@@ -16,8 +16,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -26,7 +24,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "ole2.h"
 #include "mshtmcid.h"
 
@@ -387,7 +384,7 @@ static void set_font_size(HTMLDocument *This, LPCWSTR size)
     if(collapsed) {
         nsISelection_Collapse(nsselection, (nsIDOMNode*)elem, 0);
     }else {
-        /* Remove all size attrbutes from the range */
+        /* Remove all size attributes from the range */
         remove_child_attr(elem, wszFont, &size_str);
         nsISelection_SelectAllChildren(nsselection, (nsIDOMNode*)elem);
     }
@@ -559,7 +556,6 @@ static HRESULT exec_fontname(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, 
 
     if(in) {
         char *stra;
-        DWORD len;
 
         if(V_VT(in) != VT_BSTR) {
             FIXME("Unsupported vt=%d\n", V_VT(out));
@@ -568,12 +564,8 @@ static HRESULT exec_fontname(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, 
 
         TRACE("%s\n", debugstr_w(V_BSTR(in)));
 
-        len = WideCharToMultiByte(CP_ACP, 0, V_BSTR(in), -1, NULL, 0, NULL, NULL);
-        stra = heap_alloc(len);
-        WideCharToMultiByte(CP_ACP, 0, V_BSTR(in), -1, stra, -1, NULL, NULL);
-
+        stra = heap_strdupWtoA(V_BSTR(in));
         set_ns_fontname(This->nscontainer, stra);
-
         heap_free(stra);
 
         update_doc(This, UPDATE_UI);

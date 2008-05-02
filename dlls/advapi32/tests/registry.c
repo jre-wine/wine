@@ -786,9 +786,13 @@ static void test_get_value(void)
     ret = pRegGetValueA(hkey_main, NULL, "TP1_ZB_SZ", RRF_RT_REG_SZ, &type, buf, &size);
     ok(ret == ERROR_SUCCESS, "ret=%d\n", ret);
     /* v5.2.3790.1830 (2003 SP1) returns sTestpath1 length + 2 here. */
-    ok(size == 0, "size=%d\n", size);
+    ok(size == 0 ||
+       size == 1, /* win2k3 */
+       "size=%d\n", size);
     ok(type == REG_SZ, "type=%d\n", type);
-    ok(!strcmp(sTestpath1, buf), "sTestpath=\"%s\" buf=\"%s\"\n", sTestpath1, buf);
+    ok(!strcmp(sTestpath1, buf) ||
+       !strcmp(buf, ""),
+       "Expected \"%s\" or \"\", got \"%s\"\n", sTestpath1, buf);
 
     /* Query REG_SZ using RRF_RT_REG_SZ|RRF_NOEXPAND (ok) */
     buf[0] = 0; type = 0xdeadbeef; size = sizeof(buf);
@@ -802,8 +806,9 @@ static void test_get_value(void)
     size = 0;
     ret = pRegGetValueA(hkey_main, NULL, "TP2_EXP_SZ", RRF_RT_REG_SZ, NULL, NULL, &size);
     ok(ret == ERROR_SUCCESS, "ret=%d\n", ret);
-    /* At least v5.2.3790.1830 (2003 SP1) returns the unexpanded sTestpath2 length + 1 here. */
-    ok((size == strlen(expanded2)+1) || (size == strlen(sTestpath2)+1),
+    ok((size == strlen(expanded2)+1) || /* win2k3 SP1 */
+       (size == strlen(expanded2)+2) || /* win2k3 SP2 */
+       (size == strlen(sTestpath2)+1),
         "strlen(expanded2)=%d, strlen(sTestpath2)=%d, size=%d\n", lstrlenA(expanded2), lstrlenA(sTestpath2), size);
 
     /* Query REG_EXPAND_SZ using RRF_RT_REG_SZ (ok, expands) */
@@ -1102,11 +1107,17 @@ static void test_regconnectregistry( void)
     lstrcpynA(netwName+2, compName, MAX_COMPUTERNAME_LENGTH + 1);
 
     retl = RegConnectRegistryA( compName, HKEY_LOCAL_MACHINE, &hkey);
-    ok( !retl || retl == ERROR_DLL_INIT_FAILED, "RegConnectRegistryA failed err = %d\n", retl);
+    ok( !retl ||
+        retl == ERROR_DLL_INIT_FAILED ||
+        retl == ERROR_BAD_NETPATH, /* some win2k */
+        "RegConnectRegistryA failed err = %d\n", retl);
     if( !retl) RegCloseKey( hkey);
 
     retl = RegConnectRegistryA( netwName, HKEY_LOCAL_MACHINE, &hkey);
-    ok( !retl || retl == ERROR_DLL_INIT_FAILED, "RegConnectRegistryA failed err = %d\n", retl);
+    ok( !retl ||
+        retl == ERROR_DLL_INIT_FAILED ||
+        retl == ERROR_BAD_NETPATH, /* some win2k */
+        "RegConnectRegistryA failed err = %d\n", retl);
     if( !retl) RegCloseKey( hkey);
 
     SetLastError(0xdeadbeef);

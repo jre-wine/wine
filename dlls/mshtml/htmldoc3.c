@@ -137,7 +137,7 @@ static HRESULT WINAPI HTMLDocument3_get_documentElement(IHTMLDocument3 *iface, I
             ERR("GetDocumentElement failed: %08x\n", nsres);
     }
     if(nselem) {
-        node = get_node(This, (nsIDOMNode *)nselem);
+        node = get_node(This, (nsIDOMNode *)nselem, TRUE);
         nsIDOMDocument_Release(nsdoc);
 
         IHTMLDOMNode_QueryInterface(HTMLDOMNODE(node), &IID_IHTMLElement, (void**)p);
@@ -407,8 +407,37 @@ static HRESULT WINAPI HTMLDocument3_getElementById(IHTMLDocument3 *iface, BSTR v
                                                    IHTMLElement **pel)
 {
     HTMLDocument *This = HTMLDOC3_THIS(iface);
-    FIXME("(%p)->(%s %p)\n", This, debugstr_w(v), pel);
-    return E_NOTIMPL;
+    nsIDOMDocument *nsdoc = NULL;
+    nsIDOMElement *nselem = NULL;
+    HTMLDOMNode *node;
+    nsAString id_str;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_w(v), pel);
+
+    *pel = NULL;
+
+    if(!This->nscontainer)
+        return S_OK;
+
+    nsres = nsIWebNavigation_GetDocument(This->nscontainer->navigation, &nsdoc);
+    if(NS_FAILED(nsres) || !nsdoc)
+        return S_OK;
+
+    nsAString_Init(&id_str, v);
+    nsIDOMDocument_GetElementById(nsdoc, &id_str, &nselem);
+    nsIDOMDocument_Release(nsdoc);
+    nsAString_Finish(&id_str);
+
+    if(!nselem) {
+        *pel = NULL;
+        return S_OK;
+    }
+
+    node = get_node(This, (nsIDOMNode*)nselem, TRUE);
+    nsIDOMElement_Release(nselem);
+
+    return IHTMLDOMNode_QueryInterface(HTMLDOMNODE(node), &IID_IHTMLElement, (void**)pel);
 }
 
 

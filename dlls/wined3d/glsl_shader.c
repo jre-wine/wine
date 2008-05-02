@@ -3,6 +3,7 @@
  *
  * Copyright 2006 Jason Green 
  * Copyright 2006-2007 Henri Verbeet
+ * Copyright 2007-2008 Stefan Dösinger for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -33,6 +34,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_shader);
 WINE_DECLARE_DEBUG_CHANNEL(d3d_constants);
+WINE_DECLARE_DEBUG_CHANNEL(d3d_caps);
 
 #define GLINFO_LOCATION      (*gl_info)
 
@@ -60,12 +62,15 @@ void print_glsl_info_log(WineD3D_GL_Info *gl_info, GLhandleARB obj) {
     BOOL is_spam;
 
     const char *spam[] = {
-        "Vertex shader was successfully compiled to run on hardware.\n",    /* fglrx        */
-        "Fragment shader was successfully compiled to run on hardware.\n",  /* fglrx        */
-        "Fragment shader(s) linked, vertex shader(s) linked.",              /* fglrx, no \n */
-        "Vertex shader(s) linked, no fragment shader(s) defined.",          /* fglrx, no \n */
+        "Vertex shader was successfully compiled to run on hardware.\n",    /* fglrx          */
+        "Fragment shader was successfully compiled to run on hardware.\n",  /* fglrx          */
+        "Fragment shader(s) linked, vertex shader(s) linked. \n ",          /* fglrx, with \n */
+        "Fragment shader(s) linked, vertex shader(s) linked.",              /* fglrx, no \n   */
+        "Vertex shader(s) linked, no fragment shader(s) defined. \n ",      /* fglrx, with \n */
+        "Vertex shader(s) linked, no fragment shader(s) defined.",          /* fglrx, no \n   */
         "Fragment shader was successfully compiled to run on hardware.\nWARNING: 0:1: extension 'GL_ARB_draw_buffers' is not supported",
-        "Fragment shader(s) linked, no vertex shader(s) defined."           /* fglrx, no \n */
+        "Fragment shader(s) linked, no vertex shader(s) defined.",          /* fglrx, no \n   */
+        "Fragment shader(s) linked, no vertex shader(s) defined. \n "       /* fglrx, with \n */
     };
 
     GL_EXTCALL(glGetObjectParameterivARB(obj,
@@ -2691,7 +2696,11 @@ void pshader_glsl_dp2add(SHADER_OPCODE_ARG* arg) {
     shader_glsl_add_src_param(arg, arg->src[1], arg->src_addr[1], WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1, &src1_param);
     shader_glsl_add_src_param(arg, arg->src[2], arg->src_addr[2], WINED3DSP_WRITEMASK_0, &src2_param);
 
-    shader_addline(arg->buffer, "dot(%s, %s) + %s);\n", src0_param.param_str, src1_param.param_str, src2_param.param_str);
+    if (mask_size > 1) {
+        shader_addline(arg->buffer, "vec%d(dot(%s, %s) + %s));\n", mask_size, src0_param.param_str, src1_param.param_str, src2_param.param_str);
+    } else {
+        shader_addline(arg->buffer, "dot(%s, %s) + %s);\n", src0_param.param_str, src1_param.param_str, src2_param.param_str);
+    }
 }
 
 void pshader_glsl_input_pack(
@@ -3346,20 +3355,243 @@ static void shader_glsl_destroy(IWineD3DBaseShader *iface) {
     This->baseShader.is_compiled = FALSE;
 }
 
+static unsigned int glsl_program_key_hash(void *key) {
+    glsl_program_key_t *k = (glsl_program_key_t *)key;
+
+    unsigned int hash = k->vshader | k->pshader << 16;
+    hash += ~(hash << 15);
+    hash ^=  (hash >> 10);
+    hash +=  (hash << 3);
+    hash ^=  (hash >> 6);
+    hash += ~(hash << 11);
+    hash ^=  (hash >> 16);
+
+    return hash;
+}
+
+static BOOL glsl_program_key_compare(void *keya, void *keyb) {
+    glsl_program_key_t *ka = (glsl_program_key_t *)keya;
+    glsl_program_key_t *kb = (glsl_program_key_t *)keyb;
+
+    return ka->vshader == kb->vshader && ka->pshader == kb->pshader;
+}
+
 static HRESULT shader_glsl_alloc(IWineD3DDevice *iface) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     This->shader_priv = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct shader_glsl_priv));
+    This->glsl_program_lookup = hash_table_create(&glsl_program_key_hash, &glsl_program_key_compare);
     return WINED3D_OK;
 }
 
 static void shader_glsl_free(IWineD3DDevice *iface) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     HeapFree(GetProcessHeap(), 0, This->shader_priv);
+    This->shader_priv = NULL;
 }
 
 static BOOL shader_glsl_dirty_const(IWineD3DDevice *iface) {
-    /* TODO: GL_EXT_bindable_uniform can be used to share constants accross shaders */
+    /* TODO: GL_EXT_bindable_uniform can be used to share constants across shaders */
     return FALSE;
+}
+
+static void shader_glsl_generate_pshader(IWineD3DPixelShader *iface, SHADER_BUFFER *buffer) {
+    IWineD3DPixelShaderImpl *This = (IWineD3DPixelShaderImpl *)iface;
+    shader_reg_maps* reg_maps = &This->baseShader.reg_maps;
+    CONST DWORD *function = This->baseShader.function;
+    const char *fragcolor;
+    WineD3D_GL_Info *gl_info = &((IWineD3DDeviceImpl *)This->baseShader.device)->adapter->gl_info;
+
+    /* Create the hw GLSL shader object and assign it as the baseShader.prgId */
+    GLhandleARB shader_obj = GL_EXTCALL(glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB));
+
+    if (GL_SUPPORT(ARB_DRAW_BUFFERS)) {
+        shader_addline(buffer, "#extension GL_ARB_draw_buffers : enable\n");
+    }
+    if (GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
+        /* The spec says that it doesn't have to be explicitly enabled, but the nvidia
+         * drivers write a warning if we don't do so
+         */
+        shader_addline(buffer, "#extension GL_ARB_texture_rectangle : enable\n");
+    }
+
+    /* Base Declarations */
+    shader_generate_glsl_declarations( (IWineD3DBaseShader*) This, reg_maps, buffer, &GLINFO_LOCATION);
+
+    /* Pack 3.0 inputs */
+    if (This->baseShader.hex_version >= WINED3DPS_VERSION(3,0)) {
+
+        if(((IWineD3DDeviceImpl *) This->baseShader.device)->strided_streams.u.s.position_transformed) {
+            This->vertexprocessing = pretransformed;
+            pshader_glsl_input_pack(buffer, This->semantics_in, iface);
+        } else if(!use_vs((IWineD3DDeviceImpl *) This->baseShader.device)) {
+            This->vertexprocessing = fixedfunction;
+            pshader_glsl_input_pack(buffer, This->semantics_in, iface);
+        } else {
+            This->vertexprocessing = vertexshader;
+        }
+    }
+
+    /* Base Shader Body */
+    shader_generate_main( (IWineD3DBaseShader*) This, buffer, reg_maps, function);
+
+    /* Pixel shaders < 2.0 place the resulting color in R0 implicitly */
+    if (This->baseShader.hex_version < WINED3DPS_VERSION(2,0)) {
+        /* Some older cards like GeforceFX ones don't support multiple buffers, so also not gl_FragData */
+        if(GL_SUPPORT(ARB_DRAW_BUFFERS))
+            shader_addline(buffer, "gl_FragData[0] = R0;\n");
+        else
+            shader_addline(buffer, "gl_FragColor = R0;\n");
+    }
+
+    if(GL_SUPPORT(ARB_DRAW_BUFFERS)) {
+        fragcolor = "gl_FragData[0]";
+    } else {
+        fragcolor = "gl_FragColor";
+    }
+    if(This->srgb_enabled) {
+        shader_addline(buffer, "tmp0.xyz = pow(%s.xyz, vec3(%f, %f, %f)) * vec3(%f, %f, %f) - vec3(%f, %f, %f);\n",
+                        fragcolor, srgb_pow, srgb_pow, srgb_pow, srgb_mul_high, srgb_mul_high, srgb_mul_high,
+                        srgb_sub_high, srgb_sub_high, srgb_sub_high);
+        shader_addline(buffer, "tmp1.xyz = %s.xyz * srgb_mul_low.xyz;\n", fragcolor);
+        shader_addline(buffer, "%s.x = %s.x < srgb_comparison.x ? tmp1.x : tmp0.x;\n", fragcolor, fragcolor);
+        shader_addline(buffer, "%s.y = %s.y < srgb_comparison.y ? tmp1.y : tmp0.y;\n", fragcolor, fragcolor);
+        shader_addline(buffer, "%s.z = %s.z < srgb_comparison.z ? tmp1.z : tmp0.z;\n", fragcolor, fragcolor);
+        shader_addline(buffer, "%s = clamp(%s, 0.0, 1.0);\n", fragcolor, fragcolor);
+    }
+    /* Pixel shader < 3.0 do not replace the fog stage.
+     * This implements linear fog computation and blending.
+     * TODO: non linear fog
+     * NOTE: gl_Fog.start and gl_Fog.end don't hold fog start s and end e but
+     * -1/(e-s) and e/(e-s) respectively.
+     */
+    if(This->baseShader.hex_version < WINED3DPS_VERSION(3,0)) {
+        shader_addline(buffer, "float Fog = clamp(gl_FogFragCoord * gl_Fog.start + gl_Fog.end, 0.0, 1.0);\n");
+        shader_addline(buffer, "%s.xyz = mix(gl_Fog.color.xyz, %s.xyz, Fog);\n", fragcolor, fragcolor);
+    }
+
+    shader_addline(buffer, "}\n");
+
+    TRACE("Compiling shader object %u\n", shader_obj);
+    GL_EXTCALL(glShaderSourceARB(shader_obj, 1, (const char**)&buffer->buffer, NULL));
+    GL_EXTCALL(glCompileShaderARB(shader_obj));
+    print_glsl_info_log(&GLINFO_LOCATION, shader_obj);
+
+    /* Store the shader object */
+    This->baseShader.prgId = shader_obj;
+}
+
+static void shader_glsl_generate_vshader(IWineD3DVertexShader *iface, SHADER_BUFFER *buffer) {
+    IWineD3DVertexShaderImpl *This = (IWineD3DVertexShaderImpl *)iface;
+    shader_reg_maps* reg_maps = &This->baseShader.reg_maps;
+    CONST DWORD *function = This->baseShader.function;
+    WineD3D_GL_Info *gl_info = &((IWineD3DDeviceImpl *)This->baseShader.device)->adapter->gl_info;
+
+    /* Create the hw GLSL shader program and assign it as the baseShader.prgId */
+    GLhandleARB shader_obj = GL_EXTCALL(glCreateShaderObjectARB(GL_VERTEX_SHADER_ARB));
+
+    /* Base Declarations */
+    shader_generate_glsl_declarations( (IWineD3DBaseShader*) This, reg_maps, buffer, &GLINFO_LOCATION);
+
+    /* Base Shader Body */
+    shader_generate_main( (IWineD3DBaseShader*) This, buffer, reg_maps, function);
+
+    /* Unpack 3.0 outputs */
+    if (This->baseShader.hex_version >= WINED3DVS_VERSION(3,0)) {
+        shader_addline(buffer, "order_ps_input(OUT);\n");
+    } else {
+        shader_addline(buffer, "order_ps_input();\n");
+    }
+
+    /* If this shader doesn't use fog copy the z coord to the fog coord so that we can use table fog */
+    if (!reg_maps->fog)
+        shader_addline(buffer, "gl_FogFragCoord = gl_Position.z;\n");
+
+    /* Write the final position.
+     *
+     * OpenGL coordinates specify the center of the pixel while d3d coords specify
+     * the corner. The offsets are stored in z and w in posFixup. posFixup.y contains
+     * 1.0 or -1.0 to turn the rendering upside down for offscreen rendering. PosFixup.x
+     * contains 1.0 to allow a mad.
+     */
+    shader_addline(buffer, "gl_Position.y = gl_Position.y * posFixup.y;\n");
+    shader_addline(buffer, "gl_Position.xy += posFixup.zw * gl_Position.ww;\n");
+
+    /* Z coord [0;1]->[-1;1] mapping, see comment in transform_projection in state.c
+     *
+     * Basically we want (in homogeneous coordinates) z = z * 2 - 1. However, shaders are run
+     * before the homogeneous divide, so we have to take the w into account: z = ((z / w) * 2 - 1) * w,
+     * which is the same as z = z / 2 - w.
+     */
+    shader_addline(buffer, "gl_Position.z = gl_Position.z * 2.0 - gl_Position.w;\n");
+
+    shader_addline(buffer, "}\n");
+
+    TRACE("Compiling shader object %u\n", shader_obj);
+    GL_EXTCALL(glShaderSourceARB(shader_obj, 1, (const char**)&buffer->buffer, NULL));
+    GL_EXTCALL(glCompileShaderARB(shader_obj));
+    print_glsl_info_log(&GLINFO_LOCATION, shader_obj);
+
+    /* Store the shader object */
+    This->baseShader.prgId = shader_obj;
+}
+
+static void shader_glsl_get_caps(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_info, struct shader_caps *pCaps) {
+    /* We don't have a GLSL fixed function pipeline yet, so let the none backend set its caps,
+     * then overwrite the shader specific ones
+     */
+    none_shader_backend.shader_get_caps(devtype, gl_info, pCaps);
+
+    /* Nvidia Geforce6/7 or Ati R4xx/R5xx cards with GLSL support, support VS 3.0 but older Nvidia/Ati
+     * models with GLSL support only support 2.0. In case of nvidia we can detect VS 2.0 support using
+     * vs_nv_version which is based on NV_vertex_program.
+     * For Ati cards there's no way using glsl (it abstracts the lowlevel info away) and also not
+     * using ARB_vertex_program. It is safe to assume that when a card supports pixel shader 2.0 it
+     * supports vertex shader 2.0 too and the way around. We can detect ps2.0 using the maximum number
+     * of native instructions, so use that here. For more info see the pixel shader versioning code below.
+     */
+    if((GLINFO_LOCATION.vs_nv_version == VS_VERSION_20) || (GLINFO_LOCATION.ps_arb_max_instructions <= 512))
+        pCaps->VertexShaderVersion = WINED3DVS_VERSION(2,0);
+    else
+        pCaps->VertexShaderVersion = WINED3DVS_VERSION(3,0);
+    TRACE_(d3d_caps)("Hardware vertex shader version %d.%d enabled (GLSL)\n", (pCaps->VertexShaderVersion >> 8) & 0xff, pCaps->VertexShaderVersion & 0xff);
+    pCaps->MaxVertexShaderConst = GL_LIMITS(vshader_constantsF);
+
+    /* Older DX9-class videocards (GeforceFX / Radeon >9500/X*00) only support pixel shader 2.0/2.0a/2.0b.
+     * In OpenGL the extensions related to GLSL abstract lowlevel GL info away which is needed
+     * to distinguish between 2.0 and 3.0 (and 2.0a/2.0b). In case of Nvidia we use their fragment
+     * program extensions. On other hardware including ATI GL_ARB_fragment_program offers the info
+     * in max native instructions. Intel and others also offer the info in this extension but they
+     * don't support GLSL (at least on Windows).
+     *
+     * PS2.0 requires at least 96 instructions, 2.0a/2.0b go up to 512. Assume that if the number
+     * of instructions is 512 or less we have to do with ps2.0 hardware.
+     * NOTE: ps3.0 hardware requires 512 or more instructions but ati and nvidia offer 'enough' (1024 vs 4096) on their most basic ps3.0 hardware.
+     */
+    if((GLINFO_LOCATION.ps_nv_version == PS_VERSION_20) || (GLINFO_LOCATION.ps_arb_max_instructions <= 512))
+        pCaps->PixelShaderVersion = WINED3DPS_VERSION(2,0);
+    else
+        pCaps->PixelShaderVersion = WINED3DPS_VERSION(3,0);
+
+    /* FIXME: The following line is card dependent. -8.0 to 8.0 is the
+     * Direct3D minimum requirement.
+     *
+     * Both GL_ARB_fragment_program and GLSL require a "maximum representable magnitude"
+     * of colors to be 2^10, and 2^32 for other floats. Should we use 1024 here?
+     *
+     * The problem is that the refrast clamps temporary results in the shader to
+     * [-MaxValue;+MaxValue]. If the card's max value is bigger than the one we advertize here,
+     * then applications may miss the clamping behavior. On the other hand, if it is smaller,
+     * the shader will generate incorrect results too. Unfortunately, GL deliberately doesn't
+     * offer a way to query this.
+     */
+    pCaps->PixelShader1xMaxValue = 8.0;
+    TRACE_(d3d_caps)("Hardware pixel shader version %d.%d enabled (GLSL)\n", (pCaps->PixelShaderVersion >> 8) & 0xff, pCaps->PixelShaderVersion & 0xff);
+}
+
+static void shader_glsl_load_init(void) {}
+
+static void shader_glsl_fragment_enable(IWineD3DDevice *iface, BOOL enable) {
+    none_shader_backend.shader_fragment_enable(iface, enable);
 }
 
 const shader_backend_t glsl_shader_backend = {
@@ -3372,5 +3604,11 @@ const shader_backend_t glsl_shader_backend = {
     &shader_glsl_destroy,
     &shader_glsl_alloc,
     &shader_glsl_free,
-    &shader_glsl_dirty_const
+    &shader_glsl_dirty_const,
+    &shader_glsl_generate_pshader,
+    &shader_glsl_generate_vshader,
+    &shader_glsl_get_caps,
+    &shader_glsl_load_init,
+    &shader_glsl_fragment_enable,
+    FFPStateTable
 };

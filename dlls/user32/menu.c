@@ -679,11 +679,10 @@ MENU_AdjustMenuItemRect(const POPUPMENU *menu, LPRECT rect)
 {
     if (menu->bScrolling)
     {
-        UINT arrow_bitmap_width, arrow_bitmap_height;
+        UINT arrow_bitmap_height;
         BITMAP bmp;
 
         GetObjectW(get_up_arrow_bitmap(), sizeof(bmp), &bmp);
-        arrow_bitmap_width = bmp.bmWidth;
         arrow_bitmap_height = bmp.bmHeight;
         rect->top += arrow_bitmap_height - menu->nScrollPos;
         rect->bottom += arrow_bitmap_height - menu->nScrollPos;
@@ -2636,30 +2635,6 @@ static BOOL MENU_MouseMove( MTRACKER* pmt, HMENU hPtMenu, UINT wFlags )
 
 
 /***********************************************************************
- *           MENU_SetCapture
- */
-static void MENU_SetCapture( HWND hwnd )
-{
-    HWND previous = 0;
-
-    SERVER_START_REQ( set_capture_window )
-    {
-        req->handle = hwnd;
-        req->flags  = CAPTURE_MENU;
-        if (!wine_server_call_err( req ))
-        {
-            previous = reply->previous;
-            hwnd = reply->full_handle;
-        }
-    }
-    SERVER_END_REQ;
-
-    if (previous && previous != hwnd)
-        SendMessageW( previous, WM_CAPTURECHANGED, 0, (LPARAM)hwnd );
-}
-
-
-/***********************************************************************
  *           MENU_DoNextMenu
  *
  * NOTE: WM_NEXTMENU documented in Win32 is a bit different.
@@ -2781,7 +2756,7 @@ static LRESULT MENU_DoNextMenu( MTRACKER* pmt, UINT vk )
 	if( hNewWnd != pmt->hOwnerWnd )
 	{
 	    pmt->hOwnerWnd = hNewWnd;
-	    MENU_SetCapture( pmt->hOwnerWnd );
+            set_capture_window( pmt->hOwnerWnd, GUI_INMENUMODE, NULL );
 	}
 
 	pmt->hTopMenu = pmt->hCurrentMenu = hNewMenu; /* all subpopups are hidden */
@@ -2987,6 +2962,7 @@ static BOOL MENU_TrackMenu( HMENU hmenu, UINT wFlags, INT x, INT y,
     INT executedMenuId = -1;
     MTRACKER mt;
     BOOL enterIdleSent = FALSE;
+    HWND capture_win;
 
     mt.trackFlags = 0;
     mt.hCurrentMenu = hmenu;
@@ -3015,7 +2991,9 @@ static BOOL MENU_TrackMenu( HMENU hmenu, UINT wFlags, INT x, INT y,
 
     if (wFlags & TF_ENDMENU) fEndMenu = TRUE;
 
-    MENU_SetCapture( mt.hOwnerWnd );
+    /* owner may not be visible when tracking a popup, so use the menu itself */
+    capture_win = (wFlags & TPM_POPUPMENU) ? menu->hWnd : mt.hOwnerWnd;
+    set_capture_window( capture_win, GUI_INMENUMODE, NULL );
 
     while (!fEndMenu)
     {
@@ -3239,7 +3217,7 @@ static BOOL MENU_TrackMenu( HMENU hmenu, UINT wFlags, INT x, INT y,
 	else mt.trackFlags &= ~TF_SKIPREMOVE;
     }
 
-    MENU_SetCapture(0);  /* release the capture */
+    set_capture_window( 0, GUI_INMENUMODE, NULL );
 
     /* If dropdown is still painted and the close box is clicked on
        then the menu will be destroyed as part of the DispatchMessage above.
@@ -3386,13 +3364,7 @@ void MENU_TrackKbdMenuBar( HWND hwnd, UINT wParam, WCHAR wChar)
 
     MENU_SelectItem( hwnd, hTrackMenu, uItem, TRUE, 0 );
 
-    if (wParam & HTSYSMENU && wChar != ' ')
-    {
-        /* prevent sysmenu activation for managed windows on Alt down/up */
-        if (GetPropA( hwnd, "__wine_x11_managed" ))
-            wFlags |= TF_ENDMENU; /* schedule end of menu tracking */
-    }
-    else
+    if (!(wParam & HTSYSMENU) || wChar == ' ')
     {
         if( uItem == NO_SELECTED_ITEM )
             MENU_MoveSelection( hwnd, hTrackMenu, ITEM_NEXT );
@@ -4122,7 +4094,8 @@ BOOL MENU_SetMenu( HWND hWnd, HMENU hMenu )
         return FALSE;
 
     hWnd = WIN_GetFullHandle( hWnd );
-    if (GetCapture() == hWnd) MENU_SetCapture(0);  /* release the capture */
+    if (GetCapture() == hWnd)
+        set_capture_window( 0, GUI_INMENUMODE, NULL );  /* release the capture */
 
     if (hMenu != 0)
     {

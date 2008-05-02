@@ -2,8 +2,7 @@
  * IWineD3DQuery implementation
  *
  * Copyright 2005 Oliver Stieber
- *
- *
+ * Copyright 2007-2008 Stefan Dösinger for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -63,6 +62,7 @@ static ULONG  WINAPI IWineD3DQueryImpl_Release(IWineD3DQuery *iface) {
     TRACE("(%p) : Releasing from %d\n", This, This->ref);
     ref = InterlockedDecrement(&This->ref);
     if (ref == 0) {
+        ENTER_GL();
         if(This->type == WINED3DQUERYTYPE_EVENT) {
             if(GL_SUPPORT(APPLE_FENCE)) {
                 GL_EXTCALL(glDeleteFencesAPPLE(1, &((WineQueryEventData *)(This->extendedData))->fenceId));
@@ -75,6 +75,7 @@ static ULONG  WINAPI IWineD3DQueryImpl_Release(IWineD3DQuery *iface) {
             GL_EXTCALL(glDeleteQueriesARB(1, &((WineQueryOcclusionData *)(This->extendedData))->queryId));
             checkGLcall("glDeleteQueriesARB");
         }
+        LEAVE_GL();
 
         HeapFree(GetProcessHeap(), 0, This->extendedData);
         HeapFree(GetProcessHeap(), 0, This);
@@ -287,6 +288,7 @@ static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_GetData(IWineD3DQuery* iface, 
         GLuint samples;
         GLuint queryId = ((WineQueryOcclusionData *)This->extendedData)->queryId;
 
+        ENTER_GL();
         GL_EXTCALL(glGetQueryObjectuivARB(queryId, GL_QUERY_RESULT_AVAILABLE_ARB, &available));
         checkGLcall("glGetQueryObjectuivARB(GL_QUERY_RESULT_AVAILABLE)\n");
         TRACE("(%p) : available %d.\n", This, available);
@@ -302,6 +304,7 @@ static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_GetData(IWineD3DQuery* iface, 
         } else {
             res = S_FALSE;
         }
+        LEAVE_GL();
     } else {
         WARN("(%p) : Occlusion queries not supported, or wrong context. Returning 1.\n", This);
         *data = 1;
@@ -324,11 +327,15 @@ static HRESULT  WINAPI IWineD3DEventQueryImpl_GetData(IWineD3DQuery* iface, void
         WARN("Query context not active, reporting GPU idle\n");
         *data = TRUE;
     } else if(GL_SUPPORT(APPLE_FENCE)) {
+        ENTER_GL();
         *data = GL_EXTCALL(glTestFenceAPPLE(((WineQueryEventData *)This->extendedData)->fenceId));
         checkGLcall("glTestFenceAPPLE");
+        LEAVE_GL();
     } else if(GL_SUPPORT(NV_FENCE)) {
+        ENTER_GL();
         *data = GL_EXTCALL(glTestFenceNV(((WineQueryEventData *)This->extendedData)->fenceId));
         checkGLcall("glTestFenceNV");
+        LEAVE_GL();
     } else {
         WARN("(%p): reporting GPU idle\n", This);
         *data = TRUE;
@@ -422,11 +429,15 @@ static HRESULT  WINAPI IWineD3DEventQueryImpl_Issue(IWineD3DQuery* iface,  DWORD
              */
             WARN("Query context not active\n");
         } else if(GL_SUPPORT(APPLE_FENCE)) {
+            ENTER_GL();
             GL_EXTCALL(glSetFenceAPPLE(((WineQueryEventData *)This->extendedData)->fenceId));
             checkGLcall("glSetFenceAPPLE");
+            LEAVE_GL();
         } else if (GL_SUPPORT(NV_FENCE)) {
+            ENTER_GL();
             GL_EXTCALL(glSetFenceNV(((WineQueryEventData *)This->extendedData)->fenceId, GL_ALL_COMPLETED_NV));
             checkGLcall("glSetFenceNV");
+            LEAVE_GL();
         }
     } else if(dwIssueFlags & WINED3DISSUE_BEGIN) {
         /* Started implicitly at device creation */
@@ -451,6 +462,7 @@ static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_Issue(IWineD3DQuery* iface,  D
         if(ctx != This->wineD3DDevice->activeContext || ctx->tid != GetCurrentThreadId()) {
             WARN("Not the owning context, can't start query\n");
         } else {
+            ENTER_GL();
             /* This is allowed according to msdn and our tests. Reset the query and restart */
             if (dwIssueFlags & WINED3DISSUE_BEGIN) {
                 if(This->state == QUERY_BUILDING) {
@@ -471,6 +483,7 @@ static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_Issue(IWineD3DQuery* iface,  D
                     checkGLcall("glEndQuery()");
                 }
             }
+            LEAVE_GL();
         }
     } else {
         FIXME("(%p) : Occlusion queries not supported\n", This);

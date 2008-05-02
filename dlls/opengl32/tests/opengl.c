@@ -97,7 +97,7 @@ static void test_pbuffers(HDC hdc)
      * and a pixelformat that's only available for offscreen rendering (this means that only
      * wglChoosePixelFormatARB and friends know about the format.
      *
-     * The first thing we need are pixelformats with pbuffer capabilites.
+     * The first thing we need are pixelformats with pbuffer capabilities.
      */
     res = pwglChoosePixelFormatARB(hdc, iAttribList, NULL, MAX_FORMATS, iFormats, &nFormats);
     if(res <= 0)

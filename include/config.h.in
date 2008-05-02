@@ -249,6 +249,9 @@
 /* Define to 1 if you have the <io.h> header file. */
 #undef HAVE_IO_H
 
+/* Define to 1 if you have the `isinf' function. */
+#undef HAVE_ISINF
+
 /* Define to 1 if you have the <jack/jack.h> header file. */
 #undef HAVE_JACK_JACK_H
 
@@ -945,6 +948,9 @@
 /* Define to 1 if you have the <X11/Xutil.h> header file. */
 #undef HAVE_X11_XUTIL_H
 
+/* Define to 1 if `callback' is member of `XICCallback'. */
+#undef HAVE_XICCALLBACK_CALLBACK
+
 /* Define if you have the XKB extension */
 #undef HAVE_XKB
 
@@ -956,6 +962,9 @@
 
 /* Define if Xrender has the XRenderSetPictureTransform function */
 #undef HAVE_XRENDERSETPICTURETRANSFORM
+
+/* Define to 1 if you have the `xsltInit' function. */
+#undef HAVE_XSLTINIT
 
 /* Define to 1 if you have the `_pclose' function. */
 #undef HAVE__PCLOSE
@@ -1025,6 +1034,9 @@
 
 /* Define to the soname of the libGL library. */
 #undef SONAME_LIBGL
+
+/* Define to the soname of the libGLU library. */
+#undef SONAME_LIBGLU
 
 /* Define to the soname of the libhal library. */
 #undef SONAME_LIBHAL

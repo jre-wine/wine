@@ -265,9 +265,7 @@ static BOOL load_wine_gecko(PRUnichar *gre_path)
     if(res != ERROR_SUCCESS)
         return FALSE;
 
-    ret = load_wine_gecko_v(gre_path, hkey, GECKO_VERSION, GECKO_VERSION_STRING)
-        || load_wine_gecko_v(gre_path, hkey, "0.0.1", "Wine Gecko 0.0.1\n")
-        || load_wine_gecko_v(gre_path, hkey, NULL, "Wine Gecko 0.0.1\n");
+    ret = load_wine_gecko_v(gre_path, hkey, GECKO_VERSION, GECKO_VERSION_STRING);
 
     RegCloseKey(hkey);
     return ret;
@@ -502,7 +500,12 @@ void nsAString_Init(nsAString *str, const PRUnichar *data)
 {
     NS_StringContainerInit(str);
     if(data)
-        NS_StringSetData(str, data, PR_UINT32_MAX);
+        nsAString_SetData(str, data);
+}
+
+void nsAString_SetData(nsAString *str, const PRUnichar *data)
+{
+    NS_StringSetData(str, data, PR_UINT32_MAX);
 }
 
 PRUint32 nsAString_GetData(const nsAString *str, const PRUnichar **data)
@@ -1070,7 +1073,7 @@ static nsresult NSAPI nsContextMenuListener_OnShowContextMenu(nsIContextMenuList
         FIXME("aContextFlags=%08x\n", aContextFlags);
     };
 
-    show_context_menu(This->doc, dwID, &pt, (IDispatch*)HTMLDOMNODE(get_node(This->doc, aNode)));
+    show_context_menu(This->doc, dwID, &pt, (IDispatch*)HTMLDOMNODE(get_node(This->doc, aNode, TRUE)));
 
     return NS_OK;
 }
@@ -1135,16 +1138,22 @@ static nsresult NSAPI nsURIContentListener_OnStartURIOpen(nsIURIContentListener 
     nsIWineURI_SetNSContainer(wine_uri, This);
     nsIWineURI_SetIsDocumentURI(wine_uri, TRUE);
 
-    if(This->bscallback && This->bscallback->mon) {
-        LPWSTR wine_url;
-        HRESULT hres;
+    if(This->bscallback) {
+        IMoniker *mon = get_channelbsc_mon(This->bscallback);
 
-        hres = IMoniker_GetDisplayName(This->bscallback->mon, NULL, 0, &wine_url);
-        if(SUCCEEDED(hres)) {
-            nsIWineURI_SetWineURL(wine_uri, wine_url);
-            CoTaskMemFree(wine_url);
-        }else {
-            WARN("GetDisplayName failed: %08x\n", hres);
+        if(mon) {
+            LPWSTR wine_url;
+            HRESULT hres;
+
+            hres = IMoniker_GetDisplayName(mon, NULL, 0, &wine_url);
+            if(SUCCEEDED(hres)) {
+                nsIWineURI_SetWineURL(wine_uri, wine_url);
+                CoTaskMemFree(wine_url);
+            }else {
+                WARN("GetDisplayName failed: %08x\n", hres);
+            }
+
+            IMoniker_Release(mon);
         }
     }
 
@@ -1593,14 +1602,17 @@ NSContainer *NSContainer_Create(HTMLDocument *doc, NSContainer *parent)
     ret->editor = NULL;
     ret->reset_focus = NULL;
 
+    nsres = nsIComponentManager_CreateInstanceByContractID(pCompMgr, NS_WEBBROWSER_CONTRACTID,
+            NULL, &IID_nsIWebBrowser, (void**)&ret->webbrowser);
+    if(NS_FAILED(nsres)) {
+        ERR("Creating WebBrowser failed: %08x\n", nsres);
+        heap_free(ret);
+        return NULL;
+    }
+
     if(parent)
         nsIWebBrowserChrome_AddRef(NSWBCHROME(parent));
     ret->parent = parent;
-
-    nsres = nsIComponentManager_CreateInstanceByContractID(pCompMgr, NS_WEBBROWSER_CONTRACTID,
-            NULL, &IID_nsIWebBrowser, (void**)&ret->webbrowser);
-    if(NS_FAILED(nsres))
-        ERR("Creating WebBrowser failed: %08x\n", nsres);
 
     nsres = nsIWebBrowser_SetContainerWindow(ret->webbrowser, NSWBCHROME(ret));
     if(NS_FAILED(nsres))

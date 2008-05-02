@@ -158,8 +158,10 @@ static void test_GetProgress_PreTransfer(void)
         skip("Unable to get progress of test_file.\n");
         return;
     }
-    ok(progress.BytesTotal == BG_SIZE_UNKNOWN, "Got incorrect total size: %llu\n", progress.BytesTotal);
-    ok(progress.BytesTransferred == 0, "Got incorrect number of transfered bytes: %llu\n", progress.BytesTransferred);
+    ok(progress.BytesTotal == BG_SIZE_UNKNOWN, "Got incorrect total size: %x%08x\n",
+       (DWORD)(progress.BytesTotal >> 32), (DWORD)progress.BytesTotal);
+    ok(progress.BytesTransferred == 0, "Got incorrect number of transferred bytes: %x%08x\n",
+       (DWORD)(progress.BytesTransferred >> 32), (DWORD)progress.BytesTransferred);
     ok(progress.Completed == FALSE, "Got incorret completion status\n");
 }
 
@@ -178,7 +180,7 @@ START_TEST(file)
     CoInitialize(NULL);
     for (test = tests; *test; ++test)
     {
-        /* Keep state seperate between tests.  */
+        /* Keep state separate between tests. */
         if (!setup())
         {
             skip("Unable to setup test\n");

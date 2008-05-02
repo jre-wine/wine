@@ -1153,7 +1153,7 @@ static int get_row_end_for_band(const REBAR_INFO *infoPtr, INT iBand)
     return iBand;
 }
 
-/* Compute the rcBand.{left,right} from the cxEffective bands widths computed earier.
+/* Compute the rcBand.{left,right} from the cxEffective bands widths computed earlier.
  * iBeginBand must be visible */
 static void REBAR_SetRowRectsX(const REBAR_INFO *infoPtr, INT iBeginBand, INT iEndBand)
 {
@@ -1516,9 +1516,9 @@ REBAR_AutoSize(REBAR_INFO *infoPtr, BOOL needsLayout)
     RECT rc, rcNew;
     NMRBAUTOSIZE autosize;
 
-    GetClientRect(infoPtr->hwndSelf, &rc);
     if (needsLayout)
         REBAR_Layout(infoPtr);
+    GetClientRect(infoPtr->hwndSelf, &rc);
     REBAR_SizeToHeight(infoPtr, get_rect_cy(infoPtr, &rc));
     GetClientRect(infoPtr->hwndSelf, &rcNew);
 
@@ -2848,7 +2848,6 @@ REBAR_Create (REBAR_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
 {
     LPCREATESTRUCTW cs = (LPCREATESTRUCTW) lParam;
     RECT wnrc1, clrc1;
-    HTHEME theme;
 
     if (TRACE_ON(rebar)) {
 	GetWindowRect(infoPtr->hwndSelf, &wnrc1);
@@ -2859,8 +2858,8 @@ REBAR_Create (REBAR_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
     }
 
     TRACE("created!\n");
-    
-    if ((theme = OpenThemeData (infoPtr->hwndSelf, themeClass)))
+
+    if (OpenThemeData (infoPtr->hwndSelf, themeClass))
     {
         /* native seems to clear WS_BORDER when themed */
         infoPtr->dwStyle &= ~WS_BORDER;

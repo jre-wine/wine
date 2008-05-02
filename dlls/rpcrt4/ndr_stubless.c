@@ -91,29 +91,6 @@ static inline void call_freer(PMIDL_STUB_MESSAGE pStubMsg, unsigned char *pMemor
     if (m) m(pStubMsg, pMemory, pFormat);
 }
 
-static inline unsigned long call_memory_sizer(PMIDL_STUB_MESSAGE pStubMsg, PFORMAT_STRING pFormat)
-{
-    NDR_MEMORYSIZE m = NdrMemorySizer[pFormat[0] & NDR_TABLE_MASK];
-    if (m)
-    {
-        unsigned char *saved_buffer = pStubMsg->Buffer;
-        unsigned long ret;
-        int saved_ignore_embedded_pointers = pStubMsg->IgnoreEmbeddedPointers;
-        pStubMsg->MemorySize = 0;
-        pStubMsg->IgnoreEmbeddedPointers = 1;
-        ret = m(pStubMsg, pFormat);
-        pStubMsg->IgnoreEmbeddedPointers = saved_ignore_embedded_pointers;
-        pStubMsg->Buffer = saved_buffer;
-        return ret;
-    }
-    else
-    {
-        FIXME("format type 0x%x not implemented\n", pFormat[0]);
-        RpcRaiseException(RPC_X_BAD_STUB_DATA);
-        return 0;
-    }
-}
-
 #define STUBLESS_UNMARSHAL  1
 #define STUBLESS_INITOUT    2
 #define STUBLESS_CALLSERVER 3
@@ -426,6 +403,40 @@ static void client_do_args(PMIDL_STUB_MESSAGE pStubMsg, PFORMAT_STRING pFormat,
     }
 }
 
+static unsigned int type_stack_size(unsigned char fc)
+{
+    switch (fc)
+    {
+    case RPC_FC_BYTE:
+    case RPC_FC_CHAR:
+    case RPC_FC_SMALL:
+    case RPC_FC_USMALL:
+        return sizeof(char);
+    case RPC_FC_WCHAR:
+    case RPC_FC_SHORT:
+    case RPC_FC_USHORT:
+        return sizeof(short);
+    case RPC_FC_LONG:
+    case RPC_FC_ULONG:
+    case RPC_FC_ENUM16:
+    case RPC_FC_ENUM32:
+        return sizeof(int);
+    case RPC_FC_FLOAT:
+        return sizeof(float);
+    case RPC_FC_DOUBLE:
+        return sizeof(double);
+    case RPC_FC_HYPER:
+        return sizeof(ULONGLONG);
+    case RPC_FC_ERROR_STATUS_T:
+        return sizeof(error_status_t);
+    case RPC_FC_IGNORE:
+        return sizeof(void *);
+    default:
+        ERR("invalid base type 0x%x\n", fc);
+        RpcRaiseException(RPC_S_INTERNAL_ERROR);
+    }
+}
+
 static void client_do_args_old_format(PMIDL_STUB_MESSAGE pStubMsg,
     PFORMAT_STRING pFormat, int phase, unsigned short stack_size,
     unsigned char *pRetVal, BOOL object_proc)
@@ -437,7 +448,7 @@ static void client_do_args_old_format(PMIDL_STUB_MESSAGE pStubMsg,
     /* counter */
     unsigned short i;
 
-    /* NOTE: V1 style format does't terminate on the number_of_params
+    /* NOTE: V1 style format doesn't terminate on the number_of_params
      * condition as it doesn't have this attribute. Instead it
      * terminates when the stack size given in the header is exceeded.
      */
@@ -482,7 +493,7 @@ static void client_do_args_old_format(PMIDL_STUB_MESSAGE pStubMsg,
                 if (pParam->param_direction == RPC_FC_RETURN_PARAM_BASETYPE)
                 {
                     if (pParam->param_direction & RPC_FC_RETURN_PARAM)
-                        call_unmarshaller(pStubMsg, (unsigned char **)pRetVal, pTypeFormat, 0);
+                        call_unmarshaller(pStubMsg, &pRetVal, pTypeFormat, 0);
                     else
                         call_unmarshaller(pStubMsg, &pArg, pTypeFormat, 0);
                 }
@@ -491,7 +502,7 @@ static void client_do_args_old_format(PMIDL_STUB_MESSAGE pStubMsg,
                 RpcRaiseException(RPC_S_INTERNAL_ERROR);
             }
 
-            current_stack_offset += call_memory_sizer(pStubMsg, pTypeFormat);
+            current_stack_offset += type_stack_size(*pTypeFormat);
             current_offset += sizeof(NDR_PARAM_OI_BASETYPE);
         }
         else
@@ -826,7 +837,7 @@ LONG_PTR WINAPIV NdrClientCall2(PMIDL_STUB_DESC pStubDesc, PFORMAT_STRING pForma
     return RetVal;
 }
 
-/* calls a function with the specificed arguments, restoring the stack
+/* Calls a function with the specified arguments, restoring the stack
  * properly afterwards as we don't know the calling convention of the
  * function */
 #if defined __i386__ && defined _MSC_VER
@@ -1160,7 +1171,7 @@ static LONG_PTR *stub_do_old_args(MIDL_STUB_MESSAGE *pStubMsg,
                     RpcRaiseException(RPC_S_INTERNAL_ERROR);
             }
 
-            current_stack_offset += call_memory_sizer(pStubMsg, pTypeFormat);
+            current_stack_offset += type_stack_size(*pTypeFormat);
             current_offset += sizeof(NDR_PARAM_OI_BASETYPE);
         }
         else

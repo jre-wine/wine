@@ -1769,7 +1769,7 @@ DWORD WINAPI GetUniDirectionalAdapterInfo(PIP_UNIDIRECTIONAL_ADAPTER_ADDRESS pIP
 /******************************************************************
  *    IpReleaseAddress (IPHLPAPI.@)
  *
- * Release an IP optained through DHCP,
+ * Release an IP obtained through DHCP,
  *
  * PARAMS
  *  AdapterInfo [In] adapter to release IP address
@@ -1797,7 +1797,7 @@ DWORD WINAPI IpReleaseAddress(PIP_ADAPTER_INDEX_MAP AdapterInfo)
 /******************************************************************
  *    IpRenewAddress (IPHLPAPI.@)
  *
- * Renew an IP optained through DHCP.
+ * Renew an IP obtained through DHCP.
  *
  * PARAMS
  *  AdapterInfo [In] adapter to renew IP address
@@ -1828,7 +1828,7 @@ DWORD WINAPI IpRenewAddress(PIP_ADAPTER_INDEX_MAP AdapterInfo)
  * Notify caller whenever the ip-interface map is changed.
  *
  * PARAMS
- *  Handle     [Out] handle useable in asynchronus notification
+ *  Handle     [Out] handle usable in asynchronous notification
  *  overlapped [In]  overlapped structure that notifies the caller
  *
  * RETURNS
@@ -1851,7 +1851,7 @@ DWORD WINAPI NotifyAddrChange(PHANDLE Handle, LPOVERLAPPED overlapped)
  * Notify caller whenever the ip routing table is changed.
  *
  * PARAMS
- *  Handle     [Out] handle useable in asynchronus notification
+ *  Handle     [Out] handle usable in asynchronous notification
  *  overlapped [In]  overlapped structure that notifies the caller
  *
  * RETURNS

@@ -386,7 +386,7 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         break;
 
     case WM_NCACTIVATE:
-        return NC_HandleNCActivate( hwnd, wParam );
+        return NC_HandleNCActivate( hwnd, wParam, lParam );
 
     case WM_NCDESTROY:
         {
@@ -723,6 +723,29 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 SendMessageW( parent, msg, wParam, lParam );
             break;
         }
+    case WM_KEYF1:
+        {
+            HELPINFO hi;
+
+            hi.cbSize = sizeof(HELPINFO);
+            GetCursorPos( &hi.MousePos );
+            if (MENU_IsMenuActive())
+            {
+                hi.iContextType = HELPINFO_MENUITEM;
+                hi.hItemHandle = MENU_IsMenuActive();
+                hi.iCtrlId = MenuItemFromPoint( hwnd, hi.hItemHandle, hi.MousePos );
+                hi.dwContextId = GetMenuContextHelpId( hi.hItemHandle );
+            }
+            else
+            {
+                hi.iContextType = HELPINFO_WINDOW;
+                hi.hItemHandle = hwnd;
+                hi.iCtrlId = GetWindowLongPtrA( hwnd, GWLP_ID );
+                hi.dwContextId = GetWindowContextHelpId( hwnd );
+            }
+            SendMessageW( hwnd, WM_HELP, 0, (LPARAM)&hi );
+            break;
+        }
     }
 
     return 0;
@@ -820,17 +843,18 @@ LRESULT WINAPI DefWindowProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         break;
 
     case WM_IME_KEYDOWN:
-        result = SendMessageA( hwnd, WM_KEYDOWN, wParam, lParam );
+        result = PostMessageA( hwnd, WM_KEYDOWN, wParam, lParam );
         break;
 
     case WM_IME_KEYUP:
-        result = SendMessageA( hwnd, WM_KEYUP, wParam, lParam );
+        result = PostMessageA( hwnd, WM_KEYUP, wParam, lParam );
         break;
 
     case WM_IME_STARTCOMPOSITION:
     case WM_IME_COMPOSITION:
     case WM_IME_ENDCOMPOSITION:
     case WM_IME_SELECT:
+    case WM_IME_NOTIFY:
         {
             HWND hwndIME;
 
@@ -969,6 +993,14 @@ LRESULT WINAPI DefWindowProcW(
         PostMessageW( hwnd, WM_CHAR, wParam, lParam );
         break;
 
+    case WM_IME_KEYDOWN:
+        result = PostMessageW( hwnd, WM_KEYDOWN, wParam, lParam );
+        break;
+
+    case WM_IME_KEYUP:
+        result = PostMessageW( hwnd, WM_KEYUP, wParam, lParam );
+        break;
+
     case WM_IME_SETCONTEXT:
         {
             HWND hwndIME;
@@ -983,6 +1015,7 @@ LRESULT WINAPI DefWindowProcW(
     case WM_IME_COMPOSITION:
     case WM_IME_ENDCOMPOSITION:
     case WM_IME_SELECT:
+    case WM_IME_NOTIFY:
         {
             HWND hwndIME;
 

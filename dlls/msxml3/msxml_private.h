@@ -89,6 +89,7 @@ extern IXMLDOMParseError *create_parseError( LONG code, BSTR url, BSTR reason, B
 extern HRESULT DOMDocument_create( IUnknown *pUnkOuter, LPVOID *ppObj );
 extern HRESULT SchemaCache_create( IUnknown *pUnkOuter, LPVOID *ppObj );
 extern HRESULT XMLDocument_create( IUnknown *pUnkOuter, LPVOID *ppObj );
+extern HRESULT SAXXMLReader_create(IUnknown *pUnkOuter, LPVOID *ppObj );
 
 /* typelibs */
 enum tid_t {
@@ -101,6 +102,7 @@ enum tid_t {
     IXMLDOMEntityReference_tid,
     IXMLDOMImplementation_tid,
     IXMLDOMNamedNodeMap_tid,
+    IXMLDOMNode_tid,
     IXMLDOMNodeList_tid,
     IXMLDOMParseError_tid,
     IXMLDOMProcessingInstruction_tid,
@@ -108,9 +110,23 @@ enum tid_t {
     IXMLDOMText_tid,
     IXMLElement_tid,
     IXMLDocument_tid,
+    IVBSAXAttributes_tid,
+    IVBSAXContentHandler_tid,
+    IVBSAXDeclHandler_tid,
+    IVBSAXDTDHandler_tid,
+    IVBSAXEntityResolver_tid,
+    IVBSAXErrorHandler_tid,
+    IVBSAXLexicalHandler_tid,
+    IVBSAXLocator_tid,
+    IVBSAXXMLFilter_tid,
+    IVBSAXXMLReader_tid,
+    IMXAttributes_tid,
+    IMXReaderControl_tid,
+    IMXWriter_tid,
     LAST_tid
 };
 
 extern HRESULT get_typeinfo(enum tid_t tid, ITypeInfo **typeinfo);
+extern ITypeLib *get_msxml3_typelib( LPWSTR *path );
 
 #endif /* __MSXML_PRIVATE__ */

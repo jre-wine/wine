@@ -1364,7 +1364,6 @@ static struct region *expose_window( struct window *win, const rectangle_t *old_
                                      struct region *old_vis_rgn )
 {
     struct region *new_vis_rgn, *exposed_rgn;
-    int offset_x, offset_y;
 
     if (!(new_vis_rgn = get_visible_region( win, DCX_WINDOW ))) return NULL;
 
@@ -1383,16 +1382,8 @@ static struct region *expose_window( struct window *win, const rectangle_t *old_
         }
     }
 
-    offset_x = old_window_rect->left - win->client_rect.left;
-    offset_y = old_window_rect->top - win->client_rect.top;
     if (win->parent)
     {
-        if (!is_desktop_window(win->parent))
-        {
-            offset_x += win->client_rect.left;
-            offset_y += win->client_rect.top;
-        }
-
         /* make it relative to the old window pos for subtracting */
         offset_region( new_vis_rgn, win->window_rect.left - old_window_rect->left,
                        win->window_rect.top - old_window_rect->top  );
@@ -1403,7 +1394,8 @@ static struct region *expose_window( struct window *win, const rectangle_t *old_
         {
             if (!is_region_empty( new_vis_rgn ))
             {
-                offset_region( new_vis_rgn, offset_x, offset_y );
+                /* make it relative to parent */
+                offset_region( new_vis_rgn, old_window_rect->left, old_window_rect->top );
                 redraw_window( win->parent, new_vis_rgn, 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN );
             }
         }
@@ -1812,11 +1804,22 @@ DECL_HANDLER(get_window_parents)
 /* get a list of the window children */
 DECL_HANDLER(get_window_children)
 {
-    struct window *ptr, *parent = get_window( req->parent );
+    struct window *ptr, *parent;
     int total = 0;
     user_handle_t *data;
     data_size_t len;
     atom_t atom = req->atom;
+
+    if (req->desktop)
+    {
+        struct desktop *desktop = get_desktop_obj( current->process, req->desktop, DESKTOP_ENUMERATE );
+        if (!desktop) return;
+        parent = desktop->top_window;
+        release_object( desktop );
+    }
+    else parent = get_window( req->parent );
+
+    if (!parent) return;
 
     if (get_req_data_size())
     {
@@ -1824,14 +1827,11 @@ DECL_HANDLER(get_window_children)
         if (!atom) return;
     }
 
-    if (parent)
+    LIST_FOR_EACH_ENTRY( ptr, &parent->children, struct window, entry )
     {
-        LIST_FOR_EACH_ENTRY( ptr, &parent->children, struct window, entry )
-        {
-            if (atom && get_class_atom(ptr->class) != atom) continue;
-            if (req->tid && get_thread_id(ptr->thread) != req->tid) continue;
-            total++;
-        }
+        if (atom && get_class_atom(ptr->class) != atom) continue;
+        if (req->tid && get_thread_id(ptr->thread) != req->tid) continue;
+        total++;
     }
     reply->count = total;
     len = min( get_reply_max_size(), total * sizeof(user_handle_t) );

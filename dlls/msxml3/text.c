@@ -2,6 +2,7 @@
  *    DOM text node implementation
  *
  * Copyright 2006 Huw Davies
+ * Copyright 2007-2008 Alistair Leslie-Hughes
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -59,6 +60,7 @@ static HRESULT WINAPI domtext_QueryInterface(
     TRACE("%p %s %p\n", This, debugstr_guid(riid), ppvObject);
 
     if ( IsEqualGUID( riid, &IID_IXMLDOMText ) ||
+         IsEqualGUID( riid, &IID_IXMLDOMCharacterData) ||
          IsEqualGUID( riid, &IID_IDispatch ) ||
          IsEqualGUID( riid, &IID_IUnknown ) )
     {
@@ -601,10 +603,7 @@ static HRESULT WINAPI domtext_appendData(
         if(xmlTextConcat(pDOMNode->node, pContent, SysStringLen(p) ) == 0)
             hr = S_OK;
         else
-        {
             hr = E_FAIL;
-            xmlFree(pContent);
-        }
     }
     else
         hr = E_FAIL;
@@ -616,8 +615,69 @@ static HRESULT WINAPI domtext_insertData(
     IXMLDOMText *iface,
     long offset, BSTR p)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    domtext *This = impl_from_IXMLDOMText( iface );
+    xmlnode *pDOMNode = impl_from_IXMLDOMNode( (IXMLDOMNode*)This->element );
+    xmlChar *pXmlContent;
+    BSTR sNewString;
+    HRESULT hr = S_FALSE;
+    long nLength = 0, nLengthP = 0;
+    xmlChar *str = NULL;
+
+    TRACE("%p\n", This);
+
+    /* If have a NULL or empty string, don't do anything. */
+    if(SysStringLen(p) == 0)
+        return S_OK;
+
+    if(offset < 0)
+    {
+        return E_INVALIDARG;
+    }
+
+    pXmlContent = xmlNodeGetContent(pDOMNode->node);
+    if(pXmlContent)
+    {
+        BSTR sContent = bstr_from_xmlChar( pXmlContent );
+        nLength = SysStringLen(sContent);
+        nLengthP = SysStringLen(p);
+
+        if(nLength < offset)
+        {
+            SysFreeString(sContent);
+            xmlFree(pXmlContent);
+
+            return E_INVALIDARG;
+        }
+
+        sNewString = SysAllocStringLen(NULL, nLength + nLengthP + 1);
+        if(sNewString)
+        {
+            if(offset > 0)
+                memcpy(sNewString, sContent, offset * sizeof(WCHAR));
+
+            memcpy(&sNewString[offset], p, nLengthP * sizeof(WCHAR));
+
+            if(offset+nLengthP < nLength)
+                memcpy(&sNewString[offset+nLengthP], &sContent[offset], (nLength-offset) * sizeof(WCHAR));
+
+            sNewString[nLengthP + nLength] = 0;
+
+            str = xmlChar_from_wchar((WCHAR*)sNewString);
+            if(str)
+            {
+                xmlNodeSetContent(pDOMNode->node, str);
+                hr = S_OK;
+            }
+
+            SysFreeString(sNewString);
+        }
+
+        SysFreeString(sContent);
+
+        xmlFree(pXmlContent);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI domtext_deleteData(

@@ -24,6 +24,9 @@
 
 #include <assert.h>
 #include <stdarg.h>
+#ifdef HAVE_SYS_MMAN_H
+# include <sys/mman.h>
+#endif
 
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
@@ -2032,6 +2035,41 @@ NTSTATUS WINAPI LdrAddRefDll( ULONG flags, HMODULE module )
 }
 
 
+/***********************************************************************
+ *           LdrProcessRelocationBlock  (NTDLL.@)
+ *
+ * Apply relocations to a given page of a mapped PE image.
+ */
+IMAGE_BASE_RELOCATION * WINAPI LdrProcessRelocationBlock( void *page, UINT count,
+                                                          USHORT *relocs, INT delta )
+{
+    while (count--)
+    {
+        USHORT offset = *relocs & 0xfff;
+        int type = *relocs >> 12;
+        switch(type)
+        {
+        case IMAGE_REL_BASED_ABSOLUTE:
+            break;
+        case IMAGE_REL_BASED_HIGH:
+            *(short *)((char *)page + offset) += HIWORD(delta);
+            break;
+        case IMAGE_REL_BASED_LOW:
+            *(short *)((char *)page + offset) += LOWORD(delta);
+            break;
+        case IMAGE_REL_BASED_HIGHLOW:
+            *(int *)((char *)page + offset) += delta;
+            break;
+        default:
+            FIXME("Unknown/unsupported fixup type %x.\n", type);
+            return NULL;
+        }
+        relocs++;
+    }
+    return (IMAGE_BASE_RELOCATION *)relocs;  /* return address of next block */
+}
+
+
 /******************************************************************
  *		LdrQueryProcessModuleInformation
  *
@@ -2313,6 +2351,29 @@ PIMAGE_NT_HEADERS WINAPI RtlImageNtHeader(HMODULE hModule)
 }
 
 
+/***********************************************************************
+ *           attach_process_dlls
+ *
+ * Initial attach to all the dlls loaded by the process.
+ */
+static NTSTATUS attach_process_dlls( void *wm )
+{
+    NTSTATUS status;
+
+    RtlEnterCriticalSection( &loader_section );
+    if ((status = process_attach( wm, (LPVOID)1 )) != STATUS_SUCCESS)
+    {
+        if (last_failed_modref)
+            ERR( "%s failed to initialize, aborting\n",
+                 debugstr_w(last_failed_modref->ldr.BaseDllName.Buffer) + 1 );
+        return status;
+    }
+    attach_implicitly_loaded_dlls( (LPVOID)1 );
+    RtlLeaveCriticalSection( &loader_section );
+    return status;
+}
+
+
 /******************************************************************
  *		LdrInitializeThunk (NTDLL.@)
  *
@@ -2322,6 +2383,7 @@ void WINAPI LdrInitializeThunk( ULONG unknown1, ULONG unknown2, ULONG unknown3, 
     NTSTATUS status;
     WINE_MODREF *wm;
     LPCWSTR load_path;
+    SIZE_T stack_size;
     PEB *peb = NtCurrentTeb()->Peb;
     IMAGE_NT_HEADERS *nt = RtlImageNtHeader( peb->ImageBaseAddress );
 
@@ -2344,8 +2406,11 @@ void WINAPI LdrInitializeThunk( ULONG unknown1, ULONG unknown2, ULONG unknown3, 
     RemoveEntryList( &wm->ldr.InLoadOrderModuleList );
     InsertHeadList( &peb->LdrData->InLoadOrderModuleList, &wm->ldr.InLoadOrderModuleList );
 
-    status = server_init_process_done();
-    if (status != STATUS_SUCCESS) goto error;
+    stack_size = max( nt->OptionalHeader.SizeOfStackReserve, nt->OptionalHeader.SizeOfStackCommit );
+    if (stack_size < 1024 * 1024) stack_size = 1024 * 1024;  /* Xlib needs a large stack */
+
+    if ((status = virtual_alloc_thread_stack( NULL, stack_size )) != STATUS_SUCCESS) goto error;
+    if ((status = server_init_process_done()) != STATUS_SUCCESS) goto error;
 
     actctx_init();
     load_path = NtCurrentTeb()->Peb->ProcessParameters->DllPath.Buffer;
@@ -2355,17 +2420,13 @@ void WINAPI LdrInitializeThunk( ULONG unknown1, ULONG unknown2, ULONG unknown3, 
 
     pthread_functions.sigprocmask( SIG_UNBLOCK, &server_block_set, NULL );
 
-    RtlEnterCriticalSection( &loader_section );
+    status = wine_call_on_stack( attach_process_dlls, wm, NtCurrentTeb()->Tib.StackBase );
+    if (status != STATUS_SUCCESS) goto error;
 
-    if ((status = process_attach( wm, (LPVOID)1 )) != STATUS_SUCCESS)
-    {
-        if (last_failed_modref)
-            ERR( "%s failed to initialize, aborting\n", debugstr_w(last_failed_modref->ldr.BaseDllName.Buffer) + 1 );
-        goto error;
-    }
-    attach_implicitly_loaded_dlls( (LPVOID)1 );
-
-    RtlLeaveCriticalSection( &loader_section );
+    /* clear the stack contents before calling the main entry point, some broken apps need that */
+    wine_anon_mmap( NtCurrentTeb()->Tib.StackLimit,
+                    (char *)NtCurrentTeb()->Tib.StackBase - (char *)NtCurrentTeb()->Tib.StackLimit,
+                    PROT_READ | PROT_WRITE, MAP_FIXED );
 
     if (nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) VIRTUAL_UseLargeAddressSpace();
     return;

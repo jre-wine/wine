@@ -103,7 +103,7 @@ IDirect3DExecuteBufferImpl_Execute(IDirect3DExecuteBufferImpl *This,
 
     /* Activate the viewport */
     lpViewport->active_device = lpDevice;
-    lpViewport->activate(lpViewport);
+    lpViewport->activate(lpViewport, FALSE);
 
     TRACE("ExecuteData :\n");
     if (TRACE_ON(d3d7))
@@ -401,9 +401,7 @@ IDirect3DExecuteBufferImpl_Execute(IDirect3DExecuteBufferImpl *This,
 		        unsigned int nb;
 			D3DVERTEX  *src = ((LPD3DVERTEX)  ((char *)This->desc.lpData + vs)) + ci->wStart;
 			D3DTLVERTEX *dst = ((LPD3DTLVERTEX) (This->vertex_data)) + ci->wDest;
-			D3DMATRIX *mat2 = &world_mat;
 			D3DMATRIX mat;
-			D3DVALUE nx,ny,nz;
 			D3DVIEWPORT* Viewport = &lpViewport->viewports.vp1;
 			
 			if (TRACE_ON(d3d7)) {
@@ -419,27 +417,22 @@ IDirect3DExecuteBufferImpl_Execute(IDirect3DExecuteBufferImpl *This,
                         multiply_matrix(&mat,&proj_mat,&mat);
 
 			for (nb = 0; nb < ci->dwCount; nb++) {
-			    /* Normals transformation */
-			    nx = (src->u4.nx * mat2->_11) + (src->u5.ny * mat2->_21) + (src->u6.nz * mat2->_31);
-			    ny = (src->u4.nx * mat2->_12) + (src->u5.ny * mat2->_22) + (src->u6.nz * mat2->_32);
-			    nz = (src->u4.nx * mat2->_13) + (src->u5.ny * mat2->_23) + (src->u6.nz * mat2->_33);
-			    
 			    /* No lighting yet */
 			    dst->u5.color = 0xFFFFFFFF; /* Opaque white */
 			    dst->u6.specular = 0xFF000000; /* No specular and no fog factor */
-			    
+
 			    dst->u7.tu  = src->u7.tu;
 			    dst->u8.tv  = src->u8.tv;
-			    
+
 			    /* Now, the matrix multiplication */
 			    dst->u1.sx = (src->u1.x * mat._11) + (src->u2.y * mat._21) + (src->u3.z * mat._31) + (1.0 * mat._41);
 			    dst->u2.sy = (src->u1.x * mat._12) + (src->u2.y * mat._22) + (src->u3.z * mat._32) + (1.0 * mat._42);
 			    dst->u3.sz = (src->u1.x * mat._13) + (src->u2.y * mat._23) + (src->u3.z * mat._33) + (1.0 * mat._43);
 			    dst->u4.rhw = (src->u1.x * mat._14) + (src->u2.y * mat._24) + (src->u3.z * mat._34) + (1.0 * mat._44);
 
-			    dst->u1.sx = dst->u1.sx / dst->u4.rhw * Viewport->dwWidth / 2
+			    dst->u1.sx = dst->u1.sx / dst->u4.rhw * Viewport->dvScaleX
 				       + Viewport->dwX + Viewport->dwWidth / 2;
-			    dst->u2.sy = (-dst->u2.sy) / dst->u4.rhw * Viewport->dwHeight / 2
+			    dst->u2.sy = (-dst->u2.sy) / dst->u4.rhw * Viewport->dvScaleY
 				       + Viewport->dwY + Viewport->dwHeight / 2;
 			    dst->u3.sz /= dst->u4.rhw;
 			    dst->u4.rhw = 1 / dst->u4.rhw;
@@ -460,8 +453,8 @@ IDirect3DExecuteBufferImpl_Execute(IDirect3DExecuteBufferImpl *This,
 			    dump_D3DMATRIX(&proj_mat);
 			    TRACE("  View       Matrix : (%p)\n",&view_mat);
 			    dump_D3DMATRIX(&view_mat);
-			    TRACE("  World Matrix : (%p)\n", &mat);
-			    dump_D3DMATRIX(&mat);
+			    TRACE("  World Matrix : (%p)\n", &world_mat);
+			    dump_D3DMATRIX(&world_mat);
 			}
 
 			multiply_matrix(&mat,&view_mat,&world_mat);
@@ -479,8 +472,11 @@ IDirect3DExecuteBufferImpl_Execute(IDirect3DExecuteBufferImpl *This,
 			    dst->u3.sz = (src->u1.x * mat._13) + (src->u2.y * mat._23) + (src->u3.z * mat._33) + (1.0 * mat._43);
 			    dst->u4.rhw = (src->u1.x * mat._14) + (src->u2.y * mat._24) + (src->u3.z * mat._34) + (1.0 * mat._44);
 
-			    dst->u1.sx /= dst->u4.rhw * Viewport->dvScaleX * Viewport->dwWidth / 2 + Viewport->dwX;
-			    dst->u2.sy /= dst->u4.rhw * Viewport->dvScaleY * Viewport->dwHeight / 2 + Viewport->dwY;
+			    dst->u1.sx = dst->u1.sx / dst->u4.rhw * Viewport->dvScaleX
+				       + Viewport->dwX + Viewport->dwWidth / 2;
+			    dst->u2.sy = (-dst->u2.sy) / dst->u4.rhw * Viewport->dvScaleY
+				       + Viewport->dwY + Viewport->dwHeight / 2;
+
 			    dst->u3.sz /= dst->u4.rhw;
 			    dst->u4.rhw = 1 / dst->u4.rhw;
 

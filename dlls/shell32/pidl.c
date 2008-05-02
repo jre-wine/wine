@@ -1444,7 +1444,7 @@ LPITEMIDLIST _ILCreateGuid(PIDLTYPE type, REFIID guid)
         {
             LPPIDLDATA pData = _ILGetDataPointer(pidlOut);
 
-            memcpy(&(pData->u.guid.guid), guid, sizeof(GUID));
+            pData->u.guid.guid = *guid;
             TRACE("-- create GUID-pidl %s\n",
                   debugstr_guid(&(pData->u.guid.guid)));
         }
@@ -1566,6 +1566,23 @@ LPITEMIDLIST _ILCreateDrive(LPCWSTR lpszNew)
             pszDest[0]=toupperW(lpszNew[0]);
             TRACE("-- create Drive: %s\n", debugstr_a(pszDest));
         }
+    }
+    return pidlOut;
+}
+
+LPITEMIDLIST _ILCreateEntireNetwork(void)
+{
+    LPITEMIDLIST pidlOut;
+
+    TRACE("\n");
+
+    pidlOut = _ILAlloc(PT_NETWORK, FIELD_OFFSET(PIDLDATA, u.network.szNames[sizeof("Entire Network")]));
+    if (pidlOut)
+    {
+        LPPIDLDATA pData = _ILGetDataPointer(pidlOut);
+
+        pData->u.network.dummy = 0;
+        strcpy(pData->u.network.szNames, "Entire Network");
     }
     return pidlOut;
 }

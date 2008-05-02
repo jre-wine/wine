@@ -353,11 +353,14 @@ static BOOL PRINTDLG_UpdatePrintDlgA(HWND hDlg,
 	    if (lpdm->dmFields & DM_COPIES)
 	        lpdm->u1.s1.dmCopies = GetDlgItemInt(hDlg, edt3, NULL, FALSE);
 	} else {
+            /* Application is responsible for multiple copies */
 	    if (IsDlgButtonChecked(hDlg, chx2) == BST_CHECKED)
 	        lppd->Flags |= PD_COLLATE;
             else
                lppd->Flags &= ~PD_COLLATE;
             lppd->nCopies = GetDlgItemInt(hDlg, edt3, NULL, FALSE);
+            /* multiple copies already included in the document. Driver must print only one copy */
+            lpdm->u1.s1.dmCopies = 1;
 	}
 
 	/* Print quality, PrintDlg16 */
@@ -497,7 +500,6 @@ static BOOL PRINTDLG_PaperSizeA(
     for (i=0;i<NrOfEntries;i++)
 	if (Words[i] == PaperSize)
 	    break;
-    HeapFree(GetProcessHeap(),0,Words);
     if (i == NrOfEntries) {
 	FIXME("Papersize %d not found in list?\n",PaperSize);
 	goto out;
@@ -555,7 +557,6 @@ static BOOL PRINTDLG_PaperSizeW(
     for (i=0;i<NrOfEntries;i++)
 	if (!lstrcmpW(PaperSize,Names+(64*i)))
 	    break;
-    HeapFree(GetProcessHeap(),0,Names);
     if (i==NrOfEntries) {
 	FIXME("Papersize %s not found in list?\n",debugstr_w(PaperSize));
 	goto out;
@@ -1246,7 +1247,6 @@ static LRESULT check_printer_setup(HWND hDlg)
 {
     DWORD needed,num;
     WCHAR resourcestr[256],resultstr[256];
-    int res;
 
     EnumPrintersW(PRINTER_ENUM_LOCAL, NULL, 2, NULL, 0, &needed, &num);
     if(needed == 0)
@@ -1259,7 +1259,7 @@ static LRESULT check_printer_setup(HWND hDlg)
     {
           LoadStringW(COMDLG32_hInstance, PD32_NO_DEVICES,resultstr, 255);
           LoadStringW(COMDLG32_hInstance, PD32_PRINT_TITLE,resourcestr, 255);
-          res = MessageBoxW(hDlg, resultstr, resourcestr,MB_OK | MB_ICONWARNING);
+          MessageBoxW(hDlg, resultstr, resourcestr,MB_OK | MB_ICONWARNING);
           return FALSE;
     }
 }
@@ -2565,15 +2565,13 @@ _c_str2sizeW(const PAGESETUPDLGW *dlga, LPCWSTR strin) {
  */
 static BOOL
 PRINTDLG_PS_UpdateDlgStructA(HWND hDlg, PageSetupDataA *pda) {
-    DEVNAMES	*dn;
     DEVMODEA	*dm;
     DWORD 	paperword;
 
     memcpy(pda->dlga, &pda->curdlg, sizeof(pda->curdlg));
     pda->dlga->hDevMode  = pda->pdlg.hDevMode;
     pda->dlga->hDevNames = pda->pdlg.hDevNames;
-    
-    dn = GlobalLock(pda->pdlg.hDevNames);
+
     dm = GlobalLock(pda->pdlg.hDevMode);
 
     /* Save paper orientation into device context */
@@ -2598,7 +2596,6 @@ PRINTDLG_PS_UpdateDlgStructA(HWND hDlg, PageSetupDataA *pda) {
     else
         FIXME("could not get dialog text for papersize cmbbox?\n");
 
-    GlobalUnlock(pda->pdlg.hDevNames);
     GlobalUnlock(pda->pdlg.hDevMode);
 
     return TRUE;

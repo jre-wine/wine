@@ -547,7 +547,7 @@ HRESULT DSOUND_PrimarySetFormat(DirectSoundDevice *device, LPCWAVEFORMATEX wfex,
 
 			(*dsb)->freqAdjust = ((DWORD64)(*dsb)->freq << DSOUND_FREQSHIFT) / device->pwfx->nSamplesPerSec;
 			DSOUND_RecalcFormat((*dsb));
-			DSOUND_MixToTemporary((*dsb), 0, (*dsb)->buflen);
+			DSOUND_MixToTemporary((*dsb), 0, (*dsb)->buflen, FALSE);
 			(*dsb)->primary_mixpos = 0;
 
 			RtlReleaseResource(&(*dsb)->lock);
@@ -1173,7 +1173,7 @@ HRESULT PrimaryBufferImpl_Create(
 	dsb->device = device;
 	dsb->lpVtbl = &dspbvt;
 
-	CopyMemory(&device->dsbd, dsbd, sizeof(*dsbd));
+	device->dsbd = *dsbd;
 
 	TRACE("Created primary buffer at %p\n", dsb);
 	TRACE("(formattag=0x%04x,chans=%d,samplerate=%d,"

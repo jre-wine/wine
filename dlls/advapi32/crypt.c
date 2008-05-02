@@ -44,6 +44,7 @@
 #include "crypt.h"
 #include "winnls.h"
 #include "winreg.h"
+#include "rpc.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
 #include "winternl.h"
@@ -266,6 +267,65 @@ error:
 #undef CRYPT_GetProvFuncOpt
 
 
+static void CRYPT_CreateMachineGuid(void)
+{
+	static const WCHAR cryptographyW[] = {
+                'S','o','f','t','w','a','r','e','\\',
+                'M','i','c','r','o','s','o','f','t','\\',
+                'C','r','y','p','t','o','g','r','a','p','h','y',0 };
+	static const WCHAR machineGuidW[] = {
+		'M','a','c','h','i','n','e','G','u','i','d',0 };
+	LONG r;
+	HKEY key;
+
+	r = RegOpenKeyExW(HKEY_LOCAL_MACHINE, cryptographyW, 0, KEY_ALL_ACCESS,
+			  &key);
+	if (!r)
+	{
+		DWORD size;
+
+		r = RegQueryValueExW(key, machineGuidW, NULL, NULL, NULL, &size);
+		if (r == ERROR_FILE_NOT_FOUND)
+		{
+			static const WCHAR rpcrt4[] = {
+				'r','p','c','r','t','4',0 };
+			HMODULE lib = LoadLibraryW(rpcrt4);
+
+			if (lib)
+			{
+				RPC_STATUS (RPC_ENTRY *pUuidCreate)(UUID *);
+				UUID uuid;
+                                WCHAR buf[37];
+                                RPC_STATUS rs;
+                                static const WCHAR uuidFmt[] = {
+                                    '%','0','8','x','-','%','0','4','x','-',
+                                    '%','0','4','x','-','%','0','2','x',
+                                    '%','0','2','x','-','%','0','2','x',
+                                    '%','0','2','x','%','0','2','x',
+                                    '%','0','2','x','%','0','2','x',
+                                    '%','0','2','x',0 };
+
+				pUuidCreate = GetProcAddress(lib, "UuidCreate");
+                                rs = pUuidCreate(&uuid);
+                                if (rs == S_OK)
+                                {
+                                    sprintfW(buf, uuidFmt,
+                                             uuid.Data1, uuid.Data2, uuid.Data3,
+                                             uuid.Data4[0], uuid.Data4[1],
+                                             uuid.Data4[2], uuid.Data4[3],
+                                             uuid.Data4[4], uuid.Data4[5],
+                                             uuid.Data4[6], uuid.Data4[7] );
+                                    RegSetValueExW(key, machineGuidW, 0, REG_SZ,
+                                                   (const BYTE *)buf,
+                                                   (lstrlenW(buf)+1)*sizeof(WCHAR));
+                                }
+				FreeLibrary(lib);
+			}
+		}
+		RegCloseKey(key);
+	}
+}
+
 /******************************************************************************
  * CryptAcquireContextW (ADVAPI32.@)
  *
@@ -308,6 +368,9 @@ BOOL WINAPI CryptAcquireContextW (HCRYPTPROV *phProv, LPCWSTR pszContainer,
 		SetLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
+
+	/* Make sure the MachineGuid value exists */
+	CRYPT_CreateMachineGuid();
 
 	if (!pszProvider || !*pszProvider)
 	{

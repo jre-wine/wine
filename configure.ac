@@ -14,6 +14,8 @@ dnl **** Command-line arguments ****
 
 AC_ARG_ENABLE(win16, AS_HELP_STRING([--disable-win16],[do not include Win16 support]))
 AC_ARG_ENABLE(win64, AS_HELP_STRING([--enable-win64],[build a Win64 emulator on AMD64 (won't run Win32 binaries)]))
+AC_ARG_ENABLE(maintainer-mode, AS_HELP_STRING([--enable-maintainer-mode],[enable maintainer-specific build rules]),
+                               ,[AC_SUBST([MAINTAINER_MODE],[\#])])
 
 AC_ARG_WITH(alsa,      AS_HELP_STRING([--without-alsa],[do not use the Alsa sound support]),
             [if test "x$withval" = "xno"; then ac_cv_header_sys_asoundlib_h=no; ac_cv_header_alsa_asoundlib_h=no; fi])
@@ -33,6 +35,8 @@ AC_ARG_WITH(esd,       AS_HELP_STRING([--without-esd],[do not use the EsounD sou
 AC_ARG_WITH(fontconfig,AS_HELP_STRING([--without-fontconfig],[do not use fontconfig]),
             [if test "x$withval" = "xno"; then ac_cv_header_fontconfig_fontconfig_h=no; fi])
 AC_ARG_WITH(gphoto,    AS_HELP_STRING([--without-gphoto],[do not use gphoto (Digital Camera support)]))
+AC_ARG_WITH(glu,       AS_HELP_STRING([--without-glu],[do not use the GLU library]),
+            [if test "x$withval" = "xno"; then ac_cv_header_GL_glu_h=no; fi])
 AC_ARG_WITH(hal,       AS_HELP_STRING([--without-hal],[do not use HAL (dynamic device support)]))
 AC_ARG_WITH(jack,      AS_HELP_STRING([--without-jack],[do not use the Jack sound support]),
             [if test "x$withval" = "xno"; then ac_cv_header_jack_jack_h=no; fi])
@@ -186,6 +190,15 @@ AC_SUBST(LINTFLAGS)
 dnl Check for various programs
 AC_CHECK_PROGS(FONTFORGE, fontforge, false)
 AC_CHECK_PROGS(PKG_CONFIG, pkg-config, false)
+AC_CHECK_PROGS(RSVG, rsvg, false)
+AC_CHECK_PROGS(ICOTOOL, icotool, false)
+
+if test "${enable_maintainer_mode+set}" = set
+then
+  if test "$FONTFORGE" = "false"; then WINE_WARNING([fontforge is missing, fonts can't be rebuilt.]); fi
+  if test "$RSVG" = "false"; then WINE_WARNING([rsvg is missing, icons can't be rebuilt.]); fi
+  if test "$ICOTOOL" = "false"; then WINE_WARNING([icotool is missing, icons can't be rebuilt.]); fi
+fi
 
 case $host_cpu in
   *i[[3456789]]86*)
@@ -687,6 +700,12 @@ then
         WINE_NOTICE_WITH(xcomposite,[test "x$ac_cv_lib_soname_Xcomposite" = "x"],
                          [libxcomposite development files not found, Xcomposite won't be supported.])
 
+        dnl *** Check for XICCallback struct
+        AC_CHECK_MEMBERS([XICCallback.callback],,,
+[#ifdef HAVE_X11_XLIB_H
+#include <X11/Xlib.h>
+#endif])
+
     dnl *** End of X11/Xlib.h check
 
     dnl Check for the presence of OpenGL
@@ -725,13 +744,13 @@ This probably prevents linking to OpenGL. Try deleting the file and restarting c
 	                            fi],
 				    $X_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS -dylib_file /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib)],
 			     $X_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS)
-
-	        dnl Check for GLU32 library.
-		AC_CHECK_LIB(GLU,gluLookAt,
-			     [OPENGL_LIBS="$OPENGL_LIBS -lGLU"
-			     GLU32FILES='$(GLU32FILES)']
-			     ,,
-			     $OPENGL_LIBS $X_LIBS $X_PRE_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS)
+                 if test "$ac_cv_header_GL_glu_h" = "yes"
+                 then
+                    WINE_CHECK_SONAME(GLU,gluLookAt,[GLU32FILES='$(GLU32FILES)'],,
+                                      [$OPENGL_LIBS $X_LIBS $X_PRE_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS])
+                 fi
+                 WINE_NOTICE_WITH(glu,[test "x$ac_cv_lib_soname_GLU" = "x"],
+                                 [libGLU development files not found, GLU won't be supported.])
              else
                  opengl_msg="Old Mesa headers detected. Consider upgrading your Mesa libraries."
 	     fi
@@ -809,17 +828,24 @@ then
         ac_xslt_libs="`xslt-config --libs 2>/dev/null`"
         ac_xslt_cflags="`xslt-config --cflags 2>/dev/null`"
     fi
+    ac_save_CPPFLAGS="$CPPFLAGS"
     CPPFLAGS="$CPPFLAGS $ac_xslt_cflags"
-    AC_CHECK_HEADERS([libxslt/pattern.h libxslt/transform.h],
-            [AC_CHECK_LIB(xslt, xsltCompilePattern,
-                [AC_DEFINE(HAVE_LIBXSLT, 1, [Define if you have the libxslt library])
-                 XSLTLIBS="$ac_xslt_libs"
-                 XSLTINCL="$ac_xslt_cflags"],,$ac_xslt_libs)
-            ],,
+    AC_CHECK_HEADERS([libxslt/pattern.h libxslt/transform.h],,,
     [#ifdef HAVE_LIBXSLT_PATTERN_H
 # include <libxslt/pattern.h>
 #endif])
     CPPFLAGS="$ac_save_CPPFLAGS"
+    if test "$ac_cv_header_libxslt_transform_h" = "yes"
+    then
+        AC_CHECK_LIB(xslt, xsltCompilePattern,
+            [AC_DEFINE(HAVE_LIBXSLT, 1, [Define if you have the libxslt library])
+             XSLTLIBS="$ac_xslt_libs"
+             XSLTINCL="$ac_xslt_cflags"
+             ac_save_LIBS="$LIBS"
+             LIBS="$LIBS $ac_xslt_libs"
+             AC_CHECK_FUNCS(xsltInit)
+             LIBS="$ac_save_LIBS"],,$ac_xslt_libs)
+    fi
 fi
 WINE_NOTICE_WITH(xslt,[test "$ac_cv_lib_xslt_xsltCompilePattern" != "yes"],
                  [libxslt development files not found, xslt won't be supported.])
@@ -992,12 +1018,8 @@ then
     fi
 fi
 
-dnl Only build the fonts dir if we have both freetype and fontforge
-if test "$FONTFORGE" = "false"
-then
-    WINE_WARNING([FontForge is missing.
-Fonts will not be built. Dialog text may be invisible or unaligned.])
-elif test "x$FREETYPELIBS" = "x"
+dnl Only build the fonts dir if we have freetype
+if test "x$FREETYPELIBS" = "x"
 then
     WINE_WARNING([FreeType development files not found.
 Fonts will not be built. Dialog text may be invisible or unaligned.])
@@ -1587,6 +1609,14 @@ then
     AC_DEFINE(HAVE_DAYLIGHT, 1, [Define if you have the daylight variable])
 fi
 
+dnl Check for isinf
+AC_CACHE_CHECK([for isinf], ac_cv_have_isinf,
+               AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <math.h>]], [[float f = 0.0; isinf(f)]])],[ac_cv_have_isinf="yes"],[ac_cv_have_isinf="no"]))
+if test "$ac_cv_have_isinf" = "yes"
+then
+    AC_DEFINE(HAVE_ISINF, 1, [Define to 1 if you have the `isinf' function.])
+fi
+
 dnl *** check for the need to define platform-specific symbols
 
 case $host_cpu in
@@ -1614,6 +1644,7 @@ Makefile: dummy\\
 \\
 \$(OBJS): \$(IDL_GEN_HEADERS)\\
 \$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)\\
+\$(RC_SRCS:.rc=.res): \$(IDL_TLB_SRCS:.idl=.tlb)\\
 \$(LEX_SRCS:.l=.yy.o): \$(LEX_SRCS:.l=.yy.c)\\
 \$(BISON_SRCS:.y=.tab.o): \$(BISON_SRCS:.y=.tab.c)"],
 ["### Dependencies:
@@ -1625,6 +1656,7 @@ Makefile: dummy
 
 \$(OBJS): \$(IDL_GEN_HEADERS)
 \$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)
+\$(RC_SRCS:.rc=.res): \$(IDL_TLB_SRCS:.idl=.tlb)
 \$(LEX_SRCS:.l=.yy.o): \$(LEX_SRCS:.l=.yy.c)
 \$(BISON_SRCS:.y=.tab.o): \$(BISON_SRCS:.y=.tab.c)"]))
 
@@ -1697,6 +1729,7 @@ AC_CONFIG_FILES([dlls/cryptdlg/Makefile])
 AC_CONFIG_FILES([dlls/cryptdll/Makefile])
 AC_CONFIG_FILES([dlls/cryptnet/Makefile])
 AC_CONFIG_FILES([dlls/cryptnet/tests/Makefile])
+AC_CONFIG_FILES([dlls/cryptui/Makefile])
 AC_CONFIG_FILES([dlls/ctapi32/Makefile])
 AC_CONFIG_FILES([dlls/ctl3d32/Makefile])
 AC_CONFIG_FILES([dlls/d3d10/Makefile])
@@ -1722,6 +1755,8 @@ AC_CONFIG_FILES([dlls/d3dx9_33/Makefile])
 AC_CONFIG_FILES([dlls/d3dx9_34/Makefile])
 AC_CONFIG_FILES([dlls/d3dx9_35/Makefile])
 AC_CONFIG_FILES([dlls/d3dx9_36/Makefile])
+AC_CONFIG_FILES([dlls/d3dx9_36/tests/Makefile])
+AC_CONFIG_FILES([dlls/d3dx9_37/Makefile])
 AC_CONFIG_FILES([dlls/d3dxof/Makefile])
 AC_CONFIG_FILES([dlls/dbghelp/Makefile])
 AC_CONFIG_FILES([dlls/dciman32/Makefile])
@@ -1760,6 +1795,8 @@ AC_CONFIG_FILES([dlls/dxerr8/Makefile])
 AC_CONFIG_FILES([dlls/dxerr9/Makefile])
 AC_CONFIG_FILES([dlls/dxguid/Makefile])
 AC_CONFIG_FILES([dlls/faultrep/Makefile])
+AC_CONFIG_FILES([dlls/fusion/Makefile])
+AC_CONFIG_FILES([dlls/fusion/tests/Makefile])
 AC_CONFIG_FILES([dlls/gdi32/Makefile])
 AC_CONFIG_FILES([dlls/gdi32/tests/Makefile])
 AC_CONFIG_FILES([dlls/gdiplus/Makefile])
@@ -1792,6 +1829,8 @@ AC_CONFIG_FILES([dlls/iphlpapi/tests/Makefile])
 AC_CONFIG_FILES([dlls/itircl/Makefile])
 AC_CONFIG_FILES([dlls/itss/Makefile])
 AC_CONFIG_FILES([dlls/itss/tests/Makefile])
+AC_CONFIG_FILES([dlls/jscript/Makefile])
+AC_CONFIG_FILES([dlls/jscript/tests/Makefile])
 AC_CONFIG_FILES([dlls/kernel32/Makefile])
 AC_CONFIG_FILES([dlls/kernel32/tests/Makefile])
 AC_CONFIG_FILES([dlls/localspl/Makefile])
@@ -1902,7 +1941,6 @@ AC_CONFIG_FILES([dlls/riched32/tests/Makefile])
 AC_CONFIG_FILES([dlls/rpcrt4/Makefile])
 AC_CONFIG_FILES([dlls/rpcrt4/tests/Makefile])
 AC_CONFIG_FILES([dlls/rsabase/Makefile])
-AC_CONFIG_FILES([dlls/rsabase/tests/Makefile])
 AC_CONFIG_FILES([dlls/rsaenh/Makefile])
 AC_CONFIG_FILES([dlls/rsaenh/tests/Makefile])
 AC_CONFIG_FILES([dlls/sane.ds/Makefile])
@@ -1949,6 +1987,7 @@ AC_CONFIG_FILES([dlls/urlmon/tests/Makefile])
 AC_CONFIG_FILES([dlls/user32/Makefile])
 AC_CONFIG_FILES([dlls/user32/tests/Makefile])
 AC_CONFIG_FILES([dlls/userenv/Makefile])
+AC_CONFIG_FILES([dlls/userenv/tests/Makefile])
 AC_CONFIG_FILES([dlls/usp10/Makefile])
 AC_CONFIG_FILES([dlls/usp10/tests/Makefile])
 AC_CONFIG_FILES([dlls/uuid/Makefile])
@@ -2024,11 +2063,13 @@ AC_CONFIG_FILES([programs/net/Makefile])
 AC_CONFIG_FILES([programs/notepad/Makefile])
 AC_CONFIG_FILES([programs/oleview/Makefile])
 AC_CONFIG_FILES([programs/progman/Makefile])
+AC_CONFIG_FILES([programs/reg/Makefile])
 AC_CONFIG_FILES([programs/regedit/Makefile])
 AC_CONFIG_FILES([programs/regsvr32/Makefile])
 AC_CONFIG_FILES([programs/rpcss/Makefile])
 AC_CONFIG_FILES([programs/rundll32/Makefile])
 AC_CONFIG_FILES([programs/secedit/Makefile])
+AC_CONFIG_FILES([programs/services/Makefile])
 AC_CONFIG_FILES([programs/spoolsv/Makefile])
 AC_CONFIG_FILES([programs/start/Makefile])
 AC_CONFIG_FILES([programs/svchost/Makefile])

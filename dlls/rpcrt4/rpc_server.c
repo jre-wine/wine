@@ -138,7 +138,9 @@ static RpcServerInterface* RPCRT4_find_interface(UUID* object,
   }
   LeaveCriticalSection(&server_cs);
   if (&cif->entry == &server_interfaces) cif = NULL;
-  TRACE("returning %p for %s\n", cif, debugstr_guid(object));
+  TRACE("returning %p for object %s, if_id { %d.%d %s }\n", cif,
+    debugstr_guid(object), if_id->SyntaxVersion.MajorVersion,
+    if_id->SyntaxVersion.MinorVersion, debugstr_guid(&if_id->SyntaxGUID));
   return cif;
 }
 
@@ -845,7 +847,7 @@ RPC_STATUS WINAPI RpcServerRegisterIf2( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid,
   sif = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(RpcServerInterface));
   sif->If           = If;
   if (MgrTypeUuid) {
-    memcpy(&sif->MgrTypeUuid, MgrTypeUuid, sizeof(UUID));
+    sif->MgrTypeUuid = *MgrTypeUuid;
     sif->MgrEpv       = MgrEpv;
   } else {
     memset(&sif->MgrTypeUuid, 0, sizeof(UUID));
@@ -977,8 +979,8 @@ RPC_STATUS WINAPI RpcObjectSetType( UUID* ObjUuid, UUID* TypeUuid )
       return RPC_S_ALREADY_REGISTERED;
     /* ... otherwise create a new one and add it in. */
     map = HeapAlloc(GetProcessHeap(), 0, sizeof(RpcObjTypeMap));
-    memcpy(&map->Object, ObjUuid, sizeof(UUID));
-    memcpy(&map->Type, TypeUuid, sizeof(UUID));
+    map->Object = *ObjUuid;
+    map->Type = *TypeUuid;
     map->next = NULL;
     if (prev)
       prev->next = map; /* prev is the last map in the linklist */

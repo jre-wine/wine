@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2003 John K. Hohm
  * Copyright (C) 2006 Robert Shearman
+ * Copyright (C) 2008 Alistair Leslie-Hughes
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,6 +24,8 @@
 
 #include <stdarg.h>
 #include <string.h>
+
+#define COBJMACROS
 
 #include "windef.h"
 #include "winbase.h"
@@ -552,6 +555,14 @@ static struct regsvr_coclass const coclass_list[] = {
 	"Msxml2.XMLSchemaCache",
         "3.0"
     },
+    {   &CLSID_SAXXMLReader,
+        "SAX XML Reader",
+        NULL,
+        "msxml3.dll",
+        "Both",
+        "Msxml2.SAXXMLReader",
+        "3.0"
+    },
     { NULL }			/* list terminator */
 };
 
@@ -651,6 +662,8 @@ static struct progid const progid_list[] = {
 HRESULT WINAPI DllRegisterServer(void)
 {
     HRESULT hr;
+    ITypeLib *tl;
+    LPWSTR path = NULL;
 
     TRACE("\n");
 
@@ -659,6 +672,16 @@ HRESULT WINAPI DllRegisterServer(void)
 	hr = register_interfaces(interface_list);
     if (SUCCEEDED(hr))
 	hr = register_progids(progid_list);
+
+    tl = get_msxml3_typelib( &path );
+    if (tl)
+    {
+        hr = RegisterTypeLib( tl, path, NULL );
+        ITypeLib_Release( tl );
+    }
+    else
+        hr = E_FAIL;
+
     return hr;
 }
 
@@ -676,5 +699,8 @@ HRESULT WINAPI DllUnregisterServer(void)
 	hr = unregister_interfaces(interface_list);
     if (SUCCEEDED(hr))
 	hr = unregister_progids(progid_list);
+	if (SUCCEEDED(hr))
+	    hr = UnRegisterTypeLib(&LIBID_MSXML2, 3, 0, LOCALE_SYSTEM_DEFAULT, SYS_WIN32);
+
     return hr;
 }

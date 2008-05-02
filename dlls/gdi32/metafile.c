@@ -31,7 +31,7 @@
  *
  * Memory-based metafiles are just stored as a continuous block of memory with
  * a METAHEADER at the head with METARECORDs appended to it.  mtType is
- * METAFILE_MEMORY (1).  Note this is indentical to the disk image of a
+ * METAFILE_MEMORY (1).  Note this is identical to the disk image of a
  * disk-based metafile - even mtType is METAFILE_MEMORY.
  * 16bit HMETAFILE16s are global handles to this block
  * 32bit HMETAFILEs are GDI handles METAFILEOBJs, which contains a ptr to
@@ -889,7 +889,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
     case META_STRETCHDIB:
       {
         LPBITMAPINFO info = (LPBITMAPINFO) &(mr->rdParm[11]);
-        LPSTR bits = (LPSTR)info + DIB_BitmapInfoSize( info, mr->rdParm[2] );
+        LPSTR bits = (LPSTR)info + bitmap_info_size( info, mr->rdParm[2] );
         StretchDIBits( hdc, (SHORT)mr->rdParm[10], (SHORT)mr->rdParm[9], (SHORT)mr->rdParm[8],
                        (SHORT)mr->rdParm[7], (SHORT)mr->rdParm[6], (SHORT)mr->rdParm[5],
                        (SHORT)mr->rdParm[4], (SHORT)mr->rdParm[3], bits, info,
@@ -900,7 +900,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
     case META_DIBSTRETCHBLT:
       {
         LPBITMAPINFO info = (LPBITMAPINFO) &(mr->rdParm[10]);
-        LPSTR bits = (LPSTR)info + DIB_BitmapInfoSize( info, mr->rdParm[2] );
+        LPSTR bits = (LPSTR)info + bitmap_info_size( info, mr->rdParm[2] );
         StretchDIBits( hdc, (SHORT)mr->rdParm[9], (SHORT)mr->rdParm[8], (SHORT)mr->rdParm[7],
                        (SHORT)mr->rdParm[6], (SHORT)mr->rdParm[5], (SHORT)mr->rdParm[4],
                        (SHORT)mr->rdParm[3], (SHORT)mr->rdParm[2], bits, info,
@@ -997,7 +997,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
 
         if (mr->rdSize > 12) {
             LPBITMAPINFO info = (LPBITMAPINFO) &(mr->rdParm[8]);
-            LPSTR bits = (LPSTR)info + DIB_BitmapInfoSize(info, mr->rdParm[0]);
+            LPSTR bits = (LPSTR)info + bitmap_info_size(info, mr->rdParm[0]);
 
             StretchDIBits(hdc, (SHORT)mr->rdParm[7], (SHORT)mr->rdParm[6], (SHORT)mr->rdParm[5],
                           (SHORT)mr->rdParm[4], (SHORT)mr->rdParm[3], (SHORT)mr->rdParm[2],
@@ -1027,7 +1027,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
     case META_SETDIBTODEV:
         {
             BITMAPINFO *info = (BITMAPINFO *) &(mr->rdParm[9]);
-            char *bits = (char *)info + DIB_BitmapInfoSize( info, mr->rdParm[0] );
+            char *bits = (char *)info + bitmap_info_size( info, mr->rdParm[0] );
             SetDIBitsToDevice(hdc, (SHORT)mr->rdParm[8], (SHORT)mr->rdParm[7],
                               (SHORT)mr->rdParm[6], (SHORT)mr->rdParm[5],
                               (SHORT)mr->rdParm[4], (SHORT)mr->rdParm[3],
@@ -1270,7 +1270,7 @@ static BOOL MF_Play_MetaExtTextOut(HDC hdc, METARECORD *mr)
     }
 
     if (mr->rdSize == len / 2)
-        dxx = NULL;                      /* determine if array present */
+        dxx = NULL;                      /* determine if array is present */
     else
         if (mr->rdSize == (len + s1 * sizeof(INT16)) / 2)
         {
@@ -1282,7 +1282,7 @@ static BOOL MF_Play_MetaExtTextOut(HDC hdc, METARECORD *mr)
             TRACE("%s  len: %d\n",  sot, mr->rdSize);
             WARN("Please report: ExtTextOut len=%d slen=%d rdSize=%d opt=%04x\n",
 		 len, s1, mr->rdSize, mr->rdParm[3]);
-	    dxx = NULL; /* should't happen -- but if, we continue with NULL */
+	    dxx = NULL; /* shouldn't happen -- but if, we continue with NULL */
 	}
     ExtTextOutA( hdc,
                  (SHORT)mr->rdParm[1],       /* X position */

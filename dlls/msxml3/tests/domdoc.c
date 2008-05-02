@@ -2,7 +2,7 @@
  * XML test
  *
  * Copyright 2005 Mike McCormack for CodeWeavers
- * Copyright 2007 Alistair Leslie-Hughes
+ * Copyright 2007-2008 Alistair Leslie-Hughes
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -119,6 +119,34 @@ static const CHAR szExampleXML[] =
 "    </elem>\n"
 "</root>\n";
 
+static  const CHAR szTransformXML[] =
+"<?xml version=\"1.0\"?>\n"
+"<greeting>\n"
+"Hello World\n"
+"</greeting>";
+
+static  const CHAR szTransformSSXML[] =
+"<xsl:stylesheet xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\" version=\"1.0\">\n"
+"   <xsl:output method=\"html\"/>\n"
+"   <xsl:template match=\"/\">\n"
+"       <xsl:apply-templates select=\"greeting\"/>\n"
+"   </xsl:template>\n"
+"   <xsl:template match=\"greeting\">\n"
+"       <html>\n"
+"           <body>\n"
+"               <h1>\n"
+"                   <xsl:value-of select=\".\"/>\n"
+"               </h1>\n"
+"           </body>\n"
+"       </html>\n"
+"   </xsl:template>\n"
+"</xsl:stylesheet>";
+
+static  const CHAR szTransformOutput[] =
+"<html><body><h1>"
+"Hello World"
+"</h1></body></html>";
+
 static const WCHAR szNonExistentFile[] = {
     'c', ':', '\\', 'N', 'o', 'n', 'e', 'x', 'i', 's', 't', 'e', 'n', 't', '.', 'x', 'm', 'l', 0
 };
@@ -211,6 +239,19 @@ static VARIANT _variantbstr_(const char *str)
     V_VT(&v) = VT_BSTR;
     V_BSTR(&v) = _bstr_(str);
     return v;
+}
+
+static BOOL compareIgnoreReturns(BSTR sLeft, BSTR sRight)
+{
+    for (;;)
+    {
+        while (*sLeft == '\r' || *sLeft == '\n') sLeft++;
+        while (*sRight == '\r' || *sRight == '\n') sRight++;
+        if (*sLeft != *sRight) return FALSE;
+        if (!*sLeft) return TRUE;
+        sLeft++;
+        sRight++;
+    }
 }
 
 static void get_str_for_type(DOMNodeType type, char *buf)
@@ -528,6 +569,7 @@ static void test_domdoc( void )
     ok( r == E_INVALIDARG, "returns %08x\n", r );
     r = IXMLDOMDocument_createTextNode(doc, str, &nodetext);
     ok( r == S_OK, "returns %08x\n", r );
+    SysFreeString( str );
     if(nodetext)
     {
         IXMLDOMNamedNodeMap *pAttribs;
@@ -653,9 +695,49 @@ static void test_domdoc( void )
         ok( !lstrcmpW( str, _bstr_("This &is a ; test <>\\Append") ), "incorrect get_text string\n");
         SysFreeString(str);
 
+        /* test insertData */
+        str = SysAllocStringLen(NULL, 0);
+        r = IXMLDOMText_insertData(nodetext, -1, str);
+        ok(r == S_OK, "ret %08x\n", r );
+
+        r = IXMLDOMText_insertData(nodetext, -1, NULL);
+        ok(r == S_OK, "ret %08x\n", r );
+
+        r = IXMLDOMText_insertData(nodetext, 1000, str);
+        ok(r == S_OK, "ret %08x\n", r );
+
+        r = IXMLDOMText_insertData(nodetext, 1000, NULL);
+        ok(r == S_OK, "ret %08x\n", r );
+
+        r = IXMLDOMText_insertData(nodetext, 0, NULL);
+        ok(r == S_OK, "ret %08x\n", r );
+
+        r = IXMLDOMText_insertData(nodetext, 0, str);
+        ok(r == S_OK, "ret %08x\n", r );
+        SysFreeString(str);
+
+        r = IXMLDOMText_insertData(nodetext, -1, _bstr_("Inserting"));
+        ok(r == E_INVALIDARG, "ret %08x\n", r );
+
+        r = IXMLDOMText_insertData(nodetext, 1000, _bstr_("Inserting"));
+        ok(r == E_INVALIDARG, "ret %08x\n", r );
+
+        r = IXMLDOMText_insertData(nodetext, 0, _bstr_("Begin "));
+        ok(r == S_OK, "ret %08x\n", r );
+
+        r = IXMLDOMText_insertData(nodetext, 17, _bstr_("Middle"));
+        ok(r == S_OK, "ret %08x\n", r );
+
+        r = IXMLDOMText_insertData(nodetext, 39, _bstr_(" End"));
+        ok(r == S_OK, "ret %08x\n", r );
+
+        r = IXMLDOMText_get_text(nodetext, &str);
+        ok(r == S_OK, "ret %08x\n", r );
+        ok( !lstrcmpW( str, _bstr_("Begin This &is a Middle; test <>\\Append End") ), "incorrect get_text string\n");
+        SysFreeString(str);
+
         IXMLDOMText_Release( nodetext );
     }
-    SysFreeString( str );
 
     /* test Create Comment */
     r = IXMLDOMDocument_createComment(doc, NULL, NULL);
@@ -744,6 +826,13 @@ static void test_domdoc( void )
         /* test put_data */
         r = IXMLDOMProcessingInstruction_put_data(nodePI, _bstr_("version=\"1.0\" encoding=\"UTF-8\""));
         ok(r == E_FAIL, "ret %08x\n", r );
+
+        /* test put_data */
+        V_VT(&var) = VT_BSTR;
+        V_BSTR(&var) = SysAllocString(szOpen);  /* Doesn't matter what the string is, cannot set an xml node. */
+        r = IXMLDOMProcessingInstruction_put_nodeValue(nodePI, var);
+        ok(r == E_FAIL, "ret %08x\n", r );
+        VariantClear(&var);
 
         /* test get nodeName */
         r = IXMLDOMProcessingInstruction_get_nodeName(nodePI, &str);
@@ -1735,7 +1824,7 @@ static void test_IXMLDOMDocument2(void)
     ole_check(IXMLDOMDocument2_setProperty(doc2, _bstr_("SelectionLanguage"), _variantbstr_("XPath")));
     ole_check(IXMLDOMDocument2_setProperty(doc2, _bstr_("SelectionLanguage"), _variantbstr_("XSLPattern")));
 
-    /* contrary to what MSDN calims you can switch back from XPath to XSLPattern */
+    /* contrary to what MSDN claims you can switch back from XPath to XSLPattern */
     ole_check(IXMLDOMDocument2_getProperty(doc2, _bstr_("SelectionLanguage"), &var));
     expect_eq(V_VT(&var), VT_BSTR, int, "%x");
     expect_bstr_eq_and_free(V_BSTR(&var), "XSLPattern");
@@ -2189,6 +2278,108 @@ static void test_xmlTypes(void)
                 ok(hr == S_OK, "ret %08x\n", hr );
                 ok(len == 21, "expected 21 got %ld\n", len);
 
+                /* test substringData */
+                hr = IXMLDOMComment_substringData(pComment, 0, 4, NULL);
+                ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+
+                /* test substringData - Invalid offset */
+                str = (BSTR)&szElement;
+                hr = IXMLDOMComment_substringData(pComment, -1, 4, &str);
+                ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+                ok( str == NULL, "incorrect string\n");
+
+                /* test substringData - Invalid offset */
+                str = (BSTR)&szElement;
+                hr = IXMLDOMComment_substringData(pComment, 30, 0, &str);
+                ok(hr == S_FALSE, "ret %08x\n", hr );
+                ok( str == NULL, "incorrect string\n");
+
+                /* test substringData - Invalid size */
+                str = (BSTR)&szElement;
+                hr = IXMLDOMComment_substringData(pComment, 0, -1, &str);
+                ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+                ok( str == NULL, "incorrect string\n");
+
+                /* test substringData - Invalid size */
+                str = (BSTR)&szElement;
+                hr = IXMLDOMComment_substringData(pComment, 2, 0, &str);
+                ok(hr == S_FALSE, "ret %08x\n", hr );
+                ok( str == NULL, "incorrect string\n");
+
+                /* test substringData - Start of string */
+                hr = IXMLDOMComment_substringData(pComment, 0, 4, &str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+                ok( !lstrcmpW( str, _bstr_("This") ), "incorrect substringData string\n");
+                SysFreeString(str);
+
+                /* test substringData - Middle of string */
+                hr = IXMLDOMComment_substringData(pComment, 13, 4, &str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+                ok( !lstrcmpW( str, _bstr_("test") ), "incorrect substringData string\n");
+                SysFreeString(str);
+
+                /* test substringData - End of string */
+                hr = IXMLDOMComment_substringData(pComment, 20, 4, &str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+                ok( !lstrcmpW( str, _bstr_("\\") ), "incorrect substringData string\n");
+                SysFreeString(str);
+
+                /* test appendData */
+                hr = IXMLDOMComment_appendData(pComment, NULL);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_appendData(pComment, _bstr_(""));
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_appendData(pComment, _bstr_("Append"));
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_get_text(pComment, &str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+                ok( !lstrcmpW( str, _bstr_("This &is a ; test <>\\Append") ), "incorrect get_text string\n");
+                SysFreeString(str);
+
+                /* test insertData */
+                str = SysAllocStringLen(NULL, 0);
+                hr = IXMLDOMComment_insertData(pComment, -1, str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, -1, NULL);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 1000, str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 1000, NULL);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 0, NULL);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 0, str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+                SysFreeString(str);
+
+                hr = IXMLDOMComment_insertData(pComment, -1, _bstr_("Inserting"));
+                ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 1000, _bstr_("Inserting"));
+                ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 0, _bstr_("Begin "));
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 17, _bstr_("Middle"));
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 39, _bstr_(" End"));
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_get_text(pComment, &str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+                ok( !lstrcmpW( str, _bstr_("Begin This &is a Middle; test <>\\Append End") ), "incorrect get_text string\n");
+                SysFreeString(str);
+
                 IXMLDOMComment_Release(pComment);
             }
 
@@ -2406,6 +2597,108 @@ static void test_xmlTypes(void)
                 hr = IXMLDOMCDATASection_get_data(pCDataSec, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
                 ok( !lstrcmpW( str, _bstr_("This &is a ; test <>\\") ), "incorrect text string\n");
+                SysFreeString(str);
+
+                /* test substringData */
+                hr = IXMLDOMCDATASection_substringData(pCDataSec, 0, 4, NULL);
+                ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+
+                /* test substringData - Invalid offset */
+                str = (BSTR)&szElement;
+                hr = IXMLDOMCDATASection_substringData(pCDataSec, -1, 4, &str);
+                ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+                ok( str == NULL, "incorrect string\n");
+
+                /* test substringData - Invalid offset */
+                str = (BSTR)&szElement;
+                hr = IXMLDOMCDATASection_substringData(pCDataSec, 30, 0, &str);
+                ok(hr == S_FALSE, "ret %08x\n", hr );
+                ok( str == NULL, "incorrect string\n");
+
+                /* test substringData - Invalid size */
+                str = (BSTR)&szElement;
+                hr = IXMLDOMCDATASection_substringData(pCDataSec, 0, -1, &str);
+                ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+                ok( str == NULL, "incorrect string\n");
+
+                /* test substringData - Invalid size */
+                str = (BSTR)&szElement;
+                hr = IXMLDOMCDATASection_substringData(pCDataSec, 2, 0, &str);
+                ok(hr == S_FALSE, "ret %08x\n", hr );
+                ok( str == NULL, "incorrect string\n");
+
+                /* test substringData - Start of string */
+                hr = IXMLDOMCDATASection_substringData(pCDataSec, 0, 4, &str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+                ok( !lstrcmpW( str, _bstr_("This") ), "incorrect substringData string\n");
+                SysFreeString(str);
+
+                /* test substringData - Middle of string */
+                hr = IXMLDOMCDATASection_substringData(pCDataSec, 13, 4, &str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+                ok( !lstrcmpW( str, _bstr_("test") ), "incorrect substringData string\n");
+                SysFreeString(str);
+
+                /* test substringData - End of string */
+                hr = IXMLDOMCDATASection_substringData(pCDataSec, 20, 4, &str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+                ok( !lstrcmpW( str, _bstr_("\\") ), "incorrect substringData string\n");
+                SysFreeString(str);
+
+                /* test appendData */
+                hr = IXMLDOMCDATASection_appendData(pCDataSec, NULL);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMCDATASection_appendData(pCDataSec, _bstr_(""));
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMCDATASection_appendData(pCDataSec, _bstr_("Append"));
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+                ok( !lstrcmpW( str, _bstr_("This &is a ; test <>\\Append") ), "incorrect get_text string\n");
+                SysFreeString(str);
+
+                /* test insertData */
+                str = SysAllocStringLen(NULL, 0);
+                hr = IXMLDOMCDATASection_insertData(pCDataSec, -1, str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMCDATASection_insertData(pCDataSec, -1, NULL);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMCDATASection_insertData(pCDataSec, 1000, str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMCDATASection_insertData(pCDataSec, 1000, NULL);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMCDATASection_insertData(pCDataSec, 0, NULL);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMCDATASection_insertData(pCDataSec, 0, str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+                SysFreeString(str);
+
+                hr = IXMLDOMCDATASection_insertData(pCDataSec, -1, _bstr_("Inserting"));
+                ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+
+                hr = IXMLDOMCDATASection_insertData(pCDataSec, 1000, _bstr_("Inserting"));
+                ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+
+                hr = IXMLDOMCDATASection_insertData(pCDataSec, 0, _bstr_("Begin "));
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMCDATASection_insertData(pCDataSec, 17, _bstr_("Middle"));
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMCDATASection_insertData(pCDataSec, 39, _bstr_(" End"));
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+                ok( !lstrcmpW( str, _bstr_("Begin This &is a Middle; test <>\\Append End") ), "incorrect get_text string\n");
                 SysFreeString(str);
 
                 IXMLDOMCDATASection_Release(pCDataSec);
@@ -2865,6 +3158,164 @@ static void test_nodeTypeTests( void )
     free_bstrs();
 }
 
+static void test_DocumentSaveToDocument(void)
+{
+    IXMLDOMDocument *doc = NULL;
+    IXMLDOMDocument *doc2 = NULL;
+    IXMLDOMElement *pRoot;
+
+    HRESULT hr;
+
+    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
+    if( hr != S_OK )
+        return;
+
+    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc2 );
+    if( hr != S_OK )
+    {
+        IXMLDOMDocument_Release(doc);
+        return;
+    }
+
+    hr = IXMLDOMDocument_createElement(doc, _bstr_("Testing"), &pRoot);
+    ok(hr == S_OK, "ret %08x\n", hr );
+    if(hr == S_OK)
+    {
+        hr = IXMLDOMDocument_appendChild(doc, (IXMLDOMNode*)pRoot, NULL);
+        ok(hr == S_OK, "ret %08x\n", hr );
+        if(hr == S_OK)
+        {
+            VARIANT vDoc;
+            BSTR sOrig;
+            BSTR sNew;
+
+            V_VT(&vDoc) = VT_UNKNOWN;
+            V_UNKNOWN(&vDoc) = (IUnknown*)doc2;
+
+            hr = IXMLDOMDocument_save(doc, vDoc);
+            ok(hr == S_OK, "ret %08x\n", hr );
+
+            hr = IXMLDOMDocument_get_xml(doc, &sOrig);
+            ok(hr == S_OK, "ret %08x\n", hr );
+
+            hr = IXMLDOMDocument_get_xml(doc2, &sNew);
+            ok(hr == S_OK, "ret %08x\n", hr );
+
+            ok( !lstrcmpW( sOrig, sNew ), "New document is not the same as origial\n");
+
+            SysFreeString(sOrig);
+            SysFreeString(sNew);
+        }
+    }
+
+    IXMLDOMDocument_Release(doc2);
+    IXMLDOMDocument_Release(doc);
+}
+
+static void test_testTransforms(void)
+{
+    IXMLDOMDocument *doc = NULL;
+    IXMLDOMDocument *docSS = NULL;
+    IXMLDOMNode *pNode;
+    VARIANT_BOOL bSucc;
+
+    HRESULT hr;
+
+    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
+    if( hr != S_OK )
+        return;
+
+    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&docSS );
+    if( hr != S_OK )
+    {
+        IXMLDOMDocument_Release(doc);
+        return;
+    }
+
+    hr = IXMLDOMDocument_loadXML(doc, _bstr_(szTransformXML), &bSucc);
+    ok(hr == S_OK, "ret %08x\n", hr );
+
+    hr = IXMLDOMDocument_loadXML(docSS, _bstr_(szTransformSSXML), &bSucc);
+    ok(hr == S_OK, "ret %08x\n", hr );
+
+    hr = IXMLDOMDocument_QueryInterface(docSS, &IID_IXMLDOMNode, (LPVOID*)&pNode );
+    ok(hr == S_OK, "ret %08x\n", hr );
+    if(hr == S_OK)
+    {
+        BSTR bOut;
+
+        hr = IXMLDOMDocument_transformNode(doc, pNode, &bOut);
+        ok(hr == S_OK, "ret %08x\n", hr );
+        ok( compareIgnoreReturns( bOut, _bstr_(szTransformOutput)), "Stylesheet output not correct\n");
+
+        IXMLDOMNode_Release(pNode);
+    }
+
+    IXMLDOMDocument_Release(docSS);
+    IXMLDOMDocument_Release(doc);
+
+    free_bstrs();
+}
+
+static void test_Namespaces(void)
+{
+    IXMLDOMDocument2 *doc = NULL;
+    IXMLDOMNode *pNode;
+    IXMLDOMNode *pNode2 = NULL;
+    VARIANT_BOOL bSucc;
+    HRESULT hr;
+    BSTR str;
+    static  const CHAR szNamespacesXML[] =
+"<?xml version=\"1.0\"?>\n"
+"<root xmlns:WEB='http://www.winehq.org'>\n"
+"<WEB:Site version=\"1.0\" />\n"
+"</root>";
+
+    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
+    if( hr != S_OK )
+        return;
+
+    hr = IXMLDOMDocument2_loadXML(doc, _bstr_(szNamespacesXML), &bSucc);
+    ok(hr == S_OK, "ret %08x\n", hr );
+    ok(bSucc == VARIANT_TRUE, "Expected VARIANT_TRUE got VARIANT_FALSE");
+
+    hr = IXMLDOMDocument_selectSingleNode(doc, _bstr_("root"), &pNode );
+    ok(hr == S_OK, "ret %08x\n", hr );
+    if(hr == S_OK)
+    {
+        hr = IXMLDOMNode_get_firstChild( pNode, &pNode2 );
+        ok( hr == S_OK, "ret %08x\n", hr );
+        ok( pNode2 != NULL, "pNode2 == NULL\n");
+
+        /* Test get_prefix */
+        hr = IXMLDOMNode_get_prefix(pNode2, NULL);
+        ok( hr == E_INVALIDARG, "ret %08x\n", hr );
+        /* NOTE: Need to test that arg2 gets cleared on Error. */
+
+        hr = IXMLDOMNode_get_prefix(pNode2, &str);
+        ok( hr == S_OK, "ret %08x\n", hr );
+        ok( !lstrcmpW( str, _bstr_("WEB")), "incorrect prefix string\n");
+        SysFreeString(str);
+
+        /* Test get_namespaceURI */
+        hr = IXMLDOMNode_get_namespaceURI(pNode2, NULL);
+        ok( hr == E_INVALIDARG, "ret %08x\n", hr );
+        /* NOTE: Need to test that arg2 gets cleared on Error. */
+
+        hr = IXMLDOMNode_get_namespaceURI(pNode2, &str);
+        ok( hr == S_OK, "ret %08x\n", hr );
+        ok( !lstrcmpW( str, _bstr_("http://www.winehq.org")), "incorrect namespaceURI string\n");
+        SysFreeString(str);
+
+        IXMLDOMNode_Release(pNode2);
+        IXMLDOMNode_Release(pNode);
+    }
+
+    IXMLDOMDocument2_Release(doc);
+
+    free_bstrs();
+}
+
 START_TEST(domdoc)
 {
     HRESULT r;
@@ -2886,6 +3337,9 @@ START_TEST(domdoc)
     test_cloneNode();
     test_xmlTypes();
     test_nodeTypeTests();
+    test_DocumentSaveToDocument();
+    test_testTransforms();
+    test_Namespaces();
 
     CoUninitialize();
 }

@@ -2656,6 +2656,7 @@ static void dump_get_window_parents_reply( const struct get_window_parents_reply
 
 static void dump_get_window_children_request( const struct get_window_children_request *req )
 {
+    fprintf( stderr, " desktop=%p,", req->desktop );
     fprintf( stderr, " parent=%p,", req->parent );
     fprintf( stderr, " atom=%04x,", req->atom );
     fprintf( stderr, " tid=%04x,", req->tid );
@@ -2971,6 +2972,7 @@ static void dump_create_desktop_reply( const struct create_desktop_reply *req )
 
 static void dump_open_desktop_request( const struct open_desktop_request *req )
 {
+    fprintf( stderr, " winsta=%p,", req->winsta );
     fprintf( stderr, " flags=%08x,", req->flags );
     fprintf( stderr, " access=%08x,", req->access );
     fprintf( stderr, " attributes=%08x,", req->attributes );

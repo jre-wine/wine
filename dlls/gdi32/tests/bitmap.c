@@ -276,7 +276,7 @@ static void test_dib_info(HBITMAP hbm, const void *bits, const BITMAPINFOHEADER 
 {
     BITMAP bm;
     DIBSECTION ds;
-    INT ret, width_bytes;
+    INT ret, bm_width_bytes, dib_width_bytes;
     BYTE *buf;
 
     ret = GetObject(hbm, sizeof(bm), &bm);
@@ -285,23 +285,25 @@ static void test_dib_info(HBITMAP hbm, const void *bits, const BITMAPINFOHEADER 
     ok(bm.bmType == 0, "wrong bm.bmType %d\n", bm.bmType);
     ok(bm.bmWidth == bmih->biWidth, "wrong bm.bmWidth %d\n", bm.bmWidth);
     ok(bm.bmHeight == bmih->biHeight, "wrong bm.bmHeight %d\n", bm.bmHeight);
-    width_bytes = DIB_GetWidthBytes(bm.bmWidth, bm.bmBitsPixel);
-    ok(bm.bmWidthBytes == width_bytes, "wrong bm.bmWidthBytes %d != %d\n", bm.bmWidthBytes, width_bytes);
+    dib_width_bytes = DIB_GetWidthBytes(bm.bmWidth, bm.bmBitsPixel);
+    bm_width_bytes = BITMAP_GetWidthBytes(bm.bmWidth, bm.bmBitsPixel);
+    if (bm.bmWidthBytes != dib_width_bytes) /* Win2k bug */
+        ok(bm.bmWidthBytes == bm_width_bytes, "wrong bm.bmWidthBytes %d != %d\n", bm.bmWidthBytes, bm_width_bytes);
+    else
+        ok(bm.bmWidthBytes == dib_width_bytes, "wrong bm.bmWidthBytes %d != %d\n", bm.bmWidthBytes, dib_width_bytes);
     ok(bm.bmPlanes == bmih->biPlanes, "wrong bm.bmPlanes %d\n", bm.bmPlanes);
     ok(bm.bmBitsPixel == bmih->biBitCount, "bm.bmBitsPixel %d != %d\n", bm.bmBitsPixel, bmih->biBitCount);
     ok(bm.bmBits == bits, "wrong bm.bmBits %p != %p\n", bm.bmBits, bits);
 
     buf = HeapAlloc(GetProcessHeap(), 0, bm.bmWidthBytes * bm.bmHeight + 4096);
 
-    width_bytes = BITMAP_GetWidthBytes(bm.bmWidth, bm.bmBitsPixel);
-
     /* GetBitmapBits returns not 32-bit aligned data */
     ret = GetBitmapBits(hbm, 0, NULL);
-    ok(ret == width_bytes * bm.bmHeight, "%d != %d\n", ret, width_bytes * bm.bmHeight);
+    ok(ret == bm_width_bytes * bm.bmHeight, "%d != %d\n", ret, bm_width_bytes * bm.bmHeight);
 
     memset(buf, 0xAA, bm.bmWidthBytes * bm.bmHeight + 4096);
     ret = GetBitmapBits(hbm, bm.bmWidthBytes * bm.bmHeight + 4096, buf);
-    ok(ret == width_bytes * bm.bmHeight, "%d != %d\n", ret, width_bytes * bm.bmHeight);
+    ok(ret == bm_width_bytes * bm.bmHeight, "%d != %d\n", ret, bm_width_bytes * bm.bmHeight);
 
     HeapFree(GetProcessHeap(), 0, buf);
 
@@ -331,8 +333,9 @@ static void test_dib_info(HBITMAP hbm, const void *bits, const BITMAPINFOHEADER 
     ok(ret == sizeof(ds), "wrong size %d\n", ret);
 
     ok(ds.dsBm.bmBits == bits, "wrong bm.bmBits %p != %p\n", ds.dsBm.bmBits, bits);
-    ok(ds.dsBmih.biSizeImage == ds.dsBm.bmWidthBytes * ds.dsBm.bmHeight, "%u != %u\n",
-       ds.dsBmih.biSizeImage, ds.dsBm.bmWidthBytes * ds.dsBm.bmHeight);
+    if (ds.dsBm.bmWidthBytes != bm_width_bytes) /* Win2k bug */
+        ok(ds.dsBmih.biSizeImage == ds.dsBm.bmWidthBytes * ds.dsBm.bmHeight, "%u != %u\n",
+           ds.dsBmih.biSizeImage, ds.dsBm.bmWidthBytes * ds.dsBm.bmHeight);
     ok(bmih->biSizeImage == 0, "%u != 0\n", bmih->biSizeImage);
     ds.dsBmih.biSizeImage = 0;
 
@@ -969,14 +972,24 @@ static void test_bitmap(void)
 
     SetLastError(0xdeadbeef);
     hbmp = CreateBitmap(0x7ffffff, 1, 1, 1, NULL);
-    ok(hbmp != 0, "CreateBitmap should not fail\n");
-    DeleteObject(hbmp);
+    if (!hbmp)
+    {
+        ok(GetLastError() == ERROR_NOT_ENOUGH_MEMORY,
+           "expected ERROR_NOT_ENOUGH_MEMORY, got %u\n", GetLastError());
+    }
+    else
+        DeleteObject(hbmp);
 
     SetLastError(0xdeadbeef);
     hbmp = CreateBitmap(0x7ffffff, 9, 1, 1, NULL);
-    ok(!hbmp, "CreateBitmap should fail\n");
-    ok(GetLastError() == ERROR_NOT_ENOUGH_MEMORY,
-       "expected ERROR_NOT_ENOUGH_MEMORY, got %u\n", GetLastError());
+    if (!hbmp)
+    {
+        ok(GetLastError() == ERROR_NOT_ENOUGH_MEMORY /* XP */ ||
+           GetLastError() == ERROR_INVALID_PARAMETER /* Win2k */,
+           "expected ERROR_NOT_ENOUGH_MEMORY, got %u\n", GetLastError());
+    }
+    else
+        DeleteObject(hbmp);
 
     SetLastError(0xdeadbeef);
     hbmp = CreateBitmap(0x7ffffff + 1, 1, 1, 1, NULL);
@@ -1595,6 +1608,96 @@ todo_wine
     ReleaseDC(0, hdc);
 }
 
+static void test_GetDIBits_BI_BITFIELDS(void)
+{
+    /* Try a screen resolution detection technique
+     * from the September 1999 issue of Windows Developer's Journal
+     * which seems to be in widespread use.
+     * http://www.lesher.ws/highcolor.html
+     * http://www.lesher.ws/vidfmt.c
+     * It hinges on being able to retrieve the bitmaps
+     * for the three primary colors in non-paletted 16 bit mode.
+     */
+    char dibinfo_buf[sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD)];
+    DWORD bits[32];
+    LPBITMAPINFO dibinfo = (LPBITMAPINFO) dibinfo_buf;
+    HDC hdc;
+    HBITMAP hbm;
+    int ret;
+
+    memset(dibinfo, 0, sizeof(dibinfo_buf));
+    dibinfo->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+
+    hdc = GetDC(NULL);
+    ok(hdc != NULL, "GetDC failed?\n");
+    hbm = CreateCompatibleBitmap(hdc, 1, 1);
+    ok(hbm != NULL, "CreateCompatibleBitmap failed?\n");
+
+    /* Call GetDIBits to fill in bmiHeader.  */
+    ret = GetDIBits(hdc, hbm, 0, 1, NULL, dibinfo, DIB_RGB_COLORS);
+    ok(ret == 1, "GetDIBits failed\n");
+    if (dibinfo->bmiHeader.biBitCount > 8)
+    {
+        DWORD *bitmasks = (DWORD *)dibinfo->bmiColors;
+
+        ok( dibinfo->bmiHeader.biCompression == BI_BITFIELDS,
+            "compression is %u\n", dibinfo->bmiHeader.biCompression );
+
+        ok( !bitmasks[0], "red mask is set\n" );
+        ok( !bitmasks[1], "green mask is set\n" );
+        ok( !bitmasks[2], "blue mask is set\n" );
+
+        /* test with NULL bits pointer and correct bpp */
+        dibinfo->bmiHeader.biSizeImage = 0xdeadbeef;
+        ret = GetDIBits(hdc, hbm, 0, 1, NULL, dibinfo, DIB_RGB_COLORS);
+        ok(ret == 1, "GetDIBits failed\n");
+
+        ok( bitmasks[0] != 0, "red mask is not set\n" );
+        ok( bitmasks[1] != 0, "green mask is not set\n" );
+        ok( bitmasks[2] != 0, "blue mask is not set\n" );
+        ok( dibinfo->bmiHeader.biSizeImage != 0xdeadbeef, "size image not set\n" );
+
+        /* test with valid bits pointer */
+        memset(dibinfo, 0, sizeof(dibinfo_buf));
+        dibinfo->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        ret = GetDIBits(hdc, hbm, 0, 1, NULL, dibinfo, DIB_RGB_COLORS);
+        ok(ret == 1, "GetDIBits failed ret %u err %u\n",ret,GetLastError());
+        dibinfo->bmiHeader.biSizeImage = 0xdeadbeef;
+        ret = GetDIBits(hdc, hbm, 0, 1, bits, dibinfo, DIB_RGB_COLORS);
+        ok(ret == 1, "GetDIBits failed ret %u err %u\n",ret,GetLastError());
+
+        ok( bitmasks[0] != 0, "red mask is not set\n" );
+        ok( bitmasks[1] != 0, "green mask is not set\n" );
+        ok( bitmasks[2] != 0, "blue mask is not set\n" );
+        ok( dibinfo->bmiHeader.biSizeImage != 0xdeadbeef, "size image not set\n" );
+
+        /* now with bits and 0 lines */
+        memset(dibinfo, 0, sizeof(dibinfo_buf));
+        dibinfo->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        dibinfo->bmiHeader.biSizeImage = 0xdeadbeef;
+        ret = GetDIBits(hdc, hbm, 0, 0, bits, dibinfo, DIB_RGB_COLORS);
+
+        ok( !bitmasks[0], "red mask is set\n" );
+        ok( !bitmasks[1], "green mask is set\n" );
+        ok( !bitmasks[2], "blue mask is set\n" );
+        ok( dibinfo->bmiHeader.biSizeImage != 0xdeadbeef, "size image not set\n" );
+
+        memset(bitmasks, 0, 3*sizeof(DWORD));
+        dibinfo->bmiHeader.biSizeImage = 0xdeadbeef;
+        ret = GetDIBits(hdc, hbm, 0, 0, bits, dibinfo, DIB_RGB_COLORS);
+        ok(ret == 1, "GetDIBits failed ret %u err %u\n",ret,GetLastError());
+
+        ok( bitmasks[0] != 0, "red mask is not set\n" );
+        ok( bitmasks[1] != 0, "green mask is not set\n" );
+        ok( bitmasks[2] != 0, "blue mask is not set\n" );
+        ok( dibinfo->bmiHeader.biSizeImage != 0xdeadbeef, "size image not set\n" );
+    }
+    else skip("not in 16 bpp BI_BITFIELDS mode, skipping that test\n");
+
+    DeleteObject(hbm);
+    ReleaseDC(NULL, hdc);
+}
+
 static void test_select_object(void)
 {
     HDC hdc;
@@ -2036,6 +2139,7 @@ START_TEST(bitmap)
     test_GetDIBits_selected_DDB(TRUE);
     test_GetDIBits_selected_DDB(FALSE);
     test_GetDIBits();
+    test_GetDIBits_BI_BITFIELDS();
     test_select_object();
     test_CreateBitmap();
     test_GdiAlphaBlend();

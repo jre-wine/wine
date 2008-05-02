@@ -6,7 +6,7 @@
  * Copyright 2004 Christian Costa
  * Copyright 2005 Oliver Stieber
  * Copyright 2006 Henri Verbeet
- * Copyright 2007 Stefan Dösinger for CodeWeavers
+ * Copyright 2007-2008 Stefan Dösinger for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -156,7 +156,6 @@ void primitiveDeclarationConvertToStridedData(
     int i;
     WINED3DVERTEXELEMENT *element;
     DWORD stride;
-    int reg;
     DWORD numPreloadStreams = This->stateBlock->streamIsUP ? 0 : vertexDeclaration->num_streams;
     DWORD *streams = vertexDeclaration->streams;
 
@@ -214,7 +213,6 @@ void primitiveDeclarationConvertToStridedData(
             }
         }
         data += element->Offset;
-        reg = element->Reg;
 
         TRACE("Offset %d Stream %d UsageIndex %d\n", element->Offset, element->Stream, element->UsageIndex);
 
@@ -838,15 +836,15 @@ static inline void drawStridedInstanced(IWineD3DDevice *iface, WineDirect3DVerte
 
     /* First, figure out how many instances we have to draw */
     for(i = 0; i < MAX_STREAMS; i++) {
-        /* Look at all non-instanced streams */
-        if(!(stateblock->streamFlags[i] & WINED3DSTREAMSOURCE_INSTANCEDATA) &&
-           stateblock->streamSource[i]) {
-            int inst = stateblock->streamFreq[i];
-
-            if(numInstances && inst != numInstances) {
-                ERR("Two streams specify a different number of instances. Got %d, new is %d\n", numInstances, inst);
+        /* Look at the streams and take the first one which matches */
+        if(((stateblock->streamFlags[i] & WINED3DSTREAMSOURCE_INSTANCEDATA) || (stateblock->streamFlags[i] & WINED3DSTREAMSOURCE_INDEXEDDATA)) && stateblock->streamSource[i]) {
+            /* D3D9 could set streamFreq 0 with (INSTANCEDATA or INDEXEDDATA) and then it is handled as 1. See d3d9/tests/visual.c-> stream_test() */
+            if(stateblock->streamFreq[i] == 0){
+                numInstances = 1;
+            } else {
+                numInstances = stateblock->streamFreq[i]; /* use the specified number of instances from the first matched stream. See d3d9/tests/visual.c-> stream_test() */
             }
-            numInstances = inst;
+            break; /* break, because only the first suitable value is interesting */
         }
     }
 
@@ -984,8 +982,7 @@ void drawPrimitive(IWineD3DDevice *iface,
     IWineD3DSurfaceImpl          *target;
     int i;
 
-    /* Signals other modules that a drawing is in progress and the stateblock finalized */
-    This->isInDraw = TRUE;
+    if (NumPrimitives == 0) return;
 
     /* Invalidate the back buffer memory so LockRect will read it the next time */
     for(i = 0; i < GL_LIMITS(buffers); i++) {
@@ -1030,6 +1027,9 @@ void drawPrimitive(IWineD3DDevice *iface,
         }
     }
 
+    /* Signals other modules that a drawing is in progress and the stateblock finalized */
+    This->isInDraw = TRUE;
+
     /* Ok, we will be updating the screen from here onwards so grab the lock */
 
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
@@ -1060,14 +1060,26 @@ void drawPrimitive(IWineD3DDevice *iface,
         if(!use_vs(This)) {
             if(!This->strided_streams.u.s.position_transformed && This->activeContext->num_untracked_materials &&
                 This->stateBlock->renderState[WINED3DRS_LIGHTING]) {
-                FIXME("Using software emulation because not all material properties could be tracked\n");
+                static BOOL first = TRUE;
+                if(first) {
+                    FIXME("Using software emulation because not all material properties could be tracked\n");
+                    first = FALSE;
+                } else {
+                    TRACE("Using software emulation because not all material properties could be tracked\n");
+                }
                 emulation = TRUE;
             }
             else if(This->activeContext->fog_coord && This->stateBlock->renderState[WINED3DRS_FOGENABLE]) {
                 /* Either write a pipeline replacement shader or convert the specular alpha from unsigned byte
                  * to a float in the vertex buffer
                  */
-                FIXME("Using software emulation because manual fog coordinates are provided\n");
+                static BOOL first = TRUE;
+                if(first) {
+                    FIXME("Using software emulation because manual fog coordinates are provided\n");
+                    first = FALSE;
+                } else {
+                    TRACE("Using software emulation because manual fog coordinates are provided\n");
+                }
                 emulation = TRUE;
             }
 
@@ -1081,7 +1093,13 @@ void drawPrimitive(IWineD3DDevice *iface,
         if (This->useDrawStridedSlow || emulation) {
             /* Immediate mode drawing */
             if(use_vs(This)) {
-                FIXME("Using immediate mode with vertex shaders for half float emulation\n");
+                static BOOL first = TRUE;
+                if(first) {
+                    FIXME("Using immediate mode with vertex shaders for half float emulation\n");
+                    first = FALSE;
+                } else {
+                    TRACE("Using immediate mode with vertex shaders for half float emulation\n");
+                }
                 drawStridedSlowVs(iface, strided, calculatedNumberOfindices, glPrimType,
                                   idxData, idxSize, minIndex, StartIdx, StartVertexIndex);
             } else {
@@ -1370,11 +1388,13 @@ HRESULT tesselate_rectpatch(IWineD3DDeviceImpl *This,
 
     i = glRenderMode(GL_RENDER);
     if(i == -1) {
+        LEAVE_GL();
         ERR("Feedback failed. Expected %d elements back\n", buffer_size);
         Sleep(10000);
         HeapFree(GetProcessHeap(), 0, feedbuffer);
         return WINED3DERR_DRIVERINTERNALERROR;
     } else if(i != buffer_size) {
+        LEAVE_GL();
         ERR("Unexpected amount of elements returned. Expected %d, got %d\n", buffer_size, i);
         Sleep(10000);
         HeapFree(GetProcessHeap(), 0, feedbuffer);

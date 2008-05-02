@@ -283,7 +283,7 @@ VOID DIALOG_FileNew(VOID)
 {
     static const WCHAR empty_strW[] = { 0 };
 
-    /* Close any files and promt to save changes */
+    /* Close any files and prompt to save changes */
     if (DoCloseFile()) {
         SetWindowText(Globals.hEdit, empty_strW);
         SendMessage(Globals.hEdit, EM_EMPTYUNDOBUFFER, 0, 0);
@@ -765,27 +765,12 @@ VOID DIALOG_HelpHelp(VOID)
     WinHelp(Globals.hMainWnd, helpfileW, HELP_HELPONHELP, 0);
 }
 
-VOID DIALOG_HelpLicense(VOID)
+VOID DIALOG_HelpAboutNotepad(VOID)
 {
-    TCHAR cap[20], text[1024];
-    LoadString(Globals.hInstance, IDS_LICENSE, text, 1024);
-    LoadString(Globals.hInstance, IDS_LICENSE_CAPTION, cap, 20);
-    MessageBox(Globals.hMainWnd, text, cap, MB_ICONINFORMATION | MB_OK);
-}
-
-VOID DIALOG_HelpNoWarranty(VOID)
-{
-    TCHAR cap[20], text[1024];
-    LoadString(Globals.hInstance, IDS_WARRANTY, text, 1024);
-    LoadString(Globals.hInstance, IDS_WARRANTY_CAPTION, cap, 20);
-    MessageBox(Globals.hMainWnd, text, cap, MB_ICONEXCLAMATION | MB_OK);
-}
-
-VOID DIALOG_HelpAboutWine(VOID)
-{
-    static const WCHAR notepadW[] = { 'N','o','t','e','p','a','d','\n',0 };
+    static const WCHAR notepadW[] = { 'W','i','n','e',' ','N','o','t','e','p','a','d',0 };
     WCHAR szNotepad[MAX_STRING_LEN];
-    HICON icon = LoadIcon(Globals.hInstance, MAKEINTRESOURCE(IDI_NOTEPAD));
+    HICON icon = LoadImageW( Globals.hInstance, MAKEINTRESOURCE(IDI_NOTEPAD),
+                             IMAGE_ICON, 48, 48, LR_SHARED );
 
     LoadString(Globals.hInstance, STRING_NOTEPAD, szNotepad, SIZEOF(szNotepad));
     ShellAbout(Globals.hMainWnd, szNotepad, notepadW, icon);

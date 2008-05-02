@@ -166,7 +166,8 @@ static void test_swapchain(void)
 
     hr = IDirect3D9_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(SUCCEEDED(hr), "Failed to create IDirect3D9Device (%s)\n", DXGetErrorString9(hr));
+    ok(hr == S_OK || hr == D3DERR_NOTAVAILABLE,
+       "Failed to create IDirect3D9Device (%s)\n", DXGetErrorString9(hr));
     if (FAILED(hr)) goto cleanup;
 
     /* Check if the back buffer count was modified */
@@ -347,7 +348,8 @@ static void test_refcount(void)
 
     hr = IDirect3D9_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(SUCCEEDED(hr), "Failed to create IDirect3D9Device (%s)\n", DXGetErrorString9(hr));
+    ok(hr == S_OK || hr == D3DERR_NOTAVAILABLE,
+       "Failed to create IDirect3D9Device (%s)\n", DXGetErrorString9(hr));
     if (FAILED(hr)) goto cleanup;
 
     refcount = get_refcount( (IUnknown *)pDevice );
@@ -356,8 +358,8 @@ static void test_refcount(void)
     /**
      * Check refcount of implicit surfaces and implicit swapchain. Findings:
      *   - the container is the device OR swapchain
-     *   - they hold a refernce to the device
-     *   - they are created with a refcount of 0 (Get/Release returns orignial refcount)
+     *   - they hold a reference to the device
+     *   - they are created with a refcount of 0 (Get/Release returns original refcount)
      *   - they are not freed if refcount reaches 0.
      *   - the refcount is not forwarded to the container.
      */
@@ -657,7 +659,8 @@ static void test_cursor(void)
 
     hr = IDirect3D9_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(SUCCEEDED(hr), "Failed to create IDirect3D9Device (%s)\n", DXGetErrorString9(hr));
+    ok(hr == S_OK || hr == D3DERR_NOTAVAILABLE,
+       "Failed to create IDirect3D9Device (%s)\n", DXGetErrorString9(hr));
     if (FAILED(hr)) goto cleanup;
 
     IDirect3DDevice9_CreateOffscreenPlainSurface(pDevice, 32, 32, D3DFMT_A8R8G8B8, D3DPOOL_SCRATCH, &cursor, 0);
@@ -1505,7 +1508,7 @@ static void test_draw_indexed(void)
 
     hr = IDirect3DDevice9_CreateVertexDeclaration(device, decl_elements, &vertex_declaration);
     ok(SUCCEEDED(hr), "CreateVertexDeclaration failed (0x%08x)\n", hr);
-    hr = IDirect3DDevice9_SetVertexDeclaration(device, vertex_declaration);
+    hr = IDirect3DDevice9_SetVertexDeclaration(device, NULL);
     ok(SUCCEEDED(hr), "SetVertexDeclaration failed (0x%08x)\n", hr);
 
     hr = IDirect3DDevice9_CreateVertexBuffer(device, sizeof(quad), 0, 0, D3DPOOL_DEFAULT, &vertex_buffer, NULL);
@@ -1538,9 +1541,17 @@ static void test_draw_indexed(void)
     ok(hr == D3DERR_INVALIDCALL, "DrawIndexedPrimitive returned 0x%08x, expected D3DERR_INVALIDCALL (0x%08x)\n",
             hr, D3DERR_INVALIDCALL);
 
-    /* Valid index buffer. Should succeed */
+    /* Valid index buffer, NULL vertex declaration. Should fail */
     hr = IDirect3DDevice9_SetIndices(device, index_buffer);
     ok(SUCCEEDED(hr), "SetIndices failed (0x%08x)\n", hr);
+    hr = IDirect3DDevice9_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST, 0 /* BaseVertexIndex */, 0 /* MinIndex */,
+            4 /* NumVerts */, 0 /* StartIndex */, 2 /*PrimCount */);
+    ok(hr == D3DERR_INVALIDCALL, "DrawIndexedPrimitive returned 0x%08x, expected D3DERR_INVALIDCALL (0x%08x)\n",
+            hr, D3DERR_INVALIDCALL);
+
+    /* Valid index buffer and vertex declaration. Should succeed */
+    hr = IDirect3DDevice9_SetVertexDeclaration(device, vertex_declaration);
+    ok(SUCCEEDED(hr), "SetVertexDeclaration failed (0x%08x)\n", hr);
     hr = IDirect3DDevice9_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST, 0 /* BaseVertexIndex */, 0 /* MinIndex */,
             4 /* NumVerts */, 0 /* StartIndex */, 2 /*PrimCount */);
     ok(SUCCEEDED(hr), "DrawIndexedPrimitive failed (0x%08x)\n", hr);
@@ -1745,7 +1756,8 @@ static void test_lights(void)
 
     hr = IDirect3D9_CreateDevice( d3d9, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
                                   D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_PUREDEVICE, &present_parameters, &device );
-    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE, "IDirect3D9_CreateDevice failed with %s\n", DXGetErrorString9(hr));
+    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE || hr == D3DERR_INVALIDCALL,
+       "IDirect3D9_CreateDevice failed with %s\n", DXGetErrorString9(hr));
     if(!device)
     {
         skip("Failed to create a d3d device\n");
@@ -1805,7 +1817,8 @@ static void test_set_stream_source(void)
 
     hr = IDirect3D9_CreateDevice( d3d9, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
                                   D3DCREATE_HARDWARE_VERTEXPROCESSING, &present_parameters, &device );
-    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE, "IDirect3D9_CreateDevice failed with %s\n", DXGetErrorString9(hr));
+    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE || hr == D3DERR_INVALIDCALL,
+       "IDirect3D9_CreateDevice failed with %s\n", DXGetErrorString9(hr));
     if(!device)
     {
         hr = IDirect3D9_CreateDevice( d3d9, D3DADAPTER_DEFAULT, D3DDEVTYPE_REF, hwnd,
@@ -1921,7 +1934,7 @@ static void test_display_formats()
 {
     /* Direct3D9 offers 4 display formats R5G6B5, X1R5G5B5, X8R8G8B8 and A2R10G10B10.
      * Next to these there are 6 different backbuffer formats. Only a fixed number of
-     * mixings are possible in FULLSCREEN mode. In windowed mode more combinations are
+     * combinations are possible in FULLSCREEN mode. In windowed mode more combinations are
      * allowed due to depth conversion and this is likely driver dependent.
      * This test checks which combinations are possible in fullscreen mode and this should not be driver dependent.
      * TODO: handle A2R10G10B10 but what hardware supports it? Parhelia? It is very rare. */
@@ -1986,6 +1999,41 @@ static void test_display_formats()
     if(d3d9) IDirect3D9_Release(d3d9);
 }
 
+static void test_set_material(void)
+{
+    D3DPRESENT_PARAMETERS present_parameters;
+    IDirect3DDevice9 *device = NULL;
+    IDirect3D9 *d3d9;
+    HWND hwnd;
+    HRESULT hr;
+
+    d3d9 = pDirect3DCreate9( D3D_SDK_VERSION );
+    ok(d3d9 != NULL, "Failed to create IDirect3D9 object\n");
+    hwnd = CreateWindow( "static", "d3d9_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    ok(hwnd != NULL, "Failed to create window\n");
+    if (!d3d9 || !hwnd) goto cleanup;
+
+    ZeroMemory(&present_parameters, sizeof(present_parameters));
+    present_parameters.Windowed = TRUE;
+    present_parameters.hDeviceWindow = hwnd;
+    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
+
+    IDirect3D9_CreateDevice( d3d9, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
+                                  D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_PUREDEVICE, &present_parameters, &device );
+    if(!device)
+    {
+        skip("Failed to create a d3d device\n");
+        goto cleanup;
+    }
+
+    hr = IDirect3DDevice9_SetMaterial(device, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, got %s\n",  DXGetErrorString9(hr));
+
+ cleanup:
+    if(device) IDirect3DDevice9_Release(device);
+    if(d3d9) IDirect3D9_Release(d3d9);
+}
+
 START_TEST(device)
 {
     HMODULE d3d9_handle = LoadLibraryA( "d3d9.dll" );
@@ -2015,5 +2063,6 @@ START_TEST(device)
         test_vertex_buffer_alignment();
         test_lights();
         test_set_stream_source();
+        test_set_material();
     }
 }

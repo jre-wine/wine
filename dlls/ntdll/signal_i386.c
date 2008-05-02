@@ -1009,13 +1009,12 @@ static BOOL check_atl_thunk( EXCEPTION_RECORD *rec, CONTEXT *context )
 
 
 /***********************************************************************
- *           setup_exception
+ *           setup_exception_record
  *
- * Setup a proper stack frame for the raise function, and modify the
- * sigcontext so that the return from the signal handler will call
- * the raise function.
+ * Setup the exception record and context on the thread stack.
  */
-static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func func )
+static EXCEPTION_RECORD *setup_exception_record( SIGCONTEXT *sigcontext, void *stack_ptr,
+                                                 WORD fs, WORD gs, raise_func func )
 {
     struct stack_layout
     {
@@ -1026,11 +1025,8 @@ static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func fun
         EXCEPTION_RECORD  rec;
         DWORD             ebp;
         DWORD             eip;
-    } *stack;
-
-    WORD fs, gs;
-
-    stack = init_handler( sigcontext, &fs, &gs );
+    } *stack = stack_ptr;
+    DWORD exception_code = 0;
 
     /* stack sanity checks */
 
@@ -1045,22 +1041,37 @@ static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func fun
     }
 
     if (stack - 1 > stack || /* check for overflow in subtraction */
-        (char *)(stack - 1) < (char *)NtCurrentTeb()->Tib.StackLimit ||
+        (char *)stack <= (char *)NtCurrentTeb()->DeallocationStack ||
         (char *)stack > (char *)NtCurrentTeb()->Tib.StackBase)
     {
-        UINT diff = (char *)NtCurrentTeb()->Tib.StackLimit - (char *)stack;
-        if (diff < 4096)
+        WARN( "exception outside of stack limits in thread %04x eip %08x esp %08x stack %p-%p\n",
+              GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
+              (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->Tib.StackLimit,
+              NtCurrentTeb()->Tib.StackBase );
+    }
+    else if ((char *)(stack - 1) < (char *)NtCurrentTeb()->DeallocationStack + 4096)
+    {
+        /* stack overflow on last page, unrecoverable */
+        UINT diff = (char *)NtCurrentTeb()->DeallocationStack + 4096 - (char *)(stack - 1);
+        WINE_ERR( "stack overflow %u bytes in thread %04x eip %08x esp %08x stack %p-%p-%p\n",
+                  diff, GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
+                  (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->DeallocationStack,
+                  NtCurrentTeb()->Tib.StackLimit, NtCurrentTeb()->Tib.StackBase );
+        server_abort_thread(1);
+    }
+    else if ((char *)(stack - 1) < (char *)NtCurrentTeb()->Tib.StackLimit)
+    {
+        /* stack access below stack limit, may be recoverable */
+        if (virtual_handle_stack_fault( stack - 1 )) exception_code = EXCEPTION_STACK_OVERFLOW;
+        else
         {
-            WINE_ERR( "stack overflow %u bytes in thread %04x eip %08x esp %08x stack %p-%p\n",
+            UINT diff = (char *)NtCurrentTeb()->Tib.StackLimit - (char *)(stack - 1);
+            WINE_ERR( "stack overflow %u bytes in thread %04x eip %08x esp %08x stack %p-%p-%p\n",
                       diff, GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
-                      (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->Tib.StackLimit,
-                      NtCurrentTeb()->Tib.StackBase );
+                      (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->DeallocationStack,
+                      NtCurrentTeb()->Tib.StackLimit, NtCurrentTeb()->Tib.StackBase );
             server_abort_thread(1);
         }
-        else WARN( "exception outside of stack limits in thread %04x eip %08x esp %08x stack %p-%p\n",
-                   GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
-                   (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->Tib.StackLimit,
-                   NtCurrentTeb()->Tib.StackBase );
     }
 
     stack--;  /* push the stack_layout structure */
@@ -1074,6 +1085,7 @@ static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func fun
     stack->context_ptr  = &stack->context;
 
     stack->rec.ExceptionRecord  = NULL;
+    stack->rec.ExceptionCode    = exception_code;
     stack->rec.ExceptionFlags   = EXCEPTION_CONTINUABLE;
     stack->rec.ExceptionAddress = (LPVOID)EIP_sig(sigcontext);
     stack->rec.NumberParameters = 0;
@@ -1083,8 +1095,8 @@ static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func fun
     /* now modify the sigcontext to return to the raise function */
     ESP_sig(sigcontext) = (DWORD)stack;
     EIP_sig(sigcontext) = (DWORD)func;
-    /* clear single-step and align check flag */
-    EFL_sig(sigcontext) &= ~(0x100|0x40000); 
+    /* clear single-step, direction, and align check flag */
+    EFL_sig(sigcontext) &= ~(0x100|0x400|0x40000);
     CS_sig(sigcontext)  = wine_get_cs();
     DS_sig(sigcontext)  = wine_get_ds();
     ES_sig(sigcontext)  = wine_get_es();
@@ -1093,6 +1105,22 @@ static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func fun
     SS_sig(sigcontext)  = wine_get_ss();
 
     return stack->rec_ptr;
+}
+
+
+/***********************************************************************
+ *           setup_exception
+ *
+ * Setup a proper stack frame for the raise function, and modify the
+ * sigcontext so that the return from the signal handler will call
+ * the raise function.
+ */
+static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func func )
+{
+    WORD fs, gs;
+    void *stack = init_handler( sigcontext, &fs, &gs );
+
+    return setup_exception_record( sigcontext, stack, fs, gs, func );
 }
 
 
@@ -1259,8 +1287,28 @@ static void usr2_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  */
 static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
+    WORD fs, gs;
+    EXCEPTION_RECORD *rec;
     SIGCONTEXT *context = sigcontext;
-    EXCEPTION_RECORD *rec = setup_exception( context, raise_segv_exception );
+    void *stack = init_handler( sigcontext, &fs, &gs );
+
+    /* check for page fault inside the thread stack */
+    if (get_trap_code(context) == TRAP_x86_PAGEFLT &&
+        (char *)siginfo->si_addr >= (char *)NtCurrentTeb()->DeallocationStack &&
+        (char *)siginfo->si_addr < (char *)NtCurrentTeb()->Tib.StackBase &&
+        virtual_handle_stack_fault( siginfo->si_addr ))
+    {
+        /* check if this was the last guard page */
+        if ((char *)siginfo->si_addr < (char *)NtCurrentTeb()->DeallocationStack + 2*4096)
+        {
+            rec = setup_exception_record( context, stack, fs, gs, raise_segv_exception );
+            rec->ExceptionCode = EXCEPTION_STACK_OVERFLOW;
+        }
+        return;
+    }
+
+    rec = setup_exception_record( context, stack, fs, gs, raise_segv_exception );
+    if (rec->ExceptionCode == EXCEPTION_STACK_OVERFLOW) return;
 
     switch(get_trap_code(context))
     {

@@ -938,7 +938,6 @@ BOOL WINAPI CryptRegisterDefaultOIDFunction(DWORD dwEncodingType,
 {
     HKEY key;
     LPWSTR dlls;
-    LPCWSTR existing;
     BOOL ret = FALSE;
 
     TRACE("(%x, %s, %d, %s)\n", dwEncodingType, debugstr_a(pszFuncName),
@@ -954,7 +953,7 @@ BOOL WINAPI CryptRegisterDefaultOIDFunction(DWORD dwEncodingType,
         return FALSE;
 
     dlls = CRYPT_GetDefaultOIDDlls(key);
-    if ((existing = CRYPT_FindStringInMultiString(dlls, pwszDll)))
+    if (CRYPT_FindStringInMultiString(dlls, pwszDll))
         SetLastError(ERROR_FILE_EXISTS);
     else
     {
@@ -1402,8 +1401,9 @@ static void init_oid_info(HINSTANCE hinst)
         }
         else
         {
+            LPCWSTR stringresource;
             int len = LoadStringW(hinst, (UINT_PTR)oidInfoConstructors[i].pwszName,
-             NULL, 0);
+             (LPWSTR)&stringresource, 0);
 
             if (len)
             {
@@ -1415,12 +1415,11 @@ static void init_oid_info(HINSTANCE hinst)
                     memset(info, 0, sizeof(*info));
                     info->info.cbSize = sizeof(CRYPT_OID_INFO);
                     info->info.pszOID = oidInfoConstructors[i].pszOID;
-                    info->info.pwszName =
-                     (LPWSTR)((LPBYTE)info + sizeof(struct OIDInfo));
+                    info->info.pwszName = (LPWSTR)(info + 1);
                     info->info.dwGroupId = oidInfoConstructors[i].dwGroupId;
                     info->info.u.Algid = oidInfoConstructors[i].Algid;
-                    LoadStringW(hinst, (UINT_PTR)oidInfoConstructors[i].pwszName,
-                     (LPWSTR)info->info.pwszName, len + 1);
+                    memcpy(info + 1, stringresource, len*sizeof(WCHAR));
+                    ((LPWSTR)(info + 1))[len] = 0;
                     if (oidInfoConstructors[i].blob)
                     {
                         info->info.ExtraInfo.cbData =

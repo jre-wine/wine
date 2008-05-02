@@ -319,7 +319,7 @@ BOOL WINAPI QueryPerformanceCounter(PLARGE_INTEGER counter)
 /****************************************************************************
  *		QueryPerformanceFrequency (KERNEL32.@)
  *
- * Get the resolution of the performace counter.
+ * Get the resolution of the performance counter.
  *
  * PARAMS
  *  frequency [O] Destination for the counter resolution
@@ -454,19 +454,10 @@ VOID WINAPI GetSystemInfo(
 				case 5: cachedsi.dwProcessorType = PROCESSOR_INTEL_PENTIUM;
 					cachedsi.wProcessorLevel= 5;
 					break;
-				case 6: cachedsi.dwProcessorType = PROCESSOR_INTEL_PENTIUM;
-					cachedsi.wProcessorLevel= 6;
-					break;
-				case 1: /* two-figure levels */
-                                    if (value[1] == '5')
-                                    {
-                                        cachedsi.dwProcessorType = PROCESSOR_INTEL_PENTIUM;
-                                        cachedsi.wProcessorLevel= 6;
-                                        break;
-                                    }
-                                    /* fall through */
+
 				default:
-					FIXME("unknown cpu family '%s', please report ! (-> setting to 386)\n", value);
+					cachedsi.dwProcessorType = PROCESSOR_INTEL_PENTIUM;
+					cachedsi.wProcessorLevel = atoi(value);
 					break;
 				}
 			}

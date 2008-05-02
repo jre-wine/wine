@@ -1,5 +1,5 @@
 /*
- * Copyright 2005-2006 Jacek Caban for CodeWeavers
+ * Copyright 2005-2008 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,6 +21,7 @@
 #include "mshtml.h"
 #include "mshtmhst.h"
 #include "hlink.h"
+#include "dispex.h"
 
 #include "wine/list.h"
 #include "wine/unicode.h"
@@ -54,14 +55,84 @@
 typedef struct HTMLDOMNode HTMLDOMNode;
 typedef struct ConnectionPoint ConnectionPoint;
 typedef struct BSCallback BSCallback;
+typedef struct nsChannelBSC nsChannelBSC;
+typedef struct event_target_t event_target_t;
+
+/* NOTE: make sure to keep in sync with dispex.c */
+typedef enum {
+    NULL_tid,
+    DispDOMChildrenCollection_tid,
+    DispHTMLCommentElement_tid,
+    DispHTMLDocument_tid,
+    DispHTMLDOMTextNode_tid,
+    DispHTMLElementCollection_tid,
+    DispHTMLImg_tid,
+    DispHTMLInputElement_tid,
+    DispHTMLOptionElement_tid,
+    DispHTMLStyle_tid,
+    DispHTMLUnknownElement_tid,
+    DispHTMLWindow2_tid,
+    IHTMLCommentElement_tid,
+    IHTMLDocument2_tid,
+    IHTMLDocument3_tid,
+    IHTMLDocument4_tid,
+    IHTMLDocument5_tid,
+    IHTMLDOMChildrenCollection_tid,
+    IHTMLDOMNode_tid,
+    IHTMLDOMNode2_tid,
+    IHTMLDOMTextNode_tid,
+    IHTMLElement_tid,
+    IHTMLElement2_tid,
+    IHTMLElementCollection_tid,
+    IHTMLImgElement_tid,
+    IHTMLInputElement_tid,
+    IHTMLOptionElement_tid,
+    IHTMLStyle_tid,
+    IHTMLWindow2_tid,
+    IHTMLWindow3_tid,
+    IOmNavigator_tid,
+    LAST_tid
+} tid_t;
+
+typedef struct dispex_data_t dispex_data_t;
+
+#define MSHTML_DISPID_CUSTOM_MIN 0x60000000
+#define MSHTML_DISPID_CUSTOM_MAX 0x6fffffff
 
 typedef struct {
+    HRESULT (*get_dispid)(IUnknown*,BSTR,DWORD,DISPID*);
+    HRESULT (*invoke)(IUnknown*,DISPID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,IServiceProvider*);
+} dispex_static_data_vtbl_t;
+
+typedef struct {
+    const dispex_static_data_vtbl_t *vtbl;
+    const tid_t disp_tid;
+    dispex_data_t *data;
+    const tid_t iface_tids[];
+} dispex_static_data_t;
+
+typedef struct {
+    const IDispatchExVtbl  *lpIDispatchExVtbl;
+
+    IUnknown *outer;
+
+    dispex_static_data_t *data;
+} DispatchEx;
+
+void init_dispex(DispatchEx*,IUnknown*,dispex_static_data_t*);
+
+typedef struct {
+    DispatchEx dispex;
     const IHTMLWindow2Vtbl *lpHTMLWindow2Vtbl;
+    const IHTMLWindow3Vtbl *lpHTMLWindow3Vtbl;
+    const IDispatchExVtbl  *lpIDispatchExVtbl;
 
     LONG ref;
 
     HTMLDocument *doc;
     nsIDOMWindow *nswindow;
+
+    IHTMLEventObj *event;
 
     struct list entry;
 } HTMLWindow;
@@ -97,6 +168,14 @@ struct ConnectionPoint {
 };
 
 typedef struct {
+    const IHTMLLocationVtbl *lpHTMLLocationVtbl;
+
+    LONG ref;
+
+    HTMLDocument *doc;
+} HTMLLocation;
+
+typedef struct {
     const IHTMLOptionElementFactoryVtbl *lpHTMLOptionElementFactoryVtbl;
 
     LONG ref;
@@ -105,6 +184,7 @@ typedef struct {
 } HTMLOptionElementFactory;
 
 struct HTMLDocument {
+    DispatchEx dispex;
     const IHTMLDocument2Vtbl              *lpHTMLDocument2Vtbl;
     const IHTMLDocument3Vtbl              *lpHTMLDocument3Vtbl;
     const IHTMLDocument4Vtbl              *lpHTMLDocument4Vtbl;
@@ -124,6 +204,7 @@ struct HTMLDocument {
     const IHlinkTargetVtbl                *lpHlinkTargetVtbl;
     const IPersistStreamInitVtbl          *lpPersistStreamInitVtbl;
     const ICustomDocVtbl                  *lpCustomDocVtbl;
+    const IDispatchExVtbl                 *lpIDispatchExVtbl;
 
     LONG ref;
 
@@ -138,10 +219,12 @@ struct HTMLDocument {
 
     IOleUndoManager *undomgr;
 
-    BSCallback *bscallback;
+    nsChannelBSC *bscallback;
     IMoniker *mon;
     LPOLESTR url;
     struct list bindings;
+
+    struct list script_hosts;
 
     HWND hwnd;
     HWND tooltips_hwnd;
@@ -166,6 +249,7 @@ struct HTMLDocument {
     ConnectionPoint cp_propnotif;
 
     HTMLOptionElementFactory *option_factory;
+    HTMLLocation *location;
 
     struct list selection_list;
     struct list range_list;
@@ -211,7 +295,7 @@ struct NSContainer {
 
     HWND hwnd;
 
-    BSCallback *bscallback; /* hack */
+    nsChannelBSC *bscallback; /* hack */
     HWND reset_focus; /* hack */
 };
 
@@ -229,45 +313,9 @@ typedef struct {
     nsIInterfaceRequestor *notif_callback;
     nsLoadFlags load_flags;
     nsIURI *original_uri;
-    char *content;
+    char *content_type;
     char *charset;
 } nsChannel;
-
-typedef struct {
-    const nsIInputStreamVtbl *lpInputStreamVtbl;
-
-    LONG ref;
-
-    char buf[1024];
-    DWORD buf_size;
-} nsProtocolStream;
-
-struct BSCallback {
-    const IBindStatusCallbackVtbl *lpBindStatusCallbackVtbl;
-    const IServiceProviderVtbl    *lpServiceProviderVtbl;
-    const IHttpNegotiate2Vtbl     *lpHttpNegotiate2Vtbl;
-    const IInternetBindInfoVtbl   *lpInternetBindInfoVtbl;
-
-    LONG ref;
-
-    LPWSTR headers;
-    HGLOBAL post_data;
-    ULONG post_data_len;
-    ULONG readed;
-
-    nsChannel *nschannel;
-    nsIStreamListener *nslistener;
-    nsISupports *nscontext;
-
-    IMoniker *mon;
-    IBinding *binding;
-
-    HTMLDocument *doc;
-
-    nsProtocolStream *nsstream;
-
-    struct list entry;
-};
 
 typedef struct {
     HRESULT (*qi)(HTMLDOMNode*,REFIID,void**);
@@ -275,13 +323,16 @@ typedef struct {
 } NodeImplVtbl;
 
 struct HTMLDOMNode {
-    const IHTMLDOMNodeVtbl *lpHTMLDOMNodeVtbl;
+    DispatchEx dispex;
+    const IHTMLDOMNodeVtbl   *lpHTMLDOMNodeVtbl;
+    const IHTMLDOMNode2Vtbl  *lpHTMLDOMNode2Vtbl;
     const NodeImplVtbl *vtbl;
 
     LONG ref;
 
     nsIDOMNode *nsnode;
     HTMLDocument *doc;
+    event_target_t *event_target;
 
     HTMLDOMNode *next;
 };
@@ -305,6 +356,7 @@ typedef struct {
 } HTMLTextContainer;
 
 #define HTMLWINDOW2(x)   ((IHTMLWindow2*)                 &(x)->lpHTMLWindow2Vtbl)
+#define HTMLWINDOW3(x)   ((IHTMLWindow3*)                 &(x)->lpHTMLWindow3Vtbl)
 
 #define HTMLDOC(x)       ((IHTMLDocument2*)               &(x)->lpHTMLDocument2Vtbl)
 #define HTMLDOC3(x)      ((IHTMLDocument3*)               &(x)->lpHTMLDocument3Vtbl)
@@ -352,10 +404,14 @@ typedef struct {
 #define HTMLELEM(x)      ((IHTMLElement*)                 &(x)->lpHTMLElementVtbl)
 #define HTMLELEM2(x)     ((IHTMLElement2*)                &(x)->lpHTMLElement2Vtbl)
 #define HTMLDOMNODE(x)   ((IHTMLDOMNode*)                 &(x)->lpHTMLDOMNodeVtbl)
+#define HTMLDOMNODE2(x)  ((IHTMLDOMNode2*)                &(x)->lpHTMLDOMNode2Vtbl)
 
 #define HTMLTEXTCONT(x)  ((IHTMLTextContainer*)           &(x)->lpHTMLTextContainerVtbl)
 
 #define HTMLOPTFACTORY(x)  ((IHTMLOptionElementFactory*)  &(x)->lpHTMLOptionElementFactoryVtbl)
+#define HTMLLOCATION(x)  ((IHTMLLocation*) &(x)->lpHTMLLocationVtbl)
+
+#define DISPATCHEX(x)    ((IDispatchEx*) &(x)->lpIDispatchExVtbl)
 
 #define DEFINE_THIS2(cls,ifc,iface) ((cls*)((BYTE*)(iface)-offsetof(cls,ifc)))
 #define DEFINE_THIS(cls,ifc,iface) DEFINE_THIS2(cls,lp ## ifc ## Vtbl,iface)
@@ -366,6 +422,8 @@ HRESULT HTMLLoadOptions_Create(IUnknown*,REFIID,void**);
 HTMLWindow *HTMLWindow_Create(HTMLDocument*);
 HTMLWindow *nswindow_to_window(const nsIDOMWindow*);
 HTMLOptionElementFactory *HTMLOptionElementFactory_Create(HTMLDocument*);
+HTMLLocation *HTMLLocation_Create(HTMLDocument*);
+IOmNavigator *OmNavigator_Create(void);
 void setup_nswindow(HTMLWindow*);
 
 void HTMLDocument_HTMLDocument3_Init(HTMLDocument*);
@@ -415,6 +473,7 @@ PRUint32 nsACString_GetData(const nsACString*,const char**);
 void nsACString_Finish(nsACString*);
 
 void nsAString_Init(nsAString*,const PRUnichar*);
+void nsAString_SetData(nsAString*,const PRUnichar*);
 PRUint32 nsAString_GetData(const nsAString*,const PRUnichar**);
 void nsAString_Finish(nsAString*);
 
@@ -427,11 +486,25 @@ void get_editor_controller(NSContainer*);
 void init_nsevents(NSContainer*);
 nsresult get_nsinterface(nsISupports*,REFIID,void**);
 
-BSCallback *create_bscallback(IMoniker*);
-HRESULT start_binding(HTMLDocument*,BSCallback*,IBindCtx*);
-HRESULT load_stream(BSCallback*,IStream*);
-void set_document_bscallback(HTMLDocument*,BSCallback*);
+typedef enum {
+    EVENTID_LOAD,
+    EVENTID_LAST
+} eventid_t;
+
+void check_event_attr(HTMLDocument*,nsIDOMElement*);
+void release_event_target(event_target_t*);
+void fire_event(HTMLDocument*,eventid_t,nsIDOMNode*);
+
+void set_document_bscallback(HTMLDocument*,nsChannelBSC*);
 void set_current_mon(HTMLDocument*,IMoniker*);
+HRESULT start_binding(HTMLDocument*,BSCallback*,IBindCtx*);
+
+HRESULT bind_mon_to_buffer(HTMLDocument*,IMoniker*,void**,DWORD*);
+
+nsChannelBSC *create_channelbsc(IMoniker*);
+HRESULT channelbsc_load_stream(nsChannelBSC*,IStream*);
+void channelbsc_set_channel(nsChannelBSC*,nsChannel*,nsIStreamListener*,nsISupports*);
+IMoniker *get_channelbsc_mon(nsChannelBSC*);
 
 IHTMLSelectionObject *HTMLSelectionObject_Create(HTMLDocument*,nsISelection*);
 IHTMLTxtRange *HTMLTxtRange_Create(HTMLDocument*,nsIDOMRange*);
@@ -442,9 +515,13 @@ IHTMLStyleSheetsCollection *HTMLStyleSheetsCollection_Create(nsIDOMStyleSheetLis
 void detach_selection(HTMLDocument*);
 void detach_ranges(HTMLDocument*);
 
+HTMLDOMNode *HTMLDOMTextNode_Create(nsIDOMNode*);
+
 HTMLElement *HTMLElement_Create(nsIDOMNode*);
+HTMLElement *HTMLCommentElement_Create(nsIDOMNode*);
 HTMLElement *HTMLAnchorElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLBodyElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLImgElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLInputElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLOptionElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLScriptElement_Create(nsIDOMHTMLElement*);
@@ -462,8 +539,13 @@ void HTMLDOMNode_destructor(HTMLDOMNode*);
 HRESULT HTMLElement_QI(HTMLDOMNode*,REFIID,void**);
 void HTMLElement_destructor(HTMLDOMNode*);
 
-HTMLDOMNode *get_node(HTMLDocument*,nsIDOMNode*);
+HTMLDOMNode *get_node(HTMLDocument*,nsIDOMNode*,BOOL);
 void release_nodes(HTMLDocument*);
+
+void release_script_hosts(HTMLDocument*);
+void connect_scripts(HTMLDocument*);
+void doc_insert_script(HTMLDocument*,nsIDOMHTMLScriptElement*);
+IDispatch *script_parse_event(HTMLDocument*,LPCWSTR);
 
 IHTMLElementCollection *create_all_collection(HTMLDOMNode*);
 
@@ -508,7 +590,7 @@ typedef struct task_t {
         TASK_START_BINDING
     } task_id;
 
-    BSCallback *bscallback;
+    nsChannelBSC *bscallback;
 
     struct task_t *next;
 } task_t;
@@ -517,20 +599,18 @@ typedef struct {
     HWND thread_hwnd;
     task_t *task_queue_head;
     task_t *task_queue_tail;
+    struct list timer_list;
 } thread_data_t;
 
 thread_data_t *get_thread_data(BOOL);
 HWND get_thread_hwnd(void);
 void push_task(task_t*);
 void remove_doc_tasks(const HTMLDocument*);
+DWORD set_task_timer(HTMLDocument*,DWORD,IDispatch*);
 
-/* typelibs */
-enum tid_t {
-    IHTMLWindow2_tid,
-    LAST_tid
-};
-
-HRESULT get_typeinfo(enum tid_t, ITypeInfo**);
+HRESULT get_typeinfo(tid_t,ITypeInfo**);
+void release_typelib(void);
+void call_disp_func(HTMLDocument*,IDispatch*);
 
 DEFINE_GUID(CLSID_AboutProtocol, 0x3050F406, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_JSProtocol, 0x3050F3B2, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
@@ -581,6 +661,21 @@ static inline LPWSTR heap_strdupW(LPCWSTR str)
     return ret;
 }
 
+static inline char *heap_strdupA(const char *str)
+{
+    char *ret = NULL;
+
+    if(str) {
+        DWORD size;
+
+        size = strlen(str)+1;
+        ret = heap_alloc(size);
+        memcpy(ret, str, size);
+    }
+
+    return ret;
+}
+
 static inline WCHAR *heap_strdupAtoW(const char *str)
 {
     LPWSTR ret = NULL;
@@ -590,7 +685,20 @@ static inline WCHAR *heap_strdupAtoW(const char *str)
 
         len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
         ret = heap_alloc(len*sizeof(WCHAR));
-        MultiByteToWideChar(CP_ACP, 0, str, -1, ret, -1);
+        MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
+    }
+
+    return ret;
+}
+
+static inline char *heap_strdupWtoA(LPCWSTR str)
+{
+    char *ret = NULL;
+
+    if(str) {
+        DWORD size = WideCharToMultiByte(CP_ACP, 0, str, -1, NULL, 0, NULL, NULL);
+        ret = heap_alloc(size);
+        WideCharToMultiByte(CP_ACP, 0, str, -1, ret, size, NULL, NULL);
     }
 
     return ret;

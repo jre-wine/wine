@@ -24,7 +24,7 @@
  *  - transmit_as/represent as
  *  - Multi-dimensional arrays
  *  - Conversion functions (NdrConvert)
- *  - Checks for integer addition overflow in base type and user marshall functions
+ *  - Checks for integer addition overflow in user marshall functions
  */
 
 #include <stdarg.h>
@@ -1901,7 +1901,7 @@ unsigned char * WINAPI NdrPointerMarshall(PMIDL_STUB_MESSAGE pStubMsg,
 
   TRACE("(%p,%p,%p)\n", pStubMsg, pMemory, pFormat);
 
-  /* incremement the buffer here instead of in PointerMarshall,
+  /* Increment the buffer here instead of in PointerMarshall,
    * as that is used by embedded pointers which already handle the incrementing
    * the buffer, and shouldn't write any additional pointer data to the wire */
   if (*pFormat != RPC_FC_RP)
@@ -1930,7 +1930,7 @@ unsigned char * WINAPI NdrPointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
 
   TRACE("(%p,%p,%p,%d)\n", pStubMsg, ppMemory, pFormat, fMustAlloc);
 
-  /* incremement the buffer here instead of in PointerUnmarshall,
+  /* Increment the buffer here instead of in PointerUnmarshall,
    * as that is used by embedded pointers which already handle the incrementing
    * the buffer, and shouldn't read any additional pointer data from the
    * buffer */
@@ -1957,7 +1957,7 @@ void WINAPI NdrPointerBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
 {
   TRACE("(%p,%p,%p)\n", pStubMsg, pMemory, pFormat);
 
-  /* incremement the buffer length here instead of in PointerBufferSize,
+  /* Increment the buffer length here instead of in PointerBufferSize,
    * as that is used by embedded pointers which already handle the buffer
    * length, and shouldn't write anything more to the wire */
   if (*pFormat != RPC_FC_RP)
@@ -2003,11 +2003,70 @@ void WINAPI NdrSimpleTypeMarshall( PMIDL_STUB_MESSAGE pStubMsg, unsigned char* p
 
 /***********************************************************************
  *           NdrSimpleTypeUnmarshall [RPCRT4.@]
+ *
+ * Unmarshall a base type.
+ *
+ * NOTES
+ *  Doesn't check that the buffer is long enough before copying, so the caller
+ * should do this.
  */
 void WINAPI NdrSimpleTypeUnmarshall( PMIDL_STUB_MESSAGE pStubMsg, unsigned char* pMemory,
                                      unsigned char FormatChar )
 {
-    NdrBaseTypeUnmarshall(pStubMsg, &pMemory, &FormatChar, 0);
+#define BASE_TYPE_UNMARSHALL(type) \
+        ALIGN_POINTER(pStubMsg->Buffer, sizeof(type)); \
+	TRACE("pMemory: %p\n", pMemory); \
+	*(type *)pMemory = *(type *)pStubMsg->Buffer; \
+        pStubMsg->Buffer += sizeof(type);
+
+    switch(FormatChar)
+    {
+    case RPC_FC_BYTE:
+    case RPC_FC_CHAR:
+    case RPC_FC_SMALL:
+    case RPC_FC_USMALL:
+        BASE_TYPE_UNMARSHALL(UCHAR);
+        TRACE("value: 0x%02x\n", *pMemory);
+        break;
+    case RPC_FC_WCHAR:
+    case RPC_FC_SHORT:
+    case RPC_FC_USHORT:
+        BASE_TYPE_UNMARSHALL(USHORT);
+        TRACE("value: 0x%04x\n", *(USHORT *)pMemory);
+        break;
+    case RPC_FC_LONG:
+    case RPC_FC_ULONG:
+    case RPC_FC_ERROR_STATUS_T:
+    case RPC_FC_ENUM32:
+        BASE_TYPE_UNMARSHALL(ULONG);
+        TRACE("value: 0x%08x\n", *(ULONG *)pMemory);
+        break;
+   case RPC_FC_FLOAT:
+        BASE_TYPE_UNMARSHALL(float);
+        TRACE("value: %f\n", *(float *)pMemory);
+        break;
+    case RPC_FC_DOUBLE:
+        BASE_TYPE_UNMARSHALL(double);
+        TRACE("value: %f\n", *(double *)pMemory);
+        break;
+    case RPC_FC_HYPER:
+        BASE_TYPE_UNMARSHALL(ULONGLONG);
+        TRACE("value: %s\n", wine_dbgstr_longlong(*(ULONGLONG *)pMemory));
+        break;
+    case RPC_FC_ENUM16:
+        ALIGN_POINTER(pStubMsg->Buffer, sizeof(USHORT));
+        TRACE("pMemory: %p\n", pMemory);
+        /* 16-bits on the wire, but int in memory */
+        *(UINT *)pMemory = *(USHORT *)pStubMsg->Buffer;
+        pStubMsg->Buffer += sizeof(USHORT);
+        TRACE("value: 0x%08x\n", *(UINT *)pMemory);
+        break;
+    case RPC_FC_IGNORE:
+        break;
+    default:
+        FIXME("Unhandled base type: 0x%02x\n", FormatChar);
+    }
+#undef BASE_TYPE_UNMARSHALL
 }
 
 /***********************************************************************
@@ -2190,6 +2249,13 @@ static unsigned char * ComplexMarshall(PMIDL_STUB_MESSAGE pStubMsg,
       safe_copy_to_buffer(pStubMsg, pMemory, 2);
       pMemory += 2;
       break;
+    case RPC_FC_ENUM16:
+      TRACE("enum16=%d <= %p\n", *(DWORD*)pMemory, pMemory);
+      if (32767 < *(DWORD*)pMemory)
+        RpcRaiseException(RPC_X_ENUM_VALUE_OUT_OF_RANGE);
+      safe_copy_to_buffer(pStubMsg, pMemory, 2);
+      pMemory += 4;
+      break;
     case RPC_FC_LONG:
     case RPC_FC_ULONG:
     case RPC_FC_ENUM32:
@@ -2307,6 +2373,14 @@ static unsigned char * ComplexUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
       safe_copy_from_buffer(pStubMsg, pMemory, 2);
       TRACE("short=%d => %p\n", *(WORD*)pMemory, pMemory);
       pMemory += 2;
+      break;
+    case RPC_FC_ENUM16:
+      safe_copy_from_buffer(pStubMsg, pMemory, 2);
+      *(DWORD*)pMemory &= 0xffff;
+      TRACE("enum16=%d => %p\n", *(DWORD*)pMemory, pMemory);
+      if (32767 < *(DWORD*)pMemory)
+        RpcRaiseException(RPC_X_ENUM_VALUE_OUT_OF_RANGE);
+      pMemory += 4;
       break;
     case RPC_FC_LONG:
     case RPC_FC_ULONG:
@@ -2427,6 +2501,10 @@ static unsigned char * ComplexBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
       safe_buffer_length_increment(pStubMsg, 2);
       pMemory += 2;
       break;
+    case RPC_FC_ENUM16:
+      safe_buffer_length_increment(pStubMsg, 2);
+      pMemory += 4;
+      break;
     case RPC_FC_LONG:
     case RPC_FC_ULONG:
     case RPC_FC_ENUM32:
@@ -2524,6 +2602,7 @@ static unsigned char * ComplexFree(PMIDL_STUB_MESSAGE pStubMsg,
       break;
     case RPC_FC_LONG:
     case RPC_FC_ULONG:
+    case RPC_FC_ENUM16:
     case RPC_FC_ENUM32:
       pMemory += 4;
       break;
@@ -2602,6 +2681,10 @@ static unsigned long ComplexStructMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
       size += 2;
       safe_buffer_increment(pStubMsg, 2);
       break;
+    case RPC_FC_ENUM16:
+      size += 4;
+      safe_buffer_increment(pStubMsg, 2);
+      break;
     case RPC_FC_LONG:
     case RPC_FC_ULONG:
     case RPC_FC_ENUM32:
@@ -2674,6 +2757,7 @@ unsigned long ComplexStructSize(PMIDL_STUB_MESSAGE pStubMsg,
       break;
     case RPC_FC_LONG:
     case RPC_FC_ULONG:
+    case RPC_FC_ENUM16:
     case RPC_FC_ENUM32:
       size += 4;
       break;
@@ -2912,7 +2996,6 @@ ULONG WINAPI NdrComplexStructMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
 {
   unsigned size = *(const WORD*)(pFormat+2);
   PFORMAT_STRING conf_array = NULL;
-  PFORMAT_STRING pointer_desc = NULL;
 
   TRACE("(%p,%p)\n", pStubMsg, pFormat);
 
@@ -2920,9 +3003,7 @@ ULONG WINAPI NdrComplexStructMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
 
   pFormat += 4;
   if (*(const WORD*)pFormat) conf_array = pFormat + *(const WORD*)pFormat;
-  pFormat += 2;
-  if (*(const WORD*)pFormat) pointer_desc = pFormat + *(const WORD*)pFormat;
-  pFormat += 2;
+  pFormat += 4;
 
   ComplexStructMemorySize(pStubMsg, pFormat);
 
@@ -4040,7 +4121,6 @@ void WINAPI NdrConformantStructFree(PMIDL_STUB_MESSAGE pStubMsg,
 {
     const NDR_CSTRUCT_FORMAT *pCStructFormat = (const NDR_CSTRUCT_FORMAT *)pFormat;
     PFORMAT_STRING pCArrayFormat;
-    ULONG esize;
 
     TRACE("(%p, %p, %p)\n", pStubMsg, pMemory, pFormat);
 
@@ -4060,7 +4140,6 @@ void WINAPI NdrConformantStructFree(PMIDL_STUB_MESSAGE pStubMsg,
         RpcRaiseException(RPC_S_INTERNAL_ERROR);
         return;
     }
-    esize = *(const WORD*)(pCArrayFormat+2);
 
     ComputeConformance(pStubMsg, pMemory + pCStructFormat->memory_size,
                        pCArrayFormat + 4, 0);
@@ -4406,7 +4485,6 @@ void WINAPI NdrConformantVaryingStructFree(PMIDL_STUB_MESSAGE pStubMsg,
 {
     const NDR_CVSTRUCT_FORMAT *pCVStructFormat = (const NDR_CVSTRUCT_FORMAT *)pFormat;
     PFORMAT_STRING pCVArrayFormat;
-    ULONG esize;
 
     TRACE("(%p, %p, %p)\n", pStubMsg, pMemory, pFormat);
 
@@ -4423,8 +4501,6 @@ void WINAPI NdrConformantVaryingStructFree(PMIDL_STUB_MESSAGE pStubMsg,
     switch (*pCVArrayFormat)
     {
     case RPC_FC_CVARRAY:
-        esize = *(const WORD*)(pCVArrayFormat+2);
-
         pCVArrayFormat = ComputeConformance(pStubMsg, pMemory + pCVStructFormat->memory_size,
                                             pCVArrayFormat + 4, 0);
         pCVArrayFormat = ComputeVariance(pStubMsg, pMemory + pCVStructFormat->memory_size,
@@ -4433,7 +4509,6 @@ void WINAPI NdrConformantVaryingStructFree(PMIDL_STUB_MESSAGE pStubMsg,
     case RPC_FC_C_CSTRING:
         TRACE("string=%s\n", debugstr_a((char*)pMemory + pCVStructFormat->memory_size));
         pStubMsg->ActualCount = strlen((char*)pMemory + pCVStructFormat->memory_size)+1;
-        esize = sizeof(char);
         if (pCVArrayFormat[1] == RPC_FC_STRING_SIZED)
             pCVArrayFormat = ComputeConformance(pStubMsg, pMemory + pCVStructFormat->memory_size,
                                                 pCVArrayFormat + 2, 0);
@@ -4443,7 +4518,6 @@ void WINAPI NdrConformantVaryingStructFree(PMIDL_STUB_MESSAGE pStubMsg,
     case RPC_FC_C_WSTRING:
         TRACE("string=%s\n", debugstr_w((LPWSTR)pMemory + pCVStructFormat->memory_size));
         pStubMsg->ActualCount = strlenW((LPWSTR)pMemory + pCVStructFormat->memory_size)+1;
-        esize = sizeof(WCHAR);
         if (pCVArrayFormat[1] == RPC_FC_STRING_SIZED)
             pCVArrayFormat = ComputeConformance(pStubMsg, pMemory + pCVStructFormat->memory_size,
                                                 pCVArrayFormat + 2, 0);
@@ -4928,7 +5002,6 @@ void WINAPI NdrVaryingArrayFree(PMIDL_STUB_MESSAGE pStubMsg,
                                 unsigned char *pMemory,
                                 PFORMAT_STRING pFormat)
 {
-    unsigned char alignment;
     DWORD elements;
 
     TRACE("(%p, %p, %p)\n", pStubMsg, pMemory, pFormat);
@@ -4940,8 +5013,6 @@ void WINAPI NdrVaryingArrayFree(PMIDL_STUB_MESSAGE pStubMsg,
         RpcRaiseException(RPC_S_INTERNAL_ERROR);
         return;
     }
-
-    alignment = pFormat[1] + 1;
 
     if (pFormat[0] == RPC_FC_SMVARRAY)
     {
@@ -5444,7 +5515,7 @@ void WINAPI NdrEncapsulatedUnionFree(PMIDL_STUB_MESSAGE pStubMsg,
 
     pMemory += increment;
 
-    return union_arm_free(pStubMsg, pMemory, switch_value, pFormat);
+    union_arm_free(pStubMsg, pMemory, switch_value, pFormat);
 }
 
 /***********************************************************************
@@ -5599,7 +5670,7 @@ void WINAPI NdrNonEncapsulatedUnionFree(PMIDL_STUB_MESSAGE pStubMsg,
     pFormat = ComputeConformance(pStubMsg, pMemory, pFormat, 0);
     TRACE("got switch value 0x%lx\n", pStubMsg->MaxCount);
 
-    return union_arm_free(pStubMsg, pMemory, pStubMsg->MaxCount, pFormat + *(const SHORT*)pFormat);
+    union_arm_free(pStubMsg, pMemory, pStubMsg->MaxCount, pFormat + *(const SHORT*)pFormat);
 }
 
 /***********************************************************************
@@ -5980,15 +6051,15 @@ static unsigned char *WINAPI NdrBaseTypeUnmarshall(
         { \
             *ppMemory = pStubMsg->Buffer; \
             TRACE("*ppMemory: %p\n", *ppMemory); \
+            safe_buffer_increment(pStubMsg, sizeof(type)); \
         } \
         else \
         {  \
             if (fMustAlloc) \
                 *ppMemory = NdrAllocate(pStubMsg, sizeof(type)); \
             TRACE("*ppMemory: %p\n", *ppMemory); \
-            **(type **)ppMemory = *(type *)pStubMsg->Buffer; \
-        } \
-        pStubMsg->Buffer += sizeof(type);
+            safe_copy_from_buffer(pStubMsg, *ppMemory, sizeof(type)); \
+        }
 
     switch(*pFormat)
     {

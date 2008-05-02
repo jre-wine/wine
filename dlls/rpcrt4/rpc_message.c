@@ -196,8 +196,8 @@ RpcPktHdr *RPCRT4_BuildBindHeader(unsigned long DataRepresentation,
   header->bind.assoc_gid = AssocGroupId;
   header->bind.num_elements = 1;
   header->bind.num_syntaxes = 1;
-  memcpy(&header->bind.abstract, AbstractId, sizeof(RPC_SYNTAX_IDENTIFIER));
-  memcpy(&header->bind.transfer, TransferId, sizeof(RPC_SYNTAX_IDENTIFIER));
+  header->bind.abstract = *AbstractId;
+  header->bind.transfer = *TransferId;
 
   return header;
 }
@@ -278,7 +278,7 @@ RpcPktHdr *RPCRT4_BuildBindAckHeader(unsigned long DataRepresentation,
   results->results[0].result = Result;
   results->results[0].reason = Reason;
   transfer_id = (RPC_SYNTAX_IDENTIFIER*)(results + 1);
-  memcpy(transfer_id, TransferId, sizeof(RPC_SYNTAX_IDENTIFIER));
+  *transfer_id = *TransferId;
 
   return header;
 }
@@ -1017,7 +1017,10 @@ RPC_STATUS WINAPI I_RpcNegotiateTransferSyntax(PRPC_MESSAGE pMsg)
                                 &cif->InterfaceId);
 
     if (status == RPC_S_OK)
+    {
       pMsg->ReservedForRuntime = conn;
+      RPCRT4_AddRefBinding(bind);
+    }
   }
 
   return status;
@@ -1114,6 +1117,7 @@ RPC_STATUS WINAPI I_RpcFreeBuffer(PRPC_MESSAGE pMsg)
   {
     RpcConnection *conn = pMsg->ReservedForRuntime;
     RPCRT4_CloseBinding(bind, conn);
+    RPCRT4_ReleaseBinding(bind);
     pMsg->ReservedForRuntime = NULL;
   }
   I_RpcFree(pMsg->Buffer);

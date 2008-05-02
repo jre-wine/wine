@@ -265,7 +265,7 @@ int WINAPI UuidEqual(UUID *Uuid1, UUID *Uuid2, RPC_STATUS *Status)
  *
  * PARAMS
  *     UUID *Uuid         [I] Uuid to compare
- *     RPC_STATUS *Status [O] retuns RPC_S_OK
+ *     RPC_STATUS *Status [O] returns RPC_S_OK
  *
  * RETURNS
  *     TRUE/FALSE
@@ -937,6 +937,28 @@ LONG WINAPI I_RpcMapWin32Status(RPC_STATUS status)
 }
 
 /******************************************************************************
+ * I_RpcExceptionFilter   (rpcrt4.@)
+ */
+int WINAPI I_RpcExceptionFilter(ULONG ExceptionCode)
+{
+    TRACE("0x%x\n", ExceptionCode);
+    switch (ExceptionCode)
+    {
+    case STATUS_DATATYPE_MISALIGNMENT:
+    case STATUS_BREAKPOINT:
+    case STATUS_ACCESS_VIOLATION:
+    case STATUS_ILLEGAL_INSTRUCTION:
+    case STATUS_PRIVILEGED_INSTRUCTION:
+    case STATUS_INSTRUCTION_MISALIGNMENT:
+    case STATUS_STACK_OVERFLOW:
+    case STATUS_POSSIBLE_DEADLOCK:
+        return EXCEPTION_CONTINUE_SEARCH;
+    default:
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
+}
+
+/******************************************************************************
  * RpcErrorStartEnumeration   (rpcrt4.@)
  */
 RPC_STATUS RPC_ENTRY RpcErrorStartEnumeration(RPC_ERROR_ENUM_HANDLE* EnumHandle)
@@ -1079,5 +1101,14 @@ RPC_STATUS RPC_ENTRY RpcCancelThread(void* ThreadHandle)
         }
     LeaveCriticalSection(&threaddata_cs);
 
+    return RPC_S_OK;
+}
+
+/******************************************************************************
+ * RpcCancelThreadEx   (rpcrt4.@)
+ */
+RPC_STATUS RPC_ENTRY RpcCancelThreadEx(void* ThreadHandle, LONG Timeout)
+{
+    FIXME("(%p, %d)\n", ThreadHandle, Timeout);
     return RPC_S_OK;
 }

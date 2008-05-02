@@ -82,7 +82,7 @@ static DWORD read_credential_blob(HKEY hkey, const BYTE key_data[KEY_SIZE],
         else if (type != REG_BINARY)
             return ERROR_REGISTRY_CORRUPT;
 
-        key.Length = key.MaximumLength = sizeof(key_data);
+        key.Length = key.MaximumLength = KEY_SIZE;
         key.Buffer = (unsigned char *)key_data;
 
         data.Length = data.MaximumLength = *credential_blob_size;
@@ -250,6 +250,7 @@ static DWORD mac_read_credential_from_item(SecKeychainItemRef item, BOOL require
     void *cred_blob;
     LPWSTR domain = NULL;
     LPWSTR user = NULL;
+    BOOL user_name_present = FALSE;
     SecKeychainAttributeInfo info;
     SecKeychainAttributeList *attr_list;
     UInt32 info_tags[] = { kSecServerItemAttr, kSecSecurityDomainItemAttr, kSecAccountItemAttr,
@@ -269,6 +270,19 @@ static DWORD mac_read_credential_from_item(SecKeychainItemRef item, BOOL require
         WARN("SecKeychainItemCopyAttributesAndData returned status %ld\n", status);
         return ERROR_NOT_FOUND;
     }
+
+    for (i = 0; i < attr_list->count; i++)
+        if (attr_list->attr[i].tag == kSecAccountItemAttr && attr_list->attr[i].data)
+        {
+            user_name_present = TRUE;
+            break;
+        }
+    if (!user_name_present)
+    {
+        WARN("no kSecAccountItemAttr for item\n");
+        return ERROR_NOT_FOUND;
+    }
+
     if (buffer)
     {
         credential->Flags = 0;
@@ -442,7 +456,7 @@ static DWORD write_credential_blob(HKEY hkey, LPCWSTR target_name, DWORD type,
     struct ustring key;
     DWORD ret;
 
-    key.Length = key.MaximumLength = sizeof(key_data);
+    key.Length = key.MaximumLength = KEY_SIZE;
     key.Buffer = (unsigned char *)key_data;
 
     encrypted_credential_blob = HeapAlloc(GetProcessHeap(), 0, credential_blob_size);

@@ -18,6 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
 #define COBJMACROS
 
 #include <stdarg.h>
@@ -331,6 +334,9 @@ UINT ACTION_CustomAction(MSIPACKAGE *package, LPCWSTR action, UINT script, BOOL 
             msi_free(deformated);
             break;
         case 51: /* Property set with formatted text. */
+            if (!source)
+                break;
+
             deformat_string(package,target,&deformated);
             rc = MSI_SetPropertyW(package,source,deformated);
             msi_free(deformated);

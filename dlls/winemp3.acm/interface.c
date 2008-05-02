@@ -16,12 +16,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "wine/debug.h"
 #include "mpg123.h"
 #include "mpglib.h"
 
+WINE_DEFAULT_DEBUG_CHANNEL(mpeg3);
 
 BOOL InitMP3(struct mpstr *mp)
 {
@@ -70,12 +73,13 @@ static struct buf *addbuf(struct mpstr *mp,const unsigned char *buf,int size)
 
 	nbuf = malloc( sizeof(struct buf) );
 	if(!nbuf) {
-		fprintf(stderr,"Out of memory!\n");
+		WARN("Out of memory!\n");
 		return NULL;
 	}
 	nbuf->pnt = malloc(size);
 	if(!nbuf->pnt) {
 		free(nbuf);
+		WARN("Out of memory!\n");
 		return NULL;
 	}
 	nbuf->size = size;
@@ -154,7 +158,7 @@ int decodeMP3(struct mpstr *mp,const unsigned char *in,int isize,unsigned char *
 	int len;
 
 	if(osize < 4608) {
-		fprintf(stderr,"To less out space\n");
+		ERR("Output buffer too small\n");
 		return MP3_ERR;
 	}
 
@@ -227,7 +231,8 @@ int set_pointer(struct mpstr *mp, long backstep)
 {
   unsigned char *bsbufold;
   if(mp->fsizeold < 0 && backstep > 0) {
-    fprintf(stderr,"Can't step back %ld!\n",backstep);
+    /* This is not a bug if we just did seeking, the first frame is dropped then */
+    WARN("Can't step back %ld!\n",backstep);
     return MP3_ERR;
   }
   bsbufold = mp->bsspace[mp->bsnum] + 512;

@@ -7,7 +7,7 @@
  * Copyright 2002-2003 Raphael Junqueira
  * Copyright 2004 Christian Costa
  * Copyright 2005 Oliver Stieber
- * Copyright 2006-2007 Stefan Dösinger for CodeWeavers
+ * Copyright 2006-2008 Stefan Dösinger for CodeWeavers
  * Copyright 2007 Henri Verbeet
  * Copyright 2006-2008 Roderick Colenbrander
  *
@@ -35,7 +35,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d_surface);
 
 HRESULT d3dfmt_convert_surface(BYTE *src, BYTE *dst, UINT pitch, UINT width, UINT height, UINT outpitch, CONVERT_TYPES convert, IWineD3DSurfaceImpl *surf);
 static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE table[256][4], BOOL colorkey);
+static void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES convert);
 static inline void clear_unused_channels(IWineD3DSurfaceImpl *This);
+static void surface_remove_pbo(IWineD3DSurfaceImpl *This);
 
 static void surface_bind_and_dirtify(IWineD3DSurfaceImpl *This) {
     GLint active_texture;
@@ -47,7 +49,9 @@ static void surface_bind_and_dirtify(IWineD3DSurfaceImpl *This) {
      * TODO: Track the current active texture per GL context instead of using glGet
      */
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
+        ENTER_GL();
         glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
+        LEAVE_GL();
         active_texture -= GL_TEXTURE0_ARB;
     } else {
         active_texture = 0;
@@ -113,7 +117,7 @@ static void surface_download_data(IWineD3DSurfaceImpl *This) {
         int dst_pitch = 0;
 
         /* In case of P8 the index is stored in the alpha component if the primary render target uses P8 */
-        if(This->resource.format == WINED3DFMT_P8) {
+        if(This->resource.format == WINED3DFMT_P8 && primary_render_target_is_p8(This->resource.wineD3DDevice)) {
             format = GL_ALPHA;
             type = GL_UNSIGNED_BYTE;
         }
@@ -299,8 +303,10 @@ static void surface_allocate_surface(IWineD3DSurfaceImpl *This, GLenum internal,
             /* Neither NONPOW2, DIBSECTION nor OVERSIZE flags can be set on compressed textures */
             This->Flags |= SFLAG_CLIENT;
             mem = (BYTE *)(((ULONG_PTR) This->resource.heapMemory + (RESOURCE_ALIGNMENT - 1)) & ~(RESOURCE_ALIGNMENT - 1));
+            ENTER_GL();
             GL_EXTCALL(glCompressedTexImage2DARB(This->glDescription.target, This->glDescription.level, internal,
                        width, height, 0 /* border */, This->resource.size, mem));
+            LEAVE_GL();
         }
 
         return;
@@ -419,26 +425,30 @@ ULONG WINAPI IWineD3DSurfaceImpl_Release(IWineD3DSurface *iface) {
         renderbuffer_entry_t *entry, *entry2;
         TRACE("(%p) : cleaning up\n", This);
 
+        /* Need a context to destroy the texture. Use the currently active render target, but only if
+         * the primary render target exists. Otherwise lastActiveRenderTarget is garbage, see above.
+         * When destroying the primary rt, Uninit3D will activate a context before doing anything
+         */
+        if(device->render_targets && device->render_targets[0]) {
+            ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+        }
+
+        ENTER_GL();
         if (This->glDescription.textureName != 0) { /* release the openGL texture.. */
-
-            /* Need a context to destroy the texture. Use the currently active render target, but only if
-             * the primary render target exists. Otherwise lastActiveRenderTarget is garbage, see above.
-             * When destroying the primary rt, Uninit3D will activate a context before doing anything
-             */
-            if(device->render_targets && device->render_targets[0]) {
-                ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
-            }
-
             TRACE("Deleting texture %d\n", This->glDescription.textureName);
-            ENTER_GL();
             glDeleteTextures(1, &This->glDescription.textureName);
-            LEAVE_GL();
         }
 
         if(This->Flags & SFLAG_PBO) {
             /* Delete the PBO */
             GL_EXTCALL(glDeleteBuffersARB(1, &This->pbo));
         }
+
+        LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &This->renderbuffers, renderbuffer_entry_t, entry) {
+            GL_EXTCALL(glDeleteRenderbuffersEXT(1, &entry->id));
+            HeapFree(GetProcessHeap(), 0, entry);
+        }
+        LEAVE_GL();
 
         if(This->Flags & SFLAG_DIBSECTION) {
             /* Release the DC */
@@ -456,11 +466,6 @@ ULONG WINAPI IWineD3DSurfaceImpl_Release(IWineD3DSurface *iface) {
         IWineD3DResourceImpl_CleanUp((IWineD3DResource *)iface);
         if(iface == device->ddraw_primary)
             device->ddraw_primary = NULL;
-
-        LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &This->renderbuffers, renderbuffer_entry_t, entry) {
-            GL_EXTCALL(glDeleteRenderbuffersEXT(1, &entry->id));
-            HeapFree(GetProcessHeap(), 0, entry);
-        }
 
         TRACE("(%p) Released\n", This);
         HeapFree(GetProcessHeap(), 0, This);
@@ -491,6 +496,15 @@ void WINAPI IWineD3DSurfaceImpl_PreLoad(IWineD3DSurface *iface) {
             ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
         }
 
+        if (This->resource.format == WINED3DFMT_P8 || This->resource.format == WINED3DFMT_A8P8) {
+            if(palette9_changed(This)) {
+                TRACE("Reloading surface because the d3d8/9 palette was changed\n");
+                /* TODO: This is not necessarily needed with hw palettized texture support */
+                IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
+                /* Make sure the texture is reloaded because of the palette change, this kills performance though :( */
+                IWineD3DSurface_ModifyLocation(iface, SFLAG_INTEXTURE, FALSE);
+            }
+        }
         ENTER_GL();
         glEnable(This->glDescription.target);/* make sure texture support is enabled in this context */
         if (!This->glDescription.level) {
@@ -501,19 +515,22 @@ void WINAPI IWineD3DSurfaceImpl_PreLoad(IWineD3DSurface *iface) {
             }
             glBindTexture(This->glDescription.target, This->glDescription.textureName);
             checkGLcall("glBindTexture");
+            LEAVE_GL();
             IWineD3DSurface_LoadTexture(iface, FALSE);
             /* This is where we should be reducing the amount of GLMemoryUsed */
         } else if (This->glDescription.textureName) { /* NOTE: the level 0 surface of a mpmapped texture must be loaded first! */
             /* assume this is a coding error not a real error for now */
             FIXME("Mipmap surface has a glTexture bound to it!\n");
+            LEAVE_GL();
         }
         if (This->resource.pool == WINED3DPOOL_DEFAULT) {
             /* Tell opengl to try and keep this texture in video ram (well mostly) */
             GLclampf tmp;
             tmp = 0.9f;
+            ENTER_GL();
             glPrioritizeTextures(1, &This->glDescription.textureName, &tmp);
+            LEAVE_GL();
         }
-        LEAVE_GL();
     }
     return;
 }
@@ -547,14 +564,21 @@ static void WINAPI IWineD3DSurfaceImpl_UnLoad(IWineD3DSurface *iface) {
          * Implicit resources stay however. So this means we have an implicit render target
          * or depth stencil. The content may be destroyed, but we still have to tear down
          * opengl resources, so we cannot leave early.
+         *
+         * Put the most up to date surface location into the drawable. D3D-wise this content
+         * is undefined, so it would be nowhere, but that would make the location management
+         * more complicated. The drawable is a sane location, because if we mark sysmem or
+         * texture up to date, drawPrim will copy the uninitialized texture or sysmem to the
+         * uninitialized drawable. That's pointless and we'd have to allocate the texture /
+         * sysmem copy here.
          */
-        IWineD3DSurface_ModifyLocation(iface, SFLAG_INSYSMEM, TRUE);
+        IWineD3DSurface_ModifyLocation(iface, SFLAG_INDRAWABLE, TRUE);
     } else {
         /* Load the surface into system memory */
         IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
+        IWineD3DSurface_ModifyLocation(iface, SFLAG_INDRAWABLE, FALSE);
     }
     IWineD3DSurface_ModifyLocation(iface, SFLAG_INTEXTURE, FALSE);
-    IWineD3DSurface_ModifyLocation(iface, SFLAG_INDRAWABLE, FALSE);
     This->Flags &= ~SFLAG_ALLOCATED;
 
     /* Destroy PBOs, but load them into real sysmem before */
@@ -601,6 +625,11 @@ void WINAPI IWineD3DSurfaceImpl_SetGlTextureDesc(IWineD3DSurface *iface, UINT te
     if (This->glDescription.textureName == 0 && textureName != 0) {
         IWineD3DSurface_ModifyLocation(iface, SFLAG_INTEXTURE, FALSE);
         IWineD3DSurface_AddDirtyRect(iface, NULL);
+    }
+    if(target == GL_TEXTURE_RECTANGLE_ARB && This->glDescription.target != target) {
+        This->Flags &= ~SFLAG_NORMCOORD;
+    } else if(This->glDescription.target == GL_TEXTURE_RECTANGLE_ARB && target != GL_TEXTURE_RECTANGLE_ARB) {
+        This->Flags |= SFLAG_NORMCOORD;
     }
     This->glDescription.textureName = textureName;
     This->glDescription.target      = target;
@@ -690,7 +719,7 @@ static void read_from_framebuffer(IWineD3DSurfaceImpl *This, CONST RECT *rect, v
     {
         case WINED3DFMT_P8:
         {
-            if(This->resource.usage & WINED3DUSAGE_RENDERTARGET) {
+            if(primary_render_target_is_p8(myDevice)) {
                 /* In case of P8 render targets the index is stored in the alpha component */
                 fmt = GL_ALPHA;
                 type = GL_UNSIGNED_BYTE;
@@ -789,19 +818,24 @@ static void read_from_framebuffer(IWineD3DSurfaceImpl *This, CONST RECT *rect, v
         }
     }
 
+    LEAVE_GL();
+
     /* For P8 textures we need to perform an inverse palette lookup. This is done by searching for a palette
      * index which matches the RGB value. Note this isn't guaranteed to work when there are multiple entries for
      * the same color but we have no choice.
-     * In case of render targets, the index is stored in the alpha component so no conversion is needed.
+     * In case of P8 render targets, the index is stored in the alpha component so no conversion is needed.
      */
-    if((This->resource.format == WINED3DFMT_P8) && !(This->resource.usage & WINED3DUSAGE_RENDERTARGET)) {
-        PALETTEENTRY *pal;
+    if((This->resource.format == WINED3DFMT_P8) && !primary_render_target_is_p8(myDevice)) {
+        PALETTEENTRY *pal = NULL;
         DWORD width = pitch / 3;
         int x, y, c;
+
         if(This->palette) {
             pal = This->palette->palents;
         } else {
-            pal = This->resource.wineD3DDevice->palettes[This->resource.wineD3DDevice->currentPalette];
+            ERR("Palette is missing, cannot perform inverse palette lookup\n");
+            HeapFree(GetProcessHeap(), 0, mem);
+            return ;
         }
 
         for(y = local_rect.top; y < local_rect.bottom; y++) {
@@ -824,7 +858,6 @@ static void read_from_framebuffer(IWineD3DSurfaceImpl *This, CONST RECT *rect, v
         }
         HeapFree(GetProcessHeap(), 0, mem);
     }
-    LEAVE_GL();
 }
 
 /* Read the framebuffer contents into a texture */
@@ -835,7 +868,6 @@ static void read_from_framebuffer_texture(IWineD3DSurfaceImpl *This)
     int bpp;
     GLenum format, internal, type;
     CONVERT_TYPES convert;
-    BOOL srcIsUpsideDown;
     GLint prevRead;
 
     d3dfmt_get_conv(This, TRUE /* We need color keying */, TRUE /* We will use textures */, &format, &internal, &type, &convert, &bpp, This->srgb);
@@ -862,7 +894,6 @@ static void read_from_framebuffer_texture(IWineD3DSurfaceImpl *This)
          */
         TRACE("Locking offscreen render target\n");
         glReadBuffer(device->offscreenBuffer);
-        srcIsUpsideDown = TRUE;
     } else {
         GLenum buffer = surface_get_gl_buffer((IWineD3DSurface *) This, (IWineD3DSwapChain *)swapchain);
         TRACE("Locking %#x buffer\n", buffer);
@@ -870,7 +901,6 @@ static void read_from_framebuffer_texture(IWineD3DSurfaceImpl *This)
         checkGLcall("glReadBuffer");
 
         IWineD3DSwapChain_Release((IWineD3DSwapChain *) swapchain);
-        srcIsUpsideDown = FALSE;
     }
 
     if(!(This->Flags & SFLAG_ALLOCATED)) {
@@ -986,7 +1016,9 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
     if (Flags & WINED3DLOCK_DISCARD) {
         /* Set SFLAG_INSYSMEM, so we'll never try to download the data from the texture. */
         TRACE("WINED3DLOCK_DISCARD flag passed, marking local copy as up to date\n");
+        surface_prepare_system_memory(This); /* Makes sure memory is allocated */
         This->Flags |= SFLAG_INSYSMEM;
+        goto lock_end;
     }
 
     if (This->Flags & SFLAG_INSYSMEM) {
@@ -997,7 +1029,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
 
     /* Now download the surface content from opengl
      * Use the render target readback if the surface is on a swapchain(=onscreen render target) or the current primary target
-     * Offscreen targets which are not active at the moment or are higher targets(fbos) can be locked with the texture path
+     * Offscreen targets which are not active at the moment or are higher targets(FBOs) can be locked with the texture path
      */
     IWineD3DSurface_GetContainer(iface, &IID_IWineD3DSwapChain, (void **)&swapchain);
     if(swapchain || iface == myDevice->render_targets[0]) {
@@ -1159,7 +1191,7 @@ static void flush_to_framebuffer_drawpixels(IWineD3DSurfaceImpl *This, GLenum fm
      * catch to put the dib section in InSync mode, which leads to a crash
      * and a blocked x server on my radeon card.
      *
-     * The following lines read the dib section so it is put in inSync mode
+     * The following lines read the dib section so it is put in InSync mode
      * before glDrawPixels is called and the crash is prevented. There won't
      * be any interfering gdi accesses, because UnlockRect is called from
      * ReleaseDC, and the app won't use the dc any more afterwards.
@@ -1353,6 +1385,14 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetDC(IWineD3DSurface *iface, HDC *pHDC) {
     if (This->Flags & SFLAG_LOCKED)
         return WINED3DERR_INVALIDCALL;
 
+    /* According to Direct3D9 docs, only these formats are supported */
+    if (((IWineD3DImpl *)This->resource.wineD3DDevice->wineD3D)->dxVersion > 7) {
+        if (This->resource.format != WINED3DFMT_R5G6B5 &&
+            This->resource.format != WINED3DFMT_X1R5G5B5 &&
+            This->resource.format != WINED3DFMT_R8G8B8 &&
+            This->resource.format != WINED3DFMT_X8R8G8B8) return WINED3DERR_INVALIDCALL;
+    }
+
     memset(&lock, 0, sizeof(lock)); /* To be sure */
 
     /* Create a DIB section if there isn't a hdc yet */
@@ -1386,29 +1426,28 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetDC(IWineD3DSurface *iface, HDC *pHDC) {
 
     if(This->resource.format == WINED3DFMT_P8 ||
         This->resource.format == WINED3DFMT_A8P8) {
+        /* GetDC on palettized formats is unsupported in D3D9, and the method is missing in
+            D3D8, so this should only be used for DX <=7 surfaces (with non-device palettes) */
         unsigned int n;
+        PALETTEENTRY *pal = NULL;
+
         if(This->palette) {
-            PALETTEENTRY ent[256];
-
-            GetPaletteEntries(This->palette->hpal, 0, 256, ent);
-            for (n=0; n<256; n++) {
-                col[n].rgbRed   = ent[n].peRed;
-                col[n].rgbGreen = ent[n].peGreen;
-                col[n].rgbBlue  = ent[n].peBlue;
-                col[n].rgbReserved = 0;
-            }
+            pal = This->palette->palents;
         } else {
-            IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+            IWineD3DSurfaceImpl *dds_primary = (IWineD3DSurfaceImpl *)This->resource.wineD3DDevice->ddraw_primary;
+            if (dds_primary && dds_primary->palette)
+                pal = dds_primary->palette->palents;
+        }
 
+        if (pal) {
             for (n=0; n<256; n++) {
-                col[n].rgbRed   = device->palettes[device->currentPalette][n].peRed;
-                col[n].rgbGreen = device->palettes[device->currentPalette][n].peGreen;
-                col[n].rgbBlue  = device->palettes[device->currentPalette][n].peBlue;
+                col[n].rgbRed   = pal[n].peRed;
+                col[n].rgbGreen = pal[n].peGreen;
+                col[n].rgbBlue  = pal[n].peBlue;
                 col[n].rgbReserved = 0;
             }
-
+            SetDIBColorTable(This->hDC, 0, 256, col);
         }
-        SetDIBColorTable(This->hDC, 0, 256, col);
     }
 
     *pHDC = This->hDC;
@@ -1770,6 +1809,29 @@ HRESULT d3dfmt_convert_surface(BYTE *src, BYTE *dst, UINT pitch, UINT width, UIN
         }
         break;
 
+        case CONVERT_RGB32_888:
+        {
+            /* Converting X8R8G8B8 format to R8G8B8A8 with color-keying. */
+            unsigned int x, y;
+            for (y = 0; y < height; y++)
+            {
+                source = src + pitch * y;
+                dest = dst + outpitch * y;
+                for (x = 0; x < width; x++) {
+                    DWORD color = 0xffffff & *(DWORD*)source;
+                    DWORD dstcolor = color << 8;
+                    if ((color < This->SrcBltCKey.dwColorSpaceLowValue) ||
+                        (color > This->SrcBltCKey.dwColorSpaceHighValue)) {
+                        dstcolor |= 0xff;
+                    }
+                    *(DWORD*)dest = dstcolor;
+                    source += 4;
+                    dest += 4;
+                }
+            }
+        }
+        break;
+
         case CONVERT_V8U8:
         {
             unsigned int x, y;
@@ -2029,15 +2091,13 @@ static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE table[256][4]
             return;
         }
 
-        /* Still no palette? Use the device's palette */
-        /* can ddraw and d3d < 8 surfaces use device's palette (d3d >= 8 feature)? */
+        /*  Direct3D >= 8 palette usage style: P8 textures use device palettes, palette entry format is A8R8G8B8,
+            alpha is stored in peFlags and may be used by the app if D3DPTEXTURECAPS_ALPHAPALETTE device
+            capability flag is present (wine does advertise this capability) */
         for (i = 0; i < 256; i++) {
             table[i][0] = device->palettes[device->currentPalette][i].peRed;
             table[i][1] = device->palettes[device->currentPalette][i].peGreen;
             table[i][2] = device->palettes[device->currentPalette][i].peBlue;
-            /* Direct3D >= 8 palette usage style: P8 textures use device palettes, palette entry format is A8R8G8B8,
-               alpha is stored in peFlags and may be used by the app if D3DPTEXTURECAPS_ALPHAPALETTE device
-               capability flag is present (wine does advertise this capability) */
             table[i][3] = device->palettes[device->currentPalette][i].peFlags;
         }
     } else {
@@ -2127,7 +2187,7 @@ static void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES conve
     }
 }
 
-static BOOL palette9_changed(IWineD3DSurfaceImpl *This) {
+BOOL palette9_changed(IWineD3DSurfaceImpl *This) {
     IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
 
     if(This->palette || (This->resource.format != WINED3DFMT_P8 && This->resource.format != WINED3DFMT_A8P8)) {
@@ -2204,13 +2264,6 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadTexture(IWineD3DSurface *iface, BO
         IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
         /* Make sure the texture is reloaded because of the color key change, this kills performance though :( */
         /* TODO: This is not necessarily needed with hw palettized texture support */
-        This->Flags &= ~SFLAG_INTEXTURE;
-    } else if(palette9_changed(This)) {
-        TRACE("Reloading surface because the d3d8/9 palette was changed\n");
-        /* TODO: This is not necessarily needed with hw palettized texture support */
-        IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
-
-        /* Make sure the texture is reloaded because of the color key change, this kills performance though :( */
         This->Flags &= ~SFLAG_INTEXTURE;
     } else {
         TRACE("surface is already in texture\n");
@@ -2528,7 +2581,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_SetMem(IWineD3DSurface *iface, void *Mem) {
         /* Now free the old memory if any */
         HeapFree(GetProcessHeap(), 0, release);
     } else if(This->Flags & SFLAG_USERPTR) {
-        /* Lockrect and GetDC will re-create the dib section and allocated memory */
+        /* LockRect and GetDC will re-create the dib section and allocated memory */
         This->resource.allocatedMemory = NULL;
         /* HeapMemory should be NULL already */
         if(This->resource.heapMemory != NULL) ERR("User pointer surface has heap memory allocated\n");
@@ -2599,8 +2652,8 @@ static inline void fb_copy_to_texture_direct(IWineD3DSurfaceImpl *This, IWineD3D
 
 
     ActivateContext(myDevice, SrcSurface, CTXUSAGE_BLIT);
-    ENTER_GL();
     IWineD3DSurface_PreLoad((IWineD3DSurface *) This);
+    ENTER_GL();
 
     /* TODO: Do we need GL_TEXTURE_2D enabled fpr copyteximage? */
     glEnable(This->glDescription.target);
@@ -2690,26 +2743,32 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
     UINT fbheight = Src->currentDesc.Height;
     GLenum drawBuffer = GL_BACK;
     GLenum texture_target;
+    BOOL noBackBufferBackup;
 
     TRACE("Using hwstretch blit\n");
     /* Activate the Proper context for reading from the source surface, set it up for blitting */
     ActivateContext(myDevice, SrcSurface, CTXUSAGE_BLIT);
-    ENTER_GL();
-
     IWineD3DSurface_PreLoad((IWineD3DSurface *) This);
+
+    noBackBufferBackup = !swapchain && wined3d_settings.offscreen_rendering_mode == ORM_FBO;
+    if(!noBackBufferBackup && Src->glDescription.textureName == 0) {
+        /* Get it a description */
+        IWineD3DSurface_PreLoad(SrcSurface);
+    }
+    ENTER_GL();
 
     /* Try to use an aux buffer for drawing the rectangle. This way it doesn't need restoring.
      * This way we don't have to wait for the 2nd readback to finish to leave this function.
      */
-    if(GL_LIMITS(aux_buffers) >= 2) {
+    if(myDevice->activeContext->aux_buffers >= 2) {
         /* Got more than one aux buffer? Use the 2nd aux buffer */
         drawBuffer = GL_AUX1;
-    } else if((swapchain || myDevice->offscreenBuffer == GL_BACK) && GL_LIMITS(aux_buffers) >= 1) {
+    } else if((swapchain || myDevice->offscreenBuffer == GL_BACK) && myDevice->activeContext->aux_buffers >= 1) {
         /* Only one aux buffer, but it isn't used (Onscreen rendering, or non-aux orm)? Use it! */
         drawBuffer = GL_AUX0;
     }
 
-    if(!swapchain && wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+    if(noBackBufferBackup) {
         glGenTextures(1, &backup);
         checkGLcall("glGenTextures\n");
         glBindTexture(GL_TEXTURE_2D, backup);
@@ -2719,10 +2778,6 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
         /* Backup the back buffer and copy the source buffer into a texture to draw an upside down stretched quad. If
          * we are reading from the back buffer, the backup can be used as source texture
          */
-        if(Src->glDescription.textureName == 0) {
-            /* Get it a description */
-            IWineD3DSurface_PreLoad(SrcSurface);
-        }
         texture_target = Src->glDescription.target;
         glBindTexture(texture_target, Src->glDescription.textureName);
         checkGLcall("glBindTexture(texture_target, Src->glDescription.textureName)");
@@ -2733,8 +2788,11 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
         Src->Flags &= ~SFLAG_INTEXTURE;
     }
 
-    glReadBuffer(GL_BACK);
-    checkGLcall("glReadBuffer(GL_BACK)");
+    if(swapchain) {
+        glReadBuffer(surface_get_gl_buffer(SrcSurface, (IWineD3DSwapChain *)swapchain));
+    } else {
+        glReadBuffer(myDevice->offscreenBuffer);
+    }
 
     /* TODO: Only back up the part that will be overwritten */
     glCopyTexSubImage2D(texture_target, 0,
@@ -2747,7 +2805,7 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
 
     /* No issue with overriding these - the sampler is dirty due to blit usage */
     glTexParameteri(texture_target, GL_TEXTURE_MAG_FILTER,
-                    stateLookup[WINELOOKUP_MAGFILTER][Filter - minLookup[WINELOOKUP_MAGFILTER]]);
+                    magLookup[Filter - WINED3DTEXF_NONE]);
     checkGLcall("glTexParameteri");
     glTexParameteri(texture_target, GL_TEXTURE_MIN_FILTER,
                     minMipLookup[Filter][WINED3DTEXF_NONE]);
@@ -2792,15 +2850,22 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
     }
     checkGLcall("glEnd and previous");
 
-    left = (float) srect->x1 / (float) Src->pow2Width;
-    right = (float) srect->x2 / (float) Src->pow2Width;
+    left = srect->x1;
+    right = srect->x2;
 
     if(upsidedown) {
-        top = (float) (Src->currentDesc.Height - srect->y1) / (float) Src->pow2Height;
-        bottom = (float) (Src->currentDesc.Height - srect->y2) / (float) Src->pow2Height;
+        top = Src->currentDesc.Height - srect->y1;
+        bottom = Src->currentDesc.Height - srect->y2;
     } else {
-        top = (float) (Src->currentDesc.Height - srect->y2) / (float) Src->pow2Height;
-        bottom = (float) (Src->currentDesc.Height - srect->y1) / (float) Src->pow2Height;
+        top = Src->currentDesc.Height - srect->y2;
+        bottom = Src->currentDesc.Height - srect->y1;
+    }
+
+    if(Src->Flags & SFLAG_NORMCOORD) {
+        left /= Src->pow2Width;
+        right /= Src->pow2Width;
+        top /= Src->pow2Height;
+        bottom /= Src->pow2Height;
     }
 
     /* draw the source texture stretched and upside down. The correct surface is bound already */
@@ -3074,6 +3139,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
         /* Blit from render target to texture */
         WINED3DRECT srect;
         BOOL upsideDown, stretchx;
+        BOOL paletteOverride = FALSE;
 
         if(Flags & (WINEDDBLT_KEYSRC | WINEDDBLT_KEYSRCOVERRIDE)) {
             TRACE("Color keying not supported by frame buffer to texture blit\n");
@@ -3120,6 +3186,14 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
             stretchx = FALSE;
         }
 
+        /* When blitting from a render target a texture, the texture isn't required to have a palette.
+         * In this case grab the palette from the render target. */
+        if((This->resource.format == WINED3DFMT_P8) && (This->palette == NULL)) {
+            paletteOverride = TRUE;
+            TRACE("Source surface (%p) lacks palette, overriding palette with palette %p of destination surface (%p)\n", Src, This->palette, This);
+            This->palette = Src->palette;
+        }
+
         /* Blt is a pretty powerful call, while glCopyTexSubImage2D is not. glCopyTexSubImage cannot
          * flip the image nor scale it.
          *
@@ -3146,6 +3220,10 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
             TRACE("Using hardware stretching to flip / stretch the texture\n");
             fb_copy_to_texture_hwstretch(This, SrcSurface, srcSwapchain, &srect, &rect, upsideDown, Filter);
         }
+
+        /* Clear the palette as the surface didn't have a palette attached, it would confuse GetPalette and other calls */
+        if(paletteOverride)
+            This->palette = NULL;
 
         if(!(This->Flags & SFLAG_DONOTFREE)) {
             HeapFree(GetProcessHeap(), 0, This->resource.heapMemory);
@@ -3256,7 +3334,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
 
         /* Filtering for StretchRect */
         glTexParameteri(Src->glDescription.target, GL_TEXTURE_MAG_FILTER,
-                        stateLookup[WINELOOKUP_MAGFILTER][Filter - minLookup[WINELOOKUP_MAGFILTER]]);
+                        magLookup[Filter - WINED3DTEXF_NONE]);
         checkGLcall("glTexParameteri");
         glTexParameteri(Src->glDescription.target, GL_TEXTURE_MIN_FILTER,
                         minMipLookup[Filter][WINED3DTEXF_NONE]);
@@ -3373,13 +3451,18 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
              * 'clear' expect it in ARGB format => we need to do some conversion :-)
              */
             if (This->resource.format == WINED3DFMT_P8) {
+                DWORD alpha;
+
+                if (primary_render_target_is_p8(myDevice)) alpha = DDBltFx->u5.dwFillColor << 24;
+                else alpha = 0xFF000000;
+
                 if (This->palette) {
-                    color = ((0xFF000000) |
+                    color = (alpha |
                             (This->palette->palents[DDBltFx->u5.dwFillColor].peRed << 16) |
                             (This->palette->palents[DDBltFx->u5.dwFillColor].peGreen << 8) |
                             (This->palette->palents[DDBltFx->u5.dwFillColor].peBlue));
                 } else {
-                    color = 0xFF000000;
+                    color = alpha;
                 }
             }
             else if (This->resource.format == WINED3DFMT_R5G6B5) {
@@ -3563,40 +3646,69 @@ HRESULT WINAPI IWineD3DSurfaceImpl_RealizePalette(IWineD3DSurface *iface) {
     unsigned int n;
     TRACE("(%p)\n", This);
 
+    if (!pal) return WINED3D_OK;
+
     if(This->resource.format == WINED3DFMT_P8 ||
        This->resource.format == WINED3DFMT_A8P8)
     {
-        if(!(This->Flags & SFLAG_INSYSMEM)) {
-            TRACE("Palette changed with surface that does not have an up to date system memory copy\n");
-            IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
+        int bpp;
+        GLenum format, internal, type;
+        CONVERT_TYPES convert;
+
+        /* Check if we are using a RTL mode which uses texturing for uploads */
+        BOOL use_texture = (wined3d_settings.rendertargetlock_mode == RTL_READTEX || wined3d_settings.rendertargetlock_mode == RTL_TEXTEX);
+
+        /* Check if we have hardware palette conversion if we have convert is set to NO_CONVERSION */
+        d3dfmt_get_conv(This, TRUE, use_texture, &format, &internal, &type, &convert, &bpp, This->srgb);
+
+        if((This->resource.usage & WINED3DUSAGE_RENDERTARGET) && (convert == NO_CONVERSION))
+        {
+            ENTER_GL();
+            if (This->glDescription.textureName == 0) {
+                glGenTextures(1, &This->glDescription.textureName);
+                checkGLcall("glGenTextures");
+            }
+            glBindTexture(This->glDescription.target, This->glDescription.textureName);
+            checkGLcall("glBindTexture(This->glDescription.target, This->glDescription.textureName)");
+            LEAVE_GL();
+
+            /* Make sure the texture is up to date. This call doesn't do anything if the texture is already up to date. */
+            IWineD3DSurface_LoadLocation(iface, SFLAG_INTEXTURE, NULL);
+
+            /* We want to force a palette refresh, so mark the drawable as not being up to date */
+            IWineD3DSurface_ModifyLocation(iface, SFLAG_INDRAWABLE, FALSE);
+
+            /* Re-upload the palette */
+            d3dfmt_p8_upload_palette(iface, convert);
+
+            /* Without this some palette updates are missed. This at least happens on Nvidia drivers but
+             * it works fine using Mesa. */
+            ENTER_GL();
+            glFlush();
+            LEAVE_GL();
+        } else {
+            if(!(This->Flags & SFLAG_INSYSMEM)) {
+                TRACE("Palette changed with surface that does not have an up to date system memory copy\n");
+                IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
+            }
+            TRACE("Dirtifying surface\n");
+            IWineD3DSurface_ModifyLocation(iface, SFLAG_INSYSMEM, TRUE);
         }
-        TRACE("Dirtifying surface\n");
-        IWineD3DSurface_ModifyLocation(iface, SFLAG_INSYSMEM, TRUE);
     }
 
     if(This->Flags & SFLAG_DIBSECTION) {
         TRACE("(%p): Updating the hdc's palette\n", This);
         for (n=0; n<256; n++) {
-            if(pal) {
-                col[n].rgbRed   = pal->palents[n].peRed;
-                col[n].rgbGreen = pal->palents[n].peGreen;
-                col[n].rgbBlue  = pal->palents[n].peBlue;
-            } else {
-                IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
-                /* Use the default device palette */
-                col[n].rgbRed   = device->palettes[device->currentPalette][n].peRed;
-                col[n].rgbGreen = device->palettes[device->currentPalette][n].peGreen;
-                col[n].rgbBlue  = device->palettes[device->currentPalette][n].peBlue;
-            }
+            col[n].rgbRed   = pal->palents[n].peRed;
+            col[n].rgbGreen = pal->palents[n].peGreen;
+            col[n].rgbBlue  = pal->palents[n].peBlue;
             col[n].rgbReserved = 0;
         }
         SetDIBColorTable(This->hDC, 0, 256, col);
     }
 
-    /* Propagate the changes to the drawable when we have a palette. This function is also called
-     * when the palette is removed.
-     * TODO: in case of hardware p8 palettes we should only upload the palette. */
-    if(pal && (This->resource.usage & WINED3DUSAGE_RENDERTARGET))
+    /* Propagate the changes to the drawable when we have a palette. */
+    if(This->resource.usage & WINED3DUSAGE_RENDERTARGET)
         IWineD3DSurface_LoadLocation(iface, SFLAG_INDRAWABLE, NULL);
 
     return WINED3D_OK;
@@ -3674,7 +3786,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_PrivateSetup(IWineD3DSurface *iface) {
             This->glDescription.target = GL_TEXTURE_RECTANGLE_ARB;
             This->pow2Width  = This->currentDesc.Width;
             This->pow2Height = This->currentDesc.Height;
-            This->Flags &= ~SFLAG_NONPOW2;
+            This->Flags &= ~(SFLAG_NONPOW2 | SFLAG_NORMCOORD);
         }
 
         /* No oversize, gl rect is the full texture size */
@@ -3869,6 +3981,7 @@ static inline void surface_blt_to_drawable(IWineD3DSurfaceImpl *This, const RECT
                 coords[1].x =  1;   coords[1].y = -1;   coords[1].z = -1;
                 coords[2].x =  1;   coords[2].y = -1;   coords[2].z = -1;
                 coords[3].x = -1;   coords[3].y = -1;   coords[3].z = -1;
+                break;
 
             default:
                 ERR("Unexpected texture target\n");
@@ -3988,7 +4101,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
 
         /* Download the surface to system memory */
         if(This->Flags & SFLAG_INTEXTURE) {
-            ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+            if(!device->isInDraw) ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
             surface_bind_and_dirtify(This);
 
             surface_download_data(This);
@@ -4006,6 +4119,13 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
             /* The width is in 'length' not in bytes */
             width = This->currentDesc.Width;
             pitch = IWineD3DSurface_GetPitch(iface);
+
+            /* Don't use PBOs for converted surfaces. During PBO conversion we look at SFLAG_CONVERTED
+             * but it isn't set (yet) in all cases it is getting called. */
+            if((convert != NO_CONVERSION) && (This->Flags & SFLAG_PBO)) {
+                TRACE("Removing the pbo attached to surface %p\n", This);
+                surface_remove_pbo(This);
+            }
 
             if((convert != NO_CONVERSION) && This->resource.allocatedMemory) {
                 int height = This->currentDesc.Height;
@@ -4039,7 +4159,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
         } else { /* Upload from system memory */
             d3dfmt_get_conv(This, TRUE /* We need color keying */, TRUE /* We will use textures */, &format, &internal, &type, &convert, &bpp, This->srgb);
 
-            ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+            if(!device->isInDraw) ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
             surface_bind_and_dirtify(This);
             ENTER_GL();
 
@@ -4060,6 +4180,13 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
             /* The width is in 'length' not in bytes */
             width = This->currentDesc.Width;
             pitch = IWineD3DSurface_GetPitch(iface);
+
+            /* Don't use PBOs for converted surfaces. During PBO conversion we look at SFLAG_CONVERTED
+             * but it isn't set (yet) in all cases it is getting called. */
+            if((convert != NO_CONVERSION) && (This->Flags & SFLAG_PBO)) {
+                TRACE("Removing the pbo attached to surface %p\n", This);
+                surface_remove_pbo(This);
+            }
 
             if((convert != NO_CONVERSION) && This->resource.allocatedMemory) {
                 int height = This->currentDesc.Height;

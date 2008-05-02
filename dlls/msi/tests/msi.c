@@ -304,7 +304,8 @@ static void test_MsiGetFileHash(void)
 
     /* szFilePath is empty */
     r = pMsiGetFileHashA("", 0, &hash);
-    ok(r == ERROR_PATH_NOT_FOUND, "Expected ERROR_PATH_NOT_FOUND, got %d\n", r);
+    ok(r == ERROR_PATH_NOT_FOUND || r == ERROR_BAD_PATHNAME,
+       "Expected ERROR_PATH_NOT_FOUND or ERROR_BAD_PATHNAME, got %d\n", r);
 
     /* szFilePath is nonexistent */
     r = pMsiGetFileHashA(name, 0, &hash);
@@ -413,6 +414,7 @@ static void test_MsiQueryProductState(void)
     INSTALLSTATE state;
     LONG res;
     HKEY userkey, localkey, props;
+    HKEY prodkey;
     DWORD data;
 
     create_test_guid(prodcode, prod_squashed);
@@ -442,7 +444,8 @@ static void test_MsiQueryProductState(void)
     state = MsiQueryProductStateA("A938G02JF-2NF3N93-VN3-2NNF-3KGKALDNF93");
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
 
-    /* created guid cannot possibly be an installed product code */
+    /* MSIINSTALLCONTEXT_USERUNMANAGED */
+
     state = MsiQueryProductStateA(prodcode);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
 
@@ -518,13 +521,109 @@ static void test_MsiQueryProductState(void)
     state = MsiQueryProductStateA(prodcode);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
 
-    LocalFree(usersid);
     RegDeleteValueA(props, "WindowsInstaller");
     RegDeleteKeyA(props, "");
-    RegDeleteKeyA(localkey, "");
-    RegCloseKey(userkey);
-    RegCloseKey(localkey);
     RegCloseKey(props);
+    RegDeleteKeyA(localkey, "");
+    RegCloseKey(localkey);
+    RegDeleteKeyA(userkey, "");
+    RegCloseKey(userkey);
+
+    /* MSIINSTALLCONTEXT_USERMANAGED */
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\Managed\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    state = MsiQueryProductStateA(prodcode);
+    ok(state == INSTALLSTATE_ADVERTISED,
+       "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &localkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    state = MsiQueryProductStateA(prodcode);
+    ok(state == INSTALLSTATE_ADVERTISED,
+       "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
+
+    res = RegCreateKeyA(localkey, "InstallProperties", &props);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    state = MsiQueryProductStateA(prodcode);
+    ok(state == INSTALLSTATE_ADVERTISED,
+       "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
+
+    data = 1;
+    res = RegSetValueExA(props, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&data, sizeof(DWORD));
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* WindowsInstaller value exists */
+    state = MsiQueryProductStateA(prodcode);
+    ok(state == INSTALLSTATE_DEFAULT, "Expected INSTALLSTATE_DEFAULT, got %d\n", state);
+
+    RegDeleteValueA(props, "WindowsInstaller");
+    RegDeleteKeyA(props, "");
+    RegCloseKey(props);
+    RegDeleteKeyA(localkey, "");
+    RegCloseKey(localkey);
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+
+    /* MSIINSTALLCONTEXT_MACHINE */
+
+    lstrcpyA(keypath, "Software\\Classes\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    state = MsiQueryProductStateA(prodcode);
+    ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
+    lstrcatA(keypath, "S-1-5-18\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &localkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    state = MsiQueryProductStateA(prodcode);
+    ok(state == INSTALLSTATE_ADVERTISED,
+       "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
+
+    res = RegCreateKeyA(localkey, "InstallProperties", &props);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    state = MsiQueryProductStateA(prodcode);
+    ok(state == INSTALLSTATE_ADVERTISED,
+       "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
+
+    data = 1;
+    res = RegSetValueExA(props, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&data, sizeof(DWORD));
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* WindowsInstaller value exists */
+    state = MsiQueryProductStateA(prodcode);
+    ok(state == INSTALLSTATE_DEFAULT, "Expected INSTALLSTATE_DEFAULT, got %d\n", state);
+
+    RegDeleteValueA(props, "WindowsInstaller");
+    RegDeleteKeyA(props, "");
+    RegCloseKey(props);
+    RegDeleteKeyA(localkey, "");
+    RegCloseKey(localkey);
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+
+    LocalFree(usersid);
 }
 
 static const char table_enc85[] =
@@ -2233,6 +2332,10 @@ static void test_MsiGetProductInfo(void)
     ok(!lstrcmpA(buf, "link"), "Expected \"link\", got \"%s\"\n", buf);
     ok(sz == 4, "Expected 4, got %d\n", sz);
 
+    /* pcchBuf is NULL */
+    r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPLINK, NULL, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
     /* lpValueBuf is NULL */
     sz = MAX_PATH;
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPLINK, NULL, &sz);
@@ -3201,9 +3304,12 @@ static void test_MsiGetProductInfo(void)
     sz = MAX_PATH;
     lstrcpyA(buf, "apple");
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_AUTHORIZED_LUA_APP, buf, &sz);
-    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %d\n", sz);
+    if (r != ERROR_UNKNOWN_PROPERTY)
+    {
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
+        ok(sz == 0, "Expected 0, got %d\n", sz);
+    }
 
     res = RegSetValueExA(propkey, "AuthorizedLUAApp", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
@@ -3213,9 +3319,12 @@ static void test_MsiGetProductInfo(void)
     sz = MAX_PATH;
     lstrcpyA(buf, "apple");
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_AUTHORIZED_LUA_APP, buf, &sz);
-    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %d\n", sz);
+    if (r != ERROR_UNKNOWN_PROPERTY)
+    {
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
+        ok(sz == 0, "Expected 0, got %d\n", sz);
+    }
 
     res = RegSetValueExA(prodkey, "AuthorizedLUAApp", 0, REG_SZ, (LPBYTE)"auth", 5);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
@@ -3224,9 +3333,12 @@ static void test_MsiGetProductInfo(void)
     sz = MAX_PATH;
     lstrcpyA(buf, "apple");
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_AUTHORIZED_LUA_APP, buf, &sz);
-    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(!lstrcmpA(buf, "auth"), "Expected \"auth\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %d\n", sz);
+    if (r != ERROR_UNKNOWN_PROPERTY)
+    {
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(buf, "auth"), "Expected \"auth\", got \"%s\"\n", buf);
+        ok(sz == 4, "Expected 4, got %d\n", sz);
+    }
 
     res = RegSetValueExA(prodkey, "AuthorizedLUAApp", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
@@ -3236,9 +3348,12 @@ static void test_MsiGetProductInfo(void)
     sz = MAX_PATH;
     lstrcpyA(buf, "apple");
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_AUTHORIZED_LUA_APP, buf, &sz);
-    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %d\n", sz);
+    if (r != ERROR_UNKNOWN_PROPERTY)
+    {
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
+        ok(sz == 2, "Expected 2, got %d\n", sz);
+    }
 
     RegDeleteValueA(propkey, "HelpLink");
     RegDeleteValueA(propkey, "DisplayName");

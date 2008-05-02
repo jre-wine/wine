@@ -5,11 +5,14 @@ VPATH	  = @srcdir@
 MODULE	  = none
 
 IDL_H_SRCS = \
+	activaut.idl \
+	activdbg.idl \
 	activscp.idl \
 	amstream.idl \
 	amvideo.idl \
 	austream.idl \
 	bits.idl \
+	bits1_5.idl \
 	comcat.idl \
 	control.idl \
 	d3d10.idl \
@@ -21,6 +24,7 @@ IDL_H_SRCS = \
 	dxgi.idl \
 	dxgitype.idl \
 	exdisp.idl \
+	fusion.idl \
 	hlink.idl \
 	htiframe.idl \
 	iads.idl \
@@ -64,6 +68,7 @@ IDL_H_SRCS = \
 	urlhist.idl \
 	urlmon.idl \
 	wine/itss.idl \
+	wine/svcctl.idl \
 	wtypes.idl \
 	xmldom.idl \
 	xmldso.idl
@@ -96,6 +101,7 @@ SRCDIR_INCLUDES = \
 	commdlg.h \
 	compobj.h \
 	cor.h \
+	corerror.h \
 	cpl.h \
 	custcntl.h \
 	cvconst.h \
@@ -121,6 +127,7 @@ SRCDIR_INCLUDES = \
 	d3dx9core.h \
 	d3dx9math.h \
 	d3dx9math.inl \
+	d3dx9tex.h \
 	dbghelp.h \
 	dbinit.idl \
 	dbprop.idl \
@@ -174,6 +181,7 @@ SRCDIR_INCLUDES = \
 	dshow.h \
 	dsound.h \
 	dsrole.h \
+	dvdmedia.h \
 	dwmapi.h \
 	dxdiag.h \
 	dxerr8.h \
@@ -189,6 +197,7 @@ SRCDIR_INCLUDES = \
 	fci.h \
 	fdi.h \
 	gdiplus.h \
+	gdipluscolor.h \
 	gdipluscolormatrix.h \
 	gdiplusenums.h \
 	gdiplusflat.h \

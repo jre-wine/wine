@@ -659,6 +659,8 @@ static void InternetReadFileExA_test(int flags)
             if (GetLastError() == ERROR_IO_PENDING)
             {
                 trace("InternetReadFileEx -> PENDING\n");
+                ok(flags & INTERNET_FLAG_ASYNC,
+                   "Should not get ERROR_IO_PENDING without INTERNET_FLAG_ASYNC\n");
                 CHECK_NOTIFIED(INTERNET_STATUS_RECEIVING_RESPONSE);
                 WaitForSingleObject(hCompleteEvent, INFINITE);
                 CHECK_NOTIFIED(INTERNET_STATUS_REQUEST_COMPLETE);
@@ -1468,7 +1470,7 @@ static void test_basic_request(int port, const char *verb, const char *url)
     DWORD r, count;
     char buffer[0x100];
 
-    hi = InternetOpen(NULL, 0, NULL, NULL, 0);
+    hi = InternetOpen(NULL, INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
     ok(hi != NULL, "open failed\n");
 
     hc = InternetConnect(hi, "localhost", port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);

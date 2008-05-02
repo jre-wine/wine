@@ -2139,6 +2139,7 @@ enum message_type
 
 /* Get a list of the window children */
 @REQ(get_window_children)
+    obj_handle_t   desktop;       /* handle to desktop */
     user_handle_t  parent;        /* parent window */
     atom_t         atom;          /* class atom for the listed children */
     thread_id_t    tid;           /* thread owning the listed children */
@@ -2398,6 +2399,7 @@ enum message_type
 
 /* Open a handle to a desktop */
 @REQ(open_desktop)
+    obj_handle_t winsta;          /* window station to open (null allowed) */
     unsigned int flags;           /* desktop flags */
     unsigned int access;          /* wanted access rights */
     unsigned int attributes;      /* object attributes */

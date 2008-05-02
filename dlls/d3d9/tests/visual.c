@@ -1,6 +1,7 @@
 /*
  * Copyright 2005, 2007 Henri Verbeet
- * Copyright (C) 2007 Stefan Dösinger(for CodeWeavers)
+ * Copyright (C) 2007-2008 Stefan Dösinger(for CodeWeavers)
+ * Copyright (C) 2008 Jason Green(for TransGaming)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -45,6 +46,48 @@ static HWND create_window(void)
     ret = CreateWindow("d3d9_test_wc", "d3d9_test",
                         WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION , 0, 0, 640, 480, 0, 0, 0, 0);
     return ret;
+}
+
+/* Locks a given surface and returns the color at (x,y).  It's the caller's
+ * responsibility to only pass in lockable surfaces and valid x,y coordinates */
+static DWORD getPixelColorFromSurface(IDirect3DSurface9 *surface, UINT x, UINT y)
+{
+    DWORD color;
+    HRESULT hr;
+    D3DSURFACE_DESC desc;
+    RECT rectToLock = {x, y, x+1, y+1};
+    D3DLOCKED_RECT lockedRect;
+
+    hr = IDirect3DSurface9_GetDesc(surface, &desc);
+    if(FAILED(hr))  /* This is not a test */
+    {
+        trace("Can't get the surface description, hr=%s\n", DXGetErrorString9(hr));
+        return 0xdeadbeef;
+    }
+
+    hr = IDirect3DSurface9_LockRect(surface, &lockedRect, &rectToLock, D3DLOCK_READONLY);
+    if(FAILED(hr))  /* This is not a test */
+    {
+        trace("Can't lock the surface, hr=%s\n", DXGetErrorString9(hr));
+        return 0xdeadbeef;
+    }
+    switch(desc.Format) {
+        case D3DFMT_A8R8G8B8:
+        {
+            color = ((DWORD *) lockedRect.pBits)[0] & 0xffffffff;
+            break;
+        }
+        default:
+            trace("Error: unknown surface format: %d\n", desc.Format);
+            color = 0xdeadbeef;
+            break;
+    }
+    hr = IDirect3DSurface9_UnlockRect(surface);
+    if(FAILED(hr))
+    {
+        trace("Can't unlock the surface, hr=%s\n", DXGetErrorString9(hr));
+    }
+    return color;
 }
 
 static DWORD getPixelColor(IDirect3DDevice9 *device, UINT x, UINT y)
@@ -100,6 +143,7 @@ static IDirect3DDevice9 *init_d3d9(void)
     IDirect3DDevice9 *device_ptr = 0;
     D3DPRESENT_PARAMETERS present_parameters;
     HRESULT hr;
+    D3DADAPTER_IDENTIFIER9 identifier;
 
     d3d9_create = (void *)GetProcAddress(d3d9_handle, "Direct3DCreate9");
     ok(d3d9_create != NULL, "Failed to get address of Direct3DCreate9\n");
@@ -119,10 +163,23 @@ static IDirect3DDevice9 *init_d3d9(void)
     present_parameters.EnableAutoDepthStencil = TRUE;
     present_parameters.AutoDepthStencilFormat = D3DFMT_D24S8;
 
-    hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, present_parameters.hDeviceWindow, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
+    memset(&identifier, 0, sizeof(identifier));
+    hr = IDirect3D9_GetAdapterIdentifier(d3d9_ptr, 0, 0, &identifier);
+    ok(hr == D3D_OK, "Failed to get adapter identifier description\n");
+    trace("Driver string: \"%s\"\n", identifier.Driver);
+    trace("Description string: \"%s\"\n", identifier.Description);
+    trace("Device name string: \"%s\"\n", identifier.DeviceName);
+    trace("Driver version %d.%d.%d.%d\n",
+          HIWORD(identifier.DriverVersion.HighPart), LOWORD(identifier.DriverVersion.HighPart),
+          HIWORD(identifier.DriverVersion.LowPart), LOWORD(identifier.DriverVersion.LowPart));
+
+    hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, present_parameters.hDeviceWindow, D3DCREATE_HARDWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
     if(FAILED(hr)) {
         present_parameters.AutoDepthStencilFormat = D3DFMT_D16;
-        hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, present_parameters.hDeviceWindow, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
+        hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, present_parameters.hDeviceWindow, D3DCREATE_HARDWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
+        if(FAILED(hr)) {
+            hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, present_parameters.hDeviceWindow, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
+        }
     }
     ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE, "IDirect3D_CreateDevice returned: %s\n", DXGetErrorString9(hr));
 
@@ -764,13 +821,13 @@ static void fog_test(IDirect3DDevice9 *device)
     color = getPixelColor(device, 160, 360);
     ok(color == 0x00FF0000, "Untransformed vertex with no table or vertex fog has color %08x\n", color);
     color = getPixelColor(device, 160, 120);
-    ok(color == 0x0000FF00, "Untransformed vertex with linear vertex fog has color %08x\n", color);
+    ok(color == 0x0000FF00 || color == 0x0000FE00, "Untransformed vertex with linear vertex fog has color %08x\n", color);
     color = getPixelColor(device, 480, 120);
     ok(color == 0x00FFFF00, "Transformed vertex with linear vertex fog has color %08x\n", color);
     if(caps.RasterCaps & D3DPRASTERCAPS_FOGTABLE)
     {
         color = getPixelColor(device, 480, 360);
-        ok(color == 0x0000FF00, "Transformed vertex with linear table fog has color %08x\n", color);
+        ok(color == 0x0000FF00 || color == 0x0000FE00, "Transformed vertex with linear table fog has color %08x\n", color);
     }
     else
     {
@@ -834,9 +891,9 @@ static void fog_test(IDirect3DDevice9 *device)
     }
     IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
     color = getPixelColor(device, 160, 360);
-    ok(color == 0x0000FF00, "Untransformed vertex with vertex fog and z = 0.1 has color %08x\n", color);
+    ok(color == 0x0000FF00 || color == 0x0000FE00, "Untransformed vertex with vertex fog and z = 0.1 has color %08x\n", color);
     color = getPixelColor(device, 160, 120);
-    ok(color == 0x0000FF00, "Untransformed vertex with vertex fog and z = 1.0 has color %08x\n", color);
+    ok(color == 0x0000FF00 || color == 0x0000FE00, "Untransformed vertex with vertex fog and z = 1.0 has color %08x\n", color);
     color = getPixelColor(device, 480, 120);
     ok(color == 0x00FFFF00, "Transformed vertex with linear vertex fog has color %08x\n", color);
 
@@ -881,7 +938,7 @@ static void fog_test(IDirect3DDevice9 *device)
         }
         IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
         color = getPixelColor(device, 160, 360);
-        ok(color == 0x0000FF00, "Reversed %s fog: z=0.1 has color 0x%08x, expected 0x0000ff00\n", mode, color);
+        ok(color == 0x0000FF00 || color == 0x0000FE00, "Reversed %s fog: z=0.1 has color 0x%08x, expected 0x0000ff00\n", mode, color);
 
         color = getPixelColor(device, 160, 120);
         r = (color & 0x00ff0000) >> 16;
@@ -1039,7 +1096,7 @@ static void test_cube_wrap(IDirect3DDevice9 *device)
 
         /* Due to the nature of this test, we sample essentially at the edge
          * between two faces. Because of this it's undefined from which face
-         * the driver will sample. Furtunately that's not important for this
+         * the driver will sample. Fortunately that's not important for this
          * test, since all we care about is that it doesn't sample from the
          * other side of the surface or from the border. */
         color = getPixelColor(device, 320, 240);
@@ -1120,7 +1177,7 @@ static void offscreen_test(IDirect3DDevice9 *device)
         hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
         ok(hr == D3D_OK, "Clear failed, hr = %s\n", DXGetErrorString9(hr));
 
-        /* Draw without textures - Should resut in a white quad */
+        /* Draw without textures - Should result in a white quad */
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(quad[0]));
         ok(hr == D3D_OK, "DrawPrimitiveUP failed, hr = %s\n", DXGetErrorString9(hr));
 
@@ -1541,7 +1598,7 @@ static void texbem_test(IDirect3DDevice9 *device)
         D3DDECL_END()
     } };
 
-    /* use assymetric matrix to test loading */
+    /* use asymmetric matrix to test loading */
     float bumpenvmat[4] = {0.0,0.5,-0.5,0.0};
 
     IDirect3DVertexDeclaration9 *vertex_declaration = NULL;
@@ -1993,6 +2050,529 @@ static void fill_surface(IDirect3DSurface9 *surface, DWORD color)
     ok(hr == D3D_OK, "IDirect3DSurface9_UnlockRect failed with %s\n", DXGetErrorString9(hr));
 }
 
+/* This tests a variety of possible StretchRect() situations */
+static void stretchrect_test(IDirect3DDevice9 *device)
+{
+    HRESULT hr;
+    IDirect3DTexture9 *tex_rt32 = NULL, *tex_rt64 = NULL, *tex_rt_dest64 = NULL;
+    IDirect3DSurface9 *surf_tex_rt32 = NULL, *surf_tex_rt64 = NULL, *surf_tex_rt_dest64 = NULL;
+    IDirect3DTexture9 *tex32 = NULL, *tex64 = NULL, *tex_dest64 = NULL;
+    IDirect3DSurface9 *surf_tex32 = NULL, *surf_tex64 = NULL, *surf_tex_dest64 = NULL;
+    IDirect3DSurface9 *surf_rt32 = NULL, *surf_rt64 = NULL, *surf_rt_dest64 = NULL;
+    IDirect3DSurface9 *surf_offscreen32 = NULL, *surf_offscreen64 = NULL, *surf_offscreen_dest64 = NULL;
+    IDirect3DSurface9 *surf_temp32 = NULL, *surf_temp64 = NULL;
+    IDirect3DSurface9 *orig_rt = NULL;
+    DWORD color;
+
+    hr = IDirect3DDevice9_GetRenderTarget(device, 0, &orig_rt);
+    ok(hr == D3D_OK, "Can't get render target, hr = %s\n", DXGetErrorString9(hr));
+    if(!orig_rt) {
+        goto out;
+    }
+
+    /* Create our temporary surfaces in system memory */
+    hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 32, 32, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &surf_temp32, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateOffscreenPlainSurface failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 64, 64, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &surf_temp64, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateOffscreenPlainSurface failed with %s\n", DXGetErrorString9(hr));
+
+    /* Create offscreen plain surfaces in D3DPOOL_DEFAULT */
+    hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 32, 32, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &surf_offscreen32, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateOffscreenPlainSurface failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 64, 64, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &surf_offscreen64, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateOffscreenPlainSurface failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 64, 64, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &surf_offscreen_dest64, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateOffscreenPlainSurface failed with %s\n", DXGetErrorString9(hr));
+
+    /* Create render target surfaces */
+    hr = IDirect3DDevice9_CreateRenderTarget(device, 32, 32, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, TRUE, &surf_rt32, NULL );
+    ok(hr == D3D_OK, "Creating the render target surface failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreateRenderTarget(device, 64, 64, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, TRUE, &surf_rt64, NULL );
+    ok(hr == D3D_OK, "Creating the render target surface failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreateRenderTarget(device, 64, 64, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, TRUE, &surf_rt_dest64, NULL );
+    ok(hr == D3D_OK, "Creating the render target surface failed with %s\n", DXGetErrorString9(hr));
+
+    /* Create render target textures */
+    hr = IDirect3DDevice9_CreateTexture(device, 32, 32, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex_rt32, NULL);
+    ok(hr == D3D_OK, "Creating the render target texture failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreateTexture(device, 64, 64, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex_rt64, NULL);
+    ok(hr == D3D_OK, "Creating the render target texture failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreateTexture(device, 64, 64, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex_rt_dest64, NULL);
+    ok(hr == D3D_OK, "Creating the render target texture failed with %s\n", DXGetErrorString9(hr));
+    if (tex_rt32) {
+        hr = IDirect3DTexture9_GetSurfaceLevel(tex_rt32, 0, &surf_tex_rt32);
+        ok(hr == D3D_OK, "IDirect3DTexture9_GetSurfaceLevel failed with %s\n", DXGetErrorString9(hr));
+    }
+    if (tex_rt64) {
+        hr = IDirect3DTexture9_GetSurfaceLevel(tex_rt64, 0, &surf_tex_rt64);
+        ok(hr == D3D_OK, "IDirect3DTexture9_GetSurfaceLevel failed with %s\n", DXGetErrorString9(hr));
+    }
+    if (tex_rt_dest64) {
+        hr = IDirect3DTexture9_GetSurfaceLevel(tex_rt_dest64, 0, &surf_tex_rt_dest64);
+        ok(hr == D3D_OK, "IDirect3DTexture9_GetSurfaceLevel failed with %s\n", DXGetErrorString9(hr));
+    }
+
+    /* Create regular textures in D3DPOOL_DEFAULT */
+    hr = IDirect3DDevice9_CreateTexture(device, 32, 32, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex32, NULL);
+    ok(hr == D3D_OK, "Creating the regular texture failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreateTexture(device, 64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex64, NULL);
+    ok(hr == D3D_OK, "Creating the regular texture failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreateTexture(device, 64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex_dest64, NULL);
+    ok(hr == D3D_OK, "Creating the regular texture failed with %s\n", DXGetErrorString9(hr));
+    if (tex32) {
+        hr = IDirect3DTexture9_GetSurfaceLevel(tex32, 0, &surf_tex32);
+        ok(hr == D3D_OK, "IDirect3DTexture9_GetSurfaceLevel failed with %s\n", DXGetErrorString9(hr));
+    }
+    if (tex64) {
+        hr = IDirect3DTexture9_GetSurfaceLevel(tex64, 0, &surf_tex64);
+        ok(hr == D3D_OK, "IDirect3DTexture9_GetSurfaceLevel failed with %s\n", DXGetErrorString9(hr));
+    }
+    if (tex_dest64) {
+        hr = IDirect3DTexture9_GetSurfaceLevel(tex_dest64, 0, &surf_tex_dest64);
+        ok(hr == D3D_OK, "IDirect3DTexture9_GetSurfaceLevel failed with %s\n", DXGetErrorString9(hr));
+    }
+
+    /*********************************************************************
+     * Tests for when the source parameter is an offscreen plain surface *
+     *********************************************************************/
+
+    /* Fill the offscreen 64x64 surface with green */
+    if (surf_offscreen64)
+        fill_surface(surf_offscreen64, 0xff00ff00);
+
+    /* offscreenplain ==> offscreenplain, same size */
+    if(surf_offscreen64 && surf_offscreen_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_offscreen64, NULL, surf_offscreen_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        if (hr == D3D_OK) {
+            color = getPixelColorFromSurface(surf_offscreen_dest64, 32, 32);
+            ok(color == 0xff00ff00, "StretchRect offscreen ==> offscreen same size failed: Got color 0x%08x, expected 0xff00ff00.\n", color);
+        }
+    }
+
+    /* offscreenplain ==> rendertarget texture, same size */
+    if(surf_offscreen64 && surf_tex_rt_dest64 && surf_temp64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_offscreen64, NULL, surf_tex_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        /* We can't lock rendertarget textures, so copy to our temp surface first */
+        if (hr == D3D_OK) {
+            hr = IDirect3DDevice9_GetRenderTargetData(device, surf_tex_rt_dest64, surf_temp64);
+            ok( hr == D3D_OK, "IDirect3DDevice9_GetRenderTargetData failed with %s\n", DXGetErrorString9(hr));
+        }
+
+        if (hr == D3D_OK) {
+            color = getPixelColorFromSurface(surf_temp64, 32, 32);
+            ok(color == 0xff00ff00, "StretchRect offscreen ==> rendertarget texture same size failed: Got color 0x%08x, expected 0xff00ff00.\n", color);
+        }
+    }
+
+    /* offscreenplain ==> rendertarget surface, same size */
+    if(surf_offscreen64 && surf_rt_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_offscreen64, NULL, surf_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        if (hr == D3D_OK) {
+            color = getPixelColorFromSurface(surf_rt_dest64, 32, 32);
+            ok(color == 0xff00ff00, "StretchRect offscreen ==> rendertarget surface same size failed: Got color 0x%08x, expected 0xff00ff00.\n", color);
+        }
+    }
+
+    /* offscreenplain ==> texture, same size (should fail) */
+    if(surf_offscreen64 && surf_tex_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_offscreen64, NULL, surf_tex_dest64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /* Fill the smaller offscreen surface with red */
+    fill_surface(surf_offscreen32, 0xffff0000);
+
+    /* offscreenplain ==> offscreenplain, scaling (should fail) */
+    if(surf_offscreen32 && surf_offscreen64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_offscreen32, NULL, surf_offscreen64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /* offscreenplain ==> rendertarget texture, scaling */
+    if(surf_offscreen32 && surf_tex_rt_dest64 && surf_temp64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_offscreen32, NULL, surf_tex_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        /* We can't lock rendertarget textures, so copy to our temp surface first */
+        if (hr == D3D_OK) {
+            hr = IDirect3DDevice9_GetRenderTargetData(device, surf_tex_rt_dest64, surf_temp64);
+            ok( hr == D3D_OK, "IDirect3DDevice9_GetRenderTargetData failed with %s\n", DXGetErrorString9(hr));
+        }
+
+        if (hr == D3D_OK) {
+            color = getPixelColorFromSurface(surf_temp64, 48, 48);
+            ok(color == 0xffff0000, "StretchRect offscreen ==> rendertarget texture same size failed: Got color 0x%08x, expected 0xffff0000.\n", color);
+        }
+    }
+
+    /* offscreenplain ==> rendertarget surface, scaling */
+    if(surf_offscreen32 && surf_rt_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_offscreen32, NULL, surf_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        color = getPixelColorFromSurface(surf_rt_dest64, 48, 48);
+        ok(color == 0xffff0000, "StretchRect offscreen ==> rendertarget surface scaling failed: Got color 0x%08x, expected 0xffff0000.\n", color);
+    }
+
+    /* offscreenplain ==> texture, scaling (should fail) */
+    if(surf_offscreen32 && surf_tex_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_offscreen32, NULL, surf_tex_dest64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /************************************************************
+     * Tests for when the source parameter is a regular texture *
+     ************************************************************/
+
+    /* Fill the surface of the regular texture with blue */
+    if (surf_tex64 && surf_temp64) {
+        /* Can't fill the surf_tex directly because it's created in D3DPOOL_DEFAULT */
+        fill_surface(surf_temp64, 0xff0000ff);
+        hr = IDirect3DDevice9_UpdateSurface(device, surf_temp64, NULL, surf_tex64, NULL);
+        ok( hr == D3D_OK, "IDirect3DDevice9_UpdateSurface failed with %s\n", DXGetErrorString9(hr));
+    }
+
+    /* texture ==> offscreenplain, same size */
+    if(surf_tex64 && surf_offscreen64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex64, NULL, surf_offscreen64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /* texture ==> rendertarget texture, same size */
+    if(surf_tex64 && surf_tex_rt_dest64 && surf_temp64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex64, NULL, surf_tex_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        /* We can't lock rendertarget textures, so copy to our temp surface first */
+        if (hr == D3D_OK) {
+            hr = IDirect3DDevice9_GetRenderTargetData(device, surf_tex_rt_dest64, surf_temp64);
+            ok( hr == D3D_OK, "IDirect3DDevice9_GetRenderTargetData failed with %s\n", DXGetErrorString9(hr));
+        }
+
+        if (hr == D3D_OK) {
+            color = getPixelColorFromSurface(surf_temp64, 32, 32);
+            ok(color == 0xff0000ff, "StretchRect texture ==> rendertarget texture same size failed: Got color 0x%08x, expected 0xff0000ff.\n", color);
+        }
+    }
+
+    /* texture ==> rendertarget surface, same size */
+    if(surf_tex64 && surf_rt_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex64, NULL, surf_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        if (hr == D3D_OK) {
+            color = getPixelColorFromSurface(surf_rt_dest64, 32, 32);
+            ok(color == 0xff0000ff, "StretchRect texture ==> rendertarget surface same size failed: Got color 0x%08x, expected 0xff0000ff.\n", color);
+        }
+    }
+
+    /* texture ==> texture, same size (should fail) */
+    if(surf_tex64 && surf_tex_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex64, NULL, surf_tex_dest64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /* Fill the surface of the smaller regular texture with red */
+    if (surf_tex32 && surf_temp32) {
+        /* Can't fill the surf_tex directly because it's created in D3DPOOL_DEFAULT */
+        fill_surface(surf_temp32, 0xffff0000);
+        hr = IDirect3DDevice9_UpdateSurface(device, surf_temp32, NULL, surf_tex32, NULL);
+        ok( hr == D3D_OK, "IDirect3DDevice9_UpdateSurface failed with %s\n", DXGetErrorString9(hr));
+    }
+
+    /* texture ==> offscreenplain, scaling (should fail) */
+    if(surf_tex32 && surf_offscreen64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex32, NULL, surf_offscreen64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /* texture ==> rendertarget texture, scaling */
+    if(surf_tex32 && surf_tex_rt_dest64 && surf_temp64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex32, NULL, surf_tex_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        /* We can't lock rendertarget textures, so copy to our temp surface first */
+        if (hr == D3D_OK) {
+            hr = IDirect3DDevice9_GetRenderTargetData(device, surf_tex_rt_dest64, surf_temp64);
+            ok( hr == D3D_OK, "IDirect3DDevice9_GetRenderTargetData failed with %s\n", DXGetErrorString9(hr));
+        }
+
+        if (hr == D3D_OK) {
+            color = getPixelColorFromSurface(surf_temp64, 48, 48);
+            ok(color == 0xffff0000, "StretchRect texture ==> rendertarget texture scaling failed: Got color 0x%08x, expected 0xffff0000.\n", color);
+        }
+    }
+
+    /* texture ==> rendertarget surface, scaling */
+    if(surf_tex32 && surf_rt_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex32, NULL, surf_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        color = getPixelColorFromSurface(surf_rt_dest64, 48, 48);
+        ok(color == 0xffff0000, "StretchRect texture ==> rendertarget surface scaling failed: Got color 0x%08x, expected 0xffff0000.\n", color);
+    }
+
+    /* texture ==> texture, scaling (should fail) */
+    if(surf_tex32 && surf_tex_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex32, NULL, surf_tex_dest64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /*****************************************************************
+     * Tests for when the source parameter is a rendertarget texture *
+     *****************************************************************/
+
+    /* Fill the surface of the rendertarget texture with white */
+    if (surf_tex_rt64 && surf_temp64) {
+        /* Can't fill the surf_tex_rt directly because it's created in D3DPOOL_DEFAULT */
+        fill_surface(surf_temp64, 0xffffffff);
+        hr = IDirect3DDevice9_UpdateSurface(device, surf_temp64, NULL, surf_tex_rt64, NULL);
+        ok( hr == D3D_OK, "IDirect3DDevice9_UpdateSurface failed with %s\n", DXGetErrorString9(hr));
+    }
+
+    /* rendertarget texture ==> offscreenplain, same size */
+    if(surf_tex_rt64 && surf_offscreen64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex_rt64, NULL, surf_offscreen64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /* rendertarget texture ==> rendertarget texture, same size */
+    if(surf_tex_rt64 && surf_tex_rt_dest64 && surf_temp64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex_rt64, NULL, surf_tex_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        /* We can't lock rendertarget textures, so copy to our temp surface first */
+        if (hr == D3D_OK) {
+            hr = IDirect3DDevice9_GetRenderTargetData(device, surf_tex_rt_dest64, surf_temp64);
+            ok( hr == D3D_OK, "IDirect3DDevice9_GetRenderTargetData failed with %s\n", DXGetErrorString9(hr));
+        }
+
+        if (hr == D3D_OK) {
+            color = getPixelColorFromSurface(surf_temp64, 32, 32);
+            ok(color == 0xffffffff, "StretchRect rendertarget texture ==> rendertarget texture same size failed: Got color 0x%08x, expected 0xffffffff.\n", color);
+        }
+    }
+
+    /* rendertarget texture ==> rendertarget surface, same size */
+    if(surf_tex_rt64 && surf_rt_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex_rt64, NULL, surf_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        if (hr == D3D_OK) {
+            color = getPixelColorFromSurface(surf_rt_dest64, 32, 32);
+            ok(color == 0xffffffff, "StretchRect rendertarget texture ==> rendertarget surface same size failed: Got color 0x%08x, expected 0xffffffff.\n", color);
+        }
+    }
+
+    /* rendertarget texture ==> texture, same size (should fail) */
+    if(surf_tex_rt64 && surf_tex_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex_rt64, NULL, surf_tex_dest64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /* Fill the surface of the smaller rendertarget texture with red */
+    if (surf_tex_rt32 && surf_temp32) {
+        /* Can't fill the surf_tex_rt directly because it's created in D3DPOOL_DEFAULT */
+        fill_surface(surf_temp32, 0xffff0000);
+        hr = IDirect3DDevice9_UpdateSurface(device, surf_temp32, NULL, surf_tex_rt32, NULL);
+        ok( hr == D3D_OK, "IDirect3DDevice9_UpdateSurface failed with %s\n", DXGetErrorString9(hr));
+    }
+
+    /* rendertarget texture ==> offscreenplain, scaling (should fail) */
+    if(surf_tex_rt32 && surf_offscreen64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex_rt32, NULL, surf_offscreen64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /* rendertarget texture ==> rendertarget texture, scaling */
+    if(surf_tex_rt32 && surf_tex_rt_dest64 && surf_temp64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex_rt32, NULL, surf_tex_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        /* We can't lock rendertarget textures, so copy to our temp surface first */
+        if (hr == D3D_OK) {
+            hr = IDirect3DDevice9_GetRenderTargetData(device, surf_tex_rt_dest64, surf_temp64);
+            ok( hr == D3D_OK, "IDirect3DDevice9_GetRenderTargetData failed with %s\n", DXGetErrorString9(hr));
+        }
+
+        if (hr == D3D_OK) {
+            color = getPixelColorFromSurface(surf_temp64, 48, 48);
+            ok(color == 0xffff0000, "StretchRect rendertarget texture ==> rendertarget texture scaling failed: Got color 0x%08x, expected 0xffff0000.\n", color);
+        }
+    }
+
+    /* rendertarget texture ==> rendertarget surface, scaling */
+    if(surf_tex_rt32 && surf_rt_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex_rt32, NULL, surf_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        color = getPixelColorFromSurface(surf_rt_dest64, 48, 48);
+        ok(color == 0xffff0000, "StretchRect rendertarget texture ==> rendertarget surface scaling failed: Got color 0x%08x, expected 0xffff0000.\n", color);
+    }
+
+    /* rendertarget texture ==> texture, scaling (should fail) */
+    if(surf_tex_rt32 && surf_tex_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_tex_rt32, NULL, surf_tex_dest64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /*****************************************************************
+     * Tests for when the source parameter is a rendertarget surface *
+     *****************************************************************/
+
+    /* Fill the surface of the rendertarget surface with black */
+    if (surf_rt64)
+        fill_surface(surf_rt64, 0xff000000);
+
+    /* rendertarget texture ==> offscreenplain, same size */
+    if(surf_rt64 && surf_offscreen64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_rt64, NULL, surf_offscreen64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /* rendertarget surface ==> rendertarget texture, same size */
+    if(surf_rt64 && surf_tex_rt_dest64 && surf_temp64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_rt64, NULL, surf_tex_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        /* We can't lock rendertarget textures, so copy to our temp surface first */
+        if (hr == D3D_OK) {
+            hr = IDirect3DDevice9_GetRenderTargetData(device, surf_tex_rt_dest64, surf_temp64);
+            ok( hr == D3D_OK, "IDirect3DDevice9_GetRenderTargetData failed with %s\n", DXGetErrorString9(hr));
+        }
+
+        if (hr == D3D_OK) {
+            color = getPixelColorFromSurface(surf_temp64, 32, 32);
+            ok(color == 0xff000000, "StretchRect rendertarget surface ==> rendertarget texture same size failed: Got color 0x%08x, expected 0xff000000.\n", color);
+        }
+    }
+
+    /* rendertarget surface ==> rendertarget surface, same size */
+    if(surf_rt64 && surf_rt_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_rt64, NULL, surf_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        if (hr == D3D_OK) {
+            color = getPixelColorFromSurface(surf_rt_dest64, 32, 32);
+            ok(color == 0xff000000, "StretchRect rendertarget surface ==> rendertarget surface same size failed: Got color 0x%08x, expected 0xff000000.\n", color);
+        }
+    }
+
+    /* rendertarget surface ==> texture, same size (should fail) */
+    if(surf_rt64 && surf_tex_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_rt64, NULL, surf_tex_dest64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /* Fill the surface of the smaller rendertarget texture with red */
+    if (surf_rt32)
+        fill_surface(surf_rt32, 0xffff0000);
+
+    /* rendertarget surface ==> offscreenplain, scaling (should fail) */
+    if(surf_rt32 && surf_offscreen64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_rt32, NULL, surf_offscreen64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /* rendertarget surface ==> rendertarget texture, scaling */
+    if(surf_rt32 && surf_tex_rt_dest64 && surf_temp64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_rt32, NULL, surf_tex_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        /* We can't lock rendertarget textures, so copy to our temp surface first */
+        if (hr == D3D_OK) {
+            hr = IDirect3DDevice9_GetRenderTargetData(device, surf_tex_rt_dest64, surf_temp64);
+            ok( hr == D3D_OK, "IDirect3DDevice9_GetRenderTargetData failed with %s\n", DXGetErrorString9(hr));
+        }
+
+        if (hr == D3D_OK) {
+            color = getPixelColorFromSurface(surf_temp64, 48, 48);
+            ok(color == 0xffff0000, "StretchRect rendertarget surface ==> rendertarget texture scaling failed: Got color 0x%08x, expected 0xffff0000.\n", color);
+        }
+    }
+
+    /* rendertarget surface ==> rendertarget surface, scaling */
+    if(surf_rt32 && surf_rt_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_rt32, NULL, surf_rt_dest64, NULL, 0);
+        ok( hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+
+        color = getPixelColorFromSurface(surf_rt_dest64, 48, 48);
+        ok(color == 0xffff0000, "StretchRect rendertarget surface ==> rendertarget surface scaling failed: Got color 0x%08x, expected 0xffff0000.\n", color);
+    }
+
+    /* rendertarget surface ==> texture, scaling (should fail) */
+    if(surf_rt32 && surf_tex_dest64) {
+        hr = IDirect3DDevice9_StretchRect(device, surf_rt32, NULL, surf_tex_dest64, NULL, 0);
+        todo_wine ok( hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_StretchRect succeeded, shouldn't happen (todo)\n");
+    }
+
+    /* TODO: Test when source and destination RECT parameters are given... */
+    /* TODO: Test format conversions */
+
+
+out:
+    /* Clean up */
+    if (surf_rt32)
+        IDirect3DSurface9_Release(surf_rt32);
+    if (surf_rt64)
+        IDirect3DSurface9_Release(surf_rt64);
+    if (surf_rt_dest64)
+        IDirect3DSurface9_Release(surf_rt_dest64);
+    if (surf_temp32)
+        IDirect3DSurface9_Release(surf_temp32);
+    if (surf_temp64)
+        IDirect3DSurface9_Release(surf_temp64);
+    if (surf_offscreen32)
+        IDirect3DSurface9_Release(surf_offscreen32);
+    if (surf_offscreen64)
+        IDirect3DSurface9_Release(surf_offscreen64);
+    if (surf_offscreen_dest64)
+        IDirect3DSurface9_Release(surf_offscreen_dest64);
+
+    if (tex_rt32) {
+        if (surf_tex_rt32)
+            IDirect3DSurface9_Release(surf_tex_rt32);
+        IDirect3DTexture9_Release(tex_rt32);
+    }
+    if (tex_rt64) {
+        if (surf_tex_rt64)
+            IDirect3DSurface9_Release(surf_tex_rt64);
+        IDirect3DTexture9_Release(tex_rt64);
+    }
+    if (tex_rt_dest64) {
+        if (surf_tex_rt_dest64)
+            IDirect3DSurface9_Release(surf_tex_rt_dest64);
+        IDirect3DTexture9_Release(tex_rt_dest64);
+    }
+    if (tex32) {
+        if (surf_tex32)
+            IDirect3DSurface9_Release(surf_tex32);
+        IDirect3DTexture9_Release(tex32);
+    }
+    if (tex64) {
+        if (surf_tex64)
+            IDirect3DSurface9_Release(surf_tex64);
+        IDirect3DTexture9_Release(tex64);
+    }
+    if (tex_dest64) {
+        if (surf_tex_dest64)
+            IDirect3DSurface9_Release(surf_tex_dest64);
+        IDirect3DTexture9_Release(tex_dest64);
+    }
+
+    if (orig_rt) {
+        hr = IDirect3DDevice9_SetRenderTarget(device, 0, orig_rt);
+        ok(hr == D3D_OK, "IDirect3DSetRenderTarget failed with %s\n", DXGetErrorString9(hr));
+        IDirect3DSurface9_Release(orig_rt);
+    }
+}
+
 static void maxmip_test(IDirect3DDevice9 *device)
 {
     IDirect3DTexture9 *texture = NULL;
@@ -2192,9 +2772,9 @@ static void release_buffer_test(IDirect3DDevice9 *device)
     ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
 
     hr = IDirect3DDevice9_SetIndices(device, ib);
-    ok(hr == D3D_OK, "IDirect3DIndexBuffer8_Unlock failed with %s\n", DXGetErrorString9(hr));
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetIndices failed with %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_SetStreamSource(device, 0, vb, 0, sizeof(quad[0]));
-    ok(hr == D3D_OK, "IDirect3DIndexBuffer8_Unlock failed with %s\n", DXGetErrorString9(hr));
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed with %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_DIFFUSE);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed with %s\n", DXGetErrorString9(hr));
 
@@ -2382,7 +2962,7 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
     D3DLOCKED_RECT lr;
     D3DLOCKED_BOX lb;
     DWORD color;
-    IDirect3DVertexDeclaration9 *decl, *decl2;
+    IDirect3DVertexDeclaration9 *decl, *decl2, *decl3;
     float identity[16] = {1.0, 0.0, 0.0, 0.0,
                            0.0, 1.0, 0.0, 0.0,
                            0.0, 0.0, 1.0, 0.0,
@@ -2397,6 +2977,15 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
         {0, 12, D3DDECLTYPE_FLOAT1, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
         D3DDECL_END()
     };
+    static const D3DVERTEXELEMENT9 decl_elements3[] = {
+        {0, 0,  D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {0, 12, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+        D3DDECL_END()
+    };
+    static const unsigned char proj_texdata[] = {0x00, 0x00, 0x00, 0x00,
+                                                 0x00, 0xff, 0x00, 0x00,
+                                                 0x00, 0x00, 0x00, 0x00,
+                                                 0x00, 0x00, 0x00, 0x00};
 
     memset(&lr, 0, sizeof(lr));
     memset(&lb, 0, sizeof(lb));
@@ -2410,6 +2999,8 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
     hr = IDirect3DDevice9_CreateVertexDeclaration(device, decl_elements, &decl);
     ok(hr == D3D_OK, "IDirect3DDevice9_CreateVertexDeclaration returned %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_CreateVertexDeclaration(device, decl_elements2, &decl2);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateVertexDeclaration returned %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreateVertexDeclaration(device, decl_elements3, &decl3);
     ok(hr == D3D_OK, "IDirect3DDevice9_CreateVertexDeclaration returned %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_SRGBTEXTURE, FALSE);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState(D3DSAMP_SRGBTEXTURE) returned %s\n", DXGetErrorString9(hr));
@@ -2651,6 +3242,133 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
 
     IDirect3DTexture9_Release(texture);
 
+    /* Test projected textures, without any fancy matrices */
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff203040, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreateTexture(device, 4, 4, 1, 0, D3DFMT_L8, D3DPOOL_MANAGED, &texture, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateTexture returned %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTransform(device, D3DTS_TEXTURE0, (D3DMATRIX *) &identity);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTransform failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetVertexDeclaration(device, decl3);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DTexture9_LockRect(texture, 0, &lr, NULL, 0);
+    ok(hr == D3D_OK, "IDirect3DTexture9_LockRect failed with %s\n", DXGetErrorString9(hr));
+    for(x = 0; x < 4; x++) {
+        memcpy(((BYTE *) lr.pBits) + lr.Pitch * x, proj_texdata + 4 * x, 4 * sizeof(proj_texdata[0]));
+    }
+    hr = IDirect3DTexture9_UnlockRect(texture, 0);
+    ok(hr == D3D_OK, "IDirect3DTexture9_UnlockRect failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTexture(device, 0, (IDirect3DBaseTexture9 *) texture);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed with %s\n", DXGetErrorString9(hr));
+    if(SUCCEEDED(hr))
+    {
+        const float proj_quads[] = {
+           -1.0,   -1.0,    0.1,    0.0,    0.0,    4.0,    6.0,
+            1.0,   -1.0,    0.1,    4.0,    0.0,    4.0,    6.0,
+           -1.0,    0.0,    0.1,    0.0,    4.0,    4.0,    6.0,
+            1.0,    0.0,    0.1,    4.0,    4.0,    4.0,    6.0,
+           -1.0,    0.0,    0.1,    0.0,    0.0,    4.0,    6.0,
+            1.0,    0.0,    0.1,    4.0,    0.0,    4.0,    6.0,
+           -1.0,    1.0,    0.1,    0.0,    4.0,    4.0,    6.0,
+            1.0,    1.0,    0.1,    4.0,    4.0,    4.0,    6.0,
+        };
+
+        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT4 | D3DTTFF_PROJECTED);
+        ok(SUCCEEDED(hr), "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, &proj_quads[0*7], 7 * sizeof(float));
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
+
+        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT3 | D3DTTFF_PROJECTED);
+        ok(SUCCEEDED(hr), "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, &proj_quads[4*7], 7 * sizeof(float));
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
+
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with %s\n", DXGetErrorString9(hr));
+    }
+
+    hr = IDirect3DDevice9_SetTexture(device, 0, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+    IDirect3DTexture9_Release(texture);
+
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
+    color = getPixelColor(device, 158, 118);
+    ok(color == 0x00000000, "proj: Pixel 158/118 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 162, 118);
+    ok(color == 0x00000000, "proj: Pixel 162/118 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 158, 122);
+    ok(color == 0x00000000, "proj: Pixel 158/122 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 162, 122);
+    ok(color == 0x00FFFFFF, "proj: Pixel 162/122 has color 0x%08x, expected 0x00FFFFFF\n", color);
+
+    color = getPixelColor(device, 158, 178);
+    ok(color == 0x00000000, "proj: Pixel 158/178 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 162, 178);
+    ok(color == 0x00FFFFFF, "proj: Pixel 158/178 has color 0x%08x, expected 0x00FFFFFF\n", color);
+    color = getPixelColor(device, 158, 182);
+    ok(color == 0x00000000, "proj: Pixel 158/182 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 162, 182);
+    ok(color == 0x00000000, "proj: Pixel 158/182 has color 0x%08x, expected 0x00000000\n", color);
+
+    color = getPixelColor(device, 318, 118);
+    ok(color == 0x00000000, "proj: Pixel 318/118 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 322, 118);
+    ok(color == 0x00000000, "proj: Pixel 322/118 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 318, 122);
+    ok(color == 0x00FFFFFF, "proj: Pixel 318/122 has color 0x%08x, expected 0x00FFFFFF\n", color);
+    color = getPixelColor(device, 322, 122);
+    ok(color == 0x00000000, "proj: Pixel 322/122 has color 0x%08x, expected 0x00000000\n", color);
+
+    color = getPixelColor(device, 318, 178);
+    ok(color == 0x00FFFFFF, "proj: Pixel 318/178 has color 0x%08x, expected 0x00FFFFFF\n", color);
+    color = getPixelColor(device, 322, 178);
+    ok(color == 0x00000000, "proj: Pixel 322/178 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 318, 182);
+    ok(color == 0x00000000, "proj: Pixel 318/182 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 322, 182);
+    ok(color == 0x00000000, "proj: Pixel 322/182 has color 0x%08x, expected 0x00000000\n", color);
+
+    color = getPixelColor(device, 238, 298);
+    ok(color == 0x00000000, "proj: Pixel 238/298 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 242, 298);
+    ok(color == 0x00000000, "proj: Pixel 242/298 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 238, 302);
+    ok(color == 0x00000000, "proj: Pixel 238/302 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 242, 302);
+    ok(color == 0x00FFFFFF, "proj: Pixel 242/302 has color 0x%08x, expected 0x00FFFFFF\n", color);
+
+    color = getPixelColor(device, 238, 388);
+    ok(color == 0x00000000, "proj: Pixel 238/388 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 242, 388);
+    ok(color == 0x00FFFFFF, "proj: Pixel 242/388 has color 0x%08x, expected 0x00FFFFFF\n", color);
+    color = getPixelColor(device, 238, 392);
+    ok(color == 0x00000000, "proj: Pixel 238/392 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 242, 392);
+    ok(color == 0x00000000, "proj: Pixel 242/392 has color 0x%08x, expected 0x00000000\n", color);
+
+    color = getPixelColor(device, 478, 298);
+    ok(color == 0x00000000, "proj: Pixel 478/298 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 482, 298);
+    ok(color == 0x00000000, "proj: Pixel 482/298 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 478, 302);
+    ok(color == 0x00FFFFFF, "proj: Pixel 478/302 has color 0x%08x, expected 0x00FFFFFF\n", color);
+    color = getPixelColor(device, 482, 302);
+    ok(color == 0x00000000, "proj: Pixel 482/302 has color 0x%08x, expected 0x00000000\n", color);
+
+    color = getPixelColor(device, 478, 388);
+    ok(color == 0x00FFFFFF, "proj: Pixel 478/388 has color 0x%08x, expected 0x00FFFFFF\n", color);
+    color = getPixelColor(device, 482, 388);
+    ok(color == 0x00000000, "proj: Pixel 482/388 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 478, 392);
+    ok(color == 0x00000000, "proj: Pixel 478/392 has color 0x%08x, expected 0x00000000\n", color);
+    color = getPixelColor(device, 482, 392);
+    ok(color == 0x00000000, "proj: Pixel 482/392 has color 0x%08x, expected 0x00000000\n", color);
+
     hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff203040, 0.0, 0);
     ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %s\n", DXGetErrorString9(hr));
     /* Use a smaller volume texture than the biggest possible size for memory and performance reasons
@@ -2878,6 +3596,7 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
     ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture returned %s\n", DXGetErrorString9(hr));
     IDirect3DVertexDeclaration9_Release(decl);
     IDirect3DVertexDeclaration9_Release(decl2);
+    IDirect3DVertexDeclaration9_Release(decl3);
 }
 
 static void texdepth_test(IDirect3DDevice9 *device)
@@ -3757,6 +4476,125 @@ static void constant_clamp_ps_test(IDirect3DDevice9 *device)
     IDirect3DPixelShader9_Release(shader_11);
 }
 
+static void dp2add_ps_test(IDirect3DDevice9 *device)
+{
+    IDirect3DPixelShader9 *shader_dp2add = NULL;
+    IDirect3DPixelShader9 *shader_dp2add_sat = NULL;
+    HRESULT hr;
+    DWORD color;
+
+    /* DP2ADD is defined as:  (src0.r * src1.r) + (src0.g * src1.g) + src2.
+     * One D3D restriction of all shader instructions except SINCOS is that no more than 2
+     * source tokens can be constants.  So, for this exercise, we move contents of c0 to
+     * r0 first.
+     * The result here for the r,g,b components should be roughly 0.5:
+     *   (0.5 * 0.5) + (0.5 * 0.5) + 0.0 = 0.5 */
+    static const DWORD shader_code_dp2add[] =  {
+        0xffff0200,                                                             /* ps_2_0                       */
+        0x05000051, 0xa00f0000, 0x3f000000, 0x3f000000, 0x3f800000, 0x00000000, /* def c0, 0.5, 0.5, 1.0, 0     */
+
+        0x02000001, 0x800f0000, 0xa0e40000,                                     /* mov r0, c0                   */
+        0x0400005a, 0x80070000, 0x80000000, 0x80000000, 0x80ff0000,             /* dp2add r0.rgb, r0, r0, r0.a  */
+
+        0x02000001, 0x80080000, 0xa0aa0000,                                     /* mov r0.a, c0.b               */
+        0x02000001, 0x800f0800, 0x80e40000,                                     /* mov oC0, r0                  */
+        0x0000ffff                                                              /* end                          */
+    };
+
+    /* Test the _sat modifier, too.  Result here should be:
+     *   DP2: (-0.5 * -0.5) + (-0.5 * -0.5) + 2.0 = 2.5
+     *      _SAT: ==> 1.0
+     *   ADD: (1.0 + -0.5) = 0.5
+     */
+    static const DWORD shader_code_dp2add_sat[] =  {
+        0xffff0200,                                                             /* ps_2_0                           */
+        0x05000051, 0xa00f0000, 0xbf000000, 0xbf000000, 0x3f800000, 0x40000000, /* def c0, -0.5, -0.5, 1.0, 2.0     */
+
+        0x02000001, 0x800f0000, 0xa0e40000,                                     /* mov r0, c0                       */
+        0x0400005a, 0x80170000, 0x80000000, 0x80000000, 0x80ff0000,             /* dp2add_sat r0.rgb, r0, r0, r0.a  */
+        0x03000002, 0x80070000, 0x80e40000, 0xa0000000,                         /* add r0.rgb, r0, c0.r             */
+
+        0x02000001, 0x80080000, 0xa0aa0000,                                     /* mov r0.a, c0.b                   */
+        0x02000001, 0x800f0800, 0x80e40000,                                     /* mov oC0, r0                      */
+        0x0000ffff                                                              /* end                              */
+    };
+
+    const float quad[] = {
+        -1.0,   -1.0,   0.1,
+         1.0,   -1.0,   0.1,
+        -1.0,    1.0,   0.1,
+         1.0,    1.0,   0.1
+    };
+
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff000000, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_CreatePixelShader(device, shader_code_dp2add, &shader_dp2add);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreatePixelShader returned %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_CreatePixelShader(device, shader_code_dp2add_sat, &shader_dp2add_sat);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreatePixelShader returned %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF returned %s\n", DXGetErrorString9(hr));
+
+    if (shader_dp2add) {
+
+        hr = IDirect3DDevice9_SetPixelShader(device, shader_dp2add);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader returned %s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_BeginScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene returned %s\n", DXGetErrorString9(hr));
+        if(SUCCEEDED(hr))
+        {
+            hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, 3 * sizeof(float));
+            ok(hr == D3D_OK, "DrawPrimitiveUP failed (%08x)\n", hr);
+
+            hr = IDirect3DDevice9_EndScene(device);
+            ok(hr == D3D_OK, "IDirect3DDevice9_EndScene returned %s\n", DXGetErrorString9(hr));
+        }
+        hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+        ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
+
+        color = getPixelColor(device, 360, 240);
+        ok(color == 0x007f7f7f || color == 0x00808080, "dp2add pixel has color %08x, expected ~0x007f7f7f\n", color);
+
+        IDirect3DPixelShader9_Release(shader_dp2add);
+    } else {
+        skip("dp2add shader creation failed\n");
+    }
+
+    if (shader_dp2add_sat) {
+
+        hr = IDirect3DDevice9_SetPixelShader(device, shader_dp2add_sat);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader returned %s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_BeginScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene returned %s\n", DXGetErrorString9(hr));
+        if(SUCCEEDED(hr))
+        {
+            hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, 3 * sizeof(float));
+            ok(hr == D3D_OK, "DrawPrimitiveUP failed (%08x)\n", hr);
+
+            hr = IDirect3DDevice9_EndScene(device);
+            ok(hr == D3D_OK, "IDirect3DDevice9_EndScene returned %s\n", DXGetErrorString9(hr));
+        }
+        hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+        ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
+
+        color = getPixelColor(device, 360, 240);
+        ok(color == 0x007f7f7f || color == 0x00808080, "dp2add pixel has color %08x, expected ~0x007f7f7f\n", color);
+
+        IDirect3DPixelShader9_Release(shader_dp2add_sat);
+    } else {
+        skip("dp2add shader creation failed\n");
+    }
+
+    hr = IDirect3DDevice9_SetPixelShader(device, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexShader returned %s\n", DXGetErrorString9(hr));
+}
+
 static void cnd_test(IDirect3DDevice9 *device)
 {
     IDirect3DPixelShader9 *shader_11, *shader_12, *shader_13, *shader_14;
@@ -3974,31 +4812,37 @@ static void cnd_test(IDirect3DDevice9 *device)
     color = getPixelColor(device, 158, 358);
     ok(color == 0x00ffffff, "pixel 158, 358 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 162, 358);
-    ok(color == 0x00000000, "pixel 162, 358 has color %08x, expected 0x00000000\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) <= 0x01) && ((color & 0x000000ff) <= 0x01),
+        "pixel 162, 358 has color %08x, expected 0x00000000\n", color);
     color = getPixelColor(device, 158, 362);
     ok(color == 0x00ffffff, "pixel 158, 362 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 162, 362);
-    ok(color == 0x00000000, "pixel 162, 362 has color %08x, expected 0x00000000\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) <= 0x01) && ((color & 0x000000ff) <= 0x01),
+        "pixel 162, 362 has color %08x, expected 0x00000000\n", color);
 
     /* 1.2 shader */
     color = getPixelColor(device, 478, 358);
     ok(color == 0x00ffffff, "pixel 478, 358 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 482, 358);
-    ok(color == 0x00000000, "pixel 482, 358 has color %08x, expected 0x00000000\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) <= 0x01) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 358 has color %08x, expected 0x00000000\n", color);
     color = getPixelColor(device, 478, 362);
     ok(color == 0x00ffffff, "pixel 478, 362 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 482, 362);
-    ok(color == 0x00000000, "pixel 482, 362 has color %08x, expected 0x00000000\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) <= 0x01) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 362 has color %08x, expected 0x00000000\n", color);
 
     /* 1.3 shader */
     color = getPixelColor(device, 478, 118);
     ok(color == 0x00ffffff, "pixel 478, 118 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 482, 118);
-    ok(color == 0x00000000, "pixel 482, 118 has color %08x, expected 0x00000000\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) <= 0x01) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 118 has color %08x, expected 0x00000000\n", color);
     color = getPixelColor(device, 478, 122);
     ok(color == 0x00ffffff, "pixel 478, 122 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 482, 122);
-    ok(color == 0x00000000, "pixel 482, 122 has color %08x, expected 0x00000000\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) <= 0x01) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 122 has color %08x, expected 0x00000000\n", color);
 
     hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff00ffff, 0.0, 0);
     ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %s\n", DXGetErrorString9(hr));
@@ -4051,33 +4895,45 @@ static void cnd_test(IDirect3DDevice9 *device)
 
     /* 1.1 shader. coissue flag changed the semantic of cnd, c1 is always selected */
     color = getPixelColor(device, 158, 358);
-    ok(color == 0x0000ff00, "pixel 158, 358 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 158, 358 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 162, 358);
-    ok(color == 0x0000ff00, "pixel 162, 358 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 162, 358 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 158, 362);
-    ok(color == 0x0000ff00, "pixel 158, 362 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 158, 362 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 162, 362);
-    ok(color == 0x0000ff00, "pixel 162, 362 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 162, 362 has color %08x, expected 0x0000ff00\n", color);
 
     /* 1.2 shader */
     color = getPixelColor(device, 478, 358);
-    ok(color == 0x0000ff00, "pixel 478, 358 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 478, 358 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 482, 358);
-    ok(color == 0x0000ff00, "pixel 482, 358 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 358 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 478, 362);
-    ok(color == 0x0000ff00, "pixel 478, 362 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 478, 362 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 482, 362);
-    ok(color == 0x0000ff00, "pixel 482, 362 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 362 has color %08x, expected 0x0000ff00\n", color);
 
     /* 1.3 shader */
     color = getPixelColor(device, 478, 118);
-    ok(color == 0x0000ff00, "pixel 478, 118 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 478, 118 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 482, 118);
-    ok(color == 0x0000ff00, "pixel 482, 118 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 118 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 478, 122);
-    ok(color == 0x0000ff00, "pixel 478, 122 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 478, 122 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 482, 122);
-    ok(color == 0x0000ff00, "pixel 482, 122 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 122 has color %08x, expected 0x0000ff00\n", color);
 
     IDirect3DPixelShader9_Release(shader_14_coissue);
     IDirect3DPixelShader9_Release(shader_13_coissue);
@@ -4336,6 +5192,7 @@ static void fixed_function_varying_test(IDirect3DDevice9 *device) {
     HRESULT hr;
     unsigned int i;
     DWORD color, r, g, b, r_e, g_e, b_e;
+    BOOL drawok;
 
     memcpy(data2, data, sizeof(data2));
     data2[0].pos_x = 0;     data2[0].pos_y = 0;
@@ -4367,15 +5224,24 @@ static void fixed_function_varying_test(IDirect3DDevice9 *device) {
 
         hr = IDirect3DDevice9_BeginScene(device);
         ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene returned %s\n", DXGetErrorString9(hr));
+        drawok = FALSE;
         if(SUCCEEDED(hr))
         {
             hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, data, sizeof(data[0]));
-            ok(hr == D3D_OK, "DrawPrimitiveUP failed (%08x)\n", hr);
+            ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL, "DrawPrimitiveUP failed (%08x)\n", hr);
+            drawok = SUCCEEDED(hr);
             hr = IDirect3DDevice9_EndScene(device);
             ok(hr == D3D_OK, "IDirect3DDevice9_EndScene returned %s\n", DXGetErrorString9(hr));
         }
         hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
         ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
+
+        /* Some drivers reject the combination of ps_3_0 and fixed function vertex processing. Accept
+         * the failure and do not check the color if it failed
+         */
+        if(!drawok) {
+            continue;
+        }
 
         color = getPixelColor(device, 360, 240);
         r = color & 0x00ff0000 >> 16;
@@ -4597,18 +5463,18 @@ static void vshader_version_varying_test(IDirect3DDevice9 *device) {
     color = getPixelColor(device, 160, 120);
     ok((color & 0x00ff0000) >= 0x00190000 && (color & 0x00ff0000) <= 0x00210000 &&
        (color & 0x0000ff00) >= 0x00003300 && (color & 0x0000ff00) <= 0x00003500 &&
-       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00210068,
+       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00000068,
        "vs_3_0 returned color 0x%08x, expected 0x00203366\n", color);
     color = getPixelColor(device, 160, 360);
     ok((color & 0x00ff0000) >= 0x003c0000 && (color & 0x00ff0000) <= 0x004e0000 &&
        (color & 0x0000ff00) >= 0x00000000 && (color & 0x0000ff00) <= 0x00000000 &&
-       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00210068,
-       "vs_1_1 returned color 0x%08x, expected 0x00808080\n", color);
+       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00000068,
+       "vs_1_1 returned color 0x%08x, expected 0x004c0066\n", color);
     color = getPixelColor(device, 480, 360);
     ok((color & 0x00ff0000) >= 0x003c0000 && (color & 0x00ff0000) <= 0x004e0000 &&
        (color & 0x0000ff00) >= 0x00000000 && (color & 0x0000ff00) <= 0x00000000 &&
-       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00210068,
-       "vs_2_0 returned color 0x%08x, expected 0x00000000\n", color);
+       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00000068,
+       "vs_2_0 returned color 0x%08x, expected 0x004c0066\n", color);
 
     /* cleanup */
     hr = IDirect3DDevice9_SetPixelShader(device, NULL);
@@ -4801,9 +5667,10 @@ static void pshader_version_varying_test(IDirect3DDevice9 *device) {
        (color & 0x000000ff) == 0x00000000,
        "ps_2_0 returned color 0x%08x, expected 0x00203300\n", color);
     color = getPixelColor(device, 480, 160);
-    ok((color & 0x00ff0000) >= 0x00190000 && (color & 0x00ff0000) <= 0x00210000 &&
+    ok( color == 0x00ffffff /* Nvidia driver garbage with HW vp */ || (
+       (color & 0x00ff0000) >= 0x00190000 && (color & 0x00ff0000) <= 0x00210000 &&
        (color & 0x0000ff00) >= 0x00003200 && (color & 0x0000ff00) <= 0x00003400 &&
-       (color & 0x000000ff) == 0x00000000,
+       (color & 0x000000ff) == 0x00000000),
        "fixed function fragment processing returned color 0x%08x, expected 0x00203300\n", color);
 
     /* cleanup */
@@ -5222,11 +6089,13 @@ void test_vshader_input(IDirect3DDevice9 *device)
             ok(color == 0x00FFFF80 || color == 0x00FFFF7f || color == 0x00FFFF81,
                "Input test: Quad 1(2crd) returned color 0x%08x, expected 0x00FFFF80\n", color);
 
-            /* The last value of the read but undefined stream is used */
+            /* The last value of the read but undefined stream is used, it is 0x00. The defined input is vec4(1, 0, 0, 0) */
             color = getPixelColor(device, 480, 360);
-            ok(color == 0x00FFFF00, "Input test: Quad 2(1crd) returned color 0x%08x, expected 0x00FFFF00\n", color);
+            ok(color == 0x00FFFF00 || color ==0x00FF0000,
+               "Input test: Quad 2(1crd) returned color 0x%08x, expected 0x00FFFF00\n", color);
             color = getPixelColor(device, 160, 120);
-            ok(color == 0x00FF0080 || color == 0x00FF007f || color == 0x00FF0081,
+            /* Same as above, accept both the last used value and 0.0 for the undefined streams */
+            ok(color == 0x00FF0080 || color == 0x00FF007f || color == 0x00FF0081 || color == 0x00FF0000,
                "Input test: Quad 3(2crd-wrongidx) returned color 0x%08x, expected 0x00FF0080\n", color);
 
             color = getPixelColor(device, 480, 160);
@@ -5292,8 +6161,9 @@ void test_vshader_input(IDirect3DDevice9 *device)
         hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
         ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
 
-        color = getPixelColor(device, 480, 360);
-        /* vs_1_1 may fail, accept the clear color
+        color = getPixelColor(device, 480, 350);
+        /* vs_1_1 may fail, accept the clear color. Some drivers also set the undefined streams to 0, accept that
+         * as well.
          *
          * NOTE: This test fails on the reference rasterizer. In the refrast, the 4 vertices have different colors,
          * i.e., the whole old stream is read, and not just the last used attribute. Some games require that this
@@ -5302,8 +6172,8 @@ void test_vshader_input(IDirect3DDevice9 *device)
          *
          * A test app for this behavior is Half Life 2 Episode 2 in dxlevel 95, and related games(Portal, TF2).
          */
-        ok(color == 0x000000FF || color == 0x00808080,
-           "Input test: Quad 2(different colors) returned color 0x%08x, expected 0x000000FF\n", color);
+        ok(color == 0x000000FF || color == 0x00808080 || color == 0x00000000,
+           "Input test: Quad 2(different colors) returned color 0x%08x, expected 0x000000FF, 0x00808080 or 0x00000000\n", color);
         color = getPixelColor(device, 160, 120);
 
         IDirect3DDevice9_SetVertexShader(device, NULL);
@@ -5413,6 +6283,248 @@ void test_vshader_input(IDirect3DDevice9 *device)
     IDirect3DVertexDeclaration9_Release(decl_color_float);
 }
 
+static void srgbtexture_test(IDirect3DDevice9 *device)
+{
+    /* Fill a texture with 0x7f (~ .5), and then turn on the D3DSAMP_SRGBTEXTURE
+     * texture stage state to render a quad using that texture.  The resulting
+     * color components should be 0x36 (~ 0.21), per this formula:
+     *    linear_color = ((srgb_color + 0.055) / 1.055) ^ 2.4
+     * This is true where srgb_color > 0.04045.
+     */
+    IDirect3D9 *d3d = NULL;
+    HRESULT hr;
+    LPDIRECT3DTEXTURE9 texture = NULL;
+    LPDIRECT3DSURFACE9 surface = NULL;
+    D3DLOCKED_RECT lr;
+    DWORD color;
+    float quad[] = {
+        -1.0,       1.0,       0.0,     0.0,    0.0,
+         1.0,       1.0,       0.0,     1.0,    0.0,
+        -1.0,      -1.0,       0.0,     0.0,    1.0,
+         1.0,      -1.0,       0.0,     1.0,    1.0,
+    };
+
+
+    memset(&lr, 0, sizeof(lr));
+    IDirect3DDevice9_GetDirect3D(device, &d3d);
+    if(IDirect3D9_CheckDeviceFormat(d3d, 0, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8,
+                                    D3DUSAGE_QUERY_SRGBREAD, D3DRTYPE_TEXTURE,
+                                    D3DFMT_A8R8G8B8) != D3D_OK) {
+        skip("D3DFMT_A8R8G8B8 textures with SRGBREAD not supported\n");
+        goto out;
+    }
+
+    hr = IDirect3DDevice9_CreateTexture(device, 16, 16, 1, 0,
+                                        D3DFMT_A8R8G8B8, D3DPOOL_MANAGED,
+                                        &texture, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateTexture failed with %s\n", DXGetErrorString9(hr));
+    if(!texture) {
+        skip("Failed to create A8R8G8B8 texture with SRGBREAD\n");
+        goto out;
+    }
+    hr = IDirect3DTexture9_GetSurfaceLevel(texture, 0, &surface);
+    ok(hr == D3D_OK, "IDirect3DTexture9_GetSurfaceLevel failed with %s\n", DXGetErrorString9(hr));
+
+    fill_surface(surface, 0xff7f7f7f);
+    IDirect3DSurface9_Release(surface);
+
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_LIGHTING, FALSE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState returned %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTexture(device, 0, (IDirect3DBaseTexture9 *) texture);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed with %s\n", DXGetErrorString9(hr));
+    if(SUCCEEDED(hr))
+    {
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_SRGBTEXTURE, TRUE);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_TEX1);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed with %s\n", DXGetErrorString9(hr));
+
+
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, 5 * sizeof(float));
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed with %s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with %s\n", DXGetErrorString9(hr));
+    }
+
+    hr = IDirect3DDevice9_SetTexture(device, 0, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_SRGBTEXTURE, FALSE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
+
+    color = getPixelColor(device, 320, 240);
+    ok(color == 0x00363636 || color == 0x00373737, "srgb quad has color %08x, expected 0x00363636\n", color);
+
+out:
+    if(texture) IDirect3DTexture9_Release(texture);
+    IDirect3D9_Release(d3d);
+}
+
+static void shademode_test(IDirect3DDevice9 *device)
+{
+    /* Render a quad and try all of the different fixed function shading models. */
+    HRESULT hr;
+    DWORD color0, color1;
+    DWORD color0_gouraud = 0, color1_gouraud = 0;
+    BYTE r, g, b;
+    DWORD shademode = D3DSHADE_FLAT;
+    DWORD primtype = D3DPT_TRIANGLESTRIP;
+    LPVOID data = NULL;
+    LPDIRECT3DVERTEXBUFFER9 vb_strip = NULL;
+    LPDIRECT3DVERTEXBUFFER9 vb_list = NULL;
+    UINT i, j;
+    struct vertex quad_strip[] =
+    {
+        {-1.0f, -1.0f,  0.0f, 0xffff0000  },
+        {-1.0f,  1.0f,  0.0f, 0xff00ff00  },
+        { 1.0f, -1.0f,  0.0f, 0xff0000ff  },
+        { 1.0f,  1.0f,  0.0f, 0xffffffff  }
+    };
+    struct vertex quad_list[] =
+    {
+        {-1.0f, -1.0f,  0.0f, 0xffff0000  },
+        {-1.0f,  1.0f,  0.0f, 0xff00ff00  },
+        { 1.0f, -1.0f,  0.0f, 0xff0000ff  },
+
+        {-1.0f,  1.0f,  0.0f, 0xff00ff00  },
+        { 1.0f, -1.0f,  0.0f, 0xff0000ff  },
+        { 1.0f,  1.0f,  0.0f, 0xffffffff  }
+    };
+
+    hr = IDirect3DDevice9_CreateVertexBuffer(device, sizeof(quad_strip),
+                                             0, 0, D3DPOOL_MANAGED, &vb_strip, NULL);
+    ok(hr == D3D_OK, "CreateVertexBuffer failed with %s\n", DXGetErrorString9(hr));
+    if (FAILED(hr)) goto bail;
+
+    hr = IDirect3DDevice9_CreateVertexBuffer(device, sizeof(quad_list),
+                                             0, 0, D3DPOOL_MANAGED, &vb_list, NULL);
+    ok(hr == D3D_OK, "CreateVertexBuffer failed with %s\n", DXGetErrorString9(hr));
+    if (FAILED(hr)) goto bail;
+
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_LIGHTING, FALSE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState returned %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_DIFFUSE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DVertexBuffer9_Lock(vb_strip, 0, sizeof(quad_strip), (void **) &data, 0);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Lock failed with %s\n", DXGetErrorString9(hr));
+    memcpy(data, quad_strip, sizeof(quad_strip));
+    hr = IDirect3DVertexBuffer9_Unlock(vb_strip);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DVertexBuffer9_Lock(vb_list, 0, sizeof(quad_list), (void **) &data, 0);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Lock failed with %s\n", DXGetErrorString9(hr));
+    memcpy(data, quad_list, sizeof(quad_list));
+    hr = IDirect3DVertexBuffer9_Unlock(vb_list);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
+
+    /* Try it first with a TRIANGLESTRIP.  Do it with different geometry because
+     * the color fixups we have to do for FLAT shading will be dependent on that. */
+    hr = IDirect3DDevice9_SetStreamSource(device, 0, vb_strip, 0, sizeof(quad_strip[0]));
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed with %s\n", DXGetErrorString9(hr));
+
+    /* First loop uses a TRIANGLESTRIP geometry, 2nd uses a TRIANGLELIST */
+    for (j=0; j<2; j++) {
+
+        /* Inner loop just changes the D3DRS_SHADEMODE */
+        for (i=0; i<3; i++) {
+            hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffffffff, 0.0, 0);
+            ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %s\n", DXGetErrorString9(hr));
+
+            hr = IDirect3DDevice9_SetRenderState(device, D3DRS_SHADEMODE, shademode);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState returned %s\n", DXGetErrorString9(hr));
+
+            hr = IDirect3DDevice9_BeginScene(device);
+            ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed with %s\n", DXGetErrorString9(hr));
+            if(SUCCEEDED(hr))
+            {
+                hr = IDirect3DDevice9_DrawPrimitive(device, primtype, 0, 2);
+                ok(hr == D3D_OK, "IDirect3DDevice9_DrawPrimitive failed with %s\n", DXGetErrorString9(hr));
+
+                hr = IDirect3DDevice9_EndScene(device);
+                ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with %s\n", DXGetErrorString9(hr));
+            }
+
+            hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+            ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
+
+            /* Sample two spots from the output */
+            color0 = getPixelColor(device, 100, 100); /* Inside first triangle */
+            color1 = getPixelColor(device, 500, 350); /* Inside second triangle */
+            switch(shademode) {
+                case D3DSHADE_FLAT:
+                    /* Should take the color of the first vertex of each triangle */
+                    todo_wine ok(color0 == 0x00ff0000, "FLAT shading has color0 %08x, expected 0x00ff0000 (todo)\n", color0);
+                    todo_wine ok(color1 == 0x0000ff00, "FLAT shading has color1 %08x, expected 0x0000ff00 (todo)\n", color1);
+                    shademode = D3DSHADE_GOURAUD;
+                    break;
+                case D3DSHADE_GOURAUD:
+                    /* Should be an interpolated blend */
+
+                    r = (color0 & 0x00ff0000) >> 16;
+                    g = (color0 & 0x0000ff00) >>  8;
+                    b = (color0 & 0x000000ff);
+                    ok(r >= 0x0c && r <= 0x0e && g == 0xca && b >= 0x27 && b <= 0x28,
+                       "GOURAUD shading has color0 %08x, expected 0x000dca28\n", color0);
+                    r = (color1 & 0x00ff0000) >> 16;
+                    g = (color1 & 0x0000ff00) >>  8;
+                    b = (color1 & 0x000000ff);
+                    ok(r >= 0x0c && r <= 0x0d && g >= 0x44 && g <= 0x45 && b >= 0xc7 && b <= 0xc8,
+                       "GOURAUD shading has color1 %08x, expected 0x000d45c7\n", color1);
+
+                    color0_gouraud = color0;
+                    color1_gouraud = color1;
+
+                    shademode = D3DSHADE_PHONG;
+                    break;
+                case D3DSHADE_PHONG:
+                    /* Should be the same as GOURAUD, since no hardware implements this */
+                    r = (color0 & 0x00ff0000) >> 16;
+                    g = (color0 & 0x0000ff00) >>  8;
+                    b = (color0 & 0x000000ff);
+                    ok(r >= 0x0c && r <= 0x0e && g == 0xca && b >= 0x27 && b <= 0x28,
+                       "PHONG shading has color0 %08x, expected 0x000dca28\n", color0);
+                    r = (color1 & 0x00ff0000) >> 16;
+                    g = (color1 & 0x0000ff00) >>  8;
+                    b = (color1 & 0x000000ff);
+                    ok(r >= 0x0c && r <= 0x0d && g >= 0x44 && g <= 0x45 && b >= 0xc7 && b <= 0xc8,
+                       "PHONG shading has color1 %08x, expected 0x000d45c7\n", color1);
+
+                    ok(color0 == color0_gouraud, "difference between GOURAUD and PHONG shading detected: %08x %08x\n",
+                            color0_gouraud, color0);
+                    ok(color1 == color1_gouraud, "difference between GOURAUD and PHONG shading detected: %08x %08x\n",
+                            color1_gouraud, color1);
+                    break;
+            }
+        }
+        /* Now, do it all over again with a TRIANGLELIST */
+        hr = IDirect3DDevice9_SetStreamSource(device, 0, vb_list, 0, sizeof(quad_list[0]));
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed with %s\n", DXGetErrorString9(hr));
+        primtype = D3DPT_TRIANGLELIST;
+        shademode = D3DSHADE_FLAT;
+    }
+
+bail:
+    hr = IDirect3DDevice9_SetStreamSource(device, 0, NULL, 0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState returned %s\n", DXGetErrorString9(hr));
+
+    if (vb_strip)
+        IDirect3DVertexBuffer9_Release(vb_strip);
+    if (vb_list)
+        IDirect3DVertexBuffer9_Release(vb_list);
+}
+
+
 static void fog_srgbwrite_test(IDirect3DDevice9 *device)
 {
     /* Draw a black quad, half fogged with white fog -> grey color. Enable sRGB writing.
@@ -5451,9 +6563,15 @@ static void fog_srgbwrite_test(IDirect3DDevice9 *device)
     DWORD color;
 
     IDirect3DDevice9_GetDirect3D(device, &d3d);
+    /* Ask for srgb writing on D3DRTYPE_TEXTURE. Some Windows drivers do not report it on surfaces.
+     * For some not entirely understood reasons D3DUSAGE_RENDERTARGET | D3DUSAGE_QUERY_SRGBWRITE
+     * passes on surfaces, while asking for SRGBWRITE alone fails. Textures advertize srgb writing
+     * alone as well, so use that since it is not the point of this test to show how CheckDeviceFormat
+     * works
+     */
     if(IDirect3D9_CheckDeviceFormat(d3d, 0, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8,
                                     D3DUSAGE_RENDERTARGET | D3DUSAGE_QUERY_SRGBWRITE,
-                                    D3DRTYPE_SURFACE, D3DFMT_A8R8G8B8) != D3D_OK) {
+                                    D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8) != D3D_OK) {
         skip("No SRGBWRITEENABLE support on D3DFMT_X8R8G8B8\n");
         IDirect3D9_Release(d3d);
         return;
@@ -5675,7 +6793,7 @@ static void alpha_test(IDirect3DDevice9 *device)
     green = (color & 0x0000ff00) >>  8;
     blue =  (color & 0x000000ff);
     ok(red >= 0x7e && red <= 0x81 && green == 0x00 && blue >= 0x7e && blue <= 0x81,
-       "DSTALPHA on texture returned color %08x, expected foo\n", color);
+       "DSTALPHA on texture returned color %08x, expected 0x00800080\n", color);
 
     out:
     /* restore things */
@@ -6254,7 +7372,7 @@ static void test_vshader_float16(IDirect3DDevice9 *device)
     ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateVertexDeclaration failed hr=%s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_CreateVertexShader(device, shader_code, &shader);
     ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateVertexShader failed hr=%s\n", DXGetErrorString9(hr));
-    IDirect3DDevice9_SetVertexShader(device, shader);
+    hr = IDirect3DDevice9_SetVertexShader(device, shader);
     ok(SUCCEEDED(hr), "IDirect3DDevice9_SetVertexShader failed hr=%s\n", DXGetErrorString9(hr));
 
     hr = IDirect3DDevice9_BeginScene(device);
@@ -6534,7 +7652,7 @@ static void vFace_register_test(IDirect3DDevice9 *device)
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLELIST, 4, quad, sizeof(float) * 3);
         ok(hr == D3D_OK, "IDirect3DDevice9_DrawPrimitiveUP failed, hr=%s\n", DXGetErrorString9(hr));
 
-        /* Blit the texture ontp the back buffer to make it visible */
+        /* Blit the texture onto the back buffer to make it visible */
         hr = IDirect3DDevice9_SetPixelShader(device, NULL);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader failed, hr=%s\n", DXGetErrorString9(hr));
         hr = IDirect3DDevice9_SetTexture(device, 0, (IDirect3DBaseTexture9 *) texture);
@@ -6592,7 +7710,7 @@ static void fixed_function_bumpmap_test(IDirect3DDevice9 *device)
         D3DDECL_END()
     };
 
-    /* use assymetric matrix to test loading */
+    /* use asymmetric matrix to test loading */
     float bumpenvmat[4] = {0.0,0.5,-0.5,0.0};
 
     IDirect3DVertexDeclaration9 *vertex_declaration = NULL;
@@ -7053,15 +8171,15 @@ static void pointsize_test(IDirect3DDevice9 *device)
     };
 
     /* Transforms the coordinate system [-1.0;1.0]x[-1.0;1.0] to [0.0;0.0]x[640.0;480.0]. Z is untouched */
-    matrix.m[0][0] = 2.0/640.0; matrix.m[1][0] = 0.0;       matrix.m[2][0] = 0.0;   matrix.m[3][0] =-1.0;
-    matrix.m[0][1] = 0.0;       matrix.m[1][1] =-2.0/480.0; matrix.m[2][1] = 0.0;   matrix.m[3][1] = 1.0;
-    matrix.m[0][2] = 0.0;       matrix.m[1][2] = 0.0;       matrix.m[2][2] = 1.0;   matrix.m[3][2] = 0.0;
-    matrix.m[0][3] = 0.0;       matrix.m[1][3] = 0.0;       matrix.m[2][3] = 0.0;   matrix.m[3][3] = 1.0;
+    U(matrix).m[0][0] = 2.0/640.0; U(matrix).m[1][0] = 0.0;       U(matrix).m[2][0] = 0.0;   U(matrix).m[3][0] =-1.0;
+    U(matrix).m[0][1] = 0.0;       U(matrix).m[1][1] =-2.0/480.0; U(matrix).m[2][1] = 0.0;   U(matrix).m[3][1] = 1.0;
+    U(matrix).m[0][2] = 0.0;       U(matrix).m[1][2] = 0.0;       U(matrix).m[2][2] = 1.0;   U(matrix).m[3][2] = 0.0;
+    U(matrix).m[0][3] = 0.0;       U(matrix).m[1][3] = 0.0;       U(matrix).m[2][3] = 0.0;   U(matrix).m[3][3] = 1.0;
 
-    identity.m[0][0] = 1.0;     identity.m[1][0] = 0.0;     identity.m[2][0] = 0.0; identity.m[3][0] = 0.0;
-    identity.m[0][1] = 0.0;     identity.m[1][1] = 1.0;     identity.m[2][1] = 0.0; identity.m[3][1] = 0.0;
-    identity.m[0][2] = 0.0;     identity.m[1][2] = 0.0;     identity.m[2][2] = 1.0; identity.m[3][2] = 0.0;
-    identity.m[0][3] = 0.0;     identity.m[1][3] = 0.0;     identity.m[2][3] = 0.0; identity.m[3][3] = 1.0;
+    U(identity).m[0][0] = 1.0;     U(identity).m[1][0] = 0.0;     U(identity).m[2][0] = 0.0; U(identity).m[3][0] = 0.0;
+    U(identity).m[0][1] = 0.0;     U(identity).m[1][1] = 1.0;     U(identity).m[2][1] = 0.0; U(identity).m[3][1] = 0.0;
+    U(identity).m[0][2] = 0.0;     U(identity).m[1][2] = 0.0;     U(identity).m[2][2] = 1.0; U(identity).m[3][2] = 0.0;
+    U(identity).m[0][3] = 0.0;     U(identity).m[1][3] = 0.0;     U(identity).m[2][3] = 0.0; U(identity).m[3][3] = 1.0;
 
     memset(&caps, 0, sizeof(caps));
     hr = IDirect3DDevice9_GetDeviceCaps(device, &caps);
@@ -7205,6 +8323,766 @@ static void pointsize_test(IDirect3DDevice9 *device)
     ok(hr == D3D_OK, "IDirect3DDevice9_SetTransform failed, hr=%s\n", DXGetErrorString9(hr));
 }
 
+static void multiple_rendertargets_test(IDirect3DDevice9 *device)
+{
+    HRESULT hr;
+    IDirect3DPixelShader9 *ps;
+    IDirect3DTexture9 *tex1, *tex2;
+    IDirect3DSurface9 *surf1, *surf2, *backbuf;
+    D3DCAPS9 caps;
+    DWORD color;
+    DWORD shader_code[] = {
+    0xffff0300,                                                             /* ps_3_0             */
+    0x05000051, 0xa00f0000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, /* def c0, 0, 1, 0, 0 */
+    0x05000051, 0xa00f0001, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, /* def c1, 0, 0, 1, 0 */
+    0x02000001, 0x800f0800, 0xa0e40000,                                     /* mov oC0, c0        */
+    0x02000001, 0x800f0801, 0xa0e40001,                                     /* mov oC1, c1        */
+    0x0000ffff                                                              /* END                */
+    };
+    float quad[] = {
+       -1.0,   -1.0,    0.1,
+        1.0,   -1.0,    0.1,
+       -1.0,    1.0,    0.1,
+        1.0,    1.0,    0.1,
+    };
+    float texquad[] = {
+       -1.0,   -1.0,    0.1,    0.0,    0.0,
+        0.0,   -1.0,    0.1,    1.0,    0.0,
+       -1.0,    1.0,    0.1,    0.0,    1.0,
+        0.0,    1.0,    0.1,    1.0,    1.0,
+
+        0.0,   -1.0,    0.1,    0.0,    0.0,
+        1.0,   -1.0,    0.1,    1.0,    0.0,
+        0.0,    1.0,    0.1,    0.0,    1.0,
+        1.0,    1.0,    0.1,    1.0,    1.0,
+    };
+
+    memset(&caps, 0, sizeof(caps));
+    hr = IDirect3DDevice9_GetDeviceCaps(device, &caps);
+    ok(hr == D3D_OK, "IDirect3DDevice9_GetCaps failed, hr=%s\n", DXGetErrorString9(hr));
+    if(caps.NumSimultaneousRTs < 2) {
+        skip("Only 1 simultaneous render target supported, skipping MRT test\n");
+        return;
+    }
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0xffff0000, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed, hr=%s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_CreateTexture(device, 16, 16, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &tex1, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateTexture failed, hr=%s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreateTexture(device, 16, 16, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &tex2, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateTexture failed, hr=%s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreatePixelShader(device, shader_code, &ps);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreatePixelShader failed, hr=%s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_GetRenderTarget(device, 0, &backbuf);
+    ok(hr == D3D_OK, "IDirect3DDevice9_GetRenderTarget failed, hr=%s\n", DXGetErrorString9(hr));
+    hr = IDirect3DTexture9_GetSurfaceLevel(tex1, 0, &surf1);
+    ok(hr == D3D_OK, "IDirect3DTexture9_GetSurfaceLevel failed, hr=%s\n", DXGetErrorString9(hr));
+    hr = IDirect3DTexture9_GetSurfaceLevel(tex2, 0, &surf2);
+    ok(hr == D3D_OK, "IDirect3DTexture9_GetSurfaceLevel failed, hr=%s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetPixelShader(device, ps);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader failed, hr=%s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetRenderTarget(device, 0, surf1);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderTarget failed, hr=%s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetRenderTarget(device, 1, surf2);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderTarget failed, hr=%s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed, hr=%s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed, hr=%s\n", DXGetErrorString9(hr));
+    if(SUCCEEDED(hr)) {
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, 3 * sizeof(float));
+        ok(hr == D3D_OK, "IDirect3DDevice9_DrawPrimitiveUP failed, hr=%s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_SetPixelShader(device, NULL);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader failed, hr=%s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_SetRenderTarget(device, 0, backbuf);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderTarget failed, hr=%s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_SetRenderTarget(device, 1, NULL);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderTarget failed, hr=%s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_TEX1);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed, hr=%s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_SetTexture(device, 0, (IDirect3DBaseTexture9 *) tex1);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed, hr=%s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, &texquad[0], 5 * sizeof(float));
+        ok(hr == D3D_OK, "IDirect3DDevice9_DrawPrimitiveUP failed, hr=%s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_SetTexture(device, 0, (IDirect3DBaseTexture9 *) tex2);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed, hr=%s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, &texquad[20], 5 * sizeof(float));
+        ok(hr == D3D_OK, "IDirect3DDevice9_DrawPrimitiveUP failed, hr=%s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_SetTexture(device, 0, NULL);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed, hr=%s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed, hr=%s\n", DXGetErrorString9(hr));
+    }
+
+    IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    color = getPixelColor(device, 160, 240);
+    ok(color == 0x0000ff00, "Texture 1(output color 1) has color 0x%08x, expected 0x0000ff00\n", color);
+    color = getPixelColor(device, 480, 240);
+    ok(color == 0x000000ff, "Texture 2(output color 2) has color 0x%08x, expected 0x000000ff\n", color);
+
+    IDirect3DPixelShader9_Release(ps);
+    IDirect3DTexture9_Release(tex1);
+    IDirect3DTexture9_Release(tex2);
+    IDirect3DSurface9_Release(surf1);
+    IDirect3DSurface9_Release(surf2);
+    IDirect3DSurface9_Release(backbuf);
+}
+
+struct formats {
+    const char *fmtName;
+    D3DFORMAT textureFormat;
+    DWORD resultColorBlending;
+    DWORD resultColorNoBlending;
+};
+
+const struct formats test_formats[] = {
+  { "D3DFMT_G16R16", D3DFMT_G16R16, 0x00181800, 0x002010ff},
+  { "D3DFMT_R16F", D3DFMT_R16F, 0x0018ffff, 0x0020ffff },
+  { "D3DFMT_G16R16F", D3DFMT_G16R16F, 0x001818ff, 0x002010ff },
+  { "D3DFMT_A16B16G16R16F", D3DFMT_A16B16G16R16F, 0x00181800, 0x00201000 },
+  { "D3DFMT_R32F", D3DFMT_R32F, 0x0018ffff, 0x0020ffff },
+  { "D3DFMT_G32R32F", D3DFMT_G32R32F, 0x001818ff, 0x002010ff },
+  { "D3DFMT_A32B32G32R32F", D3DFMT_A32B32G32R32F, 0x00181800, 0x00201000 },
+  { NULL, 0 }
+};
+
+static void pixelshader_blending_test(IDirect3DDevice9 *device)
+{
+    HRESULT hr;
+    IDirect3DTexture9 *offscreenTexture = NULL;
+    IDirect3DSurface9 *backbuffer = NULL, *offscreen = NULL;
+    IDirect3D9 *d3d = NULL;
+    DWORD color;
+    DWORD r0, g0, b0, r1, g1, b1;
+    int fmt_index;
+
+    static const float quad[][5] = {
+        {-0.5f, -0.5f, 0.1f, 0.0f, 0.0f},
+        {-0.5f,  0.5f, 0.1f, 0.0f, 1.0f},
+        { 0.5f, -0.5f, 0.1f, 1.0f, 0.0f},
+        { 0.5f,  0.5f, 0.1f, 1.0f, 1.0f},
+    };
+
+    /* Quad with R=0x10, G=0x20 */
+    static const struct vertex quad1[] = {
+        {-1.0f, -1.0f, 0.1f, 0x80102000},
+        {-1.0f,  1.0f, 0.1f, 0x80102000},
+        { 1.0f, -1.0f, 0.1f, 0x80102000},
+        { 1.0f,  1.0f, 0.1f, 0x80102000},
+    };
+
+    /* Quad with R=0x20, G=0x10 */
+    static const struct vertex quad2[] = {
+        {-1.0f, -1.0f, 0.1f, 0x80201000},
+        {-1.0f,  1.0f, 0.1f, 0x80201000},
+        { 1.0f, -1.0f, 0.1f, 0x80201000},
+        { 1.0f,  1.0f, 0.1f, 0x80201000},
+    };
+
+    IDirect3DDevice9_GetDirect3D(device, &d3d);
+
+    hr = IDirect3DDevice9_GetBackBuffer(device, 0, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer);
+    ok(hr == D3D_OK, "Can't get back buffer, hr = %s\n", DXGetErrorString9(hr));
+    if(!backbuffer) {
+        goto out;
+    }
+
+    for(fmt_index=0; test_formats[fmt_index].textureFormat != 0; fmt_index++)
+    {
+        D3DFORMAT fmt = test_formats[fmt_index].textureFormat;
+        if(IDirect3D9_CheckDeviceFormat(d3d, 0, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, 0, D3DRTYPE_TEXTURE, fmt) != D3D_OK) {
+           skip("%s textures not supported\n", test_formats[fmt_index].fmtName);
+           continue;
+        }
+
+        hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffffffff, 0.0, 0);
+        ok(hr == D3D_OK, "Clear failed, hr = %s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_CreateTexture(device, 128, 128, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, &offscreenTexture, NULL);
+        ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL, "Creating the offscreen render target failed, hr = %s\n", DXGetErrorString9(hr));
+        if(!offscreenTexture) {
+            continue;
+        }
+
+        hr = IDirect3DTexture9_GetSurfaceLevel(offscreenTexture, 0, &offscreen);
+        ok(hr == D3D_OK, "Can't get offscreen surface, hr = %s\n", DXGetErrorString9(hr));
+        if(!offscreen) {
+            continue;
+        }
+
+        hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_DIFFUSE);
+        ok(hr == D3D_OK, "SetFVF failed, hr = %s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+        ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+        ok(SUCCEEDED(hr), "SetSamplerState D3DSAMP_MINFILTER failed (0x%08x)\n", hr);
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+        ok(SUCCEEDED(hr), "SetSamplerState D3DSAMP_MAGFILTER failed (0x%08x)\n", hr);
+        hr = IDirect3DDevice9_SetRenderState(device, D3DRS_LIGHTING, FALSE);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState returned %s\n", DXGetErrorString9(hr));
+
+        /* Below we will draw two quads with different colors and try to blend them together.
+         * The result color is compared with the expected outcome.
+         */
+        if(IDirect3DDevice9_BeginScene(device) == D3D_OK) {
+            hr = IDirect3DDevice9_SetRenderTarget(device, 0, offscreen);
+            ok(hr == D3D_OK, "SetRenderTarget failed, hr = %s\n", DXGetErrorString9(hr));
+            hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0x00ffffff, 0.0, 0);
+            ok(hr == D3D_OK, "Clear failed, hr = %s\n", DXGetErrorString9(hr));
+
+            hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ALPHABLENDENABLE, TRUE);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed, hr = %08x\n", hr);
+
+            /* Draw a quad using color 0x0010200 */
+            hr = IDirect3DDevice9_SetRenderState(device, D3DRS_SRCBLEND, D3DBLEND_ONE);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed, hr = %08x\n", hr);
+            hr = IDirect3DDevice9_SetRenderState(device, D3DRS_DESTBLEND, D3DBLEND_ZERO);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed, hr = %08x\n", hr);
+            hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad1, sizeof(quad1[0]));
+            ok(hr == D3D_OK, "DrawPrimitiveUP failed, hr = %#08x\n", hr);
+
+            /* Draw a quad using color 0x0020100 */
+            hr = IDirect3DDevice9_SetRenderState(device, D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed, hr = %08x\n", hr);
+            hr = IDirect3DDevice9_SetRenderState(device, D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed, hr = %08x\n", hr);
+            hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad2, sizeof(quad2[0]));
+            ok(hr == D3D_OK, "DrawPrimitiveUP failed, hr = %#08x\n", hr);
+
+            /* We don't want to blend the result on the backbuffer */
+            hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ALPHABLENDENABLE, FALSE);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed, hr = %08x\n", hr);
+
+            /* Prepare rendering the 'blended' texture quad to the backbuffer */
+            hr = IDirect3DDevice9_SetRenderTarget(device, 0, backbuffer);
+            ok(hr == D3D_OK, "SetRenderTarget failed, hr = %s\n", DXGetErrorString9(hr));
+            hr = IDirect3DDevice9_SetTexture(device, 0, (IDirect3DBaseTexture9 *) offscreenTexture);
+            ok(hr == D3D_OK, "SetTexture failed, %s\n", DXGetErrorString9(hr));
+
+            hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_TEX1);
+            ok(hr == D3D_OK, "SetFVF failed, hr = %s\n", DXGetErrorString9(hr));
+
+            /* This time with the texture */
+            hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(quad[0]));
+            ok(hr == D3D_OK, "DrawPrimitiveUP failed, hr = %s\n", DXGetErrorString9(hr));
+
+            IDirect3DDevice9_EndScene(device);
+        }
+        IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+
+
+        if(IDirect3D9_CheckDeviceFormat(d3d, 0, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, D3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING, D3DRTYPE_TEXTURE, fmt) == D3D_OK) {
+            /* Compare the color of the center quad with our expectation */
+            color = getPixelColor(device, 320, 240);
+            r0 = (color & 0x00ff0000) >> 16;
+            g0 = (color & 0x0000ff00) >>  8;
+            b0 = (color & 0x000000ff) >>  0;
+
+            r1 = (test_formats[fmt_index].resultColorBlending & 0x00ff0000) >> 16;
+            g1 = (test_formats[fmt_index].resultColorBlending & 0x0000ff00) >>  8;
+            b1 = (test_formats[fmt_index].resultColorBlending & 0x000000ff) >>  0;
+
+            ok(r0 >= max(r1, 1) - 1 && r0 <= r1 + 1 &&
+               g0 >= max(g1, 1) - 1 && g0 <= g1 + 1 &&
+               b0 >= max(b1, 1) - 1 && b0 <= b1 + 1,
+               "Offscreen failed for %s: Got color %#08x, expected %#08x.\n", test_formats[fmt_index].fmtName, color, test_formats[fmt_index].resultColorBlending);
+        } else {
+            /* No pixel shader blending is supported so expected garbage.The type of 'garbage' depends on the driver version and OS.
+             * E.g. on G16R16 ati reports (on old r9600 drivers) 0x00ffffff and on modern ones 0x002010ff which is also what Nvidia
+             * reports. On Vista Nvidia seems to report 0x00ffffff on Geforce7 cards. */
+            color = getPixelColor(device, 320, 240);
+            ok((color == 0x00ffffff) || (color == test_formats[fmt_index].resultColorNoBlending), "Offscreen failed for %s: expected no color blending but received it anyway.\n", test_formats[fmt_index].fmtName);
+        }
+
+        IDirect3DDevice9_SetTexture(device, 0, NULL);
+        if(offscreenTexture) {
+            IDirect3DTexture9_Release(offscreenTexture);
+        }
+        if(offscreen) {
+            IDirect3DSurface9_Release(offscreen);
+        }
+    }
+
+out:
+    /* restore things */
+    if(backbuffer) {
+        IDirect3DDevice9_SetRenderTarget(device, 0, backbuffer);
+        IDirect3DSurface9_Release(backbuffer);
+    }
+}
+
+static void tssargtemp_test(IDirect3DDevice9 *device)
+{
+    HRESULT hr;
+    DWORD color;
+    static const struct vertex quad[] = {
+        {-1.0,     -1.0,    0.1,    0x00ff0000},
+        { 1.0,     -1.0,    0.1,    0x00ff0000},
+        {-1.0,      1.0,    0.1,    0x00ff0000},
+        { 1.0,      1.0,    0.1,    0x00ff0000}
+    };
+    D3DCAPS9 caps;
+
+    memset(&caps, 0, sizeof(caps));
+    hr = IDirect3DDevice9_GetDeviceCaps(device, &caps);
+    ok(hr == D3D_OK, "IDirect3DDevice9_GetDeviceCaps failed with %s\n", DXGetErrorString9(hr));
+    if(!(caps.PrimitiveMiscCaps & D3DPMISCCAPS_TSSARGTEMP)) {
+        skip("D3DPMISCCAPS_TSSARGTEMP not supported\n");
+        return;
+    }
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff000000, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetTextureStageState(device, 1, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 1, D3DTSS_COLORARG1, D3DTA_TFACTOR);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 1, D3DTSS_RESULTARG, D3DTA_TEMP);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetTextureStageState(device, 2, D3DTSS_COLOROP, D3DTOP_ADD);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 2, D3DTSS_COLORARG1, D3DTA_CURRENT);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 2, D3DTSS_COLORARG2, D3DTA_TEMP);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetTextureStageState(device, 3, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_TEXTUREFACTOR, 0x0000ff00);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed, hr = %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_DIFFUSE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed, hr = %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed, hr = %s\n", DXGetErrorString9(hr));
+    if(SUCCEEDED(hr)) {
+
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed, hr = %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(quad[0]));
+        ok(hr == D3D_OK, "IDirect3DDevice9_DrawPrimitiveUP failed with %s\n", DXGetErrorString9(hr));
+    }
+    IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    color = getPixelColor(device, 320, 240);
+    ok(color == 0x00FFFF00, "TSSARGTEMP test returned color 0x%08x, expected 0x00FFFF00\n", color);
+
+    /* Set stage 1 back to default */
+    hr = IDirect3DDevice9_SetTextureStageState(device, 1, D3DTSS_RESULTARG, D3DTA_CURRENT);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 2, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 3, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+}
+
+struct testdata
+{
+    DWORD idxVertex; /* number of instances in the first stream */
+    DWORD idxColor; /* number of instances in the second stream */
+    DWORD idxInstance; /* should be 1 ?? */
+    DWORD color1; /* color 1 instance */
+    DWORD color2; /* color 2 instance */
+    DWORD color3; /* color 3 instance */
+    DWORD color4; /* color 4 instance */
+    WORD strVertex; /* specify which stream to use 0-2*/
+    WORD strColor;
+    WORD strInstance;
+};
+
+static const struct testdata testcases[]=
+{
+    {4, 4, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0, 1, 2}, /*  0 */
+    {3, 4, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ffffff, 0, 1, 2}, /*  1 */
+    {2, 4, 1, 0x00ff0000, 0x00ff0000, 0x00ffffff, 0x00ffffff, 0, 1, 2}, /*  2 */
+    {1, 4, 1, 0x00ff0000, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0, 1, 2}, /*  3 */
+    {0, 4, 1, 0x00ff0000, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0, 1, 2}, /*  4 */
+    {4, 3, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0, 1, 2}, /*  5 */
+    {4, 2, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0, 1, 2}, /*  6 */
+    {4, 1, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0, 1, 2}, /*  7 */
+    {4, 0, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0, 1, 2}, /*  8 */
+    {3, 3, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ffffff, 0, 1, 2}, /*  9 */
+    {4, 4, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 1, 0, 2}, /* 10 */
+    {4, 4, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0, 2, 1}, /* 11 */
+    {4, 4, 1, 0x00ff0000, 0x00ffffff, 0x00ffffff, 0x00ffffff, 2, 3, 1}, /* 12 */
+    {4, 4, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 2, 0, 1}, /* 13 */
+    {4, 4, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 1, 2, 3}, /* 14 */
+/*
+    This case is handled in a stand alone test, SetStreamSourceFreq(0,(D3DSTREAMSOURCE_INSTANCEDATA | 1))  has to return D3DERR_INVALIDCALL!
+    {4, 4, 1, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0x00ffffff, 2, 1, 0, D3DERR_INVALIDCALL},
+*/
+};
+
+/* Drawing Indexed Geometry with instances*/
+static void stream_test(IDirect3DDevice9 *device)
+{
+    IDirect3DVertexBuffer9 *vb = NULL;
+    IDirect3DVertexBuffer9 *vb2 = NULL;
+    IDirect3DVertexBuffer9 *vb3 = NULL;
+    IDirect3DIndexBuffer9 *ib = NULL;
+    IDirect3DVertexDeclaration9 *pDecl = NULL;
+    IDirect3DVertexShader9 *shader = NULL;
+    HRESULT hr;
+    BYTE *data;
+    DWORD color;
+    DWORD ind;
+    int i;
+
+    const DWORD shader_code[] =
+    {
+        0xfffe0101,                                     /* vs_1_1 */
+        0x0000001f, 0x80000000, 0x900f0000,             /* dcl_position v0 */
+        0x0000001f, 0x8000000a, 0x900f0001,             /* dcl_color0 v1 */
+        0x0000001f, 0x80000005, 0x900f0002,             /* dcl_texcoord v2 */
+        0x00000001, 0x800f0000, 0x90e40000,             /* mov r0, v0 */
+        0x00000002, 0xc00f0000, 0x80e40000, 0x90e40002, /* add oPos, r0, v2 */
+        0x00000001, 0xd00f0000, 0x90e40001,             /* mov oD0, v1 */
+        0x0000ffff
+    };
+
+    const float quad[][3] =
+    {
+        {-0.5f, -0.5f,  1.1f}, /*0 */
+        {-0.5f,  0.5f,  1.1f}, /*1 */
+        { 0.5f, -0.5f,  1.1f}, /*2 */
+        { 0.5f,  0.5f,  1.1f}, /*3 */
+    };
+
+    const float vertcolor[][4] =
+    {
+        {1.0f, 0.0f, 0.0f, 1.0f}, /*0 */
+        {1.0f, 0.0f, 0.0f, 1.0f}, /*1 */
+        {1.0f, 0.0f, 0.0f, 1.0f}, /*2 */
+        {1.0f, 0.0f, 0.0f, 1.0f}, /*3 */
+    };
+
+    /* 4 position for 4 instances */
+    const float instancepos[][3] =
+    {
+        {-0.6f,-0.6f, 0.0f},
+        { 0.6f,-0.6f, 0.0f},
+        { 0.6f, 0.6f, 0.0f},
+        {-0.6f, 0.6f, 0.0f},
+    };
+
+    short indices[] = {0, 1, 2, 1, 2, 3};
+
+    D3DVERTEXELEMENT9 decl[] =
+    {
+        {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {1, 0,  D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
+        {2, 0,  D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+        D3DDECL_END()
+    };
+
+    /* set the default value because it isn't done in wine? */
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, 1);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+
+    /* check for D3DSTREAMSOURCE_INDEXEDDATA at stream0 */
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 0, (D3DSTREAMSOURCE_INSTANCEDATA | 1));
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+
+    /* check wrong cases */
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, 0);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_GetStreamSourceFreq(device, 1, &ind);
+    ok(hr == D3D_OK && ind == 1, "IDirect3DDevice9_GetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, 2);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_GetStreamSourceFreq(device, 1, &ind);
+    ok(hr == D3D_OK && ind == 2, "IDirect3DDevice9_GetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, (D3DSTREAMSOURCE_INDEXEDDATA | 0));
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_GetStreamSourceFreq(device, 1, &ind);
+    ok(hr == D3D_OK && ind == (D3DSTREAMSOURCE_INDEXEDDATA | 0), "IDirect3DDevice9_GetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, (D3DSTREAMSOURCE_INSTANCEDATA | 0));
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_GetStreamSourceFreq(device, 1, &ind);
+    ok(hr == D3D_OK && ind == (0 | D3DSTREAMSOURCE_INSTANCEDATA), "IDirect3DDevice9_GetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, (D3DSTREAMSOURCE_INSTANCEDATA | D3DSTREAMSOURCE_INDEXEDDATA | 0));
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_GetStreamSourceFreq(device, 1, &ind);
+    ok(hr == D3D_OK && ind == (0 | D3DSTREAMSOURCE_INSTANCEDATA), "IDirect3DDevice9_GetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+
+    /* set the default value back */
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, 1);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+
+    /* create all VertexBuffers*/
+    hr = IDirect3DDevice9_CreateVertexBuffer(device, sizeof(quad), 0, 0, D3DPOOL_MANAGED, &vb, NULL);
+    ok(hr == D3D_OK, "CreateVertexBuffer failed with %s\n", DXGetErrorString9(hr));
+    if(!vb) {
+        skip("Failed to create a vertex buffer\n");
+        return;
+    }
+    hr = IDirect3DDevice9_CreateVertexBuffer(device, sizeof(vertcolor), 0, 0, D3DPOOL_MANAGED, &vb2, NULL);
+    ok(hr == D3D_OK, "CreateVertexBuffer failed with %s\n", DXGetErrorString9(hr));
+    if(!vb2) {
+        skip("Failed to create a vertex buffer\n");
+        goto out;
+    }
+    hr = IDirect3DDevice9_CreateVertexBuffer(device, sizeof(instancepos), 0, 0, D3DPOOL_MANAGED, &vb3, NULL);
+    ok(hr == D3D_OK, "CreateVertexBuffer failed with %s\n", DXGetErrorString9(hr));
+    if(!vb3) {
+        skip("Failed to create a vertex buffer\n");
+        goto out;
+    }
+
+    /* create IndexBuffer*/
+    hr = IDirect3DDevice9_CreateIndexBuffer(device, sizeof(indices), 0, D3DFMT_INDEX16, D3DPOOL_DEFAULT, &ib, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateIndexBuffer failed with %s\n", DXGetErrorString9(hr));
+    if(!ib) {
+        skip("Failed to create a index buffer\n");
+        goto out;
+    }
+
+    /* copy all Buffers (Vertex + Index)*/
+    hr = IDirect3DVertexBuffer9_Lock(vb, 0, sizeof(quad), (void **) &data, 0);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Lock failed with %s\n", DXGetErrorString9(hr));
+    memcpy(data, quad, sizeof(quad));
+    hr = IDirect3DVertexBuffer9_Unlock(vb);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DVertexBuffer9_Lock(vb2, 0, sizeof(vertcolor), (void **) &data, 0);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Lock failed with %s\n", DXGetErrorString9(hr));
+    memcpy(data, vertcolor, sizeof(vertcolor));
+    hr = IDirect3DVertexBuffer9_Unlock(vb2);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DVertexBuffer9_Lock(vb3, 0, sizeof(instancepos), (void **) &data, 0);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Lock failed with %s\n", DXGetErrorString9(hr));
+    memcpy(data, instancepos, sizeof(instancepos));
+    hr = IDirect3DVertexBuffer9_Unlock(vb3);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DIndexBuffer9_Lock(ib, 0, sizeof(indices), (void **) &data, 0);
+    ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Lock failed with %s\n", DXGetErrorString9(hr));
+    memcpy(data, indices, sizeof(indices));
+    hr = IDirect3DIndexBuffer9_Unlock(ib);
+    ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
+
+    /* create VertexShader */
+    hr = IDirect3DDevice9_CreateVertexShader(device, shader_code, &shader);
+    ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateVertexShader failed hr=%s\n", DXGetErrorString9(hr));
+    if(!shader) {
+        skip("Failed to create a vetex shader\n");
+        goto out;
+    }
+
+    hr = IDirect3DDevice9_SetVertexShader(device, shader);
+    ok(SUCCEEDED(hr), "IDirect3DDevice9_SetVertexShader failed hr=%s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetIndices(device, ib);
+    ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
+
+    /* run all tests */
+    for( i = 0; i < sizeof(testcases)/sizeof(testcases[0]); ++i)
+    {
+        struct testdata act = testcases[i];
+        decl[0].Stream = act.strVertex;
+        decl[1].Stream = act.strColor;
+        decl[2].Stream = act.strInstance;
+        /* create VertexDeclarations */
+        hr = IDirect3DDevice9_CreateVertexDeclaration(device, decl, &pDecl);
+        ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateVertexDeclaration failed hr=%s (case %i)\n", DXGetErrorString9(hr), i);
+
+        hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffffffff, 0.0, 0);
+        ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %08x (case %i)\n", hr, i);
+
+        hr = IDirect3DDevice9_BeginScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed with %08x (case %i)\n", hr, i);
+        if(SUCCEEDED(hr))
+        {
+            hr = IDirect3DDevice9_SetVertexDeclaration(device, pDecl);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed with %08x (case %i)\n", hr, i);
+
+            hr = IDirect3DDevice9_SetStreamSourceFreq(device, act.strVertex, (D3DSTREAMSOURCE_INDEXEDDATA | act.idxVertex));
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+            hr = IDirect3DDevice9_SetStreamSource(device, act.strVertex, vb, 0, sizeof(quad[0]));
+            ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+
+            hr = IDirect3DDevice9_SetStreamSourceFreq(device, act.strColor, (D3DSTREAMSOURCE_INDEXEDDATA | act.idxColor));
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+            hr = IDirect3DDevice9_SetStreamSource(device, act.strColor, vb2, 0, sizeof(vertcolor[0]));
+            ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+
+            hr = IDirect3DDevice9_SetStreamSourceFreq(device, act.strInstance, (D3DSTREAMSOURCE_INSTANCEDATA | act.idxInstance));
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+            hr = IDirect3DDevice9_SetStreamSource(device, act.strInstance, vb3, 0, sizeof(instancepos[0]));
+            ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+
+            /* don't know if this is right (1*3 and 4*1)*/
+            hr = IDirect3DDevice9_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST, 0, 0, 1 * 3 , 0, 4*1);
+            ok(hr == D3D_OK, "IDirect3DDevice9_DrawIndexedPrimitive failed with %08x (case %i)\n", hr, i);
+            hr = IDirect3DDevice9_EndScene(device);
+            ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with %08x (case %i)\n", hr, i);
+
+            /* set all StreamSource && StreamSourceFreq back to default */
+            hr = IDirect3DDevice9_SetStreamSourceFreq(device, act.strVertex, 1);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+            hr = IDirect3DDevice9_SetStreamSource(device, act.strVertex, NULL, 0, 0);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed with %08x (case %i)\n", hr, i);
+            hr = IDirect3DDevice9_SetStreamSourceFreq(device, act.idxColor, 1);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+            hr = IDirect3DDevice9_SetStreamSource(device, act.idxColor, NULL, 0, 0);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed with %08x (case %i)\n", hr, i);
+            hr = IDirect3DDevice9_SetStreamSourceFreq(device, act.idxInstance, 1);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+            hr = IDirect3DDevice9_SetStreamSource(device, act.idxInstance, NULL, 0, 0);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed with %08x (case %i)\n", hr, i);
+        }
+
+        hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+        ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %08x (case %i)\n", hr, i);
+
+        hr = IDirect3DVertexDeclaration9_Release(pDecl);
+        ok(hr == D3D_OK, "IDirect3DVertexDeclaration9_Release failed with %08x (case %i)\n", hr, i);
+
+        color = getPixelColor(device, 160, 360);
+        ok(color == act.color1, "has color 0x%08x, expected 0x%08x (case %i)\n", color, act.color1, i);
+        color = getPixelColor(device, 480, 360);
+        ok(color == act.color2, "has color 0x%08x, expected 0x%08x (case %i)\n", color, act.color2, i);
+        color = getPixelColor(device, 480, 120);
+        ok(color == act.color3, "has color 0x%08x, expected 0x%08x (case %i)\n", color, act.color3, i);
+        color = getPixelColor(device, 160, 120);
+        ok(color == act.color4, "has color 0x%08x, expected 0x%08x (case %i)\n", color, act.color4, i);
+    }
+
+    hr = IDirect3DDevice9_SetIndices(device, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetIndices failed with %08x\n", hr);
+
+out:
+    if(vb) IDirect3DVertexBuffer9_Release(vb);
+    if(vb2)IDirect3DVertexBuffer9_Release(vb2);
+    if(vb3)IDirect3DVertexBuffer9_Release(vb3);
+    if(ib)IDirect3DIndexBuffer9_Release(ib);
+    if(shader)IDirect3DVertexShader9_Release(shader);
+}
+
+static void np2_stretch_rect_test(IDirect3DDevice9 *device) {
+    IDirect3DSurface9 *src = NULL, *dst = NULL, *backbuffer = NULL;
+    IDirect3DTexture9 *dsttex = NULL;
+    HRESULT hr;
+    DWORD color;
+    D3DRECT r1 = {0,  0,  50,  50 };
+    D3DRECT r2 = {50, 0,  100, 50 };
+    D3DRECT r3 = {50, 50, 100, 100};
+    D3DRECT r4 = {0,  50,  50, 100};
+    const float quad[] = {
+        -1.0,   -1.0,   0.1,    0.0,    0.0,
+         1.0,   -1.0,   0.1,    1.0,    0.0,
+        -1.0,    1.0,   0.1,    0.0,    1.0,
+         1.0,    1.0,   0.1,    1.0,    1.0,
+    };
+
+    hr = IDirect3DDevice9_GetBackBuffer(device, 0, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer);
+    ok(hr == D3D_OK, "IDirect3DDevice9_GetBackBuffer failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_CreateRenderTarget(device, 100, 100, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, TRUE, &src, NULL );
+    ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_CreateRenderTarget failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreateTexture(device, 25, 25, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &dsttex, NULL);
+    ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_CreateTexture failed with %s\n", DXGetErrorString9(hr));
+
+    if(!src || !dsttex) {
+        skip("One or more test resources could not be created\n");
+        goto cleanup;
+    }
+
+    hr = IDirect3DTexture9_GetSurfaceLevel(dsttex, 0, &dst);
+    ok(hr == D3D_OK, "IDirect3DTexture9_GetSurfaceLevel failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_Clear(device, 1, NULL, D3DCLEAR_TARGET, 0xff00ffff, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %s\n", DXGetErrorString9(hr));
+
+    /* Clear the StretchRect destination for debugging */
+    hr = IDirect3DDevice9_SetRenderTarget(device, 0, dst);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderTarget failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_Clear(device, 1, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetRenderTarget(device, 0, src);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderTarget failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_Clear(device, 1, &r1, D3DCLEAR_TARGET, 0xffff0000, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_Clear(device, 1, &r2, D3DCLEAR_TARGET, 0xff00ff00, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_Clear(device, 1, &r3, D3DCLEAR_TARGET, 0xff0000ff, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_Clear(device, 1, &r4, D3DCLEAR_TARGET, 0xff000000, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %s\n", DXGetErrorString9(hr));
+
+    /* Stretchrect before setting the render target back to the backbuffer. This will make Wine use
+     * the target -> texture GL blit path
+     */
+    hr = IDirect3DDevice9_StretchRect(device, src, NULL, dst, NULL, D3DTEXF_POINT);
+    ok(hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+    IDirect3DSurface9_Release(dst);
+
+    hr = IDirect3DDevice9_SetRenderTarget(device, 0, backbuffer);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderTarget failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetTexture(device, 0, (IDirect3DBaseTexture9 *) dsttex);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_TEX1);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed with %s\n", DXGetErrorString9(hr));
+    if(SUCCEEDED(hr)) {
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(float) * 5);
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with %s\n", DXGetErrorString9(hr));
+    }
+
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
+    color = getPixelColor(device, 160, 360);
+    ok(color == 0x00ff0000, "stretchrect: Pixel 160,360 has color 0x%08x, expected 0x00ff0000\n", color);
+    color = getPixelColor(device, 480, 360);
+    ok(color == 0x0000ff00, "stretchrect: Pixel 480,360 has color 0x%08x, expected 0x0000ff00\n", color);
+    color = getPixelColor(device, 480, 120);
+    ok(color == 0x000000ff, "stretchrect: Pixel 480,120 has color 0x%08x, expected 0x000000ff\n", color);
+    color = getPixelColor(device, 160, 120);
+    ok(color == 0x00000000, "stretchrect: Pixel 160,120 has color 0x%08x, expected 0x00000000\n", color);
+
+    hr = IDirect3DDevice9_SetTexture(device, 0, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+
+cleanup:
+    if(src) IDirect3DSurface9_Release(src);
+    if(backbuffer) IDirect3DSurface9_Release(backbuffer);
+    if(dsttex) IDirect3DTexture9_Release(dsttex);
+}
+
 START_TEST(visual)
 {
     IDirect3DDevice9 *device_ptr;
@@ -7260,6 +9138,7 @@ START_TEST(visual)
     }
 
     /* Now execute the real tests */
+    stretchrect_test(device_ptr);
     lighting_test(device_ptr);
     clear_test(device_ptr);
     fog_test(device_ptr);
@@ -7280,9 +9159,12 @@ START_TEST(visual)
     }
     offscreen_test(device_ptr);
     alpha_test(device_ptr);
+    shademode_test(device_ptr);
+    srgbtexture_test(device_ptr);
     release_buffer_test(device_ptr);
     float_texture_test(device_ptr);
     g16r16_texture_test(device_ptr);
+    pixelshader_blending_test(device_ptr);
     texture_transform_flags_test(device_ptr);
     autogen_mipmap_test(device_ptr);
     fixed_function_decl_test(device_ptr);
@@ -7294,6 +9176,8 @@ START_TEST(visual)
         skip("No two sided stencil support\n");
     }
     pointsize_test(device_ptr);
+    tssargtemp_test(device_ptr);
+    np2_stretch_rect_test(device_ptr);
 
     if (caps.VertexShaderVersion >= D3DVS_VERSION(1, 1))
     {
@@ -7308,6 +9192,7 @@ START_TEST(visual)
         if (caps.VertexShaderVersion >= D3DVS_VERSION(3, 0)) {
             test_vshader_input(device_ptr);
             test_vshader_float16(device_ptr);
+            stream_test(device_ptr);
         } else {
             skip("No vs_3_0 support\n");
         }
@@ -7330,19 +9215,25 @@ START_TEST(visual)
         if (caps.PixelShaderVersion >= D3DPS_VERSION(1, 4)) {
             constant_clamp_ps_test(device_ptr);
             cnd_test(device_ptr);
-            if (caps.PixelShaderVersion >= D3DPS_VERSION(3, 0)) {
-                nested_loop_test(device_ptr);
-                fixed_function_varying_test(device_ptr);
-                vFace_register_test(device_ptr);
-                vpos_register_test(device_ptr);
-                if(caps.VertexShaderVersion >= D3DVS_VERSION(3, 0)) {
-                    vshader_version_varying_test(device_ptr);
-                    pshader_version_varying_test(device_ptr);
+            if (caps.PixelShaderVersion >= D3DPS_VERSION(2, 0)) {
+                dp2add_ps_test(device_ptr);
+                if (caps.PixelShaderVersion >= D3DPS_VERSION(3, 0)) {
+                    nested_loop_test(device_ptr);
+                    fixed_function_varying_test(device_ptr);
+                    vFace_register_test(device_ptr);
+                    vpos_register_test(device_ptr);
+                    multiple_rendertargets_test(device_ptr);
+                    if(caps.VertexShaderVersion >= D3DVS_VERSION(3, 0)) {
+                        vshader_version_varying_test(device_ptr);
+                        pshader_version_varying_test(device_ptr);
+                    } else {
+                        skip("No vs_3_0 support\n");
+                    }
                 } else {
-                    skip("No vs_3_0 support\n");
+                    skip("No ps_3_0 support\n");
                 }
             } else {
-                skip("No ps_3_0 support\n");
+                skip("No ps_2_0 support\n");
             }
         }
     }

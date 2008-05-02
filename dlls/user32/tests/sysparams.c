@@ -727,9 +727,10 @@ static void test_SPI_SETBORDER( void )                 /*      6 */
      * do it twice to make the intended change). So skip parts of the tests on
      * those platforms */
     if( !iswin9x) {
-        test_setborder(1,  1, dpi);
-        test_setborder(0,  1, dpi);
+        /* win2k3 fails if you set the same border twice, or if size is 0 */
         test_setborder(2,  1, dpi);
+        test_setborder(1,  1, dpi);
+        test_setborder(3,  1, dpi);
     }
     test_setborder(1, 0, dpi);
     test_setborder(0, 0, dpi);
@@ -2554,11 +2555,13 @@ static void test_EnumDisplaySettings(void)
 
     num = 1;
     while (1) {
-	SetLastError (0xdeadbeef);
-	if (!EnumDisplaySettings(NULL, num++, &devmode)) {
-		DWORD le = GetLastError();
-		ok (le == ERROR_NO_MORE_FILES, "Last error on EnumDisplaySettings was %d, expected ERROR_NO_MORE_FILES\n", le);
-		break;
+        SetLastError (0xdeadbeef);
+        if (!EnumDisplaySettings(NULL, num++, &devmode)) {
+            DWORD le = GetLastError();
+            ok(le == ERROR_NO_MORE_FILES ||
+               le == 0xdeadbeef, /* XP, 2003 */
+               "Expected ERROR_NO_MORE_FILES or 0xdeadbeef, got %d\n", le);
+            break;
 	}
     }
 }

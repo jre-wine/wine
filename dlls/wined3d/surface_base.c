@@ -7,7 +7,7 @@
  * Copyright 2002-2003 Raphael Junqueira
  * Copyright 2004 Christian Costa
  * Copyright 2005 Oliver Stieber
- * Copyright 2006-2007 Stefan Dösinger for CodeWeavers
+ * Copyright 2006-2008 Stefan Dösinger for CodeWeavers
  * Copyright 2007 Henri Verbeet
  * Copyright 2006-2007 Roderick Colenbrander
  *
@@ -206,26 +206,16 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_SetPalette(IWineD3DSurface *iface, IWineD
         if(This->resource.usage & WINED3DUSAGE_RENDERTARGET)
             This->palette->Flags &= ~WINEDDPCAPS_PRIMARYSURFACE;
 
-    if(PalImpl != NULL) {
-        if(This->resource.usage & WINED3DUSAGE_RENDERTARGET) {
-            /* Set the device's main palette if the palette
-            * wasn't a primary palette before
-            */
-            if(!(PalImpl->Flags & WINEDDPCAPS_PRIMARYSURFACE)) {
-                IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
-                unsigned int i;
-
-                for(i=0; i < 256; i++) {
-                    device->palettes[device->currentPalette][i] = PalImpl->palents[i];
-                }
-            }
-
-            (PalImpl)->Flags |= WINEDDPCAPS_PRIMARYSURFACE;
-        }
-    }
     This->palette = PalImpl;
 
-    return IWineD3DSurface_RealizePalette(iface);
+    if(PalImpl != NULL) {
+        if(This->resource.usage & WINED3DUSAGE_RENDERTARGET) {
+            (PalImpl)->Flags |= WINEDDPCAPS_PRIMARYSURFACE;
+        }
+
+        return IWineD3DSurface_RealizePalette(iface);
+    }
+    else return WINED3D_OK;
 }
 
 HRESULT WINAPI IWineD3DBaseSurfaceImpl_SetColorKey(IWineD3DSurface *iface, DWORD Flags, WINEDDCOLORKEY *CKey) {
@@ -555,7 +545,7 @@ HRESULT IWineD3DBaseSurfaceImpl_CreateDIBSection(IWineD3DSurface *iface) {
     TRACE("DIBSection at : %p\n", This->dib.bitmap_data);
     /* copy the existing surface to the dib section */
     if(This->resource.allocatedMemory) {
-        memcpy(This->dib.bitmap_data, This->resource.allocatedMemory, b_info->bmiHeader.biSizeImage);
+        memcpy(This->dib.bitmap_data, This->resource.allocatedMemory,  This->currentDesc.Height * IWineD3DSurface_GetPitch(iface));
     } else {
         /* This is to make LockRect read the gl Texture although memory is allocated */
         This->Flags &= ~SFLAG_INSYSMEM;
@@ -650,8 +640,8 @@ IWineD3DSurfaceImpl *surface_convert_format(IWineD3DSurfaceImpl *source, WINED3D
                                  0,     /* usage */
                                  WINED3DPOOL_SCRATCH,
                                  WINED3DMULTISAMPLE_NONE,   /* TODO: Multisampled conversion */
-                                 0,     /* multisamplequality */
-                                 NULL,  /* sharedhandle */
+                                 0,     /* MultiSampleQuality */
+                                 NULL,  /* SharedHandle */
                                  IWineD3DSurface_GetImplType((IWineD3DSurface *) source),
                                  NULL); /* parent */
     if(!ret) {
@@ -849,7 +839,7 @@ IWineD3DBaseSurfaceImpl_Blt(IWineD3DSurface *iface,
 
     if (DestRect)
     {
-        memcpy(&xdst,DestRect,sizeof(xdst));
+        xdst = *DestRect;
     }
     else
     {
@@ -861,7 +851,7 @@ IWineD3DBaseSurfaceImpl_Blt(IWineD3DSurface *iface,
 
     if (SrcRect)
     {
-        memcpy(&xsrc,SrcRect,sizeof(xsrc));
+        xsrc = *SrcRect;
     }
     else
     {
@@ -1613,13 +1603,28 @@ IWineD3DBaseSurfaceImpl_BltFast(IWineD3DSurface *iface,
     else
     {
         int width = w * bpp;
+        INT sbufpitch, dbufpitch;
+
         TRACE("NO color key copy\n");
+        /* Handle overlapping surfaces */
+        if (sbuf < dbuf)
+        {
+            sbuf += (h - 1) * slock.Pitch;
+            dbuf += (h - 1) * dlock.Pitch;
+            sbufpitch = -slock.Pitch;
+            dbufpitch = -dlock.Pitch;
+        }
+        else
+        {
+            sbufpitch = slock.Pitch;
+            dbufpitch = dlock.Pitch;
+        }
         for (y = 0; y < h; y++)
         {
             /* This is pretty easy, a line for line memcpy */
-            memcpy(dbuf, sbuf, width);
-            sbuf += slock.Pitch;
-            dbuf += dlock.Pitch;
+            memmove(dbuf, sbuf, width);
+            sbuf += sbufpitch;
+            dbuf += dbufpitch;
         }
         TRACE("Copy done\n");
     }

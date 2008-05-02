@@ -222,8 +222,7 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_Init (LPDIRECTMUSICPERFORMANC
 	  This->pDirectSound = pDirectSound;
 	  IDirectSound_AddRef(This->pDirectSound);
 	} else {
-	  HRESULT hr;
-	  hr = DirectSoundCreate8(NULL, (LPDIRECTSOUND8*) &This->pDirectSound, NULL);
+	  DirectSoundCreate8(NULL, (LPDIRECTSOUND8*) &This->pDirectSound, NULL);
 	  if (!This->pDirectSound) return DSERR_NODRIVER;
 
 	  if (NULL != hWnd) {
@@ -239,7 +238,7 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_Init (LPDIRECTMUSICPERFORMANC
 	  This->pDirectMusic = (IDirectMusic8*) *ppDirectMusic;
 	  IDirectMusic8_AddRef(This->pDirectMusic);
 	} else {
-	  /* app allows the performance to initialise itfself and needs a pointer to object*/
+	  /* app allows the performance to initialise itself and needs a pointer to object*/
           CoCreateInstance (&CLSID_DirectMusic, NULL, CLSCTX_INPROC_SERVER, &IID_IDirectMusic8, (void**)&This->pDirectMusic);
 	  if (ppDirectMusic) {
 	    *ppDirectMusic = (LPDIRECTMUSIC) This->pDirectMusic;
@@ -758,7 +757,7 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_InitAudio (LPDIRECTMUSICPERFO
 	
 	IDirectMusicPerformance8Impl_Init(iface, ppDirectMusic, dsound, hWnd);
 
-	/* Init increases the ref count of the dsound object. Decremente it if the app don't want a pointer to the object. */
+	/* Init increases the ref count of the dsound object. Decrement it if the app doesn't want a pointer to the object. */
 	if (NULL == ppDirectSound) {
 	  IDirectSound_Release(This->pDirectSound);
 	}
@@ -872,7 +871,7 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_CreateStandardAudioPath (LPDI
 	        desc.dwFlags |= DSBCAPS_CTRLFREQUENCY;
 		break;
 	case DMUS_APATH_SHARED_STEREOPLUSREVERB:
-	        /* normally we havet to create 2 buffers (one for music other for reverb) 
+	        /* normally we have to create 2 buffers (one for music other for reverb)
 		 * in this case. See msdn
                  */
 	case DMUS_APATH_DYNAMIC_STEREO:

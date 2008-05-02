@@ -16,8 +16,8 @@
 @ stdcall BringWindowToTop(long)
 @ stdcall BroadcastSystemMessage(long ptr long long long) BroadcastSystemMessageA
 @ stdcall BroadcastSystemMessageA(long ptr long long long)
-# @ stub BroadcastSystemMessageExA
-# @ stub BroadcastSystemMessageExW
+@ stdcall BroadcastSystemMessageExA(long ptr long long long ptr)
+@ stdcall BroadcastSystemMessageExW(long ptr long long long ptr)
 @ stdcall BroadcastSystemMessageW(long ptr long long long)
 # @ stub BuildReasonArray
 @ stdcall CalcChildScroll(long long)
@@ -788,6 +788,3 @@
 # Wine dll separation hacks, these will go away, don't use them
 #
 @ cdecl HOOK_CallHooks(long long long long long)
-@ cdecl WINPOS_GetMinMaxInfo(long ptr ptr ptr ptr)
-@ cdecl WINPOS_ShowIconTitle(long long)
-@ cdecl WIN_invalidate_dce(long ptr) invalidate_dce

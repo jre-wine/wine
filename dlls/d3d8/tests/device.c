@@ -337,8 +337,8 @@ static void test_refcount(void)
     /**
      * Check refcount of implicit surfaces. Findings:
      *   - the container is the device
-     *   - they hold a refernce to the device
-     *   - they are created with a refcount of 0 (Get/Release returns orignial refcount)
+     *   - they hold a reference to the device
+     *   - they are created with a refcount of 0 (Get/Release returns original refcount)
      *   - they are not freed if refcount reaches 0.
      *   - the refcount is not forwarded to the container.
      */
@@ -880,6 +880,27 @@ static void test_shader(void)
         D3DVSD_REG(D3DVSDE_POSITION,  D3DVSDT_FLOAT3),
         D3DVSD_END()
     };
+    DWORD decl_normal_float2[] =
+    {
+        D3DVSD_STREAM(0),
+        D3DVSD_REG(D3DVSDE_POSITION, D3DVSDT_FLOAT3),  /* D3DVSDE_POSITION, Register v0 */
+        D3DVSD_REG(D3DVSDE_NORMAL,   D3DVSDT_FLOAT2),  /* D3DVSDE_NORMAL,   Register v1 */
+        D3DVSD_END()
+    };
+    DWORD decl_normal_float4[] =
+    {
+        D3DVSD_STREAM(0),
+        D3DVSD_REG(D3DVSDE_POSITION, D3DVSDT_FLOAT3),  /* D3DVSDE_POSITION, Register v0 */
+        D3DVSD_REG(D3DVSDE_NORMAL,   D3DVSDT_FLOAT4),  /* D3DVSDE_NORMAL,   Register v1 */
+        D3DVSD_END()
+    };
+    DWORD decl_normal_d3dcolor[] =
+    {
+        D3DVSD_STREAM(0),
+        D3DVSD_REG(D3DVSDE_POSITION, D3DVSDT_FLOAT3),  /* D3DVSDE_POSITION, Register v0 */
+        D3DVSD_REG(D3DVSDE_NORMAL,   D3DVSDT_D3DCOLOR),/* D3DVSDE_NORMAL,   Register v1 */
+        D3DVSD_END()
+    };
     const DWORD vertex_decl_size = sizeof(dwVertexDecl);
     const DWORD simple_vs_size = sizeof(simple_vs);
     const DWORD simple_ps_size = sizeof(simple_ps);
@@ -961,6 +982,23 @@ static void test_shader(void)
     hr = IDirect3DDevice8_GetVertexShader(pDevice, &hTempHandle);
     ok(hr == D3D_OK, "IDirect3DDevice8_GetVertexShader returned %#08x\n", hr);
     ok(hTempHandle == 0, "Vertex Shader %d is set, expected shader %d\n", hTempHandle, 0);
+
+    /* Test a broken declaration. 3DMark2001 tries to use normals with 2 components
+     * First try the fixed function shader function, then a custom one
+     */
+    hr = IDirect3DDevice8_CreateVertexShader(pDevice, decl_normal_float2, 0, &hVertexShader, 0);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_CreateVertexShader returned %#08x\n", hr);
+    if(SUCCEEDED(hr)) IDirect3DDevice8_DeleteVertexShader(pDevice, hVertexShader);
+    hr = IDirect3DDevice8_CreateVertexShader(pDevice, decl_normal_float4, 0, &hVertexShader, 0);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_CreateVertexShader returned %#08x\n", hr);
+    if(SUCCEEDED(hr)) IDirect3DDevice8_DeleteVertexShader(pDevice, hVertexShader);
+    hr = IDirect3DDevice8_CreateVertexShader(pDevice, decl_normal_d3dcolor, 0, &hVertexShader, 0);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_CreateVertexShader returned %#08x\n", hr);
+    if(SUCCEEDED(hr)) IDirect3DDevice8_DeleteVertexShader(pDevice, hVertexShader);
+
+    hr = IDirect3DDevice8_CreateVertexShader(pDevice, decl_normal_float2, simple_vs, &hVertexShader, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice8_CreateVertexShader returned %#08x\n", hr);
+    if(SUCCEEDED(hr)) IDirect3DDevice8_DeleteVertexShader(pDevice, hVertexShader);
 
     if (caps.PixelShaderVersion >= D3DPS_VERSION(1, 0))
     {
@@ -1136,7 +1174,8 @@ static void test_lights(void)
 
     hr = IDirect3D8_CreateDevice( d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
                                   D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_PUREDEVICE, &d3dpp, &device );
-    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE, "IDirect3D8_CreateDevice failed with %s\n", DXGetErrorString8(hr));
+    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE || hr == D3DERR_INVALIDCALL,
+       "IDirect3D8_CreateDevice failed with %s\n", DXGetErrorString8(hr));
     if(!device)
     {
         skip("Failed to create a d3d device\n");
@@ -1174,6 +1213,113 @@ static void test_lights(void)
     if(d3d8) IDirect3D8_Release(d3d8);
 }
 
+static void test_render_zero_triangles(void)
+{
+    D3DPRESENT_PARAMETERS d3dpp;
+    IDirect3DDevice8 *device = NULL;
+    IDirect3D8 *d3d8;
+    HWND hwnd;
+    HRESULT hr;
+    D3DDISPLAYMODE               d3ddm;
+
+    struct nvertex
+    {
+        float x, y, z;
+        float nx, ny, nz;
+        DWORD diffuse;
+    }  quad[] =
+    {
+        { 0.0f, -1.0f,   0.1f,  1.0f,   1.0f,   1.0f,   0xff0000ff},
+        { 0.0f,  0.0f,   0.1f,  1.0f,   1.0f,   1.0f,   0xff0000ff},
+        { 1.0f,  0.0f,   0.1f,  1.0f,   1.0f,   1.0f,   0xff0000ff},
+        { 1.0f, -1.0f,   0.1f,  1.0f,   1.0f,   1.0f,   0xff0000ff},
+    };
+
+    d3d8 = pDirect3DCreate8( D3D_SDK_VERSION );
+    ok(d3d8 != NULL, "Failed to create IDirect3D8 object\n");
+    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    ok(hwnd != NULL, "Failed to create window\n");
+    if (!d3d8 || !hwnd) goto cleanup;
+
+    IDirect3D8_GetAdapterDisplayMode( d3d8, D3DADAPTER_DEFAULT, &d3ddm );
+    ZeroMemory( &d3dpp, sizeof(d3dpp) );
+    d3dpp.Windowed         = TRUE;
+    d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
+    d3dpp.BackBufferWidth  = 800;
+    d3dpp.BackBufferHeight  = 600;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+    d3dpp.EnableAutoDepthStencil = TRUE;
+    d3dpp.AutoDepthStencilFormat = D3DFMT_D16;
+
+    hr = IDirect3D8_CreateDevice( d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
+                                  D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_PUREDEVICE, &d3dpp, &device );
+    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE || hr == D3DERR_INVALIDCALL,
+       "IDirect3D8_CreateDevice failed with %s\n", DXGetErrorString8(hr));
+    if(!device)
+    {
+        skip("Failed to create a d3d device\n");
+        goto cleanup;
+    }
+
+    hr = IDirect3DDevice8_SetVertexShader(device, D3DFVF_XYZ | D3DFVF_DIFFUSE);
+    ok(hr == D3D_OK, "IDirect3DDevice8_SetVertexShader returned %#08x\n", hr);
+
+    hr = IDirect3DDevice8_BeginScene(device);
+    ok(hr == D3D_OK, "IDirect3DDevice8_BeginScene failed with %#08x\n", hr);
+    if(hr == D3D_OK)
+    {
+        hr = IDirect3DDevice8_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0 /* MinIndex */, 0 /* NumVerts */,
+                                                    0 /*PrimCount */, NULL, D3DFMT_INDEX16, quad, sizeof(quad[0]));
+        ok(hr == D3D_OK, "IDirect3DDevice8_DrawIndexedPrimitiveUP failed with %#08x\n", hr);
+
+        IDirect3DDevice8_EndScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice8_EndScene failed with %#08x\n", hr);
+    }
+
+    IDirect3DDevice8_Present(device, NULL, NULL, NULL, NULL);
+
+    cleanup:
+    if(device) IDirect3DDevice8_Release(device);
+    if(d3d8) IDirect3D8_Release(d3d8);
+}
+
+static void test_set_material(void)
+{
+    D3DPRESENT_PARAMETERS present_parameters;
+    IDirect3DDevice8 *device = NULL;
+    IDirect3D8 *d3d8;
+    HWND hwnd;
+    HRESULT hr;
+
+    d3d8 = pDirect3DCreate8( D3D_SDK_VERSION );
+    ok(d3d8 != NULL, "Failed to create IDirect3D8 object\n");
+    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    ok(hwnd != NULL, "Failed to create window\n");
+    if (!d3d8 || !hwnd) goto cleanup;
+
+    ZeroMemory(&present_parameters, sizeof(present_parameters));
+    present_parameters.Windowed = TRUE;
+    present_parameters.hDeviceWindow = hwnd;
+    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
+
+    hr = IDirect3D8_CreateDevice( d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
+                                  D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_PUREDEVICE, &present_parameters, &device );
+    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE || hr == D3DERR_INVALIDCALL,
+       "IDirect3D8_CreateDevice failed with %s\n", DXGetErrorString8(hr));
+    if(!device)
+    {
+        skip("Failed to create a d3d device\n");
+        goto cleanup;
+    }
+
+    hr = IDirect3DDevice8_SetMaterial(device, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, got %s\n",  DXGetErrorString8(hr));
+
+ cleanup:
+    if(device) IDirect3DDevice8_Release(device);
+    if(d3d8) IDirect3D8_Release(d3d8);
+}
+
 START_TEST(device)
 {
     HMODULE d3d8_handle = LoadLibraryA( "d3d8.dll" );
@@ -1198,5 +1344,7 @@ START_TEST(device)
         test_shader();
         test_limits();
         test_lights();
+        test_render_zero_triangles();
+        test_set_material();
     }
 }

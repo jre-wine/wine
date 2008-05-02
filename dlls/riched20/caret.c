@@ -57,7 +57,9 @@ int ME_GetTextLengthEx(ME_TextEditor *editor, const GETTEXTLENGTHEX *how)
   
   length = ME_GetTextLength(editor);
 
-  if ((GetWindowLongW(editor->hWnd, GWL_STYLE) & ES_MULTILINE) && (how->flags & GTL_USECRLF))
+  if ((GetWindowLongW(editor->hWnd, GWL_STYLE) & ES_MULTILINE)
+        && (how->flags & GTL_USECRLF)
+        && !editor->bEmulateVersion10) /* Ignore GTL_USECRLF flag in 1.0 emulation */
     length += editor->nParagraphs - 1;
   
   if (how->flags & GTL_NUMBYTES)
@@ -202,19 +204,21 @@ ME_GetCursorCoordinates(ME_TextEditor *editor, ME_Cursor *pCursor,
           pSizeRun = run = tmp;
           assert(run);
           assert(run->type == diRun);
-          sz = ME_GetRunSize(&c, &para->member.para, &run->member.run, ME_StrLen(run->member.run.strText));
+          sz = ME_GetRunSize(&c, &para->member.para,
+                             &run->member.run, ME_StrLen(run->member.run.strText),
+                             row->member.row.nLMargin);
         }
       }
       if (pCursor->nOffset && !(run->member.run.nFlags & MERF_SKIPPED)) {
-        sz = ME_GetRunSize(&c, &para->member.para, &run->member.run, pCursor->nOffset);
+        sz = ME_GetRunSize(&c, &para->member.para, &run->member.run, pCursor->nOffset,
+                           row->member.row.nLMargin);
       }
 
       *height = pSizeRun->member.run.nAscent + pSizeRun->member.run.nDescent;
       *x = run->member.run.pt.x + sz.cx;
       *y = para->member.para.nYPos + row->member.row.nBaseline + pSizeRun->member.run.pt.y - pSizeRun->member.run.nAscent - ME_GetYScrollPos(editor);
-      
-      ME_DestroyContext(&c);
-      ReleaseDC(editor->hWnd, hDC);
+
+      ME_DestroyContext(&c, editor->hWnd);
       return;
     }
   }
@@ -268,6 +272,8 @@ void ME_InternalDeleteText(ME_TextEditor *editor, int nOfs,
     ME_CursorFromCharOfs(editor, nOfs, &c);
     run = &c.pRun->member.run;
     if (run->nFlags & MERF_ENDPARA) {
+      int eollen = run->nCR + run->nLF;
+
       if (!ME_FindItemFwd(c.pRun, diParagraph))
       {
         return;
@@ -275,9 +281,7 @@ void ME_InternalDeleteText(ME_TextEditor *editor, int nOfs,
       ME_JoinParagraphs(editor, ME_GetParagraph(c.pRun));
       /* ME_SkipAndPropagateCharOffset(p->pRun, shift); */
       ME_CheckCharOffsets(editor);
-      nChars--;
-      if (editor->bEmulateVersion10 && nChars)
-        nChars--;
+      nChars -= (eollen < nChars) ? eollen : nChars;
       continue;
     }
     else
@@ -411,6 +415,21 @@ void ME_InsertOLEFromCursor(ME_TextEditor *editor, const REOBJECT* reo, int nCur
 }
 
 
+void ME_InsertEndRowFromCursor(ME_TextEditor *editor, int nCursor)
+{
+  ME_Style              *pStyle = ME_GetInsertStyle(editor, nCursor);
+  ME_DisplayItem        *di;
+  WCHAR                 space = ' ';
+
+  /* FIXME no no no */
+  if (ME_IsSelection(editor))
+    ME_DeleteSelection(editor);
+
+  di = ME_InternalInsertTextFromCursor(editor, nCursor, &space, 1, pStyle,
+                                       MERF_ENDROW);
+  ME_SendSelChange(editor);
+}
+
 void
 ME_InsertTableCellFromCursor(ME_TextEditor *editor, int nCursor)
 {
@@ -505,6 +524,8 @@ void ME_InsertTextFromCursor(ME_TextEditor *editor, int nCursor,
     if (pos-str < len) {   /* handle EOLs */
       ME_DisplayItem *tp, *end_run;
       ME_Style *tmp_style;
+      int numCR, numLF;
+
       if (pos!=str)
         ME_InternalInsertTextFromCursor(editor, nCursor, str, pos-str, style, 0);
       p = &editor->pCursors[nCursor];
@@ -514,16 +535,48 @@ void ME_InsertTextFromCursor(ME_TextEditor *editor, int nCursor,
       }
       tmp_style = ME_GetInsertStyle(editor, nCursor);
       /* ME_SplitParagraph increases style refcount */
-      tp = ME_SplitParagraph(editor, p->pRun, p->pRun->member.run.style);
+
+      /* Encode and fill number of CR and LF according to emulation mode */
+      if (editor->bEmulateVersion10) {
+        const WCHAR * tpos;
+
+        /* We have to find out how many consecutive \r are there, and if there
+           is a \n terminating the run of \r's. */
+        numCR = 0; numLF = 0;
+        tpos = pos;
+        while (tpos-str < len && *tpos == '\r') {
+          tpos++;
+          numCR++;
+        }
+        if (tpos-str >= len) {
+          /* Reached end of text without finding anything but '\r' */
+          if (tpos != pos) {
+            pos++;
+          }
+          numCR = 1; numLF = 0;
+        } else if (*tpos == '\n') {
+          /* The entire run of \r's plus the one \n is one single line break */
+          pos = tpos + 1;
+          numLF = 1;
+        } else {
+          /* Found some other content past the run of \r's */
+          pos++;
+          numCR = 1; numLF = 0;
+        }
+      } else {
+        if(pos-str < len && *pos =='\r')
+          pos++;
+        if(pos-str < len && *pos =='\n')
+          pos++;
+        numCR = 1; numLF = 0;
+      }
+      tp = ME_SplitParagraph(editor, p->pRun, p->pRun->member.run.style, numCR, numLF);
       p->pRun = ME_FindItemFwd(tp, diRun);
       end_run = ME_FindItemBack(tp, diRun);
       ME_ReleaseStyle(end_run->member.run.style);
       end_run->member.run.style = tmp_style;
       p->nOffset = 0;
-      if(pos-str < len && *pos =='\r')
-        pos++;
-      if(pos-str < len && *pos =='\n')
-        pos++;
+
       if(pos-str <= len) {
         len -= pos - str;
         str = pos;
@@ -1277,7 +1330,15 @@ void ME_SendSelChange(ME_TextEditor *editor)
     sc.seltyp |= SEL_TEXT;
   if (sc.chrg.cpMin < sc.chrg.cpMax+1) /* wth were RICHEDIT authors thinking ? */
     sc.seltyp |= SEL_MULTICHAR;
-  SendMessageW(GetParent(editor->hWnd), WM_NOTIFY, sc.nmhdr.idFrom, (LPARAM)&sc);
+  TRACE("cpMin=%d cpMax=%d seltyp=%d (%s %s)\n",
+    sc.chrg.cpMin, sc.chrg.cpMax, sc.seltyp,
+    (sc.seltyp & SEL_TEXT) ? "SEL_TEXT" : "",
+    (sc.seltyp & SEL_MULTICHAR) ? "SEL_MULTICHAR" : "");
+  if (sc.chrg.cpMin != editor->notified_cr.cpMin || sc.chrg.cpMax != editor->notified_cr.cpMax)
+  {
+    editor->notified_cr = sc.chrg;
+    SendMessageW(GetParent(editor->hWnd), WM_NOTIFY, sc.nmhdr.idFrom, (LPARAM)&sc);
+  }
 }
 
 BOOL

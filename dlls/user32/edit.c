@@ -211,9 +211,9 @@ static void	EDIT_LockBuffer(EDITSTATE *es);
 static BOOL	EDIT_MakeFit(EDITSTATE *es, UINT size);
 static BOOL	EDIT_MakeUndoFit(EDITSTATE *es, UINT size);
 static void	EDIT_MoveBackward(EDITSTATE *es, BOOL extend);
-static void	EDIT_MoveEnd(EDITSTATE *es, BOOL extend);
+static void	EDIT_MoveEnd(EDITSTATE *es, BOOL extend, BOOL ctrl);
 static void	EDIT_MoveForward(EDITSTATE *es, BOOL extend);
-static void	EDIT_MoveHome(EDITSTATE *es, BOOL extend);
+static void	EDIT_MoveHome(EDITSTATE *es, BOOL extend, BOOL ctrl);
 static void	EDIT_MoveWordBackward(EDITSTATE *es, BOOL extend);
 static void	EDIT_MoveWordForward(EDITSTATE *es, BOOL extend);
 static void	EDIT_PaintLine(EDITSTATE *es, HDC hdc, INT line, BOOL rev);
@@ -257,7 +257,7 @@ static BOOL	EDIT_EM_Undo(EDITSTATE *es);
 /*
  *	WM_XXX message handlers
  */
-static void	EDIT_WM_Char(EDITSTATE *es, WCHAR c);
+static LRESULT	EDIT_WM_Char(EDITSTATE *es, WCHAR c);
 static void	EDIT_WM_Command(EDITSTATE *es, INT code, INT id, HWND conrtol);
 static void	EDIT_WM_ContextMenu(EDITSTATE *es, INT x, INT y);
 static void	EDIT_WM_Copy(EDITSTATE *es);
@@ -795,21 +795,30 @@ static LRESULT WINAPI EditWndProc_common( HWND hwnd, UINT msg,
 		result = DLGC_HASSETSEL | DLGC_WANTCHARS | DLGC_WANTARROWS;
 		
 		if (es->style & ES_MULTILINE)
-		{
 		   result |= DLGC_WANTALLKEYS;
-		   break;
-		}
 
 		if (lParam && (((LPMSG)lParam)->message == WM_KEYDOWN))
 		{
 		   int vk = (int)((LPMSG)lParam)->wParam;
 
-		   if (es->hwndListBox && (vk == VK_RETURN || vk == VK_ESCAPE))
-		   {
-		      if (SendMessageW(GetParent(hwnd), CB_GETDROPPEDSTATE, 0, 0))
-		         result |= DLGC_WANTMESSAGE;
-		   }
-		}
+                   if (es->hwndListBox)
+                   {
+                       if (vk == VK_RETURN || vk == VK_ESCAPE)
+                           if (SendMessageW(GetParent(hwnd), CB_GETDROPPEDSTATE, 0, 0))
+                               result |= DLGC_WANTMESSAGE;
+                   }
+                   else
+                   {
+                       switch (vk)
+                       {
+                           case VK_ESCAPE:
+                               SendMessageW(GetParent(hwnd), WM_CLOSE, 0, 0);
+                               break;
+                           default:
+                               break;
+                       }
+                   }
+                }
 		break;
 
         case WM_IME_CHAR:
@@ -822,7 +831,7 @@ static LRESULT WINAPI EditWndProc_common( HWND hwnd, UINT msg,
                 strng[1] = wParam & 0xff;
                 if (strng[0]) MultiByteToWideChar(CP_ACP, 0, strng, 2, &charW, 1);
                 else MultiByteToWideChar(CP_ACP, 0, &strng[1], 1, &charW, 1);
-		EDIT_WM_Char(es, charW);
+		result = EDIT_WM_Char(es, charW);
 		break;
             }
             /* fall through */
@@ -838,13 +847,16 @@ static LRESULT WINAPI EditWndProc_common( HWND hwnd, UINT msg,
 		    MultiByteToWideChar(CP_ACP, 0, &charA, 1, &charW, 1);
 		}
 
-		if ((charW == VK_RETURN || charW == VK_ESCAPE) && es->hwndListBox)
-		{
-		   if (SendMessageW(GetParent(hwnd), CB_GETDROPPEDSTATE, 0, 0))
-		      SendMessageW(GetParent(hwnd), WM_KEYDOWN, charW, 0);
-		   break;
-		}
-		EDIT_WM_Char(es, charW);
+                if (es->hwndListBox)
+                {
+                    if (charW == VK_RETURN || charW == VK_ESCAPE)
+                    {
+                        if (SendMessageW(GetParent(hwnd), CB_GETDROPPEDSTATE, 0, 0))
+                            SendMessageW(GetParent(hwnd), WM_KEYDOWN, charW, 0);
+                        break;
+                    }
+                }
+		result = EDIT_WM_Char(es, charW);
 		break;
 	}
 
@@ -1018,38 +1030,22 @@ static LRESULT WINAPI EditWndProc_common( HWND hwnd, UINT msg,
 		break;
 
 	case WM_IME_STARTCOMPOSITION:
-	/* 
-	 * FIXME in IME: This message is not always sent like it should be
-	 */
-		if (es->selection_start != es->selection_end)
-		{
-			static const WCHAR empty_stringW[] = {0};
-			EDIT_EM_ReplaceSel(es, TRUE, empty_stringW, TRUE, TRUE);
-		}
 		es->composition_start = es->selection_end;
 		es->composition_len = 0;
 		break;
 
 	case WM_IME_COMPOSITION:
-	{
-		int caret_pos = es->selection_end;
-		if (es->composition_len == 0)
-		{
-			if (es->selection_start != es->selection_end)
-			{    
-				static const WCHAR empty_stringW[] = {0};
-				EDIT_EM_ReplaceSel(es, TRUE, empty_stringW, TRUE, TRUE);
-			}
-
-			es->composition_start = es->selection_end;
-		}
-		EDIT_ImeComposition(hwnd,lParam,es);
-		EDIT_SetCaretPos(es, caret_pos, es->flags & EF_AFTER_WRAP);
+                EDIT_ImeComposition(hwnd, lParam, es);
 		break;
-	}
 
 	case WM_IME_ENDCOMPOSITION:
-		es->composition_len= 0;
+                if (es->composition_len > 0)
+                {
+                        static const WCHAR empty_stringW[] = {0};
+                        EDIT_EM_ReplaceSel(es, TRUE, empty_stringW, TRUE, TRUE);
+                        es->selection_end = es->selection_start;
+                        es->composition_len= 0;
+                }
 		break;
 
 	case WM_IME_COMPOSITIONFULL:
@@ -1184,7 +1180,7 @@ static void EDIT_BuildLineDefs_ML(EDITSTATE *es, INT istart, INT iend, INT delta
 			{
 				if (current_position - es->text > iend)
 					break; /* We reached end of line modifications */
-				/* else recalulate this line */
+				/* else recalculate this line */
 			}
 		}
 
@@ -1265,9 +1261,9 @@ static void EDIT_BuildLineDefs_ML(EDITSTATE *es, INT istart, INT iend, INT delta
 			current_line->width = (INT)LOWORD(GetTabbedTextExtentW(dc, current_position,
 					current_line->net_length, es->tabs_count, es->tabs));
 		    }
-		    else if (orig_net_length <  current_line->net_length  &&
-			current_line == start_line &&
-			current_line->index != nstart_index) {
+		    else if (current_line == start_line &&
+                             current_line->index != nstart_index &&
+                             orig_net_length < current_line->net_length) {
 			/* The previous line expanded but it's still not as wide as the client rect */
 			/* The expansion is due to an upwards line wrap so we must partially include
 			   it in the update region */
@@ -2000,13 +1996,13 @@ static void EDIT_MoveDown_ML(EDITSTATE *es, BOOL extend)
  *	EDIT_MoveEnd
  *
  */
-static void EDIT_MoveEnd(EDITSTATE *es, BOOL extend)
+static void EDIT_MoveEnd(EDITSTATE *es, BOOL extend, BOOL ctrl)
 {
 	BOOL after_wrap = FALSE;
 	INT e;
 
 	/* Pass a high value in x to make sure of receiving the end of the line */
-	if (es->style & ES_MULTILINE)
+	if (!ctrl && (es->style & ES_MULTILINE))
 		e = EDIT_CharFromPos(es, 0x3fffffff,
 			HIWORD(EDIT_EM_PosFromChar(es, es->selection_end, es->flags & EF_AFTER_WRAP)), &after_wrap);
 	else
@@ -2046,12 +2042,12 @@ static void EDIT_MoveForward(EDITSTATE *es, BOOL extend)
  *	Home key: move to beginning of line.
  *
  */
-static void EDIT_MoveHome(EDITSTATE *es, BOOL extend)
+static void EDIT_MoveHome(EDITSTATE *es, BOOL extend, BOOL ctrl)
 {
 	INT e;
 
 	/* Pass the x_offset in x to make sure of receiving the first position of the line */
-	if (es->style & ES_MULTILINE)
+	if (!ctrl && (es->style & ES_MULTILINE))
 		e = EDIT_CharFromPos(es, -es->x_offset,
 			HIWORD(EDIT_EM_PosFromChar(es, es->selection_end, es->flags & EF_AFTER_WRAP)), NULL);
 	else
@@ -3428,7 +3424,6 @@ static void EDIT_EM_ScrollCaret(EDITSTATE *es)
 {
 	if (es->style & ES_MULTILINE) {
 		INT l;
-		INT li;
 		INT vlc;
 		INT ww;
 		INT cw = es->char_width;
@@ -3437,7 +3432,6 @@ static void EDIT_EM_ScrollCaret(EDITSTATE *es)
 		INT dx = 0;
 
 		l = EDIT_EM_LineFromChar(es, es->selection_end);
-		li = EDIT_EM_LineIndex(es, l);
 		x = (short)LOWORD(EDIT_EM_PosFromChar(es, es->selection_end, es->flags & EF_AFTER_WRAP));
 		vlc = (es->format_rect.bottom - es->format_rect.top) / es->line_height;
 		if (l >= es->y_offset + vlc)
@@ -3811,8 +3805,8 @@ static void EDIT_EM_SetSel(EDITSTATE *es, UINT start, UINT end, BOOL after_wrap)
 	 * *sorting* the interval endpoints.  Let's assume that we sort them
 	 * in this order:
 	 *        start <= end <= old_start <= old_end
-	 * Knuth 5.3.1 (p 183) asssures us that this can be done optimally
-	 * in 5 comparisons; ie it's impossible to do better than the
+	 * Knuth 5.3.1 (p 183) assures us that this can be done optimally
+	 * in 5 comparisons; i.e. it is impossible to do better than the
 	 * following: */
         ORDER_UINT(end, old_end);
         ORDER_UINT(start, old_start);
@@ -3967,12 +3961,38 @@ static BOOL EDIT_EM_Undo(EDITSTATE *es)
 }
 
 
+/* Helper function for WM_CHAR
+ *
+ * According to an MSDN blog article titled "Just because you're a control
+ * doesn't mean that you're necessarily inside a dialog box," multiline edit
+ * controls without ES_WANTRETURN would attempt to detect whether it is inside
+ * a dialog box or not.
+ */
+static BOOL EDIT_IsInsideDialog(EDITSTATE *es)
+{
+    WND *pParent;
+    BOOL r = FALSE;
+
+    if (es->hwndParent)
+    {
+        pParent = WIN_GetPtr(es->hwndParent);
+        if (pParent && pParent != WND_OTHER_PROCESS && pParent != WND_DESKTOP)
+        {
+            if (pParent->flags & WIN_ISDIALOG)
+                r = TRUE;
+            WIN_ReleasePtr(pParent);
+        }
+    }
+    return r;
+}
+
+
 /*********************************************************************
  *
  *	WM_CHAR
  *
  */
-static void EDIT_WM_Char(EDITSTATE *es, WCHAR c)
+static LRESULT EDIT_WM_Char(EDITSTATE *es, WCHAR c)
 {
         BOOL control;
 
@@ -3980,13 +4000,17 @@ static void EDIT_WM_Char(EDITSTATE *es, WCHAR c)
 
 	switch (c) {
 	case '\r':
-	    /* If the edit doesn't want the return and it's not a multiline edit, do nothing */
-	    if(!(es->style & ES_MULTILINE) && !(es->style & ES_WANTRETURN))
-		break;
+            /* If it's not a multiline edit box, it would be ignored below.
+             * For multiline edit without ES_WANTRETURN, we have to make a
+             * special case.
+             */
+            if ((es->style & ES_MULTILINE) && !(es->style & ES_WANTRETURN))
+                if (EDIT_IsInsideDialog(es))
+                    break;
 	case '\n':
 		if (es->style & ES_MULTILINE) {
 			if (es->style & ES_READONLY) {
-				EDIT_MoveHome(es, FALSE);
+				EDIT_MoveHome(es, FALSE, FALSE);
 				EDIT_MoveDown_ML(es, FALSE);
 			} else {
 				static const WCHAR cr_lfW[] = {'\r','\n',0};
@@ -3998,6 +4022,8 @@ static void EDIT_WM_Char(EDITSTATE *es, WCHAR c)
 		if ((es->style & ES_MULTILINE) && !(es->style & ES_READONLY))
 		{
 			static const WCHAR tabW[] = {'\t',0};
+                        if (EDIT_IsInsideDialog(es))
+                            break;
 			EDIT_EM_ReplaceSel(es, TRUE, tabW, TRUE, TRUE);
 		}
 		break;
@@ -4043,6 +4069,7 @@ static void EDIT_WM_Char(EDITSTATE *es, WCHAR c)
  		}
 		break;
 	}
+    return 1;
 }
 
 
@@ -4225,11 +4252,9 @@ static LRESULT EDIT_WM_Destroy(EDITSTATE *es)
 	LINEDEF *pc, *pp;
 
 	if (es->hloc32W) {
-		while (LocalUnlock(es->hloc32W)) ;
 		LocalFree(es->hloc32W);
 	}
 	if (es->hloc32A) {
-		while (LocalUnlock(es->hloc32A)) ;
 		LocalFree(es->hloc32A);
 	}
 	if (es->hloc16) {
@@ -4520,10 +4545,10 @@ static LRESULT EDIT_WM_KeyDown(EDITSTATE *es, INT key)
 			EDIT_MoveForward(es, shift);
 		break;
 	case VK_HOME:
-		EDIT_MoveHome(es, shift);
+		EDIT_MoveHome(es, shift, control);
 		break;
 	case VK_END:
-		EDIT_MoveEnd(es, shift);
+		EDIT_MoveEnd(es, shift, control);
 		break;
 	case VK_PRIOR:
 		if (es->style & ES_MULTILINE)
@@ -4553,7 +4578,7 @@ static LRESULT EDIT_WM_KeyDown(EDITSTATE *es, INT key)
 				} else if (control) {
 					/* delete to end of line */
 					EDIT_EM_SetSel(es, (UINT)-1, 0, FALSE);
-					EDIT_MoveEnd(es, TRUE);
+					EDIT_MoveEnd(es, TRUE, FALSE);
 					EDIT_WM_Clear(es);
 				} else {
 					/* delete character right of caret */
@@ -4573,18 +4598,32 @@ static LRESULT EDIT_WM_KeyDown(EDITSTATE *es, INT key)
 		break;
 	case VK_RETURN:
 	    /* If the edit doesn't want the return send a message to the default object */
-	    if(!(es->style & ES_WANTRETURN))
+	    if(!(es->style & ES_MULTILINE) || !(es->style & ES_WANTRETURN))
 	    {
-		HWND hwndParent = GetParent(es->hwndSelf);
-		DWORD dw = SendMessageW( hwndParent, DM_GETDEFID, 0, 0 );
+		HWND hwndParent;
+		DWORD dw;
+
+                if (!EDIT_IsInsideDialog(es)) return 1;
+                if (control) break;
+                hwndParent = GetParent(es->hwndSelf);
+                dw = SendMessageW( hwndParent, DM_GETDEFID, 0, 0 );
 		if (HIWORD(dw) == DC_HASDEFID)
 		{
 		    SendMessageW( hwndParent, WM_COMMAND,
 				  MAKEWPARAM( LOWORD(dw), BN_CLICKED ),
  			      (LPARAM)GetDlgItem( hwndParent, LOWORD(dw) ) );
 		}
+                else
+                    SendMessageW( hwndParent, WM_COMMAND, IDOK, (LPARAM)GetDlgItem( hwndParent, IDOK ) );
 	    }
 	    break;
+        case VK_ESCAPE:
+	    if (!(es->style & ES_MULTILINE))
+                SendMessageW(GetParent(es->hwndSelf), WM_COMMAND, IDCANCEL, (LPARAM)GetDlgItem( GetParent(es->hwndSelf), IDCANCEL ) );
+            break;
+        case VK_TAB:
+            SendMessageW(es->hwndParent, WM_NEXTDLGCTL, shift, 0);
+            break;
 	}
 	return 0;
 }
@@ -4758,6 +4797,9 @@ static LRESULT EDIT_WM_NCCreate(HWND hwnd, LPCREATESTRUCTW lpcs, BOOL unicode)
 
 	if (es->style & ES_COMBO)
 	   es->hwndListBox = GetDlgItem(es->hwndParent, ID_CB_LISTBOX);
+
+        /* FIXME: should we handle changes to WS_EX_RIGHT style after creation? */
+        if (lpcs->dwExStyle & WS_EX_RIGHT) es->style |= ES_RIGHT;
 
         /* Number overrides lowercase overrides uppercase (at least it
          * does in Win95).  However I'll bet that ES_NUMBER would be
@@ -5345,22 +5387,17 @@ static void EDIT_UpdateText(EDITSTATE *es, const RECT *rc, BOOL bErase)
  * The Following code is to handle inline editing from IMEs
  */
 
-static void EDIT_GetCompositionStr(HWND hwnd, LPARAM CompFlag, EDITSTATE *es)
+static void EDIT_GetCompositionStr(HIMC hIMC, LPARAM CompFlag, EDITSTATE *es)
 {
     LONG buflen;
     LPWSTR lpCompStr = NULL;
-    HIMC hIMC;
     LPSTR lpCompStrAttr = NULL;
     DWORD dwBufLenAttr;
-
-    if (!(hIMC = ImmGetContext(hwnd)))
-        return;
 
     buflen = ImmGetCompositionStringW(hIMC, GCS_COMPSTR, NULL, 0);
 
     if (buflen < 0)
     {
-        ImmReleaseContext(hwnd, hIMC);
         return;
     }
 
@@ -5368,7 +5405,6 @@ static void EDIT_GetCompositionStr(HWND hwnd, LPARAM CompFlag, EDITSTATE *es)
     if (!lpCompStr)
     {
         ERR("Unable to allocate IME CompositionString\n");
-        ImmReleaseContext(hwnd,hIMC);
         return;
     }
 
@@ -5391,7 +5427,6 @@ static void EDIT_GetCompositionStr(HWND hwnd, LPARAM CompFlag, EDITSTATE *es)
             {
                 ERR("Unable to allocate IME Attribute String\n");
                 HeapFree(GetProcessHeap(),0,lpCompStr);
-                ImmReleaseContext(hwnd,hIMC);
                 return;
             }
             ImmGetCompositionStringW(hIMC,GCS_COMPATTR, lpCompStrAttr, 
@@ -5422,22 +5457,16 @@ static void EDIT_GetCompositionStr(HWND hwnd, LPARAM CompFlag, EDITSTATE *es)
 
     HeapFree(GetProcessHeap(),0,lpCompStrAttr);
     HeapFree(GetProcessHeap(),0,lpCompStr);
-    ImmReleaseContext(hwnd,hIMC);
 }
 
-static void EDIT_GetResultStr(HWND hwnd, EDITSTATE *es)
+static void EDIT_GetResultStr(HIMC hIMC, EDITSTATE *es)
 {
     LONG buflen;
     LPWSTR lpResultStr;
-    HIMC    hIMC;
-
-    if ( !(hIMC = ImmGetContext(hwnd)))
-        return;
 
     buflen = ImmGetCompositionStringW(hIMC, GCS_RESULTSTR, NULL, 0);
     if (buflen <= 0)
     {
-        ImmReleaseContext(hwnd, hIMC);
         return;
     }
 
@@ -5445,7 +5474,6 @@ static void EDIT_GetResultStr(HWND hwnd, EDITSTATE *es)
     if (!lpResultStr)
     {
         ERR("Unable to alloc buffer for IME string\n");
-        ImmReleaseContext(hwnd, hIMC);
         return;
     }
 
@@ -5463,13 +5491,29 @@ static void EDIT_GetResultStr(HWND hwnd, EDITSTATE *es)
     es->composition_len = 0;
 
     HeapFree(GetProcessHeap(),0,lpResultStr);
-    ImmReleaseContext(hwnd, hIMC);
 }
 
 static void EDIT_ImeComposition(HWND hwnd, LPARAM CompFlag, EDITSTATE *es)
 {
+    HIMC hIMC;
+    int cursor;
+
+    if (es->composition_len == 0 && es->selection_start != es->selection_end)
+    {
+        static const WCHAR empty_stringW[] = {0};
+        EDIT_EM_ReplaceSel(es, TRUE, empty_stringW, TRUE, TRUE);
+        es->composition_start = es->selection_end;
+    }
+
+    hIMC = ImmGetContext(hwnd);
+    if (!hIMC)
+        return;
+
     if (CompFlag & GCS_RESULTSTR)
-        EDIT_GetResultStr(hwnd,es);
+        EDIT_GetResultStr(hIMC, es);
     if (CompFlag & GCS_COMPSTR)
-        EDIT_GetCompositionStr(hwnd, CompFlag, es);
+        EDIT_GetCompositionStr(hIMC, CompFlag, es);
+    cursor = ImmGetCompositionStringW(hIMC, GCS_CURSORPOS, 0, 0);
+    ImmReleaseContext(hwnd, hIMC);
+    EDIT_SetCaretPos(es, es->selection_start + cursor, es->flags & EF_AFTER_WRAP);
 }

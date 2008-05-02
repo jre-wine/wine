@@ -350,7 +350,7 @@ static void update_font_list(void)
     fmt.cbSize = sizeof(fmt);
 
     SendMessageW(hEditorWnd, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM)&fmt);
-    SendMessageW(hFontListEdit, WM_GETTEXT, MAX_PATH, (LPARAM)fontName);
+    if (!SendMessageW(hFontListEdit, WM_GETTEXT, MAX_PATH, (LPARAM)fontName)) return;
 
     if(lstrcmpW(fontName, fmt.szFaceName))
     {
@@ -883,7 +883,7 @@ static void DialogOpenFile(void)
 static void dialog_about(void)
 {
     HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hMainWnd, GWLP_HINSTANCE);
-    HICON icon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_WORDPAD));
+    HICON icon = LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_WORDPAD), IMAGE_ICON, 48, 48, LR_SHARED);
     ShellAboutW(hMainWnd, wszAppTitle, 0, icon);
 }
 
@@ -1041,23 +1041,26 @@ static void HandleCommandLine(LPWSTR cmdline)
     while (*cmdline && *cmdline != delimiter) cmdline++;
     if (*cmdline == delimiter) cmdline++;
 
-    while (*cmdline == ' ' || *cmdline == '-' || *cmdline == '/')
+    while (*cmdline)
     {
-        WCHAR option;
+        while (isspace(*cmdline)) cmdline++;
 
-        if (*cmdline++ == ' ') continue;
-
-        option = *cmdline;
-        if (option) cmdline++;
-        while (*cmdline == ' ') cmdline++;
-
-        switch (option)
+        if (*cmdline == '-' || *cmdline == '/')
         {
-            case 'p':
-            case 'P':
-                opt_print = 1;
-                break;
+            if (!cmdline[2] || isspace(cmdline[2]))
+            {
+                switch (cmdline[1])
+                {
+                case 'P':
+                case 'p':
+                    opt_print = 1;
+                    cmdline += 2;
+                    continue;
+                }
+            }
+            /* a filename starting by / */
         }
+        break;
     }
 
     if (*cmdline)

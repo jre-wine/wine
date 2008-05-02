@@ -427,6 +427,76 @@ void WINAPI IofCompleteRequest( IRP *irp, UCHAR priority_boost )
 
 
 /***********************************************************************
+ *           InterlockedCompareExchange   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL2_ENTRYPOINT
+DEFINE_FASTCALL2_ENTRYPOINT( NTOSKRNL_InterlockedCompareExchange )
+LONG WINAPI __regs_NTOSKRNL_InterlockedCompareExchange( LONG volatile *dest, LONG xchg, LONG compare )
+#else
+LONG WINAPI NTOSKRNL_InterlockedCompareExchange( LONG volatile *dest, LONG xchg, LONG compare )
+#endif
+{
+    return InterlockedCompareExchange( dest, xchg, compare );
+}
+
+
+/***********************************************************************
+ *           InterlockedDecrement   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT( NTOSKRNL_InterlockedDecrement )
+LONG WINAPI __regs_NTOSKRNL_InterlockedDecrement( LONG volatile *dest )
+#else
+LONG WINAPI NTOSKRNL_InterlockedDecrement( LONG volatile *dest )
+#endif
+{
+    return InterlockedDecrement( dest );
+}
+
+
+/***********************************************************************
+ *           InterlockedExchange   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL2_ENTRYPOINT
+DEFINE_FASTCALL2_ENTRYPOINT( NTOSKRNL_InterlockedExchange )
+LONG WINAPI __regs_NTOSKRNL_InterlockedExchange( LONG volatile *dest, LONG val )
+#else
+LONG WINAPI NTOSKRNL_InterlockedExchange( LONG volatile *dest, LONG val )
+#endif
+{
+    return InterlockedExchange( dest, val );
+}
+
+
+/***********************************************************************
+ *           InterlockedExchangeAdd   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL2_ENTRYPOINT
+DEFINE_FASTCALL2_ENTRYPOINT( NTOSKRNL_InterlockedExchangeAdd )
+LONG WINAPI __regs_NTOSKRNL_InterlockedExchangeAdd( LONG volatile *dest, LONG incr )
+#else
+LONG WINAPI NTOSKRNL_InterlockedExchangeAdd( LONG volatile *dest, LONG incr )
+#endif
+{
+    return InterlockedExchangeAdd( dest, incr );
+}
+
+
+/***********************************************************************
+ *           InterlockedIncrement   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT( NTOSKRNL_InterlockedIncrement )
+LONG WINAPI __regs_NTOSKRNL_InterlockedIncrement( LONG volatile *dest )
+#else
+LONG WINAPI NTOSKRNL_InterlockedIncrement( LONG volatile *dest )
+#endif
+{
+    return InterlockedIncrement( dest );
+}
+
+
+/***********************************************************************
  *           ExAllocatePool   (NTOSKRNL.EXE.@)
  */
 PVOID WINAPI ExAllocatePool( POOL_TYPE type, SIZE_T size )
@@ -511,6 +581,39 @@ void WINAPI KeInitializeTimer( PKTIMER Timer )
 }
 
 
+/**********************************************************************
+ *           KeQueryActiveProcessors   (NTOSKRNL.EXE.@)
+ *
+ * Return the active Processors as bitmask
+ *
+ * RETURNS
+ *   active Processors as bitmask
+ *
+ */
+KAFFINITY WINAPI KeQueryActiveProcessors( void )
+{
+    DWORD_PTR AffinityMask;
+
+    GetProcessAffinityMask( GetCurrentProcess(), &AffinityMask, NULL);
+    return AffinityMask;
+}
+
+
+/**********************************************************************
+ *           KeQueryInterruptTime   (NTOSKRNL.EXE.@)
+ *
+ * Return the interrupt time count
+ *
+ */
+ULONGLONG WINAPI KeQueryInterruptTime( void )
+{
+    LARGE_INTEGER totaltime;
+
+    KeQueryTickCount(&totaltime);
+    return totaltime.QuadPart;
+}
+
+
 /***********************************************************************
  *           KeQuerySystemTime   (NTOSKRNL.EXE.@)
  */
@@ -559,6 +662,25 @@ void WINAPI MmFreeNonCachedMemory( void *addr, SIZE_T size )
 {
     TRACE( "%p %lu\n", addr, size );
     VirtualFree( addr, 0, MEM_RELEASE );
+}
+
+/***********************************************************************
+ *           MmIsAddressValid   (NTOSKRNL.EXE.@)
+ *
+ * Check if the process can access the virtual address without a pagefault
+ *
+ * PARAMS
+ *  VirtualAddress [I] Address to check
+ *
+ * RETURNS
+ *  Failure: FALSE
+ *  Success: TRUE  (Accessing the Address works without a Pagefault)
+ *
+ */
+BOOLEAN WINAPI MmIsAddressValid(PVOID VirtualAddress)
+{
+    TRACE("(%p)\n", VirtualAddress);
+    return !IsBadWritePtr(VirtualAddress, 1);
 }
 
 /***********************************************************************

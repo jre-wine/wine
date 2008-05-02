@@ -43,13 +43,10 @@ static void test_LoadStringW(void)
     length1 = LoadStringW(hInst, 2, (WCHAR *) &resourcepointer, 0); /* get pointer to resource. */
     length2 = LoadStringW(hInst, 2, returnedstringw, sizeof(returnedstringw) /sizeof(WCHAR)); /* get resource string */
     ok(length2 > 0, "LoadStringW failed to load resource 2, ret %d, err %d\n", length2, GetLastError());
-    todo_wine
-    {
-        ok(length1 == length2, "LoadStringW returned different values dependent on buflen. ret1 %d, ret2 %d\n",
-            length1, length2);
-        ok(length1 > 0 && resourcepointer != NULL, "LoadStringW failed to get pointer to resource 2, ret %d, err %d\n",
-            length1, GetLastError());
-    }
+    ok(length1 == length2, "LoadStringW returned different values dependent on buflen. ret1 %d, ret2 %d\n",
+        length1, length2);
+    ok(length1 > 0 && resourcepointer != NULL, "LoadStringW failed to get pointer to resource 2, ret %d, err %d\n",
+        length1, GetLastError());
 
     /* Copy the resource since it is not '\0' terminated, and add '\0' to the end */
     if(resourcepointer != NULL) /* Check that the resource pointer was loaded to avoid access violation */
@@ -62,17 +59,13 @@ static void test_LoadStringW(void)
         ok(!memcmp(copiedstringw, returnedstringw, (length2 + 1)*sizeof(WCHAR)),
            "strings don't match: returnedstring = %s, copiedstring = %s\n", returnedstring, copiedstring);
     }
-    todo_wine
-    {
-        /* check that calling LoadStringW with buffer = NULL returns zero */
-        retvalue = LoadStringW(hInst, 2, NULL, 0);
-        ok(!retvalue, "LoadStringW returned a non-zero value when called with buffer = NULL, retvalue = %d\n",
-            retvalue);
-        /* check again, with a different buflen value, that calling LoadStringW with buffer = NULL returns zero */
-        retvalue = LoadStringW(hInst, 2, NULL, 128);
-        ok(!retvalue, "LoadStringW returned a non-zero value when called with buffer = NULL, retvalue = %d\n",
-            retvalue);
-    }
+
+    /* check that calling LoadStringW with buffer = NULL returns zero */
+    retvalue = LoadStringW(hInst, 2, NULL, 0);
+    ok(!retvalue, "LoadStringW returned a non-zero value when called with buffer = NULL, retvalue = %d\n", retvalue);
+    /* check again, with a different buflen value, that calling LoadStringW with buffer = NULL returns zero */
+    retvalue = LoadStringW(hInst, 2, NULL, 128);
+    ok(!retvalue, "LoadStringW returned a non-zero value when called with buffer = NULL, retvalue = %d\n", retvalue);
 }
 
 static void test_LoadStringA (void)
@@ -81,8 +74,8 @@ static void test_LoadStringA (void)
     static const char str[] = "String resource"; /* same in resource.rc */
     char buf[128];
     struct string_test {
-        int bufsiz;
-        int expected;
+        unsigned int bufsiz;
+        unsigned int expected;
     };
     struct string_test tests[] = {{sizeof buf, sizeof str - 1},
                                   {sizeof str, sizeof str - 1},
@@ -92,12 +85,13 @@ static void test_LoadStringA (void)
 
     assert (sizeof str < sizeof buf);
     for (i = 0; i < sizeof tests / sizeof tests[0]; i++) {
-        const int bufsiz = tests[i].bufsiz;
-        const int expected = tests[i].expected;
+        const unsigned int bufsiz = tests[i].bufsiz;
+        const unsigned int expected = tests[i].expected;
         const int len = LoadStringA (hInst, 0, buf, bufsiz);
 
         ok (len == expected, "bufsiz=%d: got %d, expected %d\n",
             bufsiz, len, expected);
+        if (len != expected) continue;
         ok (!memcmp (buf, str, len),
             "bufsiz=%d: got '%s', expected '%.*s'\n",
             bufsiz, buf, len, str);

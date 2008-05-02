@@ -93,7 +93,7 @@ static void set_registry(LPCSTR install_dir)
     WCHAR mshtml_key[100];
     LPWSTR gecko_path;
     HKEY hkey;
-    DWORD res, len, size;
+    DWORD res, len;
 
     static const WCHAR wszGeckoPath[] = {'G','e','c','k','o','P','a','t','h',0};
     static const WCHAR wszWineGecko[] = {'w','i','n','e','_','g','e','c','k','o',0};
@@ -113,14 +113,13 @@ static void set_registry(LPCSTR install_dir)
 
     len = MultiByteToWideChar(CP_ACP, 0, install_dir, -1, NULL, 0)-1;
     gecko_path = heap_alloc((len+1)*sizeof(WCHAR)+sizeof(wszWineGecko));
-    MultiByteToWideChar(CP_ACP, 0, install_dir, -1, gecko_path, (len+1)*sizeof(WCHAR));
+    MultiByteToWideChar(CP_ACP, 0, install_dir, -1, gecko_path, len+1);
 
     if (len && gecko_path[len-1] != '\\')
         gecko_path[len++] = '\\';
 
     memcpy(gecko_path+len, wszWineGecko, sizeof(wszWineGecko));
 
-    size = len*sizeof(WCHAR)+sizeof(wszWineGecko);
     res = RegSetValueExW(hkey, wszGeckoPath, 0, REG_SZ, (LPVOID)gecko_path,
                        len*sizeof(WCHAR)+sizeof(wszWineGecko));
     heap_free(gecko_path);
@@ -135,7 +134,7 @@ static BOOL install_cab(LPCWSTR file_name)
     char install_dir[MAX_PATH];
     HRESULT (WINAPI *pExtractFilesA)(LPCSTR,LPCSTR,DWORD,LPCSTR,LPVOID,DWORD);
     LPSTR file_name_a;
-    DWORD res, len;
+    DWORD res;
     HRESULT hres;
 
     static const WCHAR wszAdvpack[] = {'a','d','v','p','a','c','k','.','d','l','l',0};
@@ -160,11 +159,8 @@ static BOOL install_cab(LPCWSTR file_name)
     advpack = LoadLibraryW(wszAdvpack);
     pExtractFilesA = (void *)GetProcAddress(advpack, "ExtractFiles");
 
-    len = WideCharToMultiByte(CP_ACP, 0, file_name, -1, NULL, 0, NULL, NULL);
-    file_name_a = heap_alloc(len);
-    WideCharToMultiByte(CP_ACP, 0, file_name, -1, file_name_a, -1, NULL, NULL);
-
     /* FIXME: Use unicode version (not yet implemented) */
+    file_name_a = heap_strdupWtoA(file_name);
     hres = pExtractFilesA(file_name_a, install_dir, 0, NULL, NULL, 0);
     FreeLibrary(advpack);
     heap_free(file_name_a);

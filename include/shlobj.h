@@ -54,6 +54,9 @@ DWORD        WINAPI SHFormatDrive(HWND,UINT,UINT,UINT);
 void         WINAPI SHFree(LPVOID);
 BOOL         WINAPI GetFileNameFromBrowse(HWND,LPSTR,DWORD,LPCSTR,LPCSTR,LPCSTR,LPCSTR);
 HRESULT      WINAPI SHGetInstanceExplorer(IUnknown**);
+HRESULT      WINAPI SHGetFolderPathAndSubDirA(HWND,int,HANDLE,DWORD,LPCSTR,LPSTR);
+HRESULT      WINAPI SHGetFolderPathAndSubDirW(HWND,int,HANDLE,DWORD,LPCWSTR,LPWSTR);
+#define             SHGetFolderPathAndSubDir WINELIB_NAME_AW(SHGetFolderPathAndSubDir);
 BOOL         WINAPI SHGetPathFromIDListA(LPCITEMIDLIST,LPSTR);
 BOOL         WINAPI SHGetPathFromIDListW(LPCITEMIDLIST,LPWSTR);
 #define             SHGetPathFromIDList WINELIB_NAME_AW(SHGetPathFromIDList)
@@ -73,9 +76,9 @@ VOID         WINAPI SHUpdateImageW(LPCWSTR,INT,UINT,INT);
 int          WINAPI RestartDialog(HWND,LPCWSTR,DWORD);
 int          WINAPI RestartDialogEx(HWND,LPCWSTR,DWORD,DWORD);
 
-#define SHFMT_ERROR     0xFFFFFFFFL  /* Error on last format, drive may be formatable */
-#define SHFMT_CANCEL    0xFFFFFFFEL  /* Last format was canceled */
-#define SHFMT_NOFORMAT  0xFFFFFFFDL  /* Drive is not formatable */
+#define SHFMT_ERROR     0xFFFFFFFFL  /* Error on last format, drive may be formattable */
+#define SHFMT_CANCEL    0xFFFFFFFEL  /* Last format was cancelled */
+#define SHFMT_NOFORMAT  0xFFFFFFFDL  /* Drive is not formattable */
 
 /* SHFormatDrive flags */
 #define SHFMT_ID_DEFAULT	0xFFFF

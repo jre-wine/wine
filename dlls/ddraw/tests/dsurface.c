@@ -648,7 +648,7 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Blt(lpDst, NULL, lpSrc, NULL, DDBLT_KEYDEST, &fx);
     ok(rc == DD_OK, "IDirectDrawSurface_Blt returned %08x\n", rc);
 
-    /* With korrectly passed override keys no key in the surface is needed.
+    /* With correctly passed override keys no key in the surface is needed.
      * Again, the result was checked before, no need to do that again
      */
     rc = IDirectDrawSurface_Blt(lpDst, NULL, lpSrc, NULL, DDBLT_KEYDESTOVERRIDE, &fx);
@@ -1012,6 +1012,7 @@ static void EnumTest(void)
     ok(rc == DD_OK, "GetAttachedSurface returned %08x\n", rc);
     rc = IDirectDrawSurface_GetAttachedSurface(ctx.expected[2], &ddsd.ddsCaps, &ctx.expected[3]);
     ok(rc == DDERR_NOTFOUND, "GetAttachedSurface returned %08x\n", rc);
+    ok(!ctx.expected[3], "expected NULL pointer\n");
     ctx.count = 0;
 
     rc = IDirectDraw_EnumSurfaces(lpDD, DDENUMSURFACES_DOESEXIST | DDENUMSURFACES_ALL, &ddsd, (void *) &ctx, enumCB);
@@ -1077,6 +1078,9 @@ static void AttachmentTest7(void)
     ok(num == 0, "Second mip level has %d surfaces attached, expected 1\n", num);
     /* Done level 2 */
     /* Mip level 3 is still needed */
+    hr = IDirectDrawSurface7_GetAttachedSurface(surface3, &caps, &surface4);
+    ok(hr == DDERR_NOTFOUND, "GetAttachedSurface returned %08x\n", hr);
+    ok(!surface4, "expected NULL pointer\n");
 
     /* Try to attach a 16x16 miplevel - Should not work as far I can see */
     memset(&ddsd, 0, sizeof(ddsd));
@@ -1214,6 +1218,7 @@ static void AttachmentTest(void)
     IDirectDrawSurface *surface1, *surface2, *surface3, *surface4;
     DDSURFACEDESC ddsd;
     DDSCAPS caps = {DDSCAPS_TEXTURE};
+    BOOL refrast = FALSE;
     HWND window = CreateWindow( "static", "ddraw_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
 
     memset(&ddsd, 0, sizeof(ddsd));
@@ -1265,21 +1270,41 @@ static void AttachmentTest(void)
     hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &surface4, NULL);
     ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
 
+    if (SUCCEEDED(IDirectDrawSurface7_AddAttachedSurface(surface1, surface4)))
+        refrast = TRUE;
+
     hr = IDirectDrawSurface7_AddAttachedSurface(surface1, surface4); /* Succeeds on refrast */
-    ok(hr == DDERR_CANNOTATTACHSURFACE, "Attaching a 16x16 offscreen plain surface to a 128x128 texture root returned %08x\n", hr);
+    if (refrast)
+        ok(hr == S_OK, "Attaching a 16x16 offscreen plain surface to a 128x128 texture root returned %08x\n", hr);
+    else
+        ok(hr == DDERR_CANNOTATTACHSURFACE, "Attaching a 16x16 offscreen plain surface to a 128x128 texture root returned %08x\n", hr);
     if(SUCCEEDED(hr)) IDirectDrawSurface7_DeleteAttachedSurface(surface1, 0, surface4);
+
     hr = IDirectDrawSurface7_AddAttachedSurface(surface4, surface1);  /* Succeeds on refrast */
-    ok(hr == DDERR_CANNOTATTACHSURFACE, "Attaching a 128x128 texture root to a 16x16 offscreen plain surface returned %08x\n", hr);
+    if (refrast)
+        ok(hr == S_OK, "Attaching a 128x128 texture root to a 16x16 offscreen plain surface returned %08x\n", hr);
+    else
+        ok(hr == DDERR_CANNOTATTACHSURFACE, "Attaching a 128x128 texture root to a 16x16 offscreen plain surface returned %08x\n", hr);
     if(SUCCEEDED(hr)) IDirectDrawSurface7_DeleteAttachedSurface(surface1, 0, surface1);
+
     hr = IDirectDrawSurface7_AddAttachedSurface(surface3, surface4);  /* Succeeds on refrast */
-    ok(hr == DDERR_CANNOTATTACHSURFACE, "Attaching a 16x16 offscreen plain surface to a 32x32 texture mip level returned %08x\n", hr);
+    if (refrast)
+        ok(hr == S_OK, "Attaching a 16x16 offscreen plain surface to a 32x32 texture mip level returned %08x\n", hr);
+    else
+        ok(hr == DDERR_CANNOTATTACHSURFACE, "Attaching a 16x16 offscreen plain surface to a 32x32 texture mip level returned %08x\n", hr);
     if(SUCCEEDED(hr)) IDirectDrawSurface7_DeleteAttachedSurface(surface3, 0, surface4);
+
     hr = IDirectDrawSurface7_AddAttachedSurface(surface4, surface3);
     ok(hr == DDERR_CANNOTATTACHSURFACE, "Attaching a 32x32 texture mip level to a 16x16 offscreen plain surface returned %08x\n", hr);
     if(SUCCEEDED(hr)) IDirectDrawSurface7_DeleteAttachedSurface(surface4, 0, surface3);
+
     hr = IDirectDrawSurface7_AddAttachedSurface(surface2, surface4);  /* Succeeds on refrast */
-    ok(hr == DDERR_CANNOTATTACHSURFACE, "Attaching a 16x16 offscreen plain surface to a 64x64 texture sublevel returned %08x\n", hr);
+    if (refrast)
+        ok(hr == S_OK, "Attaching a 16x16 offscreen plain surface to a 64x64 texture sublevel returned %08x\n", hr);
+    else
+        ok(hr == DDERR_CANNOTATTACHSURFACE, "Attaching a 16x16 offscreen plain surface to a 64x64 texture sublevel returned %08x\n", hr);
     if(SUCCEEDED(hr)) IDirectDrawSurface7_DeleteAttachedSurface(surface2, 0, surface4);
+
     hr = IDirectDrawSurface7_AddAttachedSurface(surface4, surface2);
     ok(hr == DDERR_CANNOTATTACHSURFACE, "Attaching a 64x64 texture sublevel to a 16x16 offscreen plain surface returned %08x\n", hr);
     if(SUCCEEDED(hr)) IDirectDrawSurface7_DeleteAttachedSurface(surface4, 0, surface2);
@@ -1504,7 +1529,6 @@ static void CubeMapTest(void)
     IDirectDrawSurface7_EnumAttachedSurfaces(cubemap,
                                              &num,
                                              CubeTestLvl1Enum);
-    trace("Enumerated %d surfaces in total\n", num);
     ok(num == 6, "Surface has %d attachments\n", num);
     IDirectDrawSurface7_Release(cubemap);
 
@@ -2110,7 +2134,6 @@ static void SizeTest(void)
     desc.dwSize = sizeof(desc);
     desc.dwFlags = DDSD_CAPS;
     desc.ddsCaps.dwCaps |= DDSCAPS_OFFSCREENPLAIN;
-    trace("before offscreenplain create dsurface = %p\n", dsurface);
     ret = IDirectDraw_CreateSurface(lpDD, &desc, &dsurface, NULL);
     ok(ret == DDERR_INVALIDPARAMS, "Creating an offscreen plain surface without a size info returned %08x (dsurface=%p)\n", ret, dsurface);
     if(dsurface)
@@ -2251,7 +2274,7 @@ static void PrivateDataTest(void)
     hr = IDirectDrawSurface7_GetPrivateData(surface7, &IID_IDirectDrawSurface7, &ptr, &size);
     ok(hr == DD_OK, "IDirectDrawSurface7_GetPrivateData failed with %08x\n", hr);
     ref2 = getref((IUnknown *) lpDD);
-    /* Object is NOT beein addrefed */
+    /* Object is NOT being addrefed */
     ok(ptr == (IUnknown *) lpDD, "Returned interface pointer is %p, expected %p\n", ptr, lpDD);
     ok(ref2 == ref + 1, "Object reference is %d, expected %d. ptr at %p, orig at %p\n", ref2, ref + 1, ptr, lpDD);
 
@@ -2371,7 +2394,9 @@ static void BltParamTest(void)
 static void PaletteTest(void)
 {
     HRESULT hr;
-    IDirectDrawPalette *palette;
+    LPDIRECTDRAWSURFACE lpSurf = NULL;
+    DDSURFACEDESC ddsd;
+    IDirectDrawPalette *palette = NULL;
     PALETTEENTRY Table[256];
     PALETTEENTRY palEntries[256];
     int i;
@@ -2387,7 +2412,7 @@ static void PaletteTest(void)
     /* Create a 8bit palette without DDPCAPS_ALLOW256 set */
     hr = IDirectDraw_CreatePalette(lpDD, DDPCAPS_8BIT, Table, &palette, NULL);
     ok(hr == DD_OK, "CreatePalette failed with %08x\n", hr);
-
+    if (FAILED(hr)) goto err;
     /* Read back the palette and verify the entries. Without DDPCAPS_ALLOW256 set
     /  entry 0 and 255 should have been overwritten with black and white */
     IDirectDrawPalette_GetEntries(palette , 0, 0, 256, &palEntries[0]);
@@ -2428,6 +2453,8 @@ static void PaletteTest(void)
     /* Create a 8bit palette with DDPCAPS_ALLOW256 set */
     hr = IDirectDraw_CreatePalette(lpDD, DDPCAPS_ALLOW256 | DDPCAPS_8BIT, Table, &palette, NULL);
     ok(hr == DD_OK, "CreatePalette failed with %08x\n", hr);
+    if (FAILED(hr)) goto err;
+
     IDirectDrawPalette_GetEntries(palette , 0, 0, 256, &palEntries[0]);
     ok(hr == DD_OK, "GetEntries failed with %08x\n", hr);
     if(hr == DD_OK)
@@ -2438,7 +2465,39 @@ static void PaletteTest(void)
                "Palette entry %d should have contained (255,0,0) but was set to %d,%d,%d)\n",
                i, palEntries[i].peRed, palEntries[i].peGreen, palEntries[i].peBlue);
     }
+
+    /* Try to set palette to a non-palettized surface */
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.ddpfPixelFormat.dwSize = sizeof(ddsd.ddpfPixelFormat);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+    ddsd.dwWidth = 800;
+    ddsd.dwHeight = 600;
+    ddsd.ddpfPixelFormat.dwFlags = DDPF_RGB;
+    U1(ddsd.ddpfPixelFormat).dwRGBBitCount = 32;
+    U2(ddsd.ddpfPixelFormat).dwRBitMask = 0xFF0000;
+    U3(ddsd.ddpfPixelFormat).dwGBitMask = 0x00FF00;
+    U4(ddsd.ddpfPixelFormat).dwBBitMask = 0x0000FF;
+    hr = IDirectDraw_CreateSurface(lpDD, &ddsd, &lpSurf, NULL);
+    ok(hr==DD_OK, "CreateSurface returned: %x\n",hr);
+    if (FAILED(hr)) {
+	skip("failed to create surface\n");
+	goto err;
+    }
+
+    hr = IDirectDrawSurface_SetPalette(lpSurf, palette);
+    ok(hr == DDERR_INVALIDPIXELFORMAT, "CreateSurface returned: %x\n",hr);
+
     IDirectDrawPalette_Release(palette);
+    palette = NULL;
+
+    hr = IDirectDrawSurface_GetPalette(lpSurf, &palette);
+    ok(hr == DDERR_NOPALETTEATTACHED, "CreateSurface returned: %x\n",hr);
+
+    err:
+
+    if (lpSurf) IDirectDrawSurface_Release(lpSurf);
+    if (palette) IDirectDrawPalette_Release(palette);
 }
 
 static void StructSizeTest(void)

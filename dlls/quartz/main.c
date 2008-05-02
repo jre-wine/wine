@@ -60,6 +60,7 @@ struct object_creation_info
 
 static const struct object_creation_info object_creation[] =
 {
+    { &CLSID_SeekingPassThru, SeekingPassThru_create },
     { &CLSID_FilterGraph, FilterGraph_create },
     { &CLSID_FilterGraphNoThread, FilterGraphNoThread_create },
     { &CLSID_FilterMapper, FilterMapper_create },
@@ -69,6 +70,7 @@ static const struct object_creation_info object_creation[] =
     { &CLSID_AviSplitter, AVISplitter_create },
     { &CLSID_MPEG1Splitter, MPEGSplitter_create },
     { &CLSID_VideoRenderer, VideoRenderer_create },
+    { &CLSID_NullRenderer, NullRenderer_create },
     { &CLSID_VideoRendererDefault, VideoRendererDefault_create },
     { &CLSID_DSoundRender, DSoundRender_create },
     { &CLSID_AVIDec, AVIDec_create },

@@ -33,6 +33,21 @@
 
 #include "msxml_private.h"
 
+#ifdef HAVE_LIBXSLT
+# ifdef HAVE_LIBXSLT_PATTERN_H
+#  include <libxslt/pattern.h>
+# endif
+# ifdef HAVE_LIBXSLT_TRANSFORM_H
+#  include <libxslt/transform.h>
+# endif
+# include <libxslt/xsltutils.h>
+# include <libxslt/xsltInternals.h>
+#endif
+
+#ifdef HAVE_LIBXML2
+# include <libxml/HTMLtree.h>
+#endif
+
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msxml);
@@ -124,8 +139,13 @@ static HRESULT WINAPI xmlnode_GetTypeInfoCount(
     IXMLDOMNode *iface,
     UINT* pctinfo )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+
+    TRACE("(%p)->(%p)\n", This, pctinfo);
+
+    *pctinfo = 1;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlnode_GetTypeInfo(
@@ -134,8 +154,14 @@ static HRESULT WINAPI xmlnode_GetTypeInfo(
     LCID lcid,
     ITypeInfo** ppTInfo )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    HRESULT hr;
+
+    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+
+    hr = get_typeinfo(IXMLDOMNode_tid, ppTInfo);
+
+    return hr;
 }
 
 static HRESULT WINAPI xmlnode_GetIDsOfNames(
@@ -146,8 +172,25 @@ static HRESULT WINAPI xmlnode_GetIDsOfNames(
     LCID lcid,
     DISPID* rgDispId )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames,
+          lcid, rgDispId);
+
+    if(!rgszNames || cNames == 0 || !rgDispId)
+        return E_INVALIDARG;
+
+    hr = get_typeinfo(IXMLDOMNode_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, rgszNames, cNames, rgDispId);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI xmlnode_Invoke(
@@ -161,8 +204,22 @@ static HRESULT WINAPI xmlnode_Invoke(
     EXCEPINFO* pExcepInfo,
     UINT* puArgErr )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+          lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+
+    hr = get_typeinfo(IXMLDOMNode_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, &(This->lpVtbl), dispIdMember, wFlags, pDispParams,
+                pVarResult, pExcepInfo, puArgErr);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI xmlnode_get_nodeName(
@@ -293,7 +350,7 @@ static HRESULT WINAPI xmlnode_put_nodeValue(
     TRACE("%p type(%d)\n", This, This->node->type);
 
     /* Document, Document Fragment, Document Type, Element,
-        Entity, Entity Reference, Notation arent supported. */
+        Entity, Entity Reference, Notation aren't supported. */
     switch ( This->node->type )
     {
     case XML_ATTRIBUTE_NODE:
@@ -1007,7 +1064,7 @@ static HRESULT WINAPI xmlnode_get_xml(
         {
             const xmlChar *pContent;
 
-            /* Attribute Nodes return a space infront of their name */
+            /* Attribute Nodes return a space in front of their name */
             pContent = xmlBufferContent(pXmlBuf);
             if( ((char*)pContent)[0] == ' ')
                 *xmlString = bstr_from_xmlChar(pContent+1);
@@ -1030,8 +1087,79 @@ static HRESULT WINAPI xmlnode_transformNode(
     IXMLDOMNode* styleSheet,
     BSTR* xmlString)
 {
-    FIXME("\n");
+#ifdef HAVE_LIBXSLT
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    xmlnode *pStyleSheet = NULL;
+    xsltStylesheetPtr xsltSS = NULL;
+    xmlDocPtr result = NULL;
+    IXMLDOMNode *ssNew;
+
+    TRACE("%p %p %p\n", This, styleSheet, xmlString);
+
+    if(!styleSheet || !xmlString)
+        return E_INVALIDARG;
+
+    *xmlString = NULL;
+
+    if(IXMLDOMNode_QueryInterface(styleSheet, &IID_IXMLDOMNode, (LPVOID)&ssNew) == S_OK)
+    {
+        pStyleSheet = impl_from_IXMLDOMNode( ssNew );
+
+        xsltSS = xsltParseStylesheetDoc( pStyleSheet->node->doc);
+        if(xsltSS)
+        {
+            result = xsltApplyStylesheet(xsltSS, This->node->doc, NULL);
+            if(result)
+            {
+                const xmlChar *pContent;
+
+                if(result->type == XML_HTML_DOCUMENT_NODE)
+                {
+                    xmlOutputBufferPtr	pOutput = xmlAllocOutputBuffer(NULL);
+                    if(pOutput)
+                    {
+                        htmlDocContentDumpOutput(pOutput, result->doc, NULL);
+                        if(pOutput)
+                        {
+                            pContent = xmlBufferContent(pOutput->buffer);
+                            *xmlString = bstr_from_xmlChar(pContent);
+                        }
+
+                        xmlOutputBufferClose(pOutput);
+                    }
+                }
+                else
+                {
+                    xmlBufferPtr pXmlBuf;
+                    int nSize;
+
+                    pXmlBuf = xmlBufferCreate();
+                    if(pXmlBuf)
+                    {
+                        nSize = xmlNodeDump(pXmlBuf, NULL, (xmlNodePtr)result, 0, 0);
+                        if(nSize > 0)
+                        {
+                            pContent = xmlBufferContent(pXmlBuf);
+                            *xmlString = bstr_from_xmlChar(pContent);
+
+                            xmlBufferFree(pXmlBuf);
+                        }
+                    }
+                }
+            }
+        }
+
+        IXMLDOMNode_Release(ssNew);
+    }
+
+    if(*xmlString == NULL)
+        *xmlString = SysAllocStringLen(NULL, 0);
+
+    return S_OK;
+#else
+    FIXME("libxslt headers were not found at compile time\n");
     return E_NOTIMPL;
+#endif
 }
 
 static HRESULT WINAPI xmlnode_selectNodes(
@@ -1079,16 +1207,52 @@ static HRESULT WINAPI xmlnode_get_namespaceURI(
     IXMLDOMNode *iface,
     BSTR* namespaceURI)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    HRESULT hr = S_FALSE;
+    xmlNsPtr *pNSList;
+
+    TRACE("%p %p\n", This, namespaceURI );
+
+    if(!namespaceURI)
+        return E_INVALIDARG;
+
+    *namespaceURI = NULL;
+
+    pNSList = xmlGetNsList(This->node->doc, This->node);
+    if(pNSList)
+    {
+        *namespaceURI = bstr_from_xmlChar( pNSList[0]->href );
+
+        hr = S_OK;
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI xmlnode_get_prefix(
     IXMLDOMNode *iface,
     BSTR* prefixString)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    HRESULT hr = S_FALSE;
+    xmlNsPtr *pNSList;
+
+    TRACE("%p %p\n", This, prefixString );
+
+    if(!prefixString)
+        return E_INVALIDARG;
+
+    *prefixString = NULL;
+
+    pNSList = xmlGetNsList(This->node->doc, This->node);
+    if(pNSList)
+    {
+        *prefixString = bstr_from_xmlChar( pNSList[0]->prefix );
+
+        hr = S_OK;
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI xmlnode_get_baseName(

@@ -310,7 +310,7 @@ IDirect3DImpl_3_EnumDevices(IDirect3D3 *iface,
     /* Some games (Motoracer 2 demo) have the bad idea to modify the device name string.
        Let's put the string in a sufficiently sized array in writable memory. */
     char device_name[50];
-    strcpy(device_name,"direct3d");
+    strcpy(device_name,"Direct3D HEL");
 
     TRACE("(%p)->(%p,%p)\n", This, Callback, Context);
     EnterCriticalSection(&ddraw_cs);
@@ -358,6 +358,8 @@ IDirect3DImpl_3_EnumDevices(IDirect3D3 *iface,
             return D3D_OK;
         }
     }
+
+    strcpy(device_name,"Direct3D HAL");
 
     TRACE("(%p) Enumerating HAL Direct3D device\n", This);
     d1 = dref;
@@ -750,7 +752,7 @@ Thunk_IDirect3DImpl_1_FindDevice(IDirect3D *iface,
  *
  * Params:
  *  refiid: IID of the device to create
- *  Surface: Inititial rendertarget
+ *  Surface: Initial rendertarget
  *  Device: Address to return the interface pointer
  *
  * Returns:
@@ -1131,6 +1133,8 @@ IDirect3DImpl_7_EnumZBufferFormats(IDirect3D7 *iface,
     ICOM_THIS_FROM(IDirectDrawImpl, IDirect3D7, iface);
     HRESULT hr;
     int i;
+    WINED3DDISPLAYMODE d3ddm;
+    WINED3DDEVTYPE type;
 
     /* Order matters. Specifically, BattleZone II (full version) expects the
      * 16-bit depth formats to be listed before the 24 and 32 ones. */
@@ -1148,15 +1152,53 @@ IDirect3DImpl_7_EnumZBufferFormats(IDirect3D7 *iface,
     if(!Callback)
         return DDERR_INVALIDPARAMS;
 
+    if(IsEqualGUID(refiidDevice, &IID_IDirect3DHALDevice)    ||
+       IsEqualGUID(refiidDevice, &IID_IDirect3DTnLHalDevice) ||
+       IsEqualGUID(refiidDevice, &IID_D3DDEVICE_WineD3D))
+    {
+        TRACE("Asked for HAL device\n");
+        type = WINED3DDEVTYPE_HAL;
+    }
+    else if(IsEqualGUID(refiidDevice, &IID_IDirect3DRGBDevice) ||
+            IsEqualGUID(refiidDevice, &IID_IDirect3DMMXDevice))
+    {
+        TRACE("Asked for SW device\n");
+        type = WINED3DDEVTYPE_SW;
+    }
+    else if(IsEqualGUID(refiidDevice, &IID_IDirect3DRefDevice))
+    {
+        TRACE("Asked for REF device\n");
+        type = WINED3DDEVTYPE_REF;
+    }
+    else if(IsEqualGUID(refiidDevice, &IID_IDirect3DNullDevice))
+    {
+        TRACE("Asked for NULLREF device\n");
+        type = WINED3DDEVTYPE_NULLREF;
+    }
+    else
+    {
+        FIXME("Unexpected device GUID %s\n", debugstr_guid(refiidDevice));
+        type = WINED3DDEVTYPE_HAL;
+    }
+
     EnterCriticalSection(&ddraw_cs);
-    for(i = 0; i < sizeof(FormatList) / sizeof(WINED3DFORMAT); i++)
+    /* We need an adapter format from somewhere to please wined3d and WGL. Use the current display mode.
+     * So far all cards offer the same depth stencil format for all modes, but if some do not and apps
+     * do not like that we'll have to find some workaround, like iterating over all imaginable formats
+     * and collecting all the depth stencil formats we can get
+     */
+    hr = IWineD3DDevice_GetDisplayMode(This->wineD3DDevice,
+                                       0 /* swapchain 0 */,
+                                       &d3ddm);
+
+    for(i = 0; i < (sizeof(FormatList) / sizeof(FormatList[0])); i++)
     {
         hr = IWineD3D_CheckDeviceFormat(This->wineD3D,
-                                        0 /* Adapter */,
-                                        0 /* DeviceType */,
-                                        0 /* AdapterFormat */,
+                                        WINED3DADAPTER_DEFAULT /* Adapter */,
+                                        type /* DeviceType */,
+                                        d3ddm.Format /* AdapterFormat */,
                                         WINED3DUSAGE_DEPTHSTENCIL /* Usage */,
-                                        0 /* ResourceType */,
+                                        WINED3DRTYPE_SURFACE,
                                         FormatList[i]);
         if(hr == D3D_OK)
         {
@@ -1253,103 +1295,10 @@ IDirect3DImpl_GetCaps(IWineD3D *WineD3D,
     WINED3DCAPS WCaps;
     HRESULT hr;
 
-    /* Some Variables to asign to the pointers in WCaps */
-    WINED3DDEVTYPE DevType;
-    UINT dummy_uint;
-    float dummy_float;
-    DWORD dummy_dword, MaxTextureBlendStages, MaxSimultaneousTextures;
-    DWORD MaxUserClipPlanes, MaxVertexBlendMatrices;
-
+    /* Some variables to assign to the pointers in WCaps */
     TRACE("()->(%p,%p,%p\n", WineD3D, Desc123, Desc7);
 
-    /* Asign the pointers in WCaps */
-    WCaps.DeviceType = &DevType;
-    WCaps.AdapterOrdinal = &dummy_uint;
-
-    WCaps.Caps = &dummy_dword;
-    WCaps.Caps2 = &dummy_dword;
-    WCaps.Caps3 = &dummy_dword;
-    WCaps.PresentationIntervals = &dummy_dword;
-
-    WCaps.CursorCaps = &dummy_dword;
-
-    WCaps.DevCaps = &Desc7->dwDevCaps;
-    WCaps.PrimitiveMiscCaps = &dummy_dword;
-    WCaps.RasterCaps = &Desc7->dpcLineCaps.dwRasterCaps;
-    WCaps.ZCmpCaps = &Desc7->dpcLineCaps.dwZCmpCaps;
-    WCaps.SrcBlendCaps = &Desc7->dpcLineCaps.dwSrcBlendCaps;
-    WCaps.DestBlendCaps = &Desc7->dpcLineCaps.dwDestBlendCaps;
-    WCaps.AlphaCmpCaps = &Desc7->dpcLineCaps.dwAlphaCmpCaps;
-    WCaps.ShadeCaps = &Desc7->dpcLineCaps.dwShadeCaps;
-    WCaps.TextureCaps = &Desc7->dpcLineCaps.dwTextureCaps;
-    WCaps.TextureFilterCaps = &Desc7->dpcLineCaps.dwTextureFilterCaps;
-    WCaps.CubeTextureFilterCaps = &dummy_dword;
-    WCaps.VolumeTextureFilterCaps = &dummy_dword;
-    WCaps.TextureAddressCaps = &Desc7->dpcLineCaps.dwTextureAddressCaps;
-    WCaps.VolumeTextureAddressCaps = &dummy_dword;
-
-    WCaps.LineCaps = &dummy_dword;
-    WCaps.MaxTextureWidth = &Desc7->dwMaxTextureWidth;
-    WCaps.MaxTextureHeight = &Desc7->dwMaxTextureHeight;
-    WCaps.MaxVolumeExtent = &dummy_dword;
-
-    WCaps.MaxTextureRepeat = &Desc7->dwMaxTextureRepeat;
-    WCaps.MaxTextureAspectRatio = &Desc7->dwMaxTextureAspectRatio;
-    WCaps.MaxAnisotropy = &Desc7->dwMaxAnisotropy;
-    WCaps.MaxVertexW = &Desc7->dvMaxVertexW;
-
-    WCaps.GuardBandLeft = &Desc7->dvGuardBandLeft;
-    WCaps.GuardBandTop = &Desc7->dvGuardBandTop;
-    WCaps.GuardBandRight = &Desc7->dvGuardBandRight;
-    WCaps.GuardBandBottom = &Desc7->dvGuardBandBottom;
-
-    WCaps.ExtentsAdjust = &Desc7->dvExtentsAdjust;
-    WCaps.StencilCaps = &Desc7->dwStencilCaps;
-
-    WCaps.FVFCaps = &Desc7->dwFVFCaps;
-    WCaps.TextureOpCaps = &Desc7->dwTextureOpCaps;
-    WCaps.MaxTextureBlendStages = &MaxTextureBlendStages;
-    WCaps.MaxSimultaneousTextures = &MaxSimultaneousTextures;
-
-    WCaps.VertexProcessingCaps = &Desc7->dwVertexProcessingCaps;
-    WCaps.MaxActiveLights = &Desc7->dwMaxActiveLights;
-    WCaps.MaxUserClipPlanes = &MaxUserClipPlanes;
-    WCaps.MaxVertexBlendMatrices = &MaxVertexBlendMatrices;
-    WCaps.MaxVertexBlendMatrixIndex = &dummy_dword;
-
-    WCaps.MaxPointSize = &dummy_float;
-    WCaps.MaxPrimitiveCount = &dummy_dword;
-    WCaps.MaxVertexIndex = &dummy_dword;
-    WCaps.MaxStreams = &dummy_dword;
-    WCaps.MaxStreamStride = &dummy_dword;
-
-    WCaps.VertexShaderVersion = &dummy_dword;
-    WCaps.MaxVertexShaderConst = &dummy_dword;
-
-    WCaps.PixelShaderVersion = &dummy_dword;
-    WCaps.PixelShader1xMaxValue = &dummy_float;
-
-    /* These are dx9 only, set them to NULL */
-    WCaps.DevCaps2 = NULL;
-    WCaps.MaxNpatchTessellationLevel = NULL;
-    WCaps.Reserved5 = NULL;
-    WCaps.MasterAdapterOrdinal = NULL;
-    WCaps.AdapterOrdinalInGroup = NULL;
-    WCaps.NumberOfAdaptersInGroup = NULL;
-    WCaps.DeclTypes = NULL;
-    WCaps.NumSimultaneousRTs = NULL;
-    WCaps.StretchRectFilterCaps = NULL;
-    /* WCaps.VS20Caps = NULL; */
-    /* WCaps.PS20Caps = NULL; */
-    WCaps.VertexTextureFilterCaps = NULL;
-    WCaps.MaxVShaderInstructionsExecuted = NULL;
-    WCaps.MaxPShaderInstructionsExecuted = NULL;
-    WCaps.MaxVertexShader30InstructionSlots = NULL;
-    WCaps.MaxPixelShader30InstructionSlots = NULL;
-    WCaps.Reserved2 = NULL;
-    WCaps.Reserved3 = NULL;
-
-    /* Now get the caps */
+    memset(&WCaps, 0, sizeof(WCaps));
     EnterCriticalSection(&ddraw_cs);
     hr = IWineD3D_GetDeviceCaps(WineD3D, 0, WINED3DDEVTYPE_HAL, &WCaps);
     LeaveCriticalSection(&ddraw_cs);
@@ -1357,6 +1306,40 @@ IDirect3DImpl_GetCaps(IWineD3D *WineD3D,
     {
         return hr;
     }
+
+    /* Copy the results into the d3d7 and d3d3 structures */
+    Desc7->dwDevCaps = WCaps.DevCaps;
+    Desc7->dpcLineCaps.dwRasterCaps = WCaps.RasterCaps;
+    Desc7->dpcLineCaps.dwZCmpCaps = WCaps.ZCmpCaps;
+    Desc7->dpcLineCaps.dwSrcBlendCaps = WCaps.SrcBlendCaps;
+    Desc7->dpcLineCaps.dwDestBlendCaps = WCaps.DestBlendCaps;
+    Desc7->dpcLineCaps.dwAlphaCmpCaps = WCaps.AlphaCmpCaps;
+    Desc7->dpcLineCaps.dwShadeCaps = WCaps.ShadeCaps;
+    Desc7->dpcLineCaps.dwTextureCaps = WCaps.TextureCaps;
+    Desc7->dpcLineCaps.dwTextureFilterCaps = WCaps.TextureFilterCaps;
+    Desc7->dpcLineCaps.dwTextureAddressCaps = WCaps.TextureAddressCaps;
+
+    Desc7->dwMaxTextureWidth = WCaps.MaxTextureWidth;
+    Desc7->dwMaxTextureHeight = WCaps.MaxTextureHeight;
+
+    Desc7->dwMaxTextureRepeat = WCaps.MaxTextureRepeat;
+    Desc7->dwMaxTextureAspectRatio = WCaps.MaxTextureAspectRatio;
+    Desc7->dwMaxAnisotropy = WCaps.MaxAnisotropy;
+    Desc7->dvMaxVertexW = WCaps.MaxVertexW;
+
+    Desc7->dvGuardBandLeft = WCaps.GuardBandLeft;
+    Desc7->dvGuardBandTop = WCaps.GuardBandTop;
+    Desc7->dvGuardBandRight = WCaps.GuardBandRight;
+    Desc7->dvGuardBandBottom = WCaps.GuardBandBottom;
+
+    Desc7->dvExtentsAdjust = WCaps.ExtentsAdjust;
+    Desc7->dwStencilCaps = WCaps.StencilCaps;
+
+    Desc7->dwFVFCaps = WCaps.FVFCaps;
+    Desc7->dwTextureOpCaps = WCaps.TextureOpCaps;
+
+    Desc7->dwVertexProcessingCaps = WCaps.VertexProcessingCaps;
+    Desc7->dwMaxActiveLights = WCaps.MaxActiveLights;
 
     /* Remove all non-d3d7 caps */
     Desc7->dwDevCaps &= (
@@ -1483,15 +1466,15 @@ IDirect3DImpl_GetCaps(IWineD3D *WineD3D,
     Desc7->dwMinTextureHeight = 1;
 
     /* Convert DWORDs safely to WORDs */
-    if(MaxTextureBlendStages > 65535) Desc7->wMaxTextureBlendStages = 65535;
-    else Desc7->wMaxTextureBlendStages = (WORD) MaxTextureBlendStages;
-    if(MaxSimultaneousTextures > 65535) Desc7->wMaxSimultaneousTextures = 65535;
-    else Desc7->wMaxSimultaneousTextures = (WORD) MaxSimultaneousTextures;
+    if(WCaps.MaxTextureBlendStages > 65535) Desc7->wMaxTextureBlendStages = 65535;
+    else Desc7->wMaxTextureBlendStages = (WORD) WCaps.MaxTextureBlendStages;
+    if(WCaps.MaxSimultaneousTextures > 65535) Desc7->wMaxSimultaneousTextures = 65535;
+    else Desc7->wMaxSimultaneousTextures = (WORD) WCaps.MaxSimultaneousTextures;
 
-    if(MaxUserClipPlanes > 65535) Desc7->wMaxUserClipPlanes = 65535;
-    else Desc7->wMaxUserClipPlanes = (WORD) MaxUserClipPlanes;
-    if(MaxVertexBlendMatrices > 65535) Desc7->wMaxVertexBlendMatrices = 65535;
-    else Desc7->wMaxVertexBlendMatrices = (WORD) MaxVertexBlendMatrices;
+    if(WCaps.MaxUserClipPlanes > 65535) Desc7->wMaxUserClipPlanes = 65535;
+    else Desc7->wMaxUserClipPlanes = (WORD) WCaps.MaxUserClipPlanes;
+    if(WCaps.MaxVertexBlendMatrices > 65535) Desc7->wMaxVertexBlendMatrices = 65535;
+    else Desc7->wMaxVertexBlendMatrices = (WORD) WCaps.MaxVertexBlendMatrices;
 
     Desc7->deviceGUID = IID_IDirect3DTnLHalDevice;
 

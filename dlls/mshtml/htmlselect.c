@@ -16,17 +16,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
-#include <stdio.h>
 
 #define COBJMACROS
 
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "ole2.h"
 
 #include "wine/debug.h"
@@ -426,7 +422,7 @@ static const NodeImplVtbl HTMLSelectElementImplVtbl = {
 
 HTMLElement *HTMLSelectElement_Create(nsIDOMHTMLElement *nselem)
 {
-    HTMLSelectElement *ret = heap_alloc(sizeof(HTMLSelectElement));
+    HTMLSelectElement *ret = heap_alloc_zero(sizeof(HTMLSelectElement));
     nsresult nsres;
 
     HTMLElement_Init(&ret->element);

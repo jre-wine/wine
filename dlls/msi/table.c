@@ -1796,9 +1796,6 @@ static UINT TABLE_find_matching_rows( struct tagMSIVIEW *view, UINT col,
 
     *row = entry->row;
 
-    if (tv->order)
-        *row = tv->order->reorder[*row];
-
     return ERROR_SUCCESS;
 }
 
@@ -2053,6 +2050,9 @@ static UINT TABLE_sort(struct tagMSIVIEW *view, column_info *columns)
     r = TABLE_get_dimensions(view, &rows, &cols);
     if (r != ERROR_SUCCESS)
         return r;
+
+    if (rows == 0)
+        return ERROR_SUCCESS;
 
     order = msi_alloc_zero(sizeof(MSIORDERINFO) + sizeof(UINT) * cols);
     if (!order)

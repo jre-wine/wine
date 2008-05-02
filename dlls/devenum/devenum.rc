@@ -124,3 +124,40 @@ LANGUAGE LANG_DUTCH, SUBLANG_NEUTRAL
 	9  "Standaardapparaat WaveOut"
 	10 "Standaardapparaat MidiOut"
 }
+
+STRINGTABLE DISCARDABLE
+LANGUAGE LANG_ROMANIAN, SUBLANG_NEUTRAL
+{
+	7  "DirectSound implicit"
+	8  "DirectSound: %s"
+	9  "Dispozitiv WaveOut implicit"
+	10 "Dispozitiv MidiOut implicit"
+}
+
+STRINGTABLE DISCARDABLE
+LANGUAGE LANG_RUSSIAN, SUBLANG_DEFAULT
+{
+	7  "Стандартный DirectSound"
+	8  "DirectSound: %s"
+	9  "Звуковое устройство вывода по умолчанию"
+	10 "Устройство вывода MIDI по умолчанию"
+
+}
+
+STRINGTABLE DISCARDABLE
+LANGUAGE LANG_SLOVENIAN, SUBLANG_DEFAULT
+{
+	7  "Privzeta DirectSound naprava"
+	8  "DirectSound: %s"
+	9  "Privzeta WaveOut naprava"
+	10 "Privzeta MidiOut naprava"
+}
+
+STRINGTABLE DISCARDABLE
+LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
+{
+	7  "기본 다이렉트 사운드"
+	8  "다이렉트 사운드: %s"
+	9  "기본 웨이브 출력 장치"
+	10 "기본 미디출력 장치"
+}

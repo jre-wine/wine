@@ -33,7 +33,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(nonclient);
 
 #define SC_ABOUTWINE            (SC_SCREENSAVE+1)
-#define SC_PUTMARK              (SC_SCREENSAVE+2)
 
   /* Some useful macros */
 #define HAS_DLGFRAME(style,exStyle) \
@@ -1123,7 +1122,7 @@ LRESULT NC_HandleNCPaint( HWND hwnd , HRGN clip)
  *
  * Handle a WM_NCACTIVATE message. Called from DefWindowProc().
  */
-LRESULT NC_HandleNCActivate( HWND hwnd, WPARAM wParam )
+LRESULT NC_HandleNCActivate( HWND hwnd, WPARAM wParam, LPARAM lParam )
 {
     WND* wndPtr = WIN_GetPtr( hwnd );
 
@@ -1138,10 +1137,16 @@ LRESULT NC_HandleNCActivate( HWND hwnd, WPARAM wParam )
     else wndPtr->flags &= ~WIN_NCACTIVATED;
     WIN_ReleasePtr( wndPtr );
 
-    if (IsIconic(hwnd))
-        WINPOS_RedrawIconTitle( hwnd );
-    else
-        NC_DoNCPaint( hwnd, (HRGN)1, FALSE );
+    /* This isn't documented but is reproducible in at least XP SP2 and
+     * Outlook 2007 depends on it
+     */
+    if (lParam != -1)
+    {
+        if (IsIconic(hwnd))
+            WINPOS_RedrawIconTitle( hwnd );
+        else
+            NC_DoNCPaint( hwnd, (HRGN)1, FALSE );
+    }
 
     return TRUE;
 }
@@ -1528,11 +1533,14 @@ LRESULT NC_HandleSysCommand( HWND hwnd, WPARAM wParam, LPARAM lParam )
     if (HOOK_CallHooks( WH_CBT, HCBT_SYSCOMMAND, wParam, lParam, TRUE ))
         return 0;
 
+    if (!USER_Driver->pSysCommand( hwnd, wParam, lParam ))
+        return 0;
+
     switch (wParam & 0xfff0)
     {
     case SC_SIZE:
     case SC_MOVE:
-        USER_Driver->pSysCommandSizeMove( hwnd, wParam );
+        WINPOS_SysCommandSizeMove( hwnd, wParam );
         break;
 
     case SC_MINIMIZE:
@@ -1590,13 +1598,10 @@ LRESULT NC_HandleSysCommand( HWND hwnd, WPARAM wParam, LPARAM lParam )
             if (hmodule)
             {
                 FARPROC aboutproc = GetProcAddress( hmodule, "ShellAboutA" );
-                if (aboutproc) aboutproc( hwnd, PACKAGE_NAME, PACKAGE_STRING, 0 );
+                if (aboutproc) aboutproc( hwnd, PACKAGE_STRING, NULL, 0 );
                 FreeLibrary( hmodule );
             }
         }
-        else
-          if (wParam == SC_PUTMARK)
-            DPRINTF("Debug mark requested by user\n");
         break;
 
     case SC_HOTKEY:

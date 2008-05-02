@@ -223,7 +223,7 @@ static int get_dib_width_bytes( int width, int depth )
  */
 static int bitmap_info_size( const BITMAPINFO * info, WORD coloruse )
 {
-    int colors;
+    int colors, masks = 0;
 
     if (info->bmiHeader.biSize == sizeof(BITMAPCOREHEADER))
     {
@@ -239,7 +239,8 @@ static int bitmap_info_size( const BITMAPINFO * info, WORD coloruse )
                 colors = 256;
         if (!colors && (info->bmiHeader.biBitCount <= 8))
             colors = 1 << info->bmiHeader.biBitCount;
-        return sizeof(BITMAPINFOHEADER) + colors *
+        if (info->bmiHeader.biCompression == BI_BITFIELDS) masks = 3;
+        return sizeof(BITMAPINFOHEADER) + masks * sizeof(DWORD) + colors *
                ((coloruse == DIB_RGB_COLORS) ? sizeof(RGBQUAD) : sizeof(WORD));
     }
 }
@@ -384,11 +385,10 @@ static ICONCACHE* CURSORICON_FindCache(HICON hIcon)
     ICONCACHE *ptr;
     ICONCACHE *pRet=NULL;
     BOOL IsFound = FALSE;
-    int count;
 
     EnterCriticalSection( &IconCrst );
 
-    for (count = 0, ptr = IconAnchor; ptr != NULL && !IsFound; ptr = ptr->next, count++ )
+    for (ptr = IconAnchor; ptr != NULL && !IsFound; ptr = ptr->next)
     {
         if ( hIcon == ptr->hIcon )
         {
@@ -701,12 +701,6 @@ HICON WINAPI CreateIconFromResourceEx( LPBYTE bits, UINT cbSize,
         hotspot = *pt;
         bmi = (BITMAPINFO *)(pt + 1);
     }
-    size = bitmap_info_size( bmi, DIB_RGB_COLORS );
-
-    if (!width) width = bmi->bmiHeader.biWidth;
-    if (!height) height = bmi->bmiHeader.biHeight/2;
-    DoStretch = (bmi->bmiHeader.biHeight/2 != height) ||
-      (bmi->bmiHeader.biWidth != width);
 
     /* Check bitmap header */
 
@@ -717,6 +711,13 @@ HICON WINAPI CreateIconFromResourceEx( LPBYTE bits, UINT cbSize,
           WARN_(cursor)("\tinvalid resource bitmap header.\n");
           return 0;
     }
+
+    size = bitmap_info_size( bmi, DIB_RGB_COLORS );
+
+    if (!width) width = bmi->bmiHeader.biWidth;
+    if (!height) height = bmi->bmiHeader.biHeight/2;
+    DoStretch = (bmi->bmiHeader.biHeight/2 != height) ||
+      (bmi->bmiHeader.biWidth != width);
 
     if (!screen_dc) screen_dc = CreateDCW( DISPLAYW, NULL, NULL, NULL );
     if (screen_dc)
@@ -2147,8 +2148,19 @@ static HBITMAP BITMAP_Load( HINSTANCE instance, LPCWSTR name,
     }
     else
     {
+        BITMAPFILEHEADER * bmfh;
+
         if (!(ptr = map_fileW( name, NULL ))) return 0;
         info = (BITMAPINFO *)(ptr + sizeof(BITMAPFILEHEADER));
+        bmfh = (BITMAPFILEHEADER *)ptr;
+        if (!(  bmfh->bfType == 0x4d42 /* 'BM' */ &&
+                bmfh->bfReserved1 == 0 &&
+                bmfh->bfReserved2 == 0))
+        {
+            WARN("Invalid/unsupported bitmap format!\n");
+            UnmapViewOfFile( ptr );
+            return 0;
+        }
     }
 
     size = bitmap_info_size(info, DIB_RGB_COLORS);

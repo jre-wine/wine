@@ -44,47 +44,27 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
 static int fix_headers(char *buf, DWORD post_len)
 {
-    char *ptr = NULL;
+    char *ptr = buf, *ptr2;
 
-    if(!strncasecmp(USER_AGENT, buf, sizeof(USER_AGENT)-1)) {
-        ptr = buf;
-    }else {
-        ptr = strstr(buf, "\r\n" USER_AGENT);
-        if(ptr)
-            ptr += 2;
-    }
+    while(*ptr && (ptr[0] != '\r' || ptr[1] != '\n')) {
+        for(ptr2=ptr+1; *ptr2 && (ptr2[0] != '\r' || ptr2[1] != '\n'); ptr2++);
 
-    if(ptr) {
-        const char *ptr2;
+        if(*ptr2)
+            ptr2 += 2;
 
-        FIXME("Ignoring User-Agent header\n");
-
-        ptr2 = strstr(ptr, "\r\n");
-        if(ptr2)
+        if(!strncasecmp(ptr, USER_AGENT, sizeof(USER_AGENT)-1)) {
+            FIXME("Ignoring User-Agent header\n");
             memmove(ptr, ptr2, strlen(ptr2)+1);
-    }
-
-    if(!post_len) {
-        if(!strncasecmp(CONTENT_TYPE, buf, sizeof(CONTENT_TYPE)-1)) {
-            ptr = buf;
-        }else {
-            ptr = strstr(buf, "\r\n" CONTENT_TYPE);
-            if(ptr)
-                ptr += 2;
-        }
-
-        if(ptr) {
-            const char *ptr2;
-
+        }else if(!post_len && !strncasecmp(ptr, CONTENT_TYPE, sizeof(CONTENT_TYPE)-1)) {
             TRACE("Ignoring Content-Type header\n");
-
-            ptr2 = strstr(ptr, "\r\n");
-            if(ptr2)
-                memmove(ptr, ptr2, strlen(ptr2)+1);
+            memmove(ptr, ptr2, strlen(ptr2)+1);
+        }else {
+            ptr = ptr2;
         }
     }
 
-    return strlen(buf);
+    *ptr = 0;
+    return ptr-buf;
 }
 
 static nsIInputStream *get_post_data_stream(IBindCtx *bctx)
@@ -154,23 +134,21 @@ static nsIInputStream *get_post_data_stream(IBindCtx *bctx)
         data = heap_alloc(headers_len+post_len+sizeof(content_length)+8);
 
         if(headers_len) {
-            WideCharToMultiByte(CP_ACP, 0, headers, -1, data, -1, NULL, NULL);
+            WideCharToMultiByte(CP_ACP, 0, headers, -1, data, headers_len, NULL, NULL);
             len = fix_headers(data, post_len);
         }
 
         if(post_len) {
-            if(len >= 4 && !strcmp(data+len-4, "\r\n\r\n"))
-                len -= 2;
-
             sprintf(data+len, content_length, post_len);
-            len = strlen(data);
+            len += strlen(data+len);
 
             memcpy(data+len, bindinfo.stgmedData.u.hGlobal, post_len);
         }
 
         TRACE("data = %s\n", debugstr_an(data, len+post_len));
 
-        ret = create_nsstream(data, len+post_len);
+        if(len)
+            ret = create_nsstream(data, len+post_len);
     }
 
     CoTaskMemFree(headers);
@@ -207,7 +185,7 @@ void set_current_mon(HTMLDocument *This, IMoniker *mon)
 
 static HRESULT set_moniker(HTMLDocument *This, IMoniker *mon, IBindCtx *pibc, BOOL *bind_complete)
 {
-    BSCallback *bscallback;
+    nsChannelBSC *bscallback;
     LPOLESTR url = NULL;
     task_t *task;
     HRESULT hres;
@@ -293,7 +271,7 @@ static HRESULT set_moniker(HTMLDocument *This, IMoniker *mon, IBindCtx *pibc, BO
         }
     }
 
-    bscallback = create_bscallback(mon);
+    bscallback = create_channelbsc(mon);
 
     if(This->frame) {
         task = heap_alloc(sizeof(task_t));
@@ -327,7 +305,7 @@ static HRESULT set_moniker(HTMLDocument *This, IMoniker *mon, IBindCtx *pibc, BO
         if(NS_SUCCEEDED(nsres)) {
             /* FIXME: don't return here (URL Moniker needs to be good enough) */
 
-            IBindStatusCallback_Release(STATUSCLB(bscallback));
+            IUnknown_Release((IUnknown*)bscallback);
             CoTaskMemFree(url);
 
             if(bind_complete)
@@ -339,7 +317,7 @@ static HRESULT set_moniker(HTMLDocument *This, IMoniker *mon, IBindCtx *pibc, BO
     }
 
     set_document_bscallback(This, bscallback);
-    IBindStatusCallback_Release(STATUSCLB(bscallback));
+    IUnknown_Release((IUnknown*)bscallback);
     CoTaskMemFree(url);
 
     if(bind_complete)
@@ -444,7 +422,7 @@ static HRESULT WINAPI PersistMoniker_Load(IPersistMoniker *iface, BOOL fFullyAva
         return hres;
 
     if(!bind_complete)
-        return start_binding(This, This->bscallback, pibc);
+        return start_binding(This, (BSCallback*)This->bscallback, pibc);
 
     return S_OK;
 }
@@ -709,7 +687,7 @@ static HRESULT WINAPI PersistStreamInit_Load(IPersistStreamInit *iface, LPSTREAM
     if(FAILED(hres))
         return hres;
 
-    return load_stream(This->bscallback, pStm);
+    return channelbsc_load_stream(This->bscallback, pStm);
 }
 
 static HRESULT WINAPI PersistStreamInit_Save(IPersistStreamInit *iface, LPSTREAM pStm,

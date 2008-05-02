@@ -392,7 +392,7 @@ static int rpcrt4_conn_np_write(RpcConnection *Connection,
   while (bytes_left)
   {
     DWORD bytes_written;
-    ret = WriteFile(npc->pipe, buf, count, &bytes_written, NULL);
+    ret = WriteFile(npc->pipe, buf, bytes_left, &bytes_written, NULL);
     if (!ret || !bytes_written)
         break;
     bytes_left -= bytes_written;
@@ -1551,7 +1551,7 @@ RPC_STATUS RPCRT4_DestroyConnection(RpcConnection* Connection)
   if (Connection->QOS) RpcQualityOfService_Release(Connection->QOS);
 
   /* server-only */
-  if (Connection->server_binding) RPCRT4_DestroyBinding(Connection->server_binding);
+  if (Connection->server_binding) RPCRT4_ReleaseBinding(Connection->server_binding);
 
   HeapFree(GetProcessHeap(), 0, Connection);
   return RPC_S_OK;

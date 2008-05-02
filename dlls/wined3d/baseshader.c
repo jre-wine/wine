@@ -6,6 +6,7 @@
  * Copyright 2004 Christian Costa
  * Copyright 2005 Oliver Stieber
  * Copyright 2006 Ivan Gyurdiev
+ * Copyright 2007-2008 Stefan Dösinger for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -1098,6 +1099,106 @@ static void shader_none_destroy(IWineD3DBaseShader *iface) {}
 static HRESULT shader_none_alloc(IWineD3DDevice *iface) {return WINED3D_OK;}
 static void shader_none_free(IWineD3DDevice *iface) {}
 static BOOL shader_none_dirty_const(IWineD3DDevice *iface) {return FALSE;}
+static void shader_none_generate_pshader(IWineD3DPixelShader *iface, SHADER_BUFFER *buffer) {
+    FIXME("NONE shader backend asked to generate a pixel shader\n");
+}
+static void shader_none_generate_vshader(IWineD3DVertexShader *iface, SHADER_BUFFER *buffer) {
+    FIXME("NONE shader backend asked to generate a vertex shader\n");
+}
+static void shader_none_load_init(void) {}
+
+#define GLINFO_LOCATION      (*gl_info)
+static void shader_none_get_caps(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_info, struct shader_caps *pCaps) {
+    pCaps->TextureOpCaps =  WINED3DTEXOPCAPS_ADD         |
+                            WINED3DTEXOPCAPS_ADDSIGNED   |
+                            WINED3DTEXOPCAPS_ADDSIGNED2X |
+                            WINED3DTEXOPCAPS_MODULATE    |
+                            WINED3DTEXOPCAPS_MODULATE2X  |
+                            WINED3DTEXOPCAPS_MODULATE4X  |
+                            WINED3DTEXOPCAPS_SELECTARG1  |
+                            WINED3DTEXOPCAPS_SELECTARG2  |
+                            WINED3DTEXOPCAPS_DISABLE;
+
+    if (GL_SUPPORT(ARB_TEXTURE_ENV_COMBINE) ||
+        GL_SUPPORT(EXT_TEXTURE_ENV_COMBINE) ||
+        GL_SUPPORT(NV_TEXTURE_ENV_COMBINE4)) {
+        pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_BLENDDIFFUSEALPHA  |
+                                WINED3DTEXOPCAPS_BLENDTEXTUREALPHA  |
+                                WINED3DTEXOPCAPS_BLENDFACTORALPHA   |
+                                WINED3DTEXOPCAPS_BLENDCURRENTALPHA  |
+                                WINED3DTEXOPCAPS_LERP               |
+                                WINED3DTEXOPCAPS_SUBTRACT;
+    }
+    if (GL_SUPPORT(ATI_TEXTURE_ENV_COMBINE3) ||
+        GL_SUPPORT(NV_TEXTURE_ENV_COMBINE4)) {
+        pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_ADDSMOOTH              |
+                                WINED3DTEXOPCAPS_MULTIPLYADD            |
+                                WINED3DTEXOPCAPS_MODULATEALPHA_ADDCOLOR |
+                                WINED3DTEXOPCAPS_MODULATECOLOR_ADDALPHA |
+                                WINED3DTEXOPCAPS_BLENDTEXTUREALPHAPM;
+    }
+    if (GL_SUPPORT(ARB_TEXTURE_ENV_DOT3))
+        pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_DOTPRODUCT3;
+
+    if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
+        pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_MODULATEINVALPHA_ADDCOLOR |
+                WINED3DTEXOPCAPS_MODULATEINVCOLOR_ADDALPHA;
+    }
+
+    if(GL_SUPPORT(ATI_ENVMAP_BUMPMAP)) {
+        pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_BUMPENVMAP;
+    } else if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+        /* Bump mapping is supported already in NV_TEXTURE_SHADER, but that extension does
+         * not support 3D textures. This asks for trouble if an app uses both bump mapping
+         * and 3D textures. It also allows us to keep the code simpler by having texture
+         * shaders constantly enabled.
+         */
+        pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_BUMPENVMAP;
+        /* TODO: Luminance bump map? */
+    }
+
+#if 0
+    /* FIXME: Add
+            pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_BUMPENVMAPLUMINANCE
+            WINED3DTEXOPCAPS_PREMODULATE */
+#endif
+
+    pCaps->MaxTextureBlendStages   = GL_LIMITS(texture_stages);
+    pCaps->MaxSimultaneousTextures = GL_LIMITS(textures);
+
+    /* Set the shader caps to 0 for the none shader backend */
+    pCaps->VertexShaderVersion  = 0;
+    pCaps->PixelShaderVersion    = 0;
+    pCaps->PixelShader1xMaxValue = 0.0;
+
+    if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
+        pCaps->PrimitiveMiscCaps |=  WINED3DPMISCCAPS_TSSARGTEMP;
+    }
+
+    /* The caps below can be supported but aren't handled yet in utils.c 'd3dta_to_combiner_input', disable them until support is fixed */
+#if 0
+    if (GL_SUPPORT(NV_REGISTER_COMBINERS2))
+    pCaps->PrimitiveMiscCaps |=  WINED3DPMISCCAPS_PERSTAGECONSTANT;
+#endif
+
+}
+
+static void shader_none_fragment_enable(IWineD3DDevice *iface, BOOL enable) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
+    WineD3D_GL_Info *gl_info = &This->adapter->gl_info;
+
+    if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+        if(enable) {
+            glEnable(GL_TEXTURE_SHADER_NV);
+            checkGLcall("glEnable(GL_TEXTURE_SHADER_NV)");
+        } else {
+            glDisable(GL_TEXTURE_SHADER_NV);
+            checkGLcall("glDisable(GL_TEXTURE_SHADER_NV)");
+        }
+    }
+}
+
+#undef GLINFO_LOCATION
 
 const shader_backend_t none_shader_backend = {
     &shader_none_select,
@@ -1109,7 +1210,13 @@ const shader_backend_t none_shader_backend = {
     &shader_none_destroy,
     &shader_none_alloc,
     &shader_none_free,
-    &shader_none_dirty_const
+    &shader_none_dirty_const,
+    &shader_none_generate_pshader,
+    &shader_none_generate_vshader,
+    &shader_none_get_caps,
+    &shader_none_load_init,
+    &shader_none_fragment_enable,
+    FFPStateTable
 };
 
 /* *******************************************

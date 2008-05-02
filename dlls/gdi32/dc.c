@@ -315,7 +315,9 @@ void DC_UpdateXforms( DC *dc )
 
     /* Reselect the font and pen back into the dc so that the size
        gets updated. */
-    if(memcmp(&oldworld2vport, &dc->xformWorld2Vport, sizeof(oldworld2vport)))
+    if ((oldworld2vport.eM11 != dc->xformWorld2Vport.eM11 ||
+         oldworld2vport.eM22 != dc->xformWorld2Vport.eM22) &&
+         !GdiIsMetaFileDC(dc->hSelf))
     {
         SelectObject(dc->hSelf, GetCurrentObject(dc->hSelf, OBJ_FONT));
         SelectObject(dc->hSelf, GetCurrentObject(dc->hSelf, OBJ_PEN));
@@ -785,6 +787,7 @@ HDC WINAPI CreateCompatibleDC( HDC hdc )
         release_dc_ptr( origDC );
         if (funcs) funcs = DRIVER_get_driver( funcs );
     }
+    else if (hdc) return 0;
 
     if (!funcs && !(funcs = DRIVER_load_driver( displayW ))) return 0;
 
@@ -1500,7 +1503,7 @@ WORD WINAPI SetHookFlags( HDC hdc, WORD flags )
  */
 INT WINAPI SetICMMode(HDC hdc, INT iEnableICM)
 {
-/*FIXME  Asuming that ICM is always off, and cannot be turned on */
+/*FIXME:  Assume that ICM is always off, and cannot be turned on */
     if (iEnableICM == ICM_OFF) return ICM_OFF;
     if (iEnableICM == ICM_ON) return 0;
     if (iEnableICM == ICM_QUERY) return ICM_OFF;

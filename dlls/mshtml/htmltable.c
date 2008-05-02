@@ -16,17 +16,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
-#include <stdio.h>
 
 #define COBJMACROS
 
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "ole2.h"
 
 #include "wine/debug.h"
@@ -550,7 +546,7 @@ static const NodeImplVtbl HTMLTableImplVtbl = {
 
 HTMLElement *HTMLTable_Create(nsIDOMHTMLElement *nselem)
 {
-    HTMLTable *ret = heap_alloc(sizeof(HTMLTable));
+    HTMLTable *ret = heap_alloc_zero(sizeof(HTMLTable));
 
     HTMLElement_Init(&ret->element);
 

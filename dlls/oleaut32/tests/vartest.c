@@ -1050,7 +1050,7 @@ static void test_VarParseNumFromStr(void)
   EXPECT(1,NUMPRS_HEX_OCT,0,1,0,0);
   EXPECT2(0,FAILDIG);
 
-  /* Doesn't recognise hex in .asm sytax */
+  /* Doesn't recognise hex in .asm syntax */
   CONVERT("0h", NUMPRS_HEX_OCT);
   EXPECT(1,NUMPRS_HEX_OCT,0,1,0,0);
   EXPECT2(0,FAILDIG);
@@ -1060,7 +1060,7 @@ static void test_VarParseNumFromStr(void)
   EXPECT(1,NUMPRS_HEX_OCT,0,1,0,0);
   EXPECT2(0,FAILDIG);
 
-  /* Doesn't recognise hex format humbers at all! */
+  /* Doesn't recognise hex format numbers at all! */
   CONVERT("0x0", NUMPRS_HEX_OCT);
   EXPECT(1,NUMPRS_HEX_OCT,0,1,0,0);
   EXPECT2(0,FAILDIG);
@@ -5261,7 +5261,7 @@ static void test_VarCat(void)
         }
     }
 
-    /* Runnning single comparison tests to compare outputs */
+    /* Running single comparison tests to compare outputs */
 
     /* Test concat strings */
     V_VT(&left) = VT_BSTR;
@@ -6273,7 +6273,7 @@ static void test_VarCmp(void)
         }
     }
 
-    /* VARCMP{,EX} run each 4 tests with a permutation of all posible
+    /* VARCMP{,EX} run each 4 tests with a permutation of all possible
        input variants with (1) and without (0) VT_RESERVED set. The order
        of the permutations is (0,0); (1,0); (0,1); (1,1) */
     VARCMP(INT,4711,I2,4711,VARCMP_EQ);
@@ -6859,11 +6859,20 @@ static void test_VarPow(void)
         "VARPOW: CY value %f, expected %f\n", V_R8(&result), 4.0);
 
     hres = pVarPow(&cy, &right, &result);
-    ok(hres == S_OK && V_VT(&result) == VT_R8,
-        "VARPOW: expected coerced hres 0x%X type VT_R8, got hres 0x%X type %s!\n",
-        S_OK, hres, vtstr(V_VT(&result)));
-    ok(hres == S_OK && EQ_DOUBLE(V_R8(&result), 4.0),
-        "VARPOW: CY value %f, expected %f\n", V_R8(&result), 4.0);
+    if (hres == S_OK)
+    {
+        ok(hres == S_OK && V_VT(&result) == VT_R8,
+           "VARPOW: expected coerced hres 0x%X type VT_R8, got hres 0x%X type %s!\n",
+           S_OK, hres, vtstr(V_VT(&result)));
+        ok(hres == S_OK && EQ_DOUBLE(V_R8(&result), 4.0),
+           "VARPOW: CY value %f, expected %f\n", V_R8(&result), 4.0);
+    }
+    else
+    {
+        ok(hres == DISP_E_BADVARTYPE && V_VT(&result) == VT_EMPTY,
+           "VARPOW: expected coerced hres 0x%X type VT_EMPTY, got hres 0x%X type %s!\n",
+           DISP_E_BADVARTYPE, hres, vtstr(V_VT(&result)));
+    }
 
     hres = pVarPow(&left, &cy, &result);
     ok(hres == S_OK && V_VT(&result) == VT_R8,
@@ -6887,11 +6896,20 @@ static void test_VarPow(void)
         "VARPOW: DECIMAL value %f, expected %f\n", V_R8(&result), 4.0);
 
     hres = pVarPow(&dec, &right, &result);
-    ok(hres == S_OK && V_VT(&result) == VT_R8,
-        "VARPOW: expected coerced hres 0x%X type VT_R8, got hres 0x%X type %s!\n",
-        S_OK, hres, vtstr(V_VT(&result)));
-    ok(hres == S_OK && EQ_DOUBLE(V_R8(&result), 4.0),
-        "VARPOW: DECIMAL value %f, expected %f\n", V_R8(&result), 4.0);
+    if (hres == S_OK)
+    {
+        ok(hres == S_OK && V_VT(&result) == VT_R8,
+           "VARPOW: expected coerced hres 0x%X type VT_R8, got hres 0x%X type %s!\n",
+           S_OK, hres, vtstr(V_VT(&result)));
+        ok(hres == S_OK && EQ_DOUBLE(V_R8(&result), 4.0),
+           "VARPOW: DECIMAL value %f, expected %f\n", V_R8(&result), 4.0);
+    }
+    else
+    {
+        ok(hres == DISP_E_BADVARTYPE && V_VT(&result) == VT_EMPTY,
+           "VARPOW: expected coerced hres 0x%X type VT_EMPTY, got hres 0x%X type %s!\n",
+           DISP_E_BADVARTYPE, hres, vtstr(V_VT(&result)));
+    }
 
     SysFreeString(num2_str);
     SysFreeString(num3_str);

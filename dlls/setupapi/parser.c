@@ -778,7 +778,7 @@ static const WCHAR *eol_backslash_state( struct parser *parser, const WCHAR *pos
 /* handler for parser QUOTES state */
 static const WCHAR *quotes_state( struct parser *parser, const WCHAR *pos )
 {
-    const WCHAR *p, *token_end = parser->start;
+    const WCHAR *p;
 
     for (p = pos; !is_eol( parser, p ); p++)
     {
@@ -787,7 +787,7 @@ static const WCHAR *quotes_state( struct parser *parser, const WCHAR *pos )
             if (p+1 < parser->end && p[1] == '"')  /* double quotes */
             {
                 push_token( parser, p + 1 );
-                parser->start = token_end = p + 2;
+                parser->start = p + 2;
                 p++;
             }
             else  /* end of quotes */
@@ -1311,11 +1311,9 @@ BOOL WINAPI SetupGetLineByIndexW( HINF hinf, PCWSTR section, DWORD index, INFCON
     struct inf_file *file = hinf;
     int section_index;
 
-    SetLastError( ERROR_SECTION_NOT_FOUND );
     for (file = hinf; file; file = file->next)
     {
         if ((section_index = find_section( file, section )) == -1) continue;
-        SetLastError( ERROR_LINE_NOT_FOUND );
         if (index < file->sections[section_index]->nb_lines)
         {
             context->Inf        = hinf;
@@ -1330,6 +1328,7 @@ BOOL WINAPI SetupGetLineByIndexW( HINF hinf, PCWSTR section, DWORD index, INFCON
         index -= file->sections[section_index]->nb_lines;
     }
     TRACE( "(%p,%s) not found\n", hinf, debugstr_w(section) );
+    SetLastError( ERROR_LINE_NOT_FOUND );
     return FALSE;
 }
 
@@ -1371,7 +1370,6 @@ BOOL WINAPI SetupFindFirstLineW( HINF hinf, PCWSTR section, PCWSTR key, INFCONTE
     struct inf_file *file;
     int section_index;
 
-    SetLastError( ERROR_SECTION_NOT_FOUND );
     for (file = hinf; file; file = file->next)
     {
         if ((section_index = find_section( file, section )) == -1) continue;
@@ -1384,7 +1382,6 @@ BOOL WINAPI SetupFindFirstLineW( HINF hinf, PCWSTR section, PCWSTR key, INFCONTE
             ctx.Line       = -1;
             return SetupFindNextMatchLineW( &ctx, key, context );
         }
-        SetLastError( ERROR_LINE_NOT_FOUND );  /* found at least one section */
         if (file->sections[section_index]->nb_lines)
         {
             context->Inf        = hinf;
@@ -1398,6 +1395,7 @@ BOOL WINAPI SetupFindFirstLineW( HINF hinf, PCWSTR section, PCWSTR key, INFCONTE
         }
     }
     TRACE( "(%p,%s,%s): not found\n", hinf, debugstr_w(section), debugstr_w(key) );
+    SetLastError( ERROR_LINE_NOT_FOUND );
     return FALSE;
 }
 
@@ -1713,21 +1711,26 @@ BOOL WINAPI SetupGetIntField( PINFCONTEXT context, DWORD index, PINT result )
     char *end, *buffer = localbuff;
     DWORD required;
     INT res;
-    BOOL ret = FALSE;
+    BOOL ret;
 
-    if (!SetupGetStringFieldA( context, index, localbuff, sizeof(localbuff), &required ))
+    if (!(ret = SetupGetStringFieldA( context, index, localbuff, sizeof(localbuff), &required )))
     {
         if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) return FALSE;
         if (!(buffer = HeapAlloc( GetProcessHeap(), 0, required ))) return FALSE;
-        if (!SetupGetStringFieldA( context, index, buffer, required, NULL )) goto done;
+        if (!(ret = SetupGetStringFieldA( context, index, buffer, required, NULL ))) goto done;
     }
-    res = strtol( buffer, &end, 0 );
-    if (end != buffer && !*end)
+    /* The call to SetupGetStringFieldA succeeded. If buffer is empty we have an optional field */
+    if (!*buffer) *result = 0;
+    else
     {
-        *result = res;
-        ret = TRUE;
+        res = strtol( buffer, &end, 0 );
+        if (end != buffer && !*end) *result = res;
+        else
+        {
+            SetLastError( ERROR_INVALID_DATA );
+            ret = FALSE;
+        }
     }
-    else SetLastError( ERROR_INVALID_DATA );
 
  done:
     if (buffer != localbuff) HeapFree( GetProcessHeap(), 0, buffer );

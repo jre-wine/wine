@@ -72,7 +72,7 @@
 @ stub LdrLoadAlternateResourceModule
 @ stdcall LdrLoadDll(wstr long ptr ptr)
 @ stdcall LdrLockLoaderLock(long ptr ptr)
-@ stub LdrProcessRelocationBlock
+@ stdcall LdrProcessRelocationBlock(ptr long ptr long)
 @ stub LdrQueryImageFileExecutionOptions
 @ stdcall LdrQueryProcessModuleInformation(ptr long ptr)
 @ stub LdrSetAppCompatDllRedirectionCallback
@@ -275,8 +275,8 @@
 @ stdcall NtQueueApcThread(long ptr long long long)
 @ stdcall NtRaiseException(ptr ptr long)
 @ stub NtRaiseHardError
-@ stdcall NtReadFile(long long long long long long long long long)
-@ stub NtReadFileScatter
+@ stdcall NtReadFile(long long ptr ptr ptr ptr long ptr ptr)
+@ stdcall NtReadFileScatter(long long ptr ptr ptr ptr long ptr ptr)
 @ stub NtReadRequestData
 @ stdcall NtReadVirtualMemory(long ptr ptr long ptr)
 @ stub NtRegisterNewDevice
@@ -375,7 +375,7 @@
 @ stub NtWaitHighEventPair
 @ stub NtWaitLowEventPair
 @ stdcall NtWriteFile(long long ptr ptr ptr ptr long ptr ptr)
-@ stub NtWriteFileGather
+@ stdcall NtWriteFileGather(long long ptr ptr ptr ptr long ptr ptr)
 @ stub NtWriteRequestData
 @ stdcall NtWriteVirtualMemory(long ptr ptr long ptr)
 @ stdcall NtYieldExecution()
@@ -1118,8 +1118,8 @@
 @ stdcall ZwQueueApcThread(long ptr long long long) NtQueueApcThread
 @ stdcall ZwRaiseException(ptr ptr long) NtRaiseException
 @ stub ZwRaiseHardError
-@ stdcall ZwReadFile(long long long long long long long long long) NtReadFile
-# @ stub ZwReadFileScatter
+@ stdcall ZwReadFile(long long ptr ptr ptr ptr long ptr ptr) NtReadFile
+@ stdcall ZwReadFileScatter(long long ptr ptr ptr ptr long ptr ptr) NtReadFileScatter
 @ stub ZwReadRequestData
 @ stdcall ZwReadVirtualMemory(long ptr ptr long ptr) NtReadVirtualMemory
 @ stub ZwRegisterNewDevice
@@ -1218,7 +1218,7 @@
 @ stub ZwWaitHighEventPair
 @ stub ZwWaitLowEventPair
 @ stdcall ZwWriteFile(long long ptr ptr ptr ptr long ptr ptr) NtWriteFile
-# @ stub ZwWriteFileGather
+@ stdcall ZwWriteFileGather(long long ptr ptr ptr ptr long ptr ptr) NtWriteFileGather
 @ stub ZwWriteRequestData
 @ stdcall ZwWriteVirtualMemory(long ptr ptr long ptr) NtWriteVirtualMemory
 @ stdcall ZwYieldExecution() NtYieldExecution
@@ -1366,10 +1366,6 @@
 # All functions must be prefixed with '__wine_' (for internal functions)
 # or 'wine_' (for user-visible functions) to avoid namespace conflicts.
 
-# Exception handling
-@ cdecl -norelay __wine_exception_handler(ptr ptr ptr ptr)
-@ cdecl -norelay __wine_finally_handler(ptr ptr ptr ptr)
-
 # Relays
 @ cdecl -norelay -i386 __wine_call_from_32_regs()
 @ cdecl -i386 __wine_enter_vm86(ptr)
@@ -1381,6 +1377,10 @@
 @ cdecl wine_server_release_fd(long long)
 @ cdecl wine_server_send_fd(long)
 @ cdecl __wine_make_process_system()
+
+# Version
+@ cdecl wine_get_version() NTDLL_wine_get_version
+@ cdecl wine_get_build_id() NTDLL_wine_get_build_id
 
 # Codepages
 @ cdecl __wine_init_codepages(ptr ptr ptr)

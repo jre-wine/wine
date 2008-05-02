@@ -4,6 +4,7 @@
  * Copyright 2002-2004 Jason Edmeades
  * Copyright 2002-2004 Raphael Junqueira
  * Copyright 2005 Oliver Stieber
+ * Copyright 2007-2008 Stefan Dösinger for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -197,10 +198,12 @@ HRESULT WINAPI IWineD3DBaseTextureImpl_SetAutoGenFilterType(IWineD3DBaseTexture 
               glTexParameteri(textureDimensions, GL_GENERATE_MIPMAP_HINT_SGIS, GL_FASTEST);
               checkGLcall("glTexParameteri(textureDimensions, GL_GENERATE_MIPMAP_HINT_SGIS, GL_FASTEST)");
 
+              break;
           case WINED3DTEXF_LINEAR:
               glTexParameteri(textureDimensions, GL_GENERATE_MIPMAP_HINT_SGIS, GL_NICEST);
               checkGLcall("glTexParameteri(textureDimensions, GL_GENERATE_MIPMAP_HINT_SGIS, GL_NICEST)");
 
+              break;
           default:
               WARN("Unexpected filter type %d, setting to GL_NICEST\n", FilterType);
               glTexParameteri(textureDimensions, GL_GENERATE_MIPMAP_HINT_SGIS, GL_NICEST);
@@ -430,18 +433,19 @@ void WINAPI IWineD3DBaseTextureImpl_ApplyStateChanges(IWineD3DBaseTexture *iface
     if(samplerStates[WINED3DSAMP_MAGFILTER]     != This->baseTexture.states[WINED3DTEXSTA_MAGFILTER]) {
         GLint glValue;
         state = samplerStates[WINED3DSAMP_MAGFILTER];
-        if (state < minLookup[WINELOOKUP_MAGFILTER] || state > maxLookup[WINELOOKUP_MAGFILTER]) {
+        if (state < WINED3DTEXF_NONE || state > WINED3DTEXF_ANISOTROPIC) {
             FIXME("Unrecognized or unsupported MAGFILTER* value %d\n", state);
+        } else {
+            glValue = (*This->baseTexture.magLookup)[state - WINED3DTEXF_NONE];
+            TRACE("ValueMAG=%d setting MAGFILTER to %x\n", state, glValue);
+            glTexParameteri(textureDimensions, GL_TEXTURE_MAG_FILTER, glValue);
+            /* We need to reset the Anisotropic filtering state when we change the mag filter to WINED3DTEXF_ANISOTROPIC (this seems a bit weird, check the documentation to see how it should be switched off. */
+            if (GL_SUPPORT(EXT_TEXTURE_FILTER_ANISOTROPIC) && WINED3DTEXF_ANISOTROPIC == state &&
+                textureDimensions != GL_TEXTURE_RECTANGLE_ARB) {
+                glTexParameteri(textureDimensions, GL_TEXTURE_MAX_ANISOTROPY_EXT, samplerStates[WINED3DSAMP_MAXANISOTROPY]);
+            }
+            This->baseTexture.states[WINED3DTEXSTA_MAGFILTER] = state;
         }
-        glValue = stateLookup[WINELOOKUP_MAGFILTER][state - minLookup[WINELOOKUP_MAGFILTER]];
-        TRACE("ValueMAG=%d setting MAGFILTER to %x\n", state, glValue);
-        glTexParameteri(textureDimensions, GL_TEXTURE_MAG_FILTER, glValue);
-        /* We need to reset the Anisotropic filtering state when we change the mag filter to WINED3DTEXF_ANISOTROPIC (this seems a bit weird, check the documentation to see how it should be switched off. */
-        if (GL_SUPPORT(EXT_TEXTURE_FILTER_ANISOTROPIC) && WINED3DTEXF_ANISOTROPIC == state &&
-            textureDimensions != GL_TEXTURE_RECTANGLE_ARB) {
-            glTexParameteri(textureDimensions, GL_TEXTURE_MAX_ANISOTROPY_EXT, samplerStates[WINED3DSAMP_MAXANISOTROPY]);
-        }
-        This->baseTexture.states[WINED3DTEXSTA_MAGFILTER] = state;
     }
 
     if(textureDimensions != GL_TEXTURE_RECTANGLE_ARB &&
@@ -462,7 +466,8 @@ void WINAPI IWineD3DBaseTextureImpl_ApplyStateChanges(IWineD3DBaseTexture *iface
                   This->baseTexture.states[WINED3DTEXSTA_MINFILTER],
                   This->baseTexture.states[WINED3DTEXSTA_MIPFILTER]);
         }
-        glValue = minMipLookup[min(max(samplerStates[WINED3DSAMP_MINFILTER],WINED3DTEXF_NONE), WINED3DTEXF_ANISOTROPIC)]
+        glValue = (*This->baseTexture.minMipLookup)
+                [min(max(samplerStates[WINED3DSAMP_MINFILTER],WINED3DTEXF_NONE), WINED3DTEXF_ANISOTROPIC)]
                 [min(max(samplerStates[WINED3DSAMP_MIPFILTER],WINED3DTEXF_NONE), WINED3DTEXF_LINEAR)];
 
         TRACE("ValueMIN=%d, ValueMIP=%d, setting MINFILTER to %x\n",

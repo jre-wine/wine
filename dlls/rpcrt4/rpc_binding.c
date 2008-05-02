@@ -227,7 +227,7 @@ RPC_STATUS RPCRT4_ResolveBinding(RpcBinding* Binding, LPCSTR Endpoint)
 RPC_STATUS RPCRT4_SetBindingObject(RpcBinding* Binding, const UUID* ObjectUuid)
 {
   TRACE("(*RpcBinding == ^%p, UUID == %s)\n", Binding, debugstr_guid(ObjectUuid)); 
-  if (ObjectUuid) memcpy(&Binding->ObjectUuid, ObjectUuid, sizeof(UUID));
+  if (ObjectUuid) Binding->ObjectUuid = *ObjectUuid;
   else UuidCreateNil(&Binding->ObjectUuid);
   return RPC_S_OK;
 }
@@ -249,14 +249,12 @@ RPC_STATUS RPCRT4_MakeBinding(RpcBinding** Binding, RpcConnection* Connection)
   return RPC_S_OK;
 }
 
-RPC_STATUS RPCRT4_ExportBinding(RpcBinding** Binding, RpcBinding* OldBinding)
+void RPCRT4_AddRefBinding(RpcBinding* Binding)
 {
-  InterlockedIncrement(&OldBinding->refs);
-  *Binding = OldBinding;
-  return RPC_S_OK;
+  InterlockedIncrement(&Binding->refs);
 }
 
-RPC_STATUS RPCRT4_DestroyBinding(RpcBinding* Binding)
+RPC_STATUS RPCRT4_ReleaseBinding(RpcBinding* Binding)
 {
   if (InterlockedDecrement(&Binding->refs))
     return RPC_S_OK;
@@ -661,7 +659,7 @@ RPC_STATUS WINAPI RpcBindingFree( RPC_BINDING_HANDLE* Binding )
 {
   RPC_STATUS status;
   TRACE("(%p) = %p\n", Binding, *Binding);
-  status = RPCRT4_DestroyBinding(*Binding);
+  status = RPCRT4_ReleaseBinding(*Binding);
   if (status == RPC_S_OK) *Binding = 0;
   return status;
 }
@@ -691,10 +689,10 @@ RPC_STATUS WINAPI RpcBindingInqObject( RPC_BINDING_HANDLE Binding, UUID* ObjectU
   RpcBinding* bind = (RpcBinding*)Binding;
 
   TRACE("(%p,%p) = %s\n", Binding, ObjectUuid, debugstr_guid(&bind->ObjectUuid));
-  memcpy(ObjectUuid, &bind->ObjectUuid, sizeof(UUID));
+  *ObjectUuid = bind->ObjectUuid;
   return RPC_S_OK;
 }
-  
+
 /***********************************************************************
  *             RpcBindingSetObject (RPCRT4.@)
  */
@@ -727,8 +725,8 @@ RPC_STATUS WINAPI RpcBindingFromStringBindingA( RPC_CSTR StringBinding, RPC_BIND
 
   if (ret == RPC_S_OK)
     ret = RPCRT4_CreateBindingA(&bind, FALSE, (char*)Protseq);
-  if (ret == RPC_S_OK)
-    ret = RPCRT4_SetBindingObject(bind, &Uuid);
+  if (ret != RPC_S_OK) return ret;
+  ret = RPCRT4_SetBindingObject(bind, &Uuid);
   if (ret == RPC_S_OK)
     ret = RPCRT4_CompleteBindingA(bind, (char*)NetworkAddr, (char*)Endpoint, (char*)Options);
 
@@ -741,7 +739,7 @@ RPC_STATUS WINAPI RpcBindingFromStringBindingA( RPC_CSTR StringBinding, RPC_BIND
   if (ret == RPC_S_OK) 
     *Binding = (RPC_BINDING_HANDLE)bind;
   else 
-    RPCRT4_DestroyBinding(bind);
+    RPCRT4_ReleaseBinding(bind);
 
   return ret;
 }
@@ -766,8 +764,8 @@ RPC_STATUS WINAPI RpcBindingFromStringBindingW( RPC_WSTR StringBinding, RPC_BIND
 
   if (ret == RPC_S_OK)
     ret = RPCRT4_CreateBindingW(&bind, FALSE, Protseq);
-  if (ret == RPC_S_OK)
-    ret = RPCRT4_SetBindingObject(bind, &Uuid);
+  if (ret != RPC_S_OK) return ret;
+  ret = RPCRT4_SetBindingObject(bind, &Uuid);
   if (ret == RPC_S_OK)
     ret = RPCRT4_CompleteBindingW(bind, NetworkAddr, Endpoint, Options);
 
@@ -780,7 +778,7 @@ RPC_STATUS WINAPI RpcBindingFromStringBindingW( RPC_WSTR StringBinding, RPC_BIND
   if (ret == RPC_S_OK)
     *Binding = (RPC_BINDING_HANDLE)bind;
   else
-    RPCRT4_DestroyBinding(bind);
+    RPCRT4_ReleaseBinding(bind);
 
   return ret;
 }
@@ -982,9 +980,9 @@ static RPC_STATUS RpcAuthInfo_Create(ULONG AuthnLevel, ULONG AuthnSvc,
             AuthInfo->nt_identity->Password = RPCRT4_strndupAtoW((const char *)nt_identity->Password, nt_identity->PasswordLength);
         AuthInfo->nt_identity->PasswordLength = nt_identity->PasswordLength;
 
-        if (!AuthInfo->nt_identity->User ||
-            !AuthInfo->nt_identity->Domain ||
-            !AuthInfo->nt_identity->Password)
+        if ((nt_identity->User && !AuthInfo->nt_identity->User) ||
+            (nt_identity->Domain && !AuthInfo->nt_identity->Domain) ||
+            (nt_identity->Password && !AuthInfo->nt_identity->Password))
         {
             HeapFree(GetProcessHeap(), 0, AuthInfo->nt_identity->User);
             HeapFree(GetProcessHeap(), 0, AuthInfo->nt_identity->Domain);
@@ -1572,7 +1570,7 @@ RpcBindingSetAuthInfoExW( RPC_BINDING_HANDLE Binding, RPC_WSTR ServerPrincName, 
     if (r == RPC_S_OK)
     {
       new_auth_info->server_principal_name = RPCRT4_strdupW(ServerPrincName);
-      if (new_auth_info->server_principal_name)
+      if (!ServerPrincName || new_auth_info->server_principal_name)
       {
         if (bind->AuthInfo) RpcAuthInfo_Release(bind->AuthInfo);
         bind->AuthInfo = new_auth_info;

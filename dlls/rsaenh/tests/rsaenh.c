@@ -27,6 +27,7 @@
 #include "winbase.h"
 #include "winerror.h"
 #include "wincrypt.h"
+#include "winreg.h"
 
 static HCRYPTPROV hProv;
 static const char szContainer[] = "winetest";
@@ -54,6 +55,33 @@ static const cryptdata cTestData[4] = {
        {'a','b','c','d','e','f','g','h','i','j','k','l',0},
        12,12,16}
 };
+
+/*
+ * 1. Take the MD5 Hash of the container name (with an extra null byte)
+ * 2. Turn the hash into a 4 DWORD hex value
+ * 3. Append a '_'
+ * 4. Add the MachineGuid
+ *
+ */
+static void uniquecontainer(char *unique)
+{
+    /* MD5 hash of "winetest\0" in 4 DWORD hex */
+    static const char szContainer_md5[] = "9d20fd8d05ed2b8455d125d0bf6d6a70";
+    static const char szCryptography[] = "Software\\Microsoft\\Cryptography";
+    static const char szMachineGuid[] = "MachineGuid";
+    HKEY hkey;
+    char guid[MAX_PATH];
+    DWORD size = MAX_PATH;
+
+    /* Get the MachineGUID */
+    RegOpenKeyA(HKEY_LOCAL_MACHINE, szCryptography, &hkey);
+    RegQueryValueExA(hkey, szMachineGuid, NULL, NULL, (LPBYTE)guid, &size);
+    RegCloseKey(hkey);
+
+    lstrcpy(unique, szContainer_md5);
+    lstrcat(unique, "_");
+    lstrcat(unique, guid);
+}
 
 static void printBytes(const char *heading, const BYTE *pb, size_t cb)
 {
@@ -175,12 +203,20 @@ static void test_prov(void)
     DWORD dwLen, dwInc;
     
     dwLen = (DWORD)sizeof(DWORD);
+    SetLastError(0xdeadbeef);
     result = CryptGetProvParam(hProv, PP_SIG_KEYSIZE_INC, (BYTE*)&dwInc, &dwLen, 0);
-    ok(result && dwInc==8, "%08x, %d\n", GetLastError(), dwInc);
+    if (!result && GetLastError() == NTE_BAD_TYPE)
+        skip("PP_SIG_KEYSIZE_INC is not supported (win9x or NT)\n");
+    else
+        ok(result && dwInc==8, "%08x, %d\n", GetLastError(), dwInc);
     
     dwLen = (DWORD)sizeof(DWORD);
+    SetLastError(0xdeadbeef);
     result = CryptGetProvParam(hProv, PP_KEYX_KEYSIZE_INC, (BYTE*)&dwInc, &dwLen, 0);
-    ok(result && dwInc==8, "%08x, %d\n", GetLastError(), dwInc);
+    if (!result && GetLastError() == NTE_BAD_TYPE)
+        skip("PP_KEYX_KEYSIZE_INC is not supported (win9x or NT)\n");
+    else
+        ok(result && dwInc==8, "%08x, %d\n", GetLastError(), dwInc);
 }
 
 static void test_gen_random(void)
@@ -1823,9 +1859,13 @@ static void test_null_provider(void)
     ok(result && dataLen == sizeof(dwParam) && (dwParam & CRYPT_SEC_DESCR),
         "Expected CRYPT_SEC_DESCR to be set, got 0x%08X\n",dwParam);
     dataLen = sizeof(keySpec);
+    SetLastError(0xdeadbeef);
     result = CryptGetProvParam(prov, PP_KEYSPEC, (LPBYTE)&keySpec, &dataLen, 0);
-    ok(result && keySpec == (AT_KEYEXCHANGE | AT_SIGNATURE),
-        "Expected AT_KEYEXCHANGE | AT_SIGNATURE, got %08x\n", keySpec);
+    if (!result && GetLastError() == NTE_BAD_TYPE)
+        skip("PP_KEYSPEC is not supported (win9x or NT)\n");
+    else
+        ok(result && keySpec == (AT_KEYEXCHANGE | AT_SIGNATURE),
+            "Expected AT_KEYEXCHANGE | AT_SIGNATURE, got %08x\n", keySpec);
     /* PP_CONTAINER parameter */
     dataLen = sizeof(szName);
     result = CryptGetProvParam(prov, PP_CONTAINER, (LPBYTE)szName, &dataLen, 0);
@@ -1834,10 +1874,24 @@ static void test_null_provider(void)
         (result)? "TRUE":"FALSE",GetLastError(),dataLen);
     /* PP_UNIQUE_CONTAINER parameter */
     dataLen = sizeof(szName);
+    SetLastError(0xdeadbeef);
     result = CryptGetProvParam(prov, PP_UNIQUE_CONTAINER, (LPBYTE)szName, &dataLen, 0);
-    ok(result && dataLen == strlen(szContainer)+1 && strcmp(szContainer,szName) == 0,
-        "failed getting PP_CONTAINER. result = %s. Error 0x%08X. returned length = %d\n",
-        (result)? "TRUE":"FALSE",GetLastError(),dataLen);
+    if (!result && GetLastError() == NTE_BAD_TYPE)
+    {
+        skip("PP_UNIQUE_CONTAINER is not supported (win9x or NT)\n");
+    }
+    else
+    {
+        char container[MAX_PATH];
+
+        ok(result, "failed getting PP_UNIQUE_CONTAINER : 0x%08X\n", GetLastError());
+        uniquecontainer(container);
+        todo_wine
+        {
+            ok(dataLen == strlen(container)+1, "Expected a param length of 70, got %d\n", dataLen);
+            ok(!strcmp(container, szName), "Wrong container name : %s\n", szName);
+        }
+    }
     result = CryptGetUserKey(prov, AT_KEYEXCHANGE, &key);
     ok(!result && GetLastError() == NTE_NO_KEY,
      "Expected NTE_NO_KEY, got %08x\n", GetLastError());

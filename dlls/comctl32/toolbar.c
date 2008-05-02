@@ -1280,7 +1280,7 @@ TOOLBAR_WrapToolbar( HWND hwnd, DWORD dwStyle )
     TBUTTON_INFO *btnPtr;
     INT x, cx, i, j;
     RECT rc;
-    BOOL bWrap, bButtonWrap;
+    BOOL bButtonWrap;
 
     /* 	When the toolbar window style is not TBSTYLE_WRAPABLE,	*/
     /*	no layout is necessary. Applications may use this style */
@@ -1314,7 +1314,6 @@ TOOLBAR_WrapToolbar( HWND hwnd, DWORD dwStyle )
 
     for (i = 0; i < infoPtr->nNumButtons; i++ )
     {
-	bWrap = FALSE;
 	btnPtr[i].fsState &= ~TBSTATE_WRAP;
 
 	if (btnPtr[i].fsState & TBSTATE_HIDDEN)
@@ -4762,7 +4761,7 @@ TOOLBAR_SetHotItem (HWND hwnd, WPARAM wParam)
 
     TRACE("hwnd = %p, nHit = %d\n", hwnd, (INT)wParam);
 
-    if ((INT)wParam > infoPtr->nNumButtons)
+    if ((INT)wParam >= infoPtr->nNumButtons)
         return infoPtr->nHotItem;
     
     if ((INT)wParam < 0)
@@ -4985,7 +4984,7 @@ TOOLBAR_SetRows (HWND hwnd, WPARAM wParam, LPARAM lParam)
         /* FIXME: Separators make this quite complex */
         if (seps) FIXME("Separators unhandled\n");
 
-        /* Round up so more per line, ie less rows */
+        /* Round up so more per line, i.e., less rows */
         idealWrap = (infoPtr->nNumButtons - hidden + (rows-1)) / rows;
 
         /* Calculate ideal wrap point if we are allowed to grow, but cannot
@@ -5186,6 +5185,7 @@ TOOLBAR_GetStringA (HWND hwnd, WPARAM wParam, LPARAM lParam)
     if (iString < infoPtr->nNumStrings)
     {
         ret = WideCharToMultiByte(CP_ACP, 0, infoPtr->strings[iString], -1, str, buffersize, NULL, NULL);
+        ret--;
 
         TRACE("returning %s\n", debugstr_a(str));
     }
@@ -5211,13 +5211,17 @@ TOOLBAR_GetStringW (HWND hwnd, WPARAM wParam, LPARAM lParam)
     {
         len = min(len, strlenW(infoPtr->strings[iString]));
         ret = (len+1)*sizeof(WCHAR);
-        memcpy(str, infoPtr->strings[iString], ret);
-        str[len] = '\0';
+        if (str)
+        {
+            memcpy(str, infoPtr->strings[iString], ret);
+            str[len] = '\0';
+        }
+        ret = len;
 
         TRACE("returning %s\n", debugstr_w(str));
     }
     else
-        ERR("String index %d out of range (largest is %d)\n", iString, infoPtr->nNumStrings - 1);
+        WARN("String index %d out of range (largest is %d)\n", iString, infoPtr->nNumStrings - 1);
 
     return ret;
 }
@@ -5774,7 +5778,6 @@ TOOLBAR_LButtonUp (HWND hwnd, WPARAM wParam, LPARAM lParam)
     POINT pt;
     INT   nHit;
     INT   nOldIndex = -1;
-    BOOL  bSendMessage = TRUE;
     NMHDR hdr;
     NMMOUSE nmmouse;
     NMTOOLBARA nmtb;
@@ -5861,8 +5864,6 @@ TOOLBAR_LButtonUp (HWND hwnd, WPARAM wParam, LPARAM lParam)
 		if (btnPtr->fsStyle & BTNS_GROUP) {
 		    nOldIndex = TOOLBAR_GetCheckedGroupButtonIndex (infoPtr,
 			nHit);
-		    if (nOldIndex == nHit)
-			bSendMessage = FALSE;
 		    if ((nOldIndex != nHit) &&
 			(nOldIndex != -1))
 			infoPtr->buttons[nOldIndex].fsState &= ~TBSTATE_CHECKED;

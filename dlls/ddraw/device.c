@@ -502,7 +502,7 @@ IDirect3DDeviceImpl_7_GetCaps(IDirect3DDevice7 *iface,
  *
  * Parameters:
  *  HWDesc: Structure to fill with the HW caps
- *  HelDesc: Structure to fill with the hardare emulation caps
+ *  HelDesc: Structure to fill with the hardware emulation caps
  *
  * Returns:
  *  D3D_OK on success
@@ -817,6 +817,8 @@ IDirect3DDeviceImpl_3_AddViewport(IDirect3DDevice3 *iface,
     EnterCriticalSection(&ddraw_cs);
     vp->next = This->viewport_list;
     This->viewport_list = vp;
+    vp->active_device = This; /* Viewport must be usable for Clear() after AddViewport,
+                                    so set active_device here. */
     LeaveCriticalSection(&ddraw_cs);
 
     return D3D_OK;
@@ -1067,7 +1069,7 @@ IDirect3DDeviceImpl_1_Pick(IDirect3DDevice *iface,
  * Params:
  *  Count: Pointer to a DWORD containing the numbers of pick records to
  *         retrieve
- *  D3DPickRec: Address to store the resulting D3DPICKRECORD arry.
+ *  D3DPickRec: Address to store the resulting D3DPICKRECORD array.
  *
  * Returns:
  *  D3D_OK, because it's a stub
@@ -1763,7 +1765,7 @@ IDirect3DDeviceImpl_3_SetCurrentViewport(IDirect3DDevice3 *iface,
 
     /* Activate this viewport */
     This->current_viewport->active_device = This;
-    This->current_viewport->activate(This->current_viewport);
+    This->current_viewport->activate(This->current_viewport, FALSE);
 
     LeaveCriticalSection(&ddraw_cs);
     return D3D_OK;

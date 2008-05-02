@@ -209,6 +209,7 @@ static void test_Next_walkList_2(void)
     if(hres != S_OK)
     {
         skip("Unable to get file from test_enumJobs\n");
+        HeapFree(GetProcessHeap(), 0, jobs);
         return;
     }
     ok(fetched == test_jobCountB, "Next returned the incorrect number of jobs: %08x\n", hres);
@@ -219,6 +220,8 @@ static void test_Next_walkList_2(void)
         if (jobs[i])
             IBackgroundCopyFile_Release(jobs[i]);
     }
+
+    HeapFree(GetProcessHeap(), 0, jobs);
 }
 
 /* Test Next Error conditions */
@@ -307,7 +310,7 @@ START_TEST(enum_jobs)
     CoInitialize(NULL);
     for (test = tests; *test; ++test)
     {
-        /* Keep state seperate between tests.  */
+        /* Keep state separate between tests */
         if (!setup())
         {
             teardown();

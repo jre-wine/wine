@@ -16,8 +16,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -26,7 +24,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "ole2.h"
 
 #include "wine/debug.h"
@@ -601,7 +598,7 @@ static const NodeImplVtbl HTMLBodyElementImplVtbl = {
 
 HTMLElement *HTMLBodyElement_Create(nsIDOMHTMLElement *nselem)
 {
-    HTMLBodyElement *ret = heap_alloc(sizeof(HTMLBodyElement));
+    HTMLBodyElement *ret = heap_alloc_zero(sizeof(HTMLBodyElement));
     nsresult nsres;
 
     TRACE("(%p)->(%p)\n", ret, nselem);

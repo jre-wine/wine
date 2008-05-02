@@ -1091,7 +1091,7 @@ static void test_menu_iteminfo( void )
         {, S, MIIM_TYPE, MFT_OWNERDRAW, -9, -9, 0, -9, -9, -9, NULL, 4, NULL, },
         txt,  OK, OK )
     TMII_DONE
-    /* test with modifymenu: string is preserved after seting OWNERDRAW */
+    /* test with modifymenu: string is preserved after setting OWNERDRAW */
     TMII_INSMI( {, S, MIIM_STRING, MFT_STRING, -1, -1, -1, -1, -1, -1, txt, 0, -1, }, OK)
     TMII_MODM( MFT_OWNERDRAW, -1, 787, OK)
     TMII_GMII ( {, S, MIIM_FTYPE|MIIM_STRING|MIIM_DATA, -9, -9, -9, -9, -9, -9, -9, string, 80, -9, },
@@ -1864,6 +1864,23 @@ static void test_menu_flags( void )
 static void test_menu_hilitemenuitem( void )
 {
     HMENU hMenu, hPopupMenu;
+    WNDCLASSA wclass;
+    HWND hWnd;
+
+    wclass.lpszClassName = "HiliteMenuTestClass";
+    wclass.style         = CS_HREDRAW | CS_VREDRAW;
+    wclass.lpfnWndProc   = WndProc;
+    wclass.hInstance     = GetModuleHandleA( NULL );
+    wclass.hIcon         = LoadIconA( 0, (LPSTR)IDI_APPLICATION );
+    wclass.hCursor       = LoadCursorA( NULL, (LPSTR)IDC_ARROW);
+    wclass.hbrBackground = (HBRUSH)( COLOR_WINDOW + 1);
+    wclass.lpszMenuName  = 0;
+    wclass.cbClsExtra    = 0;
+    wclass.cbWndExtra    = 0;
+    assert (RegisterClassA( &wclass ));
+    assert (hWnd = CreateWindowA( wclass.lpszClassName, "HiliteMenuTest",
+                                  WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0,
+                                  400, 200, NULL, NULL, wclass.hInstance, NULL) );
 
     hMenu = CreateMenu();
     hPopupMenu = CreatePopupMenu();
@@ -1874,25 +1891,107 @@ static void test_menu_hilitemenuitem( void )
     AppendMenu(hPopupMenu, MF_STRING, 102, "Item 2");
     AppendMenu(hPopupMenu, MF_STRING, 103, "Item 3");
 
-    HiliteMenuItem(NULL, hPopupMenu, 0, MF_HILITE);
-    HiliteMenuItem(NULL, hPopupMenu, 1, MF_HILITE);
-    HiliteMenuItem(NULL, hPopupMenu, 2, MF_HILITE);
-    HiliteMenuItem(NULL, hPopupMenu, 1, MF_UNHILITE);
+    SetMenu(hWnd, hMenu);
+
+    /* test invalid arguments */
+
+    ok(!(GetMenuState(hPopupMenu, 1, MF_BYPOSITION) & MF_HILITE),
+      "HiliteMenuItem: Item 2 is hilited\n");
+
+    SetLastError(0xdeadbeef);
+    todo_wine
+    {
+    ok(!HiliteMenuItem(NULL, hPopupMenu, 1, MF_HILITE | MF_BYPOSITION),
+      "HiliteMenuItem: call should have failed.\n");
+    }
+    ok(GetLastError() == 0xdeadbeef || /* 9x */
+       GetLastError() == ERROR_INVALID_WINDOW_HANDLE /* NT */,
+      "HiliteMenuItem: expected error ERROR_INVALID_WINDOW_HANDLE, got: %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ok(!HiliteMenuItem(hWnd, NULL, 1, MF_HILITE | MF_BYPOSITION),
+      "HiliteMenuItem: call should have failed.\n");
+    ok(GetLastError() == 0xdeadbeef || /* 9x */
+       GetLastError() == ERROR_INVALID_MENU_HANDLE /* NT */,
+      "HiliteMenuItem: expected error ERROR_INVALID_MENU_HANDLE, got: %d\n", GetLastError());
+
+    ok(!(GetMenuState(hPopupMenu, 1, MF_BYPOSITION) & MF_HILITE),
+      "HiliteMenuItem: Item 2 is hilited\n");
+
+    /* either MF_HILITE or MF_UNHILITE *and* MF_BYCOMMAND or MF_BYPOSITION need to be set */
+
+    SetLastError(0xdeadbeef);
+    ok(HiliteMenuItem(hWnd, hPopupMenu, 1, MF_BYPOSITION),
+      "HiliteMenuItem: call should have succeeded.\n");
+    ok(GetLastError() == 0xdeadbeef,
+      "HiliteMenuItem: expected error 0xdeadbeef, got: %d\n", GetLastError());
+
+    ok(!(GetMenuState(hPopupMenu, 1, MF_BYPOSITION) & MF_HILITE),
+      "HiliteMenuItem: Item 2 is hilited\n");
+
+    SetLastError(0xdeadbeef);
+    todo_wine
+    {
+    ok(HiliteMenuItem(hWnd, hPopupMenu, 1, MF_HILITE),
+      "HiliteMenuItem: call should have succeeded.\n");
+    }
+    ok(GetLastError() == 0xdeadbeef,
+      "HiliteMenuItem: expected error 0xdeadbeef, got: %d\n", GetLastError());
+
+    ok(!(GetMenuState(hPopupMenu, 1, MF_BYPOSITION) & MF_HILITE),
+      "HiliteMenuItem: Item 2 is hilited\n");
+
+    /* hilite a menu item (by position) */
+
+    SetLastError(0xdeadbeef);
+    ok(HiliteMenuItem(hWnd, hPopupMenu, 1, MF_HILITE | MF_BYPOSITION),
+      "HiliteMenuItem: call should not have failed.\n");
+    ok(GetLastError() == 0xdeadbeef,
+      "HiliteMenuItem: expected error 0xdeadbeef, got: %d\n", GetLastError());
 
     todo_wine
     {
-    ok(GetMenuState(hPopupMenu, 0, MF_BYPOSITION) & MF_HILITE,
-      "HiliteMenuItem: Item 1 is not hilited\n");
+    ok(GetMenuState(hPopupMenu, 1, MF_BYPOSITION) & MF_HILITE,
+      "HiliteMenuItem: Item 2 is not hilited\n");
     }
+
+    /* unhilite a menu item (by position) */
+
+    SetLastError(0xdeadbeef);
+    ok(HiliteMenuItem(hWnd, hPopupMenu, 1, MF_UNHILITE | MF_BYPOSITION),
+      "HiliteMenuItem: call should not have failed.\n");
+    ok(GetLastError() == 0xdeadbeef,
+      "HiliteMenuItem: expected error 0xdeadbeef, got: %d\n", GetLastError());
+
     ok(!(GetMenuState(hPopupMenu, 1, MF_BYPOSITION) & MF_HILITE),
       "HiliteMenuItem: Item 2 is hilited\n");
+
+    /* hilite a menu item (by command) */
+
+    SetLastError(0xdeadbeef);
+    ok(HiliteMenuItem(hWnd, hPopupMenu, 103, MF_HILITE | MF_BYCOMMAND),
+      "HiliteMenuItem: call should not have failed.\n");
+    ok(GetLastError() == 0xdeadbeef,
+      "HiliteMenuItem: expected error 0xdeadbeef, got: %d\n", GetLastError());
+
     todo_wine
     {
     ok(GetMenuState(hPopupMenu, 2, MF_BYPOSITION) & MF_HILITE,
       "HiliteMenuItem: Item 3 is not hilited\n");
     }
 
-    DestroyMenu(hMenu);
+    /* unhilite a menu item (by command) */
+
+    SetLastError(0xdeadbeef);
+    ok(HiliteMenuItem(hWnd, hPopupMenu, 103, MF_UNHILITE | MF_BYCOMMAND),
+      "HiliteMenuItem: call should not have failed.\n");
+    ok(GetLastError() == 0xdeadbeef,
+      "HiliteMenuItem: expected error 0xdeadbeef, got: %d\n", GetLastError());
+
+    ok(!(GetMenuState(hPopupMenu, 2, MF_BYPOSITION) & MF_HILITE),
+      "HiliteMenuItem: Item 3 is hilited\n");
+
+    DestroyWindow(hWnd);
 }
 
 static void check_menu_items(HMENU hmenu, UINT checked_cmd, UINT checked_type,

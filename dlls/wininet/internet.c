@@ -38,6 +38,12 @@
 #ifdef HAVE_SYS_SOCKET_H
 # include <sys/socket.h>
 #endif
+#ifdef HAVE_POLL_H
+#include <poll.h>
+#endif
+#ifdef HAVE_SYS_POLL_H
+# include <sys/poll.h>
+#endif
 #ifdef HAVE_SYS_TIME_H
 # include <sys/time.h>
 #endif
@@ -59,7 +65,6 @@
 #include "winerror.h"
 #define NO_SHLWAPI_STREAM
 #include "shlwapi.h"
-#include "wincrypt.h"
 
 #include "wine/exception.h"
 
@@ -145,8 +150,8 @@ end:
 
 LPWININETHANDLEHEADER WININET_AddRef( LPWININETHANDLEHEADER info )
 {
-    info->dwRefCount++;
-    TRACE("%p -> refcount = %d\n", info, info->dwRefCount );
+    ULONG refs = InterlockedIncrement(&info->refs);
+    TRACE("%p -> refcount = %d\n", info, refs );
     return info;
 }
 
@@ -170,9 +175,9 @@ LPWININETHANDLEHEADER WININET_GetObject( HINTERNET hinternet )
 
 BOOL WININET_Release( LPWININETHANDLEHEADER info )
 {
-    info->dwRefCount--;
-    TRACE( "object %p refcount = %d\n", info, info->dwRefCount );
-    if( !info->dwRefCount )
+    ULONG refs = InterlockedDecrement(&info->refs);
+    TRACE( "object %p refcount = %d\n", info, refs );
+    if( !refs )
     {
         if ( info->vtbl->CloseConnection )
         {
@@ -331,53 +336,56 @@ BOOL WINAPI DetectAutoProxyUrl(LPSTR lpszAutoProxyUrl,
 
 
 /***********************************************************************
- *           INTERNET_ConfigureProxyFromReg
+ *           INTERNET_ConfigureProxy
  *
  * FIXME:
  * The proxy may be specified in the form 'http=proxy.my.org'
  * Presumably that means there can be ftp=ftpproxy.my.org too.
  */
-static BOOL INTERNET_ConfigureProxyFromReg( LPWININETAPPINFOW lpwai )
+static BOOL INTERNET_ConfigureProxy( LPWININETAPPINFOW lpwai )
 {
     HKEY key;
-    DWORD r, keytype, len, enabled;
-    LPCSTR lpszInternetSettings =
-        "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+    DWORD type, len, enabled = 0;
+    LPCSTR envproxy;
+    static const WCHAR szInternetSettings[] =
+        { 'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
+          'W','i','n','d','o','w','s','\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
+          'I','n','t','e','r','n','e','t',' ','S','e','t','t','i','n','g','s',0 };
     static const WCHAR szProxyServer[] = { 'P','r','o','x','y','S','e','r','v','e','r', 0 };
+    static const WCHAR szProxyEnable[] = { 'P','r','o','x','y','E','n','a','b','l','e', 0 };
 
-    r = RegOpenKeyA(HKEY_CURRENT_USER, lpszInternetSettings, &key);
-    if ( r != ERROR_SUCCESS )
-        return FALSE;
+    if (RegOpenKeyW( HKEY_CURRENT_USER, szInternetSettings, &key )) return FALSE;
 
     len = sizeof enabled;
-    r = RegQueryValueExA( key, "ProxyEnable", NULL, &keytype,
-                          (BYTE*)&enabled, &len);
-    if( (r == ERROR_SUCCESS) && enabled )
+    if (RegQueryValueExW( key, szProxyEnable, NULL, &type, (BYTE *)&enabled, &len ) || type != REG_DWORD)
+        RegSetValueExW( key, szProxyEnable, 0, REG_DWORD, (BYTE *)&enabled, sizeof(REG_DWORD) );
+
+    if (enabled)
     {
         TRACE("Proxy is enabled.\n");
 
         /* figure out how much memory the proxy setting takes */
-        r = RegQueryValueExW( key, szProxyServer, NULL, &keytype, 
-                              NULL, &len);
-        if( (r == ERROR_SUCCESS) && len && (keytype == REG_SZ) )
+        if (!RegQueryValueExW( key, szProxyServer, NULL, &type, NULL, &len ) && len && (type == REG_SZ))
         {
             LPWSTR szProxy, p;
             static const WCHAR szHttp[] = {'h','t','t','p','=',0};
 
-            szProxy=HeapAlloc( GetProcessHeap(), 0, len );
-            RegQueryValueExW( key, szProxyServer, NULL, &keytype,
-                              (BYTE*)szProxy, &len);
+            if (!(szProxy = HeapAlloc( GetProcessHeap(), 0, len )))
+            {
+                RegCloseKey( key );
+                return FALSE;
+            }
+            RegQueryValueExW( key, szProxyServer, NULL, &type, (BYTE*)szProxy, &len );
 
             /* find the http proxy, and strip away everything else */
             p = strstrW( szProxy, szHttp );
-            if( p )
+            if (p)
             {
-                 p += lstrlenW(szHttp);
-                 lstrcpyW( szProxy, p );
+                p += lstrlenW( szHttp );
+                lstrcpyW( szProxy, p );
             }
             p = strchrW( szProxy, ' ' );
-            if( p )
-                *p = 0;
+            if (p) *p = 0;
 
             lpwai->dwAccessType = INTERNET_OPEN_TYPE_PROXY;
             lpwai->lpszProxy = szProxy;
@@ -385,13 +393,26 @@ static BOOL INTERNET_ConfigureProxyFromReg( LPWININETAPPINFOW lpwai )
             TRACE("http proxy = %s\n", debugstr_w(lpwai->lpszProxy));
         }
         else
-            ERR("Couldn't read proxy server settings.\n");
+            ERR("Couldn't read proxy server settings from registry.\n");
     }
-    else
-        TRACE("Proxy is not enabled.\n");
-    RegCloseKey(key);
+    else if ((envproxy = getenv( "http_proxy" )))
+    {
+        WCHAR *envproxyW;
 
-    return enabled;
+        len = MultiByteToWideChar( CP_UNIXCP, 0, envproxy, -1, NULL, 0 );
+        if (!(envproxyW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR)))) return FALSE;
+        MultiByteToWideChar( CP_UNIXCP, 0, envproxy, -1, envproxyW, len );
+
+        lpwai->dwAccessType = INTERNET_OPEN_TYPE_PROXY;
+        lpwai->lpszProxy = envproxyW;
+
+        TRACE("http proxy (from environment) = %s\n", debugstr_w(lpwai->lpszProxy));
+        enabled = 1;
+    }
+    if (!enabled) TRACE("Proxy is not enabled.\n");
+
+    RegCloseKey( key );
+    return (enabled > 0);
 }
 
 /***********************************************************************
@@ -471,9 +492,28 @@ static VOID APPINFO_Destroy(WININETHANDLEHEADER *hdr)
     HeapFree(GetProcessHeap(), 0, lpwai);
 }
 
+static DWORD APPINFO_QueryOption(WININETHANDLEHEADER *hdr, DWORD option, void *buffer, DWORD *size, BOOL unicode)
+{
+    switch(option) {
+    case INTERNET_OPTION_HANDLE_TYPE:
+        TRACE("INTERNET_OPTION_HANDLE_TYPE\n");
+
+        if (*size < sizeof(ULONG))
+            return ERROR_INSUFFICIENT_BUFFER;
+
+        *size = sizeof(DWORD);
+        *(DWORD*)buffer = INTERNET_HANDLE_TYPE_INTERNET;
+        return ERROR_SUCCESS;
+    }
+
+    FIXME("Not implemented option %d\n", option);
+    return ERROR_INTERNET_INVALID_OPTION;
+}
+
 static const HANDLEHEADERVtbl APPINFOVtbl = {
     APPINFO_Destroy,
     NULL,
+    APPINFO_QueryOption,
     NULL,
     NULL,
     NULL,
@@ -537,7 +577,7 @@ HINTERNET WINAPI InternetOpenW(LPCWSTR lpszAgent, DWORD dwAccessType,
     lpwai->hdr.htype = WH_HINIT;
     lpwai->hdr.vtbl = &APPINFOVtbl;
     lpwai->hdr.dwFlags = dwFlags;
-    lpwai->hdr.dwRefCount = 1;
+    lpwai->hdr.refs = 1;
     lpwai->dwAccessType = dwAccessType;
     lpwai->lpszProxyUsername = NULL;
     lpwai->lpszProxyPassword = NULL;
@@ -558,7 +598,7 @@ HINTERNET WINAPI InternetOpenW(LPCWSTR lpszAgent, DWORD dwAccessType,
             lstrcpyW( lpwai->lpszAgent, lpszAgent );
     }
     if(dwAccessType == INTERNET_OPEN_TYPE_PRECONFIG)
-        INTERNET_ConfigureProxyFromReg( lpwai );
+        INTERNET_ConfigureProxy( lpwai );
     else if (NULL != lpszProxy)
     {
         lpwai->lpszProxy = HeapAlloc( GetProcessHeap(), 0,
@@ -1686,11 +1726,16 @@ BOOL WINAPI InternetWriteFile(HINTERNET hFile, LPCVOID lpBuffer,
     TRACE("(%p %p %d %p)\n", hFile, lpBuffer, dwNumOfBytesToWrite, lpdwNumOfBytesWritten);
 
     lpwh = WININET_GetObject( hFile );
+    if (!lpwh) {
+        WARN("Invalid handle\n");
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
 
-    if(lpwh && lpwh->vtbl->WriteFile) {
+    if(lpwh->vtbl->WriteFile) {
         retval = lpwh->vtbl->WriteFile(lpwh, lpBuffer, dwNumOfBytesToWrite, lpdwNumOfBytesWritten);
     }else {
-        WARN("Invalid handle\n");
+        WARN("No Writefile method.\n");
         SetLastError(ERROR_INVALID_HANDLE);
         retval = FALSE;
     }
@@ -1830,36 +1875,10 @@ static BOOL INET_QueryOptionHelper(BOOL bIsUnicode, HINTERNET hInternet, DWORD d
 
     TRACE("(%p, 0x%08x, %p, %p)\n", hInternet, dwOption, lpBuffer, lpdwBufferLength);
 
-    lpwhh = (LPWININETHANDLEHEADER) WININET_GetObject( hInternet );
+    lpwhh = WININET_GetObject( hInternet );
 
     switch (dwOption)
     {
-        case INTERNET_OPTION_HANDLE_TYPE:
-        {
-            ULONG type;
-
-            if (!lpwhh)
-            {
-                WARN("Invalid hInternet handle\n");
-                INTERNET_SetLastError(ERROR_INVALID_HANDLE);
-                return FALSE;
-            }
-
-            type = lpwhh->htype;
-
-            TRACE("INTERNET_OPTION_HANDLE_TYPE: %d\n", type);
-
-            if (*lpdwBufferLength < sizeof(ULONG))
-                INTERNET_SetLastError(ERROR_INSUFFICIENT_BUFFER);
-            else
-            {
-                memcpy(lpBuffer, &type, sizeof(ULONG));
-                bSuccess = TRUE;
-            }
-            *lpdwBufferLength = sizeof(ULONG);
-            break;
-        }
-
         case INTERNET_OPTION_REQUEST_FLAGS:
         {
             ULONG flags = 4;
@@ -1875,98 +1894,9 @@ static BOOL INET_QueryOptionHelper(BOOL bIsUnicode, HINTERNET hInternet, DWORD d
             break;
         }
 
-        case INTERNET_OPTION_URL:
-        {
-            TRACE("INTERNET_OPTION_URL\n");
-
-            if (!lpwhh)
-            {
-                WARN("Invalid hInternet handle\n");
-                INTERNET_SetLastError(ERROR_INVALID_HANDLE);
-                return FALSE;
-            }
-            if (lpwhh->htype == WH_HHTTPREQ)
-            {
-                LPWININETHTTPREQW lpreq = (LPWININETHTTPREQW) lpwhh;
-                WCHAR url[1023];
-                static const WCHAR szFmt[] = {'h','t','t','p',':','/','/','%','s','%','s',0};
-                static const WCHAR szHost[] = {'H','o','s','t',0};
-                DWORD sizeRequired;
-                LPHTTPHEADERW Host;
-
-                Host = HTTP_GetHeader(lpreq,szHost);
-                sprintfW(url,szFmt,Host->lpszValue,lpreq->lpszPath);
-                TRACE("INTERNET_OPTION_URL: %s\n",debugstr_w(url));
-                if(!bIsUnicode)
-                {
-                    sizeRequired = WideCharToMultiByte(CP_ACP,0,url,-1,
-                     lpBuffer,*lpdwBufferLength,NULL,NULL);
-                    if (sizeRequired > *lpdwBufferLength)
-                        INTERNET_SetLastError(ERROR_INSUFFICIENT_BUFFER);
-                    else
-                        bSuccess = TRUE;
-                    *lpdwBufferLength = sizeRequired;
-                }
-                else
-                {
-                    sizeRequired = (lstrlenW(url)+1) * sizeof(WCHAR);
-                    if (*lpdwBufferLength < sizeRequired)
-                        INTERNET_SetLastError(ERROR_INSUFFICIENT_BUFFER);
-                    else
-                    {
-                        strcpyW(lpBuffer, url);
-                        bSuccess = TRUE;
-                    }
-                    *lpdwBufferLength = sizeRequired;
-                }
-            }
+        case INTERNET_OPTION_USER_AGENT:
+            FIXME("INTERNET_OPTION_USER_AGENT\n");
             break;
-        }
-
-        case INTERNET_OPTION_DATAFILE_NAME:
-        {
-            TRACE("INTERNET_OPTION_DATAFILE_NAME\n");
-            if (!lpwhh)
-            {
-                WARN("Invalid hInternet handle\n");
-                INTERNET_SetLastError(ERROR_INVALID_HANDLE);
-                return FALSE;
-            }
-            if (lpwhh->htype == WH_HHTTPREQ)
-            {
-                LPWININETHTTPREQW lpreq = (LPWININETHTTPREQW) lpwhh;
-                DWORD size;
-
-                if(!lpreq->lpszCacheFile) {
-                    *lpdwBufferLength = 0;
-                    INTERNET_SetLastError(ERROR_INTERNET_ITEM_NOT_FOUND);
-                }
-                else if(bIsUnicode)
-                {
-                    size = (lstrlenW(lpreq->lpszCacheFile)+1) * sizeof(WCHAR);
-                    if (*lpdwBufferLength < size)
-                        INTERNET_SetLastError(ERROR_INSUFFICIENT_BUFFER);
-                    else
-                    {
-                        memcpy(lpBuffer, lpreq->lpszCacheFile, size);
-                        bSuccess = TRUE;
-                    }
-                    *lpdwBufferLength = size;
-                }
-                else
-                {
-                    size = WideCharToMultiByte(CP_ACP, 0, lpreq->lpszCacheFile, -1, NULL, 0, NULL, NULL);
-                    if (size > *lpdwBufferLength) {
-                        INTERNET_SetLastError(ERROR_INSUFFICIENT_BUFFER);
-                    }else {
-                        *lpdwBufferLength = WideCharToMultiByte(CP_ACP, 0, lpreq->lpszCacheFile,
-                                -1, lpBuffer, *lpdwBufferLength, NULL, NULL);
-                        bSuccess = TRUE;
-                    }
-                }
-            }
-            break;
-        }
 
         case INTERNET_OPTION_HTTP_VERSION:
         {
@@ -2008,7 +1938,7 @@ static BOOL INET_QueryOptionHelper(BOOL bIsUnicode, HINTERNET hInternet, DWORD d
             {
                 TRACE("Getting global proxy info\n");
                 memset(&wai, 0, sizeof(WININETAPPINFOW));
-                INTERNET_ConfigureProxyFromReg( &wai );
+                INTERNET_ConfigureProxy( &wai );
                 lpwai = &wai;
             }
 
@@ -2132,87 +2062,6 @@ static BOOL INET_QueryOptionHelper(BOOL bIsUnicode, HINTERNET hInternet, DWORD d
             bSuccess = TRUE;
             break;
 
-        case INTERNET_OPTION_SECURITY_CERTIFICATE_STRUCT:
-            if (!lpwhh)
-            {
-                INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
-                return FALSE;
-            }
-            if (*lpdwBufferLength < sizeof(INTERNET_CERTIFICATE_INFOW))
-            {
-                *lpdwBufferLength = sizeof(INTERNET_CERTIFICATE_INFOW);
-                INTERNET_SetLastError(ERROR_INSUFFICIENT_BUFFER);
-            }
-            else if (lpwhh->htype == WH_HHTTPREQ)
-            {
-                LPWININETHTTPREQW lpwhr;
-                PCCERT_CONTEXT context;
-
-                lpwhr = (LPWININETHTTPREQW)lpwhh;
-                context = (PCCERT_CONTEXT)NETCON_GetCert(&(lpwhr->netConnection));
-                if (context)
-                {
-                    LPINTERNET_CERTIFICATE_INFOW info = (LPINTERNET_CERTIFICATE_INFOW)lpBuffer;
-                    DWORD strLen;
-
-                    memset(info,0,sizeof(INTERNET_CERTIFICATE_INFOW));
-                    info->ftExpiry = context->pCertInfo->NotAfter;
-                    info->ftStart = context->pCertInfo->NotBefore;
-                    if (bIsUnicode)
-                    {
-                        strLen = CertNameToStrW(context->dwCertEncodingType,
-                         &context->pCertInfo->Subject, CERT_SIMPLE_NAME_STR,
-                         NULL, 0);
-                        info->lpszSubjectInfo = LocalAlloc(0,
-                         strLen * sizeof(WCHAR));
-                        if (info->lpszSubjectInfo)
-                            CertNameToStrW(context->dwCertEncodingType,
-                             &context->pCertInfo->Subject, CERT_SIMPLE_NAME_STR,
-                             info->lpszSubjectInfo, strLen);
-                        strLen = CertNameToStrW(context->dwCertEncodingType,
-                         &context->pCertInfo->Issuer, CERT_SIMPLE_NAME_STR,
-                         NULL, 0);
-                        info->lpszIssuerInfo = LocalAlloc(0,
-                         strLen * sizeof(WCHAR));
-                        if (info->lpszIssuerInfo)
-                            CertNameToStrW(context->dwCertEncodingType,
-                             &context->pCertInfo->Issuer, CERT_SIMPLE_NAME_STR,
-                             info->lpszIssuerInfo, strLen);
-                    }
-                    else
-                    {
-                        LPINTERNET_CERTIFICATE_INFOA infoA =
-                         (LPINTERNET_CERTIFICATE_INFOA)info;
-
-                        strLen = CertNameToStrA(context->dwCertEncodingType,
-                         &context->pCertInfo->Subject, CERT_SIMPLE_NAME_STR,
-                         NULL, 0);
-                        infoA->lpszSubjectInfo = LocalAlloc(0, strLen);
-                        if (infoA->lpszSubjectInfo)
-                            CertNameToStrA(context->dwCertEncodingType,
-                             &context->pCertInfo->Subject, CERT_SIMPLE_NAME_STR,
-                             infoA->lpszSubjectInfo, strLen);
-                        strLen = CertNameToStrA(context->dwCertEncodingType,
-                         &context->pCertInfo->Issuer, CERT_SIMPLE_NAME_STR,
-                         NULL, 0);
-                        infoA->lpszIssuerInfo = LocalAlloc(0, strLen);
-                        if (infoA->lpszIssuerInfo)
-                            CertNameToStrA(context->dwCertEncodingType,
-                             &context->pCertInfo->Issuer, CERT_SIMPLE_NAME_STR,
-                             infoA->lpszIssuerInfo, strLen);
-                    }
-                    /*
-                     * Contrary to MSDN, these do not appear to be set.
-                     * lpszProtocolName
-                     * lpszSignatureAlgName
-                     * lpszEncryptionAlgName
-                     * dwKeySize
-                     */
-                    CertFreeCertificateContext(context);
-                    bSuccess = TRUE;
-                }
-            }
-            break;
         case INTERNET_OPTION_VERSION:
         {
             TRACE("INTERNET_OPTION_VERSION\n");
@@ -2272,9 +2121,20 @@ static BOOL INET_QueryOptionHelper(BOOL bIsUnicode, HINTERNET hInternet, DWORD d
         FIXME("66\n");
         bSuccess = TRUE;
         break;
-        default:
-            FIXME("Stub! %d\n", dwOption);
-            break;
+        default: {
+            if(lpwhh) {
+                DWORD res;
+
+                res = lpwhh->vtbl->QueryOption(lpwhh, dwOption, lpBuffer, lpdwBufferLength, bIsUnicode);
+                if(res == ERROR_SUCCESS)
+                    bSuccess = TRUE;
+                else
+                    SetLastError(res);
+            }else {
+                FIXME("Stub! %d\n", dwOption);
+                break;
+            }
+        }
     }
     if (lpwhh)
         WININET_Release( lpwhh );
@@ -3141,7 +3001,7 @@ static DWORD CALLBACK INTERNET_WorkerThreadFunc(LPVOID lpvParam)
 
     TRACE("\n");
 
-    memcpy(&workRequest, lpRequest, sizeof(WORKREQUEST));
+    workRequest = *lpRequest;
     HeapFree(GetProcessHeap(), 0, lpRequest);
 
     workRequest.asyncproc(&workRequest);
@@ -3170,7 +3030,7 @@ BOOL INTERNET_AsyncCall(LPWORKREQUEST lpWorkRequest)
     if (!lpNewRequest)
         return FALSE;
 
-    memcpy(lpNewRequest, lpWorkRequest, sizeof(WORKREQUEST));
+    *lpNewRequest = *lpWorkRequest;
 
     bSuccess = QueueUserWorkItem(INTERNET_WorkerThreadFunc, lpNewRequest, WT_EXECUTELONGFUNCTION);
     if (!bSuccess)
@@ -3211,22 +3071,19 @@ LPSTR INTERNET_GetResponseBuffer(void)
 
 LPSTR INTERNET_GetNextLine(INT nSocket, LPDWORD dwLen)
 {
-    struct timeval tv;
-    fd_set infd;
+    struct pollfd pfd;
     BOOL bSuccess = FALSE;
     INT nRecv = 0;
     LPSTR lpszBuffer = INTERNET_GetResponseBuffer();
 
     TRACE("\n");
 
-    FD_ZERO(&infd);
-    FD_SET(nSocket, &infd);
-    tv.tv_sec=RESPONSE_TIMEOUT;
-    tv.tv_usec=0;
+    pfd.fd = nSocket;
+    pfd.events = POLLIN;
 
     while (nRecv < MAX_REPLY_LEN)
     {
-        if (select(nSocket+1,&infd,NULL,NULL,&tv) > 0)
+        if (poll(&pfd,1, RESPONSE_TIMEOUT * 1000) > 0)
         {
             if (recv(nSocket, &lpszBuffer[nRecv], 1, 0) <= 0)
             {

@@ -83,6 +83,8 @@ extern ULONG WINAPI D3D7CB_DestroyDepthStencilSurface(IWineD3DSurface *pSurface)
 /* Global critical section */
 extern CRITICAL_SECTION ddraw_cs;
 
+extern DWORD force_refresh_rate;
+
 /*****************************************************************************
  * IDirectDraw implementation structure
  *****************************************************************************/
@@ -538,7 +540,7 @@ struct IDirect3DViewportImpl
     } viewports;
 
     /* Activation function */
-    void                      (*activate)(IDirect3DViewportImpl*);
+    void                      (*activate)(IDirect3DViewportImpl*, BOOL);
 
     /* Field used to chain viewports together */
     IDirect3DViewportImpl     *next;
@@ -554,7 +556,7 @@ struct IDirect3DViewportImpl
 const IDirect3DViewport3Vtbl IDirect3DViewport3_Vtbl;
 
 /* Helper functions */
-void viewport_activate(IDirect3DViewportImpl* This);
+void viewport_activate(IDirect3DViewportImpl* This, BOOL ignore_lights);
 
 /*****************************************************************************
  * IDirect3DExecuteBuffer - Wraps to D3D7

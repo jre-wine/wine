@@ -52,10 +52,6 @@
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
-#ifdef HAVE_VALGRIND_MEMCHECK_H
-#include <valgrind/memcheck.h>
-#endif
-
 WINE_DEFAULT_DEBUG_CHANNEL(process);
 WINE_DECLARE_DEBUG_CHANNEL(file);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
@@ -376,7 +372,7 @@ static void set_registry_variables( HANDLE hkey, ULONG type )
  * %SystemRoot% which are predefined. But Wine defines these in the
  * registry, so we need two passes.
  */
-static void set_registry_environment(void)
+static BOOL set_registry_environment(void)
 {
     static const WCHAR env_keyW[] = {'M','a','c','h','i','n','e','\\',
                                      'S','y','s','t','e','m','\\',
@@ -389,6 +385,7 @@ static void set_registry_environment(void)
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW;
     HANDLE hkey;
+    BOOL ret = FALSE;
 
     attr.Length = sizeof(attr);
     attr.RootDirectory = 0;
@@ -404,10 +401,11 @@ static void set_registry_environment(void)
         set_registry_variables( hkey, REG_SZ );
         set_registry_variables( hkey, REG_EXPAND_SZ );
         NtClose( hkey );
+        ret = TRUE;
     }
 
     /* then the ones for the current user */
-    if (RtlOpenCurrentUser( KEY_ALL_ACCESS, &attr.RootDirectory ) != STATUS_SUCCESS) return;
+    if (RtlOpenCurrentUser( KEY_ALL_ACCESS, &attr.RootDirectory ) != STATUS_SUCCESS) return ret;
     RtlInitUnicodeString( &nameW, envW );
     if (NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr ) == STATUS_SUCCESS)
     {
@@ -416,6 +414,7 @@ static void set_registry_environment(void)
         NtClose( hkey );
     }
     NtClose( attr.RootDirectory );
+    return ret;
 }
 
 /***********************************************************************
@@ -719,57 +718,18 @@ static void init_windows_dirs(void)
         DIR_System = buffer;
     }
 
-    if (GetFileAttributesW( DIR_Windows ) == INVALID_FILE_ATTRIBUTES)
-        MESSAGE( "Warning: the specified Windows directory %s is not accessible.\n",
-                 debugstr_w(DIR_Windows) );
-    if (GetFileAttributesW( DIR_System ) == INVALID_FILE_ATTRIBUTES)
-        MESSAGE( "Warning: the specified System directory %s is not accessible.\n",
-                 debugstr_w(DIR_System) );
+    if (!CreateDirectoryW( DIR_Windows, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
+        ERR( "directory %s could not be created, error %u\n",
+             debugstr_w(DIR_Windows), GetLastError() );
+    if (!CreateDirectoryW( DIR_System, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
+        ERR( "directory %s could not be created, error %u\n",
+             debugstr_w(DIR_System), GetLastError() );
 
     TRACE_(file)( "WindowsDir = %s\n", debugstr_w(DIR_Windows) );
     TRACE_(file)( "SystemDir  = %s\n", debugstr_w(DIR_System) );
 
     /* set the directories in ntdll too */
     __wine_init_windows_dir( DIR_Windows, DIR_System );
-}
-
-
-/***********************************************************************
- *           process_init
- *
- * Main process initialisation code
- */
-static BOOL process_init(void)
-{
-    static const WCHAR kernel32W[] = {'k','e','r','n','e','l','3','2',0};
-    PEB *peb = NtCurrentTeb()->Peb;
-    RTL_USER_PROCESS_PARAMETERS *params = peb->ProcessParameters;
-
-    PTHREAD_Init();
-
-    setbuf(stdout,NULL);
-    setbuf(stderr,NULL);
-
-    kernel32_handle = GetModuleHandleW(kernel32W);
-
-    LOCALE_Init();
-
-    if (!params->Environment)
-    {
-        /* Copy the parent environment */
-        if (!build_initial_environment( __wine_main_environ )) return FALSE;
-
-        /* convert old configuration to new format */
-        convert_old_config();
-
-        set_registry_environment();
-        set_additional_environment();
-    }
-
-    init_windows_dirs();
-    init_current_directory( &params->CurrentDirectory );
-
-    return TRUE;
 }
 
 
@@ -818,44 +778,6 @@ static HANDLE start_wineboot(void)
 
 
 /***********************************************************************
- *           init_stack
- *
- * Allocate the stack of new process.
- */
-static void *init_stack(void)
-{
-    void *base;
-    SIZE_T stack_size, page_size = getpagesize();
-    IMAGE_NT_HEADERS *nt = RtlImageNtHeader( NtCurrentTeb()->Peb->ImageBaseAddress );
-
-    stack_size = max( nt->OptionalHeader.SizeOfStackReserve, nt->OptionalHeader.SizeOfStackCommit );
-    stack_size += page_size;  /* for the guard page */
-    stack_size = (stack_size + 0xffff) & ~0xffff;  /* round to 64K boundary */
-    if (stack_size < 1024 * 1024) stack_size = 1024 * 1024;  /* Xlib needs a large stack */
-
-    if (!(base = VirtualAlloc( NULL, stack_size, MEM_COMMIT, PAGE_READWRITE )))
-    {
-        ERR( "failed to allocate main process stack\n" );
-        ExitProcess( 1 );
-    }
-
-    /* note: limit is lower than base since the stack grows down */
-    NtCurrentTeb()->DeallocationStack = base;
-    NtCurrentTeb()->Tib.StackBase     = (char *)base + stack_size;
-    NtCurrentTeb()->Tib.StackLimit    = (char *)base + page_size;
-
-#ifdef VALGRIND_STACK_REGISTER
-    /* no need to de-register the stack as it's the one of the main thread */
-    VALGRIND_STACK_REGISTER(NtCurrentTeb()->Tib.StackLimit, NtCurrentTeb()->Tib.StackBase);
-#endif
-
-    /* setup guard page */
-    VirtualProtect( base, page_size, PAGE_NOACCESS, NULL );
-    return NtCurrentTeb()->Tib.StackBase;
-}
-
-
-/***********************************************************************
  *           start_process
  *
  * Startup routine of a new process. Runs on the new process stack.
@@ -867,8 +789,6 @@ static void start_process( void *arg )
         PEB *peb = NtCurrentTeb()->Peb;
         IMAGE_NT_HEADERS *nt;
         LPTHREAD_START_ROUTINE entry;
-
-        LdrInitializeThunk( 0, 0, 0, 0 );
 
         nt = RtlImageNtHeader( peb->ImageBaseAddress );
         entry = (LPTHREAD_START_ROUTINE)((char *)peb->ImageBaseAddress +
@@ -937,15 +857,41 @@ static void set_process_name( int argc, char *argv[] )
  */
 void __wine_kernel_init(void)
 {
+    static const WCHAR kernel32W[] = {'k','e','r','n','e','l','3','2',0};
     static const WCHAR dotW[] = {'.',0};
     static const WCHAR exeW[] = {'.','e','x','e',0};
 
     WCHAR *p, main_exe_name[MAX_PATH+1];
     PEB *peb = NtCurrentTeb()->Peb;
+    RTL_USER_PROCESS_PARAMETERS *params = peb->ProcessParameters;
     HANDLE boot_event = 0;
+    BOOL got_environment = TRUE;
 
     /* Initialize everything */
-    if (!process_init()) exit(1);
+
+    PTHREAD_Init();
+
+    setbuf(stdout,NULL);
+    setbuf(stderr,NULL);
+    kernel32_handle = GetModuleHandleW(kernel32W);
+
+    LOCALE_Init();
+
+    if (!params->Environment)
+    {
+        /* Copy the parent environment */
+        if (!build_initial_environment( __wine_main_environ )) exit(1);
+
+        /* convert old configuration to new format */
+        convert_old_config();
+
+        got_environment = set_registry_environment();
+        set_additional_environment();
+    }
+
+    init_windows_dirs();
+    init_current_directory( &params->CurrentDirectory );
+
     set_process_name( __wine_main_argc, __wine_main_argv );
     set_library_wargv( __wine_main_argv );
 
@@ -998,10 +944,13 @@ void __wine_kernel_init(void)
     {
         if (WaitForSingleObject( boot_event, 30000 )) WARN( "boot event wait timed out\n" );
         CloseHandle( boot_event );
+        /* if we didn't find environment section, try again now that wineboot has run */
+        if (!got_environment) set_registry_environment();
     }
 
+    LdrInitializeThunk( 0, 0, 0, 0 );
     /* switch to the new stack */
-    wine_switch_to_stack( start_process, NULL, init_stack() );
+    wine_switch_to_stack( start_process, NULL, NtCurrentTeb()->Tib.StackBase );
 
  error:
     ExitProcess( GetLastError() );
@@ -2928,8 +2877,17 @@ DWORD WINAPI RegisterServiceProcess(DWORD dwProcessId, DWORD dwType)
  */
 BOOL WINAPI IsWow64Process(HANDLE hProcess, PBOOL Wow64Process)
 {
-    FIXME("(%p %p) stub!\n", hProcess, Wow64Process);
-    *Wow64Process = FALSE;
+    ULONG pbi;
+    NTSTATUS status;
+
+    status = NtQueryInformationProcess( hProcess, ProcessWow64Information, &pbi, sizeof(pbi), NULL );
+
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError( status ) );
+        return FALSE;
+    }
+    *Wow64Process = (pbi != 0);
     return TRUE;
 }
 

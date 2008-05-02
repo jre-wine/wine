@@ -1978,7 +1978,7 @@ static HRESULT WINAPI DP_IF_EnumGroupPlayers
   for( ;; )
   {
     /* We do not enum the name server or app server as they are of no
-     * concequence to the end user.
+     * consequence to the end user.
      */
     if( ( lpPList->lpPData->dpid != DPID_NAME_SERVER ) &&
         ( lpPList->lpPData->dpid != DPID_SERVERPLAYER )
@@ -2303,7 +2303,7 @@ static HRESULT WINAPI DP_IF_EnumSessions
         /* FIXME: need to kill the thread on object deletion */
         lpData->lpSpData  = &This->dp2->spData;
 
-        CopyMemory( &lpData->requestGuid, &lpsd->guidApplication, sizeof(GUID) );
+        lpData->requestGuid = lpsd->guidApplication;
         lpData->dwEnumSessionFlags = dwFlags;
         lpData->dwTimeout = dwTimeout;
 
@@ -3334,7 +3334,7 @@ DWORD DP_CalcSessionDescSize( LPCDPSESSIONDESC2 lpSessDesc, BOOL bAnsi )
   return dwSize;
 }
 
-/* Assumes that contugous buffers are already allocated. */
+/* Assumes that contiguous buffers are already allocated. */
 static void DP_CopySessionDesc( LPDPSESSIONDESC2 lpSessionDest,
                                 LPCDPSESSIONDESC2 lpSessionSrc, BOOL bAnsi )
 {
@@ -3396,13 +3396,12 @@ static void DP_CopySessionDesc( LPDPSESSIONDESC2 lpSessionDest,
 static HRESULT WINAPI DP_IF_AddGroupToGroup
           ( IDirectPlay3Impl* This, DPID idParentGroup, DPID idGroup )
 {
-  lpGroupData lpGParentData;
   lpGroupData lpGData;
   lpGroupList lpNewGList;
 
   TRACE( "(%p)->(0x%08x,0x%08x)\n", This, idParentGroup, idGroup );
 
-  if( ( lpGParentData = DP_FindAnyGroup( (IDirectPlay2AImpl*)This, idParentGroup ) ) == NULL )
+  if( DP_FindAnyGroup( (IDirectPlay2AImpl*)This, idParentGroup ) == NULL )
   {
     return DPERR_INVALIDGROUP;
   }
@@ -4487,8 +4486,6 @@ static HRESULT WINAPI DP_SendEx
             LPVOID lpData, DWORD dwDataSize, DWORD dwPriority, DWORD dwTimeout,
             LPVOID lpContext, LPDWORD lpdwMsgID, BOOL bAnsi )
 {
-  lpPlayerList lpPList;
-  lpGroupData  lpGData;
   BOOL         bValidDestination = FALSE;
 
   FIXME( "(%p)->(0x%08x,0x%08x,0x%08x,%p,0x%08x,0x%08x,0x%08x,%p,%p,%u)"
@@ -4508,7 +4505,7 @@ static HRESULT WINAPI DP_SendEx
    */
   if( idFrom != DPID_UNKNOWN )
   {
-    if( ( lpPList = DP_FindPlayer( This, idFrom ) ) == NULL )
+    if( DP_FindPlayer( This, idFrom ) == NULL )
     {
       WARN( "INFO: Invalid from player 0x%08x\n", idFrom );
       return DPERR_INVALIDPLAYER;
@@ -4551,7 +4548,7 @@ static HRESULT WINAPI DP_SendEx
   }
 
   if( ( !bValidDestination ) &&
-      ( ( lpGData = DP_FindAnyGroup( This, idTo ) ) != NULL )
+      ( DP_FindAnyGroup( This, idTo ) != NULL )
     )
   {
     bValidDestination = TRUE;

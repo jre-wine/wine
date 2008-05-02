@@ -209,7 +209,7 @@ static nsrefcnt NSAPI nsChannel_Release(nsIHttpChannel *iface)
             nsIInterfaceRequestor_Release(This->notif_callback);
         if(This->original_uri)
             nsIURI_Release(This->original_uri);
-        heap_free(This->content);
+        heap_free(This->content_type);
         heap_free(This->charset);
         heap_free(This);
     }
@@ -468,8 +468,8 @@ static nsresult NSAPI nsChannel_GetContentType(nsIHttpChannel *iface, nsACString
 
     TRACE("(%p)->(%p)\n", This, aContentType);
 
-    if(This->content) {
-        nsACString_SetData(aContentType, This->content);
+    if(This->content_type) {
+        nsACString_SetData(aContentType, This->content_type);
         return S_OK;
     }
 
@@ -485,14 +485,21 @@ static nsresult NSAPI nsChannel_SetContentType(nsIHttpChannel *iface,
                                                const nsACString *aContentType)
 {
     nsChannel *This = NSCHANNEL_THIS(iface);
+    const char *content_type;
 
     TRACE("(%p)->(%p)\n", This, aContentType);
+
+    nsACString_GetData(aContentType, &content_type);
+
+    TRACE("content_type %s\n", content_type);
+
+    heap_free(This->content_type);
+    This->content_type = heap_strdupA(content_type);
 
     if(This->channel)
         return nsIChannel_SetContentType(This->channel, aContentType);
 
-    FIXME("default action not implemented\n");
-    return NS_ERROR_NOT_IMPLEMENTED;
+    return NS_OK;
 }
 
 static nsresult NSAPI nsChannel_GetContentCharset(nsIHttpChannel *iface,
@@ -634,6 +641,51 @@ static HRESULT create_mon_for_nschannel(nsChannel *channel, IMoniker **mon)
     return hres;
 }
 
+static NSContainer *get_nscontainer_from_load_group(nsChannel *This)
+{
+    NSContainer *container;
+    nsIChannel *channel;
+    nsIRequest *req;
+    nsIWineURI *wine_uri;
+    nsIURI *uri;
+    nsresult nsres;
+
+    nsres = nsILoadGroup_GetDefaultLoadRequest(This->load_group, &req);
+    if(NS_FAILED(nsres)) {
+        ERR("GetDefaultLoadRequest failed: %08x\n", nsres);
+        return NULL;
+    }
+
+    if(!req)
+        return NULL;
+
+    nsres = nsIRequest_QueryInterface(req, &IID_nsIChannel, (void**)&channel);
+    nsIRequest_Release(req);
+    if(NS_FAILED(nsres)) {
+        WARN("Could not get nsIChannel interface: %08x\n", nsres);
+        return NULL;
+    }
+
+    nsres = nsIChannel_GetURI(channel, &uri);
+    nsIChannel_Release(channel);
+    if(NS_FAILED(nsres)) {
+        ERR("GetURI failed: %08x\n", nsres);
+        return NULL;
+    }
+
+    nsres = nsIURI_QueryInterface(uri, &IID_nsIWineURI, (void**)&wine_uri);
+    nsIURI_Release(uri);
+    if(NS_FAILED(nsres)) {
+        TRACE("Could not get nsIWineURI: %08x\n", nsres);
+        return NULL;
+    }
+
+    nsIWineURI_GetNSContainer(wine_uri, &container);
+    nsIWineURI_Release(wine_uri);
+
+    return container;
+}
+
 static nsresult async_open_doc_uri(nsChannel *This, NSContainer *container,
         nsIStreamListener *listener, nsISupports *context, BOOL *open)
 {
@@ -643,25 +695,11 @@ static nsresult async_open_doc_uri(nsChannel *This, NSContainer *container,
     *open = FALSE;
 
     if(container->bscallback) {
-        nsIChannel_AddRef(NSCHANNEL(This));
-        container->bscallback->nschannel = This;
-
-        nsIStreamListener_AddRef(listener);
-        container->bscallback->nslistener = listener;
-
-        if(context) {
-            nsISupports_AddRef(context);
-            container->bscallback->nscontext = context;
-        }
+        channelbsc_set_channel(container->bscallback, This, listener, context);
 
         if(container->doc && container->doc->mime) {
-            DWORD len;
-
-            heap_free(This->content);
-
-            len = WideCharToMultiByte(CP_ACP, 0, container->doc->mime, -1, NULL, 0, NULL, NULL);
-            This->content = heap_alloc(len);
-            WideCharToMultiByte(CP_ACP, 0, container->doc->mime, -1, This->content, -1, NULL, NULL);
+            heap_free(This->content_type);
+            This->content_type = heap_strdupWtoA(container->doc->mime);
         }
 
         if(do_load_from_moniker_hack(This))
@@ -694,7 +732,7 @@ static nsresult async_open_doc_uri(nsChannel *This, NSContainer *container,
 static nsresult async_open(nsChannel *This, NSContainer *container, nsIStreamListener *listener,
         nsISupports *context)
 {
-    BSCallback *bscallback;
+    nsChannelBSC *bscallback;
     IMoniker *mon = NULL;
     nsresult nsres;
     task_t *task;
@@ -736,19 +774,10 @@ static nsresult async_open(nsChannel *This, NSContainer *container, nsIStreamLis
     if(FAILED(hres))
         return NS_ERROR_UNEXPECTED;
 
-    bscallback = create_bscallback(mon);
+    bscallback = create_channelbsc(mon);
     IMoniker_Release(mon);
 
-    nsIChannel_AddRef(NSCHANNEL(This));
-    bscallback->nschannel = This;
-
-    nsIStreamListener_AddRef(listener);
-    bscallback->nslistener = listener;
-
-    if(context) {
-        nsISupports_AddRef(context);
-        bscallback->nscontext = context;
-    }
+    channelbsc_set_channel(bscallback, This, listener, context);
 
     task = heap_alloc(sizeof(task_t));
 
@@ -774,6 +803,13 @@ static nsresult NSAPI nsChannel_AsyncOpen(nsIHttpChannel *iface, nsIStreamListen
     TRACE("(%p)->(%p %p)\n", This, aListener, aContext);
 
     nsIWineURI_GetNSContainer(This->uri, &container);
+
+    if(!container && This->load_group) {
+        container = get_nscontainer_from_load_group(This);
+        if(container)
+            nsIWineURI_SetNSContainer(This->uri, container);
+    }
+
     if(!container) {
         TRACE("container = NULL\n");
         return This->channel
@@ -2043,7 +2079,7 @@ static nsresult NSAPI nsIOService_NewURI(nsIIOService *iface, const nsACString *
     }
 
     nsACString_Init(&spec_str, spec);
-    nsres = nsIIOService_NewURI(nsio, aSpec, aOriginCharset, aBaseURI, &uri);
+    nsres = nsIIOService_NewURI(nsio, &spec_str, aOriginCharset, aBaseURI, &uri);
     nsACString_Finish(&spec_str);
     if(NS_FAILED(nsres))
         TRACE("NewURI failed: %08x\n", nsres);
@@ -2057,6 +2093,8 @@ static nsresult NSAPI nsIOService_NewURI(nsIIOService *iface, const nsACString *
             TRACE("Could not get base nsIWineURI: %08x\n", nsres);
         }
     }
+
+    TRACE("nscontainer = %p\n", nscontainer);
 
     nsres = create_uri(uri, nscontainer, &wine_uri);
     *_retval = (nsIURI*)wine_uri;
@@ -2122,20 +2160,13 @@ static nsresult NSAPI nsIOService_NewChannelFromURI(nsIIOService *iface, nsIURI 
         return channel ? NS_OK : NS_ERROR_UNEXPECTED;
     }
 
-    ret = heap_alloc(sizeof(nsChannel));
+    ret = heap_alloc_zero(sizeof(nsChannel));
 
     ret->lpHttpChannelVtbl = &nsChannelVtbl;
     ret->lpUploadChannelVtbl = &nsUploadChannelVtbl;
     ret->ref = 1;
     ret->channel = channel;
-    ret->http_channel = NULL;
     ret->uri = wine_uri;
-    ret->post_data_stream = NULL;
-    ret->load_group = NULL;
-    ret->notif_callback = NULL;
-    ret->load_flags = 0;
-    ret->content = NULL;
-    ret->charset = NULL;
 
     nsIURI_AddRef(aURI);
     ret->original_uri = aURI;

@@ -74,7 +74,7 @@ void hash_table_put(hash_table_t *table, void *key, void *value);
 void hash_table_remove(hash_table_t *table, void *key);
 
 /* Device caps */
-#define MAX_PALETTES            256
+#define MAX_PALETTES            65536
 #define MAX_STREAMS             16
 #define MAX_TEXTURES            8
 #define MAX_FRAGMENT_SAMPLERS   16
@@ -104,15 +104,20 @@ extern const DWORD SavedVertexStates_S[NUM_SAVEDVERTEXSTATES_S];
 
 typedef enum _WINELOOKUP {
     WINELOOKUP_WARPPARAM = 0,
-    WINELOOKUP_MAGFILTER = 1,
-    MAX_LOOKUPS          = 2
+    MAX_LOOKUPS          = 1
 } WINELOOKUP;
 
 extern int minLookup[MAX_LOOKUPS];
 extern int maxLookup[MAX_LOOKUPS];
 extern DWORD *stateLookup[MAX_LOOKUPS];
 
-extern DWORD minMipLookup[WINED3DTEXF_ANISOTROPIC + 1][WINED3DTEXF_LINEAR + 1];
+typedef DWORD magLookup_t[WINED3DTEXF_ANISOTROPIC + 1];
+extern magLookup_t magLookup;
+extern magLookup_t magLookup_noFilter;
+
+typedef DWORD minMipLookup_t[WINED3DTEXF_ANISOTROPIC + 1][WINED3DTEXF_LINEAR + 1];
+extern minMipLookup_t minMipLookup;
+extern minMipLookup_t minMipLookup_noFilter;
 
 void init_type_lookup(WineD3D_GL_Info *gl_info);
 #define WINED3D_ATR_TYPE(type)          GLINFO_LOCATION.glTypeLookup[type].d3dType
@@ -124,9 +129,9 @@ void init_type_lookup(WineD3D_GL_Info *gl_info);
 /* The following functions convert 16 bit floats in the FLOAT16 data type
  * to standard C floats and vice versa. They do not depend on the encoding
  * of the C float, so they are platform independent, but slow. On x86 and
- * other IEEE 754 compliant platforms the conversion can be accelerated with
- * bitshifting the exponent and mantissa. There are also some SSE-based
- * assembly routines out there
+ * other IEEE 754 compliant platforms the conversion can be accelerated by
+ * bit shifting the exponent and mantissa. There are also some SSE-based
+ * assembly routines out there.
  *
  * See GL_NV_half_float for a reference of the FLOAT16 / GL_HALF format
  */
@@ -217,7 +222,8 @@ static inline unsigned short float_32_to_16(const float *in) {
 
 #define SHADER_ARB  1
 #define SHADER_GLSL 2
-#define SHADER_NONE 3
+#define SHADER_ATI  3
+#define SHADER_NONE 4
 
 #define RTL_DISABLE   -1
 #define RTL_AUTO       0
@@ -249,6 +255,36 @@ extern wined3d_settings_t wined3d_settings;
 /* Shader backends */
 struct SHADER_OPCODE_ARG;
 
+#define SHADER_PGMSIZE 65535
+typedef struct SHADER_BUFFER {
+    char* buffer;
+    unsigned int bsize;
+    unsigned int lineNo;
+    BOOL newline;
+} SHADER_BUFFER;
+
+struct shader_caps {
+    DWORD               PrimitiveMiscCaps;
+
+    DWORD               TextureOpCaps;
+    DWORD               MaxTextureBlendStages;
+    DWORD               MaxSimultaneousTextures;
+
+    DWORD               VertexShaderVersion;
+    DWORD               MaxVertexShaderConst;
+
+    DWORD               PixelShaderVersion;
+    float               PixelShader1xMaxValue;
+
+    WINED3DVSHADERCAPS2_0   VS20Caps;
+    WINED3DPSHADERCAPS2_0   PS20Caps;
+
+    DWORD               MaxVShaderInstructionsExecuted;
+    DWORD               MaxPShaderInstructionsExecuted;
+    DWORD               MaxVertexShader30InstructionSlots;
+    DWORD               MaxPixelShader30InstructionSlots;
+};
+
 typedef struct {
     void (*shader_select)(IWineD3DDevice *iface, BOOL usePS, BOOL useVS);
     void (*shader_select_depth_blt)(IWineD3DDevice *iface);
@@ -260,8 +296,15 @@ typedef struct {
     HRESULT (*shader_alloc_private)(IWineD3DDevice *iface);
     void (*shader_free_private)(IWineD3DDevice *iface);
     BOOL (*shader_dirtifyable_constants)(IWineD3DDevice *iface);
+    void (*shader_generate_pshader)(IWineD3DPixelShader *iface, SHADER_BUFFER *buffer);
+    void (*shader_generate_vshader)(IWineD3DVertexShader *iface, SHADER_BUFFER *buffer);
+    void (*shader_get_caps)(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_info, struct shader_caps *caps);
+    void (*shader_dll_load_init)(void);
+    void (*shader_fragment_enable)(IWineD3DDevice *iface, BOOL enable);
+    const struct StateEntry *StateTable;
 } shader_backend_t;
 
+extern const shader_backend_t atifs_shader_backend;
 extern const shader_backend_t glsl_shader_backend;
 extern const shader_backend_t arb_program_shader_backend;
 extern const shader_backend_t none_shader_backend;
@@ -329,7 +372,6 @@ extern int num_lock;
                          /* Maximum number of constants provided to the shaders */
 #define HIGHEST_TRANSFORMSTATE 512 
                          /* Highest value in WINED3DTRANSFORMSTATETYPE */
-#define MAX_PALETTES      256
 
 /* Checking of API calls */
 /* --------------------- */
@@ -543,8 +585,8 @@ struct StateEntry
     APPLYSTATEFUNC  apply;
 };
 
-/* Global state table */
-extern const struct StateEntry StateTable[];
+/* "Base" state table */
+extern const struct StateEntry FFPStateTable[];
 
 /* The new context manager that should deal with onscreen and offscreen rendering */
 struct WineD3DContext {
@@ -584,6 +626,7 @@ struct WineD3DContext {
     HDC                     hdc;
     HPBUFFERARB             pbuffer;
     BOOL                    isPBuffer;
+    GLint                   aux_buffers;
 };
 
 typedef enum ContextUsage {
@@ -636,8 +679,14 @@ extern const WINED3DLIGHT WINED3D_default_light;
 typedef struct WineD3D_PixelFormat
 {
     int iPixelFormat; /* WGL pixel format */
+    int iPixelType; /* WGL pixel type e.g. WGL_TYPE_RGBA_ARB, WGL_TYPE_RGBA_FLOAT_ARB or WGL_TYPE_COLORINDEX_ARB */
     int redSize, greenSize, blueSize, alphaSize;
     int depthSize, stencilSize;
+    BOOL windowDrawable;
+    BOOL pbufferDrawable;
+    BOOL doubleBuffer;
+    int auxBuffers;
+    int numSamples;
 } WineD3D_PixelFormat;
 
 /* The adapter structure */
@@ -645,6 +694,7 @@ typedef struct GLPixelFormatDesc GLPixelFormatDesc;
 struct WineD3DAdapter
 {
     UINT                    num;
+    BOOL                    opengl;
     POINT                   monitorPoint;
     WineD3D_GL_Info         gl_info;
     const char              *driver;
@@ -675,6 +725,36 @@ struct WineD3DRectPatch
 };
 
 HRESULT tesselate_rectpatch(IWineD3DDeviceImpl *This, struct WineD3DRectPatch *patch);
+
+enum projection_types
+{
+    proj_none,
+    proj_count3,
+    proj_count4
+};
+
+/*****************************************************************************
+ * Fixed function pipeline replacements
+ */
+struct texture_stage_op
+{
+    WINED3DTEXTUREOP        cop, aop;
+    DWORD                   carg1, carg2, carg0;
+    DWORD                   aarg1, aarg2, aarg0;
+    WINED3DFORMAT           color_correction;
+    DWORD                   dst;
+    enum projection_types   projected;
+};
+
+struct ffp_desc
+{
+    struct texture_stage_op     op[MAX_TEXTURES];
+    struct list                 entry;
+};
+
+void gen_ffp_op(IWineD3DStateBlockImpl *stateblock,struct texture_stage_op op[MAX_TEXTURES]);
+struct ffp_desc *find_ffp_shader(struct list *shaders, struct texture_stage_op op[MAX_TEXTURES]);
+void add_ffp_shader(struct list *shaders, struct ffp_desc *desc);
 
 /*****************************************************************************
  * IWineD3D implementation structure
@@ -767,7 +847,8 @@ struct IWineD3DDeviceImpl
     IWineD3DSwapChain      *lastActiveSwapChain;
 
     /* palettes texture management */
-    PALETTEENTRY            palettes[MAX_PALETTES][256];
+    UINT                    NumberOfPalettes;
+    PALETTEENTRY            **palettes;
     UINT                    currentPalette;
     UINT                    paletteConversionShader;
 
@@ -1018,6 +1099,8 @@ typedef struct IWineD3DBaseTextureClass
     UINT                    srgb_mode_change_count;
     WINED3DFORMAT           shader_conversion_group;
     float                   pow2Matrix[16];
+    minMipLookup_t          *minMipLookup;
+    magLookup_t             *magLookup;
 } IWineD3DBaseTextureClass;
 
 typedef struct IWineD3DBaseTextureImpl
@@ -1268,7 +1351,7 @@ void get_drawable_size_fbo(IWineD3DSurfaceImpl *This, UINT *width, UINT *height)
 /* Surface flags: */
 #define SFLAG_OVERSIZE    0x00000001 /* Surface is bigger than gl size, blts only */
 #define SFLAG_CONVERTED   0x00000002 /* Converted for color keying or Palettized */
-#define SFLAG_DIBSECTION  0x00000004 /* Has a DIB section attached for getdc */
+#define SFLAG_DIBSECTION  0x00000004 /* Has a DIB section attached for GetDC */
 #define SFLAG_LOCKABLE    0x00000008 /* Surface can be locked */
 #define SFLAG_DISCARD     0x00000010 /* ??? */
 #define SFLAG_LOCKED      0x00000020 /* Surface is locked atm */
@@ -1285,6 +1368,7 @@ void get_drawable_size_fbo(IWineD3DSurfaceImpl *This, UINT *width, UINT *height)
 #define SFLAG_CLIENT      0x00010000 /* GL_APPLE_client_storage is used on that texture */
 #define SFLAG_ALLOCATED   0x00020000 /* A gl texture is allocated for this surface */
 #define SFLAG_PBO         0x00040000 /* Has a PBO attached for speeding up data transfers for dynamically locked surfaces */
+#define SFLAG_NORMCOORD   0x00080000   /* Set if the GL texture coords are normalized(non-texture rectangle) */
 
 /* In some conditions the surface memory must not be freed:
  * SFLAG_OVERSIZE: Not all data can be kept in GL
@@ -1337,6 +1421,8 @@ typedef enum {
 } CONVERT_TYPES;
 
 HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_texturing, GLenum *format, GLenum *internal, GLenum *type, CONVERT_TYPES *convert, int *target_bpp, BOOL srgb_mode);
+
+BOOL palette9_changed(IWineD3DSurfaceImpl *This);
 
 /*****************************************************************************
  * IWineD3DVertexDeclaration implementation structure
@@ -1652,8 +1738,9 @@ const char *debug_d3ddegree(WINED3DDEGREETYPE order);
 GLenum StencilOp(DWORD op);
 GLenum CompareFunc(DWORD func);
 void   set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP op, DWORD arg1, DWORD arg2, DWORD arg3);
-void   set_tex_op_nvrc(IWineD3DDevice *iface, BOOL is_alpha, int stage, WINED3DTEXTUREOP op, DWORD arg1, DWORD arg2, DWORD arg3, INT texture_idx);
+void   set_tex_op_nvrc(IWineD3DDevice *iface, BOOL is_alpha, int stage, WINED3DTEXTUREOP op, DWORD arg1, DWORD arg2, DWORD arg3, INT texture_idx, DWORD dst);
 void   set_texture_matrix(const float *smat, DWORD flags, BOOL calculatedCoords, BOOL transformed, DWORD coordtype);
+void texture_activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context);
 
 void surface_set_compatible_renderbuffer(IWineD3DSurface *iface, unsigned int width, unsigned int height);
 GLenum surface_get_gl_buffer(IWineD3DSurface *iface, IWineD3DSwapChain *swapchain);
@@ -1799,14 +1886,6 @@ typedef struct shader_reg_maps {
     char fog;
 
 } shader_reg_maps;
-
-#define SHADER_PGMSIZE 65535
-typedef struct SHADER_BUFFER {
-    char* buffer;
-    unsigned int bsize;
-    unsigned int lineNo;
-    BOOL newline;
-} SHADER_BUFFER;
 
 /* Undocumented opcode controls */
 #define INST_CONTROLS_SHIFT 16
@@ -2352,5 +2431,4 @@ static inline BOOL use_ps(IWineD3DDeviceImpl *device) {
 
 void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, WINED3DRECT *src_rect,
         IWineD3DSurface *dst_surface, WINED3DRECT *dst_rect, const WINED3DTEXTUREFILTERTYPE filter, BOOL flip);
-
 #endif

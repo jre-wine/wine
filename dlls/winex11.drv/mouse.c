@@ -172,11 +172,6 @@ static void update_mouse_state( HWND hwnd, Window window, int x, int y, unsigned
 {
     struct x11drv_thread_data *data = x11drv_thread_data();
 
-    if (window == root_window)
-    {
-        x += virtual_screen_rect.left;
-        y += virtual_screen_rect.top;
-    }
     get_coords( hwnd, window, x, y, pt );
 
     /* update the cursor */
@@ -411,7 +406,7 @@ static XcursorImage *create_cursor_image( CURSORICONINFO *ptr )
 {
     int x, xmax;
     int y, ymax;
-    int and_size, xor_size;
+    int and_size;
     unsigned char *and_bits, *and_ptr, *xor_bits, *xor_ptr;
     int and_width_bytes, xor_width_bytes;
     XcursorPixel *pixel_ptr;
@@ -427,7 +422,6 @@ static XcursorImage *create_cursor_image( CURSORICONINFO *ptr )
     and_size = ptr->nWidth * ptr->nHeight / 8;
     and_ptr = and_bits = (unsigned char *)(ptr + 1);
 
-    xor_size = xor_width_bytes * ptr->nHeight;
     xor_ptr = xor_bits = and_ptr + and_size;
 
     image = pXcursorImageCreate( xmax, ymax );
@@ -669,7 +663,7 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
             int     rbits, gbits, bbits, red, green, blue;
             int     rfg, gfg, bfg, rbg, gbg, bbg;
             int     rscale, gscale, bscale;
-            int     x, y, xmax, ymax, bitIndex, byteIndex, xorIndex;
+            int     x, y, xmax, ymax, byteIndex, xorIndex;
             unsigned char *theMask, *theImage, theChar;
             int     threshold, fgBits, bgBits, bitShifted;
             BYTE    pXorBits[128];   /* Up to 32x32 icons */
@@ -708,7 +702,6 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
              */
             theImage = &theMask[ptr->nWidth/8 * ptr->nHeight];
             rfg = gfg = bfg = rbg = gbg = bbg = 0;
-            bitIndex = 0;
             byteIndex = 0;
             xorIndex = 0;
             fgBits = 0;
@@ -1115,6 +1108,7 @@ void X11DRV_EnterNotify( HWND hwnd, XEvent *xev )
 
     if (!hwnd) return;
     if (event->detail == NotifyVirtual || event->detail == NotifyNonlinearVirtual) return;
+    if (event->window == x11drv_thread_data()->grab_window) return;
 
     /* simulate a mouse motion event */
     update_mouse_state( hwnd, event->window, event->x, event->y, event->state, &pt );
