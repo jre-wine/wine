@@ -399,7 +399,7 @@ static BOOL StartLinkProcessor( LPCOLESTR szLink )
 {
     static const WCHAR szFormat[] = {
         'w','i','n','e','m','e','n','u','b','u','i','l','d','e','r','.','e','x','e',
-        ' ','-','r',' ','"','%','s','"',0 };
+        ' ','-','w',' ','"','%','s','"',0 };
     LONG len;
     LPWSTR buffer;
     STARTUPINFOW si;
@@ -417,11 +417,6 @@ static BOOL StartLinkProcessor( LPCOLESTR szLink )
     memset(&si, 0, sizeof(si));
     si.cb = sizeof(si);
     if (!CreateProcessW( NULL, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) return FALSE;
-
-    /* wait for a while to throttle the creation of linker processes */
-    if( WAIT_OBJECT_0 != WaitForSingleObject( pi.hProcess, 10000 ) )
-        WARN("Timed out waiting for shell linker\n");
-
     CloseHandle( pi.hProcess );
     CloseHandle( pi.hThread );
 
@@ -1053,10 +1048,7 @@ static HRESULT WINAPI IPersistStream_fnSave(
 	IStream*         stm,
 	BOOL             fClearDirty)
 {
-    static const WCHAR wOpen[] = {'o','p','e','n',0};
-
     LINK_HEADER header;
-    WCHAR   exePath[MAX_PATH];
     ULONG   count;
     DWORD   zero;
     HRESULT r;
@@ -1064,20 +1056,6 @@ static HRESULT WINAPI IPersistStream_fnSave(
     IShellLinkImpl *This = impl_from_IPersistStream(iface);
 
     TRACE("%p %p %x\n", This, stm, fClearDirty);
-
-    *exePath = '\0';
-
-    if (This->sPath)
-    {
-        SHELL_FindExecutable(NULL, This->sPath, wOpen, exePath, MAX_PATH,
-                             NULL, NULL, NULL, NULL);
-        /*
-         * windows can create lnk files to executables that do not exist yet
-         * so if the executable does not exist the just trust the path they
-         * gave us
-         */
-        if (!*exePath) lstrcpyW(exePath,This->sPath);
-    }
 
     memset(&header, 0, sizeof(header));
     header.dwSize = sizeof(header);
@@ -1130,7 +1108,7 @@ static HRESULT WINAPI IPersistStream_fnSave(
     }
 
     if( This->sPath )
-        Stream_WriteLocationInfo( stm, exePath, &This->volume );
+        Stream_WriteLocationInfo( stm, This->sPath, &This->volume );
 
     if( This->sDescription )
         r = Stream_WriteString( stm, This->sDescription );

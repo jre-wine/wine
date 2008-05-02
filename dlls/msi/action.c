@@ -454,15 +454,15 @@ static UINT msi_apply_substorage_transform( MSIPACKAGE *package,
 
 static UINT msi_check_patch_applicable( MSIPACKAGE *package, MSISUMMARYINFO *si )
 {
-    static const WCHAR szProdID[] = { 'P','r','o','d','u','c','t','I','D',0 };
-    LPWSTR guid_list, *guids, product_id;
+    static const WCHAR szProdCode[] = { 'P','r','o','d','u','c','t','C','o','d','e',0 };
+    LPWSTR guid_list, *guids, product_code;
     UINT i, ret = ERROR_FUNCTION_FAILED;
 
-    product_id = msi_dup_property( package, szProdID );
-    if (!product_id)
+    product_code = msi_dup_property( package, szProdCode );
+    if (!product_code)
     {
-        /* FIXME: the property ProductID should be written into the DB somewhere */
-        ERR("no product ID to check\n");
+        /* FIXME: the property ProductCode should be written into the DB somewhere */
+        ERR("no product code to check\n");
         return ERROR_SUCCESS;
     }
 
@@ -470,12 +470,12 @@ static UINT msi_check_patch_applicable( MSIPACKAGE *package, MSISUMMARYINFO *si 
     guids = msi_split_string( guid_list, ';' );
     for ( i = 0; guids[i] && ret != ERROR_SUCCESS; i++ )
     {
-        if (!lstrcmpW( guids[i], product_id ))
+        if (!lstrcmpW( guids[i], product_code ))
             ret = ERROR_SUCCESS;
     }
     msi_free( guids );
     msi_free( guid_list );
-    msi_free( product_id );
+    msi_free( product_code );
 
     return ret;
 }
@@ -748,9 +748,9 @@ static UINT ACTION_PerformActionSequence(MSIPACKAGE *package, UINT seq, BOOL UI)
         }
 
         if (UI)
-            rc = ACTION_PerformUIAction(package,action);
+            rc = ACTION_PerformUIAction(package,action,-1);
         else
-            rc = ACTION_PerformAction(package,action,FALSE);
+            rc = ACTION_PerformAction(package,action,-1,FALSE);
 end:
         msiobj_release(&row->hdr);
     }
@@ -789,9 +789,9 @@ static UINT ITERATE_Actions(MSIRECORD *row, LPVOID param)
     }
 
     if (iap->UI)
-        rc = ACTION_PerformUIAction(iap->package,action);
+        rc = ACTION_PerformUIAction(iap->package,action,-1);
     else
-        rc = ACTION_PerformAction(iap->package,action,FALSE);
+        rc = ACTION_PerformAction(iap->package,action,-1,FALSE);
 
     msi_dialog_check_messages( NULL );
 
@@ -980,12 +980,12 @@ static BOOL ACTION_HandleStandardAction(MSIPACKAGE *package, LPCWSTR action,
 }
 
 static BOOL ACTION_HandleCustomAction( MSIPACKAGE* package, LPCWSTR action,
-                                       UINT* rc, BOOL force )
+                                       UINT* rc, UINT script, BOOL force )
 {
     BOOL ret=FALSE;
     UINT arc;
 
-    arc = ACTION_CustomAction(package,action, force);
+    arc = ACTION_CustomAction(package, action, script, force);
 
     if (arc != ERROR_CALL_NOT_IMPLEMENTED)
     {
@@ -1003,7 +1003,7 @@ static BOOL ACTION_HandleCustomAction( MSIPACKAGE* package, LPCWSTR action,
  * But until I get write access to the database that is hard, so I am going to
  * hack it to see if I can get something to run.
  */
-UINT ACTION_PerformAction(MSIPACKAGE *package, const WCHAR *action, BOOL force)
+UINT ACTION_PerformAction(MSIPACKAGE *package, const WCHAR *action, UINT script, BOOL force)
 {
     UINT rc = ERROR_SUCCESS; 
     BOOL handled;
@@ -1013,7 +1013,7 @@ UINT ACTION_PerformAction(MSIPACKAGE *package, const WCHAR *action, BOOL force)
     handled = ACTION_HandleStandardAction(package, action, &rc, force);
 
     if (!handled)
-        handled = ACTION_HandleCustomAction(package, action, &rc, force);
+        handled = ACTION_HandleCustomAction(package, action, &rc, script, force);
 
     if (!handled)
     {
@@ -1024,7 +1024,7 @@ UINT ACTION_PerformAction(MSIPACKAGE *package, const WCHAR *action, BOOL force)
     return rc;
 }
 
-UINT ACTION_PerformUIAction(MSIPACKAGE *package, const WCHAR *action)
+UINT ACTION_PerformUIAction(MSIPACKAGE *package, const WCHAR *action, UINT script)
 {
     UINT rc = ERROR_SUCCESS;
     BOOL handled = FALSE;
@@ -1034,7 +1034,7 @@ UINT ACTION_PerformUIAction(MSIPACKAGE *package, const WCHAR *action)
     handled = ACTION_HandleStandardAction(package, action, &rc,TRUE);
 
     if (!handled)
-        handled = ACTION_HandleCustomAction(package, action, &rc, FALSE);
+        handled = ACTION_HandleCustomAction(package, action, &rc, script, FALSE);
 
     if( !handled && ACTION_DialogBox(package,action) == ERROR_SUCCESS )
         handled = TRUE;
@@ -1598,7 +1598,7 @@ static UINT execute_script(MSIPACKAGE *package, UINT script )
         action = package->script->Actions[script][i];
         ui_actionstart(package, action);
         TRACE("Executing Action (%s)\n",debugstr_w(action));
-        rc = ACTION_PerformAction(package, action, TRUE);
+        rc = ACTION_PerformAction(package, action, script, TRUE);
         if (rc != ERROR_SUCCESS)
             break;
     }
@@ -1982,14 +1982,19 @@ static LPWSTR msi_get_disk_file_version( LPCWSTR filename )
     version = msi_alloc( versize );
     GetFileVersionInfoW( filename, 0, versize, version );
 
-    VerQueryValueW( version, name, (LPVOID*)&lpVer, &sz );
-    msi_free( version );
+    if (!VerQueryValueW( version, name, (LPVOID*)&lpVer, &sz ))
+    {
+        msi_free( version );
+        return NULL;
+    }
 
     sprintfW( filever, name_fmt,
         HIWORD(lpVer->dwFileVersionMS),
         LOWORD(lpVer->dwFileVersionMS),
         HIWORD(lpVer->dwFileVersionLS),
         LOWORD(lpVer->dwFileVersionLS));
+
+    msi_free( version );
 
     return strdupW( filever );
 }
@@ -2507,19 +2512,26 @@ static UINT ITERATE_LaunchConditions(MSIRECORD *row, LPVOID param)
     MSIPACKAGE* package = (MSIPACKAGE*)param;
     LPCWSTR cond = NULL; 
     LPCWSTR message = NULL;
+    UINT r;
+
     static const WCHAR title[]=
         {'I','n','s','t','a','l','l',' ','F','a', 'i','l','e','d',0};
 
     cond = MSI_RecordGetString(row,1);
 
-    if (MSI_EvaluateConditionW(package,cond) != MSICONDITION_TRUE)
+    r = MSI_EvaluateConditionW(package,cond);
+    if (r == MSICONDITION_FALSE)
     {
-        LPWSTR deformated;
-        message = MSI_RecordGetString(row,2);
-        deformat_string(package,message,&deformated); 
-        MessageBoxW(NULL,deformated,title,MB_OK);
-        msi_free(deformated);
-        return ERROR_FUNCTION_FAILED;
+        if ((gUILevel & INSTALLUILEVEL_MASK) != INSTALLUILEVEL_NONE)
+        {
+            LPWSTR deformated;
+            message = MSI_RecordGetString(row,2);
+            deformat_string(package,message,&deformated);
+            MessageBoxW(NULL,deformated,title,MB_OK);
+            msi_free(deformated);
+        }
+
+        return ERROR_INSTALL_FAILURE;
     }
 
     return ERROR_SUCCESS;
@@ -3237,12 +3249,17 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
     /* for registry stuff */
     HKEY hkey=0;
     HKEY hukey=0;
+    HKEY hudkey=0, props=0;
     static const WCHAR szProductLanguage[] =
         {'P','r','o','d','u','c','t','L','a','n','g','u','a','g','e',0};
     static const WCHAR szARPProductIcon[] =
         {'A','R','P','P','R','O','D','U','C','T','I','C','O','N',0};
     static const WCHAR szProductVersion[] =
         {'P','r','o','d','u','c','t','V','e','r','s','i','o','n',0};
+    static const WCHAR szInstallProperties[] =
+        {'I','n','s','t','a','l','l','P','r','o','p','e','r','t','i','e','s',0};
+    static const WCHAR szWindowsInstaller[] =
+        {'W','i','n','d','o','w','s','I','n','s','t','a','l','l','e','r',0};
     DWORD langid;
     LPWSTR buffer;
     DWORD size;
@@ -3267,6 +3284,15 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
     if (rc != ERROR_SUCCESS)
         goto end;
 
+    rc = MSIREG_OpenUserDataProductKey(package->ProductCode,&hudkey,TRUE);
+    if (rc != ERROR_SUCCESS)
+        goto end;
+
+    rc = RegCreateKeyW(hudkey, szInstallProperties, &props);
+    if (rc != ERROR_SUCCESS)
+        goto end;
+
+    msi_reg_set_val_dword( props, szWindowsInstaller, 1 );
 
     buffer = msi_dup_property( package, INSTALLPROPERTY_PRODUCTNAMEW );
     msi_reg_set_val_str( hukey, INSTALLPROPERTY_PRODUCTNAMEW, buffer );
@@ -3330,9 +3356,10 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
     }
 
 end:
-
     RegCloseKey(hkey);
     RegCloseKey(hukey);
+    RegCloseKey(hudkey);
+    RegCloseKey(props);
 
     return rc;
 }
@@ -4648,7 +4675,7 @@ static UINT ITERATE_WriteEnvironmentString( MSIRECORD *rec, LPVOID param )
     LPWSTR deformatted, ptr;
     DWORD flags, type, size;
     LONG res;
-    HKEY env, root = HKEY_CURRENT_USER;
+    HKEY env = NULL, root = HKEY_CURRENT_USER;
 
     static const WCHAR environment[] =
         {'S','y','s','t','e','m','\\',
@@ -4759,7 +4786,7 @@ static UINT ITERATE_WriteEnvironmentString( MSIRECORD *rec, LPVOID param )
     res = RegSetValueExW(env, name, 0, type, (LPVOID)newval, size);
 
 done:
-    RegCloseKey(env);
+    if (env) RegCloseKey(env);
     msi_free(deformatted);
     msi_free(data);
     msi_free(newval);

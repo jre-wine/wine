@@ -211,6 +211,7 @@ static HANDLE hThread = NULL; /* Track the thread we create so we can clean it u
 static CFMessagePortRef Port_SendToMessageThread;
 
 static void wodHelper_PlayPtrNext(WINE_WAVEOUT* wwo);
+static void wodHelper_NotifyDoneForList(WINE_WAVEOUT* wwo, LPWAVEHDR lpWaveHdr);
 static void wodHelper_NotifyCompletions(WINE_WAVEOUT* wwo, BOOL force);
 static void widHelper_NotifyCompletions(WINE_WAVEIN* wwi);
 
@@ -1049,12 +1050,29 @@ static void wodHelper_PlayPtrNext(WINE_WAVEOUT* wwo)
     }
 }
 
+/* Send the "done" notification for each WAVEHDR in a list.  The list must be
+ * free-standing.  It should not be part of a device's queue.
+ * This function must be called with the WAVEOUT lock *not* held.  Furthermore,
+ * it does not lock it, itself.  That's because the callback to the application
+ * may prompt the application to operate on the device, and we don't want to
+ * deadlock.
+ */
+static void wodHelper_NotifyDoneForList(WINE_WAVEOUT* wwo, LPWAVEHDR lpWaveHdr)
+{
+    for ( ; lpWaveHdr; lpWaveHdr = lpWaveHdr->lpNext)
+    {
+        lpWaveHdr->dwFlags &= ~WHDR_INQUEUE;
+        lpWaveHdr->dwFlags |= WHDR_DONE;
+
+        wodNotifyClient(wwo, WOM_DONE, (DWORD)lpWaveHdr, 0);
+    }
+}
+
 /* if force is TRUE then notify the client that all the headers were completed
  */
 static void wodHelper_NotifyCompletions(WINE_WAVEOUT* wwo, BOOL force)
 {
-    LPWAVEHDR		lpWaveHdr;
-    LPWAVEHDR		lpFirstDoneWaveHdr = NULL;
+    LPWAVEHDR lpFirstDoneWaveHdr = NULL;
 
     OSSpinLockLock(&wwo->lock);
 
@@ -1067,6 +1085,7 @@ static void wodHelper_NotifyCompletions(WINE_WAVEOUT* wwo, BOOL force)
     }
     else
     {
+        LPWAVEHDR lpWaveHdr;
         LPWAVEHDR lpLastDoneWaveHdr = NULL;
 
         /* Start from lpQueuePtr and keep notifying until:
@@ -1097,13 +1116,7 @@ static void wodHelper_NotifyCompletions(WINE_WAVEOUT* wwo, BOOL force)
     OSSpinLockUnlock(&wwo->lock);
 
     /* Now, send the "done" notification for each header in our list. */
-    for (lpWaveHdr = lpFirstDoneWaveHdr; lpWaveHdr; lpWaveHdr = lpWaveHdr->lpNext)
-    {
-        lpWaveHdr->dwFlags &= ~WHDR_INQUEUE;
-        lpWaveHdr->dwFlags |= WHDR_DONE;
-
-        wodNotifyClient(wwo, WOM_DONE, (DWORD)lpWaveHdr, 0);
-    }
+    wodHelper_NotifyDoneForList(wwo, lpFirstDoneWaveHdr);
 }
 
 
@@ -1252,6 +1265,7 @@ static DWORD wodReset(WORD wDevID)
 {
     WINE_WAVEOUT* wwo;
     OSStatus status;
+    LPWAVEHDR lpSavedQueuePtr;
 
     TRACE("(%u);\n", wDevID);
 
@@ -1263,12 +1277,16 @@ static DWORD wodReset(WORD wDevID)
 
     wwo = &WOutDev[wDevID];
 
-    /* updates current notify list */
-    /* if resetting, remove all wave headers and notify client that all headers were completed */
-    wodHelper_NotifyCompletions(wwo, TRUE);
-    
     OSSpinLockLock(&wwo->lock);
-    
+
+    if (wwo->state == WINE_WS_CLOSED)
+    {
+        OSSpinLockUnlock(&wwo->lock);
+        WARN("resetting a closed device\n");
+        return MMSYSERR_INVALHANDLE;
+    }
+
+    lpSavedQueuePtr = wwo->lpQueuePtr;
     wwo->lpPlayPtr = wwo->lpQueuePtr = wwo->lpLoopPtr = NULL;
     wwo->state = WINE_WS_STOPPED;
     wwo->dwPlayedTotal = wwo->dwWrittenTotal = 0;
@@ -1284,6 +1302,11 @@ static DWORD wodReset(WORD wDevID)
              (char) (status >> 24), (char) (status >> 16), (char) (status >> 8), (char) status);
         return MMSYSERR_ERROR; /* FIXME return an error based on the OSStatus */
     }
+
+    /* Now, send the "done" notification for each header in our list. */
+    /* Do this last so the reset operation is effectively complete before the
+     * app does whatever it's going to do in response to these notifications. */
+    wodHelper_NotifyDoneForList(wwo, lpSavedQueuePtr);
 
     return MMSYSERR_NOERROR;
 }

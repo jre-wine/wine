@@ -324,8 +324,6 @@ static NTSTATUS FILE_AsyncReadService(void *user, PIO_STATUS_BLOCK iosb, NTSTATU
     async_fileio_read *fileio = user;
     int fd, needs_close, result;
 
-    TRACE("%p %p 0x%x\n", iosb, fileio->buffer, status);
-
     switch (status)
     {
     case STATUS_ALERTED: /* got some new data */
@@ -340,10 +338,7 @@ static NTSTATUS FILE_AsyncReadService(void *user, PIO_STATUS_BLOCK iosb, NTSTATU
         if (result < 0)
         {
             if (errno == EAGAIN || errno == EINTR)
-            {
-                TRACE("Deferred read %d\n", errno);
                 status = STATUS_PENDING;
-            }
             else /* check to see if the transfer is complete */
                 status = FILE_GetNtStatus();
         }
@@ -364,10 +359,6 @@ static NTSTATUS FILE_AsyncReadService(void *user, PIO_STATUS_BLOCK iosb, NTSTATU
                  */
                 status = (fileio->avail_mode) ? STATUS_SUCCESS : STATUS_PENDING;
             }
-
-            TRACE("read %d more bytes %u/%u so far (%s)\n",
-                  result, fileio->already, fileio->count,
-                  (status == STATUS_SUCCESS) ? "success" : "pending");
         }
         break;
 
@@ -465,7 +456,7 @@ static NTSTATUS get_io_timeouts( HANDLE handle, enum server_fd_type type, ULONG 
 
 
 /* retrieve the timeout for the next wait, in milliseconds */
-static inline int get_next_io_timeout( struct io_timeouts *timeouts, ULONG already )
+static inline int get_next_io_timeout( const struct io_timeouts *timeouts, ULONG already )
 {
     int ret = -1;
 
@@ -709,8 +700,6 @@ static NTSTATUS FILE_AsyncWriteService(void *user, IO_STATUS_BLOCK *iosb, NTSTAT
     int result, fd, needs_close;
     enum server_fd_type type;
 
-    TRACE("(%p %p 0x%x)\n",iosb, fileio->buffer, status);
-
     switch (status)
     {
     case STATUS_ALERTED:
@@ -735,7 +724,6 @@ static NTSTATUS FILE_AsyncWriteService(void *user, IO_STATUS_BLOCK *iosb, NTSTAT
         {
             fileio->already += result;
             status = (fileio->already < fileio->count) ? STATUS_PENDING : STATUS_SUCCESS;
-            TRACE("wrote %d more bytes %u/%u so far\n", result, fileio->already, fileio->count);
         }
         break;
 
@@ -973,7 +961,7 @@ static void WINAPI ioctl_apc( void *arg, IO_STATUS_BLOCK *io, ULONG reserved )
 static NTSTATUS server_ioctl_file( HANDLE handle, HANDLE event,
                                    PIO_APC_ROUTINE apc, PVOID apc_context,
                                    IO_STATUS_BLOCK *io, ULONG code,
-                                   PVOID in_buffer, ULONG in_size,
+                                   const void *in_buffer, ULONG in_size,
                                    PVOID out_buffer, ULONG out_size )
 {
     struct async_ioctl *async;

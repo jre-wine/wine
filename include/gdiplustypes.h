@@ -45,7 +45,97 @@ enum Status{
     PropertyNotSupported        = 20
 };
 
-#ifndef __cplusplus
+#ifdef __cplusplus
+
+class PointF
+{
+public:
+   PointF()
+   {
+       X = Y = 0.0f;
+   }
+
+   PointF(IN const PointF &pt)
+   {
+       X = pt.X;
+       Y = pt.Y;
+   }
+
+   /* FIXME: missing constructor that takes a SizeF */
+
+   PointF(IN REAL x, IN REAL y)
+   {
+       X = x;
+       Y = y;
+   }
+
+   PointF operator+(IN const PointF& pt) const
+   {
+       return PointF(X + pt.X, Y + pt.Y);
+   }
+
+   PointF operator-(IN const PointF& pt) const
+   {
+       return PointF(X - pt.X, Y - pt.Y);
+   }
+
+   BOOL Equals(IN const PointF& pt)
+   {
+       return (X == pt.X) && (Y == pt.Y);
+   }
+
+public:
+    REAL X;
+    REAL Y;
+};
+
+class PathData
+{
+public:
+    PathData()
+    {
+        Count = 0;
+        Points = NULL;
+        Types = NULL;
+    }
+
+    ~PathData()
+    {
+        if (Points != NULL)
+        {
+            delete Points;
+        }
+
+        if (Types != NULL)
+        {
+            delete Types;
+        }
+    }
+
+private:
+    PathData(const PathData &);
+    PathData& operator=(const PathData &);
+
+public:
+    INT Count;
+    PointF* Points;
+    BYTE* Types;
+};
+
+#else /* end of c++ typedefs */
+
+typedef struct PointF
+{
+    REAL X;
+    REAL Y;
+} PointF;
+
+typedef struct PathData
+{
+    INT Count;
+    PointF* Points;
+    BYTE* Types;
+} PathData;
 
 typedef enum Status Status;
 

@@ -131,9 +131,6 @@ struct JoystickImpl
 
         struct JoyDev                  *joydev;
 
-	/* The 'parent' DInput */
-	IDirectInputImpl               *dinput;
-
 	/* joystick private */
 	int				joyfd;
 
@@ -367,7 +364,7 @@ static JoystickImpl *alloc_device(REFGUID rguid, const void *jvt, IDirectInputIm
   InitializeCriticalSection(&newDevice->base.crit);
   newDevice->base.crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": JoystickImpl*->base.crit");
   newDevice->joyfd = -1;
-  newDevice->dinput = dinput;
+  newDevice->base.dinput = dinput;
   newDevice->joydev = joydev;
 #ifdef HAVE_STRUCT_FF_EFFECT_DIRECTION
   newDevice->ff_state = FF_STATUS_STOPPED;
@@ -423,7 +420,7 @@ static JoystickImpl *alloc_device(REFGUID rguid, const void *jvt, IDirectInputIm
     fake_current_js_state(newDevice);
 
     newDevice->base.data_format.wine_df = df;
-    IDirectInput_AddRef((LPDIRECTINPUTDEVICE8A)newDevice->dinput);
+    IDirectInput_AddRef((LPDIRECTINPUTDEVICE8A)newDevice->base.dinput);
     return newDevice;
 
 failed:
@@ -503,39 +500,6 @@ const struct dinput_device joystick_linuxinput_device = {
   joydev_create_deviceA,
   joydev_create_deviceW
 };
-
-/******************************************************************************
- *	Joystick
- */
-static ULONG WINAPI JoystickAImpl_Release(LPDIRECTINPUTDEVICE8A iface)
-{
-	JoystickImpl *This = (JoystickImpl *)iface;
-	ULONG ref;
-
-	ref = InterlockedDecrement(&This->base.ref);
-	if (ref)
-		return ref;
-
-        IDirectInputDevice_Unacquire(iface);
-
-	/* Reset the FF state, free all effects, etc */
-	IDirectInputDevice8_SendForceFeedbackCommand(iface, DISFFC_RESET);
-
-	/* Free the data queue */
-	HeapFree(GetProcessHeap(), 0, This->base.data_queue);
-
-        /* release the data transform filter */
-        HeapFree(GetProcessHeap(), 0, This->base.data_format.wine_df->rgodf);
-        HeapFree(GetProcessHeap(), 0, This->base.data_format.wine_df);
-        release_DataFormat(&This->base.data_format);
-
-        IDirectInput_Release((LPDIRECTINPUTDEVICE8A)This->dinput);
-        This->base.crit.DebugInfo->Spare[0] = 0;
-        DeleteCriticalSection(&This->base.crit);
-        
-        HeapFree(GetProcessHeap(),0,This);
-        return 0;
-}
 
 /******************************************************************************
   *     Acquire : gets exclusive control of the joystick
@@ -753,7 +717,7 @@ static void joy_polldev(JoystickImpl *This)
         if (inst_id >= 0)
             queue_event((LPDIRECTINPUTDEVICE8A)This,
                         id_to_offset(&This->base.data_format, inst_id),
-                        value, ie.time.tv_usec, This->dinput->evsequence++);
+                        value, ie.time.tv_usec, This->base.dinput->evsequence++);
     }
 }
 
@@ -873,7 +837,7 @@ static HRESULT WINAPI JoystickAImpl_GetCapabilities(
     }
 
     lpDIDevCaps->dwFlags	= DIDC_ATTACHED;
-    if (This->dinput->dwVersion >= 0x0800)
+    if (This->base.dinput->dwVersion >= 0x0800)
         lpDIDevCaps->dwDevType = DI8DEVTYPE_JOYSTICK | (DI8DEVTYPEJOYSTICK_STANDARD << 8);
     else
         lpDIDevCaps->dwDevType = DIDEVTYPE_JOYSTICK | (DIDEVTYPEJOYSTICK_TRADITIONAL << 8);
@@ -1328,7 +1292,7 @@ static const IDirectInputDevice8AVtbl JoystickAvt =
 {
 	IDirectInputDevice2AImpl_QueryInterface,
 	IDirectInputDevice2AImpl_AddRef,
-	JoystickAImpl_Release,
+        IDirectInputDevice2AImpl_Release,
 	JoystickAImpl_GetCapabilities,
         IDirectInputDevice2AImpl_EnumObjects,
 	JoystickAImpl_GetProperty,
@@ -1370,7 +1334,7 @@ static const IDirectInputDevice8WVtbl JoystickWvt =
 {
 	IDirectInputDevice2WImpl_QueryInterface,
 	XCAST(AddRef)IDirectInputDevice2AImpl_AddRef,
-	XCAST(Release)JoystickAImpl_Release,
+        XCAST(Release)IDirectInputDevice2AImpl_Release,
 	XCAST(GetCapabilities)JoystickAImpl_GetCapabilities,
         IDirectInputDevice2WImpl_EnumObjects,
 	XCAST(GetProperty)JoystickAImpl_GetProperty,

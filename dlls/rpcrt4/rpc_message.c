@@ -177,8 +177,9 @@ RpcPktHdr *RPCRT4_BuildFaultHeader(unsigned long DataRepresentation,
 RpcPktHdr *RPCRT4_BuildBindHeader(unsigned long DataRepresentation,
                                   unsigned short MaxTransmissionSize,
                                   unsigned short MaxReceiveSize,
-                                  RPC_SYNTAX_IDENTIFIER *AbstractId,
-                                  RPC_SYNTAX_IDENTIFIER *TransferId)
+                                  unsigned long  AssocGroupId,
+                                  const RPC_SYNTAX_IDENTIFIER *AbstractId,
+                                  const RPC_SYNTAX_IDENTIFIER *TransferId)
 {
   RpcPktHdr *header;
 
@@ -191,6 +192,7 @@ RpcPktHdr *RPCRT4_BuildBindHeader(unsigned long DataRepresentation,
   header->common.frag_len = sizeof(header->bind);
   header->bind.max_tsize = MaxTransmissionSize;
   header->bind.max_rsize = MaxReceiveSize;
+  header->bind.assoc_gid = AssocGroupId;
   header->bind.num_elements = 1;
   header->bind.num_syntaxes = 1;
   memcpy(&header->bind.abstract, AbstractId, sizeof(RPC_SYNTAX_IDENTIFIER));
@@ -238,10 +240,10 @@ RpcPktHdr *RPCRT4_BuildBindNackHeader(unsigned long DataRepresentation,
 RpcPktHdr *RPCRT4_BuildBindAckHeader(unsigned long DataRepresentation,
                                      unsigned short MaxTransmissionSize,
                                      unsigned short MaxReceiveSize,
-                                     LPSTR ServerAddress,
+                                     LPCSTR ServerAddress,
                                      unsigned long Result,
                                      unsigned long Reason,
-                                     RPC_SYNTAX_IDENTIFIER *TransferId)
+                                     const RPC_SYNTAX_IDENTIFIER *TransferId)
 {
   RpcPktHdr *header;
   unsigned long header_size;
@@ -925,7 +927,7 @@ RPC_STATUS WINAPI I_RpcSend(PRPC_MESSAGE pMsg)
   if (bind->server) {
     if (pMsg->RpcFlags & WINE_RPCFLAG_EXCEPTION) {
       hdr = RPCRT4_BuildFaultHeader(pMsg->DataRepresentation,
-                                    RPC_S_CALL_FAILED);
+                                    *(DWORD *)pMsg->Buffer);
     } else {
       hdr = RPCRT4_BuildResponseHeader(pMsg->DataRepresentation,
                                        pMsg->BufferLength);
@@ -950,6 +952,23 @@ RPC_STATUS WINAPI I_RpcSend(PRPC_MESSAGE pMsg)
   RPCRT4_CloseBinding(bind, conn);
 
   return status;
+}
+
+/* is this status something that the server can't recover from? */
+static inline BOOL is_hard_error(RPC_STATUS status)
+{
+    switch (status)
+    {
+    case 0: /* user-defined fault */
+    case ERROR_ACCESS_DENIED:
+    case ERROR_INVALID_PARAMETER:
+    case RPC_S_PROTOCOL_ERROR:
+    case RPC_S_CALL_FAILED:
+    case RPC_S_CALL_FAILED_DNE:
+        return TRUE;
+    default:
+        return FALSE;
+    }
 }
 
 /***********************************************************************
@@ -999,31 +1018,40 @@ RPC_STATUS WINAPI I_RpcReceive(PRPC_MESSAGE pMsg)
     goto fail;
   }
 
-  status = RPC_S_PROTOCOL_ERROR;
-
   switch (hdr->common.ptype) {
   case PKT_RESPONSE:
-    if (bind->server) goto fail;
+    if (bind->server) {
+        status = RPC_S_PROTOCOL_ERROR;
+        goto fail;
+    }
     break;
   case PKT_REQUEST:
-    if (!bind->server) goto fail;
+    if (!bind->server) {
+        status = RPC_S_PROTOCOL_ERROR;
+        goto fail;
+    }
     break;
   case PKT_FAULT:
     pMsg->RpcFlags |= WINE_RPCFLAG_EXCEPTION;
     ERR ("we got fault packet with status 0x%lx\n", hdr->fault.status);
     status = hdr->fault.status; /* FIXME: do translation from nca error codes */
-    goto fail;
+    if (is_hard_error(status))
+        goto fail;
+    break;
   default:
     WARN("bad packet type %d\n", hdr->common.ptype);
+    status = RPC_S_PROTOCOL_ERROR;
     goto fail;
   }
 
   /* success */
-  status = RPC_S_OK;
+  RPCRT4_CloseBinding(bind, conn);
+  RPCRT4_FreeHeader(hdr);
+  return status;
 
 fail:
   RPCRT4_FreeHeader(hdr);
-  RPCRT4_CloseBinding(bind, conn);
+  RPCRT4_DestroyConnection(conn);
   return status;
 }
 

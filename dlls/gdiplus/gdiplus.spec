@@ -106,7 +106,7 @@
 @ stub GdipCreateMetafileFromWmfFile
 @ stub GdipCreatePath2
 @ stub GdipCreatePath2I
-@ stub GdipCreatePath
+@ stdcall GdipCreatePath(long ptr)
 @ stub GdipCreatePathGradient
 @ stub GdipCreatePathGradientFromPath
 @ stub GdipCreatePathGradientI
@@ -134,7 +134,7 @@
 @ stub GdipDeleteFontFamily
 @ stdcall GdipDeleteGraphics(ptr)
 @ stub GdipDeleteMatrix
-@ stub GdipDeletePath
+@ stdcall GdipDeletePath(ptr)
 @ stub GdipDeletePathIter
 @ stdcall GdipDeletePen(ptr)
 @ stub GdipDeletePrivateFontCollection
@@ -142,9 +142,9 @@
 @ stub GdipDeleteStringFormat
 @ stub GdipDisposeImage
 @ stub GdipDisposeImageAttributes
-@ stub GdipDrawArc
+@ stdcall GdipDrawArc(ptr ptr long long long long long long)
 @ stub GdipDrawArcI
-@ stub GdipDrawBezier
+@ stdcall GdipDrawBezier(ptr ptr long long long long long long long long)
 @ stub GdipDrawBezierI
 @ stub GdipDrawBeziers
 @ stub GdipDrawBeziersI
@@ -153,7 +153,7 @@
 @ stub GdipDrawClosedCurve2I
 @ stub GdipDrawClosedCurve
 @ stub GdipDrawClosedCurveI
-@ stub GdipDrawCurve2
+@ stdcall GdipDrawCurve2(ptr ptr ptr long long)
 @ stub GdipDrawCurve2I
 @ stub GdipDrawCurve3
 @ stub GdipDrawCurve3I
@@ -176,10 +176,10 @@
 @ stub GdipDrawImageRectRectI
 @ stub GdipDrawLine
 @ stdcall GdipDrawLineI(ptr ptr long long long long)
-@ stub GdipDrawLines
+@ stdcall GdipDrawLines(ptr ptr ptr long)
 @ stub GdipDrawLinesI
 @ stub GdipDrawPath
-@ stub GdipDrawPie
+@ stdcall GdipDrawPie(ptr ptr long long long long long long)
 @ stub GdipDrawPieI
 @ stub GdipDrawPolygon
 @ stub GdipDrawPolygonI
@@ -209,7 +209,7 @@
 @ stub GdipFillEllipse
 @ stub GdipFillEllipseI
 @ stub GdipFillPath
-@ stub GdipFillPie
+@ stdcall GdipFillPie(ptr ptr long long long long long long)
 @ stub GdipFillPieI
 @ stub GdipFillPolygon2
 @ stub GdipFillPolygon2I

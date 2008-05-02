@@ -84,16 +84,16 @@ static void paint_document(HTMLDocument *This)
     EndPaint(This->hwnd, &ps);
 }
 
-static void activate_gecko(HTMLDocument *This)
+static void activate_gecko(NSContainer *This)
 {
-    TRACE("(%p) %p\n", This, This->nscontainer->window);
+    TRACE("(%p) %p\n", This, This->window);
 
-    SetParent(This->nscontainer->hwnd, This->hwnd);
-    ShowWindow(This->nscontainer->hwnd, SW_SHOW);
+    SetParent(This->hwnd, This->doc->hwnd);
+    ShowWindow(This->hwnd, SW_SHOW);
 
-    nsIBaseWindow_SetVisibility(This->nscontainer->window, TRUE);
-    nsIBaseWindow_SetEnabled(This->nscontainer->window, TRUE);
-    nsIWebBrowserFocus_Activate(This->nscontainer->focus);
+    nsIBaseWindow_SetVisibility(This->window, TRUE);
+    nsIBaseWindow_SetEnabled(This->window, TRUE);
+    nsIWebBrowserFocus_Activate(This->focus);
 }
 
 void update_doc(HTMLDocument *This, DWORD flags)
@@ -164,6 +164,19 @@ static LRESULT on_timer(HTMLDocument *This)
     return 0;
 }
 
+void notif_focus(HTMLDocument *This)
+{
+    IOleControlSite *site;
+    HRESULT hres;
+
+    hres = IOleClientSite_QueryInterface(This->client, &IID_IOleControlSite, (void**)&site);
+    if(FAILED(hres))
+        return;
+
+    IOleControlSite_OnFocus(site, This->focus);
+    IOleControlSite_Release(site);
+}
+
 static LRESULT WINAPI serverwnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     HTMLDocument *This;
@@ -180,8 +193,6 @@ static LRESULT WINAPI serverwnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
     switch(msg) {
     case WM_CREATE:
         This->hwnd = hwnd;
-        if(This->nscontainer)
-            activate_gecko(This);
         break;
     case WM_PAINT:
         paint_document(This);
@@ -242,7 +253,8 @@ static HRESULT activate_window(HTMLDocument *This)
         return FAILED(hres) ? hres : E_FAIL;
     }
 
-    hres = IOleInPlaceSite_GetWindowContext(This->ipsite, &pIPFrame, &pIPWnd, &posrect, &cliprect, &frameinfo);
+    hres = IOleInPlaceSite_GetWindowContext(This->ipsite, &pIPFrame, &pIPWnd,
+            &posrect, &cliprect, &frameinfo);
     if(FAILED(hres)) {
         WARN("GetWindowContext failed: %08x\n", hres);
         return hres;
@@ -288,6 +300,9 @@ static HRESULT activate_window(HTMLDocument *This)
          */
         SetTimer(This->hwnd, TIMER_ID, 100, NULL);
     }
+
+    if(This->nscontainer)
+        activate_gecko(This->nscontainer);
 
     This->in_place_active = TRUE;
     hres = IOleInPlaceSite_QueryInterface(This->ipsite, &IID_IOleInPlaceSiteEx, (void**)&ipsiteex);
@@ -769,6 +784,7 @@ void HTMLDocument_View_Init(HTMLDocument *This)
     This->in_place_active = FALSE;
     This->ui_active = FALSE;
     This->window_active = FALSE;
+    This->focus = FALSE;
 
     This->update = 0;
 }

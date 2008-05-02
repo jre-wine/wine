@@ -65,7 +65,7 @@ void print_glsl_info_log(WineD3D_GL_Info *gl_info, GLhandleARB obj) {
      * that if there are errors. */
     if (infologLength > 1)
     {
-        infoLog = (char *)HeapAlloc(GetProcessHeap(), 0, infologLength);
+        infoLog = HeapAlloc(GetProcessHeap(), 0, infologLength);
         GL_EXTCALL(glGetInfoLogARB(obj, infologLength, NULL, infoLog));
         FIXME("Error received from GLSL shader #%u: %s\n", obj, debugstr_a(infoLog));
         HeapFree(GetProcessHeap(), 0, infoLog);
@@ -85,7 +85,7 @@ static void shader_glsl_load_psamplers(
     int i;
     char sampler_name[20];
 
-    for (i=0; i< GL_LIMITS(samplers); ++i) {
+    for (i=0; i< GL_LIMITS(fragment_samplers); ++i) {
         if (stateBlock->textures[i] != NULL) {
             snprintf(sampler_name, sizeof(sampler_name), "Psampler%d", i);
             name_loc = GL_EXTCALL(glGetUniformLocationARB(programId, sampler_name));
@@ -94,6 +94,29 @@ static void shader_glsl_load_psamplers(
                 TRACE("Loading %s for texture %d\n", sampler_name, mapped_unit);
                 GL_EXTCALL(glUniform1iARB(name_loc, mapped_unit));
                 checkGLcall("glUniform1iARB");
+            }
+        }
+    }
+}
+
+static void shader_glsl_load_vsamplers(WineD3D_GL_Info *gl_info, IWineD3DStateBlock* iface) {
+    IWineD3DStateBlockImpl* stateBlock = (IWineD3DStateBlockImpl*) iface;
+    GLhandleARB programId = stateBlock->glsl_program->programId;
+    GLhandleARB name_loc;
+    char sampler_name[20];
+    int i;
+
+    for (i = 0; i < MAX_VERTEX_SAMPLERS; ++i) {
+        snprintf(sampler_name, sizeof(sampler_name), "Vsampler%d", i);
+        name_loc = GL_EXTCALL(glGetUniformLocationARB(programId, sampler_name));
+        if (name_loc != -1) {
+            int mapped_unit = stateBlock->wineD3DDevice->texUnitMap[MAX_FRAGMENT_SAMPLERS + i];
+            if (mapped_unit != -1 && mapped_unit < GL_LIMITS(combined_samplers)) {
+                TRACE("Loading %s for texture %d\n", sampler_name, mapped_unit);
+                GL_EXTCALL(glUniform1iARB(name_loc, mapped_unit));
+                checkGLcall("glUniform1iARB");
+            } else {
+                ERR("Trying to load sampler %s on unsupported unit %d\n", sampler_name, mapped_unit);
             }
         }
     }
@@ -307,6 +330,9 @@ void shader_glsl_load_constants(
 
         constant_locations = stateBlock->glsl_program->vuniformF_locations;
         constant_list = &stateBlock->set_vconstantsF;
+
+        /* Load vertex shader samplers */
+        shader_glsl_load_vsamplers(gl_info, (IWineD3DStateBlock*)stateBlock);
 
         /* Load DirectX 9 float constants/uniforms for vertex shader */
         shader_glsl_load_constantsF(vshader, gl_info, GL_LIMITS(vshader_constantsF),
@@ -1563,6 +1589,36 @@ void pshader_glsl_tex(SHADER_OPCODE_ARG* arg) {
     }
 }
 
+void shader_glsl_texldl(SHADER_OPCODE_ARG* arg) {
+    IWineD3DBaseShaderImpl* This = (IWineD3DBaseShaderImpl*)arg->shader;
+    glsl_sample_function_t sample_function;
+    glsl_src_param_t coord_param, lod_param;
+    char dst_swizzle[6];
+    DWORD sampler_type;
+    DWORD sampler_idx;
+
+    shader_glsl_append_dst(arg->buffer, arg);
+    shader_glsl_get_swizzle(arg->src[1], FALSE, arg->dst, dst_swizzle);
+
+    sampler_idx = arg->src[1] & WINED3DSP_REGNUM_MASK;
+    sampler_type = arg->reg_maps->samplers[sampler_idx] & WINED3DSP_TEXTURETYPE_MASK;
+    shader_glsl_get_sample_function(sampler_type, FALSE, &sample_function);
+    shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], sample_function.coord_mask, &coord_param);
+
+    shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], WINED3DSP_WRITEMASK_3, &lod_param);
+
+    if (shader_is_pshader_version(This->baseShader.hex_version)) {
+        /* The GLSL spec claims the Lod sampling functions are only supported in vertex shaders.
+         * However, they seem to work just fine in fragment shaders as well. */
+        WARN("Using %sLod in fragment shader.\n", sample_function.name);
+        shader_addline(arg->buffer, "%sLod(Psampler%u, %s, %s)%s);\n",
+                sample_function.name, sampler_idx, coord_param.param_str, lod_param.param_str, dst_swizzle);
+    } else {
+        shader_addline(arg->buffer, "%sLod(Vsampler%u, %s, %s)%s);\n",
+                sample_function.name, sampler_idx, coord_param.param_str, lod_param.param_str, dst_swizzle);
+    }
+}
+
 void pshader_glsl_texcoord(SHADER_OPCODE_ARG* arg) {
 
     /* FIXME: Make this work for more than just 2D textures */
@@ -1625,7 +1681,7 @@ void pshader_glsl_texdp3tex(SHADER_OPCODE_ARG* arg) {
 
     shader_glsl_append_dst(arg->buffer, arg);
     shader_glsl_get_write_mask(arg->dst, dst_mask);
-    shader_addline(arg->buffer, "texture1D(Psampler%u, dot(gl_TexCoord[%u].xyz, %s))%s);\n",
+    shader_addline(arg->buffer, "texture2D(Psampler%u, vec2(dot(gl_TexCoord[%u].xyz, %s), 0.5))%s);\n",
             sampler_idx, sampler_idx, src0_param.param_str, dst_mask);
 }
 

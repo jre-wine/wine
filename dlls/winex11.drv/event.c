@@ -405,6 +405,27 @@ static void handle_wm_protocols( HWND hwnd, XClientMessageEvent *event )
                 if (state == 0xFFFFFFFF || (state & (MF_DISABLED | MF_GRAYED)))
                     return;
             }
+            if (GetActiveWindow() != hwnd)
+            {
+                LRESULT ma = SendMessageW( hwnd, WM_MOUSEACTIVATE,
+                                           (WPARAM)GetAncestor( hwnd, GA_ROOT ),
+                                           MAKELONG(HTCLOSE,WM_LBUTTONDOWN) );
+                switch(ma)
+                {
+                    case MA_NOACTIVATEANDEAT:
+                    case MA_ACTIVATEANDEAT:
+                        return;
+                    case MA_NOACTIVATE:
+                        break;
+                    case MA_ACTIVATE:
+                    case 0:
+                        SetActiveWindow(hwnd);
+                        break;
+                    default:
+                        WARN( "unknown WM_MOUSEACTIVATE code %d\n", (int) ma );
+                        break;
+                }
+            }
             PostMessageW( hwnd, WM_X11DRV_DELETE_WINDOW, 0, 0 );
         }
     }
@@ -424,17 +445,18 @@ static void handle_wm_protocols( HWND hwnd, XClientMessageEvent *event )
             LRESULT ma = SendMessageW( hwnd, WM_MOUSEACTIVATE,
                                        (WPARAM)GetAncestor( hwnd, GA_ROOT ),
                                        MAKELONG(HTCAPTION,WM_LBUTTONDOWN) );
-            if (ma != MA_NOACTIVATEANDEAT && ma != MA_NOACTIVATE) set_focus( hwnd, event_time );
-            else TRACE( "not setting focus to %p (%lx), ma=%ld\n", hwnd, event->window, ma );
+            if (ma != MA_NOACTIVATEANDEAT && ma != MA_NOACTIVATE)
+            {
+                set_focus( hwnd, event_time );
+                return;
+            }
         }
-        else
-        {
-            hwnd = GetFocus();
-            if (hwnd) hwnd = GetAncestor( hwnd, GA_ROOT );
-            if (!hwnd) hwnd = GetActiveWindow();
-            if (!hwnd) hwnd = last_focus;
-            if (hwnd && can_activate_window(hwnd)) set_focus( hwnd, event_time );
-        }
+        /* try to find some other window to give the focus to */
+        hwnd = GetFocus();
+        if (hwnd) hwnd = GetAncestor( hwnd, GA_ROOT );
+        if (!hwnd) hwnd = GetActiveWindow();
+        if (!hwnd) hwnd = last_focus;
+        if (hwnd && can_activate_window(hwnd)) set_focus( hwnd, event_time );
     }
     else if (protocol == x11drv_atom(_NET_WM_PING))
     {

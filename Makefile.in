@@ -227,6 +227,7 @@ ALL_MAKEFILES = \
 	dlls/dsound/Makefile \
 	dlls/dsound/tests/Makefile \
 	dlls/dswave/Makefile \
+	dlls/dwmapi/Makefile \
 	dlls/dxdiagn/Makefile \
 	dlls/dxerr8/Makefile \
 	dlls/dxerr9/Makefile \
@@ -242,6 +243,7 @@ ALL_MAKEFILES = \
 	dlls/hid/Makefile \
 	dlls/hlink/Makefile \
 	dlls/hlink/tests/Makefile \
+	dlls/hnetcfg/Makefile \
 	dlls/iccvid/Makefile \
 	dlls/icmp/Makefile \
 	dlls/ifsmgr.vxd/Makefile \
@@ -313,6 +315,8 @@ ALL_MAKEFILES = \
 	dlls/ntdll/tests/Makefile \
 	dlls/ntdsapi/Makefile \
 	dlls/ntoskrnl.exe/Makefile \
+	dlls/ntprint/Makefile \
+	dlls/ntprint/tests/Makefile \
 	dlls/objsel/Makefile \
 	dlls/odbc32/Makefile \
 	dlls/odbccp32/Makefile \
@@ -329,6 +333,7 @@ ALL_MAKEFILES = \
 	dlls/opengl32/Makefile \
 	dlls/pdh/Makefile \
 	dlls/powrprof/Makefile \
+	dlls/printui/Makefile \
 	dlls/psapi/Makefile \
 	dlls/psapi/tests/Makefile \
 	dlls/pstorec/Makefile \
@@ -580,6 +585,7 @@ dlls/dpnhpast/Makefile: dlls/dpnhpast/Makefile.in dlls/Makedll.rules
 dlls/dsound/Makefile: dlls/dsound/Makefile.in dlls/Makedll.rules
 dlls/dsound/tests/Makefile: dlls/dsound/tests/Makefile.in dlls/Maketest.rules
 dlls/dswave/Makefile: dlls/dswave/Makefile.in dlls/Makedll.rules
+dlls/dwmapi/Makefile: dlls/dwmapi/Makefile.in dlls/Makedll.rules
 dlls/dxdiagn/Makefile: dlls/dxdiagn/Makefile.in dlls/Makedll.rules
 dlls/dxerr8/Makefile: dlls/dxerr8/Makefile.in dlls/Makeimplib.rules
 dlls/dxerr9/Makefile: dlls/dxerr9/Makefile.in dlls/Makeimplib.rules
@@ -595,6 +601,7 @@ dlls/hhctrl.ocx/Makefile: dlls/hhctrl.ocx/Makefile.in dlls/Makedll.rules
 dlls/hid/Makefile: dlls/hid/Makefile.in dlls/Makedll.rules
 dlls/hlink/Makefile: dlls/hlink/Makefile.in dlls/Makedll.rules
 dlls/hlink/tests/Makefile: dlls/hlink/tests/Makefile.in dlls/Maketest.rules
+dlls/hnetcfg/Makefile: dlls/hnetcfg/Makefile.in dlls/Makedll.rules
 dlls/iccvid/Makefile: dlls/iccvid/Makefile.in dlls/Makedll.rules
 dlls/icmp/Makefile: dlls/icmp/Makefile.in dlls/Makedll.rules
 dlls/ifsmgr.vxd/Makefile: dlls/ifsmgr.vxd/Makefile.in dlls/Makedll.rules
@@ -666,6 +673,8 @@ dlls/ntdll/Makefile: dlls/ntdll/Makefile.in dlls/Makedll.rules
 dlls/ntdll/tests/Makefile: dlls/ntdll/tests/Makefile.in dlls/Maketest.rules
 dlls/ntdsapi/Makefile: dlls/ntdsapi/Makefile.in dlls/Makedll.rules
 dlls/ntoskrnl.exe/Makefile: dlls/ntoskrnl.exe/Makefile.in dlls/Makedll.rules
+dlls/ntprint/Makefile: dlls/ntprint/Makefile.in dlls/Makedll.rules
+dlls/ntprint/tests/Makefile: dlls/ntprint/tests/Makefile.in dlls/Maketest.rules
 dlls/objsel/Makefile: dlls/objsel/Makefile.in dlls/Makedll.rules
 dlls/odbc32/Makefile: dlls/odbc32/Makefile.in dlls/Makedll.rules
 dlls/odbccp32/Makefile: dlls/odbccp32/Makefile.in dlls/Makedll.rules
@@ -682,6 +691,7 @@ dlls/olesvr32/Makefile: dlls/olesvr32/Makefile.in dlls/Makedll.rules
 dlls/opengl32/Makefile: dlls/opengl32/Makefile.in dlls/Makedll.rules
 dlls/pdh/Makefile: dlls/pdh/Makefile.in dlls/Makedll.rules
 dlls/powrprof/Makefile: dlls/powrprof/Makefile.in dlls/Makedll.rules
+dlls/printui/Makefile: dlls/printui/Makefile.in dlls/Makedll.rules
 dlls/psapi/Makefile: dlls/psapi/Makefile.in dlls/Makedll.rules
 dlls/psapi/tests/Makefile: dlls/psapi/tests/Makefile.in dlls/Maketest.rules
 dlls/pstorec/Makefile: dlls/pstorec/Makefile.in dlls/Makedll.rules

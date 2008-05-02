@@ -2101,6 +2101,17 @@ static MENUITEM *MENU_InsertItem( HMENU hMenu, UINT pos, UINT flags )
         }
     }
 
+    /* Make sure that MDI system buttons stay on the right side.
+     * Note: XP treats only bitmap handles 1 - 6 as "magic" ones
+     * regardless of their id.
+     */
+    while (pos > 0 && (menu->items[pos - 1].fType & MFT_BITMAP) &&
+           (INT_PTR)menu->items[pos - 1].hbmpItem >= (INT_PTR)HBMMENU_SYSTEM &&
+           (INT_PTR)menu->items[pos - 1].hbmpItem <= (INT_PTR)HBMMENU_MBAR_CLOSE_D)
+        pos--;
+
+    TRACE("inserting at %u by pos %u\n", pos, flags & MF_BYPOSITION);
+
     /* Create new items array */
 
     newItems = HeapAlloc( GetProcessHeap(), 0, sizeof(MENUITEM) * (menu->nItems+1) );
@@ -4639,6 +4650,9 @@ BOOL WINAPI SetMenuItemInfoA(HMENU hmenu, UINT item, BOOL bypos,
                                  const MENUITEMINFOA *lpmii)
 {
     MENUITEMINFOA mii;
+
+    TRACE("hmenu %p, item %u, by pos %d, info %p\n", hmenu, item, bypos, lpmii);
+
     if( lpmii->cbSize != sizeof( mii) &&
             lpmii->cbSize != sizeof( mii) - sizeof ( mii.hbmpItem)) {
         SetLastError( ERROR_INVALID_PARAMETER);
@@ -4660,6 +4674,9 @@ BOOL WINAPI SetMenuItemInfoW(HMENU hmenu, UINT item, BOOL bypos,
                                  const MENUITEMINFOW *lpmii)
 {
     MENUITEMINFOW mii;
+
+    TRACE("hmenu %p, item %u, by pos %d, info %p\n", hmenu, item, bypos, lpmii);
+
     if( lpmii->cbSize != sizeof( mii) &&
             lpmii->cbSize != sizeof( mii) - sizeof ( mii.hbmpItem)) {
         SetLastError( ERROR_INVALID_PARAMETER);
@@ -4771,8 +4788,11 @@ UINT WINAPI GetMenuDefaultItem(HMENU hmenu, UINT bypos, UINT flags)
 BOOL WINAPI InsertMenuItemA(HMENU hMenu, UINT uItem, BOOL bypos,
                                 const MENUITEMINFOA *lpmii)
 {
-    MENUITEM *item = MENU_InsertItem(hMenu, uItem, bypos ? MF_BYPOSITION : 0 );
+    MENUITEM *item;
     MENUITEMINFOA mii;
+
+    TRACE("hmenu %p, item %04x, by pos %d, info %p\n", hMenu, uItem, bypos, lpmii);
+
     if( lpmii->cbSize != sizeof( mii) &&
             lpmii->cbSize != sizeof( mii) - sizeof ( mii.hbmpItem)) {
         SetLastError( ERROR_INVALID_PARAMETER);
@@ -4783,6 +4803,8 @@ BOOL WINAPI InsertMenuItemA(HMENU hMenu, UINT uItem, BOOL bypos,
         mii.cbSize = sizeof( mii);
         mii.hbmpItem = NULL;
     }
+
+    item = MENU_InsertItem(hMenu, uItem, bypos ? MF_BYPOSITION : 0 );
     return SetMenuItemInfo_common(item, (const MENUITEMINFOW *)&mii, FALSE);
 }
 
@@ -4793,8 +4815,11 @@ BOOL WINAPI InsertMenuItemA(HMENU hMenu, UINT uItem, BOOL bypos,
 BOOL WINAPI InsertMenuItemW(HMENU hMenu, UINT uItem, BOOL bypos,
                                 const MENUITEMINFOW *lpmii)
 {
-    MENUITEM *item = MENU_InsertItem(hMenu, uItem, bypos ? MF_BYPOSITION : 0 );
+    MENUITEM *item;
     MENUITEMINFOW mii;
+
+    TRACE("hmenu %p, item %04x, by pos %d, info %p\n", hMenu, uItem, bypos, lpmii);
+
     if( lpmii->cbSize != sizeof( mii) &&
             lpmii->cbSize != sizeof( mii) - sizeof ( mii.hbmpItem)) {
         SetLastError( ERROR_INVALID_PARAMETER);
@@ -4805,6 +4830,8 @@ BOOL WINAPI InsertMenuItemW(HMENU hMenu, UINT uItem, BOOL bypos,
         mii.cbSize = sizeof( mii);
         mii.hbmpItem = NULL;
     }
+
+    item = MENU_InsertItem(hMenu, uItem, bypos ? MF_BYPOSITION : 0 );
     return SetMenuItemInfo_common(item, &mii, TRUE);
 }
 

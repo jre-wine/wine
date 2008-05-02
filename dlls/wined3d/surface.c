@@ -1871,7 +1871,7 @@ static BOOL palette9_changed(IWineD3DSurfaceImpl *This) {
             return FALSE;
         }
     } else {
-        This->palette9 = (PALETTEENTRY *) HeapAlloc(GetProcessHeap(), 0, sizeof(PALETTEENTRY) * 256);
+        This->palette9 = HeapAlloc(GetProcessHeap(), 0, sizeof(PALETTEENTRY) * 256);
     }
     memcpy(This->palette9, &device->palettes[device->currentPalette], sizeof(PALETTEENTRY) * 256);
     return TRUE;
@@ -3175,9 +3175,11 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_Blt(IWineD3DSurface *iface, RECT *Dest
     TRACE("(%p)->(%p,%p,%p,%x,%p)\n", This, DestRect, SrcSurface, SrcRect, Flags, DDBltFx);
     TRACE("(%p): Usage is %s\n", This, debug_d3dusage(This->resource.usage));
 
-    /* Accessing the depth stencil is supposed to fail between a BeginScene and EndScene pair */
+    /* Accessing the depth stencil is supposed to fail between a BeginScene and EndScene pair,
+     * except depth blits, which seem to work
+     */
     if(iface == myDevice->stencilBufferTarget || (SrcSurface && SrcSurface == myDevice->stencilBufferTarget)) {
-        if(myDevice->inScene) {
+        if(myDevice->inScene && !(Flags & WINEDDBLT_DEPTHFILL)) {
             TRACE("Attempt to access the depth stencil surface in a BeginScene / EndScene pair, returning WINED3DERR_INVALIDCALL\n");
             return WINED3DERR_INVALIDCALL;
         } else if(IWineD3DSurfaceImpl_BltZ(This, DestRect, SrcSurface, SrcRect, Flags, DDBltFx) == WINED3D_OK) {

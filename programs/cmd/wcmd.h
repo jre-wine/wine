@@ -28,6 +28,15 @@
 #include <ctype.h>
 #include <wine/unicode.h>
 
+/*	Data structure to hold commands to be processed */
+
+typedef struct _CMD_LIST {
+  WCHAR              *command;     /* Command string to execute                */
+  struct _CMD_LIST   *nextcommand; /* Next command string to execute           */
+  BOOL                isAmphersand;/* Whether follows &&                       */
+  int                 bracketDepth;/* How deep bracketing have we got to       */
+} CMD_LIST;
+
 void WCMD_assoc (WCHAR *, BOOL);
 void WCMD_batch (WCHAR *, WCHAR *, int, WCHAR *, HANDLE);
 void WCMD_call (WCHAR *command);
@@ -41,11 +50,11 @@ void WCMD_directory (WCHAR *);
 void WCMD_echo (const WCHAR *);
 void WCMD_endlocal (void);
 void WCMD_enter_paged_mode(const WCHAR *);
-void WCMD_exit (void);
-void WCMD_for (WCHAR *);
+void WCMD_exit (CMD_LIST **cmdList);
+void WCMD_for (WCHAR *, CMD_LIST **cmdList);
 void WCMD_give_help (WCHAR *command);
-void WCMD_goto (void);
-void WCMD_if (WCHAR *);
+void WCMD_goto (CMD_LIST **cmdList);
+void WCMD_if (WCHAR *, CMD_LIST **cmdList);
 void WCMD_leave_paged_mode(void);
 void WCMD_more (WCHAR *);
 void WCMD_move (void);
@@ -53,10 +62,10 @@ void WCMD_output (const WCHAR *format, ...);
 void WCMD_output_asis (const WCHAR *message);
 void WCMD_parse (WCHAR *s, WCHAR *q, WCHAR *p1, WCHAR *p2);
 void WCMD_pause (void);
-void WCMD_pipe (WCHAR *command);
+void WCMD_pipe (CMD_LIST **command, WCHAR *var, WCHAR *val);
 void WCMD_popd (void);
 void WCMD_print_error (void);
-void WCMD_process_command (WCHAR *command);
+void WCMD_process_command (WCHAR *command, CMD_LIST **cmdList);
 void WCMD_pushd (WCHAR *);
 int  WCMD_read_console (WCHAR *string, int str_len);
 void WCMD_remove_dir (WCHAR *command);
@@ -92,6 +101,11 @@ WCHAR *WCMD_strdupW(WCHAR *input);
 BOOL WCMD_ReadFile(const HANDLE hIn, WCHAR *intoBuf, const DWORD maxChars,
                    LPDWORD charsRead, const LPOVERLAPPED unused);
 
+WCHAR    *WCMD_ReadAndParseLine(WCHAR *initialcmd, CMD_LIST **output, HANDLE readFrom);
+CMD_LIST *WCMD_process_commands(CMD_LIST *thisCmd, BOOL oneBracket, WCHAR *var, WCHAR *val);
+void      WCMD_free_commands(CMD_LIST *cmds);
+void      WCMD_execute (WCHAR *orig_command, WCHAR *parameter, WCHAR *substitution, CMD_LIST **cmdList);
+
 /*	Data structure to hold context when executing batch files */
 
 typedef struct {
@@ -100,6 +114,7 @@ typedef struct {
   int shift_count[10];	/* Offset in terms of shifts for %0 - %9 */
   void *prev_context;	/* Pointer to the previous context block */
   BOOL  skip_rest;      /* Skip the rest of the batch program and exit */
+  CMD_LIST *toExecute;  /* Commands left to be executed */
 } BATCH_CONTEXT;
 
 /* Data structure to save setlocal and pushd information */
@@ -223,7 +238,7 @@ extern WCHAR version_string[];
 #define WCMD_ANYKEY           1031
 #define WCMD_CONSTITLE        1032
 #define WCMD_VERSION          1033
-
+#define WCMD_MOREPROMPT       1034
 
 /* msdn specified max for Win XP */
 #define MAXSTRING 8192

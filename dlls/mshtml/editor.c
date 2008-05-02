@@ -43,6 +43,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 #define NSCMD_CHARPREVIOUS "cmd_charPrevious"
 #define NSCMD_COPY         "cmd_copy"
 #define NSCMD_CUT          "cmd_cut"
+#define NSCMD_DELETECHARFORWARD   "cmd_deleteCharForward"
+#define NSCMD_DELETEWORDFORWARD   "cmd_deleteWordForward"
 #define NSCMD_FONTCOLOR    "cmd_fontColor"
 #define NSCMD_FONTFACE     "cmd_fontFace"
 #define NSCMD_INDENT       "cmd_indent"
@@ -75,10 +77,11 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 #define NSALIGN_LEFT   "left"
 #define NSALIGN_RIGHT  "right"
 
-#define DOM_VK_LEFT  VK_LEFT
-#define DOM_VK_UP    VK_UP
-#define DOM_VK_RIGHT VK_RIGHT
-#define DOM_VK_DOWN  VK_DOWN
+#define DOM_VK_LEFT     VK_LEFT
+#define DOM_VK_UP       VK_UP
+#define DOM_VK_RIGHT    VK_RIGHT
+#define DOM_VK_DOWN     VK_DOWN
+#define DOM_VK_DELETE   VK_DELETE
 
 static const WCHAR wszFont[] = {'f','o','n','t',0};
 static const WCHAR wszSize[] = {'s','i','z','e',0};
@@ -487,7 +490,8 @@ static void handle_arrow_key(HTMLDocument *This, nsIDOMKeyEvent *event, const ch
     if(b)
         i |= 2;
 
-    do_ns_editor_command(This->nscontainer, cmds[i]);
+    if(cmds[i])
+        do_ns_editor_command(This->nscontainer, cmds[i]);
 
     nsIDOMKeyEvent_PreventDefault(event);
 }
@@ -550,7 +554,18 @@ void handle_edit_event(HTMLDocument *This, nsIDOMEvent *event)
         handle_arrow_key(This, key_event, cmds);
         break;
     }
-    };
+    case DOM_VK_DELETE: {
+        static const char *cmds[] = {
+            NSCMD_DELETECHARFORWARD,
+            NSCMD_DELETEWORDFORWARD,
+            NULL, NULL
+        };
+
+        TRACE("delete\n");
+        handle_arrow_key(This, key_event, cmds);
+        break;
+    }
+    }
 
     nsIDOMKeyEvent_Release(key_event);
 }
@@ -562,6 +577,17 @@ static void set_ns_fontname(NSContainer *This, const char *fontname)
     nsICommandParams_SetCStringValue(nsparam, NSSTATE_ATTRIBUTE, fontname);
     do_ns_command(This, NSCMD_FONTFACE, nsparam);
     nsICommandParams_Release(nsparam);
+}
+
+static HRESULT exec_delete(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)->(%p %p)\n", This, in, out);
+
+    if(This->nscontainer)
+        do_ns_editor_command(This->nscontainer, NSCMD_DELETECHARFORWARD);
+
+    update_doc(This, UPDATE_UI);
+    return S_OK;
 }
 
 static HRESULT exec_fontname(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
@@ -662,18 +688,9 @@ static HRESULT exec_fontsize(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, 
     if(out) {
         WCHAR val[10] = {0};
 
-        switch(V_VT(out)) {
-        case VT_I4:
-            get_font_size(This, val);
-            V_I4(out) = strtolW(val, NULL, 10);
-            break;
-        case VT_BSTR:
-            get_font_size(This, val);
-            V_BSTR(out) = SysAllocString(val);
-            break;
-        default:
-            FIXME("unsupported vt %d\n", V_VT(out));
-        }
+        get_font_size(This, val);
+        V_VT(out) = VT_I4;
+        V_I4(out) = strtolW(val, NULL, 10);
     }
 
     if(in) {
@@ -977,6 +994,10 @@ HRESULT editor_exec_paste(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VAR
 static HRESULT query_edit_status(HTMLDocument *This, OLECMD *cmd)
 {
     switch(cmd->cmdID) {
+    case IDM_DELETE:
+        TRACE("CGID_MSHTML: IDM_DELETE\n");
+        cmd->cmdf = query_ns_edit_status(This, NULL);
+        break;
     case IDM_FONTNAME:
         TRACE("CGID_MSHTML: IDM_FONTNAME\n");
         cmd->cmdf = query_ns_edit_status(This, NULL);
@@ -1027,6 +1048,7 @@ static HRESULT query_edit_status(HTMLDocument *This, OLECMD *cmd)
 }
 
 const cmdtable_t editmode_cmds[] = {
+    {IDM_DELETE,          query_edit_status,    exec_delete},
     {IDM_FONTNAME,        query_edit_status,    exec_fontname},
     {IDM_FONTSIZE,        query_edit_status,    exec_fontsize},
     {IDM_FORECOLOR,       query_edit_status,    exec_forecolor},

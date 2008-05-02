@@ -1,8 +1,8 @@
 1 stub PdhPlaGetLogFileNameA
 @ stub PdhAdd009CounterA
 @ stub PdhAdd009CounterW
-@ stub PdhAddCounterA
-@ stub PdhAddCounterW
+@ stdcall PdhAddCounterA(ptr str long ptr)
+@ stdcall PdhAddCounterW(ptr wstr long ptr)
 @ stub PdhBindInputDataSourceA
 @ stub PdhBindInputDataSourceW
 @ stub PdhBrowseCountersA
@@ -11,8 +11,8 @@
 @ stub PdhBrowseCountersW
 @ stub PdhCalculateCounterFromRawValue
 @ stub PdhCloseLog
-@ stub PdhCloseQuery
-@ stub PdhCollectQueryData
+@ stdcall PdhCloseQuery(ptr)
+@ stdcall PdhCollectQueryData(ptr)
 @ stub PdhCollectQueryDataEx
 @ stub PdhComputeCounterStatistics
 @ stub PdhConnectMachineA
@@ -81,9 +81,9 @@
 @ stub PdhOpenLogA
 @ stub PdhOpenLogW
 @ stub PdhOpenQuery
-@ stub PdhOpenQueryA
+@ stdcall PdhOpenQueryA(str long ptr)
 @ stub PdhOpenQueryH
-@ stub PdhOpenQueryW
+@ stdcall PdhOpenQueryW(wstr long ptr)
 @ stub PdhParseCounterPathA
 @ stub PdhParseCounterPathW
 @ stub PdhParseInstanceNameA
@@ -120,7 +120,7 @@
 @ stub PdhReadRawLogRecord
 @ stub PdhRelogA
 @ stub PdhRelogW
-@ stub PdhRemoveCounter
+@ stdcall PdhRemoveCounter(ptr)
 @ stub PdhSelectDataSourceA
 @ stub PdhSelectDataSourceW
 @ stub PdhSetCounterScaleFactor

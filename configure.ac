@@ -475,13 +475,17 @@ AC_SUBST(XML2LIBS,"")
 AC_SUBST(XML2INCL,"")
 AC_SUBST(XSLTLIBS,"")
 AC_SUBST(XSLTINCL,"")
+ac_save_CPPFLAGS="$CPPFLAGS"
 if test "$PKG_CONFIG" != "false"
 then
-    ac_save_CPPFLAGS="$CPPFLAGS"
     ac_xml_libs="`$PKG_CONFIG --libs libxml-2.0 2>/dev/null`"
     ac_xml_cflags="`$PKG_CONFIG --cflags libxml-2.0 2>/dev/null`"
-    CPPFLAGS="$CPPFLAGS $ac_xml_cflags"
-    AC_CHECK_HEADERS(libxml/parser.h,
+else
+    ac_xml_libs="`xml2-config --libs 2>/dev/null`"
+    ac_xml_cflags="`xml2-config --cflags  2>/dev/null`"
+fi
+CPPFLAGS="$CPPFLAGS $ac_xml_cflags"
+AC_CHECK_HEADERS(libxml/parser.h,
         [AC_CHECK_LIB(xml2, xmlParseMemory,
             [AC_DEFINE(HAVE_LIBXML2, 1, [Define if you have the libxml2 library])
              XML2LIBS="$ac_xml_libs"
@@ -490,12 +494,18 @@ then
             [AC_DEFINE(HAVE_XMLREADMEMORY,1,[Define if libxml2 has the xmlReadMemory function])],,$ac_xml_libs)
          AC_CHECK_LIB(xml2, xmlNewDocPI,
             [AC_DEFINE(HAVE_XMLNEWDOCPI,1,[Define if libxml2 has the xmlNewDocPI function])],,$ac_xml_libs)
-        ])
-    CPPFLAGS="$ac_save_CPPFLAGS"
+    ])
+CPPFLAGS="$ac_save_CPPFLAGS"
+if test "$PKG_CONFIG" != "false"
+then
     ac_xslt_libs="`$PKG_CONFIG --libs libxslt 2>/dev/null`"
     ac_xslt_cflags="`$PKG_CONFIG --cflags libxslt 2>/dev/null`"
-    CPPFLAGS="$CPPFLAGS $ac_xslt_cflags"
-    AC_CHECK_HEADERS([libxslt/pattern.h libxslt/transform.h],
+else
+    ac_xslt_libs="`xslt-config --libs 2>/dev/null`"
+    ac_xslt_cflags="`xslt-config --cflags 2>/dev/null`"
+fi
+CPPFLAGS="$CPPFLAGS $ac_xslt_cflags"
+AC_CHECK_HEADERS([libxslt/pattern.h libxslt/transform.h],
         [AC_CHECK_LIB(xslt, xsltCompilePattern,
             [AC_DEFINE(HAVE_LIBXSLT, 1, [Define if you have the libxslt library])
              XSLTLIBS="$ac_xslt_libs"
@@ -504,8 +514,7 @@ then
 [#ifdef HAVE_LIBXSLT_PATTERN_H
 # include <libxslt/pattern.h>
 #endif])
-    CPPFLAGS="$ac_save_CPPFLAGS"
-fi
+CPPFLAGS="$ac_save_CPPFLAGS"
 
 dnl **** Check for libhal ****
 AC_SUBST(HALINCL,"")
@@ -867,6 +876,18 @@ then
   fi
 fi
 
+AC_SUBST(EXECSTACK,"")
+saved_LDFLAGS="$LDFLAGS"
+LDFLAGS="$LDFLAGS -z execstack"
+AC_CACHE_CHECK([for -z execstack], ac_cv_z_execstack,
+   AC_TRY_LINK([],[int main(void) {return 0;}],
+               ac_cv_z_execstack=yes,ac_cv_z_execstack=no))
+if test $ac_cv_z_execstack
+then
+  EXECSTACK="-z execstack"
+fi
+LDFLAGS="$saved_LDFLAGS"
+
 dnl **** Check how to define a function in assembly code ****
 
 AC_CACHE_CHECK([how to define a function in assembly code], ac_cv_asm_func_def,
@@ -915,7 +936,8 @@ AC_SUBST(LDSHARED,"")
 AC_SUBST(LDDLLFLAGS,"")
 AC_SUBST(LIBEXT,"so")
 AC_SUBST(IMPLIBEXT,"def")
-AC_SUBST(LIBWINE_LDFLAGS,"")
+AC_SUBST(LDRPATH_INSTALL,"")
+AC_SUBST(LDRPATH_LOCAL,"")
 
 case $host_os in
   cygwin*|mingw32*)
@@ -941,6 +963,7 @@ case $host_os in
     LIBWINE_LDFLAGS="-multiply_defined suppress"
     LDSHARED="\$(CC) -dynamiclib"
     STRIP="$STRIP -u -r"
+    LDRPATH_LOCAL="&& install_name_tool -change @executable_path/\`\$(RELPATH) \$(bindir) \$(libdir)\`/libwine.1.dylib @executable_path/\$(TOPOBJDIR)/libs/wine/libwine.1.dylib \$@ || \$(RM) \$@"
     dnl declare needed frameworks
     AC_SUBST(COREFOUNDATIONLIB,"-framework CoreFoundation")
     AC_SUBST(IOKITLIB,"-framework IOKit -framework CoreFoundation")
@@ -996,9 +1019,11 @@ case $host_os in
                       [AC_SUBST(LDEXECFLAGS,["-Wl,--export-dynamic"])])
 
       WINE_TRY_CFLAGS([-fPIC -Wl,--rpath,\$ORIGIN/../lib],
-                      [LIBWINE_LDFLAGS="-Wl,--rpath,\\\$\$ORIGIN/\`\$(RELPATH) \$(bindir) \$(libdir)\`"],
+                      [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(RELPATH) \$(bindir) \$(libdir)\`"
+                       LDRPATH_LOCAL="-Wl,--rpath,\\\$\$ORIGIN/\$(TOPOBJDIR)/libs/wine"],
           [WINE_TRY_CFLAGS([-fPIC -Wl,-R,\$ORIGIN/../lib],
-                           [LIBWINE_LDFLAGS="-Wl,-R,\\\$\$ORIGIN/\`\$(RELPATH) \$(bindir) \$(libdir)\`"])])
+                           [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(RELPATH) \$(bindir) \$(libdir)\`"
+                            LDRPATH_LOCAL="-Wl,-R,\\\$\$ORIGIN/\$(TOPOBJDIR)/libs/wine"])])
 
       case $host_cpu in
         *i[[3456789]]86* | x86_64)
@@ -1510,6 +1535,7 @@ AC_CONFIG_FILES([dlls/dpnhpast/Makefile])
 AC_CONFIG_FILES([dlls/dsound/Makefile])
 AC_CONFIG_FILES([dlls/dsound/tests/Makefile])
 AC_CONFIG_FILES([dlls/dswave/Makefile])
+AC_CONFIG_FILES([dlls/dwmapi/Makefile])
 AC_CONFIG_FILES([dlls/dxdiagn/Makefile])
 AC_CONFIG_FILES([dlls/dxerr8/Makefile])
 AC_CONFIG_FILES([dlls/dxerr9/Makefile])
@@ -1525,6 +1551,7 @@ AC_CONFIG_FILES([dlls/hhctrl.ocx/Makefile])
 AC_CONFIG_FILES([dlls/hid/Makefile])
 AC_CONFIG_FILES([dlls/hlink/Makefile])
 AC_CONFIG_FILES([dlls/hlink/tests/Makefile])
+AC_CONFIG_FILES([dlls/hnetcfg/Makefile])
 AC_CONFIG_FILES([dlls/iccvid/Makefile])
 AC_CONFIG_FILES([dlls/icmp/Makefile])
 AC_CONFIG_FILES([dlls/ifsmgr.vxd/Makefile])
@@ -1596,6 +1623,8 @@ AC_CONFIG_FILES([dlls/ntdll/Makefile])
 AC_CONFIG_FILES([dlls/ntdll/tests/Makefile])
 AC_CONFIG_FILES([dlls/ntdsapi/Makefile])
 AC_CONFIG_FILES([dlls/ntoskrnl.exe/Makefile])
+AC_CONFIG_FILES([dlls/ntprint/Makefile])
+AC_CONFIG_FILES([dlls/ntprint/tests/Makefile])
 AC_CONFIG_FILES([dlls/objsel/Makefile])
 AC_CONFIG_FILES([dlls/odbc32/Makefile])
 AC_CONFIG_FILES([dlls/odbccp32/Makefile])
@@ -1612,6 +1641,7 @@ AC_CONFIG_FILES([dlls/olesvr32/Makefile])
 AC_CONFIG_FILES([dlls/opengl32/Makefile])
 AC_CONFIG_FILES([dlls/pdh/Makefile])
 AC_CONFIG_FILES([dlls/powrprof/Makefile])
+AC_CONFIG_FILES([dlls/printui/Makefile])
 AC_CONFIG_FILES([dlls/psapi/Makefile])
 AC_CONFIG_FILES([dlls/psapi/tests/Makefile])
 AC_CONFIG_FILES([dlls/pstorec/Makefile])

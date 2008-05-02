@@ -84,6 +84,7 @@ int echo_mode = 1, verify_mode = 0, defaultColor = 7;
 static int opt_c, opt_k, opt_s;
 const WCHAR newline[] = {'\n','\0'};
 static const WCHAR equalsW[] = {'=','\0'};
+static const WCHAR closeBW[] = {')','\0'};
 WCHAR anykey[100];
 WCHAR version_string[100];
 WCHAR quals[MAX_PATH], param1[MAX_PATH], param2[MAX_PATH];
@@ -107,13 +108,13 @@ int wmain (int argc, WCHAR *argvW[])
   WCHAR  *cmd   = NULL;
   WCHAR string[1024];
   WCHAR envvar[4];
-  DWORD count;
   HANDLE h;
   int opt_q;
   int opt_t = 0;
   static const WCHAR autoexec[] = {'\\','a','u','t','o','e','x','e','c','.',
                                    'b','a','t','\0'};
   char ansiVersion[100];
+  CMD_LIST *toExecute = NULL;         /* Commands left to be executed */
 
   /* Pre initialize some messages */
   strcpy(ansiVersion, PACKAGE_VERSION);
@@ -320,10 +321,13 @@ int wmain (int argc, WCHAR *argvW[])
        * the currently allocated input and output handles. This allows
        * us to pipe to and read from the command interpreter.
        */
-      if (strchrW(cmd,'|') != NULL)
-          WCMD_pipe(cmd);
-      else
-          WCMD_process_command(cmd);
+
+      /* Parse the command string, without reading any more input */
+      WCMD_ReadAndParseLine(cmd, &toExecute, INVALID_HANDLE_VALUE);
+      WCMD_process_commands(toExecute, FALSE, NULL, NULL);
+      WCMD_free_commands(toExecute);
+      toExecute = NULL;
+
       HeapFree(GetProcessHeap(), 0, cmd);
       return errorlevel;
   }
@@ -411,7 +415,11 @@ int wmain (int argc, WCHAR *argvW[])
   }
 
   if (opt_k) {
-      WCMD_process_command(cmd);
+      /* Parse the command string, without reading any more input */
+      WCMD_ReadAndParseLine(cmd, &toExecute, INVALID_HANDLE_VALUE);
+      WCMD_process_commands(toExecute, FALSE, NULL, NULL);
+      WCMD_free_commands(toExecute);
+      toExecute = NULL;
       HeapFree(GetProcessHeap(), 0, cmd);
   }
 
@@ -434,22 +442,18 @@ int wmain (int argc, WCHAR *argvW[])
 
   WCMD_version ();
   while (TRUE) {
+
+    /* Read until EOF (which for std input is never, but if redirect
+       in place, may occur                                          */
     WCMD_show_prompt ();
-    WCMD_ReadFile (GetStdHandle(STD_INPUT_HANDLE), string,
-                   sizeof(string)/sizeof(WCHAR), &count, NULL);
-    if (count > 1) {
-      string[count-1] = '\0'; /* ReadFile output is not null-terminated! */
-      if (string[count-2] == '\r') string[count-2] = '\0'; /* Under Windoze we get CRLF! */
-      if (strlenW (string) != 0) {
-        if (strchrW(string,'|') != NULL) {
-          WCMD_pipe (string);
-        }
-        else {
-          WCMD_process_command (string);
-        }
-      }
-    }
+    if (WCMD_ReadAndParseLine(NULL, &toExecute,
+                              GetStdHandle(STD_INPUT_HANDLE)) == NULL)
+      break;
+    WCMD_process_commands(toExecute, FALSE, NULL, NULL);
+    WCMD_free_commands(toExecute);
+    toExecute = NULL;
   }
+  return 0;
 }
 
 
@@ -459,7 +463,7 @@ int wmain (int argc, WCHAR *argvW[])
  */
 
 
-void WCMD_process_command (WCHAR *command)
+void WCMD_process_command (WCHAR *command, CMD_LIST **cmdList)
 {
     WCHAR *cmd, *p, *s, *t, *redir;
     int status, i;
@@ -493,8 +497,12 @@ void WCMD_process_command (WCHAR *command)
     while ((p = strchrW(p, '%'))) {
       i = *(p+1) - '0';
 
+      /* Dont touch %% */
+      if (*(p+1) == '%') {
+        p+=2;
+
       /* Replace %~ modifications if in batch program */
-      if (context && *(p+1) == '~') {
+      } else if (context && *(p+1) == '~') {
         WCMD_HandleTildaModifiers(&p, NULL);
         p++;
 
@@ -527,13 +535,17 @@ void WCMD_process_command (WCHAR *command)
     if (context) {
       p = cmd;
       while ((p = strchrW(p, '%'))) {
-        s = strchrW(p+1, '%');
-        if (!s) {
-          *p=0x00;
+        if (*(p+1) == '%') {
+          p+=2;
         } else {
-          t = WCMD_strdupW(s+1);
-          strcpyW(p, t);
-          free(t);
+          s = strchrW(p+1, '%');
+          if (!s) {
+            *p=0x00;
+          } else {
+            t = WCMD_strdupW(s+1);
+            strcpyW(p, t);
+            free(t);
+          }
         }
       }
 
@@ -705,16 +717,16 @@ void WCMD_process_command (WCHAR *command)
         WCMD_echo(&whichcmd[count]);
         break;
       case WCMD_FOR:
-        WCMD_for (p);
+        WCMD_for (p, cmdList);
         break;
       case WCMD_GOTO:
-        WCMD_goto ();
+        WCMD_goto (cmdList);
         break;
       case WCMD_HELP:
         WCMD_give_help (p);
 	break;
       case WCMD_IF:
-	WCMD_if (p);
+	WCMD_if (p, cmdList);
         break;
       case WCMD_LABEL:
         WCMD_volume (1, p);
@@ -795,7 +807,7 @@ void WCMD_process_command (WCHAR *command)
         WCMD_more(p);
         break;
       case WCMD_EXIT:
-        WCMD_exit ();
+        WCMD_exit (cmdList);
         break;
       default:
         WCMD_run_program (whichcmd, 0);
@@ -1483,9 +1495,10 @@ void WCMD_opt_s_strip_quotes(WCHAR *cmd) {
  *	Handle pipes within a command - the DOS way using temporary files.
  */
 
-void WCMD_pipe (WCHAR *command) {
+void WCMD_pipe (CMD_LIST **cmdEntry, WCHAR *var, WCHAR *val) {
 
   WCHAR *p;
+  WCHAR *command = (*cmdEntry)->command;
   WCHAR temp_path[MAX_PATH], temp_file[MAX_PATH], temp_file2[MAX_PATH], temp_cmd[1024];
   static const WCHAR redirOut[] = {'%','s',' ','>',' ','%','s','\0'};
   static const WCHAR redirIn[]  = {'%','s',' ','<',' ','%','s','\0'};
@@ -1498,19 +1511,19 @@ void WCMD_pipe (WCHAR *command) {
   p = strchrW(command, '|');
   *p++ = '\0';
   wsprintf (temp_cmd, redirOut, command, temp_file);
-  WCMD_process_command (temp_cmd);
+  WCMD_execute (temp_cmd, var, val, cmdEntry);
   command = p;
   while ((p = strchrW(command, '|'))) {
     *p++ = '\0';
     GetTempFileName (temp_path, cmdW, 0, temp_file2);
     wsprintf (temp_cmd, redirBoth, command, temp_file, temp_file2);
-    WCMD_process_command (temp_cmd);
+    WCMD_execute (temp_cmd, var, val, cmdEntry);
     DeleteFile (temp_file);
     strcpyW (temp_file, temp_file2);
     command = p;
   }
   wsprintf (temp_cmd, redirIn, command, temp_file);
-  WCMD_process_command (temp_cmd);
+  WCMD_execute (temp_cmd, var, val, cmdEntry);
   DeleteFile (temp_file);
 }
 
@@ -1851,4 +1864,449 @@ BOOL WCMD_ReadFile(const HANDLE hIn, WCHAR *intoBuf, const DWORD maxChars,
 
     }
     return res;
+}
+
+/***************************************************************************
+ * WCMD_DumpCommands
+ *
+ *	Domps out the parsed command line to ensure syntax is correct
+ */
+void WCMD_DumpCommands(CMD_LIST *commands) {
+    WCHAR buffer[MAXSTRING];
+    CMD_LIST *thisCmd = commands;
+    const WCHAR fmt[] = {'%','p',' ','%','c',' ','%','2','.','2','d',' ',
+                         '%','p',' ','%','s','\0'};
+
+    WINE_TRACE("Parsed line:\n");
+    while (thisCmd != NULL) {
+      sprintfW(buffer, fmt,
+               thisCmd,
+               thisCmd->isAmphersand?'Y':'N',
+               thisCmd->bracketDepth,
+               thisCmd->nextcommand,
+               thisCmd->command);
+      WINE_TRACE("%s\n", wine_dbgstr_w(buffer));
+      thisCmd = thisCmd->nextcommand;
+    }
+}
+
+/***************************************************************************
+ * WCMD_ReadAndParseLine
+ *
+ *   Either uses supplied input or
+ *     Reads a file from the handle, and then...
+ *   Parse the text buffer, spliting into seperate commands
+ *     - unquoted && strings split 2 commands but the 2nd is flagged as
+ *            following an &&
+ *     - ( as the first character just ups the bracket depth
+ *     - unquoted ) when bracket depth > 0 terminates a bracket and
+ *            adds a CMD_LIST structure with null command
+ *     - Anything else gets put into the command string (including
+ *            redirects)
+ */
+WCHAR *WCMD_ReadAndParseLine(WCHAR *optionalcmd, CMD_LIST **output, HANDLE readFrom) {
+
+    WCHAR    *curPos;
+    BOOL      inQuotes = FALSE;
+    WCHAR     curString[MAXSTRING];
+    int       curLen   = 0;
+    int       curDepth = 0;
+    CMD_LIST *thisEntry = NULL;
+    CMD_LIST *lastEntry = NULL;
+    BOOL      isAmphersand = FALSE;
+    static WCHAR    *extraSpace = NULL;  /* Deliberately never freed */
+    const WCHAR remCmd[] = {'r','e','m',' ','\0'};
+    const WCHAR forCmd[] = {'f','o','r',' ','\0'};
+    const WCHAR ifCmd[]  = {'i','f',' ','\0'};
+    const WCHAR ifElse[] = {'e','l','s','e',' ','\0'};
+    BOOL      inRem = FALSE;
+    BOOL      inFor = FALSE;
+    BOOL      inIn  = FALSE;
+    BOOL      inIf  = FALSE;
+    BOOL      inElse= FALSE;
+    BOOL      onlyWhiteSpace = FALSE;
+    BOOL      lastWasWhiteSpace = FALSE;
+    BOOL      lastWasDo   = FALSE;
+    BOOL      lastWasIn   = FALSE;
+    BOOL      lastWasElse = FALSE;
+
+    /* Allocate working space for a command read from keyboard, file etc */
+    if (!extraSpace)
+      extraSpace = HeapAlloc(GetProcessHeap(), 0, (MAXSTRING+1) * sizeof(WCHAR));
+
+    /* If initial command read in, use that, otherwise get input from handle */
+    if (optionalcmd != NULL) {
+        strcpyW(extraSpace, optionalcmd);
+    } else if (readFrom == INVALID_HANDLE_VALUE) {
+        WINE_FIXME("No command nor handle supplied\n");
+    } else {
+        if (WCMD_fgets(extraSpace, MAXSTRING, readFrom) == NULL) return NULL;
+    }
+    curPos = extraSpace;
+
+    /* Handle truncated input - issue warning */
+    if (strlenW(extraSpace) == MAXSTRING -1) {
+        WCMD_output_asis(WCMD_LoadMessage(WCMD_TRUNCATEDLINE));
+        WCMD_output_asis(extraSpace);
+        WCMD_output_asis(newline);
+    }
+
+    /* Start with an empty string */
+    curLen = 0;
+
+    /* Parse every character on the line being processed */
+    while (*curPos != 0x00) {
+
+      WCHAR thisChar;
+
+      /* Debugging AID:
+      WINE_TRACE("Looking at '%c' (len:%d, lws:%d, ows:%d)\n", *curPos, curLen,
+                 lastWasWhiteSpace, onlyWhiteSpace);
+      */
+
+     /* Certain commands need special handling */
+      if (curLen == 0) {
+        const WCHAR forDO[]  = {'d','o',' ','\0'};
+
+        /* If command starts with 'rem', ignore any &&, ( etc */
+        if (CompareString (LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT,
+          curPos, 4, remCmd, -1) == 2) {
+          inRem = TRUE;
+
+        /* If command starts with 'for', handle ('s mid line after IN or DO */
+        } else if (CompareString (LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT,
+          curPos, 4, forCmd, -1) == 2) {
+          inFor = TRUE;
+
+        /* If command starts with 'if' or 'else', handle ('s mid line. We should ensure this
+           is only true in the command portion of the IF statement, but this
+           should suffice for now
+            FIXME: Silly syntax like "if 1(==1( (
+                                        echo they equal
+                                      )" will be parsed wrong */
+        } else if (CompareString (LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT,
+          curPos, 3, ifCmd, -1) == 2) {
+          inIf = TRUE;
+
+        } else if (CompareString (LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT,
+          curPos, 5, ifElse, -1) == 2) {
+          inElse = TRUE;
+          lastWasElse = TRUE;
+          onlyWhiteSpace = TRUE;
+          memcpy(&curString[curLen], curPos, 5*sizeof(WCHAR));
+          curLen+=5;
+          curPos+=5;
+          continue;
+
+        /* In a for loop, the DO command will follow a close bracket followed by
+           whitespace, followed by DO, ie closeBracket inserts a NULL entry, curLen
+           is then 0, and all whitespace is skipped                                */
+        } else if (inFor &&
+                   (CompareString (LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT,
+                    curPos, 3, forDO, -1) == 2)) {
+          WINE_TRACE("Found DO\n");
+          lastWasDo = TRUE;
+          onlyWhiteSpace = TRUE;
+          memcpy(&curString[curLen], curPos, 3*sizeof(WCHAR));
+          curLen+=3;
+          curPos+=3;
+          continue;
+        }
+      } else {
+
+        /* Special handling for the 'FOR' command */
+        if (inFor && lastWasWhiteSpace) {
+          const WCHAR forIN[] = {'i','n',' ','\0'};
+
+          WINE_TRACE("Found 'FOR', comparing next parm: '%s'\n", wine_dbgstr_w(curPos));
+
+          if (CompareString (LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT,
+              curPos, 3, forIN, -1) == 2) {
+            WINE_TRACE("Found IN\n");
+            lastWasIn = TRUE;
+            onlyWhiteSpace = TRUE;
+            memcpy(&curString[curLen], curPos, 3*sizeof(WCHAR));
+            curLen+=3;
+            curPos+=3;
+            continue;
+          }
+        }
+      }
+
+      /* Nothing 'ends' a REM statement and &&, quotes etc are ineffective,
+         so just use the default processing ie skip character specific
+         matching below                                                    */
+      if (!inRem) thisChar = *curPos;
+      else        thisChar = 'X';  /* Character with no special processing */
+
+      lastWasWhiteSpace = FALSE; /* Will be reset below */
+
+      switch (thisChar) {
+
+      case '\t':/* drop through - ignore whitespace at the start of a command */
+      case ' ': if (curLen > 0)
+                  curString[curLen++] = *curPos;
+
+                /* Remember just processed whitespace */
+                lastWasWhiteSpace = TRUE;
+
+                break;
+
+      case '"': inQuotes = !inQuotes;
+                curString[curLen++] = *curPos;
+                break;
+
+      case '(': /* If a '(' is the first non whitespace in a command portion
+                   ie start of line or just after &&, then we read until an
+                   unquoted ) is found                                       */
+                WINE_TRACE("Found '(' conditions: curLen(%d), inQ(%d), onlyWS(%d)"
+                           ", for(%d, In:%d, Do:%d)"
+                           ", if(%d, else:%d, lwe:%d)\n",
+                           curLen, inQuotes,
+                           onlyWhiteSpace,
+                           inFor, lastWasIn, lastWasDo,
+                           inIf, inElse, lastWasElse);
+
+                /* Ignore open brackets inside the for set */
+                if (curLen == 0 && !inIn) {
+                    WINE_TRACE("@@@4\n");
+                  curDepth++;
+
+                /* If in quotes, ignore brackets */
+                } else if (inQuotes) {
+                    WINE_TRACE("@@@3\n");
+                  curString[curLen++] = *curPos;
+
+                /* In a FOR loop, an unquoted '(' may occur straight after
+                      IN or DO
+                   In an IF statement just handle it regardless as we don't
+                      parse the operands
+                   In an ELSE statement, only allow it straight away after
+                      the ELSE and whitespace
+                 */
+                } else if (inIf ||
+                           (inElse && lastWasElse && onlyWhiteSpace) ||
+                           (inFor && (lastWasIn || lastWasDo) && onlyWhiteSpace)) {
+
+                  WINE_TRACE("@@@2\n");
+                   /* If entering into an 'IN', set inIn */
+                  if (inFor && lastWasIn && onlyWhiteSpace) {
+                    WINE_TRACE("Inside an IN\n");
+                    inIn = TRUE;
+                  }
+
+                  /* Add the current command */
+                  thisEntry = HeapAlloc(GetProcessHeap(), 0, sizeof(CMD_LIST));
+                  thisEntry->command = HeapAlloc(GetProcessHeap(), 0,
+                                                 (curLen+1) * sizeof(WCHAR));
+                  memcpy(thisEntry->command, curString, curLen * sizeof(WCHAR));
+                  thisEntry->command[curLen] = 0x00;
+                  curLen = 0;
+                  thisEntry->nextcommand = NULL;
+                  thisEntry->isAmphersand = isAmphersand;
+                  thisEntry->bracketDepth = curDepth;
+                  if (lastEntry) {
+                    lastEntry->nextcommand = thisEntry;
+                  } else {
+                    *output = thisEntry;
+                  }
+                  lastEntry = thisEntry;
+
+                  curDepth++;
+                } else {
+                  WINE_TRACE("@@@1\n");
+                  curString[curLen++] = *curPos;
+                }
+                break;
+
+      case '&': if (!inQuotes && *(curPos+1) == '&') {
+                  curPos++; /* Skip other & */
+
+                  /* Add an entry to the command list */
+                  if (curLen > 0) {
+                    thisEntry = HeapAlloc(GetProcessHeap(), 0, sizeof(CMD_LIST));
+                    thisEntry->command = HeapAlloc(GetProcessHeap(), 0,
+                                                   (curLen+1) * sizeof(WCHAR));
+                    memcpy(thisEntry->command, curString, curLen * sizeof(WCHAR));
+                    thisEntry->command[curLen] = 0x00;
+                    curLen = 0;
+                    thisEntry->nextcommand = NULL;
+                    thisEntry->isAmphersand = isAmphersand;
+                    thisEntry->bracketDepth = curDepth;
+                    if (lastEntry) {
+                      lastEntry->nextcommand = thisEntry;
+                    } else {
+                      *output = thisEntry;
+                    }
+                    lastEntry = thisEntry;
+                  }
+                  isAmphersand = TRUE;
+                } else {
+                  curString[curLen++] = *curPos;
+                }
+                break;
+
+      case ')': if (!inQuotes && curDepth > 0) {
+
+                  /* Add the current command if there is one */
+                  if (curLen) {
+                    thisEntry = HeapAlloc(GetProcessHeap(), 0, sizeof(CMD_LIST));
+                    thisEntry->command = HeapAlloc(GetProcessHeap(), 0,
+                                                   (curLen+1) * sizeof(WCHAR));
+                    memcpy(thisEntry->command, curString, curLen * sizeof(WCHAR));
+                    thisEntry->command[curLen] = 0x00;
+                    curLen = 0;
+                    thisEntry->nextcommand = NULL;
+                    thisEntry->isAmphersand = isAmphersand;
+                    thisEntry->bracketDepth = curDepth;
+                    if (lastEntry) {
+                      lastEntry->nextcommand = thisEntry;
+                    } else {
+                      *output = thisEntry;
+                    }
+                    lastEntry = thisEntry;
+                  }
+
+                  /* Add an empty entry to the command list */
+                  thisEntry = HeapAlloc(GetProcessHeap(), 0, sizeof(CMD_LIST));
+                  thisEntry->command = NULL;
+                  thisEntry->nextcommand = NULL;
+                  thisEntry->isAmphersand = FALSE;
+                  thisEntry->bracketDepth = curDepth;
+                  curDepth--;
+                  if (lastEntry) {
+                    lastEntry->nextcommand = thisEntry;
+                  } else {
+                    *output = thisEntry;
+                  }
+                  lastEntry = thisEntry;
+
+                  /* Leave inIn if necessary */
+                  if (inIn) inIn =  FALSE;
+                } else {
+                  curString[curLen++] = *curPos;
+                }
+                break;
+      default:
+                curString[curLen++] = *curPos;
+      }
+
+      curPos++;
+
+      /* At various times we need to know if we have only skipped whitespace,
+         so reset this variable and then it will remain true until a non
+         whitespace is found                                               */
+      if ((thisChar != ' ') && (thisChar != '\n')) onlyWhiteSpace = FALSE;
+
+      /* Flag end of interest in FOR DO and IN parms once something has been processed */
+      if (!lastWasWhiteSpace) {
+        lastWasIn = lastWasDo = FALSE;
+      }
+
+      /* If we have reached the end, add this command into the list */
+      if (*curPos == 0x00 && curLen > 0) {
+
+          /* Add an entry to the command list */
+          thisEntry = HeapAlloc(GetProcessHeap(), 0, sizeof(CMD_LIST));
+          thisEntry->command = HeapAlloc(GetProcessHeap(), 0,
+                                         (curLen+1) * sizeof(WCHAR));
+          memcpy(thisEntry->command, curString, curLen * sizeof(WCHAR));
+          thisEntry->command[curLen] = 0x00;
+          curLen = 0;
+          thisEntry->nextcommand = NULL;
+          thisEntry->isAmphersand = isAmphersand;
+          thisEntry->bracketDepth = curDepth;
+          if (lastEntry) {
+            lastEntry->nextcommand = thisEntry;
+          } else {
+            *output = thisEntry;
+          }
+          lastEntry = thisEntry;
+      }
+
+      /* If we have reached the end of the string, see if bracketing outstanding */
+      if (*curPos == 0x00 && curDepth > 0 && readFrom != INVALID_HANDLE_VALUE) {
+        inRem = FALSE;
+        isAmphersand = FALSE;
+        inQuotes = FALSE;
+        memset(extraSpace, 0x00, (MAXSTRING+1) * sizeof(WCHAR));
+
+        /* Read more, skipping any blank lines */
+        while (*extraSpace == 0x00) {
+          if (!context) WCMD_output_asis( WCMD_LoadMessage(WCMD_MOREPROMPT));
+          if (WCMD_fgets(extraSpace, MAXSTRING, readFrom) == NULL) break;
+        }
+        curPos = extraSpace;
+      }
+    }
+
+    /* Dump out the parsed output */
+    WCMD_DumpCommands(*output);
+
+    return extraSpace;
+}
+
+/***************************************************************************
+ * WCMD_process_commands
+ *
+ * Process all the commands read in so far
+ */
+CMD_LIST *WCMD_process_commands(CMD_LIST *thisCmd, BOOL oneBracket,
+                                WCHAR *var, WCHAR *val) {
+
+    int bdepth = -1;
+
+    if (thisCmd && oneBracket) bdepth = thisCmd->bracketDepth;
+
+    /* Loop through the commands, processing them one by one */
+    while (thisCmd) {
+
+      CMD_LIST *origCmd = thisCmd;
+
+      /* If processing one bracket only, and we find the end bracket
+         entry (or less), return                                    */
+      if (oneBracket && !thisCmd->command &&
+          bdepth <= thisCmd->bracketDepth) {
+        WINE_TRACE("Finished bracket @ %p, next command is %p\n",
+                   thisCmd, thisCmd->nextcommand);
+        return thisCmd->nextcommand;
+      }
+
+      /* Ignore the NULL entries a ')' inserts (Only 'if' cares
+         about them and it will be handled in there)
+         Also, skip over any batch labels (eg. :fred)          */
+      if (thisCmd->command && thisCmd->command[0] != ':') {
+
+        WINE_TRACE("Executing command: '%s'\n", wine_dbgstr_w(thisCmd->command));
+
+        if (strchrW(thisCmd->command,'|') != NULL) {
+          WCMD_pipe (&thisCmd, var, val);
+        } else {
+          WCMD_execute (thisCmd->command, var, val, &thisCmd);
+        }
+      }
+
+      /* Step on unless the command itself already stepped on */
+      if (thisCmd == origCmd) thisCmd = thisCmd->nextcommand;
+    }
+    return NULL;
+}
+
+/***************************************************************************
+ * WCMD_free_commands
+ *
+ * Frees the storage held for a parsed command line
+ * - This is not done in the process_commands, as eventually the current
+ *   pointer will be modified within the commands, and hence a single free
+ *   routine is simpler
+ */
+void WCMD_free_commands(CMD_LIST *cmds) {
+
+    /* Loop through the commands, freeing them one by one */
+    while (cmds) {
+      CMD_LIST *thisCmd = cmds;
+      cmds = cmds->nextcommand;
+      HeapFree(GetProcessHeap(), 0, thisCmd->command);
+      HeapFree(GetProcessHeap(), 0, thisCmd);
+    }
 }

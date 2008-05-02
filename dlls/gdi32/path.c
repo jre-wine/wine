@@ -97,7 +97,7 @@ static BOOL PATH_PathToRegion(GdiPath *pPath, INT nPolyFillMode,
 static void   PATH_EmptyPath(GdiPath *pPath);
 static BOOL PATH_ReserveEntries(GdiPath *pPath, INT numEntries);
 static BOOL PATH_DoArcPart(GdiPath *pPath, FLOAT_POINT corners[],
-   double angleStart, double angleEnd, BOOL addMoveTo);
+   double angleStart, double angleEnd, BYTE startEntryType);
 static void PATH_ScaleNormalizedPoint(FLOAT_POINT corners[], double x,
    double y, POINT *pPoint);
 static void PATH_NormalizePoint(FLOAT_POINT corners[], const FLOAT_POINT
@@ -624,7 +624,7 @@ BOOL PATH_RoundRect(DC *dc, INT x1, INT y1, INT x2, INT y2, INT ell_width, INT e
    ellCorners[0].y = corners[0].y;
    ellCorners[1].x = corners[1].x;
    ellCorners[1].y = corners[0].y+ell_height;
-   if(!PATH_DoArcPart(pPath, ellCorners, 0, -M_PI_2, TRUE))
+   if(!PATH_DoArcPart(pPath, ellCorners, 0, -M_PI_2, PT_MOVETO))
       return FALSE;
    pointTemp.x = corners[0].x+ell_width/2;
    pointTemp.y = corners[0].y;
@@ -725,8 +725,10 @@ BOOL PATH_Ellipse(DC *dc, INT x1, INT y1, INT x2, INT y2)
  * Should be called when a call to Arc is performed on a DC that has
  * an open path. This adds up to five Bezier splines representing the arc
  * to the path. When 'lines' is 1, we add 1 extra line to get a chord,
- * and when 'lines' is 2, we add 2 extra lines to get a pie.
- * Returns TRUE if successful, else FALSE.
+ * when 'lines' is 2, we add 2 extra lines to get a pie, and when 'lines' is
+ * -1 we add 1 extra line from the current DC position to the starting position
+ * of the arc before drawing the arc itself (arcto). Returns TRUE if successful,
+ * else FALSE.
  */
 BOOL PATH_Arc(DC *dc, INT x1, INT y1, INT x2, INT y2,
    INT xStart, INT yStart, INT xEnd, INT yEnd, INT lines)
@@ -736,7 +738,7 @@ BOOL PATH_Arc(DC *dc, INT x1, INT y1, INT x2, INT y2,
                /* Initialize angleEndQuadrant to silence gcc's warning */
    double      x, y;
    FLOAT_POINT corners[2], pointStart, pointEnd;
-   POINT       centre;
+   POINT       centre, pointCurPos;
    BOOL      start, end;
    INT       temp;
 
@@ -811,6 +813,18 @@ BOOL PATH_Arc(DC *dc, INT x1, INT y1, INT x2, INT y2,
       corners[1].y--;
    }
 
+   /* arcto: Add a PT_MOVETO only if this is the first entry in a stroke */
+   if(lines==-1 && pPath->newStroke)
+   {
+      pPath->newStroke=FALSE;
+      pointCurPos.x = dc->CursPosX;
+      pointCurPos.y = dc->CursPosY;
+      if(!LPtoDP(dc->hSelf, &pointCurPos, 1))
+         return FALSE;
+      if(!PATH_AddEntry(pPath, &pointCurPos, PT_MOVETO))
+         return FALSE;
+   }
+
    /* Add the arc to the path with one Bezier spline per quadrant that the
     * arc spans */
    start=TRUE;
@@ -848,7 +862,7 @@ BOOL PATH_Arc(DC *dc, INT x1, INT y1, INT x2, INT y2,
 
       /* Add the Bezier spline to the path */
       PATH_DoArcPart(pPath, corners, angleStartQuadrant, angleEndQuadrant,
-         start);
+         start ? (lines==-1 ? PT_LINETO : PT_MOVETO) : FALSE);
       start=FALSE;
    }  while(!end);
 
@@ -1521,12 +1535,12 @@ static BOOL PATH_ReserveEntries(GdiPath *pPath, INT numEntries)
  * Creates a Bezier spline that corresponds to part of an arc and appends the
  * corresponding points to the path. The start and end angles are passed in
  * "angleStart" and "angleEnd"; these angles should span a quarter circle
- * at most. If "addMoveTo" is true, a PT_MOVETO entry for the first control
- * point is added to the path; otherwise, it is assumed that the current
+ * at most. If "startEntryType" is non-zero, an entry of that type for the first
+ * control point is added to the path; otherwise, it is assumed that the current
  * position is equal to the first control point.
  */
 static BOOL PATH_DoArcPart(GdiPath *pPath, FLOAT_POINT corners[],
-   double angleStart, double angleEnd, BOOL addMoveTo)
+   double angleStart, double angleEnd, BYTE startEntryType)
 {
    double  halfAngle, a;
    double  xNorm[4], yNorm[4];
@@ -1559,10 +1573,10 @@ static BOOL PATH_DoArcPart(GdiPath *pPath, FLOAT_POINT corners[],
       }
 
    /* Add starting point to path if desired */
-   if(addMoveTo)
+   if(startEntryType)
    {
       PATH_ScaleNormalizedPoint(corners, xNorm[0], yNorm[0], &point);
-      if(!PATH_AddEntry(pPath, &point, PT_MOVETO))
+      if(!PATH_AddEntry(pPath, &point, startEntryType))
          return FALSE;
    }
 
@@ -1937,7 +1951,7 @@ static BOOL PATH_WidenPath(DC *dc)
                         corners[0].y = yo - penWidthIn;
                         corners[1].x = xo + penWidthOut;
                         corners[1].y = yo + penWidthOut;
-                        PATH_DoArcPart(pUpPath ,corners, theta + M_PI_2 , theta + 3 * M_PI_4, (j == 0 ? TRUE : FALSE));
+                        PATH_DoArcPart(pUpPath ,corners, theta + M_PI_2 , theta + 3 * M_PI_4, (j == 0 ? PT_MOVETO : FALSE));
                         PATH_DoArcPart(pUpPath ,corners, theta + 3 * M_PI_4 , theta + M_PI, FALSE);
                         PATH_DoArcPart(pUpPath ,corners, theta + M_PI, theta +  5 * M_PI_4, FALSE);
                         PATH_DoArcPart(pUpPath ,corners, theta + 5 * M_PI_4 , theta + 3 * M_PI_2, FALSE);

@@ -49,6 +49,8 @@ static inline SF_TYPE get_union_type(SAFEARRAY *psa)
     hr = SafeArrayGetVartype(psa, &vt);
     if (FAILED(hr))
     {
+        if(psa->fFeatures & FADF_VARIANT) return SF_VARIANT;
+
         switch(psa->cbElements)
         {
         case 1: vt = VT_I1; break;
@@ -190,7 +192,7 @@ static void test_marshal_LPSAFEARRAY(void)
     ok(size == 68, "size should be 68 bytes, not %ld\n", size);
     size = LPSAFEARRAY_UserSize(&umcb.Flags, 0, &lpsa);
     ok(size == 64, "size should be 64 bytes, not %ld\n", size);
-    buffer = (unsigned char *)HeapAlloc(GetProcessHeap(), 0, size);
+    buffer = HeapAlloc(GetProcessHeap(), 0, size);
     LPSAFEARRAY_UserMarshal(&umcb.Flags, buffer, &lpsa);
 
     check_safearray(buffer, lpsa);
@@ -213,7 +215,7 @@ static void test_marshal_LPSAFEARRAY(void)
 
     size = LPSAFEARRAY_UserSize(&umcb.Flags, 0, &lpsa);
     ok(size == 4, "size should be 4 bytes, not %ld\n", size);
-    buffer = (unsigned char *)HeapAlloc(GetProcessHeap(), 0, size);
+    buffer = HeapAlloc(GetProcessHeap(), 0, size);
     LPSAFEARRAY_UserMarshal(&umcb.Flags, buffer, &lpsa);
     check_safearray(buffer, lpsa);
 
@@ -236,7 +238,7 @@ static void test_marshal_LPSAFEARRAY(void)
     ok(size == 128, "size should be 128 bytes, not %ld\n", size);
     size = LPSAFEARRAY_UserSize(&umcb.Flags, 0, &lpsa);
     ok(size == 128, "size should be 128 bytes, not %ld\n", size);
-    buffer = (unsigned char *)HeapAlloc(GetProcessHeap(), 0, size);
+    buffer = HeapAlloc(GetProcessHeap(), 0, size);
     LPSAFEARRAY_UserMarshal(&umcb.Flags, buffer, &lpsa);
 
     check_safearray(buffer, lpsa);
@@ -258,7 +260,30 @@ static void test_marshal_LPSAFEARRAY(void)
 
     size = LPSAFEARRAY_UserSize(&umcb.Flags, 0, &lpsa);
     ok(size == 432, "size %ld\n", size);
-    buffer = (unsigned char *)HeapAlloc(GetProcessHeap(), 0, size);
+    buffer = HeapAlloc(GetProcessHeap(), 0, size);
+    LPSAFEARRAY_UserMarshal(&umcb.Flags, buffer, &lpsa);
+    check_safearray(buffer, lpsa);
+    HeapFree(GetProcessHeap(), 0, buffer);
+    SafeArrayDestroyData(lpsa);
+    SafeArrayDestroyDescriptor(lpsa);
+
+    /* VARTYPE-less arrays with FADF_VARIANT */
+    hr = SafeArrayAllocDescriptor(1, &lpsa);
+    ok(hr == S_OK, "saad failed %08x\n", hr);
+    lpsa->cbElements = 16;
+    lpsa->fFeatures = FADF_VARIANT;
+    lpsa->rgsabound[0].lLbound = 2;
+    lpsa->rgsabound[0].cElements = 48;
+    hr = SafeArrayAllocData(lpsa);
+    ok(hr == S_OK, "saad failed %08x\n", hr);
+
+    hr = SafeArrayGetVartype(lpsa, &vt);
+    ok(hr == E_INVALIDARG, "ret %08x\n", hr);
+
+    size = LPSAFEARRAY_UserSize(&umcb.Flags, 0, &lpsa);
+    todo_wine
+    ok(size == 1388, "size %ld\n", size);
+    buffer = HeapAlloc(GetProcessHeap(), 0, size);
     LPSAFEARRAY_UserMarshal(&umcb.Flags, buffer, &lpsa);
     check_safearray(buffer, lpsa);
     HeapFree(GetProcessHeap(), 0, buffer);
@@ -1187,6 +1212,56 @@ static void test_marshal_VARIANT(void)
         ok(V_VT(V_VARIANTREF(&v)) == V_VT(V_VARIANTREF(&v3)), "vts differ %x %x\n",
            V_VT(V_VARIANTREF(&v)), V_VT(V_VARIANTREF(&v3)));
         ok(V_R8(V_VARIANTREF(&v)) == V_R8(V_VARIANTREF(&v3)), "r8s differ\n");
+        VARIANT_UserFree(&umcb.Flags, &v3);
+        ok(heap_unknown->refs == 1, "%d refcounts of IUnknown leaked\n", heap_unknown->refs - 1);
+        IUnknown_Release((IUnknown *)heap_unknown);
+    }
+    HeapFree(GetProcessHeap(), 0, buffer);
+
+    /*** UNKNOWN BYREF ***/
+    heap_unknown = HeapAlloc(GetProcessHeap(), 0, sizeof(*heap_unknown));
+    heap_unknown->lpVtbl = &HeapUnknown_Vtbl;
+    heap_unknown->refs = 1;
+    VariantInit(&v);
+    VariantInit(&v2);
+    V_VT(&v) = VT_UNKNOWN | VT_BYREF;
+    V_UNKNOWNREF(&v) = (IUnknown **)&heap_unknown;
+
+    rpcMsg.BufferLength = stubMsg.BufferLength = VARIANT_UserSize(&umcb.Flags, 0, &v);
+    ok(stubMsg.BufferLength > 36, "size %d\n", stubMsg.BufferLength);
+    buffer = rpcMsg.Buffer = stubMsg.Buffer = stubMsg.BufferStart = HeapAlloc(GetProcessHeap(), 0, stubMsg.BufferLength);
+    stubMsg.BufferEnd = stubMsg.Buffer + stubMsg.BufferLength;
+    memset(buffer, 0xcc, stubMsg.BufferLength);
+    next = VARIANT_UserMarshal(&umcb.Flags, buffer, &v);
+    wirev = (DWORD*)buffer;
+    check_variant_header(wirev, &v, next - buffer);
+    wirev += 5;
+
+    ok(*wirev == 4, "wv[5] %08x\n", *wirev);
+    wirev++;
+    todo_wine
+    ok(*wirev == (DWORD_PTR)heap_unknown /* Win9x, Win2000 */ ||
+       *wirev == (DWORD_PTR)heap_unknown + 1 /* XP */, "wv[6] %08x\n", *wirev);
+    wirev++;
+    todo_wine
+    ok(*wirev == next - buffer - 0x24, "wv[7] %08x\n", *wirev);
+    wirev++;
+    todo_wine
+    ok(*wirev == next - buffer - 0x24, "wv[8] %08x\n", *wirev);
+    wirev++;
+    todo_wine
+    ok(*wirev == 0x574f454d, "wv[9] %08x\n", *wirev);
+    if (VARIANT_UNMARSHAL_WORKS)
+    {
+        VARIANT v3;
+        VariantInit(&v3);
+        V_VT(&v3) = VT_UNKNOWN;
+        V_UNKNOWN(&v3) = (IUnknown *)heap_unknown;
+        IUnknown_AddRef(V_UNKNOWN(&v3));
+        stubMsg.Buffer = buffer;
+        next = VARIANT_UserUnmarshal(&umcb.Flags, buffer, &v3);
+        ok(V_VT(&v) == V_VT(&v3), "got vt %d expect %d\n", V_VT(&v), V_VT(&v3));
+        ok(*V_UNKNOWNREF(&v) == *V_UNKNOWNREF(&v3), "got %p expect %p\n", *V_UNKNOWNREF(&v), *V_UNKNOWNREF(&v3));
         VARIANT_UserFree(&umcb.Flags, &v3);
         ok(heap_unknown->refs == 1, "%d refcounts of IUnknown leaked\n", heap_unknown->refs - 1);
         IUnknown_Release((IUnknown *)heap_unknown);

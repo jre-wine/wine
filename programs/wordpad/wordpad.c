@@ -85,7 +85,7 @@ static void AddButton(HWND hwndToolBar, int nImage, int nCommand)
     button.fsStyle = TBSTYLE_BUTTON;
     button.dwData = 0;
     button.iString = -1;
-    SendMessage(hwndToolBar, TB_ADDBUTTONS, 1, (LPARAM)&button);
+    SendMessageW(hwndToolBar, TB_ADDBUTTONSW, 1, (LPARAM)&button);
 }
 
 static void AddSeparator(HWND hwndToolBar)
@@ -99,7 +99,7 @@ static void AddSeparator(HWND hwndToolBar)
     button.fsStyle = TBSTYLE_SEP;
     button.dwData = 0;
     button.iString = -1;
-    SendMessage(hwndToolBar, TB_ADDBUTTONS, 1, (LPARAM)&button);
+    SendMessageW(hwndToolBar, TB_ADDBUTTONSW, 1, (LPARAM)&button);
 }
 
 static DWORD CALLBACK stream_in(DWORD_PTR cookie, LPBYTE buffer, LONG cb, LONG *pcb)
@@ -319,11 +319,12 @@ static void DoDefaultFont(void)
     ZeroMemory(&fmt, sizeof(fmt));
 
     fmt.cbSize = sizeof(fmt);
-    fmt.dwMask = CFM_FACE;
+    fmt.dwMask = CFM_FACE | CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE;
+    fmt.dwEffects = 0;
 
     lstrcpyW(fmt.szFaceName, szFaceName);
 
-    SendMessage(hEditorWnd, EM_SETCHARFORMAT,  SCF_DEFAULT, (LPARAM)&fmt);
+    SendMessageW(hEditorWnd, EM_SETCHARFORMAT,  SCF_DEFAULT, (LPARAM)&fmt);
 }
 
 static void update_window(void)
@@ -821,8 +822,6 @@ static LRESULT OnSize( HWND hWnd, WPARAM wParam, LPARAM lParam )
     HWND hwndEditor = GetDlgItem(hWnd, IDC_EDITOR);
     HWND hwndStatusBar = GetDlgItem(hWnd, IDC_STATUSBAR);
     HWND hwndReBar = GetDlgItem(hWnd, IDC_REBAR);
-    HWND hwndToolBar = GetDlgItem(hwndReBar, IDC_TOOLBAR);
-    HWND hwndFormatBar = GetDlgItem(hwndReBar, IDC_FORMATBAR);
     int rebarHeight = 0;
     REBARBANDINFOW rbbinfo;
     int rebarRows = 2;
@@ -838,26 +837,6 @@ static LRESULT OnSize( HWND hWnd, WPARAM wParam, LPARAM lParam )
         {
             nStatusSize = 0;
         }
-    }
-    if (hwndToolBar)
-    {
-        rc.left = rc.top = 0;
-        rc.right = LOWORD(lParam);
-        rc.bottom = HIWORD(lParam);
-        SendMessageW(hwndToolBar, TB_AUTOSIZE, 0, 0);
-        SendMessageW(hwndReBar, RB_SIZETORECT, 0, (LPARAM)&rc);
-        GetClientRect(hwndReBar, &rc);
-        MoveWindow(hwndReBar, 0, 0, LOWORD(lParam), rc.right, FALSE);
-    }
-    if (hwndFormatBar)
-    {
-        rc.left = rc.top = 0;
-        rc.right = LOWORD(lParam);
-        rc.bottom = HIWORD(lParam);
-        SendMessageW(hwndFormatBar, TB_AUTOSIZE, 0, 0);
-        SendMessageW(hwndReBar, RB_SIZETORECT, 0, (LPARAM)&rc);
-        GetClientRect(hwndReBar, &rc);
-        MoveWindow(hwndReBar, 0, 0, LOWORD(lParam), rc.right, FALSE);
     }
     if (hwndReBar)
     {

@@ -244,170 +244,6 @@ void primitiveDeclarationConvertToStridedData(
     }
 }
 
-void primitiveConvertFVFtoOffset(DWORD thisFVF, DWORD stride, BYTE *data, WineDirect3DVertexStridedData *strided, GLint streamVBO, UINT streamNo) {
-    int           numBlends;
-    int           numTextures;
-    int           textureNo;
-    int           coordIdxInfo = 0x00;    /* Information on number of coords supplied */
-    int           numCoords[8];           /* Holding place for WINED3DFVF_TEXTUREFORMATx  */
-
-    /* Either 3 or 4 floats depending on the FVF */
-    /* FIXME: Can blending data be in a different stream to the position data?
-          and if so using the fixed pipeline how do we handle it               */
-    if (thisFVF & WINED3DFVF_POSITION_MASK) {
-        strided->u.s.position.lpData    = data;
-        strided->u.s.position.dwType    = WINED3DDECLTYPE_FLOAT3;
-        strided->u.s.position.dwStride  = stride;
-        strided->u.s.position.VBO       = streamVBO;
-        strided->u.s.position.streamNo  = streamNo;
-        data += 3 * sizeof(float);
-        if ((thisFVF & WINED3DFVF_POSITION_MASK) == WINED3DFVF_XYZRHW) {
-            strided->u.s.position.dwType = WINED3DDECLTYPE_FLOAT4;
-            strided->u.s.position_transformed = TRUE;
-            data += sizeof(float);
-        } else
-            strided->u.s.position_transformed = FALSE;
-    }
-
-    /* Blending is numBlends * FLOATs followed by a DWORD for UBYTE4 */
-    /** do we have to Check This->stateBlock->renderState[D3DRS_INDEXEDVERTEXBLENDENABLE] ? */
-    numBlends = 1 + (((thisFVF & WINED3DFVF_XYZB5) - WINED3DFVF_XYZB1) >> 1);
-    if(thisFVF & WINED3DFVF_LASTBETA_UBYTE4) numBlends--;
-
-    if ((thisFVF & WINED3DFVF_POSITION_MASK ) > WINED3DFVF_XYZRHW) {
-        TRACE("Setting blend Weights to %p\n", data);
-        strided->u.s.blendWeights.lpData    = data;
-        strided->u.s.blendWeights.dwType    = WINED3DDECLTYPE_FLOAT1 + numBlends - 1;
-        strided->u.s.blendWeights.dwStride  = stride;
-        strided->u.s.blendWeights.VBO       = streamVBO;
-        strided->u.s.blendWeights.streamNo  = streamNo;
-        data += numBlends * sizeof(FLOAT);
-
-        if (thisFVF & WINED3DFVF_LASTBETA_UBYTE4) {
-            strided->u.s.blendMatrixIndices.lpData = data;
-            strided->u.s.blendMatrixIndices.dwType  = WINED3DDECLTYPE_UBYTE4;
-            strided->u.s.blendMatrixIndices.dwStride= stride;
-            strided->u.s.blendMatrixIndices.VBO     = streamVBO;
-            strided->u.s.blendMatrixIndices.streamNo= streamNo;
-            data += sizeof(DWORD);
-        }
-    }
-
-    /* Normal is always 3 floats */
-    if (thisFVF & WINED3DFVF_NORMAL) {
-        strided->u.s.normal.lpData    = data;
-        strided->u.s.normal.dwType    = WINED3DDECLTYPE_FLOAT3;
-        strided->u.s.normal.dwStride  = stride;
-        strided->u.s.normal.VBO       = streamVBO;
-        strided->u.s.normal.streamNo  = streamNo;
-        data += 3 * sizeof(FLOAT);
-    }
-
-    /* Pointsize is a single float */
-    if (thisFVF & WINED3DFVF_PSIZE) {
-        strided->u.s.pSize.lpData    = data;
-        strided->u.s.pSize.dwType    = WINED3DDECLTYPE_FLOAT1;
-        strided->u.s.pSize.dwStride  = stride;
-        strided->u.s.pSize.VBO       = streamVBO;
-        strided->u.s.pSize.streamNo  = streamNo;
-        data += sizeof(FLOAT);
-    }
-
-    /* Diffuse is 4 unsigned bytes */
-    if (thisFVF & WINED3DFVF_DIFFUSE) {
-        strided->u.s.diffuse.lpData    = data;
-        strided->u.s.diffuse.dwType    = WINED3DDECLTYPE_SHORT4;
-        strided->u.s.diffuse.dwStride  = stride;
-        strided->u.s.diffuse.VBO       = streamVBO;
-        strided->u.s.diffuse.streamNo  = streamNo;
-        data += sizeof(DWORD);
-    }
-
-    /* Specular is 4 unsigned bytes */
-    if (thisFVF & WINED3DFVF_SPECULAR) {
-        strided->u.s.specular.lpData    = data;
-        strided->u.s.specular.dwType    = WINED3DDECLTYPE_SHORT4;
-        strided->u.s.specular.dwStride  = stride;
-        strided->u.s.specular.VBO       = streamVBO;
-        strided->u.s.specular.streamNo  = streamNo;
-        data += sizeof(DWORD);
-    }
-
-    /* Texture coords */
-    numTextures   = (thisFVF & WINED3DFVF_TEXCOUNT_MASK) >> WINED3DFVF_TEXCOUNT_SHIFT;
-    coordIdxInfo  = (thisFVF & 0x00FF0000) >> 16; /* 16 is from definition of WINED3DFVF_TEXCOORDSIZE1, and is 8 (0-7 stages) * 2bits long */
-
-    /* numTextures indicates the number of texture coordinates supplied */
-    /* However, the first set may not be for stage 0 texture - it all   */
-    /*   depends on WINED3DTSS_TEXCOORDINDEX.                           */
-    /* The number of bytes for each coordinate set is based off         */
-    /*   WINED3DFVF_TEXCOORDSIZEn, which are the bottom 2 bits              */
-
-    /* So, for each supplied texture extract the coords */
-    for (textureNo = 0; textureNo < numTextures; ++textureNo) {
-
-        strided->u.s.texCoords[textureNo].lpData    = data;
-        strided->u.s.texCoords[textureNo].dwType    = WINED3DDECLTYPE_FLOAT1;
-        strided->u.s.texCoords[textureNo].dwStride  = stride;
-        strided->u.s.texCoords[textureNo].VBO       = streamVBO;
-        strided->u.s.texCoords[textureNo].streamNo  = streamNo;
-        numCoords[textureNo] = coordIdxInfo & 0x03;
-
-        /* Always one set */
-        data += sizeof(float);
-        if (numCoords[textureNo] != WINED3DFVF_TEXTUREFORMAT1) {
-            strided->u.s.texCoords[textureNo].dwType = WINED3DDECLTYPE_FLOAT2;
-            data += sizeof(float);
-            if (numCoords[textureNo] != WINED3DFVF_TEXTUREFORMAT2) {
-                strided->u.s.texCoords[textureNo].dwType = WINED3DDECLTYPE_FLOAT3;
-                data += sizeof(float);
-                if (numCoords[textureNo] != WINED3DFVF_TEXTUREFORMAT3) {
-                    strided->u.s.texCoords[textureNo].dwType = WINED3DDECLTYPE_FLOAT4;
-                    data += sizeof(float);
-                }
-            }
-        }
-        coordIdxInfo = coordIdxInfo >> 2; /* Drop bottom two bits */
-    }
-}
-
-void primitiveConvertToStridedData(IWineD3DDevice *iface, WineDirect3DVertexStridedData *strided, BOOL *fixup) {
-    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
-    GLint         streamVBO = 0;
-    DWORD  stride  = This->stateBlock->streamStride[0];
-    BYTE  *data    = NULL;
-    DWORD  thisFVF = 0;
-
-    /* Retrieve appropriate FVF */
-    thisFVF = This->stateBlock->fvf;
-    /* Handle memory passed directly as well as vertex buffers */
-    if (This->stateBlock->streamIsUP) {
-        streamVBO = 0;
-        data    = (BYTE *)This->stateBlock->streamSource[0];
-    } else {
-        /* The for loop should iterate through here only once per stream, so we don't need magic to prevent double loading
-         * buffers
-         */
-        data = IWineD3DVertexBufferImpl_GetMemory(This->stateBlock->streamSource[0], 0, &streamVBO);
-        if(fixup) {
-            if(streamVBO != 0 ) *fixup = TRUE;
-        }
-    }
-    VTRACE(("FVF for stream 0 is %lx\n", thisFVF));
-
-    /* Now convert the stream into pointers */
-    primitiveConvertFVFtoOffset(thisFVF, stride, data, strided, streamVBO, 0);
-
-    /* Now call PreLoad on the vertex buffer. In the very rare case
-     * that the buffers stopps converting PreLoad will dirtify the VDECL again.
-     * The vertex buffer can now use the strided structure in the device instead of finding its
-     * own again.
-     */
-    if(!This->stateBlock->streamIsUP) {
-        IWineD3DVertexBuffer_PreLoad(This->stateBlock->streamSource[0]);
-    }
-}
-
 static void drawStridedFast(IWineD3DDevice *iface,UINT numberOfVertices, GLenum glPrimitiveType,
                      const void *idxData, short idxSize, ULONG minIndex, ULONG startIdx, ULONG startVertex) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
@@ -448,7 +284,6 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
                      const void *idxData, short idxSize, ULONG minIndex, ULONG startIdx, ULONG startVertex) {
 
     unsigned int               textureNo    = 0;
-    unsigned int               texture_idx  = 0;
     const WORD                *pIdxBufS     = NULL;
     const DWORD               *pIdxBufL     = NULL;
     LONG                       vx_index;
@@ -482,7 +317,7 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
     /* Adding the stream offset once is cheaper than doing it every iteration. Do not modify the strided data, it is a pointer
      * to the strided Data in the device and might be needed intact on the next draw
      */
-    for (textureNo = 0, texture_idx = 0; textureNo < GL_LIMITS(texture_stages); ++textureNo) {
+    for (textureNo = 0; textureNo < GL_LIMITS(texture_stages); ++textureNo) {
         if(sd->u.s.texCoords[textureNo].lpData) {
             texCoords[textureNo] = sd->u.s.texCoords[textureNo].lpData + streamOffset[sd->u.s.texCoords[textureNo].streamNo];
         } else {
@@ -547,7 +382,7 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
         }
 
         /* Texture coords --------------------------- */
-        for (textureNo = 0, texture_idx = 0; textureNo < GL_LIMITS(texture_stages); ++textureNo) {
+        for (textureNo = 0; textureNo < GL_LIMITS(texture_stages); ++textureNo) {
 
             if (!GL_SUPPORT(ARB_MULTITEXTURE) && textureNo > 0) {
                 FIXME("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
@@ -563,22 +398,21 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
 
                 if (coordIdx > 7) {
                     VTRACE(("tex: %d - Skip tex coords, as being system generated\n", textureNo));
-                    ++texture_idx;
                     continue;
                 } else if (coordIdx < 0) {
                     FIXME("tex: %d - Coord index %d is less than zero, expect a crash.\n", textureNo, coordIdx);
-                    ++texture_idx;
                     continue;
                 }
 
                 ptrToCoords = (float *)(texCoords[coordIdx] + (SkipnStrides * sd->u.s.texCoords[coordIdx].dwStride));
                 if (texCoords[coordIdx] == NULL) {
                     TRACE("tex: %d - Skipping tex coords, as no data supplied\n", textureNo);
-                    ++texture_idx;
                     continue;
                 } else {
-
+                    int texture_idx = This->texUnitMap[textureNo];
                     int coordsToUse = sd->u.s.texCoords[coordIdx].dwType + 1; /* 0 == WINED3DDECLTYPE_FLOAT1 etc */
+
+                    if (texture_idx == -1) continue;
 
                     /* The coords to supply depend completely on the fvf / vertex shader */
                     switch (coordsToUse) {
@@ -656,7 +490,6 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
                     }
                 }
             }
-            if (/*!GL_SUPPORT(NV_REGISTER_COMBINERS) || This->stateBlock->textures[textureNo]*/TRUE) ++texture_idx;
         } /* End of textures */
 
         /* Diffuse -------------------------------- */
@@ -674,6 +507,19 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
 		    D3DCOLOR_B_G(diffuseColor),
 		    D3DCOLOR_B_B(diffuseColor),
 		    D3DCOLOR_B_A(diffuseColor)));
+
+            if(This->activeContext->num_untracked_materials) {
+                unsigned char i;
+                float color[4];
+                color[0] = D3DCOLOR_B_R(diffuseColor) / 255.0;
+                color[1] = D3DCOLOR_B_G(diffuseColor) / 255.0;
+                color[2] = D3DCOLOR_B_B(diffuseColor) / 255.0;
+                color[3] = D3DCOLOR_B_A(diffuseColor) / 255.0;
+
+                for(i = 0; i < This->activeContext->num_untracked_materials; i++) {
+                    glMaterialfv(GL_FRONT_AND_BACK, This->activeContext->untracked_materials[i], color);
+                }
+            }
         }
 
         /* Specular ------------------------------- */
@@ -1194,15 +1040,55 @@ void drawPrimitive(IWineD3DDevice *iface,
 
     {
         GLenum glPrimType;
+        BOOL emulation = FALSE;
+        WineDirect3DVertexStridedData *strided = &This->strided_streams;
+        WineDirect3DVertexStridedData stridedlcl;
         /* Ok, Work out which primitive is requested and how many vertexes that
            will be                                                              */
         UINT calculatedNumberOfindices = primitiveToGl(PrimitiveType, NumPrimitives, &glPrimType);
         if (numberOfVertices == 0 )
             numberOfVertices = calculatedNumberOfindices;
 
-        if (This->useDrawStridedSlow) {
+        if(!This->strided_streams.u.s.position_transformed && !use_vs(This)) {
+            if(This->activeContext->num_untracked_materials &&
+               This->stateBlock->renderState[WINED3DRS_LIGHTING]) {
+                IWineD3DVertexBufferImpl *vb;
+
+                FIXME("Using software emulation because not all material properties could be tracked\n");
+                emulation = TRUE;
+
+                strided = &stridedlcl;
+                memcpy(&stridedlcl, &This->strided_streams, sizeof(stridedlcl));
+
+#define FIXVBO(type) \
+if(stridedlcl.u.s.type.VBO) { \
+    vb = (IWineD3DVertexBufferImpl *) This->stateBlock->streamSource[stridedlcl.u.s.type.streamNo]; \
+    stridedlcl.u.s.type.VBO = 0; \
+    stridedlcl.u.s.type.lpData = (BYTE *) ((unsigned long) stridedlcl.u.s.type.lpData + (unsigned long) vb->resource.allocatedMemory); \
+}
+                FIXVBO(position);
+                FIXVBO(blendWeights);
+                FIXVBO(blendMatrixIndices);
+                FIXVBO(normal);
+                FIXVBO(pSize);
+                FIXVBO(diffuse);
+                FIXVBO(specular);
+                for(i = 0; i < WINED3DDP_MAXTEXCOORD; i++) FIXVBO(texCoords[i]);
+                FIXVBO(position2);
+                FIXVBO(normal2);
+                FIXVBO(tangent);
+                FIXVBO(binormal);
+                FIXVBO(tessFactor);
+                FIXVBO(fog);
+                FIXVBO(depth);
+                FIXVBO(sample);
+#undef FIXVBO
+            }
+        }
+
+        if (This->useDrawStridedSlow || emulation) {
             /* Immediate mode drawing */
-            drawStridedSlow(iface, &This->strided_streams, calculatedNumberOfindices,
+            drawStridedSlow(iface, strided, calculatedNumberOfindices,
                             glPrimType, idxData, idxSize, minIndex, StartIdx, StartVertexIndex);
         } else if(This->instancedDraw) {
             /* Instancing emulation with mixing immediate mode and arrays */
@@ -1238,7 +1124,7 @@ void drawPrimitive(IWineD3DDevice *iface,
            {
             IWineD3DSurface *pSur;
             int textureNo;
-            for (textureNo = 0; textureNo < GL_LIMITS(textures); ++textureNo) {
+            for (textureNo = 0; textureNo < MAX_COMBINED_SAMPLERS; ++textureNo) {
                 if (This->stateBlock->textures[textureNo] != NULL) {
                     sprintf(buffer, "/tmp/texture_%p_%d_%d.tga", This->stateBlock->textures[textureNo], primCounter, textureNo);
                     TRACE("Saving texture %s\n", buffer);

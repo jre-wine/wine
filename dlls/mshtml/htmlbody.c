@@ -40,6 +40,10 @@ typedef struct {
 
     HTMLTextContainer text_container;
 
+    ConnectionPointContainer cp_container;
+    ConnectionPoint cp_propnotif;
+    ConnectionPoint cp_txtcontevents;
+
     HTMLElement *element;
     nsIDOMHTMLBodyElement *nsbody;
 } HTMLBodyElement;
@@ -68,6 +72,9 @@ static HRESULT WINAPI HTMLBodyElement_QueryInterface(IHTMLBodyElement *iface,
     }else if(IsEqualGUID(&IID_IHTMLTextContainer, riid)) {
         TRACE("(%p)->(IID_IHTMLTextContainer %p)\n", This, ppv);
         *ppv = HTMLTEXTCONT(&This->text_container);
+    }else if(IsEqualGUID(&IID_IConnectionPointContainer, riid)) {
+        TRACE("(%p)->(IID_IConnectionPointContainer %p)\n", This, ppv);
+        *ppv = CONPTCONT(&This->cp_container);
     }
 
     if(*ppv) {
@@ -428,6 +435,7 @@ static void HTMLBodyElement_destructor(IUnknown *iface)
 {
     HTMLBodyElement *This = HTMLBODY_THIS(iface);
 
+    ConnectionPointContainer_Destroy(&This->cp_container);
     nsIDOMHTMLBodyElement_Release(This->nsbody);
     mshtml_free(This);
 }
@@ -486,6 +494,12 @@ void HTMLBodyElement_Create(HTMLElement *element)
     ret->element = element;
 
     HTMLTextContainer_Init(&ret->text_container, element);
+
+    ConnectionPoint_Init(&ret->cp_propnotif, CONPTCONT(&ret->cp_container),
+            &IID_IPropertyNotifySink, NULL);
+    ConnectionPoint_Init(&ret->cp_txtcontevents, CONPTCONT(&ret->cp_container),
+            &DIID_HTMLTextContainerEvents, &ret->cp_propnotif);
+    ConnectionPointContainer_Init(&ret->cp_container, &ret->cp_propnotif, (IUnknown*)HTMLBODY(ret));
 
     nsres = nsIDOMHTMLElement_QueryInterface(element->nselem, &IID_nsIDOMHTMLBodyElement,
                                              (void**)&ret->nsbody);

@@ -1636,7 +1636,7 @@ static void MSFT_ReadValue( VARIANT * pVar, int offset, TLBContext *pcx )
             MSFT_Read(ptr, size, pcx, DO_NOT_SEEK);/* read string (ANSI) */
             V_BSTR(pVar)=SysAllocStringLen(NULL,size);
             /* FIXME: do we need a AtoW conversion here? */
-            V_UNION(pVar, bstrVal[size])=L'\0';
+            V_UNION(pVar, bstrVal[size])='\0';
             while(size--) V_UNION(pVar, bstrVal[size])=ptr[size];
             TLB_Free(ptr);
 	}
@@ -5256,6 +5256,27 @@ _invoke(FARPROC func,CALLCONV callconv, int nrargs, DWORD *args) {
 	case 23:
 		res = func(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],args[9],args[10],args[11],args[12],args[13],args[14],args[15],args[16],args[17],args[18],args[19],args[20],args[21],args[22]);
 		break;
+	case 24:
+                res = func(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],args[9],args[10],args[11],args[12],args[13],args[14],args[15],args[16],args[17],args[18],args[19],args[20],args[21],args[22],args[23]);
+                break;
+	case 25:
+                res = func(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],args[9],args[10],args[11],args[12],args[13],args[14],args[15],args[16],args[17],args[18],args[19],args[20],args[21],args[22],args[23],args[24]);
+                break;
+	case 26:
+                res = func(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],args[9],args[10],args[11],args[12],args[13],args[14],args[15],args[16],args[17],args[18],args[19],args[20],args[21],args[22],args[23],args[24],args[25]);
+                break;
+	case 27:
+                res = func(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],args[9],args[10],args[11],args[12],args[13],args[14],args[15],args[16],args[17],args[18],args[19],args[20],args[21],args[22],args[23],args[24],args[25],args[26]);
+                break;
+	case 28:
+                res = func(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],args[9],args[10],args[11],args[12],args[13],args[14],args[15],args[16],args[17],args[18],args[19],args[20],args[21],args[22],args[23],args[24],args[25],args[26],args[27]);
+                break;
+	case 29:
+                res = func(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],args[9],args[10],args[11],args[12],args[13],args[14],args[15],args[16],args[17],args[18],args[19],args[20],args[21],args[22],args[23],args[24],args[25],args[26],args[27],args[28]);
+                break;
+	case 30:
+                res = func(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],args[9],args[10],args[11],args[12],args[13],args[14],args[15],args[16],args[17],args[18],args[19],args[20],args[21],args[22],args[23],args[24],args[25],args[26],args[27],args[28],args[29]);
+                break;
 	default:
 		FIXME("unsupported number of arguments %d in stdcall\n",nrargs);
 		res = -1;
@@ -5307,7 +5328,7 @@ static HRESULT userdefined_to_variantvt(ITypeInfo *tinfo, const TYPEDESC *tdesc,
         break;
 
     case TKIND_INTERFACE:
-        if (IsEqualIID(&IID_IDispatch, &tattr->guid))
+        if (tattr->wTypeFlags & TYPEFLAG_FDISPATCHABLE)
            *vt |= VT_DISPATCH;
         else
            *vt |= VT_UNKNOWN;

@@ -1578,6 +1578,7 @@ typedef enum _GL_SupportedExt {
   /* NVIDIA */
   NV_FOG_DISTANCE,
   NV_FRAGMENT_PROGRAM,
+  NV_FRAGMENT_PROGRAM2,
   NV_OCCLUSION_QUERY,
   NV_REGISTER_COMBINERS,
   NV_REGISTER_COMBINERS2,
@@ -1587,6 +1588,9 @@ typedef enum _GL_SupportedExt {
   NV_TEXTURE_SHADER2,
   NV_TEXTURE_SHADER3,
   NV_VERTEX_PROGRAM,
+  NV_VERTEX_PROGRAM1_1,
+  NV_VERTEX_PROGRAM2,
+  NV_VERTEX_PROGRAM3,
   NV_FENCE,
   /* ATI */
   ATI_SEPARATE_STENCIL,
@@ -1961,7 +1965,9 @@ typedef struct _WineD3D_GL_Info {
   UINT   max_lights;
   UINT   max_textures;
   UINT   max_texture_stages;
-  UINT   max_samplers;
+  UINT   max_fragment_samplers;
+  UINT   max_vertex_samplers;
+  UINT   max_combined_samplers;
   UINT   max_sampler_stages;
   UINT   max_clipplanes;
   UINT   max_texture_size;

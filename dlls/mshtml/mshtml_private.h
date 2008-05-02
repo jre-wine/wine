@@ -71,6 +71,30 @@ typedef enum {
     EDITMODE        
 } USERMODE;
 
+typedef struct {
+    const IConnectionPointContainerVtbl  *lpConnectionPointContainerVtbl;
+
+    ConnectionPoint *cp_list;
+    IUnknown *outer;
+} ConnectionPointContainer;
+
+struct ConnectionPoint {
+    const IConnectionPointVtbl *lpConnectionPointVtbl;
+
+    IConnectionPointContainer *container;
+
+    union {
+        IUnknown *unk;
+        IDispatch *disp;
+        IPropertyNotifySink *propnotif;
+    } *sinks;
+    DWORD sinks_size;
+
+    IID iid;
+
+    ConnectionPoint *next;
+};
+
 struct HTMLDocument {
     const IHTMLDocument2Vtbl              *lpHTMLDocument2Vtbl;
     const IHTMLDocument3Vtbl              *lpHTMLDocument3Vtbl;
@@ -87,7 +111,6 @@ struct HTMLDocument {
     const IOleCommandTargetVtbl           *lpOleCommandTargetVtbl;
     const IOleControlVtbl                 *lpOleControlVtbl;
     const IHlinkTargetVtbl                *lpHlinkTargetVtbl;
-    const IConnectionPointContainerVtbl   *lpConnectionPointContainerVtbl;
     const IPersistStreamInitVtbl          *lpPersistStreamInitVtbl;
 
     LONG ref;
@@ -116,15 +139,22 @@ struct HTMLDocument {
     BOOL window_active;
     BOOL has_key_path;
     BOOL container_locked;
+    BOOL focus;
 
     DWORD update;
 
-    ConnectionPoint *cp_htmldocevents;
-    ConnectionPoint *cp_htmldocevents2;
-    ConnectionPoint *cp_propnotif;
+    ConnectionPointContainer cp_container;
+    ConnectionPoint cp_htmldocevents;
+    ConnectionPoint cp_htmldocevents2;
+    ConnectionPoint cp_propnotif;
 
     HTMLDOMNode *nodes;
 };
+
+typedef struct {
+    const nsIDOMEventListenerVtbl      *lpDOMEventListenerVtbl;
+    NSContainer *This;
+} nsEventListener;
 
 struct NSContainer {
     const nsIWebBrowserChromeVtbl       *lpWebBrowserChromeVtbl;
@@ -135,7 +165,11 @@ struct NSContainer {
     const nsIInterfaceRequestorVtbl     *lpInterfaceRequestorVtbl;
     const nsIWeakReferenceVtbl          *lpWeakReferenceVtbl;
     const nsISupportsWeakReferenceVtbl  *lpSupportsWeakReferenceVtbl;
-    const nsIDOMEventListenerVtbl       *lpDOMEventListenerVtbl;
+
+    nsEventListener blur_listener;
+    nsEventListener focus_listener;
+    nsEventListener keypress_listener;
+    nsEventListener load_listener;
 
     nsIWebBrowser *webbrowser;
     nsIWebNavigation *navigation;
@@ -311,15 +345,17 @@ void HTMLDocument_View_Init(HTMLDocument*);
 void HTMLDocument_Window_Init(HTMLDocument*);
 void HTMLDocument_Service_Init(HTMLDocument*);
 void HTMLDocument_Hlink_Init(HTMLDocument*);
-void HTMLDocument_ConnectionPoints_Init(HTMLDocument*);
 
-void HTMLDocument_ConnectionPoints_Destroy(HTMLDocument*);
+void ConnectionPoint_Init(ConnectionPoint*,IConnectionPointContainer*,REFIID,ConnectionPoint*);
+void ConnectionPointContainer_Init(ConnectionPointContainer*,ConnectionPoint*,IUnknown*);
+void ConnectionPointContainer_Destroy(ConnectionPointContainer*);
 
 NSContainer *NSContainer_Create(HTMLDocument*,NSContainer*);
 void NSContainer_Release(NSContainer*);
 
 void HTMLDocument_LockContainer(HTMLDocument*,BOOL);
 void show_context_menu(HTMLDocument*,DWORD,POINT*);
+void notif_focus(HTMLDocument*);
 
 void show_tooltip(HTMLDocument*,DWORD,DWORD,LPCWSTR);
 void hide_tooltip(HTMLDocument*);
@@ -350,6 +386,8 @@ void nsAString_Finish(nsAString*);
 nsIInputStream *create_nsstream(const char*,PRInt32);
 nsICommandParams *create_nscommand_params(void);
 void nsnode_to_nsstring(nsIDOMNode*,nsAString*);
+nsIController *get_editor_controller(NSContainer*);
+void init_nsevents(NSContainer*);
 
 BSCallback *create_bscallback(IMoniker*);
 HRESULT start_binding(BSCallback*);

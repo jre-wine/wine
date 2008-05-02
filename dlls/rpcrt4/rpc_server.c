@@ -235,7 +235,12 @@ static void RPCRT4_process_packet(RpcConnection* conn, RpcPktHdr* hdr, RPC_MESSA
 
       sif = RPCRT4_find_interface(object_uuid, &conn->ActiveInterface, TRUE);
       if (!sif) {
-        /* FIXME: send fault packet? */
+        WARN("interface %s no longer registered, returning fault packet\n", debugstr_guid(&conn->ActiveInterface.SyntaxGUID));
+        response = RPCRT4_BuildFaultHeader(NDR_LOCAL_DATA_REPRESENTATION,
+                                           RPC_S_UNKNOWN_IF);
+
+        RPCRT4_Send(conn, response, NULL, 0);
+        RPCRT4_FreeHeader(response);
         break;
       }
       msg->RpcInterfaceInformation = sif->If;
@@ -274,7 +279,10 @@ static void RPCRT4_process_packet(RpcConnection* conn, RpcPktHdr* hdr, RPC_MESSA
         msg->RpcFlags |= WINE_RPCFLAG_EXCEPTION;
         msg->BufferLength = sizeof(DWORD);
         I_RpcGetBuffer(msg);
-        *(DWORD*)msg->Buffer = GetExceptionCode();
+        if (GetExceptionCode() == STATUS_ACCESS_VIOLATION)
+            *(DWORD*)msg->Buffer = ERROR_NOACCESS;
+        else
+            *(DWORD*)msg->Buffer = GetExceptionCode();
       } __ENDTRY
 
       /* send response packet */

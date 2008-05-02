@@ -582,17 +582,12 @@ IDirectDrawSurfaceImpl_Lock(IDirectDrawSurface7 *iface,
      * for the supported values. The others are ignored by WineD3D
      */
 
-    /* Hmm. Anarchy online passes an uninitialized surface descriptor,
-     * that means it doesn't have dwSize set. Init it to some sane
-     * value
-     */
-    if(DDSD->dwSize <= sizeof(DDSURFACEDESC))
+    if(DDSD->dwSize != sizeof(DDSURFACEDESC) &&
+       DDSD->dwSize != sizeof(DDSURFACEDESC2))
     {
-        DDSD->dwSize = sizeof(DDSURFACEDESC);
-    }
-    else
-    {
-        DDSD->dwSize = sizeof(DDSURFACEDESC2);
+        WARN("Invalid structure size %d, returning DDERR_INVALIDPARAMS\n", DDERR_INVALIDPARAMS);
+        LeaveCriticalSection(&ddraw_cs);
+        return DDERR_INVALIDPARAMS;
     }
 
     hr = IWineD3DSurface_LockRect(This->WineD3DSurface,
@@ -758,7 +753,31 @@ IDirectDrawSurfaceImpl_Blt(IDirectDrawSurface7 *iface,
         return DDERR_INVALIDPARAMS;
     }
 
+    /* Sizes can change, therefore hold the lock when testing the rectangles */
     EnterCriticalSection(&ddraw_cs);
+    if(DestRect)
+    {
+        if(DestRect->top >= DestRect->bottom || DestRect->left >= DestRect->right ||
+           DestRect->right > This->surface_desc.dwWidth ||
+           DestRect->bottom > This->surface_desc.dwHeight)
+        {
+            WARN("Source rectangle is invalid, returning DDERR_INVALIDRECT\n");
+            LeaveCriticalSection(&ddraw_cs);
+            return DDERR_INVALIDRECT;
+        }
+    }
+    if(Src && SrcRect)
+    {
+        if(SrcRect->top >= SrcRect->bottom || SrcRect->left >=SrcRect->right ||
+           SrcRect->right > Src->surface_desc.dwWidth ||
+           SrcRect->bottom > Src->surface_desc.dwHeight)
+        {
+            WARN("Source rectangle is invalid, returning DDERR_INVALIDRECT\n");
+            LeaveCriticalSection(&ddraw_cs);
+            return DDERR_INVALIDRECT;
+        }
+    }
+
     if(Flags & DDBLT_KEYSRC && (!Src || !(Src->surface_desc.dwFlags & DDSD_CKSRCBLT))) {
         WARN("DDBLT_KEYDEST blit without color key in surface, returning DDERR_INVALIDPARAMS\n");
         LeaveCriticalSection(&ddraw_cs);
@@ -1592,11 +1611,10 @@ IDirectDrawSurfaceImpl_GetSurfaceDesc(IDirectDrawSurface7 *iface,
     if(!DDSD)
         return DDERR_INVALIDPARAMS;
 
-    if ((DDSD->dwSize < sizeof(DDSURFACEDESC)) ||
-        (DDSD->dwSize > sizeof(DDSURFACEDESC2)))
+    if (DDSD->dwSize != sizeof(DDSURFACEDESC2))
     {
-        ERR("Impossible/Strange struct size %d.\n",DDSD->dwSize);
-        return DDERR_GENERIC;
+        WARN("Incorrect struct size %d, returning DDERR_INVALIDPARAMS\n",DDSD->dwSize);
+        return DDERR_INVALIDPARAMS;
     }
 
     EnterCriticalSection(&ddraw_cs);

@@ -238,6 +238,10 @@ static const WCHAR szDependencies[] = {
        'D','e','p','e','n','d','e','n','c','i','e','s',0};
 static const WCHAR szDependOnService[] = {
        'D','e','p','e','n','d','O','n','S','e','r','v','i','c','e',0};
+static const WCHAR szObjectName[] = {
+       'O','b','j','e','c','t','N','a','m','e',0};
+static const WCHAR szTag[] = {
+       'T','a','g',0};
 
 struct reg_value {
     DWORD type;
@@ -1317,6 +1321,8 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
     if( lpLoadOrderGroup )
         service_set_string( &val[n++], szGroup, lpLoadOrderGroup );
 
+    /* FIXME: lpDependencies is used to create both DependOnService and DependOnGroup
+     * There is no such key as what szDependencies refers to */
     if( lpDependencies )
         service_set_multi_string( &val[n++], szDependencies, lpDependencies );
 
@@ -1324,7 +1330,7 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
         FIXME("Don't know how to add a Password for a service.\n");
 
     if( lpServiceStartName )
-        service_set_string( &val[n++], szDependOnService, lpServiceStartName );
+        service_set_string( &val[n++], szObjectName, lpServiceStartName );
 
     r = service_write_values( hKey, val, n );
     if( r != ERROR_SUCCESS )
@@ -1811,7 +1817,7 @@ BOOL WINAPI QueryServiceConfigA( SC_HANDLE hService, LPQUERY_SERVICE_CONFIGA con
     MAP_STR( lpDisplayName );
 #undef MAP_STR
 
-    *needed = p - buffer;
+    *needed = p - (LPSTR)config;
     ret = TRUE;
 
 done:
@@ -1845,6 +1851,11 @@ QueryServiceConfigW( SC_HANDLE hService,
     }
     hKey = hsvc->hkey;
 
+    /* TODO: Check which members are mandatory and what the registry types
+     * should be. This should of course also be tested when a service is
+     * created.
+     */
+
     /* calculate the size required first */
     total = sizeof (QUERY_SERVICE_CONFIGW);
 
@@ -1867,6 +1878,8 @@ QueryServiceConfigW( SC_HANDLE hService,
     r = RegQueryValueExW( hKey, szGroup, 0, &type, NULL, &sz );
     if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
         total += sz;
+    else
+	total += sizeof(WCHAR);
 
     sz = 0;
     r = RegQueryValueExW( hKey, szDependencies, 0, &type, NULL, &sz );
@@ -1876,14 +1889,18 @@ QueryServiceConfigW( SC_HANDLE hService,
 	total += sizeof(WCHAR);
 
     sz = 0;
-    r = RegQueryValueExW( hKey, szStart, 0, &type, NULL, &sz );
+    r = RegQueryValueExW( hKey, szObjectName, 0, &type, NULL, &sz );
     if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
         total += sz;
+    else
+	total += sizeof(WCHAR);
 
     sz = 0;
     r = RegQueryValueExW( hKey, szDisplayName, 0, &type, NULL, &sz );
     if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
         total += sz;
+    else
+	total += sizeof(WCHAR);
 
     *pcbBytesNeeded = total;
 
@@ -1898,18 +1915,23 @@ QueryServiceConfigW( SC_HANDLE hService,
 
     sz = sizeof val;
     r = RegQueryValueExW( hKey, szType, 0, &type, (LPBYTE)&val, &sz );
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_DWORD ) )
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_DWORD ) )
         lpServiceConfig->dwServiceType = val;
 
     sz = sizeof val;
     r = RegQueryValueExW( hKey, szStart, 0, &type, (LPBYTE)&val, &sz );
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_DWORD ) )
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_DWORD ) )
         lpServiceConfig->dwStartType = val;
 
     sz = sizeof val;
     r = RegQueryValueExW( hKey, szError, 0, &type, (LPBYTE)&val, &sz );
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_DWORD ) )
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_DWORD ) )
         lpServiceConfig->dwErrorControl = val;
+
+    sz = sizeof val;
+    r = RegQueryValueExW( hKey, szTag, 0, &type, (LPBYTE)&val, &sz );
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_DWORD ) )
+        lpServiceConfig->dwTagId = val;
 
     /* now do the strings */
     p = (LPBYTE) &lpServiceConfig[1];
@@ -1935,17 +1957,8 @@ QueryServiceConfigW( SC_HANDLE hService,
 
     sz = n;
     r = RegQueryValueExW( hKey, szGroup, 0, &type, p, &sz );
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_SZ ) )
-    {
-        lpServiceConfig->lpLoadOrderGroup = (LPWSTR) p;
-        p += sz;
-        n -= sz;
-    }
-
-    sz = n;
-    r = RegQueryValueExW( hKey, szDependencies, 0, &type, p, &sz );
-    lpServiceConfig->lpDependencies = (LPWSTR) p;
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_SZ ) )
+    lpServiceConfig->lpLoadOrderGroup = (LPWSTR) p;
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
     {
         p += sz;
         n -= sz;
@@ -1957,11 +1970,59 @@ QueryServiceConfigW( SC_HANDLE hService,
 	n -= sizeof(WCHAR);
     }
 
+    sz = n;
+    r = RegQueryValueExW( hKey, szDependencies, 0, &type, p, &sz );
+    lpServiceConfig->lpDependencies = (LPWSTR) p;
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
+    {
+        p += sz;
+        n -= sz;
+    }
+    else
+    {
+	*(WCHAR *) p = 0;
+	p += sizeof(WCHAR);
+	n -= sizeof(WCHAR);
+    }
+
+    sz = n;
+    r = RegQueryValueExW( hKey, szObjectName, 0, &type, p, &sz );
+    lpServiceConfig->lpServiceStartName = (LPWSTR) p;
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
+    {
+        p += sz;
+        n -= sz;
+    }
+    else
+    {
+        *(WCHAR *) p = 0;
+        p += sizeof(WCHAR);
+        n -= sizeof(WCHAR);
+    }
+
+    sz = n;
+    r = RegQueryValueExW( hKey, szDisplayName, 0, &type, p, &sz );
+    lpServiceConfig->lpDisplayName = (LPWSTR) p;
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
+    {
+        p += sz;
+        n -= sz;
+    }
+    else
+    {
+        *(WCHAR *) p = 0;
+        p += sizeof(WCHAR);
+        n -= sizeof(WCHAR);
+    }
+
     if( n < 0 )
         ERR("Buffer overflow!\n");
 
-    TRACE("Image path = %s\n", debugstr_w(lpServiceConfig->lpBinaryPathName) );
-    TRACE("Group      = %s\n", debugstr_w(lpServiceConfig->lpLoadOrderGroup) );
+    TRACE("Image path           = %s\n", debugstr_w(lpServiceConfig->lpBinaryPathName) );
+    TRACE("Group                = %s\n", debugstr_w(lpServiceConfig->lpLoadOrderGroup) );
+    TRACE("Dependencies         = %s\n", debugstr_w(lpServiceConfig->lpDependencies) );
+    TRACE("Service account name = %s\n", debugstr_w(lpServiceConfig->lpServiceStartName) );
+    TRACE("Display name         = %s\n", debugstr_w(lpServiceConfig->lpDisplayName) );
 
     return TRUE;
 }
@@ -2209,6 +2270,8 @@ BOOL WINAPI ChangeServiceConfigW( SC_HANDLE hService, DWORD dwServiceType,
     if( lpLoadOrderGroup )
         service_set_string( &val[n++], szGroup, lpLoadOrderGroup );
 
+    /* FIXME: lpDependencies is used to create/change both DependOnService and DependOnGroup
+     * There is no such key as what szDependencies refers to */
     if( lpDependencies )
         service_set_multi_string( &val[n++], szDependencies, lpDependencies );
 
@@ -2216,7 +2279,7 @@ BOOL WINAPI ChangeServiceConfigW( SC_HANDLE hService, DWORD dwServiceType,
         FIXME("ignoring password\n");
 
     if( lpServiceStartName )
-        service_set_string( &val[n++], szDependOnService, lpServiceStartName );
+        service_set_string( &val[n++], szObjectName, lpServiceStartName );
 
     r = service_write_values( hsvc->hkey, val, n );
 

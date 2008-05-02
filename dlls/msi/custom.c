@@ -157,7 +157,7 @@ static LPWSTR msi_get_deferred_action(LPCWSTR action, LPCWSTR actiondata,
 
 static void set_deferred_action_props(MSIPACKAGE *package, LPWSTR deferred_data)
 {
-    LPWSTR end, beg = deferred_data;
+    LPWSTR end, beg = deferred_data + 1;
 
     end = strchrW(beg, ';');
     *end = '\0';
@@ -174,7 +174,7 @@ static void set_deferred_action_props(MSIPACKAGE *package, LPWSTR deferred_data)
     MSI_SetPropertyW(package, ProdCode, beg);
 }
 
-UINT ACTION_CustomAction(MSIPACKAGE *package,LPCWSTR action, BOOL execute)
+UINT ACTION_CustomAction(MSIPACKAGE *package, LPCWSTR action, UINT script, BOOL execute)
 {
     UINT rc = ERROR_SUCCESS;
     MSIRECORD * row = 0;
@@ -189,11 +189,10 @@ UINT ACTION_CustomAction(MSIPACKAGE *package,LPCWSTR action, BOOL execute)
     LPWSTR action_copy = strdupW(action);
     WCHAR *deformated=NULL;
 
-    /* deferred action: [CustomActionData]Action */
+    /* deferred action: [properties]Action */
     if ((ptr = strchrW(action_copy, ']')))
     {
-        deferred_data = action_copy + 1;
-        *ptr = '\0';
+        deferred_data = action_copy;
         action = ptr + 1;
     }
 
@@ -258,6 +257,21 @@ UINT ACTION_CustomAction(MSIPACKAGE *package,LPCWSTR action, BOOL execute)
             static const WCHAR szBlank[] = {0};
 
             LPWSTR actiondata = msi_dup_property( package, action );
+
+            switch (script)
+            {
+            case INSTALL_SCRIPT:
+                package->scheduled_action_running = TRUE;
+                break;
+            case COMMIT_SCRIPT:
+                package->commit_action_running = TRUE;
+                break;
+            case ROLLBACK_SCRIPT:
+                package->rollback_action_running = TRUE;
+                break;
+            default:
+                break;
+            }
 
             if (deferred_data)
                 set_deferred_action_props(package, deferred_data);
@@ -335,6 +349,9 @@ UINT ACTION_CustomAction(MSIPACKAGE *package,LPCWSTR action, BOOL execute)
     }
 
 end:
+    package->scheduled_action_running = FALSE;
+    package->commit_action_running = FALSE;
+    package->rollback_action_running = FALSE;
     msi_free(action_copy);
     msiobj_release(&row->hdr);
     return rc;
@@ -476,6 +493,7 @@ static UINT wait_process_handle(MSIPACKAGE* package, UINT type,
 
 typedef struct _msi_custom_action_info {
     struct list entry;
+    LONG refs;
     MSIPACKAGE *package;
     LPWSTR source;
     LPWSTR target;
@@ -485,19 +503,30 @@ typedef struct _msi_custom_action_info {
     GUID guid;
 } msi_custom_action_info;
 
-static void free_custom_action_data( msi_custom_action_info *info )
+static void release_custom_action_data( msi_custom_action_info *info )
 {
     EnterCriticalSection( &msi_custom_action_cs );
-    list_remove( &info->entry );
+
+    if (!--info->refs)
+    {
+        list_remove( &info->entry );
+        if (info->handle)
+            CloseHandle( info->handle );
+        msi_free( info->action );
+        msi_free( info->source );
+        msi_free( info->target );
+        msiobj_release( &info->package->hdr );
+        msi_free( info );
+    }
+
     LeaveCriticalSection( &msi_custom_action_cs );
-    if (info->handle)
-        CloseHandle( info->handle );
-    msi_free( info->action );
-    msi_free( info->source );
-    msi_free( info->target );
-    msiobj_release( &info->package->hdr );
-    msi_free( info );
 }
+
+/* must be called inside msi_custom_action_cs if info is in the pending custom actions list */
+static void addref_custom_action_data( msi_custom_action_info *info )
+{
+    info->refs++;
+ }
 
 static UINT wait_thread_handle( msi_custom_action_info *info )
 {
@@ -512,7 +541,7 @@ static UINT wait_thread_handle( msi_custom_action_info *info )
         if (!(info->type & msidbCustomActionTypeContinue))
             rc = custom_get_thread_return( info->package, info->handle );
 
-        free_custom_action_data( info );
+        release_custom_action_data( info );
     }
     else
     {
@@ -533,6 +562,7 @@ static msi_custom_action_info *find_action_by_guid( const GUID *guid )
     {
         if (IsEqualGUID( &info->guid, guid ))
         {
+            addref_custom_action_data( info );
             found = TRUE;
             break;
         }
@@ -640,7 +670,7 @@ static DWORD WINAPI ACTION_CallDllFunction( const GUID *guid )
 
     if (info->type & msidbCustomActionTypeAsync &&
         info->type & msidbCustomActionTypeContinue)
-        free_custom_action_data( info );
+        release_custom_action_data( info );
 
     return r;
 }
@@ -677,6 +707,8 @@ static DWORD WINAPI ACTION_CAInstallPackage(const GUID *guid)
     r = MsiInstallProductW(info->source, info->target);
     MsiSetInternalUI(old_level, NULL);
 
+    release_custom_action_data(info);
+
     return r;
 }
 
@@ -705,6 +737,7 @@ static msi_custom_action_info *do_msidbCustomActionTypeDll(
         return NULL;
 
     msiobj_addref( &package->hdr );
+    info->refs = 2; /* 1 for our caller and 1 for thread we created */
     info->package = package;
     info->type = type;
     info->target = strdupW( target );
@@ -719,7 +752,9 @@ static msi_custom_action_info *do_msidbCustomActionTypeDll(
     info->handle = CreateThread( NULL, 0, DllThread, &info->guid, 0, NULL );
     if (!info->handle)
     {
-        free_custom_action_data( info );
+        /* release both references */
+        release_custom_action_data( info );
+        release_custom_action_data( info );
         return NULL;
     }
 
@@ -736,6 +771,7 @@ static msi_custom_action_info *do_msidbCAConcurrentInstall(
         return NULL;
 
     msiobj_addref( &package->hdr );
+    info->refs = 2; /* 1 for our caller and 1 for thread we created */
     info->package = package;
     info->type = type;
     info->target = strdupW( target );
@@ -750,7 +786,9 @@ static msi_custom_action_info *do_msidbCAConcurrentInstall(
     info->handle = CreateThread( NULL, 0, ConcurrentInstallThread, &info->guid, 0, NULL );
     if (!info->handle)
     {
-        free_custom_action_data( info );
+        /* release both references */
+        release_custom_action_data( info );
+        release_custom_action_data( info );
         return NULL;
     }
 
@@ -1086,7 +1124,7 @@ static DWORD WINAPI ACTION_CallScript( const GUID *guid )
 
     if (info->type & msidbCustomActionTypeAsync &&
         info->type & msidbCustomActionTypeContinue)
-        free_custom_action_data( info );
+        release_custom_action_data( info );
 
     return S_OK;
 }
@@ -1116,6 +1154,7 @@ static msi_custom_action_info *do_msidbCustomActionTypeScript(
         return NULL;
 
     msiobj_addref( &package->hdr );
+    info->refs = 2; /* 1 for our caller and 1 for thread we created */
     info->package = package;
     info->type = type;
     info->target = strdupW( function );
@@ -1130,7 +1169,9 @@ static msi_custom_action_info *do_msidbCustomActionTypeScript(
     info->handle = CreateThread( NULL, 0, ScriptThread, &info->guid, 0, NULL );
     if (!info->handle)
     {
-        free_custom_action_data( info );
+        /* release both references */
+        release_custom_action_data( info );
+        release_custom_action_data( info );
         return NULL;
     }
 
@@ -1312,7 +1353,6 @@ void ACTION_FinishCustomActions(const MSIPACKAGE* package)
         {
             if (DuplicateHandle(GetCurrentProcess(), info->handle, GetCurrentProcess(), &wait_handles[handle_count], SYNCHRONIZE, FALSE, 0))
                 handle_count++;
-            free_custom_action_data( info );
         }
     }
 

@@ -245,6 +245,59 @@ s_square_test_us(test_us_t *tus)
   return n * n;
 }
 
+double
+s_square_encu(encu_t *eu)
+{
+  switch (eu->t)
+  {
+  case ENCU_I: return eu->tagged_union.i * eu->tagged_union.i;
+  case ENCU_F: return eu->tagged_union.f * eu->tagged_union.f;
+  default:
+    return 0.0;
+  }
+}
+
+int
+s_sum_parr(int *a[3])
+{
+  return s_sum_pcarr(a, 3);
+}
+
+int
+s_sum_pcarr(int *a[], int n)
+{
+  int i, s = 0;
+  for (i = 0; i < n; ++i)
+    s += *a[i];
+  return s;
+}
+
+int
+s_enum_ord(e_t e)
+{
+  switch (e)
+  {
+  case E1: return 1;
+  case E2: return 2;
+  case E3: return 3;
+  case E4: return 4;
+  default:
+    return 0;
+  }
+}
+
+double
+s_square_encue(encue_t *eue)
+{
+  switch (eue->t)
+  {
+  case E1: return eue->tagged_union.i1 * eue->tagged_union.i1;
+  case E2: return eue->tagged_union.f2 * eue->tagged_union.f2;
+  default:
+    return 0.0;
+  }
+}
+
 void
 s_stop(void)
 {
@@ -358,11 +411,18 @@ basic_tests(void)
   ok(dot_copy_vectors(vec1, vec2) == -21, "RPC dot_copy_vectors\n");
   ok(sum_fixed_array(f) == -2, "RPC sum_fixed_array\n");
   ok(sum_sp(&sp) == 29, "RPC sum_sp\n");
+
+  ok(enum_ord(E1) == 1, "RPC enum_ord\n");
+  ok(enum_ord(E2) == 2, "RPC enum_ord\n");
+  ok(enum_ord(E3) == 3, "RPC enum_ord\n");
+  ok(enum_ord(E4) == 4, "RPC enum_ord\n");
 }
 
 static void
 union_tests(void)
 {
+  encue_t eue;
+  encu_t eu;
   sun_t su;
   int i;
 
@@ -382,6 +442,22 @@ union_tests(void)
   su.u.pi = &i;
   i = 11;
   ok(square_sun(&su) == 121.0, "RPC square_sun\n");
+
+  eu.t = ENCU_I;
+  eu.tagged_union.i = 7;
+  ok(square_encu(&eu) == 49.0, "RPC square_encu\n");
+
+  eu.t = ENCU_F;
+  eu.tagged_union.f = 3.0;
+  ok(square_encu(&eu) == 9.0, "RPC square_encu\n");
+
+  eue.t = E1;
+  eue.tagged_union.i1 = 8;
+  ok(square_encue(&eue) == 64.0, "RPC square_encue\n");
+
+  eue.t = E2;
+  eue.tagged_union.f2 = 10.0;
+  ok(square_encue(&eue) == 100.0, "RPC square_encue\n");
 }
 
 static test_list_t *
@@ -473,13 +549,26 @@ us_t_UserFree(ULONG *flags, us_t *pus)
 static void
 pointer_tests(void)
 {
+  static int a[] = {1, 2, 3, 4};
   static char p1[] = "11";
   test_list_t *list = make_list(make_list(make_list(null_list())));
   static test_us_t tus = {{p1}};
+  int *pa[4];
 
   ok(test_list_length(list) == 3, "RPC test_list_length\n");
   ok(square_puint(p1) == 121, "RPC square_puint\n");
   ok(square_test_us(&tus) == 121, "RPC square_test_us\n");
+
+  pa[0] = &a[0];
+  pa[1] = &a[1];
+  pa[2] = &a[2];
+  ok(sum_parr(pa) == 6, "RPC sum_parr\n");
+
+  pa[0] = &a[0];
+  pa[1] = &a[1];
+  pa[2] = &a[2];
+  pa[3] = &a[3];
+  ok(sum_pcarr(pa, 4) == 10, "RPC sum_pcarr\n");
 
   free_list(list);
 }
@@ -511,7 +600,7 @@ array_tests(void)
   ok(sum_var_array(&c[2], 0) == 0, "RPC sum_conf_array\n");
 
   ok(dot_two_vectors(vs) == -4, "RPC dot_two_vectors\n");
-  cs = HeapAlloc(GetProcessHeap(), 0, offsetof(cs_t, ca) + 5 * sizeof cs->ca[0]);
+  cs = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(cs_t, ca[5]));
   cs->n = 5;
   cs->ca[0] = 3;
   cs->ca[1] = 5;
@@ -609,7 +698,17 @@ START_TEST(server)
   progname = argv[0];
 
   if (argc == 3)
-    client(argv[2]);
+  {
+    RpcTryExcept
+    {
+      client(argv[2]);
+    }
+    RpcExcept(TRUE)
+    {
+      trace("Exception %d\n", RpcExceptionCode());
+    }
+    RpcEndExcept
+  }
   else
     server();
 }

@@ -231,6 +231,8 @@ dlls/dsound/tests/dsound_crosstest.exe
 dlls/dsound/tests/testlist.c
 dlls/dsound/version.res
 dlls/dswave/version.res
+dlls/dwmapi/libdwmapi.def
+dlls/dwmapi/version.res
 dlls/dxdiagn/version.res
 dlls/gdi.exe16
 dlls/gdi32/libgdi32.def
@@ -383,6 +385,10 @@ dlls/ntdll/tests/testlist.c
 dlls/ntdll/version.res
 dlls/ntdsapi/libntdsapi.def
 dlls/ntoskrnl.exe/libntoskrnl.exe.def
+dlls/ntprint/ntprint.res
+dlls/ntprint/tests/*.ok
+dlls/ntprint/tests/ntprint_crosstest.exe
+dlls/ntprint/tests/testlist.c
 dlls/objsel/objsel.res
 dlls/odbc32/libodbc32.def
 dlls/odbccp32/libodbccp32.def
@@ -426,6 +432,7 @@ dlls/olesvr32/libolesvr32.def
 dlls/opengl32/libopengl32.def
 dlls/opengl32/version.res
 dlls/powrprof/libpowrprof.def
+dlls/printui/printui.res
 dlls/psapi/libpsapi.def
 dlls/psapi/tests/*.ok
 dlls/psapi/tests/psapi_crosstest.exe
@@ -742,9 +749,13 @@ libs/wpp/ppy.tab.c
 libs/wpp/ppy.tab.h
 loader/wine
 loader/wine-glibc
+loader/wine-glibc-installed
 loader/wine-kthread
+loader/wine-kthread-installed
 loader/wine-preloader
+loader/wine-preloader-installed
 loader/wine-pthread
+loader/wine-pthread-installed
 loader/wine.man
 programs/Makeprog.rules
 programs/clock/clock
@@ -868,6 +879,7 @@ programs/winetest/msvcrtd_test.exe
 programs/winetest/msxml3_test.exe
 programs/winetest/netapi32_test.exe
 programs/winetest/ntdll_test.exe
+programs/winetest/ntprint_test.exe
 programs/winetest/odbccp32_test.exe
 programs/winetest/ole32_test.exe
 programs/winetest/oleaut32_test.exe
@@ -910,6 +922,7 @@ programs/wordpad/wordpad.ico
 programs/xcopy/rsrc.res
 programs/xcopy/xcopy
 server/wineserver
+server/wineserver-installed
 server/wineserver.man
 tools/bin2res
 tools/fnt2bdf
@@ -937,9 +950,11 @@ tools/wineprefixcreate.man
 tools/wmc/mcy.tab.c
 tools/wmc/mcy.tab.h
 tools/wmc/wmc
+tools/wmc/wmc-installed
 tools/wmc/wmc.man
 tools/wrc/parser.tab.c
 tools/wrc/parser.tab.h
 tools/wrc/parser.yy.c
 tools/wrc/wrc
+tools/wrc/wrc-installed
 tools/wrc/wrc.man

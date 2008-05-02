@@ -2208,6 +2208,7 @@ static void BltParamTest(void)
     IDirectDrawSurface *surface1 = NULL, *surface2 = NULL;
     DDSURFACEDESC desc;
     HRESULT hr;
+    DDBLTFX BltFx;
     RECT valid = {10, 10, 20, 20};
     RECT invalid1 = {20, 10, 10, 20};
     RECT invalid2 = {20, 20, 20, 20};
@@ -2255,8 +2256,162 @@ static void BltParamTest(void)
     hr = IDirectDrawSurface_BltFast(surface1, 0, 0, surface1, NULL, 0);
     ok(hr == DD_OK, "BltFast blitting a surface onto itself returned %08x\n", hr);
 
+    /* Blt(non-fast) tests */
+    memset(&BltFx, 0, sizeof(BltFx));
+    BltFx.dwSize = sizeof(BltFx);
+    U5(BltFx).dwFillColor = 0xaabbccdd;
+
+    hr = IDirectDrawSurface_Blt(surface1, &valid, NULL, NULL, DDBLT_COLORFILL, &BltFx);
+    ok(hr == DD_OK, "IDirectDrawSurface_Blt with a valid rectangle for color fill returned %08x\n", hr);
+    hr = IDirectDrawSurface_Blt(surface1, &valid, NULL, &invalid3, DDBLT_COLORFILL, &BltFx);
+    ok(hr == DD_OK, "IDirectDrawSurface_Blt with a invalid, unused rectangle returned %08x\n", hr);
+    hr = IDirectDrawSurface_Blt(surface2, &invalid1, NULL, NULL, DDBLT_COLORFILL, &BltFx);
+    ok(hr == DDERR_INVALIDRECT, "IDirectDrawSurface_Blt with a with invalid rectangle 1 returned %08x\n", hr);
+    hr = IDirectDrawSurface_Blt(surface2, &invalid2, NULL, NULL, DDBLT_COLORFILL, &BltFx);
+    ok(hr == DDERR_INVALIDRECT, "IDirectDrawSurface_Blt with a with invalid rectangle 2 returned %08x\n", hr);
+    hr = IDirectDrawSurface_Blt(surface2, &invalid3, NULL, NULL, DDBLT_COLORFILL, &BltFx);
+    ok(hr == DDERR_INVALIDRECT, "IDirectDrawSurface_Blt with a with invalid rectangle 3 returned %08x\n", hr);
+    hr = IDirectDrawSurface_Blt(surface2, &invalid4, NULL, NULL, DDBLT_COLORFILL, &BltFx);
+    ok(hr == DDERR_INVALIDRECT, "IDirectDrawSurface_Blt with a with invalid rectangle 4 returned %08x\n", hr);
+
+    /* Valid on surface 1 */
+    hr = IDirectDrawSurface_Blt(surface1, &invalid4, NULL, NULL, DDBLT_COLORFILL, &BltFx);
+    ok(hr == DD_OK, "IDirectDrawSurface_Blt with a subrectangle fill returned %08x\n", hr);
+
+    /* Works - stretched blit */
+    hr = IDirectDrawSurface_Blt(surface1, NULL, surface2, NULL, 0, NULL);
+    ok(hr == DD_OK, "IDirectDrawSurface_Blt from a smaller to a bigger surface returned %08x\n", hr);
+    hr = IDirectDrawSurface_Blt(surface2, NULL, surface1, NULL, 0, NULL);
+    ok(hr == DD_OK, "IDirectDrawSurface_Blt from a bigger to a smaller surface %08x\n", hr);
+
+    /* Invalid dest rects in sourced blits */
+    hr = IDirectDrawSurface_Blt(surface2, &invalid1, surface1, NULL, 0, NULL);
+    ok(hr == DDERR_INVALIDRECT, "IDirectDrawSurface_Blt with a with invalid rectangle 1 returned %08x\n", hr);
+    hr = IDirectDrawSurface_Blt(surface2, &invalid2, surface1, NULL, 0, NULL);
+    ok(hr == DDERR_INVALIDRECT, "IDirectDrawSurface_Blt with a with invalid rectangle 2 returned %08x\n", hr);
+    hr = IDirectDrawSurface_Blt(surface2, &invalid3, surface1, NULL, 0, NULL);
+    ok(hr == DDERR_INVALIDRECT, "IDirectDrawSurface_Blt with a with invalid rectangle 3 returned %08x\n", hr);
+    hr = IDirectDrawSurface_Blt(surface2, &invalid4, surface1, NULL, 0, NULL);
+    ok(hr == DDERR_INVALIDRECT, "IDirectDrawSurface_Blt with a with invalid rectangle 4 returned %08x\n", hr);
+
+    /* Invalid src rects */
+    hr = IDirectDrawSurface_Blt(surface2, NULL, surface1, &invalid1, 0, NULL);
+    ok(hr == DDERR_INVALIDRECT, "IDirectDrawSurface_Blt with a with invalid rectangle 1 returned %08x\n", hr);
+    hr = IDirectDrawSurface_Blt(surface2, NULL, surface1, &invalid2, 0, NULL);
+    ok(hr == DDERR_INVALIDRECT, "IDirectDrawSurface_Blt with a with invalid rectangle 2 returned %08x\n", hr);
+    hr = IDirectDrawSurface_Blt(surface2, NULL, surface1, &invalid3, 0, NULL);
+    ok(hr == DDERR_INVALIDRECT, "IDirectDrawSurface_Blt with a with invalid rectangle 3 returned %08x\n", hr);
+    hr = IDirectDrawSurface_Blt(surface1, NULL, surface2, &invalid4, 0, NULL);
+    ok(hr == DDERR_INVALIDRECT, "IDirectDrawSurface_Blt with a with invalid rectangle 4 returned %08x\n", hr);
+
     IDirectDrawSurface_Release(surface1);
     IDirectDrawSurface_Release(surface2);
+}
+
+static void StructSizeTest(void)
+{
+    IDirectDrawSurface *surface1;
+    IDirectDrawSurface7 *surface7;
+    union {
+        DDSURFACEDESC desc1;
+        DDSURFACEDESC2 desc2;
+        char blob[1024]; /* To get a buch of writeable memory */
+    } desc;
+    DDSURFACEDESC create;
+    HRESULT hr;
+
+    memset(&desc, 0, sizeof(desc));
+    memset(&create, 0, sizeof(create));
+
+    memset(&create, 0, sizeof(create));
+    create.dwSize = sizeof(create);
+    create.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+    create.ddsCaps.dwCaps |= DDSCAPS_OFFSCREENPLAIN;
+    create.dwHeight = 128;
+    create.dwWidth = 128;
+    hr = IDirectDraw_CreateSurface(lpDD, &create, &surface1, NULL);
+    ok(hr == DD_OK, "Creating an offscreen plain surface failed with %08x\n", hr);
+    hr = IDirectDrawSurface_QueryInterface(surface1, &IID_IDirectDrawSurface7, (void **) &surface7);
+    ok(hr == DD_OK, "IDirectDrawSurface_QueryInterface failed with %08x\n", hr);
+
+    desc.desc1.dwSize = sizeof(DDSURFACEDESC);
+    hr = IDirectDrawSurface_GetSurfaceDesc(surface1, &desc.desc1);
+    ok(hr == DD_OK, "IDirectDrawSurface_GetSurfaceDesc with desc size sizeof(DDSURFACEDESC) returned %08x\n", hr);
+    hr = IDirectDrawSurface7_GetSurfaceDesc(surface7, &desc.desc2);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirectDrawSurface7_GetSurfaceDesc with desc size sizeof(DDSURFACEDESC) returned %08x\n", hr);
+
+    desc.desc2.dwSize = sizeof(DDSURFACEDESC2);
+    hr = IDirectDrawSurface_GetSurfaceDesc(surface1, &desc.desc1);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirectDrawSurface_GetSurfaceDesc with desc size sizeof(DDSURFACEDESC2) returned %08x\n", hr);
+    hr = IDirectDrawSurface7_GetSurfaceDesc(surface7, &desc.desc2);
+    ok(hr == DD_OK, "IDirectDrawSurface7_GetSurfaceDesc with desc size sizeof(DDSURFACEDESC2) returned %08x\n", hr);
+
+    desc.desc2.dwSize = 0;
+    hr = IDirectDrawSurface_GetSurfaceDesc(surface1, &desc.desc1);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirectDrawSurface_GetSurfaceDesc with desc size 0 returned %08x\n", hr);
+    hr = IDirectDrawSurface7_GetSurfaceDesc(surface7, &desc.desc2);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirectDrawSurface7_GetSurfaceDesc with desc size 0 returned %08x\n", hr);
+
+    desc.desc1.dwSize = sizeof(DDSURFACEDESC) + 1;
+    hr = IDirectDrawSurface_GetSurfaceDesc(surface1, &desc.desc1);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirectDrawSurface_GetSurfaceDesc with desc size sizeof(DDSURFACEDESC) + 1 returned %08x\n", hr);
+    hr = IDirectDrawSurface7_GetSurfaceDesc(surface7, &desc.desc2);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirectDrawSurface7_GetSurfaceDesc with desc size sizeof(DDSURFACEDESC) + 1 returned %08x\n", hr);
+
+    desc.desc2.dwSize = sizeof(DDSURFACEDESC2) + 1;
+    hr = IDirectDrawSurface_GetSurfaceDesc(surface1, &desc.desc1);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirectDrawSurface_GetSurfaceDesc with desc size sizeof(DDSURFACEDESC2) + 1returned %08x\n", hr);
+    hr = IDirectDrawSurface7_GetSurfaceDesc(surface7, &desc.desc2);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirectDrawSurface7_GetSurfaceDesc with desc size sizeof(DDSURFACEDESC2) + 1returned %08x\n", hr);
+
+    /* Tests for Lock() */
+
+    desc.desc1.dwSize = sizeof(DDSURFACEDESC);
+    hr = IDirectDrawSurface_Lock(surface1, NULL, &desc.desc1, 0, 0);
+    ok(hr == DD_OK, "IDirectDrawSurface_Lock with desc size sizeof(DDSURFACEDESC) returned %08x\n", hr);
+    if(SUCCEEDED(hr)) IDirectDrawSurface_Unlock(surface1, NULL);
+    ok(desc.desc1.dwSize == sizeof(DDSURFACEDESC), "Destination size was changed to %d\n", desc.desc1.dwSize);
+    hr = IDirectDrawSurface7_Lock(surface7, NULL, &desc.desc2, 0, 0);
+    ok(hr == DD_OK, "IDirectDrawSurface7_Lock with desc size sizeof(DDSURFACEDESC) returned %08x\n", hr);
+    if(SUCCEEDED(hr)) IDirectDrawSurface7_Unlock(surface7, NULL);
+    ok(desc.desc2.dwSize == sizeof(DDSURFACEDESC), "Destination size was changed to %d\n", desc.desc1.dwSize);
+
+    desc.desc2.dwSize = sizeof(DDSURFACEDESC2);
+    hr = IDirectDrawSurface_Lock(surface1, NULL, &desc.desc1, 0, 0);
+    ok(hr == DD_OK, "IDirectDrawSurface_Lock with desc size sizeof(DDSURFACEDESC2) returned %08x\n", hr);
+    ok(desc.desc1.dwSize == sizeof(DDSURFACEDESC2), "Destination size was changed to %d\n", desc.desc1.dwSize);
+    if(SUCCEEDED(hr)) IDirectDrawSurface_Unlock(surface1, NULL);
+    hr = IDirectDrawSurface7_Lock(surface7, NULL, &desc.desc2, 0, 0);
+    ok(hr == DD_OK, "IDirectDrawSurface7_Lock with desc size sizeof(DDSURFACEDESC2) returned %08x\n", hr);
+    if(SUCCEEDED(hr)) IDirectDrawSurface7_Unlock(surface7, NULL);
+    ok(desc.desc2.dwSize == sizeof(DDSURFACEDESC2), "Destination size was changed to %d\n", desc.desc1.dwSize);
+
+    desc.desc2.dwSize = 0;
+    hr = IDirectDrawSurface_Lock(surface1, NULL, &desc.desc1, 0, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirectDrawSurface_Lock with desc size 0 returned %08x\n", hr);
+    if(SUCCEEDED(hr)) IDirectDrawSurface_Unlock(surface1, NULL);
+    hr = IDirectDrawSurface7_Lock(surface7, NULL, &desc.desc2, 0, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirectDrawSurface7_Lock with desc size 0 returned %08x\n", hr);
+    if(SUCCEEDED(hr)) IDirectDrawSurface7_Unlock(surface7, NULL);
+
+    desc.desc1.dwSize = sizeof(DDSURFACEDESC) + 1;
+    hr = IDirectDrawSurface_Lock(surface1, NULL, &desc.desc1, 0, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirectDrawSurface_Lock with desc size sizeof(DDSURFACEDESC) + 1 returned %08x\n", hr);
+    if(SUCCEEDED(hr)) IDirectDrawSurface_Unlock(surface1, NULL);
+    hr = IDirectDrawSurface7_Lock(surface7, NULL, &desc.desc2, 0, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirectDrawSurface7_Lock with desc size sizeof(DDSURFACEDESC) + 1 returned %08x\n", hr);
+    if(SUCCEEDED(hr)) IDirectDrawSurface7_Unlock(surface7, NULL);
+
+    desc.desc2.dwSize = sizeof(DDSURFACEDESC2) + 1;
+    hr = IDirectDrawSurface_Lock(surface1, NULL, &desc.desc1, 0, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirectDrawSurface_Lock with desc size sizeof(DDSURFACEDESC2) + 1returned %08x\n", hr);
+    if(SUCCEEDED(hr)) IDirectDrawSurface_Unlock(surface1, NULL);
+    hr = IDirectDrawSurface7_Lock(surface7, NULL, &desc.desc2, 0, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "IDirectDrawSurface7_Lock with desc size sizeof(DDSURFACEDESC2) + 1returned %08x\n", hr);
+    if(SUCCEEDED(hr)) IDirectDrawSurface7_Unlock(surface7, NULL);
+
+    IDirectDrawSurface7_Release(surface7);
+    IDirectDrawSurface_Release(surface1);
 }
 
 START_TEST(dsurface)
@@ -2279,5 +2434,6 @@ START_TEST(dsurface)
     SizeTest();
     PrivateDataTest();
     BltParamTest();
+    StructSizeTest();
     ReleaseDirectDraw();
 }

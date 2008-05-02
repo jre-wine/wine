@@ -21,6 +21,7 @@
 
 #include <wine/test.h>
 #include <stdarg.h>
+#include <stdio.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -121,6 +122,9 @@ DEFINE_EXPECT(Terminate);
 DEFINE_EXPECT(Protocol_Read);
 DEFINE_EXPECT(LockRequest);
 DEFINE_EXPECT(UnlockRequest);
+DEFINE_EXPECT(OnFocus_TRUE);
+DEFINE_EXPECT(OnFocus_FALSE);
+DEFINE_EXPECT(RequestUIActivate);
 
 static IUnknown *doc_unk;
 static BOOL expect_LockContainer_fLock;
@@ -161,6 +165,18 @@ static const WCHAR wszTimesNewRoman[] =
     {'T','i','m','e','s',' ','N','e','w',' ','R','o','m','a','n',0};
 static const WCHAR wszArial[] =
     {'A','r','i','a','l',0};
+
+static const char *debugstr_guid(REFIID riid)
+{
+    static char buf[50];
+
+    sprintf(buf, "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+            riid->Data1, riid->Data2, riid->Data3, riid->Data4[0],
+            riid->Data4[1], riid->Data4[2], riid->Data4[3], riid->Data4[4],
+            riid->Data4[5], riid->Data4[6], riid->Data4[7]);
+
+    return buf;
+}
 
 #define EXPECT_UPDATEUI  1
 #define EXPECT_SETTITLE  2
@@ -1057,7 +1073,8 @@ static IOleContainer OleContainer = { &OleContainerVtbl };
 
 static HRESULT WINAPI InPlaceFrame_QueryInterface(IOleInPlaceFrame *iface, REFIID riid, void **ppv)
 {
-    return QueryInterface(riid, ppv);
+    ok(0, "unexpected call\n");
+    return E_NOINTERFACE;
 }
 
 static ULONG WINAPI InPlaceFrame_AddRef(IOleInPlaceFrame *iface)
@@ -1097,6 +1114,13 @@ static HRESULT WINAPI InPlaceFrame_RequestBorderSpace(IOleInPlaceFrame *iface,
 
 static HRESULT WINAPI InPlaceFrame_SetBorderSpace(IOleInPlaceFrame *iface,
         LPCBORDERWIDTHS pborderwidths)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceUIWindow_SetActiveObject(IOleInPlaceFrame *iface,
+        IOleInPlaceActiveObject *pActiveObject, LPCOLESTR pszObjName)
 {
     ok(0, "unexpected call\n");
     return E_NOTIMPL;
@@ -1182,6 +1206,20 @@ static const IOleInPlaceFrameVtbl InPlaceFrameVtbl = {
 
 static IOleInPlaceFrame InPlaceFrame = { &InPlaceFrameVtbl };
 
+static const IOleInPlaceFrameVtbl InPlaceUIWindowVtbl = {
+    InPlaceFrame_QueryInterface,
+    InPlaceFrame_AddRef,
+    InPlaceFrame_Release,
+    InPlaceFrame_GetWindow,
+    InPlaceFrame_ContextSensitiveHelp,
+    InPlaceFrame_GetBorder,
+    InPlaceFrame_RequestBorderSpace,
+    InPlaceFrame_SetBorderSpace,
+    InPlaceUIWindow_SetActiveObject,
+};
+
+static IOleInPlaceFrame InPlaceUIWindow = { &InPlaceUIWindowVtbl };
+
 static HRESULT WINAPI InPlaceSite_QueryInterface(IOleInPlaceSiteEx *iface, REFIID riid, void **ppv)
 {
     return QueryInterface(riid, ppv);
@@ -1242,7 +1280,7 @@ static HRESULT WINAPI InPlaceSite_GetWindowContext(IOleInPlaceSiteEx *iface,
         *ppFrame = &InPlaceFrame;
     ok(ppDoc != NULL, "ppDoc = NULL\n");
     if(ppDoc)
-        *ppDoc = NULL;
+        *ppDoc = (IOleInPlaceUIWindow*)&InPlaceUIWindow;
     ok(lprcPosRect != NULL, "lprcPosRect = NULL\n");
     if(lprcPosRect)
         memcpy(lprcPosRect, &rect, sizeof(RECT));
@@ -1320,8 +1358,8 @@ static HRESULT WINAPI InPlaceSiteEx_OnInPlaceDeactivateEx(IOleInPlaceSiteEx *ifa
 
 static HRESULT WINAPI InPlaceSiteEx_RequestUIActivate(IOleInPlaceSiteEx *iface)
 {
-    ok(0, "unexpected call\n");
-    return E_NOTIMPL;
+    CHECK_EXPECT(RequestUIActivate);
+    return S_OK;
 }
 
 static const IOleInPlaceSiteExVtbl InPlaceSiteVtbl = {
@@ -1594,6 +1632,83 @@ static const IOleDocumentSiteVtbl DocumentSiteVtbl = {
 };
 
 static IOleDocumentSite DocumentSite = { &DocumentSiteVtbl };
+
+static HRESULT WINAPI OleControlSite_QueryInterface(IOleControlSite *iface, REFIID riid, void **ppv)
+{
+    return QueryInterface(riid, ppv);
+}
+
+static ULONG WINAPI OleControlSite_AddRef(IOleControlSite *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI OleControlSite_Release(IOleControlSite *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI OleControlSite_OnControlInfoChanged(IOleControlSite *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI OleControlSite_LockInPlaceActive(IOleControlSite *iface, BOOL fLock)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI OleControlSite_GetExtendedControl(IOleControlSite *iface, IDispatch **ppDisp)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI OleControlSite_TransformCoords(IOleControlSite *iface, POINTL *pPtHimetric,
+        POINTF *pPtfContainer, DWORD dwFlags)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI OleControlSite_TranslateAccelerator(IOleControlSite *iface,
+        MSG *pMsg, DWORD grfModifiers)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI OleControlSite_OnFocus(IOleControlSite *iface, BOOL fGotFocus)
+{
+    if(fGotFocus)
+        CHECK_EXPECT(OnFocus_TRUE);
+    else
+        CHECK_EXPECT(OnFocus_FALSE);
+    return S_OK;
+}
+
+static HRESULT WINAPI OleControlSite_ShowPropertyFrame(IOleControlSite *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static const IOleControlSiteVtbl OleControlSiteVtbl = {
+    OleControlSite_QueryInterface,
+    OleControlSite_AddRef,
+    OleControlSite_Release,
+    OleControlSite_OnControlInfoChanged,
+    OleControlSite_LockInPlaceActive,
+    OleControlSite_GetExtendedControl,
+    OleControlSite_TransformCoords,
+    OleControlSite_TranslateAccelerator,
+    OleControlSite_OnFocus,
+    OleControlSite_ShowPropertyFrame
+};
+
+static IOleControlSite OleControlSite = { &OleControlSiteVtbl };
 
 static HRESULT WINAPI DocHostUIHandler_QueryInterface(IDocHostUIHandler2 *iface, REFIID riid, void **ppv)
 {
@@ -2098,6 +2213,10 @@ static const IServiceProviderVtbl ServiceProviderVtbl = {
 
 static IServiceProvider ServiceProvider = { &ServiceProviderVtbl };
 
+DEFINE_GUID(IID_unk1, 0xD48A6EC6,0x6A4A,0x11CF,0x94,0xA7,0x44,0x45,0x53,0x54,0x00,0x00); /* HTMLWindow2 ? */
+DEFINE_GUID(IID_unk2, 0x7BB0B520,0xB1A7,0x11D2,0xBB,0x23,0x00,0xC0,0x4F,0x79,0xAB,0xCD);
+DEFINE_GUID(IID_unk3, 0x000670BA,0x0000,0x0000,0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
+
 static HRESULT QueryInterface(REFIID riid, void **ppv)
 {
     *ppv = NULL;
@@ -2112,22 +2231,26 @@ static HRESULT QueryInterface(REFIID riid, void **ppv)
         *ppv = &OleContainer;
     else if(IsEqualGUID(&IID_IOleWindow, riid) || IsEqualGUID(&IID_IOleInPlaceSite, riid))
         *ppv = &InPlaceSiteEx;
-    else if(IsEqualGUID(&IID_IOleInPlaceUIWindow, riid) || IsEqualGUID(&IID_IOleInPlaceFrame, riid))
-        *ppv = &InPlaceFrame;
     else if(IsEqualGUID(&IID_IOleCommandTarget , riid))
         *ppv = &OleCommandTarget;
     else if(IsEqualGUID(&IID_IDispatch, riid))
         *ppv = &Dispatch;
     else if(IsEqualGUID(&IID_IServiceProvider, riid))
         *ppv = &ServiceProvider;
-    else if(ipsex && IsEqualGUID(&IID_IOleInPlaceSiteEx, riid))
-        *ppv = &InPlaceSiteEx;
-
-    /* TODO:
-     * {D48A6EC6-6A4A-11CF-94A7-444553540000}
-     * {7BB0B520-B1A7-11D2-BB23-00C04F79ABCD}
-     * {000670BA-0000-0000-C000-000000000046}
-     */
+    else if(IsEqualGUID(&IID_IOleInPlaceSiteEx, riid))
+        *ppv = ipsex ? &InPlaceSiteEx : NULL;
+    else if(IsEqualGUID(&IID_IOleControlSite, riid))
+        *ppv = &OleControlSite;
+    else if(IsEqualGUID(&IID_IDocHostShowUI, riid))
+        return E_NOINTERFACE; /* TODO */
+    else if(IsEqualGUID(&IID_unk1, riid))
+        return E_NOINTERFACE; /* HTMLWindow2 ? */
+    else if(IsEqualGUID(&IID_unk2, riid))
+        return E_NOINTERFACE; /* ? */
+    else if(IsEqualGUID(&IID_unk3, riid))
+        return E_NOINTERFACE; /* ? */
+    else
+        ok(0, "unexpected riid %s\n", debugstr_guid(riid));
 
     if(*ppv)
         return S_OK;
@@ -2582,6 +2705,7 @@ static void test_MSHTML_QueryStatus(IUnknown *unk, DWORD cmdf)
     test_QueryStatus(unk, &CGID_MSHTML, IDM_UNORDERLIST, cmdf);
     test_QueryStatus(unk, &CGID_MSHTML, IDM_INDENT, cmdf);
     test_QueryStatus(unk, &CGID_MSHTML, IDM_OUTDENT, cmdf);
+    test_QueryStatus(unk, &CGID_MSHTML, IDM_DELETE, cmdf);
 }
 
 static void test_OleCommandTarget(IUnknown *unk)
@@ -3090,6 +3214,7 @@ static void test_InPlaceDeactivate(IUnknown *unk, BOOL expect_call)
         return;
 
     if(expect_call) {
+        SET_EXPECT(OnFocus_FALSE);
         if(ipsex)
             SET_EXPECT(OnInPlaceDeactivateEx);
         else
@@ -3098,6 +3223,7 @@ static void test_InPlaceDeactivate(IUnknown *unk, BOOL expect_call)
     hres = IOleInPlaceObjectWindowless_InPlaceDeactivate(windowlessobj);
     ok(hres == S_OK, "InPlaceDeactivate failed: %08x\n", hres);
     if(expect_call) {
+        CHECK_CALLED(OnFocus_FALSE);
         if(ipsex)
             CHECK_CALLED(OnInPlaceDeactivateEx);
         else
@@ -3281,12 +3407,23 @@ static void test_StreamLoad(IUnknown *unk)
 
 static void test_QueryInterface(IUnknown *unk)
 {
-    IRunnableObject *runnable = (IRunnableObject*)0xdeadbeef;
+    IUnknown *qi;
     HRESULT hres;
 
-    hres = IUnknown_QueryInterface(unk, &IID_IRunnableObject, (void**)&runnable);
+    qi = (void*)0xdeadbeef;
+    hres = IUnknown_QueryInterface(unk, &IID_IRunnableObject, (void**)&qi);
     ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
-    ok(runnable == NULL, "runnable=%p, ezpected NULL\n", runnable);
+    ok(qi == NULL, "runnable=%p, ezpected NULL\n", qi);
+
+    qi = (void*)0xdeadbeef;
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLDOMNode, (void**)&qi);
+    ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
+    ok(qi == NULL, "runnable=%p, ezpected NULL\n", qi);
+
+    qi = (void*)0xdeadbeef;
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLDOMNode2, (void**)&qi);
+    ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
+    ok(qi == NULL, "runnable=%p, ezpected NULL\n", qi);
 }
 
 static void init_test(enum load_state_t ls) {

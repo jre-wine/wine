@@ -250,7 +250,7 @@ static RPC_STATUS rpcrt4_protseq_ncalrpc_open_endpoint(RpcServerProtseq* protseq
   RpcConnection *Connection;
 
   r = RPCRT4_CreateConnection(&Connection, TRUE, protseq->Protseq, NULL,
-                              endpoint, NULL, NULL, NULL, NULL);
+                              endpoint, NULL, NULL, NULL);
   if (r != RPC_S_OK)
       return r;
 
@@ -297,7 +297,7 @@ static RPC_STATUS rpcrt4_protseq_ncacn_np_open_endpoint(RpcServerProtseq *protse
   RpcConnection *Connection;
 
   r = RPCRT4_CreateConnection(&Connection, TRUE, protseq->Protseq, NULL,
-                              endpoint, NULL, NULL, NULL, NULL);
+                              endpoint, NULL, NULL, NULL);
   if (r != RPC_S_OK)
     return r;
 
@@ -857,8 +857,7 @@ static RPC_STATUS rpcrt4_protseq_ncacn_ip_tcp_open_endpoint(RpcServerProtseq *pr
         }
         create_status = RPCRT4_CreateConnection((RpcConnection **)&tcpc, TRUE,
                                                 protseq->Protseq, NULL,
-                                                endpoint, NULL, NULL, NULL,
-                                                NULL);
+                                                endpoint, NULL, NULL, NULL);
         if (create_status != RPC_S_OK)
         {
             close(sock);
@@ -1354,8 +1353,7 @@ RPC_STATUS RPCRT4_CloseConnection(RpcConnection* Connection)
 
 RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
     LPCSTR Protseq, LPCSTR NetworkAddr, LPCSTR Endpoint,
-    LPCWSTR NetworkOptions, RpcAuthInfo* AuthInfo, RpcQualityOfService *QOS,
-    RpcBinding* Binding)
+    LPCWSTR NetworkOptions, RpcAuthInfo* AuthInfo, RpcQualityOfService *QOS)
 {
   const struct connection_ops *ops;
   RpcConnection* NewConnection;
@@ -1374,7 +1372,6 @@ RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
   NewConnection->NetworkAddr = RPCRT4_strdupA(NetworkAddr);
   NewConnection->Endpoint = RPCRT4_strdupA(Endpoint);
   NewConnection->NetworkOptions = RPCRT4_strdupW(NetworkOptions);
-  NewConnection->Used = Binding;
   NewConnection->MaxTransmissionSize = RPC_MAX_PACKET_SIZE;
   memset(&NewConnection->ActiveInterface, 0, sizeof(NewConnection->ActiveInterface));
   NewConnection->NextCallId = 1;
@@ -1432,6 +1429,7 @@ RPC_STATUS RPCRT4_GetAssociation(LPCSTR Protseq, LPCSTR NetworkAddr,
   assoc->NetworkAddr = RPCRT4_strdupA(NetworkAddr);
   assoc->Endpoint = RPCRT4_strdupA(Endpoint);
   assoc->NetworkOptions = NetworkOptions ? RPCRT4_strdupW(NetworkOptions) : NULL;
+  assoc->assoc_group_id = 0;
   list_add_head(&assoc_list, &assoc->entry);
   *assoc_out = assoc;
 
@@ -1484,10 +1482,10 @@ RpcConnection *RpcAssoc_GetIdleConnection(RpcAssoc *assoc,
   /* try to find a compatible connection from the connection pool */
   EnterCriticalSection(&assoc->cs);
   LIST_FOR_EACH_ENTRY(Connection, &assoc->connection_pool, RpcConnection, conn_pool_entry)
-    if ((Connection->AuthInfo == AuthInfo) &&
-        (Connection->QOS == QOS) &&
-        !memcmp(&Connection->ActiveInterface, InterfaceId,
-                sizeof(RPC_SYNTAX_IDENTIFIER)))
+    if (!memcmp(&Connection->ActiveInterface, InterfaceId,
+                sizeof(RPC_SYNTAX_IDENTIFIER)) &&
+        RpcAuthInfo_IsEqual(Connection->AuthInfo, AuthInfo) &&
+        RpcQualityOfService_IsEqual(Connection->QOS, QOS))
     {
       list_remove(&Connection->conn_pool_entry);
       LeaveCriticalSection(&assoc->cs);
@@ -1503,6 +1501,7 @@ void RpcAssoc_ReleaseIdleConnection(RpcAssoc *assoc, RpcConnection *Connection)
 {
   assert(!Connection->server);
   EnterCriticalSection(&assoc->cs);
+  if (!assoc->assoc_group_id) assoc->assoc_group_id = Connection->assoc_group_id;
   list_add_head(&assoc->connection_pool, &Connection->conn_pool_entry);
   LeaveCriticalSection(&assoc->cs);
 }
@@ -1516,8 +1515,7 @@ RPC_STATUS RPCRT4_SpawnConnection(RpcConnection** Connection, RpcConnection* Old
                                 rpcrt4_conn_get_name(OldConnection),
                                 OldConnection->NetworkAddr,
                                 OldConnection->Endpoint, NULL,
-                                OldConnection->AuthInfo, OldConnection->QOS,
-                                NULL);
+                                OldConnection->AuthInfo, OldConnection->QOS);
   if (err == RPC_S_OK)
     rpcrt4_conn_handoff(OldConnection, *Connection);
   return err;

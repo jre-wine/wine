@@ -97,7 +97,7 @@ void WCMD_batch (WCHAR *file, WCHAR *command, int called, WCHAR *startLabel, HAN
   /* If processing a call :label, 'goto' the label in question */
   if (startLabel) {
     strcpyW(param1, startLabel);
-    WCMD_goto();
+    WCMD_goto(NULL);
   }
 
 /*
@@ -105,15 +105,13 @@ void WCMD_batch (WCHAR *file, WCHAR *command, int called, WCHAR *startLabel, HAN
  * 	the rest are handled by the main command processor.
  */
 
-  while (context -> skip_rest == FALSE && WCMD_fgets (string, sizeof(string), h)) {
-      if (strlenW(string) == MAXSTRING -1) {
-          WCMD_output_asis( WCMD_LoadMessage(WCMD_TRUNCATEDLINE));
-          WCMD_output_asis( string);
-          WCMD_output_asis( newline);
-      }
-      if (string[0] != ':') {                      /* Skip over labels */
-          WCMD_process_command (string);
-      }
+  while (context -> skip_rest == FALSE) {
+      CMD_LIST *toExecute = NULL;         /* Commands left to be executed */
+      if (WCMD_ReadAndParseLine(NULL, &toExecute, h) == NULL)
+        break;
+      WCMD_process_commands(toExecute, FALSE, NULL, NULL);
+      WCMD_free_commands(toExecute);
+      toExecute = NULL;
   }
   CloseHandle (h);
 
@@ -170,21 +168,9 @@ WCHAR *WCMD_parameter (WCHAR *s, int n, WCHAR **where) {
           i++;
         p = param;
 	break;
-      case '(':
-        if (where != NULL && i==n) *where = s;
-	s++;
-	while ((*s != '\0') && (*s != ')')) {
-	  *p++ = *s++;
-	}
-        if (i == n) {
-          *p = '\0';
-          return param;
-        }
-	if (*s == ')') s++;
-          param[0] = '\0';
-          i++;
-        p = param;
-	break;
+      /* The code to handle bracketed parms is removed because it should no longer
+         be necessary after the multiline support has been added and the for loop
+         set of data is now parseable individually. */
       case '\0':
         return param;
       default:

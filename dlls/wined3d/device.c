@@ -526,7 +526,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateStateBlock(IWineD3DDevice* iface,
         for (i = 0; i < NUM_SAVEDPIXELSTATES_R; i++) {
             object->changed.renderState[SavedPixelStates_R[i]] = TRUE;
         }
-        for (j = 0; j < GL_LIMITS(texture_stages); j++) {
+        for (j = 0; j < MAX_TEXTURES; j++) {
             for (i = 0; i < NUM_SAVEDPIXELSTATES_T; i++) {
                 object->changed.textureState[j][SavedPixelStates_T[i]] = TRUE;
             }
@@ -556,7 +556,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateStateBlock(IWineD3DDevice* iface,
         for (i = 0; i < NUM_SAVEDVERTEXSTATES_R; i++) {
             object->changed.renderState[SavedVertexStates_R[i]] = TRUE;
         }
-        for (j = 0; j < GL_LIMITS(texture_stages); j++) {
+        for (j = 0; j < MAX_TEXTURES; j++) {
             for (i = 0; i < NUM_SAVEDVERTEXSTATES_T; i++) {
                 object->changed.textureState[j][SavedVertexStates_T[i]] = TRUE;
             }
@@ -1810,10 +1810,15 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
     /* TODO: Test if OpenGL is compiled in and loaded */
 
     /* Initialize the texture unit mapping to a 1:1 mapping */
-    for(state = 0; state < MAX_SAMPLERS; state++) {
-        This->texUnitMap[state] = state;
+    for (state = 0; state < MAX_COMBINED_SAMPLERS; ++state) {
+        if (state < GL_LIMITS(fragment_samplers)) {
+            This->texUnitMap[state] = state;
+            This->rev_tex_unit_map[state] = state;
+        } else {
+            This->texUnitMap[state] = -1;
+            This->rev_tex_unit_map[state] = -1;
+        }
     }
-    This->oneToOneTexUnitMap = TRUE;
 
     /* Setup the implicit swapchain */
     TRACE("Creating implicit swapchain\n");
@@ -1935,8 +1940,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Uninit3D(IWineD3DDevice *iface, D3DCB_D
         This->cursorTexture = 0;
     }
 
-    for(sampler = 0; sampler < GL_LIMITS(sampler_stages); ++sampler) {
+    for (sampler = 0; sampler < MAX_FRAGMENT_SAMPLERS; ++sampler) {
         IWineD3DDevice_SetTexture(iface, sampler, NULL);
+    }
+    for (sampler = 0; sampler < MAX_VERTEX_SAMPLERS; ++sampler) {
+        IWineD3DDevice_SetTexture(iface, WINED3DVERTEXTEXTURESAMPLER0 + sampler, NULL);
     }
 
     /* Release the buffers (with sanity checks)*/
@@ -2697,37 +2705,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetMaterial(IWineD3DDevice *iface, CONS
         return WINED3D_OK;
     }
 
-    ENTER_GL();
-    TRACE("(%p) : Diffuse (%f,%f,%f,%f)\n", This, pMaterial->Diffuse.r, pMaterial->Diffuse.g,
-        pMaterial->Diffuse.b, pMaterial->Diffuse.a);
-    TRACE("(%p) : Ambient (%f,%f,%f,%f)\n", This, pMaterial->Ambient.r, pMaterial->Ambient.g,
-        pMaterial->Ambient.b, pMaterial->Ambient.a);
-    TRACE("(%p) : Specular (%f,%f,%f,%f)\n", This, pMaterial->Specular.r, pMaterial->Specular.g,
-        pMaterial->Specular.b, pMaterial->Specular.a);
-    TRACE("(%p) : Emissive (%f,%f,%f,%f)\n", This, pMaterial->Emissive.r, pMaterial->Emissive.g,
-        pMaterial->Emissive.b, pMaterial->Emissive.a);
-    TRACE("(%p) : Power (%f)\n", This, pMaterial->Power);
-
-    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, (float*) &This->updateStateBlock->material.Ambient);
-    checkGLcall("glMaterialfv(GL_AMBIENT)");
-    glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, (float*) &This->updateStateBlock->material.Diffuse);
-    checkGLcall("glMaterialfv(GL_DIFFUSE)");
-
-    /* Only change material color if specular is enabled, otherwise it is set to black */
-    if (This->stateBlock->renderState[WINED3DRS_SPECULARENABLE]) {
-       glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, (float*) &This->updateStateBlock->material.Specular);
-       checkGLcall("glMaterialfv(GL_SPECULAR");
-    } else {
-       float black[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-       glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, &black[0]);
-       checkGLcall("glMaterialfv(GL_SPECULAR");
-    }
-    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, (float*) &This->updateStateBlock->material.Emissive);
-    checkGLcall("glMaterialfv(GL_EMISSION)");
-    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, This->updateStateBlock->material.Power);
-    checkGLcall("glMaterialf(GL_SHININESS");
-
-    LEAVE_GL();
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_MATERIAL);
     return WINED3D_OK;
 }
 
@@ -2899,7 +2877,14 @@ static HRESULT WINAPI IWineD3DDeviceImpl_GetRenderState(IWineD3DDevice *iface, W
 
 static HRESULT WINAPI IWineD3DDeviceImpl_SetSamplerState(IWineD3DDevice *iface, DWORD Sampler, WINED3DSAMPLERSTATETYPE Type, DWORD Value) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    DWORD oldValue = This->stateBlock->samplerState[Sampler][Type];
+    DWORD oldValue;
+
+    TRACE("(%p) : Sampler %#x, Type %s (%#x), Value %#x\n",
+            This, Sampler, debug_d3dsamplerstate(Type), Type, Value);
+
+    if (Sampler >= WINED3DVERTEXTEXTURESAMPLER0 && Sampler <= WINED3DVERTEXTEXTURESAMPLER3) {
+        Sampler -= (WINED3DVERTEXTEXTURESAMPLER0 - MAX_FRAGMENT_SAMPLERS);
+    }
 
     /**
     * SetSampler is designed to allow for more than the standard up to 8 textures
@@ -2916,8 +2901,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetSamplerState(IWineD3DDevice *iface, 
     * Ok GForce say it's ok to use glTexParameter/glGetTexParameter(...).
      ******************/
 
-    TRACE("(%p) : Sampler=%d, Type=%s(%d), Value=%d\n", This, Sampler,
-        debug_d3dsamplerstate(Type), Type, Value);
+    oldValue = This->stateBlock->samplerState[Sampler][Type];
     This->updateStateBlock->samplerState[Sampler][Type]         = Value;
     This->updateStateBlock->set.samplerState[Sampler][Type]     = Value;
     This->updateStateBlock->changed.samplerState[Sampler][Type] = Value;
@@ -2940,8 +2924,16 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetSamplerState(IWineD3DDevice *iface, 
 
 static HRESULT WINAPI IWineD3DDeviceImpl_GetSamplerState(IWineD3DDevice *iface, DWORD Sampler, WINED3DSAMPLERSTATETYPE Type, DWORD* Value) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+
+    TRACE("(%p) : Sampler %#x, Type %s (%#x)\n",
+            This, Sampler, debug_d3dsamplerstate(Type), Type);
+
+    if (Sampler >= WINED3DVERTEXTEXTURESAMPLER0 && Sampler <= WINED3DVERTEXTEXTURESAMPLER3) {
+        Sampler -= (WINED3DVERTEXTEXTURESAMPLER0 - MAX_FRAGMENT_SAMPLERS);
+    }
+
     *Value = This->stateBlock->samplerState[Sampler][Type];
-    TRACE("(%p) : Sampler %d Type %u Returning %d\n", This, Sampler, Type, *Value);
+    TRACE("(%p) : Returning %#x\n", This, *Value);
 
     return WINED3D_OK;
 }
@@ -3210,8 +3202,172 @@ static inline void markTextureStagesDirty(IWineD3DDeviceImpl *This, DWORD stage)
     }
 }
 
+static void device_map_stage(IWineD3DDeviceImpl *This, int stage, int unit) {
+    int i = This->rev_tex_unit_map[unit];
+    int j = This->texUnitMap[stage];
+
+    This->texUnitMap[stage] = unit;
+    if (i != -1 && i != stage) {
+        This->texUnitMap[i] = -1;
+    }
+
+    This->rev_tex_unit_map[unit] = stage;
+    if (j != -1 && j != unit) {
+        This->rev_tex_unit_map[j] = -1;
+    }
+}
+
+static void device_update_fixed_function_usage_map(IWineD3DDeviceImpl *This) {
+    int i;
+
+    for (i = 0; i < MAX_TEXTURES; ++i) {
+        WINED3DTEXTUREOP color_op = This->stateBlock->textureState[i][WINED3DTSS_COLOROP];
+        WINED3DTEXTUREOP alpha_op = This->stateBlock->textureState[i][WINED3DTSS_ALPHAOP];
+        DWORD color_arg1 = This->stateBlock->textureState[i][WINED3DTSS_COLORARG1] & WINED3DTA_SELECTMASK;
+        DWORD color_arg2 = This->stateBlock->textureState[i][WINED3DTSS_COLORARG2] & WINED3DTA_SELECTMASK;
+        DWORD color_arg3 = This->stateBlock->textureState[i][WINED3DTSS_COLORARG0] & WINED3DTA_SELECTMASK;
+        DWORD alpha_arg1 = This->stateBlock->textureState[i][WINED3DTSS_ALPHAARG1] & WINED3DTA_SELECTMASK;
+        DWORD alpha_arg2 = This->stateBlock->textureState[i][WINED3DTSS_ALPHAARG2] & WINED3DTA_SELECTMASK;
+        DWORD alpha_arg3 = This->stateBlock->textureState[i][WINED3DTSS_ALPHAARG0] & WINED3DTA_SELECTMASK;
+
+        if (color_op == WINED3DTOP_DISABLE) {
+            /* Not used, and disable higher stages */
+            while (i < MAX_TEXTURES) {
+                This->fixed_function_usage_map[i] = FALSE;
+                ++i;
+            }
+            break;
+        }
+
+        if (((color_arg1 == WINED3DTA_TEXTURE) && color_op != WINED3DTOP_SELECTARG2)
+                || ((color_arg2 == WINED3DTA_TEXTURE) && color_op != WINED3DTOP_SELECTARG1)
+                || ((color_arg3 == WINED3DTA_TEXTURE) && (color_op == WINED3DTOP_MULTIPLYADD || color_op == WINED3DTOP_LERP))
+                || ((alpha_arg1 == WINED3DTA_TEXTURE) && alpha_op != WINED3DTOP_SELECTARG2)
+                || ((alpha_arg2 == WINED3DTA_TEXTURE) && alpha_op != WINED3DTOP_SELECTARG1)
+                || ((alpha_arg3 == WINED3DTA_TEXTURE) && (alpha_op == WINED3DTOP_MULTIPLYADD || alpha_op == WINED3DTOP_LERP))) {
+            This->fixed_function_usage_map[i] = TRUE;
+        } else {
+            This->fixed_function_usage_map[i] = FALSE;
+        }
+
+        if ((color_op == WINED3DTOP_BUMPENVMAP || color_op == WINED3DTOP_BUMPENVMAPLUMINANCE) && i < MAX_TEXTURES - 1) {
+            This->fixed_function_usage_map[i+1] = TRUE;
+        }
+    }
+}
+
+static void device_map_fixed_function_samplers(IWineD3DDeviceImpl *This) {
+    int i, tex;
+
+    device_update_fixed_function_usage_map(This);
+
+    if (This->stateBlock->lowest_disabled_stage <= GL_LIMITS(textures)) {
+        for (i = 0; i < This->stateBlock->lowest_disabled_stage; ++i) {
+            if (!This->fixed_function_usage_map[i]) continue;
+
+            if (This->texUnitMap[i] != i) {
+                device_map_stage(This, i, i);
+                IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(i));
+                markTextureStagesDirty(This, i);
+            }
+        }
+        return;
+    }
+
+    /* Now work out the mapping */
+    tex = 0;
+    for (i = 0; i < This->stateBlock->lowest_disabled_stage; ++i) {
+        if (!This->fixed_function_usage_map[i]) continue;
+
+        if (This->texUnitMap[i] != tex) {
+            device_map_stage(This, i, tex);
+            IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(i));
+            markTextureStagesDirty(This, i);
+        }
+
+        ++tex;
+    }
+}
+
+static void device_map_psamplers(IWineD3DDeviceImpl *This) {
+    DWORD *sampler_tokens = ((IWineD3DPixelShaderImpl *)This->stateBlock->pixelShader)->baseShader.reg_maps.samplers;
+    int i;
+
+    for (i = 0; i < MAX_FRAGMENT_SAMPLERS; ++i) {
+        if (sampler_tokens[i] && This->texUnitMap[i] != i) {
+            device_map_stage(This, i, i);
+            IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(i));
+            if (i < MAX_TEXTURES) {
+                markTextureStagesDirty(This, i);
+            }
+        }
+    }
+}
+
+static BOOL device_unit_free_for_vs(IWineD3DDeviceImpl *This, DWORD *pshader_sampler_tokens, DWORD *vshader_sampler_tokens, int unit) {
+    int current_mapping = This->rev_tex_unit_map[unit];
+
+    if (current_mapping == -1) {
+        /* Not currently used */
+        return TRUE;
+    }
+
+    if (current_mapping < MAX_FRAGMENT_SAMPLERS) {
+        /* Used by a fragment sampler */
+
+        if (!pshader_sampler_tokens) {
+            /* No pixel shader, check fixed function */
+            return current_mapping >= MAX_TEXTURES || !This->fixed_function_usage_map[current_mapping];
+        }
+
+        /* Pixel shader, check the shader's sampler map */
+        return !pshader_sampler_tokens[current_mapping];
+    }
+
+    /* Used by a vertex sampler */
+    return !vshader_sampler_tokens[current_mapping];
+}
+
+static void device_map_vsamplers(IWineD3DDeviceImpl *This, BOOL ps) {
+    DWORD *vshader_sampler_tokens = ((IWineD3DVertexShaderImpl *)This->stateBlock->vertexShader)->baseShader.reg_maps.samplers;
+    DWORD *pshader_sampler_tokens = NULL;
+    int start = GL_LIMITS(combined_samplers) - 1;
+    int i;
+
+    if (ps) {
+        IWineD3DPixelShaderImpl *pshader = (IWineD3DPixelShaderImpl *)This->stateBlock->pixelShader;
+
+        /* Make sure the shader's reg_maps are up to date. This is only relevant for 1.x pixelshaders. */
+        IWineD3DPixelShader_CompileShader((IWineD3DPixelShader *)pshader);
+        pshader_sampler_tokens = pshader->baseShader.reg_maps.samplers;
+    }
+
+    for (i = 0; i < MAX_VERTEX_SAMPLERS; ++i) {
+        int vsampler_idx = i + MAX_FRAGMENT_SAMPLERS;
+        if (vshader_sampler_tokens[i]) {
+            if (This->texUnitMap[vsampler_idx] != -1) {
+                /* Already mapped somewhere */
+                continue;
+            }
+
+            while (start >= 0) {
+                if (device_unit_free_for_vs(This, pshader_sampler_tokens, vshader_sampler_tokens, start)) {
+                    device_map_stage(This, vsampler_idx, start);
+                    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(vsampler_idx));
+
+                    --start;
+                    break;
+                }
+
+                --start;
+            }
+        }
+    }
+}
+
 void IWineD3DDeviceImpl_FindTexUnitMap(IWineD3DDeviceImpl *This) {
-    DWORD i, tex;
+    BOOL vs = use_vs(This);
+    BOOL ps = use_ps(This);
     /* This code can assume that GL_NV_register_combiners are supported, otherwise
      * it is never called.
      *
@@ -3220,63 +3376,15 @@ void IWineD3DDeviceImpl_FindTexUnitMap(IWineD3DDeviceImpl *This) {
      * that would be really messy and require shader recompilation
      * -> When the mapping of a stage is changed, sampler and ALL texture stage states have
      * to be reset. Because of that try to work with a 1:1 mapping as much as possible
-     * -> Whith a 1:1 mapping oneToOneTexUnitMap is set to avoid checking MAX_SAMPLERS array
-     * entries to make pixel shaders cheaper. MAX_SAMPLERS will be 128 in dx10
      */
-    if(This->stateBlock->pixelShader || This->stateBlock->lowest_disabled_stage <= GL_LIMITS(textures)) {
-        if(This->oneToOneTexUnitMap) {
-            TRACE("Not touching 1:1 map\n");
-            return;
-        }
-        TRACE("Restoring 1:1 texture unit mapping\n");
-        /* Restore a 1:1 mapping */
-        for(i = 0; i < MAX_SAMPLERS; i++) {
-            if(This->texUnitMap[i] != i) {
-                This->texUnitMap[i] = i;
-                IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(i));
-                markTextureStagesDirty(This, i);
-            }
-        }
-        This->oneToOneTexUnitMap = TRUE;
-        return;
+    if (ps) {
+        device_map_psamplers(This);
     } else {
-        /* No pixel shader, and we do not have enough texture units available. Try to skip NULL textures
-         * First, see if we can succeed at all
-         */
-        tex = 0;
-        for(i = 0; i < This->stateBlock->lowest_disabled_stage; i++) {
-            if(This->stateBlock->textures[i] == NULL) tex++;
-        }
+        device_map_fixed_function_samplers(This);
+    }
 
-        if(GL_LIMITS(textures) + tex < This->stateBlock->lowest_disabled_stage) {
-            FIXME("Too many bound textures to support the combiner settings\n");
-            return;
-        }
-
-        /* Now work out the mapping */
-        tex = 0;
-        This->oneToOneTexUnitMap = FALSE;
-        WARN("Non 1:1 mapping UNTESTED!\n");
-        for(i = 0; i < This->stateBlock->lowest_disabled_stage; i++) {
-            /* Skip NULL textures */
-            if (!This->stateBlock->textures[i]) {
-                /* Map to -1, so the check below doesn't fail if a non-NULL
-                 * texture is set on this stage */
-                TRACE("Mapping texture stage %d to -1\n", i);
-                This->texUnitMap[i] = -1;
-
-                continue;
-            }
-
-            TRACE("Mapping texture stage %d to unit %d\n", i, tex);
-            if(This->texUnitMap[i] != tex) {
-                This->texUnitMap[i] = tex;
-                IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(i));
-                markTextureStagesDirty(This, i);
-            }
-
-            ++tex;
-        }
+    if (vs) {
+        device_map_vsamplers(This, ps);
     }
 }
 
@@ -3861,11 +3969,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ProcessVertices(IWineD3DDevice *iface, 
      */
     This->stateBlock->streamIsUP = FALSE;
     memset(&strided, 0, sizeof(strided));
-    if(This->stateBlock->vertexDecl) {
-        primitiveDeclarationConvertToStridedData(iface, FALSE, &strided, &vbo);
-    } else {
-        primitiveConvertToStridedData(iface, &strided, &vbo);
-    }
+    primitiveDeclarationConvertToStridedData(iface, FALSE, &strided, &vbo);
     This->stateBlock->streamIsUP = streamWasUP;
 
     if(vbo || SrcStartIndex) {
@@ -4006,19 +4110,16 @@ static HRESULT WINAPI IWineD3DDeviceImpl_GetTextureStageState(IWineD3DDevice *if
  * Get / Set Texture
  *****/
 static HRESULT WINAPI IWineD3DDeviceImpl_SetTexture(IWineD3DDevice *iface, DWORD Stage, IWineD3DBaseTexture* pTexture) {
-
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    IWineD3DBaseTexture   *oldTexture;
+    IWineD3DBaseTexture *oldTexture;
+
+    TRACE("(%p) : Stage %#x, Texture %p\n", This, Stage, pTexture);
+
+    if (Stage >= WINED3DVERTEXTEXTURESAMPLER0 && Stage <= WINED3DVERTEXTEXTURESAMPLER3) {
+        Stage -= (WINED3DVERTEXTEXTURESAMPLER0 - MAX_FRAGMENT_SAMPLERS);
+    }
 
     oldTexture = This->updateStateBlock->textures[Stage];
-    TRACE("(%p) : Stage(%d), Texture (%p)\n", This, Stage, pTexture);
-
-#if 0 /* TODO: check so vertex textures */
-    if (Stage >= D3DVERTEXTEXTURESAMPLER && Stage <= D3DVERTEXTEXTURESAMPLER3){
-        This->updateStateBlock->vertexTextures[Stage - D3DVERTEXTEXTURESAMPLER] = pTexture;
-        return WINED3D_OK;
-    }
-#endif
 
     if(pTexture != NULL) {
         /* SetTexture isn't allowed on textures in WINED3DPOOL_SCRATCH; 
@@ -4088,7 +4189,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetTexture(IWineD3DDevice *iface, DWORD
              * Shouldn't happen as long as apps bind a texture only to one stage
              */
             TRACE("Searcing for other sampler / stage id where the texture is bound to\n");
-            for(i = 0; i < GL_LIMITS(sampler_stages); i++) {
+            for(i = 0; i < MAX_COMBINED_SAMPLERS; i++) {
                 if(This->updateStateBlock->textures[i] == oldTexture) {
                     old->baseTexture.sampler = i;
                     break;
@@ -4104,11 +4205,18 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetTexture(IWineD3DDevice *iface, DWORD
 
 static HRESULT WINAPI IWineD3DDeviceImpl_GetTexture(IWineD3DDevice *iface, DWORD Stage, IWineD3DBaseTexture** ppTexture) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    TRACE("(%p) : (%d /* Stage */,%p /* ppTexture */)\n", This, Stage, ppTexture);
+
+    TRACE("(%p) : Stage %#x, ppTexture %p\n", This, Stage, ppTexture);
+
+    if (Stage >= WINED3DVERTEXTEXTURESAMPLER0 && Stage <= WINED3DVERTEXTEXTURESAMPLER3) {
+        Stage -= (WINED3DVERTEXTEXTURESAMPLER0 - MAX_FRAGMENT_SAMPLERS);
+    }
 
     *ppTexture=This->stateBlock->textures[Stage];
     if (*ppTexture)
         IWineD3DBaseTexture_AddRef(*ppTexture);
+
+    TRACE("(%p) : Returning %p\n", This, *ppTexture);
 
     return WINED3D_OK;
 }
@@ -6249,7 +6357,7 @@ static void WINAPI IWineD3DDeviceImpl_ResourceReleased(IWineD3DDevice *iface, IW
         case WINED3DRTYPE_TEXTURE:
         case WINED3DRTYPE_CUBETEXTURE:
         case WINED3DRTYPE_VOLUMETEXTURE:
-                for (counter = 0; counter < GL_LIMITS(sampler_stages); counter++) {
+                for (counter = 0; counter < MAX_COMBINED_SAMPLERS; counter++) {
                     if (This->stateBlock != NULL && This->stateBlock->textures[counter] == (IWineD3DBaseTexture *)resource) {
                         WARN("Texture being released is still by a stateblock, Stage = %u Texture = %p\n", counter, resource);
                         This->stateBlock->textures[counter] = NULL;
