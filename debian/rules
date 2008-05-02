@@ -202,6 +202,7 @@ install-arch-stamp: $(patsubst build%,install-arch%-stamp,$(BUILDS))
 	dh_testdir
 	dh_testroot
 
+	mkdir -p debian/tmp/usr/bin
 	install -m 755 debian/winelauncher debian/tmp/usr/bin/wine
 	# MIME and binfmt databases
 	mkdir -p debian/tmp/usr/share/{mime-info,binfmts}
