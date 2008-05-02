@@ -156,7 +156,7 @@ install-arch32: build-arch32
 	dh_testdir
 	dh_testroot
 
-	# install wine, libwine, and tools
+	# install wine, libwine, fonts, and tools
 	$(MAKE) -C build32 install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/lib
 	# move the real binaries into /usr/lib/wine,
 	# wrapping them with the winelauncher
@@ -179,7 +179,7 @@ install-arch64: build-arch64
 	dh_testdir
 	dh_testroot
 
-	# install wine, libwine, and tools
+	# install wine, libwine, fonts, and tools
 	$(MAKE) -C build64 install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/lib
 	# move the real binaries into /usr/lib/wine,
 	# wrapping them with the winelauncher
@@ -234,6 +234,9 @@ ifeq (,$(AMD64_COPY))
 	# according to the <packagename>.install files
 	dh_install -s
 
+	# patch marlett.ttf due to fontforge bug #458234
+	mensis -script debian/marlett.mensis debian/libwine/usr/share/wine/fonts/marlett.ttf
+
 	# split up libwine
 ifeq ($(DEB_HOST_GNU_SYSTEM),linux-gnu)
 	mv debian/libwine/usr/lib/wine/winealsa* debian/libwine-alsa/usr/lib/wine
@@ -251,7 +254,6 @@ endif
 	mv debian/libwine/usr/lib/wine/d3dxof*   debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/glu32*    debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/opengl32* debian/libwine-gl/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/wined3d*  debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/winejack* debian/libwine-jack/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/wldap32*  debian/libwine-ldap/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/winenas*  debian/libwine-nas/usr/lib/wine
@@ -260,6 +262,7 @@ endif
 
 	dh_installdocs -s
 #	dh_installmenu -s
+	dh_installdebconf -s
 	dh_installmime -s
 
 	dh_installchangelogs -s ChangeLog

@@ -35,7 +35,7 @@ Depends: wine-bin (= ${binary:Version}), wine-utils (= ${binary:Version}),
  libwine-alsa (= ${binary:Version}) [i386 amd64 powerpc sparc] | libwine-oss (= ${binary:Version}) | libwine-esd (= ${binary:Version}) | libwine-jack (= ${binary:Version}) | libwine-nas (= ${binary:Version}),
  libwine-gl (= ${binary:Version}), libwine-print (= ${binary:Version}), libwine-sane (= ${binary:Version}),
  libwine-cms (= ${binary:Version}), libwine-gphoto2 (= ${binary:Version}), libwine-ldap (= ${binary:Version})
-Suggests: wine-doc, binfmt-support, msttcorefonts, avscan | klamav | clamav
+Suggests: wine-doc, binfmt-support, msttcorefonts, winbind, avscan | klamav | clamav
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -81,8 +81,7 @@ Package: libwine
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Depends: ${shlibs:Depends}, ia32-libs (>= 1.19) [amd64]
-Replaces: libwine0.0.971116, wine (<< 0.9.11-1), libwine-twain (<< 0.9.13)
-Conflicts: libwine0.0.971116
+Replaces: wine (<< 0.9.11-1), libwine-twain (<< 0.9.13), libwine-gl (<< 0.9.53-1)
 Recommends: libwine-print, libwine-gl
 Suggests: wine-doc
 Description: Windows API implementation - library

@@ -16,14 +16,7 @@ wine (0.9.53-1) unstable; urgency=low
   * Made debian/rules run a Mensis script to correct wrong codepage ranges
     embedded in marlett.ttf, to work around fontforge bug #458234, so
     Debian users without msttcorefonts installed can get legible text
-    (in most cases).
-  * Re-added some debconf stuff (dh_installdebconf, load debconf in postinst,
-    a few *.config files), so that users will be able to purge out old
-    debconf templates. Although debconf does not provide a reasonable way
-    to clean out old templates after a package has been reorganized, I put
-    db_purge into all the relevant postinsts, at least; let's hope that it
-    works good enough for an upgrade from etch, and that it allows me to
-    remove debconf permanently after lenny or so. Closes: #443429.
+    in most cases.
 
  -- Ove Kaaven <ovek@arcticnet.no>  Sat, 12 Jan 2008 02:52:06 +0100
 
