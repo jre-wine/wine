@@ -192,38 +192,40 @@ static const WCHAR envname_win40W[] = {'W','i','n','d','o','w','s',' ','4','.','
 static const WCHAR envname_x86W[] =   {'W','i','n','d','o','w','s',' ','N','T',' ','x','8','6',0};
 static const WCHAR subdir_win40W[] = {'w','i','n','4','0',0};
 static const WCHAR subdir_x86W[] =   {'w','3','2','x','8','6',0};
+static const WCHAR Version0_RegPathW[] = {'\\','V','e','r','s','i','o','n','-','0',0};
+static const WCHAR Version0_SubdirW[] = {'\\','0',0};
 static const WCHAR Version3_RegPathW[] = {'\\','V','e','r','s','i','o','n','-','3',0};
 static const WCHAR Version3_SubdirW[] = {'\\','3',0};
 
 static const WCHAR spooldriversW[] = {'\\','s','p','o','o','l','\\','d','r','i','v','e','r','s','\\',0};
 static const WCHAR spoolprtprocsW[] = {'\\','s','p','o','o','l','\\','p','r','t','p','r','o','c','s','\\',0};
 
+static const WCHAR backslashW[] = {'\\',0};
 static const WCHAR Configuration_FileW[] = {'C','o','n','f','i','g','u','r','a','t',
 				      'i','o','n',' ','F','i','l','e',0};
 static const WCHAR DatatypeW[] = {'D','a','t','a','t','y','p','e',0};
 static const WCHAR Data_FileW[] = {'D','a','t','a',' ','F','i','l','e',0};
-static const WCHAR Default_DevModeW[] = {'D','e','f','a','u','l','t',' ','D','e','v',
-				   'M','o','d','e',0};
-static const WCHAR Dependent_FilesW[] = {'D','e','p','e','n','d','e','n','t',' ','F',
-				   'i','l','e','s',0};
+static const WCHAR Default_DevModeW[] = {'D','e','f','a','u','l','t',' ','D','e','v','M','o','d','e',0};
+static const WCHAR Dependent_FilesW[] = {'D','e','p','e','n','d','e','n','t',' ','F','i','l','e','s',0};
 static const WCHAR DescriptionW[] = {'D','e','s','c','r','i','p','t','i','o','n',0};
 static const WCHAR DriverW[] = {'D','r','i','v','e','r',0};
+static const WCHAR HardwareIDW[] = {'H','a','r','d','w','a','r','e','I','D',0};
 static const WCHAR Help_FileW[] = {'H','e','l','p',' ','F','i','l','e',0};
 static const WCHAR LocationW[] = {'L','o','c','a','t','i','o','n',0};
+static const WCHAR ManufacturerW[] = {'M','a','n','u','f','a','c','t','u','r','e','r',0};
 static const WCHAR MonitorW[] = {'M','o','n','i','t','o','r',0};
 static const WCHAR MonitorUIW[] = {'M','o','n','i','t','o','r','U','I',0};
 static const WCHAR NameW[] = {'N','a','m','e',0};
+static const WCHAR OEM_UrlW[] = {'O','E','M',' ','U','r','l',0};
 static const WCHAR ParametersW[] = {'P','a','r','a','m','e','t','e','r','s',0};
 static const WCHAR PortW[] = {'P','o','r','t',0};
 static const WCHAR bs_Ports_bsW[] = {'\\','P','o','r','t','s','\\',0};
-static const WCHAR Print_ProcessorW[] = {'P','r','i','n','t',' ','P','r','o','c','e',
-				   's','s','o','r',0};
-static const WCHAR Printer_DriverW[] = {'P','r','i','n','t','e','r',' ','D','r','i',
-				  'v','e','r',0};
-static const WCHAR PrinterDriverDataW[] = {'P','r','i','n','t','e','r','D','r','i',
-				     'v','e','r','D','a','t','a',0};
-static const WCHAR Separator_FileW[] = {'S','e','p','a','r','a','t','o','r',' ','F',
-				  'i','l','e',0};
+static const WCHAR Previous_NamesW[] = {'P','r','e','v','i','o','u','s',' ','N','a','m','e','s',0};
+static const WCHAR Print_ProcessorW[] = {'P','r','i','n','t',' ','P','r','o','c','e','s','s','o','r',0};
+static const WCHAR Printer_DriverW[] = {'P','r','i','n','t','e','r',' ','D','r','i','v','e','r',0};
+static const WCHAR PrinterDriverDataW[] = {'P','r','i','n','t','e','r','D','r','i','v','e','r','D','a','t','a',0};
+static const WCHAR ProviderW[] = {'P','r','o','v','i','d','e','r',0};
+static const WCHAR Separator_FileW[] = {'S','e','p','a','r','a','t','o','r',' ','F','i','l','e',0};
 static const WCHAR Share_NameW[] = {'S','h','a','r','e',' ','N','a','m','e',0};
 static const WCHAR WinPrintW[] = {'W','i','n','P','r','i','n','t',0};
 static const WCHAR deviceW[]  = {'d','e','v','i','c','e',0};
@@ -242,6 +244,10 @@ static const WCHAR LPR_Port[] = {'L','P','R',':',0};
 static const WCHAR default_doc_title[] = {'L','o','c','a','l',' ','D','o','w','n','l','e','v','e','l',' ',
                                           'D','o','c','u','m','e','n','t',0};
 
+static const DWORD di_sizeof[] = {0, sizeof(DRIVER_INFO_1W), sizeof(DRIVER_INFO_2W),
+                                     sizeof(DRIVER_INFO_3W), sizeof(DRIVER_INFO_4W),
+                                     sizeof(DRIVER_INFO_5W), sizeof(DRIVER_INFO_6W),
+                                  0, sizeof(DRIVER_INFO_8W)};
 
 /******************************************************************
  *  validate the user-supplied printing-environment [internal]
@@ -264,7 +270,8 @@ static const  printenv_t * validate_envW(LPCWSTR env)
     static const printenv_t env_x86 =   {envname_x86W, subdir_x86W,
                                          3, Version3_RegPathW, Version3_SubdirW};
     static const printenv_t env_win40 = {envname_win40W, subdir_win40W,
-                                         0, emptyStringW, emptyStringW};
+                                         0, Version0_RegPathW, Version0_SubdirW};
+
     static const printenv_t * const all_printenv[]={&env_x86, &env_win40};
 
     const printenv_t *result = NULL;
@@ -421,11 +428,14 @@ static BOOL CUPS_LoadPrinters(void)
     PRINTER_INFO_2A       pinfo2a;
     char   *port,*devline;
     HKEY hkeyPrinter, hkeyPrinters, hkey;
+    char    loaderror[256];
 
-    cupshandle = wine_dlopen(SONAME_LIBCUPS, RTLD_NOW, NULL, 0);
-    if (!cupshandle) 
-	return FALSE;
-    TRACE("loaded %s\n", SONAME_LIBCUPS);
+    cupshandle = wine_dlopen(SONAME_LIBCUPS, RTLD_NOW, loaderror, sizeof(loaderror));
+    if (!cupshandle) {
+        TRACE("%s\n", loaderror);
+        return FALSE;
+    }
+    TRACE("%p: %s loaded\n", cupshandle, SONAME_LIBCUPS);
 
 #define DYNCUPS(x) 					\
     	p##x = wine_dlsym(cupshandle, #x, NULL,0);	\
@@ -3413,6 +3423,112 @@ static DWORD WINSPOOL_GetDWORDFromReg(HKEY hkey, LPCSTR ValueName)
     return value;
 }
 
+
+/*****************************************************************************
+ * get_filename_from_reg [internal]
+ *
+ * Get ValueName from hkey storing result in out
+ * when the Value in the registry has only a filename, use driverdir as prefix
+ * outlen is space left in out
+ * String is stored either as unicode or ascii
+ *
+ */
+
+static BOOL get_filename_from_reg(HKEY hkey, LPCWSTR driverdir, DWORD dirlen, LPCWSTR ValueName,
+                                  LPBYTE out, DWORD outlen, LPDWORD needed, BOOL unicode)
+{
+    WCHAR   filename[MAX_PATH];
+    DWORD   size;
+    DWORD   type;
+    LONG    ret;
+    LPWSTR  buffer = filename;
+    LPWSTR  ptr;
+
+    *needed = 0;
+    size = sizeof(filename);
+    buffer[0] = '\0';
+    ret = RegQueryValueExW(hkey, ValueName, NULL, &type, (LPBYTE) buffer, &size);
+    if (ret == ERROR_MORE_DATA) {
+        TRACE("need dynamic buffer: %u\n", size);
+        buffer = HeapAlloc(GetProcessHeap(), 0, size);
+        if (!buffer) {
+            /* No Memory is bad */
+            return FALSE;
+        }
+        buffer[0] = '\0';
+        ret = RegQueryValueExW(hkey, ValueName, NULL, &type, (LPBYTE) buffer, &size);
+    }
+
+    if ((ret != ERROR_SUCCESS) || (!buffer[0])) {
+        if (buffer != filename) HeapFree(GetProcessHeap(), 0, buffer);
+        return FALSE;
+    }
+
+    ptr = buffer;
+    while (ptr) {
+        /* do we have a full path ? */
+        ret = (((buffer[0] == '\\') && (buffer[1] == '\\')) ||
+                (buffer[0] && (buffer[1] == ':') && (buffer[2] == '\\')) );
+
+        if (!ret) {
+            /* we must build the full Path */
+            *needed += dirlen;
+            if ((out) && (outlen > dirlen)) {
+                if (unicode) {
+                    lstrcpyW((LPWSTR)out, driverdir);
+                }
+                else
+                {
+                    WideCharToMultiByte(CP_ACP, 0, driverdir, -1, (LPSTR)out, outlen, NULL, NULL);
+                }
+                out += dirlen;
+                outlen -= dirlen;
+            }
+            else
+                out = NULL;
+        }
+
+        /* write the filename */
+        if (unicode) {
+            size = (lstrlenW(ptr) + 1) * sizeof(WCHAR);
+            if ((out) && (outlen >= size)) {
+                lstrcpyW((LPWSTR)out, ptr);
+                out += size;
+                outlen -= size;
+            }
+            else
+                out = NULL;
+        }
+        else
+        {
+            size = WideCharToMultiByte(CP_ACP, 0, ptr, -1, NULL, 0, NULL, NULL);
+            if ((out) && (outlen >= size)) {
+                WideCharToMultiByte(CP_ACP, 0, ptr, -1, (LPSTR)out, outlen, NULL, NULL);
+                out += size;
+                outlen -= size;
+            }
+            else
+                out = NULL;
+        }
+        *needed += size;
+        ptr +=  lstrlenW(ptr)+1;
+        if ((type != REG_MULTI_SZ) || (!ptr[0]))  ptr = NULL;
+    }
+
+    if (buffer != filename) HeapFree(GetProcessHeap(), 0, buffer);
+
+    /* write the multisz-termination */
+    if (type == REG_MULTI_SZ) {
+        size = (unicode) ? sizeof(WCHAR) : 1;
+
+        *needed += size;
+        if (out && (outlen >= size)) {
+            memset (out, 0, size);
+        }
+    }
+    return TRUE;
+}
+
 /*****************************************************************************
  *    WINSPOOL_GetStringFromReg
  *
@@ -4242,7 +4358,7 @@ BOOL WINAPI EnumPrintersA(DWORD dwType, LPSTR lpszName,
 static BOOL WINSPOOL_GetDriverInfoFromReg(
                             HKEY    hkeyDrivers,
                             LPWSTR  DriverName,
-                            LPCWSTR pEnvironment,
+                            const printenv_t * env,
                             DWORD   Level,
                             LPBYTE  ptr,            /* DRIVER_INFO */
                             LPBYTE  pDriverStrings, /* strings buffer */
@@ -4252,143 +4368,235 @@ static BOOL WINSPOOL_GetDriverInfoFromReg(
 {
     DWORD  size, tmp;
     HKEY   hkeyDriver;
+    WCHAR  driverdir[MAX_PATH];
+    DWORD  dirlen;
     LPBYTE strPtr = pDriverStrings;
+    LPDRIVER_INFO_8W di = (LPDRIVER_INFO_8W) ptr;
 
-    TRACE("%s,%s,%d,%p,%p,%d,%d\n",
-          debugstr_w(DriverName), debugstr_w(pEnvironment),
-          Level, ptr, pDriverStrings, cbBuf, unicode);
+    TRACE("(%p, %s, %p, %d, %p, %p, %d, %d)\n", hkeyDrivers,
+          debugstr_w(DriverName), env,
+          Level, di, pDriverStrings, cbBuf, unicode);
 
-    if(unicode) {
+    if (di) ZeroMemory(di, di_sizeof[Level]);
+
+    if (unicode) {
         *pcbNeeded = (lstrlenW(DriverName) + 1) * sizeof(WCHAR);
-            if (*pcbNeeded <= cbBuf)
-               strcpyW((LPWSTR)strPtr, DriverName);
-    } else {
-        *pcbNeeded = WideCharToMultiByte(CP_ACP, 0, DriverName, -1, NULL, 0,
-                                          NULL, NULL);
-        if(*pcbNeeded <= cbBuf)
-            WideCharToMultiByte(CP_ACP, 0, DriverName, -1,
-                                (LPSTR)strPtr, *pcbNeeded, NULL, NULL);
+        if (*pcbNeeded <= cbBuf)
+           strcpyW((LPWSTR)strPtr, DriverName);
     }
-    if(Level == 1) {
-       if(ptr)
-          ((PDRIVER_INFO_1W) ptr)->pName = (LPWSTR) strPtr;
-       return TRUE;
-    } else {
-       if(ptr)
-          ((PDRIVER_INFO_2W) ptr)->pName = (LPWSTR) strPtr;
-       strPtr = (pDriverStrings) ? (pDriverStrings + (*pcbNeeded)) : NULL;
+    else
+    {
+        *pcbNeeded = WideCharToMultiByte(CP_ACP, 0, DriverName, -1, NULL, 0, NULL, NULL);
+        if (*pcbNeeded <= cbBuf)
+            WideCharToMultiByte(CP_ACP, 0, DriverName, -1, (LPSTR)strPtr, *pcbNeeded, NULL, NULL);
     }
 
-    if(!DriverName[0] || RegOpenKeyW(hkeyDrivers, DriverName, &hkeyDriver) != ERROR_SUCCESS) {
+    /* pName for level 1 has a different offset! */
+    if (Level == 1) {
+       if (di) ((LPDRIVER_INFO_1W) di)->pName = (LPWSTR) strPtr;
+       return TRUE;
+    }
+
+    /* .cVersion and .pName for level > 1 */
+    if (di) {
+        di->cVersion = env->driverversion;
+        di->pName = (LPWSTR) strPtr;
+        strPtr = (pDriverStrings) ? (pDriverStrings + (*pcbNeeded)) : NULL;
+    }
+
+    /* Reserve Space for the largest subdir and a Backslash*/
+    size = sizeof(driverdir) - sizeof(Version3_SubdirW) - sizeof(WCHAR);
+    if (!GetPrinterDriverDirectoryW(NULL, (LPWSTR) env->envname, 1, (LPBYTE) driverdir, size, &size)) {
+        /* Should never Fail */
+        return FALSE;
+    }
+    lstrcatW(driverdir, env->versionsubdir);
+    lstrcatW(driverdir, backslashW);
+
+    /* dirlen must not include the terminating zero */
+    dirlen = (unicode) ? lstrlenW(driverdir) * sizeof(WCHAR) :
+             WideCharToMultiByte(CP_ACP, 0, driverdir, -1, NULL, 0, NULL, NULL) -1;
+
+    if (!DriverName[0] || RegOpenKeyW(hkeyDrivers, DriverName, &hkeyDriver) != ERROR_SUCCESS) {
         ERR("Can't find driver %s in registry\n", debugstr_w(DriverName));
         SetLastError(ERROR_UNKNOWN_PRINTER_DRIVER); /* ? */
         return FALSE;
     }
 
-    if(ptr)
-        ((PDRIVER_INFO_2A) ptr)->cVersion = (GetVersion() & 0x80000000) ? 0 : 3; /* FIXME: add 1, 2 */
-
-    if(!pEnvironment)
-        pEnvironment = DefaultEnvironmentW;
-    if(unicode)
-        size = (lstrlenW(pEnvironment) + 1) * sizeof(WCHAR);
+    /* pEnvironment */
+    if (unicode)
+        size = (lstrlenW(env->envname) + 1) * sizeof(WCHAR);
     else
-        size = WideCharToMultiByte(CP_ACP, 0, pEnvironment, -1, NULL, 0,
-			           NULL, NULL);
+        size = WideCharToMultiByte(CP_ACP, 0, env->envname, -1, NULL, 0, NULL, NULL);
+
     *pcbNeeded += size;
-    if(*pcbNeeded <= cbBuf) {
-        if(unicode)
-            strcpyW((LPWSTR)strPtr, pEnvironment);
+    if (*pcbNeeded <= cbBuf) {
+        if (unicode) {
+            lstrcpyW((LPWSTR)strPtr, env->envname);
+        }
         else
-            WideCharToMultiByte(CP_ACP, 0, pEnvironment, -1,
-                                (LPSTR)strPtr, size, NULL, NULL);
-        if(ptr)
-            ((PDRIVER_INFO_2W) ptr)->pEnvironment = (LPWSTR)strPtr;
+        {
+            WideCharToMultiByte(CP_ACP, 0, env->envname, -1, (LPSTR)strPtr, size, NULL, NULL);
+        }
+        if (di) di->pEnvironment = (LPWSTR)strPtr;
         strPtr = (pDriverStrings) ? (pDriverStrings + (*pcbNeeded)) : NULL;
     }
 
-    if(WINSPOOL_GetStringFromReg(hkeyDriver, DriverW, strPtr, 0, &size,
-			         unicode)) {
+    /* .pDriverPath is the Graphics rendering engine.
+        The full Path is required to avoid a crash in some apps */
+    if (get_filename_from_reg(hkeyDriver, driverdir, dirlen, DriverW, strPtr, 0, &size, unicode)) {
         *pcbNeeded += size;
-        if(*pcbNeeded <= cbBuf)
-            WINSPOOL_GetStringFromReg(hkeyDriver, DriverW, strPtr, size, &tmp,
-                                      unicode);
-        if(ptr)
-            ((PDRIVER_INFO_2W) ptr)->pDriverPath = (LPWSTR)strPtr;
+        if (*pcbNeeded <= cbBuf)
+            get_filename_from_reg(hkeyDriver, driverdir, dirlen, DriverW, strPtr, size, &tmp, unicode);
+
+        if (di) di->pDriverPath = (LPWSTR)strPtr;
         strPtr = (pDriverStrings) ? (pDriverStrings + (*pcbNeeded)) : NULL;
     }
 
-    if(WINSPOOL_GetStringFromReg(hkeyDriver, Data_FileW, strPtr, 0, &size,
-			         unicode)) {
+    /* .pDataFile: For postscript-drivers, this is the ppd-file */
+    if (get_filename_from_reg(hkeyDriver, driverdir, dirlen, Data_FileW, strPtr, 0, &size, unicode)) {
         *pcbNeeded += size;
-        if(*pcbNeeded <= cbBuf)
-            WINSPOOL_GetStringFromReg(hkeyDriver, Data_FileW, strPtr, size,
-                                      &tmp, unicode);
-        if(ptr)
-            ((PDRIVER_INFO_2W) ptr)->pDataFile = (LPWSTR)strPtr;
+        if (*pcbNeeded <= cbBuf)
+            get_filename_from_reg(hkeyDriver, driverdir, dirlen, Data_FileW, strPtr, size, &size, unicode);
+
+        if (di) di->pDataFile = (LPWSTR)strPtr;
         strPtr = (pDriverStrings) ? pDriverStrings + (*pcbNeeded) : NULL;
     }
 
-    if(WINSPOOL_GetStringFromReg(hkeyDriver, Configuration_FileW, strPtr,
-                                 0, &size, unicode)) {
+    /* .pConfigFile is the Driver user Interface */
+    if (get_filename_from_reg(hkeyDriver, driverdir, dirlen, Configuration_FileW, strPtr, 0, &size, unicode)) {
         *pcbNeeded += size;
-        if(*pcbNeeded <= cbBuf)
-            WINSPOOL_GetStringFromReg(hkeyDriver, Configuration_FileW, strPtr,
-                                      size, &tmp, unicode);
-        if(ptr)
-            ((PDRIVER_INFO_2W) ptr)->pConfigFile = (LPWSTR)strPtr;
+        if (*pcbNeeded <= cbBuf)
+            get_filename_from_reg(hkeyDriver, driverdir, dirlen, Configuration_FileW, strPtr, size, &size, unicode);
+
+        if (di) di->pConfigFile = (LPWSTR)strPtr;
         strPtr = (pDriverStrings) ? pDriverStrings + (*pcbNeeded) : NULL;
     }
 
-    if(Level == 2 ) {
+    if (Level == 2 ) {
         RegCloseKey(hkeyDriver);
         TRACE("buffer space %d required %d\n", cbBuf, *pcbNeeded);
         return TRUE;
     }
 
-    if (Level != 5 && WINSPOOL_GetStringFromReg(hkeyDriver, Help_FileW, strPtr, 0, &size,
-                                 unicode)) {
+    if (Level == 5 ) {
+        RegCloseKey(hkeyDriver);
+        FIXME("level 5: incomplete\n");
+        return TRUE;
+    }
+
+    /* .pHelpFile */
+    if (get_filename_from_reg(hkeyDriver, driverdir, dirlen, Help_FileW, strPtr, 0, &size, unicode)) {
         *pcbNeeded += size;
-        if(*pcbNeeded <= cbBuf)
-            WINSPOOL_GetStringFromReg(hkeyDriver, Help_FileW, strPtr,
-                                      size, &tmp, unicode);
-        if(ptr)
-            ((PDRIVER_INFO_3W) ptr)->pHelpFile = (LPWSTR)strPtr;
+        if (*pcbNeeded <= cbBuf)
+            get_filename_from_reg(hkeyDriver, driverdir, dirlen, Help_FileW, strPtr, size, &size, unicode);
+
+        if (di) di->pHelpFile = (LPWSTR)strPtr;
         strPtr = (pDriverStrings) ? pDriverStrings + (*pcbNeeded) : NULL;
     }
 
-    if (Level != 5 && WINSPOOL_GetStringFromReg(hkeyDriver, Dependent_FilesW, strPtr, 0,
-			     &size, unicode)) {
+    /* .pDependentFiles */
+    if (get_filename_from_reg(hkeyDriver, driverdir, dirlen, Dependent_FilesW, strPtr, 0, &size, unicode)) {
         *pcbNeeded += size;
-        if(*pcbNeeded <= cbBuf)
-            WINSPOOL_GetStringFromReg(hkeyDriver, Dependent_FilesW, strPtr,
-                                      size, &tmp, unicode);
-        if(ptr)
-            ((PDRIVER_INFO_3W) ptr)->pDependentFiles = (LPWSTR)strPtr;
+        if (*pcbNeeded <= cbBuf)
+            get_filename_from_reg(hkeyDriver, driverdir, dirlen, Dependent_FilesW, strPtr, size, &size, unicode);
+
+        if (di) di->pDependentFiles = (LPWSTR)strPtr;
         strPtr = (pDriverStrings) ? pDriverStrings + (*pcbNeeded) : NULL;
     }
 
-    if (Level != 5 && WINSPOOL_GetStringFromReg(hkeyDriver, MonitorW, strPtr, 0, &size,
-                                 unicode)) {
+    /* .pMonitorName is the optional Language Monitor */
+    if (WINSPOOL_GetStringFromReg(hkeyDriver, MonitorW, strPtr, 0, &size, unicode)) {
         *pcbNeeded += size;
-        if(*pcbNeeded <= cbBuf)
-            WINSPOOL_GetStringFromReg(hkeyDriver, MonitorW, strPtr,
-                                      size, &tmp, unicode);
-        if(ptr)
-            ((PDRIVER_INFO_3W) ptr)->pMonitorName = (LPWSTR)strPtr;
+        if (*pcbNeeded <= cbBuf)
+            WINSPOOL_GetStringFromReg(hkeyDriver, MonitorW, strPtr, size, &size, unicode);
+
+        if (di) di->pMonitorName = (LPWSTR)strPtr;
         strPtr = (pDriverStrings) ? pDriverStrings + (*pcbNeeded) : NULL;
     }
 
-    if (Level != 5 && WINSPOOL_GetStringFromReg(hkeyDriver, DatatypeW, strPtr, 0, &size,
-                                 unicode)) {
+    /* .pDefaultDataType */
+    if (WINSPOOL_GetStringFromReg(hkeyDriver, DatatypeW, strPtr, 0, &size, unicode)) {
         *pcbNeeded += size;
         if(*pcbNeeded <= cbBuf)
-            WINSPOOL_GetStringFromReg(hkeyDriver, DatatypeW, strPtr,
-                                      size, &tmp, unicode);
-        if(ptr)
-            ((PDRIVER_INFO_3W) ptr)->pDefaultDataType = (LPWSTR)strPtr;
+            WINSPOOL_GetStringFromReg(hkeyDriver, DatatypeW, strPtr, size, &size, unicode);
+
+        if (di) di->pDefaultDataType = (LPWSTR)strPtr;
         strPtr = (pDriverStrings) ? pDriverStrings + (*pcbNeeded) : NULL;
     }
+
+    if (Level == 3 ) {
+        RegCloseKey(hkeyDriver);
+        TRACE("buffer space %d required %d\n", cbBuf, *pcbNeeded);
+        return TRUE;
+    }
+
+    /* .pszzPreviousNames */
+    if (WINSPOOL_GetStringFromReg(hkeyDriver, Previous_NamesW, strPtr, 0, &size, unicode)) {
+        *pcbNeeded += size;
+        if(*pcbNeeded <= cbBuf)
+            WINSPOOL_GetStringFromReg(hkeyDriver, Previous_NamesW, strPtr, size, &size, unicode);
+
+        if (di) di->pszzPreviousNames = (LPWSTR)strPtr;
+        strPtr = (pDriverStrings) ? pDriverStrings + (*pcbNeeded) : NULL;
+    }
+
+    if (Level == 4 ) {
+        RegCloseKey(hkeyDriver);
+        TRACE("buffer space %d required %d\n", cbBuf, *pcbNeeded);
+        return TRUE;
+    }
+
+    /* support is missing, but not important enough for a FIXME */
+    TRACE("%s: DriverDate + DriverVersion not supported\n", debugstr_w(DriverName));
+
+    /* .pszMfgName */
+    if (WINSPOOL_GetStringFromReg(hkeyDriver, ManufacturerW, strPtr, 0, &size, unicode)) {
+        *pcbNeeded += size;
+        if(*pcbNeeded <= cbBuf)
+            WINSPOOL_GetStringFromReg(hkeyDriver, ManufacturerW, strPtr, size, &size, unicode);
+
+        if (di) di->pszMfgName = (LPWSTR)strPtr;
+        strPtr = (pDriverStrings) ? pDriverStrings + (*pcbNeeded) : NULL;
+    }
+
+    /* .pszOEMUrl */
+    if (WINSPOOL_GetStringFromReg(hkeyDriver, OEM_UrlW, strPtr, 0, &size, unicode)) {
+        *pcbNeeded += size;
+        if(*pcbNeeded <= cbBuf)
+            WINSPOOL_GetStringFromReg(hkeyDriver, OEM_UrlW, strPtr, size, &size, unicode);
+
+        if (di) di->pszOEMUrl = (LPWSTR)strPtr;
+        strPtr = (pDriverStrings) ? pDriverStrings + (*pcbNeeded) : NULL;
+    }
+
+    /* .pszHardwareID */
+    if (WINSPOOL_GetStringFromReg(hkeyDriver, HardwareIDW, strPtr, 0, &size, unicode)) {
+        *pcbNeeded += size;
+        if(*pcbNeeded <= cbBuf)
+            WINSPOOL_GetStringFromReg(hkeyDriver, HardwareIDW, strPtr, size, &size, unicode);
+
+        if (di) di->pszHardwareID = (LPWSTR)strPtr;
+        strPtr = (pDriverStrings) ? pDriverStrings + (*pcbNeeded) : NULL;
+    }
+
+    /* .pszProvider */
+    if (WINSPOOL_GetStringFromReg(hkeyDriver, ProviderW, strPtr, 0, &size, unicode)) {
+        *pcbNeeded += size;
+        if(*pcbNeeded <= cbBuf)
+            WINSPOOL_GetStringFromReg(hkeyDriver, ProviderW, strPtr, size, &size, unicode);
+
+        if (di) di->pszProvider = (LPWSTR)strPtr;
+        strPtr = (pDriverStrings) ? pDriverStrings + (*pcbNeeded) : NULL;
+    }
+
+    if (Level == 6 ) {
+        RegCloseKey(hkeyDriver);
+        return TRUE;
+    }
+
+    /* support is missing, but not important enough for a FIXME */
+    TRACE("level 8: incomplete\n");
 
     TRACE("buffer space %d required %d\n", cbBuf, *pcbNeeded);
     RegCloseKey(hkeyDriver);
@@ -4408,20 +4616,25 @@ static BOOL WINSPOOL_GetPrinterDriver(HANDLE hPrinter, LPCWSTR pEnvironment,
     DWORD ret, type, size, needed = 0;
     LPBYTE ptr = NULL;
     HKEY hkeyPrinter, hkeyPrinters, hkeyDrivers;
+    const printenv_t * env;
 
     TRACE("(%p,%s,%d,%p,%d,%p)\n",hPrinter,debugstr_w(pEnvironment),
 	  Level,pDriverInfo,cbBuf, pcbNeeded);
 
-    ZeroMemory(pDriverInfo, cbBuf);
 
     if (!(name = get_opened_printer_name(hPrinter))) {
         SetLastError(ERROR_INVALID_HANDLE);
         return FALSE;
     }
-    if(Level < 1 || Level > 6) {
+
+    if (Level < 1 || Level == 7 || Level > 8) {
         SetLastError(ERROR_INVALID_LEVEL);
-	return FALSE;
+        return FALSE;
     }
+
+    env = validate_envW(pEnvironment);
+    if (!env) return FALSE;     /* SetLastError() is in validate_envW */
+
     if(RegCreateKeyW(HKEY_LOCAL_MACHINE, PrintersW, &hkeyPrinters) !=
        ERROR_SUCCESS) {
         ERR("Can't create Printers key\n");
@@ -4451,36 +4664,12 @@ static BOOL WINSPOOL_GetPrinterDriver(HANDLE hPrinter, LPCWSTR pEnvironment,
 	return FALSE;
     }
 
-    switch(Level) {
-    case 1:
-        size = sizeof(DRIVER_INFO_1W);
-	break;
-    case 2:
-        size = sizeof(DRIVER_INFO_2W);
-	break;
-    case 3:
-        size = sizeof(DRIVER_INFO_3W);
-	break;
-    case 4:
-        size = sizeof(DRIVER_INFO_4W);
-	break;
-    case 5:
-        size = sizeof(DRIVER_INFO_5W);
-	break;
-    case 6:
-        size = sizeof(DRIVER_INFO_6W);
-	break;
-    default:
-        ERR("Invalid level\n");
-	return FALSE;
-    }
-
-    if(size <= cbBuf)
+    size = di_sizeof[Level];
+    if ((size <= cbBuf) && pDriverInfo)
         ptr = pDriverInfo + size;
 
     if(!WINSPOOL_GetDriverInfoFromReg(hkeyDrivers, DriverName,
-                         pEnvironment, Level, pDriverInfo,
-                         (cbBuf < size) ? NULL : ptr,
+                         env, Level, pDriverInfo, ptr,
                          (cbBuf < size) ? 0 : cbBuf - size,
                          &needed, unicode)) {
             RegCloseKey(hkeyDrivers);
@@ -4894,6 +5083,7 @@ static BOOL WINSPOOL_EnumPrinterDrivers(LPWSTR pName, LPCWSTR pEnvironment,
     DWORD i, needed, number = 0, size = 0;
     WCHAR DriverNameW[255];
     PBYTE ptr;
+    const printenv_t * env;
 
     TRACE("%s,%s,%d,%p,%d,%d\n",
           debugstr_w(pName), debugstr_w(pEnvironment),
@@ -4906,10 +5096,17 @@ static BOOL WINSPOOL_EnumPrinterDrivers(LPWSTR pName, LPCWSTR pEnvironment,
         return FALSE;
     }
 
+    env = validate_envW(pEnvironment);
+    if (!env) return FALSE;     /* SetLastError() is in validate_envW */
+
     /* check input parameter */
-    if((Level < 1) || (Level > 3)) {
-        ERR("unsupported level %d\n", Level);
+    if ((Level < 1) || (Level == 7) || (Level > 8)) {
         SetLastError(ERROR_INVALID_LEVEL);
+        return FALSE;
+    }
+
+    if ((pcbNeeded == NULL) || (pcReturned == NULL)) {
+        SetLastError(RPC_X_NULL_REF_POINTER);
         return FALSE;
     }
 
@@ -4936,17 +5133,7 @@ static BOOL WINSPOOL_EnumPrinterDrivers(LPWSTR pName, LPCWSTR pEnvironment,
     /* get size of single struct
      * unicode and ascii structure have the same size
      */
-    switch (Level) {
-        case 1:
-            size = sizeof(DRIVER_INFO_1A);
-            break;
-        case 2:
-            size = sizeof(DRIVER_INFO_2A);
-            break;
-        case 3:
-            size = sizeof(DRIVER_INFO_3A);
-            break;
-    }
+    size = di_sizeof[Level];
 
     /* calculate required buffer size */
     *pcbNeeded = size * number;
@@ -4961,7 +5148,7 @@ static BOOL WINSPOOL_EnumPrinterDrivers(LPWSTR pName, LPCWSTR pEnvironment,
             return FALSE;
         }
         if(!WINSPOOL_GetDriverInfoFromReg(hkeyDrivers, DriverNameW,
-                         pEnvironment, Level, ptr,
+                         env, Level, ptr,
                          (cbBuf < *pcbNeeded) ? NULL : pDriverInfo + *pcbNeeded,
                          (cbBuf < *pcbNeeded) ? 0 : cbBuf - *pcbNeeded,
                          &needed, unicode)) {

@@ -24,6 +24,9 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "wingdi.h"
+
+#include "objbase.h"
+
 #include "gdiplus.h"
 #include "gdiplus_private.h"
 #include "wine/debug.h"
@@ -94,6 +97,63 @@ GpStatus WINGDIPAPI GdipAddPathArc(GpPath *path, REAL x1, REAL y1, REAL x2,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipAddPathBeziers(GpPath *path, GDIPCONST GpPointF *points,
+    INT count)
+{
+    INT i, old_count;
+
+    if(!path || !points || ((count - 1) % 3))
+        return InvalidParameter;
+
+    if(!lengthen_path(path, count))
+        return OutOfMemory;
+
+    old_count = path->pathdata.Count;
+
+    for(i = 0; i < count; i++){
+        path->pathdata.Points[old_count + i].X = points[i].X;
+        path->pathdata.Points[old_count + i].Y = points[i].Y;
+        path->pathdata.Types[old_count + i] = PathPointTypeBezier;
+    }
+
+    path->pathdata.Types[old_count] =
+        (path->newfigure ? PathPointTypeStart : PathPointTypeLine);
+    path->newfigure = FALSE;
+    path->pathdata.Count += count;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipAddPathEllipse(GpPath *path, REAL x, REAL y, REAL width,
+    REAL height)
+{
+    INT old_count, numpts;
+
+    if(!path)
+        return InvalidParameter;
+
+    if(!lengthen_path(path, MAX_ARC_PTS))
+        return OutOfMemory;
+
+    old_count = path->pathdata.Count;
+    if((numpts = arc2polybezier(&path->pathdata.Points[old_count],  x, y, width,
+                               height, 0.0, 360.0)) != MAX_ARC_PTS){
+        ERR("expected %d points but got %d\n", MAX_ARC_PTS, numpts);
+        return GenericError;
+    }
+
+    memset(&path->pathdata.Types[old_count + 1], PathPointTypeBezier,
+           MAX_ARC_PTS - 1);
+
+    /* An ellipse is an instrinsic figure (always its own subpath). */
+    path->pathdata.Types[old_count] = PathPointTypeStart;
+    path->pathdata.Types[old_count + MAX_ARC_PTS - 1] |= PathPointTypeCloseSubpath;
+    path->newfigure = TRUE;
+    path->pathdata.Count += MAX_ARC_PTS;
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipAddPathLine2(GpPath *path, GDIPCONST GpPointF *points,
     INT count)
 {
@@ -152,6 +212,32 @@ GpStatus WINGDIPAPI GdipAddPathPath(GpPath *path, GDIPCONST GpPath* addingPath,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipClonePath(GpPath* path, GpPath **clone)
+{
+    if(!path || !clone)
+        return InvalidParameter;
+
+    *clone = GdipAlloc(sizeof(GpPath));
+    if(!*clone) return OutOfMemory;
+
+    memcpy(*clone, path, sizeof(GpPath));
+
+    (*clone)->pathdata.Points = GdipAlloc(path->datalen * sizeof(PointF));
+    (*clone)->pathdata.Types = GdipAlloc(path->datalen);
+    if(!(*clone)->pathdata.Points || !(*clone)->pathdata.Types){
+        GdipFree(*clone);
+        GdipFree((*clone)->pathdata.Points);
+        GdipFree((*clone)->pathdata.Types);
+        return OutOfMemory;
+    }
+
+    memcpy((*clone)->pathdata.Points, path->pathdata.Points,
+           path->datalen * sizeof(PointF));
+    memcpy((*clone)->pathdata.Types, path->pathdata.Types, path->datalen);
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipClosePathFigure(GpPath* path)
 {
     if(!path)
@@ -189,6 +275,36 @@ GpStatus WINGDIPAPI GdipCreatePath(GpFillMode fill, GpPath **path)
 
     *path = GdipAlloc(sizeof(GpPath));
     if(!*path)  return OutOfMemory;
+
+    (*path)->fill = fill;
+    (*path)->newfigure = TRUE;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipCreatePath2(GDIPCONST GpPointF* points,
+    GDIPCONST BYTE* types, INT count, GpFillMode fill, GpPath **path)
+{
+    if(!path)
+        return InvalidParameter;
+
+    *path = GdipAlloc(sizeof(GpPath));
+    if(!*path)  return OutOfMemory;
+
+    (*path)->pathdata.Points = GdipAlloc(count * sizeof(PointF));
+    (*path)->pathdata.Types = GdipAlloc(count);
+
+    if(!(*path)->pathdata.Points || !(*path)->pathdata.Types){
+        GdipFree((*path)->pathdata.Points);
+        GdipFree((*path)->pathdata.Types);
+        GdipFree(*path);
+        return OutOfMemory;
+    }
+
+    memcpy((*path)->pathdata.Points, points, count * sizeof(PointF));
+    memcpy((*path)->pathdata.Types, types, count);
+    (*path)->pathdata.Count = count;
+    (*path)->datalen = count;
 
     (*path)->fill = fill;
     (*path)->newfigure = TRUE;
@@ -339,6 +455,20 @@ GpStatus WINGDIPAPI GdipGetPointCount(GpPath *path, INT *count)
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipIsOutlineVisiblePathPointI(GpPath* path, INT x, INT y,
+    GpPen *pen, GpGraphics *graphics, BOOL *result)
+{
+    static int calls;
+
+    if(!path || !pen)
+        return InvalidParameter;
+
+    if(!(calls++))
+        FIXME("not implemented\n");
+
+    return NotImplemented;
+}
+
 GpStatus WINGDIPAPI GdipStartPathFigure(GpPath *path)
 {
     if(!path)
@@ -357,6 +487,16 @@ GpStatus WINGDIPAPI GdipResetPath(GpPath *path)
     path->pathdata.Count = 0;
     path->newfigure = TRUE;
     path->fill = FillModeAlternate;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipSetPathFillMode(GpPath *path, GpFillMode fill)
+{
+    if(!path)
+        return InvalidParameter;
+
+    path->fill = fill;
 
     return Ok;
 }

@@ -200,6 +200,7 @@ static void test_decodeInt(DWORD dwEncoding)
     static const BYTE testStr[] = { 0x16, 4, 't', 'e', 's', 't' };
     static const BYTE longForm[] = { 2, 0x81, 0x01, 0x01 };
     static const BYTE bigBogus[] = { 0x02, 0x84, 0x01, 0xff, 0xff, 0xf9 };
+    static const BYTE extraBytes[] = { 2, 1, 1, 0, 0, 0, 0 };
     BYTE *buf = NULL;
     DWORD bufSize = 0;
     int i;
@@ -304,6 +305,15 @@ static void test_decodeInt(DWORD dwEncoding)
     /* Decode the value 1 with long-form length */
     ret = CryptDecodeObjectEx(dwEncoding, X509_MULTI_BYTE_INTEGER, longForm,
      sizeof(longForm), CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &bufSize);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(*(int *)buf == 1, "Expected 1, got %d\n", *(int *)buf);
+        LocalFree(buf);
+    }
+    /* check with extra bytes at the end */
+    ret = CryptDecodeObjectEx(dwEncoding, X509_INTEGER, extraBytes,
+     sizeof(extraBytes), CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &bufSize);
     ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
     if (buf)
     {
@@ -969,6 +979,11 @@ static void compareNames(const CERT_NAME_INFO *expected,
     }
 }
 
+static const BYTE twoRDNsExtraBytes[] = {
+    0x30,0x23,0x31,0x21,0x30,0x0c,0x06,0x03,0x55,0x04,0x04,
+    0x13,0x05,0x4c,0x61,0x6e,0x67,0x00,0x30,0x11,0x06,0x03,0x55,0x04,0x03,
+    0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,0x67,0,0,0,0,0,0};
+
 static void test_decodeName(DWORD dwEncoding)
 {
     BYTE *buf = NULL;
@@ -1035,6 +1050,11 @@ static void test_decodeName(DWORD dwEncoding)
         compareNames(&info, (CERT_NAME_INFO *)buf);
         LocalFree(buf);
     }
+    /* test that two RDN attrs with extra bytes succeeds */
+    bufSize = 0;
+    ret = CryptDecodeObjectEx(dwEncoding, X509_NAME, twoRDNsExtraBytes,
+     sizeof(twoRDNsExtraBytes), 0, NULL, NULL, &bufSize);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
     /* And, a slightly more complicated name */
     buf = NULL;
     bufSize = 0;
@@ -1257,6 +1277,7 @@ static void test_decodeNameValue(DWORD dwEncoding)
 }
 
 static const BYTE emptyURL[] = { 0x30, 0x02, 0x86, 0x00 };
+static const BYTE emptyURLExtraBytes[] = { 0x30, 0x02, 0x86, 0x00, 0, 0, 0 };
 static const WCHAR url[] = { 'h','t','t','p',':','/','/','w','i','n','e',
  'h','q','.','o','r','g',0 };
 static const BYTE encodedURL[] = { 0x30, 0x13, 0x86, 0x11, 0x68, 0x74,
@@ -1270,6 +1291,12 @@ static const BYTE encodedDnsName[] = { 0x30, 0x0c, 0x82, 0x0a, 0x77, 0x69,
 static const BYTE localhost[] = { 127, 0, 0, 1 };
 static const BYTE encodedIPAddr[] = { 0x30, 0x06, 0x87, 0x04, 0x7f, 0x00, 0x00,
  0x01 };
+static const unsigned char encodedCommonName[] = {
+    0x30,0x15,0x31,0x13,0x30,0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,'J','u','a','n',' ','L','a','n','g',0};
+static const BYTE encodedOidName[] = { 0x30,0x04,0x88,0x02,0x2a,0x03 };
+static const BYTE encodedDirectoryName[] = {
+0x30,0x19,0xa4,0x17,0x30,0x15,0x31,0x13,0x30,0x11,0x06,0x03,0x55,0x04,0x03,
+0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,0x67,0x00 };
 
 static void test_encodeAltName(DWORD dwEncoding)
 {
@@ -1278,6 +1305,7 @@ static void test_encodeAltName(DWORD dwEncoding)
     BYTE *buf = NULL;
     DWORD size = 0;
     BOOL ret;
+    char oid[] = "1.2.3";
 
     /* Test with empty info */
     ret = CryptEncodeObjectEx(dwEncoding, X509_ALTERNATE_NAME, &info,
@@ -1358,6 +1386,29 @@ static void test_encodeAltName(DWORD dwEncoding)
         ok(!memcmp(buf, encodedIPAddr, size), "Unexpected value\n");
         LocalFree(buf);
     }
+    /* Test with OID */
+    entry.dwAltNameChoice = CERT_ALT_NAME_REGISTERED_ID;
+    U(entry).pszRegisteredID = oid;
+    ret = CryptEncodeObjectEx(dwEncoding, X509_ALTERNATE_NAME, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    if (buf)
+    {
+        ok(size == sizeof(encodedOidName), "Wrong size %d\n", size);
+        ok(!memcmp(buf, encodedOidName, size), "Unexpected value\n");
+        LocalFree(buf);
+    }
+    /* Test with directory name */
+    entry.dwAltNameChoice = CERT_ALT_NAME_DIRECTORY_NAME;
+    U(entry).DirectoryName.cbData = sizeof(encodedCommonName);
+    U(entry).DirectoryName.pbData = (LPBYTE)encodedCommonName;
+    ret = CryptEncodeObjectEx(dwEncoding, X509_ALTERNATE_NAME, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    if (buf)
+    {
+        ok(size == sizeof(encodedDirectoryName), "Wrong size %d\n", size);
+        ok(!memcmp(buf, encodedDirectoryName, size), "Unexpected value\n");
+        LocalFree(buf);
+    }
 }
 
 static void test_decodeAltName(DWORD dwEncoding)
@@ -1412,6 +1463,9 @@ static void test_decodeAltName(DWORD dwEncoding)
          "Expected empty URL\n");
         LocalFree(buf);
     }
+    ret = CryptDecodeObjectEx(dwEncoding, X509_ALTERNATE_NAME,
+     emptyURLExtraBytes, sizeof(emptyURLExtraBytes), 0, NULL, NULL, &bufSize);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
     ret = CryptDecodeObjectEx(dwEncoding, X509_ALTERNATE_NAME, encodedURL,
      encodedURL[1] + 2, CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf,
      &bufSize);
@@ -1463,6 +1517,44 @@ static void test_decodeAltName(DWORD dwEncoding)
           U(info->rgAltEntry[0]).IPAddress.cbData);
         ok(!memcmp(U(info->rgAltEntry[0]).IPAddress.pbData, localhost,
          sizeof(localhost)), "Unexpected IP address value\n");
+        LocalFree(buf);
+    }
+    ret = CryptDecodeObjectEx(dwEncoding, X509_ALTERNATE_NAME, encodedOidName,
+     sizeof(encodedOidName), CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf,
+     &bufSize);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        info = (CERT_ALT_NAME_INFO *)buf;
+
+        ok(info->cAltEntry == 1, "Expected 1 entries, got %d\n",
+         info->cAltEntry);
+        ok(info->rgAltEntry[0].dwAltNameChoice == CERT_ALT_NAME_REGISTERED_ID,
+         "Expected CERT_ALT_NAME_REGISTERED_ID, got %d\n",
+         info->rgAltEntry[0].dwAltNameChoice);
+        ok(!strcmp(U(info->rgAltEntry[0]).pszRegisteredID, "1.2.3"),
+           "Expected OID 1.2.3, got %s\n", U(info->rgAltEntry[0]).pszRegisteredID);
+        LocalFree(buf);
+    }
+    ret = CryptDecodeObjectEx(dwEncoding, X509_ALTERNATE_NAME,
+     encodedDirectoryName, sizeof(encodedDirectoryName),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &bufSize);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        info = (CERT_ALT_NAME_INFO *)buf;
+
+        ok(info->cAltEntry == 1, "Expected 1 entries, got %d\n",
+         info->cAltEntry);
+        ok(info->rgAltEntry[0].dwAltNameChoice == CERT_ALT_NAME_DIRECTORY_NAME,
+         "Expected CERT_ALT_NAME_DIRECTORY_NAME, got %d\n",
+         info->rgAltEntry[0].dwAltNameChoice);
+        ok(U(info->rgAltEntry[0]).DirectoryName.cbData ==
+         sizeof(encodedCommonName), "Unexpected directory name length %d\n",
+          U(info->rgAltEntry[0]).DirectoryName.cbData);
+        ok(!memcmp(U(info->rgAltEntry[0]).DirectoryName.pbData,
+         encodedCommonName, sizeof(encodedCommonName)),
+         "Unexpected directory name value\n");
         LocalFree(buf);
     }
 }
@@ -1957,8 +2049,6 @@ static void test_encodeBasicConstraints(DWORD dwEncoding)
 }
 
 static const unsigned char bin63[] = { 0x30,0x06,0x01,0x01,0x01,0x02,0x01,0x01 };
-static const unsigned char encodedCommonName[] = {
-    0x30,0x15,0x31,0x13,0x30,0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,'J','u','a','n',' ','L','a','n','g',0};
 
 static void test_decodeBasicConstraints(DWORD dwEncoding)
 {
@@ -2623,6 +2713,39 @@ static const BYTE bigCert[] = { 0x30, 0x7a, 0x02, 0x01, 0x01, 0x30, 0x02, 0x06,
  0x4c, 0x61, 0x6e, 0x67, 0x00, 0x30, 0x07, 0x30, 0x02, 0x06, 0x00, 0x03, 0x01,
  0x00, 0xa3, 0x16, 0x30, 0x14, 0x30, 0x12, 0x06, 0x03, 0x55, 0x1d, 0x13, 0x01,
  0x01, 0xff, 0x04, 0x08, 0x30, 0x06, 0x01, 0x01, 0xff, 0x02, 0x01, 0x01 };
+static const BYTE v1CertWithPubKey[] = {
+0x30,0x81,0x95,0x02,0x01,0x01,0x30,0x02,0x06,0x00,0x30,0x15,0x31,0x13,0x30,
+0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,
+0x6e,0x67,0x00,0x30,0x22,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,0x31,
+0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,
+0x30,0x31,0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x15,0x31,0x13,0x30,0x11,
+0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,
+0x67,0x00,0x30,0x22,0x30,0x0d,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,
+0x01,0x01,0x05,0x00,0x03,0x11,0x00,0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,0xa3,0x16,0x30,0x14,0x30,0x12,0x06,
+0x03,0x55,0x1d,0x13,0x01,0x01,0xff,0x04,0x08,0x30,0x06,0x01,0x01,0xff,0x02,
+0x01,0x01 };
+static const BYTE v1CertWithPubKeyNoNull[] = {
+0x30,0x81,0x93,0x02,0x01,0x01,0x30,0x02,0x06,0x00,0x30,0x15,0x31,0x13,0x30,
+0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,
+0x6e,0x67,0x00,0x30,0x22,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,0x31,
+0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,
+0x30,0x31,0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x15,0x31,0x13,0x30,0x11,
+0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,
+0x67,0x00,0x30,0x20,0x30,0x0b,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,
+0x01,0x01,0x03,0x11,0x00,0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,
+0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,0xa3,0x16,0x30,0x14,0x30,0x12,0x06,0x03,0x55,
+0x1d,0x13,0x01,0x01,0xff,0x04,0x08,0x30,0x06,0x01,0x01,0xff,0x02,0x01,0x01 };
+static const BYTE v1CertWithSubjectKeyId[] = {
+0x30,0x7b,0x02,0x01,0x01,0x30,0x02,0x06,0x00,0x30,0x15,0x31,0x13,0x30,0x11,
+0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,
+0x67,0x00,0x30,0x22,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,0x31,0x30,
+0x30,0x30,0x30,0x30,0x30,0x5a,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,
+0x31,0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x15,0x31,0x13,0x30,0x11,0x06,
+0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,0x67,
+0x00,0x30,0x07,0x30,0x02,0x06,0x00,0x03,0x01,0x00,0xa3,0x17,0x30,0x15,0x30,
+0x13,0x06,0x03,0x55,0x1d,0x0e,0x04,0x0c,0x04,0x0a,0x4a,0x75,0x61,0x6e,0x20,
+0x4c,0x61,0x6e,0x67,0x00 };
 
 static const BYTE serialNum[] = { 0x01 };
 
@@ -2632,6 +2755,9 @@ static void test_encodeCertToBeSigned(DWORD dwEncoding)
     BYTE *buf = NULL;
     DWORD size = 0;
     CERT_INFO info = { 0 };
+    static char oid_rsa_rsa[] = szOID_RSA_RSA;
+    static char oid_subject_key_identifier[] = szOID_SUBJECT_KEY_IDENTIFIER;
+    CERT_EXTENSION ext;
 
     /* Test with NULL pvStructInfo */
     ret = CryptEncodeObjectEx(dwEncoding, X509_CERT_TO_BE_SIGNED, NULL,
@@ -2710,9 +2836,41 @@ static void test_encodeCertToBeSigned(DWORD dwEncoding)
         ok(!memcmp(buf, bigCert, size), "Got unexpected value\n");
         LocalFree(buf);
     }
-    /* for now, I let more interesting tests be done for each subcomponent,
-     * rather than retesting them all here.
-     */
+    /* Add a public key */
+    info.SubjectPublicKeyInfo.Algorithm.pszObjId = oid_rsa_rsa;
+    info.SubjectPublicKeyInfo.PublicKey.cbData = sizeof(aKey);
+    info.SubjectPublicKeyInfo.PublicKey.pbData = (LPBYTE)aKey;
+    ret = CryptEncodeObjectEx(dwEncoding, X509_CERT_TO_BE_SIGNED, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    if (buf)
+    {
+        ok(size == sizeof(v1CertWithPubKey) ||
+         size == sizeof(v1CertWithPubKeyNoNull), "Wrong size %d\n", size);
+        if (size == sizeof(v1CertWithPubKey))
+            ok(!memcmp(buf, v1CertWithPubKey, size), "Got unexpected value\n");
+        else if (size == sizeof(v1CertWithPubKeyNoNull))
+            ok(!memcmp(buf, v1CertWithPubKeyNoNull, size),
+             "Got unexpected value\n");
+        LocalFree(buf);
+    }
+    /* Remove the public key, and add a subject key identifier extension */
+    info.SubjectPublicKeyInfo.Algorithm.pszObjId = NULL;
+    info.SubjectPublicKeyInfo.PublicKey.cbData = 0;
+    info.SubjectPublicKeyInfo.PublicKey.pbData = NULL;
+    ext.pszObjId = oid_subject_key_identifier;
+    ext.fCritical = FALSE;
+    ext.Value.cbData = sizeof(octetCommonNameValue);
+    ext.Value.pbData = (BYTE *)octetCommonNameValue;
+    info.cExtension = 1;
+    info.rgExtension = &ext;
+    ret = CryptEncodeObjectEx(dwEncoding, X509_CERT_TO_BE_SIGNED, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    if (buf)
+    {
+        ok(size == sizeof(v1CertWithSubjectKeyId), "Wrong size %d\n", size);
+        ok(!memcmp(buf, v1CertWithSubjectKeyId, size), "Unexpected value\n");
+        LocalFree(buf);
+    }
 }
 
 static void test_decodeCertToBeSigned(DWORD dwEncoding)
@@ -2741,8 +2899,7 @@ static void test_decodeCertToBeSigned(DWORD dwEncoding)
         ret = CryptDecodeObjectEx(dwEncoding, X509_CERT_TO_BE_SIGNED,
          corruptCerts[i], corruptCerts[i][1] + 2, CRYPT_DECODE_ALLOC_FLAG, NULL,
          (BYTE *)&buf, &size);
-        ok(!ret && (GetLastError() == CRYPT_E_ASN1_CORRUPT),
-         "Expected CRYPT_E_ASN1_CORRUPT, got %08x\n", GetLastError());
+        ok(!ret, "Expected failure\n");
     }
     /* Now check with serial number, subject and issuer specified */
     ret = CryptDecodeObjectEx(dwEncoding, X509_CERT_TO_BE_SIGNED, bigCert,
@@ -2766,6 +2923,38 @@ static void test_decodeCertToBeSigned(DWORD dwEncoding)
          "Wrong size %d\n", info->Subject.cbData);
         ok(!memcmp(info->Subject.pbData, encodedCommonName,
          info->Subject.cbData), "Unexpected subject\n");
+        LocalFree(buf);
+    }
+    /* Check again with pub key specified */
+    ret = CryptDecodeObjectEx(dwEncoding, X509_CERT_TO_BE_SIGNED,
+     v1CertWithPubKey, sizeof(v1CertWithPubKey), CRYPT_DECODE_ALLOC_FLAG, NULL,
+     (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        CERT_INFO *info = (CERT_INFO *)buf;
+
+        ok(size >= sizeof(CERT_INFO), "Wrong size %d\n", size);
+        ok(info->SerialNumber.cbData == 1,
+         "Expected serial number size 1, got %d\n", info->SerialNumber.cbData);
+        ok(*info->SerialNumber.pbData == *serialNum,
+         "Expected serial number %d, got %d\n", *serialNum,
+         *info->SerialNumber.pbData);
+        ok(info->Issuer.cbData == sizeof(encodedCommonName),
+         "Wrong size %d\n", info->Issuer.cbData);
+        ok(!memcmp(info->Issuer.pbData, encodedCommonName, info->Issuer.cbData),
+         "Unexpected issuer\n");
+        ok(info->Subject.cbData == sizeof(encodedCommonName),
+         "Wrong size %d\n", info->Subject.cbData);
+        ok(!memcmp(info->Subject.pbData, encodedCommonName,
+         info->Subject.cbData), "Unexpected subject\n");
+        ok(!strcmp(info->SubjectPublicKeyInfo.Algorithm.pszObjId,
+         szOID_RSA_RSA), "Expected szOID_RSA_RSA, got %s\n",
+         info->SubjectPublicKeyInfo.Algorithm.pszObjId);
+        ok(info->SubjectPublicKeyInfo.PublicKey.cbData == sizeof(aKey),
+         "Wrong size %d\n", info->SubjectPublicKeyInfo.PublicKey.cbData);
+        ok(!memcmp(info->SubjectPublicKeyInfo.PublicKey.pbData, aKey,
+         sizeof(aKey)), "Unexpected public key\n");
         LocalFree(buf);
     }
 }
@@ -4535,6 +4724,8 @@ static void test_decodeAuthorityKeyId2(DWORD dwEncoding)
 }
 
 static const BYTE emptyPKCSContentInfo[] = { 0x30,0x04,0x06,0x02,0x2a,0x03 };
+static const BYTE emptyPKCSContentInfoExtraBytes[] = { 0x30,0x04,0x06,0x02,0x2a,
+ 0x03,0,0,0,0,0,0 };
 static const BYTE bogusPKCSContentInfo[] = { 0x30,0x07,0x06,0x02,0x2a,0x03,
  0xa0,0x01,0x01 };
 static const BYTE intPKCSContentInfo[] = { 0x30,0x09,0x06,0x02,0x2a,0x03,0xa0,
@@ -4613,6 +4804,10 @@ static void test_decodePKCSContentInfo(DWORD dwEncoding)
          info->Content.cbData);
         LocalFree(buf);
     }
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_CONTENT_INFO,
+     emptyPKCSContentInfoExtraBytes, sizeof(emptyPKCSContentInfoExtraBytes),
+     0, NULL, NULL, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %x\n", GetLastError());
     SetLastError(0xdeadbeef);
     ret = CryptDecodeObjectEx(dwEncoding, PKCS_CONTENT_INFO,
      bogusPKCSContentInfo, sizeof(bogusPKCSContentInfo),
@@ -4895,6 +5090,14 @@ static const BYTE PKCSSignerWithHash[] = {
  0x01,0x01,0x30,0x06,0x06,0x02,0x2a,0x03,0x05,0x00,0x30,0x06,0x06,0x02,0x2d,
  0x06,0x05,0x00,0x04,0x10,0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,
  0x0a,0x0b,0x0c,0x0d,0x0e,0x0f };
+static const BYTE PKCSSignerWithAuthAttr[] = {
+0x30,0x62,0x02,0x01,0x00,0x30,0x19,0x30,0x14,0x31,0x12,0x30,0x10,0x06,0x03,
+0x55,0x04,0x03,0x13,0x09,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,0x67,0x02,
+0x01,0x01,0x30,0x06,0x06,0x02,0x2a,0x03,0x05,0x00,0xa0,0x20,0x30,0x1e,0x06,
+0x03,0x55,0x04,0x03,0x31,0x17,0x30,0x15,0x31,0x13,0x30,0x11,0x06,0x03,0x55,
+0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,0x67,0x00,0x30,
+0x06,0x06,0x02,0x2d,0x06,0x05,0x00,0x04,0x10,0x00,0x01,0x02,0x03,0x04,0x05,
+0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f };
 
 static void test_encodePKCSSignerInfo(DWORD dwEncoding)
 {
@@ -4903,6 +5106,10 @@ static void test_encodePKCSSignerInfo(DWORD dwEncoding)
     LPBYTE buf = NULL;
     DWORD size = 0;
     CMSG_SIGNER_INFO info = { 0 };
+    char oid_common_name[] = szOID_COMMON_NAME;
+    CRYPT_ATTR_BLOB commonName = { sizeof(encodedCommonName),
+     (LPBYTE)encodedCommonName };
+    CRYPT_ATTRIBUTE attr = { oid_common_name, 1, &commonName };
 
     SetLastError(0xdeadbeef);
     ret = CryptEncodeObjectEx(dwEncoding, PKCS7_SIGNER_INFO, &info,
@@ -5024,6 +5231,29 @@ static void test_encodePKCSSignerInfo(DWORD dwEncoding)
             LocalFree(buf);
         }
     }
+    info.AuthAttrs.cAttr = 1;
+    info.AuthAttrs.rgAttr = &attr;
+    SetLastError(0xdeadbeef);
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS7_SIGNER_INFO, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    if (!(dwEncoding & PKCS_7_ASN_ENCODING))
+        ok(!ret && GetLastError() == E_INVALIDARG,
+         "Expected E_INVALIDARG, got %08x\n", GetLastError());
+    else
+    {
+        ok(ret, "CryptEncodeObjectEx failed: %x\n", GetLastError());
+        if (buf)
+        {
+            ok(size == sizeof(PKCSSignerWithAuthAttr), "Unexpected size %d\n",
+             size);
+            if (size == sizeof(PKCSSignerWithAuthAttr))
+                ok(!memcmp(buf, PKCSSignerWithAuthAttr, size),
+                 "Unexpected value\n");
+            else
+                ok(0, "Unexpected value\n");
+            LocalFree(buf);
+        }
+    }
 }
 
 static void test_decodePKCSSignerInfo(DWORD dwEncoding)
@@ -5126,6 +5356,26 @@ static void test_decodePKCSSignerInfo(DWORD dwEncoding)
          info->EncryptedHash.cbData);
         ok(!memcmp(info->EncryptedHash.pbData, hash, sizeof(hash)),
          "Unexpected value\n");
+        LocalFree(buf);
+    }
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS7_SIGNER_INFO,
+     PKCSSignerWithAuthAttr, sizeof(PKCSSignerWithAuthAttr),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    if (buf)
+    {
+        info = (CMSG_SIGNER_INFO *)buf;
+        ok(info->AuthAttrs.cAttr == 1, "Expected 1 attribute, got %d\n",
+         info->AuthAttrs.cAttr);
+        ok(!strcmp(info->AuthAttrs.rgAttr[0].pszObjId, szOID_COMMON_NAME),
+         "Expected %s, got %s\n", szOID_COMMON_NAME,
+         info->AuthAttrs.rgAttr[0].pszObjId);
+        ok(info->AuthAttrs.rgAttr[0].cValue == 1, "Expected 1 value, got %d\n",
+         info->AuthAttrs.rgAttr[0].cValue);
+        ok(info->AuthAttrs.rgAttr[0].rgValue[0].cbData ==
+         sizeof(encodedCommonName), "Unexpected size %d\n",
+         info->AuthAttrs.rgAttr[0].rgValue[0].cbData);
+        ok(!memcmp(info->AuthAttrs.rgAttr[0].rgValue[0].pbData,
+         encodedCommonName, sizeof(encodedCommonName)), "Unexpected value\n");
         LocalFree(buf);
     }
 }

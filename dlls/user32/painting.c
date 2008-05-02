@@ -280,7 +280,7 @@ static BOOL send_erase( HWND hwnd, UINT flags, HRGN client_rgn,
  *
  * Implementation of RDW_ERASENOW behavior.
  */
-static void erase_now( HWND hwnd, UINT rdw_flags )
+void erase_now( HWND hwnd, UINT rdw_flags )
 {
     HWND child = 0;
     HRGN hrgn;
@@ -527,6 +527,18 @@ HWND WINAPI WindowFromDC( HDC hDC )
 
 /***********************************************************************
  *		LockWindowUpdate (USER32.@)
+ *
+ * Enables or disables painting in the chosen window.
+ *
+ * PARAMS
+ *  hwnd [I] handle to a window.
+ *
+ * RETURNS
+ *  If successful, returns nonzero value. Otherwise,
+ *  returns 0.
+ *
+ * NOTES
+ *  You can lock only one window at a time.
  */
 BOOL WINAPI LockWindowUpdate( HWND hwnd )
 {

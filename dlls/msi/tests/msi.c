@@ -31,16 +31,35 @@ typedef struct test_MSIFILEHASHINFO {
     ULONG dwData[4];
 } test_MSIFILEHASHINFO, *test_PMSIFILEHASHINFO;
 
-typedef INSTALLSTATE (WINAPI *fnMsiUseFeatureExA)(LPCSTR, LPCSTR ,DWORD, DWORD );
-fnMsiUseFeatureExA pMsiUseFeatureExA;
-typedef UINT (WINAPI *fnMsiOpenPackageExA)(LPCSTR, DWORD, MSIHANDLE*);
-fnMsiOpenPackageExA pMsiOpenPackageExA;
-typedef UINT (WINAPI *fnMsiOpenPackageExW)(LPCWSTR, DWORD, MSIHANDLE*);
-fnMsiOpenPackageExW pMsiOpenPackageExW;
-typedef INSTALLSTATE (WINAPI *fnMsiGetComponentPathA)(LPCSTR, LPCSTR, LPSTR, DWORD*);
-fnMsiGetComponentPathA pMsiGetComponentPathA;
-typedef UINT (WINAPI *fnMsiGetFileHashA)(LPCSTR, DWORD, test_PMSIFILEHASHINFO);
-fnMsiGetFileHashA pMsiGetFileHashA;
+static BOOL (WINAPI *pConvertSidToStringSidA)(PSID, LPSTR*);
+
+static INSTALLSTATE (WINAPI *pMsiGetComponentPathA)
+    (LPCSTR, LPCSTR, LPSTR, DWORD*);
+static UINT (WINAPI *pMsiGetFileHashA)
+    (LPCSTR, DWORD, test_PMSIFILEHASHINFO);
+static UINT (WINAPI *pMsiOpenPackageExA)
+    (LPCSTR, DWORD, MSIHANDLE*);
+static UINT (WINAPI *pMsiOpenPackageExW)
+    (LPCWSTR, DWORD, MSIHANDLE*);
+static UINT (WINAPI *pMsiQueryComponentStateA)
+    (LPCSTR, LPCSTR, MSIINSTALLCONTEXT, LPCSTR, INSTALLSTATE*);
+static INSTALLSTATE (WINAPI *pMsiUseFeatureExA)
+    (LPCSTR, LPCSTR ,DWORD, DWORD );
+
+static void init_functionpointers(void)
+{
+    HMODULE hmsi = GetModuleHandleA("msi.dll");
+    HMODULE hadvapi32 = GetModuleHandleA("advapi32.dll");
+
+    pMsiGetComponentPathA = (void*)GetProcAddress(hmsi, "MsiGetComponentPathA");
+    pMsiGetFileHashA = (void*)GetProcAddress(hmsi, "MsiGetFileHashA");
+    pMsiOpenPackageExA = (void*)GetProcAddress(hmsi, "MsiOpenPackageExA");
+    pMsiOpenPackageExW = (void*)GetProcAddress(hmsi, "MsiOpenPackageExW");
+    pMsiQueryComponentStateA = (void*)GetProcAddress(hmsi, "MsiQueryComponentStateA");
+    pMsiUseFeatureExA = (void*)GetProcAddress(hmsi, "MsiUseFeatureExA");
+
+    pConvertSidToStringSidA = (void*)GetProcAddress(hadvapi32, "ConvertSidToStringSidA");
+}
 
 static void test_usefeature(void)
 {
@@ -324,7 +343,7 @@ static void get_user_sid(LPSTR *usersid)
     size = sizeof(buf);
     GetTokenInformation(token, TokenUser, (void *)buf, size, &size);
     user = (PTOKEN_USER)buf;
-    ConvertSidToStringSid(user->User.Sid, usersid);
+    pConvertSidToStringSidA(user->User.Sid, usersid);
 }
 
 static void test_MsiQueryProductState(void)
@@ -644,19 +663,275 @@ static void test_MsiQueryFeatureState(void)
     RegCloseKey(userkey);
 }
 
+static void test_MsiQueryComponentState(void)
+{
+    HKEY compkey, prodkey;
+    CHAR prodcode[MAX_PATH];
+    CHAR prod_squashed[MAX_PATH];
+    CHAR component[MAX_PATH];
+    CHAR comp_base85[MAX_PATH];
+    CHAR comp_squashed[MAX_PATH];
+    CHAR keypath[MAX_PATH];
+    INSTALLSTATE state;
+    LPSTR usersid;
+    LONG res;
+    UINT r;
+
+    create_test_guid(prodcode, prod_squashed);
+    compose_base85_guid(component, comp_base85, comp_squashed);
+    get_user_sid(&usersid);
+
+    /* NULL szProductCode */
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(NULL, NULL, MSIINSTALLCONTEXT_MACHINE, component, &state);
+    ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
+    ok(state == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", state);
+
+    /* empty szProductCode */
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA("", NULL, MSIINSTALLCONTEXT_MACHINE, component, &state);\
+    ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
+    ok(state == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", state);
+
+    /* random szProductCode */
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA("random", NULL, MSIINSTALLCONTEXT_MACHINE, component, &state);
+    ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
+    ok(state == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", state);
+
+    /* GUID-length szProductCode */
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA("DJANE93KNDNAS-2KN2NR93KMN3LN13=L1N3KDE", NULL, MSIINSTALLCONTEXT_MACHINE, component, &state);
+    ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
+    ok(state == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", state);
+
+    /* GUID-length with brackets */
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA("{JANE93KNDNAS-2KN2NR93KMN3LN13=L1N3KD}", NULL, MSIINSTALLCONTEXT_MACHINE, component, &state);
+    ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
+    ok(state == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", state);
+
+    /* actual GUID */
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_MACHINE, component, &state);
+    ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+    ok(state == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", state);
+
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_MACHINE, component, &state);
+    ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+    ok(state == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", state);
+
+    lstrcpyA(keypath, "Software\\Classes\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_MACHINE, component, &state);
+    ok(r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+
+    /* create local system product key */
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\S-1-5-18\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+    lstrcatA(keypath, "\\InstallProperties");
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* local system product key exists */
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_MACHINE, component, &state);
+    ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+    ok(state == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", state);
+
+    res = RegSetValueExA(prodkey, "LocalPackage", 0, REG_SZ, (const BYTE *)"msitest.msi", 11);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* LocalPackage value exists */
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_MACHINE, component, &state);
+    ok(r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\S-1-5-18\\Components\\");
+    lstrcatA(keypath, comp_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &compkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* component key exists */
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_MACHINE, component, &state);
+    ok(r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+
+    res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"", 0);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* component\product exists */
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_MACHINE, component, &state);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(state == INSTALLSTATE_NOTUSED, "Expected INSTALLSTATE_NOTUSED, got %d\n", state);
+
+    res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"hi", 2);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_MACHINE, component, &state);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+
+    RegDeleteValueA(prodkey, "LocalPackage");
+    RegDeleteKeyA(prodkey, "");
+    RegDeleteValueA(compkey, prod_squashed);
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+    RegCloseKey(compkey);
+
+    /* MSIINSTALLCONTEXT_USERUNMANAGED */
+
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED, component, &state);
+    ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+    ok(state == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", state);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED, component, &state);
+    ok(r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+    lstrcatA(keypath, "\\InstallProperties");
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegSetValueExA(prodkey, "LocalPackage", 0, REG_SZ, (const BYTE *)"msitest.msi", 11);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    RegCloseKey(prodkey);
+
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED, component, &state);
+    ok(r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Components\\");
+    lstrcatA(keypath, comp_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &compkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* component key exists */
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED, component, &state);
+    ok(r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+
+    res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"", 0);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* component\product exists */
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED, component, &state);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(state == INSTALLSTATE_NOTUSED, "Expected INSTALLSTATE_NOTUSED, got %d\n", state);
+
+    res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"hi", 2);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED, component, &state);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+
+    /* MSIINSTALLCONTEXT_USERMANAGED */
+
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERMANAGED, component, &state);
+    ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+    ok(state == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", state);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERMANAGED, component, &state);
+    ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+    ok(state == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", state);
+
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\Managed\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERMANAGED, component, &state);
+    ok(r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+    lstrcatA(keypath, "\\InstallProperties");
+
+    res = RegOpenKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegSetValueExA(prodkey, "ManagedLocalPackage", 0, REG_SZ, (const BYTE *)"msitest.msi", 11);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    state = 0xdeadbeef;
+    r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERMANAGED, component, &state);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+
+    RegDeleteValueA(prodkey, "LocalPackage");
+    RegDeleteValueA(prodkey, "ManagedLocalPackage");
+    RegDeleteKeyA(prodkey, "");
+    RegDeleteValueA(compkey, prod_squashed);
+    RegDeleteKeyA(compkey, "");
+    RegCloseKey(prodkey);
+    RegCloseKey(compkey);
+}
+
 START_TEST(msi)
 {
-    HMODULE hmod = GetModuleHandle("msi.dll");
-    pMsiUseFeatureExA = (fnMsiUseFeatureExA) 
-        GetProcAddress(hmod, "MsiUseFeatureExA");
-    pMsiOpenPackageExA = (fnMsiOpenPackageExA) 
-        GetProcAddress(hmod, "MsiOpenPackageExA");
-    pMsiOpenPackageExW = (fnMsiOpenPackageExW) 
-        GetProcAddress(hmod, "MsiOpenPackageExW");
-    pMsiGetComponentPathA = (fnMsiGetComponentPathA)
-        GetProcAddress(hmod, "MsiGetComponentPathA" );
-    pMsiGetFileHashA = (fnMsiGetFileHashA)
-        GetProcAddress(hmod, "MsiGetFileHashA" );
+    init_functionpointers();
 
     test_usefeature();
     test_null();
@@ -664,4 +939,5 @@ START_TEST(msi)
     test_filehash();
     test_MsiQueryProductState();
     test_MsiQueryFeatureState();
+    test_MsiQueryComponentState();
 }

@@ -156,20 +156,13 @@ void primitiveDeclarationConvertToStridedData(
     WINED3DVERTEXELEMENT *element;
     DWORD stride;
     int reg;
-    char isPreLoaded[MAX_STREAMS];
-    DWORD preLoadStreams[MAX_STREAMS], numPreloadStreams = 0;
-
-    memset(isPreLoaded, 0, sizeof(isPreLoaded));
+    DWORD numPreloadStreams = This->stateBlock->streamIsUP ? 0 : vertexDeclaration->num_streams;
+    DWORD *streams = vertexDeclaration->streams;
 
     /* Check for transformed vertices, disable vertex shader if present */
-    strided->u.s.position_transformed = FALSE;
-    for (i = 0; i < vertexDeclaration->declarationWNumElements - 1; ++i) {
-        element = vertexDeclaration->pDeclarationWine + i;
-
-        if (element->Usage == WINED3DDECLUSAGE_POSITIONT) {
-            strided->u.s.position_transformed = TRUE;
-            useVertexShaderFunction = FALSE;
-        }
+    strided->u.s.position_transformed = vertexDeclaration->position_transformed;
+    if(vertexDeclaration->position_transformed) {
+        useVertexShaderFunction = FALSE;
     }
 
     /* Translate the declaration into strided data */
@@ -191,11 +184,6 @@ void primitiveDeclarationConvertToStridedData(
             data    = (BYTE *)This->stateBlock->streamSource[element->Stream];
         } else {
             TRACE("Stream isn't up %d, %p\n", element->Stream, This->stateBlock->streamSource[element->Stream]);
-            if(!isPreLoaded[element->Stream]) {
-                preLoadStreams[numPreloadStreams] = element->Stream;
-                numPreloadStreams++;
-                isPreLoaded[element->Stream] = 1;
-            }
             data    = IWineD3DVertexBufferImpl_GetMemory(This->stateBlock->streamSource[element->Stream], 0, &streamVBO);
             if(fixup) {
                 if( streamVBO != 0) *fixup = TRUE;
@@ -221,10 +209,10 @@ void primitiveDeclarationConvertToStridedData(
 
         if (stride_used) {
             TRACE("Loaded %s array %u [usage=%s, usage_idx=%u, "
-                    "stream=%u, offset=%u, stride=%u, VBO=%u]\n",
+                    "stream=%u, offset=%u, stride=%u, type=%s, VBO=%u]\n",
                     useVertexShaderFunction? "shader": "fixed function", idx,
                     debug_d3ddeclusage(element->Usage), element->UsageIndex,
-                    element->Stream, element->Offset, stride, streamVBO);
+                    element->Stream, element->Offset, stride, debug_d3ddecltype(element->Type), streamVBO);
 
             strided->u.input[idx].lpData = data;
             strided->u.input[idx].dwType = element->Type;
@@ -242,7 +230,7 @@ void primitiveDeclarationConvertToStridedData(
      * once in there.
      */
     for(i=0; i < numPreloadStreams; i++) {
-        IWineD3DVertexBuffer_PreLoad(This->stateBlock->streamSource[preLoadStreams[i]]);
+        IWineD3DVertexBuffer_PreLoad(This->stateBlock->streamSource[streams[i]]);
     }
 }
 
@@ -458,7 +446,7 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
                     case WINED3DTTFF_COUNT1:
                         VTRACE(("tex:%d, s=%f\n", textureNo, s));
                         if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-                            GL_EXTCALL(glMultiTexCoord1fARB(texture_idx, s));
+                            GL_EXTCALL(glMultiTexCoord1fARB(GL_TEXTURE0_ARB + texture_idx, s));
                         } else {
                             glTexCoord1f(s);
                         }
@@ -466,7 +454,7 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
                     case WINED3DTTFF_COUNT2:
                         VTRACE(("tex:%d, s=%f, t=%f\n", textureNo, s, t));
                         if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-                            GL_EXTCALL(glMultiTexCoord2fARB(texture_idx, s, t));
+                            GL_EXTCALL(glMultiTexCoord2fARB(GL_TEXTURE0_ARB + texture_idx, s, t));
                         } else {
                             glTexCoord2f(s, t);
                         }
@@ -474,7 +462,7 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
                     case WINED3DTTFF_COUNT3:
                         VTRACE(("tex:%d, s=%f, t=%f, r=%f\n", textureNo, s, t, r));
                         if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-                            GL_EXTCALL(glMultiTexCoord3fARB(texture_idx, s, t, r));
+                            GL_EXTCALL(glMultiTexCoord3fARB(GL_TEXTURE0_ARB + texture_idx, s, t, r));
                         } else {
                             glTexCoord3f(s, t, r);
                         }
@@ -482,7 +470,7 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
                     case WINED3DTTFF_COUNT4:
                         VTRACE(("tex:%d, s=%f, t=%f, r=%f, q=%f\n", textureNo, s, t, r, q));
                         if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-                            GL_EXTCALL(glMultiTexCoord4fARB(texture_idx, s, t, r, q));
+                            GL_EXTCALL(glMultiTexCoord4fARB(GL_TEXTURE0_ARB + texture_idx, s, t, r, q));
                         } else {
                             glTexCoord4f(s, t, r, q);
                         }
@@ -818,10 +806,18 @@ static inline void drawStridedInstanced(IWineD3DDevice *iface, WineDirect3DVerte
                     /* Are those 16 bit floats. C doesn't have a 16 bit float type. I could read the single bits and calculate a 4
                      * byte float according to the IEEE standard
                      */
-                    FIXME("Unsupported WINED3DDECLTYPE_FLOAT16_2\n");
+                    if (GL_SUPPORT(NV_HALF_FLOAT)) {
+                        GL_EXTCALL(glVertexAttrib2hvNV(instancedData[j], (GLhalfNV *)ptr));
+                    } else {
+                        FIXME("Unsupported WINED3DDECLTYPE_FLOAT16_2\n");
+                    }
                     break;
                 case WINED3DDECLTYPE_FLOAT16_4:
-                    FIXME("Unsupported WINED3DDECLTYPE_FLOAT16_4\n");
+                    if (GL_SUPPORT(NV_HALF_FLOAT)) {
+                        GL_EXTCALL(glVertexAttrib4hvNV(instancedData[j], (GLhalfNV *)ptr));
+                    } else {
+                        FIXME("Unsupported WINED3DDECLTYPE_FLOAT16_4\n");
+                    }
                     break;
 
                 case WINED3DDECLTYPE_UNUSED:
@@ -854,8 +850,8 @@ void blt_to_drawable(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *surface) {
         return;
     }
 
-    ENTER_GL();
     ActivateContext(This, This->render_targets[0], CTXUSAGE_BLIT);
+    ENTER_GL();
 
     if(surface->glDescription.target == GL_TEXTURE_2D) {
         glBindTexture(GL_TEXTURE_2D, surface->glDescription.textureName);
@@ -1027,13 +1023,15 @@ void drawPrimitive(IWineD3DDevice *iface,
     }
 
     /* Ok, we will be updating the screen from here onwards so grab the lock */
-    ENTER_GL();
 
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+        ENTER_GL();
         apply_fbo_state(iface);
+        LEAVE_GL();
     }
 
     ActivateContext(This, This->render_targets[0], CTXUSAGE_DRAWPRIM);
+    ENTER_GL();
 
     if (This->depth_copy_state == WINED3D_DCS_COPY) {
         depth_copy(iface);
@@ -1243,12 +1241,12 @@ HRESULT tesselate_rectpatch(IWineD3DDeviceImpl *This,
     patch->has_normals = TRUE;
     patch->has_texcoords = FALSE;
 
-    ENTER_GL();
     /* Simply activate the context for blitting. This disables all the things we don't want and
-     * takes care for dirtifying. Dirtifying is prefered over pushing / popping, since drawing the
-     * patch(as opposed to normal draws) will most likely need different changes anyway
+     * takes care of dirtifying. Dirtifying is preferred over pushing / popping, since drawing the
+     * patch (as opposed to normal draws) will most likely need different changes anyway
      */
     ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_BLIT);
+    ENTER_GL();
 
     glMatrixMode(GL_PROJECTION);
     checkGLcall("glMatrixMode(GL_PROJECTION)");

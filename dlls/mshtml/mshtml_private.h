@@ -122,6 +122,7 @@ struct HTMLDocument {
     IDocHostUIHandler *hostui;
     IOleInPlaceSite *ipsite;
     IOleInPlaceFrame *frame;
+    IOleInPlaceUIWindow *ip_window;
 
     BSCallback *bscallback;
     IMoniker *mon;
@@ -441,6 +442,7 @@ void handle_edit_event(HTMLDocument*,nsIDOMEvent*);
 HRESULT editor_exec_copy(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
 HRESULT editor_exec_cut(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
 HRESULT editor_exec_paste(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
+void handle_edit_load(HTMLDocument *This);
 
 extern DWORD mshtml_tls;
 
@@ -469,6 +471,14 @@ thread_data_t *get_thread_data(BOOL);
 HWND get_thread_hwnd(void);
 void push_task(task_t*);
 void remove_doc_tasks(const HTMLDocument*);
+
+/* typelibs */
+enum tid_t {
+    IHTMLWindow2_tid,
+    LAST_tid
+};
+
+HRESULT get_typeinfo(enum tid_t, ITypeInfo**);
 
 DEFINE_GUID(CLSID_AboutProtocol, 0x3050F406, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_JSProtocol, 0x3050F3B2, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);

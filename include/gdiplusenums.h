@@ -19,6 +19,8 @@
 #ifndef _GDIPLUSENUMS_H
 #define _GDIPLUSENUMS_H
 
+typedef UINT GraphicsState;
+
 enum Unit
 {
     UnitWorld       = 0,
@@ -81,6 +83,121 @@ enum LineJoin
     LineJoinMiterClipped    = 3
 };
 
+enum QualityMode
+{
+    QualityModeInvalid  = -1,
+    QualityModeDefault  = 0,
+    QualityModeLow      = 1,
+    QualityModeHigh     = 2
+};
+
+enum SmoothingMode
+{
+    SmoothingModeInvalid     = QualityModeInvalid,
+    SmoothingModeDefault     = QualityModeDefault,
+    SmoothingModeHighSpeed   = QualityModeLow,
+    SmoothingModeHighQuality = QualityModeHigh,
+    SmoothingModeNone,
+    SmoothingModeAntiAlias
+};
+
+enum CompositingQuality
+{
+    CompositingQualityInvalid          = QualityModeInvalid,
+    CompositingQualityDefault          = QualityModeDefault,
+    CompositingQualityHighSpeed        = QualityModeLow,
+    CompositingQualityHighQuality      = QualityModeHigh,
+    CompositingQualityGammaCorrected,
+    CompositingQualityAssumeLinear
+};
+
+enum InterpolationMode
+{
+    InterpolationModeInvalid        = QualityModeInvalid,
+    InterpolationModeDefault        = QualityModeDefault,
+    InterpolationModeLowQuality     = QualityModeLow,
+    InterpolationModeHighQuality    = QualityModeHigh,
+    InterpolationModeBilinear,
+    InterpolationModeBicubic,
+    InterpolationModeNearestNeighbor,
+    InterpolationModeHighQualityBilinear,
+    InterpolationModeHighQualityBicubic
+};
+
+enum PixelOffsetMode
+{
+    PixelOffsetModeInvalid     = QualityModeInvalid,
+    PixelOffsetModeDefault     = QualityModeDefault,
+    PixelOffsetModeHighSpeed   = QualityModeLow,
+    PixelOffsetModeHighQuality = QualityModeHigh,
+    PixelOffsetModeNone,
+    PixelOffsetModeHalf
+};
+
+enum DashCap
+{
+    DashCapFlat     = 0,
+    DashCapRound    = 2,
+    DashCapTriangle = 3
+};
+
+enum DashStyle
+{
+    DashStyleSolid,
+    DashStyleDash,
+    DashStyleDot,
+    DashStyleDashDot,
+    DashStyleDashDotDot,
+    DashStyleCustom
+};
+
+enum MatrixOrder
+{
+    MatrixOrderPrepend = 0,
+    MatrixOrderAppend  = 1
+};
+
+enum ImageType
+{
+    ImageTypeUnknown,
+    ImageTypeBitmap,
+    ImageTypeMetafile
+};
+
+enum WrapMode
+{
+    WrapModeTile,
+    WrapModeTileFlipX,
+    WrapModeTileFlipY,
+    WrapModeTileFlipXY,
+    WrapModeClamp
+};
+
+enum MetafileType
+{
+    MetafileTypeInvalid,
+    MetafileTypeWmf,
+    MetafileTypeWmfPlaceable,
+    MetafileTypeEmf,
+    MetafileTypeEmfPlusOnly,
+    MetafileTypeEmfPlusDual
+};
+
+enum LinearGradientMode
+{
+    LinearGradientModeHorizontal,
+    LinearGradientModeVertical,
+    LinearGradientModeForwardDiagonal,
+    LinearGradientModeBackwardDiagonal
+};
+
+enum EmfType
+{
+    EmfTypeEmfOnly     = MetafileTypeEmf,
+    EmfTypeEmfPlusOnly = MetafileTypeEmfPlusOnly,
+    EmfTypeEmfPlusDual = MetafileTypeEmfPlusDual
+};
+
 #ifndef __cplusplus
 
 typedef enum Unit Unit;
@@ -89,6 +206,19 @@ typedef enum FillMode FillMode;
 typedef enum LineCap LineCap;
 typedef enum PathPointType PathPointType;
 typedef enum LineJoin LineJoin;
+typedef enum QualityMode QualityMode;
+typedef enum SmoothingMode SmoothingMode;
+typedef enum CompositingQuality CompositingQuality;
+typedef enum InterpolationMode InterpolationMode;
+typedef enum PixelOffsetMode PixelOffsetMode;
+typedef enum DashCap DashCap;
+typedef enum DashStyle DashStyle;
+typedef enum MatrixOrder MatrixOrder;
+typedef enum ImageType ImageType;
+typedef enum WrapMode WrapMode;
+typedef enum MetafileType MetafileType;
+typedef enum LinearGradientMode LinearGradientMode;
+typedef enum EmfType EmfType;
 
 #endif /* end of c typedefs */
 

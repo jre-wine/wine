@@ -243,7 +243,7 @@
 247 stub MsiGetProductInfoExA
 248 stub MsiGetProductInfoExW
 249 stdcall MsiQueryComponentStateA(str str long str ptr)
-250 stub MsiQueryComponentStateW
+250 stdcall MsiQueryComponentStateW(wstr wstr long wstr ptr)
 251 stub MsiQueryFeatureStateExA
 252 stub MsiQueryFeatureStateExW
 253 stub MsiDeterminePatchSequenceA
@@ -256,7 +256,7 @@
 260 stub MsiSourceListClearAllExW
 261 stub MsiSourceListForceResolutionExA
 262 stub MsiSourceListForceResolutionExW
-263 stub MsiSourceListEnumSourcesA
+263 stdcall MsiSourceListEnumSourcesA(str str long long long ptr ptr)
 264 stub MsiSourceListEnumSourcesW
 265 stdcall MsiSourceListGetInfoA(str str long long str ptr ptr)
 266 stub MsiSourceListGetInfoW

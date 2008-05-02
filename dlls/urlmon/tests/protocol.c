@@ -54,9 +54,19 @@
         expect_ ## func = called_ ## func = FALSE; \
     }while(0)
 
+#define CHECK_NOT_CALLED(func) \
+    do { \
+        ok(!called_ ## func, "unexpected " #func "\n"); \
+        expect_ ## func = called_ ## func = FALSE; \
+    }while(0)
+
+#define CLEAR_CALLED(func) \
+    expect_ ## func = called_ ## func = FALSE
+
 DEFINE_EXPECT(GetBindInfo);
 DEFINE_EXPECT(ReportProgress_MIMETYPEAVAILABLE);
 DEFINE_EXPECT(ReportProgress_DIRECTBIND);
+DEFINE_EXPECT(ReportProgress_RAWMIMETYPE);
 DEFINE_EXPECT(ReportProgress_FINDINGRESOURCE);
 DEFINE_EXPECT(ReportProgress_CONNECTING);
 DEFINE_EXPECT(ReportProgress_SENDINGREQUEST);
@@ -67,6 +77,7 @@ DEFINE_EXPECT(ReportData);
 DEFINE_EXPECT(ReportResult);
 DEFINE_EXPECT(GetBindString_ACCEPT_MIMES);
 DEFINE_EXPECT(GetBindString_USER_AGENT);
+DEFINE_EXPECT(GetBindString_POST_COOKIE);
 DEFINE_EXPECT(QueryService_HttpNegotiate);
 DEFINE_EXPECT(QueryService_InternetProtocol);
 DEFINE_EXPECT(BeginningTransaction);
@@ -86,12 +97,13 @@ static const WCHAR index_url[] =
 static HRESULT expect_hrResult;
 static LPCWSTR file_name, http_url, expect_wsz;
 static IInternetProtocol *http_protocol = NULL;
-static BOOL first_data_notif = FALSE;
-static HWND protocol_hwnd;
+static BOOL first_data_notif = FALSE, http_is_first = FALSE,
+    http_post_test = FALSE;
 static int state = 0;
 static DWORD bindf = 0;
 static IInternetBindInfo *prot_bind_info;
 static void *expect_pv;
+static HANDLE event_complete;
 
 static enum {
     FILE_TEST,
@@ -126,13 +138,34 @@ static ULONG WINAPI HttpNegotiate_Release(IHttpNegotiate2 *iface)
 static HRESULT WINAPI HttpNegotiate_BeginningTransaction(IHttpNegotiate2 *iface, LPCWSTR szURL,
         LPCWSTR szHeaders, DWORD dwReserved, LPWSTR *pszAdditionalHeaders)
 {
+    LPWSTR addl_headers;
+
+    static const WCHAR wszHeaders[] =
+        {'C','o','n','t','e','n','t','-','T','y','p','e',':',' ','a','p','p','l','i','c','a','t',
+         'i','o','n','/','x','-','w','w','w','-','f','o','r','m','-','u','r','l','e','n','c','o',
+         'd','e','d','\r','\n',0};
+
     CHECK_EXPECT(BeginningTransaction);
 
     ok(!lstrcmpW(szURL, http_url), "szURL != http_url\n");
     ok(!dwReserved, "dwReserved=%d, expected 0\n", dwReserved);
     ok(pszAdditionalHeaders != NULL, "pszAdditionalHeaders == NULL\n");
     if(pszAdditionalHeaders)
+    {
         ok(*pszAdditionalHeaders == NULL, "*pszAdditionalHeaders != NULL\n");
+        if (http_post_test)
+        {
+            addl_headers = CoTaskMemAlloc(sizeof(wszHeaders));
+            if (!addl_headers)
+            {
+                http_post_test = FALSE;
+                skip("Out of memory\n");
+                return E_OUTOFMEMORY;
+            }
+            lstrcpyW(addl_headers, wszHeaders);
+            *pszAdditionalHeaders = addl_headers;
+        }
+    }
 
     return S_OK;
 }
@@ -244,9 +277,35 @@ static ULONG WINAPI ProtocolSink_Release(IInternetProtocolSink *iface)
 
 static HRESULT WINAPI ProtocolSink_Switch(IInternetProtocolSink *iface, PROTOCOLDATA *pProtocolData)
 {
-    CHECK_EXPECT2(Switch);
+    HRESULT hres;
+
+    CHECK_EXPECT(Switch);
     ok(pProtocolData != NULL, "pProtocolData == NULL\n");
-    SendMessageW(protocol_hwnd, WM_USER, 0, (LPARAM)pProtocolData);
+    if (!state) {
+        if (http_is_first) {
+            CHECK_CALLED(ReportProgress_FINDINGRESOURCE);
+            CHECK_CALLED(ReportProgress_CONNECTING);
+        } else todo_wine {
+            CHECK_NOT_CALLED(ReportProgress_FINDINGRESOURCE);
+            CHECK_NOT_CALLED(ReportProgress_CONNECTING);
+        }
+        CHECK_CALLED(ReportProgress_SENDINGREQUEST);
+        SET_EXPECT(OnResponse);
+        SET_EXPECT(ReportProgress_MIMETYPEAVAILABLE);
+    }
+
+    SET_EXPECT(ReportData);
+    hres = IInternetProtocol_Continue(http_protocol, pProtocolData);
+    ok(hres == S_OK, "Continue failed: %08x\n", hres);
+    CHECK_CALLED(ReportData);
+
+    if (!state) {
+        state = 1;
+        CHECK_CALLED(OnResponse);
+        CHECK_CALLED(ReportProgress_MIMETYPEAVAILABLE);
+    }
+
+    SetEvent(event_complete);
     return S_OK;
 }
 
@@ -256,10 +315,16 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
     static const WCHAR null_guid[] = {'{','0','0','0','0','0','0','0','0','-','0','0','0','0','-',
         '0','0','0','0','-','0','0','0','0','-','0','0','0','0','0','0','0','0','0','0','0','0','}',0};
     static const WCHAR text_html[] = {'t','e','x','t','/','h','t','m','l',0};
+    static const WCHAR text_plain[] = {'t','e','x','t','/','p','l','a','i','n',0};
     static const WCHAR host[] =
         {'w','w','w','.','w','i','n','e','h','q','.','o','r','g',0};
+    static const WCHAR post_host[] =
+        {'c','r','o','s','s','o','v','e','r','.','c','o','d','e',
+         'w','e','a','v','e','r','s','.','c','o','m',0};
     static const WCHAR wszWineHQIP[] =
         {'2','0','9','.','4','6','.','2','5','.','1','3','4',0};
+    static const WCHAR wszCrossoverIP[] =
+        {'2','0','9','.','4','6','.','2','5','.','1','3','2',0};
     /* I'm not sure if it's a good idea to hardcode here the IP address... */
 
     switch(ulStatusCode) {
@@ -269,6 +334,10 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
         if(szStatusText) {
             if(tested_protocol == BIND_TEST)
                 ok(szStatusText == expect_wsz, "unexpected szStatusText\n");
+            else if (http_post_test)
+                ok(lstrlenW(text_plain) <= lstrlenW(szStatusText) &&
+                   !memcmp(szStatusText, text_plain, lstrlenW(text_plain)*sizeof(WCHAR)),
+                   "szStatusText != text/plain\n");
             else
                 ok(lstrlenW(text_html) <= lstrlenW(szStatusText) &&
                    !memcmp(szStatusText, text_html, lstrlenW(text_html)*sizeof(WCHAR)),
@@ -278,6 +347,14 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
     case BINDSTATUS_DIRECTBIND:
         CHECK_EXPECT2(ReportProgress_DIRECTBIND);
         ok(szStatusText == NULL, "szStatusText != NULL\n");
+        break;
+    case BINDSTATUS_RAWMIMETYPE:
+        CHECK_EXPECT2(ReportProgress_RAWMIMETYPE);
+        ok(szStatusText != NULL, "szStatusText == NULL\n");
+        if(szStatusText)
+            ok(lstrlenW(szStatusText) < lstrlenW(text_html) ||
+               !memcmp(szStatusText, text_html, lstrlenW(text_html)*sizeof(WCHAR)),
+               "szStatusText != text/html\n");
         break;
     case BINDSTATUS_CACHEFILENAMEAVAILABLE:
         CHECK_EXPECT(ReportProgress_CACHEFILENAMEAVAILABLE);
@@ -293,13 +370,22 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
         CHECK_EXPECT(ReportProgress_FINDINGRESOURCE);
         ok(szStatusText != NULL, "szStatusText == NULL\n");
         if(szStatusText)
-            ok(!lstrcmpW(szStatusText, host), "szStatustext != \"www.winehq.org\"\n");
+        {
+            if (!http_post_test)
+                ok(!lstrcmpW(szStatusText, host),
+                   "szStatustext != \"www.winehq.org\"\n");
+            else
+                ok(!lstrcmpW(szStatusText, post_host),
+                   "szStatustext != \"crossover.codeweavers.com\"\n");
+        }
         break;
     case BINDSTATUS_CONNECTING:
         CHECK_EXPECT(ReportProgress_CONNECTING);
         ok(szStatusText != NULL, "szStatusText == NULL\n");
         if(szStatusText)
-            ok(!lstrcmpW(szStatusText, wszWineHQIP), "Unexpected szStatusText\n");
+            ok(!lstrcmpW(szStatusText, http_post_test ?
+                         wszCrossoverIP : wszWineHQIP),
+               "Unexpected szStatusText\n");
         break;
     case BINDSTATUS_SENDINGREQUEST:
         CHECK_EXPECT(ReportProgress_SENDINGREQUEST);
@@ -343,6 +429,8 @@ static HRESULT WINAPI ProtocolSink_ReportData(IInternetProtocolSink *iface, DWOR
     }else if(tested_protocol == HTTP_TEST) {
         if(!(grfBSCF & BSCF_LASTDATANOTIFICATION))
             CHECK_EXPECT(ReportData);
+        else if (http_post_test)
+            ok(ulProgress == 13, "Read %u bytes instead of 13\n", ulProgress);
 
         ok(ulProgress, "ulProgress == 0\n");
 
@@ -353,6 +441,24 @@ static HRESULT WINAPI ProtocolSink_ReportData(IInternetProtocolSink *iface, DWOR
             ok(grfBSCF == BSCF_INTERMEDIATEDATANOTIFICATION
                || grfBSCF == (BSCF_LASTDATANOTIFICATION|BSCF_INTERMEDIATEDATANOTIFICATION),
                "grcfBSCF = %08x\n", grfBSCF);
+        }
+
+        if(!(bindf & BINDF_FROMURLMON) &&
+           !(grfBSCF & BSCF_LASTDATANOTIFICATION)) {
+            if(!state) {
+                state = 1;
+                if(http_is_first) {
+                    CHECK_CALLED(ReportProgress_FINDINGRESOURCE);
+                    CHECK_CALLED(ReportProgress_CONNECTING);
+                } else todo_wine {
+                    CHECK_NOT_CALLED(ReportProgress_FINDINGRESOURCE);
+                    CHECK_NOT_CALLED(ReportProgress_CONNECTING);
+                }
+                CHECK_CALLED(ReportProgress_SENDINGREQUEST);
+                CHECK_CALLED(OnResponse);
+                CHECK_CALLED(ReportProgress_RAWMIMETYPE);
+            }
+            SetEvent(event_complete);
         }
     }
     return S_OK;
@@ -424,6 +530,8 @@ static HRESULT WINAPI BindInfo_GetBindInfo(IInternetBindInfo *iface, DWORD *grfB
 {
     DWORD cbSize;
 
+    static const CHAR szPostData[] = "mode=Test";
+
     CHECK_EXPECT(GetBindInfo);
 
     ok(grfBINDF != NULL, "grfBINDF == NULL\n");
@@ -434,6 +542,23 @@ static HRESULT WINAPI BindInfo_GetBindInfo(IInternetBindInfo *iface, DWORD *grfB
     cbSize = pbindinfo->cbSize;
     memset(pbindinfo, 0, cbSize);
     pbindinfo->cbSize = cbSize;
+
+    if (http_post_test)
+    {
+        /* Must be GMEM_FIXED, GMEM_MOVABLE does not work properly
+         * with urlmon on native (Win98 and WinXP) */
+        U(pbindinfo->stgmedData).hGlobal = GlobalAlloc(GPTR, sizeof(szPostData));
+        if (!U(pbindinfo->stgmedData).hGlobal)
+        {
+            http_post_test = FALSE;
+            skip("Out of memory\n");
+            return E_OUTOFMEMORY;
+        }
+        lstrcpy((LPSTR)U(pbindinfo->stgmedData).hGlobal, szPostData);
+        pbindinfo->cbstgmedData = sizeof(szPostData)-1;
+        pbindinfo->dwBindVerb = BINDVERB_POST;
+        pbindinfo->stgmedData.tymed = TYMED_HGLOBAL;
+    }
 
     return S_OK;
 }
@@ -471,6 +596,12 @@ static HRESULT WINAPI BindInfo_GetBindString(IInternetBindInfo *iface, ULONG ulS
             *ppwzStr = CoTaskMemAlloc(sizeof(user_agent));
             memcpy(*ppwzStr, user_agent, sizeof(user_agent));
         }
+        return S_OK;
+    case BINDSTRING_POST_COOKIE:
+        CHECK_EXPECT(GetBindString_POST_COOKIE);
+        ok(cEl == 1, "cEl=%d, expected 1\n", cEl);
+        if(pcElFetched)
+            ok(*pcElFetched == 0, "*pcElFetch=%d, expectd 0\n", *pcElFetched);
         return S_OK;
     default:
         ok(0, "unexpected call\n");
@@ -1045,16 +1176,22 @@ static void test_file_protocol(void) {
 
 static BOOL http_protocol_start(LPCWSTR url, BOOL is_first)
 {
+    static BOOL got_user_agent = FALSE;
     HRESULT hres;
 
     first_data_notif = TRUE;
+    state = 0;
 
     SET_EXPECT(GetBindInfo);
+    if (!(bindf & BINDF_FROMURLMON))
+        SET_EXPECT(ReportProgress_DIRECTBIND);
     SET_EXPECT(GetBindString_USER_AGENT);
     SET_EXPECT(GetBindString_ACCEPT_MIMES);
     SET_EXPECT(QueryService_HttpNegotiate);
     SET_EXPECT(BeginningTransaction);
     SET_EXPECT(GetRootSecurityId);
+    if (http_post_test)
+        SET_EXPECT(GetBindString_POST_COOKIE);
 
     hres = IInternetProtocol_Start(http_protocol, url, &protocol_sink, &bind_info, 0, 0);
     ok(hres == S_OK, "Start failed: %08x\n", hres);
@@ -1062,16 +1199,32 @@ static BOOL http_protocol_start(LPCWSTR url, BOOL is_first)
         return FALSE;
 
     CHECK_CALLED(GetBindInfo);
-    CHECK_CALLED(GetBindString_USER_AGENT);
+    if (!(bindf & BINDF_FROMURLMON))
+        CHECK_CALLED(ReportProgress_DIRECTBIND);
+    if (!got_user_agent)
+    {
+        CHECK_CALLED(GetBindString_USER_AGENT);
+        got_user_agent = TRUE;
+    }
+    else todo_wine
+    {
+        /* user agent only retrieved once, even with different URLs */
+        CHECK_NOT_CALLED(GetBindString_USER_AGENT);
+    }
     CHECK_CALLED(GetBindString_ACCEPT_MIMES);
     CHECK_CALLED(QueryService_HttpNegotiate);
     CHECK_CALLED(BeginningTransaction);
-    CHECK_CALLED(GetRootSecurityId);
+    /* GetRootSecurityId called on WinXP but not on Win98 */
+    CLEAR_CALLED(GetRootSecurityId);
+    if (http_post_test)
+        CHECK_CALLED(GetBindString_POST_COOKIE);
 
     return TRUE;
 }
 
-static void test_http_protocol_url(LPCWSTR url)
+/* is_first refers to whether this is the first call to this function
+ * _for this url_ */
+static void test_http_protocol_url(LPCWSTR url, BOOL is_first)
 {
     IInternetProtocolInfo *protocol_info;
     IClassFactory *factory;
@@ -1080,6 +1233,7 @@ static void test_http_protocol_url(LPCWSTR url)
 
     trace("Testing http protocol...\n");
     http_url = url;
+    http_is_first = is_first;
 
     hres = CoGetClassObject(&CLSID_HttpProtocol, CLSCTX_INPROC_SERVER, NULL,
             &IID_IUnknown, (void**)&unk);
@@ -1102,33 +1256,86 @@ static void test_http_protocol_url(LPCWSTR url)
                                         (void**)&http_protocol);
     ok(hres == S_OK, "Could not get IInternetProtocol: %08x\n", hres);
     if(SUCCEEDED(hres)) {
-        BYTE buf[512];
+        BYTE buf[3600];
         DWORD cb;
-        MSG msg;
-
-        bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA | BINDF_FROMURLMON;
+        int *called = (bindf & BINDF_FROMURLMON) ? &called_Switch : &called_ReportData;
 
         test_priority(http_protocol);
 
         SET_EXPECT(ReportProgress_FINDINGRESOURCE);
         SET_EXPECT(ReportProgress_CONNECTING);
         SET_EXPECT(ReportProgress_SENDINGREQUEST);
+        if(!(bindf & BINDF_FROMURLMON)) {
+            SET_EXPECT(OnResponse);
+            SET_EXPECT(ReportProgress_RAWMIMETYPE);
+            SET_EXPECT(ReportData);
+        } else {
+            SET_EXPECT(Switch);
+        }
 
-        if(!http_protocol_start(url, TRUE))
+        if(!http_protocol_start(url, is_first))
             return;
 
-        hres = IInternetProtocol_Read(http_protocol, buf, 2, &cb);
-        ok(hres == E_PENDING, "Read failed: %08x, expected E_PENDING\n", hres);
-        ok(!cb, "cb=%d, expected 0\n", cb);
-
-        SET_EXPECT(Switch);
         SET_EXPECT(ReportResult);
         expect_hrResult = S_OK;
 
-        GetMessageW(&msg, NULL, 0, 0);
+        hres = IInternetProtocol_Read(http_protocol, buf, 1, &cb);
+        ok((!*called && hres == E_PENDING && cb==0) ||
+           (*called && hres == S_OK && cb==1), "Read failed: %08x (%d bytes)\n", hres, cb);
 
-        CHECK_CALLED(Switch);
+        WaitForSingleObject(event_complete, INFINITE);
+        if(bindf & BINDF_FROMURLMON)
+            CHECK_CALLED(Switch);
+        else
+            CHECK_CALLED(ReportData);
+
+        while(1) {
+            if(bindf & BINDF_FROMURLMON)
+                SET_EXPECT(Switch);
+            else
+                SET_EXPECT(ReportData);
+            hres = IInternetProtocol_Read(http_protocol, buf, sizeof(buf), &cb);
+            if(hres == E_PENDING) {
+                hres = IInternetProtocol_Read(http_protocol, buf, 1, &cb);
+                ok((!*called && hres == E_PENDING && cb==0) ||
+                   (*called && hres == S_OK && cb==1), "Read failed: %08x (%d bytes)\n", hres, cb);
+                WaitForSingleObject(event_complete, INFINITE);
+                if(bindf & BINDF_FROMURLMON)
+                    CHECK_CALLED(Switch);
+                else
+                    CHECK_CALLED(ReportData);
+            } else {
+                if(bindf & BINDF_FROMURLMON)
+                    CHECK_NOT_CALLED(Switch);
+                else
+                    CHECK_NOT_CALLED(ReportData);
+                if(cb == 0) break;
+            }
+        }
+        ok(hres == S_FALSE, "Read failed: %08x\n", hres);
         CHECK_CALLED(ReportResult);
+
+        hres = IInternetProtocol_LockRequest(http_protocol, 0);
+        ok(hres == S_OK, "LockRequest failed: %08x\n", hres);
+
+        hres = IInternetProtocol_Read(http_protocol, buf, 1, &cb);
+        ok(hres == S_FALSE, "Read failed: %08x\n", hres);
+
+        hres = IInternetProtocol_Terminate(http_protocol, 0);
+        ok(hres == S_OK, "Terminate failed: %08x\n", hres);
+
+        /* This wait is to give the internet handles being freed in Terminate
+         * enough time to actually terminate in all cases. Internet handles
+         * terminate asynchronously and native reuses the main InternetOpen
+         * handle. The only case in which this seems to be necessary is on
+         * wine with native wininet and urlmon, resulting in the next time
+         * test_http_protocol_url being called the first data notification actually
+         * being an extra last data notification from the previous connection
+         * about once out of every ten times. */
+        Sleep(100);
+
+        hres = IInternetProtocol_UnlockRequest(http_protocol);
+        ok(hres == S_OK, "UnlockRequest failed: %08x\n", hres);
 
         IInternetProtocol_Release(http_protocol);
     }
@@ -1141,78 +1348,23 @@ static void test_http_protocol(void)
     static const WCHAR winehq_url[] =
         {'h','t','t','p',':','/','/','w','w','w','.','w','i','n','e','h','q','.',
             'o','r','g','/','s','i','t','e','/','a','b','o','u','t',0};
+    static const WCHAR posttest_url[] =
+        {'h','t','t','p',':','/','/','c','r','o','s','s','o','v','e','r','.',
+         'c','o','d','e','w','e','a','v','e','r','s','.','c','o','m','/',
+         'p','o','s','t','t','e','s','t','.','p','h','p',0};
 
     tested_protocol = HTTP_TEST;
-    test_http_protocol_url(winehq_url);
+    bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA;
+    test_http_protocol_url(winehq_url, TRUE);
+    bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA | BINDF_FROMURLMON;
+    test_http_protocol_url(winehq_url, FALSE);
 
-}
-
-static LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
-{
-    if(msg == WM_USER) {
-        HRESULT hres;
-        DWORD cb;
-        BYTE buf[3600];
-
-        SET_EXPECT(ReportData);
-        if(!state) {
-            CHECK_CALLED(ReportProgress_FINDINGRESOURCE);
-            CHECK_CALLED(ReportProgress_CONNECTING);
-            CHECK_CALLED(ReportProgress_SENDINGREQUEST);
-
-            SET_EXPECT(OnResponse);
-            SET_EXPECT(ReportProgress_MIMETYPEAVAILABLE);
-        }
-
-        hres = IInternetProtocol_Continue(http_protocol, (PROTOCOLDATA*)lParam);
-        ok(hres == S_OK, "Continue failed: %08x\n", hres);
-
-        CHECK_CALLED(ReportData);
-        if(!state) {
-            CHECK_CALLED(OnResponse);
-            CHECK_CALLED(ReportProgress_MIMETYPEAVAILABLE);
-        }
-
-        do hres = IInternetProtocol_Read(http_protocol, buf, sizeof(buf), &cb);
-        while(cb);
-
-        ok(hres == S_FALSE || hres == E_PENDING, "Read failed: %08x\n", hres);
-
-        if(hres == S_FALSE)
-            PostMessageW(protocol_hwnd, WM_USER+1, 0, 0);
-
-        if(!state) {
-            state = 1;
-
-            hres = IInternetProtocol_LockRequest(http_protocol, 0);
-            ok(hres == S_OK, "LockRequest failed: %08x\n", hres);
-
-            do hres = IInternetProtocol_Read(http_protocol, buf, sizeof(buf), &cb);
-            while(cb);
-            ok(hres == S_FALSE || hres == E_PENDING, "Read failed: %08x\n", hres);
-        }
-    }
-
-    return DefWindowProc(hwnd, msg, wParam, lParam);
-}
-
-static HWND create_protocol_window(void)
-{
-    static const WCHAR wszProtocolWindow[] =
-        {'P','r','o','t','o','c','o','l','W','i','n','d','o','w',0};
-    static WNDCLASSEXW wndclass = {
-        sizeof(WNDCLASSEXW),
-        0,
-        wnd_proc,
-        0, 0, NULL, NULL, NULL, NULL, NULL,
-        wszProtocolWindow,
-        NULL
-    };
-
-    RegisterClassExW(&wndclass);
-    return CreateWindowW(wszProtocolWindow, wszProtocolWindow,
-                         WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-                         CW_USEDEFAULT, NULL, NULL, NULL, NULL);
+    http_post_test = TRUE;
+    /* Without this flag we get a ReportProgress_CACHEFILENAMEAVAILABLE
+     * notification with BINDVERB_POST */
+    bindf |= BINDF_NOWRITECACHE;
+    test_http_protocol_url(posttest_url, TRUE);
+    http_post_test = FALSE;
 }
 
 static void test_mk_protocol(void)
@@ -1380,14 +1532,14 @@ START_TEST(protocol)
 {
     OleInitialize(NULL);
 
-    protocol_hwnd = create_protocol_window();
+    event_complete = CreateEvent(NULL, FALSE, FALSE, NULL);
 
     test_file_protocol();
     test_http_protocol();
     test_mk_protocol();
     test_CreateBinding();
 
-    DestroyWindow(protocol_hwnd);
+    CloseHandle(event_complete);
 
     OleUninitialize();
 }

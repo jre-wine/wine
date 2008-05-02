@@ -27,6 +27,7 @@
 
 #include <stdarg.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 #include <limits.h>
 #include <time.h>
@@ -277,7 +278,10 @@ static const struct tagTZ_INFO TZ_INFO[] =
      'r','d',' ','T','i','m','e','\0'}, -270, 0},
    {"SAMT",
     {'S','a','m','a','r','a',' ','S','t','a','n','d','a','r','d',' ','T','i',
-     'm','e','\0'}, -270, 1},
+     'm','e','(','W','i','n','t','e','r',')','\0'}, -240, 0},
+   {"SAMST",
+    {'S','a','m','a','r','a',' ','D','a','y','l','i','g','h','t',' ','T','i',
+     'm','e','(','S','u','m','m','e','r',')','\0'}, -300, 1},
    {"YEKT",
     {'U','r','a','l','s',' ','S','t','a','n','d','a','r','d',
      ' ','T','i','m','e',' ','(','W','i','n','t','e','r',')','\0'}, -300, 0},
@@ -413,6 +417,8 @@ static const struct tagTZ_INFO TZ_INFO[] =
    {"NOVST",
     {'N','o','v','o','s','i','b','i','r','s','k',' ','S','u','m','m','e','r',
      ' ','T','i','m','e','\0'}, -420, 1},
+   {"BOT",
+    {'B','o','l','i','v','i','a','n',' ','T','i','m','e','\0'}, 240, 0},
    {"UZT",
     {'U','z','b','e','k','i','s','t','h','a','n',' ','T','i','m','e','\0'}, -300, 0}
 };
@@ -603,20 +609,19 @@ static int TIME_GetBias(time_t utc, int *pdaylight)
     int ret;
 
     RtlEnterCriticalSection( &TIME_GetBias_section );
-    if(utc == last_utc)
-    {
-        *pdaylight = last_daylight;
-        ret = last_bias;	
-    } else
+    if (utc != last_utc)
     {
         ptm = localtime(&utc);
-	*pdaylight = last_daylight =
-            ptm->tm_isdst; /* daylight for local timezone */
+	last_daylight = ptm->tm_isdst; /* daylight for local timezone */
 	ptm = gmtime(&utc);
-	ptm->tm_isdst = *pdaylight; /* use local daylight, not that of Greenwich */
+	ptm->tm_isdst = last_daylight; /* use local daylight, not that of Greenwich */
 	last_utc = utc;
-	ret = last_bias = (int)(utc-mktime(ptm));
+	last_bias = (int)(utc - mktime(ptm));
     }
+
+    *pdaylight = last_daylight;
+    ret = last_bias;
+
     RtlLeaveCriticalSection( &TIME_GetBias_section );
     return ret;
 }
@@ -821,7 +826,7 @@ NTSTATUS WINAPI NtQuerySystemTime( PLARGE_INTEGER Time )
  *
  *  Note: Windows uses a timer clocked at a multiple of 1193182 Hz. There is a
  *  good number of applications that crash when the returned frequency is either
- *  lower or higher then what Windows gives. Also too high counter values are
+ *  lower or higher than what Windows gives. Also too high counter values are
  *  reported to give problems.
  */
 NTSTATUS WINAPI NtQueryPerformanceCounter( PLARGE_INTEGER Counter, PLARGE_INTEGER Frequency )
@@ -878,7 +883,10 @@ static const WCHAR* TIME_GetTZAsStr (time_t utc, int bias, int dst)
    unsigned int i;
 
    if (!strftime (psTZName, 7, "%Z", ptm))
-      return (NULL);
+   {
+      WARN("strftime error %d\n", errno);
+      return NULL;
+   }
 
    for (i=0; i<(sizeof(TZ_INFO) / sizeof(struct tagTZ_INFO)); i++)
    {
@@ -972,10 +980,13 @@ NTSTATUS WINAPI RtlQueryTimeZoneInformation(RTL_TIME_ZONE_INFORMATION *tzinfo)
 
     memset(tzinfo, 0, sizeof(RTL_TIME_ZONE_INFORMATION));
 
-    if( !TIME_GetTimeZoneInfoFromReg(tzinfo)) {
+    if( !TIME_GetTimeZoneInfoFromReg(tzinfo))
+    {
+        WARN("TIME_GetTimeZoneInfoFromReg failed\n");
 
         gmt = time(NULL);
         bias = TIME_GetBias(gmt, &daylight);
+        TRACE("bias %d, daylight %d\n", -bias/60, daylight);
 
         tzinfo->Bias = -bias / 60;
         tzinfo->StandardBias = 0;

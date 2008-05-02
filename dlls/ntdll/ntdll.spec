@@ -389,7 +389,7 @@
 @ stdcall RtlAcquirePebLock()
 @ stdcall RtlAcquireResourceExclusive(ptr long)
 @ stdcall RtlAcquireResourceShared(ptr long)
-@ stub RtlActivateActivationContext
+@ stdcall RtlActivateActivationContext(long ptr ptr)
 @ stub RtlActivateActivationContextEx
 @ stub RtlActivateActivationContextUnsafeFast
 @ stdcall RtlAddAccessAllowedAce(ptr long long ptr)
@@ -407,7 +407,7 @@
 # @ stub RtlAddAuditAccessObjectAce
 # @ stub RtlAddCompoundAce
 # @ stub RtlAddRange
-# @ stub RtlAddRefActivationContext
+@ stdcall RtlAddRefActivationContext(ptr)
 # @ stub RtlAddRefMemoryStream
 @ stdcall RtlAddVectoredExceptionHandler(long ptr)
 # @ stub RtlAddressInSectionTable
@@ -475,7 +475,7 @@
 @ stdcall RtlCopyString(ptr ptr)
 @ stdcall RtlCopyUnicodeString(ptr ptr)
 @ stdcall RtlCreateAcl(ptr long long)
-# @ stub RtlCreateActivationContext
+@ stdcall RtlCreateActivationContext(ptr ptr)
 @ stub RtlCreateAndSetSD
 @ stdcall RtlCreateAtomTable(long ptr)
 # @ stub RtlCreateBootStatusDataFile
@@ -498,7 +498,7 @@
 @ stub RtlCustomCPToUnicodeN
 @ stub RtlCutoverTimeToSystemTime
 @ stdcall RtlDeNormalizeProcessParams(ptr)
-@ stub RtlDeactivateActivationContext
+@ stdcall RtlDeactivateActivationContext(long long)
 @ stub RtlDeactivateActivationContextUnsafeFast
 @ stub RtlDebugPrintTimes
 @ stdcall RtlDecodePointer(ptr)
@@ -574,7 +574,7 @@
 @ stdcall RtlFillMemoryUlong(ptr long long)
 @ stub RtlFinalReleaseOutOfProcessMemoryStream
 @ stub RtlFindActivationContextSectionGuid
-@ stub RtlFindActivationContextSectionString
+@ stdcall RtlFindActivationContextSectionString(long ptr long ptr ptr)
 @ stdcall RtlFindCharInUnicodeString(long ptr ptr ptr)
 @ stdcall RtlFindClearBits(ptr long long)
 @ stdcall RtlFindClearBitsAndSet(ptr long long)
@@ -604,13 +604,13 @@
 @ stdcall RtlFreeOemString(ptr)
 # @ stub RtlFreeRangeList
 @ stdcall RtlFreeSid (long)
-# @ stub RtlFreeThreadActivationContextStack
+@ stdcall RtlFreeThreadActivationContextStack()
 @ stdcall RtlFreeUnicodeString(ptr)
 @ stub RtlFreeUserThreadStack
 @ stdcall RtlGUIDFromString(ptr ptr)
 @ stub RtlGenerate8dot3Name
 @ stdcall RtlGetAce(ptr long ptr)
-# @ stub RtlGetActiveActivationContext
+@ stdcall RtlGetActiveActivationContext(ptr)
 @ stub RtlGetCallersAddress
 @ stub RtlGetCompressionWorkSpaceSize
 @ stdcall RtlGetControlSecurityDescriptor(ptr ptr ptr)
@@ -699,7 +699,7 @@
 # @ stub RtlIpv6StringToAddressExA
 # @ stub RtlIpv6StringToAddressExW
 # @ stub RtlIpv6StringToAddressW
-# @ stub RtlIsActivationContextActive
+@ stdcall RtlIsActivationContextActive(ptr)
 @ stdcall RtlIsDosDeviceName_U(wstr)
 @ stub RtlIsGenericTableEmpty
 # @ stub RtlIsGenericTableEmptyAvl
@@ -767,7 +767,7 @@
 @ stdcall RtlQueryEnvironmentVariable_U(ptr ptr ptr)
 @ stub RtlQueryHeapInformation
 @ stdcall RtlQueryInformationAcl(ptr ptr long long)
-@ stub RtlQueryInformationActivationContext
+@ stdcall RtlQueryInformationActivationContext(long long ptr long ptr long ptr)
 @ stub RtlQueryInformationActiveActivationContext
 @ stub RtlQueryInterfaceMemoryStream
 @ stub RtlQueryProcessBackTraceInformation
@@ -794,7 +794,7 @@
 @ stub RtlRealSuccessor
 @ stub RtlRegisterSecureMemoryCacheCallback
 @ stub RtlRegisterWait
-@ stub RtlReleaseActivationContext
+@ stdcall RtlReleaseActivationContext(ptr)
 @ stub RtlReleaseMemoryStream
 @ stdcall RtlReleasePebLock()
 @ stdcall RtlReleaseResource(ptr)
@@ -1026,7 +1026,7 @@
 @ stub ZwImpersonateClientOfPort
 @ stub ZwImpersonateThread
 @ stub ZwInitializeRegistry
-# @ stub ZwInitiatePowerAction
+@ stdcall ZwInitiatePowerAction(long long long long) NtInitiatePowerAction
 # @ stub ZwIsProcessInJob
 # @ stub ZwIsSystemResumeAutomatic
 @ stdcall ZwListenPort(ptr ptr) NtListenPort
@@ -1067,7 +1067,7 @@
 # @ stub ZwOpenThreadTokenEx
 @ stdcall ZwOpenTimer(ptr long ptr) NtOpenTimer
 @ stub ZwPlugPlayControl
-# @ stub ZwPowerInformation
+@ stdcall ZwPowerInformation(long ptr long ptr long) NtPowerInformation
 @ stdcall ZwPrivilegeCheck(ptr ptr ptr) NtPrivilegeCheck
 @ stub ZwPrivilegeObjectAuditAlarm
 @ stub ZwPrivilegedServiceAuditAlarm
@@ -1083,7 +1083,7 @@
 @ stdcall ZwQueryDirectoryObject(long ptr long long long ptr ptr) NtQueryDirectoryObject
 @ stub ZwQueryEaFile
 @ stdcall ZwQueryEvent(long long ptr long ptr) NtQueryEvent
-# @ stub ZwQueryFullAttributesFile
+@ stdcall ZwQueryFullAttributesFile(ptr ptr) NtQueryFullAttributesFile
 @ stdcall ZwQueryInformationAtom(long long ptr long ptr) NtQueryInformationAtom
 @ stdcall ZwQueryInformationFile(long ptr ptr long long) NtQueryInformationFile
 # @ stub ZwQueryInformationJobObject
@@ -1095,7 +1095,7 @@
 @ stub ZwQueryIntervalProfile
 @ stdcall ZwQueryIoCompletion(long long ptr long ptr) NtQueryIoCompletion
 @ stdcall ZwQueryKey(long long ptr long ptr) NtQueryKey
-# @ stub ZwQueryMultipleValueKey
+@ stdcall ZwQueryMultipleValueKey(long ptr long ptr long ptr) NtQueryMultipleValueKey
 @ stdcall ZwQueryMutant(long long ptr long ptr) NtQueryMutant
 @ stdcall ZwQueryObject(long long long long long) NtQueryObject
 @ stub ZwQueryOpenSubKeys
@@ -1115,7 +1115,7 @@
 @ stdcall ZwQueryValueKey(long ptr long ptr long ptr) NtQueryValueKey
 @ stdcall ZwQueryVirtualMemory(long ptr long ptr long ptr) NtQueryVirtualMemory
 @ stdcall ZwQueryVolumeInformationFile(long ptr ptr long long) NtQueryVolumeInformationFile
-# @ stub ZwQueueApcThread
+@ stdcall ZwQueueApcThread(long ptr long long long) NtQueueApcThread
 @ stdcall ZwRaiseException(ptr ptr long) NtRaiseException
 @ stub ZwRaiseHardError
 @ stdcall ZwReadFile(long long long long long long long long long) NtReadFile
@@ -1190,7 +1190,7 @@
 @ stdcall ZwSetValueKey(long long long long long long) NtSetValueKey
 @ stdcall ZwSetVolumeInformationFile(long ptr ptr long long) NtSetVolumeInformationFile
 @ stdcall ZwShutdownSystem(long) NtShutdownSystem
-# @ stub ZwSignalAndWaitForSingleObject
+@ stdcall ZwSignalAndWaitForSingleObject(long long long ptr) NtSignalAndWaitForSingleObject
 @ stub ZwStartProfile
 @ stub ZwStopProfile
 # @ stub ZwSuspendProcess

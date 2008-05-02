@@ -78,8 +78,23 @@ extern HRESULT create_DataFormat(LPCDIDATAFORMAT asked_format, DataFormat *forma
 extern void release_DataFormat(DataFormat *df) ;
 extern void queue_event(LPDIRECTINPUTDEVICE8A iface, int ofs, DWORD data, DWORD time, DWORD seq);
 /* Helper functions to work with data format */
+extern int id_to_object(LPCDIDATAFORMAT df, int id);
 extern int id_to_offset(const DataFormat *df, int id);
 extern int find_property(const DataFormat *df, LPCDIPROPHEADER ph);
+
+/* Common joystick stuff */
+typedef struct
+{
+    LONG lDevMin;
+    LONG lDevMax;
+    LONG lMin;
+    LONG lMax;
+    LONG lDeadZone;
+    LONG lSaturation;
+} ObjProps;
+
+extern DWORD joystick_map_pov(POINTL *p);
+extern LONG joystick_map_axis(ObjProps *props, int val);
 
 /**
  * Callback Data used by specific callback 

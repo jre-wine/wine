@@ -17,13 +17,9 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
- */
-/*
+ *
  * Most thread locking is complete. There may be a few race
  * conditions still lurking.
- *
- * Tested with a Soundblaster clone, a Gravis UltraSound Classic,
- * and a Turtle Beach Tropez+.
  *
  * TODO:
  *	Implement SetCooperativeLevel properly (need to address focus issues)
@@ -32,8 +28,8 @@
  *      Add critical section locking inside Release and AddRef methods
  *      Handle static buffers - put those in hardware, non-static not in hardware
  *      Hardware DuplicateSoundBuffer
- *      Proper volume calculation, and setting volume in HEL primary buffer
- *      Optimize WINMM and negotiate fragment size, decrease DS_HEL_MARGIN
+ *      Proper volume calculation for 3d buffers
+ *      Remove DS_HEL_FRAGS and use mixer fragment length for it
  */
 
 #include <stdarg.h>
@@ -57,11 +53,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dsound);
 
-/* these are eligible for tuning... they must be high on slow machines... */
-/* some stuff may get more responsive with lower values though... */
-#define DS_EMULDRIVER 0 /* some games (Quake 2, UT) refuse to accept
-				emulated dsound devices. set to 0 ! */
-#define DS_SND_QUEUE_MAX 10 /* max number of fragments to prebuffer */
+#define DS_HEL_BUFLEN 0x8000 /* HEL: The buffer length of the emulated buffer */
+#define DS_SND_QUEUE_MAX 10 /* max number of fragments to prebuffer, each fragment is approximately 10 ms long */
+#define DS_SND_QUEUE_MIN 6 /* If the minimum of prebuffered fragments go below this, forcibly take all locks to prevent underruns */
 
 DirectSoundDevice*	DSOUND_renderer[MAXWAVEDRIVERS];
 GUID                    DSOUND_renderer_guids[MAXWAVEDRIVERS];
@@ -94,8 +88,10 @@ HRESULT mmErr(UINT err)
 	}
 }
 
-int ds_emuldriver = DS_EMULDRIVER;
+int ds_emuldriver = 0;
+int ds_hel_buflen = DS_HEL_BUFLEN;
 int ds_snd_queue_max = DS_SND_QUEUE_MAX;
+int ds_snd_queue_min = DS_SND_QUEUE_MIN;
 int ds_hw_accel = DS_HW_ACCEL_FULL;
 int ds_default_playback = 0;
 int ds_default_capture = 0;
@@ -152,8 +148,14 @@ void setup_dsound_options(void)
     if (!get_config_key( hkey, appkey, "EmulDriver", buffer, MAX_PATH ))
         ds_emuldriver = strcmp(buffer, "N");
 
+    if (!get_config_key( hkey, appkey, "HelBuflen", buffer, MAX_PATH ))
+        ds_hel_buflen = atoi(buffer);
+
     if (!get_config_key( hkey, appkey, "SndQueueMax", buffer, MAX_PATH ))
         ds_snd_queue_max = atoi(buffer);
+
+    if (!get_config_key( hkey, appkey, "SndQueueMin", buffer, MAX_PATH ))
+        ds_snd_queue_min = atoi(buffer);
 
     if (!get_config_key( hkey, appkey, "HardwareAcceleration", buffer, MAX_PATH )) {
 	if (strcmp(buffer, "Full") == 0)
@@ -181,10 +183,14 @@ void setup_dsound_options(void)
     if (appkey) RegCloseKey( appkey );
     if (hkey) RegCloseKey( hkey );
 
-    if (ds_emuldriver != DS_EMULDRIVER )
-       WARN("ds_emuldriver = %d (default=%d)\n",ds_emuldriver, DS_EMULDRIVER);
+    if (ds_emuldriver)
+       WARN("ds_emuldriver = %d (default=0)\n",ds_emuldriver);
+    if (ds_hel_buflen != DS_HEL_BUFLEN)
+       WARN("ds_hel_buflen = %d (default=%d)\n",ds_hel_buflen ,DS_HEL_BUFLEN);
     if (ds_snd_queue_max != DS_SND_QUEUE_MAX)
        WARN("ds_snd_queue_max = %d (default=%d)\n",ds_snd_queue_max ,DS_SND_QUEUE_MAX);
+    if (ds_snd_queue_min != DS_SND_QUEUE_MIN)
+       WARN("ds_snd_queue_min = %d (default=%d)\n",ds_snd_queue_min ,DS_SND_QUEUE_MIN);
     if (ds_hw_accel != DS_HW_ACCEL_FULL)
 	WARN("ds_hw_accel = %s (default=Full)\n",
 	    ds_hw_accel==DS_HW_ACCEL_FULL ? "Full" :

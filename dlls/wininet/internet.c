@@ -53,11 +53,13 @@
 #include "winreg.h"
 #include "winuser.h"
 #include "wininet.h"
+#include "winineti.h"
 #include "winnls.h"
 #include "wine/debug.h"
 #include "winerror.h"
 #define NO_SHLWAPI_STREAM
 #include "shlwapi.h"
+#include "wincrypt.h"
 
 #include "wine/exception.h"
 
@@ -65,7 +67,6 @@
 #include "resource.h"
 
 #include "wine/unicode.h"
-#include "wincrypt.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wininet);
 
@@ -1217,16 +1218,15 @@ BOOL WINAPI InternetCrackUrlW(LPCWSTR lpszUrl_orig, DWORD dwUrlLength_orig, DWOR
     DWORD dwUrlLength = dwUrlLength_orig;
     const WCHAR lpszSeparators[3]={';','?',0};
     const WCHAR lpszSlash[2]={'/',0};
-    if(dwUrlLength==0)
-        dwUrlLength=strlenW(lpszUrl);
 
     TRACE("(%s %u %x %p)\n", debugstr_w(lpszUrl), dwUrlLength, dwFlags, lpUC);
 
-    if (!lpszUrl_orig || !*lpszUrl_orig)
+    if (!lpszUrl_orig || !*lpszUrl_orig || !lpUC)
     {
         INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
+    if (!dwUrlLength) dwUrlLength = strlenW(lpszUrl);
 
     if (dwFlags & ICU_DECODE)
     {
@@ -1556,6 +1556,19 @@ BOOL WINAPI InternetCanonicalizeUrlW(LPCWSTR lpszUrl, LPWSTR lpszBuffer,
     return (hr == S_OK) ? TRUE : FALSE;
 }
 
+static INTERNET_STATUS_CALLBACK set_status_callback(
+    LPWININETHANDLEHEADER lpwh, INTERNET_STATUS_CALLBACK callback, BOOL unicode)
+{
+    INTERNET_STATUS_CALLBACK ret;
+
+    if (unicode) lpwh->dwInternalFlags |= INET_CALLBACKW;
+    else lpwh->dwInternalFlags &= ~INET_CALLBACKW;
+
+    ret = lpwh->lpfnStatusCB;
+    lpwh->lpfnStatusCB = callback;
+
+    return ret;
+}
 
 /***********************************************************************
  *           InternetSetStatusCallbackA (WININET.@)
@@ -1576,16 +1589,12 @@ INTERNET_STATUS_CALLBACK WINAPI InternetSetStatusCallbackA(
 
     TRACE("0x%08x\n", (ULONG)hInternet);
     
-    lpwh = WININET_GetObject(hInternet);
-    if (!lpwh)
+    if (!(lpwh = WININET_GetObject(hInternet)))
         return INTERNET_INVALID_STATUS_CALLBACK;
 
-    lpwh->dwInternalFlags &= ~INET_CALLBACKW;
-    retVal = lpwh->lpfnStatusCB;
-    lpwh->lpfnStatusCB = lpfnIntCB;
+    retVal = set_status_callback(lpwh, lpfnIntCB, FALSE);
 
     WININET_Release( lpwh );
-
     return retVal;
 }
 
@@ -1607,17 +1616,13 @@ INTERNET_STATUS_CALLBACK WINAPI InternetSetStatusCallbackW(
     LPWININETHANDLEHEADER lpwh;
 
     TRACE("0x%08x\n", (ULONG)hInternet);
-    
-    lpwh = WININET_GetObject(hInternet);
-    if (!lpwh)
+
+    if (!(lpwh = WININET_GetObject(hInternet)))
         return INTERNET_INVALID_STATUS_CALLBACK;
 
-    lpwh->dwInternalFlags |= INET_CALLBACKW;
-    retVal = lpwh->lpfnStatusCB;
-    lpwh->lpfnStatusCB = lpfnIntCB;
+    retVal = set_status_callback(lpwh, lpfnIntCB, TRUE);
 
     WININET_Release( lpwh );
-
     return retVal;
 }
 
@@ -1943,11 +1948,6 @@ static BOOL INET_QueryOptionHelper(BOOL bIsUnicode, HINTERNET hInternet, DWORD d
     TRACE("(%p, 0x%08x, %p, %p)\n", hInternet, dwOption, lpBuffer, lpdwBufferLength);
 
     lpwhh = (LPWININETHANDLEHEADER) WININET_GetObject( hInternet );
-    if (!lpwhh)
-    {
-        INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
 
     switch (dwOption)
     {
@@ -2105,25 +2105,19 @@ static BOOL INET_QueryOptionHelper(BOOL bIsUnicode, HINTERNET hInternet, DWORD d
                                                    proxyBytesRequired);
 
                     pPI->dwAccessType = lpwai->dwAccessType;
+                    pPI->lpszProxy = NULL;
+                    pPI->lpszProxyBypass = NULL;
                     if (lpwai->lpszProxy)
                     {
                         lstrcpyW(proxy, lpwai->lpszProxy);
+                        pPI->lpszProxy = proxy;
                     }
-                    else
-                    {
-                        *proxy = 0;
-                    }
-                    pPI->lpszProxy = proxy;
 
                     if (lpwai->lpszProxyBypass)
                     {
                         lstrcpyW(proxy_bypass, lpwai->lpszProxyBypass);
+                        pPI->lpszProxyBypass = proxy_bypass;
                     }
-                    else
-                    {
-                        *proxy_bypass = 0;
-                    }
-                    pPI->lpszProxyBypass = proxy_bypass;
                     bSuccess = TRUE;
                 }
                 *lpdwBufferLength = sizeof(INTERNET_PROXY_INFOW) +
@@ -2152,28 +2146,22 @@ static BOOL INET_QueryOptionHelper(BOOL bIsUnicode, HINTERNET hInternet, DWORD d
                                                  proxyBytesRequired);
 
                     pPI->dwAccessType = lpwai->dwAccessType;
+                    pPI->lpszProxy = NULL;
+                    pPI->lpszProxyBypass = NULL;
                     if (lpwai->lpszProxy)
                     {
                         WideCharToMultiByte(CP_ACP, 0, lpwai->lpszProxy, -1,
                                             proxy, proxyBytesRequired, NULL, NULL);
+                        pPI->lpszProxy = proxy;
                     }
-                    else
-                    {
-                        *proxy = '\0';
-                    }
-                    pPI->lpszProxy = proxy;
 
                     if (lpwai->lpszProxyBypass)
                     {
                         WideCharToMultiByte(CP_ACP, 0, lpwai->lpszProxyBypass,
                                             -1, proxy_bypass, proxyBypassBytesRequired,
                                             NULL, NULL);
+                        pPI->lpszProxyBypass = proxy_bypass;
                     }
-                    else
-                    {
-                        *proxy_bypass = '\0';
-                    }
-                    pPI->lpszProxyBypass = proxy_bypass;
                     bSuccess = TRUE;
                 }
                 *lpdwBufferLength = sizeof(INTERNET_PROXY_INFOA) +
@@ -2214,6 +2202,11 @@ static BOOL INET_QueryOptionHelper(BOOL bIsUnicode, HINTERNET hInternet, DWORD d
             break;
 
         case INTERNET_OPTION_SECURITY_CERTIFICATE_STRUCT:
+            if (!lpwhh)
+            {
+                INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
+                return FALSE;
+            }
             if (*lpdwBufferLength < sizeof(INTERNET_CERTIFICATE_INFOW))
             {
                 *lpdwBufferLength = sizeof(INTERNET_CERTIFICATE_INFOW);
@@ -2356,6 +2349,12 @@ BOOL WINAPI InternetSetOptionW(HINTERNET hInternet, DWORD dwOption,
 
     switch (dwOption)
     {
+    case INTERNET_OPTION_CALLBACK:
+      {
+        INTERNET_STATUS_CALLBACK callback = *(INTERNET_STATUS_CALLBACK *)lpBuffer;
+        ret = (set_status_callback(lpwhh, callback, TRUE) != INTERNET_INVALID_STATUS_CALLBACK);
+        break;
+      }
     case INTERNET_OPTION_HTTP_VERSION:
       {
         HTTP_VERSION_INFO* pVersion=(HTTP_VERSION_INFO*)lpBuffer;
@@ -2478,6 +2477,16 @@ BOOL WINAPI InternetSetOptionA(HINTERNET hInternet, DWORD dwOption,
 
     switch( dwOption )
     {
+    case INTERNET_OPTION_CALLBACK:
+        {
+        LPWININETHANDLEHEADER lpwh;
+        INTERNET_STATUS_CALLBACK callback = *(INTERNET_STATUS_CALLBACK *)lpBuffer;
+
+        if (!(lpwh = (LPWININETHANDLEHEADER)WININET_GetObject(hInternet))) return FALSE;
+        r = (set_status_callback(lpwh, callback, FALSE) != INTERNET_INVALID_STATUS_CALLBACK);
+        WININET_Release(lpwh);
+        return r;
+        }
     case INTERNET_OPTION_PROXY:
         {
         LPINTERNET_PROXY_INFOA pi = (LPINTERNET_PROXY_INFOA) lpBuffer;
@@ -3251,10 +3260,40 @@ lend:
  * Determines how much data is available to be read.
  *
  * RETURNS
- *   If there is data available then TRUE, otherwise if there
- *   is not or an error occurred then FALSE. Use GetLastError() to
- *   check for ERROR_NO_MORE_FILES to see if it was the former.
+ *   TRUE on success, FALSE if an error occurred. If
+ *   INTERNET_FLAG_ASYNC was specified in InternetOpen, and
+ *   no data is presently available, FALSE is returned with
+ *   the last error ERROR_IO_PENDING; a callback with status
+ *   INTERNET_STATUS_REQUEST_COMPLETE will be sent when more
+ *   data is available.
  */
+void AsyncInternetQueryDataAvailableProc(WORKREQUEST *workRequest)
+{
+    LPWININETHTTPREQW lpwhr;
+    INTERNET_ASYNC_RESULT iar;
+    char buffer[4048];
+
+    TRACE("INTERNETQUERYDATAAVAILABLE %p\n", workRequest->hdr);
+
+    switch (workRequest->hdr->htype)
+    {
+    case WH_HHTTPREQ:
+        lpwhr = (LPWININETHTTPREQW)workRequest->hdr;
+        iar.dwResult = NETCON_recv(&lpwhr->netConnection, buffer,
+                                   min(sizeof(buffer),
+                                       lpwhr->dwContentLength - lpwhr->dwContentRead),
+                                   MSG_PEEK, (int *)&iar.dwError);
+        INTERNET_SendCallback(workRequest->hdr, workRequest->hdr->dwContext,
+                              INTERNET_STATUS_REQUEST_COMPLETE, &iar,
+                              sizeof(INTERNET_ASYNC_RESULT));
+        break;
+
+    default:
+        FIXME("unsupported file type\n");
+        break;
+    }
+}
+
 BOOL WINAPI InternetQueryDataAvailable( HINTERNET hFile,
                                 LPDWORD lpdwNumberOfBytesAvailble,
                                 DWORD dwFlags, DWORD dwConext)
@@ -3278,20 +3317,45 @@ BOOL WINAPI InternetQueryDataAvailable( HINTERNET hFile,
         if (NETCON_query_data_available(&lpwhr->netConnection,
                                         lpdwNumberOfBytesAvailble))
         {
-            if (!*lpdwNumberOfBytesAvailble &&
-                !NETCON_recv(&lpwhr->netConnection, buffer,
-                         min(sizeof(buffer), lpwhr->dwContentLength - lpwhr->dwContentRead),
-                         MSG_PEEK, (int *)lpdwNumberOfBytesAvailble))
-            {
-                INTERNET_SetLastError(ERROR_NO_MORE_FILES);
-                retval = FALSE;
-            }
             retval = TRUE;
+            if (!*lpdwNumberOfBytesAvailble)
+            {
+                /* Even if we are in async mode, we need to determine whether
+                 * there is actually more data available. We do this by trying
+                 * to peek only a single byte in async mode. */
+                BOOL async = (lpwhr->lpHttpSession->lpAppInfo->hdr.dwFlags & INTERNET_FLAG_ASYNC);
+                if (!NETCON_recv(&lpwhr->netConnection, buffer,
+                                 async ? 1 : min(sizeof(buffer),
+                                                 lpwhr->dwContentLength - lpwhr->dwContentRead),
+                                 MSG_PEEK, (int *)lpdwNumberOfBytesAvailble))
+                {
+                    INTERNET_SetLastError(ERROR_NO_MORE_FILES);
+                    retval = FALSE;
+                }
+                else if (async && *lpdwNumberOfBytesAvailble)
+                {
+                    WORKREQUEST workRequest;
+
+                    *lpdwNumberOfBytesAvailble = 0;
+                    workRequest.asyncproc = AsyncInternetQueryDataAvailableProc;
+                    workRequest.hdr = WININET_AddRef( &lpwhr->hdr );
+
+                    retval = INTERNET_AsyncCall(&workRequest);
+                    if (!retval)
+                    {
+                        WININET_Release( &lpwhr->hdr );
+                    }
+                    else
+                    {
+                        INTERNET_SetLastError(ERROR_IO_PENDING);
+                        retval = FALSE;
+                    }
+                }
+            }
         }
         else
         {
             INTERNET_SetLastError(ERROR_NO_MORE_FILES);
-            retval = FALSE;
         }
         break;
 
@@ -3620,10 +3684,7 @@ BOOL WINAPI InternetCreateUrlA(LPURL_COMPONENTSA lpUrlComponents, DWORD dwFlags,
 
     TRACE("(%p,%d,%p,%p)\n", lpUrlComponents, dwFlags, lpszUrl, lpdwUrlLength);
 
-    if (!lpUrlComponents)
-        return FALSE;
-
-    if (lpUrlComponents->dwStructSize != sizeof(URL_COMPONENTSW) || !lpdwUrlLength)
+    if (!lpUrlComponents || lpUrlComponents->dwStructSize != sizeof(URL_COMPONENTSW) || !lpdwUrlLength)
     {
         INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
@@ -3690,10 +3751,7 @@ BOOL WINAPI InternetCreateUrlW(LPURL_COMPONENTSW lpUrlComponents, DWORD dwFlags,
 
     TRACE("(%p,%d,%p,%p)\n", lpUrlComponents, dwFlags, lpszUrl, lpdwUrlLength);
 
-    if (!lpUrlComponents)
-        return FALSE;
-
-    if (lpUrlComponents->dwStructSize != sizeof(URL_COMPONENTSW) || !lpdwUrlLength)
+    if (!lpUrlComponents || lpUrlComponents->dwStructSize != sizeof(URL_COMPONENTSW) || !lpdwUrlLength)
     {
         INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
@@ -3871,4 +3929,10 @@ BOOL WINAPI ResumeSuspendedDownload( HINTERNET hInternet, DWORD dwError )
 {
     FIXME("(%p, 0x%08x) stub\n", hInternet, dwError);
     return FALSE;
+}
+
+BOOL WINAPI InternetQueryFortezzaStatus(DWORD *a, DWORD_PTR b)
+{
+    FIXME("(%p, %08lx) stub\n", a, b);
+    return 0;
 }

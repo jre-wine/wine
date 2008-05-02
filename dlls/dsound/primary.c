@@ -39,31 +39,32 @@ WINE_DEFAULT_DEBUG_CHANNEL(dsound);
 static void DSOUND_RecalcPrimary(DirectSoundDevice *device)
 {
 	DWORD nBlockAlign;
+	DWORD fraglen;
 	TRACE("(%p)\n", device);
 
 	nBlockAlign = device->pwfx->nBlockAlign;
-	if (device->hwbuf) {
-		DWORD fraglen;
-		/* Alsa doesn't have continuous buffers, instead it has buffers with power of 2,
-		 * If DS_TIME_DEL is about 10 ms, 512 * nBlockAlign is roughly correct */
-		fraglen = 512 * nBlockAlign;
+	/* Alsa doesn't have continuous buffers, instead it has buffers with power of 2,
+	 * If DS_TIME_DEL is about 10 ms, 512 * nBlockAlign is roughly correct */
+	fraglen = 512 * nBlockAlign;
 
-		/* Compensate for only being roughly accurate */
-		if (device->pwfx->nSamplesPerSec <= 26000)
-			fraglen /= 2;
+	/* Compensate for only being roughly accurate */
+	if (device->pwfx->nSamplesPerSec <= 26000)
+		fraglen /= 2;
 
-		if (device->pwfx->nSamplesPerSec <= 12000)
-			fraglen /= 2;
+	if (device->pwfx->nSamplesPerSec <= 12000)
+		fraglen /= 2;
 
-		if (device->pwfx->nSamplesPerSec >= 80000)
-			fraglen *= 2;
+	if (device->pwfx->nSamplesPerSec >= 80000)
+		fraglen *= 2;
 
-		/* reduce fragment size until an integer number of them fits in the buffer */
-		/* (FIXME: this may or may not be a good idea) */
-		while (device->buflen % fraglen) fraglen -= nBlockAlign;
-		device->fraglen = fraglen;
-		TRACE("fraglen=%d\n", device->fraglen);
-	}
+	/* If in emulation mode, reduce fragment size until an integer number of them fits in the buffer */
+	if (!device->driver)
+		while (device->buflen % fraglen)
+			fraglen -= nBlockAlign;
+	device->fraglen = fraglen;
+	device->helfrags = device->buflen / fraglen;
+	TRACE("fraglen=%d helfrags=%d\n", device->fraglen, device->helfrags);
+
 	if (device->hwbuf && device->drvdesc.dwFlags & DSDDESC_DONTNEEDWRITELEAD)
 		device->writelead = 0;
 	else
@@ -79,6 +80,7 @@ static HRESULT DSOUND_PrimaryOpen(DirectSoundDevice *device)
 	/* are we using waveOut stuff? */
 	if (!device->driver) {
 		LPBYTE newbuf;
+		LPWAVEHDR headers = NULL;
 		DWORD buflen;
 		HRESULT merr = DS_OK;
 		/* Start in pause mode, to allow buffers to get filled */
@@ -88,7 +90,8 @@ static HRESULT DSOUND_PrimaryOpen(DirectSoundDevice *device)
 
 		/* on original windows, the buffer it set to a fixed size, no matter what the settings are.
 		   on windows this size is always fixed (tested on win-xp) */
-		buflen = DS_HEL_BUFLEN;
+		buflen = ds_hel_buflen;
+		buflen -= ds_hel_buflen % device->pwfx->nBlockAlign;
 
 		TRACE("desired buflen=%d, old buffer=%p\n", buflen, device->buffer);
 
@@ -97,6 +100,7 @@ static HRESULT DSOUND_PrimaryOpen(DirectSoundDevice *device)
 			newbuf = HeapReAlloc(GetProcessHeap(),0,device->buffer,buflen);
 		else
 			newbuf = HeapAlloc(GetProcessHeap(),0,buflen);
+
 
 		if (newbuf == NULL) {
 			ERR("failed to allocate primary buffer\n");
@@ -108,33 +112,43 @@ static HRESULT DSOUND_PrimaryOpen(DirectSoundDevice *device)
 			device->buffer = newbuf;
 			device->buflen = buflen;
 		}
-		if (device->buffer) {
+
+		DSOUND_RecalcPrimary(device);
+		if (device->pwave)
+			headers = HeapReAlloc(GetProcessHeap(),0,device->pwave, device->helfrags * sizeof(WAVEHDR));
+		else
+			headers = HeapAlloc(GetProcessHeap(),0,device->helfrags * sizeof(WAVEHDR));
+
+		if (!headers) {
+			ERR("failed to allocate wave headers\n");
+			merr = DSERR_OUTOFMEMORY;
+		}
+		else if (device->buffer) {
 			unsigned c;
 
-			device->fraglen = device->buflen / DS_HEL_FRAGS;
+			device->pwave = headers;
 
 			/* sanity */
-			if(device->buflen % DS_HEL_FRAGS){
-				ERR("Bad DS_HEL_FRAGS resolution\n");
+			if(device->buflen % device->helfrags){
+				ERR("Bad helfrags resolution\n");
 			}
 
 			/* prepare fragment headers */
-			for (c=0; c<DS_HEL_FRAGS; c++) {
-				device->pwave[c]->lpData = (char*)device->buffer + c*device->fraglen;
-				device->pwave[c]->dwBufferLength = device->fraglen;
-				device->pwave[c]->dwUser = (DWORD)device;
-				device->pwave[c]->dwFlags = 0;
-				device->pwave[c]->dwLoops = 0;
-				err = mmErr(waveOutPrepareHeader(device->hwo,device->pwave[c],sizeof(WAVEHDR)));
+			for (c=0; c<device->helfrags; c++) {
+				device->pwave[c].lpData = (char*)device->buffer + c*device->fraglen;
+				device->pwave[c].dwBufferLength = device->fraglen;
+				device->pwave[c].dwUser = (DWORD)device;
+				device->pwave[c].dwFlags = 0;
+				device->pwave[c].dwLoops = 0;
+				err = mmErr(waveOutPrepareHeader(device->hwo,&device->pwave[c],sizeof(WAVEHDR)));
 				if (err != DS_OK) {
 					while (c--)
-						waveOutUnprepareHeader(device->hwo,device->pwave[c],sizeof(WAVEHDR));
+						waveOutUnprepareHeader(device->hwo,&device->pwave[c],sizeof(WAVEHDR));
 					break;
 				}
 			}
 
 			device->pwplay = 0;
-			device->pwwrite = 0;
 			device->pwqueue = 0;
 			device->playpos = 0;
 			device->mixpos = 0;
@@ -161,6 +175,7 @@ static HRESULT DSOUND_PrimaryOpen(DirectSoundDevice *device)
 		device->mixpos = 0;
 		FillMemory(device->buffer, device->buflen, (device->pwfx->wBitsPerSample == 8) ? 128 : 0);
 	}
+	DSOUND_RecalcPrimary(device);
 
 	return err;
 }
@@ -179,8 +194,8 @@ static void DSOUND_PrimaryClose(DirectSoundDevice *device)
 		/* **** */
 		device->pwqueue = (DWORD)-1; /* resetting queues */
 		waveOutReset(device->hwo);
-		for (c=0; c<DS_HEL_FRAGS; c++)
-			waveOutUnprepareHeader(device->hwo, device->pwave[c], sizeof(WAVEHDR));
+		for (c=0; c<device->helfrags; c++)
+			waveOutUnprepareHeader(device->hwo, &device->pwave[c], sizeof(WAVEHDR));
 		/* **** */
 		EnterCriticalSection(&(device->mixlock));
 
@@ -213,21 +228,6 @@ HRESULT DSOUND_PrimaryCreate(DirectSoundDevice *device)
 			return err;
 		}
 	}
-	if (!device->hwbuf) {
-		/* Allocate memory for HEL buffer headers */
-		unsigned c;
-		for (c=0; c<DS_HEL_FRAGS; c++) {
-			device->pwave[c] = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(WAVEHDR));
-			if (!device->pwave[c]) {
-				/* Argh, out of memory */
-				while (c--) {
-					HeapFree(GetProcessHeap(),0,device->pwave[c]);
-				}
-				WARN("out of memory\n");
-				return DSERR_OUTOFMEMORY;
-			}
-		}
-	}
 
 	err = DSOUND_PrimaryOpen(device);
 
@@ -236,8 +236,6 @@ HRESULT DSOUND_PrimaryCreate(DirectSoundDevice *device)
 		return err;
 	}
 
-	/* calculate fragment size and write lead */
-	DSOUND_RecalcPrimary(device);
 	device->state = STATE_STOPPED;
 	return DS_OK;
 }
@@ -255,12 +253,8 @@ HRESULT DSOUND_PrimaryDestroy(DirectSoundDevice *device)
 			if (IDsDriverBuffer_Release(device->hwbuf) == 0)
 				device->hwbuf = 0;
 		}
-	} else {
-		unsigned c;
-		for (c=0; c<DS_HEL_FRAGS; c++) {
-			HeapFree(GetProcessHeap(),0,device->pwave[c]);
-		}
-	}
+	} else
+                HeapFree(GetProcessHeap(),0,device->pwave);
         HeapFree(GetProcessHeap(),0,device->pwfx);
         device->pwfx=NULL;
 
@@ -296,9 +290,7 @@ HRESULT DSOUND_PrimaryStop(DirectSoundDevice *device)
 	if (device->hwbuf) {
 		err = IDsDriverBuffer_Stop(device->hwbuf);
 		if (err == DSERR_BUFFERLOST) {
-			DWORD flags = CALLBACK_FUNCTION;
-			if (ds_hw_accel != DS_HW_ACCEL_EMULATION)
-				flags |= WAVE_DIRECTSOUND;
+			DWORD flags = CALLBACK_FUNCTION | WAVE_DIRECTSOUND;
 			/* Wine-only: the driver wants us to reopen the device */
 			/* FIXME: check for errors */
 			IDsDriverBuffer_Release(device->hwbuf);
@@ -316,6 +308,13 @@ HRESULT DSOUND_PrimaryStop(DirectSoundDevice *device)
 								  (LPVOID)&(device->hwbuf));
 				if (err != DS_OK)
 					WARN("IDsDriver_CreateSoundBuffer failed\n");
+				else if (device->state == STATE_STOPPING)
+					device->state = STATE_STOPPED;
+				else if (device->state == STATE_PLAYING)
+					device->state = STATE_STARTING;
+				if (err == DS_OK)
+					FillMemory(device->buffer, device->buflen, (device->pwfx->wBitsPerSample == 8) ? 128 : 0);
+
 			} else {
 				WARN("waveOutOpen failed\n");
 			}
@@ -375,7 +374,7 @@ HRESULT DSOUND_PrimarySetFormat(DirectSoundDevice *device, LPCWAVEFORMATEX wfex)
 {
 	HRESULT err = DS_OK;
 	int i, alloc_size, cp_size;
-	DWORD nSamplesPerSec;
+	DWORD nSamplesPerSec, bpp, chans;
 	TRACE("(%p,%p)\n", device, wfex);
 
 	if (device->priolevel == DSSCL_NORMAL) {
@@ -407,12 +406,14 @@ HRESULT DSOUND_PrimarySetFormat(DirectSoundDevice *device, LPCWAVEFORMATEX wfex)
         device->pwfx = HeapReAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,device->pwfx,alloc_size);
 
 	nSamplesPerSec = device->pwfx->nSamplesPerSec;
+	bpp = device->pwfx->wBitsPerSample;
+	chans = device->pwfx->nChannels;
 
         CopyMemory(device->pwfx, wfex, cp_size);
 
 	if (device->drvdesc.dwFlags & DSDDESC_DOMMSYSTEMSETFORMAT) {
 		DWORD flags = CALLBACK_FUNCTION;
-		if (ds_hw_accel != DS_HW_ACCEL_EMULATION)
+		if (device->driver)
 			flags |= WAVE_DIRECTSOUND;
 		/* FIXME: check for errors */
 		DSOUND_PrimaryClose(device);
@@ -453,19 +454,20 @@ HRESULT DSOUND_PrimarySetFormat(DirectSoundDevice *device, LPCWAVEFORMATEX wfex)
 			goto done;
 		}
                 /* FIXME: should we set err back to DS_OK in all cases ? */
+		DSOUND_RecalcPrimary(device);
 	}
-	DSOUND_RecalcPrimary(device);
 
-	if (nSamplesPerSec != device->pwfx->nSamplesPerSec) {
+	if (nSamplesPerSec != device->pwfx->nSamplesPerSec || bpp != device->pwfx->wBitsPerSample || chans != device->pwfx->nChannels) {
 		IDirectSoundBufferImpl** dsb = device->buffers;
 		for (i = 0; i < device->nrofbuffers; i++, dsb++) {
 			/* **** */
-			EnterCriticalSection(&((*dsb)->lock));
+			RtlAcquireResourceExclusive(&(*dsb)->lock, TRUE);
 
-			(*dsb)->freqAdjust = ((*dsb)->freq << DSOUND_FREQSHIFT) /
-				wfex->nSamplesPerSec;
+			(*dsb)->freqAdjust = ((DWORD64)(*dsb)->freq << DSOUND_FREQSHIFT) / device->pwfx->nSamplesPerSec;
+			DSOUND_RecalcFormat((*dsb));
+			DSOUND_MixToTemporary((*dsb), 0, (*dsb)->buflen);
 
-			LeaveCriticalSection(&((*dsb)->lock));
+			RtlReleaseResource(&(*dsb)->lock);
 			/* **** */
 		}
 	}
@@ -766,7 +768,7 @@ static HRESULT WINAPI PrimaryBufferImpl_Lock(
 		     writecursor, device->buflen);
                 return DSERR_INVALIDPARAM;
         }
-                                                                                
+
         if (writebytes > device->buflen) {
                 WARN("Invalid parameter, writebytes: %u > buflen: %u\n",
 		     writebytes, device->buflen);
@@ -945,9 +947,7 @@ static HRESULT WINAPI PrimaryBufferImpl_Initialize(
 	LPDIRECTSOUNDBUFFER iface,LPDIRECTSOUND dsound,LPCDSBUFFERDESC dbsd
 ) {
 	PrimaryBufferImpl *This = (PrimaryBufferImpl *)iface;
-	FIXME("(%p,%p,%p):stub\n",This,dsound,dbsd);
-	DPRINTF("Re-Init!!!\n");
-	WARN("already initialized\n");
+	WARN("(%p) already initialized\n", This);
 	return DSERR_ALREADYINITIALIZED;
 }
 

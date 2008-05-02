@@ -186,7 +186,7 @@ BOOL WINAPI I_CryptReadTrustedPublisherDWORDValueFromRegistry(LPCWSTR name,
     return ret;
 }
 
-int WINAPI I_CryptInstallOssGlobal(DWORD x, DWORD y, DWORD z)
+DWORD WINAPI I_CryptInstallOssGlobal(DWORD x, DWORD y, DWORD z)
 {
     static int ret = 8;
     ret++;
@@ -204,6 +204,12 @@ BOOL WINAPI I_CryptUninstallAsn1Module(void *x)
 {
     FIXME("%p\n", x);
     return TRUE;
+}
+
+void *WINAPI I_CryptGetAsn1Decoder(long x)
+{
+    FIXME("%08lx\n", x);
+    return NULL;
 }
 
 BOOL WINAPI CryptFormatObject(DWORD dwCertEncodingType, DWORD dwFormatType,

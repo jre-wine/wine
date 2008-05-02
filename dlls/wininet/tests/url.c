@@ -238,6 +238,7 @@ static void InternetCrackUrlW_test(void)
     static const WCHAR url2[] = { '.','.','/','R','i','t','z','.','x','m','l',0 };
     URL_COMPONENTSW comp;
     WCHAR scheme[20], host[20], user[20], pwd[20], urlpart[50], extra[50];
+    DWORD error;
     BOOL r;
 
     urlpart[0]=0;
@@ -260,6 +261,18 @@ static void InternetCrackUrlW_test(void)
     comp.dwUrlPathLength = sizeof urlpart;
     comp.lpszExtraInfo = extra;
     comp.dwExtraInfoLength = sizeof extra;
+
+    SetLastError(0xdeadbeef);
+    r = InternetCrackUrlW(NULL, 0, 0, &comp );
+    error = GetLastError();
+    ok( !r, "InternetCrackUrlW succeeded unexpectedly\n");
+    ok( error == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER got %u\n", error);
+
+    SetLastError(0xdeadbeef);
+    r = InternetCrackUrlW(url, 0, 0, NULL );
+    error = GetLastError();
+    ok( !r, "InternetCrackUrlW succeeded unexpectedly\n");
+    ok( error == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER got %u\n", error);
 
     r = InternetCrackUrlW(url, 0, 0, &comp );
     ok( r, "failed to crack url\n");
@@ -391,11 +404,11 @@ static void InternetCreateUrlA_test(void)
                     host[]       = "host";
 
 	/* test NULL lpUrlComponents */
-	ret = InternetCreateUrlA(NULL, 0, NULL, &len);
 	SetLastError(0xdeadbeef);
+	ret = InternetCreateUrlA(NULL, 0, NULL, &len);
 	ok(!ret, "Expected failure\n");
-	ok(GetLastError() == 0xdeadbeef,
-		"Expected 0xdeadbeef, got %d\n", GetLastError());
+	ok(GetLastError() == ERROR_INVALID_PARAMETER,
+		"Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
 	ok(len == -1, "Expected len -1, got %d\n", len);
 
 	/* test zero'ed lpUrlComponents */

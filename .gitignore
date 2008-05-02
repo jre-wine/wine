@@ -226,6 +226,7 @@ dlls/dpnaddr/version.res
 dlls/dpnet/libdpnet.def
 dlls/dpnet/version.res
 dlls/dpnhpast/version.res
+dlls/dpnlobby/version.res
 dlls/dsound/libdsound.def
 dlls/dsound/tests/*.ok
 dlls/dsound/tests/dsound_crosstest.exe
@@ -329,6 +330,8 @@ dlls/mscms/tests/testlist.c
 dlls/mscms/version.res
 dlls/msdmo/libmsdmo.def
 dlls/msdmo/rsrc.res
+dlls/mshtml.tlb/mshtml_tlb.tlb
+dlls/mshtml.tlb/rsrc.res
 dlls/mshtml/libmshtml.def
 dlls/mshtml/nsiface.h
 dlls/mshtml/rsrc.res
@@ -431,6 +434,9 @@ dlls/olepro32/version.res
 dlls/olesvr.dll16
 dlls/olesvr32/libolesvr32.def
 dlls/opengl32/libopengl32.def
+dlls/opengl32/tests/*.ok
+dlls/opengl32/tests/opengl32_crosstest.exe
+dlls/opengl32/tests/testlist.c
 dlls/opengl32/version.res
 dlls/pdh/libpdh.def
 dlls/pdh/tests/*.ok
@@ -703,10 +709,13 @@ include/austream.h
 include/comcat.h
 include/config.h
 include/control.h
+include/d3d10.h
 include/ddstream.h
 include/dispex.h
 include/docobj.h
 include/downloadmgr.h
+include/dxgi.h
+include/dxgitype.h
 include/exdisp.h
 include/hlink.h
 include/htiframe.h
@@ -717,8 +726,10 @@ include/mediaobj.h
 include/mimeinfo.h
 include/mlang.h
 include/mmstream.h
+include/mscoree.h
 include/mshtmhst.h
 include/mshtml.h
+include/msinkaut.h
 include/msxml.h
 include/msxml2.h
 include/netfw.h
@@ -889,6 +900,7 @@ programs/winetest/ntprint_test.exe
 programs/winetest/odbccp32_test.exe
 programs/winetest/ole32_test.exe
 programs/winetest/oleaut32_test.exe
+programs/winetest/opengl32_test.exe
 programs/winetest/pdh_test.exe
 programs/winetest/psapi_test.exe
 programs/winetest/quartz_test.exe
@@ -924,8 +936,11 @@ programs/winhelp/winhelp
 programs/winver/winver
 programs/wordpad/formatbar.bmp
 programs/wordpad/rsrc.res
+programs/wordpad/toolbar.bmp
 programs/wordpad/wordpad
 programs/wordpad/wordpad.ico
+programs/write/rsrc.res
+programs/write/write
 programs/xcopy/rsrc.res
 programs/xcopy/xcopy
 server/wineserver

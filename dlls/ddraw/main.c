@@ -319,13 +319,6 @@ DDRAW_Create(const GUID *guid,
     list_init(&This->surface_list);
     list_add_head(&global_ddraw_list, &This->ddraw_list_entry);
 
-    This->decls = HeapAlloc(GetProcessHeap(), 0, 0);
-    if(!This->decls)
-    {
-        ERR("Error allocating an empty array for the converted vertex decls\n");
-        goto err_out;
-    }
-
     /* Call QueryInterface to get the pointer to the requested interface. This also initializes
      * The required refcount
      */
@@ -352,7 +345,7 @@ err_out:
  ***********************************************************************/
 HRESULT WINAPI
 DirectDrawCreate(GUID *GUID,
-                 IDirectDraw **DD,
+                 LPDIRECTDRAW *DD,
                  IUnknown *UnkOuter)
 {
     HRESULT hr;
@@ -375,7 +368,7 @@ DirectDrawCreate(GUID *GUID,
  ***********************************************************************/
 HRESULT WINAPI
 DirectDrawCreateEx(GUID *GUID,
-                   void **DD,
+                   LPVOID *DD,
                    REFIID iid,
                    IUnknown *UnkOuter)
 {
@@ -413,7 +406,7 @@ DirectDrawCreateEx(GUID *GUID,
  ***********************************************************************/
 HRESULT WINAPI
 DirectDrawEnumerateA(LPDDENUMCALLBACKA Callback,
-                     void *Context)
+                     LPVOID Context)
 {
     BOOL stop = FALSE;
 
@@ -447,7 +440,7 @@ DirectDrawEnumerateA(LPDDENUMCALLBACKA Callback,
  ***********************************************************************/
 HRESULT WINAPI
 DirectDrawEnumerateExA(LPDDENUMCALLBACKEXA Callback,
-                       void *Context,
+                       LPVOID Context,
                        DWORD Flags)
 {
     BOOL stop = FALSE;
@@ -841,7 +834,7 @@ static inline DWORD get_config_key(HKEY defkey, HKEY appkey, const char* name, c
 BOOL WINAPI
 DllMain(HINSTANCE hInstDLL,
         DWORD Reason,
-        void *lpv)
+        LPVOID lpv)
 {
     TRACE("(%p,%x,%p)\n", hInstDLL, Reason, lpv);
     if (Reason == DLL_PROCESS_ATTACH)

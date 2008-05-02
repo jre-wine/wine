@@ -3125,10 +3125,10 @@ static DWORD ParseAceStringRights(LPCWSTR* StringAcl)
 	while (*p && *p != ';')
             p++;
 
-	if (p - szAcl <= 8)
+	if (p - szAcl <= 10 /* 8 hex digits + "0x" */ )
 	{
 	    rights = strtoulW(szAcl, NULL, 16);
-	    *StringAcl = p;
+	    szAcl = p;
 	}
 	else
             WARN("Invalid rights string format: %s\n", debugstr_wn(szAcl, p - szAcl));
@@ -3178,7 +3178,7 @@ static BOOL ParseStringAclToAcl(LPCWSTR StringAcl, LPDWORD lpdwFlags,
 	return FALSE;
 
     if (pAcl) /* pAce is only useful if we're setting values */
-        pAce = (PACCESS_ALLOWED_ACE) ((LPBYTE)pAcl + sizeof(PACL));
+        pAce = (PACCESS_ALLOWED_ACE) (pAcl + 1);
 
     /* Parse ACL flags */
     *lpdwFlags = ParseAclStringFlags(&StringAcl);
@@ -3266,7 +3266,7 @@ static BOOL ParseStringSecurityDescriptorToSecurityDescriptor(
     LPBYTE lpNext = NULL;
     DWORD len;
 
-    *cBytes = 0;
+    *cBytes = sizeof(SECURITY_DESCRIPTOR);
 
     if (SecurityDescriptor)
         lpNext = ((LPBYTE) SecurityDescriptor) + sizeof(SECURITY_DESCRIPTOR);
@@ -3451,6 +3451,7 @@ BOOL WINAPI ConvertStringSecurityDescriptorToSecurityDescriptorW(
 
     psd = *SecurityDescriptor = (SECURITY_DESCRIPTOR*) LocalAlloc(
         GMEM_ZEROINIT, cBytes);
+    if (!psd) goto lend;
 
     psd->Revision = SID_REVISION;
     psd->Control |= SE_SELF_RELATIVE;
@@ -3743,9 +3744,7 @@ BOOL WINAPI EnumDependentServicesW(
  */
 static DWORD ComputeStringSidSize(LPCWSTR StringSid)
 {
-    DWORD size = sizeof(SID);
-
-    if (StringSid[0] == 'S' && StringSid[1] == '-') /* S-R-I-S-S */
+    if (StringSid[0] == 'S' && StringSid[1] == '-') /* S-R-I(-S)+ */
     {
         int ctok = 0;
         while (*StringSid)
@@ -3755,8 +3754,8 @@ static DWORD ComputeStringSidSize(LPCWSTR StringSid)
             StringSid++;
         }
 
-        if (ctok > 3)
-            size += (ctok - 3) * sizeof(DWORD);
+        if (ctok >= 3)
+            return GetSidLengthRequired(ctok - 2);
     }
     else /* String constant format  - Only available in winxp and above */
     {
@@ -3764,10 +3763,10 @@ static DWORD ComputeStringSidSize(LPCWSTR StringSid)
 
         for (i = 0; i < sizeof(WellKnownSids)/sizeof(WellKnownSids[0]); i++)
             if (!strncmpW(WellKnownSids[i].wstr, StringSid, 2))
-                size += (WellKnownSids[i].Sid.SubAuthorityCount - 1) * sizeof(DWORD);
+                return GetSidLengthRequired(WellKnownSids[i].Sid.SubAuthorityCount);
     }
 
-    return size;
+    return GetSidLengthRequired(0);
 }
 
 /******************************************************************************
@@ -3796,7 +3795,7 @@ static BOOL ParseStringSidToSid(LPCWSTR StringSid, PSID pSid, LPDWORD cBytes)
     if (StringSid[0] == 'S' && StringSid[1] == '-') /* S-R-I-S-S */
     {
         DWORD i = 0, identAuth;
-        DWORD csubauth = ((*cBytes - sizeof(SID)) / sizeof(DWORD)) + 1;
+        DWORD csubauth = ((*cBytes - GetSidLengthRequired(0)) / sizeof(DWORD));
 
         StringSid += 2; /* Advance to Revision */
         pisid->Revision = atoiW(StringSid);

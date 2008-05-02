@@ -2211,6 +2211,12 @@ static void test_SetForegroundWindow(HWND hwnd)
     SetWindowPos(hwnd,0,0,0,0,0,SWP_NOZORDER|SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_SHOWWINDOW);
     check_wnd_state(hwnd, hwnd, hwnd, 0);
 
+    hwnd2 = GetForegroundWindow();
+    ok(hwnd2 == hwnd, "Wrong foreground window %p\n", hwnd2);
+    ok(SetForegroundWindow( GetDesktopWindow() ), "SetForegroundWindow(desktop) error: %d\n", GetLastError());
+    hwnd2 = GetForegroundWindow();
+    ok(hwnd2 != hwnd, "Wrong foreground window %p\n", hwnd2);
+
     ShowWindow(hwnd, SW_HIDE);
     check_wnd_state(0, 0, 0, 0);
 
@@ -2501,7 +2507,7 @@ static void test_mouse_input(HWND hwnd)
     GetCursorPos(&pt);
     ok(x == pt.x && y == pt.y, "wrong cursor pos (%d,%d), expected (%d,%d)\n", pt.x, pt.y, x, y);
 
-    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
+    flush_events();
 
     /* Check that setting the same position will generate WM_MOUSEMOVE */
     SetCursorPos(x, y);
@@ -2514,7 +2520,7 @@ static void test_mouse_input(HWND hwnd)
      * otherwise it won't generate relative mouse movements below.
      */
     mouse_event(MOUSEEVENTF_MOVE, -1, -1, 0, 0);
-    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
+    flush_events();
 
     msg.message = 0;
     mouse_event(MOUSEEVENTF_MOVE, 1, 1, 0, 0);
@@ -2530,7 +2536,7 @@ static void test_mouse_input(HWND hwnd)
     ShowWindow(popup, SW_HIDE);
     ok(PeekMessageA(&msg, 0, 0, 0, PM_REMOVE), "no message available\n");
     ok(msg.hwnd == hwnd && msg.message == WM_MOUSEMOVE, "hwnd %p message %04x\n", msg.hwnd, msg.message);
-    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
+    flush_events();
 
     mouse_event(MOUSEEVENTF_MOVE, 1, 1, 0, 0);
     ShowWindow(hwnd, SW_HIDE);
@@ -2541,8 +2547,6 @@ static void test_mouse_input(HWND hwnd)
 
     ShowWindow(hwnd, SW_SHOW);
     ShowWindow(popup, SW_SHOW);
-
-    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
     flush_events();
 
     mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
@@ -2574,7 +2578,7 @@ static void test_mouse_input(HWND hwnd)
     ok(!ret, "message %04x available\n", msg.message);
 
     ShowWindow(popup, SW_HIDE);
-    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
+    flush_events();
 
     mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
     mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
@@ -3326,7 +3330,6 @@ static LRESULT WINAPI redraw_window_procA(HWND hwnd, UINT msg, WPARAM wparam, LP
             return 1;
         }
         return 0;
-        break;
     }
     return DefWindowProc(hwnd, msg, wparam, lparam);
 }

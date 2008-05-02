@@ -3,11 +3,13 @@ TOPOBJDIR = ../../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 TESTDLL   = gdiplus.dll
-IMPORTS   = gdiplus kernel32
+IMPORTS   = gdiplus user32 gdi32 kernel32
 
 CTESTS = \
 	brush.c \
+	graphics.c \
 	graphicspath.c \
+	image.c \
 	matrix.c \
 	pen.c
 

@@ -306,9 +306,6 @@
 /* Define to 1 if you have the <libxml/parser.h> header file. */
 #undef HAVE_LIBXML_PARSER_H
 
-/* Define to 1 if you have the `xpg4' library (-lxpg4). */
-#undef HAVE_LIBXPG4
-
 /* Define if you have the X Shape extension */
 #undef HAVE_LIBXSHAPE
 
@@ -815,6 +812,9 @@
 
 /* Define to 1 if you have the <sys/sysctl.h> header file. */
 #undef HAVE_SYS_SYSCTL_H
+
+/* Define to 1 if you have the <sys/thr.h> header file. */
+#undef HAVE_SYS_THR_H
 
 /* Define to 1 if you have the <sys/times.h> header file. */
 #undef HAVE_SYS_TIMES_H

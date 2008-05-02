@@ -145,6 +145,7 @@ static struct query *create_query( void )
 
 struct source
 {
+    DWORD           index;                          /* name index */
     const WCHAR    *path;                           /* identifier */
     void (CALLBACK *collect)( struct counter * );   /* collect callback */
     DWORD           type;                           /* counter type */
@@ -152,8 +153,17 @@ struct source
     LONGLONG        base;                           /* samples per second */
 };
 
+static const WCHAR path_processor_time[] =
+    {'\\','P','r','o','c','e','s','s','o','r','(','_','T','o','t','a','l',')',
+     '\\','%',' ','P','r','o','c','e','s','s','o','r',' ','T','i','m','e',0};
 static const WCHAR path_uptime[] =
     {'\\','S','y','s','t','e','m', '\\', 'S','y','s','t','e','m',' ','U','p',' ','T','i','m','e',0};
+
+static void CALLBACK collect_processor_time( struct counter *counter )
+{
+    counter->two.largevalue = 500000; /* FIXME */
+    counter->status = PDH_CSTATUS_VALID_DATA;
+}
 
 static void CALLBACK collect_uptime( struct counter *counter )
 {
@@ -161,14 +171,29 @@ static void CALLBACK collect_uptime( struct counter *counter )
     counter->status = PDH_CSTATUS_VALID_DATA;
 }
 
+#define TYPE_PROCESSOR_TIME \
+    (PERF_SIZE_LARGE | PERF_TYPE_COUNTER | PERF_COUNTER_RATE | PERF_TIMER_100NS | PERF_DELTA_COUNTER | \
+     PERF_INVERSE_COUNTER | PERF_DISPLAY_PERCENT)
+
 #define TYPE_UPTIME \
     (PERF_SIZE_LARGE | PERF_TYPE_COUNTER | PERF_COUNTER_ELAPSED | PERF_OBJECT_TIMER | PERF_DISPLAY_SECONDS)
 
 /* counter source registry */
 static const struct source counter_sources[] =
 {
-    { path_uptime, collect_uptime, TYPE_UPTIME, -3, 1000 }
+    { 6,    path_processor_time,    collect_processor_time,     TYPE_PROCESSOR_TIME,    -5,     10000000 },
+    { 674,  path_uptime,            collect_uptime,             TYPE_UPTIME,            -3,     1000 }
 };
+
+static BOOL pdh_match_path( LPCWSTR fullpath, LPCWSTR path )
+{
+    const WCHAR *p;
+
+    if (strchrW( path, '\\')) p = fullpath;
+    else p = strrchrW( fullpath, '\\' ) + 1;
+    if (strcmpW( p, path )) return FALSE;
+    return TRUE;
+}
 
 /***********************************************************************
  *              PdhAddCounterA   (PDH.@)
@@ -210,7 +235,7 @@ PDH_STATUS WINAPI PdhAddCounterW( PDH_HQUERY hquery, LPCWSTR path,
     *hcounter = NULL;
     for (i = 0; i < sizeof(counter_sources) / sizeof(counter_sources[0]); i++)
     {
-        if (strstrW( path, counter_sources[i].path ))
+        if (pdh_match_path( counter_sources[i].path, path ))
         {
             if ((counter = create_counter()))
             {
@@ -234,18 +259,36 @@ PDH_STATUS WINAPI PdhAddCounterW( PDH_HQUERY hquery, LPCWSTR path,
 }
 
 /***********************************************************************
+ *              PdhAddEnglishCounterA   (PDH.@)
+ */
+PDH_STATUS WINAPI PdhAddEnglishCounterA( PDH_HQUERY query, LPCSTR path,
+                                         DWORD_PTR userdata, PDH_HCOUNTER *counter )
+{
+    return PdhAddCounterA( query, path, userdata, counter );
+}
+
+/***********************************************************************
+ *              PdhAddEnglishCounterW   (PDH.@)
+ */
+PDH_STATUS WINAPI PdhAddEnglishCounterW( PDH_HQUERY query, LPCWSTR path,
+                                         DWORD_PTR userdata, PDH_HCOUNTER *counter )
+{
+    return PdhAddCounterW( query, path, userdata, counter );
+}
+
+/***********************************************************************
  *              PdhCloseQuery   (PDH.@)
  */
 PDH_STATUS WINAPI PdhCloseQuery( PDH_HQUERY handle )
 {
     struct query *query = handle;
-    struct list *item;
+    struct list *item, *next;
 
     TRACE("%p\n", handle);
 
     if (!query || (query->magic != PDH_MAGIC_QUERY)) return PDH_INVALID_HANDLE;
 
-    LIST_FOR_EACH( item, &query->counters )
+    LIST_FOR_EACH_SAFE( item, next, &query->counters )
     {
         struct counter *counter = LIST_ENTRY( item, struct counter, entry );
 
@@ -255,7 +298,9 @@ PDH_STATUS WINAPI PdhCloseQuery( PDH_HQUERY handle )
         pdh_free( counter );
     }
 
+    query->magic = 0;
     pdh_free( query );
+
     return ERROR_SUCCESS;
 }
 
@@ -282,6 +327,31 @@ PDH_STATUS WINAPI PdhCollectQueryData( PDH_HQUERY handle )
         SystemTimeToFileTime( &time, &counter->stamp );
     }
     return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *              PdhCollectQueryDataWithTime   (PDH.@)
+ */
+PDH_STATUS WINAPI PdhCollectQueryDataWithTime( PDH_HQUERY handle, LONGLONG *timestamp )
+{
+    PDH_STATUS ret;
+    struct query *query = handle;
+
+    TRACE("%p %p\n", handle, timestamp);
+
+    if (!query || (query->magic != PDH_MAGIC_QUERY)) return PDH_INVALID_HANDLE;
+
+    if (list_empty( &query->counters )) return PDH_NO_DATA;
+
+    ret = PdhCollectQueryData( query );
+    if (!ret && timestamp)
+    {
+        struct list *item = list_head( &query->counters );
+        struct counter *counter = LIST_ENTRY( item, struct counter, entry );
+
+        *timestamp = ((LONGLONG)counter->stamp.dwHighDateTime << 32) | counter->stamp.dwLowDateTime;
+    }
+    return ret;
 }
 
 /***********************************************************************
@@ -324,8 +394,8 @@ PDH_STATUS WINAPI PdhGetCounterInfoW( PDH_HCOUNTER handle, BOOLEAN text, LPDWORD
 
     TRACE("%p %d %p %p\n", handle, text, size, info);
 
-    if (!size)    return PDH_INVALID_ARGUMENT;
     if (!counter) return PDH_INVALID_HANDLE;
+    if (!size)    return PDH_INVALID_ARGUMENT;
 
     if (*size < sizeof(PDH_COUNTER_INFO_W))
     {
@@ -342,7 +412,7 @@ PDH_STATUS WINAPI PdhGetCounterInfoW( PDH_HCOUNTER handle, BOOLEAN text, LPDWORD
     info->dwUserData      = counter->user;
     info->dwQueryUserData = counter->queryuser;
 
-    *size = sizeof(PDH_COUNTER_INFO_A);
+    *size = sizeof(PDH_COUNTER_INFO_W);
     return ERROR_SUCCESS;
 }
 
@@ -427,6 +497,129 @@ PDH_STATUS WINAPI PdhGetRawCounterValue( PDH_HCOUNTER handle, LPDWORD type,
 
     if (type) *type = counter->type;
     return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *              PdhLookupPerfIndexByNameA   (PDH.@)
+ */
+PDH_STATUS WINAPI PdhLookupPerfIndexByNameA( LPCSTR machine, LPCSTR name, LPDWORD index )
+{
+    PDH_STATUS ret;
+    WCHAR *nameW;
+
+    TRACE("%s %s %p\n", debugstr_a(machine), debugstr_a(name), index);
+
+    if (!name || !index) return PDH_INVALID_ARGUMENT;
+
+    if (machine)
+    {
+        FIXME("remote machine not supported\n");
+        return PDH_CSTATUS_NO_MACHINE;
+    }
+    if (!(nameW = pdh_strdup_aw( name )))
+        return PDH_MEMORY_ALLOCATION_FAILURE;
+
+    ret = PdhLookupPerfIndexByNameW( NULL, nameW, index );
+
+    pdh_free( nameW );
+    return ret;
+}
+
+/***********************************************************************
+ *              PdhLookupPerfIndexByNameW   (PDH.@)
+ */
+PDH_STATUS WINAPI PdhLookupPerfIndexByNameW( LPCWSTR machine, LPCWSTR name, LPDWORD index )
+{
+    unsigned int i;
+
+    TRACE("%s %s %p\n", debugstr_w(machine), debugstr_w(name), index);
+
+    if (!name || !index) return PDH_INVALID_ARGUMENT;
+
+    if (machine)
+    {
+        FIXME("remote machine not supported\n");
+        return PDH_CSTATUS_NO_MACHINE;
+    }
+    for (i = 0; i < sizeof(counter_sources) / sizeof(counter_sources[0]); i++)
+    {
+        if (pdh_match_path( counter_sources[i].path, name ))
+        {
+            *index = counter_sources[i].index;
+            return ERROR_SUCCESS;
+        }
+    }
+    return PDH_STRING_NOT_FOUND;
+}
+
+/***********************************************************************
+ *              PdhLookupPerfNameByIndexA   (PDH.@)
+ */
+PDH_STATUS WINAPI PdhLookupPerfNameByIndexA( LPCSTR machine, DWORD index, LPSTR buffer, LPDWORD size )
+{
+    PDH_STATUS ret;
+    WCHAR bufferW[PDH_MAX_COUNTER_NAME];
+    DWORD sizeW = sizeof(bufferW) / sizeof(WCHAR);
+
+    TRACE("%s %d %p %p\n", debugstr_a(machine), index, buffer, size);
+
+    if (machine)
+    {
+        FIXME("remote machine not supported\n");
+        return PDH_CSTATUS_NO_MACHINE;
+    }
+
+    if (!buffer && !size) return PDH_INVALID_ARGUMENT;
+    if (!index) return ERROR_SUCCESS;
+
+    if (!(ret = PdhLookupPerfNameByIndexW( NULL, index, bufferW, &sizeW )))
+    {
+        int required = WideCharToMultiByte( CP_ACP, 0, bufferW, -1, NULL, 0, NULL, NULL );
+
+        if (size && *size < required) ret = PDH_MORE_DATA;
+        else WideCharToMultiByte( CP_ACP, 0, bufferW, -1, buffer, required, NULL, NULL );
+        if (size) *size = required;
+    }
+    return ret;
+}
+
+/***********************************************************************
+ *              PdhLookupPerfNameByIndexW   (PDH.@)
+ */
+PDH_STATUS WINAPI PdhLookupPerfNameByIndexW( LPCWSTR machine, DWORD index, LPWSTR buffer, LPDWORD size )
+{
+    PDH_STATUS ret;
+    unsigned int i;
+
+    TRACE("%s %d %p %p\n", debugstr_w(machine), index, buffer, size);
+
+    if (machine)
+    {
+        FIXME("remote machine not supported\n");
+        return PDH_CSTATUS_NO_MACHINE;
+    }
+
+    if (!buffer && !size) return PDH_INVALID_ARGUMENT;
+    if (!index) return ERROR_SUCCESS;
+
+    for (i = 0; i < sizeof(counter_sources) / sizeof(counter_sources[0]); i++)
+    {
+        if (counter_sources[i].index == index)
+        {
+            WCHAR *p = strrchrW( counter_sources[i].path, '\\' ) + 1;
+            unsigned int required = strlenW( p ) + 1;
+
+            if (*size < required) ret = PDH_MORE_DATA;
+            else
+            {
+                strcpyW( buffer, p );
+                ret = ERROR_SUCCESS;
+            }
+            *size = required;
+            return ret;
+        }
+    }
+    return PDH_INVALID_ARGUMENT;
 }
 
 /***********************************************************************

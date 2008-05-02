@@ -61,8 +61,12 @@ static BOOL createObjects(void)
         hr = IDirectDraw7_SetDisplayMode(DirectDraw, 640, 480, 24, 0, 0);
 
     }
-    ok(hr == DD_OK, "IDirectDraw7_SetDisplayMode failed with %08x\n", hr);
-    if(FAILED(hr)) goto err;
+    ok(hr == DD_OK || hr == DDERR_UNSUPPORTED, "IDirectDraw7_SetDisplayMode failed with %08x\n", hr);
+    if(FAILED(hr)) {
+        /* use trace, the caller calls skip() */
+        trace("SetDisplayMode failed\n");
+        goto err;
+    }
 
     hr = IDirectDraw7_QueryInterface(DirectDraw, &IID_IDirect3D7, (void**) &Direct3D);
     if (hr == E_NOINTERFACE) goto err;
@@ -364,6 +368,7 @@ static void fog_test(IDirect3DDevice7 *device)
     HRESULT hr;
     DWORD color;
     float start = 0.0, end = 1.0;
+    D3DDEVICEDESC7 caps;
 
     /* Gets full z based fog with linear fog, no fog with specular color */
     struct sVertex unstransformed_1[] = {
@@ -396,6 +401,9 @@ static void fog_test(IDirect3DDevice7 *device)
     };
     WORD Indices[] = {0, 1, 2, 2, 3, 0};
 
+    memset(&caps, 0, sizeof(caps));
+    hr = IDirect3DDevice7_GetCaps(device, &caps);
+    ok(hr == D3D_OK, "IDirect3DDevice7_GetCaps returned %08x\n", hr);
     hr = IDirect3DDevice7_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
     ok(hr == D3D_OK, "IDirect3DDevice7_Clear returned %08x\n", hr);
 
@@ -466,12 +474,124 @@ static void fog_test(IDirect3DDevice7 *device)
     ok(color == 0x0000FF00, "Untransformed vertex with linear vertex fog has color %08x\n", color);
     color = getPixelColor(device, 480, 120);
     ok(color == 0x00FFFF00, "Transformed vertex with linear vertex fog has color %08x\n", color);
-    color = getPixelColor(device, 480, 360);
-    ok(color == 0x0000FF00, "Transformed vertex with linear table fog has color %08x\n", color);
+    if(caps.dpcTriCaps.dwRasterCaps & D3DPRASTERCAPS_FOGTABLE)
+    {
+        color = getPixelColor(device, 480, 360);
+        ok(color == 0x0000FF00, "Transformed vertex with linear table fog has color %08x\n", color);
+    }
+    else
+    {
+        /* Without fog table support the vertex fog is still applied, even though table fog is turned on.
+         * The settings above result in no fogging with vertex fog
+         */
+        color = getPixelColor(device, 480, 120);
+        ok(color == 0x00FFFF00, "Transformed vertex with linear vertex fog has color %08x\n", color);
+        trace("Info: Table fog not supported by this device\n");
+    }
 
     /* Turn off the fog master switch to avoid confusing other tests */
     hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGENABLE, FALSE);
     ok(hr == D3D_OK, "Turning off fog calculations returned %08x\n", hr);
+}
+
+static void offscreen_test(IDirect3DDevice7 *device)
+{
+    HRESULT hr;
+    IDirectDrawSurface7 *backbuffer = NULL, *offscreen = NULL;
+    DWORD color;
+    DDSURFACEDESC2 ddsd;
+
+    static const float quad[][5] = {
+        {-0.5f, -0.5f, 0.1f, 0.0f, 0.0f},
+        {-0.5f,  0.5f, 0.1f, 0.0f, 1.0f},
+        { 0.5f, -0.5f, 0.1f, 1.0f, 0.0f},
+        { 0.5f,  0.5f, 0.1f, 1.0f, 1.0f},
+    };
+
+    hr = IDirect3DDevice7_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff0000, 0.0, 0);
+    ok(hr == D3D_OK, "Clear failed, hr = %08x\n", hr);
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    U4(ddsd).ddpfPixelFormat.dwSize = sizeof(U4(ddsd).ddpfPixelFormat);
+    ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT | DDSD_CAPS;
+    ddsd.dwWidth = 128;
+    ddsd.dwHeight = 128;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_3DDEVICE;
+    hr = IDirectDraw7_CreateSurface(DirectDraw, &ddsd, &offscreen, NULL);
+    ok(hr == D3D_OK, "Creating the offscreen render target failed, hr = %08x\n", hr);
+    if(!offscreen) {
+        goto out;
+    }
+
+    hr = IDirect3DDevice7_GetRenderTarget(device, &backbuffer);
+    ok(hr == D3D_OK, "Can't get back buffer, hr = %08x\n", hr);
+    if(!backbuffer) {
+        goto out;
+    }
+
+    hr = IDirect3DDevice7_SetTextureStageState(device, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %08x\n", hr);
+    hr = IDirect3DDevice7_SetTextureStageState(device, 0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %08x\n", hr);
+    hr = IDirect3DDevice7_SetTextureStageState(device, 0, D3DTSS_MINFILTER, D3DFILTER_NEAREST);
+    ok(SUCCEEDED(hr), "SetTextureStageState D3DSAMP_MINFILTER failed (0x%08x)\n", hr);
+    hr = IDirect3DDevice7_SetTextureStageState(device, 0, D3DTSS_MAGFILTER, D3DFILTER_NEAREST);
+    ok(SUCCEEDED(hr), "SetTextureStageState D3DSAMP_MAGFILTER failed (0x%08x)\n", hr);
+    hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_LIGHTING, FALSE);
+    ok(hr == D3D_OK, "IDirect3DDevice7_SetRenderState returned hr = %08x\n", hr);
+
+    if(IDirect3DDevice7_BeginScene(device) == D3D_OK) {
+        hr = IDirect3DDevice7_SetRenderTarget(device, offscreen, 0);
+        ok(hr == D3D_OK, "SetRenderTarget failed, hr = %08x\n", hr);
+        hr = IDirect3DDevice7_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
+        ok(hr == D3D_OK, "Clear failed, hr = %08x\n", hr);
+
+        /* Draw without textures - Should resut in a white quad */
+        hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_TEX1, quad, 4, 0);
+        ok(hr == D3D_OK, "DrawPrimitive failed, hr = %08x\n", hr);
+
+        hr = IDirect3DDevice7_SetRenderTarget(device, backbuffer, 0);
+        ok(hr == D3D_OK, "SetRenderTarget failed, hr = %08x\n", hr);
+        hr = IDirect3DDevice7_SetTexture(device, 0, offscreen);
+        ok(hr == D3D_OK, "SetTexture failed, %08x\n", hr);
+
+        /* This time with the texture */
+        hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_TEX1, quad, 4, 0);
+        ok(hr == D3D_OK, "DrawPrimitive failed, hr = %08x\n", hr);
+
+        IDirect3DDevice7_EndScene(device);
+    }
+
+    /* Center quad - should be white */
+    color = getPixelColor(device, 320, 240);
+    ok(color == 0x00ffffff, "Offscreen failed: Got color 0x%08x, expected 0x00ffffff.\n", color);
+    /* Some quad in the cleared part of the texture */
+    color = getPixelColor(device, 170, 240);
+    ok(color == 0x00ff00ff, "Offscreen failed: Got color 0x%08x, expected 0x00ff00ff.\n", color);
+    /* Part of the originally cleared back buffer */
+    color = getPixelColor(device, 10, 10);
+    ok(color == 0x00ff0000, "Offscreen failed: Got color 0x%08x, expected 0x00ff0000.\n", color);
+    if(0) {
+        /* Lower left corner of the screen, where back buffer offscreen rendering draws the offscreen texture.
+         * It should be red, but the offscreen texture may leave some junk there. Not tested yet. Depending on
+         * the offscreen rendering mode this test would succeed or fail
+         */
+        color = getPixelColor(device, 10, 470);
+        ok(color == 0x00ff0000, "Offscreen failed: Got color 0x%08x, expected 0x00ff0000.\n", color);
+    }
+
+out:
+    hr = IDirect3DDevice7_SetTexture(device, 0, NULL);
+
+    /* restore things */
+    if(backbuffer) {
+        hr = IDirect3DDevice7_SetRenderTarget(device, backbuffer, 0);
+        IDirectDrawSurface7_Release(backbuffer);
+    }
+    if(offscreen) {
+        IDirectDrawSurface7_Release(offscreen);
+    }
 }
 
 START_TEST(visual)
@@ -517,6 +637,7 @@ START_TEST(visual)
     lighting_test(Direct3DDevice);
     clear_test(Direct3DDevice);
     fog_test(Direct3DDevice);
+    offscreen_test(Direct3DDevice);
 
 cleanup:
     releaseObjects();

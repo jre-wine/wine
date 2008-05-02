@@ -120,7 +120,7 @@ static IDirect3DDevice9 *init_d3d9(void)
     present_parameters.AutoDepthStencilFormat = D3DFMT_D16;
 
     hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, present_parameters.hDeviceWindow, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
-    ok(hr == D3D_OK, "IDirect3D_CreateDevice returned: %s\n", DXGetErrorString9(hr));
+    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE, "IDirect3D_CreateDevice returned: %s\n", DXGetErrorString9(hr));
 
     return device_ptr;
 }
@@ -429,6 +429,7 @@ static void fog_test(IDirect3DDevice9 *device)
     HRESULT hr;
     DWORD color;
     float start = 0.0f, end = 1.0f;
+    D3DCAPS9 caps;
 
     /* Gets full z based fog with linear fog, no fog with specular color */
     struct sVertex unstransformed_1[] = {
@@ -461,6 +462,9 @@ static void fog_test(IDirect3DDevice9 *device)
     };
     WORD Indices[] = {0, 1, 2, 2, 3, 0};
 
+    memset(&caps, 0, sizeof(caps));
+    hr = IDirect3DDevice9_GetDeviceCaps(device, &caps);
+    ok(hr == D3D_OK, "IDirect3DDevice9_GetDeviceCaps returned %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
     ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %s\n", DXGetErrorString9(hr));
 
@@ -538,8 +542,20 @@ static void fog_test(IDirect3DDevice9 *device)
     ok(color == 0x0000FF00, "Untransformed vertex with linear vertex fog has color %08x\n", color);
     color = getPixelColor(device, 480, 120);
     ok(color == 0x00FFFF00, "Transformed vertex with linear vertex fog has color %08x\n", color);
-    color = getPixelColor(device, 480, 360);
-    ok(color == 0x0000FF00, "Transformed vertex with linear table fog has color %08x\n", color);
+    if(caps.RasterCaps & D3DPRASTERCAPS_FOGTABLE)
+    {
+        color = getPixelColor(device, 480, 360);
+        ok(color == 0x0000FF00, "Transformed vertex with linear table fog has color %08x\n", color);
+    }
+    else
+    {
+        /* Without fog table support the vertex fog is still applied, even though table fog is turned on.
+         * The settings above result in no fogging with vertex fog
+         */
+        color = getPixelColor(device, 480, 120);
+        ok(color == 0x00FFFF00, "Transformed vertex with linear vertex fog has color %08x\n", color);
+        trace("Info: Table fog not supported by this device\n");
+    }
 
     /* Turn off the fog master switch to avoid confusing other tests */
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGENABLE, FALSE);
@@ -684,6 +700,119 @@ static void test_cube_wrap(IDirect3DDevice9 *device)
     IDirect3DSurface9_Release(surface);
 }
 
+static void offscreen_test(IDirect3DDevice9 *device)
+{
+    HRESULT hr;
+    IDirect3DTexture9 *offscreenTexture = NULL;
+    IDirect3DSurface9 *backbuffer = NULL, *offscreen = NULL;
+    DWORD color;
+
+    static const float quad[][5] = {
+        {-0.5f, -0.5f, 0.1f, 0.0f, 0.0f},
+        {-0.5f,  0.5f, 0.1f, 0.0f, 1.0f},
+        { 0.5f, -0.5f, 0.1f, 1.0f, 0.0f},
+        { 0.5f,  0.5f, 0.1f, 1.0f, 1.0f},
+    };
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff0000, 0.0, 0);
+    ok(hr == D3D_OK, "Clear failed, hr = %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_CreateTexture(device, 128, 128, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &offscreenTexture, NULL);
+    ok(hr == D3D_OK || D3DERR_INVALIDCALL, "Creating the offscreen render target failed, hr = %s\n", DXGetErrorString9(hr));
+    if(!offscreenTexture) {
+        trace("Failed to create an X8R8G8B8 offscreen texture, trying R5G6B5\n");
+        hr = IDirect3DDevice9_CreateTexture(device, 128, 128, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R5G6B5, D3DPOOL_DEFAULT, &offscreenTexture, NULL);
+        ok(hr == D3D_OK || D3DERR_INVALIDCALL, "Creating the offscreen render target failed, hr = %s\n", DXGetErrorString9(hr));
+        if(!offscreenTexture) {
+            skip("Cannot create an offscreen render target\n");
+            goto out;
+        }
+    }
+
+    hr = IDirect3DDevice9_GetBackBuffer(device, 0, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer);
+    ok(hr == D3D_OK, "Can't get back buffer, hr = %s\n", DXGetErrorString9(hr));
+    if(!backbuffer) {
+        goto out;
+    }
+
+    hr = IDirect3DTexture9_GetSurfaceLevel(offscreenTexture, 0, &offscreen);
+    ok(hr == D3D_OK, "Can't get offscreen surface, hr = %s\n", DXGetErrorString9(hr));
+    if(!offscreen) {
+        goto out;
+    }
+
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_TEX1);
+    ok(hr == D3D_OK, "SetFVF failed, hr = %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MINFILTER, D3DTEXF_NONE);
+    ok(SUCCEEDED(hr), "SetSamplerState D3DSAMP_MINFILTER failed (0x%08x)\n", hr);
+    hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAGFILTER, D3DTEXF_NONE);
+    ok(SUCCEEDED(hr), "SetSamplerState D3DSAMP_MAGFILTER failed (0x%08x)\n", hr);
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_LIGHTING, FALSE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState returned %s\n", DXGetErrorString9(hr));
+
+    if(IDirect3DDevice9_BeginScene(device) == D3D_OK) {
+        hr = IDirect3DDevice9_SetRenderTarget(device, 0, offscreen);
+        ok(hr == D3D_OK, "SetRenderTarget failed, hr = %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
+        ok(hr == D3D_OK, "Clear failed, hr = %s\n", DXGetErrorString9(hr));
+
+        /* Draw without textures - Should resut in a white quad */
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(quad[0]));
+        ok(hr == D3D_OK, "DrawPrimitiveUP failed, hr = %s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_SetRenderTarget(device, 0, backbuffer);
+        ok(hr == D3D_OK, "SetRenderTarget failed, hr = %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_SetTexture(device, 0, (IDirect3DBaseTexture9 *) offscreenTexture);
+        ok(hr == D3D_OK, "SetTexture failed, %s\n", DXGetErrorString9(hr));
+
+        /* This time with the texture */
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(quad[0]));
+        ok(hr == D3D_OK, "DrawPrimitiveUP failed, hr = %s\n", DXGetErrorString9(hr));
+
+        IDirect3DDevice9_EndScene(device);
+    }
+
+    IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+
+    /* Center quad - should be white */
+    color = getPixelColor(device, 320, 240);
+    ok(color == 0x00ffffff, "Offscreen failed: Got color 0x%08x, expected 0x00ffffff.\n", color);
+    /* Some quad in the cleared part of the texture */
+    color = getPixelColor(device, 170, 240);
+    ok(color == 0x00ff00ff, "Offscreen failed: Got color 0x%08x, expected 0x00ff00ff.\n", color);
+    /* Part of the originally cleared back buffer */
+    color = getPixelColor(device, 10, 10);
+    ok(color == 0x00ff0000, "Offscreen failed: Got color 0x%08x, expected 0x00ff0000.\n", color);
+    if(0) {
+        /* Lower left corner of the screen, where back buffer offscreen rendering draws the offscreen texture.
+         * It should be red, but the offscreen texture may leave some junk there. Not tested yet. Depending on
+         * the offscreen rendering mode this test would succeed or fail
+         */
+        color = getPixelColor(device, 10, 470);
+        ok(color == 0x00ff0000, "Offscreen failed: Got color 0x%08x, expected 0x00ff0000.\n", color);
+    }
+
+out:
+    hr = IDirect3DDevice9_SetTexture(device, 0, NULL);
+
+    /* restore things */
+    if(backbuffer) {
+        IDirect3DDevice9_SetRenderTarget(device, 0, backbuffer);
+        IDirect3DSurface9_Release(backbuffer);
+    }
+    if(offscreenTexture) {
+        IDirect3DTexture9_Release(offscreenTexture);
+    }
+    if(offscreen) {
+        IDirect3DSurface9_Release(offscreen);
+    }
+}
+
 /* This test tests fog in combination with shaders.
  * What's tested: linear fog (vertex and table) with pixel shader
  *                linear table fog with non foggy vertex shader
@@ -802,6 +931,7 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
         {0x0000ff00, 0x0000ff00, 0x0020df00, 0x0040bf00, 0x005fa000, 0x007f8000,
          0x009f6000, 0x00bf4000, 0x00df2000, 0x00ff0000, 0x00ff0000}},
 
+#if 0  /* FIXME: these fail on GeForce 8500 */
         /* foggy vertex shader */
         {2, 0, 0, 0,
         {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
@@ -815,6 +945,7 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
         {2, 0, 3, 0,
         {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
          0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+#endif
 
         /* foggy vertex shader and pixel shader */
         {2, 1, 0, 0,
@@ -866,7 +997,7 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGEND, end.i);
     ok(hr == D3D_OK, "Setting fog end failed (%08x)\n", hr);
 
-    for (i = 0; i < 22; i++)
+    for (i = 0; i < sizeof(test_data)/sizeof(test_data[0]); i++)
     {
         hr = IDirect3DDevice9_SetVertexShader(device, vertex_shader[test_data[i].vshader]);
         ok(SUCCEEDED(hr), "SetVertexShader failed (%08x)\n", hr);
@@ -1168,6 +1299,186 @@ static void present_test(IDirect3DDevice9 *device)
     ok(color == 0x00ff0000, "Present failed: Got color 0x%08x, expected 0x00ff0000.\n", color);
 }
 
+static void fill_surface(IDirect3DSurface9 *surface, DWORD color)
+{
+    D3DSURFACE_DESC desc;
+    D3DLOCKED_RECT l;
+    HRESULT hr;
+    unsigned int x, y;
+    DWORD *mem;
+
+    memset(&desc, 0, sizeof(desc));
+    memset(&l, 0, sizeof(l));
+    hr = IDirect3DSurface9_GetDesc(surface, &desc);
+    ok(hr == D3D_OK, "IDirect3DSurface9_GetDesc failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DSurface9_LockRect(surface, &l, NULL, D3DLOCK_DISCARD);
+    ok(hr == D3D_OK, "IDirect3DSurface9_LockRect failed with %s\n", DXGetErrorString9(hr));
+    if(FAILED(hr)) return;
+
+    for(y = 0; y < desc.Height; y++)
+    {
+        mem = (DWORD *) ((BYTE *) l.pBits + y * l.Pitch);
+        for(x = 0; x < l.Pitch / sizeof(DWORD); x++)
+        {
+            mem[x] = color;
+        }
+    }
+    hr = IDirect3DSurface9_UnlockRect(surface);
+    ok(hr == D3D_OK, "IDirect3DSurface9_UnlockRect failed with %s\n", DXGetErrorString9(hr));
+}
+
+static void maxmip_test(IDirect3DDevice9 *device)
+{
+    IDirect3DTexture9 *texture = NULL;
+    IDirect3DSurface9 *surface = NULL;
+    HRESULT hr;
+    DWORD color;
+    const float quads[] = {
+        -1.0,   -1.0,   0.0,    0.0,    0.0,
+        -1.0,    0.0,   0.0,    0.0,    1.0,
+         0.0,   -1.0,   0.0,    1.0,    0.0,
+         0.0,    0.0,   0.0,    1.0,    1.0,
+
+         0.0,   -1.0,   0.0,    0.0,    0.0,
+         0.0,    0.0,   0.0,    0.0,    1.0,
+         1.0,   -1.0,   0.0,    1.0,    0.0,
+         1.0,    0.0,   0.0,    1.0,    1.0,
+
+         0.0,    0.0,   0.0,    0.0,    0.0,
+         0.0,    1.0,   0.0,    0.0,    1.0,
+         1.0,    0.0,   0.0,    1.0,    0.0,
+         1.0,    1.0,   0.0,    1.0,    1.0,
+
+        -1.0,    0.0,   0.0,    0.0,    0.0,
+        -1.0,    1.0,   0.0,    0.0,    1.0,
+         0.0,    0.0,   0.0,    1.0,    0.0,
+         0.0,    1.0,   0.0,    1.0,    1.0,
+    };
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0xffffffff, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_CreateTexture(device, 128, 128, 3, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED,
+                                        &texture, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateTexture failed with %s\n", DXGetErrorString9(hr));
+    if(!texture)
+    {
+        skip("Failed to create test texture\n");
+        return;
+    }
+
+    hr = IDirect3DTexture9_GetSurfaceLevel(texture, 0, &surface);
+    fill_surface(surface, 0xffff0000);
+    IDirect3DSurface9_Release(surface);
+    hr = IDirect3DTexture9_GetSurfaceLevel(texture, 1, &surface);
+    fill_surface(surface, 0xff00ff00);
+    IDirect3DSurface9_Release(surface);
+    hr = IDirect3DTexture9_GetSurfaceLevel(texture, 2, &surface);
+    fill_surface(surface, 0xff0000ff);
+    IDirect3DSurface9_Release(surface);
+
+    hr = IDirect3DDevice9_SetTexture(device, 0, (IDirect3DBaseTexture9 *) texture);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_TEX1);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_BeginScene(device);
+    if(SUCCEEDED(hr))
+    {
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAXMIPLEVEL, 0);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, &quads[ 0], 5 * sizeof(float));
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
+
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAXMIPLEVEL, 1);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, &quads[20], 5 * sizeof(float));
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
+
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAXMIPLEVEL, 2);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, &quads[40], 5 * sizeof(float));
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
+
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAXMIPLEVEL, 3);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, &quads[60], 5 * sizeof(float));
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
+        hr = IDirect3DDevice9_EndScene(device);
+    }
+
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(SUCCEEDED(hr), "Present failed (0x%08x)\n", hr);
+    /* With mipmapping disabled, the max mip level is ignored, only level 0 is used */
+    color = getPixelColor(device, 160, 360);
+    ok(color == 0x00FF0000, "MapMip 0, no mipfilter has color %08x\n", color);
+    color = getPixelColor(device, 160, 120);
+    ok(color == 0x00FF0000, "MapMip 3, no mipfilter has color %08x\n", color);
+    color = getPixelColor(device, 480, 120);
+    ok(color == 0x00FF0000, "MapMip 2, no mipfilter has color %08x\n", color);
+    color = getPixelColor(device, 480, 360);
+    ok(color == 0x00FF0000, "MapMip 1, no mipfilter has color %08x\n", color);
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0xffffffff, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MIPFILTER, D3DTEXF_POINT);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_BeginScene(device);
+    if(SUCCEEDED(hr))
+    {
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAXMIPLEVEL, 0);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, &quads[ 0], 5 * sizeof(float));
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
+
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAXMIPLEVEL, 1);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, &quads[20], 5 * sizeof(float));
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
+
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAXMIPLEVEL, 2);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, &quads[40], 5 * sizeof(float));
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
+
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAXMIPLEVEL, 3);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, &quads[60], 5 * sizeof(float));
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
+        hr = IDirect3DDevice9_EndScene(device);
+    }
+
+    hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAXMIPLEVEL, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(SUCCEEDED(hr), "Present failed (0x%08x)\n", hr);
+    /* Max Mip level 0-2 sample from the specified texture level, Max Mip level 3(> levels in texture)
+     * samples from the highest level in the texture(level 2)
+     */
+    color = getPixelColor(device, 160, 360);
+    ok(color == 0x00FF0000, "MapMip 0, point mipfilter has color %08x\n", color);
+    color = getPixelColor(device, 160, 120);
+    ok(color == 0x000000FF, "MapMip 3, point mipfilter has color %08x\n", color);
+    color = getPixelColor(device, 480, 120);
+    ok(color == 0x000000FF, "MapMip 2, point mipfilter has color %08x\n", color);
+    color = getPixelColor(device, 480, 360);
+    ok(color == 0x0000FF00, "MapMip 1, point mipfilter has color %08x\n", color);
+
+    hr = IDirect3DDevice9_SetTexture(device, 0, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAXMIPLEVEL, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed with %s\n", DXGetErrorString9(hr));
+    IDirect3DTexture9_Release(texture);
+}
+
 START_TEST(visual)
 {
     IDirect3DDevice9 *device_ptr;
@@ -1183,7 +1494,11 @@ START_TEST(visual)
     }
 
     device_ptr = init_d3d9();
-    if (!device_ptr) return;
+    if (!device_ptr)
+    {
+        skip("Creating the device failed\n");
+        return;
+    }
 
     IDirect3DDevice9_GetDeviceCaps(device_ptr, &caps);
 
@@ -1222,8 +1537,22 @@ START_TEST(visual)
     lighting_test(device_ptr);
     clear_test(device_ptr);
     fog_test(device_ptr);
-    test_cube_wrap(device_ptr);
+    if(caps.TextureCaps & D3DPTEXTURECAPS_CUBEMAP)
+    {
+        test_cube_wrap(device_ptr);
+    } else {
+        skip("No cube texture support\n");
+    }
     present_test(device_ptr);
+    if(caps.TextureCaps & D3DPTEXTURECAPS_MIPMAP)
+    {
+        maxmip_test(device_ptr);
+    }
+    else
+    {
+        skip("No mipmap support\n");
+    }
+    offscreen_test(device_ptr);
 
     if (caps.VertexShaderVersion >= D3DVS_VERSION(2, 0))
     {
@@ -1231,13 +1560,13 @@ START_TEST(visual)
     }
     else skip("No vs_2_0 support\n");
 
-    if (caps.VertexShaderVersion >= D3DVS_VERSION(1, 1) && caps.PixelShaderVersion >= D3DVS_VERSION(1, 1))
+    if (caps.VertexShaderVersion >= D3DVS_VERSION(1, 1) && caps.PixelShaderVersion >= D3DPS_VERSION(1, 1))
     {
         fog_with_shader_test(device_ptr);
     }
     else skip("No vs_1_1 and ps_1_1 support\n");
 
-    if (caps.PixelShaderVersion >= D3DVS_VERSION(1, 1))
+    if (caps.PixelShaderVersion >= D3DPS_VERSION(1, 1))
     {
         texbem_test(device_ptr);
     }

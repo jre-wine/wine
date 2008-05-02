@@ -93,7 +93,7 @@ static DWORD widNotifyClient(WINE_WAVEDEV* wwi, WORD wMsg, DWORD dwParam1, DWORD
 /**************************************************************************
  * 			widGetDevCaps				[internal]
  */
-static DWORD widGetDevCaps(WORD wDevID, LPWAVEOUTCAPSW lpCaps, DWORD dwSize)
+static DWORD widGetDevCaps(WORD wDevID, LPWAVEINCAPSW lpCaps, DWORD dwSize)
 {
     TRACE("(%u, %p, %u);\n", wDevID, lpCaps, dwSize);
 
@@ -154,7 +154,7 @@ static	DWORD	CALLBACK	widRecorder(LPVOID pmt)
     DWORD               frames_per_period;
 
     wwi->state = WINE_WS_STOPPED;
-    wwi->dwTotalRecorded = 0;
+    InterlockedExchange((LONG*)&wwi->dwTotalRecorded, 0);
     wwi->lpQueuePtr = NULL;
 
     SetEvent(wwi->hStartUpEvent);
@@ -198,7 +198,7 @@ static	DWORD	CALLBACK	widRecorder(LPVOID pmt)
 		    {
 			/* update number of bytes recorded in current buffer and by this device */
                         lpWaveHdr->dwBytesRecorded += bytesRead;
-			wwi->dwTotalRecorded       += bytesRead;
+			InterlockedExchangeAdd((LONG*)&wwi->dwTotalRecorded, bytesRead);
 
 			/* buffer is full. notify client */
 			if (lpWaveHdr->dwBytesRecorded == lpWaveHdr->dwBufferLength)
@@ -247,7 +247,7 @@ static	DWORD	CALLBACK	widRecorder(LPVOID pmt)
 
                         /* update number of bytes recorded in current buffer and by this device */
                         lpWaveHdr->dwBytesRecorded += dwToCopy;
-                        wwi->dwTotalRecorded += dwToCopy;
+                        InterlockedExchangeAdd((LONG*)&wwi->dwTotalRecorded, dwToCopy);
                         bytesRead -= dwToCopy;
                         pOffset   += dwToCopy;
 
@@ -385,10 +385,6 @@ static	DWORD	CALLBACK	widRecorder(LPVOID pmt)
 		HeapFree(GetProcessHeap(), 0, buffer);
 		ExitThread(0);
 		/* shouldn't go here */
-	    case WINE_WM_UPDATE:
-		SetEvent(ev);
-		break;
-
 	    default:
 		FIXME("unknown message %d\n", msg);
 		break;
@@ -784,8 +780,6 @@ static DWORD widGetPosition(WORD wDevID, LPMMTIME lpTime, DWORD uSize)
     }
 
     wwi = &WInDev[wDevID];
-    ALSA_AddRingMessage(&wwi->msgRing, WINE_WM_UPDATE, 0, TRUE);
-
     return ALSA_bytes_to_mmtime(lpTime, wwi->dwTotalRecorded, &wwi->format);
 }
 
@@ -867,7 +861,7 @@ DWORD WINAPI ALSA_widMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
     case WIDM_ADDBUFFER:	return widAddBuffer	(wDevID, (LPWAVEHDR)dwParam1,		dwParam2);
     case WIDM_PREPARE:	 	return MMSYSERR_NOTSUPPORTED;
     case WIDM_UNPREPARE: 	return MMSYSERR_NOTSUPPORTED;
-    case WIDM_GETDEVCAPS:	return widGetDevCaps	(wDevID, (LPWAVEOUTCAPSW)dwParam1,	dwParam2);
+    case WIDM_GETDEVCAPS:	return widGetDevCaps	(wDevID, (LPWAVEINCAPSW)dwParam1,	dwParam2);
     case WIDM_GETNUMDEVS:	return widGetNumDevs	();
     case WIDM_GETPOS:	 	return widGetPosition	(wDevID, (LPMMTIME)dwParam1, 		dwParam2);
     case WIDM_RESET:		return widReset		(wDevID);

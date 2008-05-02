@@ -48,6 +48,10 @@ WINE_DECLARE_DEBUG_CHANNEL(snoop);
 WINE_DECLARE_DEBUG_CHANNEL(loaddll);
 WINE_DECLARE_DEBUG_CHANNEL(imports);
 
+/* we don't want to include winuser.h */
+#define RT_MANIFEST                         ((ULONG_PTR)24)
+#define ISOLATIONAWARE_MANIFEST_RESOURCE_ID ((ULONG_PTR)2)
+
 typedef DWORD (CALLBACK *DLLENTRYPROC)(HMODULE,DWORD,LPVOID);
 
 static int process_detaching = 0;  /* set on process detach to avoid deadlocks with thread detach */
@@ -91,6 +95,7 @@ static UINT tls_module_count;      /* number of modules with TLS directory */
 static UINT tls_total_size;        /* total size of TLS storage */
 static const IMAGE_TLS_DIRECTORY **tls_dirs;  /* array of TLS directories */
 
+UNICODE_STRING windows_dir = { 0, 0, NULL };  /* windows directory */
 UNICODE_STRING system_dir = { 0, 0, NULL };  /* system directory */
 
 static RTL_CRITICAL_SECTION loader_section;
@@ -577,6 +582,32 @@ done:
 }
 
 
+/***********************************************************************
+ *           create_module_activation_context
+ */
+static NTSTATUS create_module_activation_context( LDR_MODULE *module )
+{
+    NTSTATUS status;
+    LDR_RESOURCE_INFO info;
+    const IMAGE_RESOURCE_DATA_ENTRY *entry;
+
+    info.Type = RT_MANIFEST;
+    info.Name = ISOLATIONAWARE_MANIFEST_RESOURCE_ID;
+    info.Language = 0;
+    if (!(status = LdrFindResource_U( module->BaseAddress, &info, 3, &entry )))
+    {
+        ACTCTXW ctx;
+        ctx.cbSize   = sizeof(ctx);
+        ctx.lpSource = NULL;
+        ctx.dwFlags  = ACTCTX_FLAG_RESOURCE_NAME_VALID | ACTCTX_FLAG_HMODULE_VALID;
+        ctx.hModule  = module->BaseAddress;
+        ctx.lpResourceName = (LPCWSTR)ISOLATIONAWARE_MANIFEST_RESOURCE_ID;
+        status = RtlCreateActivationContext( &module->ActivationContext, &ctx );
+    }
+    return status;
+}
+
+
 /****************************************************************
  *       fixup_imports
  *
@@ -590,6 +621,7 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
     WINE_MODREF *prev;
     DWORD size;
     NTSTATUS status;
+    ULONG_PTR cookie;
 
     if (!(wm->ldr.Flags & LDR_DONT_RESOLVE_REFS)) return STATUS_SUCCESS;  /* already done */
     wm->ldr.Flags &= ~LDR_DONT_RESOLVE_REFS;
@@ -602,6 +634,9 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
     while (imports[nb_imports].Name && imports[nb_imports].FirstThunk) nb_imports++;
 
     if (!nb_imports) return STATUS_SUCCESS;  /* no imports */
+
+    if (!create_module_activation_context( &wm->ldr ))
+        RtlActivateActivationContext( 0, wm->ldr.ActivationContext, &cookie );
 
     /* Allocate module dependency list */
     wm->nDeps = nb_imports;
@@ -619,6 +654,7 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
             status = STATUS_DLL_NOT_FOUND;
     }
     current_modref = prev;
+    if (wm->ldr.ActivationContext) RtlDeactivateActivationContext( 0, cookie );
     return status;
 }
 
@@ -650,6 +686,7 @@ static WINE_MODREF *alloc_module( HMODULE hModule, LPCWSTR filename )
     wm->ldr.SectionHandle = NULL;
     wm->ldr.CheckSum      = 0;
     wm->ldr.TimeDateStamp = 0;
+    wm->ldr.ActivationContext = 0;
 
     RtlCreateUnicodeString( &wm->ldr.FullDllName, filename );
     if ((p = strrchrW( wm->ldr.FullDllName.Buffer, '\\' ))) p++;
@@ -894,6 +931,7 @@ static BOOL MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved )
 static NTSTATUS process_attach( WINE_MODREF *wm, LPVOID lpReserved )
 {
     NTSTATUS status = STATUS_SUCCESS;
+    ULONG_PTR cookie;
     int i;
 
     if (process_detaching) return status;
@@ -907,6 +945,7 @@ static NTSTATUS process_attach( WINE_MODREF *wm, LPVOID lpReserved )
 
     /* Tag current MODREF to prevent recursive loop */
     wm->ldr.Flags |= LDR_LOAD_IN_PROGRESS;
+    if (wm->ldr.ActivationContext) RtlActivateActivationContext( 0, wm->ldr.ActivationContext, &cookie );
 
     /* Recursively attach all DLLs this one depends on */
     for ( i = 0; i < wm->nDeps; i++ )
@@ -938,6 +977,7 @@ static NTSTATUS process_attach( WINE_MODREF *wm, LPVOID lpReserved )
         InsertTailList(&NtCurrentTeb()->Peb->LdrData->InInitializationOrderModuleList,
                        &wm->ldr.InInitializationOrderModuleList);
 
+    if (wm->ldr.ActivationContext) RtlDeactivateActivationContext( 0, cookie );
     /* Remove recursion flag */
     wm->ldr.Flags &= ~LDR_LOAD_IN_PROGRESS;
 
@@ -1545,6 +1585,93 @@ static NTSTATUS load_builtin_dll( LPCWSTR load_path, LPCWSTR path, HANDLE file,
 
 
 /***********************************************************************
+ *	find_actctx_dll
+ *
+ * Find the full path (if any) of the dll from the activation context.
+ */
+static NTSTATUS find_actctx_dll( LPCWSTR libname, LPWSTR *fullname )
+{
+    static const WCHAR winsxsW[] = {'\\','w','i','n','s','x','s','\\'};
+    static const WCHAR dotManifestW[] = {'.','m','a','n','i','f','e','s','t',0};
+
+    ACTIVATION_CONTEXT_ASSEMBLY_DETAILED_INFORMATION *info;
+    ACTCTX_SECTION_KEYED_DATA data;
+    UNICODE_STRING nameW;
+    NTSTATUS status;
+    SIZE_T needed, size = 1024;
+    WCHAR *p;
+
+    RtlInitUnicodeString( &nameW, libname );
+    data.cbSize = sizeof(data);
+    status = RtlFindActivationContextSectionString( FIND_ACTCTX_SECTION_KEY_RETURN_HACTCTX, NULL,
+                                                    ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION,
+                                                    &nameW, &data );
+    if (status != STATUS_SUCCESS) return status;
+
+    for (;;)
+    {
+        if (!(info = RtlAllocateHeap( GetProcessHeap(), 0, size )))
+        {
+            status = STATUS_NO_MEMORY;
+            goto done;
+        }
+        status = RtlQueryInformationActivationContext( 0, data.hActCtx, &data.ulAssemblyRosterIndex,
+                                                       AssemblyDetailedInformationInActivationContext,
+                                                       info, size, &needed );
+        if (status == STATUS_SUCCESS) break;
+        if (status != STATUS_BUFFER_TOO_SMALL) goto done;
+        RtlFreeHeap( GetProcessHeap(), 0, info );
+        size = needed;
+        /* restart with larger buffer */
+    }
+
+    if ((p = strrchrW( info->lpAssemblyManifestPath, '\\' )))
+    {
+        DWORD dirlen = info->ulAssemblyDirectoryNameLength / sizeof(WCHAR);
+
+        p++;
+        if (strncmpiW( p, info->lpAssemblyDirectoryName, dirlen ) || strcmpiW( p + dirlen, dotManifestW ))
+        {
+            /* manifest name does not match directory name, so it's not a global
+             * windows/winsxs manifest; use the manifest directory name instead */
+            dirlen = p - info->lpAssemblyManifestPath;
+            needed = (dirlen + 1) * sizeof(WCHAR) + nameW.Length;
+            if (!(*fullname = p = RtlAllocateHeap( GetProcessHeap(), 0, needed )))
+            {
+                status = STATUS_NO_MEMORY;
+                goto done;
+            }
+            memcpy( p, info->lpAssemblyManifestPath, dirlen * sizeof(WCHAR) );
+            p += dirlen;
+            strcpyW( p, libname );
+            goto done;
+        }
+    }
+
+    needed = (windows_dir.Length + sizeof(winsxsW) + info->ulAssemblyDirectoryNameLength +
+              nameW.Length + 2*sizeof(WCHAR));
+
+    if (!(*fullname = p = RtlAllocateHeap( GetProcessHeap(), 0, needed )))
+    {
+        status = STATUS_NO_MEMORY;
+        goto done;
+    }
+    memcpy( p, windows_dir.Buffer, windows_dir.Length );
+    p += windows_dir.Length / sizeof(WCHAR);
+    memcpy( p, winsxsW, sizeof(winsxsW) );
+    p += sizeof(winsxsW) / sizeof(WCHAR);
+    memcpy( p, info->lpAssemblyDirectoryName, info->ulAssemblyDirectoryNameLength );
+    p += info->ulAssemblyDirectoryNameLength / sizeof(WCHAR);
+    *p++ = '\\';
+    strcpyW( p, libname );
+done:
+    RtlFreeHeap( GetProcessHeap(), 0, info );
+    RtlReleaseActivationContext( data.hActCtx );
+    return status;
+}
+
+
+/***********************************************************************
  *	find_dll_file
  *
  * Find the file (or already loaded module) for a given dll name.
@@ -1575,7 +1702,23 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
 
     if (!contains_path( libname ))
     {
+        NTSTATUS status;
+        WCHAR *fullname = NULL;
+
         if ((*pwm = find_basename_module( libname )) != NULL) goto found;
+
+        status = find_actctx_dll( libname, &fullname );
+        if (status == STATUS_SUCCESS)
+        {
+            TRACE ("found %s for %s\n", debugstr_w(fullname), debugstr_w(libname) );
+            RtlFreeHeap( GetProcessHeap(), 0, dllname );
+            libname = dllname = fullname;
+        }
+        else if (status != STATUS_SXS_KEY_NOT_FOUND)
+        {
+            RtlFreeHeap( GetProcessHeap(), 0, dllname );
+            return status;
+        }
     }
 
     if (RtlDetermineDosPathNameType_U( libname ) == RELATIVE_PATH)
@@ -1982,6 +2125,7 @@ static void free_modref( WINE_MODREF *wm )
     }
     SERVER_END_REQ;
 
+    RtlReleaseActivationContext( wm->ldr.ActivationContext );
     NtUnmapViewOfSection( NtCurrentProcess(), wm->ldr.BaseAddress );
     if (wm->ldr.Flags & LDR_WINE_INTERNAL) wine_dll_unload( wm->ldr.SectionHandle );
     if (cached_modref == wm) cached_modref = NULL;
@@ -2165,6 +2309,7 @@ void WINAPI LdrInitializeThunk( ULONG unknown1, ULONG unknown2, ULONG unknown3, 
 
     RtlEnterCriticalSection( &loader_section );
 
+    actctx_init();
     load_path = NtCurrentTeb()->Peb->ProcessParameters->DllPath.Buffer;
     if ((status = fixup_imports( wm, load_path )) != STATUS_SUCCESS) goto error;
     if ((status = alloc_process_tls()) != STATUS_SUCCESS) goto error;
@@ -2312,6 +2457,7 @@ void __wine_init_windows_dir( const WCHAR *windir, const WCHAR *sysdir )
     PLIST_ENTRY mark, entry;
     LPWSTR buffer, p;
 
+    RtlCreateUnicodeString( &windows_dir, windir );
     RtlCreateUnicodeString( &system_dir, sysdir );
     strcpyW( user_shared_data->NtSystemRoot, windir );
 

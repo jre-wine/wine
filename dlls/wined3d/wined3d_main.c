@@ -62,8 +62,11 @@ IWineD3D* WINAPI WineDirect3DCreate(UINT SDKVersion, UINT dxVersion, IUnknown *p
     IWineD3DImpl* object;
 
     if (!InitAdapters()) {
-        ERR("Failed to initialize direct3d adapters\n");
-        return NULL;
+        WARN("Failed to initialize direct3d adapters, Direct3D will not be available\n");
+        if(dxVersion > 7) {
+            ERR("Direct3D%d is not available without opengl\n", dxVersion);
+            return NULL;
+        }
     }
 
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IWineD3DImpl));
@@ -103,7 +106,29 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
        HKEY hkey = 0;
        HKEY appkey = 0;
        DWORD len;
+       WNDCLASSA wc;
+
        wined3d_settings.emulated_textureram = 64*1024*1024;
+
+       /* We need our own window class for a fake window which we use to retrieve GL capabilities */
+       /* We might need CS_OWNDC in the future if we notice strange things on Windows.
+        * Various articles/posts about OpenGL problems on Windows recommend this. */
+       wc.style                = CS_HREDRAW | CS_VREDRAW;
+       wc.lpfnWndProc          = DefWindowProcA;
+       wc.cbClsExtra           = 0;
+       wc.cbWndExtra           = 0;
+       wc.hInstance            = hInstDLL;
+       wc.hIcon                = LoadIconA(NULL, (LPCSTR)IDI_WINLOGO);
+       wc.hCursor              = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
+       wc.hbrBackground        = NULL;
+       wc.lpszMenuName         = NULL;
+       wc.lpszClassName        = "WineD3D_OpenGL";
+
+       if (!RegisterClassA(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+       {
+           ERR("Failed to register window class 'WineD3D_OpenGL'!\n");
+           return FALSE;
+       }
 
        DisableThreadLibraryCalls(hInstDLL);
 

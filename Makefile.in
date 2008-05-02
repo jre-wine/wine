@@ -225,6 +225,7 @@ ALL_MAKEFILES = \
 	dlls/dpnaddr/Makefile \
 	dlls/dpnet/Makefile \
 	dlls/dpnhpast/Makefile \
+	dlls/dpnlobby/Makefile \
 	dlls/dsound/Makefile \
 	dlls/dsound/tests/Makefile \
 	dlls/dswave/Makefile \
@@ -233,6 +234,7 @@ ALL_MAKEFILES = \
 	dlls/dxerr8/Makefile \
 	dlls/dxerr9/Makefile \
 	dlls/dxguid/Makefile \
+	dlls/faultrep/Makefile \
 	dlls/gdi32/Makefile \
 	dlls/gdi32/tests/Makefile \
 	dlls/gdiplus/Makefile \
@@ -253,6 +255,7 @@ ALL_MAKEFILES = \
 	dlls/imm32/Makefile \
 	dlls/infosoft/Makefile \
 	dlls/infosoft/tests/Makefile \
+	dlls/inkobj/Makefile \
 	dlls/inseng/Makefile \
 	dlls/iphlpapi/Makefile \
 	dlls/iphlpapi/tests/Makefile \
@@ -289,6 +292,7 @@ ALL_MAKEFILES = \
 	dlls/msdmo/Makefile \
 	dlls/msftedit/Makefile \
 	dlls/msg711.acm/Makefile \
+	dlls/mshtml.tlb/Makefile \
 	dlls/mshtml/Makefile \
 	dlls/mshtml/tests/Makefile \
 	dlls/msi/Makefile \
@@ -332,6 +336,7 @@ ALL_MAKEFILES = \
 	dlls/olepro32/Makefile \
 	dlls/olesvr32/Makefile \
 	dlls/opengl32/Makefile \
+	dlls/opengl32/tests/Makefile \
 	dlls/pdh/Makefile \
 	dlls/pdh/tests/Makefile \
 	dlls/powrprof/Makefile \
@@ -424,6 +429,7 @@ ALL_MAKEFILES = \
 	dlls/winequartz.drv/Makefile \
 	dlls/winex11.drv/Makefile \
 	dlls/wing32/Makefile \
+	dlls/winhttp/Makefile \
 	dlls/wininet/Makefile \
 	dlls/wininet/tests/Makefile \
 	dlls/winmm/Makefile \
@@ -490,6 +496,7 @@ ALL_MAKEFILES = \
 	programs/winhelp/Makefile \
 	programs/winver/Makefile \
 	programs/wordpad/Makefile \
+	programs/write/Makefile \
 	programs/xcopy/Makefile \
 	server/Makefile \
 	tools/Makefile \
@@ -585,6 +592,7 @@ dlls/dplayx/tests/Makefile: dlls/dplayx/tests/Makefile.in dlls/Maketest.rules
 dlls/dpnaddr/Makefile: dlls/dpnaddr/Makefile.in dlls/Makedll.rules
 dlls/dpnet/Makefile: dlls/dpnet/Makefile.in dlls/Makedll.rules
 dlls/dpnhpast/Makefile: dlls/dpnhpast/Makefile.in dlls/Makedll.rules
+dlls/dpnlobby/Makefile: dlls/dpnlobby/Makefile.in dlls/Makedll.rules
 dlls/dsound/Makefile: dlls/dsound/Makefile.in dlls/Makedll.rules
 dlls/dsound/tests/Makefile: dlls/dsound/tests/Makefile.in dlls/Maketest.rules
 dlls/dswave/Makefile: dlls/dswave/Makefile.in dlls/Makedll.rules
@@ -593,6 +601,7 @@ dlls/dxdiagn/Makefile: dlls/dxdiagn/Makefile.in dlls/Makedll.rules
 dlls/dxerr8/Makefile: dlls/dxerr8/Makefile.in dlls/Makeimplib.rules
 dlls/dxerr9/Makefile: dlls/dxerr9/Makefile.in dlls/Makeimplib.rules
 dlls/dxguid/Makefile: dlls/dxguid/Makefile.in dlls/Makeimplib.rules
+dlls/faultrep/Makefile: dlls/faultrep/Makefile.in dlls/Makedll.rules
 dlls/gdi32/Makefile: dlls/gdi32/Makefile.in dlls/Makedll.rules
 dlls/gdi32/tests/Makefile: dlls/gdi32/tests/Makefile.in dlls/Maketest.rules
 dlls/gdiplus/Makefile: dlls/gdiplus/Makefile.in dlls/Makedll.rules
@@ -613,6 +622,7 @@ dlls/imagehlp/Makefile: dlls/imagehlp/Makefile.in dlls/Makedll.rules
 dlls/imm32/Makefile: dlls/imm32/Makefile.in dlls/Makedll.rules
 dlls/infosoft/Makefile: dlls/infosoft/Makefile.in dlls/Makedll.rules
 dlls/infosoft/tests/Makefile: dlls/infosoft/tests/Makefile.in dlls/Maketest.rules
+dlls/inkobj/Makefile: dlls/inkobj/Makefile.in dlls/Makedll.rules
 dlls/inseng/Makefile: dlls/inseng/Makefile.in dlls/Makedll.rules
 dlls/iphlpapi/Makefile: dlls/iphlpapi/Makefile.in dlls/Makedll.rules
 dlls/iphlpapi/tests/Makefile: dlls/iphlpapi/tests/Makefile.in dlls/Maketest.rules
@@ -649,6 +659,7 @@ dlls/mscoree/Makefile: dlls/mscoree/Makefile.in dlls/Makedll.rules
 dlls/msdmo/Makefile: dlls/msdmo/Makefile.in dlls/Makedll.rules
 dlls/msftedit/Makefile: dlls/msftedit/Makefile.in dlls/Makedll.rules
 dlls/msg711.acm/Makefile: dlls/msg711.acm/Makefile.in dlls/Makedll.rules
+dlls/mshtml.tlb/Makefile: dlls/mshtml.tlb/Makefile.in dlls/Makedll.rules
 dlls/mshtml/Makefile: dlls/mshtml/Makefile.in dlls/Makedll.rules
 dlls/mshtml/tests/Makefile: dlls/mshtml/tests/Makefile.in dlls/Maketest.rules
 dlls/msi/Makefile: dlls/msi/Makefile.in dlls/Makedll.rules
@@ -692,6 +703,7 @@ dlls/oledlg/Makefile: dlls/oledlg/Makefile.in dlls/Makedll.rules
 dlls/olepro32/Makefile: dlls/olepro32/Makefile.in dlls/Makedll.rules
 dlls/olesvr32/Makefile: dlls/olesvr32/Makefile.in dlls/Makedll.rules
 dlls/opengl32/Makefile: dlls/opengl32/Makefile.in dlls/Makedll.rules
+dlls/opengl32/tests/Makefile: dlls/opengl32/tests/Makefile.in dlls/Maketest.rules
 dlls/pdh/Makefile: dlls/pdh/Makefile.in dlls/Makedll.rules
 dlls/pdh/tests/Makefile: dlls/pdh/tests/Makefile.in dlls/Maketest.rules
 dlls/powrprof/Makefile: dlls/powrprof/Makefile.in dlls/Makedll.rules
@@ -784,6 +796,7 @@ dlls/wineps.drv/Makefile: dlls/wineps.drv/Makefile.in dlls/Makedll.rules
 dlls/winequartz.drv/Makefile: dlls/winequartz.drv/Makefile.in dlls/Makedll.rules
 dlls/winex11.drv/Makefile: dlls/winex11.drv/Makefile.in dlls/Makedll.rules
 dlls/wing32/Makefile: dlls/wing32/Makefile.in dlls/Makedll.rules
+dlls/winhttp/Makefile: dlls/winhttp/Makefile.in dlls/Makedll.rules
 dlls/wininet/Makefile: dlls/wininet/Makefile.in dlls/Makedll.rules
 dlls/wininet/tests/Makefile: dlls/wininet/tests/Makefile.in dlls/Maketest.rules
 dlls/winmm/Makefile: dlls/winmm/Makefile.in dlls/Makedll.rules
@@ -850,6 +863,7 @@ programs/winevdm/Makefile: programs/winevdm/Makefile.in programs/Makeprog.rules
 programs/winhelp/Makefile: programs/winhelp/Makefile.in programs/Makeprog.rules
 programs/winver/Makefile: programs/winver/Makefile.in programs/Makeprog.rules
 programs/wordpad/Makefile: programs/wordpad/Makefile.in programs/Makeprog.rules
+programs/write/Makefile: programs/write/Makefile.in programs/Makeprog.rules
 programs/xcopy/Makefile: programs/xcopy/Makefile.in programs/Makeprog.rules
 server/Makefile: server/Makefile.in Make.rules
 tools/Makefile: tools/Makefile.in Make.rules

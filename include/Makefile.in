@@ -11,10 +11,13 @@ IDL_H_SRCS = \
 	austream.idl \
 	comcat.idl \
 	control.idl \
+	d3d10.idl \
 	ddstream.idl \
 	dispex.idl \
 	docobj.idl \
 	downloadmgr.idl \
+	dxgi.idl \
+	dxgitype.idl \
 	exdisp.idl \
 	hlink.idl \
 	htiframe.idl \
@@ -25,8 +28,10 @@ IDL_H_SRCS = \
 	mimeinfo.idl \
 	mlang.idl \
 	mmstream.idl \
+	mscoree.idl \
 	mshtmhst.idl \
 	mshtml.idl \
+	msinkaut.idl \
 	msxml.idl \
 	msxml2.idl \
 	netfw.idl \
@@ -81,6 +86,7 @@ SRCDIR_INCLUDES = \
 	commctrl.h \
 	commdlg.h \
 	compobj.h \
+	cor.h \
 	cpl.h \
 	custcntl.h \
 	cvconst.h \
@@ -148,6 +154,7 @@ SRCDIR_INCLUDES = \
 	dshow.h \
 	dsound.h \
 	dsrole.h \
+	dwmapi.h \
 	dxdiag.h \
 	dxerr8.h \
 	dxerr9.h \
@@ -161,11 +168,14 @@ SRCDIR_INCLUDES = \
 	fci.h \
 	fdi.h \
 	gdiplus.h \
+	gdipluscolormatrix.h \
 	gdiplusenums.h \
 	gdiplusflat.h \
 	gdiplusgpstubs.h \
+	gdiplusimaging.h \
 	gdiplusinit.h \
 	gdiplusmem.h \
+	gdiplusmetaheader.h \
 	gdipluspixelformats.h \
 	gdiplustypes.h \
 	guiddef.h \
@@ -196,11 +206,14 @@ SRCDIR_INCLUDES = \
 	lmserver.h \
 	lmshare.h \
 	lmstats.h \
+	lmuse.h \
+	lmuseflg.h \
 	lmwksta.h \
 	lzexpand.h \
 	mapi.h \
 	mapicode.h \
 	mapidefs.h \
+	mapiform.h \
 	mapiguid.h \
 	mapitags.h \
 	mapiutil.h \
@@ -335,9 +348,11 @@ SRCDIR_INCLUDES = \
 	tlhelp32.h \
 	tmschema.h \
 	twain.h \
+	userenv.h \
 	usp10.h \
 	uuids.h \
 	uxtheme.h \
+	vdmdbg.h \
 	ver.h \
 	vfw.h \
 	vfwmsgs.h \
@@ -356,6 +371,7 @@ SRCDIR_INCLUDES = \
 	winerror.h \
 	wingdi.h \
 	wininet.h \
+	winineti.h \
 	winioctl.h \
 	winldap.h \
 	winnetwk.h \
@@ -364,7 +380,6 @@ SRCDIR_INCLUDES = \
 	winnt.h \
 	winperf.h \
 	winreg.h \
-	winres.h \
 	winresrc.h \
 	winscard.h \
 	winsmcrd.h \

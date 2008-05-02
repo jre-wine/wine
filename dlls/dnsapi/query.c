@@ -660,7 +660,7 @@ exit:
  * DnsQuery_A           [DNSAPI.@]
  *
  */
-DNS_STATUS WINAPI DnsQuery_A( PCSTR name, WORD type, DWORD options, PIP4_ARRAY servers,
+DNS_STATUS WINAPI DnsQuery_A( PCSTR name, WORD type, DWORD options, PVOID servers,
                               PDNS_RECORDA *result, PVOID *reserved )
 {
     WCHAR *nameW;
@@ -695,7 +695,7 @@ DNS_STATUS WINAPI DnsQuery_A( PCSTR name, WORD type, DWORD options, PIP4_ARRAY s
  * DnsQuery_UTF8              [DNSAPI.@]
  *
  */
-DNS_STATUS WINAPI DnsQuery_UTF8( PCSTR name, WORD type, DWORD options, PIP4_ARRAY servers,
+DNS_STATUS WINAPI DnsQuery_UTF8( PCSTR name, WORD type, DWORD options, PVOID servers,
                                  PDNS_RECORDA *result, PVOID *reserved )
 {
     DNS_STATUS ret = DNS_ERROR_RCODE_NOT_IMPLEMENTED;
@@ -737,7 +737,7 @@ DNS_STATUS WINAPI DnsQuery_UTF8( PCSTR name, WORD type, DWORD options, PIP4_ARRA
  * DnsQuery_W              [DNSAPI.@]
  *
  */
-DNS_STATUS WINAPI DnsQuery_W( PCWSTR name, WORD type, DWORD options, PIP4_ARRAY servers,
+DNS_STATUS WINAPI DnsQuery_W( PCWSTR name, WORD type, DWORD options, PVOID servers,
                               PDNS_RECORDW *result, PVOID *reserved )
 {
     char *nameU;
@@ -769,7 +769,7 @@ DNS_STATUS WINAPI DnsQuery_W( PCWSTR name, WORD type, DWORD options, PIP4_ARRAY 
 }
 
 static DNS_STATUS dns_get_hostname_a( COMPUTER_NAME_FORMAT format,
-                                      LPSTR buffer, PDWORD len )
+                                      PSTR buffer, PDWORD len )
 {
     char name[256];
     DWORD size = sizeof(name);
@@ -788,7 +788,7 @@ static DNS_STATUS dns_get_hostname_a( COMPUTER_NAME_FORMAT format,
 }
 
 static DNS_STATUS dns_get_hostname_w( COMPUTER_NAME_FORMAT format,
-                                      LPWSTR buffer, PDWORD len )
+                                      PWSTR buffer, PDWORD len )
 {
     WCHAR name[256];
     DWORD size = sizeof(name);

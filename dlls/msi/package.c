@@ -720,6 +720,23 @@ static MSIPACKAGE *msi_alloc_package( void )
     return package;
 }
 
+static UINT msi_load_admin_properties(MSIPACKAGE *package)
+{
+    BYTE *data;
+    UINT r, sz;
+
+    static const WCHAR stmname[] = {'A','d','m','i','n','P','r','o','p','e','r','t','i','e','s',0};
+
+    r = read_stream_data(package->db->storage, stmname, FALSE, &data, &sz);
+    if (r != ERROR_SUCCESS)
+        return r;
+
+    r = msi_parse_command_line(package, (WCHAR *)data);
+
+    msi_free(data);
+    return r;
+}
+
 MSIPACKAGE *MSI_CreatePackage( MSIDATABASE *db, LPCWSTR base_url )
 {
     static const WCHAR szLevel[] = { 'U','I','L','e','v','e','l',0 };
@@ -750,6 +767,9 @@ MSIPACKAGE *MSI_CreatePackage( MSIDATABASE *db, LPCWSTR base_url )
         package->ProductCode = msi_dup_property( package, szProductCode );
         set_installed_prop( package );
         msi_load_summary_properties( package );
+
+        if (package->WordCount & MSIWORDCOUNT_ADMINISTRATIVE)
+            msi_load_admin_properties( package );
     }
 
     return package;
@@ -1341,7 +1361,7 @@ static MSIRECORD *MSI_GetPropertyRow( MSIPACKAGE *package, LPCWSTR name )
 
 /* internal function, not compatible with MsiGetPropertyW */
 UINT MSI_GetPropertyW( MSIPACKAGE *package, LPCWSTR szName, 
-                       LPWSTR szValueBuf, DWORD* pchValueBuf )
+                       LPWSTR szValueBuf, LPDWORD pchValueBuf )
 {
     MSIRECORD *row;
     UINT rc = ERROR_FUNCTION_FAILED;
@@ -1403,7 +1423,7 @@ int msi_get_property_int(MSIPACKAGE *package, LPCWSTR prop, int def)
 }
 
 static UINT MSI_GetProperty( MSIHANDLE handle, LPCWSTR name,
-                             awstring *szValueBuf, DWORD* pchValueBuf )
+                             awstring *szValueBuf, LPDWORD pchValueBuf )
 {
     static const WCHAR empty[] = {0};
     MSIPACKAGE *package;
@@ -1455,7 +1475,10 @@ static UINT MSI_GetProperty( MSIHANDLE handle, LPCWSTR name,
             goto done;
 
         r = msi_strcpy_to_awstring( value, szValueBuf, pchValueBuf );
-        *pchValueBuf *= sizeof(WCHAR); /* Bug required by Adobe installers */
+
+        /* Bug required by Adobe installers */
+        if (!szValueBuf->unicode)
+            *pchValueBuf *= sizeof(WCHAR);
 
 done:
         IWineMsiRemotePackage_Release(remote_package);
@@ -1490,7 +1513,7 @@ done:
 }
 
 UINT WINAPI MsiGetPropertyA( MSIHANDLE hInstall, LPCSTR szName,
-                             LPSTR szValueBuf, DWORD* pchValueBuf )
+                             LPSTR szValueBuf, LPDWORD pchValueBuf )
 {
     awstring val;
     LPWSTR name;
@@ -1509,7 +1532,7 @@ UINT WINAPI MsiGetPropertyA( MSIHANDLE hInstall, LPCSTR szName,
 }
 
 UINT WINAPI MsiGetPropertyW( MSIHANDLE hInstall, LPCWSTR szName,
-                             LPWSTR szValueBuf, DWORD* pchValueBuf )
+                             LPWSTR szValueBuf, LPDWORD pchValueBuf )
 {
     awstring val;
 

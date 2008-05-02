@@ -24,9 +24,18 @@
 class GpGraphics {};
 class GpGraphics {};
 class GpBrush {};
-class GpSolidFill {};
+class GpSolidFill : public GpBrush {};
 class GpPath {};
 class GpMatrix {};
+class GpPathIterator {};
+class GpCustomLineCap {};
+class GpImage {};
+class GpMetafile : public GpImage {};
+class GpImageAttributes {};
+class GpBitmap : public GpImage {};
+class GpPathGradient : public GpBrush {};
+class GpLineGradient : public GpBrush {};
+class GpTexture : public GpBrush {};
 
 #else /* end of c++ declarations */
 
@@ -36,6 +45,15 @@ typedef struct GpBrush GpBrush;
 typedef struct GpSolidFill GpSolidFill;
 typedef struct GpPath GpPath;
 typedef struct GpMatrix GpMatrix;
+typedef struct GpPathIterator GpPathIterator;
+typedef struct GpCustomLineCap GpCustomLineCap;
+typedef struct GpImage GpImage;
+typedef struct GpMetafile GpMetafile;
+typedef struct GpImageAttributes GpImageAttributes;
+typedef struct GpBitmap GpBitmap;
+typedef struct GpPathGradient GpPathGradient;
+typedef struct GpLineGradient GpLineGradient;
+typedef struct GpTexture GpTexture;
 
 #endif /* end of c declarations */
 
@@ -48,5 +66,11 @@ typedef PathData GpPathData;
 typedef LineCap GpLineCap;
 typedef RectF GpRectF;
 typedef LineJoin GpLineJoin;
+typedef DashCap GpDashCap;
+typedef DashStyle GpDashStyle;
+typedef MatrixOrder GpMatrixOrder;
+typedef Point GpPoint;
+typedef WrapMode GpWrapMode;
+typedef Rect GpRect;
 
 #endif

@@ -8,7 +8,7 @@
  * Copyright 2002-2003 Raphael Junqueira
  * Copyright 2004 Christian Costa
  * Copyright 2005 Oliver Stieber
- * Copyright 2006 Stefan Dösinger
+ * Copyright 2006-2008 Stefan Dösinger
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -498,7 +498,7 @@ IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface,
     WINED3DFORMAT       dfmt = WINED3DFMT_UNKNOWN, sfmt = WINED3DFMT_UNKNOWN;
     int bpp, srcheight, srcwidth, dstheight, dstwidth, width;
     int x, y;
-    const PixelFormatDesc *sEntry, *dEntry;
+    const StaticPixelFormatDesc *sEntry, *dEntry;
     LPBYTE dbuf, sbuf;
     TRACE("(%p)->(%p,%p,%p,%x,%p)\n", This, DestRect, Src, SrcRect, Flags, DDBltFx);
 
@@ -536,7 +536,7 @@ IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface,
         dfmt = This->resource.format;
         slock = dlock;
         sfmt = dfmt;
-        sEntry = getFormatDescEntry(sfmt);
+        sEntry = getFormatDescEntry(sfmt, NULL, NULL);
         dEntry = sEntry;
     }
     else
@@ -546,9 +546,9 @@ IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface,
             IWineD3DSurface_LockRect(SrcSurface, &slock, NULL, WINED3DLOCK_READONLY);
             sfmt = Src->resource.format;
         }
-        sEntry = getFormatDescEntry(sfmt);
+        sEntry = getFormatDescEntry(sfmt, NULL, NULL);
         dfmt = This->resource.format;
-        dEntry = getFormatDescEntry(dfmt);
+        dEntry = getFormatDescEntry(dfmt, NULL, NULL);
         IWineD3DSurface_LockRect(iface, &dlock,NULL,0);
     }
 
@@ -1135,7 +1135,7 @@ IWineGDISurfaceImpl_BltFast(IWineD3DSurface *iface,
     RECT                rsrc2;
     RECT                lock_src, lock_dst, lock_union;
     BYTE                *sbuf, *dbuf;
-    const PixelFormatDesc *sEntry, *dEntry;
+    const StaticPixelFormatDesc *sEntry, *dEntry;
 
     if (TRACE_ON(d3d_surface))
     {
@@ -1221,7 +1221,7 @@ IWineGDISurfaceImpl_BltFast(IWineD3DSurface *iface,
         assert(This->resource.allocatedMemory != NULL);
         sbuf = (BYTE *)This->resource.allocatedMemory + lock_src.top * pitch + lock_src.left * bpp;
         dbuf = (BYTE *)This->resource.allocatedMemory + lock_dst.top * pitch + lock_dst.left * bpp;
-        sEntry = getFormatDescEntry(Src->resource.format);
+        sEntry = getFormatDescEntry(Src->resource.format, NULL, NULL);
         dEntry = sEntry;
     }
     else
@@ -1235,8 +1235,8 @@ IWineGDISurfaceImpl_BltFast(IWineD3DSurface *iface,
         dbuf = dlock.pBits;
         TRACE("Dst is at %p, Src is at %p\n", dbuf, sbuf);
 
-        sEntry = getFormatDescEntry(Src->resource.format);
-        dEntry = getFormatDescEntry(This->resource.format);
+        sEntry = getFormatDescEntry(Src->resource.format, NULL, NULL);
+        dEntry = getFormatDescEntry(This->resource.format, NULL, NULL);
     }
 
     /* Handle first the FOURCC surfaces... */
@@ -1414,7 +1414,7 @@ const char* filename)
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
     static char *output = NULL;
     static int size = 0;
-    const PixelFormatDesc *formatEntry = getFormatDescEntry(This->resource.format);
+    const StaticPixelFormatDesc *formatEntry = getFormatDescEntry(This->resource.format, NULL, NULL);
 
     if (This->pow2Width > size) {
         output = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, This->pow2Width * 3);
@@ -1513,7 +1513,6 @@ IWineGDISurfaceImpl_PrivateSetup(IWineD3DSurface *iface)
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *) iface;
     HRESULT hr;
     HDC hdc;
-    long oldsize = This->resource.size;
 
     if(This->resource.usage & WINED3DUSAGE_OVERLAY)
     {
@@ -1527,13 +1526,8 @@ IWineGDISurfaceImpl_PrivateSetup(IWineD3DSurface *iface)
     This->resource.allocatedMemory = NULL;
 
     /* We don't mind the nonpow2 stuff in GDI */
-    This->resource.size = IWineD3DSurface_GetPitch(iface) * This->currentDesc.Height;
     This->pow2Width = This->currentDesc.Width;
     This->pow2Height = This->currentDesc.Height;
-    This->Flags &= ~SFLAG_NONPOW2;
-
-    /* Adjust the opengl mem counter */
-    globalChangeGlRam(This->resource.size - oldsize);
 
     /* Call GetDC to create a DIB section. We will use that
      * DIB section for rendering

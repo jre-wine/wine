@@ -69,10 +69,12 @@ BASEDIRS = \
 	dpnaddr \
 	dpnet \
 	dpnhpast \
+	dpnlobby \
 	dsound \
 	dswave \
 	dwmapi \
 	dxdiagn \
+	faultrep \
 	gdi32 \
 	gdiplus \
 	gphoto2.ds \
@@ -88,6 +90,7 @@ BASEDIRS = \
 	imagehlp \
 	imm32 \
 	infosoft \
+	inkobj \
 	inseng \
 	iphlpapi \
 	itss \
@@ -115,6 +118,7 @@ BASEDIRS = \
 	msftedit \
 	msg711.acm \
 	mshtml \
+	mshtml.tlb \
 	msi \
 	msimg32 \
 	msisys.ocx \
@@ -211,6 +215,7 @@ BASEDIRS = \
 	wineoss.drv \
 	wineps.drv \
 	wing32 \
+	winhttp \
 	wininet \
 	winmm \
 	winnls32 \
@@ -275,6 +280,7 @@ TESTSUBDIRS = \
 	odbccp32/tests \
 	ole32/tests \
 	oleaut32/tests \
+	opengl32/tests \
 	pdh/tests \
 	psapi/tests \
 	quartz/tests \

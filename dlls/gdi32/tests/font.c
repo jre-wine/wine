@@ -1571,8 +1571,6 @@ static void test_text_metrics(const LOGFONTA *lf)
         test_char = min(last_unicode_char, 255);
         ok(tmA.tmLastChar == test_char, "A: tmLastChar for %s %02x != %02x\n",
            font_name, tmA.tmLastChar, test_char);
-        ok(tmA.tmDefaultChar == 0x1f, "A: tmDefaultChar for %s %02x != 0x1f\n",
-           font_name, tmA.tmDefaultChar);
         ok(tmA.tmBreakChar == 0x20, "A: tmBreakChar for %s %02x != 0x20\n",
            font_name, tmA.tmBreakChar);
     }
@@ -1654,7 +1652,7 @@ static void test_GetTextMetrics(void)
     ReleaseDC(0, hdc);
 }
 
-static void test_non_existent_font(void)
+static void test_nonexistent_font(void)
 {
     LOGFONTA lf;
     HDC hdc;
@@ -1674,7 +1672,7 @@ static void test_non_existent_font(void)
     lf.lfWeight = FW_REGULAR;
     lf.lfCharSet = ANSI_CHARSET;
     lf.lfPitchAndFamily = FF_SWISS;
-    strcpy(lf.lfFaceName, "Non existent font");
+    strcpy(lf.lfFaceName, "Nonexistent font");
 
     hfont = CreateFontIndirectA(&lf);
     hfont = SelectObject(hdc, hfont);
@@ -1700,7 +1698,7 @@ START_TEST(font)
     test_SetTextJustification();
     test_font_charset();
     test_GetFontUnicodeRanges();
-    test_non_existent_font();
+    test_nonexistent_font();
 
     /* On Windows Arial has a lot of default charset aliases such as Arial Cyr,
      * I'd like to avoid them in this test.

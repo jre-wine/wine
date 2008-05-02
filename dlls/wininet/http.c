@@ -118,6 +118,7 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD
         lpdwIndex);
 static BOOL HTTP_HandleRedirect(LPWININETHTTPREQW lpwhr, LPCWSTR lpszUrl);
 static UINT HTTP_DecodeBase64(LPCWSTR base64, LPSTR bin);
+static BOOL HTTP_VerifyValidHeader(LPWININETHTTPREQW lpwhr, LPCWSTR field);
 
 
 LPHTTPHEADERW HTTP_GetHeader(LPWININETHTTPREQW req, LPCWSTR head)
@@ -636,8 +637,10 @@ static BOOL WINAPI HTTP_HttpAddRequestHeadersW(LPWININETHTTPREQW lpwhr,
         pFieldAndValue = HTTP_InterpretHttpHeader(lpszStart);
         if (pFieldAndValue)
         {
-            bSuccess = HTTP_ProcessHeader(lpwhr, pFieldAndValue[0],
-                pFieldAndValue[1], dwModifier | HTTP_ADDHDR_FLAG_REQ);
+            bSuccess = HTTP_VerifyValidHeader(lpwhr, pFieldAndValue[0]);
+            if (bSuccess)
+                bSuccess = HTTP_ProcessHeader(lpwhr, pFieldAndValue[0],
+                    pFieldAndValue[1], dwModifier | HTTP_ADDHDR_FLAG_REQ);
             HTTP_FreeTokens(pFieldAndValue);
         }
 
@@ -2593,6 +2596,12 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
         }
 
         HTTP_FixURL(lpwhr);
+        HTTP_ProcessHeader(lpwhr, szConnection,
+                           lpwhr->hdr.dwFlags & INTERNET_FLAG_KEEP_CONNECTION ? szKeepAlive : szClose,
+                           HTTP_ADDHDR_FLAG_REQ | HTTP_ADDHDR_FLAG_REPLACE);
+
+        HTTP_InsertAuthorization(lpwhr);
+        HTTP_InsertProxyAuthorization(lpwhr);
 
         /* add the headers the caller supplied */
         if( lpszHeaders && dwHeaderLength )
@@ -2600,13 +2609,6 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
             HTTP_HttpAddRequestHeadersW(lpwhr, lpszHeaders, dwHeaderLength,
                         HTTP_ADDREQ_FLAG_ADD | HTTP_ADDHDR_FLAG_REPLACE);
         }
-
-        HTTP_ProcessHeader(lpwhr, szConnection,
-                           lpwhr->hdr.dwFlags & INTERNET_FLAG_KEEP_CONNECTION ? szKeepAlive : szClose,
-                           HTTP_ADDHDR_FLAG_REQ | HTTP_ADDHDR_FLAG_REPLACE);
-
-        HTTP_InsertAuthorization(lpwhr);
-        HTTP_InsertProxyAuthorization(lpwhr);
 
         requestString = HTTP_BuildHeaderRequestString(lpwhr, lpwhr->lpszVerb, lpwhr->lpszPath, FALSE);
  
@@ -3514,6 +3516,24 @@ static BOOL HTTP_DeleteCustomHeader(LPWININETHTTPREQW lpwhr, DWORD index)
     memset( &lpwhr->pCustHeaders[lpwhr->nCustHeaders], 0, sizeof(HTTPHEADERW) );
 
     return TRUE;
+}
+
+
+/***********************************************************************
+ *           HTTP_VerifyValidHeader (internal)
+ *
+ * Verify the given header is not invalid for the given http request
+ *
+ */
+static BOOL HTTP_VerifyValidHeader(LPWININETHTTPREQW lpwhr, LPCWSTR field)
+{
+    BOOL rc = TRUE;
+
+    /* Accept-Encoding is stripped from HTTP/1.0 requests. It is invalid */
+    if (strcmpiW(field,szAccept_Encoding)==0)
+        return FALSE;
+
+    return rc;
 }
 
 /***********************************************************************

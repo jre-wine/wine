@@ -119,10 +119,9 @@ UINT UPDATE_CreateView( MSIDATABASE *db, MSIVIEW **view, LPCWSTR table,
 
 UINT DELETE_CreateView( MSIDATABASE *db, MSIVIEW **view, MSIVIEW *table );
 
-UINT JOIN_CreateView( MSIDATABASE *db, MSIVIEW **view,
-                      LPCWSTR left, LPCWSTR right );
+UINT JOIN_CreateView( MSIDATABASE *db, MSIVIEW **view, LPWSTR tables );
 
-UINT ALTER_CreateView( MSIDATABASE *db, MSIVIEW **view, LPCWSTR name, int hold );
+UINT ALTER_CreateView( MSIDATABASE *db, MSIVIEW **view, LPCWSTR name, column_info *colinfo, int hold );
 
 UINT STREAMS_CreateView( MSIDATABASE *db, MSIVIEW **view );
 
