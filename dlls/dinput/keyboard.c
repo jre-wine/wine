@@ -50,26 +50,19 @@ struct SysKeyboardImpl
     BYTE DInputKeyState[WINE_DINPUT_KEYBOARD_MAX_KEYS];
 };
 
-static SysKeyboardImpl* current_lock = NULL; 
-/* Today's acquired device
- * FIXME: currently this can be only one.
- * Maybe this should be a linked list or st.
- * I don't know what the rules are for multiple acquired keyboards,
- * but 'DI_LOSTFOCUS' and 'DI_UNACQUIRED' exist for a reason.
-*/
-
-static LRESULT CALLBACK KeyboardCallback( int code, WPARAM wparam, LPARAM lparam )
+static void KeyboardCallback( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam )
 {
-    SysKeyboardImpl *This = (SysKeyboardImpl *)current_lock;
+    SysKeyboardImpl *This = (SysKeyboardImpl *)iface;
     int dik_code;
     KBDLLHOOKSTRUCT *hook = (KBDLLHOOKSTRUCT *)lparam;
     BYTE new_diks;
 
-    TRACE("(%d,%ld,%ld)\n", code, wparam, lparam);
+    if (wparam != WM_KEYDOWN && wparam != WM_KEYUP &&
+        wparam != WM_SYSKEYDOWN && wparam != WM_SYSKEYUP)
+        return;
 
-    /* returns now if not HC_ACTION */
-    if (code != HC_ACTION) return CallNextHookEx(0, code, wparam, lparam);
-  
+    TRACE("(%p) %ld,%ld\n", iface, wparam, lparam);
+
     dik_code = hook->scanCode & 0xff;
     if (hook->flags & LLKHF_EXTENDED) dik_code |= 0x80;
 
@@ -77,7 +70,7 @@ static LRESULT CALLBACK KeyboardCallback( int code, WPARAM wparam, LPARAM lparam
 
     /* returns now if key event already known */
     if (new_diks == This->DInputKeyState[dik_code])
-        return CallNextHookEx(0, code, wparam, lparam);
+        return;
 
     This->DInputKeyState[dik_code] = new_diks;
     TRACE(" setting %02X to %02X\n", dik_code, This->DInputKeyState[dik_code]);
@@ -86,15 +79,10 @@ static LRESULT CALLBACK KeyboardCallback( int code, WPARAM wparam, LPARAM lparam
     EnterCriticalSection(&This->base.crit);
     queue_event((LPDIRECTINPUTDEVICE8A)This, dik_code, new_diks, hook->time, This->base.dinput->evsequence++);
     LeaveCriticalSection(&This->base.crit);
-    
-    return CallNextHookEx(0, code, wparam, lparam);
 }
 
-static const GUID DInput_Wine_Keyboard_GUID = { /* 0ab8648a-7735-11d2-8c73-71df54a96441 */
-  0x0ab8648a,
-  0x7735,
-  0x11d2,
-  {0x8c, 0x73, 0x71, 0xdf, 0x54, 0xa9, 0x64, 0x41}
+const GUID DInput_Wine_Keyboard_GUID = { /* 0ab8648a-7735-11d2-8c73-71df54a96441 */
+    0x0ab8648a, 0x7735, 0x11d2, {0x8c, 0x73, 0x71, 0xdf, 0x54, 0xa9, 0x64, 0x41}
 };
 
 static void fill_keyboard_dideviceinstanceA(LPDIDEVICEINSTANCEA lpddi, DWORD version) {
@@ -192,6 +180,7 @@ static SysKeyboardImpl *alloc_device(REFGUID rguid, const void *kvt, IDirectInpu
     newDevice->base.ref = 1;
     memcpy(&newDevice->base.guid, rguid, sizeof(*rguid));
     newDevice->base.dinput = dinput;
+    newDevice->base.event_proc = KeyboardCallback;
     InitializeCriticalSection(&newDevice->base.crit);
     newDevice->base.crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": SysKeyboardImpl*->base.crit");
 
@@ -294,48 +283,6 @@ static HRESULT WINAPI SysKeyboardAImpl_GetDeviceState(
     
     memcpy(ptr, This->DInputKeyState, WINE_DINPUT_KEYBOARD_MAX_KEYS);
     LeaveCriticalSection(&This->base.crit);
-
-    return DI_OK;
-}
-
-static HRESULT WINAPI SysKeyboardAImpl_Unacquire(LPDIRECTINPUTDEVICE8A iface);
-
-static HRESULT WINAPI SysKeyboardAImpl_Acquire(LPDIRECTINPUTDEVICE8A iface)
-{
-    SysKeyboardImpl *This = (SysKeyboardImpl *)iface;
-    HRESULT res;
-
-    TRACE("(%p)\n",This);
-
-    if ((res = IDirectInputDevice2AImpl_Acquire(iface)) != DI_OK) return res;
-
-    if (current_lock != NULL) {
-        FIXME("Not more than one keyboard can be acquired at the same time.\n");
-        SysKeyboardAImpl_Unacquire((LPDIRECTINPUTDEVICE8A)current_lock);
-    }
-    current_lock = This;
-
-    set_dinput_hook(WH_KEYBOARD_LL, KeyboardCallback);
-
-    return DI_OK;
-}
-
-static HRESULT WINAPI SysKeyboardAImpl_Unacquire(LPDIRECTINPUTDEVICE8A iface)
-{
-    SysKeyboardImpl *This = (SysKeyboardImpl *)iface;
-    HRESULT res;
-
-    TRACE("(this=%p)\n",This);
-
-    if ((res = IDirectInputDevice2AImpl_Unacquire(iface)) != DI_OK) return res;
-
-    set_dinput_hook(WH_KEYBOARD_LL, NULL);
-
-    /* No more locks */
-    if (current_lock == This)
-        current_lock = NULL;
-    else
-        ERR("this != current_lock\n");
 
     return DI_OK;
 }
@@ -465,8 +412,8 @@ static const IDirectInputDevice8AVtbl SysKeyboardAvt =
         IDirectInputDevice2AImpl_EnumObjects,
 	IDirectInputDevice2AImpl_GetProperty,
 	IDirectInputDevice2AImpl_SetProperty,
-	SysKeyboardAImpl_Acquire,
-	SysKeyboardAImpl_Unacquire,
+	IDirectInputDevice2AImpl_Acquire,
+	IDirectInputDevice2AImpl_Unacquire,
 	SysKeyboardAImpl_GetDeviceState,
 	IDirectInputDevice2AImpl_GetDeviceData,
 	IDirectInputDevice2AImpl_SetDataFormat,
@@ -507,8 +454,8 @@ static const IDirectInputDevice8WVtbl SysKeyboardWvt =
         IDirectInputDevice2WImpl_EnumObjects,
 	XCAST(GetProperty)IDirectInputDevice2AImpl_GetProperty,
 	XCAST(SetProperty)IDirectInputDevice2AImpl_SetProperty,
-	XCAST(Acquire)SysKeyboardAImpl_Acquire,
-	XCAST(Unacquire)SysKeyboardAImpl_Unacquire,
+	XCAST(Acquire)IDirectInputDevice2AImpl_Acquire,
+	XCAST(Unacquire)IDirectInputDevice2AImpl_Unacquire,
 	XCAST(GetDeviceState)SysKeyboardAImpl_GetDeviceState,
 	XCAST(GetDeviceData)IDirectInputDevice2AImpl_GetDeviceData,
 	XCAST(SetDataFormat)IDirectInputDevice2AImpl_SetDataFormat,

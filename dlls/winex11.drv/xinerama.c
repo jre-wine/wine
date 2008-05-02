@@ -66,7 +66,7 @@ static inline int monitor_to_index( HMONITOR handle )
 }
 
 
-#ifdef HAVE_LIBXINERAMA
+#ifdef SONAME_LIBXINERAMA
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 
@@ -125,14 +125,14 @@ static int query_screens(void)
     return count;
 }
 
-#else  /* HAVE_LIBXINERAMA */
+#else  /* SONAME_LIBXINERAMA */
 
 static inline int query_screens(void)
 {
     return 0;
 }
 
-#endif  /* HAVE_LIBXINERAMA */
+#endif  /* SONAME_LIBXINERAMA */
 
 void xinerama_init(void)
 {

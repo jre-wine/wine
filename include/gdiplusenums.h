@@ -45,11 +45,50 @@ enum FillMode
     FillModeWinding     = 1
 };
 
+enum LineCap
+{
+    LineCapFlat             = 0x00,
+    LineCapSquare           = 0x01,
+    LineCapRound            = 0x02,
+    LineCapTriangle         = 0x03,
+
+    LineCapNoAnchor         = 0x10,
+    LineCapSquareAnchor     = 0x11,
+    LineCapRoundAnchor      = 0x12,
+    LineCapDiamondAnchor    = 0x13,
+    LineCapArrowAnchor      = 0x14,
+
+    LineCapCustom           = 0xff,
+    LineCapAnchorMask       = 0xf0
+};
+
+enum PathPointType{
+    PathPointTypeStart          = 0,    /* start of a figure */
+    PathPointTypeLine           = 1,
+    PathPointTypeBezier         = 3,
+    PathPointTypePathTypeMask   = 7,
+    PathPointTypePathDashMode   = 16,   /* not used */
+    PathPointTypePathMarker     = 32,
+    PathPointTypeCloseSubpath   = 128,  /* end of a closed figure */
+    PathPointTypeBezier3        = 3
+};
+
+enum LineJoin
+{
+    LineJoinMiter           = 0,
+    LineJoinBevel           = 1,
+    LineJoinRound           = 2,
+    LineJoinMiterClipped    = 3
+};
+
 #ifndef __cplusplus
 
 typedef enum Unit Unit;
 typedef enum BrushType BrushType;
 typedef enum FillMode FillMode;
+typedef enum LineCap LineCap;
+typedef enum PathPointType PathPointType;
+typedef enum LineJoin LineJoin;
 
 #endif /* end of c typedefs */
 

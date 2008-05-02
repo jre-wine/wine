@@ -40,7 +40,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(explorer);
 
-#ifdef HAVE_LIBHAL
+#ifdef SONAME_LIBHAL
 
 #include <dbus/dbus.h>
 #include <hal/libhal.h>
@@ -236,11 +236,11 @@ void initialize_hal(void)
     CloseHandle( handle );
 }
 
-#else  /* HAVE_LIBHAL */
+#else  /* SONAME_LIBHAL */
 
 void initialize_hal(void)
 {
     WINE_TRACE( "Skipping, HAL support not compiled in\n" );
 }
 
-#endif  /* HAVE_LIBHAL */
+#endif  /* SONAME_LIBHAL */

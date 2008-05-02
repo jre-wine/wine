@@ -38,9 +38,6 @@
 #include <signal.h>
 #ifdef HAVE_CUPS_CUPS_H
 # include <cups/cups.h>
-# ifndef SONAME_LIBCUPS
-#  define SONAME_LIBCUPS "libcups.so"
-# endif
 #endif
 
 #define NONAMELESSUNION
@@ -410,7 +407,7 @@ static BOOL add_printer_driver(const char *name)
     return TRUE;
 }
 
-#ifdef HAVE_CUPS_CUPS_H
+#ifdef SONAME_LIBCUPS
 static typeof(cupsGetDests)  *pcupsGetDests;
 static typeof(cupsGetPPD)    *pcupsGetPPD;
 static typeof(cupsPrintFile) *pcupsPrintFile;
@@ -419,7 +416,7 @@ static void *cupshandle;
 static BOOL CUPS_LoadPrinters(void)
 {
     int	                  i, nrofdests;
-    BOOL                  hadprinter = FALSE;
+    BOOL                  hadprinter = FALSE, haddefault = FALSE;
     cups_dest_t          *dests;
     PRINTER_INFO_2A       pinfo2a;
     char   *port,*devline;
@@ -497,9 +494,13 @@ static BOOL CUPS_LoadPrinters(void)
 	HeapFree(GetProcessHeap(),0,port);
 
         hadprinter = TRUE;
-        if (dests[i].is_default)
+        if (dests[i].is_default) {
             WINSPOOL_SetDefaultPrinter(dests[i].name, dests[i].name, TRUE);
+            haddefault = TRUE;
+        }
     }
+    if (hadprinter & !haddefault)
+        WINSPOOL_SetDefaultPrinter(dests[0].name, dests[0].name, TRUE);
     RegCloseKey(hkeyPrinters);
     return hadprinter;
 }
@@ -1567,7 +1568,7 @@ void WINSPOOL_LoadSystemPrinters(void)
     }
 
 
-#ifdef HAVE_CUPS_CUPS_H
+#ifdef SONAME_LIBCUPS
     done = CUPS_LoadPrinters();
 #endif
 
@@ -7129,7 +7130,7 @@ static BOOL schedule_lpr(LPCWSTR printer_name, LPCWSTR filename)
  */
 static BOOL schedule_cups(LPCWSTR printer_name, LPCWSTR filename, LPCWSTR document_title)
 {
-#if HAVE_CUPS_CUPS_H
+#ifdef SONAME_LIBCUPS
     if(pcupsPrintFile)
     {
         char *unixname, *queue, *doc_titleA;

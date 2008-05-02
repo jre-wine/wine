@@ -137,6 +137,7 @@ static void test_profile_sections(void)
     char *p;
     static const char content[]="[section1]\r\nname1=val1\r\nname2=\r\nname3\r\nname4=val4\r\n[section2]\r\n";
     static const char testfile4[]=".\\testwine4.ini";
+    BOOL on_win98 = FALSE;
 
     DeleteFileA( testfile4 );
     h = CreateFileA( testfile4, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -149,17 +150,25 @@ static void test_profile_sections(void)
     SetLastError(0xdeadbeef);
     ret = GetPrivateProfileSectionA( NULL, NULL, 0, NULL );
     ok( ret == 0, "expected return size 0, got %d\n", ret );
-    ok( GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+    ok( GetLastError() == ERROR_INVALID_PARAMETER ||
+        GetLastError() == 0xdeadbeef /* Win98 */,
+        "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+    if (GetLastError() == 0xdeadbeef) on_win98 = TRUE;
 
     SetLastError(0xdeadbeef);
     ret = GetPrivateProfileSectionA( NULL, NULL, 0, testfile4 );
     ok( ret == 0, "expected return size 0, got %d\n", ret );
-    ok( GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+    ok( GetLastError() == ERROR_INVALID_PARAMETER ||
+        GetLastError() == 0xdeadbeef /* Win98 */,
+        "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
 
-    SetLastError(0xdeadbeef);
-    ret = GetPrivateProfileSectionA( "section1", NULL, 0, testfile4 );
-    ok( ret == 0, "expected return size 0, got %d\n", ret );
-    ok( GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+    if (!on_win98)
+    {
+        SetLastError(0xdeadbeef);
+        ret = GetPrivateProfileSectionA( "section1", NULL, 0, testfile4 );
+        ok( ret == 0, "expected return size 0, got %d\n", ret );
+        ok( GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+    }
 
     SetLastError(0xdeadbeef);
     ret = GetPrivateProfileSectionA( NULL, buf, sizeof(buf), testfile4 );
@@ -218,31 +227,38 @@ static void test_profile_sections_names(void)
     ok( ret == 25, "expected return size 25, got %d\n", ret );
     ok( buf[ret+1] == 0 && buf[ret] == 0, "returned buffer not terminated with double-null\n" );
     
-    
-    /* Test with sufficiently large buffer */
-    ret = GetPrivateProfileSectionNamesW( bufW, 29, testfile3W );
-    ok( ret == 27, "expected return size 27, got %d\n", ret );
-    ok( buf[ret-1] == 0 && buf[ret] == 0, "returned buffer not terminated with double-null\n" );
-    
-    /* Test with exactly fitting buffer */
-    ret = GetPrivateProfileSectionNamesW( bufW, 28, testfile3W );
-    ok( ret == 26, "expected return size 26, got %d\n", ret );
-    ok( buf[ret+1] == 0 && buf[ret] == 0, "returned buffer not terminated with double-null\n" );
-    
-    /* Test with a buffer too small */
-    ret = GetPrivateProfileSectionNamesW( bufW, 27, testfile3W );
-    ok( ret == 25, "expected return size 25, got %d\n", ret );
-    ok( buf[ret+1] == 0 && buf[ret] == 0, "returned buffer not terminated with double-null\n" );
-    
-    DeleteFileA( testfile3 );
-
     /* Tests on nonexistent file */
     memset(buf, 0xcc, sizeof(buf));
     ret = GetPrivateProfileSectionNamesA( buf, 10, ".\\not_here.ini" );
     ok( ret == 0, "expected return size 0, got %d\n", ret );
     ok( buf[0] == 0, "returned buffer not terminated with null\n" );
     ok( buf[1] != 0, "returned buffer terminated with double-null\n" );
+    
+    /* Test with sufficiently large buffer */
+    SetLastError(0xdeadbeef);
+    ret = GetPrivateProfileSectionNamesW( bufW, 29, testfile3W );
+    if (ret == 0 && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
+    {
+        skip("GetPrivateProfileSectionNamesW is not implemented\n");
+        DeleteFileA( testfile3 );
+        return;
+    }
+    ok( ret == 27, "expected return size 27, got %d\n", ret );
+    ok( bufW[ret-1] == 0 && bufW[ret] == 0, "returned buffer not terminated with double-null\n" );
+    
+    /* Test with exactly fitting buffer */
+    ret = GetPrivateProfileSectionNamesW( bufW, 28, testfile3W );
+    ok( ret == 26, "expected return size 26, got %d\n", ret );
+    ok( bufW[ret+1] == 0 && bufW[ret] == 0, "returned buffer not terminated with double-null\n" );
+    
+    /* Test with a buffer too small */
+    ret = GetPrivateProfileSectionNamesW( bufW, 27, testfile3W );
+    ok( ret == 25, "expected return size 25, got %d\n", ret );
+    ok( bufW[ret+1] == 0 && bufW[ret] == 0, "returned buffer not terminated with double-null\n" );
+    
+    DeleteFileA( testfile3 );
 
+    /* Tests on nonexistent file */
     memset(bufW, 0xcc, sizeof(bufW));
     ret = GetPrivateProfileSectionNamesW( bufW, 10, not_here );
     ok( ret == 0, "expected return size 0, got %d\n", ret );

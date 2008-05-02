@@ -563,7 +563,10 @@ HRESULT WINAPI IDirectInputDevice2AImpl_Acquire(LPDIRECTINPUTDEVICE8A iface)
     res = This->acquired ? S_FALSE : DI_OK;
     This->acquired = 1;
     if (res == DI_OK)
+    {
         This->queue_head = This->queue_tail = This->overflow = 0;
+        check_dinput_hooks(iface);
+    }
     LeaveCriticalSection(&This->crit);
 
     return res;
@@ -581,6 +584,8 @@ HRESULT WINAPI IDirectInputDevice2AImpl_Unacquire(LPDIRECTINPUTDEVICE8A iface)
     EnterCriticalSection(&This->crit);
     res = !This->acquired ? DI_NOEFFECT : DI_OK;
     This->acquired = 0;
+    if (res == DI_OK)
+        check_dinput_hooks(iface);
     LeaveCriticalSection(&This->crit);
 
     return res;
@@ -687,6 +692,10 @@ ULONG WINAPI IDirectInputDevice2AImpl_Release(LPDIRECTINPUTDEVICE8A iface)
     HeapFree(GetProcessHeap(), 0, This->data_format.wine_df->rgodf);
     HeapFree(GetProcessHeap(), 0, This->data_format.wine_df);
     release_DataFormat(&This->data_format);
+
+    EnterCriticalSection( &This->dinput->crit );
+    list_remove( &This->entry );
+    LeaveCriticalSection( &This->dinput->crit );
 
     IDirectInput_Release((LPDIRECTINPUTDEVICE8A)This->dinput);
     This->crit.DebugInfo->Spare[0] = 0;

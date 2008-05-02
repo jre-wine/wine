@@ -20,6 +20,7 @@
 
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
+#define COBJMACROS
 
 #include <stdarg.h>
 #include "windef.h"
@@ -44,6 +45,7 @@
 #include "sddl.h"
 
 #include "msipriv.h"
+#include "msiserver.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msi);
 
@@ -58,10 +60,11 @@ static void MSI_FreePackage( MSIOBJECTHDR *arg)
     ACTION_free_package_structures(package);
 }
 
-static UINT clone_properties(MSIPACKAGE *package)
+static UINT create_temp_property_table(MSIPACKAGE *package)
 {
-    MSIQUERY * view = NULL;
+    MSIQUERY *view = NULL;
     UINT rc;
+
     static const WCHAR CreateSql[] = {
        'C','R','E','A','T','E',' ','T','A','B','L','E',' ','`','_','P','r','o',
        'p','e','r','t','y','`',' ','(',' ','`','_','P','r','o','p','e','r','t',
@@ -71,6 +74,22 @@ static UINT clone_properties(MSIPACKAGE *package)
        'U','L','L',' ','T','E','M','P','O','R','A','R','Y',' ','P','R','I','M',
        'A','R','Y',' ','K','E','Y',' ','`','_','P','r','o','p','e','r','t','y',
         '`',')',0};
+
+    rc = MSI_DatabaseOpenViewW(package->db, CreateSql, &view);
+    if (rc != ERROR_SUCCESS)
+        return rc;
+
+    rc = MSI_ViewExecute(view, 0);
+    MSI_ViewClose(view);
+    msiobj_release(&view->hdr);
+    return rc;
+}
+
+UINT msi_clone_properties(MSIPACKAGE *package)
+{
+    MSIQUERY *view = NULL;
+    UINT rc;
+
     static const WCHAR Query[] = {
        'S','E','L','E','C','T',' ','*',' ',
        'F','R','O','M',' ','`','P','r','o','p','e','r','t','y','`',0};
@@ -80,17 +99,6 @@ static UINT clone_properties(MSIPACKAGE *package)
        '(','`','_','P','r','o','p','e','r','t','y','`',',',
        '`','V','a','l','u','e','`',')',' ',
        'V','A','L','U','E','S',' ','(','?',',','?',')',0};
-
-    /* create the temporary properties table */
-    rc = MSI_DatabaseOpenViewW(package->db, CreateSql, &view);
-    if (rc != ERROR_SUCCESS)
-        return rc;
-
-    rc = MSI_ViewExecute(view, 0);
-    MSI_ViewClose(view);
-    msiobj_release(&view->hdr);
-    if (rc != ERROR_SUCCESS)
-        return rc;
 
     /* clone the existing properties */
     rc = MSI_DatabaseOpenViewW(package->db, Query, &view);
@@ -697,6 +705,8 @@ static MSIPACKAGE *msi_alloc_package( void )
         list_init( &package->extensions );
         list_init( &package->progids );
         list_init( &package->RunningActions );
+        list_init( &package->sourcelist_info );
+        list_init( &package->sourcelist_media );
 
         package->ActionFormat = NULL;
         package->LastAction = NULL;
@@ -731,7 +741,8 @@ MSIPACKAGE *MSI_CreatePackage( MSIDATABASE *db, LPCWSTR base_url )
         package->PackagePath = strdupW( db->path );
         package->BaseURL = strdupW( base_url );
 
-        clone_properties( package );
+        create_temp_property_table( package );
+        msi_clone_properties( package );
         set_installer_properties(package);
         sprintfW(uilevel,szpi,gUILevel);
         MSI_SetPropertyW(package, szLevel, uilevel);
@@ -942,6 +953,7 @@ MSIHANDLE WINAPI MsiGetActiveDatabase(MSIHANDLE hInstall)
 {
     MSIPACKAGE *package;
     MSIHANDLE handle = 0;
+    IWineMsiRemotePackage *remote_package;
 
     TRACE("(%ld)\n",hInstall);
 
@@ -950,6 +962,11 @@ MSIHANDLE WINAPI MsiGetActiveDatabase(MSIHANDLE hInstall)
     {
         handle = alloc_msihandle( &package->db->hdr );
         msiobj_release( &package->hdr );
+    }
+    else if ((remote_package = (IWineMsiRemotePackage *)msi_get_remote( hInstall )))
+    {
+        IWineMsiRemotePackage_GetActiveDatabase(remote_package, &handle);
+        IWineMsiRemotePackage_Release(remote_package);
     }
 
     return handle;
@@ -1132,7 +1149,28 @@ INT WINAPI MsiProcessMessage( MSIHANDLE hInstall, INSTALLMESSAGE eMessageType,
 
     package = msihandle2msiinfo( hInstall, MSIHANDLETYPE_PACKAGE );
     if( !package )
-        return ERROR_INVALID_HANDLE;
+    {
+        HRESULT hr;
+        IWineMsiRemotePackage *remote_package;
+
+        remote_package = (IWineMsiRemotePackage *)msi_get_remote( hInstall );
+        if (!remote_package)
+            return ERROR_INVALID_HANDLE;
+
+        hr = IWineMsiRemotePackage_ProcessMessage( remote_package, eMessageType, hRecord );
+
+        IWineMsiRemotePackage_Release( remote_package );
+
+        if (FAILED(hr))
+        {
+            if (HRESULT_FACILITY(hr) == FACILITY_WIN32)
+                return HRESULT_CODE(hr);
+
+            return ERROR_FUNCTION_FAILED;
+        }
+
+        return ERROR_SUCCESS;
+    }
 
     record = msihandle2msiinfo( hRecord, MSIHANDLETYPE_RECORD );
     if( !record )
@@ -1246,7 +1284,42 @@ UINT WINAPI MsiSetPropertyW( MSIHANDLE hInstall, LPCWSTR szName, LPCWSTR szValue
 
     package = msihandle2msiinfo( hInstall, MSIHANDLETYPE_PACKAGE);
     if( !package )
-        return ERROR_INVALID_HANDLE;
+    {
+        HRESULT hr;
+        BSTR name, value;
+        IWineMsiRemotePackage *remote_package;
+
+        remote_package = (IWineMsiRemotePackage *)msi_get_remote( hInstall );
+        if (!remote_package)
+            return ERROR_INVALID_HANDLE;
+
+        name = SysAllocString( szName );
+        value = SysAllocString( szValue );
+        if (!name || !value)
+        {
+            SysFreeString( name );
+            SysFreeString( value );
+            IWineMsiRemotePackage_Release( remote_package );
+            return ERROR_OUTOFMEMORY;
+        }
+
+        hr = IWineMsiRemotePackage_SetProperty( remote_package, name, value );
+
+        SysFreeString( name );
+        SysFreeString( value );
+        IWineMsiRemotePackage_Release( remote_package );
+
+        if (FAILED(hr))
+        {
+            if (HRESULT_FACILITY(hr) == FACILITY_WIN32)
+                return HRESULT_CODE(hr);
+
+            return ERROR_FUNCTION_FAILED;
+        }
+
+        return ERROR_SUCCESS;
+    }
+
     ret = MSI_SetPropertyW( package, szName, szValue);
     msiobj_release( &package->hdr );
     return ret;
@@ -1335,7 +1408,7 @@ static UINT MSI_GetProperty( MSIHANDLE handle, LPCWSTR name,
     static const WCHAR empty[] = {0};
     MSIPACKAGE *package;
     MSIRECORD *row = NULL;
-    UINT r;
+    UINT r = ERROR_FUNCTION_FAILED;
     LPCWSTR val = NULL;
 
     TRACE("%lu %s %p %p\n", handle, debugstr_w(name),
@@ -1346,7 +1419,59 @@ static UINT MSI_GetProperty( MSIHANDLE handle, LPCWSTR name,
 
     package = msihandle2msiinfo( handle, MSIHANDLETYPE_PACKAGE );
     if (!package)
-        return ERROR_INVALID_HANDLE;
+    {
+        HRESULT hr;
+        IWineMsiRemotePackage *remote_package;
+        LPWSTR value = NULL;
+        BSTR bname;
+        DWORD len;
+
+        remote_package = (IWineMsiRemotePackage *)msi_get_remote( handle );
+        if (!remote_package)
+            return ERROR_INVALID_HANDLE;
+
+        bname = SysAllocString( name );
+        if (!bname)
+        {
+            IWineMsiRemotePackage_Release( remote_package );
+            return ERROR_OUTOFMEMORY;
+        }
+
+        len = 0;
+        hr = IWineMsiRemotePackage_GetProperty( remote_package, bname, NULL, &len );
+        if (FAILED(hr))
+            goto done;
+
+        len++;
+        value = msi_alloc(len * sizeof(WCHAR));
+        if (!value)
+        {
+            r = ERROR_OUTOFMEMORY;
+            goto done;
+        }
+
+        hr = IWineMsiRemotePackage_GetProperty( remote_package, bname, (BSTR *)value, &len );
+        if (FAILED(hr))
+            goto done;
+
+        r = msi_strcpy_to_awstring( value, szValueBuf, pchValueBuf );
+        *pchValueBuf *= sizeof(WCHAR); /* Bug required by Adobe installers */
+
+done:
+        IWineMsiRemotePackage_Release(remote_package);
+        SysFreeString(bname);
+        msi_free(value);
+
+        if (FAILED(hr))
+        {
+            if (HRESULT_FACILITY(hr) == FACILITY_WIN32)
+                return HRESULT_CODE(hr);
+
+            return ERROR_FUNCTION_FAILED;
+        }
+
+        return r;
+    }
 
     row = MSI_GetPropertyRow( package, name );
     if (row)
@@ -1392,4 +1517,271 @@ UINT WINAPI MsiGetPropertyW( MSIHANDLE hInstall, LPCWSTR szName,
     val.str.w = szValueBuf;
 
     return MSI_GetProperty( hInstall, szName, &val, pchValueBuf );
+}
+
+typedef struct _msi_remote_package_impl {
+    const IWineMsiRemotePackageVtbl *lpVtbl;
+    MSIHANDLE package;
+    LONG refs;
+} msi_remote_package_impl;
+
+static inline msi_remote_package_impl* mrp_from_IWineMsiRemotePackage( IWineMsiRemotePackage* iface )
+{
+    return (msi_remote_package_impl*) iface;
+}
+
+static HRESULT WINAPI mrp_QueryInterface( IWineMsiRemotePackage *iface,
+                REFIID riid,LPVOID *ppobj)
+{
+    if( IsEqualCLSID( riid, &IID_IUnknown ) ||
+        IsEqualCLSID( riid, &IID_IWineMsiRemotePackage ) )
+    {
+        IUnknown_AddRef( iface );
+        *ppobj = iface;
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI mrp_AddRef( IWineMsiRemotePackage *iface )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+
+    return InterlockedIncrement( &This->refs );
+}
+
+static ULONG WINAPI mrp_Release( IWineMsiRemotePackage *iface )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    ULONG r;
+
+    r = InterlockedDecrement( &This->refs );
+    if (r == 0)
+    {
+        MsiCloseHandle( This->package );
+        msi_free( This );
+    }
+    return r;
+}
+
+static HRESULT WINAPI mrp_SetMsiHandle( IWineMsiRemotePackage *iface, MSIHANDLE handle )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    This->package = handle;
+    return S_OK;
+}
+
+HRESULT WINAPI mrp_GetActiveDatabase( IWineMsiRemotePackage *iface, MSIHANDLE *handle )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    *handle = MsiGetActiveDatabase(This->package);
+    return S_OK;
+}
+
+HRESULT WINAPI mrp_GetProperty( IWineMsiRemotePackage *iface, BSTR property, BSTR *value, DWORD *size )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r;
+
+    r = MsiGetPropertyW(This->package, (LPWSTR)property, (LPWSTR)value, size);
+    if (r != ERROR_SUCCESS)
+        return HRESULT_FROM_WIN32(r);
+
+    return S_OK;
+}
+
+HRESULT WINAPI mrp_SetProperty( IWineMsiRemotePackage *iface, BSTR property, BSTR value )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r = MsiSetPropertyW(This->package, (LPWSTR)property, (LPWSTR)value);
+    return HRESULT_FROM_WIN32(r);
+}
+
+HRESULT WINAPI mrp_ProcessMessage( IWineMsiRemotePackage *iface, INSTALLMESSAGE message, MSIHANDLE record )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r = MsiProcessMessage(This->package, message, record);
+    return HRESULT_FROM_WIN32(r);
+}
+
+HRESULT WINAPI mrp_DoAction( IWineMsiRemotePackage *iface, BSTR action )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r = MsiDoActionW(This->package, (LPWSTR)action);
+    return HRESULT_FROM_WIN32(r);
+}
+
+HRESULT WINAPI mrp_Sequence( IWineMsiRemotePackage *iface, BSTR table, int sequence )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r = MsiSequenceW(This->package, (LPWSTR)table, sequence);
+    return HRESULT_FROM_WIN32(r);
+}
+
+HRESULT WINAPI mrp_GetTargetPath( IWineMsiRemotePackage *iface, BSTR folder, BSTR *value, DWORD *size )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r = MsiGetTargetPathW(This->package, (LPWSTR)folder, (LPWSTR)value, size);
+    return HRESULT_FROM_WIN32(r);
+}
+
+HRESULT WINAPI mrp_SetTargetPath( IWineMsiRemotePackage *iface, BSTR folder, BSTR value)
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r = MsiSetTargetPathW(This->package, (LPWSTR)folder, (LPWSTR)value);
+    return HRESULT_FROM_WIN32(r);
+}
+
+HRESULT WINAPI mrp_GetSourcePath( IWineMsiRemotePackage *iface, BSTR folder, BSTR *value, DWORD *size )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r = MsiGetSourcePathW(This->package, (LPWSTR)folder, (LPWSTR)value, size);
+    return HRESULT_FROM_WIN32(r);
+}
+
+HRESULT WINAPI mrp_GetMode( IWineMsiRemotePackage *iface, MSIRUNMODE mode, BOOL *ret )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    *ret = MsiGetMode(This->package, mode);
+    return S_OK;
+}
+
+HRESULT WINAPI mrp_GetFeatureState( IWineMsiRemotePackage *iface, BSTR feature,
+                                    INSTALLSTATE *installed, INSTALLSTATE *action )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r = MsiGetFeatureStateW(This->package, (LPWSTR)feature, installed, action);
+    return HRESULT_FROM_WIN32(r);
+}
+
+HRESULT WINAPI mrp_SetFeatureState( IWineMsiRemotePackage *iface, BSTR feature, INSTALLSTATE state )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r = MsiSetFeatureStateW(This->package, (LPWSTR)feature, state);
+    return HRESULT_FROM_WIN32(r);
+}
+
+HRESULT WINAPI mrp_GetComponentState( IWineMsiRemotePackage *iface, BSTR component,
+                                      INSTALLSTATE *installed, INSTALLSTATE *action )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r = MsiGetComponentStateW(This->package, (LPWSTR)component, installed, action);
+    return HRESULT_FROM_WIN32(r);
+}
+
+HRESULT WINAPI mrp_SetComponentState( IWineMsiRemotePackage *iface, BSTR component, INSTALLSTATE state )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r = MsiSetComponentStateW(This->package, (LPWSTR)component, state);
+    return HRESULT_FROM_WIN32(r);
+}
+
+HRESULT WINAPI mrp_GetLanguage( IWineMsiRemotePackage *iface, LANGID *language )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    *language = MsiGetLanguage(This->package);
+    return S_OK;
+}
+
+HRESULT WINAPI mrp_SetInstallLevel( IWineMsiRemotePackage *iface, int level )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r = MsiSetInstallLevel(This->package, level);
+    return HRESULT_FROM_WIN32(r);
+}
+
+HRESULT WINAPI mrp_FormatRecord( IWineMsiRemotePackage *iface, MSIHANDLE record,
+                                 BSTR value, DWORD *size )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r = MsiFormatRecordW(This->package, record, (LPWSTR)value, size);
+    return HRESULT_FROM_WIN32(r);
+}
+
+HRESULT WINAPI mrp_EvaluateCondition( IWineMsiRemotePackage *iface, BSTR condition )
+{
+    msi_remote_package_impl* This = mrp_from_IWineMsiRemotePackage( iface );
+    UINT r = MsiEvaluateConditionW(This->package, (LPWSTR)condition);
+    return HRESULT_FROM_WIN32(r);
+}
+
+static const IWineMsiRemotePackageVtbl msi_remote_package_vtbl =
+{
+    mrp_QueryInterface,
+    mrp_AddRef,
+    mrp_Release,
+    mrp_SetMsiHandle,
+    mrp_GetActiveDatabase,
+    mrp_GetProperty,
+    mrp_SetProperty,
+    mrp_ProcessMessage,
+    mrp_DoAction,
+    mrp_Sequence,
+    mrp_GetTargetPath,
+    mrp_SetTargetPath,
+    mrp_GetSourcePath,
+    mrp_GetMode,
+    mrp_GetFeatureState,
+    mrp_SetFeatureState,
+    mrp_GetComponentState,
+    mrp_SetComponentState,
+    mrp_GetLanguage,
+    mrp_SetInstallLevel,
+    mrp_FormatRecord,
+    mrp_EvaluateCondition,
+};
+
+HRESULT create_msi_remote_package( IUnknown *pOuter, LPVOID *ppObj )
+{
+    msi_remote_package_impl* This;
+
+    This = msi_alloc( sizeof *This );
+    if (!This)
+        return E_OUTOFMEMORY;
+
+    This->lpVtbl = &msi_remote_package_vtbl;
+    This->package = 0;
+    This->refs = 1;
+
+    *ppObj = This;
+
+    return S_OK;
+}
+
+UINT msi_package_add_info(MSIPACKAGE *package, DWORD context, DWORD options,
+                          LPCWSTR property, LPWSTR value)
+{
+    MSISOURCELISTINFO *info;
+
+    info = msi_alloc(sizeof(MSISOURCELISTINFO));
+    if (!info)
+        return ERROR_OUTOFMEMORY;
+
+    info->context = context;
+    info->options = options;
+    info->property = property;
+    info->value = strdupW(value);
+    list_add_head(&package->sourcelist_info, &info->entry);
+
+    return ERROR_SUCCESS;
+}
+
+UINT msi_package_add_media_disk(MSIPACKAGE *package, DWORD context, DWORD options,
+                                DWORD disk_id, LPWSTR volume_label, LPWSTR disk_prompt)
+{
+    MSIMEDIADISK *disk;
+
+    disk = msi_alloc(sizeof(MSIMEDIADISK));
+    if (!disk)
+        return ERROR_OUTOFMEMORY;
+
+    disk->context = context;
+    disk->options = options;
+    disk->disk_id = disk_id;
+    disk->volume_label = strdupW(volume_label);
+    disk->disk_prompt = strdupW(disk_prompt);
+    list_add_head(&package->sourcelist_media, &disk->entry);
+
+    return ERROR_SUCCESS;
 }

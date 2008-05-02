@@ -23,7 +23,7 @@
 #include <string.h>
 #include <stdio.h>
 
-#ifdef HAVE_LIBXRANDR
+#ifdef SONAME_LIBXRANDR
 
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>
@@ -41,20 +41,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(xrandr);
 
 static void *xrandr_handle;
-
-/* some default values just in case */
-#ifndef SONAME_LIBX11
-#define SONAME_LIBX11 "libX11.so"
-#endif
-#ifndef SONAME_LIBXEXT
-#define SONAME_LIBXEXT "libXext.so"
-#endif
-#ifndef SONAME_LIBXRENDER
-#define SONAME_LIBXRENDER "libXrender.so"
-#endif
-#ifndef SONAME_LIBXRANDR
-#define SONAME_LIBXRANDR "libXrandr.so"
-#endif
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f;
 MAKE_FUNCPTR(XRRConfigCurrentConfiguration)
@@ -332,4 +318,4 @@ void X11DRV_XRandR_Cleanup(void)
     real_xrandr_rates_count = NULL;
 }
 
-#endif /* HAVE_LIBXRANDR */
+#endif /* SONAME_LIBXRANDR */

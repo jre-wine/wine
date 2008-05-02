@@ -41,13 +41,14 @@ int using_client_side_fonts = FALSE;
 
 WINE_DEFAULT_DEBUG_CHANNEL(xrender);
 
-#ifdef HAVE_X11_EXTENSIONS_XRENDER_H
+#ifdef SONAME_LIBXRENDER
 
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrender.h>
 
-static XRenderPictFormat *screen_format; /* format of screen */
-static XRenderPictFormat *mono_format; /* format of mono bitmap */
+
+enum drawable_depth_type {mono_drawable, color_drawable};
+static XRenderPictFormat *pict_formats[2];
 
 typedef struct
 {
@@ -83,9 +84,6 @@ struct tagXRENDERINFO
 {
     int                cache_index;
     Picture            pict;
-    Picture            tile_pict;
-    Pixmap             tile_xpm;
-    COLORREF           lastTextColor;
 };
 
 
@@ -97,17 +95,6 @@ static INT mru = -1;
 #define INIT_CACHE_SIZE 10
 
 static int antialias = 1;
-
-/* some default values just in case */
-#ifndef SONAME_LIBX11
-#define SONAME_LIBX11 "libX11.so"
-#endif
-#ifndef SONAME_LIBXEXT
-#define SONAME_LIBXEXT "libXext.so"
-#endif
-#ifndef SONAME_LIBXRENDER
-#define SONAME_LIBXRENDER "libXrender.so"
-#endif
 
 static void *xrender_handle;
 
@@ -203,8 +190,8 @@ LOAD_OPTIONAL_FUNCPTR(XRenderSetPictureTransform)
         if(pXRenderQueryExtension(gdi_display, &event_base, &xrender_error_base)) {
             X11DRV_XRender_Installed = TRUE;
             TRACE("Xrender is up and running error_base = %d\n", xrender_error_base);
-            screen_format = pXRenderFindVisualFormat(gdi_display, visual);
-            if(!screen_format)
+            pict_formats[color_drawable] = pXRenderFindVisualFormat(gdi_display, visual);
+            if(!pict_formats[color_drawable])
             {
                 /* Xrender doesn't like DirectColor visuals, try to find a TrueColor one instead */
                 if (visual->class == DirectColor)
@@ -213,12 +200,12 @@ LOAD_OPTIONAL_FUNCPTR(XRenderSetPictureTransform)
                     if (XMatchVisualInfo( gdi_display, DefaultScreen(gdi_display),
                                           screen_depth, TrueColor, &info ))
                     {
-                        screen_format = pXRenderFindVisualFormat(gdi_display, info.visual);
-                        if (screen_format) visual = info.visual;
+                        pict_formats[color_drawable] = pXRenderFindVisualFormat(gdi_display, info.visual);
+                        if (pict_formats[color_drawable]) visual = info.visual;
                     }
                 }
             }
-            if(!screen_format) /* This fails in buggy versions of libXrender.so */
+            if(!pict_formats[color_drawable]) /* This fails in buggy versions of libXrender.so */
             {
                 wine_tsx11_unlock();
                 WINE_MESSAGE(
@@ -232,10 +219,10 @@ LOAD_OPTIONAL_FUNCPTR(XRenderSetPictureTransform)
             pf.depth = 1;
             pf.direct.alpha = 0;
             pf.direct.alphaMask = 1;
-            mono_format = pXRenderFindFormat(gdi_display, PictFormatType |
-                                             PictFormatDepth | PictFormatAlpha |
-                                             PictFormatAlphaMask, &pf, 0);
-            if(!mono_format) {
+            pict_formats[mono_drawable] = pXRenderFindFormat(gdi_display, PictFormatType |
+                                                             PictFormatDepth | PictFormatAlpha |
+                                                             PictFormatAlphaMask, &pf, 0);
+            if(!pict_formats[mono_drawable]) {
                 ERR("mono_format == NULL?\n");
                 X11DRV_XRender_Installed = FALSE;
             }
@@ -601,17 +588,6 @@ void X11DRV_XRender_UpdateDrawable(X11DRV_PDEVICE *physDev)
         pXRenderFreePicture(gdi_display, physDev->xrender->pict);
         physDev->xrender->pict = 0;
     }
-    if(physDev->xrender->tile_pict)
-    {
-        pXRenderFreePicture(gdi_display, physDev->xrender->tile_pict);
-        physDev->xrender->tile_pict = 0;
-    }
-    if(physDev->xrender->tile_xpm)
-    {
-        XFreePixmap(gdi_display, physDev->xrender->tile_xpm);
-        physDev->xrender->tile_xpm = 0;
-    }
-
     wine_tsx11_unlock();
 
     return;
@@ -1070,6 +1046,76 @@ static void SmoothGlyphGray(XImage *image, int x, int y, void *bitmap, XGlyphInf
     }
 }
 
+/*************************************************************
+ *                 get_tile_pict
+ *
+ * Returns an appropiate Picture for tiling the text colour.
+ * Call and use result within the xrender_cs
+ */
+static Picture get_tile_pict(enum drawable_depth_type type, int text_pixel)
+{
+    static struct
+    {
+        Pixmap xpm;
+        Picture pict;
+        int current_color;
+    } tiles[2], *tile;
+    XRenderColor col;
+
+    tile = &tiles[type];
+
+    if(!tile->xpm)
+    {
+        XRenderPictureAttributes pa;
+
+        wine_tsx11_lock();
+        tile->xpm = XCreatePixmap(gdi_display, root_window, 1, 1, pict_formats[type]->depth);
+
+        pa.repeat = True;
+        tile->pict = pXRenderCreatePicture(gdi_display, tile->xpm, pict_formats[type], CPRepeat, &pa);
+        wine_tsx11_unlock();
+
+        /* init current_color to something different from text_pixel */
+        tile->current_color = ~text_pixel;
+
+        if(type == mono_drawable)
+        {
+            /* for a 1bpp bitmap we always need a 1 in the tile */
+            col.red = col.green = col.blue = 0;
+            col.alpha = 0xffff;
+            wine_tsx11_lock();
+            pXRenderFillRectangle(gdi_display, PictOpSrc, tile->pict, &col, 0, 0, 1, 1);
+            wine_tsx11_unlock();
+        }
+    }
+
+    if(text_pixel != tile->current_color && type == color_drawable)
+    {
+        /* Map 0 -- 0xff onto 0 -- 0xffff */
+        int r_shift, r_len;
+        int g_shift, g_len;
+        int b_shift, b_len;
+
+        ExamineBitfield (visual->red_mask, &r_shift, &r_len );
+        ExamineBitfield (visual->green_mask, &g_shift, &g_len);
+        ExamineBitfield (visual->blue_mask, &b_shift, &b_len);
+
+        col.red = GetField(text_pixel, r_shift, r_len);
+        col.red |= col.red << 8;
+        col.green = GetField(text_pixel, g_shift, g_len);
+        col.green |= col.green << 8;
+        col.blue = GetField(text_pixel, b_shift, b_len);
+        col.blue |= col.blue << 8;
+        col.alpha = 0x0;
+
+        wine_tsx11_lock();
+        pXRenderFillRectangle(gdi_display, PictOpSrc, tile->pict, &col, 0, 0, 1, 1);
+        wine_tsx11_unlock();
+        tile->current_color = text_pixel;
+    }
+    return tile->pict;
+}
+
 static int XRenderErrorHandler(Display *dpy, XErrorEvent *event, void *arg)
 {
     return 1;
@@ -1082,7 +1128,6 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
 				const RECT *lprect, LPCWSTR wstr, UINT count,
 				const INT *lpDx )
 {
-    XRenderColor col;
     RGNDATA *data;
     XGCValues xgcval;
     int render_op = PictOpOver;
@@ -1098,6 +1143,8 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
     unsigned int idx;
     double cosEsc, sinEsc;
     LOGFONTW lf;
+    enum drawable_depth_type depth_type = (physDev->depth == 1) ? mono_drawable : color_drawable;
+    Picture tile_pict = 0;
 
     /* Do we need to disable antialiasing because of palette mode? */
     if( !physDev->bitmap || GetObjectW( physDev->bitmap->hbitmap, sizeof(bmp), &bmp ) != sizeof(bmp) ) {
@@ -1168,6 +1215,8 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
         DeleteObject( clip_region );
     }
 
+    EnterCriticalSection(&xrender_cs);
+
     if(X11DRV_XRender_Installed) {
         if(!physDev->xrender->pict) {
 	    XRenderPictureAttributes pa;
@@ -1176,8 +1225,7 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
 	    wine_tsx11_lock();
 	    physDev->xrender->pict = pXRenderCreatePicture(gdi_display,
 							   physDev->drawable,
-							   (physDev->depth == 1) ?
-							   mono_format : screen_format,
+                                                           pict_formats[depth_type],
 							   CPSubwindowMode, &pa);
 	    wine_tsx11_unlock();
 
@@ -1197,68 +1245,15 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
 	    wine_tsx11_unlock();
 	    HeapFree( GetProcessHeap(), 0, data );
 	}
-    }
 
-    if(X11DRV_XRender_Installed) {
-        /* Create a 1x1 pixmap to tile over the font mask */
-        if(!physDev->xrender->tile_xpm) {
-	    XRenderPictureAttributes pa;
-
-	    XRenderPictFormat *format = (physDev->depth == 1) ? mono_format : screen_format;
-	    wine_tsx11_lock();
-	    physDev->xrender->tile_xpm = XCreatePixmap(gdi_display,
-						       physDev->drawable,
-						       1, 1,
-						       format->depth);
-	    pa.repeat = True;
-	    physDev->xrender->tile_pict = pXRenderCreatePicture(gdi_display,
-								physDev->xrender->tile_xpm,
-								format,
-								CPRepeat, &pa);
-	    wine_tsx11_unlock();
-	    TRACE("Created pixmap of depth %d\n", format->depth);
-	    /* init lastTextColor to something different from textPixel */
-	    physDev->xrender->lastTextColor = ~physDev->textPixel;
-
-	}
-
-	if(physDev->textPixel != physDev->xrender->lastTextColor) {
-	    if(physDev->depth != 1) {
-                /* Map 0 -- 0xff onto 0 -- 0xffff */
-                int             r_shift, r_len;
-                int             g_shift, g_len;
-                int             b_shift, b_len;
-
-                ExamineBitfield (visual->red_mask, &r_shift, &r_len );
-                ExamineBitfield (visual->green_mask, &g_shift, &g_len);
-                ExamineBitfield (visual->blue_mask, &b_shift, &b_len);
-
-	        col.red = GetField(physDev->textPixel, r_shift, r_len);
-		col.red |= col.red << 8;
-		col.green = GetField(physDev->textPixel, g_shift, g_len);
-		col.green |= col.green << 8;
-		col.blue = GetField(physDev->textPixel, b_shift, b_len);
-		col.blue |= col.blue << 8;
-		col.alpha = 0x0;
-	    } else { /* for a 1bpp bitmap we always need a 1 in the tile */
-	        col.red = col.green = col.blue = 0;
-		col.alpha = 0xffff;
-	    }
-	    wine_tsx11_lock();
-	    pXRenderFillRectangle(gdi_display, PictOpSrc,
-				  physDev->xrender->tile_pict,
-				  &col, 0, 0, 1, 1);
-	    wine_tsx11_unlock();
-	    physDev->xrender->lastTextColor = physDev->textPixel;
-	}
+        tile_pict = get_tile_pict(depth_type, physDev->textPixel);
 
 	/* FIXME the mapping of Text/BkColor onto 1 or 0 needs investigation.
 	 */
-	if((physDev->depth == 1) && (textPixel == 0))
+	if((depth_type == mono_drawable) && (textPixel == 0))
 	    render_op = PictOpOutReverse; /* This gives us 'black' text */
     }
 
-    EnterCriticalSection(&xrender_cs);
     entry = glyphsetCache + physDev->xrender->cache_index;
     if( disable_antialias == FALSE )
         aa_type = entry->aa_default;
@@ -1324,7 +1319,7 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
         }
         wine_tsx11_lock();
         pXRenderCompositeText16(gdi_display, render_op,
-                                physDev->xrender->tile_pict,
+                                tile_pict,
                                 physDev->xrender->pict,
                                 formatEntry->font_format,
                                 0, 0, 0, 0, elts, count);
@@ -1425,7 +1420,7 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
 		  image_w, image_h, AllPlanes, ZPixmap,
 		  physDev->depth, image);
 	    if(!image) {
-	        Pixmap xpm = XCreatePixmap(gdi_display, physDev->drawable, image_w, image_h,
+	        Pixmap xpm = XCreatePixmap(gdi_display, root_window, image_w, image_h,
 					   physDev->depth);
 		GC gc;
 		XGCValues gcv;
@@ -1534,6 +1529,7 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
     POINT pts[2];
     BOOL top_down = FALSE;
     RGNDATA *rgndata;
+    enum drawable_depth_type dst_depth_type = (devDst->depth == 1) ? mono_drawable : color_drawable;
 
     if(!X11DRV_XRender_Installed) {
         FIXME("Unable to AlphaBlend without Xrender\n");
@@ -1616,13 +1612,12 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
     /* FIXME use devDst->xrender->pict ? */
     dst_pict = pXRenderCreatePicture(gdi_display,
                                      devDst->drawable,
-                                     (devDst->depth == 1) ?
-                                     mono_format : screen_format,
+                                     pict_formats[dst_depth_type],
                                      CPSubwindowMode, &pa);
     TRACE("dst_pict %08lx\n", dst_pict);
     TRACE("src_drawable = %08lx\n", devSrc->drawable);
     xpm = XCreatePixmap(gdi_display,
-                        devSrc->drawable,
+                        root_window,
                         widthSrc, heightSrc, 32);
     gcv.graphics_exposures = False;
     gc = XCreateGC(gdi_display, xpm, GCGraphicsExposures, &gcv);
@@ -1672,7 +1667,7 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
     return TRUE;
 }
 
-#else /* HAVE_X11_EXTENSIONS_XRENDER_H */
+#else /* SONAME_LIBXRENDER */
 
 void X11DRV_XRender_Init(void)
 {
@@ -1721,4 +1716,4 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
   return FALSE;
 }
 
-#endif /* HAVE_X11_EXTENSIONS_XRENDER_H */
+#endif /* SONAME_LIBXRENDER */

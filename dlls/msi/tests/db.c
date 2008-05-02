@@ -1821,6 +1821,27 @@ static void generate_transform(void)
 
     MsiCloseHandle(hrec);
 
+    query = "ALTER TABLE `MOO` ADD `COW` INTEGER";
+    r = run_query(hdb1, 0, query);
+    ok(r == ERROR_SUCCESS, "failed to add column\n");
+
+    query = "ALTER TABLE `MOO` ADD `PIG` INTEGER";
+    r = run_query(hdb1, 0, query);
+    ok(r == ERROR_SUCCESS, "failed to add column\n");
+
+    query = "UPDATE `MOO` SET `PIG` = 5 WHERE `NOO` = 1";
+    r = run_query(hdb1, 0, query);
+    ok(r == ERROR_SUCCESS, "failed to modify row\n");
+
+    query = "CREATE TABLE `Property` ( `Property` CHAR(72) NOT NULL, "
+            "`Value` CHAR(0) PRIMARY KEY `Property`)";
+    r = run_query(hdb1, 0, query);
+    ok(r == ERROR_SUCCESS, "failed to add property table\n");
+
+    query = "INSERT INTO `Property` ( `Property`, `Value` ) VALUES ( 'prop', 'val' )";
+    r = run_query(hdb1, 0, query);
+    ok(r == ERROR_SUCCESS, "failed to add property\n");
+
     /* database needs to be committed */
     MsiDatabaseCommit(hdb1);
 
@@ -1844,35 +1865,48 @@ static const WCHAR name5[] = { 0x4840, 0x3f3f, 0x4577, 0x446c, 0x3e6a, 0x44b2, 0
 static const WCHAR name6[] = { 0x4840, 0x3e16, 0x4818, 0}; /* MOO */
 static const WCHAR name7[] = { 0x4840, 0x3c8b, 0x3a97, 0x409b, 0 }; /* BINARY */
 static const WCHAR name8[] = { 0x3c8b, 0x3a97, 0x409b, 0x387e, 0 }; /* BINARY.1 */
+static const WCHAR name9[] = { 0x4840, 0x4559, 0x44f2, 0x4568, 0x4737, 0 }; /* Property */
 
 /* data in each table */
 static const WCHAR data1[] = { /* AAR */
-    0x0201, 0x0005, 0x8001,  /* 0x0201 = add row (1), two shorts */
-    0x0201, 0x0006, 0x8002,
+    0x0201, 0x0008, 0x8001,  /* 0x0201 = add row (1), two shorts */
+    0x0201, 0x0009, 0x8002,
 };
 static const WCHAR data2[] = { /* _Columns */
-    0x0401, 0x0002, 0x0000, 0x0003, 0xbdff,  /* 0x0401 = add row (1), 4 shorts */
-    0x0401, 0x0002, 0x0000, 0x0004, 0x8502,
+    0x0401, 0x0001, 0x8003, 0x0002, 0x9502,
+    0x0401, 0x0001, 0x8004, 0x0003, 0x9502,
+    0x0401, 0x0005, 0x0000, 0x0006, 0xbdff,  /* 0x0401 = add row (1), 4 shorts */
+    0x0401, 0x0005, 0x0000, 0x0007, 0x8502,
+    0x0401, 0x000a, 0x0000, 0x000a, 0xad48,
+    0x0401, 0x000a, 0x0000, 0x000b, 0x9d00,
 };
 static const WCHAR data3[] = { /* _Tables */
-    0x0101, 0x0002, /* 0x0101 = add row (1), 1 short */
+    0x0101, 0x0005, /* 0x0101 = add row (1), 1 short */
+    0x0101, 0x000a,
 };
 static const char data4[] = /* _StringData */
-    "cAARCARBARvwbmw";  /* all the strings squashed together */
+    "MOOCOWPIGcAARCARBARvwbmwPropertyValuepropval";  /* all the strings squashed together */
 static const WCHAR data5[] = { /* _StringPool */
 /*  len, refs */
     0,   0,    /* string 0 ''    */
-    1,   1,    /* string 1 'c'   */
-    3,   3,    /* string 2 'AAR' */
-    3,   1,    /* string 3 'CAR' */
-    3,   1,    /* string 4 'BAR' */
-    2,   1,    /* string 5 'vw'  */
-    3,   1,    /* string 6 'bmw' */
+    3,   2,    /* string 1 'MOO' */
+    3,   1,    /* string 2 'COW' */
+    3,   1,    /* string 3 'PIG' */
+    1,   1,    /* string 4 'c'   */
+    3,   3,    /* string 5 'AAR' */
+    3,   1,    /* string 6 'CAR' */
+    3,   1,    /* string 7 'BAR' */
+    2,   1,    /* string 8 'vw'  */
+    3,   1,    /* string 9 'bmw' */
+    8,   4,    /* string 10 'Property' */
+    5,   1,    /* string 11 'Value' */
+    4,   1,    /* string 12 'prop' */
+    3,   1,    /* string 13 'val' */
 };
 /* update row, 0x0002 is a bitmask of present column data, keys are excluded */
 static const WCHAR data6[] = { /* MOO */
-    0x0002, 0x8001, 0x0001, /* update row */
-    0x0000, 0x8002,         /* delete row */
+    0x000a, 0x8001, 0x0004, 0x8005, /* update row */
+    0x0000, 0x8003,         /* delete row */
 };
 
 static const WCHAR data7[] = { /* BINARY */
@@ -1881,6 +1915,10 @@ static const WCHAR data7[] = { /* BINARY */
 
 static const char data8[] =  /* stream data for the BINARY table */
     "naengmyon";
+
+static const WCHAR data9[] = { /* Property */
+    0x0201, 0x000c, 0x000d,
+};
 
 static const struct {
     LPCWSTR name;
@@ -1896,6 +1934,7 @@ static const struct {
     { name6, data6, sizeof data6 },
     { name7, data7, sizeof data7 },
     { name8, data8, sizeof data8 - 1 },
+    { name9, data9, sizeof data9 },
 };
 
 #define NUM_TRANSFORM_TABLES (sizeof table_transform_data/sizeof table_transform_data[0])
@@ -1941,21 +1980,94 @@ static void generate_transform_manual(void)
     IStorage_Release(stg);
 }
 
+static UINT set_summary_info(MSIHANDLE hdb)
+{
+    UINT res;
+    MSIHANDLE suminfo;
+
+    /* build summmary info */
+    res = MsiGetSummaryInformation(hdb, NULL, 7, &suminfo);
+    ok( res == ERROR_SUCCESS , "Failed to open summaryinfo\n" );
+
+    res = MsiSummaryInfoSetProperty(suminfo,2, VT_LPSTR, 0,NULL,
+                        "Installation Database");
+    ok( res == ERROR_SUCCESS , "Failed to set summary info\n" );
+
+    res = MsiSummaryInfoSetProperty(suminfo,3, VT_LPSTR, 0,NULL,
+                        "Installation Database");
+    ok( res == ERROR_SUCCESS , "Failed to set summary info\n" );
+
+    res = MsiSummaryInfoSetProperty(suminfo,4, VT_LPSTR, 0,NULL,
+                        "Wine Hackers");
+    ok( res == ERROR_SUCCESS , "Failed to set summary info\n" );
+
+    res = MsiSummaryInfoSetProperty(suminfo,7, VT_LPSTR, 0,NULL,
+                    ";1033");
+    ok( res == ERROR_SUCCESS , "Failed to set summary info\n" );
+
+    res = MsiSummaryInfoSetProperty(suminfo,9, VT_LPSTR, 0,NULL,
+                    "{913B8D18-FBB6-4CAC-A239-C74C11E3FA74}");
+    ok( res == ERROR_SUCCESS , "Failed to set summary info\n" );
+
+    res = MsiSummaryInfoSetProperty(suminfo, 14, VT_I4, 100, NULL, NULL);
+    ok( res == ERROR_SUCCESS , "Failed to set summary info\n" );
+
+    res = MsiSummaryInfoSetProperty(suminfo, 15, VT_I4, 0, NULL, NULL);
+    ok( res == ERROR_SUCCESS , "Failed to set summary info\n" );
+
+    res = MsiSummaryInfoPersist(suminfo);
+    ok( res == ERROR_SUCCESS , "Failed to make summary info persist\n" );
+
+    res = MsiCloseHandle( suminfo);
+    ok( res == ERROR_SUCCESS , "Failed to close suminfo\n" );
+
+    return res;
+}
+
+static MSIHANDLE create_package_db(LPCSTR filename)
+{
+    MSIHANDLE hdb = 0;
+    UINT res;
+
+    DeleteFile(msifile);
+
+    /* create an empty database */
+    res = MsiOpenDatabase(filename, MSIDBOPEN_CREATE, &hdb );
+    ok( res == ERROR_SUCCESS , "Failed to create database\n" );
+    if( res != ERROR_SUCCESS )
+        return hdb;
+
+    res = MsiDatabaseCommit( hdb );
+    ok( res == ERROR_SUCCESS , "Failed to commit database\n" );
+
+    res = set_summary_info(hdb);
+
+    res = run_query( hdb, 0,
+            "CREATE TABLE `Directory` ( "
+            "`Directory` CHAR(255) NOT NULL, "
+            "`Directory_Parent` CHAR(255), "
+            "`DefaultDir` CHAR(255) NOT NULL "
+            "PRIMARY KEY `Directory`)" );
+    ok( res == ERROR_SUCCESS , "Failed to create directory table\n" );
+
+    return hdb;
+}
+
 static void test_try_transform(void)
 {
-    MSIHANDLE hdb, hview, hrec;
+    MSIHANDLE hdb, hview, hrec, hpkg;
     LPCSTR query;
     UINT r;
     DWORD sz;
-    char buffer[0x10];
+    char buffer[MAX_PATH];
 
     DeleteFile(msifile);
     DeleteFile(msifile2);
     DeleteFile(mstfile);
 
-    /* create an empty database */
-    r = MsiOpenDatabase(msifile2, MSIDBOPEN_CREATE, &hdb );
-    ok( r == ERROR_SUCCESS , "Failed to create database\n" );
+    /* create the database */
+    hdb = create_package_db(msifile2);
+    ok(hdb, "Failed to create package db\n");
 
     query = "CREATE TABLE `MOO` ( `NOO` SHORT NOT NULL, `OOO` CHAR(255) PRIMARY KEY `NOO`)";
     r = run_query(hdb, 0, query);
@@ -2037,14 +2149,14 @@ static void test_try_transform(void)
 
     /* check unchanged value */
     hrec = 0;
-    query = "select `NOO`,`OOO` from `MOO` where `NOO` = 3 AND `OOO` = 'c'";
+    query = "select `NOO`,`OOO` from `MOO` where `NOO` = 2 AND `OOO` = 'b'";
     r = do_query(hdb, query, &hrec);
     ok(r == ERROR_SUCCESS, "select query failed\n");
     MsiCloseHandle(hrec);
 
     /* check deleted value */
     hrec = 0;
-    query = "select * from `MOO` where `NOO` = 2";
+    query = "select * from `MOO` where `NOO` = 3";
     r = do_query(hdb, query, &hrec);
     ok(r == ERROR_NO_MORE_ITEMS, "select query failed\n");
     if (hrec) MsiCloseHandle(hrec);
@@ -2083,18 +2195,30 @@ static void test_try_transform(void)
     ok(r == ERROR_SUCCESS, "record get string failed\n");
     ok(!lstrcmpA(buffer, "c"), "Expected c, got %s\n", buffer);
 
+    r = MsiRecordGetInteger(hrec, 3);
+    ok(r == 0x80000000, "Expected 0x80000000, got %d\n", r);
+
+    r = MsiRecordGetInteger(hrec, 4);
+    ok(r == 5, "Expected 5, got %d\n", r);
+
     MsiCloseHandle(hrec);
 
     r = MsiViewFetch(hview, &hrec);
     ok(r == ERROR_SUCCESS, "view fetch failed\n");
 
     r = MsiRecordGetInteger(hrec, 1);
-    ok(r == 3, "Expected 3, got %d\n", r);
+    ok(r == 2, "Expected 2, got %d\n", r);
 
     sz = sizeof buffer;
     r = MsiRecordGetString(hrec, 2, buffer, &sz);
     ok(r == ERROR_SUCCESS, "record get string failed\n");
-    ok(!lstrcmpA(buffer, "c"), "Expected b, got %s\n", buffer);
+    ok(!lstrcmpA(buffer, "b"), "Expected b, got %s\n", buffer);
+
+    r = MsiRecordGetInteger(hrec, 3);
+    ok(r == 0x80000000, "Expected 0x80000000, got %d\n", r);
+
+    r = MsiRecordGetInteger(hrec, 4);
+    ok(r == 0x80000000, "Expected 0x80000000, got %d\n", r);
 
     MsiCloseHandle(hrec);
 
@@ -2104,6 +2228,17 @@ static void test_try_transform(void)
     MsiCloseHandle(hrec);
     MsiCloseHandle(hview);
     MsiCloseHandle(hdb);
+
+    /* check that the property was added */
+    r = MsiOpenPackage(msifile2, &hpkg);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    sz = MAX_PATH;
+    r = MsiGetProperty(hpkg, "prop", buffer, &sz);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmp(buffer, "val"), "Expected val, got %s\n", buffer);
+
+    MsiCloseHandle(hpkg);
 
     DeleteFile(msifile);
     DeleteFile(msifile2);
@@ -3172,6 +3307,8 @@ static void test_update(void)
     ok(r == ERROR_SUCCESS, "MsiDatabaseCommit failed\n");
     r = MsiCloseHandle(hdb);
     ok(r == ERROR_SUCCESS, "MsiCloseHandle failed\n");
+
+    DeleteFile(msifile);
 }
 
 static void test_special_tables(void)
@@ -3321,6 +3458,8 @@ static void test_select_markers(void)
     ok(r == ERROR_SUCCESS, "MsiCloseHandle failed\n");
     r = MsiCloseHandle(hdb);
     ok(r == ERROR_SUCCESS, "MsiCloseHandle failed\n");
+
+    DeleteFile(msifile);
 }
 
 START_TEST(db)

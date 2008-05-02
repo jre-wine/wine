@@ -38,6 +38,60 @@
 #define ASN_UNIVERSALSTRING (ASN_UNIVERSAL | ASN_PRIMITIVE | 0x1c)
 #define ASN_BMPSTRING       (ASN_UNIVERSAL | ASN_PRIMITIVE | 0x1e)
 
+BOOL CRYPT_EncodeLen(DWORD len, BYTE *pbEncoded, DWORD *pcbEncoded);
+
+typedef BOOL (WINAPI *CryptEncodeObjectExFunc)(DWORD, LPCSTR, const void *,
+ DWORD, PCRYPT_ENCODE_PARA, BYTE *, DWORD *);
+
+struct AsnEncodeSequenceItem
+{
+    const void             *pvStructInfo;
+    CryptEncodeObjectExFunc encodeFunc;
+    DWORD                   size; /* used during encoding, not for your use */
+};
+
+BOOL WINAPI CRYPT_AsnEncodeSequence(DWORD dwCertEncodingType,
+ struct AsnEncodeSequenceItem items[], DWORD cItem, DWORD dwFlags,
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded);
+
+struct AsnConstructedItem
+{
+    BYTE                    tag;
+    const void             *pvStructInfo;
+    CryptEncodeObjectExFunc encodeFunc;
+};
+
+BOOL WINAPI CRYPT_AsnEncodeConstructed(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded);
+BOOL WINAPI CRYPT_AsnEncodeOid(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded);
+BOOL WINAPI CRYPT_AsnEncodeInt(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded);
+/* Like CRYPT_AsnEncodeAlgorithmId, but encodes parameters as an asn.1 NULL
+ * if they are empty.
+ */
+BOOL WINAPI CRYPT_AsnEncodeAlgorithmIdWithNullParams(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded);
+/* Like CRYPT_AsnEncodePKCSContentInfo, but allows the OID to be NULL */
+BOOL WINAPI CRYPT_AsnEncodePKCSContentInfoInternal(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded);
+BOOL WINAPI CRYPT_AsnEncodeOctets(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded);
+
+/* Helper function to check *pcbEncoded, set it to the required size, and
+ * optionally to allocate memory.  Assumes pbEncoded is not NULL.
+ * If CRYPT_ENCODE_ALLOC_FLAG is set in dwFlags, *pbEncoded will be set to a
+ * pointer to the newly allocated memory.
+ */
+BOOL CRYPT_EncodeEnsureSpace(DWORD dwFlags, PCRYPT_ENCODE_PARA pEncodePara,
+ BYTE *pbEncoded, DWORD *pcbEncoded, DWORD bytesNeeded);
+
 /* The following aren't defined in wincrypt.h, as they're "reserved" */
 #define CERT_CERT_PROP_ID 32
 #define CERT_CRL_PROP_ID  33
@@ -50,6 +104,7 @@ HCRYPTPROV CRYPT_GetDefaultProvider(void);
 
 void crypt_oid_init(HINSTANCE hinst);
 void crypt_oid_free(void);
+void crypt_sip_free(void);
 
 /* Some typedefs that make it easier to abstract which type of context we're
  * working with.
