@@ -49,7 +49,7 @@
 /* O = generate interpreted stubs */
 /* w = select win16/win32 output (?) */
 
-static char usage[] =
+static const char usage[] =
 "Usage: widl [options...] infile.idl\n"
 "   -c          Generate client stub\n"
 "   -C file     Name of client stub file (default is infile_c.c)\n"
@@ -133,9 +133,9 @@ enum {
     PREFIX_SERVER_OPTION
 };
 
-static const char *short_options =
+static const char short_options[] =
     "cC:d:D:EhH:I:NpP:sS:tT:uU:VW";
-static struct option long_options[] = {
+static const struct option long_options[] = {
     { "oldnames", no_argument, 0, OLDNAMES_OPTION },
     { "prefix-all", required_argument, 0, PREFIX_ALL_OPTION },
     { "prefix-client", required_argument, 0, PREFIX_CLIENT_OPTION },
@@ -396,8 +396,7 @@ int main(int argc,char *argv[])
     fprintf(idfile, "from %s - Do not edit ***/\n\n", input_name);
     fprintf(idfile, "#include <rpc.h>\n");
     fprintf(idfile, "#include <rpcndr.h>\n\n");
-    fprintf(idfile, "#define INITGUID\n");
-    fprintf(idfile, "#include <guiddef.h>\n\n");
+    fprintf(idfile, "#include <initguid.h>\n\n");
     fprintf(idfile, "#ifdef __cplusplus\n");
     fprintf(idfile, "extern \"C\" {\n");
     fprintf(idfile, "#endif\n\n");

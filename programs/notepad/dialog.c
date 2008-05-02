@@ -217,7 +217,7 @@ void DoOpenFile(LPCWSTR szFileName)
 	OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if(hFile == INVALID_HANDLE_VALUE)
     {
-	ShowLastError();
+	AlertFileNotFound(szFileName);
 	return;
     }
 
@@ -318,12 +318,8 @@ VOID DIALOG_FileOpen(VOID)
     openfilename.lpstrDefExt       = szDefaultExt;
 
 
-    if (GetOpenFileName(&openfilename)) {
-        if (FileExists(openfilename.lpstrFile))
-            DoOpenFile(openfilename.lpstrFile);
-        else
-            AlertFileNotFound(openfilename.lpstrFile);
-    }
+    if (GetOpenFileName(&openfilename))
+        DoOpenFile(openfilename.lpstrFile);
 }
 
 
@@ -791,9 +787,10 @@ VOID DIALOG_HelpAboutWine(VOID)
 {
     static const WCHAR notepadW[] = { 'N','o','t','e','p','a','d','\n',0 };
     WCHAR szNotepad[MAX_STRING_LEN];
+    HICON icon = LoadIcon(Globals.hInstance, MAKEINTRESOURCE(IDI_NOTEPAD));
 
     LoadString(Globals.hInstance, STRING_NOTEPAD, szNotepad, SIZEOF(szNotepad));
-    ShellAbout(Globals.hMainWnd, szNotepad, notepadW, 0);
+    ShellAbout(Globals.hMainWnd, szNotepad, notepadW, icon);
 }
 
 

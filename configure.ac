@@ -1229,6 +1229,9 @@ case $host_cpu in
       linux* | k*bsd*-gnu)
         AC_SUBST(MAIN_BINARY,"wine-glibc")
         AC_SUBST(EXTRA_BINARIES,"wine-kthread wine-pthread wine-preloader") ;;
+      freebsd*)
+        AC_SUBST(MAIN_BINARY,"wine-freebsd")
+        AC_SUBST(EXTRA_BINARIES,"wine-pthread") ;;
     esac
     ;;
 esac
@@ -1746,6 +1749,7 @@ AC_CONFIG_FILES([dlls/olecli32/Makefile])
 AC_CONFIG_FILES([dlls/oledlg/Makefile])
 AC_CONFIG_FILES([dlls/olepro32/Makefile])
 AC_CONFIG_FILES([dlls/olesvr32/Makefile])
+AC_CONFIG_FILES([dlls/olethk32/Makefile])
 AC_CONFIG_FILES([dlls/opengl32/Makefile])
 AC_CONFIG_FILES([dlls/opengl32/tests/Makefile])
 AC_CONFIG_FILES([dlls/pdh/Makefile])

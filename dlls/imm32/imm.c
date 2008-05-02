@@ -74,7 +74,7 @@ static UINT WM_MSIME_DOCUMENTFEED;
  */
 static LRESULT WINAPI IME_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
                                           LPARAM lParam);
-static void UpdateDataInDefaultIMEWindow(HWND hwnd);
+static void UpdateDataInDefaultIMEWindow(HWND hwnd, BOOL showable);
 static void ImmInternalPostIMEMessage(UINT, WPARAM, LPARAM);
 static void ImmInternalSetOpenStatus(BOOL fOpen);
 static HIMCC updateResultStr(HIMCC old, LPWSTR resultstr, DWORD len);
@@ -287,6 +287,7 @@ static HIMCC updateCompStr(HIMCC old, LPWSTR compstr, DWORD len)
                                      &new_one->dwCompReadStrOffset, TRUE);
 
         /* new CompAttr, CompClause, CompStr, dwCursorPos */
+        new_one->dwDeltaStart = 0;
 
         current_offset = updateField(lpcs->dwResultReadClauseLen,
                                      lpcs->dwResultReadClauseOffset,
@@ -438,6 +439,7 @@ static HIMCC updateResultStr(HIMCC old, LPWSTR resultstr, DWORD len)
                                      &new_one->dwCompStrOffset, TRUE);
 
         new_one->dwCursorPos = lpcs->dwCursorPos;
+        new_one->dwDeltaStart = 0;
 
         current_offset = updateField(lpcs->dwResultReadClauseLen,
                                      lpcs->dwResultReadClauseOffset,
@@ -861,6 +863,11 @@ LONG WINAPI ImmGetCompositionStringA(
         TRACE("GSC_CURSORPOS\n");
         rc = compstr->dwCursorPos;
     }
+    else if (dwIndex == GCS_DELTASTART)
+    {
+        TRACE("GCS_DELTASTART\n");
+        rc = compstr->dwDeltaStart;
+    }
     else
     {
         FIXME("Unhandled index 0x%x\n",dwIndex);
@@ -954,6 +961,11 @@ LONG WINAPI ImmGetCompositionStringW(
     {
         TRACE("GSC_CURSORPOS\n");
         rc = compstr->dwCursorPos;
+    }
+    else if (dwIndex == GCS_DELTASTART)
+    {
+        TRACE("GCS_DELTASTART\n");
+        rc = compstr->dwDeltaStart;
     }
     else
     {
@@ -1662,7 +1674,7 @@ BOOL WINAPI ImmSetCompositionStringW(
             root_context->IMC.hCompStr = newCompStr;
 
              wParam = ((const WCHAR*)lpComp)[0];
-             flags |= GCS_COMPCLAUSE | GCS_COMPATTR;
+             flags |= GCS_COMPCLAUSE | GCS_COMPATTR | GCS_DELTASTART;
         }
         else
         {
@@ -1672,7 +1684,7 @@ BOOL WINAPI ImmSetCompositionStringW(
         }
     }
 
-     UpdateDataInDefaultIMEWindow(hwndDefault);
+     UpdateDataInDefaultIMEWindow(hwndDefault,FALSE);
 
      ImmInternalPostIMEMessage(WM_IME_COMPOSITION, wParam, flags);
 
@@ -1967,6 +1979,9 @@ static void PaintDefaultIMEWnd(HWND hwnd)
     HDC hdc = BeginPaint(hwnd,&ps);
     LPCOMPOSITIONSTRING compstr;
     LPBYTE compdata = NULL;
+    HMONITOR monitor;
+    MONITORINFO mon_info;
+    INT offX=0, offY=0;
 
     GetClientRect(hwnd,&rect);
     FillRect(hdc, &rect, (HBRUSH)(COLOR_WINDOW + 1));
@@ -1991,38 +2006,80 @@ static void PaintDefaultIMEWnd(HWND hwnd)
         pt.y = size.cy;
         LPtoDP(hdc,&pt,1);
 
-        if (root_context->IMC.cfCompForm.dwStyle == CFS_POINT ||
-            root_context->IMC.cfCompForm.dwStyle == CFS_FORCE_POSITION)
+        /*
+         * How this works based on tests on windows:
+         * CFS_POINT: then we start our window at the point and grow it as large
+         *    as it needs to be for the string.
+         * CFS_RECT:  we still use the ptCurrentPos as a starting point and our
+         *    window is only as large as we need for the string, but we do not
+         *    grow such that our window exceeds the given rect.  Wrapping if
+         *    needed and possible.   If our ptCurrentPos is outside of our rect
+         *    then no window is displayed.
+         * CFS_FORCE_POSITION: appears to behave just like CFS_POINT
+         *    maybe becase the default MSIME does not do any IME adjusting.
+         */
+        if (root_context->IMC.cfCompForm.dwStyle != CFS_DEFAULT)
         {
             POINT cpt = root_context->IMC.cfCompForm.ptCurrentPos;
             ClientToScreen(root_context->IMC.hWnd,&cpt);
             rect.left = cpt.x;
             rect.top = cpt.y;
+            rect.right = rect.left + pt.x;
+            rect.bottom = rect.top + pt.y;
+            offX=offY=10;
+            monitor = MonitorFromPoint(cpt, MONITOR_DEFAULTTOPRIMARY);
+        }
+        else /* CFS_DEFAULT */
+        {
+            /* Windows places the default IME window in the bottom left */
+            HWND target = root_context->IMC.hWnd;
+            if (!target) target = GetFocus();
+
+            GetWindowRect(target,&rect);
+            rect.top = rect.bottom;
             rect.right = rect.left + pt.x + 20;
             rect.bottom = rect.top + pt.y + 20;
+            offX=offY=10;
+            monitor = MonitorFromWindow(target, MONITOR_DEFAULTTOPRIMARY);
         }
-        else if (root_context->IMC.cfCompForm.dwStyle == CFS_RECT)
+
+        if (root_context->IMC.cfCompForm.dwStyle == CFS_RECT)
         {
-            POINT cpt;
-            cpt.x = root_context->IMC.cfCompForm.rcArea.left;
-            cpt.y = root_context->IMC.cfCompForm.rcArea.top;
-            ClientToScreen(root_context->IMC.hWnd,&cpt);
-            rect.left = cpt.x;
-            rect.top = cpt.y;
-            cpt.x = root_context->IMC.cfCompForm.rcArea.right;
-            cpt.y = root_context->IMC.cfCompForm.rcArea.bottom;
-            ClientToScreen(root_context->IMC.hWnd,&cpt);
-            rect.right = cpt.x;
-            rect.bottom = cpt.y;
+            RECT client;
+            client =root_context->IMC.cfCompForm.rcArea;
+            MapWindowPoints( root_context->IMC.hWnd, 0, (POINT *)&client, 2 );
+            IntersectRect(&rect,&rect,&client);
+            /* TODO:  Wrap the input if needed */
         }
-        else
+
+        if (root_context->IMC.cfCompForm.dwStyle == CFS_DEFAULT)
         {
-            rect.right = rect.left + pt.x + 20;
-            rect.bottom = rect.top + pt.y + 20;
+            /* make sure we are on the desktop */
+            mon_info.cbSize = sizeof(mon_info);
+            GetMonitorInfoW(monitor, &mon_info);
+
+            if (rect.bottom > mon_info.rcWork.bottom)
+            {
+                int shift = rect.bottom - mon_info.rcWork.bottom;
+                rect.top -= shift;
+                rect.bottom -= shift;
+            }
+            if (rect.left < 0)
+            {
+                rect.right -= rect.left;
+                rect.left = 0;
+            }
+            if (rect.right > mon_info.rcWork.right)
+            {
+                int shift = rect.right - mon_info.rcWork.right;
+                rect.left -= shift;
+                rect.right -= shift;
+            }
         }
-        MoveWindow(hwnd, rect.left, rect.top, rect.right - rect.left ,
-                   rect.bottom - rect.top, FALSE);
-        TextOutW(hdc, 10,10, CompString, compstr->dwCompStrLen);
+
+        SetWindowPos(hwnd, HWND_TOPMOST, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, SWP_NOACTIVATE);
+
+        TextOutW(hdc, offX,offY, CompString, compstr->dwCompStrLen);
 
         if (oldfont)
             SelectObject(hdc,oldfont);
@@ -2033,9 +2090,24 @@ static void PaintDefaultIMEWnd(HWND hwnd)
     EndPaint(hwnd,&ps);
 }
 
-static void UpdateDataInDefaultIMEWindow(HWND hwnd)
+static void UpdateDataInDefaultIMEWindow(HWND hwnd, BOOL showable)
 {
+    LPCOMPOSITIONSTRING compstr;
+
+    if (root_context->IMC.hCompStr)
+        compstr = ImmLockIMCC(root_context->IMC.hCompStr);
+    else
+        compstr = NULL;
+
+    if (compstr == NULL || compstr->dwCompStrLen == 0)
+        ShowWindow(hwndDefault,SW_HIDE);
+    else if (showable)
+        ShowWindow(hwndDefault,SW_SHOWNOACTIVATE);
+
     RedrawWindow(hwnd,NULL,NULL,RDW_ERASENOW|RDW_INVALIDATE);
+
+    if (compstr != NULL)
+        ImmUnlockIMCC(root_context->IMC.hCompStr);
 }
 
 /*
@@ -2075,7 +2147,7 @@ static LRESULT WINAPI IME_WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
             if (lParam & GCS_RESULTSTR)
                     IMM_PostResult(root_context);
             else
-                 UpdateDataInDefaultIMEWindow(hwnd);
+                 UpdateDataInDefaultIMEWindow(hwnd,TRUE);
             break;
         case WM_IME_STARTCOMPOSITION:
             TRACE("IME message %s, 0x%x, 0x%x\n",

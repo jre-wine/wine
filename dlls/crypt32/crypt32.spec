@@ -26,6 +26,7 @@
 @ stdcall CertDeleteCertificateFromStore(ptr)
 @ stdcall CertDuplicateCRLContext(ptr)
 @ stdcall CertDuplicateCTLContext(ptr)
+@ stdcall CertDuplicateCertificateChain(ptr)
 @ stdcall CertDuplicateCertificateContext(ptr)
 @ stdcall CertDuplicateStore(ptr)
 @ stdcall CertEnumCRLContextProperties(ptr long)
@@ -85,6 +86,7 @@
 @ stdcall CertSetStoreProperty(ptr long long ptr)
 @ stdcall CertStrToNameA(long str long ptr ptr ptr ptr)
 @ stdcall CertStrToNameW(long wstr long ptr ptr ptr ptr)
+@ stdcall CertVerifyCertificateChainPolicy(str ptr ptr ptr)
 @ stdcall CertVerifyCRLRevocation(long ptr long ptr)
 @ stdcall CertVerifyCRLTimeValidity(ptr ptr)
 @ stub CertVerifyCTLUsage
@@ -197,17 +199,18 @@
 @ stdcall I_CryptFreeLruCache(ptr long long)
 @ stdcall I_CryptFreeTls(long long)
 @ stdcall I_CryptGetAsn1Decoder(long)
+@ stdcall I_CryptGetAsn1Encoder(long)
 @ stdcall I_CryptGetDefaultCryptProv(long)
 @ stub I_CryptGetDefaultCryptProvForEncrypt
 @ stdcall I_CryptGetOssGlobal(long)
 @ stdcall I_CryptGetTls(long)
 @ stub I_CryptInsertLruEntry
-@ stdcall I_CryptInstallAsn1Module(long long long)
+@ stdcall I_CryptInstallAsn1Module(ptr long ptr)
 @ stdcall I_CryptInstallOssGlobal(long long long)
 @ stdcall I_CryptReadTrustedPublisherDWORDValueFromRegistry(wstr ptr)
 @ stub I_CryptReleaseLruEntry
 @ stdcall I_CryptSetTls(long ptr)
-@ stdcall I_CryptUninstallAsn1Module(ptr)
+@ stdcall I_CryptUninstallAsn1Module(long)
 @ stub I_CryptUninstallOssGlobal
 @ stub PFXExportCertStore
 @ stub PFXImportCertStore

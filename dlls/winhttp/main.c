@@ -20,10 +20,9 @@
 
 #include <stdarg.h>
 
-#define COBJMACROS
-
 #include "windef.h"
 #include "winbase.h"
+#include "winhttp.h"
 
 #include "wine/debug.h"
 
@@ -81,4 +80,11 @@ HRESULT WINAPI DllUnregisterServer(void)
 {
     FIXME("()\n");
     return S_OK;
+}
+
+BOOL WINAPI WinHttpCheckPlatform(void)
+{
+    FIXME("stub\n");
+    SetLastError(ERROR_NOT_SUPPORTED);
+    return FALSE;
 }

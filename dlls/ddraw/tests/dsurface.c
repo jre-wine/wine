@@ -183,6 +183,25 @@ static void MipMapCreationTest(void)
 
     /* Destroy the surface. */
     IDirectDrawSurface_Release(lpDDSMipMapTest);
+
+
+    /* Fifth mipmap creation test: try to create a surface with
+       DDSCAPS_COMPLEX, DDSCAPS_MIPMAP, DDSD_MIPMAPCOUNT,
+       where dwMipMapCount = 0. This should fail. */
+
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_MIPMAPCOUNT;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP;
+    U2(ddsd).dwMipMapCount = 0;
+    ddsd.dwWidth = 128;
+    ddsd.dwHeight = 32;
+    rc = IDirectDraw_CreateSurface(lpDD, &ddsd, &lpDDSMipMapTest, NULL);
+    ok(rc==DDERR_INVALIDPARAMS,"CreateSurface returned: %x\n",rc);
+
+    /* Destroy the surface. */
+    if( rc == DD_OK )
+        IDirectDrawSurface_Release(lpDDSMipMapTest);
+
 }
 
 static void SrcColorKey32BlitTest(void)
@@ -1629,6 +1648,33 @@ static void test_lockrect_invalid(void)
                     ", expected DDERR_INVALIDPARAMS (0x%08x)\n", hr, rect->left, rect->top,
                     rect->right, rect->bottom, DDERR_INVALIDPARAMS);
         }
+
+        hr = IDirectDrawSurface_Lock(surface, NULL, &locked_desc, DDLOCK_WAIT, NULL);
+        ok(hr == DD_OK, "IDirectDrawSurface_Lock(rect = NULL) failed (0x%08x)\n", hr);
+        hr = IDirectDrawSurface_Lock(surface, NULL, &locked_desc, DDLOCK_WAIT, NULL);
+        ok(hr == DDERR_SURFACEBUSY, "Double lock(rect = NULL) returned 0x%08x\n", hr);
+        if(SUCCEEDED(hr)) {
+            hr = IDirectDrawSurface_Unlock(surface, NULL);
+            ok(SUCCEEDED(hr), "Unlock failed (0x%08x)\n", hr);
+        }
+        hr = IDirectDrawSurface_Unlock(surface, NULL);
+        ok(SUCCEEDED(hr), "Unlock failed (0x%08x)\n", hr);
+
+        memset(&locked_desc, 0, sizeof(locked_desc));
+        locked_desc.dwSize = sizeof(locked_desc);
+        hr = IDirectDrawSurface_Lock(surface, &valid[0], &locked_desc, DDLOCK_WAIT, NULL);
+        ok(hr == DD_OK, "IDirectDrawSurface_Lock(rect = [%d, %d]->[%d, %d]) failed (0x%08x)\n",
+           valid[0].left, valid[0].top, valid[0].right, valid[0].bottom, hr);
+        hr = IDirectDrawSurface_Lock(surface, &valid[0], &locked_desc, DDLOCK_WAIT, NULL);
+        ok(hr == DDERR_SURFACEBUSY, "Double lock(rect = [%d, %d]->[%d, %d]) failed (0x%08x)\n",
+           valid[0].left, valid[0].top, valid[0].right, valid[0].bottom, hr);
+
+        /* Locking a different rectangle returns DD_OK, but it seems to break the surface.
+         * Afterwards unlocking the surface fails(NULL rectangle, and both locked rectangles
+         */
+
+        hr = IDirectDrawSurface_Unlock(surface, NULL);
+        ok(hr == DD_OK, "Unlock returned (0x%08x)\n", hr);
 
         IDirectDrawSurface_Release(surface);
     }

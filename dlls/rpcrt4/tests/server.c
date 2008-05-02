@@ -85,6 +85,15 @@ s_str_length(const char *s)
 }
 
 int
+s_cstr_length(const char *s, int n)
+{
+  int len = 0;
+  while (0 < n-- && *s++)
+    ++len;
+  return len;
+}
+
+int
 s_dot_self(vector_t *v)
 {
   return s_square(v->x) + s_square(v->y) + s_square(v->z);
@@ -226,6 +235,16 @@ s_sum_cps(cps_t *cps)
 }
 
 int
+s_sum_cpsc(cpsc_t *cpsc)
+{
+  int sum = 0;
+  int i;
+  for (i = 0; i < (cpsc->c ? cpsc->a : cpsc->b); ++i)
+    sum += cpsc->ca[i];
+  return sum;
+}
+
+int
 s_square_puint(puint_t p)
 {
   int n = atoi(p);
@@ -298,6 +317,39 @@ s_square_encue(encue_t *eue)
   }
 }
 
+int
+s_sum_toplev_conf_2n(int *x, int n)
+{
+  int sum = 0;
+  int i;
+  for (i = 0; i < 2 * n; ++i)
+    sum += x[i];
+  return sum;
+}
+
+int
+s_sum_toplev_conf_cond(int *x, int a, int b, int c)
+{
+  int sum = 0;
+  int n = c ? a : b;
+  int i;
+  for (i = 0; i < n; ++i)
+    sum += x[i];
+  return sum;
+}
+
+double
+s_sum_aligns(aligns_t *a)
+{
+  return a->c + a->i + a->s + a->d;
+}
+
+int
+s_sum_padded(padded_t *p)
+{
+  return p->i + p->c;
+}
+
 void
 s_stop(void)
 {
@@ -343,8 +395,10 @@ basic_tests(void)
   static pvectors_t pvecs = {&vec1, &pvec2};
   static sp_inner_t spi = {42};
   static sp_t sp = {-13, &spi};
+  static aligns_t aligns = {3, 4, 5, 6.0};
   pints_t pints;
   ptypes_t ptypes;
+  padded_t padded;
   int i1, i2, i3, *pi2, *pi3, **ppi3;
   double u, v;
   float s, t;
@@ -416,6 +470,12 @@ basic_tests(void)
   ok(enum_ord(E2) == 2, "RPC enum_ord\n");
   ok(enum_ord(E3) == 3, "RPC enum_ord\n");
   ok(enum_ord(E4) == 4, "RPC enum_ord\n");
+
+  ok(sum_aligns(&aligns) == 18.0, "RPC sum_aligns\n");
+
+  padded.i = -3;
+  padded.c = 8;
+  ok(sum_padded(&padded) == 5, "RPC sum_padded\n");
 }
 
 static void
@@ -576,6 +636,7 @@ pointer_tests(void)
 static void
 array_tests(void)
 {
+  static const char str1[25] = "Hello";
   static int m[2][3][4] =
   {
     {{1, 2, 3, 4}, {-1, -3, -5, -7}, {0, 2, 4, 6}},
@@ -584,8 +645,11 @@ array_tests(void)
   static int c[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
   static vector_t vs[2] = {{1, -2, 3}, {4, -5, -6}};
   cps_t cps;
+  cpsc_t cpsc;
   cs_t *cs;
   int n;
+
+  ok(cstr_length(str1, sizeof str1) == strlen(str1), "RPC cstr_length\n");
 
   ok(sum_fixed_int_3d(m) == 4116, "RPC sum_fixed_int_3d\n");
 
@@ -616,6 +680,21 @@ array_tests(void)
   cps.n = 3;
   cps.ca2 = &c[3];
   ok(sum_cps(&cps) == 53, "RPC sum_cps\n");
+
+  cpsc.a = 4;
+  cpsc.b = 5;
+  cpsc.c = 1;
+  cpsc.ca = c;
+  ok(sum_cpsc(&cpsc) == 6, "RPC sum_cpsc\n");
+  cpsc.a = 4;
+  cpsc.b = 5;
+  cpsc.c = 0;
+  cpsc.ca = c;
+  ok(sum_cpsc(&cpsc) == 10, "RPC sum_cpsc\n");
+
+  ok(sum_toplev_conf_2n(c, 3) == 15, "RPC sum_toplev_conf_2n\n");
+  ok(sum_toplev_conf_cond(c, 5, 6, 1) == 10, "RPC sum_toplev_conf_cond\n");
+  ok(sum_toplev_conf_cond(c, 5, 6, 0) == 15, "RPC sum_toplev_conf_cond\n");
 }
 
 static void

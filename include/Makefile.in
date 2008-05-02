@@ -78,6 +78,7 @@ SRCDIR_INCLUDES = \
 	axextend.idl \
 	basetsd.h \
 	basetyps.h \
+	bcrypt.h \
 	cderr.h \
 	cfgmgr32.h \
 	cguid.h \
@@ -160,6 +161,7 @@ SRCDIR_INCLUDES = \
 	dxerr9.h \
 	dxfile.h \
 	dyngraph.idl \
+	errorrep.h \
 	errors.h \
 	evcode.h \
 	evntrace.h \
@@ -181,12 +183,14 @@ SRCDIR_INCLUDES = \
 	guiddef.h \
 	hlguids.h \
 	htmlhelp.h \
+	i_cryptasn1tls.h \
 	icm.h \
 	icmpapi.h \
 	idispids.h \
 	imagehlp.h \
 	imm.h \
 	initguid.h \
+	intshcut.h \
 	ipexport.h \
 	iphlpapi.h \
 	ipifcons.h \
@@ -370,6 +374,7 @@ SRCDIR_INCLUDES = \
 	wine/unicode.h \
 	winerror.h \
 	wingdi.h \
+	winhttp.h \
 	wininet.h \
 	winineti.h \
 	winioctl.h \

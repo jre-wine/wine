@@ -117,6 +117,9 @@ static const struct {
     {"GL_NV_vertex_program1_1",             NV_VERTEX_PROGRAM1_1},
     {"GL_NV_vertex_program2",               NV_VERTEX_PROGRAM2},
     {"GL_NV_vertex_program3",               NV_VERTEX_PROGRAM3},
+
+    /* SGI */
+    {"GL_SGIS_generate_mipmap",             SGIS_GENERATE_MIPMAP},
 };
 
 /**********************************************************
@@ -403,40 +406,6 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
     BOOL        return_value = TRUE;
     int         i;
     HDC         hdc;
-    HMODULE     mod_gl;
-
-#ifdef USE_WIN32_OPENGL
-#define USE_GL_FUNC(pfn) pfn = (void*)GetProcAddress(mod_gl, #pfn);
-    mod_gl = LoadLibraryA("opengl32.dll");
-    if(!mod_gl) {
-        ERR("Can't load opengl32.dll!\n");
-        return FALSE;
-    }
-#else
-#define USE_GL_FUNC(pfn) pfn = (void*)pwglGetProcAddress(#pfn);
-    /* To bypass the opengl32 thunks load wglGetProcAddress from gdi32 (glXGetProcAddress wrapper) instead of opengl32's */
-    mod_gl = GetModuleHandleA("gdi32.dll");
-#endif
-
-/* Load WGL core functions from opengl32.dll */
-#define USE_WGL_FUNC(pfn) p##pfn = (void*)GetProcAddress(mod_gl, #pfn);
-    WGL_FUNCS_GEN;
-#undef USE_WGL_FUNC
-
-    if(!pwglGetProcAddress) {
-        ERR("Unable to load wglGetProcAddress!\n");
-        return FALSE;
-    }
-
-/* Dynamicly load all GL core functions */
-    GL_FUNCS_GEN;
-#undef USE_GL_FUNC
-
-    /* Make sure that we've got a context */
-    /* TODO: CreateFakeGLContext should really take a display as a parameter  */
-    /* Only save the values obtained when a display is provided */
-    if (!WineD3D_CreateFakeGLContext() || wined3d_fake_gl_context_foreign)
-        return_value = FALSE;
 
     TRACE_(d3d_caps)("(%p)\n", gl_info);
 
@@ -850,12 +819,21 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
              * shader capabilities, so we use the shader capabilities to distinguish between FX and 6xxx/7xxx.
              */
             if(WINE_D3D9_CAPABLE(gl_info) && (gl_info->vs_nv_version == VS_VERSION_30)) {
-                if (strstr(gl_info->gl_renderer, "7800") ||
-                    strstr(gl_info->gl_renderer, "7900") ||
-                    strstr(gl_info->gl_renderer, "7950") ||
-                    strstr(gl_info->gl_renderer, "Quadro FX 4") ||
-                    strstr(gl_info->gl_renderer, "Quadro FX 5"))
-                        gl_info->gl_card = CARD_NVIDIA_GEFORCE_7800GT;
+                if (strstr(gl_info->gl_renderer, "8800"))
+                    gl_info->gl_card = CARD_NVIDIA_GEFORCE_8800GTS;
+                else if(strstr(gl_info->gl_renderer, "8600") ||
+                        strstr(gl_info->gl_renderer, "8700"))
+                            gl_info->gl_card = CARD_NVIDIA_GEFORCE_8600GT;
+                else if(strstr(gl_info->gl_renderer, "8300") ||
+                        strstr(gl_info->gl_renderer, "8400") ||
+                        strstr(gl_info->gl_renderer, "8500"))
+                            gl_info->gl_card = CARD_NVIDIA_GEFORCE_8300GS;
+                else if(strstr(gl_info->gl_renderer, "7800") ||
+                        strstr(gl_info->gl_renderer, "7900") ||
+                        strstr(gl_info->gl_renderer, "7950") ||
+                        strstr(gl_info->gl_renderer, "Quadro FX 4") ||
+                        strstr(gl_info->gl_renderer, "Quadro FX 5"))
+                            gl_info->gl_card = CARD_NVIDIA_GEFORCE_7800GT;
                 else if(strstr(gl_info->gl_renderer, "6800") ||
                         strstr(gl_info->gl_renderer, "7600"))
                             gl_info->gl_card = CARD_NVIDIA_GEFORCE_6800;
@@ -1043,8 +1021,6 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
         }
     }
 
-
-    WineD3D_ReleaseFakeGLContext();
     return return_value;
 }
 #undef GLINFO_LOCATION
@@ -1504,6 +1480,67 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
         }
     }
 
+    if (Usage & WINED3DUSAGE_AUTOGENMIPMAP) {
+        if(!GL_SUPPORT(SGIS_GENERATE_MIPMAP)) {
+            TRACE_(d3d_caps)("[FAILED] - No mipmap generation support\n");
+            return WINED3DERR_NOTAVAILABLE;
+        }
+    }
+
+    if(RType == WINED3DRTYPE_VOLUMETEXTURE) {
+        if(!GL_SUPPORT(EXT_TEXTURE3D)) {
+            TRACE_(d3d_caps)("[FAILED] - No volume texture support\n");
+            return WINED3DERR_NOTAVAILABLE;
+        }
+        /* Filter formats that need conversion; For one part, this conversion is unimplemented,
+         * and volume textures are huge, so it would be a big performance hit. Unless we hit an
+         * app needing one of those formats, don't advertize them to avoid leading apps into
+         * temptation. The windows drivers don't support most of those formats on volumes anyway,
+         * except of R32F.
+         */
+        switch(CheckFormat) {
+            case WINED3DFMT_P8:
+            case WINED3DFMT_A4L4:
+            case WINED3DFMT_R32F:
+            case WINED3DFMT_R16F:
+            case WINED3DFMT_X8L8V8U8:
+            case WINED3DFMT_L6V5U5:
+                TRACE_(d3d_caps)("[FAILED] - No converted formats on volumes\n");
+                return WINED3DERR_NOTAVAILABLE;
+
+            case WINED3DFMT_Q8W8V8U8:
+            case WINED3DFMT_V16U16:
+            if(!GL_SUPPORT(NV_TEXTURE_SHADER)) {
+                TRACE_(d3d_caps)("[FAILED] - No converted formats on volumes\n");
+                return WINED3DERR_NOTAVAILABLE;
+            }
+            break;
+
+            case WINED3DFMT_V8U8:
+            if(!GL_SUPPORT(NV_TEXTURE_SHADER) || !GL_SUPPORT(ATI_ENVMAP_BUMPMAP)) {
+                TRACE_(d3d_caps)("[FAILED] - No converted formats on volumes\n");
+                return WINED3DERR_NOTAVAILABLE;
+            }
+            break;
+
+            case WINED3DFMT_DXT1:
+            case WINED3DFMT_DXT2:
+            case WINED3DFMT_DXT3:
+            case WINED3DFMT_DXT4:
+            case WINED3DFMT_DXT5:
+                /* The GL_EXT_texture_compression_s3tc spec requires that loading an s3tc
+                 * compressed texture results in an error. While the D3D refrast does
+                 * support s3tc volumes, at least the nvidia windows driver does not, so
+                 * we're free not to support this format.
+                 */
+                TRACE_(d3d_caps)("[FAILED] - DXTn does not support 3D textures\n");
+                return WINED3DERR_NOTAVAILABLE;
+
+            default:
+                /* Do nothing, continue with checking the format below */
+                break;
+        }
+    }
     /* TODO: Check support against more of the WINED3DUSAGE_QUERY_* constants
      * See http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/IDirect3D9__CheckDeviceFormat.asp
      * and http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/D3DUSAGE_QUERY.asp */
@@ -1715,7 +1752,8 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
             return WINED3D_OK;
 
         /*****
-         *  Not supported for now: Bump mapping formats
+         *  Not supported everywhere(depends on GL_ATI_envmap_bumpmap or
+         *  GL_NV_texture_shader), but advertized to make apps happy.
          *  Enable some because games often fail when they are not available
          *  and are still playable even without bump mapping
          */
@@ -1724,10 +1762,18 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
         case WINED3DFMT_L6V5U5:
         case WINED3DFMT_X8L8V8U8:
         case WINED3DFMT_Q8W8V8U8:
-        case WINED3DFMT_W11V11U10:
-        case WINED3DFMT_A2W10V10U10:
             WARN_(d3d_caps)("[Not supported, but pretended to do]\n");
             return WINED3D_OK;
+
+        /* Those are not advertized by the nvidia windows driver, and not
+         * supported natively by GL_NV_texture_shader or GL_ATI_envmap_bumpmap.
+         * WINED3DFMT_A2W10V10U10 could be loaded into shaders using the unsigned
+         * ARGB format if needed
+         */
+        case WINED3DFMT_W11V11U10:
+        case WINED3DFMT_A2W10V10U10:
+            WARN_(d3d_caps)("[FAILED]\n");
+            return WINED3DERR_NOTAVAILABLE;
 
         /*****
          *  DXTN Formats: Handled above
@@ -1837,7 +1883,8 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
                                       WINED3DCAPS2_FULLSCREENGAMMA |
                                       WINED3DCAPS2_DYNAMICTEXTURES;
     *pCaps->Caps3                   = WINED3DCAPS3_ALPHA_FULLSCREEN_FLIP_OR_DISCARD;
-    *pCaps->PresentationIntervals   = WINED3DPRESENT_INTERVAL_IMMEDIATE;
+    *pCaps->PresentationIntervals   = WINED3DPRESENT_INTERVAL_IMMEDIATE  |
+                                      WINED3DPRESENT_INTERVAL_ONE;
 
     *pCaps->CursorCaps              = WINED3DCURSORCAPS_COLOR            |
                                       WINED3DCURSORCAPS_LOWRES;
@@ -2231,12 +2278,23 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
             *pCaps->PixelShaderVersion = WINED3DPS_VERSION(2,0);
         else
             *pCaps->PixelShaderVersion = WINED3DPS_VERSION(3,0);
-        /* FIXME: The following line is card dependent. -1.0 to 1.0 is a safe default clamp range for now */
-        *pCaps->PixelShader1xMaxValue = 1.0;
+        /* FIXME: The following line is card dependent. -8.0 to 8.0 is the
+         * Direct3D minimum requirement.
+         *
+         * Both GL_ARB_fragment_program and GLSL require a "maximum representable magnitude"
+         * of colors to be 2^10, and 2^32 for other floats. Should we use 1024 here?
+         *
+         * The problem is that the refrast clamps temporary results in the shader to
+         * [-MaxValue;+MaxValue]. If the card's max value is bigger than the one we advertize here,
+         * then applications may miss the clamping behavior. On the other hand, if it is smaller,
+         * the shader will generate incorrect results too. Unfortunately, GL deliberately doesn't
+         * offer a way to query this.
+         */
+        *pCaps->PixelShader1xMaxValue = 8.0;
         TRACE_(d3d_caps)("Hardware pixel shader version 3.0 enabled (GLSL)\n");
     } else if (ps_selected_mode == SHADER_ARB) {
         *pCaps->PixelShaderVersion    = WINED3DPS_VERSION(1,4);
-        *pCaps->PixelShader1xMaxValue = 1.0;
+        *pCaps->PixelShader1xMaxValue = 8.0;
         TRACE_(d3d_caps)("Hardware pixel shader version 1.4 enabled (ARB_PROGRAM)\n");
     } else {
         *pCaps->PixelShaderVersion    = 0;
@@ -2489,6 +2547,7 @@ ULONG WINAPI D3DCB_DefaultDestroyVolume(IWineD3DVolume *pVolume) {
 #define PUSH1(att)        attribs[nAttribs++] = (att);
 #define GLINFO_LOCATION (Adapters[0].gl_info)
 BOOL InitAdapters(void) {
+    static HMODULE mod_gl;
     BOOL ret;
     int ps_selected_mode, vs_selected_mode;
 
@@ -2498,25 +2557,79 @@ BOOL InitAdapters(void) {
     if(numAdapters > 0) return TRUE;
 
     TRACE("Initializing adapters\n");
+
+    if(!mod_gl) {
+#ifdef USE_WIN32_OPENGL
+#define USE_GL_FUNC(pfn) pfn = (void*)GetProcAddress(mod_gl, #pfn);
+        mod_gl = LoadLibraryA("opengl32.dll");
+        if(!mod_gl) {
+            ERR("Can't load opengl32.dll!\n");
+            return FALSE;
+        }
+#else
+#define USE_GL_FUNC(pfn) pfn = (void*)pwglGetProcAddress(#pfn);
+        /* To bypass the opengl32 thunks load wglGetProcAddress from gdi32 (glXGetProcAddress wrapper) instead of opengl32's */
+        mod_gl = GetModuleHandleA("gdi32.dll");
+#endif
+    }
+
+/* Load WGL core functions from opengl32.dll */
+#define USE_WGL_FUNC(pfn) p##pfn = (void*)GetProcAddress(mod_gl, #pfn);
+    WGL_FUNCS_GEN;
+#undef USE_WGL_FUNC
+
+    if(!pwglGetProcAddress) {
+        ERR("Unable to load wglGetProcAddress!\n");
+        return FALSE;
+    }
+
+/* Dynamically load all GL core functions */
+    GL_FUNCS_GEN;
+#undef USE_GL_FUNC
+
     /* For now only one default adapter */
     {
+        int iPixelFormat;
+        int attribs[8];
+        int values[8];
+        int nAttribs = 0;
+        int res;
+        WineD3D_PixelFormat *cfgs;
         int attribute;
         DISPLAY_DEVICEW DisplayDevice;
+        HDC hdc;
 
         TRACE("Initializing default adapter\n");
         Adapters[0].monitorPoint.x = -1;
         Adapters[0].monitorPoint.y = -1;
 
+        if (!WineD3D_CreateFakeGLContext()) {
+            ERR("Failed to get a gl context for default adapter\n");
+            HeapFree(GetProcessHeap(), 0, Adapters);
+            WineD3D_ReleaseFakeGLContext();
+            return FALSE;
+        }
+
         ret = IWineD3DImpl_FillGLCaps(&Adapters[0].gl_info);
         if(!ret) {
             ERR("Failed to initialize gl caps for default adapter\n");
             HeapFree(GetProcessHeap(), 0, Adapters);
+            WineD3D_ReleaseFakeGLContext();
             return FALSE;
         }
         ret = initPixelFormats(&Adapters[0].gl_info);
         if(!ret) {
             ERR("Failed to init gl formats\n");
             HeapFree(GetProcessHeap(), 0, Adapters);
+            WineD3D_ReleaseFakeGLContext();
+            return FALSE;
+        }
+
+        hdc = pwglGetCurrentDC();
+        if(!hdc) {
+            ERR("Failed to get gl HDC\n");
+            HeapFree(GetProcessHeap(), 0, Adapters);
+            WineD3D_ReleaseFakeGLContext();
             return FALSE;
         }
 
@@ -2529,46 +2642,37 @@ BOOL InitAdapters(void) {
         TRACE("DeviceName: %s\n", debugstr_w(DisplayDevice.DeviceName));
         strcpyW(Adapters[0].DeviceName, DisplayDevice.DeviceName);
 
-        if (WineD3D_CreateFakeGLContext()) {
-            int iPixelFormat;
-            int attribs[8];
-            int values[8];
-            int nAttribs = 0;
-            int res;
-            WineD3D_PixelFormat *cfgs;
+        attribute = WGL_NUMBER_PIXEL_FORMATS_ARB;
+        GL_EXTCALL(wglGetPixelFormatAttribivARB(hdc, 0, 0, 1, &attribute, &Adapters[0].nCfgs));
 
-            attribute = WGL_NUMBER_PIXEL_FORMATS_ARB;
-            GL_EXTCALL(wglGetPixelFormatAttribivARB(wined3d_fake_gl_context_hdc, 0, 0, 1, &attribute, &Adapters[0].nCfgs));
+        Adapters[0].cfgs = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, Adapters[0].nCfgs *sizeof(WineD3D_PixelFormat));
+        cfgs = Adapters[0].cfgs;
+        PUSH1(WGL_RED_BITS_ARB)
+        PUSH1(WGL_GREEN_BITS_ARB)
+        PUSH1(WGL_BLUE_BITS_ARB)
+        PUSH1(WGL_ALPHA_BITS_ARB)
+        PUSH1(WGL_DEPTH_BITS_ARB)
+        PUSH1(WGL_STENCIL_BITS_ARB)
 
-            Adapters[0].cfgs = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, Adapters[0].nCfgs *sizeof(WineD3D_PixelFormat));
-            cfgs = Adapters[0].cfgs;
-            PUSH1(WGL_RED_BITS_ARB)
-            PUSH1(WGL_GREEN_BITS_ARB)
-            PUSH1(WGL_BLUE_BITS_ARB)
-            PUSH1(WGL_ALPHA_BITS_ARB)
-            PUSH1(WGL_DEPTH_BITS_ARB)
-            PUSH1(WGL_STENCIL_BITS_ARB)
+        for(iPixelFormat=1; iPixelFormat<=Adapters[0].nCfgs; iPixelFormat++) {
+            res = GL_EXTCALL(wglGetPixelFormatAttribivARB(hdc, iPixelFormat, 0, nAttribs, attribs, values));
 
-            for(iPixelFormat=1; iPixelFormat<=Adapters[0].nCfgs; iPixelFormat++) {
-                res = GL_EXTCALL(wglGetPixelFormatAttribivARB(wined3d_fake_gl_context_hdc, iPixelFormat, 0, nAttribs, attribs, values));
+            if(!res)
+                continue;
 
-                if(!res)
-                    continue;
+            /* Cache the pixel format */
+            cfgs->iPixelFormat = iPixelFormat;
+            cfgs->redSize = values[0];
+            cfgs->greenSize = values[1];
+            cfgs->blueSize = values[2];
+            cfgs->alphaSize = values[3];
+            cfgs->depthSize = values[4];
+            cfgs->stencilSize = values[5];
 
-                /* Cache the pixel format */
-                cfgs->iPixelFormat = iPixelFormat;
-                cfgs->redSize = values[0];
-                cfgs->greenSize = values[1];
-                cfgs->blueSize = values[2];
-                cfgs->alphaSize = values[3];
-                cfgs->depthSize = values[4];
-                cfgs->stencilSize = values[5];
-
-                TRACE("iPixelFormat=%d, RGBA=%d/%d/%d/%d, depth=%d, stencil=%d\n", cfgs->iPixelFormat, cfgs->redSize, cfgs->greenSize, cfgs->blueSize, cfgs->alphaSize, cfgs->depthSize, cfgs->stencilSize);
-                cfgs++;
-            }
-            WineD3D_ReleaseFakeGLContext();
+            TRACE("iPixelFormat=%d, RGBA=%d/%d/%d/%d, depth=%d, stencil=%d\n", cfgs->iPixelFormat, cfgs->redSize, cfgs->greenSize, cfgs->blueSize, cfgs->alphaSize, cfgs->depthSize, cfgs->stencilSize);
+            cfgs++;
         }
+        WineD3D_ReleaseFakeGLContext();
 
         select_shader_mode(&Adapters[0].gl_info, WINED3DDEVTYPE_HAL, &ps_selected_mode, &vs_selected_mode);
         select_shader_max_constants(ps_selected_mode, vs_selected_mode, &Adapters[0].gl_info);

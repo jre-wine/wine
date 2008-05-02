@@ -124,6 +124,8 @@ struct HTMLDocument {
     IOleInPlaceFrame *frame;
     IOleInPlaceUIWindow *ip_window;
 
+    IOleUndoManager *undomgr;
+
     BSCallback *bscallback;
     IMoniker *mon;
     BSTR url;
@@ -180,6 +182,7 @@ struct NSContainer {
     nsIBaseWindow *window;
     nsIWebBrowserFocus *focus;
 
+    nsIEditor *editor;
     nsIController *editor_controller;
 
     LONG ref;
@@ -268,13 +271,14 @@ struct HTMLDOMNode {
 };
 
 typedef struct {
+    HTMLDOMNode node;
+
     const IHTMLElementVtbl *lpHTMLElementVtbl;
     const IHTMLElement2Vtbl *lpHTMLElement2Vtbl;
 
     void (*destructor)(IUnknown*);
 
     nsIDOMHTMLElement *nselem;
-    HTMLDOMNode *node;
 
     IUnknown *impl;
 } HTMLElement;
@@ -394,7 +398,7 @@ nsICommandParams *create_nscommand_params(void);
 nsIMutableArray *create_nsarray(void);
 nsIWritableVariant *create_nsvariant(void);
 void nsnode_to_nsstring(nsIDOMNode*,nsAString*);
-nsIController *get_editor_controller(NSContainer*);
+void get_editor_controller(NSContainer*);
 void init_nsevents(NSContainer*);
 
 BSCallback *create_bscallback(IMoniker*);
@@ -411,7 +415,8 @@ IHTMLStyleSheet *HTMLStyleSheet_Create(void);
 void detach_selection(HTMLDocument*);
 void detach_ranges(HTMLDocument*);
 
-void HTMLElement_Create(HTMLDOMNode*);
+HTMLElement *HTMLElement_Create(nsIDOMNode*);
+void HTMLAnchorElement_Create(HTMLElement*);
 void HTMLBodyElement_Create(HTMLElement*);
 void HTMLInputElement_Create(HTMLElement*);
 void HTMLSelectElement_Create(HTMLElement*);
@@ -453,6 +458,7 @@ HRESULT editor_exec_copy(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
 HRESULT editor_exec_cut(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
 HRESULT editor_exec_paste(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
 void handle_edit_load(HTMLDocument *This);
+HRESULT editor_is_dirty(HTMLDocument*);
 
 extern DWORD mshtml_tls;
 

@@ -1859,6 +1859,8 @@ enum message_type
     unsigned int    get_first; /* first message code to get */
     unsigned int    get_last;  /* last message code to get */
     unsigned int    hw_id;     /* id of the previous hardware message (or 0) */
+    unsigned int    wake_mask; /* wakeup bits mask */
+    unsigned int    changed_mask; /* changed bits mask */
 @REPLY
     user_handle_t   win;       /* window handle */
     int             type;      /* message type */
@@ -1878,7 +1880,7 @@ enum message_type
 
 /* Reply to a sent message */
 @REQ(reply_message)
-    unsigned int    result;    /* message result */
+    unsigned long   result;    /* message result */
     int             remove;    /* should we remove the message? */
     VARARG(data,bytes);        /* message data for sent messages */
 @END
@@ -1896,7 +1898,7 @@ enum message_type
 @REQ(get_message_reply)
     int             cancel;    /* cancel message if not ready? */
 @REPLY
-    unsigned int    result;    /* message result */
+    unsigned long   result;    /* message result */
     VARARG(data,bytes);        /* message data for sent messages */
 @END
 
@@ -2256,6 +2258,7 @@ enum message_type
 #define UPDATE_ALLCHILDREN     0x10  /* force repaint of all children */
 #define UPDATE_NOCHILDREN      0x20  /* don't try to repaint any children */
 #define UPDATE_NOREGION        0x40  /* don't return a region, only the flags */
+#define UPDATE_DELAYED_ERASE   0x80  /* still needs erase after BeginPaint */
 
 
 /* Update the z order of a window so that a given rectangle is fully visible */
@@ -2914,4 +2917,17 @@ enum message_type
 @REQ(make_process_system)
 @REPLY
     obj_handle_t event;           /* event signaled when all user processes have exited */
+@END
+
+
+/* Get detailed fixed-size information about a token */
+@REQ(get_token_statistics)
+    obj_handle_t   handle;        /* handle to the object */
+@REPLY
+    luid_t         token_id;      /* locally-unique identifier of the token */
+    luid_t         modified_id;   /* locally-unique identifier of the modified version of the token */
+    int            primary;       /* is the token primary or impersonation? */
+    int            impersonation_level; /* level of impersonation */
+    int            group_count;   /* the number of groups the token is a member of */
+    int            privilege_count; /* the number of privileges the token has */
 @END

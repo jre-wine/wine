@@ -52,7 +52,7 @@ static void shader_arb_load_constantsF(IWineD3DBaseShaderImpl* This, WineD3D_GL_
         unsigned int max_constants, float* constants, struct list *constant_list) {
     constants_entry *constant;
     local_constant* lconst;
-    DWORD i, j;
+    DWORD i, j, k;
     DWORD *idx;
 
     if (TRACE_ON(d3d_shader)) {
@@ -67,12 +67,43 @@ static void shader_arb_load_constantsF(IWineD3DBaseShaderImpl* This, WineD3D_GL_
             }
         }
     }
-    LIST_FOR_EACH_ENTRY(constant, constant_list, constants_entry, entry) {
-        idx = constant->idx;
-        j = constant->count;
-        while (j--) {
-            i = *idx++;
-            GL_EXTCALL(glProgramEnvParameter4fvARB(target_type, i, constants + (i * 4)));
+    /* In 1.X pixel shaders constants are implicitly clamped in the range [-1;1] */
+    if(target_type == GL_FRAGMENT_PROGRAM_ARB &&
+       WINED3DSHADER_VERSION_MAJOR(This->baseShader.hex_version) == 1) {
+        float lcl_const[4];
+        LIST_FOR_EACH_ENTRY(constant, constant_list, constants_entry, entry) {
+            idx = constant->idx;
+            j = constant->count;
+            while (j--) {
+                i = *idx++;
+                k = i * 4;
+                if(constants[k + 0] > 1.0) lcl_const[0] = 1.0;
+                else if(constants[k + 0] < -1.0) lcl_const[0] = -1.0;
+                else lcl_const[0] = constants[k + 0];
+
+                if(constants[k + 1] > 1.0) lcl_const[1] = 1.0;
+                else if(constants[k + 1] < -1.0) lcl_const[1] = -1.0;
+                else lcl_const[1] = constants[k + 1];
+
+                if(constants[k + 2] > 1.0) lcl_const[2] = 1.0;
+                else if(constants[k + 2] < -1.0) lcl_const[2] = -1.0;
+                else lcl_const[2] = constants[k + 2];
+
+                if(constants[k + 3] > 1.0) lcl_const[3] = 1.0;
+                else if(constants[k + 3] < -1.0) lcl_const[3] = -1.0;
+                else lcl_const[3] = constants[k + 3];
+
+                GL_EXTCALL(glProgramEnvParameter4fvARB(target_type, i, lcl_const));
+            }
+        }
+    } else {
+        LIST_FOR_EACH_ENTRY(constant, constant_list, constants_entry, entry) {
+            idx = constant->idx;
+            j = constant->count;
+            while (j--) {
+                i = *idx++;
+                GL_EXTCALL(glProgramEnvParameter4fvARB(target_type, i, constants + (i * 4)));
+            }
         }
     }
     checkGLcall("glProgramEnvParameter4fvARB()");
@@ -85,6 +116,7 @@ static void shader_arb_load_constantsF(IWineD3DBaseShaderImpl* This, WineD3D_GL_
                     values[0], values[1], values[2], values[3]);
         }
     }
+    /* Immediate constants are clamped for 1.X shaders at loading times */
     LIST_FOR_EACH_ENTRY(lconst, &This->baseShader.constantsF, local_constant, entry) {
         GL_EXTCALL(glProgramEnvParameter4fvARB(target_type, lconst->idx, (GLfloat*)lconst->value));
     }
@@ -540,6 +572,7 @@ void pshader_hw_bem(SHADER_OPCODE_ARG* arg) {
 
 void pshader_hw_cnd(SHADER_OPCODE_ARG* arg) {
 
+    IWineD3DBaseShaderImpl* shader = (IWineD3DBaseShaderImpl*) arg->shader;
     SHADER_BUFFER* buffer = arg->buffer;
     char dst_wmask[20];
     char dst_name[50];
@@ -557,8 +590,14 @@ void pshader_hw_cnd(SHADER_OPCODE_ARG* arg) {
     pshader_gen_input_modifier_line(buffer, arg->src[1], 1, src_name[1]);
     pshader_gen_input_modifier_line(buffer, arg->src[2], 2, src_name[2]);
 
-    shader_addline(buffer, "ADD TMP, -%s, coefdiv.x;\n", src_name[0]);
-    shader_addline(buffer, "CMP %s, TMP, %s, %s;\n", dst_name, src_name[1], src_name[2]);
+    /* The coissue flag changes the semantic of the cnd instruction in <= 1.3 shaders */
+    if (shader->baseShader.hex_version <= WINED3DPS_VERSION(1, 3) &&
+        arg->opcode_token & WINED3DSI_COISSUE) {
+        shader_addline(buffer, "MOV %s, %s;\n", dst_name, src_name[1]);
+    } else {
+        shader_addline(buffer, "ADD TMP, -%s, coefdiv.x;\n", src_name[0]);
+        shader_addline(buffer, "CMP %s, TMP, %s, %s;\n", dst_name, src_name[1], src_name[2]);
+    }
 }
 
 void pshader_hw_cmp(SHADER_OPCODE_ARG* arg) {
@@ -652,8 +691,31 @@ void pshader_hw_map2gl(SHADER_OPCODE_ARG* arg) {
       }
 }
 
-void pshader_hw_tex(SHADER_OPCODE_ARG* arg) {
+void pshader_hw_texkill(SHADER_OPCODE_ARG* arg) {
+    IWineD3DPixelShaderImpl* This = (IWineD3DPixelShaderImpl*) arg->shader;
+    DWORD hex_version = This->baseShader.hex_version;
+    SHADER_BUFFER* buffer = arg->buffer;
+    char reg_dest[40];
 
+    /* No swizzles are allowed in d3d's texkill. PS 1.x ignores the 4th component as documented,
+     * but >= 2.0 honors it(undocumented, but tested by the d3d9 testsuit)
+     */
+    pshader_get_register_name(arg->dst, reg_dest);
+
+    if(hex_version >= WINED3DPS_VERSION(2,0)) {
+        /* The arb backend doesn't claim ps 2.0 support, but try to eat what the app feeds to us */
+        shader_addline(buffer, "KIL %s;\n", reg_dest);
+    } else {
+        /* ARB fp doesn't like swizzles on the parameter of the KIL instruction. To mask the 4th component,
+         * copy the register into our general purpose TMP variable, overwrite .w and pass TMP to KIL
+         */
+        shader_addline(buffer, "MOV TMP, %s;\n", reg_dest);
+        shader_addline(buffer, "MOV TMP.w, one.w;\n", reg_dest);
+        shader_addline(buffer, "KIL TMP;\n", reg_dest);
+    }
+}
+
+void pshader_hw_tex(SHADER_OPCODE_ARG* arg) {
     IWineD3DPixelShaderImpl* This = (IWineD3DPixelShaderImpl*) arg->shader;
 
     DWORD dst = arg->dst;
@@ -849,8 +911,13 @@ void pshader_hw_texm3x3vspec(SHADER_OPCODE_ARG* arg) {
     shader_addline(buffer, "MOV TMP2.y, fragment.texcoord[%u].w;\n", current_state->texcoord_w[1]);
     shader_addline(buffer, "MOV TMP2.z, fragment.texcoord[%u].w;\n", reg);
 
-    /* Calculate reflection vector (Assume normal is normalized): RF = 2*(N.E)*N -E */
+    /* Calculate reflection vector
+     */
     shader_addline(buffer, "DP3 TMP.w, TMP, TMP2;\n");
+    /* The .w is ignored when sampling, so I can use TMP2.w to calculate dot(N, N) */
+    shader_addline(buffer, "DP3 TMP2.w, TMP, TMP;\n");
+    shader_addline(buffer, "RCP TMP2.w, TMP2.w;\n");
+    shader_addline(buffer, "MUL TMP.w, TMP.w, TMP2.w;\n");
     shader_addline(buffer, "MUL TMP, TMP.w, TMP;\n");
     shader_addline(buffer, "MAD TMP, coefmul.x, TMP, -TMP2;\n");
 
@@ -873,8 +940,18 @@ void pshader_hw_texm3x3spec(SHADER_OPCODE_ARG* arg) {
     pshader_gen_input_modifier_line(buffer, arg->src[0], 0, src0_name);
     shader_addline(buffer, "DP3 TMP.z, T%u, %s;\n", reg, src0_name);
 
-    /* Calculate reflection vector (Assume normal is normalized): RF = 2*(N.E)*N -E */
+    /* Calculate reflection vector.
+     *
+     *               dot(N, E)
+     * TMP.xyz = 2 * --------- * N - E
+     *               dot(N, N)
+     *
+     * Which normalizes the normal vector
+     */
     shader_addline(buffer, "DP3 TMP.w, TMP, C[%u];\n", reg3);
+    shader_addline(buffer, "DP3 TMP2.w, TMP, TMP;\n");
+    shader_addline(buffer, "RCP TMP2.w, TMP2.w;\n");
+    shader_addline(buffer, "MUL TMP.w, TMP.w, TMP2.w;\n");
     shader_addline(buffer, "MUL TMP, TMP.w, TMP;\n");
     shader_addline(buffer, "MAD TMP, coefmul.x, TMP, -C[%u];\n", reg3);
 
@@ -882,6 +959,32 @@ void pshader_hw_texm3x3spec(SHADER_OPCODE_ARG* arg) {
     sprintf(dst_str, "T%u", reg);
     shader_hw_sample(arg, reg, dst_str, "TMP", TRUE);
     current_state->current_row = 0;
+}
+
+void pshader_hw_texdepth(SHADER_OPCODE_ARG* arg) {
+    SHADER_BUFFER* buffer = arg->buffer;
+    char dst_name[50];
+
+    /* texdepth has an implicit destination, the fragment depth value. It's only parameter,
+     * which is essentially an input, is the destiantion register because it is the first
+     * param. According to the msdn, this must be register r5, but let's keep it more flexible
+     * here
+     */
+    pshader_get_register_name(arg->dst, dst_name);
+
+    /* According to the msdn, the source register(must be r5) is unusable after
+     * the texdepth instruction, so we're free to modify it
+     */
+    shader_addline(buffer, "MIN %s.g, %s.g, one.g;\n", dst_name, dst_name);
+
+    /* How to deal with the special case dst_name.g == 0? if r != 0, then
+     * the r * (1 / 0) will give infinity, which is clamped to 1.0, the correct
+     * result. But if r = 0.0, then 0 * inf = 0, which is incorrect.
+     */
+    shader_addline(buffer, "RCP %s.g, %s.g;\n", dst_name, dst_name);
+    shader_addline(buffer, "MUL TMP.x, %s.r, %s.g;\n", dst_name, dst_name);
+    shader_addline(buffer, "MIN TMP.x, TMP.x, one.r;\n", dst_name, dst_name);
+    shader_addline(buffer, "MAX result.depth, TMP.x, 0.0;\n", dst_name, dst_name);
 }
 
 /** Handles transforming all WINED3DSIO_M?x? opcodes for

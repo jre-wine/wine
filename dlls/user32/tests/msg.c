@@ -941,6 +941,7 @@ static const struct message WmDragThickBordersBarSeq[] = { /* FIXME: add */
 static const struct message WmResizingChildWithMoveWindowSeq[] = {
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOACTIVATE },
     { WM_NCCALCSIZE, sent|wparam, 1 },
+    { WM_ERASEBKGND, sent|parent|optional },
     { WM_ERASEBKGND, sent|optional },
     { WM_WINDOWPOSCHANGED, sent|wparam, SWP_NOACTIVATE },
     { WM_MOVE, sent|defwinproc },
@@ -4020,8 +4021,10 @@ static void test_messages(void)
     /* test WM_SETREDRAW on a visible child window */
     test_WM_SETREDRAW(hchild);
 
+    log_all_parent_messages++;
     MoveWindow(hchild, 10, 10, 20, 20, TRUE);
     ok_sequence(WmResizingChildWithMoveWindowSeq, "MoveWindow:child", FALSE);
+    log_all_parent_messages--;
 
     ShowWindow(hchild, SW_HIDE);
     flush_sequence();
@@ -6775,6 +6778,39 @@ static void test_timers(void)
     ok( KillTimer(info.hWnd, TIMER_ID), "KillTimer failed\n");
 
     ok(DestroyWindow(info.hWnd), "failed to destroy window\n");
+}
+
+static int count = 0;
+static VOID CALLBACK callback_count(
+    HWND hwnd,
+    UINT uMsg,
+    UINT_PTR idEvent,
+    DWORD dwTime
+)
+{
+    count++;
+}
+
+static void test_timers_no_wnd(void)
+{
+    UINT_PTR id, id2;
+    MSG msg;
+
+    count = 0;
+    id = SetTimer(NULL, 0, 100, callback_count);
+    ok(id != 0, "did not get id from SetTimer.\n");
+    id2 = SetTimer(NULL, id, 200, callback_count);
+    ok(id2 == id, "did not get same id from SetTimer when replacing (%li expected %li).\n", id2, id);
+    Sleep(150);
+    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) DispatchMessage(&msg);
+    ok(count == 0, "did not get zero count as expected (%i).\n", count);
+    Sleep(150);
+    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) DispatchMessage(&msg);
+    ok(count == 1, "did not get one count as expected (%i).\n", count);
+    KillTimer(NULL, id);
+    Sleep(250);
+    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) DispatchMessage(&msg);
+    ok(count == 1, "killing replaced timer did not work (%i).\n", count);
 }
 
 /* Various win events with arbitrary parameters */
@@ -9614,6 +9650,7 @@ START_TEST(msg)
     test_message_conversion();
     test_accelerators();
     test_timers();
+    test_timers_no_wnd();
     test_set_hook();
     test_DestroyWindow();
     test_DispatchMessage();

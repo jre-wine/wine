@@ -386,7 +386,6 @@ INT_PTR
 %ptr
 
 DLLVERSIONINFO *
-EXTRACTdest *
 PCCAB
 PERF
 PFDICABINETINFO
@@ -412,6 +411,7 @@ PFNOPEN
 PFNREAD
 PFNSEEK
 PFNWRITE
+SESSION *
 void *
 
 %str
@@ -696,6 +696,7 @@ ALG_ID
 BOOL
 DWORD
 HANDLE
+HCRYPTASN1MODULE
 HCRYPTMSG
 HCRYPTPROV
 HCRYPTPROV_LEGACY
@@ -706,6 +707,9 @@ ULONG
 
 %ptr
 
+ASN1decoding_t
+ASN1encoding_t
+ASN1module_t
 BOOL *
 BYTE *
 CERT_EXTENSION[]
@@ -733,6 +737,7 @@ LPFILETIME
 LPSTR *
 LPVOID
 LPWSTR *
+PCCERT_CHAIN_CONTEXT
 PCCERT_CHAIN_CONTEXT *
 PCCERT_CONTEXT
 PCCERT_CONTEXT *
@@ -1337,6 +1342,20 @@ BOOL *
 REFCLSID
 REFIID
 
+%%faultrep.dll
+
+%long
+
+BOOL
+
+%str
+
+LPCSTR
+
+%wstr
+
+LPCWSTR
+
 %%gdi32.dll
 
 %long
@@ -1480,6 +1499,145 @@ void
 
 LPCWSTR
 LPWSTR
+
+%%gdiplus.dll
+
+%long
+
+ARGB
+BOOL
+ColorAdjustType
+ColorMatrixFlags
+CompositingMode
+CompositingQuality
+EmfType
+GpDashCap
+GpDashStyle
+GpFillMode
+GpLineCap
+GpLineJoin
+GpMatrixOrder
+GpStatus
+GpUnit
+GpWrapMode
+GraphicsState
+HDC
+HENHMETAFILE
+HMETAFILE
+HWND
+INT
+InterpolationMode
+LANGID
+LinearGradientMode
+PixelFormat
+PixelOffsetMode
+PROPID
+SIZE_T
+SmoothingMode
+Status
+StringAlignment
+StringTrimming
+TextRenderingHint
+UINT
+WrapMode
+
+%long --pointer
+
+ULONG_PTR
+
+%float
+
+REAL
+
+%ptr
+
+ARGB *
+BitmapData *
+BOOL *
+BYTE *
+CLSID *
+ColorMatrix *
+ColorPalette *
+CompositingMode *
+CompositingQuality *
+DrawImageAbort
+EncoderParameters *
+GpBitmap *
+GpBitmap **
+GpBrush *
+GpBrush **
+GpBrushType *
+GpCustomLineCap *
+GpCustomLineCap **
+GpDashStyle *
+GpFillMode *
+GpFont *
+GpFont **
+GpGraphics *
+GpGraphics **
+GpImage *
+GpImage **
+GpImageAttributes *
+GpImageAttributes **
+GpLineGradient *
+GpLineGradient **
+GpMatrix *
+GpMatrix **
+GpMetafile *
+GpMetafile **
+GpPath *
+GpPath **
+GpPathGradient *
+GpPathGradient **
+GpPathIterator *
+GpPathIterator **
+GpPen *
+GpPen **
+GpPoint *
+GpPointF *
+GpRect *
+GpRectF *
+GpSolidFill *
+GpSolidFill **
+GpStringFormat *
+GpStringFormat **
+GpTexture *
+GpTexture **
+GpUnit *
+GraphicsState *
+GUID *
+ImageItemData *
+ImageType *
+INT *
+InterpolationMode *
+IStream *
+IStream **
+LOGFONTA *
+LOGFONTW *
+MetafileHeader *
+PixelFormat *
+PixelOffsetMode *
+REAL *
+RectF *
+SmoothingMode *
+StringAlignment *
+StringTrimming *
+TextRenderingHint *
+UINT *
+ULONG_PTR *
+VOID *
+WmfPlaceableFileHeader *
+struct GdiplusStartupInput *
+struct GdiplusStartupOutput *
+void *
+
+%wstr
+
+WCHAR *
+
+%void
+
+void
 
 %%glu32.dll
 
@@ -1672,6 +1830,7 @@ DIGEST_HANDLE
 LPDWORD
 LPSYSTEMTIME
 LPVOID
+LPWIN_CERTIFICATE
 PCHAR *
 PDWORD
 PIMAGE_LOAD_CONFIG_DIRECTORY
@@ -1679,7 +1838,6 @@ PIMAGE_NT_HEADERS
 PIMAGE_NT_HEADERS32
 PIMAGEHLP_STATUS_ROUTINE
 PLOADED_IMAGE
-PWIN_CERTIFICATE
 ULONG *
 ULONG_PTR *
 
@@ -2673,6 +2831,7 @@ int
 long
 short
 size_t
+unsigned char
 unsigned int
 unsigned long
 unsigned short int
@@ -2695,6 +2854,7 @@ EXCEPTION_REGISTRATION_RECORD **
 MSVCRT___sighandler_t
 MSVCRT__beginthread_start_routine_t
 MSVCRT__beginthreadex_start_routine_t
+MSVCRT__LDOUBLE *
 MSVCRT__onexit_t
 MSVCRT__onexit_t **
 MSVCRT__se_translator_function
@@ -2731,6 +2891,7 @@ struct MSVCRT__finddata_t *
 struct MSVCRT__finddatai64_t *
 struct MSVCRT__heapinfo *
 struct MSVCRT__stat *
+struct MSVCRT__stat64 *
 struct MSVCRT__stati64 *
 struct MSVCRT__timeb *
 struct MSVCRT__utimbuf *
@@ -3940,6 +4101,7 @@ REFIID
 
 %long
 
+DWORD
 HRESULT
 LONG
 
@@ -3948,6 +4110,34 @@ LONG
 LPVOID *
 REFCLSID
 REFIID
+
+%str
+
+LPSTR
+
+%wstr
+
+LPWSTR
+
+%%query.dll
+
+%long
+
+HRESULT
+ULONG
+
+%ptr
+
+CI_STATE *
+ULONG *
+
+%str
+
+CHAR *
+
+%wstr
+
+WCHAR *
 
 %%rasapi32.dll
 
@@ -4103,6 +4293,7 @@ UUID_VECTOR *
 ULONG *
 struct IRpcChannelBuffer *
 struct IRpcStubBuffer *
+char **
 twr_t *
 twr_t **
 unsigned char *
@@ -4117,6 +4308,7 @@ void
 %str
 
 RPC_CSTR
+char *
 
 %wstr
 
@@ -4151,6 +4343,19 @@ LPSTR
 
 LPCWSTR
 
+%%schannel.dll
+
+%long
+
+NTSTATUS
+ULONG
+
+%ptr
+
+PSECPKG_FUNCTION_TABLE *
+PSECPKG_USER_FUNCTION_TABLE *
+PULONG
+
 %%secur32.dll
 
 %long
@@ -4159,6 +4364,7 @@ BOOLEAN
 EXTENDED_NAME_FORMAT
 HANDLE
 NTSTATUS
+SECURITY_LOGON_TYPE
 SECURITY_STATUS
 ULONG
 
@@ -4168,15 +4374,22 @@ HANDLE *
 PCredHandle
 PCtxtHandle
 PHANDLE
+PLSA_OPERATIONAL_MODE
+PLSA_STRING
 PLUID
+PLUID *
 PNTSTATUS
+PQUOTA_LIMITS
 PSecBuffer
 PSecBufferDesc
 PSecPkgInfoA *
 PSecPkgInfoW *
+PSECURITY_LOGON_SESSION_DATA *
 PSecurityFunctionTableA
 PSecurityFunctionTableW
 PTimeStamp
+PTOKEN_GROUPS
+PTOKEN_SOURCE
 PULONG
 PVOID
 PVOID *
@@ -4257,6 +4470,7 @@ HSPFILEQ
 HSTRING_TABLE
 HWND
 INT
+LogSeverity
 LONG
 REGSAM
 UINT
@@ -4300,6 +4514,10 @@ PSP_FILE_CALLBACK_W
 PSP_FILE_COPY_PARAMS_A
 PSP_FILE_COPY_PARAMS_W
 PSP_INF_INFORMATION
+PSP_ORIGINAL_FILE_INFO_A
+PSP_ORIGINAL_FILE_INFO_W
+PCSTR *
+PCWSTR *
 PSTR *
 PUINT
 PVOID
@@ -4332,6 +4550,8 @@ PWSTR
 
 BOOL
 HANDLE
+HKEY
+REGSAM
 
 %wstr
 
@@ -4358,6 +4578,7 @@ REFIID
 %str
 
 LPCSTR
+LPSTR
 
 %void
 
@@ -4383,6 +4604,7 @@ HINSTANCE
 HKEY
 HMENU
 HMODULE
+HPSXA
 HRESULT
 HWND
 INT
@@ -4423,6 +4645,8 @@ IShellFolder **
 IShellView **
 IStream *
 ITEMIDLIST *
+IUnknown *
+IUnknown **
 LPBROWSEINFOA
 LPBROWSEINFOW
 LPBYTE
@@ -4439,6 +4663,7 @@ LPDROPSOURCE
 LPDROPTARGET
 LPDWORD
 LPENUMFORMATETC *
+LPFNADDPROPSHEETPAGE
 LPFNCREATEINSTANCE
 LPFNFMCALLBACK
 LPITEMIDLIST
@@ -4460,7 +4685,6 @@ LPSHQUERYRBINFO
 LPSTRRET
 LPTPMPARAMS
 LPUNKNOWN
-LPUNKNOWN *
 LPVOID
 LPVOID *
 LPWORD
@@ -4476,6 +4700,7 @@ SHChangeNotifyEntry *
 SHFILEINFOA *
 SHFILEINFOW *
 int *
+void *
 
 %str
 
@@ -4547,6 +4772,7 @@ LONGLONG
 BOOL *
 BSTR *
 CLSID *
+DATABLOCK_HEADER *
 DISPPARAMS *
 DLGPROC
 DLLVERSIONINFO *
@@ -4577,10 +4803,11 @@ LPBROWSEINFOW
 LPBYTE
 LPCITEMIDLIST
 LPCRECT
-LPCSHLWAPI_CLIST
 LPCSTR *
 LPCVOID
 LPCWSTR *
+LPDBLIST
+LPDBLIST *
 LPDWORD
 LPINT
 LPITEMIDLIST
@@ -4593,8 +4820,6 @@ LPSECURITY_ATTRIBUTES
 LPSHELLEXECUTEINFOW
 LPSHELLFOLDER
 LPSHFILEOPSTRUCTW
-LPSHLWAPI_CLIST
-LPSHLWAPI_CLIST *
 LPSTR *
 LPSTRRET
 LPTHREAD_START_ROUTINE
@@ -4677,6 +4902,24 @@ SnmpVarBind *
 SnmpVarBindList *
 UINT *
 
+%%spoolss.dll
+
+%long
+
+BOOL
+DWORD
+HANDLE
+
+%ptr
+
+LPBYTE
+LPVOID
+
+%wstr
+
+LPCWSTR
+LPWSTR
+
 %%sti.dll
 
 %long
@@ -4758,6 +5001,21 @@ TW_UINT32
 TW_MEMREF
 pTW_IDENTITY
 
+%%url.dll
+
+%long
+
+BOOL
+DWORD
+HRESULT
+HWND
+int
+
+%str
+
+LPCSTR
+LPSTR
+
 %%urlmon.dll
 
 %long
@@ -4792,6 +5050,7 @@ LPBC
 LPBINDCTX
 LPBINDSTATUSCALLBACK
 LPSOFTDISTINFO
+LPSTREAM *
 LPUNKNOWN
 LPVOID
 LPVOID *
@@ -4877,6 +5136,7 @@ int
 %long --pointer
 
 INT_PTR
+LONG_PTR
 UINT_PTR
 ULONG_PTR
 
@@ -5137,20 +5397,32 @@ LPDWORD
 LPOVERLAPPED
 LPVOID
 
+%%vdmdbg.dll
+
+%long
+
+DWORD
+INT
+LPARAM
+
+%ptr
+
+TASKENUMPROC
+
 %%version.dll
 
 %long
 
 BOOL
 DWORD
-UINT
 
 %ptr
 
+LPCVOID
 LPDWORD
 LPVOID
 LPVOID *
-UINT *
+PUINT
 
 %str
 
@@ -5507,9 +5779,12 @@ HBITMAP
 HBRUSH
 HDC
 HFONT
+HGLRC
 HICON
 HKL
+HMONITOR
 HPALETTE
+HPBUFFERARB
 HPEN
 HRGN
 HWND
@@ -5520,6 +5795,7 @@ LRESULT
 SHORT
 UINT
 WCHAR
+Window
 WPARAM
 int
 
@@ -5537,23 +5813,26 @@ HANDLE16 *
 HKL *
 INT *
 LPBYTE
+LPCRECT
 LPCVOID
 LPDEVMODEW
 LPINPUT
 LPINT
 LPLOGFONTW
+LPMONITORINFO
 LPPALETTEENTRY
 LPPOINT
 LPRECT
 LPSIZE
 LPVOID
 LPWTPACKET *
+MONITORENUMPROC
 PIXELFORMATDESCRIPTOR *
 POINT *
+PROC
 RECT *
 RGBQUAD *
 TEXTMETRICW *
-WINDOWPOS *
 X11DRV_PDEVICE *
 X11DRV_PDEVICE **
 void *
@@ -5561,6 +5840,10 @@ void *
 %void
 
 void
+
+%str
+
+LPCSTR
 
 %wstr
 
@@ -5586,6 +5869,12 @@ BITMAPINFO *
 RGBQUAD *
 void *
 void **
+
+%%winhttp.dll
+
+%long
+
+BOOL
 
 %%wininet.dll
 
@@ -5618,6 +5907,7 @@ FILETIME
 %ptr
 
 DWORD *
+DWORD_PTR *
 FILETIME *
 GOPHER_ATTRIBUTE_ENUMERATORA
 GOPHER_ATTRIBUTE_ENUMERATORW
@@ -5656,10 +5946,6 @@ unsigned long *
 LPCSTR
 LPSTR
 
-%void
-
-void
-
 %wstr
 
 LPCWSTR
@@ -5673,7 +5959,6 @@ PWSTR
 BOOL
 DWORD
 FOURCC
-HANDLE
 HDRVR
 HINSTANCE
 HMIDIIN
@@ -5769,12 +6054,28 @@ LPSTR
 LPCWSTR
 LPWSTR
 
+%void
+
+VOID
+
 %%winnls32.dll
 
 %long
 
 BOOL
 HWND
+
+%%winscard.dll
+
+%long
+
+DWORD
+LONG
+
+%ptr
+
+LPCVOID
+LPSCARDCONTEXT
 
 %%winspool.drv
 
@@ -5869,6 +6170,7 @@ LONG
 %ptr
 
 BYTE *
+CRYPT_PROVIDER_CERT *
 CRYPT_PROVIDER_DATA *
 CRYPT_PROVIDER_FUNCTIONS *
 CRYPT_PROVIDER_REGDEFUSAGE *
@@ -5882,14 +6184,18 @@ HCATINFO *
 LPVOID
 PCCERT_CONTEXT
 WINTRUST_DATA *
+void *
 
 %str
 
+LPCSTR
 char *
 
 %wstr
 
+LPCWSTR
 LPWSTR
+PWSTR
 
 %void
 
@@ -6148,9 +6454,7 @@ LPSTR
 
 %wstr
 
-LPCWSTR
 LPWSTR
-PWSTR
 
 %void
 

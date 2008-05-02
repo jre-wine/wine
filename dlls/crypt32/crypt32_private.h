@@ -250,6 +250,14 @@ PWINECRYPT_CERTSTORE CRYPT_FileNameOpenStoreA(HCRYPTPROV hCryptProv,
  DWORD dwFlags, const void *pvPara);
 PWINECRYPT_CERTSTORE CRYPT_FileNameOpenStoreW(HCRYPTPROV hCryptProv,
  DWORD dwFlags, const void *pvPara);
+PWINECRYPT_CERTSTORE CRYPT_RootOpenStore(HCRYPTPROV hCryptProv, DWORD dwFlags);
+
+/* Allocates and initializes a certificate chain engine, but without creating
+ * the root store.  Instead, it uses root, and assumes the caller has done any
+ * checking necessary.
+ */
+HCERTCHAINENGINE CRYPT_CreateChainEngine(HCERTSTORE root,
+ PCERT_CHAIN_ENGINE_CONFIG pConfig);
 
 /* Helper function for store reading functions and
  * CertAddSerializedElementToStore.  Returns a context of the appropriate type

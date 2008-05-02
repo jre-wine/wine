@@ -1196,7 +1196,16 @@ static void state_zbias(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
 
 
 static void state_normalize(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    if (stateblock->renderState[WINED3DRS_NORMALIZENORMALS]) {
+    if(isStateDirty(context, STATE_VDECL)) {
+        return;
+    }
+    /* Without vertex normals, we set the current normal to 0/0/0 to remove the diffuse factor
+     * from the opengl lighting equation, as d3d does. Normalization of 0/0/0 can lead to a division
+     * by zero and is not properly defined in opengl, so avoid it
+     */
+    if (stateblock->renderState[WINED3DRS_NORMALIZENORMALS] && (
+        stateblock->wineD3DDevice->strided_streams.u.s.normal.lpData ||
+        stateblock->wineD3DDevice->strided_streams.u.s.normal.VBO)) {
         glEnable(GL_NORMALIZE);
         checkGLcall("glEnable(GL_NORMALIZE);");
     } else {
@@ -1859,6 +1868,13 @@ static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock, W
     DWORD texUnit = state - STATE_TRANSFORM(WINED3DTS_TEXTURE0);
     DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[texUnit];
 
+    /* Ignore this when a vertex shader is used, or if the streams aren't sorted out yet */
+    if(stateblock->vertexShader ||
+       isStateDirty(context, STATE_VDECL)) {
+        TRACE("Using a vertex shader, or stream sources not sorted out yet, skipping\n");
+        return;
+    }
+
     if (mapped_stage < 0) return;
 
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
@@ -1875,7 +1891,11 @@ static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock, W
 
     set_texture_matrix((float *)&stateblock->transforms[WINED3DTS_TEXTURE0 + texUnit].u.m[0][0],
                         stateblock->textureState[texUnit][WINED3DTSS_TEXTURETRANSFORMFLAGS],
-                        (stateblock->textureState[texUnit][WINED3DTSS_TEXCOORDINDEX] & 0xFFFF0000) != WINED3DTSS_TCI_PASSTHRU);
+                        (stateblock->textureState[texUnit][WINED3DTSS_TEXCOORDINDEX] & 0xFFFF0000) != WINED3DTSS_TCI_PASSTHRU,
+                        context->last_was_rhw,
+                        stateblock->wineD3DDevice->strided_streams.u.s.texCoords[texUnit].dwStride ?
+                            stateblock->wineD3DDevice->strided_streams.u.s.texCoords[texUnit].dwType:
+                            WINED3DDECLTYPE_UNUSED);
 
 }
 
@@ -2119,12 +2139,37 @@ static void tex_coordindex(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
     }
 }
 
+static void shaderconstant(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
+
+    /* Vertex and pixel shader states will call a shader upload, don't do anything as long one of them
+     * has an update pending
+     */
+    if(isStateDirty(context, STATE_VDECL) ||
+       isStateDirty(context, STATE_PIXELSHADER)) {
+       return;
+    }
+
+    device->shader_backend->shader_load_constants((IWineD3DDevice *) device, use_ps(device), use_vs(device));
+}
+
 static void tex_bumpenvlscale(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
     union {
         DWORD d;
         float f;
     } tmpvalue;
+
+    if(stateblock->pixelShader && stage != 0 &&
+       ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->baseShader.reg_maps.luminanceparams == stage) {
+        /* The pixel shader has to know the luminance scale. Do a constants update if it
+         * isn't scheduled anyway
+         */
+        if(!isStateDirty(context, STATE_PIXELSHADERCONSTANT) &&
+           !isStateDirty(context, STATE_PIXELSHADER)) {
+            shaderconstant(STATE_PIXELSHADERCONSTANT, stateblock, context);
+        }
+    }
 
     tmpvalue.d = stateblock->textureState[stage][WINED3DTSS_BUMPENVLSCALE];
     if(tmpvalue.f != 0.0) {
@@ -2138,6 +2183,17 @@ static void tex_bumpenvloffset(DWORD state, IWineD3DStateBlockImpl *stateblock, 
         DWORD d;
         float f;
     } tmpvalue;
+
+    if(stateblock->pixelShader && stage != 0 &&
+       ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->baseShader.reg_maps.luminanceparams == stage) {
+        /* The pixel shader has to know the luminance offset. Do a constants update if it
+         * isn't scheduled anyway
+         */
+        if(!isStateDirty(context, STATE_PIXELSHADERCONSTANT) &&
+           !isStateDirty(context, STATE_PIXELSHADER)) {
+            shaderconstant(STATE_PIXELSHADERCONSTANT, stateblock, context);
+        }
+    }
 
     tmpvalue.d = stateblock->textureState[stage][WINED3DTSS_BUMPENVLOFFSET];
     if(tmpvalue.f != 0.0) {
@@ -2256,20 +2312,6 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
         glBindTexture(GL_TEXTURE_2D, stateblock->wineD3DDevice->dummyTextureName[sampler]);
         checkGLcall("glBindTexture(GL_TEXTURE_2D, stateblock->wineD3DDevice->dummyTextureName[sampler])");
     }
-}
-
-static void shaderconstant(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
-
-    /* Vertex and pixel shader states will call a shader upload, don't do anything as long one of them
-     * has an update pending
-     */
-    if(isStateDirty(context, STATE_VDECL) ||
-       isStateDirty(context, STATE_PIXELSHADER)) {
-       return;
-    }
-    
-    device->shader_backend->shader_load_constants((IWineD3DDevice *) device, use_ps(device), use_vs(device));
 }
 
 static void pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
@@ -2595,7 +2637,23 @@ static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock
             /* Transformed vertices are supposed to bypass the whole transform pipeline including
              * frustum clipping. This can't be done in opengl, so this code adjusts the Z range to
              * suppress depth clipping. This can be done because it is an orthogonal projection and
-             * the Z coordinate does not affect the size of the primitives
+             * the Z coordinate does not affect the size of the primitives. Half Life 1 and Prince of
+             * Persia 3D need this.
+             *
+             * Note that using minZ and maxZ here doesn't entirely fix the problem, since view frustum
+             * clipping is still enabled, but it seems to fix it for all apps tested so far. A minor
+             * problem can be witnessed in half-life 1 engine based games, the weapon is clipped close
+             * to the viewer.
+             *
+             * Also note that this breaks z comparison against z values filled in with clear,
+             * but no app depending on that and disabled clipping has been found yet. Comparing
+             * primitives against themselves works, so the Z buffer is still intact for normal hidden
+             * surface removal.
+             *
+             * We could disable clipping entirely by setting the near to infinity and far to -infinity,
+             * but this would break Z buffer operation. Raising the range to something less than
+             * infinity would help a bit at the cost of Z precision, but it wouldn't eliminate the
+             * problem either.
              */
             TRACE("Calling glOrtho with %f, %f, %f, %f\n", width, height, -minZ, -maxZ);
             if(stateblock->wineD3DDevice->render_offscreen) {
@@ -2613,16 +2671,16 @@ static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock
              */
             TRACE("Calling glOrtho with %f, %f, %f, %f\n", width, height, 1.0, -1.0);
             if(stateblock->wineD3DDevice->render_offscreen) {
-                glOrtho(X, X + width, -Y, -Y - height, 1.0, -1.0);
+                glOrtho(X, X + width, -Y, -Y - height, 0.0, -1.0);
             } else {
-                glOrtho(X, X + width, Y + height, Y, 1.0, -1.0);
+                glOrtho(X, X + width, Y + height, Y, 0.0, -1.0);
             }
         }
         checkGLcall("glOrtho");
 
-        /* Window Coord 0 is the middle of the first pixel, so translate by 3/8 pixels */
-        glTranslatef(0.375, 0.375, 0);
-        checkGLcall("glTranslatef(0.375, 0.375, 0)");
+        /* Window Coord 0 is the middle of the first pixel, so translate by 1/2 pixels */
+        glTranslatef(0.5, 0.5, 0);
+        checkGLcall("glTranslatef(0.5, 0.5, 0)");
         /* D3D texture coordinates are flipped compared to OpenGL ones, so
          * render everything upside down when rendering offscreen. */
         if (stateblock->wineD3DDevice->render_offscreen) {
@@ -2636,9 +2694,21 @@ static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock
             the left to the right end of the viewport (with all matrices set to
             be identity), the x coords of both ends of the line would be not
             -1 and 1 respectively but (-1-1/viewport_widh) and (1-1/viewport_width)
-            instead.                                                               */
-        glTranslatef(0.9 / stateblock->viewport.Width, -0.9 / stateblock->viewport.Height, 0);
-        checkGLcall("glTranslatef (0.9 / width, -0.9 / height, 0)");
+            instead.
+
+            1.0 / Width is used because the coord range goes from -1.0 to 1.0, then we
+            divide by the Width/Height, so we need the half range(1.0) to translate by
+            half a pixel.
+
+            The other fun is that d3d's output z range after the transformation is [0;1],
+            but opengl's is [-1;1]. Since the z buffer is in range [0;1] for both, gl
+            scales [-1;1] to [0;1]. This would mean that we end up in [0.5;1] and loose a lot
+            of Z buffer precision and the clear values do not match in the z test. Thus scale
+            [0;1] to [-1;1], so when gl undoes that we utilize the full z range
+         */
+        glTranslatef(1.0 / stateblock->viewport.Width, -1.0/ stateblock->viewport.Height, -1.0);
+        checkGLcall("glTranslatef (1.0 / width, -1.0 / height, -1.0)");
+        glScalef(1.0, 1.0, 2.0);
 
         /* D3D texture coordinates are flipped compared to OpenGL ones, so
             * render everything upside down when rendering offscreen. */
@@ -3015,8 +3085,8 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
         checkGLcall("glEnableClientState(GL_NORMAL_ARRAY)");
 
     } else {
-        glNormal3f(0, 0, 1);
-        checkGLcall("glNormal3f(0, 0, 1)");
+        glNormal3f(0, 0, 0);
+        checkGLcall("glNormal3f(0, 0, 0)");
     }
 
     /* Diffuse Colour --------------------------------------------*/
@@ -3291,6 +3361,9 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock, W
         if(context->last_was_vshader && !isStateDirty(context, STATE_RENDER(WINED3DRS_CLIPPLANEENABLE))) {
             state_clipping(STATE_RENDER(WINED3DRS_CLIPPLANEENABLE), stateblock, context);
         }
+        if(!isStateDirty(context, STATE_RENDER(WINED3DRS_NORMALIZENORMALS))) {
+            state_normalize(STATE_RENDER(WINED3DRS_NORMALIZENORMALS), stateblock, context);
+        }
     } else {
         /* We compile the shader here because we need the vertex declaration
          * in order to determine if we need to do any swizzling for D3DCOLOR
@@ -3331,6 +3404,14 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock, W
     if(updateFog) {
         state_fog(STATE_RENDER(WINED3DRS_FOGENABLE), stateblock, context);
     }
+    if(!useVertexShaderFunction) {
+        int i;
+        for(i = 0; i < MAX_TEXTURES; i++) {
+            if(!isStateDirty(context, STATE_TRANSFORM(WINED3DTS_TEXTURE0 + i))) {
+                transform_texture(STATE_TRANSFORM(WINED3DTS_TEXTURE0 + i), stateblock, context);
+            }
+        }
+    }
 }
 
 static void viewport(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
@@ -3350,8 +3431,8 @@ static void viewport(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCon
 
     checkGLcall("glViewport");
 
-    stateblock->wineD3DDevice->posFixup[2] = 0.9 / stateblock->viewport.Width;
-    stateblock->wineD3DDevice->posFixup[3] = -0.9 / stateblock->viewport.Height;
+    stateblock->wineD3DDevice->posFixup[2] = 1.0 / stateblock->viewport.Width;
+    stateblock->wineD3DDevice->posFixup[3] = -1.0 / stateblock->viewport.Height;
     if(!isStateDirty(context, STATE_TRANSFORM(WINED3DTS_PROJECTION))) {
         transform_projection(STATE_TRANSFORM(WINED3DTS_PROJECTION), stateblock, context);
     }

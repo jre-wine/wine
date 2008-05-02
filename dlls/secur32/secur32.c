@@ -588,7 +588,7 @@ static void SECUR32_initializeProviders(void)
     }
 }
 
-SecurePackage *SECUR32_findPackageW(PWSTR packageName)
+SecurePackage *SECUR32_findPackageW(PCWSTR packageName)
 {
     SecurePackage *ret = NULL;
     BOOL matched = FALSE;
@@ -634,7 +634,7 @@ SecurePackage *SECUR32_findPackageW(PWSTR packageName)
     return ret;
 }
 
-SecurePackage *SECUR32_findPackageA(PSTR packageName)
+SecurePackage *SECUR32_findPackageA(PCSTR packageName)
 {
     SecurePackage *ret;
 
@@ -778,7 +778,7 @@ SECURITY_STATUS WINAPI EnumerateSecurityPackagesW(PULONG pcPackages,
  * structures) into an array of SecPkgInfoA structures, which it returns.
  */
 static PSecPkgInfoA thunk_PSecPkgInfoWToA(ULONG cPackages,
- const PSecPkgInfoW info)
+ const SecPkgInfoW *info)
 {
     PSecPkgInfoA ret;
 
@@ -1048,29 +1048,6 @@ BOOLEAN WINAPI GetUserNameExW(
 {
     FIXME("%d %p %p\n", NameFormat, lpNameBuffer, nSize);
     return FALSE;
-}
-
-NTSTATUS WINAPI LsaCallAuthenticationPackage(
-  HANDLE LsaHandle, ULONG AuthenticationPackage, PVOID ProtocolSubmitBuffer,
-  ULONG SubmitBufferLength, PVOID* ProtocolReturnBuffer, PULONG ReturnBufferLength,
-  PNTSTATUS ProtocolStatus)
-{
-    FIXME("%p %d %p %d %p %p %p\n", LsaHandle, AuthenticationPackage,
-          ProtocolSubmitBuffer, SubmitBufferLength, ProtocolReturnBuffer,
-          ReturnBufferLength, ProtocolStatus);
-    return 0;
-}
-
-NTSTATUS WINAPI LsaConnectUntrusted(PHANDLE LsaHandle)
-{
-    FIXME("%p\n", LsaHandle);
-    return 0;
-}
-
-NTSTATUS WINAPI LsaDeregisterLogonProcess(HANDLE LsaHandle)
-{
-    FIXME("%p\n", LsaHandle);
-    return 0;
 }
 
 BOOLEAN WINAPI TranslateNameA(

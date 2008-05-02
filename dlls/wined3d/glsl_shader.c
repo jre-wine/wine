@@ -134,7 +134,7 @@ static void shader_glsl_load_constantsF(IWineD3DBaseShaderImpl* This, WineD3D_GL
     constants_entry *constant;
     local_constant* lconst;
     GLhandleARB tmp_loc;
-    DWORD i, j;
+    DWORD i, j, k;
     DWORD *idx;
 
     if (TRACE_ON(d3d_shader)) {
@@ -152,15 +152,49 @@ static void shader_glsl_load_constantsF(IWineD3DBaseShaderImpl* This, WineD3D_GL
             }
         }
     }
-    LIST_FOR_EACH_ENTRY(constant, constant_list, constants_entry, entry) {
-        idx = constant->idx;
-        j = constant->count;
-        while (j--) {
-            i = *idx++;
-            tmp_loc = constant_locations[i];
-            if (tmp_loc != -1) {
-                /* We found this uniform name in the program - go ahead and send the data */
-                GL_EXTCALL(glUniform4fvARB(tmp_loc, 1, constants + (i * 4)));
+
+    /* 1.X pshaders have the constants clamped to [-1;1] implicitly. */
+    if(WINED3DSHADER_VERSION_MAJOR(This->baseShader.hex_version) == 1 &&
+       shader_is_pshader_version(This->baseShader.hex_version)) {
+        float lcl_const[4];
+
+        LIST_FOR_EACH_ENTRY(constant, constant_list, constants_entry, entry) {
+            idx = constant->idx;
+            j = constant->count;
+            while (j--) {
+                i = *idx++;
+                tmp_loc = constant_locations[i];
+                if (tmp_loc != -1) {
+                    /* We found this uniform name in the program - go ahead and send the data */
+                    k = i * 4;
+                    if(constants[k + 0] < -1.0) lcl_const[0] = -1.0;
+                    else if(constants[k + 0] > 1.0) lcl_const[0] = 1.0;
+                    else lcl_const[0] = constants[k + 0];
+                    if(constants[k + 1] < -1.0) lcl_const[1] = -1.0;
+                    else if(constants[k + 1] > 1.0) lcl_const[1] = 1.0;
+                    else lcl_const[1] = constants[k + 1];
+                    if(constants[k + 2] < -1.0) lcl_const[2] = -1.0;
+                    else if(constants[k + 2] > 1.0) lcl_const[2] = 1.0;
+                    else lcl_const[2] = constants[k + 2];
+                    if(constants[k + 3] < -1.0) lcl_const[3] = -1.0;
+                    else if(constants[k + 3] > 1.0) lcl_const[3] = 1.0;
+                    else lcl_const[3] = constants[k + 3];
+
+                    GL_EXTCALL(glUniform4fvARB(tmp_loc, 1, lcl_const));
+                }
+            }
+        }
+    } else {
+        LIST_FOR_EACH_ENTRY(constant, constant_list, constants_entry, entry) {
+            idx = constant->idx;
+            j = constant->count;
+            while (j--) {
+                i = *idx++;
+                tmp_loc = constant_locations[i];
+                if (tmp_loc != -1) {
+                    /* We found this uniform name in the program - go ahead and send the data */
+                    GL_EXTCALL(glUniform4fvARB(tmp_loc, 1, constants + (i * 4)));
+                }
             }
         }
     }
@@ -177,6 +211,7 @@ static void shader_glsl_load_constantsF(IWineD3DBaseShaderImpl* This, WineD3D_GL
             }
         }
     }
+    /* Immediate constants are clamped to [-1;1] at shader creation time if needed */
     LIST_FOR_EACH_ENTRY(lconst, &This->baseShader.constantsF, local_constant, entry) {
         tmp_loc = constant_locations[lconst->idx];
         if (tmp_loc != -1) {
@@ -389,7 +424,25 @@ void shader_glsl_load_constants(
             pos = GL_EXTCALL(glGetUniformLocationARB(programId, "bumpenvmat"));
             checkGLcall("glGetUniformLocationARB");
             GL_EXTCALL(glUniformMatrix2fvARB(pos, 1, 0, data));
-            checkGLcall("glUniform4fvARB");
+            checkGLcall("glUniformMatrix2fvARB");
+
+            /* texbeml needs the luminance scale and offset too. If texbeml is used, needsbumpmat
+             * is set too, so we can check that in the needsbumpmat check
+             */
+            if(((IWineD3DPixelShaderImpl *) pshader)->baseShader.reg_maps.luminanceparams != -1) {
+                int stage = ((IWineD3DPixelShaderImpl *) pshader)->baseShader.reg_maps.luminanceparams;
+                GLfloat *scale = (GLfloat *) &stateBlock->textureState[stage][WINED3DTSS_BUMPENVLSCALE];
+                GLfloat *offset = (GLfloat *) &stateBlock->textureState[stage][WINED3DTSS_BUMPENVLOFFSET];
+
+                pos = GL_EXTCALL(glGetUniformLocationARB(programId, "luminancescale"));
+                checkGLcall("glGetUniformLocationARB");
+                GL_EXTCALL(glUniform1fvARB(pos, 1, scale));
+                checkGLcall("glUniform1fvARB");
+                pos = GL_EXTCALL(glGetUniformLocationARB(programId, "luminanceoffset"));
+                checkGLcall("glGetUniformLocationARB");
+                GL_EXTCALL(glUniform1fvARB(pos, 1, offset));
+                checkGLcall("glUniform1fvARB");
+            }
         }
     }
 }
@@ -429,8 +482,13 @@ void shader_generate_glsl_declarations(
 
     if(!pshader)
         shader_addline(buffer, "uniform vec4 posFixup;\n");
-    else if(reg_maps->bumpmat != -1)
+    else if(reg_maps->bumpmat != -1) {
         shader_addline(buffer, "uniform mat2 bumpenvmat;\n");
+        if(reg_maps->luminanceparams) {
+            shader_addline(buffer, "uniform float luminancescale;\n");
+            shader_addline(buffer, "uniform float luminanceoffset;\n");
+        }
+    }
 
     /* Declare texture samplers */ 
     for (i = 0; i < This->baseShader.limits.sampler; i++) {
@@ -1245,8 +1303,14 @@ void shader_glsl_cnd(SHADER_OPCODE_ARG* arg) {
         shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], WINED3DSP_WRITEMASK_0, &src0_param);
         shader_glsl_add_src_param(arg, arg->src[1], arg->src_addr[1], write_mask, &src1_param);
         shader_glsl_add_src_param(arg, arg->src[2], arg->src_addr[2], write_mask, &src2_param);
-        shader_addline(arg->buffer, "%s > 0.5 ? %s : %s);\n",
-                src0_param.param_str, src1_param.param_str, src2_param.param_str);
+
+        /* Fun: The D3DSI_COISSUE flag changes the semantic of the cnd instruction for < 1.4 shaders */
+        if(arg->opcode_token & WINED3DSI_COISSUE) {
+            shader_addline(arg->buffer, "%s /* COISSUE! */);\n", src1_param.param_str);
+        } else {
+            shader_addline(arg->buffer, "%s > 0.5 ? %s : %s);\n",
+                    src0_param.param_str, src1_param.param_str, src2_param.param_str);
+        }
         return;
     }
     /* Cycle through all source0 channels */
@@ -1605,8 +1669,17 @@ void pshader_glsl_tex(SHADER_OPCODE_ARG* arg) {
     } else {
         glsl_src_param_t coord_param;
         shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], mask, &coord_param);
-        shader_addline(arg->buffer, "%s(Psampler%u, %s)%s);\n",
-                sample_function.name, sampler_idx, coord_param.param_str, dst_swizzle);
+        if(arg->opcode_token & WINED3DSI_TEXLD_BIAS) {
+            glsl_src_param_t bias;
+            shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], WINED3DSP_WRITEMASK_3, &bias);
+
+            shader_addline(arg->buffer, "%s(Psampler%u, %s, %s)%s);\n",
+                    sample_function.name, sampler_idx, coord_param.param_str,
+                    bias.param_str, dst_swizzle);
+        } else {
+            shader_addline(arg->buffer, "%s(Psampler%u, %s)%s);\n",
+                    sample_function.name, sampler_idx, coord_param.param_str, dst_swizzle);
+        }
     }
 }
 
@@ -1695,15 +1768,39 @@ void pshader_glsl_texcoord(SHADER_OPCODE_ARG* arg) {
 void pshader_glsl_texdp3tex(SHADER_OPCODE_ARG* arg) {
     glsl_src_param_t src0_param;
     char dst_mask[6];
+    glsl_sample_function_t sample_function;
     DWORD sampler_idx = arg->dst & WINED3DSP_REGNUM_MASK;
     DWORD src_mask = WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1 | WINED3DSP_WRITEMASK_2;
+    DWORD sampler_type = arg->reg_maps->samplers[sampler_idx] & WINED3DSP_TEXTURETYPE_MASK;
 
     shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], src_mask, &src0_param);
 
     shader_glsl_append_dst(arg->buffer, arg);
     shader_glsl_get_write_mask(arg->dst, dst_mask);
-    shader_addline(arg->buffer, "texture2D(Psampler%u, vec2(dot(gl_TexCoord[%u].xyz, %s), 0.5))%s);\n",
-            sampler_idx, sampler_idx, src0_param.param_str, dst_mask);
+
+    /* Do I have to take care about the projected bit? I don't think so, since the dp3 returns only one
+     * scalar, and projected sampling would require 4
+     */
+    shader_glsl_get_sample_function(sampler_type, FALSE, &sample_function);
+
+    switch(count_bits(sample_function.coord_mask)) {
+        case 1:
+            shader_addline(arg->buffer, "%s(Psampler%u, dot(gl_TexCoord[%u].xyz, %s))%s);\n",
+                           sample_function.name, sampler_idx, sampler_idx, src0_param.param_str, dst_mask);
+            break;
+
+        case 2:
+            shader_addline(arg->buffer, "%s(Psampler%u, vec2(dot(gl_TexCoord[%u].xyz, %s), 0.0))%s);\n",
+                          sample_function.name, sampler_idx, sampler_idx, src0_param.param_str, dst_mask);
+            break;
+
+        case 3:
+            shader_addline(arg->buffer, "%s(Psampler%u, vec3(dot(gl_TexCoord[%u].xyz, %s), 0.0, 0.0))%s);\n",
+                           sample_function.name, sampler_idx, sampler_idx, src0_param.param_str, dst_mask);
+            break;
+        default:
+            FIXME("Unexpected mask bitcount %d\n", count_bits(sample_function.coord_mask));
+    }
 }
 
 /** Process the WINED3DSIO_TEXDP3 instruction in GLSL:
@@ -1733,7 +1830,13 @@ void pshader_glsl_texdepth(SHADER_OPCODE_ARG* arg) {
 
     shader_glsl_add_dst_param(arg, arg->dst, 0, &dst_param);
 
-    shader_addline(arg->buffer, "gl_FragDepth = %s.x / %s.y;\n", dst_param.reg_name, dst_param.reg_name);
+    /* Tests show that texdepth never returns anything below 0.0, and that r5.y is clamped to 1.0.
+     * Negative input is accepted, -0.25 / -0.5 returns 0.5. GL should clamp gl_FragDepth to [0;1], but
+     * this doesn't always work, so clamp the results manually. Wether or not the x value is clamped at 1
+     * too is irrelevant, since if x = 0, any y value < 1.0(and > 1.0 is not allowed) results in a result
+     * >= 1.0 or < 0.0
+     */
+    shader_addline(arg->buffer, "gl_FragDepth = (%s.y == 0.0) ? 1.0 : clamp((%s.x / min(%s.y, 1.0)), 0.0, 1.0);\n", dst_param.reg_name, dst_param.reg_name, dst_param.reg_name);
 }
 
 /** Process the WINED3DSIO_TEXM3X2DEPTH instruction in GLSL:
@@ -1836,7 +1939,7 @@ void pshader_glsl_texm3x3(SHADER_OPCODE_ARG* arg) {
 
     shader_glsl_append_dst(arg->buffer, arg);
     shader_glsl_get_write_mask(arg->dst, dst_mask);
-    shader_addline(arg->buffer, "vec4(tmp.xy, dot(T%u.xyz, %s), 1.0)%s);\n", reg, src0_param.param_str, dst_mask);
+    shader_addline(arg->buffer, "vec4(tmp0.xy, dot(T%u.xyz, %s), 1.0)%s);\n", reg, src0_param.param_str, dst_mask);
 
     current_state->current_row = 0;
 }
@@ -1861,10 +1964,8 @@ void pshader_glsl_texm3x3spec(SHADER_OPCODE_ARG* arg) {
 
     /* Perform the last matrix multiply operation */
     shader_addline(buffer, "tmp0.z = dot(T%u.xyz, %s);\n", reg, src0_param.param_str);
-
-    /* Calculate reflection vector, 2*(tmp0.src1)*tmp0-src1
-     * This is equivalent to reflect(-src1, tmp0); */
-    shader_addline(buffer, "tmp0.xyz = reflect(-(%s), tmp0.xyz);\n", src1_param.param_str);
+    /* Reflection calculation */
+    shader_addline(buffer, "tmp0.xyz = -reflect((%s), normalize(tmp0.xyz));\n", src1_param.param_str);
 
     shader_glsl_append_dst(buffer, arg);
     shader_glsl_get_write_mask(arg->dst, dst_mask);
@@ -1898,10 +1999,7 @@ void pshader_glsl_texm3x3vspec(SHADER_OPCODE_ARG* arg) {
     /* Construct the eye-ray vector from w coordinates */
     shader_addline(buffer, "tmp1.xyz = normalize(vec3(gl_TexCoord[%u].w, gl_TexCoord[%u].w, gl_TexCoord[%u].w));\n",
             current_state->texcoord_w[0], current_state->texcoord_w[1], reg);
-
-    /* Calculate reflection vector (Assume normal is normalized): RF = 2*(tmp0.tmp1)*tmp0-tmp1
-     * This is equivalent to reflect(-tmp1, tmp0); */
-    shader_addline(buffer, "tmp0.xyz = reflect(-tmp1.xyz, tmp0.xyz);\n");
+    shader_addline(buffer, "tmp0.xyz = -reflect(tmp1.xyz, normalize(tmp0.xyz));\n");
 
     shader_glsl_append_dst(buffer, arg);
     shader_glsl_get_write_mask(arg->dst, dst_mask);
@@ -1959,8 +2057,16 @@ void pshader_glsl_texbem(SHADER_OPCODE_ARG* arg) {
 
     shader_glsl_append_dst(arg->buffer, arg);
     shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], WINED3DSP_WRITEMASK_0|WINED3DSP_WRITEMASK_1, &coord_param);
-    shader_addline(arg->buffer, "%s(Psampler%u, T%u%s + vec4(bumpenvmat * %s, 0.0, 0.0)%s )%s);\n",
-                   sample_function.name, sampler_idx, sampler_idx, coord_mask, coord_param.param_str, coord_mask, dst_swizzle);
+    if(arg->opcode->opcode == WINED3DSIO_TEXBEML) {
+        glsl_src_param_t luminance_param;
+        shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], WINED3DSP_WRITEMASK_2, &luminance_param);
+        shader_addline(arg->buffer, "(%s(Psampler%u, T%u%s + vec4(bumpenvmat * %s, 0.0, 0.0)%s )*(%s * luminancescale + luminanceoffset))%s);\n",
+                       sample_function.name, sampler_idx, sampler_idx, coord_mask, coord_param.param_str, coord_mask,
+                       luminance_param.param_str, dst_swizzle);
+    } else {
+        shader_addline(arg->buffer, "%s(Psampler%u, T%u%s + vec4(bumpenvmat * %s, 0.0, 0.0)%s )%s);\n",
+                       sample_function.name, sampler_idx, sampler_idx, coord_mask, coord_param.param_str, coord_mask, dst_swizzle);
+    }
 }
 
 void pshader_glsl_bem(SHADER_OPCODE_ARG* arg) {
@@ -2022,10 +2128,22 @@ void pshader_glsl_texreg2rgb(SHADER_OPCODE_ARG* arg) {
 /** Process the WINED3DSIO_TEXKILL instruction in GLSL.
  * If any of the first 3 components are < 0, discard this pixel */
 void pshader_glsl_texkill(SHADER_OPCODE_ARG* arg) {
+    IWineD3DPixelShaderImpl* This = (IWineD3DPixelShaderImpl*) arg->shader;
+    DWORD hex_version = This->baseShader.hex_version;
     glsl_dst_param_t dst_param;
 
+    /* The argument is a destination parameter, and no writemasks are allowed */
     shader_glsl_add_dst_param(arg, arg->dst, 0, &dst_param);
-    shader_addline(arg->buffer, "if (any(lessThan(%s.xyz, vec3(0.0)))) discard;\n", dst_param.reg_name);
+    if((hex_version >= WINED3DPS_VERSION(2,0))) {
+        /* 2.0 shaders compare all 4 components in texkill */
+        shader_addline(arg->buffer, "if (any(lessThan(%s.xyzw, vec4(0.0)))) discard;\n", dst_param.reg_name);
+    } else {
+        /* 1.X shaders only compare the first 3 components, propably due to the nature of the texkill
+         * instruction as a tex* instruction, and phase, which kills all a / w components. Even if all
+         * 4 components are defined, only the first 3 are used
+         */
+        shader_addline(arg->buffer, "if (any(lessThan(%s.xyz, vec3(0.0)))) discard;\n", dst_param.reg_name);
+    }
 }
 
 /** Process the WINED3DSIO_DP2ADD instruction in GLSL.

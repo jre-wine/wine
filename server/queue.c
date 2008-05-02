@@ -56,8 +56,8 @@ struct message_result
     struct msg_queue      *sender;        /* sender queue */
     struct msg_queue      *receiver;      /* receiver queue */
     int                    replied;       /* has it been replied to? */
-    unsigned int           result;        /* reply result */
     unsigned int           error;         /* error code to pass back to sender */
+    unsigned long          result;        /* reply result */
     struct message        *callback_msg;  /* message to queue for callback */
     void                  *data;          /* message reply data */
     unsigned int           data_size;     /* size of message reply data */
@@ -437,7 +437,7 @@ static inline void remove_result_from_sender( struct message_result *result )
 }
 
 /* store the message result in the appropriate structure */
-static void store_message_result( struct message_result *res, unsigned int result,
+static void store_message_result( struct message_result *res, unsigned long result,
                                   unsigned int error )
 {
     res->result  = result;
@@ -626,7 +626,7 @@ static void receive_message( struct msg_queue *queue, struct message *msg,
 }
 
 /* set the result of the current received message */
-static void reply_message( struct msg_queue *queue, unsigned int result,
+static void reply_message( struct msg_queue *queue, unsigned long result,
                            unsigned int error, int remove, const void *data, data_size_t len )
 {
     struct message_result *res = queue->recv_result;
@@ -1828,6 +1828,8 @@ DECL_HANDLER(get_message)
         return;
     }
 
+    queue->wake_mask = req->wake_mask;
+    queue->changed_mask = req->changed_mask;
     set_error( STATUS_PENDING );  /* FIXME */
 }
 
@@ -1925,13 +1927,22 @@ DECL_HANDLER(set_win_timer)
     else
     {
         queue = get_current_queue();
-        /* find a free id for it */
-        do
+        /* look for a timer with this id */
+        if (id && (timer = find_timer( queue, NULL, req->msg, id )))
         {
-            id = queue->next_timer_id;
-            if (++queue->next_timer_id >= 0x10000) queue->next_timer_id = 1;
+            /* free and reuse id */
+            free_timer( queue, timer );
         }
-        while (find_timer( queue, 0, req->msg, id ));
+        else
+        {
+            /* find a free id for it */
+            do
+            {
+                id = queue->next_timer_id;
+                if (++queue->next_timer_id >= 0x10000) queue->next_timer_id = 1;
+            }
+            while (find_timer( queue, 0, req->msg, id ));
+        }
     }
 
     if ((timer = set_timer( queue, req->rate )))

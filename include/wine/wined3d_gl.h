@@ -2353,6 +2353,13 @@ typedef GLhandleARB (WINE_GLAPI * WINED3D_PFNGLGETHANDLEARBPROC) (GLenum pname);
 typedef void (WINE_GLAPI * WINED3D_PFNGLGETSHADERSOURCEARBPROC) (GLhandleARB obj, GLsizei maxLength, GLsizei *length, GLcharARB *source);
 typedef void (WINE_GLAPI * WINED3D_PFNGLBINDATTRIBLOCATIONARBPROC) (GLhandleARB programObj, GLuint index, const GLcharARB *name);
 typedef GLint (WINE_GLAPI * WINED3D_PFNGLGETATTRIBLOCATIONARBPROC) (GLhandleARB programObj, const GLcharARB *name);
+/* GL_ARB_pixel_buffer_object */
+#ifndef GL_ARB_pixel_buffer_object
+#define GL_PIXEL_PACK_BUFFER_ARB          0x88EB
+#define GL_PIXEL_UNPACK_BUFFER_ARB        0x88EC
+#define GL_PIXEL_PACK_BUFFER_BINDING_ARB  0x88ED
+#define GL_PIXEL_UNPACK_BUFFER_BINDING_ARB 0x88EF
+#endif
 /* GL_EXT_texture */
 #ifndef GL_EXT_texture
 #define GL_EXT_texture 1
@@ -2833,6 +2840,13 @@ typedef void (WINE_GLAPI * PGLFNGETTEXBUMPPARAMETERFVATIPROC) (GLenum, GLfloat *
 typedef int (WINE_GLAPI * PGLXFNGETVIDEOSYNCSGIPROC) (unsigned int *);
 typedef int (WINE_GLAPI * PGLXFNWAITVIDEOSYNCSGIPROC) (int, int, unsigned int *);
 
+/* GL_SGIS_generate_mipmap */
+#ifndef GLX_SGIS_generate_mipmap
+#define GL_GENERATE_MIPMAP_SGIS             0x8191
+#define GL_GENERATE_MIPMAP_HINT_SGIS        0x8192
+#define GLX_SGIS_generate_mipmap
+#endif
+
 /* GL_VERSION_2_0 */
 #ifndef GL_VERSION_2_0
 #define GL_VERSION_2_0 1
@@ -3067,6 +3081,9 @@ typedef enum _GL_Cards {
   CARD_NVIDIA_GEFORCE_6600GT      = 0x0140,
   CARD_NVIDIA_GEFORCE_6800        = 0x0041,
   CARD_NVIDIA_GEFORCE_7800GT      = 0x0092,
+  CARD_NVIDIA_GEFORCE_8300GS      = 0x0423,
+  CARD_NVIDIA_GEFORCE_8600GT      = 0x0402,
+  CARD_NVIDIA_GEFORCE_8800GTS     = 0x0193,
 
   CARD_INTEL_845G                 = 0x2562,
   CARD_INTEL_I830G                = 0x3577,
@@ -3178,6 +3195,7 @@ typedef enum _GL_SupportedExt {
   APPLE_CLIENT_STORAGE,
   /* SGI */
   SGI_VIDEO_SYNC,
+  SGIS_GENERATE_MIPMAP,
 
   /* WGL extensions */
   WGL_ARB_PBUFFER,
@@ -3343,9 +3361,9 @@ typedef enum _GL_SupportedExt {
     USE_GL_FUNC(WINED3D_PFNGLUNIFORM2FARBPROC,                glUniform2fARB); \
     USE_GL_FUNC(WINED3D_PFNGLUNIFORM3FARBPROC,                glUniform3fARB); \
     USE_GL_FUNC(WINED3D_PFNGLUNIFORM4FARBPROC,                glUniform4fARB); \
-    USE_GL_FUNC(WINED3D_PFNGLUNIFORM1IVARBPROC,               glUniform1fvARB); \
-    USE_GL_FUNC(WINED3D_PFNGLUNIFORM2IVARBPROC,               glUniform2fvARB); \
-    USE_GL_FUNC(WINED3D_PFNGLUNIFORM3IVARBPROC,               glUniform3fvARB); \
+    USE_GL_FUNC(WINED3D_PFNGLUNIFORM1FVARBPROC,               glUniform1fvARB); \
+    USE_GL_FUNC(WINED3D_PFNGLUNIFORM2FVARBPROC,               glUniform2fvARB); \
+    USE_GL_FUNC(WINED3D_PFNGLUNIFORM3FVARBPROC,               glUniform3fvARB); \
     USE_GL_FUNC(WINED3D_PFNGLUNIFORM4FVARBPROC,               glUniform4fvARB); \
     USE_GL_FUNC(WINED3D_PFNGLUNIFORM1IVARBPROC,               glUniform1ivARB); \
     USE_GL_FUNC(WINED3D_PFNGLUNIFORM2IVARBPROC,               glUniform2ivARB); \

@@ -30,10 +30,17 @@
 #include "docobj.h"
 
 static const char doc_str1[] = "<html><body>test</body></html>";
+static const char doc_str2[] =
+    "<html><body>test a<font size=\"2\">bc 123<br />it's </font>text<br /></body></html>";
+
+static WCHAR characterW[] = {'c','h','a','r','a','c','t','e','r',0};
+static WCHAR wordW[] = {'w','o','r','d',0};
 
 static const char *dbgstr_w(LPCWSTR str)
 {
     static char buf[512];
+    if(!str)
+        return "(null)";
     WideCharToMultiByte(CP_ACP, 0, str, -1, buf, sizeof(buf), NULL, NULL);
     return buf;
 }
@@ -57,19 +64,20 @@ static IHTMLDocument2 *create_document(void)
     return doc;
 }
 
-static void test_node_name(IUnknown *unk, const char *exname)
+#define test_node_name(u,n) _test_node_name(__LINE__,u,n)
+static void _test_node_name(unsigned line, IUnknown *unk, const char *exname)
 {
     IHTMLDOMNode *node;
     BSTR name;
     HRESULT hres;
 
     hres = IUnknown_QueryInterface(unk, &IID_IHTMLDOMNode, (void**)&node);
-    ok(hres == S_OK, "QueryInterface(IID_IHTMLNode) failed: %08x\n", hres);
+    ok_(__FILE__, line) (hres == S_OK, "QueryInterface(IID_IHTMLNode) failed: %08x\n", hres);
 
     hres = IHTMLDOMNode_get_nodeName(node, &name);
     IHTMLDOMNode_Release(node);
-    ok(hres == S_OK, "get_nodeName failed: %08x\n", hres);
-    ok(!strcmp_wa(name, exname), "got name: %s, expected HTML\n", dbgstr_w(name));
+    ok_(__FILE__, line) (hres == S_OK, "get_nodeName failed: %08x\n", hres);
+    ok_(__FILE__, line) (!strcmp_wa(name, exname), "got name: %s, expected HTML\n", dbgstr_w(name));
 
     SysFreeString(name);
 }
@@ -90,6 +98,250 @@ static void test_doc_elem(IHTMLDocument2 *doc)
     test_node_name((IUnknown*)elem, "HTML");
 
     IHTMLElement_Release(elem);
+}
+
+#define test_range_text(r,t) _test_range_text(__LINE__,r,t)
+static void _test_range_text(unsigned line, IHTMLTxtRange *range, const char *extext)
+{
+    BSTR text;
+    HRESULT hres;
+
+    hres = IHTMLTxtRange_get_text(range, &text);
+    ok_(__FILE__, line) (hres == S_OK, "get_text failed: %08x\n", hres);
+
+    if(extext) {
+        ok_(__FILE__, line) (text != NULL, "text == NULL\n");
+        ok_(__FILE__, line) (!strcmp_wa(text, extext), "text=\"%s\", expected \"%s\"\n", dbgstr_w(text), extext);
+    }else {
+        ok_(__FILE__, line) (text == NULL, "text=\"%s\", expected NULL\n", dbgstr_w(text));
+    }
+
+    SysFreeString(text);
+
+}
+
+#define test_range_collapse(r,b) _test_range_collapse(__LINE__,r,b)
+static void _test_range_collapse(unsigned line, IHTMLTxtRange *range, BOOL b)
+{
+    HRESULT hres;
+
+    hres = IHTMLTxtRange_collapse(range, b);
+    ok_(__FILE__, line) (hres == S_OK, "collapse failed: %08x\n", hres);
+    _test_range_text(line, range, NULL);
+}
+
+#define test_range_expand(r,u,b,t) _test_range_expand(__LINE__,r,u,b,t)
+static void _test_range_expand(unsigned line, IHTMLTxtRange *range, LPWSTR unit,
+        VARIANT_BOOL exb, const char *extext)
+{
+    VARIANT_BOOL b = 0xe0e0;
+    HRESULT hres;
+
+    hres = IHTMLTxtRange_expand(range, unit, &b);
+    ok_(__FILE__,line) (hres == S_OK, "expand failed: %08x\n", hres);
+    ok_(__FILE__,line) (b == exb, "b=%x, expected %x\n", b, exb);
+    _test_range_text(line, range, extext);
+}
+
+#define test_range_move(r,u,c,e) _test_range_move(__LINE__,r,u,c,e)
+static void _test_range_move(unsigned line, IHTMLTxtRange *range, LPWSTR unit, long cnt, long excnt)
+{
+    long c = 0xdeadbeef;
+    HRESULT hres;
+
+    hres = IHTMLTxtRange_move(range, unit, cnt, &c);
+    ok_(__FILE__,line) (hres == S_OK, "move failed: %08x\n", hres);
+    ok_(__FILE__,line) (c == excnt, "count=%ld, expected %ld\n", c, excnt);
+    _test_range_text(line, range, NULL);
+}
+
+#define test_range_moveend(r,u,c,e) _test_range_moveend(__LINE__,r,u,c,e)
+static void _test_range_moveend(unsigned line, IHTMLTxtRange *range, LPWSTR unit, long cnt, long excnt)
+{
+    long c = 0xdeadbeef;
+    HRESULT hres;
+
+    hres = IHTMLTxtRange_moveEnd(range, unit, cnt, &c);
+    ok_(__FILE__,line) (hres == S_OK, "move failed: %08x\n", hres);
+    ok_(__FILE__,line) (c == excnt, "count=%ld, expected %ld\n", c, excnt);
+}
+
+#define test_range_put_text(r,t) _test_range_put_text(__LINE__,r,t)
+static void _test_range_put_text(unsigned line, IHTMLTxtRange *range, LPCWSTR text)
+{
+    HRESULT hres;
+
+    hres = IHTMLTxtRange_put_text(range, (BSTR)text);
+    ok_(__FILE__,line) (hres == S_OK, "put_text failed: %08x\n", hres);
+    _test_range_text(line, range, NULL);
+}
+
+#define test_range_inrange(r1,r2,b) _test_range_inrange(__LINE__,r1,r2,b)
+static void _test_range_inrange(unsigned line, IHTMLTxtRange *range1, IHTMLTxtRange *range2, VARIANT_BOOL exb)
+{
+    VARIANT_BOOL b;
+    HRESULT hres;
+
+    b = 0xe0e0;
+    hres = IHTMLTxtRange_inRange(range1, range2, &b);
+    ok_(__FILE__,line) (hres == S_OK, "(1->2) isEqual failed: %08x\n", hres);
+    ok_(__FILE__,line) (b == exb, "(1->2) b=%x, expected %x\n", b, exb);
+}
+
+#define test_range_isequal(r1,r2,b) _test_range_isequal(__LINE__,r1,r2,b)
+static void _test_range_isequal(unsigned line, IHTMLTxtRange *range1, IHTMLTxtRange *range2, VARIANT_BOOL exb)
+{
+    VARIANT_BOOL b;
+    HRESULT hres;
+
+    b = 0xe0e0;
+    hres = IHTMLTxtRange_isEqual(range1, range2, &b);
+    ok_(__FILE__,line) (hres == S_OK, "(1->2) isEqual failed: %08x\n", hres);
+    ok_(__FILE__,line) (b == exb, "(1->2) b=%x, expected %x\n", b, exb);
+
+    b = 0xe0e0;
+    hres = IHTMLTxtRange_isEqual(range2, range1, &b);
+    ok_(__FILE__,line) (hres == S_OK, "(2->1) isEqual failed: %08x\n", hres);
+    ok_(__FILE__,line) (b == exb, "(2->1) b=%x, expected %x\n", b, exb);
+
+    if(exb) {
+        test_range_inrange(range1, range2, VARIANT_TRUE);
+        test_range_inrange(range2, range1, VARIANT_TRUE);
+    }
+}
+
+static void test_txtrange(IHTMLDocument2 *doc)
+{
+    IHTMLElement *elem;
+    IHTMLBodyElement *body;
+    IHTMLTxtRange *body_range, *range, *range2;
+    HRESULT hres;
+
+    hres = IHTMLDocument2_get_body(doc, &elem);
+    ok(hres == S_OK, "get_body failed: %08x\n", hres);
+
+    hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLBodyElement, (void**)&body);
+    IHTMLElement_Release(elem);
+
+    hres = IHTMLBodyElement_createTextRange(body, &body_range);
+    IHTMLBodyElement_Release(body);
+    ok(hres == S_OK, "createTextRange failed: %08x\n", hres);
+
+    test_range_text(body_range, "test abc 123\r\nit's text");
+
+    hres = IHTMLTxtRange_duplicate(body_range, &range);
+    ok(hres == S_OK, "duplicate failed: %08x\n", hres);
+
+    hres = IHTMLTxtRange_duplicate(body_range, &range2);
+    ok(hres == S_OK, "duplicate failed: %08x\n", hres);
+    test_range_isequal(range, range2, VARIANT_TRUE);
+
+    test_range_text(range, "test abc 123\r\nit's text");
+    test_range_text(body_range, "test abc 123\r\nit's text");
+
+    test_range_collapse(range, TRUE);
+    test_range_isequal(range, range2, VARIANT_FALSE);
+    test_range_inrange(range, range2, VARIANT_FALSE);
+    test_range_inrange(range2, range, VARIANT_TRUE);
+    IHTMLTxtRange_Release(range2);
+
+    test_range_expand(range, wordW, VARIANT_TRUE, "test ");
+    test_range_expand(range, wordW, VARIANT_FALSE, "test ");
+    test_range_move(range, characterW, 2, 2);
+    test_range_expand(range, wordW, VARIANT_TRUE, "test ");
+
+    test_range_collapse(range, FALSE);
+    test_range_expand(range, wordW, VARIANT_TRUE, "abc ");
+
+    test_range_collapse(range, FALSE);
+    test_range_expand(range, wordW, VARIANT_TRUE, "123");
+    test_range_expand(range, wordW, VARIANT_FALSE, "123");
+    test_range_move(range, characterW, 2, 2);
+    test_range_expand(range, wordW, VARIANT_TRUE, "123");
+
+    IHTMLTxtRange_Release(range);
+
+    hres = IHTMLTxtRange_duplicate(body_range, &range);
+    ok(hres == S_OK, "duplicate failed: %08x\n", hres);
+
+    test_range_text(range, "test abc 123\r\nit's text");
+    test_range_move(range, characterW, 3, 3);
+    test_range_moveend(range, characterW, 1, 1);
+    test_range_text(range, "t");
+    test_range_moveend(range, characterW, 3, 3);
+    test_range_text(range, "t ab");
+    test_range_moveend(range, characterW, -2, -2);
+    test_range_text(range, "t ");
+    test_range_move(range, characterW, 6, 6);
+    test_range_moveend(range, characterW, 3, 3);
+    test_range_text(range, "123");
+    test_range_moveend(range, characterW, 2, 2);
+    test_range_text(range, "123\r\ni");
+
+    IHTMLTxtRange_Release(range);
+
+    hres = IHTMLTxtRange_duplicate(body_range, &range);
+    ok(hres == S_OK, "duplicate failed: %08x\n", hres);
+
+    test_range_move(range, wordW, 1, 1);
+    test_range_moveend(range, characterW, 2, 2);
+    test_range_text(range, "ab");
+
+    test_range_move(range, characterW, -2, -2);
+    test_range_moveend(range, characterW, 2, 2);
+    test_range_text(range, "t ");
+
+    test_range_move(range, wordW, 3, 3);
+    test_range_move(range, wordW, -2, -2);
+    test_range_moveend(range, characterW, 2, 2);
+    test_range_text(range, "ab");
+
+    test_range_move(range, characterW, -6, -5);
+    test_range_moveend(range, characterW, -1, 0);
+    test_range_moveend(range, characterW, -6, 0);
+    test_range_move(range, characterW, 2, 2);
+    test_range_moveend(range, characterW, 2, 2);
+    test_range_text(range, "st");
+    test_range_moveend(range, characterW, -6, -4);
+    test_range_moveend(range, characterW, 2, 2);
+
+    IHTMLTxtRange_Release(range);
+
+    hres = IHTMLTxtRange_duplicate(body_range, &range);
+    ok(hres == S_OK, "duplicate failed: %08x\n", hres);
+
+    test_range_move(range, wordW, 2, 2);
+    test_range_moveend(range, characterW, 2, 2);
+    test_range_text(range, "12");
+
+    test_range_move(range, characterW, 15, 14);
+    test_range_move(range, characterW, -2, -2);
+    test_range_moveend(range, characterW, 3, 2);
+    test_range_text(range, "t");
+    test_range_moveend(range, characterW, -1, -1);
+    test_range_text(range, "t");
+    test_range_expand(range, wordW, VARIANT_TRUE, "text");
+    test_range_move(range, characterW, -2, -2);
+    test_range_moveend(range, characterW, 2, 2);
+    test_range_text(range, "s ");
+    test_range_move(range, characterW, 100, 7);
+    test_range_move(range, wordW, 1, 0);
+    test_range_move(range, characterW, -2, -2);
+    test_range_moveend(range, characterW, 3, 2);
+    test_range_text(range, "t");
+
+    IHTMLTxtRange_Release(range);
+
+    hres = IHTMLTxtRange_duplicate(body_range, &range);
+    ok(hres == S_OK, "duplicate failed: %08x\n", hres);
+
+    test_range_collapse(range, TRUE);
+    test_range_expand(range, wordW, VARIANT_TRUE, "test ");
+    test_range_put_text(range, wordW);
+    test_range_text(body_range, "wordabc 123\r\nit's text");
+
+    IHTMLTxtRange_Release(range);
+    IHTMLTxtRange_Release(body_range);
 }
 
 static IHTMLDocument2 *notif_doc;
@@ -257,6 +509,7 @@ START_TEST(dom)
     CoInitialize(NULL);
 
     run_domtest(doc_str1, test_doc_elem);
+    run_domtest(doc_str2, test_txtrange);
 
     CoUninitialize();
     gecko_installer_workaround(FALSE);

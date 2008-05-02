@@ -2,6 +2,7 @@
  * CMD - Wine-compatible command line interface.
  *
  * Copyright (C) 1999 D A Pickles
+ * Copyright (C) 2007 J Edmeades
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -32,6 +33,7 @@
 
 typedef struct _CMD_LIST {
   WCHAR              *command;     /* Command string to execute                */
+  WCHAR              *redirects;   /* Redirects in place                       */
   struct _CMD_LIST   *nextcommand; /* Next command string to execute           */
   BOOL                isAmphersand;/* Whether follows &&                       */
   int                 bracketDepth;/* How deep bracketing have we got to       */
@@ -65,7 +67,6 @@ void WCMD_pause (void);
 void WCMD_pipe (CMD_LIST **command, WCHAR *var, WCHAR *val);
 void WCMD_popd (void);
 void WCMD_print_error (void);
-void WCMD_process_command (WCHAR *command, CMD_LIST **cmdList);
 void WCMD_pushd (WCHAR *);
 int  WCMD_read_console (WCHAR *string, int str_len);
 void WCMD_remove_dir (WCHAR *command);
@@ -92,7 +93,7 @@ WCHAR *WCMD_parameter (WCHAR *s, int n, WCHAR **where);
 WCHAR *WCMD_strtrim_leading_spaces (WCHAR *string);
 void WCMD_strtrim_trailing_spaces (WCHAR *string);
 void WCMD_opt_s_strip_quotes(WCHAR *cmd);
-void WCMD_HandleTildaModifiers(WCHAR **start, WCHAR *forVariable);
+void WCMD_HandleTildaModifiers(WCHAR **start, WCHAR *forVariable, WCHAR *forValue, BOOL justFors);
 BOOL WCMD_ask_confirm (WCHAR *message, BOOL showSureText, BOOL *optionAll);
 
 void WCMD_splitpath(const WCHAR* path, WCHAR* drv, WCHAR* dir, WCHAR* name, WCHAR* ext);
@@ -104,7 +105,8 @@ BOOL WCMD_ReadFile(const HANDLE hIn, WCHAR *intoBuf, const DWORD maxChars,
 WCHAR    *WCMD_ReadAndParseLine(WCHAR *initialcmd, CMD_LIST **output, HANDLE readFrom);
 CMD_LIST *WCMD_process_commands(CMD_LIST *thisCmd, BOOL oneBracket, WCHAR *var, WCHAR *val);
 void      WCMD_free_commands(CMD_LIST *cmds);
-void      WCMD_execute (WCHAR *orig_command, WCHAR *parameter, WCHAR *substitution, CMD_LIST **cmdList);
+void      WCMD_execute (WCHAR *orig_command, WCHAR *redirects, WCHAR *parameter,
+                        WCHAR *substitution, CMD_LIST **cmdList);
 
 /*	Data structure to hold context when executing batch files */
 

@@ -66,7 +66,7 @@ static const char visual_id_prop[]    = "__wine_x11_visual_id";
  *
  * Check if a given window should be managed
  */
-BOOL is_window_managed( HWND hwnd, const RECT *window_rect )
+BOOL is_window_managed( HWND hwnd, UINT swp_flags, const RECT *window_rect )
 {
     DWORD style, ex_style;
 
@@ -76,6 +76,9 @@ BOOL is_window_managed( HWND hwnd, const RECT *window_rect )
     /* child windows are not managed */
     style = GetWindowLongW( hwnd, GWL_STYLE );
     if ((style & (WS_CHILD|WS_POPUP)) == WS_CHILD) return FALSE;
+    /* activated windows are managed */
+    if (!(swp_flags & (SWP_NOACTIVATE|SWP_HIDEWINDOW))) return TRUE;
+    if (hwnd == GetActiveWindow()) return TRUE;
     /* windows with caption are managed */
     if ((style & WS_CAPTION) == WS_CAPTION) return TRUE;
     /* tool windows are not managed  */
@@ -557,23 +560,26 @@ void X11DRV_set_wm_hints( Display *display, struct x11drv_win_data *data )
 
     mwm_hints.flags = MWM_HINTS_FUNCTIONS | MWM_HINTS_DECORATIONS;
     mwm_hints.functions = MWM_FUNC_MOVE;
-    if (style & WS_THICKFRAME) mwm_hints.functions |= MWM_FUNC_RESIZE;
+    if (style & WS_THICKFRAME)  mwm_hints.functions |= MWM_FUNC_RESIZE;
     if (style & WS_MINIMIZEBOX) mwm_hints.functions |= MWM_FUNC_MINIMIZE;
     if (style & WS_MAXIMIZEBOX) mwm_hints.functions |= MWM_FUNC_MAXIMIZE;
-    if (style & WS_SYSMENU)    mwm_hints.functions |= MWM_FUNC_CLOSE;
+    if (style & WS_SYSMENU)     mwm_hints.functions |= MWM_FUNC_CLOSE;
     mwm_hints.decorations = 0;
-    if ((style & WS_CAPTION) == WS_CAPTION) 
+    if (!(ex_style & WS_EX_TOOLWINDOW))
     {
-	mwm_hints.decorations |= MWM_DECOR_TITLE;
-	if (style & WS_SYSMENU) mwm_hints.decorations |= MWM_DECOR_MENU;
-	if (style & WS_MINIMIZEBOX) mwm_hints.decorations |= MWM_DECOR_MINIMIZE;
-	if (style & WS_MAXIMIZEBOX) mwm_hints.decorations |= MWM_DECOR_MAXIMIZE;
+        if ((style & WS_CAPTION) == WS_CAPTION)
+        {
+            mwm_hints.decorations |= MWM_DECOR_TITLE;
+            if (style & WS_SYSMENU) mwm_hints.decorations |= MWM_DECOR_MENU;
+            if (style & WS_MINIMIZEBOX) mwm_hints.decorations |= MWM_DECOR_MINIMIZE;
+            if (style & WS_MAXIMIZEBOX) mwm_hints.decorations |= MWM_DECOR_MAXIMIZE;
+        }
+        if (ex_style & WS_EX_DLGMODALFRAME) mwm_hints.decorations |= MWM_DECOR_BORDER;
+        else if (style & WS_THICKFRAME) mwm_hints.decorations |= MWM_DECOR_BORDER | MWM_DECOR_RESIZEH;
+        else if ((style & (WS_DLGFRAME|WS_BORDER)) == WS_DLGFRAME) mwm_hints.decorations |= MWM_DECOR_BORDER;
+        else if (style & WS_BORDER) mwm_hints.decorations |= MWM_DECOR_BORDER;
+        else if (!(style & (WS_CHILD|WS_POPUP))) mwm_hints.decorations |= MWM_DECOR_BORDER;
     }
-    if (ex_style & WS_EX_DLGMODALFRAME) mwm_hints.decorations |= MWM_DECOR_BORDER;
-    else if (style & WS_THICKFRAME) mwm_hints.decorations |= MWM_DECOR_BORDER | MWM_DECOR_RESIZEH;
-    else if ((style & (WS_DLGFRAME|WS_BORDER)) == WS_DLGFRAME) mwm_hints.decorations |= MWM_DECOR_BORDER;
-    else if (style & WS_BORDER) mwm_hints.decorations |= MWM_DECOR_BORDER;
-    else if (!(style & (WS_CHILD|WS_POPUP))) mwm_hints.decorations |= MWM_DECOR_BORDER;
 
     XChangeProperty( display, data->whole_window, x11drv_atom(_MOTIF_WM_HINTS),
                      x11drv_atom(_MOTIF_WM_HINTS), 32, PropModeReplace,
@@ -647,14 +653,17 @@ void X11DRV_set_iconic_state( HWND hwnd )
 void X11DRV_window_to_X_rect( struct x11drv_win_data *data, RECT *rect )
 {
     RECT rc;
+    DWORD ex_style;
 
     if (!data->managed) return;
     if (IsRectEmpty( rect )) return;
+    ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
+    if (ex_style & WS_EX_TOOLWINDOW) return;
 
     rc.top = rc.bottom = rc.left = rc.right = 0;
 
     AdjustWindowRectEx( &rc, GetWindowLongW( data->hwnd, GWL_STYLE ) & ~(WS_HSCROLL|WS_VSCROLL),
-                        FALSE, GetWindowLongW( data->hwnd, GWL_EXSTYLE ) );
+                        FALSE, ex_style );
 
     rect->left   -= rc.left;
     rect->right  -= rc.right;
@@ -672,11 +681,15 @@ void X11DRV_window_to_X_rect( struct x11drv_win_data *data, RECT *rect )
  */
 void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect )
 {
+    DWORD ex_style;
+
     if (!data->managed) return;
     if (IsRectEmpty( rect )) return;
+    ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
+    if (ex_style & WS_EX_TOOLWINDOW) return;
 
     AdjustWindowRectEx( rect, GetWindowLongW( data->hwnd, GWL_STYLE ) & ~(WS_HSCROLL|WS_VSCROLL),
-                        FALSE, GetWindowLongW( data->hwnd, GWL_EXSTYLE ));
+                        FALSE, ex_style );
 
     if (rect->top >= rect->bottom) rect->bottom = rect->top + 1;
     if (rect->left >= rect->right) rect->right = rect->left + 1;
@@ -979,6 +992,7 @@ static void get_desktop_xwin( Display *display, struct x11drv_win_data *data )
         {
             data->managed = TRUE;
             SetPropA( data->hwnd, managed_prop, (HANDLE)1 );
+            set_initial_wm_hints( display, data );
         }
     }
 }

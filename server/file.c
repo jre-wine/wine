@@ -286,6 +286,7 @@ void file_set_error(void)
 {
     switch (errno)
     {
+    case ETXTBSY:
     case EAGAIN:    set_error( STATUS_SHARING_VIOLATION ); break;
     case EBADF:     set_error( STATUS_INVALID_HANDLE ); break;
     case ENOSPC:    set_error( STATUS_DISK_FULL ); break;
@@ -310,7 +311,10 @@ void file_set_error(void)
 #ifdef EOVERFLOW
     case EOVERFLOW: set_error( STATUS_INVALID_PARAMETER ); break;
 #endif
-    default:        perror("file_set_error"); set_error( STATUS_UNSUCCESSFUL ); break;
+    default:
+        perror("wineserver: file_set_error() can't map error");
+        set_error( STATUS_UNSUCCESSFUL );
+        break;
     }
 }
 

@@ -91,7 +91,7 @@ void hash_table_remove(hash_table_t *table, void *key);
 #define NUM_SAVEDPIXELSTATES_R     35
 #define NUM_SAVEDPIXELSTATES_T     18
 #define NUM_SAVEDPIXELSTATES_S     12
-#define NUM_SAVEDVERTEXSTATES_R    31
+#define NUM_SAVEDVERTEXSTATES_R    34
 #define NUM_SAVEDVERTEXSTATES_T    2
 #define NUM_SAVEDVERTEXSTATES_S    1
 
@@ -197,6 +197,7 @@ typedef struct wined3d_settings_s {
   int rendertargetlock_mode;
 /* Memory tracking and object counting */
   unsigned int emulated_textureram;
+  char *logo;
 } wined3d_settings_t;
 
 extern wined3d_settings_t wined3d_settings;
@@ -728,6 +729,9 @@ struct IWineD3DDeviceImpl
     BOOL                    haveHardwareCursor;
     HCURSOR                 hardwareCursor;
 
+    /* The Wine logo surface */
+    IWineD3DSurface        *logo_surface;
+
     /* Textures for when no other textures are mapped */
     UINT                          dummyTextureName[MAX_TEXTURES];
 
@@ -1045,6 +1049,7 @@ typedef struct _WINED3DSURFACET_DESC
 typedef struct wineD3DSurface_DIB {
     HBITMAP DIBsection;
     void* bitmap_data;
+    UINT bitmap_size;
     HGDIOBJ holdbitmap;
     BOOL client_memory;
 } wineD3DSurface_DIB;
@@ -1094,6 +1099,9 @@ struct IWineD3DSurfaceImpl
 
     /* Oversized texture */
     RECT                      glRect;
+
+    /* PBO */
+    GLuint                    pbo;
 
 #if 0
     /* precalculated x and y scalings for texture coords */
@@ -1195,6 +1203,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetClipper(IWineD3DSurface *iface, IWineD3DCl
 #define SFLAG_GLCKEY      0x00008000 /* The gl texture was created with a color key */
 #define SFLAG_CLIENT      0x00010000 /* GL_APPLE_client_storage is used on that texture */
 #define SFLAG_ALLOCATED   0x00020000 /* A gl texture is allocated for this surface */
+#define SFLAG_PBO         0x00040000 /* Has a PBO attached for speeding data transfer for dynamicly locked surfaces */
 
 /* In some conditions the surface memory must not be freed:
  * SFLAG_OVERSIZE: Not all data can be kept in GL
@@ -1203,6 +1212,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetClipper(IWineD3DSurface *iface, IWineD3DCl
  * SFLAG_LOCKED: The app requires access to the surface data
  * SFLAG_DYNLOCK: Avoid freeing the data for performance
  * SFLAG_DYNCHANGE: Same reason as DYNLOCK
+ * SFLAG_PBO: PBOs don't use 'normal' memory. It is either allocated by the driver or must be NULL.
  * SFLAG_CLIENT: OpenGL uses our memory as backup
  */
 #define SFLAG_DONOTFREE  (SFLAG_OVERSIZE   | \
@@ -1212,6 +1222,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetClipper(IWineD3DSurface *iface, IWineD3DCl
                           SFLAG_DYNLOCK    | \
                           SFLAG_DYNCHANGE  | \
                           SFLAG_USERPTR    | \
+                          SFLAG_PBO        | \
                           SFLAG_CLIENT)
 
 BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]);
@@ -1231,6 +1242,7 @@ typedef enum {
     CONVERT_CK_8888_ARGB,
     CONVERT_RGB32_888,
     CONVERT_V8U8,
+    CONVERT_L6V5U5,
     CONVERT_X8L8V8U8,
     CONVERT_Q8W8V8U8,
     CONVERT_V16U16,
@@ -1343,8 +1355,8 @@ struct IWineD3DStateBlockImpl
 
     /* Indices */
     IWineD3DIndexBuffer*      pIndexData;
-    UINT                      baseVertexIndex;
-    UINT                      loadBaseVertexIndex; /* non-indexed drawing needs 0 here, indexed baseVertexIndex */
+    INT                       baseVertexIndex;
+    INT                       loadBaseVertexIndex; /* non-indexed drawing needs 0 here, indexed baseVertexIndex */
 
     /* Transform */
     WINED3DMATRIX             transforms[HIGHEST_TRANSFORMSTATE + 1];
@@ -1532,7 +1544,7 @@ GLenum StencilOp(DWORD op);
 GLenum CompareFunc(DWORD func);
 void   set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP op, DWORD arg1, DWORD arg2, DWORD arg3);
 void   set_tex_op_nvrc(IWineD3DDevice *iface, BOOL is_alpha, int stage, WINED3DTEXTUREOP op, DWORD arg1, DWORD arg2, DWORD arg3, INT texture_idx);
-void   set_texture_matrix(const float *smat, DWORD flags, BOOL calculatedCoords);
+void   set_texture_matrix(const float *smat, DWORD flags, BOOL calculatedCoords, BOOL transformed, DWORD coordtype);
 
 void surface_set_compatible_renderbuffer(IWineD3DSurface *iface, unsigned int width, unsigned int height);
 GLenum surface_get_gl_buffer(IWineD3DSurface *iface, IWineD3DSwapChain *swapchain);
@@ -1542,6 +1554,7 @@ BOOL getDepthStencilBits(WINED3DFORMAT fmt, short *depthSize, short *stencilSize
 
 /* Math utils */
 void multiply_matrix(WINED3DMATRIX *dest, const WINED3DMATRIX *src1, const WINED3DMATRIX *src2);
+unsigned int count_bits(unsigned int mask);
 
 /*****************************************************************************
  * To enable calling of inherited functions, requires prototypes 
@@ -1656,7 +1669,7 @@ typedef struct shader_reg_maps {
     /* Sampler usage tokens 
      * Use 0 as default (bit 31 is always 1 on a valid token) */
     DWORD samplers[max(MAX_FRAGMENT_SAMPLERS, MAX_VERTEX_SAMPLERS)];
-    char bumpmat;
+    char bumpmat, luminanceparams;
 
     /* Whether or not a loop is used in this shader */
     char loop;
@@ -1785,6 +1798,8 @@ extern void pshader_hw_texm3x3pad(SHADER_OPCODE_ARG* arg);
 extern void pshader_hw_texm3x3tex(SHADER_OPCODE_ARG* arg);
 extern void pshader_hw_texm3x3spec(SHADER_OPCODE_ARG* arg);
 extern void pshader_hw_texm3x3vspec(SHADER_OPCODE_ARG* arg);
+extern void pshader_hw_texdepth(SHADER_OPCODE_ARG* arg);
+extern void pshader_hw_texkill(SHADER_OPCODE_ARG* arg);
 
 /* ARB vertex shader prototypes */
 extern void vshader_hw_map2gl(SHADER_OPCODE_ARG* arg);

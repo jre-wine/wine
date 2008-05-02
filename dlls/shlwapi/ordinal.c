@@ -1775,29 +1775,29 @@ HRESULT WINAPI IUnknown_TranslateAcceleratorOCS(IUnknown *lpUnknown, LPMSG lpMsg
 /*************************************************************************
  * @  [SHLWAPI.189]
  *
- * Call IOleControlSite_GetExtendedControl() on an object.
+ * Call IOleControlSite_OnFocus() on an object.
  *
  * PARAMS
  *  lpUnknown [I] Object supporting the IOleControlSite interface.
- *  lppDisp   [O] Destination for resulting IDispatch.
+ *  fGotFocus [I] Whether focus was gained (TRUE) or lost (FALSE).
  *
  * RETURNS
  *  Success: S_OK.
  *  Failure: An HRESULT error code, or E_FAIL if lpUnknown is NULL.
  */
-DWORD WINAPI IUnknown_OnFocusOCS(IUnknown *lpUnknown, IDispatch** lppDisp)
+HRESULT WINAPI IUnknown_OnFocusOCS(IUnknown *lpUnknown, BOOL fGotFocus)
 {
   IOleControlSite* lpCSite = NULL;
   HRESULT hRet = E_FAIL;
 
-  TRACE("(%p,%p)\n", lpUnknown, lppDisp);
+  TRACE("(%p,%s)\n", lpUnknown, fGotFocus ? "TRUE" : "FALSE");
   if (lpUnknown)
   {
     hRet = IUnknown_QueryInterface(lpUnknown, &IID_IOleControlSite,
                                    (void**)&lpCSite);
     if (SUCCEEDED(hRet) && lpCSite)
     {
-      hRet = IOleControlSite_GetExtendedControl(lpCSite, lppDisp);
+      hRet = IOleControlSite_OnFocus(lpCSite, fGotFocus);
       IOleControlSite_Release(lpCSite);
     }
   }
@@ -4297,26 +4297,45 @@ DWORD WINAPI GetUIVersion(void)
 /***********************************************************************
  *              ShellMessageBoxWrapW [SHLWAPI.388]
  *
- * loads a string resource for a module, displays the string in a 
- * message box and writes it into the logfile
+ * See shell32.ShellMessageBoxW
  *
- * PARAMS
- *  mod      [I] the module containing the string resource
- *  unknown1 [I] FIXME
- *  uId      [I] the id of the string resource
- *  title    [I] the title of the message box
- *  unknown2 [I] FIXME
- *  filename [I] name of the logfile
- *
- * RETURNS
- *  FIXME
+ * NOTE:
+ * shlwapi.ShellMessageBoxWrapW is a duplicate of shell32.ShellMessageBoxW
+ * because we can't forward to it in the .spec file since it's exported by
+ * ordinal. If you change the implementation here please update the code in
+ * shell32 as well.
  */
-BOOL WINAPI ShellMessageBoxWrapW(HMODULE mod, DWORD unknown1, UINT uId,
-                                 LPCWSTR title, DWORD unknown2, LPCWSTR filename)
+INT WINAPIV ShellMessageBoxWrapW(HINSTANCE hInstance, HWND hWnd, LPCWSTR lpText,
+                                 LPCWSTR lpCaption, UINT uType, ...)
 {
-    FIXME("%p %x %d %s %x %s\n",
-          mod, unknown1, uId, debugstr_w(title), unknown2, debugstr_w(filename));
-    return TRUE;
+    WCHAR szText[100], szTitle[100];
+    LPCWSTR pszText = szText, pszTitle = szTitle;
+    LPWSTR pszTemp;
+    va_list args;
+    int ret;
+
+    va_start(args, uType);
+
+    TRACE("(%p,%p,%p,%p,%08x)\n", hInstance, hWnd, lpText, lpCaption, uType);
+
+    if (IS_INTRESOURCE(lpCaption))
+        LoadStringW(hInstance, LOWORD(lpCaption), szTitle, sizeof(szTitle)/sizeof(szTitle[0]));
+    else
+        pszTitle = lpCaption;
+
+    if (IS_INTRESOURCE(lpText))
+        LoadStringW(hInstance, LOWORD(lpText), szText, sizeof(szText)/sizeof(szText[0]));
+    else
+        pszText = lpText;
+
+    FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_STRING,
+                   pszText, 0, 0, (LPWSTR)&pszTemp, 0, &args);
+
+    va_end(args);
+
+    ret = MessageBoxW(hWnd, pszTemp, pszTitle, uType);
+    LocalFree((HLOCAL)pszTemp);
+    return ret;
 }
 
 HRESULT WINAPI IUnknown_QueryServiceExec(IUnknown *unk, REFIID service, REFIID clsid,

@@ -283,9 +283,6 @@ void X11DRV_send_mouse_input( HWND hwnd, DWORD flags, DWORD x, DWORD y,
         {
             pt.x = x;
             pt.y = y;
-            wine_tsx11_lock();
-            if (cursor_pos.x == x && cursor_pos.y == y) flags &= ~MOUSEEVENTF_MOVE;
-            wine_tsx11_unlock();
         }
     }
     else if (flags & MOUSEEVENTF_MOVE)
@@ -763,6 +760,7 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
             pixmapBits = XCreateBitmapFromData( display, root_window, (char *)pXorBits, xmax, ymax );
             if (!pixmapBits)
             {
+                HeapFree( GetProcessHeap(), 0, bitMask32 );
                 XFreePixmap( display, pixmapAll );
                 XFreeGC( display, gc );
                 image->data = NULL;

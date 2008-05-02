@@ -73,6 +73,7 @@ interface IServer
   void square_out(int x, [out] int *y);
   void square_ref([in, out] int *x);
   int str_length([string] const char *s);
+  int cstr_length([string, size_is(n)] const char *s, int n);
   int dot_self(vector_t *v);
   double square_half(double x, [out] double *y);
   float square_half_float(float x, [out] float *y);
@@ -127,8 +128,17 @@ interface IServer
     int n;
   } cps_t;
 
+  typedef struct
+  {
+    [size_is(c ? a : b)] int *ca;
+    int a;
+    int b;
+    int c;
+  } cpsc_t;
+
   int sum_cs(cs_t *cs);
   int sum_cps(cps_t *cps);
+  int sum_cpsc(cpsc_t *cpsc);
 
   typedef [wire_marshal(int)] void *puint_t;
   int square_puint(puint_t p);
@@ -176,5 +186,27 @@ interface IServer
   int sum_pcarr([size_is(n)] int *a[], int n);
   int enum_ord(e_t e);
   double square_encue(encue_t *eue);
+
+  int sum_toplev_conf_2n([size_is(n * 2)] int *x, int n);
+  int sum_toplev_conf_cond([size_is(c ? a : b)] int *x, int a, int b, int c);
+
+  typedef struct
+  {
+    char c;
+    int i;
+    short s;
+    double d;
+  } aligns_t;
+
+  double sum_aligns(aligns_t *a);
+
+  typedef struct
+  {
+    int i;
+    char c;
+  } padded_t;
+
+  int sum_padded(padded_t *p);
+
   void stop(void);
 }

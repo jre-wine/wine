@@ -328,8 +328,14 @@ BOOL PSDRV_CreateDC( HDC hdc, PSDRV_PDEVICE **pdev, LPCWSTR driver, LPCWSTR devi
     if(!pi) return FALSE;
 
     if(!pi->Fonts) {
-        MESSAGE("To use WINEPS you need to install some AFM files.\n");
-	return FALSE;
+        RASTERIZER_STATUS status;
+        if(!GetRasterizerCaps(&status, sizeof(status)) ||
+           !(status.wFlags & TT_AVAILABLE) ||
+           !(status.wFlags & TT_ENABLED)) {
+            MESSAGE("Disabling printer %s since it has no builtin fonts and there are no TrueType fonts available.\n",
+                    debugstr_w(device));
+            return FALSE;
+        }
     }
 
     physDev = HeapAlloc( PSDRV_Heap, HEAP_ZERO_MEMORY, sizeof(*physDev) );
@@ -350,7 +356,7 @@ BOOL PSDRV_CreateDC( HDC hdc, PSDRV_PDEVICE **pdev, LPCWSTR driver, LPCWSTR devi
     physDev->logPixelsX = physDev->pi->ppd->DefaultResolution;
     physDev->logPixelsY = physDev->pi->ppd->DefaultResolution;
 
-    if (output) {
+    if (output && *output) {
         INT len = WideCharToMultiByte( CP_ACP, 0, output, -1, NULL, 0, NULL, NULL );
         if ((physDev->job.output = HeapAlloc( PSDRV_Heap, 0, len )))
             WideCharToMultiByte( CP_ACP, 0, output, -1, physDev->job.output, len, NULL, NULL );

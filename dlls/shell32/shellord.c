@@ -338,6 +338,12 @@ BOOL WINAPI RegisterShellHook(
  * ShellMessageBoxW				[SHELL32.182]
  *
  * See ShellMessageBoxA.
+ *
+ * NOTE:
+ * shlwapi.ShellMessageBoxWrapW is a duplicate of shell32.ShellMessageBoxW
+ * because we can't forward to it in the .spec file since it's exported by
+ * ordinal. If you change the implementation here please update the code in
+ * shlwapi as well.
  */
 int WINAPIV ShellMessageBoxW(
 	HINSTANCE hInstance,
@@ -603,7 +609,7 @@ static INT CALLBACK SHADD_compare_mru(LPCVOID data1, LPCVOID data2, DWORD cbData
  * RETURNS
  *   position within MRU list that data was added.
  */
-static INT SHADD_create_add_mru_data(HANDLE mruhandle, LPSTR doc_name, LPSTR new_lnk_name,
+static INT SHADD_create_add_mru_data(HANDLE mruhandle, LPCSTR doc_name, LPCSTR new_lnk_name,
                                      LPSTR buffer, INT *len)
 {
     LPSTR ptr;

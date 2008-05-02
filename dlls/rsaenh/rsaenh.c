@@ -93,6 +93,7 @@ typedef struct tagCRYPTKEY
     DWORD       dwModeBits;
     DWORD       dwPermissions;
     DWORD       dwKeyLen;
+    DWORD       dwEffectiveKeyLen;
     DWORD       dwSaltLen;
     DWORD       dwBlockLen;
     DWORD       dwState;
@@ -718,7 +719,8 @@ static inline void setup_key(CRYPTKEY *pCryptKey) {
     pCryptKey->dwState = RSAENH_KEYSTATE_IDLE;
     memcpy(pCryptKey->abChainVector, pCryptKey->abInitVector, sizeof(pCryptKey->abChainVector));
     setup_key_impl(pCryptKey->aiAlgid, &pCryptKey->context, pCryptKey->dwKeyLen, 
-                   pCryptKey->dwSaltLen, pCryptKey->abKeyValue);
+                   pCryptKey->dwEffectiveKeyLen, pCryptKey->dwSaltLen,
+                   pCryptKey->abKeyValue);
 }
 
 /******************************************************************************
@@ -813,6 +815,7 @@ static HCRYPTKEY new_key(HCRYPTPROV hProv, ALG_ID aiAlgid, DWORD dwFlags, CRYPTK
         pCryptKey->dwPermissions = CRYPT_ENCRYPT | CRYPT_DECRYPT | CRYPT_READ | CRYPT_WRITE | 
                                    CRYPT_MAC;
         pCryptKey->dwKeyLen = dwKeyLen >> 3;
+        pCryptKey->dwEffectiveKeyLen = 0;
         if ((dwFlags & CRYPT_CREATE_SALT) || (dwKeyLen == 40 && !(dwFlags & CRYPT_NO_SALT))) 
             pCryptKey->dwSaltLen = 16 /*FIXME*/ - pCryptKey->dwKeyLen;
         else
@@ -1907,16 +1910,16 @@ BOOL WINAPI RSAENH_CPEncrypt(HCRYPTPROV hProv, HCRYPTKEY hKey, HCRYPTHASH hHash,
             *pdwDataLen = dwEncryptedLen;
             return TRUE;
         }
-
-        for (i=*pdwDataLen; i<dwEncryptedLen && i<dwBufLen; i++) pbData[i] = dwEncryptedLen - *pdwDataLen;
-        *pdwDataLen = dwEncryptedLen; 
-
-        if (*pdwDataLen > dwBufLen) 
-        {
+        else if (dwEncryptedLen > dwBufLen) {
+            *pdwDataLen = dwEncryptedLen;
             SetLastError(ERROR_MORE_DATA);
             return FALSE;
         }
-    
+
+        /* Pad final block with length bytes */
+        for (i=*pdwDataLen; i<dwEncryptedLen; i++) pbData[i] = dwEncryptedLen - *pdwDataLen;
+        *pdwDataLen = dwEncryptedLen;
+
         for (i=0, in=pbData; i<*pdwDataLen; i+=pCryptKey->dwBlockLen, in+=pCryptKey->dwBlockLen) {
             switch (pCryptKey->dwMode) {
                 case CRYPT_MODE_ECB:
@@ -2077,7 +2080,16 @@ BOOL WINAPI RSAENH_CPDecrypt(HCRYPTPROV hProv, HCRYPTKEY hKey, HCRYPTHASH hHash,
             }
             memcpy(in, out, pCryptKey->dwBlockLen);
         }
-        if (Final) *pdwDataLen -= pbData[*pdwDataLen-1]; 
+        if (Final) {
+            if (pbData[*pdwDataLen-1] &&
+             pbData[*pdwDataLen-1] <= pCryptKey->dwBlockLen &&
+             pbData[*pdwDataLen-1] < *pdwDataLen)
+                *pdwDataLen -= pbData[*pdwDataLen-1];
+            else {
+                SetLastError(NTE_BAD_DATA);
+                return FALSE;
+            }
+        }
 
     } else if (GET_ALG_TYPE(pCryptKey->aiAlgid) == ALG_TYPE_STREAM) {
         encrypt_stream_impl(pCryptKey->aiAlgid, &pCryptKey->context, pbData, *pdwDataLen);
@@ -2707,6 +2719,32 @@ BOOL WINAPI RSAENH_CPSetKeyParam(HCRYPTPROV hProv, HCRYPTKEY hKey, DWORD dwParam
 
         case KP_IV:
             memcpy(pCryptKey->abInitVector, pbData, pCryptKey->dwBlockLen);
+            setup_key(pCryptKey);
+            return TRUE;
+
+        case KP_EFFECTIVE_KEYLEN:
+            switch (pCryptKey->aiAlgid) {
+                case CALG_RC2:
+                    if (!pbData)
+                    {
+                        SetLastError(ERROR_INVALID_PARAMETER);
+                        return FALSE;
+                    }
+                    else if (!*(DWORD *)pbData || *(DWORD *)pbData > 1024)
+                    {
+                        SetLastError(NTE_BAD_DATA);
+                        return FALSE;
+                    }
+                    else
+                    {
+                        pCryptKey->dwEffectiveKeyLen = *(DWORD *)pbData;
+                        setup_key(pCryptKey);
+                    }
+                    break;
+                default:
+                    SetLastError(NTE_BAD_TYPE);
+                    return FALSE;
+            }
             return TRUE;
 
         case KP_SCHANNEL_ALG:
@@ -2806,6 +2844,13 @@ BOOL WINAPI RSAENH_CPGetKeyParam(HCRYPTPROV hProv, HCRYPTKEY hKey, DWORD dwParam
             dwBitLen = pCryptKey->dwKeyLen << 3;
             return copy_param(pbData, pdwDataLen, (CONST BYTE*)&dwBitLen, sizeof(DWORD));
         
+        case KP_EFFECTIVE_KEYLEN:
+            if (pCryptKey->dwEffectiveKeyLen)
+                dwBitLen = pCryptKey->dwEffectiveKeyLen;
+            else
+                dwBitLen = pCryptKey->dwKeyLen << 3;
+            return copy_param(pbData, pdwDataLen, (CONST BYTE*)&dwBitLen, sizeof(DWORD));
+
         case KP_BLOCKLEN:
             dwBitLen = pCryptKey->dwBlockLen << 3;
             return copy_param(pbData, pdwDataLen, (CONST BYTE*)&dwBitLen, sizeof(DWORD));

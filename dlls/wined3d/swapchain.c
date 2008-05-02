@@ -175,6 +175,10 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
         }
         IWineD3DSurface_Blt(This->backBuffer[0], &destRect, (IWineD3DSurface *) &cursor, NULL, WINEDDBLT_KEYSRC, NULL, WINED3DTEXF_NONE);
     }
+    if(This->wineD3DDevice->logo_surface) {
+        /* Blit the logo into the upper left corner of the drawable */
+        IWineD3DSurface_BltFast(This->backBuffer[0], 0, 0, This->wineD3DDevice->logo_surface, NULL, WINEDDBLTFAST_SRCCOLORKEY);
+    }
 
     if (pSourceRect || pDestRect) FIXME("Unhandled present options %p/%p\n", pSourceRect, pDestRect);
     /* TODO: If only source rect or dest rect are supplied then clip the window to match */
@@ -319,6 +323,25 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
                 tmp = front->resource.allocatedMemory;
                 front->resource.allocatedMemory = back->resource.allocatedMemory;
                 back->resource.allocatedMemory = tmp;
+            }
+
+            /* Flip the PBO */
+            {
+                DWORD tmp_flags = front->Flags;
+
+                GLuint tmp_pbo = front->pbo;
+                front->pbo = back->pbo;
+                back->pbo = tmp_pbo;
+
+                if(back->Flags & SFLAG_PBO)
+                    front->Flags |= SFLAG_PBO;
+                else
+                    front->Flags &= ~SFLAG_PBO;
+
+                if(tmp_flags & SFLAG_PBO)
+                    back->Flags |= SFLAG_PBO;
+                else
+                    back->Flags &= ~SFLAG_PBO;
             }
 
             /* client_memory should not be different, but just in case */
