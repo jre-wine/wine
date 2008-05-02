@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #------------------------------------------------------------------------------
 #   Winelauncher
 #       This shell script attempts to intelligently manage the process
@@ -36,8 +36,7 @@
 #------------------------------------------------------------------------------
 WINEBIN=@libdir@/wine
 WINELIB=@libdir@
-WINESERVER=
-WINEDLLPATH=@dlldir@
+WINEDLL=@dlldir@
 
 #------------------------------------------------------------------------------
 #  Establish Color Scheme
@@ -101,7 +100,7 @@ if [ `basename $0` = "wine-safe" ]; then
  "
  Wine will launch to run the requested Windows executable.
  To protect you from accidentally running a Windows virus,
- you must confirm that this is what you intented to do.
+ you must confirm that this is what you intended to do.
  " 2>/dev/null
  safe_launch=$?
  if [ $safe_launch -eq 0 ] ; then
@@ -111,7 +110,7 @@ if [ `basename $0` = "wine-safe" ]; then
   # this means xmessage was unable to ask the user, try tty instead
   echo "Wine will launch to run the requested Windows executable."
   echo "To protect you from accidentally running a Windows virus,"
-  echo "you must confirm that this is what you intented to do."
+  echo "you must confirm that this is what you intended to do."
   echo -n "(yes/no) "
   read safe_confirm
   if [ "$safe_confirm" != 'yes' -a "$safe_confirm" != 'y' ] ; then
@@ -178,20 +177,16 @@ if [ ! -r $WINELIB/libwine.so.1 ] ; then
     WINELIB=`find $argv0_dir/../ -maxdepth 2 -name 'libwine.so.1' -printf "%h\n" | head -n 1`
 fi
 
-if [ -x $WINEBIN/wineserver ] ; then
-    WINESERVER=$WINEBIN/wineserver
-fi
-
 #------------------------------------------------------------------------------
 #  Hey, if we built Wine from source, let's add a little extra fun to
 #   mix it up a bit
 #------------------------------------------------------------------------------
 if [ -x $WINEBIN/server/wineserver ] ; then
-    WINESERVER=$WINEBIN/server/wineserver
+    export WINESERVER=$WINEBIN/server/wineserver
 fi
 
 if [ -r $WINELIB/dlls/ntdll.dll.so ] ; then
-    WINEDLLPATH=$WINELIB/dlls
+    export WINEDLLPATH=$WINELIB/dlls
 fi
 
 
@@ -199,14 +194,22 @@ fi
 #  Okay, set the paths and move on.
 #------------------------------------------------------------------------------
 if [ -n "$LD_LIBRARY_PATH" ]; then
-	export LD_LIBRARY_PATH=$WINELIB:$LD_LIBRARY_PATH
+	export LD_LIBRARY_PATH="$WINELIB:$LD_LIBRARY_PATH"
 else
-	export LD_LIBRARY_PATH=$WINELIB
+	export LD_LIBRARY_PATH="$WINELIB"
+fi
+if [ -n "$WINEDLLPATH" ]; then
+	export WINEDLLPATH="$WINEDLLPATH:$WINEDLLDIR"
+else
+	export WINEDLLPATH="$WINEDLLDIR"
+fi
+if [ -z "$WINELOADER" ]; then
+	export WINELOADER=$WINEBIN/$WINE_BIN_NAME
+fi
+if [ -z "$WINESERVER" -a -x $WINEBIN/wineserver ] ; then
+	export WINESERVER=$WINEBIN/wineserver
 fi
 export PATH=$WINEBIN:$PATH
-export WINELOADER=$WINEBIN/$WINE_BIN_NAME
-export WINEDLLPATH
-export WINESERVER
 
 if [ -n "$WINEPREFIX" ]; then
     info_flag="$WINEPREFIX/.no_prelaunch_window_flag"
@@ -388,7 +391,7 @@ fi
 #  Okay, really launch Wine...
 #------------------------------------------------------------------------------
 if [ $use_log_name -ne 0 -a $use_status_name -ne 0 ] ; then
-    ( $WINEBIN/$WINE_BIN_NAME "$@"; echo $? >$status_name ) 2>&1 | tee "$log_name"
+    ( $WINEBIN/$WINE_BIN_NAME "$@"; echo $? >$status_name ) 2> >( tee "$log_name" >&2 )
     wine_return=`cat $status_name`
 else
     $WINEBIN/$WINE_BIN_NAME "$@"
@@ -402,7 +405,7 @@ fi
 #  Test the return code, and see if it fails
 #------------------------------------------------------------------------------
 if [ $always_see_output -eq 0 -a $wine_return -eq 0 ] ; then
-    echo "Wine exited with a successful status" >&2
+#    echo "Wine exited with a successful status" >&2
     if [ $use_log_name -ne 0 ] ; then
         rm -f "$log_name"
     fi
