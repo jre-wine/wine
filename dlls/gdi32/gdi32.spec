@@ -282,14 +282,14 @@
 @ stdcall GetFontUnicodeRanges(ptr ptr)
 @ stdcall GetGlyphIndicesA(long ptr long ptr long)
 @ stdcall GetGlyphIndicesW(long ptr long ptr long)
-@ stub GetGlyphOutline
+@ stdcall GetGlyphOutline(long long long ptr long ptr ptr) GetGlyphOutlineA
 @ stdcall GetGlyphOutlineA(long long long ptr long ptr ptr)
 @ stdcall GetGlyphOutlineW(long long long ptr long ptr ptr)
 @ stub GetGlyphOutlineWow
 @ stdcall GetGraphicsMode(long)
 # @ stub GetHFONT
-@ stdcall GetICMProfileA(long ptr str)
-@ stdcall GetICMProfileW(long ptr wstr)
+@ stdcall GetICMProfileA(long ptr ptr)
+@ stdcall GetICMProfileW(long ptr ptr)
 @ stdcall GetKerningPairs(long long ptr) GetKerningPairsA
 @ stdcall GetKerningPairsA(long long ptr)
 @ stdcall GetKerningPairsW(long long ptr)

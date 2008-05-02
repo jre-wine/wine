@@ -99,6 +99,8 @@ HRESULT WINAPI CorBindToRuntimeHost(LPCWSTR pwszVersion, LPCWSTR pwszBuildFlavor
         return E_FAIL;
     }
 
+    HeapFree(GetProcessHeap(), 0, mono_exe);
+
     return S_OK;
 }
 
@@ -269,6 +271,28 @@ HRESULT WINAPI GetVersionFromProcess(HANDLE hProcess, LPWSTR pVersion, DWORD cch
 {
     FIXME("(%p, %p, %d, %p): stub\n", hProcess, pVersion, cchBuffer, dwLength);
     return E_NOTIMPL;
+}
+
+HRESULT WINAPI LoadStringRCEx(LCID culture, UINT resId, LPWSTR pBuffer, int iBufLen, int bQuiet, int* pBufLen)
+{
+    HRESULT res = S_OK;
+    if ((iBufLen <= 0) || !pBuffer)
+        return E_INVALIDARG;
+    pBuffer[0] = 0;
+    if (resId) {
+        FIXME("(%d, %x, %p, %d, %d, %p): semi-stub\n", culture, resId, pBuffer, iBufLen, bQuiet, pBufLen);
+        res = E_NOTIMPL;
+    }
+    else
+        res = E_FAIL;
+    if (pBufLen)
+        *pBufLen = lstrlenW(pBuffer);
+    return res;
+}
+
+HRESULT WINAPI LoadStringRC(UINT resId, LPWSTR pBuffer, int iBufLen, int bQuiet)
+{
+    return LoadStringRCEx(-1, resId, pBuffer, iBufLen, bQuiet, NULL);
 }
 
 HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv)

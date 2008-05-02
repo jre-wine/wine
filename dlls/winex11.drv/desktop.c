@@ -68,41 +68,6 @@ static void make_modes(void)
     }
 }
 
-/***********************************************************************
- *		X11DRV_resize_desktop
- *
- * Reset the desktop window size and WM hints
- */
-static int X11DRV_resize_desktop( unsigned int width, unsigned int height )
-{
-    XSizeHints *size_hints;
-    Display *display = thread_display();
-    Window w = root_window;
-    /* set up */
-    wine_tsx11_lock();
-    size_hints  = XAllocSizeHints();
-    if (!size_hints)
-    {
-        ERR("Not enough memory for window manager hints.\n" );
-        wine_tsx11_unlock();
-        return 0;
-    }
-    size_hints->min_width = size_hints->max_width = width;
-    size_hints->min_height = size_hints->max_height = height;
-    size_hints->flags = PMinSize | PMaxSize | PSize;
-
-    /* do the work */
-    XSetWMNormalHints( display, w, size_hints );
-    XResizeWindow( display, w, width, height );
-
-    /* clean up */
-    XFree( size_hints );
-    XFlush( display );
-    wine_tsx11_unlock();
-    X11DRV_handle_desktop_resize( width, height );
-    return 1;
-}
-
 static int X11DRV_desktop_GetCurrentMode(void)
 {
     unsigned int i;
@@ -143,11 +108,10 @@ static LONG X11DRV_desktop_SetCurrentMode(int mode)
 void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height )
 {
     root_window = win;
+    managed_mode = 0;  /* no managed windows in desktop mode */
     max_width = screen_width;
     max_height = screen_height;
-    screen_width  = width;
-    screen_height = height;
-    xinerama_init();
+    xinerama_init( width, height );
 
     /* initialize the available resolutions */
     dd_modes = X11DRV_Settings_SetHandlers("desktop", 

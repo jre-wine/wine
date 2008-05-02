@@ -156,7 +156,7 @@ static INT CALLBACK font_enum_proc(const LOGFONT *elf, const TEXTMETRIC *ntm, DW
     return 1; /* continue enumeration */
 }
 
-static void test_font_metrics(HDC hdc, HFONT hfont, const char *test_str,
+static void test_font_metrics(HDC hdc, HFONT hfont, LONG lfHeight, const char *test_str,
 			      INT test_str_len, const TEXTMETRICA *tm_orig,
 			      const SIZE *size_orig, INT width_of_A_orig,
 			      INT scale_x, INT scale_y)
@@ -165,7 +165,7 @@ static void test_font_metrics(HDC hdc, HFONT hfont, const char *test_str,
     LOGFONTA lf;
     TEXTMETRICA tm;
     SIZE size;
-    INT width_of_A;
+    INT width_of_A, cx, cy;
 
     if (!hfont)
         return;
@@ -176,13 +176,17 @@ static void test_font_metrics(HDC hdc, HFONT hfont, const char *test_str,
 
     GetTextMetricsA(hdc, &tm);
 
+    cx = tm.tmAveCharWidth / tm_orig->tmAveCharWidth;
+    cy = tm.tmHeight / tm_orig->tmHeight;
+    ok(cx == scale_x && cy == scale_y, "expected scale_x %d, scale_y %d, got cx %d, cy %d\n",
+       scale_x, scale_y, cx, cy);
     ok(tm.tmHeight == tm_orig->tmHeight * scale_y, "%d != %d\n", tm.tmHeight, tm_orig->tmHeight * scale_y);
     ok(tm.tmAscent == tm_orig->tmAscent * scale_y, "%d != %d\n", tm.tmAscent, tm_orig->tmAscent * scale_y);
     ok(tm.tmDescent == tm_orig->tmDescent * scale_y, "%d != %d\n", tm.tmDescent, tm_orig->tmDescent * scale_y);
     ok(tm.tmAveCharWidth == tm_orig->tmAveCharWidth * scale_x, "%d != %d\n", tm.tmAveCharWidth, tm_orig->tmAveCharWidth * scale_x);
     ok(tm.tmMaxCharWidth == tm_orig->tmMaxCharWidth * scale_x, "%d != %d\n", tm.tmAveCharWidth, tm_orig->tmMaxCharWidth * scale_x);
 
-    ok(lf.lfHeight == tm.tmHeight, "lf %d != tm %d\n", lf.lfHeight, tm.tmHeight);
+    ok(lf.lfHeight == lfHeight, "lf %d !=  %d\n", lf.lfHeight, lfHeight);
     if (lf.lfWidth)
         ok(lf.lfWidth == tm.tmAveCharWidth, "lf %d != tm %d\n", lf.lfWidth, tm.tmAveCharWidth);
 
@@ -207,7 +211,7 @@ static void test_bitmap_font(void)
     HFONT hfont, old_hfont;
     TEXTMETRICA tm_orig;
     SIZE size_orig;
-    INT ret, i, width_orig, height_orig;
+    INT ret, i, width_orig, height_orig, scale;
 
     hdc = GetDC(0);
 
@@ -233,10 +237,17 @@ static void test_bitmap_font(void)
     DeleteObject(hfont);
 
     /* test fractional scaling */
-    for (i = 1; i < height_orig; i++)
+    for (i = 1; i <= height_orig * 3; i++)
     {
+        INT nearest_height;
+
+        bitmap_lf.lfHeight = i;
 	hfont = create_font("fractional", &bitmap_lf);
-	test_font_metrics(hdc, hfont, test_str, sizeof(test_str), &tm_orig, &size_orig, width_orig, 1, 1);
+        scale = (i + height_orig - 1) / height_orig;
+        nearest_height = scale * height_orig;
+        /* XP allows not more than 10% deviation */
+        if (scale > 1 && nearest_height - i > nearest_height / 10) scale--;
+        test_font_metrics(hdc, hfont, bitmap_lf.lfHeight, test_str, sizeof(test_str), &tm_orig, &size_orig, width_orig, 1, scale);
 	DeleteObject(hfont);
     }
 
@@ -244,14 +255,14 @@ static void test_bitmap_font(void)
     bitmap_lf.lfHeight = height_orig * 2;
     bitmap_lf.lfWidth *= 3;
     hfont = create_font("3x2", &bitmap_lf);
-    test_font_metrics(hdc, hfont, test_str, sizeof(test_str), &tm_orig, &size_orig, width_orig, 3, 2);
+    test_font_metrics(hdc, hfont, bitmap_lf.lfHeight, test_str, sizeof(test_str), &tm_orig, &size_orig, width_orig, 3, 2);
     DeleteObject(hfont);
 
     /* test integer scaling 3x3 */
     bitmap_lf.lfHeight = height_orig * 3;
     bitmap_lf.lfWidth = 0;
     hfont = create_font("3x3", &bitmap_lf);
-    test_font_metrics(hdc, hfont, test_str, sizeof(test_str), &tm_orig, &size_orig, width_orig, 3, 3);
+    test_font_metrics(hdc, hfont, bitmap_lf.lfHeight, test_str, sizeof(test_str), &tm_orig, &size_orig, width_orig, 3, 3);
     DeleteObject(hfont);
 
     ReleaseDC(0, hdc);
@@ -269,21 +280,6 @@ static INT CALLBACK find_font_proc(const LOGFONT *elf, const TEXTMETRIC *ntm, DW
     return 1; /* continue enumeration */
 }
 
-#define CP1252_BIT    0x00000001
-#define CP1250_BIT    0x00000002
-#define CP1251_BIT    0x00000004
-#define CP1253_BIT    0x00000008
-#define CP1254_BIT    0x00000010
-#define CP1255_BIT    0x00000020
-#define CP1256_BIT    0x00000040
-#define CP1257_BIT    0x00000080
-#define CP1258_BIT    0x00000100
-#define CP874_BIT     0x00010000
-#define CP932_BIT     0x00020000
-#define CP936_BIT     0x00040000
-#define CP949_BIT     0x00080000
-#define CP950_BIT     0x00100000
-
 static void test_bitmap_font_metrics(void)
 {
     static const struct font_data
@@ -294,64 +290,64 @@ static void test_bitmap_font_metrics(void)
         DWORD ansi_bitfield;
     } fd[] =
     {
-        { "MS Sans Serif", FW_NORMAL, 13, 11, 2, 2, 0, 5, 11, CP1252_BIT | CP1250_BIT | CP1251_BIT },
-        { "MS Sans Serif", FW_NORMAL, 16, 13, 3, 3, 0, 7, 14, CP1252_BIT | CP1250_BIT | CP1251_BIT },
-        { "MS Sans Serif", FW_NORMAL, 20, 16, 4, 4, 0, 8, 16, CP1252_BIT | CP1251_BIT },
-        { "MS Sans Serif", FW_NORMAL, 20, 16, 4, 4, 0, 8, 18, CP1250_BIT },
-        { "MS Sans Serif", FW_NORMAL, 24, 19, 5, 6, 0, 9, 19, CP1252_BIT },
-        { "MS Sans Serif", FW_NORMAL, 24, 19, 5, 6, 0, 9, 24, CP1250_BIT },
-        { "MS Sans Serif", FW_NORMAL, 24, 19, 5, 6, 0, 9, 20, CP1251_BIT },
-        { "MS Sans Serif", FW_NORMAL, 29, 23, 6, 5, 0, 12, 24, CP1252_BIT },
-        { "MS Sans Serif", FW_NORMAL, 29, 23, 6, 6, 0, 12, 24, CP1250_BIT },
-        { "MS Sans Serif", FW_NORMAL, 29, 23, 6, 5, 0, 12, 25, CP1251_BIT },
-        { "MS Sans Serif", FW_NORMAL, 37, 29, 8, 5, 0, 16, 32, CP1252_BIT | CP1250_BIT | CP1251_BIT },
-        { "MS Serif", FW_NORMAL, 10, 8, 2, 2, 0, 4, 8, CP1252_BIT | CP1250_BIT },
-        { "MS Serif", FW_NORMAL, 10, 8, 2, 2, 0, 5, 8, CP1251_BIT },
-        { "MS Serif", FW_NORMAL, 11, 9, 2, 2, 0, 5, 9, CP1252_BIT | CP1250_BIT | CP1251_BIT },
-        { "MS Serif", FW_NORMAL, 13, 11, 2, 2, 0, 5, 11, CP1252_BIT },
-        { "MS Serif", FW_NORMAL, 13, 11, 2, 2, 0, 5, 12, CP1250_BIT | CP1251_BIT },
-        { "MS Serif", FW_NORMAL, 16, 13, 3, 3, 0, 6, 14, CP1252_BIT | CP1250_BIT },
-        { "MS Serif", FW_NORMAL, 16, 13, 3, 3, 0, 6, 16, CP1251_BIT },
-        { "MS Serif", FW_NORMAL, 19, 15, 4, 3, 0, 8, 18, CP1252_BIT | CP1250_BIT },
-        { "MS Serif", FW_NORMAL, 19, 15, 4, 3, 0, 8, 19, CP1251_BIT },
-        { "MS Serif", FW_NORMAL, 21, 16, 5, 3, 0, 9, 17, CP1252_BIT },
-        { "MS Serif", FW_NORMAL, 21, 16, 5, 3, 0, 9, 22, CP1250_BIT },
-        { "MS Serif", FW_NORMAL, 21, 16, 5, 3, 0, 9, 23, CP1251_BIT },
-        { "MS Serif", FW_NORMAL, 27, 21, 6, 3, 0, 12, 23, CP1252_BIT },
-        { "MS Serif", FW_NORMAL, 27, 21, 6, 3, 0, 12, 26, CP1250_BIT },
-        { "MS Serif", FW_NORMAL, 27, 21, 6, 3, 0, 12, 27, CP1251_BIT },
-        { "MS Serif", FW_NORMAL, 35, 27, 8, 3, 0, 16, 33, CP1252_BIT | CP1250_BIT },
-        { "MS Serif", FW_NORMAL, 35, 27, 8, 3, 0, 16, 34, CP1251_BIT },
-        { "Courier", FW_NORMAL, 13, 11, 2, 0, 0, 8, 8, CP1252_BIT | CP1250_BIT | CP1251_BIT },
-        { "Courier", FW_NORMAL, 16, 13, 3, 0, 0, 9, 9, CP1252_BIT | CP1250_BIT | CP1251_BIT },
-        { "Courier", FW_NORMAL, 20, 16, 4, 0, 0, 12, 12, CP1252_BIT | CP1250_BIT | CP1251_BIT },
-        { "System", FW_BOLD, 16, 13, 3, 3, 0, 7, 14, CP1252_BIT },
-        { "System", FW_BOLD, 16, 13, 3, 3, 0, 7, 15, CP1250_BIT | CP1251_BIT },
+        { "MS Sans Serif", FW_NORMAL, 13, 11, 2, 2, 0, 5, 11, FS_LATIN1 | FS_LATIN2 | FS_CYRILLIC },
+        { "MS Sans Serif", FW_NORMAL, 16, 13, 3, 3, 0, 7, 14, FS_LATIN1 | FS_LATIN2 | FS_CYRILLIC },
+        { "MS Sans Serif", FW_NORMAL, 20, 16, 4, 4, 0, 8, 16, FS_LATIN1 | FS_CYRILLIC },
+        { "MS Sans Serif", FW_NORMAL, 20, 16, 4, 4, 0, 8, 18, FS_LATIN2 },
+        { "MS Sans Serif", FW_NORMAL, 24, 19, 5, 6, 0, 9, 19, FS_LATIN1 },
+        { "MS Sans Serif", FW_NORMAL, 24, 19, 5, 6, 0, 9, 24, FS_LATIN2 },
+        { "MS Sans Serif", FW_NORMAL, 24, 19, 5, 6, 0, 9, 20, FS_CYRILLIC },
+        { "MS Sans Serif", FW_NORMAL, 29, 23, 6, 5, 0, 12, 24, FS_LATIN1 },
+        { "MS Sans Serif", FW_NORMAL, 29, 23, 6, 6, 0, 12, 24, FS_LATIN2 },
+        { "MS Sans Serif", FW_NORMAL, 29, 23, 6, 5, 0, 12, 25, FS_CYRILLIC },
+        { "MS Sans Serif", FW_NORMAL, 37, 29, 8, 5, 0, 16, 32, FS_LATIN1 | FS_LATIN2 | FS_CYRILLIC },
+        { "MS Serif", FW_NORMAL, 10, 8, 2, 2, 0, 4, 8, FS_LATIN1 | FS_LATIN2 },
+        { "MS Serif", FW_NORMAL, 10, 8, 2, 2, 0, 5, 8, FS_CYRILLIC },
+        { "MS Serif", FW_NORMAL, 11, 9, 2, 2, 0, 5, 9, FS_LATIN1 | FS_LATIN2 | FS_CYRILLIC },
+        { "MS Serif", FW_NORMAL, 13, 11, 2, 2, 0, 5, 11, FS_LATIN1 },
+        { "MS Serif", FW_NORMAL, 13, 11, 2, 2, 0, 5, 12, FS_LATIN2 | FS_CYRILLIC },
+        { "MS Serif", FW_NORMAL, 16, 13, 3, 3, 0, 6, 14, FS_LATIN1 | FS_LATIN2 },
+        { "MS Serif", FW_NORMAL, 16, 13, 3, 3, 0, 6, 16, FS_CYRILLIC },
+        { "MS Serif", FW_NORMAL, 19, 15, 4, 3, 0, 8, 18, FS_LATIN1 | FS_LATIN2 },
+        { "MS Serif", FW_NORMAL, 19, 15, 4, 3, 0, 8, 19, FS_CYRILLIC },
+        { "MS Serif", FW_NORMAL, 21, 16, 5, 3, 0, 9, 17, FS_LATIN1 },
+        { "MS Serif", FW_NORMAL, 21, 16, 5, 3, 0, 9, 22, FS_LATIN2 },
+        { "MS Serif", FW_NORMAL, 21, 16, 5, 3, 0, 9, 23, FS_CYRILLIC },
+        { "MS Serif", FW_NORMAL, 27, 21, 6, 3, 0, 12, 23, FS_LATIN1 },
+        { "MS Serif", FW_NORMAL, 27, 21, 6, 3, 0, 12, 26, FS_LATIN2 },
+        { "MS Serif", FW_NORMAL, 27, 21, 6, 3, 0, 12, 27, FS_CYRILLIC },
+        { "MS Serif", FW_NORMAL, 35, 27, 8, 3, 0, 16, 33, FS_LATIN1 | FS_LATIN2 },
+        { "MS Serif", FW_NORMAL, 35, 27, 8, 3, 0, 16, 34, FS_CYRILLIC },
+        { "Courier", FW_NORMAL, 13, 11, 2, 0, 0, 8, 8, FS_LATIN1 | FS_LATIN2 | FS_CYRILLIC },
+        { "Courier", FW_NORMAL, 16, 13, 3, 0, 0, 9, 9, FS_LATIN1 | FS_LATIN2 | FS_CYRILLIC },
+        { "Courier", FW_NORMAL, 20, 16, 4, 0, 0, 12, 12, FS_LATIN1 | FS_LATIN2 | FS_CYRILLIC },
+        { "System", FW_BOLD, 16, 13, 3, 3, 0, 7, 14, FS_LATIN1 },
+        { "System", FW_BOLD, 16, 13, 3, 3, 0, 7, 15, FS_LATIN2 | FS_CYRILLIC },
 /*
  * TODO:  the system for CP932 should be NORMAL, not BOLD.  However that would
  *        require a new system.sfd for that font
  */
-        { "System", FW_BOLD, 18, 16, 2, 0, 2, 8, 16, CP932_BIT },
-        { "Small Fonts", FW_NORMAL, 3, 2, 1, 0, 0, 1, 2, CP1252_BIT },
-        { "Small Fonts", FW_NORMAL, 3, 2, 1, 0, 0, 1, 8, CP1250_BIT | CP1251_BIT },
-        { "Small Fonts", FW_NORMAL, 3, 2, 1, 0, 0, 2, 4, CP932_BIT },
-        { "Small Fonts", FW_NORMAL, 5, 4, 1, 1, 0, 3, 4, CP1252_BIT },
-        { "Small Fonts", FW_NORMAL, 5, 4, 1, 1, 0, 2, 8, CP1250_BIT | CP1251_BIT },
-        { "Small Fonts", FW_NORMAL, 5, 4, 1, 0, 0, 3, 6, CP932_BIT },
-        { "Small Fonts", FW_NORMAL, 6, 5, 1, 1, 0, 3, 13, CP1252_BIT },
-        { "Small Fonts", FW_NORMAL, 6, 5, 1, 1, 0, 3, 8, CP1250_BIT | CP1251_BIT },
-        { "Small Fonts", FW_NORMAL, 6, 5, 1, 0, 0, 4, 8, CP932_BIT },
-        { "Small Fonts", FW_NORMAL, 8, 7, 1, 1, 0, 4, 7, CP1252_BIT },
-        { "Small Fonts", FW_NORMAL, 8, 7, 1, 1, 0, 4, 8, CP1250_BIT | CP1251_BIT },
-        { "Small Fonts", FW_NORMAL, 8, 7, 1, 0, 0, 5, 10, CP932_BIT },
-        { "Small Fonts", FW_NORMAL, 10, 8, 2, 2, 0, 4, 8, CP1252_BIT | CP1250_BIT },
-        { "Small Fonts", FW_NORMAL, 10, 8, 2, 2, 0, 5, 8, CP1251_BIT },
-        { "Small Fonts", FW_NORMAL, 10, 8, 2, 0, 0, 6, 12, CP932_BIT },
-        { "Small Fonts", FW_NORMAL, 11, 9, 2, 2, 0, 5, 9, CP1252_BIT | CP1250_BIT | CP1251_BIT },
-        { "Small Fonts", FW_NORMAL, 11, 9, 2, 0, 0, 7, 14, CP932_BIT },
-        { "Fixedsys", FW_NORMAL, 15, 12, 3, 3, 0, 8, 8, CP1252_BIT | CP1250_BIT },
-        { "Fixedsys", FW_NORMAL, 16, 12, 4, 3, 0, 8, 8, CP1251_BIT },
-        { "FixedSys", FW_NORMAL, 18, 16, 2, 0, 0, 8, 16, CP932_BIT }
+        { "System", FW_BOLD, 18, 16, 2, 0, 2, 8, 16, FS_JISJAPAN },
+        { "Small Fonts", FW_NORMAL, 3, 2, 1, 0, 0, 1, 2, FS_LATIN1 },
+        { "Small Fonts", FW_NORMAL, 3, 2, 1, 0, 0, 1, 8, FS_LATIN2 | FS_CYRILLIC },
+        { "Small Fonts", FW_NORMAL, 3, 2, 1, 0, 0, 2, 4, FS_JISJAPAN },
+        { "Small Fonts", FW_NORMAL, 5, 4, 1, 1, 0, 3, 4, FS_LATIN1 },
+        { "Small Fonts", FW_NORMAL, 5, 4, 1, 1, 0, 2, 8, FS_LATIN2 | FS_CYRILLIC },
+        { "Small Fonts", FW_NORMAL, 5, 4, 1, 0, 0, 3, 6, FS_JISJAPAN },
+        { "Small Fonts", FW_NORMAL, 6, 5, 1, 1, 0, 3, 13, FS_LATIN1 },
+        { "Small Fonts", FW_NORMAL, 6, 5, 1, 1, 0, 3, 8, FS_LATIN2 | FS_CYRILLIC },
+        { "Small Fonts", FW_NORMAL, 6, 5, 1, 0, 0, 4, 8, FS_JISJAPAN },
+        { "Small Fonts", FW_NORMAL, 8, 7, 1, 1, 0, 4, 7, FS_LATIN1 },
+        { "Small Fonts", FW_NORMAL, 8, 7, 1, 1, 0, 4, 8, FS_LATIN2 | FS_CYRILLIC },
+        { "Small Fonts", FW_NORMAL, 8, 7, 1, 0, 0, 5, 10, FS_JISJAPAN },
+        { "Small Fonts", FW_NORMAL, 10, 8, 2, 2, 0, 4, 8, FS_LATIN1 | FS_LATIN2 },
+        { "Small Fonts", FW_NORMAL, 10, 8, 2, 2, 0, 5, 8, FS_CYRILLIC },
+        { "Small Fonts", FW_NORMAL, 10, 8, 2, 0, 0, 6, 12, FS_JISJAPAN },
+        { "Small Fonts", FW_NORMAL, 11, 9, 2, 2, 0, 5, 9, FS_LATIN1 | FS_LATIN2 | FS_CYRILLIC },
+        { "Small Fonts", FW_NORMAL, 11, 9, 2, 0, 0, 7, 14, FS_JISJAPAN },
+        { "Fixedsys", FW_NORMAL, 15, 12, 3, 3, 0, 8, 8, FS_LATIN1 | FS_LATIN2 },
+        { "Fixedsys", FW_NORMAL, 16, 12, 4, 3, 0, 8, 8, FS_CYRILLIC },
+        { "FixedSys", FW_NORMAL, 18, 16, 2, 0, 0, 8, 16, FS_JISJAPAN }
 
         /* FIXME: add "Terminal" */
     };
@@ -608,7 +604,7 @@ static void test_GetGlyphIndices(void)
     flags |= GGI_MARK_NONEXISTING_GLYPHS;
     charcount = pGetGlyphIndicesW(hdc, testtext, (sizeof(testtext)/2)-1, glyphs, flags);
     ok(charcount == 5, "GetGlyphIndices count of glyphs should = 5 not %d\n", charcount);
-    ok(glyphs[4] == 0x001f, "GetGlyphIndices should have returned a nonexistent char not %04x\n", glyphs[4]);
+    ok((glyphs[4] == 0x001f || glyphs[4] == UNICODE_NOCHAR /* Vista */), "GetGlyphIndices should have returned a nonexistent char not %04x\n", glyphs[4]);
     flags = 0;
     charcount = pGetGlyphIndicesW(hdc, testtext, (sizeof(testtext)/2)-1, glyphs, flags);
     ok(charcount == 5, "GetGlyphIndices count of glyphs should = 5 not %d\n", charcount);
@@ -1295,6 +1291,18 @@ static void test_EnumFontFamilies(const char *font_name, INT font_charset)
         SetLastError(0xdeadbeef);
         ret = EnumFontFamilies(hdc, NULL, arial_enum_proc, (LPARAM)&efd);
         ok(ret, "EnumFontFamilies error %u\n", GetLastError());
+        get_charset_stats(&efd, &ansi_charset, &symbol_charset, &russian_charset);
+        trace("enumerated ansi %d, symbol %d, russian %d fonts for NULL\n",
+              ansi_charset, symbol_charset, russian_charset);
+        ok(efd.total > 0, "no fonts enumerated: NULL\n");
+        ok(ansi_charset > 0, "NULL family should enumerate ANSI_CHARSET\n");
+        ok(symbol_charset > 0, "NULL family should enumerate SYMBOL_CHARSET\n");
+        ok(russian_charset > 0, "NULL family should enumerate RUSSIAN_CHARSET\n");
+
+        efd.total = 0;
+        SetLastError(0xdeadbeef);
+        ret = EnumFontFamiliesEx(hdc, NULL, arial_enum_proc, (LPARAM)&efd, 0);
+        ok(ret, "EnumFontFamiliesEx error %u\n", GetLastError());
         get_charset_stats(&efd, &ansi_charset, &symbol_charset, &russian_charset);
         trace("enumerated ansi %d, symbol %d, russian %d fonts for NULL\n",
               ansi_charset, symbol_charset, russian_charset);

@@ -218,7 +218,6 @@ ME_Style *ME_ApplyStyle(ME_Style *sSrc, CHARFORMAT2W *style)
   if (style->dwMask & CFM_UNDERLINE)
   {
       s->fmt.dwMask |= CFM_UNDERLINETYPE;
-      s->fmt.dwMask &= ~CFM_UNDERLINE;
       s->fmt.bUnderlineType = (style->dwEffects & CFM_UNDERLINE) ?
           CFU_CF1UNDERLINE : CFU_UNDERLINENONE;
   }
@@ -262,12 +261,12 @@ void ME_DumpStyleToBuf(CHARFORMAT2W *pFmt, char buf[2048])
     p += sprintf(p, "N/A");
 
   if (pFmt->dwMask & CFM_SIZE)
-    p += sprintf(p, "\nFont size:            %d\n", (int)pFmt->yHeight);
+    p += sprintf(p, "\nFont size:            %d\n", pFmt->yHeight);
   else
     p += sprintf(p, "\nFont size:            N/A\n");
-    
+
   if (pFmt->dwMask & CFM_OFFSET)
-    p += sprintf(p, "Char offset:          %d\n", (int)pFmt->yOffset);
+    p += sprintf(p, "Char offset:          %d\n", pFmt->yOffset);
   else
     p += sprintf(p, "Char offset:          N/A\n");
 

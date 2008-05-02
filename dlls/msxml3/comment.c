@@ -59,18 +59,18 @@ static HRESULT WINAPI domcomment_QueryInterface(
     TRACE("%p %s %p\n", This, debugstr_guid(riid), ppvObject);
 
     if ( IsEqualGUID( riid, &IID_IXMLDOMComment ) ||
+         IsEqualGUID( riid, &IID_IDispatch ) ||
          IsEqualGUID( riid, &IID_IUnknown ) )
     {
         *ppvObject = iface;
     }
-    else if ( IsEqualGUID( riid, &IID_IDispatch ) ||
-              IsEqualGUID( riid, &IID_IXMLDOMNode ) )
+    else if ( IsEqualGUID( riid, &IID_IXMLDOMNode ) )
     {
         return IUnknown_QueryInterface(This->node_unk, riid, ppvObject);
     }
     else
     {
-        FIXME("Unsupported inteferace %s\n", debugstr_guid(riid));
+        FIXME("Unsupported interface %s\n", debugstr_guid(riid));
         return E_NOINTERFACE;
     }
 

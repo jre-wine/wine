@@ -790,13 +790,18 @@ static HANDLE start_wineboot(void)
     }
     if (GetLastError() != ERROR_ALREADY_EXISTS)  /* we created it */
     {
-        static const WCHAR command_line[] = {'\\','w','i','n','e','b','o','o','t','.','e','x','e',0};
+        static const WCHAR command_line[] = {'\\','w','i','n','e','b','o','o','t','.','e','x','e',' ','-','-','i','n','i','t',0};
         STARTUPINFOW si;
         PROCESS_INFORMATION pi;
         WCHAR cmdline[MAX_PATH + sizeof(command_line)/sizeof(WCHAR)];
 
         memset( &si, 0, sizeof(si) );
         si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdInput  = 0;
+        si.hStdOutput = 0;
+        si.hStdError  = GetStdHandle( STD_ERROR_HANDLE );
+
         GetSystemDirectoryW( cmdline, MAX_PATH );
         lstrcatW( cmdline, command_line );
         if (CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi ))
@@ -892,6 +897,10 @@ static void start_process( void *arg )
  */
 static void set_process_name( int argc, char *argv[] )
 {
+#ifdef HAVE_SETPROCTITLE
+    setproctitle("-%s", argv[1]);
+#endif
+
 #ifdef HAVE_PRCTL
     int i, offset;
     char *p, *prctl_name = argv[1];
@@ -1189,7 +1198,23 @@ static int fork_and_exec( const char *filename, const WCHAR *cmdline,
         char **envp = build_envp( env );
         close( fd[0] );
 
-        if (flags & (CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE | DETACHED_PROCESS)) setsid();
+        if (flags & (CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE | DETACHED_PROCESS))
+        {
+            int pid;
+            if (!(pid = fork()))
+            {
+                int fd = open( "/dev/null", O_RDWR );
+                setsid();
+                /* close stdin and stdout */
+                if (fd != -1)
+                {
+                    dup2( fd, 0 );
+                    dup2( fd, 1 );
+                    close( fd );
+                }
+            }
+            else if (pid != -1) _exit(0);  /* parent */
+        }
 
         /* Reset signals that we previously set to SIG_IGN */
         signal( SIGPIPE, SIG_DFL );
@@ -1410,7 +1435,22 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
         char preloader_reserve[64], socket_env[64];
         char **argv = build_argv( cmd_line, 1 );
 
-        if (flags & (CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE | DETACHED_PROCESS)) setsid();
+        if (flags & (CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE | DETACHED_PROCESS))
+        {
+            if (!(pid = fork()))
+            {
+                int fd = open( "/dev/null", O_RDWR );
+                setsid();
+                /* close stdin and stdout */
+                if (fd != -1)
+                {
+                    dup2( fd, 0 );
+                    dup2( fd, 1 );
+                    close( fd );
+                }
+            }
+            else if (pid != -1) _exit(0);  /* parent */
+        }
 
         /* Reset signals that we previously set to SIG_IGN */
         signal( SIGPIPE, SIG_DFL );
@@ -2683,8 +2723,7 @@ BOOL WINAPI GetProcessAffinityMask( HANDLE hProcess,
         return FALSE;
     }
     if (lpProcessAffinityMask) *lpProcessAffinityMask = pbi.AffinityMask;
-    /* FIXME */
-    if (lpSystemAffinityMask)  *lpSystemAffinityMask = 1;
+    if (lpSystemAffinityMask)  *lpSystemAffinityMask = (1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1;
     return TRUE;
 }
 

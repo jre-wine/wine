@@ -10,9 +10,13 @@ EXTRAINCL = @XML2INCL@ @XSLTINCL@
 
 C_SRCS = \
 	attribute.c \
+	cdata.c \
 	comment.c \
+	docfrag.c \
 	domdoc.c \
+	domimpl.c \
 	element.c \
+	entityref.c \
 	factory.c \
 	main.c \
 	node.c \
@@ -29,6 +33,8 @@ C_SRCS = \
 	xmlelem.c
 
 RC_SRCS = version.rc
+
+IDL_TLB_SRCS = msxml3_v1.idl
 
 @MAKE_DLL_RULES@
 

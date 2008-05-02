@@ -669,7 +669,7 @@ static void drawStridedSlowVs(IWineD3DDevice *iface, WineDirect3DVertexStridedDa
     const DWORD               *pIdxBufL     = NULL;
     LONG                       vx_index;
     int i;
-    IWineD3DStateBlockImpl *stateblock = (IWineD3DStateBlockImpl *) This->stateBlock;
+    IWineD3DStateBlockImpl *stateblock = This->stateBlock;
     BYTE *ptr;
 
     if (idxSize != 0) {
@@ -1099,7 +1099,7 @@ void drawPrimitive(IWineD3DDevice *iface,
         }
     }
 
-    /* Finshed updating the screen, restore lock */
+    /* Finished updating the screen, restore lock */
     LEAVE_GL();
     TRACE("Done all gl drawing\n");
 
@@ -1160,7 +1160,7 @@ static void normalize_normal(float *n) {
  *
  * The problem is that OpenGL does not offer a direct way to return the tesselated primitives,
  * and they can't be sent off for rendering directly either. Tesselating is slow, so we want
- * to chache the patches in a vertex buffer. But more importantly, gl can't bind generated
+ * to cache the patches in a vertex buffer. But more importantly, gl can't bind generated
  * attributes to numbered shader attributes, so we have to store them and rebind them as needed
  * in drawprim.
  *

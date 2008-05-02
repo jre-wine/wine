@@ -203,6 +203,7 @@ ALL_MAKEFILES = \
 	dlls/d3drm/tests/Makefile \
 	dlls/d3dx8/Makefile \
 	dlls/d3dx8/tests/Makefile \
+	dlls/d3dx9_36/Makefile \
 	dlls/d3dxof/Makefile \
 	dlls/dbghelp/Makefile \
 	dlls/dciman32/Makefile \
@@ -313,6 +314,7 @@ ALL_MAKEFILES = \
 	dlls/msnet32/Makefile \
 	dlls/msrle32/Makefile \
 	dlls/msvcirt/Makefile \
+	dlls/msvcr71/Makefile \
 	dlls/msvcrt/Makefile \
 	dlls/msvcrt/tests/Makefile \
 	dlls/msvcrt20/Makefile \
@@ -331,6 +333,7 @@ ALL_MAKEFILES = \
 	dlls/ntdll/Makefile \
 	dlls/ntdll/tests/Makefile \
 	dlls/ntdsapi/Makefile \
+	dlls/ntdsapi/tests/Makefile \
 	dlls/ntoskrnl.exe/Makefile \
 	dlls/ntprint/Makefile \
 	dlls/ntprint/tests/Makefile \
@@ -354,6 +357,7 @@ ALL_MAKEFILES = \
 	dlls/pdh/tests/Makefile \
 	dlls/powrprof/Makefile \
 	dlls/printui/Makefile \
+	dlls/propsys/Makefile \
 	dlls/psapi/Makefile \
 	dlls/psapi/tests/Makefile \
 	dlls/pstorec/Makefile \
@@ -459,6 +463,7 @@ ALL_MAKEFILES = \
 	dlls/wintrust/Makefile \
 	dlls/wintrust/tests/Makefile \
 	dlls/wldap32/Makefile \
+	dlls/wmi/Makefile \
 	dlls/wnaspi32/Makefile \
 	dlls/wow32/Makefile \
 	dlls/ws2_32/Makefile \
@@ -588,6 +593,7 @@ dlls/d3drm/Makefile: dlls/d3drm/Makefile.in dlls/Makedll.rules
 dlls/d3drm/tests/Makefile: dlls/d3drm/tests/Makefile.in dlls/Maketest.rules
 dlls/d3dx8/Makefile: dlls/d3dx8/Makefile.in dlls/Makedll.rules
 dlls/d3dx8/tests/Makefile: dlls/d3dx8/tests/Makefile.in dlls/Maketest.rules
+dlls/d3dx9_36/Makefile: dlls/d3dx9_36/Makefile.in dlls/Makedll.rules
 dlls/d3dxof/Makefile: dlls/d3dxof/Makefile.in dlls/Makedll.rules
 dlls/dbghelp/Makefile: dlls/dbghelp/Makefile.in dlls/Makedll.rules
 dlls/dciman32/Makefile: dlls/dciman32/Makefile.in dlls/Makedll.rules
@@ -698,6 +704,7 @@ dlls/msisys.ocx/Makefile: dlls/msisys.ocx/Makefile.in dlls/Makedll.rules
 dlls/msnet32/Makefile: dlls/msnet32/Makefile.in dlls/Makedll.rules
 dlls/msrle32/Makefile: dlls/msrle32/Makefile.in dlls/Makedll.rules
 dlls/msvcirt/Makefile: dlls/msvcirt/Makefile.in dlls/Makedll.rules
+dlls/msvcr71/Makefile: dlls/msvcr71/Makefile.in dlls/Makedll.rules
 dlls/msvcrt/Makefile: dlls/msvcrt/Makefile.in dlls/Makedll.rules
 dlls/msvcrt/tests/Makefile: dlls/msvcrt/tests/Makefile.in dlls/Maketest.rules
 dlls/msvcrt20/Makefile: dlls/msvcrt20/Makefile.in dlls/Makedll.rules
@@ -716,6 +723,7 @@ dlls/newdev/Makefile: dlls/newdev/Makefile.in dlls/Makedll.rules
 dlls/ntdll/Makefile: dlls/ntdll/Makefile.in dlls/Makedll.rules
 dlls/ntdll/tests/Makefile: dlls/ntdll/tests/Makefile.in dlls/Maketest.rules
 dlls/ntdsapi/Makefile: dlls/ntdsapi/Makefile.in dlls/Makedll.rules
+dlls/ntdsapi/tests/Makefile: dlls/ntdsapi/tests/Makefile.in dlls/Maketest.rules
 dlls/ntoskrnl.exe/Makefile: dlls/ntoskrnl.exe/Makefile.in dlls/Makedll.rules
 dlls/ntprint/Makefile: dlls/ntprint/Makefile.in dlls/Makedll.rules
 dlls/ntprint/tests/Makefile: dlls/ntprint/tests/Makefile.in dlls/Maketest.rules
@@ -739,6 +747,7 @@ dlls/pdh/Makefile: dlls/pdh/Makefile.in dlls/Makedll.rules
 dlls/pdh/tests/Makefile: dlls/pdh/tests/Makefile.in dlls/Maketest.rules
 dlls/powrprof/Makefile: dlls/powrprof/Makefile.in dlls/Makedll.rules
 dlls/printui/Makefile: dlls/printui/Makefile.in dlls/Makedll.rules
+dlls/propsys/Makefile: dlls/propsys/Makefile.in dlls/Makedll.rules
 dlls/psapi/Makefile: dlls/psapi/Makefile.in dlls/Makedll.rules
 dlls/psapi/tests/Makefile: dlls/psapi/tests/Makefile.in dlls/Maketest.rules
 dlls/pstorec/Makefile: dlls/pstorec/Makefile.in dlls/Makedll.rules
@@ -844,6 +853,7 @@ dlls/wintab32/Makefile: dlls/wintab32/Makefile.in dlls/Makedll.rules
 dlls/wintrust/Makefile: dlls/wintrust/Makefile.in dlls/Makedll.rules
 dlls/wintrust/tests/Makefile: dlls/wintrust/tests/Makefile.in dlls/Maketest.rules
 dlls/wldap32/Makefile: dlls/wldap32/Makefile.in dlls/Makedll.rules
+dlls/wmi/Makefile: dlls/wmi/Makefile.in dlls/Makedll.rules
 dlls/wnaspi32/Makefile: dlls/wnaspi32/Makefile.in dlls/Makedll.rules
 dlls/wow32/Makefile: dlls/wow32/Makefile.in dlls/Makedll.rules
 dlls/ws2_32/Makefile: dlls/ws2_32/Makefile.in dlls/Makedll.rules

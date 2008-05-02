@@ -48,6 +48,7 @@ BASEDIRS = \
 	d3dim \
 	d3drm \
 	d3dx8 \
+	d3dx9_36 \
 	d3dxof \
 	dbghelp \
 	dciman32 \
@@ -131,6 +132,7 @@ BASEDIRS = \
 	msnet32 \
 	msrle32 \
 	msvcirt \
+	msvcr71 \
 	msvcrt \
 	msvcrt20 \
 	msvcrt40 \
@@ -160,6 +162,7 @@ BASEDIRS = \
 	pdh \
 	powrprof \
 	printui \
+	propsys \
 	psapi \
 	pstorec \
 	qcap \
@@ -235,6 +238,7 @@ BASEDIRS = \
 	wintab32 \
 	wintrust \
 	wldap32 \
+	wmi \
 	wnaspi32 \
 	wow32 \
 	ws2_32 \
@@ -292,6 +296,7 @@ TESTSUBDIRS = \
 	msxml3/tests \
 	netapi32/tests \
 	ntdll/tests \
+	ntdsapi/tests \
 	ntprint/tests \
 	odbccp32/tests \
 	ole32/tests \
@@ -556,6 +561,7 @@ IMPORT_LIBS = \
 	mshtml/libmshtml.$(IMPLIBEXT) \
 	msi/libmsi.$(IMPLIBEXT) \
 	msimg32/libmsimg32.$(IMPLIBEXT) \
+	msvcr71/libmsvcr71.$(IMPLIBEXT) \
 	msvcrt/libmsvcrt.$(IMPLIBEXT) \
 	msvcrt20/libmsvcrt20.$(IMPLIBEXT) \
 	msvcrt40/libmsvcrt40.$(IMPLIBEXT) \
@@ -811,6 +817,9 @@ msi/libmsi.$(IMPLIBEXT): msi/msi.spec $(WINEBUILD)
 
 msimg32/libmsimg32.$(IMPLIBEXT): msimg32/msimg32.spec $(WINEBUILD)
 	@cd msimg32 && $(MAKE) libmsimg32.$(IMPLIBEXT)
+
+msvcr71/libmsvcr71.$(IMPLIBEXT): msvcr71/msvcr71.spec $(WINEBUILD)
+	@cd msvcr71 && $(MAKE) libmsvcr71.$(IMPLIBEXT)
 
 msvcrt/libmsvcrt.$(IMPLIBEXT): msvcrt/msvcrt.spec $(WINEBUILD)
 	@cd msvcrt && $(MAKE) libmsvcrt.$(IMPLIBEXT)

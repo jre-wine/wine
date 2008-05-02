@@ -246,8 +246,14 @@ static ULONG WINAPI xmldoc_IPersistStream_Release(
 static HRESULT WINAPI xmldoc_IPersistStream_GetClassID(
     IPersistStream *iface, CLSID *classid)
 {
-    FIXME("(%p,%p): stub!\n", iface, classid);
-    return E_NOTIMPL;
+    TRACE("(%p,%p): stub!\n", iface, classid);
+
+    if(!classid)
+        return E_POINTER;
+
+    *classid = CLSID_DOMDocument2;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI xmldoc_IPersistStream_IsDirty(
@@ -348,13 +354,13 @@ static HRESULT WINAPI domdoc_QueryInterface( IXMLDOMDocument2 *iface, REFIID rii
     *ppvObject = NULL;
 
     if ( IsEqualGUID( riid, &IID_IUnknown ) ||
+         IsEqualGUID( riid, &IID_IDispatch ) ||
          IsEqualGUID( riid, &IID_IXMLDOMDocument ) ||
          IsEqualGUID( riid, &IID_IXMLDOMDocument2 ) )
     {
         *ppvObject = iface;
     }
-    else if ( IsEqualGUID( riid, &IID_IXMLDOMNode ) ||
-              IsEqualGUID( riid, &IID_IDispatch ) )
+    else if ( IsEqualGUID( riid, &IID_IXMLDOMNode ) )
     {
         return IUnknown_QueryInterface(This->node_unk, riid, ppvObject);
     }
@@ -798,8 +804,12 @@ static HRESULT WINAPI domdoc_get_implementation(
     IXMLDOMDocument2 *iface,
     IXMLDOMImplementation** impl )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    if(!impl)
+        return E_INVALIDARG;
+
+    *impl = (IXMLDOMImplementation*)create_doc_Implementation();
+
+    return S_OK;
 }
 
 static HRESULT WINAPI domdoc_get_documentElement(
@@ -875,8 +885,26 @@ static HRESULT WINAPI domdoc_createDocumentFragment(
     IXMLDOMDocument2 *iface,
     IXMLDOMDocumentFragment** docFrag )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    domdoc *This = impl_from_IXMLDOMDocument2( iface );
+    xmlNodePtr xmlnode;
+
+    TRACE("%p\n", iface);
+
+    if(!docFrag)
+        return E_INVALIDARG;
+
+    *docFrag = NULL;
+
+    xmlnode = xmlNewDocFragment(get_doc( This ) );
+
+    if(!xmlnode)
+        return E_FAIL;
+
+    xmlnode->doc = get_doc( This );
+
+    *docFrag = (IXMLDOMDocumentFragment*)create_doc_fragment(xmlnode);
+
+    return S_OK;
 }
 
 
@@ -947,8 +975,29 @@ static HRESULT WINAPI domdoc_createCDATASection(
     BSTR data,
     IXMLDOMCDATASection** cdata )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    domdoc *This = impl_from_IXMLDOMDocument2( iface );
+    xmlNodePtr xmlnode;
+    xmlChar *xml_content;
+
+    TRACE("%p->(%s %p)\n", iface, debugstr_w(data), comment);
+
+    if(!cdata)
+        return E_INVALIDARG;
+
+    *cdata = NULL;
+
+    xml_content = xmlChar_from_wchar((WCHAR*)data);
+    xmlnode = xmlNewCDataBlock(get_doc( This ), xml_content, strlen( (char*)xml_content) );
+    HeapFree(GetProcessHeap(), 0, xml_content);
+
+    if(!xmlnode)
+        return E_FAIL;
+
+    xmlnode->doc = get_doc( This );
+
+    *cdata = (IXMLDOMCDATASection*)create_cdata(xmlnode);
+
+    return S_OK;
 }
 
 
@@ -1025,8 +1074,29 @@ static HRESULT WINAPI domdoc_createEntityReference(
     BSTR name,
     IXMLDOMEntityReference** entityRef )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    domdoc *This = impl_from_IXMLDOMDocument2( iface );
+    xmlNodePtr xmlnode;
+    xmlChar *xml_name;
+
+    TRACE("%p\n", iface);
+
+    if(!entityRef)
+        return E_INVALIDARG;
+
+    *entityRef = NULL;
+
+    xml_name = xmlChar_from_wchar((WCHAR*)name);
+    xmlnode = xmlNewReference(get_doc( This ), xml_name );
+    HeapFree(GetProcessHeap(), 0, xml_name);
+
+    if(!xmlnode)
+        return E_FAIL;
+
+    xmlnode->doc = get_doc( This );
+
+    *entityRef = (IXMLDOMEntityReference*)create_doc_entity_ref(xmlnode);
+
+    return S_OK;
 }
 
 

@@ -242,6 +242,13 @@ typedef struct {
     FT_Pos size, x_ppem, y_ppem;
 } My_FT_Bitmap_Size;
 
+struct enum_data
+{
+    ENUMLOGFONTEXW elf;
+    NEWTEXTMETRICEXW ntm;
+    DWORD type;
+};
+
 typedef struct tagFace {
     struct list entry;
     WCHAR *StyleName;
@@ -260,10 +267,7 @@ typedef struct tagFace {
     BOOL external; /* TRUE if we should manually add this font to the registry */
     struct tagFamily *family;
     /* Cached data for Enum */
-    BOOL cache_valid;
-    ENUMLOGFONTEXW elf;
-    NEWTEXTMETRICEXW ntm;
-    DWORD type;
+    struct enum_data *cached_enum_data;
 } Face;
 
 typedef struct tagFamily {
@@ -320,7 +324,7 @@ struct tagGdiFont {
     struct list hfontlist;
     FONT_DESC font_desc;
     LONG aveWidth, ppem;
-    float scale_x, scale_y;
+    float scale_y;
     SHORT yMax;
     SHORT yMin;
     OUTLINETEXTMETRICW *potm;
@@ -1191,9 +1195,9 @@ static INT AddFontToList(const char *file, void *font_data_ptr, DWORD font_data_
                     FT_UInt dummy;
 
                     if(!pFT_Get_First_Char || (pFT_Get_First_Char( ft_face, &dummy ) < 0x100))
-                        fs.fsCsb[0] |= 1;
+                        fs.fsCsb[0] |= FS_LATIN1;
                     else
-                        fs.fsCsb[0] |= 1L << 31;
+                        fs.fsCsb[0] |= FS_SYMBOL;
                 }
             }
 #ifdef HAVE_FREETYPE_FTWINFNT_H
@@ -1239,7 +1243,7 @@ static INT AddFontToList(const char *file, void *font_data_ptr, DWORD font_data_
                 }
             }
             face = HeapAlloc(GetProcessHeap(), 0, sizeof(*face));
-            face->cache_valid = FALSE;
+            face->cached_enum_data = NULL;
             list_add_tail(&family->faces, &face->entry);
             face->StyleName = StyleW;
             if (file)
@@ -1300,10 +1304,10 @@ static INT AddFontToList(const char *file, void *font_data_ptr, DWORD font_data_
                     switch(ft_face->charmaps[i]->encoding) {
                     case FT_ENCODING_UNICODE:
                     case FT_ENCODING_APPLE_ROMAN:
-			face->fs.fsCsb[0] |= 1;
+			face->fs.fsCsb[0] |= FS_LATIN1;
                         break;
                     case FT_ENCODING_MS_SYMBOL:
-                        face->fs.fsCsb[0] |= 1L << 31;
+                        face->fs.fsCsb[0] |= FS_SYMBOL;
                         break;
                     default:
                         break;
@@ -1311,7 +1315,7 @@ static INT AddFontToList(const char *file, void *font_data_ptr, DWORD font_data_
                 }
             }
 
-            if(face->fs.fsCsb[0] & ~(1L << 31))
+            if (!(face->fs.fsCsb[0] & FS_SYMBOL))
                 have_installed_roman_font = TRUE;
         } while(!FT_IS_SCALABLE(ft_face) && ++bitmap_num < ft_face->num_fixed_sizes);
 
@@ -1680,6 +1684,24 @@ static BOOL load_font_from_data_dir(LPCWSTR file)
     return ret;
 }
 
+static BOOL load_font_from_winfonts_dir(LPCWSTR file)
+{
+    static const WCHAR slashW[] = {'\\','\0'};
+    BOOL ret = FALSE;
+    WCHAR windowsdir[MAX_PATH];
+    char *unixname;
+
+    GetWindowsDirectoryW(windowsdir, sizeof(windowsdir) / sizeof(WCHAR));
+    strcatW(windowsdir, fontsW);
+    strcatW(windowsdir, slashW);
+    strcatW(windowsdir, file);
+    if ((unixname = wine_get_unix_file_name(windowsdir))) {
+        ret = AddFontFileToList(unixname, NULL, NULL, ADDFONT_FORCE_BITMAP);
+        HeapFree(GetProcessHeap(), 0, unixname);
+    }
+    return ret;
+}
+
 static void load_system_fonts(void)
 {
     HKEY hkey;
@@ -1825,6 +1847,7 @@ static void update_reg_entries(void)
  */
 INT WineEngAddFontResourceEx(LPCWSTR file, DWORD flags, PVOID pdv)
 {
+    INT ret = 0;
     if (ft_handle)  /* do it only if we have freetype up and running */
     {
         char *unixname;
@@ -1834,12 +1857,21 @@ INT WineEngAddFontResourceEx(LPCWSTR file, DWORD flags, PVOID pdv)
 
         if((unixname = wine_get_unix_file_name(file)))
         {
-            INT ret = AddFontFileToList(unixname, NULL, NULL, ADDFONT_FORCE_BITMAP);
+            ret = AddFontFileToList(unixname, NULL, NULL, ADDFONT_FORCE_BITMAP);
             HeapFree(GetProcessHeap(), 0, unixname);
-            return ret;
+        }
+        if (!ret && !strchrW(file, '\\')) {
+            /* Try in %WINDIR%/fonts, needed for Fotobuch Designer */
+            ret = load_font_from_winfonts_dir(file);
+            if (!ret) {
+                /* Try in datadir/fonts (or builddir/fonts),
+                 * needed for Magic the Gathering Online
+                 */
+                ret = load_font_from_data_dir(file);
+            }
         }
     }
-    return 0;
+   return ret;
 }
 
 /*************************************************************
@@ -1966,7 +1998,7 @@ static const struct nls_update_font_list
     /* Chinese Traditional */
     { 950, 950, "vga950.fon", "cvgafix.fon", "cvgasys.fon",
       "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
-      "Tahoma",  "Times New Roman", /* FIXME unverified */
+      "PMingLiU",  "MingLiU",
     }
 };
 
@@ -2439,6 +2471,7 @@ static FT_Face OpenFontFace(GdiFont *font, Face *face, LONG width, LONG height)
         if((err = pFT_Set_Pixel_Sizes(ft_face, 0, font->ppem)) != 0)
             WARN("FT_Set_Pixel_Sizes %d, %d rets %x\n", 0, font->ppem, err);
     } else {
+        font->ppem = height;
         if((err = pFT_Set_Pixel_Sizes(ft_face, width, height)) != 0)
             WARN("FT_Set_Pixel_Sizes %d, %d rets %x\n", width, height, err);
     }
@@ -3125,18 +3158,29 @@ found:
     TRACE("Chosen: %s %s (%s/%p:%ld)\n", debugstr_w(family->FamilyName),
 	  debugstr_w(face->StyleName), face->file, face->font_data_ptr, face->face_index);
 
-    ret->scale_x = 0.0;
-    ret->scale_y = 0.0;
-
     ret->aveWidth = abs(lf.lfWidth);
 
     if(!face->scalable) {
-        ret->ppem = face->size.height;
-        if (height != 0) ret->ppem += diff;
+        /* Windows uses integer scaling factors for bitmap fonts */
+        INT scale, scaled_height;
+
+        if (height != 0) height = diff;
+        else height = 0;
+        height += face->size.height;
+
+        scale = (height + face->size.height - 1) / face->size.height;
+        scaled_height = scale * face->size.height;
+        /* XP allows not more than 10% deviation */
+        if (scale > 1 && scaled_height - height > scaled_height / 10) scale--;
+        ret->scale_y = scale;
 
         width = face->size.x_ppem >> 6;
         height = face->size.y_ppem >> 6;
     }
+    else
+        ret->scale_y = 1.0;
+    TRACE("font scale y: %f\n", ret->scale_y);
+
     ret->ft_face = OpenFontFace(ret, face, width, height);
 
     if (!ret->ft_face)
@@ -3262,12 +3306,12 @@ static void GetEnumStructs(Face *face, LPENUMLOGFONTEXW pelf,
     GdiFont *font;
     LONG width, height;
 
-    if (face->cache_valid)
+    if (face->cached_enum_data)
     {
         TRACE("Cached\n");
-        memcpy(pelf,&face->elf,sizeof(ENUMLOGFONTEXW));
-        memcpy(pntm,&face->ntm,sizeof(NEWTEXTMETRICEXW));
-        *ptype = face->type;
+        memcpy(pelf, &face->cached_enum_data->elf, sizeof(ENUMLOGFONTEXW));
+        memcpy(pntm, &face->cached_enum_data->ntm, sizeof(NEWTEXTMETRICEXW));
+        *ptype = face->cached_enum_data->type;
         return;
     }
 
@@ -3280,6 +3324,7 @@ static void GetEnumStructs(Face *face, LPENUMLOGFONTEXW pelf,
         height = face->size.y_ppem >> 6;
         width = face->size.x_ppem >> 6;
     }
+    font->scale_y = 1.0;
     
     if (!(font->ft_face = OpenFontFace(font, face, width, height)))
     {
@@ -3289,8 +3334,6 @@ static void GetEnumStructs(Face *face, LPENUMLOGFONTEXW pelf,
 
     font->name = strdupW(face->family->FamilyName);
     font->ntmFlags = face->ntmFlags;
-
-    memset(&pelf->elfLogFont, 0, sizeof(LOGFONTW));
 
     if (WineEngGetOutlineTextMetrics(font, 0, NULL))
     {
@@ -3315,17 +3358,19 @@ static void GetEnumStructs(Face *face, LPENUMLOGFONTEXW pelf,
         pntm->ntmTm.ntmSizeEM = pntm->ntmTm.tmHeight - pntm->ntmTm.tmInternalLeading;
 
         lstrcpynW(pelf->elfLogFont.lfFaceName, face->family->FamilyName, LF_FACESIZE);
-        lstrcpynW(pelf->elfFullName, face->family->FamilyName, LF_FACESIZE);
-        pelf->elfStyle[0] = '\0';
+        lstrcpynW(pelf->elfFullName, face->family->FamilyName, LF_FULLFACESIZE);
+        lstrcpynW(pelf->elfStyle, face->StyleName, LF_FACESIZE);
     }
 
     pntm->ntmTm.ntmFlags = face->ntmFlags;
     pntm->ntmTm.ntmCellHeight = pntm->ntmTm.tmHeight;
     pntm->ntmTm.ntmAvgWidth = pntm->ntmTm.tmAveCharWidth;
-    memset(&pntm->ntmFontSig, 0, sizeof(FONTSIGNATURE));
+    memcpy(&pntm->ntmFontSig, &face->fs, sizeof(FONTSIGNATURE));
 
     pelf->elfScript[0] = '\0'; /* This will get set in WineEngEnumFonts */
 
+    pelf->elfLogFont.lfEscapement = 0;
+    pelf->elfLogFont.lfOrientation = 0;
     pelf->elfLogFont.lfHeight = pntm->ntmTm.tmHeight;
     pelf->elfLogFont.lfWidth = pntm->ntmTm.tmAveCharWidth;
     pelf->elfLogFont.lfWeight = pntm->ntmTm.tmWeight;
@@ -3346,10 +3391,13 @@ static void GetEnumStructs(Face *face, LPENUMLOGFONTEXW pelf,
     if(!(pntm->ntmTm.tmPitchAndFamily & TMPF_VECTOR))
         *ptype |= RASTER_FONTTYPE;
 
-    memcpy(&face->elf,pelf,sizeof(ENUMLOGFONTEXW));
-    memcpy(&face->ntm,pntm,sizeof(NEWTEXTMETRICEXW));
-    face->type = *ptype;
-    face->cache_valid = TRUE;
+    face->cached_enum_data = HeapAlloc(GetProcessHeap(), 0, sizeof(*face->cached_enum_data));
+    if (face->cached_enum_data)
+    {
+        memcpy(&face->cached_enum_data->elf, pelf, sizeof(ENUMLOGFONTEXW));
+        memcpy(&face->cached_enum_data->ntm, pntm, sizeof(NEWTEXTMETRICEXW));
+        face->cached_enum_data->type = *ptype;
+    }
 
     free_font(font);
 }
@@ -3370,6 +3418,14 @@ DWORD WineEngEnumFonts(LPLOGFONTW plf, FONTENUMPROCW proc, LPARAM lparam)
     CHARSETINFO csi;
     LOGFONTW lf;
     int i;
+
+    if (!plf)
+    {
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfPitchAndFamily = 0;
+        lf.lfFaceName[0] = 0;
+        plf = &lf;
+    }
 
     TRACE("facename = %s charset %d\n", debugstr_w(plf->lfFaceName), plf->lfCharSet);
 
@@ -3577,7 +3633,7 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
     INT left, right, top = 0, bottom = 0, adv, lsb, bbx;
     FT_Angle angle = 0;
     FT_Int load_flags = FT_LOAD_DEFAULT | FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH;
-    float widthRatio = 1.0, heightRatio = 1.0;
+    float widthRatio = 1.0;
     FT_Matrix transMat = identityMat;
     BOOL needsTransform = FALSE;
 
@@ -3618,11 +3674,13 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
     }
 	
     /* Scaling factor */
-    if (font->scale_x != 0.0)
+    if (font->aveWidth && font->potm)
     {
-        widthRatio = font->scale_x;
-        heightRatio = font->scale_y;
+        widthRatio = (float)font->aveWidth * font->font_desc.matrix.eM11;
+        widthRatio /= (float)font->potm->otmTextMetrics.tmAveCharWidth;
     }
+    else
+        widthRatio = font->scale_y;
 
     left = (INT)(ft_face->glyph->metrics.horiBearingX * widthRatio) & -64;
     right = (INT)((ft_face->glyph->metrics.horiBearingX + ft_face->glyph->metrics.width) * widthRatio + 63) & -64;
@@ -3637,7 +3695,7 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
         scaleMat.xx = FT_FixedFromFloat(widthRatio);
         scaleMat.xy = 0;
         scaleMat.yx = 0;
-        scaleMat.yy = FT_FixedFromFloat(heightRatio);
+        scaleMat.yy = FT_FixedFromFloat(font->scale_y);
 
         pFT_Matrix_Multiply(&scaleMat, &transMat);
         needsTransform = TRUE;
@@ -4118,34 +4176,24 @@ static BOOL get_bitmap_text_metrics(GdiFont *font)
 
 static void scale_font_metrics(GdiFont *font, LPTEXTMETRICW ptm)
 {
-    if (font->scale_x == 0.0)
+    float scale_x;
+
+    if (font->aveWidth)
     {
-        if (FT_IS_SCALABLE(font->ft_face) || !font->ppem)
-            font->scale_y = 1.0;
-        else
-        {
-            font->scale_y = (float)font->ppem * font->font_desc.matrix.eM22;
-            font->scale_y /= (float)font->potm->otmTextMetrics.tmHeight;
-        }
-
-        if (font->aveWidth)
-        {
-            font->scale_x = (float)font->aveWidth * font->font_desc.matrix.eM11;
-            font->scale_x /= (float)font->potm->otmTextMetrics.tmAveCharWidth;
-        }
-        else
-            font->scale_x = font->scale_y;
-
-        TRACE("font scale x: %f y: %f\n", font->scale_x, font->scale_y);
+        scale_x = (float)font->aveWidth * font->font_desc.matrix.eM11;
+        scale_x /= (float)font->potm->otmTextMetrics.tmAveCharWidth;
     }
+    else
+        scale_x = font->scale_y;
+
     ptm->tmHeight = (float)ptm->tmHeight * font->scale_y;
     ptm->tmAscent = (float)ptm->tmAscent * font->scale_y;
     ptm->tmDescent = (float)ptm->tmDescent * font->scale_y;
     ptm->tmInternalLeading = (float)ptm->tmInternalLeading * font->scale_y;
     ptm->tmExternalLeading = (float)ptm->tmExternalLeading * font->scale_y;
 
-    ptm->tmAveCharWidth = (float)ptm->tmAveCharWidth * font->scale_x;
-    ptm->tmMaxCharWidth = (float)ptm->tmMaxCharWidth * font->scale_x;
+    ptm->tmAveCharWidth = (float)ptm->tmAveCharWidth * scale_x;
+    ptm->tmMaxCharWidth = (float)ptm->tmMaxCharWidth * scale_x;
 }
 
 /*************************************************************

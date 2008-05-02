@@ -141,46 +141,45 @@ typedef struct
 /*
  *  For TranslateCharsetInfo
  */
-#define FS(x) {{0,0,0,0},{0x1<<(x),0}}
 #define MAXTCIINDEX 32
 static const CHARSETINFO FONT_tci[MAXTCIINDEX] = {
   /* ANSI */
-  { ANSI_CHARSET, 1252, FS(0)},
-  { EASTEUROPE_CHARSET, 1250, FS(1)},
-  { RUSSIAN_CHARSET, 1251, FS(2)},
-  { GREEK_CHARSET, 1253, FS(3)},
-  { TURKISH_CHARSET, 1254, FS(4)},
-  { HEBREW_CHARSET, 1255, FS(5)},
-  { ARABIC_CHARSET, 1256, FS(6)},
-  { BALTIC_CHARSET, 1257, FS(7)},
-  { VIETNAMESE_CHARSET, 1258, FS(8)},
+  { ANSI_CHARSET, 1252, {{0,0,0,0},{FS_LATIN1,0}} },
+  { EASTEUROPE_CHARSET, 1250, {{0,0,0,0},{FS_LATIN2,0}} },
+  { RUSSIAN_CHARSET, 1251, {{0,0,0,0},{FS_CYRILLIC,0}} },
+  { GREEK_CHARSET, 1253, {{0,0,0,0},{FS_GREEK,0}} },
+  { TURKISH_CHARSET, 1254, {{0,0,0,0},{FS_TURKISH,0}} },
+  { HEBREW_CHARSET, 1255, {{0,0,0,0},{FS_HEBREW,0}} },
+  { ARABIC_CHARSET, 1256, {{0,0,0,0},{FS_ARABIC,0}} },
+  { BALTIC_CHARSET, 1257, {{0,0,0,0},{FS_BALTIC,0}} },
+  { VIETNAMESE_CHARSET, 1258, {{0,0,0,0},{FS_VIETNAMESE,0}} },
   /* reserved by ANSI */
-  { DEFAULT_CHARSET, 0, FS(0)},
-  { DEFAULT_CHARSET, 0, FS(0)},
-  { DEFAULT_CHARSET, 0, FS(0)},
-  { DEFAULT_CHARSET, 0, FS(0)},
-  { DEFAULT_CHARSET, 0, FS(0)},
-  { DEFAULT_CHARSET, 0, FS(0)},
-  { DEFAULT_CHARSET, 0, FS(0)},
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
   /* ANSI and OEM */
-  { THAI_CHARSET,  874,  FS(16)},
-  { SHIFTJIS_CHARSET, 932, FS(17)},
-  { GB2312_CHARSET, 936, FS(18)},
-  { HANGEUL_CHARSET, 949, FS(19)},
-  { CHINESEBIG5_CHARSET, 950, FS(20)},
-  { JOHAB_CHARSET, 1361, FS(21)},
+  { THAI_CHARSET, 874, {{0,0,0,0},{FS_THAI,0}} },
+  { SHIFTJIS_CHARSET, 932, {{0,0,0,0},{FS_JISJAPAN,0}} },
+  { GB2312_CHARSET, 936, {{0,0,0,0},{FS_CHINESESIMP,0}} },
+  { HANGEUL_CHARSET, 949, {{0,0,0,0},{FS_WANSUNG,0}} },
+  { CHINESEBIG5_CHARSET, 950, {{0,0,0,0},{FS_CHINESETRAD,0}} },
+  { JOHAB_CHARSET, 1361, {{0,0,0,0},{FS_JOHAB,0}} },
   /* reserved for alternate ANSI and OEM */
-  { DEFAULT_CHARSET, 0, FS(0)},
-  { DEFAULT_CHARSET, 0, FS(0)},
-  { DEFAULT_CHARSET, 0, FS(0)},
-  { DEFAULT_CHARSET, 0, FS(0)},
-  { DEFAULT_CHARSET, 0, FS(0)},
-  { DEFAULT_CHARSET, 0, FS(0)},
-  { DEFAULT_CHARSET, 0, FS(0)},
-  { DEFAULT_CHARSET, 0, FS(0)},
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
   /* reserved for system */
-  { DEFAULT_CHARSET, 0, FS(0)},
-  { SYMBOL_CHARSET, CP_SYMBOL, FS(31)},
+  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
+  { SYMBOL_CHARSET, CP_SYMBOL, {{0,0,0,0},{FS_SYMBOL,0}} }
 };
 
 /***********************************************************************
@@ -693,7 +692,8 @@ static INT CALLBACK FONT_EnumInstance16( const LOGFONTW *plf, const TEXTMETRICW 
     INT ret = 1;
     DC *dc;
 
-    if( pfe->lpLogFontParam->lfCharSet == DEFAULT_CHARSET ||
+    if (!pfe->lpLogFontParam ||
+        pfe->lpLogFontParam->lfCharSet == DEFAULT_CHARSET ||
         pfe->lpLogFontParam->lfCharSet == plf->lfCharSet )
     {
         WORD args[7];
@@ -741,7 +741,8 @@ static INT CALLBACK FONT_EnumInstance( const LOGFONTW *plf, const TEXTMETRICW *p
     DC *dc;
 
     /* lfCharSet is at the same offset in both LOGFONTA and LOGFONTW */
-    if((pfe->lpLogFontParam->lfCharSet == DEFAULT_CHARSET ||
+    if ((!pfe->lpLogFontParam ||
+        pfe->lpLogFontParam->lfCharSet == DEFAULT_CHARSET ||
         pfe->lpLogFontParam->lfCharSet == plf->lfCharSet) &&
        (!(fType & RASTER_FONTTYPE) || GetDeviceCaps(pfe->hdc, TEXTCAPS) & TC_RA_ABLE) )
     {
@@ -786,11 +787,17 @@ INT16 WINAPI EnumFontFamiliesEx16( HDC16 hDC, LPLOGFONT16 plf,
     DC* 	dc = DC_GetDCPtr( HDC_32(hDC) );
     NEWTEXTMETRICEX16 tm16;
     ENUMLOGFONTEX16 lf16;
-    LOGFONTW lfW;
+    LOGFONTW lfW, *plfW;
     BOOL enum_gdi_fonts;
 
     if (!dc) return 0;
-    FONT_LogFont16ToW(plf, &lfW);
+
+    if (plf)
+    {
+        FONT_LogFont16ToW(plf, &lfW);
+        plfW = &lfW;
+    }
+    else plfW = NULL;
 
     fe16.hdc = HDC_32(hDC);
     fe16.dc = dc;
@@ -813,10 +820,10 @@ INT16 WINAPI EnumFontFamiliesEx16( HDC16 hDC, LPLOGFONT16 plf,
     }
 
     if (enum_gdi_fonts)
-        ret = WineEngEnumFonts( &lfW, FONT_EnumInstance16, (LPARAM)&fe16 );
+        ret = WineEngEnumFonts( plfW, FONT_EnumInstance16, (LPARAM)&fe16 );
     fe16.dwFlags &= ~ENUM_CALLED;
     if (ret && dc->funcs->pEnumDeviceFonts) {
-	ret2 = dc->funcs->pEnumDeviceFonts( dc->physDev, &lfW, FONT_EnumInstance16, (LPARAM)&fe16 );
+	ret2 = dc->funcs->pEnumDeviceFonts( dc->physDev, plfW, FONT_EnumInstance16, (LPARAM)&fe16 );
 	if(fe16.dwFlags & ENUM_CALLED) /* update ret iff a font gets enumed */
 	    ret = ret2;
     }
@@ -841,8 +848,9 @@ static INT FONT_EnumFontFamiliesEx( HDC hDC, LPLOGFONTW plf,
 
     if (!dc) return 0;
 
-    TRACE("lfFaceName = %s lfCharset = %d\n", debugstr_w(plf->lfFaceName),
-	  plf->lfCharSet);
+    if (plf)
+        TRACE("lfFaceName = %s lfCharset = %d\n", debugstr_w(plf->lfFaceName),
+	    plf->lfCharSet);
     fe32.lpLogFontParam = plf;
     fe32.lpEnumFunc = efproc;
     fe32.lpData = lParam;
@@ -889,10 +897,16 @@ INT WINAPI EnumFontFamiliesExA( HDC hDC, LPLOGFONTA plf,
                                     FONTENUMPROCA efproc,
                                     LPARAM lParam, DWORD dwFlags)
 {
-    LOGFONTW lfW;
-    FONT_LogFontAToW( plf, &lfW );
+    LOGFONTW lfW, *plfW;
 
-    return FONT_EnumFontFamiliesEx( hDC, &lfW, (FONTENUMPROCW)efproc, lParam, 0);
+    if (plf)
+    {
+        FONT_LogFontAToW( plf, &lfW );
+        plfW = &lfW;
+    }
+    else plfW = NULL;
+
+    return FONT_EnumFontFamiliesEx( hDC, plfW, (FONTENUMPROCW)efproc, lParam, 0);
 }
 
 /***********************************************************************
@@ -901,17 +915,19 @@ INT WINAPI EnumFontFamiliesExA( HDC hDC, LPLOGFONTA plf,
 INT16 WINAPI EnumFontFamilies16( HDC16 hDC, LPCSTR lpFamily,
                                  FONTENUMPROC16 efproc, LPARAM lpData )
 {
-    LOGFONT16	lf;
+    LOGFONT16 lf, *plf;
 
-    lf.lfCharSet = DEFAULT_CHARSET;
     if (lpFamily)
     {
         if (!*lpFamily) return 1;
         lstrcpynA( lf.lfFaceName, lpFamily, LF_FACESIZE );
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfPitchAndFamily = 0;
+        plf = &lf;
     }
-    else lf.lfFaceName[0] = '\0';
+    else plf = NULL;
 
-    return EnumFontFamiliesEx16( hDC, &lf, efproc, lpData, 0 );
+    return EnumFontFamiliesEx16( hDC, plf, efproc, lpData, 0 );
 }
 
 /***********************************************************************
@@ -920,17 +936,19 @@ INT16 WINAPI EnumFontFamilies16( HDC16 hDC, LPCSTR lpFamily,
 INT WINAPI EnumFontFamiliesA( HDC hDC, LPCSTR lpFamily,
                                   FONTENUMPROCA efproc, LPARAM lpData )
 {
-    LOGFONTA	lf;
+    LOGFONTA lf, *plf;
 
-    lf.lfCharSet = DEFAULT_CHARSET;
     if (lpFamily)
     {
         if (!*lpFamily) return 1;
         lstrcpynA( lf.lfFaceName, lpFamily, LF_FACESIZE );
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfPitchAndFamily = 0;
+        plf = &lf;
     }
-    else lf.lfFaceName[0] = lf.lfFaceName[1] = '\0';
+    else plf = NULL;
 
-    return EnumFontFamiliesExA( hDC, &lf, efproc, lpData, 0 );
+    return EnumFontFamiliesExA( hDC, plf, efproc, lpData, 0 );
 }
 
 /***********************************************************************
@@ -939,17 +957,19 @@ INT WINAPI EnumFontFamiliesA( HDC hDC, LPCSTR lpFamily,
 INT WINAPI EnumFontFamiliesW( HDC hDC, LPCWSTR lpFamily,
                                   FONTENUMPROCW efproc, LPARAM lpData )
 {
-    LOGFONTW  lf;
+    LOGFONTW lf, *plf;
 
-    lf.lfCharSet = DEFAULT_CHARSET;
     if (lpFamily)
     {
         if (!*lpFamily) return 1;
         lstrcpynW( lf.lfFaceName, lpFamily, LF_FACESIZE );
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfPitchAndFamily = 0;
+        plf = &lf;
     }
-    else lf.lfFaceName[0] = 0;
+    else plf = NULL;
 
-    return EnumFontFamiliesExW( hDC, &lf, efproc, lpData, 0 );
+    return EnumFontFamiliesExW( hDC, plf, efproc, lpData, 0 );
 }
 
 /***********************************************************************

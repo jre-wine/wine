@@ -135,6 +135,29 @@ static void WINAPI IWineD3DVolumeTextureImpl_PreLoad(IWineD3DVolumeTexture *ifac
     return ;
 }
 
+static void WINAPI IWineD3DVolumeTextureImpl_UnLoad(IWineD3DVolumeTexture *iface) {
+    unsigned int i;
+    IWineD3DVolumeTextureImpl *This = (IWineD3DVolumeTextureImpl *)iface;
+    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+    TRACE("(%p)\n", This);
+
+    /* Unload all the surfaces and reset the texture name. If UnLoad was called on the
+     * surface before, this one will be a NOP and vice versa. Unloading an unloaded
+     * surface is fine
+     */
+    for (i = 0; i < This->baseTexture.levels; i++) {
+        IWineD3DVolume_UnLoad(This->volumes[i]);
+    }
+
+    if(This->baseTexture.textureName) {
+        ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+        ENTER_GL();
+        glDeleteTextures(1, &This->baseTexture.textureName);
+        This->baseTexture.textureName = 0;
+        LEAVE_GL();
+    }
+}
+
 static WINED3DRESOURCETYPE WINAPI IWineD3DVolumeTextureImpl_GetType(IWineD3DVolumeTexture *iface) {
     return IWineD3DResourceImpl_GetType((IWineD3DResource *)iface);
 }
@@ -228,7 +251,7 @@ static HRESULT WINAPI IWineD3DVolumeTextureImpl_GetLevelDesc(IWineD3DVolumeTextu
     IWineD3DVolumeTextureImpl *This = (IWineD3DVolumeTextureImpl *)iface;
     if (Level < This->baseTexture.levels) {
         TRACE("(%p) Level (%d)\n", This, Level);
-        return IWineD3DVolume_GetDesc((IWineD3DVolume *) This->volumes[Level], pDesc);
+        return IWineD3DVolume_GetDesc(This->volumes[Level], pDesc);
     } else {
         FIXME("(%p) Level (%d)\n", This, Level);
     }
@@ -237,8 +260,8 @@ static HRESULT WINAPI IWineD3DVolumeTextureImpl_GetLevelDesc(IWineD3DVolumeTextu
 static HRESULT WINAPI IWineD3DVolumeTextureImpl_GetVolumeLevel(IWineD3DVolumeTexture *iface, UINT Level, IWineD3DVolume** ppVolumeLevel) {
     IWineD3DVolumeTextureImpl *This = (IWineD3DVolumeTextureImpl *)iface;
     if (Level < This->baseTexture.levels) {
-      *ppVolumeLevel = (IWineD3DVolume *)This->volumes[Level];
-      IWineD3DVolume_AddRef((IWineD3DVolume *) *ppVolumeLevel);
+      *ppVolumeLevel = This->volumes[Level];
+      IWineD3DVolume_AddRef(*ppVolumeLevel);
       TRACE("(%p) -> level(%d) returning volume@%p\n", This, Level, *ppVolumeLevel);
     } else {
       FIXME("(%p) Level(%d) overflow Levels(%d)\n", This, Level, This->baseTexture.levels);
@@ -252,7 +275,7 @@ static HRESULT WINAPI IWineD3DVolumeTextureImpl_LockBox(IWineD3DVolumeTexture *i
     IWineD3DVolumeTextureImpl *This = (IWineD3DVolumeTextureImpl *)iface;
 
     if (Level < This->baseTexture.levels) {
-      hr = IWineD3DVolume_LockBox((IWineD3DVolume *)This->volumes[Level], pLockedVolume, pBox, Flags);
+      hr = IWineD3DVolume_LockBox(This->volumes[Level], pLockedVolume, pBox, Flags);
       TRACE("(%p) Level (%d) success(%u)\n", This, Level, hr);
 
     } else {
@@ -267,7 +290,7 @@ static HRESULT WINAPI IWineD3DVolumeTextureImpl_UnlockBox(IWineD3DVolumeTexture 
     IWineD3DVolumeTextureImpl *This = (IWineD3DVolumeTextureImpl *)iface;
 
     if (Level < This->baseTexture.levels) {
-      hr = IWineD3DVolume_UnlockBox((IWineD3DVolume*) This->volumes[Level]);
+      hr = IWineD3DVolume_UnlockBox(This->volumes[Level]);
       TRACE("(%p) -> level(%d) success(%u)\n", This, Level, hr);
 
     } else {
@@ -281,7 +304,7 @@ static HRESULT WINAPI IWineD3DVolumeTextureImpl_AddDirtyBox(IWineD3DVolumeTextur
     IWineD3DVolumeTextureImpl *This = (IWineD3DVolumeTextureImpl *)iface;
     This->baseTexture.dirty = TRUE;
     TRACE("(%p) : dirtyfication of volume Level (0)\n", This);
-    return IWineD3DVolume_AddDirtyBox((IWineD3DVolume *) This->volumes[0], pDirtyBox);
+    return IWineD3DVolume_AddDirtyBox(This->volumes[0], pDirtyBox);
 }
 
 const IWineD3DVolumeTextureVtbl IWineD3DVolumeTexture_Vtbl =
@@ -299,6 +322,7 @@ const IWineD3DVolumeTextureVtbl IWineD3DVolumeTexture_Vtbl =
     IWineD3DVolumeTextureImpl_SetPriority,
     IWineD3DVolumeTextureImpl_GetPriority,
     IWineD3DVolumeTextureImpl_PreLoad,
+    IWineD3DVolumeTextureImpl_UnLoad,
     IWineD3DVolumeTextureImpl_GetType,
     /* BaseTexture */
     IWineD3DVolumeTextureImpl_SetLOD,

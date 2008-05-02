@@ -410,6 +410,12 @@ static void rpcrt4_conn_np_cancel_call(RpcConnection *Connection)
     /* FIXME: implement when named pipe writes use overlapped I/O */
 }
 
+static int rpcrt4_conn_np_wait_for_incoming_data(RpcConnection *Connection)
+{
+    /* FIXME: implement when named pipe writes use overlapped I/O */
+    return -1;
+}
+
 static size_t rpcrt4_ncacn_np_get_top_of_tower(unsigned char *tower_data,
                                                const char *networkaddr,
                                                const char *endpoint)
@@ -422,8 +428,8 @@ static size_t rpcrt4_ncacn_np_get_top_of_tower(unsigned char *tower_data,
 
     TRACE("(%p, %s, %s)\n", tower_data, networkaddr, endpoint);
 
-    networkaddr_size = strlen(networkaddr) + 1;
-    endpoint_size = strlen(endpoint) + 1;
+    networkaddr_size = networkaddr ? strlen(networkaddr) + 1 : 1;
+    endpoint_size = endpoint ? strlen(endpoint) + 1 : 1;
     size = sizeof(*smb_floor) + endpoint_size + sizeof(*nb_floor) + networkaddr_size;
 
     if (!tower_data)
@@ -437,7 +443,10 @@ static size_t rpcrt4_ncacn_np_get_top_of_tower(unsigned char *tower_data,
     smb_floor->protid = EPM_PROTOCOL_SMB;
     smb_floor->count_rhs = endpoint_size;
 
-    memcpy(tower_data, endpoint, endpoint_size);
+    if (endpoint)
+        memcpy(tower_data, endpoint, endpoint_size);
+    else
+        tower_data[0] = 0;
     tower_data += endpoint_size;
 
     nb_floor = (twr_empty_floor_t *)tower_data;
@@ -448,7 +457,10 @@ static size_t rpcrt4_ncacn_np_get_top_of_tower(unsigned char *tower_data,
     nb_floor->protid = EPM_PROTOCOL_NETBIOS;
     nb_floor->count_rhs = networkaddr_size;
 
-    memcpy(tower_data, networkaddr, networkaddr_size);
+    if (networkaddr)
+        memcpy(tower_data, networkaddr, networkaddr_size);
+    else
+        tower_data[0] = 0;
     tower_data += networkaddr_size;
 
     return size;
@@ -1041,6 +1053,32 @@ static void rpcrt4_conn_tcp_cancel_call(RpcConnection *Connection)
     write(tcpc->cancel_fds[1], &dummy, 1);
 }
 
+static int rpcrt4_conn_tcp_wait_for_incoming_data(RpcConnection *Connection)
+{
+    RpcConnection_tcp *tcpc = (RpcConnection_tcp *) Connection;
+    struct pollfd pfds[2];
+
+    TRACE("%p\n", Connection);
+
+    pfds[0].fd = tcpc->sock;
+    pfds[0].events = POLLIN;
+    pfds[1].fd = tcpc->cancel_fds[0];
+    pfds[1].events = POLLIN;
+    if (poll(pfds, 2, -1 /* infinite */) == -1 && errno != EINTR)
+    {
+      ERR("poll() failed: %s\n", strerror(errno));
+      return -1;
+    }
+    if (pfds[1].revents & POLLIN) /* canceled */
+    {
+      char dummy;
+      read(pfds[1].fd, &dummy, sizeof(dummy));
+      return -1;
+    }
+
+    return 0;
+}
+
 static size_t rpcrt4_ncacn_ip_tcp_get_top_of_tower(unsigned char *tower_data,
                                                    const char *networkaddr,
                                                    const char *endpoint)
@@ -1324,6 +1362,7 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_conn_np_write,
     rpcrt4_conn_np_close,
     rpcrt4_conn_np_cancel_call,
+    rpcrt4_conn_np_wait_for_incoming_data,
     rpcrt4_ncacn_np_get_top_of_tower,
     rpcrt4_ncacn_np_parse_top_of_tower,
   },
@@ -1336,6 +1375,7 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_conn_np_write,
     rpcrt4_conn_np_close,
     rpcrt4_conn_np_cancel_call,
+    rpcrt4_conn_np_wait_for_incoming_data,
     rpcrt4_ncalrpc_get_top_of_tower,
     rpcrt4_ncalrpc_parse_top_of_tower,
   },
@@ -1348,6 +1388,7 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_conn_tcp_write,
     rpcrt4_conn_tcp_close,
     rpcrt4_conn_tcp_cancel_call,
+    rpcrt4_conn_tcp_wait_for_incoming_data,
     rpcrt4_ncacn_ip_tcp_get_top_of_tower,
     rpcrt4_ncacn_ip_tcp_parse_top_of_tower,
   }
@@ -1464,6 +1505,7 @@ RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
   NewConnection->QOS = QOS;
 
   list_init(&NewConnection->conn_pool_entry);
+  NewConnection->async_state = NULL;
 
   TRACE("connection: %p\n", NewConnection);
   *Connection = NewConnection;

@@ -262,7 +262,7 @@ static LPWSTR HTTP_BuildHeaderRequestString( LPWININETHTTPREQW lpwhr, LPCWSTR ve
     LPWSTR requestString;
     DWORD len, n;
     LPCWSTR *req;
-    INT i;
+    UINT i;
     LPWSTR p;
 
     static const WCHAR szSpace[] = { ' ',0 };
@@ -561,7 +561,8 @@ static BOOL HTTP_DoAuthorization( LPWININETHTTPREQW lpwhr, LPCWSTR pszAuthValue,
         out_desc.pBuffers = &out;
 
         sec_status = InitializeSecurityContextW(first ? &pAuthInfo->cred : NULL,
-                                                first ? NULL : &pAuthInfo->ctx, NULL,
+                                                first ? NULL : &pAuthInfo->ctx,
+                                                first ? lpwhr->lpHttpSession->lpszServerName : NULL,
                                                 context_req, 0, SECURITY_NETWORK_DREP,
                                                 in.pvBuffer ? &in_desc : NULL,
                                                 0, &pAuthInfo->ctx, &out_desc,

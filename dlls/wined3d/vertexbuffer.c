@@ -228,11 +228,11 @@ static inline BOOL process_converted_attribute(IWineD3DVertexBufferImpl *This,
     data = (((DWORD_PTR) attrib->lpData) + offset) % This->stride;
     attrib_size = WINED3D_ATR_SIZE(type) * WINED3D_ATR_TYPESIZE(type);
     for(i = 0; i < attrib_size; i++) {
-        if(This->conv_map[(DWORD_PTR) data + i] != conv_type) {
-            TRACE("Byte %ld in vertex changed\n", i + (DWORD_PTR) data);
-            TRACE("It was type %d, is %d now\n", This->conv_map[(DWORD_PTR) data + i], conv_type);
+        if(This->conv_map[data + i] != conv_type) {
+            TRACE("Byte %ld in vertex changed\n", i + data);
+            TRACE("It was type %d, is %d now\n", This->conv_map[data + i], conv_type);
             ret = TRUE;
-            This->conv_map[(DWORD_PTR) data + i] = conv_type;
+            This->conv_map[data + i] = conv_type;
         }
     }
     return ret;
@@ -245,7 +245,7 @@ static inline BOOL check_attribute(IWineD3DVertexBufferImpl *This, const WineDir
     DWORD type;
 
     /* Ignore attributes that do not have our vbo. After that check we can be sure that the attribute is
-     * there, on nonexistant attribs the vbo is 0.
+     * there, on nonexistent attribs the vbo is 0.
      */
     if(attrib->VBO != This->vbo) return FALSE;
 
@@ -301,7 +301,7 @@ inline BOOL WINAPI IWineD3DVertexBufferImpl_FindDecl(IWineD3DVertexBufferImpl *T
      * that concern the current buffer. A problem with this is that this can change between draws, so we have to validate
      * the information and reprocess the buffer if it changes, and avoid false positives for performance reasons.
      *
-     * We have do destinguish between vertex shaders and fixed function to pick the way we access the
+     * We have to distinguish between vertex shaders and fixed function to pick the way we access the
      * strided vertex information.
      *
      * This code sets up a per-byte array with the size of the detected stride of the arrays in the
@@ -429,7 +429,7 @@ static void     WINAPI IWineD3DVertexBufferImpl_PreLoad(IWineD3DVertexBuffer *if
         declChanged = IWineD3DVertexBufferImpl_FindDecl(This);
     } else if(This->Flags & VBFLAG_HASDESC) {
         /* Reuse the declaration stored in the buffer. It will most likely not change, and if it does
-         * the stream source state handler will call PreLoad again and the change will be cought
+         * the stream source state handler will call PreLoad again and the change will be caught
          */
     } else {
         /* Cannot get a declaration, and no declaration is stored in the buffer. It is pointless to preload
@@ -440,8 +440,8 @@ static void     WINAPI IWineD3DVertexBufferImpl_PreLoad(IWineD3DVertexBuffer *if
     }
 
     /* If applications change the declaration over and over, reconverting all the time is a huge
-     * performance hit. So count the declaration changes and release the VBO if there are too much
-     * of them(and thus stop converting)
+     * performance hit. So count the declaration changes and release the VBO if there are too many
+     * of them (and thus stop converting)
      */
     if(declChanged) {
         This->declChanges++;
@@ -596,6 +596,25 @@ static void     WINAPI IWineD3DVertexBufferImpl_PreLoad(IWineD3DVertexBuffer *if
     HeapFree(GetProcessHeap(), 0, data);
 }
 
+static void WINAPI IWineD3DVertexBufferImpl_UnLoad(IWineD3DVertexBuffer *iface) {
+    IWineD3DVertexBufferImpl *This = (IWineD3DVertexBufferImpl *) iface;
+    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+    TRACE("(%p)\n", This);
+
+    /* This is easy: The whole content is shadowed in This->resource.allocatedMemory,
+     * so we only have to destroy the vbo. Only do it if we have a vbo, which implies
+     * that vbos are supported
+     */
+    if(This->vbo) {
+        ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+        ENTER_GL();
+        GL_EXTCALL(glDeleteBuffersARB(1, &This->vbo));
+        checkGLcall("glDeleteBuffersARB");
+        LEAVE_GL();
+        This->vbo = 0;
+    }
+}
+
 static WINED3DRESOURCETYPE WINAPI IWineD3DVertexBufferImpl_GetType(IWineD3DVertexBuffer *iface) {
     return IWineD3DResourceImpl_GetType((IWineD3DResource *)iface);
 }
@@ -682,6 +701,7 @@ const IWineD3DVertexBufferVtbl IWineD3DVertexBuffer_Vtbl =
     IWineD3DVertexBufferImpl_SetPriority,
     IWineD3DVertexBufferImpl_GetPriority,
     IWineD3DVertexBufferImpl_PreLoad,
+    IWineD3DVertexBufferImpl_UnLoad,
     IWineD3DVertexBufferImpl_GetType,
     /* IWineD3DVertexBuffer */
     IWineD3DVertexBufferImpl_Lock,

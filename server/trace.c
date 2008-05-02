@@ -259,21 +259,30 @@ static void dump_luid( const luid_t *luid )
     fprintf( stderr, "%d.%u", luid->high_part, luid->low_part );
 }
 
-static void dump_context( const CONTEXT *context )
+static void dump_context( const CONTEXT *context, data_size_t size )
 {
+    CONTEXT ctx;
+
+    memset( &ctx, 0, sizeof(ctx) );
+    memcpy( &ctx, context, min( size, sizeof(CONTEXT) ));
 #ifdef __i386__
     fprintf( stderr, "{flags=%08x,eax=%08x,ebx=%08x,ecx=%08x,edx=%08x,esi=%08x,edi=%08x,"
              "ebp=%08x,eip=%08x,esp=%08x,eflags=%08x,cs=%04x,ds=%04x,es=%04x,"
              "fs=%04x,gs=%04x,dr0=%08x,dr1=%08x,dr2=%08x,dr3=%08x,dr6=%08x,dr7=%08x,",
-             context->ContextFlags, context->Eax, context->Ebx, context->Ecx, context->Edx,
-             context->Esi, context->Edi, context->Ebp, context->Eip, context->Esp, context->EFlags,
-             context->SegCs, context->SegDs, context->SegEs, context->SegFs, context->SegGs,
-             context->Dr0, context->Dr1, context->Dr2, context->Dr3, context->Dr6, context->Dr7 );
+             ctx.ContextFlags, ctx.Eax, ctx.Ebx, ctx.Ecx, ctx.Edx,
+             ctx.Esi, ctx.Edi, ctx.Ebp, ctx.Eip, ctx.Esp, ctx.EFlags,
+             ctx.SegCs, ctx.SegDs, ctx.SegEs, ctx.SegFs, ctx.SegGs,
+             ctx.Dr0, ctx.Dr1, ctx.Dr2, ctx.Dr3, ctx.Dr6, ctx.Dr7 );
     fprintf( stderr, "float=" );
-    dump_uints( (const int *)&context->FloatSave, sizeof(context->FloatSave) / sizeof(int) );
+    dump_uints( (const int *)&ctx.FloatSave, sizeof(ctx.FloatSave) / sizeof(int) );
+    if (size > FIELD_OFFSET( CONTEXT, ExtendedRegisters ))
+    {
+        fprintf( stderr, ",extended=" );
+        dump_uints( (const int *)&ctx.ExtendedRegisters, sizeof(ctx.ExtendedRegisters) / sizeof(int) );
+    }
     fprintf( stderr, "}" );
 #else
-    dump_uints( (const int *)context, sizeof(*context) / sizeof(int) );
+    dump_uints( (const int *)&ctx, sizeof(ctx) / sizeof(int) );
 #endif
 }
 
@@ -384,8 +393,8 @@ static void dump_varargs_context( data_size_t size )
         fprintf( stderr, "{}" );
         return;
     }
-    dump_context( cur_data );
-    remove_data( size );
+    dump_context( cur_data, size );
+    remove_data( min( size, sizeof(CONTEXT) ));
 }
 
 static void dump_varargs_exc_event( data_size_t size )
@@ -398,9 +407,12 @@ static void dump_varargs_exc_event( data_size_t size )
         return;
     }
     fprintf( stderr, "{context=" );
-    dump_context( ptr );
-    fprintf( stderr, ",rec=" );
-    dump_exc_record( (const EXCEPTION_RECORD *)(ptr + 1) );
+    dump_context( ptr, size );
+    if (size > sizeof(CONTEXT))
+    {
+        fprintf( stderr, ",rec=" );
+        dump_exc_record( (const EXCEPTION_RECORD *)(ptr + 1) );
+    }
     fputc( '}', stderr );
     remove_data( size );
 }
@@ -945,7 +957,7 @@ static void dump_get_process_info_reply( const struct get_process_info_reply *re
     fprintf( stderr, " ppid=%04x,", req->ppid );
     fprintf( stderr, " exit_code=%d,", req->exit_code );
     fprintf( stderr, " priority=%d,", req->priority );
-    fprintf( stderr, " affinity=%d,", req->affinity );
+    fprintf( stderr, " affinity=%08x,", req->affinity );
     fprintf( stderr, " peb=%p,", req->peb );
     fprintf( stderr, " start_time=" );
     dump_timeout( &req->start_time );
@@ -959,7 +971,7 @@ static void dump_set_process_info_request( const struct set_process_info_request
     fprintf( stderr, " handle=%p,", req->handle );
     fprintf( stderr, " mask=%d,", req->mask );
     fprintf( stderr, " priority=%d,", req->priority );
-    fprintf( stderr, " affinity=%d", req->affinity );
+    fprintf( stderr, " affinity=%08x", req->affinity );
 }
 
 static void dump_get_thread_info_request( const struct get_thread_info_request *req )
@@ -975,7 +987,7 @@ static void dump_get_thread_info_reply( const struct get_thread_info_reply *req 
     fprintf( stderr, " teb=%p,", req->teb );
     fprintf( stderr, " exit_code=%d,", req->exit_code );
     fprintf( stderr, " priority=%d,", req->priority );
-    fprintf( stderr, " affinity=%d,", req->affinity );
+    fprintf( stderr, " affinity=%08x,", req->affinity );
     fprintf( stderr, " creation_time=" );
     dump_timeout( &req->creation_time );
     fprintf( stderr, "," );
@@ -990,7 +1002,7 @@ static void dump_set_thread_info_request( const struct set_thread_info_request *
     fprintf( stderr, " handle=%p,", req->handle );
     fprintf( stderr, " mask=%d,", req->mask );
     fprintf( stderr, " priority=%d,", req->priority );
-    fprintf( stderr, " affinity=%d,", req->affinity );
+    fprintf( stderr, " affinity=%08x,", req->affinity );
     fprintf( stderr, " token=%p", req->token );
 }
 
@@ -2707,7 +2719,17 @@ static void dump_set_window_pos_request( const struct set_window_pos_request *re
 static void dump_set_window_pos_reply( const struct set_window_pos_reply *req )
 {
     fprintf( stderr, " new_style=%08x,", req->new_style );
-    fprintf( stderr, " new_ex_style=%08x", req->new_ex_style );
+    fprintf( stderr, " new_ex_style=%08x,", req->new_ex_style );
+    fprintf( stderr, " visible=" );
+    dump_rectangle( &req->visible );
+}
+
+static void dump_set_window_visible_rect_request( const struct set_window_visible_rect_request *req )
+{
+    fprintf( stderr, " flags=%08x,", req->flags );
+    fprintf( stderr, " handle=%p,", req->handle );
+    fprintf( stderr, " visible=" );
+    dump_rectangle( &req->visible );
 }
 
 static void dump_get_window_rectangles_request( const struct get_window_rectangles_request *req )
@@ -3909,6 +3931,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_window_children_from_point_request,
     (dump_func)dump_get_window_tree_request,
     (dump_func)dump_set_window_pos_request,
+    (dump_func)dump_set_window_visible_rect_request,
     (dump_func)dump_get_window_rectangles_request,
     (dump_func)dump_get_window_text_request,
     (dump_func)dump_set_window_text_request,
@@ -4144,6 +4167,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_window_children_from_point_reply,
     (dump_func)dump_get_window_tree_reply,
     (dump_func)dump_set_window_pos_reply,
+    (dump_func)0,
     (dump_func)dump_get_window_rectangles_reply,
     (dump_func)dump_get_window_text_reply,
     (dump_func)0,
@@ -4379,6 +4403,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_window_children_from_point",
     "get_window_tree",
     "set_window_pos",
+    "set_window_visible_rect",
     "get_window_rectangles",
     "get_window_text",
     "set_window_text",

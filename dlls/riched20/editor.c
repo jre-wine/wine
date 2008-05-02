@@ -628,9 +628,9 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
   int nEventMask = editor->nEventMask;
   ME_InStream inStream;
 
-  TRACE("stream==%p hWnd==%p format==0x%X\n", stream, editor->hWnd, (UINT)format);
+  TRACE("stream==%p hWnd==%p format==0x%X\n", stream, editor->hWnd, format);
   editor->nEventMask = 0;
-  
+
   ME_GetSelection(editor, &from, &to);
   if ((format & SFF_SELECTION) && (editor->mode & TM_RICHTEXT)) {
     style = ME_GetSelectionInsertStyle(editor);
@@ -1140,7 +1140,7 @@ static BOOL ME_ShowContextMenu(ME_TextEditor *editor, int x, int y)
   int seltype = 0;
   if(!editor->lpOleCallback)
     return FALSE;
-  ME_GetSelection(editor, (int *)&selrange.cpMin, (int *)&selrange.cpMax);
+  ME_GetSelection(editor, &selrange.cpMin, &selrange.cpMax);
   if(selrange.cpMin == selrange.cpMax)
     seltype |= SEL_EMPTY;
   else
@@ -1561,7 +1561,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
   case EM_EXGETSEL:
   {
     CHARRANGE *pRange = (CHARRANGE *)lParam;
-    ME_GetSelection(editor, (int *)&pRange->cpMin, (int *)&pRange->cpMax);
+    ME_GetSelection(editor, &pRange->cpMin, &pRange->cpMax);
     TRACE("EM_EXGETSEL = (%d,%d)\n", pRange->cpMin, pRange->cpMax);
     return 0;
   }
@@ -2034,11 +2034,11 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     LPDATAOBJECT dataObj = NULL;
     CHARRANGE range;
     HRESULT hr = S_OK;
-    
+
     if (editor->cPasswordMask)
       return 0; /* Copying or Cutting masked text isn't allowed */
-    
-    ME_GetSelection(editor, (int*)&range.cpMin, (int*)&range.cpMax);
+
+    ME_GetSelection(editor, &range.cpMin, &range.cpMax);
     if(editor->lpOleCallback)
         hr = IRichEditOleCallback_GetClipboardData(editor->lpOleCallback, &range, RECO_COPY, &dataObj);
     if(FAILED(hr) || !dataObj)
@@ -2077,7 +2077,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     else
         bufferA = heap_alloc(wParam + 2);
 
-    ex.cb = wParam + (unicode ? 2*sizeof(WCHAR) : 2);
+    ex.cb = (wParam + 2) * (unicode ? sizeof(WCHAR) : sizeof(CHAR));
     ex.flags = GT_USECRLF;
     ex.codepage = unicode ? 1200 : CP_ACP;
     ex.lpDefaultChar = NULL;
@@ -2086,8 +2086,8 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
 
     if (unicode)
     {
-        memcpy((LPWSTR)lParam, bufferW, wParam);
-        if (lstrlenW(bufferW) >= wParam / sizeof(WCHAR)) rc = 0;
+        memcpy((LPWSTR)lParam, bufferW, wParam * sizeof(WCHAR));
+        if (lstrlenW(bufferW) >= wParam) rc = 0;
     }
     else
     {
@@ -2101,7 +2101,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
   case EM_GETTEXTEX:
   {
     GETTEXTEX *ex = (GETTEXTEX*)wParam;
-    int nStart, nCount;
+    int nStart, nCount; /* in chars */
 
     if (ex->flags & ~(GT_SELECTION | GT_USECRLF))
       FIXME("GETTEXTEX flags 0x%08x not supported\n", ex->flags & ~(GT_SELECTION | GT_USECRLF));
@@ -2110,12 +2110,11 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     {
       ME_GetSelection(editor, &nStart, &nCount);
       nCount -= nStart;
-      nCount = min(nCount, ex->cb - 1);
     }
     else
     {
       nStart = 0;
-      nCount = ex->cb - 1;
+      nCount = 0x7fffffff;
     }
     if (ex->codepage == 1200)
     {
@@ -2127,10 +2126,13 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
       /* potentially each char may be a CR, why calculate the exact value with O(N) when
         we can just take a bigger buffer? :) */
       int crlfmul = (ex->flags & GT_USECRLF) ? 2 : 1;
-      LPWSTR buffer = heap_alloc((crlfmul*nCount + 1) * sizeof(WCHAR));
+      LPWSTR buffer;
       DWORD buflen = ex->cb;
       LRESULT rc;
       DWORD flags = 0;
+
+      nCount = min(nCount, ex->cb - 1);
+      buffer = heap_alloc((crlfmul*nCount + 1) * sizeof(WCHAR));
 
       buflen = ME_GetTextW(editor, buffer, nStart, nCount, ex->flags & GT_USECRLF);
       rc = WideCharToMultiByte(ex->codepage, flags, buffer, -1, (LPSTR)lParam, ex->cb, ex->lpDefaultChar, ex->lpUsedDefaultChar);
@@ -2393,6 +2395,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
         pt.x = 0;
         pt.y = editor->pBuffer->pLast->member.para.nYPos;
     }
+    pt.x += editor->selofs;
     if (wParam >= 0x40000) {
         *(POINTL *)wParam = pt;
     }

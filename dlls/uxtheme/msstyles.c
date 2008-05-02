@@ -141,7 +141,7 @@ HRESULT MSSTYLES_OpenThemeFile(LPCWSTR lpThemeFile, LPCWSTR pszColorName, LPCWST
     }
     pszSizes = (LPWSTR)LoadResource(hTheme, hrsc);
 
-    /* Validate requested color against whats available from the theme */
+    /* Validate requested color against what's available from the theme */
     if(pszColorName) {
         tmp = pszColors;
         while(*tmp) {
@@ -155,7 +155,7 @@ HRESULT MSSTYLES_OpenThemeFile(LPCWSTR lpThemeFile, LPCWSTR pszColorName, LPCWST
     else
         pszSelectedColor = pszColors; /* Use the default color */
 
-    /* Validate requested size against whats available from the theme */
+    /* Validate requested size against what's available from the theme */
     if(pszSizeName) {
         tmp = pszSizes;
         while(*tmp) {
@@ -1347,10 +1347,10 @@ HRESULT MSSTYLES_GetPropertyRect(PTHEME_PROPERTY tp, RECT *pRect)
     LPCWSTR lpCur = tp->lpValue;
     LPCWSTR lpEnd = tp->lpValue + tp->dwValueLen;
 
-    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, (int*)&pRect->left);
-    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, (int*)&pRect->top);
-    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, (int*)&pRect->right);
-    if(!MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, (int*)&pRect->bottom)) {
+    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->left);
+    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->top);
+    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->right);
+    if(!MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->bottom)) {
         TRACE("Could not parse rect property\n");
         return E_PROP_ID_UNSUPPORTED;
     }

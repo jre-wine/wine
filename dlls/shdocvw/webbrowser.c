@@ -667,10 +667,20 @@ static HRESULT WINAPI WebBrowser_get_FullScreen(IWebBrowser2 *iface, VARIANT_BOO
 static HRESULT WINAPI WebBrowser_put_FullScreen(IWebBrowser2 *iface, VARIANT_BOOL bFullScreen)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
+    VARIANTARG arg;
+    DISPPARAMS dispparams = {&arg, NULL, 1, 0};
+
+    /* In opposition to InternetExplorer, all we should do here is
+     * inform the embedder about the fullscreen change. */
 
     TRACE("(%p)->(%x)\n", This, bFullScreen);
 
     This->full_screen = bFullScreen ? VARIANT_TRUE : VARIANT_FALSE;
+
+    V_VT(&arg) = VT_BOOL;
+    V_BOOL(&arg) = bFullScreen;
+    call_sink(This->doc_host.cps.wbe2, DISPID_ONFULLSCREEN, &dispparams);
+
     return S_OK;
 }
 
@@ -854,10 +864,18 @@ static HRESULT WINAPI WebBrowser_get_Resizable(IWebBrowser2 *iface, VARIANT_BOOL
 static HRESULT WINAPI WebBrowser_put_Resizable(IWebBrowser2 *iface, VARIANT_BOOL Value)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
+    VARIANTARG arg;
+    DISPPARAMS dispparams = {&arg, NULL, 1, 0};
 
     TRACE("(%p)->(%x)\n", This, Value);
 
-    /* It's InternetExplorer object's method. We have nothing to do here. */
+    /* In opposition to InternetExplorer, all we should do here is
+     * inform the embedder about the resizable change. */
+
+    V_VT(&arg) = VT_BOOL;
+    V_BOOL(&arg) = Value;
+    call_sink(This->doc_host.cps.wbe2, DISPID_WINDOWSETRESIZABLE, &dispparams);
+
     return S_OK;
 }
 

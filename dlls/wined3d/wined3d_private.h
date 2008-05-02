@@ -488,7 +488,7 @@ struct WineD3DContext {
     IWineD3DSurface         *surface;
     DWORD                   tid;    /* Thread ID which owns this context at the moment */
 
-    /* Stores some inforation about the context state for optimization */
+    /* Stores some information about the context state for optimization */
     GLint                   last_draw_buffer;
     BOOL                    last_was_rhw;      /* true iff last draw_primitive was in xyzrhw mode */
     BOOL                    last_was_pshader;
@@ -513,7 +513,7 @@ struct WineD3DContext {
 
 typedef enum ContextUsage {
     CTXUSAGE_RESOURCELOAD       = 1,    /* Only loads textures: No State is applied */
-    CTXUSAGE_DRAWPRIM           = 2,    /* OpenGL states are set up for blitting DirectDraw surfacs */
+    CTXUSAGE_DRAWPRIM           = 2,    /* OpenGL states are set up for blitting DirectDraw surfaces */
     CTXUSAGE_BLIT               = 3,    /* OpenGL states are set up 3D drawing */
     CTXUSAGE_CLEAR              = 4,    /* Drawable and states are set up for clearing */
 } ContextUsage;
@@ -675,6 +675,7 @@ struct IWineD3DDeviceImpl
     UINT                    NumberOfSwapChains;
 
     struct list             resources; /* a linked list to track resources created by the device */
+    struct list             shaders;   /* a linked list to track shaders (pixel and vertex)      */
 
     /* Render Target Support */
     IWineD3DSurface       **render_targets;
@@ -1603,6 +1604,7 @@ unsigned int count_bits(unsigned int mask);
     extern DWORD WINAPI IWineD3DResourceImpl_SetPriority(IWineD3DResource *iface, DWORD  PriorityNew);
     extern DWORD WINAPI IWineD3DResourceImpl_GetPriority(IWineD3DResource *iface);
     extern void WINAPI IWineD3DResourceImpl_PreLoad(IWineD3DResource *iface);
+    extern void WINAPI IWineD3DResourceImpl_UnLoad(IWineD3DResource *iface);
     extern WINED3DRESOURCETYPE WINAPI IWineD3DResourceImpl_GetType(IWineD3DResource *iface);
     /*** class static members ***/
     void IWineD3DResourceImpl_CleanUp(IWineD3DResource *iface);
@@ -1969,6 +1971,7 @@ typedef struct IWineD3DBaseShaderClass
 
     /* Pointer to the parent device */
     IWineD3DDevice *device;
+    struct list     shader_list_entry;
 
 } IWineD3DBaseShaderClass;
 

@@ -142,6 +142,30 @@ static void WINAPI IWineD3DTextureImpl_PreLoad(IWineD3DTexture *iface) {
     return ;
 }
 
+static void WINAPI IWineD3DTextureImpl_UnLoad(IWineD3DTexture *iface) {
+    unsigned int i;
+    IWineD3DTextureImpl *This = (IWineD3DTextureImpl *)iface;
+    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+    TRACE("(%p)\n", This);
+
+    /* Unload all the surfaces and reset the texture name. If UnLoad was called on the
+     * surface before, this one will be a NOP and vice versa. Unloading an unloaded
+     * surface is fine
+     */
+    for (i = 0; i < This->baseTexture.levels; i++) {
+        IWineD3DSurface_UnLoad(This->surfaces[i]);
+        IWineD3DSurface_SetGlTextureDesc(This->surfaces[i], 0, IWineD3DTexture_GetTextureDimensions(iface));
+    }
+
+    if(This->baseTexture.textureName) {
+        ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+        ENTER_GL();
+        glDeleteTextures(1, &This->baseTexture.textureName);
+        This->baseTexture.textureName = 0;
+        LEAVE_GL();
+    }
+}
+
 static WINED3DRESOURCETYPE WINAPI IWineD3DTextureImpl_GetType(IWineD3DTexture *iface) {
     return IWineD3DResourceImpl_GetType((IWineD3DResource *)iface);
 }
@@ -263,7 +287,7 @@ static HRESULT WINAPI IWineD3DTextureImpl_GetSurfaceLevel(IWineD3DTexture *iface
 
     if (Level < This->baseTexture.levels) {
         *ppSurfaceLevel = This->surfaces[Level];
-        IWineD3DSurface_AddRef((IWineD3DSurface*) This->surfaces[Level]);
+        IWineD3DSurface_AddRef(This->surfaces[Level]);
         hr = WINED3D_OK;
         TRACE("(%p) : returning %p for level %d\n", This, *ppSurfaceLevel, Level);
     }
@@ -328,6 +352,7 @@ const IWineD3DTextureVtbl IWineD3DTexture_Vtbl =
     IWineD3DTextureImpl_SetPriority,
     IWineD3DTextureImpl_GetPriority,
     IWineD3DTextureImpl_PreLoad,
+    IWineD3DTextureImpl_UnLoad,
     IWineD3DTextureImpl_GetType,
     /* IWineD3DBaseTexture */
     IWineD3DTextureImpl_SetLOD,

@@ -47,7 +47,10 @@ BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD fdwReason, PVOID pvReserved)
             crypt_sip_free();
             root_store_free();
             default_chain_engine_free();
-            if (hDefProv) CryptReleaseContext(hDefProv, 0);
+            /* Don't release the default provider on process shutdown, there's
+             * no guarantee the provider dll hasn't already been unloaded.
+             */
+            if (hDefProv && !pvReserved) CryptReleaseContext(hDefProv, 0);
             break;
     }
     return TRUE;
@@ -56,8 +59,16 @@ BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD fdwReason, PVOID pvReserved)
 HCRYPTPROV CRYPT_GetDefaultProvider(void)
 {
     if (!hDefProv)
-        CryptAcquireContextW(&hDefProv, NULL, MS_ENHANCED_PROV_W,
-         PROV_RSA_FULL, CRYPT_VERIFYCONTEXT);
+    {
+        HCRYPTPROV prov;
+
+        CryptAcquireContextW(&prov, NULL, MS_ENHANCED_PROV_W, PROV_RSA_FULL,
+         CRYPT_VERIFYCONTEXT);
+        InterlockedCompareExchangePointer((PVOID *)&hDefProv, (PVOID)prov,
+         NULL);
+        if (hDefProv != prov)
+            CryptReleaseContext(prov, 0);
+    }
     return hDefProv;
 }
 

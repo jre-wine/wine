@@ -83,6 +83,7 @@ static const struct {
     {"GL_ARB_shader_objects",               ARB_SHADER_OBJECTS,             0                           },
 
     /* EXT */
+    {"GL_EXT_blend_color",                  EXT_BLEND_COLOR,                0                           },
     {"GL_EXT_blend_minmax",                 EXT_BLEND_MINMAX,               0                           },
     {"GL_EXT_fog_coord",                    EXT_FOG_COORD,                  0                           },
     {"GL_EXT_framebuffer_blit",             EXT_FRAMEBUFFER_BLIT,           0                           },
@@ -813,7 +814,7 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
                  * a fixed function pipeline anymore.
                  *
                  * So this is just a check to check that our assumption holds true. If not, write a warning
-                 * and reduce the number of vertex samplers or propably disable vertex texture fetch.
+                 * and reduce the number of vertex samplers or probably disable vertex texture fetch.
                  */
                 if(gl_info->max_vertex_samplers &&
                    MAX_TEXTURES + gl_info->max_vertex_samplers > gl_info->max_combined_samplers) {
@@ -969,7 +970,7 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
      * video memory. If the value is slightly wrong it doesn't matter as we didn't include AGP-like memory which
      * makes the amount of addressable memory higher and second OpenGL isn't that critical it moves to system
      * memory behind our backs if really needed.
-     * Note that the amout of video memory can be overruled using a registry setting.
+     * Note that the amount of video memory can be overruled using a registry setting.
      */
     switch (gl_info->gl_vendor) {
         case VENDOR_NVIDIA:
@@ -2224,8 +2225,7 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
                        WINED3DPCMPCAPS_NEVER        |
                        WINED3DPCMPCAPS_NOTEQUAL;
 
-    *pCaps->SrcBlendCaps  = WINED3DPBLENDCAPS_BLENDFACTOR     |
-                            WINED3DPBLENDCAPS_BOTHINVSRCALPHA |
+    *pCaps->SrcBlendCaps  = WINED3DPBLENDCAPS_BOTHINVSRCALPHA |
                             WINED3DPBLENDCAPS_BOTHSRCALPHA    |
                             WINED3DPBLENDCAPS_DESTALPHA       |
                             WINED3DPBLENDCAPS_DESTCOLOR       |
@@ -2239,8 +2239,7 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
                             WINED3DPBLENDCAPS_SRCCOLOR        |
                             WINED3DPBLENDCAPS_ZERO;
 
-    *pCaps->DestBlendCaps = WINED3DPBLENDCAPS_BLENDFACTOR     |
-                            WINED3DPBLENDCAPS_DESTALPHA       |
+    *pCaps->DestBlendCaps = WINED3DPBLENDCAPS_DESTALPHA       |
                             WINED3DPBLENDCAPS_DESTCOLOR       |
                             WINED3DPBLENDCAPS_INVDESTALPHA    |
                             WINED3DPBLENDCAPS_INVDESTCOLOR    |
@@ -2256,6 +2255,12 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
      * WINED3DPBLENDCAPS_BOTHINVSRCALPHA and WINED3DPBLENDCAPS_BOTHSRCALPHA are
      * legacy settings for srcblend only
      */
+
+    if( GL_SUPPORT(EXT_BLEND_COLOR)) {
+        *pCaps->SrcBlendCaps |= WINED3DPBLENDCAPS_BLENDFACTOR;
+        *pCaps->DestBlendCaps |= WINED3DPBLENDCAPS_BLENDFACTOR;
+    }
+
 
     *pCaps->AlphaCmpCaps = WINED3DPCMPCAPS_ALWAYS       |
                            WINED3DPCMPCAPS_EQUAL        |
@@ -2662,7 +2667,7 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
             *pCaps->PS20Caps.Caps                     = 0;
             *pCaps->PS20Caps.DynamicFlowControlDepth  = 0; /* WINED3DVS20_MIN_DYNAMICFLOWCONTROLDEPTH = 0 */
             *pCaps->PS20Caps.NumTemps                 = max(12, GLINFO_LOCATION.ps_arb_max_temps);
-            *pCaps->PS20Caps.StaticFlowControlDepth   = WINED3DPS20_MIN_STATICFLOWCONTROLDEPTH; /* Minumum: 1 */
+            *pCaps->PS20Caps.StaticFlowControlDepth   = WINED3DPS20_MIN_STATICFLOWCONTROLDEPTH; /* Minimum: 1 */
             *pCaps->PS20Caps.NumInstructionSlots      = WINED3DPS20_MIN_NUMINSTRUCTIONSLOTS; /* Minimum number (64 ALU + 32 Texture), a GeforceFX uses 512 */
 
             *pCaps->MaxPShaderInstructionsExecuted    = 512; /* Minimum value, a GeforceFX uses 1024 */
@@ -2737,6 +2742,7 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     IWineD3D_AddRef(object->wineD3D);
     object->parent  = parent;
     list_init(&object->resources);
+    list_init(&object->shaders);
 
     if(This->dxVersion == 7) {
         object->surface_alignment = 8;
@@ -2876,7 +2882,7 @@ static void fixup_extensions(WineD3D_GL_Info *gl_info) {
 
         /* The Intel GPUs on MacOS set the .w register of texcoords to 0.0 by default, which causes problems
          * with fixed function fragment processing. Ideally this flag should be detected with a test shader
-         * and opengl feedback mode, but some GL implementations(MacOS ATI at least, propably all macos ones)
+         * and OpenGL feedback mode, but some GL implementations (MacOS ATI at least, probably all MacOS ones)
          * do not like vertex shaders in feedback mode and return an error, even though it should be valid
          * according to the spec.
          *

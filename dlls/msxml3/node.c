@@ -417,10 +417,12 @@ static HRESULT WINAPI xmlnode_get_attributes(
     /* Attribute, CDataSection, Comment, Documents, Documents Fragments,
        Entity and Text Nodes does not support get_attributes */
     case XML_ATTRIBUTE_NODE:
+    case XML_CDATA_SECTION_NODE:
     case XML_COMMENT_NODE:
     case XML_DOCUMENT_NODE:
     case XML_DOCUMENT_FRAG_NODE:
     case XML_ENTITY_NODE:
+    case XML_ENTITY_REF_NODE:
     case XML_TEXT_NODE:
         *attributeMap = NULL;
         return S_FALSE;
@@ -645,8 +647,63 @@ static HRESULT WINAPI xmlnode_get_nodeTypeString(
     IXMLDOMNode *iface,
     BSTR* xmlnodeType)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    const xmlChar *str;
+
+    TRACE("%p\n", This );
+
+    if (!xmlnodeType)
+        return E_INVALIDARG;
+
+    if ( !This->node )
+        return E_FAIL;
+
+    switch( This->node->type )
+    {
+    case XML_ATTRIBUTE_NODE:
+        str = (const xmlChar*) "attribute";
+        break;
+    case XML_CDATA_SECTION_NODE:
+        str = (const xmlChar*) "cdatasection";
+        break;
+    case XML_COMMENT_NODE:
+        str = (const xmlChar*) "comment";
+        break;
+    case XML_DOCUMENT_NODE:
+        str = (const xmlChar*) "document";
+        break;
+    case XML_DOCUMENT_FRAG_NODE:
+        str = (const xmlChar*) "documentfragment";
+        break;
+    case XML_ELEMENT_NODE:
+        str = (const xmlChar*) "element";
+        break;
+    case XML_ENTITY_NODE:
+        str = (const xmlChar*) "entity";
+        break;
+    case XML_ENTITY_REF_NODE:
+        str = (const xmlChar*) "entityreference";
+        break;
+    case XML_NOTATION_NODE:
+        str = (const xmlChar*) "notation";
+        break;
+    case XML_PI_NODE:
+        str = (const xmlChar*) "processinginstruction";
+        break;
+    case XML_TEXT_NODE:
+        str = (const xmlChar*) "text";
+        break;
+    default:
+        FIXME("nodeName not mapped correctly (%d)\n", This->node->type);
+        str = This->node->name;
+        break;
+    }
+
+    *xmlnodeType = bstr_from_xmlChar( str );
+    if (!*xmlnodeType)
+        return S_FALSE;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlnode_get_text(
@@ -696,8 +753,29 @@ static HRESULT WINAPI xmlnode_put_text(
     IXMLDOMNode *iface,
     BSTR text)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    xmlChar *str = NULL;
+
+    TRACE("%p\n", This);
+
+    switch(This->node->type)
+    {
+    case XML_DOCUMENT_NODE:
+        return E_FAIL;
+    default:
+        break;
+    }
+
+    str = xmlChar_from_wchar((WCHAR*)text);
+
+    /* Escape the string. */
+    str = xmlEncodeEntitiesReentrant(This->node->doc, str);
+    str = xmlEncodeSpecialChars(This->node->doc, str);
+
+    xmlNodeSetContent(This->node, str);
+    xmlFree(str);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlnode_get_specified(
@@ -736,8 +814,45 @@ static HRESULT WINAPI xmlnode_get_dataType(
     IXMLDOMNode *iface,
     VARIANT* dataTypeName)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    xmlChar *pVal;
+
+    TRACE("iface %p\n", iface);
+
+    if(!dataTypeName)
+        return E_INVALIDARG;
+
+    /* Attribute, CDATA Section, Comment, Document, Document Fragment,
+        Entity, Notation, PI, and Text Node are non-typed. */
+    V_BSTR(dataTypeName) = NULL;
+    V_VT(dataTypeName) = VT_NULL;
+
+    switch ( This->node->type )
+    {
+    case XML_ELEMENT_NODE:
+        pVal = xmlGetNsProp(This->node, (xmlChar*)"dt",
+                            (xmlChar*)"urn:schemas-microsoft-com:datatypes");
+        if (pVal)
+        {
+            V_VT(dataTypeName) = VT_BSTR;
+            V_BSTR(dataTypeName) = bstr_from_xmlChar( pVal );
+            xmlFree(pVal);
+        }
+        break;
+    case XML_ENTITY_REF_NODE:
+        FIXME("XML_ENTITY_REF_NODE should return a valid value.\n");
+        break;
+    default:
+        TRACE("Type %d returning NULL\n", This->node->type);
+    }
+
+    /* non-typed nodes return S_FALSE */
+    if(V_VT(dataTypeName) == VT_NULL)
+    {
+        return S_FALSE;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlnode_put_dataType(

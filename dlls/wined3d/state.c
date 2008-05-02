@@ -83,8 +83,8 @@ static void state_lighting(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
 
     /* Lighting is not enabled if transformed vertices are drawn
      * but lighting does not affect the stream sources, so it is not grouped for performance reasons.
-     * This state reads the decoded vertex decl, so if it is dirty don't do anything. The
-     * vertex declaration appplying function calls this function for updating
+     * This state reads the decoded vertex declaration, so if it is dirty don't do anything. The
+     * vertex declaration applying function calls this function for updating
      */
 
     if(isStateDirty(context, STATE_VDECL)) {
@@ -351,10 +351,21 @@ static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     TRACE("glBlendFunc src=%x, dst=%x\n", srcBlend, dstBlend);
     glBlendFunc(srcBlend, dstBlend);
     checkGLcall("glBlendFunc");
+
+    /* colorkey fixup for stage 0 alphaop depends on WINED3DRS_ALPHABLENDENABLE state,
+        so it may need updating */
+    if (stateblock->renderState[WINED3DRS_COLORKEYENABLE]) {
+        StateTable[STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP)].apply(STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP), stateblock, context);
+    }
 }
 
 static void state_blendfactor(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     float col[4];
+
+    if(!GL_SUPPORT(EXT_BLEND_COLOR)) {
+        WARN("Unsupported in local OpenGL implementation: glBlendColorEXT\n");
+        return;
+    }
 
     TRACE("Setting BlendFactor to %d\n", stateblock->renderState[WINED3DRS_BLENDFACTOR]);
     D3DCOLORTOGLFLOAT4(stateblock->renderState[WINED3DRS_BLENDFACTOR], col);
@@ -430,7 +441,7 @@ static void state_clipping(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
     if (use_vs(stateblock->wineD3DDevice)) {
         /* The spec says that opengl clipping planes are disabled when using shaders. Direct3D planes aren't,
          * so that is an issue. The MacOS ATI driver keeps clipping planes activated with shaders in some
-         * contitions I got sick of tracking down. The shader state handler disables all clip planes because
+         * conditions I got sick of tracking down. The shader state handler disables all clip planes because
          * of that - don't do anything here and keep them disabled
          */
         if(stateblock->renderState[WINED3DRS_CLIPPLANEENABLE]) {
@@ -1094,7 +1105,7 @@ static void state_fogdensity(DWORD state, IWineD3DStateBlockImpl *stateblock, Wi
 
 /* TODO: Merge with primitive type + init_materials()!! */
 static void state_colormat(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *)stateblock->wineD3DDevice;
+    IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
     GLenum Parm = 0;
     WineDirect3DStridedData *diffuse = &device->strided_streams.u.s.diffuse;
     BOOL isDiffuseSupplied;
@@ -1452,7 +1463,7 @@ static void state_wrap(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DC
      http://www.cosc.brocku.ca/Offerings/3P98/course/lectures/texture/
      http://msdn.microsoft.com/archive/default.asp?url=/archive/en-us/directx9_c/directx/graphics/programmingguide/FixedFunction/Textures/texturewrapping.asp
      http://www.gamedev.net/reference/programming/features/rendererdll3/page2.asp
-     Descussion that ways to turn on WRAPing to solve an opengl conversion problem.
+     Discussion on the ways to turn on WRAPing to solve an OpenGL conversion problem.
      http://www.flipcode.org/cgi-bin/fcmsg.cgi?thread_show=10248
 
      so far as I can tell, wrapping and texture-coordinate generate go hand in hand,
@@ -1911,7 +1922,7 @@ static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     DWORD op, arg1, arg2, arg0;
 
     TRACE("Setting alpha op for stage %d\n", stage);
-    /* Do not care for enabled / disabled stages, just assign the settigns. colorop disables / enables required stuff */
+    /* Do not care for enabled / disabled stages, just assign the settings. colorop disables / enables required stuff */
     if (mapped_stage != -1) {
         if (GL_SUPPORT(ARB_MULTITEXTURE)) {
             if (tex_used && mapped_stage >= GL_LIMITS(textures)) {
@@ -1945,13 +1956,38 @@ static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
              * cannot remove the texture's alpha channel entirely.
              *
              * The fixup is required for Prince of Persia 3D(prison bars), while Moto racer 2 requires D3DTOP_MODULATE to work
-             * on color keyed surfaces.
+             * on color keyed surfaces. Aliens vs Predator 1 uses color keyed textures and alpha component of diffuse color to
+             * draw things like translucent text and perform other blending effects.
              *
+             * Aliens vs Predator 1 relies on diffuse alpha having an effect, so it cannot be ignored. To provide the
+             * behavior expected by the game, while emulating the colorkey, diffuse alpha must be modulated with texture alpha.
+             * OTOH, Moto racer 2 at some points sets alphaop/alphaarg to SELECTARG/CURRENT, yet puts garbage in diffuse alpha
+             * (zeroes). This works on native, because the game disables alpha test and alpha blending. Alpha test is overwritten by
+             * wine's for purposes of color-keying though, so this will lead to missing geometry if texture alpha is modulated
+             * (pixels fail alpha test). To get around this, ALPHABLENDENABLE state is checked: if the app enables alpha blending,
+             * it can be expected to provide meaningful values in diffuse alpha, so it should be modulated with texture alpha;
+             * otherwise, selecting diffuse alpha is ignored in favour of texture alpha.
+
              * What to do with multitexturing? So far no app has been found that uses color keying with multitexturing
              */
-            if(op == WINED3DTOP_DISABLE) op = WINED3DTOP_SELECTARG1;
-            if(op == WINED3DTOP_SELECTARG1) arg1 = WINED3DTA_TEXTURE;
-            else if(op == WINED3DTOP_SELECTARG2) arg2 = WINED3DTA_TEXTURE;
+            if(op == WINED3DTOP_DISABLE) {
+                arg1 = WINED3DTA_TEXTURE;
+                op = WINED3DTOP_SELECTARG1;
+            }
+            else if(op == WINED3DTOP_SELECTARG1 && arg1 != WINED3DTA_TEXTURE) {
+                if (stateblock->renderState[WINED3DRS_ALPHABLENDENABLE]) {
+                    arg2 = WINED3DTA_TEXTURE;
+                    op = WINED3DTOP_MODULATE;
+                }
+                else arg1 = WINED3DTA_TEXTURE;
+            }
+            else if(op == WINED3DTOP_SELECTARG2 && arg2 != WINED3DTA_TEXTURE) {
+                if (stateblock->renderState[WINED3DRS_ALPHABLENDENABLE]) {
+                    arg1 = WINED3DTA_TEXTURE;
+                    op = WINED3DTOP_MODULATE;
+                }
+                else arg2 = WINED3DTA_TEXTURE;
+            }
         }
     }
 
@@ -1993,7 +2029,7 @@ static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock, W
     }
     generated = (stateblock->textureState[texUnit][WINED3DTSS_TEXCOORDINDEX] & 0xFFFF0000) != WINED3DTSS_TCI_PASSTHRU;
 
-    set_texture_matrix((float *)&stateblock->transforms[WINED3DTS_TEXTURE0 + texUnit].u.m[0][0],
+    set_texture_matrix(&stateblock->transforms[WINED3DTS_TEXTURE0 + texUnit].u.m[0][0],
                         stateblock->textureState[texUnit][WINED3DTSS_TEXTURETRANSFORMFLAGS],
                         generated,
                         context->last_was_rhw,
@@ -2381,7 +2417,7 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
             }
         }
 
-        IWineD3DBaseTexture_PreLoad((IWineD3DBaseTexture *) stateblock->textures[sampler]);
+        IWineD3DBaseTexture_PreLoad(stateblock->textures[sampler]);
         IWineD3DBaseTexture_ApplyStateChanges(stateblock->textures[sampler], stateblock->textureState[sampler], stateblock->samplerState[sampler]);
 
         if (GL_SUPPORT(EXT_TEXTURE_LOD_BIAS)) {
@@ -2538,7 +2574,7 @@ static void transform_world(DWORD state, IWineD3DStateBlockImpl *stateblock, Win
      *
      * Deliberately no check if the vertex declaration is dirty because the vdecl state
      * does not always update the world matrix, only on a switch between transformed
-     * and untrannsformed draws. It *may* happen that the world matrix is set 2 times during one
+     * and untransformed draws. It *may* happen that the world matrix is set 2 times during one
      * draw, but that should be rather rare and cheaper in total.
      */
     glMatrixMode(GL_MODELVIEW);
@@ -2550,12 +2586,12 @@ static void transform_world(DWORD state, IWineD3DStateBlockImpl *stateblock, Win
     } else {
         /* In the general case, the view matrix is the identity matrix */
         if (stateblock->wineD3DDevice->view_ident) {
-            glLoadMatrixf((float *) &stateblock->transforms[WINED3DTS_WORLDMATRIX(0)].u.m[0][0]);
+            glLoadMatrixf(&stateblock->transforms[WINED3DTS_WORLDMATRIX(0)].u.m[0][0]);
             checkGLcall("glLoadMatrixf");
         } else {
-            glLoadMatrixf((float *) &stateblock->transforms[WINED3DTS_VIEW].u.m[0][0]);
+            glLoadMatrixf(&stateblock->transforms[WINED3DTS_VIEW].u.m[0][0]);
             checkGLcall("glLoadMatrixf");
-            glMultMatrixf((float *) &stateblock->transforms[WINED3DTS_WORLDMATRIX(0)].u.m[0][0]);
+            glMultMatrixf(&stateblock->transforms[WINED3DTS_WORLDMATRIX(0)].u.m[0][0]);
             checkGLcall("glMultMatrixf");
         }
     }
@@ -2571,7 +2607,7 @@ static void clipplane(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCo
     /* Clip Plane settings are affected by the model view in OpenGL, the View transform in direct3d */
     glMatrixMode(GL_MODELVIEW);
     glPushMatrix();
-    glLoadMatrixf((float *) &stateblock->transforms[WINED3DTS_VIEW].u.m[0][0]);
+    glLoadMatrixf(&stateblock->transforms[WINED3DTS_VIEW].u.m[0][0]);
 
     TRACE("Clipplane [%f,%f,%f,%f]\n",
           stateblock->clipplane[index][0],
@@ -2691,7 +2727,7 @@ static void transform_view(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
 
     glMatrixMode(GL_MODELVIEW);
     checkGLcall("glMatrixMode(GL_MODELVIEW)");
-    glLoadMatrixf((float *)(float *) &stateblock->transforms[WINED3DTS_VIEW].u.m[0][0]);
+    glLoadMatrixf(&stateblock->transforms[WINED3DTS_VIEW].u.m[0][0]);
     checkGLcall("glLoadMatrixf(...)");
 
     /* Reset lights. TODO: Call light apply func */
@@ -2835,7 +2871,7 @@ static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock
         }
         checkGLcall("glScalef");
 
-        glMultMatrixf((float *) &stateblock->transforms[WINED3DTS_PROJECTION].u.m[0][0]);
+        glMultMatrixf(&stateblock->transforms[WINED3DTS_PROJECTION].u.m[0][0]);
         checkGLcall("glLoadMatrixf");
     }
 }
@@ -3193,9 +3229,9 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
 
         /* min(WINED3D_ATR_SIZE(position),3) to Disable RHW mode as 'w' coord
            handling for rhw mode should not impact screen position whereas in GL it does.
-           This may  result in very slightly distored textures in rhw mode, but
-           a very minimal different. There's always the other option of
-           fixing the view matrix to prevent w from having any effect
+           This may result in very slightly distorted textures in rhw mode.
+           There's always the other option of fixing the view matrix to
+           prevent w from having any effect.
 
            This only applies to user pointer sources, in VBOs the vertices are fixed up
          */
@@ -3242,9 +3278,9 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
     /*  WARNING: Data here MUST be in RGBA format, so cannot      */
     /*     go directly into fast mode from app pgm, because       */
     /*     directx requires data in BGRA format.                  */
-    /* currently fixupVertices swizels the format, but this isn't */
+    /* currently fixupVertices swizzles the format, but this isn't*/
     /* very practical when using VBOS                             */
-    /* NOTE: Unless we write a vertex shader to swizel the colour */
+    /* NOTE: Unless we write a vertex shader to swizzle the colour*/
     /* , or the user doesn't care and wants the speed advantage   */
 
     if (sd->u.s.diffuse.lpData || sd->u.s.diffuse.VBO) {
@@ -3633,7 +3669,7 @@ static void light(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContex
         /* Light settings are affected by the model view in OpenGL, the View transform in direct3d*/
         glMatrixMode(GL_MODELVIEW);
         glPushMatrix();
-        glLoadMatrixf((float *)&stateblock->transforms[WINED3DTS_VIEW].u.m[0][0]);
+        glLoadMatrixf(&stateblock->transforms[WINED3DTS_VIEW].u.m[0][0]);
 
         /* Diffuse: */
         colRGBA[0] = lightInfo->OriginalParms.Diffuse.r;

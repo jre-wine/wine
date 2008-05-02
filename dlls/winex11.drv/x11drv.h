@@ -644,7 +644,8 @@ enum x11drv_window_messages
 {
     WM_X11DRV_ACQUIRE_SELECTION = 0x80001000,
     WM_X11DRV_DELETE_WINDOW,
-    WM_X11DRV_SET_WIN_FORMAT
+    WM_X11DRV_SET_WIN_FORMAT,
+    WM_X11DRV_RESIZE_DESKTOP
 };
 
 /* _NET_WM_STATE properties that we keep track of */
@@ -668,10 +669,11 @@ struct x11drv_win_data
     Pixmap      pixmap;         /* Base pixmap for if gl_drawable is a GLXPixmap */
     RECT        window_rect;    /* USER window rectangle relative to parent */
     RECT        whole_rect;     /* X window rectangle for the whole window relative to parent */
-    RECT        client_rect;    /* client area relative to whole window */
+    RECT        client_rect;    /* client area relative to parent */
     XIC         xic;            /* X input context */
     XWMHints   *wm_hints;       /* window manager hints */
-    BOOL        managed;        /* is window managed? */
+    BOOL        managed : 1;    /* is window managed? */
+    BOOL        mapped : 1;     /* is window mapped? (in either normal or iconic state) */
     DWORD       wm_state;       /* bit mask of active x11drv_wm_state values */
     struct dce *dce;            /* DCE for CS_OWNDC or CS_CLASSDC windows */
     unsigned int lock_changes;  /* lock count for X11 change requests */
@@ -680,6 +682,7 @@ struct x11drv_win_data
 };
 
 extern struct x11drv_win_data *X11DRV_get_win_data( HWND hwnd );
+extern struct x11drv_win_data *X11DRV_create_win_data( HWND hwnd );
 extern Window X11DRV_get_whole_window( HWND hwnd );
 extern XID X11DRV_get_fbconfig_id( HWND hwnd );
 extern Drawable X11DRV_get_gl_drawable( HWND hwnd );
@@ -723,17 +726,16 @@ extern BOOL is_window_managed( HWND hwnd, UINT swp_flags, const RECT *window_rec
 extern void X11DRV_set_iconic_state( HWND hwnd );
 extern void X11DRV_window_to_X_rect( struct x11drv_win_data *data, RECT *rect );
 extern void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect );
+extern void X11DRV_sync_gl_drawable( Display *display, struct x11drv_win_data *data );
 extern void X11DRV_sync_window_style( Display *display, struct x11drv_win_data *data );
 extern void X11DRV_sync_window_position( Display *display, struct x11drv_win_data *data,
-                                         UINT swp_flags, const RECT *new_client_rect,
-                                         const RECT *new_whole_rect );
-extern BOOL X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, const RECT *rectWindow,
-                                   const RECT *rectClient, UINT swp_flags, const RECT *validRects );
+                                         UINT swp_flags, const RECT *old_client_rect,
+                                         const RECT *old_whole_rect );
 extern void X11DRV_set_wm_hints( Display *display, struct x11drv_win_data *data );
-extern void xinerama_init(void);
+extern void xinerama_init( unsigned int width, unsigned int height );
 
 extern void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height );
-extern void X11DRV_handle_desktop_resize(unsigned int width, unsigned int height);
+extern void X11DRV_resize_desktop(unsigned int width, unsigned int height);
 extern void X11DRV_Settings_AddDepthModes(void);
 extern void X11DRV_Settings_AddOneMode(unsigned int width, unsigned int height, unsigned int bpp, unsigned int freq);
 extern int X11DRV_Settings_CreateDriver(LPDDHALINFO info);

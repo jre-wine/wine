@@ -23,9 +23,6 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
-#ifdef HAVE_LIBXSHAPE
-#include <X11/extensions/shape.h>
-#endif /* HAVE_LIBXSHAPE */
 #include <stdarg.h>
 
 #include "windef.h"
@@ -96,8 +93,8 @@ void X11DRV_Expose( HWND hwnd, XEvent *xev )
 
     if (!(data = X11DRV_get_win_data( hwnd ))) return;
 
-    rect.left   = event->x;
-    rect.top    = event->y;
+    rect.left   = data->whole_rect.left + event->x;
+    rect.top    = data->whole_rect.top + event->y;
     rect.right  = rect.left + event->width;
     rect.bottom = rect.top + event->height;
 
@@ -112,15 +109,15 @@ void X11DRV_Expose( HWND hwnd, XEvent *xev )
     SERVER_START_REQ( update_window_zorder )
     {
         req->window      = hwnd;
-        req->rect.left   = rect.left + data->whole_rect.left;
-        req->rect.top    = rect.top + data->whole_rect.top;
-        req->rect.right  = rect.right + data->whole_rect.left;
-        req->rect.bottom = rect.bottom + data->whole_rect.top;
+        req->rect.left   = rect.left;
+        req->rect.top    = rect.top;
+        req->rect.right  = rect.right;
+        req->rect.bottom = rect.bottom;
         wine_server_call( req );
     }
     SERVER_END_REQ;
 
-    /* make position relative to client area instead of window */
+    /* make position relative to client area instead of parent */
     OffsetRect( &rect, -data->client_rect.left, -data->client_rect.top );
     RedrawWindow( hwnd, &rect, 0, flags );
 }
@@ -137,32 +134,38 @@ void X11DRV_SetWindowStyle( HWND hwnd, DWORD old_style )
     DWORD new_style, changed;
 
     if (hwnd == GetDesktopWindow()) return;
-    if (!(data = X11DRV_get_win_data( hwnd ))) return;
-
     new_style = GetWindowLongW( hwnd, GWL_STYLE );
     changed = new_style ^ old_style;
 
     if (changed & WS_VISIBLE)
     {
+        data = X11DRV_get_win_data( hwnd );
+        if (data) invalidate_dce( hwnd, &data->window_rect );
+
+        /* we don't unmap windows, that causes trouble with the window manager */
+        if (!(new_style & WS_VISIBLE)) return;
+
+        if (!data && !(data = X11DRV_create_win_data( hwnd ))) return;
+
         if (data->whole_window && X11DRV_is_window_rect_mapped( &data->window_rect ))
         {
-            if (new_style & WS_VISIBLE)
+            X11DRV_set_wm_hints( display, data );
+            if (!data->mapped)
             {
                 TRACE( "mapping win %p\n", hwnd );
                 X11DRV_sync_window_style( display, data );
-                X11DRV_set_wm_hints( display, data );
                 wine_tsx11_lock();
                 XMapWindow( display, data->whole_window );
                 wine_tsx11_unlock();
+                data->mapped = TRUE;
             }
-            /* we don't unmap windows, that causes trouble with the window manager */
         }
-        invalidate_dce( hwnd, &data->window_rect );
     }
 
     if (changed & WS_DISABLED)
     {
-        if (data->whole_window && data->wm_hints)
+        data = X11DRV_get_win_data( hwnd );
+        if (data && data->wm_hints)
         {
             wine_tsx11_lock();
             data->wm_hints->input = !(new_style & WS_DISABLED);
@@ -190,9 +193,10 @@ static void update_wm_states( Display *display, struct x11drv_win_data *data, BO
     XEvent xev;
 
     if (!data->managed) return;
+    if (!data->mapped) return;
 
-    if (data->client_rect.left <= 0 && data->client_rect.right >= screen_width &&
-        data->client_rect.top <= 0 && data->client_rect.bottom >= screen_height)
+    if (data->whole_rect.left <= 0 && data->whole_rect.right >= screen_width &&
+        data->whole_rect.top <= 0 && data->whole_rect.bottom >= screen_height)
         new_state |= (1 << WM_STATE_FULLSCREEN);
 
     ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
@@ -234,199 +238,196 @@ static void update_wm_states( Display *display, struct x11drv_win_data *data, BO
 
 
 /***********************************************************************
+ *		move_window_bits
+ *
+ * Move the window bits when a window is moved.
+ */
+static void move_window_bits( struct x11drv_win_data *data, const RECT *old_rect, const RECT *new_rect,
+                              const RECT *old_whole_rect )
+{
+    RECT src_rect = *old_rect;
+    RECT dst_rect = *new_rect;
+    HDC hdc_src, hdc_dst;
+    INT code;
+    HRGN rgn = 0;
+    HWND parent = 0;
+
+    if (!data->whole_window)
+    {
+        OffsetRect( &dst_rect, -data->window_rect.left, -data->window_rect.top );
+        parent = GetAncestor( data->hwnd, GA_PARENT );
+        hdc_src = GetDCEx( parent, 0, DCX_CACHE );
+        hdc_dst = GetDCEx( data->hwnd, 0, DCX_CACHE | DCX_WINDOW );
+    }
+    else
+    {
+        OffsetRect( &dst_rect, -data->whole_rect.left, -data->whole_rect.top );
+        /* make src rect relative to the old position of the window */
+        OffsetRect( &src_rect, -old_whole_rect->left, -old_whole_rect->top );
+        if (dst_rect.left == src_rect.left && dst_rect.top == src_rect.top) return;
+        /* now make them relative to window rect for DCX_WINDOW */
+        OffsetRect( &dst_rect, data->whole_rect.left - data->window_rect.left,
+                    data->whole_rect.top - data->window_rect.top );
+        OffsetRect( &src_rect, data->whole_rect.left - data->window_rect.left,
+                    data->whole_rect.top - data->window_rect.top );
+        hdc_src = hdc_dst = GetDCEx( data->hwnd, 0, DCX_CACHE | DCX_WINDOW );
+    }
+
+    code = X11DRV_START_EXPOSURES;
+    ExtEscape( hdc_dst, X11DRV_ESCAPE, sizeof(code), (LPSTR)&code, 0, NULL );
+
+    TRACE( "copying bits for win %p/%lx %s -> %s\n",
+         data->hwnd, data->whole_window, wine_dbgstr_rect(&src_rect), wine_dbgstr_rect(&dst_rect) );
+    BitBlt( hdc_dst, dst_rect.left, dst_rect.top,
+            dst_rect.right - dst_rect.left, dst_rect.bottom - dst_rect.top,
+            hdc_src, src_rect.left, src_rect.top, SRCCOPY );
+
+    code = X11DRV_END_EXPOSURES;
+    ExtEscape( hdc_dst, X11DRV_ESCAPE, sizeof(code), (LPSTR)&code, sizeof(rgn), (LPSTR)&rgn );
+
+    ReleaseDC( data->hwnd, hdc_dst );
+    if (hdc_src != hdc_dst) ReleaseDC( parent, hdc_src );
+
+    if (rgn)
+    {
+        OffsetRgn( rgn, data->window_rect.left - data->client_rect.left,
+                   data->window_rect.top - data->client_rect.top );
+        RedrawWindow( data->hwnd, NULL, rgn, RDW_INVALIDATE | RDW_FRAME | RDW_ERASE | RDW_ALLCHILDREN );
+        DeleteObject( rgn );
+    }
+}
+
+/***********************************************************************
  *		SetWindowPos   (X11DRV.@)
  */
-BOOL X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, const RECT *rectWindow,
-                                   const RECT *rectClient, UINT swp_flags, const RECT *valid_rects )
+void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
+                          const RECT *rectWindow, const RECT *rectClient,
+                          const RECT *visible_rect, const RECT *valid_rects )
 {
     Display *display = thread_display();
-    struct x11drv_win_data *data;
-    RECT new_whole_rect, old_client_rect;
-    WND *win;
-    DWORD old_style, new_style, new_ex_style;
-    BOOL ret, make_managed = FALSE;
+    struct x11drv_win_data *data = X11DRV_get_win_data( hwnd );
+    DWORD new_style = GetWindowLongW( hwnd, GWL_STYLE );
+    RECT old_window_rect, old_whole_rect, old_client_rect;
 
-    if (!(data = X11DRV_get_win_data( hwnd ))) return FALSE;
+    if (!data)
+    {
+        /* create the win data if the window is being made visible */
+        if (!(new_style & WS_VISIBLE)) return;
+        if (!(data = X11DRV_create_win_data( hwnd ))) return;
+    }
 
     /* check if we need to switch the window to managed */
-    if (!data->managed && data->whole_window && managed_mode &&
-        root_window == DefaultRootWindow( display ) &&
-        data->whole_window != root_window)
+    if (!data->managed && data->whole_window && is_window_managed( hwnd, swp_flags, rectWindow ))
     {
-        if (is_window_managed( hwnd, swp_flags, rectWindow ))
-        {
-            TRACE( "making win %p/%lx managed\n", hwnd, data->whole_window );
-            make_managed = TRUE;
-            data->managed = TRUE;
-            SetPropA( hwnd, managed_prop, (HANDLE)1 );
-        }
-    }
-
-    new_whole_rect = *rectWindow;
-    X11DRV_window_to_X_rect( data, &new_whole_rect );
-
-    old_client_rect = data->client_rect;
-
-    if (!data->whole_window) swp_flags |= SWP_NOCOPYBITS;  /* we can't rely on X11 to move the bits */
-
-    if (!(win = WIN_GetPtr( hwnd ))) return FALSE;
-    if (win == WND_OTHER_PROCESS)
-    {
-        if (IsWindow( hwnd )) ERR( "cannot set rectangles of other process window %p\n", hwnd );
-        return FALSE;
-    }
-    SERVER_START_REQ( set_window_pos )
-    {
-        req->handle        = hwnd;
-        req->previous      = insert_after;
-        req->flags         = swp_flags;
-        req->window.left   = rectWindow->left;
-        req->window.top    = rectWindow->top;
-        req->window.right  = rectWindow->right;
-        req->window.bottom = rectWindow->bottom;
-        req->client.left   = rectClient->left;
-        req->client.top    = rectClient->top;
-        req->client.right  = rectClient->right;
-        req->client.bottom = rectClient->bottom;
-        if (memcmp( rectWindow, &new_whole_rect, sizeof(RECT) ) || !IsRectEmpty( &valid_rects[0] ))
-        {
-            wine_server_add_data( req, &new_whole_rect, sizeof(new_whole_rect) );
-            if (!IsRectEmpty( &valid_rects[0] ))
-                wine_server_add_data( req, valid_rects, 2 * sizeof(*valid_rects) );
-        }
-        ret = !wine_server_call( req );
-        new_style = reply->new_style;
-        new_ex_style = reply->new_ex_style;
-    }
-    SERVER_END_REQ;
-
-    if (win == WND_DESKTOP || data->whole_window == DefaultRootWindow(gdi_display))
-    {
-        data->whole_rect = data->client_rect = data->window_rect = *rectWindow;
-        if (win != WND_DESKTOP)
-        {
-            win->rectWindow   = *rectWindow;
-            win->rectClient   = *rectClient;
-            win->dwStyle      = new_style;
-            win->dwExStyle    = new_ex_style;
-            WIN_ReleasePtr( win );
-        }
-        return ret;
-    }
-
-    if (ret)
-    {
-        /* invalidate DCEs */
-
-        if ((((swp_flags & SWP_AGG_NOPOSCHANGE) != SWP_AGG_NOPOSCHANGE) && (new_style & WS_VISIBLE)) ||
-             (swp_flags & (SWP_HIDEWINDOW | SWP_SHOWWINDOW)))
-        {
-            RECT rect;
-            UnionRect( &rect, rectWindow, &win->rectWindow );
-            invalidate_dce( hwnd, &rect );
-        }
-
-        win->rectWindow   = *rectWindow;
-        win->rectClient   = *rectClient;
-        old_style         = win->dwStyle;
-        win->dwStyle      = new_style;
-        win->dwExStyle    = new_ex_style;
-        data->window_rect = *rectWindow;
-
-        TRACE( "win %p window %s client %s style %08x\n",
-               hwnd, wine_dbgstr_rect(rectWindow), wine_dbgstr_rect(rectClient), new_style );
-
-        if (make_managed && (old_style & WS_VISIBLE))
+        TRACE( "making win %p/%lx managed\n", hwnd, data->whole_window );
+        data->managed = TRUE;
+        SetPropA( hwnd, managed_prop, (HANDLE)1 );
+        if (data->mapped)
         {
             wine_tsx11_lock();
             XUnmapWindow( display, data->whole_window );
             wine_tsx11_unlock();
-            old_style &= ~WS_VISIBLE;  /* force it to be mapped again below */
-        }
-
-        if (!IsRectEmpty( &valid_rects[0] ))
-        {
-            int x_offset = 0, y_offset = 0;
-
-            if (data->whole_window)
-            {
-                /* the X server will move the bits for us */
-                x_offset = data->whole_rect.left - new_whole_rect.left;
-                y_offset = data->whole_rect.top - new_whole_rect.top;
-            }
-
-            if (x_offset != valid_rects[1].left - valid_rects[0].left ||
-                y_offset != valid_rects[1].top - valid_rects[0].top)
-            {
-                /* FIXME: should copy the window bits here */
-                RECT invalid_rect = valid_rects[0];
-
-                /* invalid_rects are relative to the client area */
-                OffsetRect( &invalid_rect, -rectClient->left, -rectClient->top );
-                RedrawWindow( hwnd, &invalid_rect, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN );
-            }
-        }
-
-
-        if (data->whole_window && !data->lock_changes)
-        {
-            if ((old_style & WS_VISIBLE) && !(new_style & WS_VISIBLE))
-            {
-                /* window got hidden, unmap it */
-                TRACE( "unmapping win %p\n", hwnd );
-                wine_tsx11_lock();
-                XUnmapWindow( display, data->whole_window );
-                wine_tsx11_unlock();
-            }
-            else if ((new_style & WS_VISIBLE) && !X11DRV_is_window_rect_mapped( rectWindow ))
-            {
-                /* resizing to zero size or off screen -> unmap */
-                TRACE( "unmapping zero size or off-screen win %p\n", hwnd );
-                wine_tsx11_lock();
-                XUnmapWindow( display, data->whole_window );
-                wine_tsx11_unlock();
-            }
-        }
-
-        X11DRV_sync_window_position( display, data, swp_flags, rectClient, &new_whole_rect );
-
-        if (data->whole_window && !data->lock_changes)
-        {
-            BOOL mapped = FALSE;
-
-            if ((new_style & WS_VISIBLE) && !(new_style & WS_MINIMIZE) &&
-                X11DRV_is_window_rect_mapped( rectWindow ))
-            {
-                if (!(old_style & WS_VISIBLE))
-                {
-                    /* window got shown, map it */
-                    TRACE( "mapping win %p\n", hwnd );
-                    mapped = TRUE;
-                }
-                else if ((swp_flags & (SWP_NOSIZE | SWP_NOMOVE)) != (SWP_NOSIZE | SWP_NOMOVE))
-                {
-                    /* resizing from zero size to non-zero -> map */
-                    TRACE( "mapping non zero size or off-screen win %p\n", hwnd );
-                    mapped = TRUE;
-                }
-
-                if (mapped || (swp_flags & SWP_FRAMECHANGED))
-                    X11DRV_set_wm_hints( display, data );
-
-                if (mapped)
-                {
-                    X11DRV_sync_window_style( display, data );
-                    wine_tsx11_lock();
-                    XMapWindow( display, data->whole_window );
-                    XFlush( display );
-                    wine_tsx11_unlock();
-                }
-                update_wm_states( display, data, mapped );
-            }
+            data->mapped = FALSE;
         }
     }
-    WIN_ReleasePtr( win );
-    return ret;
+
+    old_window_rect = data->window_rect;
+    old_whole_rect  = data->whole_rect;
+    old_client_rect = data->client_rect;
+    data->window_rect = *rectWindow;
+    data->whole_rect  = *rectWindow;
+    data->client_rect = *rectClient;
+    X11DRV_window_to_X_rect( data, &data->whole_rect );
+    if (memcmp( &visible_rect, &data->whole_rect, sizeof(RECT) ))
+    {
+        TRACE( "%p: need to update visible rect %s -> %s\n", hwnd,
+               wine_dbgstr_rect(visible_rect), wine_dbgstr_rect(&data->whole_rect) );
+        SERVER_START_REQ( set_window_visible_rect )
+        {
+            req->handle         = hwnd;
+            req->flags          = swp_flags;
+            req->visible.left   = data->whole_rect.left;
+            req->visible.top    = data->whole_rect.top;
+            req->visible.right  = data->whole_rect.right;
+            req->visible.bottom = data->whole_rect.bottom;
+            wine_server_call( req );
+        }
+        SERVER_END_REQ;
+    }
+
+    /* invalidate DCEs */
+    if ((((swp_flags & SWP_AGG_NOPOSCHANGE) != SWP_AGG_NOPOSCHANGE) && (new_style & WS_VISIBLE)) ||
+        (swp_flags & (SWP_HIDEWINDOW | SWP_SHOWWINDOW)))
+    {
+        RECT rect;
+        UnionRect( &rect, rectWindow, &old_window_rect );
+        invalidate_dce( hwnd, &rect );
+    }
+
+    TRACE( "win %p window %s client %s style %08x\n",
+           hwnd, wine_dbgstr_rect(rectWindow), wine_dbgstr_rect(rectClient), new_style );
+
+    if (!IsRectEmpty( &valid_rects[0] ))
+    {
+        int x_offset = old_whole_rect.left - data->whole_rect.left;
+        int y_offset = old_whole_rect.top - data->whole_rect.top;
+
+        /* if all that happened is that the whole window moved, copy everything */
+        if (!(swp_flags & SWP_FRAMECHANGED) &&
+            old_whole_rect.right   - data->whole_rect.right   == x_offset &&
+            old_whole_rect.bottom  - data->whole_rect.bottom  == y_offset &&
+            old_client_rect.left   - data->client_rect.left   == x_offset &&
+            old_client_rect.right  - data->client_rect.right  == x_offset &&
+            old_client_rect.top    - data->client_rect.top    == y_offset &&
+            old_client_rect.bottom - data->client_rect.bottom == y_offset &&
+            !memcmp( &valid_rects[0], &data->client_rect, sizeof(RECT) ))
+        {
+            /* if we have an X window the bits will be moved by the X server */
+            if (!data->whole_window)
+                move_window_bits( data, &old_whole_rect, &data->whole_rect, &old_whole_rect );
+        }
+        else
+            move_window_bits( data, &valid_rects[1], &valid_rects[0], &old_whole_rect );
+    }
+
+    if (data->gl_drawable &&
+        data->client_rect.right-data->client_rect.left == old_client_rect.right-old_client_rect.left &&
+        data->client_rect.bottom-data->client_rect.top == old_client_rect.bottom-old_client_rect.top)
+        X11DRV_sync_gl_drawable( display, data );
+
+    if (!data->whole_window || data->lock_changes) return;  /* nothing more to do */
+
+    if (data->mapped && (!(new_style & WS_VISIBLE) || !X11DRV_is_window_rect_mapped( rectWindow )))
+    {
+        TRACE( "unmapping win %p\n", hwnd );
+        wine_tsx11_lock();
+        XUnmapWindow( display, data->whole_window );
+        wine_tsx11_unlock();
+        data->mapped = FALSE;
+    }
+
+    X11DRV_sync_window_position( display, data, swp_flags, &old_client_rect, &old_whole_rect );
+
+    if ((new_style & WS_VISIBLE) && !(new_style & WS_MINIMIZE) &&
+        X11DRV_is_window_rect_mapped( rectWindow ))
+    {
+        BOOL was_mapped = data->mapped;
+
+        if (!data->mapped || (swp_flags & SWP_FRAMECHANGED))
+            X11DRV_set_wm_hints( display, data );
+
+        if (!data->mapped)
+        {
+            TRACE( "mapping win %p\n", hwnd );
+            X11DRV_sync_window_style( display, data );
+            wine_tsx11_lock();
+            XMapWindow( display, data->whole_window );
+            XFlush( display );
+            wine_tsx11_unlock();
+            data->mapped = TRUE;
+        }
+        update_wm_states( display, data, !was_mapped );
+    }
 }
 
 
@@ -873,30 +874,32 @@ static BOOL CALLBACK update_windows_on_desktop_resize( HWND hwnd, LPARAM lparam 
 
 
 /***********************************************************************
- *		X11DRV_handle_desktop_resize
+ *		X11DRV_resize_desktop
  */
-void X11DRV_handle_desktop_resize( unsigned int width, unsigned int height )
+void X11DRV_resize_desktop( unsigned int width, unsigned int height )
 {
     HWND hwnd = GetDesktopWindow();
-    struct x11drv_win_data *data;
     struct desktop_resize_data resize_data;
-
-    if (!(data = X11DRV_get_win_data( hwnd ))) return;
 
     SetRect( &resize_data.old_screen_rect, 0, 0, screen_width, screen_height );
     resize_data.old_virtual_rect = virtual_screen_rect;
 
-    screen_width  = width;
-    screen_height = height;
-    xinerama_init();
-    TRACE("desktop %p change to (%dx%d)\n", hwnd, width, height);
-    data->lock_changes++;
-    X11DRV_SetWindowPos( hwnd, 0, &virtual_screen_rect, &virtual_screen_rect,
-                         SWP_NOZORDER | SWP_NOMOVE | SWP_NOACTIVATE, NULL );
-    data->lock_changes--;
-    ClipCursor(NULL);
-    SendMessageTimeoutW( HWND_BROADCAST, WM_DISPLAYCHANGE, screen_bpp,
-                         MAKELPARAM( width, height ), SMTO_ABORTIFHUNG, 2000, NULL );
+    xinerama_init( width, height );
+
+    if (GetWindowThreadProcessId( hwnd, NULL ) != GetCurrentThreadId())
+    {
+        SendMessageW( hwnd, WM_X11DRV_RESIZE_DESKTOP, 0, MAKELPARAM( width, height ) );
+    }
+    else
+    {
+        TRACE( "desktop %p change to (%dx%d)\n", hwnd, width, height );
+        SetWindowPos( hwnd, 0, virtual_screen_rect.left, virtual_screen_rect.top,
+                      virtual_screen_rect.right - virtual_screen_rect.left,
+                      virtual_screen_rect.bottom - virtual_screen_rect.top,
+                      SWP_NOZORDER | SWP_NOACTIVATE );
+        SendMessageTimeoutW( HWND_BROADCAST, WM_DISPLAYCHANGE, screen_bpp,
+                             MAKELPARAM( width, height ), SMTO_ABORTIFHUNG, 2000, NULL );
+    }
 
     EnumWindows( update_windows_on_desktop_resize, (LPARAM)&resize_data );
 }
@@ -964,59 +967,6 @@ void X11DRV_ConfigureNotify( HWND hwnd, XEvent *xev )
     data->lock_changes++;
     SetWindowPos( hwnd, 0, x, y, cx, cy, flags );
     data->lock_changes--;
-}
-
-
-/***********************************************************************
- *		SetWindowRgn  (X11DRV.@)
- *
- * Assign specified region to window (for non-rectangular windows)
- */
-int X11DRV_SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL redraw )
-{
-    struct x11drv_win_data *data;
-
-    if (!(data = X11DRV_get_win_data( hwnd )))
-    {
-        if (IsWindow( hwnd ))
-            FIXME( "not supported on other thread window %p\n", hwnd );
-        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        return FALSE;
-    }
-
-#ifdef HAVE_LIBXSHAPE
-    if (data->whole_window)
-    {
-        Display *display = thread_display();
-
-        if (!hrgn)
-        {
-            wine_tsx11_lock();
-            XShapeCombineMask( display, data->whole_window,
-                               ShapeBounding, 0, 0, None, ShapeSet );
-            wine_tsx11_unlock();
-        }
-        else
-        {
-            RGNDATA *pRegionData = X11DRV_GetRegionData( hrgn, 0 );
-            if (pRegionData)
-            {
-                wine_tsx11_lock();
-                XShapeCombineRectangles( display, data->whole_window, ShapeBounding,
-                                         data->window_rect.left - data->whole_rect.left,
-                                         data->window_rect.top - data->whole_rect.top,
-                                         (XRectangle *)pRegionData->Buffer,
-                                         pRegionData->rdh.nCount,
-                                         ShapeSet, YXBanded );
-                wine_tsx11_unlock();
-                HeapFree(GetProcessHeap(), 0, pRegionData);
-            }
-        }
-    }
-#endif  /* HAVE_LIBXSHAPE */
-
-    invalidate_dce( hwnd, &data->window_rect );
-    return TRUE;
 }
 
 

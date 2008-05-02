@@ -169,7 +169,7 @@ typedef struct tagTREEVIEW_INFO
 #define TV_VSCROLL 	0x02	/* (horizontal/vertical) */
 #define TV_LDRAG		0x04	/* Lbutton pushed to start drag */
 #define TV_LDRAGGING	0x08	/* Lbutton pushed, mouse moved. */
-#define TV_RDRAG		0x10	/* dito Rbutton */
+#define TV_RDRAG		0x10	/* ditto Rbutton */
 #define TV_RDRAGGING	0x20
 
 /* bitflags for infoPtr->timer */
@@ -2042,7 +2042,7 @@ TREEVIEW_GetItemRect(const TREEVIEW_INFO *infoPtr, BOOL fTextRect, LPRECT lpRect
 static inline LRESULT
 TREEVIEW_GetVisibleCount(const TREEVIEW_INFO *infoPtr)
 {
-    /* Suprise! This does not take integral height into account. */
+    /* Surprise! This does not take integral height into account. */
     return infoPtr->clientHeight / infoPtr->uItemHeight;
 }
 
@@ -2138,7 +2138,7 @@ TREEVIEW_SetItemT(TREEVIEW_INFO *infoPtr, const TVITEMEXW *tvItem, BOOL isW)
     if (!TREEVIEW_ValidItem(infoPtr, wineItem))
 	return FALSE;
 
-    /* store the orignal item values */
+    /* store the original item values */
     originalItem = *wineItem;
 
     if (!TREEVIEW_DoSetItemT(infoPtr, wineItem, tvItem, isW))
@@ -3017,7 +3017,7 @@ TREEVIEW_Sort(TREEVIEW_INFO *infoPtr, BOOL fRecurse, HTREEITEM parent,
 	item = (HTREEITEM)DPA_GetPtr(sortList, count++);
 	while ((nextItem = (HTREEITEM)DPA_GetPtr(sortList, count++)) != NULL)
 	{
-	    /* link the two current item toghether */
+	    /* link the two current item together */
 	    item->nextSibling = nextItem;
 	    nextItem->prevSibling = item;
 
@@ -4367,7 +4367,7 @@ TREEVIEW_SelectItem(TREEVIEW_INFO *infoPtr, INT wParam, HTREEITEM item)
  * BUGS
  *
  *  - The current implementation has a list of characters it will
- *    accept and it ignores averything else. In particular it will
+ *    accept and it ignores everything else. In particular it will
  *    ignore accentuated characters which seems to match what
  *    Windows does. But I'm not sure it makes sense to follow
  *    Windows there.
@@ -4517,7 +4517,7 @@ TREEVIEW_EnsureVisible(TREEVIEW_INFO *infoPtr, HTREEITEM item, BOOL bHScroll)
 	/* Expand parents as necessary. */
 	HTREEITEM parent;
 
-        /* see if we are trying to ensure that root is vislble */
+        /* see if we are trying to ensure that root is visible */
         if((item != infoPtr->root) && TREEVIEW_ValidItem(infoPtr, item))
           parent = item->parent;
         else

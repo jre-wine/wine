@@ -459,15 +459,20 @@ static HRESULT WINAPI domelem_getAttribute(
     domelem *This = impl_from_IXMLDOMElement( iface );
     xmlNodePtr element;
     xmlChar *xml_name, *xml_value;
-    HRESULT hr = E_FAIL;
+    HRESULT hr = S_FALSE;
 
     TRACE("(%p)->(%s,%p)\n", This, debugstr_w(name), value);
+
+    if(!value || !name)
+        return E_INVALIDARG;
 
     element = get_element( This );
     if ( !element )
         return E_FAIL;
 
-    VariantInit(value);
+    V_BSTR(value) = NULL;
+    V_VT(value) = VT_NULL;
+
     xml_name = xmlChar_from_wchar( name );
     xml_value = xmlGetNsProp(element, xml_name, NULL);
     HeapFree(GetProcessHeap(), 0, xml_name);
@@ -647,12 +652,12 @@ static HRESULT WINAPI Internal_QueryInterface(
     TRACE("%p %s %p\n", This, debugstr_guid(riid), ppvObject);
 
     if ( IsEqualGUID( riid, &IID_IXMLDOMElement ) ||
+         IsEqualGUID( riid, &IID_IDispatch ) ||
          IsEqualGUID( riid, &IID_IUnknown ) )
     {
         *ppvObject = &This->lpVtbl;
     }
-    else if ( IsEqualGUID( riid, &IID_IDispatch ) ||
-              IsEqualGUID( riid, &IID_IXMLDOMNode ) )
+    else if ( IsEqualGUID( riid, &IID_IXMLDOMNode ) )
     {
         return IUnknown_QueryInterface(This->node_unk, riid, ppvObject);
     }

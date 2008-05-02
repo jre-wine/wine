@@ -20,7 +20,6 @@
 #define NONAMELESSSTRUCT
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 #include "shdocvw.h"
 #include "mshtml.h"
@@ -40,8 +39,9 @@ typedef struct {
 
     DocHost *doc_host;
 
+    LPWSTR url;
     HGLOBAL post_data;
-    LPWSTR headers;
+    BSTR headers;
     ULONG post_data_len;
 } BindStatusCallback;
 
@@ -94,10 +94,19 @@ static void dump_BINDINFO(BINDINFO *bi)
 
 static void set_status_text(BindStatusCallback *This, LPCWSTR str)
 {
-    if(!This->doc_host || !This->doc_host->frame)
+    VARIANTARG arg;
+    DISPPARAMS dispparams = {&arg, NULL, 1, 0};
+
+    if(!This->doc_host)
         return;
 
-    IOleInPlaceFrame_SetStatusText(This->doc_host->frame, str);
+    V_VT(&arg) = VT_BSTR;
+    V_BSTR(&arg) = str ? SysAllocString(str) : NULL;
+    call_sink(This->doc_host->cps.wbe2, DISPID_STATUSTEXTCHANGE, &dispparams);
+    VariantClear(&arg);
+
+    if(This->doc_host->frame)
+        IOleInPlaceFrame_SetStatusText(This->doc_host->frame, str);
 }
 
 #define BINDSC_THIS(iface) DEFINE_THIS(BindStatusCallback, BindStatusCallback, iface)
@@ -151,7 +160,9 @@ static ULONG WINAPI BindStatusCallback_Release(IBindStatusCallback *iface)
             IOleClientSite_Release(CLIENTSITE(This->doc_host));
         if(This->post_data)
             GlobalFree(This->post_data);
-        heap_free(This->headers);
+        if(This->headers)
+            SysFreeString(This->headers);
+        heap_free(This->url);
         heap_free(This);
     }
 
@@ -258,10 +269,16 @@ static HRESULT WINAPI BindStatusCallback_OnDataAvailable(IBindStatusCallback *if
     return E_NOTIMPL;
 }
 
+static void object_available_proc(DocHost *This, task_header_t *task)
+{
+    object_available(This);
+}
+
 static HRESULT WINAPI BindStatusCallback_OnObjectAvailable(IBindStatusCallback *iface,
         REFIID riid, IUnknown *punk)
 {
     BindStatusCallback *This = BINDSC_THIS(iface);
+    task_header_t *task;
     IOleObject *oleobj;
     HRESULT hres;
 
@@ -291,7 +308,8 @@ static HRESULT WINAPI BindStatusCallback_OnObjectAvailable(IBindStatusCallback *
     /* FIXME: Call SetAdvise */
     /* FIXME: Call Invoke(DISPID_READYSTATE) */
 
-    PostMessageW(This->doc_host->hwnd, WB_WM_NAVIGATE2, 0, 0);
+    task = heap_alloc(sizeof(*task));
+    push_dochost_task(This->doc_host, task, object_available_proc, FALSE);
 
     return S_OK;
 }
@@ -370,8 +388,8 @@ static const IHttpNegotiateVtbl HttpNegotiateVtbl = {
     HttpNegotiate_OnResponse
 };
 
-static IBindStatusCallback *create_callback(DocHost *doc_host, PBYTE post_data,
-        ULONG post_data_len, LPWSTR headers)
+static BindStatusCallback *create_callback(DocHost *doc_host, LPCWSTR url, PBYTE post_data,
+        ULONG post_data_len, LPCWSTR headers)
 {
     BindStatusCallback *ret = heap_alloc(sizeof(BindStatusCallback));
 
@@ -379,9 +397,10 @@ static IBindStatusCallback *create_callback(DocHost *doc_host, PBYTE post_data,
     ret->lpHttpNegotiateVtbl      = &HttpNegotiateVtbl;
 
     ret->ref = 1;
+    ret->url = heap_strdupW(url);
     ret->post_data = NULL;
     ret->post_data_len = post_data_len;
-    ret->headers = NULL;
+    ret->headers = headers ? SysAllocString(headers) : NULL;
 
     ret->doc_host = doc_host;
     IOleClientSite_AddRef(CLIENTSITE(doc_host));
@@ -391,13 +410,7 @@ static IBindStatusCallback *create_callback(DocHost *doc_host, PBYTE post_data,
         memcpy(ret->post_data, post_data, post_data_len);
     }
 
-    if(headers) {
-        int size = (strlenW(headers)+1)*sizeof(WCHAR);
-        ret->headers = heap_alloc(size);
-        memcpy(ret->headers, headers, size);
-    }
-
-    return BINDSC(ret);
+    return ret;
 }
 
 static void on_before_navigate2(DocHost *This, LPCWSTR url, const BYTE *post_data,
@@ -548,11 +561,23 @@ static HRESULT bind_to_object(DocHost *This, IMoniker *mon, LPCWSTR url, IBindCt
     static const WCHAR httpsW[] = {'h','t','t','p','s',0};
     static const WCHAR ftpW[]= {'f','t','p',0};
 
+    if(mon) {
+        IMoniker_AddRef(mon);
+    }else {
+        hres = CreateURLMoniker(NULL, url, &mon);
+        if(FAILED(hres)) {
+            WARN("CreateURLMoniker failed: %08x\n", hres);
+            return hres;
+        }
+    }
+
+    CoTaskMemFree(This->url);
+    hres = IMoniker_GetDisplayName(mon, 0, NULL, &This->url);
+    if(FAILED(hres))
+        FIXME("GetDisplayName failed: %08x\n", hres);
+
     IBindCtx_RegisterObjectParam(bindctx, (LPOLESTR)SZ_HTML_CLIENTSITE_OBJECTPARAM,
                                  (IUnknown*)CLIENTSITE(This));
-
-    if(This->frame)
-        IOleInPlaceFrame_EnableModeless(This->frame, FALSE);
 
     hres = CoInternetParseUrl(url, PARSE_SCHEMA, 0, schema, sizeof(schema)/sizeof(schema[0]),
             &schema_len, 0);
@@ -567,70 +592,74 @@ static HRESULT bind_to_object(DocHost *This, IMoniker *mon, LPCWSTR url, IBindCt
             hres = S_OK;
             if(unk)
                 IUnknown_Release(unk);
-        }else if(try_application_url(This->url)) {
+        }else if(try_application_url(url)) {
             hres = S_OK;
         }else {
             FIXME("BindToObject failed: %08x\n", hres);
         }
     }
 
-    if(This->frame)
-        IOleInPlaceFrame_EnableModeless(This->frame, TRUE);
-
+    IMoniker_Release(mon);
     return S_OK;
 }
 
-static HRESULT navigate_mon(DocHost *This, IMoniker *mon, PBYTE post_data, ULONG post_data_len,
-                     LPWSTR headers)
+static HRESULT navigate_bsc(DocHost *This, BindStatusCallback *bsc, IMoniker *mon)
 {
-    IBindStatusCallback *callback;
     IBindCtx *bindctx;
     VARIANT_BOOL cancel = VARIANT_FALSE;
-    LPWSTR url;
     HRESULT hres;
 
-    IMoniker_GetDisplayName(mon, NULL, NULL, &url);
-    TRACE("navigating to %s\n", debugstr_w(url));
-
-    on_before_navigate2(This, url, post_data, post_data_len, headers, &cancel);
+    on_before_navigate2(This, bsc->url, bsc->post_data, bsc->post_data_len, bsc->headers, &cancel);
     if(cancel) {
         FIXME("Navigation canceled\n");
-        CoTaskMemFree(url);
         return S_OK;
     }
 
     if(This->document)
         deactivate_document(This);
-    CoTaskMemFree(This->url);
-    This->url = url;
 
-    callback = create_callback(This, post_data, post_data_len, (LPWSTR)headers);
-    CreateAsyncBindCtx(0, callback, 0, &bindctx);
+    CreateAsyncBindCtx(0, BINDSC(bsc), 0, &bindctx);
 
-    hres = bind_to_object(This, mon, This->url, bindctx, callback);
+    if(This->frame)
+        IOleInPlaceFrame_EnableModeless(This->frame, FALSE);
 
-    IBindStatusCallback_Release(callback);
+    hres = bind_to_object(This, mon, bsc->url, bindctx, BINDSC(bsc));
+
+    if(This->frame)
+        IOleInPlaceFrame_EnableModeless(This->frame, TRUE);
+
     IBindCtx_Release(bindctx);
 
     return hres;
 }
 
+typedef struct {
+    task_header_t header;
+    BindStatusCallback *bsc;
+} task_navigate_bsc_t;
+
+static void navigate_bsc_proc(DocHost *This, task_header_t *t)
+{
+    task_navigate_bsc_t *task = (task_navigate_bsc_t*)t;
+
+    if(!This->hwnd)
+        create_doc_view_hwnd(This);
+
+    navigate_bsc(This, task->bsc, NULL);
+
+    IBindStatusCallback_Release(BINDSC(task->bsc));
+}
+
+
 HRESULT navigate_url(DocHost *This, LPCWSTR url, const VARIANT *Flags,
                      const VARIANT *TargetFrameName, VARIANT *PostData, VARIANT *Headers)
 {
-    IMoniker *mon;
+    task_navigate_bsc_t *task;
     PBYTE post_data = NULL;
     ULONG post_data_len = 0;
     LPWSTR headers = NULL;
-    HRESULT hres;
 
     TRACE("navigating to %s\n", debugstr_w(url));
-
-    hres = CreateURLMoniker(NULL, url, &mon);
-    if(FAILED(hres)) {
-        WARN("CreateURLMoniker failed: %08x\n", hres);
-        return hres;
-    }
 
     if((Flags && V_VT(Flags) != VT_EMPTY) 
        || (TargetFrameName && V_VT(TargetFrameName) != VT_EMPTY))
@@ -655,25 +684,25 @@ HRESULT navigate_url(DocHost *This, LPCWSTR url, const VARIANT *Flags,
         TRACE("Headers: %s\n", debugstr_w(headers));
     }
 
-    if(!This->hwnd)
-        create_doc_view_hwnd(This);
+    task = heap_alloc(sizeof(*task));
+    task->bsc = create_callback(This, url, post_data, post_data_len, headers);
 
-    hres = navigate_mon(This, mon, post_data, post_data_len, headers);
-
-    IMoniker_Release(mon);
     if(post_data)
         SafeArrayUnaccessData(V_ARRAY(PostData));
 
-    return hres;
+    push_dochost_task(This, &task->header, navigate_bsc_proc, This->url == NULL);
+
+    return S_OK;
 }
 
 static HRESULT navigate_hlink(DocHost *This, IMoniker *mon, IBindCtx *bindctx,
                               IBindStatusCallback *callback)
 {
     IHttpNegotiate *http_negotiate;
+    BindStatusCallback *bsc;
     PBYTE post_data = NULL;
     ULONG post_data_len = 0;
-    LPWSTR headers = NULL;
+    LPWSTR headers = NULL, url;
     BINDINFO bindinfo;
     DWORD bindf = 0;
     HRESULT hres;
@@ -699,8 +728,16 @@ static HRESULT navigate_hlink(DocHost *This, IMoniker *mon, IBindCtx *bindctx,
             post_data = bindinfo.stgmedData.u.hGlobal;
     }
 
-    hres = navigate_mon(This, mon, post_data, post_data_len, headers);
+    hres = IMoniker_GetDisplayName(mon, 0, NULL, &url);
+    if(FAILED(hres))
+        FIXME("GetDisplayName failed: %08x\n", hres);
 
+    bsc = create_callback(This, url, post_data, post_data_len, headers);
+    CoTaskMemFree(url);
+
+    hres = navigate_bsc(This, bsc, mon);
+
+    IBindStatusCallback_Release(BINDSC(bsc));
     CoTaskMemFree(headers);
     ReleaseBindInfo(&bindinfo);
 

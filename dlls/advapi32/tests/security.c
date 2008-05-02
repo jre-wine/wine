@@ -1541,6 +1541,20 @@ static void test_LookupAccountName(void)
         ok(sid_use == SidTypeUser, "Expected SidTypeUser, got %d\n", sid_use);
     }
     domain_size = domain_save;
+    sid_size = sid_save;
+
+    ret = LookupAccountNameA(NULL, "Everyone", psid, &sid_size, domain, &domain_size, &sid_use);
+    get_sid_info(psid, &account, &sid_dom);
+    ok(ret, "Failed to lookup account name\n");
+    ok(sid_size != 0, "sid_size was zero\n");
+    ok(!lstrcmp(account, "Everyone"), "Expected Everyone, got %s\n", account);
+    todo_wine
+    ok(!lstrcmp(domain, sid_dom), "Expected %s, got %s\n", sid_dom, domain);
+    ok(domain_size == 0, "Expected 0, got %d\n", domain_size);
+    todo_wine
+    ok(lstrlen(domain) == domain_size, "Expected %d, got %d\n", lstrlen(domain), domain_size);
+    ok(sid_use == SidTypeWellKnownGroup, "Expected SidTypeUser, got %d\n", sid_use);
+    domain_size = domain_save;
 
     /* NULL Sid with zero sid size */
     SetLastError(0xdeadbeef);
@@ -1973,8 +1987,13 @@ static void test_impersonation_level(void)
 
 static void test_SetEntriesInAcl(void)
 {
-    ACL *acl = (ACL*)0xdeadbeef;
     DWORD res;
+    PSID EveryoneSid = NULL, UsersSid = NULL;
+    PACL OldAcl = NULL, NewAcl;
+    SID_IDENTIFIER_AUTHORITY SIDAuthWorld = { SECURITY_WORLD_SID_AUTHORITY };
+    SID_IDENTIFIER_AUTHORITY SIDAuthNT = { SECURITY_NT_AUTHORITY };
+    EXPLICIT_ACCESSW ExplicitAccess;
+    static const WCHAR wszEveryone[] = {'E','v','e','r','y','o','n','e',0};
 
     if (!pSetEntriesInAclW)
     {
@@ -1982,14 +2001,87 @@ static void test_SetEntriesInAcl(void)
         return;
     }
 
-    res = pSetEntriesInAclW(0, NULL, NULL, &acl);
+    NewAcl = (PACL)0xdeadbeef;
+    res = pSetEntriesInAclW(0, NULL, NULL, &NewAcl);
     if(res == ERROR_CALL_NOT_IMPLEMENTED)
     {
         skip("SetEntriesInAclW is not implemented\n");
         return;
     }
     ok(res == ERROR_SUCCESS, "SetEntriesInAclW failed: %u\n", res);
-    ok(acl == NULL, "acl=%p, expected NULL\n", acl);
+    ok(NewAcl == NULL, "NewAcl=%p, expected NULL\n", NewAcl);
+
+    OldAcl = HeapAlloc(GetProcessHeap(), 0, 256);
+    res = InitializeAcl(OldAcl, 256, ACL_REVISION);
+    if(!res && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        skip("ACLs not implemented - skipping tests\n");
+        HeapFree(GetProcessHeap(), 0, OldAcl);
+        return;
+    }
+    ok(res, "InitializeAcl failed with error %d\n", GetLastError());
+
+    res = AllocateAndInitializeSid( &SIDAuthWorld, 1, SECURITY_WORLD_RID, 0, 0, 0, 0, 0, 0, 0, &EveryoneSid);
+    ok(res, "AllocateAndInitializeSid failed with error %d\n", GetLastError());
+
+    res = AllocateAndInitializeSid( &SIDAuthNT, 2, SECURITY_BUILTIN_DOMAIN_RID,
+        DOMAIN_ALIAS_RID_USERS, 0, 0, 0, 0, 0, 0, &UsersSid);
+    ok(res, "AllocateAndInitializeSid failed with error %d\n", GetLastError());
+
+    res = AddAccessAllowedAce(OldAcl, ACL_REVISION, KEY_READ, UsersSid);
+    ok(res, "AddAccessAllowedAce failed with error %d\n", GetLastError());
+
+    ExplicitAccess.grfAccessPermissions = KEY_WRITE;
+    ExplicitAccess.grfAccessMode = GRANT_ACCESS;
+    ExplicitAccess.grfInheritance = NO_INHERITANCE;
+    ExplicitAccess.Trustee.pMultipleTrustee = NULL;
+    ExplicitAccess.Trustee.MultipleTrusteeOperation = NO_MULTIPLE_TRUSTEE;
+    ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    ExplicitAccess.Trustee.TrusteeType = TRUSTEE_IS_UNKNOWN;
+    ExplicitAccess.Trustee.ptstrName = (LPWSTR)EveryoneSid;
+    res = pSetEntriesInAclW(1, &ExplicitAccess, OldAcl, &NewAcl);
+    ok(res == ERROR_SUCCESS, "SetEntriesInAclW failed: %u\n", res);
+    ok(NewAcl != NULL, "returned acl was NULL\n");
+    LocalFree(NewAcl);
+
+    ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_USER;
+    ExplicitAccess.Trustee.ptstrName = (LPWSTR)wszEveryone;
+    res = pSetEntriesInAclW(1, &ExplicitAccess, OldAcl, &NewAcl);
+    ok(res == ERROR_SUCCESS, "SetEntriesInAclW failed: %u\n", res);
+    ok(NewAcl != NULL, "returned acl was NULL\n");
+    LocalFree(NewAcl);
+
+    ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_BAD_FORM;
+    res = pSetEntriesInAclW(1, &ExplicitAccess, OldAcl, &NewAcl);
+    ok(res == ERROR_INVALID_PARAMETER, "SetEntriesInAclW failed: %u\n", res);
+    ok(NewAcl == NULL, "returned acl wasn't NULL: %p\n", NewAcl);
+    LocalFree(NewAcl);
+
+    ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_USER;
+    ExplicitAccess.Trustee.MultipleTrusteeOperation = TRUSTEE_IS_IMPERSONATE;
+    res = pSetEntriesInAclW(1, &ExplicitAccess, OldAcl, &NewAcl);
+    ok(res == ERROR_INVALID_PARAMETER, "SetEntriesInAclW failed: %u\n", res);
+    ok(NewAcl == NULL, "returned acl wasn't NULL: %p\n", NewAcl);
+    LocalFree(NewAcl);
+
+    ExplicitAccess.Trustee.MultipleTrusteeOperation = NO_MULTIPLE_TRUSTEE;
+    ExplicitAccess.grfAccessMode = SET_ACCESS;
+    res = pSetEntriesInAclW(1, &ExplicitAccess, OldAcl, &NewAcl);
+    ok(res == ERROR_SUCCESS, "SetEntriesInAclW failed: %u\n", res);
+    ok(NewAcl != NULL, "returned acl was NULL\n");
+    LocalFree(NewAcl);
+
+    ExplicitAccess.grfAccessMode = REVOKE_ACCESS;
+    ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    ExplicitAccess.Trustee.ptstrName = (LPWSTR)UsersSid;
+    res = pSetEntriesInAclW(1, &ExplicitAccess, OldAcl, &NewAcl);
+    ok(res == ERROR_SUCCESS, "SetEntriesInAclW failed: %u\n", res);
+    ok(NewAcl != NULL, "returned acl was NULL\n");
+    LocalFree(NewAcl);
+
+    LocalFree(UsersSid);
+    LocalFree(EveryoneSid);
+    HeapFree(GetProcessHeap(), 0, OldAcl);
 }
 
 static void test_GetNamedSecurityInfoA(void)

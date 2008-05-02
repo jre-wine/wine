@@ -9,7 +9,7 @@
  * 		98/7 	changes for making this MIDI driver work on OSS
  * 			current support is limited to MIDI ports of OSS systems
  * 		98/9	rewriting MCI code for MIDI
- * 		98/11 	splitted in midi.c and mcimidi.c
+ * 		98/11 	split in midi.c and mcimidi.c
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -330,7 +330,7 @@ LRESULT OSS_MidiInit(void)
 
 	/* This whole part is somewhat obscure to me. I'll keep trying to dig
 	   info about it. If you happen to know, please tell us. The very
-	   descritive minfo.dev_type was not used here.
+	   descriptive minfo.dev_type was not used here.
 	*/
 	/* Manufac ID. We do not have access to this with soundcard.h
 	   Does not seem to be a problem, because in mmsystem.h only

@@ -588,7 +588,7 @@ IShellFolder_fnGetAttributesOf (IShellFolder2 * iface, UINT cidl,
         IShellFolder *psfParent = NULL;
         LPCITEMIDLIST rpidl = NULL;
 
-        hr = SHBindToParent(This->pidlRoot, &IID_IShellFolder, (LPVOID*)&psfParent, (LPCITEMIDLIST*)&rpidl);
+        hr = SHBindToParent(This->pidlRoot, &IID_IShellFolder, (LPVOID*)&psfParent, &rpidl);
         if(SUCCEEDED(hr)) {
             SHELL32_GetItemAttributes (psfParent, rpidl, rgfInOut);
             IShellFolder_Release(psfParent);
@@ -1462,7 +1462,7 @@ IFSFldr_PersistFolder3_InitializeEx (IPersistFolder3 * iface,
     This->pidlRoot = ILClone (pidlRoot);
 
     /*
-     *  the target folder is spezified in csidl OR pidlTargetFolder OR
+     *  the target folder is specified in csidl OR pidlTargetFolder OR
      *  szTargetParsingName
      */
     if (ppfti) {
