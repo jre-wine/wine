@@ -99,6 +99,7 @@ static void testMemStore(void)
     HCERTSTORE store1, store2;
     PCCERT_CONTEXT context;
     BOOL ret;
+    DWORD GLE;
 
     /* NULL provider */
     store1 = CertOpenStore(0, 0, 0, 0, NULL);
@@ -124,13 +125,15 @@ static void testMemStore(void)
     context = NULL;
     ret = CertAddEncodedCertificateToStore(store1, X509_ASN_ENCODING, emptyCert,
      sizeof(emptyCert), CERT_STORE_ADD_ALWAYS, &context);
-    /* Windows returns CRYPT_E_ASN1_EOD, but accept CRYPT_E_ASN1_CORRUPT as
-     * well (because matching errors is tough in this case)
+    /* Windows returns CRYPT_E_ASN1_EOD or OSS_DATA_ERROR, but accept
+     * CRYPT_E_ASN1_CORRUPT as well (because matching errors is tough in this
+     * case)
      */
-    ok(!ret && (GetLastError() == CRYPT_E_ASN1_EOD || GetLastError() ==
-     CRYPT_E_ASN1_CORRUPT),
-     "Expected CRYPT_E_ASN1_EOD or CRYPT_E_ASN1_CORRUPT, got %08x\n",
-     GetLastError());
+    GLE = GetLastError();
+    ok(!ret && (GLE == CRYPT_E_ASN1_EOD || GLE == CRYPT_E_ASN1_CORRUPT ||
+     GLE == OSS_DATA_ERROR),
+     "Expected CRYPT_E_ASN1_EOD or CRYPT_E_ASN1_CORRUPT or OSS_DATA_ERROR, got %08x\n",
+     GLE);
     /* add a "signed" cert--the signature isn't a real signature, so this adds
      * without any check of the signature's validity
      */
@@ -152,10 +155,11 @@ static void testMemStore(void)
     /* try adding a "signed" CRL as a cert */
     ret = CertAddEncodedCertificateToStore(store1, X509_ASN_ENCODING,
      signedCRL, sizeof(signedCRL), CERT_STORE_ADD_ALWAYS, &context);
-    ok(!ret && (GetLastError() == CRYPT_E_ASN1_BADTAG || GetLastError() ==
-     CRYPT_E_ASN1_CORRUPT),
-     "Expected CRYPT_E_ASN1_BADTAG or CRYPT_E_ASN1_CORRUPT, got %08x\n",
-     GetLastError());
+    GLE = GetLastError();
+    ok(!ret && (GLE == CRYPT_E_ASN1_BADTAG || GLE == CRYPT_E_ASN1_CORRUPT ||
+     GLE == OSS_DATA_ERROR),
+     "Expected CRYPT_E_ASN1_BADTAG or CRYPT_E_ASN1_CORRUPT or OSS_DATA_ERROR, got %08x\n",
+     GLE);
     /* add a cert to store1 */
     ret = CertAddEncodedCertificateToStore(store1, X509_ASN_ENCODING, bigCert,
      sizeof(bigCert), CERT_STORE_ADD_ALWAYS, &context);
@@ -591,14 +595,16 @@ static void testRegStore(void)
     HCERTSTORE store;
     LONG rc;
     HKEY key = NULL;
-    DWORD disp;
+    DWORD disp, GLE;
 
     store = CertOpenStore(CERT_STORE_PROV_REG, 0, 0, 0, NULL);
-    ok(!store && GetLastError() == ERROR_INVALID_HANDLE,
-     "Expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
+    GLE = GetLastError();
+    ok(!store && (GLE == ERROR_INVALID_HANDLE || GLE == ERROR_BADKEY),
+     "Expected ERROR_INVALID_HANDLE or ERROR_BADKEY, got %d\n", GLE);
     store = CertOpenStore(CERT_STORE_PROV_REG, 0, 0, 0, key);
-    ok(!store && GetLastError() == ERROR_INVALID_HANDLE,
-     "Expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
+    GLE = GetLastError();
+    ok(!store && (GLE == ERROR_INVALID_HANDLE || GLE == ERROR_BADKEY),
+     "Expected ERROR_INVALID_HANDLE or ERROR_BADKEY, got %d\n", GLE);
 
     /* Opening up any old key works.. */
     key = HKEY_CURRENT_USER;
@@ -1185,16 +1191,6 @@ static void testFileStore(void)
     DeleteFileW(filename);
 }
 
-static void checkFileStoreFailure(LPCWSTR filename, DWORD dwEncodingType,
- DWORD dwFlags, DWORD expectedError)
-{
-    HCERTSTORE store = CertOpenStore(CERT_STORE_PROV_FILENAME_W,
-     dwEncodingType, 0, dwFlags, filename);
-
-    ok(!store && GetLastError() == expectedError,
-     "Expected %08x, got %08x\n", expectedError, GetLastError());
-}
-
 static BOOL initFileFromData(LPCWSTR filename, const BYTE *pb, DWORD cb)
 {
     HANDLE file = CreateFileW(filename, GENERIC_READ | GENERIC_WRITE, 0, NULL,
@@ -1219,17 +1215,23 @@ static void testFileNameStore(void)
     WCHAR filename[MAX_PATH];
     HCERTSTORE store;
     BOOL ret;
+    DWORD GLE;
 
-    checkFileStoreFailure(NULL, 0, 0, ERROR_PATH_NOT_FOUND);
+    store = CertOpenStore(CERT_STORE_PROV_FILENAME_W, 0, 0, 0, NULL);
+    GLE = GetLastError();
+    ok(!store && (GLE == ERROR_PATH_NOT_FOUND || GLE == ERROR_INVALID_PARAMETER),
+     "Expected ERROR_PATH_NOT_FOUND or ERROR_INVALID_PARAMETER, got %08x\n",
+     GLE);
 
     if (!GetTempFileNameW(szDot, szPrefix, 0, filename))
        return;
     DeleteFileW(filename);
 
     /* The two flags are mutually exclusive */
-    checkFileStoreFailure(filename, 0,
-     CERT_FILE_STORE_COMMIT_ENABLE_FLAG | CERT_STORE_READONLY_FLAG,
-     E_INVALIDARG);
+    store = CertOpenStore(CERT_STORE_PROV_FILENAME_W, 0, 0,
+     CERT_FILE_STORE_COMMIT_ENABLE_FLAG | CERT_STORE_READONLY_FLAG, filename);
+    ok(!store && GetLastError() == E_INVALIDARG,
+     "Expected E_INVALIDARG, got %08x\n", GetLastError());
 
     /* In all of the following tests, the encoding type seems to be ignored */
     if (initFileFromData(filename, bigCert, sizeof(bigCert)))

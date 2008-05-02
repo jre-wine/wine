@@ -629,35 +629,43 @@ UINT MSI_InstallPackage( MSIPACKAGE *package, LPCWSTR szPackagePath,
 
     if (szPackagePath)   
     {
-        LPWSTR p, check, path;
- 
-        path = strdupW(szPackagePath);
-        p = strrchrW(path,'\\');    
+        LPWSTR p, check, dir;
+
+        dir = strdupW(szPackagePath);
+        p = strrchrW(dir, '\\');
         if (p)
-        {
-            p++;
-            *p=0;
-        }
+            *(++p) = 0;
         else
         {
-            msi_free(path);
-            path = msi_alloc(MAX_PATH*sizeof(WCHAR));
-            GetCurrentDirectoryW(MAX_PATH,path);
-            strcatW(path,cszbs);
+            msi_free(dir);
+            dir = msi_alloc(MAX_PATH*sizeof(WCHAR));
+            GetCurrentDirectoryW(MAX_PATH, dir);
+            lstrcatW(dir, cszbs);
+            p = (LPWSTR)szPackagePath;
         }
+
+        msi_free( package->PackagePath );
+        package->PackagePath = msi_alloc((lstrlenW(dir) + lstrlenW(p) + 2) * sizeof(WCHAR));
+        if (!package->PackagePath)
+        {
+            msi_free(dir);
+            return ERROR_OUTOFMEMORY;
+        }
+
+        lstrcpyW(package->PackagePath, dir);
+        lstrcatW(package->PackagePath, cszbs);
+        lstrcatW(package->PackagePath, p);
 
         check = msi_dup_property( package, cszSourceDir );
         if (!check)
-            MSI_SetPropertyW(package, cszSourceDir, path);
+            MSI_SetPropertyW(package, cszSourceDir, dir);
         msi_free(check);
 
         check = msi_dup_property( package, cszSOURCEDIR );
         if (!check)
-            MSI_SetPropertyW(package, cszSOURCEDIR, path);
+            MSI_SetPropertyW(package, cszSOURCEDIR, dir);
 
-        msi_free( package->PackagePath );
-        package->PackagePath = path;
-
+        msi_free(dir);
         msi_free(check);
     }
 
@@ -665,6 +673,9 @@ UINT MSI_InstallPackage( MSIPACKAGE *package, LPCWSTR szPackagePath,
 
     msi_apply_transforms( package );
     msi_apply_patches( package );
+
+    /* properties may have been added by a transform */
+    msi_clone_properties( package );
 
     if ( (msi_get_property_int(package, szUILevel, 0) & INSTALLUILEVEL_MASK) >= INSTALLUILEVEL_REDUCED )
     {
@@ -3233,6 +3244,19 @@ static UINT ITERATE_PublishProduct(MSIRECORD *row, LPVOID param)
     return ERROR_SUCCESS;
 }
 
+static BOOL msi_check_publish(MSIPACKAGE *package)
+{
+    MSIFEATURE *feature;
+
+    LIST_FOR_EACH_ENTRY(feature, &package->features, MSIFEATURE, entry)
+    {
+        if (feature->ActionRequest == INSTALLSTATE_LOCAL)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
 /*
  * 99% of the work done here is only done for 
  * advertised installs. However this is where the
@@ -3243,6 +3267,8 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
 {
     UINT rc;
     MSIQUERY * view;
+    MSISOURCELISTINFO *info;
+    MSIMEDIADISK *disk;
     static const WCHAR Query[]=
         {'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
          '`','I','c','o','n','`',0};
@@ -3256,14 +3282,14 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
         {'A','R','P','P','R','O','D','U','C','T','I','C','O','N',0};
     static const WCHAR szProductVersion[] =
         {'P','r','o','d','u','c','t','V','e','r','s','i','o','n',0};
-    static const WCHAR szInstallProperties[] =
-        {'I','n','s','t','a','l','l','P','r','o','p','e','r','t','i','e','s',0};
-    static const WCHAR szWindowsInstaller[] =
-        {'W','i','n','d','o','w','s','I','n','s','t','a','l','l','e','r',0};
     DWORD langid;
     LPWSTR buffer;
     DWORD size;
     MSIHANDLE hDb, hSumInfo;
+
+    /* FIXME: also need to publish if the product is in advertise mode */
+    if (!msi_check_publish(package))
+        return ERROR_SUCCESS;
 
     /* write out icon files */
 
@@ -3288,11 +3314,9 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
     if (rc != ERROR_SUCCESS)
         goto end;
 
-    rc = RegCreateKeyW(hudkey, szInstallProperties, &props);
+    rc = MSIREG_OpenInstallPropertiesKey(package->ProductCode,&props,TRUE);
     if (rc != ERROR_SUCCESS)
         goto end;
-
-    msi_reg_set_val_dword( props, szWindowsInstaller, 1 );
 
     buffer = msi_dup_property( package, INSTALLPROPERTY_PRODUCTNAMEW );
     msi_reg_set_val_str( hukey, INSTALLPROPERTY_PRODUCTNAMEW, buffer );
@@ -3353,6 +3377,21 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
     {
         ERR("Unable to open Summary Information\n");
         rc = ERROR_SUCCESS;
+    }
+
+    /* publish the SourceList info */
+    LIST_FOR_EACH_ENTRY(info, &package->sourcelist_info, MSISOURCELISTINFO, entry)
+    {
+        MsiSourceListSetInfoW(package->ProductCode, NULL,
+                              info->context, info->options,
+                              info->property, info->value);
+    }
+
+    LIST_FOR_EACH_ENTRY(disk, &package->sourcelist_media, MSIMEDIADISK, entry)
+    {
+        MsiSourceListAddMediaDiskW(package->ProductCode, NULL,
+                                   disk->context, disk->options,
+                                   disk->disk_id, disk->volume_label, disk->disk_prompt);
     }
 
 end:
@@ -3764,6 +3803,7 @@ static UINT msi_write_uninstall_property_vals( MSIPACKAGE *package, HKEY hkey )
 static UINT ACTION_RegisterProduct(MSIPACKAGE *package)
 {
     HKEY hkey=0;
+    HKEY hudkey=0, props=0;
     LPWSTR buffer = NULL;
     UINT rc;
     DWORD size, langid;
@@ -3788,7 +3828,11 @@ static UINT ACTION_RegisterProduct(MSIPACKAGE *package)
     SYSTEMTIME systime;
     static const WCHAR date_fmt[] = {'%','i','%','i','%','i',0};
     LPWSTR upgrade_code;
-    WCHAR szDate[9]; 
+    WCHAR szDate[9];
+
+    /* FIXME: also need to publish if the product is in advertise mode */
+    if (!msi_check_publish(package))
+        return ERROR_SUCCESS;
 
     rc = MSIREG_OpenUninstallKey(package->ProductCode,&hkey,TRUE);
     if (rc != ERROR_SUCCESS)
@@ -3850,7 +3894,18 @@ static UINT ACTION_RegisterProduct(MSIPACKAGE *package)
     
     RegCloseKey(hkey);
 
-    /* FIXME: call ui_actiondata */
+    rc = MSIREG_OpenUserDataProductKey(package->ProductCode, &hudkey, TRUE);
+    if (rc != ERROR_SUCCESS)
+        return rc;
+
+    RegCloseKey(hudkey);
+
+    rc = MSIREG_OpenInstallPropertiesKey(package->ProductCode, &props, TRUE);
+    if (rc != ERROR_SUCCESS)
+        return rc;
+
+    msi_reg_set_val_dword( props, szWindowsInstaller, 1 );
+    RegCloseKey(props);
 
     return ERROR_SUCCESS;
 }
@@ -3860,9 +3915,59 @@ static UINT ACTION_InstallExecute(MSIPACKAGE *package)
     return execute_script(package,INSTALL_SCRIPT);
 }
 
+static UINT msi_unpublish_product(MSIPACKAGE *package)
+{
+    LPWSTR remove = NULL;
+    LPWSTR *features = NULL;
+    BOOL full_uninstall = TRUE;
+    MSIFEATURE *feature;
+
+    static const WCHAR szRemove[] = {'R','E','M','O','V','E',0};
+    static const WCHAR szAll[] = {'A','L','L',0};
+
+    remove = msi_dup_property(package, szRemove);
+    if (!remove)
+        return ERROR_SUCCESS;
+
+    features = msi_split_string(remove, ',');
+    if (!features)
+    {
+        msi_free(remove);
+        ERR("REMOVE feature list is empty!\n");
+        return ERROR_FUNCTION_FAILED;
+    }
+
+    if (!lstrcmpW(features[0], szAll))
+        full_uninstall = TRUE;
+    else
+    {
+        LIST_FOR_EACH_ENTRY(feature, &package->features, MSIFEATURE, entry)
+        {
+            if (feature->Action != INSTALLSTATE_ABSENT)
+                full_uninstall = FALSE;
+        }
+    }
+
+    if (!full_uninstall)
+        goto done;
+
+    MSIREG_DeleteProductKey(package->ProductCode);
+    MSIREG_DeleteUserProductKey(package->ProductCode);
+    MSIREG_DeleteUserDataProductKey(package->ProductCode);
+
+done:
+    msi_free(remove);
+    msi_free(features);
+    return ERROR_SUCCESS;
+}
+
 static UINT ACTION_InstallFinalize(MSIPACKAGE *package)
 {
     UINT rc;
+
+    rc = msi_unpublish_product(package);
+    if (rc != ERROR_SUCCESS)
+        return rc;
 
     /* turn off scheduling */
     package->script->CurrentlyScripting= FALSE;

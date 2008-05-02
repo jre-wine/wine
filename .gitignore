@@ -162,6 +162,7 @@ dlls/cryptdll/libcryptdll.def
 dlls/ctl3d.dll16
 dlls/ctl3d32/libctl3d32.def
 dlls/ctl3dv2.dll16
+dlls/d3d10/version.res
 dlls/d3d8/libd3d8.def
 dlls/d3d8/tests/*.ok
 dlls/d3d8/tests/d3d8_crosstest.exe
@@ -431,6 +432,10 @@ dlls/olesvr.dll16
 dlls/olesvr32/libolesvr32.def
 dlls/opengl32/libopengl32.def
 dlls/opengl32/version.res
+dlls/pdh/libpdh.def
+dlls/pdh/tests/*.ok
+dlls/pdh/tests/pdh_crosstest.exe
+dlls/pdh/tests/testlist.c
 dlls/powrprof/libpowrprof.def
 dlls/printui/printui.res
 dlls/psapi/libpsapi.def
@@ -777,6 +782,7 @@ programs/msiexec/msiexec
 programs/msiexec/msiexec.ico
 programs/msiexec/rsrc.res
 programs/net/net
+programs/net/rsrc.res
 programs/notepad/notepad
 programs/notepad/rsrc.res
 programs/oleview/oleview
@@ -883,6 +889,7 @@ programs/winetest/ntprint_test.exe
 programs/winetest/odbccp32_test.exe
 programs/winetest/ole32_test.exe
 programs/winetest/oleaut32_test.exe
+programs/winetest/pdh_test.exe
 programs/winetest/psapi_test.exe
 programs/winetest/quartz_test.exe
 programs/winetest/riched20_test.exe

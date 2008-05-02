@@ -35,9 +35,6 @@
 /* Define to 1 if you have the <capi20.h> header file. */
 #undef HAVE_CAPI20_H
 
-/* Define if you have capi4linux libs and headers */
-#undef HAVE_CAPI4LINUX
-
 /* Define to 1 if you have the <Carbon/Carbon.h> header file. */
 #undef HAVE_CARBON_CARBON_H
 
@@ -240,6 +237,9 @@
 /* Define to 1 if you have the `inet_network' function. */
 #undef HAVE_INET_NETWORK
 
+/* Define to 1 if you have the `inet_pton' function. */
+#undef HAVE_INET_PTON
+
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
 
@@ -294,17 +294,11 @@
 /* Define to 1 if you have the <libaudioio.h> header file. */
 #undef HAVE_LIBAUDIOIO_H
 
-/* Define if you have the hal library */
-#undef HAVE_LIBHAL
-
 /* Define to 1 if you have the `i386' library (-li386). */
 #undef HAVE_LIBI386
 
 /* Define to 1 if you have the `ossaudio' library (-lossaudio). */
 #undef HAVE_LIBOSSAUDIO
-
-/* Define if you have the Xinerama library */
-#undef HAVE_LIBXINERAMA
 
 /* Define if you have the libxml2 library */
 #undef HAVE_LIBXML2
@@ -314,9 +308,6 @@
 
 /* Define to 1 if you have the `xpg4' library (-lxpg4). */
 #undef HAVE_LIBXPG4
-
-/* Define if you have the Xrandr library */
-#undef HAVE_LIBXRANDR
 
 /* Define if you have the X Shape extension */
 #undef HAVE_LIBXSHAPE
@@ -435,14 +426,23 @@
 /* Define to 1 if you have the <netinet/in.h> header file. */
 #undef HAVE_NETINET_IN_H
 
+/* Define to 1 if you have the <netinet/in_pcb.h> header file. */
+#undef HAVE_NETINET_IN_PCB_H
+
 /* Define to 1 if you have the <netinet/in_systm.h> header file. */
 #undef HAVE_NETINET_IN_SYSTM_H
+
+/* Define to 1 if you have the <netinet/ip_var.h> header file. */
+#undef HAVE_NETINET_IP_VAR_H
 
 /* Define to 1 if you have the <netinet/tcp_fsm.h> header file. */
 #undef HAVE_NETINET_TCP_FSM_H
 
 /* Define to 1 if you have the <netinet/tcp.h> header file. */
 #undef HAVE_NETINET_TCP_H
+
+/* Define to 1 if you have the <netinet/tcp_var.h> header file. */
+#undef HAVE_NETINET_TCP_VAR_H
 
 /* Define to 1 if you have the <netipx/ipx.h> header file. */
 #undef HAVE_NETIPX_IPX_H
@@ -482,6 +482,9 @@
 
 /* Define to 1 if the system has the type `pid_t'. */
 #undef HAVE_PID_T
+
+/* Define to 1 if you have the <png.h> header file. */
+#undef HAVE_PNG_H
 
 /* Define to 1 if you have the `poll' function. */
 #undef HAVE_POLL
@@ -551,9 +554,6 @@
 
 /* Define to 1 if you have the `rfork' function. */
 #undef HAVE_RFORK
-
-/* Define if we have SANE development environment */
-#undef HAVE_SANE
 
 /* Define to 1 if you have the <sched.h> header file. */
 #undef HAVE_SCHED_H
@@ -786,6 +786,9 @@
 /* Define to 1 if you have the <sys/signal.h> header file. */
 #undef HAVE_SYS_SIGNAL_H
 
+/* Define to 1 if you have the <sys/socketvar.h> header file. */
+#undef HAVE_SYS_SOCKETVAR_H
+
 /* Define to 1 if you have the <sys/socket.h> header file. */
 #undef HAVE_SYS_SOCKET_H
 
@@ -999,14 +1002,14 @@
 /* Define to the soname of the libncurses library. */
 #undef SONAME_LIBNCURSES
 
+/* Define to the soname of the libpng library. */
+#undef SONAME_LIBPNG
+
 /* Define to the soname of the libsane library. */
 #undef SONAME_LIBSANE
 
 /* Define to the soname of the libssl library. */
 #undef SONAME_LIBSSL
-
-/* Define to the soname of the libtxc_dxtn library. */
-#undef SONAME_LIBTXC_DXTN
 
 /* Define to the soname of the libX11 library. */
 #undef SONAME_LIBX11

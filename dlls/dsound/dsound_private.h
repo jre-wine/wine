@@ -34,8 +34,6 @@
 #define DS_HW_ACCEL_EMULATION   3
 
 extern int ds_emuldriver;
-extern int ds_hel_margin;
-extern int ds_hel_queue;
 extern int ds_snd_queue_max;
 extern int ds_hw_accel;
 extern int ds_default_playback;
@@ -164,7 +162,7 @@ struct IDirectSoundBufferImpl
     PWAVEFORMATEX               pwfx;
     BufferMemory*               buffer;
     DWORD                       playflags,state,leadin;
-    DWORD                       playpos,startpos,writelead,buflen;
+    DWORD                       startpos,writelead,buflen;
     DWORD                       nAvgBytesPerSec;
     DWORD                       freq;
     DSVOLUMEPAN                 volpan;
@@ -172,7 +170,7 @@ struct IDirectSoundBufferImpl
     /* used for frequency conversion (PerfectPitch) */
     ULONG                       freqAdjust, freqAcc;
     /* used for intelligent (well, sort of) prebuffering */
-    DWORD                       primary_mixpos, buf_mixpos, last_playpos, remix_pos;
+    DWORD                       primary_mixpos, buf_mixpos;
 
     /* IDirectSoundNotifyImpl fields */
     IDirectSoundNotifyImpl*     notify;
@@ -429,13 +427,9 @@ HRESULT DSOUND_PrimarySetFormat(DirectSoundDevice *device, LPCWAVEFORMATEX wfex)
  
 HRESULT DSOUND_FullDuplexCreate(REFIID riid, LPDIRECTSOUNDFULLDUPLEX* ppDSFD);
 
-/* buffer.c */
-
-DWORD DSOUND_CalcPlayPosition(IDirectSoundBufferImpl *This, DWORD pplay, DWORD pwrite);
-
 /* mixer.c */
 
-void DSOUND_CheckEvent(IDirectSoundBufferImpl *dsb, int len);
+void DSOUND_CheckEvent(IDirectSoundBufferImpl *dsb, DWORD playpos, int len);
 void DSOUND_RecalcVolPan(PDSVOLUMEPAN volpan);
 void DSOUND_AmpFactorToVolPan(PDSVOLUMEPAN volpan);
 void DSOUND_RecalcFormat(IDirectSoundBufferImpl *dsb);

@@ -19,12 +19,26 @@
 #ifndef __WINE_GP_PRIVATE_H_
 #define __WINE_GP_PRIVATE_H_
 
+#include <math.h>
 #include "windef.h"
 #include "gdiplus.h"
 
-#define GP_DEFAULT_PENSTYLE (PS_GEOMETRIC | PS_ENDCAP_FLAT)
+#define GP_DEFAULT_PENSTYLE (PS_GEOMETRIC | PS_ENDCAP_FLAT | PS_JOIN_MITER)
+#define MAX_ARC_PTS (13)
 
 COLORREF ARGB2COLORREF(ARGB color);
+extern INT arc2polybezier(GpPointF * points, REAL x1, REAL y1, REAL x2, REAL y2,
+    REAL startAngle, REAL sweepAngle);
+
+static inline INT roundr(REAL x)
+{
+    return (INT) floorf(x + 0.5);
+}
+
+static inline REAL deg2rad(REAL degrees)
+{
+    return M_PI * degrees / 180.0;
+}
 
 struct GpPen{
     UINT style;
@@ -32,6 +46,9 @@ struct GpPen{
     GpUnit unit;
     REAL width;
     HPEN gdipen;
+    GpLineCap endcap;
+    GpLineJoin join;
+    REAL miterlimit;
 };
 
 struct GpGraphics{
@@ -51,9 +68,13 @@ struct GpSolidFill{
 
 struct GpPath{
     GpFillMode fill;
-    GpGraphics* graphics;
     GpPathData pathdata;
     BOOL newfigure; /* whether the next drawing action starts a new figure */
+    INT datalen; /* size of the arrays in pathdata */
+};
+
+struct GpMatrix{
+    REAL matrix[6];
 };
 
 #endif

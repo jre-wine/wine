@@ -128,10 +128,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(font);
 #include <freetype/ftmodapi.h>
 #endif
 
-#ifndef SONAME_LIBFREETYPE
-#define SONAME_LIBFREETYPE "libfreetype.so"
-#endif
-
 #ifndef HAVE_FT_TRUETYPEENGINETYPE
 typedef enum
 {
@@ -182,7 +178,7 @@ static FT_TrueTypeEngineType (*pFT_Get_TrueType_Engine_Type)(FT_Library);
 MAKE_FUNCPTR(FT_Get_WinFNT_Header);
 #endif
 
-#ifdef HAVE_FONTCONFIG_FONTCONFIG_H
+#ifdef SONAME_LIBFONTCONFIG
 #include <fontconfig/fontconfig.h>
 MAKE_FUNCPTR(FcConfigGetCurrent);
 MAKE_FUNCPTR(FcFontList);
@@ -195,9 +191,6 @@ MAKE_FUNCPTR(FcPatternCreate);
 MAKE_FUNCPTR(FcPatternDestroy);
 MAKE_FUNCPTR(FcPatternGetBool);
 MAKE_FUNCPTR(FcPatternGetString);
-#ifndef SONAME_LIBFONTCONFIG
-#define SONAME_LIBFONTCONFIG "libfontconfig.so"
-#endif
 #endif
 
 #undef MAKE_FUNCPTR
@@ -340,7 +333,7 @@ static struct list font_subst_list = LIST_INIT(font_subst_list);
 static struct list font_list = LIST_INIT(font_list);
 
 static const WCHAR defSerif[] = {'T','i','m','e','s',' ','N','e','w',' ','R','o','m','a','n','\0'};
-static const WCHAR defSans[] = {'M','S',' ','S','a','n','s',' ','S','e','r','i','f','\0'};
+static const WCHAR defSans[] = {'A','r','i','a','l','\0'};
 static const WCHAR defFixed[] = {'C','o','u','r','i','e','r',' ','N','e','w','\0'};
 
 static const WCHAR RegularW[] = {'R','e','g','u','l','a','r','\0'};
@@ -1142,13 +1135,13 @@ static INT AddFontFileToList(const char *file, char *fake_family, const WCHAR *t
                         TRACE("This font is a replacement but the original really exists, so we'll skip the replacement\n");
                         HeapFree(GetProcessHeap(), 0, StyleW);
                         pFT_Done_Face(ft_face);
-                        return 0;
+                        return 1;
                     }
                     if(!pHeader || pHeader->Font_Revision <= face->font_version) {
                         TRACE("Original font is newer so skipping this one\n");
                         HeapFree(GetProcessHeap(), 0, StyleW);
                         pFT_Done_Face(ft_face);
-                        return 0;
+                        return 1;
                     } else {
                         TRACE("Replacing original with this one\n");
                         list_remove(&face->entry);
@@ -1481,7 +1474,7 @@ static BOOL ReadFontDir(const char *dirname, BOOL external_fonts)
 
 static void load_fontconfig_fonts(void)
 {
-#ifdef HAVE_FONTCONFIG_FONTCONFIG_H
+#ifdef SONAME_LIBFONTCONFIG
     void *fc_handle = NULL;
     FcConfig *config;
     FcPattern *pat;

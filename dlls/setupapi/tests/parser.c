@@ -167,7 +167,7 @@ static void test_invalid_files(void)
             ok( hinf != INVALID_HANDLE_VALUE, "file %u: Open failed\n", i );
             ok( err == 0, "file %u: Error code set to %u\n", i, err );
         }
-        if (hinf != INVALID_HANDLE_VALUE) SetupCloseInfFile( hinf );
+        SetupCloseInfFile( hinf );
     }
 }
 
@@ -405,6 +405,11 @@ static void test_close_inf_file(void)
     SetLastError(0xdeadbeef);
     SetupCloseInfFile(NULL);
     ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    SetupCloseInfFile(INVALID_HANDLE_VALUE);
+    ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %u\n", GetLastError());
+
 }
 
 static const char *contents = "[Version]\n"

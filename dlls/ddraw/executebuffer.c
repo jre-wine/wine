@@ -227,6 +227,12 @@ IDirect3DExecuteBufferImpl_Execute(IDirect3DExecuteBufferImpl *This,
                     } else if(lpDevice->Handles[ci->u2.dwArg[0] - 1].type != DDrawHandle_Matrix) {
                         ERR("Handle %d is not a matrix handle\n", ci->u2.dwArg[0]);
                     } else {
+                        if(ci->u1.drstRenderStateType == D3DTRANSFORMSTATE_WORLD)
+                            lpDevice->world = ci->u2.dwArg[0];
+                        if(ci->u1.drstRenderStateType == D3DTRANSFORMSTATE_VIEW)
+                            lpDevice->view = ci->u2.dwArg[0];
+                        if(ci->u1.drstRenderStateType == D3DTRANSFORMSTATE_PROJECTION)
+                            lpDevice->proj = ci->u2.dwArg[0];
                         IDirect3DDevice7_SetTransform(ICOM_INTERFACE(lpDevice, IDirect3DDevice7),
                                                       ci->u1.drstRenderStateType, (LPD3DMATRIX) lpDevice->Handles[ci->u2.dwArg[0] - 1].ptr);
                     }
@@ -246,14 +252,19 @@ IDirect3DExecuteBufferImpl_Execute(IDirect3DExecuteBufferImpl *This,
 		    if (!ci->u1.dlstLightStateType && (ci->u1.dlstLightStateType > D3DLIGHTSTATE_COLORVERTEX))
 			ERR("Unexpected Light State Type\n");
 		    else if (ci->u1.dlstLightStateType == D3DLIGHTSTATE_MATERIAL /* 1 */) {
-			IDirect3DMaterialImpl *mat = (IDirect3DMaterialImpl *) ci->u2.dwArg[0];
+            DWORD matHandle = ci->u2.dwArg[0];
 
-			if (mat != NULL) {
-			    mat->activate(mat);
-			} else {
-			    FIXME(" D3DLIGHTSTATE_MATERIAL called with NULL material !!!\n");
-			}
+            if(!matHandle) {
+                FIXME(" D3DLIGHTSTATE_MATERIAL called with NULL material !!!\n");
+            } else if(matHandle >= lpDevice->numHandles) {
+                WARN("Material handle %d is invalid\n", matHandle);
+            } else if(lpDevice->Handles[matHandle - 1].type != DDrawHandle_Material) {
+                WARN("Handle %d is not a material handle\n", matHandle);
+            } else {
+                IDirect3DMaterialImpl *mat = (IDirect3DMaterialImpl *) lpDevice->Handles[matHandle - 1].ptr;
+                mat->activate(mat);
 		    }
+            }
 		   else if (ci->u1.dlstLightStateType == D3DLIGHTSTATE_COLORMODEL /* 3 */) {
 			switch (ci->u2.dwArg[0]) {
 			    case D3DCOLOR_MONO:
@@ -334,7 +345,7 @@ IDirect3DExecuteBufferImpl_Execute(IDirect3DExecuteBufferImpl *This,
                                             (WINED3DMATRIX*) &proj_mat);
 
                 IWineD3DDevice_GetTransform(lpDevice->wineD3DDevice,
-                                            D3DTRANSFORMSTATE_WORLD,
+                                            WINED3DTS_WORLDMATRIX(0),
                                             (WINED3DMATRIX*) &world_mat);
 
 		for (i = 0; i < count; i++) {
@@ -428,7 +439,7 @@ IDirect3DExecuteBufferImpl_Execute(IDirect3DExecuteBufferImpl *This,
 
 			    dst->u1.sx = dst->u1.sx / dst->u4.rhw * Viewport->dwWidth / 2
 				       + Viewport->dwX + Viewport->dwWidth / 2;
-			    dst->u2.sy = dst->u2.sy / dst->u4.rhw * Viewport->dwHeight / 2
+			    dst->u2.sy = (-dst->u2.sy) / dst->u4.rhw * Viewport->dwHeight / 2
 				       + Viewport->dwY + Viewport->dwHeight / 2;
 			    dst->u3.sz /= dst->u4.rhw;
 			    dst->u4.rhw = 1 / dst->u4.rhw;
@@ -514,13 +525,11 @@ IDirect3DExecuteBufferImpl_Execute(IDirect3DExecuteBufferImpl *This,
 		        if (!ci->bNegate) {
                             TRACE(" Branch to %d\n", ci->dwOffset);
 			    instr = (char*)current + ci->dwOffset;
-			    break;
 			}
 		    } else {
 		        if (ci->bNegate) {
                             TRACE(" Branch to %d\n", ci->dwOffset);
 			    instr = (char*)current + ci->dwOffset;
-			    break;
 			}
 		    }
 
