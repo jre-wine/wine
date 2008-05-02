@@ -1919,6 +1919,13 @@ static struct fd *get_handle_fd_obj( struct process *process, obj_handle_t handl
     return fd;
 }
 
+/* add a completion result to a completion queue attached to the fd */
+void fd_add_completion( struct fd *fd, unsigned long cvalue, unsigned int status, unsigned long information )
+{
+    if (fd->completion)
+        add_completion( fd->completion, fd->comp_key, cvalue, status, information );
+}
+
 /* flush a file buffers */
 DECL_HANDLER(flush_file)
 {
@@ -2046,6 +2053,17 @@ DECL_HANDLER(set_completion_info)
             fd->comp_key = req->ckey;
         }
         else set_error( STATUS_INVALID_PARAMETER );
+        release_object( fd );
+    }
+}
+
+/* push new completion msg into a completion queue attached to the fd */
+DECL_HANDLER(add_fd_completion)
+{
+    struct fd *fd = get_handle_fd_obj( current->process, req->handle, 0 );
+    if (fd)
+    {
+        fd_add_completion( fd, req->cvalue, req->status, req->information );
         release_object( fd );
     }
 }

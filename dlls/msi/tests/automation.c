@@ -387,6 +387,9 @@ static void check_service_is_installed(void)
 
     res = DeleteService(service);
     ok(res, "Failed to delete TestService\n");
+
+    CloseServiceHandle(service);
+    CloseServiceHandle(scm);
 }
 
 /*
@@ -1365,6 +1368,8 @@ static void test_SummaryInfo(IDispatch *pSummaryInfo, const msi_summary_info *in
         }
         else
             skip("SummaryInfo_Property (pid %d) unhandled result type %d\n", entry->property, vt);
+
+        VariantClear(&varresult);
     }
 
     /* SummaryInfo::Property, get; invalid arguments */

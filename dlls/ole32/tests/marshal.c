@@ -434,6 +434,8 @@ static void test_same_apartment_unmarshal_failure(void)
     ok(hr == E_NOINTERFACE, "CoUnmarshalInterface should have returned E_NOINTERFACE instead of 0x%08x\n", hr);
 
     ok_no_locks();
+
+    IStream_Release(pStream);
 }
 
 /* tests success case of an interthread marshal */
@@ -2553,7 +2555,7 @@ static void test_local_server(void)
     ok(process != NULL, "couldn't start local server process, error was %d\n", GetLastError());
 
     ready_event = CreateEvent(NULL, FALSE, FALSE, "Wine COM Test Ready Event");
-    WaitForSingleObject(ready_event, 1000);
+    WaitForSingleObject(ready_event, INFINITE);
     CloseHandle(ready_event);
 
     hr = CoCreateInstance(&CLSID_WineOOPTest, NULL, CLSCTX_LOCAL_SERVER, &IID_IClassFactory, (void **)&cf);

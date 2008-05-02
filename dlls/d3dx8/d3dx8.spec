@@ -12,8 +12,8 @@
 @ stdcall D3DXVec3Transform(ptr ptr ptr)
 @ stdcall D3DXVec3TransformCoord(ptr ptr ptr)
 @ stdcall D3DXVec3TransformNormal(ptr ptr ptr)
-@ stub D3DXVec3Project
-@ stub D3DXVec3Unproject
+@ stdcall D3DXVec3Project(ptr ptr ptr ptr ptr ptr)
+@ stdcall D3DXVec3Unproject(ptr ptr ptr ptr ptr ptr)
 @ stdcall D3DXVec4Cross(ptr ptr ptr ptr)
 @ stdcall D3DXVec4Normalize(ptr ptr)
 @ stdcall D3DXVec4Hermite(ptr ptr ptr ptr ptr long)
@@ -22,8 +22,9 @@
 @ stdcall D3DXVec4Transform(ptr ptr ptr)
 @ stdcall D3DXMatrixfDeterminant(ptr)
 @ stdcall D3DXMatrixMultiply(ptr ptr ptr)
+@ stdcall D3DXMatrixMultiplyTranspose(ptr ptr ptr)
 @ stdcall D3DXMatrixTranspose(ptr ptr)
-@ stub D3DXMatrixInverse
+@ stdcall D3DXMatrixInverse(ptr ptr ptr)
 @ stdcall D3DXMatrixScaling(ptr long long long)
 @ stdcall D3DXMatrixTranslation(ptr long long long)
 @ stdcall D3DXMatrixRotationX(ptr long)
@@ -32,8 +33,8 @@
 @ stdcall D3DXMatrixRotationAxis(ptr ptr long)
 @ stdcall D3DXMatrixRotationQuaternion(ptr ptr)
 @ stdcall D3DXMatrixRotationYawPitchRoll(ptr long long long)
-@ stub D3DXMatrixTransformation
-@ stub D3DXMatrixAffineTransformation
+@ stdcall D3DXMatrixTransformation(ptr ptr ptr ptr ptr ptr ptr)
+@ stdcall D3DXMatrixAffineTransformation(ptr long ptr ptr ptr)
 @ stdcall D3DXMatrixLookAtRH(ptr ptr ptr ptr)
 @ stdcall D3DXMatrixLookAtLH(ptr ptr ptr ptr)
 @ stdcall D3DXMatrixPerspectiveRH(ptr long long long long)
@@ -46,27 +47,27 @@
 @ stdcall D3DXMatrixOrthoLH(ptr long long long long)
 @ stdcall D3DXMatrixOrthoOffCenterRH(ptr long long long long long long)
 @ stdcall D3DXMatrixOrthoOffCenterLH(ptr long long long long long long)
-@ stub D3DXMatrixShadow
-@ stub D3DXMatrixReflect
-@ stub D3DXQuaternionToAxisAngle
-@ stub D3DXQuaternionRotationMatrix
-@ stub D3DXQuaternionRotationAxis
-@ stub D3DXQuaternionRotationYawPitchRoll
-@ stub D3DXQuaternionMultiply
+@ stdcall D3DXMatrixShadow(ptr ptr ptr)
+@ stdcall D3DXMatrixReflect(ptr ptr)
+@ stdcall D3DXQuaternionToAxisAngle(ptr ptr ptr)
+@ stdcall D3DXQuaternionRotationMatrix(ptr ptr)
+@ stdcall D3DXQuaternionRotationAxis(ptr ptr long)
+@ stdcall D3DXQuaternionRotationYawPitchRoll(ptr long long long)
+@ stdcall D3DXQuaternionMultiply(ptr ptr ptr)
 @ stdcall D3DXQuaternionNormalize(ptr ptr)
-@ stub D3DXQuaternionInverse
-@ stub D3DXQuaternionLn
-@ stub D3DXQuaternionExp
-@ stub D3DXQuaternionSlerp
-@ stub D3DXQuaternionSquad
-@ stub D3DXQuaternionBaryCentric
-@ stub D3DXPlaneNormalize
-@ stub D3DXPlaneIntersectLine
-@ stub D3DXPlaneFromPointNormal
-@ stub D3DXPlaneFromPoints
-@ stub D3DXPlaneTransform
-@ stub D3DXColorAdjustSaturation
-@ stub D3DXColorAdjustContrast
+@ stdcall D3DXQuaternionInverse(ptr ptr)
+@ stdcall D3DXQuaternionLn(ptr ptr)
+@ stdcall D3DXQuaternionExp(ptr ptr)
+@ stdcall D3DXQuaternionSlerp(ptr ptr ptr long)
+@ stdcall D3DXQuaternionSquad(ptr ptr ptr ptr ptr long)
+@ stdcall D3DXQuaternionBaryCentric(ptr ptr ptr ptr long long)
+@ stdcall D3DXPlaneNormalize(ptr ptr)
+@ stdcall D3DXPlaneIntersectLine(ptr ptr ptr ptr)
+@ stdcall D3DXPlaneFromPointNormal(ptr ptr ptr)
+@ stdcall D3DXPlaneFromPoints(ptr ptr ptr ptr)
+@ stdcall D3DXPlaneTransform(ptr ptr ptr)
+@ stdcall D3DXColorAdjustSaturation(ptr ptr long)
+@ stdcall D3DXColorAdjustContrast(ptr ptr long)
 @ stub D3DXCreateMatrixStack
 @ stdcall D3DXCreateFont(ptr ptr ptr)
 @ stub D3DXCreateFontIndirect

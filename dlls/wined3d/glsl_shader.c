@@ -199,6 +199,11 @@ static void shader_glsl_load_constantsF(IWineD3DBaseShaderImpl* This, WineD3D_GL
     }
     checkGLcall("glUniform4fvARB()");
 
+    if(!This->baseShader.load_local_constsF) {
+        TRACE("No need to load local float constants for this shader\n");
+        return;
+    }
+
     /* Load immediate constants */
     if (TRACE_ON(d3d_shader)) {
         LIST_FOR_EACH_ENTRY(lconst, &This->baseShader.constantsF, local_constant, entry) {
@@ -288,7 +293,7 @@ static void shader_glsl_load_constantsB(
     for (i=0; i<max_constants; ++i) {
         if (NULL == constants_set || constants_set[i]) {
 
-            TRACE_(d3d_constants)("Loading constants %i: %i;\n", i, constants[i*4]);
+            TRACE_(d3d_constants)("Loading constants %i: %i;\n", i, constants[i]);
 
             /* TODO: Benchmark and see if it would be beneficial to store the 
              * locations of the constants to avoid looking up each time */
@@ -296,7 +301,7 @@ static void shader_glsl_load_constantsB(
             tmp_loc = GL_EXTCALL(glGetUniformLocationARB(programId, tmp_name));
             if (tmp_loc != -1) {
                 /* We found this uniform name in the program - go ahead and send the data */
-                GL_EXTCALL(glUniform1ivARB(tmp_loc, 1, &constants[i*4]));
+                GL_EXTCALL(glUniform1ivARB(tmp_loc, 1, &constants[i]));
                 checkGLcall("glUniform1ivARB");
             }
         }
@@ -464,6 +469,7 @@ void shader_generate_glsl_declarations(
     IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *) This->baseShader.device;
     int i;
     unsigned int extra_constants_needed = 0;
+    local_constant* lconst;
 
     /* There are some minor differences between pixel and vertex shaders */
     char pshader = shader_is_pshader_version(This->baseShader.hex_version);
@@ -472,7 +478,7 @@ void shader_generate_glsl_declarations(
     /* Prototype the subroutines */
     for (i = 0; i < This->baseShader.limits.label; i++) {
         if (reg_maps->labels[i])
-            shader_addline(buffer, "void subroutine%lu();\n", i);
+            shader_addline(buffer, "void subroutine%u();\n", i);
     }
 
     /* Declare the constants (aka uniforms) */
@@ -527,9 +533,9 @@ void shader_generate_glsl_declarations(
                 extra_constants_needed++;
             } else {
                 ps_impl->srgb_mode_hardcoded = 1;
-                shader_addline(buffer, "const vec4 srgb_mul_low = {%f, %f, %f, %f};\n",
+                shader_addline(buffer, "const vec4 srgb_mul_low = vec4(%f, %f, %f, %f);\n",
                                srgb_mul_low, srgb_mul_low, srgb_mul_low, srgb_mul_low);
-                shader_addline(buffer, "const vec4 srgb_comparison = {%f, %f, %f, %f};\n",
+                shader_addline(buffer, "const vec4 srgb_comparison = vec4(%f, %f, %f, %f);\n",
                                srgb_cmp, srgb_cmp, srgb_cmp, srgb_cmp);
             }
         } else {
@@ -551,7 +557,7 @@ void shader_generate_glsl_declarations(
                  * actually used, only the max limit of the shader version
                  */
                 FIXME("Cannot find a free uniform for vpos correction params\n");
-                shader_addline(buffer, "const vec4 ycorrection = {%f, %f, 0.0, 0.0};\n",
+                shader_addline(buffer, "const vec4 ycorrection = vec4(%f, %f, 0.0, 0.0);\n",
                                device->render_offscreen ? 0.0 : ((IWineD3DSurfaceImpl *) device->render_targets[0])->currentDesc.Height,
                                device->render_offscreen ? 1.0 : -1.0);
             }
@@ -567,19 +573,24 @@ void shader_generate_glsl_declarations(
             switch (stype) {
 
                 case WINED3DSTT_1D:
-                    shader_addline(buffer, "uniform sampler1D %csampler%lu;\n", prefix, i);
+                    shader_addline(buffer, "uniform sampler1D %csampler%u;\n", prefix, i);
                     break;
                 case WINED3DSTT_2D:
-                    shader_addline(buffer, "uniform sampler2D %csampler%lu;\n", prefix, i);
+                    if(device->stateBlock->textures[i] &&
+                       IWineD3DBaseTexture_GetTextureDimensions(device->stateBlock->textures[i]) == GL_TEXTURE_RECTANGLE_ARB) {
+                        shader_addline(buffer, "uniform sampler2DRect %csampler%u;\n", prefix, i);
+                    } else {
+                        shader_addline(buffer, "uniform sampler2D %csampler%u;\n", prefix, i);
+                    }
                     break;
                 case WINED3DSTT_CUBE:
-                    shader_addline(buffer, "uniform samplerCube %csampler%lu;\n", prefix, i);
+                    shader_addline(buffer, "uniform samplerCube %csampler%u;\n", prefix, i);
                     break;
                 case WINED3DSTT_VOLUME:
-                    shader_addline(buffer, "uniform sampler3D %csampler%lu;\n", prefix, i);
+                    shader_addline(buffer, "uniform sampler3D %csampler%u;\n", prefix, i);
                     break;
                 default:
-                    shader_addline(buffer, "uniform unsupported_sampler %csampler%lu;\n", prefix, i);
+                    shader_addline(buffer, "uniform unsupported_sampler %csampler%u;\n", prefix, i);
                     FIXME("Unrecognized sampler type: %#x\n", stype);
                     break;
             }
@@ -595,7 +606,7 @@ void shader_generate_glsl_declarations(
     /* Declare texture coordinate temporaries and initialize them */
     for (i = 0; i < This->baseShader.limits.texcoord; i++) {
         if (reg_maps->texcoord[i]) 
-            shader_addline(buffer, "vec4 T%lu = gl_TexCoord[%lu];\n", i, i);
+            shader_addline(buffer, "vec4 T%u = gl_TexCoord[%u];\n", i, i);
     }
 
     /* Declare input register varyings. Only pixel shader, vertex shaders have that declared in the
@@ -603,25 +614,25 @@ void shader_generate_glsl_declarations(
      */
     if(pshader && This->baseShader.hex_version >= WINED3DVS_VERSION(3, 0)) {
         if(use_vs(device)) {
-            shader_addline(buffer, "varying vec4 IN[%lu];\n", GL_LIMITS(glsl_varyings) / 4);
+            shader_addline(buffer, "varying vec4 IN[%u];\n", GL_LIMITS(glsl_varyings) / 4);
         } else {
             /* TODO: Write a replacement shader for the fixed function vertex pipeline, so this isn't needed.
              * For fixed function vertex processing + 3.0 pixel shader we need a separate function in the
              * pixel shader that reads the fixed function color into the packed input registers.
              */
-            shader_addline(buffer, "vec4 IN[%lu];\n", GL_LIMITS(glsl_varyings) / 4);
+            shader_addline(buffer, "vec4 IN[%u];\n", GL_LIMITS(glsl_varyings) / 4);
         }
     }
 
     /* Declare output register temporaries */
     if(This->baseShader.limits.packed_output) {
-        shader_addline(buffer, "vec4 OUT[%lu];\n", This->baseShader.limits.packed_output);
+        shader_addline(buffer, "vec4 OUT[%u];\n", This->baseShader.limits.packed_output);
     }
 
     /* Declare temporary variables */
     for(i = 0; i < This->baseShader.limits.temporary; i++) {
         if (reg_maps->temporary[i])
-            shader_addline(buffer, "vec4 R%lu;\n", i);
+            shader_addline(buffer, "vec4 R%u;\n", i);
     }
 
     /* Declare attributes */
@@ -639,6 +650,15 @@ void shader_generate_glsl_declarations(
     /* Temporary variables for matrix operations */
     shader_addline(buffer, "vec4 tmp0;\n");
     shader_addline(buffer, "vec4 tmp1;\n");
+
+    /* Hardcodeable local constants */
+    if(!This->baseShader.load_local_constsF) {
+        LIST_FOR_EACH_ENTRY(lconst, &This->baseShader.constantsF, local_constant, entry) {
+            float *value = (float *) lconst->value;
+            shader_addline(buffer, "const vec4 LC%u = vec4(%f, %f, %f, %f);\n", lconst->idx,
+                           value[0], value[1], value[2], value[3]);
+        }
+    }
 
     /* Start the main program */
     shader_addline(buffer, "void main() {\n");
@@ -734,6 +754,17 @@ static void shader_glsl_gen_modifier (
     }
 }
 
+static BOOL constant_is_local(IWineD3DBaseShaderImpl* This, DWORD reg) {
+    local_constant* lconst;
+
+    if(This->baseShader.load_local_constsF) return FALSE;
+    LIST_FOR_EACH_ENTRY(lconst, &This->baseShader.constantsF, local_constant, entry) {
+        if(lconst->idx == reg) return TRUE;
+    }
+    return FALSE;
+
+}
+
 /** Writes the GLSL variable name that corresponds to the register that the
  * DX opcode parameter is trying to access */
 static void shader_glsl_get_register_name(
@@ -819,8 +850,13 @@ static void shader_glsl_get_register_name(
                }
            }
 
-        } else
-             sprintf(tmpStr, "%s[%u]", prefix, reg);
+        } else {
+            if(constant_is_local(This, reg)) {
+                sprintf(tmpStr, "LC%u", reg);
+            } else {
+                sprintf(tmpStr, "%s[%u]", prefix, reg);
+            }
+        }
 
         break;
     }
@@ -1050,7 +1086,7 @@ static inline const char* shader_get_comp_op(
     }
 }
 
-static void shader_glsl_get_sample_function(DWORD sampler_type, BOOL projected, glsl_sample_function_t *sample_function) {
+static void shader_glsl_get_sample_function(DWORD sampler_type, BOOL projected, BOOL texrect, glsl_sample_function_t *sample_function) {
     /* Note that there's no such thing as a projected cube texture. */
     switch(sampler_type) {
         case WINED3DSTT_1D:
@@ -1058,7 +1094,11 @@ static void shader_glsl_get_sample_function(DWORD sampler_type, BOOL projected, 
             sample_function->coord_mask = WINED3DSP_WRITEMASK_0;
             break;
         case WINED3DSTT_2D:
-            sample_function->name = projected ? "texture2DProj" : "texture2D";
+            if(texrect) {
+                sample_function->name = projected ? "texture2DRectProj" : "texture2DRect";
+            } else {
+                sample_function->name = projected ? "texture2DProj" : "texture2D";
+            }
             sample_function->coord_mask = WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1;
             break;
         case WINED3DSTT_CUBE:
@@ -1532,9 +1572,17 @@ void shader_glsl_compare(SHADER_OPCODE_ARG* arg) {
     } else {
         switch(arg->opcode->opcode) {
             case WINED3DSIO_SLT:
-                shader_addline(arg->buffer, "step(%s, %s));\n", src0_param.param_str, src1_param.param_str);
+                /* Step(src0, src1) is not suitable here because if src0 == src1 SLT is supposed,
+                 * to return 0.0 but step returns 1.0 because step is not < x
+                 * An alternative is a bvec compare padded with an unused secound component.
+                 * step(src1 * -1.0, src0 * -1.0) is not an option because it suffers from the same
+                 * issue. Playing with not() is not possible either because not() does not accept
+                 * a scalar.
+                 */
+                shader_addline(arg->buffer, "(%s < %s) ? 1.0 : 0.0);\n", src0_param.param_str, src1_param.param_str);
                 break;
             case WINED3DSIO_SGE:
+                /* Here we can use the step() function and safe a conditional */
                 shader_addline(arg->buffer, "step(%s, %s));\n", src1_param.param_str, src0_param.param_str);
                 break;
             default:
@@ -1970,12 +2018,12 @@ void shader_glsl_label(SHADER_OPCODE_ARG* arg) {
 
     DWORD snum = (arg->src[0]) & WINED3DSP_REGNUM_MASK;
     shader_addline(arg->buffer, "}\n");
-    shader_addline(arg->buffer, "void subroutine%lu () {\n",  snum);
+    shader_addline(arg->buffer, "void subroutine%u () {\n",  snum);
 }
 
 void shader_glsl_call(SHADER_OPCODE_ARG* arg) {
     DWORD snum = (arg->src[0]) & WINED3DSP_REGNUM_MASK;
-    shader_addline(arg->buffer, "subroutine%lu();\n", snum);
+    shader_addline(arg->buffer, "subroutine%u();\n", snum);
 }
 
 void shader_glsl_callnz(SHADER_OPCODE_ARG* arg) {
@@ -1983,7 +2031,7 @@ void shader_glsl_callnz(SHADER_OPCODE_ARG* arg) {
 
     DWORD snum = (arg->src[0]) & WINED3DSP_REGNUM_MASK;
     shader_glsl_add_src_param(arg, arg->src[1], arg->src_addr[1], WINED3DSP_WRITEMASK_0, &src1_param);
-    shader_addline(arg->buffer, "if (%s) subroutine%lu();\n", src1_param.param_str, snum);
+    shader_addline(arg->buffer, "if (%s) subroutine%u();\n", src1_param.param_str, snum);
 }
 
 /*********************************************
@@ -1997,7 +2045,7 @@ void pshader_glsl_tex(SHADER_OPCODE_ARG* arg) {
     glsl_sample_function_t sample_function;
     DWORD sampler_type;
     DWORD sampler_idx;
-    BOOL projected;
+    BOOL projected, texrect = FALSE;
     DWORD mask = 0;
 
     /* All versions have a destination register */
@@ -2047,8 +2095,13 @@ void pshader_glsl_tex(SHADER_OPCODE_ARG* arg) {
         }
     }
 
+    if(deviceImpl->stateBlock->textures[sampler_idx] &&
+       IWineD3DBaseTexture_GetTextureDimensions(deviceImpl->stateBlock->textures[sampler_idx]) == GL_TEXTURE_RECTANGLE_ARB) {
+        texrect = TRUE;
+    }
+
     sampler_type = arg->reg_maps->samplers[sampler_idx] & WINED3DSP_TEXTURETYPE_MASK;
-    shader_glsl_get_sample_function(sampler_type, projected, &sample_function);
+    shader_glsl_get_sample_function(sampler_type, projected, texrect, &sample_function);
     mask |= sample_function.coord_mask;
 
     if (hex_version < WINED3DPS_VERSION(2,0)) {
@@ -2083,19 +2136,24 @@ void pshader_glsl_tex(SHADER_OPCODE_ARG* arg) {
 
 void shader_glsl_texldl(SHADER_OPCODE_ARG* arg) {
     IWineD3DBaseShaderImpl* This = (IWineD3DBaseShaderImpl*)arg->shader;
+    IWineD3DDeviceImpl* deviceImpl = (IWineD3DDeviceImpl*) This->baseShader.device;
     glsl_sample_function_t sample_function;
     glsl_src_param_t coord_param, lod_param;
     char dst_swizzle[6];
     DWORD sampler_type;
     DWORD sampler_idx;
+    BOOL texrect = FALSE;
 
     shader_glsl_append_dst(arg->buffer, arg);
     shader_glsl_get_swizzle(arg->src[1], FALSE, arg->dst, dst_swizzle);
 
     sampler_idx = arg->src[1] & WINED3DSP_REGNUM_MASK;
     sampler_type = arg->reg_maps->samplers[sampler_idx] & WINED3DSP_TEXTURETYPE_MASK;
-    shader_glsl_get_sample_function(sampler_type, FALSE, &sample_function);
-    shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], sample_function.coord_mask, &coord_param);
+    if(deviceImpl->stateBlock->textures[sampler_idx] &&
+       IWineD3DBaseTexture_GetTextureDimensions(deviceImpl->stateBlock->textures[sampler_idx]) == GL_TEXTURE_RECTANGLE_ARB) {
+        texrect = TRUE;
+    }
+    shader_glsl_get_sample_function(sampler_type, FALSE, texrect, &sample_function);    shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], sample_function.coord_mask, &coord_param);
 
     shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], WINED3DSP_WRITEMASK_3, &lod_param);
 
@@ -2177,9 +2235,11 @@ void pshader_glsl_texdp3tex(SHADER_OPCODE_ARG* arg) {
     shader_glsl_get_write_mask(arg->dst, dst_mask);
 
     /* Do I have to take care about the projected bit? I don't think so, since the dp3 returns only one
-     * scalar, and projected sampling would require 4
+     * scalar, and projected sampling would require 4.
+     *
+     * It is a dependent read - not valid with conditional NP2 textures
      */
-    shader_glsl_get_sample_function(sampler_type, FALSE, &sample_function);
+    shader_glsl_get_sample_function(sampler_type, FALSE, FALSE, &sample_function);
 
     switch(count_bits(sample_function.coord_mask)) {
         case 1:
@@ -2234,7 +2294,7 @@ void pshader_glsl_texdepth(SHADER_OPCODE_ARG* arg) {
      * too is irrelevant, since if x = 0, any y value < 1.0 (and > 1.0 is not allowed) results in a result
      * >= 1.0 or < 0.0
      */
-    shader_addline(arg->buffer, "gl_FragDepth = clamp((%s.x / min(%s.y, 1.0)), 0.0, 1.0);\n", dst_param.reg_name, dst_param.reg_name, dst_param.reg_name);
+    shader_addline(arg->buffer, "gl_FragDepth = clamp((%s.x / min(%s.y, 1.0)), 0.0, 1.0);\n", dst_param.reg_name, dst_param.reg_name);
 }
 
 /** Process the WINED3DSIO_TEXM3X2DEPTH instruction in GLSL:
@@ -2315,7 +2375,8 @@ void pshader_glsl_texm3x3tex(SHADER_OPCODE_ARG* arg) {
 
     shader_glsl_append_dst(arg->buffer, arg);
     shader_glsl_get_write_mask(arg->dst, dst_mask);
-    shader_glsl_get_sample_function(sampler_type, FALSE, &sample_function);
+    /* Dependent read, not valid with conditional NP2 */
+    shader_glsl_get_sample_function(sampler_type, FALSE, FALSE, &sample_function);
 
     /* Sample the texture using the calculated coordinates */
     shader_addline(arg->buffer, "%s(Psampler%u, tmp0.xyz)%s);\n", sample_function.name, reg, dst_mask);
@@ -2367,7 +2428,8 @@ void pshader_glsl_texm3x3spec(SHADER_OPCODE_ARG* arg) {
 
     shader_glsl_append_dst(buffer, arg);
     shader_glsl_get_write_mask(arg->dst, dst_mask);
-    shader_glsl_get_sample_function(stype, FALSE, &sample_function);
+    /* Dependent read, not valid with conditional NP2 */
+    shader_glsl_get_sample_function(stype, FALSE, FALSE, &sample_function);
 
     /* Sample the texture */
     shader_addline(buffer, "%s(Psampler%u, tmp0.xyz)%s);\n", sample_function.name, reg, dst_mask);
@@ -2401,7 +2463,8 @@ void pshader_glsl_texm3x3vspec(SHADER_OPCODE_ARG* arg) {
 
     shader_glsl_append_dst(buffer, arg);
     shader_glsl_get_write_mask(arg->dst, dst_mask);
-    shader_glsl_get_sample_function(sampler_type, FALSE, &sample_function);
+    /* Dependent read, not valid with conditional NP2 */
+    shader_glsl_get_sample_function(sampler_type, FALSE, FALSE, &sample_function);
 
     /* Sample the texture using the calculated coordinates */
     shader_addline(buffer, "%s(Psampler%u, tmp0.xyz)%s);\n", sample_function.name, reg, dst_mask);
@@ -2429,7 +2492,8 @@ void pshader_glsl_texbem(SHADER_OPCODE_ARG* arg) {
     flags = deviceImpl->stateBlock->textureState[sampler_idx][WINED3DTSS_TEXTURETRANSFORMFLAGS];
 
     sampler_type = arg->reg_maps->samplers[sampler_idx] & WINED3DSP_TEXTURETYPE_MASK;
-    shader_glsl_get_sample_function(sampler_type, FALSE, &sample_function);
+    /* Dependent read, not valid with conditional NP2 */
+    shader_glsl_get_sample_function(sampler_type, FALSE, FALSE, &sample_function);
     mask = sample_function.coord_mask;
 
     shader_glsl_get_write_mask(arg->dst, dst_swizzle);
@@ -2518,7 +2582,8 @@ void pshader_glsl_texreg2rgb(SHADER_OPCODE_ARG* arg) {
 
     shader_glsl_append_dst(arg->buffer, arg);
     shader_glsl_get_write_mask(arg->dst, dst_mask);
-    shader_glsl_get_sample_function(sampler_type, FALSE, &sample_function);
+    /* Dependent read, not valid with conditional NP2 */
+    shader_glsl_get_sample_function(sampler_type, FALSE, FALSE, &sample_function);
     shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], sample_function.coord_mask, &src0_param);
 
     shader_addline(arg->buffer, "%s(Psampler%u, %s)%s);\n", sample_function.name, sampler_idx, src0_param.param_str, dst_mask);
@@ -2862,7 +2927,7 @@ static GLhandleARB generate_param_reorder_function(IWineD3DVertexShader *vertexs
         semantics_in = ps->semantics_in;
 
         /* This one is tricky: a 3.0 pixel shader reads from a 3.0 vertex shader */
-        shader_addline(&buffer, "varying vec4 IN[%lu];\n", GL_LIMITS(glsl_varyings) / 4);
+        shader_addline(&buffer, "varying vec4 IN[%u];\n", GL_LIMITS(glsl_varyings) / 4);
         shader_addline(&buffer, "void order_ps_input(in vec4 OUT[%u]) {\n", MAX_REG_OUTPUT);
 
         /* First, sort out position and point size. Those are not passed to the pixel shader */
@@ -2896,7 +2961,7 @@ static GLhandleARB generate_param_reorder_function(IWineD3DVertexShader *vertexs
     } else if(ps_major >= 3 && vs_major < 3) {
         semantics_in = ps->semantics_in;
 
-        shader_addline(&buffer, "varying vec4 IN[%lu];\n", GL_LIMITS(glsl_varyings) / 4);
+        shader_addline(&buffer, "varying vec4 IN[%u];\n", GL_LIMITS(glsl_varyings) / 4);
         shader_addline(&buffer, "void order_ps_input() {\n");
         /* The vertex shader wrote to the builtin varyings. There is no need to figure out position and
          * point size, but we depend on the optimizers kindness to find out that the pixel shader doesn't
@@ -2966,6 +3031,15 @@ static void set_glsl_shader_program(IWineD3DDevice *iface, BOOL use_ps, BOOL use
         int max_attribs = 16;   /* TODO: Will this always be the case? It is at the moment... */
         char tmp_name[10];
 
+        reorder_shader_id = generate_param_reorder_function(vshader, pshader, gl_info);
+        TRACE("Attaching GLSL shader object %u to program %u\n", reorder_shader_id, programId);
+        GL_EXTCALL(glAttachObjectARB(programId, reorder_shader_id));
+        checkGLcall("glAttachObjectARB");
+        /* Flag the reorder function for deletion, then it will be freed automatically when the program
+         * is destroyed
+         */
+        GL_EXTCALL(glDeleteObjectARB(reorder_shader_id));
+
         TRACE("Attaching GLSL shader object %u to program %u\n", vshader_id, programId);
         GL_EXTCALL(glAttachObjectARB(programId, vshader_id));
         checkGLcall("glAttachObjectARB");
@@ -2988,15 +3062,6 @@ static void set_glsl_shader_program(IWineD3DDevice *iface, BOOL use_ps, BOOL use
         checkGLcall("glBindAttribLocationARB");
 
         list_add_head(&((IWineD3DBaseShaderImpl *)vshader)->baseShader.linked_programs, &entry->vshader_entry);
-
-        reorder_shader_id = generate_param_reorder_function(vshader, pshader, gl_info);
-        TRACE("Attaching GLSL shader object %u to program %u\n", reorder_shader_id, programId);
-        GL_EXTCALL(glAttachObjectARB(programId, reorder_shader_id));
-        checkGLcall("glAttachObjectARB");
-        /* Flag the reorder function for deletion, then it will be freed automatically when the program
-         * is destroyed
-         */
-        GL_EXTCALL(glDeleteObjectARB(reorder_shader_id));
     }
 
     /* Attach GLSL pshader */
@@ -3137,10 +3202,44 @@ static void shader_glsl_cleanup(IWineD3DDevice *iface) {
     GL_EXTCALL(glUseProgramObjectARB(0));
 }
 
+static void shader_glsl_destroy(IWineD3DBaseShader *iface) {
+    struct list *linked_programs;
+    IWineD3DBaseShaderImpl *This = (IWineD3DBaseShaderImpl *) iface;
+    WineD3D_GL_Info *gl_info = &((IWineD3DDeviceImpl *) This->baseShader.device)->adapter->gl_info;
+
+    /* Note: Do not use QueryInterface here to find out which shader type this is because this code
+     * can be called from IWineD3DBaseShader::Release
+     */
+    char pshader = shader_is_pshader_version(This->baseShader.hex_version);
+
+    if(This->baseShader.prgId == 0) return;
+    linked_programs = &This->baseShader.linked_programs;
+
+    TRACE("Deleting linked programs\n");
+    if (linked_programs->next) {
+        struct glsl_shader_prog_link *entry, *entry2;
+
+        if(pshader) {
+            LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, linked_programs, struct glsl_shader_prog_link, pshader_entry) {
+                delete_glsl_program_entry(This->baseShader.device, entry);
+            }
+        } else {
+            LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, linked_programs, struct glsl_shader_prog_link, vshader_entry) {
+                delete_glsl_program_entry(This->baseShader.device, entry);
+            }
+        }
+    }
+
+    TRACE("Deleting shader object %u\n", This->baseShader.prgId);
+    GL_EXTCALL(glDeleteObjectARB(This->baseShader.prgId));
+    checkGLcall("glDeleteObjectARB");
+}
+
 const shader_backend_t glsl_shader_backend = {
     &shader_glsl_select,
     &shader_glsl_select_depth_blt,
     &shader_glsl_load_constants,
     &shader_glsl_cleanup,
-    &shader_glsl_color_correction
+    &shader_glsl_color_correction,
+    &shader_glsl_destroy
 };

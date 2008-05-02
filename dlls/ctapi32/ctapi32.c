@@ -18,14 +18,14 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <config.h>
-#include <wine/port.h>
+#include "config.h"
+#include "wine/port.h"
 #include <string.h>
-#include <wine/library.h>
-#include <wine/debug.h>
-#include <windef.h>
-#include <winreg.h>
-#include <winnls.h>
+#include "wine/library.h"
+#include "wine/debug.h"
+#include "windef.h"
+#include "winreg.h"
+#include "winnls.h"
 #include "ctapi.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ctapi32);
@@ -66,7 +66,7 @@ static int load_functions(void) {
 			buffer_w[size / sizeof(WCHAR)] = '\0';
 			len = WideCharToMultiByte(CP_UNIXCP, 0, buffer_w, -1, buffer, sizeof(buffer), NULL, NULL);
 			if (len)
-				memcpy(soname, buffer, len - 1);
+				memcpy(soname, buffer, len);
 		}
 		RegCloseKey(key_handle);
 	}

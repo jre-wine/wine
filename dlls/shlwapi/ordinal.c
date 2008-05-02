@@ -2800,22 +2800,69 @@ HRESULT WINAPI SHInvokeDefaultCommand(HWND hWnd, IShellFolder* lpFolder, LPCITEM
  *
  * _SHPackDispParamsV
  */
-HRESULT WINAPI SHPackDispParamsV(LPVOID w, LPVOID x, LPVOID y, LPVOID z)
+HRESULT WINAPI SHPackDispParamsV(DISPPARAMS *params, VARIANTARG *args, UINT cnt, va_list valist)
 {
-	FIXME("%p %p %p %p\n",w,x,y,z);
-	return E_FAIL;
+  VARIANTARG *iter;
+
+  TRACE("(%p %p %u ...)\n", params, args, cnt);
+
+  params->rgvarg = args;
+  params->rgdispidNamedArgs = NULL;
+  params->cArgs = cnt;
+  params->cNamedArgs = 0;
+
+  iter = args+cnt;
+
+  while(iter-- > args) {
+    V_VT(iter) = va_arg(valist, enum VARENUM);
+
+    TRACE("vt=%d\n", V_VT(iter));
+
+    if(V_VT(iter) & VT_BYREF) {
+      V_BYREF(iter) = va_arg(valist, LPVOID);
+    } else {
+      switch(V_VT(iter)) {
+      case VT_I4:
+        V_I4(iter) = va_arg(valist, LONG);
+        break;
+      case VT_BSTR:
+        V_BSTR(iter) = va_arg(valist, BSTR);
+        break;
+      case VT_DISPATCH:
+        V_DISPATCH(iter) = va_arg(valist, IDispatch*);
+        break;
+      case VT_BOOL:
+        V_BOOL(iter) = va_arg(valist, int);
+        break;
+      case VT_UNKNOWN:
+        V_UNKNOWN(iter) = va_arg(valist, IUnknown*);
+        break;
+      default:
+        V_VT(iter) = VT_I4;
+        V_I4(iter) = va_arg(valist, LONG);
+      }
+    }
+  }
+
+  return S_OK;
 }
 
 /*************************************************************************
  *      @       [SHLWAPI.282]
  *
- * This function seems to be a forward to SHPackDispParamsV (whatever THAT
- * function does...).
+ * SHPackDispParams
  */
-HRESULT WINAPI SHPackDispParams(LPVOID w, LPVOID x, LPVOID y, LPVOID z)
+HRESULT WINAPIV SHPackDispParams(DISPPARAMS *params, VARIANTARG *args, UINT cnt, ...)
 {
-  FIXME("%p %p %p %p\n", w, x, y, z);
-  return E_FAIL;
+  va_list valist;
+  HRESULT hres;
+
+  va_start(valist, cnt);
+
+  hres = SHPackDispParamsV(params, args, cnt, valist);
+
+  va_end(valist);
+  return hres;
 }
 
 /*************************************************************************
@@ -2939,64 +2986,27 @@ HRESULT WINAPIV IUnknown_CPContainerInvokeParam(
   HRESULT result;
   IConnectionPoint *iCP;
   IConnectionPointContainer *iCPC;
+  DISPPARAMS dispParams = {buffer, NULL, cParams, 0};
+  va_list valist;
 
   if (!container)
     return E_NOINTERFACE;
 
   result = IUnknown_QueryInterface(container, &IID_IConnectionPointContainer,(LPVOID*) &iCPC);
-  if (SUCCEEDED(result))
-  {
-    result = IConnectionPointContainer_FindConnectionPoint(iCPC, riid, &iCP);
-    IConnectionPointContainer_Release(iCPC);
-  }
+  if (FAILED(result))
+      return result;
 
-  if (SUCCEEDED(result))
-  {
-    ULONG cnt;
-    VARIANTARG *curvar = buffer+cParams-1;
-    DISPPARAMS dispParams = {buffer, NULL, cParams, 0};
-    va_list valist;
+  result = IConnectionPointContainer_FindConnectionPoint(iCPC, riid, &iCP);
+  IConnectionPointContainer_Release(iCPC);
+  if(FAILED(result))
+      return result;
 
-    va_start(valist, cParams);
-    for(cnt=cParams;cnt>0;cnt--,curvar--) /* backwards for some reason */
-    {
-      enum VARENUM vt = va_arg(valist, enum VARENUM);
-      memset(curvar, 0, sizeof(*curvar));
-      if (vt & VT_BYREF)
-      {
-        V_VT(curvar) = vt;
-        V_BYREF(curvar) = va_arg(valist, LPVOID);
-      } else
-        switch(vt)
-        {
-        case VT_BSTR:
-          V_VT(curvar) = vt;
-          V_BSTR(curvar) = va_arg(valist, BSTR);
-          break;
-        case VT_DISPATCH:
-          V_VT(curvar) = vt;
-          V_DISPATCH(curvar) = va_arg(valist, IDispatch*);
-          break;
-        case VT_BOOL:
-          V_VT(curvar) = vt;
-          V_BOOL(curvar) = va_arg(valist, int);
-          break;
-        case VT_UNKNOWN:
-          V_VT(curvar) = vt;
-          V_UNKNOWN(curvar) = va_arg(valist, IUnknown*);
-          break;
-        case VT_I4:
-        default:
-          V_VT(curvar) = VT_I4;
-          V_I4(curvar) = va_arg(valist, LONG);
-          break;
-        }
-    }
-    va_end(valist);
+  va_start(valist, cParams);
+  SHPackDispParamsV(&dispParams, buffer, cParams, valist);
+  va_end(valist);
 
-    result = SHLWAPI_InvokeByIID(iCP, riid, dispId, &dispParams);
-    IConnectionPoint_Release(iCP);
-  }
+  result = SHLWAPI_InvokeByIID(iCP, riid, dispId, &dispParams);
+  IConnectionPoint_Release(iCP);
 
   return result;
 }

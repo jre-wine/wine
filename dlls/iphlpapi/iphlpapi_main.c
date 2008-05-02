@@ -853,7 +853,7 @@ DWORD WINAPI GetBestRoute(DWORD dwDestAddr, DWORD dwSourceAddr, PMIB_IPFORWARDRO
     return ERROR_INVALID_PARAMETER;
 
   ret = AllocateAndGetIpForwardTableFromStack(&table, FALSE, GetProcessHeap(), 0);
-  if (table && !ret) {
+  if (!ret) {
     DWORD ndx, matchedBits, matchedNdx = table->dwNumEntries;
 
     for (ndx = 0, matchedBits = 0; ndx < table->dwNumEntries; ndx++) {
@@ -869,6 +869,11 @@ DWORD WINAPI GetBestRoute(DWORD dwDestAddr, DWORD dwSourceAddr, PMIB_IPFORWARDRO
           matchedBits = numShifts;
           matchedNdx = ndx;
         }
+        else if (!matchedBits && table->table[ndx].dwForwardType ==
+         MIB_IPROUTE_TYPE_INDIRECT) {
+          /* default to a default gateway */
+          matchedNdx = ndx;
+        }
       }
     }
     if (matchedNdx < table->dwNumEntries) {
@@ -881,8 +886,6 @@ DWORD WINAPI GetBestRoute(DWORD dwDestAddr, DWORD dwSourceAddr, PMIB_IPFORWARDRO
     }
     HeapFree(GetProcessHeap(), 0, table);
   }
-  else if (!ret)
-    ret = ERROR_OUTOFMEMORY;
   TRACE("returning %d\n", ret);
   return ret;
 }
@@ -1012,8 +1015,10 @@ DWORD WINAPI GetIfTable(PMIB_IFTABLE pIfTable, PULONG pdwSize, BOOL bOrder)
     ret = ERROR_INVALID_PARAMETER;
   else {
     DWORD numInterfaces = getNumInterfaces();
-    ULONG size = sizeof(MIB_IFTABLE) + (numInterfaces - 1) * sizeof(MIB_IFROW);
+    ULONG size = sizeof(MIB_IFTABLE);
 
+    if (numInterfaces > 1)
+      size += (numInterfaces - 1) * sizeof(MIB_IFROW);
     if (!pIfTable || *pdwSize < size) {
       *pdwSize = size;
       ret = ERROR_INSUFFICIENT_BUFFER;
@@ -1022,8 +1027,9 @@ DWORD WINAPI GetIfTable(PMIB_IFTABLE pIfTable, PULONG pdwSize, BOOL bOrder)
       InterfaceIndexTable *table = getInterfaceIndexTable();
 
       if (table) {
-        size = sizeof(MIB_IFTABLE) + (table->numIndexes - 1) *
-         sizeof(MIB_IFROW);
+        size = sizeof(MIB_IFTABLE);
+        if (table->numIndexes > 1)
+          size += (table->numIndexes - 1) * sizeof(MIB_IFROW);
         if (*pdwSize < size) {
           *pdwSize = size;
           ret = ERROR_INSUFFICIENT_BUFFER;
@@ -1079,9 +1085,10 @@ DWORD WINAPI GetInterfaceInfo(PIP_INTERFACE_INFO pIfTable, PULONG dwOutBufLen)
     ret = ERROR_INVALID_PARAMETER;
   else {
     DWORD numInterfaces = getNumInterfaces();
-    ULONG size = sizeof(IP_INTERFACE_INFO) + (numInterfaces - 1) *
-     sizeof(IP_ADAPTER_INDEX_MAP);
+    ULONG size = sizeof(IP_INTERFACE_INFO);
 
+    if (numInterfaces > 1)
+      size += (numInterfaces - 1) * sizeof(IP_ADAPTER_INDEX_MAP);
     if (!pIfTable || *dwOutBufLen < size) {
       *dwOutBufLen = size;
       ret = ERROR_INSUFFICIENT_BUFFER;
@@ -1090,8 +1097,9 @@ DWORD WINAPI GetInterfaceInfo(PIP_INTERFACE_INFO pIfTable, PULONG dwOutBufLen)
       InterfaceIndexTable *table = getInterfaceIndexTable();
 
       if (table) {
-        size = sizeof(IP_INTERFACE_INFO) + (table->numIndexes - 1) *
-         sizeof(IP_ADAPTER_INDEX_MAP);
+        size = sizeof(IP_INTERFACE_INFO);
+        if (table->numIndexes > 1)
+          size += (table->numIndexes - 1) * sizeof(IP_ADAPTER_INDEX_MAP);
         if (*dwOutBufLen < size) {
           *dwOutBufLen = size;
           ret = ERROR_INSUFFICIENT_BUFFER;
@@ -1164,17 +1172,17 @@ DWORD WINAPI GetIpAddrTable(PMIB_IPADDRTABLE pIpAddrTable, PULONG pdwSize, BOOL 
     ret = getIPAddrTable(&table, GetProcessHeap(), 0);
     if (ret == NO_ERROR)
     {
-      ULONG size = sizeof(MIB_IPADDRTABLE) + (table->dwNumEntries - 1) *
-       sizeof(MIB_IPADDRROW);
+      ULONG size = sizeof(MIB_IPADDRTABLE);
 
+      if (table->dwNumEntries > 1)
+        size += (table->dwNumEntries - 1) * sizeof(MIB_IPADDRROW);
       if (!pIpAddrTable || *pdwSize < size) {
         *pdwSize = size;
         ret = ERROR_INSUFFICIENT_BUFFER;
       }
       else {
         *pdwSize = size;
-        memcpy(pIpAddrTable, table, sizeof(MIB_IPADDRTABLE) +
-         (table->dwNumEntries - 1) * sizeof(MIB_IPADDRROW));
+        memcpy(pIpAddrTable, table, size);
         if (bOrder)
           qsort(pIpAddrTable->table, pIpAddrTable->dwNumEntries,
            sizeof(MIB_IPADDRROW), IpAddrTableSorter);
@@ -1219,9 +1227,10 @@ DWORD WINAPI GetIpForwardTable(PMIB_IPFORWARDTABLE pIpForwardTable, PULONG pdwSi
     ret = ERROR_INVALID_PARAMETER;
   else {
     DWORD numRoutes = getNumRoutes();
-    ULONG sizeNeeded = sizeof(MIB_IPFORWARDTABLE) + (numRoutes - 1) *
-     sizeof(MIB_IPFORWARDROW);
+    ULONG sizeNeeded = sizeof(MIB_IPFORWARDTABLE);
 
+    if (numRoutes > 1)
+      sizeNeeded += (numRoutes - 1) * sizeof(MIB_IPFORWARDROW);
     if (!pIpForwardTable || *pdwSize < sizeNeeded) {
       *pdwSize = sizeNeeded;
       ret = ERROR_INSUFFICIENT_BUFFER;
@@ -1231,8 +1240,9 @@ DWORD WINAPI GetIpForwardTable(PMIB_IPFORWARDTABLE pIpForwardTable, PULONG pdwSi
 
       ret = getRouteTable(&table, GetProcessHeap(), 0);
       if (!ret) {
-        sizeNeeded = sizeof(MIB_IPFORWARDTABLE) + (table->dwNumEntries - 1) *
-         sizeof(MIB_IPFORWARDROW);
+        sizeNeeded = sizeof(MIB_IPFORWARDTABLE);
+        if (table->dwNumEntries > 1)
+          sizeNeeded += (table->dwNumEntries - 1) * sizeof(MIB_IPFORWARDROW);
         if (*pdwSize < sizeNeeded) {
           *pdwSize = sizeNeeded;
           ret = ERROR_INSUFFICIENT_BUFFER;
@@ -1284,9 +1294,10 @@ DWORD WINAPI GetIpNetTable(PMIB_IPNETTABLE pIpNetTable, PULONG pdwSize, BOOL bOr
     ret = ERROR_INVALID_PARAMETER;
   else {
     DWORD numEntries = getNumArpEntries();
-    ULONG size = sizeof(MIB_IPNETTABLE) + (numEntries - 1) *
-     sizeof(MIB_IPNETROW);
+    ULONG size = sizeof(MIB_IPNETTABLE);
 
+    if (numEntries > 1)
+      size += (numEntries - 1) * sizeof(MIB_IPNETROW);
     if (!pIpNetTable || *pdwSize < size) {
       *pdwSize = size;
       ret = ERROR_INSUFFICIENT_BUFFER;
@@ -1296,8 +1307,9 @@ DWORD WINAPI GetIpNetTable(PMIB_IPNETTABLE pIpNetTable, PULONG pdwSize, BOOL bOr
 
       ret = getArpTable(&table, GetProcessHeap(), 0);
       if (!ret) {
-        size = sizeof(MIB_IPNETTABLE) + (table->dwNumEntries - 1) *
-         sizeof(MIB_IPNETROW);
+        size = sizeof(MIB_IPNETTABLE);
+        if (table->dwNumEntries > 1)
+          size += (table->dwNumEntries - 1) * sizeof(MIB_IPNETROW);
         if (*pdwSize < size) {
           *pdwSize = size;
           ret = ERROR_INSUFFICIENT_BUFFER;
@@ -1576,8 +1588,10 @@ DWORD WINAPI GetTcpTable(PMIB_TCPTABLE pTcpTable, PDWORD pdwSize, BOOL bOrder)
     ret = ERROR_INVALID_PARAMETER;
   else {
     DWORD numEntries = getNumTcpEntries();
-    DWORD size = sizeof(MIB_TCPTABLE) + (numEntries - 1) * sizeof(MIB_TCPROW);
+    DWORD size = sizeof(MIB_TCPTABLE);
 
+    if (numEntries > 1)
+      size += (numEntries - 1) * sizeof(MIB_TCPROW);
     if (!pTcpTable || *pdwSize < size) {
       *pdwSize = size;
       ret = ERROR_INSUFFICIENT_BUFFER;
@@ -1585,17 +1599,16 @@ DWORD WINAPI GetTcpTable(PMIB_TCPTABLE pTcpTable, PDWORD pdwSize, BOOL bOrder)
     else {
       ret = getTcpTable(&pTcpTable, numEntries, 0, 0);
       if (!ret) {
-        size = sizeof(MIB_TCPTABLE) + (pTcpTable->dwNumEntries - 1) *
-         sizeof(MIB_TCPROW);
+        size = sizeof(MIB_TCPTABLE);
+        if (pTcpTable->dwNumEntries > 1)
+          size += (pTcpTable->dwNumEntries - 1) * sizeof(MIB_TCPROW);
         *pdwSize = size;
 
-          if (bOrder)
-             qsort(pTcpTable->table, pTcpTable->dwNumEntries,
-                   sizeof(MIB_TCPROW), TcpTableSorter);
-          ret = NO_ERROR;
+        if (bOrder)
+           qsort(pTcpTable->table, pTcpTable->dwNumEntries,
+                 sizeof(MIB_TCPROW), TcpTableSorter);
+        ret = NO_ERROR;
       }
-      else
-        ret = ERROR_OUTOFMEMORY;
     }
   }
   TRACE("returning %d\n", ret);
@@ -1657,8 +1670,10 @@ DWORD WINAPI GetUdpTable(PMIB_UDPTABLE pUdpTable, PDWORD pdwSize, BOOL bOrder)
     ret = ERROR_INVALID_PARAMETER;
   else {
     DWORD numEntries = getNumUdpEntries();
-    DWORD size = sizeof(MIB_UDPTABLE) + (numEntries - 1) * sizeof(MIB_UDPROW);
+    DWORD size = sizeof(MIB_UDPTABLE);
 
+    if (numEntries > 1)
+      size += (numEntries - 1) * sizeof(MIB_UDPROW);
     if (!pUdpTable || *pdwSize < size) {
       *pdwSize = size;
       ret = ERROR_INSUFFICIENT_BUFFER;
@@ -1668,8 +1683,9 @@ DWORD WINAPI GetUdpTable(PMIB_UDPTABLE pUdpTable, PDWORD pdwSize, BOOL bOrder)
 
       ret = getUdpTable(&table, GetProcessHeap(), 0);
       if (!ret) {
-        size = sizeof(MIB_UDPTABLE) + (table->dwNumEntries - 1) *
-         sizeof(MIB_UDPROW);
+        size = sizeof(MIB_UDPTABLE);
+        if (table->dwNumEntries > 1)
+          size += (table->dwNumEntries - 1) * sizeof(MIB_UDPROW);
         if (*pdwSize < size) {
           *pdwSize = size;
           ret = ERROR_INSUFFICIENT_BUFFER;

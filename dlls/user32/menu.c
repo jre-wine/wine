@@ -216,7 +216,7 @@ const struct builtin_class_descr MENU_builtin_class =
     if (flags & (bit)) { flags &= ~(bit); MENUOUT ((text)); } \
   } while (0)
 
-static void do_debug_print_menuitem(const char *prefix, MENUITEM * mp,
+static void do_debug_print_menuitem(const char *prefix, const MENUITEM *mp,
 				    const char *postfix)
 {
     static const char * const hbmmenus[] = { "HBMMENU_CALLBACK", "", "HBMMENU_SYSTEM",
@@ -1095,7 +1095,7 @@ static void MENU_CalcItemSize( HDC hdc, MENUITEM *lpitem, HWND hwndOwner,
  *           MENU_GetMaxPopupHeight
  */
 static UINT
-MENU_GetMaxPopupHeight(LPPOPUPMENU lppop)
+MENU_GetMaxPopupHeight(const POPUPMENU *lppop)
 {
     if (lppop->cyMax)
         return lppop->cyMax;
@@ -1268,7 +1268,7 @@ static void MENU_MenuBarCalcSize( HDC hdc, LPRECT lprect,
  * Draw scroll arrows.
  */
 static void
-MENU_DrawScrollArrows(LPPOPUPMENU lppop, HDC hdc)
+MENU_DrawScrollArrows(const POPUPMENU *lppop, HDC hdc)
 {
     HDC hdcMem = CreateCompatibleDC(hdc);
     HBITMAP hOrigBitmap;
@@ -3580,7 +3580,6 @@ DWORD WINAPI CheckMenuItem( HMENU hMenu, UINT id, UINT flags )
     MENUITEM *item;
     DWORD ret;
 
-    TRACE("menu=%p id=%04x flags=%04x\n", hMenu, id, flags );
     if (!(item = MENU_FindItem( &hMenu, &id, flags ))) return -1;
     ret = item->fState & MF_CHECKED;
     if (flags & MF_CHECKED) item->fState |= MF_CHECKED;
@@ -3951,8 +3950,7 @@ BOOL WINAPI SetMenuItemBitmaps( HMENU hMenu, UINT nPos, UINT wFlags,
                                     HBITMAP hNewUnCheck, HBITMAP hNewCheck)
 {
     MENUITEM *item;
-    TRACE("(%p, %04x, %04x, %p, %p)\n",
-          hMenu, nPos, wFlags, hNewCheck, hNewUnCheck);
+
     if (!(item = MENU_FindItem( &hMenu, &nPos, wFlags ))) return FALSE;
 
     if (!hNewCheck && !hNewUnCheck)
@@ -4883,8 +4881,6 @@ BOOL WINAPI CheckMenuRadioItem(HMENU hMenu,
     UINT i;
     MENUITEM *mi_first = NULL, *mi_check;
     HMENU m_first, m_check;
-
-    TRACE("%p: %u-%u, check %u, flags %04x\n", hMenu, first, last, check, bypos);
 
     for (i = first; i <= last; i++)
     {

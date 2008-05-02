@@ -965,6 +965,44 @@ BOOL WINAPI SetConsoleTitleA( LPCSTR title )
 
 
 /***********************************************************************
+ *            GetConsoleKeyboardLayoutNameA   (KERNEL32.@)
+ */
+BOOL WINAPI GetConsoleKeyboardLayoutNameA(LPSTR layoutName)
+{
+    FIXME( "stub %p\n", layoutName);
+    return TRUE;
+}
+
+/***********************************************************************
+ *            GetConsoleKeyboardLayoutNameW   (KERNEL32.@)
+ */
+BOOL WINAPI GetConsoleKeyboardLayoutNameW(LPWSTR layoutName)
+{
+    FIXME( "stub %p\n", layoutName);
+    return TRUE;
+}
+
+/***********************************************************************
+ *            GetConsoleInputExeNameA   (KERNEL32.@)
+ */
+DWORD WINAPI GetConsoleInputExeNameA(DWORD BufferLength, LPSTR lpBuffer)
+{
+    DWORD ret = 0;
+    FIXME( "stub %u %p\n", BufferLength, lpBuffer);
+    return ret;
+}
+
+/***********************************************************************
+ *            GetConsoleInputExeNameW   (KERNEL32.@)
+ */
+DWORD WINAPI GetConsoleInputExeNameW(DWORD BufferLength, LPWSTR lpBuffer)
+{
+    DWORD ret = 0;
+    FIXME( "stub %u %p\n", BufferLength, lpBuffer);
+    return ret;
+}
+
+/***********************************************************************
  *            GetConsoleTitleA   (KERNEL32.@)
  *
  * See GetConsoleTitleW.

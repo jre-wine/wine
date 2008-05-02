@@ -3,11 +3,11 @@ Signature="$CHICAGO$"
 
 
 [RegisterDll]
-AddReg=Classes.Reg
+AddReg=Classes.Reg, Settings.Reg
 
 
 [UnregisterDll]
-DelReg=Classes.Reg
+DelReg=Classes.Reg, Settings.Reg
 
 
 [RegisterIE]
@@ -107,6 +107,26 @@ HKCR,"CLSID\%CLSID_WebBrowser_V1%\ProgID",,,"Shell.Explorer.1"
 HKCR,"CLSID\%CLSID_WebBrowser_V1%\VersionIndependentProgID",,,"Shell.Explorer"
 HKCR,"Shell.Explorer.1",,,""
 HKCR,"Shell.Explorer.1\CLSID",,,"%CLSID_WebBrowser_V1%"
+
+HKCR,"CLSID\%CLSID_InternetShortcut%",,,"Internet Shortcut"
+HKCR,"CLSID\%CLSID_InternetShortcut%\InProcServer32",,,"%MODULE%"
+HKCR,"CLSID\%CLSID_InternetShortcut%\InProcServer32","ThreadingModel",,"Apartment"
+HKCR,"CLSID\%CLSID_InternetShortcut%\ProgID",,,"InternetShortcut"
+HKCR,"CLSID\%CLSID_InternetShortcut%\shellex\MayChangeDefaultMenu",,,
+HKCR,"InternetShortcut",,,"Internet Shortcut"
+HKCR,"InternetShortcut","EditFlags",2,"2"
+HKCR,"InternetShortcut","IsShortcut",,
+HKCR,"InternetShortcut","NeverShowExt",,
+HKCR,"InternetShortcut\CLSID",,,"%CLSID_InteretShortcut%"
+HKCR,"InternetShortcut\DefaultIcon",,,"url.dll,0"
+HKCR,"InternetShortcut\shell\open\command",,,"rundll32.exe shdocvw.dll,OpenURL %l"
+HKCR,"InternetShortcut\shell\print\command",,,"rundll32.exe mshtml.dll,PrintHTML \"%1\""
+HKCR,"InternetShortcut\shell\printto\command",,,"rundll32.exe mshtml.dll,PrintHTML \"%1\" \"%2\" \"%3\" \"%4\""
+
+
+[Settings.Reg]
+HKCU,"Software\Microsoft\Internet Explorer\Main","Start Page",,"http://www.winehq.org"
+HKCU,"Software\Microsoft\Internet Explorer\Main","Search Page",,"http://www.google.com"
 
 
 [IE.Reg]

@@ -1128,6 +1128,12 @@ static void test_data_cache(void)
     hr = IOleCache_Uncache(pOleCache, 0xdeadbeef);
     ok(hr == OLE_E_NOCONNECTION, "IOleCache_Uncache with invalid value should return OLE_E_NOCONNECTION instead of 0x%x\n", hr);
 
+    hr = IOleCache_Cache(pOleCache, NULL, 0, &dwConnection);
+    ok(hr == E_INVALIDARG, "IOleCache_Cache with NULL fmtetc should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    hr = IOleCache_Cache(pOleCache, NULL, 0, NULL);
+    ok(hr == E_INVALIDARG, "IOleCache_Cache with NULL pdwConnection should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
     for (fmtetc.cfFormat = CF_TEXT; fmtetc.cfFormat < CF_MAX; fmtetc.cfFormat++)
     {
         int i;
@@ -1395,6 +1401,7 @@ static void test_default_handler(void)
     ok_ole_success(hr, "CreateItemMoniker");
     hr = IOleObject_SetMoniker(pObject, OLEWHICHMK_CONTAINER, pMoniker);
     ok_ole_success(hr, "IOleObject_SetMoniker");
+    IMoniker_Release(pMoniker);
 
     hr = IOleObject_GetMoniker(pObject, OLEGETMONIKER_ONLYIFTHERE, OLEWHICHMK_CONTAINER, &pMoniker);
     ok(hr == E_FAIL, "IOleObject_GetMoniker should have returned E_FAIL instead of 0x%08x\n", hr);

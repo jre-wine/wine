@@ -108,6 +108,12 @@ static HRESULT WINAPI WebBrowser_QueryInterface(IWebBrowser2 *iface, REFIID riid
     }else if(IsEqualGUID(&IID_IRunnableObject, riid)) {
         TRACE("(%p)->(IID_IRunnableObject %p) returning NULL\n", This, ppv);
         return E_NOINTERFACE;
+    }else if(IsEqualGUID(&IID_IPerPropertyBrowsing, riid)) {
+        TRACE("(%p)->(IID_IPerPropertyBrowsing %p) returning NULL\n", This, ppv);
+        return E_NOINTERFACE;
+    }else if(IsEqualGUID(&IID_IOleCache, riid)) {
+        TRACE("(%p)->(IID_IOleCache %p) returning NULL\n", This, ppv);
+        return E_NOINTERFACE;
     }
 
     if(*ppv) {
@@ -142,7 +148,7 @@ static ULONG WINAPI WebBrowser_Release(IWebBrowser2 *iface)
 
         WebBrowser_OleObject_Destroy(This);
 
-        shdocvw_free(This);
+        heap_free(This);
         SHDOCVW_UnlockModule();
     }
 
@@ -260,8 +266,15 @@ static HRESULT WINAPI WebBrowser_Stop(IWebBrowser2 *iface)
 static HRESULT WINAPI WebBrowser_get_Application(IWebBrowser2 *iface, IDispatch **ppDisp)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, ppDisp);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, ppDisp);
+
+    if(!ppDisp)
+        return E_POINTER;
+
+    *ppDisp = (IDispatch*)WEBBROWSER2(This);
+    IDispatch_AddRef(*ppDisp);
+    return S_OK;
 }
 
 static HRESULT WINAPI WebBrowser_get_Parent(IWebBrowser2 *iface, IDispatch **ppDisp)
@@ -450,8 +463,11 @@ static HRESULT WINAPI WebBrowser_get_Busy(IWebBrowser2 *iface, VARIANT_BOOL *pBo
 static HRESULT WINAPI WebBrowser_Quit(IWebBrowser2 *iface)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)\n", This);
+
+    /* It's a InternetExplorer specific method, we have nothing to do here. */
+    return E_FAIL;
 }
 
 static HRESULT WINAPI WebBrowser_ClientToWindow(IWebBrowser2 *iface, int *pcx, int *pcy)
@@ -929,7 +945,7 @@ static HRESULT WebBrowser_Create(INT version, IUnknown *pOuter, REFIID riid, voi
 
     TRACE("(%p %s %p) version=%d\n", pOuter, debugstr_guid(riid), ppv, version);
 
-    ret = shdocvw_alloc(sizeof(WebBrowser));
+    ret = heap_alloc(sizeof(WebBrowser));
 
     ret->lpWebBrowser2Vtbl = &WebBrowser2Vtbl;
     ret->ref = 0;
@@ -954,7 +970,7 @@ static HRESULT WebBrowser_Create(INT version, IUnknown *pOuter, REFIID riid, voi
     if(SUCCEEDED(hres)) {
         SHDOCVW_LockModule();
     }else {
-        shdocvw_free(ret);
+        heap_free(ret);
         return hres;
     }
 

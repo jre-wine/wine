@@ -179,6 +179,7 @@ typedef struct
     void           *arg;           /* opaque user data to pass to callback */
     void           *apc;           /* user apc to call */
     obj_handle_t    event;         /* event to signal when done */
+    unsigned long   cvalue;        /* completion value to use for completion events */
 } async_data_t;
 
 /* structures for extra message data */
@@ -286,7 +287,7 @@ typedef union
     struct
     {
         enum apc_type    type;     /* APC_ASYNC_IO */
-        unsigned int   (*func)(void*, void*, unsigned int);
+        unsigned int   (*func)(void*, void*, unsigned int, unsigned long *);
         void            *user;     /* user pointer */
         void            *sb;       /* status block */
         unsigned int     status;   /* I/O status */
@@ -371,6 +372,7 @@ typedef union
     {
         enum apc_type    type;      /* APC_ASYNC_IO */
         unsigned int     status;    /* new status of async operation */
+        unsigned long    total;     /* bytes transferred */
     } async_io;
     struct
     {
@@ -618,6 +620,7 @@ typedef union
 @REPLY
     size_t       size;          /* module size */
     void*        entry_point;
+    data_size_t  filename_len;    /* buffer len in bytes required to store filename */
     VARARG(filename,unicode_str); /* file name of module */
 @END
 
@@ -3004,4 +3007,13 @@ enum message_type
     obj_handle_t  handle;         /* object handle */
     obj_handle_t  chandle;        /* port handle */
     unsigned long ckey;           /* completion key */
+@END
+
+
+/* check for associated completion and push msg */
+@REQ(add_fd_completion)
+    obj_handle_t   handle;        /* async' object */
+    unsigned long  cvalue;        /* completion value */
+    unsigned int   status;        /* completion status */
+    unsigned long  information;   /* IO_STATUS_BLOCK Information */
 @END

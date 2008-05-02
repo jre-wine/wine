@@ -75,7 +75,7 @@ static const char manifest4[] =
 "<dependency>"
 "<dependentAssembly>"
 "<assemblyIdentity type=\"win32\" name=\"Microsoft.Windows.Common-Controls\" "
-    "version=\"6.0.0.0\" processorArchitecture=\"x86\" publicKeyToken=\"6595b64144ccf1df\">"
+    "version=\"6.0.1.0\" processorArchitecture=\"x86\" publicKeyToken=\"6595b64144ccf1df\">"
 "</assemblyIdentity>"
 "</dependentAssembly>"
 "</dependency>"
@@ -226,7 +226,7 @@ static BOOL create_wide_manifest(const char *filename, const char *manifest, BOO
     wmanifest[0] = 0xfeff;
     if (fReverse)
     {
-        int i;
+        size_t i;
         for (i = 0; i < strlen(manifest)+1; i++)
             wmanifest[i] = (wmanifest[i] << 8) | ((wmanifest[i] >> 8) & 0xff);
     }

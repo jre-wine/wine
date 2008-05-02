@@ -1004,6 +1004,7 @@ static void dump_get_dll_info_reply( const struct get_dll_info_reply *req )
 {
     fprintf( stderr, " size=%lu,", (unsigned long)req->size );
     fprintf( stderr, " entry_point=%p,", req->entry_point );
+    fprintf( stderr, " filename_len=%u,", req->filename_len );
     fprintf( stderr, " filename=" );
     dump_varargs_unicode_str( cur_size );
 }
@@ -3698,6 +3699,14 @@ static void dump_set_completion_info_request( const struct set_completion_info_r
     fprintf( stderr, " ckey=%lx", req->ckey );
 }
 
+static void dump_add_fd_completion_request( const struct add_fd_completion_request *req )
+{
+    fprintf( stderr, " handle=%p,", req->handle );
+    fprintf( stderr, " cvalue=%lx,", req->cvalue );
+    fprintf( stderr, " status=%08x,", req->status );
+    fprintf( stderr, " information=%lx", req->information );
+}
+
 static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_new_process_request,
     (dump_func)dump_get_new_process_info_request,
@@ -3926,6 +3935,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_remove_completion_request,
     (dump_func)dump_query_completion_request,
     (dump_func)dump_set_completion_info_request,
+    (dump_func)dump_add_fd_completion_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
@@ -4155,6 +4165,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)0,
     (dump_func)dump_remove_completion_reply,
     (dump_func)dump_query_completion_reply,
+    (dump_func)0,
     (dump_func)0,
 };
 
@@ -4386,6 +4397,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "remove_completion",
     "query_completion",
     "set_completion_info",
+    "add_fd_completion",
 };
 
 static const struct

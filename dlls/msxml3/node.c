@@ -373,7 +373,7 @@ static HRESULT WINAPI xmlnode_insertBefore(
 
     TRACE("(%p)->(%p,var,%p)\n",This,newChild,outNewChild);
 
-    if (!(newChild && outNewChild))
+    if (!newChild)
         return E_INVALIDARG;
 
     switch(V_VT(&refChild))
@@ -414,7 +414,9 @@ static HRESULT WINAPI xmlnode_insertBefore(
 
     IXMLDOMNode_Release(new);
     IXMLDOMNode_AddRef(newChild);
-    *outNewChild = newChild;
+    if(outNewChild)
+        *outNewChild = newChild;
+
     TRACE("ret S_OK\n");
     return S_OK;
 }
@@ -562,7 +564,10 @@ static HRESULT WINAPI xmlnode_get_text(
     default:
         FIXME("Unhandled node type %d\n", This->node->type);
     }
-        
+
+    /* Always return a string. */
+    if (!str) str = SysAllocStringLen( NULL, 0 );
+
     TRACE("%p %s\n", This, debugstr_w(str) );
     *text = str;
  

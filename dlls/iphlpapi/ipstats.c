@@ -777,9 +777,12 @@ DWORD getRouteTable(PMIB_IPFORWARDTABLE *ppIpForwardTable, HANDLE heap,
     ret = ERROR_INVALID_PARAMETER;
   else {
     DWORD numRoutes = getNumRoutes();
-    PMIB_IPFORWARDTABLE table = HeapAlloc(heap, flags,
-     sizeof(MIB_IPFORWARDTABLE) + (numRoutes - 1) * sizeof(MIB_IPFORWARDROW));
+    DWORD size = sizeof(MIB_IPFORWARDTABLE);
+    PMIB_IPFORWARDTABLE table;
 
+    if (numRoutes > 1)
+      size += (numRoutes - 1) * sizeof(MIB_IPFORWARDROW);
+    table = HeapAlloc(heap, flags, size);
     if (table) {
 #if defined(HAVE_SYS_SYSCTL_H) && defined(NET_RT_DUMP)
        int mib[6] = {CTL_NET, PF_ROUTE, 0, PF_INET, NET_RT_DUMP, 0};
@@ -1006,9 +1009,12 @@ DWORD getArpTable(PMIB_IPNETTABLE *ppIpNetTable, HANDLE heap, DWORD flags)
     ret = ERROR_INVALID_PARAMETER;
   else {
     DWORD numEntries = getNumArpEntries();
-    PMIB_IPNETTABLE table = HeapAlloc(heap, flags,
-     sizeof(MIB_IPNETTABLE) + (numEntries - 1) * sizeof(MIB_IPNETROW));
+    DWORD size = sizeof(MIB_IPNETTABLE);
+    PMIB_IPNETTABLE table;
 
+    if (numEntries > 1)
+      size += (numEntries - 1) * sizeof(MIB_IPNETROW);
+    table = HeapAlloc(heap, flags, size);
     if (table) {
       FILE *fp;
 
@@ -1106,9 +1112,12 @@ DWORD getUdpTable(PMIB_UDPTABLE *ppUdpTable, HANDLE heap, DWORD flags)
     ret = ERROR_INVALID_PARAMETER;
   else {
     DWORD numEntries = getNumUdpEntries();
-    PMIB_UDPTABLE table = HeapAlloc(heap, flags,
-     sizeof(MIB_UDPTABLE) + (numEntries - 1) * sizeof(MIB_UDPROW));
+    DWORD size = sizeof(MIB_UDPTABLE);
+    PMIB_UDPTABLE table;
 
+    if (numEntries > 1)
+      size += (numEntries - 1) * sizeof(MIB_UDPROW);
+    table = HeapAlloc(heap, flags, size);
     if (table) {
       FILE *fp;
 
@@ -1212,9 +1221,11 @@ DWORD getTcpTable(PMIB_TCPTABLE *ppTcpTable, DWORD maxEntries, HANDLE heap,
 
    if (!*ppTcpTable)
    {
-      *ppTcpTable = HeapAlloc (heap, flags,
-                               sizeof (MIB_TCPTABLE) +
-                               (numEntries - 1) * sizeof (MIB_TCPROW));
+      DWORD size = sizeof(MIB_TCPTABLE);
+
+      if (numEntries > 1)
+         size += (numEntries - 1) * sizeof (MIB_TCPROW);
+      *ppTcpTable = HeapAlloc (heap, flags, size);
       if (!*ppTcpTable)
       {
          ERR ("Out of memory!\n");

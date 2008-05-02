@@ -2254,7 +2254,7 @@ static void WINAPI read_changes_user_apc( void *arg, IO_STATUS_BLOCK *io, ULONG 
     RtlFreeHeap( GetProcessHeap(), 0, info );
 }
 
-static NTSTATUS read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, NTSTATUS status )
+static NTSTATUS read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, NTSTATUS status, ULONG_PTR *total )
 {
     struct read_changes_info *info = user;
     char path[PATH_MAX];
@@ -2299,7 +2299,7 @@ static NTSTATUS read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, NTSTATUS st
     }
 
     iosb->u.Status = ret;
-    iosb->Information = len;
+    iosb->Information = *total = len;
     return ret;
 }
 
@@ -2324,6 +2324,7 @@ NtNotifyChangeDirectoryFile( HANDLE FileHandle, HANDLE Event,
 {
     struct read_changes_info *info;
     NTSTATUS status;
+    ULONG_PTR cvalue = ApcRoutine ? 0 : (ULONG_PTR)ApcContext;
 
     TRACE("%p %p %p %p %p %p %u %u %d\n",
           FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock,
@@ -2356,6 +2357,7 @@ NtNotifyChangeDirectoryFile( HANDLE FileHandle, HANDLE Event,
         req->async.arg      = info;
         req->async.apc      = read_changes_user_apc;
         req->async.event    = Event;
+        req->async.cvalue   = cvalue;
         status = wine_server_call( req );
     }
     SERVER_END_REQ;

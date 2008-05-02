@@ -371,10 +371,10 @@
 @ stdcall FindFirstFileExA(str long ptr long ptr long)
 @ stdcall FindFirstFileExW(wstr long ptr long ptr long)
 @ stdcall FindFirstFileW(wstr ptr)
-@ stub FindFirstVolumeA
+@ stdcall FindFirstVolumeA(ptr long)
 @ stdcall FindFirstVolumeMountPointA(str ptr long)
 @ stdcall FindFirstVolumeMountPointW(wstr ptr long)
-@ stub FindFirstVolumeW
+@ stdcall FindFirstVolumeW(ptr long)
 @ stdcall FindNextChangeNotification(long)
 @ stdcall FindNextFileA(long ptr)
 @ stdcall FindNextFileW(long ptr)
@@ -386,7 +386,7 @@
 @ stdcall FindResourceExA(long str str long)
 @ stdcall FindResourceExW(long wstr wstr long)
 @ stdcall FindResourceW(long wstr wstr)
-@ stub FindVolumeClose
+@ stdcall FindVolumeClose(ptr)
 @ stdcall FindVolumeMountPointClose(ptr)
 @ stdcall FlushConsoleInputBuffer(long)
 @ stdcall FlushFileBuffers(long)
@@ -457,11 +457,11 @@
 @ stub GetConsoleFontInfo
 @ stub GetConsoleFontSize
 @ stub GetConsoleHardwareState
-@ stub GetConsoleInputExeNameA
-@ stub GetConsoleInputExeNameW
+@ stdcall GetConsoleInputExeNameA(long ptr)
+@ stdcall GetConsoleInputExeNameW(long ptr)
 @ stdcall GetConsoleInputWaitHandle()
-@ stub GetConsoleKeyboardLayoutNameA
-@ stub GetConsoleKeyboardLayoutNameW
+@ stdcall GetConsoleKeyboardLayoutNameA(ptr)
+@ stdcall GetConsoleKeyboardLayoutNameW(ptr)
 @ stdcall GetConsoleMode(long ptr)
 @ stub GetConsoleNlsMode
 @ stdcall GetConsoleOutputCP()
@@ -629,6 +629,7 @@
 @ stdcall GetTempPathA(long ptr)
 @ stdcall GetTempPathW(long ptr)
 @ stdcall GetThreadContext(long ptr)
+@ stdcall GetThreadId(ptr)
 # @ stub GetThreadIOPendingFlag
 @ stdcall GetThreadLocale()
 @ stdcall GetThreadPriority(long)

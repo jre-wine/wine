@@ -318,6 +318,7 @@ static void test__lcreat( void )
         ok ( 0 != ret, "FindClose complains (%d)\n", GetLastError ());
         ok (!strcmp (filename, search_results.cFileName),
             "found unexpected name \"%s\"\n", search_results.cFileName);
+        search_results.dwFileAttributes &= ~FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
         ok (FILE_ATTRIBUTE_ARCHIVE==search_results.dwFileAttributes,
             "attributes of file \"%s\" are 0x%04x\n", search_results.cFileName,
             search_results.dwFileAttributes);
@@ -658,10 +659,38 @@ static void test_CreateFileA(void)
     ret = GetTempFileNameA(temp_path, prefix, 0, filename);
     ok(ret != 0, "GetTempFileNameA error %d\n", GetLastError());
 
+    SetLastError(0xdeadbeef);
     hFile = CreateFileA(filename, GENERIC_READ, 0, NULL,
                         CREATE_NEW, FILE_FLAG_RANDOM_ACCESS, 0);
     ok(hFile == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_EXISTS,
         "CREATE_NEW should fail if file exists and last error value should be ERROR_FILE_EXISTS\n");
+
+    SetLastError(0xdeadbeef);
+    hFile = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL,
+                        CREATE_ALWAYS, FILE_FLAG_RANDOM_ACCESS, 0);
+    ok(hFile != INVALID_HANDLE_VALUE && GetLastError() == ERROR_ALREADY_EXISTS,
+       "hFile %p, last error %u\n", hFile, GetLastError());
+
+    CloseHandle(hFile);
+
+    SetLastError(0xdeadbeef);
+    hFile = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL,
+                        OPEN_ALWAYS, FILE_FLAG_RANDOM_ACCESS, 0);
+    ok(hFile != INVALID_HANDLE_VALUE && GetLastError() == ERROR_ALREADY_EXISTS,
+       "hFile %p, last error %u\n", hFile, GetLastError());
+
+    CloseHandle(hFile);
+
+    ret = DeleteFileA(filename);
+    ok(ret, "DeleteFileA: error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    hFile = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL,
+                        OPEN_ALWAYS, FILE_FLAG_RANDOM_ACCESS, 0);
+    ok(hFile != INVALID_HANDLE_VALUE && GetLastError() == 0,
+       "hFile %p, last error %u\n", hFile, GetLastError());
+
+    CloseHandle(hFile);
 
     ret = DeleteFileA(filename);
     ok(ret, "DeleteFileA: error %d\n", GetLastError());
@@ -686,10 +715,38 @@ static void test_CreateFileW(void)
     ret = GetTempFileNameW(temp_path, prefix, 0, filename);
     ok(ret != 0, "GetTempFileNameW error %d\n", GetLastError());
 
+    SetLastError(0xdeadbeef);
     hFile = CreateFileW(filename, GENERIC_READ, 0, NULL,
                         CREATE_NEW, FILE_FLAG_RANDOM_ACCESS, 0);
     ok(hFile == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_EXISTS,
         "CREATE_NEW should fail if file exists and last error value should be ERROR_FILE_EXISTS\n");
+
+    SetLastError(0xdeadbeef);
+    hFile = CreateFileW(filename, GENERIC_READ, FILE_SHARE_READ, NULL,
+                        CREATE_ALWAYS, FILE_FLAG_RANDOM_ACCESS, 0);
+    ok(hFile != INVALID_HANDLE_VALUE && GetLastError() == ERROR_ALREADY_EXISTS,
+       "hFile %p, last error %u\n", hFile, GetLastError());
+
+    CloseHandle(hFile);
+
+    SetLastError(0xdeadbeef);
+    hFile = CreateFileW(filename, GENERIC_READ, FILE_SHARE_READ, NULL,
+                        OPEN_ALWAYS, FILE_FLAG_RANDOM_ACCESS, 0);
+    ok(hFile != INVALID_HANDLE_VALUE && GetLastError() == ERROR_ALREADY_EXISTS,
+       "hFile %p, last error %u\n", hFile, GetLastError());
+
+    CloseHandle(hFile);
+
+    ret = DeleteFileW(filename);
+    ok(ret, "DeleteFileW: error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    hFile = CreateFileW(filename, GENERIC_READ, FILE_SHARE_READ, NULL,
+                        OPEN_ALWAYS, FILE_FLAG_RANDOM_ACCESS, 0);
+    ok(hFile != INVALID_HANDLE_VALUE && GetLastError() == 0,
+       "hFile %p, last error %u\n", hFile, GetLastError());
+
+    CloseHandle(hFile);
 
     ret = DeleteFileW(filename);
     ok(ret, "DeleteFileW: error %d\n", GetLastError());

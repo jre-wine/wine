@@ -62,6 +62,7 @@ struct media_info {
     UINT last_sequence;
     LPWSTR disk_prompt;
     LPWSTR cabinet;
+    LPWSTR first_volume;
     LPWSTR volume_label;
     BOOL is_continuous;
     BOOL is_extracted;
@@ -284,6 +285,9 @@ static UINT msi_media_get_disk_info( MSIPACKAGE *package, struct media_info *mi 
     mi->cabinet = strdupW(MSI_RecordGetString(row, 4));
     mi->volume_label = strdupW(MSI_RecordGetString(row, 5));
 
+    if (!mi->first_volume)
+        mi->first_volume = strdupW(mi->volume_label);
+
     ptr = strrchrW(mi->source, '\\') + 1;
     lstrcpyW(ptr, mi->cabinet);
     msiobj_release(&row->hdr);
@@ -491,6 +495,7 @@ static void free_media_info( struct media_info *mi )
     msi_free( mi->disk_prompt );
     msi_free( mi->cabinet );
     msi_free( mi->volume_label );
+    msi_free( mi->first_volume );
     msi_free( mi );
 }
 
@@ -563,6 +568,9 @@ static UINT load_media_info(MSIPACKAGE *package, MSIFILE *file, struct media_inf
     mi->volume_label = strdupW(MSI_RecordGetString(row, 5));
     msiobj_release(&row->hdr);
 
+    if (!mi->first_volume)
+        mi->first_volume = strdupW(mi->volume_label);
+
     source_dir = msi_dup_property(package, cszSourceDir);
 
     if (mi->cabinet && mi->cabinet[0] == '#')
@@ -596,9 +604,7 @@ static UINT load_media_info(MSIPACKAGE *package, MSIFILE *file, struct media_inf
 
 static UINT ready_media(MSIPACKAGE *package, MSIFILE *file, struct media_info *mi)
 {
-    UINT rc = ERROR_SUCCESS, type;
-    BOOL found = TRUE;
-    LPWSTR source_dir;
+    UINT rc = ERROR_SUCCESS;
 
     /* media info for continuous cabinet is already loaded */
     if (mi->is_continuous)
@@ -611,41 +617,47 @@ static UINT ready_media(MSIPACKAGE *package, MSIFILE *file, struct media_info *m
         return ERROR_FUNCTION_FAILED;
     }
 
-    if (mi->volume_label && mi->disk_id > 1)
+    /* cabinet is internal, no checks needed */
+    if (!mi->cabinet || mi->cabinet[0] == '#')
+        return ERROR_SUCCESS;
+
+    /* package should be downloaded */
+    if (file->IsCompressed &&
+        GetFileAttributesW(mi->source) == INVALID_FILE_ATTRIBUTES &&
+        package->BaseURL && UrlIsW(package->BaseURL, URLIS_URL))
     {
-        source_dir = msi_dup_property(package, cszSourceDir);
-        PathStripToRootW(source_dir);
-        type = GetDriveTypeW(source_dir);
+        return download_remote_cabinet(package, mi);
+    }
 
-        if (type == DRIVE_CDROM || type == DRIVE_REMOVABLE)
-            found = source_matches_volume(mi, source_dir);
+    /* check volume matches, change media if not */
+    if (mi->volume_label && mi->disk_id > 1 &&
+        lstrcmpW(mi->first_volume, mi->volume_label))
+    {
+        LPWSTR source = msi_dup_property(package, cszSourceDir);
+        BOOL matches;
+        UINT type;
 
-        if (!found)
-            found = GetFileAttributesW(mi->cabinet) != INVALID_FILE_ATTRIBUTES;
+        PathStripToRootW(source);
+        type = GetDriveTypeW(source);
+        matches = source_matches_volume(mi, source);
+        msi_free(source);
 
-        msi_free(source_dir);
+        if ((type == DRIVE_CDROM || type == DRIVE_REMOVABLE) && !matches)
+        {
+            rc = msi_change_media(package, mi);
+            if (rc != ERROR_SUCCESS)
+                return rc;
+        }
     }
 
     if (file->IsCompressed &&
         GetFileAttributesW(mi->source) == INVALID_FILE_ATTRIBUTES)
     {
-        found = FALSE;
-
-        if (package->BaseURL && UrlIsW(package->BaseURL, URLIS_URL))
-        {
-            rc = download_remote_cabinet(package, mi);
-            if (rc == ERROR_SUCCESS &&
-                GetFileAttributesW(mi->source) != INVALID_FILE_ATTRIBUTES)
-            {
-                found = TRUE;
-            }
-        }
+        ERR("Cabinet not found: %s\n", debugstr_w(mi->source));
+        return ERROR_INSTALL_FAILURE;
     }
 
-    if (!found)
-        rc = msi_change_media(package, mi);
-
-    return rc;
+    return ERROR_SUCCESS;
 }
 
 static UINT get_file_target(MSIPACKAGE *package, LPCWSTR file_key, 
@@ -733,6 +745,22 @@ static UINT copy_install_file(MSIFILE *file)
     return gle;
 }
 
+static BOOL check_dest_hash_matches(MSIFILE *file)
+{
+    MSIFILEHASHINFO hash;
+    UINT r;
+
+    if (!file->hash.dwFileHashInfoSize)
+        return FALSE;
+
+    hash.dwFileHashInfoSize = sizeof(MSIFILEHASHINFO);
+    r = MsiGetFileHashW(file->TargetPath, 0, &hash);
+    if (r != ERROR_SUCCESS)
+        return FALSE;
+
+    return !memcmp(&hash, &file->hash, sizeof(MSIFILEHASHINFO));
+}
+
 /*
  * ACTION_InstallFiles()
  * 
@@ -776,6 +804,12 @@ UINT ACTION_InstallFiles(MSIPACKAGE *package)
         if (file->state != msifs_missing && !mi->is_continuous && file->state != msifs_overwrite)
             continue;
 
+        if (check_dest_hash_matches(file))
+        {
+            TRACE("File hashes match, not overwriting\n");
+            continue;
+        }
+
         if (file->Sequence > mi->last_sequence || mi->is_continuous ||
             (file->IsCompressed && !mi->is_extracted))
         {
@@ -783,7 +817,6 @@ UINT ACTION_InstallFiles(MSIPACKAGE *package)
             if (rc != ERROR_SUCCESS)
             {
                 ERR("Failed to ready media\n");
-                rc = ERROR_FUNCTION_FAILED;
                 break;
             }
 

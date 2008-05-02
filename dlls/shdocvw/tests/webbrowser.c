@@ -984,6 +984,7 @@ static void test_ClassInfo(IUnknown *unk)
 static void test_ie_funcs(IUnknown *unk)
 {
     IWebBrowser2 *wb;
+    IDispatch *disp;
     VARIANT_BOOL b;
     int i;
     long hwnd;
@@ -1133,6 +1134,23 @@ static void test_ie_funcs(IUnknown *unk)
     hres = IWebBrowser2_get_Resizable(wb, &b);
     ok(hres == E_NOTIMPL, "get_Resizable failed: %08x\n", hres);
     ok(b == 0x100, "b=%x\n", b);
+
+    /* Application */
+
+    disp = NULL;
+    hres = IWebBrowser2_get_Application(wb, &disp);
+    ok(hres == S_OK, "get_Application failed: %08x\n", hres);
+    ok(disp == (void*)wb, "disp=%p, expected %p\n", disp, wb);
+    if(disp)
+        IDispatch_Release(disp);
+
+    hres = IWebBrowser2_get_Application(wb, NULL);
+    ok(hres == E_POINTER, "get_Application failed: %08x, expected E_POINTER\n", hres);
+
+    /* Quit */
+
+    hres = IWebBrowser2_Quit(wb);
+    ok(hres == E_FAIL, "Quit failed: %08x, expected E_FAIL\n", hres);
 
     IWebBrowser2_Release(wb);
 }
@@ -1394,6 +1412,8 @@ static void test_QueryInterface(IUnknown *unk)
 {
     IQuickActivate *qa = (IQuickActivate*)0xdeadbeef;
     IRunnableObject *runnable = (IRunnableObject*)0xdeadbeef;
+    IPerPropertyBrowsing *propbrowse = (void*)0xdeadbeef;
+    IOleCache *cache = (void*)0xdeadbeef;
     HRESULT hres;
 
     hres = IUnknown_QueryInterface(unk, &IID_IQuickActivate, (void**)&qa);
@@ -1403,6 +1423,14 @@ static void test_QueryInterface(IUnknown *unk)
     hres = IUnknown_QueryInterface(unk, &IID_IRunnableObject, (void**)&runnable);
     ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
     ok(runnable == NULL, "runnable=%p, ezpected NULL\n", runnable);
+
+    hres = IUnknown_QueryInterface(unk, &IID_IPerPropertyBrowsing, (void**)&propbrowse);
+    ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
+    ok(runnable == NULL, "runnable=%p, ezpected NULL\n", runnable);
+
+    hres = IUnknown_QueryInterface(unk, &IID_IOleCache, (void**)&cache);
+    ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
+    ok(cache == NULL, "runnable=%p, ezpected NULL\n", runnable);
 }
 
 static void test_WebBrowser(void)

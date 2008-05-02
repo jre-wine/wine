@@ -977,6 +977,7 @@ static HRESULT Stream_WriteLocationInfo( IStream* stm, LPCWSTR path,
     LOCATION_INFO *loc;
     LPSTR szLabel, szPath, szFinalPath;
     ULONG count = 0;
+    HRESULT hr;
 
     TRACE("%p %s %p\n", stm, debugstr_w(path), volume);
 
@@ -1018,7 +1019,10 @@ static HRESULT Stream_WriteLocationInfo( IStream* stm, LPCWSTR path,
                          szPath, path_size, NULL, NULL );
     szFinalPath[0] = 0;
 
-    return IStream_Write( stm, loc, total_size, &count );
+    hr = IStream_Write( stm, loc, total_size, &count );
+    HeapFree(GetProcessHeap(), 0, loc);
+
+    return hr;
 }
 
 static EXP_DARWIN_LINK* shelllink_build_darwinid( LPCWSTR string, DWORD magic )
@@ -2560,7 +2564,7 @@ ShellLink_InvokeCommand( IContextMenu* iface, LPCMINVOKECOMMANDINFO lpici )
 
     memset( &sei, 0, sizeof sei );
     sei.cbSize = sizeof sei;
-    sei.fMask = SEE_MASK_UNICODE | SEE_MASK_NOCLOSEPROCESS;
+    sei.fMask = SEE_MASK_UNICODE | (lpici->fMask & (SEE_MASK_NOASYNC|SEE_MASK_ASYNCOK|SEE_MASK_FLAG_NO_UI));
     sei.lpFile = path;
     sei.nShow = This->iShowCmd;
     sei.lpIDList = This->pPidl;
@@ -2569,14 +2573,7 @@ ShellLink_InvokeCommand( IContextMenu* iface, LPCMINVOKECOMMANDINFO lpici )
     sei.lpVerb = szOpen;
 
     if( ShellExecuteExW( &sei ) )
-    {
-        if ( sei.hProcess )
-        {
-            WaitForSingleObject( sei.hProcess, 10000 );
-            CloseHandle( sei.hProcess );
-        }
         r = S_OK;
-    }
     else
         r = E_FAIL;
 

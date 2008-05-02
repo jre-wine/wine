@@ -209,6 +209,7 @@ struct NSContainer {
     HWND hwnd;
 
     BSCallback *bscallback; /* hack */
+    HWND reset_focus; /* hack */
 };
 
 typedef struct {
@@ -397,6 +398,7 @@ BOOL install_wine_gecko(BOOL);
 void hlink_frame_navigate(HTMLDocument*,IHlinkFrame*,LPCWSTR,nsIInputStream*,DWORD);
 
 void call_property_onchanged(ConnectionPoint*,DISPID);
+HRESULT call_set_active_object(IOleInPlaceUIWindow*,IOleInPlaceActiveObject*);
 
 void *nsalloc(size_t);
 void nsfree(void*);
@@ -428,7 +430,7 @@ void set_current_mon(HTMLDocument*,IMoniker*);
 IHTMLSelectionObject *HTMLSelectionObject_Create(HTMLDocument*,nsISelection*);
 IHTMLTxtRange *HTMLTxtRange_Create(HTMLDocument*,nsIDOMRange*);
 IHTMLStyle *HTMLStyle_Create(nsIDOMCSSStyleDeclaration*);
-IHTMLStyleSheet *HTMLStyleSheet_Create(void);
+IHTMLStyleSheet *HTMLStyleSheet_Create(nsIDOMStyleSheet*);
 IHTMLStyleSheetsCollection *HTMLStyleSheetsCollection_Create(nsIDOMStyleSheetList*);
 
 void detach_selection(HTMLDocument*);
@@ -440,6 +442,7 @@ HTMLElement *HTMLBodyElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLInputElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLOptionElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLSelectElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLTable_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLTextAreaElement_Create(nsIDOMHTMLElement*);
 
 void HTMLElement2_Init(HTMLElement*);

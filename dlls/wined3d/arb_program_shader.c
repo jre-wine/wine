@@ -468,7 +468,7 @@ static void vshader_program_add_param(SHADER_OPCODE_ARG *arg, const DWORD param,
     break;
   case WINED3DSPR_CONST:
       if(param & WINED3DSHADER_ADDRMODE_RELATIVE) {
-          if(reg - This->rel_offset >= 0) {
+          if(reg >= This->rel_offset) {
               sprintf(tmpReg, "C[A0.x + %u]", reg - This->rel_offset);
           } else {
               sprintf(tmpReg, "C[A0.x - %u]", -reg + This->rel_offset);
@@ -525,8 +525,17 @@ static void shader_hw_sample(SHADER_OPCODE_ARG* arg, DWORD sampler_idx, const ch
             break;
 
         case WINED3DSTT_2D:
-            tex_type = "2D";
+        {
+            IWineD3DBaseShaderImpl *This = (IWineD3DBaseShaderImpl *) arg->shader;
+            IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *) This->baseShader.device;
+            if(device->stateBlock->textures[sampler_idx] &&
+               IWineD3DBaseTexture_GetTextureDimensions(device->stateBlock->textures[sampler_idx]) == GL_TEXTURE_RECTANGLE_ARB) {
+                tex_type = "RECT";
+            } else {
+                tex_type = "2D";
+            }
             break;
+        }
 
         case WINED3DSTT_VOLUME:
             tex_type = "3D";
@@ -1020,8 +1029,8 @@ void pshader_hw_texkill(SHADER_OPCODE_ARG* arg) {
          * copy the register into our general purpose TMP variable, overwrite .w and pass TMP to KIL
          */
         shader_addline(buffer, "MOV TMP, %s;\n", reg_dest);
-        shader_addline(buffer, "MOV TMP.w, one.w;\n", reg_dest);
-        shader_addline(buffer, "KIL TMP;\n", reg_dest);
+        shader_addline(buffer, "MOV TMP.w, one.w;\n");
+        shader_addline(buffer, "KIL TMP;\n");
     }
 }
 
@@ -1374,8 +1383,8 @@ void pshader_hw_texdepth(SHADER_OPCODE_ARG* arg) {
      */
     shader_addline(buffer, "RCP %s.g, %s.g;\n", dst_name, dst_name);
     shader_addline(buffer, "MUL TMP.x, %s.r, %s.g;\n", dst_name, dst_name);
-    shader_addline(buffer, "MIN TMP.x, TMP.x, one.r;\n", dst_name, dst_name);
-    shader_addline(buffer, "MAX result.depth, TMP.x, 0.0;\n", dst_name, dst_name);
+    shader_addline(buffer, "MIN TMP.x, TMP.x, one.r;\n");
+    shader_addline(buffer, "MAX result.depth, TMP.x, 0.0;\n");
 }
 
 /** Process the WINED3DSIO_TEXDP3TEX instruction in ARB:
@@ -1723,10 +1732,14 @@ static void shader_arb_cleanup(IWineD3DDevice *iface) {
     if (GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) glDisable(GL_FRAGMENT_PROGRAM_ARB);
 }
 
+static void shader_arb_destroy(IWineD3DBaseShader *iface) {
+}
+
 const shader_backend_t arb_program_shader_backend = {
     &shader_arb_select,
     &shader_arb_select_depth_blt,
     &shader_arb_load_constants,
     &shader_arb_cleanup,
-    &shader_arb_color_correction
+    &shader_arb_color_correction,
+    &shader_arb_destroy
 };

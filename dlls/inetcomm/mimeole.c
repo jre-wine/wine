@@ -2,6 +2,7 @@
  * MIME OLE Interfaces
  *
  * Copyright 2006 Robert Shearman for CodeWeavers
+ * Copyright 2007 Huw Davies for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -30,11 +31,953 @@
 #include "ole2.h"
 #include "mimeole.h"
 
+#include "wine/list.h"
 #include "wine/debug.h"
 
 #include "inetcomm_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(inetcomm);
+
+typedef struct
+{
+    LPCSTR     name;
+    DWORD      id;
+    DWORD      flags; /* MIMEPROPFLAGS */
+    VARTYPE    default_vt;
+} property_t;
+
+typedef struct
+{
+    struct list entry;
+    property_t prop;
+} property_list_entry_t;
+
+static const property_t default_props[] =
+{
+    {"References",                   PID_HDR_REFS,       0,                               VT_LPSTR},
+    {"Subject",                      PID_HDR_SUBJECT,    0,                               VT_LPSTR},
+    {"From",                         PID_HDR_FROM,       MPF_ADDRESS,                     VT_LPSTR},
+    {"Message-ID",                   PID_HDR_MESSAGEID,  0,                               VT_LPSTR},
+    {"Return-Path",                  PID_HDR_RETURNPATH, MPF_ADDRESS,                     VT_LPSTR},
+    {"Date",                         PID_HDR_DATE,       0,                               VT_LPSTR},
+    {"Received",                     PID_HDR_RECEIVED,   0,                               VT_LPSTR},
+    {"Reply-To",                     PID_HDR_REPLYTO,    MPF_ADDRESS,                     VT_LPSTR},
+    {"X-Mailer",                     PID_HDR_XMAILER,    0,                               VT_LPSTR},
+    {"Bcc",                          PID_HDR_BCC,        MPF_ADDRESS,                     VT_LPSTR},
+    {"MIME-Version",                 PID_HDR_MIMEVER,    MPF_MIME,                        VT_LPSTR},
+    {"Content-Type",                 PID_HDR_CNTTYPE,    MPF_MIME | MPF_HASPARAMS,        VT_LPSTR},
+    {"Content-Transfer-Encoding",    PID_HDR_CNTXFER,    MPF_MIME,                        VT_LPSTR},
+    {"Content-ID",                   PID_HDR_CNTID,      MPF_MIME,                        VT_LPSTR},
+    {"Content-Disposition",          PID_HDR_CNTDISP,    MPF_MIME,                        VT_LPSTR},
+    {"To",                           PID_HDR_TO,         MPF_ADDRESS,                     VT_LPSTR},
+    {"Cc",                           PID_HDR_CC,         MPF_ADDRESS,                     VT_LPSTR},
+    {"Sender",                       PID_HDR_SENDER,     MPF_ADDRESS,                     VT_LPSTR},
+    {"In-Reply-To",                  PID_HDR_INREPLYTO,  0,                               VT_LPSTR},
+    {NULL,                           0,                  0,                               0}
+};
+
+typedef struct
+{
+    struct list entry;
+    char *name;
+    char *value;
+} param_t;
+
+typedef struct
+{
+    struct list entry;
+    const property_t *prop;
+    PROPVARIANT value;
+    struct list params;
+} header_t;
+
+typedef struct MimeBody
+{
+    const IMimeBodyVtbl *lpVtbl;
+    LONG refs;
+
+    HBODY handle;
+
+    struct list headers;
+    struct list new_props; /* FIXME: This should be in a PropertySchema */
+    DWORD next_prop_id;
+    char *content_pri_type;
+    char *content_sub_type;
+    ENCODINGTYPE encoding;
+    void *data;
+    IID data_iid;
+} MimeBody;
+
+static inline MimeBody *impl_from_IMimeBody( IMimeBody *iface )
+{
+    return (MimeBody *)((char*)iface - FIELD_OFFSET(MimeBody, lpVtbl));
+}
+
+static LPSTR strdupA(LPCSTR str)
+{
+    char *ret;
+    int len = strlen(str);
+    ret = HeapAlloc(GetProcessHeap(), 0, len + 1);
+    memcpy(ret, str, len + 1);
+    return ret;
+}
+
+#define PARSER_BUF_SIZE 1024
+
+/*****************************************************
+ *        copy_headers_to_buf [internal]
+ *
+ * Copies the headers into a '\0' terminated memory block and leave
+ * the stream's current position set to after the blank line.
+ */
+static HRESULT copy_headers_to_buf(IStream *stm, char **ptr)
+{
+    char *buf = NULL;
+    DWORD size = PARSER_BUF_SIZE, offset = 0, last_end = 0;
+    HRESULT hr;
+    int done = 0;
+
+    *ptr = NULL;
+
+    do
+    {
+        char *end;
+        DWORD read;
+
+        if(!buf)
+            buf = HeapAlloc(GetProcessHeap(), 0, size + 1);
+        else
+        {
+            size *= 2;
+            buf = HeapReAlloc(GetProcessHeap(), 0, buf, size + 1);
+        }
+        if(!buf)
+        {
+            hr = E_OUTOFMEMORY;
+            goto fail;
+        }
+
+        hr = IStream_Read(stm, buf + offset, size - offset, &read);
+        if(FAILED(hr)) goto fail;
+
+        offset += read;
+        buf[offset] = '\0';
+
+        if(read == 0) done = 1;
+
+        while(!done && (end = strstr(buf + last_end, "\r\n")))
+        {
+            DWORD new_end = end - buf + 2;
+            if(new_end - last_end == 2)
+            {
+                LARGE_INTEGER off;
+                off.QuadPart = new_end;
+                IStream_Seek(stm, off, STREAM_SEEK_SET, NULL);
+                buf[new_end] = '\0';
+                done = 1;
+            }
+            else
+                last_end = new_end;
+        }
+    } while(!done);
+
+    *ptr = buf;
+    return S_OK;
+
+fail:
+    HeapFree(GetProcessHeap(), 0, buf);
+    return hr;
+}
+
+static header_t *read_prop(MimeBody *body, char **ptr)
+{
+    char *colon = strchr(*ptr, ':');
+    const property_t *prop;
+    header_t *ret;
+
+    if(!colon) return NULL;
+
+    *colon = '\0';
+
+    for(prop = default_props; prop->name; prop++)
+    {
+        if(!strcasecmp(*ptr, prop->name))
+        {
+            TRACE("%s: found match with default property id %d\n", *ptr, prop->id);
+            break;
+        }
+    }
+
+    if(!prop->name)
+    {
+        property_list_entry_t *prop_entry;
+        LIST_FOR_EACH_ENTRY(prop_entry, &body->new_props, property_list_entry_t, entry)
+        {
+            if(!strcasecmp(*ptr, prop_entry->prop.name))
+            {
+                TRACE("%s: found match with already added new property id %d\n", *ptr, prop_entry->prop.id);
+                prop = &prop_entry->prop;
+                break;
+            }
+        }
+        if(!prop->name)
+        {
+            prop_entry = HeapAlloc(GetProcessHeap(), 0, sizeof(*prop_entry));
+            prop_entry->prop.name = strdupA(*ptr);
+            prop_entry->prop.id = body->next_prop_id++;
+            prop_entry->prop.flags = 0;
+            prop_entry->prop.default_vt = VT_LPSTR;
+            list_add_tail(&body->new_props, &prop_entry->entry);
+            prop = &prop_entry->prop;
+            TRACE("%s: allocating new prop id %d\n", *ptr, prop_entry->prop.id);
+        }
+    }
+
+    ret = HeapAlloc(GetProcessHeap(), 0, sizeof(*ret));
+    ret->prop = prop;
+    PropVariantInit(&ret->value);
+    list_init(&ret->params);
+    *ptr = colon + 1;
+
+    return ret;
+}
+
+static void unfold_header(char *header, int len)
+{
+    char *start = header, *cp = header;
+
+    do {
+        while(*cp == ' ' || *cp == '\t')
+        {
+            cp++;
+            len--;
+        }
+        if(cp != start)
+            memmove(start, cp, len + 1);
+
+        cp = strstr(start, "\r\n");
+        len -= (cp - start);
+        start = cp;
+        *start = ' ';
+        start++;
+        len--;
+        cp += 2;
+    } while(*cp == ' ' || *cp == '\t');
+
+    *(start - 1) = '\0';
+}
+
+static void add_param(header_t *header, const char *p)
+{
+    const char *key = p, *value, *cp = p;
+    param_t *param;
+    char *name;
+
+    TRACE("got param %s\n", p);
+
+    while (*key == ' ' || *key == '\t' ) key++;
+
+    cp = strchr(key, '=');
+    if(!cp)
+    {
+        WARN("malformed parameter - skipping\n");
+        return;
+    }
+
+    name = HeapAlloc(GetProcessHeap(), 0, cp - key + 1);
+    memcpy(name, key, cp - key);
+    name[cp - key] = '\0';
+
+    value = cp + 1;
+
+    param = HeapAlloc(GetProcessHeap(), 0, sizeof(*param));
+    param->name = name;
+    param->value = strdupA(value);
+    list_add_tail(&header->params, &param->entry);
+}
+
+static void split_params(header_t *header, char *value)
+{
+    char *cp = value, *start = value;
+    int in_quote = 0;
+    int done_value = 0;
+
+    while(*cp)
+    {
+        if(!in_quote && *cp == ';')
+        {
+            *cp = '\0';
+            if(done_value) add_param(header, start);
+            done_value = 1;
+            start = cp + 1;
+        }
+        else if(*cp == '"')
+            in_quote = !in_quote;
+        cp++;
+    }
+    if(done_value) add_param(header, start);
+}
+
+static void read_value(header_t *header, char **cur)
+{
+    char *end = *cur, *value;
+    DWORD len;
+
+    do {
+        end = strstr(end, "\r\n");
+        end += 2;
+    } while(*end == ' ' || *end == '\t');
+
+    len = end - *cur;
+    value = HeapAlloc(GetProcessHeap(), 0, len + 1);
+    memcpy(value, *cur, len);
+    value[len] = '\0';
+
+    unfold_header(value, len);
+    TRACE("value %s\n", debugstr_a(value));
+
+    if(header->prop->flags & MPF_HASPARAMS)
+    {
+        split_params(header, value);
+        TRACE("value w/o params %s\n", debugstr_a(value));
+    }
+
+    header->value.vt = VT_LPSTR;
+    header->value.pszVal = value;
+
+    *cur = end;
+}
+
+static void init_content_type(MimeBody *body, header_t *header)
+{
+    char *slash;
+    DWORD len;
+
+    if(header->prop->id != PID_HDR_CNTTYPE)
+    {
+        ERR("called with header %s\n", header->prop->name);
+        return;
+    }
+
+    slash = strchr(header->value.pszVal, '/');
+    if(!slash)
+    {
+        WARN("malformed context type value\n");
+        return;
+    }
+    len = slash - header->value.pszVal;
+    body->content_pri_type = HeapAlloc(GetProcessHeap(), 0, len + 1);
+    memcpy(body->content_pri_type, header->value.pszVal, len);
+    body->content_pri_type[len] = '\0';
+    body->content_sub_type = strdupA(slash + 1);
+}
+
+static HRESULT parse_headers(MimeBody *body, IStream *stm)
+{
+    char *header_buf, *cur_header_ptr;
+    HRESULT hr;
+    header_t *header;
+
+    hr = copy_headers_to_buf(stm, &header_buf);
+    if(FAILED(hr)) return hr;
+
+    cur_header_ptr = header_buf;
+    while((header = read_prop(body, &cur_header_ptr)))
+    {
+        read_value(header, &cur_header_ptr);
+        list_add_tail(&body->headers, &header->entry);
+
+        if(header->prop->id == PID_HDR_CNTTYPE)
+            init_content_type(body, header);
+    }
+
+    HeapFree(GetProcessHeap(), 0, header_buf);
+    return hr;
+}
+
+static void emptry_param_list(struct list *list)
+{
+    param_t *param, *cursor2;
+
+    LIST_FOR_EACH_ENTRY_SAFE(param, cursor2, list, param_t, entry)
+    {
+        list_remove(&param->entry);
+        HeapFree(GetProcessHeap(), 0, param->name);
+        HeapFree(GetProcessHeap(), 0, param->value);
+        HeapFree(GetProcessHeap(), 0, param);
+    }
+}
+
+static void empty_header_list(struct list *list)
+{
+    header_t *header, *cursor2;
+
+    LIST_FOR_EACH_ENTRY_SAFE(header, cursor2, list, header_t, entry)
+    {
+        list_remove(&header->entry);
+        PropVariantClear(&header->value);
+        emptry_param_list(&header->params);
+        HeapFree(GetProcessHeap(), 0, header);
+    }
+}
+
+static void empty_new_prop_list(struct list *list)
+{
+    property_list_entry_t *prop, *cursor2;
+
+    LIST_FOR_EACH_ENTRY_SAFE(prop, cursor2, list, property_list_entry_t, entry)
+    {
+        list_remove(&prop->entry);
+        HeapFree(GetProcessHeap(), 0, (char *)prop->prop.name);
+        HeapFree(GetProcessHeap(), 0, prop);
+    }
+}
+
+static void release_data(REFIID riid, void *data)
+{
+    if(!data) return;
+
+    if(IsEqualIID(riid, &IID_IStream))
+        IStream_Release((IStream *)data);
+    else
+        FIXME("Unhandled data format %s\n", debugstr_guid(riid));
+}
+
+static HRESULT WINAPI MimeBody_QueryInterface(IMimeBody* iface,
+                                     REFIID riid,
+                                     void** ppvObject)
+{
+    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), ppvObject);
+
+    *ppvObject = NULL;
+
+    if (IsEqualIID(riid, &IID_IUnknown) ||
+        IsEqualIID(riid, &IID_IPersist) ||
+        IsEqualIID(riid, &IID_IPersistStreamInit) ||
+        IsEqualIID(riid, &IID_IMimePropertySet) ||
+        IsEqualIID(riid, &IID_IMimeBody))
+    {
+        *ppvObject = iface;
+    }
+
+    if(*ppvObject)
+    {
+        IUnknown_AddRef((IUnknown*)*ppvObject);
+        return S_OK;
+    }
+
+    FIXME("no interface for %s\n", debugstr_guid(riid));
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI MimeBody_AddRef(IMimeBody* iface)
+{
+    MimeBody *This = impl_from_IMimeBody(iface);
+    TRACE("(%p)->()\n", iface);
+    return InterlockedIncrement(&This->refs);
+}
+
+static ULONG WINAPI MimeBody_Release(IMimeBody* iface)
+{
+    MimeBody *This = impl_from_IMimeBody(iface);
+    ULONG refs;
+
+    TRACE("(%p)->()\n", iface);
+
+    refs = InterlockedDecrement(&This->refs);
+    if (!refs)
+    {
+        empty_header_list(&This->headers);
+        empty_new_prop_list(&This->new_props);
+
+        HeapFree(GetProcessHeap(), 0, This->content_pri_type);
+        HeapFree(GetProcessHeap(), 0, This->content_sub_type);
+
+        release_data(&This->data_iid, This->data);
+
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+
+    return refs;
+}
+
+static HRESULT WINAPI MimeBody_GetClassID(
+                                 IMimeBody* iface,
+                                 CLSID* pClassID)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+
+static HRESULT WINAPI MimeBody_IsDirty(
+                              IMimeBody* iface)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_Load(
+                           IMimeBody* iface,
+                           LPSTREAM pStm)
+{
+    MimeBody *This = impl_from_IMimeBody(iface);
+    TRACE("(%p)->(%p)\n", iface, pStm);
+    return parse_headers(This, pStm);
+}
+
+static HRESULT WINAPI MimeBody_Save(
+                           IMimeBody* iface,
+                           LPSTREAM pStm,
+                           BOOL fClearDirty)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_GetSizeMax(
+                                 IMimeBody* iface,
+                                 ULARGE_INTEGER* pcbSize)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_InitNew(
+                              IMimeBody* iface)
+{
+    TRACE("%p->()\n", iface);
+    return S_OK;
+}
+
+static HRESULT WINAPI MimeBody_GetPropInfo(
+                                  IMimeBody* iface,
+                                  LPCSTR pszName,
+                                  LPMIMEPROPINFO pInfo)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_SetPropInfo(
+                                  IMimeBody* iface,
+                                  LPCSTR pszName,
+                                  LPCMIMEPROPINFO pInfo)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_GetProp(
+                              IMimeBody* iface,
+                              LPCSTR pszName,
+                              DWORD dwFlags,
+                              LPPROPVARIANT pValue)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_SetProp(
+                              IMimeBody* iface,
+                              LPCSTR pszName,
+                              DWORD dwFlags,
+                              LPCPROPVARIANT pValue)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_AppendProp(
+                                 IMimeBody* iface,
+                                 LPCSTR pszName,
+                                 DWORD dwFlags,
+                                 LPPROPVARIANT pValue)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_DeleteProp(
+                                 IMimeBody* iface,
+                                 LPCSTR pszName)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_CopyProps(
+                                IMimeBody* iface,
+                                ULONG cNames,
+                                LPCSTR* prgszName,
+                                IMimePropertySet* pPropertySet)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_MoveProps(
+                                IMimeBody* iface,
+                                ULONG cNames,
+                                LPCSTR* prgszName,
+                                IMimePropertySet* pPropertySet)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_DeleteExcept(
+                                   IMimeBody* iface,
+                                   ULONG cNames,
+                                   LPCSTR* prgszName)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_QueryProp(
+                                IMimeBody* iface,
+                                LPCSTR pszName,
+                                LPCSTR pszCriteria,
+                                boolean fSubString,
+                                boolean fCaseSensitive)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_GetCharset(
+                                 IMimeBody* iface,
+                                 LPHCHARSET phCharset)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_SetCharset(
+                                 IMimeBody* iface,
+                                 HCHARSET hCharset,
+                                 CSETAPPLYTYPE applytype)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_GetParameters(
+                                    IMimeBody* iface,
+                                    LPCSTR pszName,
+                                    ULONG* pcParams,
+                                    LPMIMEPARAMINFO* pprgParam)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_IsContentType(
+                                    IMimeBody* iface,
+                                    LPCSTR pszPriType,
+                                    LPCSTR pszSubType)
+{
+    MimeBody *This = impl_from_IMimeBody(iface);
+
+    TRACE("(%p)->(%s, %s)\n", This, debugstr_a(pszPriType), debugstr_a(pszSubType));
+    if(pszPriType)
+    {
+        const char *pri = This->content_pri_type;
+        if(!pri) pri = "text";
+        if(strcasecmp(pri, pszPriType)) return S_FALSE;
+    }
+
+    if(pszSubType)
+    {
+        const char *sub = This->content_sub_type;
+        if(!sub) sub = "plain";
+        if(strcasecmp(sub, pszSubType)) return S_FALSE;
+    }
+
+    return S_OK;
+}
+
+static HRESULT WINAPI MimeBody_BindToObject(
+                                   IMimeBody* iface,
+                                   REFIID riid,
+                                   void** ppvObject)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_Clone(
+                            IMimeBody* iface,
+                            IMimePropertySet** ppPropertySet)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_SetOption(
+                                IMimeBody* iface,
+                                const TYPEDID oid,
+                                LPCPROPVARIANT pValue)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_GetOption(
+                                IMimeBody* iface,
+                                const TYPEDID oid,
+                                LPPROPVARIANT pValue)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_EnumProps(
+                                IMimeBody* iface,
+                                DWORD dwFlags,
+                                IMimeEnumProperties** ppEnum)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_IsType(
+                             IMimeBody* iface,
+                             IMSGBODYTYPE bodytype)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_SetDisplayName(
+                                     IMimeBody* iface,
+                                     LPCSTR pszDisplay)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_GetDisplayName(
+                                     IMimeBody* iface,
+                                     LPSTR* ppszDisplay)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_GetOffsets(
+                                 IMimeBody* iface,
+                                 LPBODYOFFSETS pOffsets)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_GetCurrentEncoding(
+                                         IMimeBody* iface,
+                                         ENCODINGTYPE* pietEncoding)
+{
+    MimeBody *This = impl_from_IMimeBody(iface);
+
+    TRACE("(%p)->(%p)\n", This, pietEncoding);
+
+    *pietEncoding = This->encoding;
+    return S_OK;
+}
+
+static HRESULT WINAPI MimeBody_SetCurrentEncoding(
+                                         IMimeBody* iface,
+                                         ENCODINGTYPE ietEncoding)
+{
+    MimeBody *This = impl_from_IMimeBody(iface);
+
+    TRACE("(%p)->(%d)\n", This, ietEncoding);
+
+    This->encoding = ietEncoding;
+    return S_OK;
+}
+
+static HRESULT WINAPI MimeBody_GetEstimatedSize(
+                                       IMimeBody* iface,
+                                       ENCODINGTYPE ietEncoding,
+                                       ULONG* pcbSize)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_GetDataHere(
+                                  IMimeBody* iface,
+                                  ENCODINGTYPE ietEncoding,
+                                  IStream* pStream)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_GetData(
+                              IMimeBody* iface,
+                              ENCODINGTYPE ietEncoding,
+                              IStream** ppStream)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_SetData(
+                              IMimeBody* iface,
+                              ENCODINGTYPE ietEncoding,
+                              LPCSTR pszPriType,
+                              LPCSTR pszSubType,
+                              REFIID riid,
+                              LPVOID pvObject)
+{
+    MimeBody *This = impl_from_IMimeBody(iface);
+    TRACE("(%p)->(%d, %s, %s, %s %p)\n", This, ietEncoding, debugstr_a(pszPriType), debugstr_a(pszSubType),
+          debugstr_guid(riid), pvObject);
+
+    if(IsEqualIID(riid, &IID_IStream))
+        IStream_AddRef((IStream *)pvObject);
+    else
+    {
+        FIXME("Unhandled object type %s\n", debugstr_guid(riid));
+        return E_INVALIDARG;
+    }
+
+    if(This->data)
+        FIXME("release old data\n");
+
+    This->data_iid = *riid;
+    This->data = pvObject;
+
+    IMimeBody_SetCurrentEncoding(iface, ietEncoding);
+
+    /* FIXME: Update the content type.
+       If pszPriType == NULL use 'application'
+       If pszSubType == NULL use 'octet-stream' */
+
+    return S_OK;
+}
+
+static HRESULT WINAPI MimeBody_EmptyData(
+                                IMimeBody* iface)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_CopyTo(
+                             IMimeBody* iface,
+                             IMimeBody* pBody)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_GetTransmitInfo(
+                                      IMimeBody* iface,
+                                      LPTRANSMITINFO pTransmitInfo)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_SaveToFile(
+                                 IMimeBody* iface,
+                                 ENCODINGTYPE ietEncoding,
+                                 LPCSTR pszFilePath)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeBody_GetHandle(
+                                IMimeBody* iface,
+                                LPHBODY phBody)
+{
+    MimeBody *This = impl_from_IMimeBody(iface);
+    TRACE("(%p)->(%p)\n", iface, phBody);
+
+    *phBody = This->handle;
+    return This->handle ? S_OK : MIME_E_NO_DATA;
+}
+
+static IMimeBodyVtbl body_vtbl =
+{
+    MimeBody_QueryInterface,
+    MimeBody_AddRef,
+    MimeBody_Release,
+    MimeBody_GetClassID,
+    MimeBody_IsDirty,
+    MimeBody_Load,
+    MimeBody_Save,
+    MimeBody_GetSizeMax,
+    MimeBody_InitNew,
+    MimeBody_GetPropInfo,
+    MimeBody_SetPropInfo,
+    MimeBody_GetProp,
+    MimeBody_SetProp,
+    MimeBody_AppendProp,
+    MimeBody_DeleteProp,
+    MimeBody_CopyProps,
+    MimeBody_MoveProps,
+    MimeBody_DeleteExcept,
+    MimeBody_QueryProp,
+    MimeBody_GetCharset,
+    MimeBody_SetCharset,
+    MimeBody_GetParameters,
+    MimeBody_IsContentType,
+    MimeBody_BindToObject,
+    MimeBody_Clone,
+    MimeBody_SetOption,
+    MimeBody_GetOption,
+    MimeBody_EnumProps,
+    MimeBody_IsType,
+    MimeBody_SetDisplayName,
+    MimeBody_GetDisplayName,
+    MimeBody_GetOffsets,
+    MimeBody_GetCurrentEncoding,
+    MimeBody_SetCurrentEncoding,
+    MimeBody_GetEstimatedSize,
+    MimeBody_GetDataHere,
+    MimeBody_GetData,
+    MimeBody_SetData,
+    MimeBody_EmptyData,
+    MimeBody_CopyTo,
+    MimeBody_GetTransmitInfo,
+    MimeBody_SaveToFile,
+    MimeBody_GetHandle
+};
+
+#define FIRST_CUSTOM_PROP_ID 0x100
+
+HRESULT MimeBody_create(IUnknown *outer, void **obj)
+{
+    MimeBody *This;
+
+    *obj = NULL;
+
+    if(outer) return CLASS_E_NOAGGREGATION;
+
+    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    if (!This) return E_OUTOFMEMORY;
+
+    This->lpVtbl = &body_vtbl;
+    This->refs = 1;
+    This->handle = NULL;
+    list_init(&This->headers);
+    list_init(&This->new_props);
+    This->next_prop_id = FIRST_CUSTOM_PROP_ID;
+    This->content_pri_type = NULL;
+    This->content_sub_type = NULL;
+    This->encoding = IET_7BIT;
+    This->data = NULL;
+    This->data_iid = IID_NULL;
+
+    *obj = (IMimeBody *)&This->lpVtbl;
+    return S_OK;
+}
 
 typedef struct MimeMessage
 {

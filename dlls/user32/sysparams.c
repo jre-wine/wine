@@ -87,37 +87,37 @@ enum spi_index
 
 static const char * const DefSysColors[] =
 {
-    "Scrollbar", "192 192 192",              /* COLOR_SCROLLBAR */
-    "Background", "0 128 128",               /* COLOR_BACKGROUND */
-    "ActiveTitle", "0 0 128",                /* COLOR_ACTIVECAPTION */
+    "Scrollbar", "212 208 200",              /* COLOR_SCROLLBAR */
+    "Background", "58 110 165",              /* COLOR_BACKGROUND */
+    "ActiveTitle", "10 36 106",              /* COLOR_ACTIVECAPTION */
     "InactiveTitle", "128 128 128",          /* COLOR_INACTIVECAPTION */
-    "Menu", "192 192 192",                   /* COLOR_MENU */
+    "Menu", "212 208 200",                   /* COLOR_MENU */
     "Window", "255 255 255",                 /* COLOR_WINDOW */
     "WindowFrame", "0 0 0",                  /* COLOR_WINDOWFRAME */
     "MenuText", "0 0 0",                     /* COLOR_MENUTEXT */
     "WindowText", "0 0 0",                   /* COLOR_WINDOWTEXT */
     "TitleText", "255 255 255",              /* COLOR_CAPTIONTEXT */
-    "ActiveBorder", "192 192 192",           /* COLOR_ACTIVEBORDER */
-    "InactiveBorder", "192 192 192",         /* COLOR_INACTIVEBORDER */
+    "ActiveBorder", "212 208 200",           /* COLOR_ACTIVEBORDER */
+    "InactiveBorder", "212 208 200",         /* COLOR_INACTIVEBORDER */
     "AppWorkSpace", "128 128 128",           /* COLOR_APPWORKSPACE */
     "Hilight", "0 0 128",                    /* COLOR_HIGHLIGHT */
     "HilightText", "255 255 255",            /* COLOR_HIGHLIGHTTEXT */
-    "ButtonFace", "192 192 192",             /* COLOR_BTNFACE */
+    "ButtonFace", "212 208 200",             /* COLOR_BTNFACE */
     "ButtonShadow", "128 128 128",           /* COLOR_BTNSHADOW */
     "GrayText", "128 128 128",               /* COLOR_GRAYTEXT */
     "ButtonText", "0 0 0",                   /* COLOR_BTNTEXT */
-    "InactiveTitleText", "192 192 192",      /* COLOR_INACTIVECAPTIONTEXT */
+    "InactiveTitleText", "212 208 200",      /* COLOR_INACTIVECAPTIONTEXT */
     "ButtonHilight", "255 255 255",          /* COLOR_BTNHIGHLIGHT */
-    "ButtonDkShadow", "0 0 0",               /* COLOR_3DDKSHADOW */
-    "ButtonLight", "224 224 224",            /* COLOR_3DLIGHT */
+    "ButtonDkShadow", "64 64 64",            /* COLOR_3DDKSHADOW */
+    "ButtonLight", "212 208 200",            /* COLOR_3DLIGHT */
     "InfoText", "0 0 0",                     /* COLOR_INFOTEXT */
     "InfoWindow", "255 255 225",             /* COLOR_INFOBK */
     "ButtonAlternateFace", "180 180 180",    /* COLOR_ALTERNATEBTNFACE */
     "HotTrackingColor", "0 0 255",           /* COLOR_HOTLIGHT */
-    "GradientActiveTitle", "16 132 208",     /* COLOR_GRADIENTACTIVECAPTION */
-    "GradientInactiveTitle", "181 181 181",  /* COLOR_GRADIENTINACTIVECAPTION */
+    "GradientActiveTitle", "166 202 240",    /* COLOR_GRADIENTACTIVECAPTION */
+    "GradientInactiveTitle", "192 192 192",  /* COLOR_GRADIENTINACTIVECAPTION */
     "MenuHilight", "0 0 0",                  /* COLOR_MENUHILIGHT */
-    "MenuBar", "192 192 192"                 /* COLOR_MENUBAR */
+    "MenuBar", "212 208 200"                 /* COLOR_MENUBAR */
 };
 
 /**
@@ -261,8 +261,7 @@ static const WCHAR MessageFontSize[]=                        {'M','e','s','s','a
 static const WCHAR System[]=                                 {'S','y','s','t','e','m',0};
 static const WCHAR IconTitleSize[]=                          {'I','c','o','n','T','i','t','l','e','S','i','z','e',0};
 static const WCHAR IconTitleFaceName[]=                      {'I','c','o','n','T','i','t','l','e','F','a','c','e','N','a','m','e',0};
-static const WCHAR defPattern[]=                             {'1','7','0',' ','8','5',' ','1','7','0',' ','8','5',' ','1','7','0',' ','8','5',
-                                                              ' ','1','7','0',' ','8','5',0};
+static const WCHAR defPattern[]=                             {'0',' ','0',' ','0',' ','0',' ','0',' ','0',' ','0',' ','0',0};
 static const WCHAR CSu[]=                                    {'%','u',0};
 static const WCHAR CSd[]=                                    {'%','d',0};
 

@@ -18,7 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define INITGUID
 
 #include <stdarg.h>
 #include <string.h>
@@ -28,7 +27,10 @@
 #include "winuser.h"
 #include "winreg.h"
 #include "winerror.h"
+#include "objbase.h"
+#include "ocidl.h"
 
+#include "initguid.h"
 #include "inetcomm_private.h"
 #include "mimeole.h"
 
@@ -431,6 +433,18 @@ static struct regsvr_coclass const coclass_list[] = {
 	NULL,
 	"inetcomm.dll",
 	"Both"
+    },
+    {   &CLSID_IMimeBody,
+        "CLSID_IMimeBody",
+        NULL,
+        "inetcomm.dll",
+        "Both"
+    },
+    {   &CLSID_IMimeMessage,
+        "CLSID_IMimeMessage",
+        NULL,
+        "inetcomm.dll",
+        "Both"
     },
     { NULL }			/* list terminator */
 };

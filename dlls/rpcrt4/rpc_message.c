@@ -449,6 +449,8 @@ static RPC_STATUS RPCRT4_SendAuth(RpcConnection *Connection, RpcPktHdr *Header,
   LONG alen;
   RPC_STATUS status;
 
+  RPCRT4_SetThreadCurrentConnection(Connection);
+
   buffer_pos = Buffer;
   /* The packet building functions save the packet header size, so we can use it. */
   hdr_size = Header->common.frag_len;
@@ -518,6 +520,7 @@ static RPC_STATUS RPCRT4_SendAuth(RpcConnection *Connection, RpcPktHdr *Header,
         if (status != RPC_S_OK)
         {
           HeapFree(GetProcessHeap(), 0, pkt);
+          RPCRT4_SetThreadCurrentConnection(NULL);
           return status;
         }
       }
@@ -528,7 +531,8 @@ write:
     HeapFree(GetProcessHeap(), 0, pkt);
     if (count<0) {
       WARN("rpcrt4_conn_write failed (auth)\n");
-      return RPC_S_PROTOCOL_ERROR;
+      RPCRT4_SetThreadCurrentConnection(NULL);
+      return RPC_S_CALL_FAILED;
     }
 
     buffer_pos += Header->common.frag_len - hdr_size - alen - auth_pad_len;
@@ -536,6 +540,7 @@ write:
     Header->common.flags &= ~RPC_FLG_FIRST;
   }
 
+  RPCRT4_SetThreadCurrentConnection(NULL);
   return RPC_S_OK;
 }
 
@@ -697,11 +702,13 @@ RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
 
   TRACE("(%p, %p, %p)\n", Connection, Header, pMsg);
 
+  RPCRT4_SetThreadCurrentConnection(Connection);
+
   /* read packet common header */
   dwRead = rpcrt4_conn_read(Connection, &common_hdr, sizeof(common_hdr));
   if (dwRead != sizeof(common_hdr)) {
     WARN("Short read of header, %d bytes\n", dwRead);
-    status = RPC_S_PROTOCOL_ERROR;
+    status = RPC_S_CALL_FAILED;
     goto fail;
   }
 
@@ -727,7 +734,7 @@ RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
   dwRead = rpcrt4_conn_read(Connection, &(*Header)->common + 1, hdr_length - sizeof(common_hdr));
   if (dwRead != hdr_length - sizeof(common_hdr)) {
     WARN("bad header length, %d bytes, hdr_length %d\n", dwRead, hdr_length);
-    status = RPC_S_PROTOCOL_ERROR;
+    status = RPC_S_CALL_FAILED;
     goto fail;
   }
 
@@ -753,7 +760,7 @@ RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
   if (auth_length) {
     auth_data = HeapAlloc(GetProcessHeap(), 0, RPC_AUTH_VERIFIER_LEN(&common_hdr));
     if (!auth_data) {
-      status = RPC_S_PROTOCOL_ERROR;
+      status = RPC_S_OUT_OF_RESOURCES;
       goto fail;
     }
   }
@@ -799,7 +806,7 @@ RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
         (unsigned char *)pMsg->Buffer + buffer_length, data_length);
     if (dwRead != data_length) {
       WARN("bad data length, %d/%ld\n", dwRead, data_length);
-      status = RPC_S_PROTOCOL_ERROR;
+      status = RPC_S_CALL_FAILED;
       goto fail;
     }
 
@@ -819,7 +826,7 @@ RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
       if (dwRead != header_auth_len) {
         WARN("bad authentication data length, %d/%d\n", dwRead,
           header_auth_len);
-        status = RPC_S_PROTOCOL_ERROR;
+        status = RPC_S_CALL_FAILED;
         goto fail;
       }
 
@@ -847,7 +854,7 @@ RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
       dwRead = rpcrt4_conn_read(Connection, *Header, hdr_length);
       if (dwRead != hdr_length) {
         WARN("invalid packet header size (%d)\n", dwRead);
-        status = RPC_S_PROTOCOL_ERROR;
+        status = RPC_S_CALL_FAILED;
         goto fail;
       }
 
@@ -872,6 +879,7 @@ RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
   status = RPC_S_OK;
 
 fail:
+  RPCRT4_SetThreadCurrentConnection(NULL);
   if (status != RPC_S_OK) {
     RPCRT4_FreeHeader(*Header);
     *Header = NULL;

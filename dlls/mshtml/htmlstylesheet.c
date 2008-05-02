@@ -38,7 +38,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
 typedef struct {
     const IHTMLStyleSheetVtbl *lpHTMLStyleSheetVtbl;
+
     LONG ref;
+
+    nsIDOMCSSStyleSheet *nsstylesheet;
 } HTMLStyleSheet;
 
 typedef struct {
@@ -167,8 +170,38 @@ static HRESULT WINAPI HTMLStyleSheetsCollection_item(IHTMLStyleSheetsCollection 
         VARIANT *pvarIndex, VARIANT *pvarResult)
 {
     HTMLStyleSheetsCollection *This = HTMLSTYLESHEETSCOL_THIS(iface);
-    FIXME("(%p)->(%p %p)\n", This, pvarIndex, pvarResult);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p %p)\n", This, pvarIndex, pvarResult);
+
+    switch(V_VT(pvarIndex)) {
+    case VT_I4: {
+        nsIDOMStyleSheet *nsstylesheet;
+        nsresult nsres;
+
+        TRACE("index=%d\n", V_I4(pvarIndex));
+
+        nsres = nsIDOMStyleSheetList_Item(This->nslist, V_I4(pvarIndex), &nsstylesheet);
+        if(NS_FAILED(nsres) || !nsstylesheet) {
+            WARN("Item failed: %08x\n", nsres);
+            V_VT(pvarResult) = VT_EMPTY;
+            return E_INVALIDARG;
+        }
+
+        V_VT(pvarResult) = VT_DISPATCH;
+        V_DISPATCH(pvarResult) = (IDispatch*)HTMLStyleSheet_Create(nsstylesheet);
+
+        return S_OK;
+    }
+
+    case VT_BSTR:
+        FIXME("id=%s not implemented\n", debugstr_w(V_BSTR(pvarResult)));
+        return E_NOTIMPL;
+
+    default:
+        WARN("Invalid vt=%d\n", V_VT(pvarIndex));
+    }
+
+    return E_INVALIDARG;
 }
 
 #undef HTMLSTYLESHEETSCOL_THIS
@@ -470,12 +503,21 @@ static const IHTMLStyleSheetVtbl HTMLStyleSheetVtbl = {
     HTMLStyleSheet_get_rules
 };
 
-IHTMLStyleSheet *HTMLStyleSheet_Create(void)
+IHTMLStyleSheet *HTMLStyleSheet_Create(nsIDOMStyleSheet *nsstylesheet)
 {
     HTMLStyleSheet *ret = mshtml_alloc(sizeof(HTMLStyleSheet));
+    nsresult nsres;
 
     ret->lpHTMLStyleSheetVtbl = &HTMLStyleSheetVtbl;
     ret->ref = 1;
+    ret->nsstylesheet = NULL;
+
+    if(nsstylesheet) {
+        nsres = nsIDOMStyleSheet_QueryInterface(nsstylesheet, &IID_nsIDOMCSSStyleSheet,
+                (void**)&ret->nsstylesheet);
+        if(NS_FAILED(nsres))
+            ERR("Could not get nsICSSStyleSheet interface: %08x\n", nsres);
+    }
 
     return HTMLSTYLESHEET(ret);
 }

@@ -163,6 +163,7 @@ typedef struct
     void           *arg;
     void           *apc;
     obj_handle_t    event;
+    unsigned long   cvalue;
 } async_data_t;
 
 
@@ -270,7 +271,7 @@ typedef union
     struct
     {
         enum apc_type    type;
-        unsigned int   (*func)(void*, void*, unsigned int);
+        unsigned int   (*func)(void*, void*, unsigned int, unsigned long *);
         void            *user;
         void            *sb;
         unsigned int     status;
@@ -355,6 +356,7 @@ typedef union
     {
         enum apc_type    type;
         unsigned int     status;
+        unsigned long    total;
     } async_io;
     struct
     {
@@ -670,6 +672,7 @@ struct get_dll_info_reply
     struct reply_header __header;
     size_t       size;
     void*        entry_point;
+    data_size_t  filename_len;
     /* VARARG(filename,unicode_str); */
 };
 
@@ -4188,6 +4191,21 @@ struct set_completion_info_reply
 };
 
 
+
+struct add_fd_completion_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+    unsigned long  cvalue;
+    unsigned int   status;
+    unsigned long  information;
+};
+struct add_fd_completion_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -4417,6 +4435,7 @@ enum request
     REQ_remove_completion,
     REQ_query_completion,
     REQ_set_completion_info,
+    REQ_add_fd_completion,
     REQ_NB_REQUESTS
 };
 
@@ -4651,6 +4670,7 @@ union generic_request
     struct remove_completion_request remove_completion_request;
     struct query_completion_request query_completion_request;
     struct set_completion_info_request set_completion_info_request;
+    struct add_fd_completion_request add_fd_completion_request;
 };
 union generic_reply
 {
@@ -4883,8 +4903,9 @@ union generic_reply
     struct remove_completion_reply remove_completion_reply;
     struct query_completion_reply query_completion_reply;
     struct set_completion_info_reply set_completion_info_reply;
+    struct add_fd_completion_reply add_fd_completion_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 328
+#define SERVER_PROTOCOL_VERSION 332
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

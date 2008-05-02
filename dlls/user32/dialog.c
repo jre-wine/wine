@@ -1683,7 +1683,7 @@ static BOOL DIALOG_DlgDirSelect( HWND hwnd, LPWSTR str, INT len,
     size = SendMessageW(listbox, combo ? CB_GETLBTEXTLEN : LB_GETTEXTLEN, item, 0 );
     if (size == LB_ERR) return FALSE;
 
-    if (!(buffer = HeapAlloc( GetProcessHeap(), 0, (size+1) * sizeof(WCHAR) ))) return FALSE;
+    if (!(buffer = HeapAlloc( GetProcessHeap(), 0, (size+2) * sizeof(WCHAR) ))) return FALSE;
 
     SendMessageW( listbox, combo ? CB_GETLBTEXT : LB_GETTEXT, item, (LPARAM)buffer );
 
@@ -1701,7 +1701,16 @@ static BOOL DIALOG_DlgDirSelect( HWND hwnd, LPWSTR str, INT len,
             ptr = buffer + 1;
         }
     }
-    else ptr = buffer;
+    else
+    {
+        /* Filenames without a dot extension must have one tacked at the end */
+        if (strchrW(buffer, '.') == NULL)
+        {
+            buffer[strlenW(buffer)+1] = '\0';
+            buffer[strlenW(buffer)] = '.';
+        }
+        ptr = buffer;
+    }
 
     if (!unicode)
     {
@@ -1759,6 +1768,8 @@ static INT DIALOG_DlgDirListW( HWND hDlg, LPWSTR spec, INT idLBox,
 
     if (idLBox && ((hwnd = GetDlgItem( hDlg, idLBox )) != 0))
     {
+        if (attrib == DDL_DRIVES) attrib |= DDL_EXCLUSIVE;
+
         SENDMSG( combo ? CB_RESETCONTENT : LB_RESETCONTENT, 0, 0 );
         if (attrib & DDL_DIRECTORY)
         {
@@ -1781,6 +1792,9 @@ static INT DIALOG_DlgDirListW( HWND hDlg, LPWSTR spec, INT idLBox,
                 return FALSE;
         }
     }
+
+    /* Convert path specification to uppercase */
+    if (spec) CharUpperW(spec);
 
     if (idStatic && ((hwnd = GetDlgItem( hDlg, idStatic )) != 0))
     {

@@ -375,6 +375,7 @@
 @ cdecl _mbsnbcnt(ptr long)
 @ stub _mbsnbcoll #(str str long)
 @ cdecl _mbsnbcpy(ptr str long)
+@ cdecl _mbsnbcpy_s(ptr long str long)
 @ cdecl _mbsnbicmp(str str long)
 @ stub _mbsnbicoll #(str str long)
 @ cdecl _mbsnbset(str long long)
@@ -711,10 +712,12 @@
 @ cdecl srand(long) MSVCRT_srand
 @ varargs sscanf(str str) MSVCRT_sscanf
 @ cdecl strcat(str str) ntdll.strcat
+@ cdecl strcat_s(str long str) MSVCRT_strcat_s
 @ cdecl strchr(str long) ntdll.strchr
 @ cdecl strcmp(str str) ntdll.strcmp
 @ cdecl strcoll(str str) MSVCRT_strcoll
 @ cdecl strcpy(ptr str) ntdll.strcpy
+@ cdecl strcpy_s(ptr long str) MSVCRT_strcpy_s
 @ cdecl strcspn(str str) ntdll.strcspn
 @ cdecl strerror(long) MSVCRT_strerror
 @ cdecl strftime(str long str ptr) MSVCRT_strftime

@@ -878,6 +878,7 @@ static void test_MkParseDisplayName(void)
         ok_ole_success(hr, IMoniker_BindToObject);
 
         IUnknown_Release(object);
+        IMoniker_Release(pmk);
     }
     IBindCtx_Release(pbc);
 
@@ -934,7 +935,7 @@ static void test_MkParseDisplayName(void)
 
     IRunningObjectTable_Revoke(pprot,pdwReg1);
     IRunningObjectTable_Revoke(pprot,pdwReg2);
-    IEnumMoniker_Release(spEM1);
+    IUnknown_Release(lpEM1);
     IEnumMoniker_Release(spEM1);
     IEnumMoniker_Release(spEM2);
     IEnumMoniker_Release(spEM3);

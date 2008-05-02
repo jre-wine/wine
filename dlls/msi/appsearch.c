@@ -677,14 +677,15 @@ static UINT ACTION_RecurseSearchDirectory(MSIPACKAGE *package, LPWSTR *appValue,
 static UINT ACTION_CheckDirectory(MSIPACKAGE *package, LPCWSTR dir,
  LPWSTR *appValue)
 {
-    UINT rc = ERROR_SUCCESS;
+    DWORD attr = GetFileAttributesW(dir);
 
-    if (GetFileAttributesW(dir) & FILE_ATTRIBUTE_DIRECTORY)
+    if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY))
     {
         TRACE("directory exists, returning %s\n", debugstr_w(dir));
         *appValue = strdupW(dir);
     }
-    return rc;
+
+    return ERROR_SUCCESS;
 }
 
 static BOOL ACTION_IsFullPath(LPCWSTR path)
@@ -730,7 +731,7 @@ static UINT ACTION_SearchDirectory(MSIPACKAGE *package, MSISIGNATURE *sig,
         rc = ERROR_SUCCESS;
         *appValue = NULL;
         for (i = 0; rc == ERROR_SUCCESS && !*appValue && i < 26; i++)
-            if (drives & (1 << drives))
+            if (drives & (1 << i))
             {
                 pathWithDrive[0] = 'A' + i;
                 if (GetDriveTypeW(pathWithDrive) == DRIVE_FIXED)
@@ -768,6 +769,9 @@ static UINT ACTION_AppSearchDr(MSIPACKAGE *package, LPWSTR *appValue, MSISIGNATU
     UINT rc;
 
     TRACE("%s\n", debugstr_w(sig->Name));
+
+    msi_free(sig->File);
+    sig->File = NULL;
 
     *appValue = NULL;
 

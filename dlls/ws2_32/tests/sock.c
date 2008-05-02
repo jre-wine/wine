@@ -850,7 +850,7 @@ LINGER linger_testvals[] = {
 static void test_set_getsockopt(void)
 {
     SOCKET s;
-    int i, err;
+    int i, err, lasterr;
     int timeout;
     LINGER lingval;
     int size;
@@ -889,6 +889,15 @@ static void test_set_getsockopt(void)
                  lingval.l_onoff, lingval.l_linger,
                  linger_testvals[i].l_onoff, linger_testvals[i].l_linger);
     }
+    /* Test for erroneously passing a value instead of a pointer as optval */
+    size = sizeof(char);
+    err = setsockopt(s, SOL_SOCKET, SO_DONTROUTE, (char *)1, size);
+    ok(err == SOCKET_ERROR, "setsockopt with optval being a value passed "
+                            "instead of failing.\n");
+    lasterr = WSAGetLastError();
+    ok(lasterr == WSAEFAULT, "setsockopt with optval being a value "
+                             "returned 0x%08x, not WSAEFAULT(0x%08x)\n",
+                             lasterr, WSAEFAULT);
     closesocket(s);
 }
 
@@ -1638,7 +1647,7 @@ static void test_extendedSocketOptions(void)
     sa.sin_port = htons(0);
     sa.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    if((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP)) < 0){
+    if((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP)) == INVALID_SOCKET) {
         trace("Creating the socket failed: %d\n", WSAGetLastError());
         WSACleanup();
         return;
@@ -1664,7 +1673,7 @@ static void test_extendedSocketOptions(void)
 
     closesocket(sock);
 
-    if((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_IP)) < 0){
+    if((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_IP)) == INVALID_SOCKET) {
         trace("Creating the socket failed: %d\n", WSAGetLastError());
         WSACleanup();
         return;
@@ -1711,7 +1720,7 @@ static void test_getsockname(void)
     sa_set.sin_port = htons(0);
     sa_set.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    if((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_IP)) < 0){
+    if((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_IP)) == INVALID_SOCKET) {
         trace("Creating the socket failed: %d\n", WSAGetLastError());
         WSACleanup();
         return;

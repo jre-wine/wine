@@ -388,6 +388,7 @@ case $host_os in
     STRIP="$STRIP -x"
     LDRPATH_LOCAL="&& install_name_tool -change @executable_path/\`\$(RELPATH) \$(bindir) \$(libdir)\`/libwine.1.dylib @executable_path/\$(TOPOBJDIR)/libs/wine/libwine.1.dylib \$@ || \$(RM) \$@"
     dnl declare needed frameworks
+    AC_SUBST(SECURITYLIB,"-framework Security -framework CoreFoundation")
     AC_SUBST(COREFOUNDATIONLIB,"-framework CoreFoundation")
     AC_SUBST(IOKITLIB,"-framework IOKit -framework CoreFoundation")
     AC_SUBST(LDEXECFLAGS,["-image_base 0x7bf00000 -Wl,-segaddr,WINE_DOS,0x00000000,-segaddr,WINE_SHARED_HEAP,0x7f000000"])
@@ -649,7 +650,7 @@ Wine will be built without XComposite support. (winex11.drv)])
 This probably prevents linking to OpenGL. Try deleting the file and restarting configure.])
                               else
                                   WINE_WARNING([No OpenGL library found on this system.
-Wine will be build without OpenGL or Direct3D support.])
+Wine will be built without OpenGL or Direct3D support.])
                               fi],
 			     $X_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS)
 
@@ -661,11 +662,11 @@ Wine will be build without OpenGL or Direct3D support.])
 			     $OPENGL_LIBS $X_LIBS $X_PRE_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS)
              else
                  WINE_WARNING([Old Mesa headers detected. Consider upgrading your Mesa libraries (http://www.mesa3d.org/).
-Wine will be build without OpenGL or Direct3D support.])
+Wine will be built without OpenGL or Direct3D support.])
 	     fi
          else
              WINE_WARNING([OpenGL development headers not found.
-Wine will be build without OpenGL or Direct3D support.])
+Wine will be built without OpenGL or Direct3D support.])
 	 fi
     fi
 

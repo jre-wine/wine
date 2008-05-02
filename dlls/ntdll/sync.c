@@ -786,7 +786,8 @@ static BOOL invoke_apc( const apc_call_t *call, apc_result_t *result )
         result->type = call->type;
         result->async_io.status = call->async_io.func( call->async_io.user,
                                                        call->async_io.sb,
-                                                       call->async_io.status );
+                                                       call->async_io.status,
+                                                       &result->async_io.total );
         break;
     case APC_VIRTUAL_ALLOC:
         result->type = call->type;
@@ -1308,5 +1309,21 @@ NTSTATUS WINAPI NtQueryIoCompletion( HANDLE CompletionPort, IO_COMPLETION_INFORM
             status = STATUS_INVALID_PARAMETER;
             break;
     }
+    return status;
+}
+
+NTSTATUS NTDLL_AddCompletion( HANDLE hFile, ULONG_PTR CompletionValue, NTSTATUS CompletionStatus, ULONG_PTR Information )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( add_fd_completion )
+    {
+        req->handle      = hFile;
+        req->cvalue      = CompletionValue;
+        req->status      = CompletionStatus;
+        req->information = Information;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
     return status;
 }

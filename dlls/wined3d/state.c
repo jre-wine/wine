@@ -107,6 +107,7 @@ static void state_lighting(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
 static void state_zenable(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     /* No z test without depth stencil buffers */
     if(stateblock->wineD3DDevice->stencilBufferTarget == NULL) {
+        TRACE("No Z buffer - disabling depth test\n");
         glDisable(GL_DEPTH_TEST); /* This also disables z writing in gl */
         checkGLcall("glDisable GL_DEPTH_TEST");
         return;
@@ -353,7 +354,9 @@ static void state_alpha(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
      * used WINED3DRS_COLORKEYENABLE state(which is d3d <= 3 only). The texture function will call alpha
      * in case it finds some texture+colorkeyenable combination which needs extra care.
      */
-    if(stateblock->textures[0] && stateblock->textureDimensions[0] == GL_TEXTURE_2D) {
+    if(stateblock->textures[0] && (
+       stateblock->textureDimensions[0] == GL_TEXTURE_2D ||
+       stateblock->textureDimensions[0] == GL_TEXTURE_RECTANGLE_ARB)) {
         surf = (IWineD3DSurfaceImpl *) ((IWineD3DTextureImpl *)stateblock->textures[0])->surfaces[0];
 
         if(surf->CKeyFlags & WINEDDSD_CKSRCBLT) {
@@ -1687,6 +1690,7 @@ static void activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock,
             case GL_TEXTURE_2D:
                 if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
                     glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, bumpmap ? GL_OFFSET_TEXTURE_2D_NV : GL_TEXTURE_2D);
+                    checkGLcall("glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, ...)");
                 } else {
                     glDisable(GL_TEXTURE_3D);
                     checkGLcall("glDisable(GL_TEXTURE_3D)");
@@ -1694,17 +1698,43 @@ static void activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock,
                         glDisable(GL_TEXTURE_CUBE_MAP_ARB);
                         checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
                     }
+                    if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
+                        glDisable(GL_TEXTURE_RECTANGLE_ARB);
+                        checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
+                    }
                     glEnable(GL_TEXTURE_2D);
                     checkGLcall("glEnable(GL_TEXTURE_2D)");
+                }
+                break;
+            case GL_TEXTURE_RECTANGLE_ARB:
+                if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+                    glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, bumpmap ? GL_OFFSET_TEXTURE_2D_NV : GL_TEXTURE_RECTANGLE_ARB);
+                    checkGLcall("glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, ...)");
+                } else {
+                    glDisable(GL_TEXTURE_2D);
+                    checkGLcall("glDisable(GL_TEXTURE_2D)");
+                    glDisable(GL_TEXTURE_3D);
+                    checkGLcall("glDisable(GL_TEXTURE_3D)");
+                    if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
+                        glDisable(GL_TEXTURE_CUBE_MAP_ARB);
+                        checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
+                    }
+                    glEnable(GL_TEXTURE_RECTANGLE_ARB);
+                    checkGLcall("glEnable(GL_TEXTURE_RECTANGLE_ARB)");
                 }
                 break;
             case GL_TEXTURE_3D:
                 if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
                     glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_TEXTURE_3D);
+                    checkGLcall("glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_TEXTURE_3D)");
                 } else {
                     if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
                         glDisable(GL_TEXTURE_CUBE_MAP_ARB);
                         checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
+                    }
+                    if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
+                        glDisable(GL_TEXTURE_RECTANGLE_ARB);
+                        checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
                     }
                     glDisable(GL_TEXTURE_2D);
                     checkGLcall("glDisable(GL_TEXTURE_2D)");
@@ -1715,11 +1745,16 @@ static void activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock,
             case GL_TEXTURE_CUBE_MAP_ARB:
                 if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
                     glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_TEXTURE_CUBE_MAP_ARB);
+                    checkGLcall("glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_TEXTURE_CUBE_MAP_ARB)");
                 } else {
                     glDisable(GL_TEXTURE_2D);
                     checkGLcall("glDisable(GL_TEXTURE_2D)");
                     glDisable(GL_TEXTURE_3D);
                     checkGLcall("glDisable(GL_TEXTURE_3D)");
+                    if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
+                        glDisable(GL_TEXTURE_RECTANGLE_ARB);
+                        checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
+                    }
                     glEnable(GL_TEXTURE_CUBE_MAP_ARB);
                     checkGLcall("glEnable(GL_TEXTURE_CUBE_MAP_ARB)");
                 }
@@ -1728,6 +1763,7 @@ static void activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock,
     } else {
         if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
             glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_NONE);
+            checkGLcall("glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_NONE)");
         } else {
             glEnable(GL_TEXTURE_2D);
             checkGLcall("glEnable(GL_TEXTURE_2D)");
@@ -1736,6 +1772,10 @@ static void activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock,
             if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
                 glDisable(GL_TEXTURE_CUBE_MAP_ARB);
                 checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
+            }
+            if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
+                glDisable(GL_TEXTURE_RECTANGLE_ARB);
+                checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
             }
             /* Binding textures is done by samplers. A dummy texture will be bound */
         }
@@ -1790,6 +1830,10 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
             if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
                 glDisable(GL_TEXTURE_CUBE_MAP_ARB);
                 checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
+            }
+            if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
+                glDisable(GL_TEXTURE_RECTANGLE_ARB);
+                checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
             }
             if(GL_SUPPORT(NV_TEXTURE_SHADER2) && mapped_stage < GL_LIMITS(textures)) {
                 glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_NONE);
@@ -1868,7 +1912,8 @@ static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     arg0 = stateblock->textureState[stage][WINED3DTSS_ALPHAARG0];
 
     if(stateblock->renderState[WINED3DRS_COLORKEYENABLE] && stage == 0 &&
-       stateblock->textures[0] && stateblock->textureDimensions[0] == GL_TEXTURE_2D) {
+       stateblock->textures[0] &&
+       (stateblock->textureDimensions[0] == GL_TEXTURE_2D || stateblock->textureDimensions[0] == GL_TEXTURE_RECTANGLE_ARB)) {
         IWineD3DSurfaceImpl *surf = (IWineD3DSurfaceImpl *) ((IWineD3DTextureImpl *) stateblock->textures[0])->surfaces[0];
 
         if(surf->CKeyFlags & WINEDDSD_CKSRCBLT &&
@@ -1903,6 +1948,7 @@ static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
 static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD texUnit = state - STATE_TRANSFORM(WINED3DTS_TEXTURE0);
     DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[texUnit];
+    BOOL generated;
 
     /* Ignore this when a vertex shader is used, or if the streams aren't sorted out yet */
     if(use_vs(stateblock->wineD3DDevice) ||
@@ -1924,15 +1970,24 @@ static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock, W
         WARN("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
         return;
     }
+    generated = (stateblock->textureState[texUnit][WINED3DTSS_TEXCOORDINDEX] & 0xFFFF0000) != WINED3DTSS_TCI_PASSTHRU;
 
     set_texture_matrix((float *)&stateblock->transforms[WINED3DTS_TEXTURE0 + texUnit].u.m[0][0],
                         stateblock->textureState[texUnit][WINED3DTSS_TEXTURETRANSFORMFLAGS],
-                        (stateblock->textureState[texUnit][WINED3DTSS_TEXCOORDINDEX] & 0xFFFF0000) != WINED3DTSS_TCI_PASSTHRU,
+                        generated,
                         context->last_was_rhw,
                         stateblock->wineD3DDevice->strided_streams.u.s.texCoords[texUnit].dwStride ?
                             stateblock->wineD3DDevice->strided_streams.u.s.texCoords[texUnit].dwType:
                             WINED3DDECLTYPE_UNUSED);
 
+    /* The sampler applying function calls us if this changes */
+    if(context->lastWasPow2Texture[texUnit] && stateblock->textures[texUnit]) {
+        if(generated) {
+            FIXME("Non-power2 texture being used with generated texture coords\n");
+        }
+        TRACE("Non power two matrix multiply fixup\n");
+        glMultMatrixf(((IWineD3DTextureImpl *) stateblock->textures[texUnit])->baseTexture.pow2Matrix);
+    }
 }
 
 static void unloadTexCoords(IWineD3DStateBlockImpl *stateblock) {
@@ -2287,20 +2342,21 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
          * scaling is reapplied or removed, the texture matrix has to be reapplied
          */
         if(!GL_SUPPORT(ARB_TEXTURE_NON_POWER_OF_TWO) && sampler < MAX_TEXTURES) {
-            if(stateblock->textureDimensions[sampler] == GL_TEXTURE_2D) {
-                if(((IWineD3DTextureImpl *) stateblock->textures[sampler])->pow2scalingFactorX != 1.0 ||
-                   ((IWineD3DTextureImpl *) stateblock->textures[sampler])->pow2scalingFactorY != 1.0 ) {
+            if(stateblock->textureDimensions[sampler] == GL_TEXTURE_2D ||
+               stateblock->textureDimensions[sampler] == GL_TEXTURE_RECTANGLE_ARB) {
+                if(((IWineD3DTextureImpl *) stateblock->textures[sampler])->baseTexture.pow2Matrix[0] != 1.0 ||
+                   ((IWineD3DTextureImpl *) stateblock->textures[sampler])->baseTexture.pow2Matrix[5] != 1.0 ) {
                     texIsPow2 = TRUE;
                 }
             } else if(stateblock->textureDimensions[sampler] == GL_TEXTURE_CUBE_MAP_ARB) {
-                if(((IWineD3DCubeTextureImpl *) stateblock->textures[sampler])->pow2scalingFactor != 1.0) {
+                if(((IWineD3DCubeTextureImpl *) stateblock->textures[sampler])->baseTexture.pow2Matrix[0] != 1.0) {
                     texIsPow2 = TRUE;
                 }
             }
 
             if(texIsPow2 || context->lastWasPow2Texture[sampler]) {
-                transform_texture(STATE_TRANSFORM(WINED3DTS_TEXTURE0 + stateblock->wineD3DDevice->texUnitMap[sampler]), stateblock, context);
                 context->lastWasPow2Texture[sampler] = texIsPow2;
+                transform_texture(STATE_TRANSFORM(WINED3DTS_TEXTURE0 + stateblock->wineD3DDevice->texUnitMap[sampler]), stateblock, context);
             }
         }
 
@@ -2338,7 +2394,7 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
                 state_alpha(WINED3DRS_COLORKEYENABLE, stateblock, context);
             }
         }
-    } else if(sampler < GL_LIMITS(texture_stages)) {
+    } else if(mapped_stage < GL_LIMITS(textures)) {
         if(sampler < stateblock->lowest_disabled_stage) {
             /* TODO: What should I do with pixel shaders here ??? */
             if(!isStateDirty(context, STATE_TEXTURESTAGE(sampler, WINED3DTSS_COLOROP))) {
@@ -3362,6 +3418,7 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock, W
          */
         if (useVertexShaderFunction) {
             device->posFixup[1] = device->render_offscreen ? -1.0 : 1.0;
+            device->posFixup[3] = -device->posFixup[1] / stateblock->viewport.Height;
         }
     }
 
@@ -3425,6 +3482,19 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock, W
                 FIXME("Clipping not supported with vertex shaders\n");
                 warned = TRUE;
             }
+            if(wasrhw) {
+                /* Apply the transform matrices when switching from rhw drawing to vertex shaders. Vertex
+                 * shaders themselves do not need it it, but the matrices are not reapplied automatically when
+                 * switching back from vertex shaders to fixed function processing. So make sure we leave the
+                 * fixed function vertex processing states back in a sane state before switching to shaders
+                 */
+                if(!isStateDirty(context, STATE_TRANSFORM(WINED3DTS_PROJECTION))) {
+                    transform_projection(STATE_TRANSFORM(WINED3DTS_PROJECTION), stateblock, context);
+                }
+                if(!isStateDirty(context, STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)))) {
+                    transform_world(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)), stateblock, context);
+                }
+            }
         }
     }
 
@@ -3472,7 +3542,7 @@ static void viewport(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCon
     checkGLcall("glViewport");
 
     stateblock->wineD3DDevice->posFixup[2] = 1.0 / stateblock->viewport.Width;
-    stateblock->wineD3DDevice->posFixup[3] = -1.0 / stateblock->viewport.Height;
+    stateblock->wineD3DDevice->posFixup[3] = -stateblock->wineD3DDevice->posFixup[1] / stateblock->viewport.Height;
     if(!isStateDirty(context, STATE_TRANSFORM(WINED3DTS_PROJECTION))) {
         transform_projection(STATE_TRANSFORM(WINED3DTS_PROJECTION), stateblock, context);
     }
@@ -3597,12 +3667,15 @@ static void light(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContex
 }
 
 static void scissorrect(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    IWineD3DSwapChainImpl *swapchain = (IWineD3DSwapChainImpl *) stateblock->wineD3DDevice->swapchains[0];
     RECT *pRect = &stateblock->scissorRect;
     RECT windowRect;
     UINT winHeight;
 
-    GetClientRect(swapchain->win_handle, &windowRect);
+    windowRect.left = 0;
+    windowRect.top = 0;
+    windowRect.right = ((IWineD3DSurfaceImpl *) stateblock->wineD3DDevice->render_targets[0])->currentDesc.Width;
+    windowRect.bottom = ((IWineD3DSurfaceImpl *) stateblock->wineD3DDevice->render_targets[0])->currentDesc.Height;
+
     /* Warning: glScissor uses window coordinates, not viewport coordinates, so our viewport correction does not apply
      * Warning2: Even in windowed mode the coords are relative to the window, not the screen
      */

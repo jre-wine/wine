@@ -753,7 +753,7 @@ static void InternetOpenUrlA_test(void)
   SetLastError(0);
   myhttp = InternetOpenUrl(myhinternet, TEST_URL, 0, 0,
 			   INTERNET_FLAG_RELOAD|INTERNET_FLAG_NO_CACHE_WRITE|INTERNET_FLAG_TRANSFER_BINARY,0);
-  if (GetLastError() == 12007)
+  if (GetLastError() == ERROR_INTERNET_NAME_NOT_RESOLVED)
     return; /* WinXP returns this when not connected to the net */
   ok((myhttp != 0),"InternetOpenUrl failed, error %u\n",GetLastError());
   ret = InternetReadFile(myhttp, buffer,0x400,&readbytes);
@@ -762,6 +762,9 @@ static void InternetOpenUrlA_test(void)
   while (readbytes && InternetReadFile(myhttp, buffer,0x400,&readbytes))
     totalbytes += readbytes;
   trace("read 0x%08x bytes\n",totalbytes);
+
+  InternetCloseHandle(myhttp);
+  InternetCloseHandle(myhinternet);
 }
 
 static void InternetTimeFromSystemTimeA_test(void)
@@ -1225,7 +1228,8 @@ struct server_info {
 static DWORD CALLBACK server_thread(LPVOID param)
 {
     struct server_info *si = param;
-    int r, s, c, i, on;
+    int r, c, i, on;
+    SOCKET s;
     struct sockaddr_in sa;
     char buffer[0x100];
     WSADATA wsaData;
@@ -1234,7 +1238,7 @@ static DWORD CALLBACK server_thread(LPVOID param)
     WSAStartup(MAKEWORD(1,1), &wsaData);
 
     s = socket(AF_INET, SOCK_STREAM, 0);
-    if (s<0)
+    if (s == INVALID_SOCKET)
         return 1;
 
     on = 1;

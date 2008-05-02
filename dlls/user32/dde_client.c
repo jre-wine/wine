@@ -985,6 +985,15 @@ static WDML_QUEUE_STATE WDML_HandleReply(WDML_CONV* pConv, MSG* msg, HDDEDATA* h
 	case WM_DDE_TERMINATE:
 	    qs = WDML_HandleIncomingTerminate(pConv, msg, hdd);
 	    break;
+        case WM_DDE_ACK:
+            /* This happens at end of DdeClientTransaction XTYP_EXECUTE
+             * Without this assignment, DdeClientTransaction's return value is undefined
+             * See also http://support.microsoft.com/kb/102574
+             */
+            *hdd = (HDDEDATA)TRUE;
+            if (ack)
+                *ack = DDE_FACK;
+	    break;
 	}
 	break;
     case WDML_QS_BLOCK:
@@ -1001,7 +1010,7 @@ static WDML_QUEUE_STATE WDML_HandleReply(WDML_CONV* pConv, MSG* msg, HDDEDATA* h
  * waits until an answer for a sent request is received
  * time out is also handled. only used for synchronous transactions
  */
-static HDDEDATA WDML_SyncWaitTransactionReply(HCONV hConv, DWORD dwTimeout, WDML_XACT* pXAct, DWORD *ack)
+static HDDEDATA WDML_SyncWaitTransactionReply(HCONV hConv, DWORD dwTimeout, const WDML_XACT* pXAct, DWORD *ack)
 {
     DWORD	dwTime;
     DWORD	err;
@@ -1223,8 +1232,6 @@ BOOL WINAPI DdeAbandonTransaction(DWORD idInst, HCONV hConv, DWORD idTransaction
     WDML_INSTANCE*	pInstance;
     WDML_CONV*		pConv;
     WDML_XACT*          pXAct;
-
-    TRACE("(%08x,%p,%08x);\n", idInst, hConv, idTransaction);
 
     if ((pInstance = WDML_GetInstance(idInst)))
     {

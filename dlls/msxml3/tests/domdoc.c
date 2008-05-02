@@ -333,6 +333,7 @@ static void test_domdoc( void )
     IXMLDOMParseError *error;
     IXMLDOMElement *element = NULL;
     IXMLDOMNode *node;
+    IXMLDOMText *nodetext = NULL;
     VARIANT_BOOL b;
     VARIANT var;
     BSTR str;
@@ -405,12 +406,9 @@ static void test_domdoc( void )
     ok( b == VARIANT_TRUE, "failed to load XML string\n");
     SysFreeString( str );
 
-    /* try with a null out pointer - crashes */
-    if (0)
-    {
-        r = IXMLDOMDocument_get_documentElement( doc, NULL );
-        ok( r == S_OK, "should be no document element\n");
-    }
+    /* try with a null out pointer */
+    r = IXMLDOMDocument_get_documentElement( doc, NULL );
+    ok( r == E_INVALIDARG, "should be no document element\n");
 
     /* check if nodename is correct */
     r = IXMLDOMDocument_get_nodeName( doc, NULL );
@@ -490,6 +488,15 @@ static void test_domdoc( void )
     ok( r == S_FALSE, "returns %08x\n", r );
     ok( code == 0, "code %ld\n", code );
     IXMLDOMParseError_Release( error );
+
+     /* test createTextNode */
+    str = SysAllocString( szOpen );
+    r = IXMLDOMDocument_createTextNode(doc, str, NULL);
+    ok( r == E_INVALIDARG, "returns %08x\n", r );
+    r = IXMLDOMDocument_createTextNode(doc, str, &nodetext);
+    ok( r == S_OK, "returns %08x\n", r );
+    IXMLDOMText_Release( nodetext );
+    SysFreeString( str );
 
     r = IXMLDOMDocument_Release( doc );
     ok( r == 0, "document ref count incorrect\n");
@@ -704,6 +711,7 @@ todo_wine
         r = IXMLDOMNode_get_baseName( node, &str );
         ok( r == S_OK, "get_baseName returned wrong code\n");
         ok( lstrcmpW(str,szdl) == 0, "basename was wrong\n");
+        SysFreeString( str );
 
         r = IXMLDOMNode_get_nodeValue( node, &var );
         ok( r == S_OK, "returns %08x\n", r );
@@ -1040,8 +1048,13 @@ static void test_create(void)
     ok( r == S_OK, "returns %08x\n", r );
     ok( node == child, "%p %p\n", node, child );
     IXMLDOMNode_Release( child );
-    IXMLDOMNode_Release( node );
 
+
+    V_VT(&var) = VT_NULL;
+    V_DISPATCH(&var) = (IDispatch*)node;
+    r = IXMLDOMNode_insertBefore( root, node, var, NULL );
+    ok( r == S_OK, "returns %08x\n", r );
+    IXMLDOMNode_Release( node );
 
     r = IXMLDOMNode_QueryInterface( root, &IID_IXMLDOMElement, (LPVOID*)&element );
     ok( r == S_OK, "returns %08x\n", r );
@@ -1202,6 +1215,10 @@ static void test_get_text(void)
     r = IXMLDOMNodeList_get_item( node_list, 0, &node );
     ok( r == S_OK, "ret %08x\n", r ); 
     IXMLDOMNodeList_Release( node_list );
+
+    /* Invalid output parameter*/
+    r = IXMLDOMNode_get_text( node, NULL );
+    ok( r == E_INVALIDARG, "ret %08x\n", r );
 
     r = IXMLDOMNode_get_text( node, &str );
     ok( r == S_OK, "ret %08x\n", r );
