@@ -36,8 +36,7 @@
 #------------------------------------------------------------------------------
 WINEBIN=@bindir@
 WINELIB=@libdir@
-WINESERVER=
-WINEDLLPATH=@dlldir@
+WINEDLL=@dlldir@
 
 #------------------------------------------------------------------------------
 #  Establish Color Scheme
@@ -178,20 +177,16 @@ if [ ! -r $WINELIB/libwine.so.1 ] ; then
     WINELIB=`find $argv0_dir/../ -maxdepth 2 -name 'libwine.so.1' -printf "%h\n" | head -n 1`
 fi
 
-if [ -x $WINEBIN/wineserver ] ; then
-    WINESERVER=$WINEBIN/wineserver
-fi
-
 #------------------------------------------------------------------------------
 #  Hey, if we built Wine from source, let's add a little extra fun to
 #   mix it up a bit
 #------------------------------------------------------------------------------
 if [ -x $WINEBIN/server/wineserver ] ; then
-    WINESERVER=$WINEBIN/server/wineserver
+    export WINESERVER=$WINEBIN/server/wineserver
 fi
 
 if [ -r $WINELIB/dlls/ntdll.dll.so ] ; then
-    WINEDLLPATH=$WINELIB/dlls
+    export WINEDLLPATH=$WINELIB/dlls
 fi
 
 
@@ -199,14 +194,22 @@ fi
 #  Okay, set the paths and move on.
 #------------------------------------------------------------------------------
 if [ -n "$LD_LIBRARY_PATH" ]; then
-	export LD_LIBRARY_PATH=$WINELIB:$LD_LIBRARY_PATH
+	export LD_LIBRARY_PATH="$WINELIB:$LD_LIBRARY_PATH"
 else
-	export LD_LIBRARY_PATH=$WINELIB
+	export LD_LIBRARY_PATH="$WINELIB"
+fi
+if [ -n "$WINEDLLPATH" ]; then
+	export WINEDLLPATH="$WINEDLLPATH:$WINEDLLDIR"
+else
+	export WINEDLLPATH="$WINEDLLDIR"
+fi
+if [ -z "$WINELOADER" ]; then
+	export WINELOADER=$WINEBIN/$WINE_BIN_NAME
+fi
+if [ -z "$WINESERVER" -a -x $WINEBIN/wineserver ] ; then
+	export WINESERVER=$WINEBIN/wineserver
 fi
 export PATH=$WINEBIN:$PATH
-export WINELOADER=$WINEBIN/$WINE_BIN_NAME
-export WINEDLLPATH
-export WINESERVER
 
 if [ -n "$WINEPREFIX" ]; then
     info_flag="$WINEPREFIX/.no_prelaunch_window_flag"
