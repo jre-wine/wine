@@ -1,3 +1,21 @@
+wine (0.9.46-1) unstable; urgency=low
+
+  * New upstream release 0.9.46.
+    - A variety of fixes to improve Photoshop CS2 support.
+    - More complete support for device installation in setupapi.
+    - New Bidi text implementation that doesn't depend on libicu.
+    - The usual assortment of Direct3D improvements.
+    - Beginning of I/O completion ports support.
+    - Lots of bug fixes.
+  * This version was released Sep 28, 2007.
+  * Removed libicu*-dev from Build-Depends.
+    (Bah, figures that they'd remove the ICU dependency now,
+    after all that effort spent on ICU in Debian...)
+  * bin2res no longer exists, so not installed into wine-utils
+    anymore.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 03 Dec 2007 00:38:25 +0100
+
 wine (0.9.45-1) unstable; urgency=low
 
   * New upstream release 0.9.45.
