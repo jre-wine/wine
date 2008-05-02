@@ -23,6 +23,8 @@
 #include "winbase.h"
 #include "wingdi.h"
 
+#include "objbase.h"
+
 #include "gdiplus.h"
 #include "gdiplus_private.h"
 
@@ -70,6 +72,23 @@ GpStatus WINGDIPAPI GdipCreateMatrix2(REAL m11, REAL m12, REAL m21, REAL m22,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipCreateMatrix3(GDIPCONST GpRectF *rect,
+    GDIPCONST GpPointF *pt, GpMatrix **matrix)
+{
+    if(!matrix)
+        return InvalidParameter;
+
+    *matrix = GdipAlloc(sizeof(GpMatrix));
+    if(!*matrix)    return OutOfMemory;
+
+    memcpy((*matrix)->matrix, rect, 4 * sizeof(REAL));
+
+    (*matrix)->matrix[4] = pt->X;
+    (*matrix)->matrix[5] = pt->Y;
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipCloneMatrix(GpMatrix *matrix, GpMatrix **clone)
 {
     if(!matrix || !clone)
@@ -107,6 +126,17 @@ GpStatus WINGDIPAPI GdipDeleteMatrix(GpMatrix *matrix)
         return InvalidParameter;
 
     GdipFree(matrix);
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetMatrixElements(GDIPCONST GpMatrix *matrix,
+    REAL *out)
+{
+    if(!matrix || !out)
+        return InvalidParameter;
+
+    memcpy(out, matrix->matrix, sizeof(matrix->matrix));
 
     return Ok;
 }
@@ -171,6 +201,22 @@ GpStatus WINGDIPAPI GdipScaleMatrix(GpMatrix *matrix, REAL scaleX, REAL scaleY,
         matrix_multiply(matrix->matrix, scale, matrix->matrix);
     else
         matrix_multiply(scale, matrix->matrix, matrix->matrix);
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipSetMatrixElements(GpMatrix *matrix, REAL m11, REAL m12,
+    REAL m21, REAL m22, REAL dx, REAL dy)
+{
+    if(!matrix)
+        return InvalidParameter;
+
+    matrix->matrix[0] = m11;
+    matrix->matrix[1] = m12;
+    matrix->matrix[2] = m21;
+    matrix->matrix[3] = m22;
+    matrix->matrix[4] = dx;
+    matrix->matrix[5] = dy;
 
     return Ok;
 }

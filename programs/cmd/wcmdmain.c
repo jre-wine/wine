@@ -1090,7 +1090,8 @@ void WCMD_run_program (WCHAR *command, int called) {
         if (!assumeInternal && !console) errorlevel = 0;
         else
         {
-            if (assumeInternal || !HIWORD(console)) WaitForSingleObject (pe.hProcess, INFINITE);
+            /* Always wait when called in a batch program context */
+            if (assumeInternal || context || !HIWORD(console)) WaitForSingleObject (pe.hProcess, INFINITE);
             GetExitCodeProcess (pe.hProcess, &errorlevel);
             if (errorlevel == STILL_ACTIVE) errorlevel = 0;
         }
@@ -2069,12 +2070,10 @@ WCHAR *WCMD_ReadAndParseLine(WCHAR *optionalcmd, CMD_LIST **output, HANDLE readF
 
                 /* Ignore open brackets inside the for set */
                 if (curLen == 0 && !inIn) {
-                    WINE_TRACE("@@@4\n");
                   curDepth++;
 
                 /* If in quotes, ignore brackets */
                 } else if (inQuotes) {
-                    WINE_TRACE("@@@3\n");
                   curString[curLen++] = *curPos;
 
                 /* In a FOR loop, an unquoted '(' may occur straight after
@@ -2088,7 +2087,6 @@ WCHAR *WCMD_ReadAndParseLine(WCHAR *optionalcmd, CMD_LIST **output, HANDLE readF
                            (inElse && lastWasElse && onlyWhiteSpace) ||
                            (inFor && (lastWasIn || lastWasDo) && onlyWhiteSpace)) {
 
-                  WINE_TRACE("@@@2\n");
                    /* If entering into an 'IN', set inIn */
                   if (inFor && lastWasIn && onlyWhiteSpace) {
                     WINE_TRACE("Inside an IN\n");
@@ -2114,7 +2112,6 @@ WCHAR *WCMD_ReadAndParseLine(WCHAR *optionalcmd, CMD_LIST **output, HANDLE readF
 
                   curDepth++;
                 } else {
-                  WINE_TRACE("@@@1\n");
                   curString[curLen++] = *curPos;
                 }
                 break;

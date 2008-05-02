@@ -32,103 +32,223 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 /*****************************************************************************
  * Pixel format array
  */
-static const PixelFormatDesc formats[] = {
-  /*{WINED3DFORMAT          ,alphamask  ,redmask    ,greenmask  ,bluemask   ,bpp    ,isFourcc   ,internal                         ,srgbInternal                           ,format  ,type   }*/
-    {WINED3DFMT_UNKNOWN     ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
+static const StaticPixelFormatDesc formats[] = {
+  /*{WINED3DFORMAT          ,alphamask  ,redmask    ,greenmask  ,bluemask   ,bpp    ,depth  ,stencil,    isFourcc*/
+    {WINED3DFMT_UNKNOWN     ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,0      ,0          ,FALSE },
     /* FourCC formats, kept here to have WINED3DFMT_R8G8B8(=20) at position 20 */
-    {WINED3DFMT_UYVY        ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                                ,0                                      ,0       ,0                        },
-    {WINED3DFMT_YUY2        ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                                ,0                                      ,0       ,0                        },
-    {WINED3DFMT_DXT1        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT1_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT ,GL_RGBA ,GL_UNSIGNED_BYTE         },
-    {WINED3DFMT_DXT2        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT ,GL_RGBA ,GL_UNSIGNED_BYTE         },
-    {WINED3DFMT_DXT3        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT ,GL_RGBA ,GL_UNSIGNED_BYTE         },
-    {WINED3DFMT_DXT4        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT5_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT ,GL_RGBA ,GL_UNSIGNED_BYTE         },
-    {WINED3DFMT_DXT5        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT5_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT ,GL_RGBA ,GL_UNSIGNED_BYTE         },
-    {WINED3DFMT_MULTI2_ARGB8,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                                ,0                                      ,0       ,0                        },
-    {WINED3DFMT_G8R8_G8B8   ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                                ,0                                      ,0       ,0                        },
-    {WINED3DFMT_R8G8_B8G8   ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_UYVY        ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,0      ,0          ,TRUE  },
+    {WINED3DFMT_YUY2        ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,0      ,0          ,TRUE  },
+    {WINED3DFMT_DXT1        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,0      ,0          ,TRUE  },
+    {WINED3DFMT_DXT2        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,0      ,0          ,TRUE  },
+    {WINED3DFMT_DXT3        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,0      ,0          ,TRUE  },
+    {WINED3DFMT_DXT4        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,0      ,0          ,TRUE  },
+    {WINED3DFMT_DXT5        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,0      ,0          ,TRUE  },
+    {WINED3DFMT_MULTI2_ARGB8,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,0      ,0          ,TRUE  },
+    {WINED3DFMT_G8R8_G8B8   ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,0      ,0          ,TRUE  },
+    {WINED3DFMT_R8G8_B8G8   ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,0      ,0          ,TRUE  },
     /* IEEE formats */
-    {WINED3DFMT_R32F        ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_RGB32F_ARB                    ,GL_RGB32F_ARB                          ,GL_RED  ,GL_FLOAT                 },
-    {WINED3DFMT_G32R32F     ,0x0        ,0x0        ,0x0        ,0x0        ,8      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
-    {WINED3DFMT_A32B32G32R32F,0x0       ,0x0        ,0x0        ,0x0        ,16     ,FALSE      ,GL_RGBA32F_ARB                   ,GL_RGBA32F_ARB                         ,GL_RGBA ,GL_FLOAT                 },
+    {WINED3DFMT_R32F        ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,0      ,0          ,FALSE },
+    {WINED3DFMT_G32R32F     ,0x0        ,0x0        ,0x0        ,0x0        ,8      ,0      ,0          ,FALSE },
+    {WINED3DFMT_A32B32G32R32F,0x0       ,0x0        ,0x0        ,0x0        ,16     ,0      ,0          ,FALSE },
     /* Hmm? */
-    {WINED3DFMT_CxV8U8      ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_CxV8U8      ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,0      ,0          ,FALSE },
     /* Float */
-    {WINED3DFMT_R16F        ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_RGB16F_ARB                    ,GL_RGB16F_ARB                          ,GL_RED  ,GL_HALF_FLOAT_ARB        },
-    {WINED3DFMT_G16R16F     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
-    {WINED3DFMT_A16B16G16R16F,0x0       ,0x0        ,0x0        ,0x0        ,8      ,FALSE      ,GL_RGBA16F_ARB                   ,GL_RGBA16F_ARB                         ,GL_RGBA ,GL_HALF_FLOAT_ARB        },
+    {WINED3DFMT_R16F        ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,0      ,0          ,FALSE },
+    {WINED3DFMT_G16R16F     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,0      ,0          ,FALSE },
+    {WINED3DFMT_A16B16G16R16F,0x0       ,0x0        ,0x0        ,0x0        ,8      ,0      ,0          ,FALSE },
     /* Palettized formats */
-    {WINED3DFMT_A8P8        ,0x0000ff00 ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
-    {WINED3DFMT_P8          ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_COLOR_INDEX8_EXT              ,GL_COLOR_INDEX8_EXT                    ,GL_COLOR_INDEX ,GL_UNSIGNED_BYTE  },
+    {WINED3DFMT_A8P8        ,0x0000ff00 ,0x0        ,0x0        ,0x0        ,2      ,0      ,0          ,FALSE },
+    {WINED3DFMT_P8          ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,0      ,0          ,FALSE },
     /* Standard ARGB formats. Keep WINED3DFMT_R8G8B8(=20) at position 20 */
-    {WINED3DFMT_R8G8B8      ,0x0        ,0x00ff0000 ,0x0000ff00 ,0x000000ff ,3      ,FALSE      ,GL_RGB8                          ,GL_RGB8                                ,GL_BGR  ,GL_UNSIGNED_BYTE         },
-    {WINED3DFMT_A8R8G8B8    ,0xff000000 ,0x00ff0000 ,0x0000ff00 ,0x000000ff ,4      ,FALSE      ,GL_RGBA8                         ,GL_SRGB8_ALPHA8_EXT                 ,GL_BGRA ,GL_UNSIGNED_INT_8_8_8_8_REV },
-    {WINED3DFMT_X8R8G8B8    ,0x0        ,0x00ff0000 ,0x0000ff00 ,0x000000ff ,4      ,FALSE      ,GL_RGB8                          ,GL_SRGB8_EXT                        ,GL_BGRA ,GL_UNSIGNED_INT_8_8_8_8_REV },
-    {WINED3DFMT_R5G6B5      ,0x0        ,0x0000F800 ,0x000007e0 ,0x0000001f ,2      ,FALSE      ,GL_RGB5                          ,GL_RGB5                              ,GL_RGB  ,GL_UNSIGNED_SHORT_5_6_5    },
-    {WINED3DFMT_X1R5G5B5    ,0x0        ,0x00007c00 ,0x000003e0 ,0x0000001f ,2      ,FALSE      ,GL_RGB5_A1                       ,GL_RGB5_A1                        ,GL_BGRA ,GL_UNSIGNED_SHORT_1_5_5_5_REV },
-    {WINED3DFMT_A1R5G5B5    ,0x00008000 ,0x00007c00 ,0x000003e0 ,0x0000001f ,2      ,FALSE      ,GL_RGB5_A1                       ,GL_RGB5_A1                        ,GL_BGRA ,GL_UNSIGNED_SHORT_1_5_5_5_REV },
-    {WINED3DFMT_A4R4G4B4    ,0x0000f000 ,0x00000f00 ,0x000000f0 ,0x0000000f ,2      ,FALSE      ,GL_RGBA4                         ,GL_SRGB8_ALPHA8_EXT               ,GL_BGRA ,GL_UNSIGNED_SHORT_4_4_4_4_REV },
-    {WINED3DFMT_R3G3B2      ,0x0        ,0x000000e0 ,0x0000001c ,0x00000003 ,1      ,FALSE      ,GL_R3_G3_B2                      ,GL_R3_G3_B2                          ,GL_RGB  ,GL_UNSIGNED_BYTE_2_3_3_REV },
-    {WINED3DFMT_A8          ,0x000000ff ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_ALPHA8                        ,GL_ALPHA8                              ,GL_ALPHA ,GL_UNSIGNED_BYTE        },
-    {WINED3DFMT_A8R3G3B2    ,0x0000ff00 ,0x000000e0 ,0x0000001c ,0x00000003 ,2      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
-    {WINED3DFMT_X4R4G4B4    ,0x0        ,0x00000f00 ,0x000000f0 ,0x0000000f ,2      ,FALSE      ,GL_RGB4                          ,GL_RGB4                           ,GL_BGRA ,GL_UNSIGNED_SHORT_4_4_4_4_REV },
-    {WINED3DFMT_A2B10G10R10 ,0xb0000000 ,0x000003ff ,0x000ffc00 ,0x3ff00000 ,4      ,FALSE      ,GL_RGB                           ,GL_RGB                           ,GL_RGBA ,GL_UNSIGNED_INT_2_10_10_10_REV },
-    {WINED3DFMT_A8B8G8R8    ,0xff000000 ,0x000000ff ,0x0000ff00 ,0x00ff0000 ,4      ,FALSE      ,GL_RGBA8                         ,GL_RGBA8                            ,GL_RGBA ,GL_UNSIGNED_INT_8_8_8_8_REV },
-    {WINED3DFMT_X8B8G8R8    ,0x0        ,0x000000ff ,0x0000ff00 ,0x00ff0000 ,4      ,FALSE      ,GL_RGB8                          ,GL_RGB8                             ,GL_RGBA ,GL_UNSIGNED_INT_8_8_8_8_REV },
-    {WINED3DFMT_G16R16      ,0x0        ,0x0000ffff ,0xffff0000 ,0x0        ,4      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
-    {WINED3DFMT_A2R10G10B10 ,0xb0000000 ,0x3ff00000 ,0x000ffc00 ,0x000003ff ,4      ,FALSE      ,GL_RGBA                          ,GL_RGBA                          ,GL_BGRA ,GL_UNSIGNED_INT_2_10_10_10_REV },
-    {WINED3DFMT_A16B16G16R16,0x0        ,0x0000ffff ,0xffff0000 ,0x0        ,8      ,FALSE      ,GL_RGBA16_EXT                    ,GL_RGBA16_EXT                          ,GL_RGBA ,GL_UNSIGNED_SHORT        },
+    {WINED3DFMT_R8G8B8      ,0x0        ,0x00ff0000 ,0x0000ff00 ,0x000000ff ,3      ,0      ,0          ,FALSE },
+    {WINED3DFMT_A8R8G8B8    ,0xff000000 ,0x00ff0000 ,0x0000ff00 ,0x000000ff ,4      ,0      ,0          ,FALSE },
+    {WINED3DFMT_X8R8G8B8    ,0x0        ,0x00ff0000 ,0x0000ff00 ,0x000000ff ,4      ,0      ,0          ,FALSE },
+    {WINED3DFMT_R5G6B5      ,0x0        ,0x0000F800 ,0x000007e0 ,0x0000001f ,2      ,0      ,0          ,FALSE },
+    {WINED3DFMT_X1R5G5B5    ,0x0        ,0x00007c00 ,0x000003e0 ,0x0000001f ,2      ,0      ,0          ,FALSE },
+    {WINED3DFMT_A1R5G5B5    ,0x00008000 ,0x00007c00 ,0x000003e0 ,0x0000001f ,2      ,0      ,0          ,FALSE },
+    {WINED3DFMT_A4R4G4B4    ,0x0000f000 ,0x00000f00 ,0x000000f0 ,0x0000000f ,2      ,0      ,0          ,FALSE },
+    {WINED3DFMT_R3G3B2      ,0x0        ,0x000000e0 ,0x0000001c ,0x00000003 ,1      ,0      ,0          ,FALSE },
+    {WINED3DFMT_A8          ,0x000000ff ,0x0        ,0x0        ,0x0        ,1      ,0      ,0          ,FALSE },
+    {WINED3DFMT_A8R3G3B2    ,0x0000ff00 ,0x000000e0 ,0x0000001c ,0x00000003 ,2      ,0      ,0          ,FALSE },
+    {WINED3DFMT_X4R4G4B4    ,0x0        ,0x00000f00 ,0x000000f0 ,0x0000000f ,2      ,0      ,0          ,FALSE },
+    {WINED3DFMT_A2B10G10R10 ,0xb0000000 ,0x000003ff ,0x000ffc00 ,0x3ff00000 ,4      ,0      ,0          ,FALSE },
+    {WINED3DFMT_A8B8G8R8    ,0xff000000 ,0x000000ff ,0x0000ff00 ,0x00ff0000 ,4      ,0      ,0          ,FALSE },
+    {WINED3DFMT_X8B8G8R8    ,0x0        ,0x000000ff ,0x0000ff00 ,0x00ff0000 ,4      ,0      ,0          ,FALSE },
+    {WINED3DFMT_G16R16      ,0x0        ,0x0000ffff ,0xffff0000 ,0x0        ,4      ,0      ,0          ,FALSE },
+    {WINED3DFMT_A2R10G10B10 ,0xb0000000 ,0x3ff00000 ,0x000ffc00 ,0x000003ff ,4      ,0      ,0          ,FALSE },
+    {WINED3DFMT_A16B16G16R16,0x0        ,0x0000ffff ,0xffff0000 ,0x0        ,8      ,0      ,0          ,FALSE },
     /* Luminance */
-    {WINED3DFMT_L8          ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_LUMINANCE8                    ,GL_SLUMINANCE8_EXT                     ,GL_LUMINANCE ,GL_UNSIGNED_BYTE    },
-    {WINED3DFMT_A8L8        ,0x0000ff00 ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_LUMINANCE8_ALPHA8             ,GL_SLUMINANCE8_ALPHA8_EXT          ,GL_LUMINANCE_ALPHA ,GL_UNSIGNED_BYTE  },
-    {WINED3DFMT_A4L4        ,0x000000f0 ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_LUMINANCE4_ALPHA4             ,GL_LUMINANCE4_ALPHA4               ,GL_LUMINANCE_ALPHA ,GL_UNSIGNED_BYTE  },
+    {WINED3DFMT_L8          ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,0      ,0          ,FALSE },
+    {WINED3DFMT_A8L8        ,0x0000ff00 ,0x0        ,0x0        ,0x0        ,2      ,0      ,0          ,FALSE },
+    {WINED3DFMT_A4L4        ,0x000000f0 ,0x0        ,0x0        ,0x0        ,1      ,0      ,0          ,FALSE },
     /* Bump mapping stuff */
-    {WINED3DFMT_V8U8        ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_DSDT8_NV                      ,GL_DSDT8_NV                            ,GL_DSDT_NV      ,GL_BYTE          },
-    {WINED3DFMT_L6V5U5      ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_COLOR_INDEX8_EXT              ,GL_COLOR_INDEX8_EXT            ,GL_COLOR_INDEX ,GL_UNSIGNED_SHORT_5_5_5_1 },
-    {WINED3DFMT_X8L8V8U8    ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DSDT8_MAG8_INTENSITY8_NV      ,GL_DSDT8_MAG8_INTENSITY8_NV            ,GL_DSDT_MAG_INTENSITY_NV ,GL_BYTE },
-    {WINED3DFMT_Q8W8V8U8    ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_SIGNED_RGBA8_NV               ,GL_SIGNED_RGBA8_NV                     ,GL_RGBA  ,GL_BYTE                 },
-    {WINED3DFMT_V16U16      ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_SIGNED_HILO16_NV              ,GL_SIGNED_HILO16_NV                    ,GL_HILO_NV ,GL_SHORT              },
-    {WINED3DFMT_W11V11U10   ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
-    {WINED3DFMT_A2W10V10U10 ,0xb0000000 ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_V8U8        ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,0      ,0          ,FALSE },
+    {WINED3DFMT_L6V5U5      ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,0      ,0          ,FALSE },
+    {WINED3DFMT_X8L8V8U8    ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,0      ,0          ,FALSE },
+    {WINED3DFMT_Q8W8V8U8    ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,0      ,0          ,FALSE },
+    {WINED3DFMT_V16U16      ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,0      ,0          ,FALSE },
+    {WINED3DFMT_W11V11U10   ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,0      ,0          ,FALSE },
+    {WINED3DFMT_A2W10V10U10 ,0xb0000000 ,0x0        ,0x0        ,0x0        ,4      ,0      ,0          ,FALSE },
     /* Depth stencil formats */
-    {WINED3DFMT_D16_LOCKABLE,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB           ,GL_DEPTH_COMPONENT ,GL_UNSIGNED_SHORT },
-    {WINED3DFMT_D32         ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT32_ARB         ,GL_DEPTH_COMPONENT32_ARB             ,GL_DEPTH_COMPONENT ,GL_UNSIGNED_INT },
-    {WINED3DFMT_D15S1       ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB           ,GL_DEPTH_COMPONENT ,GL_UNSIGNED_SHORT },
-    {WINED3DFMT_D24S8       ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB             ,GL_DEPTH_COMPONENT ,GL_UNSIGNED_INT },
-    {WINED3DFMT_D24X8       ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB              ,GL_DEPTH_COMPONENT,GL_UNSIGNED_INT },
-    {WINED3DFMT_D24X4S4     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB              ,GL_DEPTH_COMPONENT,GL_UNSIGNED_INT },
-    {WINED3DFMT_D16         ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB            ,GL_DEPTH_COMPONENT,GL_UNSIGNED_SHORT },
-    {WINED3DFMT_L16         ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_LUMINANCE16_EXT               ,GL_LUMINANCE16_EXT                  ,GL_LUMINANCE   ,GL_UNSIGNED_SHORT    },
-    {WINED3DFMT_D32F_LOCKABLE,0x0       ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT32_ARB         ,GL_DEPTH_COMPONENT32_ARB               ,GL_DEPTH_COMPONENT ,GL_FLOAT      },
-    {WINED3DFMT_D24FS8      ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB               ,GL_DEPTH_COMPONENT ,GL_FLOAT      },
+    {WINED3DFMT_D16_LOCKABLE,0x0        ,0x0        ,0x0        ,0x0        ,2      ,16     ,0          ,FALSE },
+    {WINED3DFMT_D32         ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,32     ,0          ,FALSE },
+    {WINED3DFMT_D15S1       ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,15     ,1          ,FALSE },
+    {WINED3DFMT_D24S8       ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,24     ,8          ,FALSE },
+    {WINED3DFMT_D24X8       ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,24     ,0          ,FALSE },
+    {WINED3DFMT_D24X4S4     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,24     ,4          ,FALSE },
+    {WINED3DFMT_D16         ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,16     ,0          ,FALSE },
+    {WINED3DFMT_L16         ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,0      ,0          ,FALSE },
+    {WINED3DFMT_D32F_LOCKABLE,0x0       ,0x0        ,0x0        ,0x0        ,4      ,32     ,0          ,FALSE },
+    {WINED3DFMT_D24FS8      ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,24     ,8          ,FALSE },
     /* Is this a vertex buffer? */
-    {WINED3DFMT_VERTEXDATA  ,0x0        ,0x0        ,0x0        ,0x0        ,0      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
-    {WINED3DFMT_INDEX16     ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
-    {WINED3DFMT_INDEX32     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
-    {WINED3DFMT_Q16W16V16U16,0x0        ,0x0        ,0x0        ,0x0        ,8      ,FALSE      ,GL_COLOR_INDEX                   ,GL_COLOR_INDEX                         ,GL_COLOR_INDEX ,GL_UNSIGNED_SHORT }
+    {WINED3DFMT_VERTEXDATA  ,0x0        ,0x0        ,0x0        ,0x0        ,0      ,0      ,0          ,FALSE },
+    {WINED3DFMT_INDEX16     ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,0      ,0          ,FALSE },
+    {WINED3DFMT_INDEX32     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,0      ,0          ,FALSE },
+    {WINED3DFMT_Q16W16V16U16,0x0        ,0x0        ,0x0        ,0x0        ,8      ,0      ,0          ,FALSE },
 };
 
-const PixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt)
-{
+typedef struct {
+    WINED3DFORMAT           fmt;
+    GLint                   glInternal, glGammaInternal, glFormat, glType;
+} GlPixelFormatDescTemplate;
+
+/*****************************************************************************
+ * OpenGL format template. Contains unexciting formats which do not need
+ * extension checks. The order in this table is independent of the order in
+ * the table StaticPixelFormatDesc above. Not all formats have to be in this
+ * table.
+ */
+static const GlPixelFormatDescTemplate gl_formats_template[] = {
+  /*{                           internal                         ,srgbInternal                           ,format                    ,type                           }*/
+    {WINED3DFMT_UNKNOWN        ,0                                ,0                                      ,0                         ,0                              },
+    /* FourCC formats */
+    {WINED3DFMT_UYVY           ,0                                ,0                                      ,0                         ,0                              },
+    {WINED3DFMT_YUY2           ,0                                ,0                                      ,0                         ,0                              },
+    {WINED3DFMT_DXT1           ,GL_COMPRESSED_RGBA_S3TC_DXT1_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT ,GL_RGBA                   ,GL_UNSIGNED_BYTE               },
+    {WINED3DFMT_DXT2           ,GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT ,GL_RGBA                   ,GL_UNSIGNED_BYTE               },
+    {WINED3DFMT_DXT3           ,GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT ,GL_RGBA                   ,GL_UNSIGNED_BYTE               },
+    {WINED3DFMT_DXT4           ,GL_COMPRESSED_RGBA_S3TC_DXT5_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT ,GL_RGBA                   ,GL_UNSIGNED_BYTE               },
+    {WINED3DFMT_DXT5           ,GL_COMPRESSED_RGBA_S3TC_DXT5_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT ,GL_RGBA                   ,GL_UNSIGNED_BYTE               },
+    {WINED3DFMT_MULTI2_ARGB8   ,0                                ,0                                      ,0                         ,0                              },
+    {WINED3DFMT_G8R8_G8B8      ,0                                ,0                                      ,0                         ,0                              },
+    {WINED3DFMT_R8G8_B8G8      ,0                                ,0                                      ,0                         ,0                              },
+    /* IEEE formats */
+    {WINED3DFMT_R32F           ,GL_RGB32F_ARB                    ,GL_RGB32F_ARB                          ,GL_RED                    ,GL_FLOAT                       },
+    {WINED3DFMT_G32R32F        ,0                                ,0                                      ,0                         ,0                              },
+    {WINED3DFMT_A32B32G32R32F  ,GL_RGBA32F_ARB                   ,GL_RGBA32F_ARB                         ,GL_RGBA                   ,GL_FLOAT                       },
+    /* Hmm? */
+    {WINED3DFMT_CxV8U8         ,0                                ,0                                      ,0                         ,0                              },
+    /* Float */
+    {WINED3DFMT_R16F           ,GL_RGB16F_ARB                    ,GL_RGB16F_ARB                          ,GL_RED                    ,GL_HALF_FLOAT_ARB              },
+    {WINED3DFMT_G16R16F        ,0                                ,0                                      ,0                         ,0                              },
+    {WINED3DFMT_A16B16G16R16F  ,GL_RGBA16F_ARB                   ,GL_RGBA16F_ARB                         ,GL_RGBA                   ,GL_HALF_FLOAT_ARB              },
+    /* Palettized formats */
+    {WINED3DFMT_A8P8,           0                                ,0                                      ,0                         ,0                              },
+    {WINED3DFMT_P8,             GL_COLOR_INDEX8_EXT              ,GL_COLOR_INDEX8_EXT                    ,GL_COLOR_INDEX            ,GL_UNSIGNED_BYTE               },
+    /* Standard ARGB formats */
+    {WINED3DFMT_R8G8B8         ,GL_RGB8                          ,GL_RGB8                                ,GL_BGR                    ,GL_UNSIGNED_BYTE               },
+    {WINED3DFMT_A8R8G8B8       ,GL_RGBA8                         ,GL_SRGB8_ALPHA8_EXT                    ,GL_BGRA                   ,GL_UNSIGNED_INT_8_8_8_8_REV    },
+    {WINED3DFMT_X8R8G8B8       ,GL_RGB8                          ,GL_SRGB8_EXT                           ,GL_BGRA                   ,GL_UNSIGNED_INT_8_8_8_8_REV    },
+    {WINED3DFMT_R5G6B5         ,GL_RGB5                          ,GL_RGB5                                ,GL_RGB                    ,GL_UNSIGNED_SHORT_5_6_5        },
+    {WINED3DFMT_X1R5G5B5       ,GL_RGB5_A1                       ,GL_RGB5_A1                             ,GL_BGRA                   ,GL_UNSIGNED_SHORT_1_5_5_5_REV  },
+    {WINED3DFMT_A1R5G5B5       ,GL_RGB5_A1                       ,GL_RGB5_A1                             ,GL_BGRA                   ,GL_UNSIGNED_SHORT_1_5_5_5_REV  },
+    {WINED3DFMT_A4R4G4B4       ,GL_RGBA4                         ,GL_SRGB8_ALPHA8_EXT                    ,GL_BGRA                   ,GL_UNSIGNED_SHORT_4_4_4_4_REV  },
+    {WINED3DFMT_R3G3B2         ,GL_R3_G3_B2                      ,GL_R3_G3_B2                            ,GL_RGB                    ,GL_UNSIGNED_BYTE_2_3_3_REV     },
+    {WINED3DFMT_A8             ,GL_ALPHA8                        ,GL_ALPHA8                              ,GL_ALPHA                  ,GL_UNSIGNED_BYTE               },
+    {WINED3DFMT_A8R3G3B2       ,0                                ,0                                      ,0                         ,0                              },
+    {WINED3DFMT_X4R4G4B4       ,GL_RGB4                          ,GL_RGB4                                ,GL_BGRA                   ,GL_UNSIGNED_SHORT_4_4_4_4_REV  },
+    {WINED3DFMT_A2B10G10R10    ,GL_RGB                           ,GL_RGB                                 ,GL_RGBA                   ,GL_UNSIGNED_INT_2_10_10_10_REV },
+    {WINED3DFMT_A8B8G8R8       ,GL_RGBA8                         ,GL_RGBA8                               ,GL_RGBA                   ,GL_UNSIGNED_INT_8_8_8_8_REV    },
+    {WINED3DFMT_X8B8G8R8       ,GL_RGB8                          ,GL_RGB8                                ,GL_RGBA                   ,GL_UNSIGNED_INT_8_8_8_8_REV    },
+    {WINED3DFMT_G16R16         ,0                                ,0                                      ,0                         ,0                              },
+    {WINED3DFMT_A2R10G10B10    ,GL_RGBA                          ,GL_RGBA                                ,GL_BGRA                   ,GL_UNSIGNED_INT_2_10_10_10_REV },
+    {WINED3DFMT_A16B16G16R16   ,GL_RGBA16_EXT                    ,GL_RGBA16_EXT                          ,GL_RGBA                   ,GL_UNSIGNED_SHORT              },
+    /* Luminance */
+    {WINED3DFMT_L8             ,GL_LUMINANCE8                    ,GL_SLUMINANCE8_EXT                     ,GL_LUMINANCE              ,GL_UNSIGNED_BYTE               },
+    {WINED3DFMT_A8L8           ,GL_LUMINANCE8_ALPHA8             ,GL_SLUMINANCE8_ALPHA8_EXT              ,GL_LUMINANCE_ALPHA        ,GL_UNSIGNED_BYTE               },
+    {WINED3DFMT_A4L4           ,GL_LUMINANCE4_ALPHA4             ,GL_LUMINANCE4_ALPHA4                   ,GL_LUMINANCE_ALPHA        ,GL_UNSIGNED_BYTE               },
+    /* Bump mapping stuff */
+    {WINED3DFMT_V8U8           ,GL_DSDT8_NV                      ,GL_DSDT8_NV                            ,GL_DSDT_NV                ,GL_BYTE                        },
+    {WINED3DFMT_L6V5U5         ,GL_COLOR_INDEX8_EXT              ,GL_COLOR_INDEX8_EXT                    ,GL_COLOR_INDEX            ,GL_UNSIGNED_SHORT_5_5_5_1      },
+    {WINED3DFMT_X8L8V8U8       ,GL_DSDT8_MAG8_INTENSITY8_NV      ,GL_DSDT8_MAG8_INTENSITY8_NV            ,GL_DSDT_MAG_INTENSITY_NV  ,GL_BYTE                        },
+    {WINED3DFMT_Q8W8V8U8       ,GL_SIGNED_RGBA8_NV               ,GL_SIGNED_RGBA8_NV                     ,GL_RGBA                   ,GL_BYTE                        },
+    {WINED3DFMT_V16U16         ,GL_SIGNED_HILO16_NV              ,GL_SIGNED_HILO16_NV                    ,GL_HILO_NV                ,GL_SHORT                       },
+    {WINED3DFMT_W11V11U10      ,0                                ,0                                      ,0                         ,0                              },
+    {WINED3DFMT_A2W10V10U10    ,0                                ,0                                      ,0                         ,0                              },
+    /* Depth stencil formats */
+    {WINED3DFMT_D16_LOCKABLE   ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB               ,GL_DEPTH_COMPONENT        ,GL_UNSIGNED_SHORT              },
+    {WINED3DFMT_D32            ,GL_DEPTH_COMPONENT32_ARB         ,GL_DEPTH_COMPONENT32_ARB               ,GL_DEPTH_COMPONENT        ,GL_UNSIGNED_INT                },
+    {WINED3DFMT_D15S1          ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB               ,GL_DEPTH_COMPONENT        ,GL_UNSIGNED_SHORT              },
+    {WINED3DFMT_D24S8          ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB               ,GL_DEPTH_COMPONENT        ,GL_UNSIGNED_INT                },
+    {WINED3DFMT_D24X8          ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB               ,GL_DEPTH_COMPONENT        ,GL_UNSIGNED_INT                },
+    {WINED3DFMT_D24X4S4        ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB               ,GL_DEPTH_COMPONENT        ,GL_UNSIGNED_INT                },
+    {WINED3DFMT_D16            ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB               ,GL_DEPTH_COMPONENT        ,GL_UNSIGNED_SHORT              },
+    {WINED3DFMT_L16            ,GL_LUMINANCE16_EXT               ,GL_LUMINANCE16_EXT                     ,GL_LUMINANCE              ,GL_UNSIGNED_SHORT              },
+    {WINED3DFMT_D32F_LOCKABLE  ,GL_DEPTH_COMPONENT32_ARB         ,GL_DEPTH_COMPONENT32_ARB               ,GL_DEPTH_COMPONENT        ,GL_FLOAT                       },
+    {WINED3DFMT_D24FS8         ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB               ,GL_DEPTH_COMPONENT        ,GL_FLOAT                       },
+    /* Is this a vertex buffer? */
+    {WINED3DFMT_VERTEXDATA     ,0                                ,0                                      ,0                         ,0                              },
+    {WINED3DFMT_INDEX16        ,0                                ,0                                      ,0                         ,0                              },
+    {WINED3DFMT_INDEX32        ,0                                ,0                                      ,0                         ,0                              },
+    {WINED3DFMT_Q16W16V16U16   ,GL_COLOR_INDEX                   ,GL_COLOR_INDEX                         ,GL_COLOR_INDEX            ,GL_UNSIGNED_SHORT              }
+};
+
+static inline int getFmtIdx(WINED3DFORMAT fmt) {
     /* First check if the format is at the position of its value.
      * This will catch the argb formats before the loop is entered
      */
     if(fmt < (sizeof(formats) / sizeof(formats[0])) && formats[fmt].format == fmt) {
-        return &formats[fmt];
+        return fmt;
     } else {
         unsigned int i;
         for(i = 0; i < (sizeof(formats) / sizeof(formats[0])); i++) {
             if(formats[i].format == fmt) {
-                return &formats[i];
+                return i;
             }
         }
     }
-    FIXME("Can't find format %s(%d) in the format lookup table\n", debug_d3dformat(fmt), fmt);
-    if(fmt == WINED3DFMT_UNKNOWN) {
-        ERR("Format table corrupt - Can't find WINED3DFMT_UNKNOWN\n");
-        return NULL;
+    return -1;
+}
+
+BOOL initPixelFormats(WineD3D_GL_Info *gl_info)
+{
+    unsigned int src;
+
+    gl_info->gl_formats = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                    sizeof(formats) / sizeof(formats[0]) * sizeof(gl_info->gl_formats[0]));
+    if(!gl_info->gl_formats) return FALSE;
+
+    /* If a format depends on some extensions, remove them from the table above and initialize them
+     * after this loop
+     */
+    for(src = 0; src < sizeof(gl_formats_template) / sizeof(gl_formats_template[0]); src++) {
+        int dst = getFmtIdx(gl_formats_template[src].fmt);
+        gl_info->gl_formats[dst].glInternal      = gl_formats_template[src].glInternal;
+        gl_info->gl_formats[dst].glGammaInternal = gl_formats_template[src].glGammaInternal;
+        gl_info->gl_formats[dst].glFormat        = gl_formats_template[src].glFormat;
+        gl_info->gl_formats[dst].glType          = gl_formats_template[src].glType;
     }
-    /* Get the caller a valid pointer */
-    return getFormatDescEntry(WINED3DFMT_UNKNOWN);
+
+    return TRUE;
+}
+
+const StaticPixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt, WineD3D_GL_Info *gl_info, const GlPixelFormatDesc **glDesc)
+{
+    int idx = getFmtIdx(fmt);
+
+    if(idx == -1) {
+        FIXME("Can't find format %s(%d) in the format lookup table\n", debug_d3dformat(fmt), fmt);
+        /* Get the caller a valid pointer */
+        idx = getFmtIdx(WINED3DFMT_UNKNOWN);
+    }
+    if(glDesc) {
+        if(!gl_info) {
+            ERR("OpenGL pixel format information was requested, but no gl info structure passed\n");
+            return NULL;
+        }
+        *glDesc = &gl_info->gl_formats[idx];
+    }
+    return &formats[idx];
 }
 
 /*****************************************************************************
@@ -2346,170 +2466,83 @@ void set_texture_matrix(const float *smat, DWORD flags, BOOL calculatedCoords)
 
 #define GLINFO_LOCATION ((IWineD3DImpl *)(This->wineD3D))->gl_info
 
-/* Convertes a D3D format into a OpenGL configuration format */
-int D3DFmtMakeGlCfg(WINED3DFORMAT BackBufferFormat, WINED3DFORMAT StencilBufferFormat, int *attribs, int* nAttribs, BOOL alternate){
-#define PUSH1(att)        attribs[(*nAttribs)++] = (att);
-#define PUSH2(att,value)  attribs[(*nAttribs)++] = (att); attribs[(*nAttribs)++] = (value);
-    /*We need to do some Card specific stuff in here at some point,
-    D3D now supports floating point format buffers, and there are a number of different OpelGl ways of managing these e.g.
-    GLX_ATI_pixel_format_float
-    */
-    switch (BackBufferFormat) {
-        /* color buffer */
-    case WINED3DFMT_P8:
-        PUSH2(GLX_RENDER_TYPE,  GLX_COLOR_INDEX_BIT);
-        PUSH2(GLX_BUFFER_SIZE,  8);
-        PUSH2(GLX_DOUBLEBUFFER, TRUE);
-        break;
-
-    case WINED3DFMT_R3G3B2:
-        PUSH2(GLX_RENDER_TYPE,  GLX_RGBA_BIT);
-        PUSH2(GLX_RED_SIZE,     3);
-        PUSH2(GLX_GREEN_SIZE,   3);
-        PUSH2(GLX_BLUE_SIZE,    2);
-        break;
-
-    case WINED3DFMT_A1R5G5B5:
-        PUSH2(GLX_ALPHA_SIZE,   1);
-    case WINED3DFMT_X1R5G5B5:
-        PUSH2(GLX_RED_SIZE,     5);
-        PUSH2(GLX_GREEN_SIZE,   5);
-        PUSH2(GLX_BLUE_SIZE,    5);
-        break;
-
-    case WINED3DFMT_R5G6B5:
-        PUSH2(GLX_RED_SIZE,     5);
-        PUSH2(GLX_GREEN_SIZE,   6);
-        PUSH2(GLX_BLUE_SIZE,    5);
-        break;
-
-    case WINED3DFMT_A4R4G4B4:
-        PUSH2(GLX_ALPHA_SIZE,   4);
-    case WINED3DFMT_X4R4G4B4:
-        PUSH2(GLX_RED_SIZE,     4);
-        PUSH2(GLX_GREEN_SIZE,   4);
-        PUSH2(GLX_BLUE_SIZE,    4);
-        break;
-
-    case WINED3DFMT_A8R8G8B8:
-        PUSH2(GLX_ALPHA_SIZE,   8);
-    case WINED3DFMT_R8G8B8:
-    case WINED3DFMT_X8R8G8B8:
-        PUSH2(GLX_RED_SIZE,     8);
-        PUSH2(GLX_GREEN_SIZE,   8);
-        PUSH2(GLX_BLUE_SIZE,    8);
-        break;
-
-    case WINED3DFMT_A2R10G10B10:
-        PUSH2(GLX_ALPHA_SIZE,   2);
-        PUSH2(GLX_RED_SIZE,    10);
-        PUSH2(GLX_GREEN_SIZE,  10);
-        PUSH2(GLX_BLUE_SIZE,   10);
-        break;
-
-    case WINED3DFMT_A16B16G16R16:        
-        PUSH2(GLX_ALPHA_SIZE,  16);
-        PUSH2(GLX_RED_SIZE,    16);
-        PUSH2(GLX_GREEN_SIZE,  16);
-        PUSH2(GLX_BLUE_SIZE,   16);
-        break;
-        
-    default:
-        FIXME("Unsupported color format: %s\n", debug_d3dformat(BackBufferFormat));
-        break;
+/* This small helper function is used to convert a bitmask into the number of masked bits */
+unsigned int count_bits(unsigned int mask)
+{
+    unsigned int count;
+    for (count = 0; mask; ++count)
+    {
+        mask &= mask - 1;
     }
-    if(!alternate){
-        switch (StencilBufferFormat) {
-    case 0:
-        break;
+    return count;
+}
 
-    case WINED3DFMT_D16_LOCKABLE:
-    case WINED3DFMT_D16:
-        PUSH2(GLX_DEPTH_SIZE,   16);
-        break;
+/* Helper function for retrieving color info for ChoosePixelFormat and wglChoosePixelFormatARB.
+ * The later function requires individual color components. */
+BOOL getColorBits(WINED3DFORMAT fmt, short *redSize, short *greenSize, short *blueSize, short *alphaSize, short *totalSize)
+{
+    const StaticPixelFormatDesc *desc;
 
-    case WINED3DFMT_D15S1:
-        PUSH2(GLX_DEPTH_SIZE,   15);
-        PUSH2(GLX_STENCIL_SIZE, 1);
-        /*Does openGl support a 1bit stencil?, I've seen it used elsewhere
-        e.g. http://www.ks.uiuc.edu/Research/vmd/doxygen/OpenGLDisplayDevice_8C-source.html*/
-        break;
-
-    case WINED3DFMT_D24X8:
-        PUSH2(GLX_DEPTH_SIZE,   24);
-        break;
-
-    case WINED3DFMT_D24X4S4:
-        PUSH2(GLX_DEPTH_SIZE,   24);
-        PUSH2(GLX_STENCIL_SIZE, 4);
-        break;
-
-    case WINED3DFMT_D24S8:
-        PUSH2(GLX_DEPTH_SIZE,   24);
-        PUSH2(GLX_STENCIL_SIZE, 8);
-        break;
-
-    case WINED3DFMT_D24FS8:
-        PUSH2(GLX_DEPTH_SIZE,   24);
-        PUSH2(GLX_STENCIL_SIZE, 8);
-        break;
-
-    case WINED3DFMT_D32:
-        PUSH2(GLX_DEPTH_SIZE,   32);
-        break;
-
-    default:
-        FIXME("Unsupported stencil format: %s\n", debug_d3dformat(StencilBufferFormat));
-        break;
-    }
-
-    } else { /* it the device doesn't support the 'exact' format, try to find something close */
-        switch (StencilBufferFormat) {
-        case 0:
+    TRACE("fmt: %s\n", debug_d3dformat(fmt));
+    switch(fmt)
+    {
+        case WINED3DFMT_R5G6B5:
+        case WINED3DFMT_X8R8G8B8:
             break;
-            
+        default:
+            ERR("Unsupported format: %s\n", debug_d3dformat(fmt));
+            return FALSE;
+    }
+
+    desc = getFormatDescEntry(fmt, NULL, NULL);
+    if(!desc)
+    {
+        ERR("Unable to look up format: 0x%x\n", fmt);
+        return FALSE;
+    }
+    *redSize = count_bits(desc->redMask);
+    *greenSize = count_bits(desc->greenMask);
+    *blueSize = count_bits(desc->blueMask);
+    *alphaSize = count_bits(desc->alphaMask);
+    *totalSize = *redSize + *greenSize + *blueSize + *alphaSize;
+
+    TRACE("Returning red:  %d, green: %d, blue: %d, alpha: %d, total: %d for fmt=%s\n", *redSize, *greenSize, *blueSize, *alphaSize, *totalSize, debug_d3dformat(fmt));
+    return TRUE;
+}
+
+/* Helper function for retrieving depth/stencil info for ChoosePixelFormat and wglChoosePixelFormatARB */
+BOOL getDepthStencilBits(WINED3DFORMAT fmt, short *depthSize, short *stencilSize)
+{
+    const StaticPixelFormatDesc *desc;
+
+    TRACE("fmt: %s\n", debug_d3dformat(fmt));
+    switch(fmt)
+    {
         case WINED3DFMT_D16_LOCKABLE:
         case WINED3DFMT_D16:
-            PUSH2(GLX_DEPTH_SIZE,   1);
-            break;
-
         case WINED3DFMT_D15S1:
-            PUSH2(GLX_DEPTH_SIZE,   1);
-            PUSH2(GLX_STENCIL_SIZE, 1);
-            /*Does openGl support a 1bit stencil?, I've seen it used elsewhere
-            e.g. http://www.ks.uiuc.edu/Research/vmd/doxygen/OpenGLDisplayDevice_8C-source.html*/
-            break;
-
         case WINED3DFMT_D24X8:
-            PUSH2(GLX_DEPTH_SIZE,   1);
-            break;
-
         case WINED3DFMT_D24X4S4:
-            PUSH2(GLX_DEPTH_SIZE,   1);
-            PUSH2(GLX_STENCIL_SIZE, 1);
-            break;
-
         case WINED3DFMT_D24S8:
-            PUSH2(GLX_DEPTH_SIZE,   1);
-            PUSH2(GLX_STENCIL_SIZE, 1);
-            break;
-
         case WINED3DFMT_D24FS8:
-            PUSH2(GLX_DEPTH_SIZE,   1);
-            PUSH2(GLX_STENCIL_SIZE, 1);
-            break;
-
         case WINED3DFMT_D32:
-            PUSH2(GLX_DEPTH_SIZE,   1);
             break;
-
         default:
-            FIXME("Unsupported stencil format: %s\n", debug_d3dformat(StencilBufferFormat));
-            break;
-        }
+            FIXME("Unsupported stencil format: %s\n", debug_d3dformat(fmt));
+            return FALSE;
     }
 
-    return *nAttribs;
+    desc = getFormatDescEntry(fmt, NULL, NULL);
+    if(!desc)
+    {
+        ERR("Unable to look up format: 0x%x\n", fmt);
+        return FALSE;
+    }
+    *depthSize = desc->depthSize;
+    *stencilSize = desc->stencilSize;
+
+    TRACE("Returning depthSize: %d and stencilSize: %d for fmt=%s\n", *depthSize, *stencilSize, debug_d3dformat(fmt));
+    return TRUE;
 }
 
 #undef GLINFO_LOCATION

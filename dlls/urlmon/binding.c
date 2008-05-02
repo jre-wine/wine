@@ -122,10 +122,12 @@ static void push_task(Binding *binding, task_header_t *task, task_proc_t proc)
 
     EnterCriticalSection(&binding->section);
 
-    if(binding->task_queue_tail)
+    if(binding->task_queue_tail) {
         binding->task_queue_tail->next = task;
-    else
+        binding->task_queue_tail = task;
+    }else {
         binding->task_queue_tail = binding->task_queue_head = task;
+    }
 
     LeaveCriticalSection(&binding->section);
 }
@@ -485,12 +487,14 @@ static HRESULT WINAPI ProtocolStream_Read(IStream *iface, void *pv,
     }
 
     if(read == cb) {
-        *pcbRead = read;
+        if (pcbRead)
+            *pcbRead = read;
         return S_OK;
     }
 
     This->hres = IInternetProtocol_Read(This->protocol, (PBYTE)pv+read, cb-read, &pread);
-    *pcbRead = read + pread;
+    if (pcbRead)
+        *pcbRead = read + pread;
 
     if(This->hres == E_PENDING)
         return E_PENDING;
@@ -910,6 +914,7 @@ static HRESULT WINAPI InternetProtocolSink_ReportProgress(IInternetProtocolSink 
 static void report_data(Binding *This, DWORD bscf, ULONG progress, ULONG progress_max)
 {
     FORMATETC formatetc = {0, NULL, 1, -1, TYMED_ISTREAM};
+    BOOL sent_begindownloaddata = FALSE;
 
     TRACE("(%p)->(%d %u %u)\n", This, bscf, progress, progress_max);
 
@@ -937,13 +942,18 @@ static void report_data(Binding *This, DWORD bscf, ULONG progress, ULONG progres
         fill_stream_buffer(This->stream);
 
         This->download_state = DOWNLOADING;
+        sent_begindownloaddata = TRUE;
         IBindStatusCallback_OnProgress(This->callback, progress, progress_max,
                 BINDSTATUS_BEGINDOWNLOADDATA, This->url);
     }
 
     if(This->stream->hres == S_FALSE || (bscf & BSCF_LASTDATANOTIFICATION)) {
+        This->download_state = END_DOWNLOAD;
         IBindStatusCallback_OnProgress(This->callback, progress, progress_max,
                 BINDSTATUS_ENDDOWNLOADDATA, This->url);
+    }else if(!sent_begindownloaddata) {
+        IBindStatusCallback_OnProgress(This->callback, progress, progress_max,
+                BINDSTATUS_DOWNLOADINGDATA, This->url);
     }
 
     if(!This->request_locked) {
@@ -951,13 +961,10 @@ static void report_data(Binding *This, DWORD bscf, ULONG progress, ULONG progres
         This->request_locked = SUCCEEDED(hres);
     }
 
-    fill_stream_buffer(This->stream);
-
-    IBindStatusCallback_OnDataAvailable(This->callback, bscf, This->stream->buf_size,
+    IBindStatusCallback_OnDataAvailable(This->callback, bscf, progress,
             &formatetc, &This->stgmed);
 
-    if(This->stream->hres == S_FALSE) {
-        This->download_state = END_DOWNLOAD;
+    if(This->download_state == END_DOWNLOAD) {
         IBindStatusCallback_OnStopBinding(This->callback, S_OK, NULL);
     }
 }
@@ -1370,6 +1377,7 @@ HRESULT start_binding(LPCWSTR url, IBindCtx *pbc, REFIID riid, void **ppv)
 {
     Binding *binding = NULL;
     HRESULT hres;
+    MSG msg;
 
     *ppv = NULL;
 
@@ -1396,6 +1404,15 @@ HRESULT start_binding(LPCWSTR url, IBindCtx *pbc, REFIID riid, void **ppv)
         IBinding_Release(BINDING(binding));
 
         return hres;
+    }
+
+    while(!(binding->bindf & BINDF_ASYNCHRONOUS) &&
+          binding->download_state != END_DOWNLOAD) {
+        MsgWaitForMultipleObjects(0, NULL, FALSE, 5000, QS_POSTMESSAGE);
+        while (PeekMessageW(&msg, binding->notif_hwnd, WM_USER, WM_USER+117, PM_REMOVE|PM_NOYIELD)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
     }
 
     if(binding->stream->init_buf) {

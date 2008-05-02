@@ -625,8 +625,6 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
 
     if (!(wm->ldr.Flags & LDR_DONT_RESOLVE_REFS)) return STATUS_SUCCESS;  /* already done */
     wm->ldr.Flags &= ~LDR_DONT_RESOLVE_REFS;
-    if (!create_module_activation_context( &wm->ldr ))
-        RtlActivateActivationContext( 0, wm->ldr.ActivationContext, &cookie );
 
     if (!(imports = RtlImageDirectoryEntryToData( wm->ldr.BaseAddress, TRUE,
                                                   IMAGE_DIRECTORY_ENTRY_IMPORT, &size )))
@@ -636,6 +634,9 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
     while (imports[nb_imports].Name && imports[nb_imports].FirstThunk) nb_imports++;
 
     if (!nb_imports) return STATUS_SUCCESS;  /* no imports */
+
+    if (!create_module_activation_context( &wm->ldr ))
+        RtlActivateActivationContext( 0, wm->ldr.ActivationContext, &cookie );
 
     /* Allocate module dependency list */
     wm->nDeps = nb_imports;
@@ -1591,6 +1592,7 @@ static NTSTATUS load_builtin_dll( LPCWSTR load_path, LPCWSTR path, HANDLE file,
 static NTSTATUS find_actctx_dll( LPCWSTR libname, LPWSTR *fullname )
 {
     static const WCHAR winsxsW[] = {'\\','w','i','n','s','x','s','\\'};
+    static const WCHAR dotManifestW[] = {'.','m','a','n','i','f','e','s','t',0};
 
     ACTIVATION_CONTEXT_ASSEMBLY_DETAILED_INFORMATION *info;
     ACTCTX_SECTION_KEYED_DATA data;
@@ -1623,6 +1625,29 @@ static NTSTATUS find_actctx_dll( LPCWSTR libname, LPWSTR *fullname )
         /* restart with larger buffer */
     }
 
+    if ((p = strrchrW( info->lpAssemblyManifestPath, '\\' )))
+    {
+        DWORD dirlen = info->ulAssemblyDirectoryNameLength / sizeof(WCHAR);
+
+        p++;
+        if (strncmpiW( p, info->lpAssemblyDirectoryName, dirlen ) || strcmpiW( p + dirlen, dotManifestW ))
+        {
+            /* manifest name does not match directory name, so it's not a global
+             * windows/winsxs manifest; use the manifest directory name instead */
+            dirlen = p - info->lpAssemblyManifestPath;
+            needed = (dirlen + 1) * sizeof(WCHAR) + nameW.Length;
+            if (!(*fullname = p = RtlAllocateHeap( GetProcessHeap(), 0, needed )))
+            {
+                status = STATUS_NO_MEMORY;
+                goto done;
+            }
+            memcpy( p, info->lpAssemblyManifestPath, dirlen * sizeof(WCHAR) );
+            p += dirlen;
+            strcpyW( p, libname );
+            goto done;
+        }
+    }
+
     needed = (windows_dir.Length + sizeof(winsxsW) + info->ulAssemblyDirectoryNameLength +
               nameW.Length + 2*sizeof(WCHAR));
 
@@ -1639,7 +1664,6 @@ static NTSTATUS find_actctx_dll( LPCWSTR libname, LPWSTR *fullname )
     p += info->ulAssemblyDirectoryNameLength / sizeof(WCHAR);
     *p++ = '\\';
     strcpyW( p, libname );
-    TRACE ("found %s for %s\n", debugstr_w(*fullname), debugstr_w(libname) );
 done:
     RtlFreeHeap( GetProcessHeap(), 0, info );
     RtlReleaseActivationContext( data.hActCtx );
@@ -1679,13 +1703,14 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
     if (!contains_path( libname ))
     {
         NTSTATUS status;
-        WCHAR *fullname;
+        WCHAR *fullname = NULL;
 
         if ((*pwm = find_basename_module( libname )) != NULL) goto found;
 
         status = find_actctx_dll( libname, &fullname );
         if (status == STATUS_SUCCESS)
         {
+            TRACE ("found %s for %s\n", debugstr_w(fullname), debugstr_w(libname) );
             RtlFreeHeap( GetProcessHeap(), 0, dllname );
             libname = dllname = fullname;
         }

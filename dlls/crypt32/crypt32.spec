@@ -141,7 +141,7 @@
 @ stdcall CryptMemRealloc(ptr long)
 @ stub CryptMsgCalculateEncodedLength
 @ stdcall CryptMsgClose(ptr)
-@ stub CryptMsgControl
+@ stdcall CryptMsgControl(ptr long long ptr)
 @ stub CryptMsgCountersign
 @ stub CryptMsgCountersignEncoded
 @ stdcall CryptMsgDuplicate(ptr)
@@ -196,6 +196,7 @@
 @ stdcall I_CryptFlushLruCache(ptr long long)
 @ stdcall I_CryptFreeLruCache(ptr long long)
 @ stdcall I_CryptFreeTls(long long)
+@ stdcall I_CryptGetAsn1Decoder(long)
 @ stdcall I_CryptGetDefaultCryptProv(long)
 @ stub I_CryptGetDefaultCryptProvForEncrypt
 @ stdcall I_CryptGetOssGlobal(long)

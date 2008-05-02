@@ -20,17 +20,29 @@
 #define __WINE_GP_PRIVATE_H_
 
 #include <math.h>
+#include <stdarg.h>
+
 #include "windef.h"
 #include "wingdi.h"
+#include "winbase.h"
+#include "winuser.h"
+
+#include "objbase.h"
+#include "ocidl.h"
+
 #include "gdiplus.h"
 
 #define GP_DEFAULT_PENSTYLE (PS_GEOMETRIC | PS_SOLID | PS_ENDCAP_FLAT | PS_JOIN_MITER)
 #define MAX_ARC_PTS (13)
+#define MAX_DASHLEN (16) /* this is a limitation of gdi */
+#define INCH_HIMETRIC (2540)
 
 COLORREF ARGB2COLORREF(ARGB color);
 extern INT arc2polybezier(GpPointF * points, REAL x1, REAL y1, REAL x2, REAL y2,
     REAL startAngle, REAL sweepAngle);
-extern FLOAT gdiplus_atan2(FLOAT dy, FLOAT dx);
+extern REAL gdiplus_atan2(REAL dy, REAL dx);
+extern GpStatus hresult_to_status(HRESULT res);
+extern REAL convert_unit(HDC hdc, GpUnit unit);
 
 static inline INT roundr(REAL x)
 {
@@ -56,6 +68,7 @@ struct GpPen{
     GpDashStyle dash;
     REAL *dashes;
     INT numdashes;
+    REAL offset;    /* dash offset */
     GpBrush *brush;
 };
 
@@ -82,6 +95,30 @@ struct GpSolidFill{
     ARGB color;
 };
 
+struct GpPathGradient{
+    GpBrush brush;
+    PathData pathdata;
+    ARGB centercolor;
+    GpWrapMode wrap;
+    BOOL gamma;
+    GpPointF center;
+    GpPointF focus;
+};
+
+struct GpLineGradient{
+    GpBrush brush;
+    GpPointF startpoint;
+    GpPointF endpoint;
+    ARGB startcolor;
+    ARGB endcolor;
+    GpWrapMode wrap;
+    BOOL gamma;
+};
+
+struct GpTexture{
+    GpBrush brush;
+};
+
 struct GpPath{
     GpFillMode fill;
     GpPathData pathdata;
@@ -105,6 +142,31 @@ struct GpCustomLineCap{
     BOOL fill;      /* TRUE for fill, FALSE for stroke */
     GpLineCap cap;  /* as far as I can tell, this value is ignored */
     REAL inset;     /* how much to adjust the end of the line */
+};
+
+struct GpImage{
+    IPicture* picture;
+    ImageType type;
+};
+
+struct GpMetafile{
+    GpImage image;
+    GpRectF bounds;
+    GpUnit unit;
+};
+
+struct GpBitmap{
+    GpImage image;
+    INT width;
+    INT height;
+    PixelFormat format;
+    ImageLockMode lockmode;
+    INT numlocks;
+    BYTE *bitmapbits;   /* pointer to the buffer we passed in BitmapLockBits */
+};
+
+struct GpImageAttributes{
+    WrapMode wrap;
 };
 
 #endif

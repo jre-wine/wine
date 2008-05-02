@@ -19,6 +19,7 @@
  */
 
 #include <stdarg.h>
+#include <stdio.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -110,7 +111,7 @@ static void test_open_svc(void)
        GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
        "Expected ERROR_INVALID_ADDRESS or ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
 
-    /* Non-existent service */
+    /* Nonexistent service */
     scm_handle = OpenSCManagerA(NULL, NULL, SC_MANAGER_CONNECT);
     SetLastError(0xdeadbeef);
     svc_handle = OpenServiceA(scm_handle, "deadbeef", GENERIC_READ);
@@ -139,7 +140,7 @@ static void test_open_svc(void)
 static void test_create_delete_svc(void)
 {
     SC_HANDLE scm_handle, svc_handle1;
-    CHAR username[UNLEN + 1];
+    CHAR username[UNLEN + 1], domain[MAX_PATH];
     DWORD user_size = UNLEN + 1;
     CHAR account[UNLEN + 3];
     static const CHAR servicename         [] = "Winetest";
@@ -153,8 +154,11 @@ static void test_create_delete_svc(void)
 
     /* Get the username and turn it into an account to be used in some tests */
     GetUserNameA(username, &user_size);
-    lstrcpy(account, ".\\");
-    lstrcat(account, username);
+    /* Get the domainname to cater for that situation */
+    if (GetEnvironmentVariableA("USERDOMAIN", domain, MAX_PATH))
+        sprintf(account, "%s\\%s", domain, username);
+    else
+        sprintf(account, ".\\%s", username);
 
     /* All NULL */
     SetLastError(0xdeadbeef);
@@ -415,12 +419,11 @@ static void test_get_displayname(void)
        GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
        "Expected ERROR_INVALID_ADDRESS or ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
 
-    /* Test for non-existing service */
+    /* Test for nonexistent service */
     SetLastError(0xdeadbeef);
     displaysize = -1;
     ret = GetServiceDisplayNameA(scm_handle, deadbeef, NULL, &displaysize);
     ok(!ret, "Expected failure\n");
-    todo_wine
     ok(GetLastError() == ERROR_SERVICE_DOES_NOT_EXIST,
        "Expected ERROR_SERVICE_DOES_NOT_EXIST, got %d\n", GetLastError());
 
@@ -477,7 +480,7 @@ static void test_get_displayname(void)
        GetLastError() == 0xdeadbeef       /* NT4, XP, Vista */,
        "Expected ERROR_SUCCESS, ERROR_IO_PENDING or 0xdeadbeef, got %d\n", GetLastError());
 
-    /* And with a bigger then needed buffer */
+    /* And with a bigger than needed buffer */
     SetLastError(0xdeadbeef);
     displaysize = tempsize * 2;
     ret = GetServiceDisplayNameA(scm_handle, spooler, displayname, &displaysize);
@@ -518,7 +521,7 @@ static void test_get_displayname(void)
     ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
        "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
 
-    /* And with a bigger then needed buffer */
+    /* And with a bigger than needed buffer */
     SetLastError(0xdeadbeef);
     displaysize = tempsizeW + 1; /* This caters for the null terminating character */
     ret = GetServiceDisplayNameW(scm_handle, spoolerW, displaynameW, &displaysize);
@@ -562,19 +565,24 @@ static void test_get_displayname(void)
     displaysize = -1;
     ret = GetServiceDisplayNameA(scm_handle, servicename, NULL, &displaysize);
     ok(!ret, "Expected failure\n");
-    todo_wine
-    {
     ok(displaysize == lstrlen(servicename) * 2,
        "Expected the displaysize to be twice the size of the servicename\n");
     ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
        "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
-    }
+
+    /* Buffer is too small */
+    SetLastError(0xdeadbeef);
+    tempsize = displaysize;
+    displaysize = (tempsize / 2);
+    ret = GetServiceDisplayNameA(scm_handle, servicename, displayname, &displaysize);
+    ok(!ret, "Expected failure\n");
+    ok(displaysize == tempsize, "Expected the needed buffersize\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+       "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
 
     /* Get the displayname */
     SetLastError(0xdeadbeef);
     ret = GetServiceDisplayNameA(scm_handle, servicename, displayname, &displaysize);
-    todo_wine
-    {
     ok(ret, "Expected success\n");
     ok(!lstrcmpi(displayname, servicename),
        "Expected displayname to be %s, got %s\n", servicename, displayname);
@@ -582,7 +590,6 @@ static void test_get_displayname(void)
        GetLastError() == ERROR_IO_PENDING /* W2K */ ||
        GetLastError() == 0xdeadbeef       /* NT4, XP, Vista */,
        "Expected ERROR_SUCCESS, ERROR_IO_PENDING or 0xdeadbeef, got %d\n", GetLastError());
-    }
 
     /* Delete the service */
     ret = DeleteService(svc_handle);
@@ -632,7 +639,7 @@ static void test_get_servicekeyname(void)
        GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
        "Expected ERROR_INVALID_ADDRESS or ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
 
-    /* Test for non-existing displayname */
+    /* Test for nonexistent displayname */
     SetLastError(0xdeadbeef);
     ret = GetServiceKeyNameA(scm_handle, deadbeef, NULL, &servicesize);
     ok(!ret, "Expected failure\n");
@@ -674,11 +681,11 @@ static void test_get_servicekeyname(void)
        GetLastError() == ERROR_IO_PENDING /* W2K */ ||
        GetLastError() == 0xdeadbeef       /* NT4, XP, Vista */,
        "Expected ERROR_SUCCESS, ERROR_IO_PENDING or 0xdeadbeef, got %d\n", GetLastError());
-    todo_wine
+    if (ret)
     {
-    ok(lstrlen(servicename) == tempsize/2,
-       "Expected the buffer to be twice the length of the string\n") ;
-    ok(!lstrcmpi(servicename, spooler), "Expected %s, got %s\n", spooler, servicename);
+        ok(lstrlen(servicename) == tempsize/2,
+           "Expected the buffer to be twice the length of the string\n") ;
+        ok(!lstrcmpi(servicename, spooler), "Expected %s, got %s\n", spooler, servicename);
     }
 
     CloseServiceHandle(scm_handle);
@@ -875,7 +882,7 @@ static void test_refcount(void)
     ok(ret, "Expected success\n");
 
     /* We cannot create the same service again as it's still marked as 'being deleted'.
-     * The reason is that we still have 4 open handles to this service eventhough we
+     * The reason is that we still have 4 open handles to this service even though we
      * closed the handle to the Service Control Manager in between.
      */
     SetLastError(0xdeadbeef);
@@ -906,7 +913,7 @@ static void test_refcount(void)
     ret = CloseServiceHandle(svc_handle1);
     ok(ret, "Expected success\n");
 
-    /* Wait a while. Doing a CreateService to soon will result again
+    /* Wait a while. Doing a CreateService too soon will result again
      * in an ERROR_SERVICE_MARKED_FOR_DELETE error.
      */
     Sleep(1000);

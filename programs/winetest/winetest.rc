@@ -18,8 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <windows.h>
-#include <winres.h>
+#include <windef.h>
+#include <winuser.h>
+#include <commctrl.h>
+
 #include "resource.h"
 
 IDD_TAG DIALOG 0, 0, 150, 65
@@ -187,6 +189,7 @@ ntprint_test.exe TESTRES "ntprint_test.exe"
 odbccp32_test.exe TESTRES "odbccp32_test.exe"
 ole32_test.exe TESTRES "ole32_test.exe"
 oleaut32_test.exe TESTRES "oleaut32_test.exe"
+opengl32_test.exe TESTRES "opengl32_test.exe"
 pdh_test.exe TESTRES "pdh_test.exe"
 psapi_test.exe TESTRES "psapi_test.exe"
 quartz_test.exe TESTRES "quartz_test.exe"

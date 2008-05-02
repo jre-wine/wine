@@ -65,12 +65,12 @@ static void Context_MarkStateDirty(WineD3DContext *context, DWORD state) {
  *
  * Params:
  *  This: Device to add the context for
- *  display: X display this context uses
- *  glCtx: glX context to add
- *  drawable: drawable used with this context.
+ *  hdc: device context
+ *  glCtx: WGL context to add
+ *  pbuffer: optional pbuffer used with this context
  *
  *****************************************************************************/
-static WineD3DContext *AddContextToArray(IWineD3DDeviceImpl *This, Display *display, GLXContext glCtx, Drawable drawable) {
+static WineD3DContext *AddContextToArray(IWineD3DDeviceImpl *This, HWND win_handle, HDC hdc, HGLRC glCtx, HPBUFFERARB pbuffer) {
     WineD3DContext **oldArray = This->contexts;
     DWORD state;
 
@@ -92,9 +92,10 @@ static WineD3DContext *AddContextToArray(IWineD3DDeviceImpl *This, Display *disp
         return NULL;
     }
 
-    This->contexts[This->numContexts]->display = display;
+    This->contexts[This->numContexts]->hdc = hdc;
     This->contexts[This->numContexts]->glCtx = glCtx;
-    This->contexts[This->numContexts]->drawable = drawable;
+    This->contexts[This->numContexts]->pbuffer = pbuffer;
+    This->contexts[This->numContexts]->win_handle = win_handle;
     HeapFree(GetProcessHeap(), 0, oldArray);
 
     /* Mark all states dirty to force a proper initialization of the states on the first use of the context
@@ -108,86 +109,6 @@ static WineD3DContext *AddContextToArray(IWineD3DDeviceImpl *This, Display *disp
     return This->contexts[This->numContexts - 1];
 }
 
-/* Returns an array of compatible FBconfig(s).
- * The array must be freed with XFree. Requires ENTER_GL()
- */
-static GLXFBConfig* pbuffer_find_fbconfigs(
-    IWineD3DDeviceImpl* This,
-    IWineD3DSurfaceImpl* RenderSurface,
-    Display *display) {
-
-    GLXFBConfig* cfgs = NULL;
-    int nCfgs = 0;
-    int attribs[256];
-    int nAttribs = 0;
-
-    IWineD3DSurface *StencilSurface = This->stencilBufferTarget;
-    WINED3DFORMAT BackBufferFormat = RenderSurface->resource.format;
-    WINED3DFORMAT StencilBufferFormat = (NULL != StencilSurface) ? ((IWineD3DSurfaceImpl *) StencilSurface)->resource.format : 0;
-
-    /* TODO:
-     *  if StencilSurface == NULL && zBufferTarget != NULL then switch the zbuffer off,
-     *  it StencilSurface != NULL && zBufferTarget == NULL switch it on
-     */
-
-#define PUSH1(att)        attribs[nAttribs++] = (att);
-#define PUSH2(att,value)  attribs[nAttribs++] = (att); attribs[nAttribs++] = (value);
-
-    /* PUSH2(GLX_BIND_TO_TEXTURE_RGBA_ATI, True); examples of this are few and far between (but I've got a nice working one!)*/
-
-    PUSH2(GLX_DRAWABLE_TYPE, GLX_PBUFFER_BIT);
-    PUSH2(GLX_X_RENDERABLE,  TRUE);
-    PUSH2(GLX_DOUBLEBUFFER,  TRUE);
-    TRACE("calling makeglcfg\n");
-    D3DFmtMakeGlCfg(BackBufferFormat, StencilBufferFormat, attribs, &nAttribs, FALSE /* alternate */);
-    PUSH1(None);
-    TRACE("calling chooseFGConfig\n");
-    cfgs = glXChooseFBConfig(display,
-                             DefaultScreen(display),
-                             attribs, &nCfgs);
-    if (cfgs == NULL) {
-        /* OK we didn't find the exact config, so use any reasonable match */
-        /* TODO: fill in the 'requested' and 'current' depths, and make sure that's
-           why we failed. */
-        static BOOL show_message = TRUE;
-        if (show_message) {
-            ERR("Failed to find exact match, finding alternative but you may "
-                "suffer performance issues, try changing xfree's depth to match the requested depth\n");
-            show_message = FALSE;
-        }
-        nAttribs = 0;
-        PUSH2(GLX_DRAWABLE_TYPE, GLX_PBUFFER_BIT | GLX_WINDOW_BIT);
-        /* PUSH2(GLX_X_RENDERABLE,  TRUE); */
-        PUSH2(GLX_RENDER_TYPE,   GLX_RGBA_BIT);
-        PUSH2(GLX_DOUBLEBUFFER, FALSE);
-        TRACE("calling makeglcfg\n");
-        D3DFmtMakeGlCfg(BackBufferFormat, StencilBufferFormat, attribs, &nAttribs, TRUE /* alternate */);
-        PUSH1(None);
-        cfgs = glXChooseFBConfig(display,
-                                 DefaultScreen(display),
-                                 attribs, &nCfgs);
-    }
-
-    if (cfgs == NULL) {
-        ERR("Could not get a valid FBConfig for (%u,%s)/(%u,%s)\n",
-            BackBufferFormat, debug_d3dformat(BackBufferFormat),
-            StencilBufferFormat, debug_d3dformat(StencilBufferFormat));
-    } else {
-#ifdef EXTRA_TRACES
-        int i;
-        for (i = 0; i < nCfgs; ++i) {
-            TRACE("for (%u,%s)/(%u,%s) found config[%d]@%p\n", BackBufferFormat,
-            debug_d3dformat(BackBufferFormat), StencilBufferFormat,
-            debug_d3dformat(StencilBufferFormat), i, cfgs[i]);
-        }
-#endif
-    }
-#undef PUSH1
-#undef PUSH2
-
-   return cfgs;
-}
-
 /*****************************************************************************
  * CreateContext
  *
@@ -196,130 +117,166 @@ static GLXFBConfig* pbuffer_find_fbconfigs(
  * * Params:
  *  This: Device to activate the context for
  *  target: Surface this context will render to
- *  display: X11 connection
- *  win: Target window. NULL for a pbuffer
+ *  win_handle: handle to the window which we are drawing to
+ *  create_pbuffer: tells whether to create a pbuffer or not
  *
  *****************************************************************************/
-WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, Display *display, Window win) {
-    Drawable drawable = win, oldDrawable;
-    XVisualInfo *visinfo = NULL;
-    GLXFBConfig *cfgs = NULL;
-    GLXContext ctx = NULL, oldCtx;
+WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, HWND win_handle, BOOL create_pbuffer) {
+    HDC oldDrawable, hdc;
+    HPBUFFERARB pbuffer = NULL;
+    HGLRC ctx = NULL, oldCtx;
     WineD3DContext *ret = NULL;
     int s;
 
-    TRACE("(%p): Creating a %s context for render target %p\n", This, win ? "onscreen" : "offscreen", target);
+    TRACE("(%p): Creating a %s context for render target %p\n", This, create_pbuffer ? "offscreen" : "onscreen", target);
 
-    if(!win) {
+    if(create_pbuffer) {
+        HDC hdc_parent = GetDC(win_handle);
+        int iPixelFormat = 0;
+        short red, green, blue, alphaBits, colorBits;
+        short depthBits, stencilBits;
+
+        IWineD3DSurface *StencilSurface = This->stencilBufferTarget;
+        WINED3DFORMAT StencilBufferFormat = (NULL != StencilSurface) ? ((IWineD3DSurfaceImpl *) StencilSurface)->resource.format : 0;
+
         int attribs[256];
         int nAttribs = 0;
+        unsigned int nFormats;
+
+#define PUSH1(att)        attribs[nAttribs++] = (att);
+#define PUSH2(att,value)  attribs[nAttribs++] = (att); attribs[nAttribs++] = (value);
+
+        /* Retrieve the specifications for the pixelformat from the backbuffer / stencilbuffer */
+        getColorBits(target->resource.format, &red, &green, &blue, &alphaBits, &colorBits);
+        getDepthStencilBits(StencilBufferFormat, &depthBits, &stencilBits);
+        PUSH2(WGL_DRAW_TO_PBUFFER_ARB, 1); /* We need pbuffer support; doublebuffering isn't needed */
+        PUSH2(WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB); /* Make sure we don't get a float or color index format */
+        PUSH2(WGL_COLOR_BITS_ARB, colorBits);
+        PUSH2(WGL_ALPHA_BITS_ARB, alphaBits);
+        PUSH2(WGL_DEPTH_BITS_ARB, depthBits);
+        PUSH2(WGL_STENCIL_BITS_ARB, stencilBits);
+        PUSH1(0); /* end the list */
+
+#undef PUSH1
+#undef PUSH2
+
+        /* Try to find a pixelformat that matches exactly. If that fails let ChoosePixelFormat try to find a close match */
+        if(!GL_EXTCALL(wglChoosePixelFormatARB(hdc_parent, (const int*)&attribs, NULL, 1, &iPixelFormat, &nFormats)))
+        {
+            PIXELFORMATDESCRIPTOR pfd;
+
+            TRACE("Falling back to ChoosePixelFormat as wglChoosePixelFormatARB failed\n");
+
+            ZeroMemory(&pfd, sizeof(pfd));
+            pfd.nSize      = sizeof(pfd);
+            pfd.nVersion   = 1;
+            pfd.dwFlags    = PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER_DONTCARE | PFD_DRAW_TO_WINDOW;
+            pfd.iPixelType = PFD_TYPE_RGBA;
+            pfd.cColorBits = colorBits;
+            pfd.cDepthBits = depthBits;
+            pfd.cStencilBits = stencilBits;
+            pfd.iLayerType = PFD_MAIN_PLANE;
+
+            iPixelFormat = ChoosePixelFormat(hdc_parent, &pfd);
+            if(!iPixelFormat) {
+                /* If this happens something is very wrong as ChoosePixelFormat barely fails */
+                ERR("Can't find a suitable iPixelFormat for the pbuffer\n");
+            }
+        }
 
         TRACE("Creating a pBuffer drawable for the new context\n");
-
-        cfgs = pbuffer_find_fbconfigs(This, target, display);
-        if(!cfgs) {
-            ERR("Cannot find a frame buffer configuration for the pbuffer\n");
-            goto out;
-        }
-
-        attribs[nAttribs++] = GLX_PBUFFER_WIDTH;
-        attribs[nAttribs++] = target->currentDesc.Width;
-        attribs[nAttribs++] = GLX_PBUFFER_HEIGHT;
-        attribs[nAttribs++] = target->currentDesc.Height;
-        attribs[nAttribs++] = None;
-
-        visinfo = glXGetVisualFromFBConfig(display, cfgs[0]);
-        if(!visinfo) {
-            ERR("Cannot find a visual for the pbuffer\n");
-            goto out;
-        }
-
-        drawable = glXCreatePbuffer(display, cfgs[0], attribs);
-
-        if(!drawable) {
+        pbuffer = GL_EXTCALL(wglCreatePbufferARB(hdc_parent, iPixelFormat, target->currentDesc.Width, target->currentDesc.Height, 0));
+        if(!pbuffer) {
             ERR("Cannot create a pbuffer\n");
+            ReleaseDC(win_handle, hdc_parent);
             goto out;
         }
-        XFree(cfgs);
-        cfgs = NULL;
+
+        /* In WGL a pbuffer is 'wrapped' inside a HDC to 'fool' wglMakeCurrent */
+        hdc = GL_EXTCALL(wglGetPbufferDCARB(pbuffer));
+        if(!hdc) {
+            ERR("Cannot get a HDC for pbuffer (%p)\n", pbuffer);
+            GL_EXTCALL(wglDestroyPbufferARB(pbuffer));
+            ReleaseDC(win_handle, hdc_parent);
+            goto out;
+        }
+        ReleaseDC(win_handle, hdc_parent);
     } else {
-        /* Create an onscreen target */
-        XVisualInfo             template;
-        int                     num;
+        PIXELFORMATDESCRIPTOR pfd;
+        int iPixelFormat;
+        short red, green, blue, alpha;
+        short colorBits;
+        short depthBits, stencilBits;
 
-        template.visualid = (VisualID)GetPropA(GetDesktopWindow(), "__wine_x11_visual_id");
-        /* TODO: change this to find a similar visual, but one with a stencil/zbuffer buffer that matches the request
-        (or the best possible if none is requested) */
-        TRACE("Found x visual ID  : %ld\n", template.visualid);
-        visinfo   = XGetVisualInfo(display, VisualIDMask, &template, &num);
-
-        if (NULL == visinfo) {
-            ERR("cannot really get XVisual\n");
+        hdc = GetDC(win_handle);
+        if(hdc == NULL) {
+            ERR("Cannot retrieve a device context!\n");
             goto out;
-        } else {
-            int n, value;
-            /* Write out some debug info about the visual/s */
-            TRACE("Using x visual ID  : %ld\n", template.visualid);
-            TRACE("        visual info: %p\n", visinfo);
-            TRACE("        num items  : %d\n", num);
-            for (n = 0;n < num; n++) {
-                TRACE("=====item=====: %d\n", n + 1);
-                TRACE("   visualid      : %ld\n", visinfo[n].visualid);
-                TRACE("   screen        : %d\n",  visinfo[n].screen);
-                TRACE("   depth         : %u\n",  visinfo[n].depth);
-                TRACE("   class         : %d\n",  visinfo[n].class);
-                TRACE("   red_mask      : %ld\n", visinfo[n].red_mask);
-                TRACE("   green_mask    : %ld\n", visinfo[n].green_mask);
-                TRACE("   blue_mask     : %ld\n", visinfo[n].blue_mask);
-                TRACE("   colormap_size : %d\n",  visinfo[n].colormap_size);
-                TRACE("   bits_per_rgb  : %d\n",  visinfo[n].bits_per_rgb);
-                /* log some extra glx info */
-                glXGetConfig(display, visinfo, GLX_AUX_BUFFERS, &value);
-                TRACE("   gl_aux_buffers  : %d\n",  value);
-                glXGetConfig(display, visinfo, GLX_BUFFER_SIZE ,&value);
-                TRACE("   gl_buffer_size  : %d\n",  value);
-                glXGetConfig(display, visinfo, GLX_RED_SIZE, &value);
-                TRACE("   gl_red_size  : %d\n",  value);
-                glXGetConfig(display, visinfo, GLX_GREEN_SIZE, &value);
-                TRACE("   gl_green_size  : %d\n",  value);
-                glXGetConfig(display, visinfo, GLX_BLUE_SIZE, &value);
-                TRACE("   gl_blue_size  : %d\n",  value);
-                glXGetConfig(display, visinfo, GLX_ALPHA_SIZE, &value);
-                TRACE("   gl_alpha_size  : %d\n",  value);
-                glXGetConfig(display, visinfo, GLX_DEPTH_SIZE ,&value);
-                TRACE("   gl_depth_size  : %d\n",  value);
-                glXGetConfig(display, visinfo, GLX_STENCIL_SIZE, &value);
-                TRACE("   gl_stencil_size : %d\n",  value);
-            }
-            /* Now choose a similar visual ID*/
         }
+
+        /* PixelFormat selection */
+        /* TODO: fill cColorBits/cDepthBits with target->resource.format */
+        ZeroMemory(&pfd, sizeof(pfd));
+        pfd.nSize      = sizeof(pfd);
+        pfd.nVersion   = 1;
+        pfd.dwFlags    = PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER | PFD_DRAW_TO_WINDOW;/*PFD_GENERIC_ACCELERATED*/
+        pfd.iPixelType = PFD_TYPE_RGBA;
+        pfd.cColorBits = 32;
+        pfd.cDepthBits = 24;
+        pfd.cStencilBits = 8;
+        pfd.iLayerType = PFD_MAIN_PLANE;
+
+        /* Try to match the colorBits of the d3d format */
+        if(getColorBits(target->resource.format, &red, &green, &blue, &alpha, &colorBits))
+            pfd.cColorBits = colorBits;
+
+        /* TODO: get the depth/stencil format from auto depth stencil format */
+        if(getDepthStencilBits(WINED3DFMT_D24S8, &depthBits, &stencilBits)) {
+            pfd.cDepthBits = depthBits;
+            pfd.cStencilBits = stencilBits;
+        }
+
+        iPixelFormat = ChoosePixelFormat(hdc, &pfd);
+        if(!iPixelFormat) {
+            /* If this happens something is very wrong as ChoosePixelFormat barely fails */
+            ERR("Can't find a suitable iPixelFormat\n");
+        }
+
+        DescribePixelFormat(hdc, iPixelFormat, sizeof(pfd), &pfd);
+        SetPixelFormat(hdc, iPixelFormat, NULL);
     }
 
-    ctx = glXCreateContext(display, visinfo,
-                           This->numContexts ? This->contexts[0]->glCtx : NULL,
-                           GL_TRUE);
+    ctx = wglCreateContext(hdc);
+    if(This->numContexts) wglShareLists(This->contexts[0]->glCtx, ctx);
+
     if(!ctx) {
-        ERR("Failed to create a glX context\n");
-        if(drawable != win) glXDestroyPbuffer(display, drawable);
+        ERR("Failed to create a WGL context\n");
+        if(create_pbuffer) {
+            GL_EXTCALL(wglReleasePbufferDCARB(pbuffer, hdc));
+            GL_EXTCALL(wglDestroyPbufferARB(pbuffer));
+        }
         goto out;
     }
-    ret = AddContextToArray(This, display, ctx, drawable);
+    ret = AddContextToArray(This, win_handle, hdc, ctx, pbuffer);
     if(!ret) {
         ERR("Failed to add the newly created context to the context list\n");
-        glXDestroyContext(display, ctx);
-        if(drawable != win) glXDestroyPbuffer(display, drawable);
+        wglDeleteContext(ctx);
+        if(create_pbuffer) {
+            GL_EXTCALL(wglReleasePbufferDCARB(pbuffer, hdc));
+            GL_EXTCALL(wglDestroyPbufferARB(pbuffer));
+        }
         goto out;
     }
     ret->surface = (IWineD3DSurface *) target;
-    ret->isPBuffer = win == 0;
+    ret->isPBuffer = create_pbuffer;
     ret->tid = GetCurrentThreadId();
 
     TRACE("Successfully created new context %p\n", ret);
 
     /* Set up the context defaults */
-    oldCtx  = glXGetCurrentContext();
-    oldDrawable = glXGetCurrentDrawable();
-    if(glXMakeCurrent(display, drawable, ctx) == FALSE) {
+    oldCtx  = wglGetCurrentContext();
+    oldDrawable = wglGetCurrentDC();
+    if(wglMakeCurrent(hdc, ctx) == FALSE) {
         ERR("Cannot activate context to set up defaults\n");
         goto out;
     }
@@ -391,12 +348,10 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
     }
 
     if(oldDrawable && oldCtx) {
-        glXMakeCurrent(display, oldDrawable, oldCtx);
+        wglMakeCurrent(oldDrawable, oldCtx);
     }
 
 out:
-    if(visinfo) XFree(visinfo);
-    if(cfgs) XFree(cfgs);
     return ret;
 }
 
@@ -455,14 +410,16 @@ void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context) {
 
     /* check that we are the current context first */
     TRACE("Destroying ctx %p\n", context);
-    if(glXGetCurrentContext() == context->glCtx){
-        glXMakeCurrent(context->display, None, NULL);
+    if(wglGetCurrentContext() == context->glCtx){
+        wglMakeCurrent(NULL, NULL);
     }
 
-    glXDestroyContext(context->display, context->glCtx);
     if(context->isPBuffer) {
-        glXDestroyPbuffer(context->display, context->drawable);
-    }
+        GL_EXTCALL(wglReleasePbufferDCARB(context->pbuffer, context->hdc));
+        GL_EXTCALL(wglDestroyPbufferARB(context->pbuffer));
+    } else ReleaseDC(context->win_handle, context->hdc);
+    wglDeleteContext(context->glCtx);
+
     RemoveContextFromArray(This, context);
 }
 
@@ -738,8 +695,8 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
                      * Create the context on the same server as the primary swapchain. The primary swapchain is exists at this point.
                      */
                     This->pbufferContext = CreateContext(This, targetimpl,
-                            ((IWineD3DSwapChainImpl *) This->swapchains[0])->context[0]->display,
-                            0 /* Window */);
+                            ((IWineD3DSwapChainImpl *) This->swapchains[0])->context[0]->win_handle,
+                            TRUE /* pbuffer */);
                     This->pbufferWidth = targetimpl->currentDesc.Width;
                     This->pbufferHeight = targetimpl->currentDesc.Height;
                    }
@@ -839,6 +796,7 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
 
     TRACE("(%p): Selecting context for render target %p, thread %d\n", This, target, tid);
 
+    ENTER_GL();
     if(This->lastActiveRenderTarget != target || tid != This->lastThread) {
         context = FindContext(This, target, tid);
         This->lastActiveRenderTarget = target;
@@ -850,9 +808,11 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
 
     /* Activate the opengl context */
     if(context != This->activeContext) {
-        Bool ret;
-        TRACE("Switching gl ctx to %p, drawable=%ld, ctx=%p\n", context, context->drawable, context->glCtx);
-        ret = glXMakeCurrent(context->display, context->drawable, context->glCtx);
+        BOOL ret;
+        TRACE("Switching gl ctx to %p, hdc=%p ctx=%p\n", context, context->hdc, context->glCtx);
+        LEAVE_GL();
+        ret = wglMakeCurrent(context->hdc, context->glCtx);
+        ENTER_GL();
         if(ret == FALSE) {
             ERR("Failed to activate the new context\n");
         }
@@ -906,4 +866,5 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
         default:
             FIXME("Unexpected context usage requested\n");
     }
+    LEAVE_GL();
 }

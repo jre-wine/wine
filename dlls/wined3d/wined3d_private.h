@@ -139,8 +139,11 @@ static WINED3DGLTYPE const glTypeLookup[WINED3DDECLTYPE_UNUSED] = {
                                   {WINED3DDECLTYPE_USHORT4N,  4, GL_UNSIGNED_SHORT  , GL_TRUE  ,sizeof(short int)},
                                   {WINED3DDECLTYPE_UDEC3,     3, GL_UNSIGNED_SHORT  , GL_FALSE ,sizeof(short int)},
                                   {WINED3DDECLTYPE_DEC3N,     3, GL_SHORT           , GL_TRUE  ,sizeof(short int)},
-                                  {WINED3DDECLTYPE_FLOAT16_2, 2, GL_FLOAT           , GL_FALSE ,sizeof(short int)},
-                                  {WINED3DDECLTYPE_FLOAT16_4, 4, GL_FLOAT           , GL_FALSE ,sizeof(short int)}};
+                                  /* We should do an extension check for NV_HALF_FLOAT. However, without NV_HALF_FLOAT
+                                   * we won't be able to load the data at all, so at least for the moment it wouldn't
+                                   * gain us much. */
+                                  {WINED3DDECLTYPE_FLOAT16_2, 2, GL_HALF_FLOAT_NV   , GL_FALSE ,sizeof(GLhalfNV)},
+                                  {WINED3DDECLTYPE_FLOAT16_4, 4, GL_HALF_FLOAT_NV   , GL_FALSE ,sizeof(GLhalfNV)}};
 
 #define WINED3D_ATR_TYPE(type)          glTypeLookup[type].d3dType
 #define WINED3D_ATR_SIZE(type)          glTypeLookup[type].size
@@ -517,9 +520,10 @@ struct WineD3DContext {
     char                    texShaderBumpMap;
 
     /* The actual opengl context */
-    GLXContext              glCtx;
-    Drawable                drawable;
-    Display                 *display;
+    HGLRC                   glCtx;
+    HWND                    win_handle;
+    HDC                     hdc;
+    HPBUFFERARB             pbuffer;
     BOOL                    isPBuffer;
 };
 
@@ -531,7 +535,7 @@ typedef enum ContextUsage {
 } ContextUsage;
 
 void ActivateContext(IWineD3DDeviceImpl *device, IWineD3DSurface *target, ContextUsage usage);
-WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, Display *display, Window win);
+WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, HWND win, BOOL create_pbuffer);
 void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context);
 void apply_fbo_state(IWineD3DDevice *iface);
 
@@ -570,18 +574,18 @@ struct PLIGHTINFOEL {
 extern const WINED3DLIGHT WINED3D_default_light;
 
 /* The adapter structure */
+typedef struct GLPixelFormatDesc GLPixelFormatDesc;
 struct WineD3DAdapter
 {
     POINT                   monitorPoint;
-    Display                 *display;
     WineD3D_GL_Info         gl_info;
     const char              *driver;
     const char              *description;
-    GLXFBConfig             *cfgs;
     int                     nCfgs;
 };
 
 extern BOOL InitAdapters(void);
+extern BOOL initPixelFormats(WineD3D_GL_Info *gl_info);
 
 /*****************************************************************************
  * High order patch management
@@ -675,7 +679,7 @@ struct IWineD3DDeviceImpl
     WINED3DDEVTYPE                  devType;
 
     IWineD3DSwapChain     **swapchains;
-    uint                    NumberOfSwapChains;
+    UINT                    NumberOfSwapChains;
 
     ResourceList           *resources; /* a linked list to track resources created by the device */
 
@@ -1220,6 +1224,10 @@ typedef struct IWineD3DVertexDeclarationImpl {
 
     WINED3DVERTEXELEMENT    *pDeclarationWine;
     UINT                    declarationWNumElements;
+
+    DWORD                   streams[MAX_STREAMS];
+    UINT                    num_streams;
+    BOOL                    position_transformed;
 } IWineD3DVertexDeclarationImpl;
 
 extern const IWineD3DVertexDeclarationVtbl IWineD3DVertexDeclaration_Vtbl;
@@ -1430,7 +1438,6 @@ typedef struct IWineD3DSwapChainImpl
     unsigned int            num_contexts;
 
     HWND                    win_handle;
-    Window                  win;
 } IWineD3DSwapChainImpl;
 
 extern const IWineD3DSwapChainVtbl IWineD3DSwapChain_Vtbl;
@@ -1472,7 +1479,8 @@ void   set_texture_matrix(const float *smat, DWORD flags, BOOL calculatedCoords)
 void surface_set_compatible_renderbuffer(IWineD3DSurface *iface, unsigned int width, unsigned int height);
 GLenum surface_get_gl_buffer(IWineD3DSurface *iface, IWineD3DSwapChain *swapchain);
 
-int D3DFmtMakeGlCfg(WINED3DFORMAT BackBufferFormat, WINED3DFORMAT StencilBufferFormat, int *attribs, int* nAttribs, BOOL alternate);
+BOOL getColorBits(WINED3DFORMAT fmt, short *redSize, short *greenSize, short *blueSize, short *alphaSize, short *totalSize);
+BOOL getDepthStencilBits(WINED3DFORMAT fmt, short *depthSize, short *stencilSize);
 
 /* Math utils */
 void multiply_matrix(WINED3DMATRIX *dest, const WINED3DMATRIX *src1, const WINED3DMATRIX *src2);
@@ -2037,11 +2045,13 @@ typedef struct {
     WINED3DFORMAT           format;
     DWORD                   alphaMask, redMask, greenMask, blueMask;
     UINT                    bpp;
+    short                   depthSize, stencilSize;
     BOOL                    isFourcc;
-    GLint                   glInternal, glGammaInternal, glFormat, glType;
-} PixelFormatDesc;
+} StaticPixelFormatDesc;
 
-const PixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt);
+const StaticPixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt,
+        WineD3D_GL_Info *gl_info,
+        const GlPixelFormatDesc **glDesc);
 
 static inline BOOL use_vs(IWineD3DDeviceImpl *device) {
     return (device->vs_selected_mode != SHADER_NONE

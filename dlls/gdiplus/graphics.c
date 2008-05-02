@@ -23,6 +23,16 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "wingdi.h"
+
+#define COBJMACROS
+#include "objbase.h"
+#include "ocidl.h"
+#include "olectl.h"
+#include "ole2.h"
+
+#include "winreg.h"
+#include "shlwapi.h"
+
 #include "gdiplus.h"
 #include "gdiplus_private.h"
 #include "wine/debug.h"
@@ -72,34 +82,13 @@ static BYTE convert_path_point_type(BYTE type)
     return ret;
 }
 
-static REAL convert_unit(HDC hdc, GpUnit unit)
-{
-    switch(unit)
-    {
-        case UnitInch:
-            return (REAL) GetDeviceCaps(hdc, LOGPIXELSX);
-        case UnitPoint:
-            return ((REAL)GetDeviceCaps(hdc, LOGPIXELSX)) / 72.0;
-        case UnitDocument:
-            return ((REAL)GetDeviceCaps(hdc, LOGPIXELSX)) / 300.0;
-        case UnitMillimeter:
-            return ((REAL)GetDeviceCaps(hdc, LOGPIXELSX)) / 25.4;
-        case UnitWorld:
-            ERR("cannot convert UnitWorld\n");
-            return 0.0;
-        case UnitPixel:
-        case UnitDisplay:
-        default:
-            return 1.0;
-    }
-}
-
 static INT prepare_dc(GpGraphics *graphics, GpPen *pen)
 {
     HPEN gdipen;
     REAL width;
-    INT save_state = SaveDC(graphics->hdc);
+    INT save_state = SaveDC(graphics->hdc), i, numdashes;
     GpPointF pt[2];
+    DWORD dash_array[MAX_DASHLEN];
 
     EndPath(graphics->hdc);
 
@@ -116,7 +105,22 @@ static INT prepare_dc(GpGraphics *graphics, GpPen *pen)
     width *= pen->width * convert_unit(graphics->hdc,
                           pen->unit == UnitWorld ? graphics->unit : pen->unit);
 
-    gdipen = ExtCreatePen(pen->style, roundr(width), &pen->brush->lb, 0, NULL);
+    if(pen->dash == DashStyleCustom){
+        numdashes = min(pen->numdashes, MAX_DASHLEN);
+
+        TRACE("dashes are: ");
+        for(i = 0; i < numdashes; i++){
+            dash_array[i] = roundr(width * pen->dashes[i]);
+            TRACE("%d, ", dash_array[i]);
+        }
+        TRACE("\n and the pen style is %x\n", pen->style);
+
+        gdipen = ExtCreatePen(pen->style, roundr(width), &pen->brush->lb,
+                              numdashes, dash_array);
+    }
+    else
+        gdipen = ExtCreatePen(pen->style, roundr(width), &pen->brush->lb, 0, NULL);
+
     SelectObject(graphics->hdc, gdipen);
 
     return save_state;
@@ -448,7 +452,7 @@ static void shorten_line_amt(REAL x1, REAL y1, REAL *x2, REAL *y2, REAL amt)
 }
 
 /* Draws lines between the given points, and if caps is true then draws an endcap
- * at the end of the last line.  FIXME: Startcaps not implemented. */
+ * at the end of the last line. */
 static GpStatus draw_polyline(GpGraphics *graphics, GpPen *pen,
     GDIPCONST GpPointF * pt, INT count, BOOL caps)
 {
@@ -484,7 +488,7 @@ static GpStatus draw_polyline(GpGraphics *graphics, GpPen *pen,
         else if((pen->startcap == LineCapCustom) && pen->customstart)
             shorten_line_amt(ptcopy[1].X, ptcopy[1].Y,
                              &ptcopy[0].X, &ptcopy[0].Y,
-                             pen->customend->inset * pen->width);
+                             pen->customstart->inset * pen->width);
 
         draw_cap(graphics, pen->brush->lb.lbColor, pen->endcap, pen->width, pen->customend,
                  pt[count - 2].X, pt[count - 2].Y, pt[count - 1].X, pt[count - 1].Y);
@@ -547,13 +551,12 @@ static void shorten_bezier_amt(GpPointF * pt, REAL amt, BOOL rev)
 }
 
 /* Draws bezier curves between given points, and if caps is true then draws an
- * endcap at the end of the last line.  FIXME: Startcaps not implemented. */
+ * endcap at the end of the last line. */
 static GpStatus draw_polybezier(GpGraphics *graphics, GpPen *pen,
     GDIPCONST GpPointF * pt, INT count, BOOL caps)
 {
-    POINT *pti, curpos;
+    POINT *pti;
     GpPointF *ptcopy;
-    REAL x, y;
     GpStatus status = GenericError;
 
     if(!count)
@@ -572,30 +575,14 @@ static GpStatus draw_polybezier(GpGraphics *graphics, GpPen *pen,
     if(caps){
         if(pen->endcap == LineCapArrowAnchor)
             shorten_bezier_amt(&ptcopy[count-4], pen->width, FALSE);
-        /* FIXME The following is seemingly correct only for baseinset < 0 or
-         * baseinset > ~3. With smaller baseinsets, windows actually
-         * lengthens the bezier line instead of shortening it. */
-        else if((pen->endcap == LineCapCustom) && pen->customend){
-            x = pt[count - 1].X;
-            y = pt[count - 1].Y;
-            shorten_line_amt(pt[count - 2].X, pt[count - 2].Y, &x, &y,
-                             pen->width * pen->customend->inset);
-            MoveToEx(graphics->hdc, roundr(pt[count - 1].X), roundr(pt[count - 1].Y), &curpos);
-            LineTo(graphics->hdc, roundr(x), roundr(y));
-            MoveToEx(graphics->hdc, curpos.x, curpos.y, NULL);
-        }
+        else if((pen->endcap == LineCapCustom) && pen->customend)
+            shorten_bezier_amt(&ptcopy[count-4], pen->width * pen->customend->inset,
+                               FALSE);
 
         if(pen->startcap == LineCapArrowAnchor)
             shorten_bezier_amt(ptcopy, pen->width, TRUE);
-        else if((pen->startcap == LineCapCustom) && pen->customstart){
-            x = ptcopy[0].X;
-            y = ptcopy[0].Y;
-            shorten_line_amt(ptcopy[1].X, ptcopy[1].Y, &x, &y,
-                             pen->width * pen->customend->inset);
-            MoveToEx(graphics->hdc, roundr(pt[0].X), roundr(pt[0].Y), &curpos);
-            LineTo(graphics->hdc, roundr(x), roundr(y));
-            MoveToEx(graphics->hdc, curpos.x, curpos.y, NULL);
-        }
+        else if((pen->startcap == LineCapCustom) && pen->customstart)
+            shorten_bezier_amt(ptcopy, pen->width * pen->customstart->inset, TRUE);
 
         /* the direction of the line cap is parallel to the direction at the
          * end of the bezier (which, if it has been shortened, is not the same
@@ -627,10 +614,9 @@ end:
 static GpStatus draw_poly(GpGraphics *graphics, GpPen *pen, GDIPCONST GpPointF * pt,
     GDIPCONST BYTE * types, INT count, BOOL caps)
 {
-    POINT *pti = GdipAlloc(count * sizeof(POINT)), curpos;
+    POINT *pti = GdipAlloc(count * sizeof(POINT));
     BYTE *tp = GdipAlloc(count);
     GpPointF *ptcopy = GdipAlloc(count * sizeof(GpPointF));
-    REAL x = pt[count - 1].X, y = pt[count - 1].Y;
     INT i, j;
     GpStatus status = GenericError;
 
@@ -663,16 +649,9 @@ static GpStatus draw_poly(GpGraphics *graphics, GpPen *pen, GDIPCONST GpPointF *
             case PathPointTypeBezier:
                 if(pen->endcap == LineCapArrowAnchor)
                     shorten_bezier_amt(&ptcopy[count - 4], pen->width, FALSE);
-                else if((pen->endcap == LineCapCustom) && pen->customend){
-                    x = pt[count - 1].X;
-                    y = pt[count - 1].Y;
-                    shorten_line_amt(pt[count - 2].X, pt[count - 2].Y, &x, &y,
-                                     pen->width * pen->customend->inset);
-                    MoveToEx(graphics->hdc, roundr(pt[count - 1].X),
-                             roundr(pt[count - 1].Y), &curpos);
-                    LineTo(graphics->hdc, roundr(x), roundr(y));
-                    MoveToEx(graphics->hdc, curpos.x, curpos.y, NULL);
-                }
+                else if((pen->endcap == LineCapCustom) && pen->customend)
+                    shorten_bezier_amt(&ptcopy[count - 4],
+                                       pen->width * pen->customend->inset, FALSE);
 
                 draw_cap(graphics, pen->brush->lb.lbColor, pen->endcap, pen->width, pen->customend,
                     pt[count - 1].X - (ptcopy[count - 1].X - ptcopy[count - 2].X),
@@ -708,15 +687,9 @@ static GpStatus draw_poly(GpGraphics *graphics, GpPen *pen, GDIPCONST GpPointF *
             case PathPointTypeBezier:
                 if(pen->startcap == LineCapArrowAnchor)
                     shorten_bezier_amt(&ptcopy[j - 1], pen->width, TRUE);
-                else if((pen->startcap == LineCapCustom) && pen->customstart){
-                    x = pt[j - 1].X;
-                    y = pt[j - 1].Y;
-                    shorten_line_amt(ptcopy[j].X, ptcopy[j].Y, &x, &y,
-                                     pen->width * pen->customstart->inset);
-                    MoveToEx(graphics->hdc, roundr(pt[j - 1].X), roundr(pt[j - 1].Y), &curpos);
-                    LineTo(graphics->hdc, roundr(x), roundr(y));
-                    MoveToEx(graphics->hdc, curpos.x, curpos.y, NULL);
-                }
+                else if((pen->startcap == LineCapCustom) && pen->customstart)
+                    shorten_bezier_amt(&ptcopy[j - 1],
+                                       pen->width * pen->customstart->inset, TRUE);
 
                 draw_cap(graphics, pen->brush->lb.lbColor, pen->startcap, pen->width, pen->customstart,
                     pt[j - 1].X - (ptcopy[j - 1].X - ptcopy[j].X),
@@ -734,7 +707,7 @@ static GpStatus draw_poly(GpGraphics *graphics, GpPen *pen, GDIPCONST GpPointF *
                                      &ptcopy[j - 1].X, &ptcopy[j - 1].Y,
                                      pen->customstart->inset * pen->width);
 
-                draw_cap(graphics, pen->brush->lb.lbColor, pen->endcap, pen->width, pen->customstart,
+                draw_cap(graphics, pen->brush->lb.lbColor, pen->startcap, pen->width, pen->customstart,
                          pt[j].X, pt[j].Y, pt[j - 1].X,
                          pt[j - 1].Y);
 
@@ -822,15 +795,86 @@ GpStatus WINGDIPAPI GdipCreateMetafileFromEmf(HENHMETAFILE hemf, BOOL delete,
 GpStatus WINGDIPAPI GdipCreateMetafileFromWmf(HMETAFILE hwmf, BOOL delete,
     GDIPCONST WmfPlaceableFileHeader * placeable, GpMetafile **metafile)
 {
-    static int calls;
+    IStream *stream = NULL;
+    UINT read;
+    BYTE* copy;
+    HENHMETAFILE hemf;
+    GpStatus retval = GenericError;
 
     if(!hwmf || !metafile || !placeable)
         return InvalidParameter;
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    *metafile = NULL;
+    read = GetMetaFileBitsEx(hwmf, 0, NULL);
+    if(!read)
+        return GenericError;
+    copy = GdipAlloc(read);
+    GetMetaFileBitsEx(hwmf, read, copy);
 
-    return NotImplemented;
+    hemf = SetWinMetaFileBits(read, copy, NULL, NULL);
+    GdipFree(copy);
+
+    read = GetEnhMetaFileBits(hemf, 0, NULL);
+    copy = GdipAlloc(read);
+    GetEnhMetaFileBits(hemf, read, copy);
+    DeleteEnhMetaFile(hemf);
+
+    if(CreateStreamOnHGlobal(copy, TRUE, &stream) != S_OK){
+        ERR("could not make stream\n");
+        GdipFree(copy);
+        goto err;
+    }
+
+    *metafile = GdipAlloc(sizeof(GpMetafile));
+    if(!*metafile){
+        retval = OutOfMemory;
+        goto err;
+    }
+
+    if(OleLoadPicture(stream, 0, FALSE, &IID_IPicture,
+        (LPVOID*) &((*metafile)->image.picture)) != S_OK)
+        goto err;
+
+
+    (*metafile)->image.type = ImageTypeMetafile;
+    (*metafile)->bounds.X = ((REAL) placeable->BoundingBox.Left) / ((REAL) placeable->Inch);
+    (*metafile)->bounds.Y = ((REAL) placeable->BoundingBox.Right) / ((REAL) placeable->Inch);
+    (*metafile)->bounds.Width = ((REAL) (placeable->BoundingBox.Right
+                    - placeable->BoundingBox.Left)) / ((REAL) placeable->Inch);
+    (*metafile)->bounds.Height = ((REAL) (placeable->BoundingBox.Bottom
+                   - placeable->BoundingBox.Top)) / ((REAL) placeable->Inch);
+    (*metafile)->unit = UnitInch;
+
+    if(delete)
+        DeleteMetaFile(hwmf);
+
+    return Ok;
+
+err:
+    GdipFree(*metafile);
+    IStream_Release(stream);
+    return retval;
+}
+
+GpStatus WINGDIPAPI GdipCreateStreamOnFile(GDIPCONST WCHAR * filename,
+    UINT access, IStream **stream)
+{
+    DWORD dwMode;
+    HRESULT ret;
+
+    if(!stream || !filename)
+        return InvalidParameter;
+
+    if(access & GENERIC_WRITE)
+        dwMode = STGM_SHARE_DENY_WRITE | STGM_WRITE | STGM_CREATE;
+    else if(access & GENERIC_READ)
+        dwMode = STGM_SHARE_DENY_WRITE | STGM_READ | STGM_FAILIFTHERE;
+    else
+        return InvalidParameter;
+
+    ret = SHCreateStreamOnFileW(filename, dwMode, stream);
+
+    return hresult_to_status(ret);
 }
 
 GpStatus WINGDIPAPI GdipDeleteGraphics(GpGraphics *graphics)
@@ -947,6 +991,129 @@ GpStatus WINGDIPAPI GdipDrawCurve2(GpGraphics *graphics, GpPen *pen,
     return retval;
 }
 
+GpStatus WINGDIPAPI GdipDrawImageI(GpGraphics *graphics, GpImage *image, INT x,
+    INT y)
+{
+    UINT width, height, srcw, srch;
+
+    if(!graphics || !image)
+        return InvalidParameter;
+
+    GdipGetImageWidth(image, &width);
+    GdipGetImageHeight(image, &height);
+
+    srcw = width * (((REAL) INCH_HIMETRIC) /
+            ((REAL) GetDeviceCaps(graphics->hdc, LOGPIXELSX)));
+    srch = height * (((REAL) INCH_HIMETRIC) /
+            ((REAL) GetDeviceCaps(graphics->hdc, LOGPIXELSY)));
+
+    if(image->type != ImageTypeMetafile){
+        y += height;
+        height *= -1;
+    }
+
+    IPicture_Render(image->picture, graphics->hdc, x, y, width, height,
+                    0, 0, srcw, srch, NULL);
+
+    return Ok;
+}
+
+/* FIXME: partially implemented (only works for rectangular parallelograms) */
+GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image,
+     GDIPCONST GpPointF *points, INT count, REAL srcx, REAL srcy, REAL srcwidth,
+     REAL srcheight, GpUnit srcUnit, GDIPCONST GpImageAttributes* imageAttributes,
+     DrawImageAbort callback, VOID * callbackData)
+{
+    GpPointF ptf[3];
+    POINT pti[3];
+    REAL dx, dy;
+
+    TRACE("%p %p %p %d %f %f %f %f %d %p %p %p\n", graphics, image, points, count,
+          srcx, srcy, srcwidth, srcheight, srcUnit, imageAttributes, callback,
+          callbackData);
+
+    if(!graphics || !image || !points || !imageAttributes || count != 3)
+         return InvalidParameter;
+
+    if(srcUnit == UnitInch)
+        dx = dy = (REAL) INCH_HIMETRIC;
+    else if(srcUnit == UnitPixel){
+        dx = ((REAL) INCH_HIMETRIC) /
+             ((REAL) GetDeviceCaps(graphics->hdc, LOGPIXELSX));
+        dy = ((REAL) INCH_HIMETRIC) /
+             ((REAL) GetDeviceCaps(graphics->hdc, LOGPIXELSY));
+    }
+    else
+        return NotImplemented;
+
+    memcpy(ptf, points, 3 * sizeof(GpPointF));
+    transform_and_round_points(graphics, pti, ptf, 3);
+
+    /* IPicture renders bitmaps with the y-axis reversed
+     * FIXME: flipping for unknown image type might not be correct. */
+    if(image->type != ImageTypeMetafile){
+        INT temp;
+        temp = pti[0].y;
+        pti[0].y = pti[2].y;
+        pti[2].y = temp;
+    }
+
+    if(IPicture_Render(image->picture, graphics->hdc,
+        pti[0].x, pti[0].y, pti[1].x - pti[0].x, pti[2].y - pti[0].y,
+        srcx * dx, srcy * dy,
+        srcwidth * dx, srcheight * dy,
+        NULL) != S_OK){
+        if(callback)
+            callback(callbackData);
+        return GenericError;
+    }
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipDrawImageRectRect(GpGraphics *graphics, GpImage *image,
+    REAL dstx, REAL dsty, REAL dstwidth, REAL dstheight, REAL srcx, REAL srcy,
+    REAL srcwidth, REAL srcheight, GpUnit srcUnit,
+    GDIPCONST GpImageAttributes* imageattr, DrawImageAbort callback,
+    VOID * callbackData)
+{
+    GpPointF points[3];
+
+    points[0].X = dstx;
+    points[0].Y = dsty;
+    points[1].X = dstx + dstwidth;
+    points[1].Y = dsty;
+    points[2].X = dstx;
+    points[2].Y = dsty + dstheight;
+
+    return GdipDrawImagePointsRect(graphics, image, points, 3, srcx, srcy,
+               srcwidth, srcheight, srcUnit, imageattr, callback, callbackData);
+}
+
+GpStatus WINGDIPAPI GdipDrawLine(GpGraphics *graphics, GpPen *pen, REAL x1,
+    REAL y1, REAL x2, REAL y2)
+{
+    INT save_state;
+    GpPointF pt[2];
+    GpStatus retval;
+
+    if(!pen || !graphics)
+        return InvalidParameter;
+
+    pt[0].X = x1;
+    pt[0].Y = y1;
+    pt[1].X = x2;
+    pt[1].Y = y2;
+
+    save_state = prepare_dc(graphics, pen);
+
+    retval = draw_polyline(graphics, pen, pt, 2, TRUE);
+
+    restore_dc(graphics, save_state);
+
+    return retval;
+}
+
 GpStatus WINGDIPAPI GdipDrawLineI(GpGraphics *graphics, GpPen *pen, INT x1,
     INT y1, INT x2, INT y2)
 {
@@ -1029,14 +1196,26 @@ GpStatus WINGDIPAPI GdipDrawRectangleI(GpGraphics *graphics, GpPen *pen, INT x,
     INT y, INT width, INT height)
 {
     INT save_state;
+    GpPointF ptf[4];
+    POINT pti[4];
 
     if(!pen || !graphics)
         return InvalidParameter;
 
+    ptf[0].X = x;
+    ptf[0].Y = y;
+    ptf[1].X = x + width;
+    ptf[1].Y = y;
+    ptf[2].X = x + width;
+    ptf[2].Y = y + height;
+    ptf[3].X = x;
+    ptf[3].Y = y + height;
+
     save_state = prepare_dc(graphics, pen);
     SelectObject(graphics->hdc, GetStockObject(NULL_BRUSH));
 
-    Rectangle(graphics->hdc, x, y, x + width, y + height);
+    transform_and_round_points(graphics, pti, ptf, 4);
+    Polygon(graphics->hdc, pti, 4);
 
     restore_dc(graphics, save_state);
 
@@ -1095,6 +1274,45 @@ GpStatus WINGDIPAPI GdipFillPie(GpGraphics *graphics, GpBrush *brush, REAL x,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipFillPolygon(GpGraphics *graphics, GpBrush *brush,
+    GDIPCONST GpPointF *points, INT count, GpFillMode fillMode)
+{
+    INT save_state;
+    GpPointF *ptf = NULL;
+    POINT *pti = NULL;
+    GpStatus retval = Ok;
+
+    if(!graphics || !brush || !points || !count)
+        return InvalidParameter;
+
+    ptf = GdipAlloc(count * sizeof(GpPointF));
+    pti = GdipAlloc(count * sizeof(POINT));
+    if(!ptf || !pti){
+        retval = OutOfMemory;
+        goto end;
+    }
+
+    memcpy(ptf, points, count * sizeof(GpPointF));
+
+    save_state = SaveDC(graphics->hdc);
+    EndPath(graphics->hdc);
+    SelectObject(graphics->hdc, brush->gdibrush);
+    SelectObject(graphics->hdc, GetStockObject(NULL_PEN));
+    SetPolyFillMode(graphics->hdc, (fillMode == FillModeAlternate ? ALTERNATE
+                                                                  : WINDING));
+
+    transform_and_round_points(graphics, pti, ptf, count);
+    Polygon(graphics->hdc, pti, count);
+
+    RestoreDC(graphics->hdc, save_state);
+
+end:
+    GdipFree(ptf);
+    GdipFree(pti);
+
+    return retval;
+}
+
 GpStatus WINGDIPAPI GdipFillPolygonI(GpGraphics *graphics, GpBrush *brush,
     GDIPCONST GpPoint *points, INT count, GpFillMode fillMode)
 {
@@ -1135,6 +1353,72 @@ end:
     GdipFree(pti);
 
     return retval;
+}
+
+GpStatus WINGDIPAPI GdipFillRectangle(GpGraphics *graphics, GpBrush *brush,
+    REAL x, REAL y, REAL width, REAL height)
+{
+    INT save_state;
+    GpPointF ptf[4];
+    POINT pti[4];
+
+    if(!graphics || !brush)
+        return InvalidParameter;
+
+    ptf[0].X = x;
+    ptf[0].Y = y;
+    ptf[1].X = x + width;
+    ptf[1].Y = y;
+    ptf[2].X = x + width;
+    ptf[2].Y = y + height;
+    ptf[3].X = x;
+    ptf[3].Y = y + height;
+
+    save_state = SaveDC(graphics->hdc);
+    EndPath(graphics->hdc);
+    SelectObject(graphics->hdc, brush->gdibrush);
+    SelectObject(graphics->hdc, GetStockObject(NULL_PEN));
+
+    transform_and_round_points(graphics, pti, ptf, 4);
+
+    Polygon(graphics->hdc, pti, 4);
+
+    RestoreDC(graphics->hdc, save_state);
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipFillRectangleI(GpGraphics *graphics, GpBrush *brush,
+    INT x, INT y, INT width, INT height)
+{
+    INT save_state;
+    GpPointF ptf[4];
+    POINT pti[4];
+
+    if(!graphics || !brush)
+        return InvalidParameter;
+
+    ptf[0].X = x;
+    ptf[0].Y = y;
+    ptf[1].X = x + width;
+    ptf[1].Y = y;
+    ptf[2].X = x + width;
+    ptf[2].Y = y + height;
+    ptf[3].X = x;
+    ptf[3].Y = y + height;
+
+    save_state = SaveDC(graphics->hdc);
+    EndPath(graphics->hdc);
+    SelectObject(graphics->hdc, brush->gdibrush);
+    SelectObject(graphics->hdc, GetStockObject(NULL_PEN));
+
+    transform_and_round_points(graphics, pti, ptf, 4);
+
+    Polygon(graphics->hdc, pti, 4);
+
+    RestoreDC(graphics->hdc, save_state);
+
+    return Ok;
 }
 
 /* FIXME: Compositing quality is not used anywhere except the getter/setter. */
@@ -1309,4 +1593,13 @@ GpStatus WINGDIPAPI GdipSetWorldTransform(GpGraphics *graphics, GpMatrix *matrix
 
     GdipDeleteMatrix(graphics->worldtrans);
     return GdipCloneMatrix(matrix, &graphics->worldtrans);
+}
+
+GpStatus WINGDIPAPI GdipTranslateWorldTransform(GpGraphics *graphics, REAL dx,
+    REAL dy, GpMatrixOrder order)
+{
+    if(!graphics)
+        return InvalidParameter;
+
+    return GdipTranslateMatrix(graphics->worldtrans, dx, dy, order);
 }

@@ -1431,7 +1431,7 @@ static void test_granted_access(HANDLE handle, ACCESS_MASK access, int line)
     status = pNtQueryObject( handle, ObjectBasicInformation, &obj_info,
                              sizeof(obj_info), NULL );
     ok_(__FILE__, line)(!status, "NtQueryObject with err: %08x\n", status);
-    ok_(__FILE__, line)(obj_info.GrantedAccess == access, "Gratned access should "
+    ok_(__FILE__, line)(obj_info.GrantedAccess == access, "Granted access should "
         "be 0x%08x, instead of 0x%08x\n", access, obj_info.GrantedAccess);
 }
 
@@ -1860,7 +1860,7 @@ static void test_ConvertStringSecurityDescriptor(void)
 
     SetLastError(0xdeadbeef);
     ret = pConvertStringSecurityDescriptorToSecurityDescriptorA(
-        "D:(D;;GA;;;Non existant account)", SDDL_REVISION_1, &pSD, NULL);
+        "D:(D;;GA;;;Nonexistent account)", SDDL_REVISION_1, &pSD, NULL);
     todo_wine
     ok(!ret && GetLastError() == ERROR_INVALID_ACL,
         "ConvertStringSecurityDescriptorToSecurityDescriptor should have failed with ERROR_INVALID_ACL instead of %d\n",

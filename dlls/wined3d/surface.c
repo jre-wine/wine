@@ -275,11 +275,12 @@ void surface_set_compatible_renderbuffer(IWineD3DSurface *iface, unsigned int wi
     }
 
     if (!renderbuffer) {
-        const PixelFormatDesc *format_entry = getFormatDescEntry(This->resource.format);
+        const GlPixelFormatDesc *glDesc;
+        getFormatDescEntry(This->resource.format, &GLINFO_LOCATION, &glDesc);
 
         GL_EXTCALL(glGenRenderbuffersEXT(1, &renderbuffer));
         GL_EXTCALL(glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, renderbuffer));
-        GL_EXTCALL(glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, format_entry->glFormat, width, height));
+        GL_EXTCALL(glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, glDesc->glFormat, width, height));
 
         entry = HeapAlloc(GetProcessHeap(), 0, sizeof(renderbuffer_entry_t));
         entry->width = width;
@@ -358,7 +359,6 @@ ULONG WINAPI IWineD3DSurfaceImpl_Release(IWineD3DSurface *iface) {
              * and the lastActiveRenderTarget member shouldn't matter
              */
             if(swapchain) {
-                ENTER_GL(); /* For ActivateContext */
                 if(swapchain->backBuffer && swapchain->backBuffer[0] != iface) {
                     TRACE("Activating primary back buffer\n");
                     ActivateContext(device, swapchain->backBuffer[0], CTXUSAGE_RESOURCELOAD);
@@ -373,7 +373,6 @@ ULONG WINAPI IWineD3DSurfaceImpl_Release(IWineD3DSurface *iface) {
                      */
                     device->lastActiveRenderTarget = (IWineD3DSurface *) 0xdeadbabe;
                 }
-                LEAVE_GL();
             } else {
                 /* May happen during ddraw uninitialization */
                 TRACE("Render target set, but swapchain does not exist!\n");
@@ -382,7 +381,6 @@ ULONG WINAPI IWineD3DSurfaceImpl_Release(IWineD3DSurface *iface) {
         }
 
         if (This->glDescription.textureName != 0) { /* release the openGL texture.. */
-            ENTER_GL();
 
             /* Need a context to destroy the texture. Use the currently active render target, but only if
              * the primary render target exists. Otherwise lastActiveRenderTarget is garbage, see above.
@@ -393,6 +391,7 @@ ULONG WINAPI IWineD3DSurfaceImpl_Release(IWineD3DSurface *iface) {
             }
 
             TRACE("Deleting texture %d\n", This->glDescription.textureName);
+            ENTER_GL();
             glDeleteTextures(1, &This->glDescription.textureName);
             LEAVE_GL();
         }
@@ -467,11 +466,11 @@ void WINAPI IWineD3DSurfaceImpl_PreLoad(IWineD3DSurface *iface) {
     } else {
     TRACE("(%p) : About to load surface\n", This);
 
-    ENTER_GL();
     if(!device->isInDraw) {
         ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
     }
 
+    ENTER_GL();
     glEnable(This->glDescription.target);/* make sure texture support is enabled in this context */
     if (!This->glDescription.level) {
         if (!This->glDescription.textureName) {
@@ -762,8 +761,14 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
         }
     }
 
-    if((Flags & WINED3DLOCK_DISCARD) || (This->Flags & SFLAG_INSYSMEM)) {
-        TRACE("WINED3DLOCK_DISCARD flag passed, or local copy is up to date, not downloading data\n");
+    if (Flags & WINED3DLOCK_DISCARD) {
+        /* Set SFLAG_INSYSMEM, so we'll never try to download the data from the texture. */
+        TRACE("WINED3DLOCK_DISCARD flag passed, marking local copy as up to date\n");
+        This->Flags |= SFLAG_INSYSMEM;
+    }
+
+    if (This->Flags & SFLAG_INSYSMEM) {
+        TRACE("Local copy is up to date, not downloading data\n");
         goto lock_end;
     }
 
@@ -790,8 +795,8 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
          * should help here. Furthermore unlockrect will need the context set up for blitting. The context manager will find
          * context->last_was_blit set on the unlock.
          */
-        ENTER_GL();
         ActivateContext(myDevice, iface, CTXUSAGE_BLIT);
+        ENTER_GL();
 
         /* Select the correct read buffer, and give some debug output.
          * There is no need to keep track of the current read buffer or reset it, every part of the code
@@ -864,12 +869,11 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
         if (0 != This->glDescription.textureName) {
             /* Now I have to copy thing bits back */
 
-            ENTER_GL();
-
             if(myDevice->createParms.BehaviorFlags & WINED3DCREATE_MULTITHREADED) {
                 ActivateContext(myDevice, myDevice->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
             }
 
+            ENTER_GL();
             /* Make sure that a proper texture unit is selected, bind the texture and dirtify the sampler to restore the texture on the next draw */
             if (GL_SUPPORT(ARB_MULTITEXTURE)) {
                 GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
@@ -1183,8 +1187,8 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
         }
 
         /* Activate the correct context for the render target */
-        ENTER_GL();
         ActivateContext(myDevice, iface, CTXUSAGE_BLIT);
+        ENTER_GL();
 
         if(!swapchain) {
             /* Primary offscreen render target */
@@ -1261,7 +1265,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetDC(IWineD3DSurface *iface, HDC *pHDC) {
     DWORD *masks;
     HRESULT hr;
     RGBQUAD col[256];
-    const PixelFormatDesc *formatEntry = getFormatDescEntry(This->resource.format);
+    const StaticPixelFormatDesc *formatEntry = getFormatDescEntry(This->resource.format, NULL, NULL);
 
     TRACE("(%p)->(%p)\n",This,pHDC);
 
@@ -1482,12 +1486,13 @@ HRESULT WINAPI IWineD3DSurfaceImpl_ReleaseDC(IWineD3DSurface *iface, HDC hDC) {
 
 static HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_texturing, GLenum *format, GLenum *internal, GLenum *type, CONVERT_TYPES *convert, int *target_bpp, BOOL srgb_mode) {
     BOOL colorkey_active = need_alpha_ck && (This->CKeyFlags & WINEDDSD_CKSRCBLT);
-    const PixelFormatDesc *formatEntry = getFormatDescEntry(This->resource.format);
+    const GlPixelFormatDesc *glDesc;
+    getFormatDescEntry(This->resource.format, &GLINFO_LOCATION, &glDesc);
 
     /* Default values: From the surface */
-    *format = formatEntry->glFormat;
-    *internal = srgb_mode?formatEntry->glGammaInternal:formatEntry->glInternal;
-    *type = formatEntry->glType;
+    *format = glDesc->glFormat;
+    *internal = srgb_mode?glDesc->glGammaInternal:glDesc->glInternal;
+    *type = glDesc->glType;
     *convert = NO_CONVERSION;
     *target_bpp = This->bytesPerPixel;
 
@@ -2248,7 +2253,8 @@ HRESULT WINAPI IWineD3DSurfaceImpl_SetContainer(IWineD3DSurface *iface, IWineD3D
 
 HRESULT WINAPI IWineD3DSurfaceImpl_SetFormat(IWineD3DSurface *iface, WINED3DFORMAT format) {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
-    const PixelFormatDesc *formatEntry = getFormatDescEntry(format);
+    const GlPixelFormatDesc *glDesc;
+    const StaticPixelFormatDesc *formatEntry = getFormatDescEntry(format, &GLINFO_LOCATION, &glDesc);
 
     if (This->resource.format != WINED3DFMT_UNKNOWN) {
         FIXME("(%p) : The format of the surface must be WINED3DFORMAT_UNKNOWN\n", This);
@@ -2273,9 +2279,9 @@ HRESULT WINAPI IWineD3DSurfaceImpl_SetFormat(IWineD3DSurface *iface, WINED3DFORM
 
 
     /* Setup some glformat defaults */
-    This->glDescription.glFormat         = formatEntry->glFormat;
-    This->glDescription.glFormatInternal = formatEntry->glInternal;
-    This->glDescription.glType           = formatEntry->glType;
+    This->glDescription.glFormat         = glDesc->glFormat;
+    This->glDescription.glFormatInternal = glDesc->glInternal;
+    This->glDescription.glType           = glDesc->glType;
 
     if (format != WINED3DFMT_UNKNOWN) {
         This->bytesPerPixel = formatEntry->bpp;
@@ -2410,9 +2416,9 @@ static inline void fb_copy_to_texture_direct(IWineD3DSurfaceImpl *This, IWineD3D
     UINT row;
     IWineD3DSurfaceImpl *Src = (IWineD3DSurfaceImpl *) SrcSurface;
 
-    ENTER_GL();
 
     ActivateContext(myDevice, SrcSurface, CTXUSAGE_BLIT);
+    ENTER_GL();
     IWineD3DSurface_PreLoad((IWineD3DSurface *) This);
 
     /* Bind the target texture */
@@ -2497,8 +2503,8 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
 
     TRACE("Using hwstretch blit\n");
     /* Activate the Proper context for reading from the source surface, set it up for blitting */
-    ENTER_GL();
     ActivateContext(myDevice, SrcSurface, CTXUSAGE_BLIT);
+    ENTER_GL();
     IWineD3DSurface_PreLoad((IWineD3DSurface *) This);
 
     /* Try to use an aux buffer for drawing the rectangle. This way it doesn't need restoring.
@@ -2960,10 +2966,10 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
         /* Now load the surface */
         IWineD3DSurface_PreLoad((IWineD3DSurface *) Src);
 
-        ENTER_GL();
 
         /* Activate the destination context, set it up for blitting */
         ActivateContext(myDevice, (IWineD3DSurface *) This, CTXUSAGE_BLIT);
+        ENTER_GL();
 
         if(!dstSwapchain) {
             TRACE("Drawing to offscreen buffer\n");
@@ -3436,6 +3442,16 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_PrivateSetup(IWineD3DSurface *iface) {
     /** Check against the maximum texture sizes supported by the video card **/
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *) iface;
     unsigned int pow2Width, pow2Height;
+    const GlPixelFormatDesc *glDesc;
+
+    getFormatDescEntry(This->resource.format, &GLINFO_LOCATION, &glDesc);
+    /* Setup some glformat defaults */
+    This->glDescription.glFormat         = glDesc->glFormat;
+    This->glDescription.glFormatInternal = glDesc->glInternal;
+    This->glDescription.glType           = glDesc->glType;
+
+    This->glDescription.textureName      = 0;
+    This->glDescription.target           = GL_TEXTURE_2D;
 
     /* Non-power2 support */
     if (GL_SUPPORT(ARB_TEXTURE_NON_POWER_OF_TWO)) {

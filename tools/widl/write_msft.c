@@ -1160,6 +1160,20 @@ static int encode_var(
     return 0;
 }
 
+static unsigned long get_ulong_val(unsigned long val, int vt)
+{
+    switch(vt) {
+    case VT_I2:
+    case VT_BOOL:
+    case VT_UI2:
+        return val & 0xffff;
+    case VT_I1:
+    case VT_UI1:
+        return val & 0xff;
+    }
+
+    return val;
+}
 
 static void write_value(msft_typelib_t* typelib, int *out, int vt, void *value)
 {
@@ -1177,11 +1191,11 @@ static void write_value(msft_typelib_t* typelib, int *out, int vt, void *value)
     case VT_HRESULT:
     case VT_PTR:
       {
-        unsigned long *lv = value;
-        if((*lv & 0x3ffffff) == *lv) {
+        const unsigned long lv = get_ulong_val(*(unsigned long*)value, vt);
+        if((lv & 0x3ffffff) == lv) {
             *out = 0x80000000;
             *out |= vt << 26;
-            *out |= *lv;
+            *out |= lv;
         } else {
             int offset = ctl2_alloc_segment(typelib, MSFT_SEG_CUSTDATA, 8, 0);
             *((unsigned short *)&typelib->typelib_segment_data[MSFT_SEG_CUSTDATA][offset]) = vt;
@@ -1297,6 +1311,12 @@ static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, const func_t *func, int 
     if (func->def->attrs) LIST_FOR_EACH_ENTRY( attr, func->def->attrs, const attr_t, entry ) {
         expr_t *expr = attr->u.pval;
         switch(attr->type) {
+        case ATTR_BINDABLE:
+            funcflags |= 0x4; /* FUNCFLAG_BINDABLE */
+            break;
+        case ATTR_DISPLAYBIND:
+            funcflags |= 0x10; /* FUNCFLAG_DISPLAYBIND */
+            break;
         case ATTR_ENTRY_ORDINAL:
             extra_attr = max(extra_attr, 3);
             entry = expr->cval;
@@ -1324,6 +1344,9 @@ static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, const func_t *func, int 
         case ATTR_ID:
             id = expr->cval;
             break;
+        case ATTR_NONBROWSABLE:
+            funcflags |= 0x400; /* FUNCFLAG_NONBROWSABLE */
+            break;
         case ATTR_OUT:
             break;
         case ATTR_PROPGET:
@@ -1337,9 +1360,6 @@ static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, const func_t *func, int 
             break;
         case ATTR_RESTRICTED:
             funcflags |= 0x1; /* FUNCFLAG_FRESTRICTED */
-            break;
-        case ATTR_BINDABLE:
-            funcflags |= 0x4; /* FUNCFLAG_BINDABLE */
             break;
         case ATTR_VARARG:
             if (num_optional || num_defaults)

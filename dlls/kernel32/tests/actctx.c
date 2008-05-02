@@ -171,7 +171,7 @@ static int strcmp_aw(LPCWSTR strw, const char *stra)
     WCHAR buf[1024];
 
     if (!stra) return 1;
-    MultiByteToWideChar(CP_ACP, 0, stra, -1, buf, sizeof(buf));
+    MultiByteToWideChar(CP_ACP, 0, stra, -1, buf, sizeof(buf)/sizeof(WCHAR));
     return lstrcmpW(strw, buf);
 }
 
@@ -1041,12 +1041,12 @@ START_TEST(actctx)
 
     argc = winetest_get_mainargs(&argv);
 
-    init_paths();
     if (!init_funcs())
     {
-        skip("Couldn't load kernel32\n");
+        skip("Needed functions are not available\n");
         return;
     }
+    init_paths();
 
     if(argc > 2 && !strcmp(argv[2], "manifest1")) {
         test_app_manifest();

@@ -76,18 +76,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(dinput);
 #define JOYDEV_NEW "/dev/input/js"
 #define JOYDEV_OLD "/dev/js"
 
-typedef struct {
-    LONG lMin;
-    LONG lMax;
-    LONG lDeadZone;
-    LONG lSaturation;
-} ObjProps;
-
-typedef struct {
-    LONG lX;
-    LONG lY;
-} POV;
-
 typedef struct JoystickImpl JoystickImpl;
 static const IDirectInputDevice8AVtbl JoystickAvt;
 static const IDirectInputDevice8WVtbl JoystickWvt;
@@ -107,7 +95,7 @@ struct JoystickImpl
 	int				*axis_map;
 	int				axes;
 	int				buttons;
-	POV				povs[4];
+        POINTL                          povs[4];
 };
 
 static const GUID DInput_Wine_Joystick_GUID = { /* 9e573ed9-7734-11d2-8d4a-23903fb6bdf7 */
@@ -171,7 +159,6 @@ static INT find_joystick_devices(void)
 
     return joystick_devices_count;
 }
-#undef MAX_JOYSTICKS
 
 static BOOL joydev_enum_deviceA(DWORD dwDevType, DWORD dwFlags, LPDIDEVICEINSTANCEA lpddi, DWORD version, int id)
 {
@@ -412,7 +399,8 @@ static HRESULT setup_dinput_options(JoystickImpl * device)
     return DI_OK;
 }
 
-static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *dinput, LPDIRECTINPUTDEVICEA* pdev)
+static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *dinput,
+    LPDIRECTINPUTDEVICEA* pdev, unsigned short index)
 {
     DWORD i;
     JoystickImpl* newDevice;
@@ -428,7 +416,7 @@ static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *di
         return DIERR_OUTOFMEMORY;
     }
 
-    if (!lstrcpynA(newDevice->dev, joystick_devices[rguid->Data3], sizeof(newDevice->dev)) ||
+    if (!lstrcpynA(newDevice->dev, joystick_devices[index], sizeof(newDevice->dev)) ||
         (newDevice->joyfd = open(newDevice->dev, O_RDONLY)) < 0)
     {
         WARN("open(%s, O_RDONLY) failed: %s\n", newDevice->dev, strerror(errno));
@@ -506,7 +494,10 @@ static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *di
         if (wine_obj < 8)
             df->rgodf[idx++].dwType = DIDFT_MAKEINSTANCE(wine_obj) | DIDFT_ABSAXIS;
         else
+        {
             df->rgodf[idx++].dwType = DIDFT_MAKEINSTANCE(wine_obj - 8) | DIDFT_POV;
+            i++; /* POV takes 2 axes */
+        }
     }
     for (i = 0; i < newDevice->buttons; i++)
     {
@@ -522,6 +513,8 @@ static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *di
 
     /* initialize default properties */
     for (i = 0; i < c_dfDIJoystick2.dwNumObjs; i++) {
+        newDevice->props[i].lDevMin = -32767;
+        newDevice->props[i].lDevMax = +32767;
         newDevice->props[i].lMin = 0;
         newDevice->props[i].lMax = 0xffff;
         newDevice->props[i].lDeadZone = newDevice->deadzone;	/* % * 1000 */
@@ -568,7 +561,10 @@ FAILED1:
     return hr;
 }
 
-static BOOL IsJoystickGUID(REFGUID guid)
+/******************************************************************************
+  *     get_joystick_index : Get the joystick index from a given GUID
+  */
+static unsigned short get_joystick_index(REFGUID guid)
 {
     GUID wine_joystick = DInput_Wine_Joystick_GUID;
     GUID dev_guid = *guid;
@@ -576,19 +572,26 @@ static BOOL IsJoystickGUID(REFGUID guid)
     wine_joystick.Data3 = 0;
     dev_guid.Data3 = 0;
 
-    return IsEqualGUID(&wine_joystick, &dev_guid);
+    /* for the standard joystick GUID use index 0 */
+    if(IsEqualGUID(&GUID_Joystick,guid)) return 0;
+
+    /* for the wine joystick GUIDs use the index stored in Data3 */
+    if(IsEqualGUID(&wine_joystick, &dev_guid)) return guid->Data3;
+
+    return MAX_JOYSTICKS;
 }
 
 static HRESULT joydev_create_deviceA(IDirectInputImpl *dinput, REFGUID rguid, REFIID riid, LPDIRECTINPUTDEVICEA* pdev)
 {
-  if ((IsEqualGUID(&GUID_Joystick,rguid)) ||
-      (IsJoystickGUID(rguid))) {
+  unsigned short index;
+
+  if ((index = get_joystick_index(rguid)) < MAX_JOYSTICKS) {
     if ((riid == NULL) ||
 	IsEqualGUID(&IID_IDirectInputDeviceA,riid) ||
 	IsEqualGUID(&IID_IDirectInputDevice2A,riid) ||
 	IsEqualGUID(&IID_IDirectInputDevice7A,riid) ||
 	IsEqualGUID(&IID_IDirectInputDevice8A,riid)) {
-      return alloc_device(rguid, &JoystickAvt, dinput, pdev);
+      return alloc_device(rguid, &JoystickAvt, dinput, pdev, index);
     } else {
       WARN("no interface\n");
       *pdev = 0;
@@ -603,14 +606,15 @@ static HRESULT joydev_create_deviceA(IDirectInputImpl *dinput, REFGUID rguid, RE
 
 static HRESULT joydev_create_deviceW(IDirectInputImpl *dinput, REFGUID rguid, REFIID riid, LPDIRECTINPUTDEVICEW* pdev)
 {
-  if ((IsEqualGUID(&GUID_Joystick,rguid)) ||
-      (IsJoystickGUID(rguid))) {
+  unsigned short index;
+
+  if ((index = get_joystick_index(rguid)) < MAX_JOYSTICKS) {
     if ((riid == NULL) ||
 	IsEqualGUID(&IID_IDirectInputDeviceW,riid) ||
 	IsEqualGUID(&IID_IDirectInputDevice2W,riid) ||
 	IsEqualGUID(&IID_IDirectInputDevice7W,riid) ||
 	IsEqualGUID(&IID_IDirectInputDevice8W,riid)) {
-      return alloc_device(rguid, &JoystickWvt, dinput, (LPDIRECTINPUTDEVICEA *)pdev);
+      return alloc_device(rguid, &JoystickWvt, dinput, (LPDIRECTINPUTDEVICEA *)pdev, index);
     } else {
       WARN("no interface\n");
       *pdev = 0;
@@ -622,6 +626,8 @@ static HRESULT joydev_create_deviceW(IDirectInputImpl *dinput, REFGUID rguid, RE
   *pdev = 0;
   return DIERR_DEVICENOTREG;
 }
+
+#undef MAX_JOYSTICKS
 
 const struct dinput_device joystick_linux_device = {
   "Wine Linux joystick driver",
@@ -683,51 +689,6 @@ static HRESULT WINAPI JoystickAImpl_Unacquire(LPDIRECTINPUTDEVICE8A iface)
     return DI_NOEFFECT;
 }
 
-static LONG map_axis(JoystickImpl * This, short val, short index)
-{
-    double    fval = val;
-    double    fmin = This->props[index].lMin;
-    double    fmax = This->props[index].lMax;
-    double    fret;
-
-    fret = (((fval + 32767.0) * (fmax - fmin)) / (32767.0*2.0)) + fmin;
-
-    if (fret >= 0.0)
-        fret += 0.5;
-    else
-        fret -= 0.5;
-
-    return fret;
-}
-
-static LONG calculate_pov(JoystickImpl *This, int index)
-{
-    if (This->povs[index].lX < -16384) {
-        if (This->povs[index].lY < -16384)
-            This->js.rgdwPOV[index] = 31500;
-        else if (This->povs[index].lY > 16384)
-            This->js.rgdwPOV[index] = 22500;
-        else
-            This->js.rgdwPOV[index] = 27000;
-    } else if (This->povs[index].lX > 16384) {
-        if (This->povs[index].lY < -16384)
-            This->js.rgdwPOV[index] = 4500;
-        else if (This->povs[index].lY > 16384)
-            This->js.rgdwPOV[index] = 13500;
-        else
-            This->js.rgdwPOV[index] = 9000;
-    } else {
-        if (This->povs[index].lY < -16384)
-            This->js.rgdwPOV[index] = 0;
-        else if (This->povs[index].lY > 16384)
-            This->js.rgdwPOV[index] = 18000;
-        else
-            This->js.rgdwPOV[index] = -1;
-    }
-
-    return This->js.rgdwPOV[index];
-}
-
 static void joy_polldev(JoystickImpl *This) {
     struct pollfd plfd;
     struct	js_event jse;
@@ -761,70 +722,36 @@ static void joy_polldev(JoystickImpl *This) {
         {
             int number = This->axis_map[jse.number];	/* wine format object index */
 
-            if (number < 12)
-            {
-                inst_id = DIDFT_MAKEINSTANCE(jse.number) | (number < 8 ? DIDFT_ABSAXIS : DIDFT_POV);
-                value = map_axis(This, jse.value, number);
-                /* FIXME do deadzone and saturation here */
+            if (number < 0) return;
+            inst_id = DIDFT_MAKEINSTANCE(number) | (number < 8 ? DIDFT_ABSAXIS : DIDFT_POV);
+            value = joystick_map_axis(&This->props[id_to_object(This->base.data_format.wine_df, inst_id)], jse.value);
 
-                TRACE("changing axis %d => %d\n", jse.number, number);
-                switch (number) {
-                case 0:
-                    This->js.lX = value;
-                    break;
-                case 1:
-                    This->js.lY = value;
-                    break;
-                case 2:
-                    This->js.lZ = value;
-                    break;
-                case 3:
-                    This->js.lRx = value;
-                    break;
-                case 4:
-                    This->js.lRy = value;
-                    break;
-                case 5:
-                    This->js.lRz = value;
-                    break;
-                case 6:
-                    This->js.rglSlider[0] = value;
-                    break;
-                case 7:
-                    This->js.rglSlider[1] = value;
-                    break;
-                case 8:
-                    /* FIXME don't go off array */
-                    if (This->axis_map[jse.number + 1] == number)
-                        This->povs[0].lX = jse.value;
-                    else if (This->axis_map[jse.number - 1] == number)
-                        This->povs[0].lY = jse.value;
-                    value = calculate_pov(This, 0);
-                    break;
-                case 9:
-                    if (This->axis_map[jse.number + 1] == number)
-                        This->povs[1].lX = jse.value;
-                    else if (This->axis_map[jse.number - 1] == number)
-                        This->povs[1].lY = jse.value;
-                    value = calculate_pov(This, 1);
-                    break;
-                case 10:
-                    if (This->axis_map[jse.number + 1] == number)
-                        This->povs[2].lX = jse.value;
-                    else if (This->axis_map[jse.number - 1] == number)
-                        This->povs[2].lY = jse.value;
-                    value = calculate_pov(This, 2);
-                    break;
-                case 11:
-                    if (This->axis_map[jse.number + 1] == number)
-                        This->povs[3].lX = jse.value;
-                    else if (This->axis_map[jse.number - 1] == number)
-                        This->povs[3].lY = jse.value;
-                    value = calculate_pov(This, 3);
+            TRACE("changing axis %d => %d\n", jse.number, number);
+            switch (number)
+            {
+                case 0: This->js.lX  = value; break;
+                case 1: This->js.lY  = value; break;
+                case 2: This->js.lZ  = value; break;
+                case 3: This->js.lRx = value; break;
+                case 4: This->js.lRy = value; break;
+                case 5: This->js.lRz = value; break;
+                case 6: This->js.rglSlider[0] = value; break;
+                case 7: This->js.rglSlider[1] = value; break;
+                case 8: case 9: case 10: case 11:
+                {
+                    int idx = number - 8;
+
+                    if (jse.number % 2)
+                        This->povs[idx].y = jse.value;
+                    else
+                        This->povs[idx].x = jse.value;
+
+                    This->js.rgdwPOV[idx] = value = joystick_map_pov(&This->povs[idx]);
                     break;
                 }
-            } else
-                WARN("axis %d not supported\n", number);
+                default:
+                    WARN("axis %d not supported\n", number);
+            }
         }
         if (inst_id >= 0)
             queue_event((LPDIRECTINPUTDEVICE8A)This,
@@ -1208,12 +1135,12 @@ static const IDirectInputDevice8AVtbl JoystickAvt =
 };
 
 #if !defined(__STRICT_ANSI__) && defined(__GNUC__)
-# define XCAST(fun)	(typeof(SysJoystickWvt.fun))
+# define XCAST(fun)	(typeof(JoystickWvt.fun))
 #else
 # define XCAST(fun)	(void*)
 #endif
 
-static const IDirectInputDevice8WVtbl SysJoystickWvt =
+static const IDirectInputDevice8WVtbl JoystickWvt =
 {
 	IDirectInputDevice2WImpl_QueryInterface,
 	XCAST(AddRef)IDirectInputDevice2AImpl_AddRef,

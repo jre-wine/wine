@@ -24,6 +24,7 @@ case $host in
     if test "x$enable_win64" != "xyes"
     then
       test -n "$CC" || CC="gcc -m32"
+      test -n "$CXX"|| CXX="g++ -m32"
       test -n "$LD" || LD="ld -m elf_i386"
       test -n "$AS" || AS="as --32"
       host_cpu="i386"
@@ -142,8 +143,6 @@ dnl Check for -li386 for NetBSD and OpenBSD
 AC_CHECK_LIB(i386,i386_set_ldt)
 dnl Check for -lossaudio for NetBSD
 AC_CHECK_LIB(ossaudio,_oss_ioctl)
-dnl Check for -lxpg4 for FreeBSD
-AC_CHECK_LIB(xpg4,_xpg4_setrunelocale)
 dnl Check for -lpthread
 AC_CHECK_LIB(pthread,pthread_create,AC_SUBST(LIBPTHREAD,"-lpthread"))
 
@@ -326,6 +325,12 @@ AC_CHECK_HEADERS([resolv.h],,,
 
 AC_CHECK_HEADERS(ucontext.h,,,[#include <signal.h>])
 
+AC_CHECK_HEADERS([sys/thr.h],,,
+[#include <sys/types.h>
+#if HAVE_UCONTEXT_H
+#include <ucontext.h>
+#endif])
+
 AC_CHECK_HEADERS([pthread_np.h],,,
 [#ifdef HAVE_PTHREAD_H
 #include <pthread.h>
@@ -433,6 +438,9 @@ case $host_os in
 
       WINE_TRY_CFLAGS([-fPIC -Wl,--export-dynamic],
                       [AC_SUBST(LDEXECFLAGS,["-Wl,--export-dynamic"])])
+
+      WINE_TRY_CFLAGS([-Wl,--enable-new-dtags],
+                      [LDRPATH_INSTALL="$LDRPATH_INSTALL -Wl,--enable-new-dtags"])
 
       case $host_cpu in
         *i[[3456789]]86* | x86_64)
@@ -1627,6 +1635,7 @@ AC_CONFIG_FILES([dlls/dplayx/tests/Makefile])
 AC_CONFIG_FILES([dlls/dpnaddr/Makefile])
 AC_CONFIG_FILES([dlls/dpnet/Makefile])
 AC_CONFIG_FILES([dlls/dpnhpast/Makefile])
+AC_CONFIG_FILES([dlls/dpnlobby/Makefile])
 AC_CONFIG_FILES([dlls/dsound/Makefile])
 AC_CONFIG_FILES([dlls/dsound/tests/Makefile])
 AC_CONFIG_FILES([dlls/dswave/Makefile])
@@ -1635,6 +1644,7 @@ AC_CONFIG_FILES([dlls/dxdiagn/Makefile])
 AC_CONFIG_FILES([dlls/dxerr8/Makefile])
 AC_CONFIG_FILES([dlls/dxerr9/Makefile])
 AC_CONFIG_FILES([dlls/dxguid/Makefile])
+AC_CONFIG_FILES([dlls/faultrep/Makefile])
 AC_CONFIG_FILES([dlls/gdi32/Makefile])
 AC_CONFIG_FILES([dlls/gdi32/tests/Makefile])
 AC_CONFIG_FILES([dlls/gdiplus/Makefile])
@@ -1655,6 +1665,7 @@ AC_CONFIG_FILES([dlls/imagehlp/Makefile])
 AC_CONFIG_FILES([dlls/imm32/Makefile])
 AC_CONFIG_FILES([dlls/infosoft/Makefile])
 AC_CONFIG_FILES([dlls/infosoft/tests/Makefile])
+AC_CONFIG_FILES([dlls/inkobj/Makefile])
 AC_CONFIG_FILES([dlls/inseng/Makefile])
 AC_CONFIG_FILES([dlls/iphlpapi/Makefile])
 AC_CONFIG_FILES([dlls/iphlpapi/tests/Makefile])
@@ -1691,6 +1702,7 @@ AC_CONFIG_FILES([dlls/mscoree/Makefile])
 AC_CONFIG_FILES([dlls/msdmo/Makefile])
 AC_CONFIG_FILES([dlls/msftedit/Makefile])
 AC_CONFIG_FILES([dlls/msg711.acm/Makefile])
+AC_CONFIG_FILES([dlls/mshtml.tlb/Makefile])
 AC_CONFIG_FILES([dlls/mshtml/Makefile])
 AC_CONFIG_FILES([dlls/mshtml/tests/Makefile])
 AC_CONFIG_FILES([dlls/msi/Makefile])
@@ -1734,6 +1746,7 @@ AC_CONFIG_FILES([dlls/oledlg/Makefile])
 AC_CONFIG_FILES([dlls/olepro32/Makefile])
 AC_CONFIG_FILES([dlls/olesvr32/Makefile])
 AC_CONFIG_FILES([dlls/opengl32/Makefile])
+AC_CONFIG_FILES([dlls/opengl32/tests/Makefile])
 AC_CONFIG_FILES([dlls/pdh/Makefile])
 AC_CONFIG_FILES([dlls/pdh/tests/Makefile])
 AC_CONFIG_FILES([dlls/powrprof/Makefile])
@@ -1826,6 +1839,7 @@ AC_CONFIG_FILES([dlls/wineps.drv/Makefile])
 AC_CONFIG_FILES([dlls/winequartz.drv/Makefile])
 AC_CONFIG_FILES([dlls/winex11.drv/Makefile])
 AC_CONFIG_FILES([dlls/wing32/Makefile])
+AC_CONFIG_FILES([dlls/winhttp/Makefile])
 AC_CONFIG_FILES([dlls/wininet/Makefile])
 AC_CONFIG_FILES([dlls/wininet/tests/Makefile])
 AC_CONFIG_FILES([dlls/winmm/Makefile])
@@ -1892,6 +1906,7 @@ AC_CONFIG_FILES([programs/winevdm/Makefile])
 AC_CONFIG_FILES([programs/winhelp/Makefile])
 AC_CONFIG_FILES([programs/winver/Makefile])
 AC_CONFIG_FILES([programs/wordpad/Makefile])
+AC_CONFIG_FILES([programs/write/Makefile])
 AC_CONFIG_FILES([programs/xcopy/Makefile])
 AC_CONFIG_FILES([server/Makefile])
 AC_CONFIG_FILES([tools/Makefile])

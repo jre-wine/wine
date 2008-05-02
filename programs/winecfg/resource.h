@@ -152,6 +152,9 @@
 #define IDS_SHADER_MODE_HARDWARE        8100
 #define IDS_SHADER_MODE_NONE            8101
 
+#define IDC_RES_TRACKBAR                1107
+#define IDC_RES_DPIEDIT                 1108
+
 /* applications tab */
 #define IDC_APP_LISTVIEW                1200
 #define IDC_APP_ADDAPP                  1201
@@ -228,3 +231,4 @@
 #define IDC_SYSPARAMS_ACTIVE_TITLE_TEXT 8413
 #define IDC_SYSPARAMS_INACTIVE_TITLE    8414
 #define IDC_SYSPARAMS_INACTIVE_TITLE_TEXT 8415
+#define IDC_SYSPARAMS_MSGBOX_TEXT       8416

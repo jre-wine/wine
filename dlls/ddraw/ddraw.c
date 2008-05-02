@@ -516,8 +516,6 @@ IDirectDrawImpl_SetCooperativeLevel(IDirectDraw7 *iface,
 
     if(cooplevel & DDSCL_MULTITHREADED && !(This->cooperative_level & DDSCL_MULTITHREADED))
     {
-        FIXME("DirectDraw is not fully thread safe yet\n");
-
         /* Enable thread safety in wined3d */
         IWineD3DDevice_SetMultithreaded(This->wineD3DDevice);
     }
@@ -616,7 +614,7 @@ IDirectDrawImpl_SetDisplayMode(IDirectDraw7 *iface,
     LeaveCriticalSection(&ddraw_cs);
     switch(hr)
     {
-        case WINED3DERR_NOTAVAILABLE:       return DDERR_INVALIDMODE;
+        case WINED3DERR_NOTAVAILABLE:       return DDERR_UNSUPPORTED;
         default:                            return hr;
     };
 }
@@ -3114,7 +3112,7 @@ IDirectDrawImpl_AttachD3DDevice(IDirectDrawImpl *This,
  *****************************************************************************/
 HRESULT WINAPI
 DirectDrawCreateClipper(DWORD Flags,
-                        IDirectDrawClipper **Clipper,
+                        LPDIRECTDRAWCLIPPER *Clipper,
                         IUnknown *UnkOuter)
 {
     IDirectDrawClipperImpl* object;

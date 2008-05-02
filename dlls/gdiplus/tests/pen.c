@@ -18,10 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
 #include <math.h>
 
-#include "windef.h"
+#include "windows.h"
 #include "gdiplus.h"
 #include "wine/test.h"
 
@@ -133,6 +132,7 @@ static void test_dasharray(void)
     dashes[4] = 14.0;
     dashes[5] = -100.0;
     dashes[6] = -100.0;
+    dashes[7] = dashes[8] = dashes[9] = dashes[10] = dashes[11] = 0.0;
 
     /* setting the array sets the type to custom */
     GdipGetPenDashStyle(pen, &style);
@@ -172,6 +172,13 @@ static void test_dasharray(void)
     expect(InvalidParameter, status); /* not Ok! */
     expectf(-100.0, dashes[5]);
     expectf(-100.0, dashes[6]);
+
+    /* Some invalid array values. */
+    status = GdipSetPenDashArray(pen, &dashes[7], 5);
+    expect(InvalidParameter, status);
+    dashes[9] = -1.0;
+    status = GdipSetPenDashArray(pen, &dashes[7], 5);
+    expect(InvalidParameter, status);
 
     /* Try to set with count = 0. */
     GdipSetPenDashStyle(pen, DashStyleDot);

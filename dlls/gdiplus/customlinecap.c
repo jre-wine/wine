@@ -20,6 +20,9 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "wingdi.h"
+
+#include "objbase.h"
 
 #include "gdiplus.h"
 #include "gdiplus_private.h"
@@ -111,4 +114,18 @@ GpStatus WINGDIPAPI GdipDeleteCustomLineCap(GpCustomLineCap *customCap)
     GdipFree(customCap);
 
     return Ok;
+}
+
+GpStatus WINGDIPAPI GdipSetCustomLineCapStrokeCaps(GpCustomLineCap* custom,
+    GpLineCap start, GpLineCap end)
+{
+    static int calls;
+
+    if(!custom)
+        return InvalidParameter;
+
+    if(!(calls++))
+        FIXME("not implemented\n");
+
+    return NotImplemented;
 }

@@ -21,6 +21,9 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
+
+#include "objbase.h"
+
 #include "gdiplus.h"
 #include "gdiplus_private.h"
 #include "wine/debug.h"
@@ -29,8 +32,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
 
 static DWORD gdip_to_gdi_dash(GpDashStyle dash)
 {
-    static int calls;
-
     switch(dash){
         case DashStyleSolid:
             return PS_SOLID;
@@ -43,9 +44,7 @@ static DWORD gdip_to_gdi_dash(GpDashStyle dash)
         case DashStyleDashDotDot:
             return PS_DASHDOTDOT;
         case DashStyleCustom:
-            if(!(calls++))
-                FIXME("DashStyleCustom not implemented\n");
-            return PS_SOLID;
+            return PS_USERSTYLE;
         default:
             ERR("Not a member of GpDashStyle enumeration\n");
             return 0;
@@ -85,7 +84,7 @@ GpStatus WINGDIPAPI GdipClonePen(GpPen *pen, GpPen **clonepen)
     return Ok;
 }
 
-GpStatus WINGDIPAPI GdipCreatePen1(ARGB color, FLOAT width, GpUnit unit,
+GpStatus WINGDIPAPI GdipCreatePen1(ARGB color, REAL width, GpUnit unit,
     GpPen **pen)
 {
     GpPen *gp_pen;
@@ -103,6 +102,7 @@ GpStatus WINGDIPAPI GdipCreatePen1(ARGB color, FLOAT width, GpUnit unit,
     gp_pen->join = LineJoinMiter;
     gp_pen->miterlimit = 10.0;
     gp_pen->dash = DashStyleSolid;
+    gp_pen->offset = 0.0;
     GdipCreateSolidFill(color, (GpSolidFill **)(&gp_pen->brush));
 
     if(!((gp_pen->unit == UnitWorld) || (gp_pen->unit == UnitPixel))) {
@@ -158,6 +158,16 @@ GpStatus WINGDIPAPI GdipGetPenDashArray(GpPen *pen, REAL *dash, INT count)
         return GenericError;
 
     memcpy(dash, pen->dashes, count * sizeof(REAL));
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetPenDashOffset(GpPen *pen, REAL *offset)
+{
+    if(!pen || !offset)
+        return InvalidParameter;
+
+    *offset = pen->offset;
 
     return Ok;
 }
@@ -227,7 +237,19 @@ GpStatus WINGDIPAPI GdipSetPenCustomStartCap(GpPen *pen, GpCustomLineCap* custom
 GpStatus WINGDIPAPI GdipSetPenDashArray(GpPen *pen, GDIPCONST REAL *dash,
     INT count)
 {
+    INT i;
+    REAL sum = 0;
+
     if(!pen || !dash)
+        return InvalidParameter;
+
+    for(i = 0; i < count; i++){
+        sum += dash[i];
+        if(dash[i] < 0.0)
+            return InvalidParameter;
+    }
+
+    if(sum == 0.0 && count)
         return InvalidParameter;
 
     GdipFree(pen->dashes);
@@ -240,9 +262,20 @@ GpStatus WINGDIPAPI GdipSetPenDashArray(GpPen *pen, GDIPCONST REAL *dash,
         return OutOfMemory;
     }
 
-    pen->dash = DashStyleCustom;
+    GdipSetPenDashStyle(pen, DashStyleCustom);
     memcpy(pen->dashes, dash, count * sizeof(REAL));
     pen->numdashes = count;
+
+    return Ok;
+}
+
+/* FIXME: dash offset not used */
+GpStatus WINGDIPAPI GdipSetPenDashOffset(GpPen *pen, REAL offset)
+{
+    if(!pen)
+        return InvalidParameter;
+
+    pen->offset = offset;
 
     return Ok;
 }
@@ -327,6 +360,15 @@ GpStatus WINGDIPAPI GdipSetPenStartCap(GpPen *pen, GpLineCap cap)
     GdipDeleteCustomLineCap(pen->customstart);
     pen->customstart = NULL;
     pen->startcap = cap;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipSetPenWidth(GpPen *pen, REAL width)
+{
+    if(!pen)    return InvalidParameter;
+
+    pen->width = width;
 
     return Ok;
 }

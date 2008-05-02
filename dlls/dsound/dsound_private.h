@@ -23,9 +23,7 @@
 #define DS_TIME_RES 2  /* Resolution of multimedia timer */
 #define DS_TIME_DEL 10  /* Delay of multimedia timer callback, and duration of HEL fragment */
 
-#define DS_HEL_BUFLEN 0x8000 /* HEL: The buffer length of the emulated buffer */
-#define DS_HEL_FRAGS 0x10 /* HEL only: number of waveOut fragments in primary buffer
-			 * (changing this won't help you) */
+#include "wine/list.h"
 
 /* direct sound hardware acceleration levels */
 #define DS_HW_ACCEL_FULL        0	/* default on Windows 98 */
@@ -34,7 +32,9 @@
 #define DS_HW_ACCEL_EMULATION   3
 
 extern int ds_emuldriver;
+extern int ds_hel_buflen;
 extern int ds_snd_queue_max;
+extern int ds_snd_queue_min;
 extern int ds_hw_accel;
 extern int ds_default_playback;
 extern int ds_default_capture;
@@ -83,8 +83,8 @@ struct DirectSoundDevice
     DWORD                       priolevel;
     PWAVEFORMATEX               pwfx;
     HWAVEOUT                    hwo;
-    LPWAVEHDR                   pwave[DS_HEL_FRAGS];
-    UINT                        timerID, pwplay, pwwrite, pwqueue, prebuf, precount;
+    LPWAVEHDR                   pwave;
+    UINT                        timerID, pwplay, pwqueue, prebuf, helfrags;
     DWORD                       fraglen;
     PIDSDRIVERBUFFER            hwbuf;
     LPBYTE                      buffer;
@@ -110,6 +110,7 @@ typedef struct BufferMemory
 {
     LONG                        ref;
     LPBYTE                      memory;
+    struct list buffers;
 } BufferMemory;
 
 ULONG DirectSoundDevice_Release(DirectSoundDevice * device);
@@ -157,20 +158,21 @@ struct IDirectSoundBufferImpl
     /* IDirectSoundBufferImpl fields */
     SecondaryBufferImpl*        secondary;
     DirectSoundDevice*          device;
-    CRITICAL_SECTION            lock;
+    RTL_RWLOCK                  lock;
     PIDSDRIVERBUFFER            hwbuf;
     PWAVEFORMATEX               pwfx;
     BufferMemory*               buffer;
+    LPBYTE                      tmp_buffer;
     DWORD                       playflags,state,leadin;
-    DWORD                       startpos,writelead,buflen;
+    DWORD                       writelead,buflen;
     DWORD                       nAvgBytesPerSec;
-    DWORD                       freq;
+    DWORD                       freq, tmp_buffer_len, max_buffer_len;
     DSVOLUMEPAN                 volpan;
     DSBUFFERDESC                dsbd;
     /* used for frequency conversion (PerfectPitch) */
-    ULONG                       freqAdjust, freqAcc;
-    /* used for intelligent (well, sort of) prebuffering */
-    DWORD                       primary_mixpos, buf_mixpos;
+    ULONG                       freqneeded, freqAdjust, freqAcc, freqAccNext;
+    /* used for mixing */
+    DWORD                       primary_mixpos, buf_mixpos, sec_mixpos;
 
     /* IDirectSoundNotifyImpl fields */
     IDirectSoundNotifyImpl*     notify;
@@ -186,6 +188,8 @@ struct IDirectSoundBufferImpl
 
     /* IKsPropertySet fields */
     IKsBufferPropertySetImpl*   iks;
+
+    struct list entry;
 };
 
 HRESULT IDirectSoundBufferImpl_Create(
@@ -429,10 +433,13 @@ HRESULT DSOUND_FullDuplexCreate(REFIID riid, LPDIRECTSOUNDFULLDUPLEX* ppDSFD);
 
 /* mixer.c */
 
-void DSOUND_CheckEvent(IDirectSoundBufferImpl *dsb, DWORD playpos, int len);
+void DSOUND_CheckEvent(const IDirectSoundBufferImpl *dsb, DWORD playpos, int len);
 void DSOUND_RecalcVolPan(PDSVOLUMEPAN volpan);
 void DSOUND_AmpFactorToVolPan(PDSVOLUMEPAN volpan);
 void DSOUND_RecalcFormat(IDirectSoundBufferImpl *dsb);
+void DSOUND_MixToTemporary(const IDirectSoundBufferImpl *dsb, DWORD writepos, DWORD mixlen);
+DWORD DSOUND_secpos_to_bufpos(const IDirectSoundBufferImpl *dsb, DWORD secpos, DWORD secmixpos, DWORD* overshot);
+
 void CALLBACK DSOUND_timer(UINT timerID, UINT msg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);
 void CALLBACK DSOUND_callback(HWAVEOUT hwo, UINT msg, DWORD dwUser, DWORD dw1, DWORD dw2);
 
@@ -462,7 +469,7 @@ HRESULT WINAPI IDirectSoundCaptureImpl_Initialize(
 #define STATE_CAPTURING 2
 #define STATE_STOPPING  3
 
-#define DSOUND_FREQSHIFT (14)
+#define DSOUND_FREQSHIFT (20)
 
 extern DirectSoundDevice* DSOUND_renderer[MAXWAVEDRIVERS];
 extern GUID DSOUND_renderer_guids[MAXWAVEDRIVERS];

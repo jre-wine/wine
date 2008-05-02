@@ -93,6 +93,10 @@ static const WCHAR TEST_PART_URL_1[] = {'/','t','e','s','t','/','\0'};
 
 static const WCHAR WINE_ABOUT_URL[] = {'h','t','t','p',':','/','/','w','w','w','.','w','i','n','e','h','q','.',
                                        'o','r','g','/','s','i','t','e','/','a','b','o','u','t',0};
+static const WCHAR SHORT_RESPONSE_URL[] =
+        {'h','t','t','p',':','/','/','c','r','o','s','s','o','v','e','r','.',
+         'c','o','d','e','w','e','a','v','e','r','s','.','c','o','m','/',
+         'p','o','s','t','t','e','s','t','.','p','h','p',0};
 static const WCHAR ABOUT_BLANK[] = {'a','b','o','u','t',':','b','l','a','n','k',0};
 static WCHAR INDEX_HTML[MAX_PATH];
 static const WCHAR ITS_URL[] =
@@ -104,10 +108,12 @@ static const WCHAR MK_URL[] = {'m','k',':','@','M','S','I','T','S','t','o','r','
 
 static const WCHAR wszIndexHtml[] = {'i','n','d','e','x','.','h','t','m','l',0};
 
-static BOOL stopped_binding = FALSE, emulate_protocol = FALSE;
-static DWORD read = 0;
+static BOOL stopped_binding = FALSE, emulate_protocol = FALSE,
+    data_available = FALSE, http_is_first = TRUE;
+static DWORD read = 0, bindf = 0;
+static CHAR mime_type[512];
 
-static const LPCWSTR urls[] = {
+static LPCWSTR urls[] = {
     WINE_ABOUT_URL,
     ABOUT_BLANK,
     INDEX_HTML,
@@ -122,6 +128,12 @@ static enum {
     ITS_TEST,
     MK_TEST
 } test_protocol;
+
+static enum {
+    BEFORE_DOWNLOAD,
+    DOWNLOADING,
+    END_DOWNLOAD
+} download_state;
 
 static void test_CreateURLMoniker(LPCWSTR url1, LPCWSTR url2)
 {
@@ -548,21 +560,32 @@ static HRESULT WINAPI statusclb_OnProgress(IBindStatusCallback *iface, ULONG ulP
         break;
     case BINDSTATUS_MIMETYPEAVAILABLE:
         CHECK_EXPECT(OnProgress_MIMETYPEAVAILABLE);
+        ok(download_state == BEFORE_DOWNLOAD, "Download state was %d, expected BEFORE_DOWNLOAD\n",
+           download_state);
+        WideCharToMultiByte(CP_ACP, 0, szStatusText, -1, mime_type, sizeof(mime_type)-1, NULL, NULL);
         break;
     case BINDSTATUS_BEGINDOWNLOADDATA:
         CHECK_EXPECT(OnProgress_BEGINDOWNLOADDATA);
         ok(szStatusText != NULL, "szStatusText == NULL\n");
         if(szStatusText)
             ok(!lstrcmpW(szStatusText, urls[test_protocol]), "wrong szStatusText\n");
+        ok(download_state == BEFORE_DOWNLOAD, "Download state was %d, expected BEFORE_DOWNLOAD\n",
+           download_state);
+        download_state = DOWNLOADING;
         break;
     case BINDSTATUS_DOWNLOADINGDATA:
         CHECK_EXPECT2(OnProgress_DOWNLOADINGDATA);
+        ok(download_state == DOWNLOADING, "Download state was %d, expected DOWNLOADING\n",
+           download_state);
         break;
     case BINDSTATUS_ENDDOWNLOADDATA:
         CHECK_EXPECT(OnProgress_ENDDOWNLOADDATA);
         ok(szStatusText != NULL, "szStatusText == NULL\n");
         if(szStatusText)
             ok(!lstrcmpW(szStatusText, urls[test_protocol]), "wrong szStatusText\n");
+        ok(download_state == DOWNLOADING, "Download state was %d, expected DOWNLOADING\n",
+           download_state);
+        download_state = END_DOWNLOAD;
         break;
     case BINDSTATUS_CACHEFILENAMEAVAILABLE:
         ok(szStatusText != NULL, "szStatusText == NULL\n");
@@ -596,7 +619,7 @@ static HRESULT WINAPI statusclb_GetBindInfo(IBindStatusCallback *iface, DWORD *g
 
     CHECK_EXPECT(GetBindInfo);
 
-    *grfBINDF = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA;
+    *grfBINDF = bindf;
     cbSize = pbindinfo->cbSize;
     memset(pbindinfo, 0, cbSize);
     pbindinfo->cbSize = cbSize;
@@ -610,15 +633,25 @@ static HRESULT WINAPI statusclb_OnDataAvailable(IBindStatusCallback *iface, DWOR
     HRESULT hres;
     DWORD readed;
     BYTE buf[512];
+    CHAR clipfmt[512];
 
     CHECK_EXPECT2(OnDataAvailable);
+    ok(download_state == DOWNLOADING || download_state == END_DOWNLOAD,
+       "Download state was %d, expected DOWNLOADING or END_DOWNLOAD\n",
+       download_state);
+    data_available = TRUE;
 
-    if (0)
-    {
-    /* FIXME: Uncomment after removing BindToStorage hack. */
     ok(pformatetc != NULL, "pformatetx == NULL\n");
     if(pformatetc) {
-        ok(pformatetc->cfFormat == 0xc02d, "clipformat=%x\n", pformatetc->cfFormat); 
+        if (mime_type[0]) todo_wine {
+            clipfmt[0] = 0;
+            ok(GetClipboardFormatName(pformatetc->cfFormat, clipfmt, sizeof(clipfmt)-1),
+               "GetClipboardFormatName failed, error %d\n", GetLastError());
+            ok(!lstrcmp(clipfmt, mime_type), "clipformat != mime_type, \"%s\" != \"%s\"\n",
+               clipfmt, mime_type);
+        } else {
+            ok(pformatetc->cfFormat == 0, "clipformat=%x\n", pformatetc->cfFormat);
+        }
         ok(pformatetc->ptd == NULL, "ptd = %p\n", pformatetc->ptd);
         ok(pformatetc->dwAspect == 1, "dwAspect=%u\n", pformatetc->dwAspect);
         ok(pformatetc->lindex == -1, "lindex=%d\n", pformatetc->lindex);
@@ -630,7 +663,6 @@ static HRESULT WINAPI statusclb_OnDataAvailable(IBindStatusCallback *iface, DWOR
         ok(pstgmed->tymed == TYMED_ISTREAM, "tymed=%u\n", pstgmed->tymed);
         ok(U(*pstgmed).pstm != NULL, "pstm == NULL\n");
         ok(pstgmed->pUnkForRelease != NULL, "pUnkForRelease == NULL\n");
-    }
     }
 
     if(U(*pstgmed).pstm) {
@@ -768,18 +800,17 @@ static void test_BindToStorage(int protocol, BOOL emul)
 
     test_protocol = protocol;
     emulate_protocol = emul;
+    download_state = BEFORE_DOWNLOAD;
+    stopped_binding = FALSE;
+    data_available = FALSE;
+    mime_type[0] = 0;
 
     SET_EXPECT(QueryInterface_IServiceProvider);
     hres = CreateAsyncBindCtx(0, &bsc, NULL, &bctx);
     ok(SUCCEEDED(hres), "CreateAsyncBindCtx failed: %08x\n\n", hres);
     if(FAILED(hres))
         return;
-    if(test_protocol == HTTP_TEST ||
-       test_protocol == ABOUT_TEST ||
-       (emul && test_protocol == FILE_TEST)) todo_wine
-        CHECK_CALLED(QueryInterface_IServiceProvider);
-    else
-        CHECK_CALLED(QueryInterface_IServiceProvider);
+    todo_wine CHECK_CALLED(QueryInterface_IServiceProvider);
 
     SET_EXPECT(QueryInterface_IServiceProvider);
     hres = RegisterBindStatusCallback(bctx, &bsc, &previousclb, 0);
@@ -842,24 +873,25 @@ static void test_BindToStorage(int protocol, BOOL emul)
         trace( "Network unreachable, skipping tests\n" );
         return;
     }
-    ok(SUCCEEDED(hres), "IMoniker_BindToStorage failed: %08x\n", hres);
     if (!SUCCEEDED(hres)) return;
 
-    if(test_protocol == HTTP_TEST) {
-        todo_wine {
-            ok(unk == NULL, "istr should be NULL\n");
-        }
+    if((bindf & BINDF_ASYNCHRONOUS) && !data_available) {
+        ok(hres == MK_S_ASYNCHRONOUS, "IMoniker_BindToStorage failed: %08x\n", hres);
+        ok(unk == NULL, "istr should be NULL\n");
     }else {
+        ok(hres == S_OK, "IMoniker_BindToStorage failed: %08x\n", hres);
         ok(unk != NULL, "unk == NULL\n");
     }
     if(unk)
         IUnknown_Release(unk);
 
-    while(!stopped_binding && GetMessage(&msg,NULL,0,0)) {
+    while((bindf & BINDF_ASYNCHRONOUS) &&
+          !stopped_binding && GetMessage(&msg,NULL,0,0)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
 
+    todo_wine CHECK_NOT_CALLED(QueryInterface_IServiceProvider);
     CHECK_CALLED(GetBindInfo);
     CHECK_CALLED(OnStartBinding);
     if(emulate_protocol) {
@@ -867,24 +899,28 @@ static void test_BindToStorage(int protocol, BOOL emul)
         CHECK_CALLED(UnlockRequest);
     }else {
         if(test_protocol == HTTP_TEST) {
-            todo_wine CHECK_CALLED(QueryInterface_IHttpNegotiate);
-            todo_wine CHECK_CALLED(BeginningTransaction);
+            CHECK_CALLED(QueryInterface_IHttpNegotiate);
+            CHECK_CALLED(BeginningTransaction);
             /* QueryInterface_IHttpNegotiate2 and GetRootSecurityId
              * called on WinXP but not on Win98 */
             CLEAR_CALLED(QueryInterface_IHttpNegotiate2);
             CLEAR_CALLED(GetRootSecurityId);
-            CHECK_CALLED(OnProgress_FINDINGRESOURCE);
-            CHECK_CALLED(OnProgress_CONNECTING);
-            CHECK_CALLED(OnProgress_SENDINGREQUEST);
-            todo_wine CHECK_CALLED(OnResponse);
-            todo_wine { CHECK_CALLED(OnProgress_MIMETYPEAVAILABLE); }
-        }else {
-            todo_wine CHECK_NOT_CALLED(QueryInterface_IServiceProvider);
-            CHECK_CALLED(OnProgress_MIMETYPEAVAILABLE);
+            if(http_is_first) {
+                CHECK_CALLED(OnProgress_FINDINGRESOURCE);
+                CHECK_CALLED(OnProgress_CONNECTING);
+            }else todo_wine {
+                CHECK_NOT_CALLED(OnProgress_FINDINGRESOURCE);
+                CHECK_NOT_CALLED(OnProgress_CONNECTING);
+            }
         }
+        if(test_protocol == HTTP_TEST || test_protocol == FILE_TEST)
+            CHECK_CALLED(OnProgress_SENDINGREQUEST);
+        if(test_protocol == HTTP_TEST)
+            CHECK_CALLED(OnResponse);
+        CHECK_CALLED(OnProgress_MIMETYPEAVAILABLE);
         CHECK_CALLED(OnProgress_BEGINDOWNLOADDATA);
         if(test_protocol == HTTP_TEST)
-            CHECK_CALLED(OnProgress_DOWNLOADINGDATA);
+            CLEAR_CALLED(OnProgress_DOWNLOADINGDATA);
         CHECK_CALLED(OnProgress_ENDDOWNLOADDATA);
         CHECK_CALLED(OnDataAvailable);
         CHECK_CALLED(OnStopBinding);
@@ -892,6 +928,9 @@ static void test_BindToStorage(int protocol, BOOL emul)
 
     ok(IMoniker_Release(mon) == 0, "mon should be destroyed here\n");
     ok(IBindCtx_Release(bctx) == 0, "bctx should be destroyed here\n");
+
+    if(test_protocol == HTTP_TEST)
+        http_is_first = FALSE;
 }
 
 static void set_file_url(void)
@@ -956,7 +995,22 @@ START_TEST(url)
     test_CreateAsyncBindCtx();
     test_CreateAsyncBindCtxEx();
 
+    trace("synchronous http test...\n");
+    test_BindToStorage(HTTP_TEST, FALSE);
+
+    trace("synchronous file test...\n");
+    create_file();
+    test_BindToStorage(FILE_TEST, FALSE);
+    DeleteFileW(wszIndexHtml);
+
+    bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA;
+
     trace("http test...\n");
+    test_BindToStorage(HTTP_TEST, FALSE);
+
+    trace("http test (short response)...\n");
+    http_is_first = TRUE;
+    urls[HTTP_TEST] = SHORT_RESPONSE_URL;
     test_BindToStorage(HTTP_TEST, FALSE);
 
     trace("about test...\n");

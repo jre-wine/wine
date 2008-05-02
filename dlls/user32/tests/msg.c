@@ -61,6 +61,9 @@ static BOOL (WINAPI *pUnhookWinEvent)(HWINEVENTHOOK);
 
 static void dump_winpos_flags(UINT flags);
 
+static const WCHAR testWindowClassW[] =
+{ 'T','e','s','t','W','i','n','d','o','w','C','l','a','s','s','W',0 };
+
 /*
 FIXME: add tests for these
 Window Edge Styles (Win31/Win95/98 look), in order of precedence:
@@ -724,6 +727,15 @@ static const struct message WmHideChildSeq[] = {
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam, 0, 0 },
     { WM_ERASEBKGND, sent|parent|optional },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { 0 }
+};
+/* ShowWindow(SW_HIDE) for a visible child window checking all parent events*/
+static const struct message WmHideChildSeq2[] = {
+    { WM_SHOWWINDOW, sent|wparam, 0 },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
+    { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam, 0, 0 },
+    { WM_ERASEBKGND, sent|parent },
     { WM_WINDOWPOSCHANGED, sent|wparam, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
     { 0 }
 };
@@ -3982,6 +3994,15 @@ static void test_messages(void)
     ShowWindow(hchild, SW_SHOW);
     ok_sequence(WmShowChildSeq, "ShowWindow(SW_SHOW):child", FALSE);
 
+    /* check parent messages too */
+    log_all_parent_messages++;
+    ShowWindow(hchild, SW_HIDE);
+    ok_sequence(WmHideChildSeq2, "ShowWindow(SW_HIDE):child", FALSE);
+    log_all_parent_messages--;
+
+    ShowWindow(hchild, SW_SHOW);
+    ok_sequence(WmShowChildSeq, "ShowWindow(SW_SHOW):child", FALSE);
+
     ShowWindow(hchild, SW_HIDE);
     ok_sequence(WmHideChildSeq, "ShowWindow(SW_HIDE):child", FALSE);
 
@@ -6337,6 +6358,7 @@ static LRESULT WINAPI ShowWindowProcA(HWND hwnd, UINT message, WPARAM wParam, LP
 static BOOL RegisterWindowClasses(void)
 {
     WNDCLASSA cls;
+    WNDCLASSW clsW;
 
     cls.style = 0;
     cls.lpfnWndProc = MsgCheckProcA;
@@ -6377,6 +6399,18 @@ static BOOL RegisterWindowClasses(void)
     cls.lpfnWndProc = TestDlgProcA;
     cls.lpszClassName = "TestDialogClass";
     if(!RegisterClassA(&cls)) return FALSE;
+
+    clsW.style = 0;
+    clsW.lpfnWndProc = MsgCheckProcW;
+    clsW.cbClsExtra = 0;
+    clsW.cbWndExtra = 0;
+    clsW.hInstance = GetModuleHandleW(0);
+    clsW.hIcon = 0;
+    clsW.hCursor = LoadCursorW(0, (LPWSTR)IDC_ARROW);
+    clsW.hbrBackground = GetStockObject(WHITE_BRUSH);
+    clsW.lpszMenuName = NULL;
+    clsW.lpszClassName = testWindowClassW;
+    RegisterClassW(&clsW);  /* ignore error, this fails on Win9x */
 
     return TRUE;
 }
@@ -6540,9 +6574,6 @@ static const struct message WmGetTextLengthAfromW[] = {
     { 0 }
 };
 
-static const WCHAR testWindowClassW[] = 
-{ 'T','e','s','t','W','i','n','d','o','w','C','l','a','s','s','W',0 };
-
 static const WCHAR dummy_window_text[] = {'d','u','m','m','y',' ','t','e','x','t',0};
 
 /* dummy window proc for WM_GETTEXTLENGTH test */
@@ -6582,18 +6613,6 @@ static void test_message_conversion(void)
     cls.lpszClassName = wszMsgConversionClass;
     /* this call will fail on Win9x, but that doesn't matter as this test is
      * meaningless on those platforms */
-    if(!RegisterClassW(&cls)) return;
-
-    cls.style = 0;
-    cls.lpfnWndProc = MsgCheckProcW;
-    cls.cbClsExtra = 0;
-    cls.cbWndExtra = 0;
-    cls.hInstance = GetModuleHandleW(0);
-    cls.hIcon = 0;
-    cls.hCursor = LoadCursorW(0, (LPWSTR)IDC_ARROW);
-    cls.hbrBackground = GetStockObject(WHITE_BRUSH);
-    cls.lpszMenuName = NULL;
-    cls.lpszClassName = testWindowClassW;
     if(!RegisterClassW(&cls)) return;
 
     hwnd = CreateWindowExW(0, wszMsgConversionClass, NULL, WS_OVERLAPPED,
@@ -9256,6 +9275,283 @@ static void test_SetForegroundWindow(void)
     DestroyWindow(hwnd);
 }
 
+static void test_dbcs_wm_char(void)
+{
+    BYTE dbch[2];
+    WCHAR wch, bad_wch;
+    HWND hwnd, hwnd2;
+    MSG msg;
+    DWORD time;
+    POINT pt;
+    DWORD_PTR res;
+    CPINFOEXA cpinfo;
+    UINT i, j, k;
+    struct message wmCharSeq[2];
+
+    GetCPInfoExA( CP_ACP, 0, &cpinfo );
+    if (cpinfo.MaxCharSize != 2)
+    {
+        skip( "Skipping DBCS WM_CHAR test in SBCS codepage '%s'\n", cpinfo.CodePageName );
+        return;
+    }
+
+    dbch[0] = dbch[1] = 0;
+    wch = 0;
+    bad_wch = cpinfo.UnicodeDefaultChar;
+    for (i = 0; !wch && i < MAX_LEADBYTES && cpinfo.LeadByte[i]; i += 2)
+        for (j = cpinfo.LeadByte[i]; !wch && j <= cpinfo.LeadByte[i+1]; j++)
+            for (k = 128; k <= 255; k++)
+            {
+                char str[2];
+                WCHAR wstr[2];
+                str[0] = j;
+                str[1] = k;
+                if (MultiByteToWideChar( CP_ACP, 0, str, 2, wstr, 2 ) == 1 &&
+                    WideCharToMultiByte( CP_ACP, 0, wstr, 1, str, 2, NULL, NULL ) == 2 &&
+                    (BYTE)str[0] == j && (BYTE)str[1] == k &&
+                    HIBYTE(wstr[0]) && HIBYTE(wstr[0]) != 0xff)
+                {
+                    dbch[0] = j;
+                    dbch[1] = k;
+                    wch = wstr[0];
+                    break;
+                }
+            }
+
+    if (!wch)
+    {
+        skip( "Skipping DBCS WM_CHAR test, no appropriate char found\n" );
+        return;
+    }
+    trace( "using dbcs char %02x,%02x wchar %04x bad wchar %04x codepage '%s'\n",
+           dbch[0], dbch[1], wch, bad_wch, cpinfo.CodePageName );
+
+    hwnd = CreateWindowExW(0, testWindowClassW, NULL,
+                           WS_OVERLAPPEDWINDOW, 100, 100, 200, 200, 0, 0, 0, NULL);
+    hwnd2 = CreateWindowExW(0, testWindowClassW, NULL,
+                           WS_OVERLAPPEDWINDOW, 100, 100, 200, 200, 0, 0, 0, NULL);
+    ok (hwnd != 0, "Failed to create overlapped window\n");
+    ok (hwnd2 != 0, "Failed to create overlapped window\n");
+    flush_sequence();
+
+    memset( wmCharSeq, 0, sizeof(wmCharSeq) );
+    wmCharSeq[0].message = WM_CHAR;
+    wmCharSeq[0].flags = sent|wparam;
+    wmCharSeq[0].wParam = wch;
+
+    /* posted message */
+    PostMessageA( hwnd, WM_CHAR, dbch[0], 0 );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+    PostMessageA( hwnd, WM_CHAR, dbch[1], 0 );
+    ok( PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "no message\n" );
+    ok( msg.message == WM_CHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == wch, "bad wparam %lx/%x\n", msg.wParam, wch );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+
+    /* posted thread message */
+    PostThreadMessageA( GetCurrentThreadId(), WM_CHAR, dbch[0], 0 );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+    PostMessageA( hwnd, WM_CHAR, dbch[1], 0 );
+    ok( PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "no message\n" );
+    ok( msg.message == WM_CHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == wch, "bad wparam %lx/%x\n", msg.wParam, wch );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+
+    /* sent message */
+    flush_sequence();
+    SendMessageA( hwnd, WM_CHAR, dbch[0], 0 );
+    ok_sequence( WmEmptySeq, "no messages", FALSE );
+    SendMessageA( hwnd, WM_CHAR, dbch[1], 0 );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+
+    /* sent message with timeout */
+    flush_sequence();
+    SendMessageTimeoutA( hwnd, WM_CHAR, dbch[0], 0, SMTO_NORMAL, 0, &res );
+    ok_sequence( WmEmptySeq, "no messages", FALSE );
+    SendMessageTimeoutA( hwnd, WM_CHAR, dbch[1], 0, SMTO_NORMAL, 0, &res );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+
+    /* sent message with timeout and callback */
+    flush_sequence();
+    SendMessageTimeoutA( hwnd, WM_CHAR, dbch[0], 0, SMTO_NORMAL, 0, &res );
+    ok_sequence( WmEmptySeq, "no messages", FALSE );
+    SendMessageCallbackA( hwnd, WM_CHAR, dbch[1], 0, NULL, 0 );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+
+    /* sent message with callback */
+    flush_sequence();
+    SendNotifyMessageA( hwnd, WM_CHAR, dbch[0], 0 );
+    ok_sequence( WmEmptySeq, "no messages", FALSE );
+    SendMessageCallbackA( hwnd, WM_CHAR, dbch[1], 0, NULL, 0 );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+
+    /* direct window proc call */
+    flush_sequence();
+    CallWindowProcA( (WNDPROC)GetWindowLongPtrA( hwnd, GWLP_WNDPROC ), hwnd, WM_CHAR, dbch[0], 0 );
+    ok_sequence( WmEmptySeq, "no messages", FALSE );
+    CallWindowProcA( (WNDPROC)GetWindowLongPtrA( hwnd, GWLP_WNDPROC ), hwnd, WM_CHAR, dbch[1], 0 );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+
+    /* dispatch message */
+    msg.hwnd = hwnd;
+    msg.message = WM_CHAR;
+    msg.wParam = dbch[0];
+    msg.lParam = 0;
+    DispatchMessageA( &msg );
+    ok_sequence( WmEmptySeq, "no messages", FALSE );
+    msg.wParam = dbch[1];
+    DispatchMessageA( &msg );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+
+    /* window handle is irrelevant */
+    flush_sequence();
+    SendMessageA( hwnd2, WM_CHAR, dbch[0], 0 );
+    ok_sequence( WmEmptySeq, "no messages", FALSE );
+    SendMessageA( hwnd, WM_CHAR, dbch[1], 0 );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+
+    /* interleaved post and send */
+    flush_sequence();
+    PostMessageA( hwnd2, WM_CHAR, dbch[0], 0 );
+    SendMessageA( hwnd2, WM_CHAR, dbch[0], 0 );
+    ok_sequence( WmEmptySeq, "no messages", FALSE );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+    PostMessageA( hwnd, WM_CHAR, dbch[1], 0 );
+    ok_sequence( WmEmptySeq, "no messages", FALSE );
+    ok( PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "no message\n" );
+    ok( msg.message == WM_CHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == wch, "bad wparam %lx/%x\n", msg.wParam, wch );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+    SendMessageA( hwnd, WM_CHAR, dbch[1], 0 );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+
+    /* interleaved sent message and winproc */
+    flush_sequence();
+    SendMessageA( hwnd, WM_CHAR, dbch[0], 0 );
+    CallWindowProcA( (WNDPROC)GetWindowLongPtrA( hwnd, GWLP_WNDPROC ), hwnd, WM_CHAR, dbch[0], 0 );
+    ok_sequence( WmEmptySeq, "no messages", FALSE );
+    SendMessageA( hwnd, WM_CHAR, dbch[1], 0 );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+    CallWindowProcA( (WNDPROC)GetWindowLongPtrA( hwnd, GWLP_WNDPROC ), hwnd, WM_CHAR, dbch[1], 0 );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+
+    /* interleaved winproc and dispatch */
+    msg.hwnd = hwnd;
+    msg.message = WM_CHAR;
+    msg.wParam = dbch[0];
+    msg.lParam = 0;
+    CallWindowProcA( (WNDPROC)GetWindowLongPtrA( hwnd, GWLP_WNDPROC ), hwnd, WM_CHAR, dbch[0], 0 );
+    DispatchMessageA( &msg );
+    ok_sequence( WmEmptySeq, "no messages", FALSE );
+    msg.wParam = dbch[1];
+    DispatchMessageA( &msg );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+    CallWindowProcA( (WNDPROC)GetWindowLongPtrA( hwnd, GWLP_WNDPROC ), hwnd, WM_CHAR, dbch[1], 0 );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+
+    /* interleaved sends */
+    flush_sequence();
+    SendMessageA( hwnd, WM_CHAR, dbch[0], 0 );
+    SendMessageCallbackA( hwnd, WM_CHAR, dbch[0], 0, NULL, 0 );
+    ok_sequence( WmEmptySeq, "no messages", FALSE );
+    SendMessageTimeoutA( hwnd, WM_CHAR, dbch[1], 0, SMTO_NORMAL, 0, &res );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+    SendMessageA( hwnd, WM_CHAR, dbch[1], 0 );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+
+    /* dbcs WM_CHAR */
+    flush_sequence();
+    SendMessageA( hwnd2, WM_CHAR, (dbch[1] << 8) | dbch[0], 0 );
+    ok_sequence( wmCharSeq, "Unicode WM_CHAR", FALSE );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+
+    /* other char messages are not magic */
+    PostMessageA( hwnd, WM_SYSCHAR, dbch[0], 0 );
+    ok( PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "no message\n" );
+    ok( msg.message == WM_SYSCHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == bad_wch, "bad wparam %lx/%x\n", msg.wParam, bad_wch );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+    PostMessageA( hwnd, WM_DEADCHAR, dbch[0], 0 );
+    ok( PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "no message\n" );
+    ok( msg.message == WM_DEADCHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == bad_wch, "bad wparam %lx/%x\n", msg.wParam, bad_wch );
+    ok( !PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+
+    /* test retrieving messages */
+
+    PostMessageW( hwnd, WM_CHAR, wch, 0 );
+    ok( PeekMessageA( &msg, hwnd, 0, 0, PM_REMOVE ), "no message\n" );
+    ok( msg.hwnd == hwnd, "unexpected hwnd %p\n", msg.hwnd );
+    ok( msg.message == WM_CHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == dbch[0], "bad wparam %lx/%x\n", msg.wParam, dbch[0] );
+    ok( PeekMessageA( &msg, hwnd, 0, 0, PM_REMOVE ), "no message\n" );
+    ok( msg.hwnd == hwnd, "unexpected hwnd %p\n", msg.hwnd );
+    ok( msg.message == WM_CHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == dbch[1], "bad wparam %lx/%x\n", msg.wParam, dbch[0] );
+    ok( !PeekMessageA( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+
+    /* message filters */
+    PostMessageW( hwnd, WM_CHAR, wch, 0 );
+    ok( PeekMessageA( &msg, hwnd, 0, 0, PM_REMOVE ), "no message\n" );
+    ok( msg.hwnd == hwnd, "unexpected hwnd %p\n", msg.hwnd );
+    ok( msg.message == WM_CHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == dbch[0], "bad wparam %lx/%x\n", msg.wParam, dbch[0] );
+    /* message id is filtered, hwnd is not */
+    ok( !PeekMessageA( &msg, hwnd, WM_MOUSEFIRST, WM_MOUSELAST, PM_REMOVE ), "no message\n" );
+    ok( PeekMessageA( &msg, hwnd2, 0, 0, PM_REMOVE ), "no message\n" );
+    ok( msg.hwnd == hwnd, "unexpected hwnd %p\n", msg.hwnd );
+    ok( msg.message == WM_CHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == dbch[1], "bad wparam %lx/%x\n", msg.wParam, dbch[0] );
+    ok( !PeekMessageA( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+
+    /* mixing GetMessage and PostMessage */
+    PostMessageW( hwnd, WM_CHAR, wch, 0xbeef );
+    ok( GetMessageA( &msg, hwnd, 0, 0 ), "no message\n" );
+    ok( msg.hwnd == hwnd, "unexpected hwnd %p\n", msg.hwnd );
+    ok( msg.message == WM_CHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == dbch[0], "bad wparam %lx/%x\n", msg.wParam, dbch[0] );
+    ok( msg.lParam == 0xbeef, "bad lparam %lx\n", msg.lParam );
+    time = msg.time;
+    pt = msg.pt;
+    ok( time - GetTickCount() <= 100, "bad time %x\n", msg.time );
+    ok( PeekMessageA( &msg, 0, 0, 0, PM_REMOVE ), "no message\n" );
+    ok( msg.hwnd == hwnd, "unexpected hwnd %p\n", msg.hwnd );
+    ok( msg.message == WM_CHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == dbch[1], "bad wparam %lx/%x\n", msg.wParam, dbch[0] );
+    ok( msg.lParam == 0xbeef, "bad lparam %lx\n", msg.lParam );
+    ok( msg.time == time, "bad time %x/%x\n", msg.time, time );
+    ok( msg.pt.x == pt.x && msg.pt.y == pt.y, "bad point %u,%u/%u,%u\n", msg.pt.x, msg.pt.y, pt.x, pt.y );
+    ok( !PeekMessageA( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+
+    /* without PM_REMOVE */
+    PostMessageW( hwnd, WM_CHAR, wch, 0 );
+    ok( PeekMessageA( &msg, 0, 0, 0, PM_NOREMOVE ), "no message\n" );
+    ok( msg.hwnd == hwnd, "unexpected hwnd %p\n", msg.hwnd );
+    ok( msg.message == WM_CHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == dbch[0], "bad wparam %lx/%x\n", msg.wParam, dbch[0] );
+    ok( PeekMessageA( &msg, 0, 0, 0, PM_REMOVE ), "no message\n" );
+    ok( msg.hwnd == hwnd, "unexpected hwnd %p\n", msg.hwnd );
+    ok( msg.message == WM_CHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == dbch[0], "bad wparam %lx/%x\n", msg.wParam, dbch[0] );
+    ok( PeekMessageA( &msg, 0, 0, 0, PM_NOREMOVE ), "no message\n" );
+    ok( msg.hwnd == hwnd, "unexpected hwnd %p\n", msg.hwnd );
+    ok( msg.message == WM_CHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == dbch[1], "bad wparam %lx/%x\n", msg.wParam, dbch[0] );
+    ok( PeekMessageA( &msg, 0, 0, 0, PM_REMOVE ), "no message\n" );
+    ok( msg.hwnd == hwnd, "unexpected hwnd %p\n", msg.hwnd );
+    ok( msg.message == WM_CHAR, "unexpected message %x\n", msg.message );
+    ok( msg.wParam == dbch[1], "bad wparam %lx/%x\n", msg.wParam, dbch[0] );
+    ok( !PeekMessageA( &msg, hwnd, 0, 0, PM_REMOVE ), "got message %x\n", msg.message );
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(msg)
 {
     BOOL ret;
@@ -9326,6 +9622,7 @@ START_TEST(msg)
     test_dialog_messages();
     test_nullCallback();
     test_SetForegroundWindow();
+    test_dbcs_wm_char();
 
     UnhookWindowsHookEx(hCBT_hook);
     if (pUnhookWinEvent)

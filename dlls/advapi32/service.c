@@ -2283,7 +2283,7 @@ BOOL WINAPI GetServiceDisplayNameA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
     /* Last error will be set by GetServiceDisplayNameW and must be preserved */
     GLE = GetLastError();
 
-    if (!lpDisplayName && lpcchBuffer && !ret && (GLE == ERROR_INSUFFICIENT_BUFFER))
+    if (!lpDisplayName && *lpcchBuffer && !ret && (GLE == ERROR_INSUFFICIENT_BUFFER))
     {
         /* Request for buffersize.
          *
@@ -2291,7 +2291,7 @@ BOOL WINAPI GetServiceDisplayNameA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
          */
         size = sizeW * 2;
     }
-    else if (lpDisplayName && lpcchBuffer && !ret)
+    else if (lpDisplayName && *lpcchBuffer && !ret)
     {
         /* Request for displayname.
          *
@@ -2351,6 +2351,33 @@ BOOL WINAPI GetServiceDisplayNameW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
         {
             SetLastError(ERROR_INSUFFICIENT_BUFFER);
             *lpcchBuffer = (size / sizeof(WCHAR)) - 1;
+        }
+        else if (ret == ERROR_FILE_NOT_FOUND)
+        {
+            HKEY hkey;
+
+            if (!RegOpenKeyW(hscm->hkey, lpServiceName, &hkey))
+            {
+                INT len = lstrlenW(lpServiceName);
+                BOOL r = FALSE;
+
+                if ((*lpcchBuffer <= len) || (!lpDisplayName && *lpcchBuffer))
+                    SetLastError(ERROR_INSUFFICIENT_BUFFER);
+                else if (lpDisplayName && *lpcchBuffer)
+                {
+                    /* No displayname, but the service exists and the buffer
+                     * is big enough. We should return the servicename.
+                     */
+                    lstrcpyW(lpDisplayName, lpServiceName);
+                    r = TRUE;
+                }
+
+                *lpcchBuffer = len;
+                RegCloseKey(hkey);
+                return r;
+            }
+            else
+                SetLastError(ERROR_SERVICE_DOES_NOT_EXIST);
         }
         else
             SetLastError(ret);

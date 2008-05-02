@@ -26,38 +26,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_decl);
 
-/**
- * DirectX9 SDK download
- *  http://msdn.microsoft.com/library/default.asp?url=/downloads/list/directx.asp
- *
- * Exploring D3DX
- *  http://msdn.microsoft.com/library/default.asp?url=/library/en-us/dndrive/html/directx07162002.asp
- *
- * Using Vertex Shaders
- *  http://msdn.microsoft.com/library/default.asp?url=/library/en-us/dndrive/html/directx02192001.asp
- *
- * Dx9 New
- *  http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/directx/graphics/whatsnew.asp
- *
- * Dx9 Shaders
- *  http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/directx/graphics/reference/Shaders/VertexShader2_0/VertexShader2_0.asp
- *  http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/directx/graphics/reference/Shaders/VertexShader2_0/Instructions/Instructions.asp
- *  http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/directx/graphics/programmingguide/GettingStarted/VertexDeclaration/VertexDeclaration.asp
- *  http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/directx/graphics/reference/Shaders/VertexShader3_0/VertexShader3_0.asp
- *
- * Dx9 D3DX
- *  http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/directx/graphics/programmingguide/advancedtopics/VertexPipe/matrixstack/matrixstack.asp
- *
- * FVF
- *  http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/directx/graphics/programmingguide/GettingStarted/VertexFormats/vformats.asp
- *
- * NVIDIA: DX8 Vertex Shader to NV Vertex Program
- *  http://developer.nvidia.com/view.asp?IO=vstovp
- *
- * NVIDIA: Memory Management with VAR
- *  http://developer.nvidia.com/view.asp?IO=var_memory_management
- */
-
 static void dump_wined3dvertexelement(const WINED3DVERTEXELEMENT *element) {
     TRACE("     Stream: %d\n", element->Stream);
     TRACE("     Offset: %d\n", element->Offset);
@@ -152,11 +120,13 @@ static HRESULT WINAPI IWineD3DVertexDeclarationImpl_SetDeclaration(IWineD3DVerte
         const WINED3DVERTEXELEMENT *elements, size_t element_count) {
     IWineD3DVertexDeclarationImpl *This = (IWineD3DVertexDeclarationImpl *)iface;
     HRESULT hr = WINED3D_OK;
+    int i;
+    char isPreLoaded[MAX_STREAMS];
 
     TRACE("(%p) : d3d version %d\n", This, ((IWineD3DImpl *)This->wineD3DDevice->wineD3D)->dxVersion);
+    memset(isPreLoaded, 0, sizeof(isPreLoaded));
 
     if (TRACE_ON(d3d_decl)) {
-        int i;
         for (i = 0; i < element_count; ++i) {
             dump_wined3dvertexelement(elements+i);
         }
@@ -169,6 +139,29 @@ static HRESULT WINAPI IWineD3DVertexDeclarationImpl_SetDeclaration(IWineD3DVerte
         hr = WINED3DERR_OUTOFVIDEOMEMORY;
     } else {
         CopyMemory(This->pDeclarationWine, elements, sizeof(WINED3DVERTEXELEMENT) * element_count);
+    }
+
+    /* Do some static analysis on the elements to make reading the declaration more comfortable
+     * for the drawing code
+     */
+    This->num_streams = 0;
+    This->position_transformed = FALSE;
+    for (i = 0; i < element_count; ++i) {
+
+        if(This->pDeclarationWine[i].Usage == WINED3DDECLUSAGE_POSITIONT) {
+            This->position_transformed = TRUE;
+        }
+
+        /* Find the Streams used in the declaration. The vertex buffers have to be loaded
+         * when drawing, but filter tesselation pseudo streams
+         */
+        if(This->pDeclarationWine[i].Stream >= MAX_STREAMS) continue;
+
+        if(!isPreLoaded[This->pDeclarationWine[i].Stream]) {
+            This->streams[This->num_streams] = This->pDeclarationWine[i].Stream;
+            This->num_streams++;
+            isPreLoaded[This->pDeclarationWine[i].Stream] = 1;
+        }
     }
 
     TRACE("Returning\n");

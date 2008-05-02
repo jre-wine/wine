@@ -156,20 +156,13 @@ void primitiveDeclarationConvertToStridedData(
     WINED3DVERTEXELEMENT *element;
     DWORD stride;
     int reg;
-    char isPreLoaded[MAX_STREAMS];
-    DWORD preLoadStreams[MAX_STREAMS], numPreloadStreams = 0;
-
-    memset(isPreLoaded, 0, sizeof(isPreLoaded));
+    DWORD numPreloadStreams = This->stateBlock->streamIsUP ? 0 : vertexDeclaration->num_streams;
+    DWORD *streams = vertexDeclaration->streams;
 
     /* Check for transformed vertices, disable vertex shader if present */
-    strided->u.s.position_transformed = FALSE;
-    for (i = 0; i < vertexDeclaration->declarationWNumElements - 1; ++i) {
-        element = vertexDeclaration->pDeclarationWine + i;
-
-        if (element->Usage == WINED3DDECLUSAGE_POSITIONT) {
-            strided->u.s.position_transformed = TRUE;
-            useVertexShaderFunction = FALSE;
-        }
+    strided->u.s.position_transformed = vertexDeclaration->position_transformed;
+    if(vertexDeclaration->position_transformed) {
+        useVertexShaderFunction = FALSE;
     }
 
     /* Translate the declaration into strided data */
@@ -191,11 +184,6 @@ void primitiveDeclarationConvertToStridedData(
             data    = (BYTE *)This->stateBlock->streamSource[element->Stream];
         } else {
             TRACE("Stream isn't up %d, %p\n", element->Stream, This->stateBlock->streamSource[element->Stream]);
-            if(!isPreLoaded[element->Stream]) {
-                preLoadStreams[numPreloadStreams] = element->Stream;
-                numPreloadStreams++;
-                isPreLoaded[element->Stream] = 1;
-            }
             data    = IWineD3DVertexBufferImpl_GetMemory(This->stateBlock->streamSource[element->Stream], 0, &streamVBO);
             if(fixup) {
                 if( streamVBO != 0) *fixup = TRUE;
@@ -242,7 +230,7 @@ void primitiveDeclarationConvertToStridedData(
      * once in there.
      */
     for(i=0; i < numPreloadStreams; i++) {
-        IWineD3DVertexBuffer_PreLoad(This->stateBlock->streamSource[preLoadStreams[i]]);
+        IWineD3DVertexBuffer_PreLoad(This->stateBlock->streamSource[streams[i]]);
     }
 }
 
@@ -818,10 +806,18 @@ static inline void drawStridedInstanced(IWineD3DDevice *iface, WineDirect3DVerte
                     /* Are those 16 bit floats. C doesn't have a 16 bit float type. I could read the single bits and calculate a 4
                      * byte float according to the IEEE standard
                      */
-                    FIXME("Unsupported WINED3DDECLTYPE_FLOAT16_2\n");
+                    if (GL_SUPPORT(NV_HALF_FLOAT)) {
+                        GL_EXTCALL(glVertexAttrib2hvNV(instancedData[j], (GLhalfNV *)ptr));
+                    } else {
+                        FIXME("Unsupported WINED3DDECLTYPE_FLOAT16_2\n");
+                    }
                     break;
                 case WINED3DDECLTYPE_FLOAT16_4:
-                    FIXME("Unsupported WINED3DDECLTYPE_FLOAT16_4\n");
+                    if (GL_SUPPORT(NV_HALF_FLOAT)) {
+                        GL_EXTCALL(glVertexAttrib4hvNV(instancedData[j], (GLhalfNV *)ptr));
+                    } else {
+                        FIXME("Unsupported WINED3DDECLTYPE_FLOAT16_4\n");
+                    }
                     break;
 
                 case WINED3DDECLTYPE_UNUSED:
@@ -854,8 +850,8 @@ void blt_to_drawable(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *surface) {
         return;
     }
 
-    ENTER_GL();
     ActivateContext(This, This->render_targets[0], CTXUSAGE_BLIT);
+    ENTER_GL();
 
     if(surface->glDescription.target == GL_TEXTURE_2D) {
         glBindTexture(GL_TEXTURE_2D, surface->glDescription.textureName);
@@ -1027,13 +1023,15 @@ void drawPrimitive(IWineD3DDevice *iface,
     }
 
     /* Ok, we will be updating the screen from here onwards so grab the lock */
-    ENTER_GL();
 
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+        ENTER_GL();
         apply_fbo_state(iface);
+        LEAVE_GL();
     }
 
     ActivateContext(This, This->render_targets[0], CTXUSAGE_DRAWPRIM);
+    ENTER_GL();
 
     if (This->depth_copy_state == WINED3D_DCS_COPY) {
         depth_copy(iface);
@@ -1243,12 +1241,12 @@ HRESULT tesselate_rectpatch(IWineD3DDeviceImpl *This,
     patch->has_normals = TRUE;
     patch->has_texcoords = FALSE;
 
-    ENTER_GL();
     /* Simply activate the context for blitting. This disables all the things we don't want and
-     * takes care for dirtifying. Dirtifying is prefered over pushing / popping, since drawing the
-     * patch(as opposed to normal draws) will most likely need different changes anyway
+     * takes care of dirtifying. Dirtifying is preferred over pushing / popping, since drawing the
+     * patch (as opposed to normal draws) will most likely need different changes anyway
      */
     ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_BLIT);
+    ENTER_GL();
 
     glMatrixMode(GL_PROJECTION);
     checkGLcall("glMatrixMode(GL_PROJECTION)");

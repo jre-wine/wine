@@ -428,11 +428,14 @@ static BOOL CUPS_LoadPrinters(void)
     PRINTER_INFO_2A       pinfo2a;
     char   *port,*devline;
     HKEY hkeyPrinter, hkeyPrinters, hkey;
+    char    loaderror[256];
 
-    cupshandle = wine_dlopen(SONAME_LIBCUPS, RTLD_NOW, NULL, 0);
-    if (!cupshandle) 
-	return FALSE;
-    TRACE("loaded %s\n", SONAME_LIBCUPS);
+    cupshandle = wine_dlopen(SONAME_LIBCUPS, RTLD_NOW, loaderror, sizeof(loaderror));
+    if (!cupshandle) {
+        TRACE("%s\n", loaderror);
+        return FALSE;
+    }
+    TRACE("%p: %s loaded\n", cupshandle, SONAME_LIBCUPS);
 
 #define DYNCUPS(x) 					\
     	p##x = wine_dlsym(cupshandle, #x, NULL,0);	\
@@ -5099,6 +5102,11 @@ static BOOL WINSPOOL_EnumPrinterDrivers(LPWSTR pName, LPCWSTR pEnvironment,
     /* check input parameter */
     if ((Level < 1) || (Level == 7) || (Level > 8)) {
         SetLastError(ERROR_INVALID_LEVEL);
+        return FALSE;
+    }
+
+    if ((pcbNeeded == NULL) || (pcReturned == NULL)) {
+        SetLastError(RPC_X_NULL_REF_POINTER);
         return FALSE;
     }
 

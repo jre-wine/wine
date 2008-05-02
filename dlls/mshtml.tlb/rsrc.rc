@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2000 Francois Gouget
+ * Copyright 2007 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,10 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <winresrc.h>
+#include "windef.h"
 
-#ifdef IDC_STATIC
-#undef IDC_STATIC
-#endif
-#define IDC_STATIC      (-1)
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 
+1 TYPELIB LOADONCALL DISCARDABLE mshtml_tlb.tlb

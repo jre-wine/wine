@@ -57,7 +57,7 @@ static IDirect3DDevice9 *init_d3d9(HMODULE d3d9_handle)
 
     if(FAILED(hr))
     {
-        trace("could not create device, IDirect3D9_CreateDevice returned %#x\n", hr);
+        skip("could not create device, IDirect3D9_CreateDevice returned %#x\n", hr);
         return NULL;
     }
 
@@ -150,8 +150,11 @@ static void test_surface_alignment(IDirect3DDevice9 *device_ptr)
 
         hr = IDirect3DDevice9_CreateTexture(device_ptr, 64, 64, 0, 0, MAKEFOURCC('D', 'X', 'T', '1'+i),
                                             D3DPOOL_MANAGED, &pTexture, NULL);
-        ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateTexture: %s\n", DXGetErrorString9(hr));
-        if (FAILED(hr)) continue;
+        ok(SUCCEEDED(hr) || hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_CreateTexture: %s\n", DXGetErrorString9(hr));
+        if (FAILED(hr)) {
+            skip("DXT%d surfaces are not supported\n", i + 1);
+            continue;
+        }
 
         for (j = IDirect3DBaseTexture9_GetLevelCount(pTexture) - 1; j >= 0; j--)
         {
