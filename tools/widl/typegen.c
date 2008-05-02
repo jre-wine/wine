@@ -228,6 +228,22 @@ static const char *get_context_handle_type_name(const type_t *type)
     return NULL;
 }
 
+/* This is actually fairly involved to implement precisely, due to the
+   effects attributes may have and things like that.  Right now this is
+   only used for optimization, so just check for a very small set of
+   criteria that guarantee the types are equivalent; assume every thing
+   else is different.   */
+static int compare_type(const type_t *a, const type_t *b)
+{
+    if (a == b
+        || (a->name
+            && b->name
+            && strcmp(a->name, b->name) == 0))
+        return 0;
+    /* Ordering doesn't need to be implemented yet.  */
+    return 1;
+}
+
 static int compare_expr(const expr_t *a, const expr_t *b)
 {
     int ret;
@@ -265,12 +281,17 @@ static int compare_expr(const expr_t *a, const expr_t *b)
             if (ret != 0)
                 return ret;
             return compare_expr(a->u.ext, b->u.ext);
+        case EXPR_CAST:
+            ret = compare_type(a->u.tref, b->u.tref);
+            if (ret != 0)
+                return ret;
+            /* Fall through.  */
         case EXPR_NOT:
         case EXPR_NEG:
         case EXPR_PPTR:
-        case EXPR_CAST:
-        case EXPR_SIZEOF:
             return compare_expr(a->ref, b->ref);
+        case EXPR_SIZEOF:
+            return compare_type(a->u.tref, b->u.tref);
         case EXPR_VOID:
             return 0;
     }
@@ -334,13 +355,13 @@ static void write_formatdesc(FILE *f, int indent, const char *str)
     print_file(f, indent, "\n");
 }
 
-void write_formatstringsdecl(FILE *f, int indent, ifref_list_t *ifaces, int for_objects)
+void write_formatstringsdecl(FILE *f, int indent, ifref_list_t *ifaces, type_pred_t pred)
 {
     print_file(f, indent, "#define TYPE_FORMAT_STRING_SIZE %d\n",
-               get_size_typeformatstring(ifaces, for_objects));
+               get_size_typeformatstring(ifaces, pred));
 
     print_file(f, indent, "#define PROC_FORMAT_STRING_SIZE %d\n",
-               get_size_procformatstring(ifaces, for_objects));
+               get_size_procformatstring(ifaces, pred));
 
     fprintf(f, "\n");
     write_formatdesc(f, indent, "TYPE");
@@ -439,7 +460,7 @@ static size_t write_procformatstring_var(FILE *file, int indent,
     return size;
 }
 
-void write_procformatstring(FILE *file, const ifref_list_t *ifaces, int for_objects)
+void write_procformatstring(FILE *file, const ifref_list_t *ifaces, type_pred_t pred)
 {
     const ifref_t *iface;
     int indent = 0;
@@ -454,7 +475,7 @@ void write_procformatstring(FILE *file, const ifref_list_t *ifaces, int for_obje
 
     if (ifaces) LIST_FOR_EACH_ENTRY( iface, ifaces, const ifref_t, entry )
     {
-        if (for_objects != is_object(iface->iface->attrs) || is_local(iface->iface->attrs))
+        if (!pred(iface->iface))
             continue;
 
         if (iface->iface->funcs)
@@ -863,7 +884,7 @@ static unsigned char conf_string_type_of_char_type(unsigned char t)
         return RPC_FC_C_WSTRING;
     }
 
-    error("string_type_of_char_type: unrecognized type %d", t);
+    error("string_type_of_char_type: unrecognized type %d\n", t);
     return 0;
 }
 
@@ -907,13 +928,31 @@ static int processed(const type_t *type)
     return type->typestring_offset && !type->tfswrite;
 }
 
+static int user_type_has_variable_size(const type_t *t)
+{
+    if (is_ptr(t))
+        return TRUE;
+    else
+        switch (t->type)
+        {
+        case RPC_FC_PSTRUCT:
+        case RPC_FC_CSTRUCT:
+        case RPC_FC_CPSTRUCT:
+        case RPC_FC_CVSTRUCT:
+            return TRUE;
+        }
+    /* Note: Since this only applies to user types, we can't have a conformant
+       array here, and strings should get filed under pointer in this case.  */
+    return FALSE;
+}
+
 static void write_user_tfs(FILE *file, type_t *type, unsigned int *tfsoff)
 {
     unsigned int start, absoff, flags;
     unsigned int align = 0, ualign = 0;
     const char *name;
     type_t *utype = get_user_type(type, &name);
-    size_t usize = type_memsize(utype, &ualign);
+    size_t usize = user_type_has_variable_size(utype) ? 0 : type_memsize(utype, &ualign);
     size_t size = type_memsize(type, &align);
     unsigned short funoff = user_type_offset(name);
     short reloff;
@@ -949,8 +988,8 @@ static void write_user_tfs(FILE *file, type_t *type, unsigned int *tfsoff)
     print_file(file, 2, "0x%x,\t/* Alignment= %d, Flags= %02x */\n",
                flags | (align - 1), align - 1, flags);
     print_file(file, 2, "NdrFcShort(0x%hx),\t/* Function offset= %hu */\n", funoff, funoff);
-    print_file(file, 2, "NdrFcShort(0x%lx),\t/* %lu */\n", usize, usize);
     print_file(file, 2, "NdrFcShort(0x%lx),\t/* %lu */\n", size, size);
+    print_file(file, 2, "NdrFcShort(0x%lx),\t/* %lu */\n", usize, usize);
     *tfsoff += 8;
     reloff = absoff - *tfsoff;
     print_file(file, 2, "NdrFcShort(0x%hx),\t/* Offset= %hd (%lu) */\n", reloff, reloff, absoff);
@@ -1744,6 +1783,22 @@ static size_t write_struct_tfs(FILE *file, type_t *type,
             type_t *ft = f->type;
             if (is_ptr(ft))
                 write_pointer_tfs(file, ft, tfsoff);
+            else if (!ft->declarray && is_conformant_array(ft))
+            {
+                unsigned int absoff = ft->typestring_offset;
+                short reloff = absoff - (*tfsoff + 2);
+                int ptr_type = get_attrv(f->attrs, ATTR_POINTERTYPE);
+                /* FIXME: We need to store pointer attributes for arrays
+                   so we don't lose pointer_default info.  */
+                if (ptr_type == 0)
+                    ptr_type = RPC_FC_UP;
+                print_file(file, 0, "/* %d */\n", *tfsoff);
+                print_file(file, 2, "0x%x, 0x0,\t/* %s */\n", ptr_type,
+                           string_of_type(ptr_type));
+                print_file(file, 2, "NdrFcShort(0x%hx),\t/* Offset= %hd (%u) */\n",
+                           reloff, reloff, absoff);
+                *tfsoff += 4;
+            }
         }
         if (type->ptrdesc == *tfsoff)
             type->ptrdesc = 0;
@@ -2076,7 +2131,9 @@ static size_t write_typeformatstring_var(FILE *file, int indent, const func_t *f
         int out_attr = is_attr(var->attrs, ATTR_OUT);
         const type_t *base = type->ref;
 
-        if (base->type == RPC_FC_IP)
+        if (base->type == RPC_FC_IP
+            || (base->type == 0
+                && is_attr(var->attrs, ATTR_IIDIS)))
         {
             return write_ip_tfs(file, var->attrs, type, typeformat_offset);
         }
@@ -2118,7 +2175,9 @@ static int write_embedded_types(FILE *file, const attr_list_t *attrs, type_t *ty
     {
         type_t *ref = type->ref;
 
-        if (ref->type == RPC_FC_IP)
+        if (ref->type == RPC_FC_IP
+            || (ref->type == 0
+                && is_attr(attrs, ATTR_IIDIS)))
         {
             write_ip_tfs(file, attrs, type, tfsoff);
         }
@@ -2162,7 +2221,7 @@ static int write_embedded_types(FILE *file, const attr_list_t *attrs, type_t *ty
     return retmask;
 }
 
-static size_t process_tfs(FILE *file, const ifref_list_t *ifaces, int for_objects)
+static size_t process_tfs(FILE *file, const ifref_list_t *ifaces, type_pred_t pred)
 {
     const var_t *var;
     const ifref_t *iface;
@@ -2170,7 +2229,7 @@ static size_t process_tfs(FILE *file, const ifref_list_t *ifaces, int for_object
 
     if (ifaces) LIST_FOR_EACH_ENTRY( iface, ifaces, const ifref_t, entry )
     {
-        if (for_objects != is_object(iface->iface->attrs) || is_local(iface->iface->attrs))
+        if (!pred(iface->iface))
             continue;
 
         if (iface->iface->funcs)
@@ -2197,7 +2256,7 @@ static size_t process_tfs(FILE *file, const ifref_list_t *ifaces, int for_object
 }
 
 
-void write_typeformatstring(FILE *file, const ifref_list_t *ifaces, int for_objects)
+void write_typeformatstring(FILE *file, const ifref_list_t *ifaces, type_pred_t pred)
 {
     int indent = 0;
 
@@ -2210,7 +2269,7 @@ void write_typeformatstring(FILE *file, const ifref_list_t *ifaces, int for_obje
     print_file(file, indent, "NdrFcShort(0x0),\n");
 
     set_all_tfswrite(TRUE);
-    process_tfs(file, ifaces, for_objects);
+    process_tfs(file, ifaces, pred);
 
     print_file(file, indent, "0x0\n");
     indent--;
@@ -2501,7 +2560,7 @@ void print_phase_basetype(FILE *file, int indent, enum remoting_phase phase,
             fprintf(file, " *)_StubMsg.Buffer = *");
         else
             fprintf(file, " *)_StubMsg.Buffer = ");
-        fprintf(file, varname);
+        fprintf(file, "%s", varname);
         fprintf(file, ";\n");
     }
     else if (phase == PHASE_UNMARSHAL)
@@ -2510,7 +2569,7 @@ void print_phase_basetype(FILE *file, int indent, enum remoting_phase phase,
             print_file(file, indent, "");
         else
             print_file(file, indent, "*");
-        fprintf(file, varname);
+        fprintf(file, "%s", varname);
         if (pass == PASS_IN && is_ptr(type))
             fprintf(file, " = (");
         else
@@ -2805,7 +2864,7 @@ size_t get_size_procformatstring_func(const func_t *func)
     return size;
 }
 
-size_t get_size_procformatstring(const ifref_list_t *ifaces, int for_objects)
+size_t get_size_procformatstring(const ifref_list_t *ifaces, type_pred_t pred)
 {
     const ifref_t *iface;
     size_t size = 1;
@@ -2813,7 +2872,7 @@ size_t get_size_procformatstring(const ifref_list_t *ifaces, int for_objects)
 
     if (ifaces) LIST_FOR_EACH_ENTRY( iface, ifaces, const ifref_t, entry )
     {
-        if (for_objects != is_object(iface->iface->attrs) || is_local(iface->iface->attrs))
+        if (!pred(iface->iface))
             continue;
 
         if (iface->iface->funcs)
@@ -2824,10 +2883,10 @@ size_t get_size_procformatstring(const ifref_list_t *ifaces, int for_objects)
     return size;
 }
 
-size_t get_size_typeformatstring(const ifref_list_t *ifaces, int for_objects)
+size_t get_size_typeformatstring(const ifref_list_t *ifaces, type_pred_t pred)
 {
     set_all_tfswrite(FALSE);
-    return process_tfs(NULL, ifaces, for_objects);
+    return process_tfs(NULL, ifaces, pred);
 }
 
 static void write_struct_expr(FILE *h, const expr_t *e, int brackets,

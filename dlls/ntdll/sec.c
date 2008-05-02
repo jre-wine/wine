@@ -626,8 +626,9 @@ NTSTATUS WINAPI RtlSetDaclSecurityDescriptor (
 		return STATUS_INVALID_SECURITY_DESCR;
 
 	if (!daclpresent)
-	{	lpsd->Control &= ~SE_DACL_PRESENT;
-		return TRUE;
+	{
+		lpsd->Control &= ~SE_DACL_PRESENT;
+		return STATUS_SUCCESS;
 	}
 
 	lpsd->Control |= SE_DACL_PRESENT;
@@ -1029,6 +1030,19 @@ NTSTATUS WINAPI RtlGetControlSecurityDescriptor(
     return STATUS_SUCCESS;
 }
 
+/******************************************************************************
+ * RtlSetControlSecurityDescriptor (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlSetControlSecurityDescriptor(
+    PSECURITY_DESCRIPTOR SecurityDescriptor,
+    SECURITY_DESCRIPTOR_CONTROL ControlBitsOfInterest,
+    SECURITY_DESCRIPTOR_CONTROL ControlBitsToSet)
+{
+    FIXME("(%p 0x%08x 0x%08x): stub\n", SecurityDescriptor, ControlBitsOfInterest,
+          ControlBitsToSet);
+    return STATUS_SUCCESS;
+}
+
 
 /**************************************************************************
  *                 RtlAbsoluteToSelfRelativeSD [NTDLL.@]
@@ -1065,7 +1079,7 @@ NTSTATUS WINAPI RtlCreateAcl(PACL acl,DWORD size,DWORD rev)
 {
 	TRACE("%p 0x%08x 0x%08x\n", acl, size, rev);
 
-	if (rev!=ACL_REVISION)
+	if (rev < MIN_ACL_REVISION || rev > MAX_ACL_REVISION)
 		return STATUS_INVALID_PARAMETER;
 	if (size<sizeof(ACL))
 		return STATUS_BUFFER_TOO_SMALL;
@@ -1277,7 +1291,8 @@ BOOLEAN WINAPI RtlValidAcl(PACL pAcl)
 		PACE_HEADER	ace;
 		int		i;
 
-                if (pAcl->AclRevision != ACL_REVISION)
+                if (pAcl->AclRevision < MIN_ACL_REVISION ||
+                    pAcl->AclRevision > MAX_ACL_REVISION)
                     ret = FALSE;
                 else
                 {
@@ -1538,9 +1553,9 @@ NtAccessCheck(
         RtlGetGroupSecurityDescriptor( SecurityDescriptor, &group, &defaulted );
         sd.group_len = RtlLengthSid( group );
         RtlGetSaclSecurityDescriptor( SecurityDescriptor, &present, &sacl, &defaulted );
-        sd.sacl_len = (present ? sacl->AclSize : 0);
+        sd.sacl_len = ((present && sacl) ? sacl->AclSize : 0);
         RtlGetDaclSecurityDescriptor( SecurityDescriptor, &present, &dacl, &defaulted );
-        sd.dacl_len = (present ? dacl->AclSize : 0);
+        sd.dacl_len = ((present && dacl) ? dacl->AclSize : 0);
 
         wine_server_add_data( req, &sd, sizeof(sd) );
         wine_server_add_data( req, owner, sd.owner_len );

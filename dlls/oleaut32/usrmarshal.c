@@ -49,10 +49,10 @@ static CStdPSFactoryBuffer PSFactoryBuffer;
 
 CSTDSTUBBUFFERRELEASE(&PSFactoryBuffer)
 
-extern const ExtendedProxyFileInfo oaidl_ProxyFileInfo;
+extern const ExtendedProxyFileInfo oleaut32_oaidl_ProxyFileInfo;
 
 static const ProxyFileInfo *OLEAUT32_ProxyFileList[] = {
-  &oaidl_ProxyFileInfo,
+  &oleaut32_oaidl_ProxyFileInfo,
   NULL
 };
 
@@ -1987,6 +1987,28 @@ HRESULT __RPC_STUB ITypeLib2_GetDocumentation2_Stub(
     BSTR* pbstrHelpString,
     DWORD* pdwHelpStringContext,
     BSTR* pbstrHelpStringDll)
+{
+  FIXME("not implemented\n");
+  return E_FAIL;
+}
+
+HRESULT CALLBACK IPropertyBag_Read_Proxy(
+    IPropertyBag* This,
+    LPCOLESTR pszPropName,
+    VARIANT *pVar,
+    IErrorLog *pErrorLog)
+{
+  FIXME("not implemented\n");
+  return E_FAIL;
+}
+
+HRESULT __RPC_STUB IPropertyBag_Read_Stub(
+    IPropertyBag* This,
+    LPCOLESTR pszPropName,
+    VARIANT *pVar,
+    IErrorLog *pErrorLog,
+    DWORD varType,
+    IUnknown *pUnkObj)
 {
   FIXME("not implemented\n");
   return E_FAIL;

@@ -20,7 +20,9 @@
 
 #include <stdarg.h>
 #include <fcntl.h>
-#include <unistd.h>
+#ifdef HAVE_UNISTD_H
+# include <unistd.h>
+#endif
 
 #define COBJMACROS
 #define NONAMELESSUNION
@@ -249,22 +251,25 @@ static BOOL install_from_registered_dir(void)
 
 static BOOL install_from_default_dir(void)
 {
-    const char *data_dir;
+    const char *data_dir, *subdir;
     char *file_name;
-    int len;
+    int len, len2;
     BOOL ret;
 
-    static const char gecko_dir[] = "/gecko/";
-
-    data_dir = wine_get_data_dir();
-    if(!data_dir) return FALSE;
+    if((data_dir = wine_get_data_dir()))
+        subdir = "/gecko/";
+    else if((data_dir = wine_get_build_dir()))
+        subdir = "/../gecko/";
+    else
+        return FALSE;
 
     len = strlen(data_dir);
+    len2 = strlen(subdir);
 
-    file_name = mshtml_alloc(len+sizeof(gecko_dir)+sizeof(GECKO_FILE_NAME));
+    file_name = mshtml_alloc(len+len2+sizeof(GECKO_FILE_NAME));
     memcpy(file_name, data_dir, len);
-    memcpy(file_name+len, gecko_dir, sizeof(gecko_dir));
-    memcpy(file_name+len+sizeof(gecko_dir)-1, GECKO_FILE_NAME, sizeof(GECKO_FILE_NAME));
+    memcpy(file_name+len, subdir, len2);
+    memcpy(file_name+len+len2, GECKO_FILE_NAME, sizeof(GECKO_FILE_NAME));
 
     ret = install_from_unix_file(file_name);
 
@@ -498,7 +503,7 @@ static INT_PTR CALLBACK installer_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
     return FALSE;
 }
 
-BOOL install_wine_gecko(void)
+BOOL install_wine_gecko(BOOL silent)
 {
     HANDLE hsem;
 
@@ -516,7 +521,7 @@ BOOL install_wine_gecko(void)
          */
         if(!install_from_registered_dir()
            && !install_from_default_dir()
-           && (url = get_url()))
+           && !silent && (url = get_url()))
             DialogBoxW(hInst, MAKEINTRESOURCEW(ID_DWL_DIALOG), 0, installer_proc);
     }
 

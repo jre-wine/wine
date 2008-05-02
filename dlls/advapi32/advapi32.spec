@@ -104,8 +104,8 @@
 @ stdcall CreateWellKnownSid(long ptr ptr ptr)
 # @ stub CredDeleteA
 # @ stub CredDeleteW
-# @ stub CredEnumerateA
-# @ stub CredEnumerateW
+@ stdcall CredEnumerateA(str long ptr ptr)
+@ stdcall CredEnumerateW(wstr long ptr ptr)
 # @ stub CredFree
 # @ stub CredGetSessionTypes
 # @ stub CredGetTargetInfoA
@@ -499,7 +499,7 @@
 @ stdcall RegOpenKeyExW(long wstr long long ptr)
 @ stdcall RegOpenKeyW(long wstr ptr)
 @ stdcall RegOpenUserClassesRoot(ptr long long ptr)
-# @ stub RegOverridePredefKey
+@ stub RegOverridePredefKey
 @ stdcall RegQueryInfoKeyA(long ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall RegQueryInfoKeyW(long ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall RegQueryMultipleValuesA(long ptr long ptr ptr)

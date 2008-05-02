@@ -26,7 +26,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "wingdi.h"
 #include "commctrl.h"
 #include "ole2.h"
 #include "resource.h"
@@ -93,6 +92,7 @@ static void activate_gecko(NSContainer *This)
 
     nsIBaseWindow_SetVisibility(This->window, TRUE);
     nsIBaseWindow_SetEnabled(This->window, TRUE);
+    nsIWebBrowserFocus_Activate(This->focus);
 }
 
 void update_doc(HTMLDocument *This, DWORD flags)

@@ -1484,6 +1484,7 @@ static NTSTATUS parse_manifest( struct actctx_loader* acl, struct assembly_ident
     xmlbuf_t xmlbuf;
     NTSTATUS status;
     struct assembly *assembly;
+    int unicode_tests;
 
     TRACE( "parsing manifest loaded from %s base dir %s\n", debugstr_w(filename), debugstr_w(directory) );
 
@@ -1497,7 +1498,29 @@ static NTSTATUS parse_manifest( struct actctx_loader* acl, struct assembly_ident
     assembly->manifest.type = assembly->manifest.info ? ACTIVATION_CONTEXT_PATH_TYPE_WIN32_FILE
                                                       : ACTIVATION_CONTEXT_PATH_TYPE_NONE;
 
-    if (!RtlIsTextUnicode( buffer, size, NULL ))
+    unicode_tests = IS_TEXT_UNICODE_SIGNATURE | IS_TEXT_UNICODE_REVERSE_SIGNATURE;
+    if (RtlIsTextUnicode( buffer, size, &unicode_tests ))
+    {
+        xmlbuf.ptr = buffer;
+        xmlbuf.end = xmlbuf.ptr + size / sizeof(WCHAR);
+        status = parse_manifest_buffer( acl, assembly, ai, &xmlbuf );
+    }
+    else if (unicode_tests & IS_TEXT_UNICODE_REVERSE_SIGNATURE)
+    {
+        const WCHAR *buf = buffer;
+        WCHAR *new_buff;
+        unsigned int i;
+
+        if (!(new_buff = RtlAllocateHeap( GetProcessHeap(), 0, size )))
+            return STATUS_NO_MEMORY;
+        for (i = 0; i < size / sizeof(WCHAR); i++)
+            new_buff[i] = RtlUshortByteSwap( buf[i] );
+        xmlbuf.ptr = new_buff;
+        xmlbuf.end = xmlbuf.ptr + size / sizeof(WCHAR);
+        status = parse_manifest_buffer( acl, assembly, ai, &xmlbuf );
+        RtlFreeHeap( GetProcessHeap(), 0, new_buff );
+    }
+    else
     {
         /* let's assume utf-8 for now */
         int len = wine_utf8_mbstowcs( 0, buffer, size, NULL, 0 );
@@ -1515,12 +1538,6 @@ static NTSTATUS parse_manifest( struct actctx_loader* acl, struct assembly_ident
         xmlbuf.end = xmlbuf.ptr + len;
         status = parse_manifest_buffer( acl, assembly, ai, &xmlbuf );
         RtlFreeHeap( GetProcessHeap(), 0, new_buff );
-    }
-    else
-    {
-        xmlbuf.ptr = buffer;
-        xmlbuf.end = xmlbuf.ptr + size / sizeof(WCHAR);
-        status = parse_manifest_buffer( acl, assembly, ai, &xmlbuf );
     }
     return status;
 }

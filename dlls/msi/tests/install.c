@@ -40,8 +40,9 @@ static UINT (WINAPI *pMsiSourceListGetInfoA)
 static const char *msifile = "msitest.msi";
 static const char *msifile2 = "winetest2.msi";
 static const char *mstfile = "winetest.mst";
-CHAR CURR_DIR[MAX_PATH];
-CHAR PROG_FILES_DIR[MAX_PATH];
+static CHAR CURR_DIR[MAX_PATH];
+static CHAR PROG_FILES_DIR[MAX_PATH];
+static CHAR COMMON_FILES_DIR[MAX_PATH];
 
 /* msi database data */
 
@@ -139,7 +140,8 @@ static const CHAR property_dat[] = "Property\tValue\n"
                                    "PROMPTROLLBACKCOST\tP\n"
                                    "Setup\tSetup\n"
                                    "UpgradeCode\t{4C0EAA15-0264-4E5A-8758-609EF142B92D}\n"
-                                   "AdminProperties\tPOSTADMIN\n";
+                                   "AdminProperties\tPOSTADMIN\n"
+                                   "ROOTDRIVE\tC:\\\n";
 
 static const CHAR registry_dat[] = "Registry\tRoot\tKey\tName\tValue\tComponent_\n"
                                    "s72\ti2\tl255\tL255\tL0\ts72\n"
@@ -433,7 +435,7 @@ static const CHAR adm_component_dat[] = "Component\tComponentId\tDirectory_\tAtt
 static const CHAR adm_custom_action_dat[] = "Action\tType\tSource\tTarget\tISComments\n"
                                             "s72\ti2\tS64\tS0\tS255\n"
                                             "CustomAction\tAction\n"
-                                            "SetPOSTADMIN\t51\tPOSTADMIN\t1\t";
+                                            "SetPOSTADMIN\t51\tPOSTADMIN\t1\t\n";
 
 static const CHAR adm_admin_exec_seq_dat[] = "Action\tCondition\tSequence\n"
                                              "s72\tS255\tI2\n"
@@ -995,18 +997,26 @@ static void create_cab_file(const CHAR *name, DWORD max_size, const CHAR *files)
     ok(res, "Failed to destroy the cabinet\n");
 }
 
-static BOOL get_program_files_dir(LPSTR buf)
+static BOOL get_program_files_dir(LPSTR buf, LPSTR buf2)
 {
     HKEY hkey;
-    DWORD type = REG_EXPAND_SZ, size;
+    DWORD type, size;
 
     if (RegOpenKey(HKEY_LOCAL_MACHINE,
                    "Software\\Microsoft\\Windows\\CurrentVersion", &hkey))
         return FALSE;
 
     size = MAX_PATH;
-    if (RegQueryValueEx(hkey, "ProgramFilesDir", 0, &type, (LPBYTE)buf, &size))
+    if (RegQueryValueExA(hkey, "ProgramFilesDir", 0, &type, (LPBYTE)buf, &size)) {
+        RegCloseKey(hkey);
         return FALSE;
+    }
+
+    size = MAX_PATH;
+    if (RegQueryValueExA(hkey, "CommonFilesDir", 0, &type, (LPBYTE)buf2, &size)) {
+        RegCloseKey(hkey);
+        return FALSE;
+    }
 
     RegCloseKey(hkey);
     return TRUE;
@@ -1055,6 +1065,20 @@ static BOOL delete_pf(const CHAR *rel_path, BOOL is_file)
     CHAR path[MAX_PATH];
 
     lstrcpyA(path, PROG_FILES_DIR);
+    lstrcatA(path, "\\");
+    lstrcatA(path, rel_path);
+
+    if (is_file)
+        return DeleteFileA(path);
+    else
+        return RemoveDirectoryA(path);
+}
+
+static BOOL delete_cf(const CHAR *rel_path, BOOL is_file)
+{
+    CHAR path[MAX_PATH];
+
+    lstrcpyA(path, COMMON_FILES_DIR);
     lstrcatA(path, "\\");
     lstrcatA(path, rel_path);
 
@@ -1620,8 +1644,8 @@ static void test_setdirproperty(void)
 
     r = MsiInstallProductA(msifile, NULL);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
-    ok(delete_pf("Common Files\\msitest\\maximus", TRUE), "File not installed\n");
-    ok(delete_pf("Common Files\\msitest", FALSE), "File not installed\n");
+    ok(delete_cf("msitest\\maximus", TRUE), "File not installed\n");
+    ok(delete_cf("msitest", FALSE), "File not installed\n");
 
     /* Delete the files in the temp (current) folder */
     DeleteFile(msifile);
@@ -2713,7 +2737,7 @@ static void set_admin_property_stream(LPCSTR file)
     hr = IStorage_CreateStream(stg, stmname, STGM_WRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stm);
     ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
 
-    hr = IStream_Write(stm, data, sizeof(data) - 1, &count);
+    hr = IStream_Write(stm, data, sizeof(data), &count);
     ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
 
     IStream_Release(stm);
@@ -2889,7 +2913,7 @@ START_TEST(install)
     if(len && (CURR_DIR[len - 1] == '\\'))
         CURR_DIR[len - 1] = 0;
 
-    get_program_files_dir(PROG_FILES_DIR);
+    get_program_files_dir(PROG_FILES_DIR, COMMON_FILES_DIR);
 
     test_MsiInstallProduct();
     test_MsiSetComponentState();

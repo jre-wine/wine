@@ -831,7 +831,7 @@ static void resolveImplicit(const WORD * pcls, WORD *plevel, int cch)
     occurs after the character in pszInput[n]. Breaks before the first
     character are not allowed.
 ------------------------------------------------------------------------*/
-static int resolveLines(WCHAR * pszInput, BOOL * pbrk, int cch)
+static int resolveLines(LPCWSTR pszInput, BOOL * pbrk, int cch)
 {
     /* skip characters not of type LS */
     int ich = 0;
@@ -1012,7 +1012,8 @@ static void mirror(LPWSTR pszInput, const WORD* plevel, int cch)
              Array of levels
 
 ------------------------------------------------------------------------*/
-static void BidiLines(int baselevel, WCHAR * pszLine, WORD * pclsLine, WORD * plevelLine, int cchPara, int fMirror, BOOL * pbrk)
+static void BidiLines(int baselevel, LPWSTR pszOutLine, LPCWSTR pszLine, WORD * pclsLine,
+                      WORD * plevelLine, int cchPara, int fMirror, BOOL * pbrk)
 {
     int cchLine = 0;
 
@@ -1024,11 +1025,14 @@ static void BidiLines(int baselevel, WCHAR * pszLine, WORD * pclsLine, WORD * pl
         /* resolve whitespace */
         resolveWhitespace(baselevel, pclsLine, plevelLine, cchLine);
 
-        if (fMirror)
-            mirror(pszLine, plevelLine, cchLine);
+        if (pszOutLine)
+        {
+            if (fMirror)
+                mirror(pszOutLine, plevelLine, cchLine);
 
-        /* reorder each line in place */
-        reorder(baselevel, pszLine, plevelLine, cchLine);
+            /* reorder each line in place */
+            reorder(baselevel, pszOutLine, plevelLine, cchLine);
+        }
 
         pszLine += cchLine;
         plevelLine += cchLine;
@@ -1079,7 +1083,8 @@ BOOL BIDI_Reorder(
         return FALSE;
     }
 
-    memcpy(lpOutString, lpString, uCount * sizeof(WCHAR));
+    if (lpOutString)
+        memcpy(lpOutString, lpString, uCount * sizeof(WCHAR));
 
     if (WINE_GCPW_FORCE_RTL == (dwWineGCP_Flags&WINE_GCPW_DIR_MASK))
         baselevel = 1;
@@ -1087,8 +1092,8 @@ BOOL BIDI_Reorder(
     i = done = 0;
     while (done < uCount)
     {
-        unsigned j, lastgood;
-        classify(lpOutString + done, chartype, uCount - done);
+        unsigned j;
+        classify(lpString + done, chartype, uCount - done);
         /* limit text to first block */
         i = resolveParagraphs(chartype, uCount - done);
         for (j = 0; j < i; ++j)
@@ -1107,6 +1112,7 @@ BOOL BIDI_Reorder(
             baselevel = 0;
 
         if (dwWineGCP_Flags & WINE_GCPW_LOOSE_MASK)
+        {
             for (j = 0; j < i; ++j)
                 if (chartype[j] == L)
                 {
@@ -1118,6 +1124,7 @@ BOOL BIDI_Reorder(
                     baselevel = 1;
                     break;
                 }
+        }
 
         /* resolve explicit */
         resolveExplicit(baselevel, N, chartype, levels, i, 0);
@@ -1132,13 +1139,14 @@ BOOL BIDI_Reorder(
         resolveImplicit(chartype, levels, i);
 
         /* assign directional types again, but for WS, S this time */
-        classify(lpOutString + done, chartype, i);
+        classify(lpString + done, chartype, i);
 
-        BidiLines(baselevel, lpOutString + done, chartype, levels, i, !(dwFlags & GCP_SYMSWAPOFF), 0);
+        BidiLines(baselevel, lpOutString ? lpOutString + done : NULL, lpString + done,
+                    chartype, levels, i, !(dwFlags & GCP_SYMSWAPOFF), 0);
 
         if (lpOrder)
         {
-            unsigned k;
+            int k, lastgood;
             for (j = lastgood = 0; j < i; ++j)
                 if (levels[j] != levels[lastgood])
                 {
@@ -1155,7 +1163,7 @@ BOOL BIDI_Reorder(
                 for (k = j - 1; k >= lastgood; --k)
                     lpOrder[done + k] = done + j - 1 - k;
             else
-                for (k = lastgood; k <= j; ++k)
+                for (k = lastgood; k < j; ++k)
                     lpOrder[done + k] = done + k;
         }
         done += i;

@@ -625,15 +625,22 @@ DWORD WINAPI FlushIpNetTable(DWORD dwIfIndex)
  * RETURNS
  *  Success: NO_ERROR
  *  Failure: error code from winerror.h
- *
- * FIXME
- *  Stub, returns ERROR_NOT_SUPPORTED.
  */
 DWORD WINAPI GetAdapterIndex(LPWSTR AdapterName, PULONG IfIndex)
 {
-  FIXME("(AdapterName %p, IfIndex %p): stub\n", AdapterName, IfIndex);
-  /* FIXME: implement using getInterfaceIndexByName */
-  return ERROR_NOT_SUPPORTED;
+  char adapterName[MAX_ADAPTER_NAME];
+  int i;
+  DWORD ret;
+
+  TRACE("(AdapterName %p, IfIndex %p)\n", AdapterName, IfIndex);
+  /* The adapter name is guaranteed not to have any unicode characters, so
+   * this translation is never lossy */
+  for (i = 0; i < sizeof(adapterName) - 1 && AdapterName[i]; i++)
+    adapterName[i] = (char)AdapterName[i];
+  adapterName[i] = '\0';
+  ret = getInterfaceIndexByName(adapterName, IfIndex);
+  TRACE("returning %d\n", ret);
+  return ret;
 }
 
 
@@ -678,8 +685,11 @@ DWORD WINAPI GetAdaptersInfo(PIP_ADAPTER_INFO pAdapterInfo, PULONG pOutBufLen)
       else {
         InterfaceIndexTable *table = NULL;
         PMIB_IPADDRTABLE ipAddrTable = NULL;
+        PMIB_IPFORWARDTABLE routeTable = NULL;
 
         ret = getIPAddrTable(&ipAddrTable, GetProcessHeap(), 0);
+        if (!ret)
+          ret = getRouteTable(&routeTable, GetProcessHeap(), 0);
         if (!ret)
           table = getNonLoopbackInterfaceIndexTable();
         if (table) {
@@ -719,19 +729,14 @@ DWORD WINAPI GetAdaptersInfo(PIP_ADAPTER_INFO pAdapterInfo, PULONG pOutBufLen)
             }
             for (ndx = 0; ndx < table->numIndexes; ndx++) {
               PIP_ADAPTER_INFO ptr = &pAdapterInfo[ndx];
-              DWORD addrLen = sizeof(ptr->Address), type, i;
+              DWORD i;
               PIP_ADDR_STRING currentIPAddr = &ptr->IpAddressList;
               BOOL firstIPAddr = TRUE;
 
               /* on Win98 this is left empty, but whatever */
               getInterfaceNameByIndex(table->indexes[ndx], ptr->AdapterName);
-              getInterfacePhysicalByIndex(table->indexes[ndx], &addrLen,
-               ptr->Address, &type);
-              /* MS defines address length and type as UINT in some places and
-                 DWORD in others, **sigh**.  Don't want to assume that PUINT and
-                 PDWORD are equiv (64-bit?) */
-              ptr->AddressLength = addrLen;
-              ptr->Type = type;
+              getInterfacePhysicalByIndex(table->indexes[ndx],
+               &ptr->AddressLength, ptr->Address, &ptr->Type);
               ptr->Index = table->indexes[ndx];
               for (i = 0; i < ipAddrTable->dwNumEntries; i++) {
                 if (ipAddrTable->table[i].dwIndex == ptr->Index) {
@@ -753,6 +758,14 @@ DWORD WINAPI GetAdaptersInfo(PIP_ADAPTER_INFO pAdapterInfo, PULONG pOutBufLen)
                   }
                 }
               }
+              /* Find first router through this interface, which we'll assume
+               * is the default gateway for this adapter */
+              for (i = 0; i < routeTable->dwNumEntries; i++)
+                if (routeTable->table[i].dwForwardIfIndex == ptr->Index
+                 && routeTable->table[i].dwForwardType ==
+                 MIB_IPROUTE_TYPE_INDIRECT)
+                  toIPAddressString(routeTable->table[i].dwForwardNextHop,
+                   ptr->GatewayList.IpAddress.String);
               if (winsEnabled) {
                 ptr->HaveWins = TRUE;
                 memcpy(ptr->PrimaryWinsServer.IpAddress.String,
@@ -771,6 +784,7 @@ DWORD WINAPI GetAdaptersInfo(PIP_ADAPTER_INFO pAdapterInfo, PULONG pOutBufLen)
         }
         else
           ret = ERROR_OUTOFMEMORY;
+        HeapFree(GetProcessHeap(), 0, routeTable);
         HeapFree(GetProcessHeap(), 0, ipAddrTable);
       }
     }
@@ -838,9 +852,9 @@ DWORD WINAPI GetBestRoute(DWORD dwDestAddr, DWORD dwSourceAddr, PMIB_IPFORWARDRO
   if (!pBestRoute)
     return ERROR_INVALID_PARAMETER;
 
-  AllocateAndGetIpForwardTableFromStack(&table, FALSE, GetProcessHeap(), 0);
-  if (table) {
-    DWORD ndx, matchedBits, matchedNdx = 0;
+  ret = AllocateAndGetIpForwardTableFromStack(&table, FALSE, GetProcessHeap(), 0);
+  if (table && !ret) {
+    DWORD ndx, matchedBits, matchedNdx = table->dwNumEntries;
 
     for (ndx = 0, matchedBits = 0; ndx < table->dwNumEntries; ndx++) {
       if (table->table[ndx].dwForwardType != MIB_IPROUTE_TYPE_INVALID &&
@@ -867,7 +881,7 @@ DWORD WINAPI GetBestRoute(DWORD dwDestAddr, DWORD dwSourceAddr, PMIB_IPFORWARDRO
     }
     HeapFree(GetProcessHeap(), 0, table);
   }
-  else
+  else if (!ret)
     ret = ERROR_OUTOFMEMORY;
   TRACE("returning %d\n", ret);
   return ret;
@@ -1450,13 +1464,33 @@ DWORD WINAPI GetNumberOfInterfaces(PDWORD pdwNumIf)
  *  Failure: error code from winerror.h
  *
  * FIXME
- *  Stub, returns ERROR_NOT_SUPPORTED.
+ *  Stub, returns empty IP_PER_ADAPTER_INFO in every case.
  */
 DWORD WINAPI GetPerAdapterInfo(ULONG IfIndex, PIP_PER_ADAPTER_INFO pPerAdapterInfo, PULONG pOutBufLen)
 {
+  ULONG bytesNeeded = sizeof(IP_PER_ADAPTER_INFO);
+  DWORD ret;
+
   TRACE("(IfIndex %d, pPerAdapterInfo %p, pOutBufLen %p)\n", IfIndex,
    pPerAdapterInfo, pOutBufLen);
-  return ERROR_NOT_SUPPORTED;
+  if (!pOutBufLen)
+    ret = ERROR_INVALID_PARAMETER;
+  else if (!pPerAdapterInfo)
+  {
+    *pOutBufLen = bytesNeeded;
+    ret = NO_ERROR;
+  }
+  else if (*pOutBufLen < bytesNeeded)
+  {
+    *pOutBufLen = bytesNeeded;
+    ret = ERROR_BUFFER_OVERFLOW;
+  }
+  else
+  {
+    memset(pPerAdapterInfo, 0, bytesNeeded);
+    ret = NO_ERROR;
+  }
+  return ret;
 }
 
 

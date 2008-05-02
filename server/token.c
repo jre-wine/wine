@@ -305,6 +305,29 @@ int sd_is_valid( const struct security_descriptor *sd, data_size_t size )
     return TRUE;
 }
 
+/* determines whether an object_attributes struct is valid in a buffer
+ * and calls set_error appropriately */
+int objattr_is_valid( const struct object_attributes *objattr, data_size_t size )
+{
+    if ((size < sizeof(*objattr)) || (size - sizeof(*objattr) < objattr->sd_len))
+    {
+        set_error( STATUS_ACCESS_VIOLATION );
+        return FALSE;
+    }
+
+    if (objattr->sd_len)
+    {
+        const struct security_descriptor *sd = (const struct security_descriptor *)(objattr + 1);
+        if (!sd_is_valid( sd, objattr->sd_len ))
+        {
+            set_error( STATUS_INVALID_SECURITY_DESCR );
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+}
+
 /* maps from generic rights to specific rights as given by a mapping */
 static inline void map_generic_mask(unsigned int *mask, const GENERIC_MAPPING *mapping)
 {
@@ -811,17 +834,11 @@ static unsigned int token_access_check( struct token *token,
     }
 
     /* 1: Grant desired access if the object is unprotected */
-    if (!dacl_present)
+    if (!dacl_present || !dacl)
     {
         *priv_count = 0;
         *granted_access = desired_access;
         return *status = STATUS_SUCCESS;
-    }
-    if (!dacl)
-    {
-        *priv_count = 0;
-        *status = STATUS_ACCESS_DENIED;
-        return STATUS_SUCCESS;
     }
 
     /* 2: Check if caller wants access to system security part. Note: access
@@ -878,11 +895,15 @@ static unsigned int token_access_check( struct token *token,
 
     /* 4: Grant rights according to the DACL */
     ace = (const ACE_HEADER *)(dacl + 1);
-    for (i = 0; i < dacl->AceCount; i++)
+    for (i = 0; i < dacl->AceCount; i++, ace = ace_next( ace ))
     {
         const ACCESS_ALLOWED_ACE *aa_ace;
         const ACCESS_DENIED_ACE *ad_ace;
         const SID *sid;
+
+        if (ace->AceFlags & INHERIT_ONLY_ACE)
+            continue;
+
         switch (ace->AceType)
         {
         case ACCESS_DENIED_ACE_TYPE:
@@ -920,8 +941,6 @@ static unsigned int token_access_check( struct token *token,
             * rights we need */
         if (desired_access == *granted_access)
             break;
-
-        ace = ace_next( ace );
     }
 
 done:

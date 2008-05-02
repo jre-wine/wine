@@ -580,7 +580,11 @@ static BYTE*    HLPFILE_DecompressGfx(BYTE* src, unsigned csz, unsigned sz, BYTE
         if (!tmp) return FALSE;
         HLPFILE_UncompressLZ77(src, src + csz, tmp);
         dst = tmp2 = HeapAlloc(GetProcessHeap(), 0, sz);
-        if (!dst) return FALSE;
+        if (!dst)
+        {
+            HeapFree(GetProcessHeap(), 0, tmp);
+            return FALSE;
+        }
         HLPFILE_UncompressRLE(tmp, tmp + sz77, &tmp2, sz);
         if (tmp2 - dst != sz)
             WINE_WARN("Bogus gfx sizes (LZ77+RunLen): %u / %u\n", tmp2 - dst, sz);
@@ -856,7 +860,7 @@ static BOOL HLPFILE_AddParagraph(HLPFILE *hlpfile, BYTE *buf, BYTE *end, unsigne
     HLPFILE_PARAGRAPH *paragraph, **paragraphptr;
     UINT               textsize;
     BYTE              *format, *format_end;
-    char              *text, *text_end;
+    char              *text, *text_base, *text_end;
     long               size;
     unsigned short     bits;
     unsigned           nc, ncol = 1;
@@ -870,7 +874,7 @@ static BOOL HLPFILE_AddParagraph(HLPFILE *hlpfile, BYTE *buf, BYTE *end, unsigne
     if (buf + 0x19 > end) {WINE_WARN("header too small\n"); return FALSE;};
 
     size = GET_UINT(buf, 0x4);
-    text = HeapAlloc(GetProcessHeap(), 0, size);
+    text = text_base = HeapAlloc(GetProcessHeap(), 0, size);
     if (!text) return FALSE;
     if (hlpfile->hasPhrases)
     {
@@ -1160,8 +1164,7 @@ static BOOL HLPFILE_AddParagraph(HLPFILE *hlpfile, BYTE *buf, BYTE *end, unsigne
 	    }
 	}
     }
-    if (text_end != (char*)buf + GET_UINT(buf, 0x10) + size)
-        HeapFree(GetProcessHeap(), 0, text_end - size);
+    HeapFree(GetProcessHeap(), 0, text_base);
     return TRUE;
 }
 

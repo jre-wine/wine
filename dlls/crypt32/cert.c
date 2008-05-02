@@ -1231,6 +1231,88 @@ PCCERT_CONTEXT WINAPI CertGetIssuerCertificateFromStore(HCERTSTORE hCertStore,
     return ret;
 }
 
+typedef struct _OLD_CERT_REVOCATION_STATUS {
+    DWORD cbSize;
+    DWORD dwIndex;
+    DWORD dwError;
+    DWORD dwReason;
+} OLD_CERT_REVOCATION_STATUS, *POLD_CERT_REVOCATION_STATUS;
+
+typedef BOOL (WINAPI *CertVerifyRevocationFunc)(DWORD, DWORD, DWORD,
+ void **, DWORD, PCERT_REVOCATION_PARA, PCERT_REVOCATION_STATUS);
+
+BOOL WINAPI CertVerifyRevocation(DWORD dwEncodingType, DWORD dwRevType,
+ DWORD cContext, void *rgpvContext[], DWORD dwFlags,
+ PCERT_REVOCATION_PARA pRevPara, PCERT_REVOCATION_STATUS pRevStatus)
+{
+    BOOL ret;
+
+    TRACE("(%08x, %d, %d, %p, %08x, %p, %p)\n", dwEncodingType, dwRevType,
+     cContext, rgpvContext, dwFlags, pRevPara, pRevStatus);
+
+    if (pRevStatus->cbSize != sizeof(OLD_CERT_REVOCATION_STATUS) &&
+     pRevStatus->cbSize != sizeof(CERT_REVOCATION_STATUS))
+    {
+        SetLastError(E_INVALIDARG);
+        return FALSE;
+    }
+    if (cContext)
+    {
+        static HCRYPTOIDFUNCSET set = NULL;
+        DWORD size;
+
+        if (!set)
+            set = CryptInitOIDFunctionSet(CRYPT_OID_VERIFY_REVOCATION_FUNC, 0);
+        ret = CryptGetDefaultOIDDllList(set, dwEncodingType, NULL, &size);
+        if (ret)
+        {
+            if (size == 1)
+            {
+                /* empty list */
+                SetLastError(CRYPT_E_NO_REVOCATION_DLL);
+                ret = FALSE;
+            }
+            else
+            {
+                LPWSTR dllList = CryptMemAlloc(size * sizeof(WCHAR)), ptr;
+
+                if (dllList)
+                {
+                    ret = CryptGetDefaultOIDDllList(set, dwEncodingType,
+                     dllList, &size);
+                    if (ret)
+                    {
+                        for (ptr = dllList; ret && *ptr;
+                         ptr += lstrlenW(ptr) + 1)
+                        {
+                            CertVerifyRevocationFunc func;
+                            HCRYPTOIDFUNCADDR hFunc;
+
+                            ret = CryptGetDefaultOIDFunctionAddress(set,
+                             dwEncodingType, ptr, 0, (void **)&func, &hFunc);
+                            if (ret)
+                            {
+                                ret = func(dwEncodingType, dwRevType, cContext,
+                                 rgpvContext, dwFlags, pRevPara, pRevStatus);
+                                CryptFreeOIDFunctionAddress(hFunc, 0);
+                            }
+                        }
+                    }
+                    CryptMemFree(dllList);
+                }
+                else
+                {
+                    SetLastError(ERROR_OUTOFMEMORY);
+                    ret = FALSE;
+                }
+            }
+        }
+    }
+    else
+        ret = TRUE;
+    return ret;
+}
+
 PCRYPT_ATTRIBUTE WINAPI CertFindAttribute(LPCSTR pszObjId, DWORD cAttr,
  CRYPT_ATTRIBUTE rgAttr[])
 {
@@ -1305,10 +1387,7 @@ LONG WINAPI CertVerifyTimeValidity(LPFILETIME pTimeToVerify,
 
     if (!pTimeToVerify)
     {
-        SYSTEMTIME sysTime;
-
-        GetSystemTime(&sysTime);
-        SystemTimeToFileTime(&sysTime, &fileTime);
+        GetSystemTimeAsFileTime(&fileTime);
         pTimeToVerify = &fileTime;
     }
     if ((ret = CompareFileTime(pTimeToVerify, &pCertInfo->NotBefore)) >= 0)
@@ -1942,7 +2021,10 @@ static void CRYPT_SetBitInField(struct BitField *field, DWORD bit)
         else
             field->indexes = CryptMemAlloc(sizeof(DWORD));
         if (field->indexes)
+        {
+            field->indexes[indexIndex] = 0;
             field->cIndexes = indexIndex + 1;
+        }
     }
     if (field->indexes)
         field->indexes[indexIndex] |= 1 << (bit % BITS_PER_DWORD);

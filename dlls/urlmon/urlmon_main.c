@@ -408,11 +408,11 @@ void WINAPI ReleaseBindInfo(BINDINFO* pbindinfo)
     pbindinfo->cbSize = size;
 }
 
-/***********************************************************************
- *           FindMimeFromData (URLMON.@)
- *
- * Determines the Multipurpose Internet Mail Extensions (MIME) type from the data provided.
- */
+static BOOL text_richtext_filter(const BYTE *b, DWORD size)
+{
+    return size > 5 && !memcmp(b, "{\\rtf", 5);
+}
+
 static BOOL text_html_filter(const BYTE *b, DWORD size)
 {
     int i;
@@ -430,6 +430,13 @@ static BOOL text_html_filter(const BYTE *b, DWORD size)
     }
 
     return FALSE;
+}
+
+static BOOL audio_wav_filter(const BYTE *b, DWORD size)
+{
+    return size > 12
+        && b[0] == 'R' && b[1] == 'I' && b[2] == 'F' && b[3] == 'F'
+        && b[8] == 'W' && b[9] == 'A' && b[10] == 'V' && b[11] == 'E';
 }
 
 static BOOL image_gif_filter(const BYTE *b, DWORD size)
@@ -480,6 +487,11 @@ static BOOL video_mpeg_filter(const BYTE *b, DWORD size)
         && (b[3] == 0xb3 || b[3] == 0xba);
 }
 
+static BOOL application_postscript_filter(const BYTE *b, DWORD size)
+{
+    return size > 2 && b[0] == '%' && b[1] == '!';
+}
+
 static BOOL application_pdf_filter(const BYTE *b, DWORD size)
 {
     return size > 4 && b[0] == 0x25 && b[1] == 0x50 && b[2] == 0x44 && b[3] == 0x46;
@@ -522,6 +534,11 @@ static BOOL application_octet_stream_filter(const BYTE *b, DWORD size)
     return TRUE;
 }
 
+/***********************************************************************
+ *           FindMimeFromData (URLMON.@)
+ *
+ * Determines the Multipurpose Internet Mail Extensions (MIME) type from the data provided.
+ */
 HRESULT WINAPI FindMimeFromData(LPBC pBC, LPCWSTR pwzUrl, LPVOID pBuffer,
         DWORD cbSize, LPCWSTR pwzMimeProposed, DWORD dwMimeFlags,
         LPWSTR* ppwzMimeOut, DWORD dwReserved)
@@ -558,6 +575,8 @@ HRESULT WINAPI FindMimeFromData(LPBC pBC, LPCWSTR pwzUrl, LPVOID pBuffer,
         int i;
 
         static const WCHAR wszTextHtml[] = {'t','e','x','t','/','h','t','m','l',0};
+        static const WCHAR wszTextRichtext[] = {'t','e','x','t','/','r','i','c','h','t','e','x','t',0};
+        static const WCHAR wszAudioWav[] = {'a','u','d','i','o','/','w','a','v',0};
         static const WCHAR wszImageGif[] = {'i','m','a','g','e','/','g','i','f',0};
         static const WCHAR wszImagePjpeg[] = {'i','m','a','g','e','/','p','j','p','e','g',0};
         static const WCHAR wszImageTiff[] = {'i','m','a','g','e','/','t','i','f','f',0};
@@ -565,6 +584,8 @@ HRESULT WINAPI FindMimeFromData(LPBC pBC, LPCWSTR pwzUrl, LPVOID pBuffer,
         static const WCHAR wszImageBmp[] = {'i','m','a','g','e','/','b','m','p',0};
         static const WCHAR wszVideoAvi[] = {'v','i','d','e','o','/','a','v','i',0};
         static const WCHAR wszVideoMpeg[] = {'v','i','d','e','o','/','m','p','e','g',0};
+        static const WCHAR wszAppPostscript[] =
+            {'a','p','p','l','i','c','a','t','i','o','n','/','p','o','s','t','s','c','r','i','p','t',0};
         static const WCHAR wszAppPdf[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
             'p','d','f',0};
         static const WCHAR wszAppXZip[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
@@ -584,6 +605,8 @@ HRESULT WINAPI FindMimeFromData(LPBC pBC, LPCWSTR pwzUrl, LPVOID pBuffer,
             BOOL (*filter)(const BYTE *,DWORD);
         } mime_filters[] = {
             {wszTextHtml,       text_html_filter},
+            {wszTextRichtext,   text_richtext_filter},
+            {wszAudioWav,       audio_wav_filter},
             {wszImageGif,       image_gif_filter},
             {wszImagePjpeg,     image_pjpeg_filter},
             {wszImageTiff,      image_tiff_filter},
@@ -591,6 +614,7 @@ HRESULT WINAPI FindMimeFromData(LPBC pBC, LPCWSTR pwzUrl, LPVOID pBuffer,
             {wszImageBmp,       image_bmp_filter},
             {wszVideoAvi,       video_avi_filter},
             {wszVideoMpeg,      video_mpeg_filter},
+            {wszAppPostscript,  application_postscript_filter},
             {wszAppPdf,         application_pdf_filter},
             {wszAppXZip,        application_xzip_filter},
             {wszAppXGzip,       application_xgzip_filter},
@@ -674,6 +698,21 @@ HRESULT WINAPI FindMimeFromData(LPBC pBC, LPCWSTR pwzUrl, LPVOID pBuffer,
     }
 
     return E_FAIL;
+}
+
+/***********************************************************************
+ *           GetClassFileOrMime (URLMON.@)
+ *
+ * Determines the class ID from the bind context, file name or MIME type.
+ */
+HRESULT WINAPI GetClassFileOrMime(LPBC pBC, LPCWSTR pszFilename,
+        LPVOID pBuffer, DWORD cbBuffer, LPCWSTR pszMimeType, DWORD dwReserved,
+        CLSID *pclsid)
+{
+    FIXME("(%p, %s, %p, %d, %p, 0x%08x, %p): stub\n", pBC,
+        debugstr_w(pszFilename), pBuffer, cbBuffer, debugstr_w(pszMimeType),
+        dwReserved, pclsid);
+    return E_NOTIMPL;
 }
 
 /***********************************************************************

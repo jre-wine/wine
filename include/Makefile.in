@@ -13,6 +13,7 @@ IDL_H_SRCS = \
 	control.idl \
 	d3d10.idl \
 	ddstream.idl \
+	dimm.idl \
 	dispex.idl \
 	docobj.idl \
 	downloadmgr.idl \
@@ -107,6 +108,7 @@ SRCDIR_INCLUDES = \
 	d3dx8.h \
 	d3dx8core.h \
 	d3dx8math.h \
+	d3dx8math.inl \
 	dbghelp.h \
 	dbinit.idl \
 	dbprop.idl \

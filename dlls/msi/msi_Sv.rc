@@ -1,7 +1,7 @@
 /*
- * Language neutral resources for wineps
+ * Swedish resources for MSI
  *
- * Copyright 2000 Huw D M Davies
+ * Copyright 2007 Daniel Nylander
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,3 +18,17 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+LANGUAGE LANG_SWEDISH, SUBLANG_DEFAULT
+
+STRINGTABLE DISCARDABLE
+{
+	4 "Det angivna installationspaketet kunde inte öppnas.  Kontrollera filsökvägen och försök igen."
+	5 "sökvägen %s hittades inte"
+	9 "mata in %s"
+	10 "felaktiga parametrar"
+	11 "ange vilken mapp som innehåller %s"
+	12 "installationskälla för funktion saknar"
+	13 "nätverksenhet för funktion saknar"
+	14 "funktion från:"
+	15 "välj den mapp som innehåller %s"
+}

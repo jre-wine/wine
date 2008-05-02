@@ -39,6 +39,8 @@ typedef struct {
     HTMLElement element;
 
     const IHTMLOptionElementVtbl *lpHTMLOptionElementVtbl;
+
+    nsIDOMHTMLOptionElement *nsoption;
 } HTMLOptionElement;
 
 #define HTMLOPTION(x)  ((IHTMLOptionElement*)  &(x)->lpHTMLOptionElementVtbl)
@@ -119,15 +121,41 @@ static HRESULT WINAPI HTMLOptionElement_get_selected(IHTMLOptionElement *iface, 
 static HRESULT WINAPI HTMLOptionElement_put_value(IHTMLOptionElement *iface, BSTR v)
 {
     HTMLOptionElement *This = HTMLOPTION_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    nsAString value_str;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    nsAString_Init(&value_str, v);
+    nsres = nsIDOMHTMLOptionElement_SetValue(This->nsoption, &value_str);
+    nsAString_Finish(&value_str);
+    if(NS_FAILED(nsres))
+        ERR("SetValue failed: %08x\n", nsres);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLOptionElement_get_value(IHTMLOptionElement *iface, BSTR *p)
 {
     HTMLOptionElement *This = HTMLOPTION_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsAString value_str;
+    const PRUnichar *value;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    nsAString_Init(&value_str, NULL);
+    nsres = nsIDOMHTMLOptionElement_GetValue(This->nsoption, &value_str);
+    if(NS_SUCCEEDED(nsres)) {
+        nsAString_GetData(&value_str, &value, NULL);
+        *p = SysAllocString(value);
+    }else {
+        ERR("GetValue failed: %08x\n", nsres);
+        *p = NULL;
+    }
+    nsAString_Finish(&value_str);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLOptionElement_put_defaultSelected(IHTMLOptionElement *iface, VARIANT_BOOL v)
@@ -161,15 +189,76 @@ static HRESULT WINAPI HTMLOptionElement_get_index(IHTMLOptionElement *iface, LON
 static HRESULT WINAPI HTMLOptionElement_put_text(IHTMLOptionElement *iface, BSTR v)
 {
     HTMLOptionElement *This = HTMLOPTION_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    nsIDOMDocument *nsdoc;
+    nsIDOMText *text_node;
+    nsAString text_str;
+    nsIDOMNode *tmp;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    while(1) {
+        nsIDOMNode *child;
+
+        nsres = nsIDOMHTMLOptionElement_GetFirstChild(This->nsoption, &child);
+        if(NS_FAILED(nsres) || !child)
+            break;
+
+        nsres = nsIDOMHTMLOptionElement_RemoveChild(This->nsoption, child, &tmp);
+        nsIDOMNode_Release(child);
+        if(NS_SUCCEEDED(nsres)) {
+            nsIDOMNode_Release(tmp);
+        }else {
+            ERR("RemoveChild failed: %08x\n", nsres);
+            break;
+        }
+    }
+
+    nsres = nsIWebNavigation_GetDocument(This->element.node.doc->nscontainer->navigation, &nsdoc);
+    if(NS_FAILED(nsres)) {
+        ERR("GetDocument failed: %08x\n", nsres);
+        return S_OK;
+    }
+
+    nsAString_Init(&text_str, v);
+    nsres = nsIDOMDocument_CreateTextNode(nsdoc, &text_str, &text_node);
+    nsIDOMDocument_Release(nsdoc);
+    nsAString_Finish(&text_str);
+    if(NS_FAILED(nsres)) {
+        ERR("CreateTextNode failed: %08x\n", nsres);
+        return S_OK;
+    }
+
+    nsres = nsIDOMHTMLOptionElement_AppendChild(This->nsoption, (nsIDOMNode*)text_node, &tmp);
+    if(NS_SUCCEEDED(nsres))
+        nsIDOMNode_Release(tmp);
+    else
+        ERR("AppendChild failed: %08x\n", nsres);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLOptionElement_get_text(IHTMLOptionElement *iface, BSTR *p)
 {
     HTMLOptionElement *This = HTMLOPTION_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsAString text_str;
+    const PRUnichar *text;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    nsAString_Init(&text_str, NULL);
+    nsres = nsIDOMHTMLOptionElement_GetText(This->nsoption, &text_str);
+    if(NS_SUCCEEDED(nsres)) {
+        nsAString_GetData(&text_str, &text, NULL);
+        *p = SysAllocString(text);
+    }else {
+        ERR("GetText failed: %08x\n", nsres);
+        *p = NULL;
+    }
+    nsAString_Finish(&text_str);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLOptionElement_get_form(IHTMLOptionElement *iface, IHTMLFormElement **p)
@@ -232,6 +321,10 @@ static HRESULT HTMLOptionElement_QI(HTMLDOMNode *iface, REFIID riid, void **ppv)
 static void HTMLOptionElement_destructor(HTMLDOMNode *iface)
 {
     HTMLOptionElement *This = HTMLOPTION_NODE_THIS(iface);
+
+    if(This->nsoption)
+        nsIDOMHTMLOptionElement_Release(This->nsoption);
+
     HTMLElement_destructor(&This->element.node);
 }
 
@@ -245,9 +338,182 @@ static const NodeImplVtbl HTMLOptionElementImplVtbl = {
 HTMLElement *HTMLOptionElement_Create(nsIDOMHTMLElement *nselem)
 {
     HTMLOptionElement *ret = mshtml_alloc(sizeof(HTMLOptionElement));
+    nsresult nsres;
 
     ret->lpHTMLOptionElementVtbl = &HTMLOptionElementVtbl;
     ret->element.node.vtbl = &HTMLOptionElementImplVtbl;
 
+    nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLOptionElement, (void**)&ret->nsoption);
+    if(NS_FAILED(nsres))
+        ERR("Could not get nsIDOMHTMLOptionElement interface: %08x\n", nsres);
+
     return &ret->element;
+}
+
+#define HTMLOPTFACTORY_THIS(iface) DEFINE_THIS(HTMLOptionElementFactory, HTMLOptionElementFactory, iface)
+
+static HRESULT WINAPI HTMLOptionElementFactory_QueryInterface(IHTMLOptionElementFactory *iface,
+                                                              REFIID riid, void **ppv)
+{
+    HTMLOptionElementFactory *This = HTMLOPTFACTORY_THIS(iface);
+
+    *ppv = NULL;
+
+    if(IsEqualGUID(&IID_IUnknown, riid)) {
+        TRACE("(%p)->(IID_IUnknown %p)\n", This, ppv);
+        *ppv = HTMLOPTFACTORY(This);
+    }else if(IsEqualGUID(&IID_IDispatch, riid)) {
+        TRACE("(%p)->(IID_IDispatch %p)\n", This, ppv);
+        *ppv = HTMLOPTFACTORY(This);
+    }else if(IsEqualGUID(&IID_IHTMLOptionElementFactory, riid)) {
+        TRACE("(%p)->(IID_IHTMLOptionElementFactory %p)\n", This, ppv);
+        *ppv = HTMLOPTFACTORY(This);
+    }
+
+    if(*ppv) {
+        IUnknown_AddRef((IUnknown*)*ppv);
+        return S_OK;
+    }
+
+    WARN("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI HTMLOptionElementFactory_AddRef(IHTMLOptionElementFactory *iface)
+{
+    HTMLOptionElementFactory *This = HTMLOPTFACTORY_THIS(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI HTMLOptionElementFactory_Release(IHTMLOptionElementFactory *iface)
+{
+    HTMLOptionElementFactory *This = HTMLOPTFACTORY_THIS(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    if(!ref)
+        mshtml_free(This);
+
+    return ref;
+}
+
+static HRESULT WINAPI HTMLOptionElementFactory_GetTypeInfoCount(IHTMLOptionElementFactory *iface, UINT *pctinfo)
+{
+    HTMLOptionElementFactory *This = HTMLOPTFACTORY_THIS(iface);
+    FIXME("(%p)->(%p)\n", This, pctinfo);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLOptionElementFactory_GetTypeInfo(IHTMLOptionElementFactory *iface, UINT iTInfo,
+                                              LCID lcid, ITypeInfo **ppTInfo)
+{
+    HTMLOptionElementFactory *This = HTMLOPTFACTORY_THIS(iface);
+    FIXME("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLOptionElementFactory_GetIDsOfNames(IHTMLOptionElementFactory *iface, REFIID riid,
+                                                LPOLESTR *rgszNames, UINT cNames,
+                                                LCID lcid, DISPID *rgDispId)
+{
+    HTMLOptionElementFactory *This = HTMLOPTFACTORY_THIS(iface);
+    FIXME("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames,
+                                        lcid, rgDispId);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLOptionElementFactory_Invoke(IHTMLOptionElementFactory *iface, DISPID dispIdMember,
+                            REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
+                            VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    HTMLOptionElementFactory *This = HTMLOPTFACTORY_THIS(iface);
+    FIXME("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLOptionElementFactory_create(IHTMLOptionElementFactory *iface,
+        VARIANT text, VARIANT value, VARIANT defaultselected, VARIANT selected,
+        IHTMLOptionElement **optelem)
+{
+    HTMLOptionElementFactory *This = HTMLOPTFACTORY_THIS(iface);
+    nsIDOMDocument *nsdoc;
+    nsIDOMElement *nselem;
+    nsAString option_str;
+    nsresult nsres;
+    HRESULT hres;
+
+    static const PRUnichar optionW[] = {'O','P','T','I','O','N',0};
+
+    TRACE("(%p)->(v v v v %p)\n", This, optelem);
+
+    *optelem = NULL;
+    if(!This->doc->nscontainer)
+        return E_FAIL;
+
+    nsres = nsIWebNavigation_GetDocument(This->doc->nscontainer->navigation, &nsdoc);
+    if(NS_FAILED(nsres)) {
+        ERR("GetDocument failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsAString_Init(&option_str, optionW);
+    nsres = nsIDOMDocument_CreateElement(nsdoc, &option_str, &nselem);
+    nsIDOMDocument_Release(nsdoc);
+    nsAString_Finish(&option_str);
+    if(NS_FAILED(nsres)) {
+        ERR("CreateElement failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    hres = IHTMLDOMNode_QueryInterface(HTMLDOMNODE(get_node(This->doc, (nsIDOMNode*)nselem)),
+            &IID_IHTMLOptionElement, (void**)optelem);
+    nsIDOMElement_Release(nselem);
+
+    if(V_VT(&text) == VT_BSTR)
+        IHTMLOptionElement_put_text(*optelem, V_BSTR(&text));
+    else if(V_VT(&text) != VT_EMPTY)
+        FIXME("Unsupported text vt=%d\n", V_VT(&text));
+
+    if(V_VT(&value) == VT_BSTR)
+        IHTMLOptionElement_put_value(*optelem, V_BSTR(&value));
+    else if(V_VT(&value) != VT_EMPTY)
+        FIXME("Unsupported value vt=%d\n", V_VT(&value));
+
+    if(V_VT(&defaultselected) != VT_EMPTY)
+        FIXME("Unsupported defaultselected vt=%d\n", V_VT(&defaultselected));
+    if(V_VT(&selected) != VT_EMPTY)
+        FIXME("Unsupported selected vt=%d\n", V_VT(&selected));
+
+    return S_OK;
+}
+
+#undef HTMLOPTFACTORY_THIS
+
+static const IHTMLOptionElementFactoryVtbl HTMLOptionElementFactoryVtbl = {
+    HTMLOptionElementFactory_QueryInterface,
+    HTMLOptionElementFactory_AddRef,
+    HTMLOptionElementFactory_Release,
+    HTMLOptionElementFactory_GetTypeInfoCount,
+    HTMLOptionElementFactory_GetTypeInfo,
+    HTMLOptionElementFactory_GetIDsOfNames,
+    HTMLOptionElementFactory_Invoke,
+    HTMLOptionElementFactory_create
+};
+
+HTMLOptionElementFactory *HTMLOptionElementFactory_Create(HTMLDocument *doc)
+{
+    HTMLOptionElementFactory *ret;
+
+    ret = mshtml_alloc(sizeof(HTMLOptionElementFactory));
+    ret->lpHTMLOptionElementFactoryVtbl = &HTMLOptionElementFactoryVtbl;
+    ret->ref = 1;
+    ret->doc = doc;
+
+    return ret;
 }

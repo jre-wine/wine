@@ -45,6 +45,7 @@ BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD fdwReason, PVOID pvReserved)
         case DLL_PROCESS_DETACH:
             crypt_oid_free();
             crypt_sip_free();
+            root_store_free();
             default_chain_engine_free();
             if (hDefProv) CryptReleaseContext(hDefProv, 0);
             break;
@@ -75,9 +76,21 @@ BOOL WINAPI I_CryptCreateLruCache(void *unknown, HLRUCACHE *out)
     return TRUE;
 }
 
+BOOL WINAPI I_CryptFindLruEntry(DWORD unk0, DWORD unk1)
+{
+    FIXME("(%08x, %08x): stub!\n", unk0, unk1);
+    return FALSE;
+}
+
 BOOL WINAPI I_CryptFindLruEntryData(DWORD unk0, DWORD unk1, DWORD unk2)
 {
     FIXME("(%08x, %08x, %08x): stub!\n", unk0, unk1, unk2);
+    return FALSE;
+}
+
+BOOL WINAPI I_CryptCreateLruEntry(HLRUCACHE h, DWORD unk0, DWORD unk1)
+{
+    FIXME("(%p, %08x, %08x): stub!\n", h, unk0, unk1);
     return FALSE;
 }
 

@@ -28,6 +28,15 @@ extern "C" {
 typedef HANDLE HIMC;
 typedef HANDLE HIMCC;
 
+typedef struct tagREGISTERWORDA {
+    LPSTR lpReading;
+    LPSTR lpWord;
+} REGISTERWORDA, *PREGISTERWORDA, *NPREGISTERWORDA, *LPREGISTERWORDA;
+
+typedef struct tagREGISTERWORDW {
+    LPWSTR lpReading;
+    LPWSTR lpWord;
+} REGISTERWORDW, *PREGISTERWORDW, *NPREGISTERWORDW, *LPREGISTERWORDW;
 
 typedef int (CALLBACK *REGISTERWORDENUMPROCA)(LPCSTR, DWORD, LPCSTR, LPVOID);
 typedef int (CALLBACK *REGISTERWORDENUMPROCW)(LPCWSTR, DWORD, LPCWSTR, LPVOID);
@@ -484,7 +493,7 @@ DWORD    WINAPI ImmGetCandidateListCountA(HIMC, LPDWORD);
 DWORD    WINAPI ImmGetCandidateListCountW(HIMC, LPDWORD);
 #define  ImmGetCandidateListCount WINELIB_NAME_AW(ImmGetCandidateListCount)
 BOOL   WINAPI ImmGetCandidateWindow(HIMC, DWORD, LPCANDIDATEFORM);
-#ifndef NOGDI
+#if defined(_WINGDI_) && !defined(NOGDI)
 BOOL   WINAPI ImmGetCompositionFontA(HIMC, LPLOGFONTA);
 BOOL   WINAPI ImmGetCompositionFontW(HIMC, LPLOGFONTW);
 #define  ImmGetCompositionFont WINELIB_NAME_AW(ImmGetCompositionFont)

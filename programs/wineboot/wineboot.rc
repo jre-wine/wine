@@ -29,3 +29,4 @@
 
 #include "wineboot_En.rc"
 #include "wineboot_Ko.rc"
+#include "wineboot_Sv.rc"

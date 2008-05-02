@@ -1496,7 +1496,8 @@ static void test_text_metrics(const LOGFONTA *lf)
         ok(hfont2 != 0, "CreateFontIndirect error %u\n", GetLastError());
         hfont_prev = SelectObject(hdc, hfont2);
 
-        memset(&gm1, 0xaa, sizeof(gm1));
+        /* filling with 0xaa causes false pass under WINEDEBUG=warn+heap */
+        memset(&gm1, 0xab, sizeof(gm1));
         SetLastError(0xdeadbeef);
         ret = GetGlyphOutlineA(hdc, 'x', GGO_METRICS, &gm1, 0, NULL, &mat2);
         ok(ret != GDI_ERROR, "GetGlyphOutline error 0x%x\n", GetLastError());
@@ -1571,8 +1572,6 @@ static void test_text_metrics(const LOGFONTA *lf)
         test_char = min(last_unicode_char, 255);
         ok(tmA.tmLastChar == test_char, "A: tmLastChar for %s %02x != %02x\n",
            font_name, tmA.tmLastChar, test_char);
-        ok(tmA.tmBreakChar == 0x20, "A: tmBreakChar for %s %02x != 0x20\n",
-           font_name, tmA.tmBreakChar);
     }
 
     SetLastError(0xdeadbeef);

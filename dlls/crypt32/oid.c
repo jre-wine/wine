@@ -208,7 +208,7 @@ BOOL WINAPI CryptGetDefaultOIDDllList(HCRYPTOIDFUNCSET hFuncSet,
         else
         {
             /* No value, return an empty list */
-            if (*pcchDllList)
+            if (pwszDllList && *pcchDllList)
                 *pwszDllList = '\0';
             *pcchDllList = 1;
         }
@@ -216,8 +216,10 @@ BOOL WINAPI CryptGetDefaultOIDDllList(HCRYPTOIDFUNCSET hFuncSet,
     }
     else
     {
-        SetLastError(rc);
-        ret = FALSE;
+        /* No value, return an empty list */
+        if (pwszDllList && *pcchDllList)
+            *pwszDllList = '\0';
+        *pcchDllList = 1;
     }
     CryptMemFree(keyName);
 
@@ -275,6 +277,13 @@ BOOL WINAPI CryptInstallOIDFunctionAddress(HMODULE hModule,
     return ret;
 }
 
+struct FuncAddr
+{
+    HMODULE lib;
+    LPWSTR  dllList;
+    LPWSTR  currentDll;
+};
+
 static BOOL CRYPT_GetFuncFromReg(DWORD dwEncodingType, LPCSTR pszOID,
  LPCSTR szFuncName, LPVOID *ppvFuncAddr, HCRYPTOIDFUNCADDR *phFuncAddr)
 {
@@ -322,8 +331,21 @@ static BOOL CRYPT_GetFuncFromReg(DWORD dwEncodingType, LPCSTR pszOID,
                         *ppvFuncAddr = GetProcAddress(lib, funcName);
                         if (*ppvFuncAddr)
                         {
-                            *phFuncAddr = (HCRYPTOIDFUNCADDR)lib;
-                            ret = TRUE;
+                            struct FuncAddr *addr =
+                             CryptMemAlloc(sizeof(struct FuncAddr));
+
+                            if (addr)
+                            {
+                                addr->lib = lib;
+                                addr->dllList = addr->currentDll = NULL;
+                                *phFuncAddr = addr;
+                                ret = TRUE;
+                            }
+                            else
+                            {
+                                *phFuncAddr = NULL;
+                                FreeLibrary(lib);
+                            }
                         }
                         else
                         {
@@ -409,17 +431,151 @@ BOOL WINAPI CryptFreeOIDFunctionAddress(HCRYPTOIDFUNCADDR hFuncAddr,
      * and only unload it if it can be unloaded.  Also need to implement ref
      * counting on the functions.
      */
-    FreeLibrary((HMODULE)hFuncAddr);
+    if (hFuncAddr)
+    {
+        struct FuncAddr *addr = (struct FuncAddr *)hFuncAddr;
+
+        CryptMemFree(addr->dllList);
+        FreeLibrary(addr->lib);
+        CryptMemFree(addr);
+    }
     return TRUE;
 }
 
+static BOOL CRYPT_GetFuncFromDll(LPCWSTR dll, LPCSTR func, HMODULE *lib,
+ void **ppvFuncAddr)
+{
+    BOOL ret = FALSE;
+
+    *lib = LoadLibraryW(dll);
+    if (*lib)
+    {
+        *ppvFuncAddr = GetProcAddress(*lib, func);
+        if (*ppvFuncAddr)
+            ret = TRUE;
+        else
+        {
+            FreeLibrary(*lib);
+            *lib = NULL;
+        }
+    }
+    return ret;
+}
+
 BOOL WINAPI CryptGetDefaultOIDFunctionAddress(HCRYPTOIDFUNCSET hFuncSet,
- DWORD dwEncodingType, LPCWSTR pwszDll, DWORD dwFlags, void *ppvFuncAddr,
+ DWORD dwEncodingType, LPCWSTR pwszDll, DWORD dwFlags, void **ppvFuncAddr,
  HCRYPTOIDFUNCADDR *phFuncAddr)
 {
-    FIXME("(%p, %d, %s, %08x, %p, %p): stub\n", hFuncSet, dwEncodingType,
+    struct OIDFunctionSet *set = (struct OIDFunctionSet *)hFuncSet;
+    BOOL ret = FALSE;
+
+    TRACE("(%p, %d, %s, %08x, %p, %p)\n", hFuncSet, dwEncodingType,
      debugstr_w(pwszDll), dwFlags, ppvFuncAddr, phFuncAddr);
-    return FALSE;
+
+    if (pwszDll)
+    {
+        HMODULE lib;
+
+        *phFuncAddr = NULL;
+        ret = CRYPT_GetFuncFromDll(pwszDll, set->name, &lib, ppvFuncAddr);
+        if (ret)
+        {
+            struct FuncAddr *addr = CryptMemAlloc(sizeof(struct FuncAddr));
+
+            if (addr)
+            {
+                addr->lib = lib;
+                addr->dllList = addr->currentDll = NULL;
+                *phFuncAddr = addr;
+            }
+            else
+            {
+                FreeLibrary(lib);
+                *ppvFuncAddr = NULL;
+                SetLastError(ERROR_OUTOFMEMORY);
+                ret = FALSE;
+            }
+        }
+        else
+            SetLastError(ERROR_FILE_NOT_FOUND);
+    }
+    else
+    {
+        struct FuncAddr *addr = (struct FuncAddr *)*phFuncAddr;
+
+        if (!addr)
+        {
+            DWORD size;
+
+            ret = CryptGetDefaultOIDDllList(hFuncSet, dwEncodingType, NULL,
+             &size);
+            if (ret)
+            {
+                LPWSTR dllList = CryptMemAlloc(size * sizeof(WCHAR));
+
+                if (dllList)
+                {
+                    ret = CryptGetDefaultOIDDllList(hFuncSet, dwEncodingType,
+                     dllList, &size);
+                    if (ret)
+                    {
+                        addr = CryptMemAlloc(sizeof(struct FuncAddr));
+                        if (addr)
+                        {
+                            addr->dllList = dllList;
+                            addr->currentDll = dllList;
+                            addr->lib = NULL;
+                            *phFuncAddr = addr;
+                        }
+                        else
+                        {
+                            CryptMemFree(dllList);
+                            SetLastError(ERROR_OUTOFMEMORY);
+                            ret = FALSE;
+                        }
+                    }
+                }
+                else
+                {
+                    SetLastError(ERROR_OUTOFMEMORY);
+                    ret = FALSE;
+                }
+            }
+        }
+        if (addr)
+        {
+            if (!*addr->currentDll)
+            {
+                CryptFreeOIDFunctionAddress(*phFuncAddr, 0);
+                SetLastError(ERROR_FILE_NOT_FOUND);
+                *phFuncAddr = NULL;
+                ret = FALSE;
+            }
+            else
+            {
+                /* FIXME: as elsewhere, can't free until DllCanUnloadNow says
+                 * it's possible, and should defer unloading for some time to
+                 * avoid repeated LoadLibrary/FreeLibrary on the same dll.
+                 */
+                FreeLibrary(addr->lib);
+                ret = CRYPT_GetFuncFromDll(addr->currentDll, set->name,
+                 &addr->lib, ppvFuncAddr);
+                if (ret)
+                {
+                    /* Move past the current DLL */
+                    addr->currentDll += lstrlenW(addr->currentDll) + 1;
+                    *phFuncAddr = addr;
+                }
+                else
+                {
+                    CryptFreeOIDFunctionAddress(*phFuncAddr, 0);
+                    SetLastError(ERROR_FILE_NOT_FOUND);
+                    *phFuncAddr = NULL;
+                }
+            }
+        }
+    }
+    return ret;
 }
 
 /***********************************************************************
@@ -451,10 +607,6 @@ BOOL WINAPI CryptRegisterOIDFunction(DWORD dwEncodingType, LPCSTR pszFuncName,
 
     TRACE("(%x, %s, %s, %s, %s)\n", dwEncodingType, pszFuncName,
      debugstr_a(pszOID), debugstr_w(pwszDll), pszOverrideFuncName);
-
-    /* This only registers functions for encoding certs, not messages */
-    if (!GET_CERT_ENCODING_TYPE(dwEncodingType))
-        return TRUE;
 
     /* Native does nothing pwszDll is NULL */
     if (!pwszDll)
@@ -513,10 +665,8 @@ BOOL WINAPI CryptUnregisterOIDFunction(DWORD dwEncodingType, LPCSTR pszFuncName,
     LPSTR szKey;
     LONG rc;
 
-    TRACE("%x %s %s\n", dwEncodingType, pszFuncName, pszOID);
-
-    if (!GET_CERT_ENCODING_TYPE(dwEncodingType))
-        return TRUE;
+    TRACE("%x %s %s\n", dwEncodingType, debugstr_a(pszFuncName),
+     debugstr_a(pszOID));
 
     if (!pszFuncName || !pszOID)
     {
@@ -784,8 +934,8 @@ BOOL WINAPI CryptRegisterDefaultOIDFunction(DWORD dwEncodingType,
     LPCWSTR existing;
     BOOL ret = FALSE;
 
-    TRACE("(%x, %s, %x, %s)\n", dwEncodingType, pszFuncName, dwIndex,
-     debugstr_w(pwszDll));
+    TRACE("(%x, %s, %d, %s)\n", dwEncodingType, debugstr_a(pszFuncName),
+     dwIndex, debugstr_w(pwszDll));
 
     if (!pwszDll)
     {

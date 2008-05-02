@@ -31,10 +31,10 @@ dlls/avicap32/libavicap32.def
 dlls/avifil32/libavifil32.def
 dlls/avifil32/rsrc.res
 dlls/avifile.dll16
+dlls/browseui/rsrc.res
 dlls/browseui/tests/*.ok
 dlls/browseui/tests/browseui_crosstest.exe
 dlls/browseui/tests/testlist.c
-dlls/browseui/version.res
 dlls/cabinet/cabinet.res
 dlls/cabinet/libcabinet.def
 dlls/cabinet/tests/*.ok
@@ -65,6 +65,10 @@ dlls/commdlg.dll16
 dlls/compobj.dll16
 dlls/compstui/libcompstui.def
 dlls/credui/credui.res
+dlls/credui/libcredui.def
+dlls/credui/tests/*.ok
+dlls/credui/tests/credui_crosstest.exe
+dlls/credui/tests/testlist.c
 dlls/crtdll/libcrtdll.def
 dlls/crypt32/crypt32.res
 dlls/crypt32/libcrypt32.def
@@ -72,6 +76,10 @@ dlls/crypt32/tests/*.ok
 dlls/crypt32/tests/crypt32_crosstest.exe
 dlls/crypt32/tests/testlist.c
 dlls/cryptdll/libcryptdll.def
+dlls/cryptnet/libcryptnet.def
+dlls/cryptnet/tests/*.ok
+dlls/cryptnet/tests/cryptnet_crosstest.exe
+dlls/cryptnet/tests/testlist.c
 dlls/ctl3d.dll16
 dlls/ctl3d32/libctl3d32.def
 dlls/ctl3dv2.dll16
@@ -94,6 +102,9 @@ dlls/d3drm/tests/d3drm_crosstest.exe
 dlls/d3drm/tests/testlist.c
 dlls/d3drm/version.res
 dlls/d3dx8/libd3dx8.def
+dlls/d3dx8/tests/*.ok
+dlls/d3dx8/tests/d3dx8_crosstest.exe
+dlls/d3dx8/tests/testlist.c
 dlls/d3dxof/libd3dxof.def
 dlls/d3dxof/version.res
 dlls/dbghelp/libdbghelp.def
@@ -263,6 +274,7 @@ dlls/msi/tests/*.ok
 dlls/msi/tests/msi_crosstest.exe
 dlls/msi/tests/testlist.c
 dlls/msimg32/libmsimg32.def
+dlls/msimtf/rsrc.res
 dlls/msrle32/rsrc.res
 dlls/msvcrt/libmsvcrt.def
 dlls/msvcrt/rsrc.res
@@ -326,6 +338,8 @@ dlls/ole32/version16.res
 dlls/oleacc/liboleacc.def
 dlls/oleaut32/liboleaut32.def
 dlls/oleaut32/oleaut32.res
+dlls/oleaut32/oleaut32_oaidl.h
+dlls/oleaut32/oleaut32_oaidl_p.c
 dlls/oleaut32/tests/*.ok
 dlls/oleaut32/tests/oleaut32_crosstest.exe
 dlls/oleaut32/tests/test_tlb.tlb
@@ -372,6 +386,9 @@ dlls/riched20/tests/*.ok
 dlls/riched20/tests/riched20_crosstest.exe
 dlls/riched20/tests/testlist.c
 dlls/riched20/version.res
+dlls/riched32/tests/*.ok
+dlls/riched32/tests/riched32_crosstest.exe
+dlls/riched32/tests/testlist.c
 dlls/riched32/version.res
 dlls/rpcrt4/librpcrt4.def
 dlls/rpcrt4/tests/*.ok
@@ -548,6 +565,7 @@ include/config.h
 include/control.h
 include/d3d10.h
 include/ddstream.h
+include/dimm.h
 include/dispex.h
 include/docobj.h
 include/downloadmgr.h
@@ -682,10 +700,13 @@ programs/winetest/cabinet_test.exe
 programs/winetest/comcat_test.exe
 programs/winetest/comctl32_test.exe
 programs/winetest/comdlg32_test.exe
+programs/winetest/credui_test.exe
 programs/winetest/crypt32_test.exe
+programs/winetest/cryptnet_test.exe
 programs/winetest/d3d8_test.exe
 programs/winetest/d3d9_test.exe
 programs/winetest/d3drm_test.exe
+programs/winetest/d3dx8_test.exe
 programs/winetest/ddraw_test.exe
 programs/winetest/dinput_test.exe
 programs/winetest/dnsapi_test.exe
@@ -721,6 +742,7 @@ programs/winetest/pdh_test.exe
 programs/winetest/psapi_test.exe
 programs/winetest/quartz_test.exe
 programs/winetest/riched20_test.exe
+programs/winetest/riched32_test.exe
 programs/winetest/rpcrt4_test.exe
 programs/winetest/rsabase_test.exe
 programs/winetest/rsaenh_test.exe

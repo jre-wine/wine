@@ -22,7 +22,9 @@
 #define __WINE_BROWSEUI_H
 
 extern LONG BROWSEUI_refCount;
+extern HINSTANCE BROWSEUI_hinstance;
 
 HRESULT WINAPI ACLMulti_Constructor(IUnknown *punkOuter, IUnknown **ppOut);
+HRESULT WINAPI ProgressDialog_Constructor(IUnknown *punkOuter, IUnknown **ppOut);
 
 #endif /* __WINE_SHDOCVW_H */

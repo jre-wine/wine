@@ -711,12 +711,18 @@ static void dump_inline_security_descriptor( const struct security_descriptor *s
         fprintf( stderr, ",owner=" );
         if ((sd->owner_len > FIELD_OFFSET(SID, SubAuthority[255])) || (offset + sd->owner_len > size))
             return;
-        dump_inline_sid( (const SID *)((const char *)sd + offset), sd->owner_len );
+        if (sd->owner_len)
+            dump_inline_sid( (const SID *)((const char *)sd + offset), sd->owner_len );
+        else
+            fprintf( stderr, "<not present>" );
         offset += sd->owner_len;
         fprintf( stderr, ",group=" );
         if ((sd->group_len > FIELD_OFFSET(SID, SubAuthority[255])) || (offset + sd->group_len > size))
             return;
-        dump_inline_sid( (const SID *)((const char *)sd + offset), sd->group_len );
+        if (sd->group_len)
+            dump_inline_sid( (const SID *)((const char *)sd + offset), sd->group_len );
+        else
+            fprintf( stderr, "<not present>" );
         offset += sd->group_len;
         fprintf( stderr, ",sacl=" );
         if ((sd->sacl_len >= MAX_ACL_LEN) || (offset + sd->sacl_len > size))
@@ -772,6 +778,26 @@ static void dump_varargs_token_groups( data_size_t size )
             }
             fputc( ']', stderr );
         }
+    }
+    fputc( '}', stderr );
+}
+
+static void dump_varargs_object_attributes( data_size_t size )
+{
+    const struct object_attributes *objattr = cur_data;
+    fputc( '{', stderr );
+    if (size >= sizeof(struct object_attributes))
+    {
+        const WCHAR *str;
+        fprintf( stderr, "rootdir=%p,sd=", objattr->rootdir );
+        if (objattr->sd_len > size - sizeof(*objattr)) return;
+        dump_inline_security_descriptor( (const struct security_descriptor *)(objattr + 1), objattr->sd_len );
+        str = (const WCHAR *)cur_data + (sizeof(*objattr) + objattr->sd_len) / sizeof(WCHAR);
+        fprintf( stderr, ",name=L\"" );
+        dump_strW( str, (size - sizeof(*objattr) - objattr->sd_len) / sizeof(WCHAR),
+                   stderr, "\"\"" );
+        fputc( '\"', stderr );
+        remove_data( size );
     }
     fputc( '}', stderr );
 }
@@ -1130,11 +1156,10 @@ static void dump_create_event_request( const struct create_event_request *req )
 {
     fprintf( stderr, " access=%08x,", req->access );
     fprintf( stderr, " attributes=%08x,", req->attributes );
-    fprintf( stderr, " rootdir=%p,", req->rootdir );
     fprintf( stderr, " manual_reset=%d,", req->manual_reset );
     fprintf( stderr, " initial_state=%d,", req->initial_state );
-    fprintf( stderr, " name=" );
-    dump_varargs_unicode_str( cur_size );
+    fprintf( stderr, " objattr=" );
+    dump_varargs_object_attributes( cur_size );
 }
 
 static void dump_create_event_reply( const struct create_event_reply *req )
@@ -1166,10 +1191,9 @@ static void dump_create_mutex_request( const struct create_mutex_request *req )
 {
     fprintf( stderr, " access=%08x,", req->access );
     fprintf( stderr, " attributes=%08x,", req->attributes );
-    fprintf( stderr, " rootdir=%p,", req->rootdir );
     fprintf( stderr, " owned=%d,", req->owned );
-    fprintf( stderr, " name=" );
-    dump_varargs_unicode_str( cur_size );
+    fprintf( stderr, " objattr=" );
+    dump_varargs_object_attributes( cur_size );
 }
 
 static void dump_create_mutex_reply( const struct create_mutex_reply *req )
@@ -1205,11 +1229,10 @@ static void dump_create_semaphore_request( const struct create_semaphore_request
 {
     fprintf( stderr, " access=%08x,", req->access );
     fprintf( stderr, " attributes=%08x,", req->attributes );
-    fprintf( stderr, " rootdir=%p,", req->rootdir );
     fprintf( stderr, " initial=%08x,", req->initial );
     fprintf( stderr, " max=%08x,", req->max );
-    fprintf( stderr, " name=" );
-    dump_varargs_unicode_str( cur_size );
+    fprintf( stderr, " objattr=" );
+    dump_varargs_object_attributes( cur_size );
 }
 
 static void dump_create_semaphore_reply( const struct create_semaphore_reply *req )
@@ -1698,14 +1721,13 @@ static void dump_create_mapping_request( const struct create_mapping_request *re
 {
     fprintf( stderr, " access=%08x,", req->access );
     fprintf( stderr, " attributes=%08x,", req->attributes );
-    fprintf( stderr, " rootdir=%p,", req->rootdir );
     fprintf( stderr, " size=" );
     dump_file_pos( &req->size );
     fprintf( stderr, "," );
     fprintf( stderr, " protect=%d,", req->protect );
     fprintf( stderr, " file_handle=%p,", req->file_handle );
-    fprintf( stderr, " name=" );
-    dump_varargs_unicode_str( cur_size );
+    fprintf( stderr, " objattr=" );
+    dump_varargs_object_attributes( cur_size );
 }
 
 static void dump_create_mapping_reply( const struct create_mapping_reply *req )

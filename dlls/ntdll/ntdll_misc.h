@@ -21,6 +21,7 @@
 
 #include <stdarg.h>
 #include <signal.h>
+#include <sys/types.h>
 
 #include "windef.h"
 #include "winnt.h"
@@ -28,6 +29,14 @@
 #include "wine/server.h"
 
 #define MAX_NT_PATH_LENGTH 277
+
+#define MAX_DOS_DRIVES 26
+
+struct drive_info
+{
+    dev_t dev;
+    ino_t ino;
+};
 
 /* exceptions */
 extern void wait_suspend( CONTEXT *context );
@@ -68,6 +77,11 @@ extern void server_leave_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset
 extern int server_remove_fd_from_cache( obj_handle_t handle );
 extern int server_get_unix_fd( obj_handle_t handle, unsigned int access, int *unix_fd,
                                int *needs_close, enum server_fd_type *type, unsigned int *options );
+
+/* security descriptors */
+NTSTATUS NTDLL_create_struct_sd(PSECURITY_DESCRIPTOR nt_sd, struct security_descriptor **server_sd,
+                                data_size_t *server_sd_len);
+void NTDLL_free_struct_sd(struct security_descriptor *server_sd);
 
 /* module handling */
 extern NTSTATUS MODULE_DllThreadAttach( LPVOID lpReserved );
@@ -113,6 +127,7 @@ extern NTSTATUS FILE_GetNtStatus(void);
 extern BOOL DIR_is_hidden_file( const UNICODE_STRING *name );
 extern NTSTATUS DIR_unmount_device( HANDLE handle );
 extern NTSTATUS DIR_get_unix_cwd( char **cwd );
+extern unsigned int DIR_get_drives_info( struct drive_info info[MAX_DOS_DRIVES] );
 
 /* virtual memory */
 extern NTSTATUS VIRTUAL_HandleFault(LPCVOID addr);

@@ -14,7 +14,7 @@
 @ stub AddPrinterW
 @ stdcall AllocSplStr(wstr)
 @ stub AppendPrinterNotifyInfoData
-@ stub BuildOtherNamesFromMachineName
+@ stdcall BuildOtherNamesFromMachineName(ptr ptr)
 @ stub CallDrvDevModeConversion
 @ stub CallRouterFindFirstPrinterChangeNotification
 @ stub ClosePrinter
@@ -122,7 +122,7 @@
 @ stub SplDriverUnloadComplete
 @ stub SplGetSpoolFileInfo
 @ stdcall SplInitializeWinSpoolDrv(ptr)
-@ stub SplIsUpgrade
+@ stdcall SplIsUpgrade()
 @ stub SplProcessPnPEvent
 @ stub SplReadPrinter
 @ stub SplRegisterForDeviceEvents

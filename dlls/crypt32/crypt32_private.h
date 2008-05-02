@@ -126,6 +126,7 @@ HCRYPTPROV CRYPT_GetDefaultProvider(void);
 void crypt_oid_init(HINSTANCE hinst);
 void crypt_oid_free(void);
 void crypt_sip_free(void);
+void root_store_free(void);
 void default_chain_engine_free(void);
 
 /* Some typedefs that make it easier to abstract which type of context we're
@@ -233,7 +234,8 @@ typedef struct WINE_CRYPTCERTSTORE
 void CRYPT_InitStore(WINECRYPT_CERTSTORE *store, DWORD dwFlags,
  CertStoreType type);
 void CRYPT_FreeStore(PWINECRYPT_CERTSTORE store);
-void CRYPT_EmptyStore(HCERTSTORE store);
+BOOL WINAPI I_CertUpdateStore(HCERTSTORE store1, HCERTSTORE store2, DWORD unk0,
+ DWORD unk1);
 
 PWINECRYPT_CERTSTORE CRYPT_CollectionOpenStore(HCRYPTPROV hCryptProv,
  DWORD dwFlags, const void *pvPara);
@@ -273,7 +275,7 @@ const void *CRYPT_ReadSerializedElement(const BYTE *pbElement,
  */
 BOOL CRYPT_ReadSerializedStoreFromFile(HANDLE file, HCERTSTORE store);
 
-/* Fixes up the the pointers in info, where info is assumed to be a
+/* Fixes up the pointers in info, where info is assumed to be a
  * CRYPT_KEY_PROV_INFO, followed by its container name, provider name, and any
  * provider parameters, in a contiguous buffer, but where info's pointers are
  * assumed to be invalid.  Upon return, info's pointers point to the

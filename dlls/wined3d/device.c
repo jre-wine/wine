@@ -1107,10 +1107,16 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateCubeTexture(IWineD3DDevice *iface
     if (Usage & WINED3DUSAGE_AUTOGENMIPMAP) {
         if(!GL_SUPPORT(SGIS_GENERATE_MIPMAP)) {
             WARN("No mipmap generation support, returning D3DERR_INVALIDCALL\n");
+            HeapFree(GetProcessHeap(), 0, object);
+            *ppCubeTexture = NULL;
+
             return WINED3DERR_INVALIDCALL;
         }
         if(Levels > 1) {
             WARN("D3DUSAGE_AUTOGENMIPMAP is set, and level count > 1, returning D3DERR_INVALIDCALL\n");
+            HeapFree(GetProcessHeap(), 0, object);
+            *ppCubeTexture = NULL;
+
             return WINED3DERR_INVALIDCALL;
         }
         Levels = 1;
@@ -1139,11 +1145,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateCubeTexture(IWineD3DDevice *iface
                 int k;
                 int l;
                 for (l = 0; l < j; l++) {
-                    IWineD3DSurface_Release(object->surfaces[j][i]);
+                    IWineD3DSurface_Release(object->surfaces[l][i]);
                 }
                 for (k = 0; k < i; k++) {
                     for (l = 0; l < 6; l++) {
-                    IWineD3DSurface_Release(object->surfaces[l][j]);
+                        IWineD3DSurface_Release(object->surfaces[l][k]);
                     }
                 }
 
@@ -1213,24 +1219,24 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateQuery(IWineD3DDevice *iface, WINE
     /* allocated the 'extended' data based on the type of query requested */
     switch(Type){
     case WINED3DQUERYTYPE_OCCLUSION:
+        object->extendedData = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(WineQueryOcclusionData));
+        ((WineQueryOcclusionData *)(object->extendedData))->ctx = This->activeContext;
+
         if(GL_SUPPORT(ARB_OCCLUSION_QUERY)) {
             TRACE("(%p) Allocating data for an occlusion query\n", This);
-            object->extendedData = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(WineQueryOcclusionData));
             GL_EXTCALL(glGenQueriesARB(1, &((WineQueryOcclusionData *)(object->extendedData))->queryId));
-            ((WineQueryOcclusionData *)(object->extendedData))->ctx = This->activeContext;
             break;
         }
     case WINED3DQUERYTYPE_EVENT:
+        object->extendedData = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(WineQueryEventData));
+        ((WineQueryEventData *)(object->extendedData))->ctx = This->activeContext;
+
         if(GL_SUPPORT(APPLE_FENCE)) {
-            object->extendedData = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(WineQueryEventData));
             GL_EXTCALL(glGenFencesAPPLE(1, &((WineQueryEventData *)(object->extendedData))->fenceId));
             checkGLcall("glGenFencesAPPLE");
-            ((WineQueryEventData *)(object->extendedData))->ctx = This->activeContext;
         } else if(GL_SUPPORT(NV_FENCE)) {
-            object->extendedData = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(WineQueryEventData));
             GL_EXTCALL(glGenFencesNV(1, &((WineQueryEventData *)(object->extendedData))->fenceId));
             checkGLcall("glGenFencesNV");
-            ((WineQueryEventData *)(object->extendedData))->ctx = This->activeContext;
         }
         break;
 
@@ -1435,6 +1441,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
                              &object->frontBuffer,
                              NULL /* pShared (always null)*/);
     if (object->frontBuffer != NULL) {
+        IWineD3DSurface_ModifyLocation(object->frontBuffer, SFLAG_INDRAWABLE, TRUE);
         IWineD3DSurface_SetContainer(object->frontBuffer, (IWineD3DBase *)object);
     } else {
         ERR("Failed to create the front buffer\n");
@@ -2223,11 +2230,11 @@ static void WINAPI IWineD3DDeviceImpl_SetFullscreen(IWineD3DDevice *iface, BOOL 
     This->ddraw_fullscreen = fullscreen;
 }
 
-/* Enables thead safety in the wined3d device and its resources. Called by DirectDraw
- * from SetCooperativeLeven if DDSCL_MULTITHREADED is specified, and by d3d8/9 from
+/* Enables thread safety in the wined3d device and its resources. Called by DirectDraw
+ * from SetCooperativeLevel if DDSCL_MULTITHREADED is specified, and by d3d8/9 from
  * CreateDevice if D3DCREATE_MULTITHREADED is passed.
  *
- * There is no way to deactivate thread safety once it is enabled
+ * There is no way to deactivate thread safety once it is enabled.
  */
 static void WINAPI IWineD3DDeviceImpl_SetMultithreaded(IWineD3DDevice *iface) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
@@ -4355,7 +4362,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetTexture(IWineD3DDevice *iface, DWORD
     }
 
     /** NOTE: MSDN says that setTexture increases the reference count,
-    * and the the application must set the texture back to null (or have a leaky application),
+    * and that the application must set the texture back to null (or have a leaky application),
     * This means we should pass the refcount up to the parent
      *******************************/
     if (NULL != This->updateStateBlock->textures[Stage]) {
@@ -4835,12 +4842,10 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
     /* Dirtify the target surface for now. If the surface is locked regularly, and an up to date sysmem copy exists,
      * it is most likely more efficient to perform a clear on the sysmem copy too instead of downloading it
      */
+    IWineD3DSurface_ModifyLocation(This->lastActiveRenderTarget, SFLAG_INDRAWABLE, TRUE);
+    /* TODO: Move the fbo logic into ModifyLocation() */
     if(This->render_offscreen && wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
         target->Flags |= SFLAG_INTEXTURE;
-        target->Flags &= ~SFLAG_INSYSMEM;
-    } else {
-        target->Flags |= SFLAG_INDRAWABLE;
-        target->Flags &= ~(SFLAG_INTEXTURE | SFLAG_INSYSMEM);
     }
     return WINED3D_OK;
 }
@@ -5534,8 +5539,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
 
     LEAVE_GL();
 
-    ((IWineD3DSurfaceImpl *)pDestinationSurface)->Flags &= ~SFLAG_INSYSMEM;
-    ((IWineD3DSurfaceImpl *)pDestinationSurface)->Flags |= SFLAG_INTEXTURE;
+    IWineD3DSurface_ModifyLocation(pDestinationSurface, SFLAG_INTEXTURE, TRUE);
     IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(0));
 
     return WINED3D_OK;

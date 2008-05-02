@@ -16,6 +16,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "wingdi.h"
 #include "docobj.h"
 #include "mshtml.h"
 #include "mshtmhst.h"
@@ -94,9 +95,18 @@ struct ConnectionPoint {
     ConnectionPoint *next;
 };
 
+typedef struct {
+    const IHTMLOptionElementFactoryVtbl *lpHTMLOptionElementFactoryVtbl;
+
+    LONG ref;
+
+    HTMLDocument *doc;
+} HTMLOptionElementFactory;
+
 struct HTMLDocument {
     const IHTMLDocument2Vtbl              *lpHTMLDocument2Vtbl;
     const IHTMLDocument3Vtbl              *lpHTMLDocument3Vtbl;
+    const IHTMLDocument4Vtbl              *lpHTMLDocument4Vtbl;
     const IHTMLDocument5Vtbl              *lpHTMLDocument5Vtbl;
     const IPersistMonikerVtbl             *lpPersistMonikerVtbl;
     const IPersistFileVtbl                *lpPersistFileVtbl;
@@ -151,6 +161,8 @@ struct HTMLDocument {
     ConnectionPoint cp_htmldocevents;
     ConnectionPoint cp_htmldocevents2;
     ConnectionPoint cp_propnotif;
+
+    HTMLOptionElementFactory *option_factory;
 
     struct list selection_list;
     struct list range_list;
@@ -259,6 +271,8 @@ struct HTMLDOMNode {
     const IHTMLDOMNodeVtbl *lpHTMLDOMNodeVtbl;
     const NodeImplVtbl *vtbl;
 
+    LONG ref;
+
     nsIDOMNode *nsnode;
     HTMLDocument *doc;
 
@@ -284,6 +298,7 @@ typedef struct {
 
 #define HTMLDOC(x)       ((IHTMLDocument2*)               &(x)->lpHTMLDocument2Vtbl)
 #define HTMLDOC3(x)      ((IHTMLDocument3*)               &(x)->lpHTMLDocument3Vtbl)
+#define HTMLDOC4(x)      ((IHTMLDocument4*)               &(x)->lpHTMLDocument4Vtbl)
 #define HTMLDOC5(x)      ((IHTMLDocument5*)               &(x)->lpHTMLDocument5Vtbl)
 #define PERSIST(x)       ((IPersist*)                     &(x)->lpPersistFileVtbl)
 #define PERSISTMON(x)    ((IPersistMoniker*)              &(x)->lpPersistMonikerVtbl)
@@ -330,6 +345,8 @@ typedef struct {
 
 #define HTMLTEXTCONT(x)  ((IHTMLTextContainer*)           &(x)->lpHTMLTextContainerVtbl)
 
+#define HTMLOPTFACTORY(x)  ((IHTMLOptionElementFactory*)  &(x)->lpHTMLOptionElementFactoryVtbl)
+
 #define DEFINE_THIS2(cls,ifc,iface) ((cls*)((BYTE*)(iface)-offsetof(cls,ifc)))
 #define DEFINE_THIS(cls,ifc,iface) DEFINE_THIS2(cls,lp ## ifc ## Vtbl,iface)
 
@@ -338,6 +355,7 @@ HRESULT HTMLLoadOptions_Create(IUnknown*,REFIID,void**);
 
 HTMLWindow *HTMLWindow_Create(HTMLDocument*);
 HTMLWindow *nswindow_to_window(const nsIDOMWindow*);
+HTMLOptionElementFactory *HTMLOptionElementFactory_Create(HTMLDocument*);
 void setup_nswindow(HTMLWindow*);
 
 void HTMLDocument_HTMLDocument3_Init(HTMLDocument*);
@@ -367,9 +385,11 @@ HRESULT get_client_disp_property(IOleClientSite*,DISPID,VARIANT*);
 
 HRESULT ProtocolFactory_Create(REFCLSID,REFIID,void**);
 
+BOOL load_gecko(BOOL);
 void close_gecko(void);
 void register_nsservice(nsIComponentRegistrar*,nsIServiceManager*);
 void init_nsio(nsIComponentManager*,nsIComponentRegistrar*);
+BOOL install_wine_gecko(BOOL);
 
 void hlink_frame_navigate(HTMLDocument*,IHlinkFrame*,LPCWSTR,nsIInputStream*,DWORD);
 
@@ -432,8 +452,6 @@ HTMLDOMNode *get_node(HTMLDocument*,nsIDOMNode*);
 void release_nodes(HTMLDocument*);
 
 IHTMLElementCollection *create_all_collection(HTMLDOMNode*);
-
-BOOL install_wine_gecko(void);
 
 /* commands */
 typedef struct {

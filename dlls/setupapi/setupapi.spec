@@ -292,7 +292,7 @@
 @ stdcall SetupDiCreateDeviceInterfaceW(ptr ptr ptr wstr long ptr)
 @ stdcall SetupDiCreateDeviceInterfaceRegKeyA(ptr ptr long long ptr ptr)
 @ stdcall SetupDiCreateDeviceInterfaceRegKeyW(ptr ptr long long ptr ptr)
-@ stub SetupDiDeleteDevRegKey
+@ stdcall SetupDiDeleteDevRegKey(ptr ptr long long long)
 @ stub SetupDiDeleteDeviceInfo
 @ stub SetupDiDeleteDeviceInterfaceData
 @ stdcall SetupDiDeleteDeviceInterfaceRegKey(ptr ptr long)
@@ -442,7 +442,7 @@
 @ stdcall SetupInstallFilesFromInfSectionW(long long long wstr wstr long)
 @ stdcall SetupInstallFromInfSectionA(long long str long long str long ptr ptr long ptr)
 @ stdcall SetupInstallFromInfSectionW(long long wstr long long wstr long ptr ptr long ptr)
-@ stub SetupInstallServicesFromInfSectionA
+@ stdcall SetupInstallServicesFromInfSectionA(long str long)
 @ stub SetupInstallServicesFromInfSectionExA
 @ stub SetupInstallServicesFromInfSectionExW
 @ stub SetupInstallServicesFromInfSectionW

@@ -80,6 +80,18 @@ LPWSTR WINAPI AllocSplStr(LPCWSTR pwstr)
 }
 
 /******************************************************************
+ *   BuildOtherNamesFromMachineName   [SPOOLSS.@]
+ */
+BOOL WINAPI BuildOtherNamesFromMachineName(LPVOID * ptr1, LPVOID * ptr2)
+{
+    FIXME("(%p, %p) stub\n", ptr1, ptr2);
+
+    *ptr1 = NULL;
+    *ptr2 = NULL;
+    return FALSE;
+}
+
+/******************************************************************
  *   DllAllocSplMem   [SPOOLSS.@]
  *
  * Allocate cleared memory from the spooler heap
@@ -163,7 +175,7 @@ BOOL WINAPI ImpersonatePrinterClient(HANDLE hToken)
 HANDLE WINAPI RevertToPrinterSelf(void)
 {
     FIXME("() stub\n");
-    return NULL;
+    return (HANDLE) 0xdead0947;
 }
 
 /******************************************************************
@@ -208,4 +220,13 @@ BOOL WINAPI SplInitializeWinSpoolDrv(LPVOID * table)
 
     return TRUE;
 
+}
+
+/******************************************************************
+ *   SplIsUpgrade   [SPOOLSS.@]
+ */
+BOOL WINAPI SplIsUpgrade(void)
+{
+    FIXME("() stub\n");
+    return FALSE;
 }

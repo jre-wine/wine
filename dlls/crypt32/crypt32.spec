@@ -90,7 +90,7 @@
 @ stdcall CertVerifyCRLRevocation(long ptr long ptr)
 @ stdcall CertVerifyCRLTimeValidity(ptr ptr)
 @ stub CertVerifyCTLUsage
-@ stub CertVerifyRevocation
+@ stdcall CertVerifyRevocation(long long long ptr long ptr ptr)
 @ stdcall CertVerifySubjectCertificateContext(ptr ptr ptr)
 @ stdcall CertVerifyTimeValidity(ptr ptr)
 @ stdcall CertVerifyValidityNesting(ptr ptr)
@@ -190,10 +190,12 @@
 @ stdcall CryptVerifyMessageSignature(ptr long ptr long ptr ptr ptr)
 @ stub CryptVerifyMessageSignatureWithKey
 @ stub CryptVerifySignatureU
+@ stdcall I_CertUpdateStore(ptr ptr long long)
 @ stdcall I_CryptAllocTls()
 @ stdcall I_CryptCreateLruCache(ptr ptr)
-@ stub I_CryptCreateLruEntry
+@ stdcall I_CryptCreateLruEntry(ptr long long)
 @ stdcall I_CryptDetachTls(long)
+@ stdcall I_CryptFindLruEntry(long long)
 @ stdcall I_CryptFindLruEntryData(long long long)
 @ stdcall I_CryptFlushLruCache(ptr long long)
 @ stdcall I_CryptFreeLruCache(ptr long long)

@@ -122,9 +122,37 @@ static const WELLKNOWNSID WellKnownSids[] =
     { {0,0}, WinSChannelAuthenticationSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_PACKAGE_BASE_RID, SECURITY_PACKAGE_SCHANNEL_RID } } },
     { {0,0}, WinThisOrganizationSid, { SID_REVISION, 1, { SECURITY_NT_AUTHORITY }, { SECURITY_THIS_ORGANIZATION_RID } } },
     { {0,0}, WinOtherOrganizationSid, { SID_REVISION, 1, { SECURITY_NT_AUTHORITY }, { SECURITY_OTHER_ORGANIZATION_RID } } },
+    { {0,0}, WinBuiltinIncomingForestTrustBuildersSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_INCOMING_FOREST_TRUST_BUILDERS  } } },
     { {0,0}, WinBuiltinPerfMonitoringUsersSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_MONITORING_USERS } } },
     { {0,0}, WinBuiltinPerfLoggingUsersSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_LOGGING_USERS } } },
+    { {0,0}, WinBuiltinAuthorizationAccessSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_AUTHORIZATIONACCESS } } },
+    { {0,0}, WinBuiltinTerminalServerLicenseServersSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_TS_LICENSE_SERVERS } } },
+    { {0,0}, WinBuiltinDCOMUsersSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_DCOM_USERS } } },
 };
+
+/* these SIDs must be constructed as relative to some domain - only the RID is well-kown */
+typedef struct WELLKOWNRID
+{
+    WELL_KNOWN_SID_TYPE Type;
+    DWORD Rid;
+} WELLKNOWNRID;
+
+WELLKNOWNRID WellKnownRids[] = {
+    { WinAccountAdministratorSid,    DOMAIN_USER_RID_ADMIN },
+    { WinAccountGuestSid,            DOMAIN_USER_RID_GUEST },
+    { WinAccountKrbtgtSid,           DOMAIN_USER_RID_KRBTGT },
+    { WinAccountDomainAdminsSid,     DOMAIN_GROUP_RID_ADMINS },
+    { WinAccountDomainUsersSid,      DOMAIN_GROUP_RID_USERS },
+    { WinAccountDomainGuestsSid,     DOMAIN_GROUP_RID_GUESTS },
+    { WinAccountComputersSid,        DOMAIN_GROUP_RID_COMPUTERS },
+    { WinAccountControllersSid,      DOMAIN_GROUP_RID_CONTROLLERS },
+    { WinAccountCertAdminsSid,       DOMAIN_GROUP_RID_CERT_ADMINS },
+    { WinAccountSchemaAdminsSid,     DOMAIN_GROUP_RID_SCHEMA_ADMINS },
+    { WinAccountEnterpriseAdminsSid, DOMAIN_GROUP_RID_ENTERPRISE_ADMINS },
+    { WinAccountPolicyAdminsSid,     DOMAIN_GROUP_RID_POLICY_ADMINS },
+    { WinAccountRasAndIasServersSid, DOMAIN_ALIAS_RID_RAS_SERVERS },
+};
+
 
 static SID const sidWorld = { SID_REVISION, 1, { SECURITY_WORLD_SID_AUTHORITY} , { SECURITY_WORLD_RID } };
 
@@ -552,8 +580,8 @@ AdjustTokenGroups( HANDLE TokenHandle, BOOL ResetToDefault, PTOKEN_GROUPS NewSta
  */
 BOOL WINAPI
 AdjustTokenPrivileges( HANDLE TokenHandle, BOOL DisableAllPrivileges,
-                       LPVOID NewState, DWORD BufferLength,
-                       LPVOID PreviousState, LPDWORD ReturnLength )
+                       PTOKEN_PRIVILEGES NewState, DWORD BufferLength,
+                       PTOKEN_PRIVILEGES PreviousState, PDWORD ReturnLength )
 {
     NTSTATUS status;
 
@@ -782,13 +810,7 @@ CreateWellKnownSid( WELL_KNOWN_SID_TYPE WellKnownSidType,
     unsigned int i;
     TRACE("(%d, %s, %p, %p)\n", WellKnownSidType, debugstr_sid(DomainSid), pSid, cbSid);
 
-    if (DomainSid != NULL) {
-        FIXME("Only local computer supported!\n");
-        SetLastError(ERROR_INVALID_PARAMETER);	/* FIXME */
-        return FALSE;
-    }
-
-    if (cbSid == NULL || pSid == NULL) {
+    if (cbSid == NULL || pSid == NULL || (DomainSid && !IsValidSid(DomainSid))) {
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
@@ -807,6 +829,30 @@ CreateWellKnownSid( WELL_KNOWN_SID_TYPE WellKnownSidType,
             return TRUE;
         }
     }
+
+    if (DomainSid == NULL || *GetSidSubAuthorityCount(DomainSid) == SID_MAX_SUB_AUTHORITIES)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    for (i = 0; i < sizeof(WellKnownRids)/sizeof(WellKnownRids[0]); i++)
+        if (WellKnownRids[i].Type == WellKnownSidType) {
+            UCHAR domain_subauth = *GetSidSubAuthorityCount(DomainSid);
+            DWORD domain_sid_length = GetSidLengthRequired(domain_subauth);
+            DWORD output_sid_length = GetSidLengthRequired(domain_subauth + 1);
+
+            if (*cbSid < output_sid_length) {
+                SetLastError(ERROR_INSUFFICIENT_BUFFER);
+                return FALSE;
+            }
+
+            CopyMemory(pSid, DomainSid, domain_sid_length);
+            (*GetSidSubAuthorityCount(pSid))++;
+            (*GetSidSubAuthority(pSid, domain_subauth)) = WellKnownRids[i].Rid;
+            *cbSid = output_sid_length;
+            return TRUE;
+        }
 
     SetLastError(ERROR_INVALID_PARAMETER);
     return FALSE;
@@ -1316,6 +1362,17 @@ BOOL WINAPI GetSecurityDescriptorControl ( PSECURITY_DESCRIPTOR  pSecurityDescri
 		 PSECURITY_DESCRIPTOR_CONTROL pControl, LPDWORD lpdwRevision)
 {
     return set_ntstatus( RtlGetControlSecurityDescriptor(pSecurityDescriptor,pControl,lpdwRevision));
+}
+
+/******************************************************************************
+ * SetSecurityDescriptorControl			[ADVAPI32.@]
+ */
+BOOL WINAPI SetSecurityDescriptorControl( PSECURITY_DESCRIPTOR pSecurityDescriptor,
+  SECURITY_DESCRIPTOR_CONTROL ControlBitsOfInterest,
+  SECURITY_DESCRIPTOR_CONTROL ControlBitsToSet )
+{
+    return set_ntstatus( RtlSetControlSecurityDescriptor(
+        pSecurityDescriptor, ControlBitsOfInterest, ControlBitsToSet ) );
 }
 
 /*	##############################
@@ -3032,16 +3089,6 @@ BOOL WINAPI SetPrivateObjectSecurity( SECURITY_INFORMATION SecurityInformation,
     return TRUE;
 }
 
-BOOL WINAPI SetSecurityDescriptorControl( PSECURITY_DESCRIPTOR pSecurityDescriptor,
-  SECURITY_DESCRIPTOR_CONTROL ControlBitsOfInterest,
-  SECURITY_DESCRIPTOR_CONTROL ControlBitsToSet )
-{
-    FIXME("%p 0x%08x 0x%08x - stub\n", pSecurityDescriptor, ControlBitsOfInterest,
-          ControlBitsToSet);
-
-    return TRUE;
-}
-
 BOOL WINAPI AreAllAccessesGranted( DWORD GrantedAccess, DWORD DesiredAccess )
 {
     return RtlAreAllAccessesGranted( GrantedAccess, DesiredAccess );
@@ -3948,7 +3995,7 @@ static BOOL DumpSacl(PSECURITY_DESCRIPTOR SecurityDescriptor, WCHAR **pwptr, ULO
 /******************************************************************************
  * ConvertSecurityDescriptorToStringSecurityDescriptorA [ADVAPI32.@]
  */
-BOOL WINAPI ConvertSecurityDescriptorToStringSecurityDescriptorW(PSECURITY_DESCRIPTOR SecurityDescriptor, DWORD SDRevision, SECURITY_INFORMATION RequestedInformation, LPWSTR *OutputString, ULONG *OutputLen)
+BOOL WINAPI ConvertSecurityDescriptorToStringSecurityDescriptorW(PSECURITY_DESCRIPTOR SecurityDescriptor, DWORD SDRevision, SECURITY_INFORMATION RequestedInformation, LPWSTR *OutputString, PULONG OutputLen)
 {
     ULONG len;
     WCHAR *wptr, *wstr;
@@ -3999,7 +4046,7 @@ BOOL WINAPI ConvertSecurityDescriptorToStringSecurityDescriptorW(PSECURITY_DESCR
 /******************************************************************************
  * ConvertSecurityDescriptorToStringSecurityDescriptorA [ADVAPI32.@]
  */
-BOOL WINAPI ConvertSecurityDescriptorToStringSecurityDescriptorA(PSECURITY_DESCRIPTOR SecurityDescriptor, DWORD SDRevision, SECURITY_INFORMATION Information, LPSTR *OutputString, ULONG *OutputLen)
+BOOL WINAPI ConvertSecurityDescriptorToStringSecurityDescriptorA(PSECURITY_DESCRIPTOR SecurityDescriptor, DWORD SDRevision, SECURITY_INFORMATION Information, LPSTR *OutputString, PULONG OutputLen)
 {
     LPWSTR wstr;
     ULONG len;

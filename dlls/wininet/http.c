@@ -830,6 +830,8 @@ BOOL WINAPI HttpEndRequestW(HINTERNET hRequest,
     if (NULL == lpwhr || lpwhr->hdr.htype != WH_HHTTPREQ)
     {
         INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
+        if (lpwhr)
+            WININET_Release( &lpwhr->hdr );
     	return FALSE;
     }
 
@@ -881,6 +883,7 @@ BOOL WINAPI HttpEndRequestW(HINTERNET hRequest,
         }
     }
 
+    WININET_Release( &lpwhr->hdr );
     TRACE("%i <--\n",rc);
     return rc;
 }
@@ -2179,9 +2182,12 @@ BOOL WINAPI HttpSendRequestExW(HINTERNET hRequest,
     }
     else
     {
-        ret = HTTP_HttpSendRequestW(lpwhr, lpBuffersIn->lpcszHeader, lpBuffersIn->dwHeadersLength,
-                                    lpBuffersIn->lpvBuffer, lpBuffersIn->dwBufferLength,
-                                    lpBuffersIn->dwBufferTotal, FALSE);
+        if (lpBuffersIn)
+            ret = HTTP_HttpSendRequestW(lpwhr, lpBuffersIn->lpcszHeader, lpBuffersIn->dwHeadersLength,
+                                        lpBuffersIn->lpvBuffer, lpBuffersIn->dwBufferLength,
+                                        lpBuffersIn->dwBufferTotal, FALSE);
+        else
+            ret = HTTP_HttpSendRequestW(lpwhr, NULL, 0, NULL, 0, 0, FALSE);
     }
  
     WININET_Release(&lpwhr->hdr);

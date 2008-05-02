@@ -289,7 +289,7 @@ static struct object *create_console_input( struct thread* renderer )
     console_input->input_cp      = 0;
     console_input->output_cp     = 0;
     console_input->win           = 0;
-    console_input->event         = create_event( NULL, NULL, 0, 1, 0 );
+    console_input->event         = create_event( NULL, NULL, 0, 1, 0, NULL );
 
     if (!console_input->history || !console_input->evt)
     {
@@ -710,7 +710,7 @@ static int set_console_input_info( const struct set_console_input_info_request *
 	console->history_index -= delta;
 
 	for (i = 0; i < console->history_size; i++)
-	    if (console->history[i]) free( console->history[i] );
+	    free( console->history[i] );
 	free( console->history );
 	console->history = mem;
 	console->history_size = req->history_size;
@@ -1033,7 +1033,7 @@ static void console_input_destroy( struct object *obj )
     release_object( console_in->event );
 
     for (i = 0; i < console_in->history_size; i++)
-        if (console_in->history[i]) free( console_in->history[i] );
+        free( console_in->history[i] );
     free( console_in->history );
 }
 

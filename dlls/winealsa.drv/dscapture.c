@@ -534,6 +534,7 @@ static ULONG WINAPI IDsCaptureDriverBufferImpl_Release(PIDSCDRIVERBUFFER iface)
     TRACE("mmap buffer %p destroyed\n", This->mmap_buffer);
 
     This->drv->capture_buffer = NULL;
+    LeaveCriticalSection(&This->pcm_crst);
     This->pcm_crst.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&This->pcm_crst);
 
@@ -597,7 +598,7 @@ static HRESULT WINAPI IDsCaptureDriverBufferImpl_SetFormat(PIDSCDRIVERBUFFER ifa
     {
         case  8: format = SND_PCM_FORMAT_U8; break;
         case 16: format = SND_PCM_FORMAT_S16_LE; break;
-        case 24: format = SND_PCM_FORMAT_S24_LE; break;
+        case 24: format = SND_PCM_FORMAT_S24_3LE; break;
         case 32: format = SND_PCM_FORMAT_S32_LE; break;
         default: FIXME("Unsupported bpp: %d\n", pwfx->wBitsPerSample); return DSERR_GENERIC;
     }

@@ -97,8 +97,8 @@ enum Rle_EscapeCodes
 };
 
 
-static INT X11DRV_DIB_Coerce(X_PHYSBITMAP *,INT,BOOL);
-static INT X11DRV_DIB_Lock(X_PHYSBITMAP *,INT,BOOL);
+static INT X11DRV_DIB_Coerce(X_PHYSBITMAP *,INT);
+static INT X11DRV_DIB_Lock(X_PHYSBITMAP *,INT);
 static void X11DRV_DIB_Unlock(X_PHYSBITMAP *,BOOL);
 
 /* 
@@ -257,6 +257,34 @@ static int DIB_GetBitmapInfoEx( const BITMAPINFOHEADER *header, LONG *width,
 
 
 /***********************************************************************
+ *           X11DRV_DIB_GetColorCount
+ *
+ * Computes the number of colors for the bitmap palette.
+ * Should not be called for a >8-bit deep bitmap.
+ */
+static unsigned int X11DRV_DIB_GetColorCount(const BITMAPINFO *info)
+{
+    unsigned int colors;
+    BOOL core_info = info->bmiHeader.biSize == sizeof(BITMAPCOREHEADER);
+
+    if (core_info)
+    {
+        colors = 1 << ((const BITMAPCOREINFO*)info)->bmciHeader.bcBitCount;
+    }
+    else
+    {
+        colors = info->bmiHeader.biClrUsed;
+        if (!colors) colors = 1 << info->bmiHeader.biBitCount;
+    }
+    if (colors > 256)
+    {
+        ERR("called with >256 colors!\n");
+        colors = 0;
+    }
+    return colors;
+}
+
+/***********************************************************************
  *           DIB_GetBitmapInfo
  *
  * Get the info from a bitmap header.
@@ -343,15 +371,10 @@ static int *X11DRV_DIB_GenColorMap( X11DRV_PDEVICE *physDev, int *colorMapping,
     }
     else  /* DIB_PAL_COLORS */
     {
-        if (colorPtr) {
-            const WORD * index = (const WORD *)colorPtr;
+        const WORD * index = (const WORD *)colorPtr;
 
-            for (i = start; i < end; i++, index++)
-                colorMapping[i] = X11DRV_PALETTE_ToPhysical( physDev, PALETTEINDEX(*index) );
-        } else {
-            for (i = start; i < end; i++)
-                colorMapping[i] = X11DRV_PALETTE_ToPhysical( physDev, PALETTEINDEX(i) );
-        }
+        for (i = start; i < end; i++, index++)
+            colorMapping[i] = X11DRV_PALETTE_ToPhysical( physDev, PALETTEINDEX(*index) );
     }
 
     return colorMapping;
@@ -366,40 +389,21 @@ static int *X11DRV_DIB_GenColorMap( X11DRV_PDEVICE *physDev, int *colorMapping,
 static int *X11DRV_DIB_BuildColorMap( X11DRV_PDEVICE *physDev, WORD coloruse, WORD depth,
                                       const BITMAPINFO *info, int *nColors )
 {
-    unsigned int colors;
     BOOL isInfo;
     const void *colorPtr;
     int *colorMapping;
 
+
+    *nColors = X11DRV_DIB_GetColorCount(info);
+    if (!*nColors) return NULL;
+
     isInfo = info->bmiHeader.biSize != sizeof(BITMAPCOREHEADER);
-
-    if (isInfo)
-    {
-        colors = info->bmiHeader.biClrUsed;
-        if (!colors) colors = 1 << info->bmiHeader.biBitCount;
-    }
-    else
-    {
-        colors = 1 << ((const BITMAPCOREHEADER *)info)->bcBitCount;
-    }
-
-    colorPtr = (const BYTE*) info + (WORD) info->bmiHeader.biSize;
-
-    if (colors > 256)
-    {
-        ERR("called with >256 colors!\n");
-        return NULL;
-    }
-
-    /* just so CopyDIBSection doesn't have to create an identity palette */
-    if (coloruse == (WORD)-1) colorPtr = NULL;
-
-    if (!(colorMapping = HeapAlloc(GetProcessHeap(), 0, colors * sizeof(int) )))
+    colorPtr = (const BYTE*)info + (WORD)info->bmiHeader.biSize;
+    if (!(colorMapping = HeapAlloc(GetProcessHeap(), 0, *nColors * sizeof(int) )))
         return NULL;
 
-    *nColors = colors;
     return X11DRV_DIB_GenColorMap( physDev, colorMapping, coloruse, depth,
-                                   isInfo, colorPtr, 0, colors);
+                                   isInfo, colorPtr, 0, *nColors);
 }
 
 /***********************************************************************
@@ -610,7 +614,7 @@ static void X11DRV_DIB_GetImageBits_1( int lines, BYTE *dstbits,
                 dstval=0;
                 for (x=0; x<width; x++) {
                     PALETTEENTRY srcval;
-                    srcval=srccolors[(int)*srcpixel++];
+                    srcval=srccolors[*srcpixel++];
                     dstval|=(X11DRV_DIB_GetNearestIndex
                              (colors, 2,
                               srcval.peRed,
@@ -994,7 +998,7 @@ static void X11DRV_DIB_GetImageBits_4( int lines, BYTE *dstbits,
                 dstval=0;
                 for (x=0; x<width; x++) {
                     PALETTEENTRY srcval;
-                    srcval = srccolors[(int)*srcpixel++];
+                    srcval = srccolors[*srcpixel++];
                     dstval|=(X11DRV_DIB_GetNearestIndex
                              (colors, 16,
                               srcval.peRed,
@@ -1186,7 +1190,7 @@ static void X11DRV_DIB_GetImageBits_4( int lines, BYTE *dstbits,
                         srcbyte+=6;
                     }
                     if (width&1) {
-                        /* And the the odd pixel */
+                        /* And then the odd pixel */
                         *dstbyte++=(X11DRV_DIB_GetNearestIndex
                                     (colors, 16,
                                      srcbyte[2],
@@ -1216,7 +1220,7 @@ static void X11DRV_DIB_GetImageBits_4( int lines, BYTE *dstbits,
                         srcbyte+=6;
                     }
                     if (width&1) {
-                        /* And the the odd pixel */
+                        /* And then the odd pixel */
                         *dstbyte++=(X11DRV_DIB_GetNearestIndex
                                     (colors, 16,
                                      srcbyte[0],
@@ -1262,7 +1266,7 @@ static void X11DRV_DIB_GetImageBits_4( int lines, BYTE *dstbits,
                         srcbyte+=8;
                     }
                     if (width&1) {
-                        /* And the the odd pixel */
+                        /* And then the odd pixel */
                         *dstbyte++=(X11DRV_DIB_GetNearestIndex
                                     (colors, 16,
                                      srcbyte[2],
@@ -1292,7 +1296,7 @@ static void X11DRV_DIB_GetImageBits_4( int lines, BYTE *dstbits,
                         srcbyte+=8;
                     }
                     if (width&1) {
-                        /* And the the odd pixel */
+                        /* And then the odd pixel */
                         *dstbyte++=(X11DRV_DIB_GetNearestIndex
                                     (colors, 16,
                                      srcbyte[0],
@@ -1573,7 +1577,7 @@ static void X11DRV_DIB_GetImageBits_8( int lines, BYTE *dstbits,
                dstbyte=dstbits;
                for (x = 0; x < width; x++) {
                    PALETTEENTRY srcval;
-                   srcval=srccolors[(int)*srcpixel++];
+                   srcval=srccolors[*srcpixel++];
                    *dstbyte++=X11DRV_DIB_GetNearestIndex(colors, 256,
                                                          srcval.peRed,
                                                          srcval.peGreen,
@@ -2414,7 +2418,7 @@ static void X11DRV_DIB_GetImageBits_16( int lines, BYTE *dstbits,
                 for (x = 0; x < width; x++) {
                     PALETTEENTRY srcval;
                     DWORD dstval;
-                    srcval=srccolors[(int)*srcpixel++];
+                    srcval=srccolors[*srcpixel++];
                     dstval=((srcval.peRed   << rShift) & rDst) |
                            ((srcval.peGreen << gShift) & gDst) |
                            ((srcval.peBlue  << bShift) & bDst);
@@ -2811,7 +2815,7 @@ static void X11DRV_DIB_GetImageBits_24( int lines, BYTE *dstbits,
                 dstbyte=dstbits;
                 for (x = 0; x < width; x++ ) {
                     PALETTEENTRY srcval;
-                    srcval=srccolors[(int)*srcpixel++];
+                    srcval=srccolors[*srcpixel++];
                     dstbyte[0]=srcval.peBlue;
                     dstbyte[1]=srcval.peGreen;
                     dstbyte[2]=srcval.peRed;
@@ -3396,7 +3400,7 @@ static void X11DRV_DIB_GetImageBits_32( int lines, BYTE *dstbits,
                 dstpixel=(DWORD*)dstbits;
                 for (x = 0; x < width; x++) {
                     PALETTEENTRY srcval;
-                    srcval=srccolors[(int)*srcpixel++];
+                    srcval=srccolors[*srcpixel++];
                     *dstpixel++=(srcval.peRed   << rShift) |
                                 (srcval.peGreen << gShift) |
                                 (srcval.peBlue  << bShift);
@@ -3799,7 +3803,7 @@ INT X11DRV_SetDIBitsToDevice( X11DRV_PDEVICE *physDev, INT xDest, INT yDest, DWO
     if (!cx || !cy) return lines;
 
     /* Update the pixmap from the DIB section */
-    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod, FALSE);
+    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod);
 
     X11DRV_SetupGCForText( physDev );  /* To have the correct colors */
     wine_tsx11_lock();
@@ -3939,7 +3943,7 @@ INT X11DRV_SetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan,
   descr.height    = lines;
   descr.useShm    = FALSE;
   descr.dibpitch  = ((descr.infoWidth * descr.infoBpp + 31) &~31) / 8;
-  X11DRV_DIB_Lock( physBitmap, DIB_Status_GdiMod, FALSE );
+  X11DRV_DIB_Lock( physBitmap, DIB_Status_GdiMod );
   result = X11DRV_DIB_SetImageBits( &descr );
   X11DRV_DIB_Unlock( physBitmap, TRUE );
 
@@ -4069,7 +4073,7 @@ INT X11DRV_GetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan, 
   descr.dibpitch = (obj_size == sizeof(DIBSECTION)) ? dib.dsBm.bmWidthBytes
 		       : (((descr.infoWidth * descr.infoBpp + 31) &~31) / 8);
 
-  X11DRV_DIB_Lock( physBitmap, DIB_Status_GdiMod, FALSE );
+  X11DRV_DIB_Lock( physBitmap, DIB_Status_GdiMod );
   X11DRV_DIB_GetImageBits( &descr );
   X11DRV_DIB_Unlock( physBitmap, TRUE );
 
@@ -4199,7 +4203,9 @@ void X11DRV_DIB_CopyDIBSection(X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physD
 {
   DIBSECTION dib;
   X_PHYSBITMAP *physBitmap;
-  int nColorMap = 0, *colorMap = NULL, aColorMap = FALSE;
+  unsigned int nColorMap;
+  int* x11ColorMap;
+  int freeColorMap;
 
   TRACE("(%p,%p,%d,%d,%d,%d,%d,%d)\n", physDevSrc->hdc, physDevDst->hdc,
     xSrc, ySrc, xDest, yDest, width, height);
@@ -4228,24 +4234,34 @@ void X11DRV_DIB_CopyDIBSection(X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physD
 	 * use the DIB colormap instead - this is necessary in some
 	 * cases since we need to do depth conversion in some places
 	 * where real Windows can just copy data straight over */
-	colorMap = physBitmap->colorMap;
+	x11ColorMap = physBitmap->colorMap;
 	nColorMap = physBitmap->nColorMap;
+        freeColorMap = FALSE;
       } else {
-	colorMap = X11DRV_DIB_BuildColorMap( physDevSrc, (WORD)-1,
-					     dib.dsBm.bmBitsPixel,
-					     (BITMAPINFO*)&dib.dsBmih,
-					     &nColorMap );
-	if (colorMap) aColorMap = TRUE;
+	  const BITMAPINFO* info = (BITMAPINFO*)&dib.dsBmih;
+	  int i;
+
+	  nColorMap = X11DRV_DIB_GetColorCount(info);
+	  x11ColorMap = HeapAlloc(GetProcessHeap(), 0, nColorMap * sizeof(int));
+	  for (i = 0; i < nColorMap; i++)
+	      x11ColorMap[i] = X11DRV_PALETTE_ToPhysical(physDevSrc, PALETTEINDEX(i));
+	  freeColorMap = TRUE;
       }
     }
+    else
+    {
+        nColorMap = 0;
+        x11ColorMap = NULL;
+        freeColorMap = FALSE;
+    }
     /* perform the copy */
-    X11DRV_DIB_DoCopyDIBSection(physBitmap, FALSE, colorMap, nColorMap,
+    X11DRV_DIB_DoCopyDIBSection(physBitmap, FALSE, x11ColorMap, nColorMap,
 				physDevDst->drawable, physDevDst->gc, xSrc, ySrc,
                                 physDevDst->dc_rect.left + xDest, physDevDst->dc_rect.top + yDest,
 				width, height);
     /* free color mapping */
-    if (aColorMap)
-      HeapFree(GetProcessHeap(), 0, colorMap);
+    if (freeColorMap)
+      HeapFree(GetProcessHeap(), 0, x11ColorMap);
   }
 }
 
@@ -4292,13 +4308,13 @@ static LONG CALLBACK X11DRV_DIB_FaultHandler( PEXCEPTION_POINTERS ep )
 
     if (!found) return EXCEPTION_CONTINUE_SEARCH;
 
-    X11DRV_DIB_Lock( physBitmap, DIB_Status_None, FALSE );
+    X11DRV_DIB_Lock( physBitmap, DIB_Status_None );
     if (ep->ExceptionRecord->ExceptionInformation[0] == EXCEPTION_WRITE_FAULT) {
         /* the app tried to write the DIB bits */
-        X11DRV_DIB_Coerce( physBitmap, DIB_Status_AppMod, FALSE );
+        X11DRV_DIB_Coerce( physBitmap, DIB_Status_AppMod);
     } else {
         /* the app tried to read the DIB bits */
-        X11DRV_DIB_Coerce( physBitmap, DIB_Status_InSync, FALSE );
+        X11DRV_DIB_Coerce( physBitmap, DIB_Status_InSync);
     }
     X11DRV_DIB_Unlock( physBitmap, TRUE );
 
@@ -4308,7 +4324,7 @@ static LONG CALLBACK X11DRV_DIB_FaultHandler( PEXCEPTION_POINTERS ep )
 /***********************************************************************
  *           X11DRV_DIB_Coerce
  */
-static INT X11DRV_DIB_Coerce(X_PHYSBITMAP *physBitmap, INT req, BOOL lossy)
+static INT X11DRV_DIB_Coerce(X_PHYSBITMAP *physBitmap, INT req)
 {
     INT ret = DIB_Status_None;
 
@@ -4340,11 +4356,9 @@ static INT X11DRV_DIB_Coerce(X_PHYSBITMAP *physBitmap, INT req, BOOL lossy)
 
         case DIB_Status_AppMod:
 	  TRACE("GdiMod requested in status AppMod\n" );
-	  if (!lossy) {
-	    /* make it readonly to avoid app changing data while we copy */
-	    X11DRV_DIB_DoProtectDIBSection( physBitmap, PAGE_READONLY );
-	    X11DRV_DIB_DoUpdateDIBSection( physBitmap, FALSE );
-	  }
+	  /* make it readonly to avoid app changing data while we copy */
+	  X11DRV_DIB_DoProtectDIBSection( physBitmap, PAGE_READONLY );
+	  X11DRV_DIB_DoUpdateDIBSection( physBitmap, FALSE );
 	  X11DRV_DIB_DoProtectDIBSection( physBitmap, PAGE_NOACCESS );
 	  physBitmap->p_status = DIB_Status_AppMod;
 	  physBitmap->status = DIB_Status_GdiMod;
@@ -4364,10 +4378,8 @@ static INT X11DRV_DIB_Coerce(X_PHYSBITMAP *physBitmap, INT req, BOOL lossy)
 
 	case DIB_Status_GdiMod:
 	  TRACE("InSync requested in status GdiMod\n" );
-	  if (!lossy) {
-	    X11DRV_DIB_DoProtectDIBSection( physBitmap, PAGE_READWRITE );
-	    X11DRV_DIB_DoUpdateDIBSection( physBitmap, TRUE );
-	  }
+	  X11DRV_DIB_DoProtectDIBSection( physBitmap, PAGE_READWRITE );
+	  X11DRV_DIB_DoUpdateDIBSection( physBitmap, TRUE );
 	  X11DRV_DIB_DoProtectDIBSection( physBitmap, PAGE_READONLY );
 	  physBitmap->status = DIB_Status_InSync;
 	  break;
@@ -4398,7 +4410,7 @@ static INT X11DRV_DIB_Coerce(X_PHYSBITMAP *physBitmap, INT req, BOOL lossy)
 	case DIB_Status_GdiMod:
 	  TRACE("AppMod requested in status GdiMod\n" );
 	  X11DRV_DIB_DoProtectDIBSection( physBitmap, PAGE_READWRITE );
-	  if (!lossy) X11DRV_DIB_DoUpdateDIBSection( physBitmap, TRUE );
+	  X11DRV_DIB_DoUpdateDIBSection( physBitmap, TRUE );
 	  physBitmap->status = DIB_Status_AppMod;
 	  break;
 
@@ -4425,7 +4437,7 @@ static INT X11DRV_DIB_Coerce(X_PHYSBITMAP *physBitmap, INT req, BOOL lossy)
 /***********************************************************************
  *           X11DRV_DIB_Lock
  */
-static INT X11DRV_DIB_Lock(X_PHYSBITMAP *physBitmap, INT req, BOOL lossy)
+static INT X11DRV_DIB_Lock(X_PHYSBITMAP *physBitmap, INT req)
 {
     INT ret = DIB_Status_None;
 
@@ -4434,7 +4446,7 @@ static INT X11DRV_DIB_Lock(X_PHYSBITMAP *physBitmap, INT req, BOOL lossy)
     EnterCriticalSection(&physBitmap->lock);
     ret = physBitmap->status;
     if (req != DIB_Status_None)
-      X11DRV_DIB_Coerce(physBitmap, req, lossy);
+      X11DRV_DIB_Coerce(physBitmap, req);
     return ret;
 }
 
@@ -4499,19 +4511,19 @@ static void X11DRV_DIB_Unlock(X_PHYSBITMAP *physBitmap, BOOL commit)
 /***********************************************************************
  *           X11DRV_CoerceDIBSection
  */
-INT X11DRV_CoerceDIBSection(X11DRV_PDEVICE *physDev, INT req, BOOL lossy)
+INT X11DRV_CoerceDIBSection(X11DRV_PDEVICE *physDev, INT req)
 {
     if (!physDev || !physDev->bitmap) return DIB_Status_None;
-    return X11DRV_DIB_Coerce(physDev->bitmap, req, lossy);
+    return X11DRV_DIB_Coerce(physDev->bitmap, req);
 }
 
 /***********************************************************************
  *           X11DRV_LockDIBSection
  */
-INT X11DRV_LockDIBSection(X11DRV_PDEVICE *physDev, INT req, BOOL lossy)
+INT X11DRV_LockDIBSection(X11DRV_PDEVICE *physDev, INT req)
 {
     if (!physDev || !physDev->bitmap) return DIB_Status_None;
-    return X11DRV_DIB_Lock(physDev->bitmap, req, lossy);
+    return X11DRV_DIB_Lock(physDev->bitmap, req);
 }
 
 /***********************************************************************
@@ -4656,7 +4668,7 @@ void X11DRV_DIB_DeleteDIBSection(X_PHYSBITMAP *physBitmap, DIBSECTION *dib)
   }
 
   if (dib->dshSection)
-      X11DRV_DIB_Coerce(physBitmap, DIB_Status_InSync, FALSE);
+      X11DRV_DIB_Coerce(physBitmap, DIB_Status_InSync);
 
   if (physBitmap->image)
   {
@@ -4704,7 +4716,7 @@ UINT X11DRV_SetDIBColorTable( X11DRV_PDEVICE *physDev, UINT start, UINT count, c
          * FIXME we need to recalculate the pen, brush, text and bkgnd pixels here,
          * at least for a 1 bpp dibsection
          */
-        X11DRV_DIB_Lock( physBitmap, DIB_Status_AppMod, FALSE );
+        X11DRV_DIB_Lock( physBitmap, DIB_Status_AppMod );
         X11DRV_DIB_GenColorMap( physDev, physBitmap->colorMap, DIB_RGB_COLORS,
                                 dib.dsBm.bmBitsPixel,
                                 TRUE, colors, start, end );

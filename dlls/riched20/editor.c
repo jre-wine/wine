@@ -1850,7 +1850,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     if (!wParam)
       ME_EmptyUndoStack(editor);
     ME_UpdateRepaint(editor);
-    return 0;
+    return len;
   }
   case EM_SCROLLCARET:
   {
@@ -2431,7 +2431,9 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
       SendMessageW(editor->hWnd, EM_UNDO, 0, 0);
       return 0;
     }
-    if (((unsigned)wstr)>=' ' || wstr=='\r' || wstr=='\t') {
+    if (((unsigned)wstr)>=' '
+        || (wstr=='\r' && (GetWindowLongW(hWnd, GWL_STYLE) & ES_MULTILINE))
+        || wstr=='\t') {
       /* FIXME maybe it would make sense to call EM_REPLACESEL instead ? */
       /* WM_CHAR is restricted to nTextLimit */
       int from, to;

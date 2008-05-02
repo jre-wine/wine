@@ -281,10 +281,13 @@ AC_CHECK_HEADERS([netinet/in_pcb.h netinet/ip_var.h net/if.h net/if_arp.h net/if
     [#include <sys/types.h>
      #if HAVE_SYS_SOCKET_H
      # include <sys/socket.h>
-     #endif])
+     #endif
      #if HAVE_SYS_SOCKETVAR_H
      # include <sys/socketvar.h>
      #endif
+     #if HAVE_NETINET_IN_H
+     # include <netinet/in.h>
+     #endif])
 
 AC_CHECK_HEADERS([netinet/tcp_var.h],,,
     [#include <sys/types.h>
@@ -1040,6 +1043,19 @@ dnl **** Check for fontconfig ****
 if test "$ac_cv_header_fontconfig_fontconfig_h" = "yes"
 then
     WINE_CHECK_SONAME(fontconfig,FcInit)
+elif test -n "$X_CFLAGS"
+then
+    dnl fontconfig is in the X directory on Mac OS X
+    ac_save_CPPFLAGS="$CPPFLAGS"
+    CPPFLAGS="$CPPFLAGS $X_CFLAGS"
+    $as_unset ac_cv_header_fontconfig_fontconfig_h
+    AC_CHECK_HEADERS([fontconfig/fontconfig.h])
+    CPPFLAGS="$ac_save_CPPFLAGS"
+    if test "$ac_cv_header_fontconfig_fontconfig_h" = "yes"
+    then
+        AC_SUBST(FONTCONFIGINCL,"$X_CFLAGS")
+        WINE_CHECK_SONAME(fontconfig,FcInit,,,[$X_LIBS])
+    fi
 fi
 WINE_NOTICE_IF([test "x$ac_cv_lib_soname_fontconfig" = "x"],[fontconfig development files not found.
 Wine will be built without fontconfig support.])
@@ -1232,6 +1248,7 @@ AC_CHECK_FUNCS(\
 	_popen \
 	_snprintf \
 	_spawnvp \
+	_strdup \
 	_stricmp \
 	_strnicmp \
 	_vsnprintf \
@@ -1280,6 +1297,7 @@ AC_CHECK_FUNCS(\
 	statfs \
 	statvfs \
 	strcasecmp \
+	strdup \
 	strerror \
 	strncasecmp \
 	strtold \
@@ -1350,13 +1368,13 @@ fi
 AC_CACHE_CHECK([whether we can use re-entrant gethostbyname_r Linux style],
    	wine_cv_linux_gethostbyname_r_6,
 	AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <netdb.h>]],[[
-    char *name=NULL;
+    char *name=0;
     struct hostent he;
     struct hostent *result;
-    char *buf=NULL;
+    char *buf=0;
     int bufsize=0;
     int res,errnr;
-    char *addr=NULL;
+    char *addr=0;
     int addrlen=0;
     int addrtype=0;
     res=gethostbyname_r(name,&he,buf,bufsize,&result,&errnr);
@@ -1586,11 +1604,13 @@ AC_CONFIG_FILES([dlls/comdlg32/Makefile])
 AC_CONFIG_FILES([dlls/comdlg32/tests/Makefile])
 AC_CONFIG_FILES([dlls/compstui/Makefile])
 AC_CONFIG_FILES([dlls/credui/Makefile])
+AC_CONFIG_FILES([dlls/credui/tests/Makefile])
 AC_CONFIG_FILES([dlls/crtdll/Makefile])
 AC_CONFIG_FILES([dlls/crypt32/Makefile])
 AC_CONFIG_FILES([dlls/crypt32/tests/Makefile])
 AC_CONFIG_FILES([dlls/cryptdll/Makefile])
 AC_CONFIG_FILES([dlls/cryptnet/Makefile])
+AC_CONFIG_FILES([dlls/cryptnet/tests/Makefile])
 AC_CONFIG_FILES([dlls/ctl3d32/Makefile])
 AC_CONFIG_FILES([dlls/d3d10/Makefile])
 AC_CONFIG_FILES([dlls/d3d8/Makefile])
@@ -1601,6 +1621,7 @@ AC_CONFIG_FILES([dlls/d3dim/Makefile])
 AC_CONFIG_FILES([dlls/d3drm/Makefile])
 AC_CONFIG_FILES([dlls/d3drm/tests/Makefile])
 AC_CONFIG_FILES([dlls/d3dx8/Makefile])
+AC_CONFIG_FILES([dlls/d3dx8/tests/Makefile])
 AC_CONFIG_FILES([dlls/d3dxof/Makefile])
 AC_CONFIG_FILES([dlls/dbghelp/Makefile])
 AC_CONFIG_FILES([dlls/dciman32/Makefile])
@@ -1701,6 +1722,7 @@ AC_CONFIG_FILES([dlls/mshtml/tests/Makefile])
 AC_CONFIG_FILES([dlls/msi/Makefile])
 AC_CONFIG_FILES([dlls/msi/tests/Makefile])
 AC_CONFIG_FILES([dlls/msimg32/Makefile])
+AC_CONFIG_FILES([dlls/msimtf/Makefile])
 AC_CONFIG_FILES([dlls/msisys.ocx/Makefile])
 AC_CONFIG_FILES([dlls/msnet32/Makefile])
 AC_CONFIG_FILES([dlls/msrle32/Makefile])
@@ -1759,6 +1781,7 @@ AC_CONFIG_FILES([dlls/resutils/Makefile])
 AC_CONFIG_FILES([dlls/riched20/Makefile])
 AC_CONFIG_FILES([dlls/riched20/tests/Makefile])
 AC_CONFIG_FILES([dlls/riched32/Makefile])
+AC_CONFIG_FILES([dlls/riched32/tests/Makefile])
 AC_CONFIG_FILES([dlls/rpcrt4/Makefile])
 AC_CONFIG_FILES([dlls/rpcrt4/tests/Makefile])
 AC_CONFIG_FILES([dlls/rsabase/Makefile])

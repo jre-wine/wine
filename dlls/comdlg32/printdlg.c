@@ -133,8 +133,9 @@ INT PRINTDLG_SetUpPrinterListComboA(HWND hDlg, UINT id, LPCSTR name)
 
         char buf[260];
         DWORD dwBufLen = sizeof(buf);
-        FIXME("Can't find '%s' in printer list so trying to find default\n",
-	      name);
+        if (name != NULL)
+            WARN("Can't find %s in printer list so trying to find default\n",
+	        debugstr_a(name));
 	if(!GetDefaultPrinterA(buf, &dwBufLen))
 	    return num;
 	i = SendDlgItemMessageA(hDlg, id, CB_FINDSTRINGEXACT, -1, (LPARAM)buf);
@@ -165,8 +166,9 @@ static INT PRINTDLG_SetUpPrinterListComboW(HWND hDlg, UINT id, LPCWSTR name)
 				(LPARAM)name)) == CB_ERR) {
         WCHAR buf[260];
         DWORD dwBufLen = sizeof(buf)/sizeof(buf[0]);
-        TRACE("Can't find '%s' in printer list so trying to find default\n",
-	      debugstr_w(name));
+        if (name != NULL)
+            WARN("Can't find %s in printer list so trying to find default\n",
+	        debugstr_w(name));
 	if(!GetDefaultPrinterW(buf, &dwBufLen))
 	    return num;
 	i = SendDlgItemMessageW(hDlg, id, CB_FINDSTRINGEXACT, -1, (LPARAM)buf);
@@ -1985,7 +1987,7 @@ static BOOL PRINTDLG_CreateDCW(LPPRINTDLGW lppd)
 /***********************************************************************
  *           PrintDlgA   (COMDLG32.@)
  *
- *  Displays the the PRINT dialog box, which enables the user to specify
+ *  Displays the PRINT dialog box, which enables the user to specify
  *  specific properties of the print job.
  *  
  * PARAMS
@@ -3357,7 +3359,7 @@ PageDlgProcW(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 /***********************************************************************
  *            PageSetupDlgA  (COMDLG32.@)
  *
- *  Displays the the PAGE SETUP dialog box, which enables the user to specify
+ *  Displays the PAGE SETUP dialog box, which enables the user to specify
  *  specific properties of a printed page such as
  *  size, source, orientation and the width of the page margins.
  *
@@ -3381,6 +3383,11 @@ BOOL WINAPI PageSetupDlgA(LPPAGESETUPDLGA setupdlg) {
     PageSetupDataA	*pda;
     PRINTDLGA		pdlg;
 
+    if (setupdlg == NULL) {
+	   COMDLG32_SetCommDlgExtendedError(CDERR_INITIALIZATION);
+	   return FALSE;
+    }
+
     /* TRACE */
     if(TRACE_ON(commdlg)) {
         char flagstr[1000] = "";
@@ -3397,11 +3404,8 @@ BOOL WINAPI PageSetupDlgA(LPPAGESETUPDLGA setupdlg) {
 	      setupdlg->hDevNames,
 	      setupdlg->hInstance, setupdlg->Flags, flagstr);
     }
+
     /* Checking setupdlg structure */
-    if (setupdlg == NULL) {
-	   COMDLG32_SetCommDlgExtendedError(CDERR_INITIALIZATION);
-	   return FALSE;
-    }
     if(setupdlg->lStructSize != sizeof(PAGESETUPDLGA)) {
 	   COMDLG32_SetCommDlgExtendedError(CDERR_STRUCTSIZE);
 	   return FALSE;
@@ -3486,6 +3490,12 @@ BOOL WINAPI PageSetupDlgW(LPPAGESETUPDLGW setupdlg) {
     PRINTDLGW		pdlg;
 
     FIXME("Unicode implementation is not done yet\n");
+
+    if (setupdlg == NULL) {
+	   COMDLG32_SetCommDlgExtendedError(CDERR_INITIALIZATION);
+	   return FALSE;
+    }
+
     if(TRACE_ON(commdlg)) {
         char flagstr[1000] = "";
 	const struct pd_flags *pflag = psd_flags;
@@ -3558,25 +3568,33 @@ BOOL WINAPI PageSetupDlgW(LPPAGESETUPDLGW setupdlg) {
 }
 
 /***********************************************************************
- *	PrintDlgExA (COMDLG32.@)
+ * PrintDlgExA (COMDLG32.@)
  *
  * See PrintDlgExW.
  *
- * FIXME
- *   Stub
+ * BUGS
+ *   Only a Stub
+ *
  */
-HRESULT WINAPI PrintDlgExA(LPPRINTDLGEXA lpPrintDlgExA)
+HRESULT WINAPI PrintDlgExA(LPPRINTDLGEXA lppd)
 {
-	FIXME("stub\n");
-	return E_NOTIMPL;
+
+    FIXME("(%p) stub\n", lppd);
+    if ((lppd == NULL) || (lppd->lStructSize != sizeof(PRINTDLGEXA))) {
+        return E_INVALIDARG;
+    }
+
+    if (!IsWindow(lppd->hwndOwner)) {
+        return E_HANDLE;
+    }
+
+    return E_NOTIMPL;
 }
 
 /***********************************************************************
- *	PrintDlgExW (COMDLG32.@)
+ * PrintDlgExW (COMDLG32.@)
  *
- * Display the the PRINT dialog box, which enables the user to specify
- * specific properties of the print job.  The property sheet can also have
- * additional application-specific and driver-specific property pages.
+ * Display the property sheet style PRINT dialog box
  *  
  * PARAMS
  *  lppd  [IO] ptr to PRINTDLGEX struct
@@ -3590,11 +3608,26 @@ HRESULT WINAPI PrintDlgExA(LPPRINTDLGEXA lpPrintDlgExA)
  *    E_HANDLE      Invalid handle.
  *    E_FAIL        Unspecified error.
  *  
- * FIXME
- *   Stub
+ * NOTES
+ * This Dialog enables the user to specify specific properties of the print job.
+ * The property sheet can also have additional application-specific and
+ * driver-specific property pages.
+ *
+ * BUGS
+ *   Only a Stub
+ *
  */
-HRESULT WINAPI PrintDlgExW(LPPRINTDLGEXW lpPrintDlgExW)
+HRESULT WINAPI PrintDlgExW(LPPRINTDLGEXW lppd)
 {
-	FIXME("stub\n");
-	return E_NOTIMPL;
+
+    FIXME("(%p) stub\n", lppd);
+    if ((lppd == NULL) || (lppd->lStructSize != sizeof(PRINTDLGEXW))) {
+        return E_INVALIDARG;
+    }
+
+    if (!IsWindow(lppd->hwndOwner)) {
+        return E_HANDLE;
+    }
+
+    return E_NOTIMPL;
 }

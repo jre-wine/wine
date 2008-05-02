@@ -124,7 +124,6 @@ static const struct message monthcal_color_seq[] = {
 static const struct message monthcal_curr_date_seq[] = {
     { MCM_SETCURSEL, sent|wparam, 0},
     { WM_PAINT, sent|wparam|lparam|defwinproc, 0, 0},
-    { WM_NCPAINT, sent|wparam|lparam|defwinproc, 1, 0},
     { WM_ERASEBKGND, sent|lparam|defwinproc, 0},
     { MCM_SETCURSEL, sent|wparam, 0},
     { MCM_SETCURSEL, sent|wparam, 0},
@@ -202,11 +201,6 @@ static const struct message monthcal_unicode_seq[] = {
 static const struct message monthcal_hit_test_seq[] = {
     { MCM_SETCURSEL, sent|wparam, 0},
     { WM_PAINT, sent|wparam|lparam|defwinproc, 0, 0},
-    { WM_NCPAINT, sent|wparam|lparam|defwinproc, 1, 0},
-    { WM_ERASEBKGND, sent|lparam|defwinproc, 0},
-    { WM_SETFONT, sent|lparam, 0, 0},
-    { WM_PAINT, sent|wparam|lparam|defwinproc, 0, 0},
-    { WM_ERASEBKGND, sent|lparam|defwinproc, 0},
     { MCM_HITTEST, sent|wparam, 0},
     { MCM_HITTEST, sent|wparam, 0},
     { MCM_HITTEST, sent|wparam, 0},
@@ -227,11 +221,21 @@ static const struct message monthcal_hit_test_seq[] = {
     { 0 }
 };
 
+static const struct message monthcal_todaylink_seq[] = {
+    { MCM_HITTEST, sent|wparam, 0},
+    { MCM_SETTODAY, sent|wparam, 0},
+    { WM_PAINT, sent|wparam|lparam|defwinproc, 0, 0},
+    { MCM_GETTODAY, sent|wparam, 0},
+    { WM_LBUTTONDOWN, sent|wparam|lparam, MK_LBUTTON, MAKELONG(70, 370)},
+    { WM_CAPTURECHANGED, sent|wparam|lparam|defwinproc, 0, 0},
+    { WM_PAINT, sent|wparam|lparam|defwinproc, 0, 0},
+    { MCM_GETCURSEL, sent|wparam, 0},
+    { 0 }
+};
+
 static const struct message monthcal_today_seq[] = {
     { MCM_SETTODAY, sent|wparam, 0},
     { WM_PAINT, sent|wparam|lparam|defwinproc, 0, 0},
-    { WM_NCPAINT, sent|wparam|lparam|defwinproc, 1, 0},
-    { WM_ERASEBKGND, sent|lparam|defwinproc, 0},
     { MCM_GETTODAY, sent|wparam, 0},
     { MCM_SETTODAY, sent|wparam, 0},
     { WM_PAINT, sent|wparam|lparam|defwinproc, 0, 0},
@@ -714,15 +718,12 @@ static void test_monthcal_unicode(HWND hwnd)
     ok_sequence(sequences, MONTHCAL_SEQ_INDEX, monthcal_unicode_seq, "monthcal unicode", FALSE);
 }
 
-static void test_monthcal_HitTest(HWND parent_wnd)
+static void test_monthcal_HitTest(HWND hwnd)
 {
     MCHITTESTINFO mchit;
     int res;
-    HWND hwnd;
     SYSTEMTIME st;
 
-    hwnd = create_monthcal_control(WS_CHILD | WS_BORDER | WS_VISIBLE, parent_wnd);
-    assert(hwnd);
     memset(&mchit, 0, sizeof(MCHITTESTINFO));
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
@@ -738,8 +739,6 @@ static void test_monthcal_HitTest(HWND parent_wnd)
 
     res = SendMessage(hwnd, MCM_SETCURSEL, 0, (LPARAM)&st);
     expect(1,res);
-
-    SendMessage(hwnd, WM_SETFONT, (WPARAM)GetStockObject(SYSTEM_FONT), 0);
 
     /* (0, 0) is the top left of the control and should not be active */
     mchit.cbSize = sizeof(MCHITTESTINFO);
@@ -907,8 +906,64 @@ static void test_monthcal_HitTest(HWND parent_wnd)
     todo_wine {expect(MCHT_TODAYLINK, res);}
 
     ok_sequence(sequences, MONTHCAL_SEQ_INDEX, monthcal_hit_test_seq, "monthcal hit test", TRUE);
+}
 
-    DestroyWindow(hwnd);
+static void test_monthcal_todaylink(HWND hwnd)
+{
+    MCHITTESTINFO mchit;
+    SYSTEMTIME st_test, st_new;
+    BOOL error = FALSE;
+    int res;
+
+    memset(&mchit, 0, sizeof(MCHITTESTINFO));
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    /* (70, 370) is in active area - today link */
+    mchit.cbSize = sizeof(MCHITTESTINFO);
+    mchit.pt.x = 70;
+    mchit.pt.y = 370;
+    res = SendMessage(hwnd, MCM_HITTEST, 0, (LPARAM) & mchit);
+    expect(70, mchit.pt.x);
+    expect(370, mchit.pt.y);
+    expect(mchit.uHit, res);
+    todo_wine {expect(MCHT_TODAYLINK, res);}
+    if (70 != mchit.pt.x || 370 != mchit.pt.y || mchit.uHit != res
+        || MCHT_TODAYLINK != res)
+        error = TRUE;
+
+    st_test.wDay = 1;
+    st_test.wMonth = 1;
+    st_test.wYear = 2005;
+    memset(&st_new, 0, sizeof(SYSTEMTIME));
+
+    SendMessage(hwnd, MCM_SETTODAY, 0, (LPARAM)&st_test);
+
+    res = SendMessage(hwnd, MCM_GETTODAY, 0, (LPARAM)&st_new);
+    expect(1, res);
+    expect(1, st_new.wDay);
+    expect(1, st_new.wMonth);
+    expect(2005, st_new.wYear);
+    if (1 != res || 1 != st_new.wDay || 1 != st_new.wMonth
+        || 2005 != st_new.wYear)
+        error = TRUE;
+
+    if (error) {
+        skip("cannot perform today link test\n");
+        return;
+    }
+
+    res = SendMessage(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELONG(70, 370));
+    expect(0, res);
+
+    memset(&st_new, 0, sizeof(SYSTEMTIME));
+    res = SendMessage(hwnd, MCM_GETCURSEL, 0, (LPARAM)&st_new);
+    expect(1, res);
+    expect(1, st_new.wDay);
+    expect(1, st_new.wMonth);
+    expect(2005, st_new.wYear);
+
+    ok_sequence(sequences, MONTHCAL_SEQ_INDEX, monthcal_todaylink_seq, "monthcal hit test", TRUE);
 }
 
 static void test_monthcal_today(HWND hwnd)
@@ -1068,14 +1123,17 @@ START_TEST(monthcal)
     assert(hwnd);
     ok_sequence(sequences, PARENT_SEQ_INDEX, create_monthcal_control_seq, "create monthcal control", TRUE);
 
+    SendMessage(hwnd, WM_SETFONT, (WPARAM)GetStockObject(SYSTEM_FONT), 0);
+
     test_monthcal_color(hwnd);
     test_monthcal_currDate(hwnd);
     test_monthcal_firstDay(hwnd);
     test_monthcal_unicode(hwnd);
-    test_monthcal_HitTest(parent_wnd);
     test_monthcal_today(hwnd);
     test_monthcal_scroll(hwnd);
     test_monthcal_monthrange(hwnd);
+    test_monthcal_HitTest(hwnd);
+    test_monthcal_todaylink(hwnd);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
     DestroyWindow(hwnd);

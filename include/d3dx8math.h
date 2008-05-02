@@ -58,4 +58,6 @@ typedef struct D3DXCOLOR
     FLOAT r, g, b, a;
 } D3DXCOLOR, *LPD3DXCOLOR;
 
+#include <d3dx8math.inl>
+
 #endif /* __D3DX8MATH_H__ */

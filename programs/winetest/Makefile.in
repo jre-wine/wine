@@ -27,10 +27,13 @@ TESTBINS = \
 	comcat_test.exe \
 	comctl32_test.exe \
 	comdlg32_test.exe \
+	credui_test.exe \
 	crypt32_test.exe \
+	cryptnet_test.exe \
 	d3d8_test.exe \
 	d3d9_test.exe \
 	d3drm_test.exe \
+	d3dx8_test.exe \
 	ddraw_test.exe \
 	dinput_test.exe \
 	dnsapi_test.exe \
@@ -66,6 +69,7 @@ TESTBINS = \
 	psapi_test.exe \
 	quartz_test.exe \
 	riched20_test.exe \
+	riched32_test.exe \
 	rpcrt4_test.exe \
 	rsabase_test.exe \
 	rsaenh_test.exe \
@@ -103,14 +107,20 @@ comctl32_test.exe: $(DLLDIR)/comctl32/tests/comctl32_test.exe$(DLLEXT)
 	cp $(DLLDIR)/comctl32/tests/comctl32_test.exe$(DLLEXT) $@ && $(STRIP) $@
 comdlg32_test.exe: $(DLLDIR)/comdlg32/tests/comdlg32_test.exe$(DLLEXT)
 	cp $(DLLDIR)/comdlg32/tests/comdlg32_test.exe$(DLLEXT) $@ && $(STRIP) $@
+credui_test.exe: $(DLLDIR)/credui/tests/credui_test.exe$(DLLEXT)
+	cp $(DLLDIR)/credui/tests/credui_test.exe$(DLLEXT) $@ && $(STRIP) $@
 crypt32_test.exe: $(DLLDIR)/crypt32/tests/crypt32_test.exe$(DLLEXT)
 	cp $(DLLDIR)/crypt32/tests/crypt32_test.exe$(DLLEXT) $@ && $(STRIP) $@
+cryptnet_test.exe: $(DLLDIR)/cryptnet/tests/cryptnet_test.exe$(DLLEXT)
+	cp $(DLLDIR)/cryptnet/tests/cryptnet_test.exe$(DLLEXT) $@ && $(STRIP) $@
 d3d8_test.exe: $(DLLDIR)/d3d8/tests/d3d8_test.exe$(DLLEXT)
 	cp $(DLLDIR)/d3d8/tests/d3d8_test.exe$(DLLEXT) $@ && $(STRIP) $@
 d3d9_test.exe: $(DLLDIR)/d3d9/tests/d3d9_test.exe$(DLLEXT)
 	cp $(DLLDIR)/d3d9/tests/d3d9_test.exe$(DLLEXT) $@ && $(STRIP) $@
 d3drm_test.exe: $(DLLDIR)/d3drm/tests/d3drm_test.exe$(DLLEXT)
 	cp $(DLLDIR)/d3drm/tests/d3drm_test.exe$(DLLEXT) $@ && $(STRIP) $@
+d3dx8_test.exe: $(DLLDIR)/d3dx8/tests/d3dx8_test.exe$(DLLEXT)
+	cp $(DLLDIR)/d3dx8/tests/d3dx8_test.exe$(DLLEXT) $@ && $(STRIP) $@
 ddraw_test.exe: $(DLLDIR)/ddraw/tests/ddraw_test.exe$(DLLEXT)
 	cp $(DLLDIR)/ddraw/tests/ddraw_test.exe$(DLLEXT) $@ && $(STRIP) $@
 dinput_test.exe: $(DLLDIR)/dinput/tests/dinput_test.exe$(DLLEXT)
@@ -181,6 +191,8 @@ quartz_test.exe: $(DLLDIR)/quartz/tests/quartz_test.exe$(DLLEXT)
 	cp $(DLLDIR)/quartz/tests/quartz_test.exe$(DLLEXT) $@ && $(STRIP) $@
 riched20_test.exe: $(DLLDIR)/riched20/tests/riched20_test.exe$(DLLEXT)
 	cp $(DLLDIR)/riched20/tests/riched20_test.exe$(DLLEXT) $@ && $(STRIP) $@
+riched32_test.exe: $(DLLDIR)/riched32/tests/riched32_test.exe$(DLLEXT)
+	cp $(DLLDIR)/riched32/tests/riched32_test.exe$(DLLEXT) $@ && $(STRIP) $@
 rpcrt4_test.exe: $(DLLDIR)/rpcrt4/tests/rpcrt4_test.exe$(DLLEXT)
 	cp $(DLLDIR)/rpcrt4/tests/rpcrt4_test.exe$(DLLEXT) $@ && $(STRIP) $@
 rsabase_test.exe: $(DLLDIR)/rsabase/tests/rsabase_test.exe$(DLLEXT)

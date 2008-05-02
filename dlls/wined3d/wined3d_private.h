@@ -1209,6 +1209,9 @@ const void *WINAPI IWineD3DSurfaceImpl_GetData(IWineD3DSurface *iface);
                           SFLAG_PBO        | \
                           SFLAG_CLIENT)
 
+#define SFLAG_LOCATIONS  (SFLAG_INSYSMEM   | \
+                          SFLAG_INTEXTURE  | \
+                          SFLAG_INDRAWABLE)
 BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]);
 
 typedef enum {
@@ -1653,7 +1656,7 @@ typedef struct shader_reg_maps {
      * Use 0 as default (bit 31 is always 1 on a valid token) */
     DWORD samplers[max(MAX_FRAGMENT_SAMPLERS, MAX_VERTEX_SAMPLERS)];
     char bumpmat, luminanceparams;
-    char usesnrm, vpos;
+    char usesnrm, vpos, usesdsy;
 
     /* Whether or not loops are used in this shader, and nesting depth */
     unsigned loop_depth;

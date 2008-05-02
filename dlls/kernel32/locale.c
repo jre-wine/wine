@@ -2349,6 +2349,7 @@ INT WINAPI LCMapStringW(LCID lcid, DWORD flags, LPCWSTR src, INT srclen,
 
     if (flags & LCMAP_SORTKEY)
     {
+        INT ret;
         if (src == dst)
         {
             SetLastError(ERROR_INVALID_FLAGS);
@@ -2360,7 +2361,10 @@ INT WINAPI LCMapStringW(LCID lcid, DWORD flags, LPCWSTR src, INT srclen,
         TRACE("(0x%04x,0x%08x,%s,%d,%p,%d)\n",
               lcid, flags, debugstr_wn(src, srclen), srclen, dst, dstlen);
 
-        return wine_get_sortkey(flags, src, srclen, (char *)dst, dstlen);
+        ret = wine_get_sortkey(flags, src, srclen, (char *)dst, dstlen);
+        if (ret == 0)
+            SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        return ret;
     }
 
     /* SORT_STRINGSORT must be used exclusively with LCMAP_SORTKEY */
@@ -2497,6 +2501,8 @@ INT WINAPI LCMapStringA(LCID lcid, DWORD flags, LPCSTR src, INT srclen,
             goto map_string_exit;
         }
         ret = wine_get_sortkey(flags, srcW, srclenW, dst, dstlen);
+        if (ret == 0)
+            SetLastError(ERROR_INSUFFICIENT_BUFFER);
         goto map_string_exit;
     }
 
@@ -3500,8 +3506,36 @@ BOOL WINAPI InvalidateNLSCache(void)
  */
 GEOID WINAPI GetUserGeoID( GEOCLASS GeoClass )
 {
-    FIXME("%d\n",GeoClass);
-    return GEOID_NOT_AVAILABLE;
+    GEOID ret = GEOID_NOT_AVAILABLE;
+    static const WCHAR geoW[] = {'G','e','o',0};
+    static const WCHAR nationW[] = {'N','a','t','i','o','n',0};
+    WCHAR bufferW[40], *end;
+    DWORD count;
+    HANDLE hkey, hSubkey = 0;
+    UNICODE_STRING keyW;
+    const KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)bufferW;
+    RtlInitUnicodeString( &keyW, nationW );
+    count = sizeof(bufferW);
+
+    if(!(hkey = create_registry_key())) return ret;
+
+    switch( GeoClass ){
+    case GEOCLASS_NATION:
+        if ((hSubkey = NLS_RegOpenKey(hkey, geoW)))
+        {
+            if((NtQueryValueKey(hSubkey, &keyW, KeyValuePartialInformation,
+                                (LPBYTE)bufferW, count, &count) == STATUS_SUCCESS ) && info->DataLength)
+                ret = strtolW((LPCWSTR)info->Data, &end, 10);
+        }
+        break;
+    case GEOCLASS_REGION:
+        FIXME("GEOCLASS_REGION not handled yet\n");
+        break;
+    }
+
+    NtClose(hkey);
+    if (hSubkey) NtClose(hSubkey);
+    return ret;
 }
 
 /******************************************************************************

@@ -53,9 +53,9 @@ typedef struct tagMSICOLUMNHASHENTRY
 
 typedef struct tagMSICOLUMNINFO
 {
-    LPCWSTR tablename;
+    LPWSTR tablename;
     UINT   number;
-    LPCWSTR colname;
+    LPWSTR colname;
     UINT   type;
     UINT   offset;
     INT    ref_count;
@@ -87,12 +87,12 @@ static const WCHAR szStringPool[] = {
     '_','S','t','r','i','n','g','P','o','o','l',0 };
 
 /* information for default tables */
-static const WCHAR szTables[]  = { '_','T','a','b','l','e','s',0 };
-static const WCHAR szTable[]  = { 'T','a','b','l','e',0 };
-static const WCHAR szName[]    = { 'N','a','m','e',0 };
-static const WCHAR szColumns[] = { '_','C','o','l','u','m','n','s',0 };
-static const WCHAR szNumber[]  = { 'N','u','m','b','e','r',0 };
-static const WCHAR szType[]    = { 'T','y','p','e',0 };
+static WCHAR szTables[]  = { '_','T','a','b','l','e','s',0 };
+static WCHAR szTable[]  = { 'T','a','b','l','e',0 };
+static WCHAR szName[]    = { 'N','a','m','e',0 };
+static WCHAR szColumns[] = { '_','C','o','l','u','m','n','s',0 };
+static WCHAR szNumber[]  = { 'N','u','m','b','e','r',0 };
+static WCHAR szType[]    = { 'T','y','p','e',0 };
 
 /* These tables are written into (the .hash_table part).
  * Do not mark them const.
@@ -933,8 +933,8 @@ static void msi_free_colinfo( MSICOLUMNINFO *colinfo, UINT count )
 
     for( i=0; i<count; i++ )
     {
-        msi_free( (LPWSTR) colinfo[i].tablename );
-        msi_free( (LPWSTR) colinfo[i].colname );
+        msi_free( colinfo[i].tablename );
+        msi_free( colinfo[i].colname );
         msi_free( colinfo[i].hash_table );
     }
 }
@@ -1041,10 +1041,11 @@ static UINT get_tablecolumns( MSIDATABASE *db,
 static void msi_update_table_columns( MSIDATABASE *db, LPCWSTR name )
 {
     MSITABLE *table;
-    UINT size, offset;
+    UINT size, offset, old_count;
     int n;
 
     table = find_cached_table( db, name );
+    old_count = table->col_count;
     msi_free( table->colinfo );
     table_get_column_info( db, name, &table->colinfo, &table->col_count );
 
@@ -1054,7 +1055,8 @@ static void msi_update_table_columns( MSIDATABASE *db, LPCWSTR name )
     for ( n = 0; n < table->row_count; n++ )
     {
         table->data[n] = msi_realloc( table->data[n], size );
-        table->data[n][offset] = (BYTE)MSI_NULL_INTEGER;
+        if (old_count < table->col_count)
+            memset( &table->data[n][offset], 0, size - offset );
     }
 }
 
@@ -1488,7 +1490,7 @@ static UINT table_validate_new( MSITABLEVIEW *tv, MSIRECORD *rec )
     /* check there's no duplicate keys */
     r = msi_table_find_row( tv, rec, &row );
     if (r == ERROR_SUCCESS)
-        return ERROR_INVALID_DATA;
+        return ERROR_FUNCTION_FAILED;
 
     return ERROR_SUCCESS;
 }
@@ -1558,7 +1560,7 @@ static UINT msi_table_update(struct tagMSIVIEW *view, MSIRECORD *rec, UINT row)
     if (r != ERROR_SUCCESS)
     {
         ERR("can't find row to modify\n");
-        return ERROR_SUCCESS;
+        return ERROR_FUNCTION_FAILED;
     }
 
     /* the row cannot be changed */

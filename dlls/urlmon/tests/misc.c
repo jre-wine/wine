@@ -62,6 +62,13 @@ DEFINE_EXPECT(QI_IInternetProtocolInfo);
 DEFINE_EXPECT(CreateInstance);
 DEFINE_EXPECT(unk_Release);
 
+static const char *debugstr_w(LPCWSTR str)
+{
+    static char buf[1024];
+    WideCharToMultiByte(CP_ACP, 0, str, -1, buf, sizeof(buf), NULL, NULL);
+    return buf;
+}
+
 static void test_CreateFormatEnum(void)
 {
     IEnumFORMATETC *fenum = NULL, *fenum2 = NULL;
@@ -345,6 +352,7 @@ static void test_CoInternetCompareUrl(void)
 
 static const WCHAR mimeTextHtml[] = {'t','e','x','t','/','h','t','m','l',0};
 static const WCHAR mimeTextPlain[] = {'t','e','x','t','/','p','l','a','i','n',0};
+static const WCHAR mimeTextRichtext[] = {'t','e','x','t','/','r','i','c','h','t','e','x','t',0};
 static const WCHAR mimeAppOctetStream[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
     'o','c','t','e','t','-','s','t','r','e','a','m',0};
 static const WCHAR mimeImagePjpeg[] = {'i','m','a','g','e','/','p','j','p','e','g',0};
@@ -354,6 +362,8 @@ static const WCHAR mimeImageXPng[] = {'i','m','a','g','e','/','x','-','p','n','g
 static const WCHAR mimeImageTiff[] = {'i','m','a','g','e','/','t','i','f','f',0};
 static const WCHAR mimeVideoAvi[] = {'v','i','d','e','o','/','a','v','i',0};
 static const WCHAR mimeVideoMpeg[] = {'v','i','d','e','o','/','m','p','e','g',0};
+static const WCHAR mimeAppPostscript[] =
+    {'a','p','p','l','i','c','a','t','i','o','n','/','p','o','s','t','s','c','r','i','p','t',0};
 static const WCHAR mimeAppXCompressed[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
                                     'x','-','c','o','m','p','r','e','s','s','e','d',0};
 static const WCHAR mimeAppXZip[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
@@ -364,6 +374,7 @@ static const WCHAR mimeAppJava[] = {'a','p','p','l','i','c','a','t','i','o','n',
 static const WCHAR mimeAppPdf[] = {'a','p','p','l','i','c','a','t','i','o','n','/','p','d','f',0};
 static const WCHAR mimeAppXMSDownload[] =
     {'a','p','p','l','i','c','a','t','i','o','n','/','x','-','m','s','d','o','w','n','l','o','a','d',0};
+static const WCHAR mimeAudioWav[] = {'a','u','d','i','o','/','w','a','v',0};
 
 static const struct {
     LPCWSTR url;
@@ -449,6 +460,17 @@ static BYTE data67[] = {0x25,0x50,0x44,0x46,'x','<','h','t','m','l','>'};
 static BYTE data68[] = {'M','Z','x'};
 static BYTE data69[] = {'M','Z'};
 static BYTE data70[] = {'M','Z','<','h','t','m','l','>',0xff};
+static BYTE data71[] = {'{','\\','r','t','f',0};
+static BYTE data72[] = {'{','\\','r','t','f'};
+static BYTE data73[] = {' ','{','\\','r','t','f',' '};
+static BYTE data74[] = {'{','\\','r','t','f','<','h','t','m','l','>',' '};
+static BYTE data75[] = {'R','I','F','F',0xff,0xff,0xff,0xff,'W','A','V','E',0xff};
+static BYTE data76[] = {'R','I','F','F',0xff,0xff,0xff,0xff,'W','A','V','E'};
+static BYTE data77[] = {'R','I','F','F',0xff,0xff,0xff,0xff,'W','A','V',0xff,0xff};
+static BYTE data78[] = {'R','I','F','F',0xff,0xff,0xff,0xff,'<','h','t','m','l','>',0xff};
+static BYTE data79[] = {'%','!',0xff};
+static BYTE data80[] = {'%','!'};
+static BYTE data81[] = {'%','!','P','S','<','h','t','m','l','>'};
 
 static const struct {
     BYTE *data;
@@ -524,7 +546,18 @@ static const struct {
     {data67, sizeof(data67), mimeTextHtml},
     {data68, sizeof(data68), mimeAppXMSDownload},
     {data69, sizeof(data69), mimeTextPlain},
-    {data70, sizeof(data70), mimeTextHtml}
+    {data70, sizeof(data70), mimeTextHtml},
+    {data71, sizeof(data71), mimeTextRichtext},
+    {data72, sizeof(data72), mimeTextPlain},
+    {data73, sizeof(data73), mimeTextPlain},
+    {data74, sizeof(data74), mimeTextHtml},
+    {data75, sizeof(data75), mimeAudioWav},
+    {data76, sizeof(data76), mimeTextPlain},
+    {data77, sizeof(data77), mimeTextPlain},
+    {data78, sizeof(data78), mimeTextHtml},
+    {data79, sizeof(data79), mimeAppPostscript},
+    {data80, sizeof(data80), mimeTextPlain},
+    {data81, sizeof(data81), mimeTextHtml}
 };
 
 static void test_FindMimeFromData(void)
@@ -564,7 +597,7 @@ static void test_FindMimeFromData(void)
         hres = FindMimeFromData(NULL, NULL, mime_tests2[i].data, mime_tests2[i].size,
                 NULL, 0, &mime, 0);
         ok(hres == S_OK, "[%d] FindMimeFromData failed: %08x\n", i, hres);
-        ok(!lstrcmpW(mime, mime_tests2[i].mime), "[%d] wrong mime\n", i);
+        ok(!lstrcmpW(mime, mime_tests2[i].mime), "[%d] wrong mime: %s\n", i, debugstr_w(mime));
         CoTaskMemFree(mime);
 
         hres = FindMimeFromData(NULL, NULL, mime_tests2[i].data, mime_tests2[i].size,

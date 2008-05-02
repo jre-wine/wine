@@ -264,6 +264,8 @@ BOOL X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, const RECT *rectWindow,
 
     old_client_rect = data->client_rect;
 
+    if (!data->whole_window) swp_flags |= SWP_NOCOPYBITS;  /* we can't rely on X11 to move the bits */
+
     if (!(win = WIN_GetPtr( hwnd ))) return FALSE;
     if (win == WND_OTHER_PROCESS)
     {
@@ -1353,7 +1355,7 @@ void X11DRV_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
     {
         int dx = 0, dy = 0;
 
-        if (!GetMessageW( &msg, 0, WM_KEYFIRST, WM_MOUSELAST )) break;
+        if (!GetMessageW( &msg, 0, 0, 0 )) break;
         if (CallMsgFilterW( &msg, MSGF_SIZE )) continue;
 
         /* Exit on button-up, Return, or Esc */
@@ -1362,7 +1364,11 @@ void X11DRV_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
              ((msg.wParam == VK_RETURN) || (msg.wParam == VK_ESCAPE)))) break;
 
         if ((msg.message != WM_KEYDOWN) && (msg.message != WM_MOUSEMOVE))
+        {
+            TranslateMessage( &msg );
+            DispatchMessageW( &msg );
             continue;  /* We are not interested in other messages */
+        }
 
         pt = msg.pt;
 

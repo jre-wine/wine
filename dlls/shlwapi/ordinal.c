@@ -33,6 +33,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "winnls.h"
 #include "winreg.h"
 #include "wingdi.h"
 #include "winuser.h"
@@ -731,53 +732,9 @@ BOOL WINAPI IsCharXDigitW(WCHAR wc)
  *      @	[SHLWAPI.35]
  *
  */
-BOOL WINAPI GetStringType3ExW(LPWSTR lpszStr, DWORD dwLen, LPVOID p3)
+BOOL WINAPI GetStringType3ExW(LPWSTR src, INT count, LPWORD type)
 {
-    FIXME("(%s,0x%08x,%p): stub\n", debugstr_w(lpszStr), dwLen, p3);
-    return TRUE;
-}
-
-/*************************************************************************
- *      @	[SHLWAPI.36]
- *
- * Insert a bitmap menu item at the bottom of a menu.
- *
- * PARAMS
- *  hMenu [I] Menu to insert into
- *  flags [I] Flags for insertion
- *  id    [I] Menu ID of the item
- *  str   [I] Menu text for the item
- *
- * RETURNS
- *  Success: TRUE,  the item is inserted into the menu
- *  Failure: FALSE, if any parameter is invalid
- */
-BOOL WINAPI AppendMenuWrapW(HMENU hMenu, UINT flags, UINT id, LPCWSTR str)
-{
-    TRACE("(%p,0x%08x,0x%08x,%s)\n",hMenu, flags, id, debugstr_w(str));
-    return InsertMenuW(hMenu, -1, flags | MF_BITMAP, id, str);
-}
-
-/*************************************************************************
- *      @   [SHLWAPI.138]
- *
- * Set the text of a given dialog item.
- *
- * PARAMS
- *  hWnd     [I] Handle of dialog
- *  iItem    [I] Index of item
- *  lpszText [O] Text to set
- *
- * RETURNS
- *  Success: TRUE.  The text of the dialog is set to lpszText.
- *  Failure: FALSE, Otherwise.
- */
-BOOL WINAPI SetDlgItemTextWrapW(HWND hWnd, INT iItem, LPCWSTR lpszText)
-{
-    HWND hWndItem = GetDlgItem(hWnd, iItem);
-    if (hWndItem)
-        return SetWindowTextW(hWndItem, lpszText);
-    return FALSE;
+    return GetStringTypeW(CT_CTYPE3, src, count, type);
 }
 
 /*************************************************************************
@@ -796,7 +753,7 @@ BOOL WINAPI SetDlgItemTextWrapW(HWND hWnd, INT iItem, LPCWSTR lpszText)
  */
 DWORD WINAPI StrCmpNCA(LPCSTR lpszSrc, LPCSTR lpszCmp, INT len)
 {
-    return strncmp(lpszSrc, lpszCmp, len);
+    return StrCmpNA(lpszSrc, lpszCmp, len);
 }
 
 /*************************************************************************
@@ -806,7 +763,7 @@ DWORD WINAPI StrCmpNCA(LPCSTR lpszSrc, LPCSTR lpszCmp, INT len)
  */
 DWORD WINAPI StrCmpNCW(LPCWSTR lpszSrc, LPCWSTR lpszCmp, INT len)
 {
-    return strncmpW(lpszSrc, lpszCmp, len);
+    return StrCmpNW(lpszSrc, lpszCmp, len);
 }
 
 /*************************************************************************
@@ -825,7 +782,7 @@ DWORD WINAPI StrCmpNCW(LPCWSTR lpszSrc, LPCWSTR lpszCmp, INT len)
  */
 DWORD WINAPI StrCmpNICA(LPCSTR lpszSrc, LPCSTR lpszCmp, DWORD len)
 {
-    return strncasecmp(lpszSrc, lpszCmp, len);
+    return StrCmpNIA(lpszSrc, lpszCmp, len);
 }
 
 /*************************************************************************
@@ -835,7 +792,7 @@ DWORD WINAPI StrCmpNICA(LPCSTR lpszSrc, LPCSTR lpszCmp, DWORD len)
  */
 DWORD WINAPI StrCmpNICW(LPCWSTR lpszSrc, LPCWSTR lpszCmp, DWORD len)
 {
-    return strncmpiW(lpszSrc, lpszCmp, len);
+    return StrCmpNIW(lpszSrc, lpszCmp, len);
 }
 
 /*************************************************************************
@@ -853,7 +810,7 @@ DWORD WINAPI StrCmpNICW(LPCWSTR lpszSrc, LPCWSTR lpszCmp, DWORD len)
  */
 DWORD WINAPI StrCmpCA(LPCSTR lpszSrc, LPCSTR lpszCmp)
 {
-    return strcmp(lpszSrc, lpszCmp);
+    return lstrcmpA(lpszSrc, lpszCmp);
 }
 
 /*************************************************************************
@@ -863,7 +820,7 @@ DWORD WINAPI StrCmpCA(LPCSTR lpszSrc, LPCSTR lpszCmp)
  */
 DWORD WINAPI StrCmpCW(LPCWSTR lpszSrc, LPCWSTR lpszCmp)
 {
-    return strcmpW(lpszSrc, lpszCmp);
+    return lstrcmpW(lpszSrc, lpszCmp);
 }
 
 /*************************************************************************
@@ -881,7 +838,7 @@ DWORD WINAPI StrCmpCW(LPCWSTR lpszSrc, LPCWSTR lpszCmp)
  */
 DWORD WINAPI StrCmpICA(LPCSTR lpszSrc, LPCSTR lpszCmp)
 {
-    return strcasecmp(lpszSrc, lpszCmp);
+    return lstrcmpiA(lpszSrc, lpszCmp);
 }
 
 /*************************************************************************
@@ -891,7 +848,7 @@ DWORD WINAPI StrCmpICA(LPCSTR lpszSrc, LPCSTR lpszCmp)
  */
 DWORD WINAPI StrCmpICW(LPCWSTR lpszSrc, LPCWSTR lpszCmp)
 {
-    return strcmpiW(lpszSrc, lpszCmp);
+    return lstrcmpiW(lpszSrc, lpszCmp);
 }
 
 /*************************************************************************
@@ -3542,7 +3499,7 @@ BOOL WINAPI GetOpenFileNameWrapW(LPOPENFILENAMEW ofn)
 /*************************************************************************
  *      @	[SHLWAPI.404]
  */
-HRESULT WINAPI IUnknown_EnumObjects(LPSHELLFOLDER lpFolder, HWND hwnd, SHCONTF flags, IEnumIDList **ppenum)
+HRESULT WINAPI SHIShellFolder_EnumObjects(LPSHELLFOLDER lpFolder, HWND hwnd, SHCONTF flags, IEnumIDList **ppenum)
 {
     IPersist *persist;
     HRESULT hr;
@@ -3679,16 +3636,6 @@ BOOL WINAPI MLFreeLibrary(HMODULE hModule)
 BOOL WINAPI SHFlushSFCacheWrap(void) {
   FIXME(": stub\n");
   return TRUE;
-}
-
-/*************************************************************************
- *      @	[SHLWAPI.425]
- */
-BOOL WINAPI DeleteMenuWrap(HMENU hmenu, UINT pos, UINT flags)
-{
-    /* FIXME: This should do more than simply call DeleteMenu */
-    FIXME("%p %08x %08x): semi-stub\n", hmenu, pos, flags);
-    return DeleteMenu(hmenu, pos, flags);
 }
 
 /*************************************************************************
@@ -4367,7 +4314,10 @@ UINT WINAPI ZoneComputePaneSize(HWND hwnd)
     return 0x95;
 }
 
-void WINAPI SHChangeNotify(LONG wEventId, UINT uFlags, LPCVOID dwItem1, LPCVOID dwItem2)
+/***********************************************************************
+ *              SHChangeNotifyWrap [SHLWAPI.394]
+ */
+void WINAPI SHChangeNotifyWrap(LONG wEventId, UINT uFlags, LPCVOID dwItem1, LPCVOID dwItem2)
 {
     SHChangeNotify(wEventId, uFlags, dwItem1, dwItem2);
 }

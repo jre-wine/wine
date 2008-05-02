@@ -42,3 +42,4 @@
 #include "spl_Ko.rc"
 #include "spl_No.rc"
 #include "spl_Pl.rc"
+#include "spl_Sv.rc"

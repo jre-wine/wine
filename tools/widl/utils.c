@@ -62,19 +62,28 @@ static void generic_msg(const char *s, const char *t, const char *n, va_list ap)
 			free(cpy);
 		}
 	}
-
-	fprintf(stderr, "\n");
 }
 
 
+/* yyerror:  yacc assumes this is not newline terminated.  */
 int parser_error(const char *s, ...)
+{
+	va_list ap;
+	va_start(ap, s);
+	generic_msg(s, "Error", parser_text, ap);
+	fprintf(stderr, "\n");
+	va_end(ap);
+	exit(1);
+	return 1;
+}
+
+void error_loc(const char *s, ...)
 {
 	va_list ap;
 	va_start(ap, s);
 	generic_msg(s, "Error", parser_text, ap);
 	va_end(ap);
 	exit(1);
-	return 1;
 }
 
 int parser_warning(const char *s, ...)
@@ -84,16 +93,6 @@ int parser_warning(const char *s, ...)
 	generic_msg(s, "Warning", parser_text, ap);
 	va_end(ap);
 	return 0;
-}
-
-void internal_error(const char *file, int line, const char *s, ...)
-{
-	va_list ap;
-	va_start(ap, s);
-	fprintf(stderr, "Internal error (please report) %s %d: ", file, line);
-	vfprintf(stderr, s, ap);
-	va_end(ap);
-	exit(3);
 }
 
 void error(const char *s, ...)
@@ -151,6 +150,35 @@ char *dup_basename(const char *name, const char *ext)
 		base[namelen - extlen] = '\0';
 	}
 	return base;
+}
+
+size_t widl_getline(char **linep, size_t *lenp, FILE *fp)
+{
+    char *line = *linep;
+    size_t len = *lenp;
+    size_t n = 0;
+
+    if (!line)
+    {
+        len = 64;
+        line = xmalloc(len);
+    }
+
+    while (fgets(&line[n], len - n, fp))
+    {
+        n += strlen(&line[n]);
+        if (line[n - 1] == '\n')
+            break;
+        else if (n == len - 1)
+        {
+            len *= 2;
+            line = xrealloc(line, len);
+        }
+    }
+
+    *linep = line;
+    *lenp = len;
+    return n;
 }
 
 void *xmalloc(size_t size)

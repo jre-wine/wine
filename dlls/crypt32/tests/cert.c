@@ -1374,17 +1374,11 @@ static void testGetIssuerCert(void)
      flags);
     if (parent)
         CertFreeCertificateContext(parent);
-    /* Now check just the time */
-    flags = CERT_STORE_TIME_VALIDITY_FLAG;
-    parent = CertGetIssuerCertificateFromStore(store, child, NULL, &flags);
-    ok(parent != NULL, "CertGetIssuerCertificateFromStore failed: %08x\n",
-     GetLastError());
-    /* Oops: the child is not expired, so the time validity check actually
-     * succeeds, even though the signing cert is expired.
+    /* Checking time validity is not productive, because while most Windows
+     * versions return 0 (time valid) because the child is not expired,
+     * Windows 2003 SP1 returns that it is expired.  Thus the range of
+     * possibilities is covered, and a test verifies nothing.
      */
-    ok(!flags, "Expected check to succeed, got %08x\n", flags);
-    if (parent)
-        CertFreeCertificateContext(parent);
 
     CertFreeCertificateContext(child);
     CertCloseStore(store, 0);
@@ -1413,13 +1407,6 @@ static void testGetIssuerCert(void)
     parent = CertGetIssuerCertificateFromStore(store, child, NULL, &flags);
     ok(parent == cert2, "Expected cert2 to be the first issuer\n");
     parent = CertGetIssuerCertificateFromStore(store, child, parent, &flags);
-    ok(parent == cert1, "Expected cert1 to be the second issuer\n");
-    parent = CertGetIssuerCertificateFromStore(store, child, parent, &flags);
-    ok(parent == NULL, "Expected no more than two issuers\n");
-    /* It's possible to start enumerating from any certificate in the store */
-    parent = CertGetIssuerCertificateFromStore(store, child, cert1, &flags);
-    ok(parent == NULL, "Expected no issuer\n");
-    parent = CertGetIssuerCertificateFromStore(store, child, cert2, &flags);
     ok(parent == cert1, "Expected cert1 to be the second issuer\n");
     parent = CertGetIssuerCertificateFromStore(store, child, parent, &flags);
     ok(parent == NULL, "Expected no more than two issuers\n");
@@ -1454,13 +1441,6 @@ static void testGetIssuerCert(void)
     parent = CertGetIssuerCertificateFromStore(store, child, NULL, &flags);
     ok(parent == cert2, "Expected cert2 to be the first issuer\n");
     parent = CertGetIssuerCertificateFromStore(store, child, parent, &flags);
-    ok(parent == cert1, "Expected cert1 to be the second issuer\n");
-    parent = CertGetIssuerCertificateFromStore(store, child, parent, &flags);
-    ok(parent == NULL, "Expected no more than two issuers\n");
-    /* It's possible to start enumerating from any certificate in the store */
-    parent = CertGetIssuerCertificateFromStore(store, child, cert1, &flags);
-    ok(parent == NULL, "Expected no issuer\n");
-    parent = CertGetIssuerCertificateFromStore(store, child, cert2, &flags);
     ok(parent == cert1, "Expected cert1 to be the second issuer\n");
     parent = CertGetIssuerCertificateFromStore(store, child, parent, &flags);
     ok(parent == NULL, "Expected no more than two issuers\n");
@@ -2589,6 +2569,39 @@ static void testVerifySubjectCert(void)
     CertFreeCertificateContext(context1);
 }
 
+static void testVerifyRevocation(void)
+{
+    BOOL ret;
+    CERT_REVOCATION_STATUS status = { 0 };
+    PCCERT_CONTEXT cert = CertCreateCertificateContext(X509_ASN_ENCODING,
+     bigCert, sizeof(bigCert));
+
+    /* Crash
+    ret = CertVerifyRevocation(0, 0, 0, NULL, 0, NULL, NULL);
+     */
+    SetLastError(0xdeadbeef);
+    ret = CertVerifyRevocation(0, 0, 0, NULL, 0, NULL, &status);
+    ok(!ret && GetLastError() == E_INVALIDARG,
+     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+    status.cbSize = sizeof(status);
+    ret = CertVerifyRevocation(0, 0, 0, NULL, 0, NULL, &status);
+    ok(ret, "CertVerifyRevocation failed: %08x\n", GetLastError());
+    ret = CertVerifyRevocation(0, 2, 0, NULL, 0, NULL, &status);
+    ok(ret, "CertVerifyRevocation failed: %08x\n", GetLastError());
+    ret = CertVerifyRevocation(2, 0, 0, NULL, 0, NULL, &status);
+    ok(ret, "CertVerifyRevocation failed: %08x\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = CertVerifyRevocation(0, 0, 1, (void **)&cert, 0, NULL, &status);
+    ok(!ret && GetLastError() == CRYPT_E_NO_REVOCATION_DLL,
+     "Expected CRYPT_E_NO_REVOCATION_DLL, got %08x\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = CertVerifyRevocation(0, 2, 1, (void **)&cert, 0, NULL, &status);
+    ok(!ret && GetLastError() == CRYPT_E_NO_REVOCATION_DLL,
+     "Expected CRYPT_E_NO_REVOCATION_DLL, got %08x\n", GetLastError());
+
+    CertFreeCertificateContext(cert);
+}
+
 static BYTE privKey[] = {
  0x07, 0x02, 0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x52, 0x53, 0x41, 0x32, 0x00,
  0x02, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x79, 0x10, 0x1c, 0xd0, 0x6b, 0x10,
@@ -2935,6 +2948,7 @@ START_TEST(cert)
     testHashPublicKeyInfo();
     testCompareCert();
     testVerifySubjectCert();
+    testVerifyRevocation();
     testAcquireCertPrivateKey();
     testGetPublicKeyLength();
 }

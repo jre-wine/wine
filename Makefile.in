@@ -183,11 +183,13 @@ ALL_MAKEFILES = \
 	dlls/comdlg32/tests/Makefile \
 	dlls/compstui/Makefile \
 	dlls/credui/Makefile \
+	dlls/credui/tests/Makefile \
 	dlls/crtdll/Makefile \
 	dlls/crypt32/Makefile \
 	dlls/crypt32/tests/Makefile \
 	dlls/cryptdll/Makefile \
 	dlls/cryptnet/Makefile \
+	dlls/cryptnet/tests/Makefile \
 	dlls/ctl3d32/Makefile \
 	dlls/d3d10/Makefile \
 	dlls/d3d8/Makefile \
@@ -198,6 +200,7 @@ ALL_MAKEFILES = \
 	dlls/d3drm/Makefile \
 	dlls/d3drm/tests/Makefile \
 	dlls/d3dx8/Makefile \
+	dlls/d3dx8/tests/Makefile \
 	dlls/d3dxof/Makefile \
 	dlls/dbghelp/Makefile \
 	dlls/dciman32/Makefile \
@@ -298,6 +301,7 @@ ALL_MAKEFILES = \
 	dlls/msi/Makefile \
 	dlls/msi/tests/Makefile \
 	dlls/msimg32/Makefile \
+	dlls/msimtf/Makefile \
 	dlls/msisys.ocx/Makefile \
 	dlls/msnet32/Makefile \
 	dlls/msrle32/Makefile \
@@ -356,6 +360,7 @@ ALL_MAKEFILES = \
 	dlls/riched20/Makefile \
 	dlls/riched20/tests/Makefile \
 	dlls/riched32/Makefile \
+	dlls/riched32/tests/Makefile \
 	dlls/rpcrt4/Makefile \
 	dlls/rpcrt4/tests/Makefile \
 	dlls/rsabase/Makefile \
@@ -554,11 +559,13 @@ dlls/comdlg32/Makefile: dlls/comdlg32/Makefile.in dlls/Makedll.rules
 dlls/comdlg32/tests/Makefile: dlls/comdlg32/tests/Makefile.in dlls/Maketest.rules
 dlls/compstui/Makefile: dlls/compstui/Makefile.in dlls/Makedll.rules
 dlls/credui/Makefile: dlls/credui/Makefile.in dlls/Makedll.rules
+dlls/credui/tests/Makefile: dlls/credui/tests/Makefile.in dlls/Maketest.rules
 dlls/crtdll/Makefile: dlls/crtdll/Makefile.in dlls/Makedll.rules
 dlls/crypt32/Makefile: dlls/crypt32/Makefile.in dlls/Makedll.rules
 dlls/crypt32/tests/Makefile: dlls/crypt32/tests/Makefile.in dlls/Maketest.rules
 dlls/cryptdll/Makefile: dlls/cryptdll/Makefile.in dlls/Makedll.rules
 dlls/cryptnet/Makefile: dlls/cryptnet/Makefile.in dlls/Makedll.rules
+dlls/cryptnet/tests/Makefile: dlls/cryptnet/tests/Makefile.in dlls/Maketest.rules
 dlls/ctl3d32/Makefile: dlls/ctl3d32/Makefile.in dlls/Makedll.rules
 dlls/d3d10/Makefile: dlls/d3d10/Makefile.in dlls/Makedll.rules
 dlls/d3d8/Makefile: dlls/d3d8/Makefile.in dlls/Makedll.rules
@@ -569,6 +576,7 @@ dlls/d3dim/Makefile: dlls/d3dim/Makefile.in dlls/Makedll.rules
 dlls/d3drm/Makefile: dlls/d3drm/Makefile.in dlls/Makedll.rules
 dlls/d3drm/tests/Makefile: dlls/d3drm/tests/Makefile.in dlls/Maketest.rules
 dlls/d3dx8/Makefile: dlls/d3dx8/Makefile.in dlls/Makedll.rules
+dlls/d3dx8/tests/Makefile: dlls/d3dx8/tests/Makefile.in dlls/Maketest.rules
 dlls/d3dxof/Makefile: dlls/d3dxof/Makefile.in dlls/Makedll.rules
 dlls/dbghelp/Makefile: dlls/dbghelp/Makefile.in dlls/Makedll.rules
 dlls/dciman32/Makefile: dlls/dciman32/Makefile.in dlls/Makedll.rules
@@ -669,6 +677,7 @@ dlls/mshtml/tests/Makefile: dlls/mshtml/tests/Makefile.in dlls/Maketest.rules
 dlls/msi/Makefile: dlls/msi/Makefile.in dlls/Makedll.rules
 dlls/msi/tests/Makefile: dlls/msi/tests/Makefile.in dlls/Maketest.rules
 dlls/msimg32/Makefile: dlls/msimg32/Makefile.in dlls/Makedll.rules
+dlls/msimtf/Makefile: dlls/msimtf/Makefile.in dlls/Makedll.rules
 dlls/msisys.ocx/Makefile: dlls/msisys.ocx/Makefile.in dlls/Makedll.rules
 dlls/msnet32/Makefile: dlls/msnet32/Makefile.in dlls/Makedll.rules
 dlls/msrle32/Makefile: dlls/msrle32/Makefile.in dlls/Makedll.rules
@@ -727,6 +736,7 @@ dlls/resutils/Makefile: dlls/resutils/Makefile.in dlls/Makedll.rules
 dlls/riched20/Makefile: dlls/riched20/Makefile.in dlls/Makedll.rules
 dlls/riched20/tests/Makefile: dlls/riched20/tests/Makefile.in dlls/Maketest.rules
 dlls/riched32/Makefile: dlls/riched32/Makefile.in dlls/Makedll.rules
+dlls/riched32/tests/Makefile: dlls/riched32/tests/Makefile.in dlls/Maketest.rules
 dlls/rpcrt4/Makefile: dlls/rpcrt4/Makefile.in dlls/Makedll.rules
 dlls/rpcrt4/tests/Makefile: dlls/rpcrt4/tests/Makefile.in dlls/Maketest.rules
 dlls/rsabase/Makefile: dlls/rsabase/Makefile.in dlls/Makedll.rules

@@ -101,7 +101,9 @@ int is_void(const type_t *t)
 
 int is_conformant_array(const type_t *t)
 {
-    return t->type == RPC_FC_CARRAY || t->type == RPC_FC_CVARRAY;
+    return t->type == RPC_FC_CARRAY
+        || t->type == RPC_FC_CVARRAY
+        || (t->type == RPC_FC_BOGUS_ARRAY && t->size_is);
 }
 
 void write_guid(FILE *f, const char *guid_prefix, const char *name, const UUID *uuid)
@@ -837,7 +839,7 @@ static void write_coclass_guid(type_t *cocl)
 static void write_com_interface(type_t *iface)
 {
   if (!iface->funcs && !iface->ref) {
-    parser_warning("%s has no methods", iface->name);
+    parser_warning("%s has no methods\n", iface->name);
     return;
   }
 
