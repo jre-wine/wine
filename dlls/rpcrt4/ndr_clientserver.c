@@ -32,7 +32,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
-#include "winreg.h"
 
 #include "objbase.h"
 
@@ -129,7 +128,7 @@ unsigned char* WINAPI NdrServerInitializeNew( PRPC_MESSAGE pRpcMsg, PMIDL_STUB_M
 /***********************************************************************
  *           NdrGetBuffer [RPCRT4.@]
  */
-unsigned char *WINAPI NdrGetBuffer(MIDL_STUB_MESSAGE *stubmsg, ULONG buflen, RPC_BINDING_HANDLE handle)
+unsigned char *WINAPI NdrGetBuffer(PMIDL_STUB_MESSAGE stubmsg, ULONG buflen, RPC_BINDING_HANDLE handle)
 {
   TRACE("(stubmsg == ^%p, buflen == %u, handle == %p): wild guess.\n", stubmsg, buflen, handle);
   
@@ -150,7 +149,7 @@ unsigned char *WINAPI NdrGetBuffer(MIDL_STUB_MESSAGE *stubmsg, ULONG buflen, RPC
 /***********************************************************************
  *           NdrFreeBuffer [RPCRT4.@]
  */
-void WINAPI NdrFreeBuffer(MIDL_STUB_MESSAGE *pStubMsg)
+void WINAPI NdrFreeBuffer(PMIDL_STUB_MESSAGE pStubMsg)
 {
   TRACE("(pStubMsg == ^%p): wild guess.\n", pStubMsg);
   I_RpcFreeBuffer(pStubMsg->RpcMsg);
@@ -161,7 +160,7 @@ void WINAPI NdrFreeBuffer(MIDL_STUB_MESSAGE *pStubMsg)
 /************************************************************************
  *           NdrSendReceive [RPCRT4.@]
  */
-unsigned char *WINAPI NdrSendReceive( MIDL_STUB_MESSAGE *stubmsg, unsigned char *buffer  )
+unsigned char *WINAPI NdrSendReceive( PMIDL_STUB_MESSAGE stubmsg, unsigned char *buffer  )
 {
   RPC_STATUS status;
 

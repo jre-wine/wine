@@ -30,7 +30,7 @@ static HRESULT (WINAPI *pLaunchINFSectionEx)(HWND, HINSTANCE, LPSTR, INT);
 
 static char CURR_DIR[MAX_PATH];
 
-static BOOL init_function_pointers()
+static BOOL init_function_pointers(void)
 {
     HMODULE hAdvPack = LoadLibraryA("advpack.dll");
     if (!hAdvPack)
@@ -80,12 +80,15 @@ static void create_inf_file(LPCSTR filename)
     CloseHandle(hf);
 }
 
-static void test_RunSetupCommand()
+static void test_RunSetupCommand(void)
 {
     HRESULT hr;
     HANDLE hexe;
     char path[MAX_PATH];
     char dir[MAX_PATH];
+    char systemdir[MAX_PATH];
+
+    GetSystemDirectoryA(systemdir, sizeof(systemdir));
 
     /* try an invalid cmd name */
     hr = pRunSetupCommand(NULL, NULL, "Install", "Dir", "Title", NULL, 0, NULL);
@@ -97,7 +100,7 @@ static void test_RunSetupCommand()
 
     /* try to run a nonexistent exe */
     hexe = (HANDLE)0xdeadbeef;
-    hr = pRunSetupCommand(NULL, "idontexist.exe", "Install", "c:\\windows\\system32", "Title", &hexe, 0, NULL);
+    hr = pRunSetupCommand(NULL, "idontexist.exe", "Install", systemdir, "Title", &hexe, 0, NULL);
     ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND),
        "Expected HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), got %d\n", hr);
     ok(hexe == NULL, "Expcted hexe to be NULL\n");
@@ -113,14 +116,14 @@ static void test_RunSetupCommand()
 
     /* try to run an exe with the RSC_FLAG_INF flag */
     hexe = (HANDLE)0xdeadbeef;
-    hr = pRunSetupCommand(NULL, "winver.exe", "Install", "c:\\windows\\system32", "Title", &hexe, RSC_FLAG_INF | RSC_FLAG_QUIET, NULL);
+    hr = pRunSetupCommand(NULL, "winver.exe", "Install", systemdir, "Title", &hexe, RSC_FLAG_INF | RSC_FLAG_QUIET, NULL);
     ok(is_spapi_err(hr), "Expected a setupapi error, got %d\n", hr);
     ok(hexe == (HANDLE)0xdeadbeef, "Expected hexe to be 0xdeadbeef\n");
     ok(!TerminateProcess(hexe, 0), "Expected TerminateProcess to fail\n");
 
     /* run winver.exe */
     hexe = (HANDLE)0xdeadbeef;
-    hr = pRunSetupCommand(NULL, "winver.exe", "Install", "c:\\windows\\system32", "Title", &hexe, 0, NULL);
+    hr = pRunSetupCommand(NULL, "winver.exe", "Install", systemdir, "Title", &hexe, 0, NULL);
     ok(hr == S_ASYNCHRONOUS, "Expected S_ASYNCHRONOUS, got %d\n", hr);
     ok(hexe != NULL, "Expected hexe to be non-NULL\n");
     ok(TerminateProcess(hexe, 0), "Expected TerminateProcess to succeed\n");
@@ -194,7 +197,7 @@ static void test_RunSetupCommand()
        "Expected HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), got %d\n", hr);
 }
 
-static void test_LaunchINFSection()
+static void test_LaunchINFSection(void)
 {
     HRESULT hr;
     char cmdline[MAX_PATH];
@@ -226,7 +229,7 @@ static void test_LaunchINFSection()
     DeleteFileA("test.inf");
 }
 
-static void test_LaunchINFSectionEx()
+static void test_LaunchINFSectionEx(void)
 {
     HRESULT hr;
     char cmdline[MAX_PATH];

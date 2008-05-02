@@ -113,7 +113,7 @@ static	void MSACM_DumpCache(PWINE_ACMDRIVERID padid)
  *	Returns TRUE is the format tag fmtTag is present in the cache.
  *	If so, idx is set to its index.
  */
-BOOL MSACM_FindFormatTagInCache(WINE_ACMDRIVERID* padid, DWORD fmtTag, LPDWORD idx)
+BOOL MSACM_FindFormatTagInCache(const WINE_ACMDRIVERID* padid, DWORD fmtTag, LPDWORD idx)
 {
     unsigned 	i;
 
@@ -249,7 +249,7 @@ static BOOL MSACM_ReadCache(PWINE_ACMDRIVERID padid)
 /***********************************************************************
  *           MSACM_WriteCache
  */
-static	BOOL MSACM_WriteCache(PWINE_ACMDRIVERID padid)
+static	BOOL MSACM_WriteCache(const WINE_ACMDRIVERID *padid)
 {
     LPWSTR	key = MSACM_GetRegistryKey(padid);
     HKEY	hKey;
@@ -259,11 +259,11 @@ static	BOOL MSACM_WriteCache(PWINE_ACMDRIVERID padid)
     if (RegCreateKeyW(HKEY_LOCAL_MACHINE, key, &hKey))
 	goto errCleanUp;
 
-    if (RegSetValueExA(hKey, "cFormatTags", 0, REG_DWORD, (void*)&padid->cFormatTags, sizeof(DWORD)))
+    if (RegSetValueExA(hKey, "cFormatTags", 0, REG_DWORD, (const void*)&padid->cFormatTags, sizeof(DWORD)))
 	goto errCleanUp;
-    if (RegSetValueExA(hKey, "cFilterTags", 0, REG_DWORD, (void*)&padid->cFilterTags, sizeof(DWORD)))
+    if (RegSetValueExA(hKey, "cFilterTags", 0, REG_DWORD, (const void*)&padid->cFilterTags, sizeof(DWORD)))
 	goto errCleanUp;
-    if (RegSetValueExA(hKey, "fdwSupport", 0, REG_DWORD, (void*)&padid->fdwSupport, sizeof(DWORD)))
+    if (RegSetValueExA(hKey, "fdwSupport", 0, REG_DWORD, (const void*)&padid->fdwSupport, sizeof(DWORD)))
 	goto errCleanUp;
     if (RegSetValueExA(hKey, "aFormatTagCache", 0, REG_BINARY,
 		       (void*)padid->aFormatTag,
@@ -456,7 +456,7 @@ void MSACM_EnableNotifications(void)
 /***********************************************************************
  *           MSACM_UnRegisterNotificationWindow()
  */
-PWINE_ACMNOTIFYWND MSACM_UnRegisterNotificationWindow(PWINE_ACMNOTIFYWND panwnd)
+PWINE_ACMNOTIFYWND MSACM_UnRegisterNotificationWindow(const WINE_ACMNOTIFYWND *panwnd)
 {
     PWINE_ACMNOTIFYWND p;
 
@@ -824,8 +824,8 @@ MMRESULT MSACM_Message(HACMDRIVER had, UINT uMsg, LPARAM lParam1, LPARAM lParam2
     return MMSYSERR_INVALHANDLE;
 }
 
-PWINE_ACMLOCALDRIVER MSACM_pFirstACMLocalDriver = NULL;
-PWINE_ACMLOCALDRIVER MSACM_pLastACMLocalDriver = NULL;
+static PWINE_ACMLOCALDRIVER MSACM_pFirstACMLocalDriver;
+static PWINE_ACMLOCALDRIVER MSACM_pLastACMLocalDriver;
 
 PWINE_ACMLOCALDRIVER MSACM_RegisterLocalDriver(HMODULE hModule, DRIVERPROC lpDriverProc)
 {

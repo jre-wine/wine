@@ -158,7 +158,7 @@ static BOOL CertContext_GetHashProp(void *context, DWORD dwPropId,
 {
     BOOL ret = CryptHashCertificate(0, algID, 0, toHash, toHashLen, pvData,
      pcbData);
-    if (ret)
+    if (ret && pvData)
     {
         CRYPT_DATA_BLOB blob = { *pcbData, pvData };
 
@@ -185,20 +185,17 @@ static BOOL WINAPI CertContext_GetProperty(void *context, DWORD dwPropId,
     if (ret)
     {
         if (!pvData)
-        {
             *pcbData = blob.cbData;
-            ret = TRUE;
-        }
         else if (*pcbData < blob.cbData)
         {
             SetLastError(ERROR_MORE_DATA);
             *pcbData = blob.cbData;
+            ret = FALSE;
         }
         else
         {
             memcpy(pvData, blob.pbData, blob.cbData);
             *pcbData = blob.cbData;
-            ret = TRUE;
         }
     }
     else
@@ -299,8 +296,11 @@ BOOL WINAPI CertGetCertificateContextProperty(PCCERT_CONTEXT pCertContext,
         }
         else
         {
-            *(DWORD *)pvData =
-             CertStore_GetAccessState(pCertContext->hCertStore);
+            if (pCertContext->hCertStore)
+                ret = CertGetStoreProperty(pCertContext->hCertStore, dwPropId,
+                 pvData, pcbData);
+            else
+                *(DWORD *)pvData = 0;
             ret = TRUE;
         }
         break;
@@ -320,10 +320,7 @@ BOOL WINAPI CertGetCertificateContextProperty(PCCERT_CONTEXT pCertContext,
         if (ret)
         {
             if (!pvData)
-            {
                 *pcbData = sizeof(HCRYPTPROV);
-                ret = TRUE;
-            }
             else if (*pcbData < sizeof(HCRYPTPROV))
             {
                 SetLastError(ERROR_MORE_DATA);
@@ -331,10 +328,7 @@ BOOL WINAPI CertGetCertificateContextProperty(PCCERT_CONTEXT pCertContext,
                 ret = FALSE;
             }
             else
-            {
                 *(HCRYPTPROV *)pvData = keyContext.hCryptProv;
-                ret = TRUE;
-            }
         }
         break;
     }
@@ -731,7 +725,7 @@ BOOL WINAPI CertCompareCertificateName(DWORD dwCertEncodingType,
  * insignificant if it's a leading 0 for positive numbers or a leading 0xff
  * for negative numbers.  pInt is assumed to be little-endian.
  */
-static DWORD CRYPT_significantBytes(PCRYPT_INTEGER_BLOB pInt)
+static DWORD CRYPT_significantBytes(const CRYPT_INTEGER_BLOB *pInt)
 {
     DWORD ret = pInt->cbData;
 
@@ -1350,7 +1344,7 @@ BOOL WINAPI CryptVerifyCertificateSignature(HCRYPTPROV hCryptProv,
 
 static BOOL CRYPT_VerifyCertSignatureFromPublicKeyInfo(HCRYPTPROV hCryptProv,
  DWORD dwCertEncodingType, PCERT_PUBLIC_KEY_INFO pubKeyInfo,
- PCERT_SIGNED_CONTENT_INFO signedCert)
+ const CERT_SIGNED_CONTENT_INFO *signedCert)
 {
     BOOL ret;
     HCRYPTKEY key;
@@ -1911,7 +1905,7 @@ BOOL WINAPI CertGetValidUsages(DWORD cCerts, PCCERT_CONTEXT *rghCerts,
  * pInfo is NULL, from the attributes of hProv.
  */
 static void CertContext_SetKeyProvInfo(PCCERT_CONTEXT context,
- PCRYPT_KEY_PROV_INFO pInfo, HCRYPTPROV hProv)
+ const CRYPT_KEY_PROV_INFO *pInfo, HCRYPTPROV hProv)
 {
     CRYPT_KEY_PROV_INFO info = { 0 };
     BOOL ret;
@@ -1970,10 +1964,10 @@ static void CertContext_SetKeyProvInfo(PCCERT_CONTEXT context,
             }
         }
         size = sizeof(info.dwKeySpec);
-        ret = CryptGetProvParam(hProv, PP_KEYSPEC, (LPBYTE)&info.dwKeySpec,
-         &size, 0);
-        if (!ret)
-            info.dwKeySpec = AT_SIGNATURE;
+        /* in case no CRYPT_KEY_PROV_INFO given,
+         *  we always use AT_SIGNATURE key spec
+         */
+        info.dwKeySpec = AT_SIGNATURE;
         size = sizeof(info.dwProvType);
         ret = CryptGetProvParam(hProv, PP_PROVTYPE, (LPBYTE)&info.dwProvType,
          &size, 0);
@@ -1995,20 +1989,20 @@ static void CertContext_SetKeyProvInfo(PCCERT_CONTEXT context,
 /* Creates a signed certificate context from the unsigned, encoded certificate
  * in blob, using the crypto provider hProv and the signature algorithm sigAlgo.
  */
-static PCCERT_CONTEXT CRYPT_CreateSignedCert(PCRYPT_DER_BLOB blob,
- HCRYPTPROV hProv, PCRYPT_ALGORITHM_IDENTIFIER sigAlgo)
+static PCCERT_CONTEXT CRYPT_CreateSignedCert(const CRYPT_DER_BLOB *blob,
+ HCRYPTPROV hProv, DWORD dwKeySpec, PCRYPT_ALGORITHM_IDENTIFIER sigAlgo)
 {
     PCCERT_CONTEXT context = NULL;
     BOOL ret;
     DWORD sigSize = 0;
 
-    ret = CryptSignCertificate(hProv, AT_SIGNATURE, X509_ASN_ENCODING,
+    ret = CryptSignCertificate(hProv, dwKeySpec, X509_ASN_ENCODING,
      blob->pbData, blob->cbData, sigAlgo, NULL, NULL, &sigSize);
     if (ret)
     {
         LPBYTE sig = CryptMemAlloc(sigSize);
 
-        ret = CryptSignCertificate(hProv, AT_SIGNATURE, X509_ASN_ENCODING,
+        ret = CryptSignCertificate(hProv, dwKeySpec, X509_ASN_ENCODING,
          blob->pbData, blob->cbData, sigAlgo, NULL, sig, &sigSize);
         if (ret)
         {
@@ -2050,11 +2044,11 @@ static PCCERT_CONTEXT CRYPT_CreateSignedCert(PCRYPT_DER_BLOB blob,
  * pubKey: The public key of the certificate.  Must not be NULL.
  * pExtensions: Extensions to be included with the certificate.  Optional.
  */
-static void CRYPT_MakeCertInfo(PCERT_INFO info, PCRYPT_DATA_BLOB pSerialNumber,
- PCERT_NAME_BLOB pSubjectIssuerBlob,
- PCRYPT_ALGORITHM_IDENTIFIER pSignatureAlgorithm, PSYSTEMTIME pStartTime,
- PSYSTEMTIME pEndTime, PCERT_PUBLIC_KEY_INFO pubKey,
- PCERT_EXTENSIONS pExtensions)
+static void CRYPT_MakeCertInfo(PCERT_INFO info, const CRYPT_DATA_BLOB *pSerialNumber,
+ const CERT_NAME_BLOB *pSubjectIssuerBlob,
+ const CRYPT_ALGORITHM_IDENTIFIER *pSignatureAlgorithm, const SYSTEMTIME *pStartTime,
+ const SYSTEMTIME *pEndTime, const CERT_PUBLIC_KEY_INFO *pubKey,
+ const CERT_EXTENSIONS *pExtensions)
 {
     static CHAR oid[] = szOID_RSA_SHA1RSA;
 
@@ -2168,24 +2162,80 @@ PCCERT_CONTEXT WINAPI CertCreateSelfSignCertificate(HCRYPTPROV hProv,
     PCCERT_CONTEXT context = NULL;
     BOOL ret, releaseContext = FALSE;
     PCERT_PUBLIC_KEY_INFO pubKey = NULL;
-    DWORD pubKeySize = 0;
+    DWORD pubKeySize = 0,dwKeySpec = AT_SIGNATURE;
 
     TRACE("(%08lx, %p, %08x, %p, %p, %p, %p, %p)\n", hProv,
      pSubjectIssuerBlob, dwFlags, pKeyProvInfo, pSignatureAlgorithm, pStartTime,
      pExtensions, pExtensions);
 
-    if (!hProv)
+    if(!pSubjectIssuerBlob)
     {
-        hProv = CRYPT_CreateKeyProv();
-        releaseContext = TRUE;
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
     }
 
-    CryptExportPublicKeyInfo(hProv, AT_SIGNATURE, X509_ASN_ENCODING, NULL,
+    if (!hProv)
+    {
+        if (!pKeyProvInfo)
+        {
+            hProv = CRYPT_CreateKeyProv();
+            releaseContext = TRUE;
+        }
+        else if (pKeyProvInfo->dwFlags & CERT_SET_KEY_PROV_HANDLE_PROP_ID)
+        {
+            SetLastError(NTE_BAD_FLAGS);
+            return NULL;
+        }
+        else
+        {
+            HCRYPTKEY hKey = 0;
+            /* acquire the context using the given information*/
+            ret = CryptAcquireContextW(&hProv,pKeyProvInfo->pwszContainerName,
+                    pKeyProvInfo->pwszProvName,pKeyProvInfo->dwProvType,
+                    pKeyProvInfo->dwFlags);
+            if (!ret)
+            {
+	        if(GetLastError() != NTE_BAD_KEYSET)
+                    return NULL;
+                /* create the key set */
+                ret = CryptAcquireContextW(&hProv,pKeyProvInfo->pwszContainerName,
+                    pKeyProvInfo->pwszProvName,pKeyProvInfo->dwProvType,
+                    pKeyProvInfo->dwFlags|CRYPT_NEWKEYSET);
+                if (!ret)
+                    return NULL;
+	    }
+            dwKeySpec = pKeyProvInfo->dwKeySpec;
+            /* check if the key is here */
+            ret = CryptGetUserKey(hProv,dwKeySpec,&hKey);
+            if(!ret)
+            {
+                if (NTE_NO_KEY == GetLastError())
+                { /* generate the key */
+                    ret = CryptGenKey(hProv,dwKeySpec,0,&hKey);
+                }
+                if (!ret)
+                {
+                    CryptReleaseContext(hProv,0);
+                    SetLastError(NTE_BAD_KEYSET);
+                    return NULL;
+                }
+            }
+            CryptDestroyKey(hKey);
+            releaseContext = TRUE;
+        }
+    }
+    else if (pKeyProvInfo)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
+    CryptExportPublicKeyInfo(hProv, dwKeySpec, X509_ASN_ENCODING, NULL,
      &pubKeySize);
     pubKey = CryptMemAlloc(pubKeySize);
     if (pubKey)
     {
-        ret = CryptExportPublicKeyInfo(hProv, AT_SIGNATURE, X509_ASN_ENCODING,
+        ret = CryptExportPublicKeyInfo(hProv, dwKeySpec, X509_ASN_ENCODING,
          pubKey, &pubKeySize);
         if (ret)
         {
@@ -2203,7 +2253,7 @@ PCCERT_CONTEXT WINAPI CertCreateSelfSignCertificate(HCRYPTPROV hProv,
             if (ret)
             {
                 if (!(dwFlags & CERT_CREATE_SELFSIGN_NO_SIGN))
-                    context = CRYPT_CreateSignedCert(&blob, hProv,
+                    context = CRYPT_CreateSignedCert(&blob, hProv,dwKeySpec,
                      &info.SignatureAlgorithm);
                 else
                     context = CertCreateCertificateContext(X509_ASN_ENCODING,
@@ -2218,4 +2268,16 @@ PCCERT_CONTEXT WINAPI CertCreateSelfSignCertificate(HCRYPTPROV hProv,
     if (releaseContext)
         CryptReleaseContext(hProv, 0);
     return context;
+}
+
+BOOL WINAPI CertGetCertificateChain(HCERTCHAINENGINE hChainEngine,
+    PCCERT_CONTEXT pCertContext, LPFILETIME pTime, HCERTSTORE hAdditionalStore,
+    PCERT_CHAIN_PARA pChainPara, DWORD dwFlags, LPVOID pvReserved,
+    PCCERT_CHAIN_CONTEXT* ppChainContext)
+{
+    FIXME(" %p %p %p %p %p 0x%08X %p %p - stub\n",hChainEngine, pCertContext,
+     pTime, hAdditionalStore, pChainPara, dwFlags, pvReserved, ppChainContext);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
 }

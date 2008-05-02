@@ -42,11 +42,14 @@ extern const LUID SeCreateGlobalPrivilege;
 extern const PSID security_interactive_sid;
 
 extern struct token *token_create_admin(void);
+extern struct token *token_duplicate( struct token *src_token, unsigned primary,
+                                      SECURITY_IMPERSONATION_LEVEL impersonation_level );
 extern int token_check_privileges( struct token *token, int all_required,
                                    const LUID_AND_ATTRIBUTES *reqprivs,
                                    unsigned int count, LUID_AND_ATTRIBUTES *usedprivs);
 extern const ACL *token_get_default_dacl( struct token *token );
 extern void security_set_thread_token( struct thread *thread, obj_handle_t handle );
+extern int check_object_access( struct object *obj, unsigned int *access );
 
 static inline int thread_single_check_privilege( struct thread *thread, const LUID *priv)
 {

@@ -124,14 +124,14 @@ void _dump_DIPROPHEADER(LPCDIPROPHEADER diph) {
     }
 }
 
-void _dump_OBJECTINSTANCEA(DIDEVICEOBJECTINSTANCEA *ddoi) {
+void _dump_OBJECTINSTANCEA(const DIDEVICEOBJECTINSTANCEA *ddoi) {
     if (TRACE_ON(dinput)) {
         DPRINTF("    - enumerating : %s ('%s') - %2d - 0x%08x - %s\n",
 		debugstr_guid(&ddoi->guidType), _dump_dinput_GUID(&ddoi->guidType), ddoi->dwOfs, ddoi->dwType, ddoi->tszName);
     }
 }
 
-void _dump_OBJECTINSTANCEW(DIDEVICEOBJECTINSTANCEW *ddoi) {
+void _dump_OBJECTINSTANCEW(const DIDEVICEOBJECTINSTANCEW *ddoi) {
     if (TRACE_ON(dinput)) {
         DPRINTF("    - enumerating : %s ('%s'), - %2d - 0x%08x - %s\n",
 		debugstr_guid(&ddoi->guidType), _dump_dinput_GUID(&ddoi->guidType), ddoi->dwOfs, ddoi->dwType, debugstr_w(ddoi->tszName));
@@ -217,7 +217,7 @@ void _dump_DIDATAFORMAT(const DIDATAFORMAT *df) {
 }
 
 /* Conversion between internal data buffer and external data buffer */
-void fill_DataFormat(void *out, const void *in, DataFormat *df) {
+void fill_DataFormat(void *out, const void *in, const DataFormat *df) {
     int i;
     const char *in_c = in;
     char *out_c = (char *) out;
@@ -288,8 +288,6 @@ void release_DataFormat(DataFormat * format)
     format->dt = NULL;
     HeapFree(GetProcessHeap(), 0, format->offsets);
     format->offsets = NULL;
-    if (format->user_df)
-        HeapFree(GetProcessHeap(), 0, format->user_df->rgodf);
     HeapFree(GetProcessHeap(), 0, format->user_df);
     format->user_df = NULL;
 }
@@ -298,48 +296,6 @@ inline LPDIOBJECTDATAFORMAT dataformat_to_odf(LPCDIDATAFORMAT df, int idx)
 {
     if (idx < 0 || idx >= df->dwNumObjs) return NULL;
     return (LPDIOBJECTDATAFORMAT)((LPBYTE)df->rgodf + idx * df->dwObjSize);
-}
-
-/* Make all instances sequential */
-static void calculate_ids(LPDIDATAFORMAT df)
-{
-    int i, axis = 0, pov = 0, button = 0;
-    int axis_base, pov_base, button_base;
-    DWORD type;
-
-    /* Make two passes over the format. The first counts the number
-     * for each type and the second sets the id */
-    for (i = 0; i < df->dwNumObjs; i++)
-    {
-        type = DIDFT_GETTYPE(df->rgodf[i].dwType);
-        if      (type & DIDFT_AXIS)   axis++;
-        else if (type & DIDFT_POV)    pov++;
-        else if (type & DIDFT_BUTTON) button++;
-    }
-
-    axis_base   = 0;
-    pov_base    = axis_base + axis;
-    button_base = pov_base + pov;
-    axis = pov = button = 0;
-
-    for (i = 0; i < df->dwNumObjs; i++)
-    {
-        type = DIDFT_GETTYPE(df->rgodf[i].dwType);
-        if (type & DIDFT_AXIS)
-        {
-            type |= DIDFT_MAKEINSTANCE(axis_base + axis++);
-            TRACE("axis type = 0x%08x\n", type);
-        } else if (type & DIDFT_POV)
-        {
-            type |= DIDFT_MAKEINSTANCE(pov_base + pov++);
-            TRACE("POV type = 0x%08x\n", type);
-        } else if (type & DIDFT_BUTTON)
-        {
-            type |= DIDFT_MAKEINSTANCE(button_base + button++);
-            TRACE("button type = 0x%08x\n", type);
-        }
-        df->rgodf[i].dwType = type;
-    }
 }
 
 HRESULT create_DataFormat(LPCDIDATAFORMAT asked_format, DataFormat *format)
@@ -362,10 +318,6 @@ HRESULT create_DataFormat(LPCDIDATAFORMAT asked_format, DataFormat *format)
     if (!(format->user_df = HeapAlloc(GetProcessHeap(), 0, asked_format->dwSize)))
         goto failed;
     memcpy(format->user_df, asked_format, asked_format->dwSize);
-
-    if (!(format->user_df->rgodf = HeapAlloc(GetProcessHeap(), 0, asked_format->dwNumObjs*asked_format->dwObjSize)))
-        goto failed;
-    memcpy(format->user_df->rgodf, asked_format->rgodf, asked_format->dwNumObjs*asked_format->dwObjSize);
 
     TRACE("Creating DataTransform :\n");
     
@@ -469,8 +421,6 @@ HRESULT create_DataFormat(LPCDIDATAFORMAT asked_format, DataFormat *format)
 
     HeapFree(GetProcessHeap(), 0, done);
 
-    /* Last step - reset all instances of the new format */
-    calculate_ids(format->user_df);
     return DI_OK;
 
 failed:
@@ -479,8 +429,6 @@ failed:
     format->dt = NULL;
     HeapFree(GetProcessHeap(), 0, format->offsets);
     format->offsets = NULL;
-    if (format->user_df)
-        HeapFree(GetProcessHeap(), 0, format->user_df->rgodf);
     HeapFree(GetProcessHeap(), 0, format->user_df);
     format->user_df = NULL;
 
@@ -488,13 +436,14 @@ failed:
 }
 
 /* find an object by it's offset in a data format */
-int offset_to_object(LPCDIDATAFORMAT df, int offset)
+static int offset_to_object(const DataFormat *df, int offset)
 {
     int i;
 
-    for (i = 0; i < df->dwNumObjs; i++)
-        if (dataformat_to_odf(df, i)->dwOfs == offset)
-            return i;
+    if (!df->offsets) return -1;
+
+    for (i = 0; i < df->wine_df->dwNumObjs; i++)
+        if (df->offsets[i] == offset) return i;
 
     return -1;
 }
@@ -511,18 +460,18 @@ static int id_to_object(LPCDIDATAFORMAT df, int id)
     return -1;
 }
 
-int id_to_offset(DataFormat *df, int id)
+int id_to_offset(const DataFormat *df, int id)
 {
     int obj = id_to_object(df->wine_df, id);
 
     return obj >= 0 && df->offsets ? df->offsets[obj] : -1;
 }
 
-int find_property(LPCDIDATAFORMAT df, LPCDIPROPHEADER ph)
+int find_property(const DataFormat *df, LPCDIPROPHEADER ph)
 {
     switch (ph->dwHow)
     {
-        case DIPH_BYID:     return id_to_object(df, ph->dwObj);
+        case DIPH_BYID:     return id_to_object(df->wine_df, ph->dwObj);
         case DIPH_BYOFFSET: return offset_to_object(df, ph->dwObj);
     }
     FIXME("Unhandled ph->dwHow=='%04X'\n", (unsigned int)ph->dwHow);
@@ -573,6 +522,9 @@ void queue_event(LPDIRECTINPUTDEVICE8A iface, int ofs, DWORD data, DWORD time, D
     IDirectInputDevice2AImpl *This = (IDirectInputDevice2AImpl *)iface;
     int next_pos;
 
+    /* Event is being set regardless of the queue state */
+    if (This->hEvent) SetEvent(This->hEvent);
+
     if (!This->queue_len || This->overflow || ofs < 0) return;
 
     next_pos = (This->queue_head + 1) % This->queue_len;
@@ -592,7 +544,6 @@ void queue_event(LPDIRECTINPUTDEVICE8A iface, int ofs, DWORD data, DWORD time, D
     This->data_queue[This->queue_head].dwSequence  = seq;
     This->queue_head = next_pos;
     /* Send event if asked */
-    if (This->hEvent) SetEvent(This->hEvent);
 }
 
 /******************************************************************************
@@ -605,6 +556,8 @@ HRESULT WINAPI IDirectInputDevice2AImpl_Acquire(LPDIRECTINPUTDEVICE8A iface)
     HRESULT res;
 
     if (!This->data_format.user_df) return DIERR_INVALIDPARAM;
+    if (This->dwCoopLevel & DISCL_FOREGROUND && This->win != GetForegroundWindow())
+        return DIERR_OTHERAPPHASPRIO;
 
     EnterCriticalSection(&This->crit);
     res = This->acquired ? S_FALSE : DI_OK;
@@ -724,8 +677,21 @@ ULONG WINAPI IDirectInputDevice2AImpl_Release(LPDIRECTINPUTDEVICE8A iface)
     ref = InterlockedDecrement(&(This->ref));
     if (ref) return ref;
 
-    DeleteCriticalSection(&This->crit);
+    IDirectInputDevice_Unacquire(iface);
+    /* Reset the FF state, free all effects, etc */
+    IDirectInputDevice8_SendForceFeedbackCommand(iface, DISFFC_RESET);
+
     HeapFree(GetProcessHeap(), 0, This->data_queue);
+
+    /* Free data format */
+    HeapFree(GetProcessHeap(), 0, This->data_format.wine_df->rgodf);
+    HeapFree(GetProcessHeap(), 0, This->data_format.wine_df);
+    release_DataFormat(&This->data_format);
+
+    IDirectInput_Release((LPDIRECTINPUTDEVICE8A)This->dinput);
+    This->crit.DebugInfo->Spare[0] = 0;
+    DeleteCriticalSection(&This->crit);
+
     HeapFree(GetProcessHeap(), 0, This);
 
     return DI_OK;
@@ -1006,7 +972,7 @@ HRESULT WINAPI IDirectInputDevice2WImpl_GetObjectInfo(
 	DWORD dwHow)
 {
     IDirectInputDevice2AImpl *This = (IDirectInputDevice2AImpl *)iface;
-    DWORD dwSize = pdidoi->dwSize;
+    DWORD dwSize;
     LPDIOBJECTDATAFORMAT odf;
     int idx = -1;
 
@@ -1041,6 +1007,7 @@ HRESULT WINAPI IDirectInputDevice2WImpl_GetObjectInfo(
     if (idx < 0) return DIERR_OBJECTNOTFOUND;
 
     odf = dataformat_to_odf(This->data_format.wine_df, idx);
+    dwSize = pdidoi->dwSize; /* save due to memset below */
     memset(pdidoi, 0, pdidoi->dwSize);
     pdidoi->dwSize   = dwSize;
     if (odf->pguid) pdidoi->guidType = *odf->pguid;
@@ -1219,9 +1186,8 @@ HRESULT WINAPI IDirectInputDevice2AImpl_SendForceFeedbackCommand(
 	LPDIRECTINPUTDEVICE8A iface,
 	DWORD dwFlags)
 {
-    FIXME("(this=%p,0x%08x): stub!\n",
-	  iface, dwFlags);
-    return DI_OK;
+    TRACE("(%p) 0x%08x:\n", iface, dwFlags);
+    return DI_NOEFFECT;
 }
 
 HRESULT WINAPI IDirectInputDevice2AImpl_EnumCreatedEffectObjects(

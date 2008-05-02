@@ -170,7 +170,7 @@ struct options
 
 static void clean_temp_files(void)
 {
-    int i;
+    unsigned int i;
 
     if (keep_generated) return;
 
@@ -239,7 +239,8 @@ static const strarray* get_translator(enum processor processor)
 static void compile(struct options* opts, const char* lang)
 {
     strarray* comp_args = strarray_alloc();
-    int j, gcc_defs = 0;
+    unsigned int j;
+    int gcc_defs = 0;
 
     switch(opts->processor)
     {
@@ -434,7 +435,7 @@ static void build(struct options* opts)
     const char *output_name, *spec_file, *lang;
     const char* winebuild = getenv("WINEBUILD");
     int generate_app_loader = 1;
-    int j;
+    unsigned int j;
 
     /* NOTE: for the files array we'll use the following convention:
      *    -axxx:  xxx is an archive (.a)
@@ -719,11 +720,13 @@ static int is_linker_arg(const char* arg)
 	"-static", "-static-libgcc", "-shared", "-shared-libgcc", "-symbolic",
 	"-framework"
     };
-    int j;
+    unsigned int j;
 
     switch (arg[1]) 
     {
-	case 'l': 
+	case 'R':
+	case 'z':
+	case 'l':
 	case 'u':
 	    return 1;
         case 'W':
@@ -769,7 +772,7 @@ static int is_mingw_arg(const char* arg)
     {
         "-mno-cygwin", "-mwindows", "-mconsole", "-mthreads", "-municode"
     };
-    int j;
+    unsigned int j;
 
     for (j = 0; j < sizeof(mingw_switches)/sizeof(mingw_switches[0]); j++)
 	if (strcmp(mingw_switches[j], arg) == 0) return 1;
@@ -827,7 +830,7 @@ int main(int argc, char **argv)
 		case 'x': case 'o': case 'D': case 'U':
 		case 'I': case 'A': case 'l': case 'u':
 		case 'b': case 'V': case 'G': case 'L':
-		case 'B':
+		case 'B': case 'R': case 'z':
 		    if (argv[i][2]) option_arg = &argv[i][2];
 		    else next_is_arg = 1;
 		    break;

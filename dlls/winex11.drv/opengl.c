@@ -292,8 +292,17 @@ static BOOL X11DRV_WineGL_InitOpenglInfo(void)
     template.visualid = XVisualIDFromVisual(visual);
     vis = XGetVisualInfo(gdi_display, VisualIDMask, &template, &num);
     if (vis) {
+        WORD old_fs = wine_get_fs();
         /* Create a GLX Context. Without one we can't query GL information */
         ctx = pglXCreateContext(gdi_display, vis, None, GL_TRUE);
+        if (wine_get_fs() != old_fs)
+        {
+            wine_set_fs( old_fs );
+            wine_tsx11_unlock();
+            ERR( "%%fs register corrupted, probably broken ATI driver, disabling OpenGL.\n" );
+            ERR( "You need to set the \"UseFastTls\" option to \"2\" in your X config file.\n" );
+            return FALSE;
+        }
     }
 
     if (ctx) {
@@ -305,7 +314,7 @@ static BOOL X11DRV_WineGL_InitOpenglInfo(void)
     }
 
     WineGLInfo.glVersion = (const char *) pglGetString(GL_VERSION);
-    WineGLInfo.glExtensions = (const char *) pglGetString(GL_EXTENSIONS);
+    WineGLInfo.glExtensions = strdup((const char *) pglGetString(GL_EXTENSIONS));
 
     /* Get the common GLX version supported by GLX client and server ( major/minor) */
     pglXQueryVersion(gdi_display, &WineGLInfo.glxVersion[0], &WineGLInfo.glxVersion[1]);
@@ -411,7 +420,6 @@ LOAD_FUNCPTR(glXFreeMemoryNV)
 #undef LOAD_FUNCPTR
 
     if(!X11DRV_WineGL_InitOpenglInfo()) {
-        ERR("Intialization of OpenGL info failed, disabling OpenGL!\n");
         wine_dlclose(opengl_handle, NULL, 0);
         opengl_handle = NULL;
         return FALSE;
@@ -533,7 +541,7 @@ static inline Wine_GLContext *get_context_from_GLXContext(GLXContext ctx)
  *
  * For use by wglGetCurrentReadDCARB.
  */
-inline static HDC get_hdc_from_Drawable(GLXDrawable d)
+static inline HDC get_hdc_from_Drawable(GLXDrawable d)
 {
     Wine_GLContext *ret;
     for (ret = context_list; ret; ret = ret->next) {
@@ -544,7 +552,7 @@ inline static HDC get_hdc_from_Drawable(GLXDrawable d)
     return NULL;
 }
 
-inline static BOOL is_valid_context( Wine_GLContext *ctx )
+static inline BOOL is_valid_context( Wine_GLContext *ctx )
 {
     Wine_GLContext *ptr;
     for (ptr = context_list; ptr; ptr = ptr->next) if (ptr == ctx) break;
@@ -808,7 +816,7 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
   return nAttribs;
 }
 
-BOOL get_fbconfig_from_visualid(Display *display, Visual *visual, int *fmt_id, int *fmt_index)
+static BOOL get_fbconfig_from_visualid(Display *display, Visual *visual, int *fmt_id, int *fmt_index)
 {
     GLXFBConfig* cfgs = NULL;
     int i;
@@ -817,8 +825,9 @@ BOOL get_fbconfig_from_visualid(Display *display, Visual *visual, int *fmt_id, i
     int tmp_vis_id;
     VisualID visualid;
 
-    if(!display || !display) {
+    if(!display || !visual) {
         ERR("Invalid display or visual\n");
+	return FALSE;
     }
     visualid = XVisualIDFromVisual(visual);
 
@@ -827,7 +836,7 @@ BOOL get_fbconfig_from_visualid(Display *display, Visual *visual, int *fmt_id, i
     if (NULL == cfgs || 0 == nCfgs) {
         ERR("glXChooseFBConfig returns NULL\n");
         if(cfgs != NULL) XFree(cfgs);
-            return 0;
+        return FALSE;
     }
 
     /* Find the requested offscreen format and count the number of offscreen formats */
@@ -1496,7 +1505,7 @@ BOOL X11DRV_wglMakeCurrent(X11DRV_PDEVICE *physDev, HGLRC hglrc) {
         NtCurrentTeb()->glContext = NULL;
     } else {
         Wine_GLContext *ctx = (Wine_GLContext *) hglrc;
-        Drawable drawable = physDev->drawable;
+        Drawable drawable = get_glxdrawable(physDev);
         if (ctx->ctx == NULL) {
             /* The describe lines below are for debugging purposes only */
             if (TRACE_ON(wgl)) {
@@ -1923,7 +1932,7 @@ static HPBUFFERARB WINAPI X11DRV_wglCreatePbufferARB(HDC hdc, int iPixelFormat, 
     GLXFBConfig* cfgs = NULL;
     int nCfgs = 0;
     int attribs[256];
-    unsigned nAttribs = 0;
+    int nAttribs = 0;
     int fmt_index = 0;
 
     TRACE("(%p, %d, %d, %d, %p)\n", hdc, iPixelFormat, iWidth, iHeight, piAttribList);
@@ -3074,37 +3083,34 @@ BOOL X11DRV_SwapBuffers(X11DRV_PDEVICE *physDev)
 XVisualInfo *X11DRV_setup_opengl_visual( Display *display )
 {
     XVisualInfo *visual = NULL;
-    /* In order to support OpenGL or D3D, we require a double-buffered visual and stencil buffer support, */
-    int dblBuf[] = {GLX_RGBA,GLX_DEPTH_SIZE, 24, GLX_STENCIL_SIZE, 8, GLX_ALPHA_SIZE, 8, GLX_DOUBLEBUFFER, None};
-    if (!has_opengl()) return NULL;
+    int i;
+
+    /* In order to support OpenGL or D3D, we require a double-buffered visual and stencil buffer support,
+     * D3D and some applications can make use of aux buffers.
+     */
+    int visualProperties[][11] = {
+        { GLX_RGBA, GLX_DOUBLEBUFFER, GLX_DEPTH_SIZE, 24, GLX_STENCIL_SIZE, 8, GLX_ALPHA_SIZE, 8, GLX_AUX_BUFFERS, 1, None },
+        { GLX_RGBA, GLX_DOUBLEBUFFER, GLX_DEPTH_SIZE, 24, GLX_STENCIL_SIZE, 8, GLX_ALPHA_SIZE, 8, None },
+        { GLX_RGBA, GLX_DOUBLEBUFFER, GLX_DEPTH_SIZE, 16, GLX_STENCIL_SIZE, 8, None },
+        { GLX_RGBA, GLX_DOUBLEBUFFER, GLX_DEPTH_SIZE, 16, None },
+    };
+
+    if (!has_opengl())
+        return NULL;
 
     wine_tsx11_lock();
-    visual = pglXChooseVisual(display, DefaultScreen(display), dblBuf);
-    wine_tsx11_unlock();
-    if (visual == NULL) {
-        /* fallback to 16 bits depth, no alpha */
-        int dblBuf2[] = {GLX_RGBA,GLX_DEPTH_SIZE, 16, GLX_STENCIL_SIZE, 8, GLX_DOUBLEBUFFER, None};
-        WARN("Failed to get a visual with at least 24 bits depth\n");
-
-        wine_tsx11_lock();
-        visual = pglXChooseVisual(display, DefaultScreen(display), dblBuf2);
-        wine_tsx11_unlock();
-        if (visual == NULL) {
-            /* fallback to no stencil */
-            int dblBuf2[] = {GLX_RGBA,GLX_DEPTH_SIZE, 16, GLX_DOUBLEBUFFER, None};
-            WARN("Failed to get a visual with at least 8 bits of stencil\n");
-
-            wine_tsx11_lock();
-            visual = pglXChooseVisual(display, DefaultScreen(display), dblBuf2);
-            wine_tsx11_unlock();
-            if (visual == NULL) {
-                /* This should only happen if we cannot find a match with a depth size 16 */
-                FIXME("Failed to find a suitable visual\n");
-                return visual;
-            }
-        }
+    for (i = 0; i < sizeof(visualProperties)/sizeof(visualProperties[0]); ++i) {
+        visual = pglXChooseVisual(display, DefaultScreen(display), visualProperties[i]);
+        if (visual)
+            break;
     }
-    TRACE("Visual ID %lx Chosen\n",visual->visualid);
+    wine_tsx11_unlock();
+
+    if (visual)
+        TRACE("Visual ID %lx Chosen\n", visual->visualid);
+    else
+        WARN("No suitable visual found\n");
+
     return visual;
 }
 

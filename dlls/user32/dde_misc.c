@@ -33,7 +33,6 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
-#include "winerror.h"
 #include "dde.h"
 #include "ddeml.h"
 #include "win.h"
@@ -133,7 +132,7 @@ BOOL WINAPI UnpackDDElParam(UINT msg, LPARAM lParam,
             ERR("GlobalLock failed (%lx)\n", lParam);
             return FALSE;
         }
-        TRACE("unpacked: low %08x, high %08x\n", params[0], params[1]);
+        TRACE("unpacked: low %08lx, high %08lx\n", params[0], params[1]);
         if (uiLo) *uiLo = params[0];
         if (uiHi) *uiHi = params[1];
         GlobalUnlock( (HGLOBAL)lParam );
@@ -208,7 +207,7 @@ LPARAM WINAPI ReuseDDElParam(LPARAM lParam, UINT msgIn, UINT msgOut,
             }
             params[0] = uiLo;
             params[1] = uiHi;
-            TRACE("Reusing pack %08x %08x\n", uiLo, uiHi);
+            TRACE("Reusing pack %08lx %08lx\n", uiLo, uiHi);
             GlobalUnlock( (HGLOBAL)lParam );
             return lParam;
 
@@ -1985,7 +1984,7 @@ WDML_CONV*	WDML_GetConvFromWnd(HWND hWnd)
  *
  */
 BOOL		WDML_PostAck(WDML_CONV* pConv, WDML_SIDE side, WORD appRetCode,
-			     BOOL fBusy, BOOL fAck, UINT pmt, LPARAM lParam, UINT oldMsg)
+			     BOOL fBusy, BOOL fAck, UINT_PTR pmt, LPARAM lParam, UINT oldMsg)
 {
     DDEACK	ddeAck;
     HWND	from, to;

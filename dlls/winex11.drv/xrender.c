@@ -30,7 +30,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "wownt32.h"
 #include "x11drv.h"
 #include "winternl.h"
 #include "wine/library.h"
@@ -118,6 +117,7 @@ MAKE_FUNCPTR(XRenderComposite)
 MAKE_FUNCPTR(XRenderCompositeString8)
 MAKE_FUNCPTR(XRenderCompositeString16)
 MAKE_FUNCPTR(XRenderCompositeString32)
+MAKE_FUNCPTR(XRenderCompositeText16)
 MAKE_FUNCPTR(XRenderCreateGlyphSet)
 MAKE_FUNCPTR(XRenderCreatePicture)
 MAKE_FUNCPTR(XRenderFillRectangle)
@@ -181,6 +181,7 @@ LOAD_FUNCPTR(XRenderComposite)
 LOAD_FUNCPTR(XRenderCompositeString8)
 LOAD_FUNCPTR(XRenderCompositeString16)
 LOAD_FUNCPTR(XRenderCompositeString32)
+LOAD_FUNCPTR(XRenderCompositeText16)
 LOAD_FUNCPTR(XRenderCreateGlyphSet)
 LOAD_FUNCPTR(XRenderCreatePicture)
 LOAD_FUNCPTR(XRenderFillRectangle)
@@ -346,9 +347,9 @@ static void FreeEntry(int entry)
                     HeapFree(GetProcessHeap(), 0, formatEntry->bitmaps[i]);
                 HeapFree(GetProcessHeap(), 0, formatEntry->bitmaps);
                 formatEntry->bitmaps = NULL;
-                HeapFree(GetProcessHeap(), 0, formatEntry->gis);
-                formatEntry->gis = NULL;
             }
+            HeapFree(GetProcessHeap(), 0, formatEntry->gis);
+            formatEntry->gis = NULL;
             formatEntry->nrealized = 0;
         }
 
@@ -571,18 +572,7 @@ BOOL X11DRV_XRender_SelectFont(X11DRV_PDEVICE *physDev, HFONT hfont)
  */
 void X11DRV_XRender_DeleteDC(X11DRV_PDEVICE *physDev)
 {
-    wine_tsx11_lock();
-    if(physDev->xrender->tile_pict)
-        pXRenderFreePicture(gdi_display, physDev->xrender->tile_pict);
-
-    if(physDev->xrender->tile_xpm)
-        XFreePixmap(gdi_display, physDev->xrender->tile_xpm);
-
-    if(physDev->xrender->pict) {
-	TRACE("freeing pict = %lx dc = %p\n", physDev->xrender->pict, physDev->hdc);
-        pXRenderFreePicture(gdi_display, physDev->xrender->pict);
-    }
-    wine_tsx11_unlock();
+    X11DRV_XRender_UpdateDrawable(physDev);
 
     EnterCriticalSection(&xrender_cs);
     if(physDev->xrender->cache_index != -1)
@@ -598,19 +588,32 @@ void X11DRV_XRender_DeleteDC(X11DRV_PDEVICE *physDev)
  *   X11DRV_XRender_UpdateDrawable
  *
  * This gets called from X11DRV_SetDrawable and X11DRV_SelectBitmap.
- * It deletes the pict when the drawable changes.
+ * It deletes the pict and tile when the drawable changes.
  */
 void X11DRV_XRender_UpdateDrawable(X11DRV_PDEVICE *physDev)
 {
-    if(physDev->xrender->pict) {
-        TRACE("freeing pict %08lx from dc %p drawable %08lx\n", physDev->xrender->pict,
-              physDev->hdc, physDev->drawable);
-        wine_tsx11_lock();
+    wine_tsx11_lock();
+
+    if(physDev->xrender->pict)
+    {
+        TRACE("freeing pict = %lx dc = %p\n", physDev->xrender->pict, physDev->hdc);
         XFlush(gdi_display);
         pXRenderFreePicture(gdi_display, physDev->xrender->pict);
-        wine_tsx11_unlock();
+        physDev->xrender->pict = 0;
     }
-    physDev->xrender->pict = 0;
+    if(physDev->xrender->tile_pict)
+    {
+        pXRenderFreePicture(gdi_display, physDev->xrender->tile_pict);
+        physDev->xrender->tile_pict = 0;
+    }
+    if(physDev->xrender->tile_xpm)
+    {
+        XFreePixmap(gdi_display, physDev->xrender->tile_xpm);
+        physDev->xrender->tile_xpm = 0;
+    }
+
+    wine_tsx11_unlock();
+
     return;
 }
 
@@ -630,6 +633,7 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
     gsCacheEntryFormat *formatEntry;
     UINT ggo_format = GGO_GLYPH_INDEX;
     XRenderPictFormat pf;
+    static const char zero[4];
 
     switch(format) {
     case AA_Grey:
@@ -655,7 +659,7 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
                                       NULL);
         }
         if(buflen == GDI_ERROR) {
-            ERR("GetGlyphOutlineW failed\n");
+            WARN("GetGlyphOutlineW failed\n");
             return FALSE;
         }
         TRACE("Turning off antialiasing for this monochrome font\n");
@@ -692,17 +696,16 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 	    formatEntry->bitmaps = HeapAlloc(GetProcessHeap(),
 				      HEAP_ZERO_MEMORY,
 				      formatEntry->nrealized * sizeof(formatEntry->bitmaps[0]));
-
-	  if (formatEntry->gis)
+        }
+        if (formatEntry->gis)
 	    formatEntry->gis = HeapReAlloc(GetProcessHeap(),
 				   HEAP_ZERO_MEMORY,
 				   formatEntry->gis,
 				   formatEntry->nrealized * sizeof(formatEntry->gis[0]));
-	  else
+        else
 	    formatEntry->gis = HeapAlloc(GetProcessHeap(),
 				   HEAP_ZERO_MEMORY,
-				   formatEntry->nrealized * sizeof(formatEntry->gis[0]));
-	}
+                                   formatEntry->nrealized * sizeof(formatEntry->gis[0]));
     }
 
 
@@ -788,6 +791,7 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 	}
     }
 
+
     if(formatEntry->glyphset) {
         if(format == AA_None && BitmapBitOrder(gdi_display) != MSBFirst) {
 	    unsigned char *byte = (unsigned char*) buf, c;
@@ -805,15 +809,28 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 	    }
 	}
 	gid = glyph;
+
+        /*
+          XRenderCompositeText seems to ignore 0x0 glyphs when
+          AA_None, which means we lose the advance width of glyphs
+          like the space.  We'll pretend that such glyphs are 1x1
+          bitmaps.
+        */
+
+        if(buflen == 0)
+            gi.width = gi.height = 1;
+
         wine_tsx11_lock();
 	pXRenderAddGlyphs(gdi_display, formatEntry->glyphset, &gid, &gi, 1,
-			  buf, buflen);
+                          buflen ? buf : zero, buflen ? buflen : sizeof(zero));
 	wine_tsx11_unlock();
 	HeapFree(GetProcessHeap(), 0, buf);
     } else {
         formatEntry->bitmaps[glyph] = buf;
-	memcpy(&formatEntry->gis[glyph], &gi, sizeof(gi));
     }
+
+    memcpy(&formatEntry->gis[glyph], &gi, sizeof(gi));
+
     return TRUE;
 }
 
@@ -1076,7 +1093,7 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
     int textPixel, backgroundPixel;
     HRGN saved_region = 0;
     BOOL disable_antialias = FALSE;
-    AA_Type antialias = AA_None;
+    AA_Type aa_type = AA_None;
     DIBSECTION bmp;
     unsigned int idx;
     double cosEsc, sinEsc;
@@ -1244,59 +1261,91 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
     EnterCriticalSection(&xrender_cs);
     entry = glyphsetCache + physDev->xrender->cache_index;
     if( disable_antialias == FALSE )
-        antialias = entry->aa_default;
-    formatEntry = entry->format[antialias];
+        aa_type = entry->aa_default;
+    formatEntry = entry->format[aa_type];
 
     for(idx = 0; idx < count; idx++) {
         if( !formatEntry ) {
-	    UploadGlyph(physDev, wstr[idx], antialias);
+	    UploadGlyph(physDev, wstr[idx], aa_type);
             /* re-evaluate antialias since aa_default may have changed */
             if( disable_antialias == FALSE )
-                antialias = entry->aa_default;
-            formatEntry = entry->format[antialias];
+                aa_type = entry->aa_default;
+            formatEntry = entry->format[aa_type];
         } else if( wstr[idx] >= formatEntry->nrealized || formatEntry->realized[wstr[idx]] == FALSE) {
-	    UploadGlyph(physDev, wstr[idx], antialias);
+	    UploadGlyph(physDev, wstr[idx], aa_type);
 	}
     }
-    assert(formatEntry);
+    if (!formatEntry)
+    {
+        WARN("could not upload requested glyphs\n");
+        LeaveCriticalSection(&xrender_cs);
+        goto done_unlock;
+    }
 
     TRACE("Writing %s at %d,%d\n", debugstr_wn(wstr,count),
           physDev->dc_rect.left + x, physDev->dc_rect.top + y);
 
-    if(X11DRV_XRender_Installed) {
-        wine_tsx11_lock();
-	if(!lpDx)
-	    pXRenderCompositeString16(gdi_display, render_op,
-				      physDev->xrender->tile_pict,
-				      physDev->xrender->pict,
-				      formatEntry->font_format, formatEntry->glyphset,
-				      0, 0, physDev->dc_rect.left + x, physDev->dc_rect.top + y,
-				      wstr, count);
-	else {
-	    INT offset = 0, xoff = 0, yoff = 0;
-	    for(idx = 0; idx < count; idx++) {
-	        pXRenderCompositeString16(gdi_display, render_op,
-					  physDev->xrender->tile_pict,
-					  physDev->xrender->pict,
-					  formatEntry->font_format, formatEntry->glyphset,
-					  0, 0, physDev->dc_rect.left + x + xoff,
-					  physDev->dc_rect.top + y + yoff,
-					  wstr + idx, 1);
-                offset += lpDx[idx];
-		xoff = offset * cosEsc;
-		yoff = offset * -sinEsc;
-	    }
-	}
-	wine_tsx11_unlock();
+    if(X11DRV_XRender_Installed)
+    {
+        XGlyphElt16 *elts = HeapAlloc(GetProcessHeap(), 0, sizeof(XGlyphElt16) * count);
+        INT offset = 0;
+        POINT desired, current;
 
+        /* There's a bug in XRenderCompositeText that ignores the xDst and yDst parameters.
+           So we pass zeros to the function and move to our starting position using the first
+           element of the elts array. */
+
+        desired.x = physDev->dc_rect.left + x;
+        desired.y = physDev->dc_rect.top + y;
+        current.x = current.y = 0;
+
+        for(idx = 0; idx < count; idx++)
+        {
+            elts[idx].glyphset = formatEntry->glyphset;
+            elts[idx].chars = wstr + idx;
+            elts[idx].nchars = 1;
+            elts[idx].xOff = desired.x - current.x;
+            elts[idx].yOff = desired.y - current.y;
+
+            current.x += (elts[idx].xOff + formatEntry->gis[wstr[idx]].xOff);
+            current.y += (elts[idx].yOff + formatEntry->gis[wstr[idx]].yOff);
+
+            if(!lpDx)
+            {
+                desired.x += formatEntry->gis[wstr[idx]].xOff;
+                desired.y += formatEntry->gis[wstr[idx]].yOff;
+            }
+            else
+            {
+                offset += lpDx[idx];
+                desired.x = physDev->dc_rect.left + x + offset * cosEsc;
+                desired.y = physDev->dc_rect.top  + y - offset * sinEsc;
+            }
+        }
+        wine_tsx11_lock();
+        pXRenderCompositeText16(gdi_display, render_op,
+                                physDev->xrender->tile_pict,
+                                physDev->xrender->pict,
+                                formatEntry->font_format,
+                                0, 0, 0, 0, elts, count);
+        wine_tsx11_unlock();
+        HeapFree(GetProcessHeap(), 0, elts);
     } else {
         INT offset = 0, xoff = 0, yoff = 0;
         wine_tsx11_lock();
 	XSetForeground( gdi_display, physDev->gc, textPixel );
 
-	if(antialias == AA_None) {
+        if(aa_type == AA_None || physDev->depth == 1)
+        {
+            void (* sharp_glyph_fn)(X11DRV_PDEVICE *, INT, INT, void *, XGlyphInfo *);
+
+            if(aa_type == AA_None)
+                sharp_glyph_fn = SharpGlyphMono;
+            else
+                sharp_glyph_fn = SharpGlyphGray;
+
 	    for(idx = 0; idx < count; idx++) {
-	        SharpGlyphMono(physDev, physDev->dc_rect.left + x + xoff,
+	        sharp_glyph_fn(physDev, physDev->dc_rect.left + x + xoff,
 			       physDev->dc_rect.top + y + yoff,
 			       formatEntry->bitmaps[wstr[idx]],
 			       &formatEntry->gis[wstr[idx]]);
@@ -1308,22 +1357,6 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
 		    xoff += formatEntry->gis[wstr[idx]].xOff;
 		    yoff += formatEntry->gis[wstr[idx]].yOff;
 		}
-	    }
-	} else if(physDev->depth == 1) {
-	    for(idx = 0; idx < count; idx++) {
-	        SharpGlyphGray(physDev, physDev->dc_rect.left + x + xoff,
-			       physDev->dc_rect.top + y + yoff,
-			       formatEntry->bitmaps[wstr[idx]],
-			       &formatEntry->gis[wstr[idx]]);
-		if(lpDx) {
-		    offset += lpDx[idx];
-		    xoff = offset * cosEsc;
-		    yoff = offset * -sinEsc;
-		} else {
-		    xoff += formatEntry->gis[wstr[idx]].xOff;
-		    yoff += formatEntry->gis[wstr[idx]].yOff;
-		}
-		    
 	    }
 	} else {
 	    XImage *image;

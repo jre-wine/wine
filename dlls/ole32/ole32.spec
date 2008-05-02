@@ -58,6 +58,7 @@
 @ stdcall CoRegisterMessageFilter(ptr ptr)
 @ stdcall CoRegisterPSClsid(ptr ptr)
 @ stub CoRegisterSurrogate
+@ stub CoRegisterSurrogateEx
 @ stdcall CoReleaseMarshalData(ptr)
 @ stdcall CoReleaseServerProcess()
 @ stdcall CoResumeClassObjects()
@@ -76,6 +77,7 @@
 @ stub CoUnloadingWOW
 @ stdcall CoUnmarshalHresult(ptr ptr)
 @ stdcall CoUnmarshalInterface(ptr ptr ptr)
+@ stdcall CoWaitForMultipleHandles(long long long ptr ptr)
 @ stdcall CreateAntiMoniker(ptr)
 @ stdcall CreateBindCtx(long ptr)
 @ stdcall CreateClassMoniker(ptr ptr)

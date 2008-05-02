@@ -709,6 +709,7 @@ static void parse_generated_idl( INCL_FILE *source )
     }
     else if (strendswith( source->name, "_p.c" ))
     {
+        add_include( source, "objbase.h", 0, 1 );
         add_include( source, "rpcproxy.h", 0, 1 );
         add_include( source, header, 0, 0 );
     }
@@ -944,8 +945,8 @@ int main( int argc, char *argv[] )
         if (path->name[0] != '/') continue;
         if (top_src_dir)
         {
-            if (!strncmp( path->name, top_src_dir, strlen(top_src_dir) )) continue;
-            if (path->name[strlen(top_src_dir)] == '/') continue;
+            if (!strncmp( path->name, top_src_dir, strlen(top_src_dir) ) &&
+                path->name[strlen(top_src_dir)] == '/') continue;
         }
         list_remove( &path->entry );
         free( path );

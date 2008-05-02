@@ -55,9 +55,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(console);
 
-static UINT console_input_codepage;
-static UINT console_output_codepage;
-
 static const WCHAR coninW[] = {'C','O','N','I','N','$',0};
 static const WCHAR conoutW[] = {'C','O','N','O','U','T','$',0};
 
@@ -120,7 +117,11 @@ static void char_info_AtoW( CHAR_INFO *buffer, int count )
 
 
 /******************************************************************************
- * GetConsoleWindow [KERNEL32.@]
+ * GetConsoleWindow [KERNEL32.@] Get hwnd of the console window.
+ *
+ * RETURNS
+ *   Success: hwnd of the console window.
+ *   Failure: NULL
  */
 HWND WINAPI GetConsoleWindow(VOID)
 {
@@ -137,12 +138,19 @@ HWND WINAPI GetConsoleWindow(VOID)
  */
 UINT WINAPI GetConsoleCP(VOID)
 {
-    if (!console_input_codepage) 
+    BOOL ret;
+    UINT codepage = GetOEMCP(); /* default value */
+
+    SERVER_START_REQ(get_console_input_info)
     {
-        console_input_codepage = GetOEMCP();
-	TRACE("%u\n", console_input_codepage);
+        req->handle = 0;
+        ret = !wine_server_call_err(req);
+        if (ret && reply->input_cp)
+            codepage = reply->input_cp;
     }
-    return console_input_codepage;
+    SERVER_END_REQ;
+
+    return codepage;
 }
 
 
@@ -151,9 +159,24 @@ UINT WINAPI GetConsoleCP(VOID)
  */
 BOOL WINAPI SetConsoleCP(UINT cp)
 {
-    if (!IsValidCodePage( cp )) return FALSE;
-    console_input_codepage = cp;
-    return TRUE;
+    BOOL ret;
+
+    if (!IsValidCodePage(cp))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    SERVER_START_REQ(set_console_input_info)
+    {
+        req->handle   = 0;
+        req->mask     = SET_CONSOLE_INPUT_INFO_INPUT_CODEPAGE;
+        req->input_cp = cp;
+        ret = !wine_server_call_err(req);
+    }
+    SERVER_END_REQ;
+
+    return ret;
 }
 
 
@@ -162,12 +185,19 @@ BOOL WINAPI SetConsoleCP(UINT cp)
  */
 UINT WINAPI GetConsoleOutputCP(VOID)
 {
-    if (!console_output_codepage)
+    BOOL ret;
+    UINT codepage = GetOEMCP(); /* default value */
+
+    SERVER_START_REQ(get_console_input_info)
     {
-        console_output_codepage = GetOEMCP();
-	TRACE("%u\n", console_output_codepage);
+        req->handle = 0;
+        ret = !wine_server_call_err(req);
+        if (ret && reply->output_cp)
+            codepage = reply->output_cp;
     }
-    return console_output_codepage;
+    SERVER_END_REQ;
+
+    return codepage;
 }
 
 
@@ -183,9 +213,24 @@ UINT WINAPI GetConsoleOutputCP(VOID)
  */
 BOOL WINAPI SetConsoleOutputCP(UINT cp)
 {
-    if (!IsValidCodePage( cp )) return FALSE;
-    console_output_codepage = cp;
-    return TRUE;
+    BOOL ret;
+
+    if (!IsValidCodePage(cp))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    SERVER_START_REQ(set_console_input_info)
+    {
+        req->handle   = 0;
+        req->mask     = SET_CONSOLE_INPUT_INFO_OUTPUT_CODEPAGE;
+        req->output_cp = cp;
+        ret = !wine_server_call_err(req);
+    }
+    SERVER_END_REQ;
+
+    return ret;
 }
 
 
@@ -1200,7 +1245,7 @@ BOOL WINAPI ReadConsoleA(HANDLE hConsoleInput, LPVOID lpBuffer, DWORD nNumberOfC
     BOOL	ret;
 
     if ((ret = ReadConsoleW(hConsoleInput, ptr, nNumberOfCharsToRead, &ncr, NULL)))
-	ncr = WideCharToMultiByte(CP_ACP, 0, ptr, ncr, lpBuffer, nNumberOfCharsToRead, NULL, NULL);
+        ncr = WideCharToMultiByte(GetConsoleCP(), 0, ptr, ncr, lpBuffer, nNumberOfCharsToRead, NULL, NULL);
 
     if (lpNumberOfCharsRead) *lpNumberOfCharsRead = ncr;
     HeapFree(GetProcessHeap(), 0, ptr);
@@ -2005,13 +2050,13 @@ BOOL WINAPI WriteConsoleA(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumber
     LPWSTR	xstring;
     DWORD 	n;
 
-    n = MultiByteToWideChar(CP_ACP, 0, lpBuffer, nNumberOfCharsToWrite, NULL, 0);
+    n = MultiByteToWideChar(GetConsoleOutputCP(), 0, lpBuffer, nNumberOfCharsToWrite, NULL, 0);
 
     if (lpNumberOfCharsWritten) *lpNumberOfCharsWritten = 0;
     xstring = HeapAlloc(GetProcessHeap(), 0, n * sizeof(WCHAR));
     if (!xstring) return 0;
 
-    MultiByteToWideChar(CP_ACP, 0, lpBuffer, nNumberOfCharsToWrite, xstring, n);
+    MultiByteToWideChar(GetConsoleOutputCP(), 0, lpBuffer, nNumberOfCharsToWrite, xstring, n);
 
     ret = WriteConsoleW(hConsoleOutput, xstring, n, lpNumberOfCharsWritten, 0);
 
@@ -2258,7 +2303,7 @@ BOOL WINAPI ScrollConsoleScreenBufferA(HANDLE hConsoleOutput, LPSMALL_RECT lpScr
     CHAR_INFO	ciw;
 
     ciw.Attributes = lpFill->Attributes;
-    MultiByteToWideChar(CP_ACP, 0, &lpFill->Char.AsciiChar, 1, &ciw.Char.UnicodeChar, 1);
+    MultiByteToWideChar(GetConsoleOutputCP(), 0, &lpFill->Char.AsciiChar, 1, &ciw.Char.UnicodeChar, 1);
 
     return ScrollConsoleScreenBufferW(hConsoleOutput, lpScrollRect, lpClipRect,
 				      dwDestOrigin, &ciw);
@@ -2398,6 +2443,15 @@ BOOL WINAPI ScrollConsoleScreenBufferW(HANDLE hConsoleOutput, LPSMALL_RECT lpScr
 	    CONSOLE_FillLineUniform(hConsoleOutput, start, j, i - start, lpFill);
     }
 
+    return TRUE;
+}
+
+/******************************************************************
+ *              AttachConsole  (KERNEL32.@)
+ */
+BOOL WINAPI AttachConsole(DWORD dwProcessId)
+{
+    FIXME("stub %x\n",dwProcessId);
     return TRUE;
 }
 

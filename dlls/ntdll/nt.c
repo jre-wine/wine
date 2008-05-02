@@ -217,8 +217,10 @@ NTSTATUS WINAPI NtQueryInformationToken(
     case TokenType:
         len = sizeof (TOKEN_TYPE);
         break;
-#if 0
     case TokenImpersonationLevel:
+        len = sizeof(SECURITY_IMPERSONATION_LEVEL);
+        break;
+#if 0
     case TokenStatistics:
 #endif /* 0 */
     default:
@@ -351,6 +353,17 @@ NTSTATUS WINAPI NtQueryInformationToken(
             *(RtlSubAuthoritySid(sid, 0)) = SECURITY_INTERACTIVE_RID;
             owner->Owner = sid;
         }
+        break;
+    case TokenImpersonationLevel:
+        SERVER_START_REQ( get_token_impersonation_level )
+        {
+            SECURITY_IMPERSONATION_LEVEL *impersonation_level = tokeninfo;
+            req->handle = token;
+            status = wine_server_call( req );
+            if (status == STATUS_SUCCESS)
+                *impersonation_level = reply->impersonation_level;
+        }
+        SERVER_END_REQ;
         break;
     default:
         {
@@ -683,7 +696,7 @@ NTSTATUS WINAPI NtQuerySystemInformation(
             memset(&sti, 0 , sizeof(sti));
 
             /* liKeSystemTime, liExpTimeZoneBias, uCurrentTimeZoneId */
-            NTDLL_from_server_abstime( &sti.liKeBootTime, &server_start_time );
+            sti.liKeBootTime.QuadPart = server_start_time;
 
             if (Length <= sizeof(sti))
             {
@@ -831,19 +844,8 @@ NTSTATUS WINAPI NtQuerySystemInformation(
         }
         break;
     case SystemModuleInformation:
-        {
-            SYSTEM_MODULE_INFORMATION smi;
-
-            memset(&smi, 0, sizeof(smi));
-            len = sizeof(smi);
-
-            if ( Length >= len)
-            {
-                if (!SystemInformation) ret = STATUS_ACCESS_VIOLATION;
-                else memcpy( SystemInformation, &smi, len);
-            }
-            else ret = STATUS_INFO_LENGTH_MISMATCH;
-        }
+        /* FIXME: should be system-wide */
+        ret = LdrQueryProcessModuleInformation( SystemInformation, Length, &len );
         break;
     case SystemHandleInformation:
         {
@@ -1077,25 +1079,28 @@ NTSTATUS WINAPI NtShutdownSystem(SHUTDOWN_ACTION Action)
 
 /******************************************************************************
  *  NtAllocateLocallyUniqueId (NTDLL.@)
- *
- * FIXME: the server should do that
  */
 NTSTATUS WINAPI NtAllocateLocallyUniqueId(PLUID Luid)
 {
-    static LUID luid = { SE_MAX_WELL_KNOWN_PRIVILEGE, 0 };
+    NTSTATUS status;
 
-    FIXME("%p\n", Luid);
+    TRACE("%p\n", Luid);
 
     if (!Luid)
         return STATUS_ACCESS_VIOLATION;
 
-    luid.LowPart++;
-    if (luid.LowPart==0)
-        luid.HighPart++;
-    Luid->HighPart = luid.HighPart;
-    Luid->LowPart = luid.LowPart;
+    SERVER_START_REQ( allocate_locally_unique_id )
+    {
+        status = wine_server_call( req );
+        if (!status)
+        {
+            Luid->LowPart = reply->luid.low_part;
+            Luid->HighPart = reply->luid.high_part;
+        }
+    }
+    SERVER_END_REQ;
 
-    return STATUS_SUCCESS;
+    return status;
 }
 
 /******************************************************************************

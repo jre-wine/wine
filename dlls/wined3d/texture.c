@@ -24,7 +24,7 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_texture);
-#define GLINFO_LOCATION ((IWineD3DImpl *)(((IWineD3DDeviceImpl *)This->resource.wineD3DDevice)->wineD3D))->gl_info
+#define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
 
 /* *******************************************
    IWineD3DTexture IUnknown parts follow
@@ -97,28 +97,54 @@ static void WINAPI IWineD3DTextureImpl_PreLoad(IWineD3DTexture *iface) {
     unsigned int i;
     BOOL setGlTextureDesc = FALSE;
     IWineD3DTextureImpl *This = (IWineD3DTextureImpl *)iface;
+    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+    BOOL srgb_mode = This->baseTexture.is_srgb;
+    BOOL srgb_was_toggled = FALSE;
 
     TRACE("(%p) : About to load texture\n", This);
 
     if (This->baseTexture.textureName == 0)  setGlTextureDesc = TRUE;
 
+    if(!device->isInDraw) {
+        /* ActivateContext sets isInDraw to TRUE when loading a pbuffer into a texture, thus no danger of
+         * recursive calls
+         */
+        ENTER_GL();
+        ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+        LEAVE_GL();
+    } else if (GL_SUPPORT(EXT_TEXTURE_SRGB) && This->baseTexture.bindCount > 0) {
+        srgb_mode = device->stateBlock->samplerState[This->baseTexture.sampler][WINED3DSAMP_SRGBTEXTURE];
+        srgb_was_toggled = This->baseTexture.is_srgb != srgb_mode;
+        This->baseTexture.is_srgb = srgb_mode;
+    }
+
     IWineD3DTexture_BindTexture(iface);
     ENTER_GL();
-        /* If were dirty then reload the surfaces */
-    if(This->baseTexture.dirty) {
-
+    /* If the texture is marked dirty or the srgb sampler setting has changed since the last load then reload the surfaces */
+    if (This->baseTexture.dirty) {
         for (i = 0; i < This->baseTexture.levels; i++) {
             if(setGlTextureDesc)
                 IWineD3DSurface_SetGlTextureDesc(This->surfaces[i], This->baseTexture.textureName, IWineD3DTexture_GetTextureDimensions(iface));
-            IWineD3DSurface_LoadTexture(This->surfaces[i]);
+            IWineD3DSurface_LoadTexture(This->surfaces[i], srgb_mode);
         }
+    } else if (srgb_was_toggled) {
+        if (This->baseTexture.srgb_mode_change_count < 20)
+            ++This->baseTexture.srgb_mode_change_count;
+        else
+            FIXME("Texture (%p) has been reloaded at least 20 times due to WINED3DSAMP_SRGBTEXTURE changes on it\'s sampler\n", This);
 
-        /* No longer dirty */
-        This->baseTexture.dirty = FALSE;
+        for (i = 0; i < This->baseTexture.levels; i++) {
+            IWineD3DSurfaceImpl_AddDirtyRect(This->surfaces[i], NULL);
+            IWineD3DSurface_SetGlTextureDesc(This->surfaces[i], This->baseTexture.textureName, IWineD3DTexture_GetTextureDimensions(iface));
+            IWineD3DSurface_LoadTexture(This->surfaces[i], srgb_mode);
+        }
     } else {
         TRACE("(%p) Texture not dirty, nothing to do\n" , iface);
     }
     LEAVE_GL();
+
+    /* No longer dirty */
+    This->baseTexture.dirty = FALSE;
 
     return ;
 }
@@ -155,7 +181,7 @@ static WINED3DTEXTUREFILTERTYPE WINAPI IWineD3DTextureImpl_GetAutoGenFilterType(
 }
 
 static void WINAPI IWineD3DTextureImpl_GenerateMipSubLevels(IWineD3DTexture *iface) {
-  return IWineD3DBaseTextureImpl_GenerateMipSubLevels((IWineD3DBaseTexture *)iface);
+    IWineD3DBaseTextureImpl_GenerateMipSubLevels((IWineD3DBaseTexture *)iface);
 }
 
 /* Internal function, No d3d mapping */

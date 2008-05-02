@@ -1043,6 +1043,18 @@ static void test_verify_signature(void) {
     ok(result, "%08x\n", GetLastError());
     if (!result) return;
 
+    /*check that a NULL pointer signature is correctly handled*/
+    result = CryptVerifySignature(hHash, NULL, 128, hPubSignKey, NULL, 0);
+    ok(!result && ERROR_INVALID_PARAMETER == GetLastError(),
+     "Expected ERROR_INVALID_PARAMETER error, got %08x\n", GetLastError());
+    if (result) return;
+
+    /* check that we get a bad signature error when the signature is too short*/
+    result = CryptVerifySignature(hHash, abSignatureMD2, 64, hPubSignKey, NULL, 0);
+    ok(!result && NTE_BAD_SIGNATURE == GetLastError(),
+     "Expected NTE_BAD_SIGNATURE error, got %08x\n", GetLastError());
+    if (result) return;
+
     result = CryptVerifySignature(hHash, abSignatureMD2, 128, hPubSignKey, NULL, 0);
     ok(result, "%08x\n", GetLastError());
     if (!result) return;
@@ -1306,6 +1318,11 @@ static void test_schannel_provider(void)
         0x3d, 0xca, 0x6a, 0x6f, 0xfa, 0x15, 0x4e, 0xaa
     };
     
+    result = CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_SCHANNEL, CRYPT_VERIFYCONTEXT|CRYPT_NEWKEYSET);
+    ok (result, "%08x\n", GetLastError());
+    if (result)
+        CryptReleaseContext(hProv, 0);
+
     result = CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_SCHANNEL, CRYPT_VERIFYCONTEXT);
     ok (result, "%08x\n", GetLastError());
     if (!result) return;
@@ -1480,7 +1497,8 @@ static void test_null_provider(void)
     HCRYPTPROV prov;
     HCRYPTKEY key;
     BOOL result;
-    DWORD keySpec, dataLen;
+    DWORD keySpec, dataLen,dwParam;
+    char szName[MAX_PATH];
 
     result = CryptAcquireContext(NULL, szContainer, NULL, 0, 0);
     ok(!result && GetLastError() == NTE_BAD_PROV_TYPE,
@@ -1556,11 +1574,35 @@ static void test_null_provider(void)
      CRYPT_NEWKEYSET);
     ok(result, "CryptAcquireContext failed: %08x\n", GetLastError());
     if (!result) return;
+    /* Test provider parameters getter */
+    dataLen = sizeof(dwParam);
+    result = CryptGetProvParam(prov, PP_PROVTYPE, (LPBYTE)&dwParam, &dataLen, 0);
+    ok(result && dataLen == sizeof(dwParam) && dwParam == PROV_RSA_FULL,
+        "Expected PROV_RSA_FULL, got 0x%08X\n",dwParam);
+    dataLen = sizeof(dwParam);
+    result = CryptGetProvParam(prov, PP_KEYSET_TYPE, (LPBYTE)&dwParam, &dataLen, 0);
+    ok(result && dataLen == sizeof(dwParam) && dwParam == 0,
+        "Expected 0, got 0x%08X\n",dwParam);
+    dataLen = sizeof(dwParam);
+    result = CryptGetProvParam(prov, PP_KEYSTORAGE, (LPBYTE)&dwParam, &dataLen, 0);
+    ok(result && dataLen == sizeof(dwParam) && (dwParam & CRYPT_SEC_DESCR),
+        "Expected CRYPT_SEC_DESCR to be set, got 0x%08X\n",dwParam);
     dataLen = sizeof(keySpec);
     result = CryptGetProvParam(prov, PP_KEYSPEC, (LPBYTE)&keySpec, &dataLen, 0);
-    if (result)
-        ok(keySpec == (AT_KEYEXCHANGE | AT_SIGNATURE),
-         "Expected AT_KEYEXCHANGE | AT_SIGNATURE, got %08x\n", keySpec);
+    ok(result && keySpec == (AT_KEYEXCHANGE | AT_SIGNATURE),
+        "Expected AT_KEYEXCHANGE | AT_SIGNATURE, got %08x\n", keySpec);
+    /* PP_CONTAINER parameter */
+    dataLen = sizeof(szName);
+    result = CryptGetProvParam(prov, PP_CONTAINER, (LPBYTE)szName, &dataLen, 0);
+    ok(result && dataLen == strlen(szContainer)+1 && strcmp(szContainer,szName) == 0,
+        "failed getting PP_CONTAINER. result = %s. Error 0x%08X. returned length = %d\n",
+        (result)? "TRUE":"FALSE",GetLastError(),dataLen);
+    /* PP_UNIQUE_CONTAINER parameter */
+    dataLen = sizeof(szName);
+    result = CryptGetProvParam(prov, PP_UNIQUE_CONTAINER, (LPBYTE)szName, &dataLen, 0);
+    ok(result && dataLen == strlen(szContainer)+1 && strcmp(szContainer,szName) == 0,
+        "failed getting PP_CONTAINER. result = %s. Error 0x%08X. returned length = %d\n",
+        (result)? "TRUE":"FALSE",GetLastError(),dataLen);
     result = CryptGetUserKey(prov, AT_KEYEXCHANGE, &key);
     ok(!result && GetLastError() == NTE_NO_KEY,
      "Expected NTE_NO_KEY, got %08x\n", GetLastError());
@@ -1603,6 +1645,46 @@ static void test_null_provider(void)
 
     CryptAcquireContext(&prov, szContainer, NULL, PROV_RSA_FULL,
      CRYPT_DELETEKEYSET);
+
+
+    /* test for the bug in accessing the user key in a container
+     */
+    result = CryptAcquireContext(&prov, szContainer, NULL, PROV_RSA_FULL,
+     CRYPT_NEWKEYSET);
+    ok(result, "CryptAcquireContext failed: %08x\n", GetLastError());
+    result = CryptGenKey(prov, AT_KEYEXCHANGE, 0, &key);
+    ok(result, "CryptGenKey with AT_KEYEXCHANGE failed with error %08x\n", GetLastError());
+    CryptDestroyKey(key);
+    CryptReleaseContext(prov,0);
+    result = CryptAcquireContext(&prov, szContainer, NULL, PROV_RSA_FULL,0);
+    ok(result, "CryptAcquireContext failed: 0x%08x\n", GetLastError());
+    result = CryptGetUserKey(prov, AT_KEYEXCHANGE, &key);
+    ok (result, "CryptGetUserKey failed with error %08x\n", GetLastError());
+    CryptDestroyKey(key);
+
+    CryptAcquireContext(&prov, szContainer, NULL, PROV_RSA_FULL,
+     CRYPT_DELETEKEYSET);
+
+    /* test the machine key set */
+    CryptAcquireContext(&prov, szContainer, NULL, PROV_RSA_FULL,
+     CRYPT_DELETEKEYSET|CRYPT_MACHINE_KEYSET);
+    result = CryptAcquireContext(&prov, szContainer, NULL, PROV_RSA_FULL,
+     CRYPT_NEWKEYSET|CRYPT_MACHINE_KEYSET);
+    ok(result, "CryptAcquireContext with CRYPT_MACHINE_KEYSET failed: %08x\n", GetLastError());
+    CryptReleaseContext(prov, 0);
+    result = CryptAcquireContext(&prov, szContainer, NULL, PROV_RSA_FULL,
+     CRYPT_MACHINE_KEYSET);
+    ok(result, "CryptAcquireContext with CRYPT_MACHINE_KEYSET failed: %08x\n", GetLastError());
+    CryptReleaseContext(prov,0);
+    result = CryptAcquireContext(&prov, szContainer, NULL, PROV_RSA_FULL,
+       CRYPT_DELETEKEYSET|CRYPT_MACHINE_KEYSET);
+    ok(result, "CryptAcquireContext with CRYPT_DELETEKEYSET|CRYPT_MACHINE_KEYSET failed: %08x\n",
+		GetLastError());
+    result = CryptAcquireContext(&prov, szContainer, NULL, PROV_RSA_FULL,
+     CRYPT_MACHINE_KEYSET);
+    ok(!result && GetLastError() == NTE_BAD_KEYSET ,
+	"Expected NTE_BAD_KEYSET, got %08x\n", GetLastError());
+
 }
 
 START_TEST(rsaenh)

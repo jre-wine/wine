@@ -54,7 +54,7 @@ typedef struct {
     WCHAR    lpszPath[MAX_PATH];
 } SHUSKEY, *LPSHUSKEY;
 
-DWORD   WINAPI SHStringFromGUIDW(REFGUID,LPWSTR,INT);
+INT     WINAPI SHStringFromGUIDW(REFGUID,LPWSTR,INT);
 HRESULT WINAPI SHRegGetCLSIDKeyW(REFGUID,LPCWSTR,BOOL,BOOL,PHKEY);
 
 
@@ -703,7 +703,7 @@ BOOL WINAPI SHRegGetBoolUSValueW(
 	    /* process returned data via type into bool */
 	    switch (type) {
 	    case REG_SZ:
-		data[9] = L'\0';     /* set end of string */
+		data[9] = '\0';     /* set end of string */
 		if (lstrcmpiW(data, wYES)==0 || lstrcmpiW(data, wTRUE)==0)
 		    ret = TRUE;
 		else if (lstrcmpiW(data, wNO)==0 || lstrcmpiW(data, wFALSE)==0)
@@ -715,7 +715,7 @@ BOOL WINAPI SHRegGetBoolUSValueW(
 		break;
 	    case REG_BINARY:
 		if (datalen == 1) {
-		    ret = (data[0] != L'\0');
+		    ret = (data[0] != '\0');
 		    break;
 		}
 	    default:

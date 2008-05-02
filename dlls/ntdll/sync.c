@@ -478,16 +478,9 @@ NTSTATUS WINAPI NtSetTimer(IN HANDLE handle,
 
     SERVER_START_REQ( set_timer )
     {
-        if (!when->u.LowPart && !when->u.HighPart)
-        {
-            /* special case to start timeout on now+period without too many calculations */
-            req->expire.sec  = 0;
-            req->expire.usec = 0;
-        }
-        else NTDLL_get_server_abstime( &req->expire, when );
-
         req->handle   = handle;
         req->period   = period;
+        req->expire   = when->QuadPart;
         req->callback = callback;
         req->arg      = callback_arg;
         status = wine_server_call( req );
@@ -564,7 +557,7 @@ NTSTATUS WINAPI NtQueryTimer(
             status = wine_server_call(req);
 
             /* convert server time to absolute NTDLL time */
-            NTDLL_from_server_abstime(&basic_info->RemainingTime, &reply->when);
+            basic_info->RemainingTime.QuadPart = reply->when;
             basic_info->TimerState = reply->signaled;
         }
         SERVER_END_REQ;
@@ -653,15 +646,160 @@ static int wait_reply( void *cookie )
 
 
 /***********************************************************************
+ *              invoke_apc
+ *
+ * Invoke a single APC. Return TRUE if a user APC has been run.
+ */
+static BOOL invoke_apc( const apc_call_t *call, apc_result_t *result )
+{
+    BOOL user_apc = FALSE;
+
+    memset( result, 0, sizeof(*result) );
+
+    switch (call->type)
+    {
+    case APC_USER:
+        call->user.func( call->user.args[0], call->user.args[1], call->user.args[2] );
+        user_apc = TRUE;
+        break;
+    case APC_TIMER:
+        call->timer.func( call->timer.arg, (DWORD)call->timer.time, (DWORD)(call->timer.time >> 32) );
+        user_apc = TRUE;
+        break;
+    case APC_ASYNC_IO:
+        result->type = call->type;
+        result->async_io.status = call->async_io.func( call->async_io.user,
+                                                       call->async_io.sb,
+                                                       call->async_io.status );
+        break;
+    case APC_VIRTUAL_ALLOC:
+        result->type = call->type;
+        result->virtual_alloc.addr = call->virtual_alloc.addr;
+        result->virtual_alloc.size = call->virtual_alloc.size;
+        result->virtual_alloc.status = NtAllocateVirtualMemory( NtCurrentProcess(),
+                                                                &result->virtual_alloc.addr,
+                                                                call->virtual_alloc.zero_bits,
+                                                                &result->virtual_alloc.size,
+                                                                call->virtual_alloc.op_type,
+                                                                call->virtual_alloc.prot );
+        break;
+    case APC_VIRTUAL_FREE:
+        result->type = call->type;
+        result->virtual_free.addr = call->virtual_free.addr;
+        result->virtual_free.size = call->virtual_free.size;
+        result->virtual_free.status = NtFreeVirtualMemory( NtCurrentProcess(),
+                                                           &result->virtual_free.addr,
+                                                           &result->virtual_free.size,
+                                                           call->virtual_free.op_type );
+        break;
+    case APC_VIRTUAL_QUERY:
+    {
+        MEMORY_BASIC_INFORMATION info;
+        result->type = call->type;
+        result->virtual_query.status = NtQueryVirtualMemory( NtCurrentProcess(),
+                                                             call->virtual_query.addr,
+                                                             MemoryBasicInformation, &info,
+                                                             sizeof(info), NULL );
+        if (result->virtual_query.status == STATUS_SUCCESS)
+        {
+            result->virtual_query.base       = info.BaseAddress;
+            result->virtual_query.alloc_base = info.AllocationBase;
+            result->virtual_query.size       = info.RegionSize;
+            result->virtual_query.state      = info.State;
+            result->virtual_query.prot       = info.Protect;
+            result->virtual_query.alloc_prot = info.AllocationProtect;
+            result->virtual_query.alloc_type = info.Type;
+        }
+        break;
+    }
+    case APC_VIRTUAL_PROTECT:
+        result->type = call->type;
+        result->virtual_protect.addr = call->virtual_protect.addr;
+        result->virtual_protect.size = call->virtual_protect.size;
+        result->virtual_protect.status = NtProtectVirtualMemory( NtCurrentProcess(),
+                                                                 &result->virtual_protect.addr,
+                                                                 &result->virtual_protect.size,
+                                                                 call->virtual_protect.prot,
+                                                                 &result->virtual_protect.prot );
+        break;
+    case APC_VIRTUAL_FLUSH:
+        result->type = call->type;
+        result->virtual_flush.addr = call->virtual_flush.addr;
+        result->virtual_flush.size = call->virtual_flush.size;
+        result->virtual_flush.status = NtFlushVirtualMemory( NtCurrentProcess(),
+                                                             &result->virtual_flush.addr,
+                                                             &result->virtual_flush.size, 0 );
+        break;
+    case APC_VIRTUAL_LOCK:
+        result->type = call->type;
+        result->virtual_lock.addr = call->virtual_lock.addr;
+        result->virtual_lock.size = call->virtual_lock.size;
+        result->virtual_lock.status = NtLockVirtualMemory( NtCurrentProcess(),
+                                                           &result->virtual_lock.addr,
+                                                           &result->virtual_lock.size, 0 );
+        break;
+    case APC_VIRTUAL_UNLOCK:
+        result->type = call->type;
+        result->virtual_unlock.addr = call->virtual_unlock.addr;
+        result->virtual_unlock.size = call->virtual_unlock.size;
+        result->virtual_unlock.status = NtUnlockVirtualMemory( NtCurrentProcess(),
+                                                               &result->virtual_unlock.addr,
+                                                               &result->virtual_unlock.size, 0 );
+        break;
+    case APC_MAP_VIEW:
+    {
+        LARGE_INTEGER offset;
+        result->type = call->type;
+        result->map_view.addr   = call->map_view.addr;
+        result->map_view.size   = call->map_view.size;
+        offset.u.LowPart        = call->map_view.offset_low;
+        offset.u.HighPart       = call->map_view.offset_high;
+        result->map_view.status = NtMapViewOfSection( call->map_view.handle, NtCurrentProcess(),
+                                                      &result->map_view.addr, call->map_view.zero_bits,
+                                                      0, &offset, &result->map_view.size, ViewShare,
+                                                      call->map_view.alloc_type, call->map_view.prot );
+        NtClose( call->map_view.handle );
+        break;
+    }
+    case APC_UNMAP_VIEW:
+        result->type = call->type;
+        result->unmap_view.status = NtUnmapViewOfSection( NtCurrentProcess(), call->unmap_view.addr );
+        break;
+    case APC_CREATE_THREAD:
+    {
+        CLIENT_ID id;
+        result->type = call->type;
+        result->create_thread.status = RtlCreateUserThread( NtCurrentProcess(), NULL,
+                                                            call->create_thread.suspend, NULL,
+                                                            call->create_thread.reserve,
+                                                            call->create_thread.commit,
+                                                            call->create_thread.func,
+                                                            call->create_thread.arg,
+                                                            &result->create_thread.handle, &id );
+        result->create_thread.tid = HandleToULong(id.UniqueThread);
+        break;
+    }
+    default:
+        server_protocol_error( "get_apc_request: bad type %d\n", call->type );
+        break;
+    }
+    return user_apc;
+}
+
+/***********************************************************************
  *              call_apcs
  *
- * Call outstanding APCs.
+ * Call outstanding APCs. Return TRUE if a user APC has been run.
  */
-static void call_apcs( BOOL alertable )
+static BOOL call_apcs( BOOL alertable )
 {
+    BOOL user_apc = FALSE;
     NTSTATUS ret;
     apc_call_t call;
+    apc_result_t result;
     HANDLE handle = 0;
+
+    memset( &result, 0, sizeof(result) );
 
     for (;;)
     {
@@ -669,6 +807,7 @@ static void call_apcs( BOOL alertable )
         {
             req->alertable = alertable;
             req->prev      = handle;
+            req->result    = result;
             if (!(ret = wine_server_call( req )))
             {
                 handle = reply->handle;
@@ -677,30 +816,56 @@ static void call_apcs( BOOL alertable )
         }
         SERVER_END_REQ;
 
-        if (ret) return;  /* no more APCs */
+        if (ret) return user_apc;  /* no more APCs */
 
-        switch (call.type)
+        user_apc = invoke_apc( &call, &result );
+    }
+}
+
+
+/***********************************************************************
+ *           NTDLL_queue_process_apc
+ */
+NTSTATUS NTDLL_queue_process_apc( HANDLE process, const apc_call_t *call, apc_result_t *result )
+{
+    for (;;)
+    {
+        NTSTATUS ret;
+        HANDLE handle = 0;
+        BOOL self = FALSE;
+
+        SERVER_START_REQ( queue_apc )
         {
-        case APC_USER:
-            call.user.func( call.user.args[0], call.user.args[1], call.user.args[2] );
-            break;
-        case APC_TIMER:
+            req->process = process;
+            req->call = *call;
+            if (!(ret = wine_server_call( req )))
+            {
+                handle = reply->handle;
+                self = reply->self;
+            }
+        }
+        SERVER_END_REQ;
+        if (ret != STATUS_SUCCESS) return ret;
+
+        if (self)
         {
-            LARGE_INTEGER time;
-            /* convert sec/usec to NT time */
-            RtlSecondsSince1970ToTime( call.timer.time.sec, &time );
-            time.QuadPart += call.timer.time.usec * 10;
-            call.timer.func( call.timer.arg, time.u.LowPart, time.u.HighPart );
-            break;
+            invoke_apc( call, result );
         }
-        case APC_ASYNC_IO:
-            NtCurrentTeb()->num_async_io--;
-            call.async_io.func( call.async_io.user, call.async_io.sb, call.async_io.status );
-            break;
-        default:
-            server_protocol_error( "get_apc_request: bad type %d\n", call.type );
-            break;
+        else
+        {
+            NtWaitForSingleObject( handle, FALSE, NULL );
+
+            SERVER_START_REQ( get_apc_result )
+            {
+                req->handle = handle;
+                if (!(ret = wine_server_call( req ))) *result = reply->result;
+            }
+            SERVER_END_REQ;
+
+            if (!ret && result->type == APC_NONE) continue;  /* APC didn't run, try again */
+            if (ret) NtClose( handle );
         }
+        return ret;
     }
 }
 
@@ -715,8 +880,8 @@ NTSTATUS NTDLL_wait_for_multiple_objects( UINT count, const HANDLE *handles, UIN
 {
     NTSTATUS ret;
     int cookie;
+    timeout_t abs_timeout = timeout ? timeout->QuadPart : TIMEOUT_INFINITE;
 
-    if (timeout) flags |= SELECT_TIMEOUT;
     for (;;)
     {
         SERVER_START_REQ( select )
@@ -724,15 +889,15 @@ NTSTATUS NTDLL_wait_for_multiple_objects( UINT count, const HANDLE *handles, UIN
             req->flags   = flags;
             req->cookie  = &cookie;
             req->signal  = signal_object;
-            NTDLL_get_server_abstime( &req->timeout, timeout );
+            req->timeout = abs_timeout;
             wine_server_add_data( req, handles, count * sizeof(HANDLE) );
             ret = wine_server_call( req );
+            abs_timeout = reply->timeout;
         }
         SERVER_END_REQ;
         if (ret == STATUS_PENDING) ret = wait_reply( &cookie );
         if (ret != STATUS_USER_APC) break;
-        call_apcs( (flags & SELECT_ALERTABLE) != 0 );
-        if (flags & SELECT_ALERTABLE) break;
+        if (call_apcs( (flags & SELECT_ALERTABLE) != 0 )) break;
         signal_object = 0;  /* don't signal it multiple times */
     }
 
@@ -806,40 +971,38 @@ NTSTATUS WINAPI NtYieldExecution(void)
  */
 NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeout )
 {
-    /* if alertable or async I/O in progress, we need to query the server */
-    if (alertable || NtCurrentTeb()->num_async_io)
-    {
-        UINT flags = SELECT_INTERRUPTIBLE;
-        if (alertable) flags |= SELECT_ALERTABLE;
-        return NTDLL_wait_for_multiple_objects( 0, NULL, flags, timeout, 0 );
-    }
+    /* if alertable, we need to query the server */
+    if (alertable)
+        return NTDLL_wait_for_multiple_objects( 0, NULL, SELECT_INTERRUPTIBLE | SELECT_ALERTABLE,
+                                                timeout, 0 );
 
-    if (!timeout)  /* sleep forever */
+    if (!timeout || timeout->QuadPart == TIMEOUT_INFINITE)  /* sleep forever */
     {
         for (;;) select( 0, NULL, NULL, NULL, NULL );
     }
     else
     {
-        abs_time_t when;
+        LARGE_INTEGER now;
+        timeout_t when, diff;
 
-        NTDLL_get_server_abstime( &when, timeout );
+        if ((when = timeout->QuadPart) < 0)
+        {
+            NtQuerySystemTime( &now );
+            when = now.QuadPart - when;
+        }
 
         /* Note that we yield after establishing the desired timeout */
         NtYieldExecution();
+        if (!when) return STATUS_SUCCESS;
 
         for (;;)
         {
             struct timeval tv;
-            gettimeofday( &tv, 0 );
-            tv.tv_sec = when.sec - tv.tv_sec;
-            if ((tv.tv_usec = when.usec - tv.tv_usec) < 0)
-            {
-                tv.tv_usec += 1000000;
-                tv.tv_sec--;
-            }
-            /* if our yield already passed enough time, we're done */
-            if (tv.tv_sec < 0) break;
-
+            NtQuerySystemTime( &now );
+            diff = (when - now.QuadPart + 9) / 10;
+            if (diff <= 0) break;
+            tv.tv_sec  = diff / 1000000;
+            tv.tv_usec = diff % 1000000;
             if (select( 0, NULL, NULL, NULL, &tv ) != -1) break;
         }
     }
@@ -847,7 +1010,17 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
 }
 
 /******************************************************************
- *		NtCreateIoCompletion (NTDLL.@)
+ *              NtCreateIoCompletion (NTDLL.@)
+ *              ZwCreateIoCompletion (NTDLL.@)
+ *
+ * Creates I/O completion object.
+ *
+ * PARAMS
+ *      CompletionPort            [O] created completion object handle will be placed there
+ *      DesiredAccess             [I] desired access to a handle (combination of IO_COMPLETION_*)
+ *      ObjectAttributes          [I] completion object attributes
+ *      NumberOfConcurrentThreads [I] desired number of concurrent active worker threads
+ *
  */
 NTSTATUS WINAPI NtCreateIoCompletion( PHANDLE CompletionPort, ACCESS_MASK DesiredAccess,
                                       POBJECT_ATTRIBUTES ObjectAttributes, ULONG NumberOfConcurrentThreads )
@@ -857,20 +1030,88 @@ NTSTATUS WINAPI NtCreateIoCompletion( PHANDLE CompletionPort, ACCESS_MASK Desire
     return STATUS_NOT_IMPLEMENTED;
 }
 
+/******************************************************************
+ *              NtSetIoCompletion (NTDLL.@)
+ *              ZwSetIoCompletion (NTDLL.@)
+ *
+ * Inserts completion message into queue
+ *
+ * PARAMS
+ *      CompletionPort           [I] HANDLE to completion object
+ *      CompletionKey            [I] completion key
+ *      CompletionValue          [I] completion value (usually pointer to OVERLAPPED)
+ *      Status                   [I] operation status
+ *      NumberOfBytesTransferred [I] number of bytes transferred
+ */
 NTSTATUS WINAPI NtSetIoCompletion( HANDLE CompletionPort, ULONG_PTR CompletionKey,
-                                   PIO_STATUS_BLOCK iosb, ULONG NumberOfBytesTransferred,
+                                   ULONG_PTR CompletionValue, NTSTATUS Status,
                                    ULONG NumberOfBytesToTransfer )
 {
-    FIXME("(%p, %lx, %p, %d, %d)\n", CompletionPort, CompletionKey,
-          iosb, NumberOfBytesTransferred, NumberOfBytesToTransfer);
+    FIXME("(%p, %lx, %lx, %x, %d)\n", CompletionPort, CompletionKey,
+          CompletionValue, Status, NumberOfBytesToTransfer);
     return STATUS_NOT_IMPLEMENTED;
 }
 
+/******************************************************************
+ *              NtRemoveIoCompletion (NTDLL.@)
+ *              ZwRemoveIoCompletion (NTDLL.@)
+ *
+ * (Wait for and) retrieve first completion message from completion object's queue
+ *
+ * PARAMS
+ *      CompletionPort  [I] HANDLE to I/O completion object
+ *      CompletionKey   [O] completion key
+ *      CompletionValue [O] Completion value given in NtSetIoCompletion or in async operation
+ *      iosb            [O] IO_STATUS_BLOCK of completed asynchronous operation
+ *      WaitTime        [I] optional wait time in NTDLL format
+ *
+ */
 NTSTATUS WINAPI NtRemoveIoCompletion( HANDLE CompletionPort, PULONG_PTR CompletionKey,
-                                      PIO_STATUS_BLOCK iosb, PULONG OperationStatus,
+                                      PULONG_PTR CompletionValue, PIO_STATUS_BLOCK iosb,
                                       PLARGE_INTEGER WaitTime )
 {
     FIXME("(%p, %p, %p, %p, %p)\n", CompletionPort, CompletionKey,
-          iosb, OperationStatus, WaitTime);
+          CompletionValue, iosb, WaitTime);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/******************************************************************
+ *              NtOpenIoCompletion (NTDLL.@)
+ *              ZwOpenIoCompletion (NTDLL.@)
+ *
+ * Opens I/O completion object
+ *
+ * PARAMS
+ *      CompletionPort     [O] completion object handle will be placed there
+ *      DesiredAccess      [I] desired access to a handle (combination of IO_COMPLETION_*)
+ *      ObjectAttributes   [I] completion object name
+ *
+ */
+NTSTATUS WINAPI NtOpenIoCompletion( PHANDLE CompletionPort, ACCESS_MASK DesiredAccess,
+                                    POBJECT_ATTRIBUTES ObjectAttributes )
+{
+    FIXME("(%p, 0x%x, %p)\n", CompletionPort, DesiredAccess, ObjectAttributes);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/******************************************************************
+ *              NtQueryIoCompletion (NTDLL.@)
+ *              ZwQueryIoCompletion (NTDLL.@)
+ *
+ * Requests information about given I/O completion object
+ *
+ * PARAMS
+ *      CompletionPort        [I] HANDLE to completion port to request
+ *      InformationClass      [I] information class
+ *      CompletionInformation [O] user-provided buffer for data
+ *      BufferLength          [I] buffer length
+ *      RequiredLength        [O] required buffer length
+ *
+ */
+NTSTATUS WINAPI NtQueryIoCompletion( HANDLE CompletionPort, IO_COMPLETION_INFORMATION_CLASS InformationClass,
+                                     PVOID CompletionInformation, ULONG BufferLength, PULONG RequiredLength )
+{
+    FIXME("(%p, %d, %p, 0x%x, %p)\n", CompletionPort, InformationClass, CompletionInformation,
+            BufferLength, RequiredLength);
     return STATUS_NOT_IMPLEMENTED;
 }

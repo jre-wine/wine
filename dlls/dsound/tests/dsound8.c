@@ -35,6 +35,7 @@
 
 #include "dsound_test.h"
 
+static HRESULT (WINAPI *pDirectSoundEnumerateA)(LPDSENUMCALLBACKA,LPVOID)=NULL;
 static HRESULT (WINAPI *pDirectSoundCreate8)(LPCGUID,LPDIRECTSOUND8*,LPUNKNOWN)=NULL;
 
 int align(int length, int align)
@@ -394,6 +395,7 @@ static HRESULT test_primary8(LPGUID lpGuid)
     HRESULT rc;
     LPDIRECTSOUND8 dso=NULL;
     LPDIRECTSOUNDBUFFER primary=NULL,second=NULL,third=NULL;
+    LPDIRECTSOUNDBUFFER8 pb8 = NULL;
     DSBUFFERDESC bufdesc;
     DSCAPS dscaps;
     WAVEFORMATEX wfx;
@@ -493,6 +495,10 @@ static HRESULT test_primary8(LPGUID lpGuid)
         /* rc=0x88780032 */
         ok(rc!=DS_OK,"IDirectSound8_DuplicateSoundBuffer() primary buffer "
            "should have failed %s\n",DXGetErrorString8(rc));
+
+        /* Primary buffers don't have an IDirectSoundBuffer8 */
+        rc = IDirectSoundBuffer_QueryInterface(primary, &IID_IDirectSoundBuffer8, (LPVOID*)&pb8);
+        ok(FAILED(rc), "Primary buffer does have an IDirectSoundBuffer8: %s\n", DXGetErrorString8(rc));
 
         rc=IDirectSoundBuffer_GetVolume(primary,&vol);
         ok(rc==DS_OK,"IDirectSoundBuffer_GetVolume() failed: %s\n",
@@ -808,7 +814,7 @@ static BOOL WINAPI dsenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
 static void dsound8_tests(void)
 {
     HRESULT rc;
-    rc=DirectSoundEnumerateA(&dsenum_callback,NULL);
+    rc=pDirectSoundEnumerateA(&dsenum_callback,NULL);
     ok(rc==DS_OK,"DirectSoundEnumerateA() failed: %s\n",DXGetErrorString8(rc));
 }
 
@@ -852,22 +858,27 @@ START_TEST(dsound8)
 
     CoInitialize(NULL);
 
-    hDsound = LoadLibraryA("dsound.dll");
-    if (!hDsound) {
-        trace("dsound.dll not found\n");
-        return;
+    hDsound = LoadLibrary("dsound.dll");
+    if (hDsound)
+    {
+        trace("DLL Version: %s\n", get_file_version("dsound.dll"));
+
+        pDirectSoundEnumerateA = (void*)GetProcAddress(hDsound,
+            "DirectSoundEnumerateA");
+        pDirectSoundCreate8 = (void*)GetProcAddress(hDsound,
+            "DirectSoundCreate8");
+        if (pDirectSoundCreate8)
+        {
+            IDirectSound8_tests();
+            dsound8_tests();
+        }
+        else
+            skip("dsound8 test skipped\n");
+
+        FreeLibrary(hDsound);
     }
-
-    trace("DLL Version: %s\n", get_file_version("dsound.dll"));
-
-    pDirectSoundCreate8 = (void*)GetProcAddress(hDsound, "DirectSoundCreate8");
-    if (!pDirectSoundCreate8) {
-        trace("dsound8 test skipped\n");
-        return;
-    }
-
-    IDirectSound8_tests();
-    dsound8_tests();
+    else
+        skip("dsound.dll not found!\n");
 
     CoUninitialize();
 }

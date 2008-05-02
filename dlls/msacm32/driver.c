@@ -29,11 +29,9 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winerror.h"
 #include "wingdi.h"
 #include "winuser.h"
 #include "winnls.h"
-#include "winreg.h"
 #include "mmsystem.h"
 #include "mmreg.h"
 #include "msacm.h"
@@ -589,7 +587,7 @@ MMRESULT WINAPI acmDriverOpen(PHACMDRIVER phad, HACMDRIVERID hadid, DWORD fdwOpe
 
     /* FIXME: Create a WINE_ACMDRIVER32 */
     *phad = (HACMDRIVER)pad;
-    TRACE("'%s' => %p\n", debugstr_w(padid->pszDriverAlias), pad);
+    TRACE("%s => %p\n", debugstr_w(padid->pszDriverAlias), pad);
 
     return MMSYSERR_NOERROR;
  gotError:

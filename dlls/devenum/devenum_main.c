@@ -296,7 +296,7 @@ HRESULT WINAPI DllUnregisterServer(void)
 static HRESULT register_clsids(int count, const register_info * pRegInfo, LPCWSTR pszThreadingModel)
 {
     HRESULT res = S_OK;
-    LPOLESTR clsidString;
+    LPOLESTR clsidString = NULL;
     HKEY hkeyClsid;
     HKEY hkeySub;
     HKEY hkeyInproc32;
@@ -311,6 +311,7 @@ static HRESULT register_clsids(int count, const register_info * pRegInfo, LPCWST
 
     for (i = 0; i < count; i++)
     {
+	hkeySub = 0;
         if (SUCCEEDED(res))
 	{
 	    res = StringFromCLSID(pRegInfo[i].clsid, &clsidString);
@@ -351,7 +352,7 @@ static HRESULT register_clsids(int count, const register_info * pRegInfo, LPCWST
 			   (lstrlenW(pszThreadingModel) + 1) * sizeof(WCHAR));
             RegCloseKey(hkeyInproc32);
         }
-        RegCloseKey(hkeySub);
+        if (hkeySub) RegCloseKey(hkeySub);
 	CoTaskMemFree(clsidString);
 	clsidString = NULL;
     }
@@ -364,7 +365,7 @@ static HRESULT register_clsids(int count, const register_info * pRegInfo, LPCWST
 typedef HRESULT (WINAPI *DllRegisterServer_func)(void);
 
 /* calls DllRegisterServer() for the Quartz DLL */
-static void DEVENUM_RegisterQuartz()
+static void DEVENUM_RegisterQuartz(void)
 {
     HANDLE hDLL = LoadLibraryA("quartz.dll");
     DllRegisterServer_func pDllRegisterServer = NULL;

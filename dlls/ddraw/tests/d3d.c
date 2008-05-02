@@ -27,6 +27,7 @@
 static LPDIRECTDRAW7           lpDD = NULL;
 static LPDIRECT3D7             lpD3D = NULL;
 static LPDIRECTDRAWSURFACE7    lpDDS = NULL;
+static LPDIRECTDRAWSURFACE7    lpDDSdepth = NULL;
 static LPDIRECT3DDEVICE7       lpD3DDevice = NULL;
 static LPDIRECT3DVERTEXBUFFER7 lpVBufSrc = NULL;
 static LPDIRECT3DVERTEXBUFFER7 lpVBufDest1 = NULL;
@@ -53,11 +54,7 @@ typedef struct _TVERTEX
 static void init_function_pointers(void)
 {
     HMODULE hmod = GetModuleHandleA("ddraw.dll");
-
-    if(hmod)
-    {
-        pDirectDrawCreateEx = (void*)GetProcAddress(hmod, "DirectDrawCreateEx");
-    }
+    pDirectDrawCreateEx = (void*)GetProcAddress(hmod, "DirectDrawCreateEx");
 }
 
 
@@ -89,13 +86,46 @@ static BOOL CreateDirect3D(void)
     ddsd.dwHeight = 256;
     rc = IDirectDraw7_CreateSurface(lpDD, &ddsd, &lpDDS, NULL);
     ok(rc==DD_OK, "CreateSurface returned: %x\n", rc);
+    if (!SUCCEEDED(rc))
+	return FALSE;
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_ZBUFFER;
+    U4(ddsd).ddpfPixelFormat.dwSize = sizeof(U4(ddsd).ddpfPixelFormat);
+    U4(ddsd).ddpfPixelFormat.dwFlags = DDPF_ZBUFFER;
+    U1(U4(ddsd).ddpfPixelFormat).dwZBufferBitDepth = 16;
+    U3(U4(ddsd).ddpfPixelFormat).dwZBitMask = 0x0000FFFF;
+    ddsd.dwWidth = 256;
+    ddsd.dwHeight = 256;
+    rc = IDirectDraw7_CreateSurface(lpDD, &ddsd, &lpDDSdepth, NULL);
+    ok(rc==DD_OK, "CreateSurface returned: %x\n", rc);
+    if (!SUCCEEDED(rc)) {
+        lpDDSdepth = NULL;
+    } else {
+        rc = IDirectDrawSurface_AddAttachedSurface(lpDDS, lpDDSdepth);
+        ok(rc == DD_OK, "IDirectDrawSurface_AddAttachedSurface returned %x\n", rc);
+        if (!SUCCEEDED(rc))
+            return FALSE;
+    }
 
     rc = IDirect3D7_CreateDevice(lpD3D, &IID_IDirect3DTnLHalDevice, lpDDS,
         &lpD3DDevice);
     ok(rc==D3D_OK || rc==DDERR_NOPALETTEATTACHED || rc==E_OUTOFMEMORY, "CreateDevice returned: %x\n", rc);
     if (!lpD3DDevice) {
-        trace("IDirect3D7::CreateDevice() failed with an error %x\n", rc);
-        return FALSE;
+        trace("IDirect3D7::CreateDevice() for a TnL Hal device failed with an error %x, trying HAL\n", rc);
+        rc = IDirect3D7_CreateDevice(lpD3D, &IID_IDirect3DHALDevice, lpDDS,
+            &lpD3DDevice);
+        if (!lpD3DDevice) {
+            trace("IDirect3D7::CreateDevice() for a HAL device failed with an error %x, trying RGB\n", rc);
+            rc = IDirect3D7_CreateDevice(lpD3D, &IID_IDirect3DRGBDevice, lpDDS,
+                &lpD3DDevice);
+            if (!lpD3DDevice) {
+                trace("IDirect3D7::CreateDevice() for a RGB device failed with an error %x, giving up\n", rc);
+                return FALSE;
+            }
+        }
     }
 
     return TRUE;
@@ -107,6 +137,12 @@ static void ReleaseDirect3D(void)
     {
         IDirect3DDevice7_Release(lpD3DDevice);
         lpD3DDevice = NULL;
+    }
+
+    if (lpDDSdepth != NULL)
+    {
+        IDirectDrawSurface_Release(lpDDSdepth);
+        lpDDSdepth = NULL;
     }
 
     if (lpDDS != NULL)
@@ -134,6 +170,9 @@ static void LightTest(void)
     D3DLIGHT7 light;
     D3DLIGHT7 defaultlight;
     BOOL bEnabled = FALSE;
+    float one = 1.0f;
+    float zero= 0.0f;
+    D3DMATERIAL7 mat;
 
     /* Set a few lights with funky indices. */
     memset(&light, 0, sizeof(light));
@@ -218,6 +257,85 @@ static void LightTest(void)
     /* Light 23 has not been set */
     rc = IDirect3DDevice7_GetLightEnable(lpD3DDevice, 23, &bEnabled );
     ok(rc==DDERR_INVALIDPARAMS, "GetLightEnable returned: %x\n", rc);
+
+    /* Set some lights with invalid parameters */
+    memset(&light, 0, sizeof(D3DLIGHT7));
+    light.dltType = 0;
+    U1(light.dcvDiffuse).r = 1.f;
+    U2(light.dcvDiffuse).g = 1.f;
+    U3(light.dcvDiffuse).b = 1.f;
+    U3(light.dvDirection).z = 1.f;
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 100, &light);
+    ok(rc==DDERR_INVALIDPARAMS, "SetLight returned: %x\n", rc);
+
+    memset(&light, 0, sizeof(D3DLIGHT7));
+    light.dltType = 12345;
+    U1(light.dcvDiffuse).r = 1.f;
+    U2(light.dcvDiffuse).g = 1.f;
+    U3(light.dcvDiffuse).b = 1.f;
+    U3(light.dvDirection).z = 1.f;
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 101, &light);
+    ok(rc==DDERR_INVALIDPARAMS, "SetLight returned: %x\n", rc);
+
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 102, NULL);
+    ok(rc==DDERR_INVALIDPARAMS, "SetLight returned: %x\n", rc);
+
+    memset(&light, 0, sizeof(D3DLIGHT7));
+    light.dltType = D3DLIGHT_SPOT;
+    U1(light.dcvDiffuse).r = 1.f;
+    U2(light.dcvDiffuse).g = 1.f;
+    U3(light.dcvDiffuse).b = 1.f;
+    U3(light.dvDirection).z = 1.f;
+
+    light.dvAttenuation0 = -one / zero; /* -INFINITY */
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
+    ok(rc==DDERR_INVALIDPARAMS, "SetLight returned: %x\n", rc);
+
+    light.dvAttenuation0 = -1.0;
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
+    ok(rc==DDERR_INVALIDPARAMS, "SetLight returned: %x\n", rc);
+
+    light.dvAttenuation0 = 0.0;
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
+    ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
+
+    light.dvAttenuation0 = 1.0;
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
+    ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
+
+    light.dvAttenuation0 = one / zero; /* +INFINITY */
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
+    ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
+
+    light.dvAttenuation0 = zero / zero; /* NaN */
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
+    ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
+
+    /* Directional light ignores attenuation */
+    light.dltType = D3DLIGHT_DIRECTIONAL;
+    light.dvAttenuation0 = -1.0;
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
+    ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
+
+    memset(&mat, 0, sizeof(mat));
+    rc = IDirect3DDevice7_SetMaterial(lpD3DDevice, &mat);
+    ok(rc == D3D_OK, "IDirect3DDevice7_SetMaterial returned: %x\n", rc);
+
+    mat.power = 129.0;
+    rc = IDirect3DDevice7_SetMaterial(lpD3DDevice, &mat);
+    ok(rc == D3D_OK, "IDirect3DDevice7_SetMaterial(power = 129.0) returned: %x\n", rc);
+    memset(&mat, 0, sizeof(mat));
+    rc = IDirect3DDevice7_GetMaterial(lpD3DDevice, &mat);
+    ok(rc == D3D_OK, "IDirect3DDevice7_GetMaterial returned: %x\n", rc);
+    ok(mat.power == 129, "Returned power is %f\n", mat.power);
+
+    mat.power = -1.0;
+    rc = IDirect3DDevice7_SetMaterial(lpD3DDevice, &mat);
+    ok(rc == D3D_OK, "IDirect3DDevice7_SetMaterial(power = -1.0) returned: %x\n", rc);
+    memset(&mat, 0, sizeof(mat));
+    rc = IDirect3DDevice7_GetMaterial(lpD3DDevice, &mat);
+    ok(rc == D3D_OK, "IDirect3DDevice7_GetMaterial returned: %x\n", rc);
+    ok(mat.power == -1, "Returned power is %f\n", mat.power);
 }
 
 static void ProcessVerticesTest(void)
@@ -486,6 +604,220 @@ static void StateTest( void )
     ok(rc == D3D_OK, "IDirect3DDevice7_SetRenderState(D3DRENDERSTATE_ZVISIBLE, FALSE) returned %08x\n", rc);
 }
 
+
+static void SceneTest(void)
+{
+    HRESULT                      hr;
+
+    /* Test an EndScene without beginscene. Should return an error */
+    hr = IDirect3DDevice7_EndScene(lpD3DDevice);
+    ok(hr == D3DERR_SCENE_NOT_IN_SCENE, "IDirect3DDevice7_EndScene returned %08x\n", hr);
+
+    /* Test a normal BeginScene / EndScene pair, this should work */
+    hr = IDirect3DDevice7_BeginScene(lpD3DDevice);
+    ok(hr == D3D_OK, "IDirect3DDevice7_BeginScene failed with %08x\n", hr);
+    if(SUCCEEDED(hr))
+    {
+        DDBLTFX fx;
+        memset(&fx, 0, sizeof(fx));
+        fx.dwSize = sizeof(fx);
+
+        if(lpDDSdepth) {
+            hr = IDirectDrawSurface7_Blt(lpDDSdepth, NULL, NULL, NULL, DDBLT_DEPTHFILL, &fx);
+            ok(hr == D3D_OK, "Depthfill failed in a BeginScene / EndScene pair\n");
+        } else {
+            skip("Depth stencil creation failed at startup, skipping\n");
+        }
+        hr = IDirect3DDevice7_EndScene(lpD3DDevice);
+        ok(hr == D3D_OK, "IDirect3DDevice7_EndScene failed with %08x\n", hr);
+    }
+
+    /* Test another EndScene without having begun a new scene. Should return an error */
+    hr = IDirect3DDevice7_EndScene(lpD3DDevice);
+    ok(hr == D3DERR_SCENE_NOT_IN_SCENE, "IDirect3DDevice7_EndScene returned %08x\n", hr);
+
+    /* Two nested BeginScene and EndScene calls */
+    hr = IDirect3DDevice7_BeginScene(lpD3DDevice);
+    ok(hr == D3D_OK, "IDirect3DDevice7_BeginScene failed with %08x\n", hr);
+    hr = IDirect3DDevice7_BeginScene(lpD3DDevice);
+    ok(hr == D3DERR_SCENE_IN_SCENE, "IDirect3DDevice7_BeginScene returned %08x\n", hr);
+    hr = IDirect3DDevice7_EndScene(lpD3DDevice);
+    ok(hr == D3D_OK, "IDirect3DDevice7_EndScene failed with %08x\n", hr);
+    hr = IDirect3DDevice7_EndScene(lpD3DDevice);
+    ok(hr == D3DERR_SCENE_NOT_IN_SCENE, "IDirect3DDevice7_EndScene returned %08x\n", hr);
+
+    /* TODO: Verify that blitting works in the same way as in d3d9 */
+}
+
+static void LimitTest(void)
+{
+    IDirectDrawSurface7 *pTexture = NULL;
+    HRESULT hr;
+    int i;
+    DDSURFACEDESC2 ddsd;
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE;
+    ddsd.dwWidth = 16;
+    ddsd.dwHeight = 16;
+    hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &pTexture, NULL);
+    ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
+    if(!pTexture) return;
+
+    for(i = 0; i < 8; i++) {
+        hr = IDirect3DDevice7_SetTexture(lpD3DDevice, i, pTexture);
+        ok(hr == D3D_OK, "IDirect3DDevice8_SetTexture for sampler %d failed with %08x\n", i, hr);
+        hr = IDirect3DDevice7_SetTexture(lpD3DDevice, i, NULL);
+        ok(hr == D3D_OK, "IDirect3DDevice8_SetTexture for sampler %d failed with %08x\n", i, hr);
+        hr = IDirect3DDevice7_SetTextureStageState(lpD3DDevice, i, D3DTSS_COLOROP, D3DTOP_ADD);
+        ok(hr == D3D_OK, "IDirect3DDevice8_SetTextureStageState for texture %d failed with %08x\n", i, hr);
+    }
+
+    IDirectDrawSurface7_Release(pTexture);
+}
+
+static HRESULT WINAPI enumDevicesCallback(GUID *Guid,LPSTR DeviceDescription,LPSTR DeviceName, D3DDEVICEDESC *hal, D3DDEVICEDESC *hel, VOID *ctx)
+{
+    UINT ver = *((UINT *) ctx);
+    if(IsEqualGUID(&IID_IDirect3DRGBDevice, Guid))
+    {
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "RGB Device %d hal line caps has D3DPTEXTURECAPS_POW2 flag set\n", ver);
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "RGB Device %d hal tri caps has D3DPTEXTURECAPS_POW2 flag set\n", ver);
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "RGB Device %d hel line caps does not have D3DPTEXTURECAPS_POW2 flag set\n", ver);
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "RGB Device %d hel tri caps does not have D3DPTEXTURECAPS_POW2 flag set\n", ver);
+
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "RGB Device %d hal line caps has D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "RGB Device %d hal tri caps has D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "RGB Device %d hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "RGB Device %d hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+    }
+    else if(IsEqualGUID(&IID_IDirect3DHALDevice, Guid))
+    {
+        /* pow2 is hardware dependent */
+
+        ok(hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "HAL Device %d hal line caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok(hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "HAL Device %d hal tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok((hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "HAL Device %d hel line caps has D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok((hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "HAL Device %d hel tri caps has D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+    }
+    else if(IsEqualGUID(&IID_IDirect3DRefDevice, Guid))
+    {
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "REF Device %d hal line caps has D3DPTEXTURECAPS_POW2 flag set\n", ver);
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "REF Device %d hal tri caps has D3DPTEXTURECAPS_POW2 flag set\n", ver);
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "REF Device %d hel line caps does not have D3DPTEXTURECAPS_POW2 flag set\n", ver);
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "REF Device %d hel tri caps does not have D3DPTEXTURECAPS_POW2 flag set\n", ver);
+
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "REF Device %d hal line caps has D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "REF Device %d hal tri caps has D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "REF Device %d hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "REF Device %d hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+    }
+    else if(IsEqualGUID(&IID_IDirect3DRampDevice, Guid))
+    {
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "Ramp Device %d hal line caps has D3DPTEXTURECAPS_POW2 flag set\n", ver);
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "Ramp Device %d hal tri caps has D3DPTEXTURECAPS_POW2 flag set\n", ver);
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "Ramp Device %d hel line caps does not have D3DPTEXTURECAPS_POW2 flag set\n", ver);
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "Ramp Device %d hel tri caps does not have D3DPTEXTURECAPS_POW2 flag set\n", ver);
+
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "Ramp Device %d hal line caps has D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "Ramp Device %d hal tri caps has D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "Ramp Device %d hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "Ramp Device %d hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+    }
+    else if(IsEqualGUID(&IID_IDirect3DMMXDevice, Guid))
+    {
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "MMX Device %d hal line caps has D3DPTEXTURECAPS_POW2 flag set\n", ver);
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "MMX Device %d hal tri caps has D3DPTEXTURECAPS_POW2 flag set\n", ver);
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "MMX Device %d hel line caps does not have D3DPTEXTURECAPS_POW2 flag set\n", ver);
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "MMX Device %d hel tri caps does not have D3DPTEXTURECAPS_POW2 flag set\n", ver);
+
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "MMX Device %d hal line caps has D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "MMX Device %d hal tri caps has D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "MMX Device %d hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "MMX Device %d hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n", ver);
+    }
+    else
+    {
+        ok(FALSE, "Unexpected device enumerated: \"%s\" \"%s\"\n", DeviceDescription, DeviceName);
+        if(hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) trace("hal line has pow2 set\n");
+        else trace("hal line does NOT have pow2 set\n");
+        if(hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) trace("hal tri has pow2 set\n");
+        else trace("hal tri does NOT have pow2 set\n");
+        if(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) trace("hel line has pow2 set\n");
+        else trace("hel line does NOT have pow2 set\n");
+        if(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) trace("hel tri has pow2 set\n");
+        else trace("hel tri does NOT have pow2 set\n");
+    }
+    return DDENUMRET_OK;
+}
+
+static void CapsTest(void)
+{
+    IDirect3D3 *d3d3;
+    IDirect3D3 *d3d2;
+    IDirectDraw *dd1;
+    HRESULT hr;
+    UINT ver;
+
+    hr = DirectDrawCreate(NULL, &dd1, NULL);
+    ok(hr == DD_OK, "Cannot create a DirectDraw 1 interface, hr = %08x\n", hr);
+    hr = IDirectDraw_QueryInterface(dd1, &IID_IDirect3D3, (void **) &d3d3);
+    ok(hr == D3D_OK, "IDirectDraw_QueryInterface returned %08x\n", hr);
+    ver = 3;
+    IDirect3D3_EnumDevices(d3d3, enumDevicesCallback, &ver);
+
+    IDirect3D3_Release(d3d3);
+    IDirectDraw_Release(dd1);
+
+    hr = DirectDrawCreate(NULL, &dd1, NULL);
+    ok(hr == DD_OK, "Cannot create a DirectDraw 1 interface, hr = %08x\n", hr);
+    hr = IDirectDraw_QueryInterface(dd1, &IID_IDirect3D2, (void **) &d3d2);
+    ok(hr == D3D_OK, "IDirectDraw_QueryInterface returned %08x\n", hr);
+    ver = 2;
+    IDirect3D2_EnumDevices(d3d2, enumDevicesCallback, &ver);
+
+    IDirect3D2_Release(d3d2);
+    IDirectDraw_Release(dd1);
+}
+
 START_TEST(d3d)
 {
     init_function_pointers();
@@ -501,5 +833,8 @@ START_TEST(d3d)
     LightTest();
     ProcessVerticesTest();
     StateTest();
+    SceneTest();
+    LimitTest();
+    CapsTest();
     ReleaseDirect3D();
 }

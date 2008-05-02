@@ -781,7 +781,7 @@ struct _CERT_CHAIN_CONTEXT {
     DWORD                 cChain;
     PCERT_SIMPLE_CHAIN   *rgpChain;
     DWORD                 cLowerQualityChainContext;
-    PCCERT_CHAIN_CONTEXT *rgbLowerQualityChainContext;
+    PCCERT_CHAIN_CONTEXT *rgpLowerQualityChainContext;
     BOOL                  fHasRevocationFreshnessTime;
     DWORD                 dwRevocationFreshnessTime;
 };
@@ -1613,6 +1613,11 @@ static const WCHAR MS_SCARD_PROV_W[] =           { 'M','i','c','r','o','s','o','
 #define PP_KEYSPEC              39
 #define PP_ENUMEX_SIGNING_PROT  40
 
+/* Values returned by CryptGetProvParam of PP_KEYSTORAGE */
+#define CRYPT_SEC_DESCR         0x00000001
+#define CRYPT_PSTORE            0x00000002
+#define CRYPT_UI_PROMPT         0x00000004
+
 /* Crypt{Get/Set}KeyParam */
 #define KP_IV                   1
 #define KP_SALT                 2
@@ -1940,6 +1945,10 @@ static const WCHAR CERT_TRUST_PUB_AUTHENTICODE_FLAGS_VALUE_NAME[] =
 #define CERT_REGISTRY_STORE_CLIENT_GPT_FLAG  0x80000000
 
 #define CERT_FILE_STORE_COMMIT_ENABLE_FLAG 0x00010000
+
+/* CertCloseStore dwFlags */
+#define CERT_CLOSE_STORE_FORCE_FLAG 0x00000001
+#define CERT_CLOSE_STORE_CHECK_FLAG 0x00000002
 
 /* dwAddDisposition */
 #define CERT_STORE_ADD_NEW                                 1
@@ -3004,6 +3013,195 @@ typedef struct _CERT_CHAIN_ENGINE_CONFIG
     DWORD       CycleDetectionModulus;
 } CERT_CHAIN_ENGINE_CONFIG, *PCERT_CHAIN_ENGINE_CONFIG;
 
+/* message-related definitions */
+
+typedef BOOL (WINAPI *PFN_CMSG_STREAM_OUTPUT)(const void *pvArg, BYTE *pbData,
+ DWORD cbData, BOOL fFinal);
+
+#define CMSG_INDEFINITE_LENGTH 0xffffffff
+
+typedef struct _CMSG_STREAM_INFO
+{
+    DWORD cbContent;
+    PFN_CMSG_STREAM_OUTPUT pfnStreamOutput;
+    void *pvArg;
+} CMSG_STREAM_INFO, *PCMSG_STREAM_INFO;
+
+typedef struct _CERT_ISSUER_SERIAL_NUMBER
+{
+    CERT_NAME_BLOB     Issuer;
+    CRYPT_INTEGER_BLOB SerialNumber;
+} CERT_ISSUER_SERIAL_NUMBER, *PCERT_ISSUER_SERIAL_NUMBER;
+
+typedef struct _CERT_ID
+{
+    DWORD dwIdChoice;
+    union {
+        CERT_ISSUER_SERIAL_NUMBER IssuerSerialNumber;
+        CRYPT_HASH_BLOB           KeyId;
+        CRYPT_HASH_BLOB           HashId;
+    } DUMMYUNIONNAME;
+} CERT_ID, *PCERT_ID;
+
+#undef CMSG_DATA /* may be defined by sys/socket.h */
+#define CMSG_DATA                 1
+#define CMSG_SIGNED               2
+#define CMSG_ENVELOPED            3
+#define CMSG_SIGNED_AND_ENVELOPED 4
+#define CMSG_HASHED               5
+#define CMSG_ENCRYPTED            6
+
+#define CMSG_ALL_FLAGS                 ~0U
+#define CMSG_DATA_FLAG                 (1 << CMSG_DATA)
+#define CMSG_SIGNED_FLAG               (1 << CMSG_SIGNED)
+#define CMSG_ENVELOPED_FLAG            (1 << CMSG_ENVELOPED)
+#define CMSG_SIGNED_AND_ENVELOPED_FLAG (1 << CMSG_SIGNED_AND_ENVELOPED)
+#define CMSG_ENCRYPTED_FLAG            (1 << CMSG_ENCRYPTED)
+
+typedef struct _CMSG_SIGNER_ENCODE_INFO
+{
+    DWORD                      cbSize;
+    PCERT_INFO                 pCertInfo;
+    HCRYPTPROV                 hCryptProv;
+    DWORD                      dwKeySpec;
+    CRYPT_ALGORITHM_IDENTIFIER HashAlgorithm;
+    void                      *pvHashAuxInfo;
+    DWORD                      cAuthAttr;
+    PCRYPT_ATTRIBUTE           rgAuthAttr;
+    DWORD                      cUnauthAttr;
+    PCRYPT_ATTRIBUTE           rgUnauthAttr;
+    CERT_ID                    SignerId;
+    CRYPT_ALGORITHM_IDENTIFIER HashEncryptionAlgorithm;
+    void                      *pvHashEncryptionAuxInfo;
+} CMSG_SIGNER_ENCODE_INFO, *PCMSG_SIGNER_ENCODE_INFO;
+
+typedef struct _CMSG_SIGNED_ENCODE_INFO
+{
+    DWORD                    cbSize;
+    DWORD                    cSigners;
+    PCMSG_SIGNER_ENCODE_INFO rgSigners;
+    DWORD                    cCertEncoded;
+    PCERT_BLOB               rgCertEncoded;
+    DWORD                    cCrlEncoded;
+    PCRL_BLOB                rgCrlEncoded;
+    DWORD                    cAttrCertEncoded;
+    PCERT_BLOB               rgAttrCertEncoded;
+} CMSG_SIGNED_ENCODE_INFO, *PCMSG_SIGNED_ENCODE_INFO;
+
+typedef struct _CMSG_ENVELOPED_ENCODE_INFO
+{
+    DWORD                      cbSize;
+    HCRYPTPROV                 hCryptProv;
+    CRYPT_ALGORITHM_IDENTIFIER ContentEncryptionAlgorithm;
+    void                      *pvEncryptionAuxInfo;
+    DWORD                      cRecipients;
+    PCERT_INFO                *rgpRecipientCert;
+} CMSG_ENVELOPED_ENCODE_INFO, *PCMSG_ENVELOPED_ENCODE_INFO;
+
+typedef struct _CMSG_SIGNED_AND_ENVELOPED_ENCODE_INFO
+{
+    DWORD                      cbSize;
+    CMSG_SIGNED_ENCODE_INFO    SignedInfo;
+    CMSG_ENVELOPED_ENCODE_INFO EnvelopedInfo;
+} CMSG_SIGNED_AND_ENVELOPED_ENCODE_INFO,
+ *PCMSG_SIGNED_AND_ENVELOPED_ENCODE_INFO;
+
+typedef struct _CMSG_HASHED_ENCODE_INFO
+{
+    DWORD                      cbSize;
+    HCRYPTPROV                 hCryptProv;
+    CRYPT_ALGORITHM_IDENTIFIER HashAlgorithm;
+    void                      *pvHashAuxInfo;
+} CMSG_HASHED_ENCODE_INFO, *PCMSG_HASHED_ENCODE_INFO;
+
+typedef struct _CMSG_ENCRYPTED_ENCODE_INFO
+{
+    DWORD                      cbSize;
+    CRYPT_ALGORITHM_IDENTIFIER ContentEncryptionAlgorithm;
+    void                      *pvEncryptionAuxInfo;
+} CMSG_ENCRYPTED_ENCODE_INFO, *PCMSG_ENCRYPTED_ENCODE_INFO;
+
+#define CMSG_BARE_CONTENT_FLAG             0x00000001
+#define CMSG_LENGTH_ONLY_FLAG              0x00000002
+#define CMSG_DETACHED_FLAG                 0x00000004
+#define CMSG_AUTHENTICATED_ATTRIBUTES_FLAG 0x00000008
+#define CMSG_CONTENTS_OCTETS_FLAG          0x00000010
+#define CMSG_MAX_LENGTH_FLAG               0x00000020
+#define CMSG_CMS_ENCAPSULATED_CONTENT_FLAG 0x00000040
+#define CMSG_CRYPT_RELEASE_CONTEXT_FLAG    0x00008000
+
+#define CMSG_CTRL_VERIFY_SIGNATURE       1
+#define CMSG_CTRL_DECRYPT                2
+#define CMSG_CTRL_VERIFY_HASH            5
+#define CMSG_CTRL_ADD_SIGNER             6
+#define CMSG_CTRL_DEL_SIGNER             7
+#define CMSG_CTRL_ADD_SIGNER_UNAUTH_ATTR 8
+#define CMSG_CTRL_DEL_SIGNER_UNAUTH_ATTR 9
+#define CMSG_CTRL_ADD_CERT               10
+#define CMSG_CTRL_DEL_CERT               11
+#define CMSG_CTRL_ADD_CRL                12
+#define CMSG_CTRL_DEL_CRL                13
+
+typedef struct _CMSG_CTRL_DECRYPT_PARA
+{
+    DWORD      cbSize;
+    HCRYPTPROV hCryptProv;
+    DWORD      dwKeySpec;
+    DWORD      dwRecipientIndex;
+} CMSG_CTRL_DECRYPT_PARA, *PCMSG_CTRL_DECRYPT_PARA;
+
+typedef struct _CMSG_CTRL_ADD_SIGNER_UNAUTH_ATTR_PARA
+{
+    DWORD           cbSize;
+    DWORD           dwSignerIndex;
+    CRYPT_DATA_BLOB blob;
+} CMSG_CTRL_ADD_SIGNER_UNAUTH_ATTR_PARA,
+ *PCMSG_CTRL_ADD_SIGNER_UNAUTH_ATTR_PARA;
+
+typedef struct _CMSG_CTRL_DEL_SIGNER_UNAUTH_ATTR_PARA
+{
+    DWORD           cbSize;
+    DWORD           dwSignerIndex;
+    DWORD           dwUnauthAttrIndex;
+} CMSG_CTRL_DEL_SIGNER_UNAUTH_ATTR_PARA,
+ *PCMSG_CTRL_DEL_SIGNER_UNAUTH_ATTR_PARA;
+
+#define CMSG_TYPE_PARAM                  1
+#define CMSG_CONTENT_PARAM               2
+#define CMSG_BARE_CONTENT_PARAM          3
+#define CMSG_INNER_CONTENT_PARAM         4
+#define CMSG_SIGNER_COUNT_PARAM          5
+#define CMSG_SIGNER_INFO_PARAM           6
+#define CMSG_SIGNER_CERT_INFO_PARAM      7
+#define CMSG_SIGNER_HASH_ALGORITHM_PARAM 8
+#define CMSG_SIGNER_AUTH_ATTR_PARAM      9
+#define CMSG_SIGNER_UNAUTH_ATTR_PARAM    10
+#define CMSG_CERT_COUNT_PARAM            11
+#define CMSG_CERT_PARAM                  12
+#define CMSG_CRL_COUNT_PARAM             13
+#define CMSG_CRL_PARAM                   14
+#define CMSG_ENVELOPE_ALGORITHM_PARAM    15
+#define CMSG_RECIPIENT_COUNT_PARAM       17
+#define CMSG_RECIPIENT_INDEX_PARAM       18
+#define CMSG_RECIPIENT_INFO_PARAM        19
+#define CMSG_HASH_ALGORITHM_PARAM        20
+#define CMSG_HASH_DATA_PARAM             21
+#define CMSG_COMPUTED_HASH_PARAM         22
+#define CMSG_ENCRYPT_PARAM               26
+#define CMSG_ENCRYPTED_DIGEST            27
+#define CMSG_ENCODED_SIGNER              28
+#define CMSG_ENCODED_MESSAGE             29
+#define CMSG_VERSION_PARAM               30
+#define CMSG_ATTR_CERT_COUNT_PARAM       31
+#define CMSG_ATTR_CERT_PARAM             32
+#define CMSG_CMS_RECIPIENT_COUNT_PARAM   33
+#define CMSG_CMS_RECIPIENT_INDEX_PARAM   34
+#define CMSG_CMS_RECIPIENT_ENCRYPTED_KEY_INDEX_PARAM 35
+#define CMSG_CMS_RECIPIENT_INFO_PARAM    36
+#define CMSG_UNPROTECTED_ATTR_PARAM      37
+#define CMSG_SIGNER_CERT_ID_PARAM        38
+#define CMSG_CMS_SIGNER_INFO_PARAM       39
+
 /* function declarations */
 /* advapi32.dll */
 BOOL WINAPI CryptAcquireContextA(HCRYPTPROV *phProv, LPCSTR pszContainer,
@@ -3052,28 +3250,28 @@ BOOL WINAPI CryptGetDefaultProviderW (DWORD dwProvType, DWORD *pdwReserved,
 		DWORD dwFlags, LPWSTR pszProvName, DWORD *pcbProvName);
 #define CryptGetDefaultProvider WINELIB_NAME_AW(CryptGetDefaultProvider)
 BOOL WINAPI CryptGetUserKey (HCRYPTPROV hProv, DWORD dwKeySpec, HCRYPTKEY *phUserKey);
-BOOL WINAPI CryptHashData (HCRYPTHASH hHash, const BYTE *pbData, DWORD dwDataLen, DWORD dwFlags);
+BOOL WINAPI CryptHashData (HCRYPTHASH hHash, CONST BYTE *pbData, DWORD dwDataLen, DWORD dwFlags);
 BOOL WINAPI CryptHashSessionKey (HCRYPTHASH hHash, HCRYPTKEY hKey, DWORD dwFlags);
-BOOL WINAPI CryptImportKey (HCRYPTPROV hProv, BYTE *pbData, DWORD dwDataLen,
+BOOL WINAPI CryptImportKey (HCRYPTPROV hProv, CONST BYTE *pbData, DWORD dwDataLen,
 		HCRYPTKEY hPubKey, DWORD dwFlags, HCRYPTKEY *phKey);
 BOOL WINAPI CryptReleaseContext (HCRYPTPROV hProv, DWORD dwFlags);
-BOOL WINAPI CryptSetHashParam (HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, DWORD dwFlags);
-BOOL WINAPI CryptSetKeyParam (HCRYPTKEY hKey, DWORD dwParam, BYTE *pbData, DWORD dwFlags);
+BOOL WINAPI CryptSetHashParam (HCRYPTHASH hHash, DWORD dwParam, CONST BYTE *pbData, DWORD dwFlags);
+BOOL WINAPI CryptSetKeyParam (HCRYPTKEY hKey, DWORD dwParam, CONST BYTE *pbData, DWORD dwFlags);
 BOOL WINAPI CryptSetProviderA (LPCSTR pszProvName, DWORD dwProvType);
 BOOL WINAPI CryptSetProviderW (LPCWSTR pszProvName, DWORD dwProvType);
 #define CryptSetProvider WINELIB_NAME_AW(CryptSetProvider)
 BOOL WINAPI CryptSetProviderExA (LPCSTR pszProvName, DWORD dwProvType, DWORD *pdwReserved, DWORD dwFlags);
 BOOL WINAPI CryptSetProviderExW (LPCWSTR pszProvName, DWORD dwProvType, DWORD *pdwReserved, DWORD dwFlags);
 #define CryptSetProviderEx WINELIB_NAME_AW(CryptSetProviderEx)
-BOOL WINAPI CryptSetProvParam (HCRYPTPROV hProv, DWORD dwParam, BYTE *pbData, DWORD dwFlags);
+BOOL WINAPI CryptSetProvParam (HCRYPTPROV hProv, DWORD dwParam, CONST BYTE *pbData, DWORD dwFlags);
 BOOL WINAPI CryptSignHashA (HCRYPTHASH hHash, DWORD dwKeySpec, LPCSTR sDescription,
 		DWORD dwFlags, BYTE *pbSignature, DWORD *pdwSigLen);
 BOOL WINAPI CryptSignHashW (HCRYPTHASH hHash, DWORD dwKeySpec, LPCWSTR sDescription,
 		DWORD dwFlags, BYTE *pbSignature, DWORD *pdwSigLen);
 #define CryptSignHash WINELIB_NAME_AW(CryptSignHash)
-BOOL WINAPI CryptVerifySignatureA (HCRYPTHASH hHash, BYTE *pbSignature, DWORD dwSigLen,
+BOOL WINAPI CryptVerifySignatureA (HCRYPTHASH hHash, CONST BYTE *pbSignature, DWORD dwSigLen,
 		HCRYPTKEY hPubKey, LPCSTR sDescription, DWORD dwFlags);
-BOOL WINAPI CryptVerifySignatureW (HCRYPTHASH hHash, BYTE *pbSignature, DWORD dwSigLen,
+BOOL WINAPI CryptVerifySignatureW (HCRYPTHASH hHash, CONST BYTE *pbSignature, DWORD dwSigLen,
 		HCRYPTKEY hPubKey, LPCWSTR sDescription, DWORD dwFlags);
 #define CryptVerifySignature WINELIB_NAME_AW(CryptVerifySignature)
 
@@ -3508,6 +3706,49 @@ BOOL WINAPI CertStrToNameW(DWORD dwCertEncodingType, LPCWSTR pszX500,
  DWORD dwStrType, void *pvReserved, BYTE *pbEncoded, DWORD *pcbEncoded,
  LPCWSTR *ppszError);
 #define CertStrToName WINELIB_NAME_AW(CertStrToName)
+
+DWORD WINAPI CryptMsgCalculateEncodedLength(DWORD dwMsgEncodingType,
+ DWORD dwFlags, DWORD dwMsgType, const void *pvMsgEncodeInfo,
+ LPSTR pszInnerContentObjID, DWORD cbData);
+
+BOOL WINAPI CryptMsgClose(HCRYPTMSG hCryptMsg);
+
+DWORD WINAPI CryptMsgControl(HCRYPTMSG hCryptMsg, DWORD dwFlags,
+ DWORD dwCtrlType, const void *pvCtrlPara);
+
+BOOL WINAPI CryptMsgCountersign(HCRYPTMSG hCryptMsg, DWORD dwIndex,
+ DWORD dwCountersigners, PCMSG_SIGNER_ENCODE_INFO rgCountersigners);
+
+BOOL WINAPI CryptMsgCountersignEncoded(DWORD dwEncodingType, PBYTE pbSignerInfo,
+ DWORD cbSignerInfo, DWORD cCountersigners,
+ PCMSG_SIGNER_ENCODE_INFO rgCountersigners, PBYTE pbCountersignature,
+ PDWORD pcbCountersignature);
+
+HCRYPTMSG WINAPI CryptMsgDuplicate(HCRYPTMSG hCryptMsg);
+
+BOOL WINAPI CryptMsgGetParam(HCRYPTMSG hCryptMsg, DWORD dwParamType,
+ DWORD dwIndex, void *pvData, DWORD *pcbData);
+
+HCRYPTMSG WINAPI CryptMsgOpenToDecode(DWORD dwMsgEncodingType, DWORD dwFlags,
+ DWORD dwMsgType, HCRYPTPROV hCryptProv, PCERT_INFO pRecipientInfo,
+ PCMSG_STREAM_INFO pStreamInfo);
+
+HCRYPTMSG WINAPI CryptMsgOpenToEncode(DWORD dwMsgEncodingType, DWORD dwFlags,
+ DWORD dwMsgType, const void *pvMsgEncodeInfo, LPSTR pszInnerContentObjID,
+ PCMSG_STREAM_INFO pStreamInfo);
+
+BOOL WINAPI CryptMsgUpdate(HCRYPTMSG hCryptMsg, const BYTE *pbData,
+ DWORD cbData, BOOL fFinal);
+
+BOOL WINAPI CryptMsgVerifyCountersignatureEncoded(HCRYPTPROV hCryptProv,
+ DWORD dwEncodingType, PBYTE pbSignerInfo, DWORD cbSignerInfo,
+ PBYTE pbSignerInfoCountersignature, DWORD cbSignerInfoCountersignature,
+ PCERT_INFO pciCountersigner);
+
+BOOL WINAPI CryptMsgVerifyCountersignatureEncodedEx(HCRYPTPROV hCryptProv,
+ DWORD dwEncodingType, PBYTE pbSignerInfo, DWORD cbSignerInfo,
+ PBYTE pbSignerInfoCountersignature, DWORD cbSignerInfoCountersignature,
+ DWORD dwSignerType, void *pvSigner, DWORD dwFlags, void *pvReserved);
 
 BOOL WINAPI CryptSignMessage(PCRYPT_SIGN_MESSAGE_PARA pSignPara,
  BOOL fDetachedSignature, DWORD cToBeSigned, const BYTE *rgpbToBeSigned[],

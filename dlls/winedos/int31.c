@@ -517,9 +517,9 @@ callrmproc_again:
 
 
 /**********************************************************************
- *	    CallRMInt   (WINEDOS.@)
+ *	    CallRMInt
  */
-void WINAPI DOSVM_CallRMInt( CONTEXT86 *context )
+static void DOSVM_CallRMInt( CONTEXT86 *context )
 {
     CONTEXT86 realmode_ctx;
     FARPROC16 rm_int = DOSVM_GetRMHandler( BL_reg(context) );
@@ -546,9 +546,9 @@ void WINAPI DOSVM_CallRMInt( CONTEXT86 *context )
 
 
 /**********************************************************************
- *	    CallRMProc   (WINEDOS.@)
+ *	    CallRMProc
  */
-void WINAPI DOSVM_CallRMProc( CONTEXT86 *context, int iret )
+static void DOSVM_CallRMProc( CONTEXT86 *context, int iret )
 {
     REALMODECALL *p = CTX_SEG_OFF_TO_LIN( context, 
                                           context->SegEs, 
@@ -775,9 +775,9 @@ void WINAPI DOSVM_RawModeSwitchHandler( CONTEXT86 *context )
 
 
 /**********************************************************************
- *	    AllocRMCB   (WINEDOS.@)
+ *	    AllocRMCB
  */
-void WINAPI DOSVM_AllocRMCB( CONTEXT86 *context )
+static void DOSVM_AllocRMCB( CONTEXT86 *context )
 {
     RMCB *NewRMCB = DPMI_AllocRMCB();
 
@@ -801,9 +801,9 @@ void WINAPI DOSVM_AllocRMCB( CONTEXT86 *context )
 
 
 /**********************************************************************
- *	    FreeRMCB   (WINEDOS.@)
+ *	    FreeRMCB
  */
-void WINAPI DOSVM_FreeRMCB( CONTEXT86 *context )
+static void DOSVM_FreeRMCB( CONTEXT86 *context )
 {
     FIXME("callback address: %04x:%04x\n",
           CX_reg(context), DX_reg(context));
@@ -1253,7 +1253,7 @@ void WINAPI DOSVM_Int31Handler( CONTEXT86 *context )
 
             TRACE( "allocate memory block (%d bytes)\n", size );
 
-            ptr = (BYTE *)DPMI_xalloc( size );
+            ptr = DPMI_xalloc( size );
             if (!ptr)
             {
                 SET_AX( context, 0x8012 );  /* linear memory not available */
@@ -1285,7 +1285,7 @@ void WINAPI DOSVM_Int31Handler( CONTEXT86 *context )
 
             TRACE( "resize memory block (0x%08x, %d bytes)\n", handle, size );
 
-            ptr = (BYTE *)DPMI_xrealloc( (void *)handle, size );
+            ptr = DPMI_xrealloc( (void *)handle, size );
             if (!ptr)
             {
                 SET_AX( context, 0x8012 );  /* linear memory not available */
@@ -1347,21 +1347,21 @@ void WINAPI DOSVM_Int31Handler( CONTEXT86 *context )
         break;
 
     case 0x0900:  /* Get and Disable Virtual Interrupt State */
-        TRACE( "Get and Disable Virtual Interrupt State: %ld\n", 
+        TRACE( "Get and Disable Virtual Interrupt State: %d\n",
                NtCurrentTeb()->dpmi_vif );
         SET_AL( context, NtCurrentTeb()->dpmi_vif ? 1 : 0 );
         NtCurrentTeb()->dpmi_vif = 0;
         break;
 
     case 0x0901:  /* Get and Enable Virtual Interrupt State */
-        TRACE( "Get and Enable Virtual Interrupt State: %ld\n", 
+        TRACE( "Get and Enable Virtual Interrupt State: %d\n",
                NtCurrentTeb()->dpmi_vif );
         SET_AL( context, NtCurrentTeb()->dpmi_vif ? 1 : 0 );
         NtCurrentTeb()->dpmi_vif = 1;
         break;
 
     case 0x0902:  /* Get Virtual Interrupt State */
-        TRACE( "Get Virtual Interrupt State: %ld\n", 
+        TRACE( "Get Virtual Interrupt State: %d\n",
                NtCurrentTeb()->dpmi_vif );
         SET_AL( context, NtCurrentTeb()->dpmi_vif ? 1 : 0 );
         break;

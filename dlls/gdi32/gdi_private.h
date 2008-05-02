@@ -271,7 +271,7 @@ typedef struct tagDC
     PHYSDEV      physDev;         /* Physical device (driver-specific) */
     INT          saveLevel;
     HDC          saved_dc;
-    DWORD        dwHookData;
+    DWORD_PTR    dwHookData;
     FARPROC16    hookProc;         /* the original SEGPTR ... */
     DCHOOKPROC   hookThunk;        /* ... and the thunk to call it */
 
@@ -423,6 +423,7 @@ extern BOOL WineEngGetCharABCWidthsI(GdiFont *font, UINT firstChar,
                                     UINT count, LPWORD pgi, LPABC buffer);
 extern BOOL WineEngGetCharWidth(GdiFont*, UINT, UINT, LPINT);
 extern DWORD WineEngGetFontData(GdiFont*, DWORD, DWORD, LPVOID, DWORD);
+extern DWORD WineEngGetFontUnicodeRanges(HDC, LPGLYPHSET);
 extern DWORD WineEngGetGlyphIndices(GdiFont *font, LPCWSTR lpstr, INT count,
                                     LPWORD pgi, DWORD flags);
 extern DWORD WineEngGetGlyphOutline(GdiFont*, UINT glyph, UINT format,

@@ -30,11 +30,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
-#include "winreg.h"
 #include "ole2.h"
-
-#include "uuids.h"
 
 #include "wine/itss.h"
 #include "wine/unicode.h"
@@ -347,7 +343,7 @@ static const IMonikerVtbl ITS_IMonikerImpl_Vtbl =
     ITS_IMonikerImpl_IsSystemMoniker
 };
 
-static HRESULT ITS_IMoniker_create( IMoniker **ppObj, LPWSTR name, DWORD n )
+static HRESULT ITS_IMoniker_create( IMoniker **ppObj, LPCWSTR name, DWORD n )
 {
     ITS_IMonikerImpl *itsmon;
     DWORD sz;

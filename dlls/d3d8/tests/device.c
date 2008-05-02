@@ -24,6 +24,20 @@
 
 static IDirect3D8 *(WINAPI *pDirect3DCreate8)(UINT);
 
+static const DWORD simple_vs[] = {0xFFFE0101,       /* vs_1_1               */
+    0x00000009, 0xC0010000, 0x90E40000, 0xA0E40000, /* dp4 oPos.x, v0, c0   */
+    0x00000009, 0xC0020000, 0x90E40000, 0xA0E40001, /* dp4 oPos.y, v0, c1   */
+    0x00000009, 0xC0040000, 0x90E40000, 0xA0E40002, /* dp4 oPos.z, v0, c2   */
+    0x00000009, 0xC0080000, 0x90E40000, 0xA0E40003, /* dp4 oPos.w, v0, c3   */
+    0x0000FFFF};                                    /* END                  */
+static const DWORD simple_ps[] = {0xFFFF0101,                               /* ps_1_1                       */
+    0x00000051, 0xA00F0001, 0x3F800000, 0x00000000, 0x00000000, 0x00000000, /* def c1 = 1.0, 0.0, 0.0, 0.0  */
+    0x00000042, 0xB00F0000,                                                 /* tex t0                       */
+    0x00000008, 0x800F0000, 0xA0E40001, 0xA0E40000,                         /* dp3 r0, c1, c0               */
+    0x00000005, 0x800F0000, 0x90E40000, 0x80E40000,                         /* mul r0, v0, r0               */
+    0x00000005, 0x800F0000, 0xB0E40000, 0x80E40000,                         /* mul r0, t0, r0               */
+    0x0000FFFF};                                                            /* END                          */
+
 static int get_refcount(IUnknown *object)
 {
     IUnknown_AddRef( object );
@@ -290,20 +304,6 @@ static void test_refcount(void)
         D3DVSD_REG(D3DVSDE_DIFFUSE, D3DVSDT_D3DCOLOR), /* D3DVSDE_DIFFUSE, Register v5 */
 	D3DVSD_END()
     };
-    static DWORD simple_vs[] = {0xFFFE0101,             /* vs_1_1               */
-        0x00000009, 0xC0010000, 0x90E40000, 0xA0E40000, /* dp4 oPos.x, v0, c0   */
-        0x00000009, 0xC0020000, 0x90E40000, 0xA0E40001, /* dp4 oPos.y, v0, c1   */
-        0x00000009, 0xC0040000, 0x90E40000, 0xA0E40002, /* dp4 oPos.z, v0, c2   */
-        0x00000009, 0xC0080000, 0x90E40000, 0xA0E40003, /* dp4 oPos.w, v0, c3   */
-        0x0000FFFF};                                    /* END                  */
-    static DWORD simple_ps[] = {0xFFFF0101,                                     /* ps_1_1                       */
-        0x00000051, 0xA00F0001, 0x3F800000, 0x00000000, 0x00000000, 0x00000000, /* def c1 = 1.0, 0.0, 0.0, 0.0  */
-        0x00000042, 0xB00F0000,                                                 /* tex t0                       */
-        0x00000008, 0x800F0000, 0xA0E40001, 0xA0E40000,                         /* dp3 r0, c1, c0               */
-        0x00000005, 0x800F0000, 0x90E40000, 0x80E40000,                         /* mul r0, v0, r0               */
-        0x00000005, 0x800F0000, 0xB0E40000, 0x80E40000,                         /* mul r0, t0, r0               */
-        0x0000FFFF};                                                            /* END                          */
-
 
     pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
     ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
@@ -759,12 +759,311 @@ static void test_display_modes(void)
     IDirect3D8_Release(pD3d);
 }
 
+static void test_scene(void)
+{
+    HRESULT                      hr;
+    HWND                         hwnd               = NULL;
+    IDirect3D8                  *pD3d               = NULL;
+    IDirect3DDevice8            *pDevice            = NULL;
+    D3DPRESENT_PARAMETERS        d3dpp;
+    D3DDISPLAYMODE               d3ddm;
+
+    pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
+    ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
+    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    ok(hwnd != NULL, "Failed to create window\n");
+    if (!pD3d || !hwnd) goto cleanup;
+
+    IDirect3D8_GetAdapterDisplayMode( pD3d, D3DADAPTER_DEFAULT, &d3ddm );
+    ZeroMemory( &d3dpp, sizeof(d3dpp) );
+    d3dpp.Windowed         = TRUE;
+    d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
+    d3dpp.BackBufferWidth  = 800;
+    d3dpp.BackBufferHeight  = 600;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+
+
+    hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
+                                  D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
+    ok(hr == D3D_OK, "IDirect3D8_CreateDevice failed with %s\n", DXGetErrorString8(hr));
+    if(!pDevice) goto cleanup;
+
+    /* Test an EndScene without beginscene. Should return an error */
+    hr = IDirect3DDevice8_EndScene(pDevice);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_EndScene returned %s\n", DXGetErrorString8(hr));
+
+    /* Test a normal BeginScene / EndScene pair, this should work */
+    hr = IDirect3DDevice8_BeginScene(pDevice);
+    ok(hr == D3D_OK, "IDirect3DDevice8_BeginScene failed with %s\n", DXGetErrorString8(hr));
+    if(SUCCEEDED(hr))
+    {
+        hr = IDirect3DDevice8_EndScene(pDevice);
+        ok(hr == D3D_OK, "IDirect3DDevice8_EndScene failed with %s\n", DXGetErrorString8(hr));
+    }
+
+    /* Test another EndScene without having begun a new scene. Should return an error */
+    hr = IDirect3DDevice8_EndScene(pDevice);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_EndScene returned %s\n", DXGetErrorString8(hr));
+
+    /* Two nested BeginScene and EndScene calls */
+    hr = IDirect3DDevice8_BeginScene(pDevice);
+    ok(hr == D3D_OK, "IDirect3DDevice8_BeginScene failed with %s\n", DXGetErrorString8(hr));
+    hr = IDirect3DDevice8_BeginScene(pDevice);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_BeginScene returned %s\n", DXGetErrorString8(hr));
+    hr = IDirect3DDevice8_EndScene(pDevice);
+    ok(hr == D3D_OK, "IDirect3DDevice8_EndScene failed with %s\n", DXGetErrorString8(hr));
+    hr = IDirect3DDevice8_EndScene(pDevice);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_EndScene returned %s\n", DXGetErrorString8(hr));
+
+    /* StretchRect does not exit in Direct3D8, so no equivalent to the d3d9 stretchrect tests */
+
+cleanup:
+    if(pD3d) IDirect3D8_Release(pD3d);
+    if(pDevice) IDirect3D8_Release(pDevice);
+    if(hwnd) DestroyWindow(hwnd);
+}
+
+static void test_shader(void)
+{
+    HRESULT                      hr;
+    HWND                         hwnd               = NULL;
+    IDirect3D8                  *pD3d               = NULL;
+    IDirect3DDevice8            *pDevice            = NULL;
+    D3DPRESENT_PARAMETERS        d3dpp;
+    D3DDISPLAYMODE               d3ddm;
+    DWORD                        hPixelShader = 0, hVertexShader = 0;
+    DWORD                        hPixelShader2 = 0, hVertexShader2 = 0;
+    DWORD                        hTempHandle;
+    DWORD data_size;
+    void *data;
+
+    static DWORD dwVertexDecl[] =
+    {
+        D3DVSD_STREAM(0),
+        D3DVSD_REG(D3DVSDE_POSITION,  D3DVSDT_FLOAT3),
+        D3DVSD_END()
+    };
+    const DWORD vertex_decl_size = sizeof(dwVertexDecl);
+    const DWORD simple_vs_size = sizeof(simple_vs);
+    const DWORD simple_ps_size = sizeof(simple_ps);
+
+    pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
+    ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
+    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    ok(hwnd != NULL, "Failed to create window\n");
+    if (!pD3d || !hwnd) goto cleanup;
+
+    IDirect3D8_GetAdapterDisplayMode( pD3d, D3DADAPTER_DEFAULT, &d3ddm );
+    ZeroMemory( &d3dpp, sizeof(d3dpp) );
+    d3dpp.Windowed         = TRUE;
+    d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
+    d3dpp.BackBufferWidth  = 800;
+    d3dpp.BackBufferHeight  = 600;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+
+
+    hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
+                                  D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
+    ok(hr == D3D_OK, "IDirect3D8_CreateDevice failed with %s\n", DXGetErrorString8(hr));
+    if(!pDevice) goto cleanup;
+
+    /* First create a vertex shader */
+    hr = IDirect3DDevice8_CreateVertexShader(pDevice, dwVertexDecl, simple_vs, &hVertexShader, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice8_CreateVertexShader returned %s\n", DXGetErrorString8(hr));
+    /* Msdn says that the new vertex shader is set immediately. This is wrong, apparently */
+    hr = IDirect3DDevice8_GetVertexShader(pDevice, &hTempHandle);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetVertexShader returned %s\n", DXGetErrorString8(hr));
+    ok(hTempHandle == 0, "Vertex Shader %d is set, expected shader %d\n", hTempHandle, 0);
+    /* Assign the shader, then verify that GetVertexShader works */
+    hr = IDirect3DDevice8_SetVertexShader(pDevice, hVertexShader);
+    ok(hr == D3D_OK, "IDirect3DDevice8_SetVertexShader returned %s\n", DXGetErrorString8(hr));
+    hr = IDirect3DDevice8_GetVertexShader(pDevice, &hTempHandle);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetVertexShader returned %s\n", DXGetErrorString8(hr));
+    ok(hTempHandle == hVertexShader, "Vertex Shader %d is set, expected shader %d\n", hTempHandle, hVertexShader);
+    /* Verify that we can retrieve the declaration */
+    hr = IDirect3DDevice8_GetVertexShaderDeclaration(pDevice, hVertexShader, NULL, &data_size);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetVertexShaderDeclaration returned %s\n", DXGetErrorString8(hr));
+    ok(data_size == vertex_decl_size, "Got data_size %u, expected %u\n", data_size, vertex_decl_size);
+    data = HeapAlloc(GetProcessHeap(), 0, vertex_decl_size);
+    data_size = 1;
+    hr = IDirect3DDevice8_GetVertexShaderDeclaration(pDevice, hVertexShader, data, &data_size);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_GetVertexShaderDeclaration returned %s (0x%#x), "
+            "expected D3DERR_INVALIDCALL\n", DXGetErrorString8(hr), hr);
+    ok(data_size == 1, "Got data_size %u, expected 1\n", data_size);
+    data_size = vertex_decl_size;
+    hr = IDirect3DDevice8_GetVertexShaderDeclaration(pDevice, hVertexShader, data, &data_size);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetVertexShaderDeclaration returned %s\n", DXGetErrorString8(hr));
+    ok(data_size == vertex_decl_size, "Got data_size %u, expected %u\n", data_size, vertex_decl_size);
+    ok(!memcmp(data, dwVertexDecl, vertex_decl_size), "data not equal to shader declaration\n");
+    HeapFree(GetProcessHeap(), 0, data);
+    /* Verify that we can retrieve the shader function */
+    hr = IDirect3DDevice8_GetVertexShaderFunction(pDevice, hVertexShader, NULL, &data_size);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetVertexShaderFucntion returned %s\n", DXGetErrorString8(hr));
+    ok(data_size == simple_vs_size, "Got data_size %u, expected %u\n", data_size, simple_vs_size);
+    data = HeapAlloc(GetProcessHeap(), 0, simple_vs_size);
+    data_size = 1;
+    hr = IDirect3DDevice8_GetVertexShaderFunction(pDevice, hVertexShader, data, &data_size);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_GetVertexShaderFunction returned %s (0x%#x), "
+            "expected D3DERR_INVALIDCALL\n", DXGetErrorString8(hr), hr);
+    ok(data_size == 1, "Got data_size %u, expected 1\n", data_size);
+    data_size = simple_vs_size;
+    hr = IDirect3DDevice8_GetVertexShaderFunction(pDevice, hVertexShader, data, &data_size);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetVertexShaderFunction returned %s\n", DXGetErrorString8(hr));
+    ok(data_size == simple_vs_size, "Got data_size %u, expected %u\n", data_size, simple_vs_size);
+    ok(!memcmp(data, simple_vs, simple_vs_size), "data not equal to shader function\n");
+    HeapFree(GetProcessHeap(), 0, data);
+    /* Delete the assigned shader. This is supposed to work */
+    hr = IDirect3DDevice8_DeleteVertexShader(pDevice, hVertexShader);
+    ok(hr == D3D_OK, "IDirect3DDevice8_DeleteVertexShader returned %s\n", DXGetErrorString8(hr));
+    /* The shader should be unset now */
+    hr = IDirect3DDevice8_GetVertexShader(pDevice, &hTempHandle);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetVertexShader returned %s\n", DXGetErrorString8(hr));
+    ok(hTempHandle == 0, "Vertex Shader %d is set, expected shader %d\n", hTempHandle, 0);
+
+    /* The same with a pixel shader */
+    hr = IDirect3DDevice8_CreatePixelShader(pDevice, simple_ps, &hPixelShader);
+    ok(hr == D3D_OK, "IDirect3DDevice8_CreatePixelShader returned %s\n", DXGetErrorString8(hr));
+    /* Msdn says that the new pixel shader is set immediately. This is wrong, apparently */
+    hr = IDirect3DDevice8_GetPixelShader(pDevice, &hTempHandle);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetPixelShader returned %s\n", DXGetErrorString8(hr));
+    ok(hTempHandle == 0, "Pixel Shader %d is set, expected shader %d\n", hTempHandle, 0);
+    /* Assign the shader, then verify that GetPixelShader works */
+    hr = IDirect3DDevice8_SetPixelShader(pDevice, hPixelShader);
+    ok(hr == D3D_OK, "IDirect3DDevice8_SetPixelShader returned %s\n", DXGetErrorString8(hr));
+    hr = IDirect3DDevice8_GetPixelShader(pDevice, &hTempHandle);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetPixelShader returned %s\n", DXGetErrorString8(hr));
+    ok(hTempHandle == hPixelShader, "Pixel Shader %d is set, expected shader %d\n", hTempHandle, hPixelShader);
+    /* Verify that we can retrieve the shader function */
+    hr = IDirect3DDevice8_GetPixelShaderFunction(pDevice, hPixelShader, NULL, &data_size);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetPixelShaderFucntion returned %s\n", DXGetErrorString8(hr));
+    ok(data_size == simple_ps_size, "Got data_size %u, expected %u\n", data_size, simple_ps_size);
+    data = HeapAlloc(GetProcessHeap(), 0, simple_ps_size);
+    data_size = 1;
+    hr = IDirect3DDevice8_GetPixelShaderFunction(pDevice, hPixelShader, data, &data_size);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_GetPixelShaderFunction returned %s (0x%#x), "
+            "expected D3DERR_INVALIDCALL\n", DXGetErrorString8(hr), hr);
+    ok(data_size == 1, "Got data_size %u, expected 1\n", data_size);
+    data_size = simple_ps_size;
+    hr = IDirect3DDevice8_GetPixelShaderFunction(pDevice, hPixelShader, data, &data_size);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetPixelShaderFunction returned %s\n", DXGetErrorString8(hr));
+    ok(data_size == simple_ps_size, "Got data_size %u, expected %u\n", data_size, simple_ps_size);
+    ok(!memcmp(data, simple_ps, simple_ps_size), "data not equal to shader function\n");
+    HeapFree(GetProcessHeap(), 0, data);
+    /* Delete the assigned shader. This is supposed to work */
+    hr = IDirect3DDevice8_DeletePixelShader(pDevice, hPixelShader);
+    ok(hr == D3D_OK, "IDirect3DDevice8_DeletePixelShader returned %s\n", DXGetErrorString8(hr));
+    /* The shader should be unset now */
+    hr = IDirect3DDevice8_GetPixelShader(pDevice, &hTempHandle);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetPixelShader returned %s\n", DXGetErrorString8(hr));
+    ok(hTempHandle == 0, "Pixel Shader %d is set, expected shader %d\n", hTempHandle, 0);
+
+    /* What happens if a non-bound shader is deleted? */
+    hr = IDirect3DDevice8_CreateVertexShader(pDevice, dwVertexDecl, NULL, &hVertexShader, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice8_CreateVertexShader returned %s\n", DXGetErrorString8(hr));
+    hr = IDirect3DDevice8_CreateVertexShader(pDevice, dwVertexDecl, NULL, &hVertexShader2, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice8_CreateVertexShader returned %s\n", DXGetErrorString8(hr));
+
+    hr = IDirect3DDevice8_SetVertexShader(pDevice, hVertexShader);
+    ok(hr == D3D_OK, "IDirect3DDevice8_SetVertexShader returned %s\n", DXGetErrorString8(hr));
+    hr = IDirect3DDevice8_DeleteVertexShader(pDevice, hVertexShader2);
+    ok(hr == D3D_OK, "IDirect3DDevice8_DeleteVertexShader returned %s\n", DXGetErrorString8(hr));
+    hr = IDirect3DDevice8_GetVertexShader(pDevice, &hTempHandle);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetVertexShader returned %s\n", DXGetErrorString8(hr));
+    ok(hTempHandle == hVertexShader, "Vertex Shader %d is set, expected shader %d\n", hTempHandle, hVertexShader);
+    hr = IDirect3DDevice8_DeleteVertexShader(pDevice, hVertexShader);
+    ok(hr == D3D_OK, "IDirect3DDevice8_DeleteVertexShader returned %s\n", DXGetErrorString8(hr));
+
+    /* Now for pixel shaders */
+    hr = IDirect3DDevice8_CreatePixelShader(pDevice, simple_ps, &hPixelShader);
+    ok(hr == D3D_OK, "IDirect3DDevice8_CreatePixelShader returned %s\n", DXGetErrorString8(hr));
+    hr = IDirect3DDevice8_CreatePixelShader(pDevice, simple_ps, &hPixelShader2);
+    ok(hr == D3D_OK, "IDirect3DDevice8_CreatePixelShader returned %s\n", DXGetErrorString8(hr));
+
+    hr = IDirect3DDevice8_SetPixelShader(pDevice, hPixelShader);
+    ok(hr == D3D_OK, "IDirect3DDevice8_SetPixelShader returned %s\n", DXGetErrorString8(hr));
+    hr = IDirect3DDevice8_DeletePixelShader(pDevice, hPixelShader2);
+    ok(hr == D3D_OK, "IDirect3DDevice8_DeletePixelShader returned %s\n", DXGetErrorString8(hr));
+    hr = IDirect3DDevice8_GetPixelShader(pDevice, &hTempHandle);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetPixelShader returned %s\n", DXGetErrorString8(hr));
+    ok(hTempHandle == hPixelShader, "Pixel Shader %d is set, expected shader %d\n", hTempHandle, hPixelShader);
+    hr = IDirect3DDevice8_DeletePixelShader(pDevice, hPixelShader);
+    ok(hr == D3D_OK, "IDirect3DDevice8_DeletePixelShader returned %s\n", DXGetErrorString8(hr));
+
+cleanup:
+    if(pD3d) IDirect3D8_Release(pD3d);
+    if(pDevice) IDirect3D8_Release(pDevice);
+    if(hwnd) DestroyWindow(hwnd);
+}
+
+static void test_limits(void)
+{
+    HRESULT                      hr;
+    HWND                         hwnd               = NULL;
+    IDirect3D8                  *pD3d               = NULL;
+    IDirect3DDevice8            *pDevice            = NULL;
+    D3DPRESENT_PARAMETERS        d3dpp;
+    D3DDISPLAYMODE               d3ddm;
+    IDirect3DTexture8           *pTexture           = NULL;
+    int i;
+
+    pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
+    ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
+    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    ok(hwnd != NULL, "Failed to create window\n");
+    if (!pD3d || !hwnd) goto cleanup;
+
+    IDirect3D8_GetAdapterDisplayMode( pD3d, D3DADAPTER_DEFAULT, &d3ddm );
+    ZeroMemory( &d3dpp, sizeof(d3dpp) );
+    d3dpp.Windowed         = TRUE;
+    d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
+    d3dpp.BackBufferWidth  = 800;
+    d3dpp.BackBufferHeight  = 600;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+    d3dpp.EnableAutoDepthStencil = TRUE;
+    d3dpp.AutoDepthStencilFormat = D3DFMT_D16;
+
+    hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
+                                  D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
+    ok(hr == D3D_OK, "IDirect3D8_CreateDevice failed with %s\n", DXGetErrorString8(hr));
+    if(!pDevice) goto cleanup;
+
+    hr = IDirect3DDevice8_CreateTexture(pDevice, 16, 16, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &pTexture);
+    ok(hr == D3D_OK, "IDirect3DDevice8_CreateTexture failed with %s\n", DXGetErrorString8(hr));
+    if(!pTexture) goto cleanup;
+
+    /* There are 8 texture stages. We should be able to access all of them */
+    for(i = 0; i < 8; i++) {
+        hr = IDirect3DDevice8_SetTexture(pDevice, i, (IDirect3DBaseTexture8 *) pTexture);
+        ok(hr == D3D_OK, "IDirect3DDevice8_SetTexture for sampler %d failed with %s\n", i, DXGetErrorString8(hr));
+        hr = IDirect3DDevice8_SetTexture(pDevice, i, NULL);
+        ok(hr == D3D_OK, "IDirect3DDevice8_SetTexture for sampler %d failed with %s\n", i, DXGetErrorString8(hr));
+        hr = IDirect3DDevice8_SetTextureStageState(pDevice, i, D3DTSS_COLOROP, D3DTOP_ADD);
+        ok(hr == D3D_OK, "IDirect3DDevice8_SetTextureStageState for texture %d failed with %s\n", i, DXGetErrorString8(hr));
+    }
+
+    /* Investigations show that accessing higher textures stage states does not return an error either. Writing
+     * to too high texture stages(approximately texture 40) causes memory corruption in windows, so there is no
+     * bounds checking but how do I test that?
+     */
+
+cleanup:
+    if(pTexture) IDirect3DTexture8_Release(pTexture);
+    if(pD3d) IDirect3D8_Release(pD3d);
+    if(pDevice) IDirect3D8_Release(pDevice);
+    if(hwnd) DestroyWindow(hwnd);
+}
 
 START_TEST(device)
 {
     HMODULE d3d8_handle = LoadLibraryA( "d3d8.dll" );
+    if (!d3d8_handle)
+    {
+        skip("Could not load d3d8.dll\n");
+        return;
+    }
 
     pDirect3DCreate8 = (void *)GetProcAddress( d3d8_handle, "Direct3DCreate8" );
+    ok(pDirect3DCreate8 != NULL, "Failed to get address of Direct3DCreate8\n");
     if (pDirect3DCreate8)
     {
         test_display_modes();
@@ -774,5 +1073,8 @@ START_TEST(device)
         test_mipmap_levels();
         test_cursor();
         test_states();
+        test_scene();
+        test_shader();
+        test_limits();
     }
 }

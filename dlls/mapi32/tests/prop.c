@@ -1190,7 +1190,7 @@ static void test_IProp(void)
         pMAPIFreeBuffer(lpProps);
     }
 
-    /* Add (NULL) - Can't add NULL's */
+    /* Add (NULL) - Can't add NULLs */
     lpProbs = NULL;
     pvs[0].ulPropTag = PROP_TAG(PT_NULL,0x01);
     sc = IPropData_SetProps(lpIProp, 1, pvs, &lpProbs);
@@ -1198,7 +1198,7 @@ static void test_IProp(void)
        "SetProps(): Expected INVALID_PARAMETER, null, got 0x%08X,%p\n",
        sc, lpProbs);
 
-    /* Add (OBJECT) - Can't add OBJECTS's */
+    /* Add (OBJECT) - Can't add OBJECTs */
     lpProbs = NULL;
     pvs[0].ulPropTag = PROP_TAG(PT_OBJECT,0x01);
     sc = IPropData_SetProps(lpIProp, 1, pvs, &lpProbs);
@@ -1342,10 +1342,22 @@ static void test_IProp(void)
 
 START_TEST(prop)
 {
-    if(!InitFuncPtrs())
-        return;
+    SCODE ret;
 
-    pScInitMapiUtil(0);
+    if(!InitFuncPtrs())
+    {
+        skip("Needed functions are not available\n");
+        return;
+    }
+
+    SetLastError(0xdeadbeef);
+    ret = pScInitMapiUtil(0);
+    if ((ret != S_OK) && (GetLastError() == ERROR_PROC_NOT_FOUND))
+    {
+        skip("ScInitMapiUtil is not implemented\n");
+        FreeLibrary(hMapi32);
+        return;
+    }
 
     test_PropCopyMore();
     test_UlPropSize();

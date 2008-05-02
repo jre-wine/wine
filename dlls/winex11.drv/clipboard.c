@@ -77,7 +77,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "wine/wingdi16.h"
 #include "x11drv.h"
 #include "wine/debug.h"
@@ -287,7 +286,6 @@ static WINE_CLIPFORMAT ClipFormats[]  =
 static const WCHAR wszRichTextFormat[] = {'R','i','c','h',' ','T','e','x','t',' ','F','o','r','m','a','t',0};
 static const WCHAR wszGIF[] = {'G','I','F',0};
 static const WCHAR wszHTMLFormat[] = {'H','T','M','L',' ','F','o','r','m','a','t',0};
-static const WCHAR wszRICHHTMLFormat[] = {'H','T','M','L',' ','F','o','r','m','a','t',0};
 static const struct
 {
     LPCWSTR lpszFormat;
@@ -1026,7 +1024,7 @@ static BOOL X11DRV_CLIPBOARD_RenderSynthesizedText(UINT wFormatID)
  *
  * Renders synthesized DIB
  */
-static BOOL X11DRV_CLIPBOARD_RenderSynthesizedDIB()
+static BOOL X11DRV_CLIPBOARD_RenderSynthesizedDIB(void)
 {
     BOOL bret = FALSE;
     LPWINE_CLIPDATA lpSource = NULL;
@@ -1068,7 +1066,7 @@ static BOOL X11DRV_CLIPBOARD_RenderSynthesizedDIB()
  *
  * Renders synthesized bitmap
  */
-static BOOL X11DRV_CLIPBOARD_RenderSynthesizedBitmap()
+static BOOL X11DRV_CLIPBOARD_RenderSynthesizedBitmap(void)
 {
     BOOL bret = FALSE;
     LPWINE_CLIPDATA lpSource = NULL;

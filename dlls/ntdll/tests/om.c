@@ -45,7 +45,7 @@ static NTSTATUS (WINAPI *pNtOpenSymbolicLinkObject)(PHANDLE, ACCESS_MASK, POBJEC
 static NTSTATUS (WINAPI *pNtCreateSymbolicLinkObject)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PUNICODE_STRING);
 
 
-void test_case_sensitive (void)
+static void test_case_sensitive (void)
 {
     static const WCHAR buffer1[] = {'\\','B','a','s','e','N','a','m','e','d','O','b','j','e','c','t','s','\\','t','e','s','t',0};
     static const WCHAR buffer2[] = {'\\','B','a','s','e','N','a','m','e','d','O','b','j','e','c','t','s','\\','T','e','s','t',0};
@@ -96,7 +96,7 @@ void test_case_sensitive (void)
     pNtClose(Event);
 }
 
-void test_namespace_pipe(void)
+static void test_namespace_pipe(void)
 {
     static const WCHAR buffer1[] = {'\\','?','?','\\','P','I','P','E','\\','t','e','s','t','\\','p','i','p','e',0};
     static const WCHAR buffer2[] = {'\\','?','?','\\','P','I','P','E','\\','T','E','S','T','\\','P','I','P','E',0};
@@ -171,7 +171,7 @@ void test_namespace_pipe(void)
     ok(status == STATUS_SUCCESS, "Failed to open Directory(%08x)\n", status);
 #define DIR_TEST_CREATE_OPEN_SUCCESS(h,n) \
     pRtlCreateUnicodeStringFromAsciiz(&str, n);\
-    DIR_TEST_CREATE_SUCCESS(h) pNtClose(h); DIR_TEST_OPEN_SUCCESS(h) pNtClose(h); \
+    DIR_TEST_CREATE_SUCCESS(&h) pNtClose(h); DIR_TEST_OPEN_SUCCESS(&h) pNtClose(h); \
     pRtlFreeUnicodeString(&str);
 
 static void test_name_collisions(void)
@@ -278,7 +278,7 @@ static void test_name_collisions(void)
     pNtClose(dir);
 }
 
-void test_directory(void)
+static void test_directory(void)
 {
     NTSTATUS status;
     UNICODE_STRING str;
@@ -352,7 +352,7 @@ void test_directory(void)
     DIR_TEST_OPEN_FAILURE(&h, STATUS_OBJECT_NAME_INVALID)
 
     InitializeObjectAttributes(&attr, &str, 0, dir, NULL);
-    DIR_TEST_CREATE_OPEN_SUCCESS(&h, "")
+    DIR_TEST_CREATE_OPEN_SUCCESS(h, "")
     DIR_TEST_CREATE_OPEN_FAILURE(&h, "\\", STATUS_OBJECT_PATH_SYNTAX_BAD)
     DIR_TEST_CREATE_OPEN_FAILURE(&h, "\\om.c-test", STATUS_OBJECT_PATH_SYNTAX_BAD)
     DIR_TEST_CREATE_OPEN_FAILURE(&h, "\\om.c-test\\", STATUS_OBJECT_PATH_SYNTAX_BAD)
@@ -465,7 +465,7 @@ void test_directory(void)
     status = pNtOpenSymbolicLinkObject(h, SYMBOLIC_LINK_QUERY, &attr); \
     ok(status == STATUS_SUCCESS, "Failed to open SymbolicLink(%08x)\n", status);
 
-void test_symboliclink(void)
+static void test_symboliclink(void)
 {
     NTSTATUS status;
     UNICODE_STRING str, target;
@@ -482,6 +482,13 @@ void test_symboliclink(void)
     status = pNtOpenSymbolicLinkObject(&h, SYMBOLIC_LINK_QUERY, NULL);
     ok(status == STATUS_INVALID_PARAMETER,
         "NtOpenSymbolicLinkObject should have failed with STATUS_INVALID_PARAMETER got(%08x)\n", status);
+
+    /* No attributes */
+    pRtlCreateUnicodeStringFromAsciiz(&target, "\\DosDevices");
+    status = pNtCreateSymbolicLinkObject(&h, SYMBOLIC_LINK_QUERY, NULL, &target);
+    ok(status == STATUS_SUCCESS, "NtCreateSymbolicLinkObject failed(%08x)\n", status);
+    pRtlFreeUnicodeString(&target);
+    pNtClose(h);
 
     InitializeObjectAttributes(&attr, NULL, 0, 0, NULL);
     SYMLNK_TEST_CREATE_FAILURE(&link, STATUS_INVALID_PARAMETER)
@@ -534,29 +541,32 @@ void test_symboliclink(void)
 START_TEST(om)
 {
     HMODULE hntdll = GetModuleHandleA("ntdll.dll");
-    if (hntdll)
+    if (!hntdll)
     {
-        pRtlCreateUnicodeStringFromAsciiz = (void *)GetProcAddress(hntdll, "RtlCreateUnicodeStringFromAsciiz");
-        pRtlFreeUnicodeString   = (void *)GetProcAddress(hntdll, "RtlFreeUnicodeString");
-        pNtCreateEvent          = (void *)GetProcAddress(hntdll, "NtCreateEvent");
-        pNtCreateMutant         = (void *)GetProcAddress(hntdll, "NtCreateMutant");
-        pNtOpenMutant           = (void *)GetProcAddress(hntdll, "NtOpenMutant");
-        pNtOpenFile             = (void *)GetProcAddress(hntdll, "NtOpenFile");
-        pNtClose                = (void *)GetProcAddress(hntdll, "NtClose");
-        pRtlInitUnicodeString   = (void *)GetProcAddress(hntdll, "RtlInitUnicodeString");
-        pNtCreateNamedPipeFile  = (void *)GetProcAddress(hntdll, "NtCreateNamedPipeFile");
-        pNtOpenDirectoryObject  = (void *)GetProcAddress(hntdll, "NtOpenDirectoryObject");
-        pNtCreateDirectoryObject= (void *)GetProcAddress(hntdll, "NtCreateDirectoryObject");
-        pNtOpenSymbolicLinkObject = (void *)GetProcAddress(hntdll, "NtOpenSymbolicLinkObject");
-        pNtCreateSymbolicLinkObject = (void *)GetProcAddress(hntdll, "NtCreateSymbolicLinkObject");
-        pNtCreateSemaphore      =  (void *)GetProcAddress(hntdll, "NtCreateSemaphore");
-        pNtCreateTimer          =  (void *)GetProcAddress(hntdll, "NtCreateTimer");
-        pNtCreateSection        =  (void *)GetProcAddress(hntdll, "NtCreateSection");
-
-        test_case_sensitive();
-        test_namespace_pipe();
-        test_name_collisions();
-        test_directory();
-        test_symboliclink();
+        skip("not running on NT, skipping test\n");
+        return;
     }
+
+    pRtlCreateUnicodeStringFromAsciiz = (void *)GetProcAddress(hntdll, "RtlCreateUnicodeStringFromAsciiz");
+    pRtlFreeUnicodeString   = (void *)GetProcAddress(hntdll, "RtlFreeUnicodeString");
+    pNtCreateEvent          = (void *)GetProcAddress(hntdll, "NtCreateEvent");
+    pNtCreateMutant         = (void *)GetProcAddress(hntdll, "NtCreateMutant");
+    pNtOpenMutant           = (void *)GetProcAddress(hntdll, "NtOpenMutant");
+    pNtOpenFile             = (void *)GetProcAddress(hntdll, "NtOpenFile");
+    pNtClose                = (void *)GetProcAddress(hntdll, "NtClose");
+    pRtlInitUnicodeString   = (void *)GetProcAddress(hntdll, "RtlInitUnicodeString");
+    pNtCreateNamedPipeFile  = (void *)GetProcAddress(hntdll, "NtCreateNamedPipeFile");
+    pNtOpenDirectoryObject  = (void *)GetProcAddress(hntdll, "NtOpenDirectoryObject");
+    pNtCreateDirectoryObject= (void *)GetProcAddress(hntdll, "NtCreateDirectoryObject");
+    pNtOpenSymbolicLinkObject = (void *)GetProcAddress(hntdll, "NtOpenSymbolicLinkObject");
+    pNtCreateSymbolicLinkObject = (void *)GetProcAddress(hntdll, "NtCreateSymbolicLinkObject");
+    pNtCreateSemaphore      =  (void *)GetProcAddress(hntdll, "NtCreateSemaphore");
+    pNtCreateTimer          =  (void *)GetProcAddress(hntdll, "NtCreateTimer");
+    pNtCreateSection        =  (void *)GetProcAddress(hntdll, "NtCreateSection");
+
+    test_case_sensitive();
+    test_namespace_pipe();
+    test_name_collisions();
+    test_directory();
+    test_symboliclink();
 }

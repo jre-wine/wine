@@ -24,7 +24,7 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
-#define GLINFO_LOCATION ((IWineD3DImpl *)(((IWineD3DDeviceImpl *)This->resource.wineD3DDevice)->wineD3D))->gl_info
+#define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
 
 /* *******************************************
    IWineD3DVolume IUnknown parts follow
@@ -94,7 +94,7 @@ static DWORD WINAPI IWineD3DVolumeImpl_GetPriority(IWineD3DVolume *iface) {
 }
 
 static void WINAPI IWineD3DVolumeImpl_PreLoad(IWineD3DVolume *iface) {
-    return IWineD3DResourceImpl_PreLoad((IWineD3DResource *)iface);
+    IWineD3DResourceImpl_PreLoad((IWineD3DResource *)iface);
 }
 
 static WINED3DRESOURCETYPE WINAPI IWineD3DVolumeImpl_GetType(IWineD3DVolume *iface) {
@@ -140,6 +140,10 @@ static HRESULT WINAPI IWineD3DVolumeImpl_GetDesc(IWineD3DVolume *iface, WINED3DV
 static HRESULT WINAPI IWineD3DVolumeImpl_LockBox(IWineD3DVolume *iface, WINED3DLOCKED_BOX* pLockedVolume, CONST WINED3DBOX* pBox, DWORD Flags) {
     IWineD3DVolumeImpl *This = (IWineD3DVolumeImpl *)iface;
     FIXME("(%p) : pBox=%p stub\n", This, pBox);
+
+    if(!This->resource.allocatedMemory) {
+        This->resource.allocatedMemory = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, This->resource.size);
+    }
 
     /* fixme: should we really lock as such? */
     TRACE("(%p) : box=%p, output pbox=%p, allMem=%p\n", This, pBox, pLockedVolume, This->resource.allocatedMemory);
@@ -258,9 +262,12 @@ static HRESULT WINAPI IWineD3DVolumeImpl_SetContainer(IWineD3DVolume *iface, IWi
     return WINED3D_OK;
 }
 
-static HRESULT WINAPI IWineD3DVolumeImpl_LoadTexture(IWineD3DVolume *iface, GLenum gl_level) {
+static HRESULT WINAPI IWineD3DVolumeImpl_LoadTexture(IWineD3DVolume *iface, int gl_level, BOOL srgb_mode) {
     IWineD3DVolumeImpl *This     = (IWineD3DVolumeImpl *)iface;
-    const PixelFormatDesc *formatEntry = getFormatDescEntry(This->resource.format);
+    WINED3DFORMAT format = This->resource.format;
+    const PixelFormatDesc *formatEntry = getFormatDescEntry(format);
+
+    TRACE("(%p) : level %u, format %s (0x%08x)\n", This, gl_level, debug_d3dformat(format), format);
 
     if(GL_SUPPORT(EXT_TEXTURE3D)) {
         TRACE("Calling glTexImage3D %x level=%d, intfmt=%x, w=%d, h=%d,d=%d, 0=%d, glFmt=%x, glType=%x, Mem=%p\n",
@@ -287,7 +294,11 @@ static HRESULT WINAPI IWineD3DVolumeImpl_LoadTexture(IWineD3DVolume *iface, GLen
         checkGLcall("glTexImage3D");
     } else
         WARN("This OpenGL implementation doesn't support 3D textures\n");
-    
+
+    /* When adding code releasing This->resource.allocatedMemory to save data keep in mind that
+     * GL_UNPACK_CLIENT_STORAGE_APPLE is enabled by default if supported(GL_APPLE_client_storage).
+     * Thus do not release This->resource.allocatedMemory if GL_APPLE_client_storage is supported.
+     */
     return WINED3D_OK;
 
 }

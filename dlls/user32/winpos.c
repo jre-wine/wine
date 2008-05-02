@@ -40,6 +40,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 
+#define SWP_AGG_NOGEOMETRYCHANGE \
+    (SWP_NOSIZE | SWP_NOCLIENTSIZE | SWP_NOZORDER)
 #define SWP_AGG_NOPOSCHANGE \
     (SWP_NOSIZE | SWP_NOMOVE | SWP_NOCLIENTSIZE | SWP_NOCLIENTMOVE | SWP_NOZORDER)
 #define SWP_AGG_STATUSFLAGS \
@@ -250,6 +252,7 @@ int WINAPI SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL bRedraw )
         SERVER_START_REQ( set_window_region )
         {
             req->window = hwnd;
+            req->redraw = (bRedraw != 0);
             if (data->rdh.nCount)
                 wine_server_add_data( req, data->Buffer, data->rdh.nCount * sizeof(RECT) );
             else
@@ -263,6 +266,7 @@ int WINAPI SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL bRedraw )
         SERVER_START_REQ( set_window_region )
         {
             req->window = hwnd;
+            req->redraw = (bRedraw != 0);
             ret = !wine_server_call_err( req );
         }
         SERVER_END_REQ;
@@ -428,6 +432,14 @@ HWND WINAPI WindowFromPoint( POINT pt )
 HWND WINAPI ChildWindowFromPoint( HWND hwndParent, POINT pt )
 {
     return ChildWindowFromPointEx( hwndParent, pt, CWP_ALL );
+}
+
+/*******************************************************************
+ *		RealChildWindowFromPoint (USER32.@)
+ */
+HWND WINAPI RealChildWindowFromPoint( HWND hwndParent, POINT pt )
+{
+    return ChildWindowFromPointEx( hwndParent, pt, CWP_SKIPTRANSPARENT );
 }
 
 /*******************************************************************
@@ -1592,7 +1604,9 @@ BOOL USER_SetWindowPos( WINDOWPOS * winpos )
                             &newWindowRect, &newClientRect, orig_flags, valid_rects ))
         return FALSE;
 
-    if (!(orig_flags & SWP_SHOWWINDOW))
+    /* Windows doesn't redraw a window if it is being just moved */
+    if (!(orig_flags & SWP_SHOWWINDOW) &&
+        (winpos->flags & SWP_AGG_STATUSFLAGS) != SWP_AGG_NOGEOMETRYCHANGE)
     {
         UINT rdw_flags = RDW_FRAME | RDW_ERASE;
         if ( !(orig_flags & SWP_DEFERERASE) ) rdw_flags |= RDW_ERASENOW;

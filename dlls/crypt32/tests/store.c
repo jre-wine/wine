@@ -1230,34 +1230,6 @@ static void testFileNameStore(void)
     checkFileStoreFailure(filename, 0,
      CERT_FILE_STORE_COMMIT_ENABLE_FLAG | CERT_STORE_READONLY_FLAG,
      E_INVALIDARG);
-    /* Without an encoding type, these all fail */
-    checkFileStoreFailure(filename, 0, 0, ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, 0, CERT_STORE_OPEN_EXISTING_FLAG,
-     ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, 0, CERT_STORE_CREATE_NEW_FLAG,
-     ERROR_FILE_NOT_FOUND);
-    /* Without a message encoding type, these still fail */
-    checkFileStoreFailure(filename, X509_ASN_ENCODING, 0, ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, X509_ASN_ENCODING,
-     CERT_STORE_OPEN_EXISTING_FLAG, ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, X509_ASN_ENCODING,
-     CERT_STORE_CREATE_NEW_FLAG, ERROR_FILE_NOT_FOUND);
-    /* Without a cert encoding type, they still fail */
-    checkFileStoreFailure(filename, PKCS_7_ASN_ENCODING, 0,
-     ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, PKCS_7_ASN_ENCODING,
-     CERT_STORE_OPEN_EXISTING_FLAG, ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, PKCS_7_ASN_ENCODING,
-     CERT_STORE_CREATE_NEW_FLAG, ERROR_FILE_NOT_FOUND);
-    /* With both a message and cert encoding type, but without commit enabled,
-     * they still fail
-     */
-    checkFileStoreFailure(filename, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0,
-     ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
-     CERT_STORE_OPEN_EXISTING_FLAG, ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
-     CERT_STORE_CREATE_NEW_FLAG, ERROR_FILE_NOT_FOUND);
 
     /* In all of the following tests, the encoding type seems to be ignored */
     if (initFileFromData(filename, bigCert, sizeof(bigCert)))
@@ -1377,6 +1349,126 @@ static void testCertOpenSystemStore(void)
     store = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
      CERT_SYSTEM_STORE_CURRENT_USER | CERT_STORE_DELETE_FLAG, BogusW);
     RegDeleteKeyW(HKEY_CURRENT_USER, BogusPathW);
+}
+
+struct EnumSystemStoreInfo
+{
+    BOOL  goOn;
+    DWORD storeCount;
+};
+
+static BOOL CALLBACK enumSystemStoreCB(const void *systemStore, DWORD dwFlags,
+ PCERT_SYSTEM_STORE_INFO pStoreInfo, void *pvReserved, void *pvArg)
+{
+    struct EnumSystemStoreInfo *info = (struct EnumSystemStoreInfo *)pvArg;
+
+    info->storeCount++;
+    return info->goOn;
+}
+
+static void testCertEnumSystemStore(void)
+{
+    BOOL ret;
+    struct EnumSystemStoreInfo info = { FALSE, 0 };
+
+    SetLastError(0xdeadbeef);
+    ret = CertEnumSystemStore(0, NULL, NULL, NULL);
+    ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
+     "Expected ERROR_FILE_NOT_FOUND, got %08x\n", GetLastError());
+    /* Crashes
+    ret = CertEnumSystemStore(CERT_SYSTEM_STORE_LOCAL_MACHINE, NULL, NULL,
+     NULL);
+     */
+
+    SetLastError(0xdeadbeef);
+    ret = CertEnumSystemStore(CERT_SYSTEM_STORE_LOCAL_MACHINE, NULL, &info,
+     enumSystemStoreCB);
+    /* Callback returning FALSE stops enumeration */
+    ok(!ret, "Expected CertEnumSystemStore to stop\n");
+    ok(info.storeCount == 0 || info.storeCount == 1,
+     "Expected 0 or 1 stores\n");
+
+    info.goOn = TRUE;
+    info.storeCount = 0;
+    ret = CertEnumSystemStore(CERT_SYSTEM_STORE_LOCAL_MACHINE, NULL, &info,
+     enumSystemStoreCB);
+    ok(ret, "CertEnumSystemStore failed: %08x\n", GetLastError());
+    /* There should always be at least My, Root, and CA stores */
+    ok(info.storeCount == 0 || info.storeCount >= 3,
+     "Expected at least 3 stores\n");
+}
+
+static void testStoreProperty(void)
+{
+    HCERTSTORE store;
+    BOOL ret;
+    DWORD propID, size = 0, state;
+    CRYPT_DATA_BLOB blob;
+
+    /* Crash
+    ret = CertGetStoreProperty(NULL, 0, NULL, NULL);
+    ret = CertGetStoreProperty(NULL, 0, NULL, &size);
+    ret = CertGetStoreProperty(store, 0, NULL, NULL);
+     */
+
+    store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0,
+     CERT_STORE_CREATE_NEW_FLAG, NULL);
+    /* Check a missing prop ID */
+    SetLastError(0xdeadbeef);
+    ret = CertGetStoreProperty(store, 0, NULL, &size);
+    ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
+     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+    /* Contrary to MSDN, CERT_ACCESS_STATE_PROP_ID is supported for stores.. */
+    size = sizeof(state);
+    ret = CertGetStoreProperty(store, CERT_ACCESS_STATE_PROP_ID, &state, &size);
+    ok(ret, "CertGetStoreProperty failed for CERT_ACCESS_STATE_PROP_ID: %08x\n",
+     GetLastError());
+    ok(!state, "Expected a non-persisted store\n");
+    /* and CERT_STORE_LOCALIZED_NAME_PROP_ID isn't supported by default. */
+    size = 0;
+    ret = CertGetStoreProperty(store, CERT_STORE_LOCALIZED_NAME_PROP_ID, NULL,
+     &size);
+    ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
+     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+    /* Delete an arbitrary property on a store */
+    ret = CertSetStoreProperty(store, CERT_FIRST_USER_PROP_ID, 0, NULL);
+    ok(ret, "CertSetStoreProperty failed: %08x\n", GetLastError());
+    /* Set an arbitrary property on a store */
+    blob.pbData = (LPBYTE)&state;
+    blob.cbData = sizeof(state);
+    ret = CertSetStoreProperty(store, CERT_FIRST_USER_PROP_ID, 0, &blob);
+    ok(ret, "CertSetStoreProperty failed: %08x\n", GetLastError());
+    /* Get an arbitrary property that's been set */
+    ret = CertGetStoreProperty(store, CERT_FIRST_USER_PROP_ID, NULL, &size);
+    ok(ret, "CertGetStoreProperty failed: %08x\n", GetLastError());
+    ok(size == sizeof(state), "Unexpected data size %d\n", size);
+    ret = CertGetStoreProperty(store, CERT_FIRST_USER_PROP_ID, &propID, &size);
+    ok(ret, "CertGetStoreProperty failed: %08x\n", GetLastError());
+    ok(propID == state, "CertGetStoreProperty got the wrong value\n");
+    /* Delete it again */
+    ret = CertSetStoreProperty(store, CERT_FIRST_USER_PROP_ID, 0, NULL);
+    ok(ret, "CertSetStoreProperty failed: %08x\n", GetLastError());
+    /* And check that it's missing */
+    SetLastError(0xdeadbeef);
+    ret = CertGetStoreProperty(store, CERT_FIRST_USER_PROP_ID, NULL, &size);
+    ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
+     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+    CertCloseStore(store, 0);
+
+    /* Recheck on the My store.. */
+    store = CertOpenSystemStoreW(0, MyW);
+    size = sizeof(state);
+    ret = CertGetStoreProperty(store, CERT_ACCESS_STATE_PROP_ID, &state, &size);
+    ok(ret, "CertGetStoreProperty failed for CERT_ACCESS_STATE_PROP_ID: %08x\n",
+     GetLastError());
+    ok(state, "Expected a persisted store\n");
+    SetLastError(0xdeadbeef);
+    size = 0;
+    ret = CertGetStoreProperty(store, CERT_STORE_LOCALIZED_NAME_PROP_ID, NULL,
+     &size);
+    ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
+     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+    CertCloseStore(store, 0);
 }
 
 static void testAddSerialized(void)
@@ -1545,6 +1637,8 @@ START_TEST(store)
     testFileNameStore();
 
     testCertOpenSystemStore();
+    testCertEnumSystemStore();
+    testStoreProperty();
 
     testAddSerialized();
 }

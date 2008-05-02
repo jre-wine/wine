@@ -30,7 +30,6 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "psdrv.h"
-#include "winspool.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
@@ -314,7 +313,7 @@ INT PSDRV_WriteHeader( PSDRV_PDEVICE *physDev, LPCSTR title )
     int win_duplex;
     int llx, lly, urx, ury;
 
-    TRACE("'%s'\n", debugstr_a(title));
+    TRACE("%s\n", debugstr_a(title));
 
     escaped_title = escape_title(title);
     buf = HeapAlloc( PSDRV_Heap, 0, sizeof(psheader) +
@@ -365,7 +364,7 @@ INT PSDRV_WriteHeader( PSDRV_PDEVICE *physDev, LPCSTR title )
 	}
     }
 
-    for(page = physDev->pi->ppd->PageSizes; page; page = page->next) {
+    LIST_FOR_EACH_ENTRY(page, &physDev->pi->ppd->PageSizes, PAGESIZE, entry) {
         if(page->WinPage == physDev->Devmode->dmPublic.u1.s1.dmPaperSize) {
 	    if(page->InvocationString) {
 	        PSDRV_WriteFeature(physDev->job.hJob, "*PageSize", page->Name,

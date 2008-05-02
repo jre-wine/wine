@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define COBJMACROS
+
 #include "config.h"
 
 #include <stdarg.h>
@@ -31,6 +33,7 @@
 
 #include "ole2.h"
 #include "olectl.h"
+#include "oleauto.h"
 
 #include "wine/debug.h"
 
@@ -588,22 +591,28 @@ static struct regsvr_coclass const coclass_list[] = {
  */
 /*
  * we should declare: (@see ole32/regsvr.c for examples)
- [-HKEY_CLASSES_ROOT\Interface\{000C101C-0000-0000-C000-000000000046}] 
- [-HKEY_CLASSES_ROOT\Interface\{000C101D-0000-0000-C000-000000000046}] 
- [-HKEY_CLASSES_ROOT\Interface\{000C1025-0000-0000-C000-000000000046}] 
- [-HKEY_CLASSES_ROOT\Interface\{000C1033-0000-0000-C000-000000000046}] 
- [-HKEY_CLASSES_ROOT\Interface\{000C1090-0000-0000-C000-000000000046}] 
- [-HKEY_CLASSES_ROOT\Interface\{000C1093-0000-0000-C000-000000000046}] 
- [-HKEY_CLASSES_ROOT\Interface\{000C1095-0000-0000-C000-000000000046}] 
- [-HKEY_CLASSES_ROOT\Interface\{000C109A-0000-0000-C000-000000000046}] 
- [-HKEY_CLASSES_ROOT\Interface\{000C109B-0000-0000-C000-000000000046}] 
- [-HKEY_CLASSES_ROOT\Interface\{000C109C-0000-0000-C000-000000000046}] 
- [-HKEY_CLASSES_ROOT\Interface\{000C109D-0000-0000-C000-000000000046}] 
- [-HKEY_CLASSES_ROOT\Interface\{000C109E-0000-0000-C000-000000000046}] 
+ [-HKEY_CLASSES_ROOT\Interface\{000C101D-0000-0000-C000-000000000046}]
+ [-HKEY_CLASSES_ROOT\Interface\{000C1025-0000-0000-C000-000000000046}]
+ [-HKEY_CLASSES_ROOT\Interface\{000C1033-0000-0000-C000-000000000046}]
+ [-HKEY_CLASSES_ROOT\Interface\{000C1090-0000-0000-C000-000000000046}]
+ [-HKEY_CLASSES_ROOT\Interface\{000C1093-0000-0000-C000-000000000046}]
+ [-HKEY_CLASSES_ROOT\Interface\{000C1095-0000-0000-C000-000000000046}]
+ [-HKEY_CLASSES_ROOT\Interface\{000C109A-0000-0000-C000-000000000046}]
+ [-HKEY_CLASSES_ROOT\Interface\{000C109B-0000-0000-C000-000000000046}]
+ [-HKEY_CLASSES_ROOT\Interface\{000C109C-0000-0000-C000-000000000046}]
+ [-HKEY_CLASSES_ROOT\Interface\{000C109D-0000-0000-C000-000000000046}]
+ [-HKEY_CLASSES_ROOT\Interface\{000C109E-0000-0000-C000-000000000046}]
  [-HKEY_CLASSES_ROOT\Interface\{000C109F-0000-0000-C000-000000000046}]
 */
+
 static struct regsvr_interface const interface_list[] = {
-    { NULL }			/* list terminator */
+    { &CLSID_IMsiServer,
+      "IMsiServer",
+      NULL,
+      18,
+      NULL,
+      NULL },
+    { NULL } /* list terminator */
 };
 
 static HRESULT register_msiexec(void)
@@ -644,6 +653,8 @@ static HRESULT register_msiexec(void)
  */
 HRESULT WINAPI DllRegisterServer(void)
 {
+    LPWSTR path = NULL;
+    ITypeLib *tl;
     HRESULT hr;
 
     TRACE("\n");
@@ -653,6 +664,16 @@ HRESULT WINAPI DllRegisterServer(void)
 	hr = register_interfaces(interface_list);
     if (SUCCEEDED(hr))
 	hr = register_msiexec();
+
+    tl = get_msi_typelib( &path );
+    if (tl)
+    {
+        hr = RegisterTypeLib( tl, path, NULL );
+        ITypeLib_Release( tl );
+    }
+    else
+        hr = E_FAIL;
+
     return hr;
 }
 

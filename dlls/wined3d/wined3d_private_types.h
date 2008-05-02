@@ -291,6 +291,9 @@ typedef enum _WINED3DSHADER_INSTRUCTION_OPCODE_TYPE {
 
 #define WINED3DSHADER_INSTRUCTION_PREDICATED (1 << 28)
 
+/* Undocumented opcode control to identify projective texture lookups in ps 2.0 and later */
+#define WINED3DSI_TEXLD_PROJECT 0x00010000
+
 /** Shader version tokens, and shader end tokens **/
 
 #define WINED3DPS_VERSION(major, minor) (0xFFFF0000 | ((major) << 8) | (minor))
@@ -299,5 +302,8 @@ typedef enum _WINED3DSHADER_INSTRUCTION_OPCODE_TYPE {
 #define WINED3DSHADER_VERSION_MINOR(version) (((version) >> 0) & 0xFF)
 #define WINED3DPS_END() 0x0000FFFF
 #define WINED3DVS_END() 0x0000FFFF
-  
+
+/* Multithreaded flag. Removed from the public header to signal that IWineD3D::CreateDevice ignores it */
+#define WINED3DCREATE_MULTITHREADED                 0x00000004
+
 #endif

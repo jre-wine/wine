@@ -113,33 +113,37 @@ BOOL WINAPI ArcTo( HDC hdc,
                      INT xstart, INT ystart,
                      INT xend,   INT yend )
 {
+    double width = fabs(right-left),
+        height = fabs(bottom-top),
+        xradius = width/2,
+        yradius = height/2,
+        xcenter = right > left ? left+xradius : right+xradius,
+        ycenter = bottom > top ? top+yradius : bottom+yradius,
+        angle;
     BOOL result;
     DC * dc = DC_GetDCUpdate( hdc );
     if(!dc) return FALSE;
 
-    if(dc->funcs->pArcTo)
-    {
+    if(PATH_IsPathOpen(dc->path))
+        result = PATH_Arc(dc,left,top,right,bottom,xstart,ystart,xend,yend,-1);
+    else if(dc->funcs->pArcTo)
         result = dc->funcs->pArcTo( dc->physDev, left, top, right, bottom,
 				  xstart, ystart, xend, yend );
-        GDI_ReleaseObj( hdc );
-        return result;
+    else /* We'll draw a line from the current position to the starting point of the arc, then draw the arc */
+    {
+        angle = atan2(((ystart-ycenter)/height),
+                      ((xstart-xcenter)/width));
+        LineTo(hdc, GDI_ROUND(xcenter+(cos(angle)*xradius)),
+               GDI_ROUND(ycenter+(sin(angle)*yradius)));
+        result = Arc(hdc, left, top, right, bottom, xstart, ystart, xend, yend);
+    }
+    if (result) {
+        angle = atan2(((yend-ycenter)/height),
+                      ((xend-xcenter)/width));
+        dc->CursPosX = GDI_ROUND(xcenter+(cos(angle)*xradius));
+        dc->CursPosY = GDI_ROUND(ycenter+(sin(angle)*yradius));
     }
     GDI_ReleaseObj( hdc );
-    /*
-     * Else emulate it.
-     * According to the documentation, a line is drawn from the current
-     * position to the starting point of the arc.
-     */
-    LineTo(hdc, xstart, ystart);
-    /*
-     * Then the arc is drawn.
-     */
-    result = Arc(hdc, left, top, right, bottom, xstart, ystart, xend, yend);
-    /*
-     * If no error occurred, the current position is moved to the ending
-     * point of the arc.
-     */
-    if (result) MoveToEx(hdc, xend, yend, NULL);
     return result;
 }
 
@@ -789,34 +793,26 @@ BOOL WINAPI AngleArc(HDC hdc, INT x, INT y, DWORD dwRadius, FLOAT eStartAngle, F
     dc = DC_GetDCUpdate( hdc );
     if(!dc) return FALSE;
 
-    if(dc->funcs->pAngleArc)
-    {
-        result = dc->funcs->pAngleArc( dc->physDev, x, y, dwRadius, eStartAngle, eSweepAngle );
+    /* Calculate the end point */
+    x2 = x + cos((eStartAngle+eSweepAngle)*M_PI/180) * dwRadius;
+    y2 = y - sin((eStartAngle+eSweepAngle)*M_PI/180) * dwRadius;
 
-        GDI_ReleaseObj( hdc );
-        return result;
+    if(!PATH_IsPathOpen(dc->path) && dc->funcs->pAngleArc)
+        result = dc->funcs->pAngleArc( dc->physDev, x, y, dwRadius, eStartAngle, eSweepAngle );
+    else { /* do it using ArcTo */
+        x1 = x + cos(eStartAngle*M_PI/180) * dwRadius;
+        y1 = y - sin(eStartAngle*M_PI/180) * dwRadius;
+
+        arcdir = SetArcDirection( hdc, eSweepAngle >= 0 ? AD_COUNTERCLOCKWISE : AD_CLOCKWISE);
+        result = ArcTo( hdc, x-dwRadius, y-dwRadius, x+dwRadius, y+dwRadius,
+                        x1, y1, x2, y2 );
+        SetArcDirection( hdc, arcdir );
+    }
+    if (result) {
+        dc->CursPosX = x2;
+        dc->CursPosY = y2;
     }
     GDI_ReleaseObj( hdc );
-
-    /* AngleArc always works counterclockwise */
-    arcdir = GetArcDirection( hdc );
-    SetArcDirection( hdc, AD_COUNTERCLOCKWISE );
-
-    x1 = x + cos(eStartAngle*M_PI/180) * dwRadius;
-    y1 = y - sin(eStartAngle*M_PI/180) * dwRadius;
-    x2 = x + cos((eStartAngle+eSweepAngle)*M_PI/180) * dwRadius;
-    y2 = x - sin((eStartAngle+eSweepAngle)*M_PI/180) * dwRadius;
-
-    LineTo( hdc, x1, y1 );
-    if( eSweepAngle >= 0 )
-        result = Arc( hdc, x-dwRadius, y-dwRadius, x+dwRadius, y+dwRadius,
-		      x1, y1, x2, y2 );
-    else
-	result = Arc( hdc, x-dwRadius, y-dwRadius, x+dwRadius, y+dwRadius,
-		      x2, y2, x1, y1 );
-
-    if( result ) MoveToEx( hdc, x2, y2, NULL );
-    SetArcDirection( hdc, arcdir );
     return result;
 }
 

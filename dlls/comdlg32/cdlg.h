@@ -185,7 +185,7 @@ extern BOOL  WINAPI GetFileDialog95W(LPOPENFILENAMEW ofn,UINT iDlgType);
  * Do NOT Export to other programs and dlls
  */
 
-BOOL CC_HookCallChk( LPCHOOSECOLORW lpcc );
+BOOL CC_HookCallChk( const CHOOSECOLORW *lpcc );
 int CC_MouseCheckResultWindow( HWND hDlg, LPARAM lParam );
 LRESULT CC_WMLButtonDown( HWND hDlg, WPARAM wParam, LPARAM lParam );
 LRESULT CC_WMLButtonUp( HWND hDlg, WPARAM wParam, LPARAM lParam );
@@ -193,7 +193,7 @@ LRESULT CC_WMCommand( HWND hDlg, WPARAM wParam, LPARAM lParam, WORD
 						notifyCode, HWND hwndCtl );
 LRESULT CC_WMMouseMove( HWND hDlg, LPARAM lParam );
 LRESULT CC_WMPaint( HWND hDlg, WPARAM wParam, LPARAM lParam );
-void CC_SwitchToFullSize( HWND hDlg, COLORREF result, LPRECT lprect );
+void CC_SwitchToFullSize( HWND hDlg, COLORREF result, LPCRECT lprect );
 void CC_PaintSelectedColor( HWND hDlg, COLORREF cr );
 int CC_RGBtoHSL(char c, int r, int g, int b);
 void CC_PaintCross( HWND hDlg, int x, int y);
@@ -202,7 +202,7 @@ int CC_CheckDigitsInEdit( HWND hwnd, int maxval );
 void CC_EditSetHSL( HWND hDlg, int h, int s, int l );
 int CC_HSLtoRGB(char c, int hue, int sat, int lum);
 void CC_EditSetRGB( HWND hDlg, COLORREF cr );
-void CC_PaintUserColorArray( HWND hDlg, int rows, int cols, COLORREF* lpcr );
+void CC_PaintUserColorArray( HWND hDlg, int rows, int cols, const COLORREF* lpcr );
 
 typedef struct
 {
@@ -213,10 +213,10 @@ typedef struct
 } CFn_ENUMSTRUCT, *LPCFn_ENUMSTRUCT;
 
 INT AddFontFamily(const ENUMLOGFONTEXW *lpElfex, const NEWTEXTMETRICEXW *lpNTM,
-                  UINT nFontType, LPCHOOSEFONTW lpcf, HWND hwnd,
+                  UINT nFontType, const CHOOSEFONTW *lpcf, HWND hwnd,
                   LPCFn_ENUMSTRUCT e);
 INT AddFontStyle(const ENUMLOGFONTEXW *lpElfex, const NEWTEXTMETRICEXW *metrics,
-                 UINT nFontType, LPCHOOSEFONTW lpcf, HWND hcmb2, HWND hcmb3,
+                 UINT nFontType, const CHOOSEFONTW *lpcf, HWND hcmb2, HWND hcmb3,
                  HWND hDlg, BOOL iswin16);
 void _dump_cf_flags(DWORD cflags);
 
@@ -227,6 +227,6 @@ LRESULT CFn_WMDrawItem(HWND hDlg, WPARAM wParam, LPARAM lParam);
 LRESULT CFn_WMCommand(HWND hDlg, WPARAM wParam, LPARAM lParam,
                       LPCHOOSEFONTW lpcf);
 LRESULT CFn_WMPaint(HWND hDlg, WPARAM wParam, LPARAM lParam,
-                      LPCHOOSEFONTW lpcf);
+                      const CHOOSEFONTW *lpcf);
 
 #endif /* _WINE_DLL_CDLG_H */

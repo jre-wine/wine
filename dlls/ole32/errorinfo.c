@@ -167,7 +167,7 @@ static inline ErrorInfoImpl *impl_from_ISupportErrorInfo( ISupportErrorInfo *ifa
 #define _ICreateErrorInfo_(This)	(ICreateErrorInfo*)&(This->lpvtcei)
 #define _ISupportErrorInfo_(This)	(ISupportErrorInfo*)&(This->lpvtsei)
 
-IErrorInfo * IErrorInfoImpl_Constructor(void)
+static IErrorInfo * IErrorInfoImpl_Constructor(void)
 {
 	ErrorInfoImpl * ei = HeapAlloc(GetProcessHeap(), 0, sizeof(ErrorInfoImpl));
 	if (ei)
@@ -465,8 +465,18 @@ static const ISupportErrorInfoVtbl ISupportErrorInfoImpl_VTable =
 
   ISupportErrorInfoImpl_InterfaceSupportsErrorInfo
 };
+
 /***********************************************************************
  *		CreateErrorInfo (OLE32.@)
+ *
+ * Creates an object used to set details for an error info object.
+ *
+ * PARAMS
+ *  pperrinfo [O]. Address where error info creation object will be stored.
+ *
+ * RETURNS
+ *  Success: S_OK.
+ *  Failure: HRESULT code.
  */
 HRESULT WINAPI CreateErrorInfo(ICreateErrorInfo **pperrinfo)
 {
@@ -483,13 +493,34 @@ HRESULT WINAPI CreateErrorInfo(ICreateErrorInfo **pperrinfo)
 
 /***********************************************************************
  *		GetErrorInfo (OLE32.@)
+ *
+ * Retrieves the error information object for the current thread.
+ *
+ * PARAMS
+ *  dwReserved [I]. Reserved. Must be zero.
+ *  pperrinfo  [O]. Address where error information object will be stored on return.
+ *
+ * RETURNS
+ *  Success: S_OK if an error information object was set for the current thread.
+ *           S_FALSE if otherwise.
+ *  Failure: E_INVALIDARG if dwReserved is not zero.
+ *
+ * NOTES
+ *  This function causes the current error info object for the thread to be
+ *  cleared if one was set beforehand.
  */
 HRESULT WINAPI GetErrorInfo(ULONG dwReserved, IErrorInfo **pperrinfo)
 {
 	TRACE("(%d, %p, %p)\n", dwReserved, pperrinfo, COM_CurrentInfo()->errorinfo);
 
+	if (dwReserved)
+	{
+		ERR("dwReserved (0x%x) != 0\n", dwReserved);
+		return E_INVALIDARG;
+	}
+
 	if(!pperrinfo) return E_INVALIDARG;
-        
+
 	if (!COM_CurrentInfo()->errorinfo)
 	{
 	   *pperrinfo = NULL;
@@ -505,13 +536,29 @@ HRESULT WINAPI GetErrorInfo(ULONG dwReserved, IErrorInfo **pperrinfo)
 
 /***********************************************************************
  *		SetErrorInfo (OLE32.@)
+ *
+ * Sets the error information object for the current thread.
+ *
+ * PARAMS
+ *  dwReserved [I] Reserved. Must be zero.
+ *  perrinfo   [I] Error info object.
+ *
+ * RETURNS
+ *  Success: S_OK.
+ *  Failure: E_INVALIDARG if dwReserved is not zero.
  */
 HRESULT WINAPI SetErrorInfo(ULONG dwReserved, IErrorInfo *perrinfo)
 {
 	IErrorInfo * pei;
 
 	TRACE("(%d, %p)\n", dwReserved, perrinfo);
-	
+
+	if (dwReserved)
+	{
+		ERR("dwReserved (0x%x) != 0\n", dwReserved);
+		return E_INVALIDARG;
+	}
+
 	/* release old errorinfo */
 	pei = COM_CurrentInfo()->errorinfo;
 	if (pei) IErrorInfo_Release(pei);

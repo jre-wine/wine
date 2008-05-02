@@ -38,56 +38,22 @@ LONG RPCSS_SrvThreadCount(void)
 
 BOOL RPCSS_UnBecomePipeServer(void)
 {
-  BOOL rslt = TRUE;
-  DWORD wait_result;
-  HANDLE master_mutex = RPCSS_GetMasterMutex();
-
   WINE_TRACE("\n");
 
-  wait_result = WaitForSingleObject(master_mutex, MASTER_MUTEX_TIMEOUT);
+  WINE_TRACE("shutting down pipe.\n");
+  server_live = FALSE;
+  if (!CloseHandle(np_server_end))
+    WINE_WARN("Failed to close named pipe.\n");
+  if (!CloseHandle(np_server_work_event))
+    WINE_WARN("Failed to close the event handle.\n");
+  DeleteCriticalSection(&np_server_cs);
 
-  switch (wait_result) {
-    case WAIT_ABANDONED: /* ? */
-    case WAIT_OBJECT_0:
-      /* we have ownership */
-      break;
-    case WAIT_FAILED:
-    case WAIT_TIMEOUT:
-    default: 
-      WINE_ERR("This should never happen: couldn't enter mutex.\n");
-      /* this is totally unacceptable.  no graceful out exists */
-      assert(FALSE);
-  }
-
-  /* now that we have the master mutex, we can safely stop
-     listening on the pipe.  Before we proceed, we do a final
-     check that it's OK to shut down to ensure atomicity */
-
-  if (!RPCSS_ReadyToDie())
-    rslt = FALSE;
-  else {
-    WINE_TRACE("shutting down pipe.\n");
-    server_live = FALSE;
-    if (!CloseHandle(np_server_end))
-      WINE_WARN("Failed to close named pipe.\n");
-    if (!CloseHandle(np_server_work_event))
-      WINE_WARN("Failed to close the event handle.\n");
-    DeleteCriticalSection(&np_server_cs);
-  }
-
-  if (!ReleaseMutex(master_mutex))
-    WINE_ERR("Unable to leave master mutex!??\n");
-
-  return rslt;
+  return TRUE;
 }
 
 static void RPCSS_ServerProcessRANMessage(PRPCSS_NP_MESSAGE pMsg, PRPCSS_NP_REPLY pReply)
 {
   WINE_TRACE("\n");
-  /* we do absolutely nothing, but on the server end,
-     the lazy timeout is reset as a result of our connection. */
-  RPCSS_SetMaxLazyTimeout(pMsg->message.ranmsg.timeout);
-  RPCSS_SetLazyTimeRemaining(RPCSS_GetMaxLazyTimeout());
   pReply->as_uint = 0;
 }
 
@@ -163,7 +129,7 @@ static void RPCSS_ServerProcessMessage(PRPCSS_NP_MESSAGE pMsg, PRPCSS_NP_REPLY p
 }
 
 /* each message gets its own thread.  this is it. */
-static VOID HandlerThread(LPVOID lpvPipeHandle)
+static DWORD WINAPI HandlerThread(LPVOID lpvPipeHandle)
 {
   RPCSS_NP_MESSAGE msg, vardata_payload_msg;
   char *c, *vardata = NULL;
@@ -247,9 +213,10 @@ static VOID HandlerThread(LPVOID lpvPipeHandle)
   DisconnectNamedPipe(mypipe);
   CloseHandle(mypipe);
   InterlockedDecrement(&srv_thread_count);
+  return 0;
 }
 
-static VOID NPMainWorkThread(LPVOID ignored)
+static DWORD WINAPI NPMainWorkThread(LPVOID ignored)
 {
   BOOL connected;
   HANDLE hthread, master_mutex = RPCSS_GetMasterMutex();
@@ -272,7 +239,7 @@ static VOID NPMainWorkThread(LPVOID ignored)
       hthread = CreateThread( 
         NULL,                      /* no security attribute */ 
         0,                         /* default stack size */
-        (LPTHREAD_START_ROUTINE) HandlerThread, 
+        HandlerThread,
         (LPVOID) np_server_end,    /* thread parameter */
         0,                         /* not suspended */
         &threadid                  /* returns thread ID  (not used) */
@@ -330,11 +297,12 @@ static VOID NPMainWorkThread(LPVOID ignored)
     }
   }
   WINE_TRACE("Server thread shutdown.\n");
+  return 0;
 }
 
 static HANDLE RPCSS_NPConnect(void)
 {
-  HANDLE the_pipe = NULL;
+  HANDLE the_pipe;
   DWORD dwmode, wait_result;
   HANDLE master_mutex = RPCSS_GetMasterMutex();
   
@@ -371,7 +339,6 @@ static HANDLE RPCSS_NPConnect(void)
     if (GetLastError() != ERROR_PIPE_BUSY) {
       WINE_WARN("Unable to open named pipe %s (assuming unavailable).\n", 
         wine_dbgstr_a(NAME_RPCSS_NAMED_PIPE));
-      the_pipe = NULL;
       break;
     }
 
@@ -390,7 +357,7 @@ static HANDLE RPCSS_NPConnect(void)
 
   }
 
-  if (the_pipe) {
+  if (the_pipe != INVALID_HANDLE_VALUE) {
     dwmode = PIPE_READMODE_MESSAGE;
     /* SetNamedPipeHandleState not implemented ATM, but still seems to work somehow. */
     if (! SetNamedPipeHandleState(the_pipe, &dwmode, NULL, NULL))
@@ -468,12 +435,13 @@ BOOL RPCSS_BecomePipeServer(void)
    *     ready to listen on it
    */
   
-  if ((client_handle = RPCSS_NPConnect()) != NULL) {
+  if ((client_handle = RPCSS_NPConnect()) != INVALID_HANDLE_VALUE) {
     msg.message_type = RPCSS_NP_MESSAGE_TYPEID_RANMSG;
-    msg.message.ranmsg.timeout = RPCSS_GetMaxLazyTimeout();
+    msg.message.ranmsg.timeout = 1000;
     msg.vardata_payload_size = 0;
     if (!RPCSS_SendReceiveNPMsg(client_handle, &msg, &reply))
       WINE_ERR("Something is amiss: RPC_SendReceive failed.\n");
+    CloseHandle(client_handle);
     rslt = FALSE;
   }
   if (rslt) {
@@ -514,7 +482,7 @@ BOOL RPCSS_BecomePipeServer(void)
     hthread = CreateThread( 
       NULL,                      /* no security attribute */ 
       0,                         /* default stack size */
-      (LPTHREAD_START_ROUTINE) NPMainWorkThread,
+      NPMainWorkThread,
       NULL,             /* thread parameter */
       0,                         /* not suspended */
       &threadid                  /* returns thread ID  (not used) */
@@ -541,12 +509,15 @@ BOOL RPCSS_BecomePipeServer(void)
   return rslt;
 }
 
-BOOL RPCSS_NPDoWork(void)
-{ 
-  DWORD waitresult = WaitForSingleObject(np_server_work_event, 1000);
+BOOL RPCSS_NPDoWork(HANDLE exit_handle)
+{
+  HANDLE handles[2];
+  DWORD waitresult;
+
+  handles[0] = np_server_work_event;
+  handles[1] = exit_handle;
+  waitresult = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
  
-  if (waitresult == WAIT_TIMEOUT)
-    return FALSE;
   if (waitresult == WAIT_OBJECT_0)
     return TRUE;
 

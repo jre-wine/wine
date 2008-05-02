@@ -86,7 +86,7 @@ static SecurePackageTable *packageTable = NULL;
 static SecureProviderTable *providerTable = NULL;
 
 static SecurityFunctionTableA securityFunctionTableA = {
-    SECURITY_SUPPORT_PROVIDER_INTERFACE_VERSION_2,
+    SECURITY_SUPPORT_PROVIDER_INTERFACE_VERSION,
     EnumerateSecurityPackagesA,
     QueryCredentialsAttributesA,
     AcquireCredentialsHandleA,
@@ -117,7 +117,7 @@ static SecurityFunctionTableA securityFunctionTableA = {
 };
 
 static SecurityFunctionTableW securityFunctionTableW = {
-    SECURITY_SUPPORT_PROVIDER_INTERFACE_VERSION_2,
+    SECURITY_SUPPORT_PROVIDER_INTERFACE_VERSION,
     EnumerateSecurityPackagesW,
     QueryCredentialsAttributesW,
     AcquireCredentialsHandleW,
@@ -389,7 +389,7 @@ static void _copyPackageInfo(PSecPkgInfoW info, const SecPkgInfoA *inInfoA,
 }
 
 SecureProvider *SECUR32_addProvider(const SecurityFunctionTableA *fnTableA,
- const SecurityFunctionTableW *fnTableW, const PWSTR moduleName)
+ const SecurityFunctionTableW *fnTableW, PCWSTR moduleName)
 {
     SecureProvider *ret;
 
@@ -543,6 +543,7 @@ static void SECUR32_initializeProviders(void)
 
     TRACE("\n");
     InitializeCriticalSection(&cs);
+    cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": cs");
     /* First load built-in providers */
     SECUR32_initSchannelSP();
     /* Do not load Negotiate yet. This breaks for some user on the wine-users
@@ -684,6 +685,7 @@ static void SECUR32_freeProviders(void)
     }
 
     LeaveCriticalSection(&cs);
+    cs.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&cs);
 }
 
@@ -943,7 +945,7 @@ BOOLEAN WINAPI GetComputerObjectNameW(
     if (ntStatus != STATUS_SUCCESS)
     {
         SetLastError(LsaNtStatusToWinError(ntStatus));
-        WARN("LsaOpenPolicy failed with NT status %x\n", GetLastError());
+        WARN("LsaOpenPolicy failed with NT status %u\n", GetLastError());
         return FALSE;
     }
 
@@ -953,7 +955,7 @@ BOOLEAN WINAPI GetComputerObjectNameW(
     if (ntStatus != STATUS_SUCCESS)
     {
         SetLastError(LsaNtStatusToWinError(ntStatus));
-        WARN("LsaQueryInformationPolicy failed with NT status %x\n",
+        WARN("LsaQueryInformationPolicy failed with NT status %u\n",
              GetLastError());
         LsaClose(policyHandle);
         return FALSE;

@@ -23,22 +23,25 @@ BEGIN
     POPUP "&Fichier"
     BEGIN
         MENUITEM "&Nouveau\tCtrl+N",        ID_FILE_NEW
-        MENUITEM "&Ouvrir\tCtrl+O",         ID_FILE_OPEN
-        MENUITEM "&Sauver\tCtrl+S",         ID_FILE_SAVE
+        MENUITEM "&Ouvrir...\tCtrl+O",      ID_FILE_OPEN
+        MENUITEM "&Enregistrer\tCtrl+S",    ID_FILE_SAVE
+        MENUITEM "Enregistrer &sous...",    ID_FILE_SAVEAS
         MENUITEM SEPARATOR
         MENUITEM "&Quitter",        ID_FILE_EXIT
     END
     POPUP "É&dition"
     BEGIN
-        MENUITEM "&Annuler\tCtrl+Z",               ID_EDIT_UNDO
-        MENUITEM "&Répéter\tCtrl+Y",               ID_EDIT_REDO
-        MENUITEM "&Sélectionner tout\tCtrl+A",         ID_EDIT_SELECTALL
+        MENUITEM "&Annuler\tCtrl+Z",                ID_EDIT_UNDO
+        MENUITEM "&Répéter\tCtrl+Y",                ID_EDIT_REDO
         MENUITEM SEPARATOR
-        MENUITEM "&Couper\tCtrl+X",                ID_EDIT_CUT
-        MENUITEM "Co&pier\tCtrl+C",               ID_EDIT_COPY
+        MENUITEM "&Couper\tCtrl+X",                 ID_EDIT_CUT
+        MENUITEM "Co&pier\tCtrl+C",                 ID_EDIT_COPY
+        MENUITEM "C&oller\tCtrl+V",                 ID_EDIT_PASTE
+        MENUITEM "&Effacer\tDel",                   ID_EDIT_CLEAR
+        MENUITEM "&Sélectionner tout\tCtrl+A",      ID_EDIT_SELECTALL
         MENUITEM SEPARATOR
         MENUITEM "Lecture-&seule",                  ID_EDIT_READONLY
-        MENUITEM "&Modifié",                   ID_EDIT_MODIFIED
+        MENUITEM "&Modifié",                        ID_EDIT_MODIFIED
         MENUITEM SEPARATOR
         POPUP "&Avancés"
         BEGIN
@@ -48,6 +51,12 @@ BEGIN
             MENUITEM "Format paragrap&he",          ID_EDIT_PARAFORMAT
             MENUITEM "&Recevoir texte",             ID_EDIT_GETTEXT
         END
+    END
+    POPUP "&Affichage"
+    BEGIN
+        MENUITEM "&Barre d'outils",        ID_TOGGLE_TOOLBAR
+        MENUITEM "&Barre de format",      ID_TOGGLE_FORMATBAR
+        MENUITEM "&Barre d'état",      ID_TOGGLE_STATUSBAR
     END
     POPUP "Forma&t"
     BEGIN

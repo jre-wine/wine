@@ -2,6 +2,8 @@
  * Activation contexts
  *
  * Copyright 2004 Jon Griffiths
+ * Copyright 2007 Eric Pouech
+ * Copyright 2007 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -44,6 +46,14 @@ WINE_DEFAULT_DEBUG_CHANNEL(actctx);
 #define ACTCTX_FAKE_HANDLE ((HANDLE) 0xf00baa)
 #define ACTCTX_FAKE_COOKIE ((ULONG_PTR) 0xf00bad)
 
+#define ACTCTX_MAGIC       0xC07E3E11
+
+struct actctx
+{
+    ULONG               magic;
+    LONG                ref_count;
+};
+
 /***********************************************************************
  * CreateActCtxA (KERNEL32.@)
  *
@@ -51,15 +61,74 @@ WINE_DEFAULT_DEBUG_CHANNEL(actctx);
  */
 HANDLE WINAPI CreateActCtxA(PCACTCTXA pActCtx)
 {
-  FIXME("%p %08x\n", pActCtx, pActCtx ? pActCtx->dwFlags : 0);
+    ACTCTXW     actw;
+    SIZE_T      len;
+    HANDLE      ret = INVALID_HANDLE_VALUE;
+    LPWSTR      src = NULL, assdir = NULL, resname = NULL, appname = NULL;
 
-  if (!pActCtx)
-    return INVALID_HANDLE_VALUE;
-  if (pActCtx->cbSize != sizeof *pActCtx)
-    return INVALID_HANDLE_VALUE;
-  if (pActCtx->dwFlags & ~ACTCTX_FLAGS_ALL)
-    return INVALID_HANDLE_VALUE;
-  return ACTCTX_FAKE_HANDLE;
+    TRACE("%p %08x\n", pActCtx, pActCtx ? pActCtx->dwFlags : 0);
+
+    if (!pActCtx || pActCtx->cbSize != sizeof(*pActCtx) ||
+        (pActCtx->dwFlags & ~ACTCTX_FLAGS_ALL))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    actw.cbSize = sizeof(actw);
+    actw.dwFlags = pActCtx->dwFlags;
+    if (pActCtx->lpSource)
+    {
+        len = MultiByteToWideChar(CP_ACP, 0, pActCtx->lpSource, -1, NULL, 0);
+        src = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        if (!src) return INVALID_HANDLE_VALUE;
+        MultiByteToWideChar(CP_ACP, 0, pActCtx->lpSource, -1, src, len);
+    }
+    actw.lpSource = src;
+
+    if (actw.dwFlags & ACTCTX_FLAG_PROCESSOR_ARCHITECTURE_VALID)
+        actw.wProcessorArchitecture = pActCtx->wProcessorArchitecture;
+    if (actw.dwFlags & ACTCTX_FLAG_LANGID_VALID)
+        actw.wLangId = pActCtx->wLangId;
+    if (actw.dwFlags & ACTCTX_FLAG_ASSEMBLY_DIRECTORY_VALID)
+    {
+        len = MultiByteToWideChar(CP_ACP, 0, pActCtx->lpAssemblyDirectory, -1, NULL, 0);
+        assdir = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        if (!assdir) goto done;
+        MultiByteToWideChar(CP_ACP, 0, pActCtx->lpAssemblyDirectory, -1, assdir, len);
+        actw.lpAssemblyDirectory = assdir;
+    }
+    if (actw.dwFlags & ACTCTX_FLAG_RESOURCE_NAME_VALID)
+    {
+        if ((ULONG_PTR)pActCtx->lpResourceName >> 16)
+        {
+            len = MultiByteToWideChar(CP_ACP, 0, pActCtx->lpResourceName, -1, NULL, 0);
+            resname = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+            if (!resname) goto done;
+            MultiByteToWideChar(CP_ACP, 0, pActCtx->lpResourceName, -1, resname, len);
+            actw.lpResourceName = resname;
+        }
+        else actw.lpResourceName = (LPWSTR)pActCtx->lpResourceName;
+    }
+    if (actw.dwFlags & ACTCTX_FLAG_APPLICATION_NAME_VALID)
+    {
+        len = MultiByteToWideChar(CP_ACP, 0, pActCtx->lpApplicationName, -1, NULL, 0);
+        appname = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        if (!appname) goto done;
+        MultiByteToWideChar(CP_ACP, 0, pActCtx->lpApplicationName, -1, appname, len);
+        actw.lpApplicationName = appname;
+    }
+    if (actw.dwFlags & ACTCTX_FLAG_HMODULE_VALID)
+        actw.hModule = pActCtx->hModule;
+
+    ret = CreateActCtxW(&actw);
+
+done:
+    HeapFree(GetProcessHeap(), 0, src);
+    HeapFree(GetProcessHeap(), 0, assdir);
+    HeapFree(GetProcessHeap(), 0, resname);
+    HeapFree(GetProcessHeap(), 0, appname);
+    return ret;
 }
 
 /***********************************************************************
@@ -69,15 +138,44 @@ HANDLE WINAPI CreateActCtxA(PCACTCTXA pActCtx)
  */
 HANDLE WINAPI CreateActCtxW(PCACTCTXW pActCtx)
 {
-  FIXME("%p %08x\n", pActCtx, pActCtx ? pActCtx->dwFlags : 0);
+    struct actctx*      actctx;
+    DWORD               ret = ERROR_SUCCESS;
 
-  if (!pActCtx)
+    TRACE("%p %08x\n", pActCtx, pActCtx ? pActCtx->dwFlags : 0);
+
+    if (!pActCtx || pActCtx->cbSize != sizeof(*pActCtx) ||
+        (pActCtx->dwFlags & ~ACTCTX_FLAGS_ALL))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return INVALID_HANDLE_VALUE;
+    }
+    actctx = HeapAlloc(GetProcessHeap(), 0, sizeof(*actctx));
+    if (!actctx) return INVALID_HANDLE_VALUE;
+
+    actctx->magic = ACTCTX_MAGIC;
+    actctx->ref_count = 1;
+
+    if (ret == ERROR_SUCCESS)
+    {
+        return (HANDLE)actctx;
+    }
+
+    ReleaseActCtx((HANDLE)actctx);
+    SetLastError(ret);
     return INVALID_HANDLE_VALUE;
-  if (pActCtx->cbSize != sizeof *pActCtx)
-    return INVALID_HANDLE_VALUE;
-  if (pActCtx->dwFlags & ~ACTCTX_FLAGS_ALL)
-    return INVALID_HANDLE_VALUE;
-  return ACTCTX_FAKE_HANDLE;
+}
+
+static struct actctx* check_actctx(HANDLE h)
+{
+    struct actctx*      actctx = (struct actctx*)h;
+
+    switch (actctx->magic)
+    {
+    case ACTCTX_MAGIC: return actctx;
+    default:
+        SetLastError(ERROR_INVALID_HANDLE);
+        return NULL;
+    }
 }
 
 /***********************************************************************
@@ -87,7 +185,16 @@ HANDLE WINAPI CreateActCtxW(PCACTCTXW pActCtx)
  */
 BOOL WINAPI ActivateActCtx(HANDLE hActCtx, ULONG_PTR *ulCookie)
 {
-  FIXME("%p %p\n", hActCtx, ulCookie );
+  static BOOL reported = FALSE;
+
+  if (reported)
+    TRACE("%p %p\n", hActCtx, ulCookie);
+  else
+  {
+    FIXME("%p %p\n", hActCtx, ulCookie);
+    reported = TRUE;
+  }
+
   if (ulCookie)
     *ulCookie = ACTCTX_FAKE_COOKIE;
   return TRUE;
@@ -100,7 +207,16 @@ BOOL WINAPI ActivateActCtx(HANDLE hActCtx, ULONG_PTR *ulCookie)
  */
 BOOL WINAPI DeactivateActCtx(DWORD dwFlags, ULONG_PTR ulCookie)
 {
-  FIXME("%08x %08lx\n", dwFlags, ulCookie);
+  static BOOL reported = FALSE;
+
+  if (reported)
+    TRACE("%08x %08lx\n", dwFlags, ulCookie);
+  else
+  {
+    FIXME("%08x %08lx\n", dwFlags, ulCookie);
+    reported = TRUE;
+  }
+
   if (ulCookie != ACTCTX_FAKE_COOKIE)
     return FALSE;
   return TRUE;
@@ -125,7 +241,12 @@ BOOL WINAPI GetCurrentActCtx(HANDLE* phActCtx)
  */
 void WINAPI AddRefActCtx(HANDLE hActCtx)
 {
-  FIXME("%p\n", hActCtx);
+    struct actctx*      actctx;
+
+    TRACE("%p\n", hActCtx);
+
+    if ((actctx = check_actctx(hActCtx)))
+        InterlockedIncrement( &actctx->ref_count );
 }
 
 /***********************************************************************
@@ -135,7 +256,18 @@ void WINAPI AddRefActCtx(HANDLE hActCtx)
  */
 void WINAPI ReleaseActCtx(HANDLE hActCtx)
 {
-  FIXME("%p\n", hActCtx);
+    struct actctx*      actctx;
+
+    TRACE("%p\n", hActCtx);
+
+    if ((actctx = check_actctx(hActCtx)))
+    {
+        if (!InterlockedDecrement( &actctx->ref_count ))
+        {
+            actctx->magic = 0;
+            HeapFree(GetProcessHeap(), 0, actctx);
+        }
+    }
 }
 
 /***********************************************************************

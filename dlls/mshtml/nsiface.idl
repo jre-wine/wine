@@ -1,5 +1,5 @@
 /*
- * Copyright 2005-2006 Jacek Caban for CodeWeavers
+ * Copyright 2005-2007 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,6 +22,9 @@
  * (NOT MSCOM!), but we generate the header file with WIDL compatibile with XPCOM,
  * useable in C code.
  */
+
+cpp_quote("#define GECKO_VERSION \"0.1.0\"");
+cpp_quote("#define GECKO_VERSION_STRING \"Wine Gecko \" GECKO_VERSION");
 
 import "wtypes.idl";
 
@@ -86,7 +89,6 @@ interface nsISupports
 typedef nsISupports nsISHistory;
 typedef nsISupports nsISimpleEnumerator;
 typedef nsISupports nsIWidget;
-typedef nsISupports nsIProtocolHandler;
 typedef nsISupports nsIDOMAbstractView;
 typedef nsISupports nsIHttpHeaderVisitor;
 typedef nsISupports nsIDOMBarProp;
@@ -97,8 +99,6 @@ typedef nsISupports nsIDOMNamedNodeMap;
 typedef nsISupports nsIDOMAttr;
 typedef nsISupports nsIDOMDocumentType;
 typedef nsISupports nsIDOMDOMImplementation;
-typedef nsISupports nsIDOMDocumentFragment;
-typedef nsISupports nsIDOMComment;
 typedef nsISupports nsIDOMCDATASection;
 typedef nsISupports nsIDOMProcessingInstruction;
 typedef nsISupports nsIDOMEntityReference;
@@ -110,10 +110,12 @@ typedef nsISupports nsIWebProgressListener;
 typedef nsISupports nsIDOMCSSValue;
 typedef nsISupports nsIDOMCSSRule;
 typedef nsISupports nsIPrintSession;
+typedef nsISupports nsIControllerCommandTable;
 
 [
     object,
     uuid(8bb35ed9-e332-462d-9155-4a002ab5c958)
+    /* FROZEN */
 ]
 interface nsIServiceManager : nsISupports
 {
@@ -126,6 +128,7 @@ interface nsIServiceManager : nsISupports
 [
     object,
     uuid(00000001-0000-0000-c000-000000000046)
+    /* FROZEN */
 ]
 interface nsIFactory : nsISupports
 {
@@ -136,6 +139,7 @@ interface nsIFactory : nsISupports
 [
     object,
     uuid(db242e01-e4d9-11d2-9dde-000064657374)
+    /* FROZEN */
 ]
 interface nsIObserver : nsISupports
 {
@@ -145,6 +149,7 @@ interface nsIObserver : nsISupports
 [
     object,
     uuid(a88e5a60-205a-4bb1-94e1-2628daf51eae)
+    /* FROZEN */
 ]
 interface nsIComponentManager : nsISupports
 {
@@ -159,6 +164,7 @@ interface nsIComponentManager : nsISupports
 [
     object,
     uuid(59e7e77a-38e4-11d4-8cf5-0060b0fc14a3)
+    /* FROZEN */
 ]
 interface nsIMemory : nsISupports
 {
@@ -172,6 +178,7 @@ interface nsIMemory : nsISupports
 [
     object,
     uuid(9188bc85-f92e-11d2-81ef-0060083a0bcf)
+    /* FROZEN */
 ]
 interface nsIWeakReference : nsISupports
 {
@@ -181,6 +188,7 @@ interface nsIWeakReference : nsISupports
 [
     object,
     uuid(9188bc86-f92e-11d2-81ef-0060083a0bcf)
+    /* FROZEN */
 ]
 interface nsISupportsWeakReference : nsISupports
 {
@@ -190,6 +198,7 @@ interface nsISupportsWeakReference : nsISupports
 [
     object,
     uuid(033a1470-8b2a-11d3-af88-00a024ffc08c)
+    /* FROZEN */
 ]
 interface nsIInterfaceRequestor : nsISupports
 {
@@ -199,6 +208,7 @@ interface nsIInterfaceRequestor : nsISupports
 [
     object,
     uuid(fa9c7f6c-61b3-11d4-9877-00c04fa0cf4a)
+    /* FROZEN */
 ]
 interface nsIInputStream : nsISupports
 {
@@ -215,6 +225,7 @@ interface nsIInputStream : nsISupports
 [
     object,
     uuid(450cd2d4-f0fd-424d-b365-b1251f80fd53)
+    /* NOT_FROZEN */
 ]
 interface nsIStringInputStream : nsIInputStream
 {
@@ -226,6 +237,7 @@ interface nsIStringInputStream : nsIInputStream
 [
     object,
     uuid(07a22cc0-0ce5-11d3-9331-00104ba0fd40)
+    /* FROZEN */
 ]
 interface nsIURI : nsISupports
 {
@@ -260,6 +272,7 @@ interface nsIURI : nsISupports
 [
     object,
     uuid(ef6bfbd2-fd46-48d8-96b7-9f8f0fd387fe)
+    /* FROZEN */
 ]
 interface nsIRequest : nsISupports
 {
@@ -278,6 +291,7 @@ interface nsIRequest : nsISupports
 [
     object,
     uuid(fd91e2e0-1481-11d3-9333-00104ba0fd40)
+    /* FROZEN */
 ]
 interface nsIRequestObserver : nsISupports
 {
@@ -288,6 +302,7 @@ interface nsIRequestObserver : nsISupports
 [
     object,
     uuid(1a637020-1482-11d3-9333-00104ba0fd40)
+    /* FROZEN */
 ] 
 interface nsIStreamListener : nsIRequestObserver
 {
@@ -298,6 +313,7 @@ interface nsIStreamListener : nsIRequestObserver
 [
     object,
     uuid(3de0a31c-feaf-400f-9f1e-4ef71f8b20cc)
+    /* FROZEN */
 ]
 interface nsILoadGroup : nsIRequest
 {
@@ -316,6 +332,7 @@ interface nsILoadGroup : nsIRequest
 [
     object,
     uuid(c63a055a-a676-4e71-bf3c-6cfa11082018)
+    /* FROZEN */
 ]
 interface nsIChannel : nsIRequest
 {
@@ -340,6 +357,7 @@ interface nsIChannel : nsIRequest
 [
     object,
     uuid(9277fe09-f0cc-4cd9-bbce-581dd94b0260)
+    /* FROZEN */
 ]
 interface nsIHttpChannel : nsIChannel
 {
@@ -367,6 +385,7 @@ interface nsIHttpChannel : nsIChannel
 [
     object,
     uuid(ddf633d8-e9a4-439d-ad88-de636fd9bb75)
+    /* FROZEN */
 ]
 interface nsIUploadChannel : nsISupports
 {
@@ -378,6 +397,7 @@ interface nsIUploadChannel : nsISupports
 [
     object,
     uuid(a6cf90be-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMCSSStyleDeclaration : nsISupports
 {
@@ -397,6 +417,7 @@ interface nsIDOMCSSStyleDeclaration : nsISupports
 [
     object,
     uuid(a6cf907d-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMNodeList : nsISupports
 {
@@ -407,6 +428,7 @@ interface nsIDOMNodeList : nsISupports
 [
     object,
     uuid(a6cf907c-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMNode : nsISupports
 {
@@ -455,6 +477,7 @@ interface nsIDOMNode : nsISupports
 [
     object,
     uuid(a6cf9078-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMElement : nsIDOMNode
 {
@@ -484,6 +507,7 @@ interface nsIDOMElement : nsIDOMNode
 [
     object,
     uuid(99715845-95fc-4a56-aa53-214b65c26e22)
+    /* FROZEN */
 ]
 interface nsIDOMElementCSSInlineStyle : nsISupports
 {
@@ -495,6 +519,7 @@ cpp_quote("#undef GetClassName");
 [
     object,
     uuid(a6cf9085-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMHTMLElement : nsIDOMElement
 {
@@ -513,6 +538,7 @@ interface nsIDOMHTMLElement : nsIDOMElement
 [
     object,
     uuid(da83b2ec-8264-4410-8496-ada3acd2ae42)
+    /* NOT_FROZEN */
 ]
 interface nsIDOMNSHTMLElement : nsISupports
 {
@@ -531,12 +557,17 @@ interface nsIDOMNSHTMLElement : nsISupports
     nsresult GetScrollWidth(PRInt32 *aScrollWidth);
     nsresult GetClientHeight(PRInt32 *aClientHeight);
     nsresult GetClientWidth(PRInt32 *aClientWidth);
+    nsresult GetTabIndex(PRInt32 *aTabIndex);
+    nsresult SetTabIndex(PRInt32 aTabIndex);
+    nsresult blur();
+    nsresult focus();
     nsresult ScrollIntoView(PRBool top);
 }
 
 [
     object,
     uuid(a6cf9072-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMCharacterData : nsIDOMNode
 {
@@ -553,6 +584,7 @@ interface nsIDOMCharacterData : nsIDOMNode
 [
     object,
     uuid(a6cf9082-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMText : nsIDOMCharacterData
 {
@@ -561,7 +593,26 @@ interface nsIDOMText : nsIDOMCharacterData
 
 [
     object,
+    uuid(a6cf9073-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
+]
+interface nsIDOMComment : nsIDOMCharacterData
+{
+}
+
+[
+    object,
+    uuid(a6cf9076-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
+]
+interface nsIDOMDocumentFragment : nsIDOMNode
+{
+}
+
+[
+    object,
     uuid(a6cf9075-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMDocument : nsIDOMNode
 {
@@ -591,6 +642,7 @@ interface nsIDOMDocument : nsIDOMNode
 [
     object,
     uuid(a6cf9084-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMHTMLDocument : nsIDOMDocument
 {
@@ -618,6 +670,7 @@ interface nsIDOMHTMLDocument : nsIDOMDocument
 [
     object,
     uuid(a6cf90ce-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMRange : nsISupports
 {
@@ -649,7 +702,18 @@ interface nsIDOMRange : nsISupports
 
 [
     object,
+    uuid(7b9badc6-c9bc-447a-8670-dbd195aed24b)
+    /* FROZEN */
+]
+interface nsIDOMDocumentRange : nsISupports
+{
+    nsresult CreateRange(nsIDOMRange **_retval);
+}
+
+[
+    object,
     uuid(b2c7ed59-8634-4352-9e37-5484c8b6e4e1)
+    /* FROZEN */
 ]
 interface nsISelection : nsISupports
 {
@@ -677,6 +741,7 @@ interface nsISelection : nsISupports
 [
     object,
     uuid(a6cf906b-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMWindow : nsISupports
 {
@@ -702,6 +767,7 @@ interface nsIDOMWindow : nsISupports
 [
     object,
     uuid(a6cf908e-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMHTMLBodyElement : nsIDOMHTMLElement
 {
@@ -722,6 +788,7 @@ interface nsIDOMHTMLBodyElement : nsIDOMHTMLElement
 [
     object,
     uuid(a6cf9093-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMHTMLInputElement : nsIDOMHTMLElement
 {
@@ -769,6 +836,7 @@ interface nsIDOMHTMLInputElement : nsIDOMHTMLElement
 [
     object,
     uuid(a6cf9090-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMHTMLSelectElement : nsIDOMHTMLElement
 {
@@ -800,6 +868,7 @@ interface nsIDOMHTMLSelectElement : nsIDOMHTMLElement
 [
     object,
     uuid(a6cf9094-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMHTMLTextAreaElement : nsIDOMHTMLElement
 {
@@ -831,6 +900,7 @@ interface nsIDOMHTMLTextAreaElement : nsIDOMHTMLElement
 [
     object,
     uuid(94928ab3-8b63-11d3-989d-001083010e9b)
+    /* FROZEN */
 ]
 interface nsIURIContentListener : nsISupports
 {
@@ -849,6 +919,7 @@ interface nsIURIContentListener : nsISupports
 [
     object,
     uuid(44b78386-1dd2-11b2-9ad2-e4eee2ca1916)
+    /* FROZEN */
 ]
 interface nsITooltipListener : nsISupports
 {
@@ -859,6 +930,7 @@ interface nsITooltipListener : nsISupports
 [
     object,
     uuid(69e5df00-7b8b-11d3-af61-00a024ffc08c)
+    /* FROZEN */
 ]
 interface nsIWebBrowser : nsISupports
 {
@@ -876,6 +948,7 @@ cpp_quote("#define SETUP_IS_CHROME_WRAPPER 7");
 [
     object,
     uuid(f15398a0-8018-11d3-af70-00a024ffc08c)
+    /* FROZEN */
 ]
 interface nsIWebBrowserSetup : nsISupports
 {
@@ -887,6 +960,7 @@ typedef void* nativeWindow;
 [
     object,
     uuid(046bc8a0-8015-11d3-af70-00a024ffc08c)
+    /* NOT_FROZEN */
 ]
 interface nsIBaseWindow : nsISupports
 {
@@ -922,6 +996,7 @@ cpp_quote("#define LOAD_FLAGS_NONE 0");
 [
     object,
     uuid(f5d9e7b0-d930-11d3-b057-00a024ffc08c)
+    /* NOT_FROZEN */
 ]
 interface nsIWebNavigation : nsISupports
 {
@@ -944,6 +1019,7 @@ interface nsIWebNavigation : nsISupports
 [
     object,
     uuid(f1094df6-ce0e-42c9-9847-2f663172c38d)
+    /* NOT_FROZEN */
 ]
 interface nsIPrintSettings : nsISupports
 {
@@ -1058,6 +1134,7 @@ interface nsIPrintSettings : nsISupports
 [
     object,
     uuid(9a7ca4b0-fbba-11d4-a869-00105a183419)
+    /* FROZEN */
 ]
 interface nsIWebBrowserPrint : nsISupports
 {
@@ -1082,7 +1159,38 @@ interface nsIWebBrowserPrint : nsISupports
 
 [
     object,
+    uuid(919e792a-6490-40b8-bba5-f9e9ad5640c8)
+    /* NOT_FROZEN */
+]
+interface nsIScrollable : nsISupports
+{
+    enum {
+        ScrollOrientation_X = 1,
+        ScrollOrientation_Y = 2
+    };
+
+    enum {
+        Scrollbar_Auto   = 1,
+        Scrollbar_Never  = 2,
+        Scrollbar_Always = 3
+    };
+
+    nsresult GetCurScrollPos(PRInt32 scrollOrientation, PRInt32 *curPos);
+    nsresult SetCurScrollPos(PRInt32 scrollOrientation, PRInt32 curPos);
+    nsresult SetCurScrollPosEx(PRInt32 curHorizontalPos, PRInt32 curVerticalPos);
+    nsresult GetScrollRange(PRInt32 scrollOrientation, PRInt32 *minPos, PRInt32 *maxPos);
+    nsresult SetScrollRange(PRInt32 scrollOrientation, PRInt32 minPos, PRInt32 maxPos);
+    nsresult SetScrollRangeEx(PRInt32 minHorizontalPos, PRInt32 maxHorizontalPos,
+            PRInt32 minVerticalPos, PRInt32 maxVerticalPos);
+    nsresult GetDefaultScrollbarPreferences(PRInt32 scrollOrientation, PRInt32 *scrollbarPref);
+    nsresult SetDefaultScrollbarPreferences(PRInt32 scrollOrientation, PRInt32 scrollbarPref);
+    nsresult GetScrollbarVisibility(PRBool *verticalVisible, PRBool *horizontalVisible);
+}
+
+[
+    object,
     uuid(c8c0a080-0868-11d3-915f-d9d889d48e3c)
+    /* FROZEN */
 ]
 interface nsIFile : nsISupports
 {
@@ -1133,7 +1241,34 @@ interface nsIFile : nsISupports
 
 [
     object,
+    uuid(15fd6940-8ea7-11d3-93ad-00104ba0fd40)
+    /* FROZEN */
+]
+interface nsIProtocolHandler : nsISupports
+{
+    nsresult GetScheme(nsACString *aScheme);
+    nsresult GetDefaultPort(PRInt32 *aDefaultPort);
+    nsresult GetProtocolFlags(PRUint32 *aProtocolFlags);
+    nsresult NewURI(const nsACString *aSpec, const char *aOriginCharset,
+                    nsIURI *aBaseURI, nsIURI **_retval);
+    nsresult NewChannel(nsIURI *aURI, nsIChannel **_retval);
+    nsresult AllowPort(PRInt32 port, const char *scheme, PRBool *_retval);
+}
+
+[
+    object,
+    uuid(0e61f3b2-34d7-4c79-bfdc-4860bc7341b7)
+    /* NOT_FROZEN */
+]
+interface nsIExternalProtocolHandler : nsIProtocolHandler
+{
+    nsresult ExternalAppExistsForScheme(const nsACString *scheme, PRBool *_retval);
+}
+
+[
+    object,
     uuid(bddeda3f-9020-4d12-8c70-984ee9f7935e)
+    /* FROZEN */
 ]
 interface nsIIOService : nsISupports
 {
@@ -1154,6 +1289,7 @@ interface nsIIOService : nsISupports
 [
     object,
     uuid(9c5d3c58-1dd1-11b2-a1c9-f3699284657a)
+    /* FROZEN */
 ]
 interface nsIWebBrowserFocus : nsISupports
 {
@@ -1170,6 +1306,7 @@ interface nsIWebBrowserFocus : nsISupports
 [
     object,
     uuid(ba434c60-9d52-11d3-afb0-00a024ffc08c)
+    /* FROZEN */
 ]
 interface nsIWebBrowserChrome : nsISupports
 {
@@ -1188,6 +1325,7 @@ interface nsIWebBrowserChrome : nsISupports
 [
     object,
     uuid(df31c120-ded6-11d1-bd85-00805f8ae3f4)
+    /* FROZEN */
 ]
 interface nsIDOMEventListener : nsISupports
 {
@@ -1197,6 +1335,7 @@ interface nsIDOMEventListener : nsISupports
 [
     object,
     uuid(1c773b30-d1cf-11d2-bd95-00805f8ae3f4)
+    /* FROZEN */
 ]
 interface nsIDOMEventTarget : nsISupports
 {
@@ -1208,6 +1347,7 @@ interface nsIDOMEventTarget : nsISupports
 [
     object,
     uuid(a66b7b80-ff46-bd97-0080-5f8ae38add32)
+    /* FROZEN */
 ]
 interface nsIDOMEvent : nsISupports
 {
@@ -1234,6 +1374,7 @@ cpp_quote("#define CONTEXT_BACKGROUND_IMAGE  0x20");
 [
     object,
     uuid(3478b6b0-3875-11d4-94ef-0020183bf181)
+    /* FROZEN */
 ]
 interface nsIContextMenuListener : nsISupports
 {
@@ -1243,6 +1384,7 @@ interface nsIContextMenuListener : nsISupports
 [
     object,
     uuid(a6cf90c3-15b3-11d2-932e-00805f8add32)
+    /* FROZEN */
 ]
 interface nsIDOMUIEvent : nsIDOMEvent
 {
@@ -1255,6 +1397,7 @@ interface nsIDOMUIEvent : nsIDOMEvent
 [
     object,
     uuid(ff751edc-8b02-aae7-0010-8301838a3123)
+    /* FROZEN */
 ]
 interface nsIDOMMouseEvent : nsIDOMUIEvent
 {
@@ -1278,6 +1421,7 @@ interface nsIDOMMouseEvent : nsIDOMUIEvent
 [
     object,
     uuid(028e0e6e-8b01-11d3-aae7-0010838a3123)
+    /* NOT_FROZEN */
 ]
 interface nsIDOMKeyEvent : nsIDOMUIEvent
 {
@@ -1296,6 +1440,7 @@ interface nsIDOMKeyEvent : nsIDOMUIEvent
 [
      object,
      uuid(3e5432cd-9568-4bd1-8cbe-d50aba110743)
+     /* FROZEN */
 ]
 interface nsIEmbeddingSiteWindow : nsISupports
 {
@@ -1312,6 +1457,7 @@ interface nsIEmbeddingSiteWindow : nsISupports
 [
      object,
      uuid(2417cbfe-65ad-48a6-b4b6-eb84db174392)
+     /* FROZEN */
 ]
 interface nsIComponentRegistrar : nsISupports
 {
@@ -1335,6 +1481,7 @@ interface nsIComponentRegistrar : nsISupports
 [
     object,
     uuid(1630c61a-325e-49ca-8759-a31b16c47aa5)
+    /* FROZEN */
 ]
 interface nsIPromptService : nsISupports
 {
@@ -1368,6 +1515,7 @@ interface nsIPromptService : nsISupports
 [
     object,
     uuid(b128a1e6-44f3-4331-8fbe-5af360ff21ee)
+    /* FROZEN */
 ]
 interface nsITooltipTextProvider : nsISupports
 {
@@ -1377,6 +1525,7 @@ interface nsITooltipTextProvider : nsISupports
 [
     object,
     uuid(02b0625a-e7f3-11d2-9f5a-006008a6efe9)
+    /* FROZEN */
 ]
 interface nsIProfile : nsISupports
 {
@@ -1397,6 +1546,7 @@ interface nsIProfile : nsISupports
 [
     object,
     uuid(30465632-a777-44cc-90f9-8145475ef999)
+    /* FROZEN */
 ]
 interface nsIWindowCreator : nsISupports
 {
@@ -1407,6 +1557,7 @@ interface nsIWindowCreator : nsISupports
 [
     object,
     uuid(f673ec81-a4b0-11d6-964b-eb5a2bf216fc)
+    /* NOT_FROZEN */
 ]
 interface nsIWindowCreator2 : nsIWindowCreator
 {
@@ -1418,6 +1569,7 @@ interface nsIWindowCreator2 : nsIWindowCreator
 [
     object,
     uuid(002286a8-494b-43b3-8ddd-49e3fc50622b)
+    /* FROZEN */
 ]
 interface nsIWindowWatcher : nsISupports
 {
@@ -1439,6 +1591,7 @@ interface nsIWindowWatcher : nsISupports
 [
     object,
     uuid(d39fd2b4-3978-45d2-a4be-ba448171b61b)
+    /* NOT_FROZEN */
 ]
 interface nsIEditingSession : nsISupports
 {
@@ -1455,6 +1608,7 @@ interface nsIEditingSession : nsISupports
 [
     object,
     uuid(83f892cf-7ed3-490e-967a-62640f3158e1)
+    /* NOT_FROZEN */
 ]
 interface nsICommandParams : nsISupports
 {
@@ -1480,6 +1634,7 @@ interface nsICommandParams : nsISupports
 [
     object,
     uuid(080d2001-f91e-11d4-a73c-f9242928207c)
+    /* NOT_FROZEN */
 ]
 interface nsICommandManager : nsISupports
 {
@@ -1495,7 +1650,32 @@ interface nsICommandManager : nsISupports
 
 [
     object,
+    uuid(47b82b60-a36f-4167-8072-6f421151ed50)
+    /* NOT_FROZEN */
+]
+interface nsIControllerContext : nsISupports
+{
+    nsresult Init(nsIControllerCommandTable *aCommandTable);
+    nsresult SetCommandContext(nsISupports *aCommandContext);
+}
+
+[
+    object,
+    uuid(d5b61b82-1da4-11d3-bf87-00105a1b0627)
+    /* NOT_FROZEN */
+]
+interface nsIController : nsISupports
+{
+    nsresult IsCommandEnabled(const char *command, PRBool *_retval);
+    nsresult SupportsCommand(const char *command, PRBool *_retval);
+    nsresult DoCommand(const char *command);
+    nsresult OnEvent(const char *eventName);
+}
+
+[
+    object,
     uuid(d650439a-ca29-410d-a906-b0557fb62fcd)
+    /* NOT_FROZEN */
 ]
 interface nsIContentSerializer : nsISupports
 {
@@ -1522,6 +1702,7 @@ interface nsIContentSerializer : nsISupports
 [
     object,
     uuid(5088272e-900b-11da-c687-000fea57f21a)
+    /* INTERNAL */
 ]
 interface nsIWineURI : nsIURI
 {
@@ -1529,8 +1710,8 @@ interface nsIWineURI : nsIURI
 
     nsresult GetNSContainer(NSContainer **aNSContainer);
     nsresult SetNSContainer(NSContainer *aNSContainer);
-    nsresult GetMoniker(IMoniker **aMoniker);
-    nsresult SetMoniker(IMoniker *aMoniker);
     nsresult GetIsDocumentURI(PRBool *aIsDocumentURI);
     nsresult SetIsDocumentURI(PRBool aIsDocumentURI);
+    nsresult GetWineURL(LPCWSTR *aURL);
+    nsresult SetWineURL(LPCWSTR aURL);
 }

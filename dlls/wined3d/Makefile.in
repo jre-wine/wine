@@ -12,6 +12,8 @@ C_SRCS = \
 	arb_program_shader.c \
 	baseshader.c \
 	basetexture.c \
+	clipper.c \
+	context.c \
 	cubetexture.c \
 	device.c \
 	directx.c \

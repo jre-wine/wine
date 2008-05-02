@@ -222,10 +222,10 @@ typedef struct _MIDL_STUB_MESSAGE
   CS_STUB_INFO *pCSInfo;
   unsigned char *ConformanceMark;
   unsigned char *VarianceMark;
-  INT_PTR Unused;
+  INT_PTR Unused; /* BackingStoreLowMark on IA64 */
   struct _NDR_PROC_CONTEXT *pContext;
-  INT_PTR Reserved51_1;
-  INT_PTR Reserved51_2;
+  void* ContextHandleHash;
+  void* pUserMarshalList;
   INT_PTR Reserved51_3;
   INT_PTR Reserved51_4;
   INT_PTR Reserved51_5;
@@ -274,8 +274,8 @@ typedef struct _USER_MARSHAL_ROUTINE_QUADRUPLE
 
 /* 'USRC' */
 #define USER_MARSHAL_CB_SIGNATURE \
-	( (DWORD)'U'         | ( (DWORD)'S' << 8 ) | \
-	( (DWORD)'R' << 16 ) | ( (DWORD)'C' << 24 ) )
+	( ( (DWORD)'U' << 24 ) | ( (DWORD)'S' << 16 ) | \
+	  ( (DWORD)'R' << 8  ) | ( (DWORD)'C'       ) )
 
 typedef enum
 {
@@ -610,11 +610,11 @@ RPCRTAPI void RPC_ENTRY
 RPCRTAPI unsigned char* RPC_ENTRY
   NdrServerInitializeNew( PRPC_MESSAGE pRpcMsg, PMIDL_STUB_MESSAGE pStubMsg, PMIDL_STUB_DESC pStubDesc );
 RPCRTAPI unsigned char* RPC_ENTRY
-  NdrGetBuffer( MIDL_STUB_MESSAGE *stubmsg, ULONG buflen, RPC_BINDING_HANDLE handle );
+  NdrGetBuffer( PMIDL_STUB_MESSAGE stubmsg, ULONG buflen, RPC_BINDING_HANDLE handle );
 RPCRTAPI void RPC_ENTRY
-  NdrFreeBuffer( MIDL_STUB_MESSAGE *pStubMsg );
+  NdrFreeBuffer( PMIDL_STUB_MESSAGE pStubMsg );
 RPCRTAPI unsigned char* RPC_ENTRY
-  NdrSendReceive( MIDL_STUB_MESSAGE *stubmsg, unsigned char *buffer );
+  NdrSendReceive( PMIDL_STUB_MESSAGE stubmsg, unsigned char *buffer );
 
 RPCRTAPI unsigned char * RPC_ENTRY
   NdrNsGetBuffer( PMIDL_STUB_MESSAGE pStubMsg, ULONG BufferLength, RPC_BINDING_HANDLE Handle );

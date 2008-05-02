@@ -573,6 +573,11 @@ static BOOL CALLBACK print_types_mod_cb(PSTR mod_name, DWORD base, void* ctx)
 
 int print_types(void)
 {
+    if (!dbg_curr_process)
+    {
+        dbg_printf("No known process, cannot print types\n");
+        return 0;
+    }
     SymEnumerateModules(dbg_curr_process->handle, print_types_mod_cb, NULL);
     return 0;
 }
@@ -671,8 +676,16 @@ int types_print_type(const struct dbg_type* type, BOOL details)
         break;
     case SymTagFunctionType:
         types_get_info(type, TI_GET_TYPE, &subtype.id);
-        subtype.module = type->module;
-        types_print_type(&subtype, FALSE);
+        /* is the returned type the same object as function sig itself ? */
+        if (subtype.id != type->id)
+        {
+            subtype.module = type->module;
+            types_print_type(&subtype, FALSE);
+        }
+        else
+        {
+            dbg_printf("<ret_type=self>");
+        }
         dbg_printf(" (*%s)(", name);
         if (types_get_info(type, TI_GET_CHILDRENCOUNT, &count))
         {

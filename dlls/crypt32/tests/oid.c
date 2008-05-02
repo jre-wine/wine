@@ -84,6 +84,9 @@ static const struct OIDToAlgID algIDToOID[] = {
  { szOID_OIWSEC_sha1, CALG_SHA },
 };
 
+static const WCHAR bogusDll[] = { 'b','o','g','u','s','.','d','l','l',0 };
+static const WCHAR bogus2Dll[] = { 'b','o','g','u','s','2','.','d','l','l',0 };
+
 static void testOIDToAlgID(void)
 {
     int i;
@@ -264,7 +267,6 @@ static void test_installOIDFunctionAddress(void)
 
 static void test_registerOIDFunction(void)
 {
-    static const WCHAR bogusDll[] = { 'b','o','g','u','s','.','d','l','l',0 };
     BOOL ret;
 
     /* oddly, this succeeds under WinXP; the function name key is merely
@@ -284,8 +286,14 @@ static void test_registerOIDFunction(void)
     ret = CryptRegisterOIDFunction(X509_ASN_ENCODING, "foo",
      "1.2.3.4.5.6.7.8.9.10", NULL, NULL);
     ok(ret, "Expected pseudo-success, got %d\n", GetLastError());
+    SetLastError(0xdeadbeef);
     ret = CryptRegisterOIDFunction(X509_ASN_ENCODING, "CryptDllEncodeObject",
      "1.2.3.4.5.6.7.8.9.10", bogusDll, NULL);
+    if (!ret && GetLastError() == ERROR_ACCESS_DENIED)
+    {
+        skip("Need admin rights\n");
+        return;
+    }
     ok(ret, "CryptRegisterOIDFunction failed: %d\n", GetLastError());
     ret = CryptUnregisterOIDFunction(X509_ASN_ENCODING, "CryptDllEncodeObject",
      "1.2.3.4.5.6.7.8.9.10");
@@ -315,9 +323,6 @@ static void test_registerOIDFunction(void)
     ok(ret, "CryptUnregisterOIDFunction failed: %d\n", GetLastError());
 }
 
-static const WCHAR bogusDll[] = { 'b','o','g','u','s','.','d','l','l',0 };
-static const WCHAR bogus2Dll[] = { 'b','o','g','u','s','2','.','d','l','l',0 };
-
 static void test_registerDefaultOIDFunction(void)
 {
     static const char fmt[] =
@@ -335,8 +340,14 @@ static void test_registerDefaultOIDFunction(void)
     ret = CryptRegisterDefaultOIDFunction(0, NULL, 0, bogusDll);
      */
     /* Register one at index 0 */
+    SetLastError(0xdeadbeef);
     ret = CryptRegisterDefaultOIDFunction(0, "CertDllOpenStoreProv", 0,
      bogusDll);
+    if (!ret && GetLastError() == ERROR_ACCESS_DENIED)
+    {
+        skip("Need admin rights\n");
+        return;
+    }
     ok(ret, "CryptRegisterDefaultOIDFunction failed: %08x\n", GetLastError());
     /* Reregistering should fail */
     ret = CryptRegisterDefaultOIDFunction(0, "CertDllOpenStoreProv", 0,
@@ -354,24 +365,26 @@ static void test_registerDefaultOIDFunction(void)
     ok(ret, "CryptRegisterDefaultOIDFunction failed: %08x\n", GetLastError());
     sprintf(buf, fmt, 0, func);
     rc = RegOpenKeyA(HKEY_LOCAL_MACHINE, buf, &key);
-    ok(rc == 0, "Expected key to exist, RegOpenKeyW failed: %ld\n", rc);
+    ok(rc == 0, "Expected key to exist, RegOpenKeyA failed: %ld\n", rc);
     if (rc == 0)
     {
-        static const WCHAR dllW[] = { 'D','l','l',0 };
-        WCHAR dllBuf[MAX_PATH];
+        static const CHAR dllA[] = "Dll";
+        static const CHAR bogusDll_A[] = "bogus.dll";
+        static const CHAR bogus2Dll_A[] = "bogus2.dll";
+        CHAR dllBuf[MAX_PATH];
         DWORD type, size;
-        LPWSTR ptr;
+        LPSTR ptr;
 
         size = sizeof(dllBuf) / sizeof(dllBuf[0]);
-        rc = RegQueryValueExW(key, dllW, NULL, &type, (LPBYTE)dllBuf, &size);
+        rc = RegQueryValueExA(key, dllA, NULL, &type, (LPBYTE)dllBuf, &size);
         ok(rc == 0,
-         "Expected Dll value to exist, RegQueryValueExW failed: %ld\n", rc);
+         "Expected Dll value to exist, RegQueryValueExA failed: %ld\n", rc);
         ok(type == REG_MULTI_SZ, "Expected type REG_MULTI_SZ, got %d\n", type);
         /* bogusDll was registered first, so that should be first */
         ptr = dllBuf;
-        ok(!lstrcmpiW(ptr, bogusDll), "Unexpected dll\n");
-        ptr += lstrlenW(ptr) + 1;
-        ok(!lstrcmpiW(ptr, bogus2Dll), "Unexpected dll\n");
+        ok(!lstrcmpiA(ptr, bogusDll_A), "Unexpected dll\n");
+        ptr += lstrlenA(ptr) + 1;
+        ok(!lstrcmpiA(ptr, bogus2Dll_A), "Unexpected dll\n");
         RegCloseKey(key);
     }
     /* Unregister both of them */

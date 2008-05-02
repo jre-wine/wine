@@ -72,6 +72,14 @@ FONT 8, "MS Shell Dlg"
 {
 }
 
+CLASS_TEST_DIALOG_2 DIALOG DISCARDABLE  0, 0, 100, 100
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "CreateDialogParams Test"
+CLASS "MyDialogClass"
+FONT 8, "MS Shell Dlg"
+{
+}
+
 FOCUS_TEST_DIALOG DIALOG DISCARDABLE 0, 0, 60, 30
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_CONTROL
 CAPTION "Test dialog"
@@ -79,6 +87,15 @@ FONT 8, "MS Shell Dlg"
 {
   EDITTEXT                200,4,4,50,14
 }
+
+IDD_DIALOG DIALOG DISCARDABLE  0, 0, 186, 95
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Dialog"
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,129,7,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,129,24,50,14
+END
 
 /* BINRES test_mono.bmp */
 100 BITMAP test_mono.bmp
@@ -89,3 +106,24 @@ FONT 8, "MS Shell Dlg"
  '00 00 00 00 00 00 00 00 00 00 FF FF FF 00 40 00'
  '00 00'
 } */
+
+1 MENU
+{
+    POPUP "&File"
+    {
+        MENUITEM "&New", 100
+        MENUITEM "&Open", 101
+        MENUITEM "&Save", 102
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", 103
+    }
+    POPUP "Edit"
+    {
+        MENUITEM "&Undo", 200
+        MENUITEM SEPARATOR
+        MENUITEM "Cu&t", 201
+        MENUITEM "&Copy", 202
+        MENUITEM "&Paste", 203
+        MENUITEM "&Delete", 204
+    }
+}

@@ -5,18 +5,18 @@ dnl See ChangeLog file for detailed change history.
 m4_define(WINE_VERSION,regexp(m4_include(VERSION),[version \([-.0-9A-Za-z]+\)],[\1]))
 
 AC_PREREQ(2.53b)
-AC_INIT([Wine],WINE_VERSION,[wine-devel@winehq.org])
+AC_INIT([Wine],[WINE_VERSION],[wine-devel@winehq.org])
 AC_CONFIG_SRCDIR(server/atom.c)
 AC_CONFIG_HEADERS(include/config.h)
 AC_CONFIG_AUX_DIR(tools)
 
 dnl **** Command-line arguments ****
 
-AC_ARG_ENABLE(win16, AC_HELP_STRING([--disable-win16],[do not include Win16 support]))
-AC_ARG_ENABLE(win64, AC_HELP_STRING([--enable-win64], [build a Win64 emulator on AMD64 (won't run Win32 binaries)]))
+AC_ARG_ENABLE(win16, AS_HELP_STRING([--disable-win16],[do not include Win16 support]))
+AC_ARG_ENABLE(win64, AS_HELP_STRING([--enable-win64],[build a Win64 emulator on AMD64 (won't run Win32 binaries)]))
 
-AC_ARG_WITH(opengl,    AC_HELP_STRING([--without-opengl],[do not use OpenGL]))
-AC_ARG_WITH(wine-tools,AC_HELP_STRING([--with-wine-tools=<dir>],[use Wine tools from directory <dir>]))
+AC_ARG_WITH(opengl,    AS_HELP_STRING([--without-opengl],[do not use OpenGL]))
+AC_ARG_WITH(wine-tools,AS_HELP_STRING([--with-wine-tools=<dir>],[use Wine tools from directory <dir>]))
 
 AC_CANONICAL_HOST
 case $host in
@@ -84,14 +84,12 @@ AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
 AC_SUBST(TOOLSDIR,$wine_cv_toolsdir)
 
 AC_PATH_XTRA
-AC_PROG_LEX
 
-dnl **** Just additional warning checks, since AC_PROG just sets 'lex' even
-dnl **** without one present.
-AC_CHECK_PROGS(XLEX,$LEX flex lex,none)
-if test "$XLEX" = "none"
+dnl Check for flex
+AC_CHECK_PROGS(FLEX,flex,none)
+if test "$FLEX" = "none"
 then
-  AC_MSG_ERROR([no suitable lex found. Please install the 'flex' package.])
+  AC_MSG_ERROR([no suitable flex found. Please install the 'flex' package.])
 fi
 
 dnl Check for bison
@@ -337,6 +335,7 @@ then
     AC_CHECK_HEADERS([X11/Xlib.h \
                       X11/XKBlib.h \
                       X11/Xutil.h \
+                      X11/Xcursor/Xcursor.h \
                       X11/extensions/shape.h \
                       X11/extensions/XInput.h \
                       X11/extensions/XShm.h \
@@ -388,9 +387,9 @@ then
         dnl *** Check for X RandR extension
         if test "$ac_cv_header_X11_extensions_Xrandr_h" = "yes"
         then
-                AC_TRY_COMPILE([#include <X11/Xlib.h>
-#include <X11/extensions/Xrandr.h>],[static typeof(XRRSetScreenConfigAndRate) * func;],
-                  [AC_DEFINE(HAVE_LIBXRANDR, 1, [Define if you have the Xrandr library])])
+                AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <X11/Xlib.h>
+#include <X11/extensions/Xrandr.h>]], [[static typeof(XRRSetScreenConfigAndRate) * func;]])],
+                  [AC_DEFINE(HAVE_LIBXRANDR, 1, [Define if you have the Xrandr library])],[])
         fi
 
         dnl *** Check for Transform functions in Xrender
@@ -405,9 +404,9 @@ then
         dnl *** Check for Xinerama extension
         if test "$ac_cv_header_X11_extensions_Xinerama_h" = "yes"
         then
-                AC_TRY_COMPILE([#include <X11/Xlib.h>
-#include <X11/extensions/Xinerama.h>],[static typeof(XineramaQueryScreens) * func;],
-                  [AC_DEFINE(HAVE_LIBXINERAMA, 1, [Define if you have the Xinerama library])])
+                AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <X11/Xlib.h>
+#include <X11/extensions/Xinerama.h>]], [[static typeof(XineramaQueryScreens) * func;]])],
+                  [AC_DEFINE(HAVE_LIBXINERAMA, 1, [Define if you have the Xinerama library])],[])
         fi
 
     dnl *** End of X11/Xlib.h check
@@ -423,13 +422,9 @@ then
 	then
 	    dnl Check for some problems due to old Mesa versions
 	    AC_CACHE_CHECK([for up-to-date OpenGL version], wine_cv_opengl_header_version_OK,
-	      AC_TRY_COMPILE(
-		[#include <GL/gl.h>],
-		[GLenum test = GL_UNSIGNED_SHORT_5_6_5;],
+	      AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <GL/gl.h>]], [[GLenum test = GL_UNSIGNED_SHORT_5_6_5;]])],
 		[wine_cv_opengl_header_version_OK="yes"],
-		[wine_cv_opengl_header_version_OK="no"]
-	      )
-            )
+		[wine_cv_opengl_header_version_OK="no"]))
 
 	    if test "$wine_cv_opengl_header_version_OK" = "yes"
             then
@@ -459,7 +454,11 @@ then
          [AC_CHECK_HEADERS(audio/soundlib.h,,,[#include <audio/audiolib.h>])
           AC_CHECK_LIB(audio,AuCreateFlow,
                        [AC_DEFINE(HAVE_NAS,1,[Define if you have NAS including devel headers])
-                        NASLIBS="-laudio -lXt $X_LIBS -lXext -lX11 $X_EXTRA_LIBS"],,
+                        AC_CHECK_LIB(Xau,XauGetBestAuthByAddr,
+                          [NASLIBS="-lXau -laudio -lXt $X_LIBS -lXext -lX11 $X_EXTRA_LIBS"],
+                          [NASLIBS="-laudio -lXt $X_LIBS -lXext -lX11 $X_EXTRA_LIBS"],
+                          [$X_LIBS])
+                       ],,
                        [-lXt $X_LIBS -lXext -lX11 $X_EXTRA_LIBS])])
 
     CPPFLAGS="$ac_save_CPPFLAGS"
@@ -476,13 +475,17 @@ AC_SUBST(XML2LIBS,"")
 AC_SUBST(XML2INCL,"")
 AC_SUBST(XSLTLIBS,"")
 AC_SUBST(XSLTINCL,"")
+ac_save_CPPFLAGS="$CPPFLAGS"
 if test "$PKG_CONFIG" != "false"
 then
-    ac_save_CPPFLAGS="$CPPFLAGS"
     ac_xml_libs="`$PKG_CONFIG --libs libxml-2.0 2>/dev/null`"
     ac_xml_cflags="`$PKG_CONFIG --cflags libxml-2.0 2>/dev/null`"
-    CPPFLAGS="$CPPFLAGS $ac_xml_cflags"
-    AC_CHECK_HEADERS(libxml/parser.h,
+else
+    ac_xml_libs="`xml2-config --libs 2>/dev/null`"
+    ac_xml_cflags="`xml2-config --cflags  2>/dev/null`"
+fi
+CPPFLAGS="$CPPFLAGS $ac_xml_cflags"
+AC_CHECK_HEADERS(libxml/parser.h,
         [AC_CHECK_LIB(xml2, xmlParseMemory,
             [AC_DEFINE(HAVE_LIBXML2, 1, [Define if you have the libxml2 library])
              XML2LIBS="$ac_xml_libs"
@@ -491,12 +494,18 @@ then
             [AC_DEFINE(HAVE_XMLREADMEMORY,1,[Define if libxml2 has the xmlReadMemory function])],,$ac_xml_libs)
          AC_CHECK_LIB(xml2, xmlNewDocPI,
             [AC_DEFINE(HAVE_XMLNEWDOCPI,1,[Define if libxml2 has the xmlNewDocPI function])],,$ac_xml_libs)
-        ])
-    CPPFLAGS="$ac_save_CPPFLAGS"
+    ])
+CPPFLAGS="$ac_save_CPPFLAGS"
+if test "$PKG_CONFIG" != "false"
+then
     ac_xslt_libs="`$PKG_CONFIG --libs libxslt 2>/dev/null`"
     ac_xslt_cflags="`$PKG_CONFIG --cflags libxslt 2>/dev/null`"
-    CPPFLAGS="$CPPFLAGS $ac_xslt_cflags"
-    AC_CHECK_HEADERS([libxslt/pattern.h libxslt/transform.h],
+else
+    ac_xslt_libs="`xslt-config --libs 2>/dev/null`"
+    ac_xslt_cflags="`xslt-config --cflags 2>/dev/null`"
+fi
+CPPFLAGS="$CPPFLAGS $ac_xslt_cflags"
+AC_CHECK_HEADERS([libxslt/pattern.h libxslt/transform.h],
         [AC_CHECK_LIB(xslt, xsltCompilePattern,
             [AC_DEFINE(HAVE_LIBXSLT, 1, [Define if you have the libxslt library])
              XSLTLIBS="$ac_xslt_libs"
@@ -505,8 +514,7 @@ then
 [#ifdef HAVE_LIBXSLT_PATTERN_H
 # include <libxslt/pattern.h>
 #endif])
-    CPPFLAGS="$ac_save_CPPFLAGS"
-fi
+CPPFLAGS="$ac_save_CPPFLAGS"
 
 dnl **** Check for libhal ****
 AC_SUBST(HALINCL,"")
@@ -543,24 +551,15 @@ LIBS="$ac_save_LIBS"
 
 dnl **** Check for SANE ****
 AC_CHECK_PROG(sane_devel,sane-config,sane-config,no)
-AC_SUBST(SANELIBS,"")
 AC_SUBST(SANEINCL,"")
 if test "$sane_devel" != "no"
 then
-    SANELIBS="`$sane_devel --libs`"
     SANEINCL="`$sane_devel --cflags`"
     ac_save_CPPFLAGS="$CPPFLAGS"
-    ac_save_LIBS="$LIBS"
     CPPFLAGS="$CPPFLAGS $SANEINCL"
-    LIBS="$LIBS $SANELIBS"
     AC_CHECK_HEADER(sane/sane.h,
-                    [AC_CHECK_LIB(sane,sane_open,
-                                  [AC_DEFINE(HAVE_SANE, 1, [Define if we have SANE development environment])],
-                                  [SANELIBS=""
-                                  SANEINCL=""])],
-                    [SANELIBS=""
-                    SANEINCL=""])
-    LIBS="$ac_save_LIBS"
+                    [AC_DEFINE(HAVE_SANE, 1, [Define if we have SANE development environment])],
+                    [SANEINCL=""])
     CPPFLAGS="$ac_save_CPPFLAGS"
 fi
 
@@ -599,18 +598,17 @@ dnl **** Check for the ICU library ****
 if test "$ac_cv_header_unicode_ubidi_h" = "yes"
 then
     saved_libs="$LIBS"
-    for i in ${ICU_LIB_DIR-/usr/lib}/libsicu ${ICU_LIB_DIR-/usr/lib}/libicu
-    do
-        TEST_ICUUC_LIB="${ICUUC_LIB-${i}uc.a}"
-        TEST_ICUDATA_LIB="${ICUDATA_LIB-${i}data.a}"
-        AC_MSG_CHECKING(whether can link with ICU libraries $TEST_ICUUC_LIB and $TEST_ICUDATA_LIB)
-        LIBS="$saved_libs $TEST_ICUUC_LIB $TEST_ICUDATA_LIB -lstdc++ -lgcc_s"
-    	AC_TRY_LINK([#include <unicode/ubidi.h>],[ubidi_open()],
-                    [AC_DEFINE(HAVE_ICU,1,[Define to 1 if the ICU libraries are installed])
-            	     AC_SUBST(ICULIBS,"$TEST_ICUUC_LIB $TEST_ICUDATA_LIB -lstdc++ -lgcc_s")
-                     AC_MSG_RESULT(yes)],
-                    [AC_MSG_RESULT(no)])
-    done
+    icu_libs="-lsicuuc -lsicudata -lstdc++ -lgcc_s"
+    if test -n "$ICU_LIB_DIR"
+    then
+        icu_libs="-L$ICU_LIB_DIR $icu_libs"
+    fi
+    AC_MSG_CHECKING(whether can link with ICU libraries)
+    LIBS="$saved_libs $icu_libs"
+    AC_RUN_IFELSE([AC_LANG_PROGRAM([[#include <unicode/ubidi.h>]],[[ubidi_open()]])],
+                [AC_DEFINE(HAVE_ICU,1,[Define to 1 if the ICU libraries are installed])
+                 AC_SUBST(ICULIBS,"$icu_libs")
+                 AC_MSG_RESULT(yes)],[AC_MSG_RESULT(no)],[AC_MSG_RESULT(no)])
     LIBS="$saved_libs"
 fi
 
@@ -692,12 +690,10 @@ else
                          [#if HAVE_FT2BUILD_H
                           #include <ft2build.h>
                           #endif])
-	AC_TRY_CPP([#include <ft2build.h>
-                    #include <freetype/fttrigon.h>],
-                    [AC_DEFINE(HAVE_FREETYPE_FTTRIGON_H, 1,
+	AC_PREPROC_IFELSE([AC_LANG_SOURCE([[#include <ft2build.h>
+                    #include <freetype/fttrigon.h>]])],[AC_DEFINE(HAVE_FREETYPE_FTTRIGON_H, 1,
           [Define if you have the <freetype/fttrigon.h> header file.])
-                    wine_cv_fttrigon=yes],
-                    wine_cv_fttrigon=no)
+                    wine_cv_fttrigon=yes],[wine_cv_fttrigon=no])
         AC_CHECK_TYPES(FT_TrueTypeEngineType,,,[#include <freetype/ftmodapi.h>])
         ac_save_CFLAGS="$CFLAGS"
         CFLAGS="$CFLAGS $FREETYPELIBS"
@@ -725,12 +721,8 @@ fi
 
 dnl **** Check for parport (currently Linux only) ****
 AC_CACHE_CHECK([for parport header/ppdev.h], ac_cv_c_ppdev,
- AC_TRY_COMPILE(
-   [#include <linux/ppdev.h>],
-   [ioctl (1,PPCLAIM,0)],
-   [ac_cv_c_ppdev="yes"],
-   [ac_cv_c_ppdev="no"])
- )
+ AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <linux/ppdev.h>]], [[ioctl (1,PPCLAIM,0)]])],
+    [ac_cv_c_ppdev="yes"],[ac_cv_c_ppdev="no"]))
 if test "$ac_cv_c_ppdev" = "yes"
 then
     AC_DEFINE(HAVE_PPDEV, 1, [Define if we can use ppdev.h for parallel port access])
@@ -738,26 +730,16 @@ fi
 
 dnl **** Check for va_copy ****
 AC_CACHE_CHECK([for va_copy], ac_cv_c_va_copy,
- AC_TRY_LINK(
-   [#include <stdarg.h>],
-   [va_list ap1, ap2;
-    va_copy(ap1,ap2);
-   ],
-   [ac_cv_c_va_copy="yes"],
-   [ac_cv_c_va_copy="no"])
+ AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <stdarg.h>]], [[va_list ap1, ap2; va_copy(ap1,ap2);]])],
+    [ac_cv_c_va_copy="yes"],[ac_cv_c_va_copy="no"])
  )
 if test "$ac_cv_c_va_copy" = "yes"
 then
     AC_DEFINE(HAVE_VA_COPY, 1, [Define if we have va_copy])
 fi
 AC_CACHE_CHECK([for __va_copy], ac_cv_c___va_copy,
- AC_TRY_LINK(
-   [#include <stdarg.h>],
-   [va_list ap1, ap2;
-    __va_copy(ap1,ap2);
-   ],
-   [ac_cv_c___va_copy="yes"],
-   [ac_cv_c___va_copy="no"])
+ AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <stdarg.h>]], [[va_list ap1, ap2; __va_copy(ap1,ap2);]])],
+    [ac_cv_c___va_copy="yes"],[ac_cv_c___va_copy="no"])
  )
 if test "$ac_cv_c___va_copy" = "yes"
 then
@@ -766,13 +748,9 @@ fi
 
 dnl **** Check for sigsetjmp ****
 AC_CACHE_CHECK([for sigsetjmp], ac_cv_c_sigsetjmp,
- AC_TRY_LINK(
-   [#include <setjmp.h>],
-   [sigjmp_buf buf;
+ AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <setjmp.h>]], [[sigjmp_buf buf;
     sigsetjmp( buf, 1 );
-    siglongjmp( buf, 1 );],
-   [ac_cv_c_sigsetjmp="yes"],
-   [ac_cv_c_sigsetjmp="no"])
+    siglongjmp( buf, 1 );]])],[ac_cv_c_sigsetjmp="yes"],[ac_cv_c_sigsetjmp="no"])
  )
 if test "$ac_cv_c_sigsetjmp" = "yes"
 then
@@ -790,36 +768,6 @@ WINE_CHECK_LIB_FUNCS(\
         pthread_get_stackaddr_np \
         pthread_get_stacksize_np,
         [$LIBPTHREAD])
-
-dnl **** Check for aRts Sound Server ****
-AC_PATH_PROG(ARTSCCONFIG, artsc-config)
-if test x$ARTSCCONFIG != x -a x$ARTSCCONFIG != x'"$ARTSCCONFIG"';
-then
-    ARTSC_CFLAGS=""
-    for i in `$ARTSCCONFIG --cflags`
-    do
-      case "$i" in
-        -I*) ARTSC_CFLAGS="$ARTSC_CFLAGS $i";;
-      esac
-    done
-    ARTSC_LIBS=""
-    for i in `$ARTSCCONFIG --libs`
-    do
-      case "$i" in
-        -L/usr/lib|-L/usr/lib64) ;;
-        -L*|-l*) ARTSC_LIBS="$ARTSC_LIBS $i";;
-      esac
-    done
-    save_CFLAGS="$CFLAGS"
-    CFLAGS="$CFLAGS $ARTSC_CFLAGS"
-    AC_CHECK_LIB(artsc,arts_init,
-        [AC_TRY_COMPILE([#include <artsc.h>],[arts_stream_t stream;],
-            [AC_SUBST(ARTSLIBS, $ARTSC_LIBS)
-            AC_SUBST(ARTSINCL, $ARTSC_CFLAGS)
-            AC_DEFINE(HAVE_ARTS, 1, [Define if you have ARTS sound server])])],,
-            $ARTSC_LIBS)
-    CFLAGS="$save_CFLAGS"
-fi
 
 dnl **** Check for EsounD ****
 AC_PATH_PROG(ESDCONFIG, esd-config)
@@ -847,14 +795,13 @@ AC_SUBST(ALSALIBS,"")
 if test "$ac_cv_header_sys_asoundlib_h" = "yes" -o "$ac_cv_header_alsa_asoundlib_h" = "yes"
 then
     AC_CHECK_LIB(asound,snd_pcm_hw_params_get_access,
-        [AC_TRY_COMPILE([#ifdef HAVE_ALSA_ASOUNDLIB_H
+        [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#ifdef HAVE_ALSA_ASOUNDLIB_H
 #include <alsa/asoundlib.h>
 #elif defined(HAVE_SYS_ASOUNDLIB_H)
 #include <sys/asoundlib.h>
-#endif],
-                        [int ret = snd_pcm_hw_params_get_access(NULL, NULL)],
+#endif]], [[int ret = snd_pcm_hw_params_get_access(NULL, NULL)]])],
                         [AC_DEFINE(HAVE_ALSA,1,[Define if you have ALSA 1.x including devel headers])
-                         ALSALIBS="-lasound"])])
+                         ALSALIBS="-lasound"],[])])
 fi
 
 dnl **** Check for libaudioio (which can be used to get solaris audio support) ****
@@ -883,21 +830,15 @@ then
 
   dnl Check for strength-reduce bug
   AC_CACHE_CHECK( [for gcc strength-reduce bug], ac_cv_c_gcc_strength_bug,
-                  AC_TRY_RUN([
-int	L[[4]] = {0,1,2,3};
-int main(void) {
-  static int Array[[3]];
+                  AC_RUN_IFELSE([AC_LANG_PROGRAM([[int L[[4]] = {0,1,2,3};]],
+[[static int Array[[3]];
   unsigned int B = 3;
   int i;
   for(i=0; i<B; i++) Array[[i]] = i - 3;
   for(i=0; i<4 - 1; i++) L[[i]] = L[[i + 1]];
   L[[i]] = 4;
-
-  exit( Array[[1]] != -2 || L[[2]] != 3);
-}],
-    ac_cv_c_gcc_strength_bug="no",
-    ac_cv_c_gcc_strength_bug="yes",
-    ac_cv_c_gcc_strength_bug="yes") )
+  exit( Array[[1]] != -2 || L[[2]] != 3)]])],
+    [ac_cv_c_gcc_strength_bug="no"],[ac_cv_c_gcc_strength_bug="yes"],[ac_cv_c_gcc_strength_bug="yes"]) )
   if test "$ac_cv_c_gcc_strength_bug" = "yes"
   then
     EXTRACFLAGS="$EXTRACFLAGS -fno-strength-reduce"
@@ -916,8 +857,7 @@ int main(void) {
   saved_CFLAGS="$CFLAGS"
   CFLAGS="$CFLAGS -Wpointer-arith -Werror"
   AC_CACHE_CHECK([for broken string.h that generates warnings], ac_cv_c_string_h_warnings,
-      AC_TRY_COMPILE([#include <string.h>],[],
-                     [ac_cv_c_string_h_warnings=no],[ac_cv_c_string_h_warnings=yes]))
+      AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <string.h>]], [[]])],[ac_cv_c_string_h_warnings=no],[ac_cv_c_string_h_warnings=yes]))
   CFLAGS="$saved_CFLAGS"
   if test "$ac_cv_c_string_h_warnings" = "no"
   then
@@ -928,9 +868,7 @@ int main(void) {
   saved_CFLAGS="$CFLAGS"
   CFLAGS="$CFLAGS -Werror"
   AC_CACHE_CHECK([for builtin wchar inlines], ac_cv_c_builtin_wchar_ctype,
-      AC_TRY_COMPILE([],
-                     [int iswlower(unsigned short);],
-                     [ac_cv_c_builtin_wchar_ctype=no],[ac_cv_c_builtin_wchar_ctype=yes]))
+      AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[]], [[int iswlower(unsigned short);]])],[ac_cv_c_builtin_wchar_ctype=no],[ac_cv_c_builtin_wchar_ctype=yes]))
   CFLAGS="$saved_CFLAGS"
   if test "$ac_cv_c_builtin_wchar_ctype" = "yes"
   then
@@ -998,7 +936,8 @@ AC_SUBST(LDSHARED,"")
 AC_SUBST(LDDLLFLAGS,"")
 AC_SUBST(LIBEXT,"so")
 AC_SUBST(IMPLIBEXT,"def")
-AC_SUBST(LIBWINE_LDFLAGS,"")
+AC_SUBST(LDRPATH_INSTALL,"")
+AC_SUBST(LDRPATH_LOCAL,"")
 
 case $host_os in
   cygwin*|mingw32*)
@@ -1022,8 +961,9 @@ case $host_os in
     DLLFLAGS="$DLLFLAGS -fPIC"
     LDDLLFLAGS="-bundle -multiply_defined suppress"
     LIBWINE_LDFLAGS="-multiply_defined suppress"
-    LDSHARED="\$(CC) -dynamiclib -install_name @executable_path/\`\$(RELPATH) \$(bindir) \$(libdir)\`/\$(DYNAME)"
+    LDSHARED="\$(CC) -dynamiclib"
     STRIP="$STRIP -u -r"
+    LDRPATH_LOCAL="&& install_name_tool -change @executable_path/\`\$(RELPATH) \$(bindir) \$(libdir)\`/libwine.1.dylib @executable_path/\$(TOPOBJDIR)/libs/wine/libwine.1.dylib \$@ || \$(RM) \$@"
     dnl declare needed frameworks
     AC_SUBST(COREFOUNDATIONLIB,"-framework CoreFoundation")
     AC_SUBST(IOKITLIB,"-framework IOKit -framework CoreFoundation")
@@ -1036,7 +976,7 @@ case $host_os in
     if test "$ac_cv_header_CoreAudio_CoreAudio_h" = "yes" -a "$ac_cv_header_AudioUnit_AudioUnit_h" = "yes"
     then
         dnl CoreServices needed by AudioUnit
-        AC_SUBST(COREAUDIO,"-framework CoreAudio -framework AudioUnit -framework CoreServices")
+        AC_SUBST(COREAUDIO,"-framework CoreAudio -framework AudioUnit -framework CoreServices -framework AudioToolbox -framework CoreMIDI")
     fi
     case $host_cpu in
       *powerpc*)
@@ -1079,7 +1019,11 @@ case $host_os in
                       [AC_SUBST(LDEXECFLAGS,["-Wl,--export-dynamic"])])
 
       WINE_TRY_CFLAGS([-fPIC -Wl,--rpath,\$ORIGIN/../lib],
-                      [LIBWINE_LDFLAGS="-Wl,--rpath,\\\$\$ORIGIN/\`\$(RELPATH) \$(bindir) \$(libdir)\`"])
+                      [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(RELPATH) \$(bindir) \$(libdir)\`"
+                       LDRPATH_LOCAL="-Wl,--rpath,\\\$\$ORIGIN/\$(TOPOBJDIR)/libs/wine"],
+          [WINE_TRY_CFLAGS([-fPIC -Wl,-R,\$ORIGIN/../lib],
+                           [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(RELPATH) \$(bindir) \$(libdir)\`"
+                            LDRPATH_LOCAL="-Wl,-R,\\\$\$ORIGIN/\$(TOPOBJDIR)/libs/wine"])])
 
       case $host_cpu in
         *i[[3456789]]86* | x86_64)
@@ -1170,6 +1114,7 @@ then
   WINE_GET_SONAME(Xinerama,XineramaQueryScreens,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
   WINE_GET_SONAME(Xrender,XRenderQueryExtension,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
   WINE_GET_SONAME(Xrandr,XRRQueryExtension,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
+  WINE_GET_SONAME(Xcursor,XcursorImageLoadCursor,[$X_LIBS -lX11 $X_EXTRA_LIBS])
   WINE_GET_SONAME(freetype,FT_Init_FreeType,[$X_LIBS])
   WINE_GET_SONAME(GL,glXQueryExtension,[$X_LIBS $X_EXTRA_LIBS])
   WINE_GET_SONAME(hal,libhal_ctx_new)
@@ -1183,6 +1128,7 @@ then
   WINE_GET_SONAME(curses,waddch)
   WINE_GET_SONAME(jpeg,jpeg_start_decompress)
   WINE_GET_SONAME(capi20,capi20_isinstalled)
+  WINE_GET_SONAME(sane,sane_init)
 fi
 
 
@@ -1199,7 +1145,6 @@ AC_CHECK_FUNCS(\
 	asctime_r \
 	chsize \
 	clone \
-	connect \
 	dlopen \
 	epoll_create \
 	ffs \
@@ -1211,22 +1156,13 @@ AC_CHECK_FUNCS(\
 	ftruncate \
 	futimes \
 	futimesat \
-	getaddrinfo \
 	getdirentries \
-	gethostbyname \
-	getnameinfo \
-	getnetbyname \
 	getopt_long \
 	getpagesize \
-	getprotobyname \
-	getprotobynumber \
 	getpwuid \
-	getservbyport \
 	gettid \
 	gettimeofday \
 	getuid \
-	inet_aton \
-	inet_network \
 	kqueue \
 	lstat \
 	memmove \
@@ -1241,7 +1177,6 @@ AC_CHECK_FUNCS(\
 	rfork \
 	sched_yield \
 	select \
-	sendmsg \
 	setrlimit \
 	settimeofday \
 	sigaltstack \
@@ -1276,22 +1211,25 @@ then
 fi
 
 dnl Check for -lnsl for Solaris
-if test "$ac_cv_func_gethostbyname" = no
-then
-    AC_CHECK_LIB(nsl,gethostbyname)
-fi
+AC_SEARCH_LIBS(gethostbyname, nsl)
 
 dnl Check for -lsocket for Solaris
-if test "$ac_cv_func_connect" = no
-then
-    AC_CHECK_LIB(socket,connect)
-fi
+AC_SEARCH_LIBS(connect, socket)
 
 dnl Check for -lresolv for Solaris
-if test "$ac_cv_func_inet_aton" = no
-then
-    AC_CHECK_LIB(resolv,inet_aton)
-fi
+AC_SEARCH_LIBS(inet_aton, resolv)
+
+dnl **** Check for functions which may rely on -lsocket on Solaris.
+AC_CHECK_FUNCS(\
+	getaddrinfo \
+	getnameinfo \
+	getnetbyname \
+	getprotobyname \
+	getprotobynumber \
+	getservbyport \
+	inet_network \
+	sendmsg \
+)
 
 dnl **** Check for types ****
 
@@ -1307,8 +1245,7 @@ AC_CHECK_MEMBERS([struct ff_effect.direction],,,
 #endif])
 
 AC_CACHE_CHECK([for sigaddset],wine_cv_have_sigaddset,
-               AC_TRY_LINK([#include <signal.h>],[sigset_t set; sigaddset(&set,SIGTERM);],
-                           wine_cv_have_sigaddset=yes,wine_cv_have_sigaddset=no))
+               AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <signal.h>]], [[sigset_t set; sigaddset(&set,SIGTERM);]])],[wine_cv_have_sigaddset=yes],[wine_cv_have_sigaddset=no]))
 if test "$wine_cv_have_sigaddset" = "yes"
 then
   AC_DEFINE(HAVE_SIGADDSET, 1, [Define if sigaddset is supported])
@@ -1317,9 +1254,7 @@ fi
 
 AC_CACHE_CHECK([whether we can use re-entrant gethostbyname_r Linux style],
    	wine_cv_linux_gethostbyname_r_6,
-	AC_TRY_LINK([
-#include <netdb.h>
-	], [
+	AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <netdb.h>]],[[
     char *name=NULL;
     struct hostent he;
     struct hostent *result;
@@ -1331,10 +1266,8 @@ AC_CACHE_CHECK([whether we can use re-entrant gethostbyname_r Linux style],
     int addrtype=0;
     res=gethostbyname_r(name,&he,buf,bufsize,&result,&errnr);
     res=gethostbyaddr_r(addr, addrlen, addrtype,&he,buf,bufsize,&result,&errnr);
-    ],
-	wine_cv_linux_gethostbyname_r_6=yes,
-	wine_cv_linux_gethostbyname_r_6=no
-	)
+    ]])],[wine_cv_linux_gethostbyname_r_6=yes],[wine_cv_linux_gethostbyname_r_6=no
+	])
    )
    if test "$wine_cv_linux_gethostbyname_r_6" = "yes"
    then
@@ -1346,19 +1279,16 @@ if test "$ac_cv_header_linux_joystick_h" = "yes"
 then
    AC_CACHE_CHECK([whether linux/joystick.h uses the Linux 2.2+ API],
    	wine_cv_linux_joystick_22_api,
-	AC_TRY_COMPILE([
+	AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
 	#include <sys/ioctl.h>
+	#include <sys/types.h>
 	#include <linux/joystick.h>
 
 	struct js_event blub;
 	#if !defined(JS_EVENT_AXIS) || !defined(JS_EVENT_BUTTON)
 	#error "no 2.2 header"
 	#endif
-	],/*empty*/,
-	wine_cv_linux_joystick_22_api=yes,
-	wine_cv_linux_joystick_22_api=no,
-	wine_cv_linux_joystick_22_api=no
-	)
+	]], [[/*empty*/]])],[wine_cv_linux_joystick_22_api=yes],[wine_cv_linux_joystick_22_api=no])
    )
    if test "$wine_cv_linux_joystick_22_api" = "yes"
    then
@@ -1449,15 +1379,13 @@ AC_CHECK_MEMBERS([ns_msg._msg_ptr],,,
 
 dnl Check for the external timezone variables timezone and daylight
 AC_CACHE_CHECK([for timezone variable], ac_cv_have_timezone,
-               AC_TRY_LINK([#include <time.h>],[timezone = 1],
-			   ac_cv_have_timezone="yes", ac_cv_have_timezone="no"))
+               AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <time.h>]], [[timezone = 1]])],[ac_cv_have_timezone="yes"],[ac_cv_have_timezone="no"]))
 if test "$ac_cv_have_timezone" = "yes"
 then
     AC_DEFINE(HAVE_TIMEZONE, 1, [Define if you have the timezone variable])
 fi
 AC_CACHE_CHECK([for daylight variable], ac_cv_have_daylight,
-               AC_TRY_LINK([#include <time.h>],[daylight = 1],
-			   ac_cv_have_daylight="yes", ac_cv_have_daylight="no"))
+               AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <time.h>]], [[daylight = 1]])],[ac_cv_have_daylight="yes"],[ac_cv_have_daylight="no"]))
 if test "$ac_cv_have_daylight" = "yes"
 then
     AC_DEFINE(HAVE_DAYLIGHT, 1, [Define if you have the daylight variable])
@@ -1488,7 +1416,7 @@ AC_SUBST(DEPENDENCIES,m4_if(m4_version_compare(m4_defn([m4_PACKAGE_VERSION]), [2
 Makefile: dummy\\
 	-\$(MAKEDEP) -C\$(SRCDIR) -S\$(TOPSRCDIR) -T\$(TOPOBJDIR) \$(EXTRAINCL) \$(DEPEND_SRCS)\\
 \\
-\$(ALL_OBJS): \$(IDL_H_SRCS:.idl=.h)\\
+\$(OBJS): \$(IDL_GEN_HEADERS)\\
 \$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)\\
 \$(LEX_SRCS:.l=.yy.o): \$(LEX_SRCS:.l=.yy.c)\\
 \$(BISON_SRCS:.y=.tab.o): \$(BISON_SRCS:.y=.tab.c)"],
@@ -1499,7 +1427,7 @@ Makefile: dummy\\
 Makefile: dummy
 	-\$(MAKEDEP) -C\$(SRCDIR) -S\$(TOPSRCDIR) -T\$(TOPOBJDIR) \$(EXTRAINCL) \$(DEPEND_SRCS)
 
-\$(ALL_OBJS): \$(IDL_H_SRCS:.idl=.h)
+\$(OBJS): \$(IDL_GEN_HEADERS)
 \$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)
 \$(LEX_SRCS:.l=.yy.o): \$(LEX_SRCS:.l=.yy.c)
 \$(BISON_SRCS:.y=.tab.o): \$(BISON_SRCS:.y=.tab.c)"]))
@@ -1530,323 +1458,353 @@ AC_SUBST_FILE(MAKE_TEST_RULES)
 MAKE_PROG_RULES=programs/Makeprog.rules
 AC_SUBST_FILE(MAKE_PROG_RULES)
 
-AC_CONFIG_FILES([
-Make.rules
-dlls/Makedll.rules
-dlls/Makeimplib.rules
-dlls/Maketest.rules
-programs/Makeprog.rules
-Makefile
-dlls/Makefile
-dlls/activeds/Makefile
-dlls/advapi32/Makefile
-dlls/advapi32/tests/Makefile
-dlls/advpack/Makefile
-dlls/advpack/tests/Makefile
-dlls/amstream/Makefile
-dlls/atl/Makefile
-dlls/avicap32/Makefile
-dlls/avifil32/Makefile
-dlls/cabinet/Makefile
-dlls/cabinet/tests/Makefile
-dlls/capi2032/Makefile
-dlls/cards/Makefile
-dlls/cfgmgr32/Makefile
-dlls/clusapi/Makefile
-dlls/comcat/Makefile
-dlls/comcat/tests/Makefile
-dlls/comctl32/Makefile
-dlls/comctl32/tests/Makefile
-dlls/comdlg32/Makefile
-dlls/comdlg32/tests/Makefile
-dlls/compstui/Makefile
-dlls/crtdll/Makefile
-dlls/crypt32/Makefile
-dlls/crypt32/tests/Makefile
-dlls/cryptdll/Makefile
-dlls/cryptnet/Makefile
-dlls/ctl3d32/Makefile
-dlls/d3d8/Makefile
-dlls/d3d8/tests/Makefile
-dlls/d3d9/Makefile
-dlls/d3d9/tests/Makefile
-dlls/d3dim/Makefile
-dlls/d3drm/Makefile
-dlls/d3dx8/Makefile
-dlls/d3dxof/Makefile
-dlls/dbghelp/Makefile
-dlls/dciman32/Makefile
-dlls/ddraw/Makefile
-dlls/ddraw/tests/Makefile
-dlls/ddrawex/Makefile
-dlls/devenum/Makefile
-dlls/dinput/Makefile
-dlls/dinput/tests/Makefile
-dlls/dinput8/Makefile
-dlls/dmband/Makefile
-dlls/dmcompos/Makefile
-dlls/dmime/Makefile
-dlls/dmloader/Makefile
-dlls/dmscript/Makefile
-dlls/dmstyle/Makefile
-dlls/dmsynth/Makefile
-dlls/dmusic/Makefile
-dlls/dmusic32/Makefile
-dlls/dnsapi/Makefile
-dlls/dnsapi/tests/Makefile
-dlls/dplay/Makefile
-dlls/dplayx/Makefile
-dlls/dpnet/Makefile
-dlls/dpnhpast/Makefile
-dlls/dsound/Makefile
-dlls/dsound/tests/Makefile
-dlls/dswave/Makefile
-dlls/dxdiagn/Makefile
-dlls/dxerr8/Makefile
-dlls/dxerr9/Makefile
-dlls/dxguid/Makefile
-dlls/gdi32/Makefile
-dlls/gdi32/tests/Makefile
-dlls/glu32/Makefile
-dlls/gphoto2.ds/Makefile
-dlls/hhctrl.ocx/Makefile
-dlls/hid/Makefile
-dlls/hlink/Makefile
-dlls/hlink/tests/Makefile
-dlls/iccvid/Makefile
-dlls/icmp/Makefile
-dlls/ifsmgr.vxd/Makefile
-dlls/imaadp32.acm/Makefile
-dlls/imagehlp/Makefile
-dlls/imm32/Makefile
-dlls/infosoft/Makefile
-dlls/infosoft/tests/Makefile
-dlls/inseng/Makefile
-dlls/iphlpapi/Makefile
-dlls/iphlpapi/tests/Makefile
-dlls/itss/Makefile
-dlls/itss/tests/Makefile
-dlls/kernel32/Makefile
-dlls/kernel32/tests/Makefile
-dlls/localspl/Makefile
-dlls/localspl/tests/Makefile
-dlls/lz32/Makefile
-dlls/lz32/tests/Makefile
-dlls/mapi32/Makefile
-dlls/mapi32/tests/Makefile
-dlls/mciavi32/Makefile
-dlls/mcicda/Makefile
-dlls/mciseq/Makefile
-dlls/mciwave/Makefile
-dlls/midimap/Makefile
-dlls/mlang/Makefile
-dlls/mlang/tests/Makefile
-dlls/mmdevldr.vxd/Makefile
-dlls/monodebg.vxd/Makefile
-dlls/mpr/Makefile
-dlls/mprapi/Makefile
-dlls/msacm32.drv/Makefile
-dlls/msacm32/Makefile
-dlls/msacm32/tests/Makefile
-dlls/msadp32.acm/Makefile
-dlls/mscms/Makefile
-dlls/mscms/tests/Makefile
-dlls/mscoree/Makefile
-dlls/msdmo/Makefile
-dlls/msftedit/Makefile
-dlls/msg711.acm/Makefile
-dlls/mshtml/Makefile
-dlls/mshtml/tests/Makefile
-dlls/msi/Makefile
-dlls/msi/tests/Makefile
-dlls/msimg32/Makefile
-dlls/msisys.ocx/Makefile
-dlls/msnet32/Makefile
-dlls/msrle32/Makefile
-dlls/msvcrt/Makefile
-dlls/msvcrt/tests/Makefile
-dlls/msvcrt20/Makefile
-dlls/msvcrt40/Makefile
-dlls/msvcrtd/Makefile
-dlls/msvcrtd/tests/Makefile
-dlls/msvfw32/Makefile
-dlls/msvidc32/Makefile
-dlls/mswsock/Makefile
-dlls/msxml3/Makefile
-dlls/msxml3/tests/Makefile
-dlls/nddeapi/Makefile
-dlls/netapi32/Makefile
-dlls/netapi32/tests/Makefile
-dlls/newdev/Makefile
-dlls/ntdll/Makefile
-dlls/ntdll/tests/Makefile
-dlls/ntdsapi/Makefile
-dlls/objsel/Makefile
-dlls/odbc32/Makefile
-dlls/odbccp32/Makefile
-dlls/ole32/Makefile
-dlls/ole32/tests/Makefile
-dlls/oleacc/Makefile
-dlls/oleaut32/Makefile
-dlls/oleaut32/tests/Makefile
-dlls/olecli32/Makefile
-dlls/oledlg/Makefile
-dlls/olepro32/Makefile
-dlls/olesvr32/Makefile
-dlls/opengl32/Makefile
-dlls/powrprof/Makefile
-dlls/psapi/Makefile
-dlls/psapi/tests/Makefile
-dlls/pstorec/Makefile
-dlls/qcap/Makefile
-dlls/quartz/Makefile
-dlls/quartz/tests/Makefile
-dlls/query/Makefile
-dlls/rasapi32/Makefile
-dlls/resutils/Makefile
-dlls/riched20/Makefile
-dlls/riched20/tests/Makefile
-dlls/riched32/Makefile
-dlls/rpcrt4/Makefile
-dlls/rpcrt4/tests/Makefile
-dlls/rsabase/Makefile
-dlls/rsabase/tests/Makefile
-dlls/rsaenh/Makefile
-dlls/rsaenh/tests/Makefile
-dlls/sane.ds/Makefile
-dlls/secur32/Makefile
-dlls/secur32/tests/Makefile
-dlls/security/Makefile
-dlls/sensapi/Makefile
-dlls/serialui/Makefile
-dlls/setupapi/Makefile
-dlls/setupapi/tests/Makefile
-dlls/sfc/Makefile
-dlls/shdoclc/Makefile
-dlls/shdocvw/Makefile
-dlls/shdocvw/tests/Makefile
-dlls/shell32/Makefile
-dlls/shell32/tests/Makefile
-dlls/shfolder/Makefile
-dlls/shlwapi/Makefile
-dlls/shlwapi/tests/Makefile
-dlls/snmpapi/Makefile
-dlls/spoolss/Makefile
-dlls/stdole2.tlb/Makefile
-dlls/stdole32.tlb/Makefile
-dlls/sti/Makefile
-dlls/strmiids/Makefile
-dlls/svrapi/Makefile
-dlls/tapi32/Makefile
-dlls/twain_32/Makefile
-dlls/unicows/Makefile
-dlls/url/Makefile
-dlls/urlmon/Makefile
-dlls/urlmon/tests/Makefile
-dlls/user32/Makefile
-dlls/user32/tests/Makefile
-dlls/userenv/Makefile
-dlls/usp10/Makefile
-dlls/usp10/tests/Makefile
-dlls/uuid/Makefile
-dlls/uxtheme/Makefile
-dlls/uxtheme/tests/Makefile
-dlls/vdhcp.vxd/Makefile
-dlls/vdmdbg/Makefile
-dlls/version/Makefile
-dlls/version/tests/Makefile
-dlls/vmm.vxd/Makefile
-dlls/vnbt.vxd/Makefile
-dlls/vnetbios.vxd/Makefile
-dlls/vtdapi.vxd/Makefile
-dlls/vwin32.vxd/Makefile
-dlls/w32skrnl/Makefile
-dlls/winecrt0/Makefile
-dlls/wined3d/Makefile
-dlls/winedos/Makefile
-dlls/winejoystick.drv/Makefile
-dlls/winemp3.acm/Makefile
-dlls/wineps.drv/Makefile
-dlls/winequartz.drv/Makefile
-dlls/winex11.drv/Makefile
-dlls/wininet/Makefile
-dlls/wininet/tests/Makefile
-dlls/winmm/Makefile
-dlls/winmm/tests/Makefile
-dlls/winmm/winealsa/Makefile
-dlls/winmm/winearts/Makefile
-dlls/winmm/wineaudioio/Makefile
-dlls/winmm/winecoreaudio/Makefile
-dlls/winmm/wineesd/Makefile
-dlls/winmm/winejack/Makefile
-dlls/winmm/winenas/Makefile
-dlls/winmm/wineoss/Makefile
-dlls/winnls32/Makefile
-dlls/winspool.drv/Makefile
-dlls/winspool.drv/tests/Makefile
-dlls/wintab32/Makefile
-dlls/wintrust/Makefile
-dlls/wintrust/tests/Makefile
-dlls/wldap32/Makefile
-dlls/wnaspi32/Makefile
-dlls/wow32/Makefile
-dlls/ws2_32/Makefile
-dlls/ws2_32/tests/Makefile
-dlls/wsock32/Makefile
-dlls/wtsapi32/Makefile
-documentation/Makefile
-fonts/Makefile
-include/Makefile
-libs/Makefile
-libs/port/Makefile
-libs/wine/Makefile
-libs/wpp/Makefile
-loader/Makefile
-programs/Makefile
-programs/clock/Makefile
-programs/cmd/Makefile
-programs/cmdlgtst/Makefile
-programs/control/Makefile
-programs/eject/Makefile
-programs/expand/Makefile
-programs/explorer/Makefile
-programs/hh/Makefile
-programs/icinfo/Makefile
-programs/iexplore/Makefile
-programs/msiexec/Makefile
-programs/notepad/Makefile
-programs/oleview/Makefile
-programs/progman/Makefile
-programs/regedit/Makefile
-programs/regsvr32/Makefile
-programs/rpcss/Makefile
-programs/rundll32/Makefile
-programs/start/Makefile
-programs/taskmgr/Makefile
-programs/uninstaller/Makefile
-programs/view/Makefile
-programs/wineboot/Makefile
-programs/winebrowser/Makefile
-programs/winecfg/Makefile
-programs/wineconsole/Makefile
-programs/winedbg/Makefile
-programs/winefile/Makefile
-programs/winemenubuilder/Makefile
-programs/winemine/Makefile
-programs/winepath/Makefile
-programs/winetest/Makefile
-programs/winevdm/Makefile
-programs/winhelp/Makefile
-programs/winver/Makefile
-programs/wordpad/Makefile
-server/Makefile
-tools/Makefile
-tools/widl/Makefile
-tools/winebuild/Makefile
-tools/winedump/Makefile
-tools/winegcc/Makefile
-tools/wmc/Makefile
-tools/wrc/Makefile])
+AC_CONFIG_FILES([Make.rules])
+AC_CONFIG_FILES([dlls/Makedll.rules])
+AC_CONFIG_FILES([dlls/Makeimplib.rules])
+AC_CONFIG_FILES([dlls/Maketest.rules])
+AC_CONFIG_FILES([programs/Makeprog.rules])
+AC_CONFIG_FILES([Makefile])
+AC_CONFIG_FILES([dlls/Makefile])
+AC_CONFIG_FILES([dlls/acledit/Makefile])
+AC_CONFIG_FILES([dlls/activeds/Makefile])
+AC_CONFIG_FILES([dlls/advapi32/Makefile])
+AC_CONFIG_FILES([dlls/advapi32/tests/Makefile])
+AC_CONFIG_FILES([dlls/advpack/Makefile])
+AC_CONFIG_FILES([dlls/advpack/tests/Makefile])
+AC_CONFIG_FILES([dlls/amstream/Makefile])
+AC_CONFIG_FILES([dlls/atl/Makefile])
+AC_CONFIG_FILES([dlls/avicap32/Makefile])
+AC_CONFIG_FILES([dlls/avifil32/Makefile])
+AC_CONFIG_FILES([dlls/browseui/Makefile])
+AC_CONFIG_FILES([dlls/browseui/tests/Makefile])
+AC_CONFIG_FILES([dlls/cabinet/Makefile])
+AC_CONFIG_FILES([dlls/cabinet/tests/Makefile])
+AC_CONFIG_FILES([dlls/capi2032/Makefile])
+AC_CONFIG_FILES([dlls/cards/Makefile])
+AC_CONFIG_FILES([dlls/cfgmgr32/Makefile])
+AC_CONFIG_FILES([dlls/clusapi/Makefile])
+AC_CONFIG_FILES([dlls/comcat/Makefile])
+AC_CONFIG_FILES([dlls/comcat/tests/Makefile])
+AC_CONFIG_FILES([dlls/comctl32/Makefile])
+AC_CONFIG_FILES([dlls/comctl32/tests/Makefile])
+AC_CONFIG_FILES([dlls/comdlg32/Makefile])
+AC_CONFIG_FILES([dlls/comdlg32/tests/Makefile])
+AC_CONFIG_FILES([dlls/compstui/Makefile])
+AC_CONFIG_FILES([dlls/credui/Makefile])
+AC_CONFIG_FILES([dlls/crtdll/Makefile])
+AC_CONFIG_FILES([dlls/crypt32/Makefile])
+AC_CONFIG_FILES([dlls/crypt32/tests/Makefile])
+AC_CONFIG_FILES([dlls/cryptdll/Makefile])
+AC_CONFIG_FILES([dlls/cryptnet/Makefile])
+AC_CONFIG_FILES([dlls/ctl3d32/Makefile])
+AC_CONFIG_FILES([dlls/d3d8/Makefile])
+AC_CONFIG_FILES([dlls/d3d8/tests/Makefile])
+AC_CONFIG_FILES([dlls/d3d9/Makefile])
+AC_CONFIG_FILES([dlls/d3d9/tests/Makefile])
+AC_CONFIG_FILES([dlls/d3dim/Makefile])
+AC_CONFIG_FILES([dlls/d3drm/Makefile])
+AC_CONFIG_FILES([dlls/d3drm/tests/Makefile])
+AC_CONFIG_FILES([dlls/d3dx8/Makefile])
+AC_CONFIG_FILES([dlls/d3dxof/Makefile])
+AC_CONFIG_FILES([dlls/dbghelp/Makefile])
+AC_CONFIG_FILES([dlls/dciman32/Makefile])
+AC_CONFIG_FILES([dlls/ddraw/Makefile])
+AC_CONFIG_FILES([dlls/ddraw/tests/Makefile])
+AC_CONFIG_FILES([dlls/ddrawex/Makefile])
+AC_CONFIG_FILES([dlls/devenum/Makefile])
+AC_CONFIG_FILES([dlls/dinput/Makefile])
+AC_CONFIG_FILES([dlls/dinput/tests/Makefile])
+AC_CONFIG_FILES([dlls/dinput8/Makefile])
+AC_CONFIG_FILES([dlls/dmband/Makefile])
+AC_CONFIG_FILES([dlls/dmcompos/Makefile])
+AC_CONFIG_FILES([dlls/dmime/Makefile])
+AC_CONFIG_FILES([dlls/dmloader/Makefile])
+AC_CONFIG_FILES([dlls/dmscript/Makefile])
+AC_CONFIG_FILES([dlls/dmstyle/Makefile])
+AC_CONFIG_FILES([dlls/dmsynth/Makefile])
+AC_CONFIG_FILES([dlls/dmusic/Makefile])
+AC_CONFIG_FILES([dlls/dmusic32/Makefile])
+AC_CONFIG_FILES([dlls/dnsapi/Makefile])
+AC_CONFIG_FILES([dlls/dnsapi/tests/Makefile])
+AC_CONFIG_FILES([dlls/dplay/Makefile])
+AC_CONFIG_FILES([dlls/dplayx/Makefile])
+AC_CONFIG_FILES([dlls/dplayx/tests/Makefile])
+AC_CONFIG_FILES([dlls/dpnaddr/Makefile])
+AC_CONFIG_FILES([dlls/dpnet/Makefile])
+AC_CONFIG_FILES([dlls/dpnhpast/Makefile])
+AC_CONFIG_FILES([dlls/dsound/Makefile])
+AC_CONFIG_FILES([dlls/dsound/tests/Makefile])
+AC_CONFIG_FILES([dlls/dswave/Makefile])
+AC_CONFIG_FILES([dlls/dwmapi/Makefile])
+AC_CONFIG_FILES([dlls/dxdiagn/Makefile])
+AC_CONFIG_FILES([dlls/dxerr8/Makefile])
+AC_CONFIG_FILES([dlls/dxerr9/Makefile])
+AC_CONFIG_FILES([dlls/dxguid/Makefile])
+AC_CONFIG_FILES([dlls/gdi32/Makefile])
+AC_CONFIG_FILES([dlls/gdi32/tests/Makefile])
+AC_CONFIG_FILES([dlls/gdiplus/Makefile])
+AC_CONFIG_FILES([dlls/gdiplus/tests/Makefile])
+AC_CONFIG_FILES([dlls/glu32/Makefile])
+AC_CONFIG_FILES([dlls/gphoto2.ds/Makefile])
+AC_CONFIG_FILES([dlls/hal/Makefile])
+AC_CONFIG_FILES([dlls/hhctrl.ocx/Makefile])
+AC_CONFIG_FILES([dlls/hid/Makefile])
+AC_CONFIG_FILES([dlls/hlink/Makefile])
+AC_CONFIG_FILES([dlls/hlink/tests/Makefile])
+AC_CONFIG_FILES([dlls/hnetcfg/Makefile])
+AC_CONFIG_FILES([dlls/iccvid/Makefile])
+AC_CONFIG_FILES([dlls/icmp/Makefile])
+AC_CONFIG_FILES([dlls/ifsmgr.vxd/Makefile])
+AC_CONFIG_FILES([dlls/imaadp32.acm/Makefile])
+AC_CONFIG_FILES([dlls/imagehlp/Makefile])
+AC_CONFIG_FILES([dlls/imm32/Makefile])
+AC_CONFIG_FILES([dlls/infosoft/Makefile])
+AC_CONFIG_FILES([dlls/infosoft/tests/Makefile])
+AC_CONFIG_FILES([dlls/inseng/Makefile])
+AC_CONFIG_FILES([dlls/iphlpapi/Makefile])
+AC_CONFIG_FILES([dlls/iphlpapi/tests/Makefile])
+AC_CONFIG_FILES([dlls/itss/Makefile])
+AC_CONFIG_FILES([dlls/itss/tests/Makefile])
+AC_CONFIG_FILES([dlls/kernel32/Makefile])
+AC_CONFIG_FILES([dlls/kernel32/tests/Makefile])
+AC_CONFIG_FILES([dlls/localspl/Makefile])
+AC_CONFIG_FILES([dlls/localspl/tests/Makefile])
+AC_CONFIG_FILES([dlls/localui/Makefile])
+AC_CONFIG_FILES([dlls/localui/tests/Makefile])
+AC_CONFIG_FILES([dlls/lz32/Makefile])
+AC_CONFIG_FILES([dlls/lz32/tests/Makefile])
+AC_CONFIG_FILES([dlls/mapi32/Makefile])
+AC_CONFIG_FILES([dlls/mapi32/tests/Makefile])
+AC_CONFIG_FILES([dlls/mciavi32/Makefile])
+AC_CONFIG_FILES([dlls/mcicda/Makefile])
+AC_CONFIG_FILES([dlls/mciseq/Makefile])
+AC_CONFIG_FILES([dlls/mciwave/Makefile])
+AC_CONFIG_FILES([dlls/midimap/Makefile])
+AC_CONFIG_FILES([dlls/mlang/Makefile])
+AC_CONFIG_FILES([dlls/mlang/tests/Makefile])
+AC_CONFIG_FILES([dlls/mmdevldr.vxd/Makefile])
+AC_CONFIG_FILES([dlls/monodebg.vxd/Makefile])
+AC_CONFIG_FILES([dlls/mpr/Makefile])
+AC_CONFIG_FILES([dlls/mprapi/Makefile])
+AC_CONFIG_FILES([dlls/msacm32.drv/Makefile])
+AC_CONFIG_FILES([dlls/msacm32/Makefile])
+AC_CONFIG_FILES([dlls/msacm32/tests/Makefile])
+AC_CONFIG_FILES([dlls/msadp32.acm/Makefile])
+AC_CONFIG_FILES([dlls/mscms/Makefile])
+AC_CONFIG_FILES([dlls/mscms/tests/Makefile])
+AC_CONFIG_FILES([dlls/mscoree/Makefile])
+AC_CONFIG_FILES([dlls/msdmo/Makefile])
+AC_CONFIG_FILES([dlls/msftedit/Makefile])
+AC_CONFIG_FILES([dlls/msg711.acm/Makefile])
+AC_CONFIG_FILES([dlls/mshtml/Makefile])
+AC_CONFIG_FILES([dlls/mshtml/tests/Makefile])
+AC_CONFIG_FILES([dlls/msi/Makefile])
+AC_CONFIG_FILES([dlls/msi/tests/Makefile])
+AC_CONFIG_FILES([dlls/msimg32/Makefile])
+AC_CONFIG_FILES([dlls/msisys.ocx/Makefile])
+AC_CONFIG_FILES([dlls/msnet32/Makefile])
+AC_CONFIG_FILES([dlls/msrle32/Makefile])
+AC_CONFIG_FILES([dlls/msvcrt/Makefile])
+AC_CONFIG_FILES([dlls/msvcrt/tests/Makefile])
+AC_CONFIG_FILES([dlls/msvcrt20/Makefile])
+AC_CONFIG_FILES([dlls/msvcrt40/Makefile])
+AC_CONFIG_FILES([dlls/msvcrtd/Makefile])
+AC_CONFIG_FILES([dlls/msvcrtd/tests/Makefile])
+AC_CONFIG_FILES([dlls/msvfw32/Makefile])
+AC_CONFIG_FILES([dlls/msvidc32/Makefile])
+AC_CONFIG_FILES([dlls/mswsock/Makefile])
+AC_CONFIG_FILES([dlls/msxml3/Makefile])
+AC_CONFIG_FILES([dlls/msxml3/tests/Makefile])
+AC_CONFIG_FILES([dlls/nddeapi/Makefile])
+AC_CONFIG_FILES([dlls/netapi32/Makefile])
+AC_CONFIG_FILES([dlls/netapi32/tests/Makefile])
+AC_CONFIG_FILES([dlls/newdev/Makefile])
+AC_CONFIG_FILES([dlls/ntdll/Makefile])
+AC_CONFIG_FILES([dlls/ntdll/tests/Makefile])
+AC_CONFIG_FILES([dlls/ntdsapi/Makefile])
+AC_CONFIG_FILES([dlls/ntoskrnl.exe/Makefile])
+AC_CONFIG_FILES([dlls/ntprint/Makefile])
+AC_CONFIG_FILES([dlls/ntprint/tests/Makefile])
+AC_CONFIG_FILES([dlls/objsel/Makefile])
+AC_CONFIG_FILES([dlls/odbc32/Makefile])
+AC_CONFIG_FILES([dlls/odbccp32/Makefile])
+AC_CONFIG_FILES([dlls/odbccp32/tests/Makefile])
+AC_CONFIG_FILES([dlls/ole32/Makefile])
+AC_CONFIG_FILES([dlls/ole32/tests/Makefile])
+AC_CONFIG_FILES([dlls/oleacc/Makefile])
+AC_CONFIG_FILES([dlls/oleaut32/Makefile])
+AC_CONFIG_FILES([dlls/oleaut32/tests/Makefile])
+AC_CONFIG_FILES([dlls/olecli32/Makefile])
+AC_CONFIG_FILES([dlls/oledlg/Makefile])
+AC_CONFIG_FILES([dlls/olepro32/Makefile])
+AC_CONFIG_FILES([dlls/olesvr32/Makefile])
+AC_CONFIG_FILES([dlls/opengl32/Makefile])
+AC_CONFIG_FILES([dlls/pdh/Makefile])
+AC_CONFIG_FILES([dlls/powrprof/Makefile])
+AC_CONFIG_FILES([dlls/printui/Makefile])
+AC_CONFIG_FILES([dlls/psapi/Makefile])
+AC_CONFIG_FILES([dlls/psapi/tests/Makefile])
+AC_CONFIG_FILES([dlls/pstorec/Makefile])
+AC_CONFIG_FILES([dlls/qcap/Makefile])
+AC_CONFIG_FILES([dlls/quartz/Makefile])
+AC_CONFIG_FILES([dlls/quartz/tests/Makefile])
+AC_CONFIG_FILES([dlls/query/Makefile])
+AC_CONFIG_FILES([dlls/rasapi32/Makefile])
+AC_CONFIG_FILES([dlls/resutils/Makefile])
+AC_CONFIG_FILES([dlls/riched20/Makefile])
+AC_CONFIG_FILES([dlls/riched20/tests/Makefile])
+AC_CONFIG_FILES([dlls/riched32/Makefile])
+AC_CONFIG_FILES([dlls/rpcrt4/Makefile])
+AC_CONFIG_FILES([dlls/rpcrt4/tests/Makefile])
+AC_CONFIG_FILES([dlls/rsabase/Makefile])
+AC_CONFIG_FILES([dlls/rsabase/tests/Makefile])
+AC_CONFIG_FILES([dlls/rsaenh/Makefile])
+AC_CONFIG_FILES([dlls/rsaenh/tests/Makefile])
+AC_CONFIG_FILES([dlls/sane.ds/Makefile])
+AC_CONFIG_FILES([dlls/schannel/Makefile])
+AC_CONFIG_FILES([dlls/schannel/tests/Makefile])
+AC_CONFIG_FILES([dlls/secur32/Makefile])
+AC_CONFIG_FILES([dlls/secur32/tests/Makefile])
+AC_CONFIG_FILES([dlls/security/Makefile])
+AC_CONFIG_FILES([dlls/sensapi/Makefile])
+AC_CONFIG_FILES([dlls/serialui/Makefile])
+AC_CONFIG_FILES([dlls/serialui/tests/Makefile])
+AC_CONFIG_FILES([dlls/setupapi/Makefile])
+AC_CONFIG_FILES([dlls/setupapi/tests/Makefile])
+AC_CONFIG_FILES([dlls/sfc/Makefile])
+AC_CONFIG_FILES([dlls/sfc_os/Makefile])
+AC_CONFIG_FILES([dlls/shdoclc/Makefile])
+AC_CONFIG_FILES([dlls/shdocvw/Makefile])
+AC_CONFIG_FILES([dlls/shdocvw/tests/Makefile])
+AC_CONFIG_FILES([dlls/shell32/Makefile])
+AC_CONFIG_FILES([dlls/shell32/tests/Makefile])
+AC_CONFIG_FILES([dlls/shfolder/Makefile])
+AC_CONFIG_FILES([dlls/shlwapi/Makefile])
+AC_CONFIG_FILES([dlls/shlwapi/tests/Makefile])
+AC_CONFIG_FILES([dlls/snmpapi/Makefile])
+AC_CONFIG_FILES([dlls/snmpapi/tests/Makefile])
+AC_CONFIG_FILES([dlls/spoolss/Makefile])
+AC_CONFIG_FILES([dlls/stdole2.tlb/Makefile])
+AC_CONFIG_FILES([dlls/stdole32.tlb/Makefile])
+AC_CONFIG_FILES([dlls/sti/Makefile])
+AC_CONFIG_FILES([dlls/strmiids/Makefile])
+AC_CONFIG_FILES([dlls/svrapi/Makefile])
+AC_CONFIG_FILES([dlls/sxs/Makefile])
+AC_CONFIG_FILES([dlls/tapi32/Makefile])
+AC_CONFIG_FILES([dlls/twain_32/Makefile])
+AC_CONFIG_FILES([dlls/unicows/Makefile])
+AC_CONFIG_FILES([dlls/url/Makefile])
+AC_CONFIG_FILES([dlls/urlmon/Makefile])
+AC_CONFIG_FILES([dlls/urlmon/tests/Makefile])
+AC_CONFIG_FILES([dlls/user32/Makefile])
+AC_CONFIG_FILES([dlls/user32/tests/Makefile])
+AC_CONFIG_FILES([dlls/userenv/Makefile])
+AC_CONFIG_FILES([dlls/usp10/Makefile])
+AC_CONFIG_FILES([dlls/usp10/tests/Makefile])
+AC_CONFIG_FILES([dlls/uuid/Makefile])
+AC_CONFIG_FILES([dlls/uxtheme/Makefile])
+AC_CONFIG_FILES([dlls/uxtheme/tests/Makefile])
+AC_CONFIG_FILES([dlls/vdhcp.vxd/Makefile])
+AC_CONFIG_FILES([dlls/vdmdbg/Makefile])
+AC_CONFIG_FILES([dlls/version/Makefile])
+AC_CONFIG_FILES([dlls/version/tests/Makefile])
+AC_CONFIG_FILES([dlls/vmm.vxd/Makefile])
+AC_CONFIG_FILES([dlls/vnbt.vxd/Makefile])
+AC_CONFIG_FILES([dlls/vnetbios.vxd/Makefile])
+AC_CONFIG_FILES([dlls/vtdapi.vxd/Makefile])
+AC_CONFIG_FILES([dlls/vwin32.vxd/Makefile])
+AC_CONFIG_FILES([dlls/w32skrnl/Makefile])
+AC_CONFIG_FILES([dlls/winealsa.drv/Makefile])
+AC_CONFIG_FILES([dlls/wineaudioio.drv/Makefile])
+AC_CONFIG_FILES([dlls/winecoreaudio.drv/Makefile])
+AC_CONFIG_FILES([dlls/winecrt0/Makefile])
+AC_CONFIG_FILES([dlls/wined3d/Makefile])
+AC_CONFIG_FILES([dlls/winedos/Makefile])
+AC_CONFIG_FILES([dlls/wineesd.drv/Makefile])
+AC_CONFIG_FILES([dlls/winejack.drv/Makefile])
+AC_CONFIG_FILES([dlls/winejoystick.drv/Makefile])
+AC_CONFIG_FILES([dlls/winemp3.acm/Makefile])
+AC_CONFIG_FILES([dlls/winenas.drv/Makefile])
+AC_CONFIG_FILES([dlls/wineoss.drv/Makefile])
+AC_CONFIG_FILES([dlls/wineps.drv/Makefile])
+AC_CONFIG_FILES([dlls/winequartz.drv/Makefile])
+AC_CONFIG_FILES([dlls/winex11.drv/Makefile])
+AC_CONFIG_FILES([dlls/wing32/Makefile])
+AC_CONFIG_FILES([dlls/wininet/Makefile])
+AC_CONFIG_FILES([dlls/wininet/tests/Makefile])
+AC_CONFIG_FILES([dlls/winmm/Makefile])
+AC_CONFIG_FILES([dlls/winmm/tests/Makefile])
+AC_CONFIG_FILES([dlls/winnls32/Makefile])
+AC_CONFIG_FILES([dlls/winscard/Makefile])
+AC_CONFIG_FILES([dlls/winspool.drv/Makefile])
+AC_CONFIG_FILES([dlls/winspool.drv/tests/Makefile])
+AC_CONFIG_FILES([dlls/wintab32/Makefile])
+AC_CONFIG_FILES([dlls/wintrust/Makefile])
+AC_CONFIG_FILES([dlls/wintrust/tests/Makefile])
+AC_CONFIG_FILES([dlls/wldap32/Makefile])
+AC_CONFIG_FILES([dlls/wnaspi32/Makefile])
+AC_CONFIG_FILES([dlls/wow32/Makefile])
+AC_CONFIG_FILES([dlls/ws2_32/Makefile])
+AC_CONFIG_FILES([dlls/ws2_32/tests/Makefile])
+AC_CONFIG_FILES([dlls/wsock32/Makefile])
+AC_CONFIG_FILES([dlls/wtsapi32/Makefile])
+AC_CONFIG_FILES([documentation/Makefile])
+AC_CONFIG_FILES([fonts/Makefile])
+AC_CONFIG_FILES([include/Makefile])
+AC_CONFIG_FILES([libs/Makefile])
+AC_CONFIG_FILES([libs/port/Makefile])
+AC_CONFIG_FILES([libs/wine/Makefile])
+AC_CONFIG_FILES([libs/wpp/Makefile])
+AC_CONFIG_FILES([loader/Makefile])
+AC_CONFIG_FILES([programs/Makefile])
+AC_CONFIG_FILES([programs/clock/Makefile])
+AC_CONFIG_FILES([programs/cmd/Makefile])
+AC_CONFIG_FILES([programs/cmdlgtst/Makefile])
+AC_CONFIG_FILES([programs/control/Makefile])
+AC_CONFIG_FILES([programs/eject/Makefile])
+AC_CONFIG_FILES([programs/expand/Makefile])
+AC_CONFIG_FILES([programs/explorer/Makefile])
+AC_CONFIG_FILES([programs/hh/Makefile])
+AC_CONFIG_FILES([programs/icinfo/Makefile])
+AC_CONFIG_FILES([programs/iexplore/Makefile])
+AC_CONFIG_FILES([programs/msiexec/Makefile])
+AC_CONFIG_FILES([programs/net/Makefile])
+AC_CONFIG_FILES([programs/notepad/Makefile])
+AC_CONFIG_FILES([programs/oleview/Makefile])
+AC_CONFIG_FILES([programs/progman/Makefile])
+AC_CONFIG_FILES([programs/regedit/Makefile])
+AC_CONFIG_FILES([programs/regsvr32/Makefile])
+AC_CONFIG_FILES([programs/rpcss/Makefile])
+AC_CONFIG_FILES([programs/rundll32/Makefile])
+AC_CONFIG_FILES([programs/spoolsv/Makefile])
+AC_CONFIG_FILES([programs/start/Makefile])
+AC_CONFIG_FILES([programs/taskmgr/Makefile])
+AC_CONFIG_FILES([programs/uninstaller/Makefile])
+AC_CONFIG_FILES([programs/view/Makefile])
+AC_CONFIG_FILES([programs/wineboot/Makefile])
+AC_CONFIG_FILES([programs/winebrowser/Makefile])
+AC_CONFIG_FILES([programs/winecfg/Makefile])
+AC_CONFIG_FILES([programs/wineconsole/Makefile])
+AC_CONFIG_FILES([programs/winedbg/Makefile])
+AC_CONFIG_FILES([programs/winedevice/Makefile])
+AC_CONFIG_FILES([programs/winefile/Makefile])
+AC_CONFIG_FILES([programs/winemenubuilder/Makefile])
+AC_CONFIG_FILES([programs/winemine/Makefile])
+AC_CONFIG_FILES([programs/winepath/Makefile])
+AC_CONFIG_FILES([programs/winetest/Makefile])
+AC_CONFIG_FILES([programs/winevdm/Makefile])
+AC_CONFIG_FILES([programs/winhelp/Makefile])
+AC_CONFIG_FILES([programs/winver/Makefile])
+AC_CONFIG_FILES([programs/wordpad/Makefile])
+AC_CONFIG_FILES([programs/xcopy/Makefile])
+AC_CONFIG_FILES([server/Makefile])
+AC_CONFIG_FILES([tools/Makefile])
+AC_CONFIG_FILES([tools/widl/Makefile])
+AC_CONFIG_FILES([tools/winebuild/Makefile])
+AC_CONFIG_FILES([tools/winedump/Makefile])
+AC_CONFIG_FILES([tools/winegcc/Makefile])
+AC_CONFIG_FILES([tools/wmc/Makefile])
+AC_CONFIG_FILES([tools/wrc/Makefile])
 
 AC_OUTPUT
 
@@ -2052,7 +2010,6 @@ then
 fi
 
 if test -z "$ALSALIBS" -a \
-        -z "$ARTSC_LIBS" -a \
         -z "$AUDIOIOLIBS" -a \
         -z "$NASLIBS" -a \
         -z "$ESD_LIBS" -a \
@@ -2064,7 +2021,7 @@ then
   echo >&2
   AC_MSG_WARN([No sound system was found. Windows applications will be silent.])
   AC_MSG_WARN([The currently supported sound systems are:])
-  AC_MSG_WARN([ALSA, ARTS, EsounD, AudioIO, Jack, NAS and OSS])
+  AC_MSG_WARN([ALSA, EsounD, AudioIO, Jack, NAS and OSS])
 fi
 
 echo
@@ -2075,5 +2032,5 @@ dnl Local Variables:
 dnl comment-start: "dnl "
 dnl comment-end: ""
 dnl comment-start-skip: "\\bdnl\\b\\s *"
-dnl compile-command: "autoconf && autoheader"
+dnl compile-command: "autoreconf --warnings=all"
 dnl End:

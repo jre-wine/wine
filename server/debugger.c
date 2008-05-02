@@ -36,7 +36,6 @@
 #include "process.h"
 #include "thread.h"
 #include "request.h"
-#include "console.h"
 
 enum debug_event_state { EVENT_QUEUED, EVENT_SENT, EVENT_CONTINUED };
 
@@ -78,6 +77,7 @@ static const struct object_ops debug_event_ops =
     no_get_fd,                     /* get_fd */
     no_map_access,                 /* map_access */
     no_lookup_name,                /* lookup_name */
+    no_open_file,                  /* open_file */
     no_close_handle,               /* close_handle */
     debug_event_destroy            /* destroy */
 };
@@ -98,6 +98,7 @@ static const struct object_ops debug_ctx_ops =
     no_get_fd,                     /* get_fd */
     no_map_access,                 /* map_access */
     no_lookup_name,                /* lookup_name */
+    no_open_file,                  /* open_file */
     no_close_handle,               /* close_handle */
     debug_ctx_destroy              /* destroy */
 };
@@ -424,7 +425,7 @@ static int debugger_attach( struct process *process, struct thread *debugger )
         if (thread->process == process) goto error;
 
     /* don't let a debugger debug its console... won't work */
-    if (debugger->process->console && debugger->process->console->renderer->process == process)
+    if (debugger->process->console && console_get_renderer(debugger->process->console)->process == process)
         goto error;
 
     suspend_process( process );

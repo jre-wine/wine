@@ -76,6 +76,73 @@ static int get_refcount(IUnknown *object)
     return IUnknown_Release(object);
 }
 
+static inline void print_elements(
+    D3DVERTEXELEMENT9 *elements) {
+
+    D3DVERTEXELEMENT9 last = D3DDECL_END();
+    D3DVERTEXELEMENT9 *ptr = elements;
+    int count = 0;
+
+    while (memcmp(ptr, &last, sizeof(D3DVERTEXELEMENT9))) {
+
+        trace(
+            "[Element %d] Stream = %d, Offset = %d, Type = %d, Method = %d, Usage = %d, UsageIndex = %d\n",
+             count, ptr->Stream, ptr->Offset, ptr->Type, ptr->Method, ptr->Usage, ptr->UsageIndex);
+
+        ptr++;
+        count++;
+    }
+}
+
+static int compare_elements(
+    IDirect3DVertexDeclaration9 *decl,
+    const D3DVERTEXELEMENT9 *expected_elements) {
+
+    HRESULT hr;
+    unsigned int i, size;
+    D3DVERTEXELEMENT9 last = D3DDECL_END();
+    D3DVERTEXELEMENT9 *elements = NULL;
+
+    /* How many elements are there? */
+    hr = IDirect3DVertexDeclaration9_GetDeclaration( decl, NULL, &size );
+    ok(SUCCEEDED(hr), "GetDeclaration returned %#x, expected %#x\n", hr, D3D_OK);
+    if (FAILED(hr)) goto fail;
+
+    /* Allocate buffer */
+    elements = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(D3DVERTEXELEMENT9) * size);
+    ok (elements != NULL, "Out of memory, aborting test\n");
+    if (elements == NULL) goto fail;
+
+    /* Get the elements */
+    hr = IDirect3DVertexDeclaration9_GetDeclaration( decl, elements, &size);
+    ok(SUCCEEDED(hr), "GetDeclaration returned %#x, expected %#x\n", hr, D3D_OK);
+    if (FAILED(hr)) goto fail;
+
+    /* Compare one by one */
+    for (i = 0; i < size; i++) {
+
+        int status;
+
+        int end1 = memcmp(&elements[i], &last, sizeof(D3DVERTEXELEMENT9));
+        int end2 = memcmp(&expected_elements[i], &last, sizeof(D3DVERTEXELEMENT9));
+        status = ((end1 && !end2) || (!end1 && end2));
+        ok (!status, "Mismatch in size, test declaration is %s than expected\n",
+            (end1 && !end2) ? "shorter" : "longer");
+        if (status) { print_elements(elements); goto fail; }
+
+        status = memcmp(&elements[i], &expected_elements[i], sizeof(D3DVERTEXELEMENT9));
+        ok (!status, "Mismatch in element %d\n", i);
+        if (status) { print_elements(elements); goto fail; }
+    }
+
+    HeapFree(GetProcessHeap(), 0, elements);
+    return S_OK;
+
+    fail:
+    HeapFree(GetProcessHeap(), 0, elements);
+    return E_FAIL;
+}
+
 static IDirect3DVertexDeclaration9 *test_create_vertex_declaration(IDirect3DDevice9 *device_ptr, D3DVERTEXELEMENT9 *vertex_decl)
 {
     IDirect3DVertexDeclaration9 *decl_ptr = 0;
@@ -161,15 +228,12 @@ static HRESULT test_fvf_to_decl(
     IDirect3DDevice9* device,
     IDirect3DVertexDeclaration9* default_decl,
     DWORD test_fvf,
-    CONST D3DVERTEXELEMENT9 expected_elements[],
-    D3DVERTEXELEMENT9* result_elements_ptr,
-    UINT expected_size,
+    const D3DVERTEXELEMENT9 expected_elements[],
     char object_should_change) 
 {
 
     HRESULT hr;
     IDirect3DVertexDeclaration9 *result_decl = NULL;
-    UINT result_size = 12345;
 
     /* Set a default declaration to make sure it is changed */
     hr = IDirect3DDevice9_SetVertexDeclaration ( device, default_decl );
@@ -197,48 +261,8 @@ static HRESULT test_fvf_to_decl(
     ok(result_decl != NULL, "result declaration was null\n");
     if (result_decl == NULL) 
         goto fail;
-    else { 
-
-        int status;
-
-        /* Check if the size changed, and abort if it did */
-        hr = IDirect3DVertexDeclaration9_GetDeclaration( result_decl, NULL, &result_size );
-        ok(SUCCEEDED(hr), "GetDeclaration returned %#x, expected %#x\n", hr, D3D_OK);
-        if (FAILED(hr)) goto fail;
-        ok(result_size == expected_size, "result declaration size: %d, "
-            "expected: %d\n", result_size, expected_size);
-        if (result_size != expected_size) goto fail;
-
-        /* Check the actual elements. Write it them in a caller-allocated array of the correct size
-         * That's fine, since we aborted above if the size didn't match the caller's expectations */
-        hr = IDirect3DVertexDeclaration9_GetDeclaration( result_decl, result_elements_ptr, &result_size );
-        ok(SUCCEEDED(hr), "GetDeclaration returned %#x, expected %#x\n", hr, D3D_OK);
-        if (FAILED(hr)) goto fail;
-
-        ok(result_size == expected_size, "result declaration size: %d, "
-            "expected: %d\n", result_size, expected_size);
-        if (result_size != expected_size) goto fail;
-        
-        status = memcmp(expected_elements, result_elements_ptr, expected_size * sizeof(D3DVERTEXELEMENT9));  
-        ok(!status, "result declaration differs from expected\n");
-        if (status) {
-            unsigned int i;
-
-            for (i = 0; i < expected_size; i++) { 
-
-                 trace(
-                     "Stream = %d, Offset = %d, Type = %d, "
-                     "Method = %d, Usage = %d, UsageIndex = %d\n", 
-                     result_elements_ptr[i].Stream,
-                     result_elements_ptr[i].Offset,
-                     result_elements_ptr[i].Type,
-                     result_elements_ptr[i].Method,
-                     result_elements_ptr[i].Usage,
-                     result_elements_ptr[i].UsageIndex);
-            }
-            goto fail;
-        }
-    }
+    else if (compare_elements(result_decl, expected_elements) != S_OK)
+        goto fail;
 
     if (result_decl) IUnknown_Release( result_decl );
     return S_OK;    
@@ -298,7 +322,6 @@ static void test_fvf_decl_conversion(IDirect3DDevice9 *pDevice)
 {
 
     HRESULT hr;
-    D3DVERTEXELEMENT9 result_buffer[MAXD3DDECLLENGTH];
     unsigned int i;
 
     IDirect3DVertexDeclaration9* default_decl = NULL;
@@ -424,167 +447,167 @@ static void test_fvf_decl_conversion(IDirect3DDevice9 *pDevice)
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZ, test_buffer, result_buffer, 2, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZ, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
           { { 0, 0, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_POSITIONT, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZRHW, test_buffer, result_buffer, 2, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZRHW, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
               { 0, 12, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_BLENDWEIGHT, 0 },
               { 0, 28, D3DDECLTYPE_UBYTE4, 0, D3DDECLUSAGE_BLENDINDICES, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB5 | D3DFVF_LASTBETA_UBYTE4,
-            test_buffer, result_buffer, 4, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
+            D3DFVF_XYZB5 | D3DFVF_LASTBETA_UBYTE4, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
               { 0, 12, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_BLENDWEIGHT, 0 },
               { 0, 28, D3DDECLTYPE_D3DCOLOR, 0, D3DDECLUSAGE_BLENDINDICES, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB5 | D3DFVF_LASTBETA_D3DCOLOR,
-           test_buffer, result_buffer, 4, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
+           D3DFVF_XYZB5 | D3DFVF_LASTBETA_D3DCOLOR, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
               { 0, 12, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_BLENDWEIGHT, 0 },
               { 0, 28, D3DDECLTYPE_FLOAT1, 0, D3DDECLUSAGE_BLENDINDICES, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB5, test_buffer, result_buffer, 4, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB5, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
               { 0, 12, D3DDECLTYPE_FLOAT1, 0, D3DDECLUSAGE_BLENDWEIGHT, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB1, test_buffer, result_buffer, 3, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB1, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
               { 0, 12, D3DDECLTYPE_UBYTE4, 0, D3DDECLUSAGE_BLENDINDICES, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB1 | D3DFVF_LASTBETA_UBYTE4,
-            test_buffer, result_buffer, 3, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
+            D3DFVF_XYZB1 | D3DFVF_LASTBETA_UBYTE4, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
               { 0, 12, D3DDECLTYPE_D3DCOLOR, 0, D3DDECLUSAGE_BLENDINDICES, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB1 | D3DFVF_LASTBETA_D3DCOLOR,
-            test_buffer, result_buffer, 3, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
+            D3DFVF_XYZB1 | D3DFVF_LASTBETA_D3DCOLOR, test_buffer, 1));
     }
     {
          CONST D3DVERTEXELEMENT9 test_buffer[] =
              { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
                { 0, 12, D3DDECLTYPE_FLOAT2, 0, D3DDECLUSAGE_BLENDWEIGHT, 0 }, D3DDECL_END() };
-         VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB2, test_buffer, result_buffer, 3, 1));
+         VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB2, test_buffer, 1));
     }
     {
          CONST D3DVERTEXELEMENT9 test_buffer[] =
              { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
                { 0, 12, D3DDECLTYPE_FLOAT1, 0, D3DDECLUSAGE_BLENDWEIGHT, 0 },
                { 0, 16, D3DDECLTYPE_UBYTE4, 0, D3DDECLUSAGE_BLENDINDICES, 0 }, D3DDECL_END() };
-         VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB2 | D3DFVF_LASTBETA_UBYTE4,
-             test_buffer, result_buffer, 4, 1));
+         VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
+             D3DFVF_XYZB2 | D3DFVF_LASTBETA_UBYTE4, test_buffer, 1));
      }
      {
          CONST D3DVERTEXELEMENT9 test_buffer[] =
              { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
                { 0, 12, D3DDECLTYPE_D3DCOLOR, 0, D3DDECLUSAGE_BLENDWEIGHT, 0 },
                { 0, 16, D3DDECLTYPE_UBYTE4, 0, D3DDECLUSAGE_BLENDINDICES, 0 }, D3DDECL_END() };
-         VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB2 | D3DFVF_LASTBETA_D3DCOLOR,
-             test_buffer, result_buffer, 4, 1));
+         VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
+             D3DFVF_XYZB2 | D3DFVF_LASTBETA_D3DCOLOR, test_buffer, 1));
      }
      {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
               { 0, 12, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_BLENDWEIGHT, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB3, test_buffer, result_buffer, 3, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB3, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
               { 0, 12, D3DDECLTYPE_FLOAT2, 0, D3DDECLUSAGE_BLENDWEIGHT, 0 },
               { 0, 20, D3DDECLTYPE_UBYTE4, 0, D3DDECLUSAGE_BLENDINDICES, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB3 | D3DFVF_LASTBETA_UBYTE4,
-            test_buffer, result_buffer, 4, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
+            D3DFVF_XYZB3 | D3DFVF_LASTBETA_UBYTE4, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
               { 0, 12, D3DDECLTYPE_FLOAT2, 0, D3DDECLUSAGE_BLENDWEIGHT, 0 },
               { 0, 20, D3DDECLTYPE_D3DCOLOR, 0, D3DDECLUSAGE_BLENDINDICES, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB3 | D3DFVF_LASTBETA_D3DCOLOR,
-            test_buffer, result_buffer, 4, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
+            D3DFVF_XYZB3 | D3DFVF_LASTBETA_D3DCOLOR, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
               { 0, 12, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_BLENDWEIGHT, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB4, test_buffer, result_buffer, 3, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB4, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
               { 0, 12, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_BLENDWEIGHT, 0 },
               { 0, 24, D3DDECLTYPE_UBYTE4, 0, D3DDECLUSAGE_BLENDINDICES, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB4 | D3DFVF_LASTBETA_UBYTE4,
-            test_buffer, result_buffer, 4, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
+            D3DFVF_XYZB4 | D3DFVF_LASTBETA_UBYTE4, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0 },
               { 0, 12, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_BLENDWEIGHT, 0 },
               { 0, 24, D3DDECLTYPE_D3DCOLOR, 0, D3DDECLUSAGE_BLENDINDICES, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB4 | D3DFVF_LASTBETA_D3DCOLOR,
-            test_buffer, result_buffer, 4, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
+            D3DFVF_XYZB4 | D3DFVF_LASTBETA_D3DCOLOR, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_NORMAL, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_NORMAL, test_buffer, result_buffer, 2, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_NORMAL, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT1, 0, D3DDECLUSAGE_PSIZE, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_PSIZE, test_buffer, result_buffer, 2, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_PSIZE, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_D3DCOLOR, 0, D3DDECLUSAGE_COLOR, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_DIFFUSE, test_buffer, result_buffer, 2, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_DIFFUSE, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_D3DCOLOR, 0, D3DDECLUSAGE_COLOR, 1 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_SPECULAR, test_buffer, result_buffer, 2, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_SPECULAR, test_buffer, 1));
     }
 
     /* Make sure textures of different sizes work */
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT1, 0, D3DDECLUSAGE_TEXCOORD, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_TEXCOORDSIZE1(0) | D3DFVF_TEX1,
-           test_buffer, result_buffer, 2, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
+            D3DFVF_TEXCOORDSIZE1(0) | D3DFVF_TEX1, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT2, 0, D3DDECLUSAGE_TEXCOORD, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_TEXCOORDSIZE2(0) | D3DFVF_TEX1,
-           test_buffer, result_buffer, 2, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
+            D3DFVF_TEXCOORDSIZE2(0) | D3DFVF_TEX1, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_TEXCOORD, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_TEXCOORDSIZE3(0) | D3DFVF_TEX1,
-           test_buffer, result_buffer, 2, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
+            D3DFVF_TEXCOORDSIZE3(0) | D3DFVF_TEX1, test_buffer, 1));
     }
     {
         CONST D3DVERTEXELEMENT9 test_buffer[] =
             { { 0, 0, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_TEXCOORD, 0 }, D3DDECL_END() };
-        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_TEXCOORDSIZE4(0) | D3DFVF_TEX1,
-           test_buffer, result_buffer, 2, 1));
+        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
+            D3DFVF_TEXCOORDSIZE4(0) | D3DFVF_TEX1, test_buffer, 1));
     }
 
     /* Make sure the TEXCOORD index works correctly - try several textures */
@@ -596,7 +619,7 @@ static void test_fvf_decl_conversion(IDirect3DDevice9 *pDevice)
               { 0, 24, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_TEXCOORD, 3 }, D3DDECL_END() };
         VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl,
             D3DFVF_TEXCOORDSIZE1(0) | D3DFVF_TEXCOORDSIZE3(1) | D3DFVF_TEXCOORDSIZE2(2) |
-            D3DFVF_TEXCOORDSIZE4(3) | D3DFVF_TEX4, test_buffer, result_buffer, 5, 1));
+            D3DFVF_TEXCOORDSIZE4(3) | D3DFVF_TEX4, test_buffer, 1));
     }
 
     /* Now try a combination test  */
@@ -609,15 +632,108 @@ static void test_fvf_decl_conversion(IDirect3DDevice9 *pDevice)
                   { 0, 36, D3DDECLTYPE_FLOAT2, 0, D3DDECLUSAGE_TEXCOORD, 0 },
                   { 0, 44, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_TEXCOORD, 1 }, D3DDECL_END() };
        VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, D3DFVF_XYZB4 | D3DFVF_SPECULAR | D3DFVF_DIFFUSE |
-           D3DFVF_TEXCOORDSIZE2(0) | D3DFVF_TEXCOORDSIZE3(1) | D3DFVF_TEX2, test_buffer, result_buffer, 7, 1));
+           D3DFVF_TEXCOORDSIZE2(0) | D3DFVF_TEXCOORDSIZE3(1) | D3DFVF_TEX2, test_buffer, 1));
     }
 
     /* Setting the FVF to 0 should result in no change to the default decl */
-    VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, 0, default_elements, result_buffer, 3, 0));
+    VDECL_CHECK(test_fvf_to_decl(pDevice, default_decl, 0, default_elements, 0));
 
     cleanup:
     IDirect3DDevice9_SetVertexDeclaration ( pDevice, NULL );
     if ( default_decl ) IUnknown_Release (default_decl);
+}
+
+/* Check whether a declaration converted from FVF is shared.
+ * Check whether refcounts behave as expected */
+static void test_fvf_decl_management(
+    IDirect3DDevice9* device) {
+
+    HRESULT hr;
+    IDirect3DVertexDeclaration9* result_decl1 = NULL;
+    IDirect3DVertexDeclaration9* result_decl2 = NULL;
+    IDirect3DVertexDeclaration9* result_decl3 = NULL;
+    IDirect3DVertexDeclaration9* result_decl4 = NULL;
+    int ref1, ref2, ref3, ref4;
+
+    DWORD test_fvf1 = D3DFVF_XYZRHW;
+    DWORD test_fvf2 = D3DFVF_NORMAL;
+    CONST D3DVERTEXELEMENT9 test_elements1[] =
+        { { 0, 0, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_POSITIONT, 0 }, D3DDECL_END() };
+    CONST D3DVERTEXELEMENT9 test_elements2[] =
+        { { 0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_NORMAL, 0 }, D3DDECL_END() };
+
+    /* Clear down any current vertex declaration */
+    hr = IDirect3DDevice9_SetVertexDeclaration ( device, NULL );
+    ok (SUCCEEDED(hr), "SetVertexDeclaration returned %#x, expected %#x\n", hr, D3D_OK);
+    if (FAILED(hr)) return;
+
+    /* Conversion */
+    hr = IDirect3DDevice9_SetFVF( device, test_fvf1);
+    ok(SUCCEEDED(hr), "SetFVF returned %#x, expected %#x\n", hr, D3D_OK);
+    if (FAILED(hr)) return;
+
+    /* Get converted decl (#1) */
+    hr = IDirect3DDevice9_GetVertexDeclaration ( device, &result_decl1);
+    ok(SUCCEEDED(hr), "GetVertexDeclaration returned %#x, expected %#x\n", hr, D3D_OK);
+    if (FAILED(hr)) return;
+
+    /* Get converted decl again (#2) */
+    hr = IDirect3DDevice9_GetVertexDeclaration ( device, &result_decl2);
+    ok(SUCCEEDED(hr), "GetVertexDeclaration returned %#x, expected %#x\n", hr, D3D_OK);
+    if (FAILED(hr)) return;
+
+    /* Conversion */
+    hr = IDirect3DDevice9_SetFVF( device, test_fvf2);
+    ok(SUCCEEDED(hr), "SetFVF returned %#x, expected %#x\n", hr, D3D_OK);
+    if (FAILED(hr)) return;
+
+    /* The contents should correspond to the first conversion */
+    VDECL_CHECK(compare_elements(result_decl1, test_elements1));
+
+    /* Get converted decl (#3) */
+    hr = IDirect3DDevice9_GetVertexDeclaration ( device, &result_decl3);
+    ok(SUCCEEDED(hr), "GetVertexDeclaration returned %#x, expected %#x\n", hr, D3D_OK);
+    if (FAILED(hr)) return;
+
+    /* The object should be the same */
+    ok (result_decl1 == result_decl2, "Declaration object changes on the second Get() call\n");
+    ok (result_decl2 != result_decl3, "Declaration object did not change during conversion\n");
+
+    /* The contents should correspond to the second conversion */
+    VDECL_CHECK(compare_elements(result_decl3, test_elements2));
+    /* Re-Check if the first decl was overwritten by the new Get() */
+    VDECL_CHECK(compare_elements(result_decl1, test_elements1));
+
+    hr = IDirect3DDevice9_SetFVF( device, test_fvf1);
+    ok(SUCCEEDED(hr), "SetFVF returned %#x, expected %#x\n", hr, D3D_OK);
+    if (FAILED(hr)) return;
+
+    hr = IDirect3DDevice9_GetVertexDeclaration ( device, &result_decl4);
+    ok(SUCCEEDED(hr), "GetVertexDeclaration returned %#x, expected %#x\n", hr, D3D_OK);
+    if (FAILED(hr)) return;
+
+    ok(result_decl4 == result_decl1, "Setting an already used FVF over results in a different vertexdeclaration\n");
+
+    ref1 = get_refcount((IUnknown*) result_decl1);
+    ref2 = get_refcount((IUnknown*) result_decl2);
+    ref3 = get_refcount((IUnknown*) result_decl3);
+    ref4 = get_refcount((IUnknown*) result_decl4);
+    ok (ref1 == 3, "Refcount #1 is %d, expected 3\n", ref1);
+    ok (ref2 == 3, "Refcount #2 is %d, expected 3\n", ref2);
+    ok (ref3 == 1, "Refcount #3 is %d, expected 1\n", ref3);
+    ok (ref4 == 3, "Refcount #4 is %d, expected 3\n", ref4);
+
+    /* Clear down any current vertex declaration */
+    hr = IDirect3DDevice9_SetVertexDeclaration ( device, NULL );
+    ok (SUCCEEDED(hr), "SetVertexDeclaration returned %#x, expected %#x\n", hr, D3D_OK);
+    if (FAILED(hr)) return;
+
+    IDirect3DVertexDeclaration9_Release(result_decl1);
+    IDirect3DVertexDeclaration9_Release(result_decl2);
+    IDirect3DVertexDeclaration9_Release(result_decl3);
+    IDirect3DVertexDeclaration9_Release(result_decl4);
+
+    return;
 }
 
 START_TEST(vertexdeclaration)
@@ -632,25 +748,26 @@ START_TEST(vertexdeclaration)
     d3d9_handle = LoadLibraryA("d3d9.dll");
     if (!d3d9_handle)
     {
-        trace("Could not load d3d9.dll, skipping tests\n");
+        skip("Could not load d3d9.dll\n");
         return;
     }
 
     device_ptr = init_d3d9();
     if (!device_ptr)
     {
-        trace("Failed to initialise d3d9, aborting test.\n");
+        skip("Failed to initialise d3d9\n");
         return;
     }
 
     decl_ptr = test_create_vertex_declaration(device_ptr, simple_decl);
     if (!decl_ptr)
     {
-        trace("Failed to create a vertex declaration, aborting test.\n");
+        skip("Failed to create a vertex declaration\n");
         return;
     }
 
     test_get_set_vertex_declaration(device_ptr, decl_ptr);
     test_get_declaration(decl_ptr, simple_decl, simple_decl_num_elements);
     test_fvf_decl_conversion(device_ptr);
+    test_fvf_decl_management(device_ptr);
 }

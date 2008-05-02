@@ -62,7 +62,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "wingdi.h"
 #include "wine/winuser16.h"
 #include "win.h"
 #include "user_private.h"
@@ -361,7 +360,7 @@ static void comm_waitwrite(struct DosDeviceStruct *ptr)
 /*****************************************************************************
  *	COMM16_DCBtoDCB16	(Internal)
  */
-INT16 COMM16_DCBtoDCB16(LPDCB lpdcb, LPDCB16 lpdcb16)
+static INT16 COMM16_DCBtoDCB16(LPDCB lpdcb, LPDCB16 lpdcb16)
 {
 	if(lpdcb->BaudRate<0x10000)
 		lpdcb16->BaudRate = lpdcb->BaudRate;

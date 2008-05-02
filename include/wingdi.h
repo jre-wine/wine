@@ -1851,8 +1851,8 @@ typedef struct {
     DWORD        bV5Reserved;
 } BITMAPV5HEADER, *LPBITMAPV5HEADER, *PBITMAPV5HEADER;
 
-#define PROFILE_LINKED   'LINK'
-#define PROFILE_EMBEDDED 'MBED'
+#define PROFILE_LINKED   0x4c494e4b     /* 'LINK' */
+#define PROFILE_EMBEDDED 0x4d424544     /* 'MBED' */
 
 
   /* biCompression */
@@ -3396,6 +3396,7 @@ BOOL      WINAPI GdiComment(HDC,UINT,const BYTE *);
 DEVMODEW * WINAPI GdiConvertToDevmodeW(const DEVMODEA *);
 BOOL      WINAPI GdiFlush(void);
 LONG      WINAPI GdiGetCharDimensions(HDC, LPTEXTMETRICW, LONG *);
+DWORD     WINAPI GdiGetCodePage(HDC);
 BOOL      WINAPI GdiGradientFill(HDC,PTRIVERTEX,ULONG,PVOID,ULONG,ULONG);
 BOOL      WINAPI GdiIsMetaFileDC(HDC);
 BOOL      WINAPI GdiIsMetaPrintDC(HDC);
@@ -3659,8 +3660,8 @@ BOOL      WINAPI UpdateICMRegKeyA(DWORD,LPSTR,LPSTR,UINT);
 BOOL      WINAPI UpdateICMRegKeyW(DWORD,LPWSTR,LPWSTR,UINT);
 #define     UpdateICMRegKey WINELIB_NAME_AW(UpdateICMRegKey)
 BOOL      WINAPI WidenPath(HDC);
-BOOL      WINAPI PolyTextOutA(HDC,PPOLYTEXTA,INT);
-BOOL      WINAPI PolyTextOutW(HDC,PPOLYTEXTW,INT);
+BOOL      WINAPI PolyTextOutA(HDC,const POLYTEXTA*,INT);
+BOOL      WINAPI PolyTextOutW(HDC,const POLYTEXTW*,INT);
 #define   PolyTextOut WINELIB_NAME_AW(PolyTextOut)
 
 /* These defines are used by wglSwapLayerBuffers */

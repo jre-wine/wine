@@ -34,7 +34,6 @@
 #include "winuser.h"
 #include "mmsystem.h"
 #include "mmddk.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "winnls.h"
 #include "wine/debug.h"
@@ -895,7 +894,6 @@ IDirectSoundCaptureBufferImpl_GetCurrentPosition(
 	if (hres != DS_OK)
 	    WARN("IDsCaptureDriverBuffer_GetPosition failed\n");
     } else if (This->device->hwi) {
-	EnterCriticalSection(&(This->device->lock));
 	TRACE("old This->device->state=%s\n",captureStateString[This->device->state]);
         if (lpdwCapturePosition) {
             MMTIME mtime;
@@ -907,6 +905,7 @@ IDirectSoundCaptureBufferImpl_GetCurrentPosition(
             *lpdwCapturePosition = mtime.u.cb;
         }
 
+	EnterCriticalSection(&(This->device->lock));
 	if (lpdwReadPosition) {
             if (This->device->state == STATE_STARTING) {
 		if (lpdwCapturePosition)
@@ -1665,7 +1664,7 @@ static HRESULT DirectSoundCaptureDevice_Create(
     device->state = STATE_STOPPED;
 
     InitializeCriticalSection( &(device->lock) );
-    device->lock.DebugInfo->Spare[0] = (DWORD_PTR)"DSCAPTURE_lock";
+    device->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": DirectSoundCaptureDevice.lock");
 
     *ppDevice = device;
 

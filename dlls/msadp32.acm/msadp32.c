@@ -55,7 +55,7 @@ static LRESULT ADPCM_drvClose(DWORD_PTR dwDevID)
 
 typedef struct tagAcmAdpcmData
 {
-    void (*convert)(PACMDRVSTREAMINSTANCE adsi,
+    void (*convert)(const ACMDRVSTREAMINSTANCE *adsi,
 		    const unsigned char*, LPDWORD, unsigned char*, LPDWORD);
 } AcmAdpcmData;
 
@@ -69,7 +69,7 @@ typedef	struct
     int		rate;
 } Format;
 
-static Format PCM_Formats[] =
+static const Format PCM_Formats[] =
 {
     {1,  8,  8000}, {2,  8,  8000}, {1, 16,  8000}, {2, 16,  8000},
     {1,  8, 11025}, {2,  8, 11025}, {1, 16, 11025}, {2, 16, 11025},
@@ -77,7 +77,7 @@ static Format PCM_Formats[] =
     {1,  8, 44100}, {2,  8, 44100}, {1, 16, 44100}, {2, 16, 44100},
 };
 
-static Format ADPCM_Formats[] =
+static const Format ADPCM_Formats[] =
 {
     {1,  4,  8000}, {2,	4,  8000},  {1,  4, 11025}, {2,	 4, 11025},
     {1,  4, 22050}, {2,	4, 22050},  {1,  4, 44100}, {2,	 4, 44100},
@@ -101,10 +101,10 @@ static ADPCMCOEFSET MSADPCM_CoeffSet[] =
 /***********************************************************************
  *           ADPCM_GetFormatIndex
  */
-static	DWORD	ADPCM_GetFormatIndex(WAVEFORMATEX* wfx)
+static	DWORD	ADPCM_GetFormatIndex(const WAVEFORMATEX* wfx)
 {
-    int 	i, hi;
-    Format*	fmts;
+    int             i, hi;
+    const Format*   fmts;
 
     switch (wfx->wFormatTag)
     {
@@ -204,7 +204,7 @@ static inline void process_nibble(unsigned nibble, int* idelta,
     if (*idelta < 16) *idelta = 16;
 }
 
-static	void cvtSSms16K(PACMDRVSTREAMINSTANCE adsi,
+static	void cvtSSms16K(const ACMDRVSTREAMINSTANCE *adsi,
                         const unsigned char* src, LPDWORD nsrc,
                         unsigned char* dst, LPDWORD ndst)
 {
@@ -254,7 +254,7 @@ static	void cvtSSms16K(PACMDRVSTREAMINSTANCE adsi,
     }
 }
 
-static	void cvtMMms16K(PACMDRVSTREAMINSTANCE adsi,
+static	void cvtMMms16K(const ACMDRVSTREAMINSTANCE *adsi,
                         const unsigned char* src, LPDWORD nsrc,
                         unsigned char* dst, LPDWORD ndst)
 {
@@ -613,21 +613,10 @@ static	LRESULT	ADPCM_StreamClose(PACMDRVSTREAMINSTANCE adsi)
 }
 
 /***********************************************************************
- *           ADPCM_round
- *
- */
-static	inline DWORD	ADPCM_round(DWORD a, DWORD b, DWORD c)
-{
-    assert(a && b && c);
-    /* to be sure, always return an entire number of c... */
-    return ((double)a * (double)b + (double)c - 1) / (double)c;
-}
-
-/***********************************************************************
  *           ADPCM_StreamSize
  *
  */
-static	LRESULT ADPCM_StreamSize(PACMDRVSTREAMINSTANCE adsi, PACMDRVSTREAMSIZE adss)
+static	LRESULT ADPCM_StreamSize(const ACMDRVSTREAMINSTANCE *adsi, PACMDRVSTREAMSIZE adss)
 {
     switch (adss->fdwSize)
     {

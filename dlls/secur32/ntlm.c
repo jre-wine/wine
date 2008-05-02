@@ -31,12 +31,12 @@
 #include "hmac_md5.h"
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(secur32);
+WINE_DEFAULT_DEBUG_CHANNEL(ntlm);
 
 #define NTLM_MAX_BUF 1904
 #define MIN_NTLM_AUTH_MAJOR_VERSION 3
 #define MIN_NTLM_AUTH_MINOR_VERSION 0
-#define MIN_NTLM_AUTH_MICRO_VERSION 24
+#define MIN_NTLM_AUTH_MICRO_VERSION 25
 
 static CHAR ntlm_auth[] = "ntlm_auth";
 
@@ -163,20 +163,18 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcquireCredentialsHandleW(
                     PSEC_WINNT_AUTH_IDENTITY_W auth_data = 
                         (PSEC_WINNT_AUTH_IDENTITY_W)pAuthData;
 
-                    if (!auth_data->UserLength || !auth_data->DomainLength)
-                    {
-                        ret = SEC_E_NO_CREDENTIALS;
-                        phCredential = NULL;
-                        break;
-                    }
                     /* Get username and domain from pAuthData */
                     username = HeapAlloc(GetProcessHeap(), 0, 
                             (auth_data->UserLength + 1) * sizeof(SEC_WCHAR));
-                    lstrcpyW(username, auth_data->User);
+                    memcpy(username, auth_data->User,
+                           auth_data->UserLength * sizeof(SEC_WCHAR));
+                    username[auth_data->UserLength] = '\0';
 
                     domain = HeapAlloc(GetProcessHeap(), 0,
                             (auth_data->DomainLength + 1) * sizeof(SEC_WCHAR));
-                    lstrcpyW(domain, auth_data->Domain);
+                    memcpy(domain, auth_data->Domain,
+                           auth_data->DomainLength * sizeof(SEC_WCHAR));
+                    domain[auth_data->DomainLength] = '\0';
                 }
                 TRACE("Username is %s\n", debugstr_w(username));
                 unixcp_size =  WideCharToMultiByte(CP_UNIXCP, WC_NO_BEST_FIT_CHARS,
@@ -222,17 +220,18 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcquireCredentialsHandleW(
                         {
                             helper->pwlen = WideCharToMultiByte(CP_UNIXCP, 
                                 WC_NO_BEST_FIT_CHARS, auth_data->Password, 
-                                auth_data->PasswordLength+1, NULL, 0, NULL, NULL);
-                        
+                                auth_data->PasswordLength, NULL, 0, NULL,
+                                NULL);
+
                             helper->password = HeapAlloc(GetProcessHeap(), 0, 
                                     helper->pwlen);
 
                             WideCharToMultiByte(CP_UNIXCP, WC_NO_BEST_FIT_CHARS,
-                                auth_data->Password, auth_data->PasswordLength+1,
+                                auth_data->Password, auth_data->PasswordLength,
                                 helper->password, helper->pwlen, NULL, NULL);
                         }
                     }
-           
+
                     phCredential->dwUpper = fCredentialUse;
                     phCredential->dwLower = (ULONG_PTR)helper;
                     TRACE("ACH phCredential->dwUpper: 0x%08lx, dwLower: 0x%08lx\n",
@@ -303,11 +302,11 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcquireCredentialsHandleA(
             if(identity->UserLength != 0)
             {
                 user_sizeW = MultiByteToWideChar(CP_ACP, 0, 
-                    (LPCSTR)identity->User, identity->UserLength+1, NULL, 0);
+                    (LPCSTR)identity->User, identity->UserLength, NULL, 0);
                 user = HeapAlloc(GetProcessHeap(), 0, user_sizeW * 
                         sizeof(SEC_WCHAR));
                 MultiByteToWideChar(CP_ACP, 0, (LPCSTR)identity->User, 
-                    identity->UserLength+1, user, user_sizeW);
+                    identity->UserLength, user, user_sizeW);
             }
             else
             {
@@ -317,11 +316,11 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcquireCredentialsHandleA(
             if(identity->DomainLength != 0)
             {
                 domain_sizeW = MultiByteToWideChar(CP_ACP, 0, 
-                    (LPCSTR)identity->Domain, identity->DomainLength+1, NULL, 0);
+                    (LPCSTR)identity->Domain, identity->DomainLength, NULL, 0);
                 domain = HeapAlloc(GetProcessHeap(), 0, domain_sizeW 
                     * sizeof(SEC_WCHAR));
                 MultiByteToWideChar(CP_ACP, 0, (LPCSTR)identity->Domain, 
-                    identity->DomainLength+1, domain, domain_sizeW);
+                    identity->DomainLength, domain, domain_sizeW);
             }
             else
             {
@@ -331,12 +330,12 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcquireCredentialsHandleA(
             if(identity->PasswordLength != 0)
             {
                 passwd_sizeW = MultiByteToWideChar(CP_ACP, 0, 
-                    (LPCSTR)identity->Password, identity->PasswordLength+1, 
+                    (LPCSTR)identity->Password, identity->PasswordLength,
                     NULL, 0);
                 passwd = HeapAlloc(GetProcessHeap(), 0, passwd_sizeW
                     * sizeof(SEC_WCHAR));
                 MultiByteToWideChar(CP_ACP, 0, (LPCSTR)identity->Password,
-                    identity->PasswordLength+1, passwd, passwd_sizeW);
+                    identity->PasswordLength, passwd, passwd_sizeW);
             }
             else
             {
@@ -371,6 +370,26 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcquireCredentialsHandleA(
     return ret;
 }
 
+/*************************************************************************
+ *             ntlm_GetTokenBufferIndex
+ * Calculates the index of the secbuffer with BufferType == SECBUFFER_TOKEN
+ * Returns index if found or -1 if not found.
+ */
+static int ntlm_GetTokenBufferIndex(PSecBufferDesc pMessage)
+{
+    UINT i;
+
+    TRACE("%p\n", pMessage);
+
+    for( i = 0; i < pMessage->cBuffers; ++i )
+    {
+        if(pMessage->pBuffers[i].BufferType == SECBUFFER_TOKEN)
+            return i;
+    }
+
+    return -1;
+}
+
 /***********************************************************************
  *              InitializeSecurityContextW
  */
@@ -386,23 +405,11 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
     char* buffer, *want_flags = NULL;
     PBYTE bin;
     int buffer_len, bin_len, max_len = NTLM_MAX_BUF;
+    int token_idx;
 
     TRACE("%p %p %s %d %d %d %p %d %p %p %p %p\n", phCredential, phContext,
      debugstr_w(pszTargetName), fContextReq, Reserved1, TargetDataRep, pInput,
      Reserved1, phNewContext, pOutput, pfContextAttr, ptsExpiry);
-
-    if(!phCredential)
-        return SEC_E_INVALID_HANDLE;
-
-    /* As the server side of sspi never calls this, make sure that
-     * the handler is a client handler.
-     */
-    helper = (PNegoHelper)phCredential->dwLower;
-    if(helper->mode != NTLM_CLIENT)
-    {
-        TRACE("Helper mode = %d\n", helper->mode);
-        return SEC_E_INVALID_HANDLE;
-    }
 
     /****************************************
      * When communicating with the client, there can be the
@@ -433,6 +440,20 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
     if((phContext == NULL) && (pInput == NULL))
     {
         TRACE("First time in ISC()\n");
+
+        if(!phCredential)
+            return SEC_E_INVALID_HANDLE;
+
+        /* As the server side of sspi never calls this, make sure that
+         * the handler is a client handler.
+         */
+        helper = (PNegoHelper)phCredential->dwLower;
+        if(helper->mode != NTLM_CLIENT)
+        {
+            TRACE("Helper mode = %d\n", helper->mode);
+            return SEC_E_INVALID_HANDLE;
+        }
+
         /* Allocate space for a maximal string of 
          * "SF NTLMSSP_FEATURE_SIGN NTLMSSP_FEATURE_SEAL
          * NTLMSSP_FEATURE_SESSION_KEY"
@@ -501,11 +522,11 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
         {
             lstrcpynA(buffer, "PW ", max_len-1);
             if((ret = encodeBase64((unsigned char*)helper->password,
-                        helper->pwlen-2, buffer+3,
+                        helper->pwlen, buffer+3,
                         max_len-3, &buffer_len)) != SEC_E_OK)
             {
                 TRACE("Deleting password!\n");
-                memset(helper->password, 0, helper->pwlen-2);
+                memset(helper->password, 0, helper->pwlen);
                 HeapFree(GetProcessHeap(), 0, helper->password);
                 goto isc_end;
             }
@@ -520,7 +541,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
 
         if(lstrlenA(want_flags) > 2)
         {
-            TRACE("Want flags are '%s'\n", debugstr_a(want_flags));
+            TRACE("Want flags are %s\n", debugstr_a(want_flags));
             lstrcpynA(buffer, want_flags, max_len-1);
             if((ret = run_helper(helper, buffer, max_len, &buffer_len)) 
                     != SEC_E_OK)
@@ -549,35 +570,54 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
 
         /* put the decoded client blob into the out buffer */
 
+        phNewContext->dwUpper = ctxt_attr;
+        phNewContext->dwLower = (ULONG_PTR)helper;
+
         ret = SEC_I_CONTINUE_NEEDED;
     }
     else
     {
+        int input_token_idx;
+
         /* handle second call here */
         /* encode server data to base64 */
-        if (!pInput || !pInput->cBuffers)
+        if (!pInput || ((input_token_idx = ntlm_GetTokenBufferIndex(pInput)) == -1))
         {
-            ret = SEC_E_INCOMPLETE_MESSAGE;
+            ret = SEC_E_INVALID_TOKEN;
             goto isc_end;
         }
 
-        if (!pInput->pBuffers[0].pvBuffer)
+        if(!phContext)
+            return SEC_E_INVALID_HANDLE;
+
+        /* As the server side of sspi never calls this, make sure that
+         * the handler is a client handler.
+         */
+        helper = (PNegoHelper)phContext->dwLower;
+        if(helper->mode != NTLM_CLIENT)
+        {
+            TRACE("Helper mode = %d\n", helper->mode);
+            return SEC_E_INVALID_HANDLE;
+        }
+
+        if (!pInput->pBuffers[input_token_idx].pvBuffer)
         {
             ret = SEC_E_INTERNAL_ERROR;
             goto isc_end;
         }
 
-        if(pInput->pBuffers[0].cbBuffer > max_len)
+        if(pInput->pBuffers[input_token_idx].cbBuffer > max_len)
         {
-            TRACE("pInput->pBuffers[0].cbBuffer is: %ld\n",
-                    pInput->pBuffers[0].cbBuffer);
+            TRACE("pInput->pBuffers[%d].cbBuffer is: %ld\n",
+                    input_token_idx,
+                    pInput->pBuffers[input_token_idx].cbBuffer);
             ret = SEC_E_INVALID_TOKEN;
             goto isc_end;
         }
         else
-            bin_len = pInput->pBuffers[0].cbBuffer;
+            bin_len = pInput->pBuffers[input_token_idx].cbBuffer;
 
-        memcpy(bin, pInput->pBuffers[0].pvBuffer, bin_len);
+        memcpy(bin, pInput->pBuffers[input_token_idx].pvBuffer, bin_len);
 
         lstrcpynA(buffer, "TT ", max_len-1);
 
@@ -616,33 +656,34 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
 
     /* put the decoded client blob into the out buffer */
 
-    if (fContextReq & ISC_REQ_ALLOCATE_MEMORY)
+    if (!pOutput || ((token_idx = ntlm_GetTokenBufferIndex(pOutput)) == -1))
     {
-        if (pOutput)
-        {
-            pOutput->cBuffers = 1;
-            pOutput->pBuffers[0].pvBuffer = SECUR32_ALLOC(bin_len);
-            pOutput->pBuffers[0].cbBuffer = bin_len;
-        }
+        TRACE("no SECBUFFER_TOKEN buffer could be found\n");
+        ret = SEC_E_BUFFER_TOO_SMALL;
+        goto isc_end;
     }
 
-    if (!pOutput || !pOutput->cBuffers || pOutput->pBuffers[0].cbBuffer < bin_len)
+    if (fContextReq & ISC_REQ_ALLOCATE_MEMORY)
+    {
+        pOutput->pBuffers[token_idx].pvBuffer = SECUR32_ALLOC(bin_len);
+        pOutput->pBuffers[token_idx].cbBuffer = bin_len;
+    }
+    else if (pOutput->pBuffers[token_idx].cbBuffer < bin_len)
     {
         TRACE("out buffer is NULL or has not enough space\n");
         ret = SEC_E_BUFFER_TOO_SMALL;
         goto isc_end;
     }
 
-    if (!pOutput->pBuffers[0].pvBuffer)
+    if (!pOutput->pBuffers[token_idx].pvBuffer)
     {
         TRACE("out buffer is NULL\n");
         ret = SEC_E_INTERNAL_ERROR;
         goto isc_end;
     }
 
-    pOutput->pBuffers[0].cbBuffer = bin_len;
-    pOutput->pBuffers[0].BufferType = SECBUFFER_DATA;
-    memcpy(pOutput->pBuffers[0].pvBuffer, bin, bin_len);
+    pOutput->pBuffers[token_idx].cbBuffer = bin_len;
+    memcpy(pOutput->pBuffers[token_idx].pvBuffer, bin, bin_len);
 
     if(ret == SEC_E_OK)
     {
@@ -689,7 +730,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
                         helper->pwlen, unicode_password, passwd_lenW);
 
                 SECUR32_CreateNTLMv1SessionKey((PBYTE)unicode_password,
-                        lstrlenW(unicode_password) * sizeof(SEC_WCHAR), helper->session_key);
+                        passwd_lenW * sizeof(SEC_WCHAR), helper->session_key);
 
                 HeapFree(GetProcessHeap(), 0, unicode_password);
             }
@@ -733,7 +774,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
     {
         TRACE("Deleting password!\n");
         if(helper->password)
-            memset(helper->password, 0, helper->pwlen-2);
+            memset(helper->password, 0, helper->pwlen);
         HeapFree(GetProcessHeap(), 0, helper->password);
     }
 isc_end:
@@ -753,34 +794,27 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextA(
  PSecBufferDesc pOutput, ULONG *pfContextAttr, PTimeStamp ptsExpiry)
 {
     SECURITY_STATUS ret;
+    SEC_WCHAR *target = NULL;
 
     TRACE("%p %p %s %d %d %d %p %d %p %p %p %p\n", phCredential, phContext,
      debugstr_a(pszTargetName), fContextReq, Reserved1, TargetDataRep, pInput,
      Reserved1, phNewContext, pOutput, pfContextAttr, ptsExpiry);
-    
-    if (phCredential)
+
+    if(pszTargetName != NULL)
     {
-        SEC_WCHAR *target = NULL;
-        if(pszTargetName != NULL)
-        {
-            int target_size = MultiByteToWideChar(CP_ACP, 0, pszTargetName, 
-                strlen(pszTargetName)+1, NULL, 0);
-            target = HeapAlloc(GetProcessHeap(), 0, target_size * 
-                    sizeof(SEC_WCHAR));
-            MultiByteToWideChar(CP_ACP, 0, pszTargetName, strlen(pszTargetName)+1,
-                target, target_size);
-        }
-        
-        ret = ntlm_InitializeSecurityContextW(phCredential, phContext, target, 
-                fContextReq, Reserved1, TargetDataRep, pInput, Reserved2,
-                phNewContext, pOutput, pfContextAttr, ptsExpiry);
-        
-        HeapFree(GetProcessHeap(), 0, target);
+        int target_size = MultiByteToWideChar(CP_ACP, 0, pszTargetName,
+            strlen(pszTargetName)+1, NULL, 0);
+        target = HeapAlloc(GetProcessHeap(), 0, target_size *
+                sizeof(SEC_WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, pszTargetName, strlen(pszTargetName)+1,
+            target, target_size);
     }
-    else
-    {
-        ret = SEC_E_INVALID_HANDLE;
-    }
+
+    ret = ntlm_InitializeSecurityContextW(phCredential, phContext, target,
+            fContextReq, Reserved1, TargetDataRep, pInput, Reserved2,
+            phNewContext, pOutput, pfContextAttr, ptsExpiry);
+
+    HeapFree(GetProcessHeap(), 0, target);
     return ret;
 }
 
@@ -1227,26 +1261,6 @@ static SECURITY_STATUS SEC_ENTRY ntlm_RevertSecurityContext(PCtxtHandle phContex
         ret = SEC_E_INVALID_HANDLE;
     }
     return ret;
-}
-
-/*************************************************************************
- *             ntlm_GetTokenBufferIndex
- * Calculates the index of the secbuffer with BufferType == SECBUFFER_TOKEN
- * Returns index if found or -1 if not found.
- */
-static int ntlm_GetTokenBufferIndex(PSecBufferDesc pMessage)
-{
-    UINT i;
-
-    TRACE("%p\n", pMessage);
-
-    for( i = 0; i < pMessage->cBuffers; ++i )
-    {
-        if(pMessage->pBuffers[i].BufferType == SECBUFFER_TOKEN)
-            return i;
-    }
-
-    return -1;
 }
 
 /***********************************************************************
@@ -1759,8 +1773,10 @@ void SECUR32_initNTLMSP(void)
         check_version(helper);
 
     if( (helper->major >  MIN_NTLM_AUTH_MAJOR_VERSION) ||
-        (helper->major  = MIN_NTLM_AUTH_MAJOR_VERSION  &&
-         helper->minor >= MIN_NTLM_AUTH_MINOR_VERSION  &&
+        (helper->major == MIN_NTLM_AUTH_MAJOR_VERSION  &&
+         helper->minor >  MIN_NTLM_AUTH_MINOR_VERSION) ||
+        (helper->major == MIN_NTLM_AUTH_MAJOR_VERSION  &&
+         helper->minor == MIN_NTLM_AUTH_MINOR_VERSION  &&
          helper->micro >= MIN_NTLM_AUTH_MICRO_VERSION) )
     {
         SecureProvider *provider = SECUR32_addProvider(&ntlmTableA, &ntlmTableW, NULL);

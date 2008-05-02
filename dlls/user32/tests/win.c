@@ -322,7 +322,7 @@ static void test_parent_owner(void)
     if (0)
     {
     /* this test succeeds on NT but crashes on win9x systems */
-    ret = (HWND)SetWindowLongA( test, GWL_HWNDPARENT, (LONG_PTR)hwndMain2 );
+    ret = (HWND)SetWindowLongPtrA( test, GWLP_HWNDPARENT, (LONG_PTR)hwndMain2 );
     ok( !ret, "Set GWL_HWNDPARENT succeeded on desktop\n" );
     check_parents( desktop, 0, 0, 0, 0, 0, 0 );
     ok( !SetParent( desktop, hwndMain ), "SetParent succeeded on desktop\n" );
@@ -546,7 +546,7 @@ static LRESULT WINAPI main_window_procA(HWND hwnd, UINT msg, WPARAM wparam, LPAR
 	{
 	    MINMAXINFO* minmax = (MINMAXINFO *)lparam;
 
-	    trace("hwnd %p, WM_GETMINMAXINFO, %08x, %08lx\n", hwnd, wparam, lparam);
+	    trace("hwnd %p, WM_GETMINMAXINFO, %08lx, %08lx\n", hwnd, wparam, lparam);
             trace("ptReserved (%d,%d), ptMaxSize (%d,%d), ptMaxPosition (%d,%d)\n"
                   "	  ptMinTrackSize (%d,%d), ptMaxTrackSize (%d,%d)\n",
 		  minmax->ptReserved.x, minmax->ptReserved.y,
@@ -643,7 +643,7 @@ static LRESULT WINAPI tool_window_procA(HWND hwnd, UINT msg, WPARAM wparam, LPAR
 	{
 	    MINMAXINFO* minmax = (MINMAXINFO *)lparam;
 
-	    trace("hwnd %p, WM_GETMINMAXINFO, %08x, %08lx\n", hwnd, wparam, lparam);
+	    trace("hwnd %p, WM_GETMINMAXINFO, %08lx, %08lx\n", hwnd, wparam, lparam);
             trace("ptReserved (%d,%d), ptMaxSize (%d,%d), ptMaxPosition (%d,%d)\n"
                   "	  ptMinTrackSize (%d,%d), ptMaxTrackSize (%d,%d)\n",
 		  minmax->ptReserved.x, minmax->ptReserved.y,
@@ -707,10 +707,9 @@ static BOOL RegisterWindowClasses(void)
     return TRUE;
 }
 
-static void verify_window_info(HWND hwnd, const WINDOWINFO *info, BOOL test_borders)
+static void verify_window_info(HWND hwnd, const WINDOWINFO *info)
 {
     RECT rcWindow, rcClient;
-    UINT border;
     DWORD status;
 
     ok(IsWindow(hwnd), "bad window handle\n");
@@ -734,20 +733,24 @@ static void verify_window_info(HWND hwnd, const WINDOWINFO *info, BOOL test_bord
     ok(info->dwWindowStatus == status, "wrong dwWindowStatus: %04x != %04x\n",
        info->dwWindowStatus, status);
 
-    if (test_borders && !IsRectEmpty(&rcWindow))
-    {
-	trace("rcWindow: %d,%d - %d,%d\n", rcWindow.left, rcWindow.top, rcWindow.right, rcWindow.bottom);
-	trace("rcClient: %d,%d - %d,%d\n", rcClient.left, rcClient.top, rcClient.right, rcClient.bottom);
+    trace("rcWindow: %d,%d - %d,%d\n", rcWindow.left, rcWindow.top, rcWindow.right, rcWindow.bottom);
+    trace("rcClient: %d,%d - %d,%d\n", rcClient.left, rcClient.top, rcClient.right, rcClient.bottom);
 
-	ok(info->cxWindowBorders == (unsigned)(rcClient.left - rcWindow.left),
-            "wrong cxWindowBorders %d != %d\n", info->cxWindowBorders, rcClient.left - rcWindow.left);
-	border = min(rcWindow.bottom - rcClient.bottom, rcClient.top - rcWindow.top);
-	ok(info->cyWindowBorders == border,
-	   "wrong cyWindowBorders %d != %d\n", info->cyWindowBorders, border);
-    }
-
+    /* win2k and XP return broken border info in GetWindowInfo most of
+     * the time, so there is no point in testing it.
+     */
+#if 0
+    UINT border;
+    ok(info->cxWindowBorders == (unsigned)(rcClient.left - rcWindow.left),
+       "wrong cxWindowBorders %d != %d\n", info->cxWindowBorders, rcClient.left - rcWindow.left);
+    border = min(rcWindow.bottom - rcClient.bottom, rcClient.top - rcWindow.top);
+    ok(info->cyWindowBorders == border,
+       "wrong cyWindowBorders %d != %d\n", info->cyWindowBorders, border);
+#endif
     ok(info->atomWindowType == GetClassLongA(hwnd, GCW_ATOM), "wrong atomWindowType\n");
-    ok(info->wCreatorVersion == 0x0400, "wrong wCreatorVersion %04x\n", info->wCreatorVersion);
+    ok(info->wCreatorVersion == 0x0400 /* NT4, Win2000, XP, Win2003 */ ||
+       info->wCreatorVersion == 0x0500 /* Vista */,
+       "wrong wCreatorVersion %04x\n", info->wCreatorVersion);
 }
 
 static void FixedAdjustWindowRectEx(RECT* rc, LONG style, BOOL menu, LONG exstyle)
@@ -833,7 +836,7 @@ static LRESULT CALLBACK cbt_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
 	"HCBT_SETFOCUS" };
     const char *code_name = (nCode >= 0 && nCode <= HCBT_SETFOCUS) ? CBT_code_name[nCode] : "Unknown";
 
-    trace("CBT: %d (%s), %08x, %08lx\n", nCode, code_name, wParam, lParam);
+    trace("CBT: %d (%s), %08lx, %08lx\n", nCode, code_name, wParam, lParam);
 
     /* on HCBT_DESTROYWND window state is undefined */
     if (nCode != HCBT_DESTROYWND && IsWindow((HWND)wParam))
@@ -848,10 +851,7 @@ static LRESULT CALLBACK cbt_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
 	     */
 	    info.cbSize = sizeof(WINDOWINFO);
 	    ok(pGetWindowInfo((HWND)wParam, &info), "GetWindowInfo should not fail\n");
-	    /* win2k SP4 returns broken border info if GetWindowInfo
-	     * is being called from HCBT_DESTROYWND or HCBT_MINMAX hook proc.
-	     */
-	    verify_window_info((HWND)wParam, &info, nCode != HCBT_MINMAX);
+	    verify_window_info((HWND)wParam, &info);
 	}
     }
 
@@ -1056,7 +1056,7 @@ static void test_shell_window(void)
 
 /************** MDI test ****************/
 
-static const char mdi_lParam_test_message[] = "just a test string";
+static char mdi_lParam_test_message[] = "just a test string";
 
 static void test_MDI_create(HWND parent, HWND mdi_client, INT first_id)
 {
@@ -2991,6 +2991,16 @@ static void test_scrollvalidate( HWND parent)
     CombineRgn( exprgn, exprgn, tmprgn, RGN_OR);
     ok( EqualRgn( exprgn, hrgn), "wrong update region\n");
 
+    /* clear an update region */
+    UpdateWindow( hwnd1 );
+
+    SetRect( &rc, 0,40, 100,60);
+    SetRect( &cliprc, 0,0, 100,100);
+    ScrollWindowEx( hwnd1, 0, -25, &rc, &cliprc, hrgn, &rcu, SW_INVALIDATE);
+    if (winetest_debug > 0) dump_region( hrgn );
+    SetRectRgn( exprgn, 0, 40, 98, 60 );
+    ok( EqualRgn( exprgn, hrgn), "wrong update region in excessive scroll\n");
+
     /* now test ScrollWindowEx with a combination of
      * WS_CLIPCHILDREN style and SW_SCROLLCHILDREN flag */
     /* make hwnd2 the child of hwnd1 */
@@ -3708,10 +3718,40 @@ static void test_IsWindowUnicode(void)
     DestroyWindow(hwnd);
 }
 
+static LRESULT CALLBACK minmax_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    MINMAXINFO *minmax;
+
+    if (msg != WM_GETMINMAXINFO)
+        return DefWindowProc(hwnd, msg, wp, lp);
+
+    minmax = (MINMAXINFO *)lp;
+
+    if ((GetWindowLong(hwnd, GWL_STYLE) & WS_CHILD))
+    {
+        minmax->ptReserved.x = 0;
+        minmax->ptReserved.y = 0;
+        minmax->ptMaxSize.x = 400;
+        minmax->ptMaxSize.y = 400;
+        minmax->ptMaxPosition.x = 300;
+        minmax->ptMaxPosition.y = 300;
+        minmax->ptMaxTrackSize.x = 200;
+        minmax->ptMaxTrackSize.y = 200;
+        minmax->ptMinTrackSize.x = 100;
+        minmax->ptMinTrackSize.y = 100;
+    }
+    else
+        DefWindowProc(hwnd, msg, wp, lp);
+    return 1;
+}
+
 static void test_CreateWindow(void)
 {
+    WNDCLASS cls;
     HWND hwnd, parent;
     HMENU hmenu;
+    RECT rc, rc_minmax;
+    MINMAXINFO minmax;
 
 #define expect_menu(window, menu) \
     SetLastError(0xdeadbeef); \
@@ -3904,6 +3944,66 @@ static void test_CreateWindow(void)
     ok(!IsMenu(hmenu), "IsMenu should fail\n");
     ok(GetLastError() == ERROR_INVALID_MENU_HANDLE, "IsMenu set error %d\n", GetLastError());
 
+    /* test child window sizing */
+    cls.style = 0;
+    cls.lpfnWndProc = minmax_wnd_proc;
+    cls.cbClsExtra = 0;
+    cls.cbWndExtra = 0;
+    cls.hInstance = GetModuleHandle(0);
+    cls.hIcon = 0;
+    cls.hCursor = LoadCursorA(0, (LPSTR)IDC_ARROW);
+    cls.hbrBackground = GetStockObject(WHITE_BRUSH);
+    cls.lpszMenuName = NULL;
+    cls.lpszClassName = "MinMax_WndClass";
+    RegisterClass(&cls);
+
+    SetLastError(0xdeadbeef);
+    parent = CreateWindowEx(0, "MinMax_WndClass", NULL, WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
+                           0, 0, 100, 100, 0, 0, 0, NULL);
+    ok(parent != 0, "CreateWindowEx error %d\n", GetLastError());
+    expect_menu(parent, 0);
+    expect_style(parent, WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_CLIPSIBLINGS);
+    expect_ex_style(parent, WS_EX_WINDOWEDGE);
+
+    memset(&minmax, 0, sizeof(minmax));
+    SendMessage(parent, WM_GETMINMAXINFO, 0, (LPARAM)&minmax);
+    SetRect(&rc_minmax, 0, 0, minmax.ptMaxSize.x, minmax.ptMaxSize.y);
+    ok(IsRectEmpty(&rc_minmax), "ptMaxSize is not empty\n");
+    SetRect(&rc_minmax, 0, 0, minmax.ptMaxTrackSize.x, minmax.ptMaxTrackSize.y);
+    ok(IsRectEmpty(&rc_minmax), "ptMaxTrackSize is not empty\n");
+
+    GetWindowRect(parent, &rc);
+    ok(!IsRectEmpty(&rc), "parent window rect is empty\n");
+    GetClientRect(parent, &rc);
+    ok(!IsRectEmpty(&rc), "parent client rect is empty\n");
+
+    InflateRect(&rc, 200, 200);
+    trace("creating child with rect (%d,%d-%d,%d)\n", rc.left, rc.top, rc.right, rc.bottom);
+
+    SetLastError(0xdeadbeef);
+    hwnd = CreateWindowEx(0, "MinMax_WndClass", NULL, WS_CHILD | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
+                          rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
+                          parent, (HMENU)1, 0, NULL);
+    ok(hwnd != 0, "CreateWindowEx error %d\n", GetLastError());
+    expect_menu(hwnd, 1);
+    expect_style(hwnd, WS_CHILD | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME);
+    expect_ex_style(hwnd, WS_EX_WINDOWEDGE);
+
+    memset(&minmax, 0, sizeof(minmax));
+    SendMessage(hwnd, WM_GETMINMAXINFO, 0, (LPARAM)&minmax);
+    SetRect(&rc_minmax, 0, 0, minmax.ptMaxTrackSize.x, minmax.ptMaxTrackSize.y);
+
+    GetWindowRect(hwnd, &rc);
+    OffsetRect(&rc, -rc.left, -rc.top);
+    ok(EqualRect(&rc, &rc_minmax), "rects don't match: (%d,%d-%d,%d) and (%d,%d-%d,%d)\n",
+       rc.left, rc.top, rc.right, rc.bottom,
+       rc_minmax.left, rc_minmax.top, rc_minmax.right, rc_minmax.bottom);
+
+    DestroyWindow(hwnd);
+    DestroyWindow(parent);
+
+    UnregisterClass("MinMax_WndClass", GetModuleHandle(0));
+
 #undef expect_menu
 #undef expect_style
 #undef expect_ex_style
@@ -3926,24 +4026,24 @@ static void test_SetWindowLong(void)
 
     SetLastError(0xdeadbeef);
     retval = SetWindowLongPtr(NULL, GWLP_WNDPROC, 0);
-    ok(!retval, "SetWindowLongPtr on invalid window handle should have returned 0 instead of 0x%x\n", retval);
+    ok(!retval, "SetWindowLongPtr on invalid window handle should have returned 0 instead of 0x%lx\n", retval);
     ok(check_error(GetLastError(), ERROR_INVALID_WINDOW_HANDLE),
         "SetWindowLongPtr should have set error to ERROR_INVALID_WINDOW_HANDLE instad of %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     retval = SetWindowLongPtr(hwndMain, 0xdeadbeef, 0);
-    ok(!retval, "SetWindowLongPtr on invalid index should have returned 0 instead of 0x%x\n", retval);
+    ok(!retval, "SetWindowLongPtr on invalid index should have returned 0 instead of 0x%lx\n", retval);
     ok(check_error(GetLastError(), ERROR_INVALID_INDEX),
         "SetWindowLongPtr should have set error to ERROR_INVALID_INDEX instad of %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     retval = SetWindowLongPtr(hwndMain, GWLP_WNDPROC, 0);
     ok((WNDPROC)retval == main_window_procA,
-        "SetWindowLongPtr on invalid window proc should have returned address of main_window_procA instead of 0x%x\n", retval);
+        "SetWindowLongPtr on invalid window proc should have returned address of main_window_procA instead of 0x%lx\n", retval);
     ok(GetLastError() == 0xdeadbeef, "SetWindowLongPtr shouldn't have set the last error, instead of setting it to %d\n", GetLastError());
     retval = GetWindowLongPtr(hwndMain, GWLP_WNDPROC);
     ok((WNDPROC)retval == main_window_procA,
-        "SetWindowLongPtr on invalid window proc shouldn't have changed the value returned by GetWindowLongPtr, instead of changing it to 0x%x\n", retval);
+        "SetWindowLongPtr on invalid window proc shouldn't have changed the value returned by GetWindowLongPtr, instead of changing it to 0x%lx\n", retval);
     ok(!IsWindowUnicode(hwndMain), "hwndMain shouldn't be Unicode\n");
 
     old_window_procW = (WNDPROC)GetWindowLongPtrW(hwndMain, GWLP_WNDPROC);
@@ -3954,7 +4054,7 @@ static void test_SetWindowLong(void)
         ok(GetLastError() == 0xdeadbeef, "SetWindowLongPtr shouldn't have set the last error, instead of setting it to %d\n", GetLastError());
         ok(retval != 0, "SetWindowLongPtr error %d\n", GetLastError());
         ok((WNDPROC)retval == old_window_procW,
-            "SetWindowLongPtr on invalid window proc shouldn't have changed the value returned by GetWindowLongPtr, instead of changing it to 0x%x\n", retval);
+            "SetWindowLongPtr on invalid window proc shouldn't have changed the value returned by GetWindowLongPtr, instead of changing it to 0x%lx\n", retval);
         ok(IsWindowUnicode(hwndMain), "hwndMain should now be Unicode\n");
 
         /* set it back to ANSI */
@@ -4084,6 +4184,124 @@ static void test_ShowWindow(void)
     ok(!IsWindow(hwnd), "window should not exist\n");
 }
 
+static void test_gettext(void)
+{
+    WNDCLASS cls;
+    LPCSTR clsname = "gettexttest";
+    HWND hwnd;
+    LRESULT r;
+
+    memset( &cls, 0, sizeof cls );
+    cls.lpfnWndProc = DefWindowProc;
+    cls.lpszClassName = clsname;
+    cls.hInstance = GetModuleHandle(NULL);
+
+    if (!RegisterClass( &cls )) return;
+
+    hwnd = CreateWindow( clsname, "test text", WS_OVERLAPPED, 0, 0, 10, 10, 0, NULL, NULL, NULL);
+    ok( hwnd != NULL, "window was null\n");
+
+    r = SendMessage( hwnd, WM_GETTEXT, 0x10, 0x1000);
+    ok( r == 0, "settext should return zero\n");
+
+    r = SendMessage( hwnd, WM_GETTEXT, 0x10000, 0);
+    ok( r == 0, "settext should return zero (%ld)\n", r);
+
+    r = SendMessage( hwnd, WM_GETTEXT, 0xff000000, 0x1000);
+    ok( r == 0, "settext should return zero (%ld)\n", r);
+
+    r = SendMessage( hwnd, WM_GETTEXT, 0x1000, 0xff000000);
+    ok( r == 0, "settext should return zero (%ld)\n", r);
+
+    DestroyWindow(hwnd);
+    UnregisterClass( clsname, NULL );
+}
+
+
+static void test_GetUpdateRect(void)
+{
+    RECT rc1, rc2;
+    HWND hgrandparent, hparent, hchild;
+    WNDCLASSA cls;
+    const char* classNameA = "GetUpdateRectClass";
+
+    hgrandparent = CreateWindowA("static", "grandparent", WS_OVERLAPPEDWINDOW,
+                                 0, 0, 100, 100, NULL, NULL, 0, NULL);
+
+    hparent = CreateWindowA("static", "parent", WS_CHILD|WS_VISIBLE,
+                            0, 0, 100, 100, hgrandparent, NULL, 0, NULL);
+
+    hchild = CreateWindowA("static", "child", WS_CHILD|WS_VISIBLE,
+                            10, 10, 30, 30, hparent, NULL, 0, NULL);
+
+    ShowWindow(hgrandparent, SW_SHOW);
+    UpdateWindow(hgrandparent);
+
+    ShowWindow(hchild, SW_HIDE);
+    SetRect(&rc2, 0, 0, 0, 0);
+    GetUpdateRect(hgrandparent, &rc1, FALSE);
+    todo_wine
+    {
+        ok(EqualRect(&rc1, &rc2), "rects do not match (%d,%d,%d,%d) / (%d,%d,%d,%d)\n",
+                rc1.left, rc1.top, rc1.right, rc1.bottom,
+                rc2.left, rc2.top, rc2.right, rc2.bottom);
+    }
+
+    SetRect(&rc2, 10, 10, 40, 40);
+    GetUpdateRect(hparent, &rc1, FALSE);
+    ok(EqualRect(&rc1, &rc2), "rects do not match (%d,%d,%d,%d) / (%d,%d,%d,%d)\n",
+            rc1.left, rc1.top, rc1.right, rc1.bottom,
+            rc2.left, rc2.top, rc2.right, rc2.bottom);
+
+    DestroyWindow(hgrandparent);
+
+    cls.style = 0;
+    cls.lpfnWndProc = DefWindowProcA;
+    cls.cbClsExtra = 0;
+    cls.cbWndExtra = 0;
+    cls.hInstance = GetModuleHandleA(0);
+    cls.hIcon = 0;
+    cls.hCursor = LoadCursorA(0, (LPSTR)IDC_ARROW);
+    cls.hbrBackground = GetStockObject(WHITE_BRUSH);
+    cls.lpszMenuName = NULL;
+    cls.lpszClassName = classNameA;
+
+    if(!RegisterClassA(&cls)) {
+       trace("Register failed %d\n", GetLastError());
+       return;
+    }
+
+    hgrandparent = CreateWindowA("static", "grandparent", WS_OVERLAPPEDWINDOW,
+                                 0, 0, 100, 100, NULL, NULL, 0, NULL);
+
+    hparent = CreateWindowA(classNameA, "parent", WS_CHILD|WS_VISIBLE,
+                            0, 0, 100, 100, hgrandparent, NULL, 0, NULL);
+
+    hchild = CreateWindowA(classNameA, "child", WS_CHILD|WS_VISIBLE,
+                            10, 10, 30, 30, hparent, NULL, 0, NULL);
+
+    ShowWindow(hgrandparent, SW_SHOW);
+    UpdateWindow(hgrandparent);
+
+    ShowWindow(hchild, SW_HIDE);
+    SetRect(&rc2, 0, 0, 0, 0);
+    GetUpdateRect(hgrandparent, &rc1, FALSE);
+    todo_wine
+    {
+        ok(EqualRect(&rc1, &rc2), "rects do not match (%d,%d,%d,%d) / (%d,%d,%d,%d)\n",
+                rc1.left, rc1.top, rc1.right, rc1.bottom,
+                rc2.left, rc2.top, rc2.right, rc2.bottom);
+    }
+
+    SetRect(&rc2, 10, 10, 40, 40);
+    GetUpdateRect(hparent, &rc1, FALSE);
+    ok(EqualRect(&rc1, &rc2), "rects do not match (%d,%d,%d,%d) / (%d,%d,%d,%d)\n",
+            rc1.left, rc1.top, rc1.right, rc1.bottom,
+            rc2.left, rc2.top, rc2.right, rc2.bottom);
+
+    DestroyWindow(hgrandparent);
+}
+
 START_TEST(win)
 {
     pGetAncestor = (void *)GetProcAddress( GetModuleHandleA("user32.dll"), "GetAncestor" );
@@ -4161,6 +4379,8 @@ START_TEST(win)
     test_csparentdc();
     test_SetWindowLong();
     test_ShowWindow();
+    test_gettext();
+    test_GetUpdateRect();
 
     /* add the tests above this line */
     UnhookWindowsHookEx(hhook);

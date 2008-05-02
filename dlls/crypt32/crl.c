@@ -302,20 +302,17 @@ static BOOL WINAPI CRLContext_GetProperty(void *context, DWORD dwPropId,
     if (ret)
     {
         if (!pvData)
-        {
             *pcbData = blob.cbData;
-            ret = TRUE;
-        }
         else if (*pcbData < blob.cbData)
         {
             SetLastError(ERROR_MORE_DATA);
             *pcbData = blob.cbData;
+            ret = FALSE;
         }
         else
         {
             memcpy(pvData, blob.pbData, blob.cbData);
             *pcbData = blob.cbData;
-            ret = TRUE;
         }
     }
     else
@@ -371,8 +368,11 @@ BOOL WINAPI CertGetCRLContextProperty(PCCRL_CONTEXT pCRLContext,
         }
         else
         {
-            *(DWORD *)pvData =
-             CertStore_GetAccessState(pCRLContext->hCertStore);
+            if (pCRLContext->hCertStore)
+                ret = CertGetStoreProperty(pCRLContext->hCertStore, dwPropId,
+                 pvData, pcbData);
+            else
+                *(DWORD *)pvData = 0;
             ret = TRUE;
         }
         break;
@@ -473,7 +473,7 @@ BOOL WINAPI CertIsValidCRLForCertificate(PCCERT_CONTEXT pCert,
     return TRUE;
 }
 
-static PCRL_ENTRY CRYPT_FindCertificateInCRL(PCERT_INFO cert, PCRL_INFO crl)
+static PCRL_ENTRY CRYPT_FindCertificateInCRL(PCERT_INFO cert, const CRL_INFO *crl)
 {
     DWORD i;
     PCRL_ENTRY entry = NULL;

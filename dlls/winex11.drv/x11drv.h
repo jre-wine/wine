@@ -228,6 +228,7 @@ extern BOOL X11DRV_SwapBuffers(X11DRV_PDEVICE *physDev);
 
 /* X11 driver internal functions */
 
+extern void X11DRV_Xcursor_Init(void);
 extern void X11DRV_BITMAP_Init(void);
 extern void X11DRV_FONT_Init( int log_pixels_x, int log_pixels_y );
 
@@ -497,7 +498,6 @@ struct x11drv_escape_set_dce
 struct x11drv_thread_data
 {
     Display *display;
-    HANDLE   display_fd;
     int      process_event_count;  /* recursion count for event processing */
     Cursor   cursor;               /* current cursor */
     Window   cursor_window;        /* current window that contains the cursor */
@@ -510,14 +510,14 @@ struct x11drv_thread_data
 extern struct x11drv_thread_data *x11drv_init_thread_data(void);
 extern DWORD thread_data_tls_index;
 
-inline static struct x11drv_thread_data *x11drv_thread_data(void)
+static inline struct x11drv_thread_data *x11drv_thread_data(void)
 {
     struct x11drv_thread_data *data = TlsGetValue( thread_data_tls_index );
     if (!data) data = x11drv_init_thread_data();
     return data;
 }
 
-inline static Display *thread_display(void) { return x11drv_thread_data()->display; }
+static inline Display *thread_display(void) { return x11drv_thread_data()->display; }
 
 extern Visual *visual;
 extern Window root_window;
@@ -597,6 +597,7 @@ enum x11drv_atoms
     XATOM_text_plain,
     XATOM_text_rtf,
     XATOM_text_richtext,
+    XATOM_text_uri_list,
     NB_XATOMS
 };
 
@@ -673,6 +674,8 @@ extern void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD dwFlags, DWO
                                         DWORD dwExtraInfo, UINT injected_flags );
 extern void X11DRV_send_mouse_input( HWND hwnd, DWORD flags, DWORD x, DWORD y,
                                      DWORD data, DWORD time, DWORD extra_info, UINT injected_flags );
+extern DWORD X11DRV_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles, DWORD timeout,
+                                                 DWORD mask, DWORD flags );
 
 typedef int (*x11drv_error_callback)( Display *display, XErrorEvent *event, void *arg );
 
@@ -699,10 +702,10 @@ extern LPDDHALMODEINFO X11DRV_Settings_CreateModes(unsigned int max_modes, int r
 unsigned int X11DRV_Settings_GetModeCount(void);
 void X11DRV_Settings_Init(void);
 extern void X11DRV_Settings_SetDefaultMode(int mode);
-LPDDHALMODEINFO X11DRV_Settings_SetHandlers(const char *name, 
-                                            int (*pNewGCM)(void), 
-                                            void (*pNewSCM)(int), 
-                                            unsigned int nmodes, 
+LPDDHALMODEINFO X11DRV_Settings_SetHandlers(const char *name,
+                                            int (*pNewGCM)(void),
+                                            LONG (*pNewSCM)(int),
+                                            unsigned int nmodes,
                                             int reserve_depths);
 
 extern void X11DRV_DDHAL_SwitchMode(DWORD dwModeIndex, LPVOID fb_addr, LPVIDMEM fb_mem);

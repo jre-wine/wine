@@ -28,6 +28,12 @@
 
 #define NUM_THREADS 4
 
+static HINSTANCE hkernel32;
+static LPVOID (WINAPI *pVirtualAllocEx)(HANDLE, LPVOID, SIZE_T, DWORD, DWORD);
+static BOOL   (WINAPI *pVirtualFreeEx)(HANDLE, LPVOID, SIZE_T, DWORD);
+
+/* ############################### */
+
 static HANDLE create_target_process(const char *arg)
 {
     char **argv;
@@ -55,32 +61,40 @@ static void test_VirtualAllocEx(void)
     MEMORY_BASIC_INFORMATION info;
     HANDLE hProcess;
 
+    /* not exported in all windows-versions  */
+    if ((!pVirtualAllocEx) || (!pVirtualFreeEx)) {
+        skip("VirtualAllocEx not found\n");
+        return;
+    }
+
     hProcess = create_target_process("sleep");
     ok(hProcess != NULL, "Can't start process\n");
 
     SetLastError(0xdeadbeef);
-    addr1 = VirtualAllocEx(hProcess, NULL, alloc_size, MEM_COMMIT,
+    addr1 = pVirtualAllocEx(hProcess, NULL, alloc_size, MEM_COMMIT,
                            PAGE_EXECUTE_READWRITE);
     if (!addr1 && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {   /* Win9x */
-        trace("VirtualAllocEx is not implemented, skipping the test\n");
+        skip("VirtualAllocEx not implemented\n");
+        TerminateProcess(hProcess, 0);
+        CloseHandle(hProcess);
         return;
     }
 
-    src = (char *) HeapAlloc( GetProcessHeap(), 0, alloc_size );
-    dst = (char *) HeapAlloc( GetProcessHeap(), 0, alloc_size );
+    src = HeapAlloc( GetProcessHeap(), 0, alloc_size );
+    dst = HeapAlloc( GetProcessHeap(), 0, alloc_size );
     for (i = 0; i < alloc_size; i++)
-        src[i] = 0xcafedead + i;
+        src[i] = i & 0xff;
 
-    todo_wine ok(addr1 != NULL, "VirtualAllocEx error %u\n", GetLastError());
+    ok(addr1 != NULL, "VirtualAllocEx error %u\n", GetLastError());
     b = WriteProcessMemory(hProcess, addr1, src, alloc_size, &bytes_written);
     ok(b && (bytes_written == alloc_size), "%lu bytes written\n",
        bytes_written);
     b = ReadProcessMemory(hProcess, addr1, dst, alloc_size, &bytes_read);
     ok(b && (bytes_read == alloc_size), "%lu bytes read\n", bytes_read);
     ok(!memcmp(src, dst, alloc_size), "Data from remote process differs\n");
-    b = VirtualFreeEx(hProcess, addr1, 0, MEM_RELEASE);
-    todo_wine ok(b != 0, "VirtualFreeEx, error %u\n", GetLastError());
+    b = pVirtualFreeEx(hProcess, addr1, 0, MEM_RELEASE);
+    ok(b != 0, "VirtualFreeEx, error %u\n", GetLastError());
 
     HeapFree( GetProcessHeap(), 0, src );
     HeapFree( GetProcessHeap(), 0, dst );
@@ -90,94 +104,81 @@ static void test_VirtualAllocEx(void)
      */
 
     SetLastError(0xdeadbeef);
-    addr1 = VirtualAllocEx(hProcess, 0, 0, MEM_RESERVE, PAGE_NOACCESS);
+    addr1 = pVirtualAllocEx(hProcess, 0, 0, MEM_RESERVE, PAGE_NOACCESS);
     ok(addr1 == NULL, "VirtualAllocEx should fail on zero-sized allocation\n");
     ok(GetLastError() == ERROR_INVALID_PARAMETER /* NT */ ||
        GetLastError() == ERROR_NOT_ENOUGH_MEMORY, /* Win9x */
         "got %u, expected ERROR_INVALID_PARAMETER\n", GetLastError());
 
-    addr1 = VirtualAllocEx(hProcess, 0, 0xFFFC, MEM_RESERVE, PAGE_NOACCESS);
-    todo_wine ok(addr1 != NULL, "VirtualAllocEx failed\n");
+    addr1 = pVirtualAllocEx(hProcess, 0, 0xFFFC, MEM_RESERVE, PAGE_NOACCESS);
+    ok(addr1 != NULL, "VirtualAllocEx failed\n");
 
     /* test a not committed memory */
     memset(&info, 'q', sizeof(info));
-    todo_wine ok(VirtualQueryEx(hProcess, addr1, &info, sizeof(info))
-                 == sizeof(info), "VirtualQueryEx failed\n");
-    todo_wine ok(info.BaseAddress == addr1, "%p != %p\n", info.BaseAddress,
-                 addr1);
-    todo_wine ok(info.AllocationBase == addr1, "%p != %p\n",
-                 info.AllocationBase, addr1);
-    todo_wine ok(info.AllocationProtect == PAGE_NOACCESS,
-                 "%x != PAGE_NOACCESS\n", info.AllocationProtect);
-    todo_wine ok(info.RegionSize == 0x10000, "%lx != 0x10000\n",
-                 info.RegionSize);
-    todo_wine ok(info.State == MEM_RESERVE, "%x != MEM_RESERVE\n", info.State);
+    ok(VirtualQueryEx(hProcess, addr1, &info, sizeof(info)) == sizeof(info), "VirtualQueryEx failed\n");
+    ok(info.BaseAddress == addr1, "%p != %p\n", info.BaseAddress, addr1);
+    ok(info.AllocationBase == addr1, "%p != %p\n", info.AllocationBase, addr1);
+    ok(info.AllocationProtect == PAGE_NOACCESS, "%x != PAGE_NOACCESS\n", info.AllocationProtect);
+    ok(info.RegionSize == 0x10000, "%lx != 0x10000\n", info.RegionSize);
+    ok(info.State == MEM_RESERVE, "%x != MEM_RESERVE\n", info.State);
     /* NT reports Protect == 0 for a not committed memory block */
-    todo_wine ok(info.Protect == 0 /* NT */ ||
+    ok(info.Protect == 0 /* NT */ ||
        info.Protect == PAGE_NOACCESS, /* Win9x */
         "%x != PAGE_NOACCESS\n", info.Protect);
-    todo_wine ok(info.Type == MEM_PRIVATE, "%x != MEM_PRIVATE\n", info.Type);
+    ok(info.Type == MEM_PRIVATE, "%x != MEM_PRIVATE\n", info.Type);
 
     SetLastError(0xdeadbeef);
     ok(!VirtualProtectEx(hProcess, addr1, 0xFFFC, PAGE_READONLY, &old_prot),
        "VirtualProtectEx should fail on a not committed memory\n");
-    todo_wine ok(GetLastError() == ERROR_INVALID_ADDRESS /* NT */ ||
+    ok(GetLastError() == ERROR_INVALID_ADDRESS /* NT */ ||
        GetLastError() == ERROR_INVALID_PARAMETER, /* Win9x */
         "got %u, expected ERROR_INVALID_ADDRESS\n", GetLastError());
 
-    addr2 = VirtualAllocEx(hProcess, addr1, 0x1000, MEM_COMMIT, PAGE_NOACCESS);
+    addr2 = pVirtualAllocEx(hProcess, addr1, 0x1000, MEM_COMMIT, PAGE_NOACCESS);
     ok(addr1 == addr2, "VirtualAllocEx failed\n");
 
     /* test a committed memory */
-    todo_wine ok(VirtualQueryEx(hProcess, addr1, &info, sizeof(info))
-                 == sizeof(info),
+    ok(VirtualQueryEx(hProcess, addr1, &info, sizeof(info)) == sizeof(info),
         "VirtualQueryEx failed\n");
-    todo_wine ok(info.BaseAddress == addr1, "%p != %p\n", info.BaseAddress,
-                 addr1);
-    todo_wine ok(info.AllocationBase == addr1, "%p != %p\n",
-                 info.AllocationBase, addr1);
-    todo_wine ok(info.AllocationProtect == PAGE_NOACCESS,
-                 "%x != PAGE_NOACCESS\n", info.AllocationProtect);
-    todo_wine ok(info.RegionSize == 0x1000, "%lx != 0x1000\n", info.RegionSize);
-    todo_wine ok(info.State == MEM_COMMIT, "%x != MEM_COMMIT\n", info.State);
+    ok(info.BaseAddress == addr1, "%p != %p\n", info.BaseAddress, addr1);
+    ok(info.AllocationBase == addr1, "%p != %p\n", info.AllocationBase, addr1);
+    ok(info.AllocationProtect == PAGE_NOACCESS, "%x != PAGE_NOACCESS\n", info.AllocationProtect);
+    ok(info.RegionSize == 0x1000, "%lx != 0x1000\n", info.RegionSize);
+    ok(info.State == MEM_COMMIT, "%x != MEM_COMMIT\n", info.State);
     /* this time NT reports PAGE_NOACCESS as well */
-    todo_wine ok(info.Protect == PAGE_NOACCESS, "%x != PAGE_NOACCESS\n", info.Protect);
-    todo_wine ok(info.Type == MEM_PRIVATE, "%x != MEM_PRIVATE\n", info.Type);
+    ok(info.Protect == PAGE_NOACCESS, "%x != PAGE_NOACCESS\n", info.Protect);
+    ok(info.Type == MEM_PRIVATE, "%x != MEM_PRIVATE\n", info.Type);
 
     /* this should fail, since not the whole range is committed yet */
     SetLastError(0xdeadbeef);
     ok(!VirtualProtectEx(hProcess, addr1, 0xFFFC, PAGE_READONLY, &old_prot),
         "VirtualProtectEx should fail on a not committed memory\n");
-    todo_wine ok(GetLastError() == ERROR_INVALID_ADDRESS /* NT */ ||
+    ok(GetLastError() == ERROR_INVALID_ADDRESS /* NT */ ||
        GetLastError() == ERROR_INVALID_PARAMETER, /* Win9x */
         "got %u, expected ERROR_INVALID_ADDRESS\n", GetLastError());
 
-    todo_wine ok(VirtualProtectEx(hProcess, addr1, 0x1000, PAGE_READONLY,
-                                  &old_prot), "VirtualProtectEx failed\n");
-    todo_wine ok(old_prot == PAGE_NOACCESS,
-        "wrong old protection: got %04x instead of PAGE_NOACCESS\n", old_prot);
+    old_prot = 0;
+    ok(VirtualProtectEx(hProcess, addr1, 0x1000, PAGE_READONLY, &old_prot), "VirtualProtectEx failed\n");
+    ok(old_prot == PAGE_NOACCESS, "wrong old protection: got %04x instead of PAGE_NOACCESS\n", old_prot);
 
-    todo_wine ok(VirtualProtectEx(hProcess, addr1, 0x1000, PAGE_READWRITE,
-                                  &old_prot), "VirtualProtectEx failed\n");
-    todo_wine ok(old_prot == PAGE_READONLY,
-        "wrong old protection: got %04x instead of PAGE_READONLY\n", old_prot);
+    old_prot = 0;
+    ok(VirtualProtectEx(hProcess, addr1, 0x1000, PAGE_READWRITE, &old_prot), "VirtualProtectEx failed\n");
+    ok(old_prot == PAGE_READONLY, "wrong old protection: got %04x instead of PAGE_READONLY\n", old_prot);
 
-    ok(!VirtualFreeEx(hProcess, addr1, 0x10000, 0),
+    ok(!pVirtualFreeEx(hProcess, addr1, 0x10000, 0),
        "VirtualFreeEx should fail with type 0\n");
-    todo_wine ok(GetLastError() == ERROR_INVALID_PARAMETER,
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
         "got %u, expected ERROR_INVALID_PARAMETER\n", GetLastError());
 
-    todo_wine ok(VirtualFreeEx(hProcess, addr1, 0x10000, MEM_DECOMMIT),
-                 "VirtualFreeEx failed\n");
+    ok(pVirtualFreeEx(hProcess, addr1, 0x10000, MEM_DECOMMIT), "VirtualFreeEx failed\n");
 
     /* if the type is MEM_RELEASE, size must be 0 */
-    ok(!VirtualFreeEx(hProcess, addr1, 1, MEM_RELEASE),
+    ok(!pVirtualFreeEx(hProcess, addr1, 1, MEM_RELEASE),
        "VirtualFreeEx should fail\n");
-    todo_wine ok(GetLastError() == ERROR_INVALID_PARAMETER,
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
         "got %u, expected ERROR_INVALID_PARAMETER\n", GetLastError());
 
-    todo_wine ok(VirtualFreeEx(hProcess, addr1, 0, MEM_RELEASE),
-                 "VirtualFreeEx failed\n");
+    ok(pVirtualFreeEx(hProcess, addr1, 0, MEM_RELEASE), "VirtualFreeEx failed\n");
 
     TerminateProcess(hProcess, 0);
     CloseHandle(hProcess);
@@ -414,7 +415,66 @@ static void test_MapViewOfFile(void)
         GetLastError() == ERROR_ACCESS_DENIED, "Wrong error %d\n", GetLastError() );
 
     CloseHandle( file );
+    DeleteFileA( testfile );
+}
 
+static DWORD (WINAPI *pNtMapViewOfSection)( HANDLE handle, HANDLE process, PVOID *addr_ptr,
+                                            ULONG zero_bits, SIZE_T commit_size,
+                                            const LARGE_INTEGER *offset_ptr, SIZE_T *size_ptr,
+                                            ULONG inherit, ULONG alloc_type, ULONG protect );
+static DWORD (WINAPI *pNtUnmapViewOfSection)( HANDLE process, PVOID addr );
+
+static void test_NtMapViewOfSection(void)
+{
+    HANDLE hProcess;
+
+    static const char testfile[] = "testfile.xxx";
+    static const char data[] = "test data for NtMapViewOfSection";
+    char buffer[sizeof(data)];
+    HANDLE file, mapping;
+    void *ptr;
+    BOOL ret;
+    DWORD status, written;
+    SIZE_T size, result;
+    LARGE_INTEGER offset;
+
+    pNtMapViewOfSection = (void *)GetProcAddress( GetModuleHandle("ntdll.dll"), "NtMapViewOfSection" );
+    pNtUnmapViewOfSection = (void *)GetProcAddress( GetModuleHandle("ntdll.dll"), "NtUnmapViewOfSection" );
+    if (!pNtMapViewOfSection || !pNtUnmapViewOfSection)
+    {
+        skip( "NtMapViewOfSection not found\n" );
+        return;
+    }
+
+    file = CreateFileA( testfile, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
+    ok( file != INVALID_HANDLE_VALUE, "Failed to create test file\n" );
+    WriteFile( file, data, sizeof(data), &written, NULL );
+    SetFilePointer( file, 4096, NULL, FILE_BEGIN );
+    SetEndOfFile( file );
+
+    /* read/write mapping */
+
+    mapping = CreateFileMappingA( file, NULL, PAGE_READWRITE, 0, 4096, NULL );
+    ok( mapping != 0, "CreateFileMapping failed\n" );
+
+    hProcess = create_target_process("sleep");
+    ok(hProcess != NULL, "Can't start process\n");
+
+    ptr = NULL;
+    size = 0;
+    offset.QuadPart = 0;
+    status = pNtMapViewOfSection( mapping, hProcess, &ptr, 0, 0, &offset, &size, 1, 0, PAGE_READWRITE );
+    ok( !status, "NtMapViewOfSection failed status %x\n", status );
+
+    ret = ReadProcessMemory( hProcess, ptr, buffer, sizeof(buffer), &result );
+    ok( ret, "ReadProcessMemory failed\n" );
+    ok( result == sizeof(buffer), "ReadProcessMemory didn't read all data (%lx)\n", result );
+    ok( !memcmp( buffer, data, sizeof(buffer) ), "Wrong data read\n" );
+
+    status = pNtUnmapViewOfSection( hProcess, ptr );
+    ok( !status, "NtUnmapViewOfSection failed status %x\n", status );
+
+    CloseHandle( mapping );
     CloseHandle( file );
     DeleteFileA( testfile );
 }
@@ -447,7 +507,12 @@ START_TEST(virtual)
         return;
     }
 
+    hkernel32 = GetModuleHandleA("kernel32.dll");
+    pVirtualAllocEx = (void *) GetProcAddress(hkernel32, "VirtualAllocEx");
+    pVirtualFreeEx = (void *) GetProcAddress(hkernel32, "VirtualFreeEx");
+
     test_VirtualAllocEx();
     test_VirtualAlloc();
     test_MapViewOfFile();
+    test_NtMapViewOfSection();
 }

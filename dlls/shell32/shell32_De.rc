@@ -105,6 +105,19 @@ FONT 8, "MS Shell Dlg"
 	4, 40, 180, 120
 }
 
+SHELL_YESTOALL_MSGBOX DIALOG 200, 100, 280, 90
+STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+CAPTION "Meldung"
+FONT 8, "MS Shell Dlg"
+{
+    DEFPUSHBUTTON "&Ja", IDYES, 34, 69, 53, 14, WS_GROUP | WS_TABSTOP
+    PUSHBUTTON "Ja zu &allen", IDD_YESTOALL, 92, 69, 65, 14, WS_GROUP | WS_TABSTOP
+    PUSHBUTTON "&Nein", IDNO, 162, 69, 53, 14, WS_GROUP | WS_TABSTOP
+    PUSHBUTTON "Abbrechen", IDCANCEL, 220, 69, 53, 14, WS_GROUP | WS_TABSTOP
+    ICON "", IDD_ICON, 10, 10, 16, 16
+    LTEXT "", IDD_MESSAGE, 40, 10, 238, 52, 0
+}
+
 SHELL_ABOUT_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 210, 152
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Informationen über %s"
@@ -173,8 +186,12 @@ STRINGTABLE DISCARDABLE
 	IDS_TRASHFOLDER_TEXT "Sind Sie sich sicher, dass Sie '%1' und seinen Inhalt in den Müll verschieben möchten?"
 	IDS_TRASHMULTIPLE_TEXT "Sind Sie sich sicher, dass Sie diese %1 Dateien in den Müll verschieben möchten?"
 	IDS_CANTTRASH_TEXT "Das Objekt '%1' kann nicht in den Müll verschoben werden. Möchten Sie es stattdessen löschen?"
-	IDS_OVERWRITEFILE_TEXT "Möchten Sie, dass die Datei '%1' überschrieben wird ?"
+	IDS_OVERWRITEFILE_TEXT "This folder already contains a file called '%1'.\n\nDo you want to replace it?"
 	IDS_OVERWRITEFILE_CAPTION "Bestätigung: Datei überschreiben"
+	IDS_OVERWRITEFOLDER_TEXT "This folder already contains a folder named '%1'.\n\n"\
+	    "If the files in the destination folder have the same names as files in the\n"\
+	    "selected folder they will be replaced. Do you still want to move or copy\n"\
+	    "the folder?"
 
         /* message box strings */
         IDS_RESTART_TITLE       "Neustarten"

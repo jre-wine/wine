@@ -41,7 +41,7 @@ extern char *MSVCRT__pgmptr;
 void (*_aexit_rtn)(int) = MSVCRT__exit;
 
 /* INTERNAL: call atexit functions */
-void __MSVCRT__call_atexit(void)
+static void __MSVCRT__call_atexit(void)
 {
   /* Note: should only be called with the exit lock held */
   TRACE("%d atext functions to call\n", MSVCRT_atexit_registered);
@@ -155,6 +155,8 @@ void CDECL MSVCRT_abort(void)
   }
   else
     _cputs("\nabnormal program termination\n");
+  MSVCRT_raise(MSVCRT_SIGABRT);
+  /* in case raise() returns */
   MSVCRT__exit(3);
 }
 
@@ -172,6 +174,8 @@ void CDECL MSVCRT__assert(const char* str, const char* file, unsigned int line)
   }
   else
     _cprintf("Assertion failed: %s, file %s, line %d\n\n",str, file, line);
+  MSVCRT_raise(MSVCRT_SIGABRT);
+  /* in case raise() returns */
   MSVCRT__exit(3);
 }
 

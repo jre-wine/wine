@@ -35,7 +35,7 @@ enum x11drv_escape_codes
 };
 
 /* retrieve the X display to use on a given DC */
-inline static Display *get_display( HDC hdc )
+static inline Display *get_display( HDC hdc )
 {
     Display *display;
     enum x11drv_escape_codes escape = X11DRV_GET_DISPLAY;
@@ -53,6 +53,7 @@ inline static Display *get_display( HDC hdc )
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(fps);
 
+#define GLINFO_LOCATION This->wineD3DDevice->adapter->gl_info
 
 /* IDirect3DSwapChain IUnknown parts follow: */
 static ULONG WINAPI IWineD3DSwapChainImpl_AddRef(IWineD3DSwapChain *iface) {
@@ -104,6 +105,8 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_GetParent(IWineD3DSwapChain *iface, 
 /*IWineD3DSwapChain parts follow: */
 static void WINAPI IWineD3DSwapChainImpl_Destroy(IWineD3DSwapChain *iface, D3DCB_DESTROYSURFACEFN D3DCB_DestroyRenderTarget) {
     IWineD3DSwapChainImpl *This = (IWineD3DSwapChainImpl *)iface;
+    WINED3DDISPLAYMODE mode;
+    int i;
 
     /* release the ref to the front and back buffer parents */
     if(This->frontBuffer) {
@@ -123,23 +126,34 @@ static void WINAPI IWineD3DSwapChainImpl_Destroy(IWineD3DSwapChain *iface, D3DCB
         }
     }
 
-    /* Clean up the context */
-    /* check that we are the current context first */
-    if(glXGetCurrentContext() == This->glCtx){
-        glXMakeCurrent(This->display, None, NULL);
+    /* Restore the screen resolution if we rendered in fullscreen
+     * This will restore the screen resolution to what it was before creating the swapchain. In case of d3d8 and d3d9
+     * this will be the original desktop resolution. In case of d3d7 this will be a NOP because ddraw sets the resolution
+     * before starting up Direct3D, thus orig_width and orig_height will be equal to the modes in the presentation params
+     */
+    if(This->presentParms.Windowed == FALSE) {
+        mode.Width = This->orig_width;
+        mode.Height = This->orig_height;
+        mode.RefreshRate = 0;
+        mode.Format = This->orig_fmt;
+        IWineD3DDevice_SetDisplayMode((IWineD3DDevice *) This->wineD3DDevice, 0, &mode);
     }
-    glXDestroyContext(This->display, This->glCtx);
-    /* IUnknown_Release(This->parent); This should only apply to the primary swapchain,
-        all others are created by the caller, so releasing the parent should cause
-        the child to be released, not the other way around!
-        */
+    for(i = 0; i < This->num_contexts; i++) {
+        DestroyContext(This->wineD3DDevice, This->context[i]);
+    }
+    HeapFree(GetProcessHeap(), 0, This->context);
+
     HeapFree(GetProcessHeap(), 0, This);
 }
 
 static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CONST RECT *pSourceRect, CONST RECT *pDestRect, HWND hDestWindowOverride, CONST RGNDATA *pDirtyRegion, DWORD dwFlags) {
     IWineD3DSwapChainImpl *This = (IWineD3DSwapChainImpl *)iface;
+    unsigned int sync;
+    int retval;
 
     ENTER_GL();
+
+    /* Does glXSwapBuffers need a glx context? I don't think so. Blt will activate its own context if needed */
 
     /* Render the cursor onto the back buffer, using our nifty directdraw blitting code :-) */
     if(This->wineD3DDevice->bCursorVisible && This->wineD3DDevice->cursorTexture) {
@@ -172,150 +186,74 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
         /* The cursor must have pow2 sizes */
         cursor.pow2Width = cursor.currentDesc.Width;
         cursor.pow2Height = cursor.currentDesc.Height;
+        /* The surface is in the texture */
+        cursor.Flags |= SFLAG_INTEXTURE;
         /* DDBLT_KEYSRC will cause BltOverride to enable the alpha test with GL_NOTEQUAL, 0.0,
          * which is exactly what we want :-)
          */
         if (This->presentParms.Windowed) {
             MapWindowPoints(NULL, This->win_handle, (LPPOINT)&destRect, 2);
         }
-        IWineD3DSurface_Blt(This->backBuffer[0], &destRect, (IWineD3DSurface *) &cursor, NULL, DDBLT_KEYSRC, NULL);
+        IWineD3DSurface_Blt(This->backBuffer[0], &destRect, (IWineD3DSurface *) &cursor, NULL, WINEDDBLT_KEYSRC, NULL, WINED3DTEXF_NONE);
     }
 
     if (pSourceRect || pDestRect) FIXME("Unhandled present options %p/%p\n", pSourceRect, pDestRect);
     /* TODO: If only source rect or dest rect are supplied then clip the window to match */
-    TRACE("preseting display %p, drawable %ld\n", This->display, This->drawable);
+    TRACE("preseting display %p, drawable %ld\n", This->context[0]->display, This->context[0]->drawable);
 
     /* Don't call checkGLcall, as glGetError is not applicable here */
     if (hDestWindowOverride && This->win_handle != hDestWindowOverride) {
-        /* Set this swapchain up to point to the new destination.. */
-#ifdef USE_CONTEXT_MANAGER
-            /* TODO: use a context mamager */
-#endif
+        HDC hDc;
+        WINED3DLOCKED_RECT r;
+        Display *display;
+        BYTE *mem;
 
-            /* FIXME: Never access */
-            IWineD3DSwapChainImpl *swapChainImpl;
-            IWineD3DDevice_GetSwapChain((IWineD3DDevice *)This->wineD3DDevice, 0 , (IWineD3DSwapChain **)&swapChainImpl);
-            FIXME("Unable to render to a destination window %p\n", hDestWindowOverride );
-            if(This == swapChainImpl){
-                /* FIXME: this will be fixed by moving to a context management system */
-                FIXME("Cannot change the target of the implicit swapchain\n");
-            }else{
-                HDC               hDc;
-                XVisualInfo       template;
-                int               num;
-                Display          *oldDisplay = This->display;
-                GLXContext        oldContext = This->glCtx;
-                IUnknown*         tmp;
-                GLXContext        currentContext;
-                Drawable          currentDrawable;
-                hDc                          = GetDC(hDestWindowOverride);
-                This->win_handle             = hDestWindowOverride;
-                This->win                    = (Window)GetPropA( hDestWindowOverride, "__wine_x11_whole_window" );
+        TRACE("Performing dest override of swapchain %p from window %p to %p\n", This, This->win_handle, hDestWindowOverride);
+        if(This->context[0] == This->wineD3DDevice->contexts[0]) {
+            /* The primary context 'owns' all the opengl resources. Destroying and recreating that context would require downloading
+             * all opengl resources, deleting the gl resources, destroying all other contexts, then recreating all other contexts
+             * and reload the resources
+             */
+            ERR("Cannot change the destination window of the owner of the primary context\n");
+        } else {
+            hDc                          = GetDC(hDestWindowOverride);
+            This->win_handle             = hDestWindowOverride;
+            This->win                    = (Window)GetPropA( hDestWindowOverride, "__wine_x11_whole_window" );
+            display                      = get_display(hDc);
+            ReleaseDC(hDestWindowOverride, hDc);
 
-                TRACE("Creating a new context for the window %p\n", hDestWindowOverride);
-                ENTER_GL();
-                TRACE("Desctroying context %p %p\n", This->display, This->render_ctx);
+            /* The old back buffer has to be copied over to the new back buffer. A lockrect - switchcontext - unlockrect
+             * would suffice in theory, but it is rather nasty and may cause troubles with future changes of the locking code
+             * So lock read only, copy the surface out, then lock with the discard flag and write back
+             */
+            IWineD3DSurface_LockRect(This->backBuffer[0], &r, NULL, WINED3DLOCK_READONLY);
+            mem = HeapAlloc(GetProcessHeap(), 0, r.Pitch * ((IWineD3DSurfaceImpl *) This->backBuffer[0])->currentDesc.Height);
+            memcpy(mem, r.pBits, r.Pitch * ((IWineD3DSurfaceImpl *) This->backBuffer[0])->currentDesc.Height);
+            IWineD3DSurface_UnlockRect(This->backBuffer[0]);
 
+            DestroyContext(This->wineD3DDevice, This->context[0]);
+            This->context[0] = CreateContext(This->wineD3DDevice, (IWineD3DSurfaceImpl *) This->frontBuffer, display, This->win);
 
-
-                LEAVE_GL();
-                ENTER_GL();
-
-                This->display    = get_display(hDc);
-                TRACE("Got display%p  for  %p %p\n",  This->display, hDc, hDestWindowOverride);
-                ReleaseDC(hDestWindowOverride, hDc);
-                template.visualid = (VisualID)GetPropA(GetDesktopWindow(), "__wine_x11_visual_id");
-                This->visInfo   = XGetVisualInfo(This->display, VisualIDMask, &template, &num);
-                if (NULL == This->visInfo) {
-                    ERR("cannot really get XVisual\n");
-                    LEAVE_GL();
-                    return WINED3DERR_NOTAVAILABLE;
-                }
-                /* Now we have problems? well not really we just need to know what the implicit context is */
-                /* now destroy the old context and create a new one (we should really copy the buffers over, and do the whole make current thing! */
-                /* destroy the active context?*/
-                TRACE("Creating new context for %p %p %p\n",This->display, This->visInfo, swapChainImpl->glCtx);
-                This->glCtx = glXCreateContext(This->display, This->visInfo, swapChainImpl->glCtx, GL_TRUE);
-
-                if (NULL == This->glCtx) {
-                    ERR("cannot create glxContext\n");
-                }
-                This->drawable     = This->win;
-                This->render_ctx   = This->glCtx;
-                /* Setup some default states TODO: apply the stateblock to the new context */
-                /** save current context and drawable **/
-                currentContext  =   glXGetCurrentContext();
-                currentDrawable =   glXGetCurrentDrawable();
-
-                if (glXMakeCurrent(This->display, This->win, This->glCtx) == False) {
-                    ERR("Error in setting current context (display %p context %p drawable %ld)!\n", This->display, This->glCtx, This->win);
-                }
-
-                checkGLcall("glXMakeCurrent");
-
-                /* Clear the screen */
-                glClearColor(0.0, 0.0, 0.0, 0.0);
-                checkGLcall("glClearColor");
-                glClearIndex(0);
-                glClearDepth(1);
-                glClearStencil(0);
-
-                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_ACCUM_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-                checkGLcall("glClear");
-
-                glColor3f(1.0, 1.0, 1.0);
-                checkGLcall("glColor3f");
-
-                glEnable(GL_LIGHTING);
-                checkGLcall("glEnable");
-
-                glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE);
-                checkGLcall("glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE);");
-
-                glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE_EXT);
-                checkGLcall("glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE_EXT);");
-
-                glLightModeli(GL_LIGHT_MODEL_COLOR_CONTROL, GL_SEPARATE_SPECULAR_COLOR);
-                checkGLcall("glLightModeli(GL_LIGHT_MODEL_COLOR_CONTROL, GL_SEPARATE_SPECULAR_COLOR);");
-
-                /* If this swapchain is currently the active context then make this swapchain active */
-                if(IWineD3DSurface_GetContainer(This->wineD3DDevice->render_targets[0], &IID_IWineD3DSwapChain, (void **)&tmp) == WINED3D_OK){
-                    if(tmp != (IUnknown *)This){
-                        glXMakeCurrent(This->display, currentDrawable, currentContext);
-                        checkGLcall("glXMakeCurrent");
-                    }
-                    IUnknown_Release(tmp);
-                }else{
-                    /* reset the context */
-                    glXMakeCurrent(This->display, currentDrawable, currentContext);
-                    checkGLcall("glXMakeCurrent");
-                }
-                /* delete the old contxt*/
-                glXDestroyContext(oldDisplay, oldContext); /* Should this happen on an active context? seems a bad idea */
-                LEAVE_GL();
-            }
-            IWineD3DSwapChain_Release((IWineD3DSwapChain *)swapChainImpl);
-
+            IWineD3DSurface_LockRect(This->backBuffer[0], &r, NULL, WINED3DLOCK_DISCARD);
+            memcpy(r.pBits, mem, r.Pitch * ((IWineD3DSurfaceImpl *) This->backBuffer[0])->currentDesc.Height);
+            HeapFree(GetProcessHeap(), 0, mem);
+            IWineD3DSurface_UnlockRect(This->backBuffer[0]);
         }
+    }
 
-
-        /* TODO: The slow way, save the data to memory, create a new context for the destination window, transfer the data cleanup, it may be a good idea to the move this swapchain over to the using the target winows context so that it runs faster in feature. */
-
-    glXSwapBuffers(This->display, This->drawable); /* TODO: cycle through the swapchain buffers */
+    glXSwapBuffers(This->context[0]->display, This->context[0]->drawable); /* TODO: cycle through the swapchain buffers */
 
     TRACE("glXSwapBuffers called, Starting new frame\n");
     /* FPS support */
     if (TRACE_ON(fps))
     {
-        static long prev_time, frames;
-
         DWORD time = GetTickCount();
-        frames++;
+        This->frames++;
         /* every 1.5 seconds */
-        if (time - prev_time > 1500) {
-            TRACE_(fps)("@ approx %.2ffps\n", 1000.0*frames/(time - prev_time));
-            prev_time = time;
-            frames = 0;
+        if (time - This->prev_time > 1500) {
+            TRACE_(fps)("%p @ approx %.2ffps\n", This, 1000.0*This->frames/(time - This->prev_time));
+            This->prev_time = time;
+            This->frames = 0;
         }
     }
 
@@ -358,68 +296,114 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
 #endif
 
     LEAVE_GL();
-    /* Although this is not strictly required, a simple demo showed this does occur
-       on (at least non-debug) d3d                                                  */
+
     if (This->presentParms.SwapEffect == WINED3DSWAPEFFECT_DISCARD) {
+        TRACE("Clearing the color buffer with pink color\n");
 
-        TRACE("Clearing\n");
-
-        IWineD3DDevice_Clear((IWineD3DDevice*)This->wineD3DDevice, 0, NULL, WINED3DCLEAR_STENCIL|WINED3DCLEAR_ZBUFFER|WINED3DCLEAR_TARGET, 0x00, 1.0, 0);
-
-    } else {
-        TRACE("Clearing z/stencil buffer\n");
-
-        IWineD3DDevice_Clear((IWineD3DDevice*)This->wineD3DDevice, 0, NULL, WINED3DCLEAR_STENCIL|WINED3DCLEAR_ZBUFFER, 0x00, 1.0, 0);
+        IWineD3DDevice_Clear((IWineD3DDevice*)This->wineD3DDevice, 0, NULL,
+                              WINED3DCLEAR_TARGET, 0xff00ffff, 1.0, 0);
     }
 
-    if(!(((IWineD3DSurfaceImpl *) This->frontBuffer)->Flags   & SFLAG_GLDIRTY) ||
-       !(((IWineD3DSurfaceImpl *) This->backBuffer[0])->Flags & SFLAG_GLDIRTY) ) {
+    if(((IWineD3DSurfaceImpl *) This->frontBuffer)->Flags   & SFLAG_INSYSMEM ||
+       ((IWineD3DSurfaceImpl *) This->backBuffer[0])->Flags & SFLAG_INSYSMEM ) {
         /* Both memory copies of the surfaces are ok, flip them around too instead of dirtifying */
         IWineD3DSurfaceImpl *front = (IWineD3DSurfaceImpl *) This->frontBuffer;
         IWineD3DSurfaceImpl *back = (IWineD3DSurfaceImpl *) This->backBuffer[0];
-        BOOL frontdirty = front->Flags & SFLAG_GLDIRTY;
-        BOOL backdirty = back->Flags & SFLAG_GLDIRTY;
+        BOOL frontuptodate = front->Flags & SFLAG_INSYSMEM;
+        BOOL backuptodate = back->Flags & SFLAG_INSYSMEM;
 
-        /* Flip the DC */
-        {
-            HDC tmp;
-            tmp = front->hDC;
-            front->hDC = back->hDC;
-            back->hDC = tmp;
+        if(front->resource.size == back->resource.size) {
+            /* Flip the DC */
+            {
+                HDC tmp;
+                tmp = front->hDC;
+                front->hDC = back->hDC;
+                back->hDC = tmp;
+            }
+
+            /* Flip the DIBsection */
+            {
+                HBITMAP tmp;
+                BOOL hasDib = front->Flags & SFLAG_DIBSECTION;
+                tmp = front->dib.DIBsection;
+                front->dib.DIBsection = back->dib.DIBsection;
+                back->dib.DIBsection = tmp;
+
+                if(back->Flags & SFLAG_DIBSECTION) front->Flags |= SFLAG_DIBSECTION;
+                else front->Flags &= ~SFLAG_DIBSECTION;
+                if(hasDib) back->Flags |= SFLAG_DIBSECTION;
+                else back->Flags &= ~SFLAG_DIBSECTION;
+            }
+
+            /* Flip the surface data */
+            {
+                void* tmp;
+
+                tmp = front->dib.bitmap_data;
+                front->dib.bitmap_data = back->dib.bitmap_data;
+                back->dib.bitmap_data = tmp;
+
+                tmp = front->resource.allocatedMemory;
+                front->resource.allocatedMemory = back->resource.allocatedMemory;
+                back->resource.allocatedMemory = tmp;
+            }
+
+            /* client_memory should not be different, but just in case */
+            {
+                BOOL tmp;
+                tmp = front->dib.client_memory;
+                front->dib.client_memory = back->dib.client_memory;
+                back->dib.client_memory = tmp;
+            }
+            if(frontuptodate) back->Flags |= SFLAG_INSYSMEM;
+            else back->Flags &= ~SFLAG_INSYSMEM;
+            if(backuptodate) front->Flags |= SFLAG_INSYSMEM;
+            else front->Flags &= ~SFLAG_INSYSMEM;
+        } else {
+            back->Flags &= ~SFLAG_INSYSMEM;
+            front->Flags &= ~SFLAG_INSYSMEM;
+        }
+    }
+
+    if(This->presentParms.PresentationInterval != WINED3DPRESENT_INTERVAL_IMMEDIATE && GL_SUPPORT(SGI_VIDEO_SYNC)) {
+        retval = GL_EXTCALL(glXGetVideoSyncSGI(&sync));
+        if(retval != 0) {
+            ERR("glXGetVideoSyncSGI failed(retval = %d\n", retval);
         }
 
-        /* Flip the DIBsection */
-        {
-            HBITMAP tmp;
-            tmp = front->dib.DIBsection;
-            front->dib.DIBsection = back->dib.DIBsection;
-            back->dib.DIBsection = tmp;
+        switch(This->presentParms.PresentationInterval) {
+            case WINED3DPRESENT_INTERVAL_DEFAULT:
+            case WINED3DPRESENT_INTERVAL_ONE:
+                if(sync <= This->vSyncCounter) {
+                    retval = GL_EXTCALL(glXWaitVideoSyncSGI(1, 0, &This->vSyncCounter));
+                } else {
+                    This->vSyncCounter = sync;
+                }
+                break;
+            case WINED3DPRESENT_INTERVAL_TWO:
+                if(sync <= This->vSyncCounter + 1) {
+                    retval = GL_EXTCALL(glXWaitVideoSyncSGI(2, This->vSyncCounter & 0x1, &This->vSyncCounter));
+                } else {
+                    This->vSyncCounter = sync;
+                }
+                break;
+            case WINED3DPRESENT_INTERVAL_THREE:
+                if(sync <= This->vSyncCounter + 2) {
+                    retval = GL_EXTCALL(glXWaitVideoSyncSGI(3, This->vSyncCounter % 0x3, &This->vSyncCounter));
+                } else {
+                    This->vSyncCounter = sync;
+                }
+                break;
+            case WINED3DPRESENT_INTERVAL_FOUR:
+                if(sync <= This->vSyncCounter + 3) {
+                    retval = GL_EXTCALL(glXWaitVideoSyncSGI(4, This->vSyncCounter & 0x3, &This->vSyncCounter));
+                } else {
+                    This->vSyncCounter = sync;
+                }
+                break;
+            default:
+                FIXME("Unknown presentation interval %08x\n", This->presentParms.PresentationInterval);
         }
-
-        /* Flip the surface data */
-        {
-            void* tmp;
-
-            tmp = front->dib.bitmap_data;
-            front->dib.bitmap_data = back->dib.bitmap_data;
-            back->dib.bitmap_data = tmp;
-
-            tmp = front->resource.allocatedMemory;
-            front->resource.allocatedMemory = back->resource.allocatedMemory;
-            back->resource.allocatedMemory = tmp;
-        }
-
-        /* client_memory should not be different, but just in case */
-        {
-            BOOL tmp;
-            tmp = front->dib.client_memory;
-            front->dib.client_memory = back->dib.client_memory;
-            back->dib.client_memory = tmp;
-        }
-        if(frontdirty) back->Flags |= SFLAG_GLDIRTY;
-        else back->Flags &= ~SFLAG_GLDIRTY;
-        if(backdirty) front->Flags |= SFLAG_GLDIRTY;
-        else front->Flags &= ~SFLAG_GLDIRTY;
     }
 
     TRACE("returning\n");
@@ -431,16 +415,14 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_GetFrontBufferData(IWineD3DSwapChain
     POINT start;
 
     TRACE("(%p) : iface(%p) pDestSurface(%p)\n", This, iface, pDestSurface);
-    
+
     start.x = 0;
     start.y = 0;
-    
+
     if (This->presentParms.Windowed) {
         MapWindowPoints(This->win_handle, NULL, &start, 1);
     }
-#if 0 /* TODO: make sure that this swapchains context is active */
-    IWineD3DDevice_ActivateSwapChainContext(This->wineD3DDevice, iface);
-#endif
+
     IWineD3DSurface_BltFast(pDestSurface, start.x, start.y, This->frontBuffer, NULL, 0);
     return WINED3D_OK;
 }
@@ -523,19 +505,9 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_GetDevice(IWineD3DSwapChain *iface, 
 static HRESULT WINAPI IWineD3DSwapChainImpl_GetPresentParameters(IWineD3DSwapChain *iface, WINED3DPRESENT_PARAMETERS *pPresentationParameters) {
     IWineD3DSwapChainImpl *This = (IWineD3DSwapChainImpl *)iface;
     TRACE("(%p)\n", This);
-    *pPresentationParameters->BackBufferWidth = This->presentParms.BackBufferWidth;
-    *pPresentationParameters->BackBufferHeight = This->presentParms.BackBufferHeight;
-    *pPresentationParameters->BackBufferFormat = This->presentParms.BackBufferFormat;
-    *pPresentationParameters->BackBufferCount = This->presentParms.BackBufferCount;
-    *pPresentationParameters->MultiSampleType = This->presentParms.MultiSampleType;
-    *pPresentationParameters->MultiSampleQuality = This->presentParms.MultiSampleQuality;
-    *pPresentationParameters->SwapEffect = This->presentParms.SwapEffect;
-    *pPresentationParameters->hDeviceWindow = This->presentParms.hDeviceWindow;
-    *pPresentationParameters->Windowed = This->presentParms.Windowed;
-    *pPresentationParameters->EnableAutoDepthStencil = This->presentParms.EnableAutoDepthStencil;
-    *pPresentationParameters->Flags = This->presentParms.Flags;
-    *pPresentationParameters->FullScreen_RefreshRateInHz = This->presentParms.FullScreen_RefreshRateInHz;
-    *pPresentationParameters->PresentationInterval = This->presentParms.PresentationInterval;
+
+    *pPresentationParameters = This->presentParms;
+
     return WINED3D_OK;
 }
 

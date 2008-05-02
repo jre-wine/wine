@@ -24,7 +24,6 @@
 
 #include "uuids.h"
 #include "aviriff.h"
-#include "mmreg.h"
 #include "vfwmsgs.h"
 #include "mmsystem.h"
 
@@ -265,13 +264,6 @@ static HRESULT WAVEParser_InputPin_PreConnect(IPin * iface, IPin * pConnectPin)
     hr = IAsyncReader_SyncRead(This->pReader, pos, amt.cbFormat, amt.pbFormat);
     memcpy(&amt.subtype, &MEDIATYPE_Audio, sizeof(GUID));
     amt.subtype.Data1 = ((WAVEFORMATEX*)amt.pbFormat)->wFormatTag;
-    /* CopyMediaType(&((OutputPin*)pWAVEParser->ppPins[1])->pin.mtCurrent, &amt); */
-    ((Parser_OutputPin*)pWAVEParser->Parser.ppPins[1])->pmt = (AM_MEDIA_TYPE*) CoTaskMemAlloc(sizeof(AM_MEDIA_TYPE));
-    
-    CopyMediaType(((Parser_OutputPin*)pWAVEParser->Parser.ppPins[1])->pmt, &amt);
-
-    /* Update buffer alignment of media samples in output */
-    ((Parser_OutputPin*)pWAVEParser->Parser.ppPins[1])->pin.allocProps.cbAlign = ((WAVEFORMATEX*)amt.pbFormat)->nBlockAlign;
 
     pos += chunk.cb;
     hr = IAsyncReader_SyncRead(This->pReader, pos, sizeof(chunk), (BYTE *)&chunk);
@@ -296,7 +288,7 @@ static HRESULT WAVEParser_InputPin_PreConnect(IPin * iface, IPin * pConnectPin)
     if (hr != S_OK)
         return E_FAIL;
 
-    props.cbAlign = 1;
+    props.cbAlign = ((WAVEFORMATEX*)amt.pbFormat)->nBlockAlign;
     props.cbPrefix = 0;
     props.cbBuffer = 4096;
     props.cBuffers = 2;
@@ -306,6 +298,19 @@ static HRESULT WAVEParser_InputPin_PreConnect(IPin * iface, IPin * pConnectPin)
     TRACE("WAVE File ok\n");
 
     return hr;
+}
+
+static HRESULT WAVEParser_Cleanup(LPVOID iface)
+{
+    WAVEParserImpl *This = (WAVEParserImpl*)iface;
+
+    TRACE("(%p)->()\n", This);
+
+    if (This->pCurrentSample)
+        IMediaSample_Release(This->pCurrentSample);
+    This->pCurrentSample = NULL;
+
+    return S_OK;
 }
 
 HRESULT WAVEParser_create(IUnknown * pUnkOuter, LPVOID * ppv)
@@ -325,7 +330,7 @@ HRESULT WAVEParser_create(IUnknown * pUnkOuter, LPVOID * ppv)
 
     This->pCurrentSample = NULL;
 
-    hr = Parser_Create(&(This->Parser), &CLSID_WAVEParser, WAVEParser_Sample, WAVEParser_QueryAccept, WAVEParser_InputPin_PreConnect);
+    hr = Parser_Create(&(This->Parser), &CLSID_WAVEParser, WAVEParser_Sample, WAVEParser_QueryAccept, WAVEParser_InputPin_PreConnect, WAVEParser_Cleanup);
 
     if (FAILED(hr))
         return hr;

@@ -66,32 +66,32 @@ extern void trace_request(void);
 extern void trace_reply( enum request req, const union generic_reply *reply );
 
 /* get the request vararg data */
-inline static const void *get_req_data(void)
+static inline const void *get_req_data(void)
 {
     return current->req_data;
 }
 
 /* get the request vararg size */
-inline static data_size_t get_req_data_size(void)
+static inline data_size_t get_req_data_size(void)
 {
     return current->req.request_header.request_size;
 }
 
 /* get the request vararg as unicode string */
-inline static void get_req_unicode_str( struct unicode_str *str )
+static inline void get_req_unicode_str( struct unicode_str *str )
 {
     str->str = get_req_data();
     str->len = (get_req_data_size() / sizeof(WCHAR)) * sizeof(WCHAR);
 }
 
 /* get the reply maximum vararg size */
-inline static data_size_t get_reply_max_size(void)
+static inline data_size_t get_reply_max_size(void)
 {
     return current->req.request_header.reply_size;
 }
 
 /* allocate and fill the reply data */
-inline static void *set_reply_data( const void *data, data_size_t size )
+static inline void *set_reply_data( const void *data, data_size_t size )
 {
     void *ret = set_reply_data_size( size );
     if (ret) memcpy( ret, data, size );
@@ -99,7 +99,7 @@ inline static void *set_reply_data( const void *data, data_size_t size )
 }
 
 /* set the reply data pointer directly (will be freed by request code) */
-inline static void set_reply_data_ptr( void *data, data_size_t size )
+static inline void set_reply_data_ptr( void *data, data_size_t size )
 {
     assert( size <= get_reply_max_size() );
     current->reply_size = size;
@@ -129,6 +129,7 @@ DECL_HANDLER(load_dll);
 DECL_HANDLER(unload_dll);
 DECL_HANDLER(queue_apc);
 DECL_HANDLER(get_apc);
+DECL_HANDLER(get_apc_result);
 DECL_HANDLER(close_handle);
 DECL_HANDLER(set_handle_info);
 DECL_HANDLER(dup_handle);
@@ -151,7 +152,6 @@ DECL_HANDLER(get_handle_fd);
 DECL_HANDLER(flush_file);
 DECL_HANDLER(lock_file);
 DECL_HANDLER(unlock_file);
-DECL_HANDLER(unmount_device);
 DECL_HANDLER(create_socket);
 DECL_HANDLER(accept_socket);
 DECL_HANDLER(set_socket_event);
@@ -227,6 +227,7 @@ DECL_HANDLER(set_atom_information);
 DECL_HANDLER(empty_atom_table);
 DECL_HANDLER(init_atom_table);
 DECL_HANDLER(get_msg_queue);
+DECL_HANDLER(set_queue_fd);
 DECL_HANDLER(set_queue_mask);
 DECL_HANDLER(get_queue_status);
 DECL_HANDLER(get_process_idle_event);
@@ -243,11 +244,9 @@ DECL_HANDLER(get_serial_info);
 DECL_HANDLER(set_serial_info);
 DECL_HANDLER(register_async);
 DECL_HANDLER(cancel_async);
+DECL_HANDLER(ioctl);
+DECL_HANDLER(get_ioctl_result);
 DECL_HANDLER(create_named_pipe);
-DECL_HANDLER(open_named_pipe);
-DECL_HANDLER(connect_named_pipe);
-DECL_HANDLER(wait_named_pipe);
-DECL_HANDLER(disconnect_named_pipe);
 DECL_HANDLER(get_named_pipe_info);
 DECL_HANDLER(create_window);
 DECL_HANDLER(destroy_window);
@@ -315,14 +314,22 @@ DECL_HANDLER(duplicate_token);
 DECL_HANDLER(access_check);
 DECL_HANDLER(get_token_user);
 DECL_HANDLER(get_token_groups);
+DECL_HANDLER(set_security_object);
 DECL_HANDLER(create_mailslot);
-DECL_HANDLER(open_mailslot);
 DECL_HANDLER(set_mailslot_info);
 DECL_HANDLER(create_directory);
 DECL_HANDLER(open_directory);
 DECL_HANDLER(create_symlink);
 DECL_HANDLER(open_symlink);
 DECL_HANDLER(query_symlink);
+DECL_HANDLER(get_object_info);
+DECL_HANDLER(get_token_impersonation_level);
+DECL_HANDLER(allocate_locally_unique_id);
+DECL_HANDLER(create_device_manager);
+DECL_HANDLER(create_device);
+DECL_HANDLER(delete_device);
+DECL_HANDLER(get_next_device_request);
+DECL_HANDLER(make_process_system);
 
 #ifdef WANT_REQUEST_HANDLERS
 
@@ -348,6 +355,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_unload_dll,
     (req_handler)req_queue_apc,
     (req_handler)req_get_apc,
+    (req_handler)req_get_apc_result,
     (req_handler)req_close_handle,
     (req_handler)req_set_handle_info,
     (req_handler)req_dup_handle,
@@ -370,7 +378,6 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_flush_file,
     (req_handler)req_lock_file,
     (req_handler)req_unlock_file,
-    (req_handler)req_unmount_device,
     (req_handler)req_create_socket,
     (req_handler)req_accept_socket,
     (req_handler)req_set_socket_event,
@@ -446,6 +453,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_empty_atom_table,
     (req_handler)req_init_atom_table,
     (req_handler)req_get_msg_queue,
+    (req_handler)req_set_queue_fd,
     (req_handler)req_set_queue_mask,
     (req_handler)req_get_queue_status,
     (req_handler)req_get_process_idle_event,
@@ -462,11 +470,9 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_serial_info,
     (req_handler)req_register_async,
     (req_handler)req_cancel_async,
+    (req_handler)req_ioctl,
+    (req_handler)req_get_ioctl_result,
     (req_handler)req_create_named_pipe,
-    (req_handler)req_open_named_pipe,
-    (req_handler)req_connect_named_pipe,
-    (req_handler)req_wait_named_pipe,
-    (req_handler)req_disconnect_named_pipe,
     (req_handler)req_get_named_pipe_info,
     (req_handler)req_create_window,
     (req_handler)req_destroy_window,
@@ -534,14 +540,22 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_access_check,
     (req_handler)req_get_token_user,
     (req_handler)req_get_token_groups,
+    (req_handler)req_set_security_object,
     (req_handler)req_create_mailslot,
-    (req_handler)req_open_mailslot,
     (req_handler)req_set_mailslot_info,
     (req_handler)req_create_directory,
     (req_handler)req_open_directory,
     (req_handler)req_create_symlink,
     (req_handler)req_open_symlink,
     (req_handler)req_query_symlink,
+    (req_handler)req_get_object_info,
+    (req_handler)req_get_token_impersonation_level,
+    (req_handler)req_allocate_locally_unique_id,
+    (req_handler)req_create_device_manager,
+    (req_handler)req_create_device,
+    (req_handler)req_delete_device,
+    (req_handler)req_get_next_device_request,
+    (req_handler)req_make_process_system,
 };
 #endif  /* WANT_REQUEST_HANDLERS */
 

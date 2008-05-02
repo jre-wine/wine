@@ -60,10 +60,43 @@ DEFINE_EXPECT(GetBindInfo);
 DEFINE_EXPECT(ReportProgress_BEGINDOWNLOADDATA);
 DEFINE_EXPECT(ReportProgress_SENDINGREQUEST);
 DEFINE_EXPECT(ReportProgress_MIMETYPEAVAILABLE);
+DEFINE_EXPECT(ReportProgress_CACHEFILENAMEAVAIABLE);
+DEFINE_EXPECT(ReportProgress_DIRECTBIND);
 DEFINE_EXPECT(ReportData);
 DEFINE_EXPECT(ReportResult);
 
 static HRESULT expect_hrResult;
+static IInternetProtocol *read_protocol = NULL;
+
+static const WCHAR blank_url1[] = {'i','t','s',':',
+    't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR blank_url2[] = {'m','S','-','i','T','s',':',
+    't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR blank_url3[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
+    't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR blank_url4[] = {'i','t','s',':',
+    't','e','s','t','.','c','h','m',':',':','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR blank_url5[] = {'i','t','s',':',
+    't','e','s','t','.','c','h','m',':',':','\\','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR blank_url6[] = {'i','t','s',':',
+    't','e','s','t','.','c','h','m',':',':','/','%','6','2','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR blank_url7[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
+    't','e','s','t','.','c','h','m',':',':','\\','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR blank_url8[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
+    't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l','/',0};
+
+static enum {
+    ITS_PROTOCOL,
+    MK_PROTOCOL
+} test_protocol;
+
+static const WCHAR cache_file1[] =
+    {'t','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR cache_file2[] =
+    {'t','e','s','t','.','c','h','m',':',':','\\','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR cache_file3[] =
+    {'t','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l','/',0};
+static const WCHAR *cache_file = cache_file1;
 
 static HRESULT WINAPI ProtocolSink_QueryInterface(IInternetProtocolSink *iface, REFIID riid, void **ppv)
 {
@@ -103,11 +136,22 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
         break;
     case BINDSTATUS_SENDINGREQUEST:
         CHECK_EXPECT(ReportProgress_SENDINGREQUEST);
-        ok(!lstrcmpW(szStatusText, blank_html), "unexpected szStatusText\n");
+        if(test_protocol == ITS_PROTOCOL)
+            ok(!lstrcmpW(szStatusText, blank_html), "unexpected szStatusText\n");
+        else
+            ok(szStatusText == NULL, "szStatusText != NULL\n");
         break;
     case BINDSTATUS_MIMETYPEAVAILABLE:
         CHECK_EXPECT(ReportProgress_MIMETYPEAVAILABLE);
         ok(!lstrcmpW(szStatusText, text_html), "unexpected szStatusText\n");
+        break;
+    case BINDSTATUS_CACHEFILENAMEAVAILABLE:
+        CHECK_EXPECT(ReportProgress_CACHEFILENAMEAVAIABLE);
+        ok(!lstrcmpW(szStatusText, cache_file), "unexpected szStatusText\n");
+        break;
+    case BINDSTATUS_DIRECTBIND:
+        CHECK_EXPECT(ReportProgress_DIRECTBIND);
+        ok(!szStatusText, "szStatusText != NULL\n");
         break;
     default:
         ok(0, "unexpected ulStatusCode %d\n", ulStatusCode);
@@ -123,13 +167,27 @@ static HRESULT WINAPI ProtocolSink_ReportData(IInternetProtocolSink *iface, DWOR
     CHECK_EXPECT(ReportData);
 
     ok(ulProgress == ulProgressMax, "ulProgress != ulProgressMax\n");
-    ok(grfBSCF == (BSCF_FIRSTDATANOTIFICATION | BSCF_DATAFULLYAVAILABLE), "grcf = %08x\n", grfBSCF);
+    if(test_protocol == ITS_PROTOCOL)
+        ok(grfBSCF == (BSCF_FIRSTDATANOTIFICATION | BSCF_DATAFULLYAVAILABLE), "grcf = %08x\n", grfBSCF);
+    else
+        ok(grfBSCF == (BSCF_FIRSTDATANOTIFICATION | BSCF_LASTDATANOTIFICATION), "grcf = %08x\n", grfBSCF);
+
+    if(read_protocol) {
+        BYTE buf[100];
+        DWORD cb = 0xdeadbeef;
+        HRESULT hres;
+
+        hres = IInternetProtocol_Read(read_protocol, buf, sizeof(buf), &cb);
+        ok(hres == S_OK, "Read failed: %08x\n", hres);
+        ok(cb == 13, "cb=%u expected 13\n", cb);
+        ok(!memcmp(buf, "<html></html>", 13), "unexpected data\n");
+    }
 
     return S_OK;
 }
 
-static HRESULT WINAPI ProtocolSink_ReportResult(IInternetProtocolSink *iface, HRESULT hrResult, DWORD dwError,
-        LPCWSTR szResult)
+static HRESULT WINAPI ProtocolSink_ReportResult(IInternetProtocolSink *iface, HRESULT hrResult,
+        DWORD dwError, LPCWSTR szResult)
 {
     CHECK_EXPECT(ReportResult);
 
@@ -220,15 +278,21 @@ static void test_protocol_fail(IInternetProtocol *protocol, LPCWSTR url, HRESULT
     CHECK_CALLED(ReportResult);
 }
 
-static void protocol_start(IInternetProtocol *protocol, LPCWSTR url)
+static void protocol_start(IInternetProtocol *protocol, LPCWSTR url, BOOL expect_mime)
 {
     HRESULT hres;
 
     SET_EXPECT(GetBindInfo);
+    if(test_protocol == MK_PROTOCOL)
+        SET_EXPECT(ReportProgress_DIRECTBIND);
     SET_EXPECT(ReportProgress_SENDINGREQUEST);
-    SET_EXPECT(ReportProgress_MIMETYPEAVAILABLE);
+    if(expect_mime)
+        SET_EXPECT(ReportProgress_MIMETYPEAVAILABLE);
+    if(test_protocol == MK_PROTOCOL)
+        SET_EXPECT(ReportProgress_CACHEFILENAMEAVAIABLE);
     SET_EXPECT(ReportData);
-    SET_EXPECT(ReportProgress_BEGINDOWNLOADDATA);
+    if(test_protocol == ITS_PROTOCOL)
+        SET_EXPECT(ReportProgress_BEGINDOWNLOADDATA);
     SET_EXPECT(ReportResult);
     expect_hrResult = S_OK;
 
@@ -236,14 +300,20 @@ static void protocol_start(IInternetProtocol *protocol, LPCWSTR url)
     ok(hres == S_OK, "Start failed: %08x\n", hres);
 
     CHECK_CALLED(GetBindInfo);
+    if(test_protocol == MK_PROTOCOL)
+        CHECK_CALLED(ReportProgress_DIRECTBIND);
     CHECK_CALLED(ReportProgress_SENDINGREQUEST);
-    CHECK_CALLED(ReportProgress_MIMETYPEAVAILABLE);
+    if(expect_mime)
+        CHECK_CALLED(ReportProgress_MIMETYPEAVAILABLE);
+    if(test_protocol == MK_PROTOCOL)
+        SET_EXPECT(ReportProgress_CACHEFILENAMEAVAIABLE);
     CHECK_CALLED(ReportData);
-    CHECK_CALLED(ReportProgress_BEGINDOWNLOADDATA);
+    if(test_protocol == ITS_PROTOCOL)
+        CHECK_CALLED(ReportProgress_BEGINDOWNLOADDATA);
     CHECK_CALLED(ReportResult);
 }
 
-static void test_its_protocol_url(IClassFactory *factory, LPCWSTR url)
+static void test_protocol_url(IClassFactory *factory, LPCWSTR url, BOOL expect_mime)
 {
     IInternetProtocol *protocol;
     BYTE buf[512];
@@ -255,7 +325,7 @@ static void test_its_protocol_url(IClassFactory *factory, LPCWSTR url)
     if(FAILED(hres))
         return;
 
-    protocol_start(protocol, url);
+    protocol_start(protocol, url, expect_mime);
     hres = IInternetProtocol_Read(protocol, buf, sizeof(buf), &cb);
     ok(hres == S_OK, "Read failed: %08x\n", hres);
     ok(cb == 13, "cb=%u expected 13\n", cb);
@@ -270,11 +340,11 @@ static void test_its_protocol_url(IClassFactory *factory, LPCWSTR url)
 
     cb = 0xdeadbeef;
     hres = IInternetProtocol_Read(protocol, buf, sizeof(buf), &cb);
-    ok(hres == INET_E_DATA_NOT_AVAILABLE,
-       "Read returned %08x expected INET_E_DATA_NOT_AVAILABLE\n", hres);
+    ok(hres == (test_protocol == ITS_PROTOCOL ? INET_E_DATA_NOT_AVAILABLE : E_FAIL),
+       "Read returned %08x\n", hres);
     ok(cb == 0xdeadbeef, "cb=%u expected 0xdeadbeef\n", cb);
 
-    protocol_start(protocol, url);
+    protocol_start(protocol, url, expect_mime);
     hres = IInternetProtocol_Read(protocol, buf, 2, &cb);
     ok(hres == S_OK, "Read failed: %08x\n", hres);
     ok(cb == 2, "cb=%u expected 2\n", cb);
@@ -294,7 +364,7 @@ static void test_its_protocol_url(IClassFactory *factory, LPCWSTR url)
     if(FAILED(hres))
         return;
 
-    protocol_start(protocol, url);
+    protocol_start(protocol, url, expect_mime);
     hres = IInternetProtocol_Read(protocol, buf, 2, &cb);
     ok(hres == S_OK, "Read failed: %08x\n", hres);
     hres = IInternetProtocol_LockRequest(protocol, 0);
@@ -312,7 +382,7 @@ static void test_its_protocol_url(IClassFactory *factory, LPCWSTR url)
     if(FAILED(hres))
         return;
 
-    protocol_start(protocol, url);
+    protocol_start(protocol, url, expect_mime);
     hres = IInternetProtocol_LockRequest(protocol, 0);
     ok(hres == S_OK, "LockRequest failed: %08x\n", hres);
     hres = IInternetProtocol_Terminate(protocol, 0);
@@ -332,21 +402,135 @@ static void test_its_protocol_url(IClassFactory *factory, LPCWSTR url)
     ok(cb == 2, "cb=%u expected 2\n", cb);
     ref = IInternetProtocol_Release(protocol);
     ok(!ref, "protocol ref=%d\n", ref);
+
+    hres = IClassFactory_CreateInstance(factory, NULL, &IID_IInternetProtocol, (void**)&read_protocol);
+    ok(hres == S_OK, "Could not get IInternetProtocol: %08x\n", hres);
+    if(FAILED(hres))
+        return;
+
+    protocol_start(read_protocol, url, expect_mime);
+    ref = IInternetProtocol_Release(read_protocol);
+    ok(!ref, "protocol ref=%d\n", ref);
+    read_protocol = NULL;
+}
+
+static const WCHAR rel_url1[] =
+    {'t','e','s','t','.','h','t','m','l',0};
+static const WCHAR rel_url2[] =
+    {'t','e','s','t','.','c','h','m',':',':','/','t','e','s','t','.','h','t','m','l',0};
+static const WCHAR rel_url3[] =
+    {'/','t','e','s','t','.','h','t','m','l',0};
+static const WCHAR rel_url4[] =
+    {'t','e',':','t','.','h','t','m','l',0};
+static const WCHAR rel_url5[] =
+    {'d','i','r','/','t','e','s','t','.','h','t','m','l',0};
+
+static const WCHAR base_url1[] = {'i','t','s',':',
+    't','e','s','t',':','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR base_url2[] = {'i','t','s',':','t','e','s','t','.','c','h','m',
+    ':',':','/','d','i','r','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR base_url3[] = {'m','s','-','i','t','s',':','t','e','s','t','.','c','h','m',
+    ':',':','/','d','i','r','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR base_url4[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
+    't','e','s','t','.','c','h','m',':',':','/','d','i','r','/',
+    'b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR base_url5[] = {'x','x','x',':','t','e','s','t','.','c','h','m',
+    ':',':','/','d','i','r','/','b','l','a','n','k','.','h','t','m','l',0};
+
+static const WCHAR combined_url1[] = {'i','t','s',':',
+    't','e','s','t','.','c','h','m',':',':','/','t','e','s','t','.','h','t','m','l',0};
+static const WCHAR combined_url2[] = {'i','t','s',':',
+    't','e','s','t','.','c','h','m',':',':','/','d','i','r','/','t','e','s','t','.','h','t','m','l',0};
+static const WCHAR combined_url3[] = {'i','t','s',':',
+    't','e','s','t',':','.','c','h','m',':',':','/','t','e','s','t','.','h','t','m','l',0};
+static const WCHAR combined_url4[] = {'i','t','s',':','t','e','s','t','.','c','h','m',
+    ':',':','b','l','a','n','k','.','h','t','m','l','t','e','s','t','.','h','t','m','l',0};
+static const WCHAR combined_url5[] = {'m','s','-','i','t','s',':',
+    't','e','s','t','.','c','h','m',':',':','/','d','i','r','/','t','e','s','t','.','h','t','m','l',0};
+static const WCHAR combined_url6[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
+    't','e','s','t','.','c','h','m',':',':','/','d','i','r','/','t','e','s','t','.','h','t','m','l',0};
+
+static const struct {
+    LPCWSTR base_url;
+    LPCWSTR rel_url;
+    DWORD flags;
+    HRESULT hres;
+    LPCWSTR combined_url;
+} combine_tests[] = {
+    {blank_url1, blank_url1, 0, STG_E_INVALIDNAME, NULL},
+    {blank_url2, blank_url2, 0, STG_E_INVALIDNAME, NULL},
+    {blank_url1, rel_url1, 0, S_OK, combined_url1},
+    {blank_url1, rel_url2, 0, STG_E_INVALIDNAME, NULL},
+    {blank_url1, rel_url3, 0, S_OK, combined_url1},
+    {blank_url1, rel_url4, 0, STG_E_INVALIDNAME, NULL},
+    {blank_url1, rel_url3, URL_ESCAPE_SPACES_ONLY|URL_DONT_ESCAPE_EXTRA_INFO, S_OK, combined_url1},
+    {blank_url1, rel_url5, 0, S_OK, combined_url2},
+    {rel_url1, rel_url2, 0, 0x80041001, NULL},
+    {base_url1, rel_url1, 0, S_OK, combined_url3},
+    {base_url2, rel_url1, 0, S_OK, combined_url2},
+    {blank_url4, rel_url1, 0, S_OK, combined_url4},
+    {base_url3, rel_url1, 0, S_OK, combined_url5},
+    {base_url4, rel_url1, 0, S_OK, combined_url6},
+    {base_url5, rel_url1, 0, INET_E_USE_DEFAULT_PROTOCOLHANDLER, NULL},
+    {base_url2, rel_url3, 0, S_OK, combined_url1},
+};
+
+static void test_its_protocol_info(IInternetProtocol *protocol)
+{
+    IInternetProtocolInfo *info;
+    WCHAR buf[1024];
+    DWORD size, i;
+    HRESULT hres;
+
+    hres = IInternetProtocol_QueryInterface(protocol, &IID_IInternetProtocolInfo, (void**)&info);
+    ok(hres == S_OK, "Could not get IInternetProtocolInfo interface: %08x\n", hres);
+    if(FAILED(hres))
+        return;
+
+    for(i = PARSE_CANONICALIZE; i <= PARSE_UNESCAPE; i++) {
+        if(i != PARSE_CANONICALIZE && i != PARSE_SECURITY_URL) {
+            hres = IInternetProtocolInfo_ParseUrl(info, blank_url1, i, 0, buf,
+                    sizeof(buf)/sizeof(buf[0]), &size, 0);
+            ok(hres == INET_E_DEFAULT_ACTION,
+               "[%d] failed: %08x, expected INET_E_DEFAULT_ACTION\n", i, hres);
+        }
+    }
+
+    for(i=0; i < sizeof(combine_tests)/sizeof(combine_tests[0]); i++) {
+        size = 0xdeadbeef;
+        memset(buf, 0xfe, sizeof(buf));
+        hres = IInternetProtocolInfo_CombineUrl(info, combine_tests[i].base_url,
+                combine_tests[i].rel_url, combine_tests[i].flags, buf,
+                sizeof(buf)/sizeof(WCHAR), &size, 0);
+        ok(hres == combine_tests[i].hres, "[%d] CombineUrl returned %08x, expected %08x\n",
+           i, hres, combine_tests[i].hres);
+        ok(size == (combine_tests[i].combined_url ? lstrlenW(combine_tests[i].combined_url)+1
+           : 0xdeadbeef), "[%d] unexpected size=%d\n", i, size);
+        if(combine_tests[i].combined_url)
+            ok(!lstrcmpW(combine_tests[i].combined_url, buf), "[%d] unexpected result\n", i);
+        else
+            ok(buf[0] == 0xfefe, "buf changed\n");
+    }
+
+    size = 0xdeadbeef;
+    memset(buf, 0xfe, sizeof(buf));
+    hres = IInternetProtocolInfo_CombineUrl(info, blank_url1, rel_url1, 0, buf,
+            1, &size, 0);
+    ok(hres == E_OUTOFMEMORY, "CombineUrl failed: %08x\n", hres);
+    ok(size == sizeof(combined_url1)/sizeof(WCHAR), "size=%d\n", size);
+    ok(buf[0] == 0xfefe, "buf changed\n");
+
+    IInternetProtocolInfo_Release(info);
 }
 
 static void test_its_protocol(void)
 {
+    IInternetProtocolInfo *info;
     IClassFactory *factory;
     IUnknown *unk;
     ULONG ref;
     HRESULT hres;
 
-    static const WCHAR blank_url1[] = {'i','t','s',':',
-        't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
-    static const WCHAR blank_url2[] = {'m','S','-','i','T','s',':',
-         't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
-    static const WCHAR blank_url3[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
-         't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
     static const WCHAR wrong_url1[] =
         {'i','t','s',':','t','e','s','t','.','c','h','m',':',':','/','b','l','a','n','.','h','t','m','l',0};
     static const WCHAR wrong_url2[] =
@@ -358,10 +542,15 @@ static void test_its_protocol(void)
     static const WCHAR wrong_url5[] = {'f','i','l','e',':',
         't','e','s','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
 
+    test_protocol = ITS_PROTOCOL;
+
     hres = CoGetClassObject(&CLSID_ITSProtocol, CLSCTX_INPROC_SERVER, NULL, &IID_IUnknown, (void**)&unk);
     ok(hres == S_OK, "CoGetClassObject failed: %08x\n", hres);
     if(!SUCCEEDED(hres))
         return;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IInternetProtocolInfo, (void**)&info);
+    ok(hres == E_NOINTERFACE, "Could not get IInternetProtocolInfo: %08x\n", hres);
 
     hres = IUnknown_QueryInterface(unk, &IID_IClassFactory, (void**)&factory);
     ok(hres == S_OK, "Could not get IClassFactory interface\n");
@@ -371,6 +560,8 @@ static void test_its_protocol(void)
         hres = IClassFactory_CreateInstance(factory, NULL, &IID_IInternetProtocol, (void**)&protocol);
         ok(hres == S_OK, "Could not get IInternetProtocol: %08x\n", hres);
         if(SUCCEEDED(hres)) {
+            test_its_protocol_info(protocol);
+
             test_protocol_fail(protocol, wrong_url1, STG_E_FILENOTFOUND);
             test_protocol_fail(protocol, wrong_url2, STG_E_FILENOTFOUND);
             test_protocol_fail(protocol, wrong_url3, STG_E_FILENOTFOUND);
@@ -386,15 +577,42 @@ static void test_its_protocol(void)
             ref = IInternetProtocol_Release(protocol);
             ok(!ref, "protocol ref=%d\n", ref);
 
-            test_its_protocol_url(factory, blank_url1);
-            test_its_protocol_url(factory, blank_url2);
-            test_its_protocol_url(factory, blank_url3);
+            test_protocol_url(factory, blank_url1, TRUE);
+            test_protocol_url(factory, blank_url2, TRUE);
+            test_protocol_url(factory, blank_url3, TRUE);
+            test_protocol_url(factory, blank_url4, TRUE);
+            test_protocol_url(factory, blank_url5, TRUE);
+            test_protocol_url(factory, blank_url6, TRUE);
+            test_protocol_url(factory, blank_url8, TRUE);
         }
 
         IClassFactory_Release(factory);
     }
 
     IUnknown_Release(unk);
+}
+
+static void test_mk_protocol(void)
+{
+    IClassFactory *cf;
+    HRESULT hres;
+
+    test_protocol = MK_PROTOCOL;
+
+    hres = CoGetClassObject(&CLSID_MkProtocol, CLSCTX_INPROC_SERVER, NULL, &IID_IClassFactory,
+                            (void**)&cf);
+    ok(hres == S_OK, "CoGetClassObject failed: %08x\n", hres);
+    if(!SUCCEEDED(hres))
+        return;
+
+    cache_file = cache_file1;
+    test_protocol_url(cf, blank_url3, TRUE);
+    cache_file = cache_file2;
+    test_protocol_url(cf, blank_url7, TRUE);
+    cache_file = cache_file3;
+    test_protocol_url(cf, blank_url8, FALSE);
+
+    IClassFactory_Release(cf);
 }
 
 static BOOL create_chm(void)
@@ -433,6 +651,7 @@ START_TEST(protocol)
         return;
 
     test_its_protocol();
+    test_mk_protocol();
 
     delete_chm();
     OleUninitialize();

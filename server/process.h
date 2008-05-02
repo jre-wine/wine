@@ -61,11 +61,12 @@ struct process
     int                  unix_pid;        /* Unix pid for final SIGKILL */
     int                  exit_code;       /* process exit code */
     int                  running_threads; /* number of threads running in this process */
-    struct timeval       start_time;      /* absolute time at process start */
-    struct timeval       end_time;        /* absolute time at process end */
+    timeout_t            start_time;      /* absolute time at process start */
+    timeout_t            end_time;        /* absolute time at process end */
     int                  priority;        /* priority class */
     int                  affinity;        /* process affinity mask */
     int                  suspend;         /* global process suspend count */
+    int                  is_system;       /* is it a system process? */
     unsigned int         create_flags;    /* process creation flags */
     struct list          locks;           /* list of file locks owned by the process */
     struct list          classes;         /* window classes owned by the process */
@@ -130,9 +131,16 @@ extern struct process_snapshot *process_snap( int *count );
 extern struct module_snapshot *module_snap( struct process *process, int *count );
 extern void enum_processes( int (*cb)(struct process*, void*), void *user);
 
+/* console functions */
+extern void inherit_console(struct thread *parent_thread, struct process *process, obj_handle_t hconin);
+extern int free_console( struct process *process );
+extern struct thread *console_get_renderer( struct console_input *console );
+
 /* process tracing mechanism to use */
 #ifdef __APPLE__
 #define USE_MACH
+#elif defined(__sun)
+#define USE_PROCFS
 #else
 #define USE_PTRACE
 #endif
@@ -143,14 +151,14 @@ extern void finish_process_tracing( struct process *process );
 extern int read_process_memory( struct process *process, const void *ptr, data_size_t size, char *dest );
 extern int write_process_memory( struct process *process, void *ptr, data_size_t size, const char *src );
 
-inline static process_id_t get_process_id( struct process *process ) { return process->id; }
+static inline process_id_t get_process_id( struct process *process ) { return process->id; }
 
-inline static int is_process_init_done( struct process *process )
+static inline int is_process_init_done( struct process *process )
 {
     return process->startup_state == STARTUP_DONE;
 }
 
-inline static struct process_dll *get_process_exe_module( struct process *process )
+static inline struct process_dll *get_process_exe_module( struct process *process )
 {
     struct list *ptr = list_head( &process->dlls );
     return ptr ? LIST_ENTRY( ptr, struct process_dll, entry ) : NULL;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Henri Verbeet
+ * Copyright 2006-2007 Henri Verbeet
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -136,9 +136,9 @@ static void test_surface_alignment(IDirect3DDevice9 *device_ptr)
         ok(hr == D3D_OK, "IDirect3DSurface9_LockRect returned %08x\n", hr);
         ok(!(lockedRect.Pitch & 3), "Surface pitch %d is not 32-bit aligned\n", lockedRect.Pitch);
         /* Some applications also depend on the exact pitch, rather than just
-         * the alignment. However, this test will fail or succeed depending
-         * on the NP2 mode we're using. */
-        if (0) ok(lockedRect.Pitch == 12, "Got pitch %d, expected 12\n", lockedRect.Pitch);
+         * the alignment.
+         */
+        ok(lockedRect.Pitch == 12, "Got pitch %d, expected 12\n", lockedRect.Pitch);
         hr = IDirect3DSurface9_UnlockRect(surface_ptr);
         IDirect3DSurface9_Release(surface_ptr);
     }
@@ -172,6 +172,184 @@ static void test_surface_alignment(IDirect3DDevice9 *device_ptr)
     }
 }
 
+/* Since the DXT formats are based on 4x4 blocks, locking works slightly
+ * different than with regular formats. This patch verifies we return the
+ * correct memory offsets */
+static void test_lockrect_offset(IDirect3DDevice9 *device)
+{
+    IDirect3DSurface9 *surface = 0;
+    const RECT rect = {60, 60, 68, 68};
+    D3DLOCKED_RECT locked_rect;
+    unsigned int expected_offset;
+    unsigned int offset;
+    unsigned int i;
+    BYTE *base;
+    HRESULT hr;
+
+    const struct {
+        D3DFORMAT fmt;
+        const char *name;
+        unsigned int block_width;
+        unsigned int block_height;
+        unsigned int block_size;
+    } dxt_formats[] = {
+        {D3DFMT_DXT1, "D3DFMT_DXT1", 4, 4, 8},
+        {D3DFMT_DXT2, "D3DFMT_DXT2", 4, 4, 16},
+        {D3DFMT_DXT3, "D3DFMT_DXT3", 4, 4, 16},
+        {D3DFMT_DXT4, "D3DFMT_DXT4", 4, 4, 16},
+        {D3DFMT_DXT5, "D3DFMT_DXT5", 4, 4, 16},
+    };
+
+    for (i = 0; i < (sizeof(dxt_formats) / sizeof(*dxt_formats)); ++i) {
+        hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 128, 128, dxt_formats[i].fmt, D3DPOOL_SCRATCH, &surface, 0);
+        ok(SUCCEEDED(hr), "CreateOffscreenPlainSurface failed (%08x)\n", hr);
+
+        hr = IDirect3DSurface9_LockRect(surface, &locked_rect, NULL, 0);
+        ok(SUCCEEDED(hr), "LockRect failed (%08x)\n", hr);
+
+        base = locked_rect.pBits;
+
+        hr = IDirect3DSurface9_UnlockRect(surface);
+        ok(SUCCEEDED(hr), "UnlockRect failed (%08x)\n", hr);
+
+        hr = IDirect3DSurface9_LockRect(surface, &locked_rect, &rect, 0);
+        ok(SUCCEEDED(hr), "LockRect failed (%08x)\n", hr);
+
+        offset = (BYTE *)locked_rect.pBits - base;
+        expected_offset = (rect.top / dxt_formats[i].block_height) * locked_rect.Pitch
+                        + (rect.left / dxt_formats[i].block_width) * dxt_formats[i].block_size;
+        ok(offset == expected_offset, "Got offset %u, expected offset %u for format %s\n", offset, expected_offset, dxt_formats[i].name);
+
+        hr = IDirect3DSurface9_UnlockRect(surface);
+        ok(SUCCEEDED(hr), "UnlockRect failed (%08x)\n", hr);
+
+        IDirect3DSurface9_Release(surface);
+    }
+}
+
+static void test_lockrect_invalid(IDirect3DDevice9 *device)
+{
+    IDirect3DSurface9 *surface = 0;
+    D3DLOCKED_RECT locked_rect;
+    unsigned int i;
+    BYTE *base;
+    HRESULT hr;
+
+    const RECT test_data[] = {
+        {60, 60, 68, 68},       /* Valid */
+        {60, 60, 60, 68},       /* 0 height */
+        {60, 60, 68, 60},       /* 0 width */
+        {68, 60, 60, 68},       /* left > right */
+        {60, 68, 68, 60},       /* top > bottom */
+        {-8, 60,  0, 68},       /* left < surface */
+        {60, -8, 68,  0},       /* top < surface */
+        {-16, 60, -8, 68},      /* right < surface */
+        {60, -16, 68, -8},      /* bottom < surface */
+        {60, 60, 136, 68},      /* right > surface */
+        {60, 60, 68, 136},      /* bottom > surface */
+        {136, 60, 144, 68},     /* left > surface */
+        {60, 136, 68, 144},     /* top > surface */
+    };
+
+    hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 128, 128, D3DFMT_A8R8G8B8, D3DPOOL_SCRATCH, &surface, 0);
+    ok(SUCCEEDED(hr), "CreateOffscreenPlainSurface failed (0x%08x)\n", hr);
+
+    hr = IDirect3DSurface9_LockRect(surface, &locked_rect, NULL, 0);
+    ok(SUCCEEDED(hr), "LockRect failed (0x%08x)\n", hr);
+
+    base = locked_rect.pBits;
+
+    hr = IDirect3DSurface9_UnlockRect(surface);
+    ok(SUCCEEDED(hr), "UnlockRect failed (0x%08x)\n", hr);
+
+    for (i = 0; i < (sizeof(test_data) / sizeof(*test_data)); ++i)
+    {
+        unsigned int offset, expected_offset;
+        const RECT *rect = &test_data[i];
+
+        locked_rect.pBits = (BYTE *)0xdeadbeef;
+        locked_rect.Pitch = 0xdeadbeef;
+
+        hr = IDirect3DSurface9_LockRect(surface, &locked_rect, rect, 0);
+        ok(SUCCEEDED(hr), "LockRect failed (0x%08x) for rect [%d, %d]->[%d, %d]\n",
+                hr, rect->left, rect->top, rect->right, rect->bottom);
+
+        offset = (BYTE *)locked_rect.pBits - base;
+        expected_offset = rect->top * locked_rect.Pitch + rect->left * 4;
+        ok(offset == expected_offset, "Got offset %u, expected offset %u for rect [%d, %d]->[%d, %d]\n",
+                offset, expected_offset, rect->left, rect->top, rect->right, rect->bottom);
+
+        hr = IDirect3DSurface9_UnlockRect(surface);
+        ok(SUCCEEDED(hr), "UnlockRect failed (0x%08x)\n", hr);
+    }
+
+    IDirect3DSurface9_Release(surface);
+}
+
+static unsigned long getref(IUnknown *iface)
+{
+    IUnknown_AddRef(iface);
+    return IUnknown_Release(iface);
+}
+
+static void test_private_data(IDirect3DDevice9 *device)
+{
+    HRESULT hr;
+    IDirect3DSurface9 *surface;
+    ULONG ref, ref2;
+    IUnknown *ptr;
+    DWORD size = sizeof(IUnknown *);
+
+    hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 4, 4, D3DFMT_A8R8G8B8, D3DPOOL_SCRATCH, &surface, 0);
+    ok(SUCCEEDED(hr), "CreateImageSurface failed (0x%08x)\n", hr);
+    if(!surface)
+    {
+        return;
+    }
+
+    /* This fails */
+    hr = IDirect3DSurface9_SetPrivateData(surface, &IID_IDirect3DSurface9 /* Abuse this tag */, device, 0, D3DSPD_IUNKNOWN);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DSurface9_SetPrivateData failed with %08x\n", hr);
+    hr = IDirect3DSurface9_SetPrivateData(surface, &IID_IDirect3DSurface9 /* Abuse this tag */, device, 5, D3DSPD_IUNKNOWN);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DSurface9_SetPrivateData failed with %08x\n", hr);
+    hr = IDirect3DSurface9_SetPrivateData(surface, &IID_IDirect3DSurface9 /* Abuse this tag */, device, sizeof(IUnknown *) * 2, D3DSPD_IUNKNOWN);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DSurface9_SetPrivateData failed with %08x\n", hr);
+
+    ref = getref((IUnknown *) device);
+    hr = IDirect3DSurface9_SetPrivateData(surface, &IID_IDirect3DSurface9 /* Abuse this tag */, device, sizeof(IUnknown *), D3DSPD_IUNKNOWN);
+    ok(hr == D3D_OK, "IDirect3DSurface9_SetPrivateData failed with %08x\n", hr);
+    ref2 = getref((IUnknown *) device);
+    ok(ref2 == ref + 1, "Object reference is %d, expected %d\n", ref2, ref + 1);
+    hr = IDirect3DSurface9_FreePrivateData(surface, &IID_IDirect3DSurface9);
+    ok(hr == D3D_OK, "IDirect3DSurface9_FreePrivateData returned %08x\n", hr);
+    ref2 = getref((IUnknown *) device);
+    ok(ref2 == ref, "Object reference is %d, expected %d\n", ref2, ref);
+
+    hr = IDirect3DSurface9_SetPrivateData(surface, &IID_IDirect3DSurface9, device, sizeof(IUnknown *), D3DSPD_IUNKNOWN);
+    ok(hr == D3D_OK, "IDirect3DSurface9_SetPrivateData failed with %08x\n", hr);
+    hr = IDirect3DSurface9_SetPrivateData(surface, &IID_IDirect3DSurface9, surface, sizeof(IUnknown *), D3DSPD_IUNKNOWN);
+    ok(hr == D3D_OK, "IDirect3DSurface9_SetPrivateData failed with %08x\n", hr);
+    ref2 = getref((IUnknown *) device);
+    ok(ref2 == ref, "Object reference is %d, expected %d\n", ref2, ref);
+
+    hr = IDirect3DSurface9_SetPrivateData(surface, &IID_IDirect3DSurface9, device, sizeof(IUnknown *), D3DSPD_IUNKNOWN);
+    ok(hr == D3D_OK, "IDirect3DSurface9_SetPrivateData failed with %08x\n", hr);
+    hr = IDirect3DSurface9_GetPrivateData(surface, &IID_IDirect3DSurface9, &ptr, &size);
+    ok(hr == D3D_OK, "IDirect3DSurface9_GetPrivateData failed with %08x\n", hr);
+    ref2 = getref((IUnknown *) device);
+    /* Object is NOT beein addrefed */
+    ok(ptr == (IUnknown *) device, "Returned interface pointer is %p, expected %p\n", ptr, device);
+    ok(ref2 == ref + 2, "Object reference is %d, expected %d. ptr at %p, orig at %p\n", ref2, ref + 2, ptr, device);
+    IUnknown_Release(ptr);
+
+    IDirect3DSurface9_Release(surface);
+
+    /* Destroying the surface frees the held reference */
+    ref2 = getref((IUnknown *) device);
+    /* -1 because the surface was released and held a reference before */
+    ok(ref2 == (ref - 1), "Object reference is %d, expected %d\n", ref2, (ref - 1));
+}
+
 START_TEST(surface)
 {
     HMODULE d3d9_handle;
@@ -180,7 +358,7 @@ START_TEST(surface)
     d3d9_handle = LoadLibraryA("d3d9.dll");
     if (!d3d9_handle)
     {
-        trace("Could not load d3d9.dll, skipping tests\n");
+        skip("Could not load d3d9.dll\n");
         return;
     }
 
@@ -189,4 +367,7 @@ START_TEST(surface)
 
     test_surface_get_container(device_ptr);
     test_surface_alignment(device_ptr);
+    test_lockrect_offset(device_ptr);
+    test_lockrect_invalid(device_ptr);
+    test_private_data(device_ptr);
 }

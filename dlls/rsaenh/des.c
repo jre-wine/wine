@@ -7,7 +7,7 @@
  * and Dobes Vandermeer.
  * 
  * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public 
+ * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
  * version 2.1 of the License, or (at your option) any later version.
  *
@@ -1282,7 +1282,7 @@ static const ulong64 des_fp[8][256] = {
 
 static void cookey(const ulong32 *raw1, ulong32 *keyout);
 
-void deskey(const unsigned char *key, short edf, ulong32 *keyout)
+static void deskey(const unsigned char *key, short edf, ulong32 *keyout)
 {
     ulong32 i, j, l, m, n, kn[32];
     unsigned char pc1m[56], pcr[56];

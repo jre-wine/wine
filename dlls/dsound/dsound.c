@@ -28,7 +28,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winreg.h"
 #include "mmsystem.h"
 #include "winternl.h"
 #include "mmddk.h"
@@ -146,7 +145,7 @@ static void _dump_DSCAPS(DWORD xmask) {
 
     for (i=0;i<sizeof(flags)/sizeof(flags[0]);i++)
         if ((flags[i].mask & xmask) == flags[i].mask)
-            DPRINTF("%s ",flags[i].name);
+            TRACE("%s ",flags[i].name);
 }
 
 static void _dump_DSBCAPS(DWORD xmask) {
@@ -174,7 +173,7 @@ static void _dump_DSBCAPS(DWORD xmask) {
 
     for (i=0;i<sizeof(flags)/sizeof(flags[0]);i++)
         if ((flags[i].mask & xmask) == flags[i].mask)
-            DPRINTF("%s ",flags[i].name);
+            TRACE("%s ",flags[i].name);
 }
 
 /*******************************************************************************
@@ -1072,6 +1071,7 @@ HRESULT DSOUND_Create8(
     TRACE("(%s, %p)\n", debugstr_guid(riid), ppDS);
 
     if (!IsEqualIID(riid, &IID_IUnknown) &&
+        !IsEqualIID(riid, &IID_IDirectSound) &&
         !IsEqualIID(riid, &IID_IDirectSound8)) {
         *ppDS = 0;
         return E_NOINTERFACE;
@@ -1224,7 +1224,7 @@ static HRESULT DirectSoundDevice_Create(DirectSoundDevice ** ppDevice)
     device->pwfx->cbSize = 0;
 
     InitializeCriticalSection(&(device->mixlock));
-    device->mixlock.DebugInfo->Spare[0] = (DWORD_PTR)"DSOUND_mixlock";
+    device->mixlock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": DirectSoundDevice.mixlock");
 
     RtlInitializeResource(&(device->buffer_list_lock));
 
@@ -1249,10 +1249,8 @@ ULONG DirectSoundDevice_Release(DirectSoundDevice * device)
         int i;
         timeKillEvent(device->timerID);
         timeEndPeriod(DS_TIME_RES);
-        /* wait for timer to expire */
-        Sleep(DS_TIME_RES+1);
 
-        /* The sleep above should have allowed the timer process to expire
+        /* The kill event should have allowed the timer process to expire
          * but try to grab the lock just in case. Can't hold lock because
          * IDirectSoundBufferImpl_Destroy also grabs the lock */
         RtlAcquireResourceShared(&(device->buffer_list_lock), TRUE);
@@ -1521,7 +1519,7 @@ HRESULT DirectSoundDevice_Initialize(DirectSoundDevice ** ppDevice, LPCGUID lpcG
         DSOUND_renderer[device->drvdesc.dnDevNode] = device;
         timeBeginPeriod(DS_TIME_RES);
         DSOUND_renderer[device->drvdesc.dnDevNode]->timerID = timeSetEvent(DS_TIME_DEL, DS_TIME_RES, DSOUND_timer,
-            (DWORD_PTR)DSOUND_renderer[device->drvdesc.dnDevNode], TIME_PERIODIC | TIME_CALLBACK_FUNCTION);
+            (DWORD_PTR)DSOUND_renderer[device->drvdesc.dnDevNode], TIME_PERIODIC | TIME_CALLBACK_FUNCTION | TIME_KILL_SYNCHRONOUS);
     } else {
         WARN("DSOUND_PrimaryCreate failed\n");
     }
@@ -1708,7 +1706,7 @@ HRESULT DirectSoundDevice_Compact(
         return DSERR_UNINITIALIZED;
     }
 
-    if (device->priolevel != DSSCL_PRIORITY) {
+    if (device->priolevel < DSSCL_PRIORITY) {
         WARN("incorrect priority level\n");
         return DSERR_PRIOLEVELNEEDED;
     }

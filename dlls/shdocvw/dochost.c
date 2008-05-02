@@ -486,12 +486,18 @@ void DocHost_Init(DocHost *This, IDispatch *disp)
 
     This->disp = disp;
 
+    This->client_disp = NULL;
+
     This->document = NULL;
     This->hostui = NULL;
+    This->frame = NULL;
 
     This->hwnd = NULL;
     This->frame_hwnd = NULL;
     This->url = NULL;
+
+    This->silent = VARIANT_FALSE;
+    This->offline = VARIANT_FALSE;
 
     DocHost_ClientSite_Init(This);
     DocHost_Frame_Init(This);
@@ -501,6 +507,11 @@ void DocHost_Init(DocHost *This, IDispatch *disp)
 
 void DocHost_Release(DocHost *This)
 {
+    if(This->client_disp)
+        IDispatch_Release(This->client_disp);
+    if(This->frame)
+        IOleInPlaceFrame_Release(This->frame);
+
     DocHost_ClientSite_Release(This);
 
     ConnectionPointContainer_Destroy(&This->cps);

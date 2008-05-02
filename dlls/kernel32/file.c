@@ -43,7 +43,6 @@
 #include "kernel_private.h"
 
 #include "wine/exception.h"
-#include "excpt.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 #include "thread.h"
@@ -71,6 +70,7 @@ typedef struct
 
 static BOOL oem_file_apis;
 
+static const WCHAR wildcardsW[] = { '*','?',0 };
 
 /***********************************************************************
  *              create_file_OF
@@ -345,11 +345,11 @@ static void FILE_InitProcessDosHandles( void )
 /******************************************************************
  *		FILE_ReadWriteApc (internal)
  */
-static void WINAPI FILE_ReadWriteApc(void* apc_user, PIO_STATUS_BLOCK io_status, ULONG len)
+static void WINAPI FILE_ReadWriteApc(void* apc_user, PIO_STATUS_BLOCK io_status, ULONG reserved)
 {
     LPOVERLAPPED_COMPLETION_ROUTINE  cr = (LPOVERLAPPED_COMPLETION_ROUTINE)apc_user;
 
-    cr(RtlNtStatusToDosError(io_status->u.Status), len, (LPOVERLAPPED)io_status);
+    cr(RtlNtStatusToDosError(io_status->u.Status), io_status->Information, (LPOVERLAPPED)io_status);
 }
 
 
@@ -539,17 +539,11 @@ BOOL WINAPI WriteFile( HANDLE hFile, LPCVOID buffer, DWORD bytesToWrite,
  *
  *  If successful (and relevant) lpTransferred will hold the number of
  *   bytes transferred during the async operation.
- *
- * BUGS
- *
- * Currently only works for WaitCommEvent, ReadFile, WriteFile
- *   with communications ports.
- *
  */
 BOOL WINAPI GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped,
                                 LPDWORD lpTransferred, BOOL bWait)
 {
-    DWORD r = WAIT_OBJECT_0;
+    NTSTATUS status;
 
     TRACE( "(%p %p %p %x)\n", hFile, lpOverlapped, lpTransferred, bWait );
 
@@ -558,57 +552,26 @@ BOOL WINAPI GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped,
         ERR("lpOverlapped was null\n");
         return FALSE;
     }
-    if ( bWait )
+
+    status = lpOverlapped->Internal;
+    if (status == STATUS_PENDING)
     {
-        if ( lpOverlapped->hEvent )
+        if (!bWait)
         {
-            do
-            {
-                TRACE( "waiting on %p\n", lpOverlapped );
-                r = WaitForSingleObjectEx( lpOverlapped->hEvent, INFINITE, TRUE );
-                TRACE( "wait on %p returned %d\n", lpOverlapped, r );
-            } while ( r == WAIT_IO_COMPLETION );
+            SetLastError( ERROR_IO_INCOMPLETE );
+            return FALSE;
         }
-        else
-        {
-            /* busy loop */
-            while ( ((volatile OVERLAPPED*)lpOverlapped)->Internal == STATUS_PENDING )
-                Sleep( 10 );
-        }
+
+        if (WaitForSingleObject( lpOverlapped->hEvent ? lpOverlapped->hEvent : hFile,
+                                 INFINITE ) == WAIT_FAILED)
+            return FALSE;
+        status = lpOverlapped->Internal;
     }
-    else if ( lpOverlapped->Internal == STATUS_PENDING )
-    {
-        /* Wait in order to give APCs a chance to run. */
-        /* This is cheating, so we must set the event again in case of success -
-           it may be a non-manual reset event. */
-        do
-        {
-            TRACE( "waiting on %p\n", lpOverlapped );
-            r = WaitForSingleObjectEx( lpOverlapped->hEvent, 0, TRUE );
-            TRACE( "wait on %p returned %d\n", lpOverlapped, r );
-        } while ( r == WAIT_IO_COMPLETION );
-        if ( r == WAIT_OBJECT_0 && lpOverlapped->hEvent )
-            NtSetEvent( lpOverlapped->hEvent, NULL );
-    }
-    if ( r == WAIT_FAILED )
-    {
-        WARN("wait operation failed\n");
-        return FALSE;
-    }
+
     if (lpTransferred) *lpTransferred = lpOverlapped->InternalHigh;
 
-    switch ( lpOverlapped->Internal )
-    {
-    case STATUS_SUCCESS:
-        return TRUE;
-    case STATUS_PENDING:
-        SetLastError( ERROR_IO_INCOMPLETE );
-        if ( bWait ) ERR("PENDING status after waiting!\n");
-        return FALSE;
-    default:
-        SetLastError( RtlNtStatusToDosError( lpOverlapped->Internal ) );
-        return FALSE;
-    }
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return !status;
 }
 
 /***********************************************************************
@@ -664,10 +627,10 @@ LONG WINAPI _hwrite( HFILE handle, LPCSTR buffer, LONG count )
     if (!count)
     {
         /* Expand or truncate at current position */
-        if (!SetEndOfFile( (HANDLE)handle )) return HFILE_ERROR;
+        if (!SetEndOfFile( LongToHandle(handle) )) return HFILE_ERROR;
         return 0;
     }
-    if (!WriteFile( (HANDLE)handle, buffer, count, &result, NULL ))
+    if (!WriteFile( LongToHandle(handle), buffer, count, &result, NULL ))
         return HFILE_ERROR;
     return result;
 }
@@ -679,7 +642,7 @@ LONG WINAPI _hwrite( HFILE handle, LPCSTR buffer, LONG count )
 HFILE WINAPI _lclose( HFILE hFile )
 {
     TRACE("handle %d\n", hFile );
-    return CloseHandle( (HANDLE)hFile ) ? 0 : HFILE_ERROR;
+    return CloseHandle( LongToHandle(hFile) ) ? 0 : HFILE_ERROR;
 }
 
 
@@ -688,12 +651,15 @@ HFILE WINAPI _lclose( HFILE hFile )
  */
 HFILE WINAPI _lcreat( LPCSTR path, INT attr )
 {
+    HANDLE hfile;
+
     /* Mask off all flags not explicitly allowed by the doc */
     attr &= FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM;
     TRACE("%s %02x\n", path, attr );
-    return (HFILE)CreateFileA( path, GENERIC_READ | GENERIC_WRITE,
+    hfile = CreateFileA( path, GENERIC_READ | GENERIC_WRITE,
                                FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                                CREATE_ALWAYS, attr, 0 );
+    return HandleToLong(hfile);
 }
 
 
@@ -702,8 +668,11 @@ HFILE WINAPI _lcreat( LPCSTR path, INT attr )
  */
 HFILE WINAPI _lopen( LPCSTR path, INT mode )
 {
+    HANDLE hfile;
+
     TRACE("(%s,%04x)\n", debugstr_a(path), mode );
-    return (HFILE)create_file_OF( path, mode & ~OF_CREATE );
+    hfile = create_file_OF( path, mode & ~OF_CREATE );
+    return HandleToLong(hfile);
 }
 
 /***********************************************************************
@@ -712,7 +681,7 @@ HFILE WINAPI _lopen( LPCSTR path, INT mode )
 UINT WINAPI _lread( HFILE handle, LPVOID buffer, UINT count )
 {
     DWORD result;
-    if (!ReadFile( (HANDLE)handle, buffer, count, &result, NULL ))
+    if (!ReadFile( LongToHandle(handle), buffer, count, &result, NULL ))
         return HFILE_ERROR;
     return result;
 }
@@ -723,7 +692,7 @@ UINT WINAPI _lread( HFILE handle, LPVOID buffer, UINT count )
  */
 LONG WINAPI _llseek( HFILE hFile, LONG lOffset, INT nOrigin )
 {
-    return SetFilePointer( (HANDLE)hFile, lOffset, NULL, nOrigin );
+    return SetFilePointer( LongToHandle(hFile), lOffset, NULL, nOrigin );
 }
 
 
@@ -1281,6 +1250,7 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
     static const WCHAR bkslashes_with_dotW[] = {'\\','\\','.','\\',0};
     static const WCHAR coninW[] = {'C','O','N','I','N','$',0};
     static const WCHAR conoutW[] = {'C','O','N','O','U','T','$',0};
+    SECURITY_QUALITY_OF_SERVICE qos;
 
     static const UINT nt_disposition[5] =
     {
@@ -1406,7 +1376,16 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
     attr.Attributes = OBJ_CASE_INSENSITIVE;
     attr.ObjectName = &nameW;
     attr.SecurityDescriptor = sa ? sa->lpSecurityDescriptor : NULL;
-    attr.SecurityQualityOfService = NULL;
+    if (attributes & SECURITY_SQOS_PRESENT)
+    {
+        qos.Length = sizeof(qos);
+        qos.ImpersonationLevel = (attributes >> 16) & 0x3;
+        qos.ContextTrackingMode = attributes & SECURITY_CONTEXT_TRACKING ? SECURITY_DYNAMIC_TRACKING : SECURITY_STATIC_TRACKING;
+        qos.EffectiveOnly = attributes & SECURITY_EFFECTIVE_ONLY ? TRUE : FALSE;
+        attr.SecurityQualityOfService = &qos;
+    }
+    else
+        attr.SecurityQualityOfService = NULL;
 
     if (sa && sa->bInheritHandle) attr.Attributes |= OBJ_INHERIT;
 
@@ -1549,7 +1528,6 @@ HANDLE WINAPI FindFirstFileExW( LPCWSTR filename, FINDEX_INFO_LEVELS level,
                                 LPVOID data, FINDEX_SEARCH_OPS search_op,
                                 LPVOID filter, DWORD flags)
 {
-    static const WCHAR wildcardsW[] = { '*','?',0 };
     WCHAR *mask, *p;
     FIND_FIRST_INFO *info = NULL;
     UNICODE_STRING nt_name;
@@ -1661,6 +1639,7 @@ HANDLE WINAPI FindFirstFileExW( LPCWSTR filename, FINDEX_INFO_LEVELS level,
     }
 
     RtlInitializeCriticalSection( &info->cs );
+    info->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": FIND_FIRST_INFO.cs");
     info->path     = nt_name;
     info->magic    = FIND_FIRST_MAGIC;
     info->data_pos = 0;
@@ -1776,7 +1755,8 @@ BOOL WINAPI FindNextFileW( HANDLE handle, WIN32_FIND_DATAW *data )
 
         /* check for dir symlink */
         if ((dir_info->FileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-            (dir_info->FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+            (dir_info->FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+            strpbrkW( info->mask.Buffer, wildcardsW ))
         {
             if (!check_dir_symlink( info, dir_info )) continue;
         }
@@ -1839,6 +1819,7 @@ BOOL WINAPI FindClose( HANDLE handle )
                 info->data_pos = 0;
                 info->data_len = 0;
                 RtlLeaveCriticalSection( &info->cs );
+                info->cs.DebugInfo->Spare[0] = 0;
                 RtlDeleteCriticalSection( &info->cs );
                 HeapFree( GetProcessHeap(), 0, info );
             }
@@ -2242,7 +2223,7 @@ HFILE WINAPI OpenFile( LPCSTR name, OFSTRUCT *ofs, UINT mode )
             return TRUE;
         }
 
-        handle = (HANDLE)_lopen( ofs->szPathName, mode );
+        handle = LongToHandle(_lopen( ofs->szPathName, mode ));
         if (handle == INVALID_HANDLE_VALUE) goto error;
 
         GetFileTime( handle, NULL, NULL, &filetime );
@@ -2267,7 +2248,7 @@ HFILE WINAPI OpenFile( LPCSTR name, OFSTRUCT *ofs, UINT mode )
         CloseHandle( handle );
         return TRUE;
     }
-    else return (HFILE)handle;
+    return HandleToLong(handle);
 
 error:  /* We get here if there was an error opening the file */
     ofs->nErrCode = GetLastError();

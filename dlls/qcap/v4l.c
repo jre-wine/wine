@@ -136,7 +136,7 @@ static const struct renderlist renderlist_V4l[] = {
     {  0, NULL,                          NULL },
 };
 
-const int fallback_V4l[] = { 4, 5, 7, 8, 9, 13, 15, 14, 16, 11, -1 };
+static const int fallback_V4l[] = { 4, 5, 7, 8, 9, 13, 15, 14, 16, 11, -1 };
 /* Fallback: First try raw formats (Should try yuv first perhaps?), then yuv */
 
 /* static const Capture defbox; */
@@ -224,6 +224,7 @@ HRESULT qcap_driver_destroy(Capture *capBox)
 
     if( capBox->fd != -1 )
         close(capBox->fd);
+    capBox->CritSect.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&capBox->CritSect);
     CoTaskMemFree(capBox);
     return S_OK;
@@ -789,6 +790,7 @@ Capture * qcap_driver_init( IPin *pOut, USHORT card )
     /* capBox->vtbl = &defboxVtbl; */
 
     InitializeCriticalSection( &capBox->CritSect );
+    capBox->CritSect.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": Capture.CritSect");
 
     sprintf(device, "/dev/video%i", card);
     TRACE("opening %s\n", device);

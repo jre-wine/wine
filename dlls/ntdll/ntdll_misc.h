@@ -20,11 +20,11 @@
 #define __WINE_NTDLL_MISC_H
 
 #include <stdarg.h>
+#include <signal.h>
 
 #include "windef.h"
 #include "winnt.h"
 #include "winternl.h"
-#include "winioctl.h"
 #include "wine/server.h"
 
 #define MAX_NT_PATH_LENGTH 277
@@ -39,8 +39,7 @@ extern void set_cpu_context( const CONTEXT *context );
 extern LPCSTR debugstr_us( const UNICODE_STRING *str );
 extern void dump_ObjectAttributes (const OBJECT_ATTRIBUTES *ObjectAttributes);
 
-extern void NTDLL_get_server_abstime( abs_time_t *when, const LARGE_INTEGER *timeout );
-extern void NTDLL_from_server_abstime( LARGE_INTEGER *time, const abs_time_t *when );
+extern NTSTATUS NTDLL_queue_process_apc( HANDLE process, const apc_call_t *call, apc_result_t *result );
 extern NTSTATUS NTDLL_wait_for_multiple_objects( UINT count, const HANDLE *handles, UINT flags,
                                                  const LARGE_INTEGER *timeout, HANDLE signal_object );
 
@@ -54,16 +53,20 @@ extern void virtual_init(void);
 extern void virtual_init_threading(void);
 
 /* server support */
-extern abs_time_t server_start_time;
+extern timeout_t server_start_time;
 extern void server_init_process(void);
+extern NTSTATUS server_init_process_done(void);
 extern size_t server_init_thread( int unix_pid, int unix_tid, void *entry_point );
 extern void DECLSPEC_NORETURN server_protocol_error( const char *err, ... );
 extern void DECLSPEC_NORETURN server_protocol_perror( const char *err );
 extern void DECLSPEC_NORETURN server_exit_thread( int status );
 extern void DECLSPEC_NORETURN server_abort_thread( int status );
+extern sigset_t server_block_set;
+extern void server_enter_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset );
+extern void server_leave_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset );
 extern int server_remove_fd_from_cache( obj_handle_t handle );
 extern int server_get_unix_fd( obj_handle_t handle, unsigned int access, int *unix_fd,
-                               int *needs_close, enum server_fd_type *type, int *flags );
+                               int *needs_close, enum server_fd_type *type, unsigned int *options );
 
 /* module handling */
 extern NTSTATUS MODULE_DllThreadAttach( LPVOID lpReserved );
@@ -77,8 +80,8 @@ extern UNICODE_STRING system_dir;
 
 /* redefine these to make sure we don't reference kernel symbols */
 #define GetProcessHeap()       (NtCurrentTeb()->Peb->ProcessHeap)
-#define GetCurrentProcessId()  ((DWORD)NtCurrentTeb()->ClientId.UniqueProcess)
-#define GetCurrentThreadId()   ((DWORD)NtCurrentTeb()->ClientId.UniqueThread)
+#define GetCurrentProcessId()  (HandleToULong(NtCurrentTeb()->ClientId.UniqueProcess))
+#define GetCurrentThreadId()   (HandleToULong(NtCurrentTeb()->ClientId.UniqueThread))
 
 /* Device IO */
 extern NTSTATUS CDROM_DeviceIoControl(HANDLE hDevice, 
@@ -111,11 +114,9 @@ extern NTSTATUS DIR_get_unix_cwd( char **cwd );
 
 /* virtual memory */
 extern NTSTATUS VIRTUAL_HandleFault(LPCVOID addr);
-extern BOOL VIRTUAL_HasMapping( LPCVOID addr );
 extern void VIRTUAL_SetForceExec( BOOL enable );
 extern void VIRTUAL_UseLargeAddressSpace(void);
-
-extern BOOL is_current_process( HANDLE handle );
+extern struct _KUSER_SHARED_DATA *user_shared_data;
 
 /* code pages */
 extern int ntdll_umbstowcs(DWORD flags, const char* src, int srclen, WCHAR* dst, int dstlen);

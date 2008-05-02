@@ -171,33 +171,33 @@ const struct builtin_class_descr BUTTON_builtin_class =
 };
 
 
-inline static LONG get_button_state( HWND hwnd )
+static inline LONG get_button_state( HWND hwnd )
 {
     return GetWindowLongW( hwnd, STATE_GWL_OFFSET );
 }
 
-inline static void set_button_state( HWND hwnd, LONG state )
+static inline void set_button_state( HWND hwnd, LONG state )
 {
     SetWindowLongW( hwnd, STATE_GWL_OFFSET, state );
 }
 
-inline static HFONT get_button_font( HWND hwnd )
+static inline HFONT get_button_font( HWND hwnd )
 {
     return (HFONT)GetWindowLongPtrW( hwnd, HFONT_GWL_OFFSET );
 }
 
-inline static void set_button_font( HWND hwnd, HFONT font )
+static inline void set_button_font( HWND hwnd, HFONT font )
 {
     SetWindowLongPtrW( hwnd, HFONT_GWL_OFFSET, (LONG_PTR)font );
 }
 
-inline static UINT get_button_type( LONG window_style )
+static inline UINT get_button_type( LONG window_style )
 {
     return (window_style & 0x0f);
 }
 
 /* paint a button of any type */
-inline static void paint_button( HWND hwnd, LONG style, UINT action )
+static inline void paint_button( HWND hwnd, LONG style, UINT action )
 {
     if (btnPaintFunc[style] && IsWindowVisible(hwnd))
     {
@@ -208,7 +208,7 @@ inline static void paint_button( HWND hwnd, LONG style, UINT action )
 }
 
 /* retrieve the button text; returned buffer must be freed by caller */
-inline static WCHAR *get_button_text( HWND hwnd )
+static inline WCHAR *get_button_text( HWND hwnd )
 {
     INT len = 512;
     WCHAR *buffer = HeapAlloc( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) );
@@ -410,7 +410,7 @@ static LRESULT WINAPI ButtonWndProc_common(HWND hWnd, UINT uMsg,
 
     case WM_SETFONT:
         set_button_font( hWnd, (HFONT)wParam );
-        if (lParam) paint_button( hWnd, btn_type, ODA_DRAWENTIRE );
+        if (lParam) InvalidateRect(hWnd, NULL, TRUE);
         break;
 
     case WM_GETFONT:

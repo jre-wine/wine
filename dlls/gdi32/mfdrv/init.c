@@ -241,7 +241,7 @@ HDC WINAPI CreateMetaFileW( LPCWSTR filename )
     METAFILEDRV_PDEVICE *physDev;
     HANDLE hFile;
 
-    TRACE("'%s'\n", debugstr_w(filename) );
+    TRACE("%s\n", debugstr_w(filename) );
 
     if (!(dc = MFDRV_AllocMetaFile())) return 0;
     physDev = (METAFILEDRV_PDEVICE *)dc->physDev;
@@ -582,6 +582,8 @@ INT MFDRV_ExtEscape( PHYSDEV dev, INT nEscape, INT cbInput, LPCVOID in_data,
     METARECORD *mr;
     DWORD len;
     INT ret;
+
+    if (cbOutput) return 0;  /* escapes that require output cannot work in metafiles */
 
     len = sizeof(*mr) + sizeof(WORD) + ((cbInput + 1) & ~1);
     mr = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, len);

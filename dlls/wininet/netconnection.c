@@ -33,6 +33,9 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
+#ifdef HAVE_SYS_IOCTL_H
+# include <sys/ioctl.h>
+#endif
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -497,7 +500,10 @@ BOOL NETCON_send(WININET_NETCONNECTION *connection, const void *msg, size_t len,
 BOOL NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int flags,
 		int *recvd /* out */)
 {
+    *recvd = 0;
     if (!NETCON_connected(connection)) return FALSE;
+    if (!len)
+        return TRUE;
     if (!connection->useSSL)
     {
 	*recvd = recv(connection->socketFD, buf, len, flags);
@@ -538,19 +544,13 @@ BOOL NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int f
 		HeapFree(GetProcessHeap(), 0, connection->peek_msg_mem);
 		connection->peek_msg_mem = NULL;
                 connection->peek_msg = NULL;
-		/* check if the peek buffer held too few data */
-		if ((flags & MSG_WAITALL) && (*recvd < len))
-		{
-		    int recv2 = 0;
-		    /* recursive call - but now the peek buffer is empty */
-		    if (!NETCON_recv(connection, (char*)buf + *recvd, len - *recvd, flags, &recv2))
-			return FALSE;
-		    *recvd += recv2;
-		}
 	    }
-            return TRUE;
+	    /* check if we got enough data from the peek buffer */
+	    if (!(flags & MSG_WAITALL) || (*recvd == len))
+	        return TRUE;
+	    /* otherwise, fall through */
 	}
-	*recvd = pSSL_read(connection->ssl_s, buf, len);
+	*recvd += pSSL_read(connection->ssl_s, (char*)buf + *recvd, len - *recvd);
 	if (flags & MSG_PEEK) /* must copy stuff into buffer */
 	{
             connection->peek_len = *recvd;
@@ -570,6 +570,36 @@ BOOL NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int f
 	return FALSE;
 #endif
     }
+}
+
+/******************************************************************************
+ * NETCON_query_data_available
+ * Returns the number of bytes of peeked data plus the number of bytes of
+ * queued, but unread data.
+ */
+BOOL NETCON_query_data_available(WININET_NETCONNECTION *connection, DWORD *available)
+{
+    if (!NETCON_connected(connection))
+        return FALSE;
+
+    *available = 0;
+#if defined HAVE_OPENSSL_SSL_H
+    if (connection->peek_msg) *available = connection->peek_len;
+#endif
+
+#ifdef FIONREAD
+    if (!connection->useSSL)
+    {
+        int unread;
+        int retval = ioctl(connection->socketFD, FIONREAD, &unread);
+        if (!retval)
+        {
+            TRACE("%d bytes of queued, but unread data\n", unread);
+            *available += unread;
+        }
+    }
+#endif
+    return TRUE;
 }
 
 /******************************************************************************

@@ -454,7 +454,7 @@ static void REGION_UnionRectWithRegion(const RECT *rect, WINEREGION *rgn);
 /***********************************************************************
  *            get_region_type
  */
-inline static INT get_region_type( const RGNOBJ *obj )
+static inline INT get_region_type( const RGNOBJ *obj )
 {
     switch(obj->rgn->numRects)
     {
@@ -551,7 +551,7 @@ static BOOL REGION_DeleteObject( HGDIOBJ handle, void *obj )
  */
 static HGDIOBJ REGION_SelectObject( HGDIOBJ handle, void *obj, HDC hdc )
 {
-    return (HGDIOBJ)SelectClipRgn( hdc, handle );
+    return ULongToHandle(SelectClipRgn( hdc, handle ));
 }
 
 

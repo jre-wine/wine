@@ -24,7 +24,7 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_texture);
-#define GLINFO_LOCATION ((IWineD3DImpl *)(((IWineD3DDeviceImpl *)This->resource.wineD3DDevice)->wineD3D))->gl_info
+#define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
 
 static const Wined3dTextureStateMap textureObjectSamplerStates[]  = {
     {WINED3DSAMP_ADDRESSU,      WINED3DSAMP_ADDRESSU},
@@ -96,9 +96,12 @@ ULONG WINAPI IWineD3DBaseTextureImpl_Release(IWineD3DBaseTexture *iface) {
 /* class static */
 void IWineD3DBaseTextureImpl_CleanUp(IWineD3DBaseTexture *iface) {
     IWineD3DBaseTextureImpl *This = (IWineD3DBaseTextureImpl *)iface;
+    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+
     TRACE("(%p) : textureName(%d)\n", This, This->baseTexture.textureName);
     if (This->baseTexture.textureName != 0) {
         ENTER_GL();
+        ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
         TRACE("(%p) : Deleting texture %d\n", This, This->baseTexture.textureName);
         glDeleteTextures(1, &This->baseTexture.textureName);
         LEAVE_GL();
@@ -134,7 +137,7 @@ DWORD    WINAPI        IWineD3DBaseTextureImpl_GetPriority(IWineD3DBaseTexture *
 }
 
 void     WINAPI        IWineD3DBaseTextureImpl_PreLoad(IWineD3DBaseTexture *iface) {
-    return IWineD3DResourceImpl_PreLoad((IWineD3DResource *)iface);
+    IWineD3DResourceImpl_PreLoad((IWineD3DResource *)iface);
 }
 
 WINED3DRESOURCETYPE WINAPI IWineD3DBaseTextureImpl_GetType(IWineD3DBaseTexture *iface) {
@@ -188,7 +191,7 @@ DWORD WINAPI IWineD3DBaseTextureImpl_GetLevelCount(IWineD3DBaseTexture *iface) {
 HRESULT WINAPI IWineD3DBaseTextureImpl_SetAutoGenFilterType(IWineD3DBaseTexture *iface, WINED3DTEXTUREFILTERTYPE FilterType) {
   IWineD3DBaseTextureImpl *This = (IWineD3DBaseTextureImpl *)iface;
 
-  if (!(This->baseTexture.usage & WINED3DUSAGE_AUTOGENMIPMAP)) {
+  if (!(This->resource.usage & WINED3DUSAGE_AUTOGENMIPMAP)) {
       TRACE("(%p) : returning invalid call\n", This);
       return WINED3DERR_INVALIDCALL;
   }
@@ -200,7 +203,7 @@ HRESULT WINAPI IWineD3DBaseTextureImpl_SetAutoGenFilterType(IWineD3DBaseTexture 
 WINED3DTEXTUREFILTERTYPE WINAPI IWineD3DBaseTextureImpl_GetAutoGenFilterType(IWineD3DBaseTexture *iface) {
   IWineD3DBaseTextureImpl *This = (IWineD3DBaseTextureImpl *)iface;
   FIXME("(%p) : stub\n", This);
-  if (!(This->baseTexture.usage & WINED3DUSAGE_AUTOGENMIPMAP)) {
+  if (!(This->resource.usage & WINED3DUSAGE_AUTOGENMIPMAP)) {
      return WINED3DTEXF_NONE;
   }
   return This->baseTexture.filterType;
@@ -236,7 +239,6 @@ HRESULT WINAPI IWineD3DBaseTextureImpl_BindTexture(IWineD3DBaseTexture *iface) {
 
     textureDimensions = IWineD3DBaseTexture_GetTextureDimensions(iface);
     ENTER_GL();
-
     /* Generate a texture name if we don't already have one */
     if (This->baseTexture.textureName == 0) {
         glGenTextures(1, &This->baseTexture.textureName);
@@ -279,6 +281,12 @@ HRESULT WINAPI IWineD3DBaseTextureImpl_BindTexture(IWineD3DBaseTexture *iface) {
             TRACE("Setting GL_TEXTURE_MAX_LEVEL to %d\n", This->baseTexture.levels - 1);
             glTexParameteri(textureDimensions, GL_TEXTURE_MAX_LEVEL, This->baseTexture.levels - 1);
             checkGLcall("glTexParameteri(textureDimensions, GL_TEXTURE_MAX_LEVEL, This->baseTexture.levels)");
+            if(textureDimensions==GL_TEXTURE_CUBE_MAP_ARB) {
+                /* Cubemaps are always set to clamp, regardeless of the sampler state. */
+                glTexParameteri(textureDimensions, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(textureDimensions, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                glTexParameteri(textureDimensions, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+            }
         }
 		
     } else { /* this only happened if we've run out of openGL textures */
@@ -355,7 +363,13 @@ void WINAPI IWineD3DBaseTextureImpl_ApplyStateChanges(IWineD3DBaseTexture *iface
                 if (*state < minLookup[WINELOOKUP_WARPPARAM] || *state > maxLookup[WINELOOKUP_WARPPARAM]) {
                     FIXME("Unrecognized or unsupported WINED3DTADDRESS_* value %d, state %d\n", *state, textureObjectSamplerStates[i].function);
                 } else {
-                    GLint wrapParm = stateLookup[WINELOOKUP_WARPPARAM][*state - minLookup[WINELOOKUP_WARPPARAM]];
+                    GLint wrapParm;
+                    if(textureDimensions==GL_TEXTURE_CUBE_MAP_ARB) {
+                        /* Cubemaps are always set to clamp, regardeless of the sampler state. */
+                        wrapParm = GL_CLAMP_TO_EDGE;
+                    } else {
+                        wrapParm = stateLookup[WINELOOKUP_WARPPARAM][*state - minLookup[WINELOOKUP_WARPPARAM]];
+                    }
                     TRACE("Setting WRAP_R to %d for %x\n", wrapParm, textureDimensions);
                     glTexParameteri(textureDimensions, warpLookupType(textureObjectSamplerStates[i].function), wrapParm);
                     checkGLcall("glTexParameteri(..., GL_TEXTURE_WRAP_R, wrapParm)");
@@ -439,25 +453,6 @@ void WINAPI IWineD3DBaseTextureImpl_ApplyStateChanges(IWineD3DBaseTexture *iface
             case WINED3DFUNC_NOTSUPPORTED: /* nop */
                 TRACE("(%p) : %s function is not supported by this opengl implementation\n", This, "unknown" /* TODO: replace with debug_blah... */);
                 *state = samplerStates[textureObjectSamplerStates[i].state];
-            break;
-            }
-        }
-        state++;
-    }
-
-    for(i = 0 ;textureObjectTextureStates[i].state != - 1; i++) {
-        if(*state != textureStates[textureObjectTextureStates[i].state] ) {
-            /* apply the state */
-            *state = textureStates[textureObjectTextureStates[i].state];
-            switch (textureObjectTextureStates[i].function) {
-            case WINED3DTSS_ADDRESSW:
-            /* I'm not sure what to do if this is set as well as ADDRESSW on the sampler, how do they interact together? */
-            break;
-            case WINED3DFUNC_UNIMPLEMENTED: /* unimplemented */
-            TRACE("(%p) : stub\n", This);
-            break;
-            case WINED3DFUNC_NOTSUPPORTED: /* nop */
-            TRACE("(%p) : function no supported by this opengl implementation\n", This);
             break;
             }
         }

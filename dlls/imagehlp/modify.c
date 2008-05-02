@@ -22,7 +22,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "winerror.h"
 #include "wine/debug.h"
@@ -53,8 +52,7 @@ BOOL WINAPI BindImageEx(
     Flags, debugstr_a(ImageName), debugstr_a(DllPath),
     debugstr_a(SymbolPath), StatusRoutine
   );
-  SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-  return FALSE;
+  return TRUE;
 }
 
 

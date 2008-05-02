@@ -191,7 +191,7 @@ static void wave_in_test_deviceIn(int device, LPWAVEFORMATEX pwfx, DWORD format,
     /* Check that the position is 0 at start */
     check_position(device, win, 0, pwfx);
 
-    frag.lpData=malloc(pwfx->nAvgBytesPerSec);
+    frag.lpData=HeapAlloc(GetProcessHeap(), 0, pwfx->nAvgBytesPerSec);
     frag.dwBufferLength=pwfx->nAvgBytesPerSec;
     frag.dwBytesRecorded=0;
     frag.dwUser=0;
@@ -291,7 +291,7 @@ static void wave_in_test_deviceIn(int device, LPWAVEFORMATEX pwfx, DWORD format,
             trace("Unable to play back the recorded sound\n");
     }
 
-    free(frag.lpData);
+    HeapFree(GetProcessHeap(), 0, frag.lpData);
     CloseHandle(hevent);
 }
 
@@ -329,27 +329,29 @@ static void wave_in_test_device(int device)
        "waveInGetDevCapsW(%s): MMSYSERR_NOERROR or MMSYSERR_NOTSUPPORTED "
        "expected, got %s\n",dev_name(device),wave_in_error(rc));
 
-    rc=waveInGetDevCapsA(device,0,sizeof(capsA));
+    rc=waveInGetDevCapsA(device,NULL,sizeof(capsA));
     ok(rc==MMSYSERR_INVALPARAM,
        "waveInGetDevCapsA(%s): MMSYSERR_INVALPARAM expected, got %s\n",
        dev_name(device),wave_in_error(rc));
 
-    rc=waveInGetDevCapsW(device,0,sizeof(capsW));
+    rc=waveInGetDevCapsW(device,NULL,sizeof(capsW));
     ok(rc==MMSYSERR_INVALPARAM || rc==MMSYSERR_NOTSUPPORTED,
        "waveInGetDevCapsW(%s): MMSYSERR_INVALPARAM or MMSYSERR_NOTSUPPORTED "
        "expected, got %s\n",dev_name(device),wave_in_error(rc));
 
-#if 0 /* FIXME: this works on windows but crashes wine */
-    rc=waveInGetDevCapsA(device,1,sizeof(capsA));
+    if (0)
+    {
+    /* FIXME: this works on windows but crashes wine */
+    rc=waveInGetDevCapsA(device,(LPWAVEINCAPSA)1,sizeof(capsA));
     ok(rc==MMSYSERR_INVALPARAM,
        "waveInGetDevCapsA(%s): MMSYSERR_INVALPARAM expected, got %s\n",
        dev_name(device),wave_in_error(rc));
 
-    rc=waveInGetDevCapsW(device,1,sizeof(capsW));
+    rc=waveInGetDevCapsW(device,(LPWAVEINCAPSW)1,sizeof(capsW));
     ok(rc==MMSYSERR_INVALPARAM ||  rc==MMSYSERR_NOTSUPPORTED,
        "waveInGetDevCapsW(%s): MMSYSERR_INVALPARAM or MMSYSERR_NOTSUPPORTED "
        "expected, got %s\n",dev_name(device),wave_in_error(rc));
-#endif
+    }
 
     rc=waveInGetDevCapsA(device,&capsA,4);
     ok(rc==MMSYSERR_NOERROR,
@@ -369,7 +371,7 @@ static void wave_in_test_device(int device)
        "waveInMessage(%s): failed to get interface size: rc=%s\n",
        dev_name(device),wave_in_error(rc));
     if (rc==MMSYSERR_NOERROR) {
-        nameW = (WCHAR *)malloc(size);
+        nameW = HeapAlloc(GetProcessHeap(), 0, size);
         rc=waveInMessage((HWAVEIN)device, DRV_QUERYDEVICEINTERFACE,
                          (DWORD_PTR)nameW, size);
         ok(rc==MMSYSERR_NOERROR,"waveInMessage(%s): failed to get interface "
@@ -377,11 +379,11 @@ static void wave_in_test_device(int device)
         ok(lstrlenW(nameW)+1==size/sizeof(WCHAR),
            "got an incorrect size %d\n", size);
         if (rc==MMSYSERR_NOERROR) {
-            nameA = malloc(size/sizeof(WCHAR));
+            nameA = HeapAlloc(GetProcessHeap(), 0, size/sizeof(WCHAR));
             WideCharToMultiByte(CP_ACP, 0, nameW, size/sizeof(WCHAR),
                                 nameA, size/sizeof(WCHAR), NULL, NULL);
         }
-        free(nameW);
+        HeapFree(GetProcessHeap(), 0, nameW);
     } else if (rc==MMSYSERR_NOTSUPPORTED) {
         nameA=strdup("not supported");
     }
@@ -392,7 +394,7 @@ static void wave_in_test_device(int device)
     trace("     channels=%d formats=%05x\n",
           capsA.wChannels,capsA.dwFormats);
 
-    free(nameA);
+    HeapFree(GetProcessHeap(), 0, nameA);
 
     for (f=0;f<NB_WIN_FORMATS;f++) {
         format.wFormatTag=WAVE_FORMAT_PCM;
@@ -572,7 +574,9 @@ static void wave_in_test_device(int device)
         trace("waveInOpen(%s): 6 channels not supported\n",
               dev_name(device));
 
-#if 0	/* ALSA doesn't like this */
+    if (0)
+    {
+    /* FIXME: ALSA doesn't like this */
     /* test if 24 bit samples supported */
     wfex.Format.wFormatTag=WAVE_FORMAT_EXTENSIBLE;
     wfex.Format.nChannels=2;
@@ -596,7 +600,7 @@ static void wave_in_test_device(int device)
     } else
         trace("waveInOpen(%s): 24 bit samples not supported\n",
               dev_name(device));
-#endif
+    }
 
     /* test if 32 bit samples supported */
     wfex.Format.wFormatTag=WAVE_FORMAT_EXTENSIBLE;

@@ -44,9 +44,7 @@
 #define NONAMELESSSTRUCT
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "winternl.h"
-#include "winioctl.h"
 #include "ntddscsi.h"
 #include "wine/library.h"
 #include "wine/unicode.h"
@@ -313,7 +311,7 @@ static int SCSI_getprocentry( FILE * procfile, struct LinuxProcScsiDevice * dev 
     }
 
     result = fscanf( procfile,
-        "  Type:%*3[ ]%32c%*1[ ]ANSI%*1[ ]SCSI%*1[ ]revision:%*1[ ]%x\n",
+        "  Type:%*3[ ]%32c%*1[ ]ANSI SCSI%*1[ ]revision:%*1[ ]%x\n",
         dev->type,
         &dev->ansirev );
     if( result != 2 )

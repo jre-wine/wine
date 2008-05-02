@@ -22,7 +22,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
 #include "wine/debug.h"
 
 #define COBJMACROS
@@ -123,7 +122,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_GetMediaStream(IAMMultiMediaStream
 {
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
     MSPID PurposeId;
-    int i;
+    unsigned int i;
 
     TRACE("(%p/%p)->(%p,%p)\n", This, iface, idPurpose, ppMediaStream);
 
@@ -261,7 +260,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_AddMediaStream(IAMMultiMediaStream
     hr = MediaStream_create((IMultiMediaStream*)iface, PurposeId, This->StreamType, &pStream);
     if (SUCCEEDED(hr))
     {
-        pNewStreams = (IMediaStream**)CoTaskMemAlloc((This->nbStreams+1)*sizeof(IMediaStream*));
+        pNewStreams = CoTaskMemAlloc((This->nbStreams+1)*sizeof(IMediaStream*));
         if (!pNewStreams)
         {
             IMediaStream_Release(pStream);

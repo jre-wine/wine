@@ -51,6 +51,7 @@ typedef struct tagInputContextData
         BOOL            bOpen;
         BOOL            bInternalState;
         BOOL            bRead;
+        BOOL            bInComposition;
         LOGFONTW        font;
         HFONT           textfont;
         COMPOSITIONFORM CompForm;
@@ -168,6 +169,18 @@ static void ImmInternalPostIMEMessage(UINT msg, WPARAM wParam, LPARAM lParam)
        PostMessageW(target, msg, wParam, lParam);
 }
 
+static LRESULT ImmInternalSendIMENotify(WPARAM notify, LPARAM lParam)
+{
+    HWND target;
+
+    target = root_context->hwnd;
+    if (!target) target = GetFocus();
+
+    if (target)
+       return SendMessageW(target, WM_IME_NOTIFY, notify, lParam);
+
+    return 0;
+}
 
 static void ImmInternalSetOpenStatus(BOOL fOpen)
 {
@@ -201,7 +214,7 @@ static void ImmInternalSetOpenStatus(BOOL fOpen)
     else
         ShowWindow(hwndDefault, SW_SHOWNOACTIVATE);
 
-   SendMessageW(root_context->hwnd, WM_IME_NOTIFY, IMN_SETOPENSTATUS, 0);
+   ImmInternalSendIMENotify(IMN_SETOPENSTATUS, 0);
 }
 
 
@@ -300,8 +313,7 @@ HIMC WINAPI ImmCreateContext(void)
 {
     InputContextData *new_context;
 
-    new_context = HeapAlloc(GetProcessHeap(),0,sizeof(InputContextData));
-    ZeroMemory(new_context,sizeof(InputContextData));
+    new_context = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(InputContextData));
 
     return (HIMC)new_context;
 }
@@ -563,6 +575,21 @@ LONG WINAPI ImmGetCompositionStringA(
         }
         rc = sizeof(DWORD)*2;
     }
+    else if (dwIndex == GCS_RESULTCLAUSE)
+    {
+        TRACE("GSC_RESULTCLAUSE %p %i\n", data->ResultString, data->dwResultStringSize);
+
+        rc = WideCharToMultiByte(CP_ACP, 0, (LPWSTR)data->ResultString,
+                                 data->dwResultStringSize/ sizeof(WCHAR), NULL,
+                                 0, NULL, NULL);
+
+        if (dwBufLen >= sizeof(DWORD)*2)
+        {
+            ((LPDWORD)lpBuf)[0] = 0;
+            ((LPDWORD)lpBuf)[1] = rc;
+        }
+        rc = sizeof(DWORD)*2;
+    }
     else
     {
         FIXME("Unhandled index 0x%x\n",dwIndex);
@@ -735,8 +762,8 @@ HWND WINAPI ImmGetDefaultIMEWnd(HWND hWnd)
         static const WCHAR the_name[] = {'I','M','E','\0'};
 
         IMM_Register();
-        hwndDefault = CreateWindowExW( WS_EX_CLIENTEDGE, WC_IMECLASSNAME,
-                the_name, WS_POPUPWINDOW|WS_CAPTION, 0, 0, 120, 55, 0, 0,
+        hwndDefault = CreateWindowExW( WS_EX_TOOLWINDOW, WC_IMECLASSNAME,
+                the_name, WS_POPUP, 0, 0, 1, 1, 0, 0,
                 hImeInst, 0);
 
         TRACE("Default created (%p)\n",hwndDefault);
@@ -994,7 +1021,7 @@ BOOL WINAPI ImmIsUIMessageA(
 {
     BOOL rc = FALSE;
 
-    TRACE("(%p, %x, %d, %ld)\n", hWndIME, msg, wParam, lParam);
+    TRACE("(%p, %x, %ld, %ld)\n", hWndIME, msg, wParam, lParam);
     if ((msg >= WM_IME_STARTCOMPOSITION && msg <= WM_IME_KEYLAST) ||
         (msg >= WM_IME_SETCONTEXT && msg <= WM_IME_KEYUP) ||
         (msg == WM_MSIME_SERVICE) ||
@@ -1024,7 +1051,7 @@ BOOL WINAPI ImmIsUIMessageW(
   HWND hWndIME, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     BOOL rc = FALSE;
-    TRACE("(%p, %d, %d, %ld): stub\n", hWndIME, msg, wParam, lParam);
+    TRACE("(%p, %d, %ld, %ld): stub\n", hWndIME, msg, wParam, lParam);
     if ((msg >= WM_IME_STARTCOMPOSITION && msg <= WM_IME_KEYLAST) ||
         (msg >= WM_IME_SETCONTEXT && msg <= WM_IME_KEYUP) ||
         (msg == WM_MSIME_SERVICE) ||
@@ -1115,6 +1142,9 @@ BOOL WINAPI ImmNotifyIME(
                         ImmInternalPostIMEMessage(WM_IME_COMPOSITION,
                                             root_context->ResultString[0],
                                             GCS_RESULTSTR|GCS_RESULTCLAUSE);
+
+                        ImmInternalPostIMEMessage(WM_IME_ENDCOMPOSITION, 0, 0);
+                        root_context->bInComposition = FALSE;
                     }
                     break;
                 case CPS_CONVERT:
@@ -1212,7 +1242,7 @@ BOOL WINAPI ImmSetCompositionFontA(HIMC hIMC, LPLOGFONTA lplf)
     MultiByteToWideChar(CP_ACP, 0, lplf->lfFaceName, -1, data->font.lfFaceName,
                         LF_FACESIZE);
 
-    SendMessageW(root_context->hwnd, WM_IME_NOTIFY, IMN_SETCOMPOSITIONFONT, 0);
+    ImmInternalSendIMENotify(IMN_SETCOMPOSITIONFONT, 0);
 
     if (data->textfont)
     {
@@ -1236,7 +1266,7 @@ BOOL WINAPI ImmSetCompositionFontW(HIMC hIMC, LPLOGFONTW lplf)
         return FALSE;
 
     memcpy(&data->font,lplf,sizeof(LOGFONTW));
-    SendMessageW(root_context->hwnd, WM_IME_NOTIFY, IMN_SETCOMPOSITIONFONT, 0);
+    ImmInternalSendIMENotify(IMN_SETCOMPOSITIONFONT, 0);
 
     if (data->textfont)
     {
@@ -1322,6 +1352,12 @@ BOOL WINAPI ImmSetCompositionStringW(
 
     if (dwIndex == SCS_SETSTR)
     {
+	if (!root_context->bInComposition)
+	{
+            ImmInternalPostIMEMessage(WM_IME_STARTCOMPOSITION, 0, 0);
+            root_context->bInComposition = TRUE;
+	}
+
          flags = GCS_COMPSTR;
 
          if (root_context->dwCompStringLength)
@@ -1381,7 +1417,7 @@ BOOL WINAPI ImmSetCompositionWindow(
     if (reshow)
         ShowWindow(hwndDefault,SW_SHOWNOACTIVATE);
 
-    SendMessageW(root_context->hwnd, WM_IME_NOTIFY,IMN_SETCOMPOSITIONWINDOW, 0);
+    ImmInternalSendIMENotify(IMN_SETCOMPOSITIONWINDOW, 0);
     return TRUE;
 }
 
@@ -1409,14 +1445,8 @@ BOOL WINAPI ImmSetOpenStatus(HIMC hIMC, BOOL fOpen)
 
     if (hIMC == (HIMC)FROM_IME)
     {
-        if (fOpen)
-            ImmInternalPostIMEMessage(WM_IME_STARTCOMPOSITION, 0, 0);
-
         ImmInternalSetOpenStatus(fOpen);
-
-        if (!fOpen)
-            ImmInternalPostIMEMessage(WM_IME_ENDCOMPOSITION, 0, 0);
-
+        ImmInternalSendIMENotify(IMN_SETOPENSTATUS, 0);
         return TRUE;
     }
 
@@ -1492,6 +1522,29 @@ BOOL WINAPI ImmUnregisterWordW(
   return FALSE;
 }
 
+/***********************************************************************
+ *		ImmGetImeMenuItemsA (IMM32.@)
+ */
+DWORD WINAPI ImmGetImeMenuItemsA( HIMC hIMC, DWORD dwFlags, DWORD dwType,
+   LPIMEMENUITEMINFOA lpImeParentMenu, LPIMEMENUITEMINFOA lpImeMenu,
+    DWORD dwSize)
+{
+  FIXME("(%p, %i, %i, %p, %p, %i): stub\n", hIMC, dwFlags, dwType,
+    lpImeParentMenu, lpImeMenu, dwSize);
+  return 0;
+}
+
+/***********************************************************************
+*		ImmGetImeMenuItemsW (IMM32.@)
+*/
+DWORD WINAPI ImmGetImeMenuItemsW( HIMC hIMC, DWORD dwFlags, DWORD dwType,
+   LPIMEMENUITEMINFOW lpImeParentMenu, LPIMEMENUITEMINFOW lpImeMenu,
+   DWORD dwSize)
+{
+  FIXME("(%p, %i, %i, %p, %p, %i): stub\n", hIMC, dwFlags, dwType,
+    lpImeParentMenu, lpImeMenu, dwSize);
+  return 0;
+}
 
 /*****
  * Internal functions to help with IME window management
@@ -1502,6 +1555,7 @@ static void PaintDefaultIMEWnd(HWND hwnd)
     RECT rect;
     HDC hdc = BeginPaint(hwnd,&ps);
     GetClientRect(hwnd,&rect);
+    FillRect(hdc, &rect, (HBRUSH)(COLOR_WINDOW + 1));
 
     if (root_context->dwCompStringLength && root_context->CompositionString)
     {
@@ -1512,8 +1566,6 @@ static void PaintDefaultIMEWnd(HWND hwnd)
         if (root_context->textfont)
             oldfont = SelectObject(hdc,root_context->textfont);
 
-        TextOutW(hdc, 0,0,(LPWSTR)root_context->CompositionString,
-                 root_context->dwCompStringLength / sizeof(WCHAR));
 
         GetTextExtentPoint32W(hdc, (LPWSTR)root_context->CompositionString,
                               root_context->dwCompStringLength / sizeof(WCHAR),
@@ -1521,12 +1573,44 @@ static void PaintDefaultIMEWnd(HWND hwnd)
         pt.x = size.cx;
         pt.y = size.cy;
         LPtoDP(hdc,&pt,1);
-        rect.left = pt.x;
+
+        if (root_context->CompForm.dwStyle == CFS_POINT ||
+            root_context->CompForm.dwStyle == CFS_FORCE_POSITION)
+        {
+            POINT cpt = root_context->CompForm.ptCurrentPos;
+            ClientToScreen(root_context->hwnd,&cpt);
+            rect.left = cpt.x;
+            rect.top = cpt.y;
+            rect.right = rect.left + pt.x + 20;
+            rect.bottom = rect.top + pt.y + 20;
+        }
+        else if (root_context->CompForm.dwStyle == CFS_RECT)
+        {
+            POINT cpt;
+            cpt.x = root_context->CompForm.rcArea.left;
+            cpt.y = root_context->CompForm.rcArea.top;
+            ClientToScreen(root_context->hwnd,&cpt);
+            rect.left = cpt.x;
+            rect.top = cpt.y;
+            cpt.x = root_context->CompForm.rcArea.right;
+            cpt.y = root_context->CompForm.rcArea.bottom;
+            ClientToScreen(root_context->hwnd,&cpt);
+            rect.right = cpt.x;
+            rect.bottom = cpt.y;
+        }
+        else
+        {
+            rect.right = rect.left + pt.x + 20;
+            rect.bottom = rect.top + pt.y + 20;
+        }
+        MoveWindow(hwnd, rect.left, rect.top, rect.right - rect.left ,
+                   rect.bottom - rect.top, FALSE);
+        TextOutW(hdc, 10,10,(LPWSTR)root_context->CompositionString,
+                 root_context->dwCompStringLength / sizeof(WCHAR));
 
         if (oldfont)
             SelectObject(hdc,oldfont);
     }
-    FillRect(hdc,&rect, (HBRUSH) (COLOR_WINDOW+1));
     EndPaint(hwnd,&ps);
 }
 

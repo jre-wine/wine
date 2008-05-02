@@ -45,7 +45,7 @@ static DWORD deformat_string_internal(MSIPACKAGE *package, LPCWSTR ptr,
                                      BOOL* in_group);
 
 
-static LPWSTR build_default_format(MSIRECORD* record)
+static LPWSTR build_default_format(const MSIRECORD* record)
 {
     int i;  
     int count;
@@ -113,16 +113,17 @@ static LPWSTR deformat_component(MSIPACKAGE* package, LPCWSTR key, DWORD* sz)
 {
     LPWSTR value = NULL;
     MSICOMPONENT *comp;
+    BOOL source;
 
     *sz = 0;
     if (!package)
         return NULL;
 
-    FIXME("component key %s\n", debugstr_w(key));
     comp = get_loaded_component(package,key);
     if (comp)
     {
-        value = resolve_folder(package, comp->Directory, FALSE, FALSE, NULL);
+        source = (comp->Action == INSTALLSTATE_SOURCE) ? TRUE : FALSE;
+        value = resolve_folder(package, comp->Directory, source, FALSE, TRUE, NULL);
         *sz = (strlenW(value)) * sizeof(WCHAR);
     }
 
@@ -162,8 +163,6 @@ static LPWSTR deformat_file(MSIPACKAGE* package, LPCWSTR key, DWORD* sz,
             }
             else
             {
-                ERR("Unable to get ShortPath size (%s)\n",
-                    debugstr_w( file->TargetPath) );
                 value = strdupW( file->TargetPath );
                 *sz = (lstrlenW(value)) * sizeof(WCHAR);
             }

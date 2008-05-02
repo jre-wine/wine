@@ -20,6 +20,7 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -46,7 +47,20 @@
 #include <mach/thread_act.h>
 #include <servers/bootstrap.h>
 
-extern int __pthread_kill(mach_port_t, int);
+#if defined(__APPLE__) && defined(__i386__)
+extern int pthread_kill_syscall( mach_port_t, int );
+__ASM_GLOBAL_FUNC( pthread_kill_syscall,
+                   "movl $328,%eax\n\t"  /* SYS___pthread_kill */
+                   "int $0x80\n\t"
+                   "jae 1f\n\t"
+                   "negl %eax\n"
+                   "1:\tret" );
+#else
+static inline int pthread_kill_syscall( mach_port_t, int )
+{
+    return -ENOSYS;
+}
+#endif
 
 static mach_port_t server_mach_port;
 
@@ -148,7 +162,8 @@ void finish_process_tracing( struct process *process )
 /* retrieve the thread x86 registers */
 void get_thread_context( struct thread *thread, CONTEXT *context, unsigned int flags )
 {
-    struct x86_debug_state32 state;
+#ifdef __i386__
+    x86_debug_state32_t state;
     mach_msg_type_number_t count = sizeof(state) / sizeof(int);
     mach_msg_type_name_t type;
     mach_port_t port, process_port = get_process_port( thread->process );
@@ -166,21 +181,33 @@ void get_thread_context( struct thread *thread, CONTEXT *context, unsigned int f
 
     if (!thread_get_state( port, x86_DEBUG_STATE32, (thread_state_t)&state, &count ))
     {
+/* work around silly renaming of struct members in OS X 10.5 */
+#if __DARWIN_UNIX03 && defined(_STRUCT_X86_DEBUG_STATE32)
+        context->Dr0 = state.__dr0;
+        context->Dr1 = state.__dr1;
+        context->Dr2 = state.__dr2;
+        context->Dr3 = state.__dr3;
+        context->Dr6 = state.__dr6;
+        context->Dr7 = state.__dr7;
+#else
         context->Dr0 = state.dr0;
         context->Dr1 = state.dr1;
         context->Dr2 = state.dr2;
         context->Dr3 = state.dr3;
         context->Dr6 = state.dr6;
         context->Dr7 = state.dr7;
+#endif
         context->ContextFlags |= CONTEXT_DEBUG_REGISTERS;
     }
     mach_port_deallocate( mach_task_self(), port );
+#endif
 }
 
 /* set the thread x86 registers */
 void set_thread_context( struct thread *thread, const CONTEXT *context, unsigned int flags )
 {
-    struct x86_debug_state32 state;
+#ifdef __i386__
+    x86_debug_state32_t state;
     mach_msg_type_number_t count = sizeof(state) / sizeof(int);
     mach_msg_type_name_t type;
     mach_port_t port, process_port = get_process_port( thread->process );
@@ -196,6 +223,16 @@ void set_thread_context( struct thread *thread, const CONTEXT *context, unsigned
         return;
     }
 
+#if __DARWIN_UNIX03 && defined(_STRUCT_X86_DEBUG_STATE32)
+    state.__dr0 = context->Dr0;
+    state.__dr1 = context->Dr1;
+    state.__dr2 = context->Dr2;
+    state.__dr3 = context->Dr3;
+    state.__dr4 = 0;
+    state.__dr5 = 0;
+    state.__dr6 = context->Dr6;
+    state.__dr7 = context->Dr7;
+#else
     state.dr0 = context->Dr0;
     state.dr1 = context->Dr1;
     state.dr2 = context->Dr2;
@@ -204,6 +241,7 @@ void set_thread_context( struct thread *thread, const CONTEXT *context, unsigned
     state.dr5 = 0;
     state.dr6 = context->Dr6;
     state.dr7 = context->Dr7;
+#endif
     if (!thread_set_state( port, x86_DEBUG_STATE32, (thread_state_t)&state, count ))
     {
         if (thread->context)  /* update the cached values */
@@ -217,6 +255,7 @@ void set_thread_context( struct thread *thread, const CONTEXT *context, unsigned
         }
     }
     mach_port_deallocate( mach_task_self(), port );
+#endif
 }
 
 int send_thread_signal( struct thread *thread, int sig )
@@ -232,7 +271,11 @@ int send_thread_signal( struct thread *thread, int sig )
         if (!mach_port_extract_right( process_port, thread->unix_tid,
                                       MACH_MSG_TYPE_COPY_SEND, &port, &type ))
         {
-            ret = __pthread_kill( port, sig );
+            if ((ret = pthread_kill_syscall( port, sig )) < 0)
+            {
+                errno = -ret;
+                ret = -1;
+            }
             mach_port_deallocate( mach_task_self(), port );
         }
         else errno = ESRCH;
@@ -243,6 +286,8 @@ int send_thread_signal( struct thread *thread, int sig )
             thread->unix_tid = -1;
         }
     }
+    if (debug_level && ret != -1)
+        fprintf( stderr, "%04x: *sent signal* signal=%d\n", thread->id, sig );
     return (ret != -1);
 }
 

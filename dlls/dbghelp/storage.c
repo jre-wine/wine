@@ -52,80 +52,57 @@ void pool_destroy(struct pool* pool)
 #ifdef USE_STATS
     unsigned    alloc, used, num;
     
-    for (alloc = used = num = 0, arena = pool->first; arena; arena = arena->next)
+    alloc = used = num = 0;
+    arena = pool->first;
+    while (arena)
     {
         alloc += pool->arena_size;
         used += arena->current - (char*)arena;
         num++;
+        arena = arena->next;
     }
+    if (alloc == 0) alloc = 1;      /* avoid division by zero */
     FIXME("STATS: pool %p has allocated %u kbytes, used %u kbytes in %u arenas,\n"
           "\t\t\t\tnon-allocation ratio: %.2f%%\n",
           pool, alloc >> 10, used >> 10, num, 100.0 - (float)used / (float)alloc * 100.0);
 #endif
 
-    for (arena = pool->first; arena; arena = next)
+    arena = pool->first;
+    while (arena)
     {
         next = arena->next;
         HeapFree(GetProcessHeap(), 0, arena);
+        arena = next;
     }
     pool_init(pool, 0);
 }
 
 void* pool_alloc(struct pool* pool, unsigned len)
 {
-    struct pool_arena** parena;
     struct pool_arena*  arena;
     void*               ret;
 
     len = (len + 3) & ~3; /* round up size on DWORD boundary */
     assert(sizeof(struct pool_arena) + len <= pool->arena_size && len);
 
-    for (parena = &pool->first; *parena; parena = &(*parena)->next)
+    for (arena = pool->first; arena; arena = arena->next)
     {
-        if ((char*)(*parena) + pool->arena_size - (*parena)->current >= len)
+        if ((char*)arena + pool->arena_size - arena->current >= len)
         {
-            ret = (*parena)->current;
-            (*parena)->current += len;
+            ret = arena->current;
+            arena->current += len;
             return ret;
         }
     }
- 
+
     arena = HeapAlloc(GetProcessHeap(), 0, pool->arena_size);
     if (!arena) {FIXME("OOM\n");return NULL;}
 
-    *parena = arena;
-
     ret = (char*)arena + sizeof(*arena);
-    arena->next = NULL;
+    arena->next = pool->first;
+    pool->first = arena;
     arena->current = (char*)ret + len;
     return ret;
-}
-
-static struct pool_arena* pool_is_last(struct pool* pool, void* p, unsigned old_size)
-{
-    struct pool_arena*  arena;
-
-    for (arena = pool->first; arena; arena = arena->next)
-    {
-        if (arena->current == (char*)p + old_size) return arena;
-    }
-    return NULL;
-}
-
-static void* pool_realloc(struct pool* pool, void* p, unsigned old_size, unsigned new_size)
-{
-    struct pool_arena*  arena;
-    void*               new;
-
-    if ((arena = pool_is_last(pool, p, old_size)) && 
-        (char*)p + new_size <= (char*)arena + pool->arena_size)
-    {
-        arena->current = (char*)p + new_size;
-        return p;
-    }
-    if ((new = pool_alloc(pool, new_size)) && old_size)
-        memcpy(new, p, min(old_size, new_size));
-    return new;
 }
 
 char* pool_strdup(struct pool* pool, const char* str)
@@ -155,6 +132,7 @@ void vector_init(struct vector* v, unsigned esz, unsigned bucket_sz)
     default: assert(0);
     }
     v->num_buckets = 0;
+    v->buckets_allocated = 0;
     v->num_elts = 0;
 }
 
@@ -180,49 +158,26 @@ void* vector_add(struct vector* v, struct pool* pool)
     assert(v->num_elts > ncurr);
     if (ncurr == (v->num_buckets << v->shift))
     {
-        v->buckets = pool_realloc(pool, v->buckets,
-                                  v->num_buckets * sizeof(void*),
-                                  (v->num_buckets + 1) * sizeof(void*));
+        if(v->num_buckets == v->buckets_allocated)
+        {
+            /* Double the bucket cache, so it scales well with big vectors.*/
+            unsigned    new_reserved;
+            void*       new;
+
+            new_reserved = 2*v->buckets_allocated;
+            if(new_reserved == 0) new_reserved = 1;
+
+            /* Don't even try to resize memory.
+               Pool datastructure is very inefficient with reallocs. */
+            new = pool_alloc(pool, new_reserved * sizeof(void*));
+            memcpy(new, v->buckets, v->buckets_allocated * sizeof(void*));
+            v->buckets = new;
+            v->buckets_allocated = new_reserved;
+        }
         v->buckets[v->num_buckets] = pool_alloc(pool, v->elt_size << v->shift);
         return v->buckets[v->num_buckets++];
     }
     return vector_at(v, ncurr);
-}
-
-static unsigned vector_position(const struct vector* v, const void* elt)
-{
-    int i;
-
-    for (i = 0; i < v->num_buckets; i++)
-    {
-        if (v->buckets[i] <= elt && 
-            (const char*)elt < (const char*)v->buckets[i] + (v->elt_size << v->shift))
-        {
-            return (i << v->shift) + 
-                ((const char*)elt - (const char*)v->buckets[i]) / v->elt_size;
-        }
-    }
-    assert(0);
-    return 0;
-}
-
-void* vector_iter_up(const struct vector* v, void* elt)
-{
-    unsigned    pos;
-
-    if (!elt) return vector_at(v, 0);
-    pos = vector_position(v, elt) + 1;
-    if (pos >= vector_length(v)) return NULL;
-    return vector_at(v, pos);
-}
-
-void* vector_iter_down(const struct vector* v, void* elt)
-{
-    unsigned    pos;
-    if (!elt) return vector_at(v, vector_length(v) - 1);
-    pos = vector_position(v, elt);
-    if (pos == 0) return NULL;
-    return vector_at(v, pos - 1);
 }
 
 /* We construct the sparse array as two vectors (of equal size)
@@ -361,10 +316,9 @@ unsigned hash_table_hash(const char* name, unsigned num_buckets)
 void hash_table_init(struct pool* pool, struct hash_table* ht, unsigned num_buckets)
 {
     ht->num_elts = 0;
-    ht->buckets = pool_alloc(pool, num_buckets * sizeof(struct hash_table_elt*));
-    assert(ht->buckets);
     ht->num_buckets = num_buckets;
-    memset(ht->buckets, 0, num_buckets * sizeof(struct hash_table_elt*));
+    ht->pool = pool;
+    ht->buckets = NULL;
 }
 
 void hash_table_destroy(struct hash_table* ht)
@@ -409,6 +363,13 @@ void hash_table_add(struct hash_table* ht, struct hash_table_elt* elt)
     unsigned                    hash = hash_table_hash(elt->name, ht->num_buckets);
     struct hash_table_elt**     p;
 
+    if (!ht->buckets)
+    {
+        ht->buckets = pool_alloc(ht->pool, ht->num_buckets * sizeof(struct hash_table_elt*));
+        assert(ht->buckets);
+        memset(ht->buckets, 0, ht->num_buckets * sizeof(struct hash_table_elt*));
+    }
+
     /* in some cases, we need to get back the symbols of same name in the order
      * in which they've been inserted. So insert new elements at the end of the list.
      */
@@ -422,6 +383,8 @@ void* hash_table_find(const struct hash_table* ht, const char* name)
 {
     unsigned                    hash = hash_table_hash(name, ht->num_buckets);
     struct hash_table_elt*      elt;
+
+    if(!ht->buckets) return NULL;
 
     for (elt = ht->buckets[hash]; elt; elt = elt->next)
         if (!strcmp(name, elt->name)) return elt;
@@ -447,6 +410,8 @@ void hash_table_iter_init(const struct hash_table* ht,
 
 void* hash_table_iter_up(struct hash_table_iter* hti)
 {
+    if(!hti->ht->buckets) return NULL;
+
     if (hti->element) hti->element = hti->element->next;
     while (!hti->element && hti->index < hti->last) 
         hti->element = hti->ht->buckets[++hti->index];

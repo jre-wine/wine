@@ -645,7 +645,9 @@ static BOOL WINAPI dscenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
     }
 
     /* try a non PCM format */
-#if 0
+    if (0)
+    {
+    /* FIXME: Why is this commented out? */
     init_format(&wfx,WAVE_FORMAT_MULAW,8000,8,1);
     ZeroMemory(&bufdesc, sizeof(bufdesc));
     bufdesc.dwSize=sizeof(bufdesc);
@@ -664,10 +666,12 @@ static BOOL WINAPI dscenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
 	ok(ref==0,"IDirectSoundCaptureBuffer_Release() has %d references, "
            "should have 0\n",ref);
     }
-#endif
+    }
 
     /* Try an invalid format to test error handling */
-#if 0
+    if (0)
+    {
+    /* FIXME: Remove this test altogether? */
     init_format(&wfx,WAVE_FORMAT_PCM,2000000,16,2);
     ZeroMemory(&bufdesc, sizeof(bufdesc));
     bufdesc.dwSize=sizeof(bufdesc);
@@ -680,7 +684,7 @@ static BOOL WINAPI dscenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
     rc=IDirectSoundCapture_CreateCaptureBuffer(dsco,&bufdesc,&dscbo,NULL);
     ok(rc!=DS_OK,"IDirectSoundCapture_CreateCaptureBuffer() should have failed "
        "at 2 MHz %s\n",DXGetErrorString8(rc));
-#endif
+    }
 
 EXIT:
     if (dsco!=NULL) {
@@ -706,24 +710,27 @@ START_TEST(capture)
 
     CoInitialize(NULL);
 
-    hDsound = LoadLibraryA("dsound.dll");
-    if (!hDsound) {
-        trace("dsound.dll not found\n");
-        return;
-    }
-
-    trace("DLL Version: %s\n", get_file_version("dsound.dll"));
-
-    pDirectSoundCaptureCreate=(void*)GetProcAddress(hDsound,"DirectSoundCaptureCreate");
-    pDirectSoundCaptureEnumerateA=(void*)GetProcAddress(hDsound,"DirectSoundCaptureEnumerateA");
-    if (!pDirectSoundCaptureCreate || !pDirectSoundCaptureEnumerateA)
+    hDsound = LoadLibrary("dsound.dll");
+    if (hDsound)
     {
-        trace("capture test skipped\n");
-        return;
-    }
+        trace("DLL Version: %s\n", get_file_version("dsound.dll"));
 
-    IDirectSoundCapture_tests();
-    capture_tests();
+        pDirectSoundCaptureCreate=(void*)GetProcAddress(hDsound,
+            "DirectSoundCaptureCreate");
+        pDirectSoundCaptureEnumerateA=(void*)GetProcAddress(hDsound,
+            "DirectSoundCaptureEnumerateA");
+        if (pDirectSoundCaptureCreate && pDirectSoundCaptureEnumerateA)
+        {
+            IDirectSoundCapture_tests();
+            capture_tests();
+        }
+        else
+            skip("capture test skipped\n");
+
+        FreeLibrary(hDsound);
+    }
+    else
+        skip("dsound.dll not found!\n");
 
     CoUninitialize();
 }

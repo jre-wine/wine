@@ -25,8 +25,6 @@
 #include "wine/winbase16.h"
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
-#include "winver.h"
 #include "wownt32.h"
 #include "winemm16.h"
 #include "digitalv.h"
@@ -1793,9 +1791,9 @@ theEnd:
  *		MMDRV_LoadMMDrvFunc16
  *
  */
-unsigned   MMDRV_LoadMMDrvFunc16(LPCSTR drvName, LPWINE_DRIVER d, 
-                                 LPWINE_MM_DRIVER lpDrv)
-{        
+static unsigned MMDRV_LoadMMDrvFunc16(LPCSTR drvName, LPWINE_DRIVER d,
+                                      LPWINE_MM_DRIVER lpDrv)
+{
     WINEMM_msgFunc16	func;
     unsigned            count = 0;
     char    		buffer[128];

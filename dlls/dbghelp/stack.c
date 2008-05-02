@@ -30,7 +30,6 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "dbghelp_private.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "wine/winbase16.h"
 #include "wine/debug.h"
@@ -62,7 +61,7 @@ static BOOL CALLBACK read_mem(HANDLE hProcess, DWORD addr, void* buffer,
 {
     SIZE_T      r;
     if (!ReadProcessMemory(hProcess, (void*)addr, buffer, size, &r)) return FALSE;
-    *nread = r;
+    if (nread) *nread = r;
     return TRUE;
 }
 
@@ -71,7 +70,7 @@ static BOOL CALLBACK read_mem64(HANDLE hProcess, DWORD64 addr, void* buffer,
 {
     SIZE_T      r;
     if (!ReadProcessMemory(hProcess, (void*)(DWORD_PTR)addr, buffer, size, &r)) return FALSE;
-    *nread = r;
+    if (nread) *nread = r;
     return TRUE;
 }
 

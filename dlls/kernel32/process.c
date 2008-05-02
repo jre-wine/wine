@@ -45,7 +45,6 @@
 #define WIN32_NO_STATUS
 #include "wine/winbase16.h"
 #include "wine/winuser16.h"
-#include "winioctl.h"
 #include "winternl.h"
 #include "kernel_private.h"
 #include "wine/exception.h"
@@ -90,6 +89,7 @@ const WCHAR *DIR_System = NULL;
 
 static const WCHAR comW[] = {'.','c','o','m',0};
 static const WCHAR batW[] = {'.','b','a','t',0};
+static const WCHAR cmdW[] = {'.','c','m','d',0};
 static const WCHAR pifW[] = {'.','p','i','f',0};
 static const WCHAR winevdmW[] = {'w','i','n','e','v','d','m','.','e','x','e',0};
 
@@ -101,7 +101,7 @@ extern void SHELL_LoadRegistry(void);
 /***********************************************************************
  *           contains_path
  */
-inline static int contains_path( LPCWSTR name )
+static inline int contains_path( LPCWSTR name )
 {
     return ((*name && (name[1] == ':')) || strchrW(name, '/') || strchrW(name, '\\'));
 }
@@ -113,7 +113,7 @@ inline static int contains_path( LPCWSTR name )
  * Check if an environment variable needs to be handled specially when
  * passed through the Unix environment (i.e. prefixed with "WINE").
  */
-inline static int is_special_env_var( const char *var )
+static inline int is_special_env_var( const char *var )
 {
     return (!strncmp( var, "PATH=", sizeof("PATH=")-1 ) ||
             !strncmp( var, "HOME=", sizeof("HOME=")-1 ) ||
@@ -345,7 +345,7 @@ static void set_registry_variables( HANDLE hkey, ULONG type )
         env_value.Buffer = (WCHAR *)(buffer + info->DataOffset);
         env_value.Length = env_value.MaximumLength = info->DataLength;
         if (env_value.Length && !env_value.Buffer[env_value.Length/sizeof(WCHAR)-1])
-            env_value.Length--;  /* don't count terminating null if any */
+            env_value.Length -= sizeof(WCHAR);  /* don't count terminating null if any */
         if (info->Type == REG_EXPAND_SZ)
         {
             WCHAR buf_expanded[1024];
@@ -1688,7 +1688,7 @@ BOOL WINAPI CreateProcessW( LPCWSTR app_name, LPWSTR cmd_line, LPSECURITY_ATTRIB
                                            inherit, flags, startup_info, info, unixdir, FALSE );
                 break;
             }
-            if (!strcmpiW( p, batW ))
+            if (!strcmpiW( p, batW ) || !strcmpiW( p, cmdW ) )
             {
                 TRACE( "starting %s as batch binary\n", debugstr_w(name) );
                 retv = create_cmd_process( name, tidy_cmdline, envW, cur_dir, process_attr, thread_attr,
@@ -1848,7 +1848,7 @@ HINSTANCE WINAPI LoadModule( LPCSTR name, LPVOID paramBlock )
 
     if (!SearchPathA( NULL, name, ".exe", sizeof(filename), filename, NULL ) &&
         !SearchPathA( NULL, name, NULL, sizeof(filename), filename, NULL ))
-        return (HINSTANCE)GetLastError();
+        return ULongToHandle(GetLastError());
 
     len = (BYTE)params->lpCmdLine[0];
     if (!(cmdline = HeapAlloc( GetProcessHeap(), 0, strlen(filename) + len + 2 )))
@@ -1879,7 +1879,7 @@ HINSTANCE WINAPI LoadModule( LPCSTR name, LPVOID paramBlock )
         CloseHandle( info.hThread );
         CloseHandle( info.hProcess );
     }
-    else if ((hInstance = (HINSTANCE)GetLastError()) >= (HINSTANCE)32)
+    else if ((hInstance = ULongToHandle(GetLastError())) >= (HINSTANCE)32)
     {
         FIXME("Strange error set by CreateProcess: %p\n", hInstance );
         hInstance = (HINSTANCE)11;
@@ -2174,15 +2174,15 @@ DWORD WINAPI GetProcessDword( DWORD dwProcessID, INT offset )
     case GPD_WINDOWS_VERSION:
         return GetExeVersion16();
     case GPD_THDB:
-        return (DWORD)NtCurrentTeb() - 0x10 /* FIXME */;
+        return (DWORD_PTR)NtCurrentTeb() - 0x10 /* FIXME */;
     case GPD_PDB:
-        return (DWORD)NtCurrentTeb()->Peb;
+        return (DWORD_PTR)NtCurrentTeb()->Peb; /* FIXME: truncating a pointer */
     case GPD_STARTF_SHELLDATA: /* return stdoutput handle from startupinfo ??? */
         GetStartupInfoW(&siw);
-        return (DWORD)siw.hStdOutput;
+        return HandleToULong(siw.hStdOutput);
     case GPD_STARTF_HOTKEY: /* return stdinput handle from startupinfo ??? */
         GetStartupInfoW(&siw);
-        return (DWORD)siw.hStdInput;
+        return HandleToULong(siw.hStdInput);
     case GPD_STARTF_SHOWWINDOW:
         GetStartupInfoW(&siw);
         return siw.wShowWindow;
@@ -2289,7 +2289,7 @@ HANDLE WINAPI OpenProcess( DWORD access, BOOL inherit, DWORD id )
     OBJECT_ATTRIBUTES   attr;
     CLIENT_ID           cid;
 
-    cid.UniqueProcess = (HANDLE)id;
+    cid.UniqueProcess = ULongToHandle(id);
     cid.UniqueThread = 0; /* FIXME ? */
 
     attr.Length = sizeof(OBJECT_ATTRIBUTES);
@@ -2363,7 +2363,7 @@ BOOL WINAPI CloseHandle( HANDLE handle )
     if ((handle == (HANDLE)STD_INPUT_HANDLE) ||
         (handle == (HANDLE)STD_OUTPUT_HANDLE) ||
         (handle == (HANDLE)STD_ERROR_HANDLE))
-        handle = GetStdHandle( (DWORD)handle );
+        handle = GetStdHandle( HandleToULong(handle) );
 
     if (is_console_handle(handle))
         return CloseConsoleHandle(handle);

@@ -36,7 +36,6 @@
 #include "winnls.h"
 #include "winternl.h"
 #include "winioctl.h"
-#include "ntddstor.h"
 #include "ntddcdrm.h"
 #include "kernel_private.h"
 #include "wine/library.h"
@@ -1386,4 +1385,24 @@ BOOL WINAPI GetVolumePathNameW(LPCWSTR filename, LPWSTR volumepathname, DWORD bu
     FIXME("(%s, %p, %d), stub!\n", debugstr_w(filename), volumepathname, buflen);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
+}
+
+/***********************************************************************
+ *           FindFirstVolumeMountPointA   (KERNEL32.@)
+ */
+HANDLE WINAPI FindFirstVolumeMountPointA(LPCSTR root, LPSTR mount_point, DWORD len)
+{
+    FIXME("(%s, %p, %d), stub!\n", debugstr_a(root), mount_point, len);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return INVALID_HANDLE_VALUE;
+}
+
+/***********************************************************************
+ *           FindFirstVolumeMountPointW   (KERNEL32.@)
+ */
+HANDLE WINAPI FindFirstVolumeMountPointW(LPCWSTR root, LPWSTR mount_point, DWORD len)
+{
+    FIXME("(%s, %p, %d), stub!\n", debugstr_w(root), mount_point, len);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return INVALID_HANDLE_VALUE;
 }

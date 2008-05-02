@@ -24,7 +24,6 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "winreg.h"
-#include "winver.h"
 #include "setupapi.h"
 #include "advpub.h"
 #include "winnls.h"
@@ -320,7 +319,7 @@ BOOL WINAPI SetupGetSourceFileLocationA( HINF hinf, PINFCONTEXT context, PCSTR f
     TRACE("%p, %p, %s, %p, %p, 0x%08x, %p\n", hinf, context, debugstr_a(filename), source_id,
           buffer, buffer_size, required_size);
 
-    if (filename && !(filenameW = strdupAtoW( filename )))
+    if (filename && *filename && !(filenameW = strdupAtoW( filename )))
         return FALSE;
 
     if (!SetupGetSourceFileLocationW( hinf, context, filenameW, source_id, NULL, 0, &required ))
@@ -605,5 +604,93 @@ BOOL WINAPI SetupGetTargetPathW( HINF hinf, PINFCONTEXT context, PCWSTR section,
         }
     }
     HeapFree( GetProcessHeap(), 0, dir );
+    return TRUE;
+}
+
+/***********************************************************************
+ *            SetupQueryInfOriginalFileInformationA   (SETUPAPI.@)
+ */
+BOOL WINAPI SetupQueryInfOriginalFileInformationA(
+    PSP_INF_INFORMATION InfInformation, UINT InfIndex,
+    PSP_ALTPLATFORM_INFO AlternativePlatformInfo,
+    PSP_ORIGINAL_FILE_INFO_A OriginalFileInfo)
+{
+    BOOL ret;
+    SP_ORIGINAL_FILE_INFO_W OriginalFileInfoW;
+
+    TRACE("(%p, %d, %p, %p)\n", InfInformation, InfIndex,
+        AlternativePlatformInfo, OriginalFileInfo);
+
+    if (OriginalFileInfo->cbSize != sizeof(*OriginalFileInfo))
+    {
+        ERR("incorrect OriginalFileInfo->cbSize of %d\n", OriginalFileInfo->cbSize);
+        SetLastError( ERROR_INVALID_USER_BUFFER );
+        return FALSE;
+    }
+
+    OriginalFileInfoW.cbSize = sizeof(OriginalFileInfoW);
+    ret = SetupQueryInfOriginalFileInformationW(InfInformation, InfIndex,
+        AlternativePlatformInfo, &OriginalFileInfoW);
+    if (ret)
+    {
+        WideCharToMultiByte(CP_ACP, 0, OriginalFileInfoW.OriginalInfName, MAX_PATH,
+            OriginalFileInfo->OriginalInfName, MAX_PATH, NULL, NULL);
+        WideCharToMultiByte(CP_ACP, 0, OriginalFileInfoW.OriginalCatalogName, MAX_PATH,
+            OriginalFileInfo->OriginalCatalogName, MAX_PATH, NULL, NULL);
+    }
+
+    return ret;
+}
+
+/***********************************************************************
+ *            SetupQueryInfOriginalFileInformationW   (SETUPAPI.@)
+ */
+BOOL WINAPI SetupQueryInfOriginalFileInformationW(
+    PSP_INF_INFORMATION InfInformation, UINT InfIndex,
+    PSP_ALTPLATFORM_INFO AlternativePlatformInfo,
+    PSP_ORIGINAL_FILE_INFO_W OriginalFileInfo)
+{
+    LPCWSTR inf_name;
+    LPCWSTR inf_path;
+    HINF hinf;
+    static const WCHAR wszVersion[] = { 'V','e','r','s','i','o','n',0 };
+    static const WCHAR wszCatalogFile[] = { 'C','a','t','a','l','o','g','F','i','l','e',0 };
+
+    FIXME("(%p, %d, %p, %p): semi-stub\n", InfInformation, InfIndex,
+        AlternativePlatformInfo, OriginalFileInfo);
+
+    if (OriginalFileInfo->cbSize != sizeof(*OriginalFileInfo))
+    {
+        ERR("incorrect OriginalFileInfo->cbSize of %d\n", OriginalFileInfo->cbSize);
+        return ERROR_INVALID_USER_BUFFER;
+    }
+
+    inf_path = (LPWSTR)&InfInformation->VersionData[0];
+
+    /* FIXME: we should get OriginalCatalogName from CatalogFile line in
+     * the original inf file and cache it, but that would require building a
+     * .pnf file. */
+    hinf = SetupOpenInfFileW(inf_path, NULL, INF_STYLE_WIN4, NULL);
+    if (hinf == INVALID_HANDLE_VALUE) return FALSE;
+
+    if (!SetupGetLineTextW(NULL, hinf, wszVersion, wszCatalogFile,
+                           OriginalFileInfo->OriginalCatalogName,
+                           sizeof(OriginalFileInfo->OriginalCatalogName)/sizeof(OriginalFileInfo->OriginalCatalogName[0]),
+                           NULL))
+    {
+        OriginalFileInfo->OriginalCatalogName[0] = '\0';
+    }
+    SetupCloseInfFile(hinf);
+
+    /* FIXME: not quite correct as we just return the same file name as
+     * destination (copied) inf file, not the source (original) inf file.
+     * to fix it properly would require building a .pnf file */
+    /* file name is stored in VersionData field of InfInformation */
+    inf_name = strrchrW(inf_path, '\\');
+    if (inf_name) inf_name++;
+    else inf_name = inf_path;
+
+    strcpyW(OriginalFileInfo->OriginalInfName, inf_name);
+
     return TRUE;
 }

@@ -44,8 +44,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
-#include "winnls.h"
 #include "winuser.h"
 #include "ole2.h"
 #include "oleauto.h"
@@ -178,6 +176,7 @@ typedef struct dwarf2_parse_context_s
     const struct elf_thunk_area*thunks;
     struct sparse_array         abbrev_table;
     struct sparse_array         debug_info_table;
+    unsigned long               load_offset;
     unsigned long               ref_offset;
     unsigned char               word_size;
 } dwarf2_parse_context_t;
@@ -328,19 +327,20 @@ static const char* dwarf2_debug_traverse_ctx(const dwarf2_traverse_context_t* ct
     return wine_dbg_sprintf("ctx(%p)", ctx->data); 
 }
 
-static const char* dwarf2_debug_ctx(const dwarf2_parse_context_t* ctx) 
+static const char* dwarf2_debug_ctx(const dwarf2_parse_context_t* ctx)
 {
-    return wine_dbg_sprintf("ctx(%p,%s)", ctx, ctx->module->module.ModuleName);
+    return wine_dbg_sprintf("ctx(%p,%s)",
+                            ctx, debugstr_w(ctx->module->module.ModuleName));
 }
 
-static const char* dwarf2_debug_di(const dwarf2_debug_info_t* di) 
+static const char* dwarf2_debug_di(const dwarf2_debug_info_t* di)
 {
     return wine_dbg_sprintf("debug_info(abbrev:%p,symt:%p)",
                             di->abbrev, di->symt);
 }
 
 static dwarf2_abbrev_entry_t*
-dwarf2_abbrev_table_find_entry(struct sparse_array* abbrev_table,
+dwarf2_abbrev_table_find_entry(const struct sparse_array* abbrev_table,
                                unsigned long entry_code)
 {
     assert( NULL != abbrev_table );
@@ -780,7 +780,7 @@ compute_location(dwarf2_traverse_context_t* ctx, struct location* loc,
 }
 
 static BOOL dwarf2_compute_location_attr(dwarf2_parse_context_t* ctx,
-                                         dwarf2_debug_info_t* di,
+                                         const dwarf2_debug_info_t* di,
                                          unsigned long dw,
                                          struct location* loc,
                                          const struct location* frame)
@@ -1004,8 +1004,8 @@ static struct symt* dwarf2_parse_array_type(dwarf2_parse_context_t* ctx,
     struct symt* ref_type;
     struct symt* idx_type = NULL;
     struct attribute min, max, cnt;
-    dwarf2_debug_info_t** pchild = NULL;
     dwarf2_debug_info_t* child;
+    int    i;
 
     if (di->symt) return di->symt;
 
@@ -1018,9 +1018,9 @@ static struct symt* dwarf2_parse_array_type(dwarf2_parse_context_t* ctx,
     }
     ref_type = dwarf2_lookup_type(ctx, di);
 
-    while ((pchild = vector_iter_up(&di->children, pchild)))
+    for (i=0; i<vector_length(&di->children); i++)
     {
-        child = *pchild;
+        child = *(dwarf2_debug_info_t**)vector_at(&di->children, i);
         switch (child->abbrev->tag)
         {
         case DW_TAG_subrange_type:
@@ -1093,7 +1093,7 @@ static struct symt* dwarf2_parse_reference_type(dwarf2_parse_context_t* ctx,
 }
 
 static void dwarf2_parse_udt_member(dwarf2_parse_context_t* ctx,
-                                    dwarf2_debug_info_t* di,
+                                    const dwarf2_debug_info_t* di,
                                     struct symt_udt* parent)
 {
     struct symt* elt_type;
@@ -1162,12 +1162,12 @@ static struct symt* dwarf2_parse_udt_type(dwarf2_parse_context_t* ctx,
 
     if (di->abbrev->have_child) /** any interest to not have child ? */
     {
-        dwarf2_debug_info_t**   pchild = NULL;
         dwarf2_debug_info_t*    child;
+        int    i;
 
-        while ((pchild = vector_iter_up(&di->children, pchild)))
+        for (i=0; i<vector_length(&di->children); i++)
         {
-            child = *pchild;
+            child = *(dwarf2_debug_info_t**)vector_at(&di->children, i);
 
             switch (child->abbrev->tag)
             {
@@ -1195,7 +1195,7 @@ static struct symt* dwarf2_parse_udt_type(dwarf2_parse_context_t* ctx,
 }
 
 static void dwarf2_parse_enumerator(dwarf2_parse_context_t* ctx,
-                                    dwarf2_debug_info_t* di,
+                                    const dwarf2_debug_info_t* di,
                                     struct symt_enum* parent)
 {
     struct attribute    name;
@@ -1203,7 +1203,7 @@ static void dwarf2_parse_enumerator(dwarf2_parse_context_t* ctx,
 
     TRACE("%s, for %s\n", dwarf2_debug_ctx(ctx), dwarf2_debug_di(di)); 
 
-    if (!dwarf2_find_attribute(ctx, di, DW_AT_name, &name)) name.u.string = NULL;
+    if (!dwarf2_find_attribute(ctx, di, DW_AT_name, &name)) return;
     if (!dwarf2_find_attribute(ctx, di, DW_AT_const_value, &value)) value.u.svalue = 0;
     symt_add_enum_element(ctx->module, parent, name.u.string, value.u.svalue);
 
@@ -1227,13 +1227,13 @@ static struct symt* dwarf2_parse_enumeration_type(dwarf2_parse_context_t* ctx,
 
     if (di->abbrev->have_child) /* any interest to not have child ? */
     {
-        dwarf2_debug_info_t**   pchild = NULL;
         dwarf2_debug_info_t*    child;
+        int    i;
 
         /* FIXME: should we use the sibling stuff ?? */
-        while ((pchild = vector_iter_up(&di->children, pchild)))
+        for (i=0; i<vector_length(&di->children); i++)
         {
-            child = *pchild;
+            child = *(dwarf2_debug_info_t**)vector_at(&di->children, i);
 
             switch (child->abbrev->tag)
             {
@@ -1278,8 +1278,10 @@ static void dwarf2_parse_variable(dwarf2_subprogram_t* subpgm,
     is_pmt = !block && di->abbrev->tag == DW_TAG_formal_parameter;
     param_type = dwarf2_lookup_type(subpgm->ctx, di);
         
-    if (!dwarf2_find_attribute(subpgm->ctx, di, DW_AT_name, &name))
-        name.u.string = NULL;
+    if (!dwarf2_find_attribute(subpgm->ctx, di, DW_AT_name, &name)) {
+	/* cannot do much without the name, the functions below won't like it. */
+        return;
+    }
     if (dwarf2_compute_location_attr(subpgm->ctx, di, DW_AT_location,
                                      &loc, &subpgm->frame))
     {
@@ -1298,7 +1300,7 @@ static void dwarf2_parse_variable(dwarf2_subprogram_t* subpgm,
                 ext.u.uvalue = 0;
             symt_new_global_variable(subpgm->ctx->module, subpgm->compiland,
                                      name.u.string, !ext.u.uvalue,
-                                     subpgm->ctx->module->module.BaseOfImage + loc.offset,
+                                     subpgm->ctx->load_offset + loc.offset,
                                      0, param_type);
             break;
         default:
@@ -1319,7 +1321,7 @@ static void dwarf2_parse_variable(dwarf2_subprogram_t* subpgm,
     else if (dwarf2_find_attribute(subpgm->ctx, di, DW_AT_const_value, &value))
     {
         VARIANT v;
-        if (subpgm->func) FIXME("Unsupported constant %s in function\n", name.u.string);
+        if (subpgm->func) WARN("Unsupported constant %s in function\n", name.u.string);
         if (is_pmt)       FIXME("Unsupported constant (parameter) %s in function\n", name.u.string);
         switch (value.form)
         {
@@ -1368,7 +1370,7 @@ static void dwarf2_parse_variable(dwarf2_subprogram_t* subpgm,
 }
 
 static void dwarf2_parse_subprogram_label(dwarf2_subprogram_t* subpgm,
-                                          dwarf2_debug_info_t* di)
+                                          const dwarf2_debug_info_t* di)
 {
     struct attribute    name;
     struct attribute    low_pc;
@@ -1381,18 +1383,18 @@ static void dwarf2_parse_subprogram_label(dwarf2_subprogram_t* subpgm,
         name.u.string = NULL;
 
     loc.kind = loc_absolute;
-    loc.offset = subpgm->ctx->module->module.BaseOfImage + low_pc.u.uvalue,
+    loc.offset = subpgm->ctx->load_offset + low_pc.u.uvalue;
     symt_add_function_point(subpgm->ctx->module, subpgm->func, SymTagLabel,
                             &loc, name.u.string);
 }
 
 static void dwarf2_parse_subprogram_block(dwarf2_subprogram_t* subpgm,
                                           struct symt_block* parent_block,
-					  dwarf2_debug_info_t* di);
+					  const dwarf2_debug_info_t* di);
 
 static void dwarf2_parse_inlined_subroutine(dwarf2_subprogram_t* subpgm,
                                             struct symt_block* parent_block,
-                                            dwarf2_debug_info_t* di)
+                                            const dwarf2_debug_info_t* di)
 {
     struct symt_block*  block;
     struct attribute    low_pc;
@@ -1404,17 +1406,17 @@ static void dwarf2_parse_inlined_subroutine(dwarf2_subprogram_t* subpgm,
     if (!dwarf2_find_attribute(subpgm->ctx, di, DW_AT_high_pc, &high_pc)) high_pc.u.uvalue = 0;
 
     block = symt_open_func_block(subpgm->ctx->module, subpgm->func, parent_block,
-                                 subpgm->ctx->module->module.BaseOfImage + low_pc.u.uvalue - subpgm->func->address,
+                                 subpgm->ctx->load_offset + low_pc.u.uvalue - subpgm->func->address,
                                  high_pc.u.uvalue - low_pc.u.uvalue);
 
     if (di->abbrev->have_child) /** any interest to not have child ? */
     {
-        dwarf2_debug_info_t**   pchild = NULL;
         dwarf2_debug_info_t*    child;
+        int    i;
 
-        while ((pchild = vector_iter_up(&di->children, pchild)))
+        for (i=0; i<vector_length(&di->children); i++)
         {
-            child = *pchild;
+            child = *(dwarf2_debug_info_t**)vector_at(&di->children, i);
 
             switch (child->abbrev->tag)
             {
@@ -1443,7 +1445,7 @@ static void dwarf2_parse_inlined_subroutine(dwarf2_subprogram_t* subpgm,
 
 static void dwarf2_parse_subprogram_block(dwarf2_subprogram_t* subpgm, 
                                           struct symt_block* parent_block,
-					  dwarf2_debug_info_t* di)
+					  const dwarf2_debug_info_t* di)
 {
     struct symt_block*  block;
     struct attribute    low_pc;
@@ -1457,17 +1459,17 @@ static void dwarf2_parse_subprogram_block(dwarf2_subprogram_t* subpgm,
         high_pc.u.uvalue = 0;
 
     block = symt_open_func_block(subpgm->ctx->module, subpgm->func, parent_block,
-                                 subpgm->ctx->module->module.BaseOfImage + low_pc.u.uvalue - subpgm->func->address,
+                                 subpgm->ctx->load_offset + low_pc.u.uvalue - subpgm->func->address,
                                  high_pc.u.uvalue - low_pc.u.uvalue);
 
     if (di->abbrev->have_child) /** any interest to not have child ? */
     {
-        dwarf2_debug_info_t**   pchild = NULL;
         dwarf2_debug_info_t*    child;
+        int    i;
 
-        while ((pchild = vector_iter_up(&di->children, pchild)))
+        for (i=0; i<vector_length(&di->children); i++)
         {
-            child = *pchild;
+            child = *(dwarf2_debug_info_t**)vector_at(&di->children, i);
 
             switch (child->abbrev->tag)
             {
@@ -1544,7 +1546,7 @@ static struct symt* dwarf2_parse_subprogram(dwarf2_parse_context_t* ctx,
      * (not the case for stabs), we just drop Wine's thunks here...
      * Actual thunks will be created in elf_module from the symbol table
      */
-    if (elf_is_in_thunk_area(ctx->module->module.BaseOfImage + low_pc.u.uvalue,
+    if (elf_is_in_thunk_area(ctx->load_offset + low_pc.u.uvalue,
                              ctx->thunks) >= 0)
         return NULL;
     if (!dwarf2_find_attribute(ctx, di, DW_AT_declaration, &is_decl))
@@ -1558,7 +1560,7 @@ static struct symt* dwarf2_parse_subprogram(dwarf2_parse_context_t* ctx,
     if (!is_decl.u.uvalue)
     {
         subpgm.func = symt_new_function(ctx->module, compiland, name.u.string,
-                                        ctx->module->module.BaseOfImage + low_pc.u.uvalue,
+                                        ctx->load_offset + low_pc.u.uvalue,
                                         high_pc.u.uvalue - low_pc.u.uvalue,
                                         &sig_type->symt);
         di->symt = &subpgm.func->symt;
@@ -1579,12 +1581,12 @@ static struct symt* dwarf2_parse_subprogram(dwarf2_parse_context_t* ctx,
 
     if (di->abbrev->have_child) /** any interest to not have child ? */
     {
-        dwarf2_debug_info_t**   pchild = NULL;
         dwarf2_debug_info_t*    child;
+        int    i;
 
-        while ((pchild = vector_iter_up(&di->children, pchild)))
+        for (i=0; i<vector_length(&di->children); i++)
         {
-            child = *pchild;
+            child = *(dwarf2_debug_info_t**)vector_at(&di->children, i);
 
             switch (child->abbrev->tag)
             {
@@ -1651,12 +1653,12 @@ static struct symt* dwarf2_parse_subroutine_type(dwarf2_parse_context_t* ctx,
 
     if (di->abbrev->have_child) /** any interest to not have child ? */
     {
-        dwarf2_debug_info_t**   pchild = NULL;
         dwarf2_debug_info_t*    child;
+        int    i;
 
-        while ((pchild = vector_iter_up(&di->children, pchild)))
+        for (i=0; i<vector_length(&di->children); i++)
         {
-            child = *pchild;
+            child = *(dwarf2_debug_info_t**)vector_at(&di->children, i);
 
             switch (child->abbrev->tag)
             {
@@ -1739,7 +1741,7 @@ static void dwarf2_load_one_entry(dwarf2_parse_context_t* ctx,
 }
 
 static void dwarf2_set_line_number(struct module* module, unsigned long address,
-                                   struct vector* v, unsigned file, unsigned line)
+                                   const struct vector* v, unsigned file, unsigned line)
 {
     struct symt_function*       func;
     struct symt_ht*             symt;
@@ -1747,7 +1749,8 @@ static void dwarf2_set_line_number(struct module* module, unsigned long address,
 
     if (!file || !(psrc = vector_at(v, file - 1))) return;
 
-    TRACE("%s %lx %s %u\n", module->module.ModuleName, address, source_get(module, *psrc), line);
+    TRACE("%s %lx %s %u\n",
+          debugstr_w(module->module.ModuleName), address, source_get(module, *psrc), line);
     if (!(symt = symt_find_nearest(module, address)) ||
         symt->symt.tag != SymTagFunction) return;
     func = (struct symt_function*)symt;
@@ -1904,7 +1907,7 @@ static BOOL dwarf2_parse_line_numbers(const dwarf2_section_t* sections,
                         end_sequence = TRUE;
                         break;
                     case DW_LNE_set_address:
-                        address = ctx->module->module.BaseOfImage + dwarf2_parse_addr(&traverse);
+                        address = ctx->load_offset + dwarf2_parse_addr(&traverse);
                         break;
                     case DW_LNE_define_file:
                         FIXME("not handled %s\n", traverse.data);
@@ -1934,7 +1937,8 @@ static BOOL dwarf2_parse_compilation_unit(const dwarf2_section_t* sections,
                                           const dwarf2_comp_unit_t* comp_unit,
                                           struct module* module,
                                           const struct elf_thunk_area* thunks,
-                                          const unsigned char* comp_unit_cursor)
+                                          const unsigned char* comp_unit_cursor,
+                                          unsigned long load_offset)
 {
     dwarf2_parse_context_t ctx;
     dwarf2_traverse_context_t traverse;
@@ -1962,6 +1966,7 @@ static BOOL dwarf2_parse_compilation_unit(const dwarf2_section_t* sections,
     ctx.module = module;
     ctx.word_size = comp_unit->word_size;
     ctx.thunks = thunks;
+    ctx.load_offset = load_offset;
     ctx.ref_offset = comp_unit_cursor - sections[section_debug].address;
 
     traverse.start_data = comp_unit_cursor + sizeof(dwarf2_comp_unit_stream_t);
@@ -1995,13 +2000,15 @@ static BOOL dwarf2_parse_compilation_unit(const dwarf2_section_t* sections,
         if (!dwarf2_find_attribute(&ctx, di, DW_AT_low_pc, &low_pc))
             low_pc.u.uvalue = 0;
         di->symt = &symt_new_compiland(module, 
-                                       module->module.BaseOfImage + low_pc.u.uvalue,
+                                       ctx.load_offset + low_pc.u.uvalue,
                                        source_new(module, comp_dir.u.string, name.u.string))->symt;
 
         if (di->abbrev->have_child)
         {
-            while ((pdi = vector_iter_up(&di->children, pdi)))
+            int    i;
+            for (i=0; i<vector_length(&di->children); i++)
             {
+                pdi = vector_at(&di->children, i);
                 dwarf2_load_one_entry(&ctx, *pdi, (struct symt_compiland*)di->symt);
             }
         }
@@ -2054,9 +2061,11 @@ static enum location_error loc_compute_frame(struct process* pcs,
     struct location*            pframe;
     dwarf2_traverse_context_t   lctx;
     enum location_error         err;
+    int                         i;
 
-    while ((psym = vector_iter_up(&func->vchildren, psym)))
+    for (i=0; i<vector_length(&func->vchildren); i++)
     {
+        psym = vector_at(&func->vchildren, i);
         if ((*psym)->tag == SymTagCustom)
         {
             pframe = &((struct symt_function_point*)*psym)->loc;
@@ -2204,7 +2213,7 @@ BOOL dwarf2_parse(struct module* module, unsigned long load_offset,
         comp_unit.word_size = *(unsigned char*) comp_unit_stream->word_size;
 
         dwarf2_parse_compilation_unit(section, &comp_unit, module,
-                                      thunks, comp_unit_cursor);
+                                      thunks, comp_unit_cursor, load_offset);
         comp_unit_cursor += comp_unit.length + sizeof(unsigned);
     }
     module->module.SymType = SymDia;

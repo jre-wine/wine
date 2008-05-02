@@ -31,7 +31,7 @@ WINE_DECLARE_DEBUG_CHANNEL(wc_font);
 UINT g_uiDefaultCharset;
 
 /* mapping console colors to RGB values */
-COLORREF	WCUSER_ColorMap[16] =
+const COLORREF WCUSER_ColorMap[16] =
 {
     RGB(0x00, 0x00, 0x00), RGB(0x00, 0x00, 0x80), RGB(0x00, 0x80, 0x00), RGB(0x00, 0x80, 0x80),
     RGB(0x80, 0x00, 0x00), RGB(0x80, 0x00, 0x80), RGB(0x80, 0x80, 0x00), RGB(0x80, 0x80, 0x80),
@@ -1320,7 +1320,7 @@ static LRESULT CALLBACK WCUSER_Proc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM 
 	    break;
 	case IDS_SCROLL:
 	case IDS_SEARCH:
-	    WINE_FIXME("Unhandled yet command: %x\n", wParam);
+	    WINE_FIXME("Unhandled yet command: %lx\n", wParam);
 	    break;
 	default:
 	    return DefWindowProc(hWnd, uMsg, wParam, lParam);

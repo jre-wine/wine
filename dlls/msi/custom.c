@@ -25,16 +25,27 @@
 #include "winbase.h"
 #include "winerror.h"
 #include "msidefs.h"
-#include "msipriv.h"
 #include "winuser.h"
+
+#include "msipriv.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
+#include "wine/exception.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msi);
 
 #define CUSTOM_ACTION_TYPE_MASK 0x3F
 static const WCHAR c_collen[] = {'C',':','\\',0};
 static const WCHAR cszTempFolder[]= {'T','e','m','p','F','o','l','d','e','r',0};
+
+
+static const WCHAR szActionData[] = {
+    'C','u','s','t','o','m','A','c','t','i','o','n','D','a','t','a',0
+};
+static const WCHAR ProdCode[] = {
+    'P','r','o','d','u','c','t','C','o','d','e',0
+};
+static const WCHAR UserSID[] = {'U','s','e','r','S','I','D',0};
 
 typedef struct tagMSIRUNNINGACTION
 {
@@ -54,18 +65,41 @@ static UINT HANDLE_CustomType18(MSIPACKAGE *package, LPCWSTR source,
                                 LPCWSTR target, const INT type, LPCWSTR action);
 static UINT HANDLE_CustomType19(MSIPACKAGE *package, LPCWSTR source,
                                 LPCWSTR target, const INT type, LPCWSTR action);
+static UINT HANDLE_CustomType23(MSIPACKAGE *package, LPCWSTR source,
+                                LPCWSTR target, const INT type, LPCWSTR action);
 static UINT HANDLE_CustomType50(MSIPACKAGE *package, LPCWSTR source,
                                 LPCWSTR target, const INT type, LPCWSTR action);
 static UINT HANDLE_CustomType34(MSIPACKAGE *package, LPCWSTR source,
                                 LPCWSTR target, const INT type, LPCWSTR action);
+static UINT HANDLE_CustomType37_38(MSIPACKAGE *package, LPCWSTR source,
+                                LPCWSTR target, const INT type, LPCWSTR action);
+static UINT HANDLE_CustomType5_6(MSIPACKAGE *package, LPCWSTR source,
+                                LPCWSTR target, const INT type, LPCWSTR action);
+static UINT HANDLE_CustomType21_22(MSIPACKAGE *package, LPCWSTR source,
+                                LPCWSTR target, const INT type, LPCWSTR action);
+static UINT HANDLE_CustomType53_54(MSIPACKAGE *package, LPCWSTR source,
+                                LPCWSTR target, const INT type, LPCWSTR action);
 
+typedef UINT (WINAPI *MsiCustomActionEntryPoint)( MSIHANDLE );
+
+static CRITICAL_SECTION msi_custom_action_cs;
+static CRITICAL_SECTION_DEBUG msi_custom_action_cs_debug =
+{
+    0, 0, &msi_custom_action_cs,
+    { &msi_custom_action_cs_debug.ProcessLocksList,
+      &msi_custom_action_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": msi_custom_action_cs") }
+};
+static CRITICAL_SECTION msi_custom_action_cs = { &msi_custom_action_cs_debug, -1, 0, 0, 0, 0 };
+
+static struct list msi_pending_custom_actions = LIST_INIT( msi_pending_custom_actions );
 
 static BOOL check_execution_scheduling_options(MSIPACKAGE *package, LPCWSTR action, UINT options)
 {
     if (!package->script)
         return TRUE;
 
-    if ((options & msidbCustomActionTypeClientRepeat) == 
+    if ((options & msidbCustomActionTypeClientRepeat) ==
             msidbCustomActionTypeClientRepeat)
     {
         if (!(package->script->InWhatSequence & SEQUENCE_UI &&
@@ -98,32 +132,49 @@ static BOOL check_execution_scheduling_options(MSIPACKAGE *package, LPCWSTR acti
     return TRUE;
 }
 
-/* stores the CustomActionData before the action:
- *     [CustomActionData]Action
+/* stores the following properties before the action:
+ *
+ *    [CustomActionData;UserSID;ProductCode]Action
  */
-static LPWSTR msi_get_deferred_action(LPCWSTR action, LPWSTR actiondata)
+static LPWSTR msi_get_deferred_action(LPCWSTR action, LPCWSTR actiondata,
+                                      LPCWSTR usersid, LPCWSTR prodcode)
 {
     LPWSTR deferred;
     DWORD len;
 
-    static const WCHAR begin[] = {'[',0};
-    static const WCHAR end[] = {']',0};
+    static const WCHAR format[] = {'[','%','s',';','%','s',';','%','s',']','%','s',0};
 
     if (!actiondata)
         return strdupW(action);
 
-    len = lstrlenW(action) + lstrlenW(actiondata) + 3;
+    len = lstrlenW(action) + lstrlenW(actiondata) +
+          lstrlenW(usersid) + lstrlenW(prodcode) + 5;
     deferred = msi_alloc(len * sizeof(WCHAR));
 
-    lstrcpyW(deferred, begin);
-    lstrcatW(deferred, actiondata);
-    lstrcatW(deferred, end);
-    lstrcatW(deferred, action);
-
+    sprintfW(deferred, format, actiondata, usersid, prodcode, action);
     return deferred;
 }
 
-UINT ACTION_CustomAction(MSIPACKAGE *package,LPCWSTR action, BOOL execute)
+static void set_deferred_action_props(MSIPACKAGE *package, LPWSTR deferred_data)
+{
+    LPWSTR end, beg = deferred_data + 1;
+
+    end = strchrW(beg, ';');
+    *end = '\0';
+    MSI_SetPropertyW(package, szActionData, beg);
+    beg = end + 1;
+
+    end = strchrW(beg, ';');
+    *end = '\0';
+    MSI_SetPropertyW(package, UserSID, beg);
+    beg = end + 1;
+
+    end = strchrW(beg, ']');
+    *end = '\0';
+    MSI_SetPropertyW(package, ProdCode, beg);
+}
+
+UINT ACTION_CustomAction(MSIPACKAGE *package, LPCWSTR action, UINT script, BOOL execute)
 {
     UINT rc = ERROR_SUCCESS;
     MSIRECORD * row = 0;
@@ -138,11 +189,10 @@ UINT ACTION_CustomAction(MSIPACKAGE *package,LPCWSTR action, BOOL execute)
     LPWSTR action_copy = strdupW(action);
     WCHAR *deformated=NULL;
 
-    /* deferred action: [CustomActionData]Action */
+    /* deferred action: [properties]Action */
     if ((ptr = strchrW(action_copy, ']')))
     {
-        deferred_data = action_copy + 1;
-        *ptr = '\0';
+        deferred_data = action_copy;
         action = ptr + 1;
     }
 
@@ -180,7 +230,9 @@ UINT ACTION_CustomAction(MSIPACKAGE *package,LPCWSTR action, BOOL execute)
         if (!execute)
         {
             LPWSTR actiondata = msi_dup_property(package, action);
-            LPWSTR deferred = msi_get_deferred_action(action, actiondata);
+            LPWSTR usersid = msi_dup_property(package, UserSID);
+            LPWSTR prodcode = msi_dup_property(package, ProdCode);
+            LPWSTR deferred = msi_get_deferred_action(action, actiondata, usersid, prodcode);
 
             if (type & msidbCustomActionTypeCommit)
             {
@@ -194,23 +246,40 @@ UINT ACTION_CustomAction(MSIPACKAGE *package,LPCWSTR action, BOOL execute)
             }
 
             rc = ERROR_SUCCESS;
+            msi_free(actiondata);
+            msi_free(usersid);
+            msi_free(prodcode);
             msi_free(deferred);
             goto end;
         }
         else
         {
-            /*Set ActionData*/
-
-            static const WCHAR szActionData[] = {
-            'C','u','s','t','o','m','A','c','t','i','o','n','D','a','t','a',0};
             static const WCHAR szBlank[] = {0};
+
             LPWSTR actiondata = msi_dup_property( package, action );
+
+            switch (script)
+            {
+            case INSTALL_SCRIPT:
+                package->scheduled_action_running = TRUE;
+                break;
+            case COMMIT_SCRIPT:
+                package->commit_action_running = TRUE;
+                break;
+            case ROLLBACK_SCRIPT:
+                package->rollback_action_running = TRUE;
+                break;
+            default:
+                break;
+            }
+
             if (deferred_data)
-                MSI_SetPropertyW(package,szActionData,deferred_data);
+                set_deferred_action_props(package, deferred_data);
             else if (actiondata)
                 MSI_SetPropertyW(package,szActionData,actiondata);
             else
                 MSI_SetPropertyW(package,szActionData,szBlank);
+
             msi_free(actiondata);
         }
     }
@@ -237,6 +306,10 @@ UINT ACTION_CustomAction(MSIPACKAGE *package,LPCWSTR action, BOOL execute)
         case 17:
             rc = HANDLE_CustomType17(package,source,target,type,action);
             break;
+        case 23: /* installs another package in the source tree */
+            deformat_string(package,target,&deformated);
+            rc = HANDLE_CustomType23(package,source,deformated,type,action);
+            break;
         case 50: /*EXE file specified by a property value */
             rc = HANDLE_CustomType50(package,source,target,type,action);
             break;
@@ -253,6 +326,22 @@ UINT ACTION_CustomAction(MSIPACKAGE *package,LPCWSTR action, BOOL execute)
             rc = MSI_SetPropertyW(package,source,deformated);
             msi_free(deformated);
             break;
+	case 37: /* JScript/VBScript text stored in target column. */
+	case 38:
+	    rc = HANDLE_CustomType37_38(package,source,target,type,action);
+	    break;
+	case 5:
+	case 6: /* JScript/VBScript file stored in a Binary table stream. */
+	    rc = HANDLE_CustomType5_6(package,source,target,type,action);
+	    break;
+	case 21: /* JScript/VBScript file installed with the product. */
+	case 22:
+	    rc = HANDLE_CustomType21_22(package,source,target,type,action);
+	    break;
+	case 53: /* JScript/VBScript text specified by a property value. */
+	case 54:
+	    rc = HANDLE_CustomType53_54(package,source,target,type,action);
+	    break;
         default:
             FIXME("UNHANDLED ACTION TYPE %i (%s %s)\n",
              type & CUSTOM_ACTION_TYPE_MASK, debugstr_w(source),
@@ -260,6 +349,9 @@ UINT ACTION_CustomAction(MSIPACKAGE *package,LPCWSTR action, BOOL execute)
     }
 
 end:
+    package->scheduled_action_running = FALSE;
+    package->commit_action_running = FALSE;
+    package->rollback_action_running = FALSE;
     msi_free(action_copy);
     msiobj_release(&row->hdr);
     return rc;
@@ -322,7 +414,7 @@ static UINT store_binary_to_temp(MSIPACKAGE *package, LPCWSTR source,
     return r;
 }
 
-static void file_running_action(MSIPACKAGE* package, HANDLE Handle, 
+static void file_running_action(MSIPACKAGE* package, HANDLE Handle,
                                 BOOL process, LPCWSTR name)
 {
     MSIRUNNINGACTION *action;
@@ -346,7 +438,7 @@ static UINT custom_get_process_return( HANDLE process )
     return ERROR_SUCCESS;
 }
 
-static UINT custom_get_thread_return( HANDLE thread )
+static UINT custom_get_thread_return( MSIPACKAGE *package, HANDLE thread )
 {
     DWORD rc = 0;
 
@@ -361,154 +453,380 @@ static UINT custom_get_thread_return( HANDLE thread )
         return rc;
     case ERROR_NO_MORE_ITEMS:
         return ERROR_SUCCESS;
+    case ERROR_INSTALL_SUSPEND:
+        ACTION_ForceReboot( package );
+        return ERROR_SUCCESS;
     default:
         ERR("Invalid Return Code %d\n",rc);
         return ERROR_INSTALL_FAILURE;
     }
 }
 
-static UINT process_handle(MSIPACKAGE* package, UINT type,
-                           HANDLE ThreadHandle, HANDLE ProcessHandle,
-                           LPCWSTR Name)
+static UINT wait_process_handle(MSIPACKAGE* package, UINT type,
+                           HANDLE ProcessHandle, LPCWSTR name)
 {
     UINT rc = ERROR_SUCCESS;
 
     if (!(type & msidbCustomActionTypeAsync))
     {
-        /* synchronous */
-        TRACE("Synchronous Execution of action %s\n",debugstr_w(Name));
-        if (ProcessHandle)
-            msi_dialog_check_messages(ProcessHandle);
-        else
-            msi_dialog_check_messages(ThreadHandle);
+        TRACE("waiting for %s\n", debugstr_w(name));
+
+        msi_dialog_check_messages(ProcessHandle);
 
         if (!(type & msidbCustomActionTypeContinue))
-        {
-            if (ProcessHandle)
-                rc = custom_get_process_return(ProcessHandle);
-            else
-                rc = custom_get_thread_return(ThreadHandle);
-        }
+            rc = custom_get_process_return(ProcessHandle);
 
-        CloseHandle(ThreadHandle);
-        if (ProcessHandle)
+        CloseHandle(ProcessHandle);
+    }
+    else
+    {
+        TRACE("%s running in background\n", debugstr_w(name));
+
+        if (!(type & msidbCustomActionTypeContinue))
+            file_running_action(package, ProcessHandle, TRUE, name);
+        else
             CloseHandle(ProcessHandle);
     }
+
+    return rc;
+}
+
+typedef struct _msi_custom_action_info {
+    struct list entry;
+    LONG refs;
+    MSIPACKAGE *package;
+    LPWSTR source;
+    LPWSTR target;
+    HANDLE handle;
+    LPWSTR action;
+    INT type;
+    GUID guid;
+} msi_custom_action_info;
+
+static void release_custom_action_data( msi_custom_action_info *info )
+{
+    EnterCriticalSection( &msi_custom_action_cs );
+
+    if (!--info->refs)
+    {
+        list_remove( &info->entry );
+        if (info->handle)
+            CloseHandle( info->handle );
+        msi_free( info->action );
+        msi_free( info->source );
+        msi_free( info->target );
+        msiobj_release( &info->package->hdr );
+        msi_free( info );
+    }
+
+    LeaveCriticalSection( &msi_custom_action_cs );
+}
+
+/* must be called inside msi_custom_action_cs if info is in the pending custom actions list */
+static void addref_custom_action_data( msi_custom_action_info *info )
+{
+    info->refs++;
+ }
+
+static UINT wait_thread_handle( msi_custom_action_info *info )
+{
+    UINT rc = ERROR_SUCCESS;
+
+    if (!(info->type & msidbCustomActionTypeAsync))
+    {
+        TRACE("waiting for %s\n", debugstr_w( info->action ));
+
+        msi_dialog_check_messages( info->handle );
+
+        if (!(info->type & msidbCustomActionTypeContinue))
+            rc = custom_get_thread_return( info->package, info->handle );
+
+        release_custom_action_data( info );
+    }
     else
     {
-        TRACE("Asynchronous Execution of action %s\n",debugstr_w(Name));
-        /* asynchronous */
-        if (!(type & msidbCustomActionTypeContinue))
-        {
-            if (ProcessHandle)
-            {
-                file_running_action(package, ProcessHandle, TRUE, Name);
-                CloseHandle(ThreadHandle);
-            }
-            else
-                file_running_action(package, ThreadHandle, FALSE, Name);
-        }
-        else
-        {
-            CloseHandle(ThreadHandle);
-            if (ProcessHandle)
-                CloseHandle(ProcessHandle);
-        }
+        TRACE("%s running in background\n", debugstr_w( info->action ));
     }
 
     return rc;
 }
 
-
-typedef UINT __stdcall CustomEntry(MSIHANDLE);
-
-typedef struct 
+static msi_custom_action_info *find_action_by_guid( const GUID *guid )
 {
-        MSIPACKAGE *package;
-        WCHAR *target;
-        WCHAR *source;
-} thread_struct;
+    msi_custom_action_info *info;
+    BOOL found = FALSE;
 
-static DWORD WINAPI ACTION_CallDllFunction(thread_struct *stuff)
+    EnterCriticalSection( &msi_custom_action_cs );
+
+    LIST_FOR_EACH_ENTRY( info, &msi_pending_custom_actions, msi_custom_action_info, entry )
+    {
+        if (IsEqualGUID( &info->guid, guid ))
+        {
+            addref_custom_action_data( info );
+            found = TRUE;
+            break;
+        }
+    }
+
+    LeaveCriticalSection( &msi_custom_action_cs );
+
+    if (!found)
+        return NULL;
+
+    return info;
+}
+
+static void handle_msi_break( LPCWSTR target )
 {
+    LPWSTR msg;
+    WCHAR val[MAX_PATH];
+
+    static const WCHAR MsiBreak[] = { 'M','s','i','B','r','e','a','k',0 };
+    static const WCHAR WindowsInstaller[] = {
+        'W','i','n','d','o','w','s',' ','I','n','s','t','a','l','l','e','r',0
+    };
+
+    static const WCHAR format[] = {
+        'T','o',' ','d','e','b','u','g',' ','y','o','u','r',' ',
+        'c','u','s','t','o','m',' ','a','c','t','i','o','n',',',' ',
+        'a','t','t','a','c','h',' ','y','o','u','r',' ','d','e','b','u','g','g','e','r',' ',
+        't','o',' ','p','r','o','c','e','s','s',' ','%','i',' ','(','0','x','%','X',')',' ',
+        'a','n','d',' ','p','r','e','s','s',' ','O','K',0
+    };
+
+    if( !GetEnvironmentVariableW( MsiBreak, val, MAX_PATH ))
+        return;
+
+    if( lstrcmpiW( val, target ))
+        return;
+
+    msg = msi_alloc( (lstrlenW(format) + 10) * sizeof(WCHAR) );
+    if (!msg)
+        return;
+
+    wsprintfW( msg, format, GetCurrentProcessId(), GetCurrentProcessId());
+    MessageBoxW( NULL, msg, WindowsInstaller, MB_OK);
+    msi_free(msg);
+    DebugBreak();
+}
+
+static DWORD WINAPI ACTION_CallDllFunction( const GUID *guid )
+{
+    msi_custom_action_info *info;
+    MsiCustomActionEntryPoint fn;
+    MSIHANDLE hPackage;
     HANDLE hModule;
     LPSTR proc;
-    CustomEntry *fn;
-    DWORD rc = ERROR_SUCCESS;
+    UINT r = ERROR_FUNCTION_FAILED;
 
-    TRACE("calling function (%s, %s)\n", debugstr_w(stuff->source),
-          debugstr_w(stuff->target));
-
-    hModule = LoadLibraryW(stuff->source);
-    if (hModule)
+    info = find_action_by_guid( guid );
+    if (!info)
     {
-        proc = strdupWtoA( stuff->target );
-        fn = (CustomEntry*)GetProcAddress(hModule,proc);
-        if (fn)
-        {
-            MSIHANDLE hPackage;
-            MSIPACKAGE *package = stuff->package;
+        ERR("failed to find action %s\n", debugstr_guid( guid) );
+        return r;
+    }
 
-            TRACE("Calling function %s\n", proc);
-            hPackage = alloc_msihandle( &package->hdr );
-            if (hPackage)
+    TRACE("%s %s\n", debugstr_w( info->source ), debugstr_w( info->target ) );
+
+    hModule = LoadLibraryW( info->source );
+    if (!hModule)
+    {
+        ERR("failed to load dll %s\n", debugstr_w( info->source ) );
+        return r;
+    }
+
+    proc = strdupWtoA( info->target );
+    fn = (MsiCustomActionEntryPoint) GetProcAddress( hModule, proc );
+    msi_free( proc );
+    if (fn)
+    {
+        hPackage = alloc_msihandle( &info->package->hdr );
+        if (hPackage)
+        {
+            TRACE("calling %s\n", debugstr_w( info->target ) );
+            handle_msi_break( info->target );
+
+            __TRY
             {
-                rc = fn( hPackage );
-                MsiCloseHandle( hPackage );
+                r = fn( hPackage );
             }
-            else
-                ERR("Handle for object %p not found\n", package );
+            __EXCEPT_PAGE_FAULT
+            {
+                ERR("Custom action (%s:%s) caused a page fault: %08x\n",
+                    debugstr_w(info->source), debugstr_w(info->target), GetExceptionCode());
+                r = ERROR_SUCCESS;
+            }
+            __ENDTRY;
+
+            MsiCloseHandle( hPackage );
         }
         else
-            ERR("failed to resolve functon %s\n", debugstr_a(proc));
-
-        msi_free(proc);
-        FreeLibrary(hModule);
+            ERR("failed to create handle for %p\n", info->package );
     }
     else
-        ERR("failed to load dll %s\n", debugstr_w(stuff->source));
-    msiobj_release( &stuff->package->hdr );
-    msi_free(stuff->source);
-    msi_free(stuff->target);
-    msi_free(stuff);
-    return rc;
+        ERR("GetProcAddress(%s) failed\n", debugstr_w( info->target ) );
+
+    FreeLibrary(hModule);
+
+    if (info->type & msidbCustomActionTypeAsync &&
+        info->type & msidbCustomActionTypeContinue)
+        release_custom_action_data( info );
+
+    return r;
 }
 
-static DWORD WINAPI DllThread(LPVOID info)
+static DWORD WINAPI DllThread( LPVOID arg )
 {
-    thread_struct *stuff;
+    LPGUID guid = arg;
     DWORD rc = 0;
 
-    TRACE("MSI Thread (%x) started for custom action\n", GetCurrentThreadId());
+    TRACE("custom action (%x) started\n", GetCurrentThreadId() );
 
-    stuff = (thread_struct*)info;
-    rc = ACTION_CallDllFunction(stuff);
+    rc = ACTION_CallDllFunction( guid );
 
-    TRACE("MSI Thread (%x) finished (rc %i)\n",GetCurrentThreadId(), rc);
-    /* close all handles for this thread */
+    TRACE("custom action (%x) returned %i\n", GetCurrentThreadId(), rc );
+
     MsiCloseAllHandles();
     return rc;
 }
 
-static HANDLE do_msidbCustomActionTypeDll(MSIPACKAGE *package, LPCWSTR dll, LPCWSTR target)
+static DWORD WINAPI ACTION_CAInstallPackage(const GUID *guid)
 {
-    thread_struct *info;
+    msi_custom_action_info *info;
+    UINT r = ERROR_FUNCTION_FAILED;
+    INSTALLUILEVEL old_level;
 
-    info = msi_alloc( sizeof(*info) );
-    msiobj_addref( &package->hdr );
-    info->package = package;
-    info->target = strdupW(target);
-    info->source = strdupW(dll);
+    info = find_action_by_guid(guid);
+    if (!info)
+    {
+        ERR("failed to find action %s\n", debugstr_guid(guid));
+        return r;
+    }
 
-    return CreateThread(NULL, 0, DllThread, info, 0, NULL);
+    old_level = MsiSetInternalUI(INSTALLUILEVEL_BASIC, NULL);
+    r = MsiInstallProductW(info->source, info->target);
+    MsiSetInternalUI(old_level, NULL);
+
+    release_custom_action_data(info);
+
+    return r;
 }
 
-static UINT HANDLE_CustomType1(MSIPACKAGE *package, LPCWSTR source, 
+static DWORD WINAPI ConcurrentInstallThread(LPVOID arg)
+{
+    LPGUID guid = arg;
+    DWORD rc;
+
+    TRACE("concurrent installation (%x) started\n", GetCurrentThreadId());
+
+    rc = ACTION_CAInstallPackage(guid);
+
+    TRACE("concurrent installation (%x) returned %i\n", GetCurrentThreadId(), rc);
+
+    MsiCloseAllHandles();
+    return rc;
+}
+
+static msi_custom_action_info *do_msidbCustomActionTypeDll(
+    MSIPACKAGE *package, INT type, LPCWSTR source, LPCWSTR target, LPCWSTR action )
+{
+    msi_custom_action_info *info;
+
+    info = msi_alloc( sizeof *info );
+    if (!info)
+        return NULL;
+
+    msiobj_addref( &package->hdr );
+    info->refs = 2; /* 1 for our caller and 1 for thread we created */
+    info->package = package;
+    info->type = type;
+    info->target = strdupW( target );
+    info->source = strdupW( source );
+    info->action = strdupW( action );
+    CoCreateGuid( &info->guid );
+
+    EnterCriticalSection( &msi_custom_action_cs );
+    list_add_tail( &msi_pending_custom_actions, &info->entry );
+    LeaveCriticalSection( &msi_custom_action_cs );
+
+    info->handle = CreateThread( NULL, 0, DllThread, &info->guid, 0, NULL );
+    if (!info->handle)
+    {
+        /* release both references */
+        release_custom_action_data( info );
+        release_custom_action_data( info );
+        return NULL;
+    }
+
+    return info;
+}
+
+static msi_custom_action_info *do_msidbCAConcurrentInstall(
+    MSIPACKAGE *package, INT type, LPCWSTR source, LPCWSTR target, LPCWSTR action)
+{
+    msi_custom_action_info *info;
+
+    info = msi_alloc( sizeof *info );
+    if (!info)
+        return NULL;
+
+    msiobj_addref( &package->hdr );
+    info->refs = 2; /* 1 for our caller and 1 for thread we created */
+    info->package = package;
+    info->type = type;
+    info->target = strdupW( target );
+    info->source = strdupW( source );
+    info->action = strdupW( action );
+    CoCreateGuid( &info->guid );
+
+    EnterCriticalSection( &msi_custom_action_cs );
+    list_add_tail( &msi_pending_custom_actions, &info->entry );
+    LeaveCriticalSection( &msi_custom_action_cs );
+
+    info->handle = CreateThread( NULL, 0, ConcurrentInstallThread, &info->guid, 0, NULL );
+    if (!info->handle)
+    {
+        /* release both references */
+        release_custom_action_data( info );
+        release_custom_action_data( info );
+        return NULL;
+    }
+
+    return info;
+}
+
+static UINT HANDLE_CustomType23(MSIPACKAGE *package, LPCWSTR source,
+                                LPCWSTR target, const INT type, LPCWSTR action)
+{
+    msi_custom_action_info *info;
+    WCHAR package_path[MAX_PATH];
+    DWORD size;
+
+    static const WCHAR backslash[] = {'\\',0};
+
+    MSI_GetPropertyW(package, cszSourceDir, package_path, &size);
+    lstrcatW(package_path, backslash);
+    lstrcatW(package_path, source);
+
+    if (GetFileAttributesW(package_path) == INVALID_FILE_ATTRIBUTES)
+    {
+        ERR("Source package does not exist: %s\n", debugstr_w(package_path));
+        return ERROR_FUNCTION_FAILED;
+    }
+
+    TRACE("Installing package %s concurrently\n", debugstr_w(package_path));
+
+    info = do_msidbCAConcurrentInstall(package, type, package_path, target, action);
+
+    return wait_thread_handle(info);
+}
+
+static UINT HANDLE_CustomType1(MSIPACKAGE *package, LPCWSTR source,
                                LPCWSTR target, const INT type, LPCWSTR action)
 {
+    msi_custom_action_info *info;
     WCHAR tmp_file[MAX_PATH];
-    UINT r = ERROR_SUCCESS;
-    HANDLE ThreadHandle;
+    UINT r;
 
     r = store_binary_to_temp(package, source, tmp_file);
     if (r != ERROR_SUCCESS)
@@ -523,14 +841,12 @@ static UINT HANDLE_CustomType1(MSIPACKAGE *package, LPCWSTR source,
         strcatW(tmp_file,dot);
     }
 
-    ThreadHandle = do_msidbCustomActionTypeDll( package, tmp_file, target );
+    info = do_msidbCustomActionTypeDll( package, type, tmp_file, target, action );
 
-    r = process_handle(package, type, ThreadHandle, NULL, action);
-
-    return r;
+    return wait_thread_handle( info );
 }
 
-static UINT HANDLE_CustomType2(MSIPACKAGE *package, LPCWSTR source, 
+static UINT HANDLE_CustomType2(MSIPACKAGE *package, LPCWSTR source,
                                LPCWSTR target, const INT type, LPCWSTR action)
 {
     WCHAR tmp_file[MAX_PATH];
@@ -541,7 +857,7 @@ static UINT HANDLE_CustomType2(MSIPACKAGE *package, LPCWSTR source,
     WCHAR *deformated = NULL;
     WCHAR *cmd;
     static const WCHAR spc[] = {' ',0};
-    UINT r = ERROR_SUCCESS;
+    UINT r;
 
     memset(&si,0,sizeof(STARTUPINFOW));
 
@@ -578,8 +894,9 @@ static UINT HANDLE_CustomType2(MSIPACKAGE *package, LPCWSTR source,
         ERR("Unable to execute command %s\n", debugstr_w(cmd));
         return ERROR_SUCCESS;
     }
+    CloseHandle( info.hThread );
 
-    r = process_handle(package, type, info.hThread, info.hProcess, action);
+    r = wait_process_handle(package, type, info.hProcess, action);
 
     return r;
 }
@@ -587,7 +904,7 @@ static UINT HANDLE_CustomType2(MSIPACKAGE *package, LPCWSTR source,
 static UINT HANDLE_CustomType17(MSIPACKAGE *package, LPCWSTR source,
                                 LPCWSTR target, const INT type, LPCWSTR action)
 {
-    HANDLE hThread;
+    msi_custom_action_info *info;
     MSIFILE *file;
 
     TRACE("%s %s\n", debugstr_w(source), debugstr_w(target));
@@ -599,9 +916,9 @@ static UINT HANDLE_CustomType17(MSIPACKAGE *package, LPCWSTR source,
         return ERROR_FUNCTION_FAILED;
     }
 
-    hThread = do_msidbCustomActionTypeDll( package, file->TargetPath, target );
+    info = do_msidbCustomActionTypeDll( package, type, file->TargetPath, target, action );
 
-    return process_handle(package, type, hThread, NULL, action);
+    return wait_thread_handle( info );
 }
 
 static UINT HANDLE_CustomType18(MSIPACKAGE *package, LPCWSTR source,
@@ -615,7 +932,6 @@ static UINT HANDLE_CustomType18(MSIPACKAGE *package, LPCWSTR source,
     INT len;
     static const WCHAR spc[] = {' ',0};
     MSIFILE *file;
-    UINT prc;
 
     memset(&si,0,sizeof(STARTUPINFOW));
 
@@ -646,7 +962,6 @@ static UINT HANDLE_CustomType18(MSIPACKAGE *package, LPCWSTR source,
     rc = CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL,
                   c_collen, &si, &info);
 
-    
     if ( !rc )
     {
         ERR("Unable to execute command %s\n", debugstr_w(cmd));
@@ -654,10 +969,9 @@ static UINT HANDLE_CustomType18(MSIPACKAGE *package, LPCWSTR source,
         return ERROR_SUCCESS;
     }
     msi_free(cmd);
+    CloseHandle( info.hThread );
 
-    prc = process_handle(package, type, info.hThread, info.hProcess, action);
-
-    return prc;
+    return wait_process_handle(package, type, info.hProcess, action);
 }
 
 static UINT HANDLE_CustomType19(MSIPACKAGE *package, LPCWSTR source,
@@ -731,7 +1045,6 @@ static UINT HANDLE_CustomType50(MSIPACKAGE *package, LPCWSTR source,
     rc = CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL,
                   c_collen, &si, &info);
 
-    
     if ( !rc )
     {
         ERR("Unable to execute command %s\n", debugstr_w(cmd));
@@ -740,7 +1053,9 @@ static UINT HANDLE_CustomType50(MSIPACKAGE *package, LPCWSTR source,
     }
     msi_free(cmd);
 
-    return process_handle(package, type, info.hThread, info.hProcess, action);
+    CloseHandle( info.hThread );
+
+    return wait_process_handle(package, type, info.hProcess, action);
 }
 
 static UINT HANDLE_CustomType34(MSIPACKAGE *package, LPCWSTR source,
@@ -750,11 +1065,10 @@ static UINT HANDLE_CustomType34(MSIPACKAGE *package, LPCWSTR source,
     STARTUPINFOW si;
     PROCESS_INFORMATION info;
     BOOL rc;
-    UINT prc;
 
     memset(&si,0,sizeof(STARTUPINFOW));
 
-    filename = resolve_folder(package, source, FALSE, FALSE, NULL);
+    filename = resolve_folder(package, source, FALSE, FALSE, TRUE, NULL);
 
     if (!filename)
         return ERROR_FUNCTION_FAILED;
@@ -779,39 +1093,276 @@ static UINT HANDLE_CustomType34(MSIPACKAGE *package, LPCWSTR source,
         return ERROR_SUCCESS;
     }
     msi_free(deformated);
+    CloseHandle( info.hThread );
 
-    prc = process_handle(package, type, info.hThread, info.hProcess, action);
-
-    return prc;
+    return wait_process_handle(package, type, info.hProcess, action);
 }
 
-
-void ACTION_FinishCustomActions(MSIPACKAGE* package)
+static DWORD WINAPI ACTION_CallScript( const GUID *guid )
 {
-    struct list *item, *cursor;
-    DWORD rc;
+    msi_custom_action_info *info;
+    MSIHANDLE hPackage;
+    UINT r = ERROR_FUNCTION_FAILED;
 
-    LIST_FOR_EACH_SAFE( item, cursor, &package->RunningActions )
+    info = find_action_by_guid( guid );
+    if (!info)
+    {
+        ERR("failed to find action %s\n", debugstr_guid( guid) );
+        return r;
+    }
+
+    TRACE("function %s, script %s\n", debugstr_w( info->target ), debugstr_w( info->source ) );
+
+    hPackage = alloc_msihandle( &info->package->hdr );
+    if (hPackage)
+    {
+        r = call_script( hPackage, info->type, info->source, info->target, info->action );
+        MsiCloseHandle( hPackage );
+    }
+    else
+        ERR("failed to create handle for %p\n", info->package );
+
+    if (info->type & msidbCustomActionTypeAsync &&
+        info->type & msidbCustomActionTypeContinue)
+        release_custom_action_data( info );
+
+    return S_OK;
+}
+
+static DWORD WINAPI ScriptThread( LPVOID arg )
+{
+    LPGUID guid = arg;
+    DWORD rc = 0;
+
+    TRACE("custom action (%x) started\n", GetCurrentThreadId() );
+
+    rc = ACTION_CallScript( guid );
+
+    TRACE("custom action (%x) returned %i\n", GetCurrentThreadId(), rc );
+
+    MsiCloseAllHandles();
+    return rc;
+}
+
+static msi_custom_action_info *do_msidbCustomActionTypeScript(
+    MSIPACKAGE *package, INT type, LPCWSTR script, LPCWSTR function, LPCWSTR action )
+{
+    msi_custom_action_info *info;
+
+    info = msi_alloc( sizeof *info );
+    if (!info)
+        return NULL;
+
+    msiobj_addref( &package->hdr );
+    info->refs = 2; /* 1 for our caller and 1 for thread we created */
+    info->package = package;
+    info->type = type;
+    info->target = strdupW( function );
+    info->source = strdupW( script );
+    info->action = strdupW( action );
+    CoCreateGuid( &info->guid );
+
+    EnterCriticalSection( &msi_custom_action_cs );
+    list_add_tail( &msi_pending_custom_actions, &info->entry );
+    LeaveCriticalSection( &msi_custom_action_cs );
+
+    info->handle = CreateThread( NULL, 0, ScriptThread, &info->guid, 0, NULL );
+    if (!info->handle)
+    {
+        /* release both references */
+        release_custom_action_data( info );
+        release_custom_action_data( info );
+        return NULL;
+    }
+
+    return info;
+}
+
+static UINT HANDLE_CustomType37_38(MSIPACKAGE *package, LPCWSTR source,
+                               LPCWSTR target, const INT type, LPCWSTR action)
+{
+    msi_custom_action_info *info;
+
+    TRACE("%s %s\n", debugstr_w(source), debugstr_w(target));
+
+    info = do_msidbCustomActionTypeScript( package, type, target, NULL, action );
+
+    return wait_thread_handle( info );
+}
+
+static UINT HANDLE_CustomType5_6(MSIPACKAGE *package, LPCWSTR source,
+                               LPCWSTR target, const INT type, LPCWSTR action)
+{
+    static const WCHAR query[] = {
+        'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
+        '`','B','i' ,'n','a','r','y','`',' ','W','H','E','R','E',' ',
+        '`','N','a','m','e','`',' ','=',' ','\'','%','s','\'',0};
+    MSIRECORD *row = 0;
+    msi_custom_action_info *info;
+    CHAR *buffer = NULL;
+    WCHAR *bufferw = NULL;
+    DWORD sz = 0;
+    UINT r;
+
+    TRACE("%s %s\n", debugstr_w(source), debugstr_w(target));
+
+    row = MSI_QueryGetRecord(package->db, query, source);
+    if (!row)
+        return ERROR_FUNCTION_FAILED;
+
+    r = MSI_RecordReadStream(row, 2, NULL, &sz);
+    if (r != ERROR_SUCCESS)
+	return r;
+
+    buffer = msi_alloc(sizeof(CHAR)*(sz+1));
+    if (!buffer)
+	return ERROR_FUNCTION_FAILED;
+
+    r = MSI_RecordReadStream(row, 2, buffer, &sz);
+    if (r != ERROR_SUCCESS)
+        goto done;
+
+    buffer[sz] = 0;
+    bufferw = strdupAtoW(buffer);
+    if (!bufferw)
+    {
+        r = ERROR_FUNCTION_FAILED;
+        goto done;
+    }
+
+    info = do_msidbCustomActionTypeScript( package, type, bufferw, target, action );
+    r = wait_thread_handle( info );
+
+done:
+    msi_free(bufferw);
+    msi_free(buffer);
+    return r;
+}
+
+static UINT HANDLE_CustomType21_22(MSIPACKAGE *package, LPCWSTR source,
+                               LPCWSTR target, const INT type, LPCWSTR action)
+{
+    msi_custom_action_info *info;
+    MSIFILE *file;
+    HANDLE hFile;
+    DWORD sz, szHighWord = 0, read;
+    CHAR *buffer=NULL;
+    WCHAR *bufferw=NULL;
+    BOOL bRet;
+    UINT r;
+
+    TRACE("%s %s\n", debugstr_w(source), debugstr_w(target));
+
+    file = get_loaded_file(package,source);
+    if (!file)
+    {
+	ERR("invalid file key %s\n", debugstr_w(source));
+	return ERROR_FUNCTION_FAILED;
+    }
+
+    hFile = CreateFileW(file->TargetPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (hFile == INVALID_HANDLE_VALUE)
+	return ERROR_FUNCTION_FAILED;
+
+    sz = GetFileSize(hFile, &szHighWord);
+    if (sz == INVALID_FILE_SIZE || szHighWord != 0)
+    {
+	CloseHandle(hFile);
+	return ERROR_FUNCTION_FAILED;
+    }
+
+    buffer = msi_alloc(sizeof(CHAR)*(sz+1));
+    if (!buffer)
+    {
+	CloseHandle(hFile);
+	return ERROR_FUNCTION_FAILED;
+    }
+
+    bRet = ReadFile(hFile, buffer, sz, &read, NULL);
+    CloseHandle(hFile);
+    if (!bRet)
+    {
+	r = ERROR_FUNCTION_FAILED;
+        goto done;
+    }
+
+    buffer[read] = 0;
+    bufferw = strdupAtoW(buffer);
+    if (!bufferw)
+    {
+        r = ERROR_FUNCTION_FAILED;
+        goto done;
+    }
+
+    info = do_msidbCustomActionTypeScript( package, type, bufferw, target, action );
+    r = wait_thread_handle( info );
+
+done:
+    msi_free(bufferw);
+    msi_free(buffer);
+    return r;
+}
+
+static UINT HANDLE_CustomType53_54(MSIPACKAGE *package, LPCWSTR source,
+                               LPCWSTR target, const INT type, LPCWSTR action)
+{
+    msi_custom_action_info *info;
+    WCHAR *prop;
+
+    TRACE("%s %s\n", debugstr_w(source), debugstr_w(target));
+
+    prop = msi_dup_property(package,source);
+    if (!prop)
+	return ERROR_SUCCESS;
+
+    info = do_msidbCustomActionTypeScript( package, type, prop, NULL, action );
+    msi_free(prop);
+    return wait_thread_handle( info );
+}
+
+void ACTION_FinishCustomActions(const MSIPACKAGE* package)
+{
+    struct list *item;
+    HANDLE *wait_handles;
+    unsigned int handle_count, i;
+    msi_custom_action_info *info, *cursor;
+
+    while ((item = list_head( &package->RunningActions )))
     {
         MSIRUNNINGACTION *action = LIST_ENTRY( item, MSIRUNNINGACTION, entry );
 
-        TRACE("Checking on action %s\n", debugstr_w(action->name));
-
         list_remove( &action->entry );
 
-        if (action->process)
-            GetExitCodeProcess( action->handle, &rc );
-        else
-            GetExitCodeThread( action->handle, &rc );
-
-        if (rc == STILL_ACTIVE)
-        {
-            TRACE("Waiting on action %s\n", debugstr_w( action->name) );
-            msi_dialog_check_messages( action->handle );
-        }
+        TRACE("waiting for %s\n", debugstr_w( action->name ) );
+        msi_dialog_check_messages( action->handle );
 
         CloseHandle( action->handle );
         msi_free( action->name );
         msi_free( action );
     }
+
+    EnterCriticalSection( &msi_custom_action_cs );
+
+    handle_count = list_count( &msi_pending_custom_actions );
+    wait_handles = HeapAlloc( GetProcessHeap(), 0, handle_count * sizeof(HANDLE) );
+
+    handle_count = 0;
+    LIST_FOR_EACH_ENTRY_SAFE( info, cursor, &msi_pending_custom_actions, msi_custom_action_info, entry )
+    {
+        if (info->package == package )
+        {
+            if (DuplicateHandle(GetCurrentProcess(), info->handle, GetCurrentProcess(), &wait_handles[handle_count], SYNCHRONIZE, FALSE, 0))
+                handle_count++;
+        }
+    }
+
+    LeaveCriticalSection( &msi_custom_action_cs );
+
+    for (i = 0; i < handle_count; i++)
+    {
+        msi_dialog_check_messages( wait_handles[i] );
+        CloseHandle( wait_handles[i] );
+    }
+
+    HeapFree( GetProcessHeap(), 0, wait_handles );
 }

@@ -208,7 +208,7 @@
 @ stub GetSetFileTimestamp
 @ stub GetVersionInfoFromImage
 @ stub InfIsFromOemLocation
-@ stub InstallCatalog
+@ stdcall InstallCatalog(str str ptr)
 @ stdcall InstallHinfSection(long long str long) InstallHinfSectionA
 @ stdcall InstallHinfSectionA(long long str long)
 @ stdcall InstallHinfSectionW(long long wstr long)
@@ -257,8 +257,8 @@
 @ stdcall SetupCopyOEMInfW(wstr wstr long long ptr long ptr ptr)
 @ stdcall SetupCreateDiskSpaceListA(ptr long long)
 @ stdcall SetupCreateDiskSpaceListW(ptr long long)
-@ stub SetupDecompressOrCopyFileA
-@ stub SetupDecompressOrCopyFileW
+@ stdcall SetupDecompressOrCopyFileA(str str ptr)
+@ stdcall SetupDecompressOrCopyFileW(wstr wstr ptr)
 @ stub SetupDefaultQueueCallback
 @ stdcall SetupDefaultQueueCallbackA(ptr long long long)
 @ stdcall SetupDefaultQueueCallbackW(ptr long long long)
@@ -342,8 +342,8 @@
 @ stub SetupDiGetHwProfileList
 @ stub SetupDiGetHwProfileListExA
 @ stub SetupDiGetHwProfileListExW
-@ stub SetupDiGetINFClassA
-@ stub SetupDiGetINFClassW
+@ stdcall SetupDiGetINFClassA(str ptr ptr long ptr)
+@ stdcall SetupDiGetINFClassW(wstr ptr ptr long ptr)
 @ stub SetupDiGetSelectedDevice
 @ stub SetupDiGetSelectedDriverA
 @ stub SetupDiGetSelectedDriverW
@@ -395,8 +395,10 @@
 @ stub SetupGetBackupInformationW
 @ stdcall SetupGetBinaryField(ptr long ptr long ptr)
 @ stdcall SetupGetFieldCount(ptr)
-@ stub SetupGetFileCompressionInfoA
-@ stub SetupGetFileCompressionInfoW
+@ stdcall SetupGetFileCompressionInfoA(str ptr ptr ptr ptr)
+@ stdcall SetupGetFileCompressionInfoExA(str ptr long ptr ptr ptr ptr)
+@ stdcall SetupGetFileCompressionInfoExW(wstr ptr long ptr ptr ptr ptr)
+@ stdcall SetupGetFileCompressionInfoW(wstr ptr ptr ptr ptr)
 @ stdcall SetupGetFileQueueCount(long long ptr)
 @ stdcall SetupGetFileQueueFlags(long ptr)
 @ stub SetupGetInfFileListA
@@ -461,8 +463,8 @@
 @ stub SetupQueryFileLogW
 @ stdcall SetupQueryInfFileInformationA(ptr long str long ptr)
 @ stdcall SetupQueryInfFileInformationW(ptr long wstr long ptr)
-@ stub SetupQueryInfOriginalFileInformationA
-@ stub SetupQueryInfOriginalFileInformationW
+@ stdcall SetupQueryInfOriginalFileInformationA(ptr long ptr ptr)
+@ stdcall SetupQueryInfOriginalFileInformationW(ptr long ptr ptr)
 @ stub SetupQueryInfVersionInformationA
 @ stub SetupQueryInfVersionInformationW
 @ stub SetupQuerySourceListA
@@ -509,8 +511,8 @@
 @ stdcall SetupSetFileQueueFlags(long long long)
 @ stub SetupSetPlatformPathOverrideA
 @ stub SetupSetPlatformPathOverrideW
-@ stub SetupSetSourceListA
-@ stub SetupSetSourceListW
+@ stdcall SetupSetSourceListA(long ptr long)
+@ stdcall SetupSetSourceListW(long ptr long)
 @ stdcall SetupTermDefaultQueueCallback(ptr)
 @ stdcall SetupTerminateFileLog(long)
 @ stub ShouldDeviceBeExcluded
@@ -543,13 +545,13 @@
 @ stdcall pSetupGetField(ptr long)
 @ stdcall pSetupGetGlobalFlags()
 @ stub pSetupGetOsLoaderDriveAndPath
-@ stub pSetupGetQueueFlags
+@ stdcall pSetupGetQueueFlags(ptr)
 @ stub pSetupGetVersionDatum
 @ stub pSetupGuidFromString
 @ stub pSetupIsGuidNull
 @ stub pSetupMakeSurePathExists
 @ stdcall pSetupSetGlobalFlags(long)
-@ stub pSetupSetQueueFlags
+@ stdcall pSetupSetQueueFlags(ptr long)
 @ stub pSetupSetSystemSourceFlags
 @ stub pSetupStringFromGuid
 @ stdcall pSetupStringTableAddString(ptr wstr long) StringTableAddString

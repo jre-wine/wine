@@ -37,7 +37,6 @@
 #include "wingdi.h"
 #include "wine/winuser16.h"
 #include "wine/unicode.h"
-#include "winerror.h"
 #include "winnls.h"
 #include "controls.h"
 #include "user_private.h"
@@ -1030,6 +1029,7 @@ INT WINAPI DrawTextExA( HDC hdc, LPSTR str, INT count,
    DWORD wcount;
    DWORD wmax;
    DWORD amax;
+   UINT cp;
 
    if (!count) return 0;
    if( !str || ((count == -1) && !(count = strlen(str))))
@@ -1041,7 +1041,8 @@ INT WINAPI DrawTextExA( HDC hdc, LPSTR str, INT count,
         }
         return 0;
    }
-   wcount = MultiByteToWideChar( CP_ACP, 0, str, count, NULL, 0 );
+   cp = GdiGetCodePage( hdc );
+   wcount = MultiByteToWideChar( cp, 0, str, count, NULL, 0 );
    wmax = wcount;
    amax = count;
    if (flags & DT_MODIFYSTRING)
@@ -1052,7 +1053,7 @@ INT WINAPI DrawTextExA( HDC hdc, LPSTR str, INT count,
    wstr = HeapAlloc(GetProcessHeap(), 0, wmax * sizeof(WCHAR));
    if (wstr)
    {
-       MultiByteToWideChar( CP_ACP, 0, str, count, wstr, wcount );
+       MultiByteToWideChar( cp, 0, str, count, wstr, wcount );
        if (flags & DT_MODIFYSTRING)
            for (i=4, p=wstr+wcount; i--; p++) *p=0xFFFE;
            /* Initialise the extra characters so that we can see which ones
@@ -1066,7 +1067,7 @@ INT WINAPI DrawTextExA( HDC hdc, LPSTR str, INT count,
              * and so we need to measure it ourselves.
              */
             for (i=4, p=wstr+wcount; i-- && *p != 0xFFFE; p++) wcount++;
-            WideCharToMultiByte( CP_ACP, 0, wstr, wcount, str, amax, NULL, NULL );
+            WideCharToMultiByte( cp, 0, wstr, wcount, str, amax, NULL, NULL );
        }
        HeapFree(GetProcessHeap(), 0, wstr);
    }
@@ -1246,8 +1247,8 @@ static LONG TEXT_TabbedTextOut( HDC hdc, INT x, INT y, LPCWSTR lpstr,
     }
     else
     {
-        TEXTMETRICA tm;
-        GetTextMetricsA( hdc, &tm );
+        TEXTMETRICW tm;
+        GetTextMetricsW( hdc, &tm );
         defWidth = 8 * tm.tmAveCharWidth;
     }
 
@@ -1268,12 +1269,13 @@ static LONG TEXT_TabbedTextOut( HDC hdc, INT x, INT y, LPCWSTR lpstr,
         /* and if there is a <tab>, calculate its position */
         if( i) {
             /* get x coordinate for the drawing of this string */
-            for (; cTabStops > i; lpTabPos++, cTabStops--)
+            for (; cTabStops >= i; lpTabPos++, cTabStops--)
             {
                 if( nTabOrg + abs( *lpTabPos) > x) {
                     if( lpTabPos[ i - 1] >= 0) {
                         /* a left aligned tab */
-                        x = nTabOrg + lpTabPos[ i-1] + extent.cx;
+                        x0 = nTabOrg + lpTabPos[i-1];
+                        x = x0 + extent.cx;
                         break;
                     }
                     else
@@ -1292,10 +1294,10 @@ static LONG TEXT_TabbedTextOut( HDC hdc, INT x, INT y, LPCWSTR lpstr,
             }
             /* if we have run out of tab stops and we have a valid default tab
              * stop width then round x up to that width */
-            if ((cTabStops <= i) && (defWidth > 0)) {
+            if ((cTabStops < i) && (defWidth > 0)) {
                 x0 = nTabOrg + ((x - nTabOrg) / defWidth + i) * defWidth;
                 x = x0 + extent.cx;
-            } else if ((cTabStops <= i) && (defWidth < 0)) {
+            } else if ((cTabStops < i) && (defWidth < 0)) {
                 x = nTabOrg + ((x - nTabOrg + extent.cx) / -defWidth + i)
                     * -defWidth;
                 x0 = x - extent.cx;

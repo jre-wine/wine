@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 0211/0-1301, USA
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
 #include "config.h"
@@ -266,14 +266,14 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
         while (imp < (const PDB_SYMBOL_IMPORT*)last)
         {
             ptr = (const char*)imp + sizeof(*imp) + strlen(imp->filename);
-            printf("\tImport: %x\n"
+            printf("\tImport: %lx\n"
                    "\t\tUnknown1:      %08x\n"
                    "\t\tUnknown2:      %08x\n"
                    "\t\tTimeDateStamp: %08x\n"
                    "\t\tAge:           %08u\n"
                    "\t\tfile1:         %s\n"
                    "\t\tfile2:         %s\n",
-                   (const char*)imp - (const char*)first,
+                   (ULONG_PTR)((const char*)imp - (const char*)first),
                    imp->unknown1,
                    imp->unknown2,
                    imp->TimeDateStamp,
@@ -404,7 +404,7 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
         }
 
         file_name += strlen(file_name) + 1;
-        file = (char*)((DWORD)(file_name + strlen(file_name) + 1 + 3) & ~3);
+        file = (char*)((DWORD_PTR)(file_name + strlen(file_name) + 1 + 3) & ~3);
     }
     free((char*)symbols);
 }
@@ -625,7 +625,6 @@ static void pdb_ds_dump(void)
     if (root)
     {
         const char*     ptr;
-        char            guid_str[40];
 
         printf("Root:\n"
                "\tVersion:              %u\n"
@@ -636,7 +635,7 @@ static void pdb_ds_dump(void)
                root->Version,
                root->TimeDateStamp,
                root->Age,
-               guid_to_string(&root->guid, guid_str, sizeof(guid_str)),
+               get_guid_str(&root->guid),
                root->cbNames);
         for (ptr = &root->names[0]; ptr < &root->names[0] + root->cbNames; ptr += strlen(ptr) + 1)
             printf("\tString:               %s\n", ptr);

@@ -25,10 +25,7 @@
 #include "winbase.h"
 #include "wincrypt.h"
 #include "winreg.h"
-#include "winnls.h"
-#include "mssip.h"
 #include "winuser.h"
-#include "advpub.h"
 #include "crypt32_private.h"
 #include "wine/debug.h"
 
@@ -238,5 +235,7 @@ BOOL WINAPI CryptVerifyMessageSignature(PCRYPT_VERIFY_MESSAGE_PARA pVerifyPara,
     FIXME("stub: %p, %d, %p, %d, %p, %p, %p\n",
         pVerifyPara, dwSignerIndex, pbSignedBlob, cbSignedBlob,
         pbDecoded, pcbDecoded, ppSignerCert);
+    if (ppSignerCert)
+        *ppSignerCert = NULL;
     return FALSE;
 }

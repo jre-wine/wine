@@ -1,5 +1,5 @@
 /*
- * Copyright 2006 Jacek Caban for CodeWeavers
+ * Copyright 2006-2007 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -28,6 +28,7 @@
 #include "winuser.h"
 #include "winnls.h"
 #include "ole2.h"
+#include "mshtmcid.h"
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -36,13 +37,182 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
-#define DOM_VK_LEFT  VK_LEFT
-#define DOM_VK_UP    VK_UP
-#define DOM_VK_RIGHT VK_RIGHT
-#define DOM_VK_DOWN  VK_DOWN
+#define NSCMD_ALIGN        "cmd_align"
+#define NSCMD_BOLD         "cmd_bold"
+#define NSCMD_CHARNEXT     "cmd_charNext"
+#define NSCMD_CHARPREVIOUS "cmd_charPrevious"
+#define NSCMD_COPY         "cmd_copy"
+#define NSCMD_CUT          "cmd_cut"
+#define NSCMD_DELETECHARFORWARD   "cmd_deleteCharForward"
+#define NSCMD_DELETEWORDFORWARD   "cmd_deleteWordForward"
+#define NSCMD_FONTCOLOR    "cmd_fontColor"
+#define NSCMD_FONTFACE     "cmd_fontFace"
+#define NSCMD_INDENT       "cmd_indent"
+#define NSCMD_INSERTHR     "cmd_insertHR"
+#define NSCMD_ITALIC       "cmd_italic"
+#define NSCMD_LINENEXT     "cmd_lineNext"
+#define NSCMD_LINEPREVIOUS "cmd_linePrevious"
+#define NSCMD_MOVEPAGEDOWN "cmd_movePageDown"
+#define NSCMD_MOVEPAGEUP   "cmd_movePageUp"
+#define NSCMD_OL           "cmd_ol"
+#define NSCMD_OUTDENT      "cmd_outdent"
+#define NSCMD_PASTE        "cmd_paste"
+#define NSCMD_SELECTCHARNEXT      "cmd_selectCharNext"
+#define NSCMD_SELECTCHARPREVIOUS  "cmd_selectCharPrevious"
+#define NSCMD_SELECTLINENEXT      "cmd_selectLineNext"
+#define NSCMD_SELECTLINEPREVIOUS  "cmd_selectLinePrevious"
+#define NSCMD_SELECTPAGEDOWN      "cmd_selectPageDown"
+#define NSCMD_SELECTPAGEUP        "cmd_selectPageUp"
+#define NSCMD_SELECTWORDNEXT      "cmd_selectWordNext"
+#define NSCMD_SELECTWORDPREVIOUS  "cmd_selectWordPrevious"
+#define NSCMD_UL           "cmd_ul"
+#define NSCMD_UNDERLINE    "cmd_underline"
+#define NSCMD_WORDNEXT     "cmd_wordNext"
+#define NSCMD_WORDPREVIOUS "cmd_wordPrevious"
+
+#define NSSTATE_ATTRIBUTE "state_attribute"
+#define NSSTATE_ALL       "state_all"
+
+#define NSALIGN_CENTER "center"
+#define NSALIGN_LEFT   "left"
+#define NSALIGN_RIGHT  "right"
+
+#define DOM_VK_LEFT     VK_LEFT
+#define DOM_VK_UP       VK_UP
+#define DOM_VK_RIGHT    VK_RIGHT
+#define DOM_VK_DOWN     VK_DOWN
+#define DOM_VK_DELETE   VK_DELETE
 
 static const WCHAR wszFont[] = {'f','o','n','t',0};
 static const WCHAR wszSize[] = {'s','i','z','e',0};
+
+static void do_ns_command(NSContainer *This, const char *cmd, nsICommandParams *nsparam)
+{
+    nsICommandManager *cmdmgr;
+    nsIInterfaceRequestor *iface_req;
+    nsresult nsres;
+
+    TRACE("(%p)\n", This);
+
+    nsres = nsIWebBrowser_QueryInterface(This->webbrowser,
+            &IID_nsIInterfaceRequestor, (void**)&iface_req);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIInterfaceRequestor: %08x\n", nsres);
+        return;
+    }
+
+    nsres = nsIInterfaceRequestor_GetInterface(iface_req, &IID_nsICommandManager,
+                                               (void**)&cmdmgr);
+    nsIInterfaceRequestor_Release(iface_req);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsICommandManager: %08x\n", nsres);
+        return;
+    }
+
+    nsres = nsICommandManager_DoCommand(cmdmgr, cmd, nsparam, NULL);
+    if(NS_FAILED(nsres))
+        ERR("DoCommand(%s) failed: %08x\n", debugstr_a(cmd), nsres);
+
+    nsICommandManager_Release(cmdmgr);
+}
+
+static void do_ns_editor_command(NSContainer *This, const char *cmd)
+{
+    nsresult nsres;
+
+    if(!This->editor_controller)
+        return;
+
+    nsres = nsIController_DoCommand(This->editor_controller, cmd);
+    if(NS_FAILED(nsres))
+        ERR("DoCommand(%s) failed: %08x\n", debugstr_a(cmd), nsres);
+}
+
+static nsresult get_ns_command_state(NSContainer *This, const char *cmd, nsICommandParams *nsparam)
+{
+    nsICommandManager *cmdmgr;
+    nsIInterfaceRequestor *iface_req;
+    nsresult nsres;
+
+    nsres = nsIWebBrowser_QueryInterface(This->webbrowser,
+            &IID_nsIInterfaceRequestor, (void**)&iface_req);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIInterfaceRequestor: %08x\n", nsres);
+        return nsres;
+    }
+
+    nsres = nsIInterfaceRequestor_GetInterface(iface_req, &IID_nsICommandManager,
+                                               (void**)&cmdmgr);
+    nsIInterfaceRequestor_Release(iface_req);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsICommandManager: %08x\n", nsres);
+        return nsres;
+    }
+
+    nsres = nsICommandManager_GetCommandState(cmdmgr, cmd, NULL, nsparam);
+    if(NS_FAILED(nsres))
+        ERR("GetCommandState(%s) failed: %08x\n", debugstr_a(cmd), nsres);
+
+    nsICommandManager_Release(cmdmgr);
+    return nsres;
+}
+
+static DWORD query_ns_edit_status(HTMLDocument *This, const char *nscmd)
+{
+    nsICommandParams *nsparam;
+    PRBool b = FALSE;
+
+    if(This->usermode != EDITMODE || This->readystate < READYSTATE_INTERACTIVE)
+        return OLECMDF_SUPPORTED;
+
+    if(This->nscontainer && nscmd) {
+        nsparam = create_nscommand_params();
+        get_ns_command_state(This->nscontainer, nscmd, nsparam);
+
+        nsICommandParams_GetBooleanValue(nsparam, NSSTATE_ALL, &b);
+
+        nsICommandParams_Release(nsparam);
+    }
+
+    return OLECMDF_SUPPORTED | OLECMDF_ENABLED | (b ? OLECMDF_LATCHED : 0);
+}
+
+static void set_ns_align(HTMLDocument *This, const char *align_str)
+{
+    nsICommandParams *nsparam;
+
+    if(!This->nscontainer)
+        return;
+
+    nsparam = create_nscommand_params();
+    nsICommandParams_SetCStringValue(nsparam, NSSTATE_ATTRIBUTE, align_str);
+
+    do_ns_command(This->nscontainer, NSCMD_ALIGN, nsparam);
+
+    nsICommandParams_Release(nsparam);
+}
+
+static DWORD query_align_status(HTMLDocument *This, const char *align_str)
+{
+    nsICommandParams *nsparam;
+    char *align = NULL;
+
+    if(This->usermode != EDITMODE || This->readystate < READYSTATE_INTERACTIVE)
+        return OLECMDF_SUPPORTED;
+
+    if(This->nscontainer) {
+        nsparam = create_nscommand_params();
+        get_ns_command_state(This->nscontainer, NSCMD_ALIGN, nsparam);
+
+        nsICommandParams_GetCStringValue(nsparam, NSSTATE_ATTRIBUTE, &align);
+
+        nsICommandParams_Release(nsparam);
+    }
+
+    return OLECMDF_SUPPORTED | OLECMDF_ENABLED
+        | (align && !strcmp(align_str, align) ? OLECMDF_LATCHED : 0);
+}
+
 
 static nsISelection *get_ns_selection(HTMLDocument *This)
 {
@@ -111,7 +281,7 @@ static void remove_child_attr(nsIDOMElement *elem, LPCWSTR tag, nsAString *attr_
     nsIDOMNodeList_Release(node_list);
 }
 
-void get_font_size(HTMLDocument *This, WCHAR *ret)
+static void get_font_size(HTMLDocument *This, WCHAR *ret)
 {
     nsISelection *nsselection = get_ns_selection(This);
     nsIDOMElement *elem = NULL;
@@ -179,7 +349,7 @@ void get_font_size(HTMLDocument *This, WCHAR *ret)
         nsIDOMNode_Release(node);
 }
 
-void set_font_size(HTMLDocument *This, LPCWSTR size)
+static void set_font_size(HTMLDocument *This, LPCWSTR size)
 {
     nsISelection *nsselection;
     PRBool collapsed;
@@ -197,6 +367,15 @@ void set_font_size(HTMLDocument *This, LPCWSTR size)
     if(!nsselection)
         return;
 
+    nsISelection_GetRangeCount(nsselection, &range_cnt);
+    if(range_cnt != 1) {
+        FIXME("range_cnt %d not supprted\n", range_cnt);
+        if(!range_cnt) {
+            nsISelection_Release(nsselection);
+            return;
+        }
+    }
+
     nsres = nsIWebNavigation_GetDocument(This->nscontainer->navigation, &nsdoc);
     if(NS_FAILED(nsres))
         return;
@@ -205,12 +384,8 @@ void set_font_size(HTMLDocument *This, LPCWSTR size)
     nsAString_Init(&size_str, wszSize);
     nsAString_Init(&val_str, size);
 
-    nsISelection_GetRangeCount(nsselection, &range_cnt);
-    if(range_cnt != 1)
-        FIXME("range_cnt %d not supprted\n", range_cnt);
-
     nsIDOMDocument_CreateElement(nsdoc, &font_str, &elem);
-    nsIDOMElement_SetAttribute(elem, &size_str, &val_str);        
+    nsIDOMElement_SetAttribute(elem, &size_str, &val_str);
 
     nsISelection_GetRangeAt(nsselection, 0, &range);
     nsISelection_GetIsCollapsed(nsselection, &collapsed);
@@ -302,116 +477,23 @@ static nsIDOMNode *get_child_text_node(nsIDOMNode *node, BOOL first)
     return NULL;
 }
 
-static nsIDOMNode *get_next_text_node(nsIDOMNode *node, BOOL next)
+static void handle_arrow_key(HTMLDocument *This, nsIDOMKeyEvent *event, const char **cmds)
 {
-    nsIDOMNode *iter, *iter2 = NULL, *parent = NULL;
-    PRUint16 node_type;
-
-    iter = node;
-    nsIDOMNode_AddRef(iter);
-
-    while(1) {
-        if(next)
-            nsIDOMNode_GetNextSibling(iter, &iter2);
-        else
-            nsIDOMNode_GetPreviousSibling(iter, &iter2);
-
-        while(!iter2) {
-            nsIDOMNode_GetParentNode(iter, &parent);
-            nsIDOMNode_Release(iter);
-            if(!parent)
-                return NULL;
-
-            iter = parent;
-
-            if(next)
-                nsIDOMNode_GetNextSibling(iter, &iter2);
-            else
-                nsIDOMNode_GetPreviousSibling(iter, &iter2);
-        }
-
-        nsIDOMNode_Release(iter);
-        iter = iter2;
-
-        nsIDOMNode_GetNodeType(iter, &node_type);
-
-        switch(node_type) {
-        case TEXT_NODE:
-            if(is_visible_text_node(iter))
-                return iter;
-        case ELEMENT_NODE:
-            iter2 = get_child_text_node(iter, next);
-            if(iter2) {
-                nsIDOMNode_Release(iter);
-                return iter2;
-            }
-        }
-    }
-
-    return NULL;
-}
-
-static void collapse_end_node(nsISelection *selection, nsIDOMNode *node)
-{
-    nsIDOMCharacterData *char_data;
-    PRUint32 len;
-
-    nsIDOMNode_QueryInterface(node, &IID_nsIDOMCharacterData, (void**)&char_data);
-    nsIDOMCharacterData_GetLength(char_data, &len);
-    nsIDOMCharacterData_Release(char_data);
-
-    nsISelection_Collapse(selection, node, len);
-}
-
-static void collapse_next_char(HTMLDocument *doc, nsIDOMKeyEvent *event, BOOL next)
-{
-    nsISelection *selection = get_ns_selection(doc);
-    nsIDOMNode *node;
-    PRBool collapsed, b;
-    PRUint16 node_type;
-    nsIDOMNode *text_node;
+    int i=0;
+    PRBool b;
 
     nsIDOMKeyEvent_GetCtrlKey(event, &b);
-    if(b) return;
+    if(b)
+        i |= 1;
 
     nsIDOMKeyEvent_GetShiftKey(event, &b);
-    if(b) return;
+    if(b)
+        i |= 2;
 
-    nsISelection_GetIsCollapsed(selection, &collapsed);
-    if(!collapsed)
-        nsISelection_CollapseToEnd(selection);
+    if(cmds[i])
+        do_ns_editor_command(This->nscontainer, cmds[i]);
 
-    nsISelection_GetFocusNode(selection, &node);
-    nsIDOMNode_GetNodeType(node, &node_type);
-
-    if(node_type == TEXT_NODE) {
-        nsIDOMCharacterData *char_data;
-        PRInt32 offset;
-        PRUint32 len;
-
-        nsISelection_GetFocusOffset(selection, &offset);
-
-        nsIDOMNode_QueryInterface(node, &IID_nsIDOMCharacterData, (void**)&char_data);
-        nsIDOMCharacterData_GetLength(char_data, &len);
-        nsIDOMCharacterData_Release(char_data);
-
-        if(next ? offset != len : offset) {
-            nsISelection_Collapse(selection, node, offset + (next?1:-1));
-            return;
-        }
-    }
-
-    text_node = get_next_text_node(node, next);
-    if(text_node) {
-        if(next)
-            nsISelection_Collapse(selection, text_node, 1);
-        else
-            collapse_end_node(selection, text_node);
-        nsIDOMNode_Release(text_node);
-    }
-
-    nsIDOMNode_Release(node);
-    nsISelection_Release(selection);
+    nsIDOMKeyEvent_PreventDefault(event);
 }
 
 void handle_edit_event(HTMLDocument *This, nsIDOMEvent *event)
@@ -424,14 +506,573 @@ void handle_edit_event(HTMLDocument *This, nsIDOMEvent *event)
     nsIDOMKeyEvent_GetKeyCode(key_event, &code);
 
     switch(code) {
-    case DOM_VK_LEFT:
+    case DOM_VK_LEFT: {
+        static const char *cmds[] = {
+            NSCMD_CHARPREVIOUS,
+            NSCMD_WORDPREVIOUS,
+            NSCMD_SELECTCHARPREVIOUS,
+            NSCMD_SELECTWORDPREVIOUS
+        };
+
         TRACE("left\n");
-        collapse_next_char(This, key_event, FALSE);
+        handle_arrow_key(This, key_event, cmds);
         break;
-    case DOM_VK_RIGHT:
+    }
+    case DOM_VK_RIGHT: {
+        static const char *cmds[] = {
+            NSCMD_CHARNEXT,
+            NSCMD_WORDNEXT,
+            NSCMD_SELECTCHARNEXT,
+            NSCMD_SELECTWORDNEXT
+        };
+
         TRACE("right\n");
-        collapse_next_char(This, key_event, TRUE);
-    };
+        handle_arrow_key(This, key_event, cmds);
+        break;
+    }
+    case DOM_VK_UP: {
+        static const char *cmds[] = {
+            NSCMD_LINEPREVIOUS,
+            NSCMD_MOVEPAGEUP,
+            NSCMD_SELECTLINEPREVIOUS,
+            NSCMD_SELECTPAGEUP
+        };
+
+        TRACE("up\n");
+        handle_arrow_key(This, key_event, cmds);
+        break;
+    }
+    case DOM_VK_DOWN: {
+        static const char *cmds[] = {
+            NSCMD_LINENEXT,
+            NSCMD_MOVEPAGEDOWN,
+            NSCMD_SELECTLINENEXT,
+            NSCMD_SELECTPAGEDOWN
+        };
+
+        TRACE("down\n");
+        handle_arrow_key(This, key_event, cmds);
+        break;
+    }
+    case DOM_VK_DELETE: {
+        static const char *cmds[] = {
+            NSCMD_DELETECHARFORWARD,
+            NSCMD_DELETEWORDFORWARD,
+            NULL, NULL
+        };
+
+        TRACE("delete\n");
+        handle_arrow_key(This, key_event, cmds);
+        break;
+    }
+    }
 
     nsIDOMKeyEvent_Release(key_event);
+}
+
+static void set_ns_fontname(NSContainer *This, const char *fontname)
+{
+    nsICommandParams *nsparam = create_nscommand_params();
+
+    nsICommandParams_SetCStringValue(nsparam, NSSTATE_ATTRIBUTE, fontname);
+    do_ns_command(This, NSCMD_FONTFACE, nsparam);
+    nsICommandParams_Release(nsparam);
+}
+
+static HRESULT exec_delete(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)->(%p %p)\n", This, in, out);
+
+    if(This->nscontainer)
+        do_ns_editor_command(This->nscontainer, NSCMD_DELETECHARFORWARD);
+
+    update_doc(This, UPDATE_UI);
+    return S_OK;
+}
+
+static HRESULT exec_fontname(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)->(%p %p)\n", This, in, out);
+
+    if(!This->nscontainer) {
+        update_doc(This, UPDATE_UI);
+        return E_FAIL;
+    }
+
+    if(in) {
+        char *stra;
+        DWORD len;
+
+        if(V_VT(in) != VT_BSTR) {
+            FIXME("Unsupported vt=%d\n", V_VT(out));
+            return E_INVALIDARG;
+        }
+
+        TRACE("%s\n", debugstr_w(V_BSTR(in)));
+
+        len = WideCharToMultiByte(CP_ACP, 0, V_BSTR(in), -1, NULL, 0, NULL, NULL);
+        stra = mshtml_alloc(len);
+        WideCharToMultiByte(CP_ACP, 0, V_BSTR(in), -1, stra, -1, NULL, NULL);
+
+        set_ns_fontname(This->nscontainer, stra);
+
+        mshtml_free(stra);
+
+        update_doc(This, UPDATE_UI);
+    }
+
+    if(out) {
+        nsICommandParams *nsparam;
+        LPWSTR strw;
+        char *stra;
+        DWORD len;
+        nsresult nsres;
+
+        nsparam = create_nscommand_params();
+
+        nsres = get_ns_command_state(This->nscontainer, NSCMD_FONTFACE, nsparam);
+        if(NS_FAILED(nsres))
+            return S_OK;
+
+        nsICommandParams_GetCStringValue(nsparam, NSSTATE_ATTRIBUTE, &stra);
+        nsICommandParams_Release(nsparam);
+
+        len = MultiByteToWideChar(CP_ACP, 0, stra, -1, NULL, 0);
+        strw = mshtml_alloc(len*sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, stra, -1, strw, -1);
+        nsfree(stra);
+
+        V_VT(out) = VT_BSTR;
+        V_BSTR(out) = SysAllocString(strw);
+        mshtml_free(strw);
+    }
+
+    return S_OK;
+}
+
+static HRESULT exec_forecolor(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)->(%p %p)\n", This, in, out);
+
+    if(in) {
+        if(V_VT(in) == VT_I4) {
+            nsICommandParams *nsparam = create_nscommand_params();
+            char color_str[10];
+
+            sprintf(color_str, "#%02x%02x%02x",
+                    V_I4(in)&0xff, (V_I4(in)>>8)&0xff, (V_I4(in)>>16)&0xff);
+
+            nsICommandParams_SetCStringValue(nsparam, NSSTATE_ATTRIBUTE, color_str);
+            do_ns_command(This->nscontainer, NSCMD_FONTCOLOR, nsparam);
+
+            nsICommandParams_Release(nsparam);
+        }else {
+            FIXME("unsupported in vt=%d\n", V_VT(in));
+        }
+
+        update_doc(This, UPDATE_UI);
+    }
+
+    if(out) {
+        FIXME("unsupported out\n");
+        return E_NOTIMPL;
+    }
+
+    return S_OK;
+}
+
+static HRESULT exec_fontsize(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)->(%p %p)\n", This, in, out);
+
+    if(out) {
+        WCHAR val[10] = {0};
+
+        get_font_size(This, val);
+        V_VT(out) = VT_I4;
+        V_I4(out) = strtolW(val, NULL, 10);
+    }
+
+    if(in) {
+        switch(V_VT(in)) {
+        case VT_I4: {
+            WCHAR size[10];
+            static const WCHAR format[] = {'%','d',0};
+            wsprintfW(size, format, V_I4(in));
+            set_font_size(This, size);
+            break;
+        }
+        case VT_BSTR:
+            set_font_size(This, V_BSTR(in));
+            break;
+        default:
+            FIXME("unsupported vt %d\n", V_VT(in));
+        }
+
+        update_doc(This, UPDATE_UI);
+    }
+
+    return S_OK;
+}
+
+static HRESULT exec_bold(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)\n", This);
+
+    if(in || out)
+        FIXME("unsupported args\n");
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_BOLD, NULL);
+
+    update_doc(This, UPDATE_UI);
+    return S_OK;
+}
+
+static HRESULT exec_italic(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)\n", This);
+
+    if(in || out)
+        FIXME("unsupported args\n");
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_ITALIC, NULL);
+
+    update_doc(This, UPDATE_UI);
+    return S_OK;
+}
+
+static HRESULT query_justify(HTMLDocument *This, OLECMD *cmd)
+{
+    switch(cmd->cmdID) {
+    case IDM_JUSTIFYCENTER:
+        TRACE("(%p) IDM_JUSTIFYCENTER\n", This);
+        cmd->cmdf = query_align_status(This, NSALIGN_CENTER);
+        break;
+    case IDM_JUSTIFYLEFT:
+        TRACE("(%p) IDM_JUSTIFYLEFT\n", This);
+        /* FIXME: We should set OLECMDF_LATCHED only if it's set explicitly. */
+        if(This->usermode != EDITMODE || This->readystate < READYSTATE_INTERACTIVE)
+            cmd->cmdf = OLECMDF_SUPPORTED;
+        else
+            cmd->cmdf = OLECMDF_SUPPORTED | OLECMDF_ENABLED;
+        break;
+    case IDM_JUSTIFYRIGHT:
+        TRACE("(%p) IDM_JUSTIFYRIGHT\n", This);
+        cmd->cmdf = query_align_status(This, NSALIGN_RIGHT);
+        break;
+    }
+
+    return S_OK;
+}
+
+static HRESULT exec_justifycenter(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)\n", This);
+
+    if(in || out)
+        FIXME("unsupported args\n");
+
+    set_ns_align(This, NSALIGN_CENTER);
+    update_doc(This, UPDATE_UI);
+    return S_OK;
+}
+
+static HRESULT exec_justifyleft(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)\n", This);
+
+    if(in || out)
+        FIXME("unsupported args\n");
+
+    set_ns_align(This, NSALIGN_LEFT);
+    update_doc(This, UPDATE_UI);
+    return S_OK;
+}
+
+static HRESULT exec_justifyright(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)\n", This);
+
+    if(in || out)
+        FIXME("unsupported args\n");
+
+    set_ns_align(This, NSALIGN_RIGHT);
+    update_doc(This, UPDATE_UI);
+    return S_OK;
+}
+
+static HRESULT exec_underline(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)\n", This);
+
+    if(in || out)
+        FIXME("unsupported args\n");
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_UNDERLINE, NULL);
+
+    update_doc(This, UPDATE_UI);
+    return S_OK;
+}
+
+static HRESULT exec_horizontalline(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)\n", This);
+
+    if(in || out)
+        FIXME("unsupported args\n");
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_INSERTHR, NULL);
+
+    update_doc(This, UPDATE_UI);
+    return S_OK;
+}
+
+static HRESULT exec_orderlist(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)\n", This);
+
+    if(in || out)
+        FIXME("unsupported args\n");
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_OL, NULL);
+
+    update_doc(This, UPDATE_UI);
+    return S_OK;
+}
+
+static HRESULT exec_unorderlist(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)\n", This);
+
+    if(in || out)
+        FIXME("unsupported args\n");
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_UL, NULL);
+
+    update_doc(This, UPDATE_UI);
+    return S_OK;
+}
+
+static HRESULT exec_indent(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)\n", This);
+
+    if(in || out)
+        FIXME("unsupported args\n");
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_INDENT, NULL);
+
+    update_doc(This, UPDATE_UI);
+    return S_OK;
+}
+
+static HRESULT exec_outdent(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    TRACE("(%p)\n", This);
+
+    if(in || out)
+        FIXME("unsupported args\n");
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_OUTDENT, NULL);
+
+    update_doc(This, UPDATE_UI);
+    return S_OK;
+}
+
+static HRESULT exec_composesettings(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    WCHAR *ptr;
+
+    if(out || !in || V_VT(in) != VT_BSTR) {
+        WARN("invalid arg\n");
+        return E_INVALIDARG;
+    }
+
+    TRACE("(%p)->(%x %s)\n", This, cmdexecopt, debugstr_w(V_BSTR(in)));
+
+    update_doc(This, UPDATE_UI);
+
+    ptr = V_BSTR(in);
+    if(*ptr == '1')
+        exec_bold(This, cmdexecopt, NULL, NULL);
+    ptr = strchrW(ptr, ',');
+    if(!ptr)
+        return S_OK;
+
+    if(*++ptr == '1')
+        exec_italic(This, cmdexecopt, NULL, NULL);
+    ptr = strchrW(ptr, ',');
+    if(!ptr)
+        return S_OK;
+
+    if(*++ptr == '1')
+        exec_underline(This, cmdexecopt, NULL, NULL);
+    ptr = strchrW(ptr, ',');
+    if(!ptr)
+        return S_OK;
+
+    if(isdigitW(*++ptr)) {
+        VARIANT v;
+
+        V_VT(&v) = VT_I4;
+        V_I4(&v) = *ptr-'0';
+
+        exec_fontsize(This, cmdexecopt, &v, NULL);
+    }
+    ptr = strchrW(ptr, ',');
+    if(!ptr)
+        return S_OK;
+
+    if(*++ptr != ',')
+        FIXME("set font color\n");
+    ptr = strchrW(ptr, ',');
+    if(!ptr)
+        return S_OK;
+
+    if(*++ptr != ',')
+        FIXME("set background color\n");
+    ptr = strchrW(ptr, ',');
+    if(!ptr)
+        return S_OK;
+
+    ptr++;
+    if(*ptr) {
+        VARIANT v;
+
+        V_VT(&v) = VT_BSTR;
+        V_BSTR(&v) = SysAllocString(ptr);
+
+        exec_fontname(This, cmdexecopt, &v, NULL);
+
+        SysFreeString(V_BSTR(&v));
+    }
+
+    return S_OK;
+}
+
+HRESULT editor_exec_copy(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    update_doc(This, UPDATE_UI);
+
+    if(!This->nscontainer)
+        return E_FAIL;
+
+    do_ns_editor_command(This->nscontainer, NSCMD_COPY);
+    return S_OK;
+}
+
+HRESULT editor_exec_cut(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    update_doc(This, UPDATE_UI);
+
+    if(!This->nscontainer)
+        return E_FAIL;
+
+    do_ns_editor_command(This->nscontainer, NSCMD_CUT);
+    return S_OK;
+}
+
+HRESULT editor_exec_paste(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+    update_doc(This, UPDATE_UI);
+
+    if(!This->nscontainer)
+        return E_FAIL;
+
+    do_ns_editor_command(This->nscontainer, NSCMD_PASTE);
+    return S_OK;
+}
+
+static HRESULT query_edit_status(HTMLDocument *This, OLECMD *cmd)
+{
+    switch(cmd->cmdID) {
+    case IDM_DELETE:
+        TRACE("CGID_MSHTML: IDM_DELETE\n");
+        cmd->cmdf = query_ns_edit_status(This, NULL);
+        break;
+    case IDM_FONTNAME:
+        TRACE("CGID_MSHTML: IDM_FONTNAME\n");
+        cmd->cmdf = query_ns_edit_status(This, NULL);
+        break;
+    case IDM_FONTSIZE:
+        TRACE("CGID_MSHTML: IDM_FONTSIZE\n");
+        cmd->cmdf = query_ns_edit_status(This, NULL);
+        break;
+    case IDM_BOLD:
+        TRACE("CGID_MSHTML: IDM_BOLD\n");
+        cmd->cmdf = query_ns_edit_status(This, NSCMD_BOLD);
+        break;
+    case IDM_FORECOLOR:
+        TRACE("CGID_MSHTML: IDM_FORECOLOR\n");
+        cmd->cmdf = query_ns_edit_status(This, NULL);
+        break;
+    case IDM_ITALIC:
+        TRACE("CGID_MSHTML: IDM_ITALIC\n");
+        cmd->cmdf = query_ns_edit_status(This, NSCMD_ITALIC);
+        break;
+    case IDM_UNDERLINE:
+        TRACE("CGID_MSHTML: IDM_UNDERLINE\n");
+        cmd->cmdf = query_ns_edit_status(This, NSCMD_UNDERLINE);
+        break;
+    case IDM_HORIZONTALLINE:
+        TRACE("CGID_MSHTML: IDM_HORIZONTALLINE\n");
+        cmd->cmdf = query_ns_edit_status(This, NULL);
+        break;
+    case IDM_ORDERLIST:
+        TRACE("CGID_MSHTML: IDM_ORDERLIST\n");
+        cmd->cmdf = query_ns_edit_status(This, NSCMD_OL);
+        break;
+    case IDM_UNORDERLIST:
+        TRACE("CGID_MSHTML: IDM_HORIZONTALLINE\n");
+        cmd->cmdf = query_ns_edit_status(This, NSCMD_UL);
+        break;
+    case IDM_INDENT:
+        TRACE("CGID_MSHTML: IDM_INDENT\n");
+        cmd->cmdf = query_ns_edit_status(This, NULL);
+        break;
+    case IDM_OUTDENT:
+        TRACE("CGID_MSHTML: IDM_OUTDENT\n");
+        cmd->cmdf = query_ns_edit_status(This, NULL);
+        break;
+    }
+
+    return S_OK;
+}
+
+const cmdtable_t editmode_cmds[] = {
+    {IDM_DELETE,          query_edit_status,    exec_delete},
+    {IDM_FONTNAME,        query_edit_status,    exec_fontname},
+    {IDM_FONTSIZE,        query_edit_status,    exec_fontsize},
+    {IDM_FORECOLOR,       query_edit_status,    exec_forecolor},
+    {IDM_BOLD,            query_edit_status,    exec_bold},
+    {IDM_ITALIC,          query_edit_status,    exec_italic},
+    {IDM_JUSTIFYCENTER,   query_justify,        exec_justifycenter},
+    {IDM_JUSTIFYRIGHT,    query_justify,        exec_justifyright},
+    {IDM_JUSTIFYLEFT,     query_justify,        exec_justifyleft},
+    {IDM_UNDERLINE,       query_edit_status,    exec_underline},
+    {IDM_HORIZONTALLINE,  query_edit_status,    exec_horizontalline},
+    {IDM_ORDERLIST,       query_edit_status,    exec_orderlist},
+    {IDM_UNORDERLIST,     query_edit_status,    exec_unorderlist},
+    {IDM_INDENT,          query_edit_status,    exec_indent},
+    {IDM_OUTDENT,         query_edit_status,    exec_outdent},
+    {IDM_COMPOSESETTINGS, NULL,                 exec_composesettings},
+    {0,NULL,NULL}
+};
+
+void init_editor(HTMLDocument *This)
+{
+    update_doc(This, UPDATE_UI);
+
+    if(!This->nscontainer)
+        return;
+
+    set_ns_fontname(This->nscontainer, "Times New Roman");
 }

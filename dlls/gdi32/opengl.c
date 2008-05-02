@@ -51,7 +51,7 @@ typedef struct opengl_context
  * Some functions don't receive a hDC. This function creates a global hdc and
  * if there's already a global hdc, it returns it.
  */
-static DC* OPENGL_GetDefaultDC()
+static DC* OPENGL_GetDefaultDC(void)
 {
     if(!default_hdc)
         default_hdc = CreateDCA("DISPLAY", NULL, NULL, NULL);
@@ -306,7 +306,7 @@ PROC WINAPI wglGetProcAddress(LPCSTR func)
      * of a wrapper function which will handle the HDC->PhysDev conversion.
      */
     if(ret && strcmp(func, "wglMakeContextCurrentARB") == 0)
-        return wglMakeContextCurrentARB;
+        return (PROC)wglMakeContextCurrentARB;
     else if(ret && strcmp(func, "wglGetPbufferDCARB") == 0)
         return (PROC)wglGetPbufferDCARB;
 

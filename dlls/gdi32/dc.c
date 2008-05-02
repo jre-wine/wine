@@ -166,9 +166,9 @@ DC *DC_GetDCUpdate( HDC hdc )
         dc->flags &= ~DC_DIRTY;
         if (proc)
         {
-            DWORD data = dc->dwHookData;
+            DWORD_PTR data = dc->dwHookData;
             GDI_ReleaseObj( hdc );
-            proc( HDC_16(hdc), DCHC_INVALIDVISRGN, data, 0 );
+            proc( hdc, DCHC_INVALIDVISRGN, data, 0 );
             if (!(dc = DC_GetDCPtr( hdc ))) break;
             /* otherwise restart the loop in case it became dirty again in the meantime */
         }
@@ -626,14 +626,11 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
         ERR( "no driver found for %s\n", debugstr_w(buf) );
         return 0;
     }
-    if (!(dc = DC_AllocDC( funcs, DC_MAGIC )))
-    {
-        DRIVER_release_driver( funcs );
-        return 0;
-    }
+    if (!(dc = DC_AllocDC( funcs, DC_MAGIC ))) goto error;
     hdc = dc->hSelf;
 
     dc->hBitmap = GetStockObject( DEFAULT_BITMAP );
+    if (!(dc->hVisRgn = CreateRectRgn( 0, 0, 1, 1 ))) goto error;
 
     TRACE("(driver=%s, device=%s, output=%s): returning %p\n",
           debugstr_w(driver), debugstr_w(device), debugstr_w(output), dc->hSelf );
@@ -642,17 +639,21 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
         !dc->funcs->pCreateDC( hdc, &dc->physDev, buf, device, output, initData ))
     {
         WARN("creation aborted by device\n" );
-        GDI_FreeObject( dc->hSelf, dc );
-        DRIVER_release_driver( funcs );
-        return 0;
+        goto error;
     }
 
-    dc->hVisRgn = CreateRectRgn( 0, 0, GetDeviceCaps( hdc, DESKTOPHORZRES ),
-                                 GetDeviceCaps( hdc, DESKTOPVERTRES ) );
+    SetRectRgn( dc->hVisRgn, 0, 0,
+                GetDeviceCaps( hdc, DESKTOPHORZRES ), GetDeviceCaps( hdc, DESKTOPVERTRES ) );
 
     DC_InitDC( dc );
     GDI_ReleaseObj( hdc );
     return hdc;
+
+error:
+    if (dc && dc->hVisRgn) DeleteObject( dc->hVisRgn );
+    if (dc) GDI_FreeObject( dc->hSelf, dc );
+    DRIVER_release_driver( funcs );
+    return 0;
 }
 
 
@@ -741,15 +742,12 @@ HDC WINAPI CreateCompatibleDC( HDC hdc )
 
     if (!funcs) return 0;
 
-    if (!(dc = DC_AllocDC( funcs, MEMORY_DC_MAGIC )))
-    {
-        DRIVER_release_driver( funcs );
-        return 0;
-    }
+    if (!(dc = DC_AllocDC( funcs, MEMORY_DC_MAGIC ))) goto error;
 
     TRACE("(%p): returning %p\n", hdc, dc->hSelf );
 
     dc->hBitmap = GetStockObject( DEFAULT_BITMAP );
+    if (!(dc->hVisRgn = CreateRectRgn( 0, 0, 1, 1 ))) goto error;   /* default bitmap is 1x1 */
 
     /* Copy the driver-specific physical device info into
      * the new DC. The driver may use this read-only info
@@ -760,16 +758,18 @@ HDC WINAPI CreateCompatibleDC( HDC hdc )
         !dc->funcs->pCreateDC( dc->hSelf, &dc->physDev, NULL, NULL, NULL, NULL ))
     {
         WARN("creation aborted by device\n");
-        GDI_FreeObject( dc->hSelf, dc );
-        DRIVER_release_driver( funcs );
-        return 0;
+        goto error;
     }
-
-    dc->hVisRgn = CreateRectRgn( 0, 0, 1, 1 );  /* default bitmap is 1x1 */
 
     DC_InitDC( dc );
     GDI_ReleaseObj( dc->hSelf );
     return dc->hSelf;
+
+error:
+    if (dc && dc->hVisRgn) DeleteObject( dc->hVisRgn );
+    if (dc) GDI_FreeObject( dc->hSelf, dc );
+    DRIVER_release_driver( funcs );
+    return 0;
 }
 
 
@@ -791,9 +791,9 @@ BOOL WINAPI DeleteDC( HDC hdc )
     if (dc->hookThunk)
     {
         DCHOOKPROC proc = dc->hookThunk;
-        DWORD data = dc->dwHookData;
+        DWORD_PTR data = dc->dwHookData;
         GDI_ReleaseObj( hdc );
-        if (!proc( HDC_16(hdc), DCHC_DELETEDC, data, 0 )) return FALSE;
+        if (!proc( hdc, DCHC_DELETEDC, data, 0 )) return FALSE;
         if (!(dc = DC_GetDCPtr( hdc ))) return TRUE;  /* deleted by the hook */
     }
 
@@ -1328,7 +1328,7 @@ BOOL WINAPI CombineTransform( LPXFORM xformResult, const XFORM *xform1,
  *
  * Note: this doesn't exist in Win32, we add it here because user32 needs it.
  */
-BOOL WINAPI SetDCHook( HDC hdc, DCHOOKPROC hookProc, DWORD dwHookData )
+BOOL WINAPI SetDCHook( HDC hdc, DCHOOKPROC hookProc, DWORD_PTR dwHookData )
 {
     DC *dc = GDI_GetObjPtr( hdc, DC_MAGIC );
 
@@ -1345,19 +1345,18 @@ BOOL WINAPI SetDCHook( HDC hdc, DCHOOKPROC hookProc, DWORD dwHookData )
 
 
 /* relay function to call the 16-bit DC hook proc */
-static BOOL16 WINAPI call_dc_hook16( HDC16 hdc16, WORD code, DWORD data, LPARAM lParam )
+static BOOL WINAPI call_dc_hook16( HDC hdc, WORD code, DWORD_PTR data, LPARAM lParam )
 {
     WORD args[6];
     DWORD ret;
     FARPROC16 proc = NULL;
-    HDC hdc = HDC_32( hdc16 );
     DC *dc = DC_GetDCPtr( hdc );
 
     if (!dc) return FALSE;
     proc = dc->hookProc;
     GDI_ReleaseObj( hdc );
     if (!proc) return FALSE;
-    args[5] = hdc16;
+    args[5] = HDC_16(hdc);
     args[4] = code;
     args[3] = HIWORD(data);
     args[2] = LOWORD(data);
@@ -2098,6 +2097,15 @@ COLORREF WINAPI SetDCPenColor(HDC hdc, COLORREF crColor)
     }
 
     return oldClr;
+}
+
+/***********************************************************************
+ *           CancelDC    (GDI32.@)
+ */
+BOOL WINAPI CancelDC(HDC hdc)
+{
+    FIXME("stub\n");
+    return TRUE;
 }
 
 /***********************************************************************

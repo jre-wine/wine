@@ -29,11 +29,9 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "winerror.h"
 #include "wingdi.h"
 #include "wine/exception.h"
-#include "excpt.h"
 
 #include "ddraw.h"
 #include "d3d.h"
@@ -388,6 +386,10 @@ IDirectDrawImpl_CreateSurface(LPDIRECTDRAW This, LPDDSURFACEDESC pSDesc,
     IDirectDrawSurfaceImpl *impl;
     HRESULT hr;
 
+    /* Remove front buffer flag, this causes failure in v7, and its added to normal
+     * primaries anyway
+     */
+    pSDesc->ddsCaps.dwCaps &= ~DDSCAPS_FRONTBUFFER;
     /* the LPDDSURFACEDESC -> LPDDSURFACEDESC2 conversion should be ok,
      * since the data layout is the same */
     hr = IDirectDraw7_CreateSurface(COM_INTERFACE_CAST(IDirectDrawImpl,
@@ -410,8 +412,7 @@ IDirectDrawImpl_CreateSurface(LPDIRECTDRAW This, LPDDSURFACEDESC pSDesc,
                              IDirectDraw,
                              IDirectDraw7,
                              This));
-        IDirectDraw_AddRef(This);
-        impl->ifaceToRelease = (IUnknown *) This;
+        impl->ifaceToRelease = NULL;
     }
 
     return hr;
@@ -446,8 +447,7 @@ IDirectDraw2Impl_CreateSurface(LPDIRECTDRAW2 This, LPDDSURFACEDESC pSDesc,
                              IDirectDraw2,
                              IDirectDraw7,
                              This));
-        IDirectDraw2_AddRef(This);
-        impl->ifaceToRelease = (IUnknown *) This;
+        impl->ifaceToRelease = NULL;
     }
 
     return hr;

@@ -1,7 +1,13 @@
 /*
  * Direct3D state management
  *
- * Copyright 2006 Stefan Dösinger for CodeWeavers
+ * Copyright 2002 Lionel Ulmer
+ * Copyright 2002-2005 Jason Edmeades
+ * Copyright 2003-2004 Raphael Junqueira
+ * Copyright 2004 Christian Costa
+ * Copyright 2005 Oliver Stieber
+ * Copyright 2006 Henri Verbeet
+ * Copyright 2006-2007 Stefan Dösinger for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -28,9 +34,9 @@
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(d3d_shader);
 
-#define GLINFO_LOCATION ((IWineD3DImpl *)(stateblock->wineD3DDevice->wineD3D))->gl_info
+#define GLINFO_LOCATION stateblock->wineD3DDevice->adapter->gl_info
 
-static void state_nogl(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_nogl(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     /* Used for states which are not mapped to a gl state as-is, but used somehow different,
      * e.g as a parameter for drawing, or which are unimplemented in windows d3d
      */
@@ -43,7 +49,7 @@ static void state_nogl(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_undefined(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_undefined(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     /* Print a WARN, this allows the stateblock code to loop over all states to generate a display
      * list without causing confusing terminal output. Deliberately no special debug name here
      * because its undefined.
@@ -51,19 +57,19 @@ static void state_undefined(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     WARN("undefined state %d\n", state);
 }
 
-static void state_fillmode(DWORD state, IWineD3DStateBlockImpl *stateblock) {
-    D3DFILLMODE Value = stateblock->renderState[WINED3DRS_FILLMODE];
+static void state_fillmode(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    WINED3DFILLMODE Value = stateblock->renderState[WINED3DRS_FILLMODE];
 
     switch(Value) {
-        case D3DFILL_POINT:
+        case WINED3DFILL_POINT:
             glPolygonMode(GL_FRONT_AND_BACK, GL_POINT);
             checkGLcall("glPolygonMode(GL_FRONT_AND_BACK, GL_POINT)");
             break;
-        case D3DFILL_WIREFRAME:
+        case WINED3DFILL_WIREFRAME:
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
             checkGLcall("glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)");
             break;
-        case D3DFILL_SOLID:
+        case WINED3DFILL_SOLID:
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
             checkGLcall("glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)");
             break;
@@ -72,23 +78,24 @@ static void state_fillmode(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_lighting(DWORD state, IWineD3DStateBlockImpl *stateblock) {
-    BOOL normals;
+static void state_lighting(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    BOOL transformed;
 
-    /* Lighting is only enabled if Vertex normals are passed by the application,
+    /* Lighting is not enabled if transformed vertices are drawn
      * but lighting does not affect the stream sources, so it is not grouped for performance reasons.
      * This state reads the decoded vertex decl, so if it is dirty don't do anything. The
      * vertex declaration appplying function calls this function for updating
      */
 
-	if(isStateDirty(stateblock->wineD3DDevice, STATE_VDECL)) {
-		return;
-	}
+    if(isStateDirty(context, STATE_VDECL)) {
+        return;
+    }
 
-    normals = stateblock->wineD3DDevice->strided_streams.u.s.normal.lpData != NULL ||
-              stateblock->wineD3DDevice->strided_streams.u.s.normal.VBO != 0;
+    transformed = ((stateblock->wineD3DDevice->strided_streams.u.s.position.lpData != NULL ||
+                    stateblock->wineD3DDevice->strided_streams.u.s.position.VBO != 0) &&
+                    stateblock->wineD3DDevice->strided_streams.u.s.position_transformed) ? TRUE : FALSE;
 
-    if (stateblock->renderState[WINED3DRS_LIGHTING] && normals) {
+    if (stateblock->renderState[WINED3DRS_LIGHTING] && !transformed) {
         glEnable(GL_LIGHTING);
         checkGLcall("glEnable GL_LIGHTING");
     } else {
@@ -97,7 +104,14 @@ static void state_lighting(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_zenable(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_zenable(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    /* No z test without depth stencil buffers */
+    if(stateblock->wineD3DDevice->stencilBufferTarget == NULL) {
+        glDisable(GL_DEPTH_TEST); /* This also disables z writing in gl */
+        checkGLcall("glDisable GL_DEPTH_TEST");
+        return;
+    }
+
     switch ((WINED3DZBUFFERTYPE) stateblock->renderState[WINED3DRS_ZENABLE]) {
         case WINED3DZB_FALSE:
             glDisable(GL_DEPTH_TEST);
@@ -117,7 +131,7 @@ static void state_zenable(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_cullmode(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_cullmode(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     /* TODO: Put this into the offscreen / onscreen rendering block due to device->render_offscreen */
 
     /* If we are culling "back faces with clockwise vertices" then
@@ -157,7 +171,7 @@ static void state_cullmode(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_shademode(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_shademode(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     switch ((WINED3DSHADEMODE) stateblock->renderState[WINED3DRS_SHADEMODE]) {
         case WINED3DSHADE_FLAT:
             glShadeModel(GL_FLAT);
@@ -175,7 +189,7 @@ static void state_shademode(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_ditherenable(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_ditherenable(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if (stateblock->renderState[WINED3DRS_DITHERENABLE]) {
         glEnable(GL_DITHER);
         checkGLcall("glEnable GL_DITHER");
@@ -185,7 +199,7 @@ static void state_ditherenable(DWORD state, IWineD3DStateBlockImpl *stateblock) 
     }
 }
 
-static void state_zwritenable(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_zwritenable(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     /* TODO: Test if in d3d z writing is enabled even if ZENABLE is off. If yes,
      * this has to be merged with ZENABLE and ZFUNC
      */
@@ -198,7 +212,7 @@ static void state_zwritenable(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_zfunc(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_zfunc(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     int glParm = CompareFunc(stateblock->renderState[WINED3DRS_ZFUNC]);
 
     if(glParm) {
@@ -207,7 +221,7 @@ static void state_zfunc(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_ambient(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_ambient(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     float col[4];
     D3DCOLORTOGLFLOAT4(stateblock->renderState[WINED3DRS_AMBIENT], col);
 
@@ -216,7 +230,7 @@ static void state_ambient(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     checkGLcall("glLightModel for MODEL_AMBIENT");
 }
 
-static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     int srcBlend = GL_ZERO;
     int dstBlend = GL_ZERO;
 
@@ -281,8 +295,8 @@ static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock) {
             srcBlend = GL_ONE_MINUS_SRC_ALPHA;
             break;
 
-        case D3DBLEND_BLENDFACTOR        : dstBlend = GL_CONSTANT_COLOR;   break;
-        case D3DBLEND_INVBLENDFACTOR     : dstBlend = GL_ONE_MINUS_CONSTANT_COLOR;  break;
+        case WINED3DBLEND_BLENDFACTOR        : dstBlend = GL_CONSTANT_COLOR;   break;
+        case WINED3DBLEND_INVBLENDFACTOR     : dstBlend = GL_ONE_MINUS_CONSTANT_COLOR;  break;
         default:
             FIXME("Unrecognized dst blend value %d\n", stateblock->renderState[WINED3DRS_DESTBLEND]);
     }
@@ -309,7 +323,7 @@ static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     checkGLcall("glBlendFunc");
 }
 
-static void state_blendfactor(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_blendfactor(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     float col[4];
 
     TRACE("Setting BlendFactor to %d\n", stateblock->renderState[WINED3DRS_BLENDFACTOR]);
@@ -318,7 +332,7 @@ static void state_blendfactor(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     checkGLcall("glBlendColor");
 }
 
-static void state_alpha(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_alpha(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     int glParm = 0;
     float ref;
     BOOL enable_ckey = FALSE;
@@ -331,10 +345,25 @@ static void state_alpha(DWORD state, IWineD3DStateBlockImpl *stateblock) {
      * used WINED3DRS_COLORKEYENABLE state(which is d3d <= 3 only). The texture function will call alpha
      * in case it finds some texture+colorkeyenable combination which needs extra care.
      */
-    if(stateblock->textures[0]) {
+    if(stateblock->textures[0] && stateblock->textureDimensions[0] == GL_TEXTURE_2D) {
         surf = (IWineD3DSurfaceImpl *) ((IWineD3DTextureImpl *)stateblock->textures[0])->surfaces[0];
-        if(surf->CKeyFlags & DDSD_CKSRCBLT) enable_ckey = TRUE;
+
+        if(surf->CKeyFlags & WINEDDSD_CKSRCBLT) {
+            const PixelFormatDesc *fmt = getFormatDescEntry(surf->resource.format);
+            /* The surface conversion does not do color keying conversion for surfaces that have an alpha
+             * channel on their own. Likewise, the alpha test shouldn't be set up for color keying if the
+             * surface has alpha bits
+             */
+            if(fmt->alphaMask == 0x00000000) {
+                enable_ckey = TRUE;
+            }
+        }
     }
+
+    if(enable_ckey || context->last_was_ckey) {
+        StateTable[STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP)].apply(STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP), stateblock, context);
+    }
+    context->last_was_ckey = enable_ckey;
 
     if (stateblock->renderState[WINED3DRS_ALPHATESTENABLE] ||
         (stateblock->renderState[WINED3DRS_COLORKEYENABLE] && enable_ckey)) {
@@ -360,14 +389,29 @@ static void state_alpha(DWORD state, IWineD3DStateBlockImpl *stateblock) {
         glAlphaFunc(glParm, ref);
         checkGLcall("glAlphaFunc");
     }
-    /* TODO: Some texture blending operations seem to affect the alpha test */
 }
 
-static void state_clipping(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_clipping(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD enable  = 0xFFFFFFFF;
     DWORD disable = 0x00000000;
 
-    /* TODO: Keep track of previously enabled clipplanes to avoid unneccessary resetting
+    if (use_vs(stateblock->wineD3DDevice)) {
+        /* The spec says that opengl clipping planes are disabled when using shaders. Direct3D planes aren't,
+         * so that is an issue. The MacOS ATI driver keeps clipping planes activated with shaders in some
+         * contitions I got sick of tracking down. The shader state handler disables all clip planes because
+         * of that - don't do anything here and keep them disabled
+         */
+        if(stateblock->renderState[WINED3DRS_CLIPPLANEENABLE]) {
+            static BOOL warned = FALSE;
+            if(!warned) {
+                FIXME("Clipping not supported with vertex shaders\n");
+                warned = TRUE;
+            }
+        }
+        return;
+    }
+
+    /* TODO: Keep track of previously enabled clipplanes to avoid unnecessary resetting
      * of already set values
      */
 
@@ -406,7 +450,7 @@ static void state_clipping(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_blendop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_blendop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     int glParm = GL_FUNC_ADD;
 
     if(!GL_SUPPORT(EXT_BLEND_MINMAX)) {
@@ -430,7 +474,7 @@ static void state_blendop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
 }
 
 static void
-state_specularenable(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+state_specularenable(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     /* Originally this used glLightModeli(GL_LIGHT_MODEL_COLOR_CONTROL,GL_SEPARATE_SPECULAR_COLOR)
      * and (GL_LIGHT_MODEL_COLOR_CONTROL,GL_SINGLE_COLOR) to swap between enabled/disabled
      * specular color. This is wrong:
@@ -461,11 +505,24 @@ state_specularenable(DWORD state, IWineD3DStateBlockImpl *stateblock) {
      * whether WINED3DRS_SPECULARENABLE is enabled or not.
      */
 
-    TRACE("Setting specular enable state\n");
-    /* TODO: Add to the material setting functions */
+    TRACE("Setting specular enable state and materials\n");
     if (stateblock->renderState[WINED3DRS_SPECULARENABLE]) {
         glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, (float*) &stateblock->material.Specular);
         checkGLcall("glMaterialfv");
+
+        if(stateblock->material.Power > 128.0) {
+            /* glMaterialf man page says that the material says that GL_SHININESS must be between 0.0
+             * and 128.0, although in d3d neither -1 nor 129 produce an error. For values > 128 clamp
+             * them, since 128 results in a hardly visible specular highlight, so it should be safe to
+             * to clamp to 128
+             */
+            WARN("Material power > 128\n");
+            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 128.0);
+        } else {
+            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, stateblock->material.Power);
+        }
+        checkGLcall("glMaterialf(GL_SHININESS");
+
         if (GL_SUPPORT(EXT_SECONDARY_COLOR)) {
             glEnable(GL_COLOR_SUM_EXT);
         } else {
@@ -497,9 +554,25 @@ state_specularenable(DWORD state, IWineD3DStateBlockImpl *stateblock) {
             checkGLcall("glFinalCombinerInputNV()");
         }
     }
+
+    TRACE("(%p) : Diffuse (%f,%f,%f,%f)\n", stateblock->wineD3DDevice, stateblock->material.Diffuse.r, stateblock->material.Diffuse.g,
+          stateblock->material.Diffuse.b, stateblock->material.Diffuse.a);
+    TRACE("(%p) : Ambient (%f,%f,%f,%f)\n", stateblock->wineD3DDevice, stateblock->material.Ambient.r, stateblock->material.Ambient.g,
+          stateblock->material.Ambient.b, stateblock->material.Ambient.a);
+    TRACE("(%p) : Specular (%f,%f,%f,%f)\n", stateblock->wineD3DDevice, stateblock->material.Specular.r, stateblock->material.Specular.g,
+          stateblock->material.Specular.b, stateblock->material.Specular.a);
+    TRACE("(%p) : Emissive (%f,%f,%f,%f)\n", stateblock->wineD3DDevice, stateblock->material.Emissive.r, stateblock->material.Emissive.g,
+          stateblock->material.Emissive.b, stateblock->material.Emissive.a);
+
+    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, (float*) &stateblock->material.Ambient);
+    checkGLcall("glMaterialfv(GL_AMBIENT)");
+    glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, (float*) &stateblock->material.Diffuse);
+    checkGLcall("glMaterialfv(GL_DIFFUSE)");
+    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, (float*) &stateblock->material.Emissive);
+    checkGLcall("glMaterialfv(GL_EMISSION)");
 }
 
-static void state_texfactor(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_texfactor(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     unsigned int i;
 
     /* Note the texture color applies to all textures whereas
@@ -560,7 +633,7 @@ renderstate_stencil_twosided(IWineD3DStateBlockImpl *stateblock, GLint face, GLi
 }
 
 static void
-state_stencil(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+state_stencil(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD onesided_enable = FALSE;
     DWORD twosided_enable = FALSE;
     GLint func = GL_ALWAYS;
@@ -573,6 +646,13 @@ state_stencil(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     GLint stencilFail_ccw = GL_KEEP;
     GLint depthFail_ccw = GL_KEEP;
     GLint stencilPass_ccw = GL_KEEP;
+
+    /* No stencil test without a stencil buffer */
+    if(stateblock->wineD3DDevice->stencilBufferTarget == NULL) {
+        glDisable(GL_STENCIL_TEST);
+        checkGLcall("glDisable GL_STENCIL_TEST");
+        return;
+    }
 
     if( stateblock->set.renderState[WINED3DRS_STENCILENABLE] )
         onesided_enable = stateblock->renderState[WINED3DRS_STENCILENABLE];
@@ -601,9 +681,9 @@ state_stencil(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     if( stateblock->set.renderState[WINED3DRS_CCW_STENCILPASS] )
         stencilPass_ccw = StencilOp(stateblock->renderState[WINED3DRS_CCW_STENCILPASS]);
 
-    TRACE("(onesided %d, twosided %d, ref %x, mask %x,  \
-            GL_FRONT: func: %x, fail %x, zfail %x, zpass %x  \
-            GL_BACK: func: %x, fail %x, zfail %x, zpass %x )\n",
+    TRACE("(onesided %d, twosided %d, ref %x, mask %x, "
+          "GL_FRONT: func: %x, fail %x, zfail %x, zpass %x "
+          "GL_BACK: func: %x, fail %x, zfail %x, zpass %x )\n",
     onesided_enable, twosided_enable, ref, mask,
     func, stencilFail, depthFail, stencilPass,
     func_ccw, stencilFail_ccw, depthFail_ccw, stencilPass_ccw);
@@ -626,14 +706,20 @@ state_stencil(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_stencilwrite(DWORD state, IWineD3DStateBlockImpl *stateblock) {
-    glStencilMask(stateblock->renderState[WINED3DRS_STENCILWRITEMASK]);
+static void state_stencilwrite(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    if(stateblock->wineD3DDevice->stencilBufferTarget) {
+        glStencilMask(stateblock->renderState[WINED3DRS_STENCILWRITEMASK]);
+    } else {
+        glStencilMask(0);
+    }
     checkGLcall("glStencilMask");
 }
 
-static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     /* TODO: Put this into the vertex type block once that is in the state table */
     BOOL fogenable = stateblock->renderState[WINED3DRS_FOGENABLE];
+    BOOL is_ps3 = use_ps(stateblock->wineD3DDevice)
+                  && ((IWineD3DPixelShaderImpl *)stateblock->pixelShader)->baseShader.hex_version >= WINED3DPS_VERSION(3,0);
     float fogstart, fogend;
 
     union {
@@ -645,6 +731,18 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
         /* No fog? Disable it, and we're done :-) */
         glDisable(GL_FOG);
         checkGLcall("glDisable GL_FOG");
+        if( use_ps(stateblock->wineD3DDevice)
+                && ((IWineD3DPixelShaderImpl *)stateblock->pixelShader)->baseShader.hex_version < WINED3DPS_VERSION(3,0) ) {
+            /* disable fog in the pixel shader
+             * NOTE: For pixel shader, GL_FOG_START and GL_FOG_END don't hold fog start s and end e but
+             * -1/(e-s) and e/(e-s) respectively.
+             */
+            glFogf(GL_FOG_START, 0.0f);
+            checkGLcall("glFogf(GL_FOG_START, fogstart");
+            glFogf(GL_FOG_END, 1.0f);
+            checkGLcall("glFogf(GL_FOG_END, fogend");
+        }
+        return;
     }
 
     tmpvalue.d = stateblock->renderState[WINED3DRS_FOGSTART];
@@ -652,29 +750,110 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     tmpvalue.d = stateblock->renderState[WINED3DRS_FOGEND];
     fogend = tmpvalue.f;
 
-    /* Activate when vertex shaders are in the state table */
-    if(stateblock->vertexShader && ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->baseShader.function &&
-       ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->usesFog) {
-        glFogi(GL_FOG_MODE, GL_LINEAR);
-        checkGLcall("glFogi(GL_FOG_MODE, GL_LINEAR)");
-        fogstart = 1.0;
-        fogend = 0.0;
-        stateblock->wineD3DDevice->last_was_foggy_shader = TRUE;
+    /* Fog Rules:
+     *
+     * With fixed function vertex processing, Direct3D knows 2 different fog input sources.
+     * It can use the Z value of the vertex, or the alpha component of the specular color.
+     * This depends on the fog vertex, fog table and the vertex declaration. If the Z value
+     * is used, fogstart, fogend and the equation type are used, otherwise linear fog with
+     * start = 255, end = 0 is used. Obviously the msdn is not very clear on that.
+     *
+     * FOGTABLEMODE != NONE:
+     *  The Z value is used, with the equation specified, no matter what vertex type.
+     *
+     * FOGTABLEMODE == NONE, FOGVERTEXMODE != NONE, untransformed:
+     *  Per vertex fog is calculated using the specified fog equation and the parameters
+     *
+     * FOGTABLEMODE == NONE, FOGVERTEXMODE != NONE, transformed, OR
+     * FOGTABLEMODE == NONE, FOGVERTEXMODE == NONE, untransformed:
+     *  Linear fog with start = 255.0, end = 0.0, input comes from the specular color
+     *
+     *
+     * Rules for vertex fog with shaders:
+     *
+     * When mixing fixed function functionality with the programmable pipeline, D3D expects
+     * the fog computation to happen during transformation while openGL expects it to happen
+     * during rasterization. Also, prior to pixel shader 3.0 D3D handles fog blending after
+     * the pixel shader while openGL always expects the pixel shader to handle the blending.
+     * To solve this problem, WineD3D does:
+     * 1) implement a linear fog equation and fog blending at the end of every pre 3.0 pixel
+     * shader,
+     * and 2) disables the fog computation (in either the fixed function or programmable
+     * rasterizer) if using a vertex program.
+     *
+     *
+     * If a fogtablemode and a fogvertexmode are specified, table fog is applied (with or
+     * without shaders).
+     */
+
+    if( is_ps3 ) {
+        if( !use_vs(stateblock->wineD3DDevice)
+                && stateblock->renderState[WINED3DRS_FOGTABLEMODE] == WINED3DFOG_NONE ) {
+            FIXME("Implement vertex fog for pixel shader >= 3.0 and fixed function pipeline\n");
+        }
+    }
+
+    if (use_vs(stateblock->wineD3DDevice)
+            && ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->baseShader.reg_maps.fog) {
+        if( stateblock->renderState[WINED3DRS_FOGTABLEMODE] != WINED3DFOG_NONE ) {
+            if(!is_ps3) FIXME("Implement table fog for foggy vertex shader\n");
+            /* Disable fog */
+            fogenable = FALSE;
+        } else {
+            /* Set fog computation in the rasterizer to pass through the value (just blend it) */
+            glFogi(GL_FOG_MODE, GL_LINEAR);
+            checkGLcall("glFogi(GL_FOG_MODE, GL_LINEAR)");
+            fogstart = 1.0;
+            fogend = 0.0;
+        }
+        context->last_was_foggy_shader = TRUE;
+    }
+    else if( use_ps(stateblock->wineD3DDevice) ) {
+        /* NOTE: For pixel shader, GL_FOG_START and GL_FOG_END don't hold fog start s and end e but
+         * -1/(e-s) and e/(e-s) respectively to simplify fog computation in the shader.
+         */
+        WINED3DFOGMODE mode;
+        context->last_was_foggy_shader = FALSE;
+
+        /* If both fogmodes are set use the table fog mode */
+        if(stateblock->renderState[WINED3DRS_FOGTABLEMODE] == WINED3DFOG_NONE)
+            mode = stateblock->renderState[WINED3DRS_FOGVERTEXMODE];
+        else
+            mode = stateblock->renderState[WINED3DRS_FOGTABLEMODE];
+
+        switch (mode) {
+            case WINED3DFOG_EXP:
+            case WINED3DFOG_EXP2:
+                if(!is_ps3) FIXME("Implement non linear fog for pixel shader < 3.0\n");
+                /* Disable fog */
+                fogenable = FALSE;
+                break;
+
+            case WINED3DFOG_LINEAR:
+                fogstart = -1.0f/(fogend-fogstart);
+                fogend *= -fogstart;
+                break;
+
+            case WINED3DFOG_NONE:
+                if(!is_ps3) FIXME("Implement software vertex fog for pixel shader < 3.0\n");
+                /* Disable fog */
+                fogenable = FALSE;
+                break;
+            default: FIXME("Unexpected WINED3DRS_FOGVERTEXMODE %d\n", stateblock->renderState[WINED3DRS_FOGVERTEXMODE]);
+        }
     }
     /* DX 7 sdk: "If both render states(vertex and table fog) are set to valid modes,
      * the system will apply only pixel(=table) fog effects."
      */
-	else if(stateblock->renderState[WINED3DRS_FOGTABLEMODE] == D3DFOG_NONE) {
+    else if(stateblock->renderState[WINED3DRS_FOGTABLEMODE] == WINED3DFOG_NONE) {
         glHint(GL_FOG_HINT, GL_FASTEST);
         checkGLcall("glHint(GL_FOG_HINT, GL_FASTEST)");
-        stateblock->wineD3DDevice->last_was_foggy_shader = FALSE;
+        context->last_was_foggy_shader = FALSE;
 
         switch (stateblock->renderState[WINED3DRS_FOGVERTEXMODE]) {
-            /* Processed vertices have their fog factor stored in the specular value. Fall too the none case.
-             * If we are drawing untransformed vertices atm, d3ddevice_set_ortho will update the fog
-             */
-            case D3DFOG_EXP:  {
-                if(!stateblock->wineD3DDevice->last_was_rhw) {
+            /* If processed vertices are used, fall through to the NONE case */
+            case WINED3DFOG_EXP:  {
+                if(!context->last_was_rhw) {
                     glFogi(GL_FOG_MODE, GL_EXP);
                     checkGLcall("glFogi(GL_FOG_MODE, GL_EXP");
                     if(GL_SUPPORT(EXT_FOG_COORD)) {
@@ -684,8 +863,8 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
                     break;
                 }
             }
-            case D3DFOG_EXP2: {
-                if(!stateblock->wineD3DDevice->last_was_rhw) {
+            case WINED3DFOG_EXP2: {
+                if(!context->last_was_rhw) {
                     glFogi(GL_FOG_MODE, GL_EXP2);
                     checkGLcall("glFogi(GL_FOG_MODE, GL_EXP2");
                     if(GL_SUPPORT(EXT_FOG_COORD)) {
@@ -695,8 +874,8 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
                     break;
                 }
             }
-            case D3DFOG_LINEAR: {
-                if(!stateblock->wineD3DDevice->last_was_rhw) {
+            case WINED3DFOG_LINEAR: {
+                if(!context->last_was_rhw) {
                     glFogi(GL_FOG_MODE, GL_LINEAR);
                     checkGLcall("glFogi(GL_FOG_MODE, GL_LINEAR");
                     if(GL_SUPPORT(EXT_FOG_COORD)) {
@@ -706,7 +885,7 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
                     break;
                 }
             }
-            case D3DFOG_NONE: {
+            case WINED3DFOG_NONE: {
                 /* Both are none? According to msdn the alpha channel of the specular
                  * color contains a fog factor. Set it in drawStridedSlow.
                  * Same happens with Vertexfog on transformed vertices
@@ -729,10 +908,10 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     } else {
         glHint(GL_FOG_HINT, GL_NICEST);
         checkGLcall("glHint(GL_FOG_HINT, GL_NICEST)");
-        stateblock->wineD3DDevice->last_was_foggy_shader = FALSE;
+        context->last_was_foggy_shader = FALSE;
 
         switch (stateblock->renderState[WINED3DRS_FOGTABLEMODE]) {
-            case D3DFOG_EXP:
+            case WINED3DFOG_EXP:
                 glFogi(GL_FOG_MODE, GL_EXP);
                 checkGLcall("glFogi(GL_FOG_MODE, GL_EXP");
                 if(GL_SUPPORT(EXT_FOG_COORD)) {
@@ -741,7 +920,7 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
                 }
                 break;
 
-            case D3DFOG_EXP2:
+            case WINED3DFOG_EXP2:
                 glFogi(GL_FOG_MODE, GL_EXP2);
                 checkGLcall("glFogi(GL_FOG_MODE, GL_EXP2");
                 if(GL_SUPPORT(EXT_FOG_COORD)) {
@@ -750,7 +929,7 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
                 }
                 break;
 
-            case D3DFOG_LINEAR:
+            case WINED3DFOG_LINEAR:
                 glFogi(GL_FOG_MODE, GL_LINEAR);
                 checkGLcall("glFogi(GL_FOG_MODE, GL_LINEAR");
                 if(GL_SUPPORT(EXT_FOG_COORD)) {
@@ -759,7 +938,7 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
                 }
                 break;
 
-            case D3DFOG_NONE:   /* Won't happen */
+            case WINED3DFOG_NONE:   /* Won't happen */
             default:
                 FIXME("Unexpected WINED3DRS_FOGTABLEMODE %d\n", stateblock->renderState[WINED3DRS_FOGTABLEMODE]);
         }
@@ -779,6 +958,16 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     } else {
         glDisable(GL_FOG);
         checkGLcall("glDisable GL_FOG");
+        if( use_ps(stateblock->wineD3DDevice) ) {
+            /* disable fog in the pixel shader
+             * NOTE: For pixel shader, GL_FOG_START and GL_FOG_END don't hold fog start s and end e but
+             * -1/(e-s) and e/(e-s) respectively.
+             */
+            glFogf(GL_FOG_START, 0.0f);
+            checkGLcall("glFogf(GL_FOG_START, fogstart");
+            glFogf(GL_FOG_END, 1.0f);
+            checkGLcall("glFogf(GL_FOG_END, fogend");
+        }
     }
 
     if (GL_SUPPORT(NV_FOG_DISTANCE)) {
@@ -786,15 +975,14 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_fogcolor(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_fogcolor(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     float col[4];
     D3DCOLORTOGLFLOAT4(stateblock->renderState[WINED3DRS_FOGCOLOR], col);
-    /* Set the default alpha blend color */
     glFogfv(GL_FOG_COLOR, &col[0]);
     checkGLcall("glFog GL_FOG_COLOR");
 }
 
-static void state_fogdensity(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_fogdensity(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     union {
         DWORD d;
         float f;
@@ -805,45 +993,119 @@ static void state_fogdensity(DWORD state, IWineD3DStateBlockImpl *stateblock) {
 }
 
 /* TODO: Merge with primitive type + init_materials()!! */
-static void state_colormat(DWORD state, IWineD3DStateBlockImpl *stateblock) {
-    GLenum Parm = GL_AMBIENT_AND_DIFFUSE;
+static void state_colormat(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *)stateblock->wineD3DDevice;
+    GLenum Parm = 0;
+    WineDirect3DStridedData *diffuse = &device->strided_streams.u.s.diffuse;
+    BOOL isDiffuseSupplied;
 
-    if (stateblock->renderState[WINED3DRS_COLORVERTEX]) {
+    /* Depends on the decoded vertex declaration to read the existence of diffuse data.
+     * The vertex declaration will call this function if the fixed function pipeline is used.
+     */
+
+    if(isStateDirty(context, STATE_VDECL)) {
+        return;
+    }
+
+    isDiffuseSupplied = diffuse->lpData || diffuse->VBO;
+
+    context->num_untracked_materials = 0;
+    if (isDiffuseSupplied && stateblock->renderState[WINED3DRS_COLORVERTEX]) {
         TRACE("diff %d, amb %d, emis %d, spec %d\n",
               stateblock->renderState[WINED3DRS_DIFFUSEMATERIALSOURCE],
               stateblock->renderState[WINED3DRS_AMBIENTMATERIALSOURCE],
               stateblock->renderState[WINED3DRS_EMISSIVEMATERIALSOURCE],
               stateblock->renderState[WINED3DRS_SPECULARMATERIALSOURCE]);
 
-        if (stateblock->renderState[WINED3DRS_DIFFUSEMATERIALSOURCE] == D3DMCS_COLOR1) {
-            if (stateblock->renderState[WINED3DRS_AMBIENTMATERIALSOURCE] == D3DMCS_COLOR1) {
+        if (stateblock->renderState[WINED3DRS_DIFFUSEMATERIALSOURCE] == WINED3DMCS_COLOR1) {
+            if (stateblock->renderState[WINED3DRS_AMBIENTMATERIALSOURCE] == WINED3DMCS_COLOR1) {
                 Parm = GL_AMBIENT_AND_DIFFUSE;
             } else {
                 Parm = GL_DIFFUSE;
             }
-        } else if (stateblock->renderState[WINED3DRS_AMBIENTMATERIALSOURCE] == D3DMCS_COLOR1) {
+            if(stateblock->renderState[WINED3DRS_EMISSIVEMATERIALSOURCE] == WINED3DMCS_COLOR1) {
+                context->untracked_materials[context->num_untracked_materials] = GL_EMISSION;
+                context->num_untracked_materials++;
+            }
+            if(stateblock->renderState[WINED3DRS_SPECULARMATERIALSOURCE] == WINED3DMCS_COLOR1) {
+                context->untracked_materials[context->num_untracked_materials] = GL_SPECULAR;
+                context->num_untracked_materials++;
+            }
+        } else if (stateblock->renderState[WINED3DRS_AMBIENTMATERIALSOURCE] == WINED3DMCS_COLOR1) {
             Parm = GL_AMBIENT;
-        } else if (stateblock->renderState[WINED3DRS_EMISSIVEMATERIALSOURCE] == D3DMCS_COLOR1) {
+            if(stateblock->renderState[WINED3DRS_EMISSIVEMATERIALSOURCE] == WINED3DMCS_COLOR1) {
+                context->untracked_materials[context->num_untracked_materials] = GL_EMISSION;
+                context->num_untracked_materials++;
+            }
+            if(stateblock->renderState[WINED3DRS_SPECULARMATERIALSOURCE] == WINED3DMCS_COLOR1) {
+                context->untracked_materials[context->num_untracked_materials] = GL_SPECULAR;
+                context->num_untracked_materials++;
+            }
+        } else if (stateblock->renderState[WINED3DRS_EMISSIVEMATERIALSOURCE] == WINED3DMCS_COLOR1) {
             Parm = GL_EMISSION;
-        } else if (stateblock->renderState[WINED3DRS_SPECULARMATERIALSOURCE] == D3DMCS_COLOR1) {
+            if(stateblock->renderState[WINED3DRS_SPECULARMATERIALSOURCE] == WINED3DMCS_COLOR1) {
+                context->untracked_materials[context->num_untracked_materials] = GL_SPECULAR;
+                context->num_untracked_materials++;
+            }
+        } else if (stateblock->renderState[WINED3DRS_SPECULARMATERIALSOURCE] == WINED3DMCS_COLOR1) {
             Parm = GL_SPECULAR;
-        } else {
-            Parm = -1;
         }
-
-        if (Parm == -1) {
-            if (stateblock->wineD3DDevice->tracking_color != DISABLED_TRACKING) stateblock->wineD3DDevice->tracking_color = NEEDS_DISABLE;
-        } else {
-            stateblock->wineD3DDevice->tracking_color = NEEDS_TRACKING;
-            stateblock->wineD3DDevice->tracking_parm  = Parm;
-        }
-
-    } else {
-        if (stateblock->wineD3DDevice->tracking_color != DISABLED_TRACKING) stateblock->wineD3DDevice->tracking_color = NEEDS_DISABLE;
     }
+
+    /* Nothing changed, return. */
+    if (Parm == context->tracking_parm) return;
+
+    if(!Parm) {
+        glDisable(GL_COLOR_MATERIAL);
+        checkGLcall("glDisable GL_COLOR_MATERIAL");
+    } else {
+        glColorMaterial(GL_FRONT_AND_BACK, Parm);
+        checkGLcall("glColorMaterial(GL_FRONT_AND_BACK, Parm)");
+        glEnable(GL_COLOR_MATERIAL);
+        checkGLcall("glEnable(GL_COLOR_MATERIAL)");
+    }
+
+    /* Apparently calls to glMaterialfv are ignored for properties we're
+     * tracking with glColorMaterial, so apply those here. */
+    switch (context->tracking_parm) {
+        case GL_AMBIENT_AND_DIFFUSE:
+            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, (float*)&device->updateStateBlock->material.Ambient);
+            glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, (float*)&device->updateStateBlock->material.Diffuse);
+            checkGLcall("glMaterialfv");
+            break;
+
+        case GL_DIFFUSE:
+            glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, (float*)&device->updateStateBlock->material.Diffuse);
+            checkGLcall("glMaterialfv");
+            break;
+
+        case GL_AMBIENT:
+            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, (float*)&device->updateStateBlock->material.Ambient);
+            checkGLcall("glMaterialfv");
+            break;
+
+        case GL_EMISSION:
+            glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, (float*)&device->updateStateBlock->material.Emissive);
+            checkGLcall("glMaterialfv");
+            break;
+
+        case GL_SPECULAR:
+            /* Only change material color if specular is enabled, otherwise it is set to black */
+            if (device->stateBlock->renderState[WINED3DRS_SPECULARENABLE]) {
+                glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, (float*)&device->updateStateBlock->material.Specular);
+                checkGLcall("glMaterialfv");
+            } else {
+                float black[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, &black[0]);
+                checkGLcall("glMaterialfv");
+            }
+            break;
+    }
+
+    context->tracking_parm = Parm;
 }
 
-static void state_linepattern(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_linepattern(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     union {
         DWORD                 d;
         WINED3DLINEPATTERN    lp;
@@ -863,7 +1125,7 @@ static void state_linepattern(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_zbias(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_zbias(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     union {
         DWORD d;
         float f;
@@ -891,7 +1153,7 @@ static void state_zbias(DWORD state, IWineD3DStateBlockImpl *stateblock) {
 }
 
 
-static void state_normalize(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_normalize(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if (stateblock->renderState[WINED3DRS_NORMALIZENORMALS]) {
         glEnable(GL_NORMALIZE);
         checkGLcall("glEnable(GL_NORMALIZE);");
@@ -901,7 +1163,7 @@ static void state_normalize(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_psize(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_psize(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     union {
         DWORD d;
         float f;
@@ -914,47 +1176,45 @@ static void state_psize(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     checkGLcall("glPointSize(...);");
 }
 
-static void state_psizemin(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_psizemin(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     union {
         DWORD d;
         float f;
     } tmpvalue;
 
+    tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MIN];
     if(GL_SUPPORT(ARB_POINT_PARAMETERS)) {
-        tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MIN];
         GL_EXTCALL(glPointParameterfARB)(GL_POINT_SIZE_MIN_ARB, tmpvalue.f);
         checkGLcall("glPointParameterfARB(...");
     }
     else if(GL_SUPPORT(EXT_POINT_PARAMETERS)) {
-        tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MIN];
         GL_EXTCALL(glPointParameterfEXT)(GL_POINT_SIZE_MIN_EXT, tmpvalue.f);
         checkGLcall("glPointParameterfEXT(...);");
-    } else {
-        FIXME("WINED3DRS_POINTSIZE_MIN not supported on this opengl\n");
+    } else if(tmpvalue.f != 1.0) {
+        FIXME("WINED3DRS_POINTSIZE_MIN not supported on this opengl, value is %f\n", tmpvalue.f);
     }
 }
 
-static void state_psizemax(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_psizemax(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     union {
         DWORD d;
         float f;
     } tmpvalue;
 
+    tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MAX];
     if(GL_SUPPORT(ARB_POINT_PARAMETERS)) {
-        tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MAX];
         GL_EXTCALL(glPointParameterfARB)(GL_POINT_SIZE_MAX_ARB, tmpvalue.f);
         checkGLcall("glPointParameterfARB(...");
     }
     else if(GL_SUPPORT(EXT_POINT_PARAMETERS)) {
-        tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MAX];
         GL_EXTCALL(glPointParameterfEXT)(GL_POINT_SIZE_MAX_EXT, tmpvalue.f);
         checkGLcall("glPointParameterfEXT(...);");
-    } else {
-        FIXME("WINED3DRS_POINTSIZE_MAX not supported on this opengl\n");
+    } else if(tmpvalue.f != 64.0) {
+        FIXME("WINED3DRS_POINTSIZE_MAX not supported on this opengl, value is %f\n", tmpvalue.f);
     }
 }
 
-static void state_pscale(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_pscale(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     /* TODO: Group this with the viewport */
     /*
      * POINTSCALEENABLE controls how point size value is treated. If set to
@@ -1005,18 +1265,18 @@ static void state_pscale(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_colorwrite(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_colorwrite(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD Value = stateblock->renderState[WINED3DRS_COLORWRITEENABLE];
 
     TRACE("Color mask: r(%d) g(%d) b(%d) a(%d)\n",
-        Value & D3DCOLORWRITEENABLE_RED   ? 1 : 0,
-        Value & D3DCOLORWRITEENABLE_GREEN ? 1 : 0,
-        Value & D3DCOLORWRITEENABLE_BLUE  ? 1 : 0,
-        Value & D3DCOLORWRITEENABLE_ALPHA ? 1 : 0);
-    glColorMask(Value & D3DCOLORWRITEENABLE_RED   ? GL_TRUE : GL_FALSE,
-                Value & D3DCOLORWRITEENABLE_GREEN ? GL_TRUE : GL_FALSE,
-                Value & D3DCOLORWRITEENABLE_BLUE  ? GL_TRUE : GL_FALSE,
-                Value & D3DCOLORWRITEENABLE_ALPHA ? GL_TRUE : GL_FALSE);
+        Value & WINED3DCOLORWRITEENABLE_RED   ? 1 : 0,
+        Value & WINED3DCOLORWRITEENABLE_GREEN ? 1 : 0,
+        Value & WINED3DCOLORWRITEENABLE_BLUE  ? 1 : 0,
+        Value & WINED3DCOLORWRITEENABLE_ALPHA ? 1 : 0);
+    glColorMask(Value & WINED3DCOLORWRITEENABLE_RED   ? GL_TRUE : GL_FALSE,
+                Value & WINED3DCOLORWRITEENABLE_GREEN ? GL_TRUE : GL_FALSE,
+                Value & WINED3DCOLORWRITEENABLE_BLUE  ? GL_TRUE : GL_FALSE,
+                Value & WINED3DCOLORWRITEENABLE_ALPHA ? GL_TRUE : GL_FALSE);
     checkGLcall("glColorMask(...)");
 
     /* depends on WINED3DRS_COLORWRITEENABLE. */
@@ -1030,7 +1290,7 @@ static void state_colorwrite(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_localviewer(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_localviewer(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_LOCALVIEWER]) {
         glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, 1);
         checkGLcall("glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, 1)");
@@ -1040,18 +1300,21 @@ static void state_localviewer(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_lastpixel(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_lastpixel(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_LASTPIXEL]) {
         TRACE("Last Pixel Drawing Enabled\n");
     } else {
-        FIXME("Last Pixel Drawing Disabled, not handled yet\n");
+        static BOOL first = TRUE;
+        if(first) {
+            FIXME("Last Pixel Drawing Disabled, not handled yet\n");
+            first = FALSE;
+        } else {
+            TRACE("Last Pixel Drawing Disabled, not handled yet\n");
+        }
     }
 }
 
-static void state_pointsprite(DWORD state, IWineD3DStateBlockImpl *stateblock) {
-    unsigned int i;
-    int val;
-
+static void state_pointsprite(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     /* TODO: NV_POINT_SPRITE */
     if (!GL_SUPPORT(ARB_POINT_SPRITE)) {
         TRACE("Point sprites not supported\n");
@@ -1059,30 +1322,15 @@ static void state_pointsprite(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 
     if (stateblock->renderState[WINED3DRS_POINTSPRITEENABLE]) {
-        val = GL_TRUE;
+        glEnable(GL_POINT_SPRITE_ARB);
+        checkGLcall("glEnable(GL_POINT_SPRITE_ARB)\n");
     } else {
-        val = GL_FALSE;
-    }
-
-    for (i = 0; i < GL_LIMITS(texture_stages); i++) {
-        /* Note the WINED3DRS value applies to all textures, but GL has one
-         * per texture, so apply it now ready to be used!
-         */
-        if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-            GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + i));
-            checkGLcall("glActiveTextureARB");
-        } else if (i==1) {
-            FIXME("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
-            break;
-        }
-
-        glTexEnvi(GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, val);
-        checkGLcall((val?"glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE)":
-                         "glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_FALSE)"));
+        glDisable(GL_POINT_SPRITE_ARB);
+        checkGLcall("glDisable(GL_POINT_SPRITE_ARB)\n");
     }
 }
 
-static void state_wrap(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_wrap(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     /**
      http://www.cosc.brocku.ca/Offerings/3P98/course/lectures/texture/
      http://msdn.microsoft.com/archive/default.asp?url=/archive/en-us/directx9_c/directx/graphics/programmingguide/FixedFunction/Textures/texturewrapping.asp
@@ -1109,11 +1357,11 @@ static void state_wrap(DWORD state, IWineD3DStateBlockImpl *stateblock) {
        stateblock->renderState[WINED3DRS_WRAP13] ||
        stateblock->renderState[WINED3DRS_WRAP14] ||
        stateblock->renderState[WINED3DRS_WRAP15] ) {
-        ERR("(WINED3DRS_WRAP0) Texture wraping not yet supported\n");
+        FIXME("(WINED3DRS_WRAP0) Texture wraping not yet supported\n");
     }
 }
 
-static void state_multisampleaa(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_multisampleaa(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if( GL_SUPPORT(ARB_MULTISAMPLE) ) {
         if(stateblock->renderState[WINED3DRS_MULTISAMPLEANTIALIAS]) {
             glEnable(GL_MULTISAMPLE_ARB);
@@ -1129,7 +1377,7 @@ static void state_multisampleaa(DWORD state, IWineD3DStateBlockImpl *stateblock)
     }
 }
 
-static void state_scissor(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_scissor(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_SCISSORTESTENABLE]) {
         glEnable(GL_SCISSOR_TEST);
         checkGLcall("glEnable(GL_SCISSOR_TEST)");
@@ -1139,7 +1387,7 @@ static void state_scissor(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_depthbias(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_depthbias(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     union {
         DWORD d;
         float f;
@@ -1158,7 +1406,7 @@ static void state_depthbias(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_perspective(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_perspective(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if (stateblock->renderState[WINED3DRS_TEXTUREPERSPECTIVE]) {
         glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST);
         checkGLcall("glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST)");
@@ -1168,31 +1416,31 @@ static void state_perspective(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void state_stippledalpha(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_stippledalpha(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     TRACE("Stub\n");
     if (stateblock->renderState[WINED3DRS_STIPPLEDALPHA])
-        ERR(" Stippled Alpha not supported yet.\n");
+        FIXME(" Stippled Alpha not supported yet.\n");
 }
 
-static void state_antialias(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_antialias(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     TRACE("Stub\n");
     if (stateblock->renderState[WINED3DRS_ANTIALIAS])
-        ERR(" Antialias not supported yet.\n");
+        FIXME(" Antialias not supported yet.\n");
 }
 
-static void state_multisampmask(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_multisampmask(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     TRACE("Stub\n");
     if (stateblock->renderState[WINED3DRS_MULTISAMPLEMASK] != 0xFFFFFFFF)
-        ERR("(WINED3DRS_MULTISAMPLEMASK,%d) not yet implemented\n", stateblock->renderState[WINED3DRS_MULTISAMPLEMASK]);
+        FIXME("(WINED3DRS_MULTISAMPLEMASK,%d) not yet implemented\n", stateblock->renderState[WINED3DRS_MULTISAMPLEMASK]);
 }
 
-static void state_patchedgestyle(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_patchedgestyle(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     TRACE("Stub\n");
-    if (stateblock->renderState[WINED3DRS_PATCHEDGESTYLE] != D3DPATCHEDGE_DISCRETE)
-        ERR("(WINED3DRS_PATCHEDGESTYLE,%d) not yet implemented\n", stateblock->renderState[WINED3DRS_PATCHEDGESTYLE]);
+    if (stateblock->renderState[WINED3DRS_PATCHEDGESTYLE] != WINED3DPATCHEDGE_DISCRETE)
+        FIXME("(WINED3DRS_PATCHEDGESTYLE,%d) not yet implemented\n", stateblock->renderState[WINED3DRS_PATCHEDGESTYLE]);
 }
 
-static void state_patchsegments(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_patchsegments(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     union {
         DWORD d;
         float f;
@@ -1201,124 +1449,132 @@ static void state_patchsegments(DWORD state, IWineD3DStateBlockImpl *stateblock)
 
     TRACE("Stub\n");
     if (stateblock->renderState[WINED3DRS_PATCHSEGMENTS] != tmpvalue.d)
-        ERR("(WINED3DRS_PATCHSEGMENTS,%d) not yet implemented\n", tmpvalue.d);
+    {
+        static BOOL displayed = FALSE;
+
+        tmpvalue.d = stateblock->renderState[WINED3DRS_PATCHSEGMENTS];
+        if(!displayed)
+            FIXME("(WINED3DRS_PATCHSEGMENTS,%f) not yet implemented\n", tmpvalue.f);
+
+        displayed = TRUE;
+    }
 }
 
-static void state_positiondegree(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_positiondegree(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     TRACE("Stub\n");
-    if (stateblock->renderState[WINED3DRS_POSITIONDEGREE] != D3DDEGREE_CUBIC)
-        ERR("(WINED3DRS_POSITIONDEGREE,%d) not yet implemented\n", stateblock->renderState[WINED3DRS_POSITIONDEGREE]);
+    if (stateblock->renderState[WINED3DRS_POSITIONDEGREE] != WINED3DDEGREE_CUBIC)
+        FIXME("(WINED3DRS_POSITIONDEGREE,%d) not yet implemented\n", stateblock->renderState[WINED3DRS_POSITIONDEGREE]);
 }
 
-static void state_normaldegree(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_normaldegree(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     TRACE("Stub\n");
-    if (stateblock->renderState[WINED3DRS_NORMALDEGREE] != D3DDEGREE_LINEAR)
-        ERR("(WINED3DRS_NORMALDEGREE,%d) not yet implemented\n", stateblock->renderState[WINED3DRS_NORMALDEGREE]);
+    if (stateblock->renderState[WINED3DRS_NORMALDEGREE] != WINED3DDEGREE_LINEAR)
+        FIXME("(WINED3DRS_NORMALDEGREE,%d) not yet implemented\n", stateblock->renderState[WINED3DRS_NORMALDEGREE]);
 }
 
-static void state_tessellation(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_tessellation(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     TRACE("Stub\n");
     if(stateblock->renderState[WINED3DRS_ENABLEADAPTIVETESSELLATION])
         FIXME("(WINED3DRS_ENABLEADAPTIVETESSELLATION,%d) not yet implemented\n", stateblock->renderState[WINED3DRS_ENABLEADAPTIVETESSELLATION]);
 }
 
 
-static void state_srgbwrite(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_srgbwrite(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_SRGBWRITEENABLE])
-        ERR("Render state WINED3DRS_SRGBWRITEENABLE not yet implemented\n");
+        FIXME("Render state WINED3DRS_SRGBWRITEENABLE not yet implemented\n");
 }
 
-static void state_seperateblend(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_separateblend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     TRACE("Stub\n");
     if(stateblock->renderState[WINED3DRS_SEPARATEALPHABLENDENABLE])
         FIXME("(WINED3DRS_SEPARATEALPHABLENDENABLE,%d) not yet implemented\n", stateblock->renderState[WINED3DRS_SEPARATEALPHABLENDENABLE]);
 }
 
-static void state_wrapu(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_wrapu(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_WRAPU]) {
         FIXME("Render state WINED3DRS_WRAPU not implemented yet\n");
     }
 }
 
-static void state_wrapv(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_wrapv(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_WRAPV]) {
         FIXME("Render state WINED3DRS_WRAPV not implemented yet\n");
     }
 }
 
-static void state_monoenable(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_monoenable(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_MONOENABLE]) {
         FIXME("Render state WINED3DRS_MONOENABLE not implemented yet\n");
     }
 }
 
-static void state_rop2(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_rop2(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_ROP2]) {
         FIXME("Render state WINED3DRS_ROP2 not implemented yet\n");
     }
 }
 
-static void state_planemask(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_planemask(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_PLANEMASK]) {
         FIXME("Render state WINED3DRS_PLANEMASK not implemented yet\n");
     }
 }
 
-static void state_subpixel(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_subpixel(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_SUBPIXEL]) {
         FIXME("Render state WINED3DRS_SUBPIXEL not implemented yet\n");
     }
 }
 
-static void state_subpixelx(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_subpixelx(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_SUBPIXELX]) {
         FIXME("Render state WINED3DRS_SUBPIXELX not implemented yet\n");
     }
 }
 
-static void state_stippleenable(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_stippleenable(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_STIPPLEENABLE]) {
         FIXME("Render state WINED3DRS_STIPPLEENABLE not implemented yet\n");
     }
 }
 
-static void state_bordercolor(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_bordercolor(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_BORDERCOLOR]) {
         FIXME("Render state WINED3DRS_BORDERCOLOR not implemented yet\n");
     }
 }
 
-static void state_mipmaplodbias(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_mipmaplodbias(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_MIPMAPLODBIAS]) {
         FIXME("Render state WINED3DRS_MIPMAPLODBIAS not implemented yet\n");
     }
 }
 
-static void state_anisotropy(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_anisotropy(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_ANISOTROPY]) {
         FIXME("Render state WINED3DRS_ANISOTROPY not implemented yet\n");
     }
 }
 
-static void state_flushbatch(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_flushbatch(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_FLUSHBATCH]) {
         FIXME("Render state WINED3DRS_FLUSHBATCH not implemented yet\n");
     }
 }
 
-static void state_translucentsi(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_translucentsi(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_TRANSLUCENTSORTINDEPENDENT]) {
         FIXME("Render state WINED3DRS_TRANSLUCENTSORTINDEPENDENT not implemented yet\n");
     }
 }
 
-static void state_extents(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_extents(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_EXTENTS]) {
         FIXME("Render state WINED3DRS_EXTENTS not implemented yet\n");
     }
 }
 
-static void state_ckeyblend(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void state_ckeyblend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_COLORKEYBLENDENABLE]) {
         FIXME("Render state WINED3DRS_COLORKEYBLENDENABLE not implemented yet\n");
     }
@@ -1328,50 +1584,78 @@ static void state_ckeyblend(DWORD state, IWineD3DStateBlockImpl *stateblock) {
  * Does not care for the colorop or correct gl texture unit(when using nvrc)
  * Requires the caller to activate the correct unit before
  */
-static void activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock) {
+static void activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    BOOL bumpmap = FALSE;
+
+    if(stage > 0 && (stateblock->textureState[stage - 1][WINED3DTSS_COLOROP] == WINED3DTOP_BUMPENVMAPLUMINANCE ||
+                     stateblock->textureState[stage - 1][WINED3DTSS_COLOROP] == WINED3DTOP_BUMPENVMAP)) {
+        bumpmap = TRUE;
+        context->texShaderBumpMap |= (1 << stage);
+    } else {
+        context->texShaderBumpMap &= ~(1 << stage);
+    }
+
     if(stateblock->textures[stage]) {
-        glDisable(GL_TEXTURE_1D);
-        checkGLcall("glDisable(GL_TEXTURE_1D)");
         switch(stateblock->textureDimensions[stage]) {
             case GL_TEXTURE_2D:
-                glDisable(GL_TEXTURE_3D);
-                checkGLcall("glDisable(GL_TEXTURE_3D)");
-                glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-                checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
-                glEnable(GL_TEXTURE_2D);
-                checkGLcall("glEnable(GL_TEXTURE_2D)");
+                if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+                    glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, bumpmap ? GL_OFFSET_TEXTURE_2D_NV : GL_TEXTURE_2D);
+                } else {
+                    glDisable(GL_TEXTURE_3D);
+                    checkGLcall("glDisable(GL_TEXTURE_3D)");
+                    if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
+                        glDisable(GL_TEXTURE_CUBE_MAP_ARB);
+                        checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
+                    }
+                    glEnable(GL_TEXTURE_2D);
+                    checkGLcall("glEnable(GL_TEXTURE_2D)");
+                }
                 break;
             case GL_TEXTURE_3D:
-                glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-                checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
-                glDisable(GL_TEXTURE_2D);
-                checkGLcall("glDisable(GL_TEXTURE_2D)");
-                glEnable(GL_TEXTURE_3D);
-                checkGLcall("glEnable(GL_TEXTURE_3D)");
+                if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+                    glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_TEXTURE_3D);
+                } else {
+                    if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
+                        glDisable(GL_TEXTURE_CUBE_MAP_ARB);
+                        checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
+                    }
+                    glDisable(GL_TEXTURE_2D);
+                    checkGLcall("glDisable(GL_TEXTURE_2D)");
+                    glEnable(GL_TEXTURE_3D);
+                    checkGLcall("glEnable(GL_TEXTURE_3D)");
+                }
                 break;
             case GL_TEXTURE_CUBE_MAP_ARB:
-                glDisable(GL_TEXTURE_2D);
-                checkGLcall("glDisable(GL_TEXTURE_2D)");
-                glDisable(GL_TEXTURE_3D);
-                checkGLcall("glDisable(GL_TEXTURE_3D)");
-                glEnable(GL_TEXTURE_CUBE_MAP_ARB);
-                checkGLcall("glEnable(GL_TEXTURE_CUBE_MAP_ARB)");
-                break;
+                if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+                    glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_TEXTURE_CUBE_MAP_ARB);
+                } else {
+                    glDisable(GL_TEXTURE_2D);
+                    checkGLcall("glDisable(GL_TEXTURE_2D)");
+                    glDisable(GL_TEXTURE_3D);
+                    checkGLcall("glDisable(GL_TEXTURE_3D)");
+                    glEnable(GL_TEXTURE_CUBE_MAP_ARB);
+                    checkGLcall("glEnable(GL_TEXTURE_CUBE_MAP_ARB)");
+                }
+              break;
         }
     } else {
-        glDisable(GL_TEXTURE_2D);
-        checkGLcall("glDisable(GL_TEXTURE_2D)");
-        glDisable(GL_TEXTURE_3D);
-        checkGLcall("glDisable(GL_TEXTURE_3D)");
-        glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-        checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
-        glEnable(GL_TEXTURE_1D);
-        checkGLcall("glEnable(GL_TEXTURE_1D)");
-        /* Binding textures is done by samplers. A dummy texture will be bound */
+        if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+            glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_NONE);
+        } else {
+            glEnable(GL_TEXTURE_2D);
+            checkGLcall("glEnable(GL_TEXTURE_2D)");
+            glDisable(GL_TEXTURE_3D);
+            checkGLcall("glDisable(GL_TEXTURE_3D)");
+            if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
+                glDisable(GL_TEXTURE_CUBE_MAP_ARB);
+                checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
+            }
+            /* Binding textures is done by samplers. A dummy texture will be bound */
+        }
     }
 }
 
-static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
     DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[stage];
 
@@ -1387,7 +1671,7 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
 
     if (mapped_stage != -1) {
         if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-            if (mapped_stage >= GL_LIMITS(sampler_stages)) {
+            if (mapped_stage >= GL_LIMITS(textures)) {
                 if (stateblock->textureState[stage][WINED3DTSS_COLOROP] != WINED3DTOP_DISABLE &&
                         stateblock->textureState[stage][WINED3DTSS_COLOROP] != 0) {
                     FIXME("Attempt to enable unsupported stage!\n");
@@ -1414,20 +1698,28 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
         TRACE("Stage disabled\n");
         if (mapped_stage != -1) {
             /* Disable everything here */
-            glDisable(GL_TEXTURE_1D);
-            checkGLcall("glDisable(GL_TEXTURE_1D)");
             glDisable(GL_TEXTURE_2D);
             checkGLcall("glDisable(GL_TEXTURE_2D)");
             glDisable(GL_TEXTURE_3D);
             checkGLcall("glDisable(GL_TEXTURE_3D)");
-            glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-            checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
+            if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
+                glDisable(GL_TEXTURE_CUBE_MAP_ARB);
+                checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
+            }
+            if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+                glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_NONE);
+            }
         }
         /* All done */
         return;
     }
 
-    if (mapped_stage != -1) activate_dimensions(stage, stateblock);
+    /* The sampler will also activate the correct texture dimensions, so no need to do it here
+     * if the sampler for this stage is dirty
+     */
+    if(!isStateDirty(context, STATE_SAMPLER(stage))) {
+        if (mapped_stage != -1) activate_dimensions(stage, stateblock, context);
+    }
 
     /* Set the texture combiners */
     if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
@@ -1437,6 +1729,22 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
                          stateblock->textureState[stage][WINED3DTSS_COLORARG2],
                          stateblock->textureState[stage][WINED3DTSS_COLORARG0],
                          mapped_stage);
+
+        /* In register combiners bump mapping is done in the stage AFTER the one that has the bump map operation set,
+         * thus the texture shader may have to be updated
+         */
+        if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+            BOOL usesBump = (stateblock->textureState[stage][WINED3DTSS_COLOROP] == WINED3DTOP_BUMPENVMAPLUMINANCE ||
+                             stateblock->textureState[stage][WINED3DTSS_COLOROP] == WINED3DTOP_BUMPENVMAP) ? TRUE : FALSE;
+            BOOL usedBump = (context->texShaderBumpMap & 1 << (stage + 1)) ? TRUE : FALSE;
+            if(usesBump != usedBump) {
+                GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage + 1));
+                checkGLcall("glActiveTextureARB");
+                activate_dimensions(stage + 1, stateblock, context);
+                GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
+                checkGLcall("glActiveTextureARB");
+            }
+        }
     } else {
         set_tex_op((IWineD3DDevice *)stateblock->wineD3DDevice, FALSE, stage,
                     stateblock->textureState[stage][WINED3DTSS_COLOROP],
@@ -1446,15 +1754,16 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
     DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[stage];
+    DWORD op, arg1, arg2, arg0;
 
     TRACE("Setting alpha op for stage %d\n", stage);
     /* Do not care for enabled / disabled stages, just assign the settigns. colorop disables / enables required stuff */
     if (mapped_stage != -1) {
         if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-            if (stage >= GL_LIMITS(sampler_stages)) {
+            if (stage >= GL_LIMITS(textures)) {
                 if (stateblock->textureState[stage][WINED3DTSS_COLOROP] != WINED3DTOP_DISABLE &&
                         stateblock->textureState[stage][WINED3DTSS_COLOROP] != 0) {
                     FIXME("Attempt to enable unsupported stage!\n");
@@ -1470,32 +1779,57 @@ static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
         }
     }
 
+    op = stateblock->textureState[stage][WINED3DTSS_ALPHAOP];
+    arg1 = stateblock->textureState[stage][WINED3DTSS_ALPHAARG1];
+    arg2 = stateblock->textureState[stage][WINED3DTSS_ALPHAARG2];
+    arg0 = stateblock->textureState[stage][WINED3DTSS_ALPHAARG0];
+
+    if(stateblock->renderState[WINED3DRS_COLORKEYENABLE] && stage == 0 &&
+       stateblock->textures[0] && stateblock->textureDimensions[0] == GL_TEXTURE_2D) {
+        IWineD3DSurfaceImpl *surf = (IWineD3DSurfaceImpl *) ((IWineD3DTextureImpl *) stateblock->textures[0])->surfaces[0];
+
+        if(surf->CKeyFlags & WINEDDSD_CKSRCBLT &&
+           getFormatDescEntry(surf->resource.format)->alphaMask == 0x00000000) {
+
+            /* Color keying needs to pass alpha values from the texture through to have the alpha test work properly.
+             * On the other hand applications can still use texture combiners apparently. This code takes care that apps
+             * cannot remove the texture's alpha channel entirely.
+             *
+             * The fixup is required for Prince of Persia 3D(prison bars), while Moto racer 2 requires D3DTOP_MODULATE to work
+             * on color keyed surfaces.
+             *
+             * What to do with multitexturing? So far no app has been found that uses color keying with multitexturing
+             */
+            if(op == WINED3DTOP_DISABLE) op = WINED3DTOP_SELECTARG1;
+            if(op == WINED3DTOP_SELECTARG1) arg1 = WINED3DTA_TEXTURE;
+            else if(op == WINED3DTOP_SELECTARG2) arg2 = WINED3DTA_TEXTURE;
+        }
+    }
+
     TRACE("Setting alpha op for stage %d\n", stage);
     if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
         set_tex_op_nvrc((IWineD3DDevice *)stateblock->wineD3DDevice, TRUE, stage,
-                         stateblock->textureState[stage][WINED3DTSS_ALPHAOP],
-                         stateblock->textureState[stage][WINED3DTSS_ALPHAARG1],
-                         stateblock->textureState[stage][WINED3DTSS_ALPHAARG2],
-                         stateblock->textureState[stage][WINED3DTSS_ALPHAARG0],
+                         op, arg1, arg2, arg0,
                          mapped_stage);
     } else {
-        set_tex_op((IWineD3DDevice *)stateblock->wineD3DDevice, TRUE, stage, stateblock->textureState[stage][WINED3DTSS_ALPHAOP],
-                    stateblock->textureState[stage][WINED3DTSS_ALPHAARG1],
-                    stateblock->textureState[stage][WINED3DTSS_ALPHAARG2],
-                    stateblock->textureState[stage][WINED3DTSS_ALPHAARG0]);
+        set_tex_op((IWineD3DDevice *)stateblock->wineD3DDevice, TRUE, stage,
+                    op, arg1, arg2, arg0);
     }
 }
 
-static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD texUnit = state - STATE_TRANSFORM(WINED3DTS_TEXTURE0);
+    DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[texUnit];
+
+    if (mapped_stage < 0) return;
 
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-        if(texUnit >= GL_LIMITS(sampler_stages)) {
+        if(mapped_stage >= GL_LIMITS(textures)) {
             return;
         }
-        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + stateblock->wineD3DDevice->texUnitMap[texUnit]));
+        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
         checkGLcall("glActiveTextureARB");
-    } else if (texUnit > 0) {
+    } else if (mapped_stage > 0) {
         /* We can't do anything here */
         WARN("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
         return;
@@ -1507,9 +1841,66 @@ static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock) {
 
 }
 
-static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVertexStridedData *sd);
+static void unloadTexCoords(IWineD3DStateBlockImpl *stateblock) {
+    int texture_idx;
 
-static void tex_coordindex(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+    for (texture_idx = 0; texture_idx < GL_LIMITS(texture_stages); ++texture_idx) {
+        GL_EXTCALL(glClientActiveTextureARB(GL_TEXTURE0_ARB + texture_idx));
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    }
+}
+
+static void loadTexCoords(IWineD3DStateBlockImpl *stateblock, WineDirect3DVertexStridedData *sd, GLint *curVBO) {
+    UINT *offset = stateblock->streamOffset;
+    unsigned int mapped_stage = 0;
+    unsigned int textureNo = 0;
+
+    /* The code below uses glClientActiveTexture and glMultiTexCoord* which are all part of the GL_ARB_multitexture extension. */
+    /* Abort if we don't support the extension. */
+    if (!GL_SUPPORT(ARB_MULTITEXTURE)) {
+        FIXME("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
+        return;
+    }
+
+    for (textureNo = 0; textureNo < GL_LIMITS(texture_stages); ++textureNo) {
+        int coordIdx = stateblock->textureState[textureNo][WINED3DTSS_TEXCOORDINDEX];
+
+        mapped_stage = stateblock->wineD3DDevice->texUnitMap[textureNo];
+        if (mapped_stage == -1) continue;
+
+        if (coordIdx < MAX_TEXTURES && (sd->u.s.texCoords[coordIdx].lpData || sd->u.s.texCoords[coordIdx].VBO)) {
+            TRACE("Setting up texture %u, idx %d, cordindx %u, data %p\n",
+                    textureNo, mapped_stage, coordIdx, sd->u.s.texCoords[coordIdx].lpData);
+
+            if (*curVBO != sd->u.s.texCoords[coordIdx].VBO) {
+                GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, sd->u.s.texCoords[coordIdx].VBO));
+                checkGLcall("glBindBufferARB");
+                *curVBO = sd->u.s.texCoords[coordIdx].VBO;
+            }
+
+            GL_EXTCALL(glClientActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
+            checkGLcall("glClientActiveTextureARB");
+
+            /* The coords to supply depend completely on the fvf / vertex shader */
+            glTexCoordPointer(
+                    WINED3D_ATR_SIZE(sd->u.s.texCoords[coordIdx].dwType),
+                    WINED3D_ATR_GLTYPE(sd->u.s.texCoords[coordIdx].dwType),
+                    sd->u.s.texCoords[coordIdx].dwStride,
+                    sd->u.s.texCoords[coordIdx].lpData + stateblock->loadBaseVertexIndex * sd->u.s.texCoords[coordIdx].dwStride + offset[sd->u.s.texCoords[coordIdx].streamNo]);
+            glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        } else {
+            GL_EXTCALL(glMultiTexCoord4fARB(GL_TEXTURE0_ARB + mapped_stage, 0, 0, 0, 1));
+        }
+    }
+    if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
+        /* The number of the mapped stages increases monotonically, so it's fine to use the last used one */
+        for (textureNo = mapped_stage + 1; textureNo < GL_LIMITS(textures); ++textureNo) {
+            GL_EXTCALL(glMultiTexCoord4fARB(GL_TEXTURE0_ARB + textureNo, 0, 0, 0, 1));
+        }
+    }
+}
+
+static void tex_coordindex(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
     DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[stage];
 
@@ -1519,7 +1910,7 @@ static void tex_coordindex(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-        if(stage >= GL_LIMITS(sampler_stages)) {
+        if(mapped_stage >= GL_LIMITS(fragment_samplers)) {
             return;
         }
         GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
@@ -1673,21 +2064,24 @@ static void tex_coordindex(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 
     /* Update the texture matrix */
-    if(!isStateDirty(stateblock->wineD3DDevice, STATE_TRANSFORM(WINED3DTS_TEXTURE0 + stage))) {
-        transform_texture(STATE_TRANSFORM(WINED3DTS_TEXTURE0 + stage), stateblock);
+    if(!isStateDirty(context, STATE_TRANSFORM(WINED3DTS_TEXTURE0 + stage))) {
+        transform_texture(STATE_TRANSFORM(WINED3DTS_TEXTURE0 + stage), stateblock, context);
     }
 
-    if(!isStateDirty(stateblock->wineD3DDevice, STATE_VDECL) && stateblock->wineD3DDevice->namedArraysLoaded) {
+    if(!isStateDirty(context, STATE_VDECL) && context->namedArraysLoaded) {
         /* Reload the arrays if we are using fixed function arrays to reflect the selected coord input
-         * source. Call loadVertexData directly because there is no need to reparse the vertex declaration
+         * source. Call loadTexCoords directly because there is no need to reparse the vertex declaration
          * and do all the things linked to it
          * TODO: Tidy that up to reload only the arrays of the changed unit
          */
-        loadVertexData(stateblock, &stateblock->wineD3DDevice->strided_streams);
+        GLint curVBO = GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT) ? -1 : 0;
+
+        unloadTexCoords(stateblock);
+        loadTexCoords(stateblock, &stateblock->wineD3DDevice->strided_streams, &curVBO);
     }
 }
 
-static void tex_bumpenvlscale(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void tex_bumpenvlscale(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
     union {
         DWORD d;
@@ -1696,11 +2090,11 @@ static void tex_bumpenvlscale(DWORD state, IWineD3DStateBlockImpl *stateblock) {
 
     tmpvalue.d = stateblock->textureState[stage][WINED3DTSS_BUMPENVLSCALE];
     if(tmpvalue.f != 0.0) {
-        ERR("WINED3DTSS_BUMPENVLSCALE not supported yet\n");
+        FIXME("WINED3DTSS_BUMPENVLSCALE not supported yet\n");
     }
 }
 
-static void tex_bumpenvloffset(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void tex_bumpenvloffset(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
     union {
         DWORD d;
@@ -1709,19 +2103,23 @@ static void tex_bumpenvloffset(DWORD state, IWineD3DStateBlockImpl *stateblock) 
 
     tmpvalue.d = stateblock->textureState[stage][WINED3DTSS_BUMPENVLOFFSET];
     if(tmpvalue.f != 0.0) {
-        ERR("WINED3DTSS_BUMPENVLOFFSET not supported yet\n");
+        FIXME("WINED3DTSS_BUMPENVLOFFSET not supported yet\n");
     }
 }
 
-static void tex_resultarg(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void tex_resultarg(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
 
-    if(stateblock->textureState[stage][WINED3DTSS_RESULTARG] != D3DTA_CURRENT) {
-        ERR("WINED3DTSS_RESULTARG not supported yet\n");
+    if(stage >= GL_LIMITS(texture_stages)) {
+        return;
+    }
+
+    if(stateblock->textureState[stage][WINED3DTSS_RESULTARG] != WINED3DTA_CURRENT) {
+        FIXME("WINED3DTSS_RESULTARG not supported yet\n");
     }
 }
 
-static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD sampler = state - STATE_SAMPLER(0);
     DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[sampler];
     union {
@@ -1740,7 +2138,7 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-        if(sampler >= GL_LIMITS(sampler_stages)) {
+        if (mapped_stage >= GL_LIMITS(combined_samplers)) {
             return;
         }
         GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
@@ -1758,7 +2156,7 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock) {
          * IWineD3DBaseTexture::ApplyStateChanges multiplies the set matrix with a fixup matrix. Before the
          * scaling is reapplied or removed, the texture matrix has to be reapplied
          */
-        if(wined3d_settings.nonpower2_mode != NP2_NATIVE && sampler < MAX_TEXTURES) {
+        if(!GL_SUPPORT(ARB_TEXTURE_NON_POWER_OF_TWO) && sampler < MAX_TEXTURES) {
             if(stateblock->textureDimensions[sampler] == GL_TEXTURE_2D) {
                 if(((IWineD3DTextureImpl *) stateblock->textures[sampler])->pow2scalingFactorX != 1.0 ||
                    ((IWineD3DTextureImpl *) stateblock->textures[sampler])->pow2scalingFactorY != 1.0 ) {
@@ -1770,9 +2168,9 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock) {
                 }
             }
 
-            if(texIsPow2 || stateblock->wineD3DDevice->lastWasPow2Texture[sampler]) {
-                transform_texture(STATE_TRANSFORM(WINED3DTS_TEXTURE0 + stateblock->wineD3DDevice->texUnitMap[sampler]), stateblock);
-                stateblock->wineD3DDevice->lastWasPow2Texture[sampler] = texIsPow2;
+            if(texIsPow2 || context->lastWasPow2Texture[sampler]) {
+                transform_texture(STATE_TRANSFORM(WINED3DTS_TEXTURE0 + stateblock->wineD3DDevice->texUnitMap[sampler]), stateblock, context);
+                context->lastWasPow2Texture[sampler] = texIsPow2;
             }
         }
 
@@ -1799,57 +2197,62 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock) {
             glEnable(stateblock->textureDimensions[sampler]);
             checkGLcall("glEnable(stateblock->textureDimensions[sampler])");
         } else if(sampler < stateblock->lowest_disabled_stage) {
-            activate_dimensions(sampler, stateblock);
+            if(!isStateDirty(context, STATE_TEXTURESTAGE(sampler, WINED3DTSS_COLOROP))) {
+                activate_dimensions(sampler, stateblock, context);
+            }
 
             if(stateblock->renderState[WINED3DRS_COLORKEYENABLE] && sampler == 0) {
                 /* If color keying is enabled update the alpha test, it depends on the existence
                  * of a color key in stage 0
                  */
-                state_alpha(WINED3DRS_COLORKEYENABLE, stateblock);
+                state_alpha(WINED3DRS_COLORKEYENABLE, stateblock, context);
             }
         }
     } else if(sampler < GL_LIMITS(texture_stages)) {
         if(sampler < stateblock->lowest_disabled_stage) {
-            /* TODO: Check if the colorop is dirty to do that job
-             * TODO: What should I do with pixel shaders here ???
-             */
-            activate_dimensions(sampler, stateblock);
+            /* TODO: What should I do with pixel shaders here ??? */
+            if(!isStateDirty(context, STATE_TEXTURESTAGE(sampler, WINED3DTSS_COLOROP))) {
+                activate_dimensions(sampler, stateblock, context);
+            }
         } /* Otherwise tex_colorop disables the stage */
-        glBindTexture(GL_TEXTURE_1D, stateblock->wineD3DDevice->dummyTextureName[sampler]);
-        checkGLcall("glBindTexture(GL_TEXTURE_1D, stateblock->wineD3DDevice->dummyTextureName[sampler])");
+        glBindTexture(GL_TEXTURE_2D, stateblock->wineD3DDevice->dummyTextureName[sampler]);
+        checkGLcall("glBindTexture(GL_TEXTURE_2D, stateblock->wineD3DDevice->dummyTextureName[sampler])");
     }
 }
 
-static void shaderconstant(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void shaderconstant(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
 
     /* Vertex and pixel shader states will call a shader upload, don't do anything as long one of them
      * has an update pending
      */
-    if(isStateDirty(device, STATE_VDECL) ||
-       isStateDirty(device, STATE_PIXELSHADER)) {
+    if(isStateDirty(context, STATE_VDECL) ||
+       isStateDirty(context, STATE_PIXELSHADER)) {
        return;
     }
     
-    device->shader_backend->shader_load_constants((IWineD3DDevice *) device,
-        stateblock->pixelShader && ((IWineD3DPixelShaderImpl *)stateblock->pixelShader)->baseShader.function,
-        stateblock->vertexShader && ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->baseShader.function);
+    device->shader_backend->shader_load_constants((IWineD3DDevice *) device, use_ps(device), use_vs(device));
 }
 
-static void pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
+    BOOL use_pshader = use_ps(device);
+    BOOL use_vshader = use_vs(device);
+    BOOL update_fog = FALSE;
     int i;
 
-    if(stateblock->pixelShader && ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->baseShader.function != NULL) {
-        if(!stateblock->wineD3DDevice->last_was_pshader) {
+    if (use_pshader) {
+        if(!context->last_was_pshader) {
             /* Former draw without a pixel shader, some samplers
              * may be disabled because of WINED3DTSS_COLOROP = WINED3DTOP_DISABLE
              * make sure to enable them
              */
-            for(i=0; i < MAX_SAMPLERS; i++) {
-                if(!isStateDirty(stateblock->wineD3DDevice, STATE_SAMPLER(i))) {
-                    sampler(STATE_SAMPLER(i), stateblock);
+            for(i=0; i < MAX_FRAGMENT_SAMPLERS; i++) {
+                if(!isStateDirty(context, STATE_SAMPLER(i))) {
+                    sampler(STATE_SAMPLER(i), stateblock, context);
                 }
             }
+            update_fog = TRUE;
         } else {
            /* Otherwise all samplers were activated by the code above in earlier draws, or by sampler()
             * if a different texture was bound. I don't have to do anything.
@@ -1858,43 +2261,79 @@ static void pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock) {
 
         /* Compile and bind the shader */
         IWineD3DPixelShader_CompileShader(stateblock->pixelShader);
-
-        if(!isStateDirty(stateblock->wineD3DDevice, StateTable[STATE_VSHADER].representative)) {
-            stateblock->wineD3DDevice->shader_backend->shader_select(
-                    (IWineD3DDevice *) stateblock->wineD3DDevice,
-                    TRUE,
-                    !stateblock->vertexShader ? FALSE : ((IWineD3DVertexShaderImpl *) stateblock->vertexShader)->baseShader.function != NULL);
-            
-            if(!isStateDirty(stateblock->wineD3DDevice, STATE_VERTEXSHADERCONSTANT)) {
-                shaderconstant(STATE_VERTEXSHADERCONSTANT, stateblock);
-            }
-        }
-        stateblock->wineD3DDevice->last_was_pshader = TRUE;
     } else {
         /* Disabled the pixel shader - color ops weren't applied
          * while it was enabled, so re-apply them.
          */
         for(i=0; i < MAX_TEXTURES; i++) {
-            if(!isStateDirty(stateblock->wineD3DDevice, STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP))) {
-                tex_colorop(STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP), stateblock);
+            if(!isStateDirty(context, STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP))) {
+                tex_colorop(STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP), stateblock, context);
             }
         }
-        stateblock->wineD3DDevice->last_was_pshader = FALSE;
+        if(context->last_was_pshader)
+            update_fog = TRUE;
+    }
 
-        if(!isStateDirty(stateblock->wineD3DDevice, StateTable[STATE_VSHADER].representative)) {
-            stateblock->wineD3DDevice->shader_backend->shader_select(
-                    (IWineD3DDevice *) stateblock->wineD3DDevice,
-                    FALSE,
-                    !stateblock->vertexShader ? FALSE : ((IWineD3DVertexShaderImpl *) stateblock->vertexShader)->baseShader.function != NULL);
+    if(!isStateDirty(context, StateTable[STATE_VSHADER].representative)) {
+        device->shader_backend->shader_select((IWineD3DDevice *)stateblock->wineD3DDevice, use_pshader, use_vshader);
 
-            if(!isStateDirty(stateblock->wineD3DDevice, STATE_VERTEXSHADERCONSTANT)) {
-                shaderconstant(STATE_VERTEXSHADERCONSTANT, stateblock);
-            }
+        if (!isStateDirty(context, STATE_VERTEXSHADERCONSTANT) && (use_vshader || use_pshader)) {
+            shaderconstant(STATE_VERTEXSHADERCONSTANT, stateblock, context);
+        }
+    }
+
+    if(update_fog)
+        state_fog(state, stateblock, context);
+
+    context->last_was_pshader = use_pshader;
+}
+
+static void tex_bumpenvmat(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
+
+    if(stateblock->pixelShader && stage != 0 &&
+       ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->needsbumpmat == stage) {
+        /* The pixel shader has to know the bump env matrix. Do a constants update if it isn't scheduled
+         * anyway
+         */
+        if(!isStateDirty(context, STATE_PIXELSHADERCONSTANT) &&
+           !isStateDirty(context, STATE_PIXELSHADER)) {
+            shaderconstant(STATE_PIXELSHADERCONSTANT, stateblock, context);
+        }
+    }
+
+    if(GL_SUPPORT(ATI_ENVMAP_BUMPMAP)) {
+        if(stage >= GL_LIMITS(texture_stages)) {
+            WARN("Bump env matrix of unsupported stage set\n");
+        } else if(GL_SUPPORT(ARB_MULTITEXTURE)) {
+            GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + stage));
+            checkGLcall("GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + stage))");
+        }
+        GL_EXTCALL(glTexBumpParameterfvATI(GL_BUMP_ROT_MATRIX_ATI,
+                   (float *) &(stateblock->textureState[stage][WINED3DTSS_BUMPENVMAT00])));
+        checkGLcall("glTexBumpParameterfvATI");
+    }
+    if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+        /* Direct3D sets the matrix in the stage reading the perturbation map. The result is used to
+         * offset the destination stage(always stage + 1 in d3d). In GL_NV_texture_shader, the bump
+         * map offseting is done in the stage reading the bump mapped texture, and the perturbation
+         * map is read from a specified source stage(always stage - 1 for d3d). Thus set the matrix
+         * for stage + 1. Keep the nvrc tex unit mapping in mind too
+         */
+        DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[stage + 1];
+
+        if(mapped_stage < GL_LIMITS(textures)) {
+            GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
+            checkGLcall("GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage))");
+
+            glTexEnvfv(GL_TEXTURE_SHADER_NV, GL_OFFSET_TEXTURE_MATRIX_NV,
+                      (float *) &(stateblock->textureState[stage][WINED3DTSS_BUMPENVMAT00]));
+            checkGLcall("glTexEnvfv(GL_TEXTURE_SHADER_NV, GL_OFFSET_TEXTURE_MATRIX_NV, mat)\n");
         }
     }
 }
 
-static void transform_world(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void transform_world(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     /* This function is called by transform_view below if the view matrix was changed too
      *
      * Deliberately no check if the vertex declaration is dirty because the vdecl state
@@ -1905,7 +2344,7 @@ static void transform_world(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     glMatrixMode(GL_MODELVIEW);
     checkGLcall("glMatrixMode");
 
-    if(stateblock->wineD3DDevice->last_was_rhw) {
+    if(context->last_was_rhw) {
         glLoadIdentity();
         checkGLcall("glLoadIdentity()");
     } else {
@@ -1922,7 +2361,120 @@ static void transform_world(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void transform_view(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void clipplane(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    UINT index = state - STATE_CLIPPLANE(0);
+
+    if(isStateDirty(context, STATE_TRANSFORM(WINED3DTS_VIEW)) || index >= GL_LIMITS(clipplanes)) {
+        return;
+    }
+
+    /* Clip Plane settings are affected by the model view in OpenGL, the View transform in direct3d */
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadMatrixf((float *) &stateblock->transforms[WINED3DTS_VIEW].u.m[0][0]);
+
+    TRACE("Clipplane [%f,%f,%f,%f]\n",
+          stateblock->clipplane[index][0],
+          stateblock->clipplane[index][1],
+          stateblock->clipplane[index][2],
+          stateblock->clipplane[index][3]);
+    glClipPlane(GL_CLIP_PLANE0 + index, stateblock->clipplane[index]);
+    checkGLcall("glClipPlane");
+
+    glPopMatrix();
+}
+
+static void transform_worldex(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    UINT matrix = state - STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0));
+    GLenum glMat;
+    TRACE("Setting world matrix %d\n", matrix);
+
+    if(matrix >= GL_LIMITS(blends)) {
+        WARN("Unsupported blend matrix set\n");
+        return;
+    } else if(isStateDirty(context, STATE_TRANSFORM(WINED3DTS_VIEW))) {
+        return;
+    }
+
+    /* GL_MODELVIEW0_ARB:  0x1700
+     * GL_MODELVIEW1_ARB:  0x0x850a
+     * GL_MODELVIEW2_ARB:  0x8722
+     * GL_MODELVIEW3_ARB:  0x8723
+     * etc
+     * GL_MODELVIEW31_ARB: 0x873F
+     */
+    if(matrix == 1) glMat = GL_MODELVIEW1_ARB;
+    else glMat = GL_MODELVIEW2_ARB - 2 + matrix;
+
+    glMatrixMode(glMat);
+    checkGLcall("glMatrixMode(glMat)");
+
+    /* World matrix 0 is multiplied with the view matrix because d3d uses 3 matrices while gl uses only 2. To avoid
+     * weighting the view matrix incorrectly it has to be multiplied into every gl modelview matrix
+     */
+    if(stateblock->wineD3DDevice->view_ident) {
+        glLoadMatrixf(&stateblock->transforms[WINED3DTS_WORLDMATRIX(matrix)].u.m[0][0]);
+        checkGLcall("glLoadMatrixf")
+    } else {
+        glLoadMatrixf(&stateblock->transforms[WINED3DTS_VIEW].u.m[0][0]);
+        checkGLcall("glLoadMatrixf")
+        glMultMatrixf(&stateblock->transforms[WINED3DTS_WORLDMATRIX(matrix)].u.m[0][0]);
+        checkGLcall("glMultMatrixf")
+    }
+}
+
+static void state_vertexblend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    WINED3DVERTEXBLENDFLAGS val = stateblock->renderState[WINED3DRS_VERTEXBLEND];
+
+    switch(val) {
+        case WINED3DVBF_1WEIGHTS:
+        case WINED3DVBF_2WEIGHTS:
+        case WINED3DVBF_3WEIGHTS:
+            if(GL_SUPPORT(ARB_VERTEX_BLEND)) {
+                glEnable(GL_VERTEX_BLEND_ARB);
+                checkGLcall("glEnable(GL_VERTEX_BLEND_ARB)");
+
+                /* D3D adds one more matrix which has weight (1 - sum(weights)). This is enabled at context
+                 * creation with enabling GL_WEIGHT_SUM_UNITY_ARB.
+                 */
+                GL_EXTCALL(glVertexBlendARB(stateblock->renderState[WINED3DRS_VERTEXBLEND] + 1));
+
+                if(!stateblock->wineD3DDevice->vertexBlendUsed) {
+                    int i;
+                    for(i = 1; i < GL_LIMITS(blends); i++) {
+                        if(!isStateDirty(context, STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(i)))) {
+                            transform_worldex(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(i)), stateblock, context);
+                        }
+                    }
+                    stateblock->wineD3DDevice->vertexBlendUsed = TRUE;
+                }
+            } else {
+                /* TODO: Implement vertex blending in drawStridedSlow */
+                FIXME("Vertex blending enabled, but not supported by hardware\n");
+            }
+            break;
+
+        case WINED3DVBF_DISABLE:
+        case WINED3DVBF_0WEIGHTS: /* for Indexed vertex blending - not supported */
+            if(GL_SUPPORT(ARB_VERTEX_BLEND)) {
+                glDisable(GL_VERTEX_BLEND_ARB);
+                checkGLcall("glDisable(GL_VERTEX_BLEND_ARB)");
+            } else {
+                TRACE("Vertex blending disabled\n");
+            }
+            break;
+
+        case WINED3DVBF_TWEENING:
+            /* Just set the vertex weight for weight 0, enable vertex blending and hope the app doesn't have
+             * vertex weights in the vertices?
+             * For now we don't report that as supported, so a warn should suffice
+             */
+            WARN("Tweening not supported yet\n");
+            break;
+    }
+}
+
+static void transform_view(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     unsigned int k;
 
     /* If we are changing the View matrix, reset the light and clipping planes to the new view
@@ -1931,7 +2483,7 @@ static void transform_view(DWORD state, IWineD3DStateBlockImpl *stateblock) {
      * NOTE2: Apparently texture transforms do NOT need reapplying
      */
 
-    PLIGHTINFOEL *lightChain = NULL;
+    PLIGHTINFOEL *light = NULL;
 
     glMatrixMode(GL_MODELVIEW);
     checkGLcall("glMatrixMode(GL_MODELVIEW)");
@@ -1939,22 +2491,23 @@ static void transform_view(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     checkGLcall("glLoadMatrixf(...)");
 
     /* Reset lights. TODO: Call light apply func */
-    lightChain = stateblock->lights;
-    while (lightChain && lightChain->glIndex != -1) {
-        glLightfv(GL_LIGHT0 + lightChain->glIndex, GL_POSITION, lightChain->lightPosn);
+    for(k = 0; k < stateblock->wineD3DDevice->maxConcurrentLights; k++) {
+        light = stateblock->activeLights[k];
+        if(!light) continue;
+        glLightfv(GL_LIGHT0 + light->glIndex, GL_POSITION, light->lightPosn);
         checkGLcall("glLightfv posn");
-        glLightfv(GL_LIGHT0 + lightChain->glIndex, GL_SPOT_DIRECTION, lightChain->lightDirn);
+        glLightfv(GL_LIGHT0 + light->glIndex, GL_SPOT_DIRECTION, light->lightDirn);
         checkGLcall("glLightfv dirn");
-        lightChain = lightChain->next;
     }
 
-    /* Reset Clipping Planes if clipping is enabled. TODO: Call clipplane apply func */
+    /* Reset Clipping Planes  */
     for (k = 0; k < GL_LIMITS(clipplanes); k++) {
-        glClipPlane(GL_CLIP_PLANE0 + k, stateblock->clipplane[k]);
-        checkGLcall("glClipPlane");
+        if(!isStateDirty(context, STATE_CLIPPLANE(k))) {
+            clipplane(STATE_CLIPPLANE(k), stateblock, context);
+        }
     }
 
-    if(stateblock->wineD3DDevice->last_was_rhw) {
+    if(context->last_was_rhw) {
         glLoadIdentity();
         checkGLcall("glLoadIdentity()");
         /* No need to update the world matrix, the identity is fine */
@@ -1964,13 +2517,18 @@ static void transform_view(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     /* Call the world matrix state, this will apply the combined WORLD + VIEW matrix
      * No need to do it here if the state is scheduled for update.
      */
-    if(!isStateDirty(stateblock->wineD3DDevice, STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)))) {
-        transform_world(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)), stateblock);
+    if(!isStateDirty(context, STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)))) {
+        transform_world(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)), stateblock, context);
     }
-}
 
-static void transform_worldex(DWORD state, IWineD3DStateBlockImpl *stateBlock) {
-	WARN("World matrix 1 - 255 not supported yet\n");
+    /* Avoid looping over a number of matrices if the app never used the functionality */
+    if(stateblock->wineD3DDevice->vertexBlendUsed) {
+        for(k = 1; k < GL_LIMITS(blends); k++) {
+            if(!isStateDirty(context, STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(k)))) {
+                transform_worldex(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(k)), stateblock, context);
+            }
+        }
+    }
 }
 
 static const GLfloat invymat[16] = {
@@ -1979,13 +2537,13 @@ static const GLfloat invymat[16] = {
     0.0f, 0.0f, 1.0f, 0.0f,
     0.0f, 0.0f, 0.0f, 1.0f};
 
-static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     glMatrixMode(GL_PROJECTION);
     checkGLcall("glMatrixMode(GL_PROJECTION)");
     glLoadIdentity();
     checkGLcall("glLoadIdentity");
 
-    if(stateblock->wineD3DDevice->last_was_rhw) {
+    if(context->last_was_rhw) {
         double X, Y, height, width, minZ, maxZ;
 
         X      = stateblock->viewport.X;
@@ -2002,7 +2560,11 @@ static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock
              * the Z coordinate does not affect the size of the primitives
              */
             TRACE("Calling glOrtho with %f, %f, %f, %f\n", width, height, -minZ, -maxZ);
-            glOrtho(X, X + width, Y + height, Y, -minZ, -maxZ);
+            if(stateblock->wineD3DDevice->render_offscreen) {
+                glOrtho(X, X + width, -Y, -Y - height, -minZ, -maxZ);
+            } else {
+                glOrtho(X, X + width, Y + height, Y, -minZ, -maxZ);
+            }
         } else {
             /* If the app mixes transformed and untransformed primitives we can't use the coordinate system
              * trick above because this would mess up transformed and untransformed Z order. Pass the z position
@@ -2012,7 +2574,11 @@ static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock
              * replacement shader.
              */
             TRACE("Calling glOrtho with %f, %f, %f, %f\n", width, height, 1.0, -1.0);
-            glOrtho(X, X + width, Y + height, Y, 1.0, -1.0);
+            if(stateblock->wineD3DDevice->render_offscreen) {
+                glOrtho(X, X + width, -Y, -Y - height, 1.0, -1.0);
+            } else {
+                glOrtho(X, X + width, Y + height, Y, 1.0, -1.0);
+            }
         }
         checkGLcall("glOrtho");
 
@@ -2052,18 +2618,18 @@ static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock
  * TODO: Only load / unload arrays if we have to.
  */
 static inline void unloadVertexData(IWineD3DStateBlockImpl *stateblock) {
-    int texture_idx;
-
     glDisableClientState(GL_VERTEX_ARRAY);
     glDisableClientState(GL_NORMAL_ARRAY);
     glDisableClientState(GL_COLOR_ARRAY);
     if (GL_SUPPORT(EXT_SECONDARY_COLOR)) {
         glDisableClientState(GL_SECONDARY_COLOR_ARRAY_EXT);
     }
-    for (texture_idx = 0; texture_idx < GL_LIMITS(textures); ++texture_idx) {
-        GL_EXTCALL(glClientActiveTextureARB(GL_TEXTURE0_ARB + texture_idx));
-        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    if (GL_SUPPORT(ARB_VERTEX_BLEND)) {
+        glDisableClientState(GL_WEIGHT_ARRAY_ARB);
+    } else if (GL_SUPPORT(EXT_VERTEX_WEIGHTING)) {
+        glDisableClientState(GL_VERTEX_WEIGHT_ARRAY_EXT);
     }
+    unloadTexCoords(stateblock);
 }
 
 /* This should match any arrays loaded in loadNumberedArrays
@@ -2088,65 +2654,153 @@ static inline void unloadNumberedArrays(IWineD3DStateBlockImpl *stateblock) {
 static inline void loadNumberedArrays(IWineD3DStateBlockImpl *stateblock, WineDirect3DVertexStridedData *strided) {
     GLint curVBO = GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT) ? -1 : 0;
     int i;
+    UINT *offset = stateblock->streamOffset;
+
+    /* Default to no instancing */
+    stateblock->wineD3DDevice->instancedDraw = FALSE;
 
     for (i = 0; i < MAX_ATTRIBS; i++) {
 
         if (!strided->u.input[i].lpData && !strided->u.input[i].VBO)
             continue;
 
+        /* Do not load instance data. It will be specified using glTexCoord by drawprim */
+        if(stateblock->streamFlags[strided->u.input[i].streamNo] & WINED3DSTREAMSOURCE_INSTANCEDATA) {
+            GL_EXTCALL(glDisableVertexAttribArrayARB(i));
+            stateblock->wineD3DDevice->instancedDraw = TRUE;
+            continue;
+        }
+
         TRACE_(d3d_shader)("Loading array %u [VBO=%u]\n", i, strided->u.input[i].VBO);
 
-        if(curVBO != strided->u.input[i].VBO) {
-            GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, strided->u.input[i].VBO));
-            checkGLcall("glBindBufferARB");
-            curVBO = strided->u.input[i].VBO;
+        if(strided->u.input[i].dwStride) {
+            if(curVBO != strided->u.input[i].VBO) {
+                GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, strided->u.input[i].VBO));
+                checkGLcall("glBindBufferARB");
+                curVBO = strided->u.input[i].VBO;
+            }
+            GL_EXTCALL(glVertexAttribPointerARB(i,
+                            WINED3D_ATR_SIZE(strided->u.input[i].dwType),
+                            WINED3D_ATR_GLTYPE(strided->u.input[i].dwType),
+                            WINED3D_ATR_NORMALIZED(strided->u.input[i].dwType),
+                            strided->u.input[i].dwStride,
+                            strided->u.input[i].lpData + stateblock->loadBaseVertexIndex * strided->u.input[i].dwStride + offset[strided->u.input[i].streamNo]) );
+            GL_EXTCALL(glEnableVertexAttribArrayARB(i));
+        } else {
+            /* Stride = 0 means always the same values. glVertexAttribPointerARB doesn't do that. Instead disable the pointer and
+             * set up the attribute statically. But we have to figure out the system memory address.
+             */
+            BYTE *ptr = strided->u.input[i].lpData + offset[strided->u.input[i].streamNo];
+            if(strided->u.input[i].VBO) {
+                IWineD3DVertexBufferImpl *vb = (IWineD3DVertexBufferImpl *) stateblock->streamSource[strided->u.input[i].streamNo];
+                ptr += (long) vb->resource.allocatedMemory;
+            }
+            GL_EXTCALL(glDisableVertexAttribArrayARB(i));
+
+            switch(strided->u.input[i].dwType) {
+                case WINED3DDECLTYPE_FLOAT1:
+                    GL_EXTCALL(glVertexAttrib1fvARB(i, (float *) ptr));
+                    break;
+                case WINED3DDECLTYPE_FLOAT2:
+                    GL_EXTCALL(glVertexAttrib2fvARB(i, (float *) ptr));
+                    break;
+                case WINED3DDECLTYPE_FLOAT3:
+                    GL_EXTCALL(glVertexAttrib3fvARB(i, (float *) ptr));
+                    break;
+                case WINED3DDECLTYPE_FLOAT4:
+                    GL_EXTCALL(glVertexAttrib4fvARB(i, (float *) ptr));
+                    break;
+
+                case WINED3DDECLTYPE_UBYTE4:
+                    GL_EXTCALL(glVertexAttrib4NubvARB(i, ptr));
+                    break;
+                case WINED3DDECLTYPE_UBYTE4N:
+                case WINED3DDECLTYPE_D3DCOLOR:
+                    GL_EXTCALL(glVertexAttrib4NubvARB(i, ptr));
+                    break;
+
+                case WINED3DDECLTYPE_SHORT2:
+                    GL_EXTCALL(glVertexAttrib4svARB(i, (GLshort *) ptr));
+                    break;
+                case WINED3DDECLTYPE_SHORT4:
+                    GL_EXTCALL(glVertexAttrib4svARB(i, (GLshort *) ptr));
+                    break;
+
+                case WINED3DDECLTYPE_SHORT2N:
+                {
+                    GLshort s[4] = {((short *) ptr)[0], ((short *) ptr)[1], 0, 1};
+                    GL_EXTCALL(glVertexAttrib4NsvARB(i, s));
+                    break;
+                }
+                case WINED3DDECLTYPE_USHORT2N:
+                {
+                    GLushort s[4] = {((unsigned short *) ptr)[0], ((unsigned short *) ptr)[1], 0, 1};
+                    GL_EXTCALL(glVertexAttrib4NusvARB(i, s));
+                    break;
+                }
+                case WINED3DDECLTYPE_SHORT4N:
+                    GL_EXTCALL(glVertexAttrib4NsvARB(i, (GLshort *) ptr));
+                    break;
+                case WINED3DDECLTYPE_USHORT4N:
+                    GL_EXTCALL(glVertexAttrib4NusvARB(i, (GLushort *) ptr));
+                    break;
+
+                case WINED3DDECLTYPE_UDEC3:
+                    FIXME("Unsure about WINED3DDECLTYPE_UDEC3\n");
+                    /*glVertexAttrib3usvARB(i, (GLushort *) ptr); Does not exist */
+                    break;
+                case WINED3DDECLTYPE_DEC3N:
+                    FIXME("Unsure about WINED3DDECLTYPE_DEC3N\n");
+                    /*glVertexAttrib3NusvARB(i, (GLushort *) ptr); Does not exist */
+                    break;
+
+                case WINED3DDECLTYPE_FLOAT16_2:
+                    /* Are those 16 bit floats. C doesn't have a 16 bit float type. I could read the single bits and calculate a 4
+                     * byte float according to the IEEE standard
+                     */
+                    FIXME("Unsupported WINED3DDECLTYPE_FLOAT16_2\n");
+                    break;
+                case WINED3DDECLTYPE_FLOAT16_4:
+                    FIXME("Unsupported WINED3DDECLTYPE_FLOAT16_4\n");
+                    break;
+
+                case WINED3DDECLTYPE_UNUSED:
+                default:
+                    ERR("Unexpected declaration in stride 0 attributes\n");
+                    break;
+
+            }
         }
-        GL_EXTCALL(glVertexAttribPointerARB(i,
-                        WINED3D_ATR_SIZE(strided->u.input[i].dwType),
-                        WINED3D_ATR_GLTYPE(strided->u.input[i].dwType),
-                        WINED3D_ATR_NORMALIZED(strided->u.input[i].dwType),
-                        strided->u.input[i].dwStride,
-                        strided->u.input[i].lpData + stateblock->loadBaseVertexIndex * strided->u.input[i].dwStride));
-        GL_EXTCALL(glEnableVertexAttribArrayARB(i));
-   }
+    }
 }
 
 /* Used from 2 different functions, and too big to justify making it inlined */
 static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVertexStridedData *sd) {
-    unsigned int textureNo   = 0;
-    unsigned int texture_idx = 0;
+    UINT *offset = stateblock->streamOffset;
     GLint curVBO = GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT) ? -1 : 0;
 
     TRACE("Using fast vertex array code\n");
+
+    /* This is fixed function pipeline only, and the fixed function pipeline doesn't do instancing */
+    stateblock->wineD3DDevice->instancedDraw = FALSE;
+
     /* Blend Data ---------------------------------------------- */
     if( (sd->u.s.blendWeights.lpData) || (sd->u.s.blendWeights.VBO) ||
         (sd->u.s.blendMatrixIndices.lpData) || (sd->u.s.blendMatrixIndices.VBO) ) {
 
-
         if (GL_SUPPORT(ARB_VERTEX_BLEND)) {
+            TRACE("Blend %d %p %d\n", WINED3D_ATR_SIZE(sd->u.s.blendWeights.dwType),
+                sd->u.s.blendWeights.lpData + stateblock->loadBaseVertexIndex * sd->u.s.blendWeights.dwStride, sd->u.s.blendWeights.dwStride + offset[sd->u.s.blendWeights.streamNo]);
 
-#if 1
             glEnableClientState(GL_WEIGHT_ARRAY_ARB);
             checkGLcall("glEnableClientState(GL_WEIGHT_ARRAY_ARB)");
-#endif
 
-            TRACE("Blend %d %p %d\n", WINED3D_ATR_SIZE(sd->u.s.blendWeights.dwType),
-                sd->u.s.blendWeights.lpData + stateblock->loadBaseVertexIndex * sd->u.s.blendWeights.dwStride, sd->u.s.blendWeights.dwStride);
-            /* FIXME("TODO\n");*/
-            /* Note dwType == float3 or float4 == 2 or 3 */
-
-#if 0
-            /* with this on, the normals appear to be being modified,
-               but the vertices aren't being translated as they should be
-               Maybe the world matrix aren't being setup properly? */
-            glVertexBlendARB(WINED3D_ATR_SIZE(sd->u.s.blendWeights.dwType) + 1);
-#endif
-
+            GL_EXTCALL(glVertexBlendARB(WINED3D_ATR_SIZE(sd->u.s.blendWeights.dwType) + 1));
 
             VTRACE(("glWeightPointerARB(%d, GL_FLOAT, %d, %p)\n",
                 WINED3D_ATR_SIZE(sd->u.s.blendWeights.dwType) ,
                 sd->u.s.blendWeights.dwStride,
-                sd->u.s.blendWeights.lpData + stateblock->loadBaseVertexIndex * sd->u.s.blendWeights.dwStride));
+                sd->u.s.blendWeights.lpData + stateblock->loadBaseVertexIndex * sd->u.s.blendWeights.dwStride + offset[sd->u.s.blendWeights.streamNo]));
 
             if(curVBO != sd->u.s.blendWeights.VBO) {
                 GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, sd->u.s.blendWeights.VBO));
@@ -2158,7 +2812,7 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
                 WINED3D_ATR_SIZE(sd->u.s.blendWeights.dwType),
                 WINED3D_ATR_GLTYPE(sd->u.s.blendWeights.dwType),
                 sd->u.s.blendWeights.dwStride,
-                sd->u.s.blendWeights.lpData + stateblock->loadBaseVertexIndex * sd->u.s.blendWeights.dwStride);
+                sd->u.s.blendWeights.lpData + stateblock->loadBaseVertexIndex * sd->u.s.blendWeights.dwStride + offset[sd->u.s.blendWeights.streamNo]);
 
             checkGLcall("glWeightPointerARB");
 
@@ -2169,7 +2823,6 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
                     showfixme = FALSE;
                 }
             }
-
         } else if (GL_SUPPORT(EXT_VERTEX_WEIGHTING)) {
             /* FIXME("TODO\n");*/
 #if 0
@@ -2185,20 +2838,16 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
 #endif
 
         } else {
-            /* TODO: support blends in fixupVertices */
-            FIXME("unsupported blending in openGl\n");
+            /* TODO: support blends in drawStridedSlow
+             * No need to write a FIXME here, this is done after the general vertex decl decoding
+             */
+            WARN("unsupported blending in openGl\n");
         }
     } else {
         if (GL_SUPPORT(ARB_VERTEX_BLEND)) {
-#if 0    /* TODO: Vertex blending */
-            glDisable(GL_VERTEX_BLEND_ARB);
-#endif
-            TRACE("ARB_VERTEX_BLEND\n");
-        } else if (GL_SUPPORT(EXT_VERTEX_WEIGHTING)) {
-            TRACE(" EXT_VERTEX_WEIGHTING\n");
-            glDisableClientState(GL_VERTEX_WEIGHT_ARRAY_EXT);
-            checkGLcall("glDisableClientState(GL_VERTEX_WEIGHT_ARRAY_EXT)");
-
+            static const GLbyte one = 1;
+            GL_EXTCALL(glWeightbvARB(1, &one));
+            checkGLcall("glWeightivARB(GL_LIMITS(blends), weights)");
         }
     }
 
@@ -2296,20 +2945,16 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
         if(sd->u.s.position.VBO == 0) {
             glVertexPointer(3 /* min(WINED3D_ATR_SIZE(sd->u.s.position.dwType),3) */,
                 WINED3D_ATR_GLTYPE(sd->u.s.position.dwType),
-                sd->u.s.position.dwStride, sd->u.s.position.lpData + stateblock->loadBaseVertexIndex * sd->u.s.position.dwStride);
+                sd->u.s.position.dwStride, sd->u.s.position.lpData + stateblock->loadBaseVertexIndex * sd->u.s.position.dwStride + offset[sd->u.s.position.streamNo]);
         } else {
             glVertexPointer(
                 WINED3D_ATR_SIZE(sd->u.s.position.dwType),
                 WINED3D_ATR_GLTYPE(sd->u.s.position.dwType),
-                sd->u.s.position.dwStride, sd->u.s.position.lpData + stateblock->loadBaseVertexIndex * sd->u.s.position.dwStride);
+                sd->u.s.position.dwStride, sd->u.s.position.lpData + stateblock->loadBaseVertexIndex * sd->u.s.position.dwStride + offset[sd->u.s.position.streamNo]);
         }
         checkGLcall("glVertexPointer(...)");
         glEnableClientState(GL_VERTEX_ARRAY);
         checkGLcall("glEnableClientState(GL_VERTEX_ARRAY)");
-
-    } else {
-        glDisableClientState(GL_VERTEX_ARRAY);
-        checkGLcall("glDisableClientState(GL_VERTEX_ARRAY)");
     }
 
     /* Normals -------------------------------------------------*/
@@ -2326,14 +2971,12 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
         glNormalPointer(
             WINED3D_ATR_GLTYPE(sd->u.s.normal.dwType),
             sd->u.s.normal.dwStride,
-            sd->u.s.normal.lpData + stateblock->loadBaseVertexIndex * sd->u.s.normal.dwStride);
+            sd->u.s.normal.lpData + stateblock->loadBaseVertexIndex * sd->u.s.normal.dwStride + offset[sd->u.s.normal.streamNo]);
         checkGLcall("glNormalPointer(...)");
         glEnableClientState(GL_NORMAL_ARRAY);
         checkGLcall("glEnableClientState(GL_NORMAL_ARRAY)");
 
     } else {
-        glDisableClientState(GL_NORMAL_ARRAY);
-        checkGLcall("glDisableClientState(GL_NORMAL_ARRAY)");
         glNormal3f(0, 0, 1);
         checkGLcall("glNormal3f(0, 0, 1)");
     }
@@ -2360,14 +3003,12 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
         }
         glColorPointer(4, GL_UNSIGNED_BYTE,
                        sd->u.s.diffuse.dwStride,
-                       sd->u.s.diffuse.lpData + stateblock->loadBaseVertexIndex * sd->u.s.diffuse.dwStride);
+                       sd->u.s.diffuse.lpData + stateblock->loadBaseVertexIndex * sd->u.s.diffuse.dwStride + offset[sd->u.s.diffuse.streamNo]);
         checkGLcall("glColorPointer(4, GL_UNSIGNED_BYTE, ...)");
         glEnableClientState(GL_COLOR_ARRAY);
         checkGLcall("glEnableClientState(GL_COLOR_ARRAY)");
 
     } else {
-        glDisableClientState(GL_COLOR_ARRAY);
-        checkGLcall("glDisableClientState(GL_COLOR_ARRAY)");
         glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
         checkGLcall("glColor4f(1, 1, 1, 1)");
     }
@@ -2387,7 +3028,7 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
             }
             GL_EXTCALL(glSecondaryColorPointerEXT)(4, GL_UNSIGNED_BYTE,
                                                    sd->u.s.specular.dwStride,
-                                                   sd->u.s.specular.lpData + stateblock->loadBaseVertexIndex * sd->u.s.specular.dwStride);
+                                                   sd->u.s.specular.lpData + stateblock->loadBaseVertexIndex * sd->u.s.specular.dwStride + offset[sd->u.s.specular.streamNo]);
             vcheckGLcall("glSecondaryColorPointerEXT(4, GL_UNSIGNED_BYTE, ...)");
             glEnableClientState(GL_SECONDARY_COLOR_ARRAY_EXT);
             vcheckGLcall("glEnableClientState(GL_SECONDARY_COLOR_ARRAY_EXT)");
@@ -2399,9 +3040,6 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
 
     } else {
         if (GL_SUPPORT(EXT_SECONDARY_COLOR)) {
-
-            glDisableClientState(GL_SECONDARY_COLOR_ARRAY_EXT);
-            checkGLcall("glDisableClientState(GL_SECONDARY_COLOR_ARRAY_EXT)");
             GL_EXTCALL(glSecondaryColor3fEXT)(0, 0, 0);
             checkGLcall("glSecondaryColor3fEXT(0, 0, 0)");
         } else {
@@ -2412,65 +3050,10 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
     }
 
     /* Texture coords -------------------------------------------*/
-
-    for (textureNo = 0, texture_idx = 0; textureNo < GL_LIMITS(texture_stages); ++textureNo) {
-        /* The code below uses glClientActiveTexture and glMultiTexCoord* which are all part of the GL_ARB_multitexture extension. */
-        /* Abort if we don't support the extension. */
-        if (!GL_SUPPORT(ARB_MULTITEXTURE)) {
-            FIXME("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
-            continue;
-        }
-
-        if (/*!GL_SUPPORT(NV_REGISTER_COMBINERS) || stateblock->textures[textureNo]*/ TRUE) {
-            /* Select the correct texture stage */
-            GL_EXTCALL(glClientActiveTextureARB(GL_TEXTURE0_ARB + texture_idx));
-        }
-
-        if (stateblock->textures[textureNo] != NULL) {
-            int coordIdx = stateblock->textureState[textureNo][WINED3DTSS_TEXCOORDINDEX];
-
-            if (coordIdx >= MAX_TEXTURES) {
-                VTRACE(("tex: %d - Skip tex coords, as being system generated\n", textureNo));
-                glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-                GL_EXTCALL(glMultiTexCoord4fARB(GL_TEXTURE0_ARB + texture_idx, 0, 0, 0, 1));
-
-            } else if (sd->u.s.texCoords[coordIdx].lpData == NULL && sd->u.s.texCoords[coordIdx].VBO == 0) {
-                VTRACE(("Bound texture but no texture coordinates supplied, so skipping\n"));
-                glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-                GL_EXTCALL(glMultiTexCoord4fARB(GL_TEXTURE0_ARB + texture_idx, 0, 0, 0, 1));
-
-            } else {
-                TRACE("Setting up texture %u, idx %d, cordindx %u, data %p\n",
-                      textureNo, texture_idx, coordIdx, sd->u.s.texCoords[coordIdx].lpData);
-                if(curVBO != sd->u.s.texCoords[coordIdx].VBO) {
-                    GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, sd->u.s.texCoords[coordIdx].VBO));
-                    checkGLcall("glBindBufferARB");
-                    curVBO = sd->u.s.texCoords[coordIdx].VBO;
-                }
-                /* The coords to supply depend completely on the fvf / vertex shader */
-                glTexCoordPointer(
-                    WINED3D_ATR_SIZE(sd->u.s.texCoords[coordIdx].dwType),
-                    WINED3D_ATR_GLTYPE(sd->u.s.texCoords[coordIdx].dwType),
-                    sd->u.s.texCoords[coordIdx].dwStride,
-                    sd->u.s.texCoords[coordIdx].lpData + stateblock->loadBaseVertexIndex * sd->u.s.texCoords[coordIdx].dwStride);
-                glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-            }
-        } else if (!GL_SUPPORT(NV_REGISTER_COMBINERS)) {
-            glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-            GL_EXTCALL(glMultiTexCoord4fARB(GL_TEXTURE0_ARB + textureNo, 0, 0, 0, 1));
-        }
-        if (/*!GL_SUPPORT(NV_REGISTER_COMBINERS) || stateblock->textures[textureNo]*/ TRUE) ++texture_idx;
-    }
-    if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
-        for (textureNo = texture_idx; textureNo < GL_LIMITS(textures); ++textureNo) {
-            GL_EXTCALL(glClientActiveTextureARB(GL_TEXTURE0_ARB + textureNo));
-            glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-            GL_EXTCALL(glMultiTexCoord4fARB(GL_TEXTURE0_ARB + textureNo, 0, 0, 0, 1));
-        }
-    }
+    loadTexCoords(stateblock, sd, &curVBO);
 }
 
-inline void drawPrimitiveTraceDataLocations(
+static inline void drawPrimitiveTraceDataLocations(
     WineDirect3DVertexStridedData *dataLocations) {
 
     /* Dump out what parts we have supplied */
@@ -2503,7 +3086,7 @@ inline void drawPrimitiveTraceDataLocations(
 }
 
 /* Helper for vertexdeclaration() */
-static inline void handleStreams(IWineD3DStateBlockImpl *stateblock, BOOL useVertexShaderFunction) {
+static inline void handleStreams(IWineD3DStateBlockImpl *stateblock, BOOL useVertexShaderFunction, WineD3DContext *context) {
     IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
     BOOL fixup = FALSE;
     WineDirect3DVertexStridedData *dataLocations = &device->strided_streams;
@@ -2516,7 +3099,7 @@ static inline void handleStreams(IWineD3DStateBlockImpl *stateblock, BOOL useVer
         if(TRACE_ON(d3d)) {
             drawPrimitiveTraceDataLocations(dataLocations);
         }
-    } else if (stateblock->vertexDecl || stateblock->vertexShader) {
+    } else {
         /* Note: This is a fixed function or shader codepath.
          * This means it must handle both types of strided data.
          * Shaders must go through here to zero the strided data, even if they
@@ -2524,42 +3107,29 @@ static inline void handleStreams(IWineD3DStateBlockImpl *stateblock, BOOL useVer
          */
         TRACE("================ Vertex Declaration  ===================\n");
         memset(dataLocations, 0, sizeof(*dataLocations));
+        primitiveDeclarationConvertToStridedData((IWineD3DDevice *) device,
+                useVertexShaderFunction, dataLocations, &fixup);
+    }
 
-        if (stateblock->vertexDecl != NULL ||
-            ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->vertexDeclaration != NULL) {
-
-            primitiveDeclarationConvertToStridedData((IWineD3DDevice *) device, useVertexShaderFunction,
-                dataLocations, &fixup);
-        }
-    } else {
-        /* Note: This codepath is not reachable from d3d9 (see fvf->decl9 conversion)
-         * It is reachable through d3d8, but only for fixed-function.
-         * It will not work properly for shaders.
-         */
-        TRACE("================ FVF ===================\n");
-        memset(dataLocations, 0, sizeof(*dataLocations));
-        primitiveConvertToStridedData((IWineD3DDevice *) device, dataLocations,
-									   &fixup);
-        if(TRACE_ON(d3d)) {
-            drawPrimitiveTraceDataLocations(dataLocations);
-        }
-     }
+    if (dataLocations->u.s.position_transformed) {
+        useVertexShaderFunction = FALSE;
+    }
 
     /* Unload the old arrays before loading the new ones to get old junk out */
-    if(device->numberedArraysLoaded) {
+    if(context->numberedArraysLoaded) {
         unloadNumberedArrays(stateblock);
-        device->numberedArraysLoaded = FALSE;
+        context->numberedArraysLoaded = FALSE;
     }
-    if(device->namedArraysLoaded) {
+    if(context->namedArraysLoaded) {
         unloadVertexData(stateblock);
-        device->namedArraysLoaded = FALSE;
+        context->namedArraysLoaded = FALSE;
     }
 
     if(useVertexShaderFunction) {
         TRACE("Loading numbered arrays\n");
         loadNumberedArrays(stateblock, dataLocations);
         device->useDrawStridedSlow = FALSE;
-        device->numberedArraysLoaded = TRUE;
+        context->numberedArraysLoaded = TRUE;
     } else if (fixup ||
                (dataLocations->u.s.pSize.lpData == NULL &&
                 dataLocations->u.s.diffuse.lpData == NULL &&
@@ -2568,7 +3138,7 @@ static inline void handleStreams(IWineD3DStateBlockImpl *stateblock, BOOL useVer
         TRACE("Loading vertex data\n");
         loadVertexData(stateblock, dataLocations);
         device->useDrawStridedSlow = FALSE;
-        device->namedArraysLoaded = TRUE;
+        context->namedArraysLoaded = TRUE;
     } else {
         TRACE("Not loading vertex data\n");
         device->useDrawStridedSlow = TRUE;
@@ -2577,9 +3147,6 @@ static inline void handleStreams(IWineD3DStateBlockImpl *stateblock, BOOL useVer
 /* Generate some fixme's if unsupported functionality is being used */
 #define BUFFER_OR_DATA(_attribute) dataLocations->u.s._attribute.lpData
     /* TODO: Either support missing functionality in fixupVertices or by creating a shader to replace the pipeline. */
-    if (!useVertexShaderFunction && (BUFFER_OR_DATA(blendMatrixIndices) || BUFFER_OR_DATA(blendWeights))) {
-        FIXME("Blending data is only valid with vertex shaders %p %p\n",dataLocations->u.s.blendWeights.lpData,dataLocations->u.s.blendWeights.lpData);
-    }
     if (!useVertexShaderFunction && (BUFFER_OR_DATA(position2) || BUFFER_OR_DATA(normal2))) {
         FIXME("Tweening is only valid with vertex shaders\n");
     }
@@ -2592,12 +3159,14 @@ static inline void handleStreams(IWineD3DStateBlockImpl *stateblock, BOOL useVer
 #undef BUFFER_OR_DATA
 }
 
-static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     BOOL useVertexShaderFunction = FALSE, updateFog = FALSE;
+    BOOL usePixelShaderFunction = stateblock->wineD3DDevice->ps_selected_mode != SHADER_NONE && stateblock->pixelShader
+            && ((IWineD3DPixelShaderImpl *)stateblock->pixelShader)->baseShader.function;
     BOOL transformed;
     /* Some stuff is in the device until we have per context tracking */
     IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
-    BOOL wasrhw = device->last_was_rhw;
+    BOOL wasrhw = context->last_was_rhw;
 
     /* Shaders can be implemented using ARB_PROGRAM, GLSL, or software -
      * here simply check whether a shader was set, or the user disabled shaders
@@ -2606,35 +3175,33 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock) {
        ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->baseShader.function != NULL) {
         useVertexShaderFunction = TRUE;
 
-        if(((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->usesFog != device->last_was_foggy_shader) {
+        if(((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->baseShader.reg_maps.fog != context->last_was_foggy_shader) {
             updateFog = TRUE;
         }
-    } else if(device->last_was_foggy_shader) {
+    } else if(context->last_was_foggy_shader) {
         updateFog = TRUE;
     }
 
-    handleStreams(stateblock, useVertexShaderFunction);
+    handleStreams(stateblock, useVertexShaderFunction, context);
 
-    /* Do I have to use ? TRUE : FALSE ? Or can I rely on 15==15 beeing equal to TRUE(=1)? */
-    transformed = ((device->strided_streams.u.s.position.lpData != NULL ||
-                    device->strided_streams.u.s.position.VBO != 0) &&
-                    device->strided_streams.u.s.position_transformed) ? TRUE : FALSE;
+    transformed = device->strided_streams.u.s.position_transformed;
+    if (transformed) useVertexShaderFunction = FALSE;
 
-    if(transformed != device->last_was_rhw && !useVertexShaderFunction) {
+    if(transformed != context->last_was_rhw && !useVertexShaderFunction) {
         updateFog = TRUE;
     }
 
-    /* Reapply lighting if it is not sheduled for reapplication already */
-    if(!isStateDirty(device, STATE_RENDER(WINED3DRS_LIGHTING))) {
-        state_lighting(STATE_RENDER(WINED3DRS_LIGHTING), stateblock);
+    /* Reapply lighting if it is not scheduled for reapplication already */
+    if(!isStateDirty(context, STATE_RENDER(WINED3DRS_LIGHTING))) {
+        state_lighting(STATE_RENDER(WINED3DRS_LIGHTING), stateblock, context);
     }
 
-    if (!useVertexShaderFunction && transformed) {
-        stateblock->wineD3DDevice->last_was_rhw = TRUE;
+    if (transformed) {
+        context->last_was_rhw = TRUE;
     } else {
 
         /* Untransformed, so relies on the view and projection matrices */
-        device->last_was_rhw = FALSE;
+        context->last_was_rhw = FALSE;
         /* This turns off the Z scale trick to 'disable' viewport frustum clipping in rhw mode*/
         device->untransformed = TRUE;
 
@@ -2657,10 +3224,10 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock) {
         /* TODO: Move this mainly to the viewport state and only apply when the vp has changed
          * or transformed / untransformed was switched
          */
-       if(wasrhw != device->last_was_rhw &&
-          !isStateDirty(stateblock->wineD3DDevice, STATE_TRANSFORM(WINED3DTS_PROJECTION)) &&
-          !isStateDirty(stateblock->wineD3DDevice, STATE_VIEWPORT)) {
-            transform_projection(STATE_TRANSFORM(WINED3DTS_PROJECTION), stateblock);
+       if(wasrhw != context->last_was_rhw &&
+          !isStateDirty(context, STATE_TRANSFORM(WINED3DTS_PROJECTION)) &&
+          !isStateDirty(context, STATE_VIEWPORT)) {
+            transform_projection(STATE_TRANSFORM(WINED3DTS_PROJECTION), stateblock, context);
         }
         /* World matrix needs reapplication here only if we're switching between rhw and non-rhw
          * mode.
@@ -2674,57 +3241,226 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock) {
          * dirty
          */
         if(transformed != wasrhw &&
-           !isStateDirty(stateblock->wineD3DDevice, STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0))) &&
-           !isStateDirty(stateblock->wineD3DDevice, STATE_TRANSFORM(WINED3DTS_VIEW))) {
-            transform_world(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)), stateblock);
+           !isStateDirty(context, STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0))) &&
+           !isStateDirty(context, STATE_TRANSFORM(WINED3DTS_VIEW))) {
+            transform_world(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)), stateblock, context);
+        }
+
+        if(!isStateDirty(context, STATE_RENDER(WINED3DRS_COLORVERTEX))) {
+            state_colormat(STATE_RENDER(WINED3DRS_COLORVERTEX), stateblock, context);
+        }
+
+        if(context->last_was_vshader && !isStateDirty(context, STATE_RENDER(WINED3DRS_CLIPPLANEENABLE))) {
+            state_clipping(STATE_RENDER(WINED3DRS_CLIPPLANEENABLE), stateblock, context);
         }
     } else {
         /* We compile the shader here because we need the vertex declaration
          * in order to determine if we need to do any swizzling for D3DCOLOR
          * registers. If the shader is already compiled this call will do nothing. */
         IWineD3DVertexShader_CompileShader(stateblock->vertexShader);
-    }
 
-    if(useVertexShaderFunction || device->last_was_vshader) {
-        BOOL usePixelShaderFunction = device->ps_selected_mode != SHADER_NONE && 
-                                      stateblock->pixelShader &&
-                                      ((IWineD3DPixelShaderImpl *)stateblock->pixelShader)->baseShader.function;
+        if(!context->last_was_vshader) {
+            int i;
+            static BOOL warned = FALSE;
+            /* Disable all clip planes to get defined results on all drivers. See comment in the
+             * state_clipping state handler
+             */
+            for(i = 0; i < GL_LIMITS(clipplanes); i++) {
+                glDisable(GL_CLIP_PLANE0 + i);
+                checkGLcall("glDisable(GL_CLIP_PLANE0 + i)");
+            }
 
-        /* Vertex and pixel shaders are applied together for now, so let the last dirty state do the
-         * application
-         */
-        if(!isStateDirty(device, STATE_PIXELSHADER)) {
-            device->shader_backend->shader_select((IWineD3DDevice *) device, usePixelShaderFunction, useVertexShaderFunction);
-
-            if(!isStateDirty(stateblock->wineD3DDevice, STATE_VERTEXSHADERCONSTANT) && (useVertexShaderFunction || usePixelShaderFunction)) {
-                shaderconstant(STATE_VERTEXSHADERCONSTANT, stateblock);
+            if(!warned && stateblock->renderState[WINED3DRS_CLIPPLANEENABLE]) {
+                FIXME("Clipping not supported with vertex shaders\n");
+                warned = TRUE;
             }
         }
-        device->last_was_vshader = useVertexShaderFunction;
     }
 
+    /* Vertex and pixel shaders are applied together for now, so let the last dirty state do the
+     * application
+     */
+    if (!isStateDirty(context, STATE_PIXELSHADER)) {
+        device->shader_backend->shader_select((IWineD3DDevice *)device, usePixelShaderFunction, useVertexShaderFunction);
+
+        if (!isStateDirty(context, STATE_VERTEXSHADERCONSTANT) && (useVertexShaderFunction || usePixelShaderFunction)) {
+            shaderconstant(STATE_VERTEXSHADERCONSTANT, stateblock, context);
+        }
+    }
+
+    context->last_was_vshader = useVertexShaderFunction;
+
     if(updateFog) {
-        state_fog(STATE_RENDER(WINED3DRS_FOGENABLE), stateblock);
+        state_fog(STATE_RENDER(WINED3DRS_FOGENABLE), stateblock, context);
     }
 }
 
-static void viewport(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+static void viewport(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     glDepthRange(stateblock->viewport.MinZ, stateblock->viewport.MaxZ);
     checkGLcall("glDepthRange");
-    /* Note: GL requires lower left, DirectX supplies upper left */
-    /* TODO: replace usage of renderTarget with context management */
-    glViewport(stateblock->viewport.X,
-               (((IWineD3DSurfaceImpl *)stateblock->wineD3DDevice->render_targets[0])->currentDesc.Height - (stateblock->viewport.Y + stateblock->viewport.Height)),
-               stateblock->viewport.Width, stateblock->viewport.Height);
+    /* Note: GL requires lower left, DirectX supplies upper left. This is reversed when using offscreen rendering
+     */
+    if(stateblock->wineD3DDevice->render_offscreen) {
+        glViewport(stateblock->viewport.X,
+                   stateblock->viewport.Y,
+                   stateblock->viewport.Width, stateblock->viewport.Height);
+    } else {
+        glViewport(stateblock->viewport.X,
+                   (((IWineD3DSurfaceImpl *)stateblock->wineD3DDevice->render_targets[0])->currentDesc.Height - (stateblock->viewport.Y + stateblock->viewport.Height)),
+                   stateblock->viewport.Width, stateblock->viewport.Height);
+    }
 
     checkGLcall("glViewport");
 
     stateblock->wineD3DDevice->posFixup[2] = 0.9 / stateblock->viewport.Width;
     stateblock->wineD3DDevice->posFixup[3] = -0.9 / stateblock->viewport.Height;
-    if(!isStateDirty(stateblock->wineD3DDevice, STATE_TRANSFORM(D3DTS_PROJECTION))) {
-        transform_projection(STATE_TRANSFORM(D3DTS_PROJECTION), stateblock);
+    if(!isStateDirty(context, STATE_TRANSFORM(WINED3DTS_PROJECTION))) {
+        transform_projection(STATE_TRANSFORM(WINED3DTS_PROJECTION), stateblock, context);
     }
 
+}
+
+static void light(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    UINT Index = state - STATE_ACTIVELIGHT(0);
+    PLIGHTINFOEL *lightInfo = stateblock->activeLights[Index];
+
+    if(!lightInfo) {
+        glDisable(GL_LIGHT0 + Index);
+        checkGLcall("glDisable(GL_LIGHT0 + Index)");
+    } else {
+        float quad_att;
+        float colRGBA[] = {0.0, 0.0, 0.0, 0.0};
+
+        /* Light settings are affected by the model view in OpenGL, the View transform in direct3d*/
+        glMatrixMode(GL_MODELVIEW);
+        glPushMatrix();
+        glLoadMatrixf((float *)&stateblock->transforms[WINED3DTS_VIEW].u.m[0][0]);
+
+        /* Diffuse: */
+        colRGBA[0] = lightInfo->OriginalParms.Diffuse.r;
+        colRGBA[1] = lightInfo->OriginalParms.Diffuse.g;
+        colRGBA[2] = lightInfo->OriginalParms.Diffuse.b;
+        colRGBA[3] = lightInfo->OriginalParms.Diffuse.a;
+        glLightfv(GL_LIGHT0 + Index, GL_DIFFUSE, colRGBA);
+        checkGLcall("glLightfv");
+
+        /* Specular */
+        colRGBA[0] = lightInfo->OriginalParms.Specular.r;
+        colRGBA[1] = lightInfo->OriginalParms.Specular.g;
+        colRGBA[2] = lightInfo->OriginalParms.Specular.b;
+        colRGBA[3] = lightInfo->OriginalParms.Specular.a;
+        glLightfv(GL_LIGHT0 + Index, GL_SPECULAR, colRGBA);
+        checkGLcall("glLightfv");
+
+        /* Ambient */
+        colRGBA[0] = lightInfo->OriginalParms.Ambient.r;
+        colRGBA[1] = lightInfo->OriginalParms.Ambient.g;
+        colRGBA[2] = lightInfo->OriginalParms.Ambient.b;
+        colRGBA[3] = lightInfo->OriginalParms.Ambient.a;
+        glLightfv(GL_LIGHT0 + Index, GL_AMBIENT, colRGBA);
+        checkGLcall("glLightfv");
+
+        if ((lightInfo->OriginalParms.Range *lightInfo->OriginalParms.Range) >= FLT_MIN) {
+            quad_att = 1.4/(lightInfo->OriginalParms.Range *lightInfo->OriginalParms.Range);
+        } else {
+            quad_att = 0; /*  0 or  MAX?  (0 seems to be ok) */
+        }
+
+        /* Do not assign attenuation values for lights that do not use them. D3D apps are free to pass any junk,
+         * but gl drivers use them and may crash due to bad Attenuation values. Need for Speed most wanted sets
+         * Attenuation0 to NaN and crashes in the gl lib
+         */
+
+        switch (lightInfo->OriginalParms.Type) {
+            case WINED3DLIGHT_POINT:
+                /* Position */
+                glLightfv(GL_LIGHT0 + Index, GL_POSITION, &lightInfo->lightPosn[0]);
+                checkGLcall("glLightfv");
+                glLightf(GL_LIGHT0 + Index, GL_SPOT_CUTOFF, lightInfo->cutoff);
+                checkGLcall("glLightf");
+                /* Attenuation - Are these right? guessing... */
+                glLightf(GL_LIGHT0 + Index, GL_CONSTANT_ATTENUATION,  lightInfo->OriginalParms.Attenuation0);
+                checkGLcall("glLightf");
+                glLightf(GL_LIGHT0 + Index, GL_LINEAR_ATTENUATION,    lightInfo->OriginalParms.Attenuation1);
+                checkGLcall("glLightf");
+                if (quad_att < lightInfo->OriginalParms.Attenuation2) quad_att = lightInfo->OriginalParms.Attenuation2;
+                glLightf(GL_LIGHT0 + Index, GL_QUADRATIC_ATTENUATION, quad_att);
+                checkGLcall("glLightf");
+                /* FIXME: Range */
+                break;
+
+            case WINED3DLIGHT_SPOT:
+                /* Position */
+                glLightfv(GL_LIGHT0 + Index, GL_POSITION, &lightInfo->lightPosn[0]);
+                checkGLcall("glLightfv");
+                /* Direction */
+                glLightfv(GL_LIGHT0 + Index, GL_SPOT_DIRECTION, &lightInfo->lightDirn[0]);
+                checkGLcall("glLightfv");
+                glLightf(GL_LIGHT0 + Index, GL_SPOT_EXPONENT, lightInfo->exponent);
+                checkGLcall("glLightf");
+                glLightf(GL_LIGHT0 + Index, GL_SPOT_CUTOFF, lightInfo->cutoff);
+                checkGLcall("glLightf");
+                /* Attenuation - Are these right? guessing... */
+                glLightf(GL_LIGHT0 + Index, GL_CONSTANT_ATTENUATION,  lightInfo->OriginalParms.Attenuation0);
+                checkGLcall("glLightf");
+                glLightf(GL_LIGHT0 + Index, GL_LINEAR_ATTENUATION,    lightInfo->OriginalParms.Attenuation1);
+                checkGLcall("glLightf");
+                if (quad_att < lightInfo->OriginalParms.Attenuation2) quad_att = lightInfo->OriginalParms.Attenuation2;
+                glLightf(GL_LIGHT0 + Index, GL_QUADRATIC_ATTENUATION, quad_att);
+                checkGLcall("glLightf");
+                /* FIXME: Range */
+                break;
+
+            case WINED3DLIGHT_DIRECTIONAL:
+                /* Direction */
+                glLightfv(GL_LIGHT0 + Index, GL_POSITION, &lightInfo->lightPosn[0]); /* Note gl uses w position of 0 for direction! */
+                checkGLcall("glLightfv");
+                glLightf(GL_LIGHT0 + Index, GL_SPOT_CUTOFF, lightInfo->cutoff);
+                checkGLcall("glLightf");
+                glLightf(GL_LIGHT0 + Index, GL_SPOT_EXPONENT, 0.0f);
+                checkGLcall("glLightf");
+                break;
+
+            default:
+                FIXME("Unrecognized light type %d\n", lightInfo->OriginalParms.Type);
+        }
+
+        /* Restore the modelview matrix */
+        glPopMatrix();
+
+        glEnable(GL_LIGHT0 + Index);
+        checkGLcall("glEnable(GL_LIGHT0 + Index)");
+    }
+
+    return;
+}
+
+static void scissorrect(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    IWineD3DSwapChainImpl *swapchain = (IWineD3DSwapChainImpl *) stateblock->wineD3DDevice->swapchains[0];
+    RECT *pRect = &stateblock->scissorRect;
+    RECT windowRect;
+    UINT winHeight;
+
+    GetClientRect(swapchain->win_handle, &windowRect);
+    /* Warning: glScissor uses window coordinates, not viewport coordinates, so our viewport correction does not apply
+     * Warning2: Even in windowed mode the coords are relative to the window, not the screen
+     */
+    winHeight = windowRect.bottom - windowRect.top;
+    TRACE("(%p) Setting new Scissor Rect to %d:%d-%d:%d\n", stateblock->wineD3DDevice, pRect->left, pRect->bottom - winHeight,
+          pRect->right - pRect->left, pRect->bottom - pRect->top);
+    glScissor(pRect->left, winHeight - pRect->bottom, pRect->right - pRect->left, pRect->bottom - pRect->top);
+    checkGLcall("glScissor");
+}
+
+static void indexbuffer(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    if(GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT)) {
+        if(stateblock->streamIsUP || stateblock->pIndexData == NULL ) {
+            GL_EXTCALL(glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, 0));
+        } else {
+            IWineD3DIndexBufferImpl *ib = (IWineD3DIndexBufferImpl *) stateblock->pIndexData;
+            GL_EXTCALL(glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, ib->vbo));
+        }
+    }
 }
 
 const struct StateEntry StateTable[] =
@@ -2882,7 +3618,7 @@ const struct StateEntry StateTable[] =
     { /*148, WINED3DRS_EMISSIVEMATERIALSOURCE       */      STATE_RENDER(WINED3DRS_COLORVERTEX),                state_colormat      },
     { /*149, Undefined                              */      0,                                                  state_undefined     },
     { /*150, Undefined                              */      0,                                                  state_undefined     },
-    { /*151, WINED3DRS_VERTEXBLEND                  */      0,                                                  state_nogl          },
+    { /*151, WINED3DRS_VERTEXBLEND                  */      STATE_RENDER(WINED3DRS_VERTEXBLEND),                state_vertexblend   },
     { /*152, WINED3DRS_CLIPPLANEENABLE              */      STATE_RENDER(WINED3DRS_CLIPPING),                   state_clipping      },
     { /*153, WINED3DRS_SOFTWAREVERTEXPROCESSING     */      0,                                                  state_nogl          },
     { /*154, WINED3DRS_POINTSIZE                    */      STATE_RENDER(WINED3DRS_POINTSIZE),                  state_psize         },
@@ -2939,10 +3675,10 @@ const struct StateEntry StateTable[] =
     { /*203, WINED3DRS_WRAP13                       */      STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          },
     { /*204, WINED3DRS_WRAP14                       */      STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          },
     { /*205, WINED3DRS_WRAP15                       */      STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          },
-    { /*206, WINED3DRS_SEPARATEALPHABLENDENABLE     */      STATE_RENDER(WINED3DRS_SEPARATEALPHABLENDENABLE),   state_seperateblend },
-    { /*207, WINED3DRS_SRCBLENDALPHA                */      STATE_RENDER(WINED3DRS_SEPARATEALPHABLENDENABLE),   state_seperateblend },
-    { /*208, WINED3DRS_DESTBLENDALPHA               */      STATE_RENDER(WINED3DRS_SEPARATEALPHABLENDENABLE),   state_seperateblend },
-    { /*209, WINED3DRS_BLENDOPALPHA                 */      STATE_RENDER(WINED3DRS_SEPARATEALPHABLENDENABLE),   state_seperateblend },
+    { /*206, WINED3DRS_SEPARATEALPHABLENDENABLE     */      STATE_RENDER(WINED3DRS_SEPARATEALPHABLENDENABLE),   state_separateblend },
+    { /*207, WINED3DRS_SRCBLENDALPHA                */      STATE_RENDER(WINED3DRS_SEPARATEALPHABLENDENABLE),   state_separateblend },
+    { /*208, WINED3DRS_DESTBLENDALPHA               */      STATE_RENDER(WINED3DRS_SEPARATEALPHABLENDENABLE),   state_separateblend },
+    { /*209, WINED3DRS_BLENDOPALPHA                 */      STATE_RENDER(WINED3DRS_SEPARATEALPHABLENDENABLE),   state_separateblend },
     /* Texture stage states */
     { /*0, 01, WINED3DTSS_COLOROP                   */      STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*0, 02, WINED3DTSS_COLORARG1                 */      STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         },
@@ -2950,10 +3686,10 @@ const struct StateEntry StateTable[] =
     { /*0, 04, WINED3DTSS_ALPHAOP                   */      STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*0, 05, WINED3DTSS_ALPHAARG1                 */      STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*0, 06, WINED3DTSS_ALPHAARG2                 */      STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*0, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*0, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*0, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*0, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         },
+    { /*0, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*0, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*0, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*0, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
     { /*0, 11, WINED3DTSS_TEXCOORDINDEX             */      STATE_TEXTURESTAGE(0, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      },
     { /*0, 12, WINED3DTSS_ADDRESS                   */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*0, 13, WINED3DTSS_ADDRESSU                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -2983,10 +3719,10 @@ const struct StateEntry StateTable[] =
     { /*1, 04, WINED3DTSS_ALPHAOP                   */      STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*1, 05, WINED3DTSS_ALPHAARG1                 */      STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*1, 06, WINED3DTSS_ALPHAARG2                 */      STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*1, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*1, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*1, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*1, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         },
+    { /*1, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*1, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*1, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*1, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
     { /*1, 11, WINED3DTSS_TEXCOORDINDEX             */      STATE_TEXTURESTAGE(1, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      },
     { /*1, 12, WINED3DTSS_ADDRESS                   */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*1, 13, WINED3DTSS_ADDRESSU                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -3016,10 +3752,10 @@ const struct StateEntry StateTable[] =
     { /*2, 04, WINED3DTSS_ALPHAOP                   */      STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*2, 05, WINED3DTSS_ALPHAARG1                 */      STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*2, 06, WINED3DTSS_ALPHAARG2                 */      STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*2, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*2, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*2, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*2, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         },
+    { /*2, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*2, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*2, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*2, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
     { /*2, 11, WINED3DTSS_TEXCOORDINDEX             */      STATE_TEXTURESTAGE(2, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      },
     { /*2, 12, WINED3DTSS_ADDRESS                   */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*2, 13, WINED3DTSS_ADDRESSU                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -3049,10 +3785,10 @@ const struct StateEntry StateTable[] =
     { /*3, 04, WINED3DTSS_ALPHAOP                   */      STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*3, 05, WINED3DTSS_ALPHAARG1                 */      STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*3, 06, WINED3DTSS_ALPHAARG2                 */      STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*3, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*3, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*3, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*3, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         },
+    { /*3, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*3, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*3, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*3, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
     { /*3, 11, WINED3DTSS_TEXCOORDINDEX             */      STATE_TEXTURESTAGE(3, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      },
     { /*3, 12, WINED3DTSS_ADDRESS                   */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*3, 13, WINED3DTSS_ADDRESSU                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -3082,10 +3818,10 @@ const struct StateEntry StateTable[] =
     { /*4, 04, WINED3DTSS_ALPHAOP                   */      STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*4, 05, WINED3DTSS_ALPHAARG1                 */      STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*4, 06, WINED3DTSS_ALPHAARG2                 */      STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*4, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          state_undefined     },
-    { /*4, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          state_undefined     },
-    { /*4, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          state_undefined     },
-    { /*4, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          state_undefined     },
+    { /*4, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*4, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*4, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*4, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
     { /*4, 11, WINED3DTSS_TEXCOORDINDEX             */      STATE_TEXTURESTAGE(4, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      },
     { /*4, 12, WINED3DTSS_ADDRESS                   */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*4, 13, WINED3DTSS_ADDRESSU                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -3115,10 +3851,10 @@ const struct StateEntry StateTable[] =
     { /*5, 04, WINED3DTSS_ALPHAOP                   */      STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*5, 05, WINED3DTSS_ALPHAARG1                 */      STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*5, 06, WINED3DTSS_ALPHAARG2                 */      STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*5, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*5, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*5, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*5, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         },
+    { /*5, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*5, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*5, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*5, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
     { /*5, 11, WINED3DTSS_TEXCOORDINDEX             */      STATE_TEXTURESTAGE(5, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      },
     { /*5, 12, WINED3DTSS_ADDRESS                   */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*5, 13, WINED3DTSS_ADDRESSU                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -3148,10 +3884,10 @@ const struct StateEntry StateTable[] =
     { /*6, 04, WINED3DTSS_ALPHAOP                   */      STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*6, 05, WINED3DTSS_ALPHAARG1                 */      STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*6, 06, WINED3DTSS_ALPHAARG2                 */      STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*6, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*6, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*6, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*6, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         },
+    { /*6, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*6, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*6, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*6, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
     { /*6, 11, WINED3DTSS_TEXCOORDINDEX             */      STATE_TEXTURESTAGE(6, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      },
     { /*6, 12, WINED3DTSS_ADDRESS                   */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*6, 13, WINED3DTSS_ADDRESSU                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -3181,10 +3917,10 @@ const struct StateEntry StateTable[] =
     { /*7, 04, WINED3DTSS_ALPHAOP                   */      STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*7, 05, WINED3DTSS_ALPHAARG1                 */      STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          tex_alphaop         },
     { /*7, 06, WINED3DTSS_ALPHAARG2                 */      STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*7, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*7, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*7, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         },
-    { /*7, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         },
+    { /*7, 07, WINED3DTSS_BUMPENVMAT00              */      STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*7, 08, WINED3DTSS_BUMPENVMAT01              */      STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*7, 09, WINED3DTSS_BUMPENVMAT10              */      STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
+    { /*7, 10, WINED3DTSS_BUMPENVMAT11              */      STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      },
     { /*7, 11, WINED3DTSS_TEXCOORDINDEX             */      STATE_TEXTURESTAGE(7, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      },
     { /*7, 12, WINED3DTSS_ADDRESS                   */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*7, 13, WINED3DTSS_ADDRESSU                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -3224,6 +3960,10 @@ const struct StateEntry StateTable[] =
     { /*13, Sampler 13                              */      STATE_SAMPLER(13),                                  sampler             },
     { /*14, Sampler 14                              */      STATE_SAMPLER(14),                                  sampler             },
     { /*15, Sampler 15                              */      STATE_SAMPLER(15),                                  sampler             },
+    { /*16, Vertex sampler 0                        */      STATE_SAMPLER(16),                                  sampler             },
+    { /*17, Vertex sampler 1                        */      STATE_SAMPLER(17),                                  sampler             },
+    { /*18, Vertex sampler 2                        */      STATE_SAMPLER(18),                                  sampler             },
+    { /*19, Vertex sampler 3                        */      STATE_SAMPLER(19),                                  sampler             },
     /* Pixel shader */
     { /*  , Pixel Shader                            */      STATE_PIXELSHADER,                                  pixelshader         },
       /* Transform states follow                    */
@@ -3742,9 +4482,56 @@ const struct StateEntry StateTable[] =
     { /*511, WINED3DTS_WORLDMATRIX(255)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(255)),        transform_worldex   },
       /* Various Vertex states follow */
     { /*   , STATE_STREAMSRC                        */      STATE_VDECL,                                        vertexdeclaration   },
+    { /*   , STATE_INDEXBUFFER                      */      STATE_INDEXBUFFER,                                  indexbuffer         },
     { /*   , STATE_VDECL                            */      STATE_VDECL,                                        vertexdeclaration   },
     { /*   , STATE_VSHADER                          */      STATE_VDECL,                                        vertexdeclaration   },
     { /*   , STATE_VIEWPORT                         */      STATE_VIEWPORT,                                     viewport            },
     { /*   , STATE_VERTEXSHADERCONSTANT             */      STATE_VERTEXSHADERCONSTANT,                         shaderconstant      },
     { /*   , STATE_PIXELSHADERCONSTANT              */      STATE_VERTEXSHADERCONSTANT,                         shaderconstant      },
+      /* Lights */
+    { /*   , STATE_ACTIVELIGHT(0)                   */      STATE_ACTIVELIGHT(0),                               light               },
+    { /*   , STATE_ACTIVELIGHT(1)                   */      STATE_ACTIVELIGHT(1),                               light               },
+    { /*   , STATE_ACTIVELIGHT(2)                   */      STATE_ACTIVELIGHT(2),                               light               },
+    { /*   , STATE_ACTIVELIGHT(3)                   */      STATE_ACTIVELIGHT(3),                               light               },
+    { /*   , STATE_ACTIVELIGHT(4)                   */      STATE_ACTIVELIGHT(4),                               light               },
+    { /*   , STATE_ACTIVELIGHT(5)                   */      STATE_ACTIVELIGHT(5),                               light               },
+    { /*   , STATE_ACTIVELIGHT(6)                   */      STATE_ACTIVELIGHT(6),                               light               },
+    { /*   , STATE_ACTIVELIGHT(7)                   */      STATE_ACTIVELIGHT(7),                               light               },
+
+    { /* Scissor rect                               */      STATE_SCISSORRECT,                                  scissorrect         },
+      /* Clip planes */
+    { /* STATE_CLIPPLANE(0)                         */      STATE_CLIPPLANE(0),                                 clipplane           },
+    { /* STATE_CLIPPLANE(1)                         */      STATE_CLIPPLANE(1),                                 clipplane           },
+    { /* STATE_CLIPPLANE(2)                         */      STATE_CLIPPLANE(2),                                 clipplane           },
+    { /* STATE_CLIPPLANE(3)                         */      STATE_CLIPPLANE(3),                                 clipplane           },
+    { /* STATE_CLIPPLANE(4)                         */      STATE_CLIPPLANE(4),                                 clipplane           },
+    { /* STATE_CLIPPLANE(5)                         */      STATE_CLIPPLANE(5),                                 clipplane           },
+    { /* STATE_CLIPPLANE(6)                         */      STATE_CLIPPLANE(6),                                 clipplane           },
+    { /* STATE_CLIPPLANE(7)                         */      STATE_CLIPPLANE(7),                                 clipplane           },
+    { /* STATE_CLIPPLANE(8)                         */      STATE_CLIPPLANE(8),                                 clipplane           },
+    { /* STATE_CLIPPLANE(9)                         */      STATE_CLIPPLANE(9),                                 clipplane           },
+    { /* STATE_CLIPPLANE(10)                        */      STATE_CLIPPLANE(10),                                clipplane           },
+    { /* STATE_CLIPPLANE(11)                        */      STATE_CLIPPLANE(11),                                clipplane           },
+    { /* STATE_CLIPPLANE(12)                        */      STATE_CLIPPLANE(12),                                clipplane           },
+    { /* STATE_CLIPPLANE(13)                        */      STATE_CLIPPLANE(13),                                clipplane           },
+    { /* STATE_CLIPPLANE(14)                        */      STATE_CLIPPLANE(14),                                clipplane           },
+    { /* STATE_CLIPPLANE(15)                        */      STATE_CLIPPLANE(15),                                clipplane           },
+    { /* STATE_CLIPPLANE(16)                        */      STATE_CLIPPLANE(16),                                clipplane           },
+    { /* STATE_CLIPPLANE(17)                        */      STATE_CLIPPLANE(17),                                clipplane           },
+    { /* STATE_CLIPPLANE(18)                        */      STATE_CLIPPLANE(18),                                clipplane           },
+    { /* STATE_CLIPPLANE(19)                        */      STATE_CLIPPLANE(19),                                clipplane           },
+    { /* STATE_CLIPPLANE(20)                        */      STATE_CLIPPLANE(20),                                clipplane           },
+    { /* STATE_CLIPPLANE(21)                        */      STATE_CLIPPLANE(21),                                clipplane           },
+    { /* STATE_CLIPPLANE(22)                        */      STATE_CLIPPLANE(22),                                clipplane           },
+    { /* STATE_CLIPPLANE(23)                        */      STATE_CLIPPLANE(23),                                clipplane           },
+    { /* STATE_CLIPPLANE(24)                        */      STATE_CLIPPLANE(24),                                clipplane           },
+    { /* STATE_CLIPPLANE(25)                        */      STATE_CLIPPLANE(25),                                clipplane           },
+    { /* STATE_CLIPPLANE(26)                        */      STATE_CLIPPLANE(26),                                clipplane           },
+    { /* STATE_CLIPPLANE(27)                        */      STATE_CLIPPLANE(27),                                clipplane           },
+    { /* STATE_CLIPPLANE(28)                        */      STATE_CLIPPLANE(28),                                clipplane           },
+    { /* STATE_CLIPPLANE(29)                        */      STATE_CLIPPLANE(29),                                clipplane           },
+    { /* STATE_CLIPPLANE(30)                        */      STATE_CLIPPLANE(30),                                clipplane           },
+    { /* STATE_CLIPPLANE(31)                        */      STATE_CLIPPLANE(31),                                clipplane           },
+
+    { /* STATE_MATERIAL                             */      STATE_RENDER(WINED3DRS_SPECULARENABLE),             state_specularenable},
 };

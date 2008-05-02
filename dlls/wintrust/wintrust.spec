@@ -1,13 +1,13 @@
 @ stub AddPersonalTrustDBPages
 @ stub CatalogCompactHashDatabase
 @ stdcall CryptCATAdminAcquireContext(long ptr long)
-@ stub CryptCATAdminAddCatalog
+@ stdcall CryptCATAdminAddCatalog(long wstr wstr long)
 @ stdcall CryptCATAdminCalcHashFromFileHandle(long ptr ptr long)
 @ stdcall CryptCATAdminEnumCatalogFromHash(long ptr long long ptr)
 @ stub CryptCATAdminPauseServiceForBackup
-@ stub CryptCATAdminReleaseCatalogContext
+@ stdcall CryptCATAdminReleaseCatalogContext(long long long)
 @ stdcall CryptCATAdminReleaseContext(long long)
-@ stub CryptCATAdminRemoveCatalog
+@ stdcall CryptCATAdminRemoveCatalog(ptr wstr long)
 @ stub CryptCATAdminResolveCatalogPath
 @ stub CryptCATCDFClose
 @ stub CryptCATCDFEnumAttributes

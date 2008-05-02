@@ -32,7 +32,6 @@
 #include "win.h"
 #include "user_private.h"
 #include "wine/debug.h"
-#include "winnls.h"
 #include "commctrl.h"
 #include "commdlg.h"
 #include "richedit.h"
@@ -1962,7 +1961,7 @@ static int indent_tls_index;
 /***********************************************************************
  *           get_indent_level
  */
-inline static INT_PTR get_indent_level(void)
+static inline INT_PTR get_indent_level(void)
 {
     return (INT_PTR)TlsGetValue( indent_tls_index );
 }
@@ -1971,7 +1970,7 @@ inline static INT_PTR get_indent_level(void)
 /***********************************************************************
  *           set_indent_level
  */
-inline static void set_indent_level( INT_PTR level )
+static inline void set_indent_level( INT_PTR level )
 {
     TlsSetValue( indent_tls_index, (void *)level );
 }
@@ -2411,6 +2410,23 @@ static void SPY_DumpStructure(const SPY_INSTANCE *sp_e, BOOL enter)
                 TRACE("itemData=0x%08lx\n", lpmis->itemData);
             }
             break;
+        case WM_NCCREATE:
+        case WM_CREATE:
+        {
+            BOOL unicode;
+            CREATESTRUCTA *cs;
+
+            if (!enter) break;
+
+            unicode = IsWindowUnicode(sp_e->msg_hwnd);
+            cs = (CREATESTRUCTA *)sp_e->lParam;
+            TRACE("%s %s ex=%08x style=%08x %d,%d %dx%d parent=%p menu=%p inst=%p params=%p\n",
+                  unicode ? debugstr_w((LPCWSTR)cs->lpszName) : debugstr_a(cs->lpszName),
+                  unicode ? debugstr_w((LPCWSTR)cs->lpszClass) : debugstr_a(cs->lpszClass),
+                  cs->dwExStyle, cs->style, cs->x, cs->y, cs->cx, cs->cy,
+                  cs->hwndParent, cs->hMenu, cs->hInstance, cs->lpCreateParams);
+            break;
+        }
         case WM_SIZE:
             if (!enter) break;
             TRACE("cx=%d cy=%d\n", LOWORD(sp_e->lParam), HIWORD(sp_e->lParam));
@@ -2453,7 +2469,7 @@ static void SPY_DumpStructure(const SPY_INSTANCE *sp_e, BOOL enter)
                 p = SPY_Bsearch_Notify (&spnfy_array[0], end_spnfy_array,
                                         pnmh->code);
                 if (p) {
-                    TRACE("NMHDR hwndFrom=%p idFrom=0x%08x code=%s<0x%08x>, extra=0x%x\n",
+                    TRACE("NMHDR hwndFrom=%p idFrom=0x%08lx code=%s<0x%08x>, extra=0x%x\n",
                           pnmh->hwndFrom, pnmh->idFrom, p->name, pnmh->code, p->len);
                     dumplen = p->len;
 
@@ -2475,7 +2491,7 @@ static void SPY_DumpStructure(const SPY_INSTANCE *sp_e, BOOL enter)
                     }
                 }
                 else
-                    TRACE("NMHDR hwndFrom=%p idFrom=0x%08x code=0x%08x\n",
+                    TRACE("NMHDR hwndFrom=%p idFrom=0x%08lx code=0x%08x\n",
                           pnmh->hwndFrom, pnmh->idFrom, pnmh->code);
             }
         default:
@@ -2508,13 +2524,13 @@ void SPY_EnterMessage( INT iFlag, HWND hWnd, UINT msg,
     switch(iFlag)
     {
     case SPY_DISPATCHMESSAGE16:
-        TRACE("%*s(%04x) %-16s message [%04x] %s dispatched  wp=%04x lp=%08lx\n",
+        TRACE("%*s(%04x) %-16s message [%04x] %s dispatched  wp=%04lx lp=%08lx\n",
               indent, "", HWND_16(hWnd),
               debugstr_w(sp_e.wnd_name), msg, sp_e.msg_name, wParam, lParam);
         break;
 
     case SPY_DISPATCHMESSAGE:
-        TRACE("%*s(%p) %-16s message [%04x] %s dispatched  wp=%08x lp=%08lx\n",
+        TRACE("%*s(%p) %-16s message [%04x] %s dispatched  wp=%08lx lp=%08lx\n",
                         indent, "", hWnd, debugstr_w(sp_e.wnd_name), msg,
                         sp_e.msg_name, wParam, lParam);
         break;
@@ -2529,11 +2545,11 @@ void SPY_EnterMessage( INT iFlag, HWND hWnd, UINT msg,
             else sprintf( taskName, "tid %04x", GetCurrentThreadId() );
 
             if (iFlag == SPY_SENDMESSAGE16)
-                TRACE("%*s(%04x) %-16s message [%04x] %s sent from %s wp=%04x lp=%08lx\n",
+                TRACE("%*s(%04x) %-16s message [%04x] %s sent from %s wp=%04lx lp=%08lx\n",
                       indent, "", HWND_16(hWnd), debugstr_w(sp_e.wnd_name), msg,
                       sp_e.msg_name, taskName, wParam, lParam );
             else
-            {   TRACE("%*s(%p) %-16s message [%04x] %s sent from %s wp=%08x lp=%08lx\n",
+            {   TRACE("%*s(%p) %-16s message [%04x] %s sent from %s wp=%08lx lp=%08lx\n",
                              indent, "", hWnd, debugstr_w(sp_e.wnd_name), msg,
                              sp_e.msg_name, taskName, wParam, lParam );
                 SPY_DumpStructure(&sp_e, TRUE);
@@ -2543,13 +2559,13 @@ void SPY_EnterMessage( INT iFlag, HWND hWnd, UINT msg,
 
     case SPY_DEFWNDPROC16:
         if( SPY_ExcludeDWP ) return;
-        TRACE("%*s(%04x)  DefWindowProc16: %s [%04x]  wp=%04x lp=%08lx\n",
+        TRACE("%*s(%04x)  DefWindowProc16: %s [%04x]  wp=%04lx lp=%08lx\n",
               indent, "", HWND_16(hWnd), sp_e.msg_name, msg, wParam, lParam );
         break;
 
     case SPY_DEFWNDPROC:
         if( SPY_ExcludeDWP ) return;
-        TRACE("%*s(%p)  DefWindowProc32: %s [%04x]  wp=%08x lp=%08lx\n",
+        TRACE("%*s(%p)  DefWindowProc32: %s [%04x]  wp=%08lx lp=%08lx\n",
                         indent, "", hWnd, sp_e.msg_name,
                         msg, wParam, lParam );
         break;

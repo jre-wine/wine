@@ -139,8 +139,8 @@ static INT INT_evaluate_unary( INT lval, UINT op )
     return 0;
 }
 
-static const WCHAR *STRING_evaluate( string_table *st,
-              MSIVIEW *table, UINT row, struct expr *expr, MSIRECORD *record )
+static const WCHAR *STRING_evaluate( const string_table *st,
+              MSIVIEW *table, UINT row, const struct expr *expr, const MSIRECORD *record )
 {
     UINT val = 0, r;
 
@@ -165,8 +165,8 @@ static const WCHAR *STRING_evaluate( string_table *st,
     return NULL;
 }
 
-static UINT STRCMP_Evaluate( string_table *st, MSIVIEW *table, UINT row, 
-                             struct expr *cond, INT *val, MSIRECORD *record )
+static UINT STRCMP_Evaluate( const string_table *st, MSIVIEW *table, UINT row,
+                             const struct expr *cond, INT *val, const MSIRECORD *record )
 {
     int sr;
     const WCHAR *l_str, *r_str;
@@ -190,7 +190,7 @@ static UINT STRCMP_Evaluate( string_table *st, MSIVIEW *table, UINT row,
 }
 
 static UINT WHERE_evaluate( MSIDATABASE *db, MSIVIEW *table, UINT row, 
-                             struct expr *cond, INT *val, MSIRECORD *record )
+                             const struct expr *cond, INT *val, MSIRECORD *record )
 {
     UINT r, tval;
     INT lval, rval;
@@ -438,6 +438,7 @@ static const MSIVIEWOPS where_ops =
     WHERE_fetch_int,
     WHERE_fetch_stream,
     WHERE_set_row,
+    NULL,
     NULL,
     WHERE_execute,
     WHERE_close,
