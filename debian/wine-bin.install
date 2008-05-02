@@ -18,11 +18,13 @@ debian/tmp/usr/lib/wine/explorer.exe.so
 debian/tmp/usr/lib/wine/iexplore.exe.so
 debian/tmp/usr/lib/wine/msiexec.exe.so
 debian/tmp/usr/lib/wine/net.exe.so
+debian/tmp/usr/lib/wine/reg.exe.so
 debian/tmp/usr/lib/wine/regedit.exe.so
 debian/tmp/usr/lib/wine/regsvr32.exe.so
 debian/tmp/usr/lib/wine/rpcss.exe.so
 debian/tmp/usr/lib/wine/rundll32.exe.so
 debian/tmp/usr/lib/wine/secedit.exe.so
+debian/tmp/usr/lib/wine/services.exe.so
 debian/tmp/usr/lib/wine/start.exe.so
 debian/tmp/usr/lib/wine/svchost.exe.so
 debian/tmp/usr/lib/wine/uninstaller.exe.so

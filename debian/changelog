@@ -1,3 +1,30 @@
+wine (0.9.59-1) unstable; urgency=low
+
+  * New upstream release 0.9.59.
+    - Improved support for the .NET framework.
+    - Better services handling through a separate services.exe process.
+    - Support for ATI fragment shader.
+    - Better support for http proxies.
+    - Window management fixes.
+    - Pre-compiled fonts are now available in the source tree.
+    - Lots of bug fixes.
+  * This version was released Apr 4, 2008.
+  * Installed reg.exe.so and services.exe.so into wine-bin.
+  * Made libwine-capi priority extra, since the package it depends on,
+    libcapi20, is also priority extra.
+  * Re-added #DEBHELPER# token to libwine.postinst and wine.postinst
+    (probably got lost when I tried to get rid of the debconf templates).
+  * Removed empty directory /usr/share/applications from wine-utils.
+  * Removed empty directory /usr/lib/wine from dummy package libwine-twain.
+  * Changed the architectures of the libasound2-dev build-dependency to
+    match the architectures of the libwine-alsa package.
+  * Changed the architectures of the libcapi20-dev build-dependency to
+    match the architectures of the libwine-capi package.
+  * Only build-depend on prelink on i386 and amd64. It's not available on
+    most architectures, after all. Hopefully no big deal for the rest.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 07 Apr 2008 23:00:23 +0200
+
 wine (0.9.58-1) unstable; urgency=low
 
   * New upstream release 0.9.58.
