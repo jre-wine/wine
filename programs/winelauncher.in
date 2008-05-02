@@ -405,7 +405,7 @@ fi
 #  Test the return code, and see if it fails
 #------------------------------------------------------------------------------
 if [ $always_see_output -eq 0 -a $wine_return -eq 0 ] ; then
-    echo "Wine exited with a successful status" >&2
+#    echo "Wine exited with a successful status" >&2
     if [ $use_log_name -ne 0 ] ; then
         rm -f "$log_name"
     fi
