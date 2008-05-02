@@ -138,7 +138,7 @@ static UINT UPDATE_get_column_info( struct tagMSIVIEW *view,
 }
 
 static UINT UPDATE_modify( struct tagMSIVIEW *view, MSIMODIFY eModifyMode,
-                MSIRECORD *rec )
+                           MSIRECORD *rec, UINT row )
 {
     MSIUPDATEVIEW *uv = (MSIUPDATEVIEW*)view;
 
@@ -178,13 +178,18 @@ static const MSIVIEWOPS update_ops =
     NULL,
     NULL,
     NULL,
+    NULL,
     UPDATE_execute,
     UPDATE_close,
     UPDATE_get_dimensions,
     UPDATE_get_column_info,
     UPDATE_modify,
     UPDATE_delete,
-    UPDATE_find_matching_rows
+    UPDATE_find_matching_rows,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
 };
 
 UINT UPDATE_CreateView( MSIDATABASE *db, MSIVIEW **view, LPCWSTR table,

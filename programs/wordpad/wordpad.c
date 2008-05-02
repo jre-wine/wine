@@ -287,7 +287,6 @@ static BOOL prompt_save_changes(void)
         {
             case IDNO:
                 return TRUE;
-            break;
 
             case IDYES:
                 if(wszFileName[0])
@@ -435,6 +434,57 @@ static void toggle_toolbar(int bandId)
     }
 }
 
+BOOL CALLBACK datetime_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch(message)
+    {
+        case WM_INITDIALOG:
+            {
+                WCHAR buffer[MAX_STRING_LEN];
+                SYSTEMTIME st;
+                HWND hListWnd = GetDlgItem(hWnd, IDC_DATETIME);
+                GetLocalTime(&st);
+
+                GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, 0, (LPWSTR)&buffer,
+                               MAX_STRING_LEN);
+                SendMessageW(hListWnd, LB_ADDSTRING, 0, (LPARAM)&buffer);
+                GetDateFormatW(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, 0, (LPWSTR)&buffer,
+                               MAX_STRING_LEN);
+                SendMessageW(hListWnd, LB_ADDSTRING, 0, (LPARAM)&buffer);
+                GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, 0, (LPWSTR)&buffer, MAX_STRING_LEN);
+                SendMessageW(hListWnd, LB_ADDSTRING, 0, (LPARAM)&buffer);
+
+                SendMessageW(hListWnd, LB_SETSEL, TRUE, 0);
+            }
+            break;
+
+        case WM_COMMAND:
+            switch(LOWORD(wParam))
+            {
+                case IDOK:
+                    {
+                        LRESULT index;
+                        HWND hListWnd = GetDlgItem(hWnd, IDC_DATETIME);
+
+                        index = SendMessageW(hListWnd, LB_GETCURSEL, 0, 0);
+
+                        if(index != LB_ERR)
+                        {
+                            WCHAR buffer[MAX_STRING_LEN];
+                            SendMessageW(hListWnd, LB_GETTEXT, index, (LPARAM)&buffer);
+                            SendMessageW(hEditorWnd, EM_REPLACESEL, TRUE, (LPARAM)&buffer);
+                        }
+                    }
+                    /* Fall through */
+
+                case IDCANCEL:
+                    EndDialog(hWnd, wParam);
+                    return TRUE;
+            }
+    }
+    return FALSE;
+}
+
 static LRESULT OnCreate( HWND hWnd, WPARAM wParam, LPARAM lParam)
 {
     HWND hToolBarWnd, hFormatBarWnd,  hReBarWnd;
@@ -461,7 +511,7 @@ static LRESULT OnCreate( HWND hWnd, WPARAM wParam, LPARAM lParam)
 
     hToolBarWnd = CreateToolbarEx(hReBarWnd, CCS_NOPARENTALIGN|CCS_NOMOVEY|WS_VISIBLE|WS_CHILD|TBSTYLE_TOOLTIPS|TBSTYLE_BUTTON,
       IDC_TOOLBAR,
-      0, hInstance, 0,
+      1, hInstance, IDB_TOOLBAR,
       NULL, 0,
       24, 24, 16, 16, sizeof(TBBUTTON));
 
@@ -483,6 +533,8 @@ static LRESULT OnCreate( HWND hWnd, WPARAM wParam, LPARAM lParam)
     AddButton(hToolBarWnd, nStdBitmaps+STD_PASTE, ID_EDIT_PASTE);
     AddButton(hToolBarWnd, nStdBitmaps+STD_UNDO, ID_EDIT_UNDO);
     AddButton(hToolBarWnd, nStdBitmaps+STD_REDOW, ID_EDIT_REDO);
+    AddSeparator(hToolBarWnd);
+    AddButton(hToolBarWnd, 0, ID_DATETIME);
 
     SendMessageW(hToolBarWnd, TB_AUTOSIZE, 0, 0);
 
@@ -832,6 +884,13 @@ static LRESULT OnCommand( HWND hWnd, WPARAM wParam, LPARAM lParam)
         update_window();
         break;
 
+    case ID_DATETIME:
+        {
+        HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE);
+        DialogBoxW(hInstance, MAKEINTRESOURCEW(IDD_DATETIME), hWnd, (DLGPROC)datetime_proc);
+        break;
+        }
+
     default:
         SendMessageW(hwndEditor, WM_COMMAND, wParam, lParam);
         break;
@@ -927,6 +986,11 @@ static LRESULT OnSize( HWND hWnd, WPARAM wParam, LPARAM lParam )
             rebarRows--;
 
         rebarHeight = rebarRows ? SendMessageW(hwndReBar, RB_GETBARHEIGHT, 0, 0) : 0;
+
+        rc.top = rc.left = 0;
+        rc.bottom = rebarHeight;
+        rc.right = LOWORD(lParam);
+        SendMessageW(hwndReBar, RB_SIZETORECT, 0, (LPARAM)&rc);
     }
     if (hwndEditor)
     {

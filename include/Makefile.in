@@ -11,10 +11,13 @@ IDL_H_SRCS = \
 	austream.idl \
 	comcat.idl \
 	control.idl \
+	d3d10.idl \
 	ddstream.idl \
 	dispex.idl \
 	docobj.idl \
 	downloadmgr.idl \
+	dxgi.idl \
+	dxgitype.idl \
 	exdisp.idl \
 	hlink.idl \
 	htiframe.idl \
@@ -166,6 +169,7 @@ SRCDIR_INCLUDES = \
 	gdiplusgpstubs.h \
 	gdiplusinit.h \
 	gdiplusmem.h \
+	gdiplusmetaheader.h \
 	gdipluspixelformats.h \
 	gdiplustypes.h \
 	guiddef.h \
@@ -338,6 +342,7 @@ SRCDIR_INCLUDES = \
 	usp10.h \
 	uuids.h \
 	uxtheme.h \
+	vdmdbg.h \
 	ver.h \
 	vfw.h \
 	vfwmsgs.h \

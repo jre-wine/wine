@@ -2416,11 +2416,12 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     IWineD3DDeviceImpl *object  = NULL;
     IWineD3DImpl       *This    = (IWineD3DImpl *)iface;
     HDC hDC;
-    HRESULT temp_result;
     int i;
 
-    /* Validate the adapter number */
-    if (Adapter >= IWineD3D_GetAdapterCount(iface)) {
+    /* Validate the adapter number. If no adapters are available(no GL), ignore the adapter
+     * number and create a device without a 3D adapter for 2D only operation.
+     */
+    if (IWineD3D_GetAdapterCount(iface) && Adapter >= IWineD3D_GetAdapterCount(iface)) {
         return WINED3DERR_INVALIDCALL;
     }
 
@@ -2436,7 +2437,7 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     object->lpVtbl  = &IWineD3DDevice_Vtbl;
     object->ref     = 1;
     object->wineD3D = iface;
-    object->adapter = &Adapters[Adapter];
+    object->adapter = numAdapters ? &Adapters[Adapter] : NULL;
     IWineD3D_AddRef(object->wineD3D);
     object->parent  = parent;
 
@@ -2462,20 +2463,6 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     object->adapterNo                    = Adapter;
     object->devType                      = DeviceType;
 
-    TRACE("(%p) : Creating stateblock\n", This);
-    /* Creating the startup stateBlock - Note Special Case: 0 => Don't fill in yet! */
-    if (WINED3D_OK != IWineD3DDevice_CreateStateBlock((IWineD3DDevice *)object,
-                                      WINED3DSBT_INIT,
-                                    (IWineD3DStateBlock **)&object->stateBlock,
-                                    NULL)  || NULL == object->stateBlock) {   /* Note: No parent needed for initial internal stateblock */
-        WARN("Failed to create stateblock\n");
-        goto create_device_error;
-    }
-    TRACE("(%p) : Created stateblock (%p)\n", This, object->stateBlock);
-    object->updateStateBlock = object->stateBlock;
-    IWineD3DStateBlock_AddRef((IWineD3DStateBlock*)object->updateStateBlock);
-    /* Setup surfaces for the backbuffer, frontbuffer and depthstencil buffer */
-
     select_shader_mode(&GLINFO_LOCATION, DeviceType, &object->ps_selected_mode, &object->vs_selected_mode);
     if (object->ps_selected_mode == SHADER_GLSL || object->vs_selected_mode == SHADER_GLSL) {
         object->shader_backend = &glsl_shader_backend;
@@ -2485,18 +2472,6 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     } else {
         object->shader_backend = &none_shader_backend;
     }
-
-    /* This function should *not* be modifying GL caps
-     * TODO: move the functionality where it belongs */
-    select_shader_max_constants(object->ps_selected_mode, object->vs_selected_mode, &GLINFO_LOCATION);
-
-    temp_result = allocate_shader_constants(object->updateStateBlock);
-    if (WINED3D_OK != temp_result)
-        return temp_result;
-
-    object->render_targets = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IWineD3DSurface *) * GL_LIMITS(buffers));
-    object->fbo_color_attachments = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IWineD3DSurface *) * GL_LIMITS(buffers));
-    object->draw_buffers = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(GLenum) * GL_LIMITS(buffers));
 
     /* set the state of the device to valid */
     object->state = WINED3D_OK;
@@ -2512,31 +2487,6 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
         list_init(&object->patches[i]);
     }
     return WINED3D_OK;
-create_device_error:
-
-    /* Set the device state to error */
-    object->state = WINED3DERR_DRIVERINTERNALERROR;
-
-    if (object->updateStateBlock != NULL) {
-        IWineD3DStateBlock_Release((IWineD3DStateBlock *)object->updateStateBlock);
-        object->updateStateBlock = NULL;
-    }
-    if (object->stateBlock != NULL) {
-        IWineD3DStateBlock_Release((IWineD3DStateBlock *)object->stateBlock);
-        object->stateBlock = NULL;
-    }
-    if (object->render_targets[0] != NULL) {
-        IWineD3DSurface_Release(object->render_targets[0]);
-        object->render_targets[0] = NULL;
-    }
-    if (object->stencilBufferTarget != NULL) {
-        IWineD3DSurface_Release(object->stencilBufferTarget);
-        object->stencilBufferTarget = NULL;
-    }
-    HeapFree(GetProcessHeap(), 0, object);
-    *ppReturnedDeviceInterface = NULL;
-    return WINED3DERR_INVALIDCALL;
-
 }
 #undef GLINFO_LOCATION
 
@@ -2570,6 +2520,7 @@ ULONG WINAPI D3DCB_DefaultDestroyVolume(IWineD3DVolume *pVolume) {
 BOOL InitAdapters(void) {
     HDC     device_context;
     BOOL ret;
+    int ps_selected_mode, vs_selected_mode;
 
     /* No need to hold any lock. The calling library makes sure only one thread calls
      * wined3d simultaneously
@@ -2607,6 +2558,9 @@ BOOL InitAdapters(void) {
         }
         Adapters[0].driver = "Display";
         Adapters[0].description = "Direct3D HAL";
+
+        select_shader_mode(&Adapters[0].gl_info, WINED3DDEVTYPE_HAL, &ps_selected_mode, &vs_selected_mode);
+        select_shader_max_constants(ps_selected_mode, vs_selected_mode, &Adapters[0].gl_info);
     }
     numAdapters = 1;
     TRACE("%d adapters successfully initialized\n", numAdapters);

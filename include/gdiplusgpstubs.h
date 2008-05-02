@@ -27,6 +27,10 @@ class GpBrush {};
 class GpSolidFill {};
 class GpPath {};
 class GpMatrix {};
+class GpPathIterator {};
+class GpCustomLineCap {};
+class GpImage {};
+class GpMetafile : public GpImage {};
 
 #else /* end of c++ declarations */
 
@@ -36,6 +40,10 @@ typedef struct GpBrush GpBrush;
 typedef struct GpSolidFill GpSolidFill;
 typedef struct GpPath GpPath;
 typedef struct GpMatrix GpMatrix;
+typedef struct GpPathIterator GpPathIterator;
+typedef struct GpCustomLineCap GpCustomLineCap;
+typedef struct GpImage GpImage;
+typedef struct GpMetafile GpMetafile;
 
 #endif /* end of c declarations */
 
@@ -48,5 +56,9 @@ typedef PathData GpPathData;
 typedef LineCap GpLineCap;
 typedef RectF GpRectF;
 typedef LineJoin GpLineJoin;
+typedef DashCap GpDashCap;
+typedef DashStyle GpDashStyle;
+typedef MatrixOrder GpMatrixOrder;
+typedef Point GpPoint;
 
 #endif

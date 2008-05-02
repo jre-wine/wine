@@ -389,7 +389,7 @@
 @ stdcall RtlAcquirePebLock()
 @ stdcall RtlAcquireResourceExclusive(ptr long)
 @ stdcall RtlAcquireResourceShared(ptr long)
-@ stub RtlActivateActivationContext
+@ stdcall RtlActivateActivationContext(long ptr ptr)
 @ stub RtlActivateActivationContextEx
 @ stub RtlActivateActivationContextUnsafeFast
 @ stdcall RtlAddAccessAllowedAce(ptr long long ptr)
@@ -407,7 +407,7 @@
 # @ stub RtlAddAuditAccessObjectAce
 # @ stub RtlAddCompoundAce
 # @ stub RtlAddRange
-# @ stub RtlAddRefActivationContext
+@ stdcall RtlAddRefActivationContext(ptr)
 # @ stub RtlAddRefMemoryStream
 @ stdcall RtlAddVectoredExceptionHandler(long ptr)
 # @ stub RtlAddressInSectionTable
@@ -475,7 +475,7 @@
 @ stdcall RtlCopyString(ptr ptr)
 @ stdcall RtlCopyUnicodeString(ptr ptr)
 @ stdcall RtlCreateAcl(ptr long long)
-# @ stub RtlCreateActivationContext
+@ stdcall RtlCreateActivationContext(ptr ptr)
 @ stub RtlCreateAndSetSD
 @ stdcall RtlCreateAtomTable(long ptr)
 # @ stub RtlCreateBootStatusDataFile
@@ -498,7 +498,7 @@
 @ stub RtlCustomCPToUnicodeN
 @ stub RtlCutoverTimeToSystemTime
 @ stdcall RtlDeNormalizeProcessParams(ptr)
-@ stub RtlDeactivateActivationContext
+@ stdcall RtlDeactivateActivationContext(long long)
 @ stub RtlDeactivateActivationContextUnsafeFast
 @ stub RtlDebugPrintTimes
 @ stdcall RtlDecodePointer(ptr)
@@ -574,7 +574,7 @@
 @ stdcall RtlFillMemoryUlong(ptr long long)
 @ stub RtlFinalReleaseOutOfProcessMemoryStream
 @ stub RtlFindActivationContextSectionGuid
-@ stub RtlFindActivationContextSectionString
+@ stdcall RtlFindActivationContextSectionString(long ptr long ptr ptr)
 @ stdcall RtlFindCharInUnicodeString(long ptr ptr ptr)
 @ stdcall RtlFindClearBits(ptr long long)
 @ stdcall RtlFindClearBitsAndSet(ptr long long)
@@ -604,13 +604,13 @@
 @ stdcall RtlFreeOemString(ptr)
 # @ stub RtlFreeRangeList
 @ stdcall RtlFreeSid (long)
-# @ stub RtlFreeThreadActivationContextStack
+@ stdcall RtlFreeThreadActivationContextStack()
 @ stdcall RtlFreeUnicodeString(ptr)
 @ stub RtlFreeUserThreadStack
 @ stdcall RtlGUIDFromString(ptr ptr)
 @ stub RtlGenerate8dot3Name
 @ stdcall RtlGetAce(ptr long ptr)
-# @ stub RtlGetActiveActivationContext
+@ stdcall RtlGetActiveActivationContext(ptr)
 @ stub RtlGetCallersAddress
 @ stub RtlGetCompressionWorkSpaceSize
 @ stdcall RtlGetControlSecurityDescriptor(ptr ptr ptr)
@@ -699,7 +699,7 @@
 # @ stub RtlIpv6StringToAddressExA
 # @ stub RtlIpv6StringToAddressExW
 # @ stub RtlIpv6StringToAddressW
-# @ stub RtlIsActivationContextActive
+@ stdcall RtlIsActivationContextActive(ptr)
 @ stdcall RtlIsDosDeviceName_U(wstr)
 @ stub RtlIsGenericTableEmpty
 # @ stub RtlIsGenericTableEmptyAvl
@@ -767,7 +767,7 @@
 @ stdcall RtlQueryEnvironmentVariable_U(ptr ptr ptr)
 @ stub RtlQueryHeapInformation
 @ stdcall RtlQueryInformationAcl(ptr ptr long long)
-@ stub RtlQueryInformationActivationContext
+@ stdcall RtlQueryInformationActivationContext(long long ptr ptr long ptr long ptr)
 @ stub RtlQueryInformationActiveActivationContext
 @ stub RtlQueryInterfaceMemoryStream
 @ stub RtlQueryProcessBackTraceInformation
@@ -794,7 +794,7 @@
 @ stub RtlRealSuccessor
 @ stub RtlRegisterSecureMemoryCacheCallback
 @ stub RtlRegisterWait
-@ stub RtlReleaseActivationContext
+@ stdcall RtlReleaseActivationContext(ptr)
 @ stub RtlReleaseMemoryStream
 @ stdcall RtlReleasePebLock()
 @ stdcall RtlReleaseResource(ptr)

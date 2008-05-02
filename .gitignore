@@ -703,10 +703,13 @@ include/austream.h
 include/comcat.h
 include/config.h
 include/control.h
+include/d3d10.h
 include/ddstream.h
 include/dispex.h
 include/docobj.h
 include/downloadmgr.h
+include/dxgi.h
+include/dxgitype.h
 include/exdisp.h
 include/hlink.h
 include/htiframe.h
@@ -924,6 +927,7 @@ programs/winhelp/winhelp
 programs/winver/winver
 programs/wordpad/formatbar.bmp
 programs/wordpad/rsrc.res
+programs/wordpad/toolbar.bmp
 programs/wordpad/wordpad
 programs/wordpad/wordpad.ico
 programs/xcopy/rsrc.res

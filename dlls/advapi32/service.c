@@ -1309,6 +1309,9 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
     struct reg_value val[10];
     int n = 0;
     DWORD new_mask = dwDesiredAccess;
+    DWORD index = 0;
+    WCHAR buffer[MAX_PATH];
+    BOOL displayname_exists = FALSE;
 
     TRACE("%p %s %s\n", hSCManager, 
           debugstr_w(lpServiceName), debugstr_w(lpDisplayName));
@@ -1377,15 +1380,65 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
         return NULL;
     }
 
+    /* SERVICE_BOOT_START and SERVICE_SYSTEM_START or only allowed for driver services */
+    if (((dwStartType == SERVICE_BOOT_START) || (dwStartType == SERVICE_SYSTEM_START)) &&
+        ((dwServiceType & SERVICE_WIN32_OWN_PROCESS) || (dwServiceType & SERVICE_WIN32_SHARE_PROCESS)))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
+    /* Loop through the registry to check if the service already exists and to
+     * check if we can use the given displayname.
+     * FIXME: Should we use EnumServicesStatusEx?
+     */
+    len = sizeof(buffer);
+    while (RegEnumKeyExW(hscm->hkey, index, buffer, &len, NULL, NULL, NULL, NULL) == ERROR_SUCCESS)
+    {
+        HKEY service_key;
+
+        /* The service already exists, so bail out */
+        if(!lstrcmpiW(lpServiceName, buffer))
+        {
+            SetLastError(ERROR_SERVICE_EXISTS);
+            return NULL;
+        }
+
+        /* The given displayname matches the found servicename. We don't bail out
+         * as servicename is checked before a duplicate displayname
+         */
+        if(!lstrcmpiW(lpDisplayName, buffer))
+            displayname_exists = TRUE;
+
+        if (RegOpenKeyExW(hscm->hkey, buffer, 0, KEY_READ, &service_key) == ERROR_SUCCESS)
+        {
+            WCHAR name[MAX_PATH];
+            DWORD size = sizeof(name);
+
+            if (RegQueryValueExW(service_key, szDisplayName, NULL, NULL, (LPBYTE)name, &size) == ERROR_SUCCESS)
+            {
+                /* The given displayname matches the found displayname */
+                if (!lstrcmpiW(lpDisplayName, name))
+                    displayname_exists = TRUE;
+            }
+            RegCloseKey(service_key);
+        }
+        index++;
+        len = sizeof(buffer);
+    }
+
+    if (lpDisplayName && displayname_exists)
+    {
+        SetLastError(ERROR_DUPLICATE_SERVICE_NAME);
+        return NULL;
+    }
+
     r = RegCreateKeyExW(hscm->hkey, lpServiceName, 0, NULL,
                        REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hKey, &dp);
     if (r!=ERROR_SUCCESS)
-        return NULL;
-
-    if (dp != REG_CREATED_NEW_KEY)
     {
-        SetLastError(ERROR_SERVICE_EXISTS);
-        goto error;
+        /* FIXME: Should we set an error? */
+        return NULL;
     }
 
     if( lpDisplayName )
@@ -1395,8 +1448,7 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
     service_set_dword( &val[n++], szStart, &dwStartType );
     service_set_dword( &val[n++], szError, &dwErrorControl );
 
-    if( lpBinaryPathName )
-        service_set_string( &val[n++], szImagePath, lpBinaryPathName );
+    service_set_string( &val[n++], szImagePath, lpBinaryPathName );
 
     if( lpLoadOrderGroup )
         service_set_string( &val[n++], szGroup, lpLoadOrderGroup );
@@ -1502,6 +1554,12 @@ BOOL WINAPI DeleteService( SC_HANDLE hService )
     if (!hsvc)
     {
         SetLastError( ERROR_INVALID_HANDLE );
+        return FALSE;
+    }
+
+    if (!(hsvc->dwAccess & DELETE))
+    {
+        SetLastError(ERROR_ACCESS_DENIED);
         return FALSE;
     }
 
@@ -2208,45 +2266,50 @@ BOOL WINAPI QueryServiceLockStatusW( SC_HANDLE hSCManager,
 BOOL WINAPI GetServiceDisplayNameA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
   LPSTR lpDisplayName, LPDWORD lpcchBuffer)
 {
-    struct sc_manager *hscm;
-    DWORD type, size;
-    LONG ret;
+    LPWSTR lpServiceNameW, lpDisplayNameW = NULL;
+    DWORD size, sizeW, GLE;
+    BOOL ret;
 
     TRACE("%p %s %p %p\n", hSCManager,
           debugstr_a(lpServiceName), lpDisplayName, lpcchBuffer);
 
-    if (!lpServiceName)
+    lpServiceNameW = SERV_dup(lpServiceName);
+    lpDisplayNameW = HeapAlloc(GetProcessHeap(), 0, *lpcchBuffer * sizeof(WCHAR));
+
+    size = sizeW = *lpcchBuffer;
+    ret = GetServiceDisplayNameW(hSCManager, lpServiceNameW,
+                                 lpDisplayName ? lpDisplayNameW : NULL,
+                                 &sizeW);
+    /* Last error will be set by GetServiceDisplayNameW and must be preserved */
+    GLE = GetLastError();
+
+    if (!lpDisplayName && lpcchBuffer && !ret && (GLE == ERROR_INSUFFICIENT_BUFFER))
     {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
+        /* Request for buffersize.
+         *
+         * Only set the size for ERROR_INSUFFICIENT_BUFFER
+         */
+        size = sizeW * 2;
+    }
+    else if (lpDisplayName && lpcchBuffer && !ret)
+    {
+        /* Request for displayname.
+         *
+         * size only has to be set if this fails
+         */
+        size = sizeW * 2;
     }
 
-    hscm = sc_handle_get_handle_data(hSCManager, SC_HTYPE_MANAGER);
-    if (!hscm)
-    {
-        SetLastError(ERROR_INVALID_HANDLE);
-        return FALSE;
-    }
+    WideCharToMultiByte(CP_ACP, 0, lpDisplayNameW, (sizeW + 1), lpDisplayName,
+                        *lpcchBuffer, NULL, NULL );
 
-    size = *lpcchBuffer;
-    ret = RegGetValueA(hscm->hkey, lpServiceName, "DisplayName", RRF_RT_REG_SZ, &type, lpDisplayName, &size);
-    if (!ret && !lpDisplayName && size)
-        ret = ERROR_MORE_DATA;
+    *lpcchBuffer = size;
 
-    if (ret)
-    {
-        if (lpDisplayName && *lpcchBuffer) *lpDisplayName = 0;
+    HeapFree(GetProcessHeap(), 0, lpDisplayNameW);
+    SERV_free(lpServiceNameW);
 
-        if (ret == ERROR_MORE_DATA)
-        {
-            SetLastError(ERROR_INSUFFICIENT_BUFFER);
-            *lpcchBuffer = size - 1;
-        }
-        else
-            SetLastError(ret);
-        return FALSE;
-    }
-    return TRUE;
+    SetLastError(GLE);
+    return ret;
 }
 
 /******************************************************************************
@@ -2262,16 +2325,16 @@ BOOL WINAPI GetServiceDisplayNameW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
     TRACE("%p %s %p %p\n", hSCManager,
           debugstr_w(lpServiceName), lpDisplayName, lpcchBuffer);
 
-    if (!lpServiceName)
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-
     hscm = sc_handle_get_handle_data(hSCManager, SC_HTYPE_MANAGER);
     if (!hscm)
     {
         SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    if (!lpServiceName)
+    {
+        SetLastError(ERROR_INVALID_ADDRESS);
         return FALSE;
     }
 
@@ -2293,6 +2356,10 @@ BOOL WINAPI GetServiceDisplayNameW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
             SetLastError(ret);
         return FALSE;
     }
+
+    /* Always return the correct needed size on success */
+    *lpcchBuffer = (size / sizeof(WCHAR)) - 1;
+
     return TRUE;
 }
 

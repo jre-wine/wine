@@ -151,10 +151,10 @@ static void unstretch_angle(REAL * angle, REAL rad_x, REAL rad_y)
 
     *angle = deg2rad(*angle);
 
-    if(cos(*angle) == 0 || sin(*angle) == 0)
+    if(fabs(cos(*angle)) < 0.00001 || fabs(sin(*angle)) < 0.00001)
         return;
 
-    stretched = atan2(sin(*angle) / rad_y, cos(*angle) / rad_x);
+    stretched = gdiplus_atan2(sin(*angle) / fabs(rad_y), cos(*angle) / fabs(rad_x));
     revs_off = roundr(*angle / (2.0 * M_PI)) - roundr(stretched / (2.0 * M_PI));
     stretched += ((REAL)revs_off) * M_PI * 2.0;
     *angle = stretched;
@@ -211,4 +211,13 @@ COLORREF ARGB2COLORREF(ARGB color)
         ((color & 0x0000ff) << 16) +
          (color & 0x00ff00) +
         ((color & 0xff0000) >> 16);
+}
+
+/* Like atan2, but puts angle in correct quadrant if dx is 0. */
+FLOAT gdiplus_atan2(FLOAT dy, FLOAT dx)
+{
+    if((dx == 0.0) && (dy != 0.0))
+        return dy > 0.0 ? M_PI_2 : -M_PI_2;
+
+    return atan2(dy, dx);
 }

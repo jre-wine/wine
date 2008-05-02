@@ -8,10 +8,13 @@ IMPORTS   = user32 gdi32 advapi32 kernel32 ntdll
 
 C_SRCS = \
 	brush.c \
+	customlinecap.c \
 	gdiplus.c \
 	graphics.c \
 	graphicspath.c \
+	image.c \
 	matrix.c \
+	pathiterator.c \
 	pen.c
 
 @MAKE_DLL_RULES@

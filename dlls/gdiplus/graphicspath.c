@@ -94,6 +94,63 @@ GpStatus WINGDIPAPI GdipAddPathArc(GpPath *path, REAL x1, REAL y1, REAL x2,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipAddPathBeziers(GpPath *path, GDIPCONST GpPointF *points,
+    INT count)
+{
+    INT i, old_count;
+
+    if(!path || !points || ((count - 1) % 3))
+        return InvalidParameter;
+
+    if(!lengthen_path(path, count))
+        return OutOfMemory;
+
+    old_count = path->pathdata.Count;
+
+    for(i = 0; i < count; i++){
+        path->pathdata.Points[old_count + i].X = points[i].X;
+        path->pathdata.Points[old_count + i].Y = points[i].Y;
+        path->pathdata.Types[old_count + i] = PathPointTypeBezier;
+    }
+
+    path->pathdata.Types[old_count] =
+        (path->newfigure ? PathPointTypeStart : PathPointTypeLine);
+    path->newfigure = FALSE;
+    path->pathdata.Count += count;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipAddPathEllipse(GpPath *path, REAL x, REAL y, REAL width,
+    REAL height)
+{
+    INT old_count, numpts;
+
+    if(!path)
+        return InvalidParameter;
+
+    if(!lengthen_path(path, MAX_ARC_PTS))
+        return OutOfMemory;
+
+    old_count = path->pathdata.Count;
+    if((numpts = arc2polybezier(&path->pathdata.Points[old_count],  x, y, width,
+                               height, 0.0, 360.0)) != MAX_ARC_PTS){
+        ERR("expected %d points but got %d\n", MAX_ARC_PTS, numpts);
+        return GenericError;
+    }
+
+    memset(&path->pathdata.Types[old_count + 1], PathPointTypeBezier,
+           MAX_ARC_PTS - 1);
+
+    /* An ellipse is an instrinsic figure (always its own subpath). */
+    path->pathdata.Types[old_count] = PathPointTypeStart;
+    path->pathdata.Types[old_count + MAX_ARC_PTS - 1] |= PathPointTypeCloseSubpath;
+    path->newfigure = TRUE;
+    path->pathdata.Count += MAX_ARC_PTS;
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipAddPathLine2(GpPath *path, GDIPCONST GpPointF *points,
     INT count)
 {
@@ -357,6 +414,16 @@ GpStatus WINGDIPAPI GdipResetPath(GpPath *path)
     path->pathdata.Count = 0;
     path->newfigure = TRUE;
     path->fill = FillModeAlternate;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipSetPathFillMode(GpPath *path, GpFillMode fill)
+{
+    if(!path)
+        return InvalidParameter;
+
+    path->fill = fill;
 
     return Ok;
 }

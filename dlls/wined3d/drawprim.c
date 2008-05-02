@@ -221,10 +221,10 @@ void primitiveDeclarationConvertToStridedData(
 
         if (stride_used) {
             TRACE("Loaded %s array %u [usage=%s, usage_idx=%u, "
-                    "stream=%u, offset=%u, stride=%u, VBO=%u]\n",
+                    "stream=%u, offset=%u, stride=%u, type=%s, VBO=%u]\n",
                     useVertexShaderFunction? "shader": "fixed function", idx,
                     debug_d3ddeclusage(element->Usage), element->UsageIndex,
-                    element->Stream, element->Offset, stride, streamVBO);
+                    element->Stream, element->Offset, stride, debug_d3ddecltype(element->Type), streamVBO);
 
             strided->u.input[idx].lpData = data;
             strided->u.input[idx].dwType = element->Type;
@@ -458,7 +458,7 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
                     case WINED3DTTFF_COUNT1:
                         VTRACE(("tex:%d, s=%f\n", textureNo, s));
                         if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-                            GL_EXTCALL(glMultiTexCoord1fARB(texture_idx, s));
+                            GL_EXTCALL(glMultiTexCoord1fARB(GL_TEXTURE0_ARB + texture_idx, s));
                         } else {
                             glTexCoord1f(s);
                         }
@@ -466,7 +466,7 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
                     case WINED3DTTFF_COUNT2:
                         VTRACE(("tex:%d, s=%f, t=%f\n", textureNo, s, t));
                         if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-                            GL_EXTCALL(glMultiTexCoord2fARB(texture_idx, s, t));
+                            GL_EXTCALL(glMultiTexCoord2fARB(GL_TEXTURE0_ARB + texture_idx, s, t));
                         } else {
                             glTexCoord2f(s, t);
                         }
@@ -474,7 +474,7 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
                     case WINED3DTTFF_COUNT3:
                         VTRACE(("tex:%d, s=%f, t=%f, r=%f\n", textureNo, s, t, r));
                         if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-                            GL_EXTCALL(glMultiTexCoord3fARB(texture_idx, s, t, r));
+                            GL_EXTCALL(glMultiTexCoord3fARB(GL_TEXTURE0_ARB + texture_idx, s, t, r));
                         } else {
                             glTexCoord3f(s, t, r);
                         }
@@ -482,7 +482,7 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
                     case WINED3DTTFF_COUNT4:
                         VTRACE(("tex:%d, s=%f, t=%f, r=%f, q=%f\n", textureNo, s, t, r, q));
                         if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-                            GL_EXTCALL(glMultiTexCoord4fARB(texture_idx, s, t, r, q));
+                            GL_EXTCALL(glMultiTexCoord4fARB(GL_TEXTURE0_ARB + texture_idx, s, t, r, q));
                         } else {
                             glTexCoord4f(s, t, r, q);
                         }

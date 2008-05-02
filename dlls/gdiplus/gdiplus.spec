@@ -2,7 +2,7 @@
 @ stub GdipAddPathArcI
 @ stub GdipAddPathBezier
 @ stub GdipAddPathBezierI
-@ stub GdipAddPathBeziers
+@ stdcall GdipAddPathBeziers(ptr ptr long)
 @ stub GdipAddPathBeziersI
 @ stub GdipAddPathClosedCurve2
 @ stub GdipAddPathClosedCurve2I
@@ -14,7 +14,7 @@
 @ stub GdipAddPathCurve3I
 @ stub GdipAddPathCurve
 @ stub GdipAddPathCurveI
-@ stub GdipAddPathEllipse
+@ stdcall GdipAddPathEllipse(ptr long long long long)
 @ stub GdipAddPathEllipseI
 @ stdcall GdipAddPathLine2(ptr ptr long)
 @ stub GdipAddPathLine2I
@@ -43,15 +43,15 @@
 @ stub GdipClearPathMarkers
 @ stub GdipCloneBitmapArea
 @ stub GdipCloneBitmapAreaI
-@ stub GdipCloneBrush
-@ stub GdipCloneCustomLineCap
+@ stdcall GdipCloneBrush(ptr ptr)
+@ stdcall GdipCloneCustomLineCap(ptr ptr)
 @ stub GdipCloneFont
 @ stub GdipCloneFontFamily
 @ stub GdipCloneImage
 @ stub GdipCloneImageAttributes
-@ stub GdipCloneMatrix
+@ stdcall GdipCloneMatrix(ptr ptr)
 @ stub GdipClonePath
-@ stub GdipClonePen
+@ stdcall GdipClonePen(ptr ptr)
 @ stub GdipCloneRegion
 @ stub GdipCloneStringFormat
 @ stdcall GdipClosePathFigure(ptr)
@@ -74,7 +74,7 @@
 @ stub GdipCreateBitmapFromStream
 @ stub GdipCreateBitmapFromStreamICM
 @ stub GdipCreateCachedBitmap
-@ stub GdipCreateCustomLineCap
+@ stdcall GdipCreateCustomLineCap(ptr ptr long long ptr)
 @ stub GdipCreateFont
 @ stub GdipCreateFontFamilyFromName
 @ stub GdipCreateFontFromDC
@@ -98,11 +98,11 @@
 @ stdcall GdipCreateMatrix2(long long long long long long ptr)
 @ stub GdipCreateMatrix3
 @ stub GdipCreateMatrix3I
-@ stub GdipCreateMatrix
-@ stub GdipCreateMetafileFromEmf
+@ stdcall GdipCreateMatrix(ptr)
+@ stdcall GdipCreateMetafileFromEmf(ptr long ptr)
 @ stub GdipCreateMetafileFromFile
 @ stub GdipCreateMetafileFromStream
-@ stub GdipCreateMetafileFromWmf
+@ stdcall GdipCreateMetafileFromWmf(ptr long ptr ptr)
 @ stub GdipCreateMetafileFromWmfFile
 @ stub GdipCreatePath2
 @ stub GdipCreatePath2I
@@ -110,7 +110,7 @@
 @ stub GdipCreatePathGradient
 @ stub GdipCreatePathGradientFromPath
 @ stub GdipCreatePathGradientI
-@ stub GdipCreatePathIter
+@ stdcall GdipCreatePathIter(ptr ptr)
 @ stdcall GdipCreatePen1(long long long ptr)
 @ stub GdipCreatePen2
 @ stub GdipCreateRegion
@@ -129,18 +129,18 @@
 @ stub GdipCreateTextureIAI
 @ stdcall GdipDeleteBrush(ptr)
 @ stub GdipDeleteCachedBitmap
-@ stub GdipDeleteCustomLineCap
+@ stdcall GdipDeleteCustomLineCap(ptr)
 @ stub GdipDeleteFont
 @ stub GdipDeleteFontFamily
 @ stdcall GdipDeleteGraphics(ptr)
 @ stdcall GdipDeleteMatrix(ptr)
 @ stdcall GdipDeletePath(ptr)
-@ stub GdipDeletePathIter
+@ stdcall GdipDeletePathIter(ptr)
 @ stdcall GdipDeletePen(ptr)
 @ stub GdipDeletePrivateFontCollection
 @ stub GdipDeleteRegion
 @ stub GdipDeleteStringFormat
-@ stub GdipDisposeImage
+@ stdcall GdipDisposeImage(ptr)
 @ stub GdipDisposeImageAttributes
 @ stdcall GdipDrawArc(ptr ptr long long long long long long)
 @ stub GdipDrawArcI
@@ -208,13 +208,13 @@
 @ stub GdipFillClosedCurveI
 @ stub GdipFillEllipse
 @ stub GdipFillEllipseI
-@ stub GdipFillPath
+@ stdcall GdipFillPath(ptr ptr ptr)
 @ stdcall GdipFillPie(ptr ptr long long long long long long)
 @ stub GdipFillPieI
 @ stub GdipFillPolygon2
 @ stub GdipFillPolygon2I
 @ stub GdipFillPolygon
-@ stub GdipFillPolygonI
+@ stdcall GdipFillPolygonI(ptr ptr ptr long long)
 @ stub GdipFillRectangle
 @ stub GdipFillRectangleI
 @ stub GdipFillRectangles
@@ -235,7 +235,7 @@
 @ stub GdipGetClipBounds
 @ stub GdipGetClipBoundsI
 @ stub GdipGetCompositingMode
-@ stub GdipGetCompositingQuality
+@ stdcall GdipGetCompositingQuality(ptr ptr)
 @ stub GdipGetCustomLineCapBaseCap
 @ stub GdipGetCustomLineCapBaseInset
 @ stub GdipGetCustomLineCapStrokeCaps
@@ -273,17 +273,17 @@
 @ stub GdipGetImageEncodersSize
 @ stub GdipGetImageFlags
 @ stub GdipGetImageGraphicsContext
-@ stub GdipGetImageHeight
-@ stub GdipGetImageHorizontalResolution
+@ stdcall GdipGetImageHeight(ptr ptr)
+@ stdcall GdipGetImageHorizontalResolution(ptr ptr)
 @ stub GdipGetImagePalette
 @ stub GdipGetImagePaletteSize
 @ stub GdipGetImagePixelFormat
-@ stub GdipGetImageRawFormat
+@ stdcall GdipGetImageRawFormat(ptr ptr)
 @ stub GdipGetImageThumbnail
-@ stub GdipGetImageType
-@ stub GdipGetImageVerticalResolution
-@ stub GdipGetImageWidth
-@ stub GdipGetInterpolationMode
+@ stdcall GdipGetImageType(ptr ptr)
+@ stdcall GdipGetImageVerticalResolution(ptr ptr)
+@ stdcall GdipGetImageWidth(ptr ptr)
+@ stdcall GdipGetInterpolationMode(ptr ptr)
 @ stub GdipGetLineBlend
 @ stub GdipGetLineBlendCount
 @ stub GdipGetLineColors
@@ -305,8 +305,8 @@
 @ stub GdipGetMetafileHeaderFromStream
 @ stub GdipGetMetafileHeaderFromWmf
 @ stub GdipGetNearestColor
-@ stub GdipGetPageScale
-@ stub GdipGetPageUnit
+@ stdcall GdipGetPageScale(ptr ptr)
+@ stdcall GdipGetPageUnit(ptr ptr)
 @ stub GdipGetPathData
 @ stdcall GdipGetPathFillMode(ptr ptr)
 @ stub GdipGetPathGradientBlend
@@ -332,17 +332,17 @@
 @ stdcall GdipGetPathTypes(ptr ptr long)
 @ stdcall GdipGetPathWorldBounds(ptr ptr ptr ptr)
 @ stub GdipGetPathWorldBoundsI
-@ stub GdipGetPenBrushFill
-@ stub GdipGetPenColor
+@ stdcall GdipGetPenBrushFill(ptr ptr)
+@ stdcall GdipGetPenColor(ptr ptr)
 @ stub GdipGetPenCompoundArray
 @ stub GdipGetPenCompoundCount
 @ stub GdipGetPenCustomEndCap
 @ stub GdipGetPenCustomStartCap
-@ stub GdipGetPenDashArray
+@ stdcall GdipGetPenDashArray(ptr ptr long)
 @ stub GdipGetPenDashCap197819
 @ stub GdipGetPenDashCount
 @ stub GdipGetPenDashOffset
-@ stub GdipGetPenDashStyle
+@ stdcall GdipGetPenDashStyle(ptr ptr)
 @ stub GdipGetPenEndCap
 @ stub GdipGetPenFillType
 @ stub GdipGetPenLineJoin
@@ -352,7 +352,7 @@
 @ stub GdipGetPenTransform
 @ stub GdipGetPenUnit
 @ stub GdipGetPenWidth
-@ stub GdipGetPixelOffsetMode
+@ stdcall GdipGetPixelOffsetMode(ptr ptr)
 @ stdcall GdipGetPointCount(ptr ptr)
 @ stub GdipGetPropertyCount
 @ stub GdipGetPropertyIdList
@@ -368,8 +368,8 @@
 @ stub GdipGetRegionScansCount
 @ stub GdipGetRegionScansI
 @ stub GdipGetRenderingOrigin
-@ stub GdipGetSmoothingMode
-@ stub GdipGetSolidFillColor
+@ stdcall GdipGetSmoothingMode(ptr ptr)
+@ stdcall GdipGetSolidFillColor(ptr ptr)
 @ stub GdipGetStringFormatAlign
 @ stub GdipGetStringFormatDigitSubstitution
 @ stub GdipGetStringFormatFlags
@@ -386,10 +386,10 @@
 @ stub GdipGetTextureWrapMode
 @ stub GdipGetVisibleClipBounds
 @ stub GdipGetVisibleClipBoundsI
-@ stub GdipGetWorldTransform
+@ stdcall GdipGetWorldTransform(ptr ptr)
 @ stub GdipGraphicsClear
 @ stub GdipImageForceValidation
-@ stub GdipImageGetFrameCount
+@ stdcall GdipImageGetFrameCount(ptr ptr ptr)
 @ stub GdipImageGetFrameDimensionsCount
 @ stub GdipImageGetFrameDimensionsList
 @ stub GdipImageRotateFlip
@@ -419,19 +419,19 @@
 @ stub GdipLoadImageFromFile
 @ stub GdipLoadImageFromFileICM
 @ stub GdipLoadImageFromStream
-@ stub GdipLoadImageFromStreamICM
+@ stdcall GdipLoadImageFromStreamICM(ptr ptr)
 @ stub GdipMeasureCharacterRanges
 @ stub GdipMeasureDriverString
 @ stub GdipMeasureString
 @ stub GdipMultiplyLineTransform
-@ stub GdipMultiplyMatrix
+@ stdcall GdipMultiplyMatrix(ptr ptr long)
 @ stub GdipMultiplyPathGradientTransform
 @ stub GdipMultiplyPenTransform
 @ stub GdipMultiplyTextureTransform
 @ stub GdipMultiplyWorldTransform
 @ stub GdipNewInstalledFontCollection
 @ stub GdipNewPrivateFontCollection
-@ stub GdipPathIterCopyData
+@ stdcall GdipPathIterCopyData(ptr ptr ptr ptr long long)
 @ stub GdipPathIterEnumerate
 @ stub GdipPathIterGetCount
 @ stub GdipPathIterGetSubpathCount
@@ -440,9 +440,9 @@
 @ stub GdipPathIterNextMarker
 @ stub GdipPathIterNextMarkerPath
 @ stub GdipPathIterNextPathType
-@ stub GdipPathIterNextSubpath
+@ stdcall GdipPathIterNextSubpath(ptr ptr ptr ptr ptr)
 @ stub GdipPathIterNextSubpathPath
-@ stub GdipPathIterRewind
+@ stdcall GdipPathIterRewind(ptr)
 @ stub GdipPlayMetafileRecord
 @ stub GdipPrivateAddFontFile
 @ stub GdipPrivateAddMemoryFont
@@ -463,21 +463,21 @@
 @ stub GdipResetPenTransform
 @ stub GdipResetTextureTransform
 @ stub GdipResetWorldTransform
-@ stub GdipRestoreGraphics
+@ stdcall GdipRestoreGraphics(ptr long)
 @ stub GdipReversePath
 @ stub GdipRotateLineTransform
-@ stub GdipRotateMatrix
+@ stdcall GdipRotateMatrix(ptr long long)
 @ stub GdipRotatePathGradientTransform
 @ stub GdipRotatePenTransform
 @ stub GdipRotateTextureTransform
 @ stub GdipRotateWorldTransform
 @ stub GdipSaveAdd
 @ stub GdipSaveAddImage
-@ stub GdipSaveGraphics
+@ stdcall GdipSaveGraphics(ptr ptr)
 @ stub GdipSaveImageToFile
 @ stub GdipSaveImageToStream
 @ stub GdipScaleLineTransform
-@ stub GdipScaleMatrix
+@ stdcall GdipScaleMatrix(ptr long long long)
 @ stub GdipScalePathGradientTransform
 @ stub GdipScalePenTransform
 @ stub GdipScaleTextureTransform
@@ -493,7 +493,7 @@
 @ stub GdipSetClipRectI
 @ stub GdipSetClipRegion
 @ stub GdipSetCompositingMode
-@ stub GdipSetCompositingQuality
+@ stdcall GdipSetCompositingQuality(ptr long)
 @ stub GdipSetCustomLineCapBaseCap
 @ stub GdipSetCustomLineCapBaseInset
 @ stub GdipSetCustomLineCapStrokeCaps
@@ -513,7 +513,7 @@
 @ stub GdipSetImageAttributesWrapMode
 @ stub GdipSetImagePalette
 @ stub GdipSetInfinite
-@ stub GdipSetInterpolationMode
+@ stdcall GdipSetInterpolationMode(ptr long)
 @ stub GdipSetLineBlend
 @ stub GdipSetLineColors
 @ stub GdipSetLineGammaCorrection
@@ -524,9 +524,9 @@
 @ stub GdipSetLineWrapMode
 @ stub GdipSetMatrixElements
 @ stub GdipSetMetafileDownLevelRasterizationLimit
-@ stub GdipSetPageScale
-@ stub GdipSetPageUnit
-@ stub GdipSetPathFillMode
+@ stdcall GdipSetPageScale(ptr long)
+@ stdcall GdipSetPageUnit(ptr long)
+@ stdcall GdipSetPathFillMode(ptr long)
 @ stub GdipSetPathGradientBlend
 @ stub GdipSetPathGradientCenterColor
 @ stub GdipSetPathGradientCenterPoint
@@ -541,29 +541,29 @@
 @ stub GdipSetPathGradientTransform
 @ stub GdipSetPathGradientWrapMode
 @ stub GdipSetPathMarker
-@ stub GdipSetPenBrushFill
-@ stub GdipSetPenColor
+@ stdcall GdipSetPenBrushFill(ptr ptr)
+@ stdcall GdipSetPenColor(ptr long)
 @ stub GdipSetPenCompoundArray
-@ stub GdipSetPenCustomEndCap
-@ stub GdipSetPenCustomStartCap
-@ stub GdipSetPenDashArray
+@ stdcall GdipSetPenCustomEndCap(ptr ptr)
+@ stdcall GdipSetPenCustomStartCap(ptr ptr)
+@ stdcall GdipSetPenDashArray(ptr ptr long)
 @ stub GdipSetPenDashCap197819
 @ stub GdipSetPenDashOffset
-@ stub GdipSetPenDashStyle
+@ stdcall GdipSetPenDashStyle(ptr long)
 @ stdcall GdipSetPenEndCap(ptr long)
-@ stub GdipSetPenLineCap197819
-@ stub GdipSetPenLineJoin
-@ stub GdipSetPenMiterLimit
+@ stdcall GdipSetPenLineCap197819(ptr long long long)
+@ stdcall GdipSetPenLineJoin(ptr long)
+@ stdcall GdipSetPenMiterLimit(ptr long)
 @ stub GdipSetPenMode
-@ stub GdipSetPenStartCap
+@ stdcall GdipSetPenStartCap(ptr long)
 @ stub GdipSetPenTransform
 @ stub GdipSetPenUnit
 @ stub GdipSetPenWidth
-@ stub GdipSetPixelOffsetMode
+@ stdcall GdipSetPixelOffsetMode(ptr long)
 @ stub GdipSetPropertyItem
 @ stub GdipSetRenderingOrigin
-@ stub GdipSetSmoothingMode
-@ stub GdipSetSolidFillColor
+@ stdcall GdipSetSmoothingMode(ptr long)
+@ stdcall GdipSetSolidFillColor(ptr ptr)
 @ stub GdipSetStringFormatAlign
 @ stub GdipSetStringFormatDigitSubstitution
 @ stub GdipSetStringFormatFlags
@@ -576,7 +576,7 @@
 @ stub GdipSetTextRenderingHint
 @ stub GdipSetTextureTransform
 @ stub GdipSetTextureWrapMode
-@ stub GdipSetWorldTransform
+@ stdcall GdipSetWorldTransform(ptr ptr)
 @ stub GdipShearMatrix
 @ stdcall GdipStartPathFigure(ptr)
 @ stub GdipStringFormatGetGenericDefault
@@ -591,7 +591,7 @@
 @ stub GdipTranslateClip
 @ stub GdipTranslateClipI
 @ stub GdipTranslateLineTransform
-@ stub GdipTranslateMatrix
+@ stdcall GdipTranslateMatrix(ptr long long long)
 @ stub GdipTranslatePathGradientTransform
 @ stub GdipTranslatePenTransform
 @ stub GdipTranslateRegion

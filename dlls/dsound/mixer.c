@@ -432,6 +432,7 @@ static DWORD DSOUND_MixInBuffer(IDirectSoundBufferImpl *dsb, DWORD writepos, DWO
 		int secondary_remainder = dsb->buflen - dsb->buf_mixpos;
 		int adjusted_remainder = MulDiv(dsb->device->pwfx->nAvgBytesPerSec, secondary_remainder, dsb->nAvgBytesPerSec);
 		assert(adjusted_remainder >= 0);
+		adjusted_remainder -= adjusted_remainder % dsb->device->pwfx->nBlockAlign; /* data alignment */
 			/* The adjusted remainder must be at least one sample,
 			 * otherwise we will never reach the end of the
 			 * secondary buffer, as there will perpetually be a
@@ -542,6 +543,12 @@ static DWORD DSOUND_MixInBuffer(IDirectSoundBufferImpl *dsb, DWORD writepos, DWO
 		dsb->leadin = FALSE;
 	}
 
+	/* check for notification positions */
+	if (dsb->dsbd.dwFlags & DSBCAPS_CTRLPOSITIONNOTIFY &&
+	    dsb->state != STATE_STARTING) {
+		DSOUND_CheckEvent(dsb, dsb->buf_mixpos, ilen);
+	}
+
 	dsb->buf_mixpos += ilen;
 
 	if (dsb->buf_mixpos >= dsb->buflen) {
@@ -556,6 +563,9 @@ static DWORD DSOUND_MixInBuffer(IDirectSoundBufferImpl *dsb, DWORD writepos, DWO
 		}
 	}
 
+	/* increase mix position */
+	dsb->primary_mixpos += len;
+	dsb->primary_mixpos %= dsb->device->buflen;
 	return len;
 }
 
@@ -588,7 +598,7 @@ static DWORD DSOUND_MixOne(IDirectSoundBufferImpl *dsb, DWORD playpos, DWORD wri
 {
 	/* The buffer's primary_mixpos may be before or after the the device
 	 * buffer's mixpos, but both must be ahead of writepos. */
-	DWORD primary_done;
+	DWORD primary_done, buflen = dsb->buflen / dsb->pwfx->nBlockAlign * dsb->device->pwfx->nBlockAlign;
 
 	TRACE("(%p,%d,%d,%d)\n",dsb,playpos,writepos,mixlen);
 	TRACE("writepos=%d, buf_mixpos=%d, primary_mixpos=%d, mixlen=%d\n", writepos, dsb->buf_mixpos, dsb->primary_mixpos, mixlen);
@@ -606,27 +616,32 @@ static DWORD DSOUND_MixOne(IDirectSoundBufferImpl *dsb, DWORD playpos, DWORD wri
 	}
 
 	/* take into acount already mixed data */
-	mixlen = mixlen - primary_done;
+	mixlen -= primary_done;
 
-	TRACE("mixlen (primary) = %i\n", mixlen);
+	TRACE("primary_done=%d, mixlen (primary) = %i\n", primary_done, mixlen);
 
-	/* clip to valid length */
-	mixlen = (dsb->buflen < mixlen) ? dsb->buflen : mixlen;
+	if ((dsb->playflags & DSBPLAY_LOOPING) && mixlen > buflen)
+	{
+		while (mixlen > buflen)
+		{
+			DWORD mixedlength = DSOUND_MixInBuffer(dsb, dsb->primary_mixpos, buflen);
+			mixlen -= buflen;
+			if (!mixedlength)
+			{
+				mixlen = 0;
+				break;
+			}
+		}
 
-	TRACE("primary_done=%d, mixlen (buffer)=%d\n", primary_done, mixlen);
-
-	/* mix more data */
-	mixlen = DSOUND_MixInBuffer(dsb, dsb->primary_mixpos, mixlen);
-
-	/* check for notification positions */
-	if (dsb->dsbd.dwFlags & DSBCAPS_CTRLPOSITIONNOTIFY &&
-	    dsb->state != STATE_STARTING) {
-		DSOUND_CheckEvent(dsb, writepos, mixlen);
 	}
 
-	/* increase mix position */
-	dsb->primary_mixpos += mixlen;
-	dsb->primary_mixpos %= dsb->device->buflen;
+	/* clip to valid length */
+	mixlen = (buflen < mixlen) ? buflen : mixlen;
+	TRACE("mixlen (buffer)=%d\n", mixlen);
+
+	if (mixlen)
+		/* mix more data */
+		mixlen = DSOUND_MixInBuffer(dsb, dsb->primary_mixpos, mixlen);
 
 	TRACE("new primary_mixpos=%d, mixed data len=%d, buffer left = %d\n",
 		dsb->primary_mixpos, mixlen, (dsb->buflen - dsb->buf_mixpos));

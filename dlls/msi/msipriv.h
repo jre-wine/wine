@@ -39,6 +39,7 @@
 #define MSITYPE_STRING   0x0800
 #define MSITYPE_NULLABLE 0x1000
 #define MSITYPE_KEY      0x2000
+#define MSITYPE_TEMPORARY 0x4000
 
 /* Word Count masks */
 #define MSIWORDCOUNT_SHORTFILENAMES     0x0001
@@ -156,6 +157,12 @@ typedef struct tagMSIVIEWOPS
     UINT (*fetch_stream)( struct tagMSIVIEW *view, UINT row, UINT col, IStream **stm );
 
     /*
+     * get_row - gets values from a row
+     *
+     */
+    UINT (*get_row)( struct tagMSIVIEW *view, UINT row, MSIRECORD **rec );
+
+    /*
      * set_row - sets values in a row as specified by mask
      *
      *  Similar semantics to fetch_int
@@ -202,7 +209,7 @@ typedef struct tagMSIVIEWOPS
     /*
      * modify - not yet implemented properly
      */
-    UINT (*modify)( struct tagMSIVIEW *view, MSIMODIFY eModifyMode, MSIRECORD *record );
+    UINT (*modify)( struct tagMSIVIEW *view, MSIMODIFY eModifyMode, MSIRECORD *record, UINT row );
 
     /*
      * delete - destroys the structure completely
@@ -221,6 +228,26 @@ typedef struct tagMSIVIEWOPS
      *  first call and continued to be passed in to subsequent calls.
      */
     UINT (*find_matching_rows)( struct tagMSIVIEW *view, UINT col, UINT val, UINT *row, MSIITERHANDLE *handle );
+
+    /*
+     * add_ref - increases the reference count of the table
+     */
+    UINT (*add_ref)( struct tagMSIVIEW *view );
+
+    /*
+     * release - decreases the reference count of the table
+     */
+    UINT (*release)( struct tagMSIVIEW *view );
+
+    /*
+     * add_column - adds a column to the table
+     */
+    UINT (*add_column)( struct tagMSIVIEW *view, LPCWSTR table, UINT number, LPCWSTR column, UINT type, BOOL hold );
+
+    /*
+     * remove_column - removes the column represented by table name and column number from the table
+     */
+    UINT (*remove_column)( struct tagMSIVIEW *view, LPCWSTR table, UINT number );
 } MSIVIEWOPS;
 
 struct tagMSIVIEW
@@ -605,7 +632,7 @@ extern MSICONDITION MSI_DatabaseIsTablePersistent( MSIDATABASE *db, LPCWSTR tabl
 
 extern UINT read_raw_stream_data( MSIDATABASE *db, LPCWSTR stname,
                                   USHORT **pdata, UINT *psz );
-extern UINT read_stream_data( IStorage *stg, LPCWSTR stname,
+extern UINT read_stream_data( IStorage *stg, LPCWSTR stname, BOOL table,
                               BYTE **pdata, UINT *psz );
 extern UINT write_stream_data( IStorage *stg, LPCWSTR stname,
                                LPCVOID data, UINT sz, BOOL bTable );
@@ -623,6 +650,7 @@ extern UINT ACTION_DialogBox( MSIPACKAGE*, LPCWSTR);
 extern UINT ACTION_ForceReboot(MSIPACKAGE *package);
 extern UINT MSI_Sequence( MSIPACKAGE *package, LPCWSTR szTable, INT iSequenceMode );
 extern UINT MSI_SetFeatureStates( MSIPACKAGE *package );
+extern UINT msi_parse_command_line( MSIPACKAGE *package, LPCWSTR szCommandLine );
 
 /* record internals */
 extern UINT MSI_RecordSetIStream( MSIRECORD *, unsigned int, IStream *);
@@ -668,7 +696,7 @@ extern UINT MSI_ViewClose( MSIQUERY* );
 extern UINT MSI_ViewGetColumnInfo(MSIQUERY *, MSICOLINFO, MSIRECORD **);
 extern UINT MSI_ViewModify( MSIQUERY *, MSIMODIFY, MSIRECORD * );
 extern UINT VIEW_find_column( MSIVIEW *, LPCWSTR, UINT * );
-
+extern UINT msi_view_get_row(MSIDATABASE *, MSIVIEW *, UINT, MSIRECORD **);
 
 /* install internals */
 extern UINT MSI_SetInstallLevel( MSIPACKAGE *package, int iInstallLevel );

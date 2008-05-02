@@ -40,8 +40,6 @@ static int sql_error(const char *str);
 
 WINE_DEFAULT_DEBUG_CHANNEL(msi);
 
-#define MSITYPE_TEMPORARY 0x8000
-
 typedef struct tag_SQL_input
 {
     MSIDATABASE *db;
@@ -83,7 +81,7 @@ static struct expr * EXPR_wildcard( void *info );
 }
 
 %token TK_ALTER TK_AND TK_BY TK_CHAR TK_COMMA TK_CREATE TK_DELETE
-%token TK_DISTINCT TK_DOT TK_EQ TK_FREE TK_FROM TK_GE TK_GT TK_HOLD
+%token TK_DISTINCT TK_DOT TK_EQ TK_FREE TK_FROM TK_GE TK_GT TK_HOLD TK_ADD
 %token <str> TK_ID
 %token TK_ILLEGAL TK_INSERT TK_INT
 %token <str> TK_INTEGER
@@ -231,8 +229,28 @@ onealter:
             SQL_input* sql = (SQL_input*) info;
             MSIVIEW *alter = NULL;
 
-            ALTER_CreateView( sql->db, &alter, $3, $4 );
+            ALTER_CreateView( sql->db, &alter, $3, NULL, $4 );
             if( !alter )
+                YYABORT;
+            $$ = alter;
+        }
+  | TK_ALTER TK_TABLE table TK_ADD column_and_type
+        {
+            SQL_input *sql = (SQL_input *)info;
+            MSIVIEW *alter = NULL;
+
+            ALTER_CreateView( sql->db, &alter, $3, $5, 0 );
+            if (!alter)
+                YYABORT;
+            $$ = alter;
+        }
+  | TK_ALTER TK_TABLE table TK_ADD column_and_type TK_HOLD
+        {
+            SQL_input *sql = (SQL_input *)info;
+            MSIVIEW *alter = NULL;
+
+            ALTER_CreateView( sql->db, &alter, $3, $5, 1 );
+            if (!alter)
                 YYABORT;
             $$ = alter;
         }
@@ -280,7 +298,7 @@ column_and_type:
     column column_type
         {
             $$ = $1;
-            $$->type = ($2 | MSITYPE_VALID) & ~MSITYPE_TEMPORARY;
+            $$->type = ($2 | MSITYPE_VALID);
             $$->temporary = $2 & MSITYPE_TEMPORARY ? TRUE : FALSE;
         }
     ;

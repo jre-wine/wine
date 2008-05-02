@@ -56,6 +56,21 @@
         expect_ ## func = called_ ## func = FALSE; \
     }while(0)
 
+#define CHECK_NOT_CALLED(func) \
+    do { \
+        ok(!called_ ## func, "unexpected " #func "\n"); \
+        expect_ ## func = called_ ## func = FALSE; \
+    }while(0)
+
+#define CLEAR_CALLED(func) \
+    expect_ ## func = called_ ## func = FALSE
+
+DEFINE_EXPECT(QueryInterface_IServiceProvider);
+DEFINE_EXPECT(QueryInterface_IHttpNegotiate);
+DEFINE_EXPECT(BeginningTransaction);
+DEFINE_EXPECT(OnResponse);
+DEFINE_EXPECT(QueryInterface_IHttpNegotiate2);
+DEFINE_EXPECT(GetRootSecurityId);
 DEFINE_EXPECT(GetBindInfo);
 DEFINE_EXPECT(OnStartBinding);
 DEFINE_EXPECT(OnProgress_FINDINGRESOURCE);
@@ -362,6 +377,92 @@ static const IInternetProtocolVtbl ProtocolVtbl = {
 
 static IInternetProtocol Protocol = { &ProtocolVtbl };
 
+static HRESULT WINAPI HttpNegotiate_QueryInterface(IHttpNegotiate2 *iface, REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(&IID_IUnknown, riid)
+            || IsEqualGUID(&IID_IHttpNegotiate, riid)
+            || IsEqualGUID(&IID_IHttpNegotiate2, riid)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    ok(0, "unexpected call\n");
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI HttpNegotiate_AddRef(IHttpNegotiate2 *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI HttpNegotiate_Release(IHttpNegotiate2 *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI HttpNegotiate_BeginningTransaction(IHttpNegotiate2 *iface, LPCWSTR szURL,
+        LPCWSTR szHeaders, DWORD dwReserved, LPWSTR *pszAdditionalHeaders)
+{
+    CHECK_EXPECT(BeginningTransaction);
+
+    ok(!lstrcmpW(szURL, urls[test_protocol]), "szURL != urls[test_protocol]\n");
+    ok(!dwReserved, "dwReserved=%d, expected 0\n", dwReserved);
+    ok(pszAdditionalHeaders != NULL, "pszAdditionalHeaders == NULL\n");
+    if(pszAdditionalHeaders)
+        ok(*pszAdditionalHeaders == NULL, "*pszAdditionalHeaders != NULL\n");
+
+    return S_OK;
+}
+
+static HRESULT WINAPI HttpNegotiate_OnResponse(IHttpNegotiate2 *iface, DWORD dwResponseCode,
+        LPCWSTR szResponseHeaders, LPCWSTR szRequestHeaders, LPWSTR *pszAdditionalRequestHeaders)
+{
+    CHECK_EXPECT(OnResponse);
+
+    ok(dwResponseCode == 200, "dwResponseCode=%d, expected 200\n", dwResponseCode);
+    ok(szResponseHeaders != NULL, "szResponseHeaders == NULL\n");
+    ok(szRequestHeaders == NULL, "szRequestHeaders != NULL\n");
+    /* Note: in protocol.c tests, OnResponse pszAdditionalRequestHeaders _is_ NULL */
+    ok(pszAdditionalRequestHeaders != NULL, "pszAdditionalHeaders == NULL\n");
+    if(pszAdditionalRequestHeaders)
+        ok(*pszAdditionalRequestHeaders == NULL, "*pszAdditionalHeaders != NULL\n");
+
+    return S_OK;
+}
+
+static HRESULT WINAPI HttpNegotiate_GetRootSecurityId(IHttpNegotiate2 *iface,
+        BYTE *pbSecurityId, DWORD *pcbSecurityId, DWORD_PTR dwReserved)
+{
+    static const BYTE sec_id[] = {'h','t','t','p',':','t','e','s','t',1,0,0,0};
+
+    CHECK_EXPECT(GetRootSecurityId);
+
+    ok(!dwReserved, "dwReserved=%ld, expected 0\n", dwReserved);
+    ok(pbSecurityId != NULL, "pbSecurityId == NULL\n");
+    ok(pcbSecurityId != NULL, "pcbSecurityId == NULL\n");
+
+    if(pcbSecurityId) {
+        ok(*pcbSecurityId == 512, "*pcbSecurityId=%d, expected 512\n", *pcbSecurityId);
+        *pcbSecurityId = sizeof(sec_id);
+    }
+
+    if(pbSecurityId)
+        memcpy(pbSecurityId, sec_id, sizeof(sec_id));
+
+    return E_FAIL;
+}
+
+static IHttpNegotiate2Vtbl HttpNegotiateVtbl = {
+    HttpNegotiate_QueryInterface,
+    HttpNegotiate_AddRef,
+    HttpNegotiate_Release,
+    HttpNegotiate_BeginningTransaction,
+    HttpNegotiate_OnResponse,
+    HttpNegotiate_GetRootSecurityId
+};
+
+static IHttpNegotiate2 HttpNegotiate = { &HttpNegotiateVtbl };
+
 static HRESULT WINAPI statusclb_QueryInterface(IBindStatusCallback *iface, REFIID riid, void **ppv)
 {
     if(IsEqualGUID(&IID_IInternetProtocol, riid)) {
@@ -371,6 +472,22 @@ static HRESULT WINAPI statusclb_QueryInterface(IBindStatusCallback *iface, REFII
         }else {
             return E_NOINTERFACE;
         }
+    }
+    else if (IsEqualGUID(&IID_IServiceProvider, riid))
+    {
+        CHECK_EXPECT(QueryInterface_IServiceProvider);
+    }
+    else if (IsEqualGUID(&IID_IHttpNegotiate, riid))
+    {
+        CHECK_EXPECT(QueryInterface_IHttpNegotiate);
+        *ppv = &HttpNegotiate;
+        return S_OK;
+    }
+    else if (IsEqualGUID(&IID_IHttpNegotiate2, riid))
+    {
+        CHECK_EXPECT(QueryInterface_IHttpNegotiate2);
+        *ppv = &HttpNegotiate;
+        return S_OK;
     }
 
     return E_NOINTERFACE;
@@ -561,8 +678,10 @@ static void test_CreateAsyncBindCtx(void)
     hres = CreateAsyncBindCtx(0, NULL, NULL, NULL);
     ok(hres == E_INVALIDARG, "CreateAsyncBindCtx failed. expected: E_INVALIDARG, got: %08x\n", hres);
 
+    SET_EXPECT(QueryInterface_IServiceProvider);
     hres = CreateAsyncBindCtx(0, &bsc, NULL, &bctx);
     ok(SUCCEEDED(hres), "CreateAsyncBindCtx failed: %08x\n", hres);
+    todo_wine CHECK_CALLED(QueryInterface_IServiceProvider);
 
     bindopts.cbStruct = sizeof(bindopts);
     hres = IBindCtx_GetBindOptions(bctx, &bindopts);
@@ -627,8 +746,10 @@ static void test_CreateAsyncBindCtxEx(void)
 
     IBindCtx_Release(bctx_arg);
 
+    SET_EXPECT(QueryInterface_IServiceProvider);
     hres = CreateAsyncBindCtxEx(NULL, 0, &bsc, NULL, &bctx, 0);
     ok(hres == S_OK, "CreateAsyncBindCtxEx failed: %08x\n", hres);
+    todo_wine CHECK_CALLED(QueryInterface_IServiceProvider);
 
     if(SUCCEEDED(hres))
         IBindCtx_Release(bctx);
@@ -648,14 +769,23 @@ static void test_BindToStorage(int protocol, BOOL emul)
     test_protocol = protocol;
     emulate_protocol = emul;
 
+    SET_EXPECT(QueryInterface_IServiceProvider);
     hres = CreateAsyncBindCtx(0, &bsc, NULL, &bctx);
     ok(SUCCEEDED(hres), "CreateAsyncBindCtx failed: %08x\n\n", hres);
     if(FAILED(hres))
         return;
+    if(test_protocol == HTTP_TEST ||
+       test_protocol == ABOUT_TEST ||
+       (emul && test_protocol == FILE_TEST)) todo_wine
+        CHECK_CALLED(QueryInterface_IServiceProvider);
+    else
+        CHECK_CALLED(QueryInterface_IServiceProvider);
 
+    SET_EXPECT(QueryInterface_IServiceProvider);
     hres = RegisterBindStatusCallback(bctx, &bsc, &previousclb, 0);
     ok(SUCCEEDED(hres), "RegisterBindStatusCallback failed: %08x\n", hres);
     ok(previousclb == &bsc, "previousclb(%p) != sclb(%p)\n", previousclb, &bsc);
+    todo_wine CHECK_CALLED(QueryInterface_IServiceProvider);
     if(previousclb)
         IBindStatusCallback_Release(previousclb);
 
@@ -678,6 +808,7 @@ static void test_BindToStorage(int protocol, BOOL emul)
     ok(hres == S_OK, "GetDisplayName failed %08x\n", hres);
     ok(!lstrcmpW(display_name, urls[test_protocol]), "GetDisplayName got wrong name\n");
 
+    SET_EXPECT(QueryInterface_IServiceProvider);
     SET_EXPECT(GetBindInfo);
     SET_EXPECT(OnStartBinding);
     if(emulate_protocol) {
@@ -685,11 +816,17 @@ static void test_BindToStorage(int protocol, BOOL emul)
         SET_EXPECT(UnlockRequest);
     }else {
         if(test_protocol == HTTP_TEST) {
+            SET_EXPECT(QueryInterface_IHttpNegotiate);
+            SET_EXPECT(BeginningTransaction);
+            SET_EXPECT(QueryInterface_IHttpNegotiate2);
+            SET_EXPECT(GetRootSecurityId);
             SET_EXPECT(OnProgress_FINDINGRESOURCE);
             SET_EXPECT(OnProgress_CONNECTING);
         }
         if(test_protocol == HTTP_TEST || test_protocol == FILE_TEST)
             SET_EXPECT(OnProgress_SENDINGREQUEST);
+        if(test_protocol == HTTP_TEST)
+            SET_EXPECT(OnResponse);
         SET_EXPECT(OnProgress_MIMETYPEAVAILABLE);
         SET_EXPECT(OnProgress_BEGINDOWNLOADDATA);
         if(test_protocol == HTTP_TEST)
@@ -730,11 +867,19 @@ static void test_BindToStorage(int protocol, BOOL emul)
         CHECK_CALLED(UnlockRequest);
     }else {
         if(test_protocol == HTTP_TEST) {
+            todo_wine CHECK_CALLED(QueryInterface_IHttpNegotiate);
+            todo_wine CHECK_CALLED(BeginningTransaction);
+            /* QueryInterface_IHttpNegotiate2 and GetRootSecurityId
+             * called on WinXP but not on Win98 */
+            CLEAR_CALLED(QueryInterface_IHttpNegotiate2);
+            CLEAR_CALLED(GetRootSecurityId);
             CHECK_CALLED(OnProgress_FINDINGRESOURCE);
             CHECK_CALLED(OnProgress_CONNECTING);
             CHECK_CALLED(OnProgress_SENDINGREQUEST);
+            todo_wine CHECK_CALLED(OnResponse);
             todo_wine { CHECK_CALLED(OnProgress_MIMETYPEAVAILABLE); }
         }else {
+            todo_wine CHECK_NOT_CALLED(QueryInterface_IServiceProvider);
             CHECK_CALLED(OnProgress_MIMETYPEAVAILABLE);
         }
         CHECK_CALLED(OnProgress_BEGINDOWNLOADDATA);

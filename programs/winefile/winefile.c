@@ -187,7 +187,7 @@ static int last_split;
 
 /* some common string constants */
 static const TCHAR sEmpty[] = {'\0'};
-static const TCHAR sSpace[] = {' ', '\0'};
+static const WCHAR sSpace[] = {' ', '\0'};
 static const TCHAR sNumFmt[] = {'%','d','\0'};
 static const TCHAR sQMarks[] = {'?','?','?','\0'};
 
@@ -245,28 +245,81 @@ static void display_network_error(HWND hwnd)
 
 static VOID WineLicense(HWND Wnd)
 {
-	TCHAR cap[20], text[1024];
-	LoadString(Globals.hInstance, IDS_LICENSE, text, 1024);
-	LoadString(Globals.hInstance, IDS_LICENSE_CAPTION, cap, 20);
-	MessageBox(Wnd, text, cap, MB_ICONINFORMATION | MB_OK);
+	WCHAR cap[20], text[1024];
+	LoadStringW(Globals.hInstance, IDS_LICENSE, text, 1024);
+	LoadStringW(Globals.hInstance, IDS_LICENSE_CAPTION, cap, 20);
+	MessageBoxW(Wnd, text, cap, MB_ICONINFORMATION | MB_OK);
 }
 
 static VOID WineWarranty(HWND Wnd)
 {
-	TCHAR cap[20], text[1024];
-	LoadString(Globals.hInstance, IDS_WARRANTY, text, 1024);
-	LoadString(Globals.hInstance, IDS_WARRANTY_CAPTION, cap, 20);
-	MessageBox(Wnd, text, cap, MB_ICONEXCLAMATION | MB_OK);
+	WCHAR cap[20], text[1024];
+	LoadStringW(Globals.hInstance, IDS_WARRANTY, text, 1024);
+	LoadStringW(Globals.hInstance, IDS_WARRANTY_CAPTION, cap, 20);
+	MessageBoxW(Wnd, text, cap, MB_ICONEXCLAMATION | MB_OK);
 }
 
 static inline BOOL get_check(HWND hwnd, INT id)
 {
-	return BST_CHECKED&SendMessage(GetDlgItem(hwnd, id), BM_GETSTATE, 0, 0);
+	return BST_CHECKED&SendMessageW(GetDlgItem(hwnd, id), BM_GETSTATE, 0, 0);
 }
 
 static inline INT set_check(HWND hwnd, INT id, BOOL on)
 {
-	return SendMessage(GetDlgItem(hwnd, id), BM_SETCHECK, on?BST_CHECKED:BST_UNCHECKED, 0);
+	return SendMessageW(GetDlgItem(hwnd, id), BM_SETCHECK, on?BST_CHECKED:BST_UNCHECKED, 0);
+}
+
+static inline void choose_font(HWND hwnd)
+{
+        WCHAR dlg_name[BUFFER_LEN], dlg_info[BUFFER_LEN];
+        CHOOSEFONTW chFont;
+        LOGFONTW lFont;
+
+        HDC hdc = GetDC(hwnd);
+        chFont.lStructSize = sizeof(CHOOSEFONT);
+        chFont.hwndOwner = hwnd;
+        chFont.hDC = NULL;
+        chFont.lpLogFont = &lFont;
+        chFont.Flags = CF_SCREENFONTS | CF_FORCEFONTEXIST | CF_LIMITSIZE | CF_NOSCRIPTSEL;
+        chFont.rgbColors = RGB(0,0,0);
+        chFont.lCustData = 0;
+        chFont.lpfnHook = NULL;
+        chFont.lpTemplateName = NULL;
+        chFont.hInstance = Globals.hInstance;
+        chFont.lpszStyle = NULL;
+        chFont.nFontType = SIMULATED_FONTTYPE;
+        chFont.nSizeMin = 0;
+        chFont.nSizeMax = 24;
+
+        if (ChooseFontW(&chFont)) {
+                HWND childWnd;
+                HFONT hFontOld;
+
+                DeleteObject(Globals.hfont);
+                Globals.hfont = CreateFontIndirectW(&lFont);
+                hFontOld = SelectObject(hdc, Globals.hfont);
+                GetTextExtentPoint32W(hdc, sSpace, 1, &Globals.spaceSize);
+
+                /* change font in all open child windows */
+                for(childWnd=GetWindow(Globals.hmdiclient,GW_CHILD); childWnd; childWnd=GetNextWindow(childWnd,GW_HWNDNEXT)) {
+                        ChildWnd* child = (ChildWnd*) GetWindowLongPtrW(childWnd, GWLP_USERDATA);
+                        SendMessageW(child->left.hwnd, WM_SETFONT, (WPARAM)Globals.hfont, TRUE);
+                        SendMessageW(child->right.hwnd, WM_SETFONT, (WPARAM)Globals.hfont, TRUE);
+                        SendMessageW(child->left.hwnd, LB_SETITEMHEIGHT, 1, max(Globals.spaceSize.cy,IMAGE_HEIGHT+3));
+                        SendMessageW(child->right.hwnd, LB_SETITEMHEIGHT, 1, max(Globals.spaceSize.cy,IMAGE_HEIGHT+3));
+                        InvalidateRect(child->left.hwnd, NULL, TRUE);
+                        InvalidateRect(child->right.hwnd, NULL, TRUE);
+                }
+
+                SelectObject(hdc, hFontOld);
+        }
+        else if (CommDlgExtendedError()) {
+                LoadStringW(Globals.hInstance, IDS_FONT_SEL_DLG_NAME, dlg_name, BUFFER_LEN);
+                LoadStringW(Globals.hInstance, IDS_FONT_SEL_ERROR, dlg_info, BUFFER_LEN);
+                MessageBoxW(hwnd, dlg_info, dlg_name, MB_OK);
+        }
+
+        ReleaseDC(hwnd, hdc);
 }
 
 #ifdef __WINE__
@@ -319,7 +372,7 @@ static LPCWSTR my_wcsrchr(LPCWSTR str, WCHAR c)
 /* allocate and initialise a directory entry */
 static Entry* alloc_entry(void)
 {
-	Entry* entry = (Entry*) malloc(sizeof(Entry));
+	Entry* entry = HeapAlloc(GetProcessHeap(), 0, sizeof(Entry));
 
 #ifdef _SHELL_FOLDERS
 	entry->pidl = NULL;
@@ -344,7 +397,7 @@ static void free_entry(Entry* entry)
 		IMalloc_Free(Globals.iMalloc, entry->pidl);
 #endif
 
-	free(entry);
+	HeapFree(GetProcessHeap(), 0, entry);
 }
 
 /* recursively free all child entries */
@@ -1437,7 +1490,7 @@ static ChildWnd* alloc_child_window(LPCTSTR path, LPITEMIDLIST pidl, HWND hwnd)
 	TCHAR b1[BUFFER_LEN];
 	static const TCHAR sAsterics[] = {'*', '\0'};
 
-	ChildWnd* child = (ChildWnd*) malloc(sizeof(ChildWnd));
+	ChildWnd* child = HeapAlloc(GetProcessHeap(), 0, sizeof(ChildWnd));
 	Root* root = &child->root;
 	Entry* entry;
 
@@ -1504,7 +1557,7 @@ static ChildWnd* alloc_child_window(LPCTSTR path, LPITEMIDLIST pidl, HWND hwnd)
 static void free_child_window(ChildWnd* child)
 {
 	free_entries(&child->root.entry);
-	free(child);
+	HeapFree(GetProcessHeap(), 0, child);
 }
 
 
@@ -1593,25 +1646,25 @@ static windowOptions load_registry_settings(void)
 	HKEY hKey;
 	windowOptions opts;
 
-	RegOpenKeyEx( HKEY_CURRENT_USER, registry_key,
-	              0, KEY_QUERY_VALUE, &hKey );
+        RegOpenKeyExW( HKEY_CURRENT_USER, registry_key,
+                       0, KEY_QUERY_VALUE, &hKey );
 
 	size = sizeof(DWORD);
 
-        if( RegQueryValueEx( hKey, reg_start_x, NULL, &type,
-                             (LPBYTE) &opts.start_x, &size ) != ERROR_SUCCESS )
+        if( RegQueryValueExW( hKey, reg_start_x, NULL, &type,
+                              (LPBYTE) &opts.start_x, &size ) != ERROR_SUCCESS )
 		opts.start_x = CW_USEDEFAULT;
 
-        if( RegQueryValueEx( hKey, reg_start_y, NULL, &type,
-                             (LPBYTE) &opts.start_y, &size ) != ERROR_SUCCESS )
+        if( RegQueryValueExW( hKey, reg_start_y, NULL, &type,
+                              (LPBYTE) &opts.start_y, &size ) != ERROR_SUCCESS )
 		opts.start_y = CW_USEDEFAULT;
 
-        if( RegQueryValueEx( hKey, reg_width, NULL, &type,
-                             (LPBYTE) &opts.width, &size ) != ERROR_SUCCESS )
+        if( RegQueryValueExW( hKey, reg_width, NULL, &type,
+                              (LPBYTE) &opts.width, &size ) != ERROR_SUCCESS )
 		opts.width = CW_USEDEFAULT;
 
-        if( RegQueryValueEx( hKey, reg_height, NULL, &type,
-                             (LPBYTE) &opts.height, &size ) != ERROR_SUCCESS )
+        if( RegQueryValueExW( hKey, reg_height, NULL, &type,
+                              (LPBYTE) &opts.height, &size ) != ERROR_SUCCESS )
 		opts.height = CW_USEDEFAULT;
 
 	RegCloseKey( hKey );
@@ -1630,27 +1683,27 @@ static void save_registry_settings(void)
 	width = wi.rcWindow.right - wi.rcWindow.left;
 	height = wi.rcWindow.bottom - wi.rcWindow.top;
 
-	if ( RegOpenKeyEx( HKEY_CURRENT_USER, registry_key,
-	                   0, KEY_SET_VALUE, &hKey ) != ERROR_SUCCESS )
+	if ( RegOpenKeyExW( HKEY_CURRENT_USER, registry_key,
+                            0, KEY_SET_VALUE, &hKey ) != ERROR_SUCCESS )
 	{
 		/* Unable to save registry settings - try to create key */
-		if ( RegCreateKeyEx( HKEY_CURRENT_USER, registry_key,
-		                     0, NULL, REG_OPTION_NON_VOLATILE,
-		                     KEY_SET_VALUE, NULL, &hKey, NULL ) != ERROR_SUCCESS )
+                if ( RegCreateKeyExW( HKEY_CURRENT_USER, registry_key,
+                                      0, NULL, REG_OPTION_NON_VOLATILE,
+                                      KEY_SET_VALUE, NULL, &hKey, NULL ) != ERROR_SUCCESS )
 		{
 			/* FIXME: Cannot create key */
 			return;
 		}
 	}
 	/* Save all of the settings */
-	RegSetValueEx( hKey, reg_start_x, 0, REG_DWORD,
-	               (LPBYTE) &wi.rcWindow.left, sizeof(DWORD) );
-	RegSetValueEx( hKey, reg_start_y, 0, REG_DWORD,
-	               (LPBYTE) &wi.rcWindow.top, sizeof(DWORD) );
-	RegSetValueEx( hKey, reg_width, 0, REG_DWORD,
-	               (LPBYTE) &width, sizeof(DWORD) );
-	RegSetValueEx( hKey, reg_height, 0, REG_DWORD,
-	               (LPBYTE) &height, sizeof(DWORD) );
+        RegSetValueExW( hKey, reg_start_x, 0, REG_DWORD,
+                        (LPBYTE) &wi.rcWindow.left, sizeof(DWORD) );
+        RegSetValueExW( hKey, reg_start_y, 0, REG_DWORD,
+                        (LPBYTE) &wi.rcWindow.top, sizeof(DWORD) );
+        RegSetValueExW( hKey, reg_width, 0, REG_DWORD,
+                        (LPBYTE) &width, sizeof(DWORD) );
+        RegSetValueExW( hKey, reg_height, 0, REG_DWORD,
+                        (LPBYTE) &height, sizeof(DWORD) );
 
 	/* TODO: Save more settings here (List vs. Detailed View, etc.) */
 	RegCloseKey( hKey );
@@ -1927,7 +1980,7 @@ static void CheckForFileInfo(struct PropertiesDialog* dlg, HWND hwnd, LPCTSTR st
 	DWORD dwVersionDataLen = GetFileVersionInfoSize(strFilename, NULL);
 
 	if (dwVersionDataLen) {
-		dlg->pVersionData = malloc(dwVersionDataLen);
+		dlg->pVersionData = HeapAlloc(GetProcessHeap(), 0, dwVersionDataLen);
 
 		if (GetFileVersionInfo(strFilename, 0, dwVersionDataLen, dlg->pVersionData)) {
 			LPVOID pVal;
@@ -2045,7 +2098,7 @@ static INT_PTR CALLBACK PropertiesDialogDlgProc(HWND hwnd, UINT nmsg, WPARAM wpa
 			return 1;}
 
 		case WM_NCDESTROY:
-			free(dlg->pVersionData);
+			HeapFree(GetProcessHeap(), 0, dlg->pVersionData);
 			dlg->pVersionData = NULL;
 			break;
 	}
@@ -2291,7 +2344,7 @@ static LRESULT CALLBACK FrameWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM
 				child = alloc_child_window(path, NULL, hwnd);
 
 				if (!create_child_window(child))
-					free(child);
+					HeapFree(GetProcessHeap(), 0, child);
 			} else switch(cmd) {
 				case ID_FILE_EXIT:
 					SendMessage(hwnd, WM_CLOSE, 0, 0);
@@ -2305,7 +2358,7 @@ static LRESULT CALLBACK FrameWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM
 					child = alloc_child_window(path, NULL, hwnd);
 
 					if (!create_child_window(child))
-						free(child);
+						HeapFree(GetProcessHeap(), 0, child);
 					break;}
 
 				case ID_REFRESH:
@@ -2328,58 +2381,9 @@ static LRESULT CALLBACK FrameWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM
 					SendMessage(Globals.hmdiclient, WM_MDIICONARRANGE, 0, 0);
 					break;
 
-				case ID_SELECT_FONT: {
-					TCHAR dlg_name[BUFFER_LEN], dlg_info[BUFFER_LEN];
-					CHOOSEFONT chFont;
-					LOGFONT lFont;
-
-					HDC hdc = GetDC(hwnd);
-					chFont.lStructSize = sizeof(CHOOSEFONT);
-					chFont.hwndOwner = hwnd;
-					chFont.hDC = NULL;
-					chFont.lpLogFont = &lFont;
-					chFont.Flags = CF_SCREENFONTS | CF_FORCEFONTEXIST | CF_LIMITSIZE | CF_NOSCRIPTSEL;
-					chFont.rgbColors = RGB(0,0,0);
-					chFont.lCustData = 0;
-					chFont.lpfnHook = NULL;
-					chFont.lpTemplateName = NULL;
-					chFont.hInstance = Globals.hInstance;
-					chFont.lpszStyle = NULL;
-					chFont.nFontType = SIMULATED_FONTTYPE;
-					chFont.nSizeMin = 0;
-					chFont.nSizeMax = 24;
-
-					if (ChooseFont(&chFont)) {
-						HWND childWnd;
-						HFONT hFontOld;
-
-						DeleteObject(Globals.hfont);
-						Globals.hfont = CreateFontIndirect(&lFont);
-						hFontOld = SelectObject(hdc, Globals.hfont);
-						GetTextExtentPoint32(hdc, sSpace, 1, &Globals.spaceSize);
-
-						/* change font in all open child windows */
-						for(childWnd=GetWindow(Globals.hmdiclient,GW_CHILD); childWnd; childWnd=GetNextWindow(childWnd,GW_HWNDNEXT)) {
-							ChildWnd* child = (ChildWnd*) GetWindowLongPtr(childWnd, GWLP_USERDATA);
-							SendMessage(child->left.hwnd, WM_SETFONT, (WPARAM)Globals.hfont, TRUE);
-							SendMessage(child->right.hwnd, WM_SETFONT, (WPARAM)Globals.hfont, TRUE);
-							SendMessage(child->left.hwnd, LB_SETITEMHEIGHT, 1, max(Globals.spaceSize.cy,IMAGE_HEIGHT+3));
-							SendMessage(child->right.hwnd, LB_SETITEMHEIGHT, 1, max(Globals.spaceSize.cy,IMAGE_HEIGHT+3));
-							InvalidateRect(child->left.hwnd, NULL, TRUE);
-							InvalidateRect(child->right.hwnd, NULL, TRUE);
-						}
-
-						SelectObject(hdc, hFontOld);
-					}
-					else if (CommDlgExtendedError()) {
-						LoadString(Globals.hInstance, IDS_FONT_SEL_DLG_NAME, dlg_name, BUFFER_LEN);
-						LoadString(Globals.hInstance, IDS_FONT_SEL_ERROR, dlg_info, BUFFER_LEN);
-						MessageBox(hwnd, dlg_info, dlg_name, MB_OK);
-					}
-
-					ReleaseDC(hwnd, hdc);
-					break;
-				}
+				case ID_SELECT_FONT:
+                                        choose_font(hwnd);
+                                        break;
 
 				case ID_VIEW_TOOL_BAR:
 					toggle_child(hwnd, cmd, Globals.htoolbar);
@@ -2472,7 +2476,7 @@ static LRESULT CALLBACK FrameWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM
 					child = alloc_child_window(path, NULL, hwnd);
 
 					if (!create_child_window(child))
-						free(child);
+						HeapFree(GetProcessHeap(), 0, child);
 					break;}
 #endif
 #ifdef _SHELL_FOLDERS
@@ -2487,7 +2491,7 @@ static LRESULT CALLBACK FrameWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM
 					child = alloc_child_window(path, get_path_pidl(path,hwnd), hwnd);
 
 					if (!create_child_window(child))
-						free(child);
+						HeapFree(GetProcessHeap(), 0, child);
 					break;}
 #endif
 #endif
@@ -2642,19 +2646,18 @@ static HWND create_header(HWND parent, Pane* pane, int id)
 
 static void init_output(HWND hwnd)
 {
-	static const TCHAR s1000[] = {'1','0','0','0','\0'};
-
-	TCHAR b[16];
+	static const WCHAR s1000[] = {'1','0','0','0','\0'};
+	WCHAR b[16];
 	HFONT old_font;
 	HDC hdc = GetDC(hwnd);
 
-	if (GetNumberFormat(LOCALE_USER_DEFAULT, 0, s1000, 0, b, 16) > 4)
+	if (GetNumberFormatW(LOCALE_USER_DEFAULT, 0, s1000, 0, b, 16) > 4)
 		Globals.num_sep = b[1];
 	else
 		Globals.num_sep = '.';
 
 	old_font = SelectObject(hdc, Globals.hfont);
-	GetTextExtentPoint32(hdc, sSpace, 1, &Globals.spaceSize);
+	GetTextExtentPoint32W(hdc, sSpace, 1, &Globals.spaceSize);
 	SelectObject(hdc, old_font);
 	ReleaseDC(hwnd, hdc);
 }
@@ -4434,7 +4437,7 @@ static LRESULT CALLBACK ChildWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM
 					ChildWnd* new_child = alloc_child_window(child->path, NULL, hwnd);
 
 					if (!create_child_window(new_child))
-						free(new_child);
+						HeapFree(GetProcessHeap(), 0, new_child);
 
 					break;}
 
@@ -4860,7 +4863,7 @@ static void show_frame(HWND hwndParent, int cmdshow, LPCTSTR path)
 	child->pos.rcNormalPosition.bottom = 280;
 
 	if (!create_child_window(child))
-		free(child);
+		HeapFree(GetProcessHeap(), 0, child);
 
 	SetWindowPlacement(child->hwnd, &child->pos);
 

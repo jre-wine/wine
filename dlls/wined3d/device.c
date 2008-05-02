@@ -192,33 +192,11 @@ static ULONG WINAPI IWineD3DDeviceImpl_Release(IWineD3DDevice *iface) {
             GL_EXTCALL(glDeleteFramebuffersEXT(1, &This->dst_fbo));
         }
 
-        HeapFree(GetProcessHeap(), 0, This->render_targets);
-        HeapFree(GetProcessHeap(), 0, This->fbo_color_attachments);
-        HeapFree(GetProcessHeap(), 0, This->draw_buffers);
-
         if (This->glsl_program_lookup) hash_table_destroy(This->glsl_program_lookup);
 
         /* TODO: Clean up all the surfaces and textures! */
         /* NOTE: You must release the parent if the object was created via a callback
         ** ***************************/
-
-        /* Release the update stateblock */
-        if(IWineD3DStateBlock_Release((IWineD3DStateBlock *)This->updateStateBlock) > 0){
-            if(This->updateStateBlock != This->stateBlock)
-                FIXME("(%p) Something's still holding the Update stateblock\n",This);
-        }
-        This->updateStateBlock = NULL;
-        { /* because were not doing proper internal refcounts releasing the primary state block
-            causes recursion with the extra checks in ResourceReleased, to avoid this we have
-            to set this->stateBlock = NULL; first */
-            IWineD3DStateBlock *stateBlock = (IWineD3DStateBlock *)This->stateBlock;
-            This->stateBlock = NULL;
-
-            /* Release the stateblock */
-            if(IWineD3DStateBlock_Release(stateBlock) > 0){
-                    FIXME("(%p) Something's still holding the Update stateblock\n",This);
-            }
-        }
 
         if (This->resources != NULL ) {
             FIXME("(%p) Device released with resources still bound, acceptable but unexpected\n", This);
@@ -597,7 +575,6 @@ If this flag is set, the contents of the depth stencil buffer will be invalid af
 static HRESULT  WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface, UINT Width, UINT Height, WINED3DFORMAT Format, BOOL Lockable, BOOL Discard, UINT Level, IWineD3DSurface **ppSurface,WINED3DRESOURCETYPE Type, DWORD Usage, WINED3DPOOL Pool, WINED3DMULTISAMPLE_TYPE MultiSample ,DWORD MultisampleQuality, HANDLE* pSharedHandle, WINED3DSURFTYPE Impl, IUnknown *parent) {
     IWineD3DDeviceImpl  *This = (IWineD3DDeviceImpl *)iface;    
     IWineD3DSurfaceImpl *object; /*NOTE: impl ref allowed since this is a create function */
-    unsigned int pow2Width, pow2Height;
     unsigned int Size       = 1;
     const PixelFormatDesc *tableEntry = getFormatDescEntry(Format);
     TRACE("(%p) Create surface\n",This);
@@ -638,27 +615,6 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface, U
     *    by the device.
       *******************************/
 
-    /* Non-power2 support */
-    if (GL_SUPPORT(ARB_TEXTURE_NON_POWER_OF_TWO)) {
-        pow2Width = Width;
-        pow2Height = Height;
-    } else {
-        /* Find the nearest pow2 match */
-        pow2Width = pow2Height = 1;
-        while (pow2Width < Width) pow2Width <<= 1;
-        while (pow2Height < Height) pow2Height <<= 1;
-    }
-
-    if (pow2Width > Width || pow2Height > Height) {
-         /** TODO: add support for non power two compressed textures (OpenGL 2 provices support for * non-power-two textures gratis) **/
-        if (Format == WINED3DFMT_DXT1 || Format == WINED3DFMT_DXT2 || Format == WINED3DFMT_DXT3
-               || Format == WINED3DFMT_DXT4 || Format == WINED3DFMT_DXT5) {
-            FIXME("(%p) Compressed non-power-two textures are not supported w(%d) h(%d)\n",
-                    This, Width, Height);
-            return WINED3DERR_NOTAVAILABLE;
-        }
-    }
-
     /** DXTn mipmaps use the same number of 'levels' down to eg. 8x1, but since
      *  it is based around 4x4 pixel blocks it requires padding, so allocate enough
      *  space!
@@ -697,13 +653,8 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface, U
     object->glDescription.level            = Level;
     object->glDescription.target           = GL_TEXTURE_2D;
 
-    /* Internal data */
-    object->pow2Width  = pow2Width;
-    object->pow2Height = pow2Height;
-
     /* Flags */
     object->Flags      = 0;
-    object->Flags     |= (pow2Width != Width || pow2Height != Height) ? SFLAG_NONPOW2 : 0;
     object->Flags     |= Discard ? SFLAG_DISCARD : 0;
     object->Flags     |= (WINED3DFMT_D16_LOCKABLE == Format) ? SFLAG_LOCKABLE : 0;
     object->Flags     |= Lockable ? SFLAG_LOCKABLE : 0;
@@ -765,7 +716,13 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface, U
     /* Look at the implementation and set the correct Vtable */
     switch(Impl) {
         case SURFACE_OPENGL:
-            /* Nothing to do, it's set already */
+            /* Check if a 3D adapter is available when creating gl surfaces */
+            if(!This->adapter) {
+                ERR("OpenGL surfaces are not available without opengl\n");
+                HeapFree(GetProcessHeap(), 0, object->resource.allocatedMemory);
+                HeapFree(GetProcessHeap(), 0, object);
+                return WINED3DERR_NOTAVAILABLE;
+            }
             break;
 
         case SURFACE_GDI:
@@ -1809,6 +1766,28 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
 
     /* TODO: Test if OpenGL is compiled in and loaded */
 
+    TRACE("(%p) : Creating stateblock\n", This);
+    /* Creating the startup stateBlock - Note Special Case: 0 => Don't fill in yet! */
+    hr = IWineD3DDevice_CreateStateBlock(iface,
+                                         WINED3DSBT_INIT,
+                                         (IWineD3DStateBlock **)&This->stateBlock,
+                                         NULL);
+    if (WINED3D_OK != hr) {   /* Note: No parent needed for initial internal stateblock */
+        WARN("Failed to create stateblock\n");
+        return hr;
+    }
+    TRACE("(%p) : Created stateblock (%p)\n", This, This->stateBlock);
+    This->updateStateBlock = This->stateBlock;
+    IWineD3DStateBlock_AddRef((IWineD3DStateBlock*)This->updateStateBlock);
+
+    hr = allocate_shader_constants(This->updateStateBlock);
+    if (WINED3D_OK != hr)
+        return hr;
+
+    This->render_targets = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IWineD3DSurface *) * GL_LIMITS(buffers));
+    This->fbo_color_attachments = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IWineD3DSurface *) * GL_LIMITS(buffers));
+    This->draw_buffers = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(GLenum) * GL_LIMITS(buffers));
+
     /* Initialize the texture unit mapping to a 1:1 mapping */
     for (state = 0; state < MAX_COMBINED_SAMPLERS; ++state) {
         if (state < GL_LIMITS(fragment_samplers)) {
@@ -1990,6 +1969,33 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Uninit3D(IWineD3DDevice *iface, D3DCB_D
     HeapFree(GetProcessHeap(), 0, This->swapchains);
     This->swapchains = NULL;
     This->NumberOfSwapChains = 0;
+
+    /* Release the update stateblock */
+    if(IWineD3DStateBlock_Release((IWineD3DStateBlock *)This->updateStateBlock) > 0){
+        if(This->updateStateBlock != This->stateBlock)
+            FIXME("(%p) Something's still holding the Update stateblock\n",This);
+    }
+    This->updateStateBlock = NULL;
+
+    { /* because were not doing proper internal refcounts releasing the primary state block
+        causes recursion with the extra checks in ResourceReleased, to avoid this we have
+        to set this->stateBlock = NULL; first */
+        IWineD3DStateBlock *stateBlock = (IWineD3DStateBlock *)This->stateBlock;
+        This->stateBlock = NULL;
+
+        /* Release the stateblock */
+        if(IWineD3DStateBlock_Release(stateBlock) > 0){
+            FIXME("(%p) Something's still holding the Update stateblock\n",This);
+        }
+    }
+
+    HeapFree(GetProcessHeap(), 0, This->render_targets);
+    HeapFree(GetProcessHeap(), 0, This->fbo_color_attachments);
+    HeapFree(GetProcessHeap(), 0, This->draw_buffers);
+    This->render_targets = NULL;
+    This->fbo_color_attachments = NULL;
+    This->draw_buffers = NULL;
+
 
     This->d3d_initialized = FALSE;
     return WINED3D_OK;
@@ -4503,11 +4509,18 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
     if (!curRect) {
         /* In drawable flag is set below */
 
-        glScissor(This->stateBlock->viewport.X,
-                  (((IWineD3DSurfaceImpl *)This->render_targets[0])->currentDesc.Height -
-                  (This->stateBlock->viewport.Y + This->stateBlock->viewport.Height)),
-                   This->stateBlock->viewport.Width,
-                   This->stateBlock->viewport.Height);
+        if (This->render_offscreen) {
+            glScissor(This->stateBlock->viewport.X,
+                       This->stateBlock->viewport.Y,
+                       This->stateBlock->viewport.Width,
+                       This->stateBlock->viewport.Height);
+        } else {
+            glScissor(This->stateBlock->viewport.X,
+                      (((IWineD3DSurfaceImpl *)This->render_targets[0])->currentDesc.Height -
+                      (This->stateBlock->viewport.Y + This->stateBlock->viewport.Height)),
+                       This->stateBlock->viewport.Width,
+                       This->stateBlock->viewport.Height);
+        }
         checkGLcall("glScissor");
         glClear(glMask);
         checkGLcall("glClear");
@@ -6424,18 +6437,20 @@ static void WINAPI IWineD3DDeviceImpl_ResourceReleased(IWineD3DDevice *iface, IW
         case WINED3DRTYPE_SURFACE: {
             unsigned int i;
 
-            /* Cleanup any FBO attachments */
-            for (i = 0; i < GL_LIMITS(buffers); ++i) {
-                if (This->fbo_color_attachments[i] == (IWineD3DSurface *)resource) {
-                    bind_fbo(iface, GL_FRAMEBUFFER_EXT, &This->fbo);
-                    set_render_target_fbo(iface, i, NULL);
-                    This->fbo_color_attachments[i] = NULL;
+            /* Cleanup any FBO attachments if d3d is enabled */
+            if(This->d3d_initialized) {
+                for (i = 0; i < GL_LIMITS(buffers); ++i) {
+                    if (This->fbo_color_attachments[i] == (IWineD3DSurface *)resource) {
+                        bind_fbo(iface, GL_FRAMEBUFFER_EXT, &This->fbo);
+                        set_render_target_fbo(iface, i, NULL);
+                        This->fbo_color_attachments[i] = NULL;
+                    }
                 }
-            }
-            if (This->fbo_depth_attachment == (IWineD3DSurface *)resource) {
-                bind_fbo(iface, GL_FRAMEBUFFER_EXT, &This->fbo);
-                set_depth_stencil_fbo(iface, NULL);
-                This->fbo_depth_attachment = NULL;
+                if (This->fbo_depth_attachment == (IWineD3DSurface *)resource) {
+                    bind_fbo(iface, GL_FRAMEBUFFER_EXT, &This->fbo);
+                    set_depth_stencil_fbo(iface, NULL);
+                    This->fbo_depth_attachment = NULL;
+                }
             }
 
             break;
