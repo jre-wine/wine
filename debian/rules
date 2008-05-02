@@ -31,26 +31,6 @@ configure-stamp:
 	dh_testdir
 ifneq ($(DEB_HOST_GNU_CPU), x86_64)
 	CFLAGS="$(CFLAGS)" \
-	ICUUC_LIB="` \
-	(dpkg -s libicu36-dev >/dev/null && \
-	 echo "/usr/lib/libsicuuc.a") || \
-	(dpkg -s libicu34-dev >/dev/null && \
-	 echo "/usr/lib/libsicuuc.a") || \
-	(dpkg -s libicu28-dev >/dev/null && \
-	 echo "/usr/lib/libsicuuc.a") || \
-	(dpkg -s libicu21-dev >/dev/null && \
-	 echo "/usr/lib/libicuuc.a") || \
-	echo ""`" \
-	ICUDATA_LIB="` \
-	(dpkg -s libicu36-dev >/dev/null && \
-	 echo "/usr/lib/libsicudata.a") || \
-	(dpkg -s libicu34-dev >/dev/null && \
-	 echo "/usr/lib/libsicudata.a") || \
-	(dpkg -s libicu28-dev >/dev/null && \
-	 echo "/usr/lib/libsicudata.a") || \
-	(dpkg -s libicu21-dev >/dev/null && \
-	 echo "/usr/lib/libicudata.a") || \
-	echo ""`" \
 	./configure --with-x --enable-opengl --prefix=/usr \
 	--sysconfdir=/etc \
 	--bindir=\$${prefix}/bin \
@@ -238,17 +218,6 @@ endif
 	 echo "jack=, libjack0.71.2-0" >> debian/libwine-jack.substvars) || \
 	(dpkg -s libjack0.50.0-dev >/dev/null && \
 	 echo "jack=, libjack0.50.0-0" >> debian/libwine-jack.substvars) || \
-	true
-
-	# if the distro we're compiling for has ICU, suggest it
-	(dpkg -s libicu36-dev >/dev/null && \
-	 echo "icu=" >> debian/libwine.substvars) || \
-	(dpkg -s libicu34-dev >/dev/null && \
-	 echo "icu=" >> debian/libwine.substvars) || \
-	(dpkg -s libicu28-dev >/dev/null && \
-	 echo "icu=" >> debian/libwine.substvars) || \
-	(dpkg -s libicu21-dev >/dev/null && \
-	 echo "icu=, icu" >> debian/libwine.substvars) || \
 	true
 
 ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM), x86_64-linux-gnu)

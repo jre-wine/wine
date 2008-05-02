@@ -1,3 +1,22 @@
+wine (0.9.40-1) unstable; urgency=low
+
+  * New upstream release 0.9.40.
+    - Many MSHTML improvements.
+    - A few more sound fixes.
+    - Many Direct3D fixes.
+    - Lots of bug fixes.
+  * This version was released Jun 29, 2007.
+  * Some configure.ac source modifications were mysteriously lost in
+    a couple of the previous packages, reinstated them. Interestingly,
+    the corresponding modifications to configure (the generated script)
+    were still there...
+  * Removed some stuff in debian/rules that were supposed to allow
+    building with libicu21-dev, recent changes to Wine's configure
+    script means that won't be possible anymore.
+    Removed libicu21-dev as an allowed build dependency alternative.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 20 Aug 2007 13:43:59 -0400
+
 wine (0.9.39-1) unstable; urgency=low
 
   * New upstream release 0.9.39.
