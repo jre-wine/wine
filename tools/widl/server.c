@@ -46,35 +46,13 @@ static FILE* server;
 static int indent = 0;
 
 
-static int print_server(const char *format, ...)
+static void print_server(const char *format, ...)
 {
     va_list va;
-    int i, r;
-
     va_start(va, format);
-    if (format[0] != '\n')
-        for (i = 0; i < indent; i++)
-            fprintf(server, "    ");
-    r = vfprintf(server, format, va);
+    print(server, indent, format, va);
     va_end(va);
-    return r;
 }
-
-
-static void write_parameters_init(const func_t *func)
-{
-    const var_t *var;
-
-    if (!func->args)
-        return;
-
-    LIST_FOR_EACH_ENTRY( var, func->args, const var_t, entry )
-        if (var->type->type != RPC_FC_BIND_PRIMITIVE)
-            print_server("%s = 0;\n", var->name);
-
-    fprintf(server, "\n");
-}
-
 
 static void write_function_stubs(type_t *iface, unsigned int *proc_offset)
 {
@@ -137,7 +115,7 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset)
         indent--;
         fprintf(server, "\n");
 
-        write_parameters_init(func);
+        write_parameters_init(server, indent, func);
 
         if (explicit_handle_var)
         {
@@ -207,7 +185,7 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset)
                 else
                     fprintf(server, ",\n");
                 print_server("");
-                if (var->array)
+                if (var->type->declarray)
                     fprintf(server, "*");
                 write_name(server, var);
             }
@@ -337,7 +315,7 @@ static void write_stubdescriptor(type_t *iface, int expr_eval_routines)
     print_server("0,\n");
     print_server("0x50100a4, /* MIDL Version 5.1.164 */\n");
     print_server("0,\n");
-    print_server("0,\n");
+    print_server("%s,\n", list_empty(&user_type_list) ? "0" : "UserMarshalRoutines");
     print_server("0,  /* notify & notify_flag routine table */\n");
     print_server("1,  /* Flags */\n");
     print_server("0,  /* Reserved3 */\n");
@@ -454,6 +432,7 @@ void write_server(ifref_list_t *ifaces)
             if (expr_eval_routines)
                 write_expr_eval_routine_list(server, iface->iface->name);
 
+            write_user_quad_list(server);
             write_stubdescriptor(iface->iface, expr_eval_routines);
             write_dispatchtable(iface->iface);
         }

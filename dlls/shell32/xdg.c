@@ -113,7 +113,7 @@ static char *load_path(int path_id)
     
     ret = SHAlloc(strlen(paths[path_id].default_value)+1);
     if (ret != NULL)
-        lstrcpyA(ret, env);
+        lstrcpyA(ret, paths[path_id].default_value);
     return ret;
 }
 
@@ -376,8 +376,8 @@ static int url_encode(const char *value, char *output)
             if (output)
             {
                 *(output++) = '%';
-                *(output++) = hexchars[(unsigned)(*c)/16];
-                *(output++) = hexchars[(unsigned)(*c)%16];
+                *(output++) = hexchars[(unsigned char)*c / 16];
+                *(output++) = hexchars[(unsigned char)*c % 16];
             }
             num_written += 3;
         }

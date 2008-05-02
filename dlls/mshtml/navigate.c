@@ -28,6 +28,7 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
+#include "hlguids.h"
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -404,7 +405,7 @@ static HRESULT WINAPI BindStatusCallback_OnStopBinding(IBindStatusCallback *ifac
         }
     }
 
-    if(This->doc) {
+    if(This->doc && !This->doc->nscontainer) {
         task_t *task = mshtml_alloc(sizeof(task_t));
 
         task->doc = This->doc;
@@ -413,7 +414,7 @@ static HRESULT WINAPI BindStatusCallback_OnStopBinding(IBindStatusCallback *ifac
 
         /*
          * This should be done in the worker thread that parses HTML,
-         * but we don't have such thread (Gecko parses HTML for us).
+         * but we don't have such thread.
          */
         push_task(task);
     }
@@ -744,6 +745,7 @@ void hlink_frame_navigate(HTMLDocument *doc, IHlinkFrame *hlink_frame,
     IBindCtx *bindctx;
     IMoniker *mon;
     IHlink *hlink;
+    HRESULT hr;
 
     callback = create_bscallback(NULL);
 
@@ -754,24 +756,35 @@ void hlink_frame_navigate(HTMLDocument *doc, IHlinkFrame *hlink_frame,
               debugstr_an(callback->post_data, callback->post_data_len));
     }
 
-    CreateAsyncBindCtx(0, STATUSCLB(callback), NULL, &bindctx);
-
-    hlink = Hlink_Create();
-
-    CreateURLMoniker(NULL, uri, &mon);
-    IHlink_SetMonikerReference(hlink, 0, mon, NULL);
-
-    if(hlnf & HLNF_OPENINNEWWINDOW) {
-        static const WCHAR wszBlank[] = {'_','b','l','a','n','k',0};
-        IHlink_SetTargetFrameName(hlink, wszBlank); /* FIXME */
+    hr = CreateAsyncBindCtx(0, STATUSCLB(callback), NULL, &bindctx);
+    if (FAILED(hr)) {
+        IBindStatusCallback_Release(STATUSCLB(callback));
+        return;
     }
 
-    IHlinkFrame_Navigate(hlink_frame, hlnf, bindctx, STATUSCLB(callback), hlink);
+    hr = CoCreateInstance(&CLSID_StdHlink, NULL, CLSCTX_INPROC_SERVER, &IID_IHlink, (LPVOID*)&hlink);
+    if (FAILED(hr)) {
+        IBindCtx_Release(bindctx);
+        IBindStatusCallback_Release(STATUSCLB(callback));
+        return;
+    }
+
+    hr = CreateURLMoniker(NULL, uri, &mon);
+    if (SUCCEEDED(hr)) {
+        IHlink_SetMonikerReference(hlink, 0, mon, NULL);
+
+        if(hlnf & HLNF_OPENINNEWWINDOW) {
+            static const WCHAR wszBlank[] = {'_','b','l','a','n','k',0};
+            IHlink_SetTargetFrameName(hlink, wszBlank); /* FIXME */
+        }
+
+        IHlinkFrame_Navigate(hlink_frame, hlnf, bindctx, STATUSCLB(callback), hlink);
+
+        IMoniker_Release(mon);
+    }
 
     IBindCtx_Release(bindctx);
     IBindStatusCallback_Release(STATUSCLB(callback));
-    IMoniker_Release(mon);
-
 }
 
 HRESULT start_binding(BSCallback *bscallback)
@@ -826,8 +839,10 @@ HRESULT load_stream(BSCallback *bscallback, IStream *stream)
 
     add_nsrequest(bscallback);
 
-    bscallback->nschannel->content = mshtml_alloc(sizeof(text_html));
-    memcpy(bscallback->nschannel->content, text_html, sizeof(text_html));
+    if(bscallback->nschannel) {
+        bscallback->nschannel->content = mshtml_alloc(sizeof(text_html));
+        memcpy(bscallback->nschannel->content, text_html, sizeof(text_html));
+    }
 
     hres = read_stream_data(bscallback, stream);
     IBindStatusCallback_OnStopBinding(STATUSCLB(bscallback), hres, ERROR_SUCCESS);

@@ -51,18 +51,12 @@ static int indent = 0;
 
 /* FIXME: support generation of stubless proxies */
 
-static int print_proxy( const char *format, ... )
+static void print_proxy( const char *format, ... )
 {
   va_list va;
-  int i, r;
-
   va_start( va, format );
-  if ( format[0] != '\n' )
-    for( i=0; i<indent; i++ )
-      fprintf( proxy, "    " );
-  r = vfprintf( proxy, format, va );
+  print( proxy, indent, format, va );
   va_end( va );
-  return r;
 }
 
 static void write_stubdescproto(void)
@@ -85,7 +79,7 @@ static void write_stubdesc(void)
   print_proxy( "0,\n");
   print_proxy( "0x50100a4, /* MIDL Version 5.1.164 */\n");
   print_proxy( "0,\n");
-  print_proxy( "0,\n");
+  print_proxy("%s,\n", list_empty(&user_type_list) ? "0" : "UserMarshalRoutines");
   print_proxy( "0,  /* notify & notify_flag routine table */\n");
   print_proxy( "1,  /* Flags */\n");
   print_proxy( "0,  /* Reserved3 */\n");
@@ -261,7 +255,7 @@ static void gen_proxy(type_t *iface, const func_t *cur, int idx,
   int has_ret = !is_void(def->type);
 
   indent = 0;
-  write_type(proxy, def->type);
+  write_type_left(proxy, def->type);
   print_proxy( " STDMETHODCALLTYPE %s_", iface->name);
   write_name(proxy, def);
   print_proxy( "_Proxy(\n");
@@ -272,7 +266,7 @@ static void gen_proxy(type_t *iface, const func_t *cur, int idx,
   /* local variables */
   if (has_ret) {
     print_proxy( "" );
-    write_type(proxy, def->type);
+    write_type_left(proxy, def->type);
     print_proxy( " _RetVal;\n");
   }
   print_proxy( "RPC_MESSAGE _RpcMessage;\n" );
@@ -373,9 +367,7 @@ static void gen_stub(type_t *iface, const func_t *cur, const char *cas,
   print_proxy("NdrStubInitialize(_pRpcMessage, &_StubMsg, &Object_StubDesc, _pRpcChannelBuffer);\n");
   fprintf(proxy, "\n");
 
-  if (cur->args)
-      LIST_FOR_EACH_ENTRY( arg, cur->args, const var_t, entry )
-          print_proxy("%s = 0;\n", arg->name);
+  write_parameters_init(proxy, indent, cur);
 
   print_proxy("RpcTryFinally\n");
   print_proxy("{\n");
@@ -408,7 +400,7 @@ static void gen_stub(type_t *iface, const func_t *cur, const char *cas,
       LIST_FOR_EACH_ENTRY( arg, cur->args, const var_t, entry )
       {
           fprintf(proxy, ", ");
-          if (arg->array)
+          if (arg->type->declarray)
               fprintf(proxy, "*");
           write_name(proxy, arg);
       }
@@ -507,7 +499,7 @@ static void write_proxy(type_t *iface, unsigned int *proc_offset)
       if (cname) {
           const func_t *m;
           LIST_FOR_EACH_ENTRY( m, iface->funcs, const func_t, entry )
-              if (!strcmp(get_name(m->def), cname))
+              if (!strcmp(m->def->name, cname))
               {
                   idx = m->idx;
                   break;
@@ -589,6 +581,7 @@ void write_proxies(ifref_list_t *ifaces)
           if (is_object(cur->iface->attrs) && !is_local(cur->iface->attrs))
               write_proxy(cur->iface, &proc_offset);
 
+  write_user_quad_list(proxy);
   write_stubdesc();
 
   print_proxy( "#if !defined(__RPC_WIN32__)\n");

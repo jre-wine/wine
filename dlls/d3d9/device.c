@@ -910,16 +910,14 @@ static HRESULT  WINAPI  IDirect3DDevice9Impl_GetStreamSourceFreq(LPDIRECT3DDEVIC
 static HRESULT  WINAPI  IDirect3DDevice9Impl_SetIndices(LPDIRECT3DDEVICE9 iface, IDirect3DIndexBuffer9* pIndexData) {
     IDirect3DDevice9Impl *This = (IDirect3DDevice9Impl *)iface;
     TRACE("(%p) Relay\n", This);
-    return IWineD3DDevice_SetIndices(This->WineD3DDevice, 
-                                     pIndexData==NULL ? NULL:((IDirect3DIndexBuffer9Impl *)pIndexData)->wineD3DIndexBuffer, 
-                                     0);
+    return IWineD3DDevice_SetIndices(This->WineD3DDevice,
+            pIndexData ? ((IDirect3DIndexBuffer9Impl *)pIndexData)->wineD3DIndexBuffer : NULL);
 }
 
 static HRESULT  WINAPI  IDirect3DDevice9Impl_GetIndices(LPDIRECT3DDEVICE9 iface, IDirect3DIndexBuffer9 **ppIndexData) {
     IDirect3DDevice9Impl *This = (IDirect3DDevice9Impl *)iface;
     IWineD3DIndexBuffer *retIndexData = NULL;
     HRESULT rc = D3D_OK;
-    UINT tmp;
 
     TRACE("(%p) Relay\n", This);
 
@@ -927,12 +925,12 @@ static HRESULT  WINAPI  IDirect3DDevice9Impl_GetIndices(LPDIRECT3DDEVICE9 iface,
         return D3DERR_INVALIDCALL;
     }
 
-    rc = IWineD3DDevice_GetIndices(This->WineD3DDevice, &retIndexData, &tmp);
-    if (rc == D3D_OK && NULL != retIndexData) {
+    rc = IWineD3DDevice_GetIndices(This->WineD3DDevice, &retIndexData);
+    if (SUCCEEDED(rc) && retIndexData) {
         IWineD3DIndexBuffer_GetParent(retIndexData, (IUnknown **)ppIndexData);
         IWineD3DIndexBuffer_Release(retIndexData);
-    }else{
-        if(rc != D3D_OK)  FIXME("Call to GetIndices failed\n");
+    } else {
+        if (FAILED(rc)) FIXME("Call to GetIndices failed\n");
         *ppIndexData = NULL;
     }
     return rc;

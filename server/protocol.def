@@ -177,7 +177,6 @@ typedef struct
     void           *iosb;          /* I/O status block in client addr space */
     void           *arg;           /* opaque user data to pass to callback */
     void           *apc;           /* user apc to call */
-    void           *apc_arg;       /* argument for user apc */
     obj_handle_t    event;         /* event to signal when done */
 } async_data_t;
 
@@ -2912,4 +2911,11 @@ enum message_type
     data_size_t  in_size;         /* total needed input size */
     data_size_t  out_size;        /* needed output size */
     VARARG(next_data,bytes);      /* input data of the next ioctl */
+@END
+
+
+/* Make the current process a system process */
+@REQ(make_process_system)
+@REPLY
+    obj_handle_t event;           /* event signaled when all user processes have exited */
 @END

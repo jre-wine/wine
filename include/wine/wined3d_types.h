@@ -1561,6 +1561,13 @@ typedef enum _WINED3DSURFTYPE {
 #define WINED3DCREATE_DISABLE_DRIVER_MANAGEMENT     0x00000100
 #define WINED3DCREATE_ADAPTERGROUP_DEVICE           0x00000200
 
+/* VTF defines */
+#define WINED3DDMAPSAMPLER              0x100
+#define WINED3DVERTEXTEXTURESAMPLER0    (WINED3DDMAPSAMPLER + 1)
+#define WINED3DVERTEXTEXTURESAMPLER1    (WINED3DDMAPSAMPLER + 2)
+#define WINED3DVERTEXTEXTURESAMPLER2    (WINED3DDMAPSAMPLER + 3)
+#define WINED3DVERTEXTEXTURESAMPLER3    (WINED3DDMAPSAMPLER + 4)
+
 /* DirectDraw types */
 
 typedef struct _WINEDDCOLORKEY
@@ -1751,5 +1758,16 @@ typedef struct _WINEDDOVERLAYFX
 /* dwFlags for GetFlipStatus */
 #define WINEDDGFS_CANFLIP                       1L
 #define WINEDDGFS_ISFLIPDONE                    2L
+
+/* dwFlags for Flip */
+#define WINEDDFLIP_WAIT                         0x00000001
+#define WINEDDFLIP_EVEN                         0x00000002 /* only valid for overlay */
+#define WINEDDFLIP_ODD                          0x00000004 /* only valid for overlay */
+#define WINEDDFLIP_NOVSYNC                      0x00000008
+#define WINEDDFLIP_STEREO                       0x00000010
+#define WINEDDFLIP_DONOTWAIT                    0x00000020
+#define WINEDDFLIP_INTERVAL2                    0x02000000
+#define WINEDDFLIP_INTERVAL3                    0x03000000
+#define WINEDDFLIP_INTERVAL4                    0x04000000
 
 #endif

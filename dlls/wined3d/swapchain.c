@@ -53,6 +53,7 @@ static inline Display *get_display( HDC hdc )
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(fps);
 
+#define GLINFO_LOCATION This->wineD3DDevice->adapter->gl_info
 
 /* IDirect3DSwapChain IUnknown parts follow: */
 static ULONG WINAPI IWineD3DSwapChainImpl_AddRef(IWineD3DSwapChain *iface) {
@@ -147,7 +148,8 @@ static void WINAPI IWineD3DSwapChainImpl_Destroy(IWineD3DSwapChain *iface, D3DCB
 
 static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CONST RECT *pSourceRect, CONST RECT *pDestRect, HWND hDestWindowOverride, CONST RGNDATA *pDirtyRegion, DWORD dwFlags) {
     IWineD3DSwapChainImpl *This = (IWineD3DSwapChainImpl *)iface;
-    DWORD clear_flags = 0;
+    unsigned int sync;
+    int retval;
 
     ENTER_GL();
 
@@ -295,22 +297,11 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
 
     LEAVE_GL();
 
-    if (This->wineD3DDevice->stencilBufferTarget) {
-        clear_flags |= WINED3DCLEAR_STENCIL|WINED3DCLEAR_ZBUFFER;
-    }
-
-    /* Although this is not strictly required, a simple demo showed this does occur
-       on (at least non-debug) d3d                                                  */
     if (This->presentParms.SwapEffect == WINED3DSWAPEFFECT_DISCARD) {
+        TRACE("Clearing the color buffer with pink color\n");
 
-        TRACE("Clearing\n");
-
-        IWineD3DDevice_Clear((IWineD3DDevice*)This->wineD3DDevice, 0, NULL, clear_flags|WINED3DCLEAR_TARGET, 0x00, 1.0, 0);
-
-    } else if (clear_flags) {
-        TRACE("Clearing z/stencil buffer\n");
-
-        IWineD3DDevice_Clear((IWineD3DDevice*)This->wineD3DDevice, 0, NULL, clear_flags, 0x00, 1.0, 0);
+        IWineD3DDevice_Clear((IWineD3DDevice*)This->wineD3DDevice, 0, NULL,
+                              WINED3DCLEAR_TARGET, 0xff00ffff, 1.0, 0);
     }
 
     if(((IWineD3DSurfaceImpl *) This->frontBuffer)->Flags   & SFLAG_INSYSMEM ||
@@ -321,52 +312,98 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
         BOOL frontuptodate = front->Flags & SFLAG_INSYSMEM;
         BOOL backuptodate = back->Flags & SFLAG_INSYSMEM;
 
-        /* Flip the DC */
-        {
-            HDC tmp;
-            tmp = front->hDC;
-            front->hDC = back->hDC;
-            back->hDC = tmp;
+        if(front->resource.size == back->resource.size) {
+            /* Flip the DC */
+            {
+                HDC tmp;
+                tmp = front->hDC;
+                front->hDC = back->hDC;
+                back->hDC = tmp;
+            }
+
+            /* Flip the DIBsection */
+            {
+                HBITMAP tmp;
+                BOOL hasDib = front->Flags & SFLAG_DIBSECTION;
+                tmp = front->dib.DIBsection;
+                front->dib.DIBsection = back->dib.DIBsection;
+                back->dib.DIBsection = tmp;
+
+                if(back->Flags & SFLAG_DIBSECTION) front->Flags |= SFLAG_DIBSECTION;
+                else front->Flags &= ~SFLAG_DIBSECTION;
+                if(hasDib) back->Flags |= SFLAG_DIBSECTION;
+                else back->Flags &= ~SFLAG_DIBSECTION;
+            }
+
+            /* Flip the surface data */
+            {
+                void* tmp;
+
+                tmp = front->dib.bitmap_data;
+                front->dib.bitmap_data = back->dib.bitmap_data;
+                back->dib.bitmap_data = tmp;
+
+                tmp = front->resource.allocatedMemory;
+                front->resource.allocatedMemory = back->resource.allocatedMemory;
+                back->resource.allocatedMemory = tmp;
+            }
+
+            /* client_memory should not be different, but just in case */
+            {
+                BOOL tmp;
+                tmp = front->dib.client_memory;
+                front->dib.client_memory = back->dib.client_memory;
+                back->dib.client_memory = tmp;
+            }
+            if(frontuptodate) back->Flags |= SFLAG_INSYSMEM;
+            else back->Flags &= ~SFLAG_INSYSMEM;
+            if(backuptodate) front->Flags |= SFLAG_INSYSMEM;
+            else front->Flags &= ~SFLAG_INSYSMEM;
+        } else {
+            back->Flags &= ~SFLAG_INSYSMEM;
+            front->Flags &= ~SFLAG_INSYSMEM;
+        }
+    }
+
+    if(This->presentParms.PresentationInterval != WINED3DPRESENT_INTERVAL_IMMEDIATE && GL_SUPPORT(SGI_VIDEO_SYNC)) {
+        retval = GL_EXTCALL(glXGetVideoSyncSGI(&sync));
+        if(retval != 0) {
+            ERR("glXGetVideoSyncSGI failed(retval = %d\n", retval);
         }
 
-        /* Flip the DIBsection */
-        {
-            HBITMAP tmp;
-            BOOL hasDib = front->Flags & SFLAG_DIBSECTION;
-            tmp = front->dib.DIBsection;
-            front->dib.DIBsection = back->dib.DIBsection;
-            back->dib.DIBsection = tmp;
-
-            if(back->Flags & SFLAG_DIBSECTION) front->Flags |= SFLAG_DIBSECTION;
-            else front->Flags &= ~SFLAG_DIBSECTION;
-            if(hasDib) back->Flags |= SFLAG_DIBSECTION;
-            else back->Flags &= ~SFLAG_DIBSECTION;
+        switch(This->presentParms.PresentationInterval) {
+            case WINED3DPRESENT_INTERVAL_DEFAULT:
+            case WINED3DPRESENT_INTERVAL_ONE:
+                if(sync <= This->vSyncCounter) {
+                    retval = GL_EXTCALL(glXWaitVideoSyncSGI(1, 0, &This->vSyncCounter));
+                } else {
+                    This->vSyncCounter = sync;
+                }
+                break;
+            case WINED3DPRESENT_INTERVAL_TWO:
+                if(sync <= This->vSyncCounter + 1) {
+                    retval = GL_EXTCALL(glXWaitVideoSyncSGI(2, This->vSyncCounter & 0x1, &This->vSyncCounter));
+                } else {
+                    This->vSyncCounter = sync;
+                }
+                break;
+            case WINED3DPRESENT_INTERVAL_THREE:
+                if(sync <= This->vSyncCounter + 2) {
+                    retval = GL_EXTCALL(glXWaitVideoSyncSGI(3, This->vSyncCounter % 0x3, &This->vSyncCounter));
+                } else {
+                    This->vSyncCounter = sync;
+                }
+                break;
+            case WINED3DPRESENT_INTERVAL_FOUR:
+                if(sync <= This->vSyncCounter + 3) {
+                    retval = GL_EXTCALL(glXWaitVideoSyncSGI(4, This->vSyncCounter & 0x3, &This->vSyncCounter));
+                } else {
+                    This->vSyncCounter = sync;
+                }
+                break;
+            default:
+                FIXME("Unknown presentation interval %08x\n", This->presentParms.PresentationInterval);
         }
-
-        /* Flip the surface data */
-        {
-            void* tmp;
-
-            tmp = front->dib.bitmap_data;
-            front->dib.bitmap_data = back->dib.bitmap_data;
-            back->dib.bitmap_data = tmp;
-
-            tmp = front->resource.allocatedMemory;
-            front->resource.allocatedMemory = back->resource.allocatedMemory;
-            back->resource.allocatedMemory = tmp;
-        }
-
-        /* client_memory should not be different, but just in case */
-        {
-            BOOL tmp;
-            tmp = front->dib.client_memory;
-            front->dib.client_memory = back->dib.client_memory;
-            back->dib.client_memory = tmp;
-        }
-        if(frontuptodate) back->Flags |= SFLAG_INSYSMEM;
-        else back->Flags &= ~SFLAG_INSYSMEM;
-        if(backuptodate) front->Flags |= SFLAG_INSYSMEM;
-        else front->Flags &= ~SFLAG_INSYSMEM;
     }
 
     TRACE("returning\n");

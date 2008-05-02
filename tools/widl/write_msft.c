@@ -1071,6 +1071,45 @@ static int encode_var(
     chat("encode_var: var %p type %p type->name %s type->ref %p\n",
          var, type, type->name ? type->name : "NULL", type->ref);
 
+    if (type->declarray) {
+        int num_dims, elements = 1, arrayoffset;
+        type_t *atype;
+        int *arraydata;
+
+        num_dims = 0;
+        for (atype = type; atype->declarray; atype = atype->ref)
+            ++num_dims;
+
+        chat("array with %d dimensions\n", num_dims);
+        encode_var(typelib, atype, var, &target_type, width, alignment, NULL);
+        arrayoffset = ctl2_alloc_segment(typelib, MSFT_SEG_ARRAYDESC, (2 + 2 * num_dims) * sizeof(long), 0);
+        arraydata = (void *)&typelib->typelib_segment_data[MSFT_SEG_ARRAYDESC][arrayoffset];
+
+        arraydata[0] = target_type;
+        arraydata[1] = num_dims;
+        arraydata[1] |= ((num_dims * 2 * sizeof(long)) << 16);
+
+        arraydata += 2;
+        for (atype = type; atype->declarray; atype = atype->ref)
+        {
+            arraydata[0] = atype->dim;
+            arraydata[1] = 0;
+            arraydata += 2;
+            elements *= atype->dim;
+        }
+
+        typeoffset = ctl2_alloc_segment(typelib, MSFT_SEG_TYPEDESC, 8, 0);
+        typedata = (void *)&typelib->typelib_segment_data[MSFT_SEG_TYPEDESC][typeoffset];
+
+        typedata[0] = (0x7ffe << 16) | VT_CARRAY;
+        typedata[1] = arrayoffset;
+
+        *encoded_type = typeoffset;
+        *width = *width * elements;
+        *decoded_size = 20 /*sizeof(ARRAYDESC)*/ + (num_dims - 1) * 8 /*sizeof(SAFEARRAYBOUND)*/;
+        return 0;
+    }
+
     vt = get_type_vt(type);
     if (vt == VT_PTR) {
         int skip_ptr = encode_var(typelib, type->ref, var, &target_type, NULL, NULL, &child_size);
@@ -1114,44 +1153,6 @@ static int encode_var(
         return 0;
     }
 
-    if(var->array) {
-        expr_t *dim;
-        array_dims_t *array_save;
-        int num_dims = list_count( var->array ), elements = 1, arrayoffset;
-        int *arraydata;
-
-        chat("array with %d dimensions\n", num_dims);
-        array_save = var->array;
-        var->array = NULL;
-	encode_var(typelib, type, var, &target_type, width, alignment, NULL);
-        var->array = array_save;
-	arrayoffset = ctl2_alloc_segment(typelib, MSFT_SEG_ARRAYDESC, (2 + 2 * num_dims) * sizeof(long), 0);
-	arraydata = (void *)&typelib->typelib_segment_data[MSFT_SEG_ARRAYDESC][arrayoffset];
-
-	arraydata[0] = target_type;
-        arraydata[1] = num_dims;
-        arraydata[1] |= ((num_dims * 2 * sizeof(long)) << 16);
-
-        arraydata += 2;
-        LIST_FOR_EACH_ENTRY( dim, var->array, expr_t, entry )
-        {
-            arraydata[0] = dim->cval;
-            arraydata[1] = 0;
-            arraydata += 2;
-            elements *= dim->cval;
-        }
-
-	typeoffset = ctl2_alloc_segment(typelib, MSFT_SEG_TYPEDESC, 8, 0);
-	typedata = (void *)&typelib->typelib_segment_data[MSFT_SEG_TYPEDESC][typeoffset];
-
-	typedata[0] = (0x7ffe << 16) | VT_CARRAY;
-	typedata[1] = arrayoffset;
-
-	*encoded_type = typeoffset;
-	*width = *width * elements;
-	*decoded_size = 20 /*sizeof(ARRAYDESC)*/ + (num_dims - 1) * 8 /*sizeof(SAFEARRAYBOUND)*/;
-        return 0;
-    }
     dump_type(type);
 
     encode_type(typelib, vt, type, encoded_type, width, alignment, decoded_size);
@@ -1247,7 +1248,7 @@ static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, const func_t *func, int 
     int *typedata, typedata_size;
     int i, id, next_idx;
     int decoded_size, extra_attr = 0;
-    int num_params = 0, num_defaults = 0;
+    int num_params = 0, num_optional = 0, num_defaults = 0;
     var_t *arg;
     char *namedata;
     const attr_t *attr;
@@ -1282,10 +1283,10 @@ static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, const func_t *func, int 
       {
         num_params++;
         if (arg->attrs) LIST_FOR_EACH_ENTRY( attr, arg->attrs, const attr_t, entry ) {
-            if(attr->type == ATTR_DEFAULTVALUE_EXPR || attr->type == ATTR_DEFAULTVALUE_STRING) {
+            if(attr->type == ATTR_DEFAULTVALUE_EXPR || attr->type == ATTR_DEFAULTVALUE_STRING)
                 num_defaults++;
-                break;
-            }
+            else if(attr->type == ATTR_OPTIONAL)
+                num_optional++;
         }
       }
 
@@ -1340,6 +1341,12 @@ static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, const func_t *func, int 
         case ATTR_BINDABLE:
             funcflags |= 0x4; /* FUNCFLAG_BINDABLE */
             break;
+        case ATTR_VARARG:
+            if (num_optional || num_defaults)
+                warning("add_func_desc: ignoring vararg in function with optional or defaultvalue params\n");
+            else
+                num_optional = -1;
+            break;
         default:
             warning("add_func_desc: ignoring attr %d\n", attr->type);
             break;
@@ -1393,7 +1400,7 @@ static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, const func_t *func, int 
     typedata[4] = (next_idx << 16) | (callconv << 8) | (invokekind << 3) | funckind;
     if(num_defaults) typedata[4] |= 0x1000;
     if(entry_is_ord) typedata[4] |= 0x2000;
-    typedata[5] = num_params;
+    typedata[5] = (num_optional << 16) | num_params;
 
     /* NOTE: High word of typedata[3] is total size of FUNCDESC + size of all ELEMDESCs for params + TYPEDESCs for pointer params and return types. */
     /* That is, total memory allocation required to reconstitute the FUNCDESC in its entirety. */
@@ -1557,7 +1564,7 @@ static HRESULT add_var_desc(msft_typeinfo_t *typeinfo, UINT index, var_t* var)
     char *namedata;
     int var_num = (typeinfo->typeinfo->cElement >> 16) & 0xffff;
 
-    chat("add_var_desc(%d,%s) array %p\n", index, var->name, var->array);
+    chat("add_var_desc(%d, %s)\n", index, var->name);
 
     id = 0x40000000 + index;
 

@@ -113,6 +113,31 @@ static nsIInputStream *get_post_data_stream(IBindCtx *bctx)
     return ret;
 }
 
+void set_current_mon(HTMLDocument *This, IMoniker *mon)
+{
+    HRESULT hres;
+
+    if(This->mon) {
+        IMoniker_Release(This->mon);
+        This->mon = NULL;
+    }
+
+    if(This->url) {
+        SysFreeString(This->url);
+        This->url = NULL;
+    }
+
+    if(!mon)
+        return;
+
+    IMoniker_AddRef(mon);
+    This->mon = mon;
+
+    hres = IMoniker_GetDisplayName(mon, NULL, NULL, &This->url);
+    if(FAILED(hres))
+        WARN("GetDisplayName failed: %08x\n", hres);
+}
+
 static HRESULT set_moniker(HTMLDocument *This, IMoniker *mon, IBindCtx *pibc, BOOL *bind_complete)
 {
     BSCallback *bscallback;
@@ -153,6 +178,7 @@ static HRESULT set_moniker(HTMLDocument *This, IMoniker *mon, IBindCtx *pibc, BO
 
     This->readystate = READYSTATE_LOADING;
     call_property_onchanged(This->cp_propnotif, DISPID_READYSTATE);
+    update_doc(This, UPDATE_TITLE);
 
     HTMLDocument_LockContainer(This, TRUE);
     
@@ -164,24 +190,11 @@ static HRESULT set_moniker(HTMLDocument *This, IMoniker *mon, IBindCtx *pibc, BO
 
     TRACE("got url: %s\n", debugstr_w(url));
 
-    if(This->client) {
-        IOleCommandTarget *cmdtrg = NULL;
-
-        hres = IOleClientSite_QueryInterface(This->client, &IID_IOleCommandTarget,
-                (void**)&cmdtrg);
-        if(SUCCEEDED(hres)) {
-            VARIANT var;
-
-            V_VT(&var) = VT_I4;
-            V_I4(&var) = 0;
-            IOleCommandTarget_Exec(cmdtrg, &CGID_ShellDocView, 37, 0, &var, NULL);
-
-            IOleCommandTarget_Release(cmdtrg);
-        }
-    }
+    set_current_mon(This, mon);
 
     if(This->client) {
         VARIANT silent, offline;
+        IOleCommandTarget *cmdtrg = NULL;
 
         hres = get_client_disp_property(This->client, DISPID_AMBIENT_SILENT, &silent);
         if(SUCCEEDED(hres)) {
@@ -198,6 +211,18 @@ static HRESULT set_moniker(HTMLDocument *This, IMoniker *mon, IBindCtx *pibc, BO
                 WARN("V_VT(offline) = %d\n", V_VT(&silent));
             else if(V_BOOL(&silent))
                 FIXME("offline == true\n");
+        }
+
+        hres = IOleClientSite_QueryInterface(This->client, &IID_IOleCommandTarget,
+                (void**)&cmdtrg);
+        if(SUCCEEDED(hres)) {
+            VARIANT var;
+
+            V_VT(&var) = VT_I4;
+            V_I4(&var) = 0;
+            IOleCommandTarget_Exec(cmdtrg, &CGID_ShellDocView, 37, 0, &var, NULL);
+
+            IOleCommandTarget_Release(cmdtrg);
         }
     }
 
@@ -332,8 +357,10 @@ static HRESULT WINAPI PersistMoniker_GetClassID(IPersistMoniker *iface, CLSID *p
 static HRESULT WINAPI PersistMoniker_IsDirty(IPersistMoniker *iface)
 {
     HTMLDocument *This = PERSISTMON_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)\n", This);
+
+    return IPersistStreamInit_IsDirty(PERSTRINIT(This));
 }
 
 static HRESULT WINAPI PersistMoniker_Load(IPersistMoniker *iface, BOOL fFullyAvailable,
@@ -373,8 +400,15 @@ static HRESULT WINAPI PersistMoniker_SaveCompleted(IPersistMoniker *iface, IMoni
 static HRESULT WINAPI PersistMoniker_GetCurMoniker(IPersistMoniker *iface, IMoniker **ppimkName)
 {
     HTMLDocument *This = PERSISTMON_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, ppimkName);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, ppimkName);
+
+    if(!This->mon)
+        return E_UNEXPECTED;
+
+    IMoniker_AddRef(This->mon);
+    *ppimkName = This->mon;
+    return S_OK;
 }
 
 static const IPersistMonikerVtbl PersistMonikerVtbl = {
@@ -467,8 +501,10 @@ static HRESULT WINAPI PersistFile_GetClassID(IPersistFile *iface, CLSID *pClassI
 static HRESULT WINAPI PersistFile_IsDirty(IPersistFile *iface)
 {
     HTMLDocument *This = PERSISTFILE_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)\n", This);
+
+    return IPersistStreamInit_IsDirty(PERSTRINIT(This));
 }
 
 static HRESULT WINAPI PersistFile_Load(IPersistFile *iface, LPCOLESTR pszFileName, DWORD dwMode)
@@ -560,8 +596,13 @@ static HRESULT WINAPI PersistStreamInit_GetClassID(IPersistStreamInit *iface, CL
 static HRESULT WINAPI PersistStreamInit_IsDirty(IPersistStreamInit *iface)
 {
     HTMLDocument *This = PERSTRINIT_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)\n", This);
+
+    if(This->usermode == EDITMODE)
+        FIXME("Unimplemented in edit mode\n");
+
+    return S_FALSE;
 }
 
 static HRESULT WINAPI PersistStreamInit_Load(IPersistStreamInit *iface, LPSTREAM pStm)
@@ -648,4 +689,6 @@ void HTMLDocument_Persist_Init(HTMLDocument *This)
     This->lpPersistStreamInitVtbl = &PersistStreamInitVtbl;
 
     This->bscallback = NULL;
+    This->mon = NULL;
+    This->url = NULL;
 }

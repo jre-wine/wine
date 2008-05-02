@@ -55,6 +55,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(midi);
 
 #ifdef HAVE_ALSA
 
+#ifndef SND_SEQ_PORT_TYPE_PORT
+#define SND_SEQ_PORT_TYPE_PORT (1<<19)  /* Appears in version 1.0.12rc1 */
+#endif
+
 typedef struct {
     int			state;                  /* -1 disabled, 0 is no recording started, 1 in recording, bit 2 set if in sys exclusive recording */
     DWORD		bufsize;
@@ -574,6 +578,7 @@ static DWORD midAddBuffer(WORD wDevID, LPMIDIHDR lpMidiHdr, DWORD dwSize)
     if (!(lpMidiHdr->dwFlags & MHDR_PREPARED)) return MIDIERR_UNPREPARED;
 
     EnterCriticalSection(&crit_sect);
+    lpMidiHdr->dwFlags |= MHDR_INQUEUE;
     if (MidiInDev[wDevID].lpQueueHdr == 0) {
 	MidiInDev[wDevID].lpQueueHdr = lpMidiHdr;
     } else {
@@ -1255,7 +1260,7 @@ LONG ALSA_MidiInit(void)
 	while (snd_seq_query_next_port(midiSeq, pinfo) >= 0) {
             int cap = snd_seq_port_info_get_capability(pinfo);
 	    int type = snd_seq_port_info_get_type(pinfo);
-	    if (type != SND_SEQ_PORT_TYPE_MIDI_GENERIC)
+	    if (!(type & SND_SEQ_PORT_TYPE_PORT))
 	        ALSA_AddMidiPort(cinfo, pinfo, cap, type);
 	}
     }
@@ -1268,7 +1273,7 @@ LONG ALSA_MidiInit(void)
 	while (snd_seq_query_next_port(midiSeq, pinfo) >= 0) {
             int cap = snd_seq_port_info_get_capability(pinfo);
 	    int type = snd_seq_port_info_get_type(pinfo);
-	    if (type == SND_SEQ_PORT_TYPE_MIDI_GENERIC)
+	    if (type & SND_SEQ_PORT_TYPE_PORT)
 	        ALSA_AddMidiPort(cinfo, pinfo, cap, type);
 	}
     }

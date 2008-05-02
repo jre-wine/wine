@@ -37,6 +37,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
+#define TIMER_ID 0x1000
+
 static const WCHAR wszInternetExplorer_Server[] =
     {'I','n','t','e','r','n','e','t',' ','E','x','p','l','o','r','e','r','_','S','e','r','v','e','r',0};
 
@@ -94,6 +96,74 @@ static void activate_gecko(HTMLDocument *This)
     nsIWebBrowserFocus_Activate(This->nscontainer->focus);
 }
 
+void update_doc(HTMLDocument *This, DWORD flags)
+{
+    if(!This->update && This->hwnd)
+        SetTimer(This->hwnd, TIMER_ID, 100, NULL);
+
+    This->update |= flags;
+}
+
+void update_title(HTMLDocument *This)
+{
+    IOleCommandTarget *olecmd;
+    HRESULT hres;
+
+    if(!(This->update & UPDATE_TITLE))
+        return;
+
+    This->update &= ~UPDATE_TITLE;
+
+    if(!This->client)
+        return;
+
+    hres = IOleClientSite_QueryInterface(This->client, &IID_IOleCommandTarget, (void**)&olecmd);
+    if(SUCCEEDED(hres)) {
+        VARIANT title;
+        WCHAR empty[] = {0};
+
+        V_VT(&title) = VT_BSTR;
+        V_BSTR(&title) = SysAllocString(empty);
+        IOleCommandTarget_Exec(olecmd, NULL, OLECMDID_SETTITLE, OLECMDEXECOPT_DONTPROMPTUSER,
+                               &title, NULL);
+        SysFreeString(V_BSTR(&title));
+
+        IOleCommandTarget_Release(olecmd);
+    }
+}
+
+static LRESULT on_timer(HTMLDocument *This)
+{
+    TRACE("(%p) %x\n", This, This->update);
+
+    KillTimer(This->hwnd, TIMER_ID);
+
+    if(!This->update)
+        return 0;
+
+    if(This->update & UPDATE_UI) {
+        if(This->hostui)
+            IDocHostUIHandler_UpdateUI(This->hostui);
+
+        if(This->client) {
+            IOleCommandTarget *cmdtrg;
+            HRESULT hres;
+
+            hres = IOleClientSite_QueryInterface(This->client, &IID_IOleCommandTarget,
+                                                 (void**)&cmdtrg);
+            if(SUCCEEDED(hres)) {
+                IOleCommandTarget_Exec(cmdtrg, NULL, OLECMDID_UPDATECOMMANDS,
+                                       OLECMDEXECOPT_DONTPROMPTUSER, NULL, NULL);
+                IOleCommandTarget_Release(cmdtrg);
+            }
+        }
+    }
+
+    update_title(This);
+    This->update = 0;
+    return 0;
+}
+
 static LRESULT WINAPI serverwnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     HTMLDocument *This;
@@ -130,6 +200,9 @@ static LRESULT WINAPI serverwnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                          LOWORD(lParam) - 2*ew, HIWORD(lParam) - 2*eh,
                          SWP_NOZORDER | SWP_NOACTIVATE);
         }
+        break;
+    case WM_TIMER:
+        return on_timer(This);
     }
         
     return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -154,6 +227,7 @@ static HRESULT activate_window(HTMLDocument *This)
     IOleInPlaceUIWindow *pIPWnd;
     IOleInPlaceFrame *pIPFrame;
     IOleCommandTarget *cmdtrg;
+    IOleInPlaceSiteEx *ipsiteex;
     RECT posrect, cliprect;
     OLEINPLACEFRAMEINFO frameinfo;
     HWND parent_hwnd;
@@ -211,12 +285,22 @@ static HRESULT activate_window(HTMLDocument *This)
         /* NOTE:
          * Windows implementation calls:
          * RegisterWindowMessage("MSWHEEL_ROLLMSG");
-         * SetTimer(This->hwnd, TIMER_ID, 100, NULL);
          */
+        SetTimer(This->hwnd, TIMER_ID, 100, NULL);
     }
 
     This->in_place_active = TRUE;
-    hres = IOleInPlaceSite_OnInPlaceActivate(This->ipsite);
+    hres = IOleInPlaceSite_QueryInterface(This->ipsite, &IID_IOleInPlaceSiteEx, (void**)&ipsiteex);
+    if(SUCCEEDED(hres)) {
+        BOOL redraw = FALSE;
+
+        hres = IOleInPlaceSiteEx_OnInPlaceActivateEx(ipsiteex, &redraw, 0);
+        IOleInPlaceSiteEx_Release(ipsiteex);
+        if(redraw)
+            FIXME("unsupported redraw\n");
+    }else{
+        hres = IOleInPlaceSite_OnInPlaceActivate(This->ipsite);
+    }
     if(FAILED(hres)) {
         WARN("OnInPlaceActivate failed: %08x\n", hres);
         This->in_place_active = FALSE;
@@ -442,6 +526,7 @@ static HRESULT WINAPI OleDocumentView_Show(IOleDocumentView *iface, BOOL fShow)
             if(FAILED(hres))
                 return hres;
         }
+        update_doc(This, UPDATE_UI);
         ShowWindow(This->hwnd, SW_SHOW);
     }else {
         ShowWindow(This->hwnd, SW_HIDE);
@@ -471,6 +556,8 @@ static HRESULT WINAPI OleDocumentView_UIActivate(IOleDocumentView *iface, BOOL f
             if(FAILED(hres))
                 return hres;
         }
+
+        update_doc(This, UPDATE_UI);
 
         hres = IOleInPlaceSite_OnUIActivate(This->ipsite);
         if(SUCCEEDED(hres)) {
@@ -682,4 +769,6 @@ void HTMLDocument_View_Init(HTMLDocument *This)
     This->in_place_active = FALSE;
     This->ui_active = FALSE;
     This->window_active = FALSE;
+
+    This->update = 0;
 }

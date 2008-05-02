@@ -55,6 +55,15 @@ library WindowsInstaller
         msiInstallStateDefault = 5
     } MsiInstallState;
 
+    typedef enum {
+        msiOpenDatabaseModeReadOnly = 0,
+        msiOpenDatabaseModeTransact = 1,
+        msiOpenDatabaseModeDirect = 2,
+        msiOpenDatabaseModeCreate = 3,
+        msiOpenDatabaseModeCreateDirect = 4,
+        msiOpenDatabaseModePatchFile = 32
+    } MsiOpenDatabaseMode;
+
     [ uuid(000C1090-0000-0000-C000-000000000046) ]
     dispinterface Installer
     {
@@ -67,9 +76,9 @@ library WindowsInstaller
                 [in] VARIANT PackagePath,
                 [in, optional, defaultvalue(0)] long Options);
         [id(DISPID_INSTALLER_OPENDATABASE)]
-		Database *OpenDatabase(
-		    [in] BSTR DatabasePath,
-		    [in] VARIANT OpenMode);
+            Database *OpenDatabase(
+                    [in] BSTR DatabasePath,
+                    [in] VARIANT OpenMode);
         [id(DISPID_INSTALLER_INSTALLPRODUCT)]
             void InstallProduct(
                 [in] BSTR PackagePath,
@@ -148,6 +157,12 @@ library WindowsInstaller
         methods:
         [id(DISPID_SUMMARYINFO_PROPERTY), propget]
             VARIANT Property([in] long Pid);
+        [id(DISPID_SUMMARYINFO_PROPERTY), propput]
+            void Property(
+                [in] long Pid,
+                [in] VARIANT rhs);
+        [id(DISPID_SUMMARYINFO_PROPERTYCOUNT), propget]
+            long PropertyCount();
     }
 
     typedef enum {
@@ -190,7 +205,7 @@ library WindowsInstaller
         methods:
         [id(DISPID_DATABASE_OPENVIEW)]
             View* OpenView([in] BSTR Sql);
-        [id(DISPID_DATABASE_SUMMARYINFORMATION)]
+        [id(DISPID_DATABASE_SUMMARYINFORMATION), propget]
             SummaryInfo *SummaryInformation([in, optional, defaultvalue(0)] long UpdateCount);
     }
 

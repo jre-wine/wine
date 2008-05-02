@@ -46,6 +46,7 @@ typedef struct _typelib_entry_t typelib_entry_t;
 typedef struct _importlib_t importlib_t;
 typedef struct _importinfo_t importinfo_t;
 typedef struct _typelib_t typelib_t;
+typedef struct _user_type_t user_type_t;
 
 typedef struct list attr_list_t;
 typedef struct list str_list_t;
@@ -55,6 +56,7 @@ typedef struct list var_list_t;
 typedef struct list pident_list_t;
 typedef struct list ifref_list_t;
 typedef struct list array_dims_t;
+typedef struct list user_type_list_t;
 
 enum attr_type
 {
@@ -206,9 +208,12 @@ struct _type_t {
   func_list_t *funcs;             /* interfaces and modules */
   var_list_t *fields;             /* interfaces, structures and enumerations */
   ifref_list_t *ifaces;           /* coclasses */
+  unsigned long dim;              /* array dimension */
+  expr_t *size_is, *length_is;
   type_t *orig;                   /* dup'd types */
   unsigned int typestring_offset;
   int typelib_idx;
+  unsigned int declarray : 1;     /* if declared as an array */
   unsigned int ignore : 1;
   unsigned int is_const : 1;
   unsigned int defined : 1;
@@ -220,12 +225,10 @@ struct _type_t {
 
 struct _var_t {
   char *name;
-  array_dims_t *array;
   type_t *type;
   var_list_t *args;  /* for function pointers */
   attr_list_t *attrs;
   expr_t *eval;
-  size_t corrdesc;  /* offset to correlation descriptor (e.g., for unions) */
 
   /* parser-internal */
   struct list entry;
@@ -294,13 +297,24 @@ struct _typelib_t {
     struct list importlibs;
 };
 
+struct _user_type_t {
+    struct list entry;
+    const char *name;
+};
+
+extern user_type_list_t user_type_list;
+void check_for_user_types(const var_list_t *list);
+
 void init_types(void);
 
 type_t *duptype(type_t *t, int dupname);
 type_t *alias(type_t *t, const char *name);
 
 int is_ptr(const type_t *t);
+int is_array(const type_t *t);
 int is_var_ptr(const var_t *v);
 int cant_be_null(const var_t *v);
+int is_struct(unsigned char tc);
+int is_union(unsigned char tc);
 
 #endif

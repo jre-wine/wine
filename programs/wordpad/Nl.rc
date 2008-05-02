@@ -23,8 +23,9 @@ BEGIN
     POPUP "&Bestand"
     BEGIN
         MENUITEM "&Nieuw\tCtrl+N"         ID_FILE_NEW
-        MENUITEM "&Openen\tCtrl+O",       ID_FILE_OPEN
+        MENUITEM "&Openen...\tCtrl+O",    ID_FILE_OPEN
         MENUITEM "O&pslaan\tCtrl+S",      ID_FILE_SAVE
+        MENUITEM "Ops&laan als...",       ID_FILE_SAVEAS
         MENUITEM SEPARATOR
         MENUITEM "&Afsluiten",    ID_FILE_EXIT
     END
@@ -50,6 +51,12 @@ BEGIN
             MENUITEM "&Paragraafformaat",            ID_EDIT_PARAFORMAT
             MENUITEM "&Haal tekst",                  ID_EDIT_GETTEXT
         END
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Toolbar",        ID_TOGGLE_TOOLBAR
+        MENUITEM "&Formatbar",      ID_TOGGLE_FORMATBAR
+        MENUITEM "&Statusbar",      ID_TOGGLE_STATUSBAR
     END
     POPUP "&Opmaak"
     BEGIN

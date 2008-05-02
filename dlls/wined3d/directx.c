@@ -35,7 +35,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(d3d_caps);
-#define GLINFO_LOCATION This->gl_info
 
 /**********************************************************
  * Utility functions follow
@@ -60,6 +59,10 @@ static inline Display *get_display( HDC hdc )
                     sizeof(display), (LPSTR)&display )) display = NULL;
     return display;
 }
+
+/* Adapters */
+static int numAdapters = 0;
+static struct WineD3DAdapter Adapters[1];
 
 /* lookup tables */
 int minLookup[MAX_LOOKUPS];
@@ -314,10 +317,8 @@ static void select_shader_max_constants(
  * IWineD3D parts follows
  **********************************************************/
 
-BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display) {
-    IWineD3DImpl *This = (IWineD3DImpl *)iface;
-    WineD3D_GL_Info *gl_info = &This->gl_info;
-
+#define GLINFO_LOCATION (*gl_info)
+BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info, Display* display) {
     const char *GL_Extensions    = NULL;
     const char *GLX_Extensions   = NULL;
     const char *gl_string        = NULL;
@@ -718,6 +719,9 @@ BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display) {
             } else if (strcmp(ThisExtn, "GL_EXT_texture_env_dot3") == 0) {
                 TRACE_(d3d_caps)(" FOUND: EXT Dot3 support\n");
                 gl_info->supported[EXT_TEXTURE_ENV_DOT3] = TRUE;
+            } else if (strcmp(ThisExtn, "GL_EXT_texture_sRGB") == 0) {
+                TRACE_(d3d_caps)(" FOUND: EXT sRGB support\n");
+                gl_info->supported[EXT_TEXTURE_SRGB] = TRUE;
             } else if (strcmp(ThisExtn, "GL_EXT_texture_filter_anisotropic") == 0) {
                 gl_info->supported[EXT_TEXTURE_FILTER_ANISOTROPIC] = TRUE;
                 glGetIntegerv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &gl_max);
@@ -1060,6 +1064,10 @@ BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display) {
                 }
                 memcpy(ThisExtn, Start, (GLX_Extensions - Start));
                 TRACE_(d3d_caps)("- %s\n", ThisExtn);
+                if (strstr(ThisExtn, "GLX_SGI_video_sync")) {
+                    gl_info->supported[SGI_VIDEO_SYNC] = TRUE;
+                }
+
                 if (*GLX_Extensions == ' ') GLX_Extensions++;
             }
         }
@@ -1069,6 +1077,7 @@ BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display) {
     WineD3D_ReleaseFakeGLContext();
     return return_value;
 }
+#undef GLINFO_LOCATION
 
 /**********************************************************
  * IWineD3D implementation follows
@@ -1077,9 +1086,8 @@ BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display) {
 static UINT     WINAPI IWineD3DImpl_GetAdapterCount (IWineD3D *iface) {
     IWineD3DImpl *This = (IWineD3DImpl *)iface;
 
-    /* FIXME: Set to one for now to imply the display */
-    TRACE_(d3d_caps)("(%p): Mostly stub, only returns primary display\n", This);
-    return 1;
+    TRACE_(d3d_caps)("(%p): Reporting %d adapters\n", This, numAdapters);
+    return numAdapters;
 }
 
 static HRESULT  WINAPI IWineD3DImpl_RegisterSoftwareDevice(IWineD3D *iface, void* pInitializeFunction) {
@@ -1090,14 +1098,13 @@ static HRESULT  WINAPI IWineD3DImpl_RegisterSoftwareDevice(IWineD3D *iface, void
 
 static HMONITOR WINAPI IWineD3DImpl_GetAdapterMonitor(IWineD3D *iface, UINT Adapter) {
     IWineD3DImpl *This = (IWineD3DImpl *)iface;
-    POINT pt = { -1, -1 };
 
     if (Adapter >= IWineD3DImpl_GetAdapterCount(iface)) {
         return NULL;
     }
 
-    FIXME_(d3d_caps)("(%p): returning the primary monitor for adapter %d\n", This, Adapter);
-    return MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
+    TRACE_(d3d_caps)("(%p)->(%d)\n", This, Adapter);
+    return MonitorFromPoint(Adapters[Adapter].monitorPoint, MONITOR_DEFAULTTOPRIMARY);
 }
 
 /* FIXME: GetAdapterModeCount and EnumAdapterModes currently only returns modes
@@ -1112,6 +1119,7 @@ static UINT     WINAPI IWineD3DImpl_GetAdapterModeCount(IWineD3D *iface, UINT Ad
         return 0;
     }
 
+    /* TODO: Store modes per adapter and read it from the adapter structure */
     if (Adapter == 0) { /* Display */
         int i = 0;
         int j = 0;
@@ -1167,6 +1175,7 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
         return WINED3DERR_INVALIDCALL;
     }
 
+    /* TODO: Store modes per adapter and read it from the adapter structure */
     if (Adapter == 0 && !DEBUG_SINGLE_MODE) { /* Display */
         DEVMODEW DevModeW;
         int ModeIdx = 0;
@@ -1297,18 +1306,6 @@ static HRESULT WINAPI IWineD3DImpl_GetAdapterDisplayMode(IWineD3D *iface, UINT A
     return WINED3D_OK;
 }
 
-static Display * WINAPI IWineD3DImpl_GetAdapterDisplay(IWineD3D *iface, UINT Adapter) {
-    Display *display;
-    HDC     device_context;
-    /* only works with one adapter at the moment... */
-
-    /* Get the display */
-    device_context = GetDC(0);
-    display = get_display(device_context);
-    ReleaseDC(0, device_context);
-    return display;
-}
-
 /* NOTE: due to structure differences between dx8 and dx9 D3DADAPTER_IDENTIFIER,
    and fields being inserted in the middle, a new structure is used in place    */
 static HRESULT WINAPI IWineD3DImpl_GetAdapterIdentifier(IWineD3D *iface, UINT Adapter, DWORD Flags,
@@ -1321,42 +1318,26 @@ static HRESULT WINAPI IWineD3DImpl_GetAdapterIdentifier(IWineD3D *iface, UINT Ad
         return WINED3DERR_INVALIDCALL;
     }
 
-    if (Adapter == 0) { /* Display - only device supported for now */
+    /* Return the information requested */
+    TRACE_(d3d_caps)("device/Vendor Name and Version detection using FillGLCaps\n");
+    strcpy(pIdentifier->Driver, Adapters[Adapter].driver);
+    strcpy(pIdentifier->Description, Adapters[Adapter].description);
 
-        BOOL isGLInfoValid = This->isGLInfoValid;
+    /* Note dx8 doesn't supply a DeviceName */
+    if (NULL != pIdentifier->DeviceName) strcpy(pIdentifier->DeviceName, "\\\\.\\DISPLAY"); /* FIXME: May depend on desktop? */
+    /* Current Windows drivers have versions like 6.14.... (some older have an earlier version) */
+    pIdentifier->DriverVersion->u.HighPart = MAKEDWORD_VERSION(6, 14);
+    pIdentifier->DriverVersion->u.LowPart = Adapters[Adapter].gl_info.gl_driver_version;
+    *(pIdentifier->VendorId) = Adapters[Adapter].gl_info.gl_vendor;
+    *(pIdentifier->DeviceId) = Adapters[Adapter].gl_info.gl_card;
+    *(pIdentifier->SubSysId) = 0;
+    *(pIdentifier->Revision) = 0;
 
-        /* FillGLCaps updates gl_info, but we only want to store and
-           reuse the values once we have a context which is valid. Values from
-           a temporary context may differ from the final ones                 */
-        if (!isGLInfoValid) {
-            /* If we don't know the device settings, go query them now */
-            isGLInfoValid = IWineD3DImpl_FillGLCaps(iface, IWineD3DImpl_GetAdapterDisplay(iface, Adapter));
-        }
-
-        /* Return the information requested */
-        TRACE_(d3d_caps)("device/Vendor Name and Version detection using FillGLCaps\n");
-        strcpy(pIdentifier->Driver, "Display");
-        strcpy(pIdentifier->Description, "Direct3D HAL");
-
-        /* Note dx8 doesn't supply a DeviceName */
-        if (NULL != pIdentifier->DeviceName) strcpy(pIdentifier->DeviceName, "\\\\.\\DISPLAY"); /* FIXME: May depend on desktop? */
-        /* Current Windows drivers have versions like 6.14.... (some older have an earlier version) */
-        pIdentifier->DriverVersion->u.HighPart = MAKEDWORD_VERSION(6, 14);
-        pIdentifier->DriverVersion->u.LowPart = This->gl_info.gl_driver_version;
-        *(pIdentifier->VendorId) = This->gl_info.gl_vendor;
-        *(pIdentifier->DeviceId) = This->gl_info.gl_card;
-        *(pIdentifier->SubSysId) = 0;
-        *(pIdentifier->Revision) = 0;
-
-        /*FIXME: memcpy(&pIdentifier->DeviceIdentifier, ??, sizeof(??GUID)); */
-        if (Flags & WINED3DENUM_NO_WHQL_LEVEL) {
-            *(pIdentifier->WHQLLevel) = 0;
-        } else {
-            *(pIdentifier->WHQLLevel) = 1;
-        }
-
+    /*FIXME: memcpy(&pIdentifier->DeviceIdentifier, ??, sizeof(??GUID)); */
+    if (Flags & WINED3DENUM_NO_WHQL_LEVEL) {
+        *(pIdentifier->WHQLLevel) = 0;
     } else {
-        FIXME_(d3d_caps)("Adapter not primary display\n");
+        *(pIdentifier->WHQLLevel) = 1;
     }
 
     return WINED3D_OK;
@@ -1492,9 +1473,6 @@ static HRESULT WINAPI IWineD3DImpl_CheckDepthStencilMatch(IWineD3D *iface, UINT 
                                                    WINED3DFORMAT RenderTargetFormat,
                                                    WINED3DFORMAT DepthStencilFormat) {
     IWineD3DImpl *This = (IWineD3DImpl *)iface;
-    HRESULT hr = WINED3DERR_NOTAVAILABLE;
-    GLXFBConfig* cfgs = NULL;
-    int nCfgs = 0;
     int it;
 
     WARN_(d3d_caps)("(%p)-> (STUB) (Adptr:%d, DevType:(%x,%s), AdptFmt:(%x,%s), RendrTgtFmt:(%x,%s), DepthStencilFmt:(%x,%s))\n",
@@ -1509,33 +1487,17 @@ static HRESULT WINAPI IWineD3DImpl_CheckDepthStencilMatch(IWineD3D *iface, UINT 
         return WINED3DERR_INVALIDCALL;
     }
 
-    if(WineD3D_CreateFakeGLContext())
-        cfgs = glXGetFBConfigs(wined3d_fake_gl_context_display, DefaultScreen(wined3d_fake_gl_context_display), &nCfgs);
-
-    if (cfgs) {
-        for (it = 0; it < nCfgs; ++it) {
-            if (IWineD3DImpl_IsGLXFBConfigCompatibleWithRenderFmt(wined3d_fake_gl_context_display, cfgs[it], RenderTargetFormat)) {
-                if (IWineD3DImpl_IsGLXFBConfigCompatibleWithDepthFmt(wined3d_fake_gl_context_display, cfgs[it], DepthStencilFormat)) {
-                    hr = WINED3D_OK;
-                    break ;
-                }
+    for (it = 0; it < Adapters[Adapter].nCfgs; ++it) {
+        if (IWineD3DImpl_IsGLXFBConfigCompatibleWithRenderFmt(Adapters[Adapter].display, Adapters[Adapter].cfgs[it], RenderTargetFormat)) {
+            if (IWineD3DImpl_IsGLXFBConfigCompatibleWithDepthFmt(Adapters[Adapter].display, Adapters[Adapter].cfgs[it], DepthStencilFormat)) {
+                TRACE_(d3d_caps)("(%p) : Formats matched\n", This);
+                return WINED3D_OK;
             }
         }
-        XFree(cfgs);
-        if(hr != WINED3D_OK)
-            ERR("unsupported format pair: %s and %s\n", debug_d3dformat(RenderTargetFormat), debug_d3dformat(DepthStencilFormat));
-    } else {
-        ERR_(d3d_caps)("returning WINED3D_OK even so CreateFakeGLContext or glXGetFBConfigs failed\n");
-        hr = WINED3D_OK;
     }
+    WARN_(d3d_caps)("unsupported format pair: %s and %s\n", debug_d3dformat(RenderTargetFormat), debug_d3dformat(DepthStencilFormat));
 
-    WineD3D_ReleaseFakeGLContext();
-
-    if (hr != WINED3D_OK)
-        TRACE_(d3d_caps)("Failed to match stencil format to device\n");
-
-    TRACE_(d3d_caps)("(%p) : Returning %x\n", This, hr);
-    return hr;
+    return WINED3DERR_NOTAVAILABLE;
 }
 
 static HRESULT WINAPI IWineD3DImpl_CheckDeviceMultiSampleType(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType, 
@@ -1556,6 +1518,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceMultiSampleType(IWineD3D *iface, U
         return WINED3DERR_INVALIDCALL;
     }
 
+    /* TODO: Store in Adapter structure */
     if (pQualityLevels != NULL) {
         static int s_single_shot = 0;
         if (!s_single_shot) {
@@ -1591,6 +1554,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceType(IWineD3D *iface, UINT Adapter
         return WINED3DERR_INVALIDCALL;
     }
 
+    /* TODO: Store in adapter structure */
     if (WineD3D_CreateFakeGLContext()) {
       cfgs = glXGetFBConfigs(wined3d_fake_gl_context_display, DefaultScreen(wined3d_fake_gl_context_display), &nCfgs);
       for (it = 0; it < nCfgs; ++it) {
@@ -1612,6 +1576,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceType(IWineD3D *iface, UINT Adapter
     return hr;
 }
 
+#define GLINFO_LOCATION Adapters[Adapter].gl_info
 static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType, 
                                               WINED3DFORMAT AdapterFormat, DWORD Usage, WINED3DRESOURCETYPE RType, WINED3DFORMAT CheckFormat) {
     IWineD3DImpl *This = (IWineD3DImpl *)iface;
@@ -1723,6 +1688,28 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
           return WINED3D_OK;
         default:
             break; /* Avoid compiler warnings */
+        }
+    }
+
+    /* Check for supported sRGB formats (Texture loading and framebuffer) */
+    if (GL_SUPPORT(EXT_TEXTURE_SRGB) && (Usage & WINED3DUSAGE_QUERY_SRGBREAD)) {
+        switch (CheckFormat) {
+            case WINED3DFMT_A8R8G8B8:
+            case WINED3DFMT_X8R8G8B8:
+            case WINED3DFMT_A4R4G4B4:
+            case WINED3DFMT_L8:
+            case WINED3DFMT_A8L8:
+            case WINED3DFMT_DXT1:
+            case WINED3DFMT_DXT2:
+            case WINED3DFMT_DXT3:
+            case WINED3DFMT_DXT4:
+            case WINED3DFMT_DXT5:
+                TRACE_(d3d_caps)("[OK]\n");
+                return WINED3D_OK;
+
+            default:
+                TRACE_(d3d_caps)("[FAILED] Gamma texture format %s not supported.\n", debug_d3dformat(CheckFormat));
+                return WINED3DERR_NOTAVAILABLE;
         }
     }
 
@@ -1899,21 +1886,11 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
         return WINED3DERR_INVALIDCALL;
     }
 
-    /* FIXME: GL info should be per adapter */
-
-    /* If we don't know the device settings, go query them now */
-    if (!This->isGLInfoValid) {
-        /* use the desktop window to fill gl caps */
-        BOOL rc = IWineD3DImpl_FillGLCaps(iface, IWineD3DImpl_GetAdapterDisplay(iface, Adapter));
-
-        /* We are running off a real context, save the values */
-        if (rc) This->isGLInfoValid = TRUE;
-    }
-    select_shader_mode(&This->gl_info, DeviceType, &ps_selected_mode, &vs_selected_mode);
+    select_shader_mode(&Adapters[Adapter].gl_info, DeviceType, &ps_selected_mode, &vs_selected_mode);
 
     /* This function should *not* be modifying GL caps
      * TODO: move the functionality where it belongs */
-    select_shader_max_constants(ps_selected_mode, vs_selected_mode, &This->gl_info);
+    select_shader_max_constants(ps_selected_mode, vs_selected_mode, &Adapters[Adapter].gl_info);
 
     /* ------------------------------------------------
        The following fields apply to both d3d8 and d3d9
@@ -2288,7 +2265,7 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
            models with GLSL support only support 2.0. In case of nvidia we can detect VS 2.0 support using
            vs_nv_version which is based on NV_vertex_program. For Ati cards there's no easy way, so for
            now only support 2.0/3.0 detection on Nvidia GeforceFX cards and default to 3.0 for everything else */
-        if(This->gl_info.vs_nv_version == VS_VERSION_20)
+        if(GLINFO_LOCATION.vs_nv_version == VS_VERSION_20)
             *pCaps->VertexShaderVersion = WINED3DVS_VERSION(2,0);
         else
             *pCaps->VertexShaderVersion = WINED3DVS_VERSION(3,0);
@@ -2306,7 +2283,7 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     if (ps_selected_mode == SHADER_GLSL) {
         /* See the comment about VS2.0/VS3.0 detection as we do the same here but then based on NV_fragment_program
            in case of GeforceFX cards. */
-        if(This->gl_info.ps_nv_version == PS_VERSION_20)
+        if(GLINFO_LOCATION.ps_nv_version == PS_VERSION_20)
             *pCaps->PixelShaderVersion = WINED3DPS_VERSION(2,0);
         else
             *pCaps->PixelShaderVersion = WINED3DPS_VERSION(3,0);
@@ -2367,15 +2344,15 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
                use the VS 3.0 from MSDN or else if there's OpenGL spec use a hardcoded value minimum VS3.0 value. */
             *pCaps->VS20Caps.Caps                     = WINED3DVS20CAPS_PREDICATION;
             *pCaps->VS20Caps.DynamicFlowControlDepth  = WINED3DVS20_MAX_DYNAMICFLOWCONTROLDEPTH; /* VS 3.0 requires MAX_DYNAMICFLOWCONTROLDEPTH (24) */
-            *pCaps->VS20Caps.NumTemps                 = max(32, This->gl_info.vs_arb_max_temps);
+            *pCaps->VS20Caps.NumTemps                 = max(32, GLINFO_LOCATION.vs_arb_max_temps);
             *pCaps->VS20Caps.StaticFlowControlDepth   = WINED3DVS20_MAX_STATICFLOWCONTROLDEPTH ; /* level of nesting in loops / if-statements; VS 3.0 requires MAX (4) */
 
             *pCaps->MaxVShaderInstructionsExecuted    = 65535; /* VS 3.0 needs at least 65535, some cards even use 2^32-1 */
-            *pCaps->MaxVertexShader30InstructionSlots = max(512, This->gl_info.vs_arb_max_instructions);
+            *pCaps->MaxVertexShader30InstructionSlots = max(512, GLINFO_LOCATION.vs_arb_max_instructions);
         } else if(*pCaps->VertexShaderVersion == WINED3DVS_VERSION(2,0)) {
             *pCaps->VS20Caps.Caps                     = 0;
             *pCaps->VS20Caps.DynamicFlowControlDepth  = WINED3DVS20_MIN_DYNAMICFLOWCONTROLDEPTH;
-            *pCaps->VS20Caps.NumTemps                 = max(12, This->gl_info.vs_arb_max_temps);
+            *pCaps->VS20Caps.NumTemps                 = max(12, GLINFO_LOCATION.vs_arb_max_temps);
             *pCaps->VS20Caps.StaticFlowControlDepth   = 1;    
 
             *pCaps->MaxVShaderInstructionsExecuted    = 65535;
@@ -2401,17 +2378,17 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
                                                         WINED3DPS20CAPS_NODEPENDENTREADLIMIT |
                                                         WINED3DPS20CAPS_NOTEXINSTRUCTIONLIMIT;
             *pCaps->PS20Caps.DynamicFlowControlDepth  = WINED3DPS20_MAX_DYNAMICFLOWCONTROLDEPTH; /* PS 3.0 requires MAX_DYNAMICFLOWCONTROLDEPTH (24) */
-            *pCaps->PS20Caps.NumTemps                 = max(32, This->gl_info.ps_arb_max_temps);
+            *pCaps->PS20Caps.NumTemps                 = max(32, GLINFO_LOCATION.ps_arb_max_temps);
             *pCaps->PS20Caps.StaticFlowControlDepth   = WINED3DPS20_MAX_STATICFLOWCONTROLDEPTH; /* PS 3.0 requires MAX_STATICFLOWCONTROLDEPTH (4) */
             *pCaps->PS20Caps.NumInstructionSlots      = WINED3DPS20_MAX_NUMINSTRUCTIONSLOTS; /* PS 3.0 requires MAX_NUMINSTRUCTIONSLOTS (512) */
 
             *pCaps->MaxPShaderInstructionsExecuted    = 65535;
-            *pCaps->MaxPixelShader30InstructionSlots  = max(WINED3DMIN30SHADERINSTRUCTIONS, This->gl_info.ps_arb_max_instructions);
+            *pCaps->MaxPixelShader30InstructionSlots  = max(WINED3DMIN30SHADERINSTRUCTIONS, GLINFO_LOCATION.ps_arb_max_instructions);
         } else if(*pCaps->PixelShaderVersion == WINED3DPS_VERSION(2,0)) {
             /* Below we assume PS2.0 specs, not extended 2.0a(GeforceFX)/2.0b(Radeon R3xx) ones */
             *pCaps->PS20Caps.Caps                     = 0;
             *pCaps->PS20Caps.DynamicFlowControlDepth  = 0; /* WINED3DVS20_MIN_DYNAMICFLOWCONTROLDEPTH = 0 */
-            *pCaps->PS20Caps.NumTemps                 = max(12, This->gl_info.ps_arb_max_temps);
+            *pCaps->PS20Caps.NumTemps                 = max(12, GLINFO_LOCATION.ps_arb_max_temps);
             *pCaps->PS20Caps.StaticFlowControlDepth   = WINED3DPS20_MIN_STATICFLOWCONTROLDEPTH; /* Minumum: 1 */
             *pCaps->PS20Caps.NumInstructionSlots      = WINED3DPS20_MIN_NUMINSTRUCTIONSLOTS; /* Minimum number (64 ALU + 32 Texture), a GeforceFX uses 512 */
 
@@ -2481,8 +2458,15 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     object->lpVtbl  = &IWineD3DDevice_Vtbl;
     object->ref     = 1;
     object->wineD3D = iface;
+    object->adapter = &Adapters[Adapter];
     IWineD3D_AddRef(object->wineD3D);
     object->parent  = parent;
+
+    if(This->dxVersion == 7) {
+        object->surface_alignment = 8;
+    } else {
+        object->surface_alignment = 4;
+    }
 
     /* Set the state up as invalid until the device is fully created */
     object->state   = WINED3DERR_DRIVERINTERNALERROR;
@@ -2514,12 +2498,7 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     IWineD3DStateBlock_AddRef((IWineD3DStateBlock*)object->updateStateBlock);
     /* Setup surfaces for the backbuffer, frontbuffer and depthstencil buffer */
 
-    /* Setup some defaults for creating the implicit swapchain */
-    ENTER_GL();
-    /* FIXME: GL info should be per adapter */
-    IWineD3DImpl_FillGLCaps(iface, IWineD3DImpl_GetAdapterDisplay(iface, Adapter));
-    LEAVE_GL();
-    select_shader_mode(&This->gl_info, DeviceType, &object->ps_selected_mode, &object->vs_selected_mode);
+    select_shader_mode(&GLINFO_LOCATION, DeviceType, &object->ps_selected_mode, &object->vs_selected_mode);
     if (object->ps_selected_mode == SHADER_GLSL || object->vs_selected_mode == SHADER_GLSL) {
         object->shader_backend = &glsl_shader_backend;
         object->glsl_program_lookup = hash_table_create(&glsl_program_key_hash, &glsl_program_key_compare);
@@ -2531,7 +2510,7 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
 
     /* This function should *not* be modifying GL caps
      * TODO: move the functionality where it belongs */
-    select_shader_max_constants(object->ps_selected_mode, object->vs_selected_mode, &This->gl_info);
+    select_shader_max_constants(object->ps_selected_mode, object->vs_selected_mode, &GLINFO_LOCATION);
 
     temp_result = allocate_shader_constants(object->updateStateBlock);
     if (WINED3D_OK != temp_result)
@@ -2578,6 +2557,7 @@ create_device_error:
     return WINED3DERR_INVALIDCALL;
 
 }
+#undef GLINFO_LOCATION
 
 static HRESULT WINAPI IWineD3DImpl_GetParent(IWineD3D *iface, IUnknown **pParent) {
     IWineD3DImpl *This = (IWineD3DImpl *)iface;
@@ -2605,6 +2585,54 @@ ULONG WINAPI D3DCB_DefaultDestroyVolume(IWineD3DVolume *pVolume) {
     IUnknown_Release(volumeParent);
     return IUnknown_Release(volumeParent);
 }
+
+BOOL InitAdapters(void) {
+    HDC     device_context;
+    BOOL ret;
+
+    /* No need to hold any lock. The calling library makes sure only one thread calls
+     * wined3d simultaneously
+     */
+    if(numAdapters > 0) return TRUE;
+
+    TRACE("Initializing adapters\n");
+    /* For now only one default adapter */
+    {
+        TRACE("Initializing default adapter\n");
+        Adapters[0].monitorPoint.x = -1;
+        Adapters[0].monitorPoint.y = -1;
+
+        device_context = GetDC(0);
+        Adapters[0].display = get_display(device_context);
+        ReleaseDC(0, device_context);
+
+        ENTER_GL();
+        if(WineD3D_CreateFakeGLContext()) {
+            Adapters[0].cfgs = glXGetFBConfigs(Adapters[0].display, DefaultScreen(Adapters[0].display), &Adapters[0].nCfgs);
+            WineD3D_ReleaseFakeGLContext();
+        } else {
+            ERR("Failed to create a fake opengl context to find fbconfigs formats\n");
+            LEAVE_GL();
+            return FALSE;
+        }
+        LEAVE_GL();
+
+        ret = IWineD3DImpl_FillGLCaps(&Adapters[0].gl_info, Adapters[0].display);
+        if(!ret) {
+            ERR("Failed to initialize gl caps for default adapter\n");
+            XFree(Adapters[0].cfgs);
+            HeapFree(GetProcessHeap(), 0, Adapters);
+            return FALSE;
+        }
+        Adapters[0].driver = "Display";
+        Adapters[0].description = "Direct3D HAL";
+    }
+    numAdapters = 1;
+    TRACE("%d adapters successfully initialized\n", numAdapters);
+
+    return TRUE;
+}
+
 
 /**********************************************************
  * IWineD3D VTbl follows

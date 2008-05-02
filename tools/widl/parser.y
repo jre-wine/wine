@@ -38,6 +38,7 @@
 #include "parser.h"
 #include "header.h"
 #include "typelib.h"
+#include "typegen.h"
 
 #if defined(YYBYACC)
 	/* Berkeley yacc (byacc) doesn't seem to know about these */
@@ -63,6 +64,17 @@
   /* #else we just take a chance that it works... */
 # endif
 #endif
+
+typedef struct list typelist_t;
+struct typenode {
+  type_t *type;
+  struct list entry;
+};
+
+typelist_t incomplete_types = LIST_INIT(incomplete_types);
+
+static void add_incomplete(type_t *t);
+static void fix_incomplete(void);
 
 static str_list_t *append_str(str_list_t *list, char *str);
 static attr_list_t *append_attr(attr_list_t *list, attr_t *attr);
@@ -113,6 +125,7 @@ static int compute_method_indexes(type_t *iface);
 static char *gen_name(void);
 static void process_typedefs(var_list_t *names);
 static void check_arg(var_t *arg);
+static void check_all_user_types(ifref_list_t *ifaces);
 
 #define tsENUM   1
 #define tsSTRUCT 2
@@ -262,7 +275,12 @@ static void check_arg(var_t *arg);
 
 %%
 
-input:   gbl_statements                        { write_proxies($1); write_client($1); write_server($1); }
+input:   gbl_statements				{ fix_incomplete();
+						  check_all_user_types($1);
+						  write_proxies($1);
+						  write_client($1);
+						  write_server($1);
+						}
 	;
 
 gbl_statements:					{ $$ = NULL; }
@@ -303,12 +321,24 @@ int_statements:					{ $$ = NULL; }
 statement: ';'					{}
 	| constdef ';'				{ if (!parse_only && do_header) { write_constdef($1); } }
 	| cppquote				{}
-	| enumdef ';'				{ if (!parse_only && do_header) { write_type(header, $1); fprintf(header, ";\n\n"); } }
+	| enumdef ';'				{ if (!parse_only && do_header) {
+						    write_type(header, $1, FALSE, NULL);
+						    fprintf(header, ";\n\n");
+						  }
+						}
 	| externdef ';'				{ if (!parse_only && do_header) { write_externdef($1); } }
 	| import				{}
-	| structdef ';'				{ if (!parse_only && do_header) { write_type(header, $1); fprintf(header, ";\n\n"); } }
+	| structdef ';'				{ if (!parse_only && do_header) {
+						    write_type(header, $1, FALSE, NULL);
+						    fprintf(header, ";\n\n");
+						  }
+						}
 	| typedef ';'				{}
-	| uniondef ';'				{ if (!parse_only && do_header) { write_type(header, $1); fprintf(header, ";\n\n"); } }
+	| uniondef ';'				{ if (!parse_only && do_header) {
+						    write_type(header, $1, FALSE, NULL);
+						    fprintf(header, ";\n\n");
+						  }
+						}
 	;
 
 cppquote: tCPPQUOTE '(' aSTRING ')'		{ if (!parse_only && do_header) fprintf(header, "%s\n", $3); }
@@ -346,18 +376,18 @@ args:	  arg					{ check_arg($1); $$ = append_var( NULL, $1 ); }
 
 /* split into two rules to get bison to resolve a tVOID conflict */
 arg:	  attributes type pident array		{ $$ = $3->var;
+						  $$->attrs = $1;
 						  set_type($$, $2, $3->ptr_level, $4);
 						  free($3);
-						  $$->attrs = $1;
 						}
 	| type pident array			{ $$ = $2->var;
 						  set_type($$, $1, $2->ptr_level, $3);
 						  free($2);
 						}
 	| attributes type pident '(' m_args ')'	{ $$ = $3->var;
+						  $$->attrs = $1;
 						  set_type($$, $2, $3->ptr_level - 1, NULL);
 						  free($3);
-						  $$->attrs = $1;
 						  $$->args = $5;
 						}
 	| type pident '(' m_args ')'		{ $$ = $2->var;
@@ -479,7 +509,7 @@ cases:						{ $$ = NULL; }
 	| cases case				{ $$ = append_var( $1, $2 ); }
 	;
 
-case:	  tCASE expr ':' field			{ attr_t *a = make_attrp(ATTR_CASE, $2);
+case:	  tCASE expr ':' field			{ attr_t *a = make_attrp(ATTR_CASE, append_expr( NULL, $2 ));
 						  $$ = $4; if (!$$) $$ = make_var(NULL);
 						  $$->attrs = append_attr( $$->attrs, a );
 						}
@@ -597,18 +627,18 @@ field:	  s_field ';'				{ $$ = $1; }
 	;
 
 s_field:  m_attributes type pident array	{ $$ = $3->var;
+						  $$->attrs = $1;
 						  set_type($$, $2, $3->ptr_level, $4);
 						  free($3);
-						  $$->attrs = $1;
 						}
 	;
 
 funcdef:
 	  m_attributes type callconv pident
 	  '(' m_args ')'			{ var_t *v = $4->var;
+						  v->attrs = $1;
 						  set_type(v, $2, $4->ptr_level, NULL);
 						  free($4);
-						  v->attrs = $1;
 						  $$ = make_func(v, $6);
 						  if (is_attr(v->attrs, ATTR_IN)) {
 						    yyerror("inapplicable attribute [in] for function '%s'",$$->def->name);
@@ -1199,7 +1229,11 @@ static type_t *make_type(unsigned char type, type_t *ref)
   t->funcs = NULL;
   t->fields = NULL;
   t->ifaces = NULL;
+  t->dim = 0;
+  t->size_is = NULL;
+  t->length_is = NULL;
   t->typestring_offset = 0;
+  t->declarray = FALSE;
   t->ignore = (parse_only != 0);
   t->is_const = FALSE;
   t->sign = 0;
@@ -1213,11 +1247,106 @@ static type_t *make_type(unsigned char type, type_t *ref)
 
 static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr)
 {
+  expr_list_t *sizes = get_attrp(v->attrs, ATTR_SIZEIS);
+  expr_list_t *lengs = get_attrp(v->attrs, ATTR_LENGTHIS);
+  int sizeless, has_varconf;
+  expr_t *dim;
+  type_t *atype, **ptype;
+
   v->type = type;
-  v->array = arr;
 
   for ( ; 0 < ptr_level; --ptr_level)
     v->type = make_type(RPC_FC_RP, v->type);
+
+  sizeless = FALSE;
+  if (arr) LIST_FOR_EACH_ENTRY_REV(dim, arr, expr_t, entry)
+  {
+    if (sizeless)
+      error("%s: only the first array dimension can be unspecified\n", v->name);
+
+    if (dim->is_const)
+    {
+      unsigned int align = 0;
+      size_t size = type_memsize(v->type, &align);
+
+      if (dim->cval <= 0)
+        error("%s: array dimension must be positive\n", v->name);
+
+      if (0xffffffffuL / size < (unsigned long) dim->cval)
+        error("%s: total array size is too large", v->name);
+      else if (0xffffuL < size * dim->cval)
+        v->type = make_type(RPC_FC_LGFARRAY, v->type);
+      else
+        v->type = make_type(RPC_FC_SMFARRAY, v->type);
+    }
+    else
+    {
+      sizeless = TRUE;
+      v->type = make_type(RPC_FC_CARRAY, v->type);
+    }
+
+    v->type->declarray = TRUE;
+    v->type->dim = dim->cval;
+  }
+
+  ptype = &v->type;
+  has_varconf = FALSE;
+  if (sizes) LIST_FOR_EACH_ENTRY(dim, sizes, expr_t, entry)
+  {
+    if (dim->type != EXPR_VOID)
+    {
+      has_varconf = TRUE;
+      atype = *ptype = duptype(*ptype, 0);
+
+      if (atype->type == RPC_FC_SMFARRAY || atype->type == RPC_FC_LGFARRAY)
+        error("%s: cannot specify size_is for a fixed sized array\n", v->name);
+
+      if (atype->type != RPC_FC_CARRAY && !is_ptr(atype))
+        error("%s: size_is attribute applied to illegal type\n", v->name);
+
+      atype->type = RPC_FC_CARRAY;
+      atype->size_is = dim;
+    }
+
+    ptype = &(*ptype)->ref;
+    if (*ptype == NULL)
+      error("%s: too many expressions in size_is attribute\n", v->name);
+  }
+
+  ptype = &v->type;
+  if (lengs) LIST_FOR_EACH_ENTRY(dim, lengs, expr_t, entry)
+  {
+    if (dim->type != EXPR_VOID)
+    {
+      has_varconf = TRUE;
+      atype = *ptype = duptype(*ptype, 0);
+
+      if (atype->type == RPC_FC_SMFARRAY)
+        atype->type = RPC_FC_SMVARRAY;
+      else if (atype->type == RPC_FC_LGFARRAY)
+        atype->type = RPC_FC_LGVARRAY;
+      else if (atype->type == RPC_FC_CARRAY)
+        atype->type = RPC_FC_CVARRAY;
+      else
+        error("%s: length_is attribute applied to illegal type\n", v->name);
+
+      atype->length_is = dim;
+    }
+
+    ptype = &(*ptype)->ref;
+    if (*ptype == NULL)
+      error("%s: too many expressions in length_is attribute\n", v->name);
+  }
+
+  if (has_varconf && !last_array(v->type))
+  {
+    ptype = &v->type;
+    for (ptype = &v->type; is_array(*ptype); ptype = &(*ptype)->ref)
+    {
+      *ptype = duptype(*ptype, 0);
+      (*ptype)->type = RPC_FC_BOGUS_ARRAY;
+    }
+  }
 }
 
 static ifref_list_t *append_ifref(ifref_list_t *list, ifref_t *iface)
@@ -1259,9 +1388,7 @@ static var_t *make_var(char *name)
   v->type = NULL;
   v->args = NULL;
   v->attrs = NULL;
-  v->array = NULL;
   v->eval = NULL;
-  v->corrdesc = 0;
   return v;
 }
 
@@ -1364,6 +1491,38 @@ static type_t *reg_type(type_t *type, const char *name, int t)
   return type;
 }
 
+static int is_incomplete(const type_t *t)
+{
+  return !t->defined && (is_struct(t->type) || is_union(t->type));
+}
+
+static void add_incomplete(type_t *t)
+{
+  struct typenode *tn = xmalloc(sizeof *tn);
+  tn->type = t;
+  list_add_tail(&incomplete_types, &tn->entry);
+}
+
+static void fix_type(type_t *t)
+{
+  if (t->kind == TKIND_ALIAS && is_incomplete(t)) {
+    type_t *ot = t->orig;
+    fix_type(ot);
+    t->fields = ot->fields;
+    t->defined = ot->defined;
+  }
+}
+
+static void fix_incomplete(void)
+{
+  struct typenode *tn, *next;
+
+  LIST_FOR_EACH_ENTRY_SAFE(tn, next, &incomplete_types, struct typenode, entry) {
+    fix_type(tn->type);
+    free(tn);
+  }
+}
+
 static type_t *reg_typedefs(type_t *type, pident_list_t *pidents, attr_list_t *attrs)
 {
   type_t *ptr = type;
@@ -1433,6 +1592,8 @@ static type_t *reg_typedefs(type_t *type, pident_list_t *pidents, attr_list_t *a
         yyerror("'%s': [string] attribute applied to non-pointer type",
                 cur->name);
 
+      if (is_incomplete(cur))
+        add_incomplete(cur);
       reg_type(cur, cur->name, 0);
     }
   }
@@ -1507,30 +1668,48 @@ static int get_struct_type(var_list_t *fields)
   {
     type_t *t = field->type;
 
-    if (is_ptr(field->type))
+    if (is_ptr(t))
     {
+        do
+            t = t->ref;
+        while (is_ptr(t));
+
+        switch (t->type)
+        {
+        case RPC_FC_IP:
+        case RPC_FC_ENCAPSULATED_UNION:
+        case RPC_FC_NON_ENCAPSULATED_UNION:
+        case RPC_FC_BOGUS_STRUCT:
+            return RPC_FC_BOGUS_STRUCT;
+        }
+
         has_pointer = 1;
         continue;
     }
 
-    if (is_string_type(field->attrs, field->type, field->array))
+    if (field->type->declarray)
     {
-        has_conformance = 1;
-        has_variance = 1;
-        continue;
-    }
-
-    if (is_array_type(field->attrs, field->type, field->array))
-    {
-        if (field->array && is_conformant_array(field->array))
+        if (is_string_type(field->attrs, field->type))
         {
             has_conformance = 1;
-            if (list_next( fields, &field->entry ))
+            has_variance = 1;
+            continue;
+        }
+
+        if (is_array(field->type->ref))
+            return RPC_FC_BOGUS_STRUCT;
+
+        if (is_conformant_array(field->type))
+        {
+            has_conformance = 1;
+            if (field->type->declarray && list_next(fields, &field->entry))
                 yyerror("field '%s' deriving from a conformant array must be the last field in the structure",
                         field->name);
         }
-        if (is_attr(field->attrs, ATTR_LENGTHIS))
+        if (field->type->length_is)
             has_variance = 1;
+
+        t = field->type->ref;
     }
 
     switch (t->type)
@@ -1565,13 +1744,9 @@ static int get_struct_type(var_list_t *fields)
     case RPC_FC_UP:
     case RPC_FC_FP:
     case RPC_FC_OP:
-      has_pointer = 1;
-      break;
     case RPC_FC_CARRAY:
-      has_conformance = 1;
-      if (list_next( fields, &field->entry ))
-          yyerror("field '%s' deriving from a conformant array must be the last field in the structure",
-                  field->name);
+    case RPC_FC_CVARRAY:
+      has_pointer = 1;
       break;
 
     /*
@@ -1771,4 +1946,17 @@ static void check_arg(var_t *arg)
 
   if (t->type == 0 && ! is_var_ptr(arg))
     yyerror("argument '%s' has void type", arg->name);
+}
+
+static void check_all_user_types(ifref_list_t *ifrefs)
+{
+  const ifref_t *ifref;
+  const func_t *f;
+
+  if (ifrefs) LIST_FOR_EACH_ENTRY(ifref, ifrefs, const ifref_t, entry)
+  {
+    const func_list_t *fs = ifref->iface->funcs;
+    if (fs) LIST_FOR_EACH_ENTRY(f, fs, const func_t, entry)
+      check_for_user_types(f->args);
+  }
 }

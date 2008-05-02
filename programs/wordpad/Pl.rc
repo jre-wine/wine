@@ -23,9 +23,10 @@ MAINMENU MENU DISCARDABLE
 BEGIN
     POPUP "&Plik"
     BEGIN
-        MENUITEM "&Nowy\tCtrl+N",          ID_FILE_NEW
-        MENUITEM "&Otwórz\tCtrl+O",         ID_FILE_OPEN
+        MENUITEM "&Nowy\tCtrl+N",           ID_FILE_NEW
+        MENUITEM "&Otwórz...\tCtrl+O",      ID_FILE_OPEN
         MENUITEM "&Zapisz\tCtrl+S",         ID_FILE_SAVE
+        MENUITEM "Z&apisz jako...",         ID_FILE_SAVEAS
         MENUITEM SEPARATOR
         MENUITEM "Za&koñcz",         ID_FILE_EXIT
     END
@@ -51,6 +52,12 @@ BEGIN
             MENUITEM "Format aka&pitu",           ID_EDIT_PARAFORMAT
             MENUITEM "&Pobie¿ tekst",                   ID_EDIT_GETTEXT
         END
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Toolbar",        ID_TOGGLE_TOOLBAR
+        MENUITEM "&Formatbar",      ID_TOGGLE_FORMATBAR
+        MENUITEM "&Statusbar",      ID_TOGGLE_STATUSBAR
     END
     POPUP "F&ormat"
     BEGIN

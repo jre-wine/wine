@@ -132,6 +132,9 @@ static void set_parsecomplete(HTMLDocument *doc)
 
     TRACE("(%p)\n", doc);
 
+    if(doc->usermode == EDITMODE)
+        init_editor(doc);
+
     call_property_onchanged(doc->cp_propnotif, 1005);
 
     doc->readystate = READYSTATE_INTERACTIVE;
@@ -155,6 +158,8 @@ static void set_parsecomplete(HTMLDocument *doc)
 
         IOleCommandTarget_Exec(olecmd, &CGID_MSHTML, IDM_PARSECOMPLETE, 0, NULL, NULL);
         IOleCommandTarget_Exec(olecmd, NULL, OLECMDID_HTTPEQUIV_DONE, 0, NULL, NULL);
+
+        IOleCommandTarget_Release(olecmd);
     }
 
     doc->readystate = READYSTATE_COMPLETE;
@@ -165,18 +170,7 @@ static void set_parsecomplete(HTMLDocument *doc)
         IOleInPlaceFrame_SetStatusText(doc->frame, wszDone);
     }
 
-    if(olecmd) {
-        VARIANT title;
-        WCHAR empty[] = {0};
-        
-        V_VT(&title) = VT_BSTR;
-        V_BSTR(&title) = SysAllocString(empty);
-        IOleCommandTarget_Exec(olecmd, NULL, OLECMDID_SETTITLE, OLECMDEXECOPT_DONTPROMPTUSER,
-                               &title, NULL);
-        SysFreeString(V_BSTR(&title));
-
-        IOleCommandTarget_Release(olecmd);
-    }
+    update_title(doc);
 }
 
 static void set_progress(HTMLDocument *doc)

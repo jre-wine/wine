@@ -1,5 +1,5 @@
 /*
- * Copyright 2005-2006 Jacek Caban for CodeWeavers
+ * Copyright 2005-2007 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -42,6 +42,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 #define NS_STRINGSTREAM_CONTRACTID "@mozilla.org/io/string-input-stream;1"
 #define NS_COMMANDPARAMS_CONTRACTID "@mozilla.org/embedcomp/command-params;1"
 #define NS_HTMLSERIALIZER_CONTRACTID "@mozilla.org/layout/contentserializer;1?mimetype=text/html"
+#define NS_EDITORCONTROLLER_CONTRACTID "@mozilla.org/editor/editorcontroller;1"
 
 #define APPSTARTUP_TOPIC "app-startup"
 
@@ -165,7 +166,7 @@ static BOOL load_xpcom(const PRUnichar *gre_path)
     return TRUE;
 }
 
-static void check_version(LPCWSTR gre_path)
+static BOOL check_version(LPCWSTR gre_path, const char *version_string)
 {
     WCHAR file_name[MAX_PATH];
     char version[128];
@@ -180,42 +181,74 @@ static void check_version(LPCWSTR gre_path)
     hfile = CreateFileW(file_name, GENERIC_READ, FILE_SHARE_READ, NULL,
                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if(hfile == INVALID_HANDLE_VALUE) {
-        TRACE("unknown version\n");
-        return;
+        ERR("Could not open VERSION file\n");
+        return FALSE;
     }
 
     ReadFile(hfile, version, sizeof(version), &read, NULL);
     version[read] = 0;
+    CloseHandle(hfile);
 
     TRACE("%s\n", debugstr_a(version));
 
-    CloseHandle(hfile);
+    if(strcmp(version, version_string)) {
+        ERR("Unexpected version %s, expected %s\n", debugstr_a(version),
+            debugstr_a(version_string));
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static BOOL load_wine_gecko_v(PRUnichar *gre_path, HKEY mshtml_key,
+        const char *version, const char *version_string)
+{
+    DWORD res, type, size = MAX_PATH;
+    HKEY hkey = mshtml_key;
+
+    static const WCHAR wszGeckoPath[] =
+        {'G','e','c','k','o','P','a','t','h',0};
+
+    if(version) {
+        /* @@ Wine registry key: HKCU\Software\Wine\MSHTML\<version> */
+        res = RegOpenKeyA(mshtml_key, version, &hkey);
+        if(res != ERROR_SUCCESS)
+            return FALSE;
+    }
+
+    res = RegQueryValueExW(hkey, wszGeckoPath, NULL, &type, (LPBYTE)gre_path, &size);
+    if(hkey != mshtml_key)
+        RegCloseKey(hkey);
+    if(res != ERROR_SUCCESS || type != REG_SZ)
+        return FALSE;
+
+    if(!check_version(gre_path, version_string))
+        return FALSE;
+
+    return load_xpcom(gre_path);
 }
 
 static BOOL load_wine_gecko(PRUnichar *gre_path)
 {
     HKEY hkey;
-    DWORD res, type, size = MAX_PATH;
+    DWORD res;
+    BOOL ret;
 
     static const WCHAR wszMshtmlKey[] = {
         'S','o','f','t','w','a','r','e','\\','W','i','n','e',
         '\\','M','S','H','T','M','L',0};
-    static const WCHAR wszGeckoPath[] =
-        {'G','e','c','k','o','P','a','t','h',0};
 
     /* @@ Wine registry key: HKCU\Software\Wine\MSHTML */
     res = RegOpenKeyW(HKEY_CURRENT_USER, wszMshtmlKey, &hkey);
     if(res != ERROR_SUCCESS)
         return FALSE;
 
-    res = RegQueryValueExW(hkey, wszGeckoPath, NULL, &type, (LPBYTE)gre_path, &size);
-    if(res != ERROR_SUCCESS || type != REG_SZ)
-        return FALSE;
+    ret = load_wine_gecko_v(gre_path, hkey, GECKO_VERSION, GECKO_VERSION_STRING)
+        || load_wine_gecko_v(gre_path, hkey, "0.0.1", "Wine Gecko 0.0.1\n")
+        || load_wine_gecko_v(gre_path, hkey, NULL, "Wine Gecko 0.0.1\n");
 
-    if(TRACE_ON(mshtml))
-        check_version(gre_path);
-
-    return load_xpcom(gre_path);
+    RegCloseKey(hkey);
+    return ret;
 }
 
 static void set_profile(void)
@@ -480,6 +513,12 @@ static void nsnode_to_nsstring_rec(nsIContentSerializer *serializer, nsIDOMNode 
         nsIDOMText_Release(nstext);
         break;
     }
+    case COMMENT_NODE: {
+        nsIDOMComment *nscomment;
+        nsres = nsIDOMNode_QueryInterface(nsnode, &IID_nsIDOMComment, (void**)&nscomment);
+        nsres = nsIContentSerializer_AppendComment(serializer, nscomment, 0, -1, str);
+        break;
+    }
     case DOCUMENT_NODE: {
         nsIDOMDocument *nsdoc;
         nsIDOMNode_QueryInterface(nsnode, &IID_nsIDOMDocument, (void**)&nsdoc);
@@ -487,6 +526,8 @@ static void nsnode_to_nsstring_rec(nsIContentSerializer *serializer, nsIDOMNode 
         nsIDOMDocument_Release(nsdoc);
         break;
     }
+    case DOCUMENT_FRAGMENT_NODE:
+        break;
     default:
         FIXME("Unhandled type %u\n", type);
     }
@@ -546,6 +587,136 @@ void nsnode_to_nsstring(nsIDOMNode *nsdoc, nsAString *str)
         ERR("Flush failed: %08x\n", nsres);
 
     nsIContentSerializer_Release(serializer);
+}
+
+static nsIController *get_editor_controller(NSContainer *This)
+{
+    nsIController *ret = NULL;
+    nsIEditingSession *editing_session = NULL;
+    nsIInterfaceRequestor *iface_req;
+    nsIControllerContext *ctrlctx;
+    nsIEditor *editor = NULL;
+    nsresult nsres;
+
+    nsres = nsIWebBrowser_QueryInterface(This->webbrowser,
+            &IID_nsIInterfaceRequestor, (void**)&iface_req);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIInterfaceRequestor: %08x\n", nsres);
+        return NULL;
+    }
+
+    nsres = nsIInterfaceRequestor_GetInterface(iface_req, &IID_nsIEditingSession,
+                                               (void**)&editing_session);
+    nsIInterfaceRequestor_Release(iface_req);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIEditingSession: %08x\n", nsres);
+        return NULL;
+    }
+
+    nsres = nsIEditingSession_GetEditorForWindow(editing_session,
+            This->doc->window->nswindow, &editor);
+    nsIEditingSession_Release(editing_session);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get editor: %08x\n", nsres);
+        return NULL;
+    }
+
+    nsres = nsIComponentManager_CreateInstanceByContractID(pCompMgr,
+            NS_EDITORCONTROLLER_CONTRACTID, NULL, &IID_nsIControllerContext, (void**)&ctrlctx);
+    if(NS_SUCCEEDED(nsres)) {
+        nsres = nsIControllerContext_SetCommandContext(ctrlctx, editor);
+        if(NS_FAILED(nsres))
+            ERR("SetCommandContext failed: %08x\n", nsres);
+        nsres = nsIControllerContext_QueryInterface(ctrlctx, &IID_nsIController,
+                (void**)&ret);
+        nsIControllerContext_Release(ctrlctx);
+        if(NS_FAILED(nsres))
+            ERR("Could not get nsIController interface: %08x\n", nsres);
+    }else {
+        ERR("Could not create edit controller: %08x\n", nsres);
+    }
+
+    nsISupports_Release(editor);
+
+    return ret;
+}
+
+void set_ns_editmode(NSContainer *This)
+{
+    nsIInterfaceRequestor *iface_req;
+    nsIEditingSession *editing_session = NULL;
+    nsIURIContentListener *listener = NULL;
+    nsIDOMWindow *dom_window = NULL;
+    nsresult nsres;
+
+    nsres = nsIWebBrowser_QueryInterface(This->webbrowser,
+            &IID_nsIInterfaceRequestor, (void**)&iface_req);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIInterfaceRequestor: %08x\n", nsres);
+        return;
+    }
+
+    nsres = nsIInterfaceRequestor_GetInterface(iface_req, &IID_nsIEditingSession,
+                                               (void**)&editing_session);
+    nsIInterfaceRequestor_Release(iface_req);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIEditingSession: %08x\n", nsres);
+        return;
+    }
+
+    nsres = nsIWebBrowser_GetContentDOMWindow(This->webbrowser, &dom_window);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get content DOM window: %08x\n", nsres);
+        nsIEditingSession_Release(editing_session);
+        return;
+    }
+
+    nsres = nsIEditingSession_MakeWindowEditable(editing_session, dom_window, NULL, FALSE);
+    nsIEditingSession_Release(editing_session);
+    nsIDOMWindow_Release(dom_window);
+    if(NS_FAILED(nsres)) {
+        ERR("MakeWindowEditable failed: %08x\n", nsres);
+        return;
+    }
+
+    /* MakeWindowEditable changes WebBrowser's parent URI content listener.
+     * It seams to be a bug in Gecko. To workaround it we set our content
+     * listener again and Gecko's one as its parent.
+     */
+    nsIWebBrowser_GetParentURIContentListener(This->webbrowser, &listener);
+    nsIURIContentListener_SetParentContentListener(NSURICL(This), listener);
+    nsIURIContentListener_Release(listener);
+    nsIWebBrowser_SetParentURIContentListener(This->webbrowser, NSURICL(This));
+}
+
+static void handle_load_event(NSContainer *This, nsIDOMEvent *event)
+{
+    task_t *task;
+
+    TRACE("(%p)\n", This);
+
+    if(!This->doc)
+        return;
+
+    if(This->editor_controller) {
+        nsIController_Release(This->editor_controller);
+        This->editor_controller = NULL;
+    }
+
+    if(This->doc->usermode == EDITMODE)
+        This->editor_controller = get_editor_controller(This);
+
+    task = mshtml_alloc(sizeof(task_t));
+
+    task->doc = This->doc;
+    task->task_id = TASK_PARSECOMPLETE;
+    task->next = NULL;
+
+    /*
+     * This should be done in the worker thread that parses HTML,
+     * but we don't have such thread (Gecko parses HTML for us).
+     */
+    push_task(task);
 }
 
 void close_gecko(void)
@@ -818,7 +989,7 @@ static nsresult NSAPI nsContextMenuListener_OnShowContextMenu(nsIContextMenuList
         FIXME("aContextFlags=%08x\n", aContextFlags);
     };
 
-    HTMLDocument_ShowContextMenu(This->doc, dwID, &pt);
+    show_context_menu(This->doc, dwID, &pt);
 
     return NS_OK;
 }
@@ -1203,11 +1374,26 @@ static nsrefcnt NSAPI nsDOMEventListener_Release(nsIDOMEventListener *iface)
 static nsresult NSAPI nsDOMEventListener_HandleEvent(nsIDOMEventListener *iface, nsIDOMEvent *event)
 {
     NSContainer *This = NSEVENTLIST_THIS(iface);
+    nsAString type_str;
+    const PRUnichar *type;
 
-    TRACE("(%p)->(%p)\n", This, event);
+    static const PRUnichar loadW[] = {'l','o','a','d',0};
 
-    if(This->doc->usermode == EDITMODE)
-        handle_edit_event(This->doc, event);
+    nsAString_Init(&type_str, NULL);
+    nsIDOMEvent_GetType(event, &type_str);
+    nsAString_GetData(&type_str, &type, NULL);
+
+    TRACE("(%p)->(%p) %s\n", This, event, debugstr_w(type));
+
+    if(!strcmpW(loadW, type)) {
+        handle_load_event(This, event);
+    }else if(This->doc) {
+        update_doc(This->doc, UPDATE_UI);
+        if(This->doc->usermode == EDITMODE)
+            handle_edit_event(This->doc, event);
+    }
+
+    nsAString_Finish(&type_str);
 
     return NS_OK;
 }
@@ -1348,6 +1534,7 @@ NSContainer *NSContainer_Create(HTMLDocument *doc, NSContainer *parent)
 {
     nsIDOMWindow *dom_window;
     nsIWebBrowserSetup *wbsetup;
+    nsIScrollable *scrollable;
     NSContainer *ret;
     nsresult nsres;
 
@@ -1370,6 +1557,7 @@ NSContainer *NSContainer_Create(HTMLDocument *doc, NSContainer *parent)
     ret->ref = 1;
     ret->bscallback = NULL;
     ret->content_listener = NULL;
+    ret->editor_controller = NULL;
 
     if(parent)
         nsIWebBrowserChrome_AddRef(NSWBCHROME(parent));
@@ -1439,19 +1627,45 @@ NSContainer *NSContainer_Create(HTMLDocument *doc, NSContainer *parent)
         nsres = nsIDOMWindow_QueryInterface(dom_window, &IID_nsIDOMEventTarget, (void**)&target);
         nsIDOMWindow_Release(dom_window);
         if(NS_SUCCEEDED(nsres)) {
-            nsAString keypress_str;
+            nsAString keypress_str, load_str;
             static const PRUnichar wsz_keypress[] = {'k','e','y','p','r','e','s','s',0};
+            static const PRUnichar wsz_load[] = {'l','o','a','d',0};
+
             nsAString_Init(&keypress_str, wsz_keypress);
-            nsres = nsIDOMEventTarget_AddEventListener(target, &keypress_str, NSEVENTLIST(ret), TRUE);
+            nsres = nsIDOMEventTarget_AddEventListener(target, &keypress_str, NSEVENTLIST(ret), FALSE);
             nsAString_Finish(&keypress_str);
-            nsIDOMEventTarget_Release(target);
             if(NS_FAILED(nsres))
                 ERR("AddEventTarget failed: %08x\n", nsres);
+
+            nsAString_Init(&load_str, wsz_load);
+            nsres = nsIDOMEventTarget_AddEventListener(target, &load_str, NSEVENTLIST(ret), TRUE);
+            nsAString_Finish(&load_str);
+            if(NS_FAILED(nsres))
+                ERR("AddEventTarget failed: %08x\n", nsres);
+
+            nsIDOMEventTarget_Release(target);
         }else {
             ERR("Could not get nsIDOMEventTarget interface: %08x\n", nsres);
         }
     }else {
         ERR("GetContentDOMWindow failed: %08x\n", nsres);
+    }
+
+    nsres = nsIWebBrowser_QueryInterface(ret->webbrowser, &IID_nsIScrollable, (void**)&scrollable);
+    if(NS_SUCCEEDED(nsres)) {
+        nsres = nsIScrollable_SetDefaultScrollbarPreferences(scrollable,
+                ScrollOrientation_Y, Scrollbar_Always);
+        if(NS_FAILED(nsres))
+            ERR("Could not set default Y scrollbar prefs: %08x\n", nsres);
+
+        nsres = nsIScrollable_SetDefaultScrollbarPreferences(scrollable,
+                ScrollOrientation_X, Scrollbar_Auto);
+        if(NS_FAILED(nsres))
+            ERR("Could not set default X scrollbar prefs: %08x\n", nsres);
+
+        nsIScrollable_Release(scrollable);
+    }else {
+        ERR("Could not get nsIScrollable: %08x\n", nsres);
     }
 
     return ret;
@@ -1480,6 +1694,11 @@ void NSContainer_Release(NSContainer *This)
 
     nsIWebBrowserFocus_Release(This->focus);
     This->focus = NULL;
+
+    if(This->editor_controller) {
+        nsIController_Release(This->editor_controller);
+        This->editor_controller = NULL;
+    }
 
     if(This->content_listener) {
         nsIURIContentListener_Release(This->content_listener);

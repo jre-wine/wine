@@ -23,6 +23,7 @@
 #include "server.h"
 #include "server_defines.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -162,6 +163,88 @@ s_test_list_length(test_list_t *list)
           : 0);
 }
 
+int
+s_sum_fixed_int_3d(int m[2][3][4])
+{
+  int i, j, k;
+  int sum = 0;
+
+  for (i = 0; i < 2; ++i)
+    for (j = 0; j < 3; ++j)
+      for (k = 0; k < 4; ++k)
+        sum += m[i][j][k];
+
+  return sum;
+}
+
+int
+s_sum_conf_array(int x[], int n)
+{
+  int *p = x, *end = p + n;
+  int sum = 0;
+
+  while (p < end)
+    sum += *p++;
+
+  return sum;
+}
+
+int
+s_sum_var_array(int x[20], int n)
+{
+  ok(0 <= n, "RPC sum_var_array\n");
+  ok(n <= 20, "RPC sum_var_array\n");
+
+  return s_sum_conf_array(x, n);
+}
+
+int
+s_dot_two_vectors(vector_t vs[2])
+{
+  return vs[0].x * vs[1].x + vs[0].y * vs[1].y + vs[0].z * vs[1].z;
+}
+
+int
+s_sum_cs(cs_t *cs)
+{
+  return s_sum_conf_array(cs->ca, cs->n);
+}
+
+int
+s_sum_cps(cps_t *cps)
+{
+  int sum = 0;
+  int i;
+
+  for (i = 0; i < *cps->pn; ++i)
+    sum += cps->ca1[i];
+
+  for (i = 0; i < 2 * cps->n; ++i)
+    sum += cps->ca2[i];
+
+  return sum;
+}
+
+int
+s_square_puint(puint_t p)
+{
+  int n = atoi(p);
+  return n * n;
+}
+
+int
+s_dot_copy_vectors(vector_t u, vector_t v)
+{
+  return u.x * v.x + u.y * v.y + u.z * v.z;
+}
+
+int
+s_square_test_us(test_us_t *tus)
+{
+  int n = atoi(tus->us.x);
+  return n * n;
+}
+
 void
 s_stop(void)
 {
@@ -272,6 +355,7 @@ basic_tests(void)
   ok(ptypes_sum(&ptypes) == 33.0, "RPC ptypes_sum\n");
 
   ok(dot_pvectors(&pvecs) == -21, "RPC dot_pvectors\n");
+  ok(dot_copy_vectors(vec1, vec2) == -21, "RPC dot_copy_vectors\n");
   ok(sum_fixed_array(f) == -2, "RPC sum_fixed_array\n");
   ok(sum_sp(&sp) == 29, "RPC sum_sp\n");
 }
@@ -325,14 +409,133 @@ free_list(test_list_t *list)
   HeapFree(GetProcessHeap(), 0, list);
 }
 
+ULONG __RPC_USER
+puint_t_UserSize(ULONG *flags, ULONG start, puint_t *p)
+{
+  return start + sizeof(int);
+}
+
+unsigned char * __RPC_USER
+puint_t_UserMarshal(ULONG *flags, unsigned char *buffer, puint_t *p)
+{
+  int n = atoi(*p);
+  memcpy(buffer, &n, sizeof n);
+  return buffer + sizeof n;
+}
+
+unsigned char * __RPC_USER
+puint_t_UserUnmarshal(ULONG *flags, unsigned char *buffer, puint_t *p)
+{
+  int n;
+  memcpy(&n, buffer, sizeof n);
+  *p = HeapAlloc(GetProcessHeap(), 0, 10);
+  sprintf(*p, "%d", n);
+  return buffer + sizeof n;
+}
+
+void __RPC_USER
+puint_t_UserFree(ULONG *flags, puint_t *p)
+{
+  HeapFree(GetProcessHeap(), 0, *p);
+}
+
+ULONG __RPC_USER
+us_t_UserSize(ULONG *flags, ULONG start, us_t *pus)
+{
+  return start + sizeof(struct wire_us);
+}
+
+unsigned char * __RPC_USER
+us_t_UserMarshal(ULONG *flags, unsigned char *buffer, us_t *pus)
+{
+  struct wire_us wus;
+  wus.x = atoi(pus->x);
+  memcpy(buffer, &wus, sizeof wus);
+  return buffer + sizeof wus;
+}
+
+unsigned char * __RPC_USER
+us_t_UserUnmarshal(ULONG *flags, unsigned char *buffer, us_t *pus)
+{
+  struct wire_us wus;
+  memcpy(&wus, buffer, sizeof wus);
+  pus->x = HeapAlloc(GetProcessHeap(), 0, 10);
+  sprintf(pus->x, "%d", wus.x);
+  return buffer + sizeof wus;
+}
+
+void __RPC_USER
+us_t_UserFree(ULONG *flags, us_t *pus)
+{
+  HeapFree(GetProcessHeap(), 0, pus->x);
+}
+
 static void
 pointer_tests(void)
 {
+  static char p1[] = "11";
   test_list_t *list = make_list(make_list(make_list(null_list())));
+  static test_us_t tus = {{p1}};
 
   ok(test_list_length(list) == 3, "RPC test_list_length\n");
+  ok(square_puint(p1) == 121, "RPC square_puint\n");
+  ok(square_test_us(&tus) == 121, "RPC square_test_us\n");
 
   free_list(list);
+}
+
+static void
+array_tests(void)
+{
+  static int m[2][3][4] =
+  {
+    {{1, 2, 3, 4}, {-1, -3, -5, -7}, {0, 2, 4, 6}},
+    {{1, -2, 3, -4}, {2, 3, 5, 7}, {-4, -1, -14, 4114}}
+  };
+  static int c[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  static vector_t vs[2] = {{1, -2, 3}, {4, -5, -6}};
+  cps_t cps;
+  cs_t *cs;
+  int n;
+
+  ok(sum_fixed_int_3d(m) == 4116, "RPC sum_fixed_int_3d\n");
+
+  ok(sum_conf_array(c, 10) == 45, "RPC sum_conf_array\n");
+  ok(sum_conf_array(&c[5], 2) == 11, "RPC sum_conf_array\n");
+  ok(sum_conf_array(&c[7], 1) == 7, "RPC sum_conf_array\n");
+  ok(sum_conf_array(&c[2], 0) == 0, "RPC sum_conf_array\n");
+
+  ok(sum_var_array(c, 10) == 45, "RPC sum_conf_array\n");
+  ok(sum_var_array(&c[5], 2) == 11, "RPC sum_conf_array\n");
+  ok(sum_var_array(&c[7], 1) == 7, "RPC sum_conf_array\n");
+  ok(sum_var_array(&c[2], 0) == 0, "RPC sum_conf_array\n");
+
+  ok(dot_two_vectors(vs) == -4, "RPC dot_two_vectors\n");
+  cs = HeapAlloc(GetProcessHeap(), 0, offsetof(cs_t, ca) + 5 * sizeof cs->ca[0]);
+  cs->n = 5;
+  cs->ca[0] = 3;
+  cs->ca[1] = 5;
+  cs->ca[2] = -2;
+  cs->ca[3] = -1;
+  cs->ca[4] = -4;
+  ok(sum_cs(cs) == 1, "RPC sum_cs\n");
+  HeapFree(GetProcessHeap(), 0, cs);
+
+  n = 5;
+  cps.pn = &n;
+  cps.ca1 = &c[2];
+  cps.n = 3;
+  cps.ca2 = &c[3];
+  ok(sum_cps(&cps) == 53, "RPC sum_cps\n");
+}
+
+static void
+run_tests(void)
+{
+  basic_tests();
+  union_tests();
+  pointer_tests();
+  array_tests();
 }
 
 static void
@@ -348,9 +551,7 @@ client(const char *test)
     ok(RPC_S_OK == RpcStringBindingCompose(NULL, iptcp, address, port, NULL, &binding), "RpcStringBindingCompose\n");
     ok(RPC_S_OK == RpcBindingFromStringBinding(binding, &IServer_IfHandle), "RpcBindingFromStringBinding\n");
 
-    basic_tests();
-    union_tests();
-    pointer_tests();
+    run_tests();
 
     ok(RPC_S_OK == RpcStringFree(&binding), "RpcStringFree\n");
     ok(RPC_S_OK == RpcBindingFree(&IServer_IfHandle), "RpcBindingFree\n");
@@ -365,9 +566,7 @@ client(const char *test)
     ok(RPC_S_OK == RpcStringBindingCompose(NULL, np, address, pipe, NULL, &binding), "RpcStringBindingCompose\n");
     ok(RPC_S_OK == RpcBindingFromStringBinding(binding, &IServer_IfHandle), "RpcBindingFromStringBinding\n");
 
-    basic_tests();
-    union_tests();
-    pointer_tests();
+    run_tests();
     stop();
 
     ok(RPC_S_OK == RpcStringFree(&binding), "RpcStringFree\n");

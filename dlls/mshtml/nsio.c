@@ -605,15 +605,45 @@ static BOOL do_load_from_moniker_hack(nsChannel *This)
     return FALSE;
 }
 
+static HRESULT create_mon_for_nschannel(nsChannel *channel, IMoniker **mon)
+{
+    nsIWineURI *wine_uri;
+    LPCWSTR wine_url;
+    nsresult nsres;
+    HRESULT hres;
+
+    if(!channel->original_uri) {
+        ERR("original_uri == NULL\n");
+        return E_FAIL;
+    }
+
+    nsres = nsIURI_QueryInterface(channel->original_uri, &IID_nsIWineURI, (void**)&wine_uri);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIWineURI: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsIWineURI_GetWineURL(wine_uri, &wine_url);
+    nsIWineURI_Release(wine_uri);
+    if(!wine_url) {
+        TRACE("wine_url == NULL\n");
+        return E_FAIL;
+    }
+
+    hres = CreateURLMoniker(NULL, wine_url, mon);
+    if(FAILED(hres))
+        WARN("CreateURLMonikrer failed: %08x\n", hres);
+
+    return hres;
+}
+
 static nsresult NSAPI nsChannel_AsyncOpen(nsIHttpChannel *iface, nsIStreamListener *aListener,
                                           nsISupports *aContext)
 {
     nsChannel *This = NSCHANNEL_THIS(iface);
     BSCallback *bscallback;
-    nsIWineURI *wine_uri;
-    IMoniker *mon;
+    IMoniker *mon = NULL;
     PRBool is_doc_uri;
-    LPCWSTR wine_url;
     nsresult nsres;
     task_t *task;
     HRESULT hres;
@@ -660,6 +690,11 @@ static nsresult NSAPI nsChannel_AsyncOpen(nsIHttpChannel *iface, nsIStreamListen
                 return This->channel
                     ?  nsIChannel_AsyncOpen(This->channel, aListener, aContext)
                     : NS_ERROR_UNEXPECTED;
+
+            hres = create_mon_for_nschannel(This, &mon);
+            if(FAILED(hres))
+                return NS_ERROR_UNEXPECTED;
+            set_current_mon(container->doc, mon);
         }
     }
 
@@ -685,6 +720,9 @@ static nsresult NSAPI nsChannel_AsyncOpen(nsIHttpChannel *iface, nsIStreamListen
 
         nsres = nsIChannel_AsyncOpen(This->channel, aListener, aContext);
 
+        if(mon)
+            IMoniker_Release(mon);
+
         if(NS_FAILED(nsres) && (This->load_flags & LOAD_INITIAL_DOCUMENT_URI))
             return WINE_NS_LOAD_FROM_MONIKER;
         return nsres;
@@ -692,28 +730,9 @@ static nsresult NSAPI nsChannel_AsyncOpen(nsIHttpChannel *iface, nsIStreamListen
 
     TRACE("channel == NULL\n");
 
-    if(!This->original_uri) {
-        ERR("original_uri == NULL\n");
+    hres = create_mon_for_nschannel(This, &mon);
+    if(FAILED(hres))
         return NS_ERROR_UNEXPECTED;
-    }
-
-    nsres = nsIURI_QueryInterface(This->original_uri, &IID_nsIWineURI, (void**)&wine_uri);
-    if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIWineURI: %08x\n", nsres);
-        return NS_ERROR_UNEXPECTED;
-    }
-
-    nsIWineURI_GetWineURL(wine_uri, &wine_url);
-    if(!wine_url) {
-        TRACE("wine_url == NULL\n");
-        return NS_ERROR_UNEXPECTED;
-    }
-
-    hres = CreateURLMoniker(NULL, wine_url, &mon);
-    if(FAILED(hres)) {
-        WARN("CreateURLMonikrer failed: %08x\n", hres);
-        return NS_ERROR_UNEXPECTED;
-    }
 
     bscallback = create_bscallback(mon);
     IMoniker_Release(mon);
@@ -1985,7 +2004,7 @@ static nsresult NSAPI nsIOService_NewURI(nsIIOService *iface, const nsACString *
             nsIWineURI_GetNSContainer(base_wine_uri, &nscontainer);
             nsIWineURI_GetWineURL(base_wine_uri, &base_wine_url);
         }else {
-            ERR("Could not get nsIWineURI: %08x\n", nsres);
+            TRACE("Could not get base nsIWineURI: %08x\n", nsres);
         }
     }
 
@@ -2189,7 +2208,6 @@ void init_nsio(nsIComponentManager *component_manager, nsIComponentRegistrar *re
                                                &IID_nsIFactory, (void**)&old_factory);
     if(NS_FAILED(nsres)) {
         ERR("Could not get factory: %08x\n", nsres);
-        nsIFactory_Release(old_factory);
         return;
     }
 

@@ -24,7 +24,7 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
-#define GLINFO_LOCATION ((IWineD3DImpl *)(((IWineD3DDeviceImpl *)This->wineD3DDevice)->wineD3D))->gl_info
+#define GLINFO_LOCATION This->wineD3DDevice->adapter->gl_info
 
 /***************************************
  * Stateblock helper functions follow
@@ -711,8 +711,10 @@ should really perform a delta so that only the changes get updated*/
                 IWineD3DDevice_SetTransform(pDevice, i, &This->transforms[i]);
         }
 
-        if (This->set.indices && This->changed.indices)
-            IWineD3DDevice_SetIndices(pDevice, This->pIndexData, This->baseVertexIndex);
+        if (This->set.indices && This->changed.indices) {
+            IWineD3DDevice_SetIndices(pDevice, This->pIndexData);
+            IWineD3DDevice_SetBaseVertexIndex(pDevice, This->baseVertexIndex);
+        }
 
         if (This->set.material && This->changed.material )
             IWineD3DDevice_SetMaterial(pDevice, &This->material);
@@ -1050,7 +1052,7 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStat
         This->samplerState[i][WINED3DSAMP_MIPMAPLODBIAS    ] = 0;
         This->samplerState[i][WINED3DSAMP_MAXMIPLEVEL      ] = 0;
         This->samplerState[i][WINED3DSAMP_MAXANISOTROPY    ] = 1;
-        This->samplerState[i][WINED3DSAMP_SRGBTEXTURE      ] = 0; /* TODO: Gamma correction value*/
+        This->samplerState[i][WINED3DSAMP_SRGBTEXTURE      ] = 0;
         This->samplerState[i][WINED3DSAMP_ELEMENTINDEX     ] = 0; /* TODO: Indicates which element of a  multielement texture to use */
         This->samplerState[i][WINED3DSAMP_DMAPOFFSET       ] = 0; /* TODO: Vertex offset in the presampled displacement map */
     }
@@ -1062,6 +1064,11 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStat
        then the default texture will kick in until replaced by a SetTexture call     */
     ENTER_GL();
 
+    if(GL_SUPPORT(APPLE_CLIENT_STORAGE)) {
+        /* The dummy texture does not have client storage backing */
+        glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_FALSE);
+        checkGLcall("glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_FALSE)");
+    }
     for (i = 0; i < GL_LIMITS(textures); i++) {
         GLubyte white = 255;
 
@@ -1091,6 +1098,11 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStat
 
         glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 1, 1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, &white);
         checkGLcall("glTexImage2D");
+    }
+    if(GL_SUPPORT(APPLE_CLIENT_STORAGE)) {
+        /* Reenable because if supported it is enabled by default */
+        glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE);
+        checkGLcall("glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE)");
     }
 
     LEAVE_GL();

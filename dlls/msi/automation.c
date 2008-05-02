@@ -742,10 +742,13 @@ static HRESULT WINAPI SummaryInfoImpl_Invoke(
         UINT* puArgErr)
 {
     UINT ret;
-    VARIANTARG varg0;
+    VARIANTARG varg0, varg1;
+    FILETIME ft, ftlocal;
+    SYSTEMTIME st;
     HRESULT hr;
 
     VariantInit(&varg0);
+    VariantInit(&varg1);
 
     switch (dispIdMember)
     {
@@ -754,87 +757,128 @@ static HRESULT WINAPI SummaryInfoImpl_Invoke(
             {
                 UINT type;
                 INT value;
-                INT pid;
+                DWORD size = 0;
+                DATE date;
+                LPWSTR str;
 
                 static WCHAR szEmpty[] = {0};
 
-                VariantClear(pVarResult);
+                hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
+                if (FAILED(hr)) return hr;
+                ret = MsiSummaryInfoGetPropertyW(This->msiHandle, V_I4(&varg0), &type, &value,
+                                                 &ft, szEmpty, &size);
+                if (ret != ERROR_SUCCESS &&
+                    ret != ERROR_MORE_DATA)
+                {
+                    ERR("MsiSummaryInfoGetProperty returned %d\n", ret);
+                    return DISP_E_EXCEPTION;
+                }
+
+                switch (type)
+                {
+                    case VT_EMPTY:
+                        break;
+
+                    case VT_I2:
+                    case VT_I4:
+                        V_VT(pVarResult) = VT_I4;
+                        V_I4(pVarResult) = value;
+                        break;
+
+                    case VT_LPSTR:
+                        if (!(str = msi_alloc(++size * sizeof(WCHAR))))
+                            ERR("Out of memory\n");
+                        else if ((ret = MsiSummaryInfoGetPropertyW(This->msiHandle, V_I4(&varg0), &type, NULL,
+                                                                   NULL, str, &size)) != ERROR_SUCCESS)
+                            ERR("MsiSummaryInfoGetProperty returned %d\n", ret);
+                        else
+                        {
+                            V_VT(pVarResult) = VT_BSTR;
+                            V_BSTR(pVarResult) = SysAllocString(str);
+                        }
+                        msi_free(str);
+                        break;
+
+                    case VT_FILETIME:
+                        FileTimeToLocalFileTime(&ft, &ftlocal);
+                        FileTimeToSystemTime(&ftlocal, &st);
+                        SystemTimeToVariantTime(&st, &date);
+
+                        V_VT(pVarResult) = VT_DATE;
+                        V_DATE(pVarResult) = date;
+                        break;
+
+                    default:
+                        ERR("Unhandled variant type %d\n", type);
+                }
+            }
+            else if (wFlags & DISPATCH_PROPERTYPUT)
+            {
+                UINT posValue = DISPID_PROPERTYPUT;
 
                 hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
                 if (FAILED(hr)) return hr;
-                pid = V_I4(&varg0);
-
-                if (pid == PID_CODEPAGE || (pid >= PID_PAGECOUNT && pid <= PID_CHARCOUNT) || PID_SECURITY)
+                hr = DispGetParam_CopyOnly(pDispParams, &posValue, &varg1);
+                if (FAILED(hr))
                 {
-                    ret = MsiSummaryInfoGetPropertyW(This->msiHandle, pid, &type, &value,
-                                                     NULL, NULL, NULL);
-                    if (ret != ERROR_SUCCESS)
-                        return DISP_E_EXCEPTION;
-
-                    if (pid == PID_CODEPAGE)
-                    {
-                        V_VT(pVarResult) = VT_I2;
-                        V_I2(pVarResult) = value;
-                    }
-                    else
-                    {
-                        V_VT(pVarResult) = VT_I4;
-                        V_I4(pVarResult) = value;
-                    }
+                    *puArgErr = posValue;
+                    return hr;
                 }
-                else if ((pid >= PID_TITLE && pid <= PID_REVNUMBER) || pid == PID_APPNAME)
+
+                switch (V_VT(&varg1))
                 {
-                    LPWSTR str;
-                    DWORD size = 0;
+                    case VT_I2:
+                    case VT_I4:
+                        ret = MsiSummaryInfoSetPropertyW(This->msiHandle, V_I4(&varg0), V_VT(&varg1), V_I4(&varg1), NULL, NULL);
+                        break;
 
-                    ret = MsiSummaryInfoGetPropertyW(This->msiHandle, pid, &type, NULL,
-                                                     NULL, szEmpty, &size);
-                    if (ret != ERROR_MORE_DATA)
+                    case VT_DATE:
+                        VariantTimeToSystemTime(V_DATE(&varg1), &st);
+                        SystemTimeToFileTime(&st, &ftlocal);
+                        LocalFileTimeToFileTime(&ftlocal, &ft);
+                        ret = MsiSummaryInfoSetPropertyW(This->msiHandle, V_I4(&varg0), VT_FILETIME, 0, &ft, NULL);
+                        break;
+
+                    case VT_BSTR:
+                        ret = MsiSummaryInfoSetPropertyW(This->msiHandle, V_I4(&varg0), VT_LPSTR, 0, NULL, V_BSTR(&varg1));
+                        break;
+
+                    default:
+                        FIXME("Unhandled variant type %d\n", V_VT(&varg1));
+                        VariantClear(&varg1);
                         return DISP_E_EXCEPTION;
-
-                    str = msi_alloc(++size * sizeof(WCHAR));
-                    if (!str)
-                        return DISP_E_EXCEPTION;
-
-                    ret = MsiSummaryInfoGetPropertyW(This->msiHandle, pid, &type, NULL,
-                                                     NULL, str, &size);
-                    if (ret != ERROR_SUCCESS)
-                    {
-                        msi_free(str);
-                        return DISP_E_EXCEPTION;
-                    }
-
-                    V_VT(pVarResult) = VT_BSTR;
-                    V_BSTR(pVarResult) = SysAllocString(str);
-                    msi_free(str);
                 }
-                else if (pid >= PID_EDITTIME && pid <= PID_LASTSAVE_DTM)
+
+                if (ret != ERROR_SUCCESS)
                 {
-                    FILETIME ft;
-                    SYSTEMTIME st;
-                    DATE date;
+                    ERR("MsiSummaryInfoSetPropertyW returned %d\n", ret);
+                    return DISP_E_EXCEPTION;
+                }
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
 
-                    ret = MsiSummaryInfoGetPropertyW(This->msiHandle, pid, &type, &value,
-                                                     &ft, NULL, NULL);
-                    if (ret != ERROR_SUCCESS)
-                        return DISP_E_EXCEPTION;
-
-                    FileTimeToSystemTime(&ft, &st);
-                    SystemTimeToVariantTime(&st, &date);
-
-                    V_VT(pVarResult) = VT_DATE;
-                    V_DATE(pVarResult) = date;
+        case DISPID_SUMMARYINFO_PROPERTYCOUNT:
+            if (wFlags & DISPATCH_PROPERTYGET) {
+                UINT count;
+                if ((ret = MsiSummaryInfoGetPropertyCount(This->msiHandle, &count)) != ERROR_SUCCESS)
+                    ERR("MsiSummaryInfoGetPropertyCount returned %d\n", ret);
+                else
+                {
+                    V_VT(pVarResult) = VT_I4;
+                    V_I4(pVarResult) = count;
                 }
             }
             else return DISP_E_MEMBERNOTFOUND;
             break;
 
         default:
-            ERR("Member not found: %d\n", dispIdMember);
             return DISP_E_MEMBERNOTFOUND;
     }
 
+    VariantClear(&varg1);
     VariantClear(&varg0);
+
     return S_OK;
 }
 
@@ -1119,7 +1163,7 @@ static HRESULT WINAPI DatabaseImpl_Invoke(
     switch (dispIdMember)
     {
         case DISPID_DATABASE_SUMMARYINFORMATION:
-            if (wFlags & DISPATCH_METHOD)
+            if (wFlags & DISPATCH_PROPERTYGET)
             {
                 hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
                 if (FAILED(hr))
@@ -1849,7 +1893,6 @@ static HRESULT WINAPI InstallerImpl_Invoke(
             break;
 
          default:
-            ERR("Member not found: %d\n", dispIdMember);
             return DISP_E_MEMBERNOTFOUND;
     }
 

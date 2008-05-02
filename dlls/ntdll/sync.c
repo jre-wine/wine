@@ -671,8 +671,6 @@ static BOOL invoke_apc( const apc_call_t *call, apc_result_t *result )
         result->async_io.status = call->async_io.func( call->async_io.user,
                                                        call->async_io.sb,
                                                        call->async_io.status );
-        if (result->async_io.status != STATUS_PENDING)
-            NtCurrentTeb()->num_async_io--;
         break;
     case APC_VIRTUAL_ALLOC:
         result->type = call->type;
@@ -973,13 +971,10 @@ NTSTATUS WINAPI NtYieldExecution(void)
  */
 NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeout )
 {
-    /* if alertable or async I/O in progress, we need to query the server */
-    if (alertable || NtCurrentTeb()->num_async_io)
-    {
-        UINT flags = SELECT_INTERRUPTIBLE;
-        if (alertable) flags |= SELECT_ALERTABLE;
-        return NTDLL_wait_for_multiple_objects( 0, NULL, flags, timeout, 0 );
-    }
+    /* if alertable, we need to query the server */
+    if (alertable)
+        return NTDLL_wait_for_multiple_objects( 0, NULL, SELECT_INTERRUPTIBLE | SELECT_ALERTABLE,
+                                                timeout, 0 );
 
     if (!timeout || timeout->QuadPart == TIMEOUT_INFINITE)  /* sleep forever */
     {
@@ -1015,7 +1010,17 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
 }
 
 /******************************************************************
- *		NtCreateIoCompletion (NTDLL.@)
+ *              NtCreateIoCompletion (NTDLL.@)
+ *              ZwCreateIoCompletion (NTDLL.@)
+ *
+ * Creates I/O completion object.
+ *
+ * PARAMS
+ *      CompletionPort            [O] created completion object handle will be placed there
+ *      DesiredAccess             [I] desired access to a handle (combination of IO_COMPLETION_*)
+ *      ObjectAttributes          [I] completion object attributes
+ *      NumberOfConcurrentThreads [I] desired number of concurrent active worker threads
+ *
  */
 NTSTATUS WINAPI NtCreateIoCompletion( PHANDLE CompletionPort, ACCESS_MASK DesiredAccess,
                                       POBJECT_ATTRIBUTES ObjectAttributes, ULONG NumberOfConcurrentThreads )
@@ -1025,20 +1030,88 @@ NTSTATUS WINAPI NtCreateIoCompletion( PHANDLE CompletionPort, ACCESS_MASK Desire
     return STATUS_NOT_IMPLEMENTED;
 }
 
+/******************************************************************
+ *              NtSetIoCompletion (NTDLL.@)
+ *              ZwSetIoCompletion (NTDLL.@)
+ *
+ * Inserts completion message into queue
+ *
+ * PARAMS
+ *      CompletionPort           [I] HANDLE to completion object
+ *      CompletionKey            [I] completion key
+ *      CompletionValue          [I] completion value (usually pointer to OVERLAPPED)
+ *      Status                   [I] operation status
+ *      NumberOfBytesTransferred [I] number of bytes transferred
+ */
 NTSTATUS WINAPI NtSetIoCompletion( HANDLE CompletionPort, ULONG_PTR CompletionKey,
-                                   PIO_STATUS_BLOCK iosb, ULONG NumberOfBytesTransferred,
+                                   ULONG_PTR CompletionValue, NTSTATUS Status,
                                    ULONG NumberOfBytesToTransfer )
 {
-    FIXME("(%p, %lx, %p, %d, %d)\n", CompletionPort, CompletionKey,
-          iosb, NumberOfBytesTransferred, NumberOfBytesToTransfer);
+    FIXME("(%p, %lx, %lx, %x, %d)\n", CompletionPort, CompletionKey,
+          CompletionValue, Status, NumberOfBytesToTransfer);
     return STATUS_NOT_IMPLEMENTED;
 }
 
+/******************************************************************
+ *              NtRemoveIoCompletion (NTDLL.@)
+ *              ZwRemoveIoCompletion (NTDLL.@)
+ *
+ * (Wait for and) retrieve first completion message from completion object's queue
+ *
+ * PARAMS
+ *      CompletionPort  [I] HANDLE to I/O completion object
+ *      CompletionKey   [O] completion key
+ *      CompletionValue [O] Completion value given in NtSetIoCompletion or in async operation
+ *      iosb            [O] IO_STATUS_BLOCK of completed asynchronous operation
+ *      WaitTime        [I] optional wait time in NTDLL format
+ *
+ */
 NTSTATUS WINAPI NtRemoveIoCompletion( HANDLE CompletionPort, PULONG_PTR CompletionKey,
-                                      PIO_STATUS_BLOCK iosb, PULONG OperationStatus,
+                                      PULONG_PTR CompletionValue, PIO_STATUS_BLOCK iosb,
                                       PLARGE_INTEGER WaitTime )
 {
     FIXME("(%p, %p, %p, %p, %p)\n", CompletionPort, CompletionKey,
-          iosb, OperationStatus, WaitTime);
+          CompletionValue, iosb, WaitTime);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/******************************************************************
+ *              NtOpenIoCompletion (NTDLL.@)
+ *              ZwOpenIoCompletion (NTDLL.@)
+ *
+ * Opens I/O completion object
+ *
+ * PARAMS
+ *      CompletionPort     [O] completion object handle will be placed there
+ *      DesiredAccess      [I] desired access to a handle (combination of IO_COMPLETION_*)
+ *      ObjectAttributes   [I] completion object name
+ *
+ */
+NTSTATUS WINAPI NtOpenIoCompletion( PHANDLE CompletionPort, ACCESS_MASK DesiredAccess,
+                                    POBJECT_ATTRIBUTES ObjectAttributes )
+{
+    FIXME("(%p, 0x%x, %p)\n", CompletionPort, DesiredAccess, ObjectAttributes);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/******************************************************************
+ *              NtQueryIoCompletion (NTDLL.@)
+ *              ZwQueryIoCompletion (NTDLL.@)
+ *
+ * Requests information about given I/O completion object
+ *
+ * PARAMS
+ *      CompletionPort        [I] HANDLE to completion port to request
+ *      InformationClass      [I] information class
+ *      CompletionInformation [O] user-provided buffer for data
+ *      BufferLength          [I] buffer length
+ *      RequiredLength        [O] required buffer length
+ *
+ */
+NTSTATUS WINAPI NtQueryIoCompletion( HANDLE CompletionPort, IO_COMPLETION_INFORMATION_CLASS InformationClass,
+                                     PVOID CompletionInformation, ULONG BufferLength, PULONG RequiredLength )
+{
+    FIXME("(%p, %d, %p, 0x%x, %p)\n", CompletionPort, InformationClass, CompletionInformation,
+            BufferLength, RequiredLength);
     return STATUS_NOT_IMPLEMENTED;
 }

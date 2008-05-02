@@ -181,6 +181,7 @@ static const char LookInInfosStr[] = "LookInInfos"; /* LOOKIN combo box property
  */
 
 /* Internal functions used by the dialog */
+static LRESULT FILEDLG95_ResizeControls(HWND hwnd, WPARAM wParam, LPARAM lParam);
 static LRESULT FILEDLG95_FillControls(HWND hwnd, WPARAM wParam, LPARAM lParam);
 static LRESULT FILEDLG95_OnWMCommand(HWND hwnd, WPARAM wParam, LPARAM lParam);
 static LRESULT FILEDLG95_OnWMGetIShellBrowser(HWND hwnd);
@@ -1037,35 +1038,12 @@ INT_PTR CALLBACK FileOpenDlgProc95(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             so it will be easily accessible through a GetPropA(...) */
       	 SetPropA(hwnd, FileOpenDlgInfosStr, (HANDLE) fodInfos);
 
+         FILEDLG95_InitControls(hwnd);
+
       	 fodInfos->DlgInfos.hwndCustomDlg =
      	   CreateTemplateDialog((FileOpenDlgInfos *)lParam, hwnd);
 
-         FILEDLG95_InitControls(hwnd);
-
-         if (fodInfos->DlgInfos.hwndCustomDlg)
-         {
-             RECT rc;
-             UINT flags = SWP_NOACTIVATE;
-
-             ArrangeCtrlPositions(fodInfos->DlgInfos.hwndCustomDlg, hwnd,
-                 (fodInfos->ofnInfos->Flags & (OFN_HIDEREADONLY | OFN_SHOWHELP)) == OFN_HIDEREADONLY);
-
-             /* resize the custom dialog to the parent size */
-             if (fodInfos->ofnInfos->Flags & (OFN_ENABLETEMPLATE | OFN_ENABLETEMPLATEHANDLE))
-                 GetClientRect(hwnd, &rc);
-             else
-             {
-                 /* our own fake template is zero sized and doesn't have
-                  * children, so there is no need to resize it.
-                  * Picasa depends on it.
-                  */
-                 flags |= SWP_NOSIZE;
-                 SetRectEmpty(&rc);
-             }
-             SetWindowPos(fodInfos->DlgInfos.hwndCustomDlg, HWND_BOTTOM,
-                          0, 0, rc.right, rc.bottom, flags);
-         }
-
+         FILEDLG95_ResizeControls(hwnd, wParam, lParam);
       	 FILEDLG95_FillControls(hwnd, wParam, lParam);
 
          SendCustomDlgNotificationMessage(hwnd,CDN_INITDONE);
@@ -1440,24 +1418,6 @@ static LRESULT FILEDLG95_InitControls(HWND hwnd)
     EnableWindow(GetDlgItem(hwnd, pshHelp), FALSE);
   }
 
-  /* Resize the height, if open as read only checkbox ad help button
-     are hidden and we are not using a custom template nor a customDialog
-     */
-  if ( (fodInfos->ofnInfos->Flags & OFN_HIDEREADONLY) &&
-       (!(fodInfos->ofnInfos->Flags &
-         (OFN_SHOWHELP|OFN_ENABLETEMPLATE|OFN_ENABLETEMPLATEHANDLE))) && 
-       (!fodInfos->DlgInfos.hwndCustomDlg ))
-  {
-    RECT rectDlg, rectHelp, rectCancel;
-    GetWindowRect(hwnd, &rectDlg);
-    GetWindowRect(GetDlgItem(hwnd, pshHelp), &rectHelp);
-    GetWindowRect(GetDlgItem(hwnd, IDCANCEL), &rectCancel);
-    /* subtract the height of the help button plus the space between
-       the help button and the cancel button to the height of the dialog */
-    SetWindowPos(hwnd, 0, 0, 0, rectDlg.right-rectDlg.left,
-                 (rectDlg.bottom-rectDlg.top) - (rectHelp.bottom - rectCancel.bottom),
-                 SWP_NOACTIVATE|SWP_NOMOVE|SWP_NOZORDER);
-  }
   /* change Open to Save */
   if (fodInfos->DlgInfos.dwDlgProp & FODPROP_SAVEDLG)
   {
@@ -1468,6 +1428,61 @@ static LRESULT FILEDLG95_InitControls(HWND hwnd)
       SetDlgItemTextW(hwnd, IDC_LOOKINSTATIC, buf);
   }
   return 0;
+}
+
+/***********************************************************************
+ *      FILEDLG95_ResizeControls
+ *
+ * WM_INITDIALOG message handler (after hook notification)
+ */
+static LRESULT FILEDLG95_ResizeControls(HWND hwnd, WPARAM wParam, LPARAM lParam)
+{
+  FileOpenDlgInfos *fodInfos = (FileOpenDlgInfos *) lParam;
+
+  if (fodInfos->DlgInfos.hwndCustomDlg)
+  {
+    RECT rc;
+    UINT flags = SWP_NOACTIVATE;
+
+    ArrangeCtrlPositions(fodInfos->DlgInfos.hwndCustomDlg, hwnd,
+        (fodInfos->ofnInfos->Flags & (OFN_HIDEREADONLY | OFN_SHOWHELP)) == OFN_HIDEREADONLY);
+
+    /* resize the custom dialog to the parent size */
+    if (fodInfos->ofnInfos->Flags & (OFN_ENABLETEMPLATE | OFN_ENABLETEMPLATEHANDLE))
+      GetClientRect(hwnd, &rc);
+    else
+    {
+      /* our own fake template is zero sized and doesn't have children, so
+       * there is no need to resize it. Picasa depends on it.
+       */
+      flags |= SWP_NOSIZE;
+      SetRectEmpty(&rc);
+    }
+      SetWindowPos(fodInfos->DlgInfos.hwndCustomDlg, HWND_BOTTOM,
+          0, 0, rc.right, rc.bottom, flags);
+  }
+  else
+  {
+    /* Resize the height, if open as read only checkbox ad help button are
+     * hidden and we are not using a custom template nor a customDialog
+     */
+    if ( (fodInfos->ofnInfos->Flags & OFN_HIDEREADONLY) &&
+                (!(fodInfos->ofnInfos->Flags &
+                   (OFN_SHOWHELP|OFN_ENABLETEMPLATE|OFN_ENABLETEMPLATEHANDLE))))
+    {
+      RECT rectDlg, rectHelp, rectCancel;
+      GetWindowRect(hwnd, &rectDlg);
+      GetWindowRect(GetDlgItem(hwnd, pshHelp), &rectHelp);
+      GetWindowRect(GetDlgItem(hwnd, IDCANCEL), &rectCancel);
+      /* subtract the height of the help button plus the space between the help
+       * button and the cancel button to the height of the dialog
+       */
+      SetWindowPos(hwnd, 0, 0, 0, rectDlg.right-rectDlg.left,
+          (rectDlg.bottom-rectDlg.top) - (rectHelp.bottom - rectCancel.bottom),
+          SWP_NOACTIVATE|SWP_NOMOVE|SWP_NOZORDER);
+    }
+  }
+  return TRUE;
 }
 
 /***********************************************************************
@@ -2021,7 +2036,8 @@ BOOL FILEDLG95_OnOpen(HWND hwnd)
 	  }
 	  else if( nOpenAction == ONOPEN_SEARCH )
 	  {
-            IShellView_Refresh(fodInfos->Shell.FOIShellView);
+            if (fodInfos->Shell.FOIShellView)
+              IShellView_Refresh(fodInfos->Shell.FOIShellView);
 	  }
           COMDLG32_SHFree(pidlCurrent);
           SendMessageW(fodInfos->DlgInfos.hwndFileName, EM_SETSEL, 0, -1);
@@ -2322,8 +2338,11 @@ static void FILEDLG95_SHELL_Clean(HWND hwnd)
     COMDLG32_SHFree(fodInfos->ShellInfos.pidlAbsCurrent);
 
     /* clean Shell interfaces */
-    IShellView_DestroyViewWindow(fodInfos->Shell.FOIShellView);
-    IShellView_Release(fodInfos->Shell.FOIShellView);
+    if (fodInfos->Shell.FOIShellView)
+    {
+      IShellView_DestroyViewWindow(fodInfos->Shell.FOIShellView);
+      IShellView_Release(fodInfos->Shell.FOIShellView);
+    }
     IShellFolder_Release(fodInfos->Shell.FOIShellFolder);
     IShellBrowser_Release(fodInfos->Shell.FOIShellBrowser);
     if (fodInfos->Shell.FOIDataObject)
@@ -2483,7 +2502,8 @@ static BOOL FILEDLG95_FILETYPE_OnCommand(HWND hwnd, WORD wNotifyCode)
       }
 
       /* Refresh the actual view to display the included items*/
-      IShellView_Refresh(fodInfos->Shell.FOIShellView);
+      if (fodInfos->Shell.FOIShellView)
+        IShellView_Refresh(fodInfos->Shell.FOIShellView);
     }
   }
   return FALSE;

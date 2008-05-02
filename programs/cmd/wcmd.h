@@ -26,71 +26,76 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <wine/unicode.h>
 
-void WCMD_assoc (char *, BOOL);
-void WCMD_batch (char *, char *, int, char *, HANDLE);
-void WCMD_call (char *command);
+void WCMD_assoc (WCHAR *, BOOL);
+void WCMD_batch (WCHAR *, WCHAR *, int, WCHAR *, HANDLE);
+void WCMD_call (WCHAR *command);
 void WCMD_change_tty (void);
 void WCMD_clear_screen (void);
 void WCMD_color (void);
 void WCMD_copy (void);
 void WCMD_create_dir (void);
-BOOL WCMD_delete (char *, BOOL);
-void WCMD_directory (char *);
-void WCMD_echo (const char *);
+BOOL WCMD_delete (WCHAR *, BOOL);
+void WCMD_directory (WCHAR *);
+void WCMD_echo (const WCHAR *);
 void WCMD_endlocal (void);
-void WCMD_enter_paged_mode(const char *);
+void WCMD_enter_paged_mode(const WCHAR *);
 void WCMD_exit (void);
-void WCMD_for (char *);
-void WCMD_give_help (char *command);
+void WCMD_for (WCHAR *);
+void WCMD_give_help (WCHAR *command);
 void WCMD_goto (void);
-void WCMD_if (char *);
+void WCMD_if (WCHAR *);
 void WCMD_leave_paged_mode(void);
-void WCMD_more (char *);
+void WCMD_more (WCHAR *);
 void WCMD_move (void);
-void WCMD_output (const char *format, ...);
-void WCMD_output_asis (const char *message);
-void WCMD_parse (char *s, char *q, char *p1, char *p2);
+void WCMD_output (const WCHAR *format, ...);
+void WCMD_output_asis (const WCHAR *message);
+void WCMD_parse (WCHAR *s, WCHAR *q, WCHAR *p1, WCHAR *p2);
 void WCMD_pause (void);
-void WCMD_pipe (char *command);
+void WCMD_pipe (WCHAR *command);
 void WCMD_popd (void);
 void WCMD_print_error (void);
-void WCMD_process_command (char *command);
-void WCMD_pushd (char *);
-int  WCMD_read_console (char *string, int str_len);
-void WCMD_remove_dir (char *command);
+void WCMD_process_command (WCHAR *command);
+void WCMD_pushd (WCHAR *);
+int  WCMD_read_console (WCHAR *string, int str_len);
+void WCMD_remove_dir (WCHAR *command);
 void WCMD_rename (void);
-void WCMD_run_program (char *command, int called);
-void WCMD_setlocal (const char *command);
+void WCMD_run_program (WCHAR *command, int called);
+void WCMD_setlocal (const WCHAR *command);
 void WCMD_setshow_attrib (void);
 void WCMD_setshow_date (void);
-void WCMD_setshow_default (char *command);
-void WCMD_setshow_env (char *command);
-void WCMD_setshow_path (char *command);
+void WCMD_setshow_default (WCHAR *command);
+void WCMD_setshow_env (WCHAR *command);
+void WCMD_setshow_path (WCHAR *command);
 void WCMD_setshow_prompt (void);
 void WCMD_setshow_time (void);
-void WCMD_shift (char *command);
+void WCMD_shift (WCHAR *command);
 void WCMD_show_prompt (void);
-void WCMD_title (char *);
-void WCMD_type (char *);
-void WCMD_verify (char *command);
+void WCMD_title (WCHAR *);
+void WCMD_type (WCHAR *);
+void WCMD_verify (WCHAR *command);
 void WCMD_version (void);
-int  WCMD_volume (int mode, char *command);
+int  WCMD_volume (int mode, WCHAR *command);
 
-char *WCMD_fgets (char *s, int n, HANDLE stream);
-char *WCMD_parameter (char *s, int n, char **where);
-char *WCMD_strtrim_leading_spaces (char *string);
-void WCMD_strtrim_trailing_spaces (char *string);
-void WCMD_opt_s_strip_quotes(char *cmd);
-void WCMD_HandleTildaModifiers(char **start, char *forVariable);
-BOOL WCMD_ask_confirm (char *message, BOOL showSureText);
+WCHAR *WCMD_fgets (WCHAR *s, int n, HANDLE stream);
+WCHAR *WCMD_parameter (WCHAR *s, int n, WCHAR **where);
+WCHAR *WCMD_strtrim_leading_spaces (WCHAR *string);
+void WCMD_strtrim_trailing_spaces (WCHAR *string);
+void WCMD_opt_s_strip_quotes(WCHAR *cmd);
+void WCMD_HandleTildaModifiers(WCHAR **start, WCHAR *forVariable);
+BOOL WCMD_ask_confirm (WCHAR *message, BOOL showSureText, BOOL *optionAll);
 
-void WCMD_splitpath(const CHAR* path, CHAR* drv, CHAR* dir, CHAR* name, CHAR* ext);
+void WCMD_splitpath(const WCHAR* path, WCHAR* drv, WCHAR* dir, WCHAR* name, WCHAR* ext);
+WCHAR *WCMD_LoadMessage(UINT id);
+WCHAR *WCMD_strdupW(WCHAR *input);
+BOOL WCMD_ReadFile(const HANDLE hIn, WCHAR *intoBuf, const DWORD maxChars,
+                   LPDWORD charsRead, const LPOVERLAPPED unused);
 
 /*	Data structure to hold context when executing batch files */
 
 typedef struct {
-  char *command;	/* The command which invoked the batch file */
+  WCHAR *command;	/* The command which invoked the batch file */
   HANDLE h;             /* Handle to the open batch file */
   int shift_count[10];	/* Offset in terms of shifts for %0 - %9 */
   void *prev_context;	/* Pointer to the previous context block */
@@ -104,7 +109,7 @@ struct env_stack
   struct env_stack *next;
   union {
     int    stackdepth;       /* Only used for pushd and popd */
-    char   cwd;              /* Only used for set/endlocal   */
+    WCHAR   cwd;              /* Only used for set/endlocal   */
   } u;
   WCHAR *strings;
 };
@@ -114,8 +119,8 @@ struct env_stack
 typedef struct _DIRECTORY_STACK
 {
   struct _DIRECTORY_STACK *next;
-  char  *dirName;
-  char  *fileName;
+  WCHAR  *dirName;
+  WCHAR  *fileName;
 } DIRECTORY_STACK;
 
 #endif /* !RC_INVOKED */
@@ -179,19 +184,46 @@ typedef struct _DIRECTORY_STACK
 #define WCMD_EXIT   44
 
 /* Some standard messages */
-extern const char nyi[];
-extern const char newline[];
-extern const char version_string[];
-extern const char anykey[];
+extern const WCHAR newline[];
+extern WCHAR anykey[];
+extern WCHAR version_string[];
 
 /* Translated messages */
-#define WCMD_CONFIRM  1001
-#define WCMD_YES      1002
-#define WCMD_NO       1003
-#define WCMD_NOASSOC  1004
-#define WCMD_NOFTYPE  1005
-#define WCMD_OVERWRITE 1006
-#define WCMD_MORESTR  1007
+#define WCMD_ALLHELP          1000
+#define WCMD_CONFIRM          1001
+#define WCMD_YES              1002
+#define WCMD_NO               1003
+#define WCMD_NOASSOC          1004
+#define WCMD_NOFTYPE          1005
+#define WCMD_OVERWRITE        1006
+#define WCMD_MORESTR          1007
+#define WCMD_TRUNCATEDLINE    1008
+#define WCMD_NYI              1009
+#define WCMD_NOARG            1010
+#define WCMD_SYNTAXERR        1011
+#define WCMD_FILENOTFOUND     1012
+#define WCMD_NOCMDHELP        1013
+#define WCMD_NOTARGET         1014
+#define WCMD_CURRENTDATE      1015
+#define WCMD_CURRENTTIME      1016
+#define WCMD_NEWDATE          1017
+#define WCMD_NEWTIME          1018
+#define WCMD_MISSINGENV       1019
+#define WCMD_READFAIL         1020
+#define WCMD_CALLINSCRIPT     1021
+#define WCMD_ALL              1022
+#define WCMD_DELPROMPT        1023
+#define WCMD_ECHOPROMPT       1024
+#define WCMD_VERIFYPROMPT     1025
+#define WCMD_VERIFYERR        1026
+#define WCMD_ARGERR           1027
+#define WCMD_VOLUMEDETAIL     1028
+#define WCMD_VOLUMEPROMPT     1029
+#define WCMD_NOPATH           1030
+#define WCMD_ANYKEY           1031
+#define WCMD_CONSTITLE        1032
+#define WCMD_VERSION          1033
+
 
 /* msdn specified max for Win XP */
 #define MAXSTRING 8192

@@ -82,6 +82,14 @@ HANDLE get_BaseNamedObjects_handle(void)
     return handle;
 }
 
+/* helper for kernel32->ntdll timeout format conversion */
+static inline PLARGE_INTEGER get_nt_timeout( PLARGE_INTEGER pTime, DWORD timeout )
+{
+    if (timeout == INFINITE) return NULL;
+    pTime->QuadPart = (ULONGLONG)timeout * -10000;
+    return pTime;
+}
+
 /***********************************************************************
  *              Sleep  (KERNEL32.@)
  */
@@ -96,18 +104,11 @@ VOID WINAPI Sleep( DWORD timeout )
 DWORD WINAPI SleepEx( DWORD timeout, BOOL alertable )
 {
     NTSTATUS status;
+    LARGE_INTEGER time;
 
-    if (timeout == INFINITE) status = NtDelayExecution( alertable, NULL );
-    else
-    {
-        LARGE_INTEGER time;
-
-        time.QuadPart = timeout * (ULONGLONG)10000;
-        time.QuadPart = -time.QuadPart;
-        status = NtDelayExecution( alertable, &time );
-    }
-    if (status != STATUS_USER_APC) status = STATUS_SUCCESS;
-    return status;
+    status = NtDelayExecution( alertable, get_nt_timeout( &time, timeout ) );
+    if (status == STATUS_USER_APC) return WAIT_IO_COMPLETION;
+    return 0;
 }
 
 
@@ -158,6 +159,7 @@ DWORD WINAPI WaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
 {
     NTSTATUS status;
     HANDLE hloc[MAXIMUM_WAIT_OBJECTS];
+    LARGE_INTEGER time;
     unsigned int i;
 
     if (count > MAXIMUM_WAIT_OBJECTS)
@@ -187,18 +189,8 @@ DWORD WINAPI WaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
         }
     }
 
-    if (timeout == INFINITE)
-    {
-        status = NtWaitForMultipleObjects( count, hloc, wait_all, alertable, NULL );
-    }
-    else
-    {
-        LARGE_INTEGER time;
-
-        time.QuadPart = timeout * (ULONGLONG)10000;
-        time.QuadPart = -time.QuadPart;
-        status = NtWaitForMultipleObjects( count, hloc, wait_all, alertable, &time );
-    }
+    status = NtWaitForMultipleObjects( count, hloc, wait_all, alertable,
+                                       get_nt_timeout( &time, timeout ) );
 
     if (HIWORD(status))  /* is it an error code? */
     {
@@ -302,20 +294,13 @@ DWORD WINAPI SignalObjectAndWait( HANDLE hObjectToSignal, HANDLE hObjectToWaitOn
                                   DWORD dwMilliseconds, BOOL bAlertable )
 {
     NTSTATUS status;
-    LARGE_INTEGER timeout, *ptimeout = NULL;
+    LARGE_INTEGER timeout;
 
     TRACE("%p %p %d %d\n", hObjectToSignal,
           hObjectToWaitOn, dwMilliseconds, bAlertable);
 
-    if (dwMilliseconds != INFINITE)
-    {
-        timeout.QuadPart = dwMilliseconds * (ULONGLONG)10000;
-        timeout.QuadPart = -timeout.QuadPart;
-        ptimeout = &timeout;
-    }
-
-    status = NtSignalAndWaitForSingleObject( hObjectToSignal, hObjectToWaitOn,
-                                             bAlertable, ptimeout );
+    status = NtSignalAndWaitForSingleObject( hObjectToSignal, hObjectToWaitOn, bAlertable,
+                                             get_nt_timeout( &timeout, dwMilliseconds ) );
     if (HIWORD(status))
     {
         SetLastError( RtlNtStatusToDosError(status) );
@@ -1826,12 +1811,45 @@ BOOL WINAPI SetMailslotInfo( HANDLE hMailslot, DWORD dwReadTimeout)
 HANDLE WINAPI CreateIoCompletionPort(HANDLE hFileHandle, HANDLE hExistingCompletionPort,
                                      ULONG_PTR CompletionKey, DWORD dwNumberOfConcurrentThreads)
 {
-    FIXME("(%p, %p, %08lx, %08x): stub.\n",
-          hFileHandle, hExistingCompletionPort, CompletionKey, dwNumberOfConcurrentThreads);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return NULL;
-}
+    NTSTATUS status;
+    HANDLE ret = 0;
 
+    TRACE("(%p, %p, %08lx, %08x)\n",
+          hFileHandle, hExistingCompletionPort, CompletionKey, dwNumberOfConcurrentThreads);
+
+    if (hExistingCompletionPort && hFileHandle == INVALID_HANDLE_VALUE)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
+    if (hExistingCompletionPort)
+        ret = hExistingCompletionPort;
+    else
+    {
+        status = NtCreateIoCompletion( &ret, IO_COMPLETION_ALL_ACCESS, NULL, dwNumberOfConcurrentThreads );
+        if (status != STATUS_SUCCESS) goto fail;
+    }
+
+    if (hFileHandle != INVALID_HANDLE_VALUE)
+    {
+        FILE_COMPLETION_INFORMATION info;
+        IO_STATUS_BLOCK iosb;
+
+        info.CompletionPort = ret;
+        info.CompletionKey = CompletionKey;
+        status = NtSetInformationFile( hFileHandle, &iosb, &info, sizeof(info), FileCompletionInformation );
+        if (status != STATUS_SUCCESS) goto fail;
+    }
+
+    return ret;
+
+fail:
+    if (ret && !hExistingCompletionPort)
+        CloseHandle( ret );
+    SetLastError( RtlNtStatusToDosError(status) );
+    return 0;
+}
 
 /******************************************************************************
  *		GetQueuedCompletionStatus (KERNEL32.@)
@@ -1840,17 +1858,43 @@ BOOL WINAPI GetQueuedCompletionStatus( HANDLE CompletionPort, LPDWORD lpNumberOf
                                        PULONG_PTR pCompletionKey, LPOVERLAPPED *lpOverlapped,
                                        DWORD dwMilliseconds )
 {
-    FIXME("(%p,%p,%p,%p,%d), stub!\n",
+    NTSTATUS status;
+    IO_STATUS_BLOCK iosb;
+    LARGE_INTEGER wait_time;
+
+    TRACE("(%p,%p,%p,%p,%d)\n",
           CompletionPort,lpNumberOfBytesTransferred,pCompletionKey,lpOverlapped,dwMilliseconds);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+
+    *lpOverlapped = NULL;
+
+    status = NtRemoveIoCompletion( CompletionPort, pCompletionKey, (PULONG_PTR)lpOverlapped,
+                                   &iosb, get_nt_timeout( &wait_time, dwMilliseconds ) );
+    if (status == STATUS_SUCCESS)
+    {
+        *lpNumberOfBytesTransferred = iosb.Information;
+        return TRUE;
+    }
+
+    SetLastError( RtlNtStatusToDosError(status) );
     return FALSE;
 }
 
+
+/******************************************************************************
+ *		PostQueuedCompletionStatus (KERNEL32.@)
+ */
 BOOL WINAPI PostQueuedCompletionStatus( HANDLE CompletionPort, DWORD dwNumberOfBytes,
                                         ULONG_PTR dwCompletionKey, LPOVERLAPPED lpOverlapped)
 {
-    FIXME("%p %d %08lx %p\n", CompletionPort, dwNumberOfBytes, dwCompletionKey, lpOverlapped );
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    NTSTATUS status;
+
+    TRACE("%p %d %08lx %p\n", CompletionPort, dwNumberOfBytes, dwCompletionKey, lpOverlapped );
+
+    status = NtSetIoCompletion( CompletionPort, dwCompletionKey, (ULONG_PTR)lpOverlapped,
+                                STATUS_SUCCESS, dwNumberOfBytes );
+
+    if (status == STATUS_SUCCESS) return TRUE;
+    SetLastError( RtlNtStatusToDosError(status) );
     return FALSE;
 }
 

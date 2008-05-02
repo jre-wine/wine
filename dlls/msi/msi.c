@@ -1206,7 +1206,7 @@ UINT WINAPI MsiGetFileVersionA(LPCSTR szFilePath, LPSTR lpVersionBuf,
 
     if( lpLangBuf && pcchLangBuf && *pcchLangBuf )
     {
-        lpwLangBuff = msi_alloc(*pcchVersionBuf*sizeof(WCHAR));
+        lpwLangBuff = msi_alloc(*pcchLangBuf*sizeof(WCHAR));
         if( !lpwLangBuff )
             goto end;
     }
@@ -1413,7 +1413,7 @@ INSTALLSTATE WINAPI MsiUseFeatureA( LPCSTR szProduct, LPCSTR szFeature )
  * MSI_ProvideQualifiedComponentEx [internal]
  */
 static UINT WINAPI MSI_ProvideQualifiedComponentEx(LPCWSTR szComponent,
-                LPCWSTR szQualifier, DWORD dwInstallMode, LPWSTR szProduct,
+                LPCWSTR szQualifier, DWORD dwInstallMode, LPCWSTR szProduct,
                 DWORD Unused1, DWORD Unused2, awstring *lpPathBuf,
                 DWORD* pcchPathBuf)
 {

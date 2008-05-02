@@ -44,18 +44,12 @@
 static FILE* client;
 static int indent = 0;
 
-static int print_client( const char *format, ... )
+static void print_client( const char *format, ... )
 {
     va_list va;
-    int i, r;
-
     va_start(va, format);
-    if (format[0] != '\n')
-        for (i = 0; i < indent; i++)
-            fprintf(client, "    ");
-    r = vfprintf(client, format, va);
+    print(client, indent, format, va);
     va_end(va);
-    return r;
 }
 
 
@@ -115,8 +109,9 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset)
             }
         }
 
-        write_type(client, def->type);
-        fprintf(client, " ");
+        write_type_left(client, def->type);
+        if (needs_space_after(def->type))
+          fprintf(client, " ");
         write_prefix_name(client, prefix_client, def);
         fprintf(client, "(\n");
         indent++;
@@ -135,7 +130,7 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset)
         if (!is_void(def->type))
         {
             print_client("");
-            write_type(client, def->type);
+            write_type_left(client, def->type);
             fprintf(client, " _RetVal;\n");
         }
 
@@ -304,7 +299,7 @@ static void write_stubdescriptor(type_t *iface, int expr_eval_routines)
     print_client("0,\n");
     print_client("0x50100a4, /* MIDL Version 5.1.164 */\n");
     print_client("0,\n");
-    print_client("0,\n");
+    print_client("%s,\n", list_empty(&user_type_list) ? "0" : "UserMarshalRoutines");
     print_client("0,  /* notify & notify_flag routine table */\n");
     print_client("1,  /* Flags */\n");
     print_client("0,  /* Reserved3 */\n");
@@ -433,6 +428,7 @@ void write_client(ifref_list_t *ifaces)
             expr_eval_routines = write_expr_eval_routines(client, iface->iface->name);
             if (expr_eval_routines)
                 write_expr_eval_routine_list(client, iface->iface->name);
+            write_user_quad_list(client);
             write_stubdescriptor(iface->iface, expr_eval_routines);
         }
     }

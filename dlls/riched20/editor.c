@@ -1153,6 +1153,7 @@ ME_TextEditor *ME_MakeEditor(HWND hWnd) {
   ed->lpOleCallback = NULL;
   ed->mode = TM_RICHTEXT | TM_MULTILEVELUNDO | TM_MULTICODEPAGE;
   ed->AutoURLDetect_bEnable = FALSE;
+  ed->bHaveFocus = FALSE;
   GetClientRect(hWnd, &ed->rcFormat);
   for (i=0; i<HFONT_CACHE_SIZE; i++)
   {
@@ -1518,7 +1519,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
       editor->nUndoLimit = min(wParam, STACK_SIZE_MAX);
     /* Setting a max stack size keeps wine from getting killed 
       for hogging memory. Windows allocates all this memory at once, so
-      no program would realistically set a value above our maxiumum. */  
+      no program would realistically set a value above our maximum. */
     return editor->nUndoLimit;
   }
   case EM_CANUNDO:
@@ -2335,11 +2336,13 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     }
     break;
   case WM_SETFOCUS:
+    editor->bHaveFocus = TRUE;
     ME_ShowCaret(editor);
     ME_SendOldNotify(editor, EN_SETFOCUS);
     return 0;
   case WM_KILLFOCUS:
     ME_HideCaret(editor);
+    editor->bHaveFocus = FALSE;
     ME_SendOldNotify(editor, EN_KILLFOCUS);
     return 0;
   case WM_ERASEBKGND:

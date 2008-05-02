@@ -31,7 +31,7 @@
 @ stub GdipAddPathRectanglesI
 @ stub GdipAddPathString
 @ stub GdipAddPathStringI
-@ stub GdipAlloc
+@ stdcall GdipAlloc(long)
 @ stub GdipBeginContainer2
 @ stub GdipBeginContainer
 @ stub GdipBeginContainerI
@@ -81,8 +81,8 @@
 @ stub GdipCreateFontFromLogfontA
 @ stub GdipCreateFontFromLogfontW
 @ stub GdipCreateFromHDC2
-@ stub GdipCreateFromHDC
-@ stub GdipCreateFromHWND
+@ stdcall GdipCreateFromHDC(long ptr)
+@ stdcall GdipCreateFromHWND(long ptr)
 @ stub GdipCreateFromHWNDICM
 @ stub GdipCreateHBITMAPFromBitmap
 @ stub GdipCreateHICONFromBitmap
@@ -111,7 +111,7 @@
 @ stub GdipCreatePathGradientFromPath
 @ stub GdipCreatePathGradientI
 @ stub GdipCreatePathIter
-@ stub GdipCreatePen1
+@ stdcall GdipCreatePen1(long long long ptr)
 @ stub GdipCreatePen2
 @ stub GdipCreateRegion
 @ stub GdipCreateRegionHrgn
@@ -119,7 +119,7 @@
 @ stub GdipCreateRegionRect
 @ stub GdipCreateRegionRectI
 @ stub GdipCreateRegionRgnData
-@ stub GdipCreateSolidFill
+@ stdcall GdipCreateSolidFill(long ptr)
 @ stub GdipCreateStreamOnFile
 @ stub GdipCreateStringFormat
 @ stub GdipCreateTexture2
@@ -127,16 +127,16 @@
 @ stub GdipCreateTexture
 @ stub GdipCreateTextureIA
 @ stub GdipCreateTextureIAI
-@ stub GdipDeleteBrush
+@ stdcall GdipDeleteBrush(ptr)
 @ stub GdipDeleteCachedBitmap
 @ stub GdipDeleteCustomLineCap
 @ stub GdipDeleteFont
 @ stub GdipDeleteFontFamily
-@ stub GdipDeleteGraphics
+@ stdcall GdipDeleteGraphics(ptr)
 @ stub GdipDeleteMatrix
 @ stub GdipDeletePath
 @ stub GdipDeletePathIter
-@ stub GdipDeletePen
+@ stdcall GdipDeletePen(ptr)
 @ stub GdipDeletePrivateFontCollection
 @ stub GdipDeleteRegion
 @ stub GdipDeleteStringFormat
@@ -175,7 +175,7 @@
 @ stub GdipDrawImageRectRect
 @ stub GdipDrawImageRectRectI
 @ stub GdipDrawLine
-@ stub GdipDrawLineI
+@ stdcall GdipDrawLineI(ptr ptr long long long long)
 @ stub GdipDrawLines
 @ stub GdipDrawLinesI
 @ stub GdipDrawPath
@@ -184,7 +184,7 @@
 @ stub GdipDrawPolygon
 @ stub GdipDrawPolygonI
 @ stub GdipDrawRectangle
-@ stub GdipDrawRectangleI
+@ stdcall GdipDrawRectangleI(ptr ptr long long long long)
 @ stub GdipDrawRectangles
 @ stub GdipDrawRectanglesI
 @ stub GdipDrawString
@@ -222,13 +222,13 @@
 @ stub GdipFillRegion
 @ stub GdipFlattenPath
 @ stub GdipFlush
-@ stub GdipFree
+@ stdcall GdipFree(ptr)
 @ stub GdipGetAdjustableArrowCapFillState
 @ stub GdipGetAdjustableArrowCapHeight
 @ stub GdipGetAdjustableArrowCapMiddleInset
 @ stub GdipGetAdjustableArrowCapWidth
 @ stub GdipGetAllPropertyItems
-@ stub GdipGetBrushType
+@ stdcall GdipGetBrushType(ptr ptr)
 @ stub GdipGetCellAscent
 @ stub GdipGetCellDescent
 @ stub GdipGetClip
@@ -605,5 +605,5 @@
 @ stub GdipWindingModeOutline
 @ stub GdiplusNotificationHook
 @ stub GdiplusNotificationUnhook
-@ stub GdiplusShutdown
-@ stub GdiplusStartup
+@ stdcall GdiplusShutdown(ptr)
+@ stdcall GdiplusStartup(ptr ptr ptr)

@@ -101,6 +101,8 @@ struct HTMLDocument {
     IOleInPlaceFrame *frame;
 
     BSCallback *bscallback;
+    IMoniker *mon;
+    BSTR url;
 
     HWND hwnd;
     HWND tooltips_hwnd;
@@ -114,6 +116,8 @@ struct HTMLDocument {
     BOOL window_active;
     BOOL has_key_path;
     BOOL container_locked;
+
+    DWORD update;
 
     ConnectionPoint *cp_htmldocevents;
     ConnectionPoint *cp_htmldocevents2;
@@ -137,6 +141,8 @@ struct NSContainer {
     nsIWebNavigation *navigation;
     nsIBaseWindow *window;
     nsIWebBrowserFocus *focus;
+
+    nsIController *editor_controller;
 
     LONG ref;
 
@@ -313,7 +319,7 @@ NSContainer *NSContainer_Create(HTMLDocument*,NSContainer*);
 void NSContainer_Release(NSContainer*);
 
 void HTMLDocument_LockContainer(HTMLDocument*,BOOL);
-void HTMLDocument_ShowContextMenu(HTMLDocument*,DWORD,POINT*);
+void show_context_menu(HTMLDocument*,DWORD,POINT*);
 
 void show_tooltip(HTMLDocument*,DWORD,DWORD,LPCWSTR);
 void hide_tooltip(HTMLDocument*);
@@ -349,8 +355,8 @@ BSCallback *create_bscallback(IMoniker*);
 HRESULT start_binding(BSCallback*);
 HRESULT load_stream(BSCallback*,IStream*);
 void set_document_bscallback(HTMLDocument*,BSCallback*);
+void set_current_mon(HTMLDocument*,IMoniker*);
 
-IHlink *Hlink_Create(void);
 IHTMLSelectionObject *HTMLSelectionObject_Create(nsISelection*);
 IHTMLTxtRange *HTMLTxtRange_Create(nsIDOMRange*);
 IHTMLStyle *HTMLStyle_Create(nsIDOMCSSStyleDeclaration*);
@@ -374,11 +380,29 @@ void release_nodes(HTMLDocument*);
 
 BOOL install_wine_gecko(void);
 
-/* editor */
-void handle_edit_event(HTMLDocument*,nsIDOMEvent*);
+/* commands */
+typedef struct {
+    DWORD id;
+    HRESULT (*query)(HTMLDocument*,OLECMD*);
+    HRESULT (*exec)(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
+} cmdtable_t;
 
-void get_font_size(HTMLDocument*,WCHAR*);
-void set_font_size(HTMLDocument*,LPCWSTR);
+extern const cmdtable_t editmode_cmds[];
+
+/* timer */
+#define UPDATE_UI       0x0001
+#define UPDATE_TITLE    0x0002
+
+void update_doc(HTMLDocument *This, DWORD flags);
+void update_title(HTMLDocument*);
+
+/* editor */
+void init_editor(HTMLDocument*);
+void set_ns_editmode(NSContainer*);
+void handle_edit_event(HTMLDocument*,nsIDOMEvent*);
+HRESULT editor_exec_copy(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
+HRESULT editor_exec_cut(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
+HRESULT editor_exec_paste(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
 
 extern DWORD mshtml_tls;
 

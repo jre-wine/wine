@@ -403,9 +403,10 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
     STDMETHOD(GetFVF)(THIS_ DWORD * pfvf) PURE;
     STDMETHOD_(void, SetGammaRamp)(THIS_ UINT iSwapChain, DWORD Flags, CONST WINED3DGAMMARAMP* pRamp) PURE;
     STDMETHOD_(void, GetGammaRamp)(THIS_ UINT iSwapChain, WINED3DGAMMARAMP* pRamp) PURE;
-    STDMETHOD(SetIndices)(THIS_ struct IWineD3DIndexBuffer * pIndexData,UINT  BaseVertexIndex) PURE;
-    STDMETHOD(GetIndices)(THIS_ struct IWineD3DIndexBuffer ** ppIndexData,UINT * pBaseVertexIndex) PURE;
+    STDMETHOD(SetIndices)(THIS_ struct IWineD3DIndexBuffer * pIndexData) PURE;
+    STDMETHOD(GetIndices)(THIS_ struct IWineD3DIndexBuffer ** ppIndexData) PURE;
     STDMETHOD(SetBaseVertexIndex)(THIS_ UINT baseIndex);
+    STDMETHOD(GetBaseVertexIndex)(THIS_ UINT *baseIndex);
     STDMETHOD(SetLight)(THIS_ DWORD  Index,CONST WINED3DLIGHT * pLight) PURE;
     STDMETHOD(GetLight)(THIS_ DWORD  Index,WINED3DLIGHT * pLight) PURE;
     STDMETHOD(SetLightEnable)(THIS_ DWORD  Index,BOOL  Enable) PURE;
@@ -539,9 +540,10 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
 #define IWineD3DDevice_GetDepthStencilSurface(p,a)              (p)->lpVtbl->GetDepthStencilSurface(p,a)
 #define IWineD3DDevice_SetGammaRamp(p,a,b,c)                    (p)->lpVtbl->SetGammaRamp(p,a,b,c)
 #define IWineD3DDevice_GetGammaRamp(p,a,b)                      (p)->lpVtbl->GetGammaRamp(p,a,b)
-#define IWineD3DDevice_SetIndices(p,a,b)                        (p)->lpVtbl->SetIndices(p,a,b)
-#define IWineD3DDevice_GetIndices(p,a,b)                        (p)->lpVtbl->GetIndices(p,a,b)
+#define IWineD3DDevice_SetIndices(p,a)                          (p)->lpVtbl->SetIndices(p,a)
+#define IWineD3DDevice_GetIndices(p,a)                          (p)->lpVtbl->GetIndices(p,a)
 #define IWineD3DDevice_SetBaseVertexIndex(p, a)                 (p)->lpVtbl->SetBaseVertexIndex(p, a)
+#define IWineD3DDevice_GetBaseVertexIndex(p,a)                  (p)->lpVtbl->GetBaseVertexIndex(p,a)
 #define IWineD3DDevice_SetLight(p,a,b)                          (p)->lpVtbl->SetLight(p,a,b)
 #define IWineD3DDevice_GetLight(p,a,b)                          (p)->lpVtbl->GetLight(p,a,b)
 #define IWineD3DDevice_SetLightEnable(p,a,b)                    (p)->lpVtbl->SetLightEnable(p,a,b)
@@ -1129,7 +1131,7 @@ DECLARE_INTERFACE_(IWineD3DSurface,IWineD3DResource)
     STDMETHOD(GetClipper)(THIS_ struct IWineD3DClipper **clipper);
     /* Internally used methods */
     STDMETHOD(AddDirtyRect)(THIS_ CONST RECT* pRect) PURE;
-    STDMETHOD(LoadTexture)(THIS) PURE;
+    STDMETHOD(LoadTexture)(THIS, BOOL srgb_mode) PURE;
     STDMETHOD(SaveSnapshot)(THIS_ const char *filename) PURE;
     STDMETHOD(SetContainer)(THIS_ IWineD3DBase *container) PURE;
     STDMETHOD_(void,SetGlTextureDesc)(THIS_ UINT textureName, int target) PURE;
@@ -1184,7 +1186,7 @@ DECLARE_INTERFACE_(IWineD3DSurface,IWineD3DResource)
 #define IWineD3DSurface_GetClipper(p, a)             (p)->lpVtbl->GetClipper(p, a)
 /*** IWineD3DSurface (Internal, no d3d mapping) methods ***/
 #define IWineD3DSurface_AddDirtyRect(p,a)            (p)->lpVtbl->AddDirtyRect(p,a)
-#define IWineD3DSurface_LoadTexture(p)               (p)->lpVtbl->LoadTexture(p)
+#define IWineD3DSurface_LoadTexture(p,a)             (p)->lpVtbl->LoadTexture(p,a)
 #define IWineD3DSurface_SaveSnapshot(p,a)            (p)->lpVtbl->SaveSnapshot(p,a)
 #define IWineD3DSurface_SetContainer(p,a)            (p)->lpVtbl->SetContainer(p,a)
 #define IWineD3DSurface_SetGlTextureDesc(p,a,b)      (p)->lpVtbl->SetGlTextureDesc(p,a,b)
@@ -1222,7 +1224,7 @@ DECLARE_INTERFACE_(IWineD3DVolume,IWineD3DResource)
     STDMETHOD(UnlockBox)(THIS) PURE;
     STDMETHOD(AddDirtyBox)(THIS_ CONST WINED3DBOX* pDirtyBox) PURE;
     STDMETHOD(CleanDirtyBox)(THIS) PURE;
-    STDMETHOD(LoadTexture)(THIS_ int gl_level) PURE;
+    STDMETHOD(LoadTexture)(THIS_ int gl_level, BOOL srgb_mode) PURE;
     STDMETHOD(SetContainer)(THIS_ IWineD3DBase *container) PURE;
 };
 #undef INTERFACE
@@ -1250,7 +1252,7 @@ DECLARE_INTERFACE_(IWineD3DVolume,IWineD3DResource)
 #define IWineD3DVolume_UnlockBox(p)               (p)->lpVtbl->UnlockBox(p)
 #define IWineD3DVolume_AddDirtyBox(p,a)           (p)->lpVtbl->AddDirtyBox(p,a)
 #define IWineD3DVolume_CleanDirtyBox(p)           (p)->lpVtbl->CleanDirtyBox(p)
-#define IWineD3DVolume_LoadTexture(p,a)           (p)->lpVtbl->LoadTexture(p,a)
+#define IWineD3DVolume_LoadTexture(p,a,b)         (p)->lpVtbl->LoadTexture(p,a,b)
 #define IWineD3DVolume_SetContainer(p,a)          (p)->lpVtbl->SetContainer(p,a)
 #endif
 
@@ -1587,7 +1589,7 @@ DECLARE_INTERFACE_(IWineD3DClipper,IUnknown)
 #define IWineD3DClipper_SetHWnd(p,a,b)             (p)->SetHWnd(a,b)
 #endif
 
-/* DDraw Clippers are not created from DDraw objects, they have a seperate creation function */
+/* DDraw Clippers are not created from DDraw objects, they have a separate creation function */
 IWineD3DClipper* WINAPI WineDirect3DCreateClipper(IUnknown *parent);
 
 #if 0 /* FIXME: During porting in from d3d8 - the following will be used */

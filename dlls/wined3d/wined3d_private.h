@@ -537,9 +537,6 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
 void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context);
 void apply_fbo_state(IWineD3DDevice *iface);
 
-/* Routine to fill gl caps for swapchains and IWineD3D */
-BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display);
-
 /* Macros for doing basic GPU detection based on opengl capabilities */
 #define WINE_D3D6_CAPABLE(gl_info) (gl_info->supported[ARB_MULTITEXTURE])
 #define WINE_D3D7_CAPABLE(gl_info) (gl_info->supported[ARB_TEXTURE_COMPRESSION] && gl_info->supported[ARB_TEXTURE_CUBE_MAP] && gl_info->supported[ARB_TEXTURE_ENV_DOT3])
@@ -574,6 +571,20 @@ struct PLIGHTINFOEL {
 /* The default light parameters */
 extern const WINED3DLIGHT WINED3D_default_light;
 
+/* The adapter structure */
+struct WineD3DAdapter
+{
+    POINT                   monitorPoint;
+    Display                 *display;
+    WineD3D_GL_Info         gl_info;
+    const char              *driver;
+    const char              *description;
+    GLXFBConfig             *cfgs;
+    int                     nCfgs;
+};
+
+extern BOOL InitAdapters(void);
+
 /*****************************************************************************
  * IWineD3D implementation structure
  */
@@ -586,10 +597,6 @@ typedef struct IWineD3DImpl
     /* WineD3D Information */
     IUnknown               *parent;
     UINT                    dxVersion;
-
-    /* GL Information */
-    BOOL                    isGLInfoValid;
-    WineD3D_GL_Info         gl_info;
 } IWineD3DImpl;
 
 extern const IWineD3DVtbl IWineD3D_Vtbl;
@@ -620,6 +627,7 @@ struct IWineD3DDeviceImpl
     /* WineD3D Information  */
     IUnknown               *parent;
     IWineD3D               *wineD3D;
+    struct WineD3DAdapter  *adapter;
 
     /* Window styles to restore when switching fullscreen mode */
     LONG                    style;
@@ -639,6 +647,7 @@ struct IWineD3DDeviceImpl
     BOOL                    view_ident;        /* true iff view matrix is identity                */
     BOOL                    untransformed;
     BOOL                    vertexBlendUsed;   /* To avoid needless setting of the blend matrices */
+    unsigned char           surface_alignment; /* Line Alignment of surfaces                      */
 
     /* State block related */
     BOOL                    isRecordingState;
@@ -737,6 +746,7 @@ struct IWineD3DDeviceImpl
 
 extern const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl;
 
+void IWineD3DDeviceImpl_FindTexUnitMap(IWineD3DDeviceImpl *This);
 void IWineD3DDeviceImpl_MarkStateDirty(IWineD3DDeviceImpl *This, DWORD state);
 static inline BOOL isStateDirty(WineD3DContext *context, DWORD state) {
     DWORD idx = state >> 5;
@@ -883,6 +893,8 @@ typedef struct IWineD3DBaseTextureClass
     DWORD                   states[MAX_WINETEXTURESTATES];
     LONG                    bindCount;
     DWORD                   sampler;
+    BOOL                    is_srgb;
+    UINT                    srgb_mode_change_count;
 } IWineD3DBaseTextureClass;
 
 typedef struct IWineD3DBaseTextureImpl
@@ -1173,9 +1185,6 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetClipper(IWineD3DSurface *iface, IWineD3DCl
 
 BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]);
 
-/* Alignment of the pitch */
-#define SURFACE_ALIGNMENT 4
-
 /*****************************************************************************
  * IWineD3DVertexDeclaration implementation structure
  */
@@ -1393,6 +1402,7 @@ typedef struct IWineD3DSwapChainImpl
     WINED3DFORMAT             orig_fmt;
 
     long prev_time, frames;   /* Performance tracking */
+    unsigned int vSyncCounter;
 
     WineD3DContext        **context; /* Later a array for multithreading */
     unsigned int            num_contexts;
@@ -2000,7 +2010,7 @@ typedef struct {
     DWORD                   alphaMask, redMask, greenMask, blueMask;
     UINT                    bpp;
     BOOL                    isFourcc;
-    GLint                   glInternal, glFormat, glType;
+    GLint                   glInternal, glGammaInternal, glFormat, glType;
 } PixelFormatDesc;
 
 const PixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt);

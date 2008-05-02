@@ -72,10 +72,12 @@ DEFINE_EXPECT(SetActiveObject);
 DEFINE_EXPECT(GetWindow);
 DEFINE_EXPECT(CanInPlaceActivate);
 DEFINE_EXPECT(OnInPlaceActivate);
+DEFINE_EXPECT(OnInPlaceActivateEx);
 DEFINE_EXPECT(OnUIActivate);
 DEFINE_EXPECT(GetWindowContext);
 DEFINE_EXPECT(OnUIDeactivate);
 DEFINE_EXPECT(OnInPlaceDeactivate);
+DEFINE_EXPECT(OnInPlaceDeactivateEx);
 DEFINE_EXPECT(GetContainer);
 DEFINE_EXPECT(ShowUI);
 DEFINE_EXPECT(ActivateMe);
@@ -122,7 +124,7 @@ DEFINE_EXPECT(UnlockRequest);
 
 static IUnknown *doc_unk;
 static BOOL expect_LockContainer_fLock;
-static BOOL expect_SetActiveObject_active;
+static BOOL expect_SetActiveObject_active, ipsex;
 static BOOL set_clientsite = FALSE, container_locked = FALSE;
 static BOOL readystate_set_loading = FALSE, load_from_stream;
 static BOOL editmode = FALSE;
@@ -146,10 +148,48 @@ static const char html_page[] =
 static const char css_data[] = "body {color: red}";
 
 static const WCHAR doc_url[] = {'w','i','n','e','t','e','s','t',':','d','o','c',0};
+static const WCHAR about_blank_url[] = {'a','b','o','u','t',':','b','l','a','n','k',0};
 
 static HRESULT QueryInterface(REFIID riid, void **ppv);
 static void test_readyState(IUnknown*);
 static void test_MSHTML_QueryStatus(IUnknown*,DWORD);
+static BOOL nogecko = FALSE;
+
+static void test_GetCurMoniker(IUnknown*,IMoniker*,LPCWSTR);
+
+static const WCHAR wszTimesNewRoman[] =
+    {'T','i','m','e','s',' ','N','e','w',' ','R','o','m','a','n',0};
+static const WCHAR wszArial[] =
+    {'A','r','i','a','l',0};
+
+#define EXPECT_UPDATEUI  1
+#define EXPECT_SETTITLE  2
+
+static void test_timer(DWORD flags)
+{
+    BOOL *b = &called_Exec_SETTITLE;
+    MSG msg;
+
+    if(flags & EXPECT_UPDATEUI) {
+        SET_EXPECT(UpdateUI);
+        SET_EXPECT(Exec_UPDATECOMMANDS);
+        b = &called_UpdateUI;
+    }
+    if(flags & EXPECT_SETTITLE)
+        SET_EXPECT(Exec_SETTITLE);
+
+    while(!*b && GetMessage(&msg, hwnd, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    if(flags & EXPECT_UPDATEUI) {
+        CHECK_CALLED(UpdateUI);
+        CHECK_CALLED(Exec_UPDATECOMMANDS);
+    }
+    if(flags & EXPECT_SETTITLE)
+        CHECK_CALLED(Exec_SETTITLE);
+}
 
 static HRESULT WINAPI Protocol_QueryInterface(IInternetProtocol *iface, REFIID riid, void **ppv)
 {
@@ -1142,22 +1182,22 @@ static const IOleInPlaceFrameVtbl InPlaceFrameVtbl = {
 
 static IOleInPlaceFrame InPlaceFrame = { &InPlaceFrameVtbl };
 
-static HRESULT WINAPI InPlaceSite_QueryInterface(IOleInPlaceSite *iface, REFIID riid, void **ppv)
+static HRESULT WINAPI InPlaceSite_QueryInterface(IOleInPlaceSiteEx *iface, REFIID riid, void **ppv)
 {
     return QueryInterface(riid, ppv);
 }
 
-static ULONG WINAPI InPlaceSite_AddRef(IOleInPlaceSite *iface)
+static ULONG WINAPI InPlaceSite_AddRef(IOleInPlaceSiteEx *iface)
 {
     return 2;
 }
 
-static ULONG WINAPI InPlaceSite_Release(IOleInPlaceSite *iface)
+static ULONG WINAPI InPlaceSite_Release(IOleInPlaceSiteEx *iface)
 {
     return 1;
 }
 
-static HRESULT WINAPI InPlaceSite_GetWindow(IOleInPlaceSite *iface, HWND *phwnd)
+static HRESULT WINAPI InPlaceSite_GetWindow(IOleInPlaceSiteEx *iface, HWND *phwnd)
 {
     CHECK_EXPECT(GetWindow);
     ok(phwnd != NULL, "phwnd = NULL\n");
@@ -1165,31 +1205,31 @@ static HRESULT WINAPI InPlaceSite_GetWindow(IOleInPlaceSite *iface, HWND *phwnd)
     return S_OK;
 }
 
-static HRESULT WINAPI InPlaceSite_ContextSensitiveHelp(IOleInPlaceSite *iface, BOOL fEnterMode)
+static HRESULT WINAPI InPlaceSite_ContextSensitiveHelp(IOleInPlaceSiteEx *iface, BOOL fEnterMode)
 {
     ok(0, "unexpected call\n");
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI InPlaceSite_CanInPlaceActivate(IOleInPlaceSite *iface)
+static HRESULT WINAPI InPlaceSite_CanInPlaceActivate(IOleInPlaceSiteEx *iface)
 {
     CHECK_EXPECT(CanInPlaceActivate);
     return S_OK;
 }
 
-static HRESULT WINAPI InPlaceSite_OnInPlaceActivate(IOleInPlaceSite *iface)
+static HRESULT WINAPI InPlaceSite_OnInPlaceActivate(IOleInPlaceSiteEx *iface)
 {
     CHECK_EXPECT(OnInPlaceActivate);
     return S_OK;
 }
 
-static HRESULT WINAPI InPlaceSite_OnUIActivate(IOleInPlaceSite *iface)
+static HRESULT WINAPI InPlaceSite_OnUIActivate(IOleInPlaceSiteEx *iface)
 {
     CHECK_EXPECT(OnUIActivate);
     return S_OK;
 }
 
-static HRESULT WINAPI InPlaceSite_GetWindowContext(IOleInPlaceSite *iface,
+static HRESULT WINAPI InPlaceSite_GetWindowContext(IOleInPlaceSiteEx *iface,
         IOleInPlaceFrame **ppFrame, IOleInPlaceUIWindow **ppDoc, LPRECT lprcPosRect,
         LPRECT lprcClipRect, LPOLEINPLACEFRAMEINFO lpFrameInfo)
 {
@@ -1221,44 +1261,70 @@ static HRESULT WINAPI InPlaceSite_GetWindowContext(IOleInPlaceSite *iface,
     return S_OK;
 }
 
-static HRESULT WINAPI InPlaceSite_Scroll(IOleInPlaceSite *iface, SIZE scrollExtant)
+static HRESULT WINAPI InPlaceSite_Scroll(IOleInPlaceSiteEx *iface, SIZE scrollExtant)
 {
     ok(0, "unexpected call\n");
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI InPlaceSite_OnUIDeactivate(IOleInPlaceSite *iface, BOOL fUndoable)
+static HRESULT WINAPI InPlaceSite_OnUIDeactivate(IOleInPlaceSiteEx *iface, BOOL fUndoable)
 {
     CHECK_EXPECT(OnUIDeactivate);
     ok(!fUndoable, "fUndoable = TRUE\n");
     return S_OK;
 }
 
-static HRESULT WINAPI InPlaceSite_OnInPlaceDeactivate(IOleInPlaceSite *iface)
+static HRESULT WINAPI InPlaceSite_OnInPlaceDeactivate(IOleInPlaceSiteEx *iface)
 {
     CHECK_EXPECT(OnInPlaceDeactivate);
     return S_OK;
 }
 
-static HRESULT WINAPI InPlaceSite_DiscardUndoState(IOleInPlaceSite *iface)
+static HRESULT WINAPI InPlaceSite_DiscardUndoState(IOleInPlaceSiteEx *iface)
 {
     ok(0, "unexpected call\n");
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI InPlaceSite_DeactivateAndUndo(IOleInPlaceSite *iface)
+static HRESULT WINAPI InPlaceSite_DeactivateAndUndo(IOleInPlaceSiteEx *iface)
 {
     ok(0, "unexpected call\n");
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI InPlaceSite_OnPosRectChange(IOleInPlaceSite *iface, LPCRECT lprcPosRect)
+static HRESULT WINAPI InPlaceSite_OnPosRectChange(IOleInPlaceSiteEx *iface, LPCRECT lprcPosRect)
 {
     ok(0, "unexpected call\n");
     return E_NOTIMPL;
 }
 
-static const IOleInPlaceSiteVtbl InPlaceSiteVtbl = {
+static HRESULT WINAPI InPlaceSiteEx_OnInPlaceActivateEx(IOleInPlaceSiteEx *iface, BOOL *pfNoRedraw, DWORD dwFlags)
+{
+    CHECK_EXPECT(OnInPlaceActivateEx);
+
+    ok(pfNoRedraw != NULL, "pfNoRedraw == NULL\n");
+    ok(!*pfNoRedraw, "*pfNoRedraw == TRUE\n");
+    ok(dwFlags == 0, "dwFlags = %08x\n", dwFlags);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI InPlaceSiteEx_OnInPlaceDeactivateEx(IOleInPlaceSiteEx *iface, BOOL fNoRedraw)
+{
+    CHECK_EXPECT(OnInPlaceDeactivateEx);
+
+    ok(fNoRedraw, "fNoRedraw == FALSE\n");
+
+    return S_OK;
+}
+
+static HRESULT WINAPI InPlaceSiteEx_RequestUIActivate(IOleInPlaceSiteEx *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static const IOleInPlaceSiteExVtbl InPlaceSiteVtbl = {
     InPlaceSite_QueryInterface,
     InPlaceSite_AddRef,
     InPlaceSite_Release,
@@ -1273,10 +1339,13 @@ static const IOleInPlaceSiteVtbl InPlaceSiteVtbl = {
     InPlaceSite_OnInPlaceDeactivate,
     InPlaceSite_DiscardUndoState,
     InPlaceSite_DeactivateAndUndo,
-    InPlaceSite_OnPosRectChange
+    InPlaceSite_OnPosRectChange,
+    InPlaceSiteEx_OnInPlaceActivateEx,
+    InPlaceSiteEx_OnInPlaceDeactivateEx,
+    InPlaceSiteEx_RequestUIActivate
 };
 
-static IOleInPlaceSite InPlaceSite = { &InPlaceSiteVtbl };
+static IOleInPlaceSiteEx InPlaceSiteEx = { &InPlaceSiteVtbl };
 
 static HRESULT WINAPI ClientSite_QueryInterface(IOleClientSite *iface, REFIID riid, void **ppv)
 {
@@ -1374,7 +1443,7 @@ static HRESULT WINAPI DocumentSite_ActivateMe(IOleDocumentSite *iface, IOleDocum
     ok(hres == S_OK, "could not get IOleDocument: %08x\n", hres);
 
     if(SUCCEEDED(hres)) {
-        hres = IOleDocument_CreateView(document, &InPlaceSite, NULL, 0, &view);
+        hres = IOleDocument_CreateView(document, (IOleInPlaceSite*)&InPlaceSiteEx, NULL, 0, &view);
         ok(hres == S_OK, "CreateView failed: %08x\n", hres);
 
         if(SUCCEEDED(hres)) {
@@ -1385,16 +1454,16 @@ static HRESULT WINAPI DocumentSite_ActivateMe(IOleDocumentSite *iface, IOleDocum
 
             hres = IOleDocumentView_GetInPlaceSite(view, &inplacesite);
             ok(hres == S_OK, "GetInPlaceSite failed: %08x\n", hres);
-            ok(inplacesite == &InPlaceSite, "inplacesite=%p, expected %p\n",
-                    inplacesite, &InPlaceSite);
+            ok(inplacesite == (IOleInPlaceSite*)&InPlaceSiteEx, "inplacesite=%p, expected %p\n",
+                    inplacesite, &InPlaceSiteEx);
 
-            hres = IOleDocumentView_SetInPlaceSite(view, &InPlaceSite);
+            hres = IOleDocumentView_SetInPlaceSite(view, (IOleInPlaceSite*)&InPlaceSiteEx);
             ok(hres == S_OK, "SetInPlaceSite failed: %08x\n", hres);
 
             hres = IOleDocumentView_GetInPlaceSite(view, &inplacesite);
             ok(hres == S_OK, "GetInPlaceSite failed: %08x\n", hres);
-            ok(inplacesite == &InPlaceSite, "inplacesite=%p, expected %p\n",
-                    inplacesite, &InPlaceSite);
+            ok(inplacesite == (IOleInPlaceSite*)&InPlaceSiteEx, "inplacesite=%p, expected %p\n",
+                    inplacesite, &InPlaceSiteEx);
 
             hres = IOleDocumentView_QueryInterface(view, &IID_IOleInPlaceActiveObject, (void**)&activeobj);
             ok(hres == S_OK, "Could not get IOleInPlaceActiveObject: %08x\n", hres);
@@ -1409,7 +1478,10 @@ static HRESULT WINAPI DocumentSite_ActivateMe(IOleDocumentSite *iface, IOleDocum
                 SET_EXPECT(CanInPlaceActivate);
                 SET_EXPECT(GetWindowContext);
                 SET_EXPECT(GetWindow);
-                SET_EXPECT(OnInPlaceActivate);
+                if(ipsex)
+                    SET_EXPECT(OnInPlaceActivateEx);
+                else
+                    SET_EXPECT(OnInPlaceActivate);
                 SET_EXPECT(SetStatusText);
                 SET_EXPECT(Exec_SETPROGRESSMAX);
                 SET_EXPECT(Exec_SETPROGRESSPOS);
@@ -1430,7 +1502,10 @@ static HRESULT WINAPI DocumentSite_ActivateMe(IOleDocumentSite *iface, IOleDocum
                 CHECK_CALLED(CanInPlaceActivate);
                 CHECK_CALLED(GetWindowContext);
                 CHECK_CALLED(GetWindow);
-                CHECK_CALLED(OnInPlaceActivate);
+                if(ipsex)
+                    CHECK_CALLED(OnInPlaceActivateEx);
+                else
+                    CHECK_CALLED(OnInPlaceActivate);
                 CHECK_CALLED(SetStatusText);
                 CHECK_CALLED(Exec_SETPROGRESSMAX);
                 CHECK_CALLED(Exec_SETPROGRESSPOS);
@@ -1466,7 +1541,10 @@ static HRESULT WINAPI DocumentSite_ActivateMe(IOleDocumentSite *iface, IOleDocum
                 SET_EXPECT(CanInPlaceActivate);
                 SET_EXPECT(GetWindowContext);
                 SET_EXPECT(GetWindow);
-                SET_EXPECT(OnInPlaceActivate);
+                if(ipsex)
+                    SET_EXPECT(OnInPlaceActivateEx);
+                else
+                    SET_EXPECT(OnInPlaceActivate);
                 SET_EXPECT(SetStatusText);
                 SET_EXPECT(Exec_SETPROGRESSMAX);
                 SET_EXPECT(Exec_SETPROGRESSPOS);
@@ -1479,7 +1557,10 @@ static HRESULT WINAPI DocumentSite_ActivateMe(IOleDocumentSite *iface, IOleDocum
                 CHECK_CALLED(CanInPlaceActivate);
                 CHECK_CALLED(GetWindowContext);
                 CHECK_CALLED(GetWindow);
-                CHECK_CALLED(OnInPlaceActivate);
+                if(ipsex)
+                    CHECK_CALLED(OnInPlaceActivateEx);
+                else
+                    CHECK_CALLED(OnInPlaceActivate);
                 CHECK_CALLED(SetStatusText);
                 CHECK_CALLED(Exec_SETPROGRESSMAX);
                 CHECK_CALLED(Exec_SETPROGRESSPOS);
@@ -1492,6 +1573,8 @@ static HRESULT WINAPI DocumentSite_ActivateMe(IOleDocumentSite *iface, IOleDocum
                         ok(hwnd == last_hwnd, "hwnd != last_hwnd\n");
                 }
             }
+
+            test_timer(EXPECT_UPDATEUI | ((load_state == LD_LOADING) ? EXPECT_SETTITLE : 0));
 
             if(activeobj)
                 IOleInPlaceActiveObject_Release(activeobj);
@@ -1815,6 +1898,12 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
         switch(nCmdID) {
         case 37:
             CHECK_EXPECT2(Exec_ShellDocView_37);
+
+            if(load_from_stream)
+                test_GetCurMoniker(doc_unk, NULL, about_blank_url);
+            else if(!editmode)
+                test_GetCurMoniker(doc_unk, &Moniker, NULL);
+
             ok(pvaOut == NULL, "pvaOut=%p, expected NULL\n", pvaOut);
             ok(pvaIn != NULL, "pvaIn == NULL\n");
             if(pvaIn) {
@@ -2022,7 +2111,7 @@ static HRESULT QueryInterface(REFIID riid, void **ppv)
     else if(IsEqualGUID(&IID_IOleContainer, riid))
         *ppv = &OleContainer;
     else if(IsEqualGUID(&IID_IOleWindow, riid) || IsEqualGUID(&IID_IOleInPlaceSite, riid))
-        *ppv = &InPlaceSite;
+        *ppv = &InPlaceSiteEx;
     else if(IsEqualGUID(&IID_IOleInPlaceUIWindow, riid) || IsEqualGUID(&IID_IOleInPlaceFrame, riid))
         *ppv = &InPlaceFrame;
     else if(IsEqualGUID(&IID_IOleCommandTarget , riid))
@@ -2031,9 +2120,10 @@ static HRESULT QueryInterface(REFIID riid, void **ppv)
         *ppv = &Dispatch;
     else if(IsEqualGUID(&IID_IServiceProvider, riid))
         *ppv = &ServiceProvider;
+    else if(ipsex && IsEqualGUID(&IID_IOleInPlaceSiteEx, riid))
+        *ppv = &InPlaceSiteEx;
 
     /* TODO:
-     * IOleInPlaceSiteEx
      * {D48A6EC6-6A4A-11CF-94A7-444553540000}
      * {7BB0B520-B1A7-11D2-BB23-00C04F79ABCD}
      * {000670BA-0000-0000-C000-000000000046}
@@ -2141,6 +2231,70 @@ static void test_ConnectionPointContainer(IUnknown *unk)
     IConnectionPointContainer_Release(container);
 }
 
+static void test_GetCurMoniker(IUnknown *unk, IMoniker *exmon, LPCWSTR exurl)
+{
+    IHTMLDocument2 *doc;
+    IPersistMoniker *permon;
+    IMoniker *mon = (void*)0xdeadbeef;
+    BSTR doc_url = (void*)0xdeadbeef;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IPersistMoniker, (void**)&permon);
+    ok(hres == S_OK, "QueryInterface(IID_IPersistMoniker) failed: %08x\n", hres);
+    if(FAILED(hres))
+        return;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLDocument2, (void**)&doc);
+    ok(hres == S_OK, "QueryInterface(IID_IHTMLDocument2) failed: %08x\n", hres);
+
+    hres = IHTMLDocument2_get_URL(doc, &doc_url);
+    ok(hres == S_OK, "get_URL failed: %08x\n", hres);
+
+    hres = IPersistMoniker_GetCurMoniker(permon, &mon);
+    IPersistMoniker_Release(permon);
+
+    if(exmon) {
+        BSTR url;
+        BOOL exb = expect_GetDisplayName;
+        BOOL clb = called_GetDisplayName;
+
+        ok(hres == S_OK, "GetCurrentMoniker failed: %08x\n", hres);
+        ok(mon == exmon, "mon(%p) != exmon(%p)\n", mon, exmon);
+
+        SET_EXPECT(GetDisplayName);
+        hres = IMoniker_GetDisplayName(mon, NULL, NULL, &url);
+        ok(hres == S_OK, "GetDisplayName failed: %08x\n", hres);
+        CHECK_CALLED(GetDisplayName);
+        expect_GetDisplayName = exb;
+        called_GetDisplayName = clb;
+
+        SysFreeString(url);
+        ok(!lstrcmpW(url, doc_url), "url != doc_url\n");
+    }else if(exurl) {
+        BSTR url;
+
+        ok(hres == S_OK, "GetCurrentMoniker failed: %08x\n", hres);
+
+        hres = IMoniker_GetDisplayName(mon, NULL, NULL, &url);
+        ok(hres == S_OK, "GetDisplayName failed: %08x\n", hres);
+
+        ok(!lstrcmpW(url, exurl), "unexpected url\n");
+        ok(!lstrcmpW(url, doc_url), "url != doc_url\n");
+
+        SysFreeString(url);
+    }else {
+        ok(hres == E_UNEXPECTED,
+           "GetCurrentMoniker failed: %08x, expected E_UNEXPECTED\n", hres);
+        ok(mon == (IMoniker*)0xdeadbeef, "mon=%p\n", mon);
+        ok(!lstrcmpW(doc_url, about_blank_url), "doc_url is not about:blank\n");
+    }
+
+    SysFreeString(doc_url);
+    IHTMLDocument_Release(doc);
+    if(mon && mon != (void*)0xdeadbeef)
+        IMoniker_Release(mon);
+}
+
 static void test_Load(IPersistMoniker *persist)
 {
     IBindCtx *bind;
@@ -2221,6 +2375,8 @@ static void test_Load(IPersistMoniker *persist)
 
     set_clientsite = container_locked = TRUE;
 
+    test_GetCurMoniker((IUnknown*)persist, &Moniker, NULL);
+
     IBindCtx_Release(bind);
 
     test_readyState((IUnknown*)persist);
@@ -2258,10 +2414,9 @@ static void test_download(BOOL verb_done, BOOL css_dwl)
     SET_EXPECT(Exec_SETDOWNLOADSTATE_0);
     SET_EXPECT(Exec_MSHTML_PARSECOMPLETE);
     SET_EXPECT(Exec_HTTPEQUIV_DONE);
-    SET_EXPECT(Exec_SETTITLE);
     expect_status_text = (LPWSTR)0xdeadbeef; /* TODO */
 
-    while(!called_Exec_HTTPEQUIV_DONE && GetMessage(&msg, hwnd, 0, 0)) {
+    while(!called_Exec_HTTPEQUIV_DONE && GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
@@ -2291,6 +2446,8 @@ static void test_download(BOOL verb_done, BOOL css_dwl)
             SET_CALLED(Terminate);
             SET_CALLED(Protocol_Read);
             SET_CALLED(UnlockRequest);
+
+            nogecko = TRUE;
         }
     }
     CHECK_CALLED(OnChanged_1005);
@@ -2299,7 +2456,6 @@ static void test_download(BOOL verb_done, BOOL css_dwl)
     CHECK_CALLED(Exec_SETDOWNLOADSTATE_0);
     CHECK_CALLED(Exec_MSHTML_PARSECOMPLETE);
     CHECK_CALLED(Exec_HTTPEQUIV_DONE);
-    CHECK_CALLED(Exec_SETTITLE);
 
     load_state = LD_COMPLETE;
 
@@ -2399,12 +2555,12 @@ static void test_QueryStatus(IUnknown *unk, REFIID cgid, ULONG cmdid, DWORD cmdf
         return;
 
     hres = IOleCommandTarget_QueryStatus(cmdtrg, cgid, 1, &olecmd, NULL);
-    ok(hres == S_OK, "QueryStatus failed: %08x\n", hres);
+    ok(hres == S_OK, "QueryStatus(%u) failed: %08x\n", cmdid, hres);
 
     IOleCommandTarget_Release(cmdtrg);
 
     ok(olecmd.cmdID == cmdid, "cmdID changed\n");
-    ok(olecmd.cmdf == cmdf, "cmdf=%08x, expected %08x\n", olecmd.cmdf, cmdf);
+    ok(olecmd.cmdf == cmdf, "(%u) cmdf=%08x, expected %08x\n", cmdid, olecmd.cmdf, cmdf);
 }
 
 static void test_MSHTML_QueryStatus(IUnknown *unk, DWORD cmdf)
@@ -2473,7 +2629,7 @@ static void test_OleCommandTarget_fail(IUnknown *unk)
     };
 
     hres = IUnknown_QueryInterface(unk, &IID_IOleCommandTarget, (void**)&cmdtrg);
-    ok(hres == S_OK, "QueryInterface(IIDIOleM=CommandTarget failed: %08x\n", hres);
+    ok(hres == S_OK, "QueryInterface(IIDIOleCommandTarget failed: %08x\n", hres);
     if(FAILED(hres))
         return;
 
@@ -2548,6 +2704,8 @@ static void test_exec_editmode(IUnknown *unk)
     if(FAILED(hres))
         return;
 
+    editmode = TRUE;
+
     SET_EXPECT(SetStatusText);
     SET_EXPECT(Exec_ShellDocView_37);
     SET_EXPECT(GetHostInfo);
@@ -2568,9 +2726,102 @@ static void test_exec_editmode(IUnknown *unk)
     CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
     CHECK_CALLED(OnChanged_READYSTATE);
 
+    test_timer(EXPECT_UPDATEUI|EXPECT_SETTITLE);
+
     IOleCommandTarget_Release(cmdtrg);
 
-    editmode = TRUE;
+    hres = IOleCommandTarget_Exec(cmdtrg, &CGID_MSHTML, IDM_EDITMODE,
+            OLECMDEXECOPT_DODEFAULT, NULL, NULL);
+    ok(hres == S_OK, "Exec failed: %08x\n", hres);
+}
+
+static void test_exec_fontname(IUnknown *unk, LPCWSTR name, LPCWSTR exname)
+{
+   IOleCommandTarget *cmdtrg;
+   VARIANT *in = NULL, _in, *out = NULL, _out;
+   HRESULT hres;
+
+   hres = IUnknown_QueryInterface(unk, &IID_IOleCommandTarget, (void**)&cmdtrg);
+   ok(hres == S_OK, "QueryInterface(IIDIOleM=CommandTarget failed: %08x\n", hres);
+   if(FAILED(hres))
+       return;
+
+   if(name) {
+       in = &_in;
+       V_VT(in) = VT_BSTR;
+       V_BSTR(in) = SysAllocString(name);
+   }
+
+   if(exname) {
+       out = &_out;
+       V_VT(out) = VT_I4;
+       V_I4(out) = 0xdeadbeef;
+   }
+
+   hres = IOleCommandTarget_Exec(cmdtrg, &CGID_MSHTML, IDM_FONTNAME, 0, in, out);
+   if(!nogecko)
+       ok(hres == S_OK, "Exec(IDM_FONTNAME) failed: %08x\n", hres);
+
+   if(in)
+       VariantClear(in);
+
+   if(out && !nogecko) {
+       ok(V_VT(out) == VT_BSTR, "V_VT(out) = %x\n", V_VT(out));
+       if(V_VT(out) == VT_BSTR)
+           ok(!lstrcmpW(V_BSTR(out), name ? name : exname), "unexpected fontname\n");
+       VariantClear(out);
+   }
+
+   IOleCommandTarget_Release(cmdtrg);
+}
+
+static void test_exec_noargs(IUnknown *unk, DWORD cmdid)
+{
+    IOleCommandTarget *cmdtrg;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IOleCommandTarget, (void**)&cmdtrg);
+    ok(hres == S_OK, "QueryInterface(IID_IOleCommandTarget) failed: %08x\n", hres);
+    if(FAILED(hres))
+        return;
+
+    hres = IOleCommandTarget_Exec(cmdtrg, &CGID_MSHTML, cmdid,
+            OLECMDEXECOPT_DODEFAULT, NULL, NULL);
+    ok(hres == S_OK, "Exec failed: %08x\n", hres);
+
+    IOleCommandTarget_Release(cmdtrg);
+}
+
+static void test_IsDirty(IUnknown *unk, HRESULT exhres)
+{
+    IPersistStreamInit *perinit;
+    IPersistMoniker *permon;
+    IPersistFile *perfile;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IPersistStreamInit, (void**)&perinit);
+    ok(hres == S_OK, "QueryInterface(IID_IPersistStreamInit failed: %08x\n", hres);
+    if(SUCCEEDED(hres)) {
+        hres = IPersistStreamInit_IsDirty(perinit);
+        ok(hres == exhres, "IsDirty() = %08x, expected %08x\n", hres, exhres);
+        IPersistStreamInit_Release(perinit);
+    }
+
+    hres = IUnknown_QueryInterface(unk, &IID_IPersistMoniker, (void**)&permon);
+    ok(hres == S_OK, "QueryInterface(IID_IPersistMoniker failed: %08x\n", hres);
+    if(SUCCEEDED(hres)) {
+        hres = IPersistMoniker_IsDirty(permon);
+        ok(hres == exhres, "IsDirty() = %08x, expected %08x\n", hres, exhres);
+        IPersistMoniker_Release(permon);
+    }
+
+    hres = IUnknown_QueryInterface(unk, &IID_IPersistFile, (void**)&perfile);
+    ok(hres == S_OK, "QueryInterface(IID_IPersistFile failed: %08x\n", hres);
+    if(SUCCEEDED(hres)) {
+        hres = IPersistFile_IsDirty(perfile);
+        ok(hres == exhres, "IsDirty() = %08x, expected %08x\n", hres, exhres);
+        IPersistFile_Release(perfile);
+    }
 }
 
 static HWND create_container_window(void)
@@ -2838,10 +3089,20 @@ static void test_InPlaceDeactivate(IUnknown *unk, BOOL expect_call)
     if(FAILED(hres))
         return;
 
-    if(expect_call) SET_EXPECT(OnInPlaceDeactivate);
+    if(expect_call) {
+        if(ipsex)
+            SET_EXPECT(OnInPlaceDeactivateEx);
+        else
+            SET_EXPECT(OnInPlaceDeactivate);
+    }
     hres = IOleInPlaceObjectWindowless_InPlaceDeactivate(windowlessobj);
     ok(hres == S_OK, "InPlaceDeactivate failed: %08x\n", hres);
-    if(expect_call) CHECK_CALLED(OnInPlaceDeactivate);
+    if(expect_call) {
+        if(ipsex)
+            CHECK_CALLED(OnInPlaceDeactivateEx);
+        else
+            CHECK_CALLED(OnInPlaceDeactivate);
+    }
 
     IOleInPlaceObjectWindowless_Release(windowlessobj);
 }
@@ -3012,6 +3273,9 @@ static void test_StreamLoad(IUnknown *unk)
     CHECK_CALLED(OnChanged_READYSTATE);
     CHECK_CALLED(Read);
 
+    test_timer(EXPECT_SETTITLE);
+    test_GetCurMoniker(unk, NULL, about_blank_url);
+
     IPersistStreamInit_Release(init);
 }
 
@@ -3035,6 +3299,7 @@ static void init_test(enum load_state_t ls) {
     editmode = FALSE;
     stream_read = 0;
     protocol_read = 0;
+    ipsex = FALSE;
 }
 
 static void test_HTMLDocument(enum load_state_t ls)
@@ -3053,8 +3318,10 @@ static void test_HTMLDocument(enum load_state_t ls)
     doc_unk = unk;
 
     test_QueryInterface(unk);
+    test_IsDirty(unk, S_FALSE);
     test_MSHTML_QueryStatus(unk, OLECMDF_SUPPORTED);
     test_ConnectionPointContainer(unk);
+    test_GetCurMoniker(unk, NULL, NULL);
     test_Persist(unk);
     if(load_state == LD_NO)
         test_OnAmbientPropertyChange2(unk);
@@ -3065,14 +3332,17 @@ static void test_HTMLDocument(enum load_state_t ls)
         return;
     }
 
-    if(load_state == LD_LOADING)
+    if(load_state == LD_LOADING) {
         test_download(FALSE, TRUE);
+        test_GetCurMoniker(unk, &Moniker, NULL);
+    }
 
     test_MSHTML_QueryStatus(unk, OLECMDF_SUPPORTED);
     test_OleCommandTarget_fail(unk);
     test_OleCommandTarget(unk);
     test_OnAmbientPropertyChange(unk);
     test_Window(unk, TRUE);
+
     test_UIDeactivate();
     test_OleCommandTarget(unk);
     test_Window(unk, TRUE);
@@ -3105,6 +3375,7 @@ static void test_HTMLDocument(enum load_state_t ls)
     test_CloseView();
     test_Close(unk, TRUE);
     test_OnAmbientPropertyChange2(unk);
+    test_GetCurMoniker(unk, load_state == LD_NO ? NULL : &Moniker, NULL);
 
     if(view)
         IOleDocumentView_Release(view);
@@ -3127,6 +3398,7 @@ static void test_HTMLDocument_hlink(void)
     trace("Testing HTMLDocument (hlink)...\n");
 
     init_test(LD_DOLOAD);
+    ipsex = TRUE;
 
     hres = create_document(&unk);
     if(FAILED(hres))
@@ -3134,16 +3406,20 @@ static void test_HTMLDocument_hlink(void)
     doc_unk = unk;
 
     test_ConnectionPointContainer(unk);
+    test_GetCurMoniker(unk, NULL, NULL);
     test_Persist(unk);
     test_Navigate(unk);
 
     test_download(FALSE, TRUE);
 
+    test_IsDirty(unk, S_FALSE);
     test_MSHTML_QueryStatus(unk, OLECMDF_SUPPORTED);
     test_exec_onunload(unk);
     test_Window(unk, TRUE);
     test_InPlaceDeactivate(unk, TRUE);
     test_Close(unk, FALSE);
+    test_IsDirty(unk, S_FALSE);
+    test_GetCurMoniker(unk, &Moniker, NULL);
 
     if(view)
         IOleDocumentView_Release(view);
@@ -3174,6 +3450,7 @@ static void test_HTMLDocument_StreamLoad(void)
     ok(hres == S_OK, "Could not get IOleObject: %08x\n", hres);
 
     test_readyState(unk);
+    test_IsDirty(unk, S_FALSE);
     test_ConnectionPointContainer(unk);
     test_ClientSite(oleobj, CLIENTSITE_EXPECTPATH);
     test_DoVerb(oleobj);
@@ -3181,6 +3458,7 @@ static void test_HTMLDocument_StreamLoad(void)
 
     IOleObject_Release(oleobj);
 
+    test_GetCurMoniker(unk, NULL, NULL);
     test_StreamLoad(unk);
     test_download(TRUE, FALSE);
 
@@ -3188,6 +3466,7 @@ static void test_HTMLDocument_StreamLoad(void)
     test_UIDeactivate();
     test_InPlaceDeactivate(unk, TRUE);
     test_Close(unk, FALSE);
+    test_IsDirty(unk, S_FALSE);
 
     if(view) {
         IOleDocumentView_Release(view);
@@ -3229,7 +3508,32 @@ static void test_editing_mode(void)
     test_exec_editmode(unk);
     test_MSHTML_QueryStatus(unk, OLECMDF_SUPPORTED);
     test_download(TRUE, FALSE);
+    test_timer(EXPECT_UPDATEUI);
     test_MSHTML_QueryStatus(unk, OLECMDF_SUPPORTED|OLECMDF_ENABLED);
+
+    test_exec_fontname(unk, NULL, wszTimesNewRoman);
+    test_exec_fontname(unk, wszArial, wszTimesNewRoman);
+    test_timer(EXPECT_UPDATEUI);
+    test_exec_fontname(unk, NULL, wszArial);
+
+    test_exec_noargs(unk, IDM_JUSTIFYRIGHT);
+    test_timer(EXPECT_UPDATEUI);
+    if(!nogecko)
+        test_QueryStatus(unk, &CGID_MSHTML, IDM_JUSTIFYRIGHT,
+                         OLECMDF_SUPPORTED|OLECMDF_ENABLED|OLECMDF_LATCHED);
+
+    test_exec_noargs(unk, IDM_JUSTIFYCENTER);
+    test_timer(EXPECT_UPDATEUI);
+    test_QueryStatus(unk, &CGID_MSHTML, IDM_JUSTIFYRIGHT,
+                     OLECMDF_SUPPORTED|OLECMDF_ENABLED);
+    if(!nogecko)
+        test_QueryStatus(unk, &CGID_MSHTML, IDM_JUSTIFYCENTER,
+                         OLECMDF_SUPPORTED|OLECMDF_ENABLED|OLECMDF_LATCHED);
+
+    test_exec_noargs(unk, IDM_HORIZONTALLINE);
+    test_timer(EXPECT_UPDATEUI);
+    test_QueryStatus(unk, &CGID_MSHTML, IDM_HORIZONTALLINE,
+                     OLECMDF_SUPPORTED|OLECMDF_ENABLED);
 
     test_UIDeactivate();
     test_InPlaceDeactivate(unk, TRUE);

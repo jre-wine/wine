@@ -234,6 +234,7 @@ ALL_MAKEFILES = \
 	dlls/gdi32/Makefile \
 	dlls/gdi32/tests/Makefile \
 	dlls/gdiplus/Makefile \
+	dlls/gdiplus/tests/Makefile \
 	dlls/glu32/Makefile \
 	dlls/gphoto2.ds/Makefile \
 	dlls/hal/Makefile \
@@ -326,6 +327,7 @@ ALL_MAKEFILES = \
 	dlls/olepro32/Makefile \
 	dlls/olesvr32/Makefile \
 	dlls/opengl32/Makefile \
+	dlls/pdh/Makefile \
 	dlls/powrprof/Makefile \
 	dlls/psapi/Makefile \
 	dlls/psapi/tests/Makefile \
@@ -585,6 +587,7 @@ dlls/dxguid/Makefile: dlls/dxguid/Makefile.in dlls/Makeimplib.rules
 dlls/gdi32/Makefile: dlls/gdi32/Makefile.in dlls/Makedll.rules
 dlls/gdi32/tests/Makefile: dlls/gdi32/tests/Makefile.in dlls/Maketest.rules
 dlls/gdiplus/Makefile: dlls/gdiplus/Makefile.in dlls/Makedll.rules
+dlls/gdiplus/tests/Makefile: dlls/gdiplus/tests/Makefile.in dlls/Maketest.rules
 dlls/glu32/Makefile: dlls/glu32/Makefile.in dlls/Makedll.rules
 dlls/gphoto2.ds/Makefile: dlls/gphoto2.ds/Makefile.in dlls/Makedll.rules
 dlls/hal/Makefile: dlls/hal/Makefile.in dlls/Makedll.rules
@@ -677,6 +680,7 @@ dlls/oledlg/Makefile: dlls/oledlg/Makefile.in dlls/Makedll.rules
 dlls/olepro32/Makefile: dlls/olepro32/Makefile.in dlls/Makedll.rules
 dlls/olesvr32/Makefile: dlls/olesvr32/Makefile.in dlls/Makedll.rules
 dlls/opengl32/Makefile: dlls/opengl32/Makefile.in dlls/Makedll.rules
+dlls/pdh/Makefile: dlls/pdh/Makefile.in dlls/Makedll.rules
 dlls/powrprof/Makefile: dlls/powrprof/Makefile.in dlls/Makedll.rules
 dlls/psapi/Makefile: dlls/psapi/Makefile.in dlls/Makedll.rules
 dlls/psapi/tests/Makefile: dlls/psapi/tests/Makefile.in dlls/Maketest.rules

@@ -37,8 +37,9 @@ static const WCHAR szMSITEST[] = { 'M','S','I','T','E','S','T',0 };
 static const WCHAR szProductCode[] = { '{','F','1','C','3','A','F','5','0','-','8','B','5','6','-','4','A','6','9','-','A','0','0','C','-','0','0','7','7','3','F','E','4','2','F','3','0','}',0 };
 static const WCHAR szUpgradeCode[] = { '{','C','E','0','6','7','E','8','D','-','2','E','1','A','-','4','3','6','7','-','B','7','3','4','-','4','E','B','2','B','D','A','D','6','5','6','5','}',0 };
 static const WCHAR szProductInfoException[] = { 'P','r','o','d','u','c','t','I','n','f','o',',','P','r','o','d','u','c','t',',','A','t','t','r','i','b','u','t','e',0 };
-CHAR CURR_DIR[MAX_PATH];
-EXCEPINFO excepinfo;
+static FILETIME systemtime;
+static CHAR CURR_DIR[MAX_PATH];
+static EXCEPINFO excepinfo;
 
 /*
  * OLE automation data
@@ -187,6 +188,30 @@ static const msi_table tables[] =
     ADD_TABLE(service_control)
 };
 
+typedef struct _msi_summary_info
+{
+    UINT property;
+    UINT datatype;
+    INT iValue;
+    FILETIME *pftValue;
+    const CHAR *szValue;
+} msi_summary_info;
+
+#define ADD_INFO_I2(property, iValue) {property, VT_I2, iValue, NULL, NULL}
+#define ADD_INFO_I4(property, iValue) {property, VT_I4, iValue, NULL, NULL}
+#define ADD_INFO_LPSTR(property, szValue) {property, VT_LPSTR, 0, NULL, szValue}
+#define ADD_INFO_FILETIME(property, pftValue) {property, VT_FILETIME, 0, pftValue, NULL}
+
+static const msi_summary_info summary_info[] =
+{
+    ADD_INFO_LPSTR(PID_TEMPLATE, ";1033"),
+    ADD_INFO_LPSTR(PID_REVNUMBER, "{004757CA-5092-49c2-AD20-28E1CE0DF5F2}"),
+    ADD_INFO_I4(PID_PAGECOUNT, 100),
+    ADD_INFO_I4(PID_WORDCOUNT, 0),
+    ADD_INFO_FILETIME(PID_CREATE_DTM, &systemtime),
+    ADD_INFO_FILETIME(PID_LASTPRINTED, &systemtime)
+};
+
 /*
  * Database Helpers
  */
@@ -202,26 +227,24 @@ static void write_file(const CHAR *filename, const char *data, int data_size)
     CloseHandle(hf);
 }
 
-static void write_msi_summary_info(MSIHANDLE db)
+static void write_msi_summary_info(MSIHANDLE db, const msi_summary_info *info, int num_info)
 {
     MSIHANDLE summary;
     UINT r;
+    int j;
 
-    r = MsiGetSummaryInformationA(db, NULL, 4, &summary);
+    r = MsiGetSummaryInformationA(db, NULL, num_info, &summary);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
 
-    r = MsiSummaryInfoSetPropertyA(summary, PID_TEMPLATE, VT_LPSTR, 0, NULL, ";1033");
-    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    /* import summary information into the stream */
+    for (j = 0; j < num_info; j++)
+    {
+        const msi_summary_info *entry = &info[j];
 
-    r = MsiSummaryInfoSetPropertyA(summary, PID_REVNUMBER, VT_LPSTR, 0, NULL,
-                                   "{004757CA-5092-49c2-AD20-28E1CE0DF5F2}");
-    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
-
-    r = MsiSummaryInfoSetPropertyA(summary, PID_PAGECOUNT, VT_I4, 100, NULL, NULL);
-    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
-
-    r = MsiSummaryInfoSetPropertyA(summary, PID_WORDCOUNT, VT_I4, 0, NULL, NULL);
-    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+        r = MsiSummaryInfoSetPropertyA(summary, entry->property, entry->datatype,
+                                       entry->iValue, entry->pftValue, entry->szValue);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    }
 
     /* write the summary changes back to the stream */
     r = MsiSummaryInfoPersist(summary);
@@ -230,7 +253,8 @@ static void write_msi_summary_info(MSIHANDLE db)
     MsiCloseHandle(summary);
 }
 
-static void create_database(const CHAR *name, const msi_table *tables, int num_tables)
+static void create_database(const CHAR *name, const msi_table *tables, int num_tables,
+                            const msi_summary_info *info, int num_info)
 {
     MSIHANDLE db;
     UINT r;
@@ -252,7 +276,7 @@ static void create_database(const CHAR *name, const msi_table *tables, int num_t
         DeleteFileA(table->filename);
     }
 
-    write_msi_summary_info(db);
+    write_msi_summary_info(db, info, num_info);
 
     r = MsiDatabaseCommit(db);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
@@ -367,7 +391,7 @@ static void check_service_is_installed(void)
  * Automation helpers and tests
  */
 
-/* ok-like statement which takes two unicode strings as arguments */
+/* ok-like statement which takes two unicode strings or one unicode and one ANSI string as arguments */
 static CHAR string1[MAX_PATH], string2[MAX_PATH];
 
 #define ok_w2(format, szString1, szString2) \
@@ -378,6 +402,18 @@ static CHAR string1[MAX_PATH], string2[MAX_PATH];
         WideCharToMultiByte(CP_ACP, 0, szString2, -1, string2, MAX_PATH, NULL, NULL); \
         ok(0, format, string1, string2); \
     }
+
+#define ok_aw(format, aString, wString) \
+\
+    WideCharToMultiByte(CP_ACP, 0, wString, -1, string1, MAX_PATH, NULL, NULL); \
+    if (lstrcmpA(string1, aString) != 0) \
+        ok(0, format, string1, aString); \
+
+#define ok_awplus(format, extra, aString, wString)       \
+\
+    WideCharToMultiByte(CP_ACP, 0, wString, -1, string1, MAX_PATH, NULL, NULL); \
+    if (lstrcmpA(string1, aString) != 0) \
+        ok(0, format, extra, string1, aString);  \
 
 /* exception checker */
 static WCHAR szSource[] = {'M','s','i',' ','A','P','I',' ','E','r','r','o','r',0};
@@ -422,9 +458,9 @@ static void test_dispid(void)
 {
     ok( get_dispid( pInstaller, "CreateRecord" ) == 1, "dispid wrong\n");
     ok( get_dispid( pInstaller, "OpenPackage" ) == 2, "dispid wrong\n");
-    todo_wine {
-    ok( get_dispid( pInstaller, "OpenProduct" ) == 3, "dispid wrong\n");
+    todo_wine ok( get_dispid( pInstaller, "OpenProduct" ) == 3, "dispid wrong\n");
     ok( get_dispid( pInstaller, "OpenDatabase" ) == 4, "dispid wrong\n");
+    todo_wine {
     ok( get_dispid( pInstaller, "SummaryInformation" ) == 5, "dispid wrong\n");
     ok( get_dispid( pInstaller, "UILevel" ) == 6, "dispid wrong\n");
     ok( get_dispid( pInstaller, "EnableLog" ) == 7, "dispid wrong\n");
@@ -584,6 +620,8 @@ static void test_dispatch(void)
 }
 
 /* invocation helper function */
+static int _invoke_todo_vtResult = 0;
+
 static HRESULT invoke(IDispatch *pDispatch, LPCSTR szName, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult, VARTYPE vtResult)
 {
     OLECHAR *name = NULL;
@@ -609,7 +647,10 @@ static HRESULT invoke(IDispatch *pDispatch, LPCSTR szName, WORD wFlags, DISPPARA
 
     if (hr == S_OK)
     {
-        ok(V_VT(pVarResult) == vtResult, "Variant result type is %d, expected %d\n", V_VT(pVarResult), vtResult);
+        if (_invoke_todo_vtResult) todo_wine
+            ok(V_VT(pVarResult) == vtResult, "Variant result type is %d, expected %d\n", V_VT(pVarResult), vtResult);
+        else
+            ok(V_VT(pVarResult) == vtResult, "Variant result type is %d, expected %d\n", V_VT(pVarResult), vtResult);
         if (vtResult != VT_EMPTY)
         {
             hr = VariantChangeTypeEx(pVarResult, pVarResult, LOCALE_NEUTRAL, 0, vtResult);
@@ -721,6 +762,25 @@ static HRESULT Installer_OpenPackage(LPCWSTR szPackagePath, int options, IDispat
 
     hr = invoke(pInstaller, "OpenPackage", DISPATCH_METHOD, &dispparams, &varresult, VT_DISPATCH);
     *pSession = V_DISPATCH(&varresult);
+    return hr;
+}
+
+static HRESULT Installer_OpenDatabase(LPCWSTR szDatabasePath, int openmode, IDispatch **pDatabase)
+{
+    VARIANT varresult;
+    VARIANTARG vararg[2];
+    DISPPARAMS dispparams = {vararg, NULL, sizeof(vararg)/sizeof(VARIANTARG), 0};
+    HRESULT hr;
+
+    VariantInit(&vararg[1]);
+    V_VT(&vararg[1]) = VT_BSTR;
+    V_BSTR(&vararg[1]) = SysAllocString(szDatabasePath);
+    VariantInit(&vararg[0]);
+    V_VT(&vararg[0]) = VT_I4;
+    V_I4(&vararg[0]) = openmode;
+
+    hr = invoke(pInstaller, "OpenDatabase", DISPATCH_METHOD, &dispparams, &varresult, VT_DISPATCH);
+    *pDatabase = V_DISPATCH(&varresult);
     return hr;
 }
 
@@ -1032,6 +1092,22 @@ static HRESULT Database_OpenView(IDispatch *pDatabase, LPCWSTR szSql, IDispatch 
     return hr;
 }
 
+static HRESULT Database_SummaryInformation(IDispatch *pDatabase, int iUpdateCount, IDispatch **pSummaryInfo)
+{
+    VARIANT varresult;
+    VARIANTARG vararg[1];
+    DISPPARAMS dispparams = {vararg, NULL, sizeof(vararg)/sizeof(VARIANTARG), 0};
+    HRESULT hr;
+
+    VariantInit(&vararg[0]);
+    V_VT(&vararg[0]) = VT_I4;
+    V_I4(&vararg[0]) = iUpdateCount;
+
+    hr = invoke(pDatabase, "SummaryInformation", DISPATCH_PROPERTYGET, &dispparams, &varresult, VT_DISPATCH);
+    *pSummaryInfo = V_DISPATCH(&varresult);
+    return hr;
+}
+
 static HRESULT View_Execute(IDispatch *pView, IDispatch *pRecord)
 {
     VARIANT varresult;
@@ -1193,16 +1269,199 @@ static HRESULT StringList_Count(IDispatch *pStringList, int *pCount)
     return hr;
 }
 
+static HRESULT SummaryInfo_PropertyGet(IDispatch *pSummaryInfo, int pid, VARIANT *pVarResult, VARTYPE vtExpect)
+{
+    VARIANTARG vararg[1];
+    DISPPARAMS dispparams = {vararg, NULL, sizeof(vararg)/sizeof(VARIANTARG), 0};
+
+    VariantInit(&vararg[0]);
+    V_VT(&vararg[0]) = VT_I4;
+    V_I4(&vararg[0]) = pid;
+    return invoke(pSummaryInfo, "Property", DISPATCH_PROPERTYGET, &dispparams, pVarResult, vtExpect);
+}
+
+static HRESULT SummaryInfo_PropertyPut(IDispatch *pSummaryInfo, int pid, VARIANT *pVariant)
+{
+    VARIANT varresult;
+    VARIANTARG vararg[2];
+    DISPID dispid = DISPID_PROPERTYPUT;
+    DISPPARAMS dispparams = {vararg, &dispid, sizeof(vararg)/sizeof(VARIANTARG), 1};
+
+    VariantInit(&vararg[1]);
+    V_VT(&vararg[1]) = VT_I4;
+    V_I4(&vararg[1]) = pid;
+    VariantInit(&vararg[0]);
+    VariantCopyInd(vararg, pVariant);
+
+    return invoke(pSummaryInfo, "Property", DISPATCH_PROPERTYPUT, &dispparams, &varresult, VT_EMPTY);
+}
+
+static HRESULT SummaryInfo_PropertyCountGet(IDispatch *pSummaryInfo, int *pCount)
+{
+    VARIANT varresult;
+    DISPPARAMS dispparams = {NULL, NULL, 0, 0};
+    HRESULT hr;
+
+    hr = invoke(pSummaryInfo, "PropertyCount", DISPATCH_PROPERTYGET, &dispparams, &varresult, VT_I4);
+    *pCount = V_I4(&varresult);
+    VariantClear(&varresult);
+    return hr;
+}
+
 /* Test the various objects */
 
-static void test_Database(IDispatch *pDatabase)
+#define TEST_SUMMARYINFO_PROPERTIES_MODIFIED 4
+
+static void test_SummaryInfo(IDispatch *pSummaryInfo, const msi_summary_info *info, int num_info, BOOL readonly)
+{
+    static const WCHAR szPropertyException[] = { 'P','r','o','p','e','r','t','y',',','P','i','d',0 };
+    static const WCHAR szTitle[] = { 'T','i','t','l','e',0 };
+    VARIANT varresult, var;
+    SYSTEMTIME st;
+    HRESULT hr;
+    int j;
+
+    /* SummaryInfo::PropertyCount */
+    hr = SummaryInfo_PropertyCountGet(pSummaryInfo, &j);
+    ok(hr == S_OK, "SummaryInfo_PropertyCount failed, hresult 0x%08x\n", hr);
+    ok(j == num_info, "SummaryInfo_PropertyCount returned %d, expected %d\n", j, num_info);
+
+    /* SummaryInfo::Property, get for properties we have set */
+    for (j = 0; j < num_info; j++)
+    {
+        const msi_summary_info *entry = &info[j];
+
+        int vt = entry->datatype;
+        if (vt == VT_LPSTR) vt = VT_BSTR;
+        else if (vt == VT_FILETIME) vt = VT_DATE;
+        else if (vt == VT_I2) vt = VT_I4;
+
+        hr = SummaryInfo_PropertyGet(pSummaryInfo, entry->property, &varresult, vt);
+        ok(hr == S_OK, "SummaryInfo_Property (pid %d) failed, hresult 0x%08x\n", entry->property, hr);
+        if (V_VT(&varresult) != vt)
+            skip("Skipping property tests due to type mismatch\n");
+        else if (vt == VT_I4)
+            ok(V_I4(&varresult) == entry->iValue, "SummaryInfo_Property (pid %d) I4 result expected to be %d, but was %d\n",
+               entry->property, entry->iValue, V_I4(&varresult));
+        else if (vt == VT_DATE)
+        {
+            FILETIME ft;
+            DATE d;
+
+            FileTimeToLocalFileTime(entry->pftValue, &ft);
+            FileTimeToSystemTime(&ft, &st);
+            SystemTimeToVariantTime(&st, &d);
+            ok(d == V_DATE(&varresult), "SummaryInfo_Property (pid %d) DATE result expected to be %lf, but was %lf\n", entry->property, d, V_DATE(&varresult));
+        }
+        else if (vt == VT_BSTR)
+        {
+            ok_awplus("SummaryInfo_Property (pid %d) BSTR result expected to be %s, but was %s\n", entry->property, entry->szValue, V_BSTR(&varresult));
+        }
+        else
+            skip("SummaryInfo_Property (pid %d) unhandled result type %d\n", entry->property, vt);
+    }
+
+    /* SummaryInfo::Property, get; invalid arguments */
+
+    /* Invalid pids */
+    hr = SummaryInfo_PropertyGet(pSummaryInfo, -1, &varresult, VT_EMPTY);
+    ok(hr == DISP_E_EXCEPTION, "SummaryInfo_PropertyGet failed, hresult 0x%08x\n", hr);
+    ok_exception(hr, szPropertyException);
+
+    hr = SummaryInfo_PropertyGet(pSummaryInfo, 1000, &varresult, VT_EMPTY);
+    ok(hr == DISP_E_EXCEPTION, "SummaryInfo_PropertyGet failed, hresult 0x%08x\n", hr);
+    ok_exception(hr, szPropertyException);
+
+    /* Unsupported pids */
+    hr = SummaryInfo_PropertyGet(pSummaryInfo, PID_DICTIONARY, &varresult, VT_EMPTY);
+    ok(hr == S_OK, "SummaryInfo_PropertyGet failed, hresult 0x%08x\n", hr);
+
+    hr = SummaryInfo_PropertyGet(pSummaryInfo, PID_THUMBNAIL, &varresult, VT_EMPTY);
+    ok(hr == S_OK, "SummaryInfo_PropertyGet failed, hresult 0x%08x\n", hr);
+
+    /* Pids we have not set, one for each type */
+    hr = SummaryInfo_PropertyGet(pSummaryInfo, PID_CODEPAGE, &varresult, VT_EMPTY);
+    ok(hr == S_OK, "SummaryInfo_PropertyGet failed, hresult 0x%08x\n", hr);
+
+    hr = SummaryInfo_PropertyGet(pSummaryInfo, PID_TITLE, &varresult, VT_EMPTY);
+    ok(hr == S_OK, "SummaryInfo_PropertyGet failed, hresult 0x%08x\n", hr);
+
+    hr = SummaryInfo_PropertyGet(pSummaryInfo, PID_EDITTIME, &varresult, VT_EMPTY);
+    ok(hr == S_OK, "SummaryInfo_PropertyGet failed, hresult 0x%08x\n", hr);
+
+    hr = SummaryInfo_PropertyGet(pSummaryInfo, PID_CHARCOUNT, &varresult, VT_EMPTY);
+    ok(hr == S_OK, "SummaryInfo_PropertyGet failed, hresult 0x%08x\n", hr);
+
+    if (!readonly)
+    {
+        /* SummaryInfo::Property, put; one for each type */
+
+        /* VT_I2 */
+        VariantInit(&var);
+        V_VT(&var) = VT_I2;
+        V_I2(&var) = 1;
+        hr = SummaryInfo_PropertyPut(pSummaryInfo, PID_CODEPAGE, &var);
+        ok(hr == S_OK, "SummaryInfo_PropertyPut failed, hresult 0x%08x\n", hr);
+
+        hr = SummaryInfo_PropertyGet(pSummaryInfo, PID_CODEPAGE, &varresult, VT_I4 /* NOT VT_I2 */);
+        ok(hr == S_OK, "SummaryInfo_PropertyGet failed, hresult 0x%08x\n", hr);
+        ok(V_I2(&var) == V_I2(&varresult), "SummaryInfo_PropertyGet expected %d, but returned %d\n", V_I2(&var), V_I2(&varresult));
+        VariantClear(&varresult);
+        VariantClear(&var);
+
+        /* VT_BSTR */
+        V_VT(&var) = VT_BSTR;
+        V_BSTR(&var) = SysAllocString(szTitle);
+        hr = SummaryInfo_PropertyPut(pSummaryInfo, PID_TITLE, &var);
+        ok(hr == S_OK, "SummaryInfo_PropertyPut failed, hresult 0x%08x\n", hr);
+
+        hr = SummaryInfo_PropertyGet(pSummaryInfo, PID_TITLE, &varresult, V_VT(&var));
+        ok(hr == S_OK, "SummaryInfo_PropertyGet failed, hresult 0x%08x\n", hr);
+        ok_w2("SummaryInfo_PropertyGet expected %s, but returned %s\n", V_BSTR(&var), V_BSTR(&varresult));
+        VariantClear(&varresult);
+        VariantClear(&var);
+
+        /* VT_DATE */
+        V_VT(&var) = VT_DATE;
+        FileTimeToSystemTime(&systemtime, &st);
+        SystemTimeToVariantTime(&st, &V_DATE(&var));
+        hr = SummaryInfo_PropertyPut(pSummaryInfo, PID_LASTSAVE_DTM, &var);
+        ok(hr == S_OK, "SummaryInfo_PropertyPut failed, hresult 0x%08x\n", hr);
+
+        hr = SummaryInfo_PropertyGet(pSummaryInfo, PID_LASTSAVE_DTM, &varresult, V_VT(&var));
+        ok(hr == S_OK, "SummaryInfo_PropertyGet failed, hresult 0x%08x\n", hr);
+        /* FIXME: Off by one second */
+        todo_wine ok(V_DATE(&var) == V_DATE(&varresult), "SummaryInfo_PropertyGet expected %lf, but returned %lf\n", V_DATE(&var), V_DATE(&varresult));
+        VariantClear(&varresult);
+        VariantClear(&var);
+
+        /* VT_I4 */
+        V_VT(&var) = VT_I4;
+        V_I4(&var) = 1000;
+        hr = SummaryInfo_PropertyPut(pSummaryInfo, PID_CHARCOUNT, &var);
+        ok(hr == S_OK, "SummaryInfo_PropertyPut failed, hresult 0x%08x\n", hr);
+
+        hr = SummaryInfo_PropertyGet(pSummaryInfo, PID_CHARCOUNT, &varresult, V_VT(&var));
+        ok(hr == S_OK, "SummaryInfo_PropertyGet failed, hresult 0x%08x\n", hr);
+        ok(V_I4(&var) == V_I4(&varresult), "SummaryInfo_PropertyGet expected %d, but returned %d\n", V_I4(&var), V_I4(&varresult));
+        VariantClear(&varresult);
+        VariantClear(&var);
+
+        /* SummaryInfo::PropertyCount */
+        hr = SummaryInfo_PropertyCountGet(pSummaryInfo, &j);
+        ok(hr == S_OK, "SummaryInfo_PropertyCount failed, hresult 0x%08x\n", hr);
+        ok(j == num_info+4, "SummaryInfo_PropertyCount returned %d, expected %d\n", j, num_info);
+    }
+}
+
+static void test_Database(IDispatch *pDatabase, BOOL readonly)
 {
     static WCHAR szSql[] = { 'S','E','L','E','C','T',' ','`','F','e','a','t','u','r','e','`',' ','F','R','O','M',' ','`','F','e','a','t','u','r','e','`',' ','W','H','E','R','E',' ','`','F','e','a','t','u','r','e','_','P','a','r','e','n','t','`','=','\'','O','n','e','\'',0 };
     static WCHAR szThree[] = { 'T','h','r','e','e',0 };
     static WCHAR szTwo[] = { 'T','w','o',0 };
     static WCHAR szStringDataField[] = { 'S','t','r','i','n','g','D','a','t','a',',','F','i','e','l','d',0 };
     static WCHAR szModifyModeRecord[] = { 'M','o','d','i','f','y',',','M','o','d','e',',','R','e','c','o','r','d',0 };
-    IDispatch *pView = NULL;
+    IDispatch *pView = NULL, *pSummaryInfo = NULL;
     HRESULT hr;
 
     hr = Database_OpenView(pDatabase, szSql, &pView);
@@ -1298,6 +1557,16 @@ static void test_Database(IDispatch *pDatabase)
 
         IDispatch_Release(pView);
     }
+
+    /* Database::SummaryInformation */
+    hr = Database_SummaryInformation(pDatabase, TEST_SUMMARYINFO_PROPERTIES_MODIFIED, &pSummaryInfo);
+    ok(hr == S_OK, "Database_SummaryInformation failed, hresult 0x%08x\n", hr);
+    ok(pSummaryInfo != NULL, "Database_SummaryInformation should not have returned NULL record\n");
+    if (pSummaryInfo)
+    {
+        test_SummaryInfo(pSummaryInfo, summary_info, sizeof(summary_info)/sizeof(msi_summary_info), readonly);
+        IDispatch_Release(pSummaryInfo);
+    }
 }
 
 static void test_Session(IDispatch *pSession)
@@ -1383,7 +1652,7 @@ static void test_Session(IDispatch *pSession)
     ok(hr == S_OK, "Session_Database failed, hresult 0x%08x\n", hr);
     if (hr == S_OK)
     {
-        test_Database(pDatabase);
+        test_Database(pDatabase, TRUE);
         IDispatch_Release(pDatabase);
     }
 
@@ -1981,7 +2250,7 @@ static void test_Installer(void)
     WCHAR szPath[MAX_PATH];
     HRESULT hr;
     UINT len;
-    IDispatch *pSession = NULL, *pRecord = NULL, *pStringList = NULL;
+    IDispatch *pSession = NULL, *pDatabase = NULL, *pRecord = NULL, *pStringList = NULL;
     int iValue, iCount;
 
     if (!pInstaller) return;
@@ -2032,7 +2301,8 @@ static void test_Installer(void)
     }
 
     /* Prepare package */
-    create_database(msifile, tables, sizeof(tables) / sizeof(msi_table));
+    create_database(msifile, tables, sizeof(tables) / sizeof(msi_table),
+                    summary_info, sizeof(summary_info) / sizeof(msi_summary_info));
 
     len = MultiByteToWideChar(CP_ACP, MB_PRECOMPOSED, CURR_DIR, -1, szPath, MAX_PATH);
     ok(len, "MultiByteToWideChar returned error %d\n", GetLastError());
@@ -2048,6 +2318,15 @@ static void test_Installer(void)
     {
         test_Session(pSession);
         IDispatch_Release(pSession);
+    }
+
+    /* Installer::OpenDatabase */
+    hr = Installer_OpenDatabase(szPath, (int)MSIDBOPEN_TRANSACT, &pDatabase);
+    ok(hr == S_OK, "Installer_OpenDatabase failed, hresult 0x%08x\n", hr);
+    if (hr == S_OK)
+    {
+        test_Database(pDatabase, FALSE);
+        IDispatch_Release(pDatabase);
     }
 
     /* Installer::RegistryValue */
@@ -2106,6 +2385,8 @@ START_TEST(automation)
     HRESULT hr;
     CLSID clsid;
     IUnknown *pUnk;
+
+    GetSystemTimeAsFileTime(&systemtime);
 
     GetCurrentDirectoryA(MAX_PATH, prev_path);
     GetTempPath(MAX_PATH, temp_path);

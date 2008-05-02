@@ -23,8 +23,9 @@ BEGIN
     POPUP "&Fichier"
     BEGIN
         MENUITEM "&Nouveau\tCtrl+N",        ID_FILE_NEW
-        MENUITEM "&Ouvrir\tCtrl+O",         ID_FILE_OPEN
-        MENUITEM "&Sauver\tCtrl+S",         ID_FILE_SAVE
+        MENUITEM "&Ouvrir...\tCtrl+O",      ID_FILE_OPEN
+        MENUITEM "&Enregistrer\tCtrl+S",    ID_FILE_SAVE
+        MENUITEM "Enregistrer &sous...",    ID_FILE_SAVEAS
         MENUITEM SEPARATOR
         MENUITEM "&Quitter",        ID_FILE_EXIT
     END
@@ -50,6 +51,12 @@ BEGIN
             MENUITEM "Format paragrap&he",          ID_EDIT_PARAFORMAT
             MENUITEM "&Recevoir texte",             ID_EDIT_GETTEXT
         END
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Toolbar",        ID_TOGGLE_TOOLBAR
+        MENUITEM "&Formatbar",      ID_TOGGLE_FORMATBAR
+        MENUITEM "&Statusbar",      ID_TOGGLE_STATUSBAR
     END
     POPUP "Forma&t"
     BEGIN
