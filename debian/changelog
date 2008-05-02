@@ -1,6 +1,24 @@
+wine (0.9.55-1) unstable; urgency=low
+
+  * New upstream release 0.9.55.
+    - Direct3D improvements, including driver version emulation.
+    - Beginnings of support for OLE objects in Richedit.
+    - Several fixes to the animation control.
+    - A bunch of fixes for regression test failures.
+    - Lots of bug fixes.
+  * This version was released Feb 8, 2008.
+  * Added lib32z1-dev build-dependency for amd64. This is not strictly
+    correct, since Wine does not itself depend on zlib. However, some
+    libraries in ia32-libs (such as freetype) do, and since there's no
+    ia32-libs-dev package which might be able to depend on -dev packages,
+    there's not really any other place to work around this for now.
+    Hopefully they'll fix that soon...
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 23 Feb 2008 11:54:39 +0100
+
 wine (0.9.54-1) unstable; urgency=low
 
-  * New upstream release
+  * New upstream release 0.9.54.
     - Photoshop CS/CS2 should now work, please help us testing it.
       See http://wiki.winehq.org/AdobePhotoshop for details.
     - A number of RPC fixes.
