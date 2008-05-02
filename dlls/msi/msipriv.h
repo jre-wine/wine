@@ -113,6 +113,25 @@ typedef struct tagMSIRECORD
     MSIFIELD fields[1]; /* nb. array size is count+1 */
 } MSIRECORD;
 
+typedef struct tagMSISOURCELISTINFO
+{
+    struct list entry;
+    DWORD context;
+    DWORD options;
+    LPCWSTR property;
+    LPWSTR value;
+} MSISOURCELISTINFO;
+
+typedef struct tagMSIMEDIADISK
+{
+    struct list entry;
+    DWORD context;
+    DWORD options;
+    DWORD disk_id;
+    LPWSTR volume_label;
+    LPWSTR disk_prompt;
+} MSIMEDIADISK;
+
 typedef const struct tagMSICOLUMNHASHENTRY *MSIITERHANDLE;
 
 typedef struct tagMSIVIEWOPS
@@ -248,6 +267,9 @@ typedef struct tagMSIPACKAGE
     UINT WordCount;
 
     struct list subscriptions;
+
+    struct list sourcelist_info;
+    struct list sourcelist_media;
 
     unsigned char scheduled_action_running : 1;
     unsigned char commit_action_running : 1;
@@ -512,6 +534,9 @@ DEFINE_GUID(CLSID_IMsiServerX3, 0x000C1094,0x0000,0x0000,0xC0,0x00,0x00,0x00,0x0
 
 DEFINE_GUID(CLSID_IMsiServerMessage, 0x000C101D,0x0000,0x0000,0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
 
+DEFINE_GUID(CLSID_IWineMsiRemoteCustomAction,0xBA26E6FA,0x4F27,0x4f56,0x95,0x3A,0x3F,0x90,0x27,0x20,0x18,0xAA);
+DEFINE_GUID(CLSID_IWineMsiRemotePackage,0x902b3592,0x9d08,0x4dfd,0xa5,0x93,0xd0,0x7c,0x52,0x54,0x64,0x21);
+
 /* handle unicode/ascii output in the Msi* API functions */
 typedef struct {
     BOOL unicode;
@@ -533,10 +558,14 @@ UINT msi_strcpy_to_awstring( LPCWSTR str, awstring *awbuf, DWORD *sz );
 
 /* msi server interface */
 extern ITypeLib *get_msi_typelib( LPWSTR *path );
+extern HRESULT create_msi_custom_remote( IUnknown *pOuter, LPVOID *ppObj );
+extern HRESULT create_msi_remote_package( IUnknown *pOuter, LPVOID *ppObj );
+extern IUnknown *msi_get_remote(MSIHANDLE handle);
 
 /* handle functions */
 extern void *msihandle2msiinfo(MSIHANDLE handle, UINT type);
 extern MSIHANDLE alloc_msihandle( MSIOBJECTHDR * );
+extern MSIHANDLE alloc_msi_remote_handle( IUnknown *unk );
 extern void *alloc_msiobject(UINT type, UINT size, msihandledestructor destroy );
 extern void msiobj_addref(MSIOBJECTHDR *);
 extern int msiobj_release(MSIOBJECTHDR *);
@@ -657,10 +686,12 @@ extern UINT MSI_GetComponentStateW( MSIPACKAGE *, LPCWSTR, INSTALLSTATE *, INSTA
 extern UINT MSI_GetFeatureStateW( MSIPACKAGE *, LPCWSTR, INSTALLSTATE *, INSTALLSTATE * );
 extern UINT WINAPI MSI_SetFeatureStateW(MSIPACKAGE*, LPCWSTR, INSTALLSTATE );
 extern LPCWSTR msi_download_file( LPCWSTR szUrl, LPWSTR filename );
+extern UINT msi_package_add_info(MSIPACKAGE *, DWORD, DWORD, LPCWSTR, LPWSTR);
+extern UINT msi_package_add_media_disk(MSIPACKAGE *, DWORD, DWORD, DWORD, LPWSTR, LPWSTR);
+extern UINT msi_clone_properties(MSIPACKAGE *);
 
 /* for deformating */
 extern UINT MSI_FormatRecordW( MSIPACKAGE *, MSIRECORD *, LPWSTR, DWORD * );
-extern UINT MSI_FormatRecordA( MSIPACKAGE *, MSIRECORD *, LPSTR, DWORD * );
 
 /* registry data encoding/decoding functions */
 extern BOOL unsquash_guid(LPCWSTR in, LPWSTR out);
@@ -669,17 +700,25 @@ extern BOOL encode_base85_guid(GUID *,LPWSTR);
 extern BOOL decode_base85_guid(LPCWSTR,GUID*);
 extern UINT MSIREG_OpenUninstallKey(LPCWSTR szProduct, HKEY* key, BOOL create);
 extern UINT MSIREG_OpenUserProductsKey(LPCWSTR szProduct, HKEY* key, BOOL create);
+extern UINT MSIREG_OpenUserPatchesKey(LPCWSTR szPatch, HKEY* key, BOOL create);
 extern UINT MSIREG_OpenFeatures(HKEY* key);
 extern UINT MSIREG_OpenFeaturesKey(LPCWSTR szProduct, HKEY* key, BOOL create);
+extern UINT MSIREG_OpenUserDataFeaturesKey(LPCWSTR szProduct, HKEY *key, BOOL create);
 extern UINT MSIREG_OpenComponents(HKEY* key);
 extern UINT MSIREG_OpenUserComponentsKey(LPCWSTR szComponent, HKEY* key, BOOL create);
 extern UINT MSIREG_OpenComponentsKey(LPCWSTR szComponent, HKEY* key, BOOL create);
+extern UINT MSIREG_OpenUserDataComponentKey(LPCWSTR szComponent, HKEY *key, BOOL create);
 extern UINT MSIREG_OpenProductsKey(LPCWSTR szProduct, HKEY* key, BOOL create);
+extern UINT MSIREG_OpenPatchesKey(LPCWSTR szPatch, HKEY* key, BOOL create);
 extern UINT MSIREG_OpenUserDataProductKey(LPCWSTR szProduct, HKEY* key, BOOL create);
+extern UINT MSIREG_OpenInstallPropertiesKey(LPCWSTR szProduct, HKEY* key, BOOL create);
 extern UINT MSIREG_OpenUserFeaturesKey(LPCWSTR szProduct, HKEY* key, BOOL create);
 extern UINT MSIREG_OpenUserComponentsKey(LPCWSTR szComponent, HKEY* key, BOOL create);
 extern UINT MSIREG_OpenUpgradeCodesKey(LPCWSTR szProduct, HKEY* key, BOOL create);
 extern UINT MSIREG_OpenUserUpgradeCodesKey(LPCWSTR szProduct, HKEY* key, BOOL create);
+extern UINT MSIREG_DeleteProductKey(LPCWSTR szProduct);
+extern UINT MSIREG_DeleteUserProductKey(LPCWSTR szProduct);
+extern UINT MSIREG_DeleteUserDataProductKey(LPCWSTR szProduct);
 
 extern LPWSTR msi_reg_get_val_str( HKEY hkey, LPCWSTR name );
 extern BOOL msi_reg_get_val_dword( HKEY hkey, LPCWSTR name, DWORD *val);

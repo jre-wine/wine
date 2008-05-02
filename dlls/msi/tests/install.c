@@ -19,6 +19,7 @@
  */
 
 #define _WIN32_MSI 300
+#define COBJMACROS
 
 #include <stdio.h>
 
@@ -27,10 +28,13 @@
 #include <msidefs.h>
 #include <msi.h>
 #include <fci.h>
+#include <objidl.h>
 
 #include "wine/test.h"
 
 static const char *msifile = "msitest.msi";
+static const char *msifile2 = "winetest2.msi";
+static const char *mstfile = "winetest.mst";
 CHAR CURR_DIR[MAX_PATH];
 CHAR PROG_FILES_DIR[MAX_PATH];
 
@@ -129,7 +133,8 @@ static const CHAR property_dat[] = "Property\tValue\n"
                                    "ProductVersion\t1.1.1\n"
                                    "PROMPTROLLBACKCOST\tP\n"
                                    "Setup\tSetup\n"
-                                   "UpgradeCode\t{4C0EAA15-0264-4E5A-8758-609EF142B92D}";
+                                   "UpgradeCode\t{4C0EAA15-0264-4E5A-8758-609EF142B92D}\n"
+                                   "AdminProperties\tPOSTADMIN\n";
 
 static const CHAR registry_dat[] = "Registry\tRoot\tKey\tName\tValue\tComponent_\n"
                                    "s72\ti2\tl255\tL255\tL0\ts72\n"
@@ -405,6 +410,39 @@ static const CHAR pp_install_exec_seq_dat[] = "Action\tCondition\tSequence\n"
                                               "PublishProduct\tPUBLISH_PRODUCT=1 Or FULL=1\t6400\n"
                                               "InstallFinalize\t\t6600";
 
+static const CHAR tp_component_dat[] = "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
+                                       "s72\tS38\ts72\ti2\tS255\tS72\n"
+                                       "Component\tComponent\n"
+                                       "augustus\t\tMSITESTDIR\t0\tprop=\"val\"\taugustus\n";
+
+static const CHAR cwd_component_dat[] = "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
+                                        "s72\tS38\ts72\ti2\tS255\tS72\n"
+                                        "Component\tComponent\n"
+                                        "augustus\t\tMSITESTDIR\t0\t\taugustus\n";
+
+static const CHAR adm_component_dat[] = "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
+                                        "s72\tS38\ts72\ti2\tS255\tS72\n"
+                                        "Component\tComponent\n"
+                                        "augustus\t\tMSITESTDIR\t0\tPOSTADMIN=1\taugustus";
+
+static const CHAR adm_custom_action_dat[] = "Action\tType\tSource\tTarget\tISComments\n"
+                                            "s72\ti2\tS64\tS0\tS255\n"
+                                            "CustomAction\tAction\n"
+                                            "SetPOSTADMIN\t51\tPOSTADMIN\t1\t";
+
+static const CHAR adm_admin_exec_seq_dat[] = "Action\tCondition\tSequence\n"
+                                             "s72\tS255\tI2\n"
+                                             "AdminExecuteSequence\tAction\n"
+                                             "CostFinalize\t\t1000\n"
+                                             "CostInitialize\t\t800\n"
+                                             "FileCost\t\t900\n"
+                                             "SetPOSTADMIN\t\t950\n"
+                                             "InstallFiles\t\t4000\n"
+                                             "InstallFinalize\t\t6600\n"
+                                             "InstallInitialize\t\t1500\n"
+                                             "InstallValidate\t\t1400\n"
+                                             "LaunchConditions\t\t100";
+
 typedef struct _msi_table
 {
     const CHAR *filename;
@@ -589,6 +627,44 @@ static const msi_table pp_tables[] =
     ADD_TABLE(pp_install_exec_seq),
     ADD_TABLE(rof_media),
     ADD_TABLE(property),
+};
+
+static const msi_table tp_tables[] =
+{
+    ADD_TABLE(tp_component),
+    ADD_TABLE(directory),
+    ADD_TABLE(rof_feature),
+    ADD_TABLE(ci2_feature_comp),
+    ADD_TABLE(ci2_file),
+    ADD_TABLE(install_exec_seq),
+    ADD_TABLE(rof_media),
+    ADD_TABLE(property),
+};
+
+static const msi_table cwd_tables[] =
+{
+    ADD_TABLE(cwd_component),
+    ADD_TABLE(directory),
+    ADD_TABLE(rof_feature),
+    ADD_TABLE(ci2_feature_comp),
+    ADD_TABLE(ci2_file),
+    ADD_TABLE(install_exec_seq),
+    ADD_TABLE(rof_media),
+    ADD_TABLE(property),
+};
+
+static const msi_table adm_tables[] =
+{
+    ADD_TABLE(adm_component),
+    ADD_TABLE(directory),
+    ADD_TABLE(rof_feature),
+    ADD_TABLE(ci2_feature_comp),
+    ADD_TABLE(ci2_file),
+    ADD_TABLE(install_exec_seq),
+    ADD_TABLE(rof_media),
+    ADD_TABLE(property),
+    ADD_TABLE(adm_custom_action),
+    ADD_TABLE(adm_admin_exec_seq),
 };
 
 /* cabinet definitions */
@@ -1594,15 +1670,15 @@ static void test_publish(void)
     MsiSetInternalUI(INSTALLUILEVEL_FULL, NULL);
 
     state = MsiQueryProductState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+
+    state = MsiQueryFeatureState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}", "feature");
     if (state != INSTALLSTATE_UNKNOWN)
     {
         skip("Install database not in a clean state\n");
         return;
     }
 
-    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-
-    state = MsiQueryFeatureState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}", "feature");
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
 
     state = MsiQueryFeatureState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}", "montecristo");
@@ -1683,10 +1759,7 @@ static void test_publish(void)
     ok(pf_exists("msitest"), "File not installed\n");
 
     state = MsiQueryProductState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    todo_wine
-    {
-        ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
-    }
+    ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     state = MsiQueryFeatureState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}", "feature");
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
@@ -1775,10 +1848,7 @@ static void test_publish(void)
     ok(pf_exists("msitest"), "File deleted\n");
 
     state = MsiQueryProductState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    todo_wine
-    {
-        ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    }
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
 
     state = MsiQueryFeatureState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}", "feature");
     todo_wine
@@ -1827,10 +1897,7 @@ static void test_publish(void)
     ok(pf_exists("msitest"), "File deleted\n");
 
     state = MsiQueryProductState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    todo_wine
-    {
-        ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    }
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
 
     state = MsiQueryFeatureState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}", "feature");
     todo_wine
@@ -1867,7 +1934,7 @@ static void test_publish(void)
     state = MsiQueryFeatureState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}", "montecristo");
     todo_wine
     {
-        ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+        ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
     }
 
     r = MsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
@@ -1888,10 +1955,7 @@ static void test_publish(void)
     }
 
     state = MsiQueryProductState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    todo_wine
-    {
-        ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    }
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
 
     state = MsiQueryFeatureState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}", "feature");\
     todo_wine
@@ -1928,7 +1992,7 @@ static void test_publish(void)
     state = MsiQueryFeatureState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}", "montecristo");
     todo_wine
     {
-        ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+        ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
     }
 
     r = MsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
@@ -1949,10 +2013,7 @@ static void test_publish(void)
     }
 
     state = MsiQueryProductState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    todo_wine
-    {
-        ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    }
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
 
     state = MsiQueryFeatureState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}", "feature");
     todo_wine
@@ -1989,7 +2050,7 @@ static void test_publish(void)
     state = MsiQueryFeatureState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}", "montecristo");
     todo_wine
     {
-        ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+        ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
     }
 
     r = MsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
@@ -2068,10 +2129,7 @@ static void test_publish(void)
     }
 
     state = MsiQueryProductState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    todo_wine
-    {
-        ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    }
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
 
     state = MsiQueryFeatureState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}", "feature");
     todo_wine
@@ -2129,10 +2187,7 @@ static void test_publish(void)
     }
 
     state = MsiQueryProductState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    todo_wine
-    {
-        ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    }
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
 
     state = MsiQueryFeatureState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}", "feature");
     todo_wine
@@ -2156,6 +2211,428 @@ static void test_publish(void)
 
     DeleteFile(msifile);
     DeleteFile("msitest\\maximus");
+    RemoveDirectory("msitest");
+}
+
+static void test_publishsourcelist(void)
+{
+    UINT r;
+    DWORD size;
+    CHAR value[MAX_PATH];
+    CHAR prodcode[] = "{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}";
+
+    CreateDirectoryA("msitest", NULL);
+    create_file("msitest\\maximus", 500);
+
+    create_database(msifile, pp_tables, sizeof(pp_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_FULL, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(pf_exists("msitest\\maximus"), "File not installed\n");
+    ok(pf_exists("msitest"), "File not installed\n");
+
+    /* nothing published */
+    size = 0xdeadbeef;
+    r = MsiSourceListGetInfoA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                              MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, &size);
+    ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+    ok(size == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", size);
+
+    r = MsiInstallProductA(msifile, "REGISTER_PRODUCT=1");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(pf_exists("msitest\\maximus"), "File not installed\n");
+    ok(pf_exists("msitest"), "File not installed\n");
+
+    /* after RegisterProduct */
+    size = 0xdeadbeef;
+    r = MsiSourceListGetInfoA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                              MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, &size);
+    ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+    ok(size == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", size);
+
+    r = MsiInstallProductA(msifile, "PROCESS_COMPONENTS=1");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(pf_exists("msitest\\maximus"), "File not installed\n");
+    ok(pf_exists("msitest"), "File not installed\n");
+
+    /* after ProcessComponents */
+    size = 0xdeadbeef;
+    r = MsiSourceListGetInfoA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                              MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, &size);
+    ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+    ok(size == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", size);
+
+    r = MsiInstallProductA(msifile, "PUBLISH_FEATURES=1");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(pf_exists("msitest\\maximus"), "File not installed\n");
+    ok(pf_exists("msitest"), "File not installed\n");
+
+    /* after PublishFeatures */
+    size = 0xdeadbeef;
+    r = MsiSourceListGetInfoA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                              MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, &size);
+    ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+    ok(size == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", size);
+
+    r = MsiInstallProductA(msifile, "PUBLISH_PRODUCT=1");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(pf_exists("msitest\\maximus"), "File not installed\n");
+    ok(pf_exists("msitest"), "File not installed\n");
+
+    /* after PublishProduct */
+    size = MAX_PATH;
+    lstrcpyA(value, "aaa");
+    r = MsiSourceListGetInfoA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                              MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, value, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(value, "msitest.msi"), "Expected 'msitest.msi', got %s\n", value);
+    ok(size == 11, "Expected 11, got %d\n", size);
+
+    /* complete uninstall */
+    r = MsiInstallProductA(msifile, "FULL=1 REMOVE=ALL");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    todo_wine
+    {
+        ok(!pf_exists("msitest\\maximus"), "File not deleted\n");
+        ok(!pf_exists("msitest"), "File not deleted\n");
+    }
+
+    /* make sure 'Program Files\msitest' is removed */
+    delete_pfmsitest_files();
+
+    DeleteFile(msifile);
+    DeleteFile("msitest\\maximus");
+    RemoveDirectory("msitest");
+}
+
+static UINT run_query(MSIHANDLE hdb, MSIHANDLE hrec, const char *query)
+{
+    MSIHANDLE hview = 0;
+    UINT r;
+
+    r = MsiDatabaseOpenView(hdb, query, &hview);
+    if(r != ERROR_SUCCESS)
+        return r;
+
+    r = MsiViewExecute(hview, hrec);
+    if(r == ERROR_SUCCESS)
+        r = MsiViewClose(hview);
+    MsiCloseHandle(hview);
+    return r;
+}
+
+static void set_transform_summary_info(void)
+{
+    UINT r;
+    MSIHANDLE suminfo;
+
+    /* build summmary info */
+    r = MsiGetSummaryInformation(0, mstfile, 3, &suminfo);
+    todo_wine
+    {
+        ok(r == ERROR_SUCCESS , "Failed to open summaryinfo\n");
+    }
+
+    r = MsiSummaryInfoSetProperty(suminfo, PID_TITLE, VT_LPSTR, 0, NULL, "MSITEST");
+    todo_wine
+    {
+        ok(r == ERROR_SUCCESS, "Failed to set summary info\n");
+    }
+
+    r = MsiSummaryInfoSetProperty(suminfo, PID_REVNUMBER, VT_LPSTR, 0, NULL,
+                        "{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}1.1.1;"
+                        "{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}1.1.1;"
+                        "{4C0EAA15-0264-4E5A-8758-609EF142B92D}");
+    todo_wine
+    {
+        ok(r == ERROR_SUCCESS , "Failed to set summary info\n");
+    }
+
+    r = MsiSummaryInfoSetProperty(suminfo, PID_PAGECOUNT, VT_I4, 100, NULL, NULL);
+    todo_wine
+    {
+        ok(r == ERROR_SUCCESS, "Failed to set summary info\n");
+    }
+
+    r = MsiSummaryInfoPersist(suminfo);
+    todo_wine
+    {
+        ok(r == ERROR_SUCCESS , "Failed to make summary info persist\n");
+    }
+
+    r = MsiCloseHandle(suminfo);
+    todo_wine
+    {
+        ok(r == ERROR_SUCCESS , "Failed to close suminfo\n");
+    }
+}
+
+static void generate_transform(void)
+{
+    MSIHANDLE hdb1, hdb2;
+    LPCSTR query;
+    UINT r;
+
+    /* start with two identical databases */
+    CopyFile(msifile, msifile2, FALSE);
+
+    r = MsiOpenDatabase(msifile2, MSIDBOPEN_TRANSACT, &hdb1);
+    ok(r == ERROR_SUCCESS , "Failed to create database\n");
+
+    r = MsiDatabaseCommit(hdb1);
+    ok(r == ERROR_SUCCESS , "Failed to commit database\n");
+
+    r = MsiOpenDatabase(msifile, MSIDBOPEN_READONLY, &hdb2);
+    ok(r == ERROR_SUCCESS , "Failed to create database\n");
+
+    query = "INSERT INTO `Property` ( `Property`, `Value` ) VALUES ( 'prop', 'val' )";
+    r = run_query(hdb1, 0, query);
+    ok(r == ERROR_SUCCESS, "failed to add property\n");
+
+    /* database needs to be committed */
+    MsiDatabaseCommit(hdb1);
+
+    r = MsiDatabaseGenerateTransform(hdb1, hdb2, mstfile, 0, 0);
+    ok(r == ERROR_SUCCESS, "return code %d, should be ERROR_SUCCESS\n", r);
+
+#if 0  /* not implemented in wine yet */
+    r = MsiCreateTransformSummaryInfo(hdb2, hdb2, mstfile, 0, 0);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+#endif
+
+    MsiCloseHandle(hdb1);
+    MsiCloseHandle(hdb2);
+}
+
+/* data for generating a transform */
+
+/* tables transform names - encoded as they would be in an msi database file */
+static const WCHAR name1[] = { 0x4840, 0x3f3f, 0x4577, 0x446c, 0x3b6a, 0x45e4, 0x4824, 0 }; /* _StringData */
+static const WCHAR name2[] = { 0x4840, 0x3f3f, 0x4577, 0x446c, 0x3e6a, 0x44b2, 0x482f, 0 }; /* _StringPool */
+static const WCHAR name3[] = { 0x4840, 0x4559, 0x44f2, 0x4568, 0x4737, 0 }; /* Property */
+
+/* data in each table */
+static const char data1[] = /* _StringData */
+    "propval";  /* all the strings squashed together */
+
+static const WCHAR data2[] = { /* _StringPool */
+/*  len, refs */
+    0,   0,    /* string 0 ''     */
+    4,   1,    /* string 1 'prop' */
+    3,   1,    /* string 2 'val'  */
+};
+
+static const WCHAR data3[] = { /* Property */
+    0x0201, 0x0001, 0x0002,
+};
+
+static const struct {
+    LPCWSTR name;
+    const void *data;
+    DWORD size;
+} table_transform_data[] =
+{
+    { name1, data1, sizeof data1 - 1 },
+    { name2, data2, sizeof data2 },
+    { name3, data3, sizeof data3 },
+};
+
+#define NUM_TRANSFORM_TABLES (sizeof table_transform_data/sizeof table_transform_data[0])
+
+static void generate_transform_manual(void)
+{
+    IStorage *stg = NULL;
+    IStream *stm;
+    WCHAR name[0x20];
+    HRESULT r;
+    DWORD i, count;
+    const DWORD mode = STGM_CREATE|STGM_READWRITE|STGM_DIRECT|STGM_SHARE_EXCLUSIVE;
+
+    const CLSID CLSID_MsiTransform = { 0xc1082,0,0,{0xc0,0,0,0,0,0,0,0x46}};
+
+    MultiByteToWideChar(CP_ACP, 0, mstfile, -1, name, 0x20);
+
+    r = StgCreateDocfile(name, mode, 0, &stg);
+    ok(r == S_OK, "failed to create storage\n");
+    if (!stg)
+        return;
+
+    r = IStorage_SetClass(stg, &CLSID_MsiTransform);
+    ok(r == S_OK, "failed to set storage type\n");
+
+    for (i=0; i<NUM_TRANSFORM_TABLES; i++)
+    {
+        r = IStorage_CreateStream(stg, table_transform_data[i].name,
+                            STGM_WRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stm);
+        if (FAILED(r))
+        {
+            ok(0, "failed to create stream %08x\n", r);
+            continue;
+        }
+
+        r = IStream_Write(stm, table_transform_data[i].data,
+                          table_transform_data[i].size, &count);
+        if (FAILED(r) || count != table_transform_data[i].size)
+            ok(0, "failed to write stream\n");
+        IStream_Release(stm);
+    }
+
+    IStorage_Release(stg);
+
+    set_transform_summary_info();
+}
+
+static void test_transformprop(void)
+{
+    UINT r;
+
+    CreateDirectoryA("msitest", NULL);
+    CreateDirectoryA("msitest\\msitest", NULL);
+    create_file("msitest\\augustus", 500);
+
+    create_database(msifile, tp_tables, sizeof(tp_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(!delete_pf("msitest\\augustus", TRUE), "File installed\n");
+    ok(!delete_pf("msitest", FALSE), "File installed\n");
+
+    if (0)
+        generate_transform();
+    else
+        generate_transform_manual();
+
+    r = MsiInstallProductA(msifile, "TRANSFORMS=winetest.mst");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(delete_pf("msitest\\augustus", TRUE), "File not installed\n");
+    ok(delete_pf("msitest", FALSE), "File not installed\n");
+
+    /* Delete the files in the temp (current) folder */
+    DeleteFile(msifile);
+    DeleteFile(msifile2);
+    DeleteFile(mstfile);
+    DeleteFile("msitest\\augustus");
+    RemoveDirectory("msitest");
+}
+
+static void test_currentworkingdir(void)
+{
+    UINT r;
+    CHAR path[MAX_PATH];
+    LPSTR ptr, ptr2;
+
+    CreateDirectoryA("msitest", NULL);
+    create_file("msitest\\augustus", 500);
+
+    create_database(msifile, cwd_tables, sizeof(cwd_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    CreateDirectoryA("diffdir", NULL);
+    SetCurrentDirectoryA("diffdir");
+
+    sprintf(path, "..\\%s", msifile);
+    r = MsiInstallProductA(path, NULL);
+    todo_wine
+    {
+        ok(r == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %u\n", r);
+        ok(!delete_pf("msitest\\augustus", TRUE), "File installed\n");
+        ok(!delete_pf("msitest", FALSE), "File installed\n");
+    }
+
+    sprintf(path, "%s\\%s", CURR_DIR, msifile);
+    r = MsiInstallProductA(path, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(delete_pf("msitest\\augustus", TRUE), "File not installed\n");
+    ok(delete_pf("msitest", FALSE), "File not installed\n");
+
+    lstrcpyA(path, CURR_DIR);
+    if (path[lstrlenA(path) - 1] != '\\')
+        lstrcatA(path, "\\");
+    lstrcatA(path, "msitest.msi");
+
+    ptr2 = strrchr(path, '\\');
+    *ptr2 = '\0';
+    ptr = strrchr(path, '\\');
+    *ptr2 = '\\';
+    *(ptr++) = '\0';
+
+    SetCurrentDirectoryA(path);
+
+    r = MsiInstallProductA(ptr, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(delete_pf("msitest\\augustus", TRUE), "File not installed\n");
+    ok(delete_pf("msitest", FALSE), "File not installed\n");
+
+    SetCurrentDirectoryA(CURR_DIR);
+
+    DeleteFile(msifile);
+    DeleteFile("msitest\\augustus");
+    RemoveDirectory("msitest");
+    RemoveDirectory("diffdir");
+}
+
+static void set_admin_summary_info(const CHAR *name)
+{
+    MSIHANDLE db, summary;
+    UINT r;
+
+    r = MsiOpenDatabaseA(name, MSIDBOPEN_DIRECT, &db);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    r = MsiGetSummaryInformationA(db, NULL, 1, &summary);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    r = MsiSummaryInfoSetPropertyA(summary, PID_WORDCOUNT, VT_I4, 5, NULL, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    /* write the summary changes back to the stream */
+    r = MsiSummaryInfoPersist(summary);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    MsiCloseHandle(summary);
+
+    r = MsiDatabaseCommit(db);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    MsiCloseHandle(db);
+}
+
+static void test_admin(void)
+{
+    UINT r;
+
+    CreateDirectoryA("msitest", NULL);
+    create_file("msitest\\augustus", 500);
+
+    create_database(msifile, adm_tables, sizeof(adm_tables) / sizeof(msi_table));
+    set_admin_summary_info(msifile);
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(!delete_pf("msitest\\augustus", TRUE), "File installed\n");
+    ok(!delete_pf("msitest", FALSE), "File installed\n");
+    ok(!DeleteFile("c:\\msitest\\augustus"), "File installed\n");
+    ok(!RemoveDirectory("c:\\msitest"), "File installed\n");
+
+    r = MsiInstallProductA(msifile, "ACTION=ADMIN");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(!delete_pf("msitest\\augustus", TRUE), "File installed\n");
+    ok(!delete_pf("msitest", FALSE), "File installed\n");
+    todo_wine
+    {
+        ok(DeleteFile("c:\\msitest\\augustus"), "File not installed\n");
+        ok(RemoveDirectory("c:\\msitest"), "File not installed\n");
+    }
+
+    DeleteFile(msifile);
+    DeleteFile("msitest\\augustus");
     RemoveDirectory("msitest");
 }
 
@@ -2190,6 +2667,10 @@ START_TEST(install)
     test_concurrentinstall();
     test_setpropertyfolder();
     test_publish();
+    test_publishsourcelist();
+    test_transformprop();
+    test_currentworkingdir();
+    test_admin();
 
     SetCurrentDirectoryA(prev_path);
 }

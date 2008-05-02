@@ -3767,9 +3767,11 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
     if (GetLastError() == WSAEACCES) /* raw socket denied */
     {
         if (type == SOCK_RAW)
-            MESSAGE("WARNING: Trying to create a socket of type SOCK_RAW, will fail unless running as root\n");
+            MESSAGE("WARNING: Trying to create a socket of type SOCK_RAW, this"
+                    " will fail unless you have special permissions.\n");
         else
-            MESSAGE("WS_SOCKET: not enough privileges to create socket, try running as root\n");
+            MESSAGE("WS_SOCKET: Failed to create socket, this requires"
+                    " special permissions.\n");
         SetLastError(WSAESOCKTNOSUPPORT);
     }
 
@@ -4457,7 +4459,7 @@ INT WINAPI WSAStringToAddressA(LPSTR AddressString,
 
     switch(AddressFamily)
     {
-    case AF_INET:
+    case WS_AF_INET:
     {
         struct in_addr inetaddr;
 
@@ -4494,8 +4496,9 @@ INT WINAPI WSAStringToAddressA(LPSTR AddressString,
         break;
 
     }
-    case AF_INET6:
+    case WS_AF_INET6:
     {
+        struct in6_addr inetaddr;
         /* If lpAddressLength is too small, tell caller the size we need */
         if (*lpAddressLength < sizeof(SOCKADDR_IN6))
         {
@@ -4503,8 +4506,38 @@ INT WINAPI WSAStringToAddressA(LPSTR AddressString,
             res = WSAEFAULT;
             break;
         }
-        FIXME("We don't support IPv6 yet.\n");
-        res = WSAEINVAL;
+#ifdef HAVE_INET_PTON
+        memset(lpAddress, 0, sizeof(SOCKADDR_IN6));
+
+        ((LPSOCKADDR_IN6)lpAddress)->sin6_family = WS_AF_INET6;
+
+        /* This one is a bit tricky. An IPv6 address contains colons, so the
+         * check from IPv4 doesn't work like that. However, IPv6 addresses that
+         * contain a port are written with braces like [fd12:3456:7890::1]:12345
+         * so what we will do is to look for ']', check if the next char is a
+         * colon, and if it is, parse the port as in IPv4. */
+
+        ptrPort = strchr(workBuffer, ']');
+        if(ptrPort && *(++ptrPort) == ':')
+        {
+            ((LPSOCKADDR_IN6)lpAddress)->sin6_port = (WS_u_short)atoi(ptrPort+1);
+            *ptrPort = '\0';
+        }
+        else
+        {
+            ((LPSOCKADDR_IN6)lpAddress)->sin6_port = 0;
+        }
+
+        if(inet_pton(AF_INET6, workBuffer, &inetaddr) > 0)
+        {
+            memcpy(&((LPSOCKADDR_IN6)lpAddress)->sin6_addr, &inetaddr,
+                    sizeof(struct in6_addr));
+            res = 0;
+        }
+        else
+#endif /* HAVE_INET_PTON */
+            res = WSAEINVAL;
+
         break;
     }
     default:

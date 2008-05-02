@@ -25,6 +25,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "dinput.h"
+#include "wine/list.h"
 #include "dinput_private.h"
 
 typedef struct
@@ -55,10 +56,12 @@ struct IDirectInputDevice2AImpl
     GUID                        guid;
     CRITICAL_SECTION            crit;
     IDirectInputImpl           *dinput;
+    struct list                 entry;       /* entry into IDirectInput devices list */
     HANDLE                      hEvent;
     DWORD                       dwCoopLevel;
     HWND                        win;
     int                         acquired;
+    DI_EVENT_PROC               event_proc;  /* function to receive mouse & keyboard events */
 
     LPDIDEVICEOBJECTDATA        data_queue;  /* buffer for 'GetDeviceData'.                 */
     int                         queue_len;   /* size of the queue - set in 'SetProperty'    */
@@ -89,6 +92,8 @@ typedef struct {
 
 extern BOOL DIEnumDevicesCallbackAtoW(LPCDIDEVICEOBJECTINSTANCEA, LPVOID);
 
+extern const GUID DInput_Wine_Keyboard_GUID;
+extern const GUID DInput_Wine_Mouse_GUID;
 
 /* Various debug tools */
 extern void _dump_cooperativelevel_DI(DWORD dwFlags) ;

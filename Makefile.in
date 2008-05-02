@@ -189,6 +189,7 @@ ALL_MAKEFILES = \
 	dlls/cryptdll/Makefile \
 	dlls/cryptnet/Makefile \
 	dlls/ctl3d32/Makefile \
+	dlls/d3d10/Makefile \
 	dlls/d3d8/Makefile \
 	dlls/d3d8/tests/Makefile \
 	dlls/d3d9/Makefile \
@@ -332,6 +333,7 @@ ALL_MAKEFILES = \
 	dlls/olesvr32/Makefile \
 	dlls/opengl32/Makefile \
 	dlls/pdh/Makefile \
+	dlls/pdh/tests/Makefile \
 	dlls/powrprof/Makefile \
 	dlls/printui/Makefile \
 	dlls/psapi/Makefile \
@@ -547,6 +549,7 @@ dlls/crypt32/tests/Makefile: dlls/crypt32/tests/Makefile.in dlls/Maketest.rules
 dlls/cryptdll/Makefile: dlls/cryptdll/Makefile.in dlls/Makedll.rules
 dlls/cryptnet/Makefile: dlls/cryptnet/Makefile.in dlls/Makedll.rules
 dlls/ctl3d32/Makefile: dlls/ctl3d32/Makefile.in dlls/Makedll.rules
+dlls/d3d10/Makefile: dlls/d3d10/Makefile.in dlls/Makedll.rules
 dlls/d3d8/Makefile: dlls/d3d8/Makefile.in dlls/Makedll.rules
 dlls/d3d8/tests/Makefile: dlls/d3d8/tests/Makefile.in dlls/Maketest.rules
 dlls/d3d9/Makefile: dlls/d3d9/Makefile.in dlls/Makedll.rules
@@ -690,6 +693,7 @@ dlls/olepro32/Makefile: dlls/olepro32/Makefile.in dlls/Makedll.rules
 dlls/olesvr32/Makefile: dlls/olesvr32/Makefile.in dlls/Makedll.rules
 dlls/opengl32/Makefile: dlls/opengl32/Makefile.in dlls/Makedll.rules
 dlls/pdh/Makefile: dlls/pdh/Makefile.in dlls/Makedll.rules
+dlls/pdh/tests/Makefile: dlls/pdh/tests/Makefile.in dlls/Maketest.rules
 dlls/powrprof/Makefile: dlls/powrprof/Makefile.in dlls/Makedll.rules
 dlls/printui/Makefile: dlls/printui/Makefile.in dlls/Makedll.rules
 dlls/psapi/Makefile: dlls/psapi/Makefile.in dlls/Makedll.rules

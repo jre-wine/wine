@@ -40,9 +40,9 @@
 @ stub PdhExpandWildCardPathHW
 @ stub PdhExpandWildCardPathW
 @ stub PdhFormatFromRawValue
-@ stub PdhGetCounterInfoA
-@ stub PdhGetCounterInfoW
-@ stub PdhGetCounterTimeBase
+@ stdcall PdhGetCounterInfoA(ptr long ptr ptr)
+@ stdcall PdhGetCounterInfoW(ptr long ptr ptr)
+@ stdcall PdhGetCounterTimeBase(ptr ptr)
 @ stub PdhGetDataSourceTimeRangeA
 @ stub PdhGetDataSourceTimeRangeH
 @ stub PdhGetDataSourceTimeRangeW
@@ -57,14 +57,14 @@
 @ stub PdhGetDllVersion
 @ stub PdhGetFormattedCounterArrayA
 @ stub PdhGetFormattedCounterArrayW
-@ stub PdhGetFormattedCounterValue
+@ stdcall PdhGetFormattedCounterValue(ptr long ptr ptr)
 @ stub PdhGetLogFileSize
 @ stub PdhGetLogFileTypeA
 @ stub PdhGetLogFileTypeW
 @ stub PdhGetLogSetGUID
 @ stub PdhGetRawCounterArrayA
 @ stub PdhGetRawCounterArrayW
-@ stub PdhGetRawCounterValue
+@ stdcall PdhGetRawCounterValue(ptr ptr ptr)
 @ stub PdhIsRealTimeQuery
 @ stub PdhListLogFileHeaderA
 @ stub PdhListLogFileHeaderW
@@ -123,7 +123,7 @@
 @ stdcall PdhRemoveCounter(ptr)
 @ stub PdhSelectDataSourceA
 @ stub PdhSelectDataSourceW
-@ stub PdhSetCounterScaleFactor
+@ stdcall PdhSetCounterScaleFactor(ptr long)
 @ stub PdhSetDefaultRealTimeDataSource
 @ stub PdhSetLogSetRunID
 @ stub PdhSetQueryTimeRange

@@ -1535,12 +1535,39 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
         return WINED3DERR_INVALIDCALL;
     }
 
+    if (Usage & WINED3DUSAGE_QUERY_FILTER) {
+        switch (CheckFormat) {
+            /* Filtering not supported */
+            case WINED3DFMT_A32B32G32R32F:
+                TRACE_(d3d_caps)("[FAILED]\n");
+                return WINED3DERR_NOTAVAILABLE;
+            default:
+                break;
+        }
+    }
+
     /* TODO: Check support against more of the WINED3DUSAGE_QUERY_* constants
      * See http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/IDirect3D9__CheckDeviceFormat.asp
      * and http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/D3DUSAGE_QUERY.asp */
     if (Usage & WINED3DUSAGE_QUERY_VERTEXTEXTURE) {
-        TRACE_(d3d_caps)("[FAILED]\n");
-        return WINED3DERR_NOTAVAILABLE;     /* Enable when fully supported */
+        if (!GL_LIMITS(vertex_samplers)) {
+            TRACE_(d3d_caps)("[FAILED]\n");
+            return WINED3DERR_NOTAVAILABLE;
+        }
+
+        switch (CheckFormat) {
+            case WINED3DFMT_A32B32G32R32F:
+                if (!GL_SUPPORT(ARB_TEXTURE_FLOAT)) {
+                    TRACE_(d3d_caps)("[FAILED]\n");
+                    return WINED3DERR_NOTAVAILABLE;
+                }
+                TRACE_(d3d_caps)("[OK]\n");
+                return WINED3D_OK;
+
+            default:
+                TRACE_(d3d_caps)("[FAILED]\n");
+                return WINED3DERR_NOTAVAILABLE;
+        }
     }
 
     if(Usage & WINED3DUSAGE_DEPTHSTENCIL) {
@@ -1584,6 +1611,13 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
             case WINED3DFMT_R16F:
             case WINED3DFMT_A16B16G16R16F:
                 if (!GL_SUPPORT(ARB_HALF_FLOAT_PIXEL) || !GL_SUPPORT(ARB_TEXTURE_FLOAT)) {
+                    TRACE_(d3d_caps)("[FAILED]\n");
+                    return WINED3DERR_NOTAVAILABLE;
+                }
+                TRACE_(d3d_caps)("[OK]\n");
+                return WINED3D_OK;
+            case WINED3DFMT_A32B32G32R32F:
+               if (!GL_SUPPORT(ARB_TEXTURE_FLOAT)) {
                     TRACE_(d3d_caps)("[FAILED]\n");
                     return WINED3DERR_NOTAVAILABLE;
                 }
@@ -1863,7 +1897,8 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
                                       WINED3DDEVCAPS_TEXTURESYSTEMMEMORY |
                                       WINED3DDEVCAPS_CANRENDERAFTERFLIP  |
                                       WINED3DDEVCAPS_DRAWPRIMITIVES2     |
-                                      WINED3DDEVCAPS_DRAWPRIMITIVES2EX;
+                                      WINED3DDEVCAPS_DRAWPRIMITIVES2EX   |
+                                      WINED3DDEVCAPS_RTPATCHES;
 
     *pCaps->PrimitiveMiscCaps       = WINED3DPMISCCAPS_CULLNONE              |
                                       WINED3DPMISCCAPS_CULLCCW               |
@@ -2382,6 +2417,7 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     IWineD3DImpl       *This    = (IWineD3DImpl *)iface;
     HDC hDC;
     HRESULT temp_result;
+    int i;
 
     /* Validate the adapter number */
     if (Adapter >= IWineD3D_GetAdapterCount(iface)) {
@@ -2472,6 +2508,9 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     object->ddraw_format = pixelformat_for_depth(GetDeviceCaps(hDC, BITSPIXEL) * GetDeviceCaps(hDC, PLANES));
     ReleaseDC(0, hDC);
 
+    for(i = 0; i < PATCHMAP_SIZE; i++) {
+        list_init(&object->patches[i]);
+    }
     return WINED3D_OK;
 create_device_error:
 

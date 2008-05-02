@@ -270,7 +270,9 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
             if(tested_protocol == BIND_TEST)
                 ok(szStatusText == expect_wsz, "unexpected szStatusText\n");
             else
-                ok(!lstrcmpW(szStatusText, text_html), "szStatusText != text/html\n");
+                ok(lstrlenW(text_html) <= lstrlenW(szStatusText) &&
+                   !memcmp(szStatusText, text_html, lstrlenW(text_html)*sizeof(WCHAR)),
+                   "szStatusText != text/html\n");
         }
         break;
     case BINDSTATUS_DIRECTBIND:
@@ -1055,9 +1057,7 @@ static BOOL http_protocol_start(LPCWSTR url, BOOL is_first)
     SET_EXPECT(GetRootSecurityId);
 
     hres = IInternetProtocol_Start(http_protocol, url, &protocol_sink, &bind_info, 0, 0);
-    todo_wine {
-        ok(hres == S_OK, "Start failed: %08x\n", hres);
-    }
+    ok(hres == S_OK, "Start failed: %08x\n", hres);
     if(FAILED(hres))
         return FALSE;
 

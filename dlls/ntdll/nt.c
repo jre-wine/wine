@@ -61,6 +61,16 @@ NTSTATUS WINAPI NtDuplicateToken(
         ImpersonationLevel, TokenType, NewToken);
         dump_ObjectAttributes(ObjectAttributes);
 
+    if (ObjectAttributes && ObjectAttributes->SecurityQualityOfService)
+    {
+        SECURITY_QUALITY_OF_SERVICE *SecurityQOS = ObjectAttributes->SecurityQualityOfService;
+        TRACE("ObjectAttributes->SecurityQualityOfService = {%d, %d, %d, %s}\n",
+            SecurityQOS->Length, SecurityQOS->ImpersonationLevel,
+            SecurityQOS->ContextTrackingMode,
+            SecurityQOS->EffectiveOnly ? "TRUE" : "FALSE");
+        ImpersonationLevel = SecurityQOS->ImpersonationLevel;
+    }
+
     SERVER_START_REQ( duplicate_token )
     {
         req->handle              = ExistingToken;
@@ -845,7 +855,8 @@ NTSTATUS WINAPI NtQuerySystemInformation(
         break;
     case SystemModuleInformation:
         /* FIXME: should be system-wide */
-        ret = LdrQueryProcessModuleInformation( SystemInformation, Length, &len );
+        if (!SystemInformation) ret = STATUS_ACCESS_VIOLATION;
+        else ret = LdrQueryProcessModuleInformation( SystemInformation, Length, &len );
         break;
     case SystemHandleInformation:
         {

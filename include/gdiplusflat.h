@@ -29,6 +29,8 @@ extern "C" {
 
 GpStatus WINGDIPAPI GdipCreatePen1(ARGB,REAL,GpUnit,GpPen**);
 GpStatus WINGDIPAPI GdipDeletePen(GpPen*);
+GpStatus WINGDIPAPI GdipSetPenEndCap(GpPen*,GpLineCap);
+GpStatus WINGDIPAPI GdipSetPenLineJoin(GpPen*,GpLineJoin);
 
 GpStatus WINGDIPAPI GdipCreateFromHDC(HDC,GpGraphics**);
 GpStatus WINGDIPAPI GdipCreateFromHWND(HWND,GpGraphics**);
@@ -39,6 +41,7 @@ GpStatus WINGDIPAPI GdipDrawBezier(GpGraphics*,GpPen*,REAL,REAL,REAL,REAL,REAL,
 GpStatus WINGDIPAPI GdipDrawCurve2(GpGraphics*,GpPen*,GDIPCONST GpPointF*,INT,REAL);
 GpStatus WINGDIPAPI GdipDrawLineI(GpGraphics*,GpPen*,INT,INT,INT,INT);
 GpStatus WINGDIPAPI GdipDrawLines(GpGraphics*,GpPen*,GDIPCONST GpPointF*,INT);
+GpStatus WINGDIPAPI GdipDrawPath(GpGraphics*,GpPen*,GpPath*);
 GpStatus WINGDIPAPI GdipDrawPie(GpGraphics*,GpPen*,REAL,REAL,REAL,REAL,REAL,REAL);
 GpStatus WINGDIPAPI GdipDrawRectangleI(GpGraphics*,GpPen*,INT,INT,INT,INT);
 GpStatus WINGDIPAPI GdipFillPie(GpGraphics*,GpBrush*,REAL,REAL,REAL,REAL,REAL,REAL);
@@ -47,8 +50,26 @@ GpStatus WINGDIPAPI GdipCreateSolidFill(ARGB,GpSolidFill**);
 GpStatus WINGDIPAPI GdipGetBrushType(GpBrush*,GpBrushType*);
 GpStatus WINGDIPAPI GdipDeleteBrush(GpBrush*);
 
+GpStatus WINGDIPAPI GdipAddPathArc(GpPath*,REAL,REAL,REAL,REAL,REAL,REAL);
+GpStatus WINGDIPAPI GdipAddPathLine2(GpPath*,GDIPCONST GpPointF*,INT);
+GpStatus WINGDIPAPI GdipAddPathPath(GpPath*,GDIPCONST GpPath*,BOOL);
+GpStatus WINGDIPAPI GdipClosePathFigure(GpPath*);
+GpStatus WINGDIPAPI GdipClosePathFigures(GpPath*);
 GpStatus WINGDIPAPI GdipCreatePath(GpFillMode,GpPath**);
 GpStatus WINGDIPAPI GdipDeletePath(GpPath*);
+GpStatus WINGDIPAPI GdipGetPathFillMode(GpPath*,GpFillMode*);
+GpStatus WINGDIPAPI GdipGetPathPoints(GpPath*,GpPointF*,INT);
+GpStatus WINGDIPAPI GdipGetPathTypes(GpPath*,BYTE*,INT);
+GpStatus WINGDIPAPI GdipGetPathWorldBounds(GpPath*,GpRectF*,GDIPCONST GpMatrix*,
+    GDIPCONST GpPen*);
+GpStatus WINGDIPAPI GdipGetPointCount(GpPath*,INT*);
+GpStatus WINGDIPAPI GdipStartPathFigure(GpPath*);
+GpStatus WINGDIPAPI GdipResetPath(GpPath*);
+GpStatus WINGDIPAPI GdipTransformPath(GpPath*,GpMatrix*);
+
+GpStatus WINGDIPAPI GdipCreateMatrix2(REAL,REAL,REAL,REAL,REAL,REAL,GpMatrix**);
+GpStatus WINGDIPAPI GdipDeleteMatrix(GpMatrix*);
+GpStatus WINGDIPAPI GdipTransformMatrixPoints(GpMatrix*,GpPointF*,INT);
 
 #ifdef __cplusplus
 }

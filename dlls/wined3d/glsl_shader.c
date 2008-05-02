@@ -85,15 +85,17 @@ static void shader_glsl_load_psamplers(
     int i;
     char sampler_name[20];
 
-    for (i=0; i< GL_LIMITS(fragment_samplers); ++i) {
-        if (stateBlock->textures[i] != NULL) {
-            snprintf(sampler_name, sizeof(sampler_name), "Psampler%d", i);
-            name_loc = GL_EXTCALL(glGetUniformLocationARB(programId, sampler_name));
-            if (name_loc != -1) {
-                int mapped_unit = stateBlock->wineD3DDevice->texUnitMap[i];
+    for (i = 0; i < MAX_FRAGMENT_SAMPLERS; ++i) {
+        snprintf(sampler_name, sizeof(sampler_name), "Psampler%d", i);
+        name_loc = GL_EXTCALL(glGetUniformLocationARB(programId, sampler_name));
+        if (name_loc != -1) {
+            int mapped_unit = stateBlock->wineD3DDevice->texUnitMap[i];
+            if (mapped_unit != -1 && mapped_unit < GL_LIMITS(fragment_samplers)) {
                 TRACE("Loading %s for texture %d\n", sampler_name, mapped_unit);
                 GL_EXTCALL(glUniform1iARB(name_loc, mapped_unit));
                 checkGLcall("glUniform1iARB");
+            } else {
+                ERR("Trying to load sampler %s on unsupported unit %d\n", sampler_name, mapped_unit);
             }
         }
     }
@@ -1052,7 +1054,6 @@ void shader_glsl_map2gl(SHADER_OPCODE_ARG* arg) {
     switch (curOpcode->opcode) {
         case WINED3DSIO_MIN: instruction = "min"; break;
         case WINED3DSIO_MAX: instruction = "max"; break;
-        case WINED3DSIO_RSQ: instruction = "inversesqrt"; break;
         case WINED3DSIO_ABS: instruction = "abs"; break;
         case WINED3DSIO_FRC: instruction = "fract"; break;
         case WINED3DSIO_NRM: instruction = "normalize"; break;
@@ -1060,6 +1061,8 @@ void shader_glsl_map2gl(SHADER_OPCODE_ARG* arg) {
         case WINED3DSIO_LOG: instruction = "log2"; break;
         case WINED3DSIO_EXP: instruction = "exp2"; break;
         case WINED3DSIO_SGN: instruction = "sign"; break;
+        case WINED3DSIO_DSX: instruction = "dFdx"; break;
+        case WINED3DSIO_DSY: instruction = "dFdy"; break;
         default: instruction = "";
             FIXME("Opcode %s not yet handled in GLSL\n", curOpcode->name);
             break;
@@ -1130,12 +1133,30 @@ void shader_glsl_rcp(SHADER_OPCODE_ARG* arg) {
 
     write_mask = shader_glsl_append_dst(arg->buffer, arg);
     mask_size = shader_glsl_get_write_mask_size(write_mask);
-    shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], WINED3DSP_WRITEMASK_0, &src_param);
+    shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], WINED3DSP_WRITEMASK_3, &src_param);
 
     if (mask_size > 1) {
         shader_addline(arg->buffer, "vec%d(1.0 / %s));\n", mask_size, src_param.param_str);
     } else {
         shader_addline(arg->buffer, "1.0 / %s);\n", src_param.param_str);
+    }
+}
+
+void shader_glsl_rsq(SHADER_OPCODE_ARG* arg) {
+    SHADER_BUFFER* buffer = arg->buffer;
+    glsl_src_param_t src_param;
+    DWORD write_mask;
+    size_t mask_size;
+
+    write_mask = shader_glsl_append_dst(buffer, arg);
+    mask_size = shader_glsl_get_write_mask_size(write_mask);
+
+    shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], WINED3DSP_WRITEMASK_3, &src_param);
+
+    if (mask_size > 1) {
+        shader_addline(buffer, "vec%d(inversesqrt(%s)));\n", mask_size, src_param.param_str);
+    } else {
+        shader_addline(buffer, "inversesqrt(%s));\n", src_param.param_str);
     }
 }
 

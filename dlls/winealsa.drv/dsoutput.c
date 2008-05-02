@@ -328,7 +328,7 @@ static HRESULT SetFormat(IDsDriverBufferImpl *This, LPWAVEFORMATEX pwfx, BOOL fo
         {
             /* **** */
             LeaveCriticalSection(&This->pcm_crst);
-            WARN("Can not open sound device: %s\n", snd_strerror(err));
+            WARN("Cannot open sound device: %s\n", snd_strerror(err));
             return DSERR_GENERIC;
         }
         snd_pcm_drop(This->pcm);
@@ -339,7 +339,7 @@ static HRESULT SetFormat(IDsDriverBufferImpl *This, LPWAVEFORMATEX pwfx, BOOL fo
         {
             /* **** */
             LeaveCriticalSection(&This->pcm_crst);
-            WARN("Can not open sound device: %s\n", snd_strerror(err));
+            WARN("Cannot open sound device: %s\n", snd_strerror(err));
             return DSERR_BUFFERLOST;
         }
     }
@@ -353,7 +353,7 @@ static HRESULT SetFormat(IDsDriverBufferImpl *This, LPWAVEFORMATEX pwfx, BOOL fo
     if (err < 0) { WARN("Could not set format to %d bpp\n", pwfx->wBitsPerSample); goto err; }
 
     /* Alsa's rate resampling is only used if the application specifically requests
-     * a buffer at a certain frequency, else it is better to disable due to unwanted
+     * a buffer at a certain frequency, else it is better to disable it due to unwanted
      * side effects, which may include: Less granular pointer, changing buffer sizes, etc
      */
 #if SND_LIB_VERSION >= 0x010009
@@ -383,13 +383,15 @@ static HRESULT SetFormat(IDsDriverBufferImpl *This, LPWAVEFORMATEX pwfx, BOOL fo
     TRACE("Period size is: %lu\n", psize);
 
     /* If period size is 'high', try to commit less
-     * dmix needs at least 2 buffers to work succesfully but prefers 3
+     * dmix needs at least 2 buffers to work successfully but prefers 3
      * however it seems to work ok if I just commit 2 1/2 buffers
      */
     if (psize >= 512)
     {
-        if (psize > 512 && ++warnonce == 1)
-            FIXME("Your alsa dmix period size is excessively high, unfortunately this is alsa default, try decreasing it to 512 or 256 (but double the amount of periods) if possible\n");
+        if (psize == 1024 && ++warnonce == 1)
+            FIXME("Your alsa dmix period size is 1024, try decreasing it to 512 if possible\n");
+        else if (psize > 512)
+            WARN("Your alsa period size is excessively high (%lu)\n", psize);
         This->mmap_commitahead = 2 * psize + psize/2;
         This->mmap_writeahead = 2 * psize;
     }
@@ -709,7 +711,7 @@ static HRESULT WINAPI IDsDriverImpl_CreateSoundBuffer(PIDSDRIVER iface,
     err = SetFormat(*ippdsdb, pwfx, FALSE);
     if (FAILED(err))
     {
-        WARN("Error occured: %08x\n", err);
+        WARN("Error occurred: %08x\n", err);
         goto err;
     }
 

@@ -53,8 +53,6 @@
 #include "dsdriver.h"
 #include "dsound_private.h"
 
-/* default intensity level for human ears */
-#define DEFAULT_INTENSITY 0.000000000001f
 /* default velocity of sound in the air */
 #define DEFAULT_VELOCITY 340
 
@@ -167,9 +165,6 @@ void DSOUND_Calc3DBuffer(IDirectSoundBufferImpl *dsb)
 {
 	/* volume, at which the sound will be played after all calcs. */
 	D3DVALUE lVolume = 0;
-	/* intensity (used for distance related stuff) */
-	double flIntensity;
-	double flTemp;
 	/* stuff for distance related stuff calc. */
 	D3DVECTOR vDistance;
 	D3DVALUE flDistance = 0;
@@ -223,16 +218,8 @@ void DSOUND_Calc3DBuffer(IDirectSoundBufferImpl *dsb)
 	if (flDistance < dsb->ds3db_ds3db.flMinDistance)
 		flDistance = dsb->ds3db_ds3db.flMinDistance;
 	
-	/* the following formula is taken from my physics book. I think it's ok for the *real* world...i hope m$ does it that way */
-	lVolume += 10000; /* ms likes working with negative volume...i don't */
-	lVolume /= 1000; /* convert hundreths of dB into B */
-	/* intensity level (loudness) = log10(Intensity/DefaultIntensity)...therefore */
-	flIntensity = pow(10,lVolume)*DEFAULT_INTENSITY;	
-	flTemp = (flDistance/dsb->ds3db_ds3db.flMinDistance)*(flDistance/dsb->ds3db_ds3db.flMinDistance);
-	flIntensity /= flTemp;
-	lVolume = log10(flIntensity/DEFAULT_INTENSITY);
-	lVolume *= 1000; /* convert back to hundreths of dB */
-	lVolume -= 10000; /* we need to do it in ms way */
+	/* attenuation proportional to the distance squared, converted to millibels as in lVolume*/
+	lVolume -= log10(flDistance/dsb->ds3db_ds3db.flMinDistance * flDistance/dsb->ds3db_ds3db.flMinDistance)*1000;
 	TRACE("dist. att: Distance = %f, MinDistance = %f => adjusting volume %d to %f\n", flDistance, dsb->ds3db_ds3db.flMinDistance, dsb->ds3db_lVolume, lVolume);
 
 	/* conning */
@@ -251,6 +238,9 @@ void DSOUND_Calc3DBuffer(IDirectSoundBufferImpl *dsb)
 			/* my test show that for my way of calc., we need only half of angles */
 			DWORD dwInsideConeAngle = dsb->ds3db_ds3db.dwInsideConeAngle/2;
 			DWORD dwOutsideConeAngle = dsb->ds3db_ds3db.dwOutsideConeAngle/2;
+			if (dwOutsideConeAngle == dwInsideConeAngle)
+				++dwOutsideConeAngle;
+
 			/* full volume */
 			if (flAngle < dwInsideConeAngle)
 				flAngle = dwInsideConeAngle;
@@ -285,13 +275,13 @@ void DSOUND_Calc3DBuffer(IDirectSoundBufferImpl *dsb)
 	/* FIXME: Doppler Effect disabled since i have no idea which frequency to change and how to do it */
 #if 0	
 	/* doppler shift*/
-	if ((VectorMagnitude(&ds3db.vVelocity) == 0) && (VectorMagnitude(&dsb->device->ds3dl.vVelocity) == 0))
+	if ((VectorMagnitude(&ds3db_ds3db.vVelocity) == 0) && (VectorMagnitude(&dsb->device->ds3dl.vVelocity) == 0))
 	{
 		TRACE("doppler: Buffer and Listener don't have velocities\n");
 	}
 	else
 	{
-		/* calculate length of ds3db.vVelocity component which causes Doppler Effect
+		/* calculate length of ds3db_ds3db.vVelocity component which causes Doppler Effect
 		   NOTE: if buffer moves TOWARDS the listener, it's velocity component is NEGATIVE
 		         if buffer moves AWAY from listener, it's velocity component is POSITIVE */
 		flBufferVel = ProjectVector(&dsb->ds3db_ds3db.vVelocity, &vDistance);
@@ -326,11 +316,6 @@ static void DSOUND_ChangeListener(IDirectSound3DListenerImpl *ds3dl)
 	TRACE("(%p)\n",ds3dl);
 	for (i = 0; i < ds3dl->device->nrofbuffers; i++)
 	{
-		/* some buffers don't have 3d buffer (Ultima IX seems to
-		crash without the following line) */
-		if (ds3dl->device->buffers[i]->ds3db == NULL)
-			continue;
-
 		/* check if this buffer is waiting for recalculation */
 		if (ds3dl->device->buffers[i]->ds3db_need_recalc)
 		{

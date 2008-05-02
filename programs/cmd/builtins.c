@@ -734,7 +734,7 @@ void WCMD_part_execute(CMD_LIST **cmdList, WCHAR *firstcmd, WCHAR *variable,
   }
 
 
-  /* If it didnt move the position, step to next command */
+  /* If it didn't move the position, step to next command */
   if (curPosition == *cmdList) *cmdList = (*cmdList)->nextcommand;
 
   /* Process any other parts of the command */
@@ -2303,7 +2303,7 @@ BOOL WCMD_ask_confirm (WCHAR *message, BOOL showSureText, BOOL *optionAll) {
       WCMD_output_asis (endBkt);
       WCMD_ReadFile (GetStdHandle(STD_INPUT_HANDLE), answer,
                      sizeof(answer)/sizeof(WCHAR), &count, NULL);
-      answer[0] = toupper(answer[0]);
+      answer[0] = toupperW(answer[0]);
     }
 
     /* Return the answer */

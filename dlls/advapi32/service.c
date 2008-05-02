@@ -45,6 +45,20 @@ static const WCHAR szServiceManagerKey[] = { 'S','y','s','t','e','m','\\',
 static const WCHAR  szSCMLock[] = {'A','D','V','A','P','I','_','S','C','M',
                                    'L','O','C','K',0};
 
+static const GENERIC_MAPPING scm_generic = {
+    (STANDARD_RIGHTS_READ | SC_MANAGER_ENUMERATE_SERVICE | SC_MANAGER_QUERY_LOCK_STATUS),
+    (STANDARD_RIGHTS_WRITE | SC_MANAGER_CREATE_SERVICE | SC_MANAGER_MODIFY_BOOT_CONFIG),
+    (STANDARD_RIGHTS_EXECUTE | SC_MANAGER_CONNECT | SC_MANAGER_LOCK),
+    SC_MANAGER_ALL_ACCESS
+};
+
+static const GENERIC_MAPPING svc_generic = {
+    (STANDARD_RIGHTS_READ | SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_INTERROGATE | SERVICE_ENUMERATE_DEPENDENTS),
+    (STANDARD_RIGHTS_WRITE | SERVICE_CHANGE_CONFIG),
+    (STANDARD_RIGHTS_EXECUTE | SERVICE_START | SERVICE_STOP | SERVICE_PAUSE_CONTINUE | SERVICE_USER_DEFINED_CONTROL),
+    SERVICE_ALL_ACCESS
+};
+
 typedef struct service_start_info_t
 {
     DWORD cmd;
@@ -1041,6 +1055,7 @@ SC_HANDLE WINAPI OpenSCManagerW( LPCWSTR lpMachineName, LPCWSTR lpDatabaseName,
     struct sc_manager *manager;
     HKEY hReg;
     LONG r;
+    DWORD new_mask = dwDesiredAccess;
 
     TRACE("(%s,%s,0x%08x)\n", debugstr_w(lpMachineName),
           debugstr_w(lpDatabaseName), dwDesiredAccess);
@@ -1077,8 +1092,9 @@ SC_HANDLE WINAPI OpenSCManagerW( LPCWSTR lpMachineName, LPCWSTR lpDatabaseName,
     if (r!=ERROR_SUCCESS)
         goto error;
 
-    manager->dwAccess = dwDesiredAccess;
-    TRACE("returning %p\n", manager);
+    RtlMapGenericMask(&new_mask, &scm_generic);
+    manager->dwAccess = new_mask;
+    TRACE("returning %p (access : 0x%08x)\n", manager, manager->dwAccess);
 
     return (SC_HANDLE) &manager->hdr;
 
@@ -1225,20 +1241,21 @@ SC_HANDLE WINAPI OpenServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
     HKEY hKey;
     long r;
     DWORD len;
+    DWORD new_mask = dwDesiredAccess;
 
     TRACE("%p %s %d\n", hSCManager, debugstr_w(lpServiceName), dwDesiredAccess);
-
-    if (!lpServiceName)
-    {
-        SetLastError(ERROR_INVALID_ADDRESS);
-        return NULL;
-    }
 
     hscm = sc_handle_get_handle_data( hSCManager, SC_HTYPE_MANAGER );
     if (!hscm)
     {
         SetLastError( ERROR_INVALID_HANDLE );
         return FALSE;
+    }
+
+    if (!lpServiceName)
+    {
+        SetLastError(ERROR_INVALID_ADDRESS);
+        return NULL;
     }
 
     r = RegOpenKeyExW( hscm->hkey, lpServiceName, 0, KEY_ALL_ACCESS, &hKey );
@@ -1253,10 +1270,15 @@ SC_HANDLE WINAPI OpenServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
                             sizeof (struct sc_service) + len*sizeof(WCHAR),
                             sc_handle_destroy_service );
     if (!hsvc)
+    {
+        RegCloseKey(hKey);
         return NULL;
+    }
     strcpyW( hsvc->name, lpServiceName );
     hsvc->hkey = hKey;
-    hsvc->dwAccess = dwDesiredAccess;
+
+    RtlMapGenericMask(&new_mask, &svc_generic);
+    hsvc->dwAccess = new_mask;
 
     /* add reference to SCM handle */
     hscm->hdr.ref_count++;
@@ -1286,6 +1308,7 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
     DWORD dp, len;
     struct reg_value val[10];
     int n = 0;
+    DWORD new_mask = dwDesiredAccess;
 
     TRACE("%p %s %s\n", hSCManager, 
           debugstr_w(lpServiceName), debugstr_w(lpDisplayName));
@@ -1294,6 +1317,63 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
     if (!hscm)
     {
         SetLastError( ERROR_INVALID_HANDLE );
+        return NULL;
+    }
+
+    if (!lpServiceName || !lpBinaryPathName)
+    {
+        SetLastError(ERROR_INVALID_ADDRESS);
+        return NULL;
+    }
+
+    if (!(hscm->dwAccess & SC_MANAGER_CREATE_SERVICE))
+    {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return NULL;
+    }
+
+    if (!lpServiceName[0])
+    {
+        SetLastError(ERROR_INVALID_NAME);
+        return NULL;
+    }
+
+    if (!lpBinaryPathName[0])
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
+    /* ServiceType can only be one value (except for SERVICE_INTERACTIVE_PROCESS which can be used
+     * together with SERVICE_WIN32_OWN_PROCESS or SERVICE_WIN32_SHARE_PROCESS when the service
+     * runs under the LocalSystem account)
+     */
+    switch (dwServiceType)
+    {
+    case SERVICE_KERNEL_DRIVER:
+    case SERVICE_FILE_SYSTEM_DRIVER:
+    case SERVICE_WIN32_OWN_PROCESS:
+    case SERVICE_WIN32_SHARE_PROCESS:
+        /* No problem */
+        break;
+    case SERVICE_WIN32_OWN_PROCESS | SERVICE_INTERACTIVE_PROCESS:
+    case SERVICE_WIN32_SHARE_PROCESS | SERVICE_INTERACTIVE_PROCESS:
+        /* FIXME : Do we need a more thorough check? */
+        if (lpServiceStartName)
+        {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return NULL;
+        }
+        break;
+    default:
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
+    /* StartType can only be a single value (if several values are mixed the result is probably not what was intended) */
+    if (dwStartType > SERVICE_DISABLED)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
         return NULL;
     }
 
@@ -1343,6 +1423,10 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
         goto error;
     lstrcpyW( hsvc->name, lpServiceName );
     hsvc->hkey = hKey;
+
+    RtlMapGenericMask(&new_mask, &svc_generic);
+    hsvc->dwAccess = new_mask;
+
     hsvc->scm = hscm;
     hscm->hdr.ref_count++;
 
@@ -1413,11 +1497,6 @@ CreateServiceA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
 BOOL WINAPI DeleteService( SC_HANDLE hService )
 {
     struct sc_service *hsvc;
-    HKEY hKey;
-    WCHAR valname[MAX_PATH+1];
-    INT index = 0;
-    LONG rc;
-    DWORD size;
 
     hsvc = sc_handle_get_handle_data(hService, SC_HTYPE_SERVICE);
     if (!hsvc)
@@ -1425,24 +1504,14 @@ BOOL WINAPI DeleteService( SC_HANDLE hService )
         SetLastError( ERROR_INVALID_HANDLE );
         return FALSE;
     }
-    hKey = hsvc->hkey;
 
-    size = MAX_PATH+1; 
-    /* Clean out the values */
-    rc = RegEnumValueW(hKey, index, valname,&size,0,0,0,0);
-    while (rc == ERROR_SUCCESS)
-    {
-        RegDeleteValueW(hKey,valname);
-        index++;
-        size = MAX_PATH+1; 
-        rc = RegEnumValueW(hKey, index, valname, &size,0,0,0,0);
-    }
+    /* Close the key to the service */
+    RegCloseKey(hsvc->hkey);
 
-    RegCloseKey(hKey);
+    /* Delete the service under the Service Control Manager key */
+    RegDeleteTreeW(hsvc->scm->hkey, hsvc->name);
+
     hsvc->hkey = NULL;
-
-    /* delete the key */
-    RegDeleteKeyW(hsvc->scm->hkey, hsvc->name);
 
     return TRUE;
 }

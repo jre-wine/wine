@@ -589,7 +589,7 @@ Thunk_IDirect3DDeviceImpl_1_SwapTextureHandles(IDirect3DDevice *iface,
                                                IDirect3DTexture *D3DTex1,
                                                IDirect3DTexture *D3DTex2)
 {
-    ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice2, iface);
+    ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice, iface);
     IDirectDrawSurfaceImpl *surf1 = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirect3DTexture, D3DTex1);
     IDirectDrawSurfaceImpl *surf2 = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirect3DTexture, D3DTex2);
     TRACE_(ddraw_thunk)("(%p)->(%p,%p) thunking to IDirect3DDevice2 interface.\n", This, surf1, surf2);
@@ -1405,6 +1405,25 @@ IDirect3DDeviceImpl_1_SetMatrix(IDirect3DDevice *iface,
         dump_D3DMATRIX(D3DMatrix);
 
     *((D3DMATRIX *) This->Handles[D3DMatHandle - 1].ptr) = *D3DMatrix;
+
+    if(This->world == D3DMatHandle)
+    {
+        IWineD3DDevice_SetTransform(This->wineD3DDevice,
+                                    WINED3DTS_WORLDMATRIX(0),
+                                    (WINED3DMATRIX *) D3DMatrix);
+    }
+    if(This->view == D3DMatHandle)
+    {
+        IWineD3DDevice_SetTransform(This->wineD3DDevice,
+                                    WINED3DTS_VIEW,
+                                    (WINED3DMATRIX *) D3DMatrix);
+    }
+    if(This->proj == D3DMatHandle)
+    {
+        IWineD3DDevice_SetTransform(This->wineD3DDevice,
+                                    WINED3DTS_PROJECTION,
+                                    (WINED3DMATRIX *) D3DMatrix);
+    }
 
     LeaveCriticalSection(&ddraw_cs);
     return D3D_OK;

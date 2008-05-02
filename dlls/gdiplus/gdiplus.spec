@@ -1,4 +1,4 @@
-@ stub GdipAddPathArc
+@ stdcall GdipAddPathArc(ptr long long long long long long)
 @ stub GdipAddPathArcI
 @ stub GdipAddPathBezier
 @ stub GdipAddPathBezierI
@@ -16,11 +16,11 @@
 @ stub GdipAddPathCurveI
 @ stub GdipAddPathEllipse
 @ stub GdipAddPathEllipseI
-@ stub GdipAddPathLine2
+@ stdcall GdipAddPathLine2(ptr ptr long)
 @ stub GdipAddPathLine2I
 @ stub GdipAddPathLine
 @ stub GdipAddPathLineI
-@ stub GdipAddPathPath
+@ stdcall GdipAddPathPath(ptr ptr long)
 @ stub GdipAddPathPie
 @ stub GdipAddPathPieI
 @ stub GdipAddPathPolygon
@@ -54,8 +54,8 @@
 @ stub GdipClonePen
 @ stub GdipCloneRegion
 @ stub GdipCloneStringFormat
-@ stub GdipClosePathFigure
-@ stub GdipClosePathFigures
+@ stdcall GdipClosePathFigure(ptr)
+@ stdcall GdipClosePathFigures(ptr)
 @ stub GdipCombineRegionPath
 @ stub GdipCombineRegionRect
 @ stub GdipCombineRegionRectI
@@ -95,7 +95,7 @@
 @ stub GdipCreateLineBrushFromRectWithAngle
 @ stub GdipCreateLineBrushFromRectWithAngleI
 @ stub GdipCreateLineBrushI
-@ stub GdipCreateMatrix2
+@ stdcall GdipCreateMatrix2(long long long long long long ptr)
 @ stub GdipCreateMatrix3
 @ stub GdipCreateMatrix3I
 @ stub GdipCreateMatrix
@@ -133,7 +133,7 @@
 @ stub GdipDeleteFont
 @ stub GdipDeleteFontFamily
 @ stdcall GdipDeleteGraphics(ptr)
-@ stub GdipDeleteMatrix
+@ stdcall GdipDeleteMatrix(ptr)
 @ stdcall GdipDeletePath(ptr)
 @ stub GdipDeletePathIter
 @ stdcall GdipDeletePen(ptr)
@@ -178,7 +178,7 @@
 @ stdcall GdipDrawLineI(ptr ptr long long long long)
 @ stdcall GdipDrawLines(ptr ptr ptr long)
 @ stub GdipDrawLinesI
-@ stub GdipDrawPath
+@ stdcall GdipDrawPath(ptr ptr ptr)
 @ stdcall GdipDrawPie(ptr ptr long long long long long long)
 @ stub GdipDrawPieI
 @ stub GdipDrawPolygon
@@ -308,7 +308,7 @@
 @ stub GdipGetPageScale
 @ stub GdipGetPageUnit
 @ stub GdipGetPathData
-@ stub GdipGetPathFillMode
+@ stdcall GdipGetPathFillMode(ptr ptr)
 @ stub GdipGetPathGradientBlend
 @ stub GdipGetPathGradientBlendCount
 @ stub GdipGetPathGradientCenterColor
@@ -327,10 +327,10 @@
 @ stub GdipGetPathGradientTransform
 @ stub GdipGetPathGradientWrapMode
 @ stub GdipGetPathLastPoint
-@ stub GdipGetPathPoints
+@ stdcall GdipGetPathPoints(ptr ptr long)
 @ stub GdipGetPathPointsI
-@ stub GdipGetPathTypes
-@ stub GdipGetPathWorldBounds
+@ stdcall GdipGetPathTypes(ptr ptr long)
+@ stdcall GdipGetPathWorldBounds(ptr ptr ptr ptr)
 @ stub GdipGetPathWorldBoundsI
 @ stub GdipGetPenBrushFill
 @ stub GdipGetPenColor
@@ -353,7 +353,7 @@
 @ stub GdipGetPenUnit
 @ stub GdipGetPenWidth
 @ stub GdipGetPixelOffsetMode
-@ stub GdipGetPointCount
+@ stdcall GdipGetPointCount(ptr ptr)
 @ stub GdipGetPropertyCount
 @ stub GdipGetPropertyIdList
 @ stub GdipGetPropertyItem
@@ -458,7 +458,7 @@
 @ stub GdipResetImageAttributes
 @ stub GdipResetLineTransform
 @ stub GdipResetPageTransform
-@ stub GdipResetPath
+@ stdcall GdipResetPath(ptr)
 @ stub GdipResetPathGradientTransform
 @ stub GdipResetPenTransform
 @ stub GdipResetTextureTransform
@@ -550,7 +550,7 @@
 @ stub GdipSetPenDashCap197819
 @ stub GdipSetPenDashOffset
 @ stub GdipSetPenDashStyle
-@ stub GdipSetPenEndCap
+@ stdcall GdipSetPenEndCap(ptr long)
 @ stub GdipSetPenLineCap197819
 @ stub GdipSetPenLineJoin
 @ stub GdipSetPenMiterLimit
@@ -578,13 +578,13 @@
 @ stub GdipSetTextureWrapMode
 @ stub GdipSetWorldTransform
 @ stub GdipShearMatrix
-@ stub GdipStartPathFigure
+@ stdcall GdipStartPathFigure(ptr)
 @ stub GdipStringFormatGetGenericDefault
 @ stub GdipStringFormatGetGenericTypographic
 @ stub GdipTestControl
-@ stub GdipTransformMatrixPoints
+@ stdcall GdipTransformMatrixPoints(ptr ptr long)
 @ stub GdipTransformMatrixPointsI
-@ stub GdipTransformPath
+@ stdcall GdipTransformPath(ptr ptr)
 @ stub GdipTransformPoints
 @ stub GdipTransformPointsI
 @ stub GdipTransformRegion

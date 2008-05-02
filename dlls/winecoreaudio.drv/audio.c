@@ -189,6 +189,7 @@ typedef struct {
 
     AudioUnit       audioUnit;
     AudioBufferList*bufferList;
+    AudioBufferList*bufferListCopy;
 
     /* Record state of debug channels at open.  Used to control fprintf's since
      * we can't use Wine debug channel calls in non-Wine AudioUnit threads. */
@@ -1059,12 +1060,16 @@ static void wodHelper_PlayPtrNext(WINE_WAVEOUT* wwo)
  */
 static void wodHelper_NotifyDoneForList(WINE_WAVEOUT* wwo, LPWAVEHDR lpWaveHdr)
 {
-    for ( ; lpWaveHdr; lpWaveHdr = lpWaveHdr->lpNext)
+    while (lpWaveHdr)
     {
+        LPWAVEHDR lpNext = lpWaveHdr->lpNext;
+
+        lpWaveHdr->lpNext = NULL;
         lpWaveHdr->dwFlags &= ~WHDR_INQUEUE;
         lpWaveHdr->dwFlags |= WHDR_DONE;
-
         wodNotifyClient(wwo, WOM_DONE, (DWORD)lpWaveHdr, 0);
+
+        lpWaveHdr = lpNext;
     }
 }
 
@@ -1424,6 +1429,32 @@ static DWORD wodDevInterface(UINT wDevID, PWCHAR dwParam1, DWORD dwParam2)
 }
 
 /**************************************************************************
+ *                              widDsCreate                     [internal]
+ */
+static DWORD wodDsCreate(UINT wDevID, PIDSDRIVER* drv)
+{
+    TRACE("(%d,%p)\n",wDevID,drv);
+
+    FIXME("DirectSound not implemented\n");
+    FIXME("The (slower) DirectSound HEL mode will be used instead.\n");
+    return MMSYSERR_NOTSUPPORTED;
+}
+
+/**************************************************************************
+*                              wodDsDesc                 [internal]
+*/
+static DWORD wodDsDesc(UINT wDevID, PDSDRIVERDESC desc)
+{
+    /* The DirectSound HEL will automatically wrap a non-DirectSound-capable
+     * driver in a DirectSound adaptor, thus allowing the driver to be used by
+     * DirectSound clients.  However, it only does this if we respond
+     * successfully to the DRV_QUERYDSOUNDDESC message.  It's enough to fill in
+     * the driver and device names of the description output parameter. */
+    memcpy(desc, &(WOutDev[wDevID].cadev->ds_desc), sizeof(DSDRIVERDESC));
+    return MMSYSERR_NOERROR;
+}
+
+/**************************************************************************
 * 				wodMessage (WINECOREAUDIO.7)
 */
 DWORD WINAPI CoreAudio_wodMessage(UINT wDevID, UINT wMsg, DWORD dwUser, 
@@ -1463,9 +1494,8 @@ DWORD WINAPI CoreAudio_wodMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
             
         case DRV_QUERYDEVICEINTERFACESIZE:  return wodDevInterfaceSize (wDevID, (LPDWORD)dwParam1);
         case DRV_QUERYDEVICEINTERFACE:      return wodDevInterface (wDevID, (PWCHAR)dwParam1, dwParam2);
-        case DRV_QUERYDSOUNDIFACE:	
-        case DRV_QUERYDSOUNDDESC:	
-            return MMSYSERR_NOTSUPPORTED;
+        case DRV_QUERYDSOUNDIFACE:  return wodDsCreate  (wDevID, (PIDSDRIVER*)dwParam1);
+        case DRV_QUERYDSOUNDDESC:   return wodDsDesc    (wDevID, (PDSDRIVERDESC)dwParam1);
             
         default:
             FIXME("unknown message %d!\n", wMsg);
@@ -1645,12 +1675,17 @@ static void widHelper_NotifyCompletions(WINE_WAVEIN* wwi)
     OSSpinLockUnlock(&wwi->lock);
 
     /* Now, send the "done" notification for each header in our list. */
-    for (lpWaveHdr = lpFirstDoneWaveHdr; lpWaveHdr; lpWaveHdr = lpWaveHdr->lpNext)
+    lpWaveHdr = lpFirstDoneWaveHdr;
+    while (lpWaveHdr)
     {
+        LPWAVEHDR lpNext = lpWaveHdr->lpNext;
+
+        lpWaveHdr->lpNext = NULL;
         lpWaveHdr->dwFlags &= ~WHDR_INQUEUE;
         lpWaveHdr->dwFlags |= WHDR_DONE;
-
         widNotifyClient(wwi, WIM_DATA, (DWORD)lpWaveHdr, 0);
+
+        lpWaveHdr = lpNext;
     }
 }
 
@@ -1694,25 +1729,46 @@ static void widHelper_DestroyAudioBufferList(AudioBufferList* list)
 }
 
 
+#define AUDIOBUFFERLISTSIZE(numBuffers) (offsetof(AudioBufferList, mBuffers) + (numBuffers) * sizeof(AudioBuffer))
+
 /**************************************************************************
  *                    widHelper_AllocateAudioBufferList          [internal]
  * Convenience function to allocate our audio buffers
  */
-static AudioBufferList* widHelper_AllocateAudioBufferList(UInt32 numChannels, UInt32 size)
+static AudioBufferList* widHelper_AllocateAudioBufferList(UInt32 numChannels, UInt32 bitsPerChannel, UInt32 bufferFrames, BOOL interleaved)
 {
+    UInt32                      numBuffers;
+    UInt32                      channelsPerFrame;
+    UInt32                      bytesPerFrame;
+    UInt32                      bytesPerBuffer;
     AudioBufferList*            list;
     UInt32                      i;
 
-    list = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(AudioBufferList) + numChannels * sizeof(AudioBuffer));
+    if (interleaved)
+    {
+        /* For interleaved audio, we allocate one buffer for all channels. */
+        numBuffers = 1;
+        channelsPerFrame = numChannels;
+    }
+    else
+    {
+        numBuffers = numChannels;
+        channelsPerFrame = 1;
+    }
+
+    bytesPerFrame = bitsPerChannel * channelsPerFrame / 8;
+    bytesPerBuffer = bytesPerFrame * bufferFrames;
+
+    list = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, AUDIOBUFFERLISTSIZE(numBuffers));
     if (list == NULL)
         return NULL;
 
-    list->mNumberBuffers = numChannels;
-    for (i = 0; i < numChannels; ++i)
+    list->mNumberBuffers = numBuffers;
+    for (i = 0; i < numBuffers; ++i)
     {
-        list->mBuffers[i].mNumberChannels = 1;
-        list->mBuffers[i].mDataByteSize = size;
-        list->mBuffers[i].mData = HeapAlloc(GetProcessHeap(), 0, size);
+        list->mBuffers[i].mNumberChannels = channelsPerFrame;
+        list->mBuffers[i].mDataByteSize = bytesPerBuffer;
+        list->mBuffers[i].mData = HeapAlloc(GetProcessHeap(), 0, bytesPerBuffer);
         if (list->mBuffers[i].mData == NULL)
         {
             widHelper_DestroyAudioBufferList(list);
@@ -1730,7 +1786,6 @@ static DWORD widOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
 {
     WINE_WAVEIN*    wwi;
     UInt32          frameCount;
-    UInt32          bytesPerFrame;
 
     TRACE("(%u, %p, %08X);\n", wDevID, lpDesc, dwFlags);
     if (lpDesc == NULL)
@@ -1750,7 +1805,8 @@ static DWORD widOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
 
     if (lpDesc->lpFormat->wFormatTag != WAVE_FORMAT_PCM ||
         lpDesc->lpFormat->nChannels == 0 ||
-        lpDesc->lpFormat->nSamplesPerSec == 0
+        lpDesc->lpFormat->nSamplesPerSec == 0 ||
+        lpDesc->lpFormat->nSamplesPerSec != AudioUnit_GetInputDeviceSampleRate()
         )
     {
         WARN("Bad format: tag=%04X nChannels=%d nSamplesPerSec=%d wBitsPerSample=%d !\n",
@@ -1808,9 +1864,8 @@ static DWORD widOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
     }
 
     /* Allocate our audio buffers */
-    /* For interleaved audio, we allocate one buffer for all channels. */
-    bytesPerFrame = wwi->format.wBitsPerSample * wwi->format.wf.nChannels / 8;
-    wwi->bufferList = widHelper_AllocateAudioBufferList(1, wwi->format.wf.nChannels * frameCount * bytesPerFrame);
+    wwi->bufferList = widHelper_AllocateAudioBufferList(wwi->format.wf.nChannels,
+        wwi->format.wBitsPerSample, frameCount, TRUE);
     if (wwi->bufferList == NULL)
     {
         ERR("Failed to allocate buffer list\n");
@@ -1819,6 +1874,20 @@ static DWORD widOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
         OSSpinLockUnlock(&wwi->lock);
         return MMSYSERR_NOMEM;
     }
+
+    /* Keep a copy of the buffer list structure (but not the buffers themselves)
+     * in case AudioUnitRender clobbers the original, as it is wont to do. */
+    wwi->bufferListCopy = HeapAlloc(GetProcessHeap(), 0, AUDIOBUFFERLISTSIZE(wwi->bufferList->mNumberBuffers));
+    if (wwi->bufferListCopy == NULL)
+    {
+        ERR("Failed to allocate buffer list copy\n");
+        widHelper_DestroyAudioBufferList(wwi->bufferList);
+        AudioUnitUninitialize(wwi->audioUnit);
+        AudioUnit_CloseAudioUnit(wwi->audioUnit);
+        OSSpinLockUnlock(&wwi->lock);
+        return MMSYSERR_NOMEM;
+    }
+    memcpy(wwi->bufferListCopy, wwi->bufferList, AUDIOBUFFERLISTSIZE(wwi->bufferList->mNumberBuffers));
 
     OSSpinLockUnlock(&wwi->lock);
 
@@ -1880,6 +1949,8 @@ static DWORD widClose(WORD wDevID)
         /* Dellocate our audio buffers */
         widHelper_DestroyAudioBufferList(wwi->bufferList);
         wwi->bufferList = NULL;
+        HeapFree(GetProcessHeap(), 0, wwi->bufferListCopy);
+        wwi->bufferListCopy = NULL;
 
         ret = widNotifyClient(wwi, WIM_CLOSE, 0L, 0L);
     }
@@ -2049,6 +2120,7 @@ static DWORD widStop(WORD wDevID)
 
     if (lpWaveHdr)
     {
+        lpWaveHdr->lpNext = NULL;
         lpWaveHdr->dwFlags &= ~WHDR_INQUEUE;
         lpWaveHdr->dwFlags |= WHDR_DONE;
         widNotifyClient(wwi, WIM_DATA, (DWORD)lpWaveHdr, 0);
@@ -2105,6 +2177,7 @@ static DWORD widReset(WORD wDevID)
     {
         WAVEHDR* lpNext = lpWaveHdr->lpNext;
 
+        lpWaveHdr->lpNext = NULL;
         lpWaveHdr->dwFlags &= ~WHDR_INQUEUE;
         lpWaveHdr->dwFlags |= WHDR_DONE;
         widNotifyClient(wwi, WIM_DATA, (DWORD)lpWaveHdr, 0);
@@ -2155,6 +2228,35 @@ static DWORD widDevInterface(UINT wDevID, PWCHAR dwParam1, DWORD dwParam2)
 
 
 /**************************************************************************
+ *                              widDsCreate                     [internal]
+ */
+static DWORD widDsCreate(UINT wDevID, PIDSCDRIVER* drv)
+{
+    TRACE("(%d,%p)\n",wDevID,drv);
+
+    FIXME("DirectSoundCapture not implemented\n");
+    FIXME("The (slower) DirectSound HEL mode will be used instead.\n");
+    return MMSYSERR_NOTSUPPORTED;
+}
+
+/**************************************************************************
+ *                              widDsDesc                       [internal]
+ */
+static DWORD widDsDesc(UINT wDevID, PDSDRIVERDESC desc)
+{
+    /* The DirectSound HEL will automatically wrap a non-DirectSound-capable
+     * driver in a DirectSound adaptor, thus allowing the driver to be used by
+     * DirectSound clients.  However, it only does this if we respond
+     * successfully to the DRV_QUERYDSOUNDDESC message.  It's enough to fill in
+     * the driver and device names of the description output parameter. */
+    memset(desc, 0, sizeof(*desc));
+    lstrcpynA(desc->szDrvname, "winecoreaudio.drv", sizeof(desc->szDrvname) - 1);
+    lstrcpynA(desc->szDesc, WInDev[wDevID].interface_name, sizeof(desc->szDesc) - 1);
+    return MMSYSERR_NOERROR;
+}
+
+
+/**************************************************************************
  *                              widMessage (WINECOREAUDIO.6)
  */
 DWORD WINAPI CoreAudio_widMessage(WORD wDevID, WORD wMsg, DWORD dwUser,
@@ -2183,6 +2285,8 @@ DWORD WINAPI CoreAudio_widMessage(WORD wDevID, WORD wMsg, DWORD dwUser,
         case WIDM_STOP:             return widStop          (wDevID);
         case DRV_QUERYDEVICEINTERFACESIZE: return widDevInterfaceSize       (wDevID, (LPDWORD)dwParam1);
         case DRV_QUERYDEVICEINTERFACE:     return widDevInterface           (wDevID, (PWCHAR)dwParam1, dwParam2);
+        case DRV_QUERYDSOUNDIFACE:  return widDsCreate   (wDevID, (PIDSCDRIVER*)dwParam1);
+        case DRV_QUERYDSOUNDDESC:   return widDsDesc     (wDevID, (PDSDRIVERDESC)dwParam1);
         default:
             FIXME("unknown message %d!\n", wMsg);
     }
@@ -2265,6 +2369,11 @@ OSStatus CoreAudio_wiAudioUnitIOProc(void *inRefCon,
     }
 
     OSSpinLockUnlock(&wwi->lock);
+
+    /* Restore the audio buffer list structure from backup, in case
+     * AudioUnitRender clobbered it.  (It modifies mDataByteSize and may even
+     * give us a different mData buffer to avoid a copy.) */
+    memcpy(wwi->bufferList, wwi->bufferListCopy, AUDIOBUFFERLISTSIZE(wwi->bufferList->mNumberBuffers));
 
     if (needNotify) wodSendNotifyInputCompletionsMessage(wwi);
     return err;
