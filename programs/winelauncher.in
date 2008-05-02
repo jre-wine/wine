@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #------------------------------------------------------------------------------
 #   Winelauncher
 #       This shell script attempts to intelligently manage the process
@@ -391,7 +391,7 @@ fi
 #  Okay, really launch Wine...
 #------------------------------------------------------------------------------
 if [ $use_log_name -ne 0 -a $use_status_name -ne 0 ] ; then
-    ( $WINEBIN/$WINE_BIN_NAME "$@"; echo $? >$status_name ) 2>&1 | tee "$log_name"
+    ( $WINEBIN/$WINE_BIN_NAME "$@"; echo $? >$status_name ) 2> >( tee "$log_name" >&2 )
     wine_return=`cat $status_name`
 else
     $WINEBIN/$WINE_BIN_NAME "$@"
