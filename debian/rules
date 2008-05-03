@@ -143,7 +143,7 @@ clean-arch32:
 ifeq (,$(DEB_SAVEBUILD))
 	rm -rf build32
 else
-	mv build32 /tmp
+	mv build32 /tmp || true
 endif
 
 clean-arch64:
@@ -154,7 +154,7 @@ clean-arch64:
 ifeq (,$(DEB_SAVEBUILD))
 	rm -rf build64
 else
-	mv build64 /tmp
+	mv build64 /tmp || true
 endif
 
 clean: $(patsubst build%,clean-arch%,$(BUILDS))
