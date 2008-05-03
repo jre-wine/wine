@@ -1,8 +1,26 @@
-wine (0.9.61-1) UNRELEASED; urgency=low
+wine (0.9.61-1) unstable; urgency=low
 
-  * Merge upstream Wine 0.9.61
+  * New upstream release 0.9.61, released May 2, 2008.
+    - Automatic updating of the WINEPREFIX directory.
+    - Winhelp now uses Richedit as display engine.
+    - Many RichEdit fixes.
+    - More improvements to IME support.
+    - More quartz fixes.
+    - Implementation for many more Gdiplus functions.
+    - Lots of bug fixes.
+  * Added Vcs-* fields to debian/control, pointing at the new Git
+    repository for the Debian Wine packages.
+  * Fix diff-amd64.sh to work if building out of the Git repository.
+  * Allow clean rule to succeed if invoked more than once with
+    DEB_SAVEBUILD set.
+  * Added scripts to import new upstream releases and build packages
+    using the pkg-wine Git repository.
+  * Added debian/watch file.
+  * With ia32-libs version 2.4, it's finally possible to build Wine
+    properly on amd64, so I'll now finally disable the amd64 hack.
+    (Closes: #381341.)
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sat, 03 May 2008 00:39:30 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 03 May 2008 07:46:16 +0200
 
 wine (0.9.60-4) unstable; urgency=medium
 
