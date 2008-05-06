@@ -15,8 +15,36 @@ mv wine-temp.diff $DIFFNAME
 gzip -9 $DIFFNAME
 echo Updating $DSCNAME...
 MD5=$(md5sum $DIFFNAME.gz|sed -n 's,^\([^ ]*\).*$,\1,p')
+SHA1=$(sha1sum $DIFFNAME.gz|sed -n 's,^\([^ ]*\).*$,\1,p')
+SHA256=$(sha256sum $DIFFNAME.gz|sed -n 's,^\([^ ]*\).*$,\1,p')
 SIZE=$(ls -l $DIFFNAME.gz|sed -n 's,^[^ ]* [^ ]* [^ ]* [^ ]* \([^ ]*\).*$,\1,p')
-head -n -1 $DSCNAME > wine-temp.dsc
-echo " $MD5 $SIZE $DIFFNAME.gz" >> wine-temp.dsc
+CURRENT=""
+while read -r
+do
+  if [ "$REPLY" = "Files: " ]
+  then
+    CURRENT="$MD5"
+    echo "$REPLY"
+  elif [ "$REPLY" = "Checksums-Sha1: " ]
+  then
+    CURRENT="$SHA1"
+    echo "$REPLY"
+  elif [ "$REPLY" = "Checksums-Sha256: " ]
+  then
+    CURRENT="$SHA256"
+    echo "$REPLY"
+  elif [ -z "$CURRENT" ]
+  then
+    echo "$REPLY"
+  else
+    FN=`echo "$REPLY"|cut -d ' ' -f 4`
+    if [ "$FN" = "$DIFFNAME.gz" ]
+    then
+      echo " $CURRENT $SIZE $DIFFNAME.gz"
+    else
+      echo "$REPLY"
+    fi
+  fi
+done < $DSCNAME > wine-temp.dsc
 mv wine-temp.dsc $DSCNAME
 )
