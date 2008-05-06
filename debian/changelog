@@ -1,3 +1,13 @@
+wine (0.9.61-2) unstable; urgency=low
+
+  * Seems ia32-libs is not in shape yet after all. Re-enabled amd64
+    hack.
+  * Made debian/diff-amd64.sh handle the new SHA checksums.
+  * Improved debian/maint/build-final's generation of changelogs for
+    Debian revisions.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Tue, 06 May 2008 07:13:23 +0200
+
 wine (0.9.61-1) unstable; urgency=low
 
   * New upstream release 0.9.61, released May 2, 2008.
