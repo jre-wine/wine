@@ -1,7 +1,8 @@
 Source: wine
 Section: otherosfs
 Priority: optional
-Maintainer: Ove Kaaven <ovek@arcticnet.no>
+Maintainer: Debian Wine Party <pkg-wine-party@lists.alioth.debian.org>
+Uploaders: Ove Kaaven <ovek@arcticnet.no>
 Build-Depends: debhelper (>= 5), flex | flex-old, bison,
  libx11-dev | xlibs-dev (<< 4.3), libxext-dev | xlibs-dev (<< 4.3),
  libxi-dev | xlibs-dev (<< 4.3), libxrandr-dev | xlibs-dev (<< 4.3),
