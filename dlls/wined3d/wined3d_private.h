@@ -702,6 +702,7 @@ struct WineD3DAdapter
     WCHAR                   DeviceName[CCHDEVICENAME]; /* DeviceName for use with e.g. ChangeDisplaySettings */
     int                     nCfgs;
     WineD3D_PixelFormat     *cfgs;
+    BOOL                    brokenStencil; /* Set on cards which only offer mixed depth+stencil */
     unsigned int            TextureRam; /* Amount of texture memory both video ram + AGP/TurboCache/HyperMemory/.. */
     unsigned int            UsedTextureRam;
 };
@@ -2297,14 +2298,14 @@ typedef struct IWineD3DVertexShaderImpl {
     attrib_declaration          swizzled_attribs [MAX_ATTRIBS];
     UINT                        num_swizzled_attribs;
 
-    /* run time datas...  */
+    /* run time data...  */
     VSHADERDATA                *data;
     UINT                       min_rel_offset, max_rel_offset;
     UINT                       rel_offset;
 
     UINT                       recompile_count;
 #if 0 /* needs reworking */
-    /* run time datas */
+    /* run time data */
     VSHADERINPUTDATA input;
     VSHADEROUTPUTDATA output;
 #endif

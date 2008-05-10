@@ -19,6 +19,7 @@
 #include "windef.h"
 #include "iccvid_private.h"
 
+#include "iccvid_Da.rc"
 #include "iccvid_De.rc"
 #include "iccvid_En.rc"
 #include "iccvid_Fr.rc"

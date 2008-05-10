@@ -1,3 +1,9 @@
+wine (1.0-rc1-1) UNRELEASED; urgency=low
+
+  * UNRELEASED
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 10 May 2008 09:35:12 +0200
+
 wine (0.9.61-2) unstable; urgency=low
 
   * Seems ia32-libs is not in shape yet after all. Re-enabled amd64

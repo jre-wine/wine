@@ -964,9 +964,10 @@ HINTERNET WINAPI HttpOpenRequestA(HINTERNET hHttpSession,
 {
     LPWSTR szVerb = NULL, szObjectName = NULL;
     LPWSTR szVersion = NULL, szReferrer = NULL, *szAcceptTypes = NULL;
-    INT len;
-    INT acceptTypesCount;
+    INT len, acceptTypesCount;
     HINTERNET rc = FALSE;
+    LPCSTR *types;
+
     TRACE("(%p, %s, %s, %s, %s, %p, %08x, %08lx)\n", hHttpSession,
           debugstr_a(lpszVerb), debugstr_a(lpszObjectName),
           debugstr_a(lpszVersion), debugstr_a(lpszReferrer), lpszAcceptTypes,
@@ -1008,24 +1009,37 @@ HINTERNET WINAPI HttpOpenRequestA(HINTERNET hHttpSession,
         MultiByteToWideChar(CP_ACP, 0, lpszReferrer, -1, szReferrer, len );
     }
 
-    acceptTypesCount = 0;
     if (lpszAcceptTypes)
     {
-        /* find out how many there are */
-        while (lpszAcceptTypes[acceptTypesCount] && *lpszAcceptTypes[acceptTypesCount])
-            acceptTypesCount++;
-        szAcceptTypes = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR *) * (acceptTypesCount+1));
         acceptTypesCount = 0;
-        while (lpszAcceptTypes[acceptTypesCount] && *lpszAcceptTypes[acceptTypesCount])
+        types = lpszAcceptTypes;
+        while (*types)
         {
-            len = MultiByteToWideChar(CP_ACP, 0, lpszAcceptTypes[acceptTypesCount],
-                                -1, NULL, 0 );
-            szAcceptTypes[acceptTypesCount] = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
-            if (!szAcceptTypes[acceptTypesCount] )
-                goto end;
-            MultiByteToWideChar(CP_ACP, 0, lpszAcceptTypes[acceptTypesCount],
-                                -1, szAcceptTypes[acceptTypesCount], len );
-            acceptTypesCount++;
+            /* find out how many there are */
+            if (((ULONG_PTR)*types >> 16) && **types)
+            {
+                TRACE("accept type: %s\n", debugstr_a(*types));
+                acceptTypesCount++;
+            }
+            types++;
+        }
+        szAcceptTypes = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR *) * (acceptTypesCount+1));
+        if (!szAcceptTypes) goto end;
+
+        acceptTypesCount = 0;
+        types = lpszAcceptTypes;
+        while (*types)
+        {
+            if (((ULONG_PTR)*types >> 16) && **types)
+            {
+                len = MultiByteToWideChar(CP_ACP, 0, *types, -1, NULL, 0 );
+                szAcceptTypes[acceptTypesCount] = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+                if (!szAcceptTypes[acceptTypesCount]) goto end;
+
+                MultiByteToWideChar(CP_ACP, 0, *types, -1, szAcceptTypes[acceptTypesCount], len);
+                acceptTypesCount++;
+            }
+            types++;
         }
         szAcceptTypes[acceptTypesCount] = NULL;
     }
@@ -1375,7 +1389,6 @@ static void HTTPREQ_CloseConnection(WININETHANDLEHEADER *hdr)
 {
     LPWININETHTTPREQW lpwhr = (LPWININETHTTPREQW) hdr;
     LPWININETHTTPSESSIONW lpwhs = NULL;
-    LPWININETAPPINFOW hIC = NULL;
 
     TRACE("%p\n",lpwhr);
 
@@ -1408,7 +1421,6 @@ static void HTTPREQ_CloseConnection(WININETHANDLEHEADER *hdr)
     }
 
     lpwhs = lpwhr->lpHttpSession;
-    hIC = lpwhs->lpAppInfo;
 
     INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
                           INTERNET_STATUS_CLOSING_CONNECTION, 0, 0);
@@ -1964,20 +1976,6 @@ HINTERNET WINAPI HTTP_HttpOpenRequestW(LPWININETHTTPSESSIONW lpwhs,
 
     if (NULL != hIC->lpszProxy && hIC->lpszProxy[0] != 0)
         HTTP_DealWithProxy( hIC, lpwhs, lpwhr );
-
-    if (hIC->lpszAgent)
-    {
-        WCHAR *agent_header;
-        static const WCHAR user_agent[] = {'U','s','e','r','-','A','g','e','n','t',':',' ','%','s','\r','\n',0 };
-
-        len = strlenW(hIC->lpszAgent) + strlenW(user_agent);
-        agent_header = HeapAlloc( GetProcessHeap(), 0, len*sizeof(WCHAR) );
-        sprintfW(agent_header, user_agent, hIC->lpszAgent );
-
-        HTTP_HttpAddRequestHeadersW(lpwhr, agent_header, strlenW(agent_header),
-                               HTTP_ADDREQ_FLAG_ADD);
-        HeapFree(GetProcessHeap(), 0, agent_header);
-    }
 
     Host = HTTP_GetHeader(lpwhr,szHost);
 
@@ -3175,6 +3173,19 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
         sprintfW(contentLengthStr, szContentLength, dwContentLength);
         HTTP_HttpAddRequestHeadersW(lpwhr, contentLengthStr, -1L, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDHDR_FLAG_REPLACE);
     }
+    if (lpwhr->lpHttpSession->lpAppInfo->lpszAgent)
+    {
+        WCHAR *agent_header;
+        static const WCHAR user_agent[] = {'U','s','e','r','-','A','g','e','n','t',':',' ','%','s','\r','\n',0};
+        int len;
+
+        len = strlenW(lpwhr->lpHttpSession->lpAppInfo->lpszAgent) + strlenW(user_agent);
+        agent_header = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        sprintfW(agent_header, user_agent, lpwhr->lpHttpSession->lpAppInfo->lpszAgent);
+
+        HTTP_HttpAddRequestHeadersW(lpwhr, agent_header, strlenW(agent_header), HTTP_ADDREQ_FLAG_ADD_IF_NEW);
+        HeapFree(GetProcessHeap(), 0, agent_header);
+    }
 
     do
     {
@@ -3464,7 +3475,6 @@ HINTERNET HTTP_Connect(LPWININETAPPINFOW hIC, LPCWSTR lpszServerName,
 	LPCWSTR lpszPassword, DWORD dwFlags, DWORD_PTR dwContext,
 	DWORD dwInternalFlags)
 {
-    BOOL bSuccess = FALSE;
     LPWININETHTTPSESSIONW lpwhs = NULL;
     HINTERNET handle = NULL;
 
@@ -3534,8 +3544,6 @@ HINTERNET HTTP_Connect(LPWININETAPPINFOW hIC, LPCWSTR lpszServerName,
                               INTERNET_STATUS_HANDLE_CREATED, &handle,
                               sizeof(handle));
     }
-
-    bSuccess = TRUE;
 
 lerror:
     if( lpwhs )

@@ -25,6 +25,7 @@
 
 #include "resource.h"
 
+#include "sane_Da.rc"
 #include "sane_De.rc"
 #include "sane_En.rc"
 #include "sane_Es.rc"

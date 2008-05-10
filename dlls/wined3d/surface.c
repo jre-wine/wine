@@ -2088,17 +2088,21 @@ static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE table[256][4]
         /* In DirectDraw the palette is a property of the surface, there are no such things as device palettes. */
         if(dxVersion <= 7) {
             ERR("This code should never get entered for DirectDraw!, expect problems\n");
-            return;
-        }
-
-        /*  Direct3D >= 8 palette usage style: P8 textures use device palettes, palette entry format is A8R8G8B8,
-            alpha is stored in peFlags and may be used by the app if D3DPTEXTURECAPS_ALPHAPALETTE device
-            capability flag is present (wine does advertise this capability) */
-        for (i = 0; i < 256; i++) {
-            table[i][0] = device->palettes[device->currentPalette][i].peRed;
-            table[i][1] = device->palettes[device->currentPalette][i].peGreen;
-            table[i][2] = device->palettes[device->currentPalette][i].peBlue;
-            table[i][3] = device->palettes[device->currentPalette][i].peFlags;
+            if(index_in_alpha) {
+                /* Guarantees that memory representation remains correct after sysmem<->texture transfers even if
+                   there's no palette at this time. */
+                for (i = 0; i < 256; i++) table[i][3] = i;
+            }
+        } else {
+            /*  Direct3D >= 8 palette usage style: P8 textures use device palettes, palette entry format is A8R8G8B8,
+                alpha is stored in peFlags and may be used by the app if D3DPTEXTURECAPS_ALPHAPALETTE device
+                capability flag is present (wine does advertise this capability) */
+            for (i = 0; i < 256; i++) {
+                table[i][0] = device->palettes[device->currentPalette][i].peRed;
+                table[i][1] = device->palettes[device->currentPalette][i].peGreen;
+                table[i][2] = device->palettes[device->currentPalette][i].peBlue;
+                table[i][3] = device->palettes[device->currentPalette][i].peFlags;
+            }
         }
     } else {
         TRACE("Using surface palette %p\n", pal);
@@ -3242,7 +3246,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
         /* Blit from offscreen surface to render target */
         float glTexCoord[4];
         DWORD oldCKeyFlags = Src->CKeyFlags;
-        WINEDDCOLORKEY oldBltCKey = This->SrcBltCKey;
+        WINEDDCOLORKEY oldBltCKey = Src->SrcBltCKey;
         RECT SourceRectangle;
         BOOL paletteOverride = FALSE;
 
@@ -3290,7 +3294,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
         } else if(Flags & WINEDDBLT_KEYSRCOVERRIDE) {
             /* Use color key from DDBltFx */
             Src->CKeyFlags |= WINEDDSD_CKSRCBLT;
-            This->SrcBltCKey = DDBltFx->ddckSrcColorkey;
+            Src->SrcBltCKey = DDBltFx->ddckSrcColorkey;
         } else {
             /* Do not use color key */
             Src->CKeyFlags &= ~WINEDDSD_CKSRCBLT;
@@ -3353,7 +3357,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
              * Which means that the colorkey is one of the palette entries. In other cases pixels that
              * should be masked away have alpha set to 0. */
             if(primary_render_target_is_p8(myDevice))
-                glAlphaFunc(GL_NOTEQUAL, (float)This->SrcBltCKey.dwColorSpaceLowValue / 256.0);
+                glAlphaFunc(GL_NOTEQUAL, (float)Src->SrcBltCKey.dwColorSpaceLowValue / 256.0);
             else
                 glAlphaFunc(GL_NOTEQUAL, 0.0);
             checkGLcall("glAlphaFunc\n");
@@ -3411,7 +3415,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
         }
         /* Restore the color key parameters */
         Src->CKeyFlags = oldCKeyFlags;
-        This->SrcBltCKey = oldBltCKey;
+        Src->SrcBltCKey = oldBltCKey;
 
         /* Clear the palette as the surface didn't have a palette attached, it would confuse GetPalette and other calls */
         if(paletteOverride)

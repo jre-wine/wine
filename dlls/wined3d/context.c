@@ -169,8 +169,10 @@ static int WineD3D_ChoosePixelFormat(IWineD3DDeviceImpl *This, HDC hdc, WINED3DF
             exactDepthMatch = FALSE;
 
         /* In all cases make sure the number of stencil bits matches our requirements
-         * even when we don't need stencil because it could affect performance */
-        if(!(cfgs->stencilSize == stencilBits))
+         * even when we don't need stencil because it could affect performance EXCEPT
+         * on cards which don't offer depth formats without stencil like the i915 drivers
+         * on Linux. */
+        if(stencilBits != cfgs->stencilSize && !(This->adapter->brokenStencil && stencilBits <= cfgs->stencilSize))
             continue;
 
         /* Check multisampling support */
@@ -546,7 +548,8 @@ static void RemoveContextFromArray(IWineD3DDeviceImpl *This, WineD3DContext *con
             ERR("Cannot allocate a new context array, PANIC!!!\n");
         }
         t = 0;
-        for(s = 0; s < This->numContexts; s++) {
+        /* Note that we decreased numContexts a few lines up, so use '<=' instead of '<' */
+        for(s = 0; s <= This->numContexts; s++) {
             if(oldArray[s] == context) continue;
             This->contexts[t] = oldArray[s];
             t++;

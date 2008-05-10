@@ -274,7 +274,7 @@ BOOL validate_service_config(struct service_entry *entry)
 {
     if (entry->config.dwServiceType & SERVICE_WIN32 && (entry->config.lpBinaryPathName == NULL || !entry->config.lpBinaryPathName[0]))
     {
-        WINE_ERR("Service %s is Win32 but have no image path set\n", wine_dbgstr_w(entry->name));
+        WINE_ERR("Service %s is Win32 but has no image path set\n", wine_dbgstr_w(entry->name));
         return FALSE;
     }
 
@@ -296,18 +296,18 @@ BOOL validate_service_config(struct service_entry *entry)
         }
         break;
     default:
-        WINE_ERR("Service %s have unknown service type\n", wine_dbgstr_w(entry->name));
+        WINE_ERR("Service %s has an unknown service type\n", wine_dbgstr_w(entry->name));
         return FALSE;
     }
 
     /* StartType can only be a single value (if several values are mixed the result is probably not what was intended) */
     if (entry->config.dwStartType > SERVICE_DISABLED)
     {
-        WINE_ERR("Service %s have unknown start type\n", wine_dbgstr_w(entry->name));
+        WINE_ERR("Service %s has an unknown start type\n", wine_dbgstr_w(entry->name));
         return FALSE;
     }
 
-    /* SERVICE_BOOT_START and SERVICE_SYSTEM_START or only allowed for driver services */
+    /* SERVICE_BOOT_START and SERVICE_SYSTEM_START are only allowed for driver services */
     if (((entry->config.dwStartType == SERVICE_BOOT_START) || (entry->config.dwStartType == SERVICE_SYSTEM_START)) &&
         ((entry->config.dwServiceType & SERVICE_WIN32_OWN_PROCESS) || (entry->config.dwServiceType & SERVICE_WIN32_SHARE_PROCESS)))
     {
@@ -621,17 +621,17 @@ static DWORD service_wait_for_startup(struct service_entry *service_entry, HANDL
 /******************************************************************************
  * service_send_start_message
  */
-static BOOL service_send_start_message(HANDLE pipe, LPCWSTR *argv, DWORD argc)
+static BOOL service_send_start_message(struct service_entry *service, LPCWSTR *argv, DWORD argc)
 {
     DWORD i, len, count, result;
     service_start_info *ssi;
     LPWSTR p;
     BOOL r;
 
-    WINE_TRACE("%p %p %d\n", pipe, argv, argc);
+    WINE_TRACE("%s %p %d\n", wine_dbgstr_w(service->name), argv, argc);
 
     /* FIXME: this can block so should be done in another thread */
-    r = ConnectNamedPipe(pipe, NULL);
+    r = ConnectNamedPipe(service->control_pipe, NULL);
     if (!r && GetLastError() != ERROR_PIPE_CONNECTED)
     {
         WINE_ERR("pipe connect failed\n");
@@ -639,16 +639,20 @@ static BOOL service_send_start_message(HANDLE pipe, LPCWSTR *argv, DWORD argc)
     }
 
     /* calculate how much space do we need to send the startup info */
-    len = 1;
+    len = strlenW(service->name) + 1;
     for (i=0; i<argc; i++)
         len += strlenW(argv[i])+1;
+    len++;
 
-    ssi = HeapAlloc(GetProcessHeap(),0,FIELD_OFFSET(service_start_info, str[len]));
+    ssi = HeapAlloc(GetProcessHeap(),0,FIELD_OFFSET(service_start_info, data[len]));
     ssi->cmd = WINESERV_STARTINFO;
-    ssi->size = len;
+    ssi->control = 0;
+    ssi->total_size = FIELD_OFFSET(service_start_info, data[len]);
+    ssi->name_size = strlenW(service->name) + 1;
+    strcpyW( ssi->data, service->name );
 
     /* copy service args into a single buffer*/
-    p = &ssi->str[0];
+    p = &ssi->data[ssi->name_size];
     for (i=0; i<argc; i++)
     {
         strcpyW(p, argv[i]);
@@ -656,10 +660,10 @@ static BOOL service_send_start_message(HANDLE pipe, LPCWSTR *argv, DWORD argc)
     }
     *p=0;
 
-    r = WriteFile(pipe, ssi, FIELD_OFFSET(service_start_info, str[len]), &count, NULL);
+    r = WriteFile(service->control_pipe, ssi, ssi->total_size, &count, NULL);
     if (r)
     {
-        r = ReadFile(pipe, &result, sizeof result, &count, NULL);
+        r = ReadFile(service->control_pipe, &result, sizeof result, &count, NULL);
         if (r && result)
         {
             SetLastError(result);
@@ -709,12 +713,9 @@ DWORD service_start(struct service_entry *service, DWORD service_argc, LPCWSTR *
 
     if (err == ERROR_SUCCESS)
     {
-        if (!service_send_start_message(service->control_pipe,
-                service_argv, service_argc))
+        if (!service_send_start_message(service, service_argv, service_argc))
             err = ERROR_SERVICE_REQUEST_TIMEOUT;
     }
-
-    WINE_TRACE("returning %d\n", err);
 
     if (err == ERROR_SUCCESS)
         err = service_wait_for_startup(service, process_handle);
@@ -724,6 +725,8 @@ DWORD service_start(struct service_entry *service, DWORD service_argc, LPCWSTR *
 
     ReleaseMutex(service->control_mutex);
     scmdatabase_unlock_startup(service->db);
+
+    WINE_TRACE("returning %d\n", err);
 
     return err;
 }

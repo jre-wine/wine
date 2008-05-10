@@ -452,9 +452,12 @@ HRESULT create_DataFormat(LPCDIDATAFORMAT asked_format, DataFormat *format)
 		dt[index].size = sizeof(DWORD);
 	    dt[index].offset_in  = -1;
 	    dt[index].offset_out = asked_format->rgodf[j].dwOfs;
-	    dt[index].value = 0;
+            if (asked_format->rgodf[j].dwType & DIDFT_POV)
+                dt[index].value = -1;
+            else
+                dt[index].value = 0;
 	    index++;
-	    
+
 	    same = 0;
 	}
     }
@@ -546,7 +549,7 @@ BOOL DIEnumDevicesCallbackAtoW(LPCDIDEVICEOBJECTINSTANCEA lpddi, LPVOID lpvRef) 
     if (lpddi->dwSize == sizeof(DIDEVICEINSTANCEA)) {
 	/**
 	 * if dwSize < sizeof(DIDEVICEINSTANCEA of DInput version >= 5)
-	 *  force feedback and other newer datas aren't available
+	 *  force feedback and other newer data aren't available
 	 */
 	ddtmp.dwFFMaxForce        = lpddi->dwFFMaxForce;
 	ddtmp.dwFFForceResolution = lpddi->dwFFForceResolution;

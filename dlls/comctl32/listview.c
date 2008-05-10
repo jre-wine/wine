@@ -8506,7 +8506,7 @@ static LRESULT LISTVIEW_KillFocus(LISTVIEW_INFO *infoPtr)
     /* set window focus flag */
     infoPtr->bFocus = FALSE;
 
-    /* invalidate the selected items before reseting focus flag */
+    /* invalidate the selected items before resetting focus flag */
     LISTVIEW_InvalidateSelectedItems(infoPtr);
     
     return 0;
@@ -8972,11 +8972,10 @@ static LRESULT LISTVIEW_NotifyFormat(LISTVIEW_INFO *infoPtr, HWND hwndFrom, INT 
 {
     TRACE("(hwndFrom=%p, nCommand=%d)\n", hwndFrom, nCommand);
 
-    if (nCommand != NF_REQUERY) return 0;
-    
-    infoPtr->notifyFormat = SendMessageW(hwndFrom, WM_NOTIFYFORMAT, (WPARAM)infoPtr->hwndSelf, NF_QUERY);
-    
-    return 0;
+    if (nCommand == NF_REQUERY)
+        infoPtr->notifyFormat = SendMessageW(hwndFrom, WM_NOTIFYFORMAT, (WPARAM)infoPtr->hwndSelf, NF_QUERY);
+
+    return infoPtr->notifyFormat;
 }
 
 /***

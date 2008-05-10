@@ -192,6 +192,8 @@ static VOID WINAPI callback(
             trace("%04x:Callback %p 0x%lx INTERNET_STATUS_HANDLE_CREATED %p %d\n",
                 GetCurrentThreadId(), hInternet, dwContext,
                 *(HINTERNET *)lpvStatusInformation,dwStatusInformationLength);
+            CLEAR_NOTIFIED(INTERNET_STATUS_DETECTING_PROXY);
+            SET_EXPECT(INTERNET_STATUS_DETECTING_PROXY);
             break;
         case INTERNET_STATUS_HANDLE_CLOSING:
             ok(dwStatusInformationLength == sizeof(HINTERNET),
@@ -218,6 +220,8 @@ static VOID WINAPI callback(
                 GetCurrentThreadId(), hInternet, dwContext,
                 (LPCSTR)lpvStatusInformation, dwStatusInformationLength);
             *(LPSTR)lpvStatusInformation = '\0';
+            CLEAR_NOTIFIED(INTERNET_STATUS_DETECTING_PROXY);
+            SET_EXPECT(INTERNET_STATUS_DETECTING_PROXY);
             break;
         case INTERNET_STATUS_INTERMEDIATE_RESPONSE:
             trace("%04x:Callback %p 0x%lx INTERNET_STATUS_INTERMEDIATE_RESPONSE %p %d\n",
@@ -1686,6 +1690,87 @@ static void test_http_connection(void)
     CloseHandle(hThread);
 }
 
+static void test_user_agent_header(void)
+{
+    HINTERNET ses, con, req;
+    DWORD size, err;
+    char buffer[64];
+    BOOL ret;
+
+    ses = InternetOpen("Gizmo5", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    ok(ses != NULL, "InternetOpen failed\n");
+
+    con = InternetConnect(ses, "www.winehq.org", 80, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+    ok(con != NULL, "InternetConnect failed\n");
+
+    req = HttpOpenRequest(con, "GET", "/", "HTTP/1.0", NULL, NULL, 0, 0);
+    ok(req != NULL, "HttpOpenRequest failed\n");
+
+    size = sizeof(buffer);
+    ret = HttpQueryInfo(req, HTTP_QUERY_USER_AGENT | HTTP_QUERY_FLAG_REQUEST_HEADERS, buffer, &size, NULL);
+    err = GetLastError();
+    ok(!ret, "HttpQueryInfo succeeded\n");
+    ok(err == ERROR_HTTP_HEADER_NOT_FOUND, "expected ERROR_HTTP_HEADER_NOT_FOUND, got %u\n", err);
+
+    ret = HttpAddRequestHeaders(req, "User-Agent: Gizmo Project\r\n", ~0UL, HTTP_ADDREQ_FLAG_ADD_IF_NEW);
+    ok(ret, "HttpAddRequestHeaders succeeded\n");
+
+    size = sizeof(buffer);
+    ret = HttpQueryInfo(req, HTTP_QUERY_USER_AGENT | HTTP_QUERY_FLAG_REQUEST_HEADERS, buffer, &size, NULL);
+    err = GetLastError();
+    ok(ret, "HttpQueryInfo failed\n");
+    ok(err == ERROR_HTTP_HEADER_NOT_FOUND, "expected ERROR_HTTP_HEADER_NOT_FOUND, got %u\n", err);
+
+    InternetCloseHandle(req);
+
+    req = HttpOpenRequest(con, "GET", "/", "HTTP/1.0", NULL, NULL, 0, 0);
+    ok(req != NULL, "HttpOpenRequest failed\n");
+
+    size = sizeof(buffer);
+    ret = HttpQueryInfo(req, HTTP_QUERY_ACCEPT | HTTP_QUERY_FLAG_REQUEST_HEADERS, buffer, &size, NULL);
+    err = GetLastError();
+    ok(!ret, "HttpQueryInfo succeeded\n");
+    ok(err == ERROR_HTTP_HEADER_NOT_FOUND, "expected ERROR_HTTP_HEADER_NOT_FOUND, got %u\n", err);
+
+    ret = HttpAddRequestHeaders(req, "Accept: audio/*, image/*, text/*\r\nUser-Agent: Gizmo Project\r\n", ~0UL, HTTP_ADDREQ_FLAG_ADD_IF_NEW);
+    ok(ret, "HttpAddRequestHeaders failed\n");
+
+    buffer[0] = 0;
+    size = sizeof(buffer);
+    ret = HttpQueryInfo(req, HTTP_QUERY_ACCEPT | HTTP_QUERY_FLAG_REQUEST_HEADERS, buffer, &size, NULL);
+    ok(ret, "HttpQueryInfo failed: %u\n", GetLastError());
+    ok(!strcmp(buffer, "audio/*, image/*, text/*"), "got '%s' expected 'audio/*, image/*, text/*'\n", buffer);
+
+    InternetCloseHandle(req);
+    InternetCloseHandle(con);
+    InternetCloseHandle(ses);
+}
+
+static void test_bogus_accept_types_array(void)
+{
+    HINTERNET ses, con, req;
+    static const char *types[] = { (const char *)6240, "*/*", "%p", "", "*/*", NULL };
+    DWORD size;
+    char buffer[32];
+    BOOL ret;
+
+    ses = InternetOpen("MERONG(0.9/;p)", INTERNET_OPEN_TYPE_DIRECT, "", "", 0);
+    con = InternetConnect(ses, "www.winehq.org", 80, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+    req = HttpOpenRequest(con, "POST", "/post/post_action.php", "HTTP/1.0", "", types, INTERNET_FLAG_FORMS_SUBMIT, 0);
+
+    ok(req != NULL, "HttpOpenRequest failed: %u\n", GetLastError());
+
+    buffer[0] = 0;
+    size = sizeof(buffer);
+    ret = HttpQueryInfo(req, HTTP_QUERY_ACCEPT | HTTP_QUERY_FLAG_REQUEST_HEADERS, buffer, &size, NULL);
+    ok(ret, "HttpQueryInfo failed: %u\n", GetLastError());
+    ok(!strcmp(buffer, "*/*, %p, */*"), "got '%s' expected '*/*, %%p, */*'\n", buffer);
+
+    InternetCloseHandle(req);
+    InternetCloseHandle(con);
+    InternetCloseHandle(ses);
+}
+
 #define STATUS_STRING(status) \
     memcpy(status_string[status], #status, sizeof(CHAR) * \
            (strlen(#status) < MAX_STATUS_NAME ? \
@@ -1711,6 +1796,7 @@ static void init_status_tests(void)
     STATUS_STRING(INTERNET_STATUS_CONNECTION_CLOSED);
     STATUS_STRING(INTERNET_STATUS_HANDLE_CREATED);
     STATUS_STRING(INTERNET_STATUS_HANDLE_CLOSING);
+    STATUS_STRING(INTERNET_STATUS_DETECTING_PROXY);
     STATUS_STRING(INTERNET_STATUS_REQUEST_COMPLETE);
     STATUS_STRING(INTERNET_STATUS_REDIRECT);
     STATUS_STRING(INTERNET_STATUS_INTERMEDIATE_RESPONSE);
@@ -1759,4 +1845,6 @@ START_TEST(http)
     HttpSendRequestEx_test();
     HttpHeaders_test();
     test_http_connection();
+    test_user_agent_header();
+    test_bogus_accept_types_array();
 }

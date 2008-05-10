@@ -433,7 +433,7 @@ static NTSTATUS get_io_timeouts( HANDLE handle, enum server_fd_type type, ULONG 
                         timeouts->total += count * st.ReadTotalTimeoutMultiplier;
                 }
                 else if (st.ReadIntervalTimeout == MAXDWORD)
-                    timeouts->interval = 0;
+                    timeouts->interval = timeouts->total = 0;
             }
             else  /* write */
             {
@@ -599,10 +599,22 @@ NTSTATUS WINAPI NtReadFile(HANDLE hFile, HANDLE hEvent,
             if (!result || total == length)
             {
                 if (total)
+                {
                     status = STATUS_SUCCESS;
-                else
-                    status = (type == FD_TYPE_FILE || type == FD_TYPE_CHAR) ? STATUS_END_OF_FILE : STATUS_PIPE_BROKEN;
-                goto done;
+                    goto done;
+                }
+                switch (type)
+                {
+                case FD_TYPE_FILE:
+                case FD_TYPE_CHAR:
+                    status = STATUS_END_OF_FILE;
+                    goto done;
+                case FD_TYPE_SERIAL:
+                    break;
+                default:
+                    status = STATUS_PIPE_BROKEN;
+                    goto done;
+                }
             }
         }
         else

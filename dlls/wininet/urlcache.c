@@ -1139,12 +1139,6 @@ static DWORD URLCache_HashKey(LPCSTR lpszKey)
     };
     BYTE key[4];
     DWORD i;
-    int subscript[sizeof(key) / sizeof(key[0])];
-
-    subscript[0] = *lpszKey;
-    subscript[1] = (char)(*lpszKey + 1);
-    subscript[2] = (char)(*lpszKey + 2);
-    subscript[3] = (char)(*lpszKey + 3);
 
     for (i = 0; i < sizeof(key) / sizeof(key[0]); i++)
         key[i] = lookupTable[i];
@@ -3133,7 +3127,7 @@ BOOL WINAPI FindCloseUrlCache(HANDLE hEnumHandle)
 
     TRACE("(%p)\n", hEnumHandle);
 
-    if (pEntryHandle->dwMagic != URLCACHE_FIND_ENTRY_HANDLE_MAGIC)
+    if (!pEntryHandle || pEntryHandle->dwMagic != URLCACHE_FIND_ENTRY_HANDLE_MAGIC)
     {
         SetLastError(ERROR_INVALID_HANDLE);
         return FALSE;

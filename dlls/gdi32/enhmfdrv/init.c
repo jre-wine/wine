@@ -114,7 +114,7 @@ static const DC_FUNCTIONS EMFDRV_Funcs =
     EMFDRV_SelectBrush,              /* pSelectBrush */
     EMFDRV_SelectClipPath,           /* pSelectClipPath */
     EMFDRV_SelectFont,               /* pSelectFont */
-    NULL,                            /* pSelectPalette */
+    EMFDRV_SelectPalette,            /* pSelectPalette */
     EMFDRV_SelectPen,                /* pSelectPen */
     EMFDRV_SetArcDirection,          /* pSetArcDirection */
     NULL,                            /* pSetBitmapBits */
@@ -457,7 +457,7 @@ HENHMETAFILE WINAPI CloseEnhMetaFile(HDC hdc) /* [in] metafile DC */
     emr.emr.iType = EMR_EOF;
     emr.emr.nSize = sizeof(emr);
     emr.nPalEntries = 0;
-    emr.offPalEntries = 0;
+    emr.offPalEntries = FIELD_OFFSET(EMREOF, nSizeLast);
     emr.nSizeLast = emr.emr.nSize;
     EMFDRV_WriteRecord( dc->physDev, &emr.emr );
 
