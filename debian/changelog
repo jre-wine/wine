@@ -1,8 +1,20 @@
-wine (1.0-rc1-1) UNRELEASED; urgency=low
+wine (1.0-rc1-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.0-rc1, released May 9, 2008.
+    - Bug fixes only, we are in code freeze.
+  * Made the pkg-wine-party mailing list the official maintainer of the
+    Wine packages, and myself a mere uploader.
+  * Moved libwine's Recommends on libwine-print and libwine-gl to a
+    Suggests in wine-bin instead, since I've gotten reports from people
+    not desiring of either component.
+  * Fixed watch file for Wine "rc" release versions.
+  * Reverted patch to mark stack executable. It hasn't been doing
+    anything for a while (the functional part of it probably got lost in
+    a merge conflict), and nobody has complained, so it's probably not
+    needed anymore.
+  * Did some fixes to the debian/maint/* scripts.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sat, 10 May 2008 09:35:12 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 10 May 2008 10:14:53 +0200
 
 wine (0.9.61-2) unstable; urgency=low
 
