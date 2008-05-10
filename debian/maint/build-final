@@ -3,7 +3,7 @@ set -e
 rm -f debian/amd64.tar.lzma.uu
 version=`dpkg-parsechangelog|sed -n 's/Version: \(.*\)/\1/p'`
 # see if the version in the changelog is tagged (already built)
-obj_type=`git-cat-file -t "wine-$version" 2>/dev/null`
+obj_type="`git-cat-file -t "wine-$version" 2>/dev/null`" || true
 if [ -n "$obj_type" ]
 then
   # it is, so only grab changes since then
