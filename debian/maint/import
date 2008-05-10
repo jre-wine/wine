@@ -11,7 +11,12 @@ origfilename="$3"
 # dereference symlink, we'll stash the original filename into pristine-tar
 # (currently, debian does not allow .tar.bz2 source packages anyway, so this
 # reserves the .orig.tar.* names for what's actually uploaded to Debian)
-filename=`find "$origfilename" -printf "%h/%l"`
+if [ -L "$origfilename" ]
+then
+  filename="`find "$origfilename" -printf "%h/%l"`"
+else
+  filename="$origfilename"
+fi
 
 # craft the .orig.tar.gz for the Debian source package
 debfilename="`dirname "$origfilename"`/wine_$upstream_version.orig.tar.gz"
