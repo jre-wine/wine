@@ -20,10 +20,10 @@ DEB_HOST_GNU_CPU	?= $(shell dpkg-architecture -qDEB_HOST_GNU_CPU)
 DEBIAN_VERSION := $(shell cat /etc/debian_version)
 VERSION := $(lastword $(shell dpkg-parsechangelog|grep "^Version: "))
 
-DEBIAN_SID := $(findstring sid,$(DEBIAN_VERSION))
+#DEBIAN_SID := $(findstring sid,$(DEBIAN_VERSION))
 
-#ifneq (,$(DEBIAN_SID))
-## delete amd64.tar.lzma.uu if we're on testing/unstable.
+#ifeq (,$(findstring etch,$(DEBIAN_VERSION)))
+## delete amd64.tar.lzma.uu if we're not on etch.
 #AMD64_PACK = false
 #endif
 
