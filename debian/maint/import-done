@@ -11,10 +11,10 @@ dch -v "$upstream_version-1" --distribution UNRELEASED --preserve \
  "UNRELEASED"
 git add debian/changelog
 # Amend the merge commit message
-if [ -f debian/announce.tmp ]
+if [ -f announce.tmp ]
 then
-  git commit --amend -F debian/announce.tmp
-  rm debian/announce.tmp
+  git commit --amend -F announce.tmp
+  rm announce.tmp
 else
   git commit --amend
 fi

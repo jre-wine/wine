@@ -39,8 +39,8 @@ git pull winehq tag "$upstream_tag"
 # format my verbose "New upstream release" messages, including ANNOUNCE file
 tag_time=`git-cat-file tag "$upstream_tag"|sed -n 's/tagger .*<.*> \([0-9]*\) .*/\1/p'`
 release_date=`date -u -d "@$tag_time" +"%b %-d, %Y"`
-echo "New upstream release $upstream_version, released $release_date." > debian/announce.tmp
-sed -n 's/^  - \(.*\)/- \1/p' ANNOUNCE >> debian/announce.tmp
+echo "New upstream release $upstream_version, released $release_date." > announce.tmp
+sed -n 's/^  - \(.*\)/- \1/p' ANNOUNCE >> announce.tmp
 
 # load original .tar.bz2 into pristine-tar
 git checkout master
