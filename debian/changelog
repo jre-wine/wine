@@ -1,8 +1,8 @@
 wine (1.0-rc1-2) unstable; urgency=low
 
-  * 
+  * Build-Depends and Depends on ia32-libs (>= 2.5).
 
- -- Arthur Loiret <arthur.loiret@gmail.com>  Tue, 13 May 2008 00:46:22 +0000
+ -- Arthur Loiret <arthur.loiret@gmail.com>  Tue, 13 May 2008 00:49:20 +0000
 
 wine (1.0-rc1-1) unstable; urgency=low
 
