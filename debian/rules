@@ -157,7 +157,7 @@ else
 	mv build64 /tmp || true
 endif
 
-clean: $(patsubst build%,clean-arch%,$(BUILDS))
+clean: clean-arch32 clean-arch64
 	dh_testdir
 	dh_testroot
 	rm -f install-arch-stamp build-indep-stamp
