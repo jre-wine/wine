@@ -115,6 +115,7 @@ HKCR,.tiff,"Content Type",2,"image/tiff"
 HKCR,.txt,,2,"txtfile"
 HKCR,.wri,,2,"wrifile"
 HKCR,.wav,"Content Type",2,"audio/wav"
+HKCR,.xml,,2,"xmlfile"
 HKCR,.xml,"Content Type",2,"text/xml"
 HKCR,.xsl,"Content Type",2,"text/xsl"
 HKCR,chm.file\shell\open\command,,2,"%11%\hh.exe %1"
@@ -123,7 +124,7 @@ HKCR,exefile\shell\open\command,,2,"""%1"" %*"
 HKCR,folder\shell\open\ddeexec,,2,"[ViewFolder("%l", %I, %S)]"
 HKCR,folder\shell\open\ddeexec,"NoActivateHandler",2,""
 HKCR,folder\shell\open\ddeexec\application,,2,"Folders"
-HKCR,hlpfile\shell\open\command,,2,"%10%\winhelp.exe %1"
+HKCR,hlpfile\shell\open\command,,2,"%11%\winhlp32.exe %1"
 HKCR,htmlfile\shell\open\command,,2,"%11%\winebrowser.exe -nohome"
 HKCR,htmlfile\shell\open\ddeexec,,2,"""%1"",,-1,0,,,,"
 HKCR,htmlfile\shell\open\ddeexec,"NoActivateHandler",2,""
@@ -148,6 +149,11 @@ HKCR,txtfile\shell\open\command,,2,"%11%\notepad.exe %1"
 HKCR,txtfile\shell\print\command,,2,"%11%\notepad.exe /p %1"
 HKCR,wrifile\shell\open\command,,2,"%11%\wordpad.exe %1"
 HKCR,wrifile\shell\print\command,,2,"%11%\wordpad.exe /p %1"
+HKCR,xmlfile\shell\open\command,,2,"%11%\winebrowser.exe -nohome"
+HKCR,xmlfile\shell\open\ddeexec,,2,"""%1"",,-1,0,,,,"
+HKCR,xmlfile\shell\open\ddeexec,"NoActivateHandler",2,""
+HKCR,xmlfile\shell\open\ddeexec\Application,,2,"IExplore"
+HKCR,xmlfile\shell\open\ddeexec\Topic,,2,"WWW_OpenURL"
 HKCR,http\shell\open\command,,2,"%11%\winebrowser.exe -nohome"
 HKCR,http\shell\open\ddeexec,,2,"""%1"",,-1,0,,,,"
 HKCR,http\shell\open\ddeexec,"NoActivateHandler",2,""
@@ -2225,6 +2231,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 10,,regedit.exe
 10,,twain_32.dll
 10,,winhelp.exe
+10,,winhlp32.exe
 10,command,start.exe
 11,,actxprxy.dll
 11,,advapi32.dll
@@ -2275,6 +2282,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,rsaenh.dll
 11,,rundll32.exe
 11,,schannel.dll
+11,,sensapi.dll
 11,,setupapi.dll
 11,,shdocvw.dll
 11,,shell32.dll
@@ -2284,6 +2292,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,user32.dll
 11,,version.dll
 11,,winebrowser.exe
+11,,winhlp32.exe
 11,,wininet.dll
 11,,winmm.dll
 11,,winspool.drv

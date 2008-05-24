@@ -394,7 +394,7 @@ static inline BOOL is_basic_auth_value( LPCWSTR pszAuthValue )
 {
     static const WCHAR szBasic[] = {'B','a','s','i','c'}; /* Note: not nul-terminated */
     return !strncmpiW(pszAuthValue, szBasic, ARRAYSIZE(szBasic)) &&
-        ((pszAuthValue[ARRAYSIZE(szBasic)] != ' ') || !pszAuthValue[ARRAYSIZE(szBasic)]);
+        ((pszAuthValue[ARRAYSIZE(szBasic)] == ' ') || !pszAuthValue[ARRAYSIZE(szBasic)]);
 }
 
 static BOOL HTTP_DoAuthorization( LPWININETHTTPREQW lpwhr, LPCWSTR pszAuthValue,
@@ -1201,7 +1201,7 @@ static UINT HTTP_DecodeBase64( LPCWSTR base64, LPSTR bin )
 }
 
 /***********************************************************************
- *  HTTP_InsertAuthorizationForHeader
+ *  HTTP_InsertAuthorization
  *
  *   Insert or delete the authorization field in the request header.
  */
@@ -1263,14 +1263,18 @@ static WCHAR *HTTP_BuildProxyRequestUrl(WININETHTTPREQW *req)
     {
         static const WCHAR slash[] = { '/',0 };
         static const WCHAR format[] = { 'h','t','t','p',':','/','/','%','s',':','%','d',0 };
+        static const WCHAR formatSSL[] = { 'h','t','t','p','s',':','/','/','%','s',':','%','d',0 };
         WININETHTTPSESSIONW *session = req->lpHttpSession;
 
-        size = 15; /* "http://" + sizeof(port#) + ":/\0" */
+        size = 16; /* "https://" + sizeof(port#) + ":/\0" */
         size += strlenW( session->lpszHostName ) + strlenW( req->lpszPath );
 
-        if (!(url = HeapAlloc( GetProcessHeap(), 0, size * sizeof(WCHAR) ))) return FALSE;
+        if (!(url = HeapAlloc( GetProcessHeap(), 0, size * sizeof(WCHAR) ))) return NULL;
 
-        sprintfW( url, format, session->lpszHostName, session->nHostPort );
+        if (req->hdr.dwFlags & INTERNET_FLAG_SECURE)
+            sprintfW( url, formatSSL, session->lpszHostName, session->nHostPort );
+        else
+            sprintfW( url, format, session->lpszHostName, session->nHostPort );
         if (req->lpszPath[0] != '/') strcatW( url, slash );
         strcatW( url, req->lpszPath );
     }
@@ -2197,27 +2201,26 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
         {
             LPWSTR headers;
             DWORD len;
-            BOOL ret;
+            BOOL ret = FALSE;
 
             if (request_only)
                 headers = HTTP_BuildHeaderRequestString(lpwhr, lpwhr->lpszVerb, lpwhr->lpszPath, lpwhr->lpszVersion);
             else
                 headers = lpwhr->lpszRawHeaders;
 
-	    len = strlenW(headers);
-            if (len + 1 > *lpdwBufferLength/sizeof(WCHAR))
+            len = (strlenW(headers) + 1) * sizeof(WCHAR);
+            if (len > *lpdwBufferLength)
             {
-                *lpdwBufferLength = (len + 1) * sizeof(WCHAR);
                 INTERNET_SetLastError(ERROR_INSUFFICIENT_BUFFER);
                 ret = FALSE;
-            } else
+            }
+            else if (lpBuffer)
             {
-                memcpy(lpBuffer, headers, (len+1)*sizeof(WCHAR));
-                *lpdwBufferLength = len * sizeof(WCHAR);
-
-                TRACE("returning data: %s\n", debugstr_wn((WCHAR*)lpBuffer, len));
+                memcpy(lpBuffer, headers, len);
+                TRACE("returning data: %s\n", debugstr_wn(lpBuffer, len / sizeof(WCHAR)));
                 ret = TRUE;
             }
+            *lpdwBufferLength = len;
 
             if (request_only)
                 HeapFree(GetProcessHeap(), 0, headers);
@@ -3171,7 +3174,7 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
     if (dwContentLength || !strcmpW(lpwhr->lpszVerb, szPost))
     {
         sprintfW(contentLengthStr, szContentLength, dwContentLength);
-        HTTP_HttpAddRequestHeadersW(lpwhr, contentLengthStr, -1L, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDHDR_FLAG_REPLACE);
+        HTTP_HttpAddRequestHeadersW(lpwhr, contentLengthStr, -1L, HTTP_ADDREQ_FLAG_ADD_IF_NEW);
     }
     if (lpwhr->lpHttpSession->lpAppInfo->lpszAgent)
     {
@@ -3397,7 +3400,7 @@ lend:
 
     /* TODO: send notification for P3P header */
 
-    iar.dwResult = (DWORD)bSuccess;
+    iar.dwResult = (DWORD_PTR)lpwhr->hdr.hInternet;
     iar.dwError = bSuccess ? ERROR_SUCCESS : INTERNET_GetLastError();
 
     INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,

@@ -215,8 +215,10 @@ LONG CALLBACK rtlraiseexception_vectored_handler(EXCEPTION_POINTERS *ExceptionIn
      */
     if(rec->ExceptionCode == EXCEPTION_BREAKPOINT)
     {
-        ok(context->Eip == (DWORD)code_mem + 0xa, "Eip at %x instead of %x\n",
-           context->Eip, (DWORD)code_mem + 0xa);
+        ok(context->Eip == (DWORD)code_mem + 0xa ||
+           context->Eip == (DWORD)code_mem + 0xb, /* win2k3 */
+           "Eip at %x instead of %x or %x\n", context->Eip,
+           (DWORD)code_mem + 0xa, (DWORD)code_mem + 0xb);
     }
     else
     {
@@ -245,8 +247,10 @@ static DWORD rtlraiseexception_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTR
      */
     if(rec->ExceptionCode == EXCEPTION_BREAKPOINT)
     {
-        ok(context->Eip == (DWORD)code_mem + 0xa, "Eip at %x instead of %x\n",
-           context->Eip, (DWORD)code_mem + 0xa);
+        ok(context->Eip == (DWORD)code_mem + 0xa ||
+           context->Eip == (DWORD)code_mem + 0xb, /* win2k3 */
+           "Eip at %x instead of %x or %x\n", context->Eip,
+           (DWORD)code_mem + 0xa, (DWORD)code_mem + 0xb);
     }
     else
     {
@@ -499,6 +503,7 @@ static DWORD direction_flag_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATI
     ok( context->EFlags & 0x400, "context eflags has DF bit cleared\n" );
     got_exception++;
     context->Eip++;  /* skip cli */
+    context->EFlags &= ~0x400;  /* make sure it is cleared on return */
     return ExceptionContinueExecution;
 }
 

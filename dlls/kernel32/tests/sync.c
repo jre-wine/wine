@@ -148,7 +148,30 @@ static void test_mutex(void)
     todo_wine ok(!ret && (GetLastError() == ERROR_NOT_OWNER),
         "ReleaseMutex should have failed with ERROR_NOT_OWNER instead of %d\n", GetLastError());
 
+    /* test case sensitivity */
+
+    SetLastError(0xdeadbeef);
+    hOpened = OpenMutex(READ_CONTROL, FALSE, "WINETESTMUTEX");
+    ok(!hOpened, "OpenMutex succeeded\n");
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND, "wrong error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    hOpened = OpenMutex(READ_CONTROL, FALSE, "winetestmutex");
+    ok(!hOpened, "OpenMutex succeeded\n");
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND, "wrong error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    hOpened = CreateMutex(NULL, FALSE, "WineTestMutex");
+    ok(hOpened != NULL, "CreateMutex failed with error %d\n", GetLastError());
+    ok(GetLastError() == ERROR_ALREADY_EXISTS, "wrong error %u\n", GetLastError());
     CloseHandle(hOpened);
+
+    SetLastError(0xdeadbeef);
+    hOpened = CreateMutex(NULL, FALSE, "WINETESTMUTEX");
+    ok(hOpened != NULL, "CreateMutex failed with error %d\n", GetLastError());
+    ok(GetLastError() == 0, "wrong error %u\n", GetLastError());
+    CloseHandle(hOpened);
+
     CloseHandle(hCreated);
 }
 
@@ -245,9 +268,9 @@ static void test_slist(void)
     ok(((struct item*)entry->Next)->value == 1, "item 1 not at the back of list\n");
 }
 
-static void test_event_security(void)
+static void test_event(void)
 {
-    HANDLE handle;
+    HANDLE handle, handle2;
     SECURITY_ATTRIBUTES sa;
     SECURITY_DESCRIPTOR sd;
     ACL acl;
@@ -280,6 +303,109 @@ static void test_event_security(void)
     handle = CreateEventA(&sa, FALSE, FALSE, __FILE__ ": Test Event");
     ok(handle != NULL, "CreateEventW with blank sd failed with error %d\n", GetLastError());
     CloseHandle(handle);
+
+    /* test case sensitivity */
+
+    SetLastError(0xdeadbeef);
+    handle = CreateEventA(NULL, FALSE, FALSE, __FILE__ ": Test Event");
+    ok( handle != NULL, "CreateEvent failed with error %u\n", GetLastError());
+    ok( GetLastError() == 0, "wrong error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    handle2 = CreateEventA(NULL, FALSE, FALSE, __FILE__ ": Test Event");
+    ok( handle2 != NULL, "CreateEvent failed with error %d\n", GetLastError());
+    ok( GetLastError() == ERROR_ALREADY_EXISTS, "wrong error %u\n", GetLastError());
+    CloseHandle( handle2 );
+
+    SetLastError(0xdeadbeef);
+    handle2 = CreateEventA(NULL, FALSE, FALSE, __FILE__ ": TEST EVENT");
+    ok( handle2 != NULL, "CreateEvent failed with error %d\n", GetLastError());
+    ok( GetLastError() == 0, "wrong error %u\n", GetLastError());
+    CloseHandle( handle2 );
+
+    SetLastError(0xdeadbeef);
+    handle2 = OpenEventA( EVENT_ALL_ACCESS, FALSE, __FILE__ ": Test Event");
+    ok( handle2 != NULL, "OpenEvent failed with error %d\n", GetLastError());
+    CloseHandle( handle2 );
+
+    SetLastError(0xdeadbeef);
+    handle2 = OpenEventA( EVENT_ALL_ACCESS, FALSE, __FILE__ ": TEST EVENT");
+    ok( !handle2, "OpenEvent succeeded\n");
+    ok( GetLastError() == ERROR_FILE_NOT_FOUND, "wrong error %u\n", GetLastError());
+
+    CloseHandle( handle );
+}
+
+static void test_semaphore(void)
+{
+    HANDLE handle, handle2;
+
+    /* test case sensitivity */
+
+    SetLastError(0xdeadbeef);
+    handle = CreateSemaphoreA(NULL, 0, 1, __FILE__ ": Test Semaphore");
+    ok(handle != NULL, "CreateSemaphore failed with error %u\n", GetLastError());
+    ok(GetLastError() == 0, "wrong error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    handle2 = CreateSemaphoreA(NULL, 0, 1, __FILE__ ": Test Semaphore");
+    ok( handle2 != NULL, "CreateSemaphore failed with error %d\n", GetLastError());
+    ok( GetLastError() == ERROR_ALREADY_EXISTS, "wrong error %u\n", GetLastError());
+    CloseHandle( handle2 );
+
+    SetLastError(0xdeadbeef);
+    handle2 = CreateSemaphoreA(NULL, 0, 1, __FILE__ ": TEST SEMAPHORE");
+    ok( handle2 != NULL, "CreateSemaphore failed with error %d\n", GetLastError());
+    ok( GetLastError() == 0, "wrong error %u\n", GetLastError());
+    CloseHandle( handle2 );
+
+    SetLastError(0xdeadbeef);
+    handle2 = OpenSemaphoreA( SEMAPHORE_ALL_ACCESS, FALSE, __FILE__ ": Test Semaphore");
+    ok( handle2 != NULL, "OpenSemaphore failed with error %d\n", GetLastError());
+    CloseHandle( handle2 );
+
+    SetLastError(0xdeadbeef);
+    handle2 = OpenSemaphoreA( SEMAPHORE_ALL_ACCESS, FALSE, __FILE__ ": TEST SEMAPHORE");
+    ok( !handle2, "OpenSemaphore succeeded\n");
+    ok( GetLastError() == ERROR_FILE_NOT_FOUND, "wrong error %u\n", GetLastError());
+
+    CloseHandle( handle );
+}
+
+static void test_waitable_timer(void)
+{
+    HANDLE handle, handle2;
+
+    /* test case sensitivity */
+
+    SetLastError(0xdeadbeef);
+    handle = CreateWaitableTimerA(NULL, FALSE, __FILE__ ": Test WaitableTimer");
+    ok(handle != NULL, "CreateWaitableTimer failed with error %u\n", GetLastError());
+    ok(GetLastError() == 0, "wrong error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    handle2 = CreateWaitableTimerA(NULL, FALSE, __FILE__ ": Test WaitableTimer");
+    ok( handle2 != NULL, "CreateWaitableTimer failed with error %d\n", GetLastError());
+    ok( GetLastError() == ERROR_ALREADY_EXISTS, "wrong error %u\n", GetLastError());
+    CloseHandle( handle2 );
+
+    SetLastError(0xdeadbeef);
+    handle2 = CreateWaitableTimerA(NULL, FALSE, __FILE__ ": TEST WAITABLETIMER");
+    ok( handle2 != NULL, "CreateWaitableTimer failed with error %d\n", GetLastError());
+    ok( GetLastError() == 0, "wrong error %u\n", GetLastError());
+    CloseHandle( handle2 );
+
+    SetLastError(0xdeadbeef);
+    handle2 = OpenWaitableTimerA( TIMER_ALL_ACCESS, FALSE, __FILE__ ": Test WaitableTimer");
+    ok( handle2 != NULL, "OpenWaitableTimer failed with error %d\n", GetLastError());
+    CloseHandle( handle2 );
+
+    SetLastError(0xdeadbeef);
+    handle2 = OpenWaitableTimerA( TIMER_ALL_ACCESS, FALSE, __FILE__ ": TEST WAITABLETIMER");
+    ok( !handle2, "OpenWaitableTimer succeeded\n");
+    ok( GetLastError() == ERROR_FILE_NOT_FOUND, "wrong error %u\n", GetLastError());
+
+    CloseHandle( handle );
 }
 
 static HANDLE sem = 0;
@@ -396,6 +522,8 @@ START_TEST(sync)
     test_signalandwait();
     test_mutex();
     test_slist();
-    test_event_security();
+    test_event();
+    test_semaphore();
+    test_waitable_timer();
     test_iocp_callback();
 }

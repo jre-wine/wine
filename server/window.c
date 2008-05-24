@@ -876,6 +876,16 @@ static inline int intersect_rect( rectangle_t *dst, const rectangle_t *src1, con
 }
 
 
+/* offset the coordinates of a rectangle */
+static inline void offset_rect( rectangle_t *rect, int offset_x, int offset_y )
+{
+    rect->left   += offset_x;
+    rect->top    += offset_y;
+    rect->right  += offset_x;
+    rect->bottom += offset_y;
+}
+
+
 /* set the region to the client rect clipped by the window rect, in parent-relative coordinates */
 static void set_region_client_rect( struct region *region, struct window *win )
 {
@@ -990,27 +1000,63 @@ struct window_class* get_window_class( user_handle_t window )
     return win->class;
 }
 
+/* determine the window visible rectangle, i.e. window or client rect cropped by parent rects */
+/* the returned rectangle is in window coordinates; return 0 if rectangle is empty */
+static int get_window_visible_rect( struct window *win, rectangle_t *rect, int frame )
+{
+    int offset_x = 0, offset_y = 0;
+
+    if (!(win->style & WS_VISIBLE)) return 0;
+
+    *rect = frame ? win->window_rect : win->client_rect;
+    if (!is_desktop_window(win))
+    {
+        offset_x = win->window_rect.left;
+        offset_y = win->window_rect.top;
+    }
+
+    while (win->parent)
+    {
+        win = win->parent;
+        if (!(win->style & WS_VISIBLE) || win->style & WS_MINIMIZE) return 0;
+        if (!is_desktop_window(win))
+        {
+            offset_x += win->client_rect.left;
+            offset_y += win->client_rect.top;
+            offset_rect( rect, win->client_rect.left, win->client_rect.top );
+        }
+        if (!intersect_rect( rect, rect, &win->client_rect )) return 0;
+        if (!intersect_rect( rect, rect, &win->window_rect )) return 0;
+    }
+    offset_rect( rect, -offset_x, -offset_y );
+    return 1;
+}
+
 /* return a copy of the specified region cropped to the window client or frame rectangle, */
 /* and converted from client to window coordinates. Helper for (in)validate_window. */
 static struct region *crop_region_to_win_rect( struct window *win, struct region *region, int frame )
 {
-    struct region *tmp = create_empty_region();
+    rectangle_t rect;
+    struct region *tmp;
 
-    if (!tmp) return NULL;
+    if (!get_window_visible_rect( win, &rect, frame )) return NULL;
+    if (!(tmp = create_empty_region())) return NULL;
+    set_region_rect( tmp, &rect );
 
-    /* get bounding rect in client coords */
-    if (frame) set_region_rect( tmp, &win->window_rect );
-    else set_region_client_rect( tmp, win );
-    if (!is_desktop_window(win))
-        offset_region( tmp, -win->client_rect.left, -win->client_rect.top );
+    if (region)
+    {
+        /* map it to client coords */
+        offset_region( tmp, win->window_rect.left - win->client_rect.left,
+                       win->window_rect.top - win->client_rect.top );
 
-    /* intersect specified region with bounding rect */
-    if (region && !intersect_region( tmp, region, tmp )) goto done;
-    if (is_region_empty( tmp )) goto done;
+        /* intersect specified region with bounding rect */
+        if (!intersect_region( tmp, region, tmp )) goto done;
+        if (is_region_empty( tmp )) goto done;
 
-    /* map it to window coords */
-    offset_region( tmp, win->client_rect.left - win->window_rect.left,
-                   win->client_rect.top - win->window_rect.top );
+        /* map it back to window coords */
+        offset_region( tmp, win->client_rect.left - win->window_rect.left,
+                       win->client_rect.top - win->window_rect.top );
+    }
     return tmp;
 
 done:
@@ -1052,6 +1098,45 @@ static int add_update_region( struct window *win, struct region *region )
     }
     set_update_region( win, region );
     return 1;
+}
+
+
+/* crop the update region of children to the specified rectangle, in client coords */
+static void crop_children_update_region( struct window *win, rectangle_t *rect )
+{
+    struct window *child;
+    struct region *tmp;
+    rectangle_t child_rect;
+
+    LIST_FOR_EACH_ENTRY( child, &win->children, struct window, entry )
+    {
+        if (!(child->style & WS_VISIBLE)) continue;
+        if (!rect)  /* crop everything out */
+        {
+            crop_children_update_region( child, NULL );
+            set_update_region( child, NULL );
+            continue;
+        }
+
+        /* nothing to do if child is completely inside rect */
+        if (child->window_rect.left >= rect->left &&
+            child->window_rect.top >= rect->top &&
+            child->window_rect.right <= rect->right &&
+            child->window_rect.bottom <= rect->bottom) continue;
+
+        /* map to child client coords and crop grand-children */
+        child_rect = *rect;
+        offset_rect( &child_rect, -child->client_rect.left, -child->client_rect.top );
+        crop_children_update_region( child, &child_rect );
+
+        /* now crop the child itself */
+        if (!child->update_region) continue;
+        if (!(tmp = create_empty_region())) continue;
+        set_region_rect( tmp, rect );
+        offset_region( tmp, -child->window_rect.left, -child->window_rect.top );
+        if (intersect_region( tmp, child->update_region, tmp )) set_update_region( child, tmp );
+        else free_region( tmp );
+    }
 }
 
 
@@ -1413,6 +1498,7 @@ static void set_window_pos( struct window *win, struct window *previous,
     struct region *old_vis_rgn = NULL, *exposed_rgn = NULL;
     const rectangle_t old_window_rect = win->window_rect;
     const rectangle_t old_client_rect = win->client_rect;
+    rectangle_t rect;
     int client_changed, frame_changed;
     int visible = (win->style & WS_VISIBLE) || (swp_flags & SWP_SHOWWINDOW);
 
@@ -1461,22 +1547,33 @@ static void set_window_pos( struct window *win, struct window *previous,
 
     /* crop update region to the new window rect */
 
-    if (win->update_region &&
-        (window_rect->right - window_rect->left < old_window_rect.right - old_window_rect.left ||
-         window_rect->bottom - window_rect->top < old_window_rect.bottom - old_window_rect.top))
+    if (win->update_region)
     {
-        struct region *tmp = create_empty_region();
-        if (tmp)
+        if (get_window_visible_rect( win, &rect, 1 ))
         {
-            set_region_rect( tmp, window_rect );
-            if (!is_desktop_window(win))
-                offset_region( tmp, -window_rect->left, -window_rect->top );
-            if (intersect_region( tmp, win->update_region, tmp ))
-                set_update_region( win, tmp );
-            else
-                free_region( tmp );
+            struct region *tmp = create_empty_region();
+            if (tmp)
+            {
+                set_region_rect( tmp, &rect );
+                if (intersect_region( tmp, win->update_region, tmp ))
+                    set_update_region( win, tmp );
+                else
+                    free_region( tmp );
+            }
         }
+        else set_update_region( win, NULL ); /* visible rect is empty */
     }
+
+    /* crop children regions to the new window rect */
+
+    if (get_window_visible_rect( win, &rect, 0 ))
+    {
+        /* map to client coords */
+        offset_rect( &rect, win->window_rect.left - win->client_rect.left,
+                     win->window_rect.top - win->client_rect.top );
+        crop_children_update_region( win, &rect );
+    }
+    else crop_children_update_region( win, NULL );
 
     if (swp_flags & SWP_NOREDRAW) goto done;  /* do not repaint anything */
 

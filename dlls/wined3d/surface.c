@@ -2489,7 +2489,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_SaveSnapshot(IWineD3DSurface *iface, const ch
 /**
  *   Slightly inefficient way to handle multiple dirty rects but it works :)
  */
-extern HRESULT WINAPI IWineD3DSurfaceImpl_AddDirtyRect(IWineD3DSurface *iface, CONST RECT* pDirtyRect) {
+HRESULT WINAPI IWineD3DSurfaceImpl_AddDirtyRect(IWineD3DSurface *iface, CONST RECT* pDirtyRect) {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
     IWineD3DBaseTexture *baseTexture = NULL;
 
@@ -3397,7 +3397,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
         }
 
         /* Flush in case the drawable is used by multiple GL contexts */
-        if(dstSwapchain && (dstSwapchain->num_contexts >= 2))
+        if(dstSwapchain && (This == (IWineD3DSurfaceImpl *) dstSwapchain->frontBuffer || dstSwapchain->num_contexts >= 2))
             glFlush();
 
         glBindTexture(Src->glDescription.target, 0);
@@ -3878,7 +3878,7 @@ static inline void surface_blt_to_drawable(IWineD3DSurfaceImpl *This, const RECT
         rect.bottom = This->currentDesc.Height;
     }
 
-    ActivateContext(device, device->render_targets[0], CTXUSAGE_BLIT);
+    ActivateContext(device, (IWineD3DSurface*)This, CTXUSAGE_BLIT);
     ENTER_GL();
 
     if(This->glDescription.target == GL_TEXTURE_RECTANGLE_ARB) {
@@ -4020,7 +4020,8 @@ static inline void surface_blt_to_drawable(IWineD3DSurfaceImpl *This, const RECT
     hr = IWineD3DSurface_GetContainer((IWineD3DSurface*)This, &IID_IWineD3DSwapChain, (void **) &swapchain);
     if(hr == WINED3D_OK && swapchain) {
         /* Make sure to flush the buffers. This is needed in apps like Red Alert II and Tiberian SUN that use multiple WGL contexts. */
-        if(((IWineD3DSwapChainImpl*)swapchain)->num_contexts >= 2)
+        if(((IWineD3DSwapChainImpl*)swapchain)->frontBuffer == (IWineD3DSurface*)This ||
+           ((IWineD3DSwapChainImpl*)swapchain)->num_contexts >= 2)
             glFlush();
 
         IWineD3DSwapChain_Release(swapchain);

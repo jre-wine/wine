@@ -1452,6 +1452,17 @@ static DWORD CALLBACK server_thread(LPVOID param)
             send(c, page1, sizeof page1-1, 0);
         }
 
+        if (strstr(buffer, "POST /test7"))
+        {
+            if (strstr(buffer, "Content-Length: 100"))
+            {
+                send(c, okmsg, sizeof okmsg-1, 0);
+                send(c, page1, sizeof page1-1, 0);
+            }
+            else
+                send(c, notokmsg, sizeof notokmsg-1, 0);
+        }
+
         if (strstr(buffer, "GET /quit"))
         {
             send(c, okmsg, sizeof okmsg-1, 0);
@@ -1654,6 +1665,23 @@ static void test_header_handling_order(int port)
     ok(status == 200, "request failed with status %u\n", status);
 
     InternetCloseHandle(request);
+
+    request = HttpOpenRequest(connect, "POST", "/test7", NULL, NULL, types, INTERNET_FLAG_KEEP_CONNECTION, 0);
+    ok(request != NULL, "HttpOpenRequest failed\n");
+
+    ret = HttpAddRequestHeaders(request, "Content-Length: 100\r\n", ~0UL, HTTP_ADDREQ_FLAG_ADD_IF_NEW);
+    ok(ret, "HttpAddRequestHeaders failed\n");
+
+    ret = HttpSendRequest(request, connection, ~0UL, NULL, 0);
+    ok(ret, "HttpSendRequest failed\n");
+
+    status = 0;
+    size = sizeof(status);
+    ret = HttpQueryInfo( request, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &size, NULL );
+    ok(ret, "HttpQueryInfo failed\n");
+    ok(status == 200, "request failed with status %u\n", status);
+
+    InternetCloseHandle(request);
     InternetCloseHandle(connect);
     InternetCloseHandle(session);
 }
@@ -1764,10 +1792,73 @@ static void test_bogus_accept_types_array(void)
     size = sizeof(buffer);
     ret = HttpQueryInfo(req, HTTP_QUERY_ACCEPT | HTTP_QUERY_FLAG_REQUEST_HEADERS, buffer, &size, NULL);
     ok(ret, "HttpQueryInfo failed: %u\n", GetLastError());
-    ok(!strcmp(buffer, "*/*, %p, */*"), "got '%s' expected '*/*, %%p, */*'\n", buffer);
+    ok(!strcmp(buffer, ", */*, %p, , */*") || /* IE6 */
+       !strcmp(buffer, "*/*, %p, */*"),
+       "got '%s' expected '*/*, %%p, */*' or ', */*, %%p, , */*'\n", buffer);
 
     InternetCloseHandle(req);
     InternetCloseHandle(con);
+    InternetCloseHandle(ses);
+}
+
+struct context
+{
+    HANDLE event;
+    HINTERNET req;
+};
+
+static void WINAPI cb(HINTERNET handle, DWORD_PTR context, DWORD status, LPVOID info, DWORD size)
+{
+    trace("%p 0x%08lx %u %p 0x%08x\n", handle, context, status, info, size);
+
+    if (status == INTERNET_STATUS_REQUEST_COMPLETE)
+    {
+        INTERNET_ASYNC_RESULT *result = info;
+        struct context *ctx = (struct context *)context;
+
+        trace("request handle: 0x%08lx\n", result->dwResult);
+
+        ctx->req = (HINTERNET)result->dwResult;
+        SetEvent(ctx->event);
+    }
+}
+
+static void test_open_url_async(void)
+{
+    BOOL ret;
+    HINTERNET ses, req;
+    DWORD size;
+    struct context ctx;
+    ULONG type;
+
+    ctx.req = NULL;
+    ctx.event = CreateEvent(NULL, TRUE, FALSE, "Z:_home_hans_jaman-installer.exe_ev1");
+
+    ses = InternetOpen("AdvancedInstaller", 0, NULL, NULL, INTERNET_FLAG_ASYNC);
+    ok(ses != NULL, "InternetOpen failed\n");
+
+    pInternetSetStatusCallbackA(ses, cb);
+    ResetEvent(ctx.event);
+
+    req = InternetOpenUrl(ses, "http://www.winehq.org", NULL, 0, 0, (DWORD_PTR)&ctx);
+    ok(!req && GetLastError() == ERROR_IO_PENDING, "InternetOpenUrl failed\n");
+
+    WaitForSingleObject(ctx.event, INFINITE);
+
+    type = 0;
+    size = sizeof(type);
+    ret = InternetQueryOption(ctx.req, INTERNET_OPTION_HANDLE_TYPE, &type, &size);
+    ok(ret, "InternetQueryOption failed: %u\n", GetLastError());
+    ok(type == INTERNET_HANDLE_TYPE_HTTP_REQUEST,
+       "expected INTERNET_HANDLE_TYPE_HTTP_REQUEST, got %u\n", type);
+
+    size = 0;
+    ret = HttpQueryInfo(ctx.req, HTTP_QUERY_RAW_HEADERS_CRLF, NULL, &size, NULL);
+    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "HttpQueryInfo failed\n");
+    ok(size > 0, "expected size > 0\n");
+
+    CloseHandle(ctx.event);
+    InternetCloseHandle(ctx.req);
     InternetCloseHandle(ses);
 }
 
@@ -1829,6 +1920,7 @@ START_TEST(http)
         InternetReadFile_test(INTERNET_FLAG_ASYNC);
         InternetReadFile_test(0);
         InternetReadFileExA_test(INTERNET_FLAG_ASYNC);
+        test_open_url_async();
     }
     InternetOpenRequest_test();
     test_http_cache();

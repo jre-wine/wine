@@ -121,6 +121,12 @@ static void test_LoadingImages(void)
 
     stat = GdipLoadImageFromFile(0, (GpImage**)0xdeadbeef);
     expect(InvalidParameter, stat);
+
+    stat = GdipLoadImageFromFileICM(0, 0);
+    expect(InvalidParameter, stat);
+
+    stat = GdipLoadImageFromFileICM(0, (GpImage**)0xdeadbeef);
+    expect(InvalidParameter, stat);
 }
 
 static void test_SavingImages(void)
@@ -241,7 +247,7 @@ static void test_LockBits(void)
     GpBitmap *bm;
     GpRect rect;
     BitmapData bd;
-    const REAL WIDTH = 10.0, HEIGHT = 20.0;
+    const INT WIDTH = 10, HEIGHT = 20;
 
     bm = NULL;
     stat = GdipCreateBitmapFromScan0(WIDTH, HEIGHT, 0, PixelFormat24bppRGB, NULL, &bm);
@@ -255,6 +261,17 @@ static void test_LockBits(void)
     /* read-only */
     stat = GdipBitmapLockBits(bm, &rect, ImageLockModeRead, PixelFormat24bppRGB, &bd);
     expect(Ok, stat);
+
+    if (stat == Ok) {
+        stat = GdipBitmapUnlockBits(bm, &bd);
+        expect(Ok, stat);
+    }
+
+    /* read-only, with NULL rect -> whole bitmap lock */
+    stat = GdipBitmapLockBits(bm, NULL, ImageLockModeRead, PixelFormat24bppRGB, &bd);
+    expect(Ok, stat);
+    expect(bd.Width,  WIDTH);
+    expect(bd.Height, HEIGHT);
 
     if (stat == Ok) {
         stat = GdipBitmapUnlockBits(bm, &bd);
@@ -417,6 +434,24 @@ static void test_GdipCreateBitmapFromHBITMAP(void)
     GlobalFree(hbm);
 }
 
+static void test_GdipGetImageFlags(void)
+{
+    GpImage *img;
+    GpStatus stat;
+    UINT flags;
+
+    img = (GpImage*)0xdeadbeef;
+
+    stat = GdipGetImageFlags(NULL, NULL);
+    expect(InvalidParameter, stat);
+
+    stat = GdipGetImageFlags(NULL, &flags);
+    expect(InvalidParameter, stat);
+
+    stat = GdipGetImageFlags(img, NULL);
+    expect(InvalidParameter, stat);
+}
+
 START_TEST(image)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -436,6 +471,7 @@ START_TEST(image)
     test_encoders();
     test_LockBits();
     test_GdipCreateBitmapFromHBITMAP();
+    test_GdipGetImageFlags();
 
     GdiplusShutdown(gdiplusToken);
 }

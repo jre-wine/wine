@@ -797,6 +797,12 @@ GpStatus WINGDIPAPI GdipCreateFromHWND(HWND hwnd, GpGraphics **graphics)
     return Ok;
 }
 
+/* FIXME: no icm handling */
+GpStatus WINGDIPAPI GdipCreateFromHWNDICM(HWND hwnd, GpGraphics **graphics)
+{
+    return GdipCreateFromHWND(hwnd, graphics);
+}
+
 GpStatus WINGDIPAPI GdipCreateMetafileFromEmf(HENHMETAFILE hemf, BOOL delete,
     GpMetafile **metafile)
 {
@@ -2420,4 +2426,26 @@ GpStatus WINGDIPAPI GdipMultiplyWorldTransform(GpGraphics *graphics, GDIPCONST G
         *(graphics->worldtrans) = m;
 
     return ret;
+}
+
+GpStatus WINGDIPAPI GdipGetDC(GpGraphics *graphics, HDC *hdc)
+{
+    FIXME("(%p, %p): stub\n", graphics, hdc);
+
+    *hdc = NULL;
+    return NotImplemented;
+}
+
+GpStatus WINGDIPAPI GdipReleaseDC(GpGraphics *graphics, HDC hdc)
+{
+    FIXME("(%p, %p): stub\n", graphics, hdc);
+
+    return NotImplemented;
+}
+
+GpStatus WINGDIPAPI GdipGetClip(GpGraphics *graphics, GpRegion *region)
+{
+   FIXME("(%p, %p): stub\n", graphics, region);
+
+   return NotImplemented;
 }

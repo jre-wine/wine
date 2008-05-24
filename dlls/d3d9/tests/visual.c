@@ -6367,13 +6367,32 @@ out:
     IDirect3D9_Release(d3d);
 }
 
+/* Return true if color is near the expected value */
+static int color_near(DWORD color, DWORD expected)
+{
+    const BYTE slop = 2;
+
+    BYTE r, g, b;
+    BYTE rx, gx, bx;
+    r = (color & 0x00ff0000) >> 16;
+    g = (color & 0x0000ff00) >>  8;
+    b = (color & 0x000000ff);
+    rx = (expected & 0x00ff0000) >> 16;
+    gx = (expected & 0x0000ff00) >>  8;
+    bx = (expected & 0x000000ff);
+
+    return
+      ((r >= (rx - slop)) && (r <= (rx + slop))) &&
+      ((g >= (gx - slop)) && (g <= (gx + slop))) &&
+      ((b >= (bx - slop)) && (b <= (bx + slop)));
+}
+
 static void shademode_test(IDirect3DDevice9 *device)
 {
     /* Render a quad and try all of the different fixed function shading models. */
     HRESULT hr;
     DWORD color0, color1;
     DWORD color0_gouraud = 0, color1_gouraud = 0;
-    BYTE r, g, b;
     DWORD shademode = D3DSHADE_FLAT;
     DWORD primtype = D3DPT_TRIANGLESTRIP;
     LPVOID data = NULL;
@@ -6469,15 +6488,9 @@ static void shademode_test(IDirect3DDevice9 *device)
                 case D3DSHADE_GOURAUD:
                     /* Should be an interpolated blend */
 
-                    r = (color0 & 0x00ff0000) >> 16;
-                    g = (color0 & 0x0000ff00) >>  8;
-                    b = (color0 & 0x000000ff);
-                    ok(r >= 0x0c && r <= 0x0e && g == 0xca && b >= 0x27 && b <= 0x28,
-                       "GOURAUD shading has color0 %08x, expected 0x000dca28\n", color0);
-                    r = (color1 & 0x00ff0000) >> 16;
-                    g = (color1 & 0x0000ff00) >>  8;
-                    b = (color1 & 0x000000ff);
-                    ok(r >= 0x0c && r <= 0x0d && g >= 0x44 && g <= 0x45 && b >= 0xc7 && b <= 0xc8,
+                    ok(color_near(color0, 0x000dca28),
+                       "GOURAUD shading has color0 %08x, expected 0x00dca28\n", color0);
+                    ok(color_near(color1, 0x000d45c7),
                        "GOURAUD shading has color1 %08x, expected 0x000d45c7\n", color1);
 
                     color0_gouraud = color0;
@@ -6487,15 +6500,9 @@ static void shademode_test(IDirect3DDevice9 *device)
                     break;
                 case D3DSHADE_PHONG:
                     /* Should be the same as GOURAUD, since no hardware implements this */
-                    r = (color0 & 0x00ff0000) >> 16;
-                    g = (color0 & 0x0000ff00) >>  8;
-                    b = (color0 & 0x000000ff);
-                    ok(r >= 0x0c && r <= 0x0e && g == 0xca && b >= 0x27 && b <= 0x28,
+                    ok(color_near(color0, 0x000dca28),
                        "PHONG shading has color0 %08x, expected 0x000dca28\n", color0);
-                    r = (color1 & 0x00ff0000) >> 16;
-                    g = (color1 & 0x0000ff00) >>  8;
-                    b = (color1 & 0x000000ff);
-                    ok(r >= 0x0c && r <= 0x0d && g >= 0x44 && g <= 0x45 && b >= 0xc7 && b <= 0xc8,
+                    ok(color_near(color1, 0x000d45c7),
                        "PHONG shading has color1 %08x, expected 0x000d45c7\n", color1);
 
                     ok(color0 == color0_gouraud, "difference between GOURAUD and PHONG shading detected: %08x %08x\n",
@@ -9110,7 +9117,7 @@ START_TEST(visual)
     hr = IDirect3DDevice9_Clear(device_ptr, 0, NULL, D3DCLEAR_TARGET, 0xffff0000, 0.0, 0);
     if(FAILED(hr))
     {
-        trace("Clear failed, can't assure correctness of the test results, skipping\n");
+        skip("Clear failed, can't assure correctness of the test results, skipping\n");
         goto cleanup;
     }
     IDirect3DDevice9_Present(device_ptr, NULL, NULL, NULL, NULL);
@@ -9118,14 +9125,14 @@ START_TEST(visual)
     color = getPixelColor(device_ptr, 1, 1);
     if(color !=0x00ff0000)
     {
-        trace("Sanity check returned an incorrect color(%08x), can't assure the correctness of the tests, skipping\n", color);
+        skip("Sanity check returned an incorrect color(%08x), can't assure the correctness of the tests, skipping\n", color);
         goto cleanup;
     }
 
     hr = IDirect3DDevice9_Clear(device_ptr, 0, NULL, D3DCLEAR_TARGET, 0xff00ddee, 0.0, 0);
     if(FAILED(hr))
     {
-        trace("Clear failed, can't assure correctness of the test results, skipping\n");
+        skip("Clear failed, can't assure correctness of the test results, skipping\n");
         goto cleanup;
     }
     IDirect3DDevice9_Present(device_ptr, NULL, NULL, NULL, NULL);
@@ -9133,7 +9140,7 @@ START_TEST(visual)
     color = getPixelColor(device_ptr, 639, 479);
     if(color != 0x0000ddee)
     {
-        trace("Sanity check returned an incorrect color(%08x), can't assure the correctness of the tests, skipping\n", color);
+        skip("Sanity check returned an incorrect color(%08x), can't assure the correctness of the tests, skipping\n", color);
         goto cleanup;
     }
 

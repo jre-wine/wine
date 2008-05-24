@@ -5779,9 +5779,89 @@ static void test_paint_messages(void)
     flush_events();
     ok_sequence(WmSWP_FrameChangedDeferErase, "SetWindowPos:FrameChangedDeferErase", FALSE );
 
+    ok(GetWindowLong( hparent, GWL_STYLE ) & WS_VISIBLE, "parent should be visible\n");
+    ok(GetWindowLong( hchild, GWL_STYLE ) & WS_VISIBLE, "child should be visible\n");
+
+    UpdateWindow( hparent );
+    flush_events();
+    flush_sequence();
+    trace("testing SetWindowPos(-10000, -10000) on child\n");
+    SetWindowPos( hchild, 0, -10000, -10000, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER );
+    check_update_rgn( hchild, 0 );
+    flush_events();
+
+#if 0 /* this one doesn't pass under Wine yet */
+    UpdateWindow( hparent );
+    flush_events();
+    flush_sequence();
+    trace("testing ShowWindow(SW_MINIMIZE) on child\n");
+    ShowWindow( hchild, SW_MINIMIZE );
+    check_update_rgn( hchild, 0 );
+    flush_events();
+#endif
+
+    UpdateWindow( hparent );
+    flush_events();
+    flush_sequence();
+    trace("testing SetWindowPos(-10000, -10000) on parent\n");
+    SetWindowPos( hparent, 0, -10000, -10000, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER );
+    check_update_rgn( hparent, 0 );
+    flush_events();
+
     log_all_parent_messages--;
     DestroyWindow( hparent );
     ok(!IsWindow(hchild), "child must be destroyed with its parent\n");
+
+    /* tests for moving windows off-screen (needs simple WS_POPUP windows) */
+
+    hparent = CreateWindowExA(0, "TestParentClass", "Test parent", WS_POPUP | WS_VISIBLE,
+                              100, 100, 200, 200, 0, 0, 0, NULL);
+    ok (hparent != 0, "Failed to create parent window\n");
+
+    hchild = CreateWindowExA(0, "TestWindowClass", "Test child", WS_CHILD | WS_VISIBLE,
+                           10, 10, 100, 100, hparent, 0, 0, NULL);
+    ok (hchild != 0, "Failed to create child window\n");
+
+    ShowWindow( hparent, SW_SHOW );
+    UpdateWindow( hparent );
+    UpdateWindow( hchild );
+    flush_events();
+    flush_sequence();
+
+    /* moving child outside of parent boundaries changes update region */
+    SetRect( &rect, 0, 0, 40, 40 );
+    RedrawWindow( hchild, &rect, 0, RDW_INVALIDATE | RDW_ERASE );
+    SetRectRgn( hrgn, 0, 0, 40, 40 );
+    check_update_rgn( hchild, hrgn );
+    MoveWindow( hchild, -10, 10, 100, 100, FALSE );
+    SetRectRgn( hrgn, 10, 0, 40, 40 );
+    check_update_rgn( hchild, hrgn );
+    MoveWindow( hchild, -10, -10, 100, 100, FALSE );
+    SetRectRgn( hrgn, 10, 10, 40, 40 );
+    check_update_rgn( hchild, hrgn );
+
+    /* moving parent off-screen does too */
+    SetRect( &rect, 0, 0, 100, 100 );
+    RedrawWindow( hparent, &rect, 0, RDW_INVALIDATE | RDW_ERASE | RDW_NOCHILDREN );
+    SetRectRgn( hrgn, 0, 0, 100, 100 );
+    check_update_rgn( hparent, hrgn );
+    SetRectRgn( hrgn, 10, 10, 40, 40 );
+    check_update_rgn( hchild, hrgn );
+    MoveWindow( hparent, -20, -20, 200, 200, FALSE );
+    SetRectRgn( hrgn, 20, 20, 100, 100 );
+    check_update_rgn( hparent, hrgn );
+    SetRectRgn( hrgn, 30, 30, 40, 40 );
+    check_update_rgn( hchild, hrgn );
+
+    /* invalidated region is cropped by the parent rects */
+    SetRect( &rect, 0, 0, 50, 50 );
+    RedrawWindow( hchild, &rect, 0, RDW_INVALIDATE | RDW_ERASE );
+    SetRectRgn( hrgn, 30, 30, 50, 50 );
+    check_update_rgn( hchild, hrgn );
+
+    DestroyWindow( hparent );
+    ok(!IsWindow(hchild), "child must be destroyed with its parent\n");
+    flush_sequence();
 
     DeleteObject( hrgn );
     DeleteObject( hrgn2 );

@@ -100,18 +100,18 @@ static void OnExitMenuLoop(HWND hWnd)
 
 static void UpdateMenuItems(HMENU hMenu) {
     HWND hwndTV = g_pChildWnd->hTreeWnd;
-    BOOL bIsKeySelected = FALSE;
+    BOOL bAllowEdit = FALSE;
     HKEY hRootKey = NULL;
     LPCTSTR keyName;
     keyName = GetItemPath(hwndTV, TreeView_GetSelection(hwndTV), &hRootKey);
-    if (keyName && *keyName) { /* can't modify root keys */
-        bIsKeySelected = TRUE;
+    if (GetFocus() != hwndTV || (keyName && *keyName)) { /* can't modify root keys, but allow for their values */
+        bAllowEdit = TRUE;
     }
     EnableMenuItem(hMenu, ID_EDIT_FIND, MF_ENABLED | MF_BYCOMMAND);
     EnableMenuItem(hMenu, ID_EDIT_FINDNEXT, MF_ENABLED | MF_BYCOMMAND);
-    EnableMenuItem(hMenu, ID_EDIT_MODIFY, (bIsKeySelected ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
-    EnableMenuItem(hMenu, ID_EDIT_DELETE, (bIsKeySelected ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
-    EnableMenuItem(hMenu, ID_EDIT_RENAME, (bIsKeySelected ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
+    EnableMenuItem(hMenu, ID_EDIT_MODIFY, (bAllowEdit ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
+    EnableMenuItem(hMenu, ID_EDIT_DELETE, (bAllowEdit ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
+    EnableMenuItem(hMenu, ID_EDIT_RENAME, (bAllowEdit ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
     EnableMenuItem(hMenu, ID_FAVORITES_ADDTOFAVORITES, (hRootKey ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
     EnableMenuItem(hMenu, ID_FAVORITES_REMOVEFAVORITE, 
         (GetMenuItemCount(hMenu)>2 ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
@@ -277,7 +277,7 @@ static UINT CALLBACK ExportRegistryFile_OFNHookProc(HWND hdlg, UINT uiMsg, WPARA
                 path = GetItemFullPath(g_pChildWnd->hTreeWnd, NULL, FALSE);
                 SendDlgItemMessage(hdlg, IDC_EXPORT_PATH, WM_SETTEXT, 0, (LPARAM)path);
                 HeapFree(GetProcessHeap(), 0, path);
-                CheckRadioButton(hdlg, IDC_EXPORT_ALL, IDC_EXPORT_SELECTED, IDC_EXPORT_ALL);
+                CheckRadioButton(hdlg, IDC_EXPORT_ALL, IDC_EXPORT_SELECTED, pOpenFileName->lCustData ? IDC_EXPORT_SELECTED : IDC_EXPORT_ALL);
                 break;
             case CDN_FILEOK:
                 ExportRegistryFile_StoreSelection(hdlg, pOpenFileName);
@@ -332,7 +332,7 @@ static BOOL ImportRegistryFile(HWND hWnd)
 }
 
 
-static BOOL ExportRegistryFile(HWND hWnd)
+static BOOL ExportRegistryFile(HWND hWnd, BOOL export_branch)
 {
     OPENFILENAME ofn;
     TCHAR ExportKeyPath[_MAX_PATH];
@@ -342,7 +342,7 @@ static BOOL ExportRegistryFile(HWND hWnd)
     InitOpenFileName(hWnd, &ofn);
     LoadString(hInst, IDS_FILEDIALOG_EXPORT_TITLE, title, COUNT_OF(title));
     ofn.lpstrTitle = title;
-    ofn.lCustData = 0; 
+    ofn.lCustData = export_branch;
     ofn.Flags = OFN_ENABLETEMPLATE | OFN_ENABLEHOOK | OFN_EXPLORER | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
     ofn.lpfnHook = ExportRegistryFile_OFNHookProc;
     ofn.lpTemplateName = MAKEINTRESOURCE(IDD_EXPORT_TEMPLATE);
@@ -506,9 +506,17 @@ static INT_PTR CALLBACK addtofavorites_dlgproc(HWND hwndDlg, UINT uMsg, WPARAM w
             
     switch(uMsg) {
         case WM_INITDIALOG:
+        {
+            HKEY hKeyRoot = NULL;
+            LPSTR ItemPath = GetItemPath(g_pChildWnd->hTreeWnd, NULL, &hKeyRoot);
+
+            if(!ItemPath || !*ItemPath)
+                ItemPath = GetItemFullPath(g_pChildWnd->hTreeWnd, NULL, FALSE);
             EnableWindow(GetDlgItem(hwndDlg, IDOK), FALSE);
+            SetWindowText(hwndValue, ItemPath);
             SendMessage(hwndValue, EM_SETLIMITTEXT, 127, 0);
             return TRUE;
+        }
         case WM_COMMAND:
             switch(LOWORD(wParam)) {
             case IDC_VALUE_NAME:
@@ -635,8 +643,11 @@ static BOOL _CmdWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case ID_REGISTRY_IMPORTREGISTRYFILE:
         ImportRegistryFile(hWnd);
         break;
+    case ID_EDIT_EXPORT:
+        ExportRegistryFile(hWnd, TRUE);
+        break;
     case ID_REGISTRY_EXPORTREGISTRYFILE:
-        ExportRegistryFile(hWnd);
+        ExportRegistryFile(hWnd, FALSE);
         break;
     case ID_REGISTRY_CONNECTNETWORKREGISTRY:
         break;

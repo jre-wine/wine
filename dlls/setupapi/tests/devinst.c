@@ -349,8 +349,22 @@ static void testCreateDeviceInfo(void)
     }
     SetLastError(0xdeadbeef);
     ret = pSetupDiCreateDeviceInfoA(NULL, NULL, NULL, NULL, NULL, 0, NULL);
-    ok(!ret && GetLastError() == ERROR_INVALID_DEVINST_NAME,
-     "Expected ERROR_INVALID_DEVINST_NAME, got %08x\n", GetLastError());
+    ok(!ret, "Expected failure\n");
+    ok(GetLastError() == ERROR_INVALID_DEVINST_NAME ||
+      GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */ ||
+      GetLastError() == ERROR_INVALID_HANDLE /* Win9x */,
+     "Unexpected last error, got %08x\n", GetLastError());
+
+    /* If we are running on win9x we should skip these tests. Win95
+     * fails most tests anyway and win98 pops up the "Add New Hardware
+     * Wizard".
+     */
+    if (GetLastError() == ERROR_INVALID_HANDLE)
+    {
+        skip("We are on win9x where the tests introduce issues\n");
+        return;
+    }
+
     SetLastError(0xdeadbeef);
     ret = pSetupDiCreateDeviceInfoA(NULL, "Root\\LEGACY_BOGUS\\0000", NULL,
      NULL, NULL, 0, NULL);
@@ -372,7 +386,7 @@ static void testCreateDeviceInfo(void)
         /* Finally, with all three required parameters, this succeeds: */
         ret = pSetupDiCreateDeviceInfoA(set, "Root\\LEGACY_BOGUS\\0000", &guid,
          NULL, NULL, 0, NULL);
-        ok(ret, "pSetupDiCreateDeviceInfoA failed: %08x\n", GetLastError());
+        ok(ret, "SetupDiCreateDeviceInfoA failed: %08x\n", GetLastError());
         /* This fails because the device ID already exists.. */
         SetLastError(0xdeadbeef);
         ret = pSetupDiCreateDeviceInfoA(set, "Root\\LEGACY_BOGUS\\0000", &guid,
@@ -421,11 +435,11 @@ static void testGetDeviceInstanceId(void)
     SetLastError(0xdeadbeef);
     ret = pSetupDiGetDeviceInstanceIdA(NULL, NULL, NULL, 0, NULL);
     ok(!ret && GetLastError() == ERROR_INVALID_HANDLE,
-     "Expected ERROR_INVALID_HANDLEHANDLE, got %08x\n", GetLastError());
+     "Expected ERROR_INVALID_HANDLE, got %08x\n", GetLastError());
     SetLastError(0xdeadbeef);
     ret = pSetupDiGetDeviceInstanceIdA(NULL, &devInfo, NULL, 0, NULL);
     ok(!ret && GetLastError() == ERROR_INVALID_HANDLE,
-     "Expected ERROR_INVALID_HANDLEHANDLE, got %08x\n", GetLastError());
+     "Expected ERROR_INVALID_HANDLE, got %08x\n", GetLastError());
     set = pSetupDiCreateDeviceInfoList(&guid, NULL);
     ok(set != NULL, "SetupDiCreateDeviceInfoList failed: %08x\n",
      GetLastError());
@@ -492,7 +506,6 @@ static void testRegisterDeviceInfo(void)
     ret = pSetupDiRegisterDeviceInfo(NULL, NULL, 0, NULL, NULL, NULL);
     ok(!ret && GetLastError() == ERROR_INVALID_HANDLE,
      "Expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
-    ret = pSetupDiRegisterDeviceInfo(NULL, NULL, 0, NULL, NULL, NULL);
     set = pSetupDiCreateDeviceInfoList(&guid, NULL);
     ok(set != NULL, "SetupDiCreateDeviceInfoList failed: %d\n", GetLastError());
     if (set)
@@ -804,8 +817,9 @@ static void testDevRegKey(void)
          DIREG_DRV, 0);
         todo_wine
         ok(key == INVALID_HANDLE_VALUE &&
-         GetLastError() == ERROR_INVALID_DATA,
-         "Expected ERROR_INVALID_DATA, got %08x\n", GetLastError());
+         (GetLastError() == ERROR_INVALID_DATA ||
+         GetLastError() == ERROR_ACCESS_DENIED), /* win2k3 */
+         "Expected ERROR_INVALID_DATA or ERROR_ACCESS_DENIED, got %08x\n", GetLastError());
         key = pSetupDiOpenDevRegKey(set, &devInfo, DICS_FLAG_GLOBAL, 0,
          DIREG_DRV, KEY_READ);
         ok(key != INVALID_HANDLE_VALUE, "SetupDiOpenDevRegKey failed: %08x\n",
@@ -914,12 +928,11 @@ static void testDeviceRegistryPropertyA()
     todo_wine
     ok(!ret && GetLastError() == ERROR_INVALID_REG_PROPERTY,
      "Expected ERROR_INVALID_REG_PROPERTY, got %08x\n", GetLastError());
-    SetLastError(0xdeadbeef);
+    /* GetLastError() returns nonsense in win2k3 */
     ret = pSetupDiSetDeviceRegistryPropertyA(set, &devInfo, SPDRP_FRIENDLYNAME,
      NULL, 0);
     todo_wine
-    ok(!ret && GetLastError() == ERROR_INVALID_DATA,
-     "Expected ERROR_INVALID_DATA, got %08x\n", GetLastError());
+    ok(!ret, "Expected failure, got %d\n", ret);
     SetLastError(0xdeadbeef);
     ret = pSetupDiSetDeviceRegistryPropertyA(set, &devInfo, SPDRP_FRIENDLYNAME,
      (PBYTE)friendlyName, buflen);
@@ -937,11 +950,10 @@ static void testDeviceRegistryPropertyA()
     todo_wine
     ok(!ret && GetLastError() == ERROR_INVALID_REG_PROPERTY,
      "Expected ERROR_INVALID_REG_PROPERTY, got %08x\n", GetLastError());
-    SetLastError(0xdeadbeef);
+    /* GetLastError() returns nonsense in win2k3 */
     ret = pSetupDiGetDeviceRegistryPropertyA(set, &devInfo, SPDRP_FRIENDLYNAME,
      NULL, NULL, buflen, NULL);
-    ok(!ret && GetLastError() == ERROR_INVALID_DATA,
-     "Expected ERROR_INVALID_DATA, got %08x\n", GetLastError());
+    ok(!ret, "Expected failure, got %d\n", ret);
     SetLastError(0xdeadbeef);
     ret = pSetupDiGetDeviceRegistryPropertyA(set, &devInfo, SPDRP_FRIENDLYNAME,
      NULL, NULL, 0, &size);
@@ -1012,12 +1024,11 @@ static void testDeviceRegistryPropertyW()
     todo_wine
     ok(!ret && GetLastError() == ERROR_INVALID_REG_PROPERTY,
      "Expected ERROR_INVALID_REG_PROPERTY, got %08x\n", GetLastError());
-    SetLastError(0xdeadbeef);
+    /* GetLastError() returns nonsense in win2k3 */
     ret = pSetupDiSetDeviceRegistryPropertyW(set, &devInfo, SPDRP_FRIENDLYNAME,
      NULL, 0);
     todo_wine
-    ok(!ret && GetLastError() == ERROR_INVALID_DATA,
-     "Expected ERROR_INVALID_DATA, got %08x\n", GetLastError());
+    ok(!ret, "Expected failure, got %d\n", ret);
     SetLastError(0xdeadbeef);
     ret = pSetupDiSetDeviceRegistryPropertyW(set, &devInfo, SPDRP_FRIENDLYNAME,
      (PBYTE)friendlyName, buflen);
@@ -1035,11 +1046,10 @@ static void testDeviceRegistryPropertyW()
     todo_wine
     ok(!ret && GetLastError() == ERROR_INVALID_REG_PROPERTY,
      "Expected ERROR_INVALID_REG_PROPERTY, got %08x\n", GetLastError());
-    SetLastError(0xdeadbeef);
+    /* GetLastError() returns nonsense in win2k3 */
     ret = pSetupDiGetDeviceRegistryPropertyW(set, &devInfo, SPDRP_FRIENDLYNAME,
      NULL, NULL, buflen, NULL);
-    ok(!ret && GetLastError() == ERROR_INVALID_DATA,
-     "Expected ERROR_INVALID_DATA, got %08x\n", GetLastError());
+    ok(!ret, "Expected failure, got %d\n", ret);
     SetLastError(0xdeadbeef);
     ret = pSetupDiGetDeviceRegistryPropertyW(set, &devInfo, SPDRP_FRIENDLYNAME,
      NULL, NULL, 0, &size);

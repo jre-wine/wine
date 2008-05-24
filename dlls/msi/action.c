@@ -1780,9 +1780,6 @@ UINT MSI_SetFeatureStates(MSIPACKAGE *package)
      * 9) FILEADDLOCAL
      * 10) FILEADDSOURCE
      * 11) FILEADDDEFAULT
-     * I have confirmed that if ADDLOCAL is stated then the INSTALLLEVEL is
-     * ignored for all the features. seems strange, especially since it is not
-     * documented anywhere, but it is how it works.
      *
      * I am still ignoring a lot of these. But that is ok for now, ADDLOCAL and
      * REMOVE are the big ones, since we don't handle administrative installs
@@ -1840,8 +1837,11 @@ UINT MSI_SetFeatureStates(MSIPACKAGE *package)
     {
         ComponentList *cl;
 
-        TRACE("Examining Feature %s (Installed %i, Action %i)\n",
-              debugstr_w(feature->Feature), feature->Installed, feature->Action);
+        TRACE("Examining Feature %s (Level %i, Installed %i, Action %i)\n",
+              debugstr_w(feature->Feature), feature->Level, feature->Installed, feature->Action);
+
+        if (!feature->Level)
+            continue;
 
         /* features with components that have compressed files are made local */
         LIST_FOR_EACH_ENTRY( cl, &feature->Components, ComponentList, entry )
@@ -2125,7 +2125,10 @@ static UINT ACTION_CostFinalize(MSIPACKAGE *package)
         {'C','o','s','t','i','n','g','C','o','m','p','l','e','t','e',0 };
     static const WCHAR szlevel[] =
         {'I','N','S','T','A','L','L','L','E','V','E','L',0};
+    static const WCHAR szOutOfDiskSpace[] =
+        {'O','u','t','O','f','D','i','s','k','S','p','a','c','e',0};
     static const WCHAR szOne[] = { '1', 0 };
+    static const WCHAR szZero[] = { '0', 0 };
     MSICOMPONENT *comp;
     UINT rc;
     MSIQUERY * view;
@@ -2176,6 +2179,9 @@ static UINT ACTION_CostFinalize(MSIPACKAGE *package)
     if (!level)
         MSI_SetPropertyW(package,szlevel, szOne);
     msi_free(level);
+
+    /* FIXME: check volume disk space */
+    MSI_SetPropertyW(package, szOutOfDiskSpace, szZero);
 
     ACTION_UpdateFeatureInstallStates(package);
 
@@ -5657,17 +5663,37 @@ static UINT ITERATE_PublishAssembly( MSIRECORD *rec, LPVOID param )
 
     /* FIXME: extract all files belonging to this component */
     file = msi_find_file(package, comp->KeyPath);
-
-    GetTempPathW(MAX_PATH, path);
-    r = msi_extract_file(package, file, path);
-    if (r != ERROR_SUCCESS)
+    if (!file)
     {
-        ERR("Failed to extract temporary assembly\n");
-        return r;
+        ERR("File %s not found\n", debugstr_w(comp->KeyPath));
+        return ERROR_FUNCTION_FAILED;
     }
 
-    PathAddBackslashW(path);
-    lstrcatW(path, file->FileName);
+    GetTempPathW(MAX_PATH, path);
+
+    if (file->IsCompressed)
+    {
+        r = msi_extract_file(package, file, path);
+        if (r != ERROR_SUCCESS)
+        {
+            ERR("Failed to extract temporary assembly\n");
+            return r;
+        }
+
+        PathAddBackslashW(path);
+        lstrcatW(path, file->FileName);
+    }
+    else
+    {
+        PathAddBackslashW(path);
+        lstrcatW(path, file->FileName);
+
+        if (!CopyFileW(file->SourcePath, path, FALSE))
+        {
+            ERR("Failed to copy temporary assembly: %d\n", GetLastError());
+            return ERROR_FUNCTION_FAILED;
+        }
+    }
 
     r = install_assembly(path);
     if (r != ERROR_SUCCESS)

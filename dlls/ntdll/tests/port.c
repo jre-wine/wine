@@ -118,26 +118,27 @@ static BOOL init_function_ptrs(void)
 {
     hntdll = LoadLibraryA("ntdll.dll");
 
-    if (hntdll)
-    {
-        pNtCompleteConnectPort = (void *)GetProcAddress(hntdll, "NtCompleteConnectPort");
-        pNtAcceptConnectPort = (void *)GetProcAddress(hntdll, "NtAcceptConnectPort");
-        pNtReplyPort = (void *)GetProcAddress(hntdll, "NtReplyPort");
-        pNtReplyWaitReceivePort = (void *)GetProcAddress(hntdll, "NtReplyWaitReceivePort");
-        pNtCreatePort = (void *)GetProcAddress(hntdll, "NtCreatePort");
-        pNtRequestWaitReplyPort = (void *)GetProcAddress(hntdll, "NtRequestWaitReplyPort");
-        pNtRequestPort = (void *)GetProcAddress(hntdll, "NtRequestPort");
-        pNtRegisterThreadTerminatePort = (void *)GetProcAddress(hntdll, "NtRegisterThreadTerminatePort");
-        pNtConnectPort = (void *)GetProcAddress(hntdll, "NtConnectPort");
-        pRtlInitUnicodeString = (void *)GetProcAddress(hntdll, "RtlInitUnicodeString");
-        pNtWaitForSingleObject = (void *)GetProcAddress(hntdll, "NtWaitForSingleObject");
-    }
+    if (!hntdll)
+        return FALSE;
+
+    pNtCompleteConnectPort = (void *)GetProcAddress(hntdll, "NtCompleteConnectPort");
+    pNtAcceptConnectPort = (void *)GetProcAddress(hntdll, "NtAcceptConnectPort");
+    pNtReplyPort = (void *)GetProcAddress(hntdll, "NtReplyPort");
+    pNtReplyWaitReceivePort = (void *)GetProcAddress(hntdll, "NtReplyWaitReceivePort");
+    pNtCreatePort = (void *)GetProcAddress(hntdll, "NtCreatePort");
+    pNtRequestWaitReplyPort = (void *)GetProcAddress(hntdll, "NtRequestWaitReplyPort");
+    pNtRequestPort = (void *)GetProcAddress(hntdll, "NtRequestPort");
+    pNtRegisterThreadTerminatePort = (void *)GetProcAddress(hntdll, "NtRegisterThreadTerminatePort");
+    pNtConnectPort = (void *)GetProcAddress(hntdll, "NtConnectPort");
+    pRtlInitUnicodeString = (void *)GetProcAddress(hntdll, "RtlInitUnicodeString");
+    pNtWaitForSingleObject = (void *)GetProcAddress(hntdll, "NtWaitForSingleObject");
 
     if (!pNtCompleteConnectPort || !pNtAcceptConnectPort ||
         !pNtReplyWaitReceivePort || !pNtCreatePort || !pNtRequestWaitReplyPort ||
         !pNtRequestPort || !pNtRegisterThreadTerminatePort ||
         !pNtConnectPort || !pRtlInitUnicodeString)
     {
+        FreeLibrary(hntdll);
         return FALSE;
     }
 
@@ -244,6 +245,11 @@ static void test_ports_server(void)
     obj.ObjectName = &port;
 
     status = pNtCreatePort(&PortHandle, &obj, 100, 100, 0);
+    if (status == STATUS_ACCESS_DENIED)
+    {
+        skip("Not enough rights\n");
+        return;
+    }
     todo_wine
     {
         ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %d\n", status);
@@ -309,4 +315,6 @@ START_TEST(port)
 
     test_ports_server();
     CloseHandle(thread);
+
+    FreeLibrary(hntdll);
 }

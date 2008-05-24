@@ -34,6 +34,7 @@ AC_ARG_WITH(curses,    AS_HELP_STRING([--without-curses],[do not use (n)curses])
 AC_ARG_WITH(esd,       AS_HELP_STRING([--without-esd],[do not use the EsounD sound support]))
 AC_ARG_WITH(fontconfig,AS_HELP_STRING([--without-fontconfig],[do not use fontconfig]),
             [if test "x$withval" = "xno"; then ac_cv_header_fontconfig_fontconfig_h=no; fi])
+AC_ARG_WITH(freetype,  AS_HELP_STRING([--without-freetype],[do not use the FreeType library]))
 AC_ARG_WITH(gphoto,    AS_HELP_STRING([--without-gphoto],[do not use gphoto (Digital Camera support)]))
 AC_ARG_WITH(glu,       AS_HELP_STRING([--without-glu],[do not use the GLU library]),
             [if test "x$withval" = "xno"; then ac_cv_header_GL_glu_h=no; fi])
@@ -662,7 +663,7 @@ then
                 [$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])],,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
 
         fi
-        WINE_NOTICE_WITH(xrender,[test "x$ac_cv_lib_soname_Xrender" = "x"],
+        WINE_WARNING_WITH(xrender,[test "x$ac_cv_lib_soname_Xrender" = "x"],
                          [libxrender development files not found, XRender won't be supported.])
 
         dnl *** Check for X RandR extension
@@ -774,7 +775,7 @@ else
     X_CFLAGS=""
     X_LIBS=""
 fi
-WINE_WARNING_WITH(x,[test "x$XLIB" = "x"],[X development files not found. Wine will be built
+WINE_ERROR_WITH(x,[test "x$XLIB" = "x"],[X development files not found. Wine will be built
 without X support, which probably isn't what you want. You will need to install
 development packages of Xlib/Xfree86 at the very least.])
 
@@ -808,7 +809,7 @@ then
         ])
     CPPFLAGS="$ac_save_CPPFLAGS"
 fi
-WINE_NOTICE_WITH(xml,[test "$ac_cv_lib_xml2_xmlParseMemory" != "yes"],
+WINE_WARNING_WITH(xml,[test "$ac_cv_lib_xml2_xmlParseMemory" != "yes"],
                  [libxml2 development files not found, XML won't be supported.])
 
 if test "x$with_xslt" != "xno"
@@ -840,7 +841,7 @@ then
              LIBS="$ac_save_LIBS"],,$ac_xslt_libs)
     fi
 fi
-WINE_NOTICE_WITH(xslt,[test "$ac_cv_lib_xslt_xsltCompilePattern" != "yes"],
+WINE_WARNING_WITH(xslt,[test "$ac_cv_lib_xslt_xsltCompilePattern" != "yes"],
                  [libxslt development files not found, xslt won't be supported.])
 
 dnl **** Check for libhal ****
@@ -967,7 +968,7 @@ WINE_NOTICE_WITH(ldap,[test "x$LDAPLIBS" = "x"],
 
 dnl **** Check for FreeType 2 ****
 AC_CHECK_PROGS(ft_devel,[freetype-config freetype2-config],false)
-if test "$ft_devel" != "false"
+if test "$ft_devel" != "false" -a "x$with_freetype" != "xno"
 then
     ac_freetype_libs=`$ft_devel --libs`
     ac_freetype_incl=`$ft_devel --cflags`
@@ -1007,18 +1008,12 @@ then
 	    AC_DEFINE(HAVE_FREETYPE, 1, [Define if FreeType 2 is installed])
             AC_SUBST(FREETYPELIBS,"$ac_freetype_libs")
             AC_SUBST(FREETYPEINCL,"$ac_freetype_incl")
+            AC_SUBST(FONTSSUBDIRS,"fonts")
 	fi
     fi
 fi
-
-dnl Only build the fonts dir if we have freetype
-if test "x$FREETYPELIBS" = "x"
-then
-    WINE_WARNING([FreeType development files not found.
+WINE_ERROR_WITH(freetype,[test "x$FREETYPELIBS" = "x"],[FreeType development files not found.
 Fonts will not be built. Dialog text may be invisible or unaligned.])
-else
-  AC_SUBST(FONTSSUBDIRS,"fonts")
-fi
 
 dnl **** Check for parport (currently Linux only) ****
 AC_CACHE_CHECK([for parport header/ppdev.h], ac_cv_c_ppdev,
@@ -1164,7 +1159,7 @@ then
     WINE_CHECK_SONAME(ssl,SSL_library_init)
     WINE_CHECK_SONAME(crypto,BIO_new_socket)
 fi
-WINE_NOTICE_WITH(openssl,[test "x$ac_cv_lib_soname_ssl" = "x"],
+WINE_WARNING_WITH(openssl,[test "x$ac_cv_lib_soname_ssl" = "x" -o "x$ac_cv_lib_soname_crypto" = "x"],
                  [OpenSSL development files not found, SSL won't be supported.])
 
 dnl **** Check for libjpeg ****
@@ -1172,7 +1167,7 @@ if test "$ac_cv_header_jpeglib_h" = "yes"
 then
     WINE_CHECK_SONAME(jpeg,jpeg_start_decompress)
 fi
-WINE_NOTICE_WITH(jpeg,[test "x$ac_cv_lib_soname_jpeg" = "x"],
+WINE_WARNING_WITH(jpeg,[test "x$ac_cv_lib_soname_jpeg" = "x"],
                  [libjpeg development files not found, JPEG won't be supported.])
 
 dnl **** Check for libpng ****
@@ -1180,7 +1175,7 @@ if test "$ac_cv_header_png_h" = "yes"
 then
     WINE_CHECK_SONAME(png,png_create_read_struct,,,,[[libpng[[0-9]]*]])
 fi
-WINE_NOTICE_WITH(png,[test "x$ac_cv_lib_soname_png" = "x"],
+WINE_WARNING_WITH(png,[test "x$ac_cv_lib_soname_png" = "x"],
                  [libpng development files not found, PNG won't be supported.])
 
 dnl **** Check for libodbc ****
@@ -2081,7 +2076,7 @@ AC_CONFIG_FILES([programs/winemine/Makefile])
 AC_CONFIG_FILES([programs/winepath/Makefile])
 AC_CONFIG_FILES([programs/winetest/Makefile])
 AC_CONFIG_FILES([programs/winevdm/Makefile])
-AC_CONFIG_FILES([programs/winhelp/Makefile])
+AC_CONFIG_FILES([programs/winhlp32/Makefile])
 AC_CONFIG_FILES([programs/winver/Makefile])
 AC_CONFIG_FILES([programs/wordpad/Makefile])
 AC_CONFIG_FILES([programs/write/Makefile])

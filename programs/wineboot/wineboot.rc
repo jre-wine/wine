@@ -27,6 +27,7 @@
 #include "commctrl.h"
 #include "resource.h"
 
+#include "wineboot_Da.rc"
 #include "wineboot_De.rc"
 #include "wineboot_En.rc"
 #include "wineboot_Es.rc"

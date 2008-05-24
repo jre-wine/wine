@@ -1829,8 +1829,9 @@ static void test_gethostbyname_hack(void)
     }
 
     he = NULL;
-    he = gethostbyname("someweirdandbogusname");
-    ok(he == NULL, "gethostbyname(\"someweirdandbogusname\") succeeded.\n");
+    he = gethostbyname("nonexistent.winehq.org");
+    /* Don't check for the return value, as some braindead ISPs will kindly
+     * resolve nonexistent host names to addresses of the ISP's spam pages. */
 }
 
 static void test_inet_addr(void)
