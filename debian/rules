@@ -23,18 +23,18 @@ VERSION := $(lastword $(shell dpkg-parsechangelog|grep "^Version: "))
 
 #DEBIAN_SID := $(findstring sid,$(DEBIAN_VERSION))
 
-#ifeq (,$(findstring etch,$(DEBIAN_VERSION)))
-## delete amd64.tar.lzma.uu if we're not on etch.
-#AMD64_PACK = false
-#endif
+ifeq (,$(findstring etch,$(DEBIAN_VERSION)))
+# delete amd64.tar.lzma.uu if we're not on etch.
+AMD64_PACK = false
+endif
 
 # On i386, pack binaries into amd64.tar.lzma.uu and embed it into
 # source package, because debian's amd64 port has pretty crappy
 # support for building 32-bit binaries natively.
 
-ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM),i486-linux-gnu)
-AMD64_PACK ?= true
-endif
+#ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM),i486-linux-gnu)
+#AMD64_PACK ?= true
+#endif
 
 # On amd64, build 32-bit package by simply unpacking amd64.tar.lzma.uu
 # if it exists, otherwise build from source using 32-bit compiler.
