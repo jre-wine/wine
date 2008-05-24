@@ -192,3 +192,4 @@ echo "Installation complete."
 echo "If you have problems with Wine, please read the documentation first,"
 echo "as many kinds of potential problems are explained there."
 
+exit 0
