@@ -11,6 +11,7 @@ CFLAGS=-O0 -g
 else
 CFLAGS=-O2 -g
 endif
+LDFLAGS=
 
 CONFIGOPTS = --with-x --enable-opengl
 
@@ -53,18 +54,30 @@ endif
 #BUILDS += build64
 #NATIVE_BUILD = build64
 NATIVE_BUILD = build32
+IA32_LIBS = /emul/ia32-linux
+LDFLAGS += -L$(CURDIR)/lib32
 else
 BUILDS = build32
 NATIVE_BUILD = build32
 endif
 
+configure-ia32: configure-ia32-stamp
+configure-ia32-stamp:
+	dh_testdir
+ifneq (,$(IA32_LIBS))
+	mkdir lib32 || true
+	bash debian/ia32.sh $(IA32_LIBS) lib32
+endif
+	touch configure-ia32-stamp
+
 configure-arch32: configure-arch32-stamp
-configure-arch32-stamp:
+configure-arch32-stamp: configure-ia32-stamp
 	dh_testdir
 ifeq (,$(DEB_SAVEBUILD))
 	mkdir build32 || true
 	cd build32 && \
 	CFLAGS="$(CFLAGS)" \
+	LDFLAGS="$(LDFLAGS)" \
 	../configure --disable-win64 $(CONFIGOPTS) \
 	--prefix=/usr \
 	--sysconfdir=/etc \
@@ -79,12 +92,13 @@ endif
 	touch configure-arch32-stamp
 
 configure-arch64: configure-arch64-stamp
-configure-arch64-stamp:
+configure-arch64-stamp: configure-ia32-stamp
 	dh_testdir
 ifeq (,$(DEB_SAVEBUILD))
 	mkdir build64 || true
 	cd build64 && \
 	CFLAGS="$(CFLAGS)" \
+	LDFLAGS="$(LDFLAGS)" \
 	../configure --enable-win64 $(CONFIGOPTS) \
 	--prefix=/usr \
 	--sysconfdir=/etc \
@@ -160,10 +174,11 @@ endif
 clean: clean-arch32 clean-arch64
 	dh_testdir
 	dh_testroot
-	rm -f install-arch-stamp build-indep-stamp
+	rm -f install-arch-stamp build-indep-stamp configure-ia32-stamp
 ifeq (false,$(AMD64_PACK))
 	rm -f debian/amd64.tar.lzma.uu
 endif
+	rm -rf lib32
 	dh_clean
 
 install-indep: build-indep
