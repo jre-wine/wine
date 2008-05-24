@@ -41,19 +41,71 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
+#define ARRAYSIZE(array) (sizeof(array)/sizeof((array)[0]))
+
+/* Unexposed IAMFilterData interface */
+typedef struct IAMFilterData IAMFilterData;
+
+typedef struct IAMFilterDataVtbl
+{
+    BEGIN_INTERFACE
+
+    /*** IUnknown methods ***/
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(
+        IAMFilterData *This,
+        REFIID riid,
+        void **ppvObject);
+
+    ULONG (STDMETHODCALLTYPE *AddRef)(
+        IAMFilterData *This);
+
+    ULONG (STDMETHODCALLTYPE *Release)(
+        IAMFilterData *This);
+
+    /*** IAMFilterData methods ***/
+    HRESULT (STDMETHODCALLTYPE *ParseFilterData)(
+        IAMFilterData *This,
+        BYTE *pData,
+        ULONG cb,
+        BYTE **ppRegFilter2);
+
+    HRESULT (STDMETHODCALLTYPE *CreateFilterData)(
+        IAMFilterData* This,
+        REGFILTER2 *prf2,
+        BYTE **pRegFilterData,
+        ULONG *pcb);
+
+    END_INTERFACE
+} IAMFilterDataVtbl;
+struct IAMFilterData
+{
+    const IAMFilterDataVtbl *lpVtbl;
+};
+const GUID IID_IAMFilterData = {
+ 0x97f7c4d4, 0x547b, 0x4a5f, { 0x83,0x32, 0x53,0x64,0x30,0xad,0x2e,0x4d }
+};
+
+
 typedef struct FilterMapper2Impl
 {
     const IFilterMapper2Vtbl *lpVtbl;
     const IFilterMapperVtbl  *lpVtblFilterMapper;
+    const IAMFilterDataVtbl  *lpVtblAMFilterData;
     LONG refCount;
 } FilterMapper2Impl;
 
 static const IFilterMapper2Vtbl fm2vtbl;
 static const IFilterMapperVtbl fmvtbl;
+static const IAMFilterDataVtbl AMFilterDataVtbl;
 
 static inline FilterMapper2Impl *impl_from_IFilterMapper( IFilterMapper *iface )
 {
     return (FilterMapper2Impl *)((char*)iface - FIELD_OFFSET(FilterMapper2Impl, lpVtblFilterMapper));
+}
+
+static inline FilterMapper2Impl *impl_from_IAMFilterData( IAMFilterData *iface )
+{
+    return (FilterMapper2Impl *)((char*)iface - FIELD_OFFSET(FilterMapper2Impl, lpVtblAMFilterData));
 }
 
 static const WCHAR wszClsidSlash[] = {'C','L','S','I','D','\\',0};
@@ -139,7 +191,7 @@ static int add_data(struct Vector * v, const BYTE * pData, int size)
     return index;
 }
 
-static int find_data(struct Vector * v, const BYTE * pData, int size)
+static int find_data(const struct Vector * v, const BYTE * pData, int size)
 {
     int index;
     for (index = 0; index < v->current; index++)
@@ -171,6 +223,7 @@ HRESULT FilterMapper2_create(IUnknown *pUnkOuter, LPVOID *ppObj)
 
     pFM2impl->lpVtbl = &fm2vtbl;
     pFM2impl->lpVtblFilterMapper = &fmvtbl;
+    pFM2impl->lpVtblAMFilterData = &AMFilterDataVtbl;
     pFM2impl->refCount = 1;
 
     *ppObj = pFM2impl;
@@ -178,6 +231,22 @@ HRESULT FilterMapper2_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     TRACE("-- created at %p\n", pFM2impl);
 
     return S_OK;
+}
+
+HRESULT FilterMapper_create(IUnknown *pUnkOuter, LPVOID *ppObj)
+{
+    FilterMapper2Impl *pFM2impl;
+    HRESULT hr;
+
+    TRACE("(%p, %p)\n", pUnkOuter, ppObj);
+
+    hr = FilterMapper2_create(pUnkOuter, (LPVOID*)&pFM2impl);
+    if (FAILED(hr))
+        return hr;
+
+    *ppObj = &pFM2impl->lpVtblFilterMapper;
+
+    return hr;
 }
 
 /*** IUnknown methods ***/
@@ -196,6 +265,8 @@ static HRESULT WINAPI FilterMapper2_QueryInterface(IFilterMapper2 * iface, REFII
         *ppv = iface;
     else if (IsEqualIID(riid, &IID_IFilterMapper))
         *ppv = &This->lpVtblFilterMapper;
+    else if (IsEqualIID(riid, &IID_IAMFilterData))
+        *ppv = &This->lpVtblAMFilterData;
 
     if (*ppv != NULL)
     {
@@ -212,7 +283,7 @@ static ULONG WINAPI FilterMapper2_AddRef(IFilterMapper2 * iface)
     FilterMapper2Impl *This = (FilterMapper2Impl *)iface;
     ULONG refCount = InterlockedIncrement(&This->refCount);
 
-    TRACE("(%p)->()\n", iface);
+    TRACE("(%p)->() AddRef from %d\n", This, refCount - 1);
 
     return refCount;
 }
@@ -222,7 +293,7 @@ static ULONG WINAPI FilterMapper2_Release(IFilterMapper2 * iface)
     FilterMapper2Impl *This = (FilterMapper2Impl *)iface;
     ULONG refCount = InterlockedDecrement(&This->refCount);
 
-    TRACE("(%p)->()\n", iface);
+    TRACE("(%p)->() Release from %d\n", This, refCount + 1);
 
     if (refCount == 0)
     {
@@ -242,7 +313,7 @@ static HRESULT WINAPI FilterMapper2_CreateCategory(
 {
     LPWSTR wClsidAMCat = NULL;
     LPWSTR wClsidCategory = NULL;
-    WCHAR wszKeyName[strlenW(wszClsidSlash) + strlenW(wszSlashInstance) + (CHARS_IN_GUID-1) * 2 + 1];
+    WCHAR wszKeyName[ARRAYSIZE(wszClsidSlash)-1 + ARRAYSIZE(wszSlashInstance)-1 + (CHARS_IN_GUID-1) * 2 + 1];
     HKEY hKey = NULL;
     LONG lRet;
     HRESULT hr;
@@ -365,16 +436,13 @@ static HRESULT FM2_WriteClsid(IPropertyBag * pPropBag, REFCLSID clsid)
     return hr;
 }
 
-static HRESULT FM2_WriteFilterData(IPropertyBag * pPropBag, const REGFILTER2 * prf2)
+static HRESULT FM2_WriteFilterData(const REGFILTER2 * prf2, BYTE **ppData, ULONG *pcbData)
 {
-    VARIANT var;
     int size = sizeof(struct REG_RF);
     unsigned int i;
     struct Vector mainStore = {NULL, 0, 0};
     struct Vector clsidStore = {NULL, 0, 0};
     struct REG_RF rrf;
-    SAFEARRAY * psa;
-    SAFEARRAYBOUND saBound;
     HRESULT hr = S_OK;
 
     rrf.dwVersion = prf2->dwVersion;
@@ -454,70 +522,41 @@ static HRESULT FM2_WriteFilterData(IPropertyBag * pPropBag, const REGFILTER2 * p
         }
     }
 
-    saBound.lLbound = 0;
-    saBound.cElements = mainStore.current + clsidStore.current;
-    psa = SafeArrayCreate(VT_UI1, 1, &saBound);
-    if (!psa)
+    if (SUCCEEDED(hr))
     {
-        ERR("Couldn't create SAFEARRAY\n");
-        hr = E_FAIL;
+        *pcbData = mainStore.current + clsidStore.current;
+        *ppData = CoTaskMemAlloc(*pcbData);
+        if (!*ppData)
+            hr = E_OUTOFMEMORY;
     }
 
     if (SUCCEEDED(hr))
     {
-        LPBYTE pbSAData;
-        hr = SafeArrayAccessData(psa, (LPVOID *)&pbSAData);
-        if (SUCCEEDED(hr))
-        {
-            memcpy(pbSAData, mainStore.pData, mainStore.current);
-            memcpy(pbSAData + mainStore.current, clsidStore.pData, clsidStore.current);
-            hr = SafeArrayUnaccessData(psa);
-        }
+        memcpy(*ppData, mainStore.pData, mainStore.current);
+        memcpy((*ppData) + mainStore.current, clsidStore.pData, clsidStore.current);
     }
-
-    V_VT(&var) = VT_ARRAY | VT_UI1;
-    V_UNION(&var, parray) = psa;
-
-    if (SUCCEEDED(hr))
-        hr = IPropertyBag_Write(pPropBag, wszFilterDataName, &var);
-
-    if (psa)
-        SafeArrayDestroy(psa);
 
     delete_vector(&mainStore);
     delete_vector(&clsidStore);
     return hr;
 }
 
-static HRESULT FM2_ReadFilterData(IPropertyBag * pPropBag, REGFILTER2 * prf2)
+static HRESULT FM2_ReadFilterData(BYTE *pData, REGFILTER2 * prf2)
 {
-    VARIANT var;
-    HRESULT hr;
-    LPBYTE pData = NULL;
+    HRESULT hr = S_OK;
     struct REG_RF * prrf;
     LPBYTE pCurrent;
     DWORD i;
     REGFILTERPINS2 * rgPins2;
 
-    VariantInit(&var);
-    V_VT(&var) = VT_ARRAY | VT_UI1;
+    prrf = (struct REG_RF *)pData;
+    pCurrent = pData;
 
-    hr = IPropertyBag_Read(pPropBag, wszFilterDataName, &var, NULL);
-
-    if (SUCCEEDED(hr))
-        hr = SafeArrayAccessData(V_UNION(&var, parray), (LPVOID*)&pData);
-
-    if (SUCCEEDED(hr))
+    if (prrf->dwVersion != 2)
     {
-        prrf = (struct REG_RF *)pData;
-        pCurrent = pData;
-
-        if (prrf->dwVersion != 2)
-        {
-            FIXME("Filter registry version %d not supported\n", prrf->dwVersion);
-            ZeroMemory(prf2, sizeof(*prf2));
-            hr = E_FAIL;
-        }
+        FIXME("Filter registry version %d not supported\n", prrf->dwVersion);
+        ZeroMemory(prf2, sizeof(*prf2));
+        hr = E_FAIL;
     }
 
     if (SUCCEEDED(hr))
@@ -605,11 +644,6 @@ static HRESULT FM2_ReadFilterData(IPropertyBag * pPropBag, REGFILTER2 * prf2)
 
     }
 
-    if (pData)
-        SafeArrayUnaccessData(V_UNION(&var, parray));
-
-    VariantClear(&var);
-
     return hr;
 }
 
@@ -674,7 +708,7 @@ static HRESULT WINAPI FilterMapper2_RegisterFilter(
         regfilter2.dwVersion = 2;
         regfilter2.dwMerit = prf2->dwMerit;
         regfilter2.u.s1.cPins2 = prf2->u.s.cPins;
-        pregfp2 = (REGFILTERPINS2*) CoTaskMemAlloc(prf2->u.s.cPins * sizeof(REGFILTERPINS2));
+        pregfp2 = CoTaskMemAlloc(prf2->u.s.cPins * sizeof(REGFILTERPINS2));
         regfilter2.u.s1.rgPins2 = pregfp2;
         for (i = 0; i < prf2->u.s.cPins; i++)
         {
@@ -773,7 +807,48 @@ static HRESULT WINAPI FilterMapper2_RegisterFilter(
         hr = FM2_WriteClsid(pPropBag, clsidFilter);
 
     if (SUCCEEDED(hr))
-        hr = FM2_WriteFilterData(pPropBag, &regfilter2);
+    {
+        BYTE *pData;
+        ULONG cbData;
+
+        hr = FM2_WriteFilterData(&regfilter2, &pData, &cbData);
+        if (SUCCEEDED(hr))
+        {
+            VARIANT var;
+            SAFEARRAY *psa;
+            SAFEARRAYBOUND saBound;
+
+            saBound.lLbound = 0;
+            saBound.cElements = cbData;
+            psa = SafeArrayCreate(VT_UI1, 1, &saBound);
+            if (!psa)
+            {
+                ERR("Couldn't create SAFEARRAY\n");
+                hr = E_FAIL;
+            }
+
+            if (SUCCEEDED(hr))
+            {
+                LPBYTE pbSAData;
+                hr = SafeArrayAccessData(psa, (LPVOID *)&pbSAData);
+                if (SUCCEEDED(hr))
+                {
+                    memcpy(pbSAData, pData, cbData);
+                    hr = SafeArrayUnaccessData(psa);
+                }
+            }
+
+            V_VT(&var) = VT_ARRAY | VT_UI1;
+            V_UNION(&var, parray) = psa;
+
+            if (SUCCEEDED(hr))
+                hr = IPropertyBag_Write(pPropBag, wszFilterDataName, &var);
+
+            if (psa)
+                SafeArrayDestroy(psa);
+            CoTaskMemFree(pData);
+        }
+    }
 
     if (pPropBag)
         IPropertyBag_Release(pPropBag);
@@ -889,9 +964,14 @@ static HRESULT WINAPI FilterMapper2_EnumMatchingFilters(
     *ppEnum = NULL;
 
     hr = CoCreateInstance(&CLSID_SystemDeviceEnum, NULL, CLSCTX_INPROC, &IID_ICreateDevEnum, (LPVOID*)&pCreateDevEnum);
+    if (FAILED(hr))
+        return hr;
 
-    if (SUCCEEDED(hr))
-        hr = ICreateDevEnum_CreateClassEnumerator(pCreateDevEnum, &CLSID_ActiveMovieCategories, &pEnumCat, 0);
+    hr = ICreateDevEnum_CreateClassEnumerator(pCreateDevEnum, &CLSID_ActiveMovieCategories, &pEnumCat, 0);
+    if (FAILED(hr)) {
+        ICreateDevEnum_Release(pCreateDevEnum);
+        return hr;
+    }
 
     while (IEnumMoniker_Next(pEnumCat, 1, &pMonikerCat, NULL) == S_OK)
     {
@@ -937,12 +1017,15 @@ static HRESULT WINAPI FilterMapper2_EnumMatchingFilters(
                 while (IEnumMoniker_Next(pEnum, 1, &pMoniker, NULL) == S_OK)
                 {
                     IPropertyBag * pPropBag = NULL;
+                    VARIANT var;
+                    BYTE *pData = NULL;
                     REGFILTER2 rf2;
                     DWORD i;
                     BOOL bInputMatch = !bInputNeeded;
                     BOOL bOutputMatch = !bOutputNeeded;
 
                     ZeroMemory(&rf2, sizeof(rf2));
+                    VariantInit(&var);
 
                     hrSub = IMoniker_BindToStorage(pMoniker, NULL, NULL, &IID_IPropertyBag, (LPVOID*)&pPropBag);
 
@@ -956,7 +1039,21 @@ static HRESULT WINAPI FilterMapper2_EnumMatchingFilters(
                     }
 
                     if (SUCCEEDED(hrSub))
-                        hrSub = FM2_ReadFilterData(pPropBag, &rf2);
+                    {
+                        V_VT(&var) = VT_ARRAY | VT_UI1;
+                        hrSub = IPropertyBag_Read(pPropBag, wszFilterDataName, &var, NULL);
+                    }
+
+                    if (SUCCEEDED(hrSub))
+                        hrSub = SafeArrayAccessData(V_UNION(&var, parray), (LPVOID*)&pData);
+
+                    if (SUCCEEDED(hrSub))
+                        hrSub = FM2_ReadFilterData(pData, &rf2);
+
+                    if (pData)
+                        SafeArrayUnaccessData(V_UNION(&var, parray));
+
+                    VariantClear(&var);
 
                     /* Logic used for bInputMatch expression:
                      * There exists some pin such that bInputNeeded implies (pin is an input and
@@ -1551,4 +1648,73 @@ static const IFilterMapperVtbl fmvtbl =
     FilterMapper_UnregisterFilterInstance,
     FilterMapper_UnregisterPin,
     FilterMapper_EnumMatchingFilters
+};
+
+
+/*** IUnknown methods ***/
+static HRESULT WINAPI AMFilterData_QueryInterface(IAMFilterData * iface, REFIID riid, LPVOID *ppv)
+{
+    FilterMapper2Impl *This = impl_from_IAMFilterData(iface);
+
+    return FilterMapper2_QueryInterface((IFilterMapper2*)This, riid, ppv);
+}
+
+static ULONG WINAPI AMFilterData_AddRef(IAMFilterData * iface)
+{
+    FilterMapper2Impl *This = impl_from_IAMFilterData(iface);
+
+    return FilterMapper2_AddRef((IFilterMapper2*)This);
+}
+
+static ULONG WINAPI AMFilterData_Release(IAMFilterData * iface)
+{
+    FilterMapper2Impl *This = impl_from_IAMFilterData(iface);
+
+    return FilterMapper2_Release((IFilterMapper2*)This);
+}
+
+/*** IAMFilterData methods ***/
+static HRESULT WINAPI AMFilterData_ParseFilterData(IAMFilterData* iface,
+                                                   BYTE *pData, ULONG cb,
+                                                   BYTE **ppRegFilter2)
+{
+    FilterMapper2Impl *This = impl_from_IAMFilterData(iface);
+    HRESULT hr = S_OK;
+    REGFILTER2 *prf2;
+
+    TRACE("(%p/%p)->(%p, %d, %p)\n", This, iface, pData, cb, ppRegFilter2);
+
+    prf2 = CoTaskMemAlloc(sizeof(*prf2));
+    if (!prf2)
+        return E_OUTOFMEMORY;
+    *ppRegFilter2 = (BYTE *)&prf2;
+
+    hr = FM2_ReadFilterData(pData, prf2);
+    if (FAILED(hr))
+    {
+        CoTaskMemFree(prf2);
+        *ppRegFilter2 = NULL;
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI AMFilterData_CreateFilterData(IAMFilterData* iface,
+                                                    REGFILTER2 *prf2,
+                                                    BYTE **pRegFilterData,
+                                                    ULONG *pcb)
+{
+    FilterMapper2Impl *This = impl_from_IAMFilterData(iface);
+
+    TRACE("(%p/%p)->(%p, %p, %p)\n", This, iface, prf2, pRegFilterData, pcb);
+
+    return FM2_WriteFilterData(prf2, pRegFilterData, pcb);
+}
+
+static const IAMFilterDataVtbl AMFilterDataVtbl = {
+    AMFilterData_QueryInterface,
+    AMFilterData_AddRef,
+    AMFilterData_Release,
+    AMFilterData_ParseFilterData,
+    AMFilterData_CreateFilterData
 };

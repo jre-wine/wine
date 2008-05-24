@@ -23,26 +23,50 @@ static const unsigned int formats[][4]={
     { 8000,  8, 2, 0 },
     { 8000, 16, 1, 0 },
     { 8000, 16, 2, 0 },
+    { 8000, 24, 1, 0 },
+    { 8000, 24, 2, 0 },
+    { 8000, 32, 1, 0 },
+    { 8000, 32, 2, 0 },
     {11025,  8, 1, WAVE_FORMAT_1M08 },
     {11025,  8, 2, WAVE_FORMAT_1S08 },
     {11025, 16, 1, WAVE_FORMAT_1M16 },
     {11025, 16, 2, WAVE_FORMAT_1S16 },
+    {11025, 24, 1, 0 },
+    {11025, 24, 2, 0 },
+    {11025, 32, 1, 0 },
+    {11025, 32, 2, 0 },
     {22050,  8, 1, WAVE_FORMAT_2M08 },
     {22050,  8, 2, WAVE_FORMAT_2S08 },
     {22050, 16, 1, WAVE_FORMAT_2M16 },
     {22050, 16, 2, WAVE_FORMAT_2S16 },
+    {22050, 24, 1, 0 },
+    {22050, 24, 2, 0 },
+    {22050, 32, 1, 0 },
+    {22050, 32, 2, 0 },
     {44100,  8, 1, WAVE_FORMAT_4M08 },
     {44100,  8, 2, WAVE_FORMAT_4S08 },
     {44100, 16, 1, WAVE_FORMAT_4M16 },
     {44100, 16, 2, WAVE_FORMAT_4S16 },
+    {44100, 24, 1, 0 },
+    {44100, 24, 2, 0 },
+    {44100, 32, 1, 0 },
+    {44100, 32, 2, 0 },
     {48000,  8, 1, WAVE_FORMAT_48M08 },
     {48000,  8, 2, WAVE_FORMAT_48S08 },
     {48000, 16, 1, WAVE_FORMAT_48M16 },
     {48000, 16, 2, WAVE_FORMAT_48S16 },
+    {48000, 24, 1, 0 },
+    {48000, 24, 2, 0 },
+    {48000, 32, 1, 0 },
+    {48000, 32, 2, 0 },
     {96000,  8, 1, WAVE_FORMAT_96M08 },
     {96000,  8, 2, WAVE_FORMAT_96S08 },
     {96000, 16, 1, WAVE_FORMAT_96M16 },
-    {96000, 16, 2, WAVE_FORMAT_96S16 }
+    {96000, 16, 2, WAVE_FORMAT_96S16 },
+    {96000, 24, 1, 0 },
+    {96000, 24, 2, 0 },
+    {96000, 32, 1, 0 },
+    {96000, 32, 2, 0 }
 };
 #define NB_FORMATS (sizeof(formats)/sizeof(*formats))
 
@@ -62,5 +86,4 @@ extern void test_buffer8(LPDIRECTSOUND8,LPDIRECTSOUNDBUFFER*,
 extern const char * getDSBCAPS(DWORD xmask);
 extern int align(int length, int align);
 extern const char * get_file_version(const char * file_name);
-extern const char * get_format_str(WORD format);
 extern const char * format_string(const WAVEFORMATEX* wfx);

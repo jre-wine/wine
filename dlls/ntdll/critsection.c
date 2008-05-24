@@ -37,17 +37,17 @@
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
 
-inline static LONG interlocked_inc( PLONG dest )
+static inline LONG interlocked_inc( PLONG dest )
 {
-    return interlocked_xchg_add( (int *)dest, 1 ) + 1;
+    return interlocked_xchg_add( dest, 1 ) + 1;
 }
 
-inline static LONG interlocked_dec( PLONG dest )
+static inline LONG interlocked_dec( PLONG dest )
 {
-    return interlocked_xchg_add( (int *)dest, -1 ) - 1;
+    return interlocked_xchg_add( dest, -1 ) - 1;
 }
 
-inline static void small_pause(void)
+static inline void small_pause(void)
 {
 #ifdef __i386__
     __asm__ __volatile__( "rep;nop" : : : "memory" );
@@ -208,8 +208,7 @@ static inline HANDLE get_semaphore( RTL_CRITICAL_SECTION *crit )
     {
         HANDLE sem;
         if (NtCreateSemaphore( &sem, SEMAPHORE_ALL_ACCESS, NULL, 0, 1 )) return 0;
-        if (!(ret = (HANDLE)interlocked_cmpxchg_ptr( (PVOID *)&crit->LockSemaphore,
-                                                     (PVOID)sem, 0 )))
+        if (!(ret = interlocked_cmpxchg_ptr( &crit->LockSemaphore, sem, 0 )))
             ret = sem;
         else
             NtClose(sem);  /* somebody beat us to it */
@@ -231,7 +230,7 @@ static inline NTSTATUS wait_semaphore( RTL_CRITICAL_SECTION *crit, int timeout )
         LARGE_INTEGER time;
 
         time.QuadPart = timeout * (LONGLONG)-10000000;
-        ret = NtWaitForSingleObject( sem, FALSE, &time );
+        ret = NTDLL_wait_for_multiple_objects( 1, &sem, 0, &time, 0 );
     }
     return ret;
 }
@@ -398,12 +397,12 @@ NTSTATUS WINAPI RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit )
             if (crit->DebugInfo) name = (char *)crit->DebugInfo->Spare[0];
             if (!name) name = "?";
             ERR( "section %p %s wait timed out in thread %04x, blocked by %04x, retrying (60 sec)\n",
-                 crit, debugstr_a(name), GetCurrentThreadId(), (DWORD)crit->OwningThread );
+                 crit, debugstr_a(name), GetCurrentThreadId(), HandleToULong(crit->OwningThread) );
             status = wait_semaphore( crit, 60 );
             if ( status == STATUS_TIMEOUT && TRACE_ON(relay) )
             {
                 ERR( "section %p %s wait timed out in thread %04x, blocked by %04x, retrying (5 min)\n",
-                     crit, debugstr_a(name), GetCurrentThreadId(), (DWORD) crit->OwningThread );
+                     crit, debugstr_a(name), GetCurrentThreadId(), HandleToULong(crit->OwningThread) );
                 status = wait_semaphore( crit, 300 );
             }
         }
@@ -490,7 +489,7 @@ NTSTATUS WINAPI RtlEnterCriticalSection( RTL_CRITICAL_SECTION *crit )
             if (crit->LockCount > 0) break;  /* more than one waiter, don't bother spinning */
             if (crit->LockCount == -1)       /* try again */
             {
-                if (interlocked_cmpxchg( (int *)&crit->LockCount, 0, -1 ) == -1) goto done;
+                if (interlocked_cmpxchg( &crit->LockCount, 0, -1 ) == -1) goto done;
             }
             small_pause();
         }
@@ -498,7 +497,7 @@ NTSTATUS WINAPI RtlEnterCriticalSection( RTL_CRITICAL_SECTION *crit )
 
     if (interlocked_inc( &crit->LockCount ))
     {
-        if (crit->OwningThread == (HANDLE)GetCurrentThreadId())
+        if (crit->OwningThread == ULongToHandle(GetCurrentThreadId()))
         {
             crit->RecursionCount++;
             return STATUS_SUCCESS;
@@ -508,7 +507,7 @@ NTSTATUS WINAPI RtlEnterCriticalSection( RTL_CRITICAL_SECTION *crit )
         RtlpWaitForCriticalSection( crit );
     }
 done:
-    crit->OwningThread   = (HANDLE)GetCurrentThreadId();
+    crit->OwningThread   = ULongToHandle(GetCurrentThreadId());
     crit->RecursionCount = 1;
     return STATUS_SUCCESS;
 }
@@ -534,13 +533,13 @@ done:
 BOOL WINAPI RtlTryEnterCriticalSection( RTL_CRITICAL_SECTION *crit )
 {
     BOOL ret = FALSE;
-    if (interlocked_cmpxchg( (int *)&crit->LockCount, 0, -1 ) == -1)
+    if (interlocked_cmpxchg( &crit->LockCount, 0, -1 ) == -1)
     {
-        crit->OwningThread   = (HANDLE)GetCurrentThreadId();
+        crit->OwningThread   = ULongToHandle(GetCurrentThreadId());
         crit->RecursionCount = 1;
         ret = TRUE;
     }
-    else if (crit->OwningThread == (HANDLE)GetCurrentThreadId())
+    else if (crit->OwningThread == ULongToHandle(GetCurrentThreadId()))
     {
         interlocked_inc( &crit->LockCount );
         crit->RecursionCount++;

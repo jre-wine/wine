@@ -34,6 +34,7 @@
 #include "wine/unicode.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
+#include "ddk/wdm.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ver);
 
@@ -50,6 +51,8 @@ typedef enum
     NT2K,    /* Windows 2000 */
     WINXP,   /* Windows XP */
     WIN2K3,  /* Windows 2003 */
+    WINVISTA,/* Windows Vista */
+    WIN2K8,  /* Windows 2008 */
     NB_WINDOWS_VERSIONS
 } WINDOWS_VERSION;
 
@@ -84,8 +87,6 @@ static const RTL_OSVERSIONINFOEXW VersionData[NB_WINDOWS_VERSIONS] =
          * Win95osr2.1: 4, 3, 0x40304BC, " B " (according to doc)
          * Win95osr2.5: 4, 3, 0x40304BE, " C " (according to doc)
          * Win95a/b can be discerned via regkey SubVersionNumber
-         * See also:
-         * http://support.microsoft.com/support/kb/articles/q158/2/38.asp
          */
         sizeof(RTL_OSVERSIONINFOEXW), 4, 0, 0x40003B6, VER_PLATFORM_WIN32_WINDOWS,
         {0},
@@ -135,6 +136,18 @@ static const RTL_OSVERSIONINFOEXW VersionData[NB_WINDOWS_VERSIONS] =
         sizeof(RTL_OSVERSIONINFOEXW), 5, 2, 0xECE, VER_PLATFORM_WIN32_NT,
         {'S','e','r','v','i','c','e',' ','P','a','c','k',' ','1',0},
         1, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
+    },
+    /* WINVISTA */
+    {
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 0x1770, VER_PLATFORM_WIN32_NT,
+        {' ',0},
+        0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
+    },
+    /* WIN2K8 */
+    {
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 0x1771, VER_PLATFORM_WIN32_NT,
+        {'S','e','r','v','i','c','e',' ','P','a','c','k',' ','1',0},
+        0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
     }
 };
 
@@ -150,7 +163,9 @@ static const char * const WinVersionNames[NB_WINDOWS_VERSIONS] =
     "nt40",                       /* NT40 */
     "win2000,win2k,nt2k,nt2000",  /* NT2K */
     "winxp",                      /* WINXP */
-    "win2003,win2k3"              /* WIN2K3 */
+    "win2003,win2k3",             /* WIN2K3 */
+    "vista,winvista",             /* WINVISTA*/
+    "win2008,win2k8",             /* WIN2K8 */
 };
 
 
@@ -496,6 +511,13 @@ done:
     NtCurrentTeb()->Peb->OSMinorVersion = current_version->dwMinorVersion;
     NtCurrentTeb()->Peb->OSBuildNumber  = current_version->dwBuildNumber;
     NtCurrentTeb()->Peb->OSPlatformId   = current_version->dwPlatformId;
+
+    user_shared_data->NtProductType      = current_version->wProductType;
+    user_shared_data->ProductTypeIsValid = TRUE;
+    user_shared_data->MajorNtVersion     = current_version->dwMajorVersion;
+    user_shared_data->MinorNtVersion     = current_version->dwMinorVersion;
+    user_shared_data->MinorNtVersion     = current_version->dwMinorVersion;
+    user_shared_data->SuiteMask          = current_version->wSuiteMask;
 
     TRACE( "got %d.%d plaform %d build %x name %s service pack %d.%d product %d\n",
            current_version->dwMajorVersion, current_version->dwMinorVersion,

@@ -59,11 +59,7 @@ POPUP "&Hilfe" {
   MENUITEM "&Suchen...",        CMD_HELP_SEARCH
   MENUITEM "&Hilfe benutzen",   CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  POPUP "Inf&o" {
-   MENUITEM "&Lizenz...",          CMD_LICENSE
-   MENUITEM "&KEINE GARANTIE...",  CMD_NO_WARRANTY
-   MENUITEM "&Über Wine...",       CMD_ABOUT_WINE
-  }
+  MENUITEM "&Über Notepad...", CMD_HELP_ABOUT_NOTEPAD
  }
 }
 
@@ -75,19 +71,19 @@ FONT 8, "MS Shell Dlg"
 CAPTION "Seite einrichten"
 {
 LTEXT    "&Kopfzeile:",  0x140,   10, 07, 40, 15
-EDITTEXT                         0x141,       60, 05,110, 12, WS_BORDER | WS_TABSTOP
+EDITTEXT IDC_PAGESETUP_HEADERVALUE,   60, 05,110, 12, WS_BORDER | WS_TABSTOP
 LTEXT    "&Fußzeile:",  0x142,   10, 24, 40, 15
-EDITTEXT                         0x143,       60, 22,110, 12, WS_BORDER | WS_TABSTOP
+EDITTEXT IDC_PAGESETUP_FOOTERVALUE,   60, 22,110, 12, WS_BORDER | WS_TABSTOP
 
-GROUPBOX "Ränder",      0x144,     10, 43,160, 45
+GROUPBOX "Ränder (Millimeter)",  0x144,  10, 43,160, 45
 LTEXT    "&Links:",        0x145,   20, 55, 30, 10, WS_CHILD
-EDITTEXT /*STRING_PAGESETUP_LEFTVALUE,*/   0x147,       50, 55, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
+EDITTEXT IDC_PAGESETUP_LEFTVALUE,     50, 55, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
 LTEXT    "&Oben:",         0x148,    20, 73, 30, 10, WS_CHILD
-EDITTEXT /*STRING_PAGESETUP_TOPVALUE,*/    0x14A,        50, 73, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
+EDITTEXT IDC_PAGESETUP_TOPVALUE,      50, 73, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
 LTEXT    "&Rechts:",       0x14B, 100, 55, 30, 10, WS_CHILD
-EDITTEXT /*STRING_PAGESETUP_RIGHTVALUE,*/  0x14D,     130, 55, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
+EDITTEXT IDC_PAGESETUP_RIGHTVALUE,   130, 55, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
 LTEXT    "&Unten:",      0x14E,100, 73, 30, 10, WS_CHILD
-EDITTEXT /*STRING_PAGESETUP_BOTTOMVALUE,*/ 0x150,    130, 73, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
+EDITTEXT IDC_PAGESETUP_BOTTOMVALUE,  130, 73, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
 
 DEFPUSHBUTTON "OK",         IDOK,                   180,  3, 40, 15, WS_TABSTOP
 PUSHBUTTON    "Abbrechen",     IDCANCEL,               180, 21, 40, 15, WS_TABSTOP
@@ -96,12 +92,8 @@ PUSHBUTTON    "&Hilfe",       IDHELP,                180, 39, 40, 15, WS_TABSTOP
 
 STRINGTABLE DISCARDABLE
 {
-STRING_PAGESETUP_HEADERVALUE,   "&n"        /* FIXME */
-STRING_PAGESETUP_FOOTERVALUE,   "Seite &s"   /* FIXME */
-STRING_PAGESETUP_LEFTVALUE,             "20 mm"     /* FIXME */
-STRING_PAGESETUP_RIGHTVALUE,    "20 mm"     /* FIXME */
-STRING_PAGESETUP_TOPVALUE,              "25 mm"     /* FIXME */
-STRING_PAGESETUP_BOTTOMVALUE,   "25 mm"     /* FIXME */
+STRING_PAGESETUP_HEADERVALUE,   "&f"
+STRING_PAGESETUP_FOOTERVALUE,   "Seite &p"
 
 STRING_NOTEPAD,                                 "Editor"
 STRING_ERROR,                                   "Fehler"
@@ -128,31 +120,4 @@ um diese Funktion \nabzuschließen. Beenden Sie eine oder mehrere \
 \nAnwendungen, um den verfügbaren Arbeitsspeicher zu \nerhöhen."
 
 
-}
-
-STRINGTABLE DISCARDABLE
-{
-IDS_LICENSE_CAPTION,            "LIZENZ"
-IDS_LICENSE,
-"Diese Bibliothek ist freie Software; Sie dürfen sie unter den \
-Bedingungen der GNU Lesser General Public License, wie von der \
-Free Software Foundation veröffentlicht, weiterverteilen und/oder \
-modifizieren; entweder gemäß Version 2.1 der Lizenz oder (nach \
-Ihrer Option) jeder späteren Version.\n\
-Diese Bibliothek wird in der Hoffnung weiterverbreitet, daß sie \
-nützlich sein wird, jedoch OHNE IRGENDEINE GARANTIE, auch ohne \
-die implizierte Garantie der MARKTREIFE oder der VERWENDBARKEIT \
-FÜR EINEN BESTIMMTEN ZWECK. Mehr Details finden Sie in der \
-GNU Lesser General Public License.\n\
-Sie sollten eine Kopie der GNU Lesser General Public License zusammen \
-mit dieser Bibliothek erhalten haben; falls nicht, schreiben Sie an \
-die Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, \
-Boston, MA 02110, USA."
-
-IDS_WARRANTY_CAPTION, "KEINE GARANTIE"
-IDS_WARRANTY,
-"Diese Bibliothek wird in der Hoffnung weiterverbreitet, daß sie nützlich \
-sein wird, jedoch OHNE IRGENDEINE GARANTIE, auch ohne die implizierte Garantie \
-der MARKTREIFE oder der VERWENDBARKEIT FÜR EINEN BESTIMMTEN ZWECK. Mehr Details \
-finden Sie in der GNU Lesser General Public License."
 }

@@ -83,10 +83,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
     	    	    	    	    FT_LOAD_IGNORE_TRANSFORM	|   \
 				    FT_LOAD_LINEAR_DESIGN   	    )
 
-#ifndef SONAME_LIBFREETYPE
-#define SONAME_LIBFREETYPE "libfreetype.so"
-#endif
-
 static void *ft_handle = NULL;
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f = NULL;
@@ -279,7 +275,7 @@ static BOOL FindMSTTString(FT_Face face, FT_CharMap charmap, FT_UShort name_id,
  *  units.
  *
  */
-inline static float PSUnits(LONG x, USHORT em_size)
+static inline float PSUnits(LONG x, USHORT em_size)
 {
     return 1000.0 * (float)x / (float)em_size;
 }

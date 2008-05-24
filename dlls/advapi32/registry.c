@@ -73,7 +73,7 @@ static const WCHAR name_CURRENT_CONFIG[] =
 static const WCHAR name_DYN_DATA[] =
     {'D','y','n','D','a','t','a',0};
 
-static const WCHAR *root_key_names[NB_SPECIAL_ROOT_KEYS] =
+static const WCHAR * const root_key_names[NB_SPECIAL_ROOT_KEYS] =
 {
     name_CLASSES_ROOT,
     NULL,         /* HKEY_CURRENT_USER is determined dynamically */
@@ -86,13 +86,13 @@ static const WCHAR *root_key_names[NB_SPECIAL_ROOT_KEYS] =
 
 
 /* check if value type needs string conversion (Ansi<->Unicode) */
-inline static int is_string( DWORD type )
+static inline int is_string( DWORD type )
 {
     return (type == REG_SZ) || (type == REG_EXPAND_SZ) || (type == REG_MULTI_SZ);
 }
 
 /* check if current version is NT or Win95 */
-inline static int is_version_nt(void)
+static inline int is_version_nt(void)
 {
     return !(GetVersion() & 0x80000000);
 }
@@ -136,7 +136,7 @@ static HKEY create_special_root_hkey( HANDLE hkey, DWORD access )
 }
 
 /* map the hkey from special root to normal key if necessary */
-inline static HKEY get_special_root_hkey( HKEY hkey )
+static inline HKEY get_special_root_hkey( HKEY hkey )
 {
     HKEY ret = hkey;
 
@@ -150,11 +150,37 @@ inline static HKEY get_special_root_hkey( HKEY hkey )
 
 
 /******************************************************************************
+ * RegOverridePredefKey   [ADVAPI32.@]
+ */
+LSTATUS WINAPI RegOverridePredefKey( HKEY hkey, HKEY override )
+{
+    HKEY old_key;
+    int idx;
+
+    if ((hkey < HKEY_SPECIAL_ROOT_FIRST) || (hkey > HKEY_SPECIAL_ROOT_LAST))
+        return ERROR_INVALID_PARAMETER;
+    idx = (UINT_PTR)hkey - (UINT_PTR)HKEY_SPECIAL_ROOT_FIRST;
+
+    if (override)
+    {
+        NTSTATUS status = NtDuplicateObject( GetCurrentProcess(), override,
+                                             GetCurrentProcess(), (HANDLE *)&override,
+                                             0, 0, DUPLICATE_SAME_ACCESS );
+        if (status) return RtlNtStatusToDosError( status );
+    }
+
+    old_key = InterlockedExchangePointer( (void **)&special_root_keys[idx], override );
+    if (old_key) NtClose( old_key );
+    return ERROR_SUCCESS;
+}
+
+
+/******************************************************************************
  * RegCreateKeyExW   [ADVAPI32.@]
  *
  * See RegCreateKeyExA.
  */
-LONG WINAPI RegCreateKeyExW( HKEY hkey, LPCWSTR name, DWORD reserved, LPWSTR class,
+LSTATUS WINAPI RegCreateKeyExW( HKEY hkey, LPCWSTR name, DWORD reserved, LPWSTR class,
                              DWORD options, REGSAM access, SECURITY_ATTRIBUTES *sa,
                              PHKEY retkey, LPDWORD dispos )
 {
@@ -202,7 +228,7 @@ LONG WINAPI RegCreateKeyExW( HKEY hkey, LPCWSTR name, DWORD reserved, LPWSTR cla
  * FIXME
  *  MAXIMUM_ALLOWED in access mask not supported by server
  */
-LONG WINAPI RegCreateKeyExA( HKEY hkey, LPCSTR name, DWORD reserved, LPSTR class,
+LSTATUS WINAPI RegCreateKeyExA( HKEY hkey, LPCSTR name, DWORD reserved, LPSTR class,
                              DWORD options, REGSAM access, SECURITY_ATTRIBUTES *sa,
                              PHKEY retkey, LPDWORD dispos )
 {
@@ -256,7 +282,7 @@ LONG WINAPI RegCreateKeyExA( HKEY hkey, LPCSTR name, DWORD reserved, LPSTR class
  *  Success: ERROR_SUCCESS
  *  Failure: nonzero error code defined in Winerror.h
  */
-LONG WINAPI RegCreateKeyW( HKEY hkey, LPCWSTR lpSubKey, PHKEY phkResult )
+LSTATUS WINAPI RegCreateKeyW( HKEY hkey, LPCWSTR lpSubKey, PHKEY phkResult )
 {
     /* FIXME: previous implementation converted ERROR_INVALID_HANDLE to ERROR_BADKEY, */
     /* but at least my version of NT (4.0 SP5) doesn't do this.  -- AJ */
@@ -270,7 +296,7 @@ LONG WINAPI RegCreateKeyW( HKEY hkey, LPCWSTR lpSubKey, PHKEY phkResult )
  *
  * See RegCreateKeyW.
  */
-LONG WINAPI RegCreateKeyA( HKEY hkey, LPCSTR lpSubKey, PHKEY phkResult )
+LSTATUS WINAPI RegCreateKeyA( HKEY hkey, LPCSTR lpSubKey, PHKEY phkResult )
 {
     return RegCreateKeyExA( hkey, lpSubKey, 0, NULL, REG_OPTION_NON_VOLATILE,
                             KEY_ALL_ACCESS, NULL, phkResult, NULL );
@@ -283,7 +309,7 @@ LONG WINAPI RegCreateKeyA( HKEY hkey, LPCSTR lpSubKey, PHKEY phkResult )
  * 
  * See RegOpenKeyExA.
  */
-LONG WINAPI RegOpenKeyExW( HKEY hkey, LPCWSTR name, DWORD reserved, REGSAM access, PHKEY retkey )
+LSTATUS WINAPI RegOpenKeyExW( HKEY hkey, LPCWSTR name, DWORD reserved, REGSAM access, PHKEY retkey )
 {
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW;
@@ -321,7 +347,7 @@ LONG WINAPI RegOpenKeyExW( HKEY hkey, LPCWSTR name, DWORD reserved, REGSAM acces
  *  Unlike RegCreateKeyExA(), this function will not create the key if it
  *  does not exist.
  */
-LONG WINAPI RegOpenKeyExA( HKEY hkey, LPCSTR name, DWORD reserved, REGSAM access, PHKEY retkey )
+LSTATUS WINAPI RegOpenKeyExA( HKEY hkey, LPCSTR name, DWORD reserved, REGSAM access, PHKEY retkey )
 {
     OBJECT_ATTRIBUTES attr;
     STRING nameA;
@@ -353,7 +379,7 @@ LONG WINAPI RegOpenKeyExA( HKEY hkey, LPCSTR name, DWORD reserved, REGSAM access
  *
  * See RegOpenKeyA.
  */
-LONG WINAPI RegOpenKeyW( HKEY hkey, LPCWSTR name, PHKEY retkey )
+LSTATUS WINAPI RegOpenKeyW( HKEY hkey, LPCWSTR name, PHKEY retkey )
 {
     if (!name || !*name)
     {
@@ -378,7 +404,7 @@ LONG WINAPI RegOpenKeyW( HKEY hkey, LPCWSTR name, PHKEY retkey )
  *  Success: ERROR_SUCCESS
  *  Failure: A standard Win32 error code. retkey is set to 0.
  */
-LONG WINAPI RegOpenKeyA( HKEY hkey, LPCSTR name, PHKEY retkey )
+LSTATUS WINAPI RegOpenKeyA( HKEY hkey, LPCSTR name, PHKEY retkey )
 {
     if (!name || !*name)
     {
@@ -409,7 +435,7 @@ LONG WINAPI RegOpenKeyA( HKEY hkey, LPCSTR name, PHKEY retkey )
  *  Since Wine does not currently allow threads to impersonate other users,
  *  this stub should work fine.
  */
-LONG WINAPI RegOpenCurrentUser( REGSAM access, PHKEY retkey )
+LSTATUS WINAPI RegOpenCurrentUser( REGSAM access, PHKEY retkey )
 {
     return RegOpenKeyExA( HKEY_CURRENT_USER, "", 0, access, retkey );
 }
@@ -436,7 +462,7 @@ LONG WINAPI RegOpenCurrentUser( REGSAM access, PHKEY retkey )
  *  Failure: System error code. If there are no more subkeys available, the
  *           function returns ERROR_NO_MORE_ITEMS.
  */
-LONG WINAPI RegEnumKeyExW( HKEY hkey, DWORD index, LPWSTR name, LPDWORD name_len,
+LSTATUS WINAPI RegEnumKeyExW( HKEY hkey, DWORD index, LPWSTR name, LPDWORD name_len,
                            LPDWORD reserved, LPWSTR class, LPDWORD class_len, FILETIME *ft )
 {
     NTSTATUS status;
@@ -500,7 +526,7 @@ LONG WINAPI RegEnumKeyExW( HKEY hkey, DWORD index, LPWSTR name, LPDWORD name_len
  *
  * See RegEnumKeyExW.
  */
-LONG WINAPI RegEnumKeyExA( HKEY hkey, DWORD index, LPSTR name, LPDWORD name_len,
+LSTATUS WINAPI RegEnumKeyExA( HKEY hkey, DWORD index, LPSTR name, LPDWORD name_len,
                            LPDWORD reserved, LPSTR class, LPDWORD class_len, FILETIME *ft )
 {
     NTSTATUS status;
@@ -566,7 +592,7 @@ LONG WINAPI RegEnumKeyExA( HKEY hkey, DWORD index, LPSTR name, LPDWORD name_len,
 /******************************************************************************
  * RegEnumKeyW   [ADVAPI32.@]
  *
- * Enumerates subkyes of the specified open reg key.
+ * Enumerates subkeys of the specified open reg key.
  *
  * PARAMS
  *  hKey    [I] Handle to an open key.
@@ -579,7 +605,7 @@ LONG WINAPI RegEnumKeyExA( HKEY hkey, DWORD index, LPSTR name, LPDWORD name_len,
  *  Failure: system error code. If there are no more subkeys available, the
  *           function returns ERROR_NO_MORE_ITEMS.
  */
-LONG WINAPI RegEnumKeyW( HKEY hkey, DWORD index, LPWSTR name, DWORD name_len )
+LSTATUS WINAPI RegEnumKeyW( HKEY hkey, DWORD index, LPWSTR name, DWORD name_len )
 {
     return RegEnumKeyExW( hkey, index, name, &name_len, NULL, NULL, NULL, NULL );
 }
@@ -590,7 +616,7 @@ LONG WINAPI RegEnumKeyW( HKEY hkey, DWORD index, LPWSTR name, DWORD name_len )
  *
  * See RegEnumKeyW.
  */
-LONG WINAPI RegEnumKeyA( HKEY hkey, DWORD index, LPSTR name, DWORD name_len )
+LSTATUS WINAPI RegEnumKeyA( HKEY hkey, DWORD index, LPSTR name, DWORD name_len )
 {
     return RegEnumKeyExA( hkey, index, name, &name_len, NULL, NULL, NULL, NULL );
 }
@@ -625,7 +651,7 @@ LONG WINAPI RegEnumKeyA( HKEY hkey, DWORD index, LPSTR name, DWORD name_len )
  *  - both allow class to be NULL and class_len to be NULL
  *    (it's hard to test validity, so test !NULL instead)
  */
-LONG WINAPI RegQueryInfoKeyW( HKEY hkey, LPWSTR class, LPDWORD class_len, LPDWORD reserved,
+LSTATUS WINAPI RegQueryInfoKeyW( HKEY hkey, LPWSTR class, LPDWORD class_len, LPDWORD reserved,
                               LPDWORD subkeys, LPDWORD max_subkey, LPDWORD max_class,
                               LPDWORD values, LPDWORD max_value, LPDWORD max_data,
                               LPDWORD security, FILETIME *modif )
@@ -702,7 +728,7 @@ LONG WINAPI RegQueryInfoKeyW( HKEY hkey, LPWSTR class, LPDWORD class_len, LPDWOR
  *  Failure: nonzero error code from Winerror.h ldwTotsize contains num needed
  *           bytes.
  */
-LONG WINAPI RegQueryMultipleValuesA( HKEY hkey, PVALENTA val_list, DWORD num_vals,
+LSTATUS WINAPI RegQueryMultipleValuesA( HKEY hkey, PVALENTA val_list, DWORD num_vals,
                                      LPSTR lpValueBuf, LPDWORD ldwTotsize )
 {
     unsigned int i;
@@ -748,7 +774,7 @@ LONG WINAPI RegQueryMultipleValuesA( HKEY hkey, PVALENTA val_list, DWORD num_val
  *
  * See RegQueryMultipleValuesA.
  */
-LONG WINAPI RegQueryMultipleValuesW( HKEY hkey, PVALENTW val_list, DWORD num_vals,
+LSTATUS WINAPI RegQueryMultipleValuesW( HKEY hkey, PVALENTW val_list, DWORD num_vals,
                                      LPWSTR lpValueBuf, LPDWORD ldwTotsize )
 {
     unsigned int i;
@@ -805,13 +831,13 @@ LONG WINAPI RegQueryMultipleValuesW( HKEY hkey, PVALENTW val_list, DWORD num_val
  *  lpcMaxValueNameLen     [O] Size of the key's longest value name in TCHARS.
  *  lpcMaxValueLen         [O] Longest data component among the key's values
  *  lpcbSecurityDescriptor [O] Size of the key's security descriptor.
- *  lpftLastWriteTime      [O] FILETIME strucutre that is the last write time.
+ *  lpftLastWriteTime      [O] FILETIME structure that is the last write time.
  *
  *  RETURNS
  *   Success: ERROR_SUCCESS
  *   Failure: nonzero error code from Winerror.h
  */
-LONG WINAPI RegQueryInfoKeyA( HKEY hkey, LPSTR class, LPDWORD class_len, LPDWORD reserved,
+LSTATUS WINAPI RegQueryInfoKeyA( HKEY hkey, LPSTR class, LPDWORD class_len, LPDWORD reserved,
                               LPDWORD subkeys, LPDWORD max_subkey, LPDWORD max_class,
                               LPDWORD values, LPDWORD max_value, LPDWORD max_data,
                               LPDWORD security, FILETIME *modif )
@@ -885,7 +911,7 @@ LONG WINAPI RegQueryInfoKeyA( HKEY hkey, LPSTR class, LPDWORD class_len, LPDWORD
  *  Success: ERROR_SUCCESS
  *  Failure: Error code
  */
-LONG WINAPI RegCloseKey( HKEY hkey )
+LSTATUS WINAPI RegCloseKey( HKEY hkey )
 {
     if (!hkey) return ERROR_INVALID_HANDLE;
     if (hkey >= (HKEY)0x80000000) return ERROR_SUCCESS;
@@ -898,7 +924,7 @@ LONG WINAPI RegCloseKey( HKEY hkey )
  *
  * See RegDeleteKeyA.
  */
-LONG WINAPI RegDeleteKeyW( HKEY hkey, LPCWSTR name )
+LSTATUS WINAPI RegDeleteKeyW( HKEY hkey, LPCWSTR name )
 {
     DWORD ret;
     HKEY tmp;
@@ -935,7 +961,7 @@ LONG WINAPI RegDeleteKeyW( HKEY hkey, LPCWSTR name )
  *  Success: ERROR_SUCCESS
  *  Failure: Error code
  */
-LONG WINAPI RegDeleteKeyA( HKEY hkey, LPCSTR name )
+LSTATUS WINAPI RegDeleteKeyA( HKEY hkey, LPCSTR name )
 {
     DWORD ret;
     HKEY tmp;
@@ -982,7 +1008,7 @@ LONG WINAPI RegDeleteKeyA( HKEY hkey, LPCSTR name )
  *  Success: ERROR_SUCCESS
  *  Failure: Error code
  */
-LONG WINAPI RegSetValueExW( HKEY hkey, LPCWSTR name, DWORD reserved,
+LSTATUS WINAPI RegSetValueExW( HKEY hkey, LPCWSTR name, DWORD reserved,
                             DWORD type, CONST BYTE *data, DWORD count )
 {
     UNICODE_STRING nameW;
@@ -1011,7 +1037,7 @@ LONG WINAPI RegSetValueExW( HKEY hkey, LPCWSTR name, DWORD reserved,
  *  win95 does not care about count for REG_SZ and finds out the len by itself (js)
  *  NT does definitely care (aj)
  */
-LONG WINAPI RegSetValueExA( HKEY hkey, LPCSTR name, DWORD reserved, DWORD type,
+LSTATUS WINAPI RegSetValueExA( HKEY hkey, LPCSTR name, DWORD reserved, DWORD type,
                             CONST BYTE *data, DWORD count )
 {
     ANSI_STRING nameA;
@@ -1065,20 +1091,20 @@ LONG WINAPI RegSetValueExA( HKEY hkey, LPCSTR name, DWORD reserved, DWORD type,
  *  lpSubKey [I] Name of a subkey of hKey.
  *  dwType   [I] Type of information to store.
  *  lpData   [I] String that contains the data to set for the default value.
- *  cbData   [I] Size of lpData.
+ *  cbData   [I] Ignored.
  *
  * RETURNS
  *  Success: ERROR_SUCCESS
  *  Failure: nonzero error code from Winerror.h
  */
-LONG WINAPI RegSetValueW( HKEY hkey, LPCWSTR name, DWORD type, LPCWSTR data, DWORD count )
+LSTATUS WINAPI RegSetValueW( HKEY hkey, LPCWSTR name, DWORD type, LPCWSTR data, DWORD count )
 {
     HKEY subkey = hkey;
     DWORD ret;
 
     TRACE("(%p,%s,%d,%s,%d)\n", hkey, debugstr_w(name), type, debugstr_w(data), count );
 
-    if (type != REG_SZ) return ERROR_INVALID_PARAMETER;
+    if (type != REG_SZ || !data) return ERROR_INVALID_PARAMETER;
 
     if (name && name[0])  /* need to create the subkey */
     {
@@ -1097,14 +1123,14 @@ LONG WINAPI RegSetValueW( HKEY hkey, LPCWSTR name, DWORD type, LPCWSTR data, DWO
  *
  * See RegSetValueW.
  */
-LONG WINAPI RegSetValueA( HKEY hkey, LPCSTR name, DWORD type, LPCSTR data, DWORD count )
+LSTATUS WINAPI RegSetValueA( HKEY hkey, LPCSTR name, DWORD type, LPCSTR data, DWORD count )
 {
     HKEY subkey = hkey;
     DWORD ret;
 
     TRACE("(%p,%s,%d,%s,%d)\n", hkey, debugstr_a(name), type, debugstr_a(data), count );
 
-    if (type != REG_SZ) return ERROR_INVALID_PARAMETER;
+    if (type != REG_SZ || !data) return ERROR_INVALID_PARAMETER;
 
     if (name && name[0])  /* need to create the subkey */
     {
@@ -1122,7 +1148,7 @@ LONG WINAPI RegSetValueA( HKEY hkey, LPCSTR name, DWORD type, LPCSTR data, DWORD
  *
  * See RegQueryValueExA.
  */
-LONG WINAPI RegQueryValueExW( HKEY hkey, LPCWSTR name, LPDWORD reserved, LPDWORD type,
+LSTATUS WINAPI RegQueryValueExW( HKEY hkey, LPCWSTR name, LPDWORD reserved, LPDWORD type,
                               LPBYTE data, LPDWORD count )
 {
     NTSTATUS status;
@@ -1212,12 +1238,12 @@ LONG WINAPI RegQueryValueExW( HKEY hkey, LPCWSTR name, LPDWORD reserved, LPDWORD
  *   MSDN states that if data is too small it is partially filled. In reality 
  *   it remains untouched.
  */
-LONG WINAPI RegQueryValueExA( HKEY hkey, LPCSTR name, LPDWORD reserved, LPDWORD type,
+LSTATUS WINAPI RegQueryValueExA( HKEY hkey, LPCSTR name, LPDWORD reserved, LPDWORD type,
                               LPBYTE data, LPDWORD count )
 {
     NTSTATUS status;
     ANSI_STRING nameA;
-    DWORD total_size;
+    DWORD total_size, datalen = 0;
     char buffer[256], *buf_ptr = buffer;
     KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
     static const int info_size = offsetof( KEY_VALUE_PARTIAL_INFORMATION, Data );
@@ -1228,6 +1254,7 @@ LONG WINAPI RegQueryValueExA( HKEY hkey, LPCSTR name, LPDWORD reserved, LPDWORD 
     if ((data && !count) || reserved) return ERROR_INVALID_PARAMETER;
     if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
+    if (count) datalen = *count;
     if (!data && count) *count = 0;
 
     /* this matches Win9x behaviour - NT sets *type to a random value */
@@ -1270,21 +1297,21 @@ LONG WINAPI RegQueryValueExA( HKEY hkey, LPCSTR name, LPDWORD reserved, LPDWORD 
                                        total_size - info_size );
             if (data && len)
             {
-                if (len > *count) status = STATUS_BUFFER_OVERFLOW;
+                if (len > datalen) status = STATUS_BUFFER_OVERFLOW;
                 else
                 {
                     RtlUnicodeToMultiByteN( (char*)data, len, NULL, (WCHAR *)(buf_ptr + info_size),
                                             total_size - info_size );
                     /* if the type is REG_SZ and data is not 0-terminated
                      * and there is enough space in the buffer NT appends a \0 */
-                    if (len < *count && data[len-1]) data[len] = 0;
+                    if (len < datalen && data[len-1]) data[len] = 0;
                 }
             }
             total_size = len + info_size;
         }
         else if (data)
         {
-            if (total_size - info_size > *count) status = STATUS_BUFFER_OVERFLOW;
+            if (total_size - info_size > datalen) status = STATUS_BUFFER_OVERFLOW;
             else memcpy( data, buf_ptr + info_size, total_size - info_size );
         }
     }
@@ -1315,7 +1342,7 @@ LONG WINAPI RegQueryValueExA( HKEY hkey, LPCSTR name, LPDWORD reserved, LPDWORD 
  *   Success: ERROR_SUCCESS
  *   Failure: nonzero error code from Winerror.h
  */
-LONG WINAPI RegQueryValueW( HKEY hkey, LPCWSTR name, LPWSTR data, LPLONG count )
+LSTATUS WINAPI RegQueryValueW( HKEY hkey, LPCWSTR name, LPWSTR data, LPLONG count )
 {
     DWORD ret;
     HKEY subkey = hkey;
@@ -1344,7 +1371,7 @@ LONG WINAPI RegQueryValueW( HKEY hkey, LPCWSTR name, LPWSTR data, LPLONG count )
  *
  * See RegQueryValueW.
  */
-LONG WINAPI RegQueryValueA( HKEY hkey, LPCSTR name, LPSTR data, LPLONG count )
+LSTATUS WINAPI RegQueryValueA( HKEY hkey, LPCSTR name, LPSTR data, LPLONG count )
 {
     DWORD ret;
     HKEY subkey = hkey;
@@ -1401,7 +1428,7 @@ static VOID ADVAPI_ApplyRestrictions( DWORD dwFlags, DWORD dwType,
 
                 if ((dwFlags & RRF_RT_DWORD) == RRF_RT_DWORD)
                     cbExpect = 4;
-                else if ((dwFlags & RRF_RT_DWORD) == RRF_RT_QWORD)
+                else if ((dwFlags & RRF_RT_QWORD) == RRF_RT_QWORD)
                     cbExpect = 8;
 
                 if (cbExpect && cbData != cbExpect)
@@ -1416,8 +1443,8 @@ static VOID ADVAPI_ApplyRestrictions( DWORD dwFlags, DWORD dwType,
 /******************************************************************************
  * RegGetValueW   [ADVAPI32.@]
  *
- * Retrieves the type and data for a value name associated with a key 
- * optionally expanding it's content and restricting it's type.
+ * Retrieves the type and data for a value name associated with a key,
+ * optionally expanding its content and restricting its type.
  *
  * PARAMS
  *  hKey      [I] Handle to an open key.
@@ -1426,20 +1453,21 @@ static VOID ADVAPI_ApplyRestrictions( DWORD dwFlags, DWORD dwType,
  *  dwFlags   [I] Flags restricting the value type to retrieve.
  *  pdwType   [O] Destination for the values type, may be NULL.
  *  pvData    [O] Destination for the values content, may be NULL.
- *  pcbData   [I/O] Size of pvData, updated with the size required to 
- *                  retrieve the whole content.
+ *  pcbData   [I/O] Size of pvData, updated with the size in bytes required to
+ *                  retrieve the whole content, including the trailing '\0'
+ *                  for strings.
  *
  * RETURNS
  *  Success: ERROR_SUCCESS
  *  Failure: nonzero error code from Winerror.h
  *
  * NOTES
- *  - Unless RRF_NOEXPAND is specified REG_EXPAND_SZ is automatically expanded
- *    and REG_SZ is retrieved instead.
+ *  - Unless RRF_NOEXPAND is specified, REG_EXPAND_SZ values are automatically
+ *    expanded and pdwType is set to REG_SZ instead.
  *  - Restrictions are applied after expanding, using RRF_RT_REG_EXPAND_SZ 
  *    without RRF_NOEXPAND is thus not allowed.
  */
-LONG WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue, 
+LSTATUS WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
                           DWORD dwFlags, LPDWORD pdwType, PVOID pvData,
                           LPDWORD pcbData )
 {
@@ -1451,6 +1479,8 @@ LONG WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
           hKey, debugstr_w(pszSubKey), debugstr_w(pszValue), dwFlags, pdwType,
           pvData, pcbData, cbData);
 
+    if (pvData && !pcbData)
+        return ERROR_INVALID_PARAMETER;
     if ((dwFlags & RRF_RT_REG_EXPAND_SZ) && !(dwFlags & RRF_NOEXPAND))
         return ERROR_INVALID_PARAMETER;
 
@@ -1466,7 +1496,7 @@ LONG WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
      * if the passed buffer was too small as the expanded string might be
      * smaller than the unexpanded one and could fit into cbData bytes. */
     if ((ret == ERROR_SUCCESS || ret == ERROR_MORE_DATA) &&
-        (dwType == REG_EXPAND_SZ && !(dwFlags & RRF_NOEXPAND)))
+        dwType == REG_EXPAND_SZ && !(dwFlags & RRF_NOEXPAND))
     {
         do {
             HeapFree(GetProcessHeap(), 0, pvBuf);
@@ -1478,7 +1508,7 @@ LONG WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
                 break;
             }
 
-            if (ret == ERROR_MORE_DATA)
+            if (ret == ERROR_MORE_DATA || !pvData)
                 ret = RegQueryValueExW(hKey, pszValue, NULL, 
                                        &dwType, pvBuf, &cbData);
             else
@@ -1496,15 +1526,16 @@ LONG WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
 
         if (ret == ERROR_SUCCESS)
         {
+            /* Recheck dwType in case it changed since the first call */
             if (dwType == REG_EXPAND_SZ)
             {
                 cbData = ExpandEnvironmentStringsW(pvBuf, pvData,
-                                                   pcbData ? *pcbData : 0);
+                                                   pcbData ? *pcbData : 0) * sizeof(WCHAR);
                 dwType = REG_SZ;
-                if(pcbData && cbData > *pcbData)
+                if(pvData && pcbData && cbData > *pcbData)
                     ret = ERROR_MORE_DATA;
             }
-            else if (pcbData)
+            else if (pvData)
                 CopyMemory(pvData, pvBuf, *pcbData);
         }
 
@@ -1516,7 +1547,7 @@ LONG WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
 
     ADVAPI_ApplyRestrictions(dwFlags, dwType, cbData, &ret);
 
-    if (pcbData && ret != ERROR_SUCCESS && (dwFlags & RRF_ZEROONFAILURE))
+    if (pvData && ret != ERROR_SUCCESS && (dwFlags & RRF_ZEROONFAILURE))
         ZeroMemory(pvData, *pcbData);
 
     if (pdwType) *pdwType = dwType;
@@ -1531,7 +1562,7 @@ LONG WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
  *
  * See RegGetValueW.
  */
-LONG WINAPI RegGetValueA( HKEY hKey, LPCSTR pszSubKey, LPCSTR pszValue, 
+LSTATUS WINAPI RegGetValueA( HKEY hKey, LPCSTR pszSubKey, LPCSTR pszValue,
                           DWORD dwFlags, LPDWORD pdwType, PVOID pvData, 
                           LPDWORD pcbData )
 {
@@ -1543,6 +1574,8 @@ LONG WINAPI RegGetValueA( HKEY hKey, LPCSTR pszSubKey, LPCSTR pszValue,
           hKey, pszSubKey, pszValue, dwFlags, pdwType, pvData, pcbData,
           cbData);
 
+    if (pvData && !pcbData)
+        return ERROR_INVALID_PARAMETER;
     if ((dwFlags & RRF_RT_REG_EXPAND_SZ) && !(dwFlags & RRF_NOEXPAND))
         return ERROR_INVALID_PARAMETER;
 
@@ -1558,7 +1591,7 @@ LONG WINAPI RegGetValueA( HKEY hKey, LPCSTR pszSubKey, LPCSTR pszValue,
      * if the passed buffer was too small as the expanded string might be
      * smaller than the unexpanded one and could fit into cbData bytes. */
     if ((ret == ERROR_SUCCESS || ret == ERROR_MORE_DATA) &&
-        (dwType == REG_EXPAND_SZ && !(dwFlags & RRF_NOEXPAND)))
+        dwType == REG_EXPAND_SZ && !(dwFlags & RRF_NOEXPAND))
     {
         do {
             HeapFree(GetProcessHeap(), 0, pvBuf);
@@ -1570,7 +1603,7 @@ LONG WINAPI RegGetValueA( HKEY hKey, LPCSTR pszSubKey, LPCSTR pszValue,
                 break;
             }
 
-            if (ret == ERROR_MORE_DATA)
+            if (ret == ERROR_MORE_DATA || !pvData)
                 ret = RegQueryValueExA(hKey, pszValue, NULL, 
                                        &dwType, pvBuf, &cbData);
             else
@@ -1588,15 +1621,16 @@ LONG WINAPI RegGetValueA( HKEY hKey, LPCSTR pszSubKey, LPCSTR pszValue,
 
         if (ret == ERROR_SUCCESS)
         {
+            /* Recheck dwType in case it changed since the first call */
             if (dwType == REG_EXPAND_SZ)
             {
                 cbData = ExpandEnvironmentStringsA(pvBuf, pvData,
                                                    pcbData ? *pcbData : 0);
                 dwType = REG_SZ;
-                if(pcbData && cbData > *pcbData)
+                if(pvData && pcbData && cbData > *pcbData)
                     ret = ERROR_MORE_DATA;
             }
-            else if (pcbData)
+            else if (pvData)
                 CopyMemory(pvData, pvBuf, *pcbData);
         }
 
@@ -1608,7 +1642,7 @@ LONG WINAPI RegGetValueA( HKEY hKey, LPCSTR pszSubKey, LPCSTR pszValue,
 
     ADVAPI_ApplyRestrictions(dwFlags, dwType, cbData, &ret);
 
-    if (pcbData && ret != ERROR_SUCCESS && (dwFlags & RRF_ZEROONFAILURE))
+    if (pvData && ret != ERROR_SUCCESS && (dwFlags & RRF_ZEROONFAILURE))
         ZeroMemory(pvData, *pcbData);
 
     if (pdwType) *pdwType = dwType;
@@ -1638,7 +1672,7 @@ LONG WINAPI RegGetValueA( HKEY hKey, LPCSTR pszSubKey, LPCSTR pszValue,
  *  Failure: nonzero error code from Winerror.h
  */
 
-LONG WINAPI RegEnumValueW( HKEY hkey, DWORD index, LPWSTR value, LPDWORD val_count,
+LSTATUS WINAPI RegEnumValueW( HKEY hkey, DWORD index, LPWSTR value, LPDWORD val_count,
                            LPDWORD reserved, LPDWORD type, LPBYTE data, LPDWORD count )
 {
     NTSTATUS status;
@@ -1723,7 +1757,7 @@ LONG WINAPI RegEnumValueW( HKEY hkey, DWORD index, LPWSTR value, LPDWORD val_cou
  *
  * See RegEnumValueW.
  */
-LONG WINAPI RegEnumValueA( HKEY hkey, DWORD index, LPSTR value, LPDWORD val_count,
+LSTATUS WINAPI RegEnumValueA( HKEY hkey, DWORD index, LPSTR value, LPDWORD val_count,
                            LPDWORD reserved, LPDWORD type, LPBYTE data, LPDWORD count )
 {
     NTSTATUS status;
@@ -1829,7 +1863,7 @@ LONG WINAPI RegEnumValueA( HKEY hkey, DWORD index, LPSTR value, LPDWORD val_coun
  *
  * See RegDeleteValueA.
  */
-LONG WINAPI RegDeleteValueW( HKEY hkey, LPCWSTR name )
+LSTATUS WINAPI RegDeleteValueW( HKEY hkey, LPCWSTR name )
 {
     UNICODE_STRING nameW;
 
@@ -1853,7 +1887,7 @@ LONG WINAPI RegDeleteValueW( HKEY hkey, LPCWSTR name )
  *  Success: ERROR_SUCCESS
  *  Failure: nonzero error code from Winerror.h
  */
-LONG WINAPI RegDeleteValueA( HKEY hkey, LPCSTR name )
+LSTATUS WINAPI RegDeleteValueA( HKEY hkey, LPCSTR name )
 {
     STRING nameA;
     NTSTATUS status;
@@ -1883,7 +1917,7 @@ LONG WINAPI RegDeleteValueA( HKEY hkey, LPCSTR name )
  *  Success: ERROR_SUCCESS
  *  Failure: nonzero error code from Winerror.h
  */
-LONG WINAPI RegLoadKeyW( HKEY hkey, LPCWSTR subkey, LPCWSTR filename )
+LSTATUS WINAPI RegLoadKeyW( HKEY hkey, LPCWSTR subkey, LPCWSTR filename )
 {
     OBJECT_ATTRIBUTES destkey, file;
     UNICODE_STRING subkeyW, filenameW;
@@ -1918,7 +1952,7 @@ LONG WINAPI RegLoadKeyW( HKEY hkey, LPCWSTR subkey, LPCWSTR filename )
  *
  * See RegLoadKeyW.
  */
-LONG WINAPI RegLoadKeyA( HKEY hkey, LPCSTR subkey, LPCSTR filename )
+LSTATUS WINAPI RegLoadKeyA( HKEY hkey, LPCSTR subkey, LPCSTR filename )
 {
     UNICODE_STRING subkeyW, filenameW;
     STRING subkeyA, filenameA;
@@ -1956,7 +1990,7 @@ LONG WINAPI RegLoadKeyA( HKEY hkey, LPCSTR subkey, LPCSTR filename )
  *  Success: ERROR_SUCCESS
  *  Failure: nonzero error code from Winerror.h
  */
-LONG WINAPI RegSaveKeyW( HKEY hkey, LPCWSTR file, LPSECURITY_ATTRIBUTES sa )
+LSTATUS WINAPI RegSaveKeyW( HKEY hkey, LPCWSTR file, LPSECURITY_ATTRIBUTES sa )
 {
     static const WCHAR format[] =
         {'r','e','g','%','0','4','x','.','t','m','p',0};
@@ -2012,7 +2046,7 @@ done:
  *
  * See RegSaveKeyW.
  */
-LONG WINAPI RegSaveKeyA( HKEY hkey, LPCSTR file, LPSECURITY_ATTRIBUTES sa )
+LSTATUS WINAPI RegSaveKeyA( HKEY hkey, LPCSTR file, LPSECURITY_ATTRIBUTES sa )
 {
     UNICODE_STRING *fileW = &NtCurrentTeb()->StaticUnicodeString;
     NTSTATUS status;
@@ -2039,7 +2073,7 @@ LONG WINAPI RegSaveKeyA( HKEY hkey, LPCSTR file, LPSECURITY_ATTRIBUTES sa )
  *  Success: ERROR_SUCCESS
  *  Failure: nonzero error code from Winerror.h
  */
-LONG WINAPI RegRestoreKeyW( HKEY hkey, LPCWSTR lpFile, DWORD dwFlags )
+LSTATUS WINAPI RegRestoreKeyW( HKEY hkey, LPCWSTR lpFile, DWORD dwFlags )
 {
     TRACE("(%p,%s,%d)\n",hkey,debugstr_w(lpFile),dwFlags);
 
@@ -2060,7 +2094,7 @@ LONG WINAPI RegRestoreKeyW( HKEY hkey, LPCWSTR lpFile, DWORD dwFlags )
  *
  * See RegRestoreKeyW.
  */
-LONG WINAPI RegRestoreKeyA( HKEY hkey, LPCSTR lpFile, DWORD dwFlags )
+LSTATUS WINAPI RegRestoreKeyA( HKEY hkey, LPCSTR lpFile, DWORD dwFlags )
 {
     UNICODE_STRING lpFileW;
     LONG ret;
@@ -2085,10 +2119,12 @@ LONG WINAPI RegRestoreKeyA( HKEY hkey, LPCSTR lpFile, DWORD dwFlags )
  *  Success: ERROR_SUCCESS
  *  Failure: nonzero error code from Winerror.h
  */
-LONG WINAPI RegUnLoadKeyW( HKEY hkey, LPCWSTR lpSubKey )
+LSTATUS WINAPI RegUnLoadKeyW( HKEY hkey, LPCWSTR lpSubKey )
 {
     DWORD ret;
     HKEY shkey;
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING subkey;
 
     TRACE("(%p,%s)\n",hkey, debugstr_w(lpSubKey));
 
@@ -2096,7 +2132,9 @@ LONG WINAPI RegUnLoadKeyW( HKEY hkey, LPCWSTR lpSubKey )
     if( ret )
         return ERROR_INVALID_PARAMETER;
 
-    ret = RtlNtStatusToDosError(NtUnloadKey(shkey));
+    RtlInitUnicodeString(&subkey, lpSubKey);
+    InitializeObjectAttributes(&attr, &subkey, OBJ_CASE_INSENSITIVE, shkey, NULL);
+    ret = RtlNtStatusToDosError(NtUnloadKey(&attr));
 
     RegCloseKey(shkey);
 
@@ -2109,7 +2147,7 @@ LONG WINAPI RegUnLoadKeyW( HKEY hkey, LPCWSTR lpSubKey )
  *
  * See RegUnLoadKeyW.
  */
-LONG WINAPI RegUnLoadKeyA( HKEY hkey, LPCSTR lpSubKey )
+LSTATUS WINAPI RegUnLoadKeyA( HKEY hkey, LPCSTR lpSubKey )
 {
     UNICODE_STRING lpSubKeyW;
     LONG ret;
@@ -2136,7 +2174,7 @@ LONG WINAPI RegUnLoadKeyA( HKEY hkey, LPCSTR lpSubKey )
  *  Success: ERROR_SUCCESS
  *  Failure: nonzero error code from Winerror.h
  */
-LONG WINAPI RegReplaceKeyW( HKEY hkey, LPCWSTR lpSubKey, LPCWSTR lpNewFile,
+LSTATUS WINAPI RegReplaceKeyW( HKEY hkey, LPCWSTR lpSubKey, LPCWSTR lpNewFile,
                               LPCWSTR lpOldFile )
 {
     FIXME("(%p,%s,%s,%s): stub\n", hkey, debugstr_w(lpSubKey),
@@ -2150,7 +2188,7 @@ LONG WINAPI RegReplaceKeyW( HKEY hkey, LPCWSTR lpSubKey, LPCWSTR lpNewFile,
  *
  * See RegReplaceKeyW.
  */
-LONG WINAPI RegReplaceKeyA( HKEY hkey, LPCSTR lpSubKey, LPCSTR lpNewFile,
+LSTATUS WINAPI RegReplaceKeyA( HKEY hkey, LPCSTR lpSubKey, LPCSTR lpNewFile,
                               LPCSTR lpOldFile )
 {
     UNICODE_STRING lpSubKeyW;
@@ -2183,7 +2221,7 @@ LONG WINAPI RegReplaceKeyA( HKEY hkey, LPCSTR lpSubKey, LPCSTR lpNewFile,
  *  Success: ERROR_SUCCESS
  *  Failure: nonzero error code from Winerror.h
  */
-LONG WINAPI RegSetKeySecurity( HKEY hkey, SECURITY_INFORMATION SecurityInfo,
+LSTATUS WINAPI RegSetKeySecurity( HKEY hkey, SECURITY_INFORMATION SecurityInfo,
                                PSECURITY_DESCRIPTOR pSecurityDesc )
 {
     TRACE("(%p,%d,%p)\n",hkey,SecurityInfo,pSecurityDesc);
@@ -2221,25 +2259,18 @@ LONG WINAPI RegSetKeySecurity( HKEY hkey, SECURITY_INFORMATION SecurityInfo,
  *  Success: ERROR_SUCCESS
  *  Failure: Error code
  */
-LONG WINAPI RegGetKeySecurity( HKEY hkey, SECURITY_INFORMATION SecurityInformation,
+LSTATUS WINAPI RegGetKeySecurity( HKEY hkey, SECURITY_INFORMATION SecurityInformation,
                                PSECURITY_DESCRIPTOR pSecurityDescriptor,
                                LPDWORD lpcbSecurityDescriptor )
 {
     TRACE("(%p,%d,%p,%d)\n",hkey,SecurityInformation,pSecurityDescriptor,
-          lpcbSecurityDescriptor?*lpcbSecurityDescriptor:0);
+          *lpcbSecurityDescriptor);
 
-    /* FIXME: Check for valid SecurityInformation values */
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
-    if (*lpcbSecurityDescriptor < sizeof(SECURITY_DESCRIPTOR))
-        return ERROR_INSUFFICIENT_BUFFER;
-
-    FIXME("(%p,%d,%p,%d): stub\n",hkey,SecurityInformation,
-          pSecurityDescriptor,lpcbSecurityDescriptor?*lpcbSecurityDescriptor:0);
-
-    /* Do not leave security descriptor filled with garbage */
-    RtlCreateSecurityDescriptor(pSecurityDescriptor, SECURITY_DESCRIPTOR_REVISION);
-
-    return ERROR_SUCCESS;
+    return RtlNtStatusToDosError( NtQuerySecurityObject( hkey,
+                SecurityInformation, pSecurityDescriptor,
+                *lpcbSecurityDescriptor, lpcbSecurityDescriptor ) );
 }
 
 
@@ -2255,7 +2286,7 @@ LONG WINAPI RegGetKeySecurity( HKEY hkey, SECURITY_INFORMATION SecurityInformati
  *  Success: ERROR_SUCCESS
  *  Failure: Error code
  */
-LONG WINAPI RegFlushKey( HKEY hkey )
+LSTATUS WINAPI RegFlushKey( HKEY hkey )
 {
     hkey = get_special_root_hkey( hkey );
     if (!hkey) return ERROR_INVALID_HANDLE;
@@ -2267,7 +2298,7 @@ LONG WINAPI RegFlushKey( HKEY hkey )
 /******************************************************************************
  * RegConnectRegistryW [ADVAPI32.@]
  *
- * Establishe a connection to a predefined registry key on another computer.
+ * Establish a connection to a predefined registry key on another computer.
  *
  * PARAMS
  *  lpMachineName [I] Address of name of remote computer
@@ -2278,7 +2309,7 @@ LONG WINAPI RegFlushKey( HKEY hkey )
  *  Success: ERROR_SUCCESS
  *  Failure: nonzero error code from Winerror.h
  */
-LONG WINAPI RegConnectRegistryW( LPCWSTR lpMachineName, HKEY hKey,
+LSTATUS WINAPI RegConnectRegistryW( LPCWSTR lpMachineName, HKEY hKey,
                                    PHKEY phkResult )
 {
     LONG ret;
@@ -2318,7 +2349,7 @@ LONG WINAPI RegConnectRegistryW( LPCWSTR lpMachineName, HKEY hKey,
  *
  * See RegConnectRegistryW.
  */
-LONG WINAPI RegConnectRegistryA( LPCSTR machine, HKEY hkey, PHKEY reskey )
+LSTATUS WINAPI RegConnectRegistryA( LPCSTR machine, HKEY hkey, PHKEY reskey )
 {
     UNICODE_STRING machineW;
     LONG ret;
@@ -2346,7 +2377,7 @@ LONG WINAPI RegConnectRegistryA( LPCSTR machine, HKEY hkey, PHKEY reskey )
  *  Success: ERROR_SUCCESS
  *  Failure: nonzero error code from Winerror.h
  */
-LONG WINAPI RegNotifyChangeKeyValue( HKEY hkey, BOOL fWatchSubTree,
+LSTATUS WINAPI RegNotifyChangeKeyValue( HKEY hkey, BOOL fWatchSubTree,
                                      DWORD fdwNotifyFilter, HANDLE hEvent,
                                      BOOL fAsync )
 {
@@ -2376,7 +2407,7 @@ LONG WINAPI RegNotifyChangeKeyValue( HKEY hkey, BOOL fWatchSubTree,
  *
  * PARAMS
  *  hToken     [I] Handle of token representing the user
- *  dwOptions  [I] Reserved, nust be 0
+ *  dwOptions  [I] Reserved, must be 0
  *  samDesired [I] Desired access rights
  *  phkResult  [O] Destination for the resulting key handle
  *
@@ -2389,7 +2420,7 @@ LONG WINAPI RegNotifyChangeKeyValue( HKEY hkey, BOOL fWatchSubTree,
  *  "HKEY_LOCAL_MACHINE\Software\Classes" and the
  *  "HKEY_CURRENT_USER\Software\Classes" keys merged together.
  */
-LONG WINAPI RegOpenUserClassesRoot(
+LSTATUS WINAPI RegOpenUserClassesRoot(
     HANDLE hToken,
     DWORD dwOptions,
     REGSAM samDesired,
@@ -2468,7 +2499,7 @@ static int load_string(HINSTANCE hModule, UINT resId, LPWSTR pwszBuffer, INT cMa
  *  This is an API of Windows Vista, which wasn't available at the time this code
  *  was written. We have to check for the correct behaviour once it's available. 
  */
-LONG WINAPI RegLoadMUIStringW(HKEY hKey, LPCWSTR pwszValue, LPWSTR pwszBuffer, DWORD cbBuffer,
+LSTATUS WINAPI RegLoadMUIStringW(HKEY hKey, LPCWSTR pwszValue, LPWSTR pwszBuffer, DWORD cbBuffer,
     LPDWORD pcbData, DWORD dwFlags, LPCWSTR pwszBaseDir)
 {
     DWORD dwValueType, cbData;
@@ -2554,7 +2585,7 @@ cleanup:
  *
  * See RegLoadMUIStringW
  */
-LONG WINAPI RegLoadMUIStringA(HKEY hKey, LPCSTR pszValue, LPSTR pszBuffer, DWORD cbBuffer,
+LSTATUS WINAPI RegLoadMUIStringA(HKEY hKey, LPCSTR pszValue, LPSTR pszBuffer, DWORD cbBuffer,
     LPDWORD pcbData, DWORD dwFlags, LPCSTR pszBaseDir)
 {
     UNICODE_STRING valueW, baseDirW;
@@ -2603,7 +2634,7 @@ cleanup:
  * NOTES
  *  This is useful for services that use impersonation.
  */
-LONG WINAPI RegDisablePredefinedCache(void)
+LSTATUS WINAPI RegDisablePredefinedCache(void)
 {
     HKEY hkey_current_user;
     int idx = (UINT_PTR)HKEY_CURRENT_USER - (UINT_PTR)HKEY_SPECIAL_ROOT_FIRST;
@@ -2617,4 +2648,92 @@ LONG WINAPI RegDisablePredefinedCache(void)
         NtClose( hkey_current_user );
 
     return ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ * RegDeleteTreeW [ADVAPI32.@]
+ *
+ */
+LSTATUS WINAPI RegDeleteTreeW(HKEY hKey, LPCWSTR lpszSubKey)
+{
+    LONG ret;
+    DWORD dwMaxSubkeyLen, dwMaxValueLen;
+    DWORD dwMaxLen, dwSize;
+    WCHAR szNameBuf[MAX_PATH], *lpszName = szNameBuf;
+    HKEY hSubKey = hKey;
+
+    TRACE("(hkey=%p,%p %s)\n", hKey, lpszSubKey, debugstr_w(lpszSubKey));
+
+    if(lpszSubKey)
+    {
+        ret = RegOpenKeyExW(hKey, lpszSubKey, 0, KEY_READ, &hSubKey);
+        if (ret) return ret;
+    }
+
+    /* Get highest length for keys, values */
+    ret = RegQueryInfoKeyW(hSubKey, NULL, NULL, NULL, NULL,
+            &dwMaxSubkeyLen, NULL, NULL, &dwMaxValueLen, NULL, NULL, NULL);
+    if (ret) goto cleanup;
+
+    dwMaxSubkeyLen++;
+    dwMaxValueLen++;
+    dwMaxLen = max(dwMaxSubkeyLen, dwMaxValueLen);
+    if (dwMaxLen > sizeof(szNameBuf)/sizeof(WCHAR))
+    {
+        /* Name too big: alloc a buffer for it */
+        if (!(lpszName = HeapAlloc( GetProcessHeap(), 0, dwMaxLen*sizeof(WCHAR))))
+        {
+            ret = ERROR_NOT_ENOUGH_MEMORY;
+            goto cleanup;
+        }
+    }
+
+
+    /* Recursively delete all the subkeys */
+    while (TRUE)
+    {
+        dwSize = dwMaxLen;
+        if (RegEnumKeyExW(hSubKey, 0, lpszName, &dwSize, NULL,
+                          NULL, NULL, NULL)) break;
+
+        ret = RegDeleteTreeW(hSubKey, lpszName);
+        if (ret) goto cleanup;
+    }
+
+    if (lpszSubKey)
+        ret = RegDeleteKeyW(hKey, lpszSubKey);
+    else
+        while (TRUE)
+        {
+            dwSize = dwMaxLen;
+            if (RegEnumValueW(hKey, 0, lpszName, &dwSize,
+                  NULL, NULL, NULL, NULL)) break;
+
+            ret = RegDeleteValueW(hKey, lpszName);
+            if (ret) goto cleanup;
+        }
+
+cleanup:
+    /* Free buffer if allocated */
+    if (lpszName != szNameBuf)
+        HeapFree( GetProcessHeap(), 0, lpszName);
+    if(lpszSubKey)
+        RegCloseKey(hSubKey);
+    return ret;
+}
+
+/******************************************************************************
+ * RegDeleteTreeA [ADVAPI32.@]
+ *
+ */
+LSTATUS WINAPI RegDeleteTreeA(HKEY hKey, LPCSTR lpszSubKey)
+{
+    LONG ret;
+    UNICODE_STRING lpszSubKeyW;
+
+    if (lpszSubKey) RtlCreateUnicodeStringFromAsciiz( &lpszSubKeyW, lpszSubKey);
+    else lpszSubKeyW.Buffer = NULL;
+    ret = RegDeleteTreeW( hKey, lpszSubKeyW.Buffer);
+    RtlFreeUnicodeString( &lpszSubKeyW );
+    return ret;
 }

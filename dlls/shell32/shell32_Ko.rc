@@ -1,6 +1,6 @@
 /*
  * Copyright 1998 Juergen Schmied
- * Copyright 2006 YunSong Hwang
+ * Copyright 2006, 2007 YunSong Hwang
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -76,6 +76,7 @@ MENU_SHV_FILE MENU DISCARDABLE
 BEGIN
 POPUP ""
 BEGIN
+MENUITEM "&Select"		FCIDM_SHVIEW_OPEN
 MENUITEM "탐색(&X)",		FCIDM_SHVIEW_EXPLORE
 MENUITEM "열기(&O)",		FCIDM_SHVIEW_OPEN
 MENUITEM SEPARATOR
@@ -105,17 +106,51 @@ WS_BORDER | WS_TABSTOP,
 4, 40, 180, 120
 }
 
-SHELL_ABOUT_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 210, 152
+
+SHNEWBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 218, 196
+STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
+CAPTION "폴더 탐색"
+FONT 8, "MS Shell Dlg"
+{
+LTEXT "", IDD_TITLE, 10, 8, 198, 24
+LTEXT "", IDD_STATUS, 10, 25, 198, 12
+LTEXT "폴더:", IDD_FOLDER, 10, 156, 40, 12
+CONTROL "", IDD_TREEVIEW, "SysTreeView32",
+TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
+WS_BORDER | WS_TABSTOP,
+12, 38, 194, 105
+EDITTEXT IDD_FOLDERTEXT, 46, 150, 160, 14, WS_BORDER | WS_GROUP | WS_TABSTOP
+PUSHBUTTON "새 폴더 만들기(&M)", IDD_MAKENEWFOLDER, 12, 174, 70, 14, WS_GROUP | WS_TABSTOP
+DEFPUSHBUTTON "확인", IDOK, 102, 174, 50, 14, BS_DEFPUSHBUTTON | WS_GROUP | WS_TABSTOP
+PUSHBUTTON "취소", IDCANCEL, 156, 174, 50, 14, WS_GROUP | WS_TABSTOP
+}
+
+SHELL_YESTOALL_MSGBOX DIALOG 200, 100, 280, 90
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
-CAPTION "%s 정보"
+CAPTION "메시지"
+FONT 8, "MS Shell Dlg"
+{
+DEFPUSHBUTTON "예(&Y)", IDYES, 34, 69, 53, 14, WS_GROUP | WS_TABSTOP
+PUSHBUTTON "모두 예(&A)", IDD_YESTOALL, 92, 69, 65, 14, WS_GROUP | WS_TABSTOP
+PUSHBUTTON " 아니오(&N)", IDNO, 162, 69, 53, 14, WS_GROUP | WS_TABSTOP
+PUSHBUTTON "취소(&C)", IDCANCEL, 220, 69, 53, 14, WS_GROUP | WS_TABSTOP
+ICON "", IDD_ICON, 10, 10, 16, 16
+LTEXT "", IDD_MESSAGE, 40, 10, 238, 52, 0
+}
+
+SHELL_ABOUT_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 220, 152
+STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+CAPTION " %s 정보"
 FONT 10, "MS Shell Dlg"
 {
-DEFPUSHBUTTON "확인", IDOK, 153, 133, 50, 12, WS_TABSTOP
-LISTBOX 99, 8, 65, 137, 82, LBS_NOTIFY | WS_VSCROLL | WS_BORDER
-ICON "", 1088, 10, 10, 14, 16
-LTEXT "", 100, 30, 10, 137, 10
-LTEXT "", 101, 30, 22, 137, 10
-LTEXT "Wine은 당신을 위해 제공되었습니다.:", 98, 8, 55, 137, 10
+ DEFPUSHBUTTON "확인", IDOK, 153, 133, 60, 12, WS_TABSTOP
+ PUSHBUTTON "Wine 라이센스(&l)...", IDC_ABOUT_LICENSE, 153, 113, 60, 12, WS_TABSTOP
+ LISTBOX IDC_ABOUT_LISTBOX, 8, 65, 137, 82, LBS_NOTIFY | WS_VSCROLL | WS_BORDER
+ ICON "", stc1, 10, 10, 30, 30
+ LTEXT "", IDC_ABOUT_STATIC_TEXT1, 42, 10, 170, 10
+ LTEXT "", IDC_ABOUT_STATIC_TEXT2, 42, 22, 170, 10
+ LTEXT "%s 실행중", IDC_ABOUT_STATIC_TEXT3, 42, 34, 170, 10
+ LTEXT "Wine was brought to you by:", IDC_ABOUT_WINE_TEXT, 8, 54, 204, 10
 }
 
 SHELL_RUN_DLG DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 227, 95
@@ -132,7 +167,7 @@ PUSHBUTTON "취소", IDCANCEL, 116, 63, 50, 14, WS_TABSTOP
 PUSHBUTTON "찾기(&B)...", 12288, 170, 63, 50, 14, WS_TABSTOP
 }
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 {
 /* columns in the shellview */
 IDS_SHV_COLUMN1		"파일"
@@ -173,41 +208,64 @@ IDS_TRASHITEM_TEXT "당신은 '%1' 을(를) 휴지통으로 보내기를 바랍니까?"
 IDS_TRASHFOLDER_TEXT "당신은 '%1' 과 그 안의 내용을 휴지통으로 보내기를 바랍니까?"
 IDS_TRASHMULTIPLE_TEXT "당신은 '%1' 들을(를) 휴지통으로 보내기를 바랍니까?"
 IDS_CANTTRASH_TEXT "The item '%1' can't be sent to Trash. Do you want to delete it instead?"
-IDS_OVERWRITEFILE_TEXT "파일 %1을 덮어쓰겠습니까?"
+IDS_OVERWRITEFILE_TEXT "This folder already contains a file called '%1'.\n\nDo you want to replace it?"
 IDS_OVERWRITEFILE_CAPTION "파일 덮어쓰기 확인"
+IDS_OVERWRITEFOLDER_TEXT "  이 폴더는 이미 '%1'이란 이름을 가진 폴더를 포함하고 있습니다.\n\n"\
+     "만약 당신이 같은 이름으로 대상 폴더를 지정한다면 선택된 폴더는 대체될 것입니다\n"\
+     " 대체될 것입니다. 당신은 이 폴더를 이동시키거나 복사하겠습니까?"
+
 
 /* message box strings */
-IDS_RESTART_TITLE       "다시 시작"
+IDS_RESTART_TITLE       "다시 시작" 
 IDS_RESTART_PROMPT      "당신은 윈도우즈 재부팅을  재현하겠습니까?"
 IDS_SHUTDOWN_TITLE      "끄기"
 IDS_SHUTDOWN_PROMPT     "당신은  Wine 세션을 끄겠습니까?"
 
 /* shell folder path default values */
-IDS_PROGRAMS                "Start Menu\\Programs"
-IDS_PERSONAL                "My Documents"
-IDS_FAVORITES               "Favorites"
-IDS_STARTUP                 "Start Menu\\Programs\\StartUp"
-IDS_RECENT                  "Recent"
-IDS_SENDTO                  "SendTo"
-IDS_STARTMENU               "Start Menu"
-IDS_MYMUSIC                 "My Music"
-IDS_MYVIDEO                 "My Video"
-IDS_DESKTOPDIRECTORY        "Desktop"
-IDS_NETHOOD                 "NetHood"
+IDS_PROGRAMS                "시작 메뉴\\프로그램"
+IDS_PERSONAL                "내 문서"
+IDS_FAVORITES               "즐겨찾기"
+IDS_STARTUP                 "시작 메뉴\\프로그램\\시작 프로그램"
+IDS_RECENT                  "최근 파일"
+IDS_SENDTO                  "보내기"
+IDS_STARTMENU               "시작 메뉴"
+IDS_MYMUSIC                 "내 음악"
+IDS_MYVIDEO                 "내 비디오"
+IDS_DESKTOPDIRECTORY        "데스크탑"
+IDS_NETHOOD                 "네트워크 환경"
 IDS_TEMPLATES               "Templates"
 IDS_APPDATA                 "Application Data"
-IDS_PRINTHOOD               "PrintHood"
+IDS_PRINTHOOD               "네트워크 환경"
 IDS_LOCAL_APPDATA           "Local Settings\\Application Data"
 IDS_INTERNET_CACHE          "Local Settings\\Temporary Internet Files"
 IDS_COOKIES                 "Cookies"
 IDS_HISTORY                 "Local Settings\\History"
 IDS_PROGRAM_FILES           "Program Files"
-IDS_MYPICTURES              "My Pictures"
+IDS_MYPICTURES              "내 그림"
 IDS_PROGRAM_FILES_COMMON    "Program Files\\Common Files"
-IDS_COMMON_DOCUMENTS        "Documents"
-IDS_ADMINTOOLS              "Start Menu\\Programs\\Administrative Tools"
-IDS_COMMON_MUSIC            "Documents\\My Music"
-IDS_COMMON_PICTURES         "Documents\\My Pictures"
-IDS_COMMON_VIDEO            "Documents\\My Video"
+IDS_COMMON_DOCUMENTS        "문서"
+IDS_ADMINTOOLS              "시작메뉴\\프로그램\\관리 도구"
+IDS_COMMON_MUSIC            "문서\\내 음악"
+IDS_COMMON_PICTURES         "문서\\내 그림"
+IDS_COMMON_VIDEO            "문서\\내 비디오"
 IDS_CDBURN_AREA             "Local Settings\\Application Data\\Microsoft\\CD Burning"
+
+IDS_NEWFOLDER		"새 폴더"
+}
+
+STRINGTABLE
+{
+IDS_LICENSE_CAPTION,            "Wine 라이센스"
+IDS_LICENSE,
+"Wine is free software; you can redistribute it and/or \
+modify it under the terms of the GNU Lesser General Public \
+License as published by the Free Software Foundation; either \
+version 2.1 of the License, or (at your option) any later version.\n\n\
+Wine is distributed in the hope that it will be useful, \
+but WITHOUT ANY WARRANTY; without even the implied warranty of \
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU \
+Lesser General Public License for more details.\n\n\
+You should have received a copy of the GNU Lesser General Public \
+License along with this library; if not, write to the Free Software \
+Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA."
 }

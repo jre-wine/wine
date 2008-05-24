@@ -43,7 +43,6 @@
 #include "wingdi.h"
 #include "winnls.h"
 #include "winerror.h"
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
@@ -251,9 +250,20 @@ static inline BOOL is_dib_monochrome( const BITMAPINFO* info )
 HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, BOOL on_disk )
 {
     HENHMETAFILE hmf = 0;
-    ENHMETAFILEOBJ *metaObj = GDI_AllocObject( sizeof(ENHMETAFILEOBJ),
-                                               ENHMETAFILE_MAGIC,
-					       (HGDIOBJ *)&hmf, NULL );
+    ENHMETAFILEOBJ *metaObj;
+
+    if (emh->iType != EMR_HEADER || emh->dSignature != ENHMETA_SIGNATURE ||
+        (emh->nBytes & 3)) /* refuse to load unaligned EMF as Windows does */
+    {
+        WARN("Invalid emf header type 0x%08x sig 0x%08x.\n",
+             emh->iType, emh->dSignature);
+        SetLastError(ERROR_INVALID_DATA);
+        return 0;
+    }
+
+    metaObj = GDI_AllocObject( sizeof(ENHMETAFILEOBJ),
+                               ENHMETAFILE_MAGIC,
+                               (HGDIOBJ *)&hmf, NULL );
     if (metaObj)
     {
         metaObj->emh = emh;
@@ -305,6 +315,7 @@ static HENHMETAFILE EMF_GetEnhMetaFile( HANDLE hFile )
 {
     ENHMETAHEADER *emh;
     HANDLE hMapping;
+    HENHMETAFILE hemf;
 
     hMapping = CreateFileMappingA( hFile, NULL, PAGE_READONLY, 0, 0, NULL );
     emh = MapViewOfFile( hMapping, FILE_MAP_READ, 0, 0, 0 );
@@ -312,24 +323,10 @@ static HENHMETAFILE EMF_GetEnhMetaFile( HANDLE hFile )
 
     if (!emh) return 0;
 
-    if (emh->iType != EMR_HEADER || emh->dSignature != ENHMETA_SIGNATURE) {
-        WARN("Invalid emf header type 0x%08x sig 0x%08x.\n",
-	     emh->iType, emh->dSignature);
-        goto err;
-    }
-
-    /* refuse to load unaligned EMF as Windows does */
-    if (emh->nBytes & 3)
-    {
-        WARN("Refusing to load unaligned EMF\n");
-        goto err;
-    }
-
-    return EMF_Create_HENHMETAFILE( emh, TRUE );
-
-err:
-    UnmapViewOfFile( emh );
-    return 0;
+    hemf = EMF_Create_HENHMETAFILE( emh, TRUE );
+    if (!hemf)
+        UnmapViewOfFile( emh );
+    return hemf;
 }
 
 
@@ -494,10 +491,9 @@ UINT WINAPI GetEnhMetaFileBits(
     return size;
 }
 
-typedef struct enum_emh_data
+typedef struct EMF_dc_state
 {
     INT   mode;
-    XFORM init_transform;
     XFORM world_transform;
     INT   wndOrgX;
     INT   wndOrgY;
@@ -507,6 +503,15 @@ typedef struct enum_emh_data
     INT   vportOrgY;
     INT   vportExtX;
     INT   vportExtY;
+    struct EMF_dc_state *next;
+} EMF_dc_state;
+
+typedef struct enum_emh_data
+{
+    XFORM init_transform;
+    EMF_dc_state state;
+    INT save_level;
+    EMF_dc_state *saved_state;
 } enum_emh_data;
 
 #define ENUM_GET_PRIVATE_DATA(ht) \
@@ -517,26 +522,56 @@ typedef struct enum_emh_data
 
 #define IS_WIN9X() (GetVersion()&0x80000000)
 
-static void EMF_Update_MF_Xform(HDC hdc, enum_emh_data *info)
+static void EMF_Update_MF_Xform(HDC hdc, const enum_emh_data *info)
 {
     XFORM mapping_mode_trans, final_trans;
-    FLOAT scaleX, scaleY;
+    double scaleX, scaleY;
 
-    scaleX = (FLOAT)info->vportExtX / (FLOAT)info->wndExtX;
-    scaleY = (FLOAT)info->vportExtY / (FLOAT)info->wndExtY;
+    scaleX = (double)info->state.vportExtX / (double)info->state.wndExtX;
+    scaleY = (double)info->state.vportExtY / (double)info->state.wndExtY;
     mapping_mode_trans.eM11 = scaleX;
     mapping_mode_trans.eM12 = 0.0;
     mapping_mode_trans.eM21 = 0.0;
     mapping_mode_trans.eM22 = scaleY;
-    mapping_mode_trans.eDx  = (FLOAT)info->vportOrgX - scaleX * (FLOAT)info->wndOrgX;
-    mapping_mode_trans.eDy  = (FLOAT)info->vportOrgY - scaleY * (FLOAT)info->wndOrgY;
+    mapping_mode_trans.eDx  = (double)info->state.vportOrgX - scaleX * (double)info->state.wndOrgX;
+    mapping_mode_trans.eDy  = (double)info->state.vportOrgY - scaleY * (double)info->state.wndOrgY;
 
-    CombineTransform(&final_trans, &info->world_transform, &mapping_mode_trans);
+    CombineTransform(&final_trans, &info->state.world_transform, &mapping_mode_trans);
     CombineTransform(&final_trans, &final_trans, &info->init_transform);
  
     if (!SetWorldTransform(hdc, &final_trans))
     {
         ERR("World transform failed!\n");
+    }
+}
+
+static void EMF_RestoreDC( enum_emh_data *info, INT level )
+{
+    if (abs(level) > info->save_level || level == 0) return;
+
+    if (level < 0) level = info->save_level + level + 1;
+
+    while (info->save_level >= level)
+    {
+        EMF_dc_state *state = info->saved_state;
+        info->saved_state = state->next;
+        state->next = NULL;
+        if (--info->save_level < level)
+            info->state = *state;
+        HeapFree( GetProcessHeap(), 0, state );
+    }
+}
+
+static void EMF_SaveDC( enum_emh_data *info )
+{
+    EMF_dc_state *state = HeapAlloc( GetProcessHeap(), 0, sizeof(*state));
+    if (state)
+    {
+        *state = info->state;
+        state->next = info->saved_state;
+        info->saved_state = state;
+        info->save_level++;
+        TRACE("save_level %d\n", info->save_level);
     }
 }
 
@@ -547,46 +582,46 @@ static void EMF_SetMapMode(HDC hdc, enum_emh_data *info)
     INT horzRes  = GetDeviceCaps( hdc, HORZRES );
     INT vertRes  = GetDeviceCaps( hdc, VERTRES );
 
-    TRACE("%d\n",info->mode);
+    TRACE("%d\n", info->state.mode);
 
-    switch(info->mode)
+    switch(info->state.mode)
     {
     case MM_TEXT:
-        info->wndExtX   = 1;
-        info->wndExtY   = 1;
-        info->vportExtX = 1;
-        info->vportExtY = 1;
+        info->state.wndExtX   = 1;
+        info->state.wndExtY   = 1;
+        info->state.vportExtX = 1;
+        info->state.vportExtY = 1;
         break;
     case MM_LOMETRIC:
     case MM_ISOTROPIC:
-        info->wndExtX   = horzSize * 10;
-        info->wndExtY   = vertSize * 10;
-        info->vportExtX = horzRes;
-        info->vportExtY = -vertRes;
+        info->state.wndExtX   = horzSize * 10;
+        info->state.wndExtY   = vertSize * 10;
+        info->state.vportExtX = horzRes;
+        info->state.vportExtY = -vertRes;
         break;
     case MM_HIMETRIC:
-        info->wndExtX   = horzSize * 100;
-        info->wndExtY   = vertSize * 100;
-        info->vportExtX = horzRes;
-        info->vportExtY = -vertRes;
+        info->state.wndExtX   = horzSize * 100;
+        info->state.wndExtY   = vertSize * 100;
+        info->state.vportExtX = horzRes;
+        info->state.vportExtY = -vertRes;
         break;
     case MM_LOENGLISH:
-        info->wndExtX   = MulDiv(1000, horzSize, 254);
-        info->wndExtY   = MulDiv(1000, vertSize, 254);
-        info->vportExtX = horzRes;
-        info->vportExtY = -vertRes;
+        info->state.wndExtX   = MulDiv(1000, horzSize, 254);
+        info->state.wndExtY   = MulDiv(1000, vertSize, 254);
+        info->state.vportExtX = horzRes;
+        info->state.vportExtY = -vertRes;
         break;
     case MM_HIENGLISH:
-        info->wndExtX   = MulDiv(10000, horzSize, 254);
-        info->wndExtY   = MulDiv(10000, vertSize, 254);
-        info->vportExtX = horzRes;
-        info->vportExtY = -vertRes;
+        info->state.wndExtX   = MulDiv(10000, horzSize, 254);
+        info->state.wndExtY   = MulDiv(10000, vertSize, 254);
+        info->state.vportExtX = horzRes;
+        info->state.vportExtY = -vertRes;
         break;
     case MM_TWIPS:
-        info->wndExtX   = MulDiv(14400, horzSize, 254);
-        info->wndExtY   = MulDiv(14400, vertSize, 254);
-        info->vportExtX = horzRes;
-        info->vportExtY = -vertRes;
+        info->state.wndExtX   = MulDiv(14400, horzSize, 254);
+        info->state.wndExtY   = MulDiv(14400, vertSize, 254);
+        info->state.vportExtX = horzRes;
+        info->state.vportExtY = -vertRes;
         break;
     case MM_ANISOTROPIC:
         break;
@@ -603,22 +638,22 @@ static void EMF_SetMapMode(HDC hdc, enum_emh_data *info)
 
 static void EMF_FixIsotropic(HDC hdc, enum_emh_data *info)
 {
-    double xdim = fabs((double)info->vportExtX * GetDeviceCaps( hdc, HORZSIZE ) /
-                  (GetDeviceCaps( hdc, HORZRES ) * info->wndExtX));
-    double ydim = fabs((double)info->vportExtY * GetDeviceCaps( hdc, VERTSIZE ) /
-                  (GetDeviceCaps( hdc, VERTRES ) * info->wndExtY));
+    double xdim = fabs((double)info->state.vportExtX * GetDeviceCaps( hdc, HORZSIZE ) /
+                  (GetDeviceCaps( hdc, HORZRES ) * info->state.wndExtX));
+    double ydim = fabs((double)info->state.vportExtY * GetDeviceCaps( hdc, VERTSIZE ) /
+                  (GetDeviceCaps( hdc, VERTRES ) * info->state.wndExtY));
 
     if (xdim > ydim)
     {
-        INT mincx = (info->vportExtX >= 0) ? 1 : -1;
-        info->vportExtX = floor(info->vportExtX * ydim / xdim + 0.5);
-        if (!info->vportExtX) info->vportExtX = mincx;
+        INT mincx = (info->state.vportExtX >= 0) ? 1 : -1;
+        info->state.vportExtX = floor(info->state.vportExtX * ydim / xdim + 0.5);
+        if (!info->state.vportExtX) info->state.vportExtX = mincx;
     }
     else
     {
-        INT mincy = (info->vportExtY >= 0) ? 1 : -1;
-        info->vportExtY = floor(info->vportExtY * xdim / ydim + 0.5);
-        if (!info->vportExtY) info->vportExtY = mincy;
+        INT mincy = (info->state.vportExtY >= 0) ? 1 : -1;
+        info->state.vportExtY = floor(info->state.vportExtY * xdim / ydim + 0.5);
+        if (!info->state.vportExtY) info->state.vportExtY = mincy;
     }
 }
 
@@ -743,9 +778,10 @@ BOOL WINAPI PlayEnhMetaFileRecord(
       {
         const EMRSETMAPMODE *pSetMapMode = (const EMRSETMAPMODE *)mr;
 
-        if(info->mode == pSetMapMode->iMode && (info->mode == MM_ISOTROPIC || info->mode == MM_ANISOTROPIC))
+        if (info->state.mode == pSetMapMode->iMode &&
+            (info->state.mode == MM_ISOTROPIC || info->state.mode == MM_ANISOTROPIC))
             break;
-        info->mode = pSetMapMode->iMode;
+        info->state.mode = pSetMapMode->iMode;
         EMF_SetMapMode(hdc, info);
 	break;
       }
@@ -793,14 +829,16 @@ BOOL WINAPI PlayEnhMetaFileRecord(
       }
     case EMR_SAVEDC:
       {
-	SaveDC(hdc);
+        if (SaveDC( hdc ))
+            EMF_SaveDC( info );
 	break;
       }
     case EMR_RESTOREDC:
       {
 	const EMRRESTOREDC *pRestoreDC = (const EMRRESTOREDC *)mr;
         TRACE("EMR_RESTORE: %d\n", pRestoreDC->iRelative);
-	RestoreDC(hdc, pRestoreDC->iRelative);
+        if (RestoreDC( hdc, pRestoreDC->iRelative ))
+            EMF_RestoreDC( info, pRestoreDC->iRelative );
 	break;
       }
     case EMR_INTERSECTCLIPRECT:
@@ -842,48 +880,46 @@ BOOL WINAPI PlayEnhMetaFileRecord(
       {
     	const EMRSETWINDOWORGEX *pSetWindowOrgEx = (const EMRSETWINDOWORGEX *)mr;
 
-        info->wndOrgX = pSetWindowOrgEx->ptlOrigin.x;
-        info->wndOrgY = pSetWindowOrgEx->ptlOrigin.y;
+        info->state.wndOrgX = pSetWindowOrgEx->ptlOrigin.x;
+        info->state.wndOrgY = pSetWindowOrgEx->ptlOrigin.y;
 
-        TRACE("SetWindowOrgEx: %d,%d\n",info->wndOrgX,info->wndOrgY);
+        TRACE("SetWindowOrgEx: %d,%d\n", info->state.wndOrgX, info->state.wndOrgY);
         break;
       }
     case EMR_SETWINDOWEXTEX:
       {
 	const EMRSETWINDOWEXTEX *pSetWindowExtEx = (const EMRSETWINDOWEXTEX *)mr;
 	
-        if(info->mode != MM_ISOTROPIC && info->mode != MM_ANISOTROPIC)
+        if (info->state.mode != MM_ISOTROPIC && info->state.mode != MM_ANISOTROPIC)
 	    break;
-        info->wndExtX = pSetWindowExtEx->szlExtent.cx;
-        info->wndExtY = pSetWindowExtEx->szlExtent.cy;
-        if (info->mode == MM_ISOTROPIC)
+        info->state.wndExtX = pSetWindowExtEx->szlExtent.cx;
+        info->state.wndExtY = pSetWindowExtEx->szlExtent.cy;
+        if (info->state.mode == MM_ISOTROPIC)
             EMF_FixIsotropic(hdc, info);
 
-        TRACE("SetWindowExtEx: %d,%d\n",info->wndExtX,info->wndExtY);
+        TRACE("SetWindowExtEx: %d,%d\n",info->state.wndExtX, info->state.wndExtY);
 	break;
       }
     case EMR_SETVIEWPORTORGEX:
       {
 	const EMRSETVIEWPORTORGEX *pSetViewportOrgEx = (const EMRSETVIEWPORTORGEX *)mr;
-        enum_emh_data *info = ENUM_GET_PRIVATE_DATA(handletable);
 
-        info->vportOrgX = pSetViewportOrgEx->ptlOrigin.x;
-        info->vportOrgY = pSetViewportOrgEx->ptlOrigin.y;
-        TRACE("SetViewportOrgEx: %d,%d\n",info->vportOrgX,info->vportOrgY);
+        info->state.vportOrgX = pSetViewportOrgEx->ptlOrigin.x;
+        info->state.vportOrgY = pSetViewportOrgEx->ptlOrigin.y;
+        TRACE("SetViewportOrgEx: %d,%d\n", info->state.vportOrgX, info->state.vportOrgY);
 	break;
       }
     case EMR_SETVIEWPORTEXTEX:
       {
 	const EMRSETVIEWPORTEXTEX *pSetViewportExtEx = (const EMRSETVIEWPORTEXTEX *)mr;
-        enum_emh_data *info = ENUM_GET_PRIVATE_DATA(handletable);
 
-        if(info->mode != MM_ISOTROPIC && info->mode != MM_ANISOTROPIC)
+        if (info->state.mode != MM_ISOTROPIC && info->state.mode != MM_ANISOTROPIC)
 	    break;
-        info->vportExtX = pSetViewportExtEx->szlExtent.cx;
-        info->vportExtY = pSetViewportExtEx->szlExtent.cy;
-        if (info->mode == MM_ISOTROPIC)
+        info->state.vportExtX = pSetViewportExtEx->szlExtent.cx;
+        info->state.vportExtY = pSetViewportExtEx->szlExtent.cy;
+        if (info->state.mode == MM_ISOTROPIC)
             EMF_FixIsotropic(hdc, info);
-        TRACE("SetViewportExtEx: %d,%d\n",info->vportExtX,info->vportExtY);
+        TRACE("SetViewportExtEx: %d,%d\n", info->state.vportExtX, info->state.vportExtY);
 	break;
       }
     case EMR_CREATEPEN:
@@ -1175,15 +1211,15 @@ BOOL WINAPI PlayEnhMetaFileRecord(
 
     case EMR_EXTSELECTCLIPRGN:
       {
-#if 0
-	const EMREXTSELECTCLIPRGN lpRgn = (const EMREXTSELECTCLIPRGN *)mr;
-	HRGN hRgn = ExtCreateRegion(NULL, lpRgn->cbRgnData, (RGNDATA *)lpRgn->RgnData);
+	const EMREXTSELECTCLIPRGN *lpRgn = (const EMREXTSELECTCLIPRGN *)mr;
+	HRGN hRgn = 0;
+
+        if (mr->nSize >= sizeof(*lpRgn) + sizeof(RGNDATAHEADER))
+            hRgn = ExtCreateRegion( &info->init_transform, 0, (RGNDATA *)lpRgn->RgnData );
 
 	ExtSelectClipRgn(hdc, hRgn, (INT)(lpRgn->iMode));
 	/* ExtSelectClipRgn created a copy of the region */
 	DeleteObject(hRgn);
-#endif
-        FIXME("ExtSelectClipRgn\n");
         break;
       }
 
@@ -1196,7 +1232,7 @@ BOOL WINAPI PlayEnhMetaFileRecord(
     case EMR_SETWORLDTRANSFORM:
       {
         const EMRSETWORLDTRANSFORM *lpXfrm = (const EMRSETWORLDTRANSFORM *)mr;
-        info->world_transform = lpXfrm->xform;
+        info->state.world_transform = lpXfrm->xform;
         break;
       }
 
@@ -1334,18 +1370,18 @@ BOOL WINAPI PlayEnhMetaFileRecord(
       {
         const EMRSCALEVIEWPORTEXTEX *lpScaleViewportExtEx = (const EMRSCALEVIEWPORTEXTEX *)mr;
 
-        if ((info->mode != MM_ISOTROPIC) && (info->mode != MM_ANISOTROPIC))
+        if ((info->state.mode != MM_ISOTROPIC) && (info->state.mode != MM_ANISOTROPIC))
 	    break;
         if (!lpScaleViewportExtEx->xNum || !lpScaleViewportExtEx->xDenom || 
             !lpScaleViewportExtEx->yNum || !lpScaleViewportExtEx->yDenom)
             break;
-        info->vportExtX = MulDiv(info->vportExtX, lpScaleViewportExtEx->xNum,
+        info->state.vportExtX = MulDiv(info->state.vportExtX, lpScaleViewportExtEx->xNum,
                                  lpScaleViewportExtEx->xDenom);
-        info->vportExtY = MulDiv(info->vportExtY, lpScaleViewportExtEx->yNum,
+        info->state.vportExtY = MulDiv(info->state.vportExtY, lpScaleViewportExtEx->yNum,
                                  lpScaleViewportExtEx->yDenom);
-        if (info->vportExtX == 0) info->vportExtX = 1;
-        if (info->vportExtY == 0) info->vportExtY = 1;
-        if (info->mode == MM_ISOTROPIC)
+        if (info->state.vportExtX == 0) info->state.vportExtX = 1;
+        if (info->state.vportExtY == 0) info->state.vportExtY = 1;
+        if (info->state.mode == MM_ISOTROPIC)
             EMF_FixIsotropic(hdc, info);
 
         TRACE("EMRSCALEVIEWPORTEXTEX %d/%d %d/%d\n",
@@ -1359,18 +1395,18 @@ BOOL WINAPI PlayEnhMetaFileRecord(
       {
         const EMRSCALEWINDOWEXTEX *lpScaleWindowExtEx = (const EMRSCALEWINDOWEXTEX *)mr;
 
-        if ((info->mode != MM_ISOTROPIC) && (info->mode != MM_ANISOTROPIC))
+        if ((info->state.mode != MM_ISOTROPIC) && (info->state.mode != MM_ANISOTROPIC))
 	    break;
         if (!lpScaleWindowExtEx->xNum || !lpScaleWindowExtEx->xDenom || 
             !lpScaleWindowExtEx->xNum || !lpScaleWindowExtEx->yDenom)
             break;
-        info->wndExtX = MulDiv(info->wndExtX, lpScaleWindowExtEx->xNum,
+        info->state.wndExtX = MulDiv(info->state.wndExtX, lpScaleWindowExtEx->xNum,
                                lpScaleWindowExtEx->xDenom);
-        info->wndExtY = MulDiv(info->wndExtY, lpScaleWindowExtEx->yNum,
+        info->state.wndExtY = MulDiv(info->state.wndExtY, lpScaleWindowExtEx->yNum,
                                lpScaleWindowExtEx->yDenom);
-        if (info->wndExtX == 0) info->wndExtX = 1;
-        if (info->wndExtY == 0) info->wndExtY = 1;
-        if (info->mode == MM_ISOTROPIC)
+        if (info->state.wndExtX == 0) info->state.wndExtX = 1;
+        if (info->state.wndExtY == 0) info->state.wndExtY = 1;
+        if (info->state.mode == MM_ISOTROPIC)
             EMF_FixIsotropic(hdc, info);
 
         TRACE("EMRSCALEWINDOWEXTEX %d/%d %d/%d\n",
@@ -1386,16 +1422,16 @@ BOOL WINAPI PlayEnhMetaFileRecord(
 
         switch(lpModifyWorldTrans->iMode) {
         case MWT_IDENTITY:
-            info->world_transform.eM11 = info->world_transform.eM22 = 1;
-            info->world_transform.eM12 = info->world_transform.eM21 = 0;
-            info->world_transform.eDx  = info->world_transform.eDy  = 0;
+            info->state.world_transform.eM11 = info->state.world_transform.eM22 = 1;
+            info->state.world_transform.eM12 = info->state.world_transform.eM21 = 0;
+            info->state.world_transform.eDx  = info->state.world_transform.eDy  = 0;
             break;
         case MWT_LEFTMULTIPLY:
-            CombineTransform(&info->world_transform, &lpModifyWorldTrans->xform,
-                             &info->world_transform);
+            CombineTransform(&info->state.world_transform, &lpModifyWorldTrans->xform,
+                             &info->state.world_transform);
             break;
         case MWT_RIGHTMULTIPLY:
-            CombineTransform(&info->world_transform, &info->world_transform,
+            CombineTransform(&info->state.world_transform, &info->state.world_transform,
                              &lpModifyWorldTrans->xform);
             break;
         default:
@@ -1670,11 +1706,13 @@ BOOL WINAPI PlayEnhMetaFileRecord(
         const EMRCREATEDIBPATTERNBRUSHPT *lpCreate = (const EMRCREATEDIBPATTERNBRUSHPT *)mr;
         LPVOID lpPackedStruct;
 
-        /* check that offsets and data are contained within the record */
-        if ( !( (lpCreate->cbBmi>=0) && (lpCreate->cbBits>=0) &&
-                (lpCreate->offBmi>=0) && (lpCreate->offBits>=0) &&
-                ((lpCreate->offBmi +lpCreate->cbBmi ) <= mr->nSize) &&
-                ((lpCreate->offBits+lpCreate->cbBits) <= mr->nSize) ) )
+        /* Check that offsets and data are contained within the record
+         * (including checking for wrap-arounds).
+         */
+        if (    lpCreate->offBmi  + lpCreate->cbBmi  > mr->nSize
+             || lpCreate->offBits + lpCreate->cbBits > mr->nSize
+             || lpCreate->offBmi  + lpCreate->cbBmi  < lpCreate->offBmi
+             || lpCreate->offBits + lpCreate->cbBits < lpCreate->offBits )
         {
             ERR("Invalid EMR_CREATEDIBPATTERNBRUSHPT record\n");
             break;
@@ -2237,24 +2275,28 @@ BOOL WINAPI EnumEnhMetaFile(
         return FALSE;
     }
 
-    info = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
+    info = HeapAlloc( GetProcessHeap(), 0,
 		    sizeof (enum_emh_data) + sizeof(HANDLETABLE) * emh->nHandles );
     if(!info)
     {
 	SetLastError(ERROR_NOT_ENOUGH_MEMORY);
 	return FALSE;
     }
-    info->wndOrgX = 0;
-    info->wndOrgY = 0;
-    info->wndExtX = 1;
-    info->wndExtY = 1;
-    info->vportOrgX = 0;
-    info->vportOrgY = 0;
-    info->vportExtX = 1;
-    info->vportExtY = 1;
-    info->world_transform.eM11 = info->world_transform.eM22 = 1;
-    info->world_transform.eM12 = info->world_transform.eM21 = 0;
-    info->world_transform.eDx  = info->world_transform.eDy =  0;
+    info->state.wndOrgX = 0;
+    info->state.wndOrgY = 0;
+    info->state.wndExtX = 1;
+    info->state.wndExtY = 1;
+    info->state.vportOrgX = 0;
+    info->state.vportOrgY = 0;
+    info->state.vportExtX = 1;
+    info->state.vportExtY = 1;
+    info->state.world_transform.eM11 = info->state.world_transform.eM22 = 1;
+    info->state.world_transform.eM12 = info->state.world_transform.eM21 = 0;
+    info->state.world_transform.eDx  = info->state.world_transform.eDy =  0;
+
+    info->state.next = NULL;
+    info->save_level = 0;
+    info->saved_state = NULL;
 
     ht = (HANDLETABLE*) &info[1];
     ht->objectHandle[0] = hmf;
@@ -2283,7 +2325,7 @@ BOOL WINAPI EnumEnhMetaFile(
         old_stretchblt = SetStretchBltMode(hdc, BLACKONWHITE);
     }
 
-    info->mode = MM_TEXT;
+    info->state.mode = MM_TEXT;
 
     if ( IS_WIN9X() )
     {
@@ -2298,22 +2340,22 @@ BOOL WINAPI EnumEnhMetaFile(
     else
     {
         /* WinNT combines the vp/win ext/org info into a transform */
-        FLOAT xscale, yscale;
-        xscale = (FLOAT)vp_size.cx / (FLOAT)win_size.cx;
-        yscale = (FLOAT)vp_size.cy / (FLOAT)win_size.cy;
+        double xscale, yscale;
+        xscale = (double)vp_size.cx / (double)win_size.cx;
+        yscale = (double)vp_size.cy / (double)win_size.cy;
         info->init_transform.eM11 = xscale;
         info->init_transform.eM12 = 0.0;
         info->init_transform.eM21 = 0.0;
         info->init_transform.eM22 = yscale;
-        info->init_transform.eDx  = (FLOAT)vp_org.x - xscale * (FLOAT)win_org.x;
-        info->init_transform.eDy  = (FLOAT)vp_org.y - yscale * (FLOAT)win_org.y; 
+        info->init_transform.eDx  = (double)vp_org.x - xscale * (double)win_org.x;
+        info->init_transform.eDy  = (double)vp_org.y - yscale * (double)win_org.y;
 
         CombineTransform(&info->init_transform, &savedXform, &info->init_transform);
     }
 
     if ( lpRect && WIDTH(emh->rclFrame) && HEIGHT(emh->rclFrame) )
     {
-        FLOAT xSrcPixSize, ySrcPixSize, xscale, yscale;
+        double xSrcPixSize, ySrcPixSize, xscale, yscale;
         XFORM xform;
 
         TRACE("rect: %d,%d - %d,%d. rclFrame: %d,%d - %d,%d\n",
@@ -2321,11 +2363,11 @@ BOOL WINAPI EnumEnhMetaFile(
            emh->rclFrame.left, emh->rclFrame.top, emh->rclFrame.right,
            emh->rclFrame.bottom);
 
-        xSrcPixSize = (FLOAT) emh->szlMillimeters.cx / emh->szlDevice.cx;
-        ySrcPixSize = (FLOAT) emh->szlMillimeters.cy / emh->szlDevice.cy;
-        xscale = (FLOAT) WIDTH(*lpRect) * 100.0 /
+        xSrcPixSize = (double) emh->szlMillimeters.cx / emh->szlDevice.cx;
+        ySrcPixSize = (double) emh->szlMillimeters.cy / emh->szlDevice.cy;
+        xscale = (double) WIDTH(*lpRect) * 100.0 /
                  WIDTH(emh->rclFrame) * xSrcPixSize;
-        yscale = (FLOAT) HEIGHT(*lpRect) * 100.0 /
+        yscale = (double) HEIGHT(*lpRect) * 100.0 /
                  HEIGHT(emh->rclFrame) * ySrcPixSize;
         TRACE("xscale = %f, yscale = %f\n", xscale, yscale);
 
@@ -2333,8 +2375,8 @@ BOOL WINAPI EnumEnhMetaFile(
         xform.eM12 = 0;
         xform.eM21 = 0;
         xform.eM22 = yscale;
-        xform.eDx = (FLOAT) lpRect->left - (FLOAT) WIDTH(*lpRect) / WIDTH(emh->rclFrame) * emh->rclFrame.left;
-        xform.eDy = (FLOAT) lpRect->top - (FLOAT) HEIGHT(*lpRect) / HEIGHT(emh->rclFrame) * emh->rclFrame.top;
+        xform.eDx = (double) lpRect->left - (double) WIDTH(*lpRect) / WIDTH(emh->rclFrame) * emh->rclFrame.left;
+        xform.eDy = (double) lpRect->top - (double) HEIGHT(*lpRect) / HEIGHT(emh->rclFrame) * emh->rclFrame.top;
 
         CombineTransform(&info->init_transform, &xform, &info->init_transform);
     }
@@ -2387,6 +2429,12 @@ BOOL WINAPI EnumEnhMetaFile(
         if( (ht->objectHandle)[i] )
 	    DeleteObject( (ht->objectHandle)[i] );
 
+    while (info->saved_state)
+    {
+        EMF_dc_state *state = info->saved_state;
+        info->saved_state = info->saved_state->next;
+        HeapFree( GetProcessHeap(), 0, state );
+    }
     HeapFree( GetProcessHeap(), 0, info );
     return ret;
 }
@@ -2546,7 +2594,7 @@ static INT CALLBACK cbEnhPaletteCopy( HDC a,
 
     /* Update the passed data as a return code */
     info->lpPe     = NULL; /* Palettes were copied! */
-    info->cEntries = (UINT)dwNumPalToCopy;
+    info->cEntries = dwNumPalToCopy;
 
     return FALSE; /* That's all we need */
   }
@@ -2577,7 +2625,7 @@ UINT WINAPI GetEnhMetaFilePaletteEntries( HENHMETAFILE hEmf,
   if ( enhHeader->nPalEntries == 0 ) return 0;
 
   /* Is the user requesting the number of palettes? */
-  if ( lpPe == NULL ) return (UINT)enhHeader->nPalEntries;
+  if ( lpPe == NULL ) return enhHeader->nPalEntries;
 
   /* Copy cEntries worth of PALETTEENTRY structs into the buffer */
   infoForCallBack.cEntries = cEntries;

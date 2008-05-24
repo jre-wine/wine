@@ -126,7 +126,7 @@ HRESULT WINAPI DllInstall(BOOL bInstall, LPCWSTR cmdline)
  *
  * makes sure the handle to shell32 is valid
  */
- BOOL SHDOCVW_LoadShell32(void)
+static BOOL SHDOCVW_LoadShell32(void)
 {
      if (SHDOCVW_hshell32)
        return TRUE;
@@ -161,7 +161,7 @@ BOOL WINAPI ShellDDEInit(BOOL start)
     {
       if (!SHDOCVW_LoadShell32())
         return FALSE;
-      pShellDDEInit = GetProcAddress(SHDOCVW_hshell32, (LPCSTR)188);
+      pShellDDEInit = (void *)GetProcAddress(SHDOCVW_hshell32, (LPCSTR)188);
     }
 
     if (pShellDDEInit)
@@ -217,7 +217,7 @@ static void* fetch_shlwapi_ordinal(unsigned ord)
  */
 DWORD WINAPI WhichPlatformFORWARD(void)
 {
-    static DWORD (*WINAPI p)(void);
+    static DWORD (WINAPI *p)(void);
 
     if (p || (p = fetch_shlwapi_ordinal(276))) return p();
     return 1; /* not integrated, see shlwapi.WhichPlatform */
@@ -228,7 +228,7 @@ DWORD WINAPI WhichPlatformFORWARD(void)
  */
 void WINAPI StopWatchModeFORWARD(void)
 {
-    static void (*WINAPI p)(void);
+    static void (WINAPI *p)(void);
 
     if (p || (p = fetch_shlwapi_ordinal(241))) p();
 }
@@ -238,7 +238,7 @@ void WINAPI StopWatchModeFORWARD(void)
  */
 void WINAPI StopWatchFlushFORWARD(void)
 {
-    static void (*WINAPI p)(void);
+    static void (WINAPI *p)(void);
 
     if (p || (p = fetch_shlwapi_ordinal(242))) p();
 }
@@ -249,7 +249,7 @@ void WINAPI StopWatchFlushFORWARD(void)
 DWORD WINAPI StopWatchWFORWARD(DWORD dwClass, LPCWSTR lpszStr, DWORD dwUnknown,
                                DWORD dwMode, DWORD dwTimeStamp)
 {
-    static DWORD (*WINAPI p)(DWORD, LPCWSTR, DWORD, DWORD, DWORD);
+    static DWORD (WINAPI *p)(DWORD, LPCWSTR, DWORD, DWORD, DWORD);
 
     if (p || (p = fetch_shlwapi_ordinal(243)))
         return p(dwClass, lpszStr, dwUnknown, dwMode, dwTimeStamp);
@@ -262,7 +262,7 @@ DWORD WINAPI StopWatchWFORWARD(DWORD dwClass, LPCWSTR lpszStr, DWORD dwUnknown,
 DWORD WINAPI StopWatchAFORWARD(DWORD dwClass, LPCSTR lpszStr, DWORD dwUnknown,
                                DWORD dwMode, DWORD dwTimeStamp)
 {
-    static DWORD (*WINAPI p)(DWORD, LPCSTR, DWORD, DWORD, DWORD);
+    static DWORD (WINAPI *p)(DWORD, LPCSTR, DWORD, DWORD, DWORD);
 
     if (p || (p = fetch_shlwapi_ordinal(244)))
         return p(dwClass, lpszStr, dwUnknown, dwMode, dwTimeStamp);

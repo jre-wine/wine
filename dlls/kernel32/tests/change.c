@@ -39,12 +39,14 @@
 static DWORD CALLBACK NotificationThread(LPVOID arg)
 {
     HANDLE change = (HANDLE) arg;
+    BOOL notified = FALSE;
     BOOL ret = FALSE;
     DWORD status;
 
     status = WaitForSingleObject(change, 100);
 
     if (status == WAIT_OBJECT_0 ) {
+        notified = TRUE;
         ret = FindNextChangeNotification(change);
     }
 
@@ -52,7 +54,7 @@ static DWORD CALLBACK NotificationThread(LPVOID arg)
     ok( ret, "FindCloseChangeNotification error: %d\n",
        GetLastError());
 
-    ExitThread((DWORD)ret);
+    ExitThread((DWORD)notified);
 }
 
 static HANDLE StartNotificationThread(LPCSTR path, BOOL subtree, DWORD flags)
@@ -65,7 +67,7 @@ static HANDLE StartNotificationThread(LPCSTR path, BOOL subtree, DWORD flags)
 
     thread = CreateThread(NULL, 0, NotificationThread, (LPVOID)change,
                           0, &threadId);
-    ok(thread != INVALID_HANDLE_VALUE, "CreateThread error: %d\n", GetLastError());
+    ok(thread != NULL, "CreateThread error: %d\n", GetLastError());
 
     return thread;
 }
@@ -96,7 +98,9 @@ static void test_FindFirstChangeNotification(void)
     /* pathetic checks */
 
     change = FindFirstChangeNotificationA("not-a-file", FALSE, FILE_NOTIFY_CHANGE_FILE_NAME);
-    ok(change == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND,
+    ok(change == INVALID_HANDLE_VALUE, "Expected INVALID_HANDLE_VALUE, got %p\n", change);
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND ||
+       GetLastError() == ERROR_NO_MORE_FILES, /* win95 */
        "FindFirstChangeNotification error: %d\n", GetLastError());
 
     if (0) /* This documents win2k behavior. It crashes on win98. */
@@ -150,16 +154,15 @@ static void test_FindFirstChangeNotification(void)
     thread = StartNotificationThread(dirname1, FALSE, FILE_NOTIFY_CHANGE_DIR_NAME);
     ret = MoveFileA(dirname1, dirname2);
     ok(ret, "MoveFileA error: %d\n", GetLastError());
-    ok(FinishNotificationThread(thread), "Missed notification\n");
+    /* win9x and win2k behave differently here, don't check result */
+    FinishNotificationThread(thread);
 
     /* What if we remove the directory we registered notification for? */
     thread = StartNotificationThread(dirname2, FALSE, FILE_NOTIFY_CHANGE_DIR_NAME);
     ret = RemoveDirectoryA(dirname2);
     ok(ret, "RemoveDirectoryA error: %d\n", GetLastError());
-
-    /* win98 and win2k behave differently here */
-    ret = FinishNotificationThread(thread);
-    ok(ret || !ret, "You'll never read this\n");
+    /* win9x and win2k behave differently here, don't check result */
+    FinishNotificationThread(thread);
 
     /* functional checks */
 
@@ -256,7 +259,13 @@ static void test_ffcn(void)
     static const WCHAR szBoo[] = { '\\','b','o','o',0 };
     static const WCHAR szHoo[] = { '\\','h','o','o',0 };
 
+    SetLastError(0xdeadbeef);
     r = GetTempPathW( MAX_PATH, path );
+    if (!r && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
+    {
+        skip("GetTempPathW is not implemented\n");
+        return;
+    }
     ok( r != 0, "temp path failed\n");
     if (!r)
         return;
@@ -317,6 +326,48 @@ static void test_ffcn(void)
     ok( r == TRUE, "failed to remove dir\n");
 }
 
+/* this test concentrates on the wait behavior when multiple threads are
+ * waiting on a change notification handle. */
+static void test_ffcnMultipleThreads(void)
+{
+    LONG r;
+    DWORD filter, threadId, status, exitcode;
+    HANDLE handles[2];
+    char path[MAX_PATH];
+
+    r = GetTempPathA(MAX_PATH, path);
+    ok(r, "GetTempPathA error: %d\n", GetLastError());
+
+    lstrcatA(path, "ffcnTestMultipleThreads");
+
+    RemoveDirectoryA(path);
+
+    r = CreateDirectoryA(path, NULL);
+    ok(r, "CreateDirectoryA error: %d\n", GetLastError());
+
+    filter = FILE_NOTIFY_CHANGE_FILE_NAME;
+    filter |= FILE_NOTIFY_CHANGE_DIR_NAME;
+
+    handles[0] = FindFirstChangeNotificationA(path, FALSE, filter);
+    ok(handles[0] != INVALID_HANDLE_VALUE, "FindFirstChangeNotification error: %d\n", GetLastError());
+
+    /* Test behavior if a waiting thread holds the last reference to a change
+     * directory object with an empty wine user APC queue for this thread (bug #7286) */
+
+    /* Create our notification thread */
+    handles[1] = CreateThread(NULL, 0, NotificationThread, (LPVOID)handles[0],
+                              0, &threadId);
+    ok(handles[1] != NULL, "CreateThread error: %d\n", GetLastError());
+
+    status = WaitForMultipleObjects(2, handles, FALSE, 5000);
+    ok(status == WAIT_OBJECT_0 || status == WAIT_OBJECT_0+1, "WaitForMultipleObjects status %d error %d\n", status, GetLastError());
+    ok(GetExitCodeThread(handles[1], &exitcode), "Could not retrieve thread exit code\n");
+
+    /* Clean up */
+    r = RemoveDirectoryA( path );
+    ok( r == TRUE, "failed to remove dir\n");
+}
+
 typedef BOOL (WINAPI *fnReadDirectoryChangesW)(HANDLE,LPVOID,DWORD,BOOL,DWORD,
                          LPDWORD,LPOVERLAPPED,LPOVERLAPPED_COMPLETION_ROUTINE);
 fnReadDirectoryChangesW pReadDirectoryChangesW;
@@ -334,9 +385,18 @@ static void test_readdirectorychanges(void)
     PFILE_NOTIFY_INFORMATION pfni;
 
     if (!pReadDirectoryChangesW)
+    {
+        skip("ReadDirectoryChangesW is not available\n");
         return;
+    }
 
+    SetLastError(0xdeadbeef);
     r = GetTempPathW( MAX_PATH, path );
+    if (!r && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
+    {
+        skip("GetTempPathW is not implemented\n");
+        return;
+    }
     ok( r != 0, "temp path failed\n");
     if (!r)
         return;
@@ -545,9 +605,17 @@ static void test_readdirectorychanges_null(void)
     PFILE_NOTIFY_INFORMATION pfni;
 
     if (!pReadDirectoryChangesW)
+    {
+        skip("ReadDirectoryChangesW is not available\n");
         return;
-
+    }
+    SetLastError(0xdeadbeef);
     r = GetTempPathW( MAX_PATH, path );
+    if (!r && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
+    {
+        skip("GetTempPathW is not implemented\n");
+        return;
+    }
     ok( r != 0, "temp path failed\n");
     if (!r)
         return;
@@ -636,7 +704,13 @@ static void test_readdirectorychanges_filedir(void)
     static const WCHAR szFoo[] = { '\\','f','o','o',0 };
     PFILE_NOTIFY_INFORMATION pfni;
 
+    SetLastError(0xdeadbeef);
     r = GetTempPathW( MAX_PATH, path );
+    if (!r && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
+    {
+        skip("GetTempPathW is not implemented\n");
+        return;
+    }
     ok( r != 0, "temp path failed\n");
     if (!r)
         return;
@@ -702,15 +776,106 @@ static void test_readdirectorychanges_filedir(void)
     ok( r == TRUE, "failed to remove directory\n");
 }
 
+static void test_ffcn_directory_overlap(void)
+{
+    HANDLE parent_watch, child_watch, parent_thread, child_thread;
+    char workdir[MAX_PATH], parentdir[MAX_PATH], childdir[MAX_PATH];
+    char tempfile[MAX_PATH];
+    DWORD threadId;
+    BOOL ret;
+
+    /* Setup directory hierarchy */
+    ret = GetTempPathA(MAX_PATH, workdir);
+    ok((ret > 0) && (ret <= MAX_PATH),
+       "GetTempPathA error: %d\n", GetLastError());
+
+    ret = GetTempFileNameA(workdir, "fcn", 0, tempfile);
+    ok(ret, "GetTempFileNameA error: %d\n", GetLastError());
+    ret = DeleteFileA(tempfile);
+    ok(ret, "DeleteFileA error: %d\n", GetLastError());
+
+    lstrcpyA(parentdir, tempfile);
+    ret = CreateDirectoryA(parentdir, NULL);
+    ok(ret, "CreateDirectoryA error: %d\n", GetLastError());
+
+    lstrcpyA(childdir, parentdir);
+    lstrcatA(childdir, "\\c");
+    ret = CreateDirectoryA(childdir, NULL);
+    ok(ret, "CreateDirectoryA error: %d\n", GetLastError());
+
+
+    /* When recursively watching overlapping directories, changes in child
+     * should trigger notifications for both child and parent */
+    parent_thread = StartNotificationThread(parentdir, TRUE,
+                                            FILE_NOTIFY_CHANGE_FILE_NAME);
+    child_thread = StartNotificationThread(childdir, TRUE,
+                                            FILE_NOTIFY_CHANGE_FILE_NAME);
+
+    /* Create a file in child */
+    ret = GetTempFileNameA(childdir, "fcn", 0, tempfile);
+    ok(ret, "GetTempFileNameA error: %d\n", GetLastError());
+
+    /* Both watches should trigger */
+    ret = FinishNotificationThread(parent_thread);
+    ok(ret, "Missed parent notification\n");
+    ret = FinishNotificationThread(child_thread);
+    ok(ret, "Missed child notification\n");
+
+    ret = DeleteFileA(tempfile);
+    ok(ret, "DeleteFileA error: %d\n", GetLastError());
+
+
+    /* Removing a recursive parent watch should not affect child watches. Doing
+     * so used to crash wineserver. */
+    parent_watch = FindFirstChangeNotificationA(parentdir, TRUE,
+                                                FILE_NOTIFY_CHANGE_FILE_NAME);
+    ok(parent_watch != INVALID_HANDLE_VALUE,
+       "FindFirstChangeNotification error: %d\n", GetLastError());
+    child_watch = FindFirstChangeNotificationA(childdir, TRUE,
+                                               FILE_NOTIFY_CHANGE_FILE_NAME);
+    ok(child_watch != INVALID_HANDLE_VALUE,
+       "FindFirstChangeNotification error: %d\n", GetLastError());
+
+    ret = FindCloseChangeNotification(parent_watch);
+    ok(ret, "FindCloseChangeNotification error: %d\n", GetLastError());
+
+    child_thread = CreateThread(NULL, 0, NotificationThread,
+                                (LPVOID)child_watch, 0, &threadId);
+    ok(child_thread != NULL, "CreateThread error: %d\n", GetLastError());
+
+    /* Create a file in child */
+    ret = GetTempFileNameA(childdir, "fcn", 0, tempfile);
+    ok(ret, "GetTempFileNameA error: %d\n", GetLastError());
+
+    /* Child watch should trigger */
+    ret = FinishNotificationThread(child_thread);
+    ok(ret, "Missed child notification\n");
+
+    /* clean up */
+    ret = DeleteFileA(tempfile);
+    ok(ret, "DeleteFileA error: %d\n", GetLastError());
+
+    ret = RemoveDirectoryA(childdir);
+    ok(ret, "RemoveDirectoryA error: %d\n", GetLastError());
+
+    ret = RemoveDirectoryA(parentdir);
+    ok(ret, "RemoveDirectoryA error: %d\n", GetLastError());
+}
+
 START_TEST(change)
 {
     HMODULE hkernel32 = GetModuleHandle("kernel32");
     pReadDirectoryChangesW = (fnReadDirectoryChangesW)
         GetProcAddress(hkernel32, "ReadDirectoryChangesW");
 
+    test_ffcnMultipleThreads();
+    /* The above function runs a test that must occur before FindCloseChangeNotification is run in the
+       current thread to preserve the emptiness of the wine user APC queue. To ensure this it should be
+       placed first. */
     test_FindFirstChangeNotification();
     test_ffcn();
     test_readdirectorychanges();
     test_readdirectorychanges_null();
     test_readdirectorychanges_filedir();
+    test_ffcn_directory_overlap();
 }

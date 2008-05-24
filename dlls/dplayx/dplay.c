@@ -54,12 +54,12 @@ static lpPlayerList DP_FindPlayer( IDirectPlay2AImpl* This, DPID dpid );
 static lpPlayerData DP_CreatePlayer( IDirectPlay2Impl* iface, LPDPID lpid,
                                      LPDPNAME lpName, DWORD dwFlags,
                                      HANDLE hEvent, BOOL bAnsi );
-static BOOL DP_CopyDPNAMEStruct( LPDPNAME lpDst, LPDPNAME lpSrc, BOOL bAnsi );
+static BOOL DP_CopyDPNAMEStruct( LPDPNAME lpDst, const DPNAME *lpSrc, BOOL bAnsi );
 static void DP_SetPlayerData( lpPlayerData lpPData, DWORD dwFlags,
                               LPVOID lpData, DWORD dwDataSize );
 
-static lpGroupData DP_CreateGroup( IDirectPlay2AImpl* iface, LPDPID lpid,
-                                   LPDPNAME lpName, DWORD dwFlags,
+static lpGroupData DP_CreateGroup( IDirectPlay2AImpl* iface, const DPID *lpid,
+                                   const DPNAME *lpName, DWORD dwFlags,
                                    DPID idParent, BOOL bAnsi );
 static void DP_SetGroupData( lpGroupData lpGData, DWORD dwFlags,
                              LPVOID lpData, DWORD dwDataSize );
@@ -243,6 +243,7 @@ static BOOL DP_CreateIUnknown( LPVOID lpDP )
   }
 
   InitializeCriticalSection( &This->unk->DP_lock );
+  This->unk->DP_lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": IDirectPlay2AImpl*->DirectPlayIUnknownData*->DP_lock");
 
   return TRUE;
 }
@@ -251,6 +252,7 @@ static BOOL DP_DestroyIUnknown( LPVOID lpDP )
 {
   IDirectPlay2AImpl *This = (IDirectPlay2AImpl *)lpDP;
 
+  This->unk->DP_lock.DebugInfo->Spare[0] = 0;
   DeleteCriticalSection( &This->unk->DP_lock );
   HeapFree( GetProcessHeap(), 0, This->unk );
 
@@ -270,6 +272,7 @@ static BOOL DP_CreateDirectPlay2( LPVOID lpDP )
   This->dp2->bConnectionOpen = FALSE;
 
   This->dp2->hEnumSessionThread = INVALID_HANDLE_VALUE;
+  This->dp2->dwEnumSessionLock = 0;
 
   This->dp2->bHostInterface = FALSE;
 
@@ -468,7 +471,6 @@ static BOOL DP_DestroyDirectPlay4( LPVOID lpDP )
 
 
 /* Create a new interface */
-extern
 HRESULT DP_CreateInterface
          ( REFIID riid, LPVOID* ppvObj )
 {
@@ -916,8 +918,8 @@ static HRESULT WINAPI DirectPlay2WImpl_Close
 }
 
 static
-lpGroupData DP_CreateGroup( IDirectPlay2AImpl* This, LPDPID lpid,
-                            LPDPNAME lpName, DWORD dwFlags,
+lpGroupData DP_CreateGroup( IDirectPlay2AImpl* This, const DPID *lpid,
+                            const DPNAME *lpName, DWORD dwFlags,
                             DPID idParent, BOOL bAnsi )
 {
   lpGroupData lpGData;
@@ -1225,6 +1227,9 @@ lpPlayerData DP_CreatePlayer( IDirectPlay2Impl* This, LPDPID lpid,
 
   TRACE( "Created player id 0x%08x\n", *lpid );
 
+  if( ~dwFlags & DPLAYI_PLAYER_SYSPLAYER )
+    This->dp2->lpSessionDesc->dwCurrentPlayers++;
+
   return lpPData;
 }
 
@@ -1275,13 +1280,16 @@ static lpPlayerList DP_FindPlayer( IDirectPlay2AImpl* This, DPID dpid )
 
   TRACE( "(%p)->(0x%08x)\n", This, dpid );
 
+  if(This->dp2->lpSysGroup == NULL)
+    return NULL;
+
   DPQ_FIND_ENTRY( This->dp2->lpSysGroup->players, players, lpPData->dpid, ==, dpid, lpPlayers );
 
   return lpPlayers;
 }
 
 /* Basic area for Dst must already be allocated */
-static BOOL DP_CopyDPNAMEStruct( LPDPNAME lpDst, LPDPNAME lpSrc, BOOL bAnsi )
+static BOOL DP_CopyDPNAMEStruct( LPDPNAME lpDst, const DPNAME *lpSrc, BOOL bAnsi )
 {
   if( lpSrc == NULL )
   {
@@ -1476,8 +1484,9 @@ static HRESULT WINAPI DP_IF_CreatePlayer
      */
   }
 
-  /* FIXME: Should we be storing these dwFlags or the creation ones? */
-  lpPData = DP_CreatePlayer( This, lpidPlayer, lpPlayerName, dwFlags,
+  /* We pass creation flags, so we can distinguish sysplayers and not count them in the current
+     player total */
+  lpPData = DP_CreatePlayer( This, lpidPlayer, lpPlayerName, dwCreateFlags,
                              hEvent, bAnsi );
 
   if( lpPData == NULL )
@@ -1908,7 +1917,7 @@ cbDeletePlayerFromAllGroups(
     DP_IF_EnumGroupsInGroup( (IDirectPlay3Impl*)lpCtxt->This,
                              dpId, NULL,
                              cbDeletePlayerFromAllGroups,
-                             (LPVOID)lpContext, DPENUMGROUPS_ALL,
+                             lpContext, DPENUMGROUPS_ALL,
                              lpCtxt->bAnsi );
 
   }
@@ -1968,7 +1977,7 @@ static HRESULT WINAPI DP_IF_EnumGroupPlayers
   for( ;; )
   {
     /* We do not enum the name server or app server as they are of no
-     * concequence to the end user.
+     * consequence to the end user.
      */
     if( ( lpPList->lpPData->dpid != DPID_NAME_SERVER ) &&
         ( lpPList->lpPData->dpid != DPID_SERVERPLAYER )
@@ -2264,7 +2273,6 @@ static HRESULT WINAPI DP_IF_EnumSessions
     return hr;
   }
 
-  /* FIXME: Interface locking sucks in this method */
   if( ( dwFlags & DPENUMSESSIONS_ASYNC ) )
   {
     /* Enumerate everything presently in the local session cache */
@@ -2272,11 +2280,14 @@ static HRESULT WINAPI DP_IF_EnumSessions
                                    This->dp2->lpNameServerData, dwTimeout,
                                    lpContext );
 
+    if( This->dp2->dwEnumSessionLock != 0 )
+      return DPERR_CONNECTING;
 
     /* See if we've already created a thread to service this interface */
     if( This->dp2->hEnumSessionThread == INVALID_HANDLE_VALUE )
     {
       DWORD dwThreadId;
+      This->dp2->dwEnumSessionLock++;
 
       /* Send the first enum request inline since the user may cancel a dialog
        * if one is presented. Also, may also have a connecting return code.
@@ -2291,7 +2302,7 @@ static HRESULT WINAPI DP_IF_EnumSessions
         /* FIXME: need to kill the thread on object deletion */
         lpData->lpSpData  = &This->dp2->spData;
 
-        CopyMemory( &lpData->requestGuid, &lpsd->guidApplication, sizeof(GUID) );
+        lpData->requestGuid = lpsd->guidApplication;
         lpData->dwEnumSessionFlags = dwFlags;
         lpData->dwTimeout = dwTimeout;
 
@@ -2317,6 +2328,7 @@ static HRESULT WINAPI DP_IF_EnumSessions
                                                       0,
                                                       &dwThreadId );
       }
+      This->dp2->dwEnumSessionLock--;
     }
   }
   else
@@ -3244,10 +3256,13 @@ static HRESULT WINAPI DP_SetSessionDesc
   HeapFree( GetProcessHeap(), 0, This->dp2->lpSessionDesc );
 
   This->dp2->lpSessionDesc = lpTempSessDesc;
-
   /* Set the new */
   DP_CopySessionDesc( This->dp2->lpSessionDesc, lpSessDesc, bAnsi );
-
+  if( bInitial )
+  {
+    /*Initializing session GUID*/
+    CoCreateGuid( &(This->dp2->lpSessionDesc->guidInstance) );
+  }
   /* If this is an external invocation of the interface, we should be
    * letting everyone know that things have changed. Otherwise this is
    * just an initialization and it doesn't need to be propagated.
@@ -3318,7 +3333,7 @@ DWORD DP_CalcSessionDescSize( LPCDPSESSIONDESC2 lpSessDesc, BOOL bAnsi )
   return dwSize;
 }
 
-/* Assumes that contugous buffers are already allocated. */
+/* Assumes that contiguous buffers are already allocated. */
 static void DP_CopySessionDesc( LPDPSESSIONDESC2 lpSessionDest,
                                 LPCDPSESSIONDESC2 lpSessionSrc, BOOL bAnsi )
 {
@@ -3342,7 +3357,7 @@ static void DP_CopySessionDesc( LPDPSESSIONDESC2 lpSessionDest,
                 lpSessionDest->u1.lpszSessionNameA );
       lpSessionDest->u1.lpszSessionNameA = (LPSTR)lpStartOfFreeSpace;
       lpStartOfFreeSpace +=
-        lstrlenA( (LPSTR)lpSessionDest->u1.lpszSessionNameA ) + 1;
+        lstrlenA( lpSessionDest->u1.lpszSessionNameA ) + 1;
     }
 
     if( lpSessionSrc->u2.lpszPasswordA )
@@ -3351,7 +3366,7 @@ static void DP_CopySessionDesc( LPDPSESSIONDESC2 lpSessionDest,
                 lpSessionDest->u2.lpszPasswordA );
       lpSessionDest->u2.lpszPasswordA = (LPSTR)lpStartOfFreeSpace;
       lpStartOfFreeSpace +=
-        lstrlenA( (LPSTR)lpSessionDest->u2.lpszPasswordA ) + 1;
+        lstrlenA( lpSessionDest->u2.lpszPasswordA ) + 1;
     }
   }
   else /* UNICODE */
@@ -3362,7 +3377,7 @@ static void DP_CopySessionDesc( LPDPSESSIONDESC2 lpSessionDest,
                 lpSessionDest->u1.lpszSessionName );
       lpSessionDest->u1.lpszSessionName = (LPWSTR)lpStartOfFreeSpace;
       lpStartOfFreeSpace += sizeof(WCHAR) *
-        ( lstrlenW( (LPWSTR)lpSessionDest->u1.lpszSessionName ) + 1 );
+        ( lstrlenW( lpSessionDest->u1.lpszSessionName ) + 1 );
     }
 
     if( lpSessionSrc->u2.lpszPassword )
@@ -3371,7 +3386,7 @@ static void DP_CopySessionDesc( LPDPSESSIONDESC2 lpSessionDest,
                 lpSessionDest->u2.lpszPassword );
       lpSessionDest->u2.lpszPassword = (LPWSTR)lpStartOfFreeSpace;
       lpStartOfFreeSpace += sizeof(WCHAR) *
-        ( lstrlenW( (LPWSTR)lpSessionDest->u2.lpszPassword ) + 1 );
+        ( lstrlenW( lpSessionDest->u2.lpszPassword ) + 1 );
     }
   }
 }
@@ -3380,13 +3395,12 @@ static void DP_CopySessionDesc( LPDPSESSIONDESC2 lpSessionDest,
 static HRESULT WINAPI DP_IF_AddGroupToGroup
           ( IDirectPlay3Impl* This, DPID idParentGroup, DPID idGroup )
 {
-  lpGroupData lpGParentData;
   lpGroupData lpGData;
   lpGroupList lpNewGList;
 
   TRACE( "(%p)->(0x%08x,0x%08x)\n", This, idParentGroup, idGroup );
 
-  if( ( lpGParentData = DP_FindAnyGroup( (IDirectPlay2AImpl*)This, idParentGroup ) ) == NULL )
+  if( DP_FindAnyGroup( (IDirectPlay2AImpl*)This, idParentGroup ) == NULL )
   {
     return DPERR_INVALIDGROUP;
   }
@@ -3603,8 +3617,7 @@ BOOL WINAPI DP_BuildSPCompoundAddr( LPGUID lpcSpGuid, LPVOID* lplpAddrBuf,
   HRESULT                  hr;
 
   dpCompoundAddress.dwDataSize = sizeof( GUID );
-  memcpy( &dpCompoundAddress.guidDataType, &DPAID_ServiceProvider,
-          sizeof( GUID ) ) ;
+  dpCompoundAddress.guidDataType = DPAID_ServiceProvider;
   dpCompoundAddress.lpData = lpcSpGuid;
 
   *lplpAddrBuf = NULL;
@@ -3653,7 +3666,7 @@ static HRESULT WINAPI DirectPlay3AImpl_EnumConnections
     return DPERR_INVALIDFLAGS;
   }
 
-  if( !lpEnumCallback || !*lpEnumCallback )
+  if( !lpEnumCallback )
   {
      return DPERR_INVALIDPARAMS;
   }
@@ -3711,8 +3724,10 @@ static HRESULT WINAPI DirectPlay3AImpl_EnumConnections
                             &sizeOfReturnBuffer ) != ERROR_SUCCESS )
       {
         ERR(": missing GUID registry data members\n" );
+        RegCloseKey(hkServiceProvider);
         continue;
       }
+      RegCloseKey(hkServiceProvider);
 
       /* FIXME: Check return types to ensure we're interpreting data right */
       MultiByteToWideChar( CP_ACP, 0, returnBuffer, -1, buff, sizeof(buff)/sizeof(WCHAR) );
@@ -3806,8 +3821,10 @@ static HRESULT WINAPI DirectPlay3AImpl_EnumConnections
                             &sizeOfReturnBuffer ) != ERROR_SUCCESS )
       {
         ERR(": missing GUID registry data members\n" );
+        RegCloseKey(hkServiceProvider);
         continue;
       }
+      RegCloseKey(hkServiceProvider);
 
       /* FIXME: Check return types to ensure we're interpreting data right */
       MultiByteToWideChar( CP_ACP, 0, returnBuffer, -1, buff, sizeof(buff)/sizeof(WCHAR) );
@@ -3845,6 +3862,7 @@ static HRESULT WINAPI DirectPlay3AImpl_EnumConnections
                                      &dwAddressBufferSize, TRUE ) ) != DP_OK )
       {
         ERR( "can't create address: %s\n", DPLAYX_HresultToString( hr ) );
+        HeapFree( GetProcessHeap(), 0, lpAddressBuffer );
         return hr;
       }
 
@@ -3852,8 +3870,10 @@ static HRESULT WINAPI DirectPlay3AImpl_EnumConnections
       if( !lpEnumCallback( &serviceProviderGUID, lpAddressBuffer, dwAddressBufferSize,
                            &dpName, DPCONNECTION_DIRECTPLAYLOBBY, lpContext ) )
       {
+         HeapFree( GetProcessHeap(), 0, lpAddressBuffer );
          return DP_OK;
       }
+      HeapFree( GetProcessHeap(), 0, lpAddressBuffer );
     }
   }
 
@@ -4227,7 +4247,7 @@ static HRESULT WINAPI DP_IF_InitializeConnection
 
   if( hServiceProvider == 0 )
   {
-    ERR( "Unable to load service provider\n" );
+    ERR( "Unable to load service provider %s\n", debugstr_guid(&guidSP) );
     return DPERR_UNAVAILABLE;
   }
 
@@ -4465,8 +4485,6 @@ static HRESULT WINAPI DP_SendEx
             LPVOID lpData, DWORD dwDataSize, DWORD dwPriority, DWORD dwTimeout,
             LPVOID lpContext, LPDWORD lpdwMsgID, BOOL bAnsi )
 {
-  lpPlayerList lpPList;
-  lpGroupData  lpGData;
   BOOL         bValidDestination = FALSE;
 
   FIXME( "(%p)->(0x%08x,0x%08x,0x%08x,%p,0x%08x,0x%08x,0x%08x,%p,%p,%u)"
@@ -4486,7 +4504,7 @@ static HRESULT WINAPI DP_SendEx
    */
   if( idFrom != DPID_UNKNOWN )
   {
-    if( ( lpPList = DP_FindPlayer( This, idFrom ) ) == NULL )
+    if( DP_FindPlayer( This, idFrom ) == NULL )
     {
       WARN( "INFO: Invalid from player 0x%08x\n", idFrom );
       return DPERR_INVALIDPLAYER;
@@ -4529,7 +4547,7 @@ static HRESULT WINAPI DP_SendEx
   }
 
   if( ( !bValidDestination ) &&
-      ( ( lpGData = DP_FindAnyGroup( This, idTo ) ) != NULL )
+      ( DP_FindAnyGroup( This, idTo ) != NULL )
     )
   {
     bValidDestination = TRUE;
@@ -5120,7 +5138,6 @@ static const IDirectPlay4Vtbl directPlay4AVT =
 };
 #undef XCAST
 
-extern
 HRESULT DP_GetSPPlayerData( IDirectPlay2Impl* lpDP,
                             DPID idPlayer,
                             LPVOID* lplpData )
@@ -5137,7 +5154,6 @@ HRESULT DP_GetSPPlayerData( IDirectPlay2Impl* lpDP,
   return DP_OK;
 }
 
-extern
 HRESULT DP_SetSPPlayerData( IDirectPlay2Impl* lpDP,
                             DPID idPlayer,
                             LPVOID lpData )
@@ -5258,14 +5274,14 @@ static HRESULT DirectPlayEnumerateAW(LPDPENUMDPCALLBACKA lpEnumCallbackA,
 	/* The enumeration will return FALSE if we are not to continue.
 	 *
 	 * Note: on my windows box, major / minor version is 6 / 0 for all service providers
-	 *       and have no relations to any of the two dwReserved1 and dwReserved2 keys.
+	 *       and have no relation to any of the two dwReserved1 and dwReserved2 keys.
 	 *       I think that it simply means that they are in-line with DirectX 6.0
 	 */
 	if (lpEnumCallbackA)
 	{
 	    DWORD sizeOfDescription = 0;
 	    
-	    /* Note that this the the A case of this function, so use the A variant to get the description string */
+	    /* Note that this is the A case of this function, so use the A variant to get the description string */
 	    if (RegQueryValueExA(hkServiceProvider, "DescriptionA",
 				 NULL, NULL, NULL, &sizeOfDescription) != ERROR_SUCCESS)
 	    {
@@ -5276,7 +5292,6 @@ static HRESULT DirectPlayEnumerateAW(LPDPENUMDPCALLBACKA lpEnumCallbackA,
 	    {
 		HeapFree(GetProcessHeap(), 0, descriptionA);
 		max_sizeOfDescriptionA = sizeOfDescription;
-		descriptionA = HeapAlloc(GetProcessHeap(), 0, max_sizeOfDescriptionA);
 	    }
 	    descriptionA = HeapAlloc(GetProcessHeap(), 0, sizeOfDescription);
 	    RegQueryValueExA(hkServiceProvider, "DescriptionA",
@@ -5299,7 +5314,6 @@ static HRESULT DirectPlayEnumerateAW(LPDPENUMDPCALLBACKA lpEnumCallbackA,
 	    {
 		HeapFree(GetProcessHeap(), 0, descriptionW);
 		max_sizeOfDescriptionW = sizeOfDescription;
-		descriptionW = HeapAlloc(GetProcessHeap(), 0, max_sizeOfDescriptionW);
 	    }
 	    descriptionW = HeapAlloc(GetProcessHeap(), 0, sizeOfDescription);
 	    RegQueryValueExW(hkServiceProvider, descW,

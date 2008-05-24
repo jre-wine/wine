@@ -72,12 +72,12 @@
 # include <unistd.h>
 #endif
 #include <fcntl.h>
+#include <limits.h>
 #include <time.h>
 #include <assert.h>
 
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "wine/wingdi16.h"
 #include "x11drv.h"
 #include "wine/debug.h"
@@ -287,7 +287,6 @@ static WINE_CLIPFORMAT ClipFormats[]  =
 static const WCHAR wszRichTextFormat[] = {'R','i','c','h',' ','T','e','x','t',' ','F','o','r','m','a','t',0};
 static const WCHAR wszGIF[] = {'G','I','F',0};
 static const WCHAR wszHTMLFormat[] = {'H','T','M','L',' ','F','o','r','m','a','t',0};
-static const WCHAR wszRICHHTMLFormat[] = {'H','T','M','L',' ','F','o','r','m','a','t',0};
 static const struct
 {
     LPCWSTR lpszFormat;
@@ -298,18 +297,6 @@ static const struct
     { wszRichTextFormat, XATOM_text_richtext },
     { wszGIF, XATOM_image_gif },
     { wszHTMLFormat, XATOM_text_html },
-};
-
-
-/* Maps equivalent X properties. It is assumed that lpszProperty must already 
-   be in ClipFormats or PropertyFormatMap. */
-static const struct
-{
-    UINT drvDataProperty;
-    UINT drvDataAlias;
-} PropertyAliasMap[] =
-{
-    /* DataProperty,     DataAlias */
 };
 
 
@@ -511,7 +498,8 @@ static WINE_CLIPFORMAT *X11DRV_CLIPBOARD_InsertClipboardFormat(LPCWSTR FormatNam
 {
     LPWINE_CLIPFORMAT lpFormat;
     LPWINE_CLIPFORMAT lpNewFormat;
-   
+    LPWSTR new_name;
+
     /* allocate storage for new format entry */
     lpNewFormat = HeapAlloc(GetProcessHeap(), 0, sizeof(WINE_CLIPFORMAT));
 
@@ -521,14 +509,14 @@ static WINE_CLIPFORMAT *X11DRV_CLIPBOARD_InsertClipboardFormat(LPCWSTR FormatNam
         return NULL;
     }
 
-    if (!(lpNewFormat->Name = HeapAlloc(GetProcessHeap(), 0, (strlenW(FormatName)+1)*sizeof(WCHAR))))
+    if (!(new_name = HeapAlloc(GetProcessHeap(), 0, (strlenW(FormatName)+1)*sizeof(WCHAR))))
     {
         WARN("No more memory for the new format name!\n");
         HeapFree(GetProcessHeap(), 0, lpNewFormat);
         return NULL;
     }
 
-    strcpyW((LPWSTR)lpNewFormat->Name, FormatName);
+    lpNewFormat->Name = strcpyW(new_name, FormatName);
     lpNewFormat->wFlags = 0;
     lpNewFormat->wFormatID = GlobalAddAtomW(lpNewFormat->Name);
     lpNewFormat->drvData = prop;
@@ -1037,7 +1025,7 @@ static BOOL X11DRV_CLIPBOARD_RenderSynthesizedText(UINT wFormatID)
  *
  * Renders synthesized DIB
  */
-static BOOL X11DRV_CLIPBOARD_RenderSynthesizedDIB()
+static BOOL X11DRV_CLIPBOARD_RenderSynthesizedDIB(void)
 {
     BOOL bret = FALSE;
     LPWINE_CLIPDATA lpSource = NULL;
@@ -1079,7 +1067,7 @@ static BOOL X11DRV_CLIPBOARD_RenderSynthesizedDIB()
  *
  * Renders synthesized bitmap
  */
-static BOOL X11DRV_CLIPBOARD_RenderSynthesizedBitmap()
+static BOOL X11DRV_CLIPBOARD_RenderSynthesizedBitmap(void)
 {
     BOOL bret = FALSE;
     LPWINE_CLIPDATA lpSource = NULL;
@@ -1661,7 +1649,7 @@ HANDLE X11DRV_CLIPBOARD_ExportXAPIXMAP(Window requestor, Atom aTarget, Atom rpro
     memcpy(lpData, &lpdata->drvData, *lpBytes);
     GlobalUnlock(hData);
 
-    return (HANDLE) hData;
+    return hData;
 }
 
 
@@ -1679,8 +1667,7 @@ HANDLE X11DRV_CLIPBOARD_ExportMetaFilePict(Window requestor, Atom aTarget, Atom 
         return 0;
     }
 
-    return X11DRV_CLIPBOARD_SerializeMetafile(CF_METAFILEPICT, (HANDLE)lpdata->hData32, 
-        lpBytes, TRUE);
+    return X11DRV_CLIPBOARD_SerializeMetafile(CF_METAFILEPICT, lpdata->hData32, lpBytes, TRUE);
 }
 
 
@@ -1698,8 +1685,7 @@ HANDLE X11DRV_CLIPBOARD_ExportEnhMetaFile(Window requestor, Atom aTarget, Atom r
         return 0;
     }
 
-    return X11DRV_CLIPBOARD_SerializeMetafile(CF_ENHMETAFILE, (HANDLE)lpdata->hData32, 
-        lpBytes, TRUE);
+    return X11DRV_CLIPBOARD_SerializeMetafile(CF_ENHMETAFILE, lpdata->hData32, lpBytes, TRUE);
 }
 
 
@@ -1742,6 +1728,11 @@ static BOOL X11DRV_CLIPBOARD_QueryTargets(Display *display, Window w, Atom selec
 }
 
 
+static int is_atom_error( Display *display, XErrorEvent *event, void *arg )
+{
+    return (event->error_code == BadAtom);
+}
+
 /**************************************************************************
  *		X11DRV_CLIPBOARD_InsertSelectionProperties
  *
@@ -1773,7 +1764,7 @@ static VOID X11DRV_CLIPBOARD_InsertSelectionProperties(Display *display, Atom* p
                  lpFormat = X11DRV_CLIPBOARD_LookupProperty(lpFormat, properties[i]);
              }
          }
-         else
+         else if (properties[i])
          {
              /* add it to the list of atoms that we don't know about yet */
              if (!atoms) atoms = HeapAlloc( GetProcessHeap(), 0,
@@ -1788,13 +1779,13 @@ static VOID X11DRV_CLIPBOARD_InsertSelectionProperties(Display *display, Atom* p
          char **names = HeapAlloc( GetProcessHeap(), 0, nb_atoms * sizeof(*names) );
          if (names)
          {
-             wine_tsx11_lock();
-             /* FIXME: we're at the mercy of the app sending the event here.
-              * Currently if they send a bogus atom, we will crash.
-              * We should handle BadAtom errors gracefully in this call.
-              */
-             XGetAtomNames( display, atoms, nb_atoms, names );
-             wine_tsx11_unlock();
+             X11DRV_expect_error( display, is_atom_error, NULL );
+             if (!XGetAtomNames( display, atoms, nb_atoms, names )) nb_atoms = 0;
+             if (X11DRV_check_error())
+             {
+                 WARN( "got some bad atoms, ignoring\n" );
+                 nb_atoms = 0;
+             }
              for (i = 0; i < nb_atoms; i++)
              {
                  WINE_CLIPFORMAT *lpFormat;
@@ -1916,8 +1907,22 @@ static int X11DRV_CLIPBOARD_QueryAvailableData(LPCLIPBOARDINFO lpcbinfo)
         * The TARGETS property should have returned us a list of atoms
         * corresponding to each selection target format supported.
         */
-       if ((atype == XA_ATOM || atype == x11drv_atom(TARGETS)) && aformat == 32)
-           X11DRV_CLIPBOARD_InsertSelectionProperties(display, targetList, cSelectionTargets);
+       if (atype == XA_ATOM || atype == x11drv_atom(TARGETS))
+       {
+           if (aformat == 32)
+           {
+               X11DRV_CLIPBOARD_InsertSelectionProperties(display, targetList, cSelectionTargets);
+           }
+           else if (aformat == 8)  /* work around quartz-wm brain damage */
+           {
+               unsigned long i, count = cSelectionTargets / sizeof(CARD32);
+               Atom *atoms = HeapAlloc( GetProcessHeap(), 0, count * sizeof(Atom) );
+               for (i = 0; i < count; i++)
+                   atoms[i] = ((CARD32 *)targetList)[i];  /* FIXME: byte swapping */
+               X11DRV_CLIPBOARD_InsertSelectionProperties( display, atoms, count );
+               HeapFree( GetProcessHeap(), 0, atoms );
+           }
+       }
 
        /* Free the list of targets */
        wine_tsx11_lock();
@@ -2021,71 +2026,55 @@ static BOOL X11DRV_CLIPBOARD_ReadProperty(Window w, Atom prop,
     Display *display = thread_display();
     Atom atype = AnyPropertyType;
     int aformat;
-    unsigned long total, nitems, remain, val_cnt;
-    long  reqlen, bwc;
-    unsigned char* val;
-    unsigned char* buffer;
+    unsigned long pos = 0, nitems, remain, count;
+    unsigned char *val = NULL, *buffer;
 
     if (prop == None)
         return FALSE;
 
-    TRACE("Reading property %d from X window %d\n",
-        (unsigned int)prop, (unsigned int)w);
+    TRACE("Reading property %lu from X window %lx\n", prop, w);
 
-    /*
-     * First request a zero length in order to figure out the request size.
-     */
-    wine_tsx11_lock();
-    if(XGetWindowProperty(display,w,prop,0,0,False, AnyPropertyType,
-        &atype, &aformat, &nitems, &remain, &buffer) != Success)
+    for (;;)
     {
+        wine_tsx11_lock();
+        if (XGetWindowProperty(display, w, prop, pos, INT_MAX / 4, False,
+                               AnyPropertyType, &atype, &aformat, &nitems, &remain, &buffer) != Success)
+        {
+            wine_tsx11_unlock();
+            WARN("Failed to read property\n");
+            HeapFree( GetProcessHeap(), 0, val );
+            return FALSE;
+        }
+
+        count = get_property_size( aformat, nitems );
+        if (!val) *data = HeapAlloc( GetProcessHeap(), 0, pos * sizeof(int) + count + 1 );
+        else *data = HeapReAlloc( GetProcessHeap(), 0, val, pos * sizeof(int) + count + 1 );
+
+        if (!*data)
+        {
+            XFree( buffer );
+            wine_tsx11_unlock();
+            HeapFree( GetProcessHeap(), 0, val );
+            return FALSE;
+        }
+        val = *data;
+        memcpy( (int *)val + pos, buffer, count );
+        XFree( buffer );
         wine_tsx11_unlock();
-        WARN("Failed to get property size\n");
-        return FALSE;
-    }
-
-    /* Free zero length return data if any */
-    if (buffer)
-    {
-       XFree(buffer);
-       buffer = NULL;
-    }
-
-    bwc = aformat/8;
-    reqlen = remain * bwc;
-
-    TRACE("Retrieving %ld bytes\n", reqlen);
-
-    val = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, reqlen);
-
-    /* Read property in 4K blocks */
-    for (total = 0, val_cnt = 0; remain;)
-    {
-       if (XGetWindowProperty(display, w, prop, (total / 4), 4096, False,
-           AnyPropertyType, &atype, &aformat, &nitems, &remain, &buffer) != Success)
-       {
-           wine_tsx11_unlock();
-           WARN("Failed to read property\n");
-           HeapFree(GetProcessHeap(), 0, val);
-           return FALSE;
-       }
-
-       bwc = aformat/8;
-       memcpy(&val[val_cnt], buffer, nitems * bwc);
-       val_cnt += nitems * bwc;
-       total += nitems*bwc;
-       XFree(buffer);
+        if (!remain)
+        {
+            *datasize = pos * sizeof(int) + count;
+            val[*datasize] = 0;
+            break;
+        }
+        pos += count / sizeof(int);
     }
 
     /* Delete the property on the window now that we are done
      * This will send a PropertyNotify event to the selection owner. */
+    wine_tsx11_lock();
     XDeleteProperty(display, w, prop);
-
     wine_tsx11_unlock();
-
-    *data = val;
-    *datasize = total;
-
     return TRUE;
 }
 
@@ -2149,7 +2138,7 @@ static HANDLE X11DRV_CLIPBOARD_SerializeMetafile(INT wformat, HANDLE hdata, LPDW
                 unsigned int wiresize, size;
                 LPMETAFILEPICT lpmfp = (LPMETAFILEPICT) GlobalLock(h);
 
-                memcpy(lpmfp, (LPVOID)hdata, sizeof(METAFILEPICT));
+                memcpy(lpmfp, hdata, sizeof(METAFILEPICT));
                 wiresize = *lpcbytes - sizeof(METAFILEPICT);
                 lpmfp->hMF = SetMetaFileBitsEx(wiresize,
                     ((const BYTE *)hdata) + sizeof(METAFILEPICT));
@@ -2159,7 +2148,7 @@ static HANDLE X11DRV_CLIPBOARD_SerializeMetafile(INT wformat, HANDLE hdata, LPDW
         }
         else if (wformat == CF_ENHMETAFILE)
         {
-            h = SetEnhMetaFileBits(*lpcbytes, (LPVOID)hdata);
+            h = SetEnhMetaFileBits(*lpcbytes, hdata);
         }
     }
 
@@ -2915,7 +2904,7 @@ static Atom X11DRV_SelectionRequest_MULTIPLE( HWND hWnd, XSelectionRequestEvent 
                 }
 
                 /* Set up an XSelectionRequestEvent for this (target,property) pair */
-                memcpy( &event, pevent, sizeof(XSelectionRequestEvent) );
+                event = *pevent;
                 event.target = targetPropList[i];
                 event.property = targetPropList[i+1];
 
@@ -3003,7 +2992,7 @@ static void X11DRV_HandleSelectionRequest( HWND hWnd, XSelectionRequestEvent *ev
 
                     wine_tsx11_lock();
                     XChangeProperty(display, request, rprop, event->target,
-                                    8, PropModeReplace, (unsigned char *)lpClipData, cBytes);
+                                    8, PropModeReplace, lpClipData, cBytes);
                     wine_tsx11_unlock();
 
                     GlobalUnlock(hClipData);

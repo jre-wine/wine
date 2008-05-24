@@ -42,7 +42,7 @@ static BOOL 	    glyphNamesIndexed = TRUE;
  *  the AGL glyph names into it; returns 0 on success, 1 on failure
  *
  */
-INT PSDRV_GlyphListInit()
+INT PSDRV_GlyphListInit(void)
 {
     INT i;
 
@@ -73,7 +73,7 @@ INT PSDRV_GlyphListInit()
  *  list if necessary; returns index on success (-1 on failure)
  *
  */
-inline static INT GlyphListInsert(LPCSTR szName, INT index)
+static inline INT GlyphListInsert(LPCSTR szName, INT index)
 {
     GLYPHNAME *g;
 
@@ -180,7 +180,7 @@ const GLYPHNAME *PSDRV_GlyphName(LPCSTR szName)
  *  Initializes index member of all GLYPHNAME structures
  *
  */
-VOID PSDRV_IndexGlyphList()
+VOID PSDRV_IndexGlyphList(void)
 {
     INT i;
 

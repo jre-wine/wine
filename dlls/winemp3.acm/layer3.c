@@ -20,15 +20,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
 #include <stdlib.h>
+#include "wine/debug.h"
 #include "mpg123.h"
 #include "mpglib.h"
 #include "huffman.h"
 
-extern struct mpstr *gmp;
-
 #define MPEG1
-
+WINE_DEFAULT_DEBUG_CHANNEL(mpeg3);
 
 static real ispow[8207];
 static real aa_ca[8],aa_cs[8];
@@ -48,8 +48,8 @@ struct bandInfoStruct {
   short shortDiff[13];
 };
 
-int longLimit[9][23];
-int shortLimit[9][14];
+static int longLimit[9][23];
+static int shortLimit[9][14];
 
 static const struct bandInfoStruct bandInfo[9] = {
 
@@ -335,7 +335,7 @@ static int III_get_side_info_1(struct III_sideinfo *si,int stereo,
        gr_info->part2_3_length = getbits(12);
        gr_info->big_values = getbits_fast(9);
        if(gr_info->big_values > 288) {
-          fprintf(stderr,"big_values too large!\n");
+          FIXME("big_values (%d) too large!\n", gr_info->big_values);
           gr_info->big_values = 288;
        }
        gr_info->pow2gain = gainpow2+256 - getbits_fast(8) + powdiff;
@@ -359,7 +359,7 @@ static int III_get_side_info_1(struct III_sideinfo *si,int stereo,
            gr_info->full_gain[i] = gr_info->pow2gain + (getbits_fast(3)<<3);
 
          if(gr_info->block_type == 0) {
-           fprintf(stderr,"Blocktype == 0 and window-switching == 1 not allowed.\n");
+           FIXME("Blocktype == 0 and window-switching == 1 not allowed.\n");
            return 0;
          }
          /* region_count/start parameters are implicit in this case. */
@@ -409,7 +409,7 @@ static int III_get_side_info_2(struct III_sideinfo *si,int stereo,
        gr_info->part2_3_length = getbits(12);
        gr_info->big_values = getbits_fast(9);
        if(gr_info->big_values > 288) {
-         fprintf(stderr,"big_values too large!\n");
+         FIXME("big_values(%d) too large!\n", gr_info->big_values);
          gr_info->big_values = 288;
        }
        gr_info->pow2gain = gainpow2+256 - getbits_fast(8) + powdiff;
@@ -433,7 +433,7 @@ static int III_get_side_info_2(struct III_sideinfo *si,int stereo,
            gr_info->full_gain[i] = gr_info->pow2gain + (getbits_fast(3)<<3);
 
          if(gr_info->block_type == 0) {
-           fprintf(stderr,"Blocktype == 0 and window-switching == 1 not allowed.\n");
+           FIXME("Blocktype == 0 and window-switching == 1 not allowed.\n");
            return 0;
          }
          /* region_count/start parameters are implicit in this case. */
@@ -970,7 +970,7 @@ static int III_dequantize_sample(real xr[SBLIMIT][SSLIMIT],int *scf,
   if(part2remain > 0)
     getbits(part2remain);
   else if(part2remain < 0) {
-    fprintf(stderr,"mpg123: Can't rewind stream by %d bits!\n",-part2remain);
+    FIXME("mpg123: Can't rewind stream by %d bits!\n",-part2remain);
     return 1; /* -> error */
   }
   return 0;
@@ -1381,7 +1381,7 @@ static int III_dequantize_sample_ms(real xr[2][SBLIMIT][SSLIMIT],int *scf,
   if(part2remain > 0 )
     getbits(part2remain);
   else if(part2remain < 0) {
-    fprintf(stderr,"mpg123_ms: Can't rewind stream by %d bits!\n",-part2remain);
+    FIXME("mpg123_ms: Can't rewind stream by %d bits!\n",-part2remain);
     return 1; /* -> error */
   }
   return 0;
@@ -1573,7 +1573,7 @@ static void III_antialias(real xr[SBLIMIT][SSLIMIT],struct gr_info_s *gr_info)
 }
 
 /*
- DCT insipired by Jeff Tsay's DCT from the maplay package
+ DCT inspired by Jeff Tsay's DCT from the maplay package
  this is an optimized version with manual unroll.
 
  References:
@@ -1830,11 +1830,11 @@ static void dct12(real *in,real *rawout1,real *rawout2,register real *wi,registe
  * III_hybrid
  */
 static void III_hybrid(real fsIn[SBLIMIT][SSLIMIT],real tsOut[SSLIMIT][SBLIMIT],
-   int ch,struct gr_info_s *gr_info)
+   int ch,struct gr_info_s *gr_info,struct mpstr *mp)
 {
    real *tspnt = (real *) tsOut;
-   real (*block)[2][SBLIMIT*SSLIMIT] = gmp->hybrid_block;
-   int *blc = gmp->hybrid_blc;
+   real (*block)[2][SBLIMIT*SSLIMIT] = mp->hybrid_block;
+   int *blc = mp->hybrid_blc;
    real *rawout1,*rawout2;
    int bt;
    int sb = 0;
@@ -1919,11 +1919,11 @@ int do_layer3(struct frame *fr,unsigned char *pcm_sample,int *pcm_point)
     if(!III_get_side_info_1(&sideinfo,stereo,ms_stereo,sfreq,single))
       return -1;
 #else
-    fprintf(stderr,"Not supported\n");
+    FIXME("Not supported\n");
 #endif
   }
 
-  if(set_pointer(sideinfo.main_data_begin) == MP3_ERR)
+  if(set_pointer(fr->mp,sideinfo.main_data_begin) == MP3_ERR)
     return -1;
 
   for (gr=0;gr<granules;gr++)
@@ -1940,7 +1940,7 @@ int do_layer3(struct frame *fr,unsigned char *pcm_sample,int *pcm_point)
 #ifdef MPEG1
         part2bits = III_get_scale_factors_1(scalefacs[0],gr_info);
 #else
-	fprintf(stderr,"Not supported\n");
+	FIXME("Not supported\n");
 #endif
       }
       if(III_dequantize_sample(hybridIn[0], scalefacs[0],gr_info,sfreq,part2bits))
@@ -1955,7 +1955,7 @@ int do_layer3(struct frame *fr,unsigned char *pcm_sample,int *pcm_point)
 #ifdef MPEG1
         part2bits = III_get_scale_factors_1(scalefacs[1],gr_info);
 #else
-	fprintf(stderr,"Not supported\n");
+	FIXME("Not supported\n");
 #endif
       }
 
@@ -2006,17 +2006,17 @@ int do_layer3(struct frame *fr,unsigned char *pcm_sample,int *pcm_point)
     for(ch=0;ch<stereo1;ch++) {
       struct gr_info_s *gr_info = &(sideinfo.ch[ch].gr[gr]);
       III_antialias(hybridIn[ch],gr_info);
-      III_hybrid(hybridIn[ch], hybridOut[ch], ch,gr_info);
+      III_hybrid(hybridIn[ch], hybridOut[ch], ch,gr_info, fr->mp);
     }
 
     for(ss=0;ss<SSLIMIT;ss++) {
       if(single >= 0) {
-        clip += synth_1to1_mono(hybridOut[0][ss],pcm_sample,pcm_point);
+        clip += synth_1to1_mono(fr->mp,hybridOut[0][ss],pcm_sample,pcm_point);
       }
       else {
         int p1 = *pcm_point;
-        clip += synth_1to1(hybridOut[0][ss],0,pcm_sample,&p1);
-        clip += synth_1to1(hybridOut[1][ss],1,pcm_sample,pcm_point);
+        clip += synth_1to1(fr->mp,hybridOut[0][ss],0,pcm_sample,&p1);
+        clip += synth_1to1(fr->mp,hybridOut[1][ss],1,pcm_sample,pcm_point);
       }
     }
   }

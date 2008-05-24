@@ -56,13 +56,43 @@
 #endif
 
 #include "windef.h"
-#include "thread.h"
 #include "wine/library.h"
 #include "ntdll_misc.h"
+#include "wine/exception.h"
+#include "wine/debug.h"
 
 #ifdef HAVE_VALGRIND_MEMCHECK_H
 #include <valgrind/memcheck.h>
 #endif
+
+#undef ERR  /* Solaris needs to define this */
+
+/* not defined for x86, so copy the x86_64 definition */
+typedef struct DECLSPEC_ALIGN(16) _M128A
+{
+    ULONGLONG Low;
+    LONGLONG High;
+} M128A;
+
+typedef struct
+{
+    WORD ControlWord;
+    WORD StatusWord;
+    BYTE TagWord;
+    BYTE Reserved1;
+    WORD ErrorOpcode;
+    DWORD ErrorOffset;
+    WORD ErrorSelector;
+    WORD Reserved2;
+    DWORD DataOffset;
+    WORD DataSelector;
+    WORD Reserved3;
+    DWORD MxCsr;
+    DWORD MxCsr_Mask;
+    M128A FloatRegisters[8];
+    M128A XmmRegisters[16];
+    BYTE Reserved4[96];
+} XMM_SAVE_AREA32;
 
 /***********************************************************************
  * signal context platform-specific definitions
@@ -94,6 +124,7 @@ typedef ucontext_t SIGCONTEXT;
 #define ERROR_sig(context)   ((context)->uc_mcontext.gregs[REG_ERR])
 
 #define FPU_sig(context)     ((FLOATING_SAVE_AREA*)((context)->uc_mcontext.fpregs))
+#define FPUX_sig(context)    (FPU_sig(context) && !((context)->uc_mcontext.fpregs->status >> 16) ? (XMM_SAVE_AREA32 *)(FPU_sig(context) + 1) : NULL)
 
 #define VM86_EAX 0 /* the %eax value while vm86_enter is executing */
 
@@ -130,7 +161,7 @@ __ASM_GLOBAL_FUNC(vm86_enter,
                   ".globl " __ASM_NAME("vm86_return_end") "\n\t"
                   __ASM_FUNC("vm86_return_end") "\n"
                   __ASM_NAME("vm86_return_end") ":\n\t"
-                  "ret" );
+                  "ret" )
 
 #ifdef HAVE_SYS_VM86_H
 # define __HAVE_VM86
@@ -161,6 +192,9 @@ typedef struct trapframe SIGCONTEXT;
 #define EIP_sig(context)     (*((unsigned long*)&(context)->tf_eip))
 #define ESP_sig(context)     (*((unsigned long*)&(context)->tf_esp))
 
+#define FPU_sig(context)     NULL  /* FIXME */
+#define FPUX_sig(context)    NULL  /* FIXME */
+
 #endif /* bsdi */
 
 #if defined(__NetBSD__) || defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__OpenBSD__)
@@ -189,6 +223,9 @@ typedef struct sigcontext SIGCONTEXT;
 #define EIP_sig(context)     ((context)->sc_eip)
 #define ESP_sig(context)     ((context)->sc_esp)
 
+#define FPU_sig(context)     NULL  /* FIXME */
+#define FPUX_sig(context)    NULL  /* FIXME */
+
 #endif  /* *BSD */
 
 #if defined(__svr4__) || defined(_SCO_DS) || defined(__sun)
@@ -196,10 +233,7 @@ typedef struct sigcontext SIGCONTEXT;
 #ifdef _SCO_DS
 #include <sys/regset.h>
 #endif
-/* Solaris kludge */
-#undef ERR
 #include <sys/ucontext.h>
-#undef ERR
 typedef struct ucontext SIGCONTEXT;
 
 #ifdef _SCO_DS
@@ -232,9 +266,15 @@ typedef struct ucontext SIGCONTEXT;
 #else
 #define ESP_sig(context)     ((context)->uc_mcontext.gregs[ESP])
 #endif
+#ifdef ERR
+#define ERROR_sig(context)   ((context)->uc_mcontext.gregs[ERR])
+#endif
 #ifdef TRAPNO
 #define TRAP_sig(context)     ((context)->uc_mcontext.gregs[TRAPNO])
 #endif
+
+#define FPU_sig(context)     NULL  /* FIXME */
+#define FPUX_sig(context)    NULL  /* FIXME */
 
 #endif  /* svr4 || SCO_DS */
 
@@ -243,6 +283,29 @@ typedef struct ucontext SIGCONTEXT;
 
 typedef ucontext_t SIGCONTEXT;
 
+/* work around silly renaming of struct members in OS X 10.5 */
+#if __DARWIN_UNIX03 && defined(_STRUCT_X86_EXCEPTION_STATE32)
+#define EAX_sig(context)     ((context)->uc_mcontext->__ss.__eax)
+#define EBX_sig(context)     ((context)->uc_mcontext->__ss.__ebx)
+#define ECX_sig(context)     ((context)->uc_mcontext->__ss.__ecx)
+#define EDX_sig(context)     ((context)->uc_mcontext->__ss.__edx)
+#define ESI_sig(context)     ((context)->uc_mcontext->__ss.__esi)
+#define EDI_sig(context)     ((context)->uc_mcontext->__ss.__edi)
+#define EBP_sig(context)     ((context)->uc_mcontext->__ss.__ebp)
+#define CS_sig(context)      ((context)->uc_mcontext->__ss.__cs)
+#define DS_sig(context)      ((context)->uc_mcontext->__ss.__ds)
+#define ES_sig(context)      ((context)->uc_mcontext->__ss.__es)
+#define FS_sig(context)      ((context)->uc_mcontext->__ss.__fs)
+#define GS_sig(context)      ((context)->uc_mcontext->__ss.__gs)
+#define SS_sig(context)      ((context)->uc_mcontext->__ss.__ss)
+#define EFL_sig(context)     ((context)->uc_mcontext->__ss.__eflags)
+#define EIP_sig(context)     (*((unsigned long*)&(context)->uc_mcontext->__ss.__eip))
+#define ESP_sig(context)     (*((unsigned long*)&(context)->uc_mcontext->__ss.__esp))
+#define TRAP_sig(context)    ((context)->uc_mcontext->__es.__trapno)
+#define ERROR_sig(context)   ((context)->uc_mcontext->__es.__err)
+#define FPU_sig(context)     NULL
+#define FPUX_sig(context)    ((XMM_SAVE_AREA32 *)&(context)->uc_mcontext->__fs.__fpu_fcw)
+#else
 #define EAX_sig(context)     ((context)->uc_mcontext->ss.eax)
 #define EBX_sig(context)     ((context)->uc_mcontext->ss.ebx)
 #define ECX_sig(context)     ((context)->uc_mcontext->ss.ecx)
@@ -250,26 +313,22 @@ typedef ucontext_t SIGCONTEXT;
 #define ESI_sig(context)     ((context)->uc_mcontext->ss.esi)
 #define EDI_sig(context)     ((context)->uc_mcontext->ss.edi)
 #define EBP_sig(context)     ((context)->uc_mcontext->ss.ebp)
-
 #define CS_sig(context)      ((context)->uc_mcontext->ss.cs)
 #define DS_sig(context)      ((context)->uc_mcontext->ss.ds)
 #define ES_sig(context)      ((context)->uc_mcontext->ss.es)
 #define FS_sig(context)      ((context)->uc_mcontext->ss.fs)
 #define GS_sig(context)      ((context)->uc_mcontext->ss.gs)
 #define SS_sig(context)      ((context)->uc_mcontext->ss.ss)
-
 #define EFL_sig(context)     ((context)->uc_mcontext->ss.eflags)
-
 #define EIP_sig(context)     (*((unsigned long*)&(context)->uc_mcontext->ss.eip))
 #define ESP_sig(context)     (*((unsigned long*)&(context)->uc_mcontext->ss.esp))
-
 #define TRAP_sig(context)    ((context)->uc_mcontext->es.trapno)
 #define ERROR_sig(context)   ((context)->uc_mcontext->es.err)
+#define FPU_sig(context)     NULL
+#define FPUX_sig(context)    ((XMM_SAVE_AREA32 *)&(context)->uc_mcontext->fs.fpu_fcw)
+#endif
 
 #endif /* __APPLE__ */
-
-#include "wine/exception.h"
-#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
 
@@ -279,6 +338,8 @@ static size_t signal_stack_mask;
 static size_t signal_stack_size;
 
 static wine_signal_handler handlers[256];
+
+static int fpux_support;  /* whether the CPU support extended fpu context */
 
 extern void DECLSPEC_NORETURN __wine_call_from_32_restore_regs( const CONTEXT *context );
 
@@ -324,7 +385,8 @@ enum i386_trap_code
     TRAP_x86_ARITHTRAP  = 16,  /* Floating point exception */
     TRAP_x86_ALIGNFLT   = 17,  /* Alignment check exception */
     TRAP_x86_MCHK       = 18,  /* Machine check exception */
-    TRAP_x86_CACHEFLT   = 19   /* Cache flush exception */
+    TRAP_x86_CACHEFLT   = 19   /* SIMD exception (via SIGFPE) if CPU is SSE capable
+                                  otherwise Cache flush exception (via SIGSEV) */
 #endif
 };
 
@@ -332,7 +394,7 @@ enum i386_trap_code
 /***********************************************************************
  *           dispatch_signal
  */
-inline static int dispatch_signal(unsigned int sig)
+static inline int dispatch_signal(unsigned int sig)
 {
     if (handlers[sig] == NULL) return 0;
     return handlers[sig](sig);
@@ -469,7 +531,7 @@ static void merge_vm86_pending_flags( EXCEPTION_RECORD *rec )
      * we are returning from exception handler, pending events
      * will be rechecked after each raised exception.
      */
-    while (check_pending && NtCurrentTeb()->vm86_pending)
+    while (check_pending && get_vm86_teb_info()->vm86_pending)
     {
         check_pending = FALSE;
         ntdll_get_thread_data()->vm86_ptr = NULL;
@@ -491,7 +553,7 @@ static void merge_vm86_pending_flags( EXCEPTION_RECORD *rec )
             rec->ExceptionAddress = (LPVOID)vcontext.Eip;
 
             vcontext.EFlags &= ~VIP_MASK;
-            NtCurrentTeb()->vm86_pending = 0;
+            get_vm86_teb_info()->vm86_pending = 0;
             __regs_RtlRaiseException( rec, &vcontext );
 
             restore_vm86_context( &vcontext, vm86 );
@@ -506,7 +568,7 @@ static void merge_vm86_pending_flags( EXCEPTION_RECORD *rec )
      * that the following operation compiles into atomic
      * instruction.
      */
-    vm86->regs.eflags |= NtCurrentTeb()->vm86_pending;
+    vm86->regs.eflags |= get_vm86_teb_info()->vm86_pending;
 }
 #endif /* __HAVE_VM86 */
 
@@ -519,11 +581,11 @@ typedef void (WINAPI *raise_func)( EXCEPTION_RECORD *rec, CONTEXT *context );
  *
  * Handler initialization when the full context is not needed.
  */
-inline static void *init_handler( const SIGCONTEXT *sigcontext, WORD *fs, WORD *gs )
+static inline void *init_handler( const SIGCONTEXT *sigcontext, WORD *fs, WORD *gs )
 {
     void *stack = (void *)(ESP_sig(sigcontext) & ~3);
     TEB *teb = get_current_teb();
-    struct ntdll_thread_regs *thread_regs = (struct ntdll_thread_regs *)teb->SpareBytes1;
+    struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)teb->SystemReserved2;
 
     /* get %fs and %gs at time of the fault */
 #ifdef FS_sig
@@ -537,7 +599,7 @@ inline static void *init_handler( const SIGCONTEXT *sigcontext, WORD *fs, WORD *
     *gs = wine_get_gs();
 #endif
 
-    wine_set_fs( thread_regs->fs );
+    wine_set_fs( thread_data->fs );
 
     /* now restore a proper %gs for the fault handler */
     if (!wine_ldt_is_system(CS_sig(sigcontext)) ||
@@ -550,7 +612,7 @@ inline static void *init_handler( const SIGCONTEXT *sigcontext, WORD *fs, WORD *
          * SS is still non-system segment. This is why both CS and SS
          * are checked.
          */
-        wine_set_gs( thread_regs->gs );
+        wine_set_gs( thread_data->gs );
         stack = teb->WOW32Reserved;
     }
 #ifdef __HAVE_VM86
@@ -576,7 +638,7 @@ inline static void *init_handler( const SIGCONTEXT *sigcontext, WORD *fs, WORD *
  *
  * Save the thread FPU context.
  */
-inline static void save_fpu( CONTEXT *context )
+static inline void save_fpu( CONTEXT *context )
 {
 #ifdef __GNUC__
     context->ContextFlags |= CONTEXT_FLOATING_POINT;
@@ -586,11 +648,30 @@ inline static void save_fpu( CONTEXT *context )
 
 
 /***********************************************************************
+ *           save_fpux
+ *
+ * Save the thread FPU extended context.
+ */
+static inline void save_fpux( CONTEXT *context )
+{
+#ifdef __GNUC__
+    /* we have to enforce alignment by hand */
+    char buffer[sizeof(XMM_SAVE_AREA32) + 16];
+    XMM_SAVE_AREA32 *state = (XMM_SAVE_AREA32 *)(((ULONG_PTR)buffer + 15) & ~15);
+
+    __asm__ __volatile__( "fxsave %0" : "=m" (*state) );
+    context->ContextFlags |= CONTEXT_EXTENDED_REGISTERS;
+    memcpy( context->ExtendedRegisters, state, sizeof(*state) );
+#endif
+}
+
+
+/***********************************************************************
  *           restore_fpu
  *
  * Restore the FPU context to a sigcontext.
  */
-inline static void restore_fpu( const CONTEXT *context )
+static inline void restore_fpu( const CONTEXT *context )
 {
     FLOATING_SAVE_AREA float_status = context->FloatSave;
     /* reset the current interrupt status */
@@ -602,13 +683,81 @@ inline static void restore_fpu( const CONTEXT *context )
 
 
 /***********************************************************************
+ *           restore_fpux
+ *
+ * Restore the FPU extended context to a sigcontext.
+ */
+static inline void restore_fpux( const CONTEXT *context )
+{
+#ifdef __GNUC__
+    /* we have to enforce alignment by hand */
+    char buffer[sizeof(XMM_SAVE_AREA32) + 16];
+    XMM_SAVE_AREA32 *state = (XMM_SAVE_AREA32 *)(((ULONG_PTR)buffer + 15) & ~15);
+
+    memcpy( state, context->ExtendedRegisters, sizeof(*state) );
+    /* reset the current interrupt status */
+    state->StatusWord &= state->ControlWord | 0xff80;
+    __asm__ __volatile__( "fxrstor %0" : : "m" (*state) );
+#endif
+}
+
+
+/***********************************************************************
+ *           fpux_to_fpu
+ *
+ * Build a standard FPU context from an extended one.
+ */
+static void fpux_to_fpu( FLOATING_SAVE_AREA *fpu, const XMM_SAVE_AREA32 *fpux )
+{
+    unsigned int i, tag, stack_top;
+
+    fpu->ControlWord   = fpux->ControlWord | 0xffff0000;
+    fpu->StatusWord    = fpux->StatusWord | 0xffff0000;
+    fpu->ErrorOffset   = fpux->ErrorOffset;
+    fpu->ErrorSelector = fpux->ErrorSelector | (fpux->ErrorOpcode << 16);
+    fpu->DataOffset    = fpux->DataOffset;
+    fpu->DataSelector  = fpux->DataSelector;
+    fpu->Cr0NpxState   = fpux->StatusWord | 0xffff0000;
+
+    stack_top = (fpux->StatusWord >> 11) & 7;
+    fpu->TagWord = 0xffff0000;
+    for (i = 0; i < 8; i++)
+    {
+        memcpy( &fpu->RegisterArea[10 * i], &fpux->FloatRegisters[i], 10 );
+        if (!(fpux->TagWord & (1 << i))) tag = 3;  /* empty */
+        else
+        {
+            const M128A *reg = &fpux->FloatRegisters[(i - stack_top) & 7];
+            if ((reg->High & 0x7fff) == 0x7fff)  /* exponent all ones */
+            {
+                tag = 2;  /* special */
+            }
+            else if (!(reg->High & 0x7fff))  /* exponent all zeroes */
+            {
+                if (reg->Low) tag = 2;  /* special */
+                else tag = 1;  /* zero */
+            }
+            else
+            {
+                if (reg->Low >> 63) tag = 0;  /* valid */
+                else tag = 2;  /* special */
+            }
+        }
+        fpu->TagWord |= tag << (2 * i);
+    }
+}
+
+
+/***********************************************************************
  *           save_context
  *
  * Build a context structure from the signal info.
  */
-inline static void save_context( CONTEXT *context, const SIGCONTEXT *sigcontext, WORD fs, WORD gs )
+static inline void save_context( CONTEXT *context, const SIGCONTEXT *sigcontext, WORD fs, WORD gs )
 {
     struct ntdll_thread_regs * const regs = ntdll_get_thread_regs();
+    FLOATING_SAVE_AREA *fpu = FPU_sig(sigcontext);
+    XMM_SAVE_AREA32 *fpux = FPUX_sig(sigcontext);
 
     memset(context, 0, sizeof(*context));
     context->ContextFlags = CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS;
@@ -635,17 +784,19 @@ inline static void save_context( CONTEXT *context, const SIGCONTEXT *sigcontext,
     context->Dr6          = regs->dr6;
     context->Dr7          = regs->dr7;
 
-#ifdef FPU_sig
-    if (FPU_sig(sigcontext))
+    if (fpu)
     {
         context->ContextFlags |= CONTEXT_FLOATING_POINT;
-        context->FloatSave = *FPU_sig(sigcontext);
+        context->FloatSave = *fpu;
     }
-    else
-#endif
+    if (fpux)
     {
-        save_fpu( context );
+        context->ContextFlags |= CONTEXT_FLOATING_POINT | CONTEXT_EXTENDED_REGISTERS;
+        memcpy( context->ExtendedRegisters, fpux, sizeof(*fpux) );
+        fpux_support = 1;
+        if (!fpu) fpux_to_fpu( &context->FloatSave, fpux );
     }
+    if (!fpu && !fpux) save_fpu( context );
 }
 
 
@@ -654,9 +805,11 @@ inline static void save_context( CONTEXT *context, const SIGCONTEXT *sigcontext,
  *
  * Restore the signal info from the context.
  */
-inline static void restore_context( const CONTEXT *context, SIGCONTEXT *sigcontext )
+static inline void restore_context( const CONTEXT *context, SIGCONTEXT *sigcontext )
 {
     struct ntdll_thread_regs * const regs = ntdll_get_thread_regs();
+    FLOATING_SAVE_AREA *fpu = FPU_sig(sigcontext);
+    XMM_SAVE_AREA32 *fpux = FPUX_sig(sigcontext);
 
     regs->dr0 = context->Dr0;
     regs->dr1 = context->Dr1;
@@ -689,16 +842,9 @@ inline static void restore_context( const CONTEXT *context, SIGCONTEXT *sigconte
     wine_set_fs( context->SegFs );
 #endif
 
-#ifdef FPU_sig
-    if (FPU_sig(sigcontext))
-    {
-        *FPU_sig(sigcontext) = context->FloatSave;
-    }
-    else
-#endif
-    {
-        restore_fpu( context );
-    }
+    if (fpu) *fpu = context->FloatSave;
+    if (fpux) memcpy( fpux, context->ExtendedRegisters, sizeof(*fpux) );
+    if (!fpu && !fpux) restore_fpu( context );
 }
 
 
@@ -710,9 +856,10 @@ inline static void restore_context( const CONTEXT *context, SIGCONTEXT *sigconte
 void WINAPI __regs_get_cpu_context( CONTEXT *context, CONTEXT *regs )
 {
     *context = *regs;
-    save_fpu( context );
+    if (fpux_support) save_fpux( context );
+    else save_fpu( context );
 }
-DEFINE_REGS_ENTRYPOINT( get_cpu_context, 4, 4 );
+DEFINE_REGS_ENTRYPOINT( get_cpu_context, 4, 4 )
 
 
 /***********************************************************************
@@ -724,7 +871,8 @@ void set_cpu_context( const CONTEXT *context )
 {
     DWORD flags = context->ContextFlags & ~CONTEXT_i386;
 
-    if (flags & CONTEXT_FLOATING_POINT) restore_fpu( context );
+    if ((flags & CONTEXT_EXTENDED_REGISTERS) && fpux_support) restore_fpux( context );
+    else if (flags & CONTEXT_FLOATING_POINT) restore_fpu( context );
 
     if (flags & CONTEXT_DEBUG_REGISTERS)
     {
@@ -738,10 +886,19 @@ void set_cpu_context( const CONTEXT *context )
     }
     if (flags & CONTEXT_FULL)
     {
-        if ((flags & CONTEXT_FULL) != (CONTEXT_FULL & ~CONTEXT_i386))
+        if (!(flags & CONTEXT_CONTROL))
             FIXME( "setting partial context (%x) not supported\n", flags );
-        else
+        else if (flags & CONTEXT_SEGMENTS)
             __wine_call_from_32_restore_regs( context );
+        else
+        {
+            CONTEXT newcontext = *context;
+            newcontext.SegDs = wine_get_ds();
+            newcontext.SegEs = wine_get_es();
+            newcontext.SegFs = wine_get_fs();
+            newcontext.SegGs = wine_get_gs();
+            __wine_call_from_32_restore_regs( &newcontext );
+        }
     }
 }
 
@@ -752,7 +909,7 @@ void set_cpu_context( const CONTEXT *context )
  * Check if the fault location is a privileged instruction.
  * Based on the instruction emulation code in dlls/kernel/instr.c.
  */
-static inline int is_privileged_instr( CONTEXT86 *context )
+static inline DWORD is_privileged_instr( CONTEXT86 *context )
 {
     const BYTE *instr;
     unsigned int prefix_count = 0;
@@ -774,7 +931,7 @@ static inline int is_privileged_instr( CONTEXT86 *context )
     case 0xf0:  /* lock */
     case 0xf2:  /* repne */
     case 0xf3:  /* repe */
-        if (++prefix_count >= 15) return 0;
+        if (++prefix_count >= 15) return EXCEPTION_ILLEGAL_INSTRUCTION;
         instr++;
         continue;
 
@@ -785,7 +942,7 @@ static inline int is_privileged_instr( CONTEXT86 *context )
         case 0x21: /* mov drX, reg */
         case 0x22: /* mov reg, crX */
         case 0x23: /* mov reg drX */
-            return 1;
+            return EXCEPTION_PRIV_INSTRUCTION;
         }
         return 0;
     case 0x6c: /* insb (%dx) */
@@ -804,7 +961,7 @@ static inline int is_privileged_instr( CONTEXT86 *context )
     case 0xf4: /* hlt */
     case 0xfa: /* cli */
     case 0xfb: /* sti */
-        return 1;
+        return EXCEPTION_PRIV_INSTRUCTION;
     default:
         return 0;
     }
@@ -852,13 +1009,12 @@ static BOOL check_atl_thunk( EXCEPTION_RECORD *rec, CONTEXT *context )
 
 
 /***********************************************************************
- *           setup_exception
+ *           setup_exception_record
  *
- * Setup a proper stack frame for the raise function, and modify the
- * sigcontext so that the return from the signal handler will call
- * the raise function.
+ * Setup the exception record and context on the thread stack.
  */
-static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func func )
+static EXCEPTION_RECORD *setup_exception_record( SIGCONTEXT *sigcontext, void *stack_ptr,
+                                                 WORD fs, WORD gs, raise_func func )
 {
     struct stack_layout
     {
@@ -869,45 +1025,59 @@ static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func fun
         EXCEPTION_RECORD  rec;
         DWORD             ebp;
         DWORD             eip;
-    } *stack;
-
-    WORD fs, gs;
-
-    stack = init_handler( sigcontext, &fs, &gs );
+    } *stack = stack_ptr;
+    DWORD exception_code = 0;
 
     /* stack sanity checks */
 
     if ((char *)stack >= (char *)get_signal_stack() &&
         (char *)stack < (char *)get_signal_stack() + signal_stack_size)
     {
-        ERR( "nested exception on signal stack in thread %04x eip %08x esp %08x stack %p-%p\n",
-             GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
-             (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->Tib.StackLimit,
-             NtCurrentTeb()->Tib.StackBase );
+        WINE_ERR( "nested exception on signal stack in thread %04x eip %08x esp %08x stack %p-%p\n",
+                  GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
+                  (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->Tib.StackLimit,
+                  NtCurrentTeb()->Tib.StackBase );
         server_abort_thread(1);
     }
 
     if (stack - 1 > stack || /* check for overflow in subtraction */
-        (char *)(stack - 1) < (char *)NtCurrentTeb()->Tib.StackLimit ||
+        (char *)stack <= (char *)NtCurrentTeb()->DeallocationStack ||
         (char *)stack > (char *)NtCurrentTeb()->Tib.StackBase)
     {
-        UINT diff = (char *)NtCurrentTeb()->Tib.StackLimit - (char *)stack;
-        if (diff < 4096)
+        WARN( "exception outside of stack limits in thread %04x eip %08x esp %08x stack %p-%p\n",
+              GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
+              (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->Tib.StackLimit,
+              NtCurrentTeb()->Tib.StackBase );
+    }
+    else if ((char *)(stack - 1) < (char *)NtCurrentTeb()->DeallocationStack + 4096)
+    {
+        /* stack overflow on last page, unrecoverable */
+        UINT diff = (char *)NtCurrentTeb()->DeallocationStack + 4096 - (char *)(stack - 1);
+        WINE_ERR( "stack overflow %u bytes in thread %04x eip %08x esp %08x stack %p-%p-%p\n",
+                  diff, GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
+                  (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->DeallocationStack,
+                  NtCurrentTeb()->Tib.StackLimit, NtCurrentTeb()->Tib.StackBase );
+        server_abort_thread(1);
+    }
+    else if ((char *)(stack - 1) < (char *)NtCurrentTeb()->Tib.StackLimit)
+    {
+        /* stack access below stack limit, may be recoverable */
+        if (virtual_handle_stack_fault( stack - 1 )) exception_code = EXCEPTION_STACK_OVERFLOW;
+        else
         {
-            ERR( "stack overflow %u bytes in thread %04x eip %08x esp %08x stack %p-%p\n",
-                 diff, GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
-                 (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->Tib.StackLimit,
-                 NtCurrentTeb()->Tib.StackBase );
+            UINT diff = (char *)NtCurrentTeb()->Tib.StackLimit - (char *)(stack - 1);
+            WINE_ERR( "stack overflow %u bytes in thread %04x eip %08x esp %08x stack %p-%p-%p\n",
+                      diff, GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
+                      (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->DeallocationStack,
+                      NtCurrentTeb()->Tib.StackLimit, NtCurrentTeb()->Tib.StackBase );
             server_abort_thread(1);
         }
-        else WARN( "exception outside of stack limits in thread %04x eip %08x esp %08x stack %p-%p\n",
-                   GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
-                   (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->Tib.StackLimit,
-                   NtCurrentTeb()->Tib.StackBase );
     }
 
     stack--;  /* push the stack_layout structure */
-#ifdef HAVE_VALGRIND_MEMCHECK_H
+#if defined(VALGRIND_MAKE_MEM_UNDEFINED)
+    VALGRIND_MAKE_MEM_UNDEFINED(stack, sizeof(*stack));
+#elif defined(VALGRIND_MAKE_WRITABLE)
     VALGRIND_MAKE_WRITABLE(stack, sizeof(*stack));
 #endif
     stack->ret_addr     = (void *)0xdeadbabe;  /* raise_func must not return */
@@ -915,6 +1085,7 @@ static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func fun
     stack->context_ptr  = &stack->context;
 
     stack->rec.ExceptionRecord  = NULL;
+    stack->rec.ExceptionCode    = exception_code;
     stack->rec.ExceptionFlags   = EXCEPTION_CONTINUABLE;
     stack->rec.ExceptionAddress = (LPVOID)EIP_sig(sigcontext);
     stack->rec.NumberParameters = 0;
@@ -924,8 +1095,8 @@ static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func fun
     /* now modify the sigcontext to return to the raise function */
     ESP_sig(sigcontext) = (DWORD)stack;
     EIP_sig(sigcontext) = (DWORD)func;
-    /* clear single-step and align check flag */
-    EFL_sig(sigcontext) &= ~(0x100|0x40000); 
+    /* clear single-step, direction, and align check flag */
+    EFL_sig(sigcontext) &= ~(0x100|0x400|0x40000);
     CS_sig(sigcontext)  = wine_get_cs();
     DS_sig(sigcontext)  = wine_get_ds();
     ES_sig(sigcontext)  = wine_get_es();
@@ -934,6 +1105,22 @@ static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func fun
     SS_sig(sigcontext)  = wine_get_ss();
 
     return stack->rec_ptr;
+}
+
+
+/***********************************************************************
+ *           setup_exception
+ *
+ * Setup a proper stack frame for the raise function, and modify the
+ * sigcontext so that the return from the signal handler will call
+ * the raise function.
+ */
+static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func func )
+{
+    WORD fs, gs;
+    void *stack = init_handler( sigcontext, &fs, &gs );
+
+    return setup_exception_record( sigcontext, stack, fs, gs, func );
 }
 
 
@@ -1011,21 +1198,21 @@ static void WINAPI raise_trap_exception( EXCEPTION_RECORD *rec, CONTEXT *context
 {
     if (rec->ExceptionCode == EXCEPTION_SINGLE_STEP)
     {
-        if (context->EFlags & 0x100)
+        struct ntdll_thread_regs * const regs = ntdll_get_thread_regs();
+
+        /* when single stepping can't tell whether this is a hw bp or a
+         * single step interrupt. try to avoid as much overhead as possible
+         * and only do a server call if there is any hw bp enabled. */
+
+        if( !(context->EFlags & 0x100) || (regs->dr7 & 0xff) )
         {
-            context->EFlags &= ~0x100;  /* clear single-step flag */
-        }
-        else  /* hardware breakpoint, fetch the debug registers */
-        {
+            /* (possible) hardware breakpoint, fetch the debug registers */
             context->ContextFlags = CONTEXT_DEBUG_REGISTERS;
             NtGetContextThread(GetCurrentThread(), context);
-            /* do we really have a bp from a debug register ?
-             * if not, then someone did a kill(SIGTRAP) on us, and we
-             * shall return a breakpoint, not a single step exception
-             */
-            if (!(context->Dr6 & 0xf)) rec->ExceptionCode = EXCEPTION_BREAKPOINT;
             context->ContextFlags |= CONTEXT_FULL;  /* restore flags */
         }
+
+        context->EFlags &= ~0x100;  /* clear single-step flag */
     }
 
     __regs_RtlRaiseException( rec, context );
@@ -1052,7 +1239,7 @@ static void WINAPI raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
 static void WINAPI raise_vm86_sti_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
     /* merge_vm86_pending_flags merges the vm86_pending flag in safely */
-    NtCurrentTeb()->vm86_pending |= VIP_MASK;
+    get_vm86_teb_info()->vm86_pending |= VIP_MASK;
 
     if (ntdll_get_thread_data()->vm86_ptr)
     {
@@ -1064,12 +1251,12 @@ static void WINAPI raise_vm86_sti_exception( EXCEPTION_RECORD *rec, CONTEXT *con
         }
         merge_vm86_pending_flags( rec );
     }
-    else if (NtCurrentTeb()->dpmi_vif &&
+    else if (get_vm86_teb_info()->dpmi_vif &&
              !wine_ldt_is_system(context->SegCs) &&
              !wine_ldt_is_system(context->SegSs))
     {
         /* Executing DPMI code and virtual interrupts are enabled. */
-        NtCurrentTeb()->vm86_pending = 0;
+        get_vm86_teb_info()->vm86_pending = 0;
         __regs_RtlRaiseException( rec, context );
     }
 done:
@@ -1100,8 +1287,28 @@ static void usr2_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  */
 static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
+    WORD fs, gs;
+    EXCEPTION_RECORD *rec;
     SIGCONTEXT *context = sigcontext;
-    EXCEPTION_RECORD *rec = setup_exception( context, raise_segv_exception );
+    void *stack = init_handler( sigcontext, &fs, &gs );
+
+    /* check for page fault inside the thread stack */
+    if (get_trap_code(context) == TRAP_x86_PAGEFLT &&
+        (char *)siginfo->si_addr >= (char *)NtCurrentTeb()->DeallocationStack &&
+        (char *)siginfo->si_addr < (char *)NtCurrentTeb()->Tib.StackBase &&
+        virtual_handle_stack_fault( siginfo->si_addr ))
+    {
+        /* check if this was the last guard page */
+        if ((char *)siginfo->si_addr < (char *)NtCurrentTeb()->DeallocationStack + 2*4096)
+        {
+            rec = setup_exception_record( context, stack, fs, gs, raise_segv_exception );
+            rec->ExceptionCode = EXCEPTION_STACK_OVERFLOW;
+        }
+        return;
+    }
+
+    rec = setup_exception_record( context, stack, fs, gs, raise_segv_exception );
+    if (rec->ExceptionCode == EXCEPTION_STACK_OVERFLOW) return;
 
     switch(get_trap_code(context))
     {
@@ -1120,16 +1327,17 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     case TRAP_x86_SEGNPFLT:  /* Segment not present exception */
     case TRAP_x86_PROTFLT:   /* General protection fault */
     case TRAP_x86_UNKNOWN:   /* Unknown fault code */
-        if (!get_error_code(context) && is_privileged_instr( get_exception_context(rec) ))
-            rec->ExceptionCode = EXCEPTION_PRIV_INSTRUCTION;
-        else
         {
             WORD err = get_error_code(context);
+            if (!err && (rec->ExceptionCode = is_privileged_instr( get_exception_context(rec) ))) break;
             rec->ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
             rec->NumberParameters = 2;
             rec->ExceptionInformation[0] = 0;
             /* if error contains a LDT selector, use that as fault address */
-            rec->ExceptionInformation[1] = (err & 7) == 4 ? (err & ~7) : 0xffffffff;
+            if ((err & 7) == 4 && !wine_ldt_is_system( err | 7 ))
+                rec->ExceptionInformation[1] = err & ~7;
+            else
+                rec->ExceptionInformation[1] = 0xffffffff;
         }
         break;
     case TRAP_x86_PAGEFLT:  /* Page fault */
@@ -1142,7 +1350,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         rec->ExceptionCode = EXCEPTION_DATATYPE_MISALIGNMENT;
         break;
     default:
-        ERR( "Got unexpected trap %d\n", get_trap_code(context) );
+        WINE_ERR( "Got unexpected trap %d\n", get_trap_code(context) );
         /* fall through */
     case TRAP_x86_NMI:       /* NMI interrupt */
     case TRAP_x86_DNA:       /* Device not available exception */
@@ -1206,8 +1414,21 @@ static void fpe_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     case TRAP_x86_UNKNOWN:    /* Unknown fault code */
         rec->ExceptionCode = get_fpu_code( win_context );
         break;
+    case TRAP_x86_CACHEFLT:  /* SIMD exception */
+        /* TODO:
+         * Behaviour only tested for divide-by-zero exceptions
+         * Check for other SIMD exceptions as well */
+        if(siginfo->si_code != FPE_FLTDIV)
+            FIXME("untested SIMD exception: %#x. Might not work correctly\n",
+                  siginfo->si_code);
+
+        rec->ExceptionCode = STATUS_FLOAT_MULTIPLE_TRAPS;
+        rec->NumberParameters = 1;
+        /* no idea what meaning is actually behind this but that's what native does */
+        rec->ExceptionInformation[0] = 0;
+        break;
     default:
-        ERR( "Got unexpected trap %d\n", get_trap_code(context) );
+        WINE_ERR( "Got unexpected trap %d\n", get_trap_code(context) );
         rec->ExceptionCode = EXCEPTION_FLT_INVALID_OPERATION;
         break;
     }
@@ -1246,11 +1467,11 @@ static void abrt_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 
 
 /**********************************************************************
- *		term_handler
+ *		quit_handler
  *
- * Handler for SIGTERM.
+ * Handler for SIGQUIT.
  */
-static void term_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+static void quit_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     WORD fs, gs;
     init_handler( sigcontext, &fs, &gs );
@@ -1287,7 +1508,7 @@ size_t get_signal_stack_total_size(void)
 
     if (!signal_stack_size)
     {
-        size_t size = 4096, min_size = teb_size + max( MINSIGSTKSZ, 4096 );
+        size_t size = 8192, min_size = teb_size + max( MINSIGSTKSZ, 8192 );
         /* find the first power of two not smaller than min_size */
         while (size < min_size) size *= 2;
         signal_stack_mask = size - 1;
@@ -1317,7 +1538,7 @@ BOOL SIGNAL_Init(void)
     struct sigaction sig_act;
 
 #ifdef HAVE_SIGALTSTACK
-    struct sigaltstack ss;
+    stack_t ss;
 
 #ifdef __APPLE__
     int mib[2], val = 1;
@@ -1337,12 +1558,8 @@ BOOL SIGNAL_Init(void)
     }
 #endif  /* HAVE_SIGALTSTACK */
 
-    sigemptyset( &sig_act.sa_mask );
-    sigaddset( &sig_act.sa_mask, SIGINT );
-    sigaddset( &sig_act.sa_mask, SIGUSR1 );
-    sigaddset( &sig_act.sa_mask, SIGUSR2 );
+    sig_act.sa_mask = server_block_set;
     sig_act.sa_flags = SA_SIGINFO | SA_RESTART;
-
 #ifdef SA_ONSTACK
     sig_act.sa_flags |= SA_ONSTACK;
 #endif
@@ -1353,8 +1570,8 @@ BOOL SIGNAL_Init(void)
     if (sigaction( SIGFPE, &sig_act, NULL ) == -1) goto error;
     sig_act.sa_sigaction = abrt_handler;
     if (sigaction( SIGABRT, &sig_act, NULL ) == -1) goto error;
-    sig_act.sa_sigaction = term_handler;
-    if (sigaction( SIGTERM, &sig_act, NULL ) == -1) goto error;
+    sig_act.sa_sigaction = quit_handler;
+    if (sigaction( SIGQUIT, &sig_act, NULL ) == -1) goto error;
     sig_act.sa_sigaction = usr1_handler;
     if (sigaction( SIGUSR1, &sig_act, NULL ) == -1) goto error;
 
@@ -1421,8 +1638,7 @@ void __wine_enter_vm86( CONTEXT *context )
         {
         case VM86_UNKNOWN: /* unhandled GP fault - IO-instruction or similar */
             rec.ExceptionCode = EXCEPTION_PRIV_INSTRUCTION;
-            raise_segv_exception( &rec, context );
-            continue;
+            break;
         case VM86_TRAP: /* return due to DOS-debugger request */
             switch(VM86_ARG(res))
             {
@@ -1445,7 +1661,7 @@ void __wine_enter_vm86( CONTEXT *context )
         case VM86_STI: /* sti/popf/iret instruction enabled virtual interrupts */
             context->EFlags |= VIF_MASK;
             context->EFlags &= ~VIP_MASK;
-            NtCurrentTeb()->vm86_pending = 0;
+            get_vm86_teb_info()->vm86_pending = 0;
             rec.ExceptionCode = EXCEPTION_VM86_STI;
             break;
         case VM86_PICRETURN: /* return due to pending PIC request */
@@ -1453,7 +1669,7 @@ void __wine_enter_vm86( CONTEXT *context )
             break;
         case VM86_SIGNAL: /* cannot happen because vm86_enter handles this case */
         default:
-            ERR( "unhandled result from vm86 mode %x\n", res );
+            WINE_ERR( "unhandled result from vm86 mode %x\n", res );
             continue;
         }
         __regs_RtlRaiseException( &rec, context );
@@ -1473,12 +1689,12 @@ void __wine_enter_vm86( CONTEXT *context )
 /**********************************************************************
  *		DbgBreakPoint   (NTDLL.@)
  */
-__ASM_GLOBAL_FUNC( DbgBreakPoint, "int $3; ret");
+__ASM_GLOBAL_FUNC( DbgBreakPoint, "int $3; ret")
 
 /**********************************************************************
  *		DbgUserBreakPoint   (NTDLL.@)
  */
-__ASM_GLOBAL_FUNC( DbgUserBreakPoint, "int $3; ret");
+__ASM_GLOBAL_FUNC( DbgUserBreakPoint, "int $3; ret")
 
 
 /**********************************************************************
@@ -1505,7 +1721,7 @@ __ASM_GLOBAL_FUNC( EXC_CallHandler,
 "	popl	%ebx\n"
 "	leave\n"
 "	ret\n"
-);
+)
 __ASM_GLOBAL_FUNC(call_exception_handler,
 "	pushl	%ebp\n"
 "	movl	%esp, %ebp\n"
@@ -1529,5 +1745,5 @@ __ASM_GLOBAL_FUNC(call_exception_handler,
 "	movl	%ebp, %esp\n"     /* restore saved stack, in case it was corrupted */
 "	popl	%ebp\n"
 "	ret	$20\n"            /* (*4) */
-);
+)
 #endif  /* __i386__ */

@@ -146,8 +146,22 @@ static nsrefcnt NSAPI nsPromptService_Release(nsIPromptService *iface)
 static nsresult NSAPI nsPromptService_Alert(nsIPromptService *iface, nsIDOMWindow *aParent,
         const PRUnichar *aDialogTitle, const PRUnichar *aText)
 {
-    FIXME("(%p %s %s)\n", aParent, debugstr_w(aDialogTitle), debugstr_w(aText));
-    return NS_ERROR_NOT_IMPLEMENTED;
+    HTMLWindow *window;
+    BSTR text;
+
+    TRACE("(%p %s %s)\n", aParent, debugstr_w(aDialogTitle), debugstr_w(aText));
+
+    window = nswindow_to_window(aParent);
+    if(!window) {
+        WARN("Could not find HTMLWindow for nsIDOMWindow %p\n", aParent);
+        return NS_ERROR_UNEXPECTED;
+    }
+
+    text = SysAllocString(aText);
+    IHTMLWindow2_alert(HTMLWINDOW2(window), text);
+    SysFreeString(text);
+
+    return NS_OK;
 }
 
 static nsresult NSAPI nsPromptService_AlertCheck(nsIPromptService *iface,
@@ -320,7 +334,7 @@ static nsresult NSAPI nsTooltipTextProvider_GetNodeText(nsITooltipTextProvider *
             nsIDOMHTMLElement_GetTitle(nselem, &title_str);
             nsIDOMHTMLElement_Release(nselem);
 
-            nsAString_GetData(&title_str, &title, NULL);
+            nsAString_GetData(&title_str, &title);
             if(title && *title) {
                 if(node != aNode)
                     nsIDOMNode_Release(node);
@@ -380,7 +394,7 @@ static nsresult NSAPI nsServiceFactory_QueryInterface(nsIFactory *iface, nsIIDRe
     *result = NULL;
 
     if(IsEqualGUID(&IID_nsISupports, riid)) {
-        TRACE("(%p)->(IID_nsISupoprts %p)\n", This, result);
+        TRACE("(%p)->(IID_nsISupports %p)\n", This, result);
         *result = NSFACTORY(This);
     }else if(IsEqualGUID(&IID_nsIFactory, riid)) {
         TRACE("(%p)->(IID_nsIFactory %p)\n", This, result);
@@ -451,7 +465,7 @@ void register_nsservice(nsIComponentRegistrar *registrar, nsIServiceManager *ser
     if(NS_FAILED(nsres))
         ERR("RegisterFactory failed: %08x\n", nsres);
 
-    nsres = nsIServiceManager_GetServiceByContactID(service_manager, NS_WINDOWWATCHER_CONTRACTID,
+    nsres = nsIServiceManager_GetServiceByContractID(service_manager, NS_WINDOWWATCHER_CONTRACTID,
             &IID_nsIWindowWatcher, (void**)&window_watcher);
     if(NS_SUCCEEDED(nsres)) {
         nsres = nsIWindowWatcher_SetWindowCreator(window_watcher,

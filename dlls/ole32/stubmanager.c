@@ -35,9 +35,8 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "objbase.h"
-#include "ole2.h"
-#include "ole2ver.h"
 #include "rpc.h"
+
 #include "wine/debug.h"
 #include "compobj_private.h"
 
@@ -70,9 +69,27 @@ struct stub_manager *new_stub_manager(APARTMENT *apt, IUnknown *object)
     /* start off with 2 references because the stub is in the apartment
      * and the caller will also hold a reference */
     sm->refs   = 2;
+    sm->weakrefs = 0;
 
-    /* yes, that's right, this starts at zero. that's zero EXTERNAL
-     * refs, ie nobody has unmarshalled anything yet. we can't have
+    sm->oxid_info.dwPid = GetCurrentProcessId();
+    sm->oxid_info.dwTid = GetCurrentThreadId();
+    /*
+     * FIXME: this is a hack for marshalling IRemUnknown. In real
+     * DCOM, the IPID of the IRemUnknown interface is generated like
+     * any other and passed to the OXID resolver which then returns it
+     * when queried. We don't have an OXID resolver yet so instead we
+     * use a magic IPID reserved for IRemUnknown.
+     */
+    sm->oxid_info.ipidRemUnknown.Data1 = 0xffffffff;
+    sm->oxid_info.ipidRemUnknown.Data2 = 0xffff;
+    sm->oxid_info.ipidRemUnknown.Data3 = 0xffff;
+    assert(sizeof(sm->oxid_info.ipidRemUnknown.Data4) == sizeof(apt->oxid));
+    memcpy(&sm->oxid_info.ipidRemUnknown.Data4, &apt->oxid, sizeof(OXID));
+    sm->oxid_info.dwAuthnHint = RPC_C_AUTHN_LEVEL_NONE;
+    sm->oxid_info.psa = NULL /* FIXME */;
+
+    /* Yes, that's right, this starts at zero. that's zero EXTERNAL
+     * refs, i.e., nobody has unmarshalled anything yet. We can't have
      * negative refs because the stub manager cannot be explicitly
      * killed, it has to die by somebody unmarshalling then releasing
      * the marshalled ifptr.
@@ -103,6 +120,7 @@ static void stub_manager_delete(struct stub_manager *m)
         stub_manager_delete_ifstub(m, ifstub);
     }
 
+    CoTaskMemFree(m->oxid_info.psa);
     IUnknown_Release(m->object);
 
     DEBUG_CLEAR_CRITSEC_NAME(&m->lock);
@@ -235,15 +253,18 @@ ULONG stub_manager_int_release(struct stub_manager *This)
 }
 
 /* add some external references (ie from a client that unmarshaled an ifptr) */
-ULONG stub_manager_ext_addref(struct stub_manager *m, ULONG refs)
+ULONG stub_manager_ext_addref(struct stub_manager *m, ULONG refs, BOOL tableweak)
 {
     ULONG rc;
 
     EnterCriticalSection(&m->lock);
-    
+
     /* make sure we don't overflow extrefs */
     refs = min(refs, (ULONG_MAX-1 - m->extrefs));
     rc = (m->extrefs += refs);
+
+    if (tableweak)
+        rc += ++m->weakrefs;
 
     LeaveCriticalSection(&m->lock);
     
@@ -253,7 +274,7 @@ ULONG stub_manager_ext_addref(struct stub_manager *m, ULONG refs)
 }
 
 /* remove some external references */
-ULONG stub_manager_ext_release(struct stub_manager *m, ULONG refs, BOOL last_unlock_releases)
+ULONG stub_manager_ext_release(struct stub_manager *m, ULONG refs, BOOL tableweak, BOOL last_unlock_releases)
 {
     ULONG rc;
 
@@ -262,6 +283,9 @@ ULONG stub_manager_ext_release(struct stub_manager *m, ULONG refs, BOOL last_unl
     /* make sure we don't underflow extrefs */
     refs = min(refs, m->extrefs);
     rc = (m->extrefs -= refs);
+
+    if (tableweak)
+        rc += --m->weakrefs;
 
     LeaveCriticalSection(&m->lock);
     
@@ -347,7 +371,7 @@ HRESULT ipid_to_stub_manager(const IPID *ipid, APARTMENT **stub_apt, struct stub
 {
     /* FIXME: hack for IRemUnknown */
     if (ipid->Data2 == 0xffff)
-        *stub_apt = apartment_findfromoxid(*(OXID *)ipid->Data4, TRUE);
+        *stub_apt = apartment_findfromoxid(*(const OXID *)ipid->Data4, TRUE);
     else
         *stub_apt = apartment_findfromtid(ipid->Data2);
     if (!*stub_apt)
@@ -366,10 +390,11 @@ HRESULT ipid_to_stub_manager(const IPID *ipid, APARTMENT **stub_apt, struct stub
 }
 
 /* gets the apartment, stub and channel of an object. the caller must
- * release the references to all objects if the function returned success,
- * otherwise no references are returned. */
+ * release the references to all objects (except iface) if the function
+ * returned success, otherwise no references are returned. */
 HRESULT ipid_get_dispatch_params(const IPID *ipid, APARTMENT **stub_apt,
-                                 IRpcStubBuffer **stub, IRpcChannelBuffer **chan)
+                                 IRpcStubBuffer **stub, IRpcChannelBuffer **chan,
+                                 IID *iid, IUnknown **iface)
 {
     struct stub_manager *stubmgr;
     struct ifstub *ifstub;
@@ -387,6 +412,8 @@ HRESULT ipid_get_dispatch_params(const IPID *ipid, APARTMENT **stub_apt,
         *chan = ifstub->chan;
         IRpcChannelBuffer_AddRef(*chan);
         *stub_apt = apt;
+        *iid = ifstub->iid;
+        *iface = ifstub->iface;
 
         stub_manager_int_release(stubmgr);
         return S_OK;
@@ -449,21 +476,10 @@ struct ifstub *stub_manager_new_ifstub(struct stub_manager *m, IRpcStubBuffer *s
     stub->flags = flags;
     stub->iid = *iid;
 
-    /* 
-     * FIXME: this is a hack for marshalling IRemUnknown. In real
-     * DCOM, the IPID of the IRemUnknown interface is generated like
-     * any other and passed to the OXID resolver which then returns it
-     * when queried. We don't have an OXID resolver yet so instead we
-     * use a magic IPID reserved for IRemUnknown.
-     */
-    if (IsEqualIID(iid, &IID_IRemUnknown))
-    {
-        stub->ipid.Data1 = 0xffffffff;
-        stub->ipid.Data2 = 0xffff;
-        stub->ipid.Data3 = 0xffff;
-        assert(sizeof(stub->ipid.Data4) == sizeof(m->apt->oxid));
-        memcpy(&stub->ipid.Data4, &m->apt->oxid, sizeof(OXID));
-    }
+    /* FIXME: find a cleaner way of identifying that we are creating an ifstub
+     * for the remunknown interface */
+    if (flags & MSHLFLAGSP_REMUNKNOWN)
+        stub->ipid = m->oxid_info.ipidRemUnknown;
     else
         generate_ipid(m, &stub->ipid);
 
@@ -525,7 +541,7 @@ BOOL stub_manager_notify_unmarshal(struct stub_manager *m, const IPID *ipid)
 }
 
 /* handles refcounting for CoReleaseMarshalData */
-void stub_manager_release_marshal_data(struct stub_manager *m, ULONG refs, const IPID *ipid)
+void stub_manager_release_marshal_data(struct stub_manager *m, ULONG refs, const IPID *ipid, BOOL tableweak)
 {
     struct ifstub *ifstub;
  
@@ -537,7 +553,7 @@ void stub_manager_release_marshal_data(struct stub_manager *m, ULONG refs, const
     else if (ifstub->flags & MSHLFLAGS_TABLESTRONG)
         refs = 1;
 
-    stub_manager_ext_release(m, refs, TRUE);
+    stub_manager_ext_release(m, refs, tableweak, TRUE);
 }
 
 /* is an ifstub table marshaled? */
@@ -684,7 +700,7 @@ static HRESULT WINAPI RemUnknown_RemAddRef(IRemUnknown *iface,
             continue;
         }
 
-        stub_manager_ext_addref(stubmgr, InterfaceRefs[i].cPublicRefs);
+        stub_manager_ext_addref(stubmgr, InterfaceRefs[i].cPublicRefs, FALSE);
         if (InterfaceRefs[i].cPrivateRefs)
             FIXME("Adding %ld refs securely not implemented\n", InterfaceRefs[i].cPrivateRefs);
 
@@ -717,7 +733,7 @@ static HRESULT WINAPI RemUnknown_RemRelease(IRemUnknown *iface,
             break;
         }
 
-        stub_manager_ext_release(stubmgr, InterfaceRefs[i].cPublicRefs, TRUE);
+        stub_manager_ext_release(stubmgr, InterfaceRefs[i].cPublicRefs, FALSE, TRUE);
         if (InterfaceRefs[i].cPrivateRefs)
             FIXME("Releasing %ld refs securely not implemented\n", InterfaceRefs[i].cPrivateRefs);
 
@@ -754,7 +770,7 @@ HRESULT start_apartment_remote_unknown(void)
         {
             STDOBJREF stdobjref; /* dummy - not used */
             /* register it with the stub manager */
-            hr = marshal_object(apt, &stdobjref, &IID_IRemUnknown, (IUnknown *)pRemUnknown, MSHLFLAGS_NORMAL);
+            hr = marshal_object(apt, &stdobjref, &IID_IRemUnknown, (IUnknown *)pRemUnknown, MSHLFLAGS_NORMAL|MSHLFLAGSP_REMUNKNOWN);
             /* release our reference to the object as the stub manager will manage the life cycle for us */
             IRemUnknown_Release(pRemUnknown);
             if (hr == S_OK)

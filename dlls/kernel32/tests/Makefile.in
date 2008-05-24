@@ -3,15 +3,17 @@ TOPOBJDIR = ../../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 TESTDLL   = kernel32.dll
-IMPORTS   = kernel32
+IMPORTS   = advapi32 kernel32
 
 CTESTS = \
+	actctx.c \
 	alloc.c \
 	atom.c \
 	change.c \
 	codepage.c \
 	comm.c \
 	console.c \
+	debugger.c \
 	directory.c \
 	drive.c \
 	environ.c \
@@ -19,6 +21,7 @@ CTESTS = \
 	format_msg.c \
 	generated.c \
 	heap.c \
+	loader.c \
 	locale.c \
 	module.c \
 	mailslot.c \
@@ -26,6 +29,7 @@ CTESTS = \
 	pipe.c \
 	process.c \
 	profile.c \
+	resource.c \
 	sync.c \
 	thread.c \
 	time.c \
@@ -34,6 +38,8 @@ CTESTS = \
 	version.c \
 	virtual.c \
 	volume.c
+
+RC_SRCS = resource.rc
 
 @MAKE_TEST_RULES@
 

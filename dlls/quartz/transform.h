@@ -18,12 +18,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "control_private.h"
+
 typedef struct TransformFilterImpl TransformFilterImpl;
 
 typedef struct TransformFuncsTable {
     HRESULT (*pfnProcessBegin) (TransformFilterImpl* This);
-    HRESULT (*pfnProcessSampleData) (TransformFilterImpl* This, LPBYTE data, DWORD size);
+    HRESULT (*pfnProcessSampleData) (TransformFilterImpl* This, IMediaSample *pSample);
     HRESULT (*pfnProcessEnd) (TransformFilterImpl* This);
+    HRESULT (*pfnQueryConnect) (TransformFilterImpl* This, const AM_MEDIA_TYPE * pmt);
     HRESULT (*pfnConnectInput) (TransformFilterImpl* This, const AM_MEDIA_TYPE * pmt);
     HRESULT (*pfnCleanup) (TransformFilterImpl* This);
 } TransformFuncsTable;
@@ -39,10 +42,11 @@ struct TransformFilterImpl
     IReferenceClock * pClock;
     FILTER_INFO filterInfo;
     CLSID clsid;
+    struct MediaSeekingImpl mediaSeeking;
 
     IPin ** ppPins;
 
-    TransformFuncsTable * pFuncsTable;
+    const TransformFuncsTable * pFuncsTable;
 };
 
-HRESULT TransformFilter_Create(TransformFilterImpl*, const CLSID*, TransformFuncsTable* pFuncsTable);
+HRESULT TransformFilter_Create(TransformFilterImpl*, const CLSID*, const TransformFuncsTable* pFuncsTable, CHANGEPROC stop, CHANGEPROC current, CHANGEPROC rate);

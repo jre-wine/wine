@@ -67,7 +67,7 @@ struct NSCache
 typedef struct NSCache NSCache, *lpNSCache;
 
 /* Function prototypes */
-DPQ_DECL_DELETECB( cbDeleteNSNodeFromHeap, lpNSCacheData );
+static DPQ_DECL_DELETECB( cbDeleteNSNodeFromHeap, lpNSCacheData );
 
 /* Name Server functions
  * ---------------------
@@ -136,10 +136,11 @@ void NS_AddRemoteComputerAsNameServer( LPCVOID                      lpcNSAddrHdr
   if( lpCacheNode->data == NULL )
   {
     ERR( "no memory for SESSIONDESC2\n" );
+    HeapFree( GetProcessHeap(), 0, lpCacheNode );
     return;
   }
 
-  CopyMemory( lpCacheNode->data, &lpcMsg->sd, sizeof( *lpCacheNode->data ) );
+  *lpCacheNode->data = lpcMsg->sd;
   len = WideCharToMultiByte( CP_ACP, 0, (LPCWSTR)(lpcMsg+1), -1, NULL, 0, NULL, NULL );
   if ((lpCacheNode->data->u1.lpszSessionNameA = HeapAlloc( GetProcessHeap(), 0, len )))
   {
@@ -211,7 +212,7 @@ void NS_SetLocalAddr( LPVOID lpNSInfo, LPCVOID lpHdr, DWORD dwHdrSize )
  */
 HRESULT NS_SendSessionRequestBroadcast( LPCGUID lpcGuid,
                                         DWORD dwFlags,
-                                        LPSPINITDATA lpSpData )
+                                        const SPINITDATA *lpSpData )
 
 {
   DPSP_ENUMSESSIONSDATA data;
@@ -239,13 +240,13 @@ HRESULT NS_SendSessionRequestBroadcast( LPCGUID lpcGuid,
   lpMsg->dwPasswordSize = 0; /* FIXME: If enumerating passwords..? */
   lpMsg->dwFlags        = dwFlags;
 
-  CopyMemory( &lpMsg->guidApplication, lpcGuid, sizeof( *lpcGuid ) );
+  lpMsg->guidApplication = *lpcGuid;
 
   return (lpSpData->lpCB->EnumSessions)( &data );
 }
 
 /* Delete a name server node which has been allocated on the heap */
-DPQ_DECL_DELETECB( cbDeleteNSNodeFromHeap, lpNSCacheData )
+static DPQ_DECL_DELETECB( cbDeleteNSNodeFromHeap, lpNSCacheData )
 {
   /* NOTE: This proc doesn't deal with the walking pointer */
 
@@ -410,7 +411,7 @@ void NS_ReplyToEnumSessionsRequest( LPCVOID lpcMsg,
   rmsg->envelope.wVersion   = DPMSGVER_DP6;
 
   CopyMemory( &rmsg->sd, lpDP->dp2->lpSessionDesc,
-              sizeof( lpDP->dp2->lpSessionDesc->dwSize ) );
+              lpDP->dp2->lpSessionDesc->dwSize );
   rmsg->dwUnknown = 0x0000005c;
   if( bAnsi )
   {

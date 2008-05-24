@@ -111,7 +111,7 @@ static void GraphCtrl_Init(TGraphCtrl* this)
 }
 
 #if 0
-TGraphCtrl::~TGraphCtrl()
+TGraphCtrl::~TGraphCtrl(void)
 {
     /*  just to be picky restore the bitmaps for the two memory dc's */
     /*  (these dc's are being destroyed so there shouldn't be any leaks) */
@@ -127,15 +127,11 @@ TGraphCtrl::~TGraphCtrl()
 
 BOOL GraphCtrl_Create(TGraphCtrl* this, HWND hWnd, HWND hParentWnd, UINT nID) 
 {
-    BOOL result = 0;
-
     GraphCtrl_Init(this);
     this->m_hParentWnd = hParentWnd;
     this->m_hWnd = hWnd;
     GraphCtrl_Resize(this);
-    if (result != 0)
-        GraphCtrl_InvalidateCtrl(this);
-    return result;
+    return 0;
 }
 
 void GraphCtrl_SetRange(TGraphCtrl* this, double dLower, double dUpper, int nDecimalPlaces)
@@ -327,8 +323,8 @@ void GraphCtrl_InvalidateCtrl(TGraphCtrl* this)
             (m_rectPlot.bottom+m_rectPlot.top)/2, m_strYUnitsString, _tcslen(m_strYUnitsString));
     SelectObject(m_dcGrid, oldFont);
 #endif
-    /*  at this point we are done filling the the grid bitmap,  */
-    /*  no more drawing to this bitmap is needed until the setting are changed */
+    /*  at this point we are done filling the grid bitmap,  */
+    /*  no more drawing to this bitmap is needed until the settings are changed */
   
     /*  if we don't have one yet, set up a memory dc for the plot */
     if (this->m_dcPlot == NULL) 
@@ -418,7 +414,7 @@ void GraphCtrl_DrawPoint(TGraphCtrl* this)
          *  note: the m_dcPlot covers the entire client
          *        but we only shift bitmap that is the size 
          *        of the plot rectangle
-         *  grab the right side of the plot (exluding m_nShiftPixels on the left)
+         *  grab the right side of the plot (excluding m_nShiftPixels on the left)
          *  move this grabbed bitmap to the left by m_nShiftPixels
          */
         BitBlt(this->m_dcPlot, this->m_rectPlot.left, this->m_rectPlot.top+1, 
@@ -434,7 +430,7 @@ void GraphCtrl_DrawPoint(TGraphCtrl* this)
         /*  fill the cleanup area with the background */
         FillRect(this->m_dcPlot, &rectCleanUp, this->m_brushBack);
 
-        /*  draw the next line segement */
+        /*  draw the next line segment */
         for (i = 0; i < MAX_PLOTS; i++) 
         {
             /*  grab the plotting pen */
@@ -519,7 +515,7 @@ void GraphCtrl_Resize(TGraphCtrl* this)
 }
 
 #if 0
-void TGraphCtrl::Reset()
+void TGraphCtrl::Reset(void)
 {
     /*  to clear the existing data (in the form of a bitmap) */
     /*  simply invalidate the entire control */

@@ -31,7 +31,6 @@
 #include "tmschema.h"
 
 #include "msstyles.h"
-#include "uxthemedll.h"
 
 #include "wine/debug.h"
 
@@ -136,7 +135,7 @@ HRESULT WINAPI GetThemeSysFont(HTHEME hTheme, int iFontID, LOGFONTW *plf)
             case TMT_MSGBOXFONT: font = &ncm.lfMessageFont; break;
             default: FIXME("Unknown FontID: %d\n", iFontID); break;
         }
-        if(font) CopyMemory(plf, font, sizeof(LOGFONTW));
+        if(font) *plf = *font;
         else     hr = STG_E_INVALIDPARAMETER;
     }
     return hr;

@@ -23,6 +23,7 @@
 
 #include <assert.h>
 #include <stdarg.h>
+#include <errno.h>
 
 #include "wine/winbase16.h"
 #include "windef.h"
@@ -30,7 +31,6 @@
 #include "winerror.h"
 #include "wownt32.h"
 #include "excpt.h"
-#include "thread.h"
 #include "winternl.h"
 #include "kernel_private.h"
 #include "kernel16_private.h"
@@ -256,7 +256,7 @@ static DWORD call16_handler( EXCEPTION_RECORD *record, EXCEPTION_REGISTRATION_RE
         else
         {
             SEGPTR gpHandler;
-            DWORD ret = INSTR_EmulateInstruction( record, context );
+            DWORD ret = __wine_emulate_instruction( record, context );
 
             /*
              * Insert check for pending DPMI events. Note that this 
@@ -264,7 +264,7 @@ static DWORD call16_handler( EXCEPTION_RECORD *record, EXCEPTION_REGISTRATION_RE
              * emulated because the instruction emulation requires
              * original CS:IP and the emulation may change TEB.dpmi_vif.
              */
-            if(NtCurrentTeb()->dpmi_vif)
+            if(get_vm86_teb_info()->dpmi_vif)
                 insert_event_check( context );
 
             if (ret != ExceptionContinueSearch) return ret;
@@ -310,7 +310,7 @@ static DWORD vm86_handler( EXCEPTION_RECORD *record, EXCEPTION_REGISTRATION_RECO
     if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ||
         record->ExceptionCode == EXCEPTION_PRIV_INSTRUCTION)
     {
-        return INSTR_EmulateInstruction( record, context );
+        return __wine_emulate_instruction( record, context );
     }
 
     return ExceptionContinueSearch;
@@ -587,9 +587,19 @@ BOOL WINAPI K32WOWCallback16Ex( DWORD vpfn16, DWORD dwFlags,
         {
             EXCEPTION_REGISTRATION_RECORD frame;
             frame.Handler = vm86_handler;
+            errno = 0;
             __wine_push_frame( &frame );
             __wine_enter_vm86( context );
             __wine_pop_frame( &frame );
+            if (errno != 0)  /* enter_vm86 will fall with ENOSYS on x64 kernels */
+            {
+                WARN("__wine_enter_vm86 failed (errno=%d)\n", errno);
+                if (errno == ENOSYS)
+                    SetLastError(ERROR_NOT_SUPPORTED);
+                else
+                    SetLastError(ERROR_GEN_FAILURE);
+                return FALSE;
+            }
         }
         else
         {
@@ -614,7 +624,7 @@ BOOL WINAPI K32WOWCallback16Ex( DWORD vpfn16, DWORD dwFlags,
              * Note that wine_call_to_16_regs overwrites context stack
              * pointer so we may modify it here without a problem.
              */
-            if (NtCurrentTeb()->dpmi_vif)
+            if (get_vm86_teb_info()->dpmi_vif)
             {
                 context->SegSs = wine_get_ds();
                 context->Esp   = (DWORD)stack;

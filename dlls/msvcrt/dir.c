@@ -29,7 +29,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "wine/unicode.h"
 #include "msvcrt.h"
@@ -132,7 +131,7 @@ static void msvcrt_wfttofdi64( const WIN32_FIND_DATAW *fd, struct MSVCRT__wfindd
  * NOTES
  *  See SetCurrentDirectoryA.
  */
-int CDECL _chdir(const char * newdir)
+int CDECL MSVCRT__chdir(const char * newdir)
 {
   if (!SetCurrentDirectoryA(newdir))
   {
@@ -420,11 +419,10 @@ char* CDECL _getcwd(char * buf, int size)
 
   if (!buf)
   {
-    if (size < 0)
-      return _strdup(dir);
-    return msvcrt_strndup(dir,size);
+      if (size <= dir_len) size = dir_len + 1;
+      if (!(buf = MSVCRT_malloc( size ))) return NULL;
   }
-  if (dir_len >= size)
+  else if (dir_len >= size)
   {
     *MSVCRT__errno() = MSVCRT_ERANGE;
     return NULL; /* buf too small */
@@ -448,9 +446,8 @@ MSVCRT_wchar_t* CDECL _wgetcwd(MSVCRT_wchar_t * buf, int size)
 
   if (!buf)
   {
-    if (size < 0)
-      return _wcsdup(dir);
-    return msvcrt_wstrndup(dir,size);
+      if (size <= dir_len) size = dir_len + 1;
+      if (!(buf = MSVCRT_malloc( size * sizeof(WCHAR) ))) return NULL;
   }
   if (dir_len >= size)
   {
@@ -604,10 +601,10 @@ unsigned int CDECL MSVCRT__getdiskfree(unsigned int disk, struct MSVCRT__diskfre
 
   if (GetDiskFreeSpaceW(disk==0?NULL:drivespec,ret,ret+1,ret+2,ret+3))
   {
-    d->sectors_per_cluster = (unsigned)ret[0];
-    d->bytes_per_sector = (unsigned)ret[1];
-    d->avail_clusters = (unsigned)ret[2];
-    d->total_clusters = (unsigned)ret[3];
+    d->sectors_per_cluster = ret[0];
+    d->bytes_per_sector = ret[1];
+    d->avail_clusters = ret[2];
+    d->total_clusters = ret[3];
     return 0;
   }
   err = GetLastError();
@@ -630,7 +627,7 @@ unsigned int CDECL MSVCRT__getdiskfree(unsigned int disk, struct MSVCRT__diskfre
  * NOTES
  *  See CreateDirectoryA.
  */
-int CDECL _mkdir(const char * newdir)
+int CDECL MSVCRT__mkdir(const char * newdir)
 {
   if (CreateDirectoryA(newdir,NULL))
     return 0;
@@ -666,7 +663,7 @@ int CDECL _wmkdir(const MSVCRT_wchar_t* newdir)
  * NOTES
  *  See RemoveDirectoryA.
  */
-int CDECL _rmdir(const char * dir)
+int CDECL MSVCRT__rmdir(const char * dir)
 {
   if (RemoveDirectoryA(dir))
     return 0;
@@ -768,7 +765,7 @@ MSVCRT_wchar_t * CDECL _wfullpath(MSVCRT_wchar_t * absPath, const MSVCRT_wchar_t
     return NULL;
   }
 
-  TRACE(":resolving relative path '%s'\n",debugstr_w(relPath));
+  TRACE(":resolving relative path %s\n",debugstr_w(relPath));
 
   rc = GetFullPathNameW(relPath,size,buffer,&lastpart);
 
@@ -856,7 +853,7 @@ VOID CDECL _makepath(char * path, const char * drive,
                      const char *directory, const char * filename,
                      const char * extension)
 {
-    char ch;
+    char *p = path;
 
     TRACE("(%s %s %s %s)\n", debugstr_a(drive), debugstr_a(directory),
           debugstr_a(filename), debugstr_a(extension) );
@@ -864,28 +861,30 @@ VOID CDECL _makepath(char * path, const char * drive,
     if ( !path )
         return;
 
-    path[0] = '\0';
     if (drive && drive[0])
     {
-        path[0] = drive[0];
-        path[1] = ':';
-        path[2] = 0;
+        *p++ = drive[0];
+        *p++ = ':';
+        *p = 0;
     }
     if (directory && directory[0])
     {
-        strcat(path, directory);
-        ch = path[strlen(path)-1];
-        if (ch != '/' && ch != '\\')
-            strcat(path,"\\");
+        strcpy(p, directory);
+        p += strlen(directory) - 1;
+        if (*p != '/' && *p != '\\') {
+            strcat(p, "\\");
+            p++;
+        }
+        p++;
     }
     if (filename && filename[0])
     {
-        strcat(path, filename);
+        strcpy(p, filename);
         if (extension && extension[0])
         {
             if ( extension[0] != '.' )
-                strcat(path,".");
-            strcat(path,extension);
+                strcat(p,".");
+            strcat(p,extension);
         }
     }
     TRACE("returning %s\n",path);
@@ -943,7 +942,7 @@ VOID CDECL _wmakepath(MSVCRT_wchar_t *path, const MSVCRT_wchar_t *drive, const M
 /*********************************************************************
  *		_searchenv (MSVCRT.@)
  *
- * Search for a file in a list of paths from an envronment variable.
+ * Search for a file in a list of paths from an environment variable.
  *
  * PARAMS
  *  file   [I] Name of the file to search for.
@@ -1005,6 +1004,69 @@ void CDECL _searchenv(const char* file, const char* env, char *buf)
     if (GetFileAttributesA( curPath ) != INVALID_FILE_ATTRIBUTES)
     {
       strcpy(buf, curPath);
+      msvcrt_set_errno(ERROR_FILE_NOT_FOUND);
+      return; /* Found */
+    }
+    penv = *end ? end + 1 : end;
+  } while(1);
+}
+
+/*********************************************************************
+ *      _wsearchenv (MSVCRT.@)
+ *
+ * Unicode version of _searchenv
+ */
+void CDECL _wsearchenv(const MSVCRT_wchar_t* file, const MSVCRT_wchar_t* env, MSVCRT_wchar_t *buf)
+{
+  MSVCRT_wchar_t *envVal, *penv;
+  MSVCRT_wchar_t curPath[MAX_PATH];
+
+  *buf = '\0';
+
+  /* Try CWD first */
+  if (GetFileAttributesW( file ) != INVALID_FILE_ATTRIBUTES)
+  {
+    GetFullPathNameW( file, MAX_PATH, buf, NULL );
+    /* Sigh. This error is *always* set, regardless of success */
+    msvcrt_set_errno(ERROR_FILE_NOT_FOUND);
+    return;
+  }
+
+  /* Search given environment variable */
+  envVal = _wgetenv(env);
+  if (!envVal)
+  {
+    msvcrt_set_errno(ERROR_FILE_NOT_FOUND);
+    return;
+  }
+
+  penv = envVal;
+  TRACE(":searching for %s in paths %s\n", debugstr_w(file), debugstr_w(envVal));
+
+  do
+  {
+    MSVCRT_wchar_t *end = penv;
+
+    while(*end && *end != ';') end++; /* Find end of next path */
+    if (penv == end || !*penv)
+    {
+      msvcrt_set_errno(ERROR_FILE_NOT_FOUND);
+      return;
+    }
+    memcpy(curPath, penv, (end - penv) * sizeof(MSVCRT_wchar_t));
+    if (curPath[end - penv] != '/' || curPath[end - penv] != '\\')
+    {
+      curPath[end - penv] = '\\';
+      curPath[end - penv + 1] = '\0';
+    }
+    else
+      curPath[end - penv] = '\0';
+
+    strcatW(curPath, file);
+    TRACE("Checking for file %s\n", debugstr_w(curPath));
+    if (GetFileAttributesW( curPath ) != INVALID_FILE_ATTRIBUTES)
+    {
+      strcpyW(buf, curPath);
       msvcrt_set_errno(ERROR_FILE_NOT_FOUND);
       return; /* Found */
     }

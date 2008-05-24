@@ -44,7 +44,7 @@
  * History:
  * 14 Jun 89 - Version 1.0 by Gershon Elber.
  *  3 Sep 90 - Version 1.1 by Gershon Elber (Support for Gif89, Unique names)
- * 15 Sep 90 - Version 2.0 by Eric S. Raymond (Changes to suoport GIF slurp)
+ * 15 Sep 90 - Version 2.0 by Eric S. Raymond (Changes to support GIF slurp)
  * 26 Jun 96 - Version 3.0 by Eric S. Raymond (Full GIF89 support)
  * 17 Dec 98 - Version 4.0 by Toshio Kuratomi (Fix extension writing code)
  *****************************************************************************/
@@ -88,7 +88,7 @@ typedef struct GifColorType {
 typedef struct ColorMapObject {
     int ColorCount;
     int BitsPerPixel;
-    GifColorType *Colors;    /* on malloc(3) heap */
+    GifColorType *Colors;
 } ColorMapObject;
 
 typedef struct GifImageDesc {
@@ -153,17 +153,17 @@ int DGifCloseFile(GifFileType * GifFile);
 /* This is the in-core version of an extension record */
 typedef struct {
     int ByteCount;
-    char *Bytes;    /* on malloc(3) heap */
+    char *Bytes;
     int Function;   /* Holds the type of the Extension block. */
 } ExtensionBlock;
 
 /* This holds an image header, its unpacked raster bits, and extensions */
 typedef struct SavedImage {
     GifImageDesc ImageDesc;
-    unsigned char *RasterBits;  /* on malloc(3) heap */
+    unsigned char *RasterBits;
     int Function;   /* DEPRECATED: Use ExtensionBlocks[x].Function instead */
     int ExtensionBlockCount;
-    ExtensionBlock *ExtensionBlocks;    /* on malloc(3) heap */
+    ExtensionBlock *ExtensionBlocks;
 } SavedImage;
 
 #endif /* _UNGIF_H_ */

@@ -33,7 +33,6 @@
 #include "objbase.h"
 #include "undocshell.h"
 #include "shlguid.h"
-#include "winreg.h"
 
 #include "wine/debug.h"
 
@@ -555,7 +554,7 @@ static HRESULT WINAPI IEIPersistFile_fnGetClassID(
 	if (lpClassId==NULL)
 	  return E_POINTER;
 
-	memcpy(lpClassId, &StdFolderID, sizeof(StdFolderID));
+	*lpClassId = StdFolderID;
 
 	return S_OK;
 }

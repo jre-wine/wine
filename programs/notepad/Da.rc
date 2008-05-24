@@ -3,6 +3,7 @@
  *
  *  Copyright 1998 Henrik Olsen <henrik@iaeste.dk>
  *  Copyright 2002 Sylvain Petreolle <spetreolle@yahoo.fr>
+ *  Copyright 2008 Jens Albretsen <jens@albretsen.dk>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -39,7 +40,7 @@ POPUP "&Rediger" {
   MENUITEM SEPARATOR
   MENUITEM "&Klip\tCtrl+X",     CMD_CUT
   MENUITEM "K&opier\tCtrl+C",   CMD_COPY
-  MENUITEM "Sæt &ind\tCtrl+V",  CMD_PASTE
+  MENUITEM "&Indsæt\tCtrl+V",  CMD_PASTE
   MENUITEM "&Slet\tDel",        CMD_DELETE
   MENUITEM SEPARATOR
   MENUITEM "Marker &alt",       CMD_SELECT_ALL
@@ -56,11 +57,7 @@ POPUP "&Hjælp" {
   MENUITEM "&Søg efter hjælp om...",    CMD_HELP_SEARCH
   MENUITEM "&Brug af Hjælp",    CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  POPUP "&Om Notesblok" {
-   MENUITEM "&Licens...",          CMD_LICENSE
-   MENUITEM "&Ingen Garenti...",     CMD_NO_WARRANTY
-   MENUITEM "&Om WINE...",         CMD_ABOUT_WINE
-  }
+  MENUITEM "&Om Notepad...", CMD_HELP_ABOUT_NOTEPAD
  }
 }
 
@@ -72,19 +69,19 @@ FONT 8, "MS Shell Dlg"
 CAPTION "Sideopsætning"
 {
 LTEXT    "&Sidehoved:",  0x140,   10, 07, 40, 15
-EDITTEXT                         0x141,       60, 05,110, 12, WS_BORDER | WS_TABSTOP
+EDITTEXT IDC_PAGESETUP_HEADERVALUE,   60, 05,110, 12, WS_BORDER | WS_TABSTOP
 LTEXT    "Side&fod:",  0x142,   10, 24, 40, 15
-EDITTEXT                         0x143,       60, 22,110, 12, WS_BORDER | WS_TABSTOP
+EDITTEXT IDC_PAGESETUP_FOOTERVALUE,   60, 22,110, 12, WS_BORDER | WS_TABSTOP
 
 GROUPBOX "Margener:",      0x144,     10, 43,160, 45
 LTEXT    "&Venstre:",        0x145,   20, 55, 30, 10, WS_CHILD
-EDITTEXT /*STRING_PAGESETUP_LEFTVALUE,*/   0x147,       50, 55, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
+EDITTEXT IDC_PAGESETUP_LEFTVALUE,     50, 55, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
 LTEXT    "&Top:",         0x148,    20, 73, 30, 10, WS_CHILD
-EDITTEXT /*STRING_PAGESETUP_TOPVALUE,*/    0x14A,        50, 73, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
+EDITTEXT IDC_PAGESETUP_TOPVALUE,      50, 73, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
 LTEXT    "&Højre:",       0x14B, 100, 55, 30, 10, WS_CHILD
-EDITTEXT /*STRING_PAGESETUP_RIGHTVALUE,*/  0x14D,     130, 55, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
+EDITTEXT IDC_PAGESETUP_RIGHTVALUE,   130, 55, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
 LTEXT    "&Bund:",      0x14E,100, 73, 30, 10, WS_CHILD
-EDITTEXT /*STRING_PAGESETUP_BOTTOMVALUE,*/ 0x150,    130, 73, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
+EDITTEXT IDC_PAGESETUP_BOTTOMVALUE,  130, 73, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
 
 DEFPUSHBUTTON "OK",         IDOK,                   180,  3, 40, 15, WS_TABSTOP
 PUSHBUTTON    "Annuller",     IDCANCEL,               180, 21, 40, 15, WS_TABSTOP
@@ -93,12 +90,8 @@ PUSHBUTTON    "&Hjælp",       IDHELP,                180, 39, 40, 15, WS_TABSTOP
 
 STRINGTABLE DISCARDABLE
 {
-STRING_PAGESETUP_HEADERVALUE,   "&n"        /* FIXME */
-STRING_PAGESETUP_FOOTERVALUE,   "Page &s"   /* FIXME */
-STRING_PAGESETUP_LEFTVALUE,             "20 mm"     /* FIXME */
-STRING_PAGESETUP_RIGHTVALUE,    "20 mm"     /* FIXME */
-STRING_PAGESETUP_TOPVALUE,              "25 mm"     /* FIXME */
-STRING_PAGESETUP_BOTTOMVALUE,   "25 mm"     /* FIXME */
+STRING_PAGESETUP_HEADERVALUE,   "&f"
+STRING_PAGESETUP_FOOTERVALUE,   "Page &p"
 
 STRING_NOTEPAD,                                 "Notesblok"
 STRING_ERROR,                                   "FEJL"

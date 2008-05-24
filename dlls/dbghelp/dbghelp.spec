@@ -1,22 +1,22 @@
 @ stub DbgHelpCreateUserDump
 @ stub DbgHelpCreateUserDumpW
 @ stdcall EnumDirTree(long str str ptr ptr ptr)
-@ stub EnumDirTreeW
+@ stdcall EnumDirTreeW(long wstr wstr ptr ptr ptr)
 @ stdcall EnumerateLoadedModules(long ptr ptr)
-@ stub EnumerateLoadedModules64
-@ stub EnumerateLoadedModulesW64
+@ stdcall EnumerateLoadedModules64(long ptr ptr)
+@ stdcall EnumerateLoadedModulesW64(long ptr ptr)
 @ stdcall ExtensionApiVersion()
 @ stdcall FindDebugInfoFile(str str ptr)
 @ stdcall FindDebugInfoFileEx(str str ptr ptr ptr)
 @ stub FindDebugInfoFileExW
 @ stdcall FindExecutableImage(str str str)
-@ stub FindExecutableImageEx
-@ stub FindExecutableImageExW
+@ stdcall FindExecutableImageEx(str str ptr ptr ptr)
+@ stdcall FindExecutableImageExW(wstr wstr ptr ptr ptr)
 @ stub FindFileInPath
 @ stub FindFileInSearchPath
 @ stdcall GetTimestampForLoadedLibrary(long)
-@ stdcall ImageDirectoryEntryToData(ptr long long ptr) ntdll.RtlImageDirectoryEntryToData
-@ stub ImageDirectoryEntryToDataEx
+@ stdcall ImageDirectoryEntryToData(ptr long long ptr)
+@ stdcall ImageDirectoryEntryToDataEx(ptr long long ptr ptr)
 @ stdcall ImageNtHeader(ptr) ntdll.RtlImageNtHeader
 @ stdcall ImageRvaToSection(ptr ptr long) ntdll.RtlImageRvaToSection
 @ stdcall ImageRvaToVa(ptr ptr long ptr) ntdll.RtlImageRvaToVa
@@ -26,8 +26,8 @@
 @ stdcall MapDebugInformation(long str str long)
 @ stdcall MiniDumpReadDumpStream(ptr long ptr ptr ptr)
 @ stdcall MiniDumpWriteDump(ptr long ptr long long long long)
-@ stdcall SearchTreeForFile(str str str)
-@ stub SearchTreeForFileW
+@ stdcall SearchTreeForFile(str str ptr)
+@ stdcall SearchTreeForFileW(wstr wstr ptr)
 @ stdcall StackWalk(long long long ptr ptr ptr ptr ptr ptr)
 @ stdcall StackWalk64(long long long ptr ptr ptr ptr ptr ptr)
 @ stub SymAddSymbol
@@ -43,10 +43,10 @@
 @ stub SymEnumSymbolsForAddr
 @ stub SymEnumSymbolsForAddrW
 @ stdcall SymEnumTypes(ptr double ptr ptr)
-@ stub SymEnumTypesW
+@ stdcall SymEnumTypesW(ptr double ptr ptr)
 @ stdcall SymEnumerateModules(long ptr ptr)
 @ stdcall SymEnumerateModules64(long ptr ptr)
-@ stub SymEnumerateModulesW64
+@ stdcall SymEnumerateModulesW64(long ptr ptr)
 @ stdcall SymEnumerateSymbols(long long ptr ptr)
 @ stub SymEnumerateSymbols64
 @ stub SymEnumerateSymbolsW
@@ -54,7 +54,7 @@
 @ stub SymFindDebugInfoFile
 @ stub SymFindDebugInfoFileW
 @ stdcall SymFindFileInPath(long str str ptr long long long ptr ptr ptr)
-@ stub SymFindFileInPathW
+@ stdcall SymFindFileInPathW(long wstr wstr ptr long long long ptr ptr ptr)
 @ stdcall SymFromAddr(ptr double ptr ptr)
 @ stdcall SymFromAddrW(ptr double ptr ptr)
 @ stub SymFromIndex
@@ -99,7 +99,7 @@
 @ stub SymGetSourceVarFromToken
 @ stub SymGetSourceVarFromTokenW
 @ stdcall SymGetSymFromAddr(long long ptr ptr)
-@ stdcall SymGetSymFromAddr64(long long long ptr ptr)
+@ stdcall SymGetSymFromAddr64(long double ptr ptr)
 @ stdcall SymGetSymFromName(long str ptr)
 @ stub SymGetSymFromName64
 @ stdcall SymGetSymNext(long ptr)
@@ -119,7 +119,7 @@
 @ stdcall SymLoadModuleEx(long long str str double long ptr long)
 @ stdcall SymLoadModuleExW(long long wstr wstr double long ptr long)
 @ stdcall SymMatchFileName(str str ptr ptr)
-@ stub SymMatchFileNameW
+@ stdcall SymMatchFileNameW(wstr wstr ptr ptr)
 @ stdcall SymMatchString(str str long)
 @ stub SymMatchStringA
 @ stub SymMatchStringW

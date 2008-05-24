@@ -99,6 +99,12 @@ static void test_suminfo(void)
     r = MsiSummaryInfoGetProperty(hsuminfo, 0, NULL, NULL, NULL, 0, NULL);
     ok(r == ERROR_SUCCESS, "getpropcount failed\n");
 
+    r = MsiSummaryInfoGetProperty(hsuminfo, -1, NULL, NULL, NULL, 0, NULL);
+    ok(r == ERROR_UNKNOWN_PROPERTY, "MsiSummaryInfoGetProperty wrong error\n");
+
+    r = MsiSummaryInfoGetProperty(hsuminfo, PID_SECURITY+1, NULL, NULL, NULL, 0, NULL);
+    ok(r == ERROR_UNKNOWN_PROPERTY, "MsiSummaryInfoGetProperty wrong error\n");
+
     type = -1;
     r = MsiSummaryInfoGetProperty(hsuminfo, 0, &type, NULL, NULL, 0, NULL);
     ok(r == ERROR_SUCCESS, "getpropcount failed\n");
@@ -385,12 +391,14 @@ static void test_summary_binary(void)
     type = 0;
     r = MsiSummaryInfoGetProperty(hsuminfo, PID_LASTPRINTED, &type, NULL, NULL, sval, &sz);
     ok(r == ERROR_SUCCESS, "MsiSummaryInfoGetProperty failed\n");
-    ok( !strcmp(sval, ""), "value incorrect\n");
+    ok(!lstrcmpA(sval, "") || !lstrcmpA(sval, "7"),
+        "Expected empty string or \"7\", got \"%s\"\n", sval);
     todo_wine {
-    ok( type == VT_LPSTR, "type wrong\n");
-    ok( sz == 0, "length wrong\n");
+    ok(type == VT_LPSTR, "Expected VT_LPSTR, got %d\n", type);
+    ok(sz == 0 || sz == 1, "Expected 0 or 1, got %d\n", sz);
     }
 
+    ival = -1;
     r = MsiSummaryInfoGetProperty(hsuminfo, PID_WORDCOUNT, &type, &ival, NULL, NULL, NULL);
     ok(r == ERROR_SUCCESS, "MsiSummaryInfoGetProperty failed\n");
     todo_wine ok( ival == 0, "value incorrect\n");

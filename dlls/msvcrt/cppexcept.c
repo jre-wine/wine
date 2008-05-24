@@ -30,7 +30,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "msvcrt.h"
 #include "wine/exception.h"
@@ -39,17 +38,17 @@
 
 #include "cppexcept.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(seh);
-
 #ifdef __i386__  /* CxxFrameHandler is not supported on non-i386 */
+
+WINE_DEFAULT_DEBUG_CHANNEL(seh);
 
 DWORD CDECL cxx_frame_handler( PEXCEPTION_RECORD rec, cxx_exception_frame* frame,
                                PCONTEXT context, EXCEPTION_REGISTRATION_RECORD** dispatch,
-                               cxx_function_descr *descr, EXCEPTION_REGISTRATION_RECORD* nested_frame,
-                               int nested_trylevel );
+                               const cxx_function_descr *descr,
+                               EXCEPTION_REGISTRATION_RECORD* nested_frame, int nested_trylevel );
 
 /* call a function with a given ebp */
-inline static void *call_ebp_func( void *func, void *ebp )
+static inline void *call_ebp_func( void *func, void *ebp )
 {
     void *ret;
     int dummy;
@@ -65,7 +64,7 @@ inline static void *call_ebp_func( void *func, void *ebp )
 }
 
 /* call a copy constructor */
-inline static void call_copy_ctor( void *func, void *this, void *src, int has_vbase )
+static inline void call_copy_ctor( void *func, void *this, void *src, int has_vbase )
 {
     TRACE( "calling copy ctor %p object %p src %p\n", func, this, src );
     if (has_vbase)
@@ -78,13 +77,13 @@ inline static void call_copy_ctor( void *func, void *this, void *src, int has_vb
 }
 
 /* call the destructor of the exception object */
-inline static void call_dtor( void *func, void *object )
+static inline void call_dtor( void *func, void *object )
 {
     __asm__ __volatile__("call *%0" : : "r" (func), "c" (object) : "eax", "edx", "memory" );
 }
 
 /* continue execution to the specified address after exception is caught */
-inline static void DECLSPEC_NORETURN continue_after_catch( cxx_exception_frame* frame, void *addr )
+static inline void DECLSPEC_NORETURN continue_after_catch( cxx_exception_frame* frame, void *addr )
 {
     __asm__ __volatile__("movl -4(%0),%%esp; leal 12(%0),%%ebp; jmp *%1"
                          : : "r" (frame), "a" (addr) );
@@ -112,7 +111,7 @@ static void dump_exception_type( const cxx_exception_type *type )
     }
 }
 
-static void dump_function_descr( const cxx_function_descr *descr, const cxx_exception_type *info )
+static void dump_function_descr( const cxx_function_descr *descr )
 {
     UINT i;
     int j;
@@ -133,7 +132,7 @@ static void dump_function_descr( const cxx_function_descr *descr, const cxx_exce
                  descr->tryblock[i].catchblock_count );
         for (j = 0; j < descr->tryblock[i].catchblock_count; j++)
         {
-            catchblock_info *ptr = &descr->tryblock[i].catchblock[j];
+            const catchblock_info *ptr = &descr->tryblock[i].catchblock[j];
             TRACE( "        %d: flags %x offset %d handler %p type %p %s\n",
                      j, ptr->flags, ptr->offset, ptr->handler,
                      ptr->type_info, dbgstr_type_info( ptr->type_info ) );
@@ -142,7 +141,8 @@ static void dump_function_descr( const cxx_function_descr *descr, const cxx_exce
 }
 
 /* check if the exception type is caught by a given catch block, and return the type that matched */
-static const cxx_type_info *find_caught_type( cxx_exception_type *exc_type, catchblock_info *catchblock )
+static const cxx_type_info *find_caught_type( cxx_exception_type *exc_type,
+                                              const catchblock_info *catchblock )
 {
     UINT i;
 
@@ -168,7 +168,7 @@ static const cxx_type_info *find_caught_type( cxx_exception_type *exc_type, catc
 
 /* copy the exception object where the catch block wants it */
 static void copy_exception( void *object, cxx_exception_frame *frame,
-                            catchblock_info *catchblock, const cxx_type_info *type )
+                            const catchblock_info *catchblock, const cxx_type_info *type )
 {
     void **dest_ptr;
 
@@ -197,7 +197,7 @@ static void copy_exception( void *object, cxx_exception_frame *frame,
 }
 
 /* unwind the local function up to a given trylevel */
-static void cxx_local_unwind( cxx_exception_frame* frame, cxx_function_descr *descr, int last_level)
+static void cxx_local_unwind( cxx_exception_frame* frame, const cxx_function_descr *descr, int last_level)
 {
     void (*handler)();
     int trylevel = frame->trylevel;
@@ -227,7 +227,7 @@ struct catch_func_nested_frame
     EXCEPTION_REGISTRATION_RECORD frame;     /* standard exception frame */
     EXCEPTION_RECORD             *prev_rec;  /* previous record to restore in thread data */
     cxx_exception_frame          *cxx_frame; /* frame of parent exception */
-    cxx_function_descr           *descr;     /* descriptor of parent exception */
+    const cxx_function_descr     *descr;     /* descriptor of parent exception */
     int                           trylevel;  /* current try level */
     EXCEPTION_RECORD             *rec;       /* rec associated with frame */
 };
@@ -275,8 +275,8 @@ static DWORD catch_function_nested_handler( EXCEPTION_RECORD *rec, EXCEPTION_REG
 
 /* find and call the appropriate catch block for an exception */
 /* returns the address to continue execution to after the catch block was called */
-inline static void call_catch_block( PEXCEPTION_RECORD rec, cxx_exception_frame *frame,
-                                     cxx_function_descr *descr, int nested_trylevel,
+static inline void call_catch_block( PEXCEPTION_RECORD rec, cxx_exception_frame *frame,
+                                     const cxx_function_descr *descr, int nested_trylevel,
                                      cxx_exception_type *info )
 {
     UINT i;
@@ -289,7 +289,7 @@ inline static void call_catch_block( PEXCEPTION_RECORD rec, cxx_exception_frame 
 
     for (i = 0; i < descr->tryblock_count; i++)
     {
-        tryblock_info *tryblock = &descr->tryblock[i];
+        const tryblock_info *tryblock = &descr->tryblock[i];
 
         if (trylevel < tryblock->start_level) continue;
         if (trylevel > tryblock->end_level) continue;
@@ -297,7 +297,7 @@ inline static void call_catch_block( PEXCEPTION_RECORD rec, cxx_exception_frame 
         /* got a try block */
         for (j = 0; j < tryblock->catchblock_count; j++)
         {
-            catchblock_info *catchblock = &tryblock->catchblock[j];
+            const catchblock_info *catchblock = &tryblock->catchblock[j];
             if(info)
             {
                 const cxx_type_info *type = find_caught_type( info, catchblock );
@@ -357,7 +357,8 @@ inline static void call_catch_block( PEXCEPTION_RECORD rec, cxx_exception_frame 
  */
 DWORD CDECL cxx_frame_handler( PEXCEPTION_RECORD rec, cxx_exception_frame* frame,
                                PCONTEXT context, EXCEPTION_REGISTRATION_RECORD** dispatch,
-                               cxx_function_descr *descr, EXCEPTION_REGISTRATION_RECORD* nested_frame,
+                               const cxx_function_descr *descr,
+                               EXCEPTION_REGISTRATION_RECORD* nested_frame,
                                int nested_trylevel )
 {
     cxx_exception_type *exc_type;
@@ -390,7 +391,7 @@ DWORD CDECL cxx_frame_handler( PEXCEPTION_RECORD rec, cxx_exception_frame* frame
             TRACE("handling C++ exception rec %p frame %p trylevel %d descr %p nested_frame %p\n",
                   rec, frame, frame->trylevel, descr, nested_frame );
             dump_exception_type( exc_type );
-            dump_function_descr( descr, exc_type );
+            dump_function_descr( descr );
         }
     }
     else
@@ -420,9 +421,35 @@ __ASM_GLOBAL_FUNC( __CxxFrameHandler,
                    "pushl 28(%esp)\n\t"  /* rec */
                    "call " __ASM_NAME("cxx_frame_handler") "\n\t"
                    "add $28,%esp\n\t"
-                   "ret" );
+                   "ret" )
+
+
+/*********************************************************************
+ *		__CxxLongjmpUnwind (MSVCRT.@)
+ *
+ * Callback meant to be used as UnwindFunc for setjmp/longjmp.
+ */
+void __stdcall __CxxLongjmpUnwind( const struct MSVCRT___JUMP_BUFFER *buf )
+{
+    cxx_exception_frame *frame = (cxx_exception_frame *)buf->Registration;
+    const cxx_function_descr *descr = (const cxx_function_descr *)buf->UnwindData[0];
+
+    TRACE( "unwinding frame %p descr %p trylevel %ld\n", frame, descr, buf->TryLevel );
+    cxx_local_unwind( frame, descr, buf->TryLevel );
+}
 
 #endif  /* __i386__ */
+
+
+/*********************************************************************
+ *		__CppXcptFilter (MSVCRT.@)
+ */
+int CDECL __CppXcptFilter(NTSTATUS ex, PEXCEPTION_POINTERS ptr)
+{
+    /* only filter c++ exceptions */
+    if (ex != CXX_EXCEPTION) return EXCEPTION_CONTINUE_SEARCH;
+    return _XcptFilter( ex, ptr );
+}
 
 /*********************************************************************
  *		_CxxThrowException (MSVCRT.@)

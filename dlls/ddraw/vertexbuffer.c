@@ -32,11 +32,9 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "winerror.h"
 #include "wingdi.h"
 #include "wine/exception.h"
-#include "excpt.h"
 
 #include "ddraw.h"
 #include "d3d.h"
@@ -164,8 +162,37 @@ IDirect3DVertexBufferImpl_Release(IDirect3DVertexBuffer7 *iface)
 
     if (ref == 0)
     {
+        IWineD3DVertexBuffer *curVB = NULL;
+        UINT offset, stride;
+
+        EnterCriticalSection(&ddraw_cs);
+        /* D3D7 Vertex buffers don't stay bound in the device, they are passed as a parameter
+         * to drawPrimitiveVB. DrawPrimitiveVB sets them as the stream source in wined3d,
+         * and they should get unset there before they are destroyed
+         */
+        IWineD3DDevice_GetStreamSource(This->ddraw->wineD3DDevice,
+                                       0 /* Stream number */,
+                                       &curVB,
+                                       &offset,
+                                       &stride);
+        if(curVB == This->wineD3DVertexBuffer)
+        {
+            IWineD3DDevice_SetStreamSource(This->ddraw->wineD3DDevice,
+                                        0 /* Steam number */,
+                                        NULL /* stream data */,
+                                        0 /* Offset */,
+                                        0 /* stride */);
+        }
+        if(curVB)
+        {
+            IWineD3DVertexBuffer_Release(curVB); /* For the GetStreamSource */
+        }
+
+        IWineD3DVertexDeclaration_Release(This->wineD3DVertexDeclaration);
         IWineD3DVertexBuffer_Release(This->wineD3DVertexBuffer);
+        LeaveCriticalSection(&ddraw_cs);
         HeapFree(GetProcessHeap(), 0, This);
+
         return 0;
     }
     return ref;
@@ -214,6 +241,7 @@ IDirect3DVertexBufferImpl_Lock(IDirect3DVertexBuffer7 *iface,
     HRESULT hr;
     TRACE("(%p)->(%08x,%p,%p)\n", This, Flags, Data, Size);
 
+    EnterCriticalSection(&ddraw_cs);
     if(Size)
     {
         /* Get the size, for returning it, and for locking */
@@ -222,16 +250,19 @@ IDirect3DVertexBufferImpl_Lock(IDirect3DVertexBuffer7 *iface,
         if(hr != D3D_OK)
         {
             ERR("(%p) IWineD3DVertexBuffer::GetDesc failed with hr=%08x\n", This, hr);
+            LeaveCriticalSection(&ddraw_cs);
             return hr;
         }
         *Size = Desc.Size;
     }
 
-    return IWineD3DVertexBuffer_Lock(This->wineD3DVertexBuffer,
-                                     0 /* OffsetToLock */,
-                                     0 /* SizeToLock, 0 == Full lock */,
-                                     (BYTE **) Data,
-                                     Flags);
+    hr = IWineD3DVertexBuffer_Lock(This->wineD3DVertexBuffer,
+                                   0 /* OffsetToLock */,
+                                   0 /* SizeToLock, 0 == Full lock */,
+                                   (BYTE **) Data,
+                                   Flags);
+    LeaveCriticalSection(&ddraw_cs);
+    return hr;
 }
 
 static HRESULT WINAPI
@@ -262,10 +293,14 @@ static HRESULT WINAPI
 IDirect3DVertexBufferImpl_Unlock(IDirect3DVertexBuffer7 *iface)
 {
     ICOM_THIS_FROM(IDirect3DVertexBufferImpl, IDirect3DVertexBuffer7, iface);
+    HRESULT hr;
     TRACE("(%p)->()\n", This);
 
-    /* This is easy :) */
-    return IWineD3DVertexBuffer_Unlock(This->wineD3DVertexBuffer);
+    EnterCriticalSection(&ddraw_cs);
+    hr = IWineD3DVertexBuffer_Unlock(This->wineD3DVertexBuffer);
+    LeaveCriticalSection(&ddraw_cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI
@@ -315,6 +350,7 @@ IDirect3DVertexBufferImpl_ProcessVertices(IDirect3DVertexBuffer7 *iface,
     IDirect3DDeviceImpl *D3D = ICOM_OBJECT(IDirect3DDeviceImpl, IDirect3DDevice7, D3DDevice);
     BOOL oldClip, doClip;
     HRESULT hr;
+    WINED3DVERTEXBUFFER_DESC Desc;
 
     TRACE("(%p)->(%08x,%d,%d,%p,%d,%p,%08x)\n", This, VertexOp, DestIndex, Count, Src, SrcIndex, D3D, Flags);
 
@@ -330,6 +366,7 @@ IDirect3DVertexBufferImpl_ProcessVertices(IDirect3DVertexBuffer7 *iface,
      */
     if( !(VertexOp & D3DVOP_TRANSFORM) ) return DDERR_INVALIDPARAMS;
 
+    EnterCriticalSection(&ddraw_cs);
     /* WineD3D doesn't know d3d7 vertex operation, it uses
      * render states instead. Set the render states according to
      * the vertex ops
@@ -345,13 +382,21 @@ IDirect3DVertexBufferImpl_ProcessVertices(IDirect3DVertexBuffer7 *iface,
                                       doClip);
     }
 
-
+    IWineD3DVertexBuffer_GetDesc(Src->wineD3DVertexBuffer,
+                                 &Desc);
+    IWineD3DDevice_SetStreamSource(D3D->wineD3DDevice,
+                                   0, /* Stream No */
+                                   Src->wineD3DVertexBuffer,
+                                   0, /* Offset */
+                                   get_flexible_vertex_size(Desc.FVF));
+    IWineD3DDevice_SetVertexDeclaration(D3D->wineD3DDevice,
+                                        Src->wineD3DVertexDeclaration);
     hr = IWineD3DDevice_ProcessVertices(D3D->wineD3DDevice,
                                         SrcIndex,
                                         DestIndex,
                                         Count,
                                         This->wineD3DVertexBuffer,
-                                        Src->wineD3DVertexBuffer,
+                                        NULL /* Output vdecl */,
                                         Flags);
 
     /* Restore the states if needed */
@@ -359,6 +404,7 @@ IDirect3DVertexBufferImpl_ProcessVertices(IDirect3DVertexBuffer7 *iface,
         IWineD3DDevice_SetRenderState(D3D->wineD3DDevice,
                                       WINED3DRS_CLIPPING,
                                       oldClip);
+    LeaveCriticalSection(&ddraw_cs);
     return hr;
 }
 
@@ -408,28 +454,25 @@ IDirect3DVertexBufferImpl_GetVertexBufferDesc(IDirect3DVertexBuffer7 *iface,
     ICOM_THIS_FROM(IDirect3DVertexBufferImpl, IDirect3DVertexBuffer7, iface);
     WINED3DVERTEXBUFFER_DESC WDesc;
     HRESULT hr;
-    DWORD size;
     TRACE("(%p)->(%p)\n", This, Desc);
 
     if(!Desc) return DDERR_INVALIDPARAMS;
 
+    EnterCriticalSection(&ddraw_cs);
     hr = IWineD3DVertexBuffer_GetDesc(This->wineD3DVertexBuffer,
                                       &WDesc);
     if(hr != D3D_OK)
     {
         ERR("(%p) IWineD3DVertexBuffer::GetDesc failed with hr=%08x\n", This, hr);
+        LeaveCriticalSection(&ddraw_cs);
         return hr;
     }
 
-    /* Clear the return value of garbage */
-    size = Desc->dwSize;
-    memset(Desc, 0, size);
-
     /* Now fill the Desc structure */
-    Desc->dwSize = size;
     Desc->dwCaps = This->Caps;
     Desc->dwFVF = WDesc.FVF;
     Desc->dwNumVertices = WDesc.Size / get_flexible_vertex_size(WDesc.FVF);
+    LeaveCriticalSection(&ddraw_cs);
 
     return D3D_OK;
 }
@@ -471,7 +514,9 @@ IDirect3DVertexBufferImpl_Optimize(IDirect3DVertexBuffer7 *iface,
     /* We could forward this call to WineD3D and take advantage
      * of it once we use OpenGL vertex buffers
      */
+    EnterCriticalSection(&ddraw_cs);
     This->Caps |= D3DVBCAPS_OPTIMIZED;
+    LeaveCriticalSection(&ddraw_cs);
 
     return DD_OK;
 }

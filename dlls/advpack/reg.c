@@ -25,7 +25,6 @@
 #include "winerror.h"
 #include "winuser.h"
 #include "winternl.h"
-#include "setupapi.h"
 #include "advpub.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -98,7 +97,7 @@ error:
     return FALSE;
 }
 
-static void strentry_atow(STRENTRYA *aentry, STRENTRYW *wentry)
+static void strentry_atow(const STRENTRYA *aentry, STRENTRYW *wentry)
 {
     DWORD name_len, val_len;
 
@@ -171,7 +170,7 @@ HRESULT WINAPI RegInstallA(HMODULE hm, LPCSTR pszSection, const STRTABLEA* pstTa
     return hr;
 }
 
-static HRESULT write_predefined_strings(HMODULE hm, LPWSTR ini_path)
+static HRESULT write_predefined_strings(HMODULE hm, LPCWSTR ini_path)
 {
     WCHAR mod_path[MAX_PATH + 2];
     WCHAR sys_mod_path[MAX_PATH + 2];
@@ -211,7 +210,7 @@ static HRESULT write_predefined_strings(HMODULE hm, LPWSTR ini_path)
  * substitution table, and executes the INF.
  *
  * PARAMS
- *   hm         [I] Module that contains the REGINST resouce.
+ *   hm         [I] Module that contains the REGINST resource.
  *   pszSection [I] The INF section to execute.
  *   pstTable   [I] Table of string substitutions.
  * 
@@ -221,7 +220,7 @@ static HRESULT write_predefined_strings(HMODULE hm, LPWSTR ini_path)
  */
 HRESULT WINAPI RegInstallW(HMODULE hm, LPCWSTR pszSection, const STRTABLEW* pstTable)
 {
-    int i;
+    unsigned int i;
     CABINFOW cabinfo;
     WCHAR tmp_ini_path[MAX_PATH];
     HRESULT hr = E_FAIL;

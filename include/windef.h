@@ -52,7 +52,7 @@ extern "C" {
 #ifndef __stdcall
 # ifdef __i386__
 #  ifdef __GNUC__
-#   ifdef __APPLE__ /* Mac OSX uses 16-byte aligned stack and not a 4-byte one */
+#   ifdef __APPLE__ /* Mac OS X uses a 16-byte aligned stack and not a 4-byte one */
 #    define __stdcall __attribute__((__stdcall__)) __attribute__((__force_align_arg_pointer__))
 #   else
 #    define __stdcall __attribute__((__stdcall__))
@@ -69,7 +69,7 @@ extern "C" {
 
 #ifndef __cdecl
 # if defined(__i386__) && defined(__GNUC__)
-#  ifdef __APPLE__ /* Mac OSX uses 16-byte aligned stack and not a 4-byte one */
+#  ifdef __APPLE__ /* Mac OS X uses 16-byte aligned stack and not a 4-byte one */
 #   define __cdecl __attribute__((__cdecl__)) __attribute__((__force_align_arg_pointer__))
 #  else
 #   define __cdecl __attribute__((__cdecl__))
@@ -196,7 +196,7 @@ typedef int             INT,        *PINT,     *LPINT;
 typedef unsigned int    UINT,       *PUINT;
 typedef float           FLOAT,      *PFLOAT;
 typedef char                        *PSZ;
-#if defined(_MSC_VER) || (defined(WINE_NO_LONG_AS_INT) && !defined(_WIN64))
+#ifdef _MSC_VER
 typedef long                                   *LPLONG;
 typedef unsigned long   DWORD,      *PDWORD,   *LPDWORD;
 typedef unsigned long   ULONG,      *PULONG;

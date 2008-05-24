@@ -63,7 +63,7 @@ einzeln auszuführen.\n\
 Syntax: FOR %Variable IN (set) DO Befehl\n\
 \n\
 Die Anforderung das % Zeichen zu verdoppeln, sobald FOR in einer Batchdatei\n\
-benutzt wird, existiert im WCMD nicht.\n"
+benutzt wird, existiert im CMD nicht.\n"
 
   WCMD_GOTO,
 "Der GOTO Befehl transferiert die Ausführung zu einer anderen Stelle in einer\n\
@@ -113,7 +113,7 @@ MOVE schlägt fehl, wenn die alte und die neue Position auf verschiedenen DOS\n\
 Laufwerken sind.\n"
 
   WCMD_PATH,
-"PATH ändert oder zeigt den WCMD Suchpfad an.\n\
+"PATH ändert oder zeigt den CMD Suchpfad an.\n\
 \n\
 Nach der Eingabe von PATH, wird die aktuelle PATH Einstellung angezeigt\n\
 (nach dem Start wird der Wert aus der wine.conf Datei genommen). Um die\n\
@@ -126,16 +126,16 @@ modifizieren. Zum Beispiel:\n\
 
   WCMD_PAUSE,
 "PAUSE lässt eine Meldung auf dem Bildschirm erscheinen\n\
-'Press Return key to continue' und wartet darauf, dass der Nutzer die\n\
-Return/Enter-Taste drückt. Es wird hauptsächlich in Batchdateien genutzt,\n\
-um dem Nutzer zu erlauben, die Ausgabe eines vorherigen Befehls zu lesen,\n\
-bevor es durch Scrollen vom Bildschirm verschwindet.\n"
+'Drücken Sie die Eingabetaste um fortzufahren' und wartet darauf, dass der\n\
+Benutzer die Eingabetaste/Enter-Taste drückt. Es wird hauptsächlich in\n\
+Batchdateien genutzt, um dem Beutzer zu erlauben, die Ausgabe eines vorherigen\n\
+Befehls zu lesen, bevor es durch Scrollen vom Bildschirm verschwindet.\n"
 
   WCMD_PROMPT,
 "PROMPT setzt den Befehlszeilenprompt.\n\
 \n\
 Die Zeichenkette, die dem PROMPT Befehl folgt (und dem Leerzeichen\n\
-unmittelbar danach), erscheint am Zeilenanfang, wenn WCMD auf die Eingabe\n\
+unmittelbar danach), erscheint am Zeilenanfang, wenn CMD auf die Eingabe\n\
 wartet.\n\
 \n\
 Die nachfolgenden Zeichen haben eine besondere Bedeutung:\n\
@@ -143,7 +143,7 @@ Die nachfolgenden Zeichen haben eine besondere Bedeutung:\n\
 $$    Dollarzeichen       $_    Zeilenvorschub      $b    Pipe Zeichen (|)\n\
 $d    aktuelles Datum     $e    Escape              $g    > Zeichen\n\
 $l    < Zeichen           $n    akutelles Laufwerk  $p    aktueller Pfad\n\
-$q    Gleichheitszeichen  $t    aktuelle Zeit       $v    wcmd Version\n\
+$q    Gleichheitszeichen  $t    aktuelle Zeit       $v    cmd Version\n\
 \n\
 Hinweis: Die Eingabe des PROMPT Befehls ohne eine Prompt-Zeichenkette, setzt\n\
 den Prompt zu den Standardwert zurück, was das aktuelle Verzeichnis (inklusive\n\
@@ -165,7 +165,7 @@ Batchdatei genutzt werden.\n"
   WCMD_RMDIR,  "Hilfe für RMDIR\n"
 
   WCMD_SET,
-"SET ändert oder zeigt die WCMD Umgebungsvariablen an.\n\
+"SET ändert oder zeigt die CMD Umgebungsvariablen an.\n\
 \n\
 SET ohne Parameter zeigt alle aktuellen Umgebungsvariablen an.\n\
 \n\
@@ -180,7 +180,7 @@ eingeschlossen sein.\n\
 In Wine werden die Umgebungsvariablen des darunterliegenden Betriebssystems\n\
 mit in die Win32 Umgebung eingebunden, deshalb gibt es gewöhnlich mehr Werte\n\
 als es sie in einer ursprünglichen Win32 Realisierung gäbe. Anmerkung: Es ist\n\
-nicht möglich die Umgebungsvariablen des Betriebssystems vom WCMD aus zu\n\
+nicht möglich die Umgebungsvariablen des Betriebssystems vom CMD aus zu\n\
 beeinflussen.\n"
 
   WCMD_SHIFT,
@@ -190,8 +190,8 @@ Es hat keine Auswirkungen, wenn es von der Befehlszeile gerufen wird.\n"
 
   WCMD_TIME,   "Hilfe für TIME\n"
 
-  WCMD_TITLE,  
-"Setzt den Fenstertitel für das WCMD - Fenster.\n\
+  WCMD_TITLE,
+"Setzt den Fenstertitel für das CMD - Fenster.\n\
 \n\
 Syntax: TITLE [Zeichenkette]\n"
 
@@ -211,16 +211,25 @@ VERIFY		Zeigt an, ob ON oder OFF verwendet wird.\n\
 Das Verify Flag hat keine Funktion in Wine.\n"
 
   WCMD_VER,
-"VER zeigt die aktuelle Version von WCMD an.\n"
+"VER zeigt die aktuelle Version von CMD an.\n"
 
   WCMD_VOL,    "Hilfe für VOL\n"
 
+  WCMD_PUSHD,  "PUSHD <Verzeichnisname> speichert das aktuelle\n\
+Verzeichnis auf einem Stack und wecheselt das Arbeitsverzeichnis\n\
+zu dem angegebenen.\n"
+
+  WCMD_POPD,   "POPD wechselt das Arbeitsverzeichnis zu dem zuletzt\n\
+mit PUSHD gespeicherten.\n"
+
+  WCMD_MORE,   "MORE displays output of files or piped input in pages.\n"
+
   WCMD_EXIT,
 "EXIT beendet die aktuelle Befehlssitzung und kehrt zum\n\
-Betriebssystem oder der Shell zurück, von der WCMD gestart wurde.\n"
+Betriebssystem oder der Shell zurück, von der CMD gestart wurde.\n"
 
 
-  1000, "WCMD eingebauten Befehle sind:\n\
+  WCMD_ALLHELP, "CMD eingebauten Befehle sind:\n\
 ATTRIB\t\tZeigt an oder ändert die DOS Dateieigenschaften\n\
 CALL\t\tRuft eine Batch-Datei innerhalb einer anderen auf\n\
 CD (CHDIR)\tWechselt in das Verzeichnis\n\
@@ -233,6 +242,7 @@ DIR\t\tListet den Inhalt eines Verzeichnisses\n\
 ECHO\t\tKopiert den Text direkt zur Konsolenausgabe\n\
 HELP\t\tZeigt detalierte Informationen zu einen Thema\n\
 MD (MKDIR)\tErzeugt ein Unterverzeichnis\n\
+MORE\t\tZeigt die Ausgabe seitenweise an\n\
 MOVE\t\tBewegt eine oder mehrere Dateien oder einen Verzeichnisbaum\n\
 PATH\t\tSetzt oder zeigt den Suchpfad an\n\
 PROMPT\t\tÄndert den Befehlszeilenprompt\n\
@@ -240,11 +250,46 @@ REN (RENAME)\tBenennt eine Datei um\n\
 RD (RMDIR)\tLöscht ein Unterverzeichnis\n\
 SET\t\tSetzt oder zeigt die Umgebungsvariablen an\n\
 TIME\t\tSetzt oder zeigt die aktuelle Systemzeit an\n\
-TITLE\t\tSetzt den Fenstertitel für die WCMD - Sitzung\n\
+TITLE\t\tSetzt den Fenstertitel für die CMD - Sitzung\n\
 TYPE\t\tGibt den Inhalt einer Textdatei aus\n\
-VER\t\tZeigt die aktuelle Version von WCMD an\n\
+VER\t\tZeigt die aktuelle Version von CMD an\n\
 VOL\t\tZeigt die Bezeichnung eines Laufwerkes an\n\
-EXIT\t\tBeendet den WCMD\n\n\
+EXIT\t\tBeendet den CMD\n\n\
 Geben Sie HELP <Befehl> ein, damit Sie weitere Informationen für einen der\n\
 obigen Befehle erhalten.\n"
+
+  WCMD_CONFIRM, "Sind sie sicher"
+  WCMD_YES, "J"
+  WCMD_NO, "N"
+  WCMD_NOASSOC, "Verknüpfung für Dateiendung %s fehlt\n"
+  WCMD_NOFTYPE, "Kein Befehl zum Öffnen für Dateityp '%s'\n"
+  WCMD_OVERWRITE, "%s überschreiben"
+  WCMD_MORESTR, "Mehr..."
+  WCMD_TRUNCATEDLINE, "Die Zeile bei der Batchverarbeitung ist möglicherweise abgeschnitten. Benutze:\n"
+  WCMD_NYI, "Noch nicht implementiert\n\n"
+  WCMD_NOARG, "Argument fehlt\n"
+  WCMD_SYNTAXERR, "Syntaxfehler\n"
+  WCMD_FILENOTFOUND, "%s : Datei nicht gefunden\n"
+  WCMD_NOCMDHELP, "Hilfe für %s ist nicht verfügbar\n"
+  WCMD_NOTARGET, "Das Sprungziel von GOTO wurde nicht gefunden\n"
+  WCMD_CURRENTDATE, "Aktuelles Datum ist %s\n"
+  WCMD_CURRENTTIME, "Aktuelle Zeit ist %s\n"
+  WCMD_NEWDATE, "Geben Sie das neue Datum ein: "
+  WCMD_NEWTIME, "Geben Sie die neue Zeit ein: "
+  WCMD_MISSINGENV, "Die Umgebungsvariable %s ist nicht definiert\n"
+  WCMD_READFAIL, "'%s' konnte nicht geöffnet werden\n"
+  WCMD_CALLINSCRIPT, "Cannot call batch label outside of a batch script\n"
+  WCMD_ALL, "A"
+  WCMD_DELPROMPT, "%s, löschen"
+  WCMD_ECHOPROMPT, "Echo ist %s\n"
+  WCMD_VERIFYPROMPT, "Verify ist %s\n"
+  WCMD_VERIFYERR, "Verify muß ON oder OFF sein\n";
+  WCMD_ARGERR, "Parameterfehler\n"
+  WCMD_VOLUMEDETAIL, "Volume in Laufwerk %c ist %s\nVolumeseriennummer ist %04x-%04x\n\n"
+  WCMD_VOLUMEPROMPT, "Volumebezeichnung (11 Zeichen, EINGABETASTE für keine)?"
+  WCMD_NOPATH, "PATH nicht gefunden\n"
+  WCMD_ANYKEY,"Drücken Sie die Eingabetaste um fortzufahren: "
+  WCMD_CONSTITLE,"Wine Befehlsprozessor"
+  WCMD_VERSION,"CMD Version %s\n\n"
+  WCMD_MOREPROMPT, "Mehr? "
 }

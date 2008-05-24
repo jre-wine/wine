@@ -38,6 +38,9 @@
 extern HMODULE COMCTL32_hModule;
 extern HBRUSH  COMCTL32_hPattern55AABrush;
 
+/* has a value of: 0, CCS_TOP, CCS_NOMOVEY, CCS_BOTTOM */
+#define CCS_LAYOUT_MASK 0x3
+
 /* Property sheet / Wizard */
 #define IDD_PROPSHEET 1006
 #define IDD_WIZARD    1020
@@ -125,6 +128,7 @@ typedef struct
     COLORREF clrBtnFace;            /* COLOR_BTNFACE                       */
     COLORREF clrHighlight;          /* COLOR_HIGHLIGHT                     */
     COLORREF clrHighlightText;      /* COLOR_HIGHLIGHTTEXT                 */
+    COLORREF clrHotTrackingColor;   /* COLOR_HOTLIGHT                      */
     COLORREF clr3dHilight;          /* COLOR_3DHILIGHT                     */
     COLORREF clr3dShadow;           /* COLOR_3DSHADOW                      */
     COLORREF clr3dDkShadow;         /* COLOR_3DDKSHADOW                    */
@@ -145,12 +149,11 @@ VOID COMCTL32_RefreshSysColors(void);
 void COMCTL32_DrawInsertMark(HDC hDC, const RECT *lpRect, COLORREF clrInsertMark, BOOL bHorizontal);
 void COMCTL32_EnsureBitmapSize(HBITMAP *pBitmap, int cxMinWidth, int cyMinHeight, COLORREF crBackground);
 INT  Str_GetPtrWtoA (LPCWSTR lpSrc, LPSTR lpDest, INT nMaxLen);
+INT  Str_GetPtrAtoW (LPCSTR lpSrc, LPWSTR lpDest, INT nMaxLen);
 BOOL Str_SetPtrAtoW (LPWSTR *lppDest, LPCSTR lpSrc);
 BOOL Str_SetPtrWtoA (LPSTR *lppDest, LPCWSTR lpSrc);
 
 #define COMCTL32_VERSION_MINOR 81
-#define WINE_FILEVERSION 5, COMCTL32_VERSION_MINOR, 4704, 1100
-#define WINE_FILEVERSIONSTR "5.81"
 
 /* Our internal stack structure of the window procedures to subclass */
 typedef struct _SUBCLASSPROCS {

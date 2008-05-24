@@ -23,6 +23,12 @@
 #include "config.h"
 #include "wine/port.h"
 
+#ifdef HAVE_POLL_H
+#include <poll.h>
+#endif
+#ifdef HAVE_SYS_POLL_H
+# include <sys/poll.h>
+#endif
 #ifdef HAVE_SYS_TIME_H
 # include <sys/time.h>
 #endif
@@ -32,6 +38,9 @@
 #endif
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
+#endif
+#ifdef HAVE_SYS_IOCTL_H
+# include <sys/ioctl.h>
 #endif
 #include <stdarg.h>
 #include <stdlib.h>
@@ -44,15 +53,15 @@
 #include "winbase.h"
 #include "wininet.h"
 #include "winerror.h"
+#include "wincrypt.h"
+
+#include "wine/debug.h"
+#include "internet.h"
 
 /* To avoid conflicts with the Unix socket headers. we only need it for
  * the error codes anyway. */
 #define USE_WS_PREFIX
 #include "winsock2.h"
-
-#include "wine/debug.h"
-#include "internet.h"
-#include "wincrypt.h"
 
 #define RESPONSE_TIMEOUT        30            /* FROM internet.c */
 
@@ -65,16 +74,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(wininet);
  *    SSL stuff should use crypt32.dll
  */
 
-#if defined HAVE_OPENSSL_SSL_H && defined HAVE_OPENSSL_ERR_H
+#ifdef SONAME_LIBSSL
 
 #include <openssl/err.h>
-
-#ifndef SONAME_LIBSSL
-#define SONAME_LIBSSL "libssl.so"
-#endif
-#ifndef SONAME_LIBCRYPTO
-#define SONAME_LIBCRYPTO "libcrypto.so"
-#endif
 
 static void *OpenSSL_ssl_handle;
 static void *OpenSSL_crypto_handle;
@@ -117,7 +119,7 @@ BOOL NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
     connection->socketFD = -1;
     if (useSSL)
     {
-#if defined HAVE_OPENSSL_SSL_H && defined HAVE_OPENSSL_ERR_H
+#if defined(SONAME_LIBSSL) && defined(SONAME_LIBCRYPTO)
         TRACE("using SSL connection\n");
 	if (OpenSSL_ssl_handle) /* already initialized everything */
             return TRUE;
@@ -207,6 +209,7 @@ BOOL NETCON_connected(WININET_NETCONNECTION *connection)
 /* translate a unix error code into a winsock one */
 static int sock_get_error( int err )
 {
+#if !defined(__MINGW32__) && !defined (_MSC_VER)
     switch (err)
     {
         case EINTR:             return WSAEINTR;
@@ -266,6 +269,8 @@ static int sock_get_error( int err )
 #endif
     default: errno=err; perror("sock_set_error"); return WSAEFAULT;
     }
+#endif
+    return err;
 }
 
 /******************************************************************************
@@ -275,7 +280,7 @@ static int sock_get_error( int err )
 BOOL NETCON_create(WININET_NETCONNECTION *connection, int domain,
 	      int type, int protocol)
 {
-#if defined HAVE_OPENSSL_SSL_H && defined HAVE_OPENSSL_ERR_H
+#ifdef SONAME_LIBSSL
     if (connection->useSSL)
         return FALSE;
 #endif
@@ -299,7 +304,7 @@ BOOL NETCON_close(WININET_NETCONNECTION *connection)
 
     if (!NETCON_connected(connection)) return FALSE;
 
-#if defined HAVE_OPENSSL_SSL_H && defined HAVE_OPENSSL_ERR_H
+#ifdef SONAME_LIBSSL
     if (connection->useSSL)
     {
         HeapFree(GetProcessHeap(),0,connection->peek_msg_mem);
@@ -325,7 +330,7 @@ BOOL NETCON_close(WININET_NETCONNECTION *connection)
     }
     return TRUE;
 }
-#if defined HAVE_OPENSSL_SSL_H && defined HAVE_OPENSSL_ERR_H
+#ifdef SONAME_LIBSSL
 static BOOL check_hostname(X509 *cert, char *hostname)
 {
     /* FIXME: implement */
@@ -338,7 +343,7 @@ static BOOL check_hostname(X509 *cert, char *hostname)
  */
 BOOL NETCON_secure_connect(WININET_NETCONNECTION *connection, LPCWSTR hostname)
 {
-#if defined HAVE_OPENSSL_SSL_H && defined HAVE_OPENSSL_ERR_H
+#ifdef SONAME_LIBSSL
     long verify_res;
     X509 *cert;
     int len;
@@ -476,7 +481,7 @@ BOOL NETCON_send(WININET_NETCONNECTION *connection, const void *msg, size_t len,
     }
     else
     {
-#if defined HAVE_OPENSSL_SSL_H && defined HAVE_OPENSSL_ERR_H
+#ifdef SONAME_LIBSSL
 	if (flags)
             FIXME("SSL_write doesn't support any flags (%08x)\n", flags);
 	*sent = pSSL_write(connection->ssl_s, msg, len);
@@ -497,7 +502,10 @@ BOOL NETCON_send(WININET_NETCONNECTION *connection, const void *msg, size_t len,
 BOOL NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int flags,
 		int *recvd /* out */)
 {
+    *recvd = 0;
     if (!NETCON_connected(connection)) return FALSE;
+    if (!len)
+        return TRUE;
     if (!connection->useSSL)
     {
 	*recvd = recv(connection->socketFD, buf, len, flags);
@@ -510,7 +518,7 @@ BOOL NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int f
     }
     else
     {
-#if defined HAVE_OPENSSL_SSL_H && defined HAVE_OPENSSL_ERR_H
+#ifdef SONAME_LIBSSL
 	if (flags & ~(MSG_PEEK|MSG_WAITALL))
 	    FIXME("SSL_read does not support the following flag: %08x\n", flags);
 
@@ -538,19 +546,13 @@ BOOL NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int f
 		HeapFree(GetProcessHeap(), 0, connection->peek_msg_mem);
 		connection->peek_msg_mem = NULL;
                 connection->peek_msg = NULL;
-		/* check if the peek buffer held too few data */
-		if ((flags & MSG_WAITALL) && (*recvd < len))
-		{
-		    int recv2 = 0;
-		    /* recursive call - but now the peek buffer is empty */
-		    if (!NETCON_recv(connection, (char*)buf + *recvd, len - *recvd, flags, &recv2))
-			return FALSE;
-		    *recvd += recv2;
-		}
 	    }
-            return TRUE;
+	    /* check if we got enough data from the peek buffer */
+	    if (!(flags & MSG_WAITALL) || (*recvd == len))
+	        return TRUE;
+	    /* otherwise, fall through */
 	}
-	*recvd = pSSL_read(connection->ssl_s, buf, len);
+	*recvd += pSSL_read(connection->ssl_s, (char*)buf + *recvd, len - *recvd);
 	if (flags & MSG_PEEK) /* must copy stuff into buffer */
 	{
             connection->peek_len = *recvd;
@@ -573,6 +575,36 @@ BOOL NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int f
 }
 
 /******************************************************************************
+ * NETCON_query_data_available
+ * Returns the number of bytes of peeked data plus the number of bytes of
+ * queued, but unread data.
+ */
+BOOL NETCON_query_data_available(WININET_NETCONNECTION *connection, DWORD *available)
+{
+    *available = 0;
+    if (!NETCON_connected(connection))
+        return FALSE;
+
+#ifdef SONAME_LIBSSL
+    if (connection->peek_msg) *available = connection->peek_len;
+#endif
+
+#ifdef FIONREAD
+    if (!connection->useSSL)
+    {
+        int unread;
+        int retval = ioctlsocket(connection->socketFD, FIONREAD, &unread);
+        if (!retval)
+        {
+            TRACE("%d bytes of queued, but unread data\n", unread);
+            *available += unread;
+        }
+    }
+#endif
+    return TRUE;
+}
+
+/******************************************************************************
  * NETCON_getNextLine
  */
 BOOL NETCON_getNextLine(WININET_NETCONNECTION *connection, LPSTR lpszBuffer, LPDWORD dwBuffer)
@@ -584,19 +616,16 @@ BOOL NETCON_getNextLine(WININET_NETCONNECTION *connection, LPSTR lpszBuffer, LPD
 
     if (!connection->useSSL)
     {
-	struct timeval tv;
-	fd_set infd;
+        struct pollfd pfd;
 	BOOL bSuccess = FALSE;
 	DWORD nRecv = 0;
 
-	FD_ZERO(&infd);
-	FD_SET(connection->socketFD, &infd);
-	tv.tv_sec=RESPONSE_TIMEOUT;
-	tv.tv_usec=0;
+        pfd.fd = connection->socketFD;
+        pfd.events = POLLIN;
 
 	while (nRecv < *dwBuffer)
 	{
-	    if (select(connection->socketFD+1,&infd,NULL,NULL,&tv) > 0)
+	    if (poll(&pfd,1, RESPONSE_TIMEOUT * 1000) > 0)
 	    {
 		if (recv(connection->socketFD, &lpszBuffer[nRecv], 1, 0) <= 0)
 		{
@@ -634,7 +663,7 @@ BOOL NETCON_getNextLine(WININET_NETCONNECTION *connection, LPSTR lpszBuffer, LPD
     }
     else
     {
-#if defined HAVE_OPENSSL_SSL_H && defined HAVE_OPENSSL_ERR_H
+#ifdef SONAME_LIBSSL
 	long prev_timeout;
 	DWORD nRecv = 0;
         BOOL success = TRUE;
@@ -678,8 +707,7 @@ BOOL NETCON_getNextLine(WININET_NETCONNECTION *connection, LPSTR lpszBuffer, LPD
 
 LPCVOID NETCON_GetCert(WININET_NETCONNECTION *connection)
 {
-
-#if defined HAVE_OPENSSL_SSL_H && defined HAVE_OPENSSL_ERR_H
+#ifdef SONAME_LIBSSL
     X509* cert;
     unsigned char* buffer,*p;
     INT len;
@@ -723,7 +751,7 @@ LPCVOID NETCON_GetCert(WININET_NETCONNECTION *connection)
 #endif
 }
 
-BOOL NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value)
+DWORD NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value)
 {
     int result;
     struct timeval tv;
@@ -731,7 +759,7 @@ BOOL NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value)
     /* FIXME: we should probably store the timeout in the connection to set
      * when we do connect */
     if (!NETCON_connected(connection))
-        return TRUE;
+        return ERROR_SUCCESS;
 
     /* value is in milliseconds, convert to struct timeval */
     tv.tv_sec = value / 1000;
@@ -744,9 +772,8 @@ BOOL NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value)
     if (result == -1)
     {
         WARN("setsockopt failed (%s)\n", strerror(errno));
-        INTERNET_SetLastError(sock_get_error(errno));
-        return FALSE;
+        return sock_get_error(errno);
     }
 
-    return TRUE;
+    return ERROR_SUCCESS;
 }

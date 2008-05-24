@@ -25,7 +25,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
@@ -34,7 +33,6 @@
 #include "wownt32.h"
 #include "mmddk.h"
 #include "winioctl.h"
-#include "ntddstor.h"
 #include "ntddcdrm.h"
 #include "winternl.h"
 #include "wine/debug.h"
@@ -74,7 +72,7 @@ static	DWORD	MCICDA_drvOpen(LPCWSTR str, LPMCI_OPEN_DRIVER_PARMSW modp)
 	return 0;
 
     wmcda->wDevID = modp->wDeviceID;
-    mciSetDriverData(wmcda->wDevID, (DWORD)wmcda);
+    mciSetDriverData(wmcda->wDevID, (DWORD_PTR)wmcda);
     modp->wCustomCommandTable = MCI_NO_COMMAND_TABLE;
     modp->wType = MCI_DEVTYPE_CD_AUDIO;
     return modp->wDeviceID;
@@ -121,7 +119,7 @@ static	DWORD    MCICDA_GetStatus(WINE_MCICDAUDIO* wmcda)
     fmt.Format = IOCTL_CDROM_CURRENT_POSITION;
     if (!DeviceIoControl(wmcda->handle, IOCTL_CDROM_READ_Q_CHANNEL, &fmt, sizeof(fmt),
                          &data, sizeof(data), &br, NULL)) {
-        if (GetLastError() == STATUS_NO_MEDIA_IN_DEVICE) mode = MCI_MODE_OPEN;
+        if (GetLastError() == ERROR_NOT_READY) mode = MCI_MODE_OPEN;
     } else {
         switch (data.CurrentPosition.Header.AudioStatus)
         {
@@ -145,10 +143,10 @@ static	int	MCICDA_GetError(WINE_MCICDAUDIO* wmcda)
 {
     switch (GetLastError())
     {
-    case STATUS_NO_MEDIA_IN_DEVICE:     return MCIERR_DEVICE_NOT_READY;
-    case STATUS_IO_DEVICE_ERROR:        return MCIERR_HARDWARE;
+    case ERROR_NOT_READY:     return MCIERR_DEVICE_NOT_READY;
+    case ERROR_IO_DEVICE:     return MCIERR_HARDWARE;
     default:
-	FIXME("Unknown mode %x\n", GetLastError());
+	FIXME("Unknown mode %u\n", GetLastError());
     }
     return MCIERR_DRIVER_INTERNAL;
 }
@@ -295,7 +293,7 @@ static DWORD MCICDA_Open(UINT wDevID, DWORD dwFlags, LPMCI_OPEN_PARMSW lpOpenPar
     }
     if (dwFlags & MCI_OPEN_ELEMENT) {
         if (dwFlags & MCI_OPEN_ELEMENT_ID) {
-            WARN("MCI_OPEN_ELEMENT_ID %8x ! Abort\n", (DWORD)lpOpenParms->lpstrElementName);
+            WARN("MCI_OPEN_ELEMENT_ID %p! Abort\n", lpOpenParms->lpstrElementName);
             return MCIERR_NO_ELEMENT_ALLOWED;
         }
         TRACE("MCI_OPEN_ELEMENT element name: %s\n", debugstr_w(lpOpenParms->lpstrElementName));
@@ -520,7 +518,6 @@ static DWORD MCICDA_Info(UINT wDevID, DWORD dwFlags, LPMCI_INFO_PARMSW lpParms)
 static DWORD MCICDA_Status(UINT wDevID, DWORD dwFlags, LPMCI_STATUS_PARMS lpParms)
 {
     WINE_MCICDAUDIO*	        wmcda = MCICDA_GetOpenDrv(wDevID);
-    DWORD                       idx;
     DWORD	                ret = 0;
     CDROM_SUB_Q_DATA_FORMAT     fmt;
     SUB_Q_CHANNEL_DATA          data;
@@ -560,7 +557,6 @@ static DWORD MCICDA_Status(UINT wDevID, DWORD dwFlags, LPMCI_STATUS_PARMS lpParm
 		TRACE("MCI_TRACK #%u LENGTH=??? !\n", lpParms->dwTrack);
 		if (lpParms->dwTrack < toc.FirstTrack || lpParms->dwTrack > toc.LastTrack)
 		    return MCIERR_OUTOFRANGE;
-                idx = lpParms->dwTrack - toc.FirstTrack;
 		lpParms->dwReturn = FRAME_OF_TOC(toc, lpParms->dwTrack + 1) -
                     FRAME_OF_TOC(toc, lpParms->dwTrack);
 		/* Windows returns one frame less than the total track length for the

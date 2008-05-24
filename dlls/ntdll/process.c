@@ -71,6 +71,24 @@ PEB * WINAPI RtlGetCurrentPeb(void)
     return NtCurrentTeb()->Peb;
 }
 
+/***********************************************************************
+ *           __wine_make_process_system   (NTDLL.@)
+ *
+ * Mark the current process as a system process.
+ * Returns the event that is signaled when all non-system processes have exited.
+ */
+HANDLE __wine_make_process_system(void)
+{
+    HANDLE ret = 0;
+    SERVER_START_REQ( make_process_system )
+    {
+        if (!wine_server_call( req )) ret = reply->event;
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+
 #define UNIMPLEMENTED_INFO_CLASS(c) \
     case c: \
         FIXME("(process=%p) Unimplemented information class: " #c "\n", ProcessHandle); \
@@ -119,7 +137,6 @@ NTSTATUS WINAPI NtQueryInformationProcess(
     UNIMPLEMENTED_INFO_CLASS(ProcessDeviceMap);
     UNIMPLEMENTED_INFO_CLASS(ProcessSessionInformation);
     UNIMPLEMENTED_INFO_CLASS(ProcessForegroundInformation);
-    UNIMPLEMENTED_INFO_CLASS(ProcessImageFileName);
     UNIMPLEMENTED_INFO_CLASS(ProcessLUIDDeviceMapsEnabled);
     UNIMPLEMENTED_INFO_CLASS(ProcessBreakOnTermination);
     UNIMPLEMENTED_INFO_CLASS(ProcessDebugObjectHandle);
@@ -129,6 +146,7 @@ NTSTATUS WINAPI NtQueryInformationProcess(
     case ProcessBasicInformation:
         {
             PROCESS_BASIC_INFORMATION pbi;
+            const unsigned int affinity_mask = (1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1;
 
             if (ProcessInformationLength >= sizeof(PROCESS_BASIC_INFORMATION))
             {
@@ -144,8 +162,8 @@ NTSTATUS WINAPI NtQueryInformationProcess(
                         if ((ret = wine_server_call( req )) == STATUS_SUCCESS)
                         {
                             pbi.ExitStatus = reply->exit_code;
-                            pbi.PebBaseAddress = (DWORD)reply->peb;
-                            pbi.AffinityMask = reply->affinity;
+                            pbi.PebBaseAddress = reply->peb;
+                            pbi.AffinityMask = reply->affinity & affinity_mask;
                             pbi.BasePriority = reply->priority;
                             pbi.UniqueProcessId = reply->pid;
                             pbi.InheritedFromUniqueProcessId = reply->ppid;
@@ -236,8 +254,8 @@ NTSTATUS WINAPI NtQueryInformationProcess(
                       req->handle = ProcessHandle;
                       if ((ret = wine_server_call( req )) == STATUS_SUCCESS)
                       {
-                          NTDLL_from_server_abstime(&pti.CreateTime, &reply->start_time);
-                          NTDLL_from_server_abstime(&pti.ExitTime, &reply->end_time);
+                          pti.CreateTime.QuadPart = reply->start_time;
+                          pti.ExitTime.QuadPart = reply->end_time;
                       }
                     }
                     SERVER_END_REQ;
@@ -291,6 +309,27 @@ NTSTATUS WINAPI NtQueryInformationProcess(
         }
         else ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
+    case ProcessImageFileName:
+        SERVER_START_REQ(get_dll_info)
+        {
+            UNICODE_STRING *image_file_name_str = ProcessInformation;
+
+            req->handle = ProcessHandle;
+            req->base_address = NULL; /* main module */
+            wine_server_set_reply( req, image_file_name_str ? image_file_name_str + 1 : NULL,
+                                   ProcessInformationLength > sizeof(UNICODE_STRING) ? ProcessInformationLength - sizeof(UNICODE_STRING) : 0 );
+            ret = wine_server_call( req );
+            if (ret == STATUS_BUFFER_TOO_SMALL) ret = STATUS_INFO_LENGTH_MISMATCH;
+
+            len = sizeof(UNICODE_STRING) + reply->filename_len;
+            if (ret == STATUS_SUCCESS)
+            {
+                image_file_name_str->MaximumLength = image_file_name_str->Length = reply->filename_len;
+                image_file_name_str->Buffer = (PWSTR)(image_file_name_str + 1);
+            }
+        }
+        SERVER_END_REQ;
+        break;
     default:
         FIXME("(%p,info_class=%d,%p,0x%08x,%p) Unknown information class\n",
               ProcessHandle,ProcessInformationClass,
@@ -321,6 +360,8 @@ NTSTATUS WINAPI NtSetInformationProcess(
     {
     case ProcessAffinityMask:
         if (ProcessInformationLength != sizeof(DWORD_PTR)) return STATUS_INVALID_PARAMETER;
+        if (*(PDWORD_PTR)ProcessInformation & ~((1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1))
+            return STATUS_INVALID_PARAMETER;
         SERVER_START_REQ( set_process_info )
         {
             req->handle   = ProcessHandle;
@@ -386,7 +427,7 @@ NTSTATUS  WINAPI NtOpenProcess(PHANDLE handle, ACCESS_MASK access,
 
     SERVER_START_REQ( open_process )
     {
-        req->pid        = (process_id_t)cid->UniqueProcess;
+        req->pid        = HandleToULong(cid->UniqueProcess);
         req->access     = access;
         req->attributes = attr ? attr->Attributes : 0;
         status = wine_server_call( req );

@@ -48,14 +48,12 @@
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "winternl.h"
 
 #include "wine/exception.h"
 #include "wine/debug.h"
-#include "excpt.h"
 #include "dbghelp_private.h"
-#include "mscvpdb.h"
+#include "wine/mscvpdb.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp_coff);
 
@@ -120,7 +118,8 @@ static int coff_add_file(struct CoffFileSet* coff_files, struct module* module,
     file = coff_files->files + coff_files->nfiles;
     file->startaddr = 0xffffffff;
     file->endaddr   = 0;
-    file->compiland = symt_new_compiland(module, source_new(module, NULL, filename));
+    file->compiland = symt_new_compiland(module, 0,
+                                         source_new(module, NULL, filename));
     file->linetab_offset = -1;
     file->linecnt = 0;
     file->entries = NULL;
@@ -219,15 +218,15 @@ BOOL coff_process_info(const struct msc_debug_info* msc_dbg)
                  */
                 const char* fn;
 
-                fn = source_get(msc_dbg->module, 
+                fn = source_get(msc_dbg->module,
                                 coff_files.files[curr_file_idx].compiland->source);
 
-                TRACE("Duplicating sect from %s: %lx %x %x %d %d\n",
+                TRACE("Duplicating sect from %s: %x %x %x %d %d\n",
                       fn, aux->Section.Length,
                       aux->Section.NumberOfRelocations,
                       aux->Section.NumberOfLinenumbers,
                       aux->Section.Number, aux->Section.Selection);
-                TRACE("More sect %d %s %08lx %d %d %d\n",
+                TRACE("More sect %d %s %08x %d %d %d\n",
                       coff_sym->SectionNumber,
                       coff_get_name(coff_sym, coff_strtab),
                       coff_sym->Value, coff_sym->Type,
@@ -241,7 +240,7 @@ BOOL coff_process_info(const struct msc_debug_info* msc_dbg)
 	    }
             else
 	    {
-                TRACE("New text sect from %s: %lx %x %x %d %d\n",
+                TRACE("New text sect from %s: %x %x %x %d %d\n",
                       source_get(msc_dbg->module, coff_files.files[curr_file_idx].compiland->source),
                       aux->Section.Length,
                       aux->Section.NumberOfRelocations,

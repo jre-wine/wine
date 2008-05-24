@@ -2,6 +2,7 @@
  * XDND handler code
  *
  * Copyright 2003 Ulrich Czekalla
+ * Copyright 2007 Damjan Jovanovic
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,17 +27,17 @@
 # include <unistd.h>
 #endif
 #include <stdarg.h>
+#include <stdio.h>
 
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
-#include "winerror.h"
-#include "wownt32.h"
 
 #include "x11drv.h"
 #include "shlobj.h"  /* DROPFILES */
 
+#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xdnd);
@@ -58,6 +59,7 @@ static LPXDNDDATA XDNDData = NULL;
 static POINT XDNDxy = { 0, 0 };
 
 static void X11DRV_XDND_InsertXDNDData(int property, int format, void* data, unsigned int len);
+static int X11DRV_XDND_DeconstructTextURIList(int property, void* data, int len);
 static int X11DRV_XDND_DeconstructTextPlain(int property, void* data, int len);
 static int X11DRV_XDND_DeconstructTextHTML(int property, void* data, int len);
 static int X11DRV_XDND_MapFormat(unsigned int property, unsigned char *data, int len);
@@ -66,7 +68,7 @@ static void X11DRV_XDND_ResolveProperty(Display *display, Window xwin, Time tm,
 static void X11DRV_XDND_SendDropFiles(HWND hwnd);
 static void X11DRV_XDND_FreeDragDropOp(void);
 static unsigned int X11DRV_XDND_UnixToDos(char** lpdest, char* lpsrc, int len);
-static DROPFILES* X11DRV_XDND_BuildDropFiles(char* filename, unsigned int len, POINT pt);
+static WCHAR* X11DRV_XDND_URIToDOS(char *encodedURI);
 
 static CRITICAL_SECTION xdnd_cs;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -284,7 +286,7 @@ static void X11DRV_XDND_ResolveProperty(Display *display, Window xwin, Time tm,
             AnyPropertyType, &acttype, &actfmt, &icount, &bytesret, &data);
         wine_tsx11_unlock();
 
-        entries += X11DRV_XDND_MapFormat(types[i], data, icount * (actfmt / 8));
+        entries += X11DRV_XDND_MapFormat(types[i], data, get_property_size( actfmt, icount ));
         wine_tsx11_lock();
         XFree(data);
         wine_tsx11_unlock();
@@ -335,11 +337,99 @@ static int X11DRV_XDND_MapFormat(unsigned int property, unsigned char *data, int
     X11DRV_XDND_InsertXDNDData(property, property, xdata, len);
     count++;
 
-    if (property == x11drv_atom(text_plain))
+    if (property == x11drv_atom(text_uri_list))
+        count += X11DRV_XDND_DeconstructTextURIList(property, data, len);
+    else if (property == x11drv_atom(text_plain))
         count += X11DRV_XDND_DeconstructTextPlain(property, data, len);
     else if (property == x11drv_atom(text_html))
         count += X11DRV_XDND_DeconstructTextHTML(property, data, len);
 
+    return count;
+}
+
+
+/**************************************************************************
+ * X11DRV_XDND_DeconstructTextURIList
+ *
+ * Interpret text/uri-list data and add records to <dndfmt> linked list
+ */
+static int X11DRV_XDND_DeconstructTextURIList(int property, void* data, int len)
+{
+    char *uriList = (char*) data;
+    char *uri;
+    WCHAR *path;
+
+    char *out = NULL;
+    int size = 0;
+    int capacity = 4096;
+
+    int count = 0;
+    int start = 0;
+    int end = 0;
+
+    out = HeapAlloc(GetProcessHeap(), 0, capacity);
+    if (out == NULL)
+        return 0;
+
+    while (end < len)
+    {
+        while (end < len && uriList[end] != '\r')
+            ++end;
+        if (end == len)
+            break;
+        if (uriList[end+1] != '\n')
+        {
+            WARN("URI list line doesn't end in \\r\\n\n");
+            break;
+        }
+
+        uri = HeapAlloc(GetProcessHeap(), 0, end - start + 1);
+        if (uri == NULL)
+            break;
+        lstrcpynA(uri, &uriList[start], end - start + 1);
+        path = X11DRV_XDND_URIToDOS(uri);
+        TRACE("converted URI %s to DOS path %s\n", debugstr_a(uri), debugstr_w(path));
+        HeapFree(GetProcessHeap(), 0, uri);
+
+        if (path)
+        {
+            int pathSize = strlenW(path) + 1;
+            if (pathSize > capacity-size)
+            {
+                capacity = 2*capacity + pathSize;
+                out = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, out, capacity + 1);
+                if (out == NULL)
+                    goto done;
+            }
+            WideCharToMultiByte(CP_ACP, 0, path, -1, &out[size], pathSize, 0, 0);
+            size += pathSize;
+        done:
+            HeapFree(GetProcessHeap(), 0, path);
+            if (out == NULL)
+                break;
+        }
+
+        start = end + 2;
+        end = start;
+    }
+    if (out && end == len)
+    {
+        DROPFILES *dropFiles;
+        dropFiles = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(DROPFILES) + size + 1);
+        if (dropFiles)
+        {
+            dropFiles->pFiles = sizeof(DROPFILES);
+            dropFiles->pt.x = XDNDxy.x;
+            dropFiles->pt.y = XDNDxy.y;
+            dropFiles->fNC = 0;
+            dropFiles->fWide = FALSE;
+            out[size] = '\0';
+            memcpy(((char*)dropFiles) + dropFiles->pFiles, out, size + 1);
+            X11DRV_XDND_InsertXDNDData(property, CF_HDROP, dropFiles, sizeof(DROPFILES) + size + 1);
+            count = 1;
+        }
+    }
+    HeapFree(GetProcessHeap(), 0, out);
     return count;
 }
 
@@ -351,49 +441,15 @@ static int X11DRV_XDND_MapFormat(unsigned int property, unsigned char *data, int
  */
 static int X11DRV_XDND_DeconstructTextPlain(int property, void* data, int len)
 {
-    char *p = (char*) data;
     char* dostext;
-    int count = 0;
 
-    /* Always suppply plain text */
+    /* Always supply plain text */
     X11DRV_XDND_UnixToDos(&dostext, (char*)data, len);
     X11DRV_XDND_InsertXDNDData(property, CF_TEXT, dostext, strlen(dostext));
-    count++;
 
     TRACE("CF_TEXT (%d): %s\n", CF_TEXT, dostext);
 
-    /* Check for additional mappings */
-    while (*p != '\0' && *p != ':') /* Advance to end of protocol */
-        p++;
-
-    if (*p == ':')
-    {
-        if (!strncasecmp(data, "http", 4))
-        {
-            X11DRV_XDND_InsertXDNDData(property, RegisterClipboardFormatA("UniformResourceLocator"),
-                strdup(dostext), strlen(dostext));
-                count++;
-
-            TRACE("UniformResourceLocator: %s\n", dostext);
-        }
-        else if (!strncasecmp(data, "file", 4))
-        {
-            DROPFILES* pdf;
-
-            pdf = X11DRV_XDND_BuildDropFiles(p+1, len - 5, XDNDxy);
-            if (pdf)
-            {
-                unsigned int size = HeapSize(GetProcessHeap(), 0, pdf);
-
-                X11DRV_XDND_InsertXDNDData(property, CF_HDROP, pdf, size);
-                count++;
-            }
-
-            TRACE("CF_HDROP: %p\n", pdf);
-        }
-    }
-
-    return count;
+    return 1;
 }
 
 
@@ -487,57 +543,6 @@ static void X11DRV_XDND_FreeDragDropOp(void)
 
 
 /**************************************************************************
- * X11DRV_XDND_BuildDropFiles
- */
-static DROPFILES* X11DRV_XDND_BuildDropFiles(char* filename, unsigned int len, POINT pt)
-{
-    char* pfn;
-    int pathlen;
-    char path[MAX_PATH];
-    DROPFILES *lpDrop = NULL;
-
-    /* Advance to last starting slash */
-    pfn = filename + 1;
-    while (*pfn && (*pfn == '\\' || *pfn =='/'))
-    {
-        pfn++;
-        filename++;
-    }
-
-    /* Remove any trailing \r or \n */
-    while (*pfn)
-    {
-        if (*pfn == '\r' || *pfn == '\n')
-        {
-            *pfn = 0;
-            break;
-        }
-        pfn++;
-    }
-
-    TRACE("%s\n", filename);
-
-    pathlen = GetLongPathNameA(filename, path, MAX_PATH);
-    if (pathlen)
-    {
-        lpDrop = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(DROPFILES) + pathlen + 1);
-
-        lpDrop->pFiles = sizeof(DROPFILES);
-        lpDrop->pt.x = pt.x;
-        lpDrop->pt.y = pt.y;
-        lpDrop->fNC = 0;
-        lpDrop->fWide = FALSE;
-
-        strcpy(((char*)lpDrop)+lpDrop->pFiles, path);
-    }
-
-    TRACE("resolved %s\n", lpDrop ? filename : NULL);
-
-    return lpDrop;
-}
-
-
-/**************************************************************************
  * X11DRV_XDND_UnixToDos
  */
 static unsigned int X11DRV_XDND_UnixToDos(char** lpdest, char* lpsrc, int len)
@@ -567,4 +572,86 @@ static unsigned int X11DRV_XDND_UnixToDos(char** lpdest, char* lpsrc, int len)
     }
 
     return lines;
+}
+
+
+/**************************************************************************
+ * X11DRV_XDND_URIToDOS
+ */
+static WCHAR* X11DRV_XDND_URIToDOS(char *encodedURI)
+{
+    WCHAR *ret = NULL;
+    int i;
+    int j = 0;
+    char *uri = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, strlen(encodedURI) + 1);
+    if (uri == NULL)
+        return NULL;
+    for (i = 0; encodedURI[i]; ++i)
+    {
+        if (encodedURI[i] == '%')
+        { 
+            if (encodedURI[i+1] && encodedURI[i+2])
+            {
+                char buffer[3];
+                int number;
+                buffer[0] = encodedURI[i+1];
+                buffer[1] = encodedURI[i+2];
+                buffer[2] = '\0';
+                sscanf(buffer, "%x", &number);
+                uri[j++] = number;
+                i += 2;
+            }
+            else
+            {
+                WARN("invalid URI encoding in %s\n", debugstr_a(encodedURI));
+                HeapFree(GetProcessHeap(), 0, uri);
+                return NULL;
+            }
+        }
+        else
+            uri[j++] = encodedURI[i];
+    }
+
+    /* Read http://www.freedesktop.org/wiki/Draganddropwarts and cry... */
+    if (strncmp(uri, "file:/", 6) == 0)
+    {
+        if (uri[6] == '/')
+        {
+            if (uri[7] == '/')
+            {
+                /* file:///path/to/file (nautilus, thunar) */
+                ret = wine_get_dos_file_name(&uri[7]);
+            }
+            else if (uri[7])
+            {
+                /* file://hostname/path/to/file (X file drag spec) */
+                char hostname[256];
+                char *path = strchr(&uri[7], '/');
+                if (path)
+                {
+                    *path = '\0';
+                    if (strcmp(&uri[7], "localhost") == 0)
+                    {
+                        *path = '/';
+                        ret = wine_get_dos_file_name(path);
+                    }
+                    else if (gethostname(hostname, sizeof(hostname)) == 0)
+                    {
+                        if (strcmp(hostname, &uri[7]) == 0)
+                        {
+                            *path = '/';
+                            ret = wine_get_dos_file_name(path);
+                        }
+                    }
+                }
+            }
+        }
+        else if (uri[6])
+        {
+            /* file:/path/to/file (konqueror) */
+            ret = wine_get_dos_file_name(&uri[5]);
+        }
+    }
+    HeapFree(GetProcessHeap(), 0, uri);
+    return ret;
 }

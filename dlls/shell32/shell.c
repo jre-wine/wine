@@ -33,19 +33,15 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winerror.h"
 #include "winreg.h"
 #include "wownt32.h"
-#include "dlgs.h"
 #include "shellapi.h"
 #include "winuser.h"
 #include "wingdi.h"
 #include "shlobj.h"
 #include "shlwapi.h"
-#include "ddeml.h"
 
 #include "wine/winbase16.h"
-#include "wine/winuser16.h"
 #include "shell32_main.h"
 
 #include "wine/debug.h"
@@ -60,9 +56,9 @@ typedef struct {     /* structure for dropped files */
  /* memory block with filenames follows */
 } DROPFILESTRUCT16, *LPDROPFILESTRUCT16;
 
-static const char*	lpstrMsgWndCreated = "OTHERWINDOWCREATED";
-static const char*	lpstrMsgWndDestroyed = "OTHERWINDOWDESTROYED";
-static const char*	lpstrMsgShellActivate = "ACTIVATESHELLWINDOW";
+static const char lpstrMsgWndCreated[] = "OTHERWINDOWCREATED";
+static const char lpstrMsgWndDestroyed[] = "OTHERWINDOWDESTROYED";
+static const char lpstrMsgShellActivate[] = "ACTIVATESHELLWINDOW";
 
 static HWND	SHELL_hWnd = 0;
 static HHOOK	SHELL_hHook = 0;
@@ -124,10 +120,8 @@ UINT16 WINAPI DragQueryFile16(
 	}
 
 	i = strlen(lpDrop);
-	i++;
 	if (!lpszFile ) goto end;   /* needed buffer size */
-	i = (wLength > i) ? i : wLength;
-	lstrcpynA (lpszFile,  lpDrop,  i);
+	lstrcpynA (lpszFile, lpDrop, wLength);
 end:
 	GlobalUnlock16(hDrop);
 	return i;
@@ -139,7 +133,7 @@ end:
 void WINAPI DragFinish16(HDROP16 h)
 {
     TRACE("\n");
-    GlobalFree16((HGLOBAL16)h);
+    GlobalFree16(h);
 }
 
 
@@ -313,7 +307,7 @@ static LPSTR SHELL_FindString(LPSTR lpEnv, LPCSTR entry)
 
 /**********************************************************************/
 
-SEGPTR WINAPI FindEnvironmentString16(LPSTR str)
+SEGPTR WINAPI FindEnvironmentString16(LPCSTR str)
 { SEGPTR  spEnv;
   LPSTR lpEnv,lpString;
   TRACE("\n");
@@ -418,7 +412,7 @@ DWORD WINAPI DoEnvironmentSubst16(LPSTR str,WORD length)
  */
 static LRESULT WINAPI SHELL_HookProc(INT code, WPARAM wParam, LPARAM lParam)
 {
-    TRACE("%i, %x, %08lx\n", code, wParam, lParam );
+    TRACE("%i, %lx, %08lx\n", code, wParam, lParam );
 
     if (SHELL_hWnd)
     {
@@ -566,7 +560,7 @@ DWORD WINAPI RegSetValue16( HKEY hkey, LPCSTR name, DWORD type, LPCSTR data, DWO
  *
  * HACK
  *    The 16bit RegQueryValue doesn't handle selectorblocks anyway, so we just
- *    mask out the high 16 bit.  This (not so much incidently) hopefully fixes
+ *    mask out the high 16 bit.  This (not so much incidentally) hopefully fixes
  *    Aldus FH4)
  */
 DWORD WINAPI RegQueryValue16( HKEY hkey, LPCSTR name, LPSTR data, LPDWORD count
@@ -589,8 +583,8 @@ DWORD WINAPI RegEnumKey16( HKEY hkey, DWORD index, LPSTR name, DWORD name_len )
 /*************************************************************************
  *           SHELL_Execute16 [Internal]
  */
-static UINT SHELL_Execute16(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
-			    LPSHELLEXECUTEINFOW psei, LPSHELLEXECUTEINFOW psei_out)
+static UINT_PTR SHELL_Execute16(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
+			    const SHELLEXECUTEINFOW *psei, LPSHELLEXECUTEINFOW psei_out)
 {
     UINT ret;
     char sCmd[MAX_PATH];

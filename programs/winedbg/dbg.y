@@ -54,8 +54,8 @@ static int dbg_error(const char*);
 %token tENABLE tDISABLE tBREAK tHBREAK tWATCH tDELETE tSET tPRINT tEXAM
 %token tABORT tECHO
 %token tCLASS tMAPS tSTACK tSEGMENTS tSYMBOL tREGS tALLREGS tWND tQUEUE tLOCAL tEXCEPTION
-%token tPROCESS tTHREAD tMODREF tEOL tEOF
-%token tFRAME tSHARE tCOND tDISPLAY tUNDISPLAY tDISASSEMBLE
+%token tPROCESS tTHREAD tEOL tEOF
+%token tFRAME tSHARE tMODULE tCOND tDISPLAY tUNDISPLAY tDISASSEMBLE
 %token tSTEPI tNEXTI tFINISH tSHOW tDIR tWHATIS tSOURCE
 %token <string> tPATH tIDENTIFIER tSTRING tDEBUGSTR tINTVAR
 %token <integer> tNUM tFORMAT
@@ -132,7 +132,7 @@ command:
     | tFRAME tNUM              	{ stack_set_frame($2); }
     | tSHOW tDIR     	       	{ source_show_path(); }
     | tDIR pathname            	{ source_add_path($2); }
-    | tDIR     		       	{ source_nuke_path(); }
+    | tDIR     		       	{ source_nuke_path(dbg_curr_process); }
     | tCOND tNUM               	{ break_add_condition($2, NULL); }
     | tCOND tNUM expr     	{ break_add_condition($2, $3); }
     | tSOURCE pathname          { parser($2); }
@@ -285,6 +285,8 @@ info_command:
 
 maintenance_command:
       tMAINTENANCE tTYPE        { print_types(); }
+    | tMAINTENANCE tMODULE tSTRING { tgt_module_load($3, FALSE); }
+    | tMAINTENANCE '*' tMODULE tSTRING { tgt_module_load($4, TRUE); }
     ;
 
 noprocess_state:
@@ -399,9 +401,9 @@ lvalue:
 
 %%
 
-static WINE_EXCEPTION_FILTER(wine_dbg_cmd)
+static LONG WINAPI wine_dbg_cmd(EXCEPTION_POINTERS *eptr)
 {
-    switch (GetExceptionCode())
+    switch (eptr->ExceptionRecord->ExceptionCode)
     {
     case DEBUG_STATUS_INTERNAL_ERROR:
         dbg_printf("\nWineDbg internal error\n");
@@ -434,7 +436,7 @@ static WINE_EXCEPTION_FILTER(wine_dbg_cmd)
         dbg_interrupt_debuggee();
         return EXCEPTION_CONTINUE_EXECUTION;
     default:
-        dbg_printf("\nException %lx\n", GetExceptionCode());
+        dbg_printf("\nException %x\n", eptr->ExceptionRecord->ExceptionCode);
         break;
     }
 
@@ -470,7 +472,8 @@ int      input_fetch_entire_line(const char* pfx, char** line)
     do
     {
         if (!ReadFile(dbg_parser_input, &ch, 1, &nread, NULL) || nread == 0)
-            break;
+            return -1;
+
         if (len + 2 > alloc)
         {
             while (len + 2 > alloc) alloc *= 2;
@@ -487,9 +490,9 @@ int      input_fetch_entire_line(const char* pfx, char** line)
 int input_read_line(const char* pfx, char* buf, int size)
 {
     char*       line = NULL;
-    size_t      len = 0;
 
-    len = input_fetch_entire_line(pfx, &line);
+    int len = input_fetch_entire_line(pfx, &line);
+    if (len < 0) return 0;
     /* remove trailing \n */
     if (len > 0 && line[len - 1] == '\n') len--;
     len = min(size - 1, len);

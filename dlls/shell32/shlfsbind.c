@@ -28,7 +28,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "winuser.h"
 #include "shlobj.h"
 #include "shell32_main.h"
@@ -208,7 +207,7 @@ static HRESULT WINAPI IFileSystemBindData_fnGetFindData(
     if (!pfd)
         return E_INVALIDARG;
 
-    memcpy(pfd, &This->findFile, sizeof(WIN32_FIND_DATAW));
+    *pfd = This->findFile;
     return NOERROR;
 }
 
@@ -219,7 +218,7 @@ static HRESULT WINAPI IFileSystemBindData_fnSetFindData(
     TRACE("(%p), %p\n", This, pfd);
 
     if (pfd)
-        memcpy(&This->findFile, pfd, sizeof(WIN32_FIND_DATAW));
+        This->findFile = *pfd;
     else
         memset(&This->findFile, 0, sizeof(WIN32_FIND_DATAW));
     return NOERROR;

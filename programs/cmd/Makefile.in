@@ -3,8 +3,9 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = cmd.exe
-APPMODE   = -mconsole
-IMPORTS   = shell32 user32 kernel32
+APPMODE   = -mconsole -municode
+EXTRADEFS = -DUNICODE
+IMPORTS   = shell32 user32 advapi32 kernel32
 
 C_SRCS = \
 	batch.c \
@@ -13,8 +14,8 @@ C_SRCS = \
 	wcmdmain.c
 
 RC_SRCS = wcmdrc.rc
-RC_BINSRC = wcmdrc.rc
-RC_BINARIES = wcmd.ico
+
+SVG_SRCS = wcmd.svg
 
 @MAKE_PROG_RULES@
 

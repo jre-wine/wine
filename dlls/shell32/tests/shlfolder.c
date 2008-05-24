@@ -43,9 +43,14 @@
 static IMalloc *ppM;
 
 static HRESULT (WINAPI *pSHBindToParent)(LPCITEMIDLIST, REFIID, LPVOID*, LPCITEMIDLIST*);
+static HRESULT (WINAPI *pSHGetFolderPathA)(HWND, int, HANDLE, DWORD, LPSTR);
+static HRESULT (WINAPI *pSHGetFolderPathAndSubDirA)(HWND, int, HANDLE, DWORD, LPCSTR, LPSTR);
+static BOOL (WINAPI *pSHGetPathFromIDListW)(LPCITEMIDLIST,LPWSTR);
 static BOOL (WINAPI *pSHGetSpecialFolderPathW)(HWND, LPWSTR, int, BOOL);
 static HRESULT (WINAPI *pStrRetToBufW)(STRRET*,LPCITEMIDLIST,LPWSTR,UINT);
 static LPITEMIDLIST (WINAPI *pILFindLastID)(LPCITEMIDLIST);
+static void (WINAPI *pILFree)(LPITEMIDLIST);
+static BOOL (WINAPI *pILIsEqual)(LPCITEMIDLIST, LPCITEMIDLIST);
 
 static void init_function_pointers(void)
 {
@@ -53,19 +58,17 @@ static void init_function_pointers(void)
     HRESULT hr;
 
     hmod = GetModuleHandleA("shell32.dll");
-    if(hmod)
-    {
-        pSHBindToParent = (void*)GetProcAddress(hmod, "SHBindToParent");
-        pSHGetSpecialFolderPathW = (void*)GetProcAddress(hmod, "SHGetSpecialFolderPathW");
-        pILFindLastID = (void *)GetProcAddress(hmod, (LPCSTR)16);
-
-    }
+    pSHBindToParent = (void*)GetProcAddress(hmod, "SHBindToParent");
+    pSHGetFolderPathA = (void*)GetProcAddress(hmod, "SHGetFolderPathA");
+    pSHGetFolderPathAndSubDirA = (void*)GetProcAddress(hmod, "SHGetFolderPathAndSubDirA");
+    pSHGetPathFromIDListW = (void*)GetProcAddress(hmod, "SHGetPathFromIDListW");
+    pSHGetSpecialFolderPathW = (void*)GetProcAddress(hmod, "SHGetSpecialFolderPathW");
+    pILFindLastID = (void *)GetProcAddress(hmod, (LPCSTR)16);
+    pILFree = (void*)GetProcAddress(hmod, (LPSTR)155);
+    pILIsEqual = (void*)GetProcAddress(hmod, (LPSTR)21);
 
     hmod = GetModuleHandleA("shlwapi.dll");
-    if(hmod)
-    {
-        pStrRetToBufW = (void*)GetProcAddress(hmod, "StrRetToBufW");
-    }
+    pStrRetToBufW = (void*)GetProcAddress(hmod, "StrRetToBufW");
 
     hr = SHGetMalloc(&ppM);
     ok(hr == S_OK, "SHGetMalloc failed %08x\n", hr);
@@ -109,7 +112,7 @@ static void test_ParseDisplayName(void)
     if (!pSHGetSpecialFolderPathW || !pILFindLastID) goto finished;
     
     bRes = pSHGetSpecialFolderPathW(NULL, cTestDirW, CSIDL_PERSONAL, FALSE);
-    ok(bRes, "SHGetSpecialFolderPath(CSIDL_PERSONAL) failed! %d\n", GetLastError());
+    ok(bRes, "SHGetSpecialFolderPath(CSIDL_PERSONAL) failed! %u\n", GetLastError());
     if (!bRes) goto finished;
 
     hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL, cTestDirW, NULL, &newPIDL, 0);
@@ -294,7 +297,7 @@ static void test_BindToObject(void)
 #endif
 
     cChars = GetSystemDirectoryA(szSystemDir, MAX_PATH);
-    ok (cChars > 0 && cChars < MAX_PATH, "GetSystemDirectoryA failed! LastError: %08x\n", GetLastError());
+    ok (cChars > 0 && cChars < MAX_PATH, "GetSystemDirectoryA failed! LastError: %u\n", GetLastError());
     if (cChars == 0 || cChars >= MAX_PATH) {
         IShellFolder_Release(psfMyComputer);
         return;
@@ -327,7 +330,27 @@ static void test_BindToObject(void)
 
     IShellFolder_Release(psfSystemDir);
 }
-  
+
+/* Based on PathAddBackslashW from dlls/shlwapi/path.c */
+static LPWSTR myPathAddBackslashW( LPWSTR lpszPath )
+{
+  size_t iLen;
+
+  if (!lpszPath || (iLen = lstrlenW(lpszPath)) >= MAX_PATH)
+    return NULL;
+
+  if (iLen)
+  {
+    lpszPath += iLen;
+    if (lpszPath[-1] != '\\')
+    {
+      *lpszPath++ = '\\';
+      *lpszPath = '\0';
+    }
+  }
+  return lpszPath;
+}
+
 static void test_GetDisplayName(void)
 {
     BOOL result;
@@ -335,6 +358,7 @@ static void test_GetDisplayName(void)
     HANDLE hTestFile;
     WCHAR wszTestFile[MAX_PATH], wszTestFile2[MAX_PATH], wszTestDir[MAX_PATH];
     char szTestFile[MAX_PATH], szTestDir[MAX_PATH];
+    DWORD attr;
     STRRET strret;
     LPSHELLFOLDER psfDesktop, psfPersonal;
     IUnknown *psfFile;
@@ -345,10 +369,10 @@ static void test_GetDisplayName(void)
     static const WCHAR wszDirName[] = { 'w','i','n','e','t','e','s','t',0 };
 
     /* I'm trying to figure if there is a functional difference between calling
-     * SHGetPathFromIDList and calling GetDisplayNameOf(SHGDN_FORPARSING) after
+     * SHGetPathFromIDListW and calling GetDisplayNameOf(SHGDN_FORPARSING) after
      * binding to the shellfolder. One thing I thought of was that perhaps 
-     * SHGetPathFromIDList would be able to get the path to a file, which does
-     * not exist anymore, while the other method would'nt. It turns out there's
+     * SHGetPathFromIDListW would be able to get the path to a file, which does
+     * not exist anymore, while the other method wouldn't. It turns out there's
      * no functional difference in this respect.
      */
 
@@ -356,23 +380,28 @@ static void test_GetDisplayName(void)
 
     /* First creating a directory in MyDocuments and a file in this directory. */
     result = pSHGetSpecialFolderPathW(NULL, wszTestDir, CSIDL_PERSONAL, FALSE);
-    ok(result, "SHGetSpecialFolderPathW failed! Last error: %08x\n", GetLastError());
+    ok(result, "SHGetSpecialFolderPathW failed! Last error: %u\n", GetLastError());
     if (!result) return;
 
-    PathAddBackslashW(wszTestDir);
+    myPathAddBackslashW(wszTestDir);
     lstrcatW(wszTestDir, wszDirName);
+    /* Use ANSI file functions so this works on Windows 9x */
     WideCharToMultiByte(CP_ACP, 0, wszTestDir, -1, szTestDir, MAX_PATH, 0, 0);
-    result = CreateDirectoryA(szTestDir, NULL);
-    ok(result, "CreateDirectoryA failed! Last error: %08x\n", GetLastError());
-    if (!result) return;
+    CreateDirectoryA(szTestDir, NULL);
+    attr=GetFileAttributesA(szTestDir);
+    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY))
+    {
+        ok(0, "unable to create the '%s' directory\n", szTestDir);
+        return;
+    }
 
     lstrcpyW(wszTestFile, wszTestDir);
-    PathAddBackslashW(wszTestFile);
+    myPathAddBackslashW(wszTestFile);
     lstrcatW(wszTestFile, wszFileName);
     WideCharToMultiByte(CP_ACP, 0, wszTestFile, -1, szTestFile, MAX_PATH, 0, 0);
 
     hTestFile = CreateFileA(szTestFile, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
-    ok((hTestFile != INVALID_HANDLE_VALUE), "CreateFileA failed! Last error: %08x\n", GetLastError());
+    ok((hTestFile != INVALID_HANDLE_VALUE), "CreateFileA failed! Last error: %u\n", GetLastError());
     if (hTestFile == INVALID_HANDLE_VALUE) return;
     CloseHandle(hTestFile);
 
@@ -423,24 +452,27 @@ static void test_GetDisplayName(void)
         hr = IShellFolder_SetNameOf(psfPersonal, NULL, pidlNew, wszAbsoluteFilename, 
                 SHGDN_FORPARSING, NULL);
         ok (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED), "SetNameOf succeeded! hr = %08x\n", hr);
-   
-        /* Rename the file back to it's original name. SetNameOf ignores the fact, that the 
+
+        /* Rename the file back to its original name. SetNameOf ignores the fact, that the
          * SHGDN flags specify an absolute path. */
         hr = IShellFolder_SetNameOf(psfPersonal, NULL, pidlNew, wszFileName, SHGDN_FORPARSING, NULL);
         ok (SUCCEEDED(hr), "SetNameOf failed! hr = %08x\n", hr);
 
-        ILFree(pidlNew);
+        pILFree(pidlNew);
         IShellFolder_Release(psfPersonal);
     }
-    
+
     /* Deleting the file and the directory */
     DeleteFileA(szTestFile);
     RemoveDirectoryA(szTestDir);
 
     /* SHGetPathFromIDListW still works, although the file is not present anymore. */
-    result = SHGetPathFromIDListW(pidlTestFile, wszTestFile2);
-    ok (result, "SHGetPathFromIDListW failed! Last error: %08x\n", GetLastError());
-    ok (!lstrcmpiW(wszTestFile, wszTestFile2), "SHGetPathFromIDListW returns incorrect path!\n");
+    if (pSHGetPathFromIDListW)
+    {
+        result = pSHGetPathFromIDListW(pidlTestFile, wszTestFile2);
+        ok (result, "SHGetPathFromIDListW failed! Last error: %u\n", GetLastError());
+        ok (!lstrcmpiW(wszTestFile, wszTestFile2), "SHGetPathFromIDListW returns incorrect path!\n");
+    }
 
     if(!pSHBindToParent) return;
 
@@ -770,26 +802,30 @@ static void test_SHGetPathFromIDList(void)
 	HMODULE hShell32;
 	LPITEMIDLIST pidlPrograms;
 
-    if(!pSHGetSpecialFolderPathW) return;
+    if(!pSHGetPathFromIDListW || !pSHGetSpecialFolderPathW)
+    {
+        skip("SHGetPathFromIDListW() or SHGetSpecialFolderPathW() is missing\n");
+        return;
+    }
 
-    /* Calling SHGetPathFromIDList with no pidl should return the empty string */
+    /* Calling SHGetPathFromIDListW with no pidl should return the empty string */
     wszPath[0] = 'a';
     wszPath[1] = '\0';
-    result = SHGetPathFromIDListW(NULL, wszPath);
+    result = pSHGetPathFromIDListW(NULL, wszPath);
     ok(!result, "Expected failure\n");
     ok(!wszPath[0], "Expected empty string\n");
 
-    /* Calling SHGetPathFromIDList with an empty pidl should return the desktop folder's path. */
+    /* Calling SHGetPathFromIDListW with an empty pidl should return the desktop folder's path. */
     result = pSHGetSpecialFolderPathW(NULL, wszDesktop, CSIDL_DESKTOP, FALSE);
-    ok(result, "SHGetSpecialFolderPathW(CSIDL_DESKTOP) failed! Last error: %08x\n", GetLastError());
+    ok(result, "SHGetSpecialFolderPathW(CSIDL_DESKTOP) failed! Last error: %u\n", GetLastError());
     if (!result) return;
     
-    result = SHGetPathFromIDListW(pidlEmpty, wszPath);
-    ok(result, "SHGetPathFromIDListW failed! Last error: %08x\n", GetLastError());
+    result = pSHGetPathFromIDListW(pidlEmpty, wszPath);
+    ok(result, "SHGetPathFromIDListW failed! Last error: %u\n", GetLastError());
     if (!result) return;
-    ok(!lstrcmpiW(wszDesktop, wszPath), "SHGetPathFromIDList didn't return desktop path for empty pidl!\n");
+    ok(!lstrcmpiW(wszDesktop, wszPath), "SHGetPathFromIDListW didn't return desktop path for empty pidl!\n");
 
-    /* MyComputer does not map to a filesystem path. SHGetPathFromIDList should fail. */
+    /* MyComputer does not map to a filesystem path. SHGetPathFromIDListW should fail. */
     hr = SHGetDesktopFolder(&psfDesktop);
     ok (SUCCEEDED(hr), "SHGetDesktopFolder failed! hr = %08x\n", hr);
     if (FAILED(hr)) return;
@@ -804,9 +840,9 @@ static void test_SHGetPathFromIDList(void)
     SetLastError(0xdeadbeef);
     wszPath[0] = 'a';
     wszPath[1] = '\0';
-    result = SHGetPathFromIDListW(pidlMyComputer, wszPath);
-    ok (!result, "SHGetPathFromIDList succeeded where it shouldn't!\n");
-    ok (GetLastError()==0xdeadbeef, "SHGetPathFromIDList shouldn't set last error! Last error: %08x\n", GetLastError());
+    result = pSHGetPathFromIDListW(pidlMyComputer, wszPath);
+    ok (!result, "SHGetPathFromIDListW succeeded where it shouldn't!\n");
+    ok (GetLastError()==0xdeadbeef, "SHGetPathFromIDListW shouldn't set last error! Last error: %u\n", GetLastError());
     ok (!wszPath[0], "Expected empty path\n");
     if (result) {
         IShellFolder_Release(psfDesktop);
@@ -816,15 +852,15 @@ static void test_SHGetPathFromIDList(void)
     IMalloc_Free(ppM, pidlMyComputer);
 
     result = pSHGetSpecialFolderPathW(NULL, wszFileName, CSIDL_DESKTOPDIRECTORY, FALSE);
-    ok(result, "SHGetSpecialFolderPathW failed! Last error: %08x\n", GetLastError());
+    ok(result, "SHGetSpecialFolderPathW failed! Last error: %u\n", GetLastError());
     if (!result) {
         IShellFolder_Release(psfDesktop);
         return;
     }
-    PathAddBackslashW(wszFileName);
+    myPathAddBackslashW(wszFileName);
     lstrcatW(wszFileName, wszTestFile);
     hTestFile = CreateFileW(wszFileName, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
-    ok(hTestFile != INVALID_HANDLE_VALUE, "CreateFileW failed! Last error: %08x\n", GetLastError());
+    ok(hTestFile != INVALID_HANDLE_VALUE, "CreateFileW failed! Last error: %u\n", GetLastError());
     if (hTestFile == INVALID_HANDLE_VALUE) {
         IShellFolder_Release(psfDesktop);
         return;
@@ -858,8 +894,8 @@ static void test_SHGetPathFromIDList(void)
            "returned incorrect path for file placed on desktop\n");
     }
 
-    result = SHGetPathFromIDListW(pidlTestFile, wszPath);
-    ok(result, "SHGetPathFromIDListW failed! Last error: %08x\n", GetLastError());
+    result = pSHGetPathFromIDListW(pidlTestFile, wszPath);
+    ok(result, "SHGetPathFromIDListW failed! Last error: %u\n", GetLastError());
     IMalloc_Free(ppM, pidlTestFile);
     if (!result) return;
     ok(0 == lstrcmpW(wszFileName, wszPath), "SHGetPathFromIDListW returned incorrect path for file placed on desktop\n");
@@ -873,9 +909,9 @@ static void test_SHGetPathFromIDList(void)
     ok(SUCCEEDED(hr), "SHGetFolderLocation failed: 0x%08x\n", hr);
 
     SetLastError(0xdeadbeef);
-    result = SHGetPathFromIDListW(pidlPrograms, wszPath);
+    result = pSHGetPathFromIDListW(pidlPrograms, wszPath);
 	IMalloc_Free(ppM, pidlPrograms);
-    ok(result, "SHGetPathFromIDList failed\n");
+    ok(result, "SHGetPathFromIDListW failed\n");
 }
 
 static void test_EnumObjects_and_CompareIDs(void)
@@ -982,7 +1018,7 @@ static HRESULT WINAPI InitPropertyBag_IPropertyBag_Read(IPropertyBag *iface, LPC
         if (V_VT(pVar) != VT_BSTR) return E_INVALIDARG;
 
         result = pSHGetSpecialFolderPathW(NULL, wszPath, CSIDL_DESKTOPDIRECTORY, FALSE);
-        ok(result, "SHGetSpecialFolderPathW(DESKTOPDIRECTORY) failed! x%08x\n", GetLastError());
+        ok(result, "SHGetSpecialFolderPathW(DESKTOPDIRECTORY) failed! %u\n", GetLastError());
         if (!result) return E_INVALIDARG;
 
         V_BSTR(pVar) = SysAllocString(wszPath);
@@ -1016,11 +1052,11 @@ static const IPropertyBagVtbl InitPropertyBag_IPropertyBagVtbl = {
     InitPropertyBag_IPropertyBag_Write
 };
 
-struct IPropertyBag InitPropertyBag = {
+static struct IPropertyBag InitPropertyBag = {
     &InitPropertyBag_IPropertyBagVtbl
 };
 
-void test_FolderShortcut(void) {
+static void test_FolderShortcut(void) {
     IPersistPropertyBag *pPersistPropertyBag;
     IShellFolder *pShellFolder, *pDesktopFolder;
     IPersistFolder3 *pPersistFolder3;
@@ -1078,7 +1114,7 @@ void test_FolderShortcut(void) {
     }
 
     result = pSHGetSpecialFolderPathW(NULL, wszDesktopPath, CSIDL_DESKTOPDIRECTORY, FALSE);
-    ok(result, "SHGetSpecialFolderPathW(CSIDL_DESKTOPDIRECTORY) failed! 0x%08x\n", GetLastError());
+    ok(result, "SHGetSpecialFolderPathW(CSIDL_DESKTOPDIRECTORY) failed! %u\n", GetLastError());
     if (!result) return;
 
     pStrRetToBufW(&strret, NULL, wszBuffer, MAX_PATH);
@@ -1122,17 +1158,17 @@ void test_FolderShortcut(void) {
     ok (SUCCEEDED(hr), "IPersistFolder3::Initialize failed! hr = %08x\n", hr);
     if (FAILED(hr)) {
         IPersistFolder3_Release(pPersistFolder3);
-        ILFree(pidlWineTestFolder);
+        pILFree(pidlWineTestFolder);
         return;
     }
-    
+
     hr = IPersistFolder3_GetCurFolder(pPersistFolder3, &pidlCurrentFolder);
     ok(SUCCEEDED(hr), "IPersistFolder3_GetCurFolder failed! hr=0x%08x\n", hr);
-    ok(ILIsEqual(pidlCurrentFolder, pidlWineTestFolder), 
+    ok(pILIsEqual(pidlCurrentFolder, pidlWineTestFolder),
         "IPersistFolder3_GetCurFolder should return pidlWineTestFolder!\n");
-    ILFree(pidlCurrentFolder);
-    ILFree(pidlWineTestFolder);
- 
+    pILFree(pidlCurrentFolder);
+    pILFree(pidlWineTestFolder);
+
     hr = IPersistFolder3_QueryInterface(pPersistFolder3, &IID_IShellFolder, (LPVOID*)&pShellFolder);
     IPersistFolder3_Release(pPersistFolder3);
     ok(SUCCEEDED(hr), "IPersistFolder3_QueryInterface(IShellFolder) failed! hr = %08x\n", hr);
@@ -1150,7 +1186,7 @@ void test_FolderShortcut(void) {
 
     /* Next few lines are meant to show that children of FolderShortcuts are not FolderShortcuts,
      * but ShellFSFolders. */
-    PathAddBackslashW(wszDesktopPath);
+    myPathAddBackslashW(wszDesktopPath);
     lstrcatW(wszDesktopPath, wszSomeSubFolder);
     if (!CreateDirectoryW(wszDesktopPath, NULL)) {
         IShellFolder_Release(pShellFolder);
@@ -1166,12 +1202,12 @@ void test_FolderShortcut(void) {
         return;
     }
 
-    hr = IShellFolder_BindToObject(pShellFolder, pidlSubFolder, NULL, &IID_IPersistFolder3, 
+    hr = IShellFolder_BindToObject(pShellFolder, pidlSubFolder, NULL, &IID_IPersistFolder3,
                                    (LPVOID*)&pPersistFolder3);
     IShellFolder_Release(pShellFolder);
-    ILFree(pidlSubFolder);
+    pILFree(pidlSubFolder);
     ok (SUCCEEDED(hr), "IShellFolder::BindToObject failed! hr = %08x\n", hr);
-    if (FAILED(hr)) 
+    if (FAILED(hr))
         return;
 
     /* On windows, we expect CLSID_ShellFSFolder. On wine we relax this constraint
@@ -1210,7 +1246,7 @@ struct FileStructW {
 };
 #include "poppack.h"
 
-void test_ITEMIDLIST_format(void) {
+static void test_ITEMIDLIST_format(void) {
     WCHAR wszPersonal[MAX_PATH];
     LPSHELLFOLDER psfDesktop, psfPersonal;
     LPITEMIDLIST pidlPersonal, pidlFile;
@@ -1224,11 +1260,11 @@ void test_ITEMIDLIST_format(void) {
     if(!pSHGetSpecialFolderPathW) return;
 
     bResult = pSHGetSpecialFolderPathW(NULL, wszPersonal, CSIDL_PERSONAL, FALSE);
-    ok(bResult, "SHGetSpecialFolderPathW failed! Last error: %08x\n", GetLastError());
+    ok(bResult, "SHGetSpecialFolderPathW failed! Last error: %u\n", GetLastError());
     if (!bResult) return;
 
     bResult = SetCurrentDirectoryW(wszPersonal);
-    ok(bResult, "SetCurrentDirectory failed! Last error: %d\n", GetLastError());
+    ok(bResult, "SetCurrentDirectory failed! Last error: %u\n", GetLastError());
     if (!bResult) return;
 
     hr = SHGetDesktopFolder(&psfDesktop);
@@ -1242,10 +1278,10 @@ void test_ITEMIDLIST_format(void) {
         return;
     }
 
-    hr = IShellFolder_BindToObject(psfDesktop, pidlPersonal, NULL, &IID_IShellFolder, 
+    hr = IShellFolder_BindToObject(psfDesktop, pidlPersonal, NULL, &IID_IShellFolder,
         (LPVOID*)&psfPersonal);
     IShellFolder_Release(psfDesktop);
-    ILFree(pidlPersonal);
+    pILFree(pidlPersonal);
     ok(SUCCEEDED(hr), "psfDesktop->BindToObject failed! hr = %08x\n", hr);
     if (FAILED(hr)) return;
 
@@ -1257,7 +1293,7 @@ void test_ITEMIDLIST_format(void) {
         WideCharToMultiByte(CP_ACP, 0, wszFile[i], -1, szFile, MAX_PATH, NULL, NULL);
         
         hFile = CreateFileW(wszFile[i], GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_FLAG_WRITE_THROUGH, NULL);
-        ok(hFile != INVALID_HANDLE_VALUE, "CreateFile failed! (%d)\n", GetLastError());
+        ok(hFile != INVALID_HANDLE_VALUE, "CreateFile failed! (%u)\n", GetLastError());
         if (hFile == INVALID_HANDLE_VALUE) {
             IShellFolder_Release(psfPersonal);
             return;
@@ -1329,9 +1365,116 @@ void test_ITEMIDLIST_format(void) {
             }
         }
 
-        ILFree(pidlFile);
+        pILFree(pidlFile);
     }
 }
+
+static void testSHGetFolderPathAndSubDirA(void)
+{
+    HRESULT ret;
+    BOOL delret;
+    DWORD dwret;
+    int i;
+    static char wine[] = "wine";
+    static char winetemp[] = "wine\\temp";
+    static char appdata[MAX_PATH];
+    static char testpath[MAX_PATH];
+    static char toolongpath[MAX_PATH+1];
+
+    if(!pSHGetFolderPathA) {
+        skip("SHGetFolderPathA not present!\n");
+        return;
+    }
+    if(!SUCCEEDED(pSHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, appdata)))
+    {
+        skip("SHGetFolderPathA failed for CSIDL_LOCAL_APPDATA!\n");
+        return;
+    }
+
+    sprintf(testpath, "%s\\%s", appdata, winetemp);
+    delret = RemoveDirectoryA(testpath);
+    if(!delret && (ERROR_PATH_NOT_FOUND != GetLastError()) ) {
+        skip("RemoveDirectoryA(%s) failed with error %u\n", testpath, GetLastError());
+        return;
+    }
+
+    sprintf(testpath, "%s\\%s", appdata, wine);
+    delret = RemoveDirectoryA(testpath);
+    if(!delret && (ERROR_PATH_NOT_FOUND != GetLastError()) && (ERROR_FILE_NOT_FOUND != GetLastError())) {
+        skip("RemoveDirectoryA(%s) failed with error %u\n", testpath, GetLastError());
+        return;
+    }
+    for(i=0; i< MAX_PATH; i++)
+        toolongpath[i] = '0' + i % 10;
+    toolongpath[MAX_PATH] = '\0';
+
+    /* test invalid second parameter */
+    ret = pSHGetFolderPathAndSubDirA(NULL, CSIDL_FLAG_DONT_VERIFY | 0xff, NULL, SHGFP_TYPE_CURRENT, wine, testpath);
+    ok(E_INVALIDARG == ret, "expected E_INVALIDARG, got  %x\n", ret);
+
+    /* test invalid forth parameter */
+    ret = pSHGetFolderPathAndSubDirA(NULL, CSIDL_FLAG_DONT_VERIFY | CSIDL_LOCAL_APPDATA, NULL, 2, wine, testpath);
+    switch(ret) {
+        case S_OK: /* winvista */
+            ok(!strncmp(appdata, testpath, strlen(appdata)),
+                "expected %s to start with %s\n", testpath, appdata);
+            ok(!lstrcmpA(&testpath[1 + strlen(appdata)], winetemp),
+                "expected %s to end with %s\n", testpath, winetemp);
+            break;
+        case E_INVALIDARG: /* winxp, win2k3 */
+            break;
+        default:
+            ok(0, "expected S_OK or E_INVALIDARG, got  %x\n", ret);
+    }
+
+    /* test fifth parameter */
+    testpath[0] = '\0';
+    ret = pSHGetFolderPathAndSubDirA(NULL, CSIDL_FLAG_DONT_VERIFY | CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, NULL, testpath);
+    ok(S_OK == ret, "expected S_OK, got %x\n", ret);
+    ok(!lstrcmpA(appdata, testpath), "expected %s, got %s\n", appdata, testpath);
+
+    testpath[0] = '\0';
+    ret = pSHGetFolderPathAndSubDirA(NULL, CSIDL_FLAG_DONT_VERIFY | CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, "", testpath);
+    ok(S_OK == ret, "expected S_OK, got %x\n", ret);
+    ok(!lstrcmpA(appdata, testpath), "expected %s, got %s\n", appdata, testpath);
+
+    testpath[0] = '\0';
+    ret = pSHGetFolderPathAndSubDirA(NULL, CSIDL_FLAG_DONT_VERIFY | CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, "\\", testpath);
+    ok(S_OK == ret, "expected S_OK, got %x\n", ret);
+    ok(!lstrcmpA(appdata, testpath), "expected %s, got %s\n", appdata, testpath);
+
+    ret = pSHGetFolderPathAndSubDirA(NULL, CSIDL_FLAG_DONT_VERIFY | CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, toolongpath, testpath);
+    ok(HRESULT_FROM_WIN32(ERROR_FILENAME_EXCED_RANGE) == ret,
+        "expected %x, got %x\n", HRESULT_FROM_WIN32(ERROR_FILENAME_EXCED_RANGE), ret);
+
+    testpath[0] = '\0';
+    ret = pSHGetFolderPathAndSubDirA(NULL, CSIDL_FLAG_DONT_VERIFY | CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, wine, NULL);
+    ok((S_OK == ret) || (E_INVALIDARG == ret), "expected S_OK or E_INVALIDARG, got %x\n", ret);
+
+    /* test a not existing path */
+    testpath[0] = '\0';
+    ret = pSHGetFolderPathAndSubDirA(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, winetemp, testpath);
+    ok(HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND) == ret,
+        "expected %x, got %x\n", HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND), ret);
+
+    /* create a directory inside a not existing directory */
+    testpath[0] = '\0';
+    ret = pSHGetFolderPathAndSubDirA(NULL, CSIDL_FLAG_CREATE | CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, winetemp, testpath);
+    ok(S_OK == ret, "expected S_OK, got %x\n", ret);
+    ok(!strncmp(appdata, testpath, strlen(appdata)),
+        "expected %s to start with %s\n", testpath, appdata);
+    ok(!lstrcmpA(&testpath[1 + strlen(appdata)], winetemp),
+        "expected %s to end with %s\n", testpath, winetemp);
+    dwret = GetFileAttributes(testpath);
+    ok(FILE_ATTRIBUTE_DIRECTORY | dwret, "expected %x to contain FILE_ATTRIBUTE_DIRECTORY\n", dwret);
+
+    /* cleanup */
+    sprintf(testpath, "%s\\%s", appdata, winetemp);
+    RemoveDirectoryA(testpath);
+    sprintf(testpath, "%s\\%s", appdata, wine);
+    RemoveDirectoryA(testpath);
+}
+
 
 START_TEST(shlfolder)
 {
@@ -1349,6 +1492,10 @@ START_TEST(shlfolder)
     test_CallForAttributes();
     test_FolderShortcut();
     test_ITEMIDLIST_format();
+    if(pSHGetFolderPathAndSubDirA)
+        testSHGetFolderPathAndSubDirA();
+    else
+        skip("SHGetFolderPathAndSubDirA not present\n");
 
     OleUninitialize();
 }

@@ -32,11 +32,9 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "winerror.h"
 #include "wingdi.h"
 #include "wine/exception.h"
-#include "excpt.h"
 
 #include "ddraw.h"
 #include "d3d.h"
@@ -151,16 +149,16 @@ IDirect3DLightImpl_Initialize(IDirect3DLight *iface,
  * Assigns a lighting value to this object
  *
  * Params:
- *  Light: Lighting parametes to set
+ *  Light: Lighting parameter to set
  *
  * Returns:
  *  D3D_OK on success
  *  DDERR_INVALIDPARAMS if Light is NULL
  *
  *****************************************************************************/
-static void dump_light(LPD3DLIGHT2 light)
+static void dump_light(const D3DLIGHT2 *light)
 {
-    DPRINTF("    - dwSize : %d\n", light->dwSize);
+    TRACE("    - dwSize : %d\n", light->dwSize);
 }
 
 static const float zero_value[] = {
@@ -203,10 +201,12 @@ IDirect3DLightImpl_SetLight(IDirect3DLight *iface,
     light7->dvTheta        = lpLight->dvTheta;
     light7->dvPhi          = lpLight->dvPhi;
 
+    EnterCriticalSection(&ddraw_cs);
     memcpy(&This->light, lpLight, lpLight->dwSize);
     if ((This->light.dwFlags & D3DLIGHT_ACTIVE) != 0) {
         This->update(This);        
     }
+    LeaveCriticalSection(&ddraw_cs);
     return D3D_OK;
 }
 
@@ -232,7 +232,11 @@ IDirect3DLightImpl_GetLight(IDirect3DLight *iface,
         TRACE("  Returning light definition :\n");
 	dump_light(&This->light);
     }
+
+    EnterCriticalSection(&ddraw_cs);
     memcpy(lpLight, &This->light, lpLight->dwSize);
+    LeaveCriticalSection(&ddraw_cs);
+
     return DD_OK;
 }
 

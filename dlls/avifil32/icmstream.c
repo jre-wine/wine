@@ -23,11 +23,9 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "winerror.h"
 #include "mmsystem.h"
 #include "vfw.h"
-#include "msacm.h"
 
 #include "avifile_private.h"
 
@@ -560,7 +558,7 @@ static HRESULT WINAPI ICMStream_fnSetFormat(IAVIStream *iface, LONG pos,
     if (ICCompressBegin(This->hic, lpbi, This->lpbiOutput) != S_OK)
       return AVIERR_COMPRESSOR;
 
-    /* check if we need to restart decompresion also */
+    /* check if we need to restart decompression also */
     if (This->lKeyFrameEvery != 1 &&
 	(This->dwICMFlags & VIDCF_FASTTEMPORALC) == 0) {
       ICDecompressEnd(This->hic);

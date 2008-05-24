@@ -5,65 +5,96 @@ VPATH     = @srcdir@
 MODULE    = wine
 
 C_SRCS = \
+	freebsd.c \
 	glibc.c \
 	kthread.c \
 	main.c \
 	preloader.c \
 	pthread.c
 
-KTHREAD_OBJS = kthread.o main.o version.o
-PTHREAD_OBJS = pthread.o main.o version.o
+KTHREAD_OBJS = kthread.o main.o
+PTHREAD_OBJS = pthread.o main.o
 
 MAIN_BINARY    = @MAIN_BINARY@
 EXTRA_BINARIES = @EXTRA_BINARIES@
 WINE_BINARIES  = $(MAIN_BINARY) $(EXTRA_BINARIES)
 
-MANPAGES = wine.man
+PROGRAMS = \
+	wine \
+	wine-freebsd \
+	wine-freebsd-installed \
+	wine-glibc \
+	wine-glibc-installed \
+	wine-kthread \
+	wine-kthread-installed \
+	wine-preloader \
+	wine-preloader-installed \
+	wine-pthread \
+	wine-pthread-installed
 
-INSTALLDIRS = $(DESTDIR)$(bindir) $(DESTDIR)$(mandir)/man$(prog_manext)
+MANPAGES = \
+	wine.man \
+	wine.de.man \
+	wine.fr.man
 
-all: $(WINE_BINARIES) $(MODULE) $(MANPAGES)
+INSTALLDIRS = \
+	$(DESTDIR)$(bindir) \
+	$(DESTDIR)$(mandir)/man$(prog_manext) \
+	$(DESTDIR)$(mandir)/de.UTF-8/man$(prog_manext) \
+	$(DESTDIR)$(mandir)/fr.UTF-8/man$(prog_manext)
+
+all: $(WINE_BINARIES) $(WINE_BINARIES:%=%-installed) $(MODULE) $(MANPAGES)
 
 @MAKE_RULES@
 
 LIBPTHREAD  = @LIBPTHREAD@
 LDEXECFLAGS = @LDEXECFLAGS@
 
-wine-glibc: glibc.o Makefile.in
-	$(CC) -o $@ glibc.o $(LIBWINE_LDFLAGS) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS)
+wine-freebsd: freebsd.o Makefile.in
+	$(CC) -o $@ freebsd.o $(LIBWINE) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_LOCAL)
 
-wine-preloader: preloader.o Makefile.in
+wine-freebsd-installed: freebsd.o Makefile.in
+	$(CC) -o $@ freebsd.o $(LIBWINE) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_INSTALL)
+
+wine-glibc: glibc.o Makefile.in
+	$(CC) -o $@ glibc.o $(LIBWINE) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_LOCAL)
+
+wine-glibc-installed: glibc.o Makefile.in
+	$(CC) -o $@ glibc.o $(LIBWINE) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_INSTALL)
+
+wine-preloader wine-preloader-installed: preloader.o Makefile.in
 	$(CC) -o $@ -static -nostartfiles -nodefaultlibs -Wl,-Ttext=0x7c000000 preloader.o $(LIBPORT) $(LDFLAGS)
 
 wine-kthread: $(KTHREAD_OBJS) Makefile.in
-	$(CC) -o $@ $(LDEXECFLAGS) $(KTHREAD_OBJS) $(LIBWINE_LDFLAGS) $(LIBPORT) $(EXTRALIBS) $(LDFLAGS)
+	$(CC) -o $@ $(LDEXECFLAGS) $(KTHREAD_OBJS) $(LIBWINE) $(LIBPORT) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_LOCAL)
+
+wine-kthread-installed: $(KTHREAD_OBJS) Makefile.in
+	$(CC) -o $@ $(LDEXECFLAGS) $(KTHREAD_OBJS) $(LIBWINE) $(LIBPORT) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_INSTALL)
 
 wine-pthread: $(PTHREAD_OBJS) Makefile.in
-	$(CC) -o $@ $(LDEXECFLAGS) $(PTHREAD_OBJS) $(LIBWINE_LDFLAGS) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS)
+	$(CC) -o $@ $(LDEXECFLAGS) $(PTHREAD_OBJS) $(LIBWINE) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_LOCAL)
+
+wine-pthread-installed: $(PTHREAD_OBJS) Makefile.in
+	$(CC) -o $@ $(LDEXECFLAGS) $(PTHREAD_OBJS) $(LIBWINE) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_INSTALL)
 
 $(MODULE): $(MAIN_BINARY)
 	$(RM) $(MODULE) && $(LN_S) $(MAIN_BINARY) $(MODULE)
 
-install:: $(WINE_BINARIES) $(MANPAGES) $(INSTALLDIRS)
+install:: $(WINE_BINARIES:%=%-installed) $(MANPAGES) $(INSTALLDIRS)
 	for f in $(WINE_BINARIES); do \
 	  if [ "$(MAIN_BINARY)" = "$$f" ]; \
-	  then $(INSTALL_PROGRAM) $$f $(DESTDIR)$(bindir)/$(MODULE); \
-	  else $(INSTALL_PROGRAM) $$f $(DESTDIR)$(bindir)/$$f; \
+	  then $(INSTALL_PROGRAM) $$f-installed $(DESTDIR)$(bindir)/$(MODULE); \
+	  else $(INSTALL_PROGRAM) $$f-installed $(DESTDIR)$(bindir)/$$f; \
 	  fi; \
 	done
 	$(INSTALL_DATA) wine.man $(DESTDIR)$(mandir)/man$(prog_manext)/wine.$(prog_manext)
+	$(INSTALL_DATA) wine.de.man $(DESTDIR)$(mandir)/de.UTF-8/man$(prog_manext)/wine.$(prog_manext)
+	$(INSTALL_DATA) wine.fr.man $(DESTDIR)$(mandir)/fr.UTF-8/man$(prog_manext)/wine.$(prog_manext)
 
 uninstall::
 	-cd $(DESTDIR)$(bindir) && $(RM) $(WINE_BINARIES) $(MODULE)
 	$(RM) $(DESTDIR)$(mandir)/man$(prog_manext)/wine.$(prog_manext)
-
-clean::
-	$(RM) $(WINE_BINARIES) $(MODULE) version.c version-stamp
-
-version-stamp: dummy
-	(GIT_DIR=$(TOPSRCDIR)/.git git-describe 2>/dev/null || echo "wine-@PACKAGE_VERSION@") | sed -e 's/\(.*\)/const char wine_version[] = "\1";/' >$@ || ($(RM) $@ && exit 1)
-
-version.c: version-stamp
-	@cmp -s version-stamp $@ || cp version-stamp $@
+	$(RM) $(DESTDIR)$(mandir)/de.UTF-8/man$(prog_manext)/wine.$(prog_manext)
+	$(RM) $(DESTDIR)$(mandir)/fr.UTF-8/man$(prog_manext)/wine.$(prog_manext)
 
 @DEPENDENCIES@  # everything below this line is overwritten by make depend

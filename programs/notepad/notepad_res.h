@@ -23,6 +23,8 @@
 #define DIALOG_PAGESETUP        0x202
 #define ID_ACCEL                0x203
 
+#define IDI_NOTEPAD             0x300
+
 /* Commands */
 #define CMD_NEW                 0x100
 #define CMD_OPEN                0x101
@@ -50,17 +52,19 @@
 #define CMD_HELP_CONTENTS       0x130
 #define CMD_HELP_SEARCH         0x131
 #define CMD_HELP_ON_HELP        0x132
-#define CMD_LICENSE             0x135
-#define CMD_NO_WARRANTY         0x136
-#define CMD_ABOUT_WINE          0x137
+#define CMD_HELP_ABOUT_NOTEPAD  0x134
+
+/* Control IDs */
+#define IDC_PAGESETUP_HEADERVALUE 0x141
+#define IDC_PAGESETUP_FOOTERVALUE 0x143
+#define IDC_PAGESETUP_LEFTVALUE   0x147
+#define IDC_PAGESETUP_RIGHTVALUE  0x14A
+#define IDC_PAGESETUP_TOPVALUE    0x14D
+#define IDC_PAGESETUP_BOTTOMVALUE 0x150
 
 /* Strings */
 #define STRING_PAGESETUP_HEADERVALUE 0x160
 #define STRING_PAGESETUP_FOOTERVALUE 0x161
-#define STRING_PAGESETUP_LEFTVALUE 0x162
-#define STRING_PAGESETUP_RIGHTVALUE 0x163
-#define STRING_PAGESETUP_TOPVALUE 0x164
-#define STRING_PAGESETUP_BOTTOMVALUE 0x165
 
 #define STRING_NOTEPAD 0x170
 #define STRING_ERROR 0x171
@@ -76,8 +80,3 @@
 
 #define STRING_NOTFOUND 0x17B
 #define STRING_OUT_OF_MEMORY 0x17C
-
-#define IDS_LICENSE_CAPTION       0x180
-#define IDS_LICENSE               0x181
-#define IDS_WARRANTY_CAPTION      0x182
-#define IDS_WARRANTY              0x183

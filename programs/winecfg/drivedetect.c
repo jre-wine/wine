@@ -43,6 +43,12 @@ WINE_DEFAULT_DEBUG_CHANNEL(winecfg);
 BOOL gui_mode = TRUE;
 static long working_mask = 0;
 
+typedef struct
+{
+  const char *szNode;
+  int nType;
+} DEV_NODES;
+
 #ifdef HAVE_MNTENT_H
 
 static const DEV_NODES sDeviceNodes[] = {
@@ -289,7 +295,7 @@ static void ensure_drive_c_is_mapped(void)
     }
 }
 
-int autodetect_drives()
+int autodetect_drives(void)
 {
 #ifdef HAVE_MNTENT_H
     struct mntent *ent;

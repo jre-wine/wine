@@ -3,7 +3,7 @@
  *
  * Copyright (C) 1996,      Eric Youngdale.
  * Copyright (C) 1999-2000, Ulrich Weigand.
- * Copyright (C) 2004,      Eric Pouech.
+ * Copyright (C) 2004-2007, Eric Pouech.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,16 +22,16 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
 
 #include "dbghelp_private.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "wine/debug.h"
-#include "winnls.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 
@@ -42,7 +42,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
  * its debugging information)
  */
 static BOOL pe_load_stabs(const struct process* pcs, struct module* module, 
-                          const void* mapping, IMAGE_NT_HEADERS* nth)
+                          void* mapping, IMAGE_NT_HEADERS* nth)
 {
     IMAGE_SECTION_HEADER*       section;
     int                         i, stabsize = 0, stabstrsize = 0;
@@ -69,15 +69,17 @@ static BOOL pe_load_stabs(const struct process* pcs, struct module* module,
     {
         ret = stabs_parse(module, 
                           module->module.BaseOfImage - nth->OptionalHeader.ImageBase, 
-                          RtlImageRvaToVa(nth, (void*)mapping, stabs, NULL),
+                          RtlImageRvaToVa(nth, mapping, stabs, NULL),
                           stabsize,
-                          RtlImageRvaToVa(nth, (void*)mapping, stabstr, NULL),
+                          RtlImageRvaToVa(nth, mapping, stabstr, NULL),
                           stabstrsize);
     }
+
+    TRACE("%s the STABS debug info\n", ret ? "successfully loaded" : "failed to load");
     return ret;
 }
 
-static BOOL CALLBACK dbg_match(char* file, void* user)
+static BOOL CALLBACK dbg_match(const char* file, void* user)
 {
     /* accept first file */
     return FALSE;
@@ -98,19 +100,19 @@ static BOOL pe_load_dbg_file(const struct process* pcs, struct module* module,
     const IMAGE_DEBUG_DIRECTORY*        dbg;
     BOOL                                ret = FALSE;
 
-    WINE_TRACE("Processing DBG file %s\n", dbg_name);
+    WINE_TRACE("Processing DBG file %s\n", debugstr_a(dbg_name));
 
     if (SymFindFileInPath(pcs->handle, NULL, dbg_name, NULL, 0, 0, 0, tmp, dbg_match, NULL) &&
-        (hFile = CreateFileA(tmp, GENERIC_READ, FILE_SHARE_READ, NULL, 
+        (hFile = CreateFileA(tmp, GENERIC_READ, FILE_SHARE_READ, NULL,
                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL)) != INVALID_HANDLE_VALUE &&
-        ((hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) != 0) &&
+        ((hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) != 0) &&
         ((dbg_mapping = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)) != NULL))
     {
         hdr = (const IMAGE_SEPARATE_DEBUG_HEADER*)dbg_mapping;
         if (hdr->TimeDateStamp != timestamp)
         {
             WINE_ERR("Warning - %s has incorrect internal timestamp\n",
-                     dbg_name);
+                     debugstr_a(dbg_name));
             /*
              * Well, sometimes this happens to DBG files which ARE REALLY the
              * right .DBG files but nonetheless this check fails. Anyway,
@@ -138,11 +140,11 @@ static BOOL pe_load_dbg_file(const struct process* pcs, struct module* module,
             ERR("Wrong signature in .DBG file %s\n", debugstr_a(tmp));
     }
     else
-        WINE_ERR("-Unable to peruse .DBG file %s (%s)\n", dbg_name, debugstr_a(tmp));
+        WINE_ERR("-Unable to peruse .DBG file %s (%s)\n", debugstr_a(dbg_name), debugstr_a(tmp));
 
     if (dbg_mapping) UnmapViewOfFile(dbg_mapping);
     if (hMap) CloseHandle(hMap);
-    if (hFile != NULL) CloseHandle(hFile);
+    if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
     return ret;
 }
 
@@ -153,7 +155,7 @@ static BOOL pe_load_dbg_file(const struct process* pcs, struct module* module,
  */
 static BOOL pe_load_msc_debug_info(const struct process* pcs, 
                                    struct module* module,
-                                   const void* mapping, IMAGE_NT_HEADERS* nth)
+                                   void* mapping, IMAGE_NT_HEADERS* nth)
 {
     BOOL                        ret = FALSE;
     const IMAGE_DATA_DIRECTORY* dir;
@@ -165,7 +167,7 @@ static BOOL pe_load_msc_debug_info(const struct process* pcs,
     nDbg = dir->Size / sizeof(IMAGE_DEBUG_DIRECTORY);
     if (!nDbg) return FALSE;
 
-    dbg = RtlImageRvaToVa(nth, (void*)mapping, dir->VirtualAddress, NULL);
+    dbg = RtlImageRvaToVa(nth, mapping, dir->VirtualAddress, NULL);
 
     /* Parse debug directory */
     if (nth->FileHeader.Characteristics & IMAGE_FILE_DEBUG_STRIPPED)
@@ -178,7 +180,7 @@ static BOOL pe_load_msc_debug_info(const struct process* pcs,
             misc->DataType != IMAGE_DEBUG_MISC_EXENAME)
         {
             WINE_ERR("-Debug info stripped, but no .DBG file in module %s\n",
-                     module->module.ModuleName);
+                     debugstr_w(module->module.ModuleName));
         }
         else
         {
@@ -201,7 +203,7 @@ static BOOL pe_load_msc_debug_info(const struct process* pcs,
  */
 static BOOL pe_load_export_debug_info(const struct process* pcs, 
                                       struct module* module, 
-                                      const void* mapping, IMAGE_NT_HEADERS* nth)
+                                      void* mapping, IMAGE_NT_HEADERS* nth)
 {
     unsigned int 		        i;
     const IMAGE_EXPORT_DIRECTORY* 	exports;
@@ -231,13 +233,13 @@ static BOOL pe_load_export_debug_info(const struct process* pcs,
     for (i = 0; i < nth->FileHeader.NumberOfSections; i++, section++) 
     {
 	symt_new_public(module, NULL, section->Name, 
-                        RtlImageRvaToVa(nth, (void*)mapping, section->VirtualAddress, NULL), 
+                        RtlImageRvaToVa(nth, mapping, section->VirtualAddress, NULL), 
                         1, TRUE /* FIXME */, TRUE /* FIXME */);
     }
 #endif
 
     /* Add exported functions */
-    if ((exports = RtlImageDirectoryEntryToData((void*)mapping, FALSE,
+    if ((exports = RtlImageDirectoryEntryToData(mapping, FALSE,
                                                 IMAGE_DIRECTORY_ENTRY_EXPORT, &size)))
     {
         const WORD*             ordinals = NULL;
@@ -246,29 +248,32 @@ static BOOL pe_load_export_debug_info(const struct process* pcs,
         unsigned int		j;
         char			buffer[16];
 
-        functions = RtlImageRvaToVa(nth, (void*)mapping, exports->AddressOfFunctions, NULL);
-        ordinals  = RtlImageRvaToVa(nth, (void*)mapping, exports->AddressOfNameOrdinals, NULL);
-        names     = RtlImageRvaToVa(nth, (void*)mapping, exports->AddressOfNames, NULL);
+        functions = RtlImageRvaToVa(nth, mapping, exports->AddressOfFunctions, NULL);
+        ordinals  = RtlImageRvaToVa(nth, mapping, exports->AddressOfNameOrdinals, NULL);
+        names     = RtlImageRvaToVa(nth, mapping, exports->AddressOfNames, NULL);
 
-        for (i = 0; i < exports->NumberOfNames; i++) 
+        if (functions && ordinals && names)
         {
-            if (!names[i]) continue;
-            symt_new_public(module, NULL, 
-                            RtlImageRvaToVa(nth, (void*)mapping, names[i], NULL),
-                            base + functions[ordinals[i]], 
-                            1, TRUE /* FIXME */, TRUE /* FIXME */);
-        }
-	    
-        for (i = 0; i < exports->NumberOfFunctions; i++) 
-        {
-            if (!functions[i]) continue;
-            /* Check if we already added it with a name */
-            for (j = 0; j < exports->NumberOfNames; j++)
-                if ((ordinals[j] == i) && names[j]) break;
-            if (j < exports->NumberOfNames) continue;
-            snprintf(buffer, sizeof(buffer), "%ld", i + exports->Base);
-            symt_new_public(module, NULL, buffer, base + (DWORD)functions[i], 1,
-                            TRUE /* FIXME */, TRUE /* FIXME */);
+            for (i = 0; i < exports->NumberOfNames; i++)
+            {
+                if (!names[i]) continue;
+                symt_new_public(module, NULL,
+                                RtlImageRvaToVa(nth, mapping, names[i], NULL),
+                                base + functions[ordinals[i]],
+                                1, TRUE /* FIXME */, TRUE /* FIXME */);
+            }
+
+            for (i = 0; i < exports->NumberOfFunctions; i++)
+            {
+                if (!functions[i]) continue;
+                /* Check if we already added it with a name */
+                for (j = 0; j < exports->NumberOfNames; j++)
+                    if ((ordinals[j] == i) && names[j]) break;
+                if (j < exports->NumberOfNames) continue;
+                snprintf(buffer, sizeof(buffer), "%d", i + exports->Base);
+                symt_new_public(module, NULL, buffer, base + (DWORD)functions[i], 1,
+                                TRUE /* FIXME */, TRUE /* FIXME */);
+            }
         }
     }
     /* no real debug info, only entry points */
@@ -289,10 +294,10 @@ BOOL pe_load_debug_info(const struct process* pcs, struct module* module)
     void*               mapping;
     IMAGE_NT_HEADERS*   nth;
 
-    hFile = CreateFileA(module->module.LoadedImageName, GENERIC_READ, FILE_SHARE_READ,
+    hFile = CreateFileW(module->module.LoadedImageName, GENERIC_READ, FILE_SHARE_READ,
                         NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) return ret;
-    if ((hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) != 0)
+    if ((hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) != 0)
     {
         if ((mapping = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)) != NULL)
         {
@@ -320,43 +325,35 @@ BOOL pe_load_debug_info(const struct process* pcs, struct module* module)
 }
 
 /******************************************************************
- *		pe_load_module
+ *		pe_load_native_module
  *
  */
-struct module* pe_load_module(struct process* pcs, const char* name,
-                              HANDLE hFile, DWORD base, DWORD size)
+struct module* pe_load_native_module(struct process* pcs, const WCHAR* name,
+                                     HANDLE hFile, DWORD base, DWORD size)
 {
     struct module*      module = NULL;
     BOOL                opened = FALSE;
     HANDLE              hMap;
-    void*               mapping;
-    char                loaded_name[MAX_PATH];
+    WCHAR               loaded_name[MAX_PATH];
 
     loaded_name[0] = '\0';
     if (!hFile)
     {
-        unsigned len = WideCharToMultiByte(CP_ACP,0, pcs->search_path, -1, NULL, 0, NULL, NULL);
-        char* sp;
 
-        if (!name)
-        {
-            /* FIXME SetLastError */
-            return NULL;
-        }
-        sp = HeapAlloc(GetProcessHeap(), 0, len);
-        if (!sp) return FALSE;
-        WideCharToMultiByte(CP_ACP,0, pcs->search_path, -1, sp, len, NULL, NULL);
+        assert(name);
 
-        if ((hFile = FindExecutableImage(name, sp, loaded_name)) == NULL)
+        if ((hFile = FindExecutableImageExW(name, pcs->search_path, loaded_name, NULL, NULL)) == NULL)
             return NULL;
         opened = TRUE;
     }
-    else if (name) strcpy(loaded_name, name);
+    else if (name) strcpyW(loaded_name, name);
     else if (dbghelp_options & SYMOPT_DEFERRED_LOADS)
         FIXME("Trouble ahead (no module name passed in deferred mode)\n");
-    if (!(module = module_find_by_name(pcs, loaded_name, DMT_PE)) &&
-        (hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) != NULL)
+
+    if ((hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) != NULL)
     {
+        void*   mapping;
+
         if ((mapping = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)) != NULL)
         {
             IMAGE_NT_HEADERS*   nth = RtlImageNtHeader(mapping);
@@ -365,9 +362,9 @@ struct module* pe_load_module(struct process* pcs, const char* name,
             {
                 if (!base) base = nth->OptionalHeader.ImageBase;
                 if (!size) size = nth->OptionalHeader.SizeOfImage;
-            
+
                 module = module_new(pcs, loaded_name, DMT_PE, FALSE, base, size,
-                                    nth->FileHeader.TimeDateStamp, 
+                                    nth->FileHeader.TimeDateStamp,
                                     nth->OptionalHeader.CheckSum);
                 if (module)
                 {
@@ -376,6 +373,8 @@ struct module* pe_load_module(struct process* pcs, const char* name,
                     else
                         pe_load_debug_info(pcs, module);
                 }
+                else
+                    ERR("could not load the module '%s'\n", debugstr_w(loaded_name));
             }
             UnmapViewOfFile(mapping);
         }
@@ -402,43 +401,75 @@ BOOL pe_load_nt_header(HANDLE hProc, DWORD base, IMAGE_NT_HEADERS* nth)
 }
 
 /******************************************************************
- *		pe_load_module_from_pcs
+ *		pe_load_builtin_module
  *
  */
-struct module* pe_load_module_from_pcs(struct process* pcs, const char* name, 
-                                       const char* mod_name, DWORD base, DWORD size)
+struct module* pe_load_builtin_module(struct process* pcs, const WCHAR* name,
+                                      DWORD base, DWORD size)
 {
-    struct module*      module;
-    const char*         ptr;
+    struct module*      module = NULL;
 
-    if ((module = module_find_by_name(pcs, name, DMT_PE))) return module;
-    if (mod_name) ptr = mod_name;
-    else
+    if (base && pcs->dbg_hdr_addr)
     {
-        for (ptr = name + strlen(name) - 1; ptr >= name; ptr--)
+        IMAGE_NT_HEADERS    nth;
+
+        if (pe_load_nt_header(pcs->handle, base, &nth))
         {
-            if (*ptr == '/' || *ptr == '\\')
-            {
-                ptr++;
-                break;
-            }
+            if (!size) size = nth.OptionalHeader.SizeOfImage;
+            module = module_new(pcs, name, DMT_PE, FALSE, base, size,
+                                nth.FileHeader.TimeDateStamp,
+                                nth.OptionalHeader.CheckSum);
         }
     }
-    if (ptr && (module = module_find_by_name(pcs, ptr, DMT_PE))) return module;
-    if (base)
-    {
-        if (pcs->dbg_hdr_addr)
-        {
-            IMAGE_NT_HEADERS    nth;
-
-            if (pe_load_nt_header(pcs->handle, base, &nth))
-            {
-                if (!size) size = nth.OptionalHeader.SizeOfImage;
-                module = module_new(pcs, name, DMT_PE, FALSE, base, size,
-                                    nth.FileHeader.TimeDateStamp, nth.OptionalHeader.CheckSum);
-            }
-        } else if (size)
-            module = module_new(pcs, name, DMT_PE, FALSE, base, size, 0 /* FIXME */, 0 /* FIXME */);
-    }
     return module;
+}
+
+/***********************************************************************
+ *           ImageDirectoryEntryToDataEx (DBGHELP.@)
+ *
+ * Search for specified directory in PE image
+ *
+ * PARAMS
+ *
+ *   base    [in]  Image base address
+ *   image   [in]  TRUE - image has been loaded by loader, FALSE - raw file image
+ *   dir     [in]  Target directory index
+ *   size    [out] Receives directory size
+ *   section [out] Receives pointer to section header of section containing directory data
+ *
+ * RETURNS
+ *   Success: pointer to directory data
+ *   Failure: NULL
+ *
+ */
+PVOID WINAPI ImageDirectoryEntryToDataEx( PVOID base, BOOLEAN image, USHORT dir, PULONG size, PIMAGE_SECTION_HEADER *section )
+{
+    const IMAGE_NT_HEADERS *nt;
+    DWORD addr;
+
+    *size = 0;
+
+    if (!(nt = RtlImageNtHeader( base ))) return NULL;
+    if (dir >= nt->OptionalHeader.NumberOfRvaAndSizes) return NULL;
+    if (!(addr = nt->OptionalHeader.DataDirectory[dir].VirtualAddress)) return NULL;
+
+    *size = nt->OptionalHeader.DataDirectory[dir].Size;
+    if (image || addr < nt->OptionalHeader.SizeOfHeaders)
+    {
+        if (section) *section = NULL;
+        return (char *)base + addr;
+    }
+
+    return RtlImageRvaToVa( nt, (HMODULE)base, addr, section );
+}
+
+/***********************************************************************
+ *         ImageDirectoryEntryToData   (DBGHELP.@)
+ *
+ * NOTES
+ *   See ImageDirectoryEntryToDataEx
+ */
+PVOID WINAPI ImageDirectoryEntryToData( PVOID base, BOOLEAN image, USHORT dir, PULONG size )
+{
+    return ImageDirectoryEntryToDataEx( base, image, dir, size, NULL );
 }

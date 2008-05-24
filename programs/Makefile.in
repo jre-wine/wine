@@ -17,14 +17,20 @@ SUBDIRS = \
 	icinfo \
 	iexplore \
 	msiexec \
+	net \
 	notepad \
 	oleview \
 	progman \
+	reg \
 	regedit \
 	regsvr32 \
 	rpcss \
 	rundll32 \
+	secedit \
+	services \
+	spoolsv \
 	start \
+	svchost \
 	taskmgr \
 	uninstaller \
 	view \
@@ -33,15 +39,18 @@ SUBDIRS = \
 	winecfg \
 	wineconsole \
 	winedbg \
+	winedevice \
 	winefile \
 	winemenubuilder \
 	winemine \
 	winepath \
 	winetest \
 	winevdm \
-	winhelp \
+	winhlp32 \
 	winver \
-	wordpad
+	wordpad \
+	write \
+	xcopy
 
 # Sub-directories to run make install into
 INSTALLSUBDIRS = \
@@ -55,14 +64,20 @@ INSTALLSUBDIRS = \
 	icinfo \
 	iexplore \
 	msiexec \
+	net \
 	notepad \
 	oleview \
 	progman \
+	reg \
 	regedit \
 	regsvr32 \
 	rpcss \
 	rundll32 \
+	secedit \
+	services \
+	spoolsv \
 	start \
+	svchost \
 	taskmgr \
 	uninstaller \
 	wineboot \
@@ -70,14 +85,17 @@ INSTALLSUBDIRS = \
 	winecfg \
 	wineconsole \
 	winedbg \
+	winedevice \
 	winefile \
 	winemenubuilder \
 	winemine \
 	winepath \
 	winevdm \
-	winhelp \
+	winhlp32 \
 	winver \
-	wordpad
+	wordpad \
+	write \
+	xcopy
 
 # Programs to install in bin directory
 INSTALLPROGS = \
@@ -94,20 +112,18 @@ INSTALLPROGS = \
 	winedbg \
 	winefile \
 	winemine \
-	winepath \
-	winhelp
+	winepath
 
 INSTALLDIRS = $(DESTDIR)$(bindir)
 
+PROGRAMS = wineapploader
+
 @MAKE_RULES@
 
-all: wineapploader winelauncher $(SUBDIRS)
+all: $(PROGRAMS) $(SUBDIRS)
 
 wineapploader: wineapploader.in
 	sed -e 's,@bindir\@,$(bindir),g' $(SRCDIR)/wineapploader.in >$@ || ($(RM) $@ && false)
-
-winelauncher: winelauncher.in
-	sed -e 's,@bindir\@,$(bindir),g' -e 's,@libdir\@,$(libdir),g' -e 's,@dlldir\@,$(dlldir),g' $(SRCDIR)/winelauncher.in >$@ || ($(RM) $@ && false)
 
 # Rules for installation
 
@@ -124,15 +140,11 @@ install-progs.so: $(INSTALLPROGS:%=%/__installprog__)
 
 install-progs: # nothing to do here
 
-install:: winelauncher install-progs$(DLLEXT) $(INSTALLDIRS)
-	$(INSTALL_SCRIPT) winelauncher $(DESTDIR)$(bindir)/winelauncher
+install:: install-progs$(DLLEXT) $(INSTALLDIRS)
 
 uninstall::
-	-cd $(DESTDIR)$(bindir) && $(RM) wineapploader winelauncher $(INSTALLPROGS)
+	-cd $(DESTDIR)$(bindir) && $(RM) wineapploader $(INSTALLPROGS)
 	-rmdir $(DESTDIR)$(dlldir)
-
-clean::
-	$(RM) wineapploader winelauncher
 
 # Rules for testing
 

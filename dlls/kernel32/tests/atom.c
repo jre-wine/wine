@@ -222,7 +222,9 @@ static void test_get_atom_name(void)
 
     memset( buf, '.', sizeof(buf) );
     len = GlobalGetAtomNameA( atom, buf, 6 );
-    ok( len == 0, "bad length %d\n", len );
+    ok( len == 0 ||
+        len == 5, /* win9x */
+        "bad length %d\n", len );
     ok( !memcmp( buf, "fooba\0....", 10 ), "bad buffer contents\n");
     if (unicode_OS)
     {
@@ -292,7 +294,7 @@ static void test_get_atom_name(void)
             {
                 /* len == 0 with ERROR_MORE_DATA is on NT3.51 */
                 ok(len == 1 || (len == 0 && GetLastError() == ERROR_MORE_DATA),
-                         "0x%04x: got %u with %d (excepted '1' or '0' with " \
+                         "0x%04x: got %u with %d (excepted '1' or '0' with "
                          "ERROR_MORE_DATA)\n", i, len, GetLastError());
                 ok(outW[1] == DOUBLE('.'), "buffer overwrite\n");
             }
@@ -566,7 +568,7 @@ static void test_local_get_atom_name(void)
         do_initW(inW, "abcdefghij", 255);
         atom = AddAtomW(inW);
         ok(atom, "couldn't add atom for %s\n", in);
-        len = GetAtomNameW(atom, outW, sizeof(outW));
+        len = GetAtomNameW(atom, outW, sizeof(outW)/sizeof(outW[0]));
         ok(len == 255, "length mismatch (%u instead of 255)\n", len);
         for (i = 0; i < 255; i++)
         {

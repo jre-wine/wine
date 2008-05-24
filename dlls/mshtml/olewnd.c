@@ -201,9 +201,22 @@ static HRESULT WINAPI OleInPlaceObjectWindowless_InPlaceDeactivate(IOleInPlaceOb
         SetWindowPos(This->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
     }
 
+    This->focus = FALSE;
+    notif_focus(This);
+
     This->in_place_active = FALSE;
-    if(This->ipsite)
-        IOleInPlaceSite_OnInPlaceDeactivate(This->ipsite);
+    if(This->ipsite) {
+        IOleInPlaceSiteEx *ipsiteex;
+        HRESULT hres;
+
+        hres = IOleInPlaceSite_QueryInterface(This->ipsite, &IID_IOleInPlaceSiteEx, (void**)&ipsiteex);
+        if(SUCCEEDED(hres)) {
+            IOleInPlaceSiteEx_OnInPlaceDeactivateEx(ipsiteex, TRUE);
+            IOleInPlaceSiteEx_Release(ipsiteex);
+        }else {
+            IOleInPlaceSite_OnInPlaceDeactivate(This->ipsite);
+        }
+    }
 
     return S_OK;
 }
@@ -234,7 +247,7 @@ static HRESULT WINAPI OleInPlaceObjectWindowless_OnWindowMessage(IOleInPlaceObje
         UINT msg, WPARAM wParam, LPARAM lParam, LRESULT *lpResult)
 {
     HTMLDocument *This = OLEINPLACEWND_THIS(iface);
-    FIXME("(%p)->(%u %u %lu %p)\n", This, msg, wParam, lParam, lpResult);
+    FIXME("(%p)->(%u %lu %lu %p)\n", This, msg, wParam, lParam, lpResult);
     return E_NOTIMPL;
 }
 
@@ -261,25 +274,6 @@ static const IOleInPlaceObjectWindowlessVtbl OleInPlaceObjectWindowlessVtbl = {
 };
 
 #undef INPLACEWIN_THIS
-
-void HTMLDocument_ShowContextMenu(HTMLDocument *This, DWORD dwID, POINT *ppt)
-{
-    HMENU menu_res, menu;
-    HRESULT hres;
-
-    hres = IDocHostUIHandler_ShowContextMenu(This->hostui, dwID, ppt,
-            (IUnknown*)CMDTARGET(This), (IDispatch*)HTMLDOC(This));
-    if(hres == S_OK)
-        return;
-
-    menu_res = LoadMenuW(get_shdoclc(), MAKEINTRESOURCEW(IDR_BROWSE_CONTEXT_MENU));
-    menu = GetSubMenu(menu_res, dwID);
-
-    TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
-            ppt->x, ppt->y, 0, This->hwnd, NULL);
-
-    DestroyMenu(menu_res);
-}
 
 void HTMLDocument_Window_Init(HTMLDocument *This)
 {

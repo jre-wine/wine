@@ -24,18 +24,25 @@
 #include "windef.h"
 #include "winbase.h"
 #include "dinput.h"
+#include "wine/list.h"
 
 /* Implementation specification */
 typedef struct IDirectInputImpl IDirectInputImpl;
 struct IDirectInputImpl
 {
-   const void *lpVtbl;
-   LONG  ref;
+    const IDirectInput7AVtbl   *lpVtbl;
+    const IDirectInput7WVtbl   *lpVtbl7w;
+    const IDirectInput8AVtbl   *lpVtbl8a;
+    const IDirectInput8WVtbl   *lpVtbl8w;
 
-   /* Used to have an unique sequence number for all the events */
-   DWORD evsequence;
+    LONG                        ref;
 
-   DWORD dwVersion;
+    CRITICAL_SECTION            crit;
+    struct list                 entry;          /* entry into list of all IDirectInputs */
+
+    DWORD                       evsequence;     /* unique sequence number for events */
+    DWORD                       dwVersion;      /* direct input version number */
+    struct list                 devices_list;   /* list of all created dinput devices */
 };
 
 /* Function called by all devices that Wine supports */
@@ -52,8 +59,9 @@ extern const struct dinput_device keyboard_device;
 extern const struct dinput_device joystick_linux_device;
 extern const struct dinput_device joystick_linuxinput_device;
 
-extern HINSTANCE DINPUT_instance;
+extern void check_dinput_hooks(LPDIRECTINPUTDEVICE8A);
+typedef void (*DI_EVENT_PROC)(LPDIRECTINPUTDEVICE8A, WPARAM, LPARAM);
 
-extern HHOOK set_dinput_hook(int hook_id, LPVOID proc);
+extern void _dump_diactionformatA(LPDIACTIONFORMATA);
 
 #endif /* __WINE_DLLS_DINPUT_DINPUT_PRIVATE_H */

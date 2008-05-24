@@ -40,7 +40,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "wtypes.h"
 #include "nspapi.h"
 #include "winsock2.h"
@@ -100,7 +99,7 @@ static INT WINSOCK_EnterSingleProtocolW( INT protocol, WSAPROTOCOL_INFOW* info )
         info->dwServiceFlags1 = XP1_PARTIAL_MESSAGE | XP1_EXPEDITED_DATA |
                                 XP1_GRACEFUL_CLOSE | XP1_GUARANTEED_ORDER |
                                 XP1_GUARANTEED_DELIVERY;
-        memcpy( &info->ProviderId, &ProviderIdIP, sizeof(GUID) );
+        info->ProviderId = ProviderIdIP;
         info->dwCatalogEntryId = 0x3e9;
         info->ProtocolChain.ChainLen = 1;
         info->iVersion = 2;
@@ -115,7 +114,7 @@ static INT WINSOCK_EnterSingleProtocolW( INT protocol, WSAPROTOCOL_INFOW* info )
         info->dwServiceFlags1 = XP1_PARTIAL_MESSAGE | XP1_SUPPORT_BROADCAST |
                                 XP1_SUPPORT_MULTIPOINT | XP1_MESSAGE_ORIENTED |
                                 XP1_CONNECTIONLESS;
-        memcpy( &info->ProviderId, &ProviderIdIP, sizeof(GUID) );
+        info->ProviderId = ProviderIdIP;
         info->dwCatalogEntryId = 0x3ea;
         info->ProtocolChain.ChainLen = 1;
         info->iVersion = 2;
@@ -131,7 +130,7 @@ static INT WINSOCK_EnterSingleProtocolW( INT protocol, WSAPROTOCOL_INFOW* info )
         info->dwServiceFlags1 = XP1_PARTIAL_MESSAGE | XP1_SUPPORT_BROADCAST |
                                 XP1_SUPPORT_MULTIPOINT | XP1_MESSAGE_ORIENTED |
                                 XP1_CONNECTIONLESS;
-        memcpy( &info->ProviderId, &ProviderIdIPX, sizeof(GUID) );
+        info->ProviderId = ProviderIdIPX;
         info->dwCatalogEntryId = 0x406;
         info->ProtocolChain.ChainLen = 1;
         info->iVersion = 2;
@@ -148,7 +147,7 @@ static INT WINSOCK_EnterSingleProtocolW( INT protocol, WSAPROTOCOL_INFOW* info )
         info->dwServiceFlags1 = XP1_IFS_HANDLES | XP1_PSEUDO_STREAM |
                                 XP1_MESSAGE_ORIENTED | XP1_GUARANTEED_ORDER |
                                 XP1_GUARANTEED_DELIVERY;
-        memcpy( &info->ProviderId, &ProviderIdSPX, sizeof(GUID) );
+        info->ProviderId = ProviderIdSPX;
         info->dwCatalogEntryId = 0x407;
         info->ProtocolChain.ChainLen = 1;
         info->iVersion = 2;
@@ -164,7 +163,7 @@ static INT WINSOCK_EnterSingleProtocolW( INT protocol, WSAPROTOCOL_INFOW* info )
         info->dwServiceFlags1 = XP1_IFS_HANDLES | XP1_GRACEFUL_CLOSE |
                                 XP1_PSEUDO_STREAM | XP1_MESSAGE_ORIENTED |
                                 XP1_GUARANTEED_ORDER | XP1_GUARANTEED_DELIVERY;
-        memcpy( &info->ProviderId, &ProviderIdSPX, sizeof(GUID) );
+        info->ProviderId = ProviderIdSPX;
         info->dwCatalogEntryId = 0x409;
         info->ProtocolChain.ChainLen = 1;
         info->iVersion = 2;
@@ -204,7 +203,7 @@ static INT WINSOCK_EnterSingleProtocolA( INT protocol, WSAPROTOCOL_INFOA* info )
         info->dwServiceFlags1 = XP1_IFS_HANDLES | XP1_EXPEDITED_DATA |
                                 XP1_GRACEFUL_CLOSE | XP1_GUARANTEED_ORDER |
                                 XP1_GUARANTEED_DELIVERY;
-        memcpy( &info->ProviderId, &ProviderIdIP, sizeof(GUID) );
+        info->ProviderId = ProviderIdIP;
         info->dwCatalogEntryId = 0x3e9;
         info->ProtocolChain.ChainLen = 1;
         info->iVersion = 2;
@@ -219,7 +218,7 @@ static INT WINSOCK_EnterSingleProtocolA( INT protocol, WSAPROTOCOL_INFOA* info )
         info->dwServiceFlags1 = XP1_IFS_HANDLES | XP1_SUPPORT_BROADCAST |
                                 XP1_SUPPORT_MULTIPOINT | XP1_MESSAGE_ORIENTED |
                                 XP1_CONNECTIONLESS;
-        memcpy( &info->ProviderId, &ProviderIdIP, sizeof(GUID) );
+        info->ProviderId = ProviderIdIP;
         info->dwCatalogEntryId = 0x3ea;
         info->ProtocolChain.ChainLen = 1;
         info->iVersion = 2;
@@ -235,7 +234,7 @@ static INT WINSOCK_EnterSingleProtocolA( INT protocol, WSAPROTOCOL_INFOA* info )
         info->dwServiceFlags1 = XP1_IFS_HANDLES | XP1_SUPPORT_BROADCAST |
                                 XP1_SUPPORT_MULTIPOINT | XP1_MESSAGE_ORIENTED |
                                 XP1_CONNECTIONLESS;
-        memcpy( &info->ProviderId, &ProviderIdIPX, sizeof(GUID) );
+        info->ProviderId = ProviderIdIPX;
         info->dwCatalogEntryId = 0x406;
         info->ProtocolChain.ChainLen = 1;
         info->iVersion = 2;
@@ -252,7 +251,7 @@ static INT WINSOCK_EnterSingleProtocolA( INT protocol, WSAPROTOCOL_INFOA* info )
         info->dwServiceFlags1 = XP1_IFS_HANDLES | XP1_PSEUDO_STREAM |
                                 XP1_MESSAGE_ORIENTED | XP1_GUARANTEED_ORDER |
                                 XP1_GUARANTEED_DELIVERY;
-        memcpy( &info->ProviderId, &ProviderIdSPX, sizeof(GUID) );
+        info->ProviderId = ProviderIdSPX;
         info->dwCatalogEntryId = 0x407;
         info->ProtocolChain.ChainLen = 1;
         info->iVersion = 2;
@@ -268,7 +267,7 @@ static INT WINSOCK_EnterSingleProtocolA( INT protocol, WSAPROTOCOL_INFOA* info )
         info->dwServiceFlags1 = XP1_IFS_HANDLES | XP1_GRACEFUL_CLOSE |
                                 XP1_PSEUDO_STREAM | XP1_MESSAGE_ORIENTED |
                                 XP1_GUARANTEED_ORDER | XP1_GUARANTEED_DELIVERY;
-        memcpy( &info->ProviderId, &ProviderIdSPX, sizeof(GUID) );
+        info->ProviderId = ProviderIdSPX;
         info->dwCatalogEntryId = 0x409;
         info->ProtocolChain.ChainLen = 1;
         info->iVersion = 2;
@@ -302,18 +301,16 @@ INT WINAPI WSAEnumProtocolsA( LPINT protocols, LPWSAPROTOCOL_INFOA buffer, LPDWO
     DWORD size = 0;
     INT local[] = { WS_IPPROTO_TCP, WS_IPPROTO_UDP, NSPROTO_IPX, NSPROTO_SPX, NSPROTO_SPXII, 0 };
 
-    if (!buffer)
-        return SOCKET_ERROR;
-
     if (!protocols) protocols = local;
 
     while (protocols[i]) i++;
 
     size = i * sizeof(WSAPROTOCOL_INFOA);
 
-    if (*len < size)
+    if (*len < size || !buffer)
     {
         *len = size;
+        WSASetLastError(WSAENOBUFS);
         return SOCKET_ERROR;
     }
 
@@ -368,18 +365,16 @@ INT WINAPI WSAEnumProtocolsW( LPINT protocols, LPWSAPROTOCOL_INFOW buffer, LPDWO
     DWORD size = 0;
     INT local[] = { WS_IPPROTO_TCP, WS_IPPROTO_UDP, NSPROTO_IPX, NSPROTO_SPX, NSPROTO_SPXII, 0 };
 
-    if (!buffer)
-        return SOCKET_ERROR;
-
     if (!protocols) protocols = local;
 
     while (protocols[i]) i++;
 
     size = i * sizeof(WSAPROTOCOL_INFOW);
 
-    if (*len < size)
+    if (*len < size || !buffer)
     {
         *len = size;
+        WSASetLastError(WSAENOBUFS);
         return SOCKET_ERROR;
     }
 
@@ -408,11 +403,11 @@ INT WINAPI WSAEnumProtocolsW( LPINT protocols, LPWSAPROTOCOL_INFOW buffer, LPDWO
  *  Doesn't supply info on layered protocols.
  *
  */
-INT WINAPI WSCEnumProtocols( LPINT protocols, LPWSAPROTOCOL_INFOW buffer, LPDWORD len, LPINT errno )
+INT WINAPI WSCEnumProtocols( LPINT protocols, LPWSAPROTOCOL_INFOW buffer, LPDWORD len, LPINT err )
 {
     INT ret = WSAEnumProtocolsW( protocols, buffer, len );
 
-    if (ret == SOCKET_ERROR) *errno = WSAENOBUFS;
+    if (ret == SOCKET_ERROR) *err = WSAENOBUFS;
 
     return ret;
 }

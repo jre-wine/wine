@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
 #include <windows.h>
 
 #include <stdio.h>
@@ -239,23 +237,22 @@ START_TEST(duplex)
 
     CoInitialize(NULL);
 
-    hDsound = LoadLibraryA("dsound.dll");
-    if (!hDsound) {
-        trace("dsound.dll not found\n");
-        goto done;
-    }
-
-    trace("DLL Version: %s\n", get_file_version("dsound.dll"));
-
-    pDirectSoundFullDuplexCreate=(void*)GetProcAddress(hDsound,"DirectSoundFullDuplexCreate");
-    if (!pDirectSoundFullDuplexCreate)
+    hDsound = LoadLibrary("dsound.dll");
+    if (hDsound)
     {
-        trace("duplex test skipped\n");
-        goto done;
+        trace("DLL Version: %s\n", get_file_version("dsound.dll"));
+
+        pDirectSoundFullDuplexCreate=(void*)GetProcAddress(hDsound,
+            "DirectSoundFullDuplexCreate");
+        if (pDirectSoundFullDuplexCreate)
+            IDirectSoundFullDuplex_tests();
+        else
+            skip("duplex test skipped\n");
+
+        FreeLibrary(hDsound);
     }
+    else
+        skip("dsound.dll not found!\n");
 
-    IDirectSoundFullDuplex_tests();
-
-done:
     CoUninitialize();
 }

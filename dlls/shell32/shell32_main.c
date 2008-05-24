@@ -37,7 +37,6 @@
 #include "winuser.h"
 #include "wingdi.h"
 #include "shlobj.h"
-#include "shlguid.h"
 #include "shlwapi.h"
 
 #include "undocshell.h"
@@ -86,7 +85,6 @@ extern const char * const SHELL_Authors[];
 LPWSTR* WINAPI CommandLineToArgvW(LPCWSTR lpCmdline, int* numargs)
 {
     DWORD argc;
-    HGLOBAL hargv;
     LPWSTR  *argv;
     LPCWSTR cs;
     LPWSTR arg,s,d;
@@ -98,20 +96,18 @@ LPWSTR* WINAPI CommandLineToArgvW(LPCWSTR lpCmdline, int* numargs)
         /* Return the path to the executable */
         DWORD len, size=16;
 
-        hargv=GlobalAlloc(size, 0);
-        argv=GlobalLock(hargv);
+        argv=LocalAlloc(LMEM_FIXED, size);
         for (;;)
         {
-            len = GetModuleFileNameW(0, (LPWSTR)(argv+1), size-sizeof(LPWSTR));
+            len = GetModuleFileNameW(0, (LPWSTR)(argv+1), (size-sizeof(LPWSTR))/sizeof(WCHAR));
             if (!len)
             {
-                GlobalFree(hargv);
+                LocalFree(argv);
                 return NULL;
             }
             if (len < size) break;
             size*=2;
-            hargv=GlobalReAlloc(hargv, size, 0);
-            argv=GlobalLock(hargv);
+            argv=LocalReAlloc(argv, size, 0);
         }
         argv[0]=(LPWSTR)(argv+1);
         if (numargs)
@@ -120,7 +116,7 @@ LPWSTR* WINAPI CommandLineToArgvW(LPCWSTR lpCmdline, int* numargs)
         return argv;
     }
 
-    /* to get a writeable copy */
+    /* to get a writable copy */
     argc=0;
     bcount=0;
     in_quotes=0;
@@ -161,8 +157,7 @@ LPWSTR* WINAPI CommandLineToArgvW(LPCWSTR lpCmdline, int* numargs)
     /* Allocate in a single lump, the string array, and the strings that go with it.
      * This way the caller can make a single GlobalFree call to free both, as per MSDN.
      */
-    hargv=GlobalAlloc(0, argc*sizeof(LPWSTR)+(strlenW(lpCmdline)+1)*sizeof(WCHAR));
-    argv=GlobalLock(hargv);
+    argv=LocalAlloc(LMEM_FIXED, argc*sizeof(LPWSTR)+(strlenW(lpCmdline)+1)*sizeof(WCHAR));
     if (!argv)
         return NULL;
     cmdline=(LPWSTR)(argv+argc);
@@ -275,6 +270,9 @@ static DWORD shgfi_get_exe_type(LPCWSTR szFullPath)
         SetFilePointer( hfile, mz_header.e_lfanew, NULL, SEEK_SET );
         ReadFile( hfile, &nt, sizeof(nt), &len, NULL );
         CloseHandle( hfile );
+        /* DLL files are not executable and should return 0 */
+        if (nt.FileHeader.Characteristics & IMAGE_FILE_DLL)
+            return 0;
         if (nt.OptionalHeader.Subsystem == IMAGE_SUBSYSTEM_WINDOWS_GUI)
         {
              return IMAGE_NT_SIGNATURE | 
@@ -356,7 +354,7 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
          (flags & (SHGFI_ATTRIBUTES|SHGFI_EXETYPE|SHGFI_PIDL)))
         return FALSE;
 
-    /* windows initializes this values regardless of the flags */
+    /* windows initializes these values regardless of the flags */
     if (psfi != NULL)
     {
         psfi->szDisplayName[0] = '\0';
@@ -511,21 +509,56 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
     {
         UINT uDummy,uFlags;
 
-        hr = IShellFolder_GetUIObjectOf(psfParent, 0, 1,
-               (LPCITEMIDLIST*)&pidlLast, &IID_IExtractIconW,
-               &uDummy, (LPVOID*)&pei);
-        if (SUCCEEDED(hr))
+        if (flags & SHGFI_USEFILEATTRIBUTES)
         {
-            hr = IExtractIconW_GetIconLocation(pei, uGilFlags,
-                    szLocation, MAX_PATH, &iIndex, &uFlags);
-            psfi->iIcon = iIndex;
-
-            if (!(uFlags & GIL_NOTFILENAME))
-                lstrcpyW (psfi->szDisplayName, szLocation);
+            if (dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            {
+                lstrcpyW(psfi->szDisplayName, swShell32Name);
+                psfi->iIcon = -IDI_SHELL_FOLDER;
+            }
             else
-                ret = FALSE;
+            {
+                WCHAR* szExt;
+                static const WCHAR p1W[] = {'%','1',0};
+                WCHAR sTemp [MAX_PATH];
 
-            IExtractIconW_Release(pei);
+                szExt = PathFindExtensionW(szFullPath);
+                TRACE("szExt=%s\n", debugstr_w(szExt));
+                if ( szExt &&
+                     HCR_MapTypeToValueW(szExt, sTemp, MAX_PATH, TRUE) &&
+                     HCR_GetDefaultIconW(sTemp, sTemp, MAX_PATH, &psfi->iIcon))
+                {
+                    if (lstrcmpW(p1W, sTemp))
+                        strcpyW(psfi->szDisplayName, sTemp);
+                    else
+                    {
+                        /* the icon is in the file */
+                        strcpyW(psfi->szDisplayName, szFullPath);
+                    }
+                }
+                else
+                    ret = FALSE;
+            }
+        }
+        else
+        {
+            hr = IShellFolder_GetUIObjectOf(psfParent, 0, 1,
+                (LPCITEMIDLIST*)&pidlLast, &IID_IExtractIconW,
+                &uDummy, (LPVOID*)&pei);
+            if (SUCCEEDED(hr))
+            {
+                hr = IExtractIconW_GetIconLocation(pei, uGilFlags,
+                    szLocation, MAX_PATH, &iIndex, &uFlags);
+
+                if (uFlags & GIL_NOTFILENAME)
+                    ret = FALSE;
+                else
+                {
+                    lstrcpyW (psfi->szDisplayName, szLocation);
+                    psfi->iIcon = iIndex;
+                }
+                IExtractIconW_Release(pei);
+            }
         }
     }
 
@@ -547,7 +580,7 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
                 static const WCHAR p1W[] = {'%','1',0};
 
                 psfi->iIcon = 0;
-                szExt = (LPWSTR) PathFindExtensionW(sTemp);
+                szExt = PathFindExtensionW(sTemp);
                 if ( szExt &&
                      HCR_MapTypeToValueW(szExt, sTemp, MAX_PATH, TRUE) &&
                      HCR_GetDefaultIconW(sTemp, sTemp, MAX_PATH, &icon_idx))
@@ -818,42 +851,41 @@ typedef struct
     HFONT hFont;
 } ABOUT_INFO;
 
-#define IDC_STATIC_TEXT1   100
-#define IDC_STATIC_TEXT2   101
-#define IDC_LISTBOX        99
-#define IDC_WINE_TEXT      98
+#define DROP_FIELD_TOP    (-12)
 
-#define DROP_FIELD_TOP    (-15)
-#define DROP_FIELD_HEIGHT  15
-
-static BOOL __get_dropline( HWND hWnd, LPRECT lprect )
+static void paint_dropline( HDC hdc, HWND hWnd )
 {
-    HWND hWndCtl = GetDlgItem(hWnd, IDC_WINE_TEXT);
+    HWND hWndCtl = GetDlgItem(hWnd, IDC_ABOUT_WINE_TEXT);
+    RECT rect;
 
-    if( hWndCtl )
-    {
-        GetWindowRect( hWndCtl, lprect );
-        MapWindowPoints( 0, hWnd, (LPPOINT)lprect, 2 );
-        lprect->bottom = (lprect->top += DROP_FIELD_TOP);
-        return TRUE;
-    }
-    return FALSE;
+    if (!hWndCtl) return;
+    GetWindowRect( hWndCtl, &rect );
+    MapWindowPoints( 0, hWnd, (LPPOINT)&rect, 2 );
+    rect.top += DROP_FIELD_TOP;
+    rect.bottom = rect.top + 2;
+    DrawEdge( hdc, &rect, BDR_SUNKENOUTER, BF_RECT );
 }
 
 /*************************************************************************
  * SHAppBarMessage            [SHELL32.@]
  */
-UINT WINAPI SHAppBarMessage(DWORD msg, PAPPBARDATA data)
+UINT_PTR WINAPI SHAppBarMessage(DWORD msg, PAPPBARDATA data)
 {
     int width=data->rc.right - data->rc.left;
     int height=data->rc.bottom - data->rc.top;
     RECT rec=data->rc;
+
+    FIXME("msg=%d, data={cb=%d, hwnd=%p, callback=%x, edge=%d, rc=%s, lparam=%lx}: stub\n",
+          msg, data->cbSize, data->hWnd, data->uCallbackMessage, data->uEdge,
+          wine_dbgstr_rect(&data->rc), data->lParam);
 
     switch (msg)
     {
     case ABM_GETSTATE:
         return ABS_ALWAYSONTOP | ABS_AUTOHIDE;
     case ABM_GETTASKBARPOS:
+        /* FIXME: This is wrong.  It should return the taskbar co-ords and edge from the monitor
+           which contains data->hWnd */
         GetWindowRect(data->hWnd, &rec);
         data->rc=rec;
         return TRUE;
@@ -861,8 +893,7 @@ UINT WINAPI SHAppBarMessage(DWORD msg, PAPPBARDATA data)
         SetActiveWindow(data->hWnd);
         return TRUE;
     case ABM_GETAUTOHIDEBAR:
-        data->hWnd=GetActiveWindow();
-        return TRUE;
+        return 0; /* pretend there is no autohide bar */
     case ABM_NEW:
         /* cbSize, hWnd, and uCallbackMessage are used. All other ignored */
         SetWindowPos(data->hWnd,HWND_TOP,0,0,0,0,SWP_SHOWWINDOW|SWP_NOMOVE|SWP_NOSIZE);
@@ -946,26 +977,32 @@ INT_PTR CALLBACK AboutDlgProc( HWND hWnd, UINT msg, WPARAM wParam,
     case WM_INITDIALOG:
         {
             ABOUT_INFO *info = (ABOUT_INFO *)lParam;
-            WCHAR Template[512], AppTitle[512];
+            WCHAR template[512], buffer[512], version[64];
+            extern const char *wine_get_build_id(void);
 
             if (info)
             {
                 const char* const *pstr = SHELL_Authors;
                 SendDlgItemMessageW(hWnd, stc1, STM_SETICON,(WPARAM)info->hIcon, 0);
-                GetWindowTextW( hWnd, Template, sizeof(Template)/sizeof(WCHAR) );
-                sprintfW( AppTitle, Template, info->szApp );
-                SetWindowTextW( hWnd, AppTitle );
-                SetWindowTextW( GetDlgItem(hWnd, IDC_STATIC_TEXT1), info->szApp );
-                SetWindowTextW( GetDlgItem(hWnd, IDC_STATIC_TEXT2), info->szOtherStuff );
-                hWndCtl = GetDlgItem(hWnd, IDC_LISTBOX);
+                GetWindowTextW( hWnd, template, sizeof(template)/sizeof(WCHAR) );
+                sprintfW( buffer, template, info->szApp );
+                SetWindowTextW( hWnd, buffer );
+                SetWindowTextW( GetDlgItem(hWnd, IDC_ABOUT_STATIC_TEXT1), info->szApp );
+                SetWindowTextW( GetDlgItem(hWnd, IDC_ABOUT_STATIC_TEXT2), info->szOtherStuff );
+                GetWindowTextW( GetDlgItem(hWnd, IDC_ABOUT_STATIC_TEXT3),
+                                template, sizeof(template)/sizeof(WCHAR) );
+                MultiByteToWideChar( CP_UTF8, 0, wine_get_build_id(), -1,
+                                     version, sizeof(version)/sizeof(WCHAR) );
+                sprintfW( buffer, template, version );
+                SetWindowTextW( GetDlgItem(hWnd, IDC_ABOUT_STATIC_TEXT3), buffer );
+                hWndCtl = GetDlgItem(hWnd, IDC_ABOUT_LISTBOX);
                 SendMessageW( hWndCtl, WM_SETREDRAW, 0, 0 );
                 SendMessageW( hWndCtl, WM_SETFONT, (WPARAM)info->hFont, 0 );
                 while (*pstr)
                 {
-                    WCHAR name[64];
                     /* authors list is in utf-8 format */
-                    MultiByteToWideChar( CP_UTF8, 0, *pstr, -1, name, sizeof(name)/sizeof(WCHAR) );
-                    SendMessageW( hWndCtl, LB_ADDSTRING, (WPARAM)-1, (LPARAM)name );
+                    MultiByteToWideChar( CP_UTF8, 0, *pstr, -1, buffer, sizeof(buffer)/sizeof(WCHAR) );
+                    SendMessageW( hWndCtl, LB_ADDSTRING, (WPARAM)-1, (LPARAM)buffer );
                     pstr++;
                 }
                 SendMessageW( hWndCtl, WM_SETREDRAW, 1, 0 );
@@ -975,16 +1012,9 @@ INT_PTR CALLBACK AboutDlgProc( HWND hWnd, UINT msg, WPARAM wParam,
 
     case WM_PAINT:
         {
-            RECT rect;
             PAINTSTRUCT ps;
             HDC hDC = BeginPaint( hWnd, &ps );
-
-            if (__get_dropline( hWnd, &rect ))
-            {
-                SelectObject( hDC, GetStockObject( BLACK_PEN ) );
-                MoveToEx( hDC, rect.left, rect.top, NULL );
-                LineTo( hDC, rect.right, rect.bottom );
-            }
+            paint_dropline( hDC, hWnd );
             EndPaint( hWnd, &ps );
         }
     break;
@@ -994,6 +1024,22 @@ INT_PTR CALLBACK AboutDlgProc( HWND hWnd, UINT msg, WPARAM wParam,
         {
             EndDialog(hWnd, TRUE);
             return TRUE;
+        }
+        if (wParam == IDC_ABOUT_LICENSE)
+        {
+            MSGBOXPARAMSW params;
+
+            params.cbSize = sizeof(params);
+            params.hwndOwner = hWnd;
+            params.hInstance = shell32_hInstance;
+            params.lpszText = MAKEINTRESOURCEW(IDS_LICENSE);
+            params.lpszCaption = MAKEINTRESOURCEW(IDS_LICENSE_CAPTION);
+            params.dwStyle = MB_ICONINFORMATION | MB_OK;
+            params.lpszIcon = 0;
+            params.dwContextHelpId = 0;
+            params.lpfnMsgBoxCallback = NULL;
+            params.dwLanguageId = LANG_NEUTRAL;
+            MessageBoxIndirectW( &params );
         }
         break;
     case WM_CLOSE:
@@ -1053,11 +1099,12 @@ BOOL WINAPI ShellAboutW( HWND hWnd, LPCWSTR szApp, LPCWSTR szOtherStuff,
 
     if(!(hRes = FindResourceW(shell32_hInstance, wszSHELL_ABOUT_MSGBOX, (LPWSTR)RT_DIALOG)))
         return FALSE;
-    if(!(template = (LPVOID)LoadResource(shell32_hInstance, hRes)))
+    if(!(template = LoadResource(shell32_hInstance, hRes)))
         return FALSE;
+    if (!hIcon) hIcon = LoadImageW( 0, (LPWSTR)IDI_WINLOGO, IMAGE_ICON, 48, 48, LR_SHARED );
     info.szApp        = szApp;
     info.szOtherStuff = szOtherStuff;
-    info.hIcon        = hIcon ? hIcon : LoadIconW( 0, (LPWSTR)IDI_WINLOGO );
+    info.hIcon        = hIcon;
 
     SystemParametersInfoW( SPI_GETICONTITLELOGFONT, 0, &logFont, 0 );
     info.hFont = CreateFontIndirectW( &logFont );
@@ -1076,6 +1123,14 @@ void WINAPI FreeIconList( DWORD dw )
     FIXME("%x: stub\n",dw);
 }
 
+/*************************************************************************
+ * SHLoadNonloadedIconOverlayIdentifiers (SHELL32.@)
+ */
+HRESULT WINAPI SHLoadNonloadedIconOverlayIdentifiers( VOID )
+{
+    FIXME("stub\n");
+    return S_OK;
+}
 
 /***********************************************************************
  * DllGetVersion [SHELL32.@]

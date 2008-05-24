@@ -206,7 +206,7 @@ static void UXTHEME_LoadTheme(void)
     }
     if(!bThemeActive) {
         MSSTYLES_SetActiveTheme(NULL, FALSE);
-        TRACE("Themeing not active\n");
+        TRACE("Theming not active\n");
     }
 }
 
@@ -471,7 +471,7 @@ static void UXTHEME_SaveSystemMetrics(void)
  *
  * Change the current active theme
  */
-HRESULT UXTHEME_SetActiveTheme(PTHEME_FILE tf)
+static HRESULT UXTHEME_SetActiveTheme(PTHEME_FILE tf)
 {
     HKEY hKey;
     WCHAR tmp[2];
@@ -605,7 +605,7 @@ HRESULT WINAPI EnableTheming(BOOL fEnable)
  * I'm using atoms as there may be large numbers of duplicated strings
  * and they do the work of keeping memory down as a cause of that quite nicely
  */
-HRESULT UXTHEME_SetWindowProperty(HWND hwnd, ATOM aProp, LPCWSTR pszValue)
+static HRESULT UXTHEME_SetWindowProperty(HWND hwnd, ATOM aProp, LPCWSTR pszValue)
 {
     ATOM oldValue = (ATOM)(size_t)RemovePropW(hwnd, (LPCWSTR)MAKEINTATOM(aProp));
     if(oldValue)
@@ -622,7 +622,7 @@ HRESULT UXTHEME_SetWindowProperty(HWND hwnd, ATOM aProp, LPCWSTR pszValue)
     return S_OK;
 }
 
-LPWSTR UXTHEME_GetWindowProperty(HWND hwnd, ATOM aProp, LPWSTR pszBuffer, int dwLen)
+static LPWSTR UXTHEME_GetWindowProperty(HWND hwnd, ATOM aProp, LPWSTR pszBuffer, int dwLen)
 {
     ATOM atValue = (ATOM)(size_t)GetPropW(hwnd, (LPCWSTR)MAKEINTATOM(aProp));
     if(atValue) {
@@ -842,7 +842,7 @@ HRESULT WINAPI GetThemeDocumentationProperty(LPCWSTR pszThemeName,
  * RETURNS
  *     some kind of status flag
  */
-DWORD WINAPI QueryThemeServices()
+DWORD WINAPI QueryThemeServices(void)
 {
     FIXME("stub\n");
     return 3; /* This is what is returned under XP in most cases */
@@ -1171,7 +1171,7 @@ HRESULT WINAPI EnumThemeSizes(LPWSTR pszThemeFileName, LPWSTR pszColorName,
  *     0x800706488 (Unknown property) when enumeration is canceled from callback
  *
  * NOTES
- * When pszUnknown is NULL the callback is never called, the value does not seem to surve
+ * When pszUnknown is NULL the callback is never called, the value does not seem to serve
  * any other purpose
  */
 HRESULT WINAPI ParseThemeIniFile(LPCWSTR pszIniFileName, LPWSTR pszUnknown,

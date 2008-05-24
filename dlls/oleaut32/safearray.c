@@ -204,7 +204,7 @@ static void SAFEARRAY_SetFeatures(VARTYPE vt, SAFEARRAY *psa)
 }
 
 /* Create an array */
-static SAFEARRAY* SAFEARRAY_Create(VARTYPE vt, UINT cDims, SAFEARRAYBOUND *rgsabound, ULONG ulSize)
+static SAFEARRAY* SAFEARRAY_Create(VARTYPE vt, UINT cDims, const SAFEARRAYBOUND *rgsabound, ULONG ulSize)
 {
   SAFEARRAY *psa = NULL;
   int i;
@@ -228,7 +228,7 @@ static SAFEARRAY* SAFEARRAY_Create(VARTYPE vt, UINT cDims, SAFEARRAYBOUND *rgsab
     if (ulSize)
       psa->cbElements = ulSize;
 
-    if (FAILED(SafeArrayAllocData(psa)))
+    if (!psa->cbElements || FAILED(SafeArrayAllocData(psa)))
     {
       SafeArrayDestroyDescriptor(psa);
       psa = NULL;
@@ -483,7 +483,7 @@ HRESULT WINAPI SafeArrayAllocDescriptor(UINT cDims, SAFEARRAY **ppsaOut)
  *  Failure: An HRESULT error code indicating the error.
  *
  * NOTES
- *  - This function does not chack that vt is an allowed VARTYPE.
+ *  - This function does not check that vt is an allowed VARTYPE.
  *  - Unlike SafeArrayAllocDescriptor(), vt is associated with the array.
  *  See SafeArray.
  */
@@ -533,19 +533,16 @@ HRESULT WINAPI SafeArrayAllocData(SAFEARRAY *psa)
   {
     ULONG ulSize = SAFEARRAY_GetCellCount(psa);
 
-    hRet = E_OUTOFMEMORY;
+    psa->pvData = SAFEARRAY_Malloc(ulSize * psa->cbElements);
 
-    if (psa->cbElements)
+    if (psa->pvData)
     {
-      psa->pvData = SAFEARRAY_Malloc(ulSize * psa->cbElements);
-
-      if (psa->pvData)
-      {
-        hRet = S_OK;
-        TRACE("%u bytes allocated for data at %p (%u objects).\n",
-              ulSize * psa->cbElements, psa->pvData, ulSize);
-      }
+      hRet = S_OK;
+      TRACE("%u bytes allocated for data at %p (%u objects).\n",
+            ulSize * psa->cbElements, psa->pvData, ulSize);
     }
+    else
+      hRet = E_OUTOFMEMORY;
   }
   return hRet;
 }
@@ -808,7 +805,7 @@ HRESULT WINAPI SafeArrayUnlock(SAFEARRAY *psa)
   if (!psa)
     return E_INVALIDARG;
 
-  if ((LONG)InterlockedDecrement( (LONG*) &psa->cLocks) < 0)
+  if (InterlockedDecrement( (LONG*) &psa->cLocks) < 0)
   {
     WARN("Unlocked but no lock held!\n");
     InterlockedIncrement( (LONG*) &psa->cLocks);

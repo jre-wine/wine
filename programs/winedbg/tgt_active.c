@@ -76,7 +76,7 @@ BOOL dbg_attach_debuggee(DWORD pid, BOOL cofe)
 
     if (!DebugActiveProcess(pid)) 
     {
-        dbg_printf("Can't attach process %lx: error %ld\n", pid, GetLastError());
+        dbg_printf("Can't attach process %04x: error %u\n", pid, GetLastError());
         dbg_del_process(dbg_curr_process);
 	return FALSE;
     }
@@ -107,7 +107,14 @@ static unsigned dbg_fetch_context(void)
     return TRUE;
 }
 
-static unsigned dbg_exception_prolog(BOOL is_debug, const EXCEPTION_RECORD* rec)
+/***********************************************************************
+ *              dbg_exception_prolog
+ *
+ * Examine exception and decide if interactive mode is entered(return TRUE)
+ * or exception is silently continued(return FALSE)
+ * is_debug means the exception is a breakpoint or single step exception
+ */
+static unsigned dbg_exception_prolog(BOOL is_debug, BOOL first_chance, const EXCEPTION_RECORD* rec)
 {
     ADDRESS64   addr;
     BOOL        is_break;
@@ -143,13 +150,14 @@ static unsigned dbg_exception_prolog(BOOL is_debug, const EXCEPTION_RECORD* rec)
     /* this will resynchronize builtin dbghelp's internal ELF module list */
     SymLoadModule(dbg_curr_process->handle, 0, 0, 0, 0, 0);
 
+    if (is_debug) break_adjust_pc(&addr, rec->ExceptionCode, first_chance, &is_break);
     /*
      * Do a quiet backtrace so that we have an idea of what the situation
      * is WRT the source files.
      */
     stack_fetch_frames();
-    if (is_debug &&
-	break_should_continue(&addr, rec->ExceptionCode, &dbg_curr_thread->exec_count, &is_break))
+
+    if (is_debug && !is_break && break_should_continue(&addr, rec->ExceptionCode))
 	return FALSE;
 
     if (addr.Mode != dbg_curr_thread->addr_mode)
@@ -202,7 +210,7 @@ static unsigned dbg_exception_prolog(BOOL is_debug, const EXCEPTION_RECORD* rec)
                 HeapFree(GetProcessHeap(), 0, last_file);
                 last_name = strcpy(HeapAlloc(GetProcessHeap(), 0, strlen(si->Name) + 1), si->Name);
                 last_file = strcpy(HeapAlloc(GetProcessHeap(), 0, strlen(il.FileName) + 1), il.FileName);
-                dbg_printf("%s () at %s:%ld\n", last_name, last_file, il.LineNumber);
+                dbg_printf("%s () at %s:%u\n", last_name, last_file, il.LineNumber);
             }
         }
     }
@@ -240,7 +248,7 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
 
     assert(dbg_curr_thread);
 
-    WINE_TRACE("exception=%lx first_chance=%c\n",
+    WINE_TRACE("exception=%x first_chance=%c\n",
                rec->ExceptionCode, first_chance ? 'Y' : 'N');
 
     switch (rec->ExceptionCode)
@@ -257,11 +265,11 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
             pThread = dbg_get_thread(dbg_curr_process, pThreadName->dwThreadID);
         if(!pThread)
         {
-            dbg_printf("Thread ID=0x%lx not in our list of threads -> can't rename\n", pThreadName->dwThreadID);
+            dbg_printf("Thread ID=%04x not in our list of threads -> can't rename\n", pThreadName->dwThreadID);
             return DBG_CONTINUE;
         }
         if (dbg_read_memory(pThreadName->szName, pThread->name, 9))
-            dbg_printf("Thread ID=0x%lx renamed using MS VC6 extension (name==\"%s\")\n",
+            dbg_printf("Thread ID=%04x renamed using MS VC6 extension (name==\"%s\")\n",
                        pThread->tid, pThread->name);
         return DBG_CONTINUE;
     }
@@ -380,8 +388,16 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
 	case EXCEPTION_FLT_STACK_CHECK:
             dbg_printf("floating point stack check");
             break;
+        case CXX_EXCEPTION:
+            if(rec->NumberParameters == 3 && rec->ExceptionInformation[0] == CXX_FRAME_MAGIC)
+                dbg_printf("C++ exception(object = 0x%08lx, type = 0x%08lx)",
+                           rec->ExceptionInformation[1], rec->ExceptionInformation[2]);
+            else
+                dbg_printf("C++ exception with strange parameter count %d or magic 0x%08lx",
+                           rec->NumberParameters, rec->ExceptionInformation[0]);
+            break;
         default:
-            dbg_printf("0x%08lx", rec->ExceptionCode);
+            dbg_printf("0x%08x", rec->ExceptionCode);
             break;
         }
     }
@@ -389,7 +405,7 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
         dbg_printf( ", invalid program stack" );
     }
 
-    if (dbg_exception_prolog(is_debug, rec))
+    if (dbg_exception_prolog(is_debug, first_chance, rec))
     {
 	dbg_interactiveP = TRUE;
         return 0;
@@ -422,7 +438,7 @@ static void fetch_module_name(void* name_addr, BOOL unicode, void* mod_addr,
             if (!(h = GetModuleHandleA("psapi")) ||
                 !(gpif = (void*)GetProcAddress(h, "GetProcessImageFileName")) ||
                 !(gpif)(dbg_curr_process->handle, buffer, bufsz))
-                snprintf(buffer, bufsz, "Process_%08lx", dbg_curr_pid);
+                snprintf(buffer, bufsz, "Process_%08x", dbg_curr_pid);
         }
         else
             snprintf(buffer, bufsz, "DLL_%p", mod_addr);
@@ -447,12 +463,12 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
     case EXCEPTION_DEBUG_EVENT:
         if (!dbg_curr_thread)
         {
-            WINE_ERR("%08lx:%08lx: not a registered process or thread (perhaps a 16 bit one ?)\n",
+            WINE_ERR("%04x:%04x: not a registered process or thread (perhaps a 16 bit one ?)\n",
                      de->dwProcessId, de->dwThreadId);
             break;
         }
 
-        WINE_TRACE("%08lx:%08lx: exception code=%08lx\n",
+        WINE_TRACE("%04x:%04x: exception code=%08x\n",
                    de->dwProcessId, de->dwThreadId,
                    de->u.Exception.ExceptionRecord.ExceptionCode);
 
@@ -485,10 +501,10 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
                           de->u.CreateProcessInfo.lpBaseOfImage,
                           buffer, sizeof(buffer), TRUE);
 
-        WINE_TRACE("%08lx:%08lx: create process '%s'/%p @%08lx (%ld<%ld>)\n",
+        WINE_TRACE("%04x:%04x: create process '%s'/%p @%p (%u<%u>)\n",
                    de->dwProcessId, de->dwThreadId,
                    buffer, de->u.CreateProcessInfo.lpImageName,
-                   (unsigned long)(void*)de->u.CreateProcessInfo.lpStartAddress,
+                   de->u.CreateProcessInfo.lpStartAddress,
                    de->u.CreateProcessInfo.dwDebugInfoFileOffset,
                    de->u.CreateProcessInfo.nDebugInfoSize);
         dbg_set_process_name(dbg_curr_process, buffer);
@@ -497,11 +513,10 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
             dbg_printf("Couldn't initiate DbgHelp\n");
         if (!SymLoadModule(dbg_curr_process->handle, de->u.CreateProcessInfo.hFile, buffer, NULL,
                            (unsigned long)de->u.CreateProcessInfo.lpBaseOfImage, 0))
-            dbg_printf("couldn't load main module (%lx)\n", GetLastError());
+            dbg_printf("couldn't load main module (%u)\n", GetLastError());
 
-        WINE_TRACE("%08lx:%08lx: create thread I @%08lx\n",
-                   de->dwProcessId, de->dwThreadId,
-                   (unsigned long)(void*)de->u.CreateProcessInfo.lpStartAddress);
+        WINE_TRACE("%04x:%04x: create thread I @%p\n",
+                   de->dwProcessId, de->dwThreadId, de->u.CreateProcessInfo.lpStartAddress);
 
         dbg_curr_thread = dbg_add_thread(dbg_curr_process,
                                          de->dwThreadId,
@@ -517,7 +532,7 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         break;
 
     case EXIT_PROCESS_DEBUG_EVENT:
-        WINE_TRACE("%08lx:%08lx: exit process (%ld)\n",
+        WINE_TRACE("%04x:%04x: exit process (%d)\n",
                    de->dwProcessId, de->dwThreadId, de->u.ExitProcess.dwExitCode);
 
         if (dbg_curr_process == NULL)
@@ -526,13 +541,12 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
             break;
         }
         tgt_process_active_close_process(dbg_curr_process, FALSE);
-        dbg_printf("Process of pid=0x%08lx has terminated\n", de->dwProcessId);
+        dbg_printf("Process of pid=%04x has terminated\n", de->dwProcessId);
         break;
 
     case CREATE_THREAD_DEBUG_EVENT:
-        WINE_TRACE("%08lx:%08lx: create thread D @%08lx\n",
-                   de->dwProcessId, de->dwThreadId,
-                   (unsigned long)(void*)de->u.CreateThread.lpStartAddress);
+        WINE_TRACE("%04x:%04x: create thread D @%p\n",
+                   de->dwProcessId, de->dwThreadId, de->u.CreateThread.lpStartAddress);
 
         if (dbg_curr_process == NULL)
         {
@@ -558,7 +572,7 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         break;
 
     case EXIT_THREAD_DEBUG_EVENT:
-        WINE_TRACE("%08lx:%08lx: exit thread (%ld)\n",
+        WINE_TRACE("%04x:%04x: exit thread (%d)\n",
                    de->dwProcessId, de->dwThreadId, de->u.ExitThread.dwExitCode);
 
         if (dbg_curr_thread == NULL)
@@ -581,9 +595,9 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
                           de->u.LoadDll.lpBaseOfDll,
                           buffer, sizeof(buffer), FALSE);
 
-        WINE_TRACE("%08lx:%08lx: loads DLL %s @%08lx (%ld<%ld>)\n",
+        WINE_TRACE("%04x:%04x: loads DLL %s @%p (%u<%u>)\n",
                    de->dwProcessId, de->dwThreadId,
-                   buffer, (unsigned long)de->u.LoadDll.lpBaseOfDll,
+                   buffer, de->u.LoadDll.lpBaseOfDll,
                    de->u.LoadDll.dwDebugInfoFileOffset,
                    de->u.LoadDll.nDebugInfoSize);
         SymLoadModule(dbg_curr_process->handle, de->u.LoadDll.hFile, buffer, NULL,
@@ -600,9 +614,9 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         break;
 
     case UNLOAD_DLL_DEBUG_EVENT:
-        WINE_TRACE("%08lx:%08lx: unload DLL @%08lx\n", 
+        WINE_TRACE("%04x:%04x: unload DLL @%p\n",
                    de->dwProcessId, de->dwThreadId,
-                   (unsigned long)de->u.UnloadDll.lpBaseOfDll);
+                   de->u.UnloadDll.lpBaseOfDll);
         break_delete_xpoints_from_module((unsigned long)de->u.UnloadDll.lpBaseOfDll);
         SymUnloadModule(dbg_curr_process->handle, 
                         (unsigned long)de->u.UnloadDll.lpBaseOfDll);
@@ -618,18 +632,18 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         memory_get_string(dbg_curr_process,
                           de->u.DebugString.lpDebugStringData, TRUE,
                           de->u.DebugString.fUnicode, buffer, sizeof(buffer));
-        WINE_TRACE("%08lx:%08lx: output debug string (%s)\n",
+        WINE_TRACE("%04x:%04x: output debug string (%s)\n",
                    de->dwProcessId, de->dwThreadId, buffer);
         break;
 
     case RIP_EVENT:
-        WINE_TRACE("%08lx:%08lx: rip error=%ld type=%ld\n",
+        WINE_TRACE("%04x:%04x: rip error=%u type=%u\n",
                    de->dwProcessId, de->dwThreadId, de->u.RipInfo.dwError,
                    de->u.RipInfo.dwType);
         break;
 
     default:
-        WINE_TRACE("%08lx:%08lx: unknown event (%ld)\n",
+        WINE_TRACE("%04x:%04x: unknown event (%x)\n",
                    de->dwProcessId, de->dwThreadId, de->dwDebugEventCode);
     }
     if (!cont) return TRUE;  /* stop execution */
@@ -653,19 +667,19 @@ static void dbg_resume_debuggee(DWORD cont)
         if (dbg_curr_thread)
         {
             if (!SetThreadContext(dbg_curr_thread->handle, &dbg_context))
-                dbg_printf("Cannot set ctx on %lu\n", dbg_curr_tid);
+                dbg_printf("Cannot set ctx on %04x\n", dbg_curr_tid);
         }
     }
     dbg_interactiveP = FALSE;
     if (!ContinueDebugEvent(dbg_curr_pid, dbg_curr_tid, cont))
-        dbg_printf("Cannot continue on %lu (%lu)\n", dbg_curr_tid, cont);
+        dbg_printf("Cannot continue on %04x (%08x)\n", dbg_curr_tid, cont);
 }
 
 static void wait_exception(void)
 {
     DEBUG_EVENT		de;
 
-    while (dbg_curr_process && WaitForDebugEvent(&de, INFINITE))
+    while (dbg_num_processes() && WaitForDebugEvent(&de, INFINITE))
     {
         if (dbg_handle_debug_event(&de)) break;
     }
@@ -704,19 +718,25 @@ void     dbg_active_wait_for_first_exception(void)
 static	unsigned dbg_start_debuggee(LPSTR cmdLine)
 {
     PROCESS_INFORMATION	info;
-    STARTUPINFOA	startup;
+    STARTUPINFOA	startup, current;
+    DWORD               flags;
+
+    GetStartupInfoA(&current);
 
     memset(&startup, 0, sizeof(startup));
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESHOWWINDOW;
-    startup.wShowWindow = SW_SHOWNORMAL;
+
+    startup.wShowWindow = (current.dwFlags & STARTF_USESHOWWINDOW) ?
+        current.wShowWindow : SW_SHOWNORMAL;
 
     /* FIXME: shouldn't need the CREATE_NEW_CONSOLE, but as usual CUI:s need it
      * while GUI:s don't
      */
-    if (!CreateProcess(NULL, cmdLine, NULL, NULL,
-                       FALSE, 
-                       DEBUG_PROCESS|DEBUG_ONLY_THIS_PROCESS|CREATE_NEW_CONSOLE,
+    flags = DEBUG_PROCESS | CREATE_NEW_CONSOLE;
+    if (!DBG_IVAR(AlsoDebugProcChild)) flags |= DEBUG_ONLY_THIS_PROCESS;
+
+    if (!CreateProcess(NULL, cmdLine, NULL, NULL, FALSE, flags,
                        NULL, NULL, &startup, &info))
     {
 	dbg_printf("Couldn't start process '%s'\n", cmdLine);
@@ -804,7 +824,7 @@ enum dbg_start  dbg_active_attach(int argc, char* argv[])
         }
         if (!SetEvent((HANDLE)evt))
         {
-            WINE_ERR("Invalid event handle: %lx\n", evt);
+            WINE_ERR("Invalid event handle: %x\n", evt);
             return start_error_init;
         }
         CloseHandle((HANDLE)evt);
@@ -873,7 +893,7 @@ enum dbg_start dbg_active_auto(int argc, char* argv[])
         if (ds != start_ok) return ds;
         hFile = parser_generate_command_file("echo Modules:", "info share",
                                              "echo Threads:", "info threads",
-                                             NULL);
+                                             "backtrace", "detach", NULL);
     }
     else if (!strcmp(argv[0], "--minidump"))
     {
@@ -922,7 +942,7 @@ enum dbg_start dbg_active_auto(int argc, char* argv[])
             /* FIXME: should generate unix name as well */
             dbg_printf("Capturing program state in %s\n", tmp + 9);
         }
-        hFile = parser_generate_command_file(tmp, NULL);
+        hFile = parser_generate_command_file(tmp, "detach", NULL);
     }
     else return start_error_parse;
     if (hFile == INVALID_HANDLE_VALUE) return start_error_parse;
@@ -964,4 +984,5 @@ static struct be_process_io be_process_active_io =
     tgt_process_active_close_process,
     ReadProcessMemory,
     WriteProcessMemory,
+    GetThreadSelectorEntry,
 };

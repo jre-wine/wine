@@ -27,7 +27,7 @@ struct backend_cpu
      * address manipulation
      * ------------------------------------------------------------------------------ */
     /* Linearizes an address. Only CPUs with segmented address model need this.
-     * Otherwise, implementation is straigthforward (be_cpu_linearize will do)
+     * Otherwise, implementation is straightforward (be_cpu_linearize will do)
      */
     void*               (*linearize)(HANDLE hThread, const ADDRESS64*);
     /* Fills in an ADDRESS64 structure from a segment & an offset. CPUs without
@@ -43,6 +43,10 @@ struct backend_cpu
      */
     unsigned            (*get_addr)(HANDLE hThread, const CONTEXT* ctx, 
                                     enum be_cpu_addr, ADDRESS64* addr);
+
+    /* returns which kind of information a given register number refers to */
+    unsigned            (*get_register_info)(int regno, enum be_cpu_addr* kind);
+
     /* -------------------------------------------------------------------------------
      * context manipulation 
      * ------------------------------------------------------------------------------- */
@@ -72,9 +76,9 @@ struct backend_cpu
      * it's INT3 (0xCC)
      */
     unsigned            (*is_break_insn)(const void*);
-    /* Check whether instruciton at 'addr' is a function call */
+    /* Check whether instruction at 'addr' is a function call */
     unsigned            (*is_function_call)(const void* insn, ADDRESS64* callee);
-    /* Ask for dissasembling one instruction. If display is true, assembly code
+    /* Ask for disassembling one instruction. If display is true, assembly code
      * will be printed. In all cases, 'addr' is advanced at next instruction
      */
     void                (*disasm_one_insn)(ADDRESS64* addr, int display);

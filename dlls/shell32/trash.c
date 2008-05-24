@@ -19,11 +19,17 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+
 #include <stdarg.h>
-#include <sys/stat.h>
+#ifdef HAVE_SYS_STAT_H
+# include <sys/stat.h>
+#endif
 #include <sys/types.h>
 #include <stdlib.h>
-#include <unistd.h>
+#ifdef HAVE_UNISTD_H
+# include <unistd.h>
+#endif
 #include <dirent.h>
 
 #include "windef.h"
@@ -132,7 +138,7 @@ static BOOL TRASH_EnsureInitialized(void)
     return TRUE;
 }
 
-static BOOL file_good_for_bucket(TRASH_BUCKET *pBucket, struct stat *file_stat)
+static BOOL file_good_for_bucket(const TRASH_BUCKET *pBucket, const struct stat *file_stat)
 {
     if (pBucket->device != file_stat->st_dev)
         return FALSE;
@@ -248,7 +254,7 @@ static char *create_trashinfo(const char *info_dir, const char *file_path)
     return NULL;
 }
 
-void remove_trashinfo_file(const char *info_dir, const char *base_name)
+static void remove_trashinfo_file(const char *info_dir, const char *base_name)
 {
     char *filename_buffer;
     
@@ -343,7 +349,7 @@ static HRESULT TRASH_CreateSimplePIDL(const TRASH_ELEMENT *element, const WIN32_
 /***********************************************************************
  *      TRASH_UnpackItemID [Internal]
  *
- * DESCRITION:
+ * DESCRIPTION:
  * Extract the information stored in an Item ID. The TRASH_ELEMENT
  * identifies the element in the Trash. The WIN32_FIND_DATA contains the
  * information about the original file. The data->ftLastAccessTime contains
@@ -380,7 +386,7 @@ void TRASH_DisposeElement(TRASH_ELEMENT *element)
     SHFree(element->filename);
 }
 
-HRESULT TRASH_GetDetails(const TRASH_ELEMENT *element, WIN32_FIND_DATAW *data)
+static HRESULT TRASH_GetDetails(const TRASH_ELEMENT *element, WIN32_FIND_DATAW *data)
 {
     LPSTR path = NULL;
     XDG_PARSED_FILE *parsed = NULL;
@@ -474,13 +480,13 @@ failed:
     return ret;
 }
 
-INT CALLBACK free_item_callback(void *item, void *lParam)
+static INT CALLBACK free_item_callback(void *item, void *lParam)
 {
     SHFree(item);
     return TRUE;
 }
 
-static HDPA enum_bucket_trashinfos(TRASH_BUCKET *bucket, int *count)
+static HDPA enum_bucket_trashinfos(const TRASH_BUCKET *bucket, int *count)
 {
     HDPA ret = DPA_Create(32);
     struct dirent *entry;

@@ -22,6 +22,7 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -40,7 +41,6 @@
 #include "winnls.h"
 #include "winreg.h"
 #include "winuser.h"
-#include "excpt.h"
 
 #include "ole2.h"
 #include "propidl.h" /* for LPSAFEARRAY_User* functions */
@@ -55,6 +55,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(ole);
 WINE_DECLARE_DEBUG_CHANNEL(olerelay);
 
 #define ICOM_THIS_MULTI(impl,field,iface) impl* const This=(impl*)((char*)(iface) - offsetof(impl,field))
+
+static HRESULT TMarshalDispatchChannel_Create(
+    IRpcChannelBuffer *pDelegateChannel, REFIID tmarshal_riid,
+    IRpcChannelBuffer **ppChannel);
 
 typedef struct _marshal_state {
     LPBYTE	base;
@@ -93,7 +97,7 @@ xbuf_resize(marshal_state *buf, DWORD newsize)
 }
 
 static HRESULT
-xbuf_add(marshal_state *buf, LPBYTE stuff, DWORD size)
+xbuf_add(marshal_state *buf, const BYTE *stuff, DWORD size)
 {
     HRESULT hr;
 
@@ -282,14 +286,12 @@ _get_typeinfo_for_iid(REFIID riid, ITypeInfo**ti) {
 	ERR("No %s key found.\n",interfacekey);
        	return E_FAIL;
     }
-    type = (1<<REG_SZ);
     tlguidlen = sizeof(tlguid);
     if (RegQueryValueExA(ikey,NULL,NULL,&type,(LPBYTE)tlguid,&tlguidlen)) {
 	ERR("Getting typelib guid failed.\n");
 	RegCloseKey(ikey);
 	return E_FAIL;
     }
-    type = (1<<REG_SZ);
     verlen = sizeof(ver);
     if (RegQueryValueExA(ikey,"Version",NULL,&type,(LPBYTE)ver,&verlen)) {
 	ERR("Could not get version value?\n");
@@ -319,25 +321,49 @@ _get_typeinfo_for_iid(REFIID riid, ITypeInfo**ti) {
     return hres;
 }
 
-/* Determine nr of functions. Since we use the toplevel interface and all
- * inherited ones have lower numbers, we are ok to not to descent into
- * the inheritance tree I think.
+/*
+ * Determine the number of functions including all inherited functions.
+ * Note for non-dual dispinterfaces we simply return the size of IDispatch.
  */
-static int _nroffuncs(ITypeInfo *tinfo) {
-    int 	n, max = 0;
-    const FUNCDESC *fdesc;
-    HRESULT	hres;
+static HRESULT num_of_funcs(ITypeInfo *tinfo, unsigned int *num)
+{
+    HRESULT hres;
+    TYPEATTR *attr;
+    ITypeInfo *tinfo2;
 
-    n=0;
-    while (1) {
-	hres = ITypeInfoImpl_GetInternalFuncDesc(tinfo,n,&fdesc);
-	if (hres)
-	    return max+1;
-	if (fdesc->oVft/4 > max)
-	    max = fdesc->oVft/4;
-	n++;
+    *num = 0;
+    hres = ITypeInfo_GetTypeAttr(tinfo, &attr);
+    if (hres) {
+        ERR("GetTypeAttr failed with %x\n",hres);
+        return hres;
     }
-    /*NOTREACHED*/
+
+    if(attr->typekind == TKIND_DISPATCH && (attr->wTypeFlags & TYPEFLAG_FDUAL))
+    {
+        HREFTYPE href;
+        hres = ITypeInfo_GetRefTypeOfImplType(tinfo, -1, &href);
+        if(FAILED(hres))
+        {
+            ERR("Unable to get interface href from dual dispinterface\n");
+            goto end;
+        }
+        hres = ITypeInfo_GetRefTypeInfo(tinfo, href, &tinfo2);
+        if(FAILED(hres))
+        {
+            ERR("Unable to get interface from dual dispinterface\n");
+            goto end;
+        }
+        hres = num_of_funcs(tinfo2, num);
+        ITypeInfo_Release(tinfo2);
+    }
+    else
+    {
+        *num = attr->cbSizeVft / 4;
+    }
+
+ end:
+    ITypeInfo_ReleaseTypeAttr(tinfo, attr);
+    return hres;
 }
 
 #ifdef __i386__
@@ -347,12 +373,13 @@ static int _nroffuncs(ITypeInfo *tinfo) {
 typedef struct _TMAsmProxy {
     BYTE	popleax;
     BYTE	pushlval;
-    BYTE	nr;
+    DWORD	nr;
     BYTE	pushleax;
     BYTE	lcall;
     DWORD	xcall;
     BYTE	lret;
     WORD	bytestopop;
+    BYTE	nop;
 } TMAsmProxy;
 
 #include "poppack.h"
@@ -413,6 +440,7 @@ TMProxyImpl_Release(LPRPCPROXYBUFFER iface)
     if (!refCount)
     {
         if (This->dispatch_proxy) IRpcProxyBuffer_Release(This->dispatch_proxy);
+        This->crit.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->crit);
         if (This->chanbuf) IRpcChannelBuffer_Release(This->chanbuf);
         VirtualFree(This->asmstubs, 0, MEM_RELEASE);
@@ -439,7 +467,15 @@ TMProxyImpl_Connect(
     LeaveCriticalSection(&This->crit);
 
     if (This->dispatch_proxy)
-        IRpcProxyBuffer_Connect(This->dispatch_proxy, pRpcChannelBuffer);
+    {
+        IRpcChannelBuffer *pDelegateChannel;
+        HRESULT hr = TMarshalDispatchChannel_Create(pRpcChannelBuffer, &This->iid, &pDelegateChannel);
+        if (FAILED(hr))
+            return hr;
+        hr = IRpcProxyBuffer_Connect(This->dispatch_proxy, pDelegateChannel);
+        IRpcChannelBuffer_Release(pDelegateChannel);
+        return hr;
+    }
 
     return S_OK;
 }
@@ -491,7 +527,7 @@ _argsize(DWORD vt) {
 }
 
 static int
-_xsize(TYPEDESC *td) {
+_xsize(const TYPEDESC *td) {
     switch (td->vt) {
     case VT_DATE:
 	return sizeof(DATE);
@@ -499,7 +535,7 @@ _xsize(TYPEDESC *td) {
 	return sizeof(VARIANT)+3;
     case VT_CARRAY: {
 	int i, arrsize = 1;
-	ARRAYDESC *adesc = td->u.lpadesc;
+	const ARRAYDESC *adesc = td->u.lpadesc;
 
 	for (i=0;i<adesc->cDims;i++)
 	    arrsize *= adesc->rgbounds[i].cElements;
@@ -538,6 +574,7 @@ serialize_param(
 	return S_OK;
     case VT_I8:
     case VT_UI8:
+    case VT_R8:
     case VT_CY:
 	hres = S_OK;
 	if (debugout) TRACE_(olerelay)("%x%x\n",arg[0],arg[1]);
@@ -662,11 +699,24 @@ serialize_param(
 	    }
 	    ITypeInfo_GetTypeAttr(tinfo2,&tattr);
 	    switch (tattr->typekind) {
+            case TKIND_ALIAS:
+                if (tattr->tdescAlias.vt == VT_USERDEFINED)
+                {
+                    DWORD href = tattr->tdescAlias.u.hreftype;
+                    ITypeInfo_ReleaseTypeAttr(tinfo, tattr);
+                    ITypeInfo_Release(tinfo2);
+                    hres = ITypeInfo_GetRefTypeInfo(tinfo,href,&tinfo2);
+                    if (hres) {
+                        ERR("Could not get typeinfo of hreftype %x for VT_USERDEFINED.\n",tdesc->u.lptdesc->u.hreftype);
+                        return hres;
+                    }
+                    ITypeInfo_GetTypeAttr(tinfo2,&tattr);
+                    derefhere = (tattr->typekind != TKIND_DISPATCH && tattr->typekind != TKIND_INTERFACE);
+                }
+                break;
 	    case TKIND_ENUM:	/* confirmed */
 	    case TKIND_RECORD:	/* FIXME: mostly untested */
-		derefhere=TRUE;
 		break;
-	    case TKIND_ALIAS:	/* FIXME: untested */
 	    case TKIND_DISPATCH:	/* will be done in VT_USERDEFINED case */
 	    case TKIND_INTERFACE:	/* will be done in VT_USERDEFINED case */
 		derefhere=FALSE;
@@ -865,6 +915,7 @@ deserialize_param(
 	}
         case VT_I8:
         case VT_UI8:
+        case VT_R8:
         case VT_CY:
 	    if (readit) {
 		hres = xbuf_get(buf,(LPBYTE)arg,8);
@@ -935,6 +986,7 @@ deserialize_param(
 		    hres = xbuf_get(buf,(LPBYTE)str,len*sizeof(WCHAR));
 		    if (hres) {
 			ERR("Failed to read BSTR.\n");
+			HeapFree(GetProcessHeap(),0,str);
 			return hres;
 		    }
                     *bstr = CoTaskMemAlloc(sizeof(BSTR *));
@@ -965,6 +1017,7 @@ deserialize_param(
 		    hres = xbuf_get(buf,(LPBYTE)str,len*sizeof(WCHAR));
 		    if (hres) {
 			ERR("Failed to read BSTR.\n");
+			HeapFree(GetProcessHeap(),0,str);
 			return hres;
 		    }
 		    *arg = (DWORD)SysAllocStringLen(str,len);
@@ -991,11 +1044,24 @@ deserialize_param(
 		}
 		ITypeInfo_GetTypeAttr(tinfo2,&tattr);
 		switch (tattr->typekind) {
+                case TKIND_ALIAS:
+                    if (tattr->tdescAlias.vt == VT_USERDEFINED)
+                    {
+                        DWORD href = tattr->tdescAlias.u.hreftype;
+                        ITypeInfo_ReleaseTypeAttr(tinfo, tattr);
+                        ITypeInfo_Release(tinfo2);
+                        hres = ITypeInfo_GetRefTypeInfo(tinfo,href,&tinfo2);
+                        if (hres) {
+                            ERR("Could not get typeinfo of hreftype %x for VT_USERDEFINED.\n",tdesc->u.lptdesc->u.hreftype);
+                            return hres;
+                        }
+                        ITypeInfo_GetTypeAttr(tinfo2,&tattr);
+                        derefhere = (tattr->typekind != TKIND_DISPATCH && tattr->typekind != TKIND_INTERFACE);
+                    }
+                    break;
 		case TKIND_ENUM:	/* confirmed */
 		case TKIND_RECORD:	/* FIXME: mostly untested */
-		    derefhere=TRUE;
 		    break;
-		case TKIND_ALIAS:	/* FIXME: untested */
 		case TKIND_DISPATCH:	/* will be done in VT_USERDEFINED case */
 		case TKIND_INTERFACE:	/* will be done in VT_USERDEFINED case */
 		    derefhere=FALSE;
@@ -1163,63 +1229,109 @@ deserialize_param(
     }
 }
 
-/* Searches function, also in inherited interfaces */
-static HRESULT
-_get_funcdesc(
-    ITypeInfo *tinfo, int iMethod, ITypeInfo **tactual, const FUNCDESC **fdesc, BSTR *iname, BSTR *fname)
+/* Retrieves a function's funcdesc, searching back into inherited interfaces. */
+static HRESULT get_funcdesc(ITypeInfo *tinfo, int iMethod, ITypeInfo **tactual, const FUNCDESC **fdesc,
+                            BSTR *iname, BSTR *fname, UINT *num)
 {
-    int i = 0, j = 0;
-    HRESULT hres;
+    HRESULT hr;
+    UINT i, impl_types;
+    UINT inherited_funcs = 0;
+    TYPEATTR *attr;
 
     if (fname) *fname = NULL;
     if (iname) *iname = NULL;
+    if (num) *num = 0;
+    *tactual = NULL;
 
-    while (1) {
-	hres = ITypeInfoImpl_GetInternalFuncDesc(tinfo, i, fdesc);
-
-	if (hres) {
-	    ITypeInfo	*tinfo2;
-	    HREFTYPE	href;
-	    TYPEATTR	*attr;
-
-	    hres = ITypeInfo_GetTypeAttr(tinfo, &attr);
-	    if (hres) {
-		ERR("GetTypeAttr failed with %x\n",hres);
-		return hres;
-	    }
-	    /* Not found, so look in inherited ifaces. */
-	    for (j=0;j<attr->cImplTypes;j++) {
-		hres = ITypeInfo_GetRefTypeOfImplType(tinfo, j, &href);
-		if (hres) {
-		    ERR("Did not find a reftype for interface offset %d?\n",j);
-		    break;
-		}
-		hres = ITypeInfo_GetRefTypeInfo(tinfo, href, &tinfo2);
-		if (hres) {
-		    ERR("Did not find a typeinfo for reftype %d?\n",href);
-		    continue;
-		}
-		hres = _get_funcdesc(tinfo2,iMethod,tactual,fdesc,iname,fname);
-		ITypeInfo_Release(tinfo2);
-		if (!hres) {
-		    ITypeInfo_ReleaseTypeAttr(tinfo, attr);
-		    return S_OK;
-                }
-	    }
-	    ITypeInfo_ReleaseTypeAttr(tinfo, attr);
-	    return hres;
-	}
-	if (((*fdesc)->oVft/4) == iMethod) {
-	    if (fname)
-		ITypeInfo_GetDocumentation(tinfo,(*fdesc)->memid,fname,NULL,NULL,NULL);
-	    if (iname)
-		ITypeInfo_GetDocumentation(tinfo,-1,iname,NULL,NULL,NULL);
-	    *tactual = tinfo;
-	    ITypeInfo_AddRef(*tactual);
-	    return S_OK;
-	}
-	i++;
+    hr = ITypeInfo_GetTypeAttr(tinfo, &attr);
+    if (FAILED(hr))
+    {
+        ERR("GetTypeAttr failed with %x\n",hr);
+        return hr;
     }
+
+    if(attr->typekind == TKIND_DISPATCH)
+    {
+        if(attr->wTypeFlags & TYPEFLAG_FDUAL)
+        {
+            HREFTYPE href;
+            ITypeInfo *tinfo2;
+
+            hr = ITypeInfo_GetRefTypeOfImplType(tinfo, -1, &href);
+            if(FAILED(hr))
+            {
+                ERR("Cannot get interface href from dual dispinterface\n");
+                ITypeInfo_ReleaseTypeAttr(tinfo, attr);
+                return hr;
+            }
+            hr = ITypeInfo_GetRefTypeInfo(tinfo, href, &tinfo2);
+            if(FAILED(hr))
+            {
+                ERR("Cannot get interface from dual dispinterface\n");
+                ITypeInfo_ReleaseTypeAttr(tinfo, attr);
+                return hr;
+            }
+            hr = get_funcdesc(tinfo2, iMethod, tactual, fdesc, iname, fname, num);
+            ITypeInfo_Release(tinfo2);
+            ITypeInfo_ReleaseTypeAttr(tinfo, attr);
+            return hr;
+        }
+        ERR("Shouldn't be called with a non-dual dispinterface\n");
+        return E_FAIL;
+    }
+
+    impl_types = attr->cImplTypes;
+    ITypeInfo_ReleaseTypeAttr(tinfo, attr);
+
+    for (i = 0; i < impl_types; i++)
+    {
+        HREFTYPE href;
+        ITypeInfo *pSubTypeInfo;
+        UINT sub_funcs;
+
+        hr = ITypeInfo_GetRefTypeOfImplType(tinfo, i, &href);
+        if (FAILED(hr)) return hr;
+        hr = ITypeInfo_GetRefTypeInfo(tinfo, href, &pSubTypeInfo);
+        if (FAILED(hr)) return hr;
+
+        hr = get_funcdesc(pSubTypeInfo, iMethod, tactual, fdesc, iname, fname, &sub_funcs);
+        inherited_funcs += sub_funcs;
+        ITypeInfo_Release(pSubTypeInfo);
+        if(SUCCEEDED(hr)) return hr;
+    }
+    if(iMethod < inherited_funcs)
+    {
+        ERR("shouldn't be here\n");
+        return E_INVALIDARG;
+    }
+
+    for(i = inherited_funcs; i <= iMethod; i++)
+    {
+        hr = ITypeInfoImpl_GetInternalFuncDesc(tinfo, i - inherited_funcs, fdesc);
+        if(FAILED(hr))
+        {
+            if(num) *num = i;
+            return hr;
+        }
+    }
+
+    /* found it. We don't care about num so zero it */
+    if(num) *num = 0;
+    *tactual = tinfo;
+    ITypeInfo_AddRef(*tactual);
+    if (fname) ITypeInfo_GetDocumentation(tinfo,(*fdesc)->memid,fname,NULL,NULL,NULL);
+    if (iname) ITypeInfo_GetDocumentation(tinfo,-1,iname,NULL,NULL,NULL);
+    return S_OK;
+}
+
+static inline BOOL is_in_elem(const ELEMDESC *elem)
+{
+    return (elem->u.paramdesc.wParamFlags & PARAMFLAG_FIN || !elem->u.paramdesc.wParamFlags);
+}
+
+static inline BOOL is_out_elem(const ELEMDESC *elem)
+{
+    return (elem->u.paramdesc.wParamFlags & PARAMFLAG_FOUT || !elem->u.paramdesc.wParamFlags);
 }
 
 static DWORD
@@ -1241,10 +1353,9 @@ xCall(LPVOID retptr, int method, TMProxyImpl *tpinfo /*, args */)
 
     EnterCriticalSection(&tpinfo->crit);
 
-    hres = _get_funcdesc(tpinfo->tinfo,method,&tinfo,&fdesc,&iname,&fname);
+    hres = get_funcdesc(tpinfo->tinfo,method,&tinfo,&fdesc,&iname,&fname,NULL);
     if (hres) {
         ERR("Did not find typeinfo/funcdesc entry for method %d!\n",method);
-        ITypeInfo_Release(tinfo);
         LeaveCriticalSection(&tpinfo->crit);
         return E_FAIL;
     }
@@ -1295,14 +1406,14 @@ xCall(LPVOID retptr, int method, TMProxyImpl *tpinfo /*, args */)
 		TRACE_(olerelay)("%s=",relaystr(names[i+1]));
 	}
 	/* No need to marshal other data than FIN and any VT_PTR. */
-	if (!(elem->u.paramdesc.wParamFlags & PARAMFLAG_FIN || !elem->u.paramdesc.wParamFlags) && (elem->tdesc.vt != VT_PTR)) {
+	if (!is_in_elem(elem) && (elem->tdesc.vt != VT_PTR)) {
 	    xargs+=_argsize(elem->tdesc.vt);
 	    if (relaydeb) TRACE_(olerelay)("[out]");
 	    continue;
 	}
 	hres = serialize_param(
 	    tinfo,
-	    elem->u.paramdesc.wParamFlags & PARAMFLAG_FIN || !elem->u.paramdesc.wParamFlags,
+	    is_in_elem(elem),
 	    relaydeb,
 	    FALSE,
 	    &elem->tdesc,
@@ -1354,14 +1465,14 @@ xCall(LPVOID retptr, int method, TMProxyImpl *tpinfo /*, args */)
 	    if (i+1<nrofnames && names[i+1]) TRACE_(olerelay)("%s=",relaystr(names[i+1]));
 	}
 	/* No need to marshal other data than FOUT and any VT_PTR */
-	if (!(elem->u.paramdesc.wParamFlags & PARAMFLAG_FOUT) && (elem->tdesc.vt != VT_PTR)) {
+	if (!is_out_elem(elem) && (elem->tdesc.vt != VT_PTR)) {
 	    xargs += _argsize(elem->tdesc.vt);
 	    if (relaydeb) TRACE_(olerelay)("[in]");
 	    continue;
 	}
 	hres = deserialize_param(
 	    tinfo,
-	    elem->u.paramdesc.wParamFlags & PARAMFLAG_FOUT,
+	    is_out_elem(elem),
 	    relaydeb,
 	    FALSE,
 	    &(elem->tdesc),
@@ -1384,6 +1495,7 @@ xCall(LPVOID retptr, int method, TMProxyImpl *tpinfo /*, args */)
     hres = remoteresult;
 
 exit:
+    IRpcChannelBuffer_FreeBuffer(chanbuf,&msg);
     for (i = 0; i < nrofnames; i++)
         SysFreeString(names[i]);
     HeapFree(GetProcessHeap(),0,buf.base);
@@ -1473,6 +1585,116 @@ static HRESULT WINAPI ProxyIDispatch_Invoke(LPDISPATCH iface, DISPID dispIdMembe
                             puArgErr);
 }
 
+typedef struct
+{
+    const IRpcChannelBufferVtbl *lpVtbl;
+    LONG                  refs;
+    /* the IDispatch-derived interface we are handling */
+	IID                   tmarshal_iid;
+    IRpcChannelBuffer    *pDelegateChannel;
+} TMarshalDispatchChannel;
+
+static HRESULT WINAPI TMarshalDispatchChannel_QueryInterface(LPRPCCHANNELBUFFER iface, REFIID riid, LPVOID *ppv)
+{
+    *ppv = NULL;
+    if (IsEqualIID(riid,&IID_IRpcChannelBuffer) || IsEqualIID(riid,&IID_IUnknown))
+    {
+        *ppv = (LPVOID)iface;
+        IUnknown_AddRef(iface);
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI TMarshalDispatchChannel_AddRef(LPRPCCHANNELBUFFER iface)
+{
+    TMarshalDispatchChannel *This = (TMarshalDispatchChannel *)iface;
+    return InterlockedIncrement(&This->refs);
+}
+
+static ULONG WINAPI TMarshalDispatchChannel_Release(LPRPCCHANNELBUFFER iface)
+{
+    TMarshalDispatchChannel *This = (TMarshalDispatchChannel *)iface;
+    ULONG ref;
+
+    ref = InterlockedDecrement(&This->refs);
+    if (ref)
+        return ref;
+
+	IRpcChannelBuffer_Release(This->pDelegateChannel);
+    HeapFree(GetProcessHeap(), 0, This);
+    return 0;
+}
+
+static HRESULT WINAPI TMarshalDispatchChannel_GetBuffer(LPRPCCHANNELBUFFER iface, RPCOLEMESSAGE* olemsg, REFIID riid)
+{
+    TMarshalDispatchChannel *This = (TMarshalDispatchChannel *)iface;
+    TRACE("(%p, %s)\n", olemsg, debugstr_guid(riid));
+    /* Note: we are pretending to invoke a method on the interface identified
+     * by tmarshal_iid so that we can re-use the IDispatch proxy/stub code
+     * without the RPC runtime getting confused by not exporting an IDispatch interface */
+    return IRpcChannelBuffer_GetBuffer(This->pDelegateChannel, olemsg, &This->tmarshal_iid);
+}
+
+static HRESULT WINAPI TMarshalDispatchChannel_SendReceive(LPRPCCHANNELBUFFER iface, RPCOLEMESSAGE *olemsg, ULONG *pstatus)
+{
+    TMarshalDispatchChannel *This = (TMarshalDispatchChannel *)iface;
+    TRACE("(%p, %p)\n", olemsg, pstatus);
+    return IRpcChannelBuffer_SendReceive(This->pDelegateChannel, olemsg, pstatus);
+}
+
+static HRESULT WINAPI TMarshalDispatchChannel_FreeBuffer(LPRPCCHANNELBUFFER iface, RPCOLEMESSAGE* olemsg)
+{
+    TMarshalDispatchChannel *This = (TMarshalDispatchChannel *)iface;
+    TRACE("(%p)\n", olemsg);
+    return IRpcChannelBuffer_FreeBuffer(This->pDelegateChannel, olemsg);
+}
+
+static HRESULT WINAPI TMarshalDispatchChannel_GetDestCtx(LPRPCCHANNELBUFFER iface, DWORD* pdwDestContext, void** ppvDestContext)
+{
+    TMarshalDispatchChannel *This = (TMarshalDispatchChannel *)iface;
+    TRACE("(%p,%p)\n", pdwDestContext, ppvDestContext);
+    return IRpcChannelBuffer_GetDestCtx(This->pDelegateChannel, pdwDestContext, ppvDestContext);
+}
+
+static HRESULT WINAPI TMarshalDispatchChannel_IsConnected(LPRPCCHANNELBUFFER iface)
+{
+    TMarshalDispatchChannel *This = (TMarshalDispatchChannel *)iface;
+    TRACE("()\n");
+    return IRpcChannelBuffer_IsConnected(This->pDelegateChannel);
+}
+
+static const IRpcChannelBufferVtbl TMarshalDispatchChannelVtbl =
+{
+    TMarshalDispatchChannel_QueryInterface,
+    TMarshalDispatchChannel_AddRef,
+    TMarshalDispatchChannel_Release,
+    TMarshalDispatchChannel_GetBuffer,
+    TMarshalDispatchChannel_SendReceive,
+    TMarshalDispatchChannel_FreeBuffer,
+    TMarshalDispatchChannel_GetDestCtx,
+    TMarshalDispatchChannel_IsConnected
+};
+
+static HRESULT TMarshalDispatchChannel_Create(
+    IRpcChannelBuffer *pDelegateChannel, REFIID tmarshal_riid,
+    IRpcChannelBuffer **ppChannel)
+{
+    TMarshalDispatchChannel *This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    if (!This)
+        return E_OUTOFMEMORY;
+
+    This->lpVtbl = &TMarshalDispatchChannelVtbl;
+    This->refs = 1;
+    IRpcChannelBuffer_AddRef(pDelegateChannel);
+    This->pDelegateChannel = pDelegateChannel;
+    This->tmarshal_iid = *tmarshal_riid;
+
+    *ppChannel = (IRpcChannelBuffer *)&This->lpVtbl;
+    return S_OK;
+}
+
+
 static inline HRESULT get_facbuf_for_iid(REFIID riid, IPSFactoryBuffer **facbuf)
 {
     HRESULT       hr;
@@ -1484,6 +1706,59 @@ static inline HRESULT get_facbuf_for_iid(REFIID riid, IPSFactoryBuffer **facbuf)
                              &IID_IPSFactoryBuffer, (LPVOID*)facbuf);
 }
 
+static HRESULT init_proxy_entry_point(TMProxyImpl *proxy, unsigned int num)
+{
+    int j;
+    /* nrofargs without This */
+    int nrofargs;
+    ITypeInfo *tinfo2;
+    TMAsmProxy	*xasm = proxy->asmstubs + num;
+    HRESULT hres;
+    const FUNCDESC *fdesc;
+
+    hres = get_funcdesc(proxy->tinfo, num, &tinfo2, &fdesc, NULL, NULL, NULL);
+    if (hres) {
+        ERR("GetFuncDesc %x should not fail here.\n",hres);
+        return hres;
+    }
+    ITypeInfo_Release(tinfo2);
+    /* some args take more than 4 byte on the stack */
+    nrofargs = 0;
+    for (j=0;j<fdesc->cParams;j++)
+        nrofargs += _argsize(fdesc->lprgelemdescParam[j].tdesc.vt);
+
+#ifdef __i386__
+    if (fdesc->callconv != CC_STDCALL) {
+        ERR("calling convention is not stdcall????\n");
+        return E_FAIL;
+    }
+/* popl %eax	-	return ptr
+ * pushl <nr>
+ * pushl %eax
+ * call xCall
+ * lret <nr> (+4)
+ *
+ *
+ * arg3 arg2 arg1 <method> <returnptr>
+ */
+    xasm->popleax       = 0x58;
+    xasm->pushlval      = 0x68;
+    xasm->nr            = num;
+    xasm->pushleax      = 0x50;
+    xasm->lcall         = 0xe8; /* relative jump */
+    xasm->xcall         = (DWORD)xCall;
+    xasm->xcall        -= (DWORD)&(xasm->lret);
+    xasm->lret          = 0xc2;
+    xasm->bytestopop    = (nrofargs+2)*4; /* pop args, This, iMethod */
+    xasm->nop           = 0x90;
+    proxy->lpvtbl[num]  = xasm;
+#else
+    FIXME("not implemented on non i386\n");
+    return E_FAIL;
+#endif
+    return S_OK;
+}
+
 static HRESULT WINAPI
 PSFacBuf_CreateProxy(
     LPPSFACTORYBUFFER iface, IUnknown* pUnkOuter, REFIID riid,
@@ -1491,10 +1766,10 @@ PSFacBuf_CreateProxy(
 {
     HRESULT	hres;
     ITypeInfo	*tinfo;
-    int		i, nroffuncs;
-    const FUNCDESC *fdesc;
+    unsigned int i, nroffuncs;
     TMProxyImpl	*proxy;
     TYPEATTR	*typeattr;
+    BOOL        defer_to_dispatch = FALSE;
 
     TRACE("(...%s...)\n",debugstr_guid(riid));
     hres = _get_typeinfo_for_iid(riid,&tinfo);
@@ -1502,11 +1777,18 @@ PSFacBuf_CreateProxy(
 	ERR("No typeinfo for %s?\n",debugstr_guid(riid));
 	return hres;
     }
-    nroffuncs = _nroffuncs(tinfo);
+
+    hres = num_of_funcs(tinfo, &nroffuncs);
+    if (FAILED(hres)) {
+        ERR("Cannot get number of functions for typeinfo %s\n",debugstr_guid(riid));
+        ITypeInfo_Release(tinfo);
+        return hres;
+    }
+
     proxy = CoTaskMemAlloc(sizeof(TMProxyImpl));
     if (!proxy) return E_OUTOFMEMORY;
 
-    assert(sizeof(TMAsmProxy) == 12);
+    assert(sizeof(TMAsmProxy) == 16);
 
     proxy->dispatch = NULL;
     proxy->dispatch_proxy = NULL;
@@ -1517,71 +1799,17 @@ PSFacBuf_CreateProxy(
         CoTaskMemFree(proxy);
         return E_OUTOFMEMORY;
     }
+    proxy->lpvtbl2	= &tmproxyvtable;
+    /* one reference for the proxy */
+    proxy->ref		= 1;
+    proxy->tinfo	= tinfo;
+    proxy->iid		= *riid;
+    proxy->chanbuf      = 0;
 
     InitializeCriticalSection(&proxy->crit);
+    proxy->crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": TMProxyImpl.crit");
 
     proxy->lpvtbl = HeapAlloc(GetProcessHeap(),0,sizeof(LPBYTE)*nroffuncs);
-    for (i=0;i<nroffuncs;i++) {
-	TMAsmProxy	*xasm = proxy->asmstubs+i;
-
-	switch (i) {
-	case 0:
-		proxy->lpvtbl[i] = ProxyIUnknown_QueryInterface;
-		break;
-	case 1:
-		proxy->lpvtbl[i] = ProxyIUnknown_AddRef;
-		break;
-	case 2:
-		proxy->lpvtbl[i] = ProxyIUnknown_Release;
-		break;
-	default: {
-		int j;
-		/* nrofargs without This */
-		int nrofargs;
-                ITypeInfo *tinfo2;
-		hres = _get_funcdesc(tinfo,i,&tinfo2,&fdesc,NULL,NULL);
-                ITypeInfo_Release(tinfo2);
-		if (hres) {
-		    ERR("GetFuncDesc %x should not fail here.\n",hres);
-		    return hres;
-		}
-		/* some args take more than 4 byte on the stack */
-		nrofargs = 0;
-		for (j=0;j<fdesc->cParams;j++)
-		    nrofargs += _argsize(fdesc->lprgelemdescParam[j].tdesc.vt);
-
-#ifdef __i386__
-		if (fdesc->callconv != CC_STDCALL) {
-		    ERR("calling convention is not stdcall????\n");
-		    return E_FAIL;
-		}
-/* popl %eax	-	return ptr
- * pushl <nr>
- * pushl %eax
- * call xCall
- * lret <nr> (+4)
- *
- *
- * arg3 arg2 arg1 <method> <returnptr>
- */
-		xasm->popleax	= 0x58;
-		xasm->pushlval	= 0x6a;
-		xasm->nr	= i;
-		xasm->pushleax	= 0x50;
-		xasm->lcall	= 0xe8;	/* relative jump */
-		xasm->xcall	= (DWORD)xCall;
-		xasm->xcall     -= (DWORD)&(xasm->lret);
-		xasm->lret	= 0xc2;
-		xasm->bytestopop= (nrofargs+2)*4; /* pop args, This, iMethod */
-		proxy->lpvtbl[i] = xasm;
-		break;
-#else
-                FIXME("not implemented on non i386\n");
-                return E_FAIL;
-#endif
-	    }
-	}
-    }
 
     /* if we derive from IDispatch then defer to its proxy for its methods */
     hres = ITypeInfo_GetTypeAttr(tinfo, &typeattr);
@@ -1598,23 +1826,68 @@ PSFacBuf_CreateProxy(
                     (void **)&proxy->dispatch);
                 IPSFactoryBuffer_Release(factory_buffer);
             }
+            if ((hres == S_OK) && (nroffuncs < 7))
+            {
+                ERR("nroffuncs calculated incorrectly (%d)\n", nroffuncs);
+                hres = E_UNEXPECTED;
+            }
             if (hres == S_OK)
             {
-                proxy->lpvtbl[3] = ProxyIDispatch_GetTypeInfoCount;
-                proxy->lpvtbl[4] = ProxyIDispatch_GetTypeInfo;
-                proxy->lpvtbl[5] = ProxyIDispatch_GetIDsOfNames;
-                proxy->lpvtbl[6] = ProxyIDispatch_Invoke;
+                defer_to_dispatch = TRUE;
             }
         }
         ITypeInfo_ReleaseTypeAttr(tinfo, typeattr);
     }
 
-    proxy->lpvtbl2	= &tmproxyvtable;
-    /* one reference for the proxy */
-    proxy->ref		= 1;
-    proxy->tinfo	= tinfo;
-    memcpy(&proxy->iid,riid,sizeof(*riid));
-    proxy->chanbuf      = 0;
+    for (i=0;i<nroffuncs;i++) {
+	switch (i) {
+	case 0:
+		proxy->lpvtbl[i] = ProxyIUnknown_QueryInterface;
+		break;
+	case 1:
+		proxy->lpvtbl[i] = ProxyIUnknown_AddRef;
+		break;
+	case 2:
+		proxy->lpvtbl[i] = ProxyIUnknown_Release;
+		break;
+        case 3:
+                if(!defer_to_dispatch)
+                {
+                    hres = init_proxy_entry_point(proxy, i);
+                    if(FAILED(hres)) return hres;
+                }
+                else proxy->lpvtbl[3] = ProxyIDispatch_GetTypeInfoCount;
+                break;
+        case 4:
+                if(!defer_to_dispatch)
+                {
+                    hres = init_proxy_entry_point(proxy, i);
+                    if(FAILED(hres)) return hres;
+                }
+                else proxy->lpvtbl[4] = ProxyIDispatch_GetTypeInfo;
+                break;
+        case 5:
+                if(!defer_to_dispatch)
+                {
+                    hres = init_proxy_entry_point(proxy, i);
+                    if(FAILED(hres)) return hres;
+                }
+                else proxy->lpvtbl[5] = ProxyIDispatch_GetIDsOfNames;
+                break;
+        case 6:
+                if(!defer_to_dispatch)
+                {
+                    hres = init_proxy_entry_point(proxy, i);
+                    if(FAILED(hres)) return hres;
+                }
+                else proxy->lpvtbl[6] = ProxyIDispatch_Invoke;
+                break;
+	default:
+                hres = init_proxy_entry_point(proxy, i);
+                if(FAILED(hres)) return hres;
+	}
+    }
+
     if (hres == S_OK)
     {
         *ppv		= (LPVOID)proxy;
@@ -1723,7 +1996,7 @@ TMStubImpl_Invoke(
     HRESULT	hres;
     DWORD	*args = NULL, res, *xargs, nrofargs;
     marshal_state	buf;
-    UINT	nrofnames;
+    UINT	nrofnames = 0;
     BSTR	names[10];
     BSTR	iname = NULL;
     ITypeInfo 	*tinfo = NULL;
@@ -1756,7 +2029,7 @@ TMStubImpl_Invoke(
     memcpy(buf.base, xmsg->Buffer, xmsg->cbBuffer);
     buf.curoff	= 0;
 
-    hres = _get_funcdesc(This->tinfo,xmsg->iMethod,&tinfo,&fdesc,&iname,NULL);
+    hres = get_funcdesc(This->tinfo,xmsg->iMethod,&tinfo,&fdesc,&iname,NULL,NULL);
     if (hres) {
 	ERR("GetFuncDesc on method %d failed with %x\n",xmsg->iMethod,hres);
 	return hres;
@@ -1797,7 +2070,7 @@ TMStubImpl_Invoke(
 
 	hres = deserialize_param(
 	   tinfo,
-	   elem->u.paramdesc.wParamFlags & PARAMFLAG_FIN || !elem->u.paramdesc.wParamFlags,
+	   is_in_elem(elem),
 	   FALSE,
 	   TRUE,
 	   &(elem->tdesc),
@@ -1822,7 +2095,7 @@ TMStubImpl_Invoke(
             args
         );
     }
-    __EXCEPT(NULL)
+    __EXCEPT_ALL
     {
         DWORD dwExceptionCode = GetExceptionCode();
         ERR("invoke call failed with exception 0x%08x (%d)\n", dwExceptionCode, dwExceptionCode);
@@ -1843,7 +2116,7 @@ TMStubImpl_Invoke(
 	ELEMDESC	*elem = fdesc->lprgelemdescParam+i;
 	hres = serialize_param(
 	   tinfo,
-	   elem->u.paramdesc.wParamFlags & PARAMFLAG_FOUT,
+	   is_out_elem(elem),
 	   FALSE,
 	   TRUE,
 	   &elem->tdesc,
@@ -1946,7 +2219,7 @@ PSFacBuf_CreateStub(
     stub->tinfo		= tinfo;
     stub->dispatch_stub = NULL;
     stub->dispatch_derivative = FALSE;
-    memcpy(&(stub->iid),riid,sizeof(*riid));
+    stub->iid		= *riid;
     hres = IRpcStubBuffer_Connect((LPRPCSTUBBUFFER)stub,pUnkServer);
     *ppStub 		= (LPRPCSTUBBUFFER)stub;
     TRACE("IRpcStubBuffer: %p\n", stub);

@@ -20,6 +20,7 @@
 
 #include <stdarg.h>
 #include <string.h>
+#include <limits.h>
 
 #define COBJMACROS
 
@@ -217,6 +218,9 @@ BSTR WINAPI SysAllocStringLen(const OLECHAR *str, unsigned int len)
     DWORD* newBuffer;
     WCHAR* stringBuffer;
 
+    /* Detect integer overflow. */
+    if (len >= ((UINT_MAX-sizeof(WCHAR)-sizeof(DWORD))/sizeof(WCHAR)))
+	return NULL;
     /*
      * Find the length of the buffer passed-in, in bytes.
      */
@@ -234,8 +238,8 @@ BSTR WINAPI SysAllocStringLen(const OLECHAR *str, unsigned int len)
     /*
      * If the memory allocation failed, return a null pointer.
      */
-    if (newBuffer==0)
-      return 0;
+    if (!newBuffer)
+      return NULL;
 
     /*
      * Copy the length of the string in the placeholder.
@@ -262,7 +266,7 @@ BSTR WINAPI SysAllocStringLen(const OLECHAR *str, unsigned int len)
      * string.
      */
     stringBuffer = (WCHAR*)newBuffer;
-    stringBuffer[len] = L'\0';
+    stringBuffer[len] = '\0';
 
     return (LPWSTR)stringBuffer;
 }
@@ -287,6 +291,10 @@ BSTR WINAPI SysAllocStringLen(const OLECHAR *str, unsigned int len)
  */
 int WINAPI SysReAllocStringLen(BSTR* old, const OLECHAR* str, unsigned int len)
 {
+    /* Detect integer overflow. */
+    if (len >= ((UINT_MAX-sizeof(WCHAR)-sizeof(DWORD))/sizeof(WCHAR)))
+	return 0;
+
     if (*old!=NULL) {
       DWORD newbytelen = len*sizeof(WCHAR);
       DWORD *ptr = HeapReAlloc(GetProcessHeap(),0,((DWORD*)*old)-1,newbytelen+sizeof(WCHAR)+sizeof(DWORD));
@@ -335,6 +343,10 @@ BSTR WINAPI SysAllocStringByteLen(LPCSTR str, UINT len)
 {
     DWORD* newBuffer;
     char* stringBuffer;
+
+    /* Detect integer overflow. */
+    if (len >= (UINT_MAX-sizeof(WCHAR)-sizeof(DWORD)))
+	return NULL;
 
     /*
      * Allocate a new buffer to hold the string.
@@ -570,7 +582,7 @@ HRESULT WINAPI GetActiveObject(REFCLSID rcid,LPVOID preserved,LPUNKNOWN *ppunk)
  * Currently the versions returned are 2.20 for Win3.1, 2.30 for Win95 & NT 3.51,
  * and 2.40 for all later versions. The build number is maximum, i.e. 0xffff.
  */
-ULONG WINAPI OaBuildVersion()
+ULONG WINAPI OaBuildVersion(void)
 {
     switch(GetVersion() & 0x8000ffff)  /* mask off build number */
     {
@@ -687,8 +699,8 @@ HRESULT WINAPI OleTranslateColor(
 
 extern HRESULT OLEAUTPS_DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv);
 
-extern void _get_STDFONT_CF(LPVOID);
-extern void _get_STDPIC_CF(LPVOID);
+extern void _get_STDFONT_CF(LPVOID *);
+extern void _get_STDPIC_CF(LPVOID *);
 
 static HRESULT WINAPI PSDispatchFacBuf_QueryInterface(IPSFactoryBuffer *iface, REFIID riid, void **ppv)
 {
@@ -825,11 +837,21 @@ BOOL WINAPI DllMain(HINSTANCE hInstDll, DWORD fdwReason, LPVOID lpvReserved)
   switch (fdwReason) {
   case DLL_PROCESS_ATTACH:
     DisableThreadLibraryCalls(hInstDll);
-    OLEAUT32_hModule = (HMODULE)hInstDll;
+    OLEAUT32_hModule = hInstDll;
     break;
   case DLL_PROCESS_DETACH:
     break;
   };
 
   return TRUE;
+}
+
+/***********************************************************************
+ *              OleIconToCursor (OLEAUT32.415)
+ */
+HCURSOR WINAPI OleIconToCursor( HINSTANCE hinstExe, HICON hIcon)
+{
+    FIXME("(%p,%p), partially implemented.\n",hinstExe,hIcon);
+    /* FIXME: make a extended conversation from HICON to HCURSOR */
+    return CopyCursor(hIcon);
 }

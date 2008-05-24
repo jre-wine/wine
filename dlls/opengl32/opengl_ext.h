@@ -26,7 +26,6 @@
 #define XMD_H /* This is to prevent the Xmd.h inclusion bug :-/ */
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
-#include <GL/glx.h>
 #ifdef HAVE_GL_GLEXT_H
 # include <GL/glext.h>
 #endif
@@ -61,8 +60,5 @@ typedef struct {
 extern void *extension_funcs[];
 extern const OpenGL_extension extension_registry[];
 extern const int extension_registry_size;
-
-const GLubyte* internal_glGetString(GLenum name);
-void internal_glGetIntegerv(GLenum pname, GLint* params);
 
 #endif /* __DLLS_OPENGL32_OPENGL_EXT_H */

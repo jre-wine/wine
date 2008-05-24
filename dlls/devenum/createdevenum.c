@@ -221,7 +221,7 @@ static HRESULT DEVENUM_CreateAMCategoryKey(const CLSID * clsidCategory)
  *
  * Creates the keys in the registry for the dynamic categories
  */
-static HRESULT DEVENUM_CreateSpecialCategories()
+static HRESULT DEVENUM_CreateSpecialCategories(void)
 {
     HRESULT res;
     WCHAR szDSoundNameFormat[MAX_PATH + 1];
@@ -459,7 +459,7 @@ static HRESULT DEVENUM_CreateSpecialCategories()
                        OLECHAR wszVfwIndex[] = { 'V','F','W','I','n','d','e','x',0 };
                        VARIANT var;
                        V_VT(&var) = VT_I4;
-                       V_UNION(&var, ulVal) = (ULONG)i;
+                       V_UNION(&var, ulVal) = i;
                        res = IMoniker_BindToStorage(pMoniker, NULL, NULL, &IID_IPropertyBag, (LPVOID)&pPropBag);
                        if (SUCCEEDED(res))
                           res = IPropertyBag_Write(pPropBag, wszVfwIndex, &var);

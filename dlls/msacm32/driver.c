@@ -29,11 +29,9 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winerror.h"
 #include "wingdi.h"
 #include "winuser.h"
 #include "winnls.h"
-#include "winreg.h"
 #include "mmsystem.h"
 #include "mmreg.h"
 #include "msacm.h"
@@ -301,7 +299,7 @@ MMRESULT WINAPI acmDriverDetailsW(HACMDRIVERID hadid, PACMDRIVERDETAILSW padd, D
     if (mmr == MMSYSERR_NOERROR) {
         ACMDRIVERDETAILSW paddw;
         paddw.cbStruct = sizeof(paddw);
-        mmr = (MMRESULT)MSACM_Message(acmDrvr, ACMDM_DRIVER_DETAILS, (LPARAM)&paddw,  0);
+        mmr = MSACM_Message(acmDrvr, ACMDM_DRIVER_DETAILS, (LPARAM)&paddw,  0);
 
 	acmDriverClose(acmDrvr, 0);
         paddw.cbStruct = min(padd->cbStruct, sizeof(*padd));
@@ -426,11 +424,11 @@ LRESULT WINAPI acmDriverMessage(HACMDRIVER had, UINT uMsg, LPARAM lParam1, LPARA
             }
         
             if (pAlias != NULL) {
-                unsigned int iStructSize = 16;
-                /* This verification is required because DRVCONFIGINFO is 12 bytes
-                   long, yet native msacm reports a 16-byte structure to codecs.
+                /* DRVCONFIGINFO is only 12 bytes long, but native msacm
+                 * reports a 16-byte structure to codecs, so allocate 16 bytes,
+                 * just to be on the safe side.
                  */
-                if (iStructSize < sizeof(DRVCONFIGINFO)) iStructSize = sizeof(DRVCONFIGINFO);
+                const unsigned int iStructSize = 16;
                 pConfigInfo = HeapAlloc(MSACM_hHeap, 0, iStructSize);
                 if (!pConfigInfo) {
                     ERR("OOM while supplying DRVCONFIGINFO for DRV_CONFIGURE, using NULL\n");
@@ -589,7 +587,7 @@ MMRESULT WINAPI acmDriverOpen(PHACMDRIVER phad, HACMDRIVERID hadid, DWORD fdwOpe
 
     /* FIXME: Create a WINE_ACMDRIVER32 */
     *phad = (HACMDRIVER)pad;
-    TRACE("'%s' => %p\n", debugstr_w(padid->pszDriverAlias), pad);
+    TRACE("%s => %p\n", debugstr_w(padid->pszDriverAlias), pad);
 
     return MMSYSERR_NOERROR;
  gotError:

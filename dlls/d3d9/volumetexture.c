@@ -58,7 +58,7 @@ static ULONG WINAPI IDirect3DVolumeTexture9Impl_Release(LPDIRECT3DVOLUMETEXTURE9
     TRACE("(%p) : ReleaseRef to %d\n", This, ref);
 
     if (ref == 0) {
-        IWineD3DVolumeTexture_Release(This->wineD3DVolumeTexture);
+        IWineD3DVolumeTexture_Destroy(This->wineD3DVolumeTexture, D3D9CB_DestroyVolume);
         IUnknown_Release(This->parentDevice);
         HeapFree(GetProcessHeap(), 0, This);
     }
@@ -105,7 +105,7 @@ static DWORD WINAPI IDirect3DVolumeTexture9Impl_GetPriority(LPDIRECT3DVOLUMETEXT
 static void WINAPI IDirect3DVolumeTexture9Impl_PreLoad(LPDIRECT3DVOLUMETEXTURE9 iface) {
     IDirect3DVolumeTexture9Impl *This = (IDirect3DVolumeTexture9Impl *)iface;
     TRACE("(%p) Relay\n", This);
-    return IWineD3DVolumeTexture_PreLoad(This->wineD3DVolumeTexture);
+    IWineD3DVolumeTexture_PreLoad(This->wineD3DVolumeTexture);
 }
 
 static D3DRESOURCETYPE WINAPI IDirect3DVolumeTexture9Impl_GetType(LPDIRECT3DVOLUMETEXTURE9 iface) {
@@ -148,7 +148,7 @@ static D3DTEXTUREFILTERTYPE WINAPI IDirect3DVolumeTexture9Impl_GetAutoGenFilterT
 static void WINAPI IDirect3DVolumeTexture9Impl_GenerateMipSubLevels(LPDIRECT3DVOLUMETEXTURE9 iface) {
     IDirect3DVolumeTexture9Impl *This = (IDirect3DVolumeTexture9Impl *)iface;
     TRACE("(%p) Relay\n", This);
-    return IWineD3DVolumeTexture_GenerateMipSubLevels(This->wineD3DVolumeTexture);
+    IWineD3DVolumeTexture_GenerateMipSubLevels(This->wineD3DVolumeTexture);
 }
 
 /* IDirect3DVolumeTexture9 Interface follow: */
@@ -238,7 +238,7 @@ static const IDirect3DVolumeTexture9Vtbl Direct3DVolumeTexture9_Vtbl =
 
 
 /* IDirect3DDevice9 IDirect3DVolumeTexture9 Methods follow: */
-HRESULT  WINAPI  IDirect3DDevice9Impl_CreateVolumeTexture(LPDIRECT3DDEVICE9 iface, 
+HRESULT  WINAPI  IDirect3DDevice9Impl_CreateVolumeTexture(LPDIRECT3DDEVICE9EX iface,
                                                           UINT Width, UINT Height, UINT Depth, UINT Levels, DWORD Usage, 
                                                           D3DFORMAT Format, D3DPOOL Pool, 
                                                           IDirect3DVolumeTexture9** ppVolumeTexture, HANDLE* pSharedHandle) {

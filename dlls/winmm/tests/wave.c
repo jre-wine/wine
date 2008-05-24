@@ -58,7 +58,7 @@ static char* wave_generate_la(WAVEFORMATEX* wfx, double duration, DWORD* size)
 
     nb_samples=(int)(duration*wfx->nSamplesPerSec);
     *size=nb_samples*wfx->nBlockAlign;
-    b=buf=malloc(*size);
+    b=buf=HeapAlloc(GetProcessHeap(), 0, *size);
     for (i=0;i<nb_samples;i++) {
         double y=sin(440.0*2*PI*i/wfx->nSamplesPerSec);
         if (wfx->wBitsPerSample==8) {
@@ -117,7 +117,7 @@ static char* wave_generate_silence(WAVEFORMATEX* wfx, double duration, DWORD* si
 
     nb_samples=(int)(duration*wfx->nSamplesPerSec);
     *size=nb_samples*wfx->nBlockAlign;
-    b=buf=malloc(*size);
+    b=buf=HeapAlloc(GetProcessHeap(), 0, *size);
     for (i=0;i<nb_samples;i++) {
         if (wfx->wBitsPerSample==8) {
             for (j = 0; j < wfx->nChannels; j++)
@@ -287,7 +287,7 @@ const char * wave_open_flags(DWORD flags)
     return msg;
 }
 
-const char * wave_header_flags(DWORD flags)
+static const char * wave_header_flags(DWORD flags)
 {
 #define WHDR_MASK (WHDR_BEGINLOOP|WHDR_DONE|WHDR_ENDLOOP|WHDR_INQUEUE|WHDR_PREPARED)
     static char msg[1024];
@@ -319,7 +319,7 @@ const char * wave_header_flags(DWORD flags)
     }
     if (flags & ~WHDR_MASK) {
         char temp[32];
-        sprintf(temp, "UNKNOWN(0x%08lx)", flags & ~WHDR_MASK);
+        sprintf(temp, "UNKNOWN(0x%08x)", flags & ~WHDR_MASK);
         if (!first) strcat(msg, " ");
         strcat(msg, temp);
     }
@@ -461,8 +461,8 @@ static void check_position(int device, HWAVEOUT wout, DWORD bytes,
         trace("waveOutGetPosition(%s): TIME_BYTES not supported, returned %s\n",
               dev_name(device),wave_time_format(mmtime.wType));
     returned = time_to_bytes(&mmtime, pwfx);
-    ok(returned == bytes, "waveOutGetPosition(%s): returned %ld bytes, "
-       "should be %ld\n", dev_name(device), returned, bytes);
+    ok(returned == bytes, "waveOutGetPosition(%s): returned %d bytes, "
+       "should be %d\n", dev_name(device), returned, bytes);
 
     mmtime.wType = TIME_SAMPLES;
     rc=waveOutGetPosition(wout, &mmtime, sizeof(mmtime));
@@ -472,8 +472,8 @@ static void check_position(int device, HWAVEOUT wout, DWORD bytes,
         trace("waveOutGetPosition(%s): TIME_SAMPLES not supported, "
               "returned %s\n",dev_name(device),wave_time_format(mmtime.wType));
     returned = time_to_bytes(&mmtime, pwfx);
-    ok(returned == bytes, "waveOutGetPosition(%s): returned %ld samples "
-       "(%ld bytes), should be %ld (%ld bytes)\n", dev_name(device),
+    ok(returned == bytes, "waveOutGetPosition(%s): returned %d samples "
+       "(%d bytes), should be %d (%d bytes)\n", dev_name(device),
        bytes_to_samples(returned, pwfx), returned,
        bytes_to_samples(bytes, pwfx), bytes);
 
@@ -485,8 +485,8 @@ static void check_position(int device, HWAVEOUT wout, DWORD bytes,
         trace("waveOutGetPosition(%s): TIME_MS not supported, returned %s\n",
               dev_name(device), wave_time_format(mmtime.wType));
     returned = time_to_bytes(&mmtime, pwfx);
-    ok(returned == bytes, "waveOutGetPosition(%s): returned %ld ms, "
-       "(%ld bytes), should be %ld (%ld bytes)\n", dev_name(device),
+    ok(returned == bytes, "waveOutGetPosition(%s): returned %d ms, "
+       "(%d bytes), should be %d (%d bytes)\n", dev_name(device),
        bytes_to_ms(returned, pwfx), returned,
        bytes_to_ms(bytes, pwfx), bytes);
 
@@ -535,6 +535,7 @@ static DWORD WINAPI callback_thread(LPVOID lpParameter)
 {
     MSG msg;
 
+    PeekMessageW( &msg, 0, 0, 0, PM_NOREMOVE );  /* make sure the thread has a message queue */
     SetEvent((HANDLE)lpParameter);
 
     while (GetMessage(&msg, 0, 0, 0)) {
@@ -581,7 +582,7 @@ static void wave_out_test_deviceOut(int device, double duration,
     int i, j;
 
     hevent=CreateEvent(NULL,FALSE,FALSE,NULL);
-    ok(hevent!=NULL,"CreateEvent(): error=%ld\n",GetLastError());
+    ok(hevent!=NULL,"CreateEvent(): error=%d\n",GetLastError());
     if (hevent==NULL)
         return;
 
@@ -629,7 +630,7 @@ static void wave_out_test_deviceOut(int device, double duration,
        (!(flags & WAVE_FORMAT_DIRECT) || (flags & WAVE_MAPPED)) &&
        !(pcaps->dwFormats & format)) ||
        (rc==MMSYSERR_INVALFLAG && (flags & WAVE_FORMAT_DIRECT)),
-       "waveOutOpen(%s): format=%ldx%2dx%d flags=%lx(%s) rc=%s\n",
+       "waveOutOpen(%s): format=%dx%2dx%d flags=%lx(%s) rc=%s\n",
        dev_name(device),pwfx->nSamplesPerSec,pwfx->wBitsPerSample,
        pwfx->nChannels,CALLBACK_EVENT|flags,
        wave_open_flags(CALLBACK_EVENT|flags),wave_out_error(rc));
@@ -639,7 +640,7 @@ static void wave_out_test_deviceOut(int device, double duration,
               "capabilities but opening it failed.\n");
     if ((rc==WAVERR_BADFORMAT || rc==MMSYSERR_NOTSUPPORTED) &&
        !(pcaps->dwFormats & format))
-        trace("waveOutOpen(%s): format=%ldx%2dx%d %s rc=%s failed but format "
+        trace("waveOutOpen(%s): format=%dx%2dx%d %s rc=%s failed but format "
               "not supported so OK.\n", dev_name(device), pwfx->nSamplesPerSec,
               pwfx->wBitsPerSample,pwfx->nChannels,
               flags & WAVE_FORMAT_DIRECT ? "flags=WAVE_FORMAT_DIRECT" :
@@ -652,11 +653,11 @@ static void wave_out_test_deviceOut(int device, double duration,
     ok(pwfx->nChannels==nChannels &&
        pwfx->wBitsPerSample==wBitsPerSample &&
        pwfx->nSamplesPerSec==nSamplesPerSec,
-       "got the wrong format: %ldx%2dx%d instead of %ldx%2dx%d\n",
+       "got the wrong format: %dx%2dx%d instead of %dx%2dx%d\n",
        pwfx->nSamplesPerSec, pwfx->wBitsPerSample,
        pwfx->nChannels, nSamplesPerSec, wBitsPerSample, nChannels);
 
-    frags = malloc(headers * sizeof(WAVEHDR));
+    frags = HeapAlloc(GetProcessHeap(), 0, headers * sizeof(WAVEHDR));
 
     if (sine)
         buffer=wave_generate_la(pwfx,duration / (loops + 1),&length);
@@ -690,7 +691,7 @@ static void wave_out_test_deviceOut(int device, double duration,
 
     if (interactive && rc==MMSYSERR_NOERROR) {
         DWORD start,end;
-        trace("Playing %g second %s at %5ldx%2dx%d %2d header%s %d loop%s %ld bytes %s %s\n",duration,
+        trace("Playing %g second %s at %5dx%2dx%d %2d header%s %d loop%s %d bytes %s %s\n",duration,
               sine ? "440Hz tone" : "silence",pwfx->nSamplesPerSec,
               pwfx->wBitsPerSample,pwfx->nChannels, headers, headers > 1 ? "s": " ",
               loops, loops == 1 ? " " : "s", length * (loops + 1),
@@ -779,7 +780,7 @@ static void wave_out_test_deviceOut(int device, double duration,
            "waveOutUnprepareHeader(%s): rc=%s\n",dev_name(device),
            wave_out_error(rc));
     }
-    free(buffer);
+    HeapFree(GetProcessHeap(), 0, buffer);
 
     rc=waveOutClose(wout);
     ok(rc==MMSYSERR_NOERROR,"waveOutClose(%s): rc=%s\n",dev_name(device),
@@ -791,7 +792,7 @@ EXIT:
         WaitForSingleObject(hevent,INFINITE);
     }
     CloseHandle(hevent);
-    free(frags);
+    HeapFree(GetProcessHeap(), 0, frags);
 }
 
 static void wave_out_test_device(int device)
@@ -838,7 +839,9 @@ static void wave_out_test_device(int device)
        "waveOutGetDevCapsW(%s): MMSYSERR_INVALPARAM or MMSYSERR_NOTSUPPORTED "
        "expected, got %s\n",dev_name(device),wave_out_error(rc));
 
-#if 0 /* FIXME: this works on windows but crashes wine */
+    if (0)
+    {
+    /* FIXME: this works on windows but crashes wine */
     rc=waveOutGetDevCapsA(device,(LPWAVEOUTCAPSA)1,sizeof(capsA));
     ok(rc==MMSYSERR_INVALPARAM,
        "waveOutGetDevCapsA(%s): MMSYSERR_INVALPARAM expected, got %s\n",
@@ -848,12 +851,12 @@ static void wave_out_test_device(int device)
     ok(rc==MMSYSERR_INVALPARAM || rc==MMSYSERR_NOTSUPPORTED,
        "waveOutGetDevCapsW(%s): MMSYSERR_INVALPARAM or MMSYSERR_NOTSUPPORTED "
        "expected, got %s\n",dev_name(device),wave_out_error(rc));
-#endif
+    }
 
     rc=waveOutGetDevCapsA(device,&capsA,4);
-    ok(rc==MMSYSERR_NOERROR,
-       "waveOutGetDevCapsA(%s): MMSYSERR_NOERROR expected, got %s\n",
-       dev_name(device),wave_out_error(rc));
+    ok(rc==MMSYSERR_NOERROR || rc==MMSYSERR_INVALPARAM,
+       "waveOutGetDevCapsA(%s): MMSYSERR_NOERROR or MMSYSERR_INVALPARAM "
+       "expected, got %s\n", dev_name(device),wave_out_error(rc));
 
     rc=waveOutGetDevCapsW(device,&capsW,4);
     ok(rc==MMSYSERR_NOERROR || rc==MMSYSERR_NOTSUPPORTED,
@@ -868,30 +871,38 @@ static void wave_out_test_device(int device)
        "waveOutMessage(%s): failed to get interface size, rc=%s\n",
        dev_name(device),wave_out_error(rc));
     if (rc==MMSYSERR_NOERROR) {
-        nameW = (WCHAR *)malloc(size);
+        nameW = HeapAlloc(GetProcessHeap(), 0, size);
         rc=waveOutMessage((HWAVEOUT)device, DRV_QUERYDEVICEINTERFACE,
                           (DWORD_PTR)nameW, size);
         ok(rc==MMSYSERR_NOERROR,"waveOutMessage(%s): failed to get interface "
            "name, rc=%s\n",dev_name(device),wave_out_error(rc));
-        ok(lstrlenW(nameW)+1==size/sizeof(WCHAR),"got an incorrect size %ld\n",size);
+        ok(lstrlenW(nameW)+1==size/sizeof(WCHAR),"got an incorrect size %d\n",size);
         if (rc==MMSYSERR_NOERROR) {
-            nameA = malloc(size/sizeof(WCHAR));
+            nameA = HeapAlloc(GetProcessHeap(), 0, size/sizeof(WCHAR));
             WideCharToMultiByte(CP_ACP, 0, nameW, size/sizeof(WCHAR), nameA,
                                 size/sizeof(WCHAR), NULL, NULL);
         }
-        free(nameW);
+        HeapFree(GetProcessHeap(), 0, nameW);
     }
     else if (rc==MMSYSERR_NOTSUPPORTED) {
-        nameA=strdup("not supported");
+        nameA=HeapAlloc(GetProcessHeap(), 0, sizeof("not supported"));
+        strcpy(nameA, "not supported");
     }
+
+    rc=waveOutGetDevCapsA(device,&capsA,sizeof(capsA));
+    ok(rc==MMSYSERR_NOERROR,
+       "waveOutGetDevCapsA(%s): MMSYSERR_NOERROR expected, got %s\n",
+       dev_name(device),wave_out_error(rc));
+    if (rc!=MMSYSERR_NOERROR)
+        return;
 
     trace("  %s: \"%s\" (%s) %d.%d (%d:%d)\n",dev_name(device),capsA.szPname,
           (nameA?nameA:"failed"),capsA.vDriverVersion >> 8,
           capsA.vDriverVersion & 0xff, capsA.wMid,capsA.wPid);
-    trace("     channels=%d formats=%05lx support=%04lx\n",
+    trace("     channels=%d formats=%05x support=%04x\n",
           capsA.wChannels,capsA.dwFormats,capsA.dwSupport);
     trace("     %s\n",wave_out_caps(capsA.dwSupport));
-    free(nameA);
+    HeapFree(GetProcessHeap(), 0, nameA);
 
     if (winetest_interactive && (device != WAVE_MAPPER))
     {
@@ -1084,7 +1095,7 @@ static void wave_out_test_device(int device)
        "waveOutOpen(%s): opening the device in 11 bits mode should fail: "
        "rc=%s\n",dev_name(device),wave_out_error(rc));
     if (rc==MMSYSERR_NOERROR) {
-        trace("     got %ldx%2dx%d for %ldx%2dx%d\n",
+        trace("     got %dx%2dx%d for %dx%2dx%d\n",
               format.nSamplesPerSec, format.wBitsPerSample,
               format.nChannels,
               oformat.nSamplesPerSec, oformat.wBitsPerSample,
@@ -1107,7 +1118,7 @@ static void wave_out_test_device(int device)
        "waveOutOpen(%s): opening the device at 2 MHz sample rate should fail: "
        "rc=%s\n",dev_name(device),wave_out_error(rc));
     if (rc==MMSYSERR_NOERROR) {
-        trace("     got %ldx%2dx%d for %ldx%2dx%d\n",
+        trace("     got %dx%2dx%d for %dx%2dx%d\n",
               format.nSamplesPerSec, format.wBitsPerSample,
               format.nChannels,
               oformat.nSamplesPerSec, oformat.wBitsPerSample,
@@ -1257,7 +1268,9 @@ static void wave_out_test_device(int device)
         trace("waveOutOpen(%s): 6 channels not supported\n",
               dev_name(device));
 
-#if 0	/* ALSA doesn't like this format */
+    if (0)
+    {
+    /* FIXME: ALSA doesn't like this format */
     /* test if 24 bit samples supported */
     wfex.Format.wFormatTag=WAVE_FORMAT_EXTENSIBLE;
     wfex.Format.nChannels=2;
@@ -1283,7 +1296,7 @@ static void wave_out_test_device(int device)
     } else
         trace("waveOutOpen(%s): 24 bit samples not supported\n",
               dev_name(device));
-#endif
+    }
 
     /* test if 32 bit samples supported */
     wfex.Format.wFormatTag=WAVE_FORMAT_EXTENSIBLE;

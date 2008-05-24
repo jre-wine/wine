@@ -24,7 +24,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "winnt.h"
 #include "imagehlp.h"
@@ -145,7 +144,7 @@ static BOOL IMAGEHLP_GetCertificateOffset( HANDLE handle, DWORD num,
  */
 
 BOOL WINAPI ImageAddCertificate(
-  HANDLE FileHandle, PWIN_CERTIFICATE Certificate, PDWORD Index)
+  HANDLE FileHandle, LPWIN_CERTIFICATE Certificate, PDWORD Index)
 {
   FIXME("(%p, %p, %p): stub\n",
     FileHandle, Certificate, Index
@@ -161,7 +160,7 @@ BOOL WINAPI ImageEnumerateCertificates(
     HANDLE handle, WORD TypeFilter, PDWORD CertificateCount,
     PDWORD Indices, DWORD IndexCount)
 {
-    DWORD size, count, offset, sd_VirtualAddr;
+    DWORD size, count, offset, sd_VirtualAddr, index;
     WIN_CERTIFICATE hdr;
     const size_t cert_hdr_size = sizeof hdr - sizeof hdr.bCertificate;
     BOOL r;
@@ -169,17 +168,12 @@ BOOL WINAPI ImageEnumerateCertificates(
     TRACE("%p %hd %p %p %d\n",
            handle, TypeFilter, CertificateCount, Indices, IndexCount);
 
-    if( Indices )
-    {
-        FIXME("Indices not handled!\n");
-        return FALSE;
-    }
-
     r = IMAGEHLP_GetSecurityDirOffset( handle, &sd_VirtualAddr, &size );
     if( !r )
         return FALSE;
 
     offset = 0;
+    index = 0;
     *CertificateCount = 0;
     while( offset < size )
     {
@@ -207,10 +201,13 @@ BOOL WINAPI ImageEnumerateCertificates(
             (TypeFilter == hdr.wCertificateType) )
         {
             (*CertificateCount)++;
+            if(Indices && *CertificateCount <= IndexCount)
+                *Indices++ = index;
         }
 
         /* next certificate */
         offset += hdr.dwLength;
+        index++;
     }
 
     return TRUE;
@@ -223,25 +220,31 @@ BOOL WINAPI ImageEnumerateCertificates(
  */
 BOOL WINAPI ImageGetCertificateData(
                 HANDLE handle, DWORD Index,
-                PWIN_CERTIFICATE Certificate, PDWORD RequiredLength)
+                LPWIN_CERTIFICATE Certificate, PDWORD RequiredLength)
 {
     DWORD r, offset, ofs, size, count;
 
     TRACE("%p %d %p %p\n", handle, Index, Certificate, RequiredLength);
 
+    if( !RequiredLength)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
     if( !IMAGEHLP_GetCertificateOffset( handle, Index, &ofs, &size ) )
         return FALSE;
-
-    if( !Certificate )
-    {
-        *RequiredLength = size;
-        return TRUE;
-    }
 
     if( *RequiredLength < size )
     {
         *RequiredLength = size;
         SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        return FALSE;
+    }
+
+    if( !Certificate )
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
 
@@ -258,6 +261,7 @@ BOOL WINAPI ImageGetCertificateData(
         return FALSE;
 
     TRACE("OK\n");
+    SetLastError( NO_ERROR );
 
     return TRUE;
 }
@@ -266,7 +270,7 @@ BOOL WINAPI ImageGetCertificateData(
  *		ImageGetCertificateHeader (IMAGEHLP.@)
  */
 BOOL WINAPI ImageGetCertificateHeader(
-    HANDLE handle, DWORD index, PWIN_CERTIFICATE pCert)
+    HANDLE handle, DWORD index, LPWIN_CERTIFICATE pCert)
 {
     DWORD r, offset, ofs, size, count;
     const size_t cert_hdr_size = sizeof *pCert - sizeof pCert->bCertificate;

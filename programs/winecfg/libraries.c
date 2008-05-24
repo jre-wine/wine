@@ -21,6 +21,7 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
 
 #define NONAMELESSUNION
 #define WIN32_LEAN_AND_MEAN
@@ -55,7 +56,6 @@ static const char * const builtin_only[] =
     "glu32",
     "icmp",
     "iphlpapi",
-    "joystick.drv",
     "kernel32",
     "mswsock",
     "ntdll",
@@ -68,12 +68,12 @@ static const char * const builtin_only[] =
     "vdmdbg",
     "w32skrnl",
     "winealsa.drv",
-    "winearts.drv",
     "wineaudioio.drv",
     "wined3d",
     "winedos",
     "wineesd.drv",
     "winejack.drv",
+    "winejoystick.drv",
     "winemp3.acm",
     "winenas.drv",
     "wineoss.drv",
@@ -95,7 +95,7 @@ enum dllmode
 	BUILTIN,
 	NATIVE,
 	DISABLE,
-	UNKNOWN /* Special value indicating an erronous DLL override mode */
+	UNKNOWN /* Special value indicating an erroneous DLL override mode */
 };
 
 struct dll
@@ -408,10 +408,14 @@ static void init_libsheet(HWND dialog)
 static void on_add_combo_change(HWND dialog)
 {
     char buffer[1024];
+    int sel, len;
 
     SendDlgItemMessage(dialog, IDC_DLLCOMBO, WM_GETTEXT, sizeof(buffer), (LPARAM) buffer);
+    /* if lib was chosen from combobox, we receive an empty buffer, check manually */
+    sel=SendDlgItemMessage(dialog, IDC_DLLCOMBO, CB_GETCURSEL, 0, 0);
+    len=SendDlgItemMessage(dialog, IDC_DLLCOMBO, CB_GETLBTEXTLEN, sel, 0);
 
-    if (strlen(buffer))
+    if (strlen(buffer)>0 || len>0)
         enable(IDC_DLLS_ADDDLL)
     else
         disable(IDC_DLLS_ADDDLL);

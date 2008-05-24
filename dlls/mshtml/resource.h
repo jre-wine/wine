@@ -26,6 +26,11 @@
 #define ID_DWL_INSTALL      7602
 #define ID_DWL_STATUS       7603
 
+#define IDS_MESSAGE_BOX_TITLE  2213
+
+#define IDS_PRINT_HEADER_TEMPLATE  8403
+#define IDS_PRINT_FOOTER_TEMPLATE  8404
+
 #define IDR_BROWSE_CONTEXT_MENU  24641
 
 #define IDM_TRACETAGS           6004
@@ -44,3 +49,9 @@
 #define IDM_DUMPLAYOUTRECTS     6017
 
 #define _IDM_REFRESH            6042
+
+#define IDD_HYPERLINK           8000
+
+#define IDC_STATIC              9000
+#define IDC_URL                 9001
+#define IDC_TYPE                9002

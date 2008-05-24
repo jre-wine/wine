@@ -73,44 +73,8 @@ struct file_queue
 };
 
 
-inline static WCHAR *strdupW( const WCHAR *str )
-{
-    WCHAR *ret = NULL;
-    if (str)
-    {
-        int len = (strlenW(str) + 1) * sizeof(WCHAR);
-        if ((ret = HeapAlloc( GetProcessHeap(), 0, len ))) memcpy( ret, str, len );
-    }
-    return ret;
-}
-
-
-inline static WCHAR *strdupAtoW( const char *str )
-{
-    WCHAR *ret = NULL;
-    if (str)
-    {
-        DWORD len = MultiByteToWideChar( CP_ACP, 0, str, -1, NULL, 0 );
-        if ((ret = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) )))
-            MultiByteToWideChar( CP_ACP, 0, str, -1, ret, len );
-    }
-    return ret;
-}
-
-inline static char *strdupWtoA( const WCHAR *str )
-{
-    char *ret = NULL;
-    if (str)
-    {
-        DWORD len = WideCharToMultiByte( CP_ACP, 0, str, -1, NULL, 0, NULL, NULL );
-        if ((ret = HeapAlloc( GetProcessHeap(), 0, len )))
-            WideCharToMultiByte( CP_ACP, 0, str, -1, ret, len, NULL, NULL );
-    }
-    return ret;
-}
-
 /* append a file operation to a queue */
-inline static void queue_file_op( struct file_op_queue *queue, struct file_op *op )
+static inline void queue_file_op( struct file_op_queue *queue, struct file_op *op )
 {
     op->next = NULL;
     if (queue->tail) queue->tail->next = op;
@@ -229,6 +193,7 @@ UINT CALLBACK QUEUE_callback_WtoA( void *context, UINT notification,
     case SPFILENOTIFY_RENAMEERROR:
     case SPFILENOTIFY_STARTCOPY:
     case SPFILENOTIFY_ENDCOPY:
+    case SPFILENOTIFY_QUEUESCAN_EX:
         {
             FILEPATHS_W *pathsW = (FILEPATHS_W *)param1;
             FILEPATHS_A pathsA;
@@ -262,8 +227,18 @@ UINT CALLBACK QUEUE_callback_WtoA( void *context, UINT notification,
         }
         break;
 
-    case SPFILENOTIFY_NEEDMEDIA:
     case SPFILENOTIFY_QUEUESCAN:
+        {
+            LPWSTR targetW = (LPWSTR)param1;
+            LPSTR target = strdupWtoA( targetW );
+
+            ret = callback_ctx->orig_handler( callback_ctx->orig_context, notification,
+                                              (UINT_PTR)target, param2 );
+            HeapFree( GetProcessHeap(), 0, target );
+        }
+        break;
+
+    case SPFILENOTIFY_NEEDMEDIA:
         FIXME("mapping for %d not implemented\n",notification);
     case SPFILENOTIFY_STARTQUEUE:
     case SPFILENOTIFY_ENDQUEUE:
@@ -428,7 +403,7 @@ HSPFILEQ WINAPI SetupOpenFileQueue(void)
     struct file_queue *queue;
 
     if (!(queue = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*queue))))
-        return (HSPFILEQ)INVALID_HANDLE_VALUE;
+        return INVALID_HANDLE_VALUE;
     return queue;
 }
 
@@ -1216,22 +1191,70 @@ BOOL WINAPI SetupCommitFileQueueW( HWND owner, HSPFILEQ handle, PSP_FILE_CALLBAC
 /***********************************************************************
  *            SetupScanFileQueueA   (SETUPAPI.@)
  */
-BOOL WINAPI SetupScanFileQueueA( HSPFILEQ queue, DWORD flags, HWND window,
-                                 PSP_FILE_CALLBACK_A callback, PVOID context, PDWORD result )
+BOOL WINAPI SetupScanFileQueueA( HSPFILEQ handle, DWORD flags, HWND window,
+                                 PSP_FILE_CALLBACK_A handler, PVOID context, PDWORD result )
 {
-    FIXME("stub\n");
-    return FALSE;
+    struct callback_WtoA_context ctx;
+
+    TRACE("%p %x %p %p %p %p\n", handle, flags, window, handler, context, result);
+
+    ctx.orig_context = context;
+    ctx.orig_handler = handler;
+
+    return SetupScanFileQueueW( handle, flags, window, QUEUE_callback_WtoA, &ctx, result );
 }
 
 
 /***********************************************************************
  *            SetupScanFileQueueW   (SETUPAPI.@)
  */
-BOOL WINAPI SetupScanFileQueueW( HSPFILEQ queue, DWORD flags, HWND window,
-                                 PSP_FILE_CALLBACK_W callback, PVOID context, PDWORD result )
+BOOL WINAPI SetupScanFileQueueW( HSPFILEQ handle, DWORD flags, HWND window,
+                                 PSP_FILE_CALLBACK_W handler, PVOID context, PDWORD result )
 {
-    FIXME("stub\n");
-    return FALSE;
+    struct file_queue *queue = handle;
+    struct file_op *op;
+    FILEPATHS_W paths;
+    UINT notification = 0;
+    BOOL ret = FALSE;
+
+    TRACE("%p %x %p %p %p %p\n", handle, flags, window, handler, context, result);
+
+    if (!queue->copy_queue.count) return TRUE;
+
+    if (flags & SPQ_SCAN_USE_CALLBACK)        notification = SPFILENOTIFY_QUEUESCAN;
+    else if (flags & SPQ_SCAN_USE_CALLBACKEX) notification = SPFILENOTIFY_QUEUESCAN_EX;
+
+    if (flags & ~(SPQ_SCAN_USE_CALLBACK | SPQ_SCAN_USE_CALLBACKEX))
+    {
+        FIXME("flags %x not fully implemented\n", flags);
+    }
+
+    paths.Source = paths.Target = NULL;
+
+    for (op = queue->copy_queue.head; op; op = op->next)
+    {
+        build_filepathsW( op, &paths );
+        switch (notification)
+        {
+        case SPFILENOTIFY_QUEUESCAN:
+            /* FIXME: handle delay flag */
+            if (handler( context,  notification, (UINT_PTR)paths.Target, 0 )) goto done;
+            break;
+        case SPFILENOTIFY_QUEUESCAN_EX:
+            if (handler( context, notification, (UINT_PTR)&paths, 0 )) goto done;
+            break;
+        default:
+            ret = TRUE; goto done;
+        }
+    }
+
+    ret = TRUE;
+
+ done:
+    if (result) *result = 0;
+    HeapFree( GetProcessHeap(), 0, (void *)paths.Source );
+    HeapFree( GetProcessHeap(), 0, (void *)paths.Target );
+    return ret;
 }
 
 
@@ -1354,10 +1377,10 @@ UINT WINAPI SetupDefaultQueueCallbackA( PVOID context, UINT notification,
         TRACE( "end queue\n" );
         return 0;
     case SPFILENOTIFY_STARTSUBQUEUE:
-        TRACE( "start subqueue %d count %d\n", param1, param2 );
+        TRACE( "start subqueue %ld count %ld\n", param1, param2 );
         return TRUE;
     case SPFILENOTIFY_ENDSUBQUEUE:
-        TRACE( "end subqueue %d\n", param1 );
+        TRACE( "end subqueue %ld\n", param1 );
         return 0;
     case SPFILENOTIFY_STARTDELETE:
         TRACE( "start delete %s\n", debugstr_a(paths->Target) );
@@ -1393,7 +1416,7 @@ UINT WINAPI SetupDefaultQueueCallbackA( PVOID context, UINT notification,
         TRACE( "need media\n" );
         return FILEOP_SKIP;
     default:
-        FIXME( "notification %d params %x,%x\n", notification, param1, param2 );
+        FIXME( "notification %d params %lx,%lx\n", notification, param1, param2 );
         break;
     }
     return 0;
@@ -1418,10 +1441,10 @@ UINT WINAPI SetupDefaultQueueCallbackW( PVOID context, UINT notification,
         TRACE( "end queue\n" );
         return 0;
     case SPFILENOTIFY_STARTSUBQUEUE:
-        TRACE( "start subqueue %d count %d\n", param1, param2 );
+        TRACE( "start subqueue %ld count %ld\n", param1, param2 );
         return TRUE;
     case SPFILENOTIFY_ENDSUBQUEUE:
-        TRACE( "end subqueue %d\n", param1 );
+        TRACE( "end subqueue %ld\n", param1 );
         return 0;
     case SPFILENOTIFY_STARTDELETE:
         TRACE( "start delete %s\n", debugstr_w(paths->Target) );
@@ -1458,7 +1481,7 @@ UINT WINAPI SetupDefaultQueueCallbackW( PVOID context, UINT notification,
         TRACE( "need media\n" );
         return FILEOP_SKIP;
     default:
-        FIXME( "notification %d params %x,%x\n", notification, param1, param2 );
+        FIXME( "notification %d params %lx,%lx\n", notification, param1, param2 );
         break;
     }
     return 0;
@@ -1539,4 +1562,23 @@ UINT WINAPI SetupCopyErrorW( HWND parent, PCWSTR dialogTitle, PCWSTR diskname,
     FIXME( "stub: (Error Number %d when attempting to copy file %s from %s to %s)\n",
            w32error, debugstr_w(sourcefile), debugstr_w(sourcepath) ,debugstr_w(targetpath));
     return DPROMPT_SKIPFILE;
+}
+
+/***********************************************************************
+ *            pSetupGetQueueFlags   (SETUPAPI.@)
+ */
+DWORD WINAPI pSetupGetQueueFlags( HSPFILEQ handle )
+{
+    struct file_queue *queue = handle;
+    return queue->flags;
+}
+
+/***********************************************************************
+ *            pSetupSetQueueFlags   (SETUPAPI.@)
+ */
+BOOL WINAPI pSetupSetQueueFlags( HSPFILEQ handle, DWORD flags )
+{
+    struct file_queue *queue = handle;
+    queue->flags = flags;
+    return TRUE;
 }

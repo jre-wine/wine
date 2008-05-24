@@ -216,7 +216,7 @@ static	unsigned dbg_save_internal_vars(void)
 
     for (i = 0; i < DBG_IV_LAST; i++) 
     {
-        /* FIXME: type should be infered from basic type -if any- of intvar */
+        /* FIXME: type should be inferred from basic type -if any- of intvar */
         if (dbg_internal_vars[i].pval == &dbg_internal_vars[i].val)
             RegSetValueEx(hkey, dbg_internal_vars[i].name, 0,
                           REG_DWORD, (const void*)dbg_internal_vars[i].pval, 
@@ -240,6 +240,16 @@ const struct dbg_internal_var* dbg_get_internal_var(const char* name)
     }
 
     return NULL;
+}
+
+unsigned         dbg_num_processes(void)
+{
+    struct dbg_process*	p;
+    unsigned            num = 0;
+
+    for (p = dbg_process_list; p; p = p->next)
+	num++;
+    return num;
 }
 
 struct dbg_process*     dbg_get_process(DWORD pid)
@@ -268,7 +278,7 @@ struct dbg_process*	dbg_add_process(const struct be_process_io* pio, DWORD pid, 
     {
         if (p->handle != 0)
         {
-            WINE_ERR("Process (%lu) is already defined\n", pid);
+            WINE_ERR("Process (%04x) is already defined\n", pid);
         }
         else
         {
@@ -292,6 +302,11 @@ struct dbg_process*	dbg_add_process(const struct be_process_io* pio, DWORD pid, 
     memset(p->bp, 0, sizeof(p->bp));
     p->delayed_bp = NULL;
     p->num_delayed_bp = 0;
+    p->source_ofiles = NULL;
+    p->search_path = NULL;
+    p->source_current_file[0] = '\0';
+    p->source_start_line = -1;
+    p->source_end_line = -1;
 
     p->next = dbg_process_list;
     p->prev = NULL;
@@ -321,6 +336,8 @@ void dbg_del_process(struct dbg_process* p)
             HeapFree(GetProcessHeap(), 0, p->delayed_bp[i].u.symbol.name);
 
     HeapFree(GetProcessHeap(), 0, p->delayed_bp);
+    source_nuke_path(p);
+    source_free_files(p);
     if (p->prev) p->prev->next = p->next;
     if (p->next) p->next->prev = p->prev;
     if (p == dbg_process_list) dbg_process_list = p->next;
@@ -335,7 +352,7 @@ struct mod_loader_info
     IMAGEHLP_MODULE*    imh_mod;
 };
 
-static BOOL CALLBACK mod_loader_cb(PSTR mod_name, DWORD base, void* ctx)
+static BOOL CALLBACK mod_loader_cb(PCSTR mod_name, ULONG base, PVOID ctx)
 {
     struct mod_loader_info*     mli = (struct mod_loader_info*)ctx;
 
@@ -401,7 +418,7 @@ struct dbg_thread* dbg_add_thread(struct dbg_process* p, DWORD tid,
     t->curr_frame = -1;
     t->addr_mode = AddrModeFlat;
 
-    snprintf(t->name, sizeof(t->name), "0x%08lx", tid);
+    snprintf(t->name, sizeof(t->name), "%04x", tid);
 
     t->next = p->threads;
     t->prev = NULL;
@@ -547,7 +564,7 @@ int main(int argc, char** argv)
             hFile = parser_generate_command_file(argv[0], NULL);
             if (hFile == INVALID_HANDLE_VALUE)
             {
-                dbg_printf("Couldn't open temp file (%lu)\n", GetLastError());
+                dbg_printf("Couldn't open temp file (%u)\n", GetLastError());
                 return 1;
             }
             argc--; argv++;
@@ -560,7 +577,7 @@ int main(int argc, char** argv)
                                 NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
             if (hFile == INVALID_HANDLE_VALUE)
             {
-                dbg_printf("Couldn't open file %s (%lu)\n", argv[0], GetLastError());
+                dbg_printf("Couldn't open file %s (%u)\n", argv[0], GetLastError());
                 return 1;
             }
             argc--; argv++;
@@ -586,7 +603,7 @@ int main(int argc, char** argv)
 
     if (dbg_curr_process)
     {
-        dbg_printf("WineDbg starting on pid 0x%lx\n", dbg_curr_pid);
+        dbg_printf("WineDbg starting on pid %04x\n", dbg_curr_pid);
         if (dbg_curr_process->active_debuggee) dbg_active_wait_for_first_exception();
     }
 
@@ -594,7 +611,7 @@ int main(int argc, char** argv)
     parser_handle(hFile);
 
     while (dbg_process_list)
-        dbg_process_list->process_io->close_process(dbg_process_list, TRUE);
+        dbg_process_list->process_io->close_process(dbg_process_list, FALSE);
 
     dbg_save_internal_vars();
 

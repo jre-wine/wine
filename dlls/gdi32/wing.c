@@ -20,9 +20,12 @@
 
 #include "config.h"
 
+#include <stdarg.h>
+
 #include "windef.h"
+#include "winbase.h"
+#include "wingdi.h"
 #include "wownt32.h"
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/wingdi16.h"
 #include "wine/debug.h"
@@ -93,13 +96,11 @@ HDC16 WINAPI WinGCreateDC16(void)
  */
 BOOL16 WINAPI WinGRecommendDIBFormat16(BITMAPINFO *bmpi)
 {
-    static const WCHAR szDisplayW[] = { 'D','I','S','P','L','A','Y','\0' };
-    HDC hdc;
     TRACE("(%p)\n", bmpi);
+
     if (!bmpi)
 	return FALSE;
 
-    hdc = CreateDCW( szDisplayW, NULL, NULL, NULL );
     bmpi->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     bmpi->bmiHeader.biWidth = 320;
     bmpi->bmiHeader.biHeight = -1;
@@ -111,7 +112,7 @@ BOOL16 WINAPI WinGRecommendDIBFormat16(BITMAPINFO *bmpi)
     bmpi->bmiHeader.biYPelsPerMeter = 0;
     bmpi->bmiHeader.biClrUsed = 0;
     bmpi->bmiHeader.biClrImportant = 0;
-    DeleteDC(hdc);
+
     return TRUE;
 }
 

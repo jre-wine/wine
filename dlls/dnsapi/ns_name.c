@@ -32,7 +32,6 @@
 # include <resolv.h>
 #endif
 #include <string.h>
-#include <ctype.h>
 
 /* Data. */
 
@@ -54,7 +53,7 @@ static int		printable(int);
  *	The root is returned as "."
  *	All other domains are returned in non absolute form
  */
-int
+static int
 dns_ns_name_ntop(const u_char *src, char *dst, size_t dstsiz) {
 	const u_char *cp;
 	char *dn, *eom;
@@ -275,7 +274,7 @@ dns_ns_name_pton(const char *src, u_char *dst, size_t dstsiz) {
  * return:
  *	-1 if it fails, or consumed octets if it succeeds.
  */
-int
+static int
 dns_ns_name_unpack(const u_char *msg, const u_char *eom, const u_char *src,
 	       u_char *dst, size_t dstsiz)
 {
@@ -411,7 +410,7 @@ dns_ns_name_skip(const u_char **ptrptr, const u_char *eom) {
 /*
  * special(ch)
  *	Thinking in noninternationalized USASCII (per the DNS spec),
- *	is this characted special ("in need of quoting") ?
+ *	is this character special ("in need of quoting") ?
  * return:
  *	boolean.
  */

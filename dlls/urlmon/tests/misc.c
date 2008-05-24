@@ -18,6 +18,7 @@
 
 #define COBJMACROS
 #define CONST_VTABLE
+#define NONAMELESSUNION
 
 #include <wine/test.h>
 #include <stdarg.h>
@@ -61,6 +62,13 @@ DEFINE_EXPECT(ParseUrl);
 DEFINE_EXPECT(QI_IInternetProtocolInfo);
 DEFINE_EXPECT(CreateInstance);
 DEFINE_EXPECT(unk_Release);
+
+static const char *debugstr_w(LPCWSTR str)
+{
+    static char buf[1024];
+    WideCharToMultiByte(CP_ACP, 0, str, -1, buf, sizeof(buf), NULL, NULL);
+    return buf;
+}
 
 static void test_CreateFormatEnum(void)
 {
@@ -235,13 +243,14 @@ static void test_RegisterFormatEnumerator(void)
     hres = IBindCtx_GetObjectParam(bctx, wszEnumFORMATETC, &unk);
     ok(hres == E_FAIL, "GetObjectParam failed: %08x, expected E_FAIL\n", hres);
 
+    IEnumFORMATETC_Release(format);
     IBindCtx_Release(bctx);
 }
 
 static const WCHAR url1[] = {'r','e','s',':','/','/','m','s','h','t','m','l','.','d','l','l',
         '/','b','l','a','n','k','.','h','t','m',0};
 static const WCHAR url2[] = {'i','n','d','e','x','.','h','t','m',0};
-static const WCHAR url3[] = {'f','i','l','e',':','c',':','\\','I','n','d','e','x','.','h','t','m',0};
+static const WCHAR url3[] = {'f','i','l','e',':','/','/','c',':','\\','I','n','d','e','x','.','h','t','m',0};
 static const WCHAR url4[] = {'f','i','l','e',':','s','o','m','e','%','2','0','f','i','l','e',
         '%','2','e','j','p','g',0};
 static const WCHAR url5[] = {'h','t','t','p',':','/','/','w','w','w','.','w','i','n','e','h','q',
@@ -250,7 +259,11 @@ static const WCHAR url6[] = {'a','b','o','u','t',':','b','l','a','n','k',0};
 static const WCHAR url7[] = {'f','t','p',':','/','/','w','i','n','e','h','q','.','o','r','g','/',
         'f','i','l','e','.','t','e','s','t',0};
 static const WCHAR url8[] = {'t','e','s','t',':','1','2','3','a','b','c',0};
-
+static const WCHAR url9[] =
+    {'h','t','t','p',':','/','/','w','w','w','.','w','i','n','e','h','q','.','o','r','g',
+     '/','s','i','t','e','/','a','b','o','u','t',0};
+static const WCHAR url10[] = {'f','i','l','e',':','/','/','s','o','m','e','%','2','0','f','i','l','e',
+        '.','j','p','g',0};
 
 static const WCHAR url4e[] = {'f','i','l','e',':','s','o','m','e',' ','f','i','l','e',
         '.','j','p','g',0};
@@ -328,8 +341,65 @@ static void test_CoInternetParseUrl(void)
     }
 }
 
+static void test_CoInternetCompareUrl(void)
+{
+    HRESULT hres;
+
+    hres = CoInternetCompareUrl(url1, url1, 0);
+    ok(hres == S_OK, "CoInternetParseUrl failed: %08x\n", hres);
+
+    hres = CoInternetCompareUrl(url1, url3, 0);
+    ok(hres == S_FALSE, "CoInternetParseUrl failed: %08x\n", hres);
+
+    hres = CoInternetCompareUrl(url3, url1, 0);
+    ok(hres == S_FALSE, "CoInternetParseUrl failed: %08x\n", hres);
+}
+
+static const struct {
+    LPCWSTR url;
+    DWORD uses_net;
+} query_info_tests[] = {
+    {url1, 0},
+    {url2, 0},
+    {url3, 0},
+    {url4, 0},
+    {url5, 0},
+    {url6, 0},
+    {url7, 0},
+    {url8, 0}
+};
+
+static void test_CoInternetQueryInfo(void)
+{
+    BYTE buf[100];
+    DWORD cb, i;
+    HRESULT hres;
+
+    for(i=0; i < sizeof(query_info_tests)/sizeof(query_info_tests[0]); i++) {
+        cb = 0xdeadbeef;
+        memset(buf, '?', sizeof(buf));
+        hres = CoInternetQueryInfo(query_info_tests[0].url, QUERY_USES_NETWORK, 0, buf, sizeof(buf), &cb, 0);
+        ok(hres == S_OK, "[%d] CoInternetQueryInfo failed: %08x\n", i, hres);
+        ok(cb == sizeof(DWORD), "[%d] cb = %d\n", i, cb);
+        ok(*(DWORD*)buf == query_info_tests[i].uses_net, "[%d] ret %x, expected %x\n",
+           i, *(DWORD*)buf, query_info_tests[i].uses_net);
+
+        hres = CoInternetQueryInfo(query_info_tests[0].url, QUERY_USES_NETWORK, 0, buf, 3, &cb, 0);
+        ok(hres == E_FAIL, "[%d] CoInternetQueryInfo failed: %08x, expected E_FAIL\n", i, hres);
+        hres = CoInternetQueryInfo(query_info_tests[0].url, QUERY_USES_NETWORK, 0, NULL, sizeof(buf), &cb, 0);
+        ok(hres == E_FAIL, "[%d] CoInternetQueryInfo failed: %08x, expected E_FAIL\n", i, hres);
+
+        memset(buf, '?', sizeof(buf));
+        hres = CoInternetQueryInfo(query_info_tests[0].url, QUERY_USES_NETWORK, 0, buf, sizeof(buf), NULL, 0);
+        ok(hres == S_OK, "[%d] CoInternetQueryInfo failed: %08x\n", i, hres);
+        ok(*(DWORD*)buf == query_info_tests[i].uses_net, "[%d] ret %x, expected %x\n",
+           i, *(DWORD*)buf, query_info_tests[i].uses_net);
+    }
+}
+
 static const WCHAR mimeTextHtml[] = {'t','e','x','t','/','h','t','m','l',0};
 static const WCHAR mimeTextPlain[] = {'t','e','x','t','/','p','l','a','i','n',0};
+static const WCHAR mimeTextRichtext[] = {'t','e','x','t','/','r','i','c','h','t','e','x','t',0};
 static const WCHAR mimeAppOctetStream[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
     'o','c','t','e','t','-','s','t','r','e','a','m',0};
 static const WCHAR mimeImagePjpeg[] = {'i','m','a','g','e','/','p','j','p','e','g',0};
@@ -339,18 +409,33 @@ static const WCHAR mimeImageXPng[] = {'i','m','a','g','e','/','x','-','p','n','g
 static const WCHAR mimeImageTiff[] = {'i','m','a','g','e','/','t','i','f','f',0};
 static const WCHAR mimeVideoAvi[] = {'v','i','d','e','o','/','a','v','i',0};
 static const WCHAR mimeVideoMpeg[] = {'v','i','d','e','o','/','m','p','e','g',0};
+static const WCHAR mimeAppPostscript[] =
+    {'a','p','p','l','i','c','a','t','i','o','n','/','p','o','s','t','s','c','r','i','p','t',0};
+static const WCHAR mimeAppXCompressed[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
+                                    'x','-','c','o','m','p','r','e','s','s','e','d',0};
+static const WCHAR mimeAppXZip[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
+                                    'x','-','z','i','p','-','c','o','m','p','r','e','s','s','e','d',0};
+static const WCHAR mimeAppXGzip[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
+                                    'x','-','g','z','i','p','-','c','o','m','p','r','e','s','s','e','d',0};
+static const WCHAR mimeAppJava[] = {'a','p','p','l','i','c','a','t','i','o','n','/','j','a','v','a',0};
+static const WCHAR mimeAppPdf[] = {'a','p','p','l','i','c','a','t','i','o','n','/','p','d','f',0};
+static const WCHAR mimeAppXMSDownload[] =
+    {'a','p','p','l','i','c','a','t','i','o','n','/','x','-','m','s','d','o','w','n','l','o','a','d',0};
+static const WCHAR mimeAudioWav[] = {'a','u','d','i','o','/','w','a','v',0};
+static const WCHAR mimeAudioBasic[] = {'a','u','d','i','o','/','b','a','s','i','c',0};
 
 static const struct {
     LPCWSTR url;
     LPCWSTR mime;
+    HRESULT hres;
 } mime_tests[] = {
-    {url1, mimeTextHtml},
-    {url2, mimeTextHtml},
-    {url3, mimeTextHtml},
-    {url4, NULL},
-    {url5, NULL},
-    {url6, NULL},
-    {url7, NULL}
+    {url1, mimeTextHtml, S_OK},
+    {url2, mimeTextHtml, S_OK},
+    {url3, mimeTextHtml, S_OK},
+    {url4, NULL, E_FAIL},
+    {url5, NULL, __HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)},
+    {url6, NULL, E_FAIL},
+    {url7, NULL, __HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)}
 };
 
 static BYTE data1[] = "test data\n";
@@ -407,6 +492,37 @@ static BYTE data51[] = {0x00,0x00,0x01,0xba,0xff};
 static BYTE data52[] = {0x00,0x00,0x01,0xb8,0xff};
 static BYTE data53[] = {0x00,0x00,0x01,0xba};
 static BYTE data54[] = {0x00,0x00,0x01,0xba,'<','h','t','m','l','>'};
+static BYTE data55[] = {0x1f,0x8b,'x'};
+static BYTE data56[] = {0x1f};
+static BYTE data57[] = {0x1f,0x8b,'<','h','t','m','l','>','t','e','s','t',0};
+static BYTE data58[] = {0x1f,0x8b};
+static BYTE data59[] = {0x50,0x4b,'x'};
+static BYTE data60[] = {0x50,0x4b};
+static BYTE data61[] = {0x50,0x4b,'<','h','t','m','l','>',0};
+static BYTE data62[] = {0xca,0xfe,0xba,0xbe,'x'};
+static BYTE data63[] = {0xca,0xfe,0xba,0xbe};
+static BYTE data64[] = {0xca,0xfe,0xba,0xbe,'<','h','t','m','l','>',0};
+static BYTE data65[] = {0x25,0x50,0x44,0x46,'x'};
+static BYTE data66[] = {0x25,0x50,0x44,0x46};
+static BYTE data67[] = {0x25,0x50,0x44,0x46,'x','<','h','t','m','l','>'};
+static BYTE data68[] = {'M','Z','x'};
+static BYTE data69[] = {'M','Z'};
+static BYTE data70[] = {'M','Z','<','h','t','m','l','>',0xff};
+static BYTE data71[] = {'{','\\','r','t','f',0};
+static BYTE data72[] = {'{','\\','r','t','f'};
+static BYTE data73[] = {' ','{','\\','r','t','f',' '};
+static BYTE data74[] = {'{','\\','r','t','f','<','h','t','m','l','>',' '};
+static BYTE data75[] = {'R','I','F','F',0xff,0xff,0xff,0xff,'W','A','V','E',0xff};
+static BYTE data76[] = {'R','I','F','F',0xff,0xff,0xff,0xff,'W','A','V','E'};
+static BYTE data77[] = {'R','I','F','F',0xff,0xff,0xff,0xff,'W','A','V',0xff,0xff};
+static BYTE data78[] = {'R','I','F','F',0xff,0xff,0xff,0xff,'<','h','t','m','l','>',0xff};
+static BYTE data79[] = {'%','!',0xff};
+static BYTE data80[] = {'%','!'};
+static BYTE data81[] = {'%','!','P','S','<','h','t','m','l','>'};
+static BYTE data82[] = {'.','s','n','d',0};
+static BYTE data83[] = {'.','s','n','d'};
+static BYTE data84[] = {'.','s','n','d',0,'<','h','t','m','l','>',1,1};
+static BYTE data85[] = {'.','S','N','D',0};
 
 static const struct {
     BYTE *data;
@@ -466,7 +582,38 @@ static const struct {
     {data51, sizeof(data51), mimeVideoMpeg},
     {data52, sizeof(data52), mimeAppOctetStream},
     {data53, sizeof(data53), mimeAppOctetStream},
-    {data54, sizeof(data54), mimeTextHtml}
+    {data54, sizeof(data54), mimeTextHtml},
+    {data55, sizeof(data55), mimeAppXGzip},
+    {data56, sizeof(data56), mimeTextPlain},
+    {data57, sizeof(data57), mimeTextHtml},
+    {data58, sizeof(data58), mimeAppOctetStream},
+    {data59, sizeof(data59), mimeAppXZip},
+    {data60, sizeof(data60), mimeTextPlain},
+    {data61, sizeof(data61), mimeTextHtml},
+    {data62, sizeof(data62), mimeAppJava},
+    {data63, sizeof(data63), mimeTextPlain},
+    {data64, sizeof(data64), mimeTextHtml},
+    {data65, sizeof(data65), mimeAppPdf},
+    {data66, sizeof(data66), mimeTextPlain},
+    {data67, sizeof(data67), mimeTextHtml},
+    {data68, sizeof(data68), mimeAppXMSDownload},
+    {data69, sizeof(data69), mimeTextPlain},
+    {data70, sizeof(data70), mimeTextHtml},
+    {data71, sizeof(data71), mimeTextRichtext},
+    {data72, sizeof(data72), mimeTextPlain},
+    {data73, sizeof(data73), mimeTextPlain},
+    {data74, sizeof(data74), mimeTextHtml},
+    {data75, sizeof(data75), mimeAudioWav},
+    {data76, sizeof(data76), mimeTextPlain},
+    {data77, sizeof(data77), mimeTextPlain},
+    {data78, sizeof(data78), mimeTextHtml},
+    {data79, sizeof(data79), mimeAppPostscript},
+    {data80, sizeof(data80), mimeTextPlain},
+    {data81, sizeof(data81), mimeTextHtml},
+    {data82, sizeof(data82), mimeAudioBasic},
+    {data83, sizeof(data83), mimeTextPlain},
+    {data84, sizeof(data84), mimeTextHtml},
+    {data85, sizeof(data85), mimeTextPlain}
 };
 
 static void test_FindMimeFromData(void)
@@ -483,7 +630,9 @@ static void test_FindMimeFromData(void)
             ok(!lstrcmpW(mime, mime_tests[i].mime), "[%d] wrong mime\n", i);
             CoTaskMemFree(mime);
         }else {
-            ok(hres == E_FAIL, "FindMimeFromData failed: %08x, expected E_FAIL\n", hres);
+            ok(hres == E_FAIL || hres == mime_tests[i].hres,
+               "[%d] FindMimeFromData failed: %08x, expected %08x\n",
+               i, hres, mime_tests[i].hres);
             ok(mime == (LPWSTR)0xf0f0f0f0, "[%d] mime != 0xf0f0f0f0\n", i);
         }
 
@@ -504,7 +653,7 @@ static void test_FindMimeFromData(void)
         hres = FindMimeFromData(NULL, NULL, mime_tests2[i].data, mime_tests2[i].size,
                 NULL, 0, &mime, 0);
         ok(hres == S_OK, "[%d] FindMimeFromData failed: %08x\n", i, hres);
-        ok(!lstrcmpW(mime, mime_tests2[i].mime), "[%d] wrong mime\n", i);
+        ok(!lstrcmpW(mime, mime_tests2[i].mime), "[%d] wrong mime: %s\n", i, debugstr_w(mime));
         CoTaskMemFree(mime);
 
         hres = FindMimeFromData(NULL, NULL, mime_tests2[i].data, mime_tests2[i].size,
@@ -515,6 +664,7 @@ static void test_FindMimeFromData(void)
             ok(!lstrcmpW(mime, mimeTextHtml), "[%d] wrong mime\n", i);
         else
             ok(!lstrcmpW(mime, mime_tests2[i].mime), "[%d] wrong mime\n", i);
+        CoTaskMemFree(mime);
 
         hres = FindMimeFromData(NULL, NULL, mime_tests2[i].data, mime_tests2[i].size,
                 mimeImagePjpeg, 0, &mime, 0);
@@ -564,12 +714,15 @@ static void test_FindMimeFromData(void)
 }
 
 static const BYTE secid1[] = {'f','i','l','e',':',0,0,0,0};
-static const BYTE secid4[] ={'f','i','l','e',':',3,0,0,0};
 static const BYTE secid5[] = {'h','t','t','p',':','w','w','w','.','w','i','n','e','h','q',
     '.','o','r','g',3,0,0,0};
 static const BYTE secid6[] = {'a','b','o','u','t',':','b','l','a','n','k',3,0,0,0};
 static const BYTE secid7[] = {'f','t','p',':','w','i','n','e','h','q','.','o','r','g',
                               3,0,0,0};
+static const BYTE secid10[] =
+    {'f','i','l','e',':','s','o','m','e','%','2','0','f','i','l','e','.','j','p','g',3,0,0,0};
+static const BYTE secid10_2[] =
+    {'f','i','l','e',':','s','o','m','e',' ','f','i','l','e','.','j','p','g',3,0,0,0};
 
 static struct secmgr_test {
     LPCWSTR url;
@@ -582,7 +735,6 @@ static struct secmgr_test {
     {url1, 0,   S_OK, sizeof(secid1), secid1, S_OK},
     {url2, 100, 0x80041001, 0, NULL, E_INVALIDARG},
     {url3, 0,   S_OK, sizeof(secid1), secid1, S_OK},
-    {url4, 3,   S_OK, sizeof(secid4), secid4, S_OK},
     {url5, 3,   S_OK, sizeof(secid5), secid5, S_OK},
     {url6, 3,   S_OK, sizeof(secid6), secid6, S_OK},
     {url7, 3,   S_OK, sizeof(secid7), secid7, S_OK}
@@ -593,7 +745,7 @@ static void test_SecurityManager(void)
     int i;
     IInternetSecurityManager *secmgr = NULL;
     BYTE buf[512];
-    DWORD zone, size;
+    DWORD zone, size, policy;
     HRESULT hres;
 
     hres = CoInternetCreateSecurityManager(NULL, &secmgr, 0);
@@ -605,11 +757,15 @@ static void test_SecurityManager(void)
         zone = 100;
         hres = IInternetSecurityManager_MapUrlToZone(secmgr, secmgr_tests[i].url,
                                                      &zone, 0);
-        ok(hres == secmgr_tests[i].zone_hres,
+        ok(hres == secmgr_tests[i].zone_hres /* IE <=6 */
+           || (FAILED(secmgr_tests[i].zone_hres) && hres == E_INVALIDARG), /* IE7 */
            "[%d] MapUrlToZone failed: %08x, expected %08x\n",
                 i, hres, secmgr_tests[i].zone_hres);
-        ok(zone == secmgr_tests[i].zone, "[%d] zone=%d, expected %d\n", i, zone,
-                secmgr_tests[i].zone);
+        if(SUCCEEDED(hres))
+            ok(zone == secmgr_tests[i].zone, "[%d] zone=%d, expected %d\n", i, zone,
+               secmgr_tests[i].zone);
+        else
+            ok(zone == secmgr_tests[i].zone || zone == -1, "[%d] zone=%d\n", i, zone);
 
         size = sizeof(buf);
         memset(buf, 0xf0, sizeof(buf));
@@ -626,8 +782,26 @@ static void test_SecurityManager(void)
     }
 
     zone = 100;
+    hres = IInternetSecurityManager_MapUrlToZone(secmgr, url10, &zone, 0);
+    ok(hres == S_OK, "MapUrlToZone failed: %08x, expected S_OK\n", hres);
+    ok(zone == 3, "zone=%d, expected 3\n", zone);
+
+    /* win2k3 translates %20 into a space */
+    size = sizeof(buf);
+    memset(buf, 0xf0, sizeof(buf));
+    hres = IInternetSecurityManager_GetSecurityId(secmgr, url10, buf, &size, 0);
+    ok(hres == S_OK, "GetSecurityId failed: %08x, expected S_OK\n", hres);
+    ok(size == sizeof(secid10) ||
+       size == sizeof(secid10_2), /* win2k3 */
+       "size=%d\n", size);
+    ok(!memcmp(buf, secid10, size) ||
+       !memcmp(buf, secid10_2, size), /* win2k3 */
+       "wrong secid\n");
+
+    zone = 100;
     hres = IInternetSecurityManager_MapUrlToZone(secmgr, NULL, &zone, 0);
     ok(hres == E_INVALIDARG, "MapUrlToZone failed: %08x, expected E_INVALIDARG\n", hres);
+    ok(zone == 100 || zone == -1, "zone=%d\n", zone);
 
     size = sizeof(buf);
     hres = IInternetSecurityManager_GetSecurityId(secmgr, NULL, buf, &size, 0);
@@ -642,7 +816,101 @@ static void test_SecurityManager(void)
     ok(hres == E_INVALIDARG,
        "GetSecurityId failed: %08x, expected E_INVALIDARG\n", hres);
 
+    hres = IInternetSecurityManager_ProcessUrlAction(secmgr, NULL, URLACTION_SCRIPT_RUN, (BYTE*)&policy,
+            sizeof(WCHAR), NULL, 0, 0, 0);
+    ok(hres == E_INVALIDARG, "ProcessUrlAction failed: %08x, expected E_INVALIDARG\n", hres);
+
     IInternetSecurityManager_Release(secmgr);
+}
+
+static void test_url_action(IInternetSecurityManager *secmgr, IInternetZoneManager *zonemgr, DWORD action)
+{
+    DWORD res, size, policy, reg_policy;
+    char buf[10];
+    HKEY hkey;
+    HRESULT hres;
+
+    res = RegOpenKeyA(HKEY_LOCAL_MACHINE,
+            "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\3", &hkey);
+    if(res != ERROR_SUCCESS) {
+        ok(0, "Could not open zone key\n");
+        return;
+    }
+
+    wsprintf(buf, "%X", action);
+    size = sizeof(DWORD);
+    res = RegQueryValueExA(hkey, buf, NULL, NULL, (BYTE*)&reg_policy, &size);
+    RegCloseKey(hkey);
+    if(res != ERROR_SUCCESS || size != sizeof(DWORD)) {
+        policy = 0xdeadbeef;
+        hres = IInternetSecurityManager_ProcessUrlAction(secmgr, url9, action, (BYTE*)&policy,
+                sizeof(WCHAR), NULL, 0, 0, 0);
+        ok(hres == E_FAIL, "ProcessUrlAction(%x) failed: %08x, expected E_FAIL\n", action, hres);
+        ok(policy == 0xdeadbeef, "(%x) policy=%x\n", action, policy);
+
+        policy = 0xdeadbeef;
+        hres = IInternetZoneManager_GetZoneActionPolicy(zonemgr, 3, action, (BYTE*)&policy,
+                sizeof(DWORD), URLZONEREG_DEFAULT);
+        ok(hres == E_FAIL, "GetZoneActionPolicy failed: %08x, expected E_FAIL\n", hres);
+        ok(policy == 0xdeadbeef, "(%x) policy=%x\n", action, policy);
+        return;
+    }
+
+    policy = 0xdeadbeef;
+    hres = IInternetZoneManager_GetZoneActionPolicy(zonemgr, 3, action, (BYTE*)&policy,
+            sizeof(DWORD), URLZONEREG_DEFAULT);
+    ok(hres == S_OK, "GetZoneActionPolicy failed: %08x\n", hres);
+    ok(policy == reg_policy, "(%x) policy=%x, expected %x\n", action, policy, reg_policy);
+
+    if(policy != URLPOLICY_QUERY) {
+        policy = 0xdeadbeef;
+        hres = IInternetSecurityManager_ProcessUrlAction(secmgr, url9, action, (BYTE*)&policy,
+                sizeof(WCHAR), NULL, 0, 0, 0);
+        if(reg_policy == URLPOLICY_DISALLOW)
+            ok(hres == S_FALSE, "ProcessUrlAction(%x) failed: %08x, expected S_FALSE\n", action, hres);
+        else
+            ok(hres == S_OK, "ProcessUrlAction(%x) failed: %08x\n", action, hres);
+        ok(policy == 0xdeadbeef, "(%x) policy=%x\n", action, policy);
+    }
+}
+
+static void test_special_url_action(IInternetSecurityManager *secmgr, IInternetZoneManager *zonemgr, DWORD action)
+{
+    DWORD policy;
+    HRESULT hres;
+
+    policy = 0xdeadbeef;
+    hres = IInternetZoneManager_GetZoneActionPolicy(zonemgr, 3, action, (BYTE*)&policy,
+            sizeof(DWORD), URLZONEREG_DEFAULT);
+    ok(hres == S_OK, "GetZoneActionPolicy failed: %08x\n", hres);
+    ok(policy == URLPOLICY_DISALLOW, "(%x) policy=%x, expected URLPOLIVY_DISALLOW\n", action, policy);
+
+    policy = 0xdeadbeef;
+    hres = IInternetSecurityManager_ProcessUrlAction(secmgr, url1, action, (BYTE*)&policy,
+            sizeof(WCHAR), NULL, 0, 0, 0);
+    ok(hres == S_FALSE, "ProcessUrlAction(%x) failed: %08x, expected S_FALSE\n", action, hres);
+}
+
+static void test_polices(void)
+{
+    IInternetZoneManager *zonemgr = NULL;
+    IInternetSecurityManager *secmgr = NULL;
+    HRESULT hres;
+
+    hres = CoInternetCreateSecurityManager(NULL, &secmgr, 0);
+    ok(hres == S_OK, "CoInternetCreateSecurityManager failed: %08x\n", hres);
+    hres = CoInternetCreateZoneManager(NULL, &zonemgr, 0);
+    ok(hres == S_OK, "CoInternetCreateZoneManager failed: %08x\n", hres);
+
+    test_url_action(secmgr, zonemgr, URLACTION_SCRIPT_RUN);
+    test_url_action(secmgr, zonemgr, URLACTION_ACTIVEX_OVERRIDE_OBJECT_SAFETY);
+    test_url_action(secmgr, zonemgr, URLACTION_CHANNEL_SOFTDIST_PERMISSIONS);
+    test_url_action(secmgr, zonemgr, 0xdeadbeef);
+
+    test_special_url_action(secmgr, zonemgr, URLACTION_SCRIPT_OVERRIDE_SAFETY);
+
+    IInternetSecurityManager_Release(secmgr);
+    IInternetZoneManager_Release(zonemgr);
 }
 
 static void test_ZoneManager(void)
@@ -703,6 +971,7 @@ static void register_protocols(void)
                                        wszAbout, 0, NULL, 0);
     IClassFactory_Release(factory);
 
+    IInternetSession_Release(session);
 }
 
 static HRESULT WINAPI InternetProtocolInfo_QueryInterface(IInternetProtocolInfo *iface,
@@ -794,6 +1063,13 @@ static ULONG WINAPI ClassFactory_Release(IClassFactory *iface)
 static HRESULT WINAPI ClassFactory_CreateInstance(IClassFactory *iface, IUnknown *pOuter,
                                         REFIID riid, void **ppv)
 {
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ProtocolCF_CreateInstance(IClassFactory *iface, IUnknown *pOuter,
+                                        REFIID riid, void **ppv)
+{
     CHECK_EXPECT(CreateInstance);
 
     ok(iface == expect_cf, "unexpected iface\n");
@@ -819,8 +1095,17 @@ static const IClassFactoryVtbl ClassFactoryVtbl = {
     ClassFactory_LockServer
 };
 
-static IClassFactory test_protocol_cf = { &ClassFactoryVtbl };
-static IClassFactory test_protocol_cf2 = { &ClassFactoryVtbl };
+static const IClassFactoryVtbl ProtocolCFVtbl = {
+    ClassFactory_QueryInterface,
+    ClassFactory_AddRef,
+    ClassFactory_Release,
+    ProtocolCF_CreateInstance,
+    ClassFactory_LockServer
+};
+
+static IClassFactory test_protocol_cf = { &ProtocolCFVtbl };
+static IClassFactory test_protocol_cf2 = { &ProtocolCFVtbl };
+static IClassFactory test_cf = { &ClassFactoryVtbl };
 
 static void test_NameSpace(void)
 {
@@ -948,6 +1233,33 @@ static void test_NameSpace(void)
     IInternetSession_Release(session);
 }
 
+static void test_MimeFilter(void)
+{
+    IInternetSession *session;
+    HRESULT hres;
+
+    static const WCHAR mimeW[] = {'t','e','s','t','/','m','i','m','e',0};
+
+    hres = CoInternetGetSession(0, &session, 0);
+    ok(hres == S_OK, "CoInternetGetSession failed: %08x\n", hres);
+    if(FAILED(hres))
+        return;
+
+    hres = IInternetSession_RegisterMimeFilter(session, &test_cf, &IID_NULL, mimeW);
+    ok(hres == S_OK, "RegisterMimeFilter failed: %08x\n", hres);
+
+    hres = IInternetSession_UnregisterMimeFilter(session, &test_cf, mimeW);
+    ok(hres == S_OK, "UnregisterMimeFilter failed: %08x\n", hres);
+
+    hres = IInternetSession_UnregisterMimeFilter(session, &test_cf, mimeW);
+    ok(hres == S_OK, "UnregisterMimeFilter failed: %08x\n", hres);
+
+    hres = IInternetSession_UnregisterMimeFilter(session, (void*)0xdeadbeef, mimeW);
+    ok(hres == S_OK, "UnregisterMimeFilter failed: %08x\n", hres);
+
+    IInternetSession_Release(session);
+}
+
 static ULONG WINAPI unk_Release(IUnknown *iface)
 {
     CHECK_EXPECT(unk_Release);
@@ -990,6 +1302,50 @@ static void test_ReleaseBindInfo(void)
     ok(bi.pUnk == &unk, "bi.pUnk=%p, expected %p\n", bi.pUnk, &unk);
 }
 
+static void test_CopyStgMedium(void)
+{
+    STGMEDIUM src, dst;
+    HRESULT hres;
+
+    static WCHAR fileW[] = {'f','i','l','e',0};
+
+    memset(&src, 0xf0, sizeof(src));
+    memset(&dst, 0xe0, sizeof(dst));
+    src.tymed = TYMED_NULL;
+    src.pUnkForRelease = NULL;
+    hres = CopyStgMedium(&src, &dst);
+    ok(hres == S_OK, "CopyStgMedium failed: %08x\n", hres);
+    ok(dst.tymed == TYMED_NULL, "tymed=%d\n", dst.tymed);
+    ok(dst.u.hGlobal == (void*)0xf0f0f0f0, "u=%p\n", dst.u.hGlobal);
+    ok(!dst.pUnkForRelease, "pUnkForRelease=%p, expected NULL\n", dst.pUnkForRelease);
+
+    memset(&dst, 0xe0, sizeof(dst));
+    src.tymed = TYMED_ISTREAM;
+    src.u.pstm = NULL;
+    src.pUnkForRelease = NULL;
+    hres = CopyStgMedium(&src, &dst);
+    ok(hres == S_OK, "CopyStgMedium failed: %08x\n", hres);
+    ok(dst.tymed == TYMED_ISTREAM, "tymed=%d\n", dst.tymed);
+    ok(!dst.u.pstm, "pstm=%p\n", dst.u.pstm);
+    ok(!dst.pUnkForRelease, "pUnkForRelease=%p, expected NULL\n", dst.pUnkForRelease);
+
+    memset(&dst, 0xe0, sizeof(dst));
+    src.tymed = TYMED_FILE;
+    src.u.lpszFileName = fileW;
+    src.pUnkForRelease = NULL;
+    hres = CopyStgMedium(&src, &dst);
+    ok(hres == S_OK, "CopyStgMedium failed: %08x\n", hres);
+    ok(dst.tymed == TYMED_FILE, "tymed=%d\n", dst.tymed);
+    ok(dst.u.lpszFileName && dst.u.lpszFileName != fileW, "lpszFileName=%p\n", dst.u.lpszFileName);
+    ok(!lstrcmpW(dst.u.lpszFileName, fileW), "wrong file name\n");
+    ok(!dst.pUnkForRelease, "pUnkForRelease=%p, expected NULL\n", dst.pUnkForRelease);
+
+    hres = CopyStgMedium(&src, NULL);
+    ok(hres == E_POINTER, "CopyStgMedium failed: %08x, expected E_POINTER\n", hres);
+    hres = CopyStgMedium(NULL, &dst);
+    ok(hres == E_POINTER, "CopyStgMedium failed: %08x, expected E_POINTER\n", hres);
+}
+
 static void test_UrlMkGetSessionOption(void)
 {
     DWORD encoding, size;
@@ -1030,6 +1386,111 @@ static void test_UrlMkGetSessionOption(void)
     ok(encoding == 0xdeadbeef, "encoding = %08x, exepcted 0xdeadbeef\n", encoding);
 }
 
+static void test_ObtainUserAgentString(void)
+{
+    static const CHAR expected[] = "Mozilla/4.0 (compatible; MSIE ";
+    static CHAR str[3];
+    LPSTR str2 = NULL;
+    HRESULT hres;
+    DWORD size, saved;
+
+    hres = ObtainUserAgentString(0, NULL, NULL);
+    ok(hres == E_INVALIDARG, "ObtainUserAgentString failed: %08x\n", hres);
+
+    size = 100;
+    hres = ObtainUserAgentString(0, NULL, &size);
+    ok(hres == E_INVALIDARG, "ObtainUserAgentString failed: %08x\n", hres);
+    ok(size == 100, "size=%d, expected %d\n", size, 100);
+
+    size = 0;
+    hres = ObtainUserAgentString(0, str, &size);
+    ok(hres == E_OUTOFMEMORY, "ObtainUserAgentString failed: %08x\n", hres);
+    ok(size > 0, "size=%d, expected non-zero\n", size);
+
+    size = 2;
+    str[0] = 'a';
+    hres = ObtainUserAgentString(0, str, &size);
+    ok(hres == E_OUTOFMEMORY, "ObtainUserAgentString failed: %08x\n", hres);
+    ok(size > 0, "size=%d, expected non-zero\n", size);
+    ok(str[0] == 'a', "str[0]=%c, expected 'a'\n", str[0]);
+
+    size = 0;
+    hres = ObtainUserAgentString(1, str, &size);
+    ok(hres == E_OUTOFMEMORY, "ObtainUserAgentString failed: %08x\n", hres);
+    ok(size > 0, "size=%d, expected non-zero\n", size);
+
+    str2 = HeapAlloc(GetProcessHeap(), 0, (size+20)*sizeof(CHAR));
+    if (!str2)
+    {
+        skip("skipping rest of ObtainUserAgent tests, out of memory\n");
+    }
+    else
+    {
+        saved = size;
+        hres = ObtainUserAgentString(0, str2, &size);
+        ok(hres == S_OK, "ObtainUserAgentString failed: %08x\n", hres);
+        ok(size == saved, "size=%d, expected %d\n", size, saved);
+        ok(strlen(expected) <= strlen(str2) &&
+           !memcmp(expected, str2, strlen(expected)*sizeof(CHAR)),
+           "user agent was \"%s\", expected to start with \"%s\"\n",
+           str2, expected);
+
+        size = saved+10;
+        hres = ObtainUserAgentString(0, str2, &size);
+        ok(hres == S_OK, "ObtainUserAgentString failed: %08x\n", hres);
+        ok(size == saved, "size=%d, expected %d\n", size, saved);
+    }
+    HeapFree(GetProcessHeap(), 0, str2);
+}
+
+static void test_MkParseDisplayNameEx(void)
+{
+    IMoniker *mon = NULL;
+    LPWSTR name;
+    DWORD issys;
+    ULONG eaten = 0;
+    IBindCtx *bctx;
+    HRESULT hres;
+
+    static const WCHAR clsid_nameW[] = {'c','l','s','i','d',':',
+            '2','0','D','0','4','F','E','0','-','3','A','E','A','-','1','0','6','9','-','A','2','D','8',
+            '-','0','8','0','0','2','B','3','0','3','0','9','D',':',0};
+
+    CreateBindCtx(0, &bctx);
+
+    hres = MkParseDisplayNameEx(bctx, url9, &eaten, &mon);
+    ok(hres == S_OK, "MkParseDisplayNameEx failed: %08x\n", hres);
+    ok(eaten == sizeof(url9)/sizeof(WCHAR)-1, "eaten=%d\n", eaten);
+    ok(mon != NULL, "mon == NULL\n");
+
+    hres = IMoniker_GetDisplayName(mon, NULL, 0, &name);
+    ok(hres == S_OK, "GetDiasplayName failed: %08x\n", hres);
+    ok(!lstrcmpW(name, url9), "wrong display name %s\n", debugstr_w(name));
+    CoTaskMemFree(name);
+
+    hres = IMoniker_IsSystemMoniker(mon, &issys);
+    ok(hres == S_OK, "IsSystemMoniker failed: %08x\n", hres);
+    ok(issys == MKSYS_URLMONIKER, "issys=%x\n", issys);
+
+    IMoniker_Release(mon);
+
+    hres = MkParseDisplayNameEx(bctx, clsid_nameW, &eaten, &mon);
+    ok(hres == S_OK, "MkParseDisplayNameEx failed: %08x\n", hres);
+    ok(eaten == sizeof(clsid_nameW)/sizeof(WCHAR)-1, "eaten=%d\n", eaten);
+    ok(mon != NULL, "mon == NULL\n");
+
+    hres = IMoniker_IsSystemMoniker(mon, &issys);
+    ok(hres == S_OK, "IsSystemMoniker failed: %08x\n", hres);
+    ok(issys == MKSYS_CLASSMONIKER, "issys=%x\n", issys);
+
+    IMoniker_Release(mon);
+
+    hres = MkParseDisplayNameEx(bctx, url8, &eaten, &mon);
+    ok(FAILED(hres), "MkParseDisplayNameEx succeeded: %08x\n", hres);
+
+    IBindCtx_Release(bctx);
+}
+
 START_TEST(misc)
 {
     OleInitialize(NULL);
@@ -1039,12 +1500,19 @@ START_TEST(misc)
     test_CreateFormatEnum();
     test_RegisterFormatEnumerator();
     test_CoInternetParseUrl();
+    test_CoInternetCompareUrl();
+    test_CoInternetQueryInfo();
     test_FindMimeFromData();
     test_SecurityManager();
+    test_polices();
     test_ZoneManager();
     test_NameSpace();
+    test_MimeFilter();
     test_ReleaseBindInfo();
+    test_CopyStgMedium();
     test_UrlMkGetSessionOption();
+    test_ObtainUserAgentString();
+    test_MkParseDisplayNameEx();
 
     OleUninitialize();
 }

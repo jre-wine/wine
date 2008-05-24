@@ -35,7 +35,6 @@
 #include "winuser.h"
 #include "objbase.h"
 #include "ole2.h"
-#include "ole2ver.h"
 #include "rpc.h"
 #include "winerror.h"
 #include "winreg.h"
@@ -155,7 +154,7 @@ DWORD CDECL IMalloc16_fnGetSize(IMalloc16* iface,SEGPTR pv)
  * IMalloc16_DidAlloc [COMPOBJ.507]
  */
 INT16 CDECL IMalloc16_fnDidAlloc(IMalloc16* iface,LPVOID pv) {
-        IMalloc16 *This = (IMalloc16 *)iface;
+        IMalloc16 *This = iface;
 	TRACE("(%p)->DidAlloc(%p)\n",This,pv);
 	return (INT16)-1;
 }
@@ -410,7 +409,7 @@ HRESULT WINAPI StringFromCLSID16(
  */
 HRESULT WINAPI ProgIDFromCLSID16(
   REFCLSID clsid, /* [in] class id as found in registry */
-  LPOLESTR16 *lplpszProgID/* [out] associated Prog ID */
+  LPOLESTR16 *lplpszProgID/* [out] associated Program ID */
 ) {
   static const WCHAR wszProgID[] = {'P','r','o','g','I','D',0};
   HKEY     hkey;
@@ -644,6 +643,15 @@ HRESULT WINAPI CoCreateInstance16(
 	debugstr_guid(rclsid), pUnkOuter, dwClsContext, debugstr_guid(iid),
 	ppv
   );
+  return E_NOTIMPL;
+}
+
+/***********************************************************************
+ *           CoDisconnectObject [COMPOBJ.15]
+ */
+HRESULT WINAPI CoDisconnectObject16( LPUNKNOWN lpUnk, DWORD reserved )
+{
+  FIXME("(%p, 0x%08x): stub!\n", lpUnk, reserved);
   return E_NOTIMPL;
 }
 

@@ -18,8 +18,6 @@
 
 #define DIRECTINPUT_VERSION 0x0700
 
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
 #include <windows.h>
 
 #include <math.h>
@@ -69,7 +67,7 @@ static const DIDATAFORMAT c_dfDIJoystickTest = {
     (LPDIOBJECTDATAFORMAT)dfDIJoystickTest
 };
 
-HWND get_hwnd(void)
+static HWND get_hwnd(void)
 {
     HWND hwnd=GetForegroundWindow();
     if (!hwnd)
@@ -83,6 +81,8 @@ typedef struct tagJoystickInfo
     DWORD axis;
     DWORD pov;
     DWORD button;
+    LONG  lMin, lMax;
+    DWORD dZone;
 } JoystickInfo;
 
 static BOOL CALLBACK EnumAxes(
@@ -98,20 +98,45 @@ static BOOL CALLBACK EnumAxes(
         IsEqualIID(&pdidoi->guidType, &GUID_RxAxis) ||
         IsEqualIID(&pdidoi->guidType, &GUID_RyAxis) ||
         IsEqualIID(&pdidoi->guidType, &GUID_RzAxis) ||
-        IsEqualIID(&pdidoi->guidType, &GUID_Slider)) {
+        IsEqualIID(&pdidoi->guidType, &GUID_Slider))
+    {
         DIPROPRANGE diprg;
+        DIPROPDWORD dipdw;
+
         diprg.diph.dwSize       = sizeof(DIPROPRANGE);
         diprg.diph.dwHeaderSize = sizeof(DIPROPHEADER);
         diprg.diph.dwHow        = DIPH_BYID;
         diprg.diph.dwObj        = pdidoi->dwType;
-        diprg.lMin              = -1000;
-        diprg.lMax              = +1000;
+
+        dipdw.diph.dwSize       = sizeof(dipdw);
+        dipdw.diph.dwHeaderSize = sizeof(DIPROPHEADER);
+        dipdw.diph.dwHow        = DIPH_BYID;
+        dipdw.diph.dwObj        = pdidoi->dwType;
+
+        hr = IDirectInputDevice_GetProperty(info->pJoystick, DIPROP_RANGE, &diprg.diph);
+        ok(SUCCEEDED(hr), "IDirectInputDevice_GetProperty() failed: %s\n", DXGetErrorString8(hr));
+        ok(info->lMin == diprg.lMin && info->lMax == diprg.lMax, "Min/Max range invalid: "
+           "expected %d..%d got %d..%d\n", info->lMin, info->lMax, diprg.lMin, diprg.lMax);
+
+        diprg.lMin = -2000;
+        diprg.lMax = +2000;
 
         hr = IDirectInputDevice_SetProperty(info->pJoystick, DIPROP_RANGE, NULL);
         ok(hr==E_INVALIDARG,"IDirectInputDevice_SetProperty() should have returned "
            "E_INVALIDARG, returned: %s\n", DXGetErrorString8(hr));
 
         hr = IDirectInputDevice_SetProperty(info->pJoystick, DIPROP_RANGE, &diprg.diph);
+        ok(hr==DI_OK,"IDirectInputDevice_SetProperty() failed: %s\n", DXGetErrorString8(hr));
+
+        /* dead zone */
+        hr = IDirectInputDevice_GetProperty(info->pJoystick, DIPROP_DEADZONE, &dipdw.diph);
+        ok(SUCCEEDED(hr), "IDirectInputDevice_GetProperty() failed: %s\n", DXGetErrorString8(hr));
+        ok(info->dZone == dipdw.dwData, "deadzone invalid: expected %d got %d\n",
+           info->dZone, dipdw.dwData);
+
+        dipdw.dwData = 123;
+
+        hr = IDirectInputDevice_SetProperty(info->pJoystick, DIPROP_DEADZONE, &dipdw.diph);
         ok(hr==DI_OK,"IDirectInputDevice_SetProperty() failed: %s\n", DXGetErrorString8(hr));
 
         info->axis++;
@@ -241,14 +266,26 @@ static BOOL CALLBACK EnumJoysticks(
     ZeroMemory(&info, sizeof(info));
     info.pJoystick = pJoystick;
 
+    /* default min/max limits */
+    info.lMin = 0;
+    info.lMax = 0xffff;
     /* enumerate objects */
     hr = IDirectInputDevice_EnumObjects(pJoystick, EnumAxes, (VOID*)&info, DIDFT_ALL);
     ok(hr==DI_OK,"IDirectInputDevice_EnumObjects() failed: %s\n",
        DXGetErrorString8(hr));
 
-    ok(caps.dwAxes == info.axis, "Number of enumerated axes doesn't match capabilities\n");
-    ok(caps.dwButtons == info.button, "Number of enumerated buttons doesn't match capabilities\n");
-    ok(caps.dwPOVs == info.pov, "Number of enumerated POVs doesn't match capabilities\n");
+    ok(caps.dwAxes == info.axis, "Number of enumerated axes (%d) doesn't match capabilities (%d)\n", info.axis, caps.dwAxes);
+    ok(caps.dwButtons == info.button, "Number of enumerated buttons (%d) doesn't match capabilities (%d)\n", info.button, caps.dwButtons);
+    ok(caps.dwPOVs == info.pov, "Number of enumerated POVs (%d) doesn't match capabilities (%d)\n", info.pov, caps.dwPOVs);
+
+    /* Set format and check limits again */
+    hr = IDirectInputDevice_SetDataFormat(pJoystick, &c_dfDIJoystick2);
+    ok(hr==DI_OK,"IDirectInputDevice_SetDataFormat() failed: %s\n", DXGetErrorString8(hr));
+    info.lMin = -2000;
+    info.lMax = +2000;
+    info.dZone= 123;
+    hr = IDirectInputDevice_EnumObjects(pJoystick, EnumAxes, (VOID*)&info, DIDFT_ALL);
+    ok(hr==DI_OK,"IDirectInputDevice_EnumObjects() failed: %s\n", DXGetErrorString8(hr));
 
     hr = IDirectInputDevice_GetDeviceInfo(pJoystick, 0);
     ok(hr==E_POINTER, "IDirectInputDevice_GetDeviceInfo() "
@@ -273,11 +310,26 @@ static BOOL CALLBACK EnumJoysticks(
     ok(hr==DI_OK,"IDirectInputDevice_GetDeviceInfo() failed: %s\n",
        DXGetErrorString8(hr));
 
+    hr = IDirectInputDevice_Unacquire(pJoystick);
+    ok(hr == S_FALSE, "IDirectInputDevice_Unacquire() should have returned S_FALSE, got: %s\n",
+       DXGetErrorString8(hr));
+
     hr = IDirectInputDevice_Acquire(pJoystick);
     ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %s\n",
        DXGetErrorString8(hr));
     if (hr != DI_OK)
         goto RELEASE;
+
+    hr = IDirectInputDevice_Acquire(pJoystick);
+    ok(hr == S_FALSE, "IDirectInputDevice_Acquire() should have returned S_FALSE, got: %s\n",
+       DXGetErrorString8(hr));
+
+    if (info.pov < 4)
+    {
+        hr = IDirectInputDevice_GetDeviceState(pJoystick, sizeof(DIJOYSTATE2), &js);
+        ok(hr == DI_OK, "IDirectInputDevice_GetDeviceState() failed: %s\n", DXGetErrorString8(hr));
+        ok(js.rgdwPOV[3] == -1, "Default for unassigned POV should be -1 not: %d\n", js.rgdwPOV[3]);
+    }
 
     if (winetest_interactive) {
         trace("You have 30 seconds to test all axes, sliders, POVs and buttons\n");

@@ -25,6 +25,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "winternl.h"
 #include "wine/winbase16.h"
 #include "wownt32.h"
 #include "dosexe.h"
@@ -32,7 +33,6 @@
 #include "excpt.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
-#include "thread.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(int31);
 
@@ -108,11 +108,11 @@ static WORD alloc_pm_selector( WORD seg, unsigned char flags )
  * Handle EXCEPTION_VM86_STI exceptions generated
  * when there are pending asynchronous events.
  */
-static WINE_EXCEPTION_FILTER(dpmi_exception_handler)
+static LONG WINAPI dpmi_exception_handler(EXCEPTION_POINTERS *eptr)
 {
 #ifdef __i386__
-    EXCEPTION_RECORD *rec = GetExceptionInformation()->ExceptionRecord;
-    CONTEXT *context = GetExceptionInformation()->ContextRecord;
+    EXCEPTION_RECORD *rec = eptr->ExceptionRecord;
+    CONTEXT *context = eptr->ContextRecord;
 
     if (rec->ExceptionCode == EXCEPTION_VM86_STI)
     {
@@ -183,7 +183,7 @@ static void INT_SetRealModeContext( REALMODECALL *call, CONTEXT86 *context )
 
 /**********************************************************************
  *          DPMI_xalloc
- * special virtualalloc, allocates lineary monoton growing memory.
+ * special virtualalloc, allocates linearly monoton growing memory.
  * (the usual VirtualAlloc does not satisfy that restriction)
  */
 static LPVOID DPMI_xalloc( DWORD len ) 
@@ -353,10 +353,10 @@ __ASM_GLOBAL_FUNC(DPMI_CallRMCB32,
  */
 static void DPMI_CallRMCBProc( CONTEXT86 *context, RMCB *rmcb, WORD flag )
 {
-    DWORD old_vif = NtCurrentTeb()->dpmi_vif;
+    DWORD old_vif = get_vm86_teb_info()->dpmi_vif;
 
     /* Disable virtual interrupts. */
-    NtCurrentTeb()->dpmi_vif = 0;
+    get_vm86_teb_info()->dpmi_vif = 0;
 
     if (wine_ldt_is_system( rmcb->proc_sel )) {
         /* Wine-internal RMCB, call directly */
@@ -404,7 +404,7 @@ static void DPMI_CallRMCBProc( CONTEXT86 *context, RMCB *rmcb, WORD flag )
     } __EXCEPT(dpmi_exception_handler) { } __ENDTRY
         
     /* Restore virtual interrupt flag. */
-    NtCurrentTeb()->dpmi_vif = old_vif;                                 
+    get_vm86_teb_info()->dpmi_vif = old_vif;
 }
 
 
@@ -517,9 +517,9 @@ callrmproc_again:
 
 
 /**********************************************************************
- *	    CallRMInt   (WINEDOS.@)
+ *	    CallRMInt
  */
-void WINAPI DOSVM_CallRMInt( CONTEXT86 *context )
+static void DOSVM_CallRMInt( CONTEXT86 *context )
 {
     CONTEXT86 realmode_ctx;
     FARPROC16 rm_int = DOSVM_GetRMHandler( BL_reg(context) );
@@ -546,9 +546,9 @@ void WINAPI DOSVM_CallRMInt( CONTEXT86 *context )
 
 
 /**********************************************************************
- *	    CallRMProc   (WINEDOS.@)
+ *	    CallRMProc
  */
-void WINAPI DOSVM_CallRMProc( CONTEXT86 *context, int iret )
+static void DOSVM_CallRMProc( CONTEXT86 *context, int iret )
 {
     REALMODECALL *p = CTX_SEG_OFF_TO_LIN( context, 
                                           context->SegEs, 
@@ -734,7 +734,7 @@ void WINAPI DOSVM_RawModeSwitchHandler( CONTEXT86 *context )
   rm_ctx.SegGs  = 0;
 
   /* Copy interrupt state. */
-  if (NtCurrentTeb()->dpmi_vif)
+  if (get_vm86_teb_info()->dpmi_vif)
       rm_ctx.EFlags = V86_FLAG | VIF_MASK;
   else
       rm_ctx.EFlags = V86_FLAG;
@@ -764,9 +764,9 @@ void WINAPI DOSVM_RawModeSwitchHandler( CONTEXT86 *context )
 
   /* Copy interrupt state. */
   if (rm_ctx.EFlags & VIF_MASK)
-      NtCurrentTeb()->dpmi_vif = 1;
+      get_vm86_teb_info()->dpmi_vif = 1;
   else
-      NtCurrentTeb()->dpmi_vif = 0;
+      get_vm86_teb_info()->dpmi_vif = 0;
 
   /* Return to new address and hope that we didn't mess up */
   TRACE("re-entering protected mode at %04x:%08x\n",
@@ -775,9 +775,9 @@ void WINAPI DOSVM_RawModeSwitchHandler( CONTEXT86 *context )
 
 
 /**********************************************************************
- *	    AllocRMCB   (WINEDOS.@)
+ *	    AllocRMCB
  */
-void WINAPI DOSVM_AllocRMCB( CONTEXT86 *context )
+static void DOSVM_AllocRMCB( CONTEXT86 *context )
 {
     RMCB *NewRMCB = DPMI_AllocRMCB();
 
@@ -801,9 +801,9 @@ void WINAPI DOSVM_AllocRMCB( CONTEXT86 *context )
 
 
 /**********************************************************************
- *	    FreeRMCB   (WINEDOS.@)
+ *	    FreeRMCB
  */
-void WINAPI DOSVM_FreeRMCB( CONTEXT86 *context )
+static void DOSVM_FreeRMCB( CONTEXT86 *context )
 {
     FIXME("callback address: %04x:%04x\n",
           CX_reg(context), DX_reg(context));
@@ -1067,7 +1067,7 @@ void WINAPI DOSVM_Int31Handler( CONTEXT86 *context )
         break;
 
     case 0x0200: /* get real mode interrupt vector */
-        TRACE( "get realmode interupt vector (0x%02x)\n",
+        TRACE( "get realmode interrupt vector (0x%02x)\n",
                BL_reg(context) );
         {
             FARPROC16 proc = DOSVM_GetRMHandler( BL_reg(context) );
@@ -1253,7 +1253,7 @@ void WINAPI DOSVM_Int31Handler( CONTEXT86 *context )
 
             TRACE( "allocate memory block (%d bytes)\n", size );
 
-            ptr = (BYTE *)DPMI_xalloc( size );
+            ptr = DPMI_xalloc( size );
             if (!ptr)
             {
                 SET_AX( context, 0x8012 );  /* linear memory not available */
@@ -1285,7 +1285,7 @@ void WINAPI DOSVM_Int31Handler( CONTEXT86 *context )
 
             TRACE( "resize memory block (0x%08x, %d bytes)\n", handle, size );
 
-            ptr = (BYTE *)DPMI_xrealloc( (void *)handle, size );
+            ptr = DPMI_xrealloc( (void *)handle, size );
             if (!ptr)
             {
                 SET_AX( context, 0x8012 );  /* linear memory not available */
@@ -1347,23 +1347,23 @@ void WINAPI DOSVM_Int31Handler( CONTEXT86 *context )
         break;
 
     case 0x0900:  /* Get and Disable Virtual Interrupt State */
-        TRACE( "Get and Disable Virtual Interrupt State: %ld\n", 
-               NtCurrentTeb()->dpmi_vif );
-        SET_AL( context, NtCurrentTeb()->dpmi_vif ? 1 : 0 );
-        NtCurrentTeb()->dpmi_vif = 0;
+        TRACE( "Get and Disable Virtual Interrupt State: %d\n",
+               get_vm86_teb_info()->dpmi_vif );
+        SET_AL( context, get_vm86_teb_info()->dpmi_vif ? 1 : 0 );
+        get_vm86_teb_info()->dpmi_vif = 0;
         break;
 
     case 0x0901:  /* Get and Enable Virtual Interrupt State */
-        TRACE( "Get and Enable Virtual Interrupt State: %ld\n", 
-               NtCurrentTeb()->dpmi_vif );
-        SET_AL( context, NtCurrentTeb()->dpmi_vif ? 1 : 0 );
-        NtCurrentTeb()->dpmi_vif = 1;
+        TRACE( "Get and Enable Virtual Interrupt State: %d\n",
+               get_vm86_teb_info()->dpmi_vif );
+        SET_AL( context, get_vm86_teb_info()->dpmi_vif ? 1 : 0 );
+        get_vm86_teb_info()->dpmi_vif = 1;
         break;
 
     case 0x0902:  /* Get Virtual Interrupt State */
-        TRACE( "Get Virtual Interrupt State: %ld\n", 
-               NtCurrentTeb()->dpmi_vif );
-        SET_AL( context, NtCurrentTeb()->dpmi_vif ? 1 : 0 );
+        TRACE( "Get Virtual Interrupt State: %d\n",
+               get_vm86_teb_info()->dpmi_vif );
+        SET_AL( context, get_vm86_teb_info()->dpmi_vif ? 1 : 0 );
         break;
 
     case 0x0e00:  /* Get Coprocessor Status (1.0) */

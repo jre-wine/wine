@@ -29,7 +29,6 @@
 #define IDS_LIST_COLUMN_TYPE            92
 #define IDS_LIST_COLUMN_DATA            93
 #define IDS_LIST_COLUMN_LAST            93
-#define IDD_ABOUTBOX                    103
 #define IDS_APP_TITLE                   103
 #define IDI_REGEDIT                     100
 #define IDI_SMALL                       108
@@ -133,6 +132,8 @@
 #define ID_SWITCH_PANELS                32871
 #define ID_FAVORITE_FIRST               33000
 #define ID_FAVORITE_LAST                33099
+#define ID_EDIT_NEW_MULTI_STRINGVALUE   33100
+#define ID_EDIT_EXPORT                  33101
 
 #define IDD_EDIT_STRING			2000
 #define IDC_VALUE_NAME			2001
@@ -143,6 +144,7 @@
 #define IDC_FIND_VALUES                 2006
 #define IDC_FIND_CONTENT                2007
 #define IDC_FIND_WHOLE                  2008
+#define IDD_EDIT_MULTI_STRING           2009
 
 #define IDC_EXPORT_BASE                 100
 #define IDC_EXPORT_ALL                  101

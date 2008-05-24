@@ -58,7 +58,7 @@ typedef struct CCPRIVATE
     RECT fullsize;       /* original dialog window size */
     UINT msetrgb;        /* # of SETRGBSTRING message (today not used)  */
     RECT old3angle;      /* last position of l-marker */
-    RECT oldcross;       /* last position of color/satuation marker */
+    RECT oldcross;       /* last position of color/saturation marker */
     BOOL updating;       /* to prevent recursive WM_COMMAND/EN_UPDATE processing */
     int h;
     int s;
@@ -197,7 +197,7 @@ static LRESULT CC_WMCommand16( HWND hDlg, WPARAM wParam, LPARAM lParam, WORD not
     HDC hdc;
     COLORREF *cr;
     LCCPRIV lpp = (LCCPRIV)GetWindowLongPtrW(hDlg, DWLP_USER);
-    TRACE("CC_WMCommand wParam=%x lParam=%lx\n", wParam, lParam);
+    TRACE("CC_WMCommand wParam=%lx lParam=%lx\n", wParam, lParam);
     switch (wParam)
     {
           case 0x2c2:  /* edit notify RGB */

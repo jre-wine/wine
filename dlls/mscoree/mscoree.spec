@@ -2,7 +2,7 @@
 18 stub PostError
 19 stub InitSSAutoEnterThread
 20 stub UpdateError
-22 stub LoadStringRC
+22 stdcall LoadStringRC(long ptr long long)
 23 stub ReOpenMetaDataWithMemory
 
 @ stub CallFunctionShim
@@ -19,18 +19,18 @@
 @ stub CorBindToRuntimeByCfg
 @ stub CorBindToRuntimeByPath
 @ stub CorBindToRuntimeByPathEx
-@ stub CorBindToRuntimeEx
+@ stdcall CorBindToRuntimeEx(wstr wstr long ptr ptr ptr)
 @ stdcall CorBindToRuntimeHost(wstr wstr wstr ptr long ptr ptr ptr)
 @ stub CorDllMainWorker
-@ stub CorExitProcess
+@ stdcall CorExitProcess(long)
 @ stub CorGetSvc
 @ stub CorIsLatestSvc
 @ stub CorMarkThreadInThreadPool
 @ stub CorTickleSvc
 @ stub CreateConfigStream
 @ stub CreateDebuggingInterfaceFromVersion
-@ stub DllCanUnloadNow
-@ stub DllGetClassObject
+@ stdcall -private DllCanUnloadNow()
+@ stdcall -private DllGetClassObject(ptr ptr ptr)
 @ stub DllRegisterServer
 @ stub DllUnregisterServer
 @ stub EEDllGetClassObjectFromClass
@@ -39,8 +39,8 @@
 @ stdcall GetAssemblyMDImport(ptr ptr ptr)
 @ stub GetCORRequiredVersion
 @ stub GetCORRootDirectory
-@ stub GetCORSystemDirectory
-@ stdcall GetCORVersion(wstr long ptr)
+@ stdcall GetCORSystemDirectory(ptr long ptr)
+@ stdcall GetCORVersion(ptr long ptr)
 @ stub GetCompileInfo
 @ stub GetFileVersion
 @ stub GetHashFromAssemblyFile
@@ -57,21 +57,31 @@
 @ stub GetPrivateContextsPerfCounters
 @ stub GetProcessExecutableHeap
 @ stub GetRealProcAddress
-@ stub GetRequestedRuntimeInfo
+@ stdcall GetRequestedRuntimeInfo(wstr wstr wstr long long ptr long ptr ptr long ptr)
 @ stub GetRequestedRuntimeVersion
 @ stub GetRequestedRuntimeVersionForCLSID
 @ stub GetStartupFlags
 @ stub GetTargetForVTableEntry
 @ stub GetTokenForVTableEntry
-@ stub GetVersionFromProcess
+@ stdcall GetVersionFromProcess(ptr ptr long ptr)
 @ stub GetXMLElement
 @ stub GetXMLElementAttribute
 @ stub GetXMLObject
 @ stdcall LoadLibraryShim(ptr ptr ptr ptr)
 @ stub LoadLibraryWithPolicyShim
-@ stub LoadStringRCEx
+@ stdcall LoadStringRCEx(long long ptr long long ptr)
 @ stub LockClrVersion
 @ stub MetaDataGetDispenser
+@ stdcall ND_CopyObjDst(ptr ptr long long)
+@ stdcall ND_CopyObjSrc(ptr long ptr long)
+@ stdcall ND_RI2(ptr long)
+@ stdcall ND_RI4(ptr long)
+@ stdcall -ret64 ND_RI8(ptr long)
+@ stdcall ND_RU1(ptr long)
+@ stdcall ND_WI2(ptr long long)
+@ stdcall ND_WI4(ptr long long)
+@ stdcall ND_WI8(ptr long long long)
+@ stdcall ND_WU1(ptr long long)
 @ stub OpenCtrs
 @ stub ReOpenMetaDataWithMemoryEx
 @ stub RunDll@ShimW

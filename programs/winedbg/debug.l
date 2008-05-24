@@ -22,9 +22,14 @@
 %option nounput interactive 8bit prefix="dbg_"
 
 %{
+#include "config.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+
+#ifndef HAVE_UNISTD_H
+#define YY_NO_UNISTD_H
+#endif
 
 #include "debugger.h"
 #include "dbg.tab.h"
@@ -33,9 +38,9 @@
 
 static int read_input(const char* pfx, char* buf, int size)
 {
-    size_t      len;
-static char*  last_line = NULL;
-static size_t last_line_idx = 0;
+    int len;
+    static char*  last_line = NULL;
+    static size_t last_line_idx = 0;
 
     /* try first to fetch the remaining of an existing line */
     if (last_line_idx == 0)
@@ -44,6 +49,7 @@ static size_t last_line_idx = 0;
         /* no remaining chars to be read from last line, grab a brand new line up to '\n' */
         lexeme_flush();
         len = input_fetch_entire_line(pfx, &tmp);
+        if (len < 0) return 0;  /* eof */
         /* FIXME: should have a pair of buffers, and switch between the two, instead of
          * reallocating a new one for each line
          */
@@ -95,7 +101,7 @@ STRING     \"[^\n"]+\"
 %x NOPROCESS
 %%
                                         /* set to special state when no process is loaded. */
-                                        if (!dbg_curr_process && YYSTATE == INITIAL) {BEGIN(NOPROCESS);}
+                                        if (!dbg_num_processes() && YYSTATE == INITIAL) {BEGIN(NOPROCESS);}
 
 <<EOF>>                                 { return tEOF; }
 <*>\n		                        { BEGIN(INITIAL); syntax_error = 0; return tEOL; }
@@ -177,11 +183,12 @@ STRING     \"[^\n"]+\"
 <INITIAL>whatis|whati|what		{ BEGIN(NOCMD); return tWHATIS; }
 <INITIAL,NOPROCESS>run|ru|r     	{ BEGIN(ASTRING_EXPECTED); return tRUN;}
 <INITIAL>detach|detac|deta|det   	{ BEGIN(NOCMD); return tDETACH; }
-<INITIAL>maintenance|maint              { BEGIN(MAINT_CMD); return tMAINTENANCE; }
+<INITIAL,NOPROCESS>maintenance|maint    { BEGIN(MAINT_CMD); return tMAINTENANCE; }
 <INITIAL>minidump|mdmp                  { BEGIN(PATH_EXPECTED); return tMINIDUMP; }
 <INITIAL>echo				{ BEGIN(ASTRING_EXPECTED); return tECHO; }
 <NOPROCESS>attach|attac|atta|att 	{ BEGIN(NOCMD); return tATTACH; }
-<INFO_CMD>share|shar|sha		{ return tSHARE; }
+<INFO_CMD>share|shar|sha                { return tSHARE; }
+<MAINT_CMD>module|modul|mod             { BEGIN(ASTRING_EXPECTED); return tMODULE; }
 <INFO_CMD>locals|local|loca|loc		{ return tLOCAL; }
 <INFO_CMD>class|clas|cla                { return tCLASS; }
 <INFO_CMD>process|proces|proce|proc   	{ return tPROCESS; }

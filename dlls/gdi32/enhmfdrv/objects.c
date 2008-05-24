@@ -22,7 +22,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "gdi.h"
 #include "enhmfdrv/enhmetafiledrv.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
@@ -175,7 +174,7 @@ DWORD EMFDRV_CreateBrushIndirect( PHYSDEV dev, HBRUSH hBrush )
 	    bmSize = DIB_GetDIBImageBytes(info->bmiHeader.biWidth,
 					  info->bmiHeader.biHeight,
 					  info->bmiHeader.biBitCount);
-	biSize = DIB_BitmapInfoSize(info, LOWORD(logbrush.lbColor));
+	biSize = bitmap_info_size(info, LOWORD(logbrush.lbColor));
 	size = sizeof(EMRCREATEDIBPATTERNBRUSHPT) + biSize + bmSize;
 	emr = HeapAlloc( GetProcessHeap(), 0, size );
 	if(!emr) break;
@@ -393,7 +392,7 @@ HFONT EMFDRV_SelectFont( PHYSDEV dev, HFONT hFont, HANDLE gdiFont )
 /******************************************************************
  *         EMFDRV_CreatePenIndirect
  */
-static HPEN EMFDRV_CreatePenIndirect(PHYSDEV dev, HPEN hPen )
+static DWORD EMFDRV_CreatePenIndirect(PHYSDEV dev, HPEN hPen)
 {
     EMRCREATEPEN emr;
     DWORD index = 0;
@@ -424,7 +423,7 @@ static HPEN EMFDRV_CreatePenIndirect(PHYSDEV dev, HPEN hPen )
 
     if(!EMFDRV_WriteRecord( dev, &emr.emr ))
         index = 0;
-    return (HPEN)index;
+    return index;
 }
 
 /******************************************************************
@@ -454,7 +453,7 @@ HPEN EMFDRV_SelectPen(PHYSDEV dev, HPEN hPen )
     if((index = EMFDRV_FindObject(dev, hPen)) != 0)
         goto found;
 
-    if (!(index = (DWORD)EMFDRV_CreatePenIndirect(dev, hPen ))) return 0;
+    if (!(index = EMFDRV_CreatePenIndirect(dev, hPen))) return 0;
     GDI_hdc_using_object(hPen, physDev->hdc);
 
  found:
@@ -462,6 +461,63 @@ HPEN EMFDRV_SelectPen(PHYSDEV dev, HPEN hPen )
     emr.emr.nSize = sizeof(emr);
     emr.ihObject = index;
     return EMFDRV_WriteRecord( dev, &emr.emr ) ? hPen : 0;
+}
+
+
+/******************************************************************
+ *         EMFDRV_CreatePalette
+ */
+static DWORD EMFDRV_CreatePalette(PHYSDEV dev, HPALETTE hPal)
+{
+    WORD i;
+    struct {
+        EMRCREATEPALETTE hdr;
+        PALETTEENTRY entry[255];
+    } pal;
+
+    memset( &pal, 0, sizeof(pal) );
+
+    if (!GetObjectW( hPal, sizeof(pal.hdr.lgpl) + sizeof(pal.entry), &pal.hdr.lgpl ))
+        return 0;
+
+    for (i = 0; i < pal.hdr.lgpl.palNumEntries; i++)
+        pal.hdr.lgpl.palPalEntry[i].peFlags = 0;
+
+    pal.hdr.emr.iType = EMR_CREATEPALETTE;
+    pal.hdr.emr.nSize = sizeof(pal.hdr) + pal.hdr.lgpl.palNumEntries * sizeof(PALETTEENTRY);
+    pal.hdr.ihPal = EMFDRV_AddHandle( dev, hPal );
+
+    if (!EMFDRV_WriteRecord( dev, &pal.hdr.emr ))
+        pal.hdr.ihPal = 0;
+    return pal.hdr.ihPal;
+}
+
+/******************************************************************
+ *         EMFDRV_SelectPalette
+ */
+HPALETTE EMFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPal, BOOL force )
+{
+    EMFDRV_PDEVICE *physDev = (EMFDRV_PDEVICE*)dev;
+    EMRSELECTPALETTE emr;
+    DWORD index;
+
+    if (hPal == GetStockObject( DEFAULT_PALETTE ))
+    {
+        index = DEFAULT_PALETTE | 0x80000000;
+        goto found;
+    }
+
+    if ((index = EMFDRV_FindObject( dev, hPal )) != 0)
+        goto found;
+
+    if (!(index = EMFDRV_CreatePalette( dev, hPal ))) return 0;
+    GDI_hdc_using_object( hPal, physDev->hdc );
+
+found:
+    emr.emr.iType = EMR_SELECTPALETTE;
+    emr.emr.nSize = sizeof(emr);
+    emr.ihPal = index;
+    return EMFDRV_WriteRecord( dev, &emr.emr ) ? hPal : 0;
 }
 
 

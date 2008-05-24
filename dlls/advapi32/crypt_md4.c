@@ -58,7 +58,7 @@ static void byteReverse( unsigned char *buf, unsigned longs )
     unsigned int t;
 
     do {
-        t = (unsigned int)((unsigned)buf[3] << 8 | buf[2]) << 16 |
+        t = ((unsigned)buf[3] << 8 | buf[2]) << 16 |
             ((unsigned)buf[1] << 8 | buf[0]);
         *(unsigned int *)buf = t;
         buf += 4;
@@ -90,7 +90,7 @@ VOID WINAPI MD4Update( MD4_CTX *ctx, const unsigned char *buf, unsigned int len 
     /* Update bitcount */
     t = ctx->i[0];
 
-    if ((ctx->i[0] = t + ((unsigned int)len << 3)) < t)
+    if ((ctx->i[0] = t + (len << 3)) < t)
         ctx->i[1]++;        /* Carry from low to high */
 
     ctx->i[1] += len >> 29;
@@ -285,12 +285,12 @@ static void MD4Transform( unsigned int buf[4], const unsigned int in[16] )
  *  Failure: STATUS_UNSUCCESSFUL
  *
  */
-NTSTATUS WINAPI SystemFunction007(PUNICODE_STRING string, LPBYTE hash)
+NTSTATUS WINAPI SystemFunction007(const UNICODE_STRING *string, LPBYTE hash)
 {
     MD4_CTX ctx;
 
     MD4Init( &ctx );
-    MD4Update( &ctx, (BYTE*) string->Buffer, string->Length );
+    MD4Update( &ctx, (const BYTE *)string->Buffer, string->Length );
     MD4Final( &ctx );
     memcpy( hash, ctx.digest, 0x10 );
 
@@ -313,7 +313,7 @@ NTSTATUS WINAPI SystemFunction007(PUNICODE_STRING string, LPBYTE hash)
  *  Failure: STATUS_UNSUCCESSFUL
  *
  */
-NTSTATUS WINAPI SystemFunction010(LPVOID unknown, LPBYTE data, LPBYTE hash)
+NTSTATUS WINAPI SystemFunction010(LPVOID unknown, const BYTE *data, LPBYTE hash)
 {
     MD4_CTX ctx;
 

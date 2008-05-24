@@ -45,7 +45,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(qcap);
 
 static LONG objects_ref = 0;
 static LONG server_locks = 0;
-static HINSTANCE ghInst = NULL;
 
 static const WCHAR wAudioCaptFilter[] =
 {'A','u','d','i','o',' ','C','a','p','t','u','r','e',' ','F','i','l','t','e','r',0};
@@ -83,66 +82,79 @@ static CFactoryTemplate const g_cTemplates[] = {
         wAudioCaptureFilter, 
         &CLSID_AudioCaptureFilter,
         QCAP_createAudioCaptureFilter,
+        NULL,
         NULL
     },{
         wAVICompressor, 
         &CLSID_AVICompressor, 
         QCAP_createAVICompressor,
+        NULL,
         NULL
     },*/{
         wVFWCaptFilter,
         &CLSID_VfwCapture,
         QCAP_createVFWCaptureFilter,
+        NULL,
         NULL
     },/*{
         wVFWCaptFilterProp,
         &CLSID_VFWCaptureFilterPropertyPage,
         QCAP_createVFWCaptureFilterPropertyPage,
+        NULL,
         NULL
     },{
         wAVIMux,
         &CLSID_AVImux,
         QCAP_createAVImux,
+        NULL,
         NULL
     },{
         wAVIMuxPropPage,
         &CLSID_AVImuxPropertyPage,
         QCAP_createAVImuxPropertyPage,
+        NULL,
         NULL
     },{
         wAVIMuxPropPage1,
         &CLSID_AVImuxPropertyPage1,
         QCAP_createAVImuxPropertyPage1,
+        NULL,
         NULL
     },{
         wFileWriter,
         &CLSID_FileWriter,
         QCAP_createFileWriter,
+        NULL,
         NULL
     },*/{
         wCaptGraphBuilder,
         &CLSID_CaptureGraphBuilder,
         QCAP_createCaptureGraphBuilder2,
+        NULL,
         NULL
     },{
         wCaptGraphBuilder2,
         &CLSID_CaptureGraphBuilder2,
         QCAP_createCaptureGraphBuilder2,
+        NULL,
         NULL
     }/*,{
         wInfPinTeeFilter, 
         &CLSID_InfinitePinTeeFilter, 
         QCAP_createInfinitePinTeeFilter,
+        NULL,
         NULL
     },{
         wSmartTeeFilter,
         &CLSID_SmartTeeFilter,
         QCAP_createSmartTeeFilter,
+        NULL,
         NULL
     },{
         wAudioInMixerProp,
         &CLSID_AudioInputMixerPropertyPage,
         QCAP_createAudioInputMixerPropertyPage,
+        NULL,
         NULL
     }*/
 };
@@ -158,7 +170,6 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
     {
         case DLL_PROCESS_ATTACH:
             DisableThreadLibraryCalls(hInstDLL);
-            ghInst = hInstDLL;
             SetupInitializeServers(g_cTemplates, g_numTemplates, TRUE);
             break;
         case DLL_PROCESS_DETACH:
@@ -175,7 +186,7 @@ HRESULT WINAPI DllRegisterServer(void)
 {
     TRACE("()\n");
 
-    return SetupRegisterServers(g_cTemplates, g_numTemplates, ghInst, TRUE);	
+    return SetupRegisterServers(g_cTemplates, g_numTemplates, TRUE);
 }
 
 /***********************************************************************
@@ -185,7 +196,7 @@ HRESULT WINAPI DllUnregisterServer(void)
 {
     TRACE("\n");
 
-    return SetupRegisterServers(g_cTemplates, g_numTemplates, ghInst, FALSE);	
+    return SetupRegisterServers(g_cTemplates, g_numTemplates, FALSE);
 }
 
 /***********************************************************************

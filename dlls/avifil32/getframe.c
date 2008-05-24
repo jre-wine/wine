@@ -16,12 +16,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
 #include <stdarg.h>
 
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "wingdi.h"
 #include "winuser.h"
 #include "vfw.h"
@@ -214,7 +212,7 @@ static LPVOID  WINAPI IGetFrame_fnGetFrame(IGetFrame *iface, LONG lPos)
       if (This->lpOutFormat != NULL) {
 	BITMAPINFOHEADER bi;
 
-	memcpy(&bi, This->lpOutFormat, sizeof(bi));
+	bi = *This->lpOutFormat;
 	AVIFILE_CloseCompressor(This);
 
 	if (FAILED(IGetFrame_SetFormat(iface, &bi, NULL, 0, 0, -1, -1))) {

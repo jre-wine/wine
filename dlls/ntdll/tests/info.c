@@ -19,39 +19,39 @@
  */
 
 #include "ntdll_test.h"
+#include <winnls.h>
 
 static NTSTATUS (WINAPI * pNtQuerySystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 static NTSTATUS (WINAPI * pNtQueryInformationProcess)(HANDLE, PROCESSINFOCLASS, PVOID, ULONG, PULONG);
 static NTSTATUS (WINAPI * pNtReadVirtualMemory)(HANDLE, const void*, void*, SIZE_T, SIZE_T*);
-
-static HMODULE hntdll = 0;
 
 /* one_before_last_pid is used to be able to compare values of a still running process
    with the output of the test_query_process_times and test_query_process_handlecount tests.
 */
 static DWORD one_before_last_pid = 0;
 
-#define NTDLL_GET_PROC(func) \
+#define NTDLL_GET_PROC(func) do {                     \
     p ## func = (void*)GetProcAddress(hntdll, #func); \
     if(!p ## func) { \
       trace("GetProcAddress(%s) failed\n", #func); \
-      FreeLibrary(hntdll); \
       return FALSE; \
-    }
+    } \
+  } while(0)
 
 static BOOL InitFunctionPtrs(void)
 {
-    hntdll = LoadLibraryA("ntdll.dll");
-    if(!hntdll) {
-      trace("Could not load ntdll.dll\n");
-      return FALSE;
-    }
-    if (hntdll)
+    /* All needed functions are NT based, so using GetModuleHandle is a good check */
+    HMODULE hntdll = GetModuleHandle("ntdll");
+    if (!hntdll)
     {
-      NTDLL_GET_PROC(NtQuerySystemInformation)
-      NTDLL_GET_PROC(NtQueryInformationProcess)
-      NTDLL_GET_PROC(NtReadVirtualMemory)
+        skip("Not running on NT\n");
+        return FALSE;
     }
+
+    NTDLL_GET_PROC(NtQuerySystemInformation);
+    NTDLL_GET_PROC(NtQueryInformationProcess);
+    NTDLL_GET_PROC(NtReadVirtualMemory);
+
     return TRUE;
 }
 
@@ -277,7 +277,7 @@ static void test_query_process(void)
 
     is_nt = ( spi->dwOffset - (sbi.NumberOfProcessors * sizeof(SYSTEM_THREAD_INFORMATION)) == 136);
 
-    if (is_nt) trace("Windows version is NT, we will skip thread tests\n");
+    if (is_nt) skip("Windows version is NT, we will skip thread tests\n");
 
     /* Check if we have some return values
      * 
@@ -383,10 +383,8 @@ static void test_query_module(void)
 
     ModuleCount = smi->ModulesCount;
     sm = &smi->Modules[0];
-    todo_wine{
-        /* our implementation is a stub for now */
-        ok( ModuleCount > 0, "Expected some modules to be loaded\n");
-    }
+    /* our implementation is a stub for now */
+    ok( ModuleCount > 0, "Expected some modules to be loaded\n");
 
     /* Loop through all the modules/drivers, Wine doesn't get here (yet) */
     for (i = 0; i < ModuleCount ; i++)
@@ -629,7 +627,7 @@ static void test_query_process_io(void)
     status = pNtQueryInformationProcess( GetCurrentProcess(), ProcessIoCounters, &pii, sizeof(pii), &ReturnLength);
     if (status == STATUS_NOT_SUPPORTED)
     {
-        trace("ProcessIoCounters information class not supported, skipping tests\n");
+        skip("ProcessIoCounters information class is not supported\n");
         return;
     }
  
@@ -680,7 +678,7 @@ static void test_query_process_times(void)
     process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, one_before_last_pid);
     if (!process)
     {
-        trace("Could not open process with ID : %d, error : %08x. Going to use current one.\n", one_before_last_pid, GetLastError());
+        trace("Could not open process with ID : %d, error : %u. Going to use current one.\n", one_before_last_pid, GetLastError());
         process = GetCurrentProcess();
         trace("ProcessTimes for current process\n");
     }
@@ -733,7 +731,7 @@ static void test_query_process_handlecount(void)
     process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, one_before_last_pid);
     if (!process)
     {
-        trace("Could not open process with ID : %d, error : %08x. Going to use current one.\n", one_before_last_pid, GetLastError());
+        trace("Could not open process with ID : %d, error : %u. Going to use current one.\n", one_before_last_pid, GetLastError());
         process = GetCurrentProcess();
         trace("ProcessHandleCount for current process\n");
     }
@@ -755,6 +753,42 @@ static void test_query_process_handlecount(void)
     {
         ok( handlecount > 0, "Expected some handles, got 0\n");
     }
+}
+
+static void test_query_process_image_file_name(void)
+{
+    DWORD status;
+    ULONG ReturnLength;
+    UNICODE_STRING image_file_name;
+    void *buffer;
+    char *file_nameA;
+    INT len;
+
+    status = pNtQueryInformationProcess(NULL, ProcessImageFileName, &image_file_name, sizeof(image_file_name), NULL);
+    if (status == STATUS_INVALID_INFO_CLASS)
+    {
+        skip("ProcessImageFileName is not supported\n");
+        return;
+    }
+    ok( status == STATUS_INVALID_HANDLE, "Expected STATUS_INVALID_HANDLE, got %08x\n", status);
+
+    status = pNtQueryInformationProcess( GetCurrentProcess(), ProcessImageFileName, &image_file_name, 2, &ReturnLength);
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08x\n", status);
+
+    status = pNtQueryInformationProcess( GetCurrentProcess(), ProcessImageFileName, &image_file_name, sizeof(image_file_name), &ReturnLength);
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08x\n", status);
+
+    buffer = HeapAlloc(GetProcessHeap(), 0, ReturnLength);
+    status = pNtQueryInformationProcess( GetCurrentProcess(), ProcessImageFileName, buffer, ReturnLength, &ReturnLength);
+    ok( status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08x\n", status);
+    memcpy(&image_file_name, buffer, sizeof(image_file_name));
+    len = WideCharToMultiByte(CP_ACP, 0, image_file_name.Buffer, image_file_name.Length/sizeof(WCHAR), NULL, 0, NULL, NULL);
+    file_nameA = HeapAlloc(GetProcessHeap(), 0, len + 1);
+    WideCharToMultiByte(CP_ACP, 0, image_file_name.Buffer, image_file_name.Length/sizeof(WCHAR), file_nameA, len, NULL, NULL);
+    file_nameA[len] = '\0';
+    HeapFree(GetProcessHeap(), 0, buffer);
+    trace("process image file name: %s\n", file_nameA);
+    HeapFree(GetProcessHeap(), 0, file_nameA);
 }
 
 
@@ -785,7 +819,8 @@ static void test_readvirtualmemory(void)
     todo_wine{
     status = pNtReadVirtualMemory(process, (void *) 0x1234, buffer, 12, &readcount);
     ok( status == STATUS_PARTIAL_COPY, "Expected STATUS_PARTIAL_COPY, got %08x\n", status);
-    ok( readcount == 0, "Expected to read 0 bytes, got %ld\n",readcount);
+    if (status == STATUS_PARTIAL_COPY)
+        ok( readcount == 0, "Expected to read 0 bytes, got %ld\n",readcount);
     }
 
     /* 0 handle */
@@ -889,9 +924,11 @@ START_TEST(info)
     trace("Starting test_query_process_handlecount()\n");
     test_query_process_handlecount();
 
+    /* 27 ProcessImageFileName */
+    trace("Starting test_query_process_image_file_name()\n");
+    test_query_process_image_file_name();
+
     /* belongs into it's own file */
     trace("Starting test_readvirtualmemory()\n");
     test_readvirtualmemory();
-
-    FreeLibrary(hntdll);
 }

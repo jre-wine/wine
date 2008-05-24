@@ -20,8 +20,6 @@
 #define DIRECTINPUT_VERSION 0x0700
 
 #define COBJMACROS
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
 #include <windows.h>
 
 #include <math.h>
@@ -70,28 +68,78 @@ static void test_set_coop(LPDIRECTINPUT pDI, HWND hwnd)
     if (pMouse) IUnknown_Release(pMouse);
 }
 
+static void test_acquire(LPDIRECTINPUT pDI, HWND hwnd)
+{
+    HRESULT hr;
+    LPDIRECTINPUTDEVICE pMouse = NULL;
+    DIMOUSESTATE m_state;
+
+    hr = IDirectInput_CreateDevice(pDI, &GUID_SysMouse, &pMouse, NULL);
+    ok(SUCCEEDED(hr), "IDirectInput_CreateDevice() failed: %s\n", DXGetErrorString8(hr));
+    if (FAILED(hr)) return;
+
+    hr = IDirectInputDevice_SetCooperativeLevel(pMouse, hwnd, DISCL_NONEXCLUSIVE | DISCL_FOREGROUND);
+    ok(hr == S_OK, "SetCooperativeLevel: %s\n", DXGetErrorString8(hr));
+
+    hr = IDirectInputDevice_SetDataFormat(pMouse, &c_dfDIMouse);
+    ok(SUCCEEDED(hr), "IDirectInputDevice_SetDataFormat() failed: %s\n", DXGetErrorString8(hr));
+    hr = IDirectInputDevice_Unacquire(pMouse);
+    ok(hr == S_FALSE, "IDirectInputDevice_Unacquire() should have failed: %s\n", DXGetErrorString8(hr));
+    hr = IDirectInputDevice_Acquire(pMouse);
+    ok(SUCCEEDED(hr), "IDirectInputDevice_Acquire() failed: %s\n", DXGetErrorString8(hr));
+    hr = IDirectInputDevice_Acquire(pMouse);
+    ok(hr == S_FALSE, "IDirectInputDevice_Acquire() should have failed: %s\n", DXGetErrorString8(hr));
+
+    /* Foreground coop level requires window to have focus */
+    /* This should make dinput loose mouse input */
+    SetActiveWindow( 0 );
+
+    hr = IDirectInputDevice_GetDeviceState(pMouse, sizeof(m_state), &m_state);
+    ok(hr == DIERR_NOTACQUIRED, "GetDeviceState() should have failed: %s\n", DXGetErrorString8(hr));
+    /* Workaround so we can test other things. Remove when Wine is fixed */
+    IDirectInputDevice_Unacquire(pMouse);
+
+    hr = IDirectInputDevice_Acquire(pMouse);
+    ok(hr == DIERR_OTHERAPPHASPRIO, "Acquire() should have failed: %s\n", DXGetErrorString8(hr));
+
+    SetActiveWindow( hwnd );
+    hr = IDirectInputDevice_Acquire(pMouse);
+    ok(hr == S_OK, "Acquire() failed: %s\n", DXGetErrorString8(hr));
+
+    if (pMouse) IUnknown_Release(pMouse);
+}
+
 static void mouse_tests(void)
 {
     HRESULT hr;
     LPDIRECTINPUT pDI = NULL;
     HINSTANCE hInstance = GetModuleHandle(NULL);
     HWND hwnd;
+    ULONG ref = 0;
 
     hr = DirectInputCreate(hInstance, DIRECTINPUT_VERSION, &pDI, NULL);
+    if (hr == DIERR_OLDDIRECTINPUTVERSION)
+    {
+        skip("Tests require a newer dinput version\n");
+        return;
+    }
     ok(SUCCEEDED(hr), "DirectInputCreate() failed: %s\n", DXGetErrorString8(hr));
     if (FAILED(hr)) return;
 
     hwnd = CreateWindow("static", "Title", WS_OVERLAPPEDWINDOW,
                         10, 10, 200, 200, NULL, NULL, NULL, NULL);
     ok(hwnd != NULL, "err: %d\n", GetLastError());
-    if (!hwnd) return;
+    if (hwnd)
+    {
+        ShowWindow(hwnd, SW_SHOW);
 
-    ShowWindow(hwnd, SW_SHOW);
+        test_set_coop(pDI, hwnd);
+        test_acquire(pDI, hwnd);
 
-    test_set_coop(pDI, hwnd);
-
-    DestroyWindow(hwnd);
-    if (pDI) IUnknown_Release(pDI);
+        DestroyWindow(hwnd);
+    }
+    if (pDI) ref = IUnknown_Release(pDI);
+    ok(!ref, "IDirectInput_Release() reference count = %d\n", ref);
 }
 
 START_TEST(mouse)

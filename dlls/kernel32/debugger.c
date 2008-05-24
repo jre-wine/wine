@@ -340,7 +340,7 @@ BOOL WINAPI DebugBreakProcess(HANDLE hProc)
 /***********************************************************************
  *           DebugBreak   (KERNEL.203)
  *
- *  Raises an expection in a 16 bit application so that a debugger (if attached)
+ *  Raises an exception in a 16 bit application so that a debugger (if attached)
  *  can take some action.
  *
  * PARAMS
@@ -383,6 +383,24 @@ BOOL WINAPI IsDebuggerPresent(void)
     return NtCurrentTeb()->Peb->BeingDebugged;
 }
 
+/***********************************************************************
+ *           CheckRemoteDebuggerPresent   (KERNEL32.@)
+ *
+ *  Allows a process to determine if there is a remote debugger
+ *  attached.
+ *
+ * PARAMS
+ *
+ * RETURNS
+ *
+ *  TRUE because it is a stub.
+ */
+BOOL WINAPI CheckRemoteDebuggerPresent(HANDLE process, PBOOL DebuggerPresent)
+{
+    FIXME("(%p)->(%p): Stub!\n", process, DebuggerPresent);
+    *DebuggerPresent = FALSE;
+    return TRUE;
+}
 
 /***********************************************************************
  *           _DebugOutput                    (KERNEL.328)

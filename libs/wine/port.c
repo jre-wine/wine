@@ -64,7 +64,7 @@ __ASM_GLOBAL_FUNC( wine_switch_to_stack,
                    "pushl %edx\n\t"
                    "xorl %ebp,%ebp\n\t"
                    "call *%ecx\n\t"
-                   "int $3" /* we never return here */ );
+                   "int $3" /* we never return here */ )
 #elif defined(__i386__) && defined(_MSC_VER)
 __declspec(naked) void wine_switch_to_stack( void (*func)(void *), void *arg, void *stack )
 {
@@ -83,7 +83,7 @@ __ASM_GLOBAL_FUNC( wine_switch_to_stack,
                    "sub %o2, 96, %sp\n\t" /* store stack */
                    "call %l0, 0\n\t" /* call func */
                    "mov %l1, %o0\n\t" /* delay slot:  arg for func */
-                   "ta 0x01"); /* breakpoint - we never get here */
+                   "ta 0x01") /* breakpoint - we never get here */
 #elif defined(__powerpc__) && defined(__APPLE__)
 __ASM_GLOBAL_FUNC( wine_switch_to_stack,
                    "mtctr r3\n\t" /* func -> ctr */
@@ -91,21 +91,21 @@ __ASM_GLOBAL_FUNC( wine_switch_to_stack,
                    "mr r1,r5\n\t" /* stack */
                    "subi r1,r1,0x100\n\t" /* adjust stack pointer */
                    "bctr\n" /* call ctr */
-                   "1:\tb 1b"); /* loop */
+                   "1:\tb 1b") /* loop */
 #elif defined(__powerpc__) && defined(__GNUC__)
 __ASM_GLOBAL_FUNC( wine_switch_to_stack,
                    "mtctr 3\n\t" /* func -> ctr */
                    "mr 3,4\n\t" /* args -> function param 1 (r3) */
                    "mr 1,5\n\t" /* stack */
                    "bctr\n\t" /* call ctr */
-                   "1:\tb 1b"); /* loop */
+                   "1:\tb 1b") /* loop */
 #elif defined(__ALPHA__) && defined(__GNUC__)
 __ASM_GLOBAL_FUNC( wine_switch_to_stack,
                    "mov $16,$0\n\t" /* func */
                    "mov $17,$16\n\t" /* arg */
                    "mov $18,$30\n\t" /* stack */
                    "jsr $31,($0),0\n\t" /* call func */
-                   "L1:\tbr $31,L1"); /* loop */
+                   "L1:\tbr $31,L1") /* loop */
 #elif defined(__x86_64__) && defined(__GNUC__)
 __ASM_GLOBAL_FUNC( wine_switch_to_stack,
                    "movq %rdi,%rax\n\t" /* func */
@@ -114,7 +114,71 @@ __ASM_GLOBAL_FUNC( wine_switch_to_stack,
                    "movq %rdx,%rsp\n\t"
                    "xorq %rbp,%rbp\n\t"
                    "callq *%rax\n\t"    /* call func */
-                   "int $3");
+                   "int $3")
+#else
+void DECLSPEC_NORETURN wine_switch_to_stack( void (*func)(void *), void *arg, void *stack )
+{
+    wine_call_on_stack( (int (*)(void *))func, arg, stack );
+    abort();
+}
+#endif
+
+
+/***********************************************************************
+ *           wine_call_on_stack
+ *
+ * Switch to the specified stack to call the function and return.
+ */
+int wine_call_on_stack( int (*func)(void *), void *arg, void *stack );
+#if defined(__i386__) && defined(__GNUC__)
+__ASM_GLOBAL_FUNC( wine_call_on_stack,
+                   "pushl %ebp\n\t"
+                   "pushl %esi\n\t"
+                   "movl 12(%esp),%ecx\n\t"  /* func */
+                   "movl 16(%esp),%edx\n\t"  /* arg */
+                   "movl 20(%esp),%esi\n\t"  /* stack */
+                   "andl $~15,%esi\n\t"
+                   "subl $12,%esi\n\t"
+                   "xchgl %esi,%esp\n\t"
+                   "pushl %edx\n\t"
+                   "xorl %ebp,%ebp\n\t"
+                   "call *%ecx\n\t"
+                   "movl %esi,%esp\n\t"
+                   "popl %esi\n\t"
+                   "popl %ebp\n\t"
+                   "ret" )
+#elif defined(__i386__) && defined(_MSC_VER)
+__declspec(naked) int wine_call_on_stack( int (*func)(void *), void *arg, void *stack )
+{
+  __asm push ebp;
+  __asm push esi;
+  __asm mov ecx, 12[esp];
+  __asm mov edx, 16[esp];
+  __asm mov esi, 20[esp];
+  __asm xchg esp, esi;
+  __asm push edx;
+  __asm xor ebp, ebp;
+  __asm call [ecx];
+  __asm mov esp, esi;
+  __asm pop esi;
+  __asm pop ebp
+  __asm ret;
+}
+#elif defined(__x86_64__) && defined(__GNUC__)
+__ASM_GLOBAL_FUNC( wine_call_on_stack,
+                   "pushq %rbp\n\t"
+                   "pushq %rbx\n\t"
+                   "movq %rsp,%rbx\n\t"
+                   "movq %rdi,%rax\n\t" /* func */
+                   "movq %rsi,%rdi\n\t" /* arg */
+                   "andq $~15,%rdx\n\t" /* stack */
+                   "movq %rdx,%rsp\n\t"
+                   "xorq %rbp,%rbp\n\t"
+                   "callq *%rax\n\t"    /* call func */
+                   "movq %rbx,%rsp\n\t"
+                   "popq %rbx\n\t"
+                   "popq %rbp\n\t"
+                   "ret")
 #else
 #error You must implement wine_switch_to_stack for your platform
 #endif

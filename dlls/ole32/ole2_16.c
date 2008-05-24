@@ -35,12 +35,8 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
-#include "winnls.h"
-#include "commctrl.h"
 #include "ole2.h"
-#include "ole2ver.h"
 #include "winerror.h"
-#include "wownt32.h"
 
 #include "wine/winbase16.h"
 #include "wine/wingdi16.h"
@@ -120,7 +116,7 @@ HGLOBAL16 WINAPI OleMetaFilePictFromIconAndLabel16(
     mf16 = (METAFILEPICT16 *)GlobalLock16(hmf16);
     mf16->mm = MM_ANISOTROPIC;
     mf16->xExt = 20; /* FIXME: bogus */
-    mf16->yExt = 20; /* dito */
+    mf16->yExt = 20; /* ditto */
     mfSize = GetMetaFileBitsEx(hmf, 0, 0);
     mf16->hMF = GlobalAlloc16(GMEM_MOVEABLE, mfSize);
     if(mf16->hMF)
@@ -154,9 +150,12 @@ HRESULT WINAPI CreateFileMoniker16(LPCOLESTR16 lpszPathName,LPMONIKER* ppmk)
 
 /******************************************************************************
  *        OleSetMenuDescriptor (OLE2.41)
+ *
+ * PARAMS
+ *  hOleMenu  FIXME: Should probably be an HOLEMENU16.
  */
 HRESULT WINAPI OleSetMenuDescriptor16(
-    HOLEMENU               hOleMenu, /* FIXME: HOLEMENU16 likely */
+    HOLEMENU               hOleMenu,
     HWND16                 hwndFrame,
     HWND16                 hwndActiveObject,
     LPOLEINPLACEFRAME        lpFrame,

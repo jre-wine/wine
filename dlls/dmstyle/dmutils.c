@@ -3,19 +3,19 @@
  * Copyright (C) 2004 Rok Mandeljc
  * Copyright (C) 2004 Raphael Junqueira
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Library General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
  
 #include <stdio.h>
@@ -31,9 +31,7 @@
 #include "winuser.h"
 
 #include "wine/debug.h"
-#include "wine/list.h"
 #include "wine/unicode.h"
-#include "winreg.h"
 #include "objbase.h"
 
 #include "dmusici.h"
@@ -209,9 +207,9 @@ HRESULT IDirectMusicUtils_IPersistStream_ParseReference (LPPERSISTSTREAM iface, 
     }
     TRACE_(dmfile)(": ListCount[0] = %d < ListSize[0] = %d\n", ListCount[0], ListSize[0]);
   } while (ListCount[0] < ListSize[0]);
-  
+
   ref_desc.dwValidData |= DMUS_OBJ_CLASS;
-  memcpy(&ref_desc.guidClass, &ref.guidClassID, sizeof(ref.guidClassID));
+  ref_desc.guidClass = ref.guidClassID;
 
   TRACE_(dmfile)("** DM Reference Begin of Load ***\n");
   TRACE_(dmfile)("With Desc:\n");
@@ -256,7 +254,7 @@ const char *debugstr_fourcc (DWORD fourcc) {
 }
 
 /* DMUS_VERSION struct to string conversion for debug messages */
-const char *debugstr_dmversion (LPDMUS_VERSION version) {
+static const char *debugstr_dmversion (const DMUS_VERSION *version) {
 	if (!version) return "'null'";
 	return wine_dbg_sprintf ("\'%i,%i,%i,%i\'",
 		HIWORD(version->dwVersionMS),LOWORD(version->dwVersionMS),
@@ -264,7 +262,7 @@ const char *debugstr_dmversion (LPDMUS_VERSION version) {
 }
 
 /* month number into month name (for debugstr_filetime) */
-const char *debugstr_month (DWORD dwMonth) {
+static const char *debugstr_month (DWORD dwMonth) {
 	switch (dwMonth) {
 		case 1: return "January";
 		case 2: return "February";
@@ -283,14 +281,14 @@ const char *debugstr_month (DWORD dwMonth) {
 }
 
 /* FILETIME struct to string conversion for debug messages */
-const char *debugstr_filetime (LPFILETIME time) {
+static const char *debugstr_filetime (const FILETIME *time) {
 	SYSTEMTIME sysTime;
 
 	if (!time) return "'null'";
 	
 	FileTimeToSystemTime (time, &sysTime);
 	
-	return wine_dbg_sprintf ("\'%02i. %s %04i %02i:%02i:%02i\'", \
+	return wine_dbg_sprintf ("\'%02i. %s %04i %02i:%02i:%02i\'",
 		sysTime.wDay, debugstr_month(sysTime.wMonth), sysTime.wYear,
 		sysTime.wHour, sysTime.wMinute, sysTime.wSecond);
 }
@@ -646,7 +644,7 @@ const char* debugstr_flags (DWORD flags, const flag_info* names, size_t num_name
 }
 
 /* dump DMUS_OBJ flags */
-const char *debugstr_DMUS_OBJ_FLAGS (DWORD flagmask) {
+static const char *debugstr_DMUS_OBJ_FLAGS (DWORD flagmask) {
     static const flag_info flags[] = {
 	    FE(DMUS_OBJ_OBJECT),
 	    FE(DMUS_OBJ_CLASS),
@@ -665,7 +663,7 @@ const char *debugstr_DMUS_OBJ_FLAGS (DWORD flagmask) {
 }
 
 /* dump DMUS_CONTAINER flags */
-const char *debugstr_DMUS_CONTAINER_FLAGS (DWORD flagmask) {
+static const char *debugstr_DMUS_CONTAINER_FLAGS (DWORD flagmask) {
     static const flag_info flags[] = {
 	    FE(DMUS_CONTAINER_NOLOADS)
 	};
@@ -673,7 +671,7 @@ const char *debugstr_DMUS_CONTAINER_FLAGS (DWORD flagmask) {
 }
 
 /* dump DMUS_CONTAINED_OBJF flags */
-const char *debugstr_DMUS_CONTAINED_OBJF_FLAGS (DWORD flagmask) {
+static const char *debugstr_DMUS_CONTAINED_OBJF_FLAGS (DWORD flagmask) {
     static const flag_info flags[] = {
 	    FE(DMUS_CONTAINED_OBJF_KEEP)
 	};
@@ -682,7 +680,7 @@ const char *debugstr_DMUS_CONTAINED_OBJF_FLAGS (DWORD flagmask) {
 
 const char *debugstr_DMUS_OBJECTDESC (LPDMUS_OBJECTDESC pDesc) {
 	if (pDesc) {
-		char buffer[1024] = "", *ptr = &buffer[0];
+		char buffer[1024], *ptr = buffer;
 		
 		ptr += sprintf(ptr, "DMUS_OBJECTDESC (%p):\n", pDesc);
 		ptr += sprintf(ptr, " - dwSize = 0x%08X\n", pDesc->dwSize);
@@ -698,8 +696,7 @@ const char *debugstr_DMUS_OBJECTDESC (LPDMUS_OBJECTDESC pDesc) {
 		                                                     wine_dbgstr_longlong(pDesc->llMemLength), pDesc->pbMemData);
 		if (pDesc->dwValidData & DMUS_OBJ_STREAM) ptr += sprintf(ptr, " - pStream = %p\n", pDesc->pStream);
 		
-		ptr = &buffer[0];
-		return ptr;
+		return wine_dbg_sprintf("%s", buffer);
 	} else {
 		return wine_dbg_sprintf("(NULL)");
 	}
@@ -727,13 +724,12 @@ void debug_DMUS_OBJECTDESC (LPDMUS_OBJECTDESC pDesc) {
 
 const char *debugstr_DMUS_IO_CONTAINER_HEADER (LPDMUS_IO_CONTAINER_HEADER pHeader) {
 	if (pHeader) {
-		char buffer[1024] = "", *ptr = &buffer[0];
+		char buffer[1024], *ptr = buffer;
 		
 		ptr += sprintf(ptr, "DMUS_IO_CONTAINER_HEADER (%p):\n", pHeader);
 		ptr += sprintf(ptr, " - dwFlags = %s\n", debugstr_DMUS_CONTAINER_FLAGS(pHeader->dwFlags));
 		
-		ptr = &buffer[0];
-		return ptr;
+		return wine_dbg_sprintf("%s", buffer);
 	} else {
 		return wine_dbg_sprintf("(NULL)");
 	}
@@ -741,7 +737,7 @@ const char *debugstr_DMUS_IO_CONTAINER_HEADER (LPDMUS_IO_CONTAINER_HEADER pHeade
 
 const char *debugstr_DMUS_IO_CONTAINED_OBJECT_HEADER (LPDMUS_IO_CONTAINED_OBJECT_HEADER pHeader) {
 	if (pHeader) {
-		char buffer[1024] = "", *ptr = &buffer[0];
+		char buffer[1024], *ptr = buffer;
 		
 		ptr += sprintf(ptr, "DMUS_IO_CONTAINED_OBJECT_HEADER (%p):\n", pHeader);
 		ptr += sprintf(ptr, " - guidClassID = %s\n", debugstr_dmguid(&pHeader->guidClassID));
@@ -749,8 +745,7 @@ const char *debugstr_DMUS_IO_CONTAINED_OBJECT_HEADER (LPDMUS_IO_CONTAINED_OBJECT
 		ptr += sprintf(ptr, " - ckid = %s\n", debugstr_fourcc (pHeader->ckid));
 		ptr += sprintf(ptr, " - fccType = %s\n", debugstr_fourcc (pHeader->fccType));
 
-		ptr = &buffer[0];
-		return ptr;
+		return wine_dbg_sprintf("%s", buffer);
 	} else {
 		return wine_dbg_sprintf("(NULL)");
 	}

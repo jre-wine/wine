@@ -27,19 +27,23 @@
 #include "winbase.h"
 #include "objbase.h"
 #include "shlguid.h"
+#include "urlmon.h" /* for CLSID_FileProtocol */
 
 #include "wine/test.h"
 
 /* functions that are not present on all versions of Windows */
 HRESULT (WINAPI * pCoInitializeEx)(LPVOID lpReserved, DWORD dwCoInit);
+HRESULT (WINAPI * pCoGetObjectContext)(REFIID riid, LPVOID *ppv);
 
 #define ok_ole_success(hr, func) ok(hr == S_OK, func " failed with error 0x%08x\n", hr)
+#define ok_more_than_one_lock() ok(cLocks > 0, "Number of locks should be > 0, but actually is %d\n", cLocks)
+#define ok_no_locks() ok(cLocks == 0, "Number of locks should be 0, but actually is %d\n", cLocks)
 
 static const CLSID CLSID_non_existent =   { 0x12345678, 0x1234, 0x1234, { 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0 } };
 static const CLSID CLSID_CDeviceMoniker = { 0x4315d437, 0x5b8c, 0x11d0, { 0xbd, 0x3b, 0x00, 0xa0, 0xc9, 0x11, 0xce, 0x86 } };
-static const WCHAR devicedotone[] = {'d','e','v','i','c','e','.','1',0};
+static WCHAR devicedotone[] = {'d','e','v','i','c','e','.','1',0};
 static const WCHAR wszNonExistent[] = {'N','o','n','E','x','i','s','t','e','n','t',0};
-static const WCHAR wszCLSID_CDeviceMoniker[] =
+static WCHAR wszCLSID_CDeviceMoniker[] =
 {
     '{',
     '4','3','1','5','d','4','3','7','-',
@@ -57,7 +61,84 @@ static const IID IID_IWineTest =
     0x4fd0,
     {0xa1, 0xa2, 0x5d, 0x5a, 0x36, 0x54, 0xd3, 0xbd}
 }; /* 5201163f-8164-4fd0-a1a2-5d5a3654d3bd */
+static const CLSID CLSID_WineOOPTest = {
+    0x5201163f,
+    0x8164,
+    0x4fd0,
+    {0xa1, 0xa2, 0x5d, 0x5a, 0x36, 0x54, 0xd3, 0xbd}
+}; /* 5201163f-8164-4fd0-a1a2-5d5a3654d3bd */
 
+static LONG cLocks;
+
+static void LockModule(void)
+{
+    InterlockedIncrement(&cLocks);
+}
+
+static void UnlockModule(void)
+{
+    InterlockedDecrement(&cLocks);
+}
+
+static HRESULT WINAPI Test_IClassFactory_QueryInterface(
+    LPCLASSFACTORY iface,
+    REFIID riid,
+    LPVOID *ppvObj)
+{
+    if (ppvObj == NULL) return E_POINTER;
+
+    if (IsEqualGUID(riid, &IID_IUnknown) ||
+        IsEqualGUID(riid, &IID_IClassFactory))
+    {
+        *ppvObj = (LPVOID)iface;
+        IClassFactory_AddRef(iface);
+        return S_OK;
+    }
+
+    *ppvObj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI Test_IClassFactory_AddRef(LPCLASSFACTORY iface)
+{
+    LockModule();
+    return 2; /* non-heap-based object */
+}
+
+static ULONG WINAPI Test_IClassFactory_Release(LPCLASSFACTORY iface)
+{
+    UnlockModule();
+    return 1; /* non-heap-based object */
+}
+
+static HRESULT WINAPI Test_IClassFactory_CreateInstance(
+    LPCLASSFACTORY iface,
+    LPUNKNOWN pUnkOuter,
+    REFIID riid,
+    LPVOID *ppvObj)
+{
+    *ppvObj = NULL;
+    if (pUnkOuter) return CLASS_E_NOAGGREGATION;
+    return E_NOINTERFACE;
+}
+
+static HRESULT WINAPI Test_IClassFactory_LockServer(
+    LPCLASSFACTORY iface,
+    BOOL fLock)
+{
+    return S_OK;
+}
+
+static const IClassFactoryVtbl TestClassFactory_Vtbl =
+{
+    Test_IClassFactory_QueryInterface,
+    Test_IClassFactory_AddRef,
+    Test_IClassFactory_Release,
+    Test_IClassFactory_CreateInstance,
+    Test_IClassFactory_LockServer
+};
+
+static IClassFactory Test_ClassFactory = { &TestClassFactory_Vtbl };
 
 static void test_ProgIDFromCLSID(void)
 {
@@ -86,7 +167,7 @@ static void test_CLSIDFromProgID(void)
     ok(hr == S_OK, "CLSIDFromProgID failed with error 0x%08x\n", hr);
     ok(IsEqualCLSID(&clsid, &CLSID_CDeviceMoniker), "clsid wasn't equal to CLSID_CDeviceMoniker\n");
 
-    hr = CLSIDFromString((LPOLESTR)devicedotone, &clsid);
+    hr = CLSIDFromString(devicedotone, &clsid);
     ok_ole_success(hr, "CLSIDFromString");
     ok(IsEqualCLSID(&clsid, &CLSID_CDeviceMoniker), "clsid wasn't equal to CLSID_CDeviceMoniker\n");
 
@@ -107,13 +188,34 @@ static void test_CLSIDFromProgID(void)
 static void test_CLSIDFromString(void)
 {
     CLSID clsid;
-    HRESULT hr = CLSIDFromString((LPOLESTR)wszCLSID_CDeviceMoniker, &clsid);
+    HRESULT hr = CLSIDFromString(wszCLSID_CDeviceMoniker, &clsid);
     ok_ole_success(hr, "CLSIDFromString");
     ok(IsEqualCLSID(&clsid, &CLSID_CDeviceMoniker), "clsid wasn't equal to CLSID_CDeviceMoniker\n");
 
     hr = CLSIDFromString(NULL, &clsid);
     ok_ole_success(hr, "CLSIDFromString");
     ok(IsEqualCLSID(&clsid, &CLSID_NULL), "clsid wasn't equal to CLSID_NULL\n");
+}
+
+static void test_StringFromGUID2(void)
+{
+  WCHAR str[50];
+  int len;
+  /* Test corner cases for buffer size */
+  len = StringFromGUID2(&CLSID_CDeviceMoniker,str,50);
+  ok(len == 39, "len: %d (expected 39)\n", len);
+  ok(!lstrcmpiW(str, wszCLSID_CDeviceMoniker),"string wan't equal for CLSID_CDeviceMoniker\n");
+
+  memset(str,0,sizeof str);
+  len = StringFromGUID2(&CLSID_CDeviceMoniker,str,39);
+  ok(len == 39, "len: %d (expected 39)\n", len);
+  ok(!lstrcmpiW(str, wszCLSID_CDeviceMoniker),"string wan't equal for CLSID_CDeviceMoniker\n");
+
+  len = StringFromGUID2(&CLSID_CDeviceMoniker,str,38);
+  ok(len == 0, "len: %d (expected 0)\n", len);
+
+  len = StringFromGUID2(&CLSID_CDeviceMoniker,str,30);
+  ok(len == 0, "len: %d (expected 0)\n", len);
 }
 
 static void test_CoCreateInstance(void)
@@ -127,7 +229,7 @@ static void test_CoCreateInstance(void)
     OleInitialize(NULL);
     hr = CoCreateInstance(rclsid, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&pUnk);
     ok_ole_success(hr, "CoCreateInstance");
-    IUnknown_Release(pUnk);
+    if(pUnk) IUnknown_Release(pUnk);
     OleUninitialize();
 
     hr = CoCreateInstance(rclsid, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&pUnk);
@@ -160,7 +262,7 @@ static ATOM register_dummy_class(void)
         NULL,
         TEXT("WineOleTestClass"),
     };
-    
+
     return RegisterClass(&wc);
 }
 
@@ -250,9 +352,10 @@ static void test_CoRegisterMessageFilter(void)
     HRESULT hr;
     IMessageFilter *prev_filter;
 
-#if 0 /* crashes without an apartment! */
     hr = CoRegisterMessageFilter(&MessageFilter, &prev_filter);
-#endif
+    ok(hr == CO_E_NOT_SUPPORTED,
+        "CoRegisterMessageFilter should have failed with CO_E_NOT_SUPPORTED instead of 0x%08x\n",
+        hr);
 
     pCoInitializeEx(NULL, COINIT_MULTITHREADED);
     prev_filter = (IMessageFilter *)0xdeadbeef;
@@ -336,7 +439,7 @@ static HRESULT WINAPI PSFactoryBuffer_QueryInterface(
     }
     return E_NOINTERFACE;
 }
-        
+
 static ULONG WINAPI PSFactoryBuffer_AddRef(
     IPSFactoryBuffer * This)
 {
@@ -358,7 +461,7 @@ static HRESULT WINAPI PSFactoryBuffer_CreateProxy(
 {
     return E_NOTIMPL;
 }
-        
+
 static HRESULT WINAPI PSFactoryBuffer_CreateStub(
     IPSFactoryBuffer * This,
     /* [in] */ REFIID riid,
@@ -454,10 +557,469 @@ static void test_CoGetPSClsid(void)
     CoUninitialize();
 }
 
+/* basic test, mainly for invalid arguments. see marshal.c for more */
+static void test_CoUnmarshalInterface(void)
+{
+    IUnknown *pProxy;
+    IStream *pStream;
+    HRESULT hr;
+
+    hr = CoUnmarshalInterface(NULL, &IID_IUnknown, (void **)&pProxy);
+    ok(hr == E_INVALIDARG, "CoUnmarshalInterface should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &pStream);
+    ok_ole_success(hr, "CreateStreamOnHGlobal");
+
+    hr = CoUnmarshalInterface(pStream, &IID_IUnknown, (void **)&pProxy);
+    todo_wine
+    ok(hr == CO_E_NOTINITIALIZED, "CoUnmarshalInterface should have returned CO_E_NOTINITIALIZED instead of 0x%08x\n", hr);
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    hr = CoUnmarshalInterface(pStream, &IID_IUnknown, (void **)&pProxy);
+    ok(hr == STG_E_READFAULT, "CoUnmarshalInterface should have returned STG_E_READFAULT instead of 0x%08x\n", hr);
+
+    CoUninitialize();
+
+    hr = CoUnmarshalInterface(pStream, &IID_IUnknown, NULL);
+    ok(hr == E_INVALIDARG, "CoUnmarshalInterface should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    IStream_Release(pStream);
+}
+
+static void test_CoGetInterfaceAndReleaseStream(void)
+{
+    HRESULT hr;
+    IUnknown *pUnk;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    hr = CoGetInterfaceAndReleaseStream(NULL, &IID_IUnknown, (void**)&pUnk);
+    ok(hr == E_INVALIDARG, "hr %08x\n", hr);
+
+    CoUninitialize();
+}
+
+/* basic test, mainly for invalid arguments. see marshal.c for more */
+static void test_CoMarshalInterface(void)
+{
+    IStream *pStream;
+    HRESULT hr;
+    static const LARGE_INTEGER llZero;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &pStream);
+    ok_ole_success(hr, "CreateStreamOnHGlobal");
+
+    hr = CoMarshalInterface(pStream, &IID_IUnknown, NULL, MSHCTX_INPROC, NULL, MSHLFLAGS_NORMAL);
+    ok(hr == E_INVALIDARG, "CoMarshalInterface should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    hr = CoMarshalInterface(NULL, &IID_IUnknown, (IUnknown *)&Test_ClassFactory, MSHCTX_INPROC, NULL, MSHLFLAGS_NORMAL);
+    ok(hr == E_INVALIDARG, "CoMarshalInterface should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    hr = CoMarshalInterface(pStream, &IID_IUnknown, (IUnknown *)&Test_ClassFactory, MSHCTX_INPROC, NULL, MSHLFLAGS_NORMAL);
+    ok_ole_success(hr, "CoMarshalInterface");
+
+    /* stream not rewound */
+    hr = CoReleaseMarshalData(pStream);
+    ok(hr == STG_E_READFAULT, "CoReleaseMarshalData should have returned STG_E_READFAULT instead of 0x%08x\n", hr);
+
+    hr = IStream_Seek(pStream, llZero, STREAM_SEEK_SET, NULL);
+    ok_ole_success(hr, "IStream_Seek");
+
+    hr = CoReleaseMarshalData(pStream);
+    ok_ole_success(hr, "CoReleaseMarshalData");
+
+    IStream_Release(pStream);
+
+    CoUninitialize();
+}
+
+static void test_CoMarshalInterThreadInterfaceInStream(void)
+{
+    IStream *pStream;
+    HRESULT hr;
+    IClassFactory *pProxy;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    cLocks = 0;
+
+    hr = CoMarshalInterThreadInterfaceInStream(&IID_IUnknown, (IUnknown *)&Test_ClassFactory, NULL);
+    ok(hr == E_INVALIDARG, "CoMarshalInterThreadInterfaceInStream should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    hr = CoMarshalInterThreadInterfaceInStream(&IID_IUnknown, NULL, &pStream);
+    ok(hr == E_INVALIDARG, "CoMarshalInterThreadInterfaceInStream should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    ok_no_locks();
+
+    hr = CoMarshalInterThreadInterfaceInStream(&IID_IUnknown, (IUnknown *)&Test_ClassFactory, &pStream);
+    ok_ole_success(hr, "CoMarshalInterThreadInterfaceInStream");
+
+    ok_more_than_one_lock();
+
+    hr = CoUnmarshalInterface(pStream, &IID_IClassFactory, (void **)&pProxy);
+    ok_ole_success(hr, "CoUnmarshalInterface");
+
+    IClassFactory_Release(pProxy);
+    IStream_Release(pStream);
+
+    ok_no_locks();
+
+    CoUninitialize();
+}
+
+static void test_CoRegisterClassObject(void)
+{
+    DWORD cookie;
+    HRESULT hr;
+    IClassFactory *pcf;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    /* CLSCTX_INPROC_SERVER */
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_INPROC_SERVER, REGCLS_SINGLEUSE, &cookie);
+    ok_ole_success(hr, "CoRegisterClassObject");
+    hr = CoRevokeClassObject(cookie);
+    ok_ole_success(hr, "CoRevokeClassObject");
+
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_INPROC_SERVER, REGCLS_MULTIPLEUSE, &cookie);
+    ok_ole_success(hr, "CoRegisterClassObject");
+    hr = CoRevokeClassObject(cookie);
+    ok_ole_success(hr, "CoRevokeClassObject");
+
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_INPROC_SERVER, REGCLS_MULTI_SEPARATE, &cookie);
+    ok_ole_success(hr, "CoRegisterClassObject");
+    hr = CoRevokeClassObject(cookie);
+    ok_ole_success(hr, "CoRevokeClassObject");
+
+    /* CLSCTX_LOCAL_SERVER */
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_LOCAL_SERVER, REGCLS_SINGLEUSE, &cookie);
+    ok_ole_success(hr, "CoRegisterClassObject");
+    hr = CoRevokeClassObject(cookie);
+    ok_ole_success(hr, "CoRevokeClassObject");
+
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE, &cookie);
+    ok_ole_success(hr, "CoRegisterClassObject");
+    hr = CoRevokeClassObject(cookie);
+    ok_ole_success(hr, "CoRevokeClassObject");
+
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_LOCAL_SERVER, REGCLS_MULTI_SEPARATE, &cookie);
+    ok_ole_success(hr, "CoRegisterClassObject");
+    hr = CoRevokeClassObject(cookie);
+    ok_ole_success(hr, "CoRevokeClassObject");
+
+    /* CLSCTX_INPROC_SERVER|CLSCTX_LOCAL_SERVER */
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_INPROC_SERVER|CLSCTX_LOCAL_SERVER, REGCLS_SINGLEUSE, &cookie);
+    ok_ole_success(hr, "CoRegisterClassObject");
+    hr = CoRevokeClassObject(cookie);
+    ok_ole_success(hr, "CoRevokeClassObject");
+
+    /* test whether registered class becomes invalid when apartment is destroyed */
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_INPROC_SERVER, REGCLS_SINGLEUSE, &cookie);
+    ok_ole_success(hr, "CoRegisterClassObject");
+
+    CoUninitialize();
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    hr = CoGetClassObject(&CLSID_WineOOPTest, CLSCTX_INPROC_SERVER, NULL,
+                          &IID_IClassFactory, (void **)&pcf);
+    ok(hr == REGDB_E_CLASSNOTREG, "object registered in an apartment shouldn't accessible after it is destroyed\n");
+
+    /* crashes with at least win9x DCOM! */
+    if (0)
+        hr = CoRevokeClassObject(cookie);
+
+    CoUninitialize();
+}
+
+static HRESULT get_class_object(CLSCTX clsctx)
+{
+    HRESULT hr;
+    IClassFactory *pcf;
+
+    hr = CoGetClassObject(&CLSID_WineOOPTest, clsctx, NULL, &IID_IClassFactory,
+                          (void **)&pcf);
+
+    if (SUCCEEDED(hr))
+        IClassFactory_Release(pcf);
+
+    return hr;
+}
+
+static DWORD CALLBACK get_class_object_thread(LPVOID pv)
+{
+    CLSCTX clsctx = (CLSCTX)(DWORD_PTR)pv;
+    HRESULT hr;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    hr = get_class_object(clsctx);
+
+    CoUninitialize();
+
+    return hr;
+}
+
+static DWORD CALLBACK get_class_object_proxy_thread(LPVOID pv)
+{
+    CLSCTX clsctx = (CLSCTX)(DWORD_PTR)pv;
+    HRESULT hr;
+    IClassFactory *pcf;
+    IMultiQI *pMQI;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    hr = CoGetClassObject(&CLSID_WineOOPTest, clsctx, NULL, &IID_IClassFactory,
+                          (void **)&pcf);
+
+    if (SUCCEEDED(hr))
+    {
+        hr = IClassFactory_QueryInterface(pcf, &IID_IMultiQI, (void **)&pMQI);
+        if (SUCCEEDED(hr))
+            IMultiQI_Release(pMQI);
+        IClassFactory_Release(pcf);
+    }
+
+    CoUninitialize();
+
+    return hr;
+}
+
+static DWORD CALLBACK register_class_object_thread(LPVOID pv)
+{
+    HRESULT hr;
+    DWORD cookie;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_INPROC_SERVER, REGCLS_SINGLEUSE, &cookie);
+
+    CoUninitialize();
+
+    return hr;
+}
+
+static DWORD CALLBACK revoke_class_object_thread(LPVOID pv)
+{
+    DWORD cookie = (DWORD_PTR)pv;
+    HRESULT hr;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    hr = CoRevokeClassObject(cookie);
+
+    CoUninitialize();
+
+    return hr;
+}
+
+static void test_registered_object_thread_affinity(void)
+{
+    HRESULT hr;
+    DWORD cookie;
+    HANDLE thread;
+    DWORD tid;
+    DWORD exitcode;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    /* CLSCTX_INPROC_SERVER */
+
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_INPROC_SERVER, REGCLS_SINGLEUSE, &cookie);
+    ok_ole_success(hr, "CoRegisterClassObject");
+
+    thread = CreateThread(NULL, 0, get_class_object_thread, (LPVOID)CLSCTX_INPROC_SERVER, 0, &tid);
+    ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
+    WaitForSingleObject(thread, INFINITE);
+    GetExitCodeThread(thread, &exitcode);
+    hr = exitcode;
+    ok(hr == REGDB_E_CLASSNOTREG, "CoGetClassObject on inproc object "
+       "registered in different thread should return REGDB_E_CLASSNOTREG "
+       "instead of 0x%08x\n", hr);
+
+    hr = get_class_object(CLSCTX_INPROC_SERVER);
+    ok(hr == S_OK, "CoGetClassObject on inproc object registered in same "
+       "thread should return S_OK instead of 0x%08x\n", hr);
+
+    thread = CreateThread(NULL, 0, register_class_object_thread, NULL, 0, &tid);
+    ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
+    WaitForSingleObject(thread, INFINITE);
+    GetExitCodeThread(thread, &exitcode);
+    hr = exitcode;
+    ok(hr == S_OK, "CoRegisterClassObject with same CLSID but in different thread should return S_OK instead of 0x%08x\n", hr);
+
+    hr = CoRevokeClassObject(cookie);
+    ok_ole_success(hr, "CoRevokeClassObject");
+
+    /* CLSCTX_LOCAL_SERVER */
+
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE, &cookie);
+    ok_ole_success(hr, "CoRegisterClassObject");
+
+    thread = CreateThread(NULL, 0, get_class_object_proxy_thread, (LPVOID)CLSCTX_LOCAL_SERVER, 0, &tid);
+    ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
+    while (MsgWaitForMultipleObjects(1, &thread, FALSE, INFINITE, QS_ALLINPUT) == WAIT_OBJECT_0 + 1)
+    {
+        MSG msg;
+        while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE))
+        {
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+        }
+    }
+    GetExitCodeThread(thread, &exitcode);
+    hr = exitcode;
+    ok(hr == S_OK, "CoGetClassObject on local server object "
+       "registered in different thread should return S_OK "
+       "instead of 0x%08x\n", hr);
+
+    hr = get_class_object(CLSCTX_LOCAL_SERVER);
+    ok(hr == S_OK, "CoGetClassObject on local server object registered in same "
+       "thread should return S_OK instead of 0x%08x\n", hr);
+
+    thread = CreateThread(NULL, 0, revoke_class_object_thread, (LPVOID)cookie, 0, &tid);
+    ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
+    WaitForSingleObject(thread, INFINITE);
+    GetExitCodeThread(thread, &exitcode);
+    hr = exitcode;
+    ok(hr == RPC_E_WRONG_THREAD, "CoRevokeClassObject called from different "
+       "thread to where registered should return RPC_E_WRONG_THREAD instead of 0x%08x\n", hr);
+
+    thread = CreateThread(NULL, 0, register_class_object_thread, NULL, 0, &tid);
+    ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
+    WaitForSingleObject(thread, INFINITE);
+    GetExitCodeThread(thread, &exitcode);
+    hr = exitcode;
+    ok(hr == S_OK, "CoRegisterClassObject with same CLSID but in different "
+        "thread should return S_OK instead of 0x%08x\n", hr);
+
+    hr = CoRevokeClassObject(cookie);
+    ok_ole_success(hr, "CoRevokeClassObject");
+
+    CoUninitialize();
+}
+
+static DWORD CALLBACK free_libraries_thread(LPVOID p)
+{
+    CoFreeUnusedLibraries();
+    return 0;
+}
+
+static inline BOOL is_module_loaded(const char *module)
+{
+    return GetModuleHandle(module) ? TRUE : FALSE;
+}
+
+static void test_CoFreeUnusedLibraries(void)
+{
+    HRESULT hr;
+    IUnknown *pUnk;
+    DWORD tid;
+    HANDLE thread;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    ok(!is_module_loaded("urlmon.dll"), "urlmon.dll shouldn't be loaded\n");
+
+    hr = CoCreateInstance(&CLSID_FileProtocol, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&pUnk);
+    if (hr == REGDB_E_CLASSNOTREG)
+    {
+        trace("IE not installed so can't run CoFreeUnusedLibraries test\n");
+        return;
+    }
+    ok_ole_success(hr, "CoCreateInstance");
+
+    ok(is_module_loaded("urlmon.dll"), "urlmon.dll should be loaded\n");
+
+    IUnknown_Release(pUnk);
+
+    ok(is_module_loaded("urlmon.dll"), "urlmon.dll should be loaded\n");
+
+    thread = CreateThread(NULL, 0, free_libraries_thread, NULL, 0, &tid);
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+
+    ok(is_module_loaded("urlmon.dll"), "urlmon.dll should be loaded\n");
+
+    CoFreeUnusedLibraries();
+
+    ok(!is_module_loaded("urlmon.dll"), "urlmon.dll shouldn't be loaded\n");
+
+    CoUninitialize();
+}
+
+static void test_CoGetObjectContext(void)
+{
+    HRESULT hr;
+    ULONG refs;
+    IComThreadingInfo *pComThreadingInfo;
+    APTTYPE apttype;
+    THDTYPE thdtype;
+
+    if (!pCoGetObjectContext)
+    {
+        skip("CoGetObjectContext not present\n");
+        return;
+    }
+
+    hr = pCoGetObjectContext(&IID_IComThreadingInfo, (void **)&pComThreadingInfo);
+    ok(hr == CO_E_NOTINITIALIZED, "CoGetObjectContext should have returned CO_E_NOTINITIALIZED instead of 0x%08x\n", hr);
+    ok(pComThreadingInfo == NULL, "pComThreadingInfo should have been set to NULL\n");
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    hr = pCoGetObjectContext(&IID_IComThreadingInfo, (void **)&pComThreadingInfo);
+    ok_ole_success(hr, "CoGetObjectContext");
+
+    hr = IComThreadingInfo_GetCurrentApartmentType(pComThreadingInfo, &apttype);
+    ok_ole_success(hr, "IComThreadingInfo_GetCurrentApartmentType");
+    ok(apttype == APTTYPE_MAINSTA, "apartment type should be APTTYPE_MAINSTA instead of %d\n", apttype);
+
+    hr = IComThreadingInfo_GetCurrentThreadType(pComThreadingInfo, &thdtype);
+    ok_ole_success(hr, "IComThreadingInfo_GetCurrentThreadType");
+    ok(thdtype == THDTYPE_PROCESSMESSAGES, "thread type should be THDTYPE_PROCESSMESSAGES instead of %d\n", thdtype);
+
+    refs = IComThreadingInfo_Release(pComThreadingInfo);
+    ok(refs == 0, "pComThreadingInfo should have 0 refs instead of %d refs\n", refs);
+
+    CoUninitialize();
+
+    pCoInitializeEx(NULL, COINIT_MULTITHREADED);
+
+    hr = pCoGetObjectContext(&IID_IComThreadingInfo, (void **)&pComThreadingInfo);
+    ok_ole_success(hr, "CoGetObjectContext");
+
+    hr = IComThreadingInfo_GetCurrentApartmentType(pComThreadingInfo, &apttype);
+    ok_ole_success(hr, "IComThreadingInfo_GetCurrentApartmentType");
+    ok(apttype == APTTYPE_MTA, "apartment type should be APTTYPE_MTA instead of %d\n", apttype);
+
+    hr = IComThreadingInfo_GetCurrentThreadType(pComThreadingInfo, &thdtype);
+    ok_ole_success(hr, "IComThreadingInfo_GetCurrentThreadType");
+    ok(thdtype == THDTYPE_BLOCKMESSAGES, "thread type should be THDTYPE_BLOCKMESSAGES instead of %d\n", thdtype);
+
+    refs = IComThreadingInfo_Release(pComThreadingInfo);
+    ok(refs == 0, "pComThreadingInfo should have 0 refs instead of %d refs\n", refs);
+
+    CoUninitialize();
+}
 
 START_TEST(compobj)
 {
     HMODULE hOle32 = GetModuleHandle("ole32");
+    pCoGetObjectContext = (void*)GetProcAddress(hOle32, "CoGetObjectContext");
     if (!(pCoInitializeEx = (void*)GetProcAddress(hOle32, "CoInitializeEx")))
     {
         trace("You need DCOM95 installed to run this test\n");
@@ -467,10 +1029,19 @@ START_TEST(compobj)
     test_ProgIDFromCLSID();
     test_CLSIDFromProgID();
     test_CLSIDFromString();
+    test_StringFromGUID2();
     test_CoCreateInstance();
     test_ole_menu();
     test_CoGetClassObject();
     test_CoRegisterMessageFilter();
     test_CoRegisterPSClsid();
     test_CoGetPSClsid();
+    test_CoUnmarshalInterface();
+    test_CoGetInterfaceAndReleaseStream();
+    test_CoMarshalInterface();
+    test_CoMarshalInterThreadInterfaceInStream();
+    test_CoRegisterClassObject();
+    test_registered_object_thread_affinity();
+    test_CoFreeUnusedLibraries();
+    test_CoGetObjectContext();
 }

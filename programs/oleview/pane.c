@@ -15,12 +15,12 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA 
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
 #include "main.h"
 
-int GetSplitPos(HWND hWnd)
+static int GetSplitPos(HWND hWnd)
 {
     PANE *pane = (PANE *)GetMenu(hWnd);
 
@@ -30,7 +30,7 @@ int GetSplitPos(HWND hWnd)
             pane->pos : pane->width-pane->size/2-1);
 }
 
-void DrawSplitMoving(HWND hWnd, int x)
+static void DrawSplitMoving(HWND hWnd, int x)
 {
     RECT rt;
     HDC hdc = GetDC(hWnd);
@@ -151,7 +151,11 @@ BOOL CreatePanedWindow(HWND hWnd, HWND *hWndCreated, HINSTANCE hInst)
     pane = HeapAlloc(GetProcessHeap(), 0, sizeof(PANE));
     *hWndCreated = CreateWindow(wszPaneClass, NULL, WS_CHILD|WS_VISIBLE,
             CW_USEDEFAULT, CW_USEDEFAULT, 0, 0,    hWnd, (HMENU)pane, hInst, NULL);
-    if(!hWndCreated) return FALSE;
+    if(!hWndCreated)
+    {
+        HeapFree(GetProcessHeap(), 0, pane);
+        return FALSE;
+    }
 
     pane->left = NULL;
     pane->right = NULL;

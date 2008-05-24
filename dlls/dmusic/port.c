@@ -2,19 +2,19 @@
  *
  * Copyright (C) 2003-2004 Rok Mandeljc
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Library General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
 #include "dmusic_private.h"
@@ -115,7 +115,7 @@ static HRESULT WINAPI IDirectMusicPortImpl_Compact (LPDIRECTMUSICPORT iface) {
 static HRESULT WINAPI IDirectMusicPortImpl_GetCaps (LPDIRECTMUSICPORT iface, LPDMUS_PORTCAPS pPortCaps) {
 	IDirectMusicPortImpl *This = (IDirectMusicPortImpl *)iface;
 	TRACE("(%p, %p)\n", This, pPortCaps);
-	memcpy(pPortCaps, &This->caps, sizeof(DMUS_PORTCAPS));	
+	*pPortCaps = This->caps;
 	return S_OK;
 }
 
@@ -171,7 +171,45 @@ static HRESULT WINAPI IDirectMusicPortImpl_SetDirectSound (LPDIRECTMUSICPORT ifa
 
 static HRESULT WINAPI IDirectMusicPortImpl_GetFormat (LPDIRECTMUSICPORT iface, LPWAVEFORMATEX pWaveFormatEx, LPDWORD pdwWaveFormatExSize, LPDWORD pdwBufferSize) {
 	IDirectMusicPortImpl *This = (IDirectMusicPortImpl *)iface;
+	WAVEFORMATEX format;
 	FIXME("(%p, %p, %p, %p): stub\n", This, pWaveFormatEx, pdwWaveFormatExSize, pdwBufferSize);
+
+	if (pWaveFormatEx == NULL)
+	{
+		if (pdwWaveFormatExSize)
+			*pdwWaveFormatExSize = sizeof(format);
+		else
+			return E_POINTER;
+	}
+	else
+	{
+		if (pdwWaveFormatExSize == NULL)
+			return E_POINTER;
+
+		/* Just fill this in with something that will not crash Direct Sound for now. */
+		/* It won't be used anyway until Performances are completed */
+		format.wFormatTag = WAVE_FORMAT_PCM;
+		format.nChannels = 2; /* This->params.dwAudioChannels; */
+		format.nSamplesPerSec = 44100; /* This->params.dwSampleRate; */
+		format.wBitsPerSample = 16;	/* FIXME: check this */
+		format.nBlockAlign = (format.wBitsPerSample * format.nChannels) / 8;
+		format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
+		format.cbSize = 0;
+
+		if (*pdwWaveFormatExSize >= sizeof(format))
+		{
+			CopyMemory(pWaveFormatEx, &format, min(sizeof(format), *pdwWaveFormatExSize));
+			*pdwWaveFormatExSize = sizeof(format);	/* FIXME check if this is set */
+		}
+		else
+			return E_POINTER;	/* FIXME find right error */
+	}
+
+	if (pdwBufferSize)
+		*pdwBufferSize = 44100 * 2 * 2;
+	else
+		return E_POINTER;
+
 	return S_OK;
 }
 
@@ -212,8 +250,8 @@ HRESULT WINAPI DMUSIC_CreateDirectMusicPortImpl (LPCGUID lpcGUID, LPVOID *ppobj,
 	obj->lpVtbl = &DirectMusicPort_Vtbl;
 	obj->ref = 0;  /* will be inited by QueryInterface */
 	obj->fActive = FALSE;
-	memcpy(&obj->params, pPortParams, sizeof(DMUS_PORTPARAMS));
-	memcpy(&obj->caps, pPortCaps, sizeof(DMUS_PORTCAPS));
+	obj->params = *pPortParams;
+	obj->caps = *pPortCaps;
 	obj->pDirectSound = NULL;
 	obj->pLatencyClock = NULL;
 	hr = DMUSIC_CreateReferenceClockImpl(&IID_IReferenceClock, (LPVOID*)&obj->pLatencyClock, NULL);

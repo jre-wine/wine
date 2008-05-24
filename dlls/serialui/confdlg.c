@@ -47,7 +47,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(comm);
 
-HMODULE SERIALUI_hModule = 0;
+static HMODULE SERIALUI_hModule;
+
+static const WCHAR comW[] = {'c','o','m',0 };
 
 /***********************************************************************
  * DllMain [Internal] Initializes the internal 'SERIALUI.DLL'.
@@ -110,7 +112,7 @@ typedef struct tagPARAM2STR
     DWORD         dwSize;
     LPPARAM2STRDATA data;
 } PARAM2STR, *LPPARAM2STR;
-typedef const LPPARAM2STR LPCPARAM2STR;
+typedef const PARAM2STR *LPCPARAM2STR;
 
 #define SERIALUI_TABLESIZE(x) ((sizeof (x))/(sizeof (x[0])))
 
@@ -166,7 +168,7 @@ static void SERIALUI_AddConfItems(HWND hDlg, DWORD id, LPCPARAM2STR table, DWORD
 }
 
 /*
- * Get the current sellection of the given combo box and set a DCB field to
+ * Get the current selection of the given combo box and set a DCB field to
  * the value matching that selection.
  */
 static BOOL SERIALUI_GetConfItems(HWND hDlg, DWORD id, LPCPARAM2STR table, LPDWORD lpdwVal)
@@ -205,7 +207,7 @@ static BOOL SERIALUI_GetConfItems(HWND hDlg, DWORD id, LPCPARAM2STR table, LPDWO
  * dcb.BaudRate. This code is to convert back and forth between CBR_ style
  * and integers. The dialog box uses integer values.
  */
-static DWORD SERIALUI_BaudConvertTable[] =  {
+static const DWORD SERIALUI_BaudConvertTable[] =  {
   CBR_110, 110, CBR_300, 300, CBR_600, 600, CBR_1200, 1200,
   CBR_2400, 2400, CBR_4800, 4800, CBR_9600, 9600, CBR_14400, 14400,
   CBR_19200, 19200, CBR_38400, 38400, CBR_56000, 56000, CBR_57600, 57600,
@@ -342,7 +344,7 @@ static void SERIALUI_DialogInfoToDCB(HWND hDlg, SERIALUI_DialogInfo *info)
  *
  * Shows a dialog for configuring a COMM port
  */
-INT_PTR CALLBACK SERIALUI_ConfigDialogProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+static INT_PTR CALLBACK SERIALUI_ConfigDialogProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     static const WCHAR szSettings[] = {
         'S','e','t','t','i','n','g','s',' ','f','o','r',' ',0
@@ -374,10 +376,10 @@ INT_PTR CALLBACK SERIALUI_ConfigDialogProc(HWND hWnd, UINT uMsg, WPARAM wParam, 
         {
         case IDOK:
             SERIALUI_DialogInfoToDCB(hWnd,info);
-            EndDialog(hWnd,1);
+            EndDialog(hWnd, ERROR_SUCCESS);
             return TRUE;
         case IDCANCEL:
-            EndDialog(hWnd,0);
+            EndDialog(hWnd, ERROR_CANCELLED);
             return TRUE;
 /* test code for Get/SetDefaultCommConfig begins */
         case ID_GETDEFAULT:
@@ -429,38 +431,44 @@ static VOID SERIALUI_strfree( LPWSTR strW )
 /***********************************************************************
  * drvCommConfigDialogW (SERIALUI.@)
  *
- * Used by Win9x KERNEL to show a dialog for configuring a COMM port.
+ * Show a dialog for configuring a Serial Port.
+ *
  */
-BOOL WINAPI drvCommConfigDialogW(
-	LPCWSTR lpszName,
-	HWND hWndParent,
-	LPCOMMCONFIG lpCommConfig
-) {
+DWORD WINAPI drvCommConfigDialogW(LPCWSTR lpszName, HWND hWndParent, LPCOMMCONFIG lpCommConfig)
+{
     SERIALUI_DialogInfo info;
+    INT res;
 
     info.lpCommConfig  = lpCommConfig;
     info.lpszDevice    = lpszName;
     info.bConvert      = FALSE;
     info.dwFlowControl = 0;
 
-    if(!lpCommConfig)
-        return FALSE;
+    if ((!lpCommConfig) || (!lpszName))
+        return ERROR_INVALID_PARAMETER;
 
-    return DialogBoxParamW(SERIALUI_hModule,
+    if (lpCommConfig->dwSize < sizeof(COMMCONFIG))
+        return ERROR_INSUFFICIENT_BUFFER;
+
+    if (!lpszName[0])
+        return ERROR_BADKEY;
+
+    res = DialogBoxParamW( SERIALUI_hModule,
                            MAKEINTRESOURCEW(IDD_SERIALUICONFIG),
                            hWndParent,
                            SERIALUI_ConfigDialogProc,
                            (LPARAM)&info);
+
+    return (res == -1) ? GetLastError() : res ;
 }
 
 /***********************************************************************
  * drvCommConfigDialogA (SERIALUI.@)
  */
-BOOL WINAPI drvCommConfigDialogA(
-	LPCSTR lpszName, HWND hWndParent, LPCOMMCONFIG lpCommConfig )
+DWORD WINAPI drvCommConfigDialogA(LPCSTR lpszName, HWND hWndParent, LPCOMMCONFIG lpCommConfig)
 {
     LPWSTR strW = SERIALUI_strdup( lpszName );
-    BOOL r = drvCommConfigDialogW( strW, hWndParent, lpCommConfig );
+    DWORD r = drvCommConfigDialogW( strW, hWndParent, lpCommConfig );
     SERIALUI_strfree( strW );
     return r;
 }
@@ -535,7 +543,7 @@ BOOL WINAPI drvSetDefaultCommConfigA(
  * FIXME: uses the wrong registry key... should use a digit, not
  *        the comm port name.
  */
-BOOL WINAPI drvGetDefaultCommConfigW(
+DWORD WINAPI drvGetDefaultCommConfigW(
 	LPCWSTR lpszDevice, LPCOMMCONFIG lpCommConfig, LPDWORD lpdwSize)
 {
     HKEY hKeyReg, hKeyPort;
@@ -543,25 +551,35 @@ BOOL WINAPI drvGetDefaultCommConfigW(
     DWORD r,dwSize,dwType;
     static const WCHAR fmt[] = {'%','s','\\','%','s',0 };
 
-    TRACE("%p %p %p\n",lpszDevice,lpCommConfig,lpdwSize);
+    TRACE("(%s, %p, %p) *lpdwSize: %u\n", debugstr_w(lpszDevice), lpCommConfig, lpdwSize, lpdwSize ? *lpdwSize : 0);
 
-    if(!lpCommConfig)
-        return FALSE;
+    if ((!lpszDevice) || (!lpCommConfig) || (!lpdwSize)) {
+        return ERROR_INVALID_PARAMETER;
+    }
 
-    if(!lpdwSize)
-        return FALSE;
+    if (*lpdwSize < sizeof (COMMCONFIG)) {
+        *lpdwSize = sizeof (COMMCONFIG);
+        return ERROR_INSUFFICIENT_BUFFER;
+    }
 
-    if(*lpdwSize < sizeof (COMMCONFIG))
-        return FALSE;
+    /* only "com1" - "com9" is allowed */
+    r = sizeof(comW) / sizeof(WCHAR);       /* len of "com\0" */
+    lstrcpynW(szKeyName, lpszDevice, r);    /* simulate a lstrcmpnW */
+    r--;
+
+    if( lstrcmpiW(szKeyName, comW) ||
+        (lpszDevice[r] < '1') || (lpszDevice[r] > '9') || lpszDevice[r+1]) {
+        return ERROR_BADKEY;
+    }
 
     *lpdwSize = sizeof (COMMCONFIG);
     memset(lpCommConfig, 0 , sizeof (COMMCONFIG));
     lpCommConfig->dwSize = sizeof (COMMCONFIG);
     lpCommConfig->wVersion = 1;
+    lpCommConfig->dwProviderSubType = PST_RS232;
 
     r = RegConnectRegistryW(NULL, HKEY_LOCAL_MACHINE, &hKeyReg);
-    if(r != ERROR_SUCCESS)
-        return FALSE;
+    if(r != ERROR_SUCCESS) return r;
 
     snprintfW(szKeyName, sizeof(szKeyName)/sizeof(WCHAR), fmt, lpszCommKey ,lpszDevice);
     r = RegOpenKeyW(hKeyReg, szKeyName, &hKeyPort);
@@ -571,17 +589,17 @@ BOOL WINAPI drvGetDefaultCommConfigW(
         dwType = 0;
         r = RegQueryValueExW( hKeyPort, lpszDCB, NULL,
                              &dwType, (LPBYTE)&lpCommConfig->dcb, &dwSize);
-        if ((r==ERROR_SUCCESS) && (dwType != REG_BINARY))
-            r = 1;
-        if ((r==ERROR_SUCCESS) && (dwSize != sizeof(DCB)))
-            r = 1;
 
         RegCloseKey(hKeyPort);
+        if ((r!=ERROR_SUCCESS) || (dwType != REG_BINARY) || (dwSize != sizeof(DCB))) {
+            RegCloseKey(hKeyReg);
+            return ERROR_INVALID_PARAMETER;
+        }
+
     }
     else
     {
         /* FIXME: default to a hardcoded commconfig */
-
         lpCommConfig->dcb.DCBlength = sizeof(DCB);
         lpCommConfig->dcb.BaudRate = 9600;
         lpCommConfig->dcb.fBinary = TRUE;
@@ -589,22 +607,22 @@ BOOL WINAPI drvGetDefaultCommConfigW(
         lpCommConfig->dcb.ByteSize = 8;
         lpCommConfig->dcb.Parity = NOPARITY;
         lpCommConfig->dcb.StopBits = ONESTOPBIT;
-        return TRUE;
+        return ERROR_SUCCESS;
     }
 
     RegCloseKey(hKeyReg);
 
-    return (r==ERROR_SUCCESS);
+    return r;
 }
 
 /***********************************************************************
  * drvGetDefaultCommConfigA (SERIALUI.@)
  */
-BOOL WINAPI drvGetDefaultCommConfigA(
+DWORD WINAPI drvGetDefaultCommConfigA(
 	LPCSTR lpszDevice, LPCOMMCONFIG lpCommConfig, LPDWORD lpdwSize)
 {
     LPWSTR strW = SERIALUI_strdup( lpszDevice );
-    BOOL r = drvGetDefaultCommConfigW( strW, lpCommConfig, lpdwSize );
+    DWORD r = drvGetDefaultCommConfigW( strW, lpCommConfig, lpdwSize );
     SERIALUI_strfree( strW );
     return r;
 }

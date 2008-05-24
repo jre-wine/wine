@@ -23,10 +23,8 @@
 #include <math.h>
 
 #include "windef.h"
-#include "winbase.h"
 #include "wingdi.h"
 #include "psdrv.h"
-#include "winspool.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
@@ -48,6 +46,8 @@ BOOL PSDRV_ExtTextOut( PSDRV_PDEVICE *physDev, INT x, INT y, UINT flags,
 
     TRACE("(x=%d, y=%d, flags=0x%08x, str=%s, count=%d, lpDx=%p)\n", x, y,
 	  flags, debugstr_wn(str, count), count, lpDx);
+
+    if(physDev->job.hJob == 0) return FALSE;
 
     /* write font if not already written */
     PSDRV_SetFont(physDev);
@@ -95,20 +95,9 @@ static BOOL PSDRV_Text(PSDRV_PDEVICE *physDev, INT x, INT y, UINT flags, LPCWSTR
 		       UINT count, BOOL bDrawBackground, const INT *lpDx)
 {
     WORD *glyphs = NULL;
-    double cosEsc, sinEsc;
-    LOGFONTW lf;
 
     if (!count)
 	return TRUE;
-
-    GetObjectW(GetCurrentObject(physDev->hdc, OBJ_FONT), sizeof(lf), &lf);
-    if(lf.lfEscapement != 0) {
-        cosEsc = cos(lf.lfEscapement * M_PI / 1800);
-        sinEsc = sin(lf.lfEscapement * M_PI / 1800);
-    } else {
-        cosEsc = 1;
-        sinEsc = 0;
-    }
 
     if(physDev->font.fontloc == Download)
         glyphs = (LPWORD)str;

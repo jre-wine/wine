@@ -75,15 +75,31 @@ typedef struct IDirect3DExecuteBufferImpl IDirect3DExecuteBufferImpl;
 typedef struct IDirect3DVertexBufferImpl  IDirect3DVertexBufferImpl;
 typedef struct IParentImpl                IParentImpl;
 
+/* Callbacks for implicit object destruction */
+extern ULONG WINAPI D3D7CB_DestroySwapChain(IWineD3DSwapChain *pSwapChain);
+
+extern ULONG WINAPI D3D7CB_DestroyDepthStencilSurface(IWineD3DSurface *pSurface);
+
+/* Global critical section */
+extern CRITICAL_SECTION ddraw_cs;
+
+extern DWORD force_refresh_rate;
+
 /*****************************************************************************
  * IDirectDraw implementation structure
  *****************************************************************************/
+struct FvfToDecl
+{
+    DWORD fvf;
+    IWineD3DVertexDeclaration *decl;
+};
 
 struct IDirectDrawImpl
 {
     /* IUnknown fields */
     ICOM_VFIELD_MULTI(IDirectDraw7);
     ICOM_VFIELD_MULTI(IDirectDraw4);
+    ICOM_VFIELD_MULTI(IDirectDraw3);
     ICOM_VFIELD_MULTI(IDirectDraw2);
     ICOM_VFIELD_MULTI(IDirectDraw);
     ICOM_VFIELD_MULTI(IDirect3D7);
@@ -92,7 +108,7 @@ struct IDirectDrawImpl
     ICOM_VFIELD_MULTI(IDirect3D);
 
     /* See comment in IDirectDraw::AddRef */
-    LONG                    ref7, ref4, ref2, ref1, numIfaces;
+    LONG                    ref7, ref4, ref2, ref3, ref1, numIfaces;
 
     /* WineD3D linkage */
     IWineD3D                *wineD3D;
@@ -113,9 +129,6 @@ struct IDirectDrawImpl
     DWORD                   orig_bpp;
 
     DDCAPS                  caps;
-
-    LONG                    style;
-    LONG                    exStyle;
 
     /* D3D things */
     IDirectDrawSurfaceImpl  *d3d_target;
@@ -146,11 +159,16 @@ struct IDirectDrawImpl
      */
     struct list surface_list;
     LONG surfaces;
+
+    /* FVF management */
+    struct FvfToDecl       *decls;
+    UINT                    numConvertedDecls, declArraySize;
 };
 
 /* Declare the VTables. They can be found ddraw.c */
 const IDirectDraw7Vtbl IDirectDraw7_Vtbl;
 const IDirectDraw4Vtbl IDirectDraw4_Vtbl;
+const IDirectDraw3Vtbl IDirectDraw3_Vtbl;
 const IDirectDraw2Vtbl IDirectDraw2_Vtbl;
 const IDirectDrawVtbl  IDirectDraw1_Vtbl;
 
@@ -183,8 +201,9 @@ HRESULT WINAPI
 IDirectDrawImpl_RecreateSurfacesCallback(IDirectDrawSurface7 *surf,
                                          DDSURFACEDESC2 *desc,
                                          void *Context);
-void
-remove_ddraw_object(IDirectDrawImpl *ddraw);
+IWineD3DVertexDeclaration *
+IDirectDrawImpl_FindDecl(IDirectDrawImpl *This,
+                         DWORD fvf);
 
 /* The default surface type */
 extern WINED3DSURFTYPE DefaultSurfaceType;
@@ -210,13 +229,23 @@ struct IDirectDrawSurfaceImpl
     /* Connections to other Objects */
     IDirectDrawImpl         *ddraw;
     IWineD3DSurface         *WineD3DSurface;
-    IWineD3DTexture         *wineD3DTexture;
+    IWineD3DBaseTexture     *wineD3DTexture;
 
     /* This implementation handles attaching surfaces to other surfaces */
     IDirectDrawSurfaceImpl  *next_attached;
     IDirectDrawSurfaceImpl  *first_attached;
-    IDirectDrawSurfaceImpl  *next_complex;
-    IDirectDrawSurfaceImpl  *first_complex;
+
+    /* Complex surfaces are organized in a tree, although the tree is degenerated to a list in most cases.
+     * In mipmap and primary surfaces each level has only one attachment, which is the next surface level.
+     * Only the cube texture root has 6 surfaces attached, which then have a normal mipmap chain attached
+     * to them. So hardcode the array to 6, a dynamic array or a list would be an overkill.
+     */
+#define MAX_COMPLEX_ATTACHED 6
+    IDirectDrawSurfaceImpl  *complex_array[MAX_COMPLEX_ATTACHED];
+    /* You can't traverse the tree upwards. Only a flag for Surface::Release because its needed there,
+     * but no pointer to prevent temptations to traverse it in the wrong direction.
+     */
+    BOOL                    is_complex_root;
 
     /* Surface description, for GetAttachedSurface */
     DDSURFACEDESC2          surface_desc;
@@ -244,6 +273,9 @@ const IDirectDrawSurface3Vtbl IDirectDrawSurface3_Vtbl;
 const IDirectDrawGammaControlVtbl IDirectDrawGammaControl_Vtbl;
 const IDirect3DTexture2Vtbl IDirect3DTexture2_Vtbl;
 const IDirect3DTextureVtbl IDirect3DTexture1_Vtbl;
+
+HRESULT WINAPI IDirectDrawSurfaceImpl_AddAttachedSurface(IDirectDrawSurfaceImpl *This, IDirectDrawSurfaceImpl *Surf);
+void IDirectDrawSurfaceImpl_Destroy(IDirectDrawSurfaceImpl *This);
 
 /* Get the number of bytes per pixel for a given surface */
 #define PFGET_BPP(pf) (pf.dwFlags&DDPF_PALETTEINDEXED8?1:((pf.dwRGBBitCount+7)/8))
@@ -304,6 +336,9 @@ struct IDirect3DDeviceImpl
     IDirect3DViewportImpl *current_viewport;
     D3DVIEWPORT7 active_viewport;
 
+    /* Required to keep track which of two available texture blending modes in d3ddevice3 is used */
+    BOOL legacyTextureBlending;
+
     /* Light state */
     DWORD material;
 
@@ -319,6 +354,7 @@ struct IDirect3DDeviceImpl
     /* Handle management */
     struct HandleEntry      *Handles;
     DWORD                    numHandles;
+    D3DMATRIXHANDLE          world, proj, view;
 };
 
 /* Vtables in various versions */
@@ -333,6 +369,7 @@ const GUID IID_D3DDEVICE_WineD3D;
 /* Helper functions */
 HRESULT IDirect3DImpl_GetCaps(IWineD3D *WineD3D, D3DDEVICEDESC *Desc123, D3DDEVICEDESC7 *Desc7);
 DWORD IDirect3DDeviceImpl_CreateHandle(IDirect3DDeviceImpl *This);
+WINED3DZBUFFERTYPE IDirect3DDeviceImpl_UpdateDepthStencil(IDirect3DDeviceImpl *This);
 
 /* Structures */
 struct EnumTextureFormatsCBS
@@ -370,15 +407,14 @@ struct IDirectDrawClipperImpl
     ICOM_VFIELD_MULTI(IDirectDrawClipper);
     LONG ref;
 
-    /* IDirectDrawClipper fields */
-    HWND hWnd;
-
-    IDirectDrawImpl* ddraw_owner;
-    struct IDirectDrawClipperImpl* prev_ddraw;
-    struct IDirectDrawClipperImpl* next_ddraw;
+    IWineD3DClipper           *wineD3DClipper;
+    IDirectDrawImpl           *ddraw_owner;
 };
 
 const IDirectDrawClipperVtbl IDirectDrawClipper_Vtbl;
+
+typedef IWineD3DClipper* (WINAPI *fnWineDirect3DCreateClipper)(IUnknown *);
+fnWineDirect3DCreateClipper pWineDirect3DCreateClipper;
 
 /*****************************************************************************
  * IDirectDrawPalette implementation structure
@@ -507,7 +543,7 @@ struct IDirect3DViewportImpl
     } viewports;
 
     /* Activation function */
-    void                      (*activate)(IDirect3DViewportImpl*);
+    void                      (*activate)(IDirect3DViewportImpl*, BOOL);
 
     /* Field used to chain viewports together */
     IDirect3DViewportImpl     *next;
@@ -523,7 +559,7 @@ struct IDirect3DViewportImpl
 const IDirect3DViewport3Vtbl IDirect3DViewport3_Vtbl;
 
 /* Helper functions */
-void viewport_activate(IDirect3DViewportImpl* This);
+void viewport_activate(IDirect3DViewportImpl* This, BOOL ignore_lights);
 
 /*****************************************************************************
  * IDirect3DExecuteBuffer - Wraps to D3D7
@@ -571,8 +607,10 @@ struct IDirect3DVertexBufferImpl
     ICOM_VFIELD_MULTI(IDirect3DVertexBuffer);
     LONG                 ref;
 
-    /*** WineD3D link ***/
+    /*** WineD3D and ddraw links ***/
     IWineD3DVertexBuffer *wineD3DVertexBuffer;
+    IWineD3DVertexDeclaration *wineD3DVertexDeclaration;
+    IDirectDrawImpl *ddraw;
 
     /*** Storage for D3D7 specific things ***/
     DWORD                Caps;
@@ -593,10 +631,10 @@ const IDirect3DVertexBufferVtbl IDirect3DVertexBuffer1_Vtbl;
     (((((d3dvtVertexType) >> (16 + (2 * (tex_num)))) + 1) & 0x03) + 1)
 
 void PixelFormat_WineD3DtoDD(DDPIXELFORMAT *DDPixelFormat, WINED3DFORMAT WineD3DFormat);
-WINED3DFORMAT PixelFormat_DD2WineD3D(DDPIXELFORMAT *DDPixelFormat);
+WINED3DFORMAT PixelFormat_DD2WineD3D(const DDPIXELFORMAT *DDPixelFormat);
 void DDRAW_dump_surface_desc(const DDSURFACEDESC2 *lpddsd);
 void DDRAW_dump_pixelformat(const DDPIXELFORMAT *PixelFormat);
-void dump_D3DMATRIX(D3DMATRIX *mat);
+void dump_D3DMATRIX(const D3DMATRIX *mat);
 void DDRAW_dump_DDCAPS(const DDCAPS *lpcaps);
 DWORD get_flexible_vertex_size(DWORD d3dvtVertexType);
 void DDRAW_dump_DDSCAPS2(const DDSCAPS2 *in);
@@ -604,7 +642,7 @@ void DDRAW_dump_cooperativelevel(DWORD cooplevel);
 
 /* This only needs to be here as long the processvertices functionality of
  * IDirect3DExecuteBuffer isn't in WineD3D */
-void multiply_matrix(LPD3DMATRIX dest, LPD3DMATRIX src1, LPD3DMATRIX src2);
+void multiply_matrix(LPD3DMATRIX dest, const D3DMATRIX *src1, const D3DMATRIX *src2);
 
 /* Used for generic dumping */
 typedef struct
@@ -624,7 +662,6 @@ typedef struct
 } member_info;
 
 /* Structure copy */
-#define DDRAW_dump_flags(flags,names,num_names) DDRAW_dump_flags_(flags, names, num_names, 1)
 #define ME(x,f,e) { x, #x, (void (*)(const void *))(f), offsetof(STRUCT, e) }
 
 #define DD_STRUCT_COPY_BYSIZE(to,from)                  \

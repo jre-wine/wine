@@ -196,11 +196,19 @@ The verify flag has no function in Wine.\n"
 
   WCMD_VOL,    "Help about VOL\n"
 
+  WCMD_PUSHD,  "PUSHD <directoryname> saves the current directory onto a\n\
+stack, and then changes the current directory to the supplied one.\n"
+
+  WCMD_POPD,   "POPD changes current directory to the last one saved with\n\
+PUSHD.\n"
+
+  WCMD_MORE,   "MORE displays output of files or piped input in pages.\n"
+
   WCMD_EXIT,
 "EXIT terminates the current command session and returns\n\
 to the operating system or shell from which you invoked cmd.\n"
 
-  1000, "CMD built-in commands are:\n\
+  WCMD_ALLHELP, "CMD built-in commands are:\n\
 ATTRIB\t\tShow or change DOS file attributes\n\
 CALL\t\tInvoke a batch file from inside another\n\
 CD (CHDIR)\tChange current default directory\n\
@@ -213,9 +221,12 @@ DIR\t\tList the contents of a directory\n\
 ECHO\t\tCopy text directly to the console output\n\
 HELP\t\tShow brief help details on a topic\n\
 MD (MKDIR)\tCreate a subdirectory\n\
+MORE\t\tDisplay output in pages\n\
 MOVE\t\tMove a file, set of files or directory tree\n\
 PATH\t\tSet or show the search path\n\
+POPD\t\tRestores the directory to the last one saved with PUSHD\n\
 PROMPT\t\tChange the command prompt\n\
+PUSHD\t\tChanges to a new directory, saving the current one\n\
 REN (RENAME)\tRename a file\n\
 RD (RMDIR)\tDelete a subdirectory\n\
 SET\t\tSet or show environment variables\n\
@@ -226,4 +237,39 @@ VER\t\tShow the current version of CMD\n\
 VOL\t\tShow the volume label of a disk device\n\
 EXIT\t\tClose down CMD\n\n\
 Enter HELP <command> for further information on any of the above commands\n"
+
+  WCMD_CONFIRM, "Are you sure"
+  WCMD_YES, "Y"
+  WCMD_NO, "N"
+  WCMD_NOASSOC, "File association missing for extension %s\n"
+  WCMD_NOFTYPE, "No open command associated with file type '%s'\n"
+  WCMD_OVERWRITE, "Overwrite %s"
+  WCMD_MORESTR, "More..."
+  WCMD_TRUNCATEDLINE, "Line in Batch processing possibly truncated. Using:\n"
+  WCMD_NYI, "Not Yet Implemented\n\n"
+  WCMD_NOARG, "Argument missing\n"
+  WCMD_SYNTAXERR, "Syntax error\n"
+  WCMD_FILENOTFOUND, "%s : File Not Found\n"
+  WCMD_NOCMDHELP, "No help available for %s\n"
+  WCMD_NOTARGET, "Target to GOTO not found\n"
+  WCMD_CURRENTDATE, "Current Date is %s\n"
+  WCMD_CURRENTTIME, "Current Time is %s\n"
+  WCMD_NEWDATE, "Enter new date: "
+  WCMD_NEWTIME, "Enter new time: "
+  WCMD_MISSINGENV, "Environment variable %s not defined\n"
+  WCMD_READFAIL, "Failed to open '%s'\n"
+  WCMD_CALLINSCRIPT, "Cannot call batch label outside of a batch script\n"
+  WCMD_ALL, "A"
+  WCMD_DELPROMPT, "%s, Delete"
+  WCMD_ECHOPROMPT, "Echo is %s\n"
+  WCMD_VERIFYPROMPT, "Verify is %s\n"
+  WCMD_VERIFYERR, "Verify must be ON or OFF\n";
+  WCMD_ARGERR, "Parameter error\n"
+  WCMD_VOLUMEDETAIL, "Volume in drive %c is %s\nVolume Serial Number is %04x-%04x\n\n"
+  WCMD_VOLUMEPROMPT, "Volume label (11 characters, ENTER for none)?"
+  WCMD_NOPATH, "PATH not found\n"
+  WCMD_ANYKEY,"Press Return key to continue: "
+  WCMD_CONSTITLE,"Wine Command Prompt"
+  WCMD_VERSION,"CMD Version %s\n\n"
+  WCMD_MOREPROMPT, "More? "
 }

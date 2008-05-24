@@ -18,11 +18,6 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  *
- * NOTES:
- *
- * See http://www.microsoft.com/msj/0197/exception/exception.htm,
- * but don't believe all of it.
- *
  * FIXME: Incomplete support for nested exceptions/try block cleanup.
  */
 
@@ -33,7 +28,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "wine/exception.h"
 #include "msvcrt.h"
@@ -66,21 +60,41 @@ typedef struct _MSVCRT_EXCEPTION_FRAME
 #define TRYLEVEL_END (-1) /* End of trylevel list */
 
 #if defined(__GNUC__) && defined(__i386__)
-inline static void call_finally_block( void *code_block, void *base_ptr )
+static inline void call_finally_block( void *code_block, void *base_ptr )
 {
-    __asm__ __volatile__ ("movl %1,%%ebp; call *%%eax" \
+    __asm__ __volatile__ ("movl %1,%%ebp; call *%%eax"
                           : : "a" (code_block), "g" (base_ptr));
 }
 
-inline static DWORD call_filter( void *func, void *arg, void *ebp )
+static inline int call_filter( int (*func)(PEXCEPTION_POINTERS), void *arg, void *ebp )
 {
-    DWORD ret;
+    int ret;
     __asm__ __volatile__ ("pushl %%ebp; pushl %3; movl %2,%%ebp; call *%%eax; popl %%ebp; popl %%ebp"
                           : "=a" (ret)
                           : "0" (func), "r" (ebp), "r" (arg)
                           : "ecx", "edx", "memory" );
     return ret;
 }
+
+static inline int call_unwind_func( int (*func)(void), void *ebp )
+{
+    int ret;
+    __asm__ __volatile__ ("pushl %%ebp\n\t"
+                          "pushl %%ebx\n\t"
+                          "pushl %%esi\n\t"
+                          "pushl %%edi\n\t"
+                          "movl %2,%%ebp\n\t"
+                          "call *%0\n\t"
+                          "popl %%edi\n\t"
+                          "popl %%esi\n\t"
+                          "popl %%ebx\n\t"
+                          "popl %%ebp"
+                          : "=a" (ret)
+                          : "0" (func), "r" (ebp)
+                          : "ecx", "edx", "memory" );
+    return ret;
+}
+
 #endif
 
 static DWORD MSVCRT_nested_handler(PEXCEPTION_RECORD rec,
@@ -88,7 +102,7 @@ static DWORD MSVCRT_nested_handler(PEXCEPTION_RECORD rec,
                                    PCONTEXT context,
                                    EXCEPTION_REGISTRATION_RECORD** dispatch)
 {
-  if (rec->ExceptionFlags & 0x6)
+  if (!(rec->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND)))
     return ExceptionContinueSearch;
   *dispatch = frame;
   return ExceptionCollidedUnwind;
@@ -109,8 +123,43 @@ __ASM_GLOBAL_FUNC(_EH_prolog,
                   "movl  %ebp, 12(%esp)\n\t"
                   "leal  12(%esp), %ebp\n\t"
                   "pushl %eax\n\t"
-                  "ret");
-#endif
+                  "ret")
+
+static void msvcrt_local_unwind2(MSVCRT_EXCEPTION_FRAME* frame, int trylevel, void *ebp)
+{
+  EXCEPTION_REGISTRATION_RECORD reg;
+
+  TRACE("(%p,%d,%d)\n",frame, frame->trylevel, trylevel);
+
+  /* Register a handler in case of a nested exception */
+  reg.Handler = MSVCRT_nested_handler;
+  reg.Prev = NtCurrentTeb()->Tib.ExceptionList;
+  __wine_push_frame(&reg);
+
+  while (frame->trylevel != TRYLEVEL_END && frame->trylevel != trylevel)
+  {
+      int level = frame->trylevel;
+      frame->trylevel = frame->scopetable[level].previousTryLevel;
+      if (!frame->scopetable[level].lpfnFilter)
+      {
+          TRACE( "__try block cleanup level %d handler %p ebp %p\n",
+                 level, frame->scopetable[level].lpfnHandler, ebp );
+          call_unwind_func( frame->scopetable[level].lpfnHandler, ebp );
+      }
+  }
+  __wine_pop_frame(&reg);
+  TRACE("unwound OK\n");
+}
+
+/*******************************************************************
+ *		_local_unwind2 (MSVCRT.@)
+ */
+void CDECL _local_unwind2(MSVCRT_EXCEPTION_FRAME* frame, int trylevel)
+{
+    msvcrt_local_unwind2( frame, trylevel, &frame->_ebp );
+}
+
+#endif  /* __i386__ */
 
 /*******************************************************************
  *		_global_unwind2 (MSVCRT.@)
@@ -119,38 +168,6 @@ void CDECL _global_unwind2(EXCEPTION_REGISTRATION_RECORD* frame)
 {
     TRACE("(%p)\n",frame);
     RtlUnwind( frame, 0, 0, 0 );
-}
-
-/*******************************************************************
- *		_local_unwind2 (MSVCRT.@)
- */
-void CDECL _local_unwind2(MSVCRT_EXCEPTION_FRAME* frame, int trylevel)
-{
-  MSVCRT_EXCEPTION_FRAME *curframe = frame;
-  EXCEPTION_REGISTRATION_RECORD reg;
-
-  TRACE("(%p,%d,%d)\n",frame, frame->trylevel, trylevel);
-
-  /* Register a handler in case of a nested exception */
-  reg.Handler = (PEXCEPTION_HANDLER)MSVCRT_nested_handler;
-  reg.Prev = NtCurrentTeb()->Tib.ExceptionList;
-  __wine_push_frame(&reg);
-
-  while (frame->trylevel != TRYLEVEL_END && frame->trylevel != trylevel)
-  {
-    int curtrylevel = frame->scopetable[frame->trylevel].previousTryLevel;
-    curframe = frame;
-    curframe->trylevel = curtrylevel;
-    if (!frame->scopetable[curtrylevel].lpfnFilter)
-    {
-      ERR("__try block cleanup not implemented - expect crash!\n");
-      /* FIXME: Remove current frame, set ebp, call
-       * frame->scopetable[curtrylevel].lpfnHandler()
-       */
-    }
-  }
-  __wine_pop_frame(&reg);
-  TRACE("unwound OK\n");
 }
 
 /*********************************************************************
@@ -175,8 +192,7 @@ int CDECL _except_handler3(PEXCEPTION_RECORD rec,
                            PCONTEXT context, void* dispatcher)
 {
 #if defined(__GNUC__) && defined(__i386__)
-  long retval;
-  int trylevel;
+  int retval, trylevel;
   EXCEPTION_POINTERS exceptPtrs;
   PSCOPETABLE pScopeTable;
 
@@ -189,7 +205,7 @@ int CDECL _except_handler3(PEXCEPTION_RECORD rec,
   if (rec->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND))
   {
     /* Unwinding the current frame */
-     _local_unwind2(frame, TRYLEVEL_END);
+    msvcrt_local_unwind2(frame, TRYLEVEL_END, &frame->_ebp);
     TRACE("unwound current frame, returning ExceptionContinueSearch\n");
     return ExceptionContinueSearch;
   }
@@ -221,7 +237,7 @@ int CDECL _except_handler3(PEXCEPTION_RECORD rec,
         {
           /* Unwind all higher frames, this one will handle the exception */
           _global_unwind2((EXCEPTION_REGISTRATION_RECORD*)frame);
-          _local_unwind2(frame, trylevel);
+          msvcrt_local_unwind2(frame, trylevel, &frame->_ebp);
 
           /* Set our trylevel to the enclosing block, and call the __finally
            * code, which won't return
@@ -236,7 +252,7 @@ int CDECL _except_handler3(PEXCEPTION_RECORD rec,
     }
   }
 #else
-  TRACE("exception %lx flags=%lx at %p handler=%p %p %p stub\n",
+  FIXME("exception %lx flags=%lx at %p handler=%p %p %p stub\n",
         rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
         frame->handler, context, dispatcher);
 #endif
@@ -259,7 +275,7 @@ int CDECL _abnormal_termination(void)
 
 #ifdef __i386__
 #define MSVCRT_JMP_MAGIC 0x56433230 /* ID value for new jump structure */
-typedef void (*MSVCRT_unwind_function)(const void*);
+typedef void (__stdcall *MSVCRT_unwind_function)(const struct MSVCRT___JUMP_BUFFER *);
 
 /* define an entrypoint for setjmp/setjmp3 that stores the registers in the jmp buf */
 /* and then jumps to the C backend function */
@@ -286,7 +302,7 @@ __ASM_GLOBAL_FUNC( longjmp_set_regs,
                    "movl 12(%ecx),%esi\n\t"  /* jmp_buf.Esi */
                    "movl 16(%ecx),%esp\n\t"  /* jmp_buf.Esp */
                    "addl $4,%esp\n\t"        /* get rid of return address */
-                   "jmp *20(%ecx)\n\t"       /* jmp_buf.Eip */ );
+                   "jmp *20(%ecx)\n\t"       /* jmp_buf.Eip */ )
 
 /*
  * The signatures of the setjmp/longjmp functions do not match that
@@ -297,11 +313,11 @@ __ASM_GLOBAL_FUNC( longjmp_set_regs,
 /*******************************************************************
  *		_setjmp (MSVCRT.@)
  */
-DEFINE_SETJMP_ENTRYPOINT(MSVCRT__setjmp);
+DEFINE_SETJMP_ENTRYPOINT(MSVCRT__setjmp)
 int CDECL __regs_MSVCRT__setjmp(struct MSVCRT___JUMP_BUFFER *jmp)
 {
     jmp->Registration = (unsigned long)NtCurrentTeb()->Tib.ExceptionList;
-    if (jmp->Registration == TRYLEVEL_END)
+    if (jmp->Registration == ~0UL)
         jmp->TryLevel = TRYLEVEL_END;
     else
         jmp->TryLevel = ((MSVCRT_EXCEPTION_FRAME*)jmp->Registration)->trylevel;
@@ -314,13 +330,13 @@ int CDECL __regs_MSVCRT__setjmp(struct MSVCRT___JUMP_BUFFER *jmp)
 /*******************************************************************
  *		_setjmp3 (MSVCRT.@)
  */
-DEFINE_SETJMP_ENTRYPOINT( MSVCRT__setjmp3 );
+DEFINE_SETJMP_ENTRYPOINT( MSVCRT__setjmp3 )
 int CDECL __regs_MSVCRT__setjmp3(struct MSVCRT___JUMP_BUFFER *jmp, int nb_args, ...)
 {
     jmp->Cookie = MSVCRT_JMP_MAGIC;
     jmp->UnwindFunc = 0;
     jmp->Registration = (unsigned long)NtCurrentTeb()->Tib.ExceptionList;
-    if (jmp->Registration == TRYLEVEL_END)
+    if (jmp->Registration == ~0UL)
     {
         jmp->TryLevel = TRYLEVEL_END;
     }
@@ -370,8 +386,8 @@ int CDECL MSVCRT_longjmp(struct MSVCRT___JUMP_BUFFER *jmp, int retval)
             unwind_func(jmp);
         }
         else
-            _local_unwind2((MSVCRT_EXCEPTION_FRAME*)jmp->Registration,
-                           jmp->TryLevel);
+            msvcrt_local_unwind2((MSVCRT_EXCEPTION_FRAME*)jmp->Registration,
+                                 jmp->TryLevel, (void *)jmp->Ebp);
     }
 
     if (!retval)
@@ -385,7 +401,7 @@ int CDECL MSVCRT_longjmp(struct MSVCRT___JUMP_BUFFER *jmp, int retval)
  */
 void __stdcall _seh_longjmp_unwind(struct MSVCRT___JUMP_BUFFER *jmp)
 {
-    _local_unwind2( (MSVCRT_EXCEPTION_FRAME *)jmp->Registration, jmp->TryLevel );
+    msvcrt_local_unwind2( (MSVCRT_EXCEPTION_FRAME *)jmp->Registration, jmp->TryLevel, (void *)jmp->Ebp );
 }
 #endif /* i386 */
 
@@ -412,7 +428,7 @@ static BOOL WINAPI msvcrt_console_handler(DWORD ctrlType)
 typedef void (*float_handler)(int, int);
 
 /* The exception codes are actually NTSTATUS values */
-struct
+static const struct
 {
     NTSTATUS status;
     int signal;
@@ -429,6 +445,7 @@ struct
 static LONG WINAPI msvcrt_exception_filter(struct _EXCEPTION_POINTERS *except)
 {
     LONG ret = EXCEPTION_CONTINUE_SEARCH;
+    MSVCRT___sighandler_t handler;
 
     if (!except || !except->ExceptionRecord)
         return EXCEPTION_CONTINUE_SEARCH;
@@ -436,15 +453,17 @@ static LONG WINAPI msvcrt_exception_filter(struct _EXCEPTION_POINTERS *except)
     switch (except->ExceptionRecord->ExceptionCode)
     {
     case EXCEPTION_ACCESS_VIOLATION:
-        if (sighandlers[MSVCRT_SIGSEGV])
+        if ((handler = sighandlers[MSVCRT_SIGSEGV]) != MSVCRT_SIG_DFL)
         {
-            if (sighandlers[MSVCRT_SIGSEGV] != MSVCRT_SIG_IGN)
-                sighandlers[MSVCRT_SIGSEGV](MSVCRT_SIGSEGV);
+            if (handler != MSVCRT_SIG_IGN)
+            {
+                sighandlers[MSVCRT_SIGSEGV] = MSVCRT_SIG_DFL;
+                handler(MSVCRT_SIGSEGV);
+            }
             ret = EXCEPTION_CONTINUE_EXECUTION;
         }
         break;
-    /* According to
-     * http://msdn.microsoft.com/library/en-us/vclib/html/_CRT_signal.asp
+    /* According to msdn,
      * the FPE signal handler takes as a second argument the type of
      * floating point exception.
      */
@@ -455,31 +474,36 @@ static LONG WINAPI msvcrt_exception_filter(struct _EXCEPTION_POINTERS *except)
     case EXCEPTION_FLT_OVERFLOW:
     case EXCEPTION_FLT_STACK_CHECK:
     case EXCEPTION_FLT_UNDERFLOW:
-        if (sighandlers[MSVCRT_SIGFPE])
+        if ((handler = sighandlers[MSVCRT_SIGFPE]) != MSVCRT_SIG_DFL)
         {
-            if (sighandlers[MSVCRT_SIGFPE] != MSVCRT_SIG_IGN)
+            if (handler != MSVCRT_SIG_IGN)
             {
                 int i, float_signal = _FPE_INVALID;
 
-                float_handler handler = (float_handler)sighandlers[MSVCRT_SIGFPE];
+                sighandlers[MSVCRT_SIGFPE] = MSVCRT_SIG_DFL;
                 for (i = 0; i < sizeof(float_exception_map) /
-                 sizeof(float_exception_map[0]); i++)
+                         sizeof(float_exception_map[0]); i++)
+                {
                     if (float_exception_map[i].status ==
-                     except->ExceptionRecord->ExceptionCode)
+                        except->ExceptionRecord->ExceptionCode)
                     {
                         float_signal = float_exception_map[i].signal;
                         break;
                     }
-                handler(MSVCRT_SIGFPE, float_signal);
+                }
+                ((float_handler)handler)(MSVCRT_SIGFPE, float_signal);
             }
             ret = EXCEPTION_CONTINUE_EXECUTION;
         }
         break;
     case EXCEPTION_ILLEGAL_INSTRUCTION:
-        if (sighandlers[MSVCRT_SIGILL])
+        if ((handler = sighandlers[MSVCRT_SIGILL]) != MSVCRT_SIG_DFL)
         {
-            if (sighandlers[MSVCRT_SIGILL] != MSVCRT_SIG_IGN)
-                sighandlers[MSVCRT_SIGILL](MSVCRT_SIGILL);
+            if (handler != MSVCRT_SIG_IGN)
+            {
+                sighandlers[MSVCRT_SIGILL] = MSVCRT_SIG_DFL;
+                handler(MSVCRT_SIGILL);
+            }
             ret = EXCEPTION_CONTINUE_EXECUTION;
         }
         break;
@@ -501,8 +525,6 @@ void msvcrt_free_signals(void)
 
 /*********************************************************************
  *		signal (MSVCRT.@)
- * MS signal handling is described here:
- * http://msdn.microsoft.com/library/en-us/vclib/html/_CRT_signal.asp
  * Some signals may never be generated except through an explicit call to
  * raise.
  */
@@ -532,6 +554,40 @@ MSVCRT___sighandler_t CDECL MSVCRT_signal(int sig, MSVCRT___sighandler_t func)
         ret = MSVCRT_SIG_ERR;
     }
     return ret;
+}
+
+/*********************************************************************
+ *		raise (MSVCRT.@)
+ */
+int CDECL MSVCRT_raise(int sig)
+{
+    MSVCRT___sighandler_t handler;
+
+    TRACE("(%d)\n", sig);
+
+    switch (sig)
+    {
+    case MSVCRT_SIGABRT:
+    case MSVCRT_SIGFPE:
+    case MSVCRT_SIGILL:
+    case MSVCRT_SIGSEGV:
+    case MSVCRT_SIGINT:
+    case MSVCRT_SIGTERM:
+        handler = sighandlers[sig];
+        if (handler == MSVCRT_SIG_DFL) MSVCRT__exit(3);
+        if (handler != MSVCRT_SIG_IGN)
+        {
+            sighandlers[sig] = MSVCRT_SIG_DFL;
+            if (sig == MSVCRT_SIGFPE)
+                ((float_handler)handler)(sig, _FPE_EXPLICITGEN);
+            else
+                handler(sig);
+        }
+        break;
+    default:
+        return -1;
+    }
+    return 0;
 }
 
 /*********************************************************************

@@ -20,10 +20,13 @@
 
 #include <stdarg.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
-#include "profinfo.h"
+#include "winternl.h"
+#include "userenv.h"
 
 #include "wine/debug.h"
 
@@ -49,8 +52,41 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 BOOL WINAPI CreateEnvironmentBlock( LPVOID* lpEnvironment,
                      HANDLE hToken, BOOL bInherit )
 {
-    FIXME("%p %p %d\n", lpEnvironment, hToken, bInherit );
+    NTSTATUS r;
+
+    TRACE("%p %p %d\n", lpEnvironment, hToken, bInherit );
+
+    if (!lpEnvironment)
+        return FALSE;
+
+    r = RtlCreateEnvironment(bInherit, (WCHAR **)lpEnvironment);
+    if (r == STATUS_SUCCESS)
+        return TRUE;
     return FALSE;
+}
+
+BOOL WINAPI ExpandEnvironmentStringsForUserA( HANDLE hToken, LPCSTR lpSrc,
+                     LPSTR lpDest, DWORD dwSize )
+{
+    BOOL ret;
+
+    TRACE("%p %s %p %d\n", hToken, debugstr_a(lpSrc), lpDest, dwSize);
+
+    ret = ExpandEnvironmentStringsA( lpSrc, lpDest, dwSize );
+    TRACE("<- %s\n", debugstr_a(lpDest));
+    return ret;
+}
+
+BOOL WINAPI ExpandEnvironmentStringsForUserW( HANDLE hToken, LPCWSTR lpSrc,
+                     LPWSTR lpDest, DWORD dwSize )
+{
+    BOOL ret;
+
+    TRACE("%p %s %p %d\n", hToken, debugstr_w(lpSrc), lpDest, dwSize);
+
+    ret = ExpandEnvironmentStringsW( lpSrc, lpDest, dwSize );
+    TRACE("<- %s\n", debugstr_w(lpDest));
+    return ret;
 }
 
 BOOL WINAPI GetUserProfileDirectoryA( HANDLE hToken, LPSTR lpProfileDir,
@@ -79,15 +115,10 @@ BOOL WINAPI GetProfilesDirectoryW( LPWSTR lpProfilesDir, LPDWORD lpcchSize )
     return FALSE;
 }
 
-/* FIXME: these belong in userenv.h */
-#define PT_TEMPORARY    0x00000001
-#define PT_ROAMING      0x00000002
-#define PT_MANDATORY    0x00000004
-
-BOOL WINAPI GetProfileType( LPDWORD pdwFlags )
+BOOL WINAPI GetProfileType( DWORD *pdwFlags )
 {
     FIXME("%p\n", pdwFlags );
-    *pdwFlags = PT_MANDATORY | PT_ROAMING | PT_TEMPORARY;
+    *pdwFlags = 0;
     return TRUE;
 }
 
@@ -96,4 +127,22 @@ BOOL WINAPI LoadUserProfileA( HANDLE hToken, LPPROFILEINFOA lpProfileInfo )
     FIXME("%p %p\n", hToken, lpProfileInfo );
     lpProfileInfo->hProfile = HKEY_CURRENT_USER;
     return TRUE;
+}
+
+BOOL WINAPI RegisterGPNotification( HANDLE event, BOOL machine )
+{
+    FIXME("%p %d\n", event, machine );
+    return TRUE;
+}
+
+BOOL WINAPI UnregisterGPNotification( HANDLE event )
+{
+    FIXME("%p\n", event );
+    return TRUE;
+}
+
+BOOL WINAPI UnloadUserProfile( HANDLE hToken, HANDLE hProfile )
+{
+    FIXME("(%p, %p): stub\n", hToken, hProfile);
+    return FALSE;
 }

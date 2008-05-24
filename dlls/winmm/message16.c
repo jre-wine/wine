@@ -25,8 +25,6 @@
 #include "wine/winbase16.h"
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
-#include "winver.h"
 #include "wownt32.h"
 #include "winemm16.h"
 #include "digitalv.h"
@@ -325,7 +323,7 @@ static  WINMM_MapType	MMDRV_MidiOut_Map16To32W  (UINT wMsg, LPDWORD lpdwUser, DW
 		mh32->dwFlags = mh16->dwFlags;
 		/* FIXME: nothing on mh32->lpNext */
 		/* could link the mh32->lpNext at this level for memory house keeping */
-		mh32->dwOffset = (*lpParam2 >= sizeof(MIDIHDR)) ? ((LPMIDIHDR)mh16)->dwOffset : 0;
+		mh32->dwOffset = (*lpParam2 >= sizeof(MIDIHDR)) ? mh16->dwOffset : 0;
 		mh16->lpNext = mh32; /* for reuse in unprepare and write */
 		/* store size of passed MIDIHDR?? structure to know if dwOffset is available or not */
 		mh16->reserved = *lpParam2;
@@ -342,7 +340,7 @@ static  WINMM_MapType	MMDRV_MidiOut_Map16To32W  (UINT wMsg, LPDWORD lpdwUser, DW
     case MODM_LONGDATA:
 	{
 	    LPMIDIHDR		mh16 = MapSL(*lpParam1);
-	    LPMIDIHDR		mh32 = (LPMIDIHDR)mh16->lpNext;
+	    LPMIDIHDR		mh32 = mh16->lpNext;
 
 	    *lpParam1 = (DWORD)mh32;
 	    *lpParam2 = sizeof(MIDIHDR);
@@ -488,7 +486,7 @@ static  WINMM_MapType	MMDRV_MidiOut_Map32WTo16  (UINT wMsg, LPDWORD lpdwUser, DW
 		/* could link the mh32->lpNext at this level for memory house keeping */
 		mh16->dwOffset = (*lpParam2 >= sizeof(MIDIHDR)) ? mh32->dwOffset : 0;
 
-		mh32->lpNext = (LPMIDIHDR)mh16; /* for reuse in unprepare and write */
+		mh32->lpNext = mh16; /* for reuse in unprepare and write */
 		mh32->reserved = *lpParam2;
 
 		TRACE("mh16=%08lx mh16->lpData=%p mh32->buflen=%u mh32->lpData=%p\n",
@@ -505,7 +503,7 @@ static  WINMM_MapType	MMDRV_MidiOut_Map32WTo16  (UINT wMsg, LPDWORD lpdwUser, DW
     case MODM_LONGDATA:
 	{
 	    LPMIDIHDR		mh32 = (LPMIDIHDR)(*lpParam1);
-	    LPMIDIHDR		mh16 = (LPMIDIHDR)mh32->lpNext;
+	    LPMIDIHDR		mh16 = mh32->lpNext;
 	    LPSTR		ptr = (LPSTR)mh16 - sizeof(LPMIDIHDR);
 
 	    assert(*(LPMIDIHDR*)ptr == mh32);
@@ -620,7 +618,7 @@ static  WINMM_MapType	MMDRV_MidiOut_UnMap32WTo16(UINT wMsg, LPDWORD lpdwUser, DW
 	    LPSTR		ptr = (LPSTR)mh16 - sizeof(LPMIDIHDR);
 	    LPMIDIHDR		mh32 = *(LPMIDIHDR*)ptr;
 
-	    assert(mh32->lpNext == (LPMIDIHDR)mh16);
+	    assert(mh32->lpNext == mh16);
             UnMapLS( *lpParam1 );
 	    mh32->dwBytesRecorded = mh16->dwBytesRecorded;
 	    mh32->dwUser = mh16->dwUser;
@@ -786,7 +784,7 @@ static  WINMM_MapType	MMDRV_WaveIn_Map16To32W  (UINT wMsg, LPDWORD lpdwUser, DWO
     case WIDM_UNPREPARE:
 	{
 	    LPWAVEHDR		wh16 = MapSL(*lpParam1);
-	    LPWAVEHDR		wh32 = (LPWAVEHDR)wh16->lpNext;
+	    LPWAVEHDR		wh32 = wh16->lpNext;
 
 	    *lpParam1 = (DWORD)wh32;
 	    *lpParam2 = sizeof(WAVEHDR);
@@ -916,8 +914,8 @@ static  WINMM_MapType	MMDRV_WaveIn_Map32WTo16  (UINT wMsg, LPDWORD lpdwUser, DWO
 	       xxx		extra bytes to WAVEFORMATEX
 	    */
 	    if (wod32->lpFormat->wFormatTag != WAVE_FORMAT_PCM) {
-		TRACE("Allocating %u extra bytes (%d)\n", ((LPWAVEFORMATEX)wod32->lpFormat)->cbSize, wod32->lpFormat->wFormatTag);
-		sz += ((LPWAVEFORMATEX)wod32->lpFormat)->cbSize;
+		TRACE("Allocating %u extra bytes (%d)\n", wod32->lpFormat->cbSize, wod32->lpFormat->wFormatTag);
+		sz += wod32->lpFormat->cbSize;
 	    }
 
             ptr = HeapAlloc( GetProcessHeap(), 0,
@@ -968,11 +966,10 @@ static  WINMM_MapType	MMDRV_WaveIn_Map32WTo16  (UINT wMsg, LPDWORD lpdwUser, DWO
 		/* FIXME: nothing on wh32->lpNext */
 		/* could link the wh32->lpNext at this level for memory house keeping */
 		wh32->lpNext = wh16; /* for reuse in unprepare and write */
-		TRACE("wh16=%08x wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
-		      seg_ptr + sizeof(LPWAVEHDR), wh16->lpData,
-		      wh32->dwBufferLength, wh32->lpData);
 		*lpParam1 = seg_ptr + sizeof(LPWAVEHDR);
 		*lpParam2 = sizeof(WAVEHDR);
+		TRACE("wh16=%08lx wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
+		      *lpParam1, wh16->lpData, wh32->dwBufferLength, wh32->lpData);
 
 		ret = WINMM_MAP_OKMEM;
 	    } else {
@@ -990,14 +987,14 @@ static  WINMM_MapType	MMDRV_WaveIn_Map32WTo16  (UINT wMsg, LPDWORD lpdwUser, DWO
 
 	    assert(*(LPWAVEHDR*)ptr == wh32);
 
-	    TRACE("wh16=%08x wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
-		  seg_ptr + sizeof(LPWAVEHDR), wh16->lpData, wh32->dwBufferLength, wh32->lpData);
-
 	    if (wMsg == WIDM_ADDBUFFER)
 		memcpy((LPSTR)wh16 + sizeof(WAVEHDR), wh32->lpData, wh32->dwBufferLength);
 
 	    *lpParam1 = seg_ptr + sizeof(LPWAVEHDR);
 	    *lpParam2 = sizeof(WAVEHDR);
+	    TRACE("wh16=%08lx wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
+		  *lpParam1, wh16->lpData, wh32->dwBufferLength, wh32->lpData);
+
 	    /* dwBufferLength can be reduced between prepare & write */
 	    if (wMsg == WIDM_ADDBUFFER && wh16->dwBufferLength < wh32->dwBufferLength) {
 		ERR("Size of buffer has been increased from %d to %d, keeping initial value\n",
@@ -1286,7 +1283,7 @@ static  WINMM_MapType	MMDRV_WaveOut_Map16To32W  (UINT wMsg, LPDWORD lpdwUser, DW
     case WODM_WRITE:
 	{
 	    LPWAVEHDR		wh16 = MapSL(*lpParam1);
-	    LPWAVEHDR		wh32 = (LPWAVEHDR)wh16->lpNext;
+	    LPWAVEHDR		wh32 = wh16->lpNext;
 
 	    *lpParam1 = (DWORD)wh32;
 	    *lpParam2 = sizeof(WAVEHDR);
@@ -1476,8 +1473,8 @@ static  WINMM_MapType	MMDRV_WaveOut_Map32WTo16  (UINT wMsg, LPDWORD lpdwUser, DW
 	       xxx		extra bytes to WAVEFORMATEX
 	    */
 	    if (wod32->lpFormat->wFormatTag != WAVE_FORMAT_PCM) {
-		TRACE("Allocating %u extra bytes (%d)\n", ((LPWAVEFORMATEX)wod32->lpFormat)->cbSize, wod32->lpFormat->wFormatTag);
-		sz += ((LPWAVEFORMATEX)wod32->lpFormat)->cbSize;
+		TRACE("Allocating %u extra bytes (%d)\n", wod32->lpFormat->cbSize, wod32->lpFormat->wFormatTag);
+		sz += wod32->lpFormat->cbSize;
 	    }
 
 	    ptr = HeapAlloc( GetProcessHeap(), 0,
@@ -1528,11 +1525,10 @@ static  WINMM_MapType	MMDRV_WaveOut_Map32WTo16  (UINT wMsg, LPDWORD lpdwUser, DW
 		/* FIXME: nothing on wh32->lpNext */
 		/* could link the wh32->lpNext at this level for memory house keeping */
 		wh32->lpNext = wh16; /* for reuse in unprepare and write */
-		TRACE("wh16=%08x wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
-		      seg_ptr + sizeof(LPWAVEHDR), wh16->lpData,
-		      wh32->dwBufferLength, wh32->lpData);
 		*lpParam1 = seg_ptr + sizeof(LPWAVEHDR);
 		*lpParam2 = sizeof(WAVEHDR);
+		TRACE("wh16=%08lx wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
+		      *lpParam1, wh16->lpData, wh32->dwBufferLength, wh32->lpData);
 
 		ret = WINMM_MAP_OKMEM;
 	    } else {
@@ -1550,15 +1546,14 @@ static  WINMM_MapType	MMDRV_WaveOut_Map32WTo16  (UINT wMsg, LPDWORD lpdwUser, DW
 
 	    assert(*(LPWAVEHDR*)ptr == wh32);
 
-	    TRACE("wh16=%08x wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
-		  seg_ptr + sizeof(LPWAVEHDR), wh16->lpData,
-		  wh32->dwBufferLength, wh32->lpData);
-
 	    if (wMsg == WODM_WRITE)
 		memcpy((LPSTR)wh16 + sizeof(WAVEHDR), wh32->lpData, wh32->dwBufferLength);
 
 	    *lpParam1 = seg_ptr + sizeof(LPWAVEHDR);
 	    *lpParam2 = sizeof(WAVEHDR);
+	    TRACE("wh16=%08lx wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
+		  *lpParam1, wh16->lpData, wh32->dwBufferLength, wh32->lpData);
+
 	    /* dwBufferLength can be reduced between prepare & write */
 	    if (wMsg == WODM_WRITE && wh16->dwBufferLength < wh32->dwBufferLength) {
 		ERR("Size of buffer has been increased from %d to %d, keeping initial value\n",
@@ -1796,9 +1791,9 @@ theEnd:
  *		MMDRV_LoadMMDrvFunc16
  *
  */
-unsigned   MMDRV_LoadMMDrvFunc16(LPCSTR drvName, LPWINE_DRIVER d, 
-                                 LPWINE_MM_DRIVER lpDrv)
-{        
+static unsigned MMDRV_LoadMMDrvFunc16(LPCSTR drvName, LPWINE_DRIVER d,
+                                      LPWINE_MM_DRIVER lpDrv)
+{
     WINEMM_msgFunc16	func;
     unsigned            count = 0;
     char    		buffer[128];
@@ -3353,7 +3348,7 @@ static  WINMM_MapType	MCI_UnMapMsg32WTo16(WORD uDevType, WORD wMsg, DWORD dwFlag
                                 mip32w->lpstrReturn, mip32w->dwRetSize / sizeof(WCHAR));
             UnMapLS( lParam );
             UnMapLS( mip16->lpstrReturn );
-            HeapFree( GetProcessHeap(), 0, (void*)MapSL(mip16->lpstrReturn) );
+            HeapFree( GetProcessHeap(), 0, MapSL(mip16->lpstrReturn) );
             HeapFree( GetProcessHeap(), 0, (char*)mip16 - sizeof(LPMCI_OPEN_PARMSW) );
 	}
 	return WINMM_MAP_OK;

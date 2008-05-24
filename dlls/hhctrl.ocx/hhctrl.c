@@ -2,6 +2,7 @@
  * hhctrl implementation
  *
  * Copyright 2004 Krzysztof Foltman
+ * Copyright 2007 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,19 +19,31 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-#include <string.h>
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winnls.h"
-#include "winuser.h"
 #include "wine/debug.h"
-#include "htmlhelp.h"
+
+#define INIT_GUID
+#include "hhctrl.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(htmlhelp);
 
-int WINAPI doWinMain(HINSTANCE hInstance, LPSTR szCmdLine);
+HINSTANCE hhctrl_hinstance;
+BOOL hh_process = FALSE;
+
+BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD fdwReason, LPVOID lpvReserved)
+{
+    TRACE("(%p,%d,%p)\n", hInstance, fdwReason, lpvReserved);
+
+    switch (fdwReason)
+    {
+    case DLL_PROCESS_ATTACH:
+        hhctrl_hinstance = hInstance;
+        DisableThreadLibraryCalls(hInstance);
+        break;
+    case DLL_PROCESS_DETACH:
+        break;
+    }
+    return TRUE;
+}
 
 static const char *command_to_string(UINT command)
 {
@@ -65,6 +78,7 @@ static const char *command_to_string(UINT command)
         X( HH_SET_EXCLUSIVE_FILTER );
         X( HH_INITIALIZE );
         X( HH_UNINITIALIZE );
+        X( HH_SAFE_DISPLAY_TOPIC );
         X( HH_PRETRANSLATEMESSAGE );
         X( HH_SET_GLOBAL_PROPERTY );
     default: return "???";
@@ -72,53 +86,189 @@ static const char *command_to_string(UINT command)
 #undef X
 }
 
-HWND WINAPI HtmlHelpW(HWND caller, LPCWSTR filename, UINT command, DWORD data)
+/******************************************************************
+ *		HtmlHelpW (HHCTRL.OCX.15)
+ */
+HWND WINAPI HtmlHelpW(HWND caller, LPCWSTR filename, UINT command, DWORD_PTR data)
 {
-    CHAR *file = NULL;
-
-    TRACE("(%p, %s, command=%s, data=%d)\n",
+    TRACE("(%p, %s, command=%s, data=%lx)\n",
           caller, debugstr_w( filename ),
           command_to_string( command ), data);
 
-    if (filename)
-    {
-        DWORD len = WideCharToMultiByte( CP_ACP, 0, filename, -1, NULL, 0, NULL, NULL );
-
-        file = HeapAlloc( GetProcessHeap(), 0, len );
-        WideCharToMultiByte( CP_ACP, 0, filename, -1, file, len, NULL, NULL );
-    }
-
     switch (command)
     {
-        case HH_DISPLAY_TOPIC:
-        case HH_DISPLAY_TOC:
-        case HH_DISPLAY_SEARCH:
-        case HH_HELP_CONTEXT:
-            FIXME("Not all HH cases handled correctly\n");
-            doWinMain(GetModuleHandleW(NULL), file);
-            break;
-        default:
-            FIXME("HH case %s not handled.\n", command_to_string( command ));
+    case HH_DISPLAY_TOPIC:
+    case HH_DISPLAY_TOC:
+    case HH_DISPLAY_SEARCH:{
+        static const WCHAR delimW[] = {':',':',0};
+        HHInfo *info;
+        BOOL res;
+        WCHAR chm_file[MAX_PATH];
+        const WCHAR *index;
+
+        FIXME("Not all HH cases handled correctly\n");
+
+        if (!filename)
+            return NULL;
+
+        index = strstrW(filename, delimW);
+        if (index)
+        {
+            memcpy(chm_file, filename, (index-filename)*sizeof(WCHAR));
+            chm_file[index-filename] = 0;
+            filename = chm_file;
+            index += 2; /* advance beyond "::" for calling NavigateToChm() later */
+        }
+        else
+        {
+            if (command!=HH_DISPLAY_SEARCH) /* FIXME - use HH_FTS_QUERYW structure in data */
+                index = (const WCHAR*)data;
+        }
+
+        info = CreateHelpViewer(filename);
+        if(!info)
+            return NULL;
+
+        if(!index)
+            index = info->WinType.pszFile;
+
+        res = NavigateToChm(info, info->pCHMInfo->szFile, index);
+        if(!res)
+        {
+            ReleaseHelpViewer(info);
+            return NULL;
+        }
+        return info->WinType.hwndHelp;
     }
-    HeapFree(GetProcessHeap(), 0, file);
+    case HH_HELP_CONTEXT: {
+        HHInfo *info;
+        LPWSTR url;
+
+        if (!filename)
+            return NULL;
+
+        info = CreateHelpViewer(filename);
+        if(!info)
+            return NULL;
+
+        url = FindContextAlias(info->pCHMInfo, data);
+        if(!url)
+        {
+            ReleaseHelpViewer(info);
+            return NULL;
+        }
+
+        NavigateToUrl(info, url);
+        heap_free(url);
+        return info->WinType.hwndHelp;
+    }
+    case HH_PRETRANSLATEMESSAGE: {
+        static BOOL warned = FALSE;
+
+        if (!warned)
+        {
+            FIXME("HH_PRETRANSLATEMESSAGE unimplemented\n");
+            warned = TRUE;
+        }
+        return 0;
+    }
+    default:
+        FIXME("HH case %s not handled.\n", command_to_string( command ));
+    }
+
     return 0;
 }
 
-HWND WINAPI HtmlHelpA(HWND caller, LPCSTR filename, UINT command, DWORD data)
+/******************************************************************
+ *		HtmlHelpA (HHCTRL.OCX.14)
+ */
+HWND WINAPI HtmlHelpA(HWND caller, LPCSTR filename, UINT command, DWORD_PTR data)
 {
-    WCHAR *wfile = NULL;
+    WCHAR *wfile = NULL, *wdata = NULL;
+    DWORD len;
     HWND result;
 
     if (filename)
     {
-        DWORD len = MultiByteToWideChar( CP_ACP, 0, filename, -1, NULL, 0 );
-
-        wfile = HeapAlloc( GetProcessHeap(), 0, len*sizeof(WCHAR));
+        len = MultiByteToWideChar( CP_ACP, 0, filename, -1, NULL, 0 );
+        wfile = heap_alloc(len*sizeof(WCHAR));
         MultiByteToWideChar( CP_ACP, 0, filename, -1, wfile, len );
     }
 
-    result = HtmlHelpW( caller, wfile, command, data );
+    if (data)
+    {
+        switch(command)
+        {
+        case HH_ALINK_LOOKUP:
+        case HH_DISPLAY_SEARCH:
+        case HH_DISPLAY_TEXT_POPUP:
+        case HH_GET_LAST_ERROR:
+        case HH_GET_WIN_TYPE:
+        case HH_KEYWORD_LOOKUP:
+        case HH_SET_WIN_TYPE:
+        case HH_SYNC:
+            FIXME("structures not handled yet\n");
+            break;
 
-    HeapFree( GetProcessHeap(), 0, wfile );
+        case HH_DISPLAY_INDEX:
+        case HH_DISPLAY_TOPIC:
+        case HH_DISPLAY_TOC:
+        case HH_GET_WIN_HANDLE:
+        case HH_SAFE_DISPLAY_TOPIC:
+            len = MultiByteToWideChar( CP_ACP, 0, (const char*)data, -1, NULL, 0 );
+            wdata = heap_alloc(len*sizeof(WCHAR));
+            MultiByteToWideChar( CP_ACP, 0, (const char*)data, -1, wdata, len );
+            break;
+
+        case HH_CLOSE_ALL:
+        case HH_HELP_CONTEXT:
+        case HH_INITIALIZE:
+        case HH_PRETRANSLATEMESSAGE:
+        case HH_TP_HELP_CONTEXTMENU:
+        case HH_TP_HELP_WM_HELP:
+        case HH_UNINITIALIZE:
+            /* either scalar or pointer to scalar - do nothing */
+            break;
+
+        default:
+            FIXME("Unknown command: %s (%d)\n", command_to_string(command), command);
+            break;
+        }
+    }
+
+    result = HtmlHelpW( caller, wfile, command, wdata ? (DWORD_PTR)wdata : data );
+
+    heap_free(wfile);
+    heap_free(wdata);
     return result;
+}
+
+/******************************************************************
+ *		doWinMain (HHCTRL.OCX.13)
+ */
+int WINAPI doWinMain(HINSTANCE hInstance, LPSTR szCmdLine)
+{
+    MSG msg;
+
+    hh_process = TRUE;
+
+    /* FIXME: Check szCmdLine for bad arguments */
+    HtmlHelpA(GetDesktopWindow(), szCmdLine, HH_DISPLAY_TOPIC, 0);
+
+    while (GetMessageW(&msg, 0, 0, 0))
+    {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    return 0;
+}
+
+/******************************************************************
+ *		DllGetClassObject (HHCTRL.OCX.@)
+ */
+HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
+{
+    FIXME("(%s %s %p)\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
+    return CLASS_E_CLASSNOTAVAILABLE;
 }

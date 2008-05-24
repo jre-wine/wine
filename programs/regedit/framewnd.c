@@ -42,6 +42,10 @@ static TCHAR favoriteName[128];
 static TCHAR searchString[128];
 static int searchMask = SEARCH_KEYS | SEARCH_VALUES | SEARCH_CONTENT;
 
+static TCHAR FileNameBuffer[_MAX_PATH];
+static TCHAR FileTitleBuffer[_MAX_PATH];
+static TCHAR FilterBuffer[_MAX_PATH];
+
 /*******************************************************************************
  * Local module support methods
  */
@@ -96,18 +100,18 @@ static void OnExitMenuLoop(HWND hWnd)
 
 static void UpdateMenuItems(HMENU hMenu) {
     HWND hwndTV = g_pChildWnd->hTreeWnd;
-    BOOL bIsKeySelected = FALSE;
+    BOOL bAllowEdit = FALSE;
     HKEY hRootKey = NULL;
     LPCTSTR keyName;
     keyName = GetItemPath(hwndTV, TreeView_GetSelection(hwndTV), &hRootKey);
-    if (keyName && *keyName) { /* can't modify root keys */
-        bIsKeySelected = TRUE;
+    if (GetFocus() != hwndTV || (keyName && *keyName)) { /* can't modify root keys, but allow for their values */
+        bAllowEdit = TRUE;
     }
     EnableMenuItem(hMenu, ID_EDIT_FIND, MF_ENABLED | MF_BYCOMMAND);
     EnableMenuItem(hMenu, ID_EDIT_FINDNEXT, MF_ENABLED | MF_BYCOMMAND);
-    EnableMenuItem(hMenu, ID_EDIT_MODIFY, (bIsKeySelected ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
-    EnableMenuItem(hMenu, ID_EDIT_DELETE, (bIsKeySelected ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
-    EnableMenuItem(hMenu, ID_EDIT_RENAME, (bIsKeySelected ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
+    EnableMenuItem(hMenu, ID_EDIT_MODIFY, (bAllowEdit ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
+    EnableMenuItem(hMenu, ID_EDIT_DELETE, (bAllowEdit ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
+    EnableMenuItem(hMenu, ID_EDIT_RENAME, (bAllowEdit ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
     EnableMenuItem(hMenu, ID_FAVORITES_ADDTOFAVORITES, (hRootKey ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
     EnableMenuItem(hMenu, ID_FAVORITES_REMOVEFAVORITE, 
         (GetMenuItemCount(hMenu)>2 ? MF_ENABLED : MF_GRAYED) | MF_BYCOMMAND);
@@ -251,7 +255,7 @@ static void ExportRegistryFile_StoreSelection(HWND hdlg, OPENFILENAME *pOpenFile
         pOpenFileName->lCustData = (LPARAM)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(TCHAR));
 }
 
-static UINT_PTR CALLBACK ExportRegistryFile_OFNHookProc(HWND hdlg, UINT uiMsg, WPARAM wParam, LPARAM lParam)
+static UINT CALLBACK ExportRegistryFile_OFNHookProc(HWND hdlg, UINT uiMsg, WPARAM wParam, LPARAM lParam)
 {
     static OPENFILENAME* pOpenFileName;
     OFNOTIFY *pOfNotify;
@@ -273,7 +277,7 @@ static UINT_PTR CALLBACK ExportRegistryFile_OFNHookProc(HWND hdlg, UINT uiMsg, W
                 path = GetItemFullPath(g_pChildWnd->hTreeWnd, NULL, FALSE);
                 SendDlgItemMessage(hdlg, IDC_EXPORT_PATH, WM_SETTEXT, 0, (LPARAM)path);
                 HeapFree(GetProcessHeap(), 0, path);
-                CheckRadioButton(hdlg, IDC_EXPORT_ALL, IDC_EXPORT_SELECTED, IDC_EXPORT_ALL);
+                CheckRadioButton(hdlg, IDC_EXPORT_ALL, IDC_EXPORT_SELECTED, pOpenFileName->lCustData ? IDC_EXPORT_SELECTED : IDC_EXPORT_ALL);
                 break;
             case CDN_FILEOK:
                 ExportRegistryFile_StoreSelection(hdlg, pOpenFileName);
@@ -286,9 +290,6 @@ static UINT_PTR CALLBACK ExportRegistryFile_OFNHookProc(HWND hdlg, UINT uiMsg, W
     return 0L;
 }
 
-TCHAR FileNameBuffer[_MAX_PATH];
-TCHAR FileTitleBuffer[_MAX_PATH];
-TCHAR FilterBuffer[_MAX_PATH];
 
 static BOOL InitOpenFileName(HWND hWnd, OPENFILENAME *pofn)
 {
@@ -326,11 +327,12 @@ static BOOL ImportRegistryFile(HWND hWnd)
     } else {
         CheckCommDlgError(hWnd);
     }
+    RefreshTreeView(g_pChildWnd->hTreeWnd);
     return TRUE;
 }
 
 
-static BOOL ExportRegistryFile(HWND hWnd)
+static BOOL ExportRegistryFile(HWND hWnd, BOOL export_branch)
 {
     OPENFILENAME ofn;
     TCHAR ExportKeyPath[_MAX_PATH];
@@ -340,7 +342,7 @@ static BOOL ExportRegistryFile(HWND hWnd)
     InitOpenFileName(hWnd, &ofn);
     LoadString(hInst, IDS_FILEDIALOG_EXPORT_TITLE, title, COUNT_OF(title));
     ofn.lpstrTitle = title;
-    ofn.lCustData = 0; 
+    ofn.lCustData = export_branch;
     ofn.Flags = OFN_ENABLETEMPLATE | OFN_ENABLEHOOK | OFN_EXPLORER | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
     ofn.lpfnHook = ExportRegistryFile_OFNHookProc;
     ofn.lpTemplateName = MAKEINTRESOURCE(IDD_EXPORT_TEMPLATE);
@@ -504,9 +506,17 @@ static INT_PTR CALLBACK addtofavorites_dlgproc(HWND hwndDlg, UINT uMsg, WPARAM w
             
     switch(uMsg) {
         case WM_INITDIALOG:
+        {
+            HKEY hKeyRoot = NULL;
+            LPSTR ItemPath = GetItemPath(g_pChildWnd->hTreeWnd, NULL, &hKeyRoot);
+
+            if(!ItemPath || !*ItemPath)
+                ItemPath = GetItemFullPath(g_pChildWnd->hTreeWnd, NULL, FALSE);
             EnableWindow(GetDlgItem(hwndDlg, IDOK), FALSE);
+            SetWindowText(hwndValue, ItemPath);
             SendMessage(hwndValue, EM_SETLIMITTEXT, 127, 0);
             return TRUE;
+        }
         case WM_COMMAND:
             switch(LOWORD(wParam)) {
             case IDC_VALUE_NAME:
@@ -633,8 +643,11 @@ static BOOL _CmdWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case ID_REGISTRY_IMPORTREGISTRYFILE:
         ImportRegistryFile(hWnd);
         break;
+    case ID_EDIT_EXPORT:
+        ExportRegistryFile(hWnd, TRUE);
+        break;
     case ID_REGISTRY_EXPORTREGISTRYFILE:
-        ExportRegistryFile(hWnd);
+        ExportRegistryFile(hWnd, FALSE);
         break;
     case ID_REGISTRY_CONNECTNETWORKREGISTRY:
         break;
@@ -709,6 +722,9 @@ static BOOL _CmdWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case ID_EDIT_NEW_STRINGVALUE:
 	valueType = REG_SZ;
 	goto create_value;
+    case ID_EDIT_NEW_MULTI_STRINGVALUE:
+	valueType = REG_MULTI_SZ;
+	goto create_value;
     case ID_EDIT_NEW_BINARYVALUE:
 	valueType = REG_BINARY;
 	goto create_value;
@@ -731,7 +747,6 @@ static BOOL _CmdWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	    StartValueRename(g_pChildWnd->hListWnd);
 	}
 	break;
-    break;
     case ID_REGISTRY_PRINTERSETUP:
         /*PRINTDLG pd;*/
         /*PrintDlg(&pd);*/

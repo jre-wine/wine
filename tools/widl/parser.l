@@ -25,13 +25,18 @@
 nl	\r?\n
 ws	[ \f\t\r]
 cident	[a-zA-Z_][0-9a-zA-Z_]*
-int	[0-9]+
+u_suffix	(u|U)
+l_suffix	(l|L)
+int	[0-9]+({l_suffix}?{u_suffix}?|{u_suffix}?{l_suffix}?)?
 hexd	[0-9a-fA-F]
-hex	0x{hexd}+
+hex	0(x|X){hexd}+({l_suffix}?{u_suffix}?|{u_suffix}?{l_suffix}?)?
 uuid	{hexd}{8}-{hexd}{4}-{hexd}{4}-{hexd}{4}-{hexd}{12}
+double	[0-9]+\.[0-9]+([eE][+-]?[0-9]+)*
 
 %x QUOTE
-%x pp_line
+%x WSTRQUOTE
+%x ATTR
+%x PP_LINE
 
 %{
 
@@ -42,8 +47,11 @@ uuid	{hexd}{8}-{hexd}{4}-{hexd}{4}-{hexd}{4}-{hexd}{12}
 #include <string.h>
 #include <ctype.h>
 #include <assert.h>
+
 #ifdef HAVE_UNISTD_H
-# include <unistd.h>
+#include <unistd.h>
+#else
+#define YY_NO_UNISTD_H
 #endif
 
 #include "widl.h"
@@ -63,6 +71,7 @@ static int cbufidx;
 static int cbufalloc = 0;
 
 static int kw_token(const char *kw);
+static int attr_token(const char *kw);
 
 #define MAX_IMPORT_DEPTH 10
 struct {
@@ -73,9 +82,7 @@ struct {
 } import_stack[MAX_IMPORT_DEPTH];
 int import_stack_ptr = 0;
 
-static void pop_import(void);
-
-static UUID* parse_uuid(const char*u)
+UUID *parse_uuid(const char *u)
 {
   UUID* uuid = xmalloc(sizeof(UUID));
   char b[3];
@@ -103,60 +110,78 @@ static UUID* parse_uuid(const char*u)
  **************************************************************************
  */
 %%
-<INITIAL>^{ws}*\#{ws}*	yy_push_state(pp_line);
-<pp_line>[^\n]*         {
+<INITIAL,ATTR>^{ws}*\#{ws}*	yy_push_state(PP_LINE);
+<PP_LINE>[^\n]*         {
                             int lineno;
                             char *cptr, *fname;
                             yy_pop_state();
                             lineno = (int)strtol(yytext, &cptr, 10);
                             if(!lineno)
-                                parser_error("Malformed '#...' line-directive; invalid linenumber");
+                                error_loc("Malformed '#...' line-directive; invalid linenumber\n");
                             fname = strchr(cptr, '"');
                             if(!fname)
-                                parser_error("Malformed '#...' line-directive; missing filename");
+                                error_loc("Malformed '#...' line-directive; missing filename\n");
                             fname++;
                             cptr = strchr(fname, '"');
                             if(!cptr)
-                                parser_error("Malformed '#...' line-directive; missing terminating \"");
+                                error_loc("Malformed '#...' line-directive; missing terminating \"\n");
                             *cptr = '\0';
                             line_number = lineno - 1;  /* We didn't read the newline */
                             free( input_name );
                             input_name = xstrdup(fname);
                         }
-\"			yy_push_state(QUOTE); cbufidx = 0;
+<INITIAL,ATTR>\"	yy_push_state(QUOTE); cbufidx = 0;
 <QUOTE>\"		{
 				yy_pop_state();
 				parser_lval.str = get_buffered_cstring();
 				return aSTRING;
 			}
-<QUOTE>\\\\		|
-<QUOTE>\\\"		addcchar(yytext[1]);
-<QUOTE>\\.		addcchar('\\'); addcchar(yytext[1]);
-<QUOTE>.		addcchar(yytext[0]);
-{uuid}			{
+<INITIAL,ATTR>L\"	yy_push_state(WSTRQUOTE);
+<WSTRQUOTE>\"		{
+				yy_pop_state();
+				parser_lval.str = get_buffered_cstring();
+				return aWSTRING;
+			}
+<QUOTE,WSTRQUOTE>\\\\	|
+<QUOTE,WSTRQUOTE>\\\"	addcchar(yytext[1]);
+<QUOTE,WSTRQUOTE>\\.	addcchar('\\'); addcchar(yytext[1]);
+<QUOTE,WSTRQUOTE>.	addcchar(yytext[0]);
+<INITIAL,ATTR>\[	yy_push_state(ATTR); return '[';
+<ATTR>\]		yy_pop_state(); return ']';
+<ATTR>{cident}		return attr_token(yytext);
+<ATTR>{uuid}			{
 				parser_lval.uuid = parse_uuid(yytext);
 				return aUUID;
 			}
-{hex}			{
+<INITIAL,ATTR>{hex}	{
 				parser_lval.num = strtoul(yytext, NULL, 0);
 				return aHEXNUM;
 			}
-{int}			{
+<INITIAL,ATTR>{int}	{
 				parser_lval.num = strtoul(yytext, NULL, 0);
 				return aNUM;
 			}
+<INITIAL>{double}	{
+				parser_lval.dbl = strtod(yytext, NULL);
+				return aDOUBLE;
+			}
 SAFEARRAY{ws}*/\(	return tSAFEARRAY;
 {cident}		return kw_token(yytext);
-\n			line_number++;
-{ws}
-\<\<			return SHL;
-\>\>			return SHR;
-.			return yytext[0];
+<INITIAL,ATTR>\n	line_number++;
+<INITIAL,ATTR>{ws}
+<INITIAL,ATTR>\<\<	return SHL;
+<INITIAL,ATTR>\>\>	return SHR;
+<INITIAL,ATTR>\-\>	return MEMBERPTR;
+<INITIAL,ATTR>==	return EQUALITY;
+<INITIAL,ATTR>!=	return INEQUALITY;
+<INITIAL,ATTR>\>=	return GREATEREQUAL;
+<INITIAL,ATTR>\<=	return LESSEQUAL;
+<INITIAL,ATTR>\|\|	return LOGICALOR;
+<INITIAL,ATTR>&&	return LOGICALAND;
+<INITIAL,ATTR>.		return yytext[0];
 <<EOF>>			{
-				if (import_stack_ptr) {
-					pop_import();
+				if (import_stack_ptr)
 					return aEOF;
-				}
 				else yyterminate();
 			}
 %%
@@ -168,150 +193,156 @@ int parser_wrap(void)
 }
 #endif
 
-static struct keyword {
+struct keyword {
 	const char *kw;
 	int token;
-} keywords[] = {
+};
+
+/* This table MUST be alphabetically sorted on the kw field */
+static const struct keyword keywords[] = {
 	{"FALSE",			tFALSE},
+	{"NULL",			tNULL},
 	{"TRUE",			tTRUE},
 	{"__cdecl",			tCDECL},
+	{"__fastcall",			tFASTCALL},
 	{"__int64",			tINT64},
+	{"__pascal",			tPASCAL},
 	{"__stdcall",			tSTDCALL},
+	{"_cdecl",			tCDECL},
+	{"_fastcall",			tFASTCALL},
+	{"_pascal",			tPASCAL},
 	{"_stdcall",			tSTDCALL},
-	{"aggregatable",		tAGGREGATABLE},
-	{"allocate",			tALLOCATE},
-	{"appobject",			tAPPOBJECT},
-	{"async",			tASYNC},
-	{"async_uuid",			tASYNCUUID},
-	{"auto_handle",			tAUTOHANDLE},
-	{"bindable",			tBINDABLE},
 	{"boolean",			tBOOLEAN},
-	{"broadcast",			tBROADCAST},
 	{"byte",			tBYTE},
-	{"byte_count",			tBYTECOUNT},
-	{"call_as",			tCALLAS},
-	{"callback",			tCALLBACK},
 	{"case",			tCASE},
+	{"cdecl",			tCDECL},
 	{"char",			tCHAR},
 	{"coclass",			tCOCLASS},
-	{"code",			tCODE},
-	{"comm_status",			tCOMMSTATUS},
 	{"const",			tCONST},
-	{"context_handle",		tCONTEXTHANDLE},
-	{"context_handle_noserialize",	tCONTEXTHANDLENOSERIALIZE},
-	{"context_handle_serialize",	tCONTEXTHANDLENOSERIALIZE},
-	{"control",			tCONTROL},
 	{"cpp_quote",			tCPPQUOTE},
-/* ... */
 	{"default",			tDEFAULT},
-	{"defaultcollelem",		tDEFAULTCOLLELEM},
-	{"defaultvalue",		tDEFAULTVALUE},
-	{"defaultvtable",		tDEFAULTVTABLE},
 	{"dispinterface",		tDISPINTERFACE},
-	{"displaybind",			tDISPLAYBIND},
-	{"dllname",			tDLLNAME},
 	{"double",			tDOUBLE},
-	{"dual",			tDUAL},
-	{"endpoint",			tENDPOINT},
-	{"entry",			tENTRY},
 	{"enum",			tENUM},
 	{"error_status_t",		tERRORSTATUST},
-	{"explicit_handle",		tEXPLICITHANDLE},
 	{"extern",			tEXTERN},
 	{"float",			tFLOAT},
-	{"handle",			tHANDLE},
 	{"handle_t",			tHANDLET},
-	{"helpcontext",			tHELPCONTEXT},
-	{"helpfile",			tHELPFILE},
-	{"helpstring",			tHELPSTRING},
-	{"helpstringcontext",		tHELPSTRINGCONTEXT},
-	{"helpstringdll",		tHELPSTRINGDLL},
-	{"hidden",                      tHIDDEN},
 	{"hyper",			tHYPER},
-	{"id",				tID},
-	{"idempotent",			tIDEMPOTENT},
-/* ... */
-	{"iid_is",			tIIDIS},
-	{"immediatebind",		tIMMEDIATEBIND},
-	{"implicit_handle",		tIMPLICITHANDLE},
 	{"import",			tIMPORT},
 	{"importlib",			tIMPORTLIB},
-	{"in",				tIN},
-	{"in_line",			tINLINE},
-	{"input_sync",			tINPUTSYNC},
+	{"inline",			tINLINE},
 	{"int",				tINT},
-/* ... */
 	{"interface",			tINTERFACE},
-	{"lcid",			tLCID},
-	{"length_is",			tLENGTHIS},
 	{"library",			tLIBRARY},
-/* ... */
-	{"local",			tLOCAL},
 	{"long",			tLONG},
-/* ... */
 	{"methods",			tMETHODS},
-/* ... */
 	{"module",			tMODULE},
-/* ... */
-	{"nonbrowsable",		tNONBROWSABLE},
-	{"noncreatable",		tNONCREATABLE},
-	{"nonextensible",		tNONEXTENSIBLE},
-	{"object",			tOBJECT},
-	{"odl",				tODL},
-	{"oleautomation",		tOLEAUTOMATION},
-/* ... */
-	{"optional",			tOPTIONAL},
-	{"out",				tOUT},
-/* ... */
-	{"pointer_default",		tPOINTERDEFAULT},
-/* ... */
+	{"pascal",			tPASCAL},
 	{"properties",			tPROPERTIES},
-	{"propget",			tPROPGET},
-	{"propput",			tPROPPUT},
-	{"propputref",			tPROPPUTREF},
-        {"ptr",				tPTR},
-/* ... */
-	{"public",			tPUBLIC},
-        {"range",			tRANGE},
-/* ... */
-	{"readonly",			tREADONLY},
-	{"ref",				tREF},
-	{"requestedit",			tREQUESTEDIT},
-	{"restricted",                  tRESTRICTED},
-	{"retval",			tRETVAL},
-/* ... */
+	{"register",			tREGISTER},
 	{"short",			tSHORT},
 	{"signed",			tSIGNED},
-	{"single",			tSINGLE},
-	{"size_is",			tSIZEIS},
 	{"sizeof",			tSIZEOF},
         {"small",			tSMALL},
-/* ... */
-	{"source",			tSOURCE},
-/* ... */	
-	{"string",			tSTRING},
+	{"static",			tSTATIC},
+	{"stdcall",			tSTDCALL},
 	{"struct",			tSTRUCT},
 	{"switch",			tSWITCH},
-	{"switch_is",			tSWITCHIS},
-	{"switch_type",			tSWITCHTYPE},
-/* ... */
-	{"transmit_as",			tTRANSMITAS},
 	{"typedef",			tTYPEDEF},
 	{"union",			tUNION},
-/* ... */
-	{"unique",			tUNIQUE},
 	{"unsigned",			tUNSIGNED},
-/* ... */
-	{"uuid",			tUUID},
-	{"v1_enum",			tV1ENUM},
-/* ... */
-	{"vararg",			tVARARG},
-	{"version",			tVERSION},
 	{"void",			tVOID},
 	{"wchar_t",			tWCHAR},
-	{"wire_marshal",		tWIREMARSHAL},
 };
 #define NKEYWORDS (sizeof(keywords)/sizeof(keywords[0]))
+
+/* keywords only recognized in attribute lists
+ * This table MUST be alphabetically sorted on the kw field
+ */
+static const struct keyword attr_keywords[] =
+{
+        {"aggregatable",                tAGGREGATABLE},
+        {"allocate",                    tALLOCATE},
+        {"appobject",                   tAPPOBJECT},
+        {"async",                       tASYNC},
+        {"async_uuid",                  tASYNCUUID},
+        {"auto_handle",                 tAUTOHANDLE},
+        {"bindable",                    tBINDABLE},
+        {"broadcast",                   tBROADCAST},
+        {"byte_count",                  tBYTECOUNT},
+        {"call_as",                     tCALLAS},
+        {"callback",                    tCALLBACK},
+        {"code",                        tCODE},
+        {"comm_status",                 tCOMMSTATUS},
+        {"context_handle",              tCONTEXTHANDLE},
+        {"context_handle_noserialize",  tCONTEXTHANDLENOSERIALIZE},
+        {"context_handle_serialize",    tCONTEXTHANDLENOSERIALIZE},
+        {"control",                     tCONTROL},
+        {"defaultcollelem",             tDEFAULTCOLLELEM},
+        {"defaultvalue",                tDEFAULTVALUE},
+        {"defaultvtable",               tDEFAULTVTABLE},
+        {"displaybind",                 tDISPLAYBIND},
+        {"dllname",                     tDLLNAME},
+        {"dual",                        tDUAL},
+        {"endpoint",                    tENDPOINT},
+        {"entry",                       tENTRY},
+        {"explicit_handle",             tEXPLICITHANDLE},
+        {"handle",                      tHANDLE},
+        {"helpcontext",                 tHELPCONTEXT},
+        {"helpfile",                    tHELPFILE},
+        {"helpstring",                  tHELPSTRING},
+        {"helpstringcontext",           tHELPSTRINGCONTEXT},
+        {"helpstringdll",               tHELPSTRINGDLL},
+        {"hidden",                      tHIDDEN},
+        {"id",                          tID},
+        {"idempotent",                  tIDEMPOTENT},
+        {"iid_is",                      tIIDIS},
+        {"immediatebind",               tIMMEDIATEBIND},
+        {"implicit_handle",             tIMPLICITHANDLE},
+        {"in",                          tIN},
+        {"in_line",                     tIN_LINE},
+        {"input_sync",                  tINPUTSYNC},
+        {"lcid",                        tLCID},
+        {"length_is",                   tLENGTHIS},
+        {"local",                       tLOCAL},
+        {"nonbrowsable",                tNONBROWSABLE},
+        {"noncreatable",                tNONCREATABLE},
+        {"nonextensible",               tNONEXTENSIBLE},
+        {"object",                      tOBJECT},
+        {"odl",                         tODL},
+        {"oleautomation",               tOLEAUTOMATION},
+        {"optional",                    tOPTIONAL},
+        {"out",                         tOUT},
+        {"pointer_default",             tPOINTERDEFAULT},
+        {"propget",                     tPROPGET},
+        {"propput",                     tPROPPUT},
+        {"propputref",                  tPROPPUTREF},
+        {"ptr",                         tPTR},
+        {"public",                      tPUBLIC},
+        {"range",                       tRANGE},
+        {"readonly",                    tREADONLY},
+        {"ref",                         tREF},
+        {"requestedit",                 tREQUESTEDIT},
+        {"restricted",                  tRESTRICTED},
+        {"retval",                      tRETVAL},
+        {"single",                      tSINGLE},
+        {"size_is",                     tSIZEIS},
+        {"source",                      tSOURCE},
+        {"strict_context_handle",       tSTRICTCONTEXTHANDLE},
+        {"string",                      tSTRING},
+        {"switch_is",                   tSWITCHIS},
+        {"switch_type",                 tSWITCHTYPE},
+        {"transmit_as",                 tTRANSMITAS},
+        {"unique",                      tUNIQUE},
+        {"uuid",                        tUUID},
+        {"v1_enum",                     tV1ENUM},
+        {"vararg",                      tVARARG},
+        {"version",                     tVERSION},
+        {"wire_marshal",                tWIREMARSHAL},
+};
+
+
 #define KWP(p) ((const struct keyword *)(p))
 
 static int kw_cmp_func(const void *s1, const void *s2)
@@ -319,29 +350,30 @@ static int kw_cmp_func(const void *s1, const void *s2)
 	return strcmp(KWP(s1)->kw, KWP(s2)->kw);
 }
 
-#define KW_BSEARCH
 static int kw_token(const char *kw)
 {
 	struct keyword key, *kwp;
 	key.kw = kw;
-#ifdef KW_BSEARCH
 	kwp = bsearch(&key, keywords, NKEYWORDS, sizeof(keywords[0]), kw_cmp_func);
-#else
-	{
-		int i;
-		for (kwp=NULL, i=0; i < NKEYWORDS; i++)
-			if (!kw_cmp_func(&key, &keywords[i])) {
-				kwp = &keywords[i];
-				break;
-			}
-	}
-#endif
 	if (kwp) {
 		parser_lval.str = xstrdup(kwp->kw);
 		return kwp->token;
 	}
 	parser_lval.str = xstrdup(kw);
 	return is_type(kw) ? aKNOWNTYPE : aIDENTIFIER;
+}
+
+static int attr_token(const char *kw)
+{
+        struct keyword key, *kwp;
+        key.kw = kw;
+        kwp = bsearch(&key, attr_keywords, sizeof(attr_keywords)/sizeof(attr_keywords[0]),
+                      sizeof(attr_keywords[0]), kw_cmp_func);
+        if (kwp) {
+            parser_lval.str = xstrdup(kwp->kw);
+            return kwp->token;
+        }
+        return kw_token(kw);
 }
 
 static void addcchar(char c)
@@ -351,7 +383,7 @@ static void addcchar(char c)
 		cbufalloc += 1024;
 		cbuffer = xrealloc(cbuffer, cbufalloc * sizeof(cbuffer[0]));
 		if(cbufalloc > 65536)
-			parser_warning("Reallocating string buffer larger than 64kB");
+			parser_warning("Reallocating string buffer larger than 64kB\n");
 	}
 	cbuffer[cbufidx++] = c;
 }
@@ -362,7 +394,7 @@ static char *get_buffered_cstring(void)
 	return xstrdup(cbuffer);
 }
 
-static void pop_import(void)
+void pop_import(void)
 {
 	int ptr = import_stack_ptr-1;
 
@@ -374,7 +406,6 @@ static void pop_import(void)
 		free(temp_name);
 	}
 	temp_name = import_stack[ptr].temp_name;
-	free( input_name );
 	input_name = import_stack[ptr].input_name;
 	line_number = import_stack[ptr].line_number;
 	import_stack_ptr--;
@@ -388,19 +419,10 @@ struct imports {
 int do_import(char *fname)
 {
 	FILE *f;
-	char *hname, *path, *p;
+	char *path;
 	struct imports *import;
 	int ptr = import_stack_ptr;
 	int ret;
-
-	if (!parse_only && do_header) {
-		hname = dup_basename(fname, ".idl");
-                p = hname + strlen(hname) - 2;
-                if (p <= hname || strcmp( p, ".h" )) strcat(hname, ".h");
-
-		fprintf(header, "#include <%s>\n", hname);
-		free(hname);
-	}
 
 	import = first_import;
 	while (import && strcmp(import->name, fname))
@@ -412,8 +434,12 @@ int do_import(char *fname)
 	import->next = first_import;
 	first_import = import;
 
-        if (!(path = wpp_find_include( fname, input_name )))
-            parser_error("Unable to open include file %s", fname);
+        /* don't search for a file name with a path in the include directories,
+         * for compatibility with MIDL */
+        if (strchr( fname, '/' ) || strchr( fname, '\\' ))
+            path = strdup( fname );
+        else if (!(path = wpp_find_include( fname, input_name )))
+            error_loc("Unable to open include file %s\n", fname);
 
 	import_stack[ptr].temp_name = temp_name;
 	import_stack[ptr].input_name = input_name;
@@ -426,7 +452,7 @@ int do_import(char *fname)
         if (ret) exit(1);
 
 	if((f = fopen(temp_name, "r")) == NULL)
-		parser_error("Unable to open %s", temp_name);
+		error_loc("Unable to open %s\n", temp_name);
 
 	import_stack[ptr].state = YY_CURRENT_BUFFER;
 	yy_switch_to_buffer(yy_create_buffer(f, YY_BUF_SIZE));

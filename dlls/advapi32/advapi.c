@@ -18,9 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -32,7 +29,7 @@
 #include "winreg.h"
 #include "winternl.h"
 #include "winerror.h"
-#include "appmgmt.h"
+#include "wincred.h"
 
 #include "wine/library.h"
 #include "wine/debug.h"
@@ -88,7 +85,7 @@ BOOL WINAPI
 GetUserNameW( LPWSTR lpszName, LPDWORD lpSize )
 {
     const char *name = wine_get_user_name();
-    DWORD len = MultiByteToWideChar( CP_UNIXCP, 0, name, -1, NULL, 0 );
+    DWORD i, len = MultiByteToWideChar( CP_UNIXCP, 0, name, -1, NULL, 0 );
 
     if (len > *lpSize)
     {
@@ -99,6 +96,12 @@ GetUserNameW( LPWSTR lpszName, LPDWORD lpSize )
 
     *lpSize = len;
     MultiByteToWideChar( CP_UNIXCP, 0, name, -1, lpszName, len );
+
+    /* Word uses the user name to create named mutexes and file mappings,
+     * and backslashes in the name cause the creation to fail.
+     */
+    for (i = 0; lpszName[i]; i++)
+        if (lpszName[i] == '\\' || lpszName[i] == '/') lpszName[i] = '_';
     return TRUE;
 }
 
@@ -118,7 +121,7 @@ BOOL WINAPI GetCurrentHwProfileA(LPHW_PROFILE_INFOA pInfo)
 {
 	FIXME("(%p) semi-stub\n", pInfo);
 	pInfo->dwDockInfo = DOCKINFO_DOCKED;
-	strcpy(pInfo->szHwProfileGuid,"{12340001-1234-1234-1234-1233456789012}");
+	strcpy(pInfo->szHwProfileGuid,"{12340001-1234-1234-1234-123456789012}");
 	strcpy(pInfo->szHwProfileName,"Wine Profile");
 	return 1;
 }
@@ -284,7 +287,8 @@ DWORD WINAPI CommandLineFromMsiDescriptor( WCHAR *szDescriptor,
     hmsi = LoadLibraryW( szMsi );
     if (!hmsi)
         return r;
-    mpcfd = (void*) GetProcAddress( hmsi, "MsiProvideComponentFromDescriptorW" );
+    mpcfd = (fnMsiProvideComponentFromDescriptor)GetProcAddress( hmsi,
+                                                                 "MsiProvideComponentFromDescriptorW" );
     if (mpcfd)
         r = mpcfd( szDescriptor, szCommandLine, pcchCommandLine, NULL );
     FreeLibrary( hmsi );

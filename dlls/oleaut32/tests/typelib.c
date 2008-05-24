@@ -23,12 +23,33 @@
 
 #include <wine/test.h>
 #include <stdarg.h>
+#include <stdio.h>
 
 #include "windef.h"
 #include "winbase.h"
 #include "oleauto.h"
 #include "ocidl.h"
 #include "shlwapi.h"
+#include "tmarshal.h"
+
+#define expect_eq(expr, value, type, format) { type _ret = (expr); ok((value) == _ret, #expr " expected " format " got " format "\n", value, _ret); }
+#define expect_int(expr, value) expect_eq(expr, (int)value, int, "%d")
+#define expect_hex(expr, value) expect_eq(expr, (int)value, int, "0x%x")
+#define expect_null(expr) expect_eq(expr, NULL, const void *, "%p")
+
+#define expect_wstr_utf8val(expr, value) \
+    { \
+        CHAR buf[260]; \
+        expect_eq(!WideCharToMultiByte(CP_UTF8, 0, (expr), -1, buf, 260, NULL, NULL), 0, int, "%d"); \
+        ok(lstrcmp(value, buf) == 0, #expr " expected \"%s\" got \"%s\"\n", value, buf); \
+    }
+
+#define ole_expect(expr, expect) { \
+    HRESULT r = expr; \
+    ok(r == (expect), #expr " returned %x, expected %s (%x)\n", r, #expect, expect); \
+}
+
+#define ole_check(expr) ole_expect(expr, S_OK);
 
 #define ok_ole_success(hr, func) ok(hr == S_OK, #func " failed with error 0x%08x\n", hr)
 
@@ -277,12 +298,12 @@ static void test_CreateDispTypeInfo(void)
     FUNCDESC *pFuncDesc;
     MEMBERID memid;
 
-    static const WCHAR func1[] = {'f','u','n','c','1',0};
+    static WCHAR func1[] = {'f','u','n','c','1',0};
     static const WCHAR func2[] = {'f','u','n','c','2',0};
     static const WCHAR func3[] = {'f','u','n','c','3',0};
     static const WCHAR parm1[] = {'p','a','r','m','1',0};
     static const WCHAR parm2[] = {'p','a','r','m','2',0};
-    OLECHAR *name = (OLECHAR *)func1;
+    OLECHAR *name = func1;
 
     ifdata.pmethdata = methdata;
     ifdata.cMembers = sizeof(methdata) / sizeof(methdata[0]);
@@ -343,18 +364,21 @@ static void test_CreateDispTypeInfo(void)
 
     hr = ITypeInfo_GetRefTypeOfImplType(pTypeInfo, 0, &href);
     ok(hr == S_OK, "hr %08x\n", hr);
-    todo_wine {
     ok(href == 0, "href = 0x%x\n", href);
-    }
     hr = ITypeInfo_GetRefTypeInfo(pTypeInfo, href, &pTI2);
     ok(hr == S_OK, "hr %08x\n", hr);
     hr = ITypeInfo_GetTypeAttr(pTI2, &pTypeAttr);
     ok(hr == S_OK, "hr %08x\n", hr);
     ok(pTypeAttr->typekind == TKIND_INTERFACE, "typekind %0x\n", pTypeAttr->typekind);
+    ok(pTypeAttr->cFuncs == 4, "cFuncs %d\n", pTypeAttr->cFuncs);
+    ok(IsEqualGUID(&pTypeAttr->guid, &GUID_NULL), "guid {%08x-...}\n", pTypeAttr->guid.Data1);
+    ok(pTypeAttr->wTypeFlags == 0, "typeflags %08x\n", pTypeAttr->wTypeFlags);
+
     ITypeInfo_ReleaseTypeAttr(pTI2, pTypeAttr);
 
     hr = ITypeInfo_GetFuncDesc(pTI2, 0, &pFuncDesc);
     ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFuncDesc->memid == 0x123, "memid %x\n", pFuncDesc->memid);
     ok(pFuncDesc->funckind == FUNC_VIRTUAL, "funckind %d\n", pFuncDesc->funckind);
     ok(pFuncDesc->invkind == methdata[0].wFlags, "invkind %d\n", pFuncDesc->invkind);
     ok(pFuncDesc->callconv == methdata[0].cc, "callconv %d\n", pFuncDesc->callconv);
@@ -489,6 +513,70 @@ static void test_TypeInfo(void)
     ITypeLib_Release(pTypeLib);
 }
 
+/* RegDeleteTreeW from dlls/advapi32/registry.c */
+static LSTATUS myRegDeleteTreeW(HKEY hKey, LPCWSTR lpszSubKey)
+{
+    LONG ret;
+    DWORD dwMaxSubkeyLen, dwMaxValueLen;
+    DWORD dwMaxLen, dwSize;
+    WCHAR szNameBuf[MAX_PATH], *lpszName = szNameBuf;
+    HKEY hSubKey = hKey;
+
+    if(lpszSubKey)
+    {
+        ret = RegOpenKeyExW(hKey, lpszSubKey, 0, KEY_READ, &hSubKey);
+        if (ret) return ret;
+    }
+
+    ret = RegQueryInfoKeyW(hSubKey, NULL, NULL, NULL, NULL,
+            &dwMaxSubkeyLen, NULL, NULL, &dwMaxValueLen, NULL, NULL, NULL);
+    if (ret) goto cleanup;
+
+    dwMaxSubkeyLen++;
+    dwMaxValueLen++;
+    dwMaxLen = max(dwMaxSubkeyLen, dwMaxValueLen);
+    if (dwMaxLen > sizeof(szNameBuf)/sizeof(WCHAR))
+    {
+        /* Name too big: alloc a buffer for it */
+        if (!(lpszName = HeapAlloc( GetProcessHeap(), 0, dwMaxLen*sizeof(WCHAR))))
+        {
+            ret = ERROR_NOT_ENOUGH_MEMORY;
+            goto cleanup;
+        }
+    }
+
+    /* Recursively delete all the subkeys */
+    while (TRUE)
+    {
+        dwSize = dwMaxLen;
+        if (RegEnumKeyExW(hSubKey, 0, lpszName, &dwSize, NULL,
+                          NULL, NULL, NULL)) break;
+
+        ret = myRegDeleteTreeW(hSubKey, lpszName);
+        if (ret) goto cleanup;
+    }
+
+    if (lpszSubKey)
+        ret = RegDeleteKeyW(hKey, lpszSubKey);
+    else
+        while (TRUE)
+        {
+            dwSize = dwMaxLen;
+            if (RegEnumValueW(hKey, 0, lpszName, &dwSize,
+                  NULL, NULL, NULL, NULL)) break;
+
+            ret = RegDeleteValueW(hKey, lpszName);
+            if (ret) goto cleanup;
+        }
+
+cleanup:
+    if (lpszName != szNameBuf)
+        HeapFree(GetProcessHeap(), 0, lpszName);
+    if(lpszSubKey)
+        RegCloseKey(hSubKey);
+    return ret;
+}
+
 static BOOL do_typelib_reg_key(GUID *uid, WORD maj, WORD min, LPCWSTR base, BOOL remove)
 {
     static const WCHAR typelibW[] = {'T','y','p','e','l','i','b','\\',0};
@@ -503,7 +591,7 @@ static BOOL do_typelib_reg_key(GUID *uid, WORD maj, WORD min, LPCWSTR base, BOOL
 
     if (remove)
     {
-        ok(SHDeleteKeyW(HKEY_CLASSES_ROOT, buf) == ERROR_SUCCESS, "SHDeleteKey failed\n");
+        ok(myRegDeleteTreeW(HKEY_CLASSES_ROOT, buf) == ERROR_SUCCESS, "SHDeleteKey failed\n");
         return TRUE;
     }
 
@@ -575,11 +663,715 @@ static void test_QueryPathOfRegTypeLib(void)
     do_typelib_reg_key(&uid, 0, 0, NULL, 1);
 }
 
+static void test_inheritance(void)
+{
+    HRESULT hr;
+    ITypeLib *pTL;
+    ITypeInfo *pTI, *pTI_p;
+    TYPEATTR *pTA;
+    HREFTYPE href;
+    FUNCDESC *pFD;
+    WCHAR path[MAX_PATH];
+    static const WCHAR tl_path[] = {'.','\\','m','i','d','l','_','t','m','a','r','s','h','a','l','.','t','l','b',0};
+
+    BOOL use_midl_tlb = 0;
+
+    GetModuleFileNameW(NULL, path, MAX_PATH);
+
+    if(use_midl_tlb)
+        memcpy(path, tl_path, sizeof(tl_path));
+
+    hr = LoadTypeLib(path, &pTL);
+    if(FAILED(hr)) return;
+
+
+    /* ItestIF3 is a syntax 2 dispinterface */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &DIID_ItestIF3, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_DISPATCH, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 28, "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->wTypeFlags == TYPEFLAG_FDISPATCHABLE, "typeflags %x\n", pTA->wTypeFlags);
+if(use_midl_tlb) {
+    ok(pTA->cFuncs == 6, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, 0, &href);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeInfo(pTI, href, &pTI_p);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(pTI_p, &pTA);
+    ok(IsEqualGUID(&pTA->guid, &IID_IDispatch), "guid {%08x-....\n", pTA->guid.Data1);
+    ITypeInfo_ReleaseTypeAttr(pTI_p, pTA);
+    ITypeInfo_Release(pTI_p);
+
+    /* Should have six methods */
+    hr = ITypeInfo_GetFuncDesc(pTI, 6, &pFD);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "hr %08x\n", hr);
+    hr = ITypeInfo_GetFuncDesc(pTI, 5, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x60020000, "memid %08x\n", pFD->memid);
+    ok(pFD->oVft == 20, "oVft %d\n", pFD->oVft);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+}
+    ITypeInfo_Release(pTI);
+
+
+    /* ItestIF4 is a syntax 1 dispinterface */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &DIID_ItestIF4, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_DISPATCH, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 28, "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->wTypeFlags == TYPEFLAG_FDISPATCHABLE, "typeflags %x\n", pTA->wTypeFlags);
+    ok(pTA->cFuncs == 1, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, 0, &href);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeInfo(pTI, href, &pTI_p);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(pTI_p, &pTA);
+    ok(IsEqualGUID(&pTA->guid, &IID_IDispatch), "guid {%08x-....\n", pTA->guid.Data1);
+    ITypeInfo_ReleaseTypeAttr(pTI_p, pTA);
+    ITypeInfo_Release(pTI_p);
+    hr = ITypeInfo_GetFuncDesc(pTI, 1, &pFD);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "hr %08x\n", hr);
+    hr = ITypeInfo_GetFuncDesc(pTI, 0, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x1c, "memid %08x\n", pFD->memid);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+    ITypeInfo_Release(pTI);
+
+
+    /* ItestIF5 is dual with inherited ifaces which derive from IUnknown but not IDispatch */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &IID_ItestIF5, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_DISPATCH, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 28, "sizevft %d\n", pTA->cbSizeVft);
+if(use_midl_tlb) {
+    ok(pTA->wTypeFlags == TYPEFLAG_FDUAL, "typeflags %x\n", pTA->wTypeFlags);
+ }
+    ok(pTA->cFuncs == 8, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, 0, &href);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeInfo(pTI, href, &pTI_p);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(pTI_p, &pTA);
+    ok(IsEqualGUID(&pTA->guid, &IID_IDispatch), "guid {%08x-....\n", pTA->guid.Data1);
+    ITypeInfo_ReleaseTypeAttr(pTI_p, pTA);
+    ITypeInfo_Release(pTI_p);
+if(use_midl_tlb) {
+    hr = ITypeInfo_GetFuncDesc(pTI, 6, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x1234, "memid %08x\n", pFD->memid);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+}
+    ITypeInfo_Release(pTI);
+
+    /* ItestIF7 is dual with inherited ifaces which derive from Dispatch */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &IID_ItestIF7, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_DISPATCH, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 28, "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->wTypeFlags == (TYPEFLAG_FDISPATCHABLE|TYPEFLAG_FDUAL), "typeflags %x\n", pTA->wTypeFlags);
+    ok(pTA->cFuncs == 10, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, 0, &href);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeInfo(pTI, href, &pTI_p);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(pTI_p, &pTA);
+    ok(IsEqualGUID(&pTA->guid, &IID_IDispatch), "guid {%08x-....\n", pTA->guid.Data1);
+    ITypeInfo_ReleaseTypeAttr(pTI_p, pTA);
+    ITypeInfo_Release(pTI_p);
+
+    hr = ITypeInfo_GetFuncDesc(pTI, 9, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x1236, "memid %08x\n", pFD->memid);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+    ITypeInfo_Release(pTI);
+
+    /* ItestIF10 is a syntax 2 dispinterface which doesn't derive from IUnknown */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &DIID_ItestIF10, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_DISPATCH, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 28, "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->wTypeFlags == TYPEFLAG_FDISPATCHABLE, "typeflags %x\n", pTA->wTypeFlags);
+if(use_midl_tlb) {
+    ok(pTA->cFuncs == 3, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, -1, &href);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, 0, &href);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeInfo(pTI, href, &pTI_p);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(pTI_p, &pTA);
+    ok(IsEqualGUID(&pTA->guid, &IID_IDispatch), "guid {%08x-....\n", pTA->guid.Data1);
+    ITypeInfo_ReleaseTypeAttr(pTI_p, pTA);
+    ITypeInfo_Release(pTI_p);
+
+    /* Should have three methods */
+    hr = ITypeInfo_GetFuncDesc(pTI, 3, &pFD);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "hr %08x\n", hr);
+    hr = ITypeInfo_GetFuncDesc(pTI, 2, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x60010000, "memid %08x\n", pFD->memid);
+    ok(pFD->oVft == 8, "oVft %d\n", pFD->oVft);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+}
+    ITypeInfo_Release(pTI);
+
+    /* ItestIF11 is a syntax 2 dispinterface which derives from IDispatch */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &DIID_ItestIF11, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_DISPATCH, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 28, "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->wTypeFlags == TYPEFLAG_FDISPATCHABLE, "typeflags %x\n", pTA->wTypeFlags);
+if(use_midl_tlb) {
+    ok(pTA->cFuncs == 10, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, 0, &href);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeInfo(pTI, href, &pTI_p);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(pTI_p, &pTA);
+    ok(IsEqualGUID(&pTA->guid, &IID_IDispatch), "guid {%08x-....\n", pTA->guid.Data1);
+    ITypeInfo_ReleaseTypeAttr(pTI_p, pTA);
+    ITypeInfo_Release(pTI_p);
+
+    /* Should have ten methods */
+    hr = ITypeInfo_GetFuncDesc(pTI, 10, &pFD);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "hr %08x\n", hr);
+    hr = ITypeInfo_GetFuncDesc(pTI, 9, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x1236, "memid %08x\n", pFD->memid);
+    ok(pFD->oVft == 36, "oVft %d\n", pFD->oVft);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+}
+    ITypeInfo_Release(pTI);
+
+
+    /* ItestIF2 is an interface which derives from IUnknown */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &IID_ItestIF2, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_INTERFACE, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 24, "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->wTypeFlags == 0, "typeflags %x\n", pTA->wTypeFlags);
+if(use_midl_tlb) {
+    ok(pTA->cFuncs == 1, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    /* Should have one method */
+    hr = ITypeInfo_GetFuncDesc(pTI, 1, &pFD);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "hr %08x\n", hr);
+    hr = ITypeInfo_GetFuncDesc(pTI, 0, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x60020000, "memid %08x\n", pFD->memid);
+    ok(pFD->oVft == 20, "oVft %d\n", pFD->oVft);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+}
+    ITypeInfo_Release(pTI);
+
+    ITypeLib_Release(pTL);
+
+    return;
+}
+
+#if 0       /* use this to generate more tests */
+
+#define OLE_CHECK(x) { HRESULT hr = x; if (FAILED(hr)) { printf(#x "failed - %x\n", hr); return; } }
+
+static char *dump_string(LPWSTR wstr)
+{
+    int size = lstrlenW(wstr)+3;
+    char *out = CoTaskMemAlloc(size);
+    WideCharToMultiByte(20127, 0, wstr, -1, out+1, size, NULL, NULL);
+    out[0] = '\"';
+    strcat(out, "\"");
+    return out;
+}
+
+struct map_entry
+{
+    DWORD value;
+    const char *name;
+};
+
+#define MAP_ENTRY(x) { x, #x }
+static const struct map_entry tkind_map[] = {
+    MAP_ENTRY(TKIND_ENUM),
+    MAP_ENTRY(TKIND_RECORD),
+    MAP_ENTRY(TKIND_MODULE),
+    MAP_ENTRY(TKIND_INTERFACE),
+    MAP_ENTRY(TKIND_DISPATCH),
+    MAP_ENTRY(TKIND_COCLASS),
+    MAP_ENTRY(TKIND_ALIAS),
+    MAP_ENTRY(TKIND_UNION),
+    MAP_ENTRY(TKIND_MAX),
+    {0, NULL}
+};
+
+static const struct map_entry funckind_map[] = {
+    MAP_ENTRY(FUNC_VIRTUAL),
+    MAP_ENTRY(FUNC_PUREVIRTUAL),
+    MAP_ENTRY(FUNC_NONVIRTUAL),
+    MAP_ENTRY(FUNC_STATIC),
+    MAP_ENTRY(FUNC_DISPATCH),
+    {0, NULL}
+};
+
+static const struct map_entry invkind_map[] = {
+    MAP_ENTRY(INVOKE_FUNC),
+    MAP_ENTRY(INVOKE_PROPERTYGET),
+    MAP_ENTRY(INVOKE_PROPERTYPUT),
+    MAP_ENTRY(INVOKE_PROPERTYPUTREF),
+    {0, NULL}
+};
+
+#undef MAP_ENTRY
+
+static const char *map_value(DWORD val, const struct map_entry *map)
+{
+    static int map_id;
+    static char bufs[16][256];
+    char *buf;
+
+    while (map->name)
+    {
+        if (map->value == val)
+            return map->name;
+        map++;
+    }
+
+    buf = bufs[(map_id++)%16];
+    sprintf(buf, "0x%x", val);
+    return buf;
+}
+
+static void test_dump_typelib(const char *name)
+{
+    WCHAR wszString[260];
+    ITypeInfo *info;
+    ITypeLib *lib;
+    int count;
+    int i;
+
+    MultiByteToWideChar(CP_ACP, 0, name, -1, wszString, 260);
+    OLE_CHECK(LoadTypeLib(wszString, &lib));
+    count = ITypeLib_GetTypeInfoCount(lib);
+    printf("/* interfaces count: %d */\n", count);
+    for (i = 0; i < count; i++)
+    {
+        TYPEATTR *attr;
+        BSTR name;
+        int f = 0;
+
+        OLE_CHECK(ITypeLib_GetDocumentation(lib, i, &name, NULL, NULL, NULL));
+        printf("{\n"
+               "  %s,\n", dump_string(name));
+        SysFreeString(name);
+
+        OLE_CHECK(ITypeLib_GetTypeInfo(lib, i, &info));
+        ITypeInfo_GetTypeAttr(info, &attr);
+        printf("  /*kind*/ %s, /*flags*/ 0x%x, /*align*/ %d, /*size*/ %d,\n"
+               "  /*#vtbl*/ %d, /*#func*/ %d,\n"
+               "  {\n",
+            map_value(attr->typekind, tkind_map), attr->wTypeFlags, attr->cbAlignment, attr->cbSizeInstance, attr->cbSizeVft,
+            attr->cFuncs);
+        ITypeInfo_ReleaseTypeAttr(info, attr);
+        while (1)
+        {
+            FUNCDESC *desc;
+            BSTR tab[256];
+            UINT cNames;
+            int p;
+
+            if (FAILED(ITypeInfo_GetFuncDesc(info, f, &desc)))
+                break;
+            printf("    {\n"
+                   "      0x%x, /*func*/ %s, /*inv*/ %s, /*call*/ 0x%x,\n",
+                desc->memid, map_value(desc->funckind, funckind_map), map_value(desc->invkind, invkind_map),
+                desc->callconv);
+            printf("      /*#param*/ %d, /*#opt*/ %d, /*vtbl*/ %d, /*#scodes*/ %d, /*flags*/ 0x%x,\n",
+                desc->cParams, desc->cParamsOpt, desc->oVft, desc->cScodes, desc->wFuncFlags);
+            printf("      {%d, %x}, /* ret */\n", desc->elemdescFunc.tdesc.vt, desc->elemdescFunc.paramdesc.wParamFlags);
+            printf("      { /* params */\n");
+            for (p = 0; p < desc->cParams; p++)
+            {
+                ELEMDESC e = desc->lprgelemdescParam[p];
+                printf("        {%d, %x},\n", e.tdesc.vt, e.paramdesc.wParamFlags);
+            }
+            printf("        {-1, -1}\n");
+            printf("      },\n");
+            printf("      { /* names */\n");
+            OLE_CHECK(ITypeInfo_GetNames(info, desc->memid, tab, 256, &cNames));
+            for (p = 0; p < cNames; p++)
+            {
+                printf("        %s,\n", dump_string(tab[p]));
+                SysFreeString(tab[p]);
+            }
+            printf("        NULL,\n");
+            printf("      },\n");
+            printf("    },\n");
+            ITypeInfo_ReleaseFuncDesc(info, desc);
+            f++;
+        }
+        printf("  }\n");
+        printf("},\n");
+        ITypeInfo_Release(info);
+    }
+    ITypeLib_Release(lib);
+}
+
+#else
+
+typedef struct _element_info
+{
+    VARTYPE vt;
+    USHORT wParamFlags;
+} element_info;
+
+typedef struct _function_info
+{
+    MEMBERID memid;
+    FUNCKIND funckind;
+    INVOKEKIND invkind;
+    CALLCONV callconv;
+    short cParams;
+    short cParamsOpt;
+    short oVft;
+    short cScodes;
+    WORD wFuncFlags;
+    element_info ret_type;
+    element_info params[15];
+    LPCSTR names[15];
+} function_info;
+
+typedef struct _interface_info
+{
+    LPCSTR name;
+    TYPEKIND type;
+    WORD wTypeFlags;
+    USHORT cbAlignment;
+    USHORT cbSizeInstance;
+    USHORT cbSizeVft;
+    USHORT cFuncs;
+    function_info funcs[20];
+} interface_info;
+
+static const interface_info info[] = {
+/* interfaces count: 2 */
+{
+  "IDualIface",
+  /*kind*/ TKIND_DISPATCH, /*flags*/ 0x1040, /*align*/ 4, /*size*/ 4,
+  /*#vtbl*/ 28, /*#func*/ 8,
+  {
+    {
+      0x60000000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      /*#param*/ 2, /*#opt*/ 0, /*vtbl*/ 0, /*#scodes*/ 0, /*flags*/ 0x1,
+      {24, 0}, /* ret */
+      { /* params */
+        {26, 1},
+        {26, 2},
+        {-1, -1}
+      },
+      { /* names */
+        "QueryInterface",
+        "riid",
+        "ppvObj",
+        NULL,
+      },
+    },
+    {
+      0x60000001, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 4, /*#scodes*/ 0, /*flags*/ 0x1,
+      {19, 0}, /* ret */
+      { /* params */
+        {-1, -1}
+      },
+      { /* names */
+        "AddRef",
+        NULL,
+      },
+    },
+    {
+      0x60000002, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 8, /*#scodes*/ 0, /*flags*/ 0x1,
+      {19, 0}, /* ret */
+      { /* params */
+        {-1, -1}
+      },
+      { /* names */
+        "Release",
+        NULL,
+      },
+    },
+    {
+      0x60010000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 12, /*#scodes*/ 0, /*flags*/ 0x1,
+      {24, 0}, /* ret */
+      { /* params */
+        {26, 2},
+        {-1, -1}
+      },
+      { /* names */
+        "GetTypeInfoCount",
+        "pctinfo",
+        NULL,
+      },
+    },
+    {
+      0x60010001, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      /*#param*/ 3, /*#opt*/ 0, /*vtbl*/ 16, /*#scodes*/ 0, /*flags*/ 0x1,
+      {24, 0}, /* ret */
+      { /* params */
+        {23, 1},
+        {19, 1},
+        {26, 2},
+        {-1, -1}
+      },
+      { /* names */
+        "GetTypeInfo",
+        "itinfo",
+        "lcid",
+        "pptinfo",
+        NULL,
+      },
+    },
+    {
+      0x60010002, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      /*#param*/ 5, /*#opt*/ 0, /*vtbl*/ 20, /*#scodes*/ 0, /*flags*/ 0x1,
+      {24, 0}, /* ret */
+      { /* params */
+        {26, 1},
+        {26, 1},
+        {23, 1},
+        {19, 1},
+        {26, 2},
+        {-1, -1}
+      },
+      { /* names */
+        "GetIDsOfNames",
+        "riid",
+        "rgszNames",
+        "cNames",
+        "lcid",
+        "rgdispid",
+        NULL,
+      },
+    },
+    {
+      0x60010003, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      /*#param*/ 8, /*#opt*/ 0, /*vtbl*/ 24, /*#scodes*/ 0, /*flags*/ 0x1,
+      {24, 0}, /* ret */
+      { /* params */
+        {3, 1},
+        {26, 1},
+        {19, 1},
+        {18, 1},
+        {26, 1},
+        {26, 2},
+        {26, 2},
+        {26, 2},
+        {-1, -1}
+      },
+      { /* names */
+        "Invoke",
+        "dispidMember",
+        "riid",
+        "lcid",
+        "wFlags",
+        "pdispparams",
+        "pvarResult",
+        "pexcepinfo",
+        "puArgErr",
+        NULL,
+      },
+    },
+    {
+      0x60020000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 28, /*#scodes*/ 0, /*flags*/ 0x0,
+      {24, 0}, /* ret */
+      { /* params */
+        {-1, -1}
+      },
+      { /* names */
+        "Test",
+        NULL,
+      },
+    },
+  }
+},
+{
+  "ISimpleIface",
+  /*kind*/ TKIND_INTERFACE, /*flags*/ 0x1000, /*align*/ 4, /*size*/ 4,
+  /*#vtbl*/ 32, /*#func*/ 1,
+  {
+    {
+      0x60020000, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 28, /*#scodes*/ 0, /*flags*/ 0x0,
+      {25, 0}, /* ret */
+      { /* params */
+        {-1, -1}
+      },
+      { /* names */
+        "Test",
+        NULL,
+      },
+    },
+  }
+},
+};
+
+#define check_type(elem, info) { \
+      expect_int((elem)->tdesc.vt, (info)->vt);                     \
+      expect_hex(U(*(elem)).paramdesc.wParamFlags, (info)->wParamFlags); \
+  }
+
+static void test_dump_typelib(const char *name)
+{
+    WCHAR wszName[MAX_PATH];
+    ITypeLib *typelib;
+    int ifcount = sizeof(info)/sizeof(info[0]);
+    int iface, func;
+
+    MultiByteToWideChar(CP_UTF8, 0, name, -1, wszName, MAX_PATH);
+    ole_check(LoadTypeLibEx(wszName, REGKIND_NONE, &typelib));
+    expect_eq(ITypeLib_GetTypeInfoCount(typelib), ifcount, UINT, "%d");
+    for (iface = 0; iface < ifcount; iface++)
+    {
+        const interface_info *if_info = &info[iface];
+        ITypeInfo *typeinfo;
+        TYPEATTR *typeattr;
+        BSTR bstrIfName;
+
+        trace("Interface %s\n", if_info->name);
+        ole_check(ITypeLib_GetTypeInfo(typelib, iface, &typeinfo));
+        ole_check(ITypeLib_GetDocumentation(typelib, iface, &bstrIfName, NULL, NULL, NULL));
+        expect_wstr_utf8val(bstrIfName, if_info->name);
+        SysFreeString(bstrIfName);
+
+        ole_check(ITypeInfo_GetTypeAttr(typeinfo, &typeattr));
+        expect_int(typeattr->typekind, if_info->type);
+        expect_hex(typeattr->wTypeFlags, if_info->wTypeFlags);
+        expect_int(typeattr->cbAlignment, if_info->cbAlignment);
+        expect_int(typeattr->cbSizeInstance, if_info->cbSizeInstance);
+        expect_int(typeattr->cbSizeVft, if_info->cbSizeVft);
+        expect_int(typeattr->cFuncs, if_info->cFuncs);
+
+        for (func = 0; func < typeattr->cFuncs; func++)
+        {
+            function_info *fn_info = (function_info *)&if_info->funcs[func];
+            FUNCDESC *desc;
+            BSTR namesTab[256];
+            UINT cNames;
+            int i;
+
+            trace("Function %s\n", fn_info->names[0]);
+            ole_check(ITypeInfo_GetFuncDesc(typeinfo, func, &desc));
+            expect_int(desc->memid, fn_info->memid);
+            expect_int(desc->funckind, fn_info->funckind);
+            expect_int(desc->invkind, fn_info->invkind);
+            expect_int(desc->callconv, fn_info->callconv);
+            expect_int(desc->cParams, fn_info->cParams);
+            expect_int(desc->cParamsOpt, fn_info->cParamsOpt);
+            expect_int(desc->oVft, fn_info->oVft);
+            expect_int(desc->cScodes, fn_info->cScodes);
+            expect_int(desc->wFuncFlags, fn_info->wFuncFlags);
+            ole_check(ITypeInfo_GetNames(typeinfo, desc->memid, namesTab, 256, &cNames));
+            for (i = 0; i < cNames; i++)
+            {
+                expect_wstr_utf8val(namesTab[i], fn_info->names[i]);
+                SysFreeString(namesTab[i]);
+            }
+            expect_null(fn_info->names[cNames]);
+
+            check_type(&desc->elemdescFunc, &fn_info->ret_type);
+            for (i = 0 ; i < desc->cParams; i++)
+            {
+                check_type(&desc->lprgelemdescParam[i], &fn_info->params[i]);
+            }
+            expect_int(fn_info->params[desc->cParams].vt, (VARTYPE)-1);
+
+            ITypeInfo_ReleaseFuncDesc(typeinfo, desc);
+        }
+
+        ITypeInfo_ReleaseTypeAttr(typeinfo, typeattr);
+        ITypeInfo_Release(typeinfo);
+    }
+    ITypeLib_Release(typelib);
+}
+
+#endif
+
+static const char *create_test_typelib(void)
+{
+    static char filename[MAX_PATH];
+    HANDLE file;
+    HRSRC res;
+    void *ptr;
+    DWORD written;
+
+    GetTempFileNameA( ".", "tlb", 0, filename );
+    file = CreateFile( filename, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
+    ok( file != INVALID_HANDLE_VALUE, "file creation failed\n" );
+    if (file == INVALID_HANDLE_VALUE) return NULL;
+    res = FindResource( GetModuleHandle(0), MAKEINTRESOURCE(2), "TYPELIB" );
+    ok( res != 0, "couldn't find resource\n" );
+    ptr = LockResource( LoadResource( GetModuleHandle(0), res ));
+    WriteFile( file, ptr, SizeofResource( GetModuleHandle(0), res ), &written, NULL );
+    ok( written == SizeofResource( GetModuleHandle(0), res ), "couldn't write resource\n" );
+    CloseHandle( file );
+    return filename;
+}
+
 START_TEST(typelib)
 {
+    const char *filename;
+
     ref_count_test(wszStdOle2);
     test_TypeComp();
     test_CreateDispTypeInfo();
     test_TypeInfo();
     test_QueryPathOfRegTypeLib();
+    test_inheritance();
+
+    if ((filename = create_test_typelib()))
+    {
+        test_dump_typelib( filename );
+        DeleteFile( filename );
+    }
 }

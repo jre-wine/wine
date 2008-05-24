@@ -28,7 +28,6 @@
 #include "winuser.h"
 #include "winreg.h"
 #include "wownt32.h"
-#include "wingdi.h"
 #include "winnls.h"
 #include "setupapi.h"
 #include "setupx16.h"
@@ -91,6 +90,7 @@ VHSTR WINAPI vsmStringAdd16(LPCSTR lpszName)
     VHSTR n;
     VHSTR index = 0xffff;
     HANDLE heap;
+    LPSTR str;
 
     TRACE("add string '%s'\n", lpszName);
     /* search whether string already inserted */
@@ -137,8 +137,9 @@ VHSTR WINAPI vsmStringAdd16(LPCSTR lpszName)
     if (!vhstrlist[index])
 	vhstrlist[index] = HeapAlloc(heap, HEAP_ZERO_MEMORY, sizeof(VHSTR_STRUCT));
     vhstrlist[index]->refcount = 1;
-    vhstrlist[index]->pStr = HeapAlloc(heap, 0, strlen(lpszName)+1);
-    strcpy((LPSTR)vhstrlist[index]->pStr, lpszName);
+    str = HeapAlloc(heap, 0, strlen(lpszName)+1);
+    strcpy(str, lpszName);
+    vhstrlist[index]->pStr = str;
     return index;
 }
 
@@ -218,7 +219,8 @@ static LPVIRTNODE *pvnlist = NULL;
 static DWORD vn_num = 0;
 static DWORD vn_last = 0;
 
-static RETERR16 VCP_VirtnodeCreate(LPVCPFILESPEC vfsSrc, LPVCPFILESPEC vfsDst, WORD fl, LPARAM lParam, LPEXPANDVTBL lpExpandVtbl)
+static RETERR16 VCP_VirtnodeCreate(const VCPFILESPEC *vfsSrc, const VCPFILESPEC *vfsDst,
+                                   WORD fl, LPARAM lParam, LPEXPANDVTBL lpExpandVtbl)
 {
     HANDLE heap;
     LPVIRTNODE lpvn;
@@ -248,10 +250,10 @@ static RETERR16 VCP_VirtnodeCreate(LPVCPFILESPEC vfsSrc, LPVCPFILESPEC vfsDst, W
     lpvn->cbSize = sizeof(VIRTNODE);
 
     if (vfsSrc)
-        memcpy(&lpvn->vfsSrc, vfsSrc, sizeof(VCPFILESPEC));
+        lpvn->vfsSrc = *vfsSrc;
 
     if (vfsDst)
-        memcpy(&lpvn->vfsDst, vfsDst, sizeof(VCPFILESPEC));
+        lpvn->vfsDst = *vfsDst;
 
     lpvn->fl = fl;
     lpvn->lParam = lParam;
@@ -537,7 +539,7 @@ RETERR16 WINAPI VcpClose16(WORD fl, LPCSTR lpszBackupDest)
 
     TRACE("(%04x, '%s')\n", fl, lpszBackupDest);
 
-    /* FIXME: needs to sort virtnodes in case VCPFL_INSPECIFIEDORDER
+    /* FIXME: needs to sort VIRTNODEs in case VCPFL_INSPECIFIEDORDER
      * is not set. This is done by VCP_Callback(VCPM_NODECOMPARE) */
 
     TRACE("#1\n");
@@ -595,7 +597,7 @@ RETERR16 WINAPI vcpDefCallbackProc16(LPVOID lpvObj, UINT16 uMsg, WPARAM wParam,
 {
     static int count = 0;
     if (count < 10)
-        FIXME("(%p, %04x, %04x, %08lx, %08lx) - what to do here ?\n",
+        FIXME("(%p, %04x, %04lx, %08lx, %08lx) - what to do here ?\n",
 		lpvObj, uMsg, wParam, lParam, lParamRef);
     count++;
     return OK;
@@ -745,7 +747,7 @@ RETERR16 WINAPI vcpUICallbackProc16(LPVOID lpvObj, UINT16 uMsg, WPARAM wParam,
     RETERR16 res = VCPN_OK, cbres;
 
     if (count < 5)
-        FIXME("(%p, %04x, %04x, %08lx, %08lx) - semi-stub\n",
+        FIXME("(%p, %04x, %04lx, %08lx, %08lx) - semi-stub\n",
 		lpvObj, uMsg, wParam, lParam, lParamRef);
     count++;
     switch (uMsg)

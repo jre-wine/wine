@@ -19,7 +19,7 @@
  */
 
 /*
- * Here are helper functions formally in action.c that are used by a variaty of
+ * Here are helper functions formally in action.c that are used by a variety of
  * actions and functions.
  */
 
@@ -31,6 +31,8 @@
 #include "wine/debug.h"
 #include "msipriv.h"
 #include "winuser.h"
+#include "winreg.h"
+#include "shlwapi.h"
 #include "wine/unicode.h"
 #include "msidefs.h"
 
@@ -67,9 +69,32 @@ LPWSTR build_icon_path(MSIPACKAGE *package, LPCWSTR icon_name )
     return FilePath;
 }
 
-LPWSTR msi_dup_record_field( MSIRECORD *row, INT index )
+LPWSTR msi_dup_record_field( MSIRECORD *rec, INT field )
 {
-    return strdupW( MSI_RecordGetString(row,index) );
+    DWORD sz = 0;
+    LPWSTR str;
+    UINT r;
+
+    if (MSI_RecordIsNull( rec, field ))
+        return NULL;
+
+    r = MSI_RecordGetStringW( rec, field, NULL, &sz );
+    if (r != ERROR_SUCCESS)
+        return NULL;
+
+    sz ++;
+    str = msi_alloc( sz * sizeof (WCHAR) );
+    if (!str)
+        return str;
+    str[0] = 0;
+    r = MSI_RecordGetStringW( rec, field, str, &sz );
+    if (r != ERROR_SUCCESS)
+    {
+        ERR("failed to get string!\n");
+        msi_free( str );
+        return NULL;
+    }
+    return str;
 }
 
 MSICOMPONENT* get_loaded_component( MSIPACKAGE* package, LPCWSTR Component )
@@ -108,31 +133,22 @@ MSIFILE* get_loaded_file( MSIPACKAGE* package, LPCWSTR key )
     return NULL;
 }
 
-int track_tempfile( MSIPACKAGE *package, LPCWSTR name, LPCWSTR path )
+int track_tempfile( MSIPACKAGE *package, LPCWSTR path )
 {
     MSITEMPFILE *temp;
 
+    TRACE("%s\n", debugstr_w(path));
+
     LIST_FOR_EACH_ENTRY( temp, &package->tempfiles, MSITEMPFILE, entry )
-    {
-        if (lstrcmpW( name, temp->File )==0)
-        {
-            TRACE("tempfile %s already exists with path %s\n",
-                debugstr_w(temp->File), debugstr_w(temp->Path));
-            return -1;
-        }
-    }
+        if (!lstrcmpW( path, temp->Path ))
+            return 0;
 
     temp = msi_alloc_zero( sizeof (MSITEMPFILE) );
     if (!temp)
         return -1;
 
     list_add_head( &package->tempfiles, &temp->entry );
-
-    temp->File = strdupW( name );
     temp->Path = strdupW( path );
-
-    TRACE("adding tempfile %s with path %s\n",
-           debugstr_w(temp->File), debugstr_w(temp->Path));
 
     return 0;
 }
@@ -140,7 +156,7 @@ int track_tempfile( MSIPACKAGE *package, LPCWSTR name, LPCWSTR path )
 MSIFOLDER *get_loaded_folder( MSIPACKAGE *package, LPCWSTR dir )
 {
     MSIFOLDER *folder;
-    
+
     LIST_FOR_EACH_ENTRY( folder, &package->folders, MSIFOLDER, entry )
     {
         if (lstrcmpW( dir, folder->Directory )==0)
@@ -207,22 +223,25 @@ static void clean_spaces_from_path( LPWSTR p )
 }
 
 LPWSTR resolve_folder(MSIPACKAGE *package, LPCWSTR name, BOOL source, 
-                      BOOL set_prop, MSIFOLDER **folder)
+                      BOOL set_prop, BOOL load_prop, MSIFOLDER **folder)
 {
     MSIFOLDER *f;
-    LPWSTR p, path = NULL;
+    LPWSTR p, path = NULL, parent;
 
     TRACE("Working to resolve %s\n",debugstr_w(name));
 
     if (!name)
         return NULL;
 
+    if (!lstrcmpW(name,cszSourceDir))
+        name = cszTargetDir;
+
     f = get_loaded_folder( package, name );
     if (!f)
         return NULL;
 
     /* special resolving for Target and Source root dir */
-    if (strcmpW(name,cszTargetDir)==0 || strcmpW(name,cszSourceDir)==0)
+    if (!strcmpW(name,cszTargetDir))
     {
         if (!f->ResolvedTarget && !f->Property)
         {
@@ -258,76 +277,86 @@ LPWSTR resolve_folder(MSIPACKAGE *package, LPCWSTR name, BOOL source,
         TRACE("   already resolved to %s\n",debugstr_w(path));
         return path;
     }
-    else if (source && f->ResolvedSource)
+
+    if (source && f->ResolvedSource)
     {
         path = strdupW( f->ResolvedSource );
         TRACE("   (source)already resolved to %s\n",debugstr_w(path));
         return path;
     }
-    else if (!source && f->Property)
+
+    if (!source && f->Property)
     {
         path = build_directory_name( 2, f->Property, NULL );
-                    
+
         TRACE("   internally set to %s\n",debugstr_w(path));
         if (set_prop)
             MSI_SetPropertyW( package, name, path );
         return path;
     }
 
-    if (f->Parent)
+    if (!source && load_prop && (path = msi_dup_property( package, name )))
     {
-        LPWSTR parent = f->Parent->Directory;
-
-        TRACE(" ! Parent is %s\n", debugstr_w(parent));
-
-        p = resolve_folder(package, parent, source, set_prop, NULL);
-        if (!source)
-        {
-            TRACE("   TargetDefault = %s\n", debugstr_w(f->TargetDefault));
-
-            path = build_directory_name( 3, p, f->TargetDefault, NULL );
-            clean_spaces_from_path( path );
-            f->ResolvedTarget = strdupW( path );
-            TRACE("target -> %s\n", debugstr_w(path));
-            if (set_prop)
-                MSI_SetPropertyW(package,name,path);
-        }
-        else 
-        {
-            /* source may be in a few different places ... check each of them */
-            path = NULL;
-
-            /* try the long path directory */
-            if (f->SourceLongPath)
-            {
-                path = build_directory_name( 3, p, f->SourceLongPath, NULL );
-                if (INVALID_FILE_ATTRIBUTES == GetFileAttributesW( path ))
-                {
-                    msi_free( path );
-                    path = NULL;
-                }
-            }
-
-            /* try the short path directory */
-            if (!path && f->SourceShortPath)
-            {
-                path = build_directory_name( 3, p, f->SourceShortPath, NULL );
-                if (INVALID_FILE_ATTRIBUTES == GetFileAttributesW( path ))
-                {
-                    msi_free( path );
-                    path = NULL;
-                }
-            }
-
-            /* try the root of the install */
-            if (!path)
-                path = get_source_root( package );
-
-            TRACE("source -> %s\n", debugstr_w(path));
-            f->ResolvedSource = strdupW( path );
-        }
-        msi_free(p);
+        f->ResolvedTarget = strdupW( path );
+        TRACE("   property set to %s\n", debugstr_w(path));
+        return path;
     }
+
+    if (!f->Parent)
+        return path;
+
+    parent = f->Parent;
+
+    TRACE(" ! Parent is %s\n", debugstr_w(parent));
+
+    p = resolve_folder(package, parent, source, set_prop, load_prop, NULL);
+    if (!source)
+    {
+        TRACE("   TargetDefault = %s\n", debugstr_w(f->TargetDefault));
+
+        path = build_directory_name( 3, p, f->TargetDefault, NULL );
+        clean_spaces_from_path( path );
+        f->ResolvedTarget = strdupW( path );
+        TRACE("target -> %s\n", debugstr_w(path));
+        if (set_prop)
+            MSI_SetPropertyW(package,name,path);
+    }
+    else
+    {
+        /* source may be in a few different places ... check each of them */
+        path = NULL;
+
+        /* try the long path directory */
+        if (f->SourceLongPath)
+        {
+            path = build_directory_name( 3, p, f->SourceLongPath, NULL );
+            if (INVALID_FILE_ATTRIBUTES == GetFileAttributesW( path ))
+            {
+                msi_free( path );
+                path = NULL;
+            }
+        }
+
+        /* try the short path directory */
+        if (!path && f->SourceShortPath)
+        {
+            path = build_directory_name( 3, p, f->SourceShortPath, NULL );
+            if (INVALID_FILE_ATTRIBUTES == GetFileAttributesW( path ))
+            {
+                msi_free( path );
+                path = NULL;
+            }
+        }
+
+        /* try the root of the install */
+        if (!path)
+            path = get_source_root( package );
+
+        TRACE("source -> %s\n", debugstr_w(path));
+        f->ResolvedSource = strdupW( path );
+    }
+    msi_free(p);
+
     return path;
 }
 
@@ -341,18 +370,16 @@ DWORD deformat_string(MSIPACKAGE *package, LPCWSTR ptr, WCHAR** data )
 
         MSI_RecordSetStringW(rec,0,ptr);
         MSI_FormatRecordW(package,rec,NULL,&size);
-        if (size >= 0)
-        {
-            size++;
-            *data = msi_alloc(size*sizeof(WCHAR));
-            if (size > 1)
-                MSI_FormatRecordW(package,rec,*data,&size);
-            else
-                *data[0] = 0;
-            msiobj_release( &rec->hdr );
-            return sizeof(WCHAR)*size;
-        }
+
+        size++;
+        *data = msi_alloc(size*sizeof(WCHAR));
+        if (size > 1)
+            MSI_FormatRecordW(package,rec,*data,&size);
+        else
+            *data[0] = 0;
+
         msiobj_release( &rec->hdr );
+        return sizeof(WCHAR)*size;
     }
 
     *data = NULL;
@@ -405,8 +432,8 @@ static void remove_tracked_tempfiles(MSIPACKAGE* package)
 
         list_remove( &temp->entry );
         TRACE("deleting temp file %s\n", debugstr_w( temp->Path ));
-        DeleteFileW( temp->Path );
-        msi_free( temp->File );
+        if (!DeleteFileW( temp->Path ))
+            ERR("failed to delete %s\n", debugstr_w( temp->Path ));
         msi_free( temp->Path );
         msi_free( temp );
     }
@@ -462,7 +489,7 @@ void ACTION_free_package_structures( MSIPACKAGE* package)
 {
     INT i;
     struct list *item, *cursor;
-    
+
     TRACE("Freeing package action data\n");
 
     remove_tracked_tempfiles(package);
@@ -479,6 +506,7 @@ void ACTION_free_package_structures( MSIPACKAGE* package)
         MSIFOLDER *folder = LIST_ENTRY( item, MSIFOLDER, entry );
 
         list_remove( &folder->entry );
+        msi_free( folder->Parent );
         msi_free( folder->Directory );
         msi_free( folder->TargetDefault );
         msi_free( folder->SourceLongPath );
@@ -492,7 +520,7 @@ void ACTION_free_package_structures( MSIPACKAGE* package)
     LIST_FOR_EACH_SAFE( item, cursor, &package->components )
     {
         MSICOMPONENT *comp = LIST_ENTRY( item, MSICOMPONENT, entry );
-        
+
         list_remove( &comp->entry );
         msi_free( comp->Component );
         msi_free( comp->ComponentId );
@@ -577,6 +605,25 @@ void ACTION_free_package_structures( MSIPACKAGE* package)
         msi_free( appid->ServiceParameters );
         msi_free( appid->DllSurrogate );
         msi_free( appid );
+    }
+
+    LIST_FOR_EACH_SAFE( item, cursor, &package->sourcelist_info )
+    {
+        MSISOURCELISTINFO *info = LIST_ENTRY( item, MSISOURCELISTINFO, entry );
+
+        list_remove( &info->entry );
+        msi_free( info->value );
+	msi_free( info );
+    }
+
+    LIST_FOR_EACH_SAFE( item, cursor, &package->sourcelist_media )
+    {
+        MSIMEDIADISK *info = LIST_ENTRY( item, MSIMEDIADISK, entry );
+
+        list_remove( &info->entry );
+        msi_free( info->volume_label );
+        msi_free( info->disk_prompt );
+	msi_free( info );
     }
 
     if (package->script)
@@ -765,7 +812,7 @@ void ui_actiondata(MSIPACKAGE *package, LPCWSTR action, MSIRECORD * record)
     msiobj_release(&row->hdr);
 }
 
-BOOL ACTION_VerifyComponentForAction( MSICOMPONENT* comp, INSTALLSTATE check )
+BOOL ACTION_VerifyComponentForAction( const MSICOMPONENT* comp, INSTALLSTATE check )
 {
     if (!comp)
         return FALSE;
@@ -779,12 +826,9 @@ BOOL ACTION_VerifyComponentForAction( MSICOMPONENT* comp, INSTALLSTATE check )
         return FALSE;
 }
 
-BOOL ACTION_VerifyFeatureForAction( MSIFEATURE* feature, INSTALLSTATE check )
+BOOL ACTION_VerifyFeatureForAction( const MSIFEATURE* feature, INSTALLSTATE check )
 {
     if (!feature)
-        return FALSE;
-
-    if (feature->Installed == check)
         return FALSE;
 
     if (feature->ActionRequest == check)
@@ -843,7 +887,7 @@ LPWSTR create_component_advertise_string(MSIPACKAGE* package,
     return output;
 }
 
-/* update compoennt state based on a feature change */
+/* update component state based on a feature change */
 void ACTION_UpdateComponentStates(MSIPACKAGE *package, LPCWSTR szFeature)
 {
     INSTALLSTATE newstate;
@@ -877,6 +921,8 @@ void ACTION_UpdateComponentStates(MSIPACKAGE *package, LPCWSTR szFeature)
             ComponentList *clist;
             MSIFEATURE *f;
 
+            component->hasLocalFeature = FALSE;
+
             msi_component_set_state( component, newstate );
 
             /*if any other feature wants is local we need to set it local*/
@@ -895,6 +941,7 @@ void ACTION_UpdateComponentStates(MSIPACKAGE *package, LPCWSTR szFeature)
                           f->ActionRequest == INSTALLSTATE_SOURCE) )
                     {
                         TRACE("Saved by %s\n", debugstr_w(f->Feature));
+                        component->hasLocalFeature = TRUE;
 
                         if (component->Attributes & msidbComponentAttributesOptional)
                         {
@@ -941,7 +988,7 @@ UINT register_unique_action(MSIPACKAGE *package, LPCWSTR action)
     return ERROR_SUCCESS;
 }
 
-BOOL check_unique_action(MSIPACKAGE *package, LPCWSTR action)
+BOOL check_unique_action(const MSIPACKAGE *package, LPCWSTR action)
 {
     INT i;
 
@@ -987,20 +1034,14 @@ WCHAR* generate_error_string(MSIPACKAGE *package, UINT error, DWORD count, ... )
     va_end(va);
 
     MSI_FormatRecordW(package,rec,NULL,&size);
-    if (size >= 0)
-    {
-        size++;
-        data = msi_alloc(size*sizeof(WCHAR));
-        if (size > 1)
-            MSI_FormatRecordW(package,rec,data,&size);
-        else
-            data[0] = 0;
-        msiobj_release( &rec->hdr );
-        return data;
-    }
 
+    size++;
+    data = msi_alloc(size*sizeof(WCHAR));
+    if (size > 1)
+        MSI_FormatRecordW(package,rec,data,&size);
+    else
+        data[0] = 0;
     msiobj_release( &rec->hdr );
-    data = NULL;
     return data;
 }
 
@@ -1017,4 +1058,133 @@ void msi_ui_error( DWORD msg_id, DWORD type )
         return;
 
     MessageBoxW( NULL, text, title, type );
+}
+
+typedef struct
+{
+    MSIPACKAGE *package;
+    MSIMEDIAINFO *mi;
+    MSIFILE *file;
+    LPWSTR destination;
+} CabData;
+
+static INT_PTR cabinet_notify(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
+{
+    TRACE("(%d)\n", fdint);
+
+    switch (fdint)
+    {
+    case fdintNEXT_CABINET:
+    {
+        ERR("continuous cabinets not handled\n");
+        return 0;
+    }
+
+    case fdintCOPY_FILE:
+    {
+        CabData *data = (CabData*) pfdin->pv;
+        LPWSTR file, path;
+        DWORD attrs, size;
+        HANDLE handle;
+        MSIFILE *f;
+
+        file = strdupAtoW(pfdin->psz1);
+        f = get_loaded_file(data->package, file);
+        msi_free(file);
+
+        if (!f)
+        {
+            WARN("unknown file in cabinet (%s)\n",debugstr_a(pfdin->psz1));
+            return 0;
+        }
+
+        if (lstrcmpW(f->File, data->file->File))
+            return 0;
+
+        size = lstrlenW(data->destination) + lstrlenW(data->file->FileName) + 2;
+        path = msi_alloc(size * sizeof(WCHAR));
+        lstrcpyW(path, data->destination);
+        PathAddBackslashW(path);
+        lstrcatW(path, data->file->FileName);
+
+        TRACE("extracting %s\n", debugstr_w(path));
+
+        attrs = f->Attributes & (FILE_ATTRIBUTE_READONLY|FILE_ATTRIBUTE_HIDDEN|FILE_ATTRIBUTE_SYSTEM);
+        if (!attrs) attrs = FILE_ATTRIBUTE_NORMAL;
+
+        handle = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, 0,
+                             NULL, CREATE_ALWAYS, attrs, NULL);
+        if (handle == INVALID_HANDLE_VALUE)
+        {
+            if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES)
+                ERR("failed to create %s (error %d)\n",
+                    debugstr_w(path), GetLastError());
+
+            msi_free(path);
+            return 0;
+        }
+
+        msi_free(path);
+        return (INT_PTR)handle;
+    }
+
+    case fdintCLOSE_FILE_INFO:
+    {
+        FILETIME ft;
+        FILETIME ftLocal;
+        HANDLE handle = (HANDLE)pfdin->hf;
+
+        if (!DosDateTimeToFileTime(pfdin->date, pfdin->time, &ft))
+            return -1;
+        if (!LocalFileTimeToFileTime(&ft, &ftLocal))
+            return -1;
+        if (!SetFileTime(handle, &ftLocal, 0, &ftLocal))
+            return -1;
+        CloseHandle(handle);
+        return 1;
+    }
+
+    default:
+        return 0;
+    }
+}
+
+UINT msi_extract_file(MSIPACKAGE *package, MSIFILE *file, LPWSTR destdir)
+{
+    MSIMEDIAINFO *mi;
+    CabData data;
+    UINT r;
+
+    mi = msi_alloc_zero(sizeof(MSIMEDIAINFO));
+    if (!mi)
+        return ERROR_OUTOFMEMORY;
+
+    r = msi_load_media_info(package, file, mi);
+    if (r != ERROR_SUCCESS)
+        goto done;
+
+    if (GetFileAttributesW(mi->source) == INVALID_FILE_ATTRIBUTES)
+    {
+        r = find_published_source(package, mi);
+        if (r != ERROR_SUCCESS)
+        {
+            ERR("Cabinet not found: %s\n", debugstr_w(mi->source));
+            return ERROR_INSTALL_FAILURE;
+        }
+    }
+
+    data.package = package;
+    data.mi = mi;
+    data.file = file;
+    data.destination = destdir;
+
+    if (!msi_cabextract(package, mi, cabinet_notify, &data))
+    {
+        ERR("Failed to extract cabinet file\n");
+        r = ERROR_FUNCTION_FAILED;
+    }
+
+done:
+    msi_free_media_info(mi);
+    return r;
 }

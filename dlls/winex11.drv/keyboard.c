@@ -44,9 +44,7 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
-#include "wine/winuser16.h"
 #include "winnls.h"
-#include "win.h"
 #include "x11drv.h"
 #include "wine/server.h"
 #include "wine/unicode.h"
@@ -54,27 +52,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(keyboard);
 WINE_DECLARE_DEBUG_CHANNEL(key);
-
-typedef union
-{
-    struct
-    {
-#ifndef BITFIELDS_BIGENDIAN
-        unsigned long count : 16;
-#endif
-        unsigned long code : 8;
-        unsigned long extended : 1;
-        unsigned long unused : 2;
-        unsigned long win_internal : 2;
-        unsigned long context : 1;
-        unsigned long previous : 1;
-        unsigned long transition : 1;
-#ifdef BITFIELDS_BIGENDIAN
-        unsigned long count : 16;
-#endif
-    } lp1;
-    unsigned long lp2;
-} KEYLP;
 
 /* key state table bits:
   0x80 -> key is pressed
@@ -89,8 +66,7 @@ static BYTE TrackSysKey = 0; /* determine whether ALT key up will cause a WM_SYS
 static int min_keycode, max_keycode, keysyms_per_keycode;
 static WORD keyc2vkey[256], keyc2scan[256];
 
-static int NumLockMask, AltGrMask; /* mask in the XKeyEvent state */
-static int kcControl, kcAlt, kcShift, kcNumLock, kcCapsLock; /* keycodes */
+static int NumLockMask, ScrollLockMask, AltGrMask; /* mask in the XKeyEvent state */
 
 static char KEYBOARD_MapDeadKeysym(KeySym keysym);
 
@@ -992,7 +968,7 @@ static const WORD nonchar_key_vkey[256] =
     /* unused */
     0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF20 */
     0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF28 */
-    0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF30 */
+    0, VK_HANGUL, 0, 0, VK_HANJA, 0, 0, 0,                      /* FF30 */
     0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF38 */
     0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF40 */
     0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF48 */
@@ -1001,7 +977,7 @@ static const WORD nonchar_key_vkey[256] =
     VK_DOWN, VK_PRIOR, VK_NEXT, VK_END,
     0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF58 */
     /* misc keys */
-    VK_SELECT, VK_SNAPSHOT, VK_EXECUTE, VK_INSERT, 0, 0, 0, 0,  /* FF60 */
+    VK_SELECT, VK_SNAPSHOT, VK_EXECUTE, VK_INSERT, 0,0,0, VK_APPS, /* FF60 */
     0, VK_CANCEL, VK_HELP, VK_CANCEL, 0, 0, 0, 0,               /* FF68 */
     0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF70 */
     /* keypad keys */
@@ -1024,9 +1000,9 @@ static const WORD nonchar_key_vkey[256] =
     0, 0, 0, 0, 0, 0, 0, 0,                                     /* FFD0 */
     0, 0, 0, 0, 0, 0, 0, 0,                                     /* FFD8 */
     /* modifier keys */
-    0, VK_SHIFT, VK_SHIFT, VK_CONTROL,                          /* FFE0 */
-    VK_CONTROL, VK_CAPITAL, 0, VK_MENU,
-    VK_MENU, VK_MENU, VK_MENU, 0, 0, 0, 0, 0,                   /* FFE8 */
+    0, VK_LSHIFT, VK_RSHIFT, VK_LCONTROL,                       /* FFE0 */
+    VK_RCONTROL, VK_CAPITAL, 0, VK_MENU,
+    VK_MENU, VK_LMENU, VK_RMENU, 0, 0, 0, 0, 0,                 /* FFE8 */
     0, 0, 0, 0, 0, 0, 0, 0,                                     /* FFF0 */
     0, 0, 0, 0, 0, 0, 0, VK_DELETE                              /* FFF8 */
 };
@@ -1070,12 +1046,51 @@ static const WORD nonchar_key_scan[256] =
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FFD0 */
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FFD8 */
     /* modifier keys */
-    0x00, 0x2A, 0x36, 0x1D, 0x11D, 0x3A, 0x00, 0x38,             /* FFE0 */
+    0x00, 0x2A, 0x136, 0x1D, 0x11D, 0x3A, 0x00, 0x38,            /* FFE0 */
     0x138, 0x38, 0x138, 0x00, 0x00, 0x00, 0x00, 0x00,            /* FFE8 */
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FFF0 */
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x153              /* FFF8 */
 };
 
+static const WORD xfree86_vendor_key_vkey[256] =
+{
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF00 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF08 */
+    0, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,            /* 1008FF10 */
+    VK_MEDIA_PLAY_PAUSE, VK_MEDIA_STOP,
+    VK_MEDIA_PREV_TRACK, VK_MEDIA_NEXT_TRACK,
+    0, VK_LAUNCH_MAIL, 0, VK_BROWSER_SEARCH,                    /* 1008FF18 */
+    0, 0, 0, VK_BROWSER_HOME,
+    0, 0, 0, 0, 0, 0, VK_BROWSER_BACK, VK_BROWSER_FORWARD,      /* 1008FF20 */
+    VK_BROWSER_STOP, VK_BROWSER_REFRESH, 0, 0, 0, 0, 0, 0,      /* 1008FF28 */
+    VK_BROWSER_FAVORITES, 0, VK_LAUNCH_MEDIA_SELECT, 0,         /* 1008FF30 */
+    0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF38 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF40 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF48 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF50 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF58 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF60 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF68 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF70 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF78 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF80 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF88 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF90 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF98 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFA0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFA8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFB0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFB8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFC0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFC8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFD0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFD8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFE0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFE8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFF0 */
+    0, 0, 0, 0, 0, 0, 0, 0                                      /* 1008FFF8 */
+};
 
 /* Returns the Windows virtual key code associated with the X event <e> */
 /* x11 lock must be held */
@@ -1085,7 +1100,8 @@ static WORD EVENT_event_to_vkey( XIC xic, XKeyEvent *e)
     Status status;
     char buf[24];
 
-    if (xic)
+    /* Clients should pass only KeyPress events to XmbLookupString */
+    if (xic && e->type == KeyPress)
         XmbLookupString(xic, e, buf, sizeof(buf), &keysym, &status);
     else
         XLookupString(e, buf, sizeof(buf), &keysym, NULL);
@@ -1102,43 +1118,55 @@ static WORD EVENT_event_to_vkey( XIC xic, XKeyEvent *e)
     return keyc2vkey[e->keycode];
 }
 
-static BOOL NumState=FALSE, CapsState=FALSE;
-
 
 /***********************************************************************
  *           X11DRV_send_keyboard_input
  */
-void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD dwFlags, DWORD time,
+void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD event_flags, DWORD time,
                                  DWORD dwExtraInfo, UINT injected_flags )
 {
     UINT message;
-    KEYLP keylp;
     KBDLLHOOKSTRUCT hook;
-    WORD wVkStripped;
+    WORD flags, wVkStripped, wVkL, wVkR, vk_hook = wVk;
 
     wVk = LOBYTE(wVk);
+    flags = LOBYTE(wScan);
+
+    if (event_flags & KEYEVENTF_EXTENDEDKEY) flags |= KF_EXTENDED;
+    /* FIXME: set KF_DLGMODE and KF_MENUMODE when needed */
 
     /* strip left/right for menu, control, shift */
-    if (wVk == VK_LMENU || wVk == VK_RMENU)
+    switch (wVk)
+    {
+    case VK_MENU:
+    case VK_LMENU:
+    case VK_RMENU:
+        wVk = (event_flags & KEYEVENTF_EXTENDEDKEY) ? VK_RMENU : VK_LMENU;
         wVkStripped = VK_MENU;
-    else if (wVk == VK_LCONTROL || wVk == VK_RCONTROL)
+        wVkL = VK_LMENU;
+        wVkR = VK_RMENU;
+        break;
+    case VK_CONTROL:
+    case VK_LCONTROL:
+    case VK_RCONTROL:
+        wVk = (event_flags & KEYEVENTF_EXTENDEDKEY) ? VK_RCONTROL : VK_LCONTROL;
         wVkStripped = VK_CONTROL;
-    else if (wVk == VK_LSHIFT || wVk == VK_RSHIFT)
+        wVkL = VK_LCONTROL;
+        wVkR = VK_RCONTROL;
+        break;
+    case VK_SHIFT:
+    case VK_LSHIFT:
+    case VK_RSHIFT:
+        wVk = (event_flags & KEYEVENTF_EXTENDEDKEY) ? VK_RSHIFT : VK_LSHIFT;
         wVkStripped = VK_SHIFT;
-    else
-        wVkStripped = wVk;
+        wVkL = VK_LSHIFT;
+        wVkR = VK_RSHIFT;
+        break;
+    default:
+        wVkStripped = wVkL = wVkR = wVk;
+    }
 
-    keylp.lp2 = 0;
-    keylp.lp1.count = 1;
-    keylp.lp1.code = wScan;
-    keylp.lp1.extended = (dwFlags & KEYEVENTF_EXTENDEDKEY) != 0;
-    keylp.lp1.win_internal = 0; /* this has something to do with dialogs,
-                                * don't remember where I read it - AK */
-                                /* it's '1' under windows, when a dialog box appears
-                                 * and you press one of the underlined keys - DF*/
-
-    /* note that there is a test for all this */
-    if (dwFlags & KEYEVENTF_KEYUP )
+    if (event_flags & KEYEVENTF_KEYUP)
     {
         message = WM_KEYUP;
         if ((key_state_table[VK_MENU] & 0x80) &&
@@ -1150,38 +1178,46 @@ void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD dwFlags, DWORD time
                 message = WM_SYSKEYUP;
             TrackSysKey = 0;
         }
-        key_state_table[wVk] &= ~0x80;
-        key_state_table[wVkStripped] &= ~0x80;
-        keylp.lp1.previous = 1;
-        keylp.lp1.transition = 1;
+        flags |= KF_REPEAT | KF_UP;
     }
     else
     {
-        keylp.lp1.previous = (key_state_table[wVk] & 0x80) != 0;
-        keylp.lp1.transition = 0;
-        if (!(key_state_table[wVk] & 0x80)) key_state_table[wVk] ^= 0x01;
-        key_state_table[wVk] |= 0xc0;
-        key_state_table[wVkStripped] |= 0xc0;
-
         message = WM_KEYDOWN;
-        if ((key_state_table[VK_MENU] & 0x80) && !(key_state_table[VK_CONTROL] & 0x80))
+        if ((key_state_table[VK_MENU] & 0x80 || wVkStripped == VK_MENU) &&
+            !(key_state_table[VK_CONTROL] & 0x80 || wVkStripped == VK_CONTROL))
         {
             message = WM_SYSKEYDOWN;
             TrackSysKey = wVkStripped;
         }
+        if (key_state_table[wVk] & 0x80) flags |= KF_REPEAT;
     }
 
-    keylp.lp1.context = (key_state_table[VK_MENU] & 0x80) != 0; /* 1 if alt */
-
     TRACE_(key)(" wParam=%04x, lParam=%08lx, InputKeyState=%x\n",
-                wVk, keylp.lp2, key_state_table[wVk] );
+                wVk, MAKELPARAM( 1, flags ), key_state_table[wVk] );
 
-    hook.vkCode      = wVk;
+    /* Hook gets whatever key was sent. */
+    hook.vkCode      = vk_hook;
     hook.scanCode    = wScan;
-    hook.flags       = (keylp.lp2 >> 24) | injected_flags;
+    hook.flags       = (flags >> 8) | injected_flags;
     hook.time        = time;
     hook.dwExtraInfo = dwExtraInfo;
     if (HOOK_CallHooks( WH_KEYBOARD_LL, HC_ACTION, message, (LPARAM)&hook, TRUE )) return;
+
+    if (event_flags & KEYEVENTF_KEYUP)
+    {
+        key_state_table[wVk] &= ~0x80;
+        key_state_table[wVkStripped] = key_state_table[wVkL] | key_state_table[wVkR];
+    }
+    else
+    {
+        if (!(key_state_table[wVk] & 0x80)) key_state_table[wVk] ^= 0x01;
+        key_state_table[wVk] |= 0xc0;
+        key_state_table[wVkStripped] = key_state_table[wVkL] | key_state_table[wVkR];
+    }
+
+    if (key_state_table[VK_MENU] & 0x80) flags |= KF_ALTDOWN;
+
+    if (wVkStripped == VK_SHIFT) flags &= ~KF_EXTENDED;
 
     SERVER_START_REQ( send_hardware_message )
     {
@@ -1189,7 +1225,7 @@ void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD dwFlags, DWORD time
         req->win      = 0;
         req->msg      = message;
         req->wparam   = wVk;
-        req->lparam   = keylp.lp2;
+        req->lparam   = MAKELPARAM( 1 /* repeat count */, flags );
         req->x        = cursor_pos.x;
         req->y        = cursor_pos.y;
         req->time     = time;
@@ -1200,71 +1236,28 @@ void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD dwFlags, DWORD time
 }
 
 
-/**********************************************************************
- *		KEYBOARD_GenerateMsg
- *
- * Generate Down+Up messages when NumLock or CapsLock is pressed.
- *
- * Convention : called with vkey only VK_NUMLOCK or VK_CAPITAL
- *
- */
-static void KEYBOARD_GenerateMsg( WORD vkey, WORD scan, int Evtype, DWORD event_time )
-{
-  BOOL * State = (vkey==VK_NUMLOCK? &NumState : &CapsState);
-  DWORD up, down;
-
-  if (*State) {
-    /* The INTERMEDIARY state means : just after a 'press' event, if a 'release' event comes,
-       don't treat it. It's from the same key press. Then the state goes to ON.
-       And from there, a 'release' event will switch off the toggle key. */
-    *State=FALSE;
-    TRACE("INTERM : don't treat release of toggle key. key_state_table[%#x] = %#x\n",
-          vkey,key_state_table[vkey]);
-  } else
-    {
-        down = (vkey==VK_NUMLOCK ? KEYEVENTF_EXTENDEDKEY : 0);
-        up = (vkey==VK_NUMLOCK ? KEYEVENTF_EXTENDEDKEY : 0) | KEYEVENTF_KEYUP;
-	if ( key_state_table[vkey] & 0x1 ) /* it was ON */
-	  {
-	    if (Evtype!=KeyPress)
-	      {
-		TRACE("ON + KeyRelease => generating DOWN and UP messages.\n");
-	        X11DRV_send_keyboard_input( vkey, scan, down, event_time, 0, 0 );
-	        X11DRV_send_keyboard_input( vkey, scan, up, event_time, 0, 0 );
-		*State=FALSE;
-		key_state_table[vkey] &= ~0x01; /* Toggle state to off. */
-	      }
-	  }
-	else /* it was OFF */
-	  if (Evtype==KeyPress)
-	    {
-	      TRACE("OFF + Keypress => generating DOWN and UP messages.\n");
-	      X11DRV_send_keyboard_input( vkey, scan, down, event_time, 0, 0 );
-	      X11DRV_send_keyboard_input( vkey, scan, up, event_time, 0, 0 );
-	      *State=TRUE; /* Goes to intermediary state before going to ON */
-	      key_state_table[vkey] |= 0x01; /* Toggle state to on. */
-	    }
-    }
-}
-
 /***********************************************************************
  *           KEYBOARD_UpdateOneState
  *
  * Updates internal state for <vkey>, depending on key <state> under X
  *
  */
-inline static void KEYBOARD_UpdateOneState ( int vkey, int state, DWORD time )
+static inline void KEYBOARD_UpdateOneState ( WORD vkey, WORD scan, int state, DWORD time )
 {
     /* Do something if internal table state != X state for keycode */
-    if (((key_state_table[vkey] & 0x80)!=0) != state)
+    if (((key_state_table[vkey & 0xff] & 0x80)!=0) != state)
     {
+        DWORD flags = vkey & 0x100 ? KEYEVENTF_EXTENDEDKEY : 0;
+
+        if (!state) flags |= KEYEVENTF_KEYUP;
+
         TRACE("Adjusting state for vkey %#.2x. State before %#.2x\n",
-              vkey, key_state_table[vkey]);
+              vkey, key_state_table[vkey & 0xff]);
 
         /* Fake key being pressed inside wine */
-        X11DRV_send_keyboard_input( vkey, 0, state? 0 : KEYEVENTF_KEYUP, time, 0, 0 );
+        X11DRV_send_keyboard_input( vkey & 0xff, scan & 0xff, flags, time, 0, 0 );
 
-        TRACE("State after %#.2x\n",key_state_table[vkey]);
+        TRACE("State after %#.2x\n", key_state_table[vkey & 0xff]);
     }
 }
 
@@ -1279,30 +1272,43 @@ inline static void KEYBOARD_UpdateOneState ( int vkey, int state, DWORD time )
  */
 void X11DRV_KeymapNotify( HWND hwnd, XEvent *event )
 {
-    int i, j, alt, control, shift;
+    int i, j;
     DWORD time = GetCurrentTime();
 
-    alt = control = shift = 0;
     /* the minimum keycode is always greater or equal to 8, so we can
      * skip the first 8 values, hence start at 1
      */
     for (i = 1; i < 32; i++)
     {
-        if (!event->xkeymap.key_vector[i]) continue;
         for (j = 0; j < 8; j++)
         {
-            if (!(event->xkeymap.key_vector[i] & (1<<j))) continue;
-            switch(keyc2vkey[(i * 8) + j] & 0xff)
+            WORD vkey = keyc2vkey[(i * 8) + j];
+            WORD scan = keyc2scan[(i * 8) + j];
+            int state = (event->xkeymap.key_vector[i] & (1<<j)) != 0;
+
+            switch(vkey & 0xff)
             {
-            case VK_MENU:    alt = 1; break;
-            case VK_CONTROL: control = 1; break;
-            case VK_SHIFT:   shift = 1; break;
+            case VK_LMENU:
+            case VK_RMENU:
+            case VK_LCONTROL:
+            case VK_RCONTROL:
+            case VK_LSHIFT:
+            case VK_RSHIFT:
+                KEYBOARD_UpdateOneState( vkey, scan, state, time );
+                break;
             }
         }
     }
-    KEYBOARD_UpdateOneState( VK_MENU, alt, time );
-    KEYBOARD_UpdateOneState( VK_CONTROL, control, time );
-    KEYBOARD_UpdateOneState( VK_SHIFT, shift, time );
+}
+
+static void update_lock_state(BYTE vkey, WORD scan, DWORD time)
+{
+    DWORD flags = vkey == VK_NUMLOCK ? KEYEVENTF_EXTENDEDKEY : 0;
+
+    if (key_state_table[vkey] & 0x80) flags ^= KEYEVENTF_KEYUP;
+
+    X11DRV_send_keyboard_input( vkey, scan, flags, time, 0, 0 );
+    X11DRV_send_keyboard_input( vkey, scan, flags ^ KEYEVENTF_KEYUP, time, 0, 0 );
 }
 
 /***********************************************************************
@@ -1326,23 +1332,14 @@ void X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
 		event->type, event->window, event->state, event->keycode);
 
     wine_tsx11_lock();
-    if (xic)
+    /* Clients should pass only KeyPress events to XmbLookupString */
+    if (xic && event->type == KeyPress)
         ascii_chars = XmbLookupString(xic, event, Str, sizeof(Str), &keysym, &status);
     else
         ascii_chars = XLookupString(event, Str, sizeof(Str), &keysym, NULL);
     wine_tsx11_unlock();
 
-    /* Ignore some unwanted events */
-    if ((keysym >= XK_ISO_Lock && keysym <= XK_ISO_Last_Group_Lock) ||
-         keysym == XK_Mode_switch)
-    {
-        wine_tsx11_lock();
-        TRACE("Ignoring %s keyboard event\n", XKeysymToString(keysym));
-        wine_tsx11_unlock();
-        return;
-    }
-
-    TRACE_(key)("state = %X nbyte = %d, status 0x%x\n", event->state, ascii_chars, status);
+    TRACE_(key)("nbyte = %d, status 0x%x\n", ascii_chars, status);
 
     if (status == XBufferOverflow)
         ERR("Buffer Overflow need %i!\n",ascii_chars);
@@ -1365,7 +1362,6 @@ void X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
     /* Save also all possible modifier states. */
     AltGrMask = event->state & (0x6000 | Mod1Mask | Mod2Mask | Mod3Mask | Mod4Mask | Mod5Mask);
 
-    Str[ascii_chars] = '\0';
     if (TRACE_ON(key)){
 	const char *ksname;
 
@@ -1374,9 +1370,9 @@ void X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
         wine_tsx11_unlock();
 	if (!ksname)
 	  ksname = "No Name";
-	TRACE_(key)("%s : keysym=%lX (%s), # of chars=%d / 0x%02x / '%s'\n",
+	TRACE_(key)("%s : keysym=%lX (%s), # of chars=%d / %s\n",
                     (event->type == KeyPress) ? "KeyPress" : "KeyRelease",
-                    keysym, ksname, ascii_chars, Str[0] & 0xff, Str);
+                    keysym, ksname, ascii_chars, debugstr_an(Str, ascii_chars));
     }
 
     wine_tsx11_lock();
@@ -1388,47 +1384,44 @@ void X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
     TRACE_(key)("keycode 0x%x converted to vkey 0x%x\n",
                 event->keycode, vkey);
 
-   if (vkey)
-   {
-    switch (vkey & 0xff)
+    if (!vkey) return;
+
+    dwFlags = 0;
+    if ( event->type == KeyRelease ) dwFlags |= KEYEVENTF_KEYUP;
+    if ( vkey & 0x100 )              dwFlags |= KEYEVENTF_EXTENDEDKEY;
+
+
+    /* Note: X sets the below states on key down and clears them on key up.
+       Windows triggers them on key down. */
+
+    /* Adjust the CAPSLOCK state if it has been changed outside wine */
+    if (!(key_state_table[VK_CAPITAL] & 0x01) != !(event->state & LockMask) &&
+        vkey != VK_CAPITAL)
     {
-    case VK_NUMLOCK:
-      KEYBOARD_GenerateMsg( VK_NUMLOCK, 0x45, event->type, event_time );
-      break;
-    case VK_CAPITAL:
-      TRACE("Caps Lock event. (type %d). State before : %#.2x\n",event->type,key_state_table[vkey]);
-      KEYBOARD_GenerateMsg( VK_CAPITAL, 0x3A, event->type, event_time );
-      TRACE("State after : %#.2x\n",key_state_table[vkey]);
-      break;
-    default:
-        /* Adjust the NUMLOCK state if it has been changed outside wine */
-	if (!(key_state_table[VK_NUMLOCK] & 0x01) != !(event->state & NumLockMask))
-	  {
-	    TRACE("Adjusting NumLock state.\n");
-	    KEYBOARD_GenerateMsg( VK_NUMLOCK, 0x45, KeyPress, event_time );
-	    KEYBOARD_GenerateMsg( VK_NUMLOCK, 0x45, KeyRelease, event_time );
-	  }
-        /* Adjust the CAPSLOCK state if it has been changed outside wine */
-	if (!(key_state_table[VK_CAPITAL] & 0x01) != !(event->state & LockMask))
-	  {
-              TRACE("Adjusting Caps Lock state.\n");
-	    KEYBOARD_GenerateMsg( VK_CAPITAL, 0x3A, KeyPress, event_time );
-	    KEYBOARD_GenerateMsg( VK_CAPITAL, 0x3A, KeyRelease, event_time );
-	  }
-	/* Not Num nor Caps : end of intermediary states for both. */
-	NumState = FALSE;
-	CapsState = FALSE;
-
-	bScan = keyc2scan[event->keycode] & 0xFF;
-	TRACE_(key)("bScan = 0x%02x.\n", bScan);
-
-	dwFlags = 0;
-	if ( event->type == KeyRelease ) dwFlags |= KEYEVENTF_KEYUP;
-	if ( vkey & 0x100 )              dwFlags |= KEYEVENTF_EXTENDEDKEY;
-
-        X11DRV_send_keyboard_input( vkey & 0xff, bScan, dwFlags, event_time, 0, 0 );
+        TRACE("Adjusting CapsLock state (%#.2x)\n", key_state_table[VK_CAPITAL]);
+        update_lock_state(VK_CAPITAL, 0x3A, event_time);
     }
-   }
+
+    /* Adjust the NUMLOCK state if it has been changed outside wine */
+    if (!(key_state_table[VK_NUMLOCK] & 0x01) != !(event->state & NumLockMask) &&
+        (vkey & 0xff) != VK_NUMLOCK)
+    {
+        TRACE("Adjusting NumLock state (%#.2x)\n", key_state_table[VK_NUMLOCK]);
+        update_lock_state(VK_NUMLOCK, 0x45, event_time);
+    }
+
+    /* Adjust the SCROLLLOCK state if it has been changed outside wine */
+    if (!(key_state_table[VK_SCROLL] & 0x01) != !(event->state & ScrollLockMask) &&
+        vkey != VK_SCROLL)
+    {
+        TRACE("Adjusting ScrLock state (%#.2x)\n", key_state_table[VK_SCROLL]);
+        update_lock_state(VK_SCROLL, 0x46, event_time);
+    }
+
+    bScan = keyc2scan[event->keycode] & 0xFF;
+    TRACE_(key)("bScan = 0x%02x.\n", bScan);
+
+    X11DRV_send_keyboard_input( vkey & 0xff, bScan, dwFlags, event_time, 0, 0 );
 }
 
 /**********************************************************************
@@ -1440,9 +1433,8 @@ void X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
  * X11 lock must be held.
  */
 static void
-X11DRV_KEYBOARD_DetectLayout (void)
+X11DRV_KEYBOARD_DetectLayout( Display *display )
 {
-  Display *display = thread_display();
   unsigned current, match, mismatch, seq, i, syms;
   int score, keyc, key, pkey, ok;
   KeySym keysym = 0;
@@ -1549,9 +1541,8 @@ X11DRV_KEYBOARD_DetectLayout (void)
 /**********************************************************************
  *		X11DRV_InitKeyboard
  */
-void X11DRV_InitKeyboard(void)
+void X11DRV_InitKeyboard( Display *display )
 {
-    Display *display = thread_display();
     KeySym *ksp;
     XModifierKeymap *mmp;
     KeySym keysym;
@@ -1561,6 +1552,7 @@ void X11DRV_InitKeyboard(void)
     int keyc, i, keyn, syms;
     char ckey[4]={0,0,0,0};
     const char (*lkey)[MAIN_LEN][4];
+    char vkey_used[256] = { 0 };
 
     wine_tsx11_lock();
     XDisplayKeycodes(display, &min_keycode, &max_keycode);
@@ -1587,12 +1579,17 @@ void X11DRV_InitKeyboard(void)
                         NumLockMask = 1 << i;
                         TRACE_(key)("NumLockMask is %x\n", NumLockMask);
 		    }
+                    else if (XKeycodeToKeysym(display, *kcp, k) == XK_Scroll_Lock)
+		    {
+                        ScrollLockMask = 1 << i;
+                        TRACE_(key)("ScrollLockMask is %x\n", ScrollLockMask);
+		    }
             }
     }
     XFreeModifiermap(mmp);
 
     /* Detect the keyboard layout */
-    X11DRV_KEYBOARD_DetectLayout();
+    X11DRV_KEYBOARD_DetectLayout( display );
     lkey = main_key_tab[kbd_layout].key;
     syms = (keysyms_per_keycode > 4) ? 4 : keysyms_per_keycode;
 
@@ -1604,6 +1601,7 @@ void X11DRV_InitKeyboard(void)
     e2.state = 0;
 
     OEMvkey = VK_OEM_8; /* next is available.  */
+    memset(keyc2vkey, 0, sizeof(keyc2vkey));
     for (keyc = min_keycode; keyc <= max_keycode; keyc++)
     {
         char buf[30];
@@ -1621,6 +1619,11 @@ void X11DRV_InitKeyboard(void)
                 scan = nonchar_key_scan[keysym & 0xff];
 		/* set extended bit when necessary */
 		if (scan & 0x100) vkey |= 0x100;
+            } else if ((keysym >> 8) == 0x1008FF) { /* XFree86 vendor keys */
+                vkey = xfree86_vendor_key_vkey[keysym & 0xff];
+                /* All vendor keys are extended with a scan code of 0 per testing on WinXP */
+                scan = 0x100;
+		vkey |= 0x100;
             } else if (keysym == 0x20) {                 /* Spacebar */
 	        vkey = VK_SPACE;
 		scan = 0x39;
@@ -1649,6 +1652,7 @@ void X11DRV_InitKeyboard(void)
 	      for (keyn=0; keyn<MAIN_LEN; keyn++) {
 		for (ok=(*lkey)[keyn][i=0]; ok&&(i<4); i++)
 		  if ((*lkey)[keyn][i] && (*lkey)[keyn][i]!=ckey[i]) ok=0;
+		if (!ok) i--; /* we overshot */
 		if (ok||(i>maxlen)) {
 		  maxlen=i; maxval=keyn;
 		}
@@ -1662,76 +1666,99 @@ void X11DRV_InitKeyboard(void)
 		vkey = (*lvkey)[maxval];
 	      }
 	    }
-#if 0 /* this breaks VK_OEM_x VKeys in some layout tables by inserting
-       * a VK code into a not appropriate place.
-       */
-            /* find a suitable layout-dependent VK code */
-	    /* (most Winelib apps ought to be able to work without layout tables!) */
-            for (i = 0; (i < keysyms_per_keycode) && (!vkey); i++)
-            {
-                keysym = XLookupKeysym(&e2, i);
-                if ((keysym >= VK_0 && keysym <= VK_9)
-                    || (keysym >= VK_A && keysym <= VK_Z)) {
-		    vkey = keysym;
-		}
+        }
+        TRACE("keycode %04x => vkey %04x\n", e2.keycode, vkey);
+        keyc2vkey[e2.keycode] = vkey;
+        keyc2scan[e2.keycode] = scan;
+        if ((vkey & 0xff) && vkey_used[(vkey & 0xff)])
+            WARN("vkey %04x is being used by more than one keycode\n", vkey);
+        vkey_used[(vkey & 0xff)] = 1;
+    } /* for */
+
+#define VKEY_IF_NOT_USED(vkey) (vkey_used[(vkey)] ? 0 : (vkey_used[(vkey)] = 1, (vkey)))
+    for (keyc = min_keycode; keyc <= max_keycode; keyc++)
+    {
+        vkey = keyc2vkey[keyc] & 0xff;
+        if (vkey)
+            continue;
+
+        e2.keycode = (KeyCode)keyc;
+        keysym = XLookupKeysym(&e2, 0);
+        if (!keysym)
+           continue;
+
+        /* find a suitable layout-dependent VK code */
+        /* (most Winelib apps ought to be able to work without layout tables!) */
+        for (i = 0; (i < keysyms_per_keycode) && (!vkey); i++)
+        {
+            keysym = XLookupKeysym(&e2, i);
+            if ((keysym >= XK_0 && keysym <= XK_9)
+                || (keysym >= XK_A && keysym <= XK_Z)) {
+                vkey = VKEY_IF_NOT_USED(keysym);
             }
+        }
 
-            for (i = 0; (i < keysyms_per_keycode) && (!vkey); i++)
+        for (i = 0; (i < keysyms_per_keycode) && (!vkey); i++)
+        {
+            keysym = XLookupKeysym(&e2, i);
+            switch (keysym)
             {
-                keysym = XLookupKeysym(&e2, i);
-		switch (keysym)
-		{
-		case ';':             vkey = VK_OEM_1; break;
-		case '/':             vkey = VK_OEM_2; break;
-		case '`':             vkey = VK_OEM_3; break;
-		case '[':             vkey = VK_OEM_4; break;
-		case '\\':            vkey = VK_OEM_5; break;
-		case ']':             vkey = VK_OEM_6; break;
-		case '\'':            vkey = VK_OEM_7; break;
-		case ',':             vkey = VK_OEM_COMMA; break;
-		case '.':             vkey = VK_OEM_PERIOD; break;
-		case '-':             vkey = VK_OEM_MINUS; break;
-		case '+':             vkey = VK_OEM_PLUS; break;
-		}
-	    }
+            case ';':             vkey = VKEY_IF_NOT_USED(VK_OEM_1); break;
+            case '/':             vkey = VKEY_IF_NOT_USED(VK_OEM_2); break;
+            case '`':             vkey = VKEY_IF_NOT_USED(VK_OEM_3); break;
+            case '[':             vkey = VKEY_IF_NOT_USED(VK_OEM_4); break;
+            case '\\':            vkey = VKEY_IF_NOT_USED(VK_OEM_5); break;
+            case ']':             vkey = VKEY_IF_NOT_USED(VK_OEM_6); break;
+            case '\'':            vkey = VKEY_IF_NOT_USED(VK_OEM_7); break;
+            case ',':             vkey = VKEY_IF_NOT_USED(VK_OEM_COMMA); break;
+            case '.':             vkey = VKEY_IF_NOT_USED(VK_OEM_PERIOD); break;
+            case '-':             vkey = VKEY_IF_NOT_USED(VK_OEM_MINUS); break;
+            case '+':             vkey = VKEY_IF_NOT_USED(VK_OEM_PLUS); break;
+            }
+        }
 
-            if (!vkey)
+        if (!vkey)
+        {
+            /* Others keys: let's assign OEM virtual key codes in the allowed range,
+             * that is ([0xba,0xc0], [0xdb,0xe4], 0xe6 (given up) et [0xe9,0xf5]) */
+            do
             {
-                /* Others keys: let's assign OEM virtual key codes in the allowed range,
-                 * that is ([0xba,0xc0], [0xdb,0xe4], 0xe6 (given up) et [0xe9,0xf5]) */
                 switch (++OEMvkey)
                 {
                 case 0xc1 : OEMvkey=0xdb; break;
                 case 0xe5 : OEMvkey=0xe9; break;
                 case 0xf6 : OEMvkey=0xf5; WARN("No more OEM vkey available!\n");
                 }
+            } while (OEMvkey < 0xf5 && vkey_used[OEMvkey]);
 
-                vkey = OEMvkey;
+            vkey = VKEY_IF_NOT_USED(OEMvkey);
 
-                if (TRACE_ON(keyboard))
+            if (TRACE_ON(keyboard))
+            {
+                TRACE("OEM specific virtual key %X assigned to keycode %X:\n",
+                                 OEMvkey, e2.keycode);
+                TRACE("(");
+                for (i = 0; i < keysyms_per_keycode; i += 1)
                 {
-                    TRACE("OEM specific virtual key %X assigned to keycode %X:\n",
-                                     OEMvkey, e2.keycode);
-                    TRACE("(");
-                    for (i = 0; i < keysyms_per_keycode; i += 1)
-                    {
-                        const char *ksname;
+                    const char *ksname;
 
-                        keysym = XLookupKeysym(&e2, i);
-                        ksname = XKeysymToString(keysym);
-                        if (!ksname)
-			    ksname = "NoSymbol";
-                        TRACE( "%lX (%s) ", keysym, ksname);
-                    }
-                    TRACE(")\n");
+                    keysym = XLookupKeysym(&e2, i);
+                    ksname = XKeysymToString(keysym);
+                    if (!ksname)
+                        ksname = "NoSymbol";
+                    TRACE( "%lX (%s) ", keysym, ksname);
                 }
+                TRACE(")\n");
             }
-#endif
         }
-        TRACE("keycode %04x => vkey %04x\n", e2.keycode, vkey);
-        keyc2vkey[e2.keycode] = vkey;
-        keyc2scan[e2.keycode] = scan;
+
+        if (vkey)
+        {
+            TRACE("keycode %04x => vkey %04x\n", e2.keycode, vkey);
+            keyc2vkey[e2.keycode] = vkey;
+        }
     } /* for */
+#undef VKEY_IF_NOT_USED
 
     /* If some keys still lack scancodes, assign some arbitrary ones to them now */
     for (scan = 0x60, keyc = min_keycode; keyc <= max_keycode; keyc++)
@@ -1747,13 +1774,6 @@ void X11DRV_InitKeyboard(void)
 	keyc2scan[keyc]=scan++;
       }
 
-    /* Now store one keycode for each modifier. Used to simulate keypresses. */
-    kcControl = XKeysymToKeycode(display, XK_Control_L);
-    kcAlt = XKeysymToKeycode(display, XK_Alt_L);
-    if (!kcAlt) kcAlt = XKeysymToKeycode(display, XK_Meta_L);
-    kcShift = XKeysymToKeycode(display, XK_Shift_L);
-    kcNumLock = XKeysymToKeycode(display, XK_Num_Lock);
-    kcCapsLock = XKeysymToKeycode(display, XK_Caps_Lock);
     wine_tsx11_unlock();
 }
 
@@ -1763,8 +1783,13 @@ void X11DRV_InitKeyboard(void)
  */
 SHORT X11DRV_GetAsyncKeyState(INT key)
 {
-    SHORT retval = ((key_state_table[key] & 0x40) ? 0x0001 : 0) |
-                   ((key_state_table[key] & 0x80) ? 0x8000 : 0);
+    SHORT retval;
+
+    /* Photoshop livelocks unless mouse events are included here */
+    X11DRV_MsgWaitForMultipleObjectsEx( 0, NULL, 0, QS_KEY | QS_MOUSE, 0 );
+
+    retval = ((key_state_table[key] & 0x40) ? 0x0001 : 0) |
+             ((key_state_table[key] & 0x80) ? 0x8000 : 0);
     key_state_table[key] &= ~0x40;
     TRACE_(key)("(%x) -> %x\n", key, retval);
     return retval;
@@ -1912,7 +1937,7 @@ void X11DRV_MappingNotify( HWND dummy, XEvent *event )
     wine_tsx11_lock();
     XRefreshKeyboardMapping(&event->xmapping);
     wine_tsx11_unlock();
-    X11DRV_InitKeyboard();
+    X11DRV_InitKeyboard( thread_display() );
 
     hwnd = GetFocus();
     if (!hwnd) hwnd = GetActiveWindow();
@@ -2028,26 +2053,72 @@ UINT X11DRV_MapVirtualKeyEx(UINT wCode, UINT wMapType, HKL hkl)
     if (hkl != X11DRV_GetKeyboardLayout(0))
         FIXME("keyboard layout %p is not supported\n", hkl);
 
-	switch(wMapType) {
-		case 0:	{ /* vkey-code to scan-code */
-			/* let's do vkey -> keycode -> scan */
-			int keyc;
-			for (keyc=min_keycode; keyc<=max_keycode; keyc++)
-				if ((keyc2vkey[keyc] & 0xFF) == wCode)
-					returnMVK (keyc2scan[keyc] & 0xFF);
-			TRACE("returning no scan-code.\n");
-		        return 0; }
+    switch(wMapType)
+    {
+        case MAPVK_VK_TO_VSC: /* vkey-code to scan-code */
+        case MAPVK_VK_TO_VSC_EX:
+        {
+            int keyc;
 
-		case 1: { /* scan-code to vkey-code */
-			/* let's do scan -> keycode -> vkey */
-			int keyc;
-			for (keyc=min_keycode; keyc<=max_keycode; keyc++)
-				if ((keyc2scan[keyc] & 0xFF) == (wCode & 0xFF))
-					returnMVK (keyc2vkey[keyc] & 0xFF);
-			TRACE("returning no vkey-code.\n");
-		        return 0; }
+            switch (wCode)
+            {
+                case VK_SHIFT: wCode = VK_LSHIFT; break;
+                case VK_CONTROL: wCode = VK_LCONTROL; break;
+                case VK_MENU: wCode = VK_LMENU; break;
+            }
 
-		case 2: { /* vkey-code to unshifted ANSI code */
+            /* let's do vkey -> keycode -> scan */
+            for (keyc = min_keycode; keyc <= max_keycode; keyc++)
+                if ((keyc2vkey[keyc] & 0xFF) == wCode) break;
+
+            if (keyc > max_keycode)
+            {
+                TRACE("returning no scan-code.\n");
+                return 0;
+            }
+            returnMVK (keyc2scan[keyc] & 0xFF);
+        }
+        case MAPVK_VSC_TO_VK: /* scan-code to vkey-code */
+        case MAPVK_VSC_TO_VK_EX:
+        {
+            int keyc;
+            UINT vkey = 0;
+
+            /* let's do scan -> keycode -> vkey */
+            for (keyc = min_keycode; keyc <= max_keycode; keyc++)
+                if ((keyc2scan[keyc] & 0xFF) == (wCode & 0xFF))
+                {
+                    vkey = keyc2vkey[keyc] & 0xFF;
+                    /* Only stop if it's not a numpad vkey; otherwise keep
+                       looking for a potential better vkey. */
+                    if (vkey && (vkey < VK_NUMPAD0 || VK_DIVIDE < vkey))
+                        break;
+                }
+
+            if (vkey == 0)
+            {
+                TRACE("returning no vkey-code.\n");
+                return 0;
+            }
+
+            if (wMapType == MAPVK_VSC_TO_VK)
+                switch (vkey)
+                {
+                    case VK_LSHIFT:
+                    case VK_RSHIFT:
+                        vkey = VK_SHIFT; break;
+                    case VK_LCONTROL:
+                    case VK_RCONTROL:
+                        vkey = VK_CONTROL; break;
+                    case VK_LMENU:
+                    case VK_RMENU:
+                        vkey = VK_MENU; break;
+                }
+
+            returnMVK (vkey);
+        }
+		case MAPVK_VK_TO_CHAR: /* vkey-code to unshifted ANSI code */
+		{
                         /* we still don't know what "unshifted" means. in windows VK_W (0x57)
                          * returns 0x57, which is upercase 'W'. So we have to return the uppercase
                          * key.. Looks like something is wrong with the MS docs?
@@ -2057,17 +2128,15 @@ UINT X11DRV_MapVirtualKeyEx(UINT wCode, UINT wMapType, HKL hkl)
 			/* let's do vkey -> keycode -> (XLookupString) ansi char */
 			XKeyEvent e;
 			KeySym keysym;
-			int keyc;
-			char s[2];
-			e.display = display;
+			int keyc, len;
+			char s[10];
 
-			e.state = LockMask;
-			/* LockMask should behave exactly like caps lock - upercase
-			 * the letter keys and thats about it. */
+			e.display = display;
+			e.state = 0;
+			e.keycode = 0;
 
                         wine_tsx11_lock();
 
-			e.keycode = 0;
 			/* We exit on the first keycode found, to speed up the thing. */
 			for (keyc=min_keycode; (keyc<=max_keycode) && (!e.keycode) ; keyc++)
 			{ /* Find a keycode that could have generated this virtual key */
@@ -2095,24 +2164,20 @@ UINT X11DRV_MapVirtualKeyEx(UINT wCode, UINT wMapType, HKL hkl)
 			}
 			TRACE("Found keycode %d (0x%2X)\n",e.keycode,e.keycode);
 
-			if (XLookupString(&e, s, 2, &keysym, NULL))
-                        {
-                            wine_tsx11_unlock();
-                            returnMVK (*s);
-                        }
-
-			TRACE("returning no ANSI.\n");
+                        len = XLookupString(&e, s, sizeof(s), &keysym, NULL);
                         wine_tsx11_unlock();
+
+                        if (len)
+                        {
+                            WCHAR wch;
+                            if (MultiByteToWideChar(CP_UNIXCP, 0, s, len, &wch, 1))
+                                returnMVK(toupperW(wch));
+                        }
+			TRACE("returning no ANSI.\n");
 			return 0;
-			}
-
-		case 3:   /* **NT only** scan-code to vkey-code but distinguish between  */
-              		  /*             left and right  */
-		          FIXME(" stub for NT\n");
-                          return 0;
-
+		}
 		default: /* reserved */
-			WARN("Unknown wMapType %d !\n", wMapType);
+			FIXME("Unknown wMapType %d !\n", wMapType);
 			return 0;
 	}
 	return 0;
@@ -2132,14 +2197,15 @@ INT X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
   scanCode = lParam >> 16;
   scanCode &= 0x1ff;  /* keep "extended-key" flag with code */
 
-  /* FIXME: should use MVK type 3 (NT version that distinguishes right and left */
-  vkey = X11DRV_MapVirtualKeyEx(scanCode, 1, X11DRV_GetKeyboardLayout(0));
+  vkey = X11DRV_MapVirtualKeyEx(scanCode, MAPVK_VSC_TO_VK_EX, X11DRV_GetKeyboardLayout(0));
 
   /*  handle "don't care" bit (0x02000000) */
   if (!(lParam & 0x02000000)) {
     switch (vkey) {
-         case VK_LSHIFT:
          case VK_RSHIFT:
+                          /* R-Shift is "special" - it is an extended key with separate scan code */
+                          scanCode |= 0x100;
+         case VK_LSHIFT:
                           vkey = VK_SHIFT;
                           break;
        case VK_LCONTROL:
@@ -2150,12 +2216,10 @@ INT X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
           case VK_RMENU:
                           vkey = VK_MENU;
                           break;
-               default:
-                          break;
     }
   }
 
-  ansi = X11DRV_MapVirtualKeyEx(vkey, 2, X11DRV_GetKeyboardLayout(0));
+  ansi = X11DRV_MapVirtualKeyEx(vkey, MAPVK_VK_TO_CHAR, X11DRV_GetKeyboardLayout(0));
   TRACE("scan 0x%04x, vkey 0x%04x, ANSI 0x%04x\n", scanCode, vkey, ansi);
 
   /* first get the name of the "regular" keys which is the Upper case
@@ -2209,9 +2273,9 @@ INT X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
       }
   }
 
-  /* Finally issue FIXME for unknown keys   */
+  /* Finally issue WARN for unknown keys   */
 
-  FIXME("(%08x,%p,%d): unsupported key, vkey=%04x, ansi=%04x\n",lParam,lpBuffer,nSize,vkey,ansi);
+  WARN("(%08x,%p,%d): unsupported key, vkey=%04x, ansi=%04x\n",lParam,lpBuffer,nSize,vkey,ansi);
   if (lpBuffer && nSize)
     *lpBuffer = 0;
   return 0;
@@ -2324,7 +2388,7 @@ INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
     char lpChar[10];
     HWND focus;
     XIC xic;
-    Status status;
+    Status status = 0;
 
     if (scanCode & 0x8000)
     {
@@ -2416,11 +2480,32 @@ INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
     TRACE_(key)("type %d, window %lx, state 0x%04x, keycode 0x%04x\n",
 		e.type, e.window, e.state, e.keycode);
 
+    /* Clients should pass only KeyPress events to XmbLookupString,
+     * e.type was set to KeyPress above.
+     */
     if (xic)
         ret = XmbLookupString(xic, &e, lpChar, sizeof(lpChar), &keysym, &status);
     else
         ret = XLookupString(&e, lpChar, sizeof(lpChar), &keysym, NULL);
     wine_tsx11_unlock();
+
+    TRACE_(key)("nbyte = %d, status 0x%x\n", ret, status);
+
+    if (status == XBufferOverflow)
+        ERR("Buffer Overflow need %d!\n", ret);
+
+    if (TRACE_ON(key))
+    {
+        const char *ksname;
+
+        wine_tsx11_lock();
+        ksname = XKeysymToString(keysym);
+        wine_tsx11_unlock();
+        if (!ksname) ksname = "No Name";
+        TRACE_(key)("%s : keysym=%lX (%s), # of chars=%d / %s\n",
+                    (e.type == KeyPress) ? "KeyPress" : "KeyRelease",
+                    keysym, ksname, ret, debugstr_an(lpChar, ret));
+    }
 
     if (ret == 0)
     {
@@ -2460,6 +2545,11 @@ INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
             ret = 1;
             goto found;
         }
+        else if ((keysym >> 8) == 0x1008FF) {
+            bufW[0] = 0;
+            ret = 0;
+            goto found;
+        }
 	else
 	    {
 	    const char *ksname;
@@ -2471,9 +2561,9 @@ INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
 		ksname = "No Name";
 	    if ((keysym >> 8) != 0xff)
 		{
-		ERR("Please report: no char for keysym %04lX (%s) :\n",
+		WARN("no char for keysym %04lX (%s) :\n",
                     keysym, ksname);
-		ERR("(virtKey=%X,scanCode=%X,keycode=%X,state=%X)\n",
+		WARN("virtKey=%X, scanCode=%X, keycode=%X, state=%X\n",
                     virtKey, scanCode, e.keycode, e.state);
 		}
 	    }
@@ -2513,6 +2603,12 @@ INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
         {
             lpChar[0] = 0;
             ret = 0;
+        }
+	else if((lpKeyState[VK_CONTROL] & 0x80) /* Control is pressed */
+		&& (keysym == XK_Return || keysym == XK_KP_Enter))
+        {
+            lpChar[0] = '\n';
+            ret = 1;
         }
 
         /* Hack to detect an XLookupString hard-coded to Latin1 */

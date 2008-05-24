@@ -47,8 +47,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(share);
  *     NERR_InvalidComputer        Invalid computer name
  *     NERR_UserNotFound           User name could not be found.
  */
-NET_API_STATUS WINAPI NetSessionEnum(LPWSTR servername, LPWSTR UncClientName,
-    LPWSTR username, DWORD level, LPBYTE* bufptr, DWORD prefmaxlen, LPDWORD entriesread,
+NET_API_STATUS WINAPI NetSessionEnum(LMSTR servername, LMSTR UncClientName,
+    LMSTR username, DWORD level, LPBYTE* bufptr, DWORD prefmaxlen, LPDWORD entriesread,
     LPDWORD totalentries, LPDWORD resume_handle)
 {
     FIXME("Stub (%s %s %s %d %p %d %p %p %p)\n", debugstr_w(servername),
@@ -75,11 +75,20 @@ NET_API_STATUS WINAPI NetSessionEnum(LPWSTR servername, LPWSTR UncClientName,
  *   On failure it returns a system error code (FIXME: find out which)
  *
  */
-NET_API_STATUS WINAPI NetShareEnum( LPWSTR servername, DWORD level, LPBYTE* bufptr,
+NET_API_STATUS WINAPI NetShareEnum( LMSTR servername, DWORD level, LPBYTE* bufptr,
     DWORD prefmaxlen, LPDWORD entriesread, LPDWORD totalentries, LPDWORD resume_handle)
 {
     FIXME("Stub (%s %d %p %d %p %p %p)\n", debugstr_w(servername), level, bufptr,
         prefmaxlen, entriesread, totalentries, resume_handle);
 
     return ERROR_NOT_SUPPORTED;
+}
+
+/************************************************************
+ * NetShareDel  (NETAPI32.@)
+ */
+NET_API_STATUS WINAPI NetShareDel(LMSTR servername, LMSTR netname, DWORD reserved)
+{
+    FIXME("Stub (%s %s %d)\n", debugstr_w(servername), debugstr_w(netname), reserved);
+    return NERR_Success;
 }

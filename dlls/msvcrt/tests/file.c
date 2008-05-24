@@ -27,12 +27,14 @@
 #include <share.h>
 #include <sys/stat.h>
 #include <io.h>
+#include <direct.h>
 #include <windef.h>
 #include <winbase.h>
 #include <winnls.h>
 #include <process.h>
 #include <errno.h>
-#include "msvcrt.h"
+
+static HANDLE proc_handles[2];
 
 static void test_fdopen( void )
 {
@@ -139,20 +141,23 @@ static void test_readmode( BOOL ascii_mode )
     static const char outbuffer[] = "0,1,2,3,4,5,6,7,8,9\r\n\r\nA,B,C,D,E\r\nX,Y,Z";
     static const char padbuffer[] = "ghjghjghjghj";
     static const char nlbuffer[] = "\r\n";
-    char buffer[2*MSVCRT_BUFSIZ+256], *optr;
+    char buffer[2*BUFSIZ+256];
+    const char *optr;
     int fd;
     FILE *file;
-    int i, j, m, fp, ao, *ip, pl;
+    const int *ip;
+    int i, j, m, ao, pl;
+    unsigned int fp;
     long l;
 
     fd = open ("fdopen.tst", O_WRONLY | O_CREAT | O_BINARY, _S_IREAD |_S_IWRITE);
-    /* an internal buffer of MSVCRT_BUFSIZ is maintained, so make a file big
+    /* an internal buffer of BUFSIZ is maintained, so make a file big
      * enough to test operations that cross the buffer boundary 
      */
-    j = (2*MSVCRT_BUFSIZ-4)/strlen(padbuffer);
+    j = (2*BUFSIZ-4)/strlen(padbuffer);
     for (i=0; i<j; i++)
         write (fd, padbuffer, strlen(padbuffer));
-    j = (2*MSVCRT_BUFSIZ-4)%strlen(padbuffer);
+    j = (2*BUFSIZ-4)%strlen(padbuffer);
     for (i=0; i<j; i++)
         write (fd, &padbuffer[i], 1);
     write (fd, nlbuffer, strlen(nlbuffer));
@@ -173,9 +178,9 @@ static void test_readmode( BOOL ascii_mode )
     
     /* first is a test of fgets, ftell, fseek */
     ok(ftell(file) == 0,"Did not start at beginning of file in %s\n", IOMODE);
-    ok(fgets(buffer,2*MSVCRT_BUFSIZ+256,file) !=0,"padding line fgets failed unexpected in %s\n", IOMODE);
+    ok(fgets(buffer,2*BUFSIZ+256,file) !=0,"padding line fgets failed unexpected in %s\n", IOMODE);
     l = ftell(file);
-    pl = 2*MSVCRT_BUFSIZ-2;
+    pl = 2*BUFSIZ-2;
     ok(l == pl,"padding line ftell got %ld should be %d in %s\n", l, pl, IOMODE);
     ok(lstrlenA(buffer) == pl+ao,"padding line fgets got size %d should be %d in %s\n",
      lstrlenA(buffer), pl+ao, IOMODE);
@@ -207,16 +212,16 @@ static void test_readmode( BOOL ascii_mode )
     /* test fread across buffer boundary */
     rewind(file);
     ok(ftell(file) == 0,"Did not start at beginning of file in %s\n", IOMODE);
-    ok(fgets(buffer,MSVCRT_BUFSIZ-6,file) !=0,"padding line fgets failed unexpected in %s\n", IOMODE);
+    ok(fgets(buffer,BUFSIZ-6,file) !=0,"padding line fgets failed unexpected in %s\n", IOMODE);
     j=strlen(outbuffer);
-    i=fread(buffer,1,MSVCRT_BUFSIZ+strlen(outbuffer),file);
-    ok(i==MSVCRT_BUFSIZ+j,"fread failed, expected %d got %d in %s\n", MSVCRT_BUFSIZ+j, i, IOMODE);
+    i=fread(buffer,1,BUFSIZ+strlen(outbuffer),file);
+    ok(i==BUFSIZ+j,"fread failed, expected %d got %d in %s\n", BUFSIZ+j, i, IOMODE);
     l = ftell(file);
     ok(l == pl+j-(ao*4)-5,"ftell after fread got %ld should be %d in %s\n", l, pl+j-(ao*4)-5, IOMODE);
     for (m=0; m<3; m++)
-        ok(buffer[m]==padbuffer[m+(MSVCRT_BUFSIZ-4)%strlen(padbuffer)],"expected %c got %c\n", padbuffer[m], buffer[m]);
-    m+=MSVCRT_BUFSIZ+2+ao;
-    optr = (char *)outbuffer;
+        ok(buffer[m]==padbuffer[m+(BUFSIZ-4)%strlen(padbuffer)],"expected %c got %c\n", padbuffer[m], buffer[m]);
+    m+=BUFSIZ+2+ao;
+    optr = outbuffer;
     for (; m<i; m++) {
         ok(buffer[m]==*optr,"char %d expected %c got %c in %s\n", m, *optr, buffer[m], IOMODE);
         optr++;
@@ -226,7 +231,7 @@ static void test_readmode( BOOL ascii_mode )
     /* fread should return the requested number of bytes if available */
     rewind(file);
     ok(ftell(file) == 0,"Did not start at beginning of file in %s\n", IOMODE);
-    ok(fgets(buffer,MSVCRT_BUFSIZ-6,file) !=0,"padding line fgets failed unexpected in %s\n", IOMODE);
+    ok(fgets(buffer,BUFSIZ-6,file) !=0,"padding line fgets failed unexpected in %s\n", IOMODE);
     j = fp+10;
     i=fread(buffer,1,j,file);
     ok(i==j,"fread failed, expected %d got %d in %s\n", j, i, IOMODE);
@@ -236,7 +241,7 @@ static void test_readmode( BOOL ascii_mode )
     ok(fread(buffer,1,1,file)==0,"fread failure in %s\n", IOMODE);
     ok(feof(file)!=0,"feof failure in %s\n", IOMODE);
     ok(fseek(file,-3,SEEK_CUR)==0,"seek failure in %s\n", IOMODE);
-    todo_wine ok(feof(file)==0,"feof failure in %s\n", IOMODE);
+    ok(feof(file)==0,"feof failure in %s\n", IOMODE);
     ok(fread(buffer,2,1,file)==1,"fread failed in %s\n", IOMODE);
     ok(feof(file)==0,"feof failure in %s\n", IOMODE);
     ok(fread(buffer,2,1,file)==0,"fread failure in %s\n",IOMODE);
@@ -245,9 +250,9 @@ static void test_readmode( BOOL ascii_mode )
     /* test some additional functions */
     rewind(file);
     ok(ftell(file) == 0,"Did not start at beginning of file in %s\n", IOMODE);
-    ok(fgets(buffer,2*MSVCRT_BUFSIZ+256,file) !=0,"padding line fgets failed unexpected in %s\n", IOMODE);
+    ok(fgets(buffer,2*BUFSIZ+256,file) !=0,"padding line fgets failed unexpected in %s\n", IOMODE);
     i = _getw(file);
-    ip = (int *)outbuffer;
+    ip = (const int *)outbuffer;
     ok(i == *ip,"_getw failed, expected %08x got %08x in %s\n", *ip, i, IOMODE);
     for (fp=0; fp<strlen(outbuffer); fp++)
         if (outbuffer[fp] == '\n') break;
@@ -266,8 +271,42 @@ static void test_readmode( BOOL ascii_mode )
     unlink ("fdopen.tst");
 }
 
+static void test_asciimode(void)
+{
+    FILE *fp;
+    char buf[64];
 
-static WCHAR* AtoW( char* p )
+    /* Simple test of CR CR LF handling.  Test both fgets and fread code paths, they're different! */
+    fp = fopen("ascii.tst", "wb");
+    fputs("\r\r\n", fp);
+    fclose(fp);
+    fp = fopen("ascii.tst", "rt");
+    ok(fgets(buf, sizeof(buf), fp) != NULL, "fgets\n");
+    ok(0 == strcmp(buf, "\r\n"), "CR CR LF not read as CR LF\n");
+    rewind(fp);
+    ok((fread(buf, 1, sizeof(buf), fp) == 2) && (0 == strcmp(buf, "\r\n")), "CR CR LF not read as CR LF\n");
+    fclose(fp);
+    unlink("ascii.tst");
+
+    /* Simple test of foo ^Z [more than one block] bar handling */
+    fp = fopen("ascii.tst", "wb");
+    fputs("foo\032", fp);  /* foo, logical EOF, ... */
+    fseek(fp, 65536L, SEEK_SET); /* ... more than MSVCRT_BUFSIZ, ... */
+    fputs("bar", fp); /* ... bar */
+    fclose(fp);
+    fp = fopen("ascii.tst", "rt");
+    ok(fgets(buf, sizeof(buf), fp) != NULL, "fgets foo\n");
+    ok(0 == strcmp(buf, "foo"), "foo ^Z not read as foo by fgets\n");
+    ok(fgets(buf, sizeof(buf), fp) == NULL, "fgets after logical EOF\n");
+    rewind(fp);
+    ok((fread(buf, 1, sizeof(buf), fp) == 3) && (0 == strcmp(buf, "foo")), "foo ^Z not read as foo by fread\n");
+    ok((fread(buf, 1, sizeof(buf), fp) == 0), "fread after logical EOF\n");
+    fclose(fp);
+
+    unlink("ascii.tst");
+}
+
+static WCHAR* AtoW( const char* p )
 {
     WCHAR* buffer;
     DWORD len = MultiByteToWideChar( CP_ACP, 0, p, -1, NULL, 0 );
@@ -292,6 +331,7 @@ static void test_fgetc( void )
   ret = fgetc(tempfh);
   ok(ich == ret, "Second fgetc expected %x got %x\n", ich, ret);
   fclose(tempfh);
+  unlink(tempf);
 }
 
 static void test_fgetwc( void )
@@ -301,17 +341,18 @@ static void test_fgetwc( void )
   char* tempf;
   FILE *tempfh;
   static const char mytext[]= "This is test_fgetwc\r\n";
-  WCHAR wtextW[MSVCRT_BUFSIZ+LLEN+1];
+  WCHAR wtextW[BUFSIZ+LLEN+1];
   WCHAR *mytextW = NULL, *aptr, *wptr;
   BOOL diff_found = FALSE;
-  int i, j;
+  int j;
+  unsigned int i;
   long l;
 
   tempf=_tempnam(".","wne");
   tempfh = fopen(tempf,"wb");
   j = 'a';
   /* pad to almost the length of the internal buffer */
-  for (i=0; i<MSVCRT_BUFSIZ-4; i++)
+  for (i=0; i<BUFSIZ-4; i++)
     fputc(j,tempfh);
   j = '\r';
   fputc(j,tempfh);
@@ -324,12 +365,12 @@ static void test_fgetwc( void )
   tempfh = fopen(tempf,"rt"); /* open in TEXT mode */
   fgetws(wtextW,LLEN,tempfh);
   l=ftell(tempfh);
-  ok(l==MSVCRT_BUFSIZ-2, "ftell expected %d got %ld\n", MSVCRT_BUFSIZ-2, l);
+  ok(l==BUFSIZ-2, "ftell expected %d got %ld\n", BUFSIZ-2, l);
   fgetws(wtextW,LLEN,tempfh);
   l=ftell(tempfh);
-  ok(l==MSVCRT_BUFSIZ-2+strlen(mytext), "ftell expected %d got %ld\n",
-   MSVCRT_BUFSIZ-2+strlen(mytext), l);
-  mytextW = AtoW ((char*)mytext);
+  ok(l==BUFSIZ-2+strlen(mytext), "ftell expected %d got %ld\n",
+   BUFSIZ-2+strlen(mytext), l);
+  mytextW = AtoW (mytext);
   aptr = mytextW;
   wptr = wtextW;
   for (i=0; i<strlen(mytext)-2; i++, aptr++, wptr++)
@@ -346,7 +387,7 @@ static void test_fgetwc( void )
   /* pad to almost the length of the internal buffer. Use an odd number of bytes
      to test that we can read wchars that are split across the internal buffer
      boundary */
-  for (i=0; i<MSVCRT_BUFSIZ-3-strlen(mytext)*sizeof(WCHAR); i++)
+  for (i=0; i<BUFSIZ-3-strlen(mytext)*sizeof(WCHAR); i++)
     fputc(j,tempfh);
   j = '\r';
   fputwc(j,tempfh);
@@ -357,7 +398,7 @@ static void test_fgetwc( void )
   fclose(tempfh);
   /* in binary mode, getws/c expects wide characters */
   tempfh = fopen(tempf,"rb"); /* open in BINARY mode */
-  j=(MSVCRT_BUFSIZ-2)/sizeof(WCHAR)-strlen(mytext);
+  j=(BUFSIZ-2)/sizeof(WCHAR)-strlen(mytext);
   fgetws(wtextW,j,tempfh);
   l=ftell(tempfh);
   j=(j-1)*sizeof(WCHAR);
@@ -493,7 +534,7 @@ static void test_file_put_get( void )
   fclose(tempfh);
   tempfh = fopen(tempf,"rt"); /* open in TEXT mode */
   fgetws(wtextW,LLEN,tempfh);
-  mytextW = AtoW ((char*)mytext);
+  mytextW = AtoW (mytext);
   aptr = mytextW;
   wptr = wtextW;
 
@@ -643,8 +684,9 @@ static void test_file_inherit( const char* selfname )
     ok(fd != -1, "Couldn't create test file\n");
     arg_v[0] = selfname;
     arg_v[1] = "tests/file.c";
-    arg_v[2] = buffer; sprintf(buffer, "%d", fd);
-    arg_v[3] = 0;
+    arg_v[2] = "inherit";
+    arg_v[3] = buffer; sprintf(buffer, "%d", fd);
+    arg_v[4] = 0;
     _spawnvp(_P_WAIT, selfname, arg_v);
     ok(tell(fd) == 8, "bad position %lu expecting 8\n", tell(fd));
     lseek(fd, 0, SEEK_SET);
@@ -656,8 +698,8 @@ static void test_file_inherit( const char* selfname )
     ok(fd != -1, "Couldn't create test file\n");
     arg_v[0] = selfname;
     arg_v[1] = "tests/file.c";
-    arg_v[2] = buffer; sprintf(buffer, "%d", fd);
-    arg_v[3] = buffer;
+    arg_v[2] = "inherit_no";
+    arg_v[3] = buffer; sprintf(buffer, "%d", fd);
     arg_v[4] = 0;
     _spawnvp(_P_WAIT, selfname, arg_v);
     ok(tell(fd) == 0, "bad position %lu expecting 0\n", tell(fd));
@@ -794,6 +836,198 @@ static void test_setmaxstdio(void)
     ok(-1 == _setmaxstdio(2049),"_setmaxstdio returned %d instead of -1\n",_setmaxstdio(2049));
 }
 
+static void test_stat(void)
+{
+    int fd;
+    int pipes[2];
+    struct stat buf;
+
+    /* Tests for a file */
+    fd = open("stat.tst", O_WRONLY | O_CREAT | O_BINARY, _S_IREAD |_S_IWRITE);
+    if (fd >= 0)
+    {
+        if (fstat(fd, &buf) == 0)
+        {
+            if ((buf.st_mode & _S_IFMT) == _S_IFREG)
+            {
+                ok(buf.st_dev == 0, "st_dev is %d, expected 0\n", buf.st_dev);
+                ok(buf.st_dev == buf.st_rdev, "st_dev (%d) and st_rdev (%d) differ\n",
+                    buf.st_dev, buf.st_rdev);
+                ok(buf.st_nlink == 1, "st_nlink is %d, expected 1\n",
+                    buf.st_nlink);
+                ok(buf.st_size == 0, "st_size is %d, expected 0\n",
+                    buf.st_size);
+            }
+            else
+                skip("file is not a file?\n");
+        }
+        else
+            skip("fstat failed, errno %d\n", errno);
+        close(fd);
+        remove("stat.tst");
+    }
+    else
+        skip("open failed with errno %d\n", errno);
+
+    /* Tests for a char device */
+    if (_dup2(0, 10) == 0)
+    {
+        if (fstat(10, &buf) == 0)
+        {
+            if (buf.st_mode == _S_IFCHR)
+            {
+                ok(buf.st_dev == 10, "st_dev is %d, expected 10\n", buf.st_dev);
+                ok(buf.st_rdev == 10, "st_rdev is %d, expected 10\n", buf.st_rdev);
+                ok(buf.st_nlink == 1, "st_nlink is %d, expected 1\n", buf.st_nlink);
+            }
+            else
+                skip("stdin is not a char device?\n");
+        }
+        else
+            skip("fstat failed with errno %d\n", errno);
+        close(10);
+    }
+    else
+        skip("_dup2 failed with errno %d\n", errno);
+
+    /* Tests for pipes */
+    if (_pipe(pipes, 1024, O_BINARY) == 0)
+    {
+        if (fstat(pipes[0], &buf) == 0)
+        {
+            if (buf.st_mode == _S_IFIFO)
+            {
+                ok(buf.st_dev == pipes[0], "st_dev is %d, expected %d\n",
+                    buf.st_dev, pipes[0]);
+                ok(buf.st_rdev == pipes[0], "st_rdev is %d, expected %d\n",
+                    buf.st_rdev, pipes[0]);
+                ok(buf.st_nlink == 1, "st_nlink is %d, expected 1\n",
+                    buf.st_nlink);
+            }
+            else
+                skip("pipe() didn't make a pipe?\n");
+        }
+        else
+            skip("fstat failed with errno %d\n", errno);
+        close(pipes[0]);
+        close(pipes[1]);
+    }
+    else
+        skip("pipe failed with errno %d\n", errno);
+}
+
+static const char* pipe_string="Hello world";
+
+/* How many messages to transfer over the pipe */
+#define N_TEST_MESSAGES 3
+
+static void test_pipes_child(int argc, char** args)
+{
+    int fd;
+    int nwritten;
+    int i;
+
+    if (argc < 5)
+    {
+        ok(0, "not enough parameters: %d\n", argc);
+        return;
+    }
+
+    fd=atoi(args[3]);
+    ok(close(fd) == 0, "unable to close %d: %d\n", fd, errno);
+
+    fd=atoi(args[4]);
+
+    for (i=0; i<N_TEST_MESSAGES; i++) {
+       nwritten=write(fd, pipe_string, strlen(pipe_string));
+       ok(nwritten == strlen(pipe_string), "i %d, expected to write %d bytes, wrote %d\n", i, strlen(pipe_string), nwritten);
+       /* let other process wake up so they can show off their "keep reading until EOF" behavior */
+       if (i < N_TEST_MESSAGES-1)
+           Sleep(100);
+    }
+
+    ok(close(fd) == 0, "unable to close %d: %d\n", fd, errno);
+}
+
+static void test_pipes(const char* selfname)
+{
+    int pipes[2];
+    char str_fdr[12], str_fdw[12];
+    FILE* file;
+    const char* arg_v[6];
+    char buf[4096];
+    char expected[4096];
+    int r;
+    int i;
+
+    /* Test reading from a pipe with read() */
+    if (_pipe(pipes, 1024, O_BINARY) < 0)
+    {
+        ok(0, "pipe failed with errno %d\n", errno);
+        return;
+    }
+
+    arg_v[0] = selfname;
+    arg_v[1] = "tests/file.c";
+    arg_v[2] = "pipes";
+    arg_v[3] = str_fdr; sprintf(str_fdr, "%d", pipes[0]);
+    arg_v[4] = str_fdw; sprintf(str_fdw, "%d", pipes[1]);
+    arg_v[5] = NULL;
+    proc_handles[0] = (HANDLE)_spawnvp(_P_NOWAIT, selfname, arg_v);
+    ok(close(pipes[1]) == 0, "unable to close %d: %d\n", pipes[1], errno);
+
+    for (i=0; i<N_TEST_MESSAGES; i++) {
+       r=read(pipes[0], buf, sizeof(buf)-1);
+       ok(r == strlen(pipe_string), "i %d, expected to read %d bytes, got %d\n", i, strlen(pipe_string)+1, r);
+       if (r > 0)
+           buf[r]='\0';
+       ok(strcmp(buf, pipe_string) == 0, "expected to read '%s', got '%s'\n", pipe_string, buf);
+   }
+
+    r=read(pipes[0], buf, sizeof(buf)-1);
+    ok(r == 0, "expected to read 0 bytes, got %d\n", r);
+    ok(close(pipes[0]) == 0, "unable to close %d: %d\n", pipes[0], errno);
+
+    /* Test reading from a pipe with fread() */
+    if (_pipe(pipes, 1024, O_BINARY) < 0)
+    {
+        ok(0, "pipe failed with errno %d\n", errno);
+        return;
+    }
+
+    arg_v[0] = selfname;
+    arg_v[1] = "tests/file.c";
+    arg_v[2] = "pipes";
+    arg_v[3] = str_fdr; sprintf(str_fdr, "%d", pipes[0]);
+    arg_v[4] = str_fdw; sprintf(str_fdw, "%d", pipes[1]);
+    arg_v[5] = NULL;
+    proc_handles[1] = (HANDLE)_spawnvp(_P_NOWAIT, selfname, arg_v);
+    ok(close(pipes[1]) == 0, "unable to close %d: %d\n", pipes[1], errno);
+    file=fdopen(pipes[0], "r");
+
+    /* In blocking mode, fread will keep calling read() until it gets
+     * enough bytes, or EOF, even on Unix.  (If this were a Unix terminal
+     * in cooked mode instead of a pipe, it would also stop on EOL.)
+     */
+    expected[0] = 0;
+    for (i=0; i<N_TEST_MESSAGES; i++)
+       strcat(expected, pipe_string);
+    r=fread(buf, 1, sizeof(buf)-1, file);
+    ok(r == strlen(expected), "fread() returned %d instead of %d: ferror=%d\n", r, strlen(expected), ferror(file));
+    if (r > 0)
+       buf[r]='\0';
+    ok(strcmp(buf, expected) == 0, "got '%s' expected '%s'\n", buf, expected);
+
+    /* Let child close the file before we read, so we can sense EOF reliably */
+    Sleep(100);
+    r=fread(buf, 1, sizeof(buf)-1, file);
+    ok(r == 0, "fread() returned %d instead of 0\n", r);
+    ok(ferror(file) == 0, "got ferror() = %d\n", ferror(file));
+    ok(feof(file), "feof() is false!\n");
+
+    ok(fclose(file) == 0, "unable to close the pipe: %d\n", errno);
+}
+
 START_TEST(file)
 {
     int arg_c;
@@ -804,18 +1038,26 @@ START_TEST(file)
     /* testing low-level I/O */
     if (arg_c >= 3)
     {
-        if (arg_c == 3) test_file_inherit_child(arg_v[2]); 
-        else test_file_inherit_child_no(arg_v[2]);
+        if (strcmp(arg_v[2], "inherit") == 0)
+            test_file_inherit_child(arg_v[3]);
+        else if (strcmp(arg_v[2], "inherit_no") == 0)
+            test_file_inherit_child_no(arg_v[3]);
+        else if (strcmp(arg_v[2], "pipes") == 0)
+            test_pipes_child(arg_c, arg_v);
+        else
+            ok(0, "invalid argument '%s'\n", arg_v[2]);
         return;
     }
     test_file_inherit(arg_v[0]);
     test_file_write_read();
     test_chsize();
+    test_stat();
 
     /* testing stream I/O */
     test_fdopen();
     test_fopen_fclose_fcloseall();
     test_fileops();
+    test_asciimode();
     test_readmode(FALSE); /* binary mode */
     test_readmode(TRUE);  /* ascii mode */
     test_fgetc();
@@ -825,4 +1067,10 @@ START_TEST(file)
     test_tmpnam();
     test_get_osfhandle();
     test_setmaxstdio();
+    test_pipes(arg_v[0]);
+
+    /* Wait for the (_P_NOWAIT) spawned processes to finish to make sure the report
+     * file contains lines in the correct order
+     */
+    WaitForMultipleObjects(sizeof(proc_handles)/sizeof(proc_handles[0]), proc_handles, TRUE, 5000);
 }

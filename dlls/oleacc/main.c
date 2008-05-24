@@ -38,7 +38,7 @@ HRESULT WINAPI CreateStdAccessibleObject( HWND hwnd, LONG idObject,
 
 HRESULT WINAPI LresultFromObject( REFIID riid, WPARAM wParam, LPUNKNOWN pAcc )
 {
-    FIXME("%s %d %p\n", debugstr_guid(riid), wParam, pAcc );
+    FIXME("%s %ld %p\n", debugstr_guid(riid), wParam, pAcc );
     return E_NOTIMPL;
 }
 
@@ -60,4 +60,10 @@ HRESULT WINAPI DllUnregisterServer(void)
 {
     FIXME("\n");
     return S_OK;
+}
+
+void WINAPI GetOleaccVersionInfo(DWORD* pVersion, DWORD* pBuild)
+{
+    *pVersion = MAKELONG(2,4); /* Windows XP version of oleacc: 4.2.5406.0 */
+    *pBuild = MAKELONG(0,5406);
 }

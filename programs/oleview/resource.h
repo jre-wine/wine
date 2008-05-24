@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA 
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
 #define IDS_APPNAME                1
@@ -30,6 +30,7 @@
 #define IDS_ABOUTVER               21
 
 #define IDS_OPEN                   30
+#define IDS_OPEN_TYPELIB_FILTER    31
 
 #define IDM_BIND                   100
 #define IDM_TYPELIB                101

@@ -28,7 +28,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winerror.h"
 #include "winreg.h"
 #include "wingdi.h"
 #include "winternl.h"
@@ -50,10 +49,25 @@ typedef struct wine_wgl_s {
     PROC WINAPI  (*p_wglGetProcAddress)(LPCSTR  lpszProc);
 
     void WINAPI  (*p_wglGetIntegerv)(GLenum pname, GLint* params);
+    void WINAPI  (*p_wglFinish)(void);
+    void WINAPI  (*p_wglFlush)(void);
 } wine_wgl_t;
 
 /** global wgl object */
 static wine_wgl_t wine_wgl;
+
+#ifdef SONAME_LIBGLU
+#define MAKE_FUNCPTR(f) static typeof(f) * p##f;
+MAKE_FUNCPTR(gluNewTess)
+MAKE_FUNCPTR(gluDeleteTess)
+MAKE_FUNCPTR(gluTessBeginContour)
+MAKE_FUNCPTR(gluTessBeginPolygon)
+MAKE_FUNCPTR(gluTessCallback)
+MAKE_FUNCPTR(gluTessEndContour)
+MAKE_FUNCPTR(gluTessEndPolygon)
+MAKE_FUNCPTR(gluTessVertex)
+#undef MAKE_FUNCPTR
+#endif /* SONAME_LIBGLU */
 
 /* x11drv GDI escapes */
 #define X11DRV_ESCAPE 6789
@@ -75,19 +89,15 @@ void (*wine_tsx11_lock_ptr)(void) = NULL;
 void (*wine_tsx11_unlock_ptr)(void) = NULL;
 
 static HMODULE opengl32_handle;
+static void* libglu_handle = NULL;
 
-static char  internal_gl_disabled_extensions[512];
+static char* internal_gl_disabled_extensions = NULL;
 static char* internal_gl_extensions = NULL;
 
 typedef struct wine_glcontext {
   HDC hdc;
-  Display *display;
-  XVisualInfo *vis;
-  GLXFBConfig fb_conf;
-  GLXContext ctx;
   BOOL do_escape;
-  struct wine_glcontext *next;
-  struct wine_glcontext *prev;
+  /* ... more stuff here */
 } Wine_GLContext;
 
 void enter_gl(void)
@@ -104,6 +114,8 @@ void enter_gl(void)
     return;
 }
 
+const GLubyte * WINAPI wine_glGetString( GLenum name );
+
 /***********************************************************************
  *		wglCreateLayerContext (OPENGL32.@)
  */
@@ -117,17 +129,6 @@ HGLRC WINAPI wglCreateLayerContext(HDC hdc,
   FIXME(" no handler for layer %d\n", iLayerPlane);
 
   return NULL;
-}
-
-/***********************************************************************
- *		wglCopyContext (OPENGL32.@)
- */
-BOOL WINAPI wglCopyContext(HGLRC hglrcSrc,
-			   HGLRC hglrcDst,
-			   UINT mask) {
-  FIXME("(%p,%p,%d)\n", hglrcSrc, hglrcDst, mask);
-
-  return FALSE;
 }
 
 /***********************************************************************
@@ -156,9 +157,6 @@ int WINAPI wglGetLayerPaletteEntries(HDC hdc,
   return 0;
 }
 
-/***********************************************************************
- *		wglGetProcAddress (OPENGL32.@)
- */
 static int compar(const void *elt_a, const void *elt_b) {
   return strcmp(((const OpenGL_extension *) elt_a)->name,
 		((const OpenGL_extension *) elt_b)->name);
@@ -167,7 +165,7 @@ static int compar(const void *elt_a, const void *elt_b) {
 /* Check if a GL extension is supported */
 static BOOL is_extension_supported(const char* extension)
 {
-    const char *gl_ext_string = (const char*)internal_glGetString(GL_EXTENSIONS);
+    const char *gl_ext_string = (const char*)wine_glGetString(GL_EXTENSIONS);
 
     TRACE("Checking for extension '%s'\n", extension);
 
@@ -193,7 +191,7 @@ static BOOL is_extension_supported(const char* extension)
     if(strncmp(extension, "GL_VERSION_", 11) == 0)
     {
         const GLubyte *gl_version = glGetString(GL_VERSION);
-        const const char *version = extension + 11; /* Move past 'GL_VERSION_' */
+        const char *version = extension + 11; /* Move past 'GL_VERSION_' */
 
         if(!gl_version) {
             ERR("Error no OpenGL version found,\n");
@@ -211,12 +209,18 @@ static BOOL is_extension_supported(const char* extension)
     return FALSE;
 }
 
+/***********************************************************************
+ *		wglGetProcAddress (OPENGL32.@)
+ */
 PROC WINAPI wglGetProcAddress(LPCSTR  lpszProc) {
   void *local_func;
   OpenGL_extension  ext;
   const OpenGL_extension *ext_ret;
 
   TRACE("(%s)\n", lpszProc);
+
+  if(lpszProc == NULL)
+    return NULL;
 
   /* First, look if it's not already defined in the 'standard' OpenGL functions */
   if ((local_func = GetProcAddress(opengl32_handle, lpszProc)) != NULL) {
@@ -229,16 +233,20 @@ PROC WINAPI wglGetProcAddress(LPCSTR  lpszProc) {
   ext_ret = (const OpenGL_extension *) bsearch(&ext, extension_registry,
 					 extension_registry_size, sizeof(OpenGL_extension), compar);
 
-  /* If nothing was found, we are looking for a WGL extension */
+  /* If nothing was found, we are looking for a WGL extension or an unknown GL extension. */
   if (ext_ret == NULL) {
+    /* If the function name starts with a w it is a WGL extension */
+    if(lpszProc[0] == 'w')
+      return wine_wgl.p_wglGetProcAddress(lpszProc);
+
+    /* We are dealing with an unknown GL extension. */
     WARN("Extension '%s' not defined in opengl32.dll's function table!\n", lpszProc);
-    return wine_wgl.p_wglGetProcAddress(lpszProc);
+    return NULL;
   } else { /* We are looking for an OpenGL extension */
 
     /* Check if the GL extension required by the function is available */
     if(!is_extension_supported(ext_ret->extension)) {
         WARN("Extension '%s' required by function '%s' not supported!\n", ext_ret->extension, lpszProc);
-        return NULL;
     }
 
     local_func = wine_wgl.p_wglGetProcAddress(ext_ret->name);
@@ -319,7 +327,43 @@ BOOL WINAPI wglSwapLayerBuffers(HDC hdc,
   return TRUE;
 }
 
-#ifdef HAVE_GL_GLU_H
+#ifdef SONAME_LIBGLU
+
+static void *load_libglu(void)
+{
+    static int already_loaded;
+    void *handle;
+
+    if (already_loaded) return libglu_handle;
+    already_loaded = 1;
+
+    TRACE("Trying to load GLU library: %s\n", SONAME_LIBGLU);
+    handle = wine_dlopen(SONAME_LIBGLU, RTLD_NOW, NULL, 0);
+    if (!handle)
+    {
+        WARN("Failed to load %s\n", SONAME_LIBGLU);
+        return NULL;
+    }
+
+#define LOAD_FUNCPTR(f) if((p##f = (void*)wine_dlsym(handle, #f, NULL, 0)) == NULL) goto sym_not_found;
+LOAD_FUNCPTR(gluNewTess)
+LOAD_FUNCPTR(gluDeleteTess)
+LOAD_FUNCPTR(gluTessBeginContour)
+LOAD_FUNCPTR(gluTessBeginPolygon)
+LOAD_FUNCPTR(gluTessCallback)
+LOAD_FUNCPTR(gluTessEndContour)
+LOAD_FUNCPTR(gluTessEndPolygon)
+LOAD_FUNCPTR(gluTessVertex)
+#undef LOAD_FUNCPTR
+    libglu_handle = handle;
+    return handle;
+
+sym_not_found:
+    WARN("Unable to load function ptrs from libGLU\n");
+    /* Close the library as we won't use it */
+    wine_dlclose(handle, NULL, 0);
+    return NULL;
+}
 
 static void fixed_to_double(POINTFX fixed, UINT em_size, GLdouble vertex[3])
 {
@@ -350,7 +394,7 @@ static void tess_callback_end(void)
 /***********************************************************************
  *		wglUseFontOutlines_common
  */
-BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
+static BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
                                       DWORD first,
                                       DWORD count,
                                       DWORD listBase,
@@ -371,14 +415,19 @@ BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
     TRACE("(%p, %d, %d, %d, %f, %f, %d, %p, %s)\n", hdc, first, count,
           listBase, deviation, extrusion, format, lpgmf, unicode ? "W" : "A");
 
+    if (!load_libglu())
+    {
+        ERR("libGLU is required for this function but isn't loaded\n");
+        return FALSE;
+    }
 
     ENTER_GL();
-    tess = gluNewTess();
+    tess = pgluNewTess();
     if(tess)
     {
-        gluTessCallback(tess, GLU_TESS_VERTEX, (_GLUfuncptr)tess_callback_vertex);
-        gluTessCallback(tess, GLU_TESS_BEGIN, (_GLUfuncptr)tess_callback_begin);
-        gluTessCallback(tess, GLU_TESS_END, tess_callback_end);
+        pgluTessCallback(tess, GLU_TESS_VERTEX, (_GLUfuncptr)tess_callback_vertex);
+        pgluTessCallback(tess, GLU_TESS_BEGIN, (_GLUfuncptr)tess_callback_begin);
+        pgluTessCallback(tess, GLU_TESS_END, tess_callback_end);
     }
     LEAVE_GL();
 
@@ -436,17 +485,17 @@ BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
 
 	ENTER_GL();
 	glNewList(listBase++, GL_COMPILE);
-        gluTessBeginPolygon(tess, NULL);
+        pgluTessBeginPolygon(tess, NULL);
 
         pph = (TTPOLYGONHEADER*)buf;
         while((BYTE*)pph < buf + needed)
         {
             TRACE("\tstart %d, %d\n", pph->pfxStart.x.value, pph->pfxStart.y.value);
 
-            gluTessBeginContour(tess);
+            pgluTessBeginContour(tess);
 
             fixed_to_double(pph->pfxStart, em_size, vertices);
-            gluTessVertex(tess, vertices, vertices);
+            pgluTessVertex(tess, vertices, vertices);
             vertices += 3;
 
             ppc = (TTPOLYCURVE*)((char*)pph + sizeof(*pph));
@@ -460,7 +509,7 @@ BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
                     {
                         TRACE("\t\tline to %d, %d\n", ppc->apfx[i].x.value, ppc->apfx[i].y.value);
                         fixed_to_double(ppc->apfx[i], em_size, vertices); 
-                        gluTessVertex(tess, vertices, vertices);
+                        pgluTessVertex(tess, vertices, vertices);
                         vertices += 3;
                     }
                     break;
@@ -473,28 +522,28 @@ BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
                               ppc->apfx[i * 2].x.value,     ppc->apfx[i * 3].y.value,
                               ppc->apfx[i * 2 + 1].x.value, ppc->apfx[i * 3 + 1].y.value);
                         fixed_to_double(ppc->apfx[i * 2], em_size, vertices); 
-                        gluTessVertex(tess, vertices, vertices);
+                        pgluTessVertex(tess, vertices, vertices);
                         vertices += 3;
                         fixed_to_double(ppc->apfx[i * 2 + 1], em_size, vertices); 
-                        gluTessVertex(tess, vertices, vertices);
+                        pgluTessVertex(tess, vertices, vertices);
                         vertices += 3;
                     }
                     break;
                 default:
                     ERR("\t\tcurve type = %d\n", ppc->wType);
-                    gluTessEndContour(tess);
+                    pgluTessEndContour(tess);
                     goto error_in_list;
                 }
 
                 ppc = (TTPOLYCURVE*)((char*)ppc + sizeof(*ppc) +
                                      (ppc->cpfx - 1) * sizeof(POINTFX));
             }
-            gluTessEndContour(tess);
+            pgluTessEndContour(tess);
             pph = (TTPOLYGONHEADER*)((char*)pph + pph->cb);
         }
 
 error_in_list:
-        gluTessEndPolygon(tess);
+        pgluTessEndPolygon(tess);
         glTranslated((GLdouble)gm.gmCellIncX / em_size, (GLdouble)gm.gmCellIncY / em_size, 0.0);
         glEndList();
         LEAVE_GL();
@@ -504,14 +553,14 @@ error_in_list:
 
  error:
     DeleteObject(SelectObject(hdc, old_font));
-    gluDeleteTess(tess);
+    pgluDeleteTess(tess);
     return TRUE;
 
 }
 
-#else /* HAVE_GL_GLU_H */
+#else /* SONAME_LIBGLU */
 
-BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
+static BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
                                       DWORD first,
                                       DWORD count,
                                       DWORD listBase,
@@ -525,7 +574,7 @@ BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
     return FALSE;
 }
 
-#endif /* HAVE_GL_GLU_H */
+#endif /* SONAME_LIBGLU */
 
 /***********************************************************************
  *		wglUseFontOutlinesA (OPENGL32.@)
@@ -557,37 +606,62 @@ BOOL WINAPI wglUseFontOutlinesW(HDC hdc,
     return wglUseFontOutlines_common(hdc, first, count, listBase, deviation, extrusion, format, lpgmf, TRUE);
 }
 
-const GLubyte * internal_glGetString(GLenum name) {
+/***********************************************************************
+ *              glFinish (OPENGL32.@)
+ */
+void WINAPI wine_glFinish( void )
+{
+    TRACE("()\n");
+    wine_wgl.p_wglFinish();
+}
+
+/***********************************************************************
+ *              glFlush (OPENGL32.@)
+ */
+void WINAPI wine_glFlush( void )
+{
+    TRACE("()\n");
+    wine_wgl.p_wglFlush();
+}
+
+/***********************************************************************
+ *              glGetString (OPENGL32.@)
+ */
+const GLubyte * WINAPI wine_glGetString( GLenum name )
+{
+  const GLubyte *ret;
   const char* GL_Extensions = NULL;
-  
+
   if (GL_EXTENSIONS != name) {
-    return glGetString(name);
+    ENTER_GL();
+    ret = glGetString(name);
+    LEAVE_GL();
+    return ret;
   }
 
   if (NULL == internal_gl_extensions) {
+    ENTER_GL();
     GL_Extensions = (const char *) glGetString(GL_EXTENSIONS);
 
-    TRACE("GL_EXTENSIONS reported:\n");  
-    if (NULL == GL_Extensions) {
-      ERR("GL_EXTENSIONS returns NULL\n");      
-      return NULL;
-    } else {
+    if (GL_Extensions)
+    {
       size_t len = strlen(GL_Extensions);
       internal_gl_extensions = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, len + 2);
 
+      TRACE("GL_EXTENSIONS reported:\n");
       while (*GL_Extensions != 0x00) {
 	const char* Start = GL_Extensions;
 	char        ThisExtn[256];
-	 
-	memset(ThisExtn, 0x00, sizeof(ThisExtn));
+
 	while (*GL_Extensions != ' ' && *GL_Extensions != 0x00) {
 	  GL_Extensions++;
 	}
 	memcpy(ThisExtn, Start, (GL_Extensions - Start));
+        ThisExtn[GL_Extensions - Start] = 0;
 	TRACE("- %s:", ThisExtn);
 	
 	/* test if supported API is disabled by config */
-	if (NULL == strstr(internal_gl_disabled_extensions, ThisExtn)) {
+	if (!internal_gl_disabled_extensions || !strstr(internal_gl_disabled_extensions, ThisExtn)) {
 	  strcat(internal_gl_extensions, " ");
 	  strcat(internal_gl_extensions, ThisExtn);
 	  TRACE(" active\n");
@@ -598,31 +672,26 @@ const GLubyte * internal_glGetString(GLenum name) {
 	if (*GL_Extensions == ' ') GL_Extensions++;
       }
     }
+    LEAVE_GL();
   }
   return (const GLubyte *) internal_gl_extensions;
 }
 
-void internal_glGetIntegerv(GLenum pname, GLint* params) {
-  TRACE("pname: 0x%x, params %p\n", pname, params);
-  glGetIntegerv(pname, params);
-  /* A few parameters like GL_DEPTH_BITS differ between WGL and GLX, the wglGetIntegerv helper function handles those */
-  wine_wgl.p_wglGetIntegerv(pname, params);
+/***********************************************************************
+ *              glGetIntegerv (OPENGL32.@)
+ */
+void WINAPI wine_glGetIntegerv( GLenum pname, GLint* params )
+{
+    wine_wgl.p_wglGetIntegerv(pname, params);
 }
 
-
-/* No need to load any other libraries as according to the ABI, libGL should be self-sufficient and
-   include all dependencies
-*/
-#ifndef SONAME_LIBGL
-#define SONAME_LIBGL "libGL.so"
-#endif
 
 /* This is for brain-dead applications that use OpenGL functions before even
    creating a rendering context.... */
 static BOOL process_attach(void)
 {
   HMODULE mod_x11, mod_gdi32;
-  DWORD size = sizeof(internal_gl_disabled_extensions);
+  DWORD size;
   HKEY hkey = 0;
 
   GetDesktopWindow();  /* make sure winex11 is loaded (FIXME) */
@@ -642,11 +711,14 @@ static BOOL process_attach(void)
 
   /* Interal WGL function */
   wine_wgl.p_wglGetIntegerv = (void *)wine_wgl.p_wglGetProcAddress("wglGetIntegerv");
+  wine_wgl.p_wglFinish = (void *)wine_wgl.p_wglGetProcAddress("wglFinish");
+  wine_wgl.p_wglFlush = (void *)wine_wgl.p_wglGetProcAddress("wglFlush");
 
-  internal_gl_disabled_extensions[0] = 0;
   if (!RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\OpenGL", &hkey)) {
-    if (!RegQueryValueExA( hkey, "DisabledExtensions", 0, NULL, (LPBYTE)internal_gl_disabled_extensions, &size)) {
-      TRACE("found DisabledExtensions=\"%s\"\n", internal_gl_disabled_extensions);
+    if (!RegQueryValueExA( hkey, "DisabledExtensions", 0, NULL, NULL, &size)) {
+      internal_gl_disabled_extensions = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+      RegQueryValueExA( hkey, "DisabledExtensions", 0, NULL, (LPBYTE)internal_gl_disabled_extensions, &size);
+      TRACE("found DisabledExtensions=%s\n", debugstr_a(internal_gl_disabled_extensions));
     }
     RegCloseKey(hkey);
   }
@@ -659,7 +731,9 @@ static BOOL process_attach(void)
 
 static void process_detach(void)
 {
+  if (libglu_handle) wine_dlclose(libglu_handle, NULL, 0);
   HeapFree(GetProcessHeap(), 0, internal_gl_extensions);
+  HeapFree(GetProcessHeap(), 0, internal_gl_disabled_extensions);
 }
 
 /***********************************************************************

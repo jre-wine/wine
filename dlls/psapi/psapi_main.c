@@ -66,7 +66,7 @@ static BOOL PSAPI_ModuleIteratorInit(MODULE_ITERATOR *iter, HANDLE hProcess)
     }
 
     /* Read address of LdrData from PEB */
-    if (!ReadProcessMemory(hProcess, &((PPEB)pbi.PebBaseAddress)->LdrData,
+    if (!ReadProcessMemory(hProcess, &pbi.PebBaseAddress->LdrData,
                            &pLdrData, sizeof(pLdrData), NULL))
         return FALSE;
 
@@ -483,7 +483,7 @@ BOOL WINAPI GetPerformanceInfo( PPERFORMANCE_INFORMATION info, DWORD size )
 
     TRACE( "(%p, %d)\n", info, size );
 
-    status = NtQueryInformationProcess( GetCurrentProcess(), SystemPerformanceInformation, info, size, NULL );
+    status = NtQuerySystemInformation( SystemPerformanceInformation, info, size, NULL );
 
     if (status)
     {
@@ -561,7 +561,7 @@ BOOL WINAPI GetWsChanges( HANDLE process, PPSAPI_WS_WATCH_INFORMATION watchinfo,
 
     TRACE( "(%p, %p, %d)\n", process, watchinfo, size );
 
-    status = NtQueryVirtualMemory( process, NULL, ProcessWorkingSetWatch, watchinfo, size, NULL );
+    status = NtQueryInformationProcess( process, ProcessWorkingSetWatch, watchinfo, size, NULL );
 
     if (status)
     {

@@ -32,6 +32,8 @@
  *	Add symbol size to internal symbol table.
  */
 
+#define NONAMELESSUNION
+
 #include "config.h"
 #include "wine/port.h"
 
@@ -49,14 +51,12 @@
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "winternl.h"
 
 #include "wine/exception.h"
 #include "wine/debug.h"
-#include "excpt.h"
 #include "dbghelp_private.h"
-#include "mscvpdb.h"
+#include "wine/mscvpdb.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp_msc);
 
@@ -127,12 +127,21 @@ static void codeview_init_basic_types(struct module* module)
     cv_basic_types[T_USHORT] = &symt_new_basic(module, btUInt,  "unsigned short", 2)->symt;
     cv_basic_types[T_ULONG]  = &symt_new_basic(module, btUInt,  "unsigned long", 4)->symt;
     cv_basic_types[T_UQUAD]  = &symt_new_basic(module, btUInt,  "unsigned long long", 8)->symt;
+    cv_basic_types[T_BOOL08] = &symt_new_basic(module, btBool,  "BOOL08", 1)->symt;
+    cv_basic_types[T_BOOL16] = &symt_new_basic(module, btBool,  "BOOL16", 2)->symt;
+    cv_basic_types[T_BOOL32] = &symt_new_basic(module, btBool,  "BOOL32", 4)->symt;
+    cv_basic_types[T_BOOL64] = &symt_new_basic(module, btBool,  "BOOL64", 8)->symt;
     cv_basic_types[T_REAL32] = &symt_new_basic(module, btFloat, "float", 4)->symt;
     cv_basic_types[T_REAL64] = &symt_new_basic(module, btFloat, "double", 8)->symt;
     cv_basic_types[T_RCHAR]  = &symt_new_basic(module, btInt,   "signed char", 1)->symt;
     cv_basic_types[T_WCHAR]  = &symt_new_basic(module, btWChar, "wchar_t", 2)->symt;
+    cv_basic_types[T_INT2]   = &symt_new_basic(module, btInt,   "INT2", 2)->symt;
+    cv_basic_types[T_UINT2]  = &symt_new_basic(module, btUInt,  "UINT2", 2)->symt;
     cv_basic_types[T_INT4]   = &symt_new_basic(module, btInt,   "INT4", 4)->symt;
     cv_basic_types[T_UINT4]  = &symt_new_basic(module, btUInt,  "UINT4", 4)->symt;
+    cv_basic_types[T_INT8]   = &symt_new_basic(module, btInt,   "INT8", 8)->symt;
+    cv_basic_types[T_UINT8]  = &symt_new_basic(module, btUInt,  "UINT8", 8)->symt;
+    cv_basic_types[T_HRESULT]= &symt_new_basic(module, btUInt,  "HRESULT", 4)->symt;
 
     cv_basic_types[T_32PVOID]   = &symt_new_pointer(module, cv_basic_types[T_VOID])->symt;
     cv_basic_types[T_32PCHAR]   = &symt_new_pointer(module, cv_basic_types[T_CHAR])->symt;
@@ -143,12 +152,21 @@ static void codeview_init_basic_types(struct module* module)
     cv_basic_types[T_32PUSHORT] = &symt_new_pointer(module, cv_basic_types[T_USHORT])->symt;
     cv_basic_types[T_32PULONG]  = &symt_new_pointer(module, cv_basic_types[T_ULONG])->symt;
     cv_basic_types[T_32PUQUAD]  = &symt_new_pointer(module, cv_basic_types[T_UQUAD])->symt;
+    cv_basic_types[T_32PBOOL08] = &symt_new_pointer(module, cv_basic_types[T_BOOL08])->symt;
+    cv_basic_types[T_32PBOOL16] = &symt_new_pointer(module, cv_basic_types[T_BOOL16])->symt;
+    cv_basic_types[T_32PBOOL32] = &symt_new_pointer(module, cv_basic_types[T_BOOL32])->symt;
+    cv_basic_types[T_32PBOOL64] = &symt_new_pointer(module, cv_basic_types[T_BOOL64])->symt;
     cv_basic_types[T_32PREAL32] = &symt_new_pointer(module, cv_basic_types[T_REAL32])->symt;
     cv_basic_types[T_32PREAL64] = &symt_new_pointer(module, cv_basic_types[T_REAL64])->symt;
     cv_basic_types[T_32PRCHAR]  = &symt_new_pointer(module, cv_basic_types[T_RCHAR])->symt;
     cv_basic_types[T_32PWCHAR]  = &symt_new_pointer(module, cv_basic_types[T_WCHAR])->symt;
+    cv_basic_types[T_32PINT2]   = &symt_new_pointer(module, cv_basic_types[T_INT2])->symt;
+    cv_basic_types[T_32PUINT2]  = &symt_new_pointer(module, cv_basic_types[T_UINT2])->symt;
     cv_basic_types[T_32PINT4]   = &symt_new_pointer(module, cv_basic_types[T_INT4])->symt;
     cv_basic_types[T_32PUINT4]  = &symt_new_pointer(module, cv_basic_types[T_UINT4])->symt;
+    cv_basic_types[T_32PINT8]   = &symt_new_pointer(module, cv_basic_types[T_INT8])->symt;
+    cv_basic_types[T_32PUINT8]  = &symt_new_pointer(module, cv_basic_types[T_UINT8])->symt;
+    cv_basic_types[T_32PHRESULT]= &symt_new_pointer(module, cv_basic_types[T_HRESULT])->symt;
 }
 
 static int numeric_leaf(int* value, const unsigned short int* leaf)
@@ -176,7 +194,7 @@ static int numeric_leaf(int* value, const unsigned short int* leaf)
 
         case LF_USHORT:
             length += 2;
-            *value = *(const unsigned short*)leaf;
+            *value = *leaf;
             break;
 
         case LF_LONG:
@@ -321,7 +339,7 @@ struct codeview_type_parse
     DWORD               num;
 };
 
-static inline const void* codeview_jump_to_type(struct codeview_type_parse* ctp, DWORD idx)
+static inline const void* codeview_jump_to_type(const struct codeview_type_parse* ctp, DWORD idx)
 {
     if (idx < FIRST_DEFINABLE_TYPE) return NULL;
     idx -= FIRST_DEFINABLE_TYPE;
@@ -344,21 +362,20 @@ static int codeview_add_type(unsigned int typeno, struct symt* dt)
     {
         cv_current_module->num_defined_types += 0x100;
         if (cv_current_module->defined_types)
-            cv_current_module->defined_types = (struct symt**)
-                HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 
-                            cv_current_module->defined_types,
+            cv_current_module->defined_types = HeapReAlloc(GetProcessHeap(),
+                            HEAP_ZERO_MEMORY, cv_current_module->defined_types,
                             cv_current_module->num_defined_types * sizeof(struct symt*));
         else
-            cv_current_module->defined_types = (struct symt**)
-                HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                          cv_current_module->num_defined_types * sizeof(struct symt*));
+            cv_current_module->defined_types = HeapAlloc(GetProcessHeap(),
+                            HEAP_ZERO_MEMORY,
+                            cv_current_module->num_defined_types * sizeof(struct symt*));
 
         if (cv_current_module->defined_types == NULL) return FALSE;
     }
     if (cv_current_module->defined_types[typeno - FIRST_DEFINABLE_TYPE])
     {
         if (cv_current_module->defined_types[typeno - FIRST_DEFINABLE_TYPE] != dt)
-            FIXME("Overwritting at %x\n", typeno);
+            FIXME("Overwriting at %x\n", typeno);
     }
     cv_current_module->defined_types[typeno - FIRST_DEFINABLE_TYPE] = dt;
     return TRUE;
@@ -394,7 +411,7 @@ static void* codeview_cast_symt(struct symt* symt, enum SymTagEnum tag)
 }
 
 static struct symt* codeview_fetch_type(struct codeview_type_parse* ctp,
-                                        unsigned typeno)
+                                        unsigned typeno, BOOL details)
 {
     struct symt*                symt;
     const union codeview_type*  p;
@@ -408,7 +425,7 @@ static struct symt* codeview_fetch_type(struct codeview_type_parse* ctp,
         FIXME("Cannot locate type %x\n", typeno);
         return NULL;
     }
-    symt = codeview_parse_one_type(ctp, typeno, p, FALSE);
+    symt = codeview_parse_one_type(ctp, typeno, p, details);
     if (!symt) FIXME("Couldn't load forward type %x\n", typeno);
     return symt;
 }
@@ -424,7 +441,7 @@ static struct symt* codeview_add_type_pointer(struct codeview_type_parse* ctp,
         existing = codeview_cast_symt(existing, SymTagPointerType);
         return existing;
     }
-    pointee = codeview_fetch_type(ctp, pointee_type);
+    pointee = codeview_fetch_type(ctp, pointee_type, FALSE);
     return &symt_new_pointer(ctp->module, pointee)->symt;
 }
 
@@ -434,8 +451,8 @@ static struct symt* codeview_add_type_array(struct codeview_type_parse* ctp,
                                             unsigned int indextype,
                                             unsigned int arr_len)
 {
-    struct symt*        elem = codeview_fetch_type(ctp, elemtype);
-    struct symt*        index = codeview_fetch_type(ctp, indextype);
+    struct symt*        elem = codeview_fetch_type(ctp, elemtype, FALSE);
+    struct symt*        index = codeview_fetch_type(ctp, indextype, FALSE);
     DWORD               arr_max = 0;
 
     if (elem)
@@ -507,19 +524,19 @@ static void codeview_add_udt_element(struct codeview_type_parse* ctp,
         {
         case LF_BITFIELD_V1:
             symt_add_udt_element(ctp->module, symt, name,
-                                 codeview_fetch_type(ctp, cv_type->bitfield_v1.type),
+                                 codeview_fetch_type(ctp, cv_type->bitfield_v1.type, FALSE),
                                  cv_type->bitfield_v1.bitoff,
                                  cv_type->bitfield_v1.nbits);
             return;
         case LF_BITFIELD_V2:
             symt_add_udt_element(ctp->module, symt, name,
-                                 codeview_fetch_type(ctp, cv_type->bitfield_v2.type),
+                                 codeview_fetch_type(ctp, cv_type->bitfield_v2.type, FALSE),
                                  cv_type->bitfield_v2.bitoff,
                                  cv_type->bitfield_v2.nbits);
             return;
         }
     }
-    subtype = codeview_fetch_type(ctp, type);
+    subtype = codeview_fetch_type(ctp, type, FALSE);
 
     if (subtype)
     {
@@ -644,6 +661,11 @@ static int codeview_add_type_struct_field_list(struct codeview_type_parse* ctp,
             ptr += 2 + 4 + 2 + (1 + type->stmember_v2.p_name.namelen);
             break;
 
+        case LF_STMEMBER_V3:
+            /* FIXME: ignored for now */
+            ptr += 2 + 4 + 2 + (strlen(type->stmember_v3.name) + 1);
+            break;
+
         case LF_METHOD_V1:
             /* FIXME: ignored for now */
             ptr += 2 + 2 + 2 + (1 + type->method_v1.p_name.namelen);
@@ -654,6 +676,11 @@ static int codeview_add_type_struct_field_list(struct codeview_type_parse* ctp,
             ptr += 2 + 2 + 4 + (1 + type->method_v2.p_name.namelen);
             break;
 
+        case LF_METHOD_V3:
+            /* FIXME: ignored for now */
+            ptr += 2 + 2 + 4 + (strlen(type->method_v3.name) + 1);
+            break;
+
         case LF_NESTTYPE_V1:
             /* FIXME: ignored for now */
             ptr += 2 + 2 + (1 + type->nesttype_v1.p_name.namelen);
@@ -662,6 +689,11 @@ static int codeview_add_type_struct_field_list(struct codeview_type_parse* ctp,
         case LF_NESTTYPE_V2:
             /* FIXME: ignored for now */
             ptr += 2 + 2 + 4 + (1 + type->nesttype_v2.p_name.namelen);
+            break;
+
+        case LF_NESTTYPE_V3:
+            /* FIXME: ignored for now */
+            ptr += 2 + 2 + 4 + (strlen(type->nesttype_v3.name) + 1);
             break;
 
         case LF_VFUNCTAB_V1:
@@ -702,6 +734,20 @@ static int codeview_add_type_struct_field_list(struct codeview_type_parse* ctp,
             }
             break;
 
+        case LF_ONEMETHOD_V3:
+            /* FIXME: ignored for now */
+            switch ((type->onemethod_v3.attribute >> 2) & 7)
+            {
+            case 4: case 6: /* (pure) introducing virtual method */
+                ptr += 2 + 2 + 4 + 4 + (strlen(type->onemethod_virt_v3.name) + 1);
+                break;
+
+            default:
+                ptr += 2 + 2 + 4 + (strlen(type->onemethod_v3.name) + 1);
+                break;
+            }
+            break;
+
         default:
             FIXME("Unsupported type %04x in STRUCT field list\n", type->generic.id);
             return FALSE;
@@ -714,7 +760,8 @@ static int codeview_add_type_struct_field_list(struct codeview_type_parse* ctp,
 static struct symt* codeview_add_type_enum(struct codeview_type_parse* ctp,
                                            struct symt* existing,
                                            const char* name,
-                                           unsigned fieldlistno)
+                                           unsigned fieldlistno,
+                                           unsigned basetype)
 {
     struct symt_enum*   symt;
 
@@ -725,7 +772,8 @@ static struct symt* codeview_add_type_enum(struct codeview_type_parse* ctp,
     }
     else
     {
-        symt = symt_new_enum(ctp->module, name);
+        symt = symt_new_enum(ctp->module, name,
+                             codeview_fetch_type(ctp, basetype, FALSE));
         if (fieldlistno)
         {
             const union codeview_reftype* fieldlist;
@@ -755,12 +803,9 @@ static struct symt* codeview_add_type_struct(struct codeview_type_parse* ctp,
 
 static struct symt* codeview_new_func_signature(struct codeview_type_parse* ctp, 
                                                 struct symt* existing,
-                                                unsigned ret_type,
-                                                unsigned args_list,
                                                 enum CV_call_e call_conv)
 {
     struct symt_function_signature*     sym;
-    const union codeview_reftype*       reftype;
 
     if (existing)
     {
@@ -769,10 +814,19 @@ static struct symt* codeview_new_func_signature(struct codeview_type_parse* ctp,
     }
     else
     {
-        sym = symt_new_function_signature(ctp->module, 
-                                          codeview_fetch_type(ctp, ret_type),
-                                          call_conv);
+        sym = symt_new_function_signature(ctp->module, NULL, call_conv);
     }
+    return &sym->symt;
+}
+
+static void codeview_add_func_signature_args(struct codeview_type_parse* ctp,
+                                             struct symt_function_signature* sym,
+                                             unsigned ret_type,
+                                             unsigned args_list)
+{
+    const union codeview_reftype*       reftype;
+
+    sym->rettype = codeview_fetch_type(ctp, ret_type, FALSE);
     if (args_list && (reftype = codeview_jump_to_type(ctp, args_list)))
     {
         int i;
@@ -781,19 +835,17 @@ static struct symt* codeview_new_func_signature(struct codeview_type_parse* ctp,
         case LF_ARGLIST_V1:
             for (i = 0; i < reftype->arglist_v1.num; i++)
                 symt_add_function_signature_parameter(ctp->module, sym,
-                                                      codeview_fetch_type(ctp, reftype->arglist_v1.args[i]));
+                                                      codeview_fetch_type(ctp, reftype->arglist_v1.args[i], FALSE));
             break;
         case LF_ARGLIST_V2:
             for (i = 0; i < reftype->arglist_v2.num; i++)
                 symt_add_function_signature_parameter(ctp->module, sym,
-                                                      codeview_fetch_type(ctp, reftype->arglist_v2.args[i]));
+                                                      codeview_fetch_type(ctp, reftype->arglist_v2.args[i], FALSE));
             break;
         default:
             FIXME("Unexpected leaf %x for signature's pmt\n", reftype->generic.id);
         }
     }
-
-    return &sym->symt;
 }
 
 static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
@@ -811,8 +863,8 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
     switch (type->generic.id)
     {
     case LF_MODIFIER_V1:
-        /* FIXME: we don't handle modifiers, 
-         * but readd previous type on the curr_type 
+        /* FIXME: we don't handle modifiers,
+         * but read previous type on the curr_type
          */
         WARN("Modifier on %x: %s%s%s%s\n",
              type->modifier_v1.type,
@@ -820,9 +872,7 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
              type->modifier_v1.attribute & 0x02 ? "volatile " : "",
              type->modifier_v1.attribute & 0x04 ? "unaligned " : "",
              type->modifier_v1.attribute & ~0x07 ? "unknown " : "");
-        if (!(symt = codeview_get_type(type->modifier_v1.type, TRUE)))
-            symt = codeview_parse_one_type(ctp, type->modifier_v1.type,
-                                           codeview_jump_to_type(ctp, type->modifier_v1.type), details);
+        symt = codeview_fetch_type(ctp, type->modifier_v1.type, details);
         break;
     case LF_MODIFIER_V2:
         /* FIXME: we don't handle modifiers, but readd previous type on the curr_type */
@@ -832,9 +882,7 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
              type->modifier_v2.attribute & 0x02 ? "volatile " : "",
              type->modifier_v2.attribute & 0x04 ? "unaligned " : "",
              type->modifier_v2.attribute & ~0x07 ? "unknown " : "");
-        if (!(symt = codeview_get_type(type->modifier_v2.type, TRUE)))
-            symt = codeview_parse_one_type(ctp, type->modifier_v2.type,
-                                           codeview_jump_to_type(ctp, type->modifier_v2.type), details);
+        symt = codeview_fetch_type(ctp, type->modifier_v2.type, details);
         break;
 
     case LF_POINTER_V1:
@@ -964,49 +1012,73 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
     case LF_ENUM_V1:
         symt = codeview_add_type_enum(ctp, existing,
                                       terminate_string(&type->enumeration_v1.p_name),
-                                      type->enumeration_v1.fieldlist);
+                                      type->enumeration_v1.fieldlist,
+                                      type->enumeration_v1.type);
         break;
 
     case LF_ENUM_V2:
         symt = codeview_add_type_enum(ctp, existing,
                                       terminate_string(&type->enumeration_v2.p_name),
-                                      type->enumeration_v2.fieldlist);
+                                      type->enumeration_v2.fieldlist,
+                                      type->enumeration_v2.type);
         break;
 
     case LF_ENUM_V3:
         symt = codeview_add_type_enum(ctp, existing, type->enumeration_v3.name,
-                                      type->enumeration_v3.fieldlist);
+                                      type->enumeration_v3.fieldlist,
+                                      type->enumeration_v3.type);
         break;
 
     case LF_PROCEDURE_V1:
-        symt = codeview_new_func_signature(ctp, existing,
-                                           type->procedure_v1.rvtype,
-                                           details ? type->procedure_v1.arglist : 0,
-                                           type->procedure_v1.call);
+        symt = codeview_new_func_signature(ctp, existing, type->procedure_v1.call);
+        if (details)
+        {
+            codeview_add_type(curr_type, symt);
+            codeview_add_func_signature_args(ctp,
+                                             (struct symt_function_signature*)symt,
+                                             type->procedure_v1.rvtype,
+                                             type->procedure_v1.arglist);
+        }
         break;
     case LF_PROCEDURE_V2:
-        symt = codeview_new_func_signature(ctp, existing,
-                                           type->procedure_v2.rvtype,
-                                           details ? type->procedure_v2.arglist : 0,
-                                           type->procedure_v2.call);
+        symt = codeview_new_func_signature(ctp, existing,type->procedure_v2.call);
+        if (details)
+        {
+            codeview_add_type(curr_type, symt);
+            codeview_add_func_signature_args(ctp,
+                                             (struct symt_function_signature*)symt,
+                                             type->procedure_v2.rvtype,
+                                             type->procedure_v2.arglist);
+        }
         break;
+
     case LF_MFUNCTION_V1:
         /* FIXME: for C++, this is plain wrong, but as we don't use arg types
          * nor class information, this would just do for now
          */
-        symt = codeview_new_func_signature(ctp, existing,
-                                           type->mfunction_v1.rvtype,
-                                           details ? type->mfunction_v1.arglist : 0,
-                                           type->mfunction_v1.call);
+        symt = codeview_new_func_signature(ctp, existing, type->mfunction_v1.call);
+        if (details)
+        {
+            codeview_add_type(curr_type, symt);
+            codeview_add_func_signature_args(ctp,
+                                             (struct symt_function_signature*)symt,
+                                             type->mfunction_v1.rvtype,
+                                             type->mfunction_v1.arglist);
+        }
         break;
     case LF_MFUNCTION_V2:
         /* FIXME: for C++, this is plain wrong, but as we don't use arg types
          * nor class information, this would just do for now
          */
-        symt = codeview_new_func_signature(ctp, existing,
-                                           type->mfunction_v2.rvtype,
-                                           details ? type->mfunction_v2.arglist : 0,
-                                           type->mfunction_v2.call);
+        symt = codeview_new_func_signature(ctp, existing, type->mfunction_v2.call);
+        if (details)
+        {
+            codeview_add_type(curr_type, symt);
+            codeview_add_func_signature_args(ctp,
+                                             (struct symt_function_signature*)symt,
+                                             type->mfunction_v2.rvtype,
+                                             type->mfunction_v2.arglist);
+        }
         break;
 
     case LF_VTSHAPE_V1:
@@ -1046,8 +1118,8 @@ static int codeview_parse_type_table(struct codeview_type_parse* ctp)
          *   X  1500-150d       for V3 types
          *      8000-8010       for numeric leafes
          */
-        if (type->generic.id & 0x8600) continue;
-        codeview_parse_one_type(ctp, curr_type, type, TRUE);
+        if (!(type->generic.id & 0x8600) || (type->generic.id & 0x0100))
+            codeview_parse_one_type(ctp, curr_type, type, TRUE);
     }
 
     return TRUE;
@@ -1101,8 +1173,8 @@ static struct codeview_linetab* codeview_snarf_linetab(struct module* module,
      * There is one header for each segment, so that we can reach in
      * and pull bits as required.
      */
-    lt_hdr = (struct codeview_linetab*)
-        HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (nseg + 1) * sizeof(*lt_hdr));
+    lt_hdr = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                (nseg + 1) * sizeof(*lt_hdr));
     if (lt_hdr == NULL)
     {
         goto leave;
@@ -1239,6 +1311,7 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
     struct symt*                        symt;
     const char*                         name;
     struct symt_compiland*              compiland = NULL;
+    struct location                     loc;
 
     /*
      * Loop over the different types of records and whenever we
@@ -1249,6 +1322,7 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
         const union codeview_symbol* sym = (const union codeview_symbol*)(root + i);
         length = sym->generic.len + 2;
         if (i + length > size) break;
+        if (!sym->generic.id || length < 4) break;
         if (length & 3) FIXME("unpadded len %u\n", length);
 
         switch (sym->generic.id)
@@ -1337,8 +1411,11 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
                                           codeview_get_type(sym->proc_v1.proctype, FALSE));
             codeview_add_func_linenum(msc_dbg->module, curr_func, flt, 
                                       sym->proc_v1.offset, sym->proc_v1.proc_len);
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, sym->proc_v1.debug_start, NULL);
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, sym->proc_v1.debug_end, NULL);
+            loc.kind = loc_absolute;
+            loc.offset = sym->proc_v1.debug_start;
+            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, &loc, NULL);
+            loc.offset = sym->proc_v1.debug_end;
+            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, &loc, NULL);
 	    break;
 	case S_GPROC_V2:
 	case S_LPROC_V2:
@@ -1351,8 +1428,11 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
                                           codeview_get_type(sym->proc_v2.proctype, FALSE));
             codeview_add_func_linenum(msc_dbg->module, curr_func, flt, 
                                       sym->proc_v2.offset, sym->proc_v2.proc_len);
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, sym->proc_v2.debug_start, NULL);
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, sym->proc_v2.debug_end, NULL);
+            loc.kind = loc_absolute;
+            loc.offset = sym->proc_v2.debug_start;
+            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, &loc, NULL);
+            loc.offset = sym->proc_v2.debug_end;
+            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, &loc, NULL);
 	    break;
 	case S_GPROC_V3:
 	case S_LPROC_V3:
@@ -1365,45 +1445,83 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
                                           codeview_get_type(sym->proc_v3.proctype, FALSE));
             codeview_add_func_linenum(msc_dbg->module, curr_func, flt, 
                                       sym->proc_v3.offset, sym->proc_v3.proc_len);
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, sym->proc_v3.debug_start, NULL);
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, sym->proc_v3.debug_end, NULL);
+            loc.kind = loc_absolute;
+            loc.offset = sym->proc_v3.debug_start;
+            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, &loc, NULL);
+            loc.offset = sym->proc_v3.debug_end;
+            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, &loc, NULL);
 	    break;
         /*
          * Function parameters and stack variables.
          */
 	case S_BPREL_V1:
+            loc.kind = loc_regrel;
+            loc.reg = 0; /* FIXME */
+            loc.offset = sym->stack_v1.offset;
             symt_add_func_local(msc_dbg->module, curr_func, 
                                 sym->stack_v1.offset > 0 ? DataIsParam : DataIsLocal, 
-                                0, TRUE, sym->stack_v1.offset, block,
+                                &loc, block,
                                 codeview_get_type(sym->stack_v1.symtype, FALSE),
                                 terminate_string(&sym->stack_v1.p_name));
             break;
 	case S_BPREL_V2:
+            loc.kind = loc_regrel;
+            loc.reg = 0; /* FIXME */
+            loc.offset = sym->stack_v2.offset;
             symt_add_func_local(msc_dbg->module, curr_func, 
                                 sym->stack_v2.offset > 0 ? DataIsParam : DataIsLocal, 
-                                0, TRUE, sym->stack_v2.offset, block,
+                                &loc, block,
                                 codeview_get_type(sym->stack_v2.symtype, FALSE),
                                 terminate_string(&sym->stack_v2.p_name));
             break;
 	case S_BPREL_V3:
+            loc.kind = loc_regrel;
+            loc.reg = 0; /* FIXME */
+            loc.offset = sym->stack_v3.offset;
             symt_add_func_local(msc_dbg->module, curr_func, 
                                 sym->stack_v3.offset > 0 ? DataIsParam : DataIsLocal, 
-                                0, TRUE, sym->stack_v3.offset, block,
+                                &loc, block,
                                 codeview_get_type(sym->stack_v3.symtype, FALSE),
                                 sym->stack_v3.name);
             break;
+	case S_BPREL_XXXX_V3:
+            loc.kind = loc_regrel;
+            loc.reg = 0; /* FIXME */
+            loc.offset = sym->stack_xxxx_v3.offset;
+            WARN("Supposed stack variable %s (%d)\n", sym->stack_xxxx_v3.name, sym->stack_xxxx_v3.unknown);
+            symt_add_func_local(msc_dbg->module, curr_func,
+                                sym->stack_xxxx_v3.offset > 0 ? DataIsParam : DataIsLocal,
+                                &loc, block,
+                                codeview_get_type(sym->stack_xxxx_v3.symtype, FALSE),
+                                sym->stack_xxxx_v3.name);
+            break;
 
         case S_REGISTER_V1:
+            loc.kind = loc_register;
+            loc.reg = sym->register_v1.reg;
+            loc.offset = 0;
             symt_add_func_local(msc_dbg->module, curr_func, 
-                                DataIsLocal, sym->register_v1.reg, FALSE, 0,
+                                DataIsLocal, &loc,
                                 block, codeview_get_type(sym->register_v1.type, FALSE),
                                 terminate_string(&sym->register_v1.p_name));
             break;
         case S_REGISTER_V2:
+            loc.kind = loc_register;
+            loc.reg = sym->register_v2.reg;
+            loc.offset = 0;
             symt_add_func_local(msc_dbg->module, curr_func, 
-                                DataIsLocal, sym->register_v2.reg, FALSE, 0,
+                                DataIsLocal, &loc,
                                 block, codeview_get_type(sym->register_v2.type, FALSE),
                                 terminate_string(&sym->register_v2.p_name));
+            break;
+        case S_REGISTER_V3:
+            loc.kind = loc_register;
+            loc.reg = sym->register_v3.reg;
+            loc.offset = 0;
+            symt_add_func_local(msc_dbg->module, curr_func,
+                                DataIsLocal, &loc,
+                                block, codeview_get_type(sym->register_v3.type, FALSE),
+                                sym->register_v3.name);
             break;
 
         case S_BLOCK_V1:
@@ -1429,35 +1547,35 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
             }
             break;
 
-        case S_COMPILE_V1:
-            TRACE("S-Compile-V1 %x %s\n", 
-                  sym->compile_v1.unknown, terminate_string(&sym->compile_v1.p_name));
+        case S_COMPILAND_V1:
+            TRACE("S-Compiland-V1 %x %s\n",
+                  sym->compiland_v1.unknown, terminate_string(&sym->compiland_v1.p_name));
             break;
 
-        case S_COMPILE_V2:
-            TRACE("S-Compile-V2 %s\n", terminate_string(&sym->compile_v2.p_name));
+        case S_COMPILAND_V2:
+            TRACE("S-Compiland-V2 %s\n", terminate_string(&sym->compiland_v2.p_name));
             if (TRACE_ON(dbghelp_msc))
             {
-                const char* ptr1 = sym->compile_v2.p_name.name + sym->compile_v2.p_name.namelen;
+                const char* ptr1 = sym->compiland_v2.p_name.name + sym->compiland_v2.p_name.namelen;
                 const char* ptr2;
                 while (*ptr1)
                 {
                     ptr2 = ptr1 + strlen(ptr1) + 1;
-                    TRACE("\t%s => %s\n", ptr1, ptr2); 
+                    TRACE("\t%s => %s\n", ptr1, debugstr_a(ptr2));
                     ptr1 = ptr2 + strlen(ptr2) + 1;
                 }
             }
             break;
-        case S_COMPILE_V3:
-            TRACE("S-Compile-V3 %s\n", sym->compile_v3.name);
+        case S_COMPILAND_V3:
+            TRACE("S-Compiland-V3 %s\n", sym->compiland_v3.name);
             if (TRACE_ON(dbghelp_msc))
             {
-                const char* ptr1 = sym->compile_v3.name + strlen(sym->compile_v3.name);
+                const char* ptr1 = sym->compiland_v3.name + strlen(sym->compiland_v3.name);
                 const char* ptr2;
                 while (*ptr1)
                 {
                     ptr2 = ptr1 + strlen(ptr1) + 1;
-                    TRACE("\t%s => %s\n", ptr1, ptr2); 
+                    TRACE("\t%s => %s\n", ptr1, debugstr_a(ptr2));
                     ptr1 = ptr2 + strlen(ptr2) + 1;
                 }
             }
@@ -1465,7 +1583,7 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
 
         case S_OBJNAME_V1:
             TRACE("S-ObjName %s\n", terminate_string(&sym->objname_v1.p_name));
-            compiland = symt_new_compiland(msc_dbg->module, 
+            compiland = symt_new_compiland(msc_dbg->module, 0 /* FIXME */,
                                            source_new(msc_dbg->module, NULL,
                                                       terminate_string(&sym->objname_v1.p_name)));
             break;
@@ -1473,79 +1591,77 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
         case S_LABEL_V1:
             if (curr_func)
             {
-                symt_add_function_point(msc_dbg->module, curr_func, SymTagLabel, 
-                                        codeview_get_address(msc_dbg, sym->label_v1.segment, sym->label_v1.offset) - curr_func->address,
+                loc.kind = loc_absolute;
+                loc.offset = codeview_get_address(msc_dbg, sym->label_v1.segment, sym->label_v1.offset) - curr_func->address;
+                symt_add_function_point(msc_dbg->module, curr_func, SymTagLabel, &loc,
                                         terminate_string(&sym->label_v1.p_name));
             }
-            else
-                FIXME("No current function for label %s\n",
-                      terminate_string(&sym->label_v1.p_name));
+            else symt_new_label(msc_dbg->module, compiland,
+                                terminate_string(&sym->label_v1.p_name),
+                                codeview_get_address(msc_dbg, sym->label_v1.segment, sym->label_v1.offset));
             break;
         case S_LABEL_V3:
             if (curr_func)
             {
+                loc.kind = loc_absolute;
+                loc.offset = codeview_get_address(msc_dbg, sym->label_v3.segment, sym->label_v3.offset) - curr_func->address;
                 symt_add_function_point(msc_dbg->module, curr_func, SymTagLabel, 
-                                        codeview_get_address(msc_dbg, sym->label_v3.segment, sym->label_v3.offset) - curr_func->address,
-                                        sym->label_v3.name);
+                                        &loc, sym->label_v3.name);
             }
-            else
-                FIXME("No current function for label %s\n", sym->label_v3.name);
+            else symt_new_label(msc_dbg->module, compiland, sym->label_v3.name,
+                                codeview_get_address(msc_dbg, sym->label_v3.segment, sym->label_v3.offset));
             break;
 
         case S_CONSTANT_V1:
             {
-                int                     val, vlen;
+                int                     vlen;
                 const struct p_string*  name;
-                const char*             x;
                 struct symt*            se;
+                VARIANT                 v;
 
-                vlen = numeric_leaf(&val, &sym->constant_v1.cvalue);
+                v.n1.n2.vt = VT_I4;
+                vlen = numeric_leaf(&v.n1.n2.n3.intVal, &sym->constant_v1.cvalue);
                 name = (const struct p_string*)((const char*)&sym->constant_v1.cvalue + vlen);
                 se = codeview_get_type(sym->constant_v1.type, FALSE);
-                if (!se) x = "---";
-                else if (se->tag == SymTagEnum) x = ((struct symt_enum*)se)->name;
-                else x = "###";
-                    
-                TRACE("S-Constant-V1 %u %s %x (%s)\n", 
-                      val, terminate_string(name), sym->constant_v1.type, x);
-                /* FIXME: we should add this as a constant value */
+
+                TRACE("S-Constant-V1 %u %s %x\n",
+                      v.n1.n2.n3.intVal, terminate_string(name), sym->constant_v1.type);
+                symt_new_constant(msc_dbg->module, compiland, terminate_string(name),
+                                  se, &v);
             }
             break;
         case S_CONSTANT_V2:
             {
-                int                     val, vlen;
+                int                     vlen;
                 const struct p_string*  name;
-                const char*             x;
                 struct symt*            se;
+                VARIANT                 v;
 
-                vlen = numeric_leaf(&val, &sym->constant_v2.cvalue);
+                v.n1.n2.vt = VT_I4;
+                vlen = numeric_leaf(&v.n1.n2.n3.intVal, &sym->constant_v2.cvalue);
                 name = (const struct p_string*)((const char*)&sym->constant_v2.cvalue + vlen);
                 se = codeview_get_type(sym->constant_v2.type, FALSE);
-                if (!se) x = "---";
-                else if (se->tag == SymTagEnum) x = ((struct symt_enum*)se)->name;
-                else x = "###";
-                    
-                TRACE("S-Constant-V2 %u %s %x (%s)\n", 
-                      val, terminate_string(name), sym->constant_v2.type, x);
-                /* FIXME: we should add this as a constant value */
+
+                TRACE("S-Constant-V2 %u %s %x\n",
+                      v.n1.n2.n3.intVal, terminate_string(name), sym->constant_v2.type);
+                symt_new_constant(msc_dbg->module, compiland, terminate_string(name),
+                                  se, &v);
             }
             break;
         case S_CONSTANT_V3:
             {
-                int                     val, vlen;
+                int                     vlen;
                 const char*             name;
-                const char*             x;
                 struct symt*            se;
+                VARIANT                 v;
 
-                vlen = numeric_leaf(&val, &sym->constant_v3.cvalue);
+                v.n1.n2.vt = VT_I4;
+                vlen = numeric_leaf(&v.n1.n2.n3.intVal, &sym->constant_v3.cvalue);
                 name = (const char*)&sym->constant_v3.cvalue + vlen;
                 se = codeview_get_type(sym->constant_v3.type, FALSE);
-                if (!se) x = "---";
-                else if (se->tag == SymTagEnum) x = ((struct symt_enum*)se)->name;
-                else x = "###";
-                    
-                TRACE("S-Constant-V3 %u %s %x (%s)\n", 
-                      val, name, sym->constant_v3.type, x);
+
+                TRACE("S-Constant-V3 %u %s %x\n",
+                      v.n1.n2.n3.intVal, name, sym->constant_v3.type);
                 /* FIXME: we should add this as a constant value */
             }
             break;
@@ -1595,7 +1711,7 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
             length += (*name + 1 + 3) & ~3;
             break;
 
-        case S_PUB_DATA_V3:
+        case S_PUB_V3:
             if (!(dbghelp_options & SYMOPT_NO_PUBLICS))
             {
                 symt_new_public(msc_dbg->module, compiland,
@@ -1606,6 +1722,8 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
             break;
         case S_PUB_FUNC1_V3:
         case S_PUB_FUNC2_V3: /* using a data_v3 isn't what we'd expect */
+#if 0
+            /* FIXME: this is plain wrong (from a simple test) */
             if (!(dbghelp_options & SYMOPT_NO_PUBLICS))
             {
                 symt_new_public(msc_dbg->module, compiland,
@@ -1613,6 +1731,7 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
                                 codeview_get_address(msc_dbg, sym->data_v3.segment, sym->data_v3.offset),
                                 1, TRUE /* FIXME */, TRUE);
             }
+#endif
             break;
 
         case S_MSTOOL_V3: /* just to silence a few warnings */
@@ -1621,6 +1740,10 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
         case S_SSEARCH_V1:
             TRACE("Start search: seg=0x%x at offset 0x%08x\n",
                   sym->ssearch_v1.segment, sym->ssearch_v1.offset);
+            break;
+
+        case S_ALIGN_V1:
+            TRACE("S-Align V1\n");
             break;
 
         default:
@@ -1701,7 +1824,7 @@ static void* pdb_read_ds_file(const struct PDB_DS_HEADER* pdb,
 
     if (toc->file_size[file_nr] == 0 || toc->file_size[file_nr] == 0xFFFFFFFF)
     {
-        FIXME(">>> requesting NULL stream (%lu)\n", file_nr);
+        FIXME(">>> requesting NULL stream (%u)\n", file_nr);
         return NULL;
     }
     block_list = &toc->file_size[toc->num_files];
@@ -1829,7 +1952,7 @@ static void pdb_convert_symbol_file(const PDB_SYMBOLS* symbols,
     }
 }
 
-static BOOL CALLBACK pdb_match(char* file, void* user)
+static BOOL CALLBACK pdb_match(const char* file, void* user)
 {
     /* accept first file that exists */
     HANDLE h = CreateFileA(file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -1874,7 +1997,7 @@ static HANDLE open_pdb_file(const struct process* pcs,
 }
 
 static void pdb_process_types(const struct msc_debug_info* msc_dbg, 
-                              const char* image, struct pdb_lookup* pdb_lookup)
+                              const char* image, const struct pdb_lookup* pdb_lookup)
 {
     BYTE*       types_image = NULL;
 
@@ -1898,7 +2021,7 @@ static void pdb_process_types(const struct msc_debug_info* msc_dbg,
         case 19990903:
             break;
         default:
-            ERR("-Unknown type info version %ld\n", types.version);
+            ERR("-Unknown type info version %d\n", types.version);
         }
 
         ctp.module = msc_dbg->module;
@@ -1962,7 +2085,7 @@ static BOOL pdb_init(struct pdb_lookup* pdb_lookup, const char* image, BOOL do_f
         case 19970604:      /* VC 6.0 */
             break;
         default:
-            ERR("-Unknown root block version %ld\n", root->Version);
+            ERR("-Unknown root block version %d\n", root->Version);
         }
         if (do_fill)
         {
@@ -1974,7 +2097,7 @@ static BOOL pdb_init(struct pdb_lookup* pdb_lookup, const char* image, BOOL do_f
                  pdb_lookup->u.jg.timestamp != root->TimeDateStamp ||
                  pdb_lookup->age != root->Age)
             ret = FALSE;
-        TRACE("found JG/%c for %s: age=%lx timestamp=%lx\n",
+        TRACE("found JG/%c for %s: age=%x timestamp=%x\n",
               do_fill ? 'f' : '-', pdb_lookup->filename, root->Age,
               root->TimeDateStamp);
         pdb_free(root);
@@ -1999,7 +2122,7 @@ static BOOL pdb_init(struct pdb_lookup* pdb_lookup, const char* image, BOOL do_f
         case 20000404:
             break;
         default:
-            ERR("-Unknown root block version %ld\n", root->Version);
+            ERR("-Unknown root block version %d\n", root->Version);
         }
         if (do_fill)
         {
@@ -2011,7 +2134,7 @@ static BOOL pdb_init(struct pdb_lookup* pdb_lookup, const char* image, BOOL do_f
                  memcmp(&pdb_lookup->u.ds.guid, &root->guid, sizeof(GUID)) ||
                  pdb_lookup->age != root->Age)
             ret = FALSE;
-        TRACE("found DS/%c for %s: age=%lx guid=%s\n",
+        TRACE("found DS/%c for %s: age=%x guid=%s\n",
               do_fill ? 'f' : '-', pdb_lookup->filename, root->Age,
               debugstr_guid(&root->guid));
         pdb_free(root);
@@ -2046,9 +2169,10 @@ static BOOL pdb_process_internal(const struct process* pcs,
 
 static void pdb_process_symbol_imports(const struct process* pcs, 
                                        const struct msc_debug_info* msc_dbg,
-                                       PDB_SYMBOLS* symbols, 
+                                       const PDB_SYMBOLS* symbols,
                                        const void* symbols_image,
-                                       char* image, struct pdb_lookup* pdb_lookup,
+                                       const char* image,
+                                       const struct pdb_lookup* pdb_lookup,
                                        unsigned module_index)
 {
     if (module_index == -1 && symbols && symbols->pdbimport_size)
@@ -2084,7 +2208,7 @@ static void pdb_process_symbol_imports(const struct process* pcs,
                 imp_pdb_lookup.kind = PDB_JG;
                 imp_pdb_lookup.u.jg.timestamp = imp->TimeDateStamp;
                 imp_pdb_lookup.age = imp->Age;
-                TRACE("got for %s: age=%lu ts=%lx\n",
+                TRACE("got for %s: age=%u ts=%x\n",
                       imp->filename, imp->Age, imp->TimeDateStamp);
                 pdb_process_internal(pcs, msc_dbg, &imp_pdb_lookup, i);
             }
@@ -2112,7 +2236,7 @@ static BOOL pdb_process_internal(const struct process* pcs,
 
     /* Open and map() .PDB file */
     if ((hFile = open_pdb_file(pcs, pdb_lookup)) == NULL ||
-        ((hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) == NULL) ||
+        ((hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) == NULL) ||
         ((image = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)) == NULL))
     {
         WARN("Unable to open .PDB file: %s\n", pdb_lookup->filename);
@@ -2137,7 +2261,7 @@ static BOOL pdb_process_internal(const struct process* pcs,
         case 19990903:
             break;
         default:
-            ERR("-Unknown symbol info version %ld %08lx\n", 
+            ERR("-Unknown symbol info version %d %08x\n",
                 symbols.version, symbols.version);
         }
 
@@ -2221,7 +2345,9 @@ static BOOL pdb_process_file(const struct process* pcs,
         else
             msc_dbg->module->module.PdbSig70 = pdb_lookup->u.ds.guid;
         msc_dbg->module->module.PdbAge = pdb_lookup->age;
-        strcpy(msc_dbg->module->module.LoadedPdbName, pdb_lookup->filename);
+        MultiByteToWideChar(CP_ACP, 0, pdb_lookup->filename, -1,
+                            msc_dbg->module->module.LoadedPdbName,
+                            sizeof(msc_dbg->module->module.LoadedPdbName) / sizeof(WCHAR));
         /* FIXME: we could have a finer grain here */
         msc_dbg->module->module.LineNumbers = TRUE;
         msc_dbg->module->module.GlobalSymbols = TRUE;
@@ -2238,9 +2364,9 @@ BOOL pdb_fetch_file_info(struct pdb_lookup* pdb_lookup)
     char*               image = NULL;
     BOOL                ret = TRUE;
 
-    if ((hFile = CreateFileA(pdb_lookup->filename, GENERIC_READ, FILE_SHARE_READ, NULL, 
+    if ((hFile = CreateFileA(pdb_lookup->filename, GENERIC_READ, FILE_SHARE_READ, NULL,
                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL)) == INVALID_HANDLE_VALUE ||
-        ((hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) == NULL) ||
+        ((hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) == NULL) ||
         ((image = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)) == NULL))
     {
         WARN("Unable to open .PDB file: %s\n", pdb_lookup->filename);
@@ -2254,7 +2380,7 @@ BOOL pdb_fetch_file_info(struct pdb_lookup* pdb_lookup)
 
     if (image) UnmapViewOfFile(image);
     if (hMap) CloseHandle(hMap);
-    if (hFile) CloseHandle(hFile);
+    if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
 
     return ret;
 }
@@ -2272,34 +2398,35 @@ BOOL pdb_fetch_file_info(struct pdb_lookup* pdb_lookup)
 static BOOL codeview_process_info(const struct process* pcs, 
                                   const struct msc_debug_info* msc_dbg)
 {
-    const CODEVIEW_HEADER_NBxx* cv = (const CODEVIEW_HEADER_NBxx*)msc_dbg->root;
+    const DWORD*                signature = (const DWORD*)msc_dbg->root;
     BOOL                        ret = FALSE;
     struct pdb_lookup           pdb_lookup;
 
-    TRACE("Processing signature %.4s\n", (const char*)&cv->dwSignature);
+    TRACE("Processing signature %.4s\n", (const char*)signature);
 
-    switch (cv->dwSignature)
+    switch (*signature)
     {
     case CODEVIEW_NB09_SIG:
     case CODEVIEW_NB11_SIG:
     {
-        const CV_DIRECTORY_HEADER*      hdr = (const CV_DIRECTORY_HEADER*)(msc_dbg->root + cv->lfoDirectory);
-        const CV_DIRECTORY_ENTRY*       ent;
-        const CV_DIRECTORY_ENTRY*       prev;
-        const CV_DIRECTORY_ENTRY*       next;
+        const OMFSignature*     cv = (const OMFSignature*)msc_dbg->root;
+        const OMFDirHeader*     hdr = (const OMFDirHeader*)(msc_dbg->root + cv->filepos);
+        const OMFDirEntry*      ent;
+        const OMFDirEntry*      prev;
+        const OMFDirEntry*      next;
         unsigned int                    i;
 
         codeview_init_basic_types(msc_dbg->module);
 
         for (i = 0; i < hdr->cDir; i++)
         {
-            ent = (const CV_DIRECTORY_ENTRY*)((const BYTE*)hdr + hdr->cbDirHeader + i * hdr->cbDirEntry);
-            if (ent->subsection == sstGlobalTypes)
+            ent = (const OMFDirEntry*)((const BYTE*)hdr + hdr->cbDirHeader + i * hdr->cbDirEntry);
+            if (ent->SubSection == sstGlobalTypes)
             {
-                const CV_ENTRY_GLOBAL_TYPES*    types;
+                const OMFGlobalTypes*           types;
                 struct codeview_type_parse      ctp;
 
-                types = (const CV_ENTRY_GLOBAL_TYPES*)(msc_dbg->root + ent->lfo);
+                types = (const OMFGlobalTypes*)(msc_dbg->root + ent->lfo);
                 ctp.module = msc_dbg->module;
                 ctp.offset = (const DWORD*)(types + 1);
                 ctp.num    = types->cTypes;
@@ -2314,15 +2441,15 @@ static BOOL codeview_process_info(const struct process* pcs,
             }
         }
 
-        ent = (const CV_DIRECTORY_ENTRY*)((const BYTE*)hdr + hdr->cbDirHeader);
+        ent = (const OMFDirEntry*)((const BYTE*)hdr + hdr->cbDirHeader);
         for (i = 0; i < hdr->cDir; i++, ent = next)
         {
             next = (i == hdr->cDir-1) ? NULL :
-                   (const CV_DIRECTORY_ENTRY*)((const BYTE*)ent + hdr->cbDirEntry);
+                   (const OMFDirEntry*)((const BYTE*)ent + hdr->cbDirEntry);
             prev = (i == 0) ? NULL :
-                   (const CV_DIRECTORY_ENTRY*)((const BYTE*)ent - hdr->cbDirEntry);
+                   (const OMFDirEntry*)((const BYTE*)ent - hdr->cbDirEntry);
 
-            if (ent->subsection == sstAlignSym)
+            if (ent->SubSection == sstAlignSym)
             {
                 /*
                  * Check the next and previous entry.  If either is a
@@ -2334,13 +2461,13 @@ static BOOL codeview_process_info(const struct process* pcs,
                 struct codeview_linetab*        linetab = NULL;
 
                 if (next && next->iMod == ent->iMod && 
-                    next->subsection == sstSrcModule)
+                    next->SubSection == sstSrcModule)
                     linetab = codeview_snarf_linetab(msc_dbg->module, 
                                                      msc_dbg->root + next->lfo, next->cb, 
                                                      TRUE);
 
                 if (prev && prev->iMod == ent->iMod &&
-                    prev->subsection == sstSrcModule)
+                    prev->SubSection == sstSrcModule)
                     linetab = codeview_snarf_linetab(msc_dbg->module, 
                                                      msc_dbg->root + prev->lfo, prev->cb, 
                                                      TRUE);
@@ -2364,7 +2491,7 @@ static BOOL codeview_process_info(const struct process* pcs,
 
     case CODEVIEW_NB10_SIG:
     {
-        const CODEVIEW_PDB_DATA* pdb = (const CODEVIEW_PDB_DATA*)(cv + 1);
+        const CODEVIEW_PDB_DATA* pdb = (const CODEVIEW_PDB_DATA*)msc_dbg->root;
         pdb_lookup.filename = pdb->name;
         pdb_lookup.kind = PDB_JG;
         pdb_lookup.u.jg.timestamp = pdb->timestamp;
@@ -2375,9 +2502,9 @@ static BOOL codeview_process_info(const struct process* pcs,
     }
     case CODEVIEW_RSDS_SIG:
     {
-        const CODEVIEW_HEADER_RSDS* rsds = (const CODEVIEW_HEADER_RSDS*)msc_dbg->root;
+        const OMFSignatureRSDS* rsds = (const OMFSignatureRSDS*)msc_dbg->root;
 
-        TRACE("Got RSDS type of PDB file: guid=%s unk=%08lx name=%s\n",
+        TRACE("Got RSDS type of PDB file: guid=%s unk=%08x name=%s\n",
               wine_dbgstr_guid(&rsds->guid), rsds->unknown, rsds->name);
         pdb_lookup.filename = rsds->name;
         pdb_lookup.kind = PDB_DS;
@@ -2388,14 +2515,14 @@ static BOOL codeview_process_info(const struct process* pcs,
         break;
     }
     default:
-        ERR("Unknown CODEVIEW signature %08lX in module %s\n",
-            cv->dwSignature, msc_dbg->module->module.ModuleName);
+        ERR("Unknown CODEVIEW signature %08x in module %s\n",
+            *signature, debugstr_w(msc_dbg->module->module.ModuleName));
         break;
     }
     if (ret)
     {
-        msc_dbg->module->module.CVSig = cv->dwSignature;
-        memcpy(msc_dbg->module->module.CVData, cv,
+        msc_dbg->module->module.CVSig = *signature;
+        memcpy(msc_dbg->module->module.CVData, msc_dbg->root,
                sizeof(msc_dbg->module->module.CVData));
     }
     return ret;

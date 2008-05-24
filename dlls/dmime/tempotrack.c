@@ -3,19 +3,19 @@
  * Copyright (C) 2003-2004 Rok Mandeljc
  * Copyright (C) 2004 Raphael Junqueira
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Library General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
 #include "dmime_private.h"
@@ -117,7 +117,7 @@ static HRESULT WINAPI IDirectMusicTempoTrack_IDirectMusicTrack_InitPlay (LPDIREC
     ERR(": no more memory\n");
     return E_OUTOFMEMORY;
   }
-  /** TODO real fill useful datas */
+  /** TODO real fill useful data */
   pState->dummy = 0;
   *ppStateData = pState;
   return S_OK;
@@ -310,7 +310,7 @@ static ULONG WINAPI IDirectMusicTempoTrack_IPersistStream_Release (LPPERSISTSTRE
 static HRESULT WINAPI IDirectMusicTempoTrack_IPersistStream_GetClassID (LPPERSISTSTREAM iface, CLSID* pClassID) {
   ICOM_THIS_MULTI(IDirectMusicSegment8Impl, PersistStreamVtbl, iface);
   TRACE("(%p, %p)\n", This, pClassID);
-  memcpy(pClassID, &CLSID_DirectMusicTempoTrack, sizeof(CLSID));
+  *pClassID = CLSID_DirectMusicTempoTrack;
   return S_OK;
 }
 
@@ -352,7 +352,7 @@ static HRESULT WINAPI IDirectMusicTempoTrack_IPersistStream_Load (LPPERSISTSTREA
 	ERR(": no more memory\n");
 	return  E_OUTOFMEMORY;
       }
-      memcpy(&pNewItem->item, &item, sizeof(DMUS_IO_TEMPO_ITEM));
+      pNewItem->item = item;
       list_add_tail (&This->Items, &pNewItem->entry);
       pNewItem = NULL;
       StreamCount += sizeof(item);
@@ -414,7 +414,7 @@ HRESULT WINAPI DMUSIC_CreateDirectMusicTempoTrack (LPCGUID lpcGUID, LPVOID *ppob
   track->pDesc = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(DMUS_OBJECTDESC));
   DM_STRUCT_INIT(track->pDesc);
   track->pDesc->dwValidData |= DMUS_OBJ_CLASS;
-  memcpy (&track->pDesc->guidClass, &CLSID_DirectMusicTempoTrack, sizeof (CLSID));
+  track->pDesc->guidClass = CLSID_DirectMusicTempoTrack;
   track->ref = 0; /* will be inited by QueryInterface */
   track->enabled = TRUE;
   list_init (&track->Items);

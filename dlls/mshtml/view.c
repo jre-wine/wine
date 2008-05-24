@@ -26,7 +26,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "wingdi.h"
 #include "commctrl.h"
 #include "ole2.h"
 #include "resource.h"
@@ -36,6 +35,8 @@
 #include "mshtml_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
+
+#define TIMER_ID 0x1000
 
 static const WCHAR wszInternetExplorer_Server[] =
     {'I','n','t','e','r','n','e','t',' ','E','x','p','l','o','r','e','r','_','S','e','r','v','e','r',0};
@@ -49,41 +50,130 @@ typedef struct {
     WNDPROC proc;
 } tooltip_data;
 
-static void paint_disabled(HWND hwnd) {
-    HDC hdc;
+static void paint_document(HTMLDocument *This)
+{
     PAINTSTRUCT ps;
-    HBRUSH brush;
     RECT rect;
-    HFONT font;
-    WCHAR wszHTMLDisabled[100];
+    HDC hdc;
 
-    LoadStringW(hInst, IDS_HTMLDISABLED, wszHTMLDisabled, sizeof(wszHTMLDisabled)/sizeof(WCHAR));
+    GetClientRect(This->hwnd, &rect);
 
-    font = CreateFontA(25,0,0,0,400,0,0,0,ANSI_CHARSET,0,0,DEFAULT_QUALITY,DEFAULT_PITCH,NULL);
-    brush = CreateSolidBrush(RGB(255,255,255));
-    GetClientRect(hwnd, &rect);
+    hdc = BeginPaint(This->hwnd, &ps);
 
-    hdc = BeginPaint(hwnd, &ps);
-    SelectObject(hdc, font);
-    SelectObject(hdc, brush);
-    Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom);
-    DrawTextW(hdc, wszHTMLDisabled,-1, &rect, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
-    EndPaint(hwnd, &ps);
+    if(!(This->hostinfo.dwFlags & (DOCHOSTUIFLAG_NO3DOUTERBORDER|DOCHOSTUIFLAG_NO3DBORDER)))
+        DrawEdge(hdc, &rect, EDGE_SUNKEN, BF_RECT|BF_ADJUST);
 
-    DeleteObject(font);
-    DeleteObject(brush);
+    if(!This->nscontainer) {
+        WCHAR wszHTMLDisabled[100];
+        HFONT font;
+
+        LoadStringW(hInst, IDS_HTMLDISABLED, wszHTMLDisabled, sizeof(wszHTMLDisabled)/sizeof(WCHAR));
+
+        font = CreateFontA(25,0,0,0,400,0,0,0,ANSI_CHARSET,0,0,DEFAULT_QUALITY,DEFAULT_PITCH,NULL);
+
+        SelectObject(hdc, font);
+        SelectObject(hdc, GetSysColorBrush(COLOR_WINDOW));
+
+        Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom);
+        DrawTextW(hdc, wszHTMLDisabled,-1, &rect, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+
+        DeleteObject(font);
+    }
+
+    EndPaint(This->hwnd, &ps);
 }
 
-static void activate_gecko(HTMLDocument *This)
+static void activate_gecko(NSContainer *This)
 {
-    TRACE("(%p) %p\n", This, This->nscontainer->window);
+    TRACE("(%p) %p\n", This, This->window);
 
-    SetParent(This->nscontainer->hwnd, This->hwnd);
-    ShowWindow(This->nscontainer->hwnd, SW_SHOW);
+    SetParent(This->hwnd, This->doc->hwnd);
+    ShowWindow(This->hwnd, SW_SHOW);
 
-    nsIBaseWindow_SetVisibility(This->nscontainer->window, TRUE);
-    nsIBaseWindow_SetEnabled(This->nscontainer->window, TRUE);
-    nsIWebBrowserFocus_Activate(This->nscontainer->focus);
+    nsIBaseWindow_SetVisibility(This->window, TRUE);
+    nsIBaseWindow_SetEnabled(This->window, TRUE);
+    nsIWebBrowserFocus_Activate(This->focus);
+}
+
+void update_doc(HTMLDocument *This, DWORD flags)
+{
+    if(!This->update && This->hwnd)
+        SetTimer(This->hwnd, TIMER_ID, 100, NULL);
+
+    This->update |= flags;
+}
+
+void update_title(HTMLDocument *This)
+{
+    IOleCommandTarget *olecmd;
+    HRESULT hres;
+
+    if(!(This->update & UPDATE_TITLE))
+        return;
+
+    This->update &= ~UPDATE_TITLE;
+
+    if(!This->client)
+        return;
+
+    hres = IOleClientSite_QueryInterface(This->client, &IID_IOleCommandTarget, (void**)&olecmd);
+    if(SUCCEEDED(hres)) {
+        VARIANT title;
+        WCHAR empty[] = {0};
+
+        V_VT(&title) = VT_BSTR;
+        V_BSTR(&title) = SysAllocString(empty);
+        IOleCommandTarget_Exec(olecmd, NULL, OLECMDID_SETTITLE, OLECMDEXECOPT_DONTPROMPTUSER,
+                               &title, NULL);
+        SysFreeString(V_BSTR(&title));
+
+        IOleCommandTarget_Release(olecmd);
+    }
+}
+
+static LRESULT on_timer(HTMLDocument *This)
+{
+    TRACE("(%p) %x\n", This, This->update);
+
+    KillTimer(This->hwnd, TIMER_ID);
+
+    if(!This->update)
+        return 0;
+
+    if(This->update & UPDATE_UI) {
+        if(This->hostui)
+            IDocHostUIHandler_UpdateUI(This->hostui);
+
+        if(This->client) {
+            IOleCommandTarget *cmdtrg;
+            HRESULT hres;
+
+            hres = IOleClientSite_QueryInterface(This->client, &IID_IOleCommandTarget,
+                                                 (void**)&cmdtrg);
+            if(SUCCEEDED(hres)) {
+                IOleCommandTarget_Exec(cmdtrg, NULL, OLECMDID_UPDATECOMMANDS,
+                                       OLECMDEXECOPT_DONTPROMPTUSER, NULL, NULL);
+                IOleCommandTarget_Release(cmdtrg);
+            }
+        }
+    }
+
+    update_title(This);
+    This->update = 0;
+    return 0;
+}
+
+void notif_focus(HTMLDocument *This)
+{
+    IOleControlSite *site;
+    HRESULT hres;
+
+    hres = IOleClientSite_QueryInterface(This->client, &IID_IOleControlSite, (void**)&site);
+    if(FAILED(hres))
+        return;
+
+    IOleControlSite_OnFocus(site, This->focus);
+    IOleControlSite_Release(site);
 }
 
 static LRESULT WINAPI serverwnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -102,18 +192,29 @@ static LRESULT WINAPI serverwnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
     switch(msg) {
     case WM_CREATE:
         This->hwnd = hwnd;
-        if(This->nscontainer)
-            activate_gecko(This);
         break;
     case WM_PAINT:
-        if(!This->nscontainer)
-            paint_disabled(hwnd);
+        paint_document(This);
         break;
     case WM_SIZE:
         TRACE("(%p)->(WM_SIZE)\n", This);
-        if(This->nscontainer)
-            SetWindowPos(This->nscontainer->hwnd, NULL, 0, 0, LOWORD(lParam), HIWORD(lParam),
-                    SWP_NOZORDER | SWP_NOACTIVATE);
+        if(This->nscontainer) {
+            INT ew=0, eh=0;
+
+            if(!(This->hostinfo.dwFlags & (DOCHOSTUIFLAG_NO3DOUTERBORDER|DOCHOSTUIFLAG_NO3DBORDER))) {
+                ew = GetSystemMetrics(SM_CXEDGE);
+                eh = GetSystemMetrics(SM_CYEDGE);
+            }
+
+            SetWindowPos(This->nscontainer->hwnd, NULL, ew, eh,
+                         LOWORD(lParam) - 2*ew, HIWORD(lParam) - 2*eh,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        break;
+    case WM_TIMER:
+        return on_timer(This);
+    case WM_MOUSEACTIVATE:
+        return MA_ACTIVATE;
     }
         
     return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -135,9 +236,9 @@ static void register_serverwnd_class(void)
 
 static HRESULT activate_window(HTMLDocument *This)
 {
-    IOleInPlaceUIWindow *pIPWnd;
     IOleInPlaceFrame *pIPFrame;
     IOleCommandTarget *cmdtrg;
+    IOleInPlaceSiteEx *ipsiteex;
     RECT posrect, cliprect;
     OLEINPLACEFRAMEINFO frameinfo;
     HWND parent_hwnd;
@@ -152,16 +253,15 @@ static HRESULT activate_window(HTMLDocument *This)
         return FAILED(hres) ? hres : E_FAIL;
     }
 
-    hres = IOleInPlaceSite_GetWindowContext(This->ipsite, &pIPFrame, &pIPWnd, &posrect, &cliprect, &frameinfo);
+    hres = IOleInPlaceSite_GetWindowContext(This->ipsite, &pIPFrame, &This->ip_window,
+            &posrect, &cliprect, &frameinfo);
     if(FAILED(hres)) {
         WARN("GetWindowContext failed: %08x\n", hres);
         return hres;
     }
 
-    if(pIPWnd)
-        IOleInPlaceUIWindow_Release(pIPWnd);
     TRACE("got window context: %p %p {%d %d %d %d} {%d %d %d %d} {%d %x %p %p %d}\n",
-            pIPFrame, pIPWnd, posrect.left, posrect.top, posrect.right, posrect.bottom,
+            pIPFrame, This->ip_window, posrect.left, posrect.top, posrect.right, posrect.bottom,
             cliprect.left, cliprect.top, cliprect.right, cliprect.bottom,
             frameinfo.cb, frameinfo.fMDIApp, frameinfo.hwndFrame, frameinfo.haccel, frameinfo.cAccelEntries);
 
@@ -190,17 +290,29 @@ static HRESULT activate_window(HTMLDocument *This)
         SetWindowPos(This->hwnd, NULL, 0, 0, 0, 0,
                 SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOREDRAW | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         RedrawWindow(This->hwnd, NULL, NULL, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
-        SetFocus(This->hwnd);
 
         /* NOTE:
          * Windows implementation calls:
          * RegisterWindowMessage("MSWHEEL_ROLLMSG");
-         * SetTimer(This->hwnd, TIMER_ID, 100, NULL);
          */
+        SetTimer(This->hwnd, TIMER_ID, 100, NULL);
     }
 
+    if(This->nscontainer)
+        activate_gecko(This->nscontainer);
+
     This->in_place_active = TRUE;
-    hres = IOleInPlaceSite_OnInPlaceActivate(This->ipsite);
+    hres = IOleInPlaceSite_QueryInterface(This->ipsite, &IID_IOleInPlaceSiteEx, (void**)&ipsiteex);
+    if(SUCCEEDED(hres)) {
+        BOOL redraw = FALSE;
+
+        hres = IOleInPlaceSiteEx_OnInPlaceActivateEx(ipsiteex, &redraw, 0);
+        IOleInPlaceSiteEx_Release(ipsiteex);
+        if(redraw)
+            FIXME("unsupported redraw\n");
+    }else{
+        hres = IOleInPlaceSite_OnInPlaceActivate(This->ipsite);
+    }
     if(FAILED(hres)) {
         WARN("OnInPlaceActivate failed: %08x\n", hres);
         This->in_place_active = FALSE;
@@ -232,7 +344,7 @@ static HRESULT activate_window(HTMLDocument *This)
     return S_OK;
 }
 
-static LRESULT tooltips_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+static LRESULT WINAPI tooltips_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     tooltip_data *data = GetPropW(hwnd, wszTooltipData);
 
@@ -256,7 +368,7 @@ static LRESULT tooltips_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 static void create_tooltips_window(HTMLDocument *This)
 {
-    tooltip_data *data = mshtml_alloc(sizeof(*data));
+    tooltip_data *data = heap_alloc(sizeof(*data));
 
     This->tooltips_hwnd = CreateWindowExW(0, TOOLTIPS_CLASSW, NULL, TTS_NOPREFIX | WS_POPUP,
             CW_USEDEFAULT, CW_USEDEFAULT, 10, 10, This->hwnd, NULL, hInst, NULL);
@@ -301,6 +413,18 @@ void hide_tooltip(HTMLDocument *This)
 
     SendMessageW(This->tooltips_hwnd, TTM_DELTOOLW, 0, (LPARAM)&toolinfo);
     SendMessageW(This->tooltips_hwnd, TTM_ACTIVATE, FALSE, 0);
+}
+
+HRESULT call_set_active_object(IOleInPlaceUIWindow *window, IOleInPlaceActiveObject *act_obj)
+{
+    static WCHAR html_documentW[30];
+
+    if(act_obj && !html_documentW[0]) {
+        LoadStringW(hInst, IDS_HTMLDOCUMENT, html_documentW,
+                    sizeof(html_documentW)/sizeof(WCHAR));
+    }
+
+    return IOleInPlaceFrame_SetActiveObject(window, act_obj, act_obj ? html_documentW : NULL);
 }
 
 /**********************************************************
@@ -426,9 +550,14 @@ static HRESULT WINAPI OleDocumentView_Show(IOleDocumentView *iface, BOOL fShow)
             if(FAILED(hres))
                 return hres;
         }
+        update_doc(This, UPDATE_UI);
         ShowWindow(This->hwnd, SW_SHOW);
     }else {
         ShowWindow(This->hwnd, SW_HIDE);
+        if(This->ip_window) {
+            IOleInPlaceUIWindow_Release(This->ip_window);
+            This->ip_window = NULL;
+        }
     }
 
     return S_OK;
@@ -447,6 +576,8 @@ static HRESULT WINAPI OleDocumentView_UIActivate(IOleDocumentView *iface, BOOL f
     }
 
     if(fUIActivate) {
+        RECT rcBorderWidths;
+
         if(This->ui_active)
             return S_OK;
 
@@ -456,12 +587,16 @@ static HRESULT WINAPI OleDocumentView_UIActivate(IOleDocumentView *iface, BOOL f
                 return hres;
         }
 
+        This->focus = TRUE;
+        if(This->nscontainer)
+            nsIWebBrowserFocus_Activate(This->nscontainer->focus);
+        notif_focus(This);
+
+        update_doc(This, UPDATE_UI);
+
         hres = IOleInPlaceSite_OnUIActivate(This->ipsite);
         if(SUCCEEDED(hres)) {
-            OLECHAR wszHTMLDocument[30];
-            LoadStringW(hInst, IDS_HTMLDOCUMENT, wszHTMLDocument,
-                    sizeof(wszHTMLDocument)/sizeof(WCHAR));
-            IOleInPlaceFrame_SetActiveObject(This->frame, ACTOBJ(This), wszHTMLDocument);
+            call_set_active_object((IOleInPlaceUIWindow*)This->frame, ACTOBJ(This));
         }else {
             FIXME("OnUIActivate failed: %08x\n", hres);
             IOleInPlaceFrame_Release(This->frame);
@@ -470,18 +605,26 @@ static HRESULT WINAPI OleDocumentView_UIActivate(IOleDocumentView *iface, BOOL f
             return hres;
         }
 
-        hres = IDocHostUIHandler_ShowUI(This->hostui, 0, ACTOBJ(This), CMDTARGET(This),
-                This->frame, NULL);
+        hres = IDocHostUIHandler_ShowUI(This->hostui,
+                This->usermode == EDITMODE ? DOCHOSTUITYPE_AUTHOR : DOCHOSTUITYPE_BROWSE,
+                ACTOBJ(This), CMDTARGET(This), This->frame, This->ip_window);
         if(FAILED(hres))
             IDocHostUIHandler_HideUI(This->hostui);
 
+        if(This->ip_window)
+            call_set_active_object(This->ip_window, ACTOBJ(This));
+
+        memset(&rcBorderWidths, 0, sizeof(rcBorderWidths));
+        IOleInPlaceFrame_SetBorderSpace(This->frame, &rcBorderWidths);
+
         This->ui_active = TRUE;
     }else {
-        This->window_active = FALSE;
         if(This->ui_active) {
             This->ui_active = FALSE;
+            if(This->ip_window)
+                call_set_active_object(This->ip_window, NULL);
             if(This->frame)
-                IOleInPlaceFrame_SetActiveObject(This->frame, NULL, NULL);
+                call_set_active_object((IOleInPlaceUIWindow*)This->frame, NULL);
             if(This->hostui)
                 IDocHostUIHandler_HideUI(This->hostui);
             if(This->ipsite)
@@ -660,10 +803,14 @@ void HTMLDocument_View_Init(HTMLDocument *This)
 
     This->ipsite = NULL;
     This->frame = NULL;
+    This->ip_window = NULL;
     This->hwnd = NULL;
     This->tooltips_hwnd = NULL;
 
     This->in_place_active = FALSE;
     This->ui_active = FALSE;
     This->window_active = FALSE;
+    This->focus = FALSE;
+
+    This->update = 0;
 }

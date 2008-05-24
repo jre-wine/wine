@@ -24,6 +24,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "ddk/hidsdi.h"
 
 #include "wine/debug.h"
 
@@ -52,5 +53,5 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
 void WINAPI HidD_GetHidGuid(LPGUID guid)
 {
     TRACE("(%p)\n", guid);
-    memcpy(guid, &HID_GUID, sizeof(GUID));
+    *guid = HID_GUID;
 }

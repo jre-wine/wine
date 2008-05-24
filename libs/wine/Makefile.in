@@ -71,6 +71,7 @@ C_SRCS = \
 	c_1256.c \
 	c_1257.c \
 	c_1258.c \
+	c_1361.c \
 	c_10000.c \
 	c_10006.c \
 	c_10007.c \
@@ -95,6 +96,8 @@ C_SRCS = \
 	c_28604.c \
 	c_28605.c \
 	c_28606.c
+
+EXTRA_OBJS = version.o
 
 all: $(MODULE) $(MODULE:.dll=.a)
 
@@ -134,10 +137,10 @@ libwine.dll: $(OBJS) wine.def Makefile.in
 DYLIB_LDFLAGS = -compatibility_version $(SOVERSION) -current_version $(VERSION)
 
 libwine.$(VERSION).dylib: $(OBJS) $(RELPATH) Makefile.in
-	$(LDSHARED) $(DYLIB_LDFLAGS) $(OBJS) $(EXTRALIBS) $(LDFLAGS) $(LIBS) -o $@
+	$(LDSHARED) -install_name $(libdir)/$(DYNAME) $(DYLIB_LDFLAGS) $(OBJS) $(EXTRALIBS) $(LDFLAGS) $(LIBS) -o $@
 
 libwine.$(SOVERSION).dylib: libwine.$(VERSION).dylib
-	$(RM) $@ && $(LN_S) libwine.$(VERSION).dylib $@
+	cp -p libwine.$(VERSION).dylib $@ && install_name_tool -id @executable_path/`$(RELPATH) $(bindir) $(libdir)`/$(DYNAME) $@ || $(RM) $@
 
 libwine.dylib: libwine.$(SOVERSION).dylib
 	$(RM) $@ && $(LN_S) libwine.$(SOVERSION).dylib $@
@@ -173,8 +176,14 @@ uninstall::
 	-cd $(DESTDIR)$(libdir) && $(RM) libwine.a libwine.dll libwine.so libwine.so.$(VERSION) \
 		libwine.so.$(SOVERSION) libwine.dylib libwine.$(VERSION).dylib libwine.$(SOVERSION).dylib
 
+version-stamp: dummy
+	(GIT_DIR=$(TOPSRCDIR)/.git git describe HEAD 2>/dev/null || echo "wine-@PACKAGE_VERSION@") | sed -n -e '$$s/\(.*\)/const char wine_build[] = "\1";/p' >$@ || ($(RM) $@ && exit 1)
+
+version.c: version-stamp
+	@cmp -s version-stamp $@ || cp version-stamp $@
+
 clean::
-	$(RM) libwine.so.$(SOVERSION) libwine.so.$(VERSION)
+	$(RM) libwine.so.$(SOVERSION) libwine.so.$(VERSION) version.c version-stamp
 
 $(RELPATH):
 	@cd $(TOOLSDIR)/tools && $(MAKE) relpath

@@ -25,9 +25,7 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winerror.h"
 #include "wingdi.h"
-#include "winspool.h"
 
 #include "psdrv.h"
 #include "wine/debug.h"
@@ -52,6 +50,73 @@ static void get_download_name(PSDRV_PDEVICE *physDev, LPOUTLINETEXTMETRICA
 {
     int len;
     char *p;
+    DWORD size;
+
+    size = GetFontData(physDev->hdc, MS_MAKE_TAG('n','a','m','e'), 0, NULL, 0);
+    if(size != 0 && size != GDI_ERROR)
+    {
+        BYTE *name = HeapAlloc(GetProcessHeap(), 0, size);
+        if(name)
+        {
+            USHORT count, i;
+            BYTE *strings;
+            struct
+            {
+                USHORT platform_id;
+                USHORT encoding_id;
+                USHORT language_id;
+                USHORT name_id;
+                USHORT length;
+                USHORT offset;
+            } *name_record;
+
+            GetFontData(physDev->hdc, MS_MAKE_TAG('n','a','m','e'), 0, name, size);
+            count = GET_BE_WORD(name + 2);
+            strings = name + GET_BE_WORD(name + 4);
+            name_record = (typeof(name_record))(name + 6);
+            for(i = 0; i < count; i++, name_record++)
+            {
+                name_record->platform_id = GET_BE_WORD(&name_record->platform_id);
+                name_record->encoding_id = GET_BE_WORD(&name_record->encoding_id);
+                name_record->language_id = GET_BE_WORD(&name_record->language_id);
+                name_record->name_id     = GET_BE_WORD(&name_record->name_id);
+                name_record->length      = GET_BE_WORD(&name_record->length);
+                name_record->offset      = GET_BE_WORD(&name_record->offset);
+
+                if(name_record->platform_id == 1 && name_record->encoding_id == 0 &&
+                   name_record->language_id == 0 && name_record->name_id == 6)
+                {
+                    TRACE("Got Mac PS name %s\n", debugstr_an((char*)strings + name_record->offset, name_record->length));
+                    *str = HeapAlloc(GetProcessHeap(), 0, name_record->length + 1);
+                    memcpy(*str, strings + name_record->offset, name_record->length);
+                    *(*str + name_record->length) = '\0';
+                    HeapFree(GetProcessHeap(), 0, name);
+                    return;
+                }
+                if(name_record->platform_id == 3 && name_record->encoding_id == 1 &&
+                   name_record->language_id == 0x409 && name_record->name_id == 6)
+                {
+                    WCHAR *unicode = HeapAlloc(GetProcessHeap(), 0, name_record->length + 2);
+                    DWORD len;
+                    int c;
+
+                    for(c = 0; c < name_record->length / 2; c++)
+                        unicode[c] = GET_BE_WORD(strings + name_record->offset + c * 2);
+                    unicode[c] = 0;
+                    TRACE("Got Windows PS name %s\n", debugstr_w(unicode));
+                    len = WideCharToMultiByte(1252, 0, unicode, -1, NULL, 0, NULL, NULL);
+                    *str = HeapAlloc(GetProcessHeap(), 0, len);
+                    WideCharToMultiByte(1252, 0, unicode, -1, *str, len, NULL, NULL);
+                    HeapFree(GetProcessHeap(), 0, unicode);
+                    HeapFree(GetProcessHeap(), 0, name);
+                    return;
+                }
+            }
+            TRACE("Unable to find PostScript name\n");
+            HeapFree(GetProcessHeap(), 0, name);
+        }
+    }
+
     len = strlen((char*)potm + (ptrdiff_t)potm->otmpFullName) + 1;
     *str = HeapAlloc(GetProcessHeap(),0,len);
     strcpy(*str, (char*)potm + (ptrdiff_t)potm->otmpFullName);
@@ -131,6 +196,7 @@ BOOL PSDRV_SelectDownloadFont(PSDRV_PDEVICE *physDev)
     LPOUTLINETEXTMETRICA potm;
     DWORD len = GetOutlineTextMetricsA(physDev->hdc, 0, NULL);
 
+    if(!len) return FALSE;
     potm = HeapAlloc(GetProcessHeap(), 0, len);
     GetOutlineTextMetricsA(physDev->hdc, len, potm);
     get_download_name(physDev, potm, &ps_name);
@@ -176,15 +242,17 @@ BOOL PSDRV_WriteSetDownloadFont(PSDRV_PDEVICE *physDev)
         RECT bbox;
         UINT emsize;
 
+        if (!get_bbox(physDev, &bbox, &emsize)) {
+	    HeapFree(GetProcessHeap(), 0, potm);
+	    return FALSE;
+	}
+        if(!is_room_for_font(physDev))
+            PSDRV_EmptyDownloadList(physDev, TRUE);
+
         pdl = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*pdl));
 	pdl->ps_name = HeapAlloc(GetProcessHeap(), 0, strlen(ps_name)+1);
 	strcpy(pdl->ps_name, ps_name);
 	pdl->next = NULL;
-
-        if (!get_bbox(physDev, &bbox, &emsize))
-		return FALSE;
-        if(!is_room_for_font(physDev))
-            PSDRV_EmptyDownloadList(physDev, TRUE);
 
         if(physDev->pi->ppd->TTRasterizer == RO_Type42) {
 	    pdl->typeinfo.Type42 = T42_download_header(physDev, ps_name, &bbox, emsize);

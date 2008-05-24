@@ -32,16 +32,11 @@
 #include "windows.h"
 #include "winclock.h"
 
-#define Black  RGB(0,0,0)
-#define Gray   RGB(128,128,128)
-#define LtGray RGB(192,192,192)
-#define White  RGB(255,255,255)
-
-static const COLORREF FaceColor = LtGray;
-static const COLORREF HandColor = White;
-static const COLORREF TickColor = White;
-static const COLORREF ShadowColor = Black;
-static const COLORREF BackgroundColor = LtGray;
+#define FaceColor (GetSysColor(COLOR_3DFACE))
+#define HandColor (GetSysColor(COLOR_3DHIGHLIGHT))
+#define TickColor (GetSysColor(COLOR_3DHIGHLIGHT))
+#define ShadowColor (GetSysColor(COLOR_3DDKSHADOW))
+#define BackgroundColor (GetSysColor(COLOR_3DFACE))
 
 static const int SHADOW_DEPTH = 2;
  
@@ -82,7 +77,7 @@ static void DrawTicks(HDC dc, const POINT* centre, int radius)
     }
 }
 
-static void DrawFace(HDC dc, const POINT* centre, int radius)
+static void DrawFace(HDC dc, const POINT* centre, int radius, int border)
 {
     /* Ticks */
     SelectObject(dc, CreatePen(PS_SOLID, 2, ShadowColor));
@@ -91,8 +86,12 @@ static void DrawFace(HDC dc, const POINT* centre, int radius)
     DeleteObject(SelectObject(dc, CreatePen(PS_SOLID, 2, TickColor)));
     OffsetWindowOrgEx(dc, SHADOW_DEPTH, SHADOW_DEPTH, NULL);
     DrawTicks(dc, centre, radius);
-
-    DeleteObject(SelectObject(dc, GetStockObject(NULL_BRUSH)));
+    if (border)
+    {
+        SelectObject(dc, GetStockObject(NULL_BRUSH));
+        DeleteObject(SelectObject(dc, CreatePen(PS_SOLID, 5, ShadowColor)));
+        Ellipse(dc, centre->x - radius, centre->y - radius, centre->x + radius, centre->y + radius);
+    }
     DeleteObject(SelectObject(dc, GetStockObject(NULL_PEN)));
 }
 
@@ -159,7 +158,7 @@ static void PositionHands(const POINT* centre, int radius, BOOL bSeconds)
         PositionHand(centre, radius * 0.79, second/60 * 2*M_PI, &SecondHand);  
 }
 
-void AnalogClock(HDC dc, int x, int y, BOOL bSeconds)
+void AnalogClock(HDC dc, int x, int y, BOOL bSeconds, BOOL border)
 {
     POINT centre;
     int radius;
@@ -171,7 +170,7 @@ void AnalogClock(HDC dc, int x, int y, BOOL bSeconds)
     centre.x = x/2;
     centre.y = y/2;
 
-    DrawFace(dc, &centre, radius);
+    DrawFace(dc, &centre, radius, border);
 
     PositionHands(&centre, radius, bSeconds);
     DrawHands(dc, bSeconds);

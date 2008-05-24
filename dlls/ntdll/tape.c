@@ -97,7 +97,7 @@ static NTSTATUS TAPE_GetStatus( int error )
 /******************************************************************
  *      TAPE_CreatePartition
  */
-static NTSTATUS TAPE_CreatePartition( int fd, TAPE_CREATE_PARTITION *data )
+static NTSTATUS TAPE_CreatePartition( int fd, const TAPE_CREATE_PARTITION *data )
 {
 #ifdef HAVE_SYS_MTIO_H
     struct mtop cmd;
@@ -139,7 +139,7 @@ static NTSTATUS TAPE_CreatePartition( int fd, TAPE_CREATE_PARTITION *data )
 /******************************************************************
  *      TAPE_Erase
  */
-static NTSTATUS TAPE_Erase( int fd, TAPE_ERASE *data )
+static NTSTATUS TAPE_Erase( int fd, const TAPE_ERASE *data )
 {
 #ifdef HAVE_SYS_MTIO_H
     struct mtop cmd;
@@ -232,7 +232,7 @@ static NTSTATUS TAPE_GetMediaParams( int fd, TAPE_GET_MEDIA_PARAMETERS *data )
 #endif
     data->PartitionCount = 1;
 #ifdef HAVE_STRUCT_MTGET_MT_GSTAT
-    data->WriteProtected = GMT_WR_PROT(get.mt_gstat);
+    data->WriteProtected = (GMT_WR_PROT(get.mt_gstat) != 0);
 #else
     data->WriteProtected = 0;
 #endif
@@ -300,7 +300,7 @@ static NTSTATUS TAPE_GetPosition( int fd, ULONG type, TAPE_GET_POSITION *data )
 /******************************************************************
  *      TAPE_Prepare
  */
-static NTSTATUS TAPE_Prepare( int fd, TAPE_PREPARE *data )
+static NTSTATUS TAPE_Prepare( int fd, const TAPE_PREPARE *data )
 {
 #ifdef HAVE_SYS_MTIO_H
     struct mtop cmd;
@@ -353,7 +353,7 @@ static NTSTATUS TAPE_Prepare( int fd, TAPE_PREPARE *data )
 /******************************************************************
  *      TAPE_SetDriveParams
  */
-static NTSTATUS TAPE_SetDriveParams( int fd, TAPE_SET_DRIVE_PARAMETERS *data )
+static NTSTATUS TAPE_SetDriveParams( int fd, const TAPE_SET_DRIVE_PARAMETERS *data )
 {
 #if defined(HAVE_SYS_MTIO_H) && defined(MTCOMPRESSION)
     struct mtop cmd;
@@ -379,7 +379,7 @@ static NTSTATUS TAPE_SetDriveParams( int fd, TAPE_SET_DRIVE_PARAMETERS *data )
 /******************************************************************
  *      TAPE_SetMediaParams
  */
-static NTSTATUS TAPE_SetMediaParams( int fd, TAPE_SET_MEDIA_PARAMETERS *data )
+static NTSTATUS TAPE_SetMediaParams( int fd, const TAPE_SET_MEDIA_PARAMETERS *data )
 {
 #ifdef HAVE_SYS_MTIO_H
     struct mtop cmd;
@@ -399,16 +399,21 @@ static NTSTATUS TAPE_SetMediaParams( int fd, TAPE_SET_MEDIA_PARAMETERS *data )
 /******************************************************************
  *      TAPE_SetPosition
  */
-static NTSTATUS TAPE_SetPosition( int fd, TAPE_SET_POSITION *data )
+static NTSTATUS TAPE_SetPosition( int fd, const TAPE_SET_POSITION *data )
 {
 #ifdef HAVE_SYS_MTIO_H
     struct mtop cmd;
 
-    TRACE( "fd: %d method: 0x%08x partition: 0x%08x offset: 0x%08x immediate: 0x%02x\n",
-           fd, data->Method, data->Partition, data->Offset.u.LowPart, data->Immediate );
+    TRACE( "fd: %d method: 0x%08x partition: 0x%08x offset: 0x%x%08x immediate: 0x%02x\n",
+           fd, data->Method, data->Partition, (DWORD)(data->Offset.QuadPart >> 32),
+           (DWORD)data->Offset.QuadPart, data->Immediate );
 
-    if (data->Offset.u.HighPart > 0)
+    if (sizeof(cmd.mt_count) < sizeof(data->Offset.QuadPart) &&
+        (int)data->Offset.QuadPart != data->Offset.QuadPart)
+    {
+        ERR("Offset too large or too small\n");
         return STATUS_INVALID_PARAMETER;
+    }
 
     switch (data->Method)
     {
@@ -418,7 +423,7 @@ static NTSTATUS TAPE_SetPosition( int fd, TAPE_SET_POSITION *data )
 #ifdef MTSEEK
     case TAPE_ABSOLUTE_BLOCK:
         cmd.mt_op = MTSEEK;
-        cmd.mt_count = data->Offset.u.LowPart;
+        cmd.mt_count = data->Offset.QuadPart;
         break;
 #endif
 #ifdef MTEOM
@@ -427,24 +432,24 @@ static NTSTATUS TAPE_SetPosition( int fd, TAPE_SET_POSITION *data )
         break;
 #endif
     case TAPE_SPACE_FILEMARKS:
-        if (data->Offset.u.LowPart >= 0) {
+        if (data->Offset.QuadPart >= 0) {
             cmd.mt_op = MTFSF;
-            cmd.mt_count = data->Offset.u.LowPart;
+            cmd.mt_count = data->Offset.QuadPart;
         }
         else {
             cmd.mt_op = MTBSF;
-            cmd.mt_count = -data->Offset.u.LowPart;
+            cmd.mt_count = -data->Offset.QuadPart;
         }
         break;
 #if defined(MTFSS) && defined(MTBSS)
     case TAPE_SPACE_SETMARKS:
-        if (data->Offset.u.LowPart >= 0) {
+        if (data->Offset.QuadPart >= 0) {
             cmd.mt_op = MTFSS;
-            cmd.mt_count = data->Offset.u.LowPart;
+            cmd.mt_count = data->Offset.QuadPart;
         }
         else {
             cmd.mt_op = MTBSS;
-            cmd.mt_count = -data->Offset.u.LowPart;
+            cmd.mt_count = -data->Offset.QuadPart;
         }
         break;
 #endif
@@ -470,7 +475,7 @@ static NTSTATUS TAPE_SetPosition( int fd, TAPE_SET_POSITION *data )
 /******************************************************************
  *      TAPE_WriteMarks
  */
-static NTSTATUS TAPE_WriteMarks( int fd, TAPE_WRITE_MARKS *data )
+static NTSTATUS TAPE_WriteMarks( int fd, const TAPE_WRITE_MARKS *data )
 {
 #ifdef HAVE_SYS_MTIO_H
     struct mtop cmd;
@@ -524,7 +529,7 @@ NTSTATUS TAPE_DeviceIoControl( HANDLE device, HANDLE event,
 
     io_status->Information = 0;
 
-    if ((status = server_get_unix_fd( device, 0, &fd, &needs_close, NULL )))
+    if ((status = server_get_unix_fd( device, 0, &fd, &needs_close, NULL, NULL )))
         goto error;
 
     switch (io_control)

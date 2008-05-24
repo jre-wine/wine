@@ -21,8 +21,8 @@ LANGUAGE LANG_RUSSIAN, SUBLANG_DEFAULT
 
 MENU_001 MENU DISCARDABLE
 BEGIN
-    MENUITEM "&Большие Иконки",	FCIDM_SHVIEW_BIGICON
-    MENUITEM "&Мелкие Иконки",	FCIDM_SHVIEW_SMALLICON
+    MENUITEM "&Большие значки",	FCIDM_SHVIEW_BIGICON
+    MENUITEM "&Мелкие значки",	FCIDM_SHVIEW_SMALLICON
     MENUITEM "&Список",		FCIDM_SHVIEW_LISTVIEW
     MENUITEM "&Подробно",	FCIDM_SHVIEW_REPORTVIEW
 END
@@ -36,27 +36,27 @@ BEGIN
     BEGIN
         POPUP "&Просмотр"
         BEGIN
-            MENUITEM "&Большие Иконки",	FCIDM_SHVIEW_BIGICON
-            MENUITEM "&Мелкие Иконки",	FCIDM_SHVIEW_SMALLICON
+            MENUITEM "&Большие значки",	FCIDM_SHVIEW_BIGICON
+            MENUITEM "&Мелкие значки",	FCIDM_SHVIEW_SMALLICON
             MENUITEM "&Список",		FCIDM_SHVIEW_LISTVIEW
             MENUITEM "&Подробно",	FCIDM_SHVIEW_REPORTVIEW
         END
         MENUITEM SEPARATOR
-        POPUP "Arrange &Icons"
+        POPUP "Упорядочить &значки"
         BEGIN
-            MENUITEM "По &Имени",	0x30	/* column 0 */
-            MENUITEM "По &Типу",	0x32	/* column 2 */
-            MENUITEM "По &Размеру",	0x31	/* ... */
-            MENUITEM "По &Дате",	0x33
+            MENUITEM "По &имени",	0x30	/* column 0 */
+            MENUITEM "По &типу",	0x32	/* column 2 */
+            MENUITEM "По &размеру",	0x31	/* ... */
+            MENUITEM "По &дате",	0x33
             MENUITEM SEPARATOR
             MENUITEM "&Автоматически",	FCIDM_SHVIEW_AUTOARRANGE
         END
-        MENUITEM "В&ыровнять иконки",	FCIDM_SHVIEW_SNAPTOGRID
+        MENUITEM "В&ыровнять значки",	FCIDM_SHVIEW_SNAPTOGRID
         MENUITEM SEPARATOR
         MENUITEM "О&бновить",		FCIDM_SHVIEW_REFRESH
         MENUITEM SEPARATOR
         MENUITEM "&Вставить",		FCIDM_SHVIEW_INSERT
-        MENUITEM "Вставить &ярклык",	FCIDM_SHVIEW_INSERTLINK
+        MENUITEM "Вставить &ярлык",	FCIDM_SHVIEW_INSERTLINK
         MENUITEM SEPARATOR
         POPUP "Создать"
         BEGIN
@@ -76,14 +76,15 @@ MENU_SHV_FILE MENU DISCARDABLE
 BEGIN
     POPUP ""
     BEGIN
+        MENUITEM "&Выбрать"		FCIDM_SHVIEW_OPEN
         MENUITEM "&Проводник",		FCIDM_SHVIEW_EXPLORE
         MENUITEM "&Открыть",		FCIDM_SHVIEW_OPEN
         MENUITEM SEPARATOR
         MENUITEM "&Вырезать",		FCIDM_SHVIEW_CUT
         MENUITEM "&Копировать",		FCIDM_SHVIEW_COPY
         MENUITEM SEPARATOR
-        MENUITEM "Создать &Яолык",	FCIDM_SHVIEW_CREATELINK
-        MENUITEM "&Удалмть",		FCIDM_SHVIEW_DELETE
+        MENUITEM "Создать &ярлык",	FCIDM_SHVIEW_CREATELINK
+        MENUITEM "&Удалить",		FCIDM_SHVIEW_DELETE
         MENUITEM "Переи&меновать",	FCIDM_SHVIEW_RENAME
         MENUITEM SEPARATOR
         MENUITEM "Сво&йства",		FCIDM_SHVIEW_PROPERTIES
@@ -105,17 +106,50 @@ FONT 8, "MS Shell Dlg"
 	        4, 40, 180, 120
 }
 
+SHNEWBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 218, 196
+STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
+CAPTION "Обзор"
+FONT 8, "MS Shell Dlg"
+{
+    LTEXT "", IDD_TITLE, 10, 8, 198, 24
+    LTEXT "", IDD_STATUS, 10, 25, 198, 12
+    LTEXT "Папка:", IDD_FOLDER, 10, 156, 40, 12
+    CONTROL "", IDD_TREEVIEW, "SysTreeView32",
+                TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
+                WS_BORDER | WS_TABSTOP,
+                12, 38, 194, 105
+    EDITTEXT IDD_FOLDERTEXT, 46, 150, 160, 14, WS_BORDER | WS_GROUP | WS_TABSTOP
+    PUSHBUTTON "Создать &новую папку", IDD_MAKENEWFOLDER, 12, 174, 70, 14, WS_GROUP | WS_TABSTOP
+    DEFPUSHBUTTON "Да", IDOK, 102, 174, 50, 14, BS_DEFPUSHBUTTON | WS_GROUP | WS_TABSTOP
+    PUSHBUTTON "Отменить", IDCANCEL, 156, 174, 50, 14, WS_GROUP | WS_TABSTOP
+}
+
+SHELL_YESTOALL_MSGBOX DIALOG 200, 100, 280, 90
+STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+CAPTION "Сообщение"
+FONT 8, "MS Shell Dlg"
+{
+    DEFPUSHBUTTON "&Да", IDYES, 34, 69, 53, 14, WS_GROUP | WS_TABSTOP
+    PUSHBUTTON "Да для &всех", IDD_YESTOALL, 92, 69, 65, 14, WS_GROUP | WS_TABSTOP
+    PUSHBUTTON "&Нет", IDNO, 162, 69, 53, 14, WS_GROUP | WS_TABSTOP
+    PUSHBUTTON "&Отменить", IDCANCEL, 220, 69, 53, 14, WS_GROUP | WS_TABSTOP
+    ICON "", IDD_ICON, 10, 10, 16, 16
+    LTEXT "", IDD_MESSAGE, 40, 10, 238, 52, 0
+}
+
 SHELL_ABOUT_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 210, 152
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "О %s"
 FONT 10, "MS Shell Dlg"
 {
  DEFPUSHBUTTON "OK", IDOK, 153, 133, 50, 12, WS_TABSTOP
- LISTBOX 99, 8, 65, 137, 82, LBS_NOTIFY | WS_VSCROLL | WS_BORDER
- ICON "", 1088, 10, 10, 14, 16
- LTEXT "", 100, 30, 10, 137, 10
- LTEXT "", 101, 30, 22, 137, 10
- LTEXT "Разработчики Wine:", 98, 8, 55, 137, 10
+ PUSHBUTTON "&Лицензия Wine...", IDC_ABOUT_LICENSE, 153, 113, 60, 12, WS_TABSTOP
+ LISTBOX IDC_ABOUT_LISTBOX, 8, 65, 137, 82, LBS_NOTIFY | WS_VSCROLL | WS_BORDER
+ ICON "", stc1, 10, 10, 30, 30
+ LTEXT "", IDC_ABOUT_STATIC_TEXT1, 40, 10, 137, 10
+ LTEXT "", IDC_ABOUT_STATIC_TEXT2, 40, 22, 137, 10
+ LTEXT "Версия Wine %s", IDC_ABOUT_STATIC_TEXT3, 42, 34, 170, 10
+ LTEXT "Разработчики Wine:", IDC_ABOUT_WINE_TEXT, 8, 55, 137, 10
 }
 
 SHELL_RUN_DLG DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 227, 95
@@ -132,28 +166,31 @@ FONT 8, "MS Shell Dlg"
  PUSHBUTTON "Об&зор...", 12288, 170, 63, 50, 14, WS_TABSTOP
 }
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 {
     /* columns in the shellview */
     IDS_SHV_COLUMN1		"Имя"
     IDS_SHV_COLUMN2		"Размер"
     IDS_SHV_COLUMN3		"Тип"
-    IDS_SHV_COLUMN4		"Изменен"
+    IDS_SHV_COLUMN4		"Изменён"
     IDS_SHV_COLUMN5		"Атрибуты"
-    IDS_SHV_COLUMN6		"Полный объем"
+    IDS_SHV_COLUMN6		"Полный объём"
     IDS_SHV_COLUMN7		"Свободно"
     IDS_SHV_COLUMN8		"Имя"
     IDS_SHV_COLUMN9		"Комментарий"
     IDS_SHV_COLUMN10		"Владелец"
     IDS_SHV_COLUMN11		"Группа"
+    IDS_SHV_COLUMN_DELFROM	"Исходное местонаходение"
+    IDS_SHV_COLUMN_DELDATE	"Время удаления"
 
     /* special folders */
     IDS_DESKTOP			"Рабочий стол"
     IDS_MYCOMPUTER		"Мой компьютер"
+    IDS_RECYCLEBIN_FOLDER_NAME  "Корзина"
 
     /* context menus */
-    IDS_VIEW_LARGE		"&Большие Иконки"
-    IDS_VIEW_SMALL		"&Мелкие Иконки"
+    IDS_VIEW_LARGE		"&Большие значки"
+    IDS_VIEW_SMALL		"&Мелкие значки"
     IDS_VIEW_LIST		"&Список"
     IDS_VIEW_DETAILS		"&Подробно"
     IDS_SELECT			"&Выбрать"
@@ -164,31 +201,40 @@ STRINGTABLE DISCARDABLE
     IDS_DELETEITEM_CAPTION	"Подтверждение удаления файла"
     IDS_DELETEFOLDER_CAPTION	"Подтверждение удаления папки"
     IDS_DELETEITEM_TEXT		"Удалить '%1'?"
-    IDS_DELETEMULTIPLE_TEXT	"Удалить эти обьекты (%1?"
-    IDS_OVERWRITEFILE_TEXT	"Заменить файл(ы) %1?"
+    IDS_DELETEMULTIPLE_TEXT	"Удалить эти обьекты (%1)?"
+    IDS_DELETESELECTED_TEXT     "Удалить выбранные обьекты?"
+    IDS_TRASHITEM_TEXT          "Переместить '%1' в корзину?"
+    IDS_TRASHFOLDER_TEXT        "Переместить папку '%1' и все ее содержимое корзину?"
+    IDS_TRASHMULTIPLE_TEXT      "Переместить обьекты %1 в корзину?"
+    IDS_CANTTRASH_TEXT          "Обьект '%1' не может быть послан в корзину. Вы хотите его удаить?"
+    IDS_OVERWRITEFILE_TEXT      "Папка уже содержит файл '%1'.\n\nВы хотите заменить его?"
     IDS_OVERWRITEFILE_CAPTION	"Подтверждение замены файла"
+    IDS_OVERWRITEFOLDER_TEXT "Эта папка уже содержит папку '%1'.\n\n"\
+	    "Если файлы в конечной папке имеют те же имена, что и файлы в выбранной\n"\
+	    "папке, они будут заменены. Вы всё ещё хотите переместить или скопировать\n"\
+	    "папку?"
 
     /* message box strings */
     IDS_RESTART_TITLE		"Перезагрузить"
     IDS_RESTART_PROMPT		"Вы хотите симулировать перезапуск Windows?"
     IDS_SHUTDOWN_TITLE		"Выключить питание"
-    IDS_SHUTDOWN_PROMPT		"Вы хотите закинчить работу с Wine?"
+    IDS_SHUTDOWN_PROMPT		"Закончить работу с Wine?"
 
     /* shell folder path default values */
     IDS_PROGRAMS                "Главное меню\\Программы"
     IDS_PERSONAL                "Мои документы"
     IDS_FAVORITES               "Избранное"
     IDS_STARTUP                 "Главное меню\\Программы\\Автозагрузка"
-    IDS_RECENT                  "Recent"
-    IDS_SENDTO                  "Отпрввить"
+    IDS_RECENT                  "Недавнее"
+    IDS_SENDTO                  "Отправить"
     IDS_STARTMENU               "Главное меню"
     IDS_MYMUSIC                 "Моя музыка"
     IDS_MYVIDEO                 "Мои фильмы"
     IDS_DESKTOPDIRECTORY        "Рабочий стол"
-    IDS_NETHOOD                 "NetHood"
+    IDS_NETHOOD                 "Сетевое окружение"
     IDS_TEMPLATES               "Шаблоны"
     IDS_APPDATA                 "Application Data"
-    IDS_PRINTHOOD               "PrintHood"
+    IDS_PRINTHOOD               "Принтеры"
     IDS_LOCAL_APPDATA           "Local Settings\\Application Data"
     IDS_INTERNET_CACHE          "Local Settings\\Temporary Internet Files"
     IDS_COOKIES                 "Cookies"
@@ -202,4 +248,6 @@ STRINGTABLE DISCARDABLE
     IDS_COMMON_PICTURES         "Общие документы\\Мои рисунки"
     IDS_COMMON_VIDEO            "Общие документы\\Мои фильмы"
     IDS_CDBURN_AREA             "Local Settings\\Application Data\\Microsoft\\CD Burning"
+
+    IDS_NEWFOLDER		"New Folder"
 }

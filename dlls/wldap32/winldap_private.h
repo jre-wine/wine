@@ -23,6 +23,8 @@
  */
 
 typedef enum {
+    WLDAP32_LDAP_SUCCESS                 =   0x00,
+    WLDAP32_LDAP_UNWILLING_TO_PERFORM    =   0x35,
     WLDAP32_LDAP_SERVER_DOWN             =   0x51,
     WLDAP32_LDAP_LOCAL_ERROR             =   0x52,
     WLDAP32_LDAP_ENCODING_ERROR          =   0x53,
@@ -48,43 +50,56 @@ typedef struct berelement
     PCHAR opaque;
 } WLDAP32_BerElement;
 
-#define LDAP_OPT_THREAD_FN_PTRS         0x05
-#define LDAP_OPT_REBIND_FN              0x06
-#define LDAP_OPT_REBIND_ARG             0x07
-#define LDAP_OPT_SSL                    0x0a
-#define LDAP_OPT_IO_FN_PTRS             0x0b
-#define LDAP_OPT_CACHE_FN_PTRS          0x0d
-#define LDAP_OPT_CACHE_STRATEGY         0x0e
-#define LDAP_OPT_CACHE_ENABLE           0x0f
-#define LDAP_OPT_REFERRAL_HOP_LIMIT     0x10
-#define LDAP_OPT_VERSION                0x11
-#define LDAP_OPT_SERVER_ERROR           0x33
-#define LDAP_OPT_SERVER_EXT_ERROR       0x34
-#define LDAP_OPT_PING_KEEP_ALIVE        0x36
-#define LDAP_OPT_PING_WAIT_TIME         0x37
-#define LDAP_OPT_PING_LIMIT             0x38
-#define LDAP_OPT_DNSDOMAIN_NAME         0x3b
-#define LDAP_OPT_GETDSNAME_FLAGS        0x3d
-#define LDAP_OPT_HOST_REACHABLE         0x3e
-#define LDAP_OPT_PROMPT_CREDENTIALS     0x3f
-#define LDAP_OPT_TCP_KEEPALIVE          0x40
-#define LDAP_OPT_FAST_CONCURRENT_BIND   0x41
-#define LDAP_OPT_SEND_TIMEOUT           0x42
-#define LDAP_OPT_REFERRAL_CALLBACK      0x70
-#define LDAP_OPT_CLIENT_CERTIFICATE     0x80
-#define LDAP_OPT_SERVER_CERTIFICATE     0x81
-#define LDAP_OPT_AUTO_RECONNECT         0x91
-#define LDAP_OPT_SSPI_FLAGS             0x92
-#define LDAP_OPT_SSL_INFO               0x93
-#define LDAP_OPT_REF_DEREF_CONN_PER_MSG 0x94
-#define LDAP_OPT_TLS                    LDAP_OPT_SSL
-#define LDAP_OPT_TLS_INFO               LDAP_OPT_SSL_INFO
-#define LDAP_OPT_SIGN                   0x95
-#define LDAP_OPT_ENCRYPT                0x96
-#define LDAP_OPT_SASL_METHOD            0x97
-#define LDAP_OPT_AREC_EXCLUSIVE         0x98
-#define LDAP_OPT_SECURITY_CONTEXT       0x99
-#define LDAP_OPT_ROOTDSE_CACHE          0x9a
+#define WLDAP32_LDAP_OPT_API_INFO               0x00
+#define WLDAP32_LDAP_OPT_DESC                   0x01
+#define WLDAP32_LDAP_OPT_DEREF                  0x02
+#define WLDAP32_LDAP_OPT_SIZELIMIT              0x03
+#define WLDAP32_LDAP_OPT_TIMELIMIT              0x04
+#define WLDAP32_LDAP_OPT_THREAD_FN_PTRS         0x05
+#define WLDAP32_LDAP_OPT_REBIND_FN              0x06
+#define WLDAP32_LDAP_OPT_REBIND_ARG             0x07
+#define WLDAP32_LDAP_OPT_REFERRALS              0x08
+#define WLDAP32_LDAP_OPT_RESTART                0x09
+#define WLDAP32_LDAP_OPT_SSL                    0x0a
+#define WLDAP32_LDAP_OPT_IO_FN_PTRS             0x0b
+#define WLDAP32_LDAP_OPT_CACHE_FN_PTRS          0x0d
+#define WLDAP32_LDAP_OPT_CACHE_STRATEGY         0x0e
+#define WLDAP32_LDAP_OPT_CACHE_ENABLE           0x0f
+#define WLDAP32_LDAP_OPT_REFERRAL_HOP_LIMIT     0x10
+#define WLDAP32_LDAP_OPT_VERSION                0x11
+#define WLDAP32_LDAP_OPT_PROTOCOL_VERSION       WLDAP32_LDAP_OPT_VERSION
+#define WLDAP32_LDAP_OPT_SERVER_CONTROLS        0x12
+#define WLDAP32_LDAP_OPT_API_FEATURE_INFO       0x15
+#define WLDAP32_LDAP_OPT_HOST_NAME              0x30
+#define WLDAP32_LDAP_OPT_ERROR_NUMBER           0x31
+#define WLDAP32_LDAP_OPT_ERROR_STRING           0x32
+#define WLDAP32_LDAP_OPT_SERVER_ERROR           0x33
+#define WLDAP32_LDAP_OPT_SERVER_EXT_ERROR       0x34
+#define WLDAP32_LDAP_OPT_PING_KEEP_ALIVE        0x36
+#define WLDAP32_LDAP_OPT_PING_WAIT_TIME         0x37
+#define WLDAP32_LDAP_OPT_PING_LIMIT             0x38
+#define WLDAP32_LDAP_OPT_DNSDOMAIN_NAME         0x3b
+#define WLDAP32_LDAP_OPT_GETDSNAME_FLAGS        0x3d
+#define WLDAP32_LDAP_OPT_HOST_REACHABLE         0x3e
+#define WLDAP32_LDAP_OPT_PROMPT_CREDENTIALS     0x3f
+#define WLDAP32_LDAP_OPT_TCP_KEEPALIVE          0x40
+#define WLDAP32_LDAP_OPT_FAST_CONCURRENT_BIND   0x41
+#define WLDAP32_LDAP_OPT_SEND_TIMEOUT           0x42
+#define WLDAP32_LDAP_OPT_REFERRAL_CALLBACK      0x70
+#define WLDAP32_LDAP_OPT_CLIENT_CERTIFICATE     0x80
+#define WLDAP32_LDAP_OPT_SERVER_CERTIFICATE     0x81
+#define WLDAP32_LDAP_OPT_AUTO_RECONNECT         0x91
+#define WLDAP32_LDAP_OPT_SSPI_FLAGS             0x92
+#define WLDAP32_LDAP_OPT_SSL_INFO               0x93
+#define WLDAP32_LDAP_OPT_REF_DEREF_CONN_PER_MSG 0x94
+#define WLDAP32_LDAP_OPT_TLS                    WLDAP32_LDAP_OPT_SSL
+#define WLDAP32_LDAP_OPT_TLS_INFO               WLDAP32_LDAP_OPT_SSL_INFO
+#define WLDAP32_LDAP_OPT_SIGN                   0x95
+#define WLDAP32_LDAP_OPT_ENCRYPT                0x96
+#define WLDAP32_LDAP_OPT_SASL_METHOD            0x97
+#define WLDAP32_LDAP_OPT_AREC_EXCLUSIVE         0x98
+#define WLDAP32_LDAP_OPT_SECURITY_CONTEXT       0x99
+#define WLDAP32_LDAP_OPT_ROOTDSE_CACHE          0x9a
 
 typedef struct ldap
 {
@@ -176,6 +191,14 @@ typedef struct WLDAP32_berval
 #define LDAP_PAGED_RESULT_OID_STRING "1.2.840.113556.1.4.319"
 #define LDAP_PAGED_RESULT_OID_STRING_W (const WCHAR []){'1','.','2','.', \
         '8','4','0','.','1','1','3','5','5','6','.','1','.','4','.','3','1','9',0}
+
+#define LDAP_SERVER_RESP_SORT_OID "1.2.840.113556.1.4.474"
+#define LDAP_SERVER_RESP_SORT_OID_W (const WCHAR []){'1','.','2','.', \
+        '8','4','0','.','1','1','3','5','5','6','.','1','.','4','.','4','7','4',0}
+
+#define LDAP_CONTROL_VLVRESPONSE "2.16.840.1.113730.3.4.10"
+#define LDAP_CONTROL_VLVRESPONSE_W (const WCHAR []){'2','.','1','6','.', \
+        '8','4','0','.','1','.','1','1','3','7','3','0','.','3','.','4','.','1','0',0}
 
 typedef struct ldapcontrolA
 {

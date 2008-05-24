@@ -6,7 +6,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or(at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -109,7 +109,7 @@ static inline ICPanelImpl *impl_from_IShellExecuteHookA( IShellExecuteHookA *ifa
 *   IShellFolder [ControlPanel] implementation
 */
 
-static shvheader ControlPanelSFHeader[] = {
+static const shvheader ControlPanelSFHeader[] = {
     {IDS_SHV_COLUMN8, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 15},/*FIXME*/
     {IDS_SHV_COLUMN9, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 200},/*FIXME*/
 };
@@ -288,7 +288,7 @@ static PIDLCPanelStruct* _ILGetCPanelPointer(LPCITEMIDLIST pidl)
     LPPIDLDATA pdata = _ILGetDataPointer(pidl);
 
     if (pdata && pdata->type==PT_CPLAPPLET)
-        return (PIDLCPanelStruct*)&(pdata->u.cpanel);
+        return &pdata->u.cpanel;
 
     return NULL;
 }
@@ -436,14 +436,14 @@ static BOOL CreateCPanelEnumList(
 
                 if (!(wfd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
                     strcpy(p, wfd.cFileName);
-                    SHELL_RegisterCPanelApp((IEnumIDList*)iface, szPath);
+                    SHELL_RegisterCPanelApp(iface, szPath);
                 }
             } while(FindNextFileA(hFile, &wfd));
             FindClose(hFile);
         }
 
-        SHELL_RegisterRegistryCPanelApps((IEnumIDList*)iface, HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Control Panel\\Cpls");
-        SHELL_RegisterRegistryCPanelApps((IEnumIDList*)iface, HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Control Panel\\Cpls");
+        SHELL_RegisterRegistryCPanelApps(iface, HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Control Panel\\Cpls");
+        SHELL_RegisterRegistryCPanelApps(iface, HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Control Panel\\Cpls");
     }
     return TRUE;
 }
@@ -917,7 +917,7 @@ static const IPersistFolder2Vtbl vt_PersistFolder2 =
     ICPanel_PersistFolder2_GetCurFolder
 };
 
-HRESULT CPanel_GetIconLocationW(LPITEMIDLIST pidl,
+HRESULT CPanel_GetIconLocationW(LPCITEMIDLIST pidl,
                LPWSTR szIconFile, UINT cchMax, int* piIndex)
 {
     PIDLCPanelStruct* pcpanel = _ILGetCPanelPointer(pidl);
@@ -997,7 +997,7 @@ static HRESULT WINAPI IShellExecuteHookW_fnExecute(IShellExecuteHookW* iface, LP
 
     MultiByteToWideChar(CP_ACP, 0, pcpanel->szName+pcpanel->offsDispName, -1, params, MAX_PATH);
 
-    memcpy(&sei_tmp, psei, sizeof(sei_tmp));
+    sei_tmp = *psei;
     sei_tmp.lpFile = path;
     sei_tmp.lpParameters = params;
     sei_tmp.fMask &= ~SEE_MASK_INVOKEIDLIST;
@@ -1078,7 +1078,7 @@ static HRESULT WINAPI IShellExecuteHookA_fnExecute(IShellExecuteHookA* iface, LP
     lstrcatA(path, "\" ");
     lstrcatA(path, pcpanel->szName+pcpanel->offsDispName);
 
-    memcpy(&sei_tmp, psei, sizeof(sei_tmp));
+    sei_tmp = *psei;
     sei_tmp.lpFile = path;
     sei_tmp.fMask &= ~SEE_MASK_INVOKEIDLIST;
 

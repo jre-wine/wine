@@ -78,7 +78,6 @@ struct master_socket
 {
     struct object        obj;        /* object header */
     struct fd           *fd;         /* file descriptor of the master socket */
-    struct timeout_user *timeout;    /* timeout on last process exit */
 };
 
 static void master_socket_dump( struct object *obj, int verbose );
@@ -89,6 +88,7 @@ static const struct object_ops master_socket_ops =
 {
     sizeof(struct master_socket),  /* size */
     master_socket_dump,            /* dump */
+    no_get_type,                   /* get_type */
     no_add_queue,                  /* add_queue */
     NULL,                          /* remove_queue */
     NULL,                          /* signaled */
@@ -96,7 +96,10 @@ static const struct object_ops master_socket_ops =
     no_signal,                     /* signal */
     no_get_fd,                     /* get_fd */
     no_map_access,                 /* map_access */
+    default_get_sd,                /* get_sd */
+    default_set_sd,                /* set_sd */
     no_lookup_name,                /* lookup_name */
+    no_open_file,                  /* open_file */
     no_close_handle,               /* close_handle */
     master_socket_destroy          /* destroy */
 };
@@ -105,19 +108,23 @@ static const struct fd_ops master_socket_fd_ops =
 {
     NULL,                          /* get_poll_events */
     master_socket_poll_event,      /* poll_event */
-    no_flush,                      /* flush */
-    no_get_file_info,              /* get_file_info */
-    no_queue_async,                /* queue_async */
-    no_cancel_async                /* cancel_async */
+    NULL,                          /* flush */
+    NULL,                          /* get_fd_type */
+    NULL,                          /* ioctl */
+    NULL,                          /* queue_async */
+    NULL,                          /* reselect_async */
+    NULL                           /* cancel_async */
 };
 
 
 struct thread *current = NULL;  /* thread handling the current request */
 unsigned int global_error = 0;  /* global error code for when no thread is current */
-struct timeval server_start_time = { 0, 0 };  /* server startup time */
+timeout_t server_start_time = 0;  /* server startup time */
+int server_dir_fd = -1;    /* file descriptor for the server dir */
+int config_dir_fd = -1;    /* file descriptor for the config dir */
 
 static struct master_socket *master_socket;  /* the master socket object */
-static int force_shutdown;
+static struct timeout_user *master_timeout;
 
 /* socket communication static structures */
 static struct iovec myiovec;
@@ -465,8 +472,7 @@ int send_client_fd( struct process *process, int fd, obj_handle_t handle )
 /* get current tick count to return to client */
 unsigned int get_tick_count(void)
 {
-    return ((current_time.tv_sec - server_start_time.tv_sec) * 1000) +
-           ((current_time.tv_usec - server_start_time.tv_usec) / 1000);
+    return (current_time - server_start_time) / 10000;
 }
 
 static void master_socket_dump( struct object *obj, int verbose )
@@ -503,11 +509,6 @@ static void master_socket_poll_event( struct fd *fd, int event )
         unsigned int len = sizeof(dummy);
         int client = accept( get_unix_fd( master_socket->fd ), (struct sockaddr *) &dummy, &len );
         if (client == -1) return;
-        if (sock->timeout)
-        {
-            remove_timeout_user( sock->timeout );
-            sock->timeout = NULL;
-        }
         fcntl( client, F_SETFL, O_NONBLOCK );
         create_process( client, NULL, 0 );
     }
@@ -554,7 +555,8 @@ static void create_server_dir( const char *dir )
     create_dir( server_dir, &st );
 
     if (chdir( server_dir ) == -1) fatal_perror( "chdir %s", server_dir );
-    if (stat( ".", &st2 ) == -1) fatal_perror( "stat %s", server_dir );
+    if ((server_dir_fd = open( ".", O_RDONLY )) == -1) fatal_perror( "open %s", server_dir );
+    if (fstat( server_dir_fd, &st2 ) == -1) fatal_perror( "stat %s", server_dir );
     if (st.st_dev != st2.st_dev || st.st_ino != st2.st_ino)
         fatal_error( "chdir did not end up in %s\n", server_dir );
 
@@ -618,7 +620,7 @@ int kill_lock_owner( int sig )
     create_server_dir( server_dir );
     fd = create_server_lock();
 
-    for (i = 0; i < 10; i++)
+    for (i = 1; i <= 20; i++)
     {
         fl.l_type   = F_WRLCK;
         fl.l_whence = SEEK_SET;
@@ -642,7 +644,7 @@ int kill_lock_owner( int sig )
             }
         }
         else if (fl.l_pid != pid) goto done;  /* no longer the same process */
-        sleep( 1 );
+        usleep( 50000 * i );
     }
     /* waited long enough, now kill it */
     kill( pid, SIGKILL );
@@ -724,9 +726,8 @@ static void acquire_lock(void)
     if (listen( fd, 5 ) == -1) fatal_perror( "listen" );
 
     if (!(master_socket = alloc_object( &master_socket_ops )) ||
-        !(master_socket->fd = create_anonymous_fd( &master_socket_fd_ops, fd, &master_socket->obj )))
+        !(master_socket->fd = create_anonymous_fd( &master_socket_fd_ops, fd, &master_socket->obj, 0 )))
         fatal_error( "out of memory\n" );
-    master_socket->timeout = NULL;
     set_fd_events( master_socket->fd, POLLIN );
     make_object_static( &master_socket->obj );
 }
@@ -735,6 +736,7 @@ static void acquire_lock(void)
 void open_master_socket(void)
 {
     const char *server_dir = wine_get_server_dir();
+    const char *config_dir = wine_get_config_dir();
     int fd, pid, status, sync_pipe[2];
     char dummy;
 
@@ -742,7 +744,10 @@ void open_master_socket(void)
     assert( sizeof(union generic_request) == sizeof(struct request_max_size) );
     assert( sizeof(union generic_reply) == sizeof(struct request_max_size) );
 
-    if (!server_dir) fatal_error( "directory %s cannot be accessed\n", wine_get_config_dir() );
+    if (!server_dir) fatal_error( "directory %s cannot be accessed\n", config_dir );
+    if (chdir( config_dir ) == -1) fatal_perror( "chdir to %s", config_dir );
+    if ((config_dir_fd = open( ".", O_RDONLY )) == -1) fatal_perror( "open %s", config_dir );
+
     create_server_dir( server_dir );
 
     if (!foreground)
@@ -798,50 +803,33 @@ void open_master_socket(void)
     msghdr.msg_iov     = &myiovec;
     msghdr.msg_iovlen  = 1;
 
-    /* init startup time */
-    gettimeofday( &server_start_time, NULL );
+    /* init the process tracing mechanism */
+    init_tracing_mechanism();
 }
 
 /* master socket timer expiration handler */
 static void close_socket_timeout( void *arg )
 {
-    master_socket->timeout = NULL;
+    master_timeout = NULL;
     flush_registry();
-
-    /* if a new client is waiting, we keep on running */
-    if (!force_shutdown && check_fd_events( master_socket->fd, POLLIN )) return;
-
     if (debug_level) fprintf( stderr, "wineserver: exiting (pid=%ld)\n", (long) getpid() );
 
 #ifdef DEBUG_OBJECTS
     close_objects();  /* shut down everything properly */
 #endif
-    exit( force_shutdown );
+    exit( 0 );
 }
 
 /* close the master socket and stop waiting for new clients */
-void close_master_socket(void)
+void close_master_socket( timeout_t timeout )
 {
-    if (master_socket_timeout == -1) return;  /* just keep running forever */
-
-    if (master_socket_timeout)
+    if (master_socket)
     {
-        struct timeval when = current_time;
-        add_timeout( &when, master_socket_timeout * 1000 );
-        master_socket->timeout = add_timeout_user( &when, close_socket_timeout, NULL );
+        release_object( master_socket );
+        master_socket = NULL;
     }
-    else close_socket_timeout( NULL );  /* close it right away */
-}
+    if (master_timeout)  /* cancel previous timeout */
+        remove_timeout_user( master_timeout );
 
-/* forced shutdown, used for wineserver -k */
-void shutdown_master_socket(void)
-{
-    force_shutdown = 1;
-    master_socket_timeout = 0;
-    if (master_socket->timeout)
-    {
-        remove_timeout_user( master_socket->timeout );
-        close_socket_timeout( NULL );
-    }
-    set_fd_events( master_socket->fd, -1 ); /* stop waiting for new clients */
+    master_timeout = add_timeout_user( timeout, close_socket_timeout, NULL );
 }

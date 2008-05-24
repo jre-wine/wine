@@ -77,7 +77,7 @@ VOID WINAPI DsRoleFreeMemory(PVOID Buffer)
  *  DsRoleGetPrimaryDomainInformation  (NETAPI32.@)
  *
  * PARAMS
- *  lpServer  [I] Pointer to UNICODE string with Computername
+ *  lpServer  [I] Pointer to UNICODE string with ComputerName
  *  InfoLevel [I] Type of data to retrieve	
  *  Buffer    [O] Pointer to to the requested data
  *
@@ -116,7 +116,7 @@ DWORD WINAPI DsRoleGetPrimaryDomainInformation(
              POLICY_VIEW_LOCAL_INFORMATION, &PolicyHandle);
             if (NtStatus != STATUS_SUCCESS)
             {
-                ERR("LsaOpenPolicyFailed with NT status %x\n",
+                TRACE("LsaOpenPolicyFailed with NT status %x\n",
                     LsaNtStatusToWinError(NtStatus));
                 return ERROR_OUTOFMEMORY;
             }

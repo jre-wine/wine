@@ -50,7 +50,6 @@
 #include "wingdi.h"
 #include "winuser.h"
 #include "vfw.h"
-#include "winreg.h"
 #include "winnls.h"
 #include "winternl.h"
 #include "wine/debug.h"
@@ -180,7 +179,7 @@ static BOOL query_video_device(int devnum, char *name, int namesize, char *versi
 BOOL VFWAPI capGetDriverDescriptionA(WORD wDriverIndex, LPSTR lpszName,
                                      INT cbName, LPSTR lpszVer, INT cbVer)
 {
-   HRESULT retval;
+   BOOL retval;
    WCHAR devname[CAP_DESC_MAX], devver[CAP_DESC_MAX];
    TRACE("--> capGetDriverDescriptionW\n");
    retval = capGetDriverDescriptionW(wDriverIndex, devname, CAP_DESC_MAX, devver, CAP_DESC_MAX);

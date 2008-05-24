@@ -24,7 +24,6 @@
 #include <string.h>
 
 #include "dbghelp_private.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "wine/debug.h"
 
@@ -42,10 +41,10 @@ DWORD WINAPI GetTimestampForLoadedLibrary(HMODULE Module)
 /***********************************************************************
  *		MapDebugInformation (DBGHELP.@)
  */
-PIMAGE_DEBUG_INFORMATION WINAPI MapDebugInformation(HANDLE FileHandle, LPSTR FileName,
-                                                    LPSTR SymbolPath, DWORD ImageBase)
+PIMAGE_DEBUG_INFORMATION WINAPI MapDebugInformation(HANDLE FileHandle, PCSTR FileName,
+                                                    PCSTR SymbolPath, ULONG ImageBase)
 {
-    FIXME("(%p, %s, %s, 0x%08lx): stub\n", FileHandle, FileName, SymbolPath, ImageBase);
+    FIXME("(%p, %s, %s, 0x%08x): stub\n", FileHandle, FileName, SymbolPath, ImageBase);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return NULL;
 }

@@ -32,7 +32,6 @@
 #include "undocshell.h"
 #include "shlwapi.h"
 #include "shell32_main.h"
-#include "shlguid.h"
 
 #include "pidl.h"
 #include "wine/debug.h"
@@ -133,7 +132,7 @@ static LPFMINFO FM_SetMenuParameter(
 static int FM_InitMenuPopup(HMENU hmenu, LPCITEMIDLIST pAlternatePidl)
 {	IShellFolder	*lpsf, *lpsf2;
 	ULONG		ulItemAttr = SFGAO_FOLDER;
-	UINT		uID, uFlags, uEnumFlags;
+	UINT		uID, uEnumFlags;
 	LPFNFMCALLBACK	lpfnCallback;
 	LPCITEMIDLIST	pidl;
 	WCHAR		sTemp[MAX_PATH];
@@ -165,7 +164,6 @@ static int FM_InitMenuPopup(HMENU hmenu, LPCITEMIDLIST pAlternatePidl)
 	  return 0;
 
 	uID = menudata->uID;
-	uFlags = menudata->uFlags;
 	uEnumFlags = menudata->uEnumFlags;
 	lpfnCallback = menudata->lpfnCallback;
 	menudata->bInitialized = FALSE;
@@ -594,7 +592,7 @@ LRESULT WINAPI FileMenu_DrawItem(
 	COLORREF clrPrevText, clrPrevBkgnd;
 	int xi,yi,xt,yt;
 	HIMAGELIST hImageList;
-	RECT TextRect, BorderRect;
+	RECT TextRect;
 	LPFMINFO menuinfo;
 
 	TRACE("%p %p %s\n", hWnd, lpdis, debugstr_w(pMyItem->szItemText));
@@ -617,9 +615,6 @@ LRESULT WINAPI FileMenu_DrawItem(
 	if (menuinfo->nBorderWidth)
 	  TextRect.left += menuinfo->nBorderWidth;
 
-	BorderRect.right = menuinfo->nBorderWidth;
-/*	FillRect(lpdis->hDC, &BorderRect, CreateSolidBrush( menuinfo->crBorderColor));
-*/
 	TextRect.left += FM_LEFTBORDER;
 	xi = TextRect.left + FM_SPACE1;
 	yi = TextRect.top + FM_Y_SPACE/2;
@@ -662,7 +657,7 @@ LRESULT WINAPI FileMenu_HandleMenuChar(
 	HMENU	hMenu,
 	WPARAM	wParam)
 {
-	FIXME("%p 0x%08x\n",hMenu,wParam);
+	FIXME("%p 0x%08lx\n",hMenu,wParam);
 	return 0;
 }
 

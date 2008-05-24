@@ -32,12 +32,18 @@
 #include "wingdi.h"
 #include "wownt32.h"
 #include "wine/winuser16.h"
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 #include "winerror.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(palette);
+
+typedef struct tagPALETTEOBJ
+{
+    GDIOBJHDR           header;
+    const DC_FUNCTIONS *funcs;      /* DC function table */
+    LOGPALETTE          logpalette; /* _MUST_ be the last field */
+} PALETTEOBJ;
 
 static INT PALETTE_GetObject( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
 static BOOL PALETTE_UnrealizeObject( HGDIOBJ handle, void *obj );
@@ -46,7 +52,6 @@ static BOOL PALETTE_DeleteObject( HGDIOBJ handle, void *obj );
 static const struct gdi_obj_funcs palette_funcs =
 {
     NULL,                     /* pSelectObject */
-    PALETTE_GetObject,        /* pGetObject16 */
     PALETTE_GetObject,        /* pGetObjectA */
     PALETTE_GetObject,        /* pGetObjectW */
     PALETTE_UnrealizeObject,  /* pUnrealizeObject */
@@ -62,7 +67,8 @@ static UINT SystemPaletteUse = SYSPAL_STATIC;  /* currently not considered */
 
 static HPALETTE hPrimaryPalette = 0; /* used for WM_PALETTECHANGED */
 static HPALETTE hLastRealizedPalette = 0; /* UnrealizeObject() needs it */
-static const DC_FUNCTIONS *pLastRealizedDC;
+
+#define NB_RESERVED_COLORS  20   /* number of fixed colors in system palette */
 
 static const PALETTEENTRY sys_pal_template[NB_RESERVED_COLORS] =
 {
@@ -106,7 +112,6 @@ HPALETTE PALETTE_Init(void)
 {
     HPALETTE          hpalette;
     LOGPALETTE *        palPtr;
-    PALETTEOBJ*         palObj;
 
     /* create default palette (20 system colors) */
 
@@ -119,25 +124,7 @@ HPALETTE PALETTE_Init(void)
     memcpy( palPtr->palPalEntry, sys_pal_template, sizeof(sys_pal_template) );
     hpalette = CreatePalette( palPtr );
     HeapFree( GetProcessHeap(), 0, palPtr );
-
-    palObj = (PALETTEOBJ*) GDI_GetObjPtr( hpalette, PALETTE_MAGIC );
-    if (palObj)
-    {
-        if (!(palObj->mapping = HeapAlloc( GetProcessHeap(), 0, sizeof(int) * NB_RESERVED_COLORS )))
-            ERR("Cannot create palette mapping -- out of memory!\n");
-        GDI_ReleaseObj( hpalette );
-    }
     return hpalette;
-}
-
-/***********************************************************************
- *           PALETTE_ValidateFlags
- */
-static void PALETTE_ValidateFlags(PALETTEENTRY* lpPalE, int size)
-{
-    int i = 0;
-    for( ; i<size ; i++ )
-        lpPalE[i].peFlags = PC_SYS_USED | (lpPalE[i].peFlags & 0x07);
 }
 
 
@@ -166,9 +153,7 @@ HPALETTE WINAPI CreatePalette(
                                         PALETTE_MAGIC, (HGDIOBJ *)&hpalette,
 					&palette_funcs ))) return 0;
     memcpy( &palettePtr->logpalette, palette, size );
-    PALETTE_ValidateFlags(palettePtr->logpalette.palPalEntry,
-			  palettePtr->logpalette.palNumEntries);
-    palettePtr->mapping = NULL;
+    palettePtr->funcs = NULL;
     GDI_ReleaseObj( hpalette );
 
     TRACE("   returning %p\n", hpalette);
@@ -315,9 +300,6 @@ UINT WINAPI GetPaletteEntries(
       }
       memcpy( entries, &palPtr->logpalette.palPalEntry[start],
 	      count * sizeof(PALETTEENTRY) );
-      for( numEntries = 0; numEntries < count ; numEntries++ )
-	   if (entries[numEntries].peFlags & 0xF0)
-	       entries[numEntries].peFlags = 0;
     }
 
     GDI_ReleaseObj( hpalette );
@@ -358,8 +340,6 @@ UINT WINAPI SetPaletteEntries(
     if (start+count > numEntries) count = numEntries - start;
     memcpy( &palPtr->logpalette.palPalEntry[start], entries,
 	    count * sizeof(PALETTEENTRY) );
-    PALETTE_ValidateFlags(palPtr->logpalette.palPalEntry,
-			  palPtr->logpalette.palNumEntries);
     UnrealizeObject( hpalette );
     GDI_ReleaseObj( hpalette );
     return count;
@@ -382,7 +362,6 @@ BOOL WINAPI ResizePalette(
     PALETTEOBJ * palPtr = (PALETTEOBJ *) GDI_GetObjPtr( hPal, PALETTE_MAGIC );
     UINT	 cPrevEnt, prevVer;
     int		 prevsize, size = sizeof(LOGPALETTE) + (cEntries - 1) * sizeof(PALETTEENTRY);
-    int*	 mapping = NULL;
 
     TRACE("hpal = %p, prev = %i, new = %i\n",
           hPal, palPtr ? palPtr->logpalette.palNumEntries : -1, cEntries );
@@ -392,30 +371,12 @@ BOOL WINAPI ResizePalette(
     prevsize = sizeof(LOGPALETTE) + (cPrevEnt - 1) * sizeof(PALETTEENTRY) +
 	      				sizeof(int*) + sizeof(GDIOBJHDR);
     size += sizeof(int*) + sizeof(GDIOBJHDR);
-    mapping = palPtr->mapping;
 
     if (!(palPtr = GDI_ReallocObject( size, hPal, palPtr ))) return FALSE;
 
-    if( mapping )
-    {
-        int *newMap = HeapReAlloc(GetProcessHeap(), 0, mapping, cEntries * sizeof(int) );
-	if(newMap == NULL)
-        {
-            ERR("Cannot resize mapping -- out of memory!\n");
-            GDI_ReleaseObj( hPal );
-            return FALSE;
-        }
-        palPtr->mapping = newMap;
-    }
+    PALETTE_UnrealizeObject( hPal, palPtr );
 
-    if( cEntries > cPrevEnt )
-    {
-	if( mapping )
-	    memset(palPtr->mapping + cPrevEnt, 0, (cEntries - cPrevEnt)*sizeof(int));
-	memset( (BYTE*)palPtr + prevsize, 0, size - prevsize );
-        PALETTE_ValidateFlags((PALETTEENTRY*)((BYTE*)palPtr + prevsize),
-						     cEntries - cPrevEnt );
-    }
+    if( cEntries > cPrevEnt ) memset( (BYTE*)palPtr + prevsize, 0, size - prevsize );
     palPtr->logpalette.palNumEntries = cEntries;
     palPtr->logpalette.palVersion = prevVer;
     GDI_ReleaseObj( hPal );
@@ -470,19 +431,14 @@ BOOL WINAPI AnimatePalette(
               pptr->peRed, pptr->peGreen, pptr->peBlue);
             memcpy( &palPtr->logpalette.palPalEntry[StartIndex], pptr,
                     sizeof(PALETTEENTRY) );
-            PALETTE_ValidateFlags(&palPtr->logpalette.palPalEntry[StartIndex], 1);
           } else {
             TRACE("Not animating entry %d -- not PC_RESERVED\n", StartIndex);
           }
         }
-        
-        GDI_ReleaseObj( hPal );
-        
-        TRACE("pLastRealizedDC %p -- pLastRealizedDC->pRealizePalette %p\n",
-          pLastRealizedDC, pLastRealizedDC ? pLastRealizedDC->pRealizePalette : 0);
+        if (palPtr->funcs && palPtr->funcs->pRealizePalette)
+            palPtr->funcs->pRealizePalette( NULL, hPal, hPal == hPrimaryPalette );
 
-        if (pLastRealizedDC && pLastRealizedDC->pRealizePalette)
-            pLastRealizedDC->pRealizePalette( NULL, hPal, hPal == hPrimaryPalette );
+        GDI_ReleaseObj( hPal );
     }
     return TRUE;
 }
@@ -555,11 +511,11 @@ UINT WINAPI GetSystemPaletteEntries(
 
     TRACE("hdc=%p,start=%i,count=%i\n", hdc,start,count);
 
-    if ((dc = DC_GetDCPtr( hdc )))
+    if ((dc = get_dc_ptr( hdc )))
     {
         if (dc->funcs->pGetSystemPaletteEntries)
             ret = dc->funcs->pGetSystemPaletteEntries( dc->physDev, start, count, entries );
-        GDI_ReleaseObj( hdc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -592,8 +548,6 @@ UINT WINAPI GetNearestPaletteIndex(
 
         for( i = 0; i < palObj->logpalette.palNumEntries && diff ; i++, entry++)
         {
-            if (!(entry->peFlags & PC_SYS_USED)) continue;
-
             r = entry->peRed - GetRValue(color);
             g = entry->peGreen - GetGValue(color);
             b = entry->peBlue - GetBValue(color);
@@ -626,18 +580,18 @@ COLORREF WINAPI GetNearestColor(
     COLORREF nearest;
     DC 		*dc;
 
-    if (!(dc = DC_GetDCPtr( hdc ))) return CLR_INVALID;
+    if (!(dc = get_dc_ptr( hdc ))) return CLR_INVALID;
 
     if (dc->funcs->pGetNearestColor)
     {
         nearest = dc->funcs->pGetNearestColor( dc->physDev, color );
-        GDI_ReleaseObj( hdc );
+        release_dc_ptr( dc );
         return nearest;
     }
 
     if (!(GetDeviceCaps(hdc, RASTERCAPS) & RC_PALETTE))
     {
-        GDI_ReleaseObj( hdc );
+        release_dc_ptr( dc );
         return color;
     }
 
@@ -660,14 +614,14 @@ COLORREF WINAPI GetNearestColor(
             WARN("RGB(%x) : idx %d is out of bounds, assuming NULL\n", color, index );
             if (!GetPaletteEntries( hpal, 0, 1, &entry ))
             {
-                GDI_ReleaseObj( hdc );
+                release_dc_ptr( dc );
                 return CLR_INVALID;
             }
         }
         color = RGB( entry.peRed, entry.peGreen, entry.peBlue );
     }
     nearest = color & 0x00ffffff;
-    GDI_ReleaseObj( hdc );
+    release_dc_ptr( dc );
 
     TRACE("(%06x): returning %06x\n", color, nearest );
     return nearest;
@@ -697,15 +651,16 @@ static BOOL PALETTE_UnrealizeObject( HGDIOBJ handle, void *obj )
 {
     PALETTEOBJ *palette = obj;
 
-    HeapFree( GetProcessHeap(), 0, palette->mapping );
-    palette->mapping = NULL;
-
-    if (hLastRealizedPalette == handle)
+    if (palette->funcs)
     {
-        TRACE("unrealizing palette %p\n", handle);
-        hLastRealizedPalette = 0;
-        pLastRealizedDC = NULL;
+        if (palette->funcs->pUnrealizePalette)
+            palette->funcs->pUnrealizePalette( handle );
+        palette->funcs = NULL;
     }
+
+    if (InterlockedCompareExchangePointer( (void **)&hLastRealizedPalette, 0, handle ) == handle)
+        TRACE("unrealizing palette %p\n", handle);
+
     return TRUE;
 }
 
@@ -715,15 +670,7 @@ static BOOL PALETTE_UnrealizeObject( HGDIOBJ handle, void *obj )
  */
 static BOOL PALETTE_DeleteObject( HGDIOBJ handle, void *obj )
 {
-    PALETTEOBJ *palette = obj;
-
-    HeapFree( GetProcessHeap(), 0, palette->mapping );
-    if (hLastRealizedPalette == handle)
-    {
-        TRACE("unrealizing palette %p\n", handle);
-        hLastRealizedPalette = 0;
-        pLastRealizedDC = NULL;
-    }
+    PALETTE_UnrealizeObject( handle, obj );
     return GDI_FreeObject( handle, obj );
 }
 
@@ -743,7 +690,7 @@ HPALETTE WINAPI GDISelectPalette( HDC hdc, HPALETTE hpal, WORD wBkg)
       WARN("invalid selected palette %p\n",hpal);
       return 0;
     }
-    if (!(dc = DC_GetDCPtr( hdc ))) return 0;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
     ret = dc->hPalette;
     if (dc->funcs->pSelectPalette) hpal = dc->funcs->pSelectPalette( dc->physDev, hpal, FALSE );
     if (hpal)
@@ -752,7 +699,7 @@ HPALETTE WINAPI GDISelectPalette( HDC hdc, HPALETTE hpal, WORD wBkg)
         if (!wBkg) hPrimaryPalette = hpal;
     }
     else ret = 0;
-    GDI_ReleaseObj( hdc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -763,7 +710,7 @@ HPALETTE WINAPI GDISelectPalette( HDC hdc, HPALETTE hpal, WORD wBkg)
 UINT WINAPI GDIRealizePalette( HDC hdc )
 {
     UINT realized = 0;
-    DC* dc = DC_GetDCPtr( hdc );
+    DC* dc = get_dc_ptr( hdc );
 
     if (!dc) return 0;
 
@@ -774,17 +721,23 @@ UINT WINAPI GDIRealizePalette( HDC hdc )
         if (dc->funcs->pRealizeDefaultPalette)
             realized = dc->funcs->pRealizeDefaultPalette( dc->physDev );
     }
-    else if(dc->hPalette != hLastRealizedPalette )
+    else if (InterlockedExchangePointer( (void **)&hLastRealizedPalette, dc->hPalette ) != dc->hPalette)
     {
         if (dc->funcs->pRealizePalette)
-            realized = dc->funcs->pRealizePalette( dc->physDev, dc->hPalette,
-                                                   (dc->hPalette == hPrimaryPalette) );
-        hLastRealizedPalette = dc->hPalette;
-        pLastRealizedDC = dc->funcs;
+        {
+            PALETTEOBJ *palPtr = GDI_GetObjPtr( dc->hPalette, PALETTE_MAGIC );
+            if (palPtr)
+            {
+                realized = dc->funcs->pRealizePalette( dc->physDev, dc->hPalette,
+                                                       (dc->hPalette == hPrimaryPalette) );
+                palPtr->funcs = dc->funcs;
+                GDI_ReleaseObj( dc->hPalette );
+            }
+        }
     }
     else TRACE("  skipping (hLastRealizedPalette = %p)\n", hLastRealizedPalette);
 
-    GDI_ReleaseObj( hdc );
+    release_dc_ptr( dc );
     TRACE("   realized %i colors.\n", realized );
     return realized;
 }
@@ -800,10 +753,10 @@ UINT16 WINAPI RealizeDefaultPalette16( HDC16 hdc )
 
     TRACE("%04x\n", hdc );
 
-    if (!(dc = DC_GetDCPtr( HDC_32(hdc) ))) return 0;
+    if (!(dc = get_dc_ptr( HDC_32(hdc) ))) return 0;
 
     if (dc->funcs->pRealizeDefaultPalette) ret = dc->funcs->pRealizeDefaultPalette( dc->physDev );
-    GDI_ReleaseObj( HDC_32(hdc) );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -812,11 +765,11 @@ UINT16 WINAPI RealizeDefaultPalette16( HDC16 hdc )
  */
 BOOL16 WINAPI IsDCCurrentPalette16(HDC16 hDC)
 {
-    DC *dc = DC_GetDCPtr( HDC_32(hDC) );
+    DC *dc = get_dc_ptr( HDC_32(hDC) );
     if (dc)
     {
       BOOL bRet = dc->hPalette == hPrimaryPalette;
-      GDI_ReleaseObj( HDC_32(hDC) );
+      release_dc_ptr( dc );
       return bRet;
     }
     return FALSE;
@@ -890,7 +843,7 @@ BOOL WINAPI UpdateColors(
              */
             if (hWnd && size)
             {
-                RedrawWindow_funcptr pRedrawWindow = GetProcAddress( mod, "RedrawWindow" );
+                RedrawWindow_funcptr pRedrawWindow = (void *)GetProcAddress( mod, "RedrawWindow" );
                 if (pRedrawWindow) pRedrawWindow( hWnd, NULL, 0, RDW_INVALIDATE );
             }
         }
@@ -909,152 +862,10 @@ VOID WINAPI SetMagicColors16(HDC16 hDC, COLORREF color, UINT16 index)
 }
 
 /*********************************************************************
- *           SetMagicColors   (GDI.@)
+ *           SetMagicColors   (GDI32.@)
  */
 BOOL WINAPI SetMagicColors(HDC hdc, ULONG u1, ULONG u2)
 {
     FIXME("(%p 0x%08x 0x%08x): stub\n", hdc, u1, u2);
     return TRUE;
-}
-
-/**********************************************************************
- * GetICMProfileA [GDI32.@]
- *
- * Returns the filename of the specified device context's color
- * management profile, even if color management is not enabled
- * for that DC.
- *
- * RETURNS
- *    TRUE if name copied successfully OR lpszFilename is NULL
- *    FALSE if the buffer length pointed to by lpcbName is too small
- *
- * NOTE
- *    The buffer length pointed to by lpcbName is ALWAYS updated to
- *    the length required regardless of other actions this function
- *    may take.
- *
- * FIXME
- *    How does Windows assign these?  Some registry key?
- */
-
-
-/*********************************************************************/
-
-BOOL WINAPI GetICMProfileA(HDC hDC, LPDWORD lpcbName, LPSTR lpszFilename)
-{
-    DWORD callerLen;
-    static const char icm[] = "winefake.icm";
-
-    FIXME("(%p, %p, %p): partial stub\n", hDC, lpcbName, lpszFilename);
-
-    callerLen = *lpcbName;
-
-    /* all 3 behaviors require the required buffer size to be set */
-    *lpcbName = sizeof(icm);
-
-    /* behavior 1: if lpszFilename is NULL, return size of string and no error */
-    if (!lpszFilename) return TRUE;
-
-    /* behavior 2: if buffer size too small, return size of string and error */
-    if (callerLen < sizeof(icm))
-    {
-	SetLastError(ERROR_INSUFFICIENT_BUFFER);
-	return FALSE;
-    }
-
-    /* behavior 3: if buffer size OK and pointer not NULL, copy and return size */
-    memcpy(lpszFilename, icm, sizeof(icm));
-    return TRUE;
-}
-
-/**********************************************************************
- * GetICMProfileW [GDI32.@]
- **/
-BOOL WINAPI GetICMProfileW(HDC hDC, LPDWORD lpcbName, LPWSTR lpszFilename)
-{
-    DWORD callerLen;
-    static const WCHAR icm[] = { 'w','i','n','e','f','a','k','e','.','i','c','m', 0 };
-
-    FIXME("(%p, %p, %p): partial stub\n", hDC, lpcbName, lpszFilename);
-
-    callerLen = *lpcbName;
-
-    /* all 3 behaviors require the required buffer size to be set */
-    *lpcbName = sizeof(icm) / sizeof(WCHAR);
-
-    /* behavior 1: if lpszFilename is NULL, return size of string and no error */
-    if (!lpszFilename) return TRUE;
-
-    /* behavior 2: if buffer size too small, return size of string and error */
-    if (callerLen < sizeof(icm)/sizeof(WCHAR))
-    {
-        SetLastError(ERROR_INSUFFICIENT_BUFFER);
-        return FALSE;
-    }
-
-    /* behavior 3: if buffer size OK and pointer not NULL, copy and return size */
-    memcpy(lpszFilename, icm, sizeof(icm));
-    return TRUE;
-}
-
-/**********************************************************************
- * GetLogColorSpaceA [GDI32.@]
- *
- */
-BOOL WINAPI GetLogColorSpaceA(HCOLORSPACE hColorSpace, LPLOGCOLORSPACEA lpBuffer, DWORD nSize)
-{
-    FIXME("%p %p 0x%08x: stub!\n", hColorSpace, lpBuffer, nSize);
-    return FALSE;
-}
-
-/**********************************************************************
- * GetLogColorSpaceW [GDI32.@]
- *
- */
-BOOL WINAPI GetLogColorSpaceW(HCOLORSPACE hColorSpace, LPLOGCOLORSPACEW lpBuffer, DWORD nSize)
-{
-    FIXME("%p %p 0x%08x: stub!\n", hColorSpace, lpBuffer, nSize);
-    return FALSE;
-}
-
-/**********************************************************************
- * SetICMProfileA [GDI32.@]
- *
- */
-BOOL WINAPI SetICMProfileA(HDC hDC, LPSTR lpszFilename)
-{
-    FIXME("hDC %p filename '%s': stub!\n", hDC, debugstr_a(lpszFilename));
-    return TRUE; /* success */
-}
-
-/**********************************************************************
- * SetICMProfileA [GDI32.@]
- *
- */
-BOOL WINAPI SetICMProfileW(HDC hDC, LPWSTR lpszFilename)
-{
-    FIXME("hDC %p filename '%s': stub!\n", hDC, debugstr_w(lpszFilename));
-    return TRUE; /* success */
-}
-
-/**********************************************************************
- * UpdateICMRegKeyA [GDI32.@]
- *
- */
-BOOL WINAPI UpdateICMRegKeyA(DWORD dwReserved, LPSTR lpszCMID, LPSTR lpszFileName, UINT nCommand)
-{
-    FIXME("(0x%08x, %s, %s, 0x%08x): stub!\n", dwReserved, debugstr_a(lpszCMID),
-          debugstr_a(lpszFileName), nCommand);
-    return TRUE; /* success */
-}
-
-/**********************************************************************
- * UpdateICMRegKeyW [GDI32.@]
- *
- */
-BOOL WINAPI UpdateICMRegKeyW(DWORD dwReserved, LPWSTR lpszCMID, LPWSTR lpszFileName, UINT nCommand)
-{
-    FIXME("(0x%08x, %s, %s, 0x%08x): stub!\n", dwReserved, debugstr_w(lpszCMID),
-          debugstr_w(lpszFileName), nCommand);
-    return TRUE; /* success */
 }

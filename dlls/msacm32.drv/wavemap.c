@@ -67,7 +67,7 @@ typedef	struct tagWAVEMAPDATA {
     DWORD       nSamplesPerSecInner;
 } WAVEMAPDATA;
 
-static	BOOL	WAVEMAP_IsData(WAVEMAPDATA* wm)
+static	BOOL	WAVEMAP_IsData(const WAVEMAPDATA* wm)
 {
     return (!IsBadReadPtr(wm, sizeof(WAVEMAPDATA)) && wm->self == wm);
 }
@@ -88,7 +88,7 @@ static void CALLBACK wodCallback(HWAVEOUT hWave, UINT uMsg, DWORD_PTR dwInstance
 	return;
     }
 
-    if (hWave != wom->u.out.hInnerWave && uMsg != WOM_OPEN)
+    if (uMsg != WOM_OPEN && hWave != wom->u.out.hInnerWave)
 	ERR("Shouldn't happen (%p %p)\n", hWave, wom->u.out.hInnerWave);
 
     switch (uMsg) {
@@ -434,7 +434,7 @@ static	DWORD	wodGetPosition(WAVEMAPDATA* wom, LPMMTIME lpTime, DWORD dwParam2)
     MMTIME      timepos;
     TRACE("(%p %p %08x)\n", wom, lpTime, dwParam2);
 
-    memcpy(&timepos, lpTime, sizeof(timepos));
+    timepos = *lpTime;
 
     /* For TIME_MS, we're going to recalculate using TIME_BYTES */
     if (lpTime->wType == TIME_MS)
@@ -509,7 +509,7 @@ static	DWORD	wodGetDevCaps(UINT wDevID, WAVEMAPDATA* wom, LPWAVEOUTCAPSW lpWaveC
 	WAVEOUTCAPSW woc;
 	woc.wMid = 0x00FF;
 	woc.wPid = 0x0001;
-	woc.vDriverVersion = 0x0100;
+	woc.vDriverVersion = 0x0332;
 	lstrcpyW(woc.szPname, name);
 	woc.dwFormats =
             WAVE_FORMAT_96M08 | WAVE_FORMAT_96S08 | WAVE_FORMAT_96M16 | WAVE_FORMAT_96S16 |
@@ -988,7 +988,7 @@ static	DWORD	widGetPosition(WAVEMAPDATA* wim, LPMMTIME lpTime, DWORD dwParam2)
     MMTIME      timepos;
     TRACE("(%p %p %08x)\n", wim, lpTime, dwParam2);
 
-    memcpy(&timepos, lpTime, sizeof(timepos));
+    timepos = *lpTime;
 
     /* For TIME_MS, we're going to recalculate using TIME_BYTES */
     if (lpTime->wType == TIME_MS)

@@ -156,7 +156,7 @@ static PROXYHANDLE gProxyHandle;
         } \
 }
 
-SQLRETURN SQLDummyFunc(void)
+static SQLRETURN SQLDummyFunc(void)
 {
     TRACE("SQLDummyFunc:\n");
     return SQL_SUCCESS;
@@ -347,7 +347,7 @@ static void ODBC_ReplicateODBCToRegistry (int is_user, SQLHENV hEnv)
                         KEY_ALL_ACCESS, NULL, &hDSN, NULL))
                         == ERROR_SUCCESS)
                 {
-                    static const char *DRIVERKEY = "Driver";
+                    static const char DRIVERKEY[] = "Driver";
                     if ((reg_ret = RegQueryValueExA (hDSN, DRIVERKEY,
                             NULL, NULL, NULL, NULL))
                             == ERROR_FILE_NOT_FOUND)
@@ -518,31 +518,23 @@ static BOOL ODBC_LoadDriverManager(void)
    TRACE("\n");
 
    gProxyHandle.bFunctionReady = FALSE;
-   gProxyHandle.nErrorType = ERROR_LIBRARY_NOT_FOUND;
 
-   if (s!= NULL && strlen (s) >= sizeof(gProxyHandle.dmLibName))
-   {
-          ERR("Driver name too long (%s)\n",s);
-          return FALSE;
-   }
-   if (s == NULL || strlen(s) == 0)
-          s = "libodbc.so";
-   strcpy(gProxyHandle.dmLibName, s);
+#ifdef SONAME_LIBODBC
+   if (!s || !s[0]) s = SONAME_LIBODBC;
+#endif
+   if (!s || !s[0]) goto failed;
 
-   gProxyHandle.dmHandle = wine_dlopen(gProxyHandle.dmLibName, RTLD_LAZY | RTLD_GLOBAL, error, sizeof(error));
+   gProxyHandle.dmHandle = wine_dlopen(s, RTLD_LAZY | RTLD_GLOBAL, error, sizeof(error));
 
-   if (gProxyHandle.dmHandle == NULL)           /* fail to load unixODBC driver manager */
-   {
-           WARN("failed to open library %s: %s\n", gProxyHandle.dmLibName, error);
-           gProxyHandle.dmLibName[0] = '\0';
-           gProxyHandle.nErrorType = ERROR_LIBRARY_NOT_FOUND;
-           return FALSE;
-   }
-   else
+   if (gProxyHandle.dmHandle != NULL)
    {
       gProxyHandle.nErrorType = ERROR_FREE;
       return TRUE;
    }
+failed:
+   WARN("failed to open library %s: %s\n", debugstr_a(s), error);
+   gProxyHandle.nErrorType = ERROR_LIBRARY_NOT_FOUND;
+   return FALSE;
 }
 
 
@@ -711,7 +703,7 @@ SQLRETURN WINAPI SQLAllocStmt(SQLHDBC ConnectionHandle, SQLHSTMT *StatementHandl
 SQLRETURN WINAPI SQLAllocHandleStd( SQLSMALLINT HandleType,
                                                          SQLHANDLE InputHandle, SQLHANDLE *OutputHandle)
 {
-        TRACE("ProxyODBC: SQLAllocHandelStd.\n");
+        TRACE("ProxyODBC: SQLAllocHandleStd.\n");
 
         if (!gProxyHandle.bFunctionReady || gProxyHandle.dmHandle == NULL)
         {
@@ -2108,7 +2100,7 @@ SQLRETURN WINAPI SQLSetScrollOptions(
 
 static int SQLColAttributes_KnownStringAttribute(SQLUSMALLINT fDescType)
 {
-    static SQLUSMALLINT attrList[] =
+    static const SQLUSMALLINT attrList[] =
     {
         SQL_COLUMN_OWNER_NAME,
         SQL_COLUMN_QUALIFIER_NAME,

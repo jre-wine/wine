@@ -44,7 +44,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(advapi);
         return FailureCode; \
 }
 
-static void dumpLsaAttributes(PLSA_OBJECT_ATTRIBUTES oa)
+static void dumpLsaAttributes(const LSA_OBJECT_ATTRIBUTES *oa)
 {
     if (oa)
     {
@@ -446,7 +446,8 @@ NTSTATUS WINAPI LsaQueryInformationPolicy(
              * All other fields are zero.
              */
             PPOLICY_PRIMARY_DOMAIN_INFO pinfo;
-            pinfo = ADVAPI_GetDomainName(sizeof(*pinfo), (char*)&pinfo->Name - (char*)pinfo);
+
+            pinfo = ADVAPI_GetDomainName(sizeof(*pinfo), offsetof(POLICY_PRIMARY_DOMAIN_INFO, Name));
 
             TRACE("setting domain to %s\n", debugstr_w(pinfo->Name.Buffer));
 
@@ -497,7 +498,7 @@ NTSTATUS WINAPI LsaQueryInformationPolicy(
              */
             PPOLICY_DNS_DOMAIN_INFO pinfo;
 
-            pinfo = ADVAPI_GetDomainName(sizeof(*pinfo), (char*)&pinfo->Name - (char*)pinfo);
+            pinfo = ADVAPI_GetDomainName(sizeof(*pinfo), offsetof(POLICY_DNS_DOMAIN_INFO, Name));
 
             TRACE("setting domain to %s\n", debugstr_w(pinfo->Name.Buffer));
 

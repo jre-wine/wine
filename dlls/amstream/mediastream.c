@@ -21,7 +21,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
 #include "wine/debug.h"
 
 #define COBJMACROS
@@ -42,7 +41,7 @@ typedef struct {
     STREAM_TYPE StreamType;
 } IMediaStreamImpl;
 
-static struct IMediaStreamVtbl MediaStream_Vtbl;
+static const struct IMediaStreamVtbl MediaStream_Vtbl;
 
 HRESULT MediaStream_create(IMultiMediaStream* Parent, const MSPID* pPurposeId, STREAM_TYPE StreamType, IMediaStream** ppMediaStream)
 {
@@ -72,7 +71,8 @@ static HRESULT WINAPI IMediaStreamImpl_QueryInterface(IMediaStream* iface, REFII
     TRACE("(%p/%p)->(%s,%p)\n", iface, This, debugstr_guid(riid), ppvObject);
 
     if (IsEqualGUID(riid, &IID_IUnknown) ||
-        IsEqualGUID(riid, &IID_IAMMultiMediaStream))
+        IsEqualGUID(riid, &IID_IAMMultiMediaStream) ||
+        IsEqualGUID(riid, &IID_IDirectDrawMediaStream))
     {
       IClassFactory_AddRef(iface);
       *ppvObject = This;
@@ -166,7 +166,7 @@ static HRESULT WINAPI IMediaStreamImpl_SendEndOfStream(IMediaStream* iface, DWOR
     return S_FALSE;
 }
 
-static IMediaStreamVtbl MediaStream_Vtbl =
+static const struct IMediaStreamVtbl MediaStream_Vtbl =
 {
     IMediaStreamImpl_QueryInterface,
     IMediaStreamImpl_AddRef,
