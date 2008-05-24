@@ -10,7 +10,6 @@ debian/tmp/usr/bin/wineconsole
 debian/tmp/usr/bin/winepath
 debian/tmp/usr/bin/wineprefixcreate
 debian/tmp/usr/bin/wineshelllink
-debian/tmp/usr/bin/winhelp
 debian/tmp/usr/lib/wine/cmd.exe.so
 debian/tmp/usr/lib/wine/eject.exe.so
 debian/tmp/usr/lib/wine/expand.exe.so
@@ -36,7 +35,7 @@ debian/tmp/usr/lib/wine/winedevice.exe.so
 debian/tmp/usr/lib/wine/winemenubuilder.exe.so
 debian/tmp/usr/lib/wine/winepath.exe.so
 debian/tmp/usr/lib/wine/winevdm.exe.so
-debian/tmp/usr/lib/wine/winhelp.exe.so
+debian/tmp/usr/lib/wine/winhlp32.exe.so
 debian/tmp/usr/lib/wine/write.exe.so
 debian/tmp/usr/lib/wine/xcopy.exe.so
 debian/tmp/usr/share/binfmts
