@@ -1,8 +1,29 @@
-wine (1.0-rc2-1) UNRELEASED; urgency=low
+wine (1.0-rc2-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.0-rc2, released May 23, 2008.
+    - Bug fixes only, we are in code freeze.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sat, 24 May 2008 20:45:51 +0200
+  [ Ove Kaaven ]
+  * winhelp has been renamed to winhlp32, updated debian/wine-bin.install
+    accordingly.
+  * Reverted Debian modifications to tools/wineinstall, they won't be
+    needed anymore.
+  * Made libwine-oss depend on oss-compat.
+  * debian/rules clean now depends unconditionally on clean-arch32 and
+    clean-arch64. This should allow the clean rule to do its job even
+    outside of a chroot.
+  * Deleted debian/wine-utils.undocumented.
+  * On amd64, symlink in libraries from ia32-libs for Wine to link
+    against, to work around ia32-libs not providing the necessary
+    symlinks itself. (Based on list of libraries provided by Arthur
+    Loiret.)
+  * Disable the old amd64 hack in favor of the new ia32-libs symlink
+    hack.
+
+  [ Arthur Loiret ]
+  * Add myself to Uploaders.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Sun, 25 May 2008 03:15:23 +0200
 
 wine (1.0-rc1-1) unstable; urgency=low
 
