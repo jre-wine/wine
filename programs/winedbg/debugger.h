@@ -367,7 +367,7 @@ extern BOOL             memory_disasm_one_insn(ADDRESS64* addr);
 extern char*            memory_offset_to_string(char *str, DWORD64 offset, unsigned mode);
 extern void             print_bare_address(const ADDRESS64* addr);
 extern void             print_address(const ADDRESS64* addr, BOOLEAN with_line);
-extern void             print_basic(const struct dbg_lvalue* value, int count, char format);
+extern void             print_basic(const struct dbg_lvalue* value, char format);
 
   /* source.c */
 extern void             source_list(IMAGEHLP_LINE* src1, IMAGEHLP_LINE* src2, int delta);
@@ -417,7 +417,7 @@ extern void             print_value(const struct dbg_lvalue* addr, char format, 
 extern int              types_print_type(const struct dbg_type*, BOOL details);
 extern int              print_types(void);
 extern long int         types_extract_as_integer(const struct dbg_lvalue*);
-extern LONGLONG         types_extract_as_longlong(const struct dbg_lvalue*);
+extern LONGLONG         types_extract_as_longlong(const struct dbg_lvalue*, unsigned* psize);
 extern void             types_extract_as_address(const struct dbg_lvalue*, ADDRESS64*);
 extern BOOL             types_deref(const struct dbg_lvalue* value, struct dbg_lvalue* result);
 extern BOOL             types_udt_find_element(struct dbg_lvalue* value, const char* name, long int* tmpbuf);

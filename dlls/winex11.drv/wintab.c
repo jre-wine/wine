@@ -418,6 +418,7 @@ static BOOL is_stylus(const char *name, const char *type)
     static const char* tablet_stylus_whitelist[] = {
         "stylus",
         "wizardpen",
+        "acecad",
         NULL
     };
 
@@ -535,7 +536,10 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
 #ifdef IsXExtensionPointer
         case IsXExtensionPointer:
 #endif
-            TRACE("Is XExtension%s\n", (devices[loop].use == IsXExtensionDevice)? "Device":"Pointer");
+#ifdef IsXExtensionKeyboard
+	case IsXExtensionKeyboard:
+#endif
+            TRACE("Is XExtension: Device, Keyboard, or Pointer\n");
             cursor_target++;
             target = &devices[loop];
             cursor = &gSysCursor[cursor_target];

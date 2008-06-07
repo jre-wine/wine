@@ -49,18 +49,12 @@ struct wine_test
     char *exename;
 };
 
-struct rev_info
-{
-    const char* file;
-    const char* rev;
-};
-
 char *tag = NULL;
 static struct wine_test *wine_tests;
 static int nr_of_files, nr_of_tests;
-static struct rev_info *rev_infos = NULL;
 static const char whitespace[] = " \t\r\n";
 static const char testexe[] = "_test.exe";
+static char build_id[64];
 
 static char * get_file_version(char * file_name)
 {
@@ -219,43 +213,6 @@ static const char* get_test_source_file(const char* test, const char* subtest)
     return buffer;
 }
 
-static const char* get_file_rev(const char* file)
-{
-    const struct rev_info* rev;
- 
-    for(rev = rev_infos; rev->file; rev++) {
-	if (strcmp(rev->file, file) == 0) return rev->rev;
-    }
-
-    return "-";
-}
-
-static void extract_rev_infos (void)
-{
-    char revinfo[256], *p;
-    int size = 0, i;
-    unsigned int len;
-    HMODULE module = GetModuleHandle (NULL);
-
-    for (i = 0; TRUE; i++) {
-	if (i >= size) {
-	    size += 100;
-	    rev_infos = xrealloc (rev_infos, size * sizeof (*rev_infos));
-	}
-	memset(rev_infos + i, 0, sizeof(rev_infos[i]));
-
-        len = LoadStringA (module, REV_INFO+i, revinfo, sizeof(revinfo));
-        if (len == 0) break; /* end of revision info */
-	if (len >= sizeof(revinfo) - 1) 
-	    report (R_FATAL, "Revision info too long.");
-	if(!(p = strrchr(revinfo, ':')))
-	    report (R_FATAL, "Revision info malformed (i=%d)", i);
-	*p = 0;
-	rev_infos[i].file = strdup(revinfo);
-	rev_infos[i].rev = strdup(p + 1);
-    }
-}
-
 static void* extract_rcdata (LPTSTR name, int type, DWORD* size)
 {
     HRSRC rsrc;
@@ -276,24 +233,30 @@ extract_test (struct wine_test *test, const char *dir, LPTSTR res_name)
 {
     BYTE* code;
     DWORD size;
-    FILE* fout;
     char *exepos;
+    HANDLE hfile;
+    DWORD written;
 
     code = extract_rcdata (res_name, TESTRES, &size);
     if (!code) report (R_FATAL, "Can't find test resource %s: %d",
                        res_name, GetLastError ());
     test->name = xstrdup( res_name );
-    test->exename = strmake (NULL, "%s/%s", dir, test->name);
+    test->exename = strmake (NULL, "%s\\%s", dir, test->name);
     exepos = strstr (test->name, testexe);
     if (!exepos) report (R_FATAL, "Not an .exe file: %s", test->name);
     *exepos = 0;
     test->name = xrealloc (test->name, exepos - test->name + 1);
     report (R_STEP, "Extracting: %s", test->name);
 
-    if (!(fout = fopen (test->exename, "wb")) ||
-        (fwrite (code, size, 1, fout) != 1) ||
-        fclose (fout)) report (R_FATAL, "Failed to write file %s.",
-                               test->exename);
+    hfile = CreateFileA(test->exename, GENERIC_READ | GENERIC_WRITE, 0, NULL,
+                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hfile == INVALID_HANDLE_VALUE)
+        report (R_FATAL, "Failed to open file %s.", test->exename);
+
+    if (!WriteFile(hfile, code, size, &written, NULL))
+        report (R_FATAL, "Failed to write file %s.", test->exename);
+
+    CloseHandle(hfile);
 }
 
 /* Run a command for MS milliseconds.  If OUT != NULL, also redirect
@@ -448,10 +411,9 @@ run_test (struct wine_test* test, const char* subtest, const char *tempdir)
 {
     int status;
     const char* file = get_test_source_file(test->name, subtest);
-    const char* rev = get_file_rev(file);
     char *cmd = strmake (NULL, "%s %s", test->exename, subtest);
 
-    xprintf ("%s:%s start %s %s\n", test->name, subtest, file, rev);
+    xprintf ("%s:%s start %s -\n", test->name, subtest, file);
     status = run_ex (cmd, NULL, tempdir, 120000);
     free (cmd);
     xprintf ("%s:%s done (%d)\n", test->name, subtest, status);
@@ -501,7 +463,6 @@ run_tests (char *logname)
     int logfile;
     char *strres, *eol, *nextline;
     DWORD strsize;
-    char build[64];
 
     SetErrorMode (SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
 
@@ -538,11 +499,7 @@ run_tests (char *logname)
     report (R_DIR, tempdir);
 
     xprintf ("Version 4\n");
-    strres = extract_rcdata (MAKEINTRESOURCE(WINE_BUILD), STRINGRES, &strsize);
-    xprintf ("Tests from build ");
-    if (LoadStringA( 0, IDS_BUILD_ID, build, sizeof(build) )) xprintf( "%s\n", build );
-    else if (strres) xprintf ("%.*s", strsize, strres);
-    else xprintf ("-\n");
+    xprintf ("Tests from build %s\n", build_id[0] ? build_id : "-" );
     strres = extract_rcdata (MAKEINTRESOURCE(TESTS_URL), STRINGRES, &strsize);
     xprintf ("Archive: ");
     if (strres) xprintf ("%.*s", strsize, strres);
@@ -634,8 +591,7 @@ int WINAPI WinMain (HINSTANCE hInst, HINSTANCE hPrevInst,
     int poweroff = 0;
     int interactive = 1;
 
-    /* initialize the revision information first */
-    extract_rev_infos();
+    if (!LoadStringA( 0, IDS_BUILD_ID, build_id, sizeof(build_id) )) build_id[0] = 0;
 
     cmdLine = strtok (cmdLine, whitespace);
     while (cmdLine) {
@@ -720,10 +676,14 @@ int WINAPI WinMain (HINSTANCE hInst, HINSTANCE hPrevInst,
         }
         report (R_TAG);
 
+        if (!build_id[0])
+            report( R_WARNING, "You won't be able to submit results without a valid build id.\n"
+                    "To submit results, winetest needs to be built from a git checkout." );
+
         if (!logname) {
             logname = run_tests (NULL);
-            if (report (R_ASK, MB_YESNO, "Do you want to submit the "
-                        "test results?") == IDYES)
+            if (build_id[0] &&
+                report (R_ASK, MB_YESNO, "Do you want to submit the test results?") == IDYES)
                 if (!send_file (logname) && remove (logname))
                     report (R_WARNING, "Can't remove logfile: %d.", errno);
             free (logname);

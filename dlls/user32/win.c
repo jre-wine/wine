@@ -1119,6 +1119,9 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
     if (cx < 0) cx = 0;
     if (cy < 0) cy = 0;
     SetRect( &rect, cs->x, cs->y, cs->x + cx, cs->y + cy );
+    /* check for wraparound */
+    if (cs->x + cx < cs->x) rect.right = 0x7fffffff;
+    if (cs->y + cy < cs->y) rect.bottom = 0x7fffffff;
     if (!set_window_pos( hwnd, 0, SWP_NOZORDER | SWP_NOACTIVATE, &rect, &rect, NULL )) goto failed;
 
     /* send WM_NCCREATE */
@@ -3162,21 +3165,45 @@ BOOL WINAPI DragDetect( HWND hWnd, POINT pt )
 /******************************************************************************
  *		GetWindowModuleFileNameA (USER32.@)
  */
-UINT WINAPI GetWindowModuleFileNameA( HWND hwnd, LPSTR lpszFileName, UINT cchFileNameMax)
+UINT WINAPI GetWindowModuleFileNameA( HWND hwnd, LPSTR module, UINT size )
 {
-    FIXME("GetWindowModuleFileNameA(hwnd %p, lpszFileName %p, cchFileNameMax %u) stub!\n",
-          hwnd, lpszFileName, cchFileNameMax);
-    return 0;
+    WND *win;
+    HINSTANCE hinst;
+
+    TRACE( "%p, %p, %u\n", hwnd, module, size );
+
+    win = WIN_GetPtr( hwnd );
+    if (!win || win == WND_OTHER_PROCESS || win == WND_DESKTOP)
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return 0;
+    }
+    hinst = win->hInstance;
+    WIN_ReleasePtr( win );
+
+    return GetModuleFileNameA( hinst, module, size );
 }
 
 /******************************************************************************
  *		GetWindowModuleFileNameW (USER32.@)
  */
-UINT WINAPI GetWindowModuleFileNameW( HWND hwnd, LPWSTR lpszFileName, UINT cchFileNameMax)
+UINT WINAPI GetWindowModuleFileNameW( HWND hwnd, LPWSTR module, UINT size )
 {
-    FIXME("GetWindowModuleFileNameW(hwnd %p, lpszFileName %p, cchFileNameMax %u) stub!\n",
-          hwnd, lpszFileName, cchFileNameMax);
-    return 0;
+    WND *win;
+    HINSTANCE hinst;
+
+    TRACE( "%p, %p, %u\n", hwnd, module, size );
+
+    win = WIN_GetPtr( hwnd );
+    if (!win || win == WND_OTHER_PROCESS || win == WND_DESKTOP)
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return 0;
+    }
+    hinst = win->hInstance;
+    WIN_ReleasePtr( win );
+
+    return GetModuleFileNameW( hinst, module, size );
 }
 
 /******************************************************************************

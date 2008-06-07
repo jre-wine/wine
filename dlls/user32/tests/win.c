@@ -46,6 +46,7 @@ void dump_region(HRGN hrgn);
 
 static HWND (WINAPI *pGetAncestor)(HWND,UINT);
 static BOOL (WINAPI *pGetWindowInfo)(HWND,WINDOWINFO*);
+static UINT (WINAPI *pGetWindowModuleFileNameA)(HWND,LPSTR,UINT);
 
 static BOOL test_lbuttondown_flag;
 static HWND hwndMessage;
@@ -4229,6 +4230,31 @@ static void test_CreateWindow(void)
     ok( rc.bottom == 0, "invalid rect bottom %u\n", rc.bottom );
     DestroyWindow(hwnd);
 
+    /* we need a parent at 0,0 so that child coordinates match */
+    DestroyWindow(parent);
+    parent = CreateWindowEx(0, "MinMax_WndClass", NULL, WS_POPUP, 0, 0, 100, 100, 0, 0, 0, NULL);
+    ok(parent != 0, "CreateWindowEx error %d\n", GetLastError());
+
+    expected_cx = 100;
+    expected_cy = 0x7fffffff;
+    SetRect( &expected_rect, 10, 10, 110, 0x7fffffff );
+    hwnd = CreateWindowExA(0, "Sizes_WndClass", NULL, WS_CHILD, 10, 10, 100, 0x7fffffff, parent, 0, 0, NULL);
+    ok( hwnd != 0, "creation failed err %u\n", GetLastError());
+    GetClientRect( hwnd, &rc );
+    ok( rc.right == 100, "invalid rect right %u\n", rc.right );
+    ok( rc.bottom == 0x7fffffff - 10, "invalid rect bottom %u\n", rc.bottom );
+    DestroyWindow(hwnd);
+
+    expected_cx = 0x7fffffff;
+    expected_cy = 0x7fffffff;
+    SetRect( &expected_rect, 20, 10, 0x7fffffff, 0x7fffffff );
+    hwnd = CreateWindowExA(0, "Sizes_WndClass", NULL, WS_CHILD, 20, 10, 0x7fffffff, 0x7fffffff, parent, 0, 0, NULL);
+    ok( hwnd != 0, "creation failed err %u\n", GetLastError());
+    GetClientRect( hwnd, &rc );
+    ok( rc.right == 0x7fffffff - 20, "invalid rect right %u\n", rc.right );
+    ok( rc.bottom == 0x7fffffff - 10, "invalid rect bottom %u\n", rc.bottom );
+    DestroyWindow(hwnd);
+
     /* top level window */
     expected_cx = expected_cy = 200000;
     SetRect( &expected_rect, 0, 0, GetSystemMetrics(SM_CXMAXTRACK), GetSystemMetrics(SM_CYMAXTRACK) );
@@ -4631,10 +4657,96 @@ static void test_Expose(void)
     DestroyWindow(mw);
 }
 
+static void test_GetWindowModuleFileName(void)
+{
+    HWND hwnd;
+    HINSTANCE hinst;
+    UINT ret1, ret2;
+    char buf1[MAX_PATH], buf2[MAX_PATH];
+
+    if (!pGetWindowModuleFileNameA)
+    {
+        skip("GetWindowModuleFileNameA is not available\n");
+        return;
+    }
+
+    hwnd = CreateWindowExA(0, "static", NULL, WS_POPUP, 0,0,0,0, 0, 0, 0, NULL);
+    assert(hwnd);
+
+    hinst = (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
+    ok(hinst == 0, "expected 0, got %p\n", hinst);
+
+    buf1[0] = 0;
+    SetLastError(0xdeadbeef);
+    ret1 = GetModuleFileName(hinst, buf1, sizeof(buf1));
+    ok(ret1, "GetModuleFileName error %u\n", GetLastError());
+
+    buf2[0] = 0;
+    SetLastError(0xdeadbeef);
+    ret2 = pGetWindowModuleFileNameA(hwnd, buf2, sizeof(buf2));
+    ok(ret2, "GetWindowModuleFileNameA error %u\n", GetLastError());
+
+    ok(ret1 == ret2, "%u != %u\n", ret1, ret2);
+    ok(!strcmp(buf1, buf2), "%s != %s\n", buf1, buf2);
+
+    hinst = GetModuleHandle(0);
+
+    /* MSDN mentions ERROR_INSUFFICIENT_BUFFER, but XP doesn't do it */
+    SetLastError(0xdeadbeef);
+    ret2 = GetModuleFileName(hinst, buf2, ret1 - 2);
+    ok(ret2 == ret1 - 2, "expected %u, got %u\n", ret1 - 2, ret2);
+    ok(GetLastError() == 0xdeadbeef ||
+       GetLastError() == ERROR_INSUFFICIENT_BUFFER, /* win2k3 */
+       "expected 0xdeadbeef or ERROR_INSUFFICIENT_BUFFER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret2 = GetModuleFileName(hinst, buf2, 0);
+    ok(!ret2, "GetModuleFileName should return 0\n");
+    ok(GetLastError() == 0xdeadbeef ||
+       GetLastError() == ERROR_INSUFFICIENT_BUFFER, /* win2k3 */
+       "expected 0xdeadbeef or ERROR_INSUFFICIENT_BUFFER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret2 = pGetWindowModuleFileNameA(hwnd, buf2, ret1 - 2);
+    ok(ret2 == ret1 - 2, "expected %u, got %u\n", ret1 - 2, ret2);
+    ok(GetLastError() == 0xdeadbeef ||
+       GetLastError() == ERROR_INSUFFICIENT_BUFFER, /* win2k3 */
+       "expected 0xdeadbeef or ERROR_INSUFFICIENT_BUFFER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret2 = pGetWindowModuleFileNameA(hwnd, buf2, 0);
+    ok(!ret2, "expected 0, got %u\n", ret2);
+    ok(GetLastError() == 0xdeadbeef ||
+       GetLastError() == ERROR_INSUFFICIENT_BUFFER, /* win2k3 */
+       "expected 0xdeadbeef or ERROR_INSUFFICIENT_BUFFER, got %u\n", GetLastError());
+
+    DestroyWindow(hwnd);
+
+    buf2[0] = 0;
+    hwnd = (HWND)0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret1 = pGetWindowModuleFileNameA(hwnd, buf1, sizeof(buf1));
+    ok(!ret1, "expected 0, got %u\n", ret1);
+    ok(GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "expected ERROR_INVALID_WINDOW_HANDLE, got %u\n", GetLastError());
+
+    hwnd = GetDesktopWindow();
+    ok(IsWindow(hwnd), "got invalid desktop window %p\n", hwnd);
+    SetLastError(0xdeadbeef);
+    ret1 = pGetWindowModuleFileNameA(hwnd, buf1, sizeof(buf1));
+    ok(!ret1, "expected 0, got %u\n", ret1);
+
+    hwnd = FindWindow("Shell_TrayWnd", NULL);
+    ok(IsWindow(hwnd), "got invalid tray window %p\n", hwnd);
+    SetLastError(0xdeadbeef);
+    ret1 = pGetWindowModuleFileNameA(hwnd, buf1, sizeof(buf1));
+    ok(!ret1, "expected 0, got %u\n", ret1);
+}
+
 START_TEST(win)
 {
     pGetAncestor = (void *)GetProcAddress( GetModuleHandleA("user32.dll"), "GetAncestor" );
     pGetWindowInfo = (void *)GetProcAddress( GetModuleHandleA("user32.dll"), "GetWindowInfo" );
+    pGetWindowModuleFileNameA = (void *)GetProcAddress( GetModuleHandleA("user32.dll"), "GetWindowModuleFileNameA" );
 
     hwndMain = CreateWindowExA(0, "static", NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, 0, 0, NULL);
     if (hwndMain)
@@ -4675,7 +4787,7 @@ START_TEST(win)
 
     /* Add the tests below this line */
     test_params();
-
+    test_GetWindowModuleFileName();
     test_capture_1();
     test_capture_2();
     test_capture_3(hwndMain, hwndMain2);

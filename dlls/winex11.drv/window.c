@@ -423,10 +423,7 @@ BOOL X11DRV_set_win_format( HWND hwnd, XID fbconfig_id )
     if (!(data = X11DRV_get_win_data(hwnd)) &&
         !(data = X11DRV_create_win_data(hwnd))) return FALSE;
 
-    wine_tsx11_lock();
-    vis = visual_from_fbconfig_id(fbconfig_id);
-    wine_tsx11_unlock();
-    if (!vis) return FALSE;
+    if (!(vis = visual_from_fbconfig_id(fbconfig_id))) return FALSE;
 
     if (data->whole_window)
     {
@@ -559,15 +556,9 @@ static void sync_gl_drawable(struct x11drv_win_data *data)
     }
 #endif
 
+    if (!(vis = visual_from_fbconfig_id(data->fbconfig_id))) return;
+
     wine_tsx11_lock();
-
-    vis = visual_from_fbconfig_id(data->fbconfig_id);
-    if(!vis)
-    {
-        wine_tsx11_unlock();
-        return;
-    }
-
     pix = XCreatePixmap(gdi_display, root_window, w, h, vis->depth);
     if(!pix)
     {
@@ -1756,14 +1747,21 @@ void X11DRV_GetDC( HDC hdc, HWND hwnd, HWND top, const RECT *win_rect,
     escape.fbconfig_id = 0;
     escape.gl_drawable = 0;
     escape.pixmap      = 0;
+    escape.gl_copy     = FALSE;
 
     if (top == hwnd && data && IsIconic( hwnd ) && data->icon_window)
     {
         escape.drawable = data->icon_window;
     }
-    else if (top == hwnd && (flags & DCX_WINDOW))
+    else if (top == hwnd)
     {
-        escape.drawable = data ? data->whole_window : X11DRV_get_whole_window( hwnd );
+        escape.fbconfig_id = data ? data->fbconfig_id : (XID)GetPropA( hwnd, fbconfig_id_prop );
+        /* GL draws to the client area even for window DCs */
+        escape.gl_drawable = data ? data->client_window : X11DRV_get_client_window( hwnd );
+        if (flags & DCX_WINDOW)
+            escape.drawable = data ? data->whole_window : X11DRV_get_whole_window( hwnd );
+        else
+            escape.drawable = escape.gl_drawable;
     }
     else
     {
@@ -1771,6 +1769,7 @@ void X11DRV_GetDC( HDC hdc, HWND hwnd, HWND top, const RECT *win_rect,
         escape.fbconfig_id = data ? data->fbconfig_id : (XID)GetPropA( hwnd, fbconfig_id_prop );
         escape.gl_drawable = data ? data->gl_drawable : (Drawable)GetPropA( hwnd, gl_drawable_prop );
         escape.pixmap      = data ? data->pixmap : (Pixmap)GetPropA( hwnd, pixmap_prop );
+        escape.gl_copy     = (escape.gl_drawable != 0);
         if (flags & DCX_CLIPCHILDREN) escape.mode = ClipByChildren;
     }
 

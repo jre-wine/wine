@@ -501,6 +501,12 @@ static void test_load_save(void)
     HANDLE hf;
     DWORD r;
 
+    if (!pGetLongPathNameA)
+    {
+        skip("GetLongPathNameA is not available\n");
+        return;
+    }
+
     /* Save an empty .lnk file */
     memset(&desc, 0, sizeof(desc));
     create_lnk(lnkfile, &desc, 0);
@@ -533,10 +539,13 @@ static void test_load_save(void)
     if (p)
         *p='\0';
 
+    /* IShellLink returns path in long form */
+    pGetLongPathNameA(mypath, realpath, MAX_PATH);
+
     /* Overwrite the existing lnk file and point it to existing files */
     desc.description="test 2";
     desc.workdir=mydir;
-    desc.path=mypath;
+    desc.path=realpath;
     desc.pidl=NULL;
     desc.arguments="/option1 /option2 \"Some string\"";
     desc.showcmd=SW_SHOWNORMAL;
@@ -565,11 +574,6 @@ static void test_load_save(void)
     /* Create a temporary non-executable file */
     r=GetTempPath(sizeof(mypath), mypath);
     ok(r<sizeof(mypath), "GetTempPath failed (%d), err %d\n", r, GetLastError());
-    if (!pGetLongPathNameA)
-    {
-        skip("GetLongPathNameA is not available\n");
-        goto cleanup;
-    }
     r=pGetLongPathNameA(mypath, mydir, sizeof(mydir));
     ok(r<sizeof(mydir), "GetLongPathName failed (%d), err %d\n", r, GetLastError());
     p=strrchr(mydir, '\\');
@@ -602,7 +606,6 @@ static void test_load_save(void)
      * represented as a path.
      */
 
-cleanup:
     /* DeleteFileW is not implemented on Win9x */
     r=DeleteFileA("c:\\test.lnk");
     ok(r, "failed to delete link (%d)\n", GetLastError());

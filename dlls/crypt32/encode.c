@@ -346,8 +346,8 @@ static BOOL WINAPI CRYPT_AsnEncodeValidity(DWORD dwCertEncodingType,
     /* This has two filetimes in a row, a NotBefore and a NotAfter */
     const FILETIME *timePtr = (const FILETIME *)pvStructInfo;
     struct AsnEncodeSequenceItem items[] = {
-     { timePtr++, CRYPT_AsnEncodeChoiceOfTime, 0 },
-     { timePtr,   CRYPT_AsnEncodeChoiceOfTime, 0 },
+     { timePtr,     CRYPT_AsnEncodeChoiceOfTime, 0 },
+     { timePtr + 1, CRYPT_AsnEncodeChoiceOfTime, 0 },
     };
 
     ret = CRYPT_AsnEncodeSequence(dwCertEncodingType, items, 
@@ -2540,8 +2540,8 @@ static BOOL WINAPI CRYPT_AsnEncodeInteger(DWORD dwCertEncodingType,
 
     __TRY
     {
-        DWORD significantBytes, lenBytes;
-        BYTE padByte = 0, bytesNeeded;
+        DWORD significantBytes, lenBytes, bytesNeeded;
+        BYTE padByte = 0;
         BOOL pad = FALSE;
         const CRYPT_INTEGER_BLOB *blob =
          (const CRYPT_INTEGER_BLOB *)pvStructInfo;
@@ -2629,8 +2629,7 @@ static BOOL WINAPI CRYPT_AsnEncodeUnsignedInteger(DWORD dwCertEncodingType,
 
     __TRY
     {
-        DWORD significantBytes, lenBytes;
-        BYTE bytesNeeded;
+        DWORD significantBytes, lenBytes, bytesNeeded;
         BOOL pad = FALSE;
         const CRYPT_INTEGER_BLOB *blob =
          (const CRYPT_INTEGER_BLOB *)pvStructInfo;
@@ -3919,8 +3918,12 @@ static BOOL WINAPI CRYPT_ImportRsaPublicKeyInfoEx(HCRYPTPROV hCryptProv,
              pInfo->PublicKey.pbData, pInfo->PublicKey.cbData, 0, pubKey,
              &pubKeySize);
             if (ret)
+            {
+                if(aiKeyAlg)
+                  ((BLOBHEADER*)pubKey)->aiKeyAlg = aiKeyAlg;
                 ret = CryptImportKey(hCryptProv, pubKey, pubKeySize, 0, 0,
                  phKey);
+            }
             CryptMemFree(pubKey);
         }
         else

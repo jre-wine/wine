@@ -297,6 +297,7 @@ static const int ws_af_map[][2] =
 #ifdef HAVE_IPX
     MAP_OPTION( AF_IPX ),
 #endif
+    {FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO},
 };
 
 static const int ws_socktype_map[][2] =
@@ -304,6 +305,7 @@ static const int ws_socktype_map[][2] =
     MAP_OPTION( SOCK_DGRAM ),
     MAP_OPTION( SOCK_STREAM ),
     MAP_OPTION( SOCK_RAW ),
+    {FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO},
 };
 
 static const int ws_proto_map[][2] =
@@ -314,6 +316,7 @@ static const int ws_proto_map[][2] =
     MAP_OPTION( IPPROTO_ICMP ),
     MAP_OPTION( IPPROTO_IGMP ),
     MAP_OPTION( IPPROTO_RAW ),
+    {FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO},
 };
 
 static const int ws_aiflag_map[][2] =
@@ -1489,6 +1492,19 @@ int WINAPI WS_connect(SOCKET s, const struct WS_sockaddr* name, int namelen)
         }
         else
         {
+            if (name->sa_family == WS_AF_INET)
+            {
+                struct sockaddr_in *in4 = (struct sockaddr_in*) &uaddr;
+                if (memcmp(&in4->sin_addr, &magic_loopback_addr, 4) == 0)
+                {
+                    /* Trying to connect to magic replace-loopback address,
+                     * assuming we really want to connect to localhost */
+                    TRACE("Trying to connect to magic IP address, using "
+                         "INADDR_LOOPBACK instead.\n");
+                    in4->sin_addr.s_addr = htonl(WS_INADDR_LOOPBACK);
+                }
+            }
+
             if (connect(fd, &uaddr.addr, uaddrlen) == 0)
                 goto connect_success;
         }
@@ -3781,28 +3797,18 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
       return ret;
     }
 
-    /* check and convert the socket family */
+    /* convert the socket family and type */
     af = convert_af_w2u(af);
-    if (af == -1)
-    {
-      FIXME("Unsupported socket family %d!\n", af);
-      SetLastError(WSAEAFNOSUPPORT);
-      return INVALID_SOCKET;
-    }
-
-    /* check the socket type */
     type = convert_socktype_w2u(type);
-    if (type == -1)
-    {
-      SetLastError(WSAESOCKTNOSUPPORT);
-      return INVALID_SOCKET;
-    }
 
-    /* check the protocol type */
-    if ( protocol < 0 )  /* don't support negative values */
+    if (lpProtocolInfo)
     {
-        SetLastError(WSAEPROTONOSUPPORT);
-        return INVALID_SOCKET;
+        if (af == FROM_PROTOCOL_INFO)
+            af = lpProtocolInfo->iAddressFamily;
+        if (type == FROM_PROTOCOL_INFO)
+            type = lpProtocolInfo->iSocketType;
+        if (protocol == FROM_PROTOCOL_INFO)
+            protocol = lpProtocolInfo->iProtocol;
     }
 
     if ( af == AF_UNSPEC)  /* did they not specify the address family? */
