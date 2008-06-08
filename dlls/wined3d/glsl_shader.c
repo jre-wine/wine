@@ -699,12 +699,13 @@ void shader_generate_glsl_declarations(
     shader_addline(buffer, "vec4 tmp0;\n");
     shader_addline(buffer, "vec4 tmp1;\n");
 
-    /* Hardcodable local constants */
+    /* Local constants use a different name so they can be loaded once at shader link time
+     * They can't be hardcoded into the shader text via LC = {x, y, z, w}; because the
+     * float -> string conversion can cause precision loss.
+     */
     if(!This->baseShader.load_local_constsF) {
         LIST_FOR_EACH_ENTRY(lconst, &This->baseShader.constantsF, local_constant, entry) {
-            float *value = (float *) lconst->value;
-            shader_addline(buffer, "const vec4 LC%u = vec4(%f, %f, %f, %f);\n", lconst->idx,
-                           value[0], value[1], value[2], value[3]);
+            shader_addline(buffer, "uniform vec4 %cLC%u;\n", prefix, lconst->idx);
         }
     }
 
@@ -878,7 +879,7 @@ static void shader_glsl_get_register_name(
         break;
     case WINED3DSPR_CONST:
     {
-        const char* prefix = pshader? "PC":"VC";
+        const char prefix = pshader? 'P':'V';
 
         /* Relative addressing */
         if (param & WINED3DSHADER_ADDRMODE_RELATIVE) {
@@ -889,23 +890,23 @@ static void shader_glsl_get_register_name(
                glsl_src_param_t rel_param;
                shader_glsl_add_src_param(arg, addr_token, 0, WINED3DSP_WRITEMASK_0, &rel_param);
                if(reg) {
-                   sprintf(tmpStr, "%s[%s + %u]", prefix, rel_param.param_str, reg);
+                   sprintf(tmpStr, "%cC[%s + %u]", prefix, rel_param.param_str, reg);
                } else {
-                   sprintf(tmpStr, "%s[%s]", prefix, rel_param.param_str);
+                   sprintf(tmpStr, "%cC[%s]", prefix, rel_param.param_str);
                }
            } else {
                if(reg) {
-                   sprintf(tmpStr, "%s[A0.x + %u]", prefix, reg);
+                   sprintf(tmpStr, "%cC[A0.x + %u]", prefix, reg);
                } else {
-                   sprintf(tmpStr, "%s[A0.x]", prefix);
+                   sprintf(tmpStr, "%cC[A0.x]", prefix);
                }
            }
 
         } else {
             if(shader_constant_is_local(This, reg)) {
-                sprintf(tmpStr, "LC%u", reg);
+                sprintf(tmpStr, "%cLC%u", prefix, reg);
             } else {
-                sprintf(tmpStr, "%s[%u]", prefix, reg);
+                sprintf(tmpStr, "%cC[%u]", prefix, reg);
             }
         }
 
@@ -3076,6 +3077,21 @@ static GLhandleARB generate_param_reorder_function(IWineD3DVertexShader *vertexs
     return ret;
 }
 
+static void hardcode_local_constants(IWineD3DBaseShaderImpl *shader, WineD3D_GL_Info *gl_info, GLhandleARB programId, char prefix) {
+    local_constant* lconst;
+    GLuint tmp_loc;
+    float *value;
+    char glsl_name[8];
+
+    LIST_FOR_EACH_ENTRY(lconst, &shader->baseShader.constantsF, local_constant, entry) {
+        value = (float *) lconst->value;
+        snprintf(glsl_name, sizeof(glsl_name), "%cLC%u", prefix, lconst->idx);
+        tmp_loc = GL_EXTCALL(glGetUniformLocationARB(programId, glsl_name));
+        GL_EXTCALL(glUniform4fvARB(tmp_loc, 1, value));
+    }
+    checkGLcall("Hardcoding local constants\n");
+}
+
 /** Sets the GLSL program ID for the given pixel and vertex shader combination.
  * It sets the programId on the current StateBlock (because it should be called
  * inside of the DrawPrimitive() part of the render loop).
@@ -3227,6 +3243,17 @@ static void set_glsl_shader_program(IWineD3DDevice *iface, BOOL use_ps, BOOL use
     if(pshader_id) {
         /* Load pixel shader samplers */
         shader_glsl_load_psamplers(gl_info, (IWineD3DStateBlock*)This->stateBlock, programId);
+    }
+
+    /* If the local constants do not have to be loaded with the environment constants,
+     * load them now to have them hardcoded in the GLSL program. This saves some CPU cycles
+     * later
+     */
+    if(pshader && !((IWineD3DPixelShaderImpl*)pshader)->baseShader.load_local_constsF) {
+        hardcode_local_constants((IWineD3DBaseShaderImpl *) pshader, gl_info, programId, 'P');
+    }
+    if(vshader && !((IWineD3DVertexShaderImpl*)vshader)->baseShader.load_local_constsF) {
+        hardcode_local_constants((IWineD3DBaseShaderImpl *) vshader, gl_info, programId, 'V');
     }
 }
 

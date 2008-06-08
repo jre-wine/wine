@@ -28,7 +28,7 @@ static DWORD texture_stages;
 static HWND create_window(void)
 {
     WNDCLASS wc = {0};
-    wc.lpfnWndProc = &DefWindowProc;
+    wc.lpfnWndProc = DefWindowProc;
     wc.lpszClassName = "d3d9_test_wc";
     RegisterClass(&wc);
 
@@ -255,6 +255,7 @@ static void execute_test_chain(
 typedef struct event_data {
     IDirect3DStateBlock9* stateblock;
     IDirect3DSurface9* original_render_target;
+    IDirect3DSwapChain9* new_swap_chain;
 } event_data;
 
 static int switch_render_target(
@@ -293,7 +294,7 @@ static int switch_render_target(
     if (hret != D3D_OK) goto error;
 
     IUnknown_Release(backbuffer);
-    IUnknown_Release(swapchain);
+    edata->new_swap_chain = swapchain;
     return EVENT_OK;
 
     error:
@@ -318,6 +319,8 @@ static int revert_render_target(
     }
 
     IUnknown_Release(edata->original_render_target);
+
+    IUnknown_Release(edata->new_swap_chain);
     return EVENT_OK;
 }
 
