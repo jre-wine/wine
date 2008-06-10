@@ -19,6 +19,7 @@ libwine-capi    (ISDN card module)
 libwine-cms     (color management module)
 libwine-ldap    (LDAP module)
 libwine-dev     (Winelib development headers and tools)
+libwine-dbg     (debugging symbols)
 wine-utils      (extra binaries)
 wine-doc        (documentation in HTML and DocBook format)
 
@@ -27,22 +28,25 @@ and functionality that not all users need and want to spend disk
 space on; thus, it is a general theme in Debian to split up big
 packages like this. Make sure you install the ones you need.
 
-Also note that Wine for Debian is set up to use the winelauncher
-wrapper by default (/usr/bin/wine is a shell script that starts
-the real Wine binary, which is in /usr/lib/wine). This is both
-for convenience (it asks you to run winecfg), and because I've
-installed some Wine components that users aren't supposed to run
-directly into /usr/lib/wine instead of /usr/bin, and the script
-is needed to tell Wine where to find them. Also, it warns you if
-Wine is invoked from your mail reader or web browser, to help you
-avoid trojans, viruses, and worms.
-
 The libwine-gl split was requested in Debian bug #304815.
 The libwine-print/libwine-sane split was requested in #148479.
 
-Newer developments in Wine, such as dynamic loading of CUPS,
-may make it possible to merge libwine-print back into libwine
-proper at some future date, though.
+Nowadays, Wine can load many libraries, such as CUPS, at runtime,
+and fail gracefully if they're not there. Thus, in theory, almost
+all the packages *could* be merged back into a big package without
+hard dependencies on all kinds of things. But because the package
+split provides predictability, where you can *trust* that installing
+libwine-print will, indeed, allow you to print (even on amd64 where
+you might not otherwise realize you need a 32-bit CUPS), this package
+organization will remain for now.
+
+Also note that Wine for Debian is set up to use a wrapper script,
+where /usr/bin/wine is a shell script that starts the real Wine
+binary, which is in /usr/lib/wine. These days, the script doesn't
+do much more than warn you if Wine is invoked from your mail reader
+or web browser, to help you avoid trojans, viruses, and worms. Except
+it might also warns you if you're suffering from some known common
+system misconfiguration that may prevent Wine from working properly.
 
 Other resources
 ===============
@@ -56,53 +60,50 @@ For further information and resources about Wine, refer to
 http://www.winehq.com/
 
 
-New Wine packages built by Scott Ritchie are currently
-available from this apt source:
+If you need debs of previous Wine versions, perhaps because of some
+regression, you should be able to download archived debs from
+http://snapshot.debian.net. This site archives the entire Debian
+package repository daily, and you can download any previous version
+of any Debian package from there.
 
-deb http://wine.sourceforge.net/apt/ binary/
-deb-src http://wine.sourceforge.net/apt/ source/
+If you're running Debian stable, and your Wine version seems too old,
+you can usually download reasonably recent Wine packages from
+http://www.backports.org. This is a repository for packages built from
+package sources from Debian testing, backported to Debian stable, which
+should cover most user's needs.
 
-(instructions at http://www.winehq.org/site/download-deb)
 
-These currently differ from the official Debian packages,
-but are usually newer and more bleeding edge.
+Feel free to visit the Debian Wine packaging's homepage for more
+resources, go to http://pkg-wine.alioth.debian.org/
+
+
+WineHQ provides Debian packages at http://www.winehq.org/site/download-deb,
+built by Scott Ritchie of Ubuntu, however these are currently different
+from the official Debian packages, notably by not splitting the package
+like the official Debian packages do. Upgrading between these two packaging
+styles is not always smooth, so use them with that in mind, and do not file
+bugs to the Debian bug tracker about them.
 
 
 Configuration
 =============
-The best way to configure Wine right now is to run winecfg;
-the winelauncher will ask you to do so the first time you
-start Wine.
+The best way to configure Wine is to run winecfg.
 
-If you need to configure Wine manually, without winecfg:
+(Note that if you see a resolution setting in there and you think
+jacking it up to max is a good idea, think again. It probably doesn't
+do what you think it does, and the Wine forums are plagued with users
+trying to recover from their mistake.)
 
-As of Wine release 20040408, the Wine authors introduced a
-"wineprefixcreate" script. It will create a basic ~/.wine
-directory in your home directory. You can then add drive
-or device mappings by adding symlinks, and you can edit
-the settings in the registry to suit you. Refer to any
-available documentation about these settings.
+If you need to set up Wine manually, without winecfg, you
+can force the creation of a ~/.wine directory by running
+"wineboot".
 
-winebrowser
-===========
-To make winebrowser launch the web browser of your choice when an
-application wants to show you a web page, and it doesn't already,
-you must edit ~/.wine/system.reg and find the [Software\\Wine\\WineBrowser]
-key, where the "Browser" option resides. I've now patched winebrowser
-to set this to Debian's "sensible-browser" if it doesn't exist already,
-but if you have an existing Wine installation where it already does exist
-with an inappropriate setting, this is how to fix it.
+If you're upgrading from a previous Wine version, Wine will usually
+attempt to upgrade the configuration in ~/.wine automatically. But
+if you need to, you can try to repair your configuration manually
+with "wineprefixcreate".
 
-Updating the registry
-=====================
-The way to install an updated default registry was changed as of
-Wine release 20040309. You should now do something like:
-
-  wine rundll32.exe setupapi.dll,InstallHinfSection \
-    DefaultInstall 128 /usr/share/wine/wine.inf
-
-(which must probably be done per-user for now.)
-
-If this doesn't work, try copying wine.inf to the current directory
-and load it from there, as there are sometimes bugs with using full
-Unix paths in Winelib apps (but which should get fixed eventually).
+Or, if you're desperate, you can always completely wipe your Wine setup
+with "rm -rf ~/.wine". (This will destroy everything you've installed,
+including their configuration and data files, so if you have anything
+important in there, back it up first.) You can then start afresh.
