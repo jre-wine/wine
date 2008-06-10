@@ -14,6 +14,7 @@ debian/tmp/usr/lib/wine/cmd.exe.so
 debian/tmp/usr/lib/wine/eject.exe.so
 debian/tmp/usr/lib/wine/expand.exe.so
 debian/tmp/usr/lib/wine/explorer.exe.so
+debian/tmp/usr/lib/wine/hh.exe.so
 debian/tmp/usr/lib/wine/iexplore.exe.so
 debian/tmp/usr/lib/wine/msiexec.exe.so
 debian/tmp/usr/lib/wine/net.exe.so

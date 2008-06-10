@@ -52,7 +52,7 @@ Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powe
 Depends: ${shlibs:Depends}, x11-utils | xbase-clients (>= 4.0) | xcontrib
 Suggests: libwine-print, libwine-gl
 Conflicts: binfmt-support (<< 1.1.2)
-Replaces: libwine (<< 0.0.20010216), wine-utils (<< 0.9.50), wine (<< 0.9.35)
+Replaces: libwine (<< 0.0.20010216), wine-utils (<< 1.0-rc4-1), wine (<< 0.9.35)
 Description: Windows API implementation - binary loader
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.

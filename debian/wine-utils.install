@@ -8,7 +8,6 @@ debian/tmp/usr/bin/winemaker
 debian/tmp/usr/bin/winemine
 debian/tmp/usr/bin/wine-font-convert
 debian/tmp/usr/lib/wine/control.exe.so
-debian/tmp/usr/lib/wine/hh.exe.so
 debian/tmp/usr/lib/wine/notepad.exe.so
 debian/tmp/usr/lib/wine/oleview.exe.so
 debian/tmp/usr/lib/wine/progman.exe.so
