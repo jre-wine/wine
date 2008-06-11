@@ -1,8 +1,16 @@
-wine (1.0-rc4-1) UNRELEASED; urgency=low
+wine (1.0-rc4-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.0-rc4, released Jun 6, 2008.
+    - Bug fixes only, we are in code freeze.
+  * Moved hh.exe from wine-utils to wine-bin.
+  * There's no longer an official upstream changelog file. It's possible
+    to automatically generate one from their git repository, but
+    probably not very important to do at this time. For now, I've
+    removed all upstream changelogs from the packages.
+  * Major update of README.Debian. Obsolete information has been
+    removed, and what remains has been updated and expanded.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sun, 08 Jun 2008 05:06:40 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Wed, 11 Jun 2008 16:04:35 +0200
 
 wine (1.0-rc3-1) unstable; urgency=low
 
