@@ -260,7 +260,7 @@ binary-indep: build-indep install-indep
 	dh_testroot
 
 	dh_installdocs -i
-	dh_installchangelogs -i ChangeLog
+	dh_installchangelogs -i
 	dh_compress -i
 	dh_fixperms -i
 	dh_installdeb -i
@@ -313,7 +313,7 @@ endif
 	dh_installdebconf -s
 	dh_installmime -s
 
-	dh_installchangelogs -s ChangeLog
+	dh_installchangelogs -s
 	dh_link -s
 
 	# Wine uses many "interesting" linker options,
