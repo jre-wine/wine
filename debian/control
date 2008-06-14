@@ -15,7 +15,7 @@ Build-Depends: debhelper (>= 5), flex | flex-old, bison,
  xlibmesa-gl-dev | xlibmesa-dev (<< 4.3) | libgl-dev,
  libglu1-xorg-dev | xlibmesa-glu-dev | xlibmesa-dev (<= 4.2.1-4) | libglu-dev,
  freeglut3-dev | libglut-dev | glutg3-dev, libxmu-dev | xlibs-dev (<< 4.3),
- libxcursor-dev | xlibs-dev (<< 4.3), libncurses5-dev, libcupsys2-dev,
+ libxcursor-dev | xlibs-dev (<< 4.3), libncurses5-dev, libcups2-dev | libcupsys2-dev,
  libjpeg62-dev | libjpeg-dev, libpng12-dev | libpng3-dev | libpng-dev,
  libfreetype6-dev, libfontconfig1-dev,
  libasound2-dev [i386 amd64 powerpc sparc],
@@ -209,7 +209,7 @@ Description: Windows API implementation - OSS sound module
 Package: libwine-print
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: ${shlibs:Depends}, cupsys-bsd | lpr
+Depends: ${shlibs:Depends}, cups-bsd | cupsys-bsd | lpr
 Replaces: libwine (<< 0.0.20020710)
 Description: Windows API implementation - printing module
  Wine is a free MS-Windows API implementation.
