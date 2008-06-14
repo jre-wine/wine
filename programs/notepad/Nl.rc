@@ -57,7 +57,7 @@ POPUP "&Help" {
   MENUITEM "&Zoeken...",         CMD_HELP_SEARCH
   MENUITEM "&Hulp bij Help",     CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  MENUITEM "&About Notepad...", CMD_HELP_ABOUT_NOTEPAD
+  MENUITEM "&About Notepad", CMD_HELP_ABOUT_NOTEPAD
  }
 }
 
@@ -113,5 +113,5 @@ STRING_NOTSAVED,                                "Het bestand '%s'\nis gewijzigd\
 Wilt u de wijzigingen opslaan?"
 STRING_NOTFOUND,                                "'%s' kan niet worden gevonden."
 STRING_OUT_OF_MEMORY,                           "Onvoldoende geheugen. \
-\nSluit een of meer applicaties om de hoeveelheid \nbeschikbaar geheugen te vergroten."
+\nSluit een of meer applicaties om de hoeveelheid\nbeschikbaar geheugen te vergroten."
 }

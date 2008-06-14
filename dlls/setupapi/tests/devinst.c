@@ -183,6 +183,33 @@ cleanup:
     return ret;
 }
 
+static void clean_devclass_key(void)
+{
+    static const WCHAR devclass[] = {'S','y','s','t','e','m','\\',
+     'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
+     'C','o','n','t','r','o','l','\\','D','e','v','i','c','e','C','l','a','s','s','e','s','\\',
+     '{','6','a','5','5','b','5','a','4','-','3','f','6','5','-',
+     '1','1','d','b','-','b','7','0','4','-',
+     '0','0','1','1','9','5','5','c','2','b','d','b','}',0};
+    HKEY key;
+    DWORD subkeys;
+
+    /* Check if we have subkeys as Windows 2000 doesn't delete
+     * the keys under the DeviceClasses key after a SetupDiDestroyDeviceInfoList.
+     */
+    RegOpenKeyW(HKEY_LOCAL_MACHINE, devclass, &key);
+    RegQueryInfoKey(key, NULL, NULL, NULL, &subkeys, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    if (subkeys > 0)
+    {
+        trace("We are most likely on Windows 2000\n");
+        devinst_RegDeleteTreeW(HKEY_LOCAL_MACHINE, devclass);
+    }
+    else
+    {
+        ok(!RegDeleteKeyW(HKEY_LOCAL_MACHINE, devclass),
+         "Couldn't delete deviceclass key\n");
+    }
+}
 
 static void test_SetupDiCreateDeviceInfoListEx(void) 
 {
@@ -698,12 +725,13 @@ static void testCreateDeviceInterface(void)
         ok(i == 2, "expected 2 interfaces, got %d\n", i);
         ok(GetLastError() == ERROR_NO_MORE_ITEMS,
          "SetupDiEnumDeviceInterfaces failed: %08x\n", GetLastError());
-        pSetupDiDestroyDeviceInfoList(set);
+        ret = pSetupDiDestroyDeviceInfoList(set);
+        ok(ret, "SetupDiDestroyDeviceInfoList failed: %08x\n", GetLastError());
 
         /* Cleanup */
         /* FIXME: On Wine we still have the bogus entry in Enum\Root and
          * subkeys, as well as the deviceclass key with subkeys.
-         * Only do the RegDeleteKey, once Wine is fixed.
+         * Only clean the deviceclass key once Wine if fixed.
          */
         if (!RegOpenKeyW(HKEY_LOCAL_MACHINE, bogus, &key))
         {
@@ -714,8 +742,7 @@ static void testCreateDeviceInterface(void)
         }
         else
         {
-            ok(!RegDeleteKeyW(HKEY_LOCAL_MACHINE, devclass),
-             "Couldn't delete deviceclass key\n");
+            clean_devclass_key();
         }
     }
 }
@@ -787,6 +814,8 @@ static void testGetDeviceInterfaceDetail(void)
         {
             static const char path[] =
              "\\\\?\\root#legacy_bogus#0000#{6a55b5a4-3f65-11db-b704-0011955c2bdb}";
+            static const char path_w2k[] =
+             "\\\\?\\root#legacy_bogus#0000#{6a55b5a4-3f65-11db-b704-0011955c2bdb}\\";
             LPBYTE buf = HeapAlloc(GetProcessHeap(), 0, size);
             SP_DEVICE_INTERFACE_DETAIL_DATA_A *detail =
                 (SP_DEVICE_INTERFACE_DETAIL_DATA_A *)buf;
@@ -818,14 +847,19 @@ static void testGetDeviceInterfaceDetail(void)
                     size, &size, NULL);
             ok(ret, "SetupDiGetDeviceInterfaceDetailA failed: %d\n",
                     GetLastError());
-            ok(!lstrcmpiA(path, detail->DevicePath), "Unexpected path %s\n",
-                    detail->DevicePath);
+            ok(!lstrcmpiA(path, detail->DevicePath) ||
+             !lstrcmpiA(path_w2k, detail->DevicePath), "Unexpected path %s\n",
+             detail->DevicePath);
             /* Check SetupDiGetDeviceInterfaceDetailW */
             if (pSetupDiGetDeviceInterfaceDetailW)
             {
                 ret = pSetupDiGetDeviceInterfaceDetailW(set, &interfaceData, NULL, 0, &size, NULL);
-                ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Expected ERROR_INSUFFICIENT_BUFFER, got error code: %d\n", GetLastError());
-                ok(expectedsize == size, "SetupDiGetDeviceInterfaceDetailW returned wrong reqsize: expected %d, got %d\n", expectedsize, size);
+                ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+                 "Expected ERROR_INSUFFICIENT_BUFFER, got error code: %d\n", GetLastError());
+                ok(expectedsize == size ||
+                 (expectedsize + sizeof(WCHAR)) == size /* W2K adds a backslash */,
+                 "SetupDiGetDeviceInterfaceDetailW returned wrong reqsize, got %d\n",
+                 size);
             }
             else
                 skip("SetupDiGetDeviceInterfaceDetailW is not available\n");
@@ -848,8 +882,7 @@ static void testGetDeviceInterfaceDetail(void)
         }
         else
         {
-            ok(!RegDeleteKeyW(HKEY_LOCAL_MACHINE, devclass),
-             "Couldn't delete deviceclass key\n");
+            clean_devclass_key();
         }
     }
 }
@@ -1071,6 +1104,8 @@ static void testRegisterAndGetDetail(void)
     {
         static const char path[] =
             "\\\\?\\root#legacy_bogus#0000#{6a55b5a4-3f65-11db-b704-0011955c2bdb}";
+        static const char path_w2k[] =
+         "\\\\?\\root#legacy_bogus#0000#{6a55b5a4-3f65-11db-b704-0011955c2bdb}\\";
         PSP_DEVICE_INTERFACE_DETAIL_DATA_A detail = NULL;
 
         detail = (PSP_DEVICE_INTERFACE_DETAIL_DATA_A)HeapAlloc(GetProcessHeap(), 0, dwSize);
@@ -1085,8 +1120,9 @@ static void testRegisterAndGetDetail(void)
              * as all the tests are cleaned up correctly this has to be (or should be) fixed
              */
             todo_wine
-            ok(!lstrcmpiA(path, detail->DevicePath), "Unexpected path %s\n",
-                    detail->DevicePath);
+            ok(!lstrcmpiA(path, detail->DevicePath) ||
+             !lstrcmpiA(path_w2k, detail->DevicePath), "Unexpected path %s\n",
+             detail->DevicePath);
             HeapFree(GetProcessHeap(), 0, detail);
         }
     }
@@ -1108,11 +1144,7 @@ static void testRegisterAndGetDetail(void)
     }
     else
     {
-        /* There should only be a class key entry, so a simple
-         * RegDeleteKey should work
-         */
-        ok(!RegDeleteKeyW(HKEY_LOCAL_MACHINE, devclass),
-         "Couldn't delete classkey\n");
+        clean_devclass_key();
     }
 }
 

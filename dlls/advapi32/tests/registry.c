@@ -263,7 +263,11 @@ static void test_hkey_main_Value_W(LPCWSTR name, LPCWSTR string,
     ret = RegQueryValueExW(hkey_main, name, NULL, &type, NULL, &cbData);
     GLE = GetLastError();
     ok(ret == ERROR_SUCCESS, "RegQueryValueExW failed: %d, GLE=%d\n", ret, GLE);
-    if(GLE == ERROR_CALL_NOT_IMPLEMENTED) return;
+    if(GLE == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        win_skip("RegQueryValueExW() is not implemented\n");
+        return;
+    }
 
     ok(type == REG_SZ, "RegQueryValueExW returned type %d\n", type);
     ok(cbData == full_byte_len,
@@ -556,7 +560,7 @@ static void test_enum_value(void)
     res = RegSetValueExW( test_key, testW, 0, REG_SZ, (const BYTE *)foobarW, 7*sizeof(WCHAR) );
     if (res==0 && GetLastError()==ERROR_CALL_NOT_IMPLEMENTED)
     {
-        skip("RegSetValueExW is not implemented\n");
+        win_skip("RegSetValueExW is not implemented\n");
         goto cleanup;
     }
     ok( res == 0, "RegSetValueExW failed error %d\n", res );
@@ -675,7 +679,7 @@ static void test_get_value(void)
    
     if(!pRegGetValueA)
     {
-        skip("RegGetValue not available on this platform\n");
+        win_skip("RegGetValue not available on this platform\n");
         return;
     }
 
@@ -775,7 +779,7 @@ static void test_get_value(void)
     ret = pRegGetValueA(hkey_main, NULL, "TP1_SZ", RRF_RT_REG_SZ, &type, NULL, &size);
     ok(ret == ERROR_SUCCESS, "ret=%d\n", ret);
     /* v5.2.3790.1830 (2003 SP1) returns sTestpath1 length + 2 here. */
-    ok(size == strlen(sTestpath1)+1 || size == strlen(sTestpath1)+2,
+    ok(size == strlen(sTestpath1)+1 || broken(size == strlen(sTestpath1)+2),
        "strlen(sTestpath1)=%d size=%d\n", lstrlenA(sTestpath1), size);
     ok(type == REG_SZ, "type=%d\n", type);
 
@@ -816,7 +820,7 @@ static void test_get_value(void)
     ret = pRegGetValueA(hkey_main, NULL, "TP1_EXP_SZ", RRF_RT_REG_SZ, &type, buf, &size);
     ok(ret == ERROR_SUCCESS, "ret=%d\n", ret);
     /* At least v5.2.3790.1830 (2003 SP1) returns the unexpanded sTestpath1 length + 1 here. */
-    ok((size == strlen(expanded)+1) || (size == strlen(sTestpath1)+1), 
+    ok(size == strlen(expanded)+1 || broken(size == strlen(sTestpath1)+1),
         "strlen(expanded)=%d, strlen(sTestpath1)=%d, size=%d\n", lstrlenA(expanded), lstrlenA(sTestpath1), size);
     ok(type == REG_SZ, "type=%d\n", type);
     ok(!strcmp(expanded, buf), "expanded=\"%s\" buf=\"%s\"\n", expanded, buf);
@@ -826,7 +830,7 @@ static void test_get_value(void)
     ret = pRegGetValueA(hkey_main, NULL, "TP2_EXP_SZ", RRF_RT_REG_SZ, &type, buf, &size);
     ok(ret == ERROR_SUCCESS, "ret=%d\n", ret);
     /* At least v5.2.3790.1830 (2003 SP1) returns the unexpanded sTestpath2 length + 1 here. */
-    ok((size == strlen(expanded2)+1) || (size == strlen(sTestpath2)+1),
+    ok(size == strlen(expanded2)+1 || broken(size == strlen(sTestpath2)+1),
         "strlen(expanded2)=%d, strlen(sTestpath1)=%d, size=%d\n", lstrlenA(expanded2), lstrlenA(sTestpath2), size);
     ok(type == REG_SZ, "type=%d\n", type);
     ok(!strcmp(expanded2, buf), "expanded2=\"%s\" buf=\"%s\"\n", expanded2, buf);
@@ -844,7 +848,7 @@ static void test_get_value(void)
     ret = pRegGetValueA(hkey_main, NULL, "TP1_EXP_SZ", RRF_RT_REG_EXPAND_SZ|RRF_NOEXPAND, NULL, NULL, &size);
     ok(ret == ERROR_SUCCESS, "ret=%d\n", ret);
     /* v5.2.3790.1830 (2003 SP1) returns sTestpath1 length + 2 here. */
-    ok(size == strlen(sTestpath1)+1 || size == strlen(sTestpath1)+2,
+    ok(size == strlen(sTestpath1)+1 || broken(size == strlen(sTestpath1)+2),
        "strlen(sTestpath1)=%d size=%d\n", lstrlenA(sTestpath1), size);
 
     /* Query REG_EXPAND_SZ using RRF_RT_REG_SZ|RRF_NOEXPAND (type mismatch) */
@@ -1124,7 +1128,7 @@ static void test_regconnectregistry( void)
     schnd = OpenSCManagerA( compName, NULL, GENERIC_READ); 
     if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        skip("OpenSCManagerA is not implemented\n");
+        win_skip("OpenSCManagerA is not implemented\n");
         return;
     }
 
@@ -1218,7 +1222,7 @@ static void test_reg_query_value(void)
     ret = RegQueryValueW(subkey, NULL, valW, &size);
     if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        skip("RegQueryValueW is not implemented\n");
+        win_skip("RegQueryValueW is not implemented\n");
         goto cleanup;
     }
     ok(ret == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", ret);
@@ -1266,7 +1270,7 @@ static void test_reg_delete_tree(void)
     LONG size, ret;
 
     if(!pRegDeleteTreeA) {
-        skip("Skipping RegDeleteTreeA tests, function not present\n");
+        win_skip("Skipping RegDeleteTreeA tests, function not present\n");
         return;
     }
 

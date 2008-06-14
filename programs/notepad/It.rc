@@ -62,7 +62,7 @@ POPUP "&Aiuto" {
   MENUITEM "&Trova...",        CMD_HELP_SEARCH
   MENUITEM "&Aiuto sulla Guida",     CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  MENUITEM "&Informazioni sul Blocco Note...", CMD_HELP_ABOUT_NOTEPAD
+  MENUITEM "&Informazioni sul Blocco Note", CMD_HELP_ABOUT_NOTEPAD
  }
 }
 
@@ -118,6 +118,6 @@ STRING_NOTSAVED,                                "Il file '%s'\ne' stato modifica
 Salvare le modifiche ?"
 STRING_NOTFOUND,                                        "'%s' non è stato trovato."
 STRING_OUT_OF_MEMORY,                   "Memoria insufficiente per completare questa operazione \
- \nChiudere una o più applicazioni per aumentare la quantita'\n di memoria libera."
+\nChiudere una o più applicazioni per aumentare la quantita'\n di memoria libera."
 
 }

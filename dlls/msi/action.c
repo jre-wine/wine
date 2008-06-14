@@ -1464,6 +1464,25 @@ static UINT load_file(MSIRECORD *row, LPVOID param)
         file->IsCompressed = package->WordCount & MSIWORDCOUNT_COMPRESSED;
     }
 
+    if (!file->IsCompressed)
+    {
+        LPWSTR p, path;
+
+        p = resolve_folder(package, file->Component->Directory,
+                           TRUE, FALSE, TRUE, NULL);
+        path = build_directory_name(2, p, file->ShortName);
+
+        if (file->LongName &&
+            GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES)
+        {
+            msi_free(path);
+            path = build_directory_name(2, p, file->LongName);
+        }
+
+        file->SourcePath = path;
+        msi_free(p);
+    }
+
     load_file_hash(package, file);
 
     TRACE("File Loaded (%s)\n",debugstr_w(file->File));  
@@ -1601,10 +1620,10 @@ static UINT ACTION_CostInitialize(MSIPACKAGE *package)
     MSI_SetPropertyW(package, szCosting, szZero);
     MSI_SetPropertyW(package, cszRootDrive, c_colon);
 
+    load_all_folders( package );
     load_all_components( package );
     load_all_features( package );
     load_all_files( package );
-    load_all_folders( package );
 
     return ERROR_SUCCESS;
 }

@@ -896,6 +896,9 @@ static void test_simple_struct(void)
     test_pointer_marshal(fmtstr_simple_struct, &s1, 24, wiredata, 28, NULL, 0, "struct");
     }
 
+    /* zero the entire structure, including the hole */
+    memset(&ps1, 0, sizeof(&ps1));
+
     /* FC_PSTRUCT */
     ps1.l1 = 0xdeadbeef;
     l = 0xcafebabe;
@@ -1315,6 +1318,7 @@ static void test_conformant_array(void)
     void *ptr;
     unsigned char *mem, *mem_orig;
     unsigned char memsrc[20];
+    unsigned int i;
 
     static const unsigned char fmtstr_conf_array[] =
     {
@@ -1327,6 +1331,9 @@ static void test_conformant_array(void)
         0x1,               /* FC_BYTE */
         0x5b               /* FC_END */
     };
+
+    for (i = 0; i < sizeof(memsrc); i++)
+        memsrc[i] = i * i;
 
     StubDesc = Object_StubDesc;
     StubDesc.pFormatTypes = fmtstr_conf_array;

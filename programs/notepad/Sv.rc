@@ -59,7 +59,7 @@ POPUP "&Hjälp" {
   MENUITEM "&Sök...",           CMD_HELP_SEARCH
   MENUITEM "Användning &av hjälp",    CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  MENUITEM "&About Notepad...", CMD_HELP_ABOUT_NOTEPAD
+  MENUITEM "&About Notepad", CMD_HELP_ABOUT_NOTEPAD
  }
 }
 
@@ -115,7 +115,7 @@ STRING_NOTSAVED,                                "Filen '%s'\nhar ändrats\n\n \
 Vill du spara ändringarna?"
 STRING_NOTFOUND,                                        "'%s' hittades inte."
 STRING_OUT_OF_MEMORY,                   "Inte tillräckligt med minne för att slutföra \
-den här uppgiften. \nAvsluta ett eller flera program för att öka mängden \nledigt \
+den här uppgiften.\nAvsluta ett eller flera program för att öka mängden\nledigt \
 minne."
 
 }

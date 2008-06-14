@@ -47,7 +47,7 @@ FONT 8, "MS Shell Dlg"
 
 SAVE_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Gem som ..."
+CAPTION "Gem som..."
 FONT 8, "MS Shell Dlg"
 {
  LTEXT "&Filnavn:", 1090, 6, 6, 76, 9
@@ -371,7 +371,7 @@ STRINGTABLE DISCARDABLE
     IDS_CREATEFILE          "Filen eksisterer ikke.\nVil du lave den?"
     IDS_OVERWRITEFILE       "Filen findes allerede.\nVil du erstatte den?"
     IDS_INVALID_FILENAME_TITLE "Ugyldige tegn i stien"
-    IDS_INVALID_FILENAME    "A filnavn må ikke indeholde følgende tegn: \n                          / : < > |"
+    IDS_INVALID_FILENAME    "A filnavn må ikke indeholde følgende tegn:\n                          / : < > |"
     IDS_PATHNOTEXISTING     "Stien eksisterer ikke."
     IDS_FILENOTEXISTING     "Filen eksisterer ikke."
 }

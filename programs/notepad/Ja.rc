@@ -59,7 +59,7 @@ POPUP "ヘルプ(&H)" {
   MENUITEM "検索(&S)...",        CMD_HELP_SEARCH
   MENUITEM "ヘルプの使い方(&H)",     CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  MENUITEM "&About Notepad...", CMD_HELP_ABOUT_NOTEPAD
+  MENUITEM "&About Notepad", CMD_HELP_ABOUT_NOTEPAD
  }
 }
 
@@ -115,7 +115,7 @@ STRING_NOTSAVED,                                "ファイル '%s'\nは変更されていま
 変更を保存しますか ?"
 STRING_NOTFOUND,                                        "'%s' は見つかりませんでした"
 STRING_OUT_OF_MEMORY,                   "この操作を実行するためのメモリが\
-足りません。 \nメモリの空きを増やすためにいくつかのアプリケーションを\n終了して\
+足りません。\nメモリの空きを増やすためにいくつかのアプリケーションを\n終了して\
 下さい。"
 
 }

@@ -48,7 +48,7 @@ FONT 9, "MS Shell Dlg"
 
 SAVE_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "다른 이름으로 저장 ..."
+CAPTION "다른 이름으로 저장..."
 FONT 9, "MS Shell Dlg"
 {
  LTEXT "파일 이름(&N):", 1090, 6, 6, 76, 9
@@ -372,7 +372,7 @@ STRINGTABLE DISCARDABLE
     IDS_CREATEFILE          "파일은 존재하지 않습니다\n파일을 만들겠습니까?"
     IDS_OVERWRITEFILE       "파일은 이미 존재합니다.\n덮어쓰겠습니까?"
     IDS_INVALID_FILENAME_TITLE "경로에 올바르지 않은 문자가 있습니다h"
-    IDS_INVALID_FILENAME    "파일이름에는 다음 문자만 포함될 수 있습니다: \n                          / : < > |"
+    IDS_INVALID_FILENAME    "파일이름에는 다음 문자만 포함될 수 있습니다:\n                          / : < > |"
     IDS_PATHNOTEXISTING     "경로가 존재하지 않습니다."
     IDS_FILENOTEXISTING     "파일이 존재하지 않습니다"
 }
