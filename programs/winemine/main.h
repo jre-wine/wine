@@ -19,8 +19,8 @@
 #include <windows.h>
 
 #define BEGINNER_MINES        10
-#define BEGINNER_COLS         8
-#define BEGINNER_ROWS         8
+#define BEGINNER_COLS         9
+#define BEGINNER_ROWS         9
 
 #define ADVANCED_MINES        40
 #define ADVANCED_COLS         16
@@ -44,6 +44,8 @@
 #define LED_HEIGHT       23
 #define FACE_WIDTH       24
 #define FACE_HEIGHT      24
+
+#define MAX_PLAYER_NAME_SIZE 31
 
 typedef enum { SPRESS_BMP, COOL_BMP, DEAD_BMP, OOH_BMP, SMILE_BMP } FACE_BMP;
 
@@ -84,7 +86,7 @@ typedef struct tagBOARD
     unsigned rows;
     unsigned cols;
     unsigned mines;
-    char best_name [3][16];
+    char best_name [3][MAX_PLAYER_NAME_SIZE+1];
     DWORD best_time [3];
     DIFFICULTY difficulty;
 
@@ -134,7 +136,7 @@ void CheckLevel( BOARD *p_board );
 
 void CreateBoard( BOARD *p_board );
 
-void CreateBoxes( BOARD *p_board );
+void PlaceMines ( BOARD *p_board, int selected_col, int selected_row );
 
 void TestBoard( HWND hWnd, BOARD *p_board, int x, int y, int msg );
 

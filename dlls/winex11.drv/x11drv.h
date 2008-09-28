@@ -522,12 +522,22 @@ extern DWORD thread_data_tls_index;
 
 static inline struct x11drv_thread_data *x11drv_thread_data(void)
 {
-    struct x11drv_thread_data *data = TlsGetValue( thread_data_tls_index );
-    if (!data) data = x11drv_init_thread_data();
-    return data;
+    return TlsGetValue( thread_data_tls_index );
 }
 
-static inline Display *thread_display(void) { return x11drv_thread_data()->display; }
+/* retrieve the thread display, or NULL if not created yet */
+static inline Display *thread_display(void)
+{
+    struct x11drv_thread_data *data = x11drv_thread_data();
+    if (!data) return NULL;
+    return data->display;
+}
+
+/* retrieve the thread display, creating it if needed */
+static inline Display *thread_init_display(void)
+{
+    return x11drv_init_thread_data()->display;
+}
 
 static inline size_t get_property_size( int format, unsigned long count )
 {

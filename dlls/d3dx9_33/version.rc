@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2002 Greg Turner
+ * Copyright 2008 Louis Lenders
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,11 +16,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __WINE_RPCSS_NP_CLIENT_H
-#define __WINE_RPCSS_NP_CLIENT_H
+#define WINE_FILEDESCRIPTION_STR "Wine D3DX9"
+#define WINE_FILENAME_STR "d3dx9.dll"
+#define WINE_FILEVERSION 9,18,904,15
+#define WINE_FILEVERSION_STR "9.18.904.15"
+#define WINE_PRODUCTVERSION 9,18,904,15
+#define WINE_PRODUCTVERSION_STR "9.18.904.15"
 
-/* rpcss_np_client.c */
-HANDLE RPC_RpcssNPConnect(void);
-BOOL RPCRT4_SendReceiveNPMsg(HANDLE, PRPCSS_NP_MESSAGE, char *,  PRPCSS_NP_REPLY);
-
-#endif /* __RPCSS_NP_CLIENT_H */
+#include "wine/wine_common_ver.rc"

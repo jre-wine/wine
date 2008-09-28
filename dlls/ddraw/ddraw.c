@@ -524,8 +524,6 @@ IDirectDrawImpl_SetCooperativeLevel(IDirectDraw7 *iface,
         WARN("(%p) Unhandled flag DDSCL_ALLOWMODEX, harmless\n", This);
     if(cooplevel & DDSCL_FPUSETUP)
         WARN("(%p) Unhandled flag DDSCL_FPUSETUP, harmless\n", This);
-    if(cooplevel & DDSCL_FPUPRESERVE)
-        WARN("(%p) Unhandled flag DDSCL_FPUPRESERVE, harmless\n", This);
 
     /* Store the cooperative_level */
     This->cooperative_level |= cooplevel;
@@ -3239,6 +3237,12 @@ DirectDrawCreateClipper(DWORD Flags,
     {
         LeaveCriticalSection(&ddraw_cs);
         return CLASS_E_NOAGGREGATION;
+    }
+
+    if (!LoadWineD3D())
+    {
+        LeaveCriticalSection(&ddraw_cs);
+        return DDERR_NODIRECTDRAWSUPPORT;
     }
 
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,

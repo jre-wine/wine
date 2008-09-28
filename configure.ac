@@ -161,8 +161,9 @@ then
 fi
 
 AC_CHECK_TOOLS(AS,[gas as],as)
-AC_CHECK_TOOL(LD,ld,ld)
-AC_CHECK_TOOL(AR,ar,ar)
+AC_CHECK_TOOLS(LD,[ld gld],ld)
+AC_CHECK_TOOLS(NM,[nm gnm],nm)
+AC_CHECK_TOOLS(AR,[ar gar],ar)
 AC_SUBST(ARFLAGS,rc)
 AC_PROG_RANLIB
 AC_CHECK_TOOL(STRIP,strip,strip)
@@ -231,6 +232,7 @@ AC_CHECK_HEADERS(\
 	CoreAudio/CoreAudio.h \
 	DiskArbitration/DiskArbitration.h \
 	IOKit/IOKitLib.h \
+	alias.h \
 	alsa/asoundlib.h \
 	arpa/inet.h \
 	arpa/nameser.h \
@@ -347,8 +349,20 @@ AC_CHECK_HEADERS([sys/mount.h sys/statfs.h sys/user.h sys/vfs.h],,,
      # include <sys/param.h>
      #endif])
 
-AC_CHECK_HEADERS([netinet/in_pcb.h netinet/ip_var.h net/if.h net/if_arp.h net/if_dl.h net/if_types.h net/route.h netipx/ipx.h],,,
-    [#include <sys/types.h>
+AC_CHECK_HEADERS(\
+	netinet/ip.h \
+	net/if.h \
+	net/if_arp.h \
+	net/if_dl.h \
+	net/if_types.h \
+	net/route.h \
+	netinet/if_ether.h \
+	netinet/in_pcb.h \
+	netinet/ip_icmp.h \
+	netinet/ip_var.h \
+	netinet/udp.h \
+	netipx/ipx.h \
+,,,[#include <sys/types.h>
      #ifdef HAVE_SYS_SOCKET_H
      # include <sys/socket.h>
      #endif
@@ -357,10 +371,16 @@ AC_CHECK_HEADERS([netinet/in_pcb.h netinet/ip_var.h net/if.h net/if_arp.h net/if
      #endif
      #ifdef HAVE_NETINET_IN_H
      # include <netinet/in.h>
+     #endif
+     #ifdef HAVE_NETINET_IP_H
+     # include <netinet/ip.h>
      #endif])
 
-AC_CHECK_HEADERS([netinet/tcp_var.h],,,
+AC_CHECK_HEADERS([netinet/tcp_var.h netinet/udp_var.h netinet/icmp_var.h netinet/tcp_timer.h ],,,
     [#include <sys/types.h>
+     #ifdef HAVE_ALIAS_H
+     # include <alias.h>
+     #endif
      #ifdef HAVE_SYS_SOCKET_H
      # include <sys/socket.h>
      #endif
@@ -369,6 +389,18 @@ AC_CHECK_HEADERS([netinet/tcp_var.h],,,
      #endif
      #ifdef HAVE_NETINET_IN_H
      # include <netinet/in.h>
+     #endif
+     #ifdef HAVE_NETINET_IP_H
+     # include <netinet/ip.h>
+     #endif
+     #ifdef HAVE_NETINET_IP_VAR_H
+     # include <netinet/ip_var.h>
+     #endif
+     #ifdef HAVE_NETINET_IP_ICMP_H
+     # include <netinet/ip_icmp.h>
+     #endif
+     #ifdef HAVE_NETINET_UDP_H
+     # include <netinet/udp.h>
      #endif
      #ifdef HAVE_NETINET_TCP_H
      # include <netinet/tcp.h>
@@ -1588,7 +1620,7 @@ fi
 
 dnl Check for isinf
 AC_CACHE_CHECK([for isinf], ac_cv_have_isinf,
-               AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <math.h>]], [[float f = 0.0; isinf(f)]])],[ac_cv_have_isinf="yes"],[ac_cv_have_isinf="no"]))
+               AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <math.h>]], [[float f = 0.0; int i=isinf(f)]])],[ac_cv_have_isinf="yes"],[ac_cv_have_isinf="no"]))
 if test "$ac_cv_have_isinf" = "yes"
 then
     AC_DEFINE(HAVE_ISINF, 1, [Define to 1 if you have the `isinf' function.])
@@ -1796,6 +1828,8 @@ AC_CONFIG_FILES([dlls/imm32/Makefile])
 AC_CONFIG_FILES([dlls/imm32/tests/Makefile])
 AC_CONFIG_FILES([dlls/inetcomm/Makefile])
 AC_CONFIG_FILES([dlls/inetcomm/tests/Makefile])
+AC_CONFIG_FILES([dlls/inetmib1/Makefile])
+AC_CONFIG_FILES([dlls/inetmib1/tests/Makefile])
 AC_CONFIG_FILES([dlls/infosoft/Makefile])
 AC_CONFIG_FILES([dlls/infosoft/tests/Makefile])
 AC_CONFIG_FILES([dlls/initpki/Makefile])

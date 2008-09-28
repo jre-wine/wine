@@ -303,7 +303,7 @@ static void clear_test(IDirect3DDevice8 *device)
 
     /* negative x, negative y */
     rect_negneg.x1 = 640;
-    rect_negneg.x1 = 240;
+    rect_negneg.y1 = 240;
     rect_negneg.x2 = 320;
     rect_negneg.y2 = 0;
     hr = IDirect3DDevice8_Clear(device, 1, &rect_negneg, D3DCLEAR_TARGET, 0xff00ff00, 0.0, 0);
@@ -746,7 +746,7 @@ static void alpha_test(IDirect3DDevice8 *device)
     HRESULT hr;
     IDirect3DTexture8 *offscreenTexture;
     IDirect3DSurface8 *backbuffer = NULL, *offscreen = NULL, *depthstencil = NULL;
-    DWORD color, red, green, blue;
+    DWORD color;
 
     struct vertex quad1[] =
     {
@@ -870,32 +870,20 @@ static void alpha_test(IDirect3DDevice8 *device)
     IDirect3DDevice8_Present(device, NULL, NULL, NULL, NULL);
 
     color = getPixelColor(device, 160, 360);
-    red =   (color & 0x00ff0000) >> 16;
-    green = (color & 0x0000ff00) >>  8;
-    blue =  (color & 0x000000ff);
-    ok(red >= 0xbe && red <= 0xc0 && green >= 0x39 && green <= 0x41 && blue == 0x00,
+    ok(color_match(color, D3DCOLOR_ARGB(0x00, 0xbf, 0x40, 0x00), 1),
        "SRCALPHA on frame buffer returned color %08x, expected 0x00bf4000\n", color);
 
     color = getPixelColor(device, 160, 120);
-    red =   (color & 0x00ff0000) >> 16;
-    green = (color & 0x0000ff00) >>  8;
-    blue =  (color & 0x000000ff);
-    ok(red >= 0x7e && red <= 0x81 && green == 0x00 && blue >= 0x7e && blue <= 0x81,
-       "DSTALPHA on frame buffer returned color %08x, expected 0x00ff0000\n", color);
+    ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x7f, 0x00, 0x80), 2),
+       "DSTALPHA on frame buffer returned color %08x, expected 0x007f0080\n", color);
 
     color = getPixelColor(device, 480, 360);
-    red =   (color & 0x00ff0000) >> 16;
-    green = (color & 0x0000ff00) >>  8;
-    blue =  (color & 0x000000ff);
-    ok(red >= 0xbe && red <= 0xc0 && green >= 0x39 && green <= 0x41 && blue == 0x00,
-       "SRCALPHA on texture returned color %08x, expected bar\n", color);
+    ok(color_match(color, D3DCOLOR_ARGB(0x00, 0xbf, 0x40, 0x00), 1),
+       "SRCALPHA on texture returned color %08x, expected 0x00bf4000\n", color);
 
     color = getPixelColor(device, 480, 120);
-    red =   (color & 0x00ff0000) >> 16;
-    green = (color & 0x0000ff00) >>  8;
-    blue =  (color & 0x000000ff);
-    ok(red == 0x00 && green == 0x00 && blue >= 0xfe && blue <= 0xff ,
-       "DSTALPHA on texture returned color %08x, expected foo\n", color);
+    ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x00, 0x00, 0xff), 1),
+       "DSTALPHA on texture returned color %08x, expected 0x000000ff\n", color);
 
     out:
     /* restore things */
@@ -1272,7 +1260,7 @@ static void texop_test(IDirect3DDevice8 *device)
         ok(SUCCEEDED(hr), "Present failed with 0x%08x (%s)\n", hr, DXGetErrorString8(hr));
 
         color = getPixelColor(device, 320, 240);
-        ok(color_match(color, test_data[i].result, 1), "Operation %s returned color 0x%08x, expected 0x%08x\n",
+        ok(color_match(color, test_data[i].result, 3), "Operation %s returned color 0x%08x, expected 0x%08x\n",
                 test_data[i].name, color, test_data[i].result);
     }
 

@@ -66,9 +66,11 @@ typedef enum {
     DispHTMLDocument_tid,
     DispHTMLDOMTextNode_tid,
     DispHTMLElementCollection_tid,
+    DispHTMLGenericElement_tid,
     DispHTMLImg_tid,
     DispHTMLInputElement_tid,
     DispHTMLOptionElement_tid,
+    DispHTMLSelectElement_tid,
     DispHTMLStyle_tid,
     DispHTMLUnknownElement_tid,
     DispHTMLWindow2_tid,
@@ -84,9 +86,11 @@ typedef enum {
     IHTMLElement_tid,
     IHTMLElement2_tid,
     IHTMLElementCollection_tid,
+    IHTMLGenericElement_tid,
     IHTMLImgElement_tid,
     IHTMLInputElement_tid,
     IHTMLOptionElement_tid,
+    IHTMLSelectElement_tid,
     IHTMLStyle_tid,
     IHTMLWindow2_tid,
     IHTMLWindow3_tid,
@@ -94,7 +98,16 @@ typedef enum {
     LAST_tid
 } tid_t;
 
+typedef enum {
+    EVENTID_CHANGE,
+    EVENTID_CLICK,
+    EVENTID_KEYUP,
+    EVENTID_LOAD,
+    EVENTID_LAST
+} eventid_t;
+
 typedef struct dispex_data_t dispex_data_t;
+typedef struct dispex_dynamic_data_t dispex_dynamic_data_t;
 
 #define MSHTML_DISPID_CUSTOM_MIN 0x60000000
 #define MSHTML_DISPID_CUSTOM_MAX 0x6fffffff
@@ -117,6 +130,7 @@ typedef struct {
     IUnknown *outer;
 
     dispex_static_data_t *data;
+    dispex_dynamic_data_t *dynamic_data;
 } DispatchEx;
 
 void init_dispex(DispatchEx*,IUnknown*,dispex_static_data_t*);
@@ -277,6 +291,7 @@ struct NSContainer {
     nsEventListener keypress_listener;
     nsEventListener load_listener;
     nsEventListener node_insert_listener;
+    nsEventListener htmlevent_listener;
 
     nsIWebBrowser *webbrowser;
     nsIWebNavigation *navigation;
@@ -297,6 +312,8 @@ struct NSContainer {
 
     nsChannelBSC *bscallback; /* hack */
     HWND reset_focus; /* hack */
+
+    BOOL event_vector[EVENTID_LAST];
 };
 
 typedef struct {
@@ -484,16 +501,14 @@ nsIWritableVariant *create_nsvariant(void);
 void nsnode_to_nsstring(nsIDOMNode*,nsAString*);
 void get_editor_controller(NSContainer*);
 void init_nsevents(NSContainer*);
+void add_nsevent_listener(NSContainer*,LPCWSTR);
 nsresult get_nsinterface(nsISupports*,REFIID,void**);
-
-typedef enum {
-    EVENTID_LOAD,
-    EVENTID_LAST
-} eventid_t;
 
 void check_event_attr(HTMLDocument*,nsIDOMElement*);
 void release_event_target(event_target_t*);
 void fire_event(HTMLDocument*,eventid_t,nsIDOMNode*);
+HRESULT set_node_event(HTMLDOMNode*,eventid_t,VARIANT*);
+eventid_t str_to_eid(LPCWSTR);
 
 void set_document_bscallback(HTMLDocument*,nsChannelBSC*);
 void set_current_mon(HTMLDocument*,IMoniker*);
@@ -515,10 +530,10 @@ IHTMLStyleSheetsCollection *HTMLStyleSheetsCollection_Create(nsIDOMStyleSheetLis
 void detach_selection(HTMLDocument*);
 void detach_ranges(HTMLDocument*);
 
-HTMLDOMNode *HTMLDOMTextNode_Create(nsIDOMNode*);
+HTMLDOMNode *HTMLDOMTextNode_Create(HTMLDocument*,nsIDOMNode*);
 
-HTMLElement *HTMLElement_Create(nsIDOMNode*);
-HTMLElement *HTMLCommentElement_Create(nsIDOMNode*);
+HTMLElement *HTMLElement_Create(HTMLDocument*,nsIDOMNode*,BOOL);
+HTMLElement *HTMLCommentElement_Create(HTMLDocument*,nsIDOMNode*);
 HTMLElement *HTMLAnchorElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLBodyElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLImgElement_Create(nsIDOMHTMLElement*);
@@ -528,7 +543,9 @@ HTMLElement *HTMLScriptElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLSelectElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLTable_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLTextAreaElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLGenericElement_Create(nsIDOMHTMLElement*);
 
+void HTMLDOMNode_Init(HTMLDocument*,HTMLDOMNode*,nsIDOMNode*);
 void HTMLElement_Init(HTMLElement*);
 void HTMLElement2_Init(HTMLElement*);
 void HTMLTextContainer_Init(HTMLTextContainer*);

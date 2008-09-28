@@ -150,10 +150,17 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
     {
         struct user_thread_info *thread_info = get_user_thread_info();
 
-        if (!thread_info->desktop) thread_info->desktop = full_parent ? full_parent : handle;
-        else assert( full_parent == thread_info->desktop );
-        if (full_parent && !USER_Driver->pCreateDesktopWindow( thread_info->desktop ))
-            ERR( "failed to create desktop window\n" );
+        if (name == (LPCWSTR)DESKTOP_CLASS_ATOM)
+        {
+            if (!thread_info->top_window) thread_info->top_window = full_parent ? full_parent : handle;
+            else assert( full_parent == thread_info->top_window );
+            if (full_parent && !USER_Driver->pCreateDesktopWindow( thread_info->top_window ))
+                ERR( "failed to create desktop window\n" );
+        }
+        else  /* HWND_MESSAGE parent */
+        {
+            if (!thread_info->msg_window && !full_parent) thread_info->msg_window = handle;
+        }
     }
 
     USER_Lock();
@@ -350,6 +357,42 @@ static void get_server_window_text( HWND hwnd, LPWSTR text, INT count )
 }
 
 
+/*******************************************************************
+ *           get_hwnd_message_parent
+ *
+ * Return the parent for HWND_MESSAGE windows.
+ */
+HWND get_hwnd_message_parent(void)
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+
+    if (!thread_info->msg_window) GetDesktopWindow();  /* trigger creation */
+    return thread_info->msg_window;
+}
+
+
+/*******************************************************************
+ *           is_desktop_window
+ *
+ * Check if window is the desktop or the HWND_MESSAGE top parent.
+ */
+BOOL is_desktop_window( HWND hwnd )
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+
+    if (!hwnd) return FALSE;
+    if (hwnd == thread_info->top_window) return TRUE;
+    if (hwnd == thread_info->msg_window) return TRUE;
+
+    if (!HIWORD(hwnd) || HIWORD(hwnd) == 0xffff)
+    {
+        if (LOWORD(thread_info->top_window) == LOWORD(hwnd)) return TRUE;
+        if (LOWORD(thread_info->msg_window) == LOWORD(hwnd)) return TRUE;
+    }
+    return FALSE;
+}
+
+
 /***********************************************************************
  *           WIN_GetPtr
  *
@@ -372,11 +415,7 @@ WND *WIN_GetPtr( HWND hwnd )
             return ptr;
         ptr = NULL;
     }
-    else if (index == USER_HANDLE_TO_INDEX(GetDesktopWindow()))
-    {
-        if (hwnd == GetDesktopWindow() || !HIWORD(hwnd) || HIWORD(hwnd) == 0xffff) ptr = WND_DESKTOP;
-        else ptr = NULL;
-    }
+    else if (is_desktop_window( hwnd )) ptr = WND_DESKTOP;
     else ptr = WND_OTHER_PROCESS;
     USER_Unlock();
     return ptr;
@@ -433,7 +472,11 @@ HWND WIN_Handle32( HWND16 hwnd16 )
 
     if (!(ptr = WIN_GetPtr( hwnd ))) return hwnd;
 
-    if (ptr == WND_DESKTOP) return GetDesktopWindow();
+    if (ptr == WND_DESKTOP)
+    {
+        if (LOWORD(hwnd) == LOWORD(GetDesktopWindow())) return GetDesktopWindow();
+        else return get_hwnd_message_parent();
+    }
 
     if (ptr != WND_OTHER_PROCESS)
     {
@@ -548,8 +591,16 @@ BOOL WIN_GetRectangles( HWND hwnd, RECT *rectWindow, RECT *rectClient )
     {
         RECT rect;
         rect.left = rect.top = 0;
-        rect.right  = GetSystemMetrics(SM_CXSCREEN);
-        rect.bottom = GetSystemMetrics(SM_CYSCREEN);
+        if (hwnd == get_hwnd_message_parent())
+        {
+            rect.right  = 100;
+            rect.bottom = 100;
+        }
+        else
+        {
+            rect.right  = GetSystemMetrics(SM_CXSCREEN);
+            rect.bottom = GetSystemMetrics(SM_CYSCREEN);
+        }
         if (rectWindow) *rectWindow = rect;
         if (rectClient) *rectClient = rect;
     }
@@ -962,11 +1013,7 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
 
     if (cs->hwndParent == HWND_MESSAGE)
     {
-      /* native ole32.OleInitialize uses HWND_MESSAGE to create the
-       * message window (style: WS_POPUP|WS_DISABLED)
-       */
-      FIXME("Parent is HWND_MESSAGE\n");
-      parent = GetDesktopWindow();
+        cs->hwndParent = parent = get_hwnd_message_parent();
     }
     else if (cs->hwndParent)
     {
@@ -978,13 +1025,17 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
     }
     else
     {
+        static const WCHAR messageW[] = {'M','e','s','s','a','g','e',0};
+
         if ((cs->style & (WS_CHILD|WS_POPUP)) == WS_CHILD)
         {
             WARN("No parent for child window\n" );
             SetLastError(ERROR_TLW_WITH_WSCHILD);
             return 0;  /* WS_CHILD needs a parent, but WS_POPUP doesn't */
         }
-        if (className != (LPCWSTR)DESKTOP_CLASS_ATOM)  /* are we creating the desktop itself? */
+        /* are we creating the desktop or HWND_MESSAGE parent itself? */
+        if (className != (LPCWSTR)DESKTOP_CLASS_ATOM &&
+            (IS_INTRESOURCE(className) || strcmpiW( className, messageW )))
             parent = GetDesktopWindow();
     }
 
@@ -1410,7 +1461,7 @@ BOOL WINAPI DestroyWindow( HWND hwnd )
 {
     BOOL is_child;
 
-    if (!(hwnd = WIN_IsCurrentThread( hwnd )) || (hwnd == GetDesktopWindow()))
+    if (!(hwnd = WIN_IsCurrentThread( hwnd )) || is_desktop_window( hwnd ))
     {
         SetLastError( ERROR_ACCESS_DENIED );
         return FALSE;
@@ -1527,7 +1578,9 @@ HWND WINAPI FindWindowExW( HWND parent, HWND child, LPCWSTR className, LPCWSTR t
     int i = 0, len = 0;
     WCHAR *buffer = NULL;
 
-    if (!parent) parent = GetDesktopWindow();
+    if (!parent && child) parent = GetDesktopWindow();
+    else if (parent == HWND_MESSAGE) parent = get_hwnd_message_parent();
+
     if (title)
     {
         len = strlenW(title) + 1;  /* one extra char to check for chars beyond the end */
@@ -1620,16 +1673,20 @@ HWND WINAPI GetDesktopWindow(void)
 {
     struct user_thread_info *thread_info = get_user_thread_info();
 
-    if (thread_info->desktop) return thread_info->desktop;
+    if (thread_info->top_window) return thread_info->top_window;
 
     SERVER_START_REQ( get_desktop_window )
     {
         req->force = 0;
-        if (!wine_server_call( req )) thread_info->desktop = reply->handle;
+        if (!wine_server_call( req ))
+        {
+            thread_info->top_window = reply->top_window;
+            thread_info->msg_window = reply->msg_window;
+        }
     }
     SERVER_END_REQ;
 
-    if (!thread_info->desktop)
+    if (!thread_info->top_window)
     {
         USEROBJECTFLAGS flags;
         if (!GetUserObjectInformationW( GetProcessWindowStation(), UOI_FLAGS, &flags,
@@ -1664,15 +1721,19 @@ HWND WINAPI GetDesktopWindow(void)
         SERVER_START_REQ( get_desktop_window )
         {
             req->force = 1;
-            if (!wine_server_call( req )) thread_info->desktop = reply->handle;
+            if (!wine_server_call( req ))
+            {
+                thread_info->top_window = reply->top_window;
+                thread_info->msg_window = reply->msg_window;
+            }
         }
         SERVER_END_REQ;
     }
 
-    if (!thread_info->desktop || !USER_Driver->pCreateDesktopWindow( thread_info->desktop ))
+    if (!thread_info->top_window || !USER_Driver->pCreateDesktopWindow( thread_info->top_window ))
         ERR( "failed to create desktop window\n" );
 
-    return thread_info->desktop;
+    return thread_info->top_window;
 }
 
 
@@ -2580,7 +2641,8 @@ HWND WINAPI GetAncestor( HWND hwnd, UINT type )
         break;
 
     case GA_ROOTOWNER:
-        if ((ret = WIN_GetFullHandle( hwnd )) == GetDesktopWindow()) return 0;
+        if (is_desktop_window( hwnd )) return 0;
+        ret = WIN_GetFullHandle( hwnd );
         for (;;)
         {
             HWND parent = GetParent( ret );
@@ -2611,6 +2673,7 @@ HWND WINAPI SetParent( HWND hwnd, HWND parent )
     }
 
     if (!parent) parent = GetDesktopWindow();
+    else if (parent == HWND_MESSAGE) parent = get_hwnd_message_parent();
     else parent = WIN_GetFullHandle( parent );
 
     if (!IsWindow( parent ))
@@ -2695,11 +2758,11 @@ BOOL WINAPI IsWindowVisible( HWND hwnd )
 
     if (!(GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE)) return FALSE;
     if (!(list = list_window_parents( hwnd ))) return TRUE;
-    if (list[0] && list[1])  /* desktop window is considered always visible so we don't check it */
+    if (list[0])
     {
         for (i = 0; list[i+1]; i++)
             if (!(GetWindowLongW( list[i], GWL_STYLE ) & WS_VISIBLE)) break;
-        retval = !list[i+1];
+        retval = !list[i+1] && (list[i] == GetDesktopWindow());  /* top message window isn't visible */
     }
     HeapFree( GetProcessHeap(), 0, list );
     return retval;
@@ -2724,12 +2787,12 @@ BOOL WIN_IsWindowDrawable( HWND hwnd, BOOL icon )
     if ((style & WS_MINIMIZE) && icon && GetClassLongPtrW( hwnd, GCLP_HICON ))  return FALSE;
 
     if (!(list = list_window_parents( hwnd ))) return TRUE;
-    if (list[0] && list[1])  /* desktop window is considered always visible so we don't check it */
+    if (list[0])
     {
         for (i = 0; list[i+1]; i++)
             if ((GetWindowLongW( list[i], GWL_STYLE ) & (WS_VISIBLE|WS_MINIMIZE)) != WS_VISIBLE)
                 break;
-        retval = !list[i+1];
+        retval = !list[i+1] && (list[i] == GetDesktopWindow());  /* top message window isn't visible */
     }
     HeapFree( GetProcessHeap(), 0, list );
     return retval;
@@ -2879,6 +2942,11 @@ HWND WINAPI GetLastActivePopup( HWND hwnd )
  */
 HWND *WIN_ListChildren( HWND hwnd )
 {
+    if (!hwnd)
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return NULL;
+    }
     return list_window_children( 0, hwnd, NULL, 0 );
 }
 

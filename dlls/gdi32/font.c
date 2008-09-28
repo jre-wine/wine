@@ -800,9 +800,17 @@ INT WINAPI GetTextFaceA( HDC hdc, INT count, LPSTR name )
 
     if (name)
     {
-        if (count && !WideCharToMultiByte( CP_ACP, 0, nameW, -1, name, count, NULL, NULL))
+        if (count)
+        {
+            res = WideCharToMultiByte(CP_ACP, 0, nameW, -1, name, count, NULL, NULL);
+            if (res == 0)
+                res = count;
             name[count-1] = 0;
-        res = strlen(name);
+            /* GetTextFaceA does NOT include the nul byte in the return count.  */
+            res--;
+        }
+        else
+            res = 0;
     }
     else
         res = WideCharToMultiByte( CP_ACP, 0, nameW, -1, NULL, 0, NULL, NULL);
@@ -825,12 +833,13 @@ INT WINAPI GetTextFaceW( HDC hdc, INT count, LPWSTR name )
         ret = WineEngGetTextFace(dc->gdiFont, count, name);
     else if ((font = (FONTOBJ *) GDI_GetObjPtr( dc->hFont, FONT_MAGIC )))
     {
+        INT n = strlenW(font->logfont.lfFaceName) + 1;
         if (name)
         {
             lstrcpynW( name, font->logfont.lfFaceName, count );
-            ret = strlenW(name);
+            ret = min(count, n);
         }
-        else ret = strlenW(font->logfont.lfFaceName) + 1;
+        else ret = n;
         GDI_ReleaseObj( dc->hFont );
     }
     release_dc_ptr( dc );
@@ -1409,6 +1418,9 @@ UINT WINAPI GetOutlineTextMetricsW(
                 output = HeapAlloc(GetProcessHeap(), 0, ret);
                 WineEngGetOutlineTextMetrics(dc->gdiFont, ret, output);
             }
+
+        output->otmTextMetrics.tmDigitizedAspectX = GetDeviceCaps(hdc, LOGPIXELSX);
+        output->otmTextMetrics.tmDigitizedAspectY = GetDeviceCaps(hdc, LOGPIXELSY);
 
 #define WDPTOLP(x) ((x<0)?					\
 		(-abs(INTERNAL_XDSTOWS(dc, (x)))):		\
@@ -2898,13 +2910,13 @@ BOOL WINAPI GetCharABCWidthsFloatA( HDC hdc, UINT first, UINT last, LPABCFLOAT a
  */
 BOOL WINAPI GetCharABCWidthsFloatW( HDC hdc, UINT first, UINT last, LPABCFLOAT abcf )
 {
-    ABC *abc;
+    ABC *abc, *abc_base;
     unsigned int i, size = sizeof(ABC) * (last - first + 1);
     BOOL ret;
 
     TRACE("%p, %d, %d, %p - partial stub\n", hdc, first, last, abcf);
 
-    abc = HeapAlloc( GetProcessHeap(), 0, size );
+    abc = abc_base = HeapAlloc( GetProcessHeap(), 0, size );
     if (!abc) return FALSE;
 
     ret = GetCharABCWidthsW( hdc, first, last, abc );
@@ -2917,7 +2929,7 @@ BOOL WINAPI GetCharABCWidthsFloatW( HDC hdc, UINT first, UINT last, LPABCFLOAT a
             abcf->abcfC = abc->abcC;
         }
     }
-    HeapFree( GetProcessHeap(), 0, abc );
+    HeapFree( GetProcessHeap(), 0, abc_base );
     return ret;
 }
 

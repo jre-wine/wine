@@ -176,6 +176,10 @@ static const NodeImplVtbl HTMLCommentElementImplVtbl = {
 };
 
 static const tid_t HTMLCommentElement_iface_tids[] = {
+    IHTMLDOMNode_tid,
+    IHTMLDOMNode2_tid,
+    IHTMLElement_tid,
+    IHTMLElement2_tid,
     IHTMLCommentElement_tid,
     0
 };
@@ -186,7 +190,7 @@ static dispex_static_data_t HTMLCommentElement_dispex = {
     HTMLCommentElement_iface_tids
 };
 
-HTMLElement *HTMLCommentElement_Create(nsIDOMNode *nsnode)
+HTMLElement *HTMLCommentElement_Create(HTMLDocument *doc, nsIDOMNode *nsnode)
 {
     HTMLCommentElement *ret = heap_alloc_zero(sizeof(*ret));
 
@@ -195,6 +199,7 @@ HTMLElement *HTMLCommentElement_Create(nsIDOMNode *nsnode)
 
     init_dispex(&ret->element.node.dispex, (IUnknown*)HTMLCOMMENT(ret), &HTMLCommentElement_dispex);
     HTMLElement_Init(&ret->element);
+    HTMLDOMNode_Init(doc, &ret->element.node, nsnode);
 
     return &ret->element;
 }

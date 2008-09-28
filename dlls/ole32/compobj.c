@@ -724,7 +724,7 @@ HRESULT apartment_createwindowifneeded(struct apartment *apt)
     {
         HWND hwnd = CreateWindowW(wszAptWinClass, NULL, 0,
                                   0, 0, 0, 0,
-                                  0, 0, OLE32_hInstance, NULL);
+                                  HWND_MESSAGE, 0, OLE32_hInstance, NULL);
         if (!hwnd)
         {
             ERR("CreateWindow failed with error %d\n", GetLastError());
@@ -1231,7 +1231,9 @@ HRESULT WINAPI CoDisconnectObject( LPUNKNOWN lpUnk, DWORD reserved )
  */
 HRESULT WINAPI CoCreateGuid(GUID *pguid)
 {
-    return UuidCreate(pguid);
+    DWORD status = UuidCreate(pguid);
+    if (status == RPC_S_OK || status == RPC_S_UUID_LOCAL_ONLY) return S_OK;
+    return HRESULT_FROM_WIN32( status );
 }
 
 /******************************************************************************

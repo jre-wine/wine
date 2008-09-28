@@ -1040,7 +1040,6 @@ static HRESULT WINAPI FilterMapper2_EnumMatchingFilters(
 
                     if (SUCCEEDED(hrSub))
                     {
-                        V_VT(&var) = VT_ARRAY | VT_UI1;
                         hrSub = IPropertyBag_Read(pPropBag, wszFilterDataName, &var, NULL);
                     }
 
@@ -1071,7 +1070,7 @@ static HRESULT WINAPI FilterMapper2_EnumMatchingFilters(
                             const REGFILTERPINS2 * rfp2 = rf2.u.s1.rgPins2 + i;
 
                             bInputMatch = bInputMatch || (!(rfp2->dwFlags & REG_PINFLAG_B_OUTPUT) &&
-                                (!bRender || (rfp2->dwFlags & REG_PINFLAG_B_RENDERER)) &&
+                                (!bRender == !(rfp2->dwFlags & REG_PINFLAG_B_RENDERER)) &&
                                 MatchTypes(bExactMatch, rfp2->nMediaTypes, rfp2->lpMediaType, cInputTypes, pInputTypes));
                             bOutputMatch = bOutputMatch || ((rfp2->dwFlags & REG_PINFLAG_B_OUTPUT) &&
                                 MatchTypes(bExactMatch, rfp2->nMediaTypes, rfp2->lpMediaType, cOutputTypes, pOutputTypes));
@@ -1273,14 +1272,14 @@ static HRESULT WINAPI FilterMapper_EnumMatchingFilters(
 
         if (SUCCEEDED(hrSub))
         {
-            len = (strlenW((WCHAR*)&V_UNION(&var, bstrVal))+1) * sizeof(WCHAR);
+            len = (strlenW((WCHAR*)V_UNION(&var, bstrVal))+1) * sizeof(WCHAR);
             if (!(regfilters[idx].Name = CoTaskMemAlloc(len*2)))
                 hr = E_OUTOFMEMORY;
         }
 
         if (SUCCEEDED(hrSub))
         {
-            memcpy(regfilters[idx].Name, &V_UNION(&var, bstrVal), len);
+            memcpy(regfilters[idx].Name, V_UNION(&var, bstrVal), len);
             regfilters[idx].Clsid = clsid;
             idx++;
         }

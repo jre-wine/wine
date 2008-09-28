@@ -141,14 +141,16 @@ static void check_EM_FINDTEXT(HWND hwnd, const char *name, struct find_s *f, int
   ft.lpstrText = f->needle;
   findloc = SendMessage(hwnd, EM_FINDTEXT, f->flags, (LPARAM) &ft);
   ok(findloc == f->expected_loc,
-     "EM_FINDTEXT(%s,%d) '%s' in range(%d,%d), flags %08x, got start at %d\n",
-     name, id, f->needle, f->start, f->end, f->flags, findloc);
+     "EM_FINDTEXT(%s,%d) '%s' in range(%d,%d), flags %08x, got start at %d, expected %d\n",
+     name, id, f->needle, f->start, f->end, f->flags, findloc, f->expected_loc);
 }
 
 static void check_EM_FINDTEXTEX(HWND hwnd, const char *name, struct find_s *f,
     int id) {
   int findloc;
   FINDTEXTEX ft;
+  int expected_end_loc;
+
   memset(&ft, 0, sizeof(ft));
   ft.chrg.cpMin = f->start;
   ft.chrg.cpMax = f->end;
@@ -160,10 +162,11 @@ static void check_EM_FINDTEXTEX(HWND hwnd, const char *name, struct find_s *f,
   ok(ft.chrgText.cpMin == f->expected_loc,
       "EM_FINDTEXTEX(%s,%d) '%s' in range(%d,%d), flags %08x, start at %d\n",
       name, id, f->needle, f->start, f->end, f->flags, ft.chrgText.cpMin);
-  ok(ft.chrgText.cpMax == ((f->expected_loc == -1) ? -1
-        : f->expected_loc + strlen(f->needle)),
-      "EM_FINDTEXTEX(%s,%d) '%s' in range(%d,%d), flags %08x, end at %d\n",
-      name, id, f->needle, f->start, f->end, f->flags, ft.chrgText.cpMax);
+  expected_end_loc = ((f->expected_loc == -1) ? -1
+        : f->expected_loc + strlen(f->needle));
+  ok(ft.chrgText.cpMax == expected_end_loc,
+      "EM_FINDTEXTEX(%s,%d) '%s' in range(%d,%d), flags %08x, end at %d, expected %d\n",
+      name, id, f->needle, f->start, f->end, f->flags, ft.chrgText.cpMax, expected_end_loc);
 }
 
 static void run_tests_EM_FINDTEXT(HWND hwnd, const char *name, struct find_s *find,
@@ -187,6 +190,7 @@ static void run_tests_EM_FINDTEXT(HWND hwnd, const char *name, struct find_s *fi
 static void test_EM_FINDTEXT(void)
 {
   HWND hwndRichEdit = new_richedit(NULL);
+  CHARFORMAT2 cf2;
 
   /* Empty rich edit control */
   run_tests_EM_FINDTEXT(hwndRichEdit, "1", find_tests,
@@ -196,6 +200,30 @@ static void test_EM_FINDTEXT(void)
 
   /* Haystack text */
   run_tests_EM_FINDTEXT(hwndRichEdit, "2", find_tests2,
+      sizeof(find_tests2)/sizeof(struct find_s));
+
+  /* Setting a format on an arbitrary range should have no effect in search
+     results. This tests correct offset reporting across runs. */
+  cf2.cbSize = sizeof(CHARFORMAT2);
+  SendMessage(hwndRichEdit, EM_GETCHARFORMAT, (WPARAM) SCF_DEFAULT,
+             (LPARAM) &cf2);
+  cf2.dwMask = CFM_ITALIC | cf2.dwMask;
+  cf2.dwEffects = CFE_ITALIC ^ cf2.dwEffects;
+  SendMessage(hwndRichEdit, EM_SETSEL, 6, 20);
+  SendMessage(hwndRichEdit, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+
+  /* Haystack text, again */
+  run_tests_EM_FINDTEXT(hwndRichEdit, "2-bis", find_tests2,
+      sizeof(find_tests2)/sizeof(struct find_s));
+
+  /* Yet another range */
+  cf2.dwMask = CFM_BOLD | cf2.dwMask;
+  cf2.dwEffects = CFE_BOLD ^ cf2.dwEffects;
+  SendMessage(hwndRichEdit, EM_SETSEL, 11, 15);
+  SendMessage(hwndRichEdit, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+
+  /* Haystack text, again */
+  run_tests_EM_FINDTEXT(hwndRichEdit, "2-bisbis", find_tests2,
       sizeof(find_tests2)/sizeof(struct find_s));
 
   DestroyWindow(hwndRichEdit);
@@ -369,11 +397,141 @@ static void test_EM_SCROLLCARET(void)
   DestroyWindow(hwndRichEdit);
 }
 
+static void test_EM_POSFROMCHAR(void)
+{
+  HWND hwndRichEdit = new_richedit(NULL);
+  int i;
+  LRESULT result;
+  unsigned int height = 0;
+  int xpos = 0;
+  static const char text[] = "aa\n"
+      "this is a long line of text that should be longer than the "
+      "control's width\n"
+      "cc\n"
+      "dd\n"
+      "ee\n"
+      "ff\n"
+      "gg\n"
+      "hh\n";
+
+  /* Fill the control to lines to ensure that most of them are offscreen */
+  for (i = 0; i < 50; i++)
+  {
+    /* Do not modify the string; it is exactly 16 characters long. */
+    SendMessage(hwndRichEdit, EM_SETSEL, 0, 0);
+    SendMessage(hwndRichEdit, EM_REPLACESEL, 0, (LPARAM)"0123456789ABCDE\n");
+  }
+
+  /*
+   Richedit 1.0 receives a POINTL* on wParam and character offset on lParam, returns void.
+   Richedit 2.0 receives character offset on wParam, ignores lParam, returns MAKELONG(x,y)
+   Richedit 3.0 accepts either of the above API conventions.
+   */
+
+  /* Testing Richedit 2.0 API format */
+
+  /* Testing start of lines. X-offset should be constant on all cases (native is 1).
+     Since all lines are identical and drawn with the same font,
+     they should have the same height... right?
+   */
+  for (i = 0; i < 50; i++)
+  {
+    /* All the lines are 16 characters long */
+    result = SendMessage(hwndRichEdit, EM_POSFROMCHAR, i * 16, 0);
+    if (i == 0)
+    {
+      ok(HIWORD(result) == 0, "EM_POSFROMCHAR reports y=%d, expected 0\n", HIWORD(result));
+      todo_wine {
+      ok(LOWORD(result) == 1, "EM_POSFROMCHAR reports x=%d, expected 1\n", LOWORD(result));
+      }
+      xpos = LOWORD(result);
+    }
+    else if (i == 1)
+    {
+      ok(HIWORD(result) > 0, "EM_POSFROMCHAR reports y=%d, expected > 0\n", HIWORD(result));
+      ok(LOWORD(result) == xpos, "EM_POSFROMCHAR reports x=%d, expected 1\n", LOWORD(result));
+      height = HIWORD(result);
+    }
+    else
+    {
+      ok(HIWORD(result) == i * height, "EM_POSFROMCHAR reports y=%d, expected %d\n", HIWORD(result), i * height);
+      ok(LOWORD(result) == xpos, "EM_POSFROMCHAR reports x=%d, expected 1\n", LOWORD(result));
+    }
+  }
+
+  /* Testing position at end of text */
+  result = SendMessage(hwndRichEdit, EM_POSFROMCHAR, 50 * 16, 0);
+  ok(HIWORD(result) == 50 * height, "EM_POSFROMCHAR reports y=%d, expected %d\n", HIWORD(result), 50 * height);
+  ok(LOWORD(result) == xpos, "EM_POSFROMCHAR reports x=%d, expected 1\n", LOWORD(result));
+
+  /* Testing position way past end of text */
+  result = SendMessage(hwndRichEdit, EM_POSFROMCHAR, 55 * 16, 0);
+  ok(HIWORD(result) == 50 * height, "EM_POSFROMCHAR reports y=%d, expected %d\n", HIWORD(result), 50 * height);
+  ok(LOWORD(result) == xpos, "EM_POSFROMCHAR reports x=%d, expected 1\n", LOWORD(result));
+
+  /* Testing that vertical scrolling does, in fact, have an effect on EM_POSFROMCHAR */
+  SendMessage(hwndRichEdit, EM_SCROLL, SB_LINEDOWN, 0); /* line down */
+  for (i = 0; i < 50; i++)
+  {
+    /* All the lines are 16 characters long */
+    result = SendMessage(hwndRichEdit, EM_POSFROMCHAR, i * 16, 0);
+    ok((signed short)(HIWORD(result)) == (i - 1) * height,
+        "EM_POSFROMCHAR reports y=%hd, expected %d\n",
+        (signed short)(HIWORD(result)), (i - 1) * height);
+    ok(LOWORD(result) == xpos, "EM_POSFROMCHAR reports x=%d, expected 1\n", LOWORD(result));
+  }
+
+  /* Testing position at end of text */
+  result = SendMessage(hwndRichEdit, EM_POSFROMCHAR, 50 * 16, 0);
+  ok(HIWORD(result) == (50 - 1) * height, "EM_POSFROMCHAR reports y=%d, expected %d\n", HIWORD(result), (50 - 1) * height);
+  ok(LOWORD(result) == xpos, "EM_POSFROMCHAR reports x=%d, expected 1\n", LOWORD(result));
+
+  /* Testing position way past end of text */
+  result = SendMessage(hwndRichEdit, EM_POSFROMCHAR, 55 * 16, 0);
+  ok(HIWORD(result) == (50 - 1) * height, "EM_POSFROMCHAR reports y=%d, expected %d\n", HIWORD(result), (50 - 1) * height);
+  ok(LOWORD(result) == xpos, "EM_POSFROMCHAR reports x=%d, expected 1\n", LOWORD(result));
+
+  /* Testing that horizontal scrolling does, in fact, have an effect on EM_POSFROMCHAR */
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) text);
+  SendMessage(hwndRichEdit, EM_SCROLL, SB_LINEUP, 0); /* line up */
+
+  result = SendMessage(hwndRichEdit, EM_POSFROMCHAR, 0, 0);
+  ok(HIWORD(result) == 0, "EM_POSFROMCHAR reports y=%d, expected 0\n", HIWORD(result));
+  todo_wine {
+  ok(LOWORD(result) == 1, "EM_POSFROMCHAR reports x=%d, expected 1\n", LOWORD(result));
+  }
+  xpos = LOWORD(result);
+
+  SendMessage(hwndRichEdit, WM_HSCROLL, SB_LINERIGHT, 0);
+  result = SendMessage(hwndRichEdit, EM_POSFROMCHAR, 0, 0);
+  ok(HIWORD(result) == 0, "EM_POSFROMCHAR reports y=%d, expected 0\n", HIWORD(result));
+  todo_wine {
+  /* Fails on builtin because horizontal scrollbar is not being shown */
+  ok((signed short)(LOWORD(result)) < xpos,
+        "EM_POSFROMCHAR reports x=%hd, expected value less than %d\n",
+        (signed short)(LOWORD(result)), xpos);
+  }
+  DestroyWindow(hwndRichEdit);
+}
+
 static void test_EM_SETCHARFORMAT(void)
 {
   HWND hwndRichEdit = new_richedit(NULL);
   CHARFORMAT2 cf2;
   int rc = 0;
+  int tested_effects[] = {
+    CFE_BOLD,
+    CFE_ITALIC,
+    CFE_UNDERLINE,
+    CFE_STRIKEOUT,
+    CFE_PROTECTED,
+    CFE_LINK,
+    CFE_SUBSCRIPT,
+    CFE_SUPERSCRIPT,
+    0
+  };
+  int i;
+  CHARRANGE cr;
 
   /* Invalid flags, CHARFORMAT2 structure blanked out */
   memset(&cf2, 0, sizeof(cf2));
@@ -411,6 +569,9 @@ static void test_EM_SETCHARFORMAT(void)
   rc = SendMessage(hwndRichEdit, EM_SETCHARFORMAT, (WPARAM) 0xfffffff0,
              (LPARAM) &cf2);
   ok(rc == 1, "EM_SETCHARFORMAT returned %d instead of 1\n", rc);
+  rc = SendMessage(hwndRichEdit, EM_CANUNDO, 0, 0);
+  ok(rc == FALSE, "Should not be able to undo here.\n");
+  SendMessage(hwndRichEdit, EM_EMPTYUNDOBUFFER, 0, 0);
 
   /* A valid flag, CHARFORMAT2 structure minimally filled */
   memset(&cf2, 0, sizeof(cf2));
@@ -418,6 +579,9 @@ static void test_EM_SETCHARFORMAT(void)
   rc = SendMessage(hwndRichEdit, EM_SETCHARFORMAT, (WPARAM) SCF_DEFAULT,
              (LPARAM) &cf2);
   ok(rc == 1, "EM_SETCHARFORMAT returned %d instead of 1\n", rc);
+  rc = SendMessage(hwndRichEdit, EM_CANUNDO, 0, 0);
+  todo_wine ok(rc == FALSE, "Should not be able to undo here.\n");
+  SendMessage(hwndRichEdit, EM_EMPTYUNDOBUFFER, 0, 0);
 
   /* A valid flag, CHARFORMAT2 structure minimally filled */
   memset(&cf2, 0, sizeof(cf2));
@@ -425,6 +589,9 @@ static void test_EM_SETCHARFORMAT(void)
   rc = SendMessage(hwndRichEdit, EM_SETCHARFORMAT, (WPARAM) SCF_SELECTION,
              (LPARAM) &cf2);
   ok(rc == 1, "EM_SETCHARFORMAT returned %d instead of 1\n", rc);
+  rc = SendMessage(hwndRichEdit, EM_CANUNDO, 0, 0);
+  ok(rc == FALSE, "Should not be able to undo here.\n");
+  SendMessage(hwndRichEdit, EM_EMPTYUNDOBUFFER, 0, 0);
 
   /* A valid flag, CHARFORMAT2 structure minimally filled */
   memset(&cf2, 0, sizeof(cf2));
@@ -432,6 +599,9 @@ static void test_EM_SETCHARFORMAT(void)
   rc = SendMessage(hwndRichEdit, EM_SETCHARFORMAT, (WPARAM) SCF_WORD,
              (LPARAM) &cf2);
   ok(rc == 1, "EM_SETCHARFORMAT returned %d instead of 1\n", rc);
+  rc = SendMessage(hwndRichEdit, EM_CANUNDO, 0, 0);
+  todo_wine ok(rc == TRUE, "Should not be able to undo here.\n");
+  SendMessage(hwndRichEdit, EM_EMPTYUNDOBUFFER, 0, 0);
 
   /* A valid flag, CHARFORMAT2 structure minimally filled */
   memset(&cf2, 0, sizeof(cf2));
@@ -439,6 +609,9 @@ static void test_EM_SETCHARFORMAT(void)
   rc = SendMessage(hwndRichEdit, EM_SETCHARFORMAT, (WPARAM) SCF_ALL,
              (LPARAM) &cf2);
   ok(rc == 1, "EM_SETCHARFORMAT returned %d instead of 1\n", rc);
+  rc = SendMessage(hwndRichEdit, EM_CANUNDO, 0, 0);
+  todo_wine ok(rc == TRUE, "Should not be able to undo here.\n");
+  SendMessage(hwndRichEdit, EM_EMPTYUNDOBUFFER, 0, 0);
 
   cf2.cbSize = sizeof(CHARFORMAT2);
   SendMessage(hwndRichEdit, EM_GETCHARFORMAT, (WPARAM) SCF_DEFAULT,
@@ -490,6 +663,251 @@ static void test_EM_SETCHARFORMAT(void)
   ok(rc == 1, "EM_SETCHARFORMAT returned %d instead of 1\n", rc);
   rc = SendMessage(hwndRichEdit, EM_GETMODIFY, 0, 0);
   ok(rc == -1, "Text not marked as modified, expected modified! (%d)\n", rc);
+
+  DestroyWindow(hwndRichEdit);
+
+  /* EM_GETCHARFORMAT tests */
+  for (i = 0; tested_effects[i]; i++)
+  {
+    hwndRichEdit = new_richedit(NULL);
+    SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"wine");
+
+    /* Need to set a TrueType font to get consistent CFM_BOLD results */
+    memset(&cf2, 0, sizeof(CHARFORMAT2));
+    cf2.cbSize = sizeof(CHARFORMAT2);
+    cf2.dwMask = CFM_FACE|CFM_WEIGHT;
+    cf2.dwEffects = 0;
+    strcpy(cf2.szFaceName, "Courier New");
+    cf2.wWeight = FW_DONTCARE;
+    SendMessage(hwndRichEdit, EM_SETCHARFORMAT, SCF_ALL, (LPARAM) &cf2);
+
+    memset(&cf2, 0, sizeof(CHARFORMAT2));
+    cf2.cbSize = sizeof(CHARFORMAT2);
+    SendMessage(hwndRichEdit, EM_SETSEL, 0, 4);
+    SendMessage(hwndRichEdit, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+    ok ((((tested_effects[i] == CFE_SUBSCRIPT || tested_effects[i] == CFE_SUPERSCRIPT) &&
+          (cf2.dwMask & CFM_SUPERSCRIPT) == CFM_SUPERSCRIPT)
+          ||
+          (cf2.dwMask & tested_effects[i]) == tested_effects[i]),
+        "%d, cf2.dwMask == 0x%08x expected mask 0x%08x\n", i, cf2.dwMask, tested_effects[i]);
+    ok((cf2.dwEffects & tested_effects[i]) == 0,
+        "%d, cf2.dwEffects == 0x%08x expected effect 0x%08x clear\n", i, cf2.dwEffects, tested_effects[i]);
+
+    memset(&cf2, 0, sizeof(CHARFORMAT2));
+    cf2.cbSize = sizeof(CHARFORMAT2);
+    cf2.dwMask = tested_effects[i];
+    if (cf2.dwMask == CFE_SUBSCRIPT || cf2.dwMask == CFE_SUPERSCRIPT)
+      cf2.dwMask = CFM_SUPERSCRIPT;
+    cf2.dwEffects = tested_effects[i];
+    SendMessage(hwndRichEdit, EM_SETSEL, 0, 2);
+    SendMessage(hwndRichEdit, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+
+    memset(&cf2, 0, sizeof(CHARFORMAT2));
+    cf2.cbSize = sizeof(CHARFORMAT2);
+    SendMessage(hwndRichEdit, EM_SETSEL, 0, 2);
+    SendMessage(hwndRichEdit, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+    ok ((((tested_effects[i] == CFE_SUBSCRIPT || tested_effects[i] == CFE_SUPERSCRIPT) &&
+          (cf2.dwMask & CFM_SUPERSCRIPT) == CFM_SUPERSCRIPT)
+          ||
+          (cf2.dwMask & tested_effects[i]) == tested_effects[i]),
+        "%d, cf2.dwMask == 0x%08x expected mask 0x%08x\n", i, cf2.dwMask, tested_effects[i]);
+    ok((cf2.dwEffects & tested_effects[i]) == tested_effects[i],
+        "%d, cf2.dwEffects == 0x%08x expected effect 0x%08x\n", i, cf2.dwEffects, tested_effects[i]);
+
+    memset(&cf2, 0, sizeof(CHARFORMAT2));
+    cf2.cbSize = sizeof(CHARFORMAT2);
+    SendMessage(hwndRichEdit, EM_SETSEL, 2, 4);
+    SendMessage(hwndRichEdit, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+    ok ((((tested_effects[i] == CFE_SUBSCRIPT || tested_effects[i] == CFE_SUPERSCRIPT) &&
+          (cf2.dwMask & CFM_SUPERSCRIPT) == CFM_SUPERSCRIPT)
+          ||
+          (cf2.dwMask & tested_effects[i]) == tested_effects[i]),
+        "%d, cf2.dwMask == 0x%08x expected mask 0x%08x\n", i, cf2.dwMask, tested_effects[i]);
+    ok((cf2.dwEffects & tested_effects[i]) == 0,
+        "%d, cf2.dwEffects == 0x%08x expected effect 0x%08x clear\n", i, cf2.dwEffects, tested_effects[i]);
+
+    memset(&cf2, 0, sizeof(CHARFORMAT2));
+    cf2.cbSize = sizeof(CHARFORMAT2);
+    SendMessage(hwndRichEdit, EM_SETSEL, 1, 3);
+    SendMessage(hwndRichEdit, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+    ok ((((tested_effects[i] == CFE_SUBSCRIPT || tested_effects[i] == CFE_SUPERSCRIPT) &&
+          (cf2.dwMask & CFM_SUPERSCRIPT) == 0)
+          ||
+          (cf2.dwMask & tested_effects[i]) == 0),
+        "%d, cf2.dwMask == 0x%08x expected mask 0x%08x clear\n", i, cf2.dwMask, tested_effects[i]);
+
+    DestroyWindow(hwndRichEdit);
+  }
+
+  for (i = 0; tested_effects[i]; i++)
+  {
+    hwndRichEdit = new_richedit(NULL);
+    SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"wine");
+
+    /* Need to set a TrueType font to get consistent CFM_BOLD results */
+    memset(&cf2, 0, sizeof(CHARFORMAT2));
+    cf2.cbSize = sizeof(CHARFORMAT2);
+    cf2.dwMask = CFM_FACE|CFM_WEIGHT;
+    cf2.dwEffects = 0;
+    strcpy(cf2.szFaceName, "Courier New");
+    cf2.wWeight = FW_DONTCARE;
+    SendMessage(hwndRichEdit, EM_SETCHARFORMAT, SCF_ALL, (LPARAM) &cf2);
+
+    memset(&cf2, 0, sizeof(CHARFORMAT2));
+    cf2.cbSize = sizeof(CHARFORMAT2);
+    cf2.dwMask = tested_effects[i];
+    if (cf2.dwMask == CFE_SUBSCRIPT || cf2.dwMask == CFE_SUPERSCRIPT)
+      cf2.dwMask = CFM_SUPERSCRIPT;
+    cf2.dwEffects = tested_effects[i];
+    SendMessage(hwndRichEdit, EM_SETSEL, 2, 4);
+    SendMessage(hwndRichEdit, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+
+    memset(&cf2, 0, sizeof(CHARFORMAT2));
+    cf2.cbSize = sizeof(CHARFORMAT2);
+    SendMessage(hwndRichEdit, EM_SETSEL, 0, 2);
+    SendMessage(hwndRichEdit, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+    ok ((((tested_effects[i] == CFE_SUBSCRIPT || tested_effects[i] == CFE_SUPERSCRIPT) &&
+          (cf2.dwMask & CFM_SUPERSCRIPT) == CFM_SUPERSCRIPT)
+          ||
+          (cf2.dwMask & tested_effects[i]) == tested_effects[i]),
+        "%d, cf2.dwMask == 0x%08x expected mask 0x%08x\n", i, cf2.dwMask, tested_effects[i]);
+    ok((cf2.dwEffects & tested_effects[i]) == 0,
+        "%d, cf2.dwEffects == 0x%08x expected effect 0x%08x clear\n", i, cf2.dwEffects, tested_effects[i]);
+
+    memset(&cf2, 0, sizeof(CHARFORMAT2));
+    cf2.cbSize = sizeof(CHARFORMAT2);
+    SendMessage(hwndRichEdit, EM_SETSEL, 2, 4);
+    SendMessage(hwndRichEdit, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+    ok ((((tested_effects[i] == CFE_SUBSCRIPT || tested_effects[i] == CFE_SUPERSCRIPT) &&
+          (cf2.dwMask & CFM_SUPERSCRIPT) == CFM_SUPERSCRIPT)
+          ||
+          (cf2.dwMask & tested_effects[i]) == tested_effects[i]),
+        "%d, cf2.dwMask == 0x%08x expected mask 0x%08x\n", i, cf2.dwMask, tested_effects[i]);
+    ok((cf2.dwEffects & tested_effects[i]) == tested_effects[i],
+        "%d, cf2.dwEffects == 0x%08x expected effect 0x%08x\n", i, cf2.dwEffects, tested_effects[i]);
+
+    memset(&cf2, 0, sizeof(CHARFORMAT2));
+    cf2.cbSize = sizeof(CHARFORMAT2);
+    SendMessage(hwndRichEdit, EM_SETSEL, 1, 3);
+    SendMessage(hwndRichEdit, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+    ok ((((tested_effects[i] == CFE_SUBSCRIPT || tested_effects[i] == CFE_SUPERSCRIPT) &&
+          (cf2.dwMask & CFM_SUPERSCRIPT) == 0)
+          ||
+          (cf2.dwMask & tested_effects[i]) == 0),
+        "%d, cf2.dwMask == 0x%08x expected mask 0x%08x clear\n", i, cf2.dwMask, tested_effects[i]);
+    ok((cf2.dwEffects & tested_effects[i]) == tested_effects[i],
+        "%d, cf2.dwEffects == 0x%08x expected effect 0x%08x set\n", i, cf2.dwEffects, tested_effects[i]);
+
+    DestroyWindow(hwndRichEdit);
+  }
+
+  /* Effects applied on an empty selection should take effect when selection is
+     replaced with text */
+  hwndRichEdit = new_richedit(NULL);
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"wine");
+  SendMessage(hwndRichEdit, EM_SETSEL, 2, 2); /* Empty selection */
+
+  memset(&cf2, 0, sizeof(CHARFORMAT2));
+  cf2.cbSize = sizeof(CHARFORMAT2);
+  cf2.dwMask = CFM_BOLD;
+  cf2.dwEffects = CFE_BOLD;
+  SendMessage(hwndRichEdit, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+
+  /* Selection is now nonempty */
+  SendMessage(hwndRichEdit, EM_REPLACESEL, 0, (LPARAM)"newi");
+
+  memset(&cf2, 0, sizeof(CHARFORMAT2));
+  cf2.cbSize = sizeof(CHARFORMAT2);
+  SendMessage(hwndRichEdit, EM_SETSEL, 2, 6);
+  SendMessage(hwndRichEdit, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+
+  ok (((cf2.dwMask & CFM_BOLD) == CFM_BOLD),
+      "%d, cf2.dwMask == 0x%08x expected mask 0x%08x\n", i, cf2.dwMask, CFM_BOLD);
+  ok((cf2.dwEffects & CFE_BOLD) == CFE_BOLD,
+      "%d, cf2.dwEffects == 0x%08x expected effect 0x%08x\n", i, cf2.dwEffects, CFE_BOLD);
+
+
+  /* Set two effects on an empty selection */
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"wine");
+  SendMessage(hwndRichEdit, EM_SETSEL, 2, 2); /* Empty selection */
+
+  memset(&cf2, 0, sizeof(CHARFORMAT2));
+  cf2.cbSize = sizeof(CHARFORMAT2);
+  cf2.dwMask = CFM_BOLD;
+  cf2.dwEffects = CFE_BOLD;
+  SendMessage(hwndRichEdit, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+  cf2.dwMask = CFM_ITALIC;
+  cf2.dwEffects = CFE_ITALIC;
+  SendMessage(hwndRichEdit, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+
+  /* Selection is now nonempty */
+  SendMessage(hwndRichEdit, EM_REPLACESEL, 0, (LPARAM)"newi");
+
+  memset(&cf2, 0, sizeof(CHARFORMAT2));
+  cf2.cbSize = sizeof(CHARFORMAT2);
+  SendMessage(hwndRichEdit, EM_SETSEL, 2, 6);
+  SendMessage(hwndRichEdit, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+
+  ok (((cf2.dwMask & (CFM_BOLD|CFM_ITALIC)) == (CFM_BOLD|CFM_ITALIC)),
+      "%d, cf2.dwMask == 0x%08x expected mask 0x%08x\n", i, cf2.dwMask, (CFM_BOLD|CFM_ITALIC));
+  ok((cf2.dwEffects & (CFE_BOLD|CFE_ITALIC)) == (CFE_BOLD|CFE_ITALIC),
+      "%d, cf2.dwEffects == 0x%08x expected effect 0x%08x\n", i, cf2.dwEffects, (CFE_BOLD|CFE_ITALIC));
+
+  /* Setting the (empty) selection to exactly the same place as before should
+     NOT clear the insertion style! */
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"wine");
+  SendMessage(hwndRichEdit, EM_SETSEL, 2, 2); /* Empty selection */
+
+  memset(&cf2, 0, sizeof(CHARFORMAT2));
+  cf2.cbSize = sizeof(CHARFORMAT2);
+  cf2.dwMask = CFM_BOLD;
+  cf2.dwEffects = CFE_BOLD;
+  SendMessage(hwndRichEdit, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+
+  /* Empty selection in same place, insert style should NOT be forgotten here. */
+  SendMessage(hwndRichEdit, EM_SETSEL, 2, 2);
+
+  /* Selection is now nonempty */
+  SendMessage(hwndRichEdit, EM_REPLACESEL, 0, (LPARAM)"newi");
+
+  memset(&cf2, 0, sizeof(CHARFORMAT2));
+  cf2.cbSize = sizeof(CHARFORMAT2);
+  SendMessage(hwndRichEdit, EM_SETSEL, 2, 6);
+  SendMessage(hwndRichEdit, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+
+  ok (((cf2.dwMask & CFM_BOLD) == CFM_BOLD),
+      "%d, cf2.dwMask == 0x%08x expected mask 0x%08x\n", i, cf2.dwMask, CFM_BOLD);
+  ok((cf2.dwEffects & CFE_BOLD) == CFE_BOLD,
+      "%d, cf2.dwEffects == 0x%08x expected effect 0x%08x\n", i, cf2.dwEffects, CFE_BOLD);
+
+  /* Ditto with EM_EXSETSEL */
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"wine");
+  cr.cpMin = 2; cr.cpMax = 2;
+  SendMessage(hwndRichEdit, EM_EXSETSEL, 0, (LPARAM)&cr); /* Empty selection */
+
+  memset(&cf2, 0, sizeof(CHARFORMAT2));
+  cf2.cbSize = sizeof(CHARFORMAT2);
+  cf2.dwMask = CFM_BOLD;
+  cf2.dwEffects = CFE_BOLD;
+  SendMessage(hwndRichEdit, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+
+  /* Empty selection in same place, insert style should NOT be forgotten here. */
+  cr.cpMin = 2; cr.cpMax = 2;
+  SendMessage(hwndRichEdit, EM_EXSETSEL, 0, (LPARAM)&cr); /* Empty selection */
+
+  /* Selection is now nonempty */
+  SendMessage(hwndRichEdit, EM_REPLACESEL, 0, (LPARAM)"newi");
+
+  memset(&cf2, 0, sizeof(CHARFORMAT2));
+  cf2.cbSize = sizeof(CHARFORMAT2);
+  cr.cpMin = 2; cr.cpMax = 6;
+  SendMessage(hwndRichEdit, EM_EXSETSEL, 0, (LPARAM)&cr); /* Empty selection */
+  SendMessage(hwndRichEdit, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM) &cf2);
+
+  ok (((cf2.dwMask & CFM_BOLD) == CFM_BOLD),
+      "%d, cf2.dwMask == 0x%08x expected mask 0x%08x\n", i, cf2.dwMask, CFM_BOLD);
+  ok((cf2.dwEffects & CFE_BOLD) == CFE_BOLD,
+      "%d, cf2.dwEffects == 0x%08x expected effect 0x%08x\n", i, cf2.dwEffects, CFE_BOLD);
 
   DestroyWindow(hwndRichEdit);
 }
@@ -901,14 +1319,20 @@ static void test_EM_SETOPTIONS(void)
     DestroyWindow(hwndRichEdit);
 }
 
-static void check_CFE_LINK_rcvd(HWND hwnd, int is_url, const char * url)
+static int check_CFE_LINK_selection(HWND hwnd, int sel_start, int sel_end)
 {
   CHARFORMAT2W text_format;
-  int link_present = 0;
   text_format.cbSize = sizeof(text_format);
-  SendMessage(hwnd, EM_SETSEL, 0, 1);
+  SendMessage(hwnd, EM_SETSEL, sel_start, sel_end);
   SendMessage(hwnd, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM) &text_format);
-  link_present = text_format.dwEffects & CFE_LINK;
+  return (text_format.dwEffects & CFE_LINK) ? 1 : 0;
+}
+
+static void check_CFE_LINK_rcvd(HWND hwnd, int is_url, const char * url)
+{
+  int link_present = 0;
+
+  link_present = check_CFE_LINK_selection(hwnd, 0, 1);
   if (is_url) 
   { /* control text is url; should get CFE_LINK */
 	ok(0 != link_present, "URL Case: CFE_LINK not set for [%s].\n", url);
@@ -943,9 +1367,70 @@ static void test_EM_AUTOURLDETECT(void)
     {"wais:waisserver", 1}  
   };
 
-  int i;
+  int i, j;
   int urlRet=-1;
   HWND hwndRichEdit, parent;
+
+  /* All of the following should cause the URL to be detected  */
+  const char * templates_delim[] = {
+    "This is some text with X on it",
+    "This is some text with (X) on it",
+    "This is some text with X\r on it",
+    "This is some text with ---X--- on it",
+    "This is some text with \"X\" on it",
+    "This is some text with 'X' on it",
+    "This is some text with 'X' on it",
+    "This is some text with :X: on it",
+
+    "This text ends with X",
+
+    "This is some text with X) on it",
+    "This is some text with X--- on it",
+    "This is some text with X\" on it",
+    "This is some text with X' on it",
+    "This is some text with X: on it",
+
+    "This is some text with (X on it",
+    "This is some text with \rX on it",
+    "This is some text with ---X on it",
+    "This is some text with \"X on it",
+    "This is some text with 'X on it",
+    "This is some text with :X on it",
+  };
+  /* None of these should cause the URL to be detected */
+  const char * templates_non_delim[] = {
+    "This is some text with |X| on it",
+    "This is some text with *X* on it",
+    "This is some text with /X/ on it",
+    "This is some text with +X+ on it",
+    "This is some text with %X% on it",
+    "This is some text with #X# on it",
+    "This is some text with @X@ on it",
+    "This is some text with \\X\\ on it",
+    "This is some text with |X on it",
+    "This is some text with *X on it",
+    "This is some text with /X on it",
+    "This is some text with +X on it",
+    "This is some text with %X on it",
+    "This is some text with #X on it",
+    "This is some text with @X on it",
+    "This is some text with \\X on it",
+  };
+  /* All of these cause the URL detection to be extended by one more byte,
+     thus demonstrating that the tested character is considered as part
+     of the URL. */
+  const char * templates_xten_delim[] = {
+    "This is some text with X| on it",
+    "This is some text with X* on it",
+    "This is some text with X/ on it",
+    "This is some text with X+ on it",
+    "This is some text with X% on it",
+    "This is some text with X# on it",
+    "This is some text with X@ on it",
+    "This is some text with X\\ on it",
+  };
+  char buffer[1024];
+  MSG msg;
 
   parent = new_static_wnd(NULL);
   hwndRichEdit = new_richedit(parent);
@@ -961,16 +1446,631 @@ static void test_EM_AUTOURLDETECT(void)
   ok(urlRet==E_INVALIDARG, "Bad wParam2: urlRet is: %d\n", urlRet);
   /* for each url, check the text to see if CFE_LINK effect is present */
   for (i = 0; i < sizeof(urls)/sizeof(struct urls_s); i++) {
+
     SendMessage(hwndRichEdit, EM_AUTOURLDETECT, FALSE, 0);
     SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) urls[i].text);
-    SendMessage(hwndRichEdit, WM_CHAR, 0, 0);
     check_CFE_LINK_rcvd(hwndRichEdit, 0, urls[i].text);
+
+    /* Link detection should happen immediately upon WM_SETTEXT */
     SendMessage(hwndRichEdit, EM_AUTOURLDETECT, TRUE, 0);
     SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) urls[i].text);
-    SendMessage(hwndRichEdit, WM_CHAR, 0, 0);
     check_CFE_LINK_rcvd(hwndRichEdit, urls[i].is_url, urls[i].text);
   }
   DestroyWindow(hwndRichEdit);
+
+  /* Test detection of URLs within normal text - WM_SETTEXT case. */
+  for (i = 0; i < sizeof(urls)/sizeof(struct urls_s); i++) {
+    hwndRichEdit = new_richedit(parent);
+
+    for (j = 0; j < sizeof(templates_delim) / sizeof(const char *); j++) {
+      char * at_pos;
+      int at_offset;
+      int end_offset;
+
+      at_pos = strchr(templates_delim[j], 'X');
+      at_offset = at_pos - templates_delim[j];
+      strncpy(buffer, templates_delim[j], at_offset);
+      buffer[at_offset] = '\0';
+      strcat(buffer, urls[i].text);
+      strcat(buffer, templates_delim[j] + at_offset + 1);
+      end_offset = at_offset + strlen(urls[i].text);
+
+      SendMessage(hwndRichEdit, EM_AUTOURLDETECT, TRUE, 0);
+      SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) buffer);
+
+      /* This assumes no templates start with the URL itself, and that they
+         have at least two characters before the URL text */
+      ok(!check_CFE_LINK_selection(hwndRichEdit, 0, 1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", 0, 1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -2, at_offset -1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -2, at_offset -1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -1, at_offset),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -1, at_offset, buffer);
+
+      if (urls[i].is_url)
+      {
+        ok(check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK not set in (%d-%d), text: %s\n", at_offset, at_offset +1, buffer);
+        ok(check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK not set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      else
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset, at_offset + 1, buffer);
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      if (buffer[end_offset] != '\0')
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset, end_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset, end_offset + 1, buffer);
+        if (buffer[end_offset +1] != '\0')
+        {
+          ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset +1, end_offset +2),
+            "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset +1, end_offset +2, buffer);
+        }
+      }
+    }
+
+    for (j = 0; j < sizeof(templates_non_delim) / sizeof(const char *); j++) {
+      char * at_pos;
+      int at_offset;
+      int end_offset;
+
+      at_pos = strchr(templates_non_delim[j], 'X');
+      at_offset = at_pos - templates_non_delim[j];
+      strncpy(buffer, templates_non_delim[j], at_offset);
+      buffer[at_offset] = '\0';
+      strcat(buffer, urls[i].text);
+      strcat(buffer, templates_non_delim[j] + at_offset + 1);
+      end_offset = at_offset + strlen(urls[i].text);
+
+      SendMessage(hwndRichEdit, EM_AUTOURLDETECT, TRUE, 0);
+      SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) buffer);
+
+      /* This assumes no templates start with the URL itself, and that they
+         have at least two characters before the URL text */
+      ok(!check_CFE_LINK_selection(hwndRichEdit, 0, 1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", 0, 1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -2, at_offset -1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -2, at_offset -1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -1, at_offset),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -1, at_offset, buffer);
+
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset, at_offset + 1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      if (buffer[end_offset] != '\0')
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset, end_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset, end_offset + 1, buffer);
+        if (buffer[end_offset +1] != '\0')
+        {
+          ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset +1, end_offset +2),
+            "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset +1, end_offset +2, buffer);
+        }
+      }
+    }
+
+    for (j = 0; j < sizeof(templates_xten_delim) / sizeof(const char *); j++) {
+      char * at_pos;
+      int at_offset;
+      int end_offset;
+
+      at_pos = strchr(templates_xten_delim[j], 'X');
+      at_offset = at_pos - templates_xten_delim[j];
+      strncpy(buffer, templates_xten_delim[j], at_offset);
+      buffer[at_offset] = '\0';
+      strcat(buffer, urls[i].text);
+      strcat(buffer, templates_xten_delim[j] + at_offset + 1);
+      end_offset = at_offset + strlen(urls[i].text);
+
+      SendMessage(hwndRichEdit, EM_AUTOURLDETECT, TRUE, 0);
+      SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) buffer);
+
+      /* This assumes no templates start with the URL itself, and that they
+         have at least two characters before the URL text */
+      ok(!check_CFE_LINK_selection(hwndRichEdit, 0, 1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", 0, 1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -2, at_offset -1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -2, at_offset -1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -1, at_offset),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -1, at_offset, buffer);
+
+      if (urls[i].is_url)
+      {
+        ok(check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK not set in (%d-%d), text: %s\n", at_offset, at_offset +1, buffer);
+        ok(check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK not set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+        ok(check_CFE_LINK_selection(hwndRichEdit, end_offset, end_offset +1),
+          "CFE_LINK not set in (%d-%d), text: %s\n", end_offset, end_offset +1, buffer);
+      }
+      else
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset, at_offset + 1, buffer);
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset, end_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset, end_offset +1, buffer);
+      }
+      if (buffer[end_offset +1] != '\0')
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset +1, end_offset +2),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset +1, end_offset + 2, buffer);
+        if (buffer[end_offset +2] != '\0')
+        {
+          ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset +2, end_offset +3),
+            "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset +2, end_offset +3, buffer);
+        }
+      }
+    }
+
+    DestroyWindow(hwndRichEdit);
+    hwndRichEdit = NULL;
+  }
+
+#define INSERT_CR \
+  do { \
+    keybd_event('\r', 0x1c, 0, 0); \
+    keybd_event('\r', 0x1c, KEYEVENTF_KEYUP, 0); \
+    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) { \
+      TranslateMessage(&msg); \
+      DispatchMessage(&msg); \
+    } \
+  } while (0)
+
+#define INSERT_BS \
+  do { \
+    keybd_event(0x08, 0x0e, 0, 0); \
+    keybd_event(0x08, 0x0e, KEYEVENTF_KEYUP, 0); \
+    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) { \
+      TranslateMessage(&msg); \
+      DispatchMessage(&msg); \
+    } \
+  } while (0)
+
+  /* Test detection of URLs within normal text - WM_CHAR case. */
+  for (i = 0; i < sizeof(urls)/sizeof(struct urls_s); i++) {
+    hwndRichEdit = new_richedit(parent);
+
+    for (j = 0; j < sizeof(templates_delim) / sizeof(const char *); j++) {
+      char * at_pos;
+      int at_offset;
+      int end_offset;
+      int u, v;
+
+      at_pos = strchr(templates_delim[j], 'X');
+      at_offset = at_pos - templates_delim[j];
+      end_offset = at_offset + strlen(urls[i].text);
+
+      SendMessage(hwndRichEdit, EM_AUTOURLDETECT, TRUE, 0);
+      SendMessage(hwndRichEdit, WM_SETTEXT, 0, 0);
+      for (u = 0; templates_delim[j][u]; u++) {
+        if (templates_delim[j][u] == '\r') {
+          INSERT_CR;
+        } else if (templates_delim[j][u] != 'X') {
+          SendMessage(hwndRichEdit, WM_CHAR, templates_delim[j][u], 1);
+        } else {
+          for (v = 0; urls[i].text[v]; v++) {
+            SendMessage(hwndRichEdit, WM_CHAR, urls[i].text[v], 1);
+          }
+        }
+      }
+      SendMessage(hwndRichEdit, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+      trace("Using template: %s\n", templates_delim[j]);
+
+      /* This assumes no templates start with the URL itself, and that they
+         have at least two characters before the URL text */
+      ok(!check_CFE_LINK_selection(hwndRichEdit, 0, 1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", 0, 1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -2, at_offset -1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -2, at_offset -1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -1, at_offset),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -1, at_offset, buffer);
+
+      if (urls[i].is_url)
+      {
+        ok(check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK not set in (%d-%d), text: %s\n", at_offset, at_offset +1, buffer);
+        ok(check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK not set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      else
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset, at_offset + 1, buffer);
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      if (buffer[end_offset] != '\0')
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset, end_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset, end_offset + 1, buffer);
+        if (buffer[end_offset +1] != '\0')
+        {
+          ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset +1, end_offset +2),
+            "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset +1, end_offset +2, buffer);
+        }
+      }
+
+      /* The following will insert a paragraph break after the first character
+         of the URL candidate, thus breaking the URL. It is expected that the
+         CFE_LINK attribute should break across both pieces of the URL */
+      SendMessage(hwndRichEdit, EM_SETSEL, at_offset+1, at_offset+1);
+      INSERT_CR;
+      SendMessage(hwndRichEdit, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+
+      ok(!check_CFE_LINK_selection(hwndRichEdit, 0, 1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", 0, 1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -2, at_offset -1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -2, at_offset -1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -1, at_offset),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -1, at_offset, buffer);
+
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset, at_offset + 1, buffer);
+      /* end_offset moved because of paragraph break */
+      ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset, end_offset+1, buffer);
+      if (buffer[end_offset+1] != '\0')
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset+1, end_offset +2),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset+1, end_offset +2, buffer);
+        if (buffer[end_offset +2] != '\0')
+        {
+          ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset +2, end_offset +3),
+            "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset +2, end_offset +3, buffer);
+        }
+      }
+
+      /* The following will remove the just-inserted paragraph break, thus
+         restoring the URL */
+      SendMessage(hwndRichEdit, EM_SETSEL, at_offset+2, at_offset+2);
+      INSERT_BS;
+      SendMessage(hwndRichEdit, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+
+      ok(!check_CFE_LINK_selection(hwndRichEdit, 0, 1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", 0, 1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -2, at_offset -1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -2, at_offset -1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -1, at_offset),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -1, at_offset, buffer);
+
+      if (urls[i].is_url)
+      {
+        ok(check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK not set in (%d-%d), text: %s\n", at_offset, at_offset +1, buffer);
+        ok(check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK not set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      else
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset, at_offset + 1, buffer);
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      if (buffer[end_offset] != '\0')
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset, end_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset, end_offset + 1, buffer);
+        if (buffer[end_offset +1] != '\0')
+        {
+          ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset +1, end_offset +2),
+            "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset +1, end_offset +2, buffer);
+        }
+      }
+    }
+    DestroyWindow(hwndRichEdit);
+    hwndRichEdit = NULL;
+  }
+
+  /* Test detection of URLs within normal text - EM_SETTEXTEX case. */
+  for (i = 0; i < sizeof(urls)/sizeof(struct urls_s); i++) {
+    SETTEXTEX st;
+
+    hwndRichEdit = new_richedit(parent);
+
+    /* There are at least three ways in which EM_SETTEXTEX must cause URLs to
+       be detected:
+       1) Set entire text, a la WM_SETTEXT
+       2) Set a selection of the text to the URL
+       3) Set a portion of the text at a time, which eventually results in
+          an URL
+       All of them should give equivalent results
+     */
+
+    /* Set entire text in one go, like WM_SETTEXT */
+    for (j = 0; j < sizeof(templates_delim) / sizeof(const char *); j++) {
+      char * at_pos;
+      int at_offset;
+      int end_offset;
+
+      st.codepage = CP_ACP;
+      st.flags = ST_DEFAULT;
+
+      at_pos = strchr(templates_delim[j], 'X');
+      at_offset = at_pos - templates_delim[j];
+      strncpy(buffer, templates_delim[j], at_offset);
+      buffer[at_offset] = '\0';
+      strcat(buffer, urls[i].text);
+      strcat(buffer, templates_delim[j] + at_offset + 1);
+      end_offset = at_offset + strlen(urls[i].text);
+
+      SendMessage(hwndRichEdit, EM_AUTOURLDETECT, TRUE, 0);
+      SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&st, (LPARAM) buffer);
+
+      /* This assumes no templates start with the URL itself, and that they
+         have at least two characters before the URL text */
+      ok(!check_CFE_LINK_selection(hwndRichEdit, 0, 1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", 0, 1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -2, at_offset -1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -2, at_offset -1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -1, at_offset),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -1, at_offset, buffer);
+
+      if (urls[i].is_url)
+      {
+        ok(check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK not set in (%d-%d), text: %s\n", at_offset, at_offset +1, buffer);
+        ok(check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK not set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      else
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset, at_offset + 1, buffer);
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      if (buffer[end_offset] != '\0')
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset, end_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset, end_offset + 1, buffer);
+        if (buffer[end_offset +1] != '\0')
+        {
+          ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset +1, end_offset +2),
+            "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset +1, end_offset +2, buffer);
+        }
+      }
+    }
+
+    /* Set selection with X to the URL */
+    for (j = 0; j < sizeof(templates_delim) / sizeof(const char *); j++) {
+      char * at_pos;
+      int at_offset;
+      int end_offset;
+
+      at_pos = strchr(templates_delim[j], 'X');
+      at_offset = at_pos - templates_delim[j];
+      end_offset = at_offset + strlen(urls[i].text);
+
+      st.codepage = CP_ACP;
+      st.flags = ST_DEFAULT;
+      SendMessage(hwndRichEdit, EM_AUTOURLDETECT, TRUE, 0);
+      SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&st, (LPARAM) templates_delim[j]);
+      st.flags = ST_SELECTION;
+      SendMessage(hwndRichEdit, EM_SETSEL, at_offset, at_offset+1);
+      SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&st, (LPARAM) urls[i].text);
+      SendMessage(hwndRichEdit, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+
+      /* This assumes no templates start with the URL itself, and that they
+         have at least two characters before the URL text */
+      ok(!check_CFE_LINK_selection(hwndRichEdit, 0, 1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", 0, 1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -2, at_offset -1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -2, at_offset -1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -1, at_offset),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -1, at_offset, buffer);
+
+      if (urls[i].is_url)
+      {
+        ok(check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK not set in (%d-%d), text: %s\n", at_offset, at_offset +1, buffer);
+        ok(check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK not set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      else
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset, at_offset + 1, buffer);
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      if (buffer[end_offset] != '\0')
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset, end_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset, end_offset + 1, buffer);
+        if (buffer[end_offset +1] != '\0')
+        {
+          ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset +1, end_offset +2),
+            "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset +1, end_offset +2, buffer);
+        }
+      }
+    }
+
+    /* Set selection with X to the first character of the URL, then the rest */
+    for (j = 0; j < sizeof(templates_delim) / sizeof(const char *); j++) {
+      char * at_pos;
+      int at_offset;
+      int end_offset;
+
+      at_pos = strchr(templates_delim[j], 'X');
+      at_offset = at_pos - templates_delim[j];
+      end_offset = at_offset + strlen(urls[i].text);
+
+      strcpy(buffer, "YY");
+      buffer[0] = urls[i].text[0];
+
+      st.codepage = CP_ACP;
+      st.flags = ST_DEFAULT;
+      SendMessage(hwndRichEdit, EM_AUTOURLDETECT, TRUE, 0);
+      SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&st, (LPARAM) templates_delim[j]);
+      st.flags = ST_SELECTION;
+      SendMessage(hwndRichEdit, EM_SETSEL, at_offset, at_offset+1);
+      SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&st, (LPARAM) buffer);
+      SendMessage(hwndRichEdit, EM_SETSEL, at_offset+1, at_offset+2);
+      SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&st, (LPARAM)(urls[i].text + 1));
+      SendMessage(hwndRichEdit, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+
+      /* This assumes no templates start with the URL itself, and that they
+         have at least two characters before the URL text */
+      ok(!check_CFE_LINK_selection(hwndRichEdit, 0, 1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", 0, 1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -2, at_offset -1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -2, at_offset -1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -1, at_offset),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -1, at_offset, buffer);
+
+      if (urls[i].is_url)
+      {
+        ok(check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK not set in (%d-%d), text: %s\n", at_offset, at_offset +1, buffer);
+        ok(check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK not set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      else
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset, at_offset + 1, buffer);
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      if (buffer[end_offset] != '\0')
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset, end_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset, end_offset + 1, buffer);
+        if (buffer[end_offset +1] != '\0')
+        {
+          ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset +1, end_offset +2),
+            "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset +1, end_offset +2, buffer);
+        }
+      }
+    }
+
+    DestroyWindow(hwndRichEdit);
+    hwndRichEdit = NULL;
+  }
+
+  /* Test detection of URLs within normal text - EM_REPLACESEL case. */
+  for (i = 0; i < sizeof(urls)/sizeof(struct urls_s); i++) {
+    hwndRichEdit = new_richedit(parent);
+
+    /* Set selection with X to the URL */
+    for (j = 0; j < sizeof(templates_delim) / sizeof(const char *); j++) {
+      char * at_pos;
+      int at_offset;
+      int end_offset;
+
+      at_pos = strchr(templates_delim[j], 'X');
+      at_offset = at_pos - templates_delim[j];
+      end_offset = at_offset + strlen(urls[i].text);
+
+      SendMessage(hwndRichEdit, EM_AUTOURLDETECT, TRUE, 0);
+      SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) templates_delim[j]);
+      SendMessage(hwndRichEdit, EM_SETSEL, at_offset, at_offset+1);
+      SendMessage(hwndRichEdit, EM_REPLACESEL, 0, (LPARAM) urls[i].text);
+      SendMessage(hwndRichEdit, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+
+      /* This assumes no templates start with the URL itself, and that they
+         have at least two characters before the URL text */
+      ok(!check_CFE_LINK_selection(hwndRichEdit, 0, 1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", 0, 1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -2, at_offset -1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -2, at_offset -1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -1, at_offset),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -1, at_offset, buffer);
+
+      if (urls[i].is_url)
+      {
+        ok(check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK not set in (%d-%d), text: %s\n", at_offset, at_offset +1, buffer);
+        ok(check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK not set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      else
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset, at_offset + 1, buffer);
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      if (buffer[end_offset] != '\0')
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset, end_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset, end_offset + 1, buffer);
+        if (buffer[end_offset +1] != '\0')
+        {
+          ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset +1, end_offset +2),
+            "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset +1, end_offset +2, buffer);
+        }
+      }
+    }
+
+    /* Set selection with X to the first character of the URL, then the rest */
+    for (j = 0; j < sizeof(templates_delim) / sizeof(const char *); j++) {
+      char * at_pos;
+      int at_offset;
+      int end_offset;
+
+      at_pos = strchr(templates_delim[j], 'X');
+      at_offset = at_pos - templates_delim[j];
+      end_offset = at_offset + strlen(urls[i].text);
+
+      strcpy(buffer, "YY");
+      buffer[0] = urls[i].text[0];
+
+      SendMessage(hwndRichEdit, EM_AUTOURLDETECT, TRUE, 0);
+      SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) templates_delim[j]);
+      SendMessage(hwndRichEdit, EM_SETSEL, at_offset, at_offset+1);
+      SendMessage(hwndRichEdit, EM_REPLACESEL, 0, (LPARAM) buffer);
+      SendMessage(hwndRichEdit, EM_SETSEL, at_offset+1, at_offset+2);
+      SendMessage(hwndRichEdit, EM_REPLACESEL, 0, (LPARAM)(urls[i].text + 1));
+      SendMessage(hwndRichEdit, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+
+      /* This assumes no templates start with the URL itself, and that they
+         have at least two characters before the URL text */
+      ok(!check_CFE_LINK_selection(hwndRichEdit, 0, 1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", 0, 1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -2, at_offset -1),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -2, at_offset -1, buffer);
+      ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset -1, at_offset),
+        "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset -1, at_offset, buffer);
+
+      if (urls[i].is_url)
+      {
+        ok(check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK not set in (%d-%d), text: %s\n", at_offset, at_offset +1, buffer);
+        ok(check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK not set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      else
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, at_offset, at_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", at_offset, at_offset + 1, buffer);
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset -1, end_offset),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset -1, end_offset, buffer);
+      }
+      if (buffer[end_offset] != '\0')
+      {
+        ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset, end_offset +1),
+          "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset, end_offset + 1, buffer);
+        if (buffer[end_offset +1] != '\0')
+        {
+          ok(!check_CFE_LINK_selection(hwndRichEdit, end_offset +1, end_offset +2),
+            "CFE_LINK incorrectly set in (%d-%d), text: %s\n", end_offset +1, end_offset +2, buffer);
+        }
+      }
+    }
+
+    DestroyWindow(hwndRichEdit);
+    hwndRichEdit = NULL;
+  }
+
   DestroyWindow(parent);
 }
 
@@ -2531,6 +3631,30 @@ static DWORD CALLBACK test_EM_STREAMIN_esCallback(DWORD_PTR dwCookie,
   return 0;
 }
 
+struct StringWithLength {
+    int length;
+    char *buffer;
+};
+
+/* This callback is used to handled the null characters in a string. */
+static DWORD CALLBACK test_EM_STREAMIN_esCallback2(DWORD_PTR dwCookie,
+                                                   LPBYTE pbBuff,
+                                                   LONG cb,
+                                                   LONG *pcb)
+{
+    struct StringWithLength* str = (struct StringWithLength*)dwCookie;
+    int size = str->length;
+    *pcb = cb;
+    if (*pcb > size) {
+      *pcb = size;
+    }
+    if (*pcb > 0) {
+      memcpy(pbBuff, str->buffer, *pcb);
+      str->buffer += *pcb;
+      str->length -= *pcb;
+    }
+    return 0;
+}
 
 static void test_EM_STREAMIN(void)
 {
@@ -2559,6 +3683,15 @@ static void test_EM_STREAMIN(void)
     "\\tx11448 \\tx11872 \\tx12296 \\tx12720 \\tx13144 \\cf2 RichEdit1\\line }";
 
   const char * streamText3 = "RichEdit1";
+
+  struct StringWithLength cookieForStream4;
+  const char * streamText4 =
+      "This text just needs to be long enough to cause run to be split onto "\
+      "two seperate lines and make sure the null terminating character is "\
+      "handled properly.\0";
+  int length4 = strlen(streamText4) + 1;
+  cookieForStream4.buffer = (char *)streamText4;
+  cookieForStream4.length = length4;
 
   /* Minimal test without \par at the end */
   es.dwCookie = (DWORD_PTR)&streamText0;
@@ -2642,6 +3775,17 @@ static void test_EM_STREAMIN(void)
   ok (strlen(buffer)  == 0,
       "EM_STREAMIN: Test 3 set wrong text: Result: %s\n",buffer);
   ok(es.dwError == -16, "EM_STREAMIN: Test 3 set error %d, expected %d\n", es.dwError, -16);
+
+  es.dwCookie = (DWORD_PTR)&cookieForStream4;
+  es.dwError = 0;
+  es.pfnCallback = test_EM_STREAMIN_esCallback2;
+  SendMessage(hwndRichEdit, EM_STREAMIN,
+              (WPARAM)(SF_TEXT), (LPARAM)&es);
+
+  result = SendMessage(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM) buffer);
+  ok (result  == length4,
+      "EM_STREAMIN: Test 4 returned %ld, expected %d\n", result, length4);
+  ok(es.dwError == 0, "EM_STREAMIN: Test 4 set error %d, expected %d\n", es.dwError, 0);
 
   DestroyWindow(hwndRichEdit);
 }
@@ -3208,6 +4352,208 @@ static void test_WM_NOTIFY(void)
     DestroyWindow(parent);
 }
 
+static void simulate_typing_characters(HWND hwnd, const char* szChars)
+{
+    int ret;
+
+    while (*szChars != '\0') {
+        SendMessageA(hwnd, WM_KEYDOWN, *szChars, 1);
+        ret = SendMessageA(hwnd, WM_CHAR, *szChars, 1);
+        ok(ret == 0, "WM_CHAR('%c') ret=%d\n", *szChars, ret);
+        SendMessageA(hwnd, WM_KEYUP, *szChars, 1);
+        szChars++;
+    }
+}
+
+static void test_undo_coalescing(void)
+{
+    HWND hwnd;
+    int result;
+    char buffer[64] = {0};
+
+    /* multi-line control inserts CR normally */
+    hwnd = CreateWindowExA(0, "RichEdit20W", NULL, WS_POPUP|ES_MULTILINE,
+                           0, 0, 200, 60, 0, 0, 0, 0);
+    ok(hwnd != 0, "CreateWindowExA error %u\n", GetLastError());
+
+    result = SendMessage(hwnd, EM_CANUNDO, 0, 0);
+    ok (result == FALSE, "Can undo after window creation.\n");
+    result = SendMessage(hwnd, EM_UNDO, 0, 0);
+    ok (result == FALSE, "Undo operation successful with nothing to undo.\n");
+    result = SendMessage(hwnd, EM_CANREDO, 0, 0);
+    ok (result == FALSE, "Can redo after window creation.\n");
+    result = SendMessage(hwnd, EM_REDO, 0, 0);
+    ok (result == FALSE, "Redo operation successful with nothing undone.\n");
+
+    /* Test the effect of arrows keys during typing on undo transactions*/
+    simulate_typing_characters(hwnd, "one two three");
+    SendMessage(hwnd, WM_KEYDOWN, VK_RIGHT, 1);
+    SendMessage(hwnd, WM_KEYUP, VK_RIGHT, 1);
+    simulate_typing_characters(hwnd, " four five six");
+
+    result = SendMessage(hwnd, EM_CANREDO, 0, 0);
+    ok (result == FALSE, "Can redo before anything is undone.\n");
+    result = SendMessage(hwnd, EM_CANUNDO, 0, 0);
+    ok (result == TRUE, "Cannot undo typed characters.\n");
+    result = SendMessage(hwnd, EM_UNDO, 0, 0);
+    ok (result == TRUE, "EM_UNDO Failed to undo typed characters.\n");
+    result = SendMessage(hwnd, EM_CANREDO, 0, 0);
+    ok (result == TRUE, "Cannot redo after undo.\n");
+    SendMessageA(hwnd, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+    result = strcmp(buffer, "one two three");
+    ok (result == 0, "expected '%s' but got '%s'\n", "one two three", buffer);
+
+    result = SendMessage(hwnd, EM_CANUNDO, 0, 0);
+    ok (result == TRUE, "Cannot undo typed characters.\n");
+    result = SendMessage(hwnd, WM_UNDO, 0, 0);
+    ok (result == TRUE, "Failed to undo typed characters.\n");
+    SendMessageA(hwnd, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+    result = strcmp(buffer, "");
+    ok (result == 0, "expected '%s' but got '%s'\n", "", buffer);
+
+    /* Test the effect of focus changes during typing on undo transactions*/
+    simulate_typing_characters(hwnd, "one two three");
+    result = SendMessage(hwnd, EM_CANREDO, 0, 0);
+    ok (result == FALSE, "Redo buffer should have been cleared by typing.\n");
+    SendMessage(hwnd, WM_KILLFOCUS, (WPARAM)NULL, 0);
+    SendMessage(hwnd, WM_SETFOCUS, (WPARAM)NULL, 0);
+    simulate_typing_characters(hwnd, " four five six");
+    result = SendMessage(hwnd, EM_UNDO, 0, 0);
+    ok (result == TRUE, "Failed to undo typed characters.\n");
+    SendMessageA(hwnd, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+    result = strcmp(buffer, "one two three");
+    ok (result == 0, "expected '%s' but got '%s'\n", "one two three", buffer);
+
+    /* Test the effect of the back key during typing on undo transactions */
+    SendMessage(hwnd, EM_EMPTYUNDOBUFFER, 0, 0);
+    result = SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)"");
+    ok (result == TRUE, "Failed to clear the text.\n");
+    simulate_typing_characters(hwnd, "one two threa");
+    result = SendMessage(hwnd, EM_CANREDO, 0, 0);
+    ok (result == FALSE, "Redo buffer should have been cleared by typing.\n");
+    SendMessage(hwnd, WM_KEYDOWN, VK_BACK, 1);
+    SendMessage(hwnd, WM_KEYUP, VK_BACK, 1);
+    simulate_typing_characters(hwnd, "e four five six");
+    result = SendMessage(hwnd, EM_UNDO, 0, 0);
+    ok (result == TRUE, "Failed to undo typed characters.\n");
+    SendMessageA(hwnd, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+    result = strcmp(buffer, "");
+    ok (result == 0, "expected '%s' but got '%s'\n", "", buffer);
+
+    /* Test the effect of the delete key during typing on undo transactions */
+    SendMessage(hwnd, EM_EMPTYUNDOBUFFER, 0, 0);
+    result = SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)"abcd");
+    ok(result == TRUE, "Failed to set the text.\n");
+    SendMessage(hwnd, EM_SETSEL, (WPARAM)1, (LPARAM)1);
+    SendMessage(hwnd, WM_KEYDOWN, VK_DELETE, 1);
+    SendMessage(hwnd, WM_KEYUP, VK_DELETE, 1);
+    SendMessage(hwnd, WM_KEYDOWN, VK_DELETE, 1);
+    SendMessage(hwnd, WM_KEYUP, VK_DELETE, 1);
+    result = SendMessage(hwnd, EM_UNDO, 0, 0);
+    ok (result == TRUE, "Failed to undo typed characters.\n");
+    SendMessageA(hwnd, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+    result = strcmp(buffer, "acd");
+    ok (result == 0, "expected '%s' but got '%s'\n", "acd", buffer);
+    result = SendMessage(hwnd, EM_UNDO, 0, 0);
+    ok (result == TRUE, "Failed to undo typed characters.\n");
+    SendMessageA(hwnd, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+    result = strcmp(buffer, "abcd");
+    ok (result == 0, "expected '%s' but got '%s'\n", "abcd", buffer);
+
+    /* Test the effect of EM_STOPGROUPTYPING on undo transactions*/
+    SendMessage(hwnd, EM_EMPTYUNDOBUFFER, 0, 0);
+    result = SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)"");
+    ok (result == TRUE, "Failed to clear the text.\n");
+    simulate_typing_characters(hwnd, "one two three");
+    result = SendMessage(hwnd, EM_STOPGROUPTYPING, 0, 0);
+    ok (result == 0, "expected %d but got %d\n", 0, result);
+    simulate_typing_characters(hwnd, " four five six");
+    result = SendMessage(hwnd, EM_UNDO, 0, 0);
+    ok (result == TRUE, "Failed to undo typed characters.\n");
+    SendMessageA(hwnd, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+    result = strcmp(buffer, "one two three");
+    ok (result == 0, "expected '%s' but got '%s'\n", "one two three", buffer);
+    result = SendMessage(hwnd, EM_UNDO, 0, 0);
+    ok (result == TRUE, "Failed to undo typed characters.\n");
+    ok (result == TRUE, "Failed to undo typed characters.\n");
+    SendMessageA(hwnd, WM_GETTEXT, sizeof(buffer), (LPARAM)buffer);
+    result = strcmp(buffer, "");
+    ok (result == 0, "expected '%s' but got '%s'\n", "", buffer);
+
+    DestroyWindow(hwnd);
+}
+
+/* Used to simulate a Ctrl-Arrow Key press. */
+#define SEND_CTRL_EXT_KEY(hwnd, vk, scancode) \
+    keybd_event(VK_CONTROL, 0x1d, 0, 0);\
+    keybd_event(vk, scancode, KEYEVENTF_EXTENDEDKEY, 0);\
+    keybd_event(vk, scancode | 0x80, KEYEVENTF_KEYUP | KEYEVENTF_EXTENDEDKEY, 0);\
+    keybd_event(VK_CONTROL, 0x1d | 0x80, KEYEVENTF_KEYUP, 0); \
+    while (PeekMessage(&msg, hwnd, 0, 0, PM_REMOVE)) { \
+        TranslateMessage(&msg); \
+        DispatchMessage(&msg); \
+    }
+#define SEND_CTRL_LEFT(hwnd) SEND_CTRL_EXT_KEY(hwnd, VK_LEFT, 0x4b)
+#define SEND_CTRL_RIGHT(hwnd) SEND_CTRL_EXT_KEY(hwnd, VK_RIGHT, 0x4d)
+
+static void test_word_movement(){
+    HWND hwnd;
+    int result;
+    int sel_start, sel_end;
+    MSG msg;
+
+    /* multi-line control inserts CR normally */
+    hwnd = new_richedit(NULL);
+
+    SendMessage(hwnd, WM_SETFOCUS, (WPARAM)hwnd, 0);
+    result = SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)"one two  three");
+    ok (result == TRUE, "Failed to clear the text.\n");
+    SendMessage(hwnd, EM_SETSEL, 0, 0);
+    /* |one two three */
+
+    SEND_CTRL_RIGHT(hwnd)
+    /* one |two  three */
+    SendMessage(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
+    ok(sel_start == sel_end, "Selection should be empty\n");
+    ok(sel_start == 4, "Cursur is at %d instead of %d\n", sel_start, 4);
+
+    SEND_CTRL_RIGHT(hwnd)
+    /* one two  |three */
+    SendMessage(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
+    ok(sel_start == sel_end, "Selection should be empty\n");
+    ok(sel_start == 9, "Cursur is at %d instead of %d\n", sel_start, 9);
+
+    SEND_CTRL_LEFT(hwnd)
+    /* one |two  three */
+    SendMessage(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
+    ok(sel_start == sel_end, "Selection should be empty\n");
+    ok(sel_start == 4, "Cursur is at %d instead of %d\n", sel_start, 4);
+
+    SEND_CTRL_LEFT(hwnd)
+    /* |one two  three */
+    SendMessage(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
+    ok(sel_start == sel_end, "Selection should be empty\n");
+    ok(sel_start == 0, "Cursur is at %d instead of %d\n", sel_start, 0);
+
+    SendMessage(hwnd, EM_SETSEL, 8, 8);
+    /* one two | three */
+    SEND_CTRL_RIGHT(hwnd)
+    /* one two  |three */
+    SendMessage(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
+    ok(sel_start == sel_end, "Selection should be empty\n");
+    ok(sel_start == 9, "Cursur is at %d instead of %d\n", sel_start, 9);
+
+    SendMessage(hwnd, EM_SETSEL, 11, 11);
+    /* one two  th|ree */
+    SEND_CTRL_LEFT(hwnd)
+    /* one two  |three */
+    SendMessage(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
+    ok(sel_start == sel_end, "Selection should be empty\n");
+    ok(sel_start == 9, "Cursur is at %d instead of %d\n", sel_start, 9);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST( editor )
 {
   MSG msg;
@@ -3220,6 +4566,7 @@ START_TEST( editor )
   test_WM_CHAR();
   test_EM_FINDTEXT();
   test_EM_GETLINE();
+  test_EM_POSFROMCHAR();
   test_EM_SCROLLCARET();
   test_EM_SCROLL();
   test_WM_SETTEXT();
@@ -3231,7 +4578,6 @@ START_TEST( editor )
   test_WM_GETTEXT();
   test_EM_GETTEXTRANGE();
   test_EM_GETSELTEXT();
-  test_EM_AUTOURLDETECT();
   test_EM_SETUNDOLIMIT();
   test_ES_PASSWORD();
   test_EM_SETTEXTEX();
@@ -3251,7 +4597,10 @@ START_TEST( editor )
   test_EM_REPLACESEL(1);
   test_EM_REPLACESEL(0);
   test_WM_NOTIFY();
+  test_EM_AUTOURLDETECT();
   test_eventMask();
+  test_undo_coalescing();
+  test_word_movement();
 
   /* Set the environment variable WINETEST_RICHED20 to keep windows
    * responsive and open for 30 seconds. This is useful for debugging.

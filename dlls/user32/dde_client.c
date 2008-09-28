@@ -576,7 +576,7 @@ static	HGLOBAL	WDML_BuildExecuteCommand(WDML_CONV* pConv, LPCVOID pData, DWORD c
     {
 	if (clientUnicode)
 	{
-	    memSize = WideCharToMultiByte( CP_ACP, 0, pData, cbData, NULL, 0, NULL, NULL);
+	    memSize = WideCharToMultiByte( CP_ACP, 0, pData, cbData / sizeof(WCHAR), NULL, 0, NULL, NULL);
 	}
 	else
 	{
@@ -601,7 +601,7 @@ static	HGLOBAL	WDML_BuildExecuteCommand(WDML_CONV* pConv, LPCVOID pData, DWORD c
 	    {
 		if (clientUnicode)
 		{
-		    WideCharToMultiByte( CP_ACP, 0, pData, cbData, pDst, memSize, NULL, NULL);
+		    WideCharToMultiByte( CP_ACP, 0, pData, cbData / sizeof(WCHAR), pDst, memSize, NULL, NULL);
 		}
 		else
 		{
@@ -1032,7 +1032,7 @@ static HDDEDATA WDML_SyncWaitTransactionReply(HCONV hConv, DWORD dwTimeout, cons
 
 	    while (PeekMessageW(&msg, 0, WM_DDE_FIRST, WM_DDE_LAST, PM_REMOVE))
 	    {
-                HDDEDATA hdd;
+                HDDEDATA hdd = NULL;
 
                 pConv = WDML_GetConv(hConv, FALSE);
                 if (pConv == NULL)

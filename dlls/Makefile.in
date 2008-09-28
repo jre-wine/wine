@@ -113,6 +113,7 @@ BASEDIRS = \
 	imagehlp \
 	imm32 \
 	inetcomm \
+	inetmib1 \
 	infosoft \
 	initpki \
 	inkobj \
@@ -310,6 +311,7 @@ TESTSUBDIRS = \
 	hlink/tests \
 	imm32/tests \
 	inetcomm/tests \
+	inetmib1/tests \
 	infosoft/tests \
 	iphlpapi/tests \
 	itss/tests \

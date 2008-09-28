@@ -2239,7 +2239,15 @@ BOOL WINAPI GetConsoleCursorInfo(HANDLE hCon, LPCONSOLE_CURSOR_INFO cinfo)
     }
     SERVER_END_REQ;
 
-    TRACE("(%p) returning (%d,%d)\n", hCon, cinfo->dwSize, cinfo->bVisible);
+    if (!ret) return FALSE;
+
+    if (!cinfo)
+    {
+        SetLastError(ERROR_INVALID_ACCESS);
+        ret = FALSE;
+    }
+    else TRACE("(%p) returning (%d,%d)\n", hCon, cinfo->dwSize, cinfo->bVisible);
+
     return ret;
 }
 
@@ -2533,6 +2541,33 @@ BOOL WINAPI ScrollConsoleScreenBufferW(HANDLE hConsoleOutput, LPSMALL_RECT lpScr
 BOOL WINAPI AttachConsole(DWORD dwProcessId)
 {
     FIXME("stub %x\n",dwProcessId);
+    return TRUE;
+}
+
+/******************************************************************
+ *              GetConsoleDisplayMode  (KERNEL32.@)
+ */
+BOOL WINAPI GetConsoleDisplayMode(LPDWORD lpModeFlags)
+{
+    TRACE("semi-stub: %p\n", lpModeFlags);
+    /* It is safe to successfully report windowed mode */
+    *lpModeFlags = 0;
+    return TRUE;
+}
+
+/******************************************************************
+ *              SetConsoleDisplayMode  (KERNEL32.@)
+ */
+BOOL WINAPI SetConsoleDisplayMode(HANDLE hConsoleOutput, DWORD dwFlags,
+                                  COORD *lpNewScreenBufferDimensions)
+{
+    TRACE("(%p, %x, (%d, %d))\n", hConsoleOutput, dwFlags,
+          lpNewScreenBufferDimensions->X, lpNewScreenBufferDimensions->Y);
+    if (dwFlags == 1)
+    {
+        /* We cannot switch to fullscreen */
+        return FALSE;
+    }
     return TRUE;
 }
 

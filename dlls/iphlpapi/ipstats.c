@@ -28,6 +28,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#ifdef HAVE_ALIAS_H
+#include <alias.h>
+#endif
 #ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
 #endif
@@ -43,11 +46,23 @@
 #ifdef HAVE_NET_IF_H
 #include <net/if.h>
 #endif
+#ifdef HAVE_NET_IF_DL_H
+#include <net/if_dl.h>
+#endif
+#ifdef HAVE_NET_IF_TYPES_H
+#include <net/if_types.h>
+#endif
 #ifdef HAVE_NET_ROUTE_H
 #include <net/route.h>
 #endif
 #ifdef HAVE_NET_IF_ARP_H
 #include <net/if_arp.h>
+#endif
+#ifdef HAVE_NETINET_IF_ETHER_H
+#include <netinet/if_ether.h>
+#endif
+#ifdef HAVE_NETINET_IP_H
+#include <netinet/ip.h>
 #endif
 #ifdef HAVE_NETINET_TCP_H
 #include <netinet/tcp.h>
@@ -55,15 +70,29 @@
 #ifdef HAVE_NETINET_TCP_FSM_H
 #include <netinet/tcp_fsm.h>
 #endif
-
 #ifdef HAVE_NETINET_IN_PCB_H
 #include <netinet/in_pcb.h>
 #endif
 #ifdef HAVE_NETINET_TCP_VAR_H
 #include <netinet/tcp_var.h>
 #endif
+#ifdef HAVE_NETINET_TCP_TIMER_H
+#include <netinet/tcp_timer.h>
+#endif
+#ifdef HAVE_NETINET_IP_ICMP_H
+#include <netinet/ip_icmp.h>
+#endif
+#ifdef HAVE_NETINET_ICMP_VAR_H
+#include <netinet/icmp_var.h>
+#endif
 #ifdef HAVE_NETINET_IP_VAR_H
 #include <netinet/ip_var.h>
+#endif
+#ifdef HAVE_NETINET_UDP_H
+#include <netinet/udp.h>
+#endif
+#ifdef HAVE_NETINET_UDP_VAR_H
+#include <netinet/udp_var.h>
 #endif
 
 #ifdef HAVE_SYS_SYSCTL_H
@@ -102,15 +131,60 @@ WINE_DEFAULT_DEBUG_CHANNEL(iphlpapi);
 
 DWORD getInterfaceStatsByName(const char *name, PMIB_IFROW entry)
 {
-  FILE *fp;
+#if defined(HAVE_SYS_SYSCTL_H) && defined(NET_RT_IFLIST)
+  int mib[] = {CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_IFLIST, if_nametoindex(name)};
+#define MIB_LEN (sizeof(mib) / sizeof(mib[0]))
 
-  if (!name)
-    return ERROR_INVALID_PARAMETER;
-  if (!entry)
+  size_t needed;
+  char *buf, *end;
+  struct if_msghdr *ifm;
+  struct if_data ifdata;
+  if (!name || !entry)
     return ERROR_INVALID_PARAMETER;
 
+  if(sysctl(mib, MIB_LEN, NULL, &needed, NULL, 0) == -1)
+  {
+      ERR ("failed to get size of iflist\n");
+      return ERROR_NOT_SUPPORTED;
+  }
+  buf = HeapAlloc (GetProcessHeap (), 0, needed);
+  if (!buf) return ERROR_NOT_SUPPORTED;
+  if(sysctl(mib, MIB_LEN, buf, &needed, NULL, 0) == -1)
+  {
+      ERR ("failed to get iflist\n");
+      HeapFree (GetProcessHeap (), 0, buf);
+      return ERROR_NOT_SUPPORTED;
+  }
+  else
+      for ( end = buf + needed; buf < end; buf += ifm->ifm_msglen)
+      {
+          ifm = (struct if_msghdr *) buf;
+          if(ifm->ifm_type == RTM_IFINFO && ifm->ifm_data.ifi_type == IFT_ETHER)
+          {
+              ifdata = ifm->ifm_data;
+              entry->dwMtu = ifdata.ifi_mtu;
+              entry->dwSpeed = ifdata.ifi_baudrate;
+              entry->dwInOctets = ifdata.ifi_ibytes;
+              entry->dwInErrors = ifdata.ifi_ierrors;
+              entry->dwInDiscards = ifdata.ifi_iqdrops;
+              entry->dwInUcastPkts = ifdata.ifi_ipackets;
+              entry->dwInNUcastPkts = ifdata.ifi_imcasts;
+              entry->dwOutOctets = ifdata.ifi_obytes;
+              entry->dwOutUcastPkts = ifdata.ifi_opackets;
+              entry->dwOutErrors = ifdata.ifi_oerrors;
+              HeapFree (GetProcessHeap (), 0, buf);
+              return NO_ERROR;
+          }
+      }
+      HeapFree (GetProcessHeap (), 0, buf);
+      return ERROR_NOT_SUPPORTED;
+#else
   /* get interface stats from /proc/net/dev, no error if can't
      no inUnknownProtos, outNUcastPkts, outQLen */
+  FILE *fp;
+
+  if (!name || !entry)
+    return ERROR_INVALID_PARAMETER;
   fp = fopen("/proc/net/dev", "r");
   if (fp) {
     char buf[512] = { 0 }, *ptr;
@@ -188,10 +262,70 @@ DWORD getInterfaceStatsByName(const char *name, PMIB_IFROW entry)
   }
 
   return NO_ERROR;
+#endif
 }
 
 DWORD getICMPStats(MIB_ICMP *stats)
 {
+#if defined(HAVE_SYS_SYSCTL_H) && defined(ICMPCTL_STATS)
+  int mib[] = {CTL_NET, PF_INET, IPPROTO_ICMP, ICMPCTL_STATS};
+#define MIB_LEN (sizeof(mib) / sizeof(mib[0]))
+  size_t needed;
+  struct icmpstat icmp_stat;
+  int i;
+
+  if (!stats)
+    return ERROR_INVALID_PARAMETER;
+
+  needed = sizeof(icmp_stat);
+  if(sysctl(mib, MIB_LEN, &icmp_stat, &needed, NULL, 0) == -1)
+  {
+      ERR ("failed to get icmpstat\n");
+      return ERROR_NOT_SUPPORTED;
+  }
+
+
+  /*in stats */
+  stats->stats.icmpInStats.dwMsgs = icmp_stat.icps_badcode + icmp_stat.icps_checksum + icmp_stat.icps_tooshort + icmp_stat.icps_badlen;
+  for(i = 0; i <= ICMP_MAXTYPE; i++)
+      stats->stats.icmpInStats.dwMsgs += icmp_stat.icps_inhist[i];
+
+  stats->stats.icmpInStats.dwErrors = icmp_stat.icps_badcode + icmp_stat.icps_tooshort + icmp_stat.icps_checksum + icmp_stat.icps_badlen;
+
+  stats->stats.icmpInStats.dwDestUnreachs = icmp_stat.icps_inhist[ICMP_UNREACH];
+  stats->stats.icmpInStats.dwTimeExcds = icmp_stat.icps_inhist[ICMP_TIMXCEED];
+  stats->stats.icmpInStats.dwParmProbs = icmp_stat.icps_inhist[ICMP_PARAMPROB];
+  stats->stats.icmpInStats.dwSrcQuenchs = icmp_stat.icps_inhist[ICMP_SOURCEQUENCH];
+  stats->stats.icmpInStats.dwRedirects = icmp_stat.icps_inhist[ICMP_REDIRECT];
+  stats->stats.icmpInStats.dwEchos = icmp_stat.icps_inhist[ICMP_ECHO];
+  stats->stats.icmpInStats.dwEchoReps = icmp_stat.icps_inhist[ICMP_ECHOREPLY];
+  stats->stats.icmpInStats.dwTimestamps = icmp_stat.icps_inhist[ICMP_TSTAMP];
+  stats->stats.icmpInStats.dwTimestampReps = icmp_stat.icps_inhist[ICMP_TSTAMPREPLY];
+  stats->stats.icmpInStats.dwAddrMasks = icmp_stat.icps_inhist[ICMP_MASKREQ];
+  stats->stats.icmpInStats.dwAddrMaskReps = icmp_stat.icps_inhist[ICMP_MASKREPLY];
+
+
+  /* out stats */
+  stats->stats.icmpOutStats.dwMsgs = icmp_stat.icps_oldshort + icmp_stat.icps_oldicmp;
+  for(i = 0; i <= ICMP_MAXTYPE; i++)
+  stats->stats.icmpOutStats.dwMsgs += icmp_stat.icps_outhist[i];
+
+  stats->stats.icmpOutStats.dwErrors = icmp_stat.icps_oldshort + icmp_stat.icps_oldicmp;
+
+  stats->stats.icmpOutStats.dwDestUnreachs = icmp_stat.icps_outhist[ICMP_UNREACH];
+  stats->stats.icmpOutStats.dwTimeExcds = icmp_stat.icps_outhist[ICMP_TIMXCEED];
+  stats->stats.icmpOutStats.dwParmProbs = icmp_stat.icps_outhist[ICMP_PARAMPROB];
+  stats->stats.icmpOutStats.dwSrcQuenchs = icmp_stat.icps_outhist[ICMP_SOURCEQUENCH];
+  stats->stats.icmpOutStats.dwRedirects = icmp_stat.icps_outhist[ICMP_REDIRECT];
+  stats->stats.icmpOutStats.dwEchos = icmp_stat.icps_outhist[ICMP_ECHO];
+  stats->stats.icmpOutStats.dwEchoReps = icmp_stat.icps_outhist[ICMP_ECHOREPLY];
+  stats->stats.icmpOutStats.dwTimestamps = icmp_stat.icps_outhist[ICMP_TSTAMP];
+  stats->stats.icmpOutStats.dwTimestampReps = icmp_stat.icps_outhist[ICMP_TSTAMPREPLY];
+  stats->stats.icmpOutStats.dwAddrMasks = icmp_stat.icps_outhist[ICMP_MASKREQ];
+  stats->stats.icmpOutStats.dwAddrMaskReps = icmp_stat.icps_outhist[ICMP_MASKREPLY];
+
+  return NO_ERROR;
+#else
   FILE *fp;
 
   if (!stats)
@@ -321,10 +455,62 @@ DWORD getICMPStats(MIB_ICMP *stats)
   }
 
   return NO_ERROR;
+#endif
 }
 
 DWORD getIPStats(PMIB_IPSTATS stats)
 {
+#if defined(HAVE_SYS_SYSCTL_H) && defined(IPCTL_STATS)
+  int mib[] = {CTL_NET, PF_INET, IPPROTO_IP, IPCTL_STATS};
+#define MIB_LEN (sizeof(mib) / sizeof(mib[0]))
+  int ip_ttl, ip_forwarding;
+  struct ipstat ip_stat;
+  size_t needed;
+
+  if (!stats)
+      return ERROR_INVALID_PARAMETER;
+
+  needed = sizeof(ip_stat);
+  if(sysctl(mib, MIB_LEN, &ip_stat, &needed, NULL, 0) == -1)
+  {
+      ERR ("failed to get ipstat\n");
+      return ERROR_NOT_SUPPORTED;
+  }
+
+  needed = sizeof(ip_ttl);
+  if (sysctlbyname ("net.inet.ip.ttl", &ip_ttl, &needed, NULL, 0) == -1)
+  {
+      ERR ("failed to get ip Default TTL\n");
+      return ERROR_NOT_SUPPORTED;
+  }
+
+  needed = sizeof(ip_forwarding);
+  if (sysctlbyname ("net.inet.ip.forwarding", &ip_forwarding, &needed, NULL, 0) == -1)
+  {
+      ERR ("failed to get ip forwarding\n");
+      return ERROR_NOT_SUPPORTED;
+  }
+
+  stats->dwForwarding = ip_forwarding;
+  stats->dwDefaultTTL = ip_ttl;
+  stats->dwInDelivers = ip_stat.ips_delivered;
+  stats->dwInHdrErrors = ip_stat.ips_badhlen + ip_stat.ips_badsum + ip_stat.ips_tooshort + ip_stat.ips_badlen;
+  stats->dwInAddrErrors = ip_stat.ips_cantforward;
+  stats->dwInReceives = ip_stat.ips_total;
+  stats->dwForwDatagrams = ip_stat.ips_forward;
+  stats->dwInUnknownProtos = ip_stat.ips_noproto;
+  stats->dwInDiscards = ip_stat.ips_fragdropped;
+  stats->dwOutDiscards = ip_stat.ips_odropped;
+  stats->dwReasmOks = ip_stat.ips_reassembled;
+  stats->dwFragOks = ip_stat.ips_fragmented;
+  stats->dwFragFails = ip_stat.ips_cantfrag;
+  stats->dwReasmTimeout = ip_stat.ips_fragtimeout;
+  stats->dwOutNoRoutes = ip_stat.ips_noroute;
+  stats->dwOutRequests = ip_stat.ips_localout;
+  stats->dwReasmReqds = ip_stat.ips_fragments;
+
+  return NO_ERROR;
+#else
   FILE *fp;
 
   if (!stats)
@@ -438,10 +624,51 @@ DWORD getIPStats(PMIB_IPSTATS stats)
   }
 
   return NO_ERROR;
+#endif
 }
 
 DWORD getTCPStats(MIB_TCPSTATS *stats)
 {
+#if defined(HAVE_SYS_SYSCTL_H) && defined(UDPCTL_STATS)
+#ifndef TCPTV_MIN  /* got removed in Mac OS X for some reason */
+#define TCPTV_MIN 2
+#define TCPTV_REXMTMAX 128
+#endif
+  int mib[] = {CTL_NET, PF_INET, IPPROTO_TCP, TCPCTL_STATS};
+#define MIB_LEN (sizeof(mib) / sizeof(mib[0]))
+#define hz 1000
+  struct tcpstat tcp_stat;
+  size_t needed;
+
+  if (!stats)
+    return ERROR_INVALID_PARAMETER;
+  needed = sizeof(tcp_stat);
+
+  if(sysctl(mib, MIB_LEN, &tcp_stat, &needed, NULL, 0) == -1)
+  {
+      ERR ("failed to get tcpstat\n");
+      return ERROR_NOT_SUPPORTED;
+  }
+
+  stats->dwRtoAlgorithm = MIB_TCP_RTO_VANJ;
+  stats->dwRtoMin = TCPTV_MIN;
+  stats->dwRtoMax = TCPTV_REXMTMAX;
+  stats->dwMaxConn = -1;
+  stats->dwActiveOpens = tcp_stat.tcps_connattempt;
+  stats->dwPassiveOpens = tcp_stat.tcps_accepts;
+  stats->dwAttemptFails = tcp_stat.tcps_conndrops;
+  stats->dwEstabResets = tcp_stat.tcps_drops;
+  stats->dwCurrEstab = 0;
+  stats->dwInSegs = tcp_stat.tcps_rcvtotal;
+  stats->dwOutSegs = tcp_stat.tcps_sndtotal - tcp_stat.tcps_sndrexmitpack;
+  stats->dwRetransSegs = tcp_stat.tcps_sndrexmitpack;
+  stats->dwInErrs = tcp_stat.tcps_rcvbadsum + tcp_stat.tcps_rcvbadoff + tcp_stat.tcps_rcvmemdrop + tcp_stat.tcps_rcvshort;
+  stats->dwOutRsts = tcp_stat.tcps_sndctrl - tcp_stat.tcps_closed;
+  stats->dwNumConns = tcp_stat.tcps_connects;
+
+  return NO_ERROR;
+
+#else
   FILE *fp;
 
   if (!stats)
@@ -475,7 +702,7 @@ DWORD getTCPStats(MIB_TCPSTATS *stats)
           ptr = endPtr;
         }
         if (ptr && *ptr) {
-          stats->dwRtoMin = strtoul(ptr, &endPtr, 10);
+          stats->dwRtoMax = strtoul(ptr, &endPtr, 10);
           ptr = endPtr;
         }
         if (ptr && *ptr) {
@@ -534,10 +761,35 @@ DWORD getTCPStats(MIB_TCPSTATS *stats)
   }
 
   return NO_ERROR;
+#endif
 }
 
 DWORD getUDPStats(MIB_UDPSTATS *stats)
 {
+#if defined(HAVE_SYS_SYSCTL_H) && defined(UDPCTL_STATS)
+  int mib[] = {CTL_NET, PF_INET, IPPROTO_UDP, UDPCTL_STATS};
+#define MIB_LEN (sizeof(mib) / sizeof(mib[0]))
+  struct udpstat udp_stat;
+  size_t needed;
+  if (!stats)
+      return ERROR_INVALID_PARAMETER;
+
+  needed = sizeof(udp_stat);
+
+  if(sysctl(mib, MIB_LEN, &udp_stat, &needed, NULL, 0) == -1)
+  {
+      ERR ("failed to get udpstat\n");
+      return ERROR_NOT_SUPPORTED;
+  }
+
+  stats->dwInDatagrams = udp_stat.udps_ipackets;
+  stats->dwOutDatagrams = udp_stat.udps_opackets;
+  stats->dwNoPorts = udp_stat.udps_noport;
+  stats->dwInErrors = udp_stat.udps_hdrops + udp_stat.udps_badsum + udp_stat.udps_fullsock + udp_stat.udps_badlen;
+  stats->dwNumAddrs = getNumUdpEntries();
+
+  return NO_ERROR;
+#else
   FILE *fp;
 
   if (!stats)
@@ -593,6 +845,7 @@ DWORD getUDPStats(MIB_UDPSTATS *stats)
   }
 
   return NO_ERROR;
+#endif
 }
 
 static DWORD getNumWithOneHeader(const char *filename)
@@ -863,7 +1116,7 @@ DWORD getRouteTable(PMIB_IPFORWARDTABLE *ppIpForwardTable, HANDLE heap,
                 addr = 0;
              else if (sa->sa_family != AF_INET)
              {
-                ERR ("Received unsupported sockaddr family 0x%x\n",
+                WARN ("Received unsupported sockaddr family 0x%x\n",
                      sa->sa_family);
                 addr = 0;
              }
@@ -889,7 +1142,7 @@ DWORD getRouteTable(PMIB_IPFORWARDTABLE *ppIpForwardTable, HANDLE heap,
                    break;
 
                 default:
-                   ERR ("Unexpected address type 0x%x\n", i);
+                   WARN ("Unexpected address type 0x%x\n", i);
              }
           }
 
@@ -993,18 +1246,52 @@ DWORD getRouteTable(PMIB_IPFORWARDTABLE *ppIpForwardTable, HANDLE heap,
 
 DWORD getNumArpEntries(void)
 {
+#if defined(HAVE_SYS_SYSCTL_H) && defined(NET_RT_DUMP)
+  int mib[] = {CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_FLAGS, RTF_LLINFO};
+#define MIB_LEN (sizeof(mib) / sizeof(mib[0]))
+  DWORD arpEntries = 0;
+  size_t needed;
+  char *buf, *lim, *next;
+  struct rt_msghdr *rtm;
+  struct sockaddr_inarp *sinarp;
+  struct sockaddr_dl *sdl;
+
+  if (sysctl (mib, MIB_LEN,  NULL, &needed, NULL, 0) == -1)
+  {
+     ERR ("failed to get size of arp table\n");
+     return 0;
+  }
+
+  buf = HeapAlloc (GetProcessHeap (), 0, needed);
+  if (!buf) return 0;
+
+  if (sysctl (mib, MIB_LEN, buf, &needed, NULL, 0) == -1)
+  {
+     ERR ("failed to get arp table\n");
+     HeapFree (GetProcessHeap (), 0, buf);
+     return 0;
+  }
+
+  lim = buf + needed;
+  next = buf;
+  while(next < lim)
+  {
+      rtm = (struct rt_msghdr *)next;
+      sinarp=(struct sockaddr_inarp *)(rtm + 1);
+      sdl = (struct sockaddr_dl *)((char *)sinarp + ROUNDUP(sinarp->sin_len));
+      if(sdl->sdl_alen) /* arp entry */
+      arpEntries++;
+      next += rtm->rtm_msglen;
+  }
+  HeapFree (GetProcessHeap (), 0, buf);
+  return arpEntries;
+#endif
   return getNumWithOneHeader("/proc/net/arp");
 }
 
 DWORD getArpTable(PMIB_IPNETTABLE *ppIpNetTable, HANDLE heap, DWORD flags)
 {
-  DWORD ret;
-
-#if defined(HAVE_SYS_SYSCTL_H) && defined(NET_RT_DUMP)
-  ERR ("unimplemented!\n");
-  return ERROR_NOT_SUPPORTED;
-#endif
-
+  DWORD ret = NO_ERROR;
   if (!ppIpNetTable)
     ret = ERROR_INVALID_PARAMETER;
   else {
@@ -1015,10 +1302,76 @@ DWORD getArpTable(PMIB_IPNETTABLE *ppIpNetTable, HANDLE heap, DWORD flags)
     if (numEntries > 1)
       size += (numEntries - 1) * sizeof(MIB_IPNETROW);
     table = HeapAlloc(heap, flags, size);
+#if defined(HAVE_SYS_SYSCTL_H) && defined(NET_RT_DUMP)
+    if (table)
+    {
+      int mib[] = {CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_FLAGS, RTF_LLINFO};
+#define MIB_LEN (sizeof(mib) / sizeof(mib[0]))
+      size_t needed;
+      char *buf, *lim, *next;
+      struct rt_msghdr *rtm;
+      struct sockaddr_inarp *sinarp;
+      struct sockaddr_dl *sdl;
+
+      *ppIpNetTable = table;
+      table->dwNumEntries = 0;
+
+      if (sysctl (mib, MIB_LEN,  NULL, &needed, NULL, 0) == -1)
+      {
+         ERR ("failed to get size of arp table\n");
+         return ERROR_NOT_SUPPORTED;
+      }
+
+      buf = HeapAlloc (GetProcessHeap (), 0, needed);
+      if (!buf) return ERROR_OUTOFMEMORY;
+
+      if (sysctl (mib, MIB_LEN, buf, &needed, NULL, 0) == -1)
+      {
+         ERR ("failed to get arp table\n");
+         HeapFree (GetProcessHeap (), 0, buf);
+         return ERROR_NOT_SUPPORTED;
+      }
+
+      lim = buf + needed;
+      next = buf;
+      while(next < lim)
+      {
+          rtm = (struct rt_msghdr *)next;
+          sinarp=(struct sockaddr_inarp *)(rtm + 1);
+          sdl = (struct sockaddr_dl *)((char *)sinarp + ROUNDUP(sinarp->sin_len));
+          if(sdl->sdl_alen) /* arp entry */
+          {
+              DWORD byte = strtoul(&sdl->sdl_data[sdl->sdl_alen], NULL, 16);
+              memset(&table->table[table->dwNumEntries], 0, sizeof(MIB_IPNETROW));
+              table->table[table->dwNumEntries].dwAddr = sinarp->sin_addr.s_addr;
+              table->table[table->dwNumEntries].dwIndex = sdl->sdl_index;
+              table->table[table->dwNumEntries].dwPhysAddrLen = sdl->sdl_alen;
+
+              table->table[table->dwNumEntries].bPhysAddr[
+                  table->table[table->dwNumEntries].dwPhysAddrLen++] =
+                  byte & 0x0ff;
+              if(rtm->rtm_rmx.rmx_expire == 0)
+                  table->table[table->dwNumEntries].dwType = MIB_IPNET_TYPE_STATIC;
+              else if(sinarp->sin_other & SIN_PROXY)
+                  table->table[table->dwNumEntries].dwType = MIB_IPNET_TYPE_OTHER;
+              else if(rtm->rtm_rmx.rmx_expire != 0)
+                  table->table[table->dwNumEntries].dwType = MIB_IPNET_TYPE_DYNAMIC;
+              else
+                  table->table[table->dwNumEntries].dwType = MIB_IPNET_TYPE_INVALID;
+
+              table->dwNumEntries++;
+          }
+          next += rtm->rtm_msglen;
+      }
+      HeapFree (GetProcessHeap (), 0, buf);
+    }
+    else
+        ret = ERROR_OUTOFMEMORY;
+  return ret;
+#endif
+
     if (table) {
       FILE *fp;
-
-      ret = NO_ERROR;
       *ppIpNetTable = table;
       table->dwNumEntries = 0;
       /* get from /proc/net/arp, no error if can't */
@@ -1096,7 +1449,11 @@ DWORD getArpTable(PMIB_IPNETTABLE *ppIpNetTable, HANDLE heap, DWORD flags)
 
 DWORD getNumUdpEntries(void)
 {
+#if defined(HAVE_SYS_SYSCTL_H) && defined(HAVE_NETINET_IN_PCB_H)
+   return getNumWithOneHeader ("net.inet.udp.pcblist");
+#else
   return getNumWithOneHeader("/proc/net/udp");
+#endif
 }
 
 DWORD getUdpTable(PMIB_UDPTABLE *ppUdpTable, HANDLE heap, DWORD flags)

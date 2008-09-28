@@ -1490,6 +1490,8 @@ BOOL WINAPI InternetCrackUrlW(LPCWSTR lpszUrl_orig, DWORD dwUrlLength_orig, DWOR
     }
     else
     {
+        if (lpUC->lpszUrlPath && (lpUC->dwUrlPathLength > 0))
+            lpUC->lpszUrlPath[0] = 0;
         lpUC->dwUrlPathLength = 0;
     }
 
@@ -2258,44 +2260,44 @@ BOOL WINAPI InternetSetOptionW(HINTERNET hInternet, DWORD dwOption,
       break;
     case INTERNET_OPTION_ERROR_MASK:
       {
-        unsigned long flags=*(unsigned long*)lpBuffer;
-        FIXME("Option INTERNET_OPTION_ERROR_MASK(%ld): STUB\n",flags);
+        ULONG flags = *(ULONG *)lpBuffer;
+        FIXME("Option INTERNET_OPTION_ERROR_MASK(%d): STUB\n", flags);
       }
       break;
     case INTERNET_OPTION_CODEPAGE:
       {
-        unsigned long codepage=*(unsigned long*)lpBuffer;
-        FIXME("Option INTERNET_OPTION_CODEPAGE (%ld): STUB\n",codepage);
+        ULONG codepage = *(ULONG *)lpBuffer;
+        FIXME("Option INTERNET_OPTION_CODEPAGE (%d): STUB\n", codepage);
       }
       break;
     case INTERNET_OPTION_REQUEST_PRIORITY:
       {
-        unsigned long priority=*(unsigned long*)lpBuffer;
-        FIXME("Option INTERNET_OPTION_REQUEST_PRIORITY (%ld): STUB\n",priority);
+        ULONG priority = *(ULONG *)lpBuffer;
+        FIXME("Option INTERNET_OPTION_REQUEST_PRIORITY (%d): STUB\n", priority);
       }
       break;
     case INTERNET_OPTION_CONNECT_TIMEOUT:
       {
-        unsigned long connecttimeout=*(unsigned long*)lpBuffer;
-        FIXME("Option INTERNET_OPTION_CONNECT_TIMEOUT (%ld): STUB\n",connecttimeout);
+        ULONG connecttimeout = *(ULONG *)lpBuffer;
+        FIXME("Option INTERNET_OPTION_CONNECT_TIMEOUT (%d): STUB\n", connecttimeout);
       }
       break;
     case INTERNET_OPTION_DATA_RECEIVE_TIMEOUT:
       {
-        unsigned long receivetimeout=*(unsigned long*)lpBuffer;
-        FIXME("Option INTERNET_OPTION_DATA_RECEIVE_TIMEOUT (%ld): STUB\n",receivetimeout);
+        ULONG receivetimeout = *(ULONG *)lpBuffer;
+        FIXME("Option INTERNET_OPTION_DATA_RECEIVE_TIMEOUT (%d): STUB\n", receivetimeout);
       }
       break;
     case INTERNET_OPTION_MAX_CONNS_PER_SERVER:
       {
-        unsigned long conns=*(unsigned long*)lpBuffer;
-        FIXME("Option INTERNET_OPTION_MAX_CONNS_PER_SERVER (%ld): STUB\n",conns);
+        ULONG conns = *(ULONG *)lpBuffer;
+        FIXME("Option INTERNET_OPTION_MAX_CONNS_PER_SERVER (%d): STUB\n", conns);
       }
       break;
     case INTERNET_OPTION_MAX_CONNS_PER_1_0_SERVER:
       {
-        unsigned long conns=*(unsigned long*)lpBuffer;
-        FIXME("Option INTERNET_OPTION_MAX_CONNS_PER_1_0_SERVER (%ld): STUB\n",conns);
+        ULONG conns = *(ULONG *)lpBuffer;
+        FIXME("Option INTERNET_OPTION_MAX_CONNS_PER_1_0_SERVER (%d): STUB\n", conns);
       }
       break;
     case INTERNET_OPTION_RESET_URLCACHE_SESSION:
@@ -2312,11 +2314,17 @@ BOOL WINAPI InternetSetOptionW(HINTERNET hInternet, DWORD dwOption,
 	break;
     case INTERNET_OPTION_SEND_TIMEOUT:
     case INTERNET_OPTION_RECEIVE_TIMEOUT:
-        FIXME("INTERNET_OPTION_SEND/RECEIVE_TIMEOUT\n");
+    {
+        ULONG timeout = *(ULONG *)lpBuffer;
+        FIXME("INTERNET_OPTION_SEND/RECEIVE_TIMEOUT %d\n", timeout);
         break;
+    }
     case INTERNET_OPTION_CONNECT_RETRIES:
-        FIXME("Option INTERNET_OPTION_CONNECT_RETRIES: STUB\n");
+    {
+        ULONG retries = *(ULONG *)lpBuffer;
+        FIXME("INTERNET_OPTION_CONNECT_RETRIES %d\n", retries);
         break;
+    }
     case INTERNET_OPTION_CONTEXT_VALUE:
 	 FIXME("Option INTERNET_OPTION_CONTEXT_VALUE; STUB\n");
 	 break;

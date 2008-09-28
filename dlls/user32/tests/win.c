@@ -2164,9 +2164,23 @@ static void test_vis_rgn( HWND hwnd )
     ReleaseDC( hwnd, hdc );
 }
 
+static LRESULT WINAPI set_focus_on_activate_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_ACTIVATE && LOWORD(wp) == WA_ACTIVE)
+    {
+        HWND child = GetWindow(hwnd, GW_CHILD);
+        ok(child != 0, "couldn't find child window\n");
+        SetFocus(child);
+        ok(GetFocus() == child, "Focus should be on child %p\n", child);
+        return 0;
+    }
+    return DefWindowProc(hwnd, msg, wp, lp);
+}
+
 static void test_SetFocus(HWND hwnd)
 {
     HWND child;
+    WNDPROC old_wnd_proc;
 
     /* check if we can set focus to non-visible windows */
 
@@ -2212,6 +2226,28 @@ static void test_SetFocus(HWND hwnd)
     EnableWindow(hwnd, FALSE);
     ok( GetFocus() == child, "Focus should still be on child %p\n", child );
     EnableWindow(hwnd, TRUE);
+
+    ok( GetActiveWindow() == hwnd, "parent window %p should be active\n", hwnd);
+    ShowWindow(hwnd, SW_SHOWMINIMIZED);
+    ok( GetActiveWindow() == hwnd, "parent window %p should be active\n", hwnd);
+todo_wine
+    ok( GetFocus() != child, "Focus should not be on child %p\n", child );
+    ok( GetFocus() != hwnd, "Focus should not be on parent %p\n", hwnd );
+    ShowWindow(hwnd, SW_RESTORE);
+    ok( GetActiveWindow() == hwnd, "parent window %p should be active\n", hwnd);
+    ok( GetFocus() == hwnd, "Focus should be on parent %p\n", hwnd );
+    ShowWindow(hwnd, SW_SHOWMINIMIZED);
+    ok( GetActiveWindow() == hwnd, "parent window %p should be active\n", hwnd);
+    ok( GetFocus() != child, "Focus should not be on child %p\n", child );
+todo_wine
+    ok( GetFocus() != hwnd, "Focus should not be on parent %p\n", hwnd );
+    old_wnd_proc = (WNDPROC)SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)set_focus_on_activate_proc);
+    ShowWindow(hwnd, SW_RESTORE);
+    ok( GetActiveWindow() == hwnd, "parent window %p should be active\n", hwnd);
+todo_wine
+    ok( GetFocus() == child, "Focus should be on child %p, not %p\n", child, GetFocus() );
+
+    SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)old_wnd_proc);
 
     DestroyWindow( child );
 }
@@ -4657,33 +4693,32 @@ static void test_GetWindowModuleFileName(void)
 
     hinst = GetModuleHandle(0);
 
-    /* MSDN mentions ERROR_INSUFFICIENT_BUFFER, but XP doesn't do it */
     SetLastError(0xdeadbeef);
     ret2 = GetModuleFileName(hinst, buf2, ret1 - 2);
     ok(ret2 == ret1 - 2, "expected %u, got %u\n", ret1 - 2, ret2);
-    ok(GetLastError() == 0xdeadbeef ||
-       GetLastError() == ERROR_INSUFFICIENT_BUFFER, /* win2k3 */
+    ok(GetLastError() == 0xdeadbeef /* XP */ ||
+       GetLastError() == ERROR_INSUFFICIENT_BUFFER, /* win2k3, vista */
        "expected 0xdeadbeef or ERROR_INSUFFICIENT_BUFFER, got %u\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret2 = GetModuleFileName(hinst, buf2, 0);
     ok(!ret2, "GetModuleFileName should return 0\n");
-    ok(GetLastError() == 0xdeadbeef ||
-       GetLastError() == ERROR_INSUFFICIENT_BUFFER, /* win2k3 */
+    ok(GetLastError() == 0xdeadbeef /* XP */ ||
+       GetLastError() == ERROR_INSUFFICIENT_BUFFER, /* win2k3, vista */
        "expected 0xdeadbeef or ERROR_INSUFFICIENT_BUFFER, got %u\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret2 = pGetWindowModuleFileNameA(hwnd, buf2, ret1 - 2);
     ok(ret2 == ret1 - 2, "expected %u, got %u\n", ret1 - 2, ret2);
-    ok(GetLastError() == 0xdeadbeef ||
-       GetLastError() == ERROR_INSUFFICIENT_BUFFER, /* win2k3 */
+    ok(GetLastError() == 0xdeadbeef /* XP */ ||
+       GetLastError() == ERROR_INSUFFICIENT_BUFFER, /* win2k3, vista */
        "expected 0xdeadbeef or ERROR_INSUFFICIENT_BUFFER, got %u\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret2 = pGetWindowModuleFileNameA(hwnd, buf2, 0);
     ok(!ret2, "expected 0, got %u\n", ret2);
-    ok(GetLastError() == 0xdeadbeef ||
-       GetLastError() == ERROR_INSUFFICIENT_BUFFER, /* win2k3 */
+    ok(GetLastError() == 0xdeadbeef /* XP */ ||
+       GetLastError() == ERROR_INSUFFICIENT_BUFFER, /* win2k3, vista */
        "expected 0xdeadbeef or ERROR_INSUFFICIENT_BUFFER, got %u\n", GetLastError());
 
     DestroyWindow(hwnd);
@@ -4708,26 +4743,71 @@ static void test_GetWindowModuleFileName(void)
     ok(!ret1, "expected 0, got %u\n", ret1);
 }
 
+static void test_hwnd_message(void)
+{
+    HWND parent = 0, hwnd, found;
+    RECT rect;
+
+    hwnd = CreateWindowExA(0, "MainWindowClass", "message window", WS_CAPTION | WS_VISIBLE,
+                           100, 100, 200, 200, HWND_MESSAGE, 0, 0, NULL);
+    if (!hwnd)
+    {
+        win_skip("CreateWindowExA with parent HWND_MESSAGE failed\n");
+        return;
+    }
+
+    ok( !GetParent(hwnd), "GetParent should return 0 for message only windows\n" );
+    if (pGetAncestor)
+    {
+        char buffer[100];
+        HWND root, desktop = GetDesktopWindow();
+
+        parent = pGetAncestor(hwnd, GA_PARENT);
+        ok(parent != 0, "GetAncestor(GA_PARENT) should not return 0 for message windows\n");
+        ok(parent != desktop, "GetAncestor(GA_PARENT) should not return desktop for message windows\n");
+        root = pGetAncestor(hwnd, GA_ROOT);
+        ok(root == hwnd, "GetAncestor(GA_ROOT) should return hwnd for message windows\n");
+        ok( !pGetAncestor(parent, GA_PARENT), "parent shouldn't have a parent\n" );
+        trace("parent %p root %p desktop %p\n", parent, root, desktop);
+        if (!GetClassNameA( parent, buffer, sizeof(buffer) )) buffer[0] = 0;
+        ok( !lstrcmpi( buffer, "Message" ), "wrong parent class '%s'\n", buffer );
+        GetWindowRect( parent, &rect );
+        ok( rect.left == 0 && rect.right == 100 && rect.top == 0 && rect.bottom == 100,
+            "wrong parent rect %d,%d-%d,%d\n", rect.left, rect.top, rect.right, rect.bottom );
+    }
+    GetWindowRect( hwnd, &rect );
+    ok( rect.left == 100 && rect.right == 300 && rect.top == 100 && rect.bottom == 300,
+        "wrong window rect %d,%d-%d,%d\n", rect.left, rect.top, rect.right, rect.bottom );
+
+    /* test FindWindow behavior */
+
+    found = FindWindowExA( 0, 0, 0, "message window" );
+    ok( found == hwnd, "didn't find message window %p/%p\n", found, hwnd );
+    found = FindWindowExA( GetDesktopWindow(), 0, 0, "message window" );
+    ok( found == 0, "found message window %p/%p\n", found, hwnd );
+    if (parent)
+    {
+        found = FindWindowExA( parent, 0, 0, "message window" );
+        ok( found == hwnd, "didn't find message window %p/%p\n", found, hwnd );
+    }
+
+    /* test IsChild behavior */
+
+    if (parent) ok( !IsChild( parent, hwnd ), "HWND_MESSAGE is child of top window\n" );
+
+    /* test IsWindowVisible behavior */
+
+    ok( !IsWindowVisible( hwnd ), "HWND_MESSAGE window is visible\n" );
+    if (parent) ok( !IsWindowVisible( parent ), "HWND_MESSAGE parent is visible\n" );
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(win)
 {
     pGetAncestor = (void *)GetProcAddress( GetModuleHandleA("user32.dll"), "GetAncestor" );
     pGetWindowInfo = (void *)GetProcAddress( GetModuleHandleA("user32.dll"), "GetWindowInfo" );
     pGetWindowModuleFileNameA = (void *)GetProcAddress( GetModuleHandleA("user32.dll"), "GetWindowModuleFileNameA" );
-
-    hwndMain = CreateWindowExA(0, "static", NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, 0, 0, NULL);
-    if (hwndMain)
-    {
-        ok(!GetParent(hwndMain), "GetParent should return 0 for message only windows\n");
-        if (pGetAncestor)
-        {
-            hwndMessage = pGetAncestor(hwndMain, GA_PARENT);
-            ok(hwndMessage != 0, "GetAncestor(GA_PARENT) should not return 0 for message only windows\n");
-            trace("hwndMessage %p\n", hwndMessage);
-        }
-        DestroyWindow(hwndMain);
-    }
-    else
-        trace("CreateWindowExA with parent HWND_MESSAGE failed\n");
 
     if (!RegisterWindowClasses()) assert(0);
 
@@ -4739,8 +4819,6 @@ START_TEST(win)
                                WS_MAXIMIZEBOX | WS_POPUP,
                                100, 100, 200, 200,
                                0, 0, GetModuleHandle(0), NULL);
-    test_nonclient_area(hwndMain);
-
     hwndMain2 = CreateWindowExA(/*WS_EX_TOOLWINDOW*/ 0, "MainWindowClass", "Main window 2",
                                 WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
                                 WS_MAXIMIZEBOX | WS_POPUP,
@@ -4752,6 +4830,8 @@ START_TEST(win)
     our_pid = GetWindowThreadProcessId(hwndMain, NULL);
 
     /* Add the tests below this line */
+    test_hwnd_message();
+    test_nonclient_area(hwndMain);
     test_params();
     test_GetWindowModuleFileName();
     test_capture_1();

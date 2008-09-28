@@ -93,6 +93,7 @@ typedef struct InputPin
 	REFERENCE_TIME tStop;
 	double dRate;
 	BOOL flushing, end_of_stream;
+	IMemAllocator *preferred_allocator;
 } InputPin;
 
 typedef struct OutputPin
@@ -142,7 +143,7 @@ typedef struct PullPin
 #define Req_Pause  3
 
 /*** Constructors ***/
-HRESULT InputPin_Construct(const IPinVtbl *InputPin_Vtbl, const PIN_INFO * pPinInfo, SAMPLEPROC_PUSH pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, CLEANUPPROC pCleanUp, LPCRITICAL_SECTION pCritSec, IPin ** ppPin);
+HRESULT InputPin_Construct(const IPinVtbl *InputPin_Vtbl, const PIN_INFO * pPinInfo, SAMPLEPROC_PUSH pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, CLEANUPPROC pCleanUp, LPCRITICAL_SECTION pCritSec, IMemAllocator *, IPin ** ppPin);
 HRESULT OutputPin_Construct(const IPinVtbl *OutputPin_Vtbl, long outputpin_size, const PIN_INFO * pPinInfo, ALLOCATOR_PROPERTIES *props, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, IPin ** ppPin);
 HRESULT PullPin_Construct(const IPinVtbl *PullPin_Vtbl, const PIN_INFO * pPinInfo, SAMPLEPROC_PULL pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, CLEANUPPROC pCleanUp, STOPPROCESSPROC, REQUESTPROC pCustomRequest, LPCRITICAL_SECTION pCritSec, IPin ** ppPin);
 
@@ -203,6 +204,7 @@ HRESULT WINAPI MemInputPin_ReceiveCanBlock(IMemInputPin * iface);
 
 /* Pull Pin */
 HRESULT WINAPI PullPin_ReceiveConnection(IPin * iface, IPin * pReceivePin, const AM_MEDIA_TYPE * pmt);
+HRESULT WINAPI PullPin_Disconnect(IPin * iface);
 HRESULT WINAPI PullPin_QueryInterface(IPin * iface, REFIID riid, LPVOID * ppv);
 ULONG   WINAPI PullPin_Release(IPin * iface);
 HRESULT WINAPI PullPin_EndOfStream(IPin * iface);
@@ -211,8 +213,6 @@ HRESULT WINAPI PullPin_EndFlush(IPin * iface);
 HRESULT WINAPI PullPin_NewSegment(IPin * iface, REFERENCE_TIME tStart, REFERENCE_TIME tStop, double dRate);
 
 /* Thread interaction functions: Hold the thread_lock before calling them */
-HRESULT PullPin_InitProcessing(PullPin * This);
 HRESULT PullPin_StartProcessing(PullPin * This);
-HRESULT PullPin_StopProcessing(PullPin * This);
 HRESULT PullPin_PauseProcessing(PullPin * This);
 HRESULT PullPin_WaitForStateChange(PullPin * This, DWORD dwMilliseconds);

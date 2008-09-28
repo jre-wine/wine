@@ -35,6 +35,16 @@ static UINT CALLBACK OFNHookProc( HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPa
         if( nmh->code == CDN_INITDONE)
         {
             PostMessage( GetParent(hDlg), WM_COMMAND, IDCANCEL, FALSE);
+        } else if (nmh->code == CDN_FOLDERCHANGE )
+        {
+            char buf[1024];
+            int ret;
+
+            memset(buf, 0x66, sizeof(buf));
+            ret = SendMessage( GetParent(hDlg), CDM_GETFOLDERIDLIST, 5, (LPARAM)buf);
+            ok(ret > 0, "CMD_GETFOLDERIDLIST not implemented\n");
+            if (ret > 5)
+                ok(buf[0] == 0x66 && buf[1] == 0x66, "CMD_GETFOLDERIDLIST: The buffer was touched on failure\n");
         }
     }
 
@@ -47,6 +57,9 @@ static void test_DialogCancel(void)
     OPENFILENAMEA ofn;
     BOOL result;
     char szFileName[MAX_PATH] = "";
+    char szInitialDir[MAX_PATH];
+
+    GetWindowsDirectory(szInitialDir, MAX_PATH);
 
     ZeroMemory(&ofn, sizeof(ofn));
 
@@ -58,6 +71,7 @@ static void test_DialogCancel(void)
     ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_ENABLEHOOK;
     ofn.lpstrDefExt = "txt";
     ofn.lpfnHook = (LPOFNHOOKPROC) OFNHookProc;
+    ofn.lpstrInitialDir = szInitialDir;
 
     PrintDlgA(NULL);
     ok(CDERR_INITIALIZATION == CommDlgExtendedError(), "expected %d, got %d\n",
@@ -67,6 +81,24 @@ static void test_DialogCancel(void)
     ok(0 == result, "expected %d, got %d\n", 0, result);
     ok(0 == CommDlgExtendedError(), "expected %d, got %d\n", 0,
        CommDlgExtendedError());
+
+    PrintDlgA(NULL);
+    ok(CDERR_INITIALIZATION == CommDlgExtendedError(), "expected %d, got %d\n",
+              CDERR_INITIALIZATION, CommDlgExtendedError());
+
+    result = GetSaveFileNameA(&ofn);
+    ok(0 == result, "expected %d, got %d\n", 0, result);
+    ok(0 == CommDlgExtendedError(), "expected %d, got %d\n", 0,
+       CommDlgExtendedError());
+
+    PrintDlgA(NULL);
+    ok(CDERR_INITIALIZATION == CommDlgExtendedError(), "expected %d, got %d\n",
+              CDERR_INITIALIZATION, CommDlgExtendedError());
+
+    /* Before passing the ofn to Unicode functions, remove the ANSI strings */
+    ofn.lpstrFilter = NULL;
+    ofn.lpstrInitialDir = NULL;
+    ofn.lpstrDefExt = NULL;
 
     PrintDlgA(NULL);
     ok(CDERR_INITIALIZATION == CommDlgExtendedError(), "expected %d, got %d\n",
@@ -82,19 +114,6 @@ static void test_DialogCancel(void)
         ok(0 == CommDlgExtendedError(), "expected %d, got %d\n", 0,
            CommDlgExtendedError());
     }
-
-    PrintDlgA(NULL);
-    ok(CDERR_INITIALIZATION == CommDlgExtendedError(), "expected %d, got %d\n",
-              CDERR_INITIALIZATION, CommDlgExtendedError());
-
-    result = GetSaveFileNameA(&ofn);
-    ok(0 == result, "expected %d, got %d\n", 0, result);
-    ok(0 == CommDlgExtendedError(), "expected %d, got %d\n", 0,
-       CommDlgExtendedError());
-
-    PrintDlgA(NULL);
-    ok(CDERR_INITIALIZATION == CommDlgExtendedError(), "expected %d, got %d\n",
-              CDERR_INITIALIZATION, CommDlgExtendedError());
 
     SetLastError(0xdeadbeef);
     result = GetSaveFileNameW((LPOPENFILENAMEW) &ofn);

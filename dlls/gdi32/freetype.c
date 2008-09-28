@@ -328,7 +328,7 @@ struct tagGdiFont {
     INT orientation;
     FONT_DESC font_desc;
     LONG aveWidth, ppem;
-    float scale_y;
+    double scale_y;
     SHORT yMax;
     SHORT yMin;
     DWORD ntmFlags;
@@ -359,8 +359,6 @@ static struct list font_list = LIST_INIT(font_list);
 static const WCHAR defSerif[] = {'T','i','m','e','s',' ','N','e','w',' ','R','o','m','a','n','\0'};
 static const WCHAR defSans[] = {'A','r','i','a','l','\0'};
 static const WCHAR defFixed[] = {'C','o','u','r','i','e','r',' ','N','e','w','\0'};
-
-static const WCHAR RegularW[] = {'R','e','g','u','l','a','r','\0'};
 
 static const WCHAR fontsW[] = {'\\','f','o','n','t','s','\0'};
 static const WCHAR win9x_font_reg_key[] = {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
@@ -809,7 +807,7 @@ static inline BOOL is_win9x(void)
    in the highest 16 bits and the decimal part in the lowest 16 bits of the FT_Fixed.
    It fails if the integer part of the float number is greater than SHORT_MAX.
 */
-static inline FT_Fixed FT_FixedFromFloat(float f)
+static inline FT_Fixed FT_FixedFromFloat(double f)
 {
 	short value = f;
 	unsigned short fract = (f - value) * 0xFFFF;
@@ -1008,7 +1006,7 @@ static void LoadSubstList(void)
 
 	    /* Win 2000 doesn't allow mapping between different charsets
 	       or mapping of DEFAULT_CHARSET */
-	    if((psub->to.charset != psub->from.charset) ||
+	    if ((psub->from.charset && psub->to.charset != psub->from.charset) ||
 	       psub->to.charset == DEFAULT_CHARSET) {
 	        HeapFree(GetProcessHeap(), 0, psub->to.name);
 		HeapFree(GetProcessHeap(), 0, psub->from.name);
@@ -1945,7 +1943,7 @@ static void update_reg_entries(void)
             face = LIST_ENTRY(face_elem_ptr, Face, entry);
             if(!face->external) continue;
             len = len_fam;
-            if(strcmpiW(face->StyleName, RegularW))
+            if (!(face->ntmFlags & NTM_REGULAR))
                 len = len_fam + strlenW(face->StyleName) + 1;
             valueW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
             strcpyW(valueW, family->FamilyName);
@@ -2124,84 +2122,144 @@ static const struct nls_update_font_list
     UINT ansi_cp, oem_cp;
     const char *oem, *fixed, *system;
     const char *courier, *serif, *small, *sserif;
-   /* these are for font substitute */
+    /* these are for font substitutes */
     const char *shelldlg, *tmsrmn;
+    const char *fixed_0, *system_0, *courier_0, *serif_0, *small_0, *sserif_0,
+               *helv_0, *tmsrmn_0;
+    const struct subst
+    {
+        const char *from, *to;
+    } arial_0, courier_new_0, times_new_roman_0;
 } nls_update_font_list[] =
 {
     /* Latin 1 (United States) */
     { 1252, 437, "vgaoem.fon", "vgafix.fon", "vgasys.fon",
       "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
       "Tahoma","Times New Roman",
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+      { 0 }, { 0 }, { 0 }
     },
     /* Latin 1 (Multilingual) */
     { 1252, 850, "vga850.fon", "vgafix.fon", "vgasys.fon",
       "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
       "Tahoma","Times New Roman",  /* FIXME unverified */
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+      { 0 }, { 0 }, { 0 }
     },
     /* Eastern Europe */
     { 1250, 852, "vga852.fon", "vgafixe.fon", "vgasyse.fon",
       "couree.fon", "serifee.fon", "smallee.fon", "sserifee.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
+      "Fixedsys,238", "System,238",
+      "Courier New,238", "MS Serif,238", "Small Fonts,238",
+      "MS Sans Serif,238", "MS Sans Serif,238", "MS Serif,238",
+      { "Arial CE,0", "Arial,238" },
+      { "Courier New CE,0", "Courier New,238" },
+      { "Times New Roman CE,0", "Times New Roman,238" }
     },
     /* Cyrillic */
     { 1251, 866, "vga866.fon", "vgafixr.fon", "vgasysr.fon",
       "courer.fon", "serifer.fon", "smaller.fon", "sserifer.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
+      "Fixedsys,204", "System,204",
+      "Courier New,204", "MS Serif,204", "Small Fonts,204",
+      "MS Sans Serif,204", "MS Sans Serif,204", "MS Serif,204",
+      { "Arial Cyr,0", "Arial,204" },
+      { "Courier New Cyr,0", "Courier New,204" },
+      { "Times New Roman Cyr,0", "Times New Roman,204" }
     },
     /* Greek */
     { 1253, 737, "vga869.fon", "vgafixg.fon", "vgasysg.fon",
       "coureg.fon", "serifeg.fon", "smalleg.fon", "sserifeg.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
+      "Fixedsys,161", "System,161",
+      "Courier New,161", "MS Serif,161", "Small Fonts,161",
+      "MS Sans Serif,161", "MS Sans Serif,161", "MS Serif,161",
+      { "Arial Greek,0", "Arial,161" },
+      { "Courier New Greek,0", "Courier New,161" },
+      { "Times New Roman Greek,0", "Times New Roman,161" }
     },
     /* Turkish */
     { 1254, 857, "vga857.fon", "vgafixt.fon", "vgasyst.fon",
       "couret.fon", "serifet.fon", "smallet.fon", "sserifet.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
+      "Fixedsys,162", "System,162",
+      "Courier New,162", "MS Serif,162", "Small Fonts,162",
+      "MS Sans Serif,162", "MS Sans Serif,162", "MS Serif,162",
+      { "Arial Tur,0", "Arial,162" },
+      { "Courier New Tur,0", "Courier New,162" },
+      { "Times New Roman Tur,0", "Times New Roman,162" }
     },
     /* Hebrew */
     { 1255, 862, "vgaoem.fon", "vgaf1255.fon", "vgas1255.fon",
       "coue1255.fon", "sere1255.fon", "smae1255.fon", "ssee1255.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
+      "Fixedsys,177", "System,177",
+      "Courier New,177", "MS Serif,177", "Small Fonts,177",
+      "MS Sans Serif,177", "MS Sans Serif,177", "MS Serif,177",
+      { 0 }, { 0 }, { 0 }
     },
     /* Arabic */
     { 1256, 720, "vgaoem.fon", "vgaf1256.fon", "vgas1256.fon",
       "coue1256.fon", "sere1256.fon", "smae1256.fon", "ssee1256.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
+      "Fixedsys,178", "System,178",
+      "Courier New,178", "MS Serif,178", "Small Fonts,178",
+      "MS Sans Serif,178", "MS Sans Serif,178", "MS Serif,178",
+      { 0 }, { 0 }, { 0 }
     },
     /* Baltic */
     { 1257, 775, "vga775.fon", "vgaf1257.fon", "vgas1257.fon",
       "coue1257.fon", "sere1257.fon", "smae1257.fon", "ssee1257.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
+      "Fixedsys,186", "System,186",
+      "Courier New,186", "MS Serif,186", "Small Fonts,186",
+      "MS Sans Serif,186", "MS Sans Serif,186", "MS Serif,186",
+      { "Arial Baltic,0", "Arial,186" },
+      { "Courier New Baltic,0", "Courier New,186" },
+      { "Times New Roman Baltic,0", "Times New Roman,186" }
     },
     /* Vietnamese */
     { 1258, 1258, "vga850.fon", "vgafix.fon", "vgasys.fon",
       "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+      { 0 }, { 0 }, { 0 }
     },
     /* Thai */
     { 874, 874, "vga850.fon", "vgaf874.fon", "vgas874.fon",
       "coure.fon", "serife.fon", "smalle.fon", "ssee874.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+      { 0 }, { 0 }, { 0 }
     },
     /* Japanese */
     { 932, 932, "vga932.fon", "jvgafix.fon", "jvgasys.fon",
       "coure.fon", "serife.fon", "jsmalle.fon", "sserife.fon",
       "MS UI Gothic","MS Serif",
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+      { 0 }, { 0 }, { 0 }
     },
     /* Chinese Simplified */
     { 936, 936, "vga936.fon", "svgafix.fon", "svgasys.fon",
       "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
       "Tahoma", "Times New Roman", /* FIXME unverified */
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+      { 0 }, { 0 }, { 0 }
     },
     /* Korean */
     { 949, 949, "vga949.fon", "hvgafix.fon", "hvgasys.fon",
       "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
       "Gulim",  "Batang",
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+      { 0 }, { 0 }, { 0 }
     },
     /* Chinese Traditional */
     { 950, 950, "vga950.fon", "cvgafix.fon", "cvgasys.fon",
       "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
       "PMingLiU",  "MingLiU",
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+      { 0 }, { 0 }, { 0 }
     }
 };
 
@@ -2248,12 +2306,21 @@ static void add_font_list(HKEY hkey, const struct nls_update_font_list *fl)
     RegSetValueExA(hkey, "Small Fonts", 0, REG_SZ, (const BYTE *)fl->small, strlen(fl->small)+1);
 }
 
+static void set_value_key(HKEY hkey, const char *name, const char *value)
+{
+    if (value)
+        RegSetValueExA(hkey, name, 0, REG_SZ, (const BYTE *)value, strlen(value) + 1);
+    else if (name)
+        RegDeleteValueA(hkey, name);
+}
+
 static void update_font_info(void)
 {
     char buf[40], cpbuf[40];
     DWORD len, type;
     HKEY hkey = 0;
     UINT i, ansi_cp = 0, oem_cp = 0;
+    BOOL done = FALSE;
 
     if (RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\Wine\\Fonts", 0, NULL, 0, KEY_ALL_ACCESS, NULL, &hkey, NULL) != ERROR_SUCCESS)
         return;
@@ -2285,11 +2352,11 @@ static void update_font_info(void)
 
     for (i = 0; i < sizeof(nls_update_font_list)/sizeof(nls_update_font_list[0]); i++)
     {
+        HKEY hkey;
+
         if (nls_update_font_list[i].ansi_cp == ansi_cp &&
             nls_update_font_list[i].oem_cp == oem_cp)
         {
-            HKEY hkey;
-
             hkey = create_config_fonts_registry_key();
             RegSetValueExA(hkey, "OEMFONT.FON", 0, REG_SZ, (const BYTE *)nls_update_font_list[i].oem, strlen(nls_update_font_list[i].oem)+1);
             RegSetValueExA(hkey, "FIXEDFON.FON", 0, REG_SZ, (const BYTE *)nls_update_font_list[i].fixed, strlen(nls_update_font_list[i].fixed)+1);
@@ -2310,12 +2377,38 @@ static void update_font_info(void)
                                strlen(nls_update_font_list[i].shelldlg)+1);
                 RegSetValueExA(hkey, "Tms Rmn", 0, REG_SZ, (const BYTE *)nls_update_font_list[i].tmsrmn,
                                strlen(nls_update_font_list[i].tmsrmn)+1);
+
+                set_value_key(hkey, "Fixedsys,0", nls_update_font_list[i].fixed_0);
+                set_value_key(hkey, "System,0", nls_update_font_list[i].system_0);
+                set_value_key(hkey, "Courier,0", nls_update_font_list[i].courier_0);
+                set_value_key(hkey, "MS Serif,0", nls_update_font_list[i].serif_0);
+                set_value_key(hkey, "Small Fonts,0", nls_update_font_list[i].small_0);
+                set_value_key(hkey, "MS Sans Serif,0", nls_update_font_list[i].sserif_0);
+                set_value_key(hkey, "Helv,0", nls_update_font_list[i].helv_0);
+                set_value_key(hkey, "Tms Rmn,0", nls_update_font_list[i].tmsrmn_0);
+
+                set_value_key(hkey, nls_update_font_list[i].arial_0.from, nls_update_font_list[i].arial_0.to);
+                set_value_key(hkey, nls_update_font_list[i].courier_new_0.from, nls_update_font_list[i].courier_new_0.to);
+                set_value_key(hkey, nls_update_font_list[i].times_new_roman_0.from, nls_update_font_list[i].times_new_roman_0.to);
+
                 RegCloseKey(hkey);
             }
-            return;
+            done = TRUE;
+        }
+        else
+        {
+            /* Delete the FontSubstitutes from other locales */
+            if (!RegCreateKeyA( HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Windows NT\\CurrentVersion\\FontSubstitutes", &hkey ))
+            {
+                set_value_key(hkey, nls_update_font_list[i].arial_0.from, NULL);
+                set_value_key(hkey, nls_update_font_list[i].courier_new_0.from, NULL);
+                set_value_key(hkey, nls_update_font_list[i].times_new_roman_0.from, NULL);
+                RegCloseKey(hkey);
+            }
         }
     }
-    FIXME("there is no font defaults for codepages %u,%u\n", ansi_cp, oem_cp);
+    if (!done)
+        FIXME("there is no font defaults for codepages %u,%u\n", ansi_cp, oem_cp);
 }
 
 
@@ -2588,11 +2681,11 @@ static LONG calc_ppem_for_height(FT_Face ft_face, LONG height)
 
     if(height > 0) {
         if(pOS2->usWinAscent + pOS2->usWinDescent == 0)
-            ppem = ft_face->units_per_EM * height /
-                (pHori->Ascender - pHori->Descender);
+            ppem = MulDiv(ft_face->units_per_EM, height,
+                          pHori->Ascender - pHori->Descender);
         else
-            ppem = ft_face->units_per_EM * height /
-                (pOS2->usWinAscent + pOS2->usWinDescent);
+            ppem = MulDiv(ft_face->units_per_EM, height,
+                          pOS2->usWinAscent + pOS2->usWinDescent);
     }
     else
         ppem = -height;
@@ -2692,6 +2785,7 @@ static FT_Face OpenFontFace(GdiFont *font, Face *face, LONG width, LONG height)
         font->ppem = load_VDMX(font, height);
         if(font->ppem == 0)
             font->ppem = calc_ppem_for_height(ft_face, height);
+        TRACE("height %d => ppem %d\n", height, font->ppem);
 
         if((err = pFT_Set_Pixel_Sizes(ft_face, 0, font->ppem)) != 0)
             WARN("FT_Set_Pixel_Sizes %d, %d rets %x\n", 0, font->ppem, err);
@@ -3149,6 +3243,7 @@ GdiFont *WineEngCreateFontInstance(DC *dc, HFONT hfont)
     LOGFONTW lf;
     CHARSETINFO csi;
     HFONTLIST *hflist;
+    FontSubst *psub = NULL;
 
     EnterCriticalSection( &freetype_cs );
 
@@ -3177,6 +3272,11 @@ GdiFont *WineEngCreateFontInstance(DC *dc, HFONT hfont)
 	  lf.lfWeight, lf.lfPitchAndFamily, lf.lfCharSet, lf.lfOrientation,
 	  lf.lfEscapement);
 
+    TRACE("DC transform %f %f %f %f %f %f\n",
+          dc->xformWorld2Vport.eM11, dc->xformWorld2Vport.eM12,
+          dc->xformWorld2Vport.eM21, dc->xformWorld2Vport.eM22,
+          dc->xformWorld2Vport.eDx, dc->xformWorld2Vport.eDy);
+
     /* check the cache first */
     if((ret = find_in_cache(hfont, &lf, &dc->xformWorld2Vport, can_use_bitmap)) != NULL) {
         TRACE("returning cached gdiFont(%p) for hFont %p\n", ret, hfont);
@@ -3200,14 +3300,13 @@ GdiFont *WineEngCreateFontInstance(DC *dc, HFONT hfont)
 
     ret = alloc_font();
 
-     memcpy(&ret->font_desc.matrix, &dc->xformWorld2Vport, sizeof(FMAT2));
-     ret->font_desc.lf = lf;
-     ret->font_desc.can_use_bitmap = can_use_bitmap;
-     calc_hash(&ret->font_desc);
-     hflist = HeapAlloc(GetProcessHeap(), 0, sizeof(*hflist));
-     hflist->hfont = hfont;
-     list_add_head(&ret->hfontlist, &hflist->entry);
-
+    memcpy(&ret->font_desc.matrix, &dc->xformWorld2Vport, sizeof(FMAT2));
+    ret->font_desc.lf = lf;
+    ret->font_desc.can_use_bitmap = can_use_bitmap;
+    calc_hash(&ret->font_desc);
+    hflist = HeapAlloc(GetProcessHeap(), 0, sizeof(*hflist));
+    hflist->hfont = hfont;
+    list_add_head(&ret->hfontlist, &hflist->entry);
 
     /* If lfFaceName is "Symbol" then Windows fixes up lfCharSet to
        SYMBOL_CHARSET so that Symbol gets picked irrespective of the
@@ -3231,7 +3330,6 @@ GdiFont *WineEngCreateFontInstance(DC *dc, HFONT hfont)
 
     family = NULL;
     if(lf.lfFaceName[0] != '\0') {
-        FontSubst *psub;
         SYSTEM_LINKS *font_link;
         CHILD_FONT *font_link_entry;
         LPWSTR FaceName = lf.lfFaceName;
@@ -3247,9 +3345,10 @@ GdiFont *WineEngCreateFontInstance(DC *dc, HFONT hfont)
         psub = get_font_subst(&font_subst_list, FaceName, lf.lfCharSet);
 
 	if(psub) {
-	    TRACE("substituting %s -> %s\n", debugstr_w(FaceName),
-		  debugstr_w(psub->to.name));
-	    strcpyW(FaceName, psub->to.name);
+	    TRACE("substituting %s,%d -> %s,%d\n", debugstr_w(FaceName), lf.lfCharSet,
+		  debugstr_w(psub->to.name), (psub->to.charset != -1) ? psub->to.charset : lf.lfCharSet);
+	    if (psub->to.charset != -1)
+		lf.lfCharSet = psub->to.charset;
 	}
 
 	/* We want a match on name and charset or just name if
@@ -3260,7 +3359,9 @@ GdiFont *WineEngCreateFontInstance(DC *dc, HFONT hfont)
 	*/
         LIST_FOR_EACH(family_elem_ptr, &font_list) {
             family = LIST_ENTRY(family_elem_ptr, Family, entry);
-	    if(!strcmpiW(family->FamilyName, FaceName)) {
+            if (!strcmpiW(family->FamilyName, FaceName) ||
+                (psub && !strcmpiW(family->FamilyName, psub->to.name)))
+            {
                 LIST_FOR_EACH(face_elem_ptr, &family->faces) { 
                     face = LIST_ENTRY(face_elem_ptr, Face, entry);
                     if((csi.fs.fsCsb[0] & (face->fs.fsCsb[0] | face->fs_links.fsCsb[0])) || !csi.fs.fsCsb[0])
@@ -3293,6 +3394,8 @@ GdiFont *WineEngCreateFontInstance(DC *dc, HFONT hfont)
             }
         }
     }
+
+    psub = NULL; /* substitution is no more relevant */
 
     /* If requested charset was DEFAULT_CHARSET then try using charset
        corresponding to the current ansi codepage */
@@ -3378,8 +3481,7 @@ found:
     it = lf.lfItalic ? 1 : 0;
     bd = lf.lfWeight > 550 ? 1 : 0;
 
-    height = GDI_ROUND( (double)lf.lfHeight * dc->xformWorld2Vport.eM22 );
-    height = lf.lfHeight < 0 ? -abs(height) : abs(height);
+    height = lf.lfHeight;
 
     face = best = best_bitmap = NULL;
     LIST_FOR_EACH_ENTRY(face, &family->faces, Face, entry)
@@ -3478,7 +3580,7 @@ found:
     }
 
     ret->orientation = FT_IS_SCALABLE(ret->ft_face) ? lf.lfOrientation : 0;
-    ret->name = strdupW(family->FamilyName);
+    ret->name = psub ? strdupW(psub->from.name) : strdupW(family->FamilyName);
     ret->underline = lf.lfUnderline ? 0xff : 0;
     ret->strikeout = lf.lfStrikeOut ? 0xff : 0;
     create_child_font_list(ret);
@@ -4156,6 +4258,18 @@ DWORD WineEngGetGlyphIndices(GdiFont *font, LPCWSTR lpstr, INT count,
     return count;
 }
 
+static inline BOOL is_identity_FMAT2(const FMAT2 *matrix)
+{
+    static const FMAT2 identity = { 1.0, 0.0, 0.0, 1.0 };
+    return !memcmp(matrix, &identity, sizeof(FMAT2));
+}
+
+static inline BOOL is_identity_MAT2(const MAT2 *matrix)
+{
+    static const MAT2 identity = { {0,1}, {0,0}, {0,0}, {0,1} };
+    return !memcmp(matrix, &identity, sizeof(MAT2));
+}
+
 /*************************************************************
  * WineEngGetGlyphOutline
  *
@@ -4178,15 +4292,18 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
     INT left, right, top = 0, bottom = 0, adv, lsb, bbx;
     FT_Angle angle = 0;
     FT_Int load_flags = FT_LOAD_DEFAULT | FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH;
-    float widthRatio = 1.0;
+    double widthRatio = 1.0;
     FT_Matrix transMat = identityMat;
     BOOL needsTransform = FALSE;
     BOOL tategaki = (font->GSUB_Table != NULL);
     UINT original_index;
 
-
     TRACE("%p, %04x, %08x, %p, %08x, %p, %p\n", font, glyph, format, lpgm,
 	  buflen, buf, lpmat);
+
+    TRACE("font transform %f %f %f %f\n",
+          font->font_desc.matrix.eM11, font->font_desc.matrix.eM12,
+          font->font_desc.matrix.eM21, font->font_desc.matrix.eM22);
 
     EnterCriticalSection( &freetype_cs );
 
@@ -4209,8 +4326,13 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
 	font->gm = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, font->gm,
 			       font->gmsize * sizeof(GM*));
     } else {
-        if(format == GGO_METRICS && font->gm[original_index / GM_BLOCK_SIZE] != NULL && FONT_GM(font,original_index)->init ) {
+        if (format == GGO_METRICS && font->gm[original_index / GM_BLOCK_SIZE] != NULL &&
+            FONT_GM(font,original_index)->init && (!lpmat || is_identity_MAT2(lpmat)))
+        {
             *lpgm = FONT_GM(font,original_index)->gm;
+            TRACE("cached: %u,%u,%s,%d,%d\n", lpgm->gmBlackBoxX, lpgm->gmBlackBoxY,
+                  wine_dbgstr_point(&lpgm->gmptGlyphOrigin),
+                  lpgm->gmCellIncX, lpgm->gmCellIncY);
             LeaveCriticalSection( &freetype_cs );
 	    return 1; /* FIXME */
 	}
@@ -4231,23 +4353,28 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
     }
 	
     /* Scaling factor */
-    if (font->aveWidth && font->potm)
+    if (font->aveWidth)
     {
-        widthRatio = (float)font->aveWidth * font->font_desc.matrix.eM11;
-        widthRatio /= (float)font->potm->otmTextMetrics.tmAveCharWidth;
+        TEXTMETRICW tm;
+
+        WineEngGetTextMetrics(font, &tm);
+
+        widthRatio = (double)font->aveWidth;
+        widthRatio /= (double)font->potm->otmTextMetrics.tmAveCharWidth;
     }
     else
         widthRatio = font->scale_y;
 
-    left = (INT)(ft_face->glyph->metrics.horiBearingX * widthRatio) & -64;
-    right = (INT)((ft_face->glyph->metrics.horiBearingX + ft_face->glyph->metrics.width) * widthRatio + 63) & -64;
+    left = (INT)(ft_face->glyph->metrics.horiBearingX) & -64;
+    right = (INT)((ft_face->glyph->metrics.horiBearingX + ft_face->glyph->metrics.width) + 63) & -64;
 
-    adv = (INT)((ft_face->glyph->metrics.horiAdvance * widthRatio) + 63) >> 6;
+    adv = (INT)((ft_face->glyph->metrics.horiAdvance) + 63) >> 6;
     lsb = left >> 6;
     bbx = (right - left) >> 6;
 
     /* Scaling transform */
-    if(font->aveWidth) {
+    if (widthRatio != 1.0 || font->scale_y != 1.0)
+    {
         FT_Matrix scaleMat;
         scaleMat.xx = FT_FixedFromFloat(widthRatio);
         scaleMat.xy = 0;
@@ -4274,7 +4401,7 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
     if(font->orientation && !tategaki) {
         FT_Matrix rotationMat;
         FT_Vector vecAngle;
-        angle = FT_FixedFromFloat((float)font->orientation / 10.0);
+        angle = FT_FixedFromFloat((double)font->orientation / 10.0);
         pFT_Vector_Unit(&vecAngle, angle);
         rotationMat.xx = vecAngle.x;
         rotationMat.xy = -vecAngle.y;
@@ -4285,8 +4412,21 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
         needsTransform = TRUE;
     }
 
+    /* World transform */
+    if (!is_identity_FMAT2(&font->font_desc.matrix))
+    {
+        FT_Matrix worldMat;
+        worldMat.xx = FT_FixedFromFloat(font->font_desc.matrix.eM11);
+        worldMat.xy = FT_FixedFromFloat(font->font_desc.matrix.eM21);
+        worldMat.yx = FT_FixedFromFloat(font->font_desc.matrix.eM12);
+        worldMat.yy = FT_FixedFromFloat(font->font_desc.matrix.eM22);
+        pFT_Matrix_Multiply(&worldMat, &transMat);
+        needsTransform = TRUE;
+    }
+
     /* Extra transformation specified by caller */
-    if (lpmat) {
+    if (lpmat && !is_identity_MAT2(lpmat))
+    {
         FT_Matrix extraMat;
         extraMat.xx = FT_FixedFromFIXED(lpmat->eM11);
         extraMat.xy = FT_FixedFromFIXED(lpmat->eM21);
@@ -4333,7 +4473,7 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
 	vec.x = ft_face->glyph->metrics.horiAdvance;
 	vec.y = 0;
 	pFT_Vector_Transform(&vec, &transMat);
-	lpgm->gmCellIncX = (vec.x+63) >> 6;
+	adv = lpgm->gmCellIncX = (vec.x+63) >> 6;
 	lpgm->gmCellIncY = -((vec.y+63) >> 6);
     }
     lpgm->gmBlackBoxX = (right - left) >> 6;
@@ -4341,7 +4481,12 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
     lpgm->gmptGlyphOrigin.x = left >> 6;
     lpgm->gmptGlyphOrigin.y = top >> 6;
 
-    if(format == GGO_METRICS || format == GGO_BITMAP || format ==  WINE_GGO_GRAY16_BITMAP)
+    TRACE("%u,%u,%s,%d,%d\n", lpgm->gmBlackBoxX, lpgm->gmBlackBoxY,
+          wine_dbgstr_point(&lpgm->gmptGlyphOrigin),
+          lpgm->gmCellIncX, lpgm->gmCellIncY);
+
+    if ((format == GGO_METRICS || format == GGO_BITMAP || format ==  WINE_GGO_GRAY16_BITMAP) &&
+        (!lpmat || is_identity_MAT2(lpmat))) /* don't cache custom transforms */
     {
         FONT_GM(font,original_index)->gm = *lpgm;
         FONT_GM(font,original_index)->adv = adv;
@@ -4749,24 +4894,83 @@ static BOOL get_bitmap_text_metrics(GdiFont *font)
 
 static void scale_font_metrics(const GdiFont *font, LPTEXTMETRICW ptm)
 {
-    float scale_x;
+    double scale_x, scale_y;
 
     if (font->aveWidth)
     {
-        scale_x = (float)font->aveWidth * font->font_desc.matrix.eM11;
-        scale_x /= (float)font->potm->otmTextMetrics.tmAveCharWidth;
+        scale_x = (double)font->aveWidth;
+        scale_x /= (double)font->potm->otmTextMetrics.tmAveCharWidth;
     }
     else
         scale_x = font->scale_y;
 
-    ptm->tmHeight = (float)ptm->tmHeight * font->scale_y;
-    ptm->tmAscent = (float)ptm->tmAscent * font->scale_y;
-    ptm->tmDescent = (float)ptm->tmDescent * font->scale_y;
-    ptm->tmInternalLeading = (float)ptm->tmInternalLeading * font->scale_y;
-    ptm->tmExternalLeading = (float)ptm->tmExternalLeading * font->scale_y;
+    scale_x *= fabs(font->font_desc.matrix.eM11);
+    scale_y = font->scale_y * fabs(font->font_desc.matrix.eM22);
 
-    ptm->tmAveCharWidth = (float)ptm->tmAveCharWidth * scale_x;
-    ptm->tmMaxCharWidth = (float)ptm->tmMaxCharWidth * scale_x;
+#define SCALE_X(x) (x) = GDI_ROUND((double)(x) * (scale_x))
+#define SCALE_Y(y) (y) = GDI_ROUND((double)(y) * (scale_y))
+
+    SCALE_Y(ptm->tmHeight);
+    SCALE_Y(ptm->tmAscent);
+    SCALE_Y(ptm->tmDescent);
+    SCALE_Y(ptm->tmInternalLeading);
+    SCALE_Y(ptm->tmExternalLeading);
+    SCALE_Y(ptm->tmOverhang);
+
+    SCALE_X(ptm->tmAveCharWidth);
+    SCALE_X(ptm->tmMaxCharWidth);
+
+#undef SCALE_X
+#undef SCALE_Y
+}
+
+static void scale_outline_font_metrics(const GdiFont *font, OUTLINETEXTMETRICW *potm)
+{
+    double scale_x, scale_y;
+
+    if (font->aveWidth)
+    {
+        scale_x = (double)font->aveWidth;
+        scale_x /= (double)font->potm->otmTextMetrics.tmAveCharWidth;
+    }
+    else
+        scale_x = font->scale_y;
+
+    scale_x *= fabs(font->font_desc.matrix.eM11);
+    scale_y = font->scale_y * fabs(font->font_desc.matrix.eM22);
+
+    scale_font_metrics(font, &potm->otmTextMetrics);
+
+#define SCALE_X(x) (x) = GDI_ROUND((double)(x) * (scale_x))
+#define SCALE_Y(y) (y) = GDI_ROUND((double)(y) * (scale_y))
+
+    SCALE_Y(potm->otmAscent);
+    SCALE_Y(potm->otmDescent);
+    SCALE_Y(potm->otmLineGap);
+    SCALE_Y(potm->otmsCapEmHeight);
+    SCALE_Y(potm->otmsXHeight);
+    SCALE_Y(potm->otmrcFontBox.top);
+    SCALE_Y(potm->otmrcFontBox.bottom);
+    SCALE_X(potm->otmrcFontBox.left);
+    SCALE_X(potm->otmrcFontBox.right);
+    SCALE_Y(potm->otmMacAscent);
+    SCALE_Y(potm->otmMacDescent);
+    SCALE_Y(potm->otmMacLineGap);
+    SCALE_X(potm->otmptSubscriptSize.x);
+    SCALE_Y(potm->otmptSubscriptSize.y);
+    SCALE_X(potm->otmptSubscriptOffset.x);
+    SCALE_Y(potm->otmptSubscriptOffset.y);
+    SCALE_X(potm->otmptSuperscriptSize.x);
+    SCALE_Y(potm->otmptSuperscriptSize.y);
+    SCALE_X(potm->otmptSuperscriptOffset.x);
+    SCALE_Y(potm->otmptSuperscriptOffset.y);
+    SCALE_Y(potm->otmsStrikeoutSize);
+    SCALE_Y(potm->otmsStrikeoutPosition);
+    SCALE_Y(potm->otmsUnderscoreSize);
+    SCALE_Y(potm->otmsUnderscorePosition);
+
+#undef SCALE_X
+#undef SCALE_Y
 }
 
 /*************************************************************
@@ -4825,7 +5029,7 @@ UINT WineEngGetOutlineTextMetrics(GdiFont *font, UINT cbSize,
         if(cbSize >= font->potm->otmSize)
         {
 	    memcpy(potm, font->potm, font->potm->otmSize);
-            scale_font_metrics(font, &potm->otmTextMetrics);
+            scale_outline_font_metrics(font, potm);
         }
         LeaveCriticalSection( &freetype_cs );
 	return font->potm->otmSize;
@@ -4849,7 +5053,7 @@ UINT WineEngGetOutlineTextMetrics(GdiFont *font, UINT cbSize,
     needed += lenfam;
 
     /* length of otmpFaceName */
-    if(!strcasecmp(ft_face->style_name, "regular")) {
+    if ((ft_face->style_flags & (FT_STYLE_FLAG_ITALIC | FT_STYLE_FLAG_BOLD)) == 0) {
       needed += lenfam; /* just the family name */
     } else {
       needed += lenfam + lensty; /* family + " " + style */
@@ -4934,11 +5138,16 @@ UINT WineEngGetOutlineTextMetrics(GdiFont *font, UINT cbSize,
      * symbol range to 0 - f0ff
      */
     if (font->charset == SYMBOL_CHARSET)
+    {
         TM.tmFirstChar = 0;
+        TM.tmDefaultChar = pOS2->usDefaultChar ? pOS2->usDefaultChar : 0x1f;
+    }
     else
+    {
         TM.tmFirstChar = pOS2->usFirstCharIndex;
+        TM.tmDefaultChar = pOS2->usDefaultChar ? pOS2->usDefaultChar : 0xffff;
+    }
     TM.tmLastChar = pOS2->usLastCharIndex;
-    TM.tmDefaultChar = pOS2->usDefaultChar ? pOS2->usDefaultChar : 0x1f;
     TM.tmBreakChar = pOS2->usBreakChar ? pOS2->usBreakChar : ' ';
     TM.tmItalic = font->fake_italic ? 255 : ((ft_face->style_flags & FT_STYLE_FLAG_ITALIC) ? 255 : 0);
     TM.tmUnderlined = font->underline;
@@ -4991,7 +5200,6 @@ UINT WineEngGetOutlineTextMetrics(GdiFont *font, UINT cbSize,
     }
 
     TM.tmCharSet = font->charset;
-#undef TM
 
     font->potm->otmFiller = 0;
     memcpy(&font->potm->otmPanoseNumber, pOS2->panose, PANOSE_COUNT);
@@ -5010,9 +5218,9 @@ UINT WineEngGetOutlineTextMetrics(GdiFont *font, UINT cbSize,
     font->potm->otmrcFontBox.right = (pFT_MulFix(ft_face->bbox.xMax, x_scale) + 32) >> 6;
     font->potm->otmrcFontBox.top = (pFT_MulFix(ft_face->bbox.yMax, y_scale) + 32) >> 6;
     font->potm->otmrcFontBox.bottom = (pFT_MulFix(ft_face->bbox.yMin, y_scale) + 32) >> 6;
-    font->potm->otmMacAscent = 0; /* where do these come from ? */
-    font->potm->otmMacDescent = 0;
-    font->potm->otmMacLineGap = 0;
+    font->potm->otmMacAscent = TM.tmAscent;
+    font->potm->otmMacDescent = -TM.tmDescent;
+    font->potm->otmMacLineGap = font->potm->otmLineGap;
     font->potm->otmusMinimumPPEM = 0; /* TT Header */
     font->potm->otmptSubscriptSize.x = (pFT_MulFix(pOS2->ySubscriptXSize, x_scale) + 32) >> 6;
     font->potm->otmptSubscriptSize.y = (pFT_MulFix(pOS2->ySubscriptYSize, y_scale) + 32) >> 6;
@@ -5031,6 +5239,7 @@ UINT WineEngGetOutlineTextMetrics(GdiFont *font, UINT cbSize,
         font->potm->otmsUnderscoreSize = (pFT_MulFix(pPost->underlineThickness, y_scale) + 32) >> 6;
 	font->potm->otmsUnderscorePosition = (pFT_MulFix(pPost->underlinePosition, y_scale) + 32) >> 6;
     }
+#undef TM
 
     /* otmp* members should clearly have type ptrdiff_t, but M$ knows best */
     cp = (char*)font->potm + sizeof(*font->potm);
@@ -5042,7 +5251,7 @@ UINT WineEngGetOutlineTextMetrics(GdiFont *font, UINT cbSize,
     cp += lensty;
     font->potm->otmpFaceName = (LPSTR)(cp - (char*)font->potm);
     strcpyW((WCHAR*)cp, family_nameW);
-    if(strcasecmp(ft_face->style_name, "regular")) {
+    if (ft_face->style_flags & (FT_STYLE_FLAG_ITALIC | FT_STYLE_FLAG_BOLD)) {
         strcatW((WCHAR*)cp, spaceW);
 	strcatW((WCHAR*)cp, style_nameW);
 	cp += lenfam + lensty;
@@ -5057,7 +5266,7 @@ UINT WineEngGetOutlineTextMetrics(GdiFont *font, UINT cbSize,
     if(potm && needed <= cbSize)
     {
         memcpy(potm, font->potm, font->potm->otmSize);
-        scale_font_metrics(font, &potm->otmTextMetrics);
+        scale_outline_font_metrics(font, potm);
     }
 
 end:
@@ -5360,11 +5569,12 @@ DWORD WineEngGetFontData(GdiFont *font, DWORD table, DWORD offset, LPVOID buf,
  */
 INT WineEngGetTextFace(GdiFont *font, INT count, LPWSTR str)
 {
+    INT n = strlenW(font->name) + 1;
     if(str) {
         lstrcpynW(str, font->name, count);
-	return strlenW(font->name);
+        return min(count, n);
     } else
-        return strlenW(font->name) + 1;
+        return n;
 }
 
 UINT WineEngGetTextCharsetInfo(GdiFont *font, LPFONTSIGNATURE fs, DWORD flags)

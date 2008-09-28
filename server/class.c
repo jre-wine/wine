@@ -128,6 +128,14 @@ int is_desktop_class( struct window_class *class )
     return (class->atom == DESKTOP_ATOM && !class->local);
 }
 
+int is_hwnd_message_class( struct window_class *class )
+{
+    static const WCHAR messageW[] = {'M','e','s','s','a','g','e'};
+    static const struct unicode_str name = { messageW, sizeof(messageW) };
+
+    return (!class->local && class->atom == find_global_atom( NULL, &name ));
+}
+
 atom_t get_class_atom( struct window_class *class )
 {
     return class->atom;
@@ -142,11 +150,13 @@ void *get_class_client_ptr( struct window_class *class )
 DECL_HANDLER(create_class)
 {
     struct window_class *class;
+    struct unicode_str name;
     atom_t atom;
 
-    if (get_req_data_size())
+    get_req_unicode_str( &name );
+    if (name.len)
     {
-        atom = add_global_atom( NULL, get_req_data(), get_req_data_size() / sizeof(WCHAR) );
+        atom = add_global_atom( NULL, &name );
         if (!atom) return;
     }
     else
@@ -187,10 +197,11 @@ DECL_HANDLER(create_class)
 DECL_HANDLER(destroy_class)
 {
     struct window_class *class;
+    struct unicode_str name;
     atom_t atom = req->atom;
 
-    if (get_req_data_size())
-        atom = find_global_atom( NULL, get_req_data(), get_req_data_size() / sizeof(WCHAR) );
+    get_req_unicode_str( &name );
+    if (name.len) atom = find_global_atom( NULL, &name );
 
     if (!(class = find_class( current->process, atom, req->instance )))
         set_win32_error( ERROR_CLASS_DOES_NOT_EXIST );

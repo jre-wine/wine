@@ -459,6 +459,24 @@ done:
     return ret;
 }
 
+/* compares the version of a file read from the filesystem and
+ * the version specified in the File table
+ */
+static int msi_compare_file_version(MSIFILE *file)
+{
+    WCHAR version[MAX_PATH];
+    DWORD size;
+    UINT r;
+
+    size = MAX_PATH;
+    version[0] = '\0';
+    r = MsiGetFileVersionW(file->TargetPath, version, &size, NULL, NULL);
+    if (r != ERROR_SUCCESS)
+        return 0;
+
+    return lstrcmpW(version, file->Version);
+}
+
 void msi_free_media_info( MSIMEDIAINFO *mi )
 {
     msi_free( mi->disk_prompt );
@@ -544,10 +562,9 @@ UINT msi_load_media_info(MSIPACKAGE *package, MSIFILE *file, MSIMEDIAINFO *mi)
         options |= MSISOURCETYPE_NETWORK;
     }
 
-    if (mi->type == DRIVE_CDROM || mi->type == DRIVE_REMOVABLE)
-        msi_package_add_media_disk(package, package->Context,
-                                   MSICODE_PRODUCT, mi->disk_id,
-                                   mi->volume_label, mi->disk_prompt);
+    msi_package_add_media_disk(package, package->Context,
+                               MSICODE_PRODUCT, mi->disk_id,
+                               mi->volume_label, mi->disk_prompt);
 
     msi_package_add_info(package, package->Context,
                          options, INSTALLPROPERTY_LASTUSEDSOURCEW, source);
@@ -803,6 +820,13 @@ UINT ACTION_InstallFiles(MSIPACKAGE *package)
             continue;
         }
 
+        if (MsiGetFileVersionW(file->TargetPath, NULL, NULL, NULL, NULL) == ERROR_SUCCESS &&
+            msi_compare_file_version(file) >= 0)
+        {
+            TRACE("Destination file version greater, not overwriting\n");
+            continue;
+        }
+
         if (file->Sequence > mi->last_sequence || mi->is_continuous ||
             (file->IsCompressed && !mi->is_extracted))
         {
@@ -971,24 +995,6 @@ UINT ACTION_DuplicateFiles(MSIPACKAGE *package)
     msiobj_release(&view->hdr);
 
     return rc;
-}
-
-/* compares the version of a file read from the filesystem and
- * the version specified in the File table
- */
-static int msi_compare_file_version( MSIFILE *file )
-{
-    WCHAR version[MAX_PATH];
-    DWORD size;
-    UINT r;
-
-    size = MAX_PATH;
-    version[0] = '\0';
-    r = MsiGetFileVersionW( file->TargetPath, version, &size, NULL, NULL );
-    if ( r != ERROR_SUCCESS )
-        return 0;
-
-    return lstrcmpW( version, file->Version );
 }
 
 UINT ACTION_RemoveFiles( MSIPACKAGE *package )

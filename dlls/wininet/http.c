@@ -1329,6 +1329,8 @@ static BOOL HTTP_ResolveName(LPWININETHTTPREQW lpwhr)
     char szaddr[32];
     LPWININETHTTPSESSIONW lpwhs = lpwhr->lpHttpSession;
 
+    if (lpwhs->socketAddress.sin_addr.s_addr) return TRUE;
+
     INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
                           INTERNET_STATUS_RESOLVING_NAME,
                           lpwhs->lpszServerName,
@@ -1619,8 +1621,9 @@ static DWORD HTTP_Read(WININETHTTPREQW *req, void *buffer, DWORD size, DWORD *re
 
     if(req->lpszCacheFile) {
         BOOL res;
+        DWORD dwBytesWritten;
 
-        res = WriteFile(req->hCacheFile, buffer, bytes_read, NULL, NULL);
+        res = WriteFile(req->hCacheFile, buffer, bytes_read, &dwBytesWritten, NULL);
         if(!res)
             WARN("WriteFile failed: %u\n", GetLastError());
     }
@@ -1688,7 +1691,9 @@ static DWORD HTTP_ReadChunked(WININETHTTPREQW *req, void *buffer, DWORD size, DW
 
         if (req->lpszCacheFile)
         {
-            if (!WriteFile(req->hCacheFile, p, bytes_read, NULL, NULL))
+            DWORD dwBytesWritten;
+
+            if (!WriteFile(req->hCacheFile, p, bytes_read, &dwBytesWritten, NULL))
                 WARN("WriteFile failed: %u\n", GetLastError());
         }
         p += bytes_read;
@@ -2012,16 +2017,6 @@ HINTERNET WINAPI HTTP_HttpOpenRequestW(LPWININETHTTPSESSIONW lpwhs,
     INTERNET_SendCallback(&lpwhs->hdr, dwContext,
                           INTERNET_STATUS_HANDLE_CREATED, &handle,
                           sizeof(handle));
-
-    /*
-     * A STATUS_REQUEST_COMPLETE is NOT sent here as per my tests on windows
-     */
-
-    if (!HTTP_ResolveName(lpwhr))
-    {
-        InternetCloseHandle( handle );
-        handle = NULL;
-    }
 
 lend:
     if( lpwhr )
@@ -3165,9 +3160,6 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
 
     assert(lpwhr->hdr.htype == WH_HHTTPREQ);
 
-    /* Clear any error information */
-    INTERNET_SetLastError(0);
-
     /* if the verb is NULL default to GET */
     if (!lpwhr->lpszVerb)
         lpwhr->lpszVerb = WININET_strdupW(szGET);
@@ -3189,6 +3181,11 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
 
         HTTP_HttpAddRequestHeadersW(lpwhr, agent_header, strlenW(agent_header), HTTP_ADDREQ_FLAG_ADD_IF_NEW);
         HeapFree(GetProcessHeap(), 0, agent_header);
+    }
+    if (lpwhr->hdr.dwFlags & INTERNET_FLAG_PRAGMA_NOCACHE)
+    {
+        static const WCHAR pragma_nocache[] = {'P','r','a','g','m','a',':',' ','n','o','-','c','a','c','h','e','\r','\n',0};
+        HTTP_HttpAddRequestHeadersW(lpwhr, pragma_nocache, strlenW(pragma_nocache), HTTP_ADDREQ_FLAG_ADD_IF_NEW);
     }
 
     do
@@ -3409,6 +3406,7 @@ lend:
                           sizeof(INTERNET_ASYNC_RESULT));
 
     TRACE("<--\n");
+    if (bSuccess) INTERNET_SetLastError(ERROR_SUCCESS);
     return bSuccess;
 }
 
@@ -3594,6 +3592,7 @@ static BOOL HTTP_OpenConnection(LPWININETHTTPREQW lpwhr)
         bSuccess = TRUE;
         goto lend;
     }
+    if (!HTTP_ResolveName(lpwhr)) goto lend;
 
     lpwhs = lpwhr->lpHttpSession;
 
@@ -4137,6 +4136,9 @@ static BOOL HTTP_DeleteCustomHeader(LPWININETHTTPREQW lpwhr, DWORD index)
     if( index >= lpwhr->nCustHeaders )
         return FALSE;
     lpwhr->nCustHeaders--;
+
+    HeapFree(GetProcessHeap(), 0, lpwhr->pCustHeaders[index].lpszField);
+    HeapFree(GetProcessHeap(), 0, lpwhr->pCustHeaders[index].lpszValue);
 
     memmove( &lpwhr->pCustHeaders[index], &lpwhr->pCustHeaders[index+1],
              (lpwhr->nCustHeaders - index)* sizeof(HTTPHEADERW) );

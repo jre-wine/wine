@@ -524,6 +524,7 @@ static BOOL CUPS_LoadPrinters(void)
             TRACE("Printer already exists\n");
             RegDeleteValueW(hkeyPrinter, May_Delete_Value);
             RegCloseKey(hkeyPrinter);
+            add_printer_driver(dests[i].name);
         } else {
             static CHAR data_type[] = "RAW",
                     print_proc[]    = "WinPrint",
@@ -661,6 +662,7 @@ PRINTCAP_ParseEntry(const char *pent, BOOL isfirst) {
         TRACE("Printer already exists\n");
         RegDeleteValueW(hkeyPrinter, May_Delete_Value);
         RegCloseKey(hkeyPrinter);
+        add_printer_driver(devname);
     } else {
         static CHAR data_type[]   = "RAW",
                     print_proc[]  = "WinPrint",
@@ -2295,10 +2297,10 @@ BOOL WINAPI AddMonitorA(LPSTR pName, DWORD Level, LPBYTE pMonitors)
     MONITOR_INFO_2W mi2w;
 
     mi2a = (LPMONITOR_INFO_2A) pMonitors;
-    TRACE("(%s, %d, %p) :  %s %s %s\n", debugstr_a(pName), Level, pMonitors, 
-            mi2a ? debugstr_a(mi2a->pName) : NULL,
-            mi2a ? debugstr_a(mi2a->pEnvironment) : NULL,
-            mi2a ? debugstr_a(mi2a->pDLLName) : NULL);
+    TRACE("(%s, %d, %p) :  %s %s %s\n", debugstr_a(pName), Level, pMonitors,
+          debugstr_a(mi2a ? mi2a->pName : NULL),
+          debugstr_a(mi2a ? mi2a->pEnvironment : NULL),
+          debugstr_a(mi2a ? mi2a->pDLLName : NULL));
 
     if  (Level != 2) {
         SetLastError(ERROR_INVALID_LEVEL);
@@ -2371,10 +2373,10 @@ BOOL WINAPI AddMonitorW(LPWSTR pName, DWORD Level, LPBYTE pMonitors)
     BOOL    res = FALSE;
 
     mi2w = (LPMONITOR_INFO_2W) pMonitors;
-    TRACE("(%s, %d, %p) :  %s %s %s\n", debugstr_w(pName), Level, pMonitors, 
-            mi2w ? debugstr_w(mi2w->pName) : NULL,
-            mi2w ? debugstr_w(mi2w->pEnvironment) : NULL,
-            mi2w ? debugstr_w(mi2w->pDLLName) : NULL);
+    TRACE("(%s, %d, %p) :  %s %s %s\n", debugstr_w(pName), Level, pMonitors,
+          debugstr_w(mi2w ? mi2w->pName : NULL),
+          debugstr_w(mi2w ? mi2w->pEnvironment : NULL),
+          debugstr_w(mi2w ? mi2w->pDLLName : NULL));
 
     if (Level != 2) {
         SetLastError(ERROR_INVALID_LEVEL);
@@ -2665,7 +2667,7 @@ BOOL WINAPI DeletePortW (LPWSTR pName, HWND hWnd, LPWSTR pPortName)
         else
         {
             FIXME("not implemented for %s (%p: %s => %p: %s)\n", debugstr_w(pPortName),
-                pm, pm ? debugstr_w(pm->dllname) : NULL, pui, pui ? debugstr_w(pui->dllname) : NULL);
+                  pm, debugstr_w(pm ? pm->dllname : NULL), pui, debugstr_w(pui ? pui->dllname : NULL));
 
             /* XP: ERROR_NOT_SUPPORTED, NT351,9x: ERROR_INVALID_PARAMETER */
             SetLastError(ERROR_NOT_SUPPORTED);
@@ -6551,7 +6553,7 @@ BOOL WINAPI AddPortW(LPWSTR pName, HWND hWnd, LPWSTR pMonitorName)
         else
         {
             FIXME("not implemented for %s (%p: %s => %p: %s)\n", debugstr_w(pMonitorName),
-                pm, pm ? debugstr_w(pm->dllname) : NULL, pui, pui ? debugstr_w(pui->dllname) : NULL);
+                  pm, debugstr_w(pm ? pm->dllname : NULL), pui, debugstr_w(pui ? pui->dllname : NULL));
 
             /* XP: ERROR_NOT_SUPPORTED, NT351,9x: ERROR_INVALID_PARAMETER */
             SetLastError(ERROR_NOT_SUPPORTED);
@@ -6989,7 +6991,7 @@ BOOL WINAPI ConfigurePortW(LPWSTR pName, HWND hWnd, LPWSTR pPortName)
         else
         {
             FIXME("not implemented for %s (%p: %s => %p: %s)\n", debugstr_w(pPortName),
-                pm, pm ? debugstr_w(pm->dllname) : NULL, pui, pui ? debugstr_w(pui->dllname) : NULL);
+                  pm, debugstr_w(pm ? pm->dllname : NULL), pui, debugstr_w(pui ? pui->dllname : NULL));
 
             /* XP: ERROR_NOT_SUPPORTED, NT351,9x: ERROR_INVALID_PARAMETER */
             SetLastError(ERROR_NOT_SUPPORTED);

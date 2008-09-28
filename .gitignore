@@ -158,6 +158,9 @@ dlls/inetcomm/libinetcomm.def
 dlls/inetcomm/tests/*.ok
 dlls/inetcomm/tests/inetcomm_crosstest.exe
 dlls/inetcomm/tests/testlist.c
+dlls/inetmib1/tests/*.ok
+dlls/inetmib1/tests/inetmib1_crosstest.exe
+dlls/inetmib1/tests/testlist.c
 dlls/infosoft/tests/*.ok
 dlls/infosoft/tests/infosoft_crosstest.exe
 dlls/infosoft/tests/testlist.c
@@ -343,6 +346,8 @@ dlls/riched20/tests/testlist.c
 dlls/riched32/tests/*.ok
 dlls/riched32/tests/riched32_crosstest.exe
 dlls/riched32/tests/testlist.c
+dlls/rpcrt4/epm.h
+dlls/rpcrt4/epm_c.c
 dlls/rpcrt4/librpcrt4.def
 dlls/rpcrt4/tests/*.ok
 dlls/rpcrt4/tests/rpcrt4_crosstest.exe
@@ -545,6 +550,9 @@ include/tom.h
 include/unknwn.h
 include/urlhist.h
 include/urlmon.h
+include/vmr9.h
+include/wine/dcetypes.h
+include/wine/epm.h
 include/wine/itss.h
 include/wine/svcctl.h
 include/wtypes.h
@@ -586,6 +594,8 @@ programs/progman/progman
 programs/reg/reg
 programs/regedit/regedit
 programs/regsvr32/regsvr32
+programs/rpcss/epm.h
+programs/rpcss/epm_s.c
 programs/rpcss/irot.h
 programs/rpcss/irot_s.c
 programs/rpcss/rpcss
@@ -641,6 +651,7 @@ programs/winetest/gdiplus_test.exe
 programs/winetest/hlink_test.exe
 programs/winetest/imm32_test.exe
 programs/winetest/inetcomm_test.exe
+programs/winetest/inetmib1_test.exe
 programs/winetest/infosoft_test.exe
 programs/winetest/iphlpapi_test.exe
 programs/winetest/itss_test.exe

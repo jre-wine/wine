@@ -89,6 +89,39 @@ static void init_function_pointers(void)
     pSetupDiGetDeviceRegistryPropertyW = (void *)GetProcAddress(hSetupAPI, "SetupDiGetDeviceRegistryPropertyW");
 }
 
+static void change_reg_permissions(const WCHAR *regkey)
+{
+    HKEY hkey;
+    SID_IDENTIFIER_AUTHORITY ident = { SECURITY_WORLD_SID_AUTHORITY };
+    SECURITY_DESCRIPTOR sd;
+    PSID EveryoneSid;
+    PACL pacl = NULL;
+
+    RegOpenKeyExW(HKEY_LOCAL_MACHINE, regkey, 0, WRITE_DAC, &hkey);
+
+    /* Initialize the 'Everyone' sid */
+    AllocateAndInitializeSid(&ident, 1, SECURITY_WORLD_RID, 0, 0, 0, 0, 0, 0, 0, &EveryoneSid);
+
+    pacl = HeapAlloc(GetProcessHeap(), 0, 256);
+    InitializeAcl(pacl, 256, ACL_REVISION);
+
+    /* Add 'Full Control' for 'Everyone' */
+    AddAccessAllowedAce(pacl, ACL_REVISION, KEY_ALL_ACCESS, EveryoneSid);
+
+    InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION);
+
+    SetSecurityDescriptorDacl(&sd, TRUE, pacl, FALSE);
+
+    /* Set the new security on the registry key */
+    RegSetKeySecurity(hkey, DACL_SECURITY_INFORMATION, &sd);
+
+    RegCloseKey(hkey);
+
+    HeapFree(GetProcessHeap(), 0, pacl);
+    if (EveryoneSid)
+        FreeSid(EveryoneSid);
+}
+
 static BOOL remove_device(void)
 {
     HDEVINFO set;
@@ -336,20 +369,9 @@ static void testInstallClass(void)
      '{','6','a','5','5','b','5','a','4','-','3','f','6','5','-',
      '1','1','d','b','-','b','7','0','4','-',
      '0','0','1','1','9','5','5','c','2','b','d','b','}',0};
-    static const CHAR classKey_win9x[] =
-     "System\\CurrentControlSet\\Services\\Class\\"
-     "{6a55b5a4-3f65-11db-b704-0011955c2bdb}";
-    static const CHAR bogus_win9x[] =
-     "System\\CurrentControlSet\\Services\\Class\\Bogus";
     char tmpfile[MAX_PATH];
     BOOL ret;
-    HKEY hkey;
 
-    if (!pSetupDiInstallClassA)
-    {
-        skip("No SetupDiInstallClassA\n");
-        return;
-    }
     tmpfile[0] = '.';
     tmpfile[1] = '\\';
     get_temp_filename(tmpfile + 2);
@@ -372,21 +394,10 @@ static void testInstallClass(void)
      */
     ret = pSetupDiInstallClassA(NULL, tmpfile, 0, NULL);
     ok(ret, "SetupDiInstallClassA failed: %08x\n", GetLastError());
-    if (!RegOpenKeyA(HKEY_LOCAL_MACHINE, classKey_win9x, &hkey))
-    {
-        /* We are on win9x */
-        RegCloseKey(hkey);
-        ok(!RegDeleteKeyA(HKEY_LOCAL_MACHINE, classKey_win9x),
-         "Couldn't delete win9x classkey\n");
-        ok(!RegDeleteKeyA(HKEY_LOCAL_MACHINE, bogus_win9x),
-         "Couldn't delete win9x bogus services class\n");
-    }
-    else
-    {
-        /* NT4 and above */
-        ok(!RegDeleteKeyW(HKEY_LOCAL_MACHINE, classKey),
-         "Couldn't delete NT classkey\n");
-    }
+
+    ok(!RegDeleteKeyW(HKEY_LOCAL_MACHINE, classKey),
+     "Couldn't delete classkey\n");
+
     DeleteFile(tmpfile);
 }
 
@@ -401,29 +412,12 @@ static void testCreateDeviceInfo(void)
      'E','n','u','m','\\','R','o','o','t','\\',
      'L','E','G','A','C','Y','_','B','O','G','U','S',0};
 
-    if (!pSetupDiCreateDeviceInfoList || !pSetupDiEnumDeviceInfo ||
-     !pSetupDiDestroyDeviceInfoList || !pSetupDiCreateDeviceInfoA)
-    {
-        skip("No SetupDiCreateDeviceInfoA\n");
-        return;
-    }
     SetLastError(0xdeadbeef);
     ret = pSetupDiCreateDeviceInfoA(NULL, NULL, NULL, NULL, NULL, 0, NULL);
     ok(!ret, "Expected failure\n");
     ok(GetLastError() == ERROR_INVALID_DEVINST_NAME ||
-      GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */ ||
-      GetLastError() == ERROR_INVALID_HANDLE /* Win9x */,
+      GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
      "Unexpected last error, got %08x\n", GetLastError());
-
-    /* If we are running on win9x we should skip these tests. Win95
-     * fails most tests anyway and win98 pops up the "Add New Hardware
-     * Wizard".
-     */
-    if (GetLastError() == ERROR_INVALID_HANDLE)
-    {
-        skip("We are on win9x where the tests introduce issues\n");
-        return;
-    }
 
     SetLastError(0xdeadbeef);
     ret = pSetupDiCreateDeviceInfoA(NULL, "Root\\LEGACY_BOGUS\\0000", NULL,
@@ -439,19 +433,46 @@ static void testCreateDeviceInfo(void)
         DWORD i;
         static GUID deadbeef =
          {0xdeadbeef, 0xdead, 0xbeef, {0xde,0xad,0xbe,0xef,0xde,0xad,0xbe,0xef}};
+        LONG res;
+        HKEY key;
+        static const WCHAR bogus0000[] = {'S','y','s','t','e','m','\\',
+         'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
+         'E','n','u','m','\\','R','o','o','t','\\',
+         'L','E','G','A','C','Y','_','B','O','G','U','S','\\','0','0','0','0',0};
 
+        /* So we know we have a clean start */
+        res = RegOpenKeyW(HKEY_LOCAL_MACHINE, bogus0000, &key);
+        ok(res != ERROR_SUCCESS, "Expected key to not exist\n");
         /* No GUID given */
         SetLastError(0xdeadbeef);
         ret = pSetupDiCreateDeviceInfoA(set, "Root\\LEGACY_BOGUS\\0000", NULL,
          NULL, NULL, 0, NULL);
         ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
             "Expected ERROR_INVALID_PARAMETER, got %08x\n", GetLastError());
+        /* Even though NT4 fails it still adds some stuff to the registry that
+         * can't be deleted via normal setupapi functions. As the registry is written
+         * by a different user (SYSTEM) we have to do some magic to get rid of the key
+         */
+        if (!RegOpenKeyW(HKEY_LOCAL_MACHINE, bogus0000, &key))
+        {
+            trace("NT4 created a bogus key on failure, will be removed now\n");
+            change_reg_permissions(bogus0000);
+            ok(!RegDeleteKeyW(HKEY_LOCAL_MACHINE, bogus0000),
+             "Could not delete LEGACY_BOGUS\\0000 key\n");
+        }
         /* We can't add device information to the set with a different GUID */
         SetLastError(0xdeadbeef);
         ret = pSetupDiCreateDeviceInfoA(set, "Root\\LEGACY_BOGUS\\0000",
          &deadbeef, NULL, NULL, 0, NULL);
         ok(!ret && GetLastError() == ERROR_CLASS_MISMATCH,
          "Expected ERROR_CLASS_MISMATCH, got %08x\n", GetLastError());
+        if (!RegOpenKeyW(HKEY_LOCAL_MACHINE, bogus0000, &key))
+        {
+            trace("NT4 created a bogus key on failure, will be removed now\n");
+            change_reg_permissions(bogus0000);
+            ok(!RegDeleteKeyW(HKEY_LOCAL_MACHINE, bogus0000),
+             "Could not delete LEGACY_BOGUS\\0000 key\n");
+        }
         /* Finally, with all three required parameters, this succeeds: */
         ret = pSetupDiCreateDeviceInfoA(set, "Root\\LEGACY_BOGUS\\0000", &guid,
          NULL, NULL, 0, NULL);
@@ -530,12 +551,6 @@ static void testGetDeviceInstanceId(void)
     HDEVINFO set;
     SP_DEVINFO_DATA devInfo = { 0 };
 
-    if (!pSetupDiCreateDeviceInfoList || !pSetupDiDestroyDeviceInfoList ||
-     !pSetupDiCreateDeviceInfoA || !pSetupDiGetDeviceInstanceIdA)
-    {
-        skip("No SetupDiGetDeviceInstanceIdA\n");
-        return;
-    }
     SetLastError(0xdeadbeef);
     ret = pSetupDiGetDeviceInstanceIdA(NULL, NULL, NULL, 0, NULL);
     ok(!ret && GetLastError() == ERROR_INVALID_HANDLE,
@@ -587,7 +602,8 @@ static void testGetDeviceInstanceId(void)
         ret = pSetupDiGetDeviceInstanceIdA(set, &devInfo, instanceID,
          sizeof(instanceID), NULL);
         ok(ret, "SetupDiGetDeviceInstanceIdA failed: %08x\n", GetLastError());
-        ok(!lstrcmpA(instanceID, "ROOT\\LEGACY_BOGUS\\0001"),
+        /* NT4 returns 'Root' and W2K and above 'ROOT' */
+        ok(!lstrcmpiA(instanceID, "ROOT\\LEGACY_BOGUS\\0001"),
          "Unexpected instance ID %s\n", instanceID);
         pSetupDiDestroyDeviceInfoList(set);
     }
@@ -598,12 +614,6 @@ static void testRegisterDeviceInfo(void)
     BOOL ret;
     HDEVINFO set;
 
-    if (!pSetupDiCreateDeviceInfoList || !pSetupDiDestroyDeviceInfoList ||
-     !pSetupDiRegisterDeviceInfo)
-    {
-        skip("No SetupDiRegisterDeviceInfo\n");
-        return;
-    }
     SetLastError(0xdeadbeef);
     ret = pSetupDiRegisterDeviceInfo(NULL, NULL, 0, NULL, NULL, NULL);
     ok(!ret && GetLastError() == ERROR_INVALID_HANDLE,
@@ -639,8 +649,7 @@ static void testRegisterDeviceInfo(void)
             ok(ret, "SetupDiCreateDeviceInfoA failed: %d\n", GetLastError());
         }
         /* FIXME: On Win2K+ systems, this is now persisted to registry in
-         * HKLM\System\CCS\Enum\USB\Bogus\0000.  I don't check because the
-         * Win9x location is different.
+         * HKLM\System\CCS\Enum\USB\Bogus\0000.
          * FIXME: the key also becomes undeletable.  How to get rid of it?
          */
         pSetupDiDestroyDeviceInfoList(set);
@@ -663,11 +672,9 @@ static void testCreateDeviceInterface(void)
      '1','1','d','b','-','b','7','0','4','-',
      '0','0','1','1','9','5','5','c','2','b','d','b','}',0};
 
-    if (!pSetupDiCreateDeviceInfoList || !pSetupDiDestroyDeviceInfoList ||
-     !pSetupDiCreateDeviceInfoA || !pSetupDiCreateDeviceInterfaceA ||
-     !pSetupDiEnumDeviceInterfaces)
+    if (!pSetupDiCreateDeviceInterfaceA || !pSetupDiEnumDeviceInterfaces)
     {
-        skip("No SetupDiCreateDeviceInterfaceA\n");
+        skip("SetupDiCreateDeviceInterfaceA and/or SetupDiEnumDeviceInterfaces are not available\n");
         return;
     }
     SetLastError(0xdeadbeef);
@@ -762,11 +769,9 @@ static void testGetDeviceInterfaceDetail(void)
      '1','1','d','b','-','b','7','0','4','-',
      '0','0','1','1','9','5','5','c','2','b','d','b','}',0};
 
-    if (!pSetupDiCreateDeviceInfoList || !pSetupDiDestroyDeviceInfoList ||
-     !pSetupDiCreateDeviceInfoA || !pSetupDiCreateDeviceInterfaceA ||
-     !pSetupDiGetDeviceInterfaceDetailA)
+    if (!pSetupDiCreateDeviceInterfaceA || !pSetupDiGetDeviceInterfaceDetailA)
     {
-        skip("No SetupDiGetDeviceInterfaceDetailA\n");
+        skip("SetupDiCreateDeviceInterfaceA and/or SetupDiGetDeviceInterfaceDetailA are not available\n");
         return;
     }
     SetLastError(0xdeadbeef);
@@ -839,9 +844,7 @@ static void testGetDeviceInterfaceDetail(void)
                     size, &size, NULL);
             ok(!ret && GetLastError() == ERROR_INVALID_USER_BUFFER,
              "Expected ERROR_INVALID_USER_BUFFER, got %08x\n", GetLastError());
-            /* Windows 2000 and up check for the exact size. Win9x returns ERROR_INVALID_PARAMETER
-             * on every call (so doesn't get here) and NT4 doesn't have this function.
-             */
+            /* Windows 2000 and up check for the exact size */
             detail->cbSize = FIELD_OFFSET(SP_DEVICE_INTERFACE_DETAIL_DATA_A, DevicePath[1]);
             ret = pSetupDiGetDeviceInterfaceDetailA(set, &interfaceData, detail,
                     size, &size, NULL);
@@ -851,18 +854,13 @@ static void testGetDeviceInterfaceDetail(void)
              !lstrcmpiA(path_w2k, detail->DevicePath), "Unexpected path %s\n",
              detail->DevicePath);
             /* Check SetupDiGetDeviceInterfaceDetailW */
-            if (pSetupDiGetDeviceInterfaceDetailW)
-            {
-                ret = pSetupDiGetDeviceInterfaceDetailW(set, &interfaceData, NULL, 0, &size, NULL);
-                ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
-                 "Expected ERROR_INSUFFICIENT_BUFFER, got error code: %d\n", GetLastError());
-                ok(expectedsize == size ||
-                 (expectedsize + sizeof(WCHAR)) == size /* W2K adds a backslash */,
-                 "SetupDiGetDeviceInterfaceDetailW returned wrong reqsize, got %d\n",
-                 size);
-            }
-            else
-                skip("SetupDiGetDeviceInterfaceDetailW is not available\n");
+            ret = pSetupDiGetDeviceInterfaceDetailW(set, &interfaceData, NULL, 0, &size, NULL);
+            ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+             "Expected ERROR_INSUFFICIENT_BUFFER, got error code: %d\n", GetLastError());
+            ok(expectedsize == size ||
+             (expectedsize + sizeof(WCHAR)) == size /* W2K adds a backslash */,
+             "SetupDiGetDeviceInterfaceDetailW returned wrong reqsize, got %d\n",
+             size);
 
             HeapFree(GetProcessHeap(), 0, buf);
         }
@@ -903,23 +901,8 @@ static void testDevRegKey(void)
     HDEVINFO set;
     HKEY key = NULL;
 
-    if (!pSetupDiCreateDeviceInfoList || !pSetupDiDestroyDeviceInfoList ||
-     !pSetupDiCreateDeviceInfoA || !pSetupDiOpenDevRegKey ||
-     !pSetupDiRegisterDeviceInfo || !pSetupDiCreateDevRegKeyW ||
-     !pSetupDiCallClassInstaller)
-    {
-        skip("No SetupDiOpenDevRegKey\n");
-        return;
-    }
-
-    /* Check if we are on win9x */
     SetLastError(0xdeadbeef);
     key = pSetupDiCreateDevRegKeyW(NULL, NULL, 0, 0, 0, NULL, NULL);
-    if (key == INVALID_HANDLE_VALUE && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
-    {
-        skip("We are on win9x where the tests introduce issues\n");
-        return;
-    }
     ok(key == INVALID_HANDLE_VALUE,
      "Expected INVALID_HANDLE_VALUE, got %p\n", key);
     ok(GetLastError() == ERROR_INVALID_HANDLE,
@@ -987,14 +970,14 @@ static void testDevRegKey(void)
         todo_wine
         ok(key == INVALID_HANDLE_VALUE &&
          GetLastError() == ERROR_KEY_DOES_NOT_EXIST,
-         "Expected ERROR_KEY_DOES_NOT_EXIST_EXIST, got %08x\n", GetLastError());
+         "Expected ERROR_KEY_DOES_NOT_EXIST, got %08x\n", GetLastError());
         SetLastError(0xdeadbeef);
         key = pSetupDiOpenDevRegKey(set, &devInfo, DICS_FLAG_GLOBAL, 0,
          DIREG_DEV, 0);
         todo_wine
         ok(key == INVALID_HANDLE_VALUE &&
          GetLastError() == ERROR_KEY_DOES_NOT_EXIST,
-         "Expected ERROR_KEY_DOES_NOT_EXIST_EXIST, got %08x\n", GetLastError());
+         "Expected ERROR_KEY_DOES_NOT_EXIST, got %08x\n", GetLastError());
         SetLastError(0xdeadbeef);
         /* The class key shouldn't be there */
         res = RegOpenKeyW(HKEY_LOCAL_MACHINE, classKey, &key);
@@ -1069,6 +1052,13 @@ static void testRegisterAndGetDetail(void)
      '{','6','a','5','5','b','5','a','4','-','3','f','6','5','-',
      '1','1','d','b','-','b','7','0','4','-',
      '0','0','1','1','9','5','5','c','2','b','d','b','}',0};
+
+    if (!pSetupDiCreateDeviceInterfaceA || !pSetupDiEnumDeviceInterfaces ||
+        !pSetupDiGetDeviceInterfaceDetailA)
+    {
+        skip("Needed functions are not available\n");
+        return;
+    }
 
     SetLastError(0xdeadbeef);
     set = pSetupDiGetClassDevsA(&guid, NULL, 0, DIGCF_ALLCLASSES);
@@ -1272,11 +1262,6 @@ static void testDeviceRegistryPropertyW()
 
     SetLastError(0xdeadbeef);
     set = pSetupDiGetClassDevsW(&guid, NULL, 0, DIGCF_DEVICEINTERFACE);
-    if (set == INVALID_HANDLE_VALUE && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
-    {
-        skip("W-functions are not implemented\n");
-        return;
-    }
     ok(set != INVALID_HANDLE_VALUE, "SetupDiGetClassDevsW failed: %08x\n",
      GetLastError());
     SetLastError(0xdeadbeef);
@@ -1365,17 +1350,32 @@ static void testDeviceRegistryPropertyW()
 
 START_TEST(devinst)
 {
-    init_function_pointers();
+    HDEVINFO set;
 
-    if (pSetupDiCreateDeviceInfoListExW && pSetupDiDestroyDeviceInfoList)
+     init_function_pointers();
+
+    /* Win9x/WinMe does things totally different so we skip all the tests
+     *
+     * We don't want to exclude NT4 so hence this check.
+     */
+    SetLastError(0xdeadbeef);
+    set = pSetupDiGetClassDevsW(NULL, NULL, 0, 0);
+    if (set == INVALID_HANDLE_VALUE && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        skip("Win9x/WinMe has totally different behavior\n");
+        return;
+    }
+
+    if (pSetupDiCreateDeviceInfoListExW)
         test_SetupDiCreateDeviceInfoListEx();
     else
-        skip("SetupDiCreateDeviceInfoListExW and/or SetupDiDestroyDeviceInfoList not available\n");
+        skip("SetupDiCreateDeviceInfoListExW is not available\n");
 
     if (pSetupDiOpenClassRegKeyExA)
         test_SetupDiOpenClassRegKeyExA();
     else
         skip("SetupDiOpenClassRegKeyExA is not available\n");
+
     testInstallClass();
     testCreateDeviceInfo();
     testGetDeviceInstanceId();

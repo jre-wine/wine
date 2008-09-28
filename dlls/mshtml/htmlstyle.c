@@ -43,6 +43,8 @@ typedef struct {
 
 #define HTMLSTYLE(x)  ((IHTMLStyle*) &(x)->lpHTMLStyleVtbl)
 
+static const WCHAR attrBackground[] =
+    {'b','a','c','k','g','r','o','u','n','d',0};
 static const WCHAR attrBackgroundColor[] =
     {'b','a','c','k','g','r','o','u','n','d','-','c','o','l','o','r',0};
 static const WCHAR attrBackgroundImage[] =
@@ -116,7 +118,27 @@ static LPWSTR fix_px_value(LPCWSTR val)
     return NULL;
 }
 
+static LPWSTR fix_url_value(LPCWSTR val)
+{
+    WCHAR *ret, *ptr;
+
+    static const WCHAR urlW[] = {'u','r','l','('};
+
+    if(strncmpW(val, urlW, sizeof(urlW)/sizeof(WCHAR)) || !strchrW(val, '\\'))
+        return NULL;
+
+    ret = heap_strdupW(val);
+
+    for(ptr = ret; *ptr; ptr++) {
+        if(*ptr == '\\')
+            *ptr = '/';
+    }
+
+    return ret;
+}
+
 #define ATTR_FIX_PX  1
+#define ATTR_FIX_URL 2
 
 static HRESULT set_style_attr(HTMLStyle *This, LPCWSTR name, LPCWSTR value, DWORD flags)
 {
@@ -130,6 +152,8 @@ static HRESULT set_style_attr(HTMLStyle *This, LPCWSTR name, LPCWSTR value, DWOR
 
     if(flags & ATTR_FIX_PX)
         val = fix_px_value(value);
+    if(flags & ATTR_FIX_URL)
+        val = fix_url_value(value);
 
     nsAString_Init(&str_name, name);
     nsAString_Init(&str_value, val ? val : value);
@@ -396,7 +420,18 @@ static HRESULT WINAPI HTMLStyle_get_font(IHTMLStyle *iface, BSTR *p)
 static HRESULT WINAPI HTMLStyle_put_color(IHTMLStyle *iface, VARIANT v)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(v%d)\n", This, V_VT(&v));
+
+    TRACE("(%p)->(v%d)\n", This, V_VT(&v));
+
+    switch(V_VT(&v)) {
+    case VT_BSTR:
+        TRACE("%s\n", debugstr_w(V_BSTR(&v)));
+        return set_style_attr(This, attrColor, V_BSTR(&v), 0);
+
+    default:
+        FIXME("unsupported vt=%d\n", V_VT(&v));
+    }
+
     return E_NOTIMPL;
 }
 
@@ -413,8 +448,10 @@ static HRESULT WINAPI HTMLStyle_get_color(IHTMLStyle *iface, VARIANT *p)
 static HRESULT WINAPI HTMLStyle_put_background(IHTMLStyle *iface, BSTR v)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    return set_style_attr(This, attrBackground, v, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_get_background(IHTMLStyle *iface, BSTR *p)
@@ -460,7 +497,7 @@ static HRESULT WINAPI HTMLStyle_put_backgroundImage(IHTMLStyle *iface, BSTR v)
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
-    return set_style_attr(This, attrBackgroundImage, v, 0);
+    return set_style_attr(This, attrBackgroundImage, v, ATTR_FIX_URL);
 }
 
 static HRESULT WINAPI HTMLStyle_get_backgroundImage(IHTMLStyle *iface, BSTR *p)

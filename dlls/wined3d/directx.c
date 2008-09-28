@@ -61,6 +61,7 @@ static const struct {
     {"GL_ATI_fragment_shader",              ATI_FRAGMENT_SHADER,            0                           },
 
     /* ARB */
+    {"GL_ARB_color_buffer_float",           ARB_COLOR_BUFFER_FLOAT,         0                           },
     {"GL_ARB_draw_buffers",                 ARB_DRAW_BUFFERS,               0                           },
     {"GL_ARB_fragment_program",             ARB_FRAGMENT_PROGRAM,           0                           },
     {"GL_ARB_fragment_shader",              ARB_FRAGMENT_SHADER,            0                           },
@@ -2211,7 +2212,9 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DFORMAT CheckFormat)
             TRACE_(d3d_caps)("[OK]\n");
             return TRUE;
 
-        /* Depth/stencil is handled using checkDepthStencilCapability, return FALSE here */
+        /*****
+         *  Supported: Depth/Stencil formats
+         */
         case WINED3DFMT_D16_LOCKABLE:
         case WINED3DFMT_D16:
         case WINED3DFMT_D15S1:
@@ -2221,7 +2224,7 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DFORMAT CheckFormat)
         case WINED3DFMT_D24FS8:
         case WINED3DFMT_D32:
         case WINED3DFMT_D32F_LOCKABLE:
-            return FALSE;
+            return TRUE;
 
         /*****
          *  Not supported everywhere(depends on GL_ATI_envmap_bumpmap or
@@ -2318,7 +2321,7 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DFORMAT CheckFormat)
             /* Floating point formats */
         case WINED3DFMT_R16F:
         case WINED3DFMT_A16B16G16R16F:
-            if(GL_SUPPORT(ARB_HALF_FLOAT_PIXEL)) {
+            if(GL_SUPPORT(ARB_TEXTURE_FLOAT) && GL_SUPPORT(ARB_HALF_FLOAT_PIXEL)) {
                 TRACE_(d3d_caps)("[OK]\n");
                 return TRUE;
             }
@@ -2668,9 +2671,15 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
                     return WINED3DERR_NOTAVAILABLE;
                 }
             }
-        } else if(CheckDepthStencilCapability(Adapter, AdapterFormat, CheckFormat)) {
-            if(Usage & WINED3DUSAGE_DEPTHSTENCIL)
-                UsageCaps |= WINED3DUSAGE_DEPTHSTENCIL;
+
+            if(Usage & WINED3DUSAGE_DEPTHSTENCIL) {
+                if(CheckDepthStencilCapability(Adapter, AdapterFormat, CheckFormat)) {
+                    UsageCaps |= WINED3DUSAGE_DEPTHSTENCIL;
+                } else {
+                    TRACE_(d3d_caps)("[FAILED] - No depth stencil support\n");
+                    return WINED3DERR_NOTAVAILABLE;
+                }
+            }
         } else {
             TRACE_(d3d_caps)("[FAILED] - Texture format not supported\n");
             return WINED3DERR_NOTAVAILABLE;
@@ -2943,13 +2952,13 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
                                      WINED3DPMISCCAPS_CLIPTLVERTS           |
                                      WINED3DPMISCCAPS_CLIPPLANESCALEDPOINTS |
                                      WINED3DPMISCCAPS_MASKZ                 |
-                                     WINED3DPMISCCAPS_BLENDOP;
+                                     WINED3DPMISCCAPS_BLENDOP               |
+                                     WINED3DPMISCCAPS_MRTPOSTPIXELSHADERBLENDING;
                                     /* TODO:
                                         WINED3DPMISCCAPS_NULLREFERENCE
                                         WINED3DPMISCCAPS_INDEPENDENTWRITEMASKS
                                         WINED3DPMISCCAPS_FOGANDSPECULARALPHA
                                         WINED3DPMISCCAPS_MRTINDEPENDENTBITDEPTHS
-                                        WINED3DPMISCCAPS_MRTPOSTPIXELSHADERBLENDING
                                         WINED3DPMISCCAPS_FOGVERTEXCLAMPED */
 
     if(GL_SUPPORT(EXT_BLEND_EQUATION_SEPARATE) && GL_SUPPORT(EXT_BLEND_FUNC_SEPARATE))
@@ -3588,21 +3597,25 @@ struct driver_version_information {
 };
 
 static const struct driver_version_information driver_version_table[] = {
-    /* Nvidia drivers. Geforce FX and newer cards are supported by the current driver */
-    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCEFX_5200,     7,  15, 10, 16921   },
-    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCEFX_5600,     7,  15, 10, 16921   },
-    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCEFX_5800,     7,  15, 10, 16921   },
-    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6200,       7,  15, 10, 16921   },
-    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6600GT,     7,  15, 10, 16921   },
-    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6800,       7,  15, 10, 16921   },
-    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7400,       7,  15, 10, 16921   },
-    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7300,       7,  15, 10, 16921   },
-    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7600,       7,  15, 10, 16921   },
-    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7800GT,     7,  15, 10, 16921   },
-    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8300GS,     7,  15, 10, 16921   },
-    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8600GT,     7,  15, 10, 16921   },
-    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8600MGT,    7,  15, 10, 16921   },
-    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8800GTS,    7,  15, 10, 16921   },
+    /* Nvidia drivers. Geforce6 and newer cards are supported by the current driver (177.x)*/
+    /* GeforceFX support is up to 173.x, Geforce2MX/3/4 upto 96.x, TNT/Geforce1/2 upto 71.x */
+    /* Note that version numbers >100 lets say 123.45 use >= x.y.11.2345 and not x.y.10.12345 */
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCEFX_5200,     7,  15, 11, 7341   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCEFX_5600,     7,  15, 11, 7341   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCEFX_5800,     7,  15, 11, 7341   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6200,       7,  15, 11, 7341   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6600GT,     7,  15, 11, 7341   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6800,       7,  15, 11, 7341   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7400,       7,  15, 11, 7341   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7300,       7,  15, 11, 7341   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7600,       7,  15, 11, 7341   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7800GT,     7,  15, 11, 7341   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8300GS,     7,  15, 11, 7341   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8600GT,     7,  15, 11, 7341   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8600MGT,    7,  15, 11, 7341   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8800GTS,    7,  15, 11, 7341   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9600GT,     7,  15, 11, 7341    },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9800GT,     7,  15, 11, 7341    },
 
     /* ATI cards. The driver versions are somewhat similar, but not quite the same. Let's hardcode */
     {VENDOR_ATI,        CARD_ATI_RADEON_9500,           6,  14, 10, 6764    },

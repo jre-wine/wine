@@ -35,17 +35,45 @@ struct event_target_t {
     IDispatch *event_table[EVENTID_LAST];
 };
 
+static const WCHAR changeW[] = {'c','h','a','n','g','e',0};
+static const WCHAR onchangeW[] = {'o','n','c','h','a','n','g','e',0};
+
+static const WCHAR clickW[] = {'c','l','i','c','k',0};
+static const WCHAR onclickW[] = {'o','n','c','l','i','c','k',0};
+
+static const WCHAR keyupW[] = {'k','e','y','u','p',0};
+static const WCHAR onkeyupW[] = {'o','n','k','e','y','u','p',0};
+
 static const WCHAR loadW[] = {'l','o','a','d',0};
 static const WCHAR onloadW[] = {'o','n','l','o','a','d',0};
 
 typedef struct {
     LPCWSTR name;
     LPCWSTR attr_name;
+    DWORD flags;
 } event_info_t;
 
+#define EVENT_DEFAULTLISTENER    0x0001
+
 static const event_info_t event_info[] = {
-    {loadW, onloadW}
+    {changeW,   onchangeW,   EVENT_DEFAULTLISTENER},
+    {clickW,    onclickW,    EVENT_DEFAULTLISTENER},
+    {keyupW,    onkeyupW,    EVENT_DEFAULTLISTENER},
+    {loadW,     onloadW,     0}
 };
+
+eventid_t str_to_eid(LPCWSTR str)
+{
+    int i;
+
+    for(i=0; i < sizeof(event_info)/sizeof(event_info[0]); i++) {
+        if(!strcmpW(event_info[i].name, str))
+            return i;
+    }
+
+    ERR("unknown type %s\n", debugstr_w(str));
+    return EVENTID_LAST;
+}
 
 typedef struct {
     const IHTMLEventObjVtbl  *lpIHTMLEventObjVtbl;
@@ -374,11 +402,44 @@ void fire_event(HTMLDocument *doc, eventid_t eid, nsIDOMNode *target)
     if(node->event_target && node->event_target->event_table[eid]) {
         doc->window->event = create_event();
 
+        TRACE("%s >>>\n", debugstr_w(event_info[eid].name));
         call_disp_func(doc, node->event_target->event_table[eid]);
+        TRACE("%s <<<\n", debugstr_w(event_info[eid].name));
 
         IHTMLEventObj_Release(doc->window->event);
         doc->window->event = NULL;
     }
+}
+
+static HRESULT set_node_event_disp(HTMLDOMNode *node, eventid_t eid, IDispatch *disp)
+{
+    if(!node->event_target)
+        node->event_target = heap_alloc_zero(sizeof(event_target_t));
+    else if(node->event_target->event_table[eid])
+        IDispatch_Release(node->event_target->event_table[eid]);
+
+    IDispatch_AddRef(disp);
+    node->event_target->event_table[eid] = disp;
+
+    if((event_info[eid].flags & EVENT_DEFAULTLISTENER) && !node->doc->nscontainer->event_vector[eid]) {
+        node->doc->nscontainer->event_vector[eid] = TRUE;
+        add_nsevent_listener(node->doc->nscontainer, event_info[eid].name);
+    }
+
+    return S_OK;
+}
+
+HRESULT set_node_event(HTMLDOMNode *node, eventid_t eid, VARIANT *var)
+{
+    switch(V_VT(var)) {
+    case VT_DISPATCH:
+        return set_node_event_disp(node, eid, V_DISPATCH(var));
+
+    default:
+        FIXME("not supported vt=%d\n", V_VT(var));
+    }
+
+    return E_NOTIMPL;
 }
 
 void check_event_attr(HTMLDocument *doc, nsIDOMElement *nselem)
@@ -406,9 +467,8 @@ void check_event_attr(HTMLDocument *doc, nsIDOMElement *nselem)
             disp = script_parse_event(doc, attr_value);
             if(disp) {
                 node = get_node(doc, (nsIDOMNode*)nselem, TRUE);
-                if(!node->event_target)
-                    node->event_target = heap_alloc_zero(sizeof(event_target_t));
-                node->event_target->event_table[i] = disp;
+                set_node_event_disp(node, i, disp);
+                IDispatch_Release(disp);
             }
         }
     }

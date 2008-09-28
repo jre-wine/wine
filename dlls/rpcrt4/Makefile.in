@@ -25,10 +25,12 @@ C_SRCS = \
 	rpc_message.c \
 	rpc_server.c \
 	rpc_transport.c \
-	rpcrt4_main.c \
-	rpcss_np_client.c
+	rpcrt4_main.c
 
 RC_SRCS = version.rc
+
+IDL_C_SRCS = \
+	epm.idl
 
 @MAKE_DLL_RULES@
 

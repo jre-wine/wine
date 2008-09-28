@@ -437,13 +437,13 @@ static RPC_STATUS RPCRT4_SecurePacket(RpcConnection *Connection,
 }
          
 /***********************************************************************
- *           RPCRT4_SendAuth (internal)
+ *           RPCRT4_SendWithAuth (internal)
  * 
  * Transmit a packet with authorization data over connection in acceptable fragments.
  */
-static RPC_STATUS RPCRT4_SendAuth(RpcConnection *Connection, RpcPktHdr *Header,
-                                  void *Buffer, unsigned int BufferLength,
-                                  const void *Auth, unsigned int AuthLength)
+static RPC_STATUS RPCRT4_SendWithAuth(RpcConnection *Connection, RpcPktHdr *Header,
+                                      void *Buffer, unsigned int BufferLength,
+                                      const void *Auth, unsigned int AuthLength)
 {
   PUCHAR buffer_pos;
   DWORD hdr_size;
@@ -631,8 +631,8 @@ failed:
 /***********************************************************************
  *           RPCRT4_AuthorizeBinding (internal)
  */
-static RPC_STATUS RPCRT_AuthorizeConnection(RpcConnection* conn,
-                                            BYTE *challenge, ULONG count)
+RPC_STATUS RPCRT4_AuthorizeConnection(RpcConnection* conn, BYTE *challenge,
+                                      ULONG count)
 {
   SecBuffer inp, out;
   RpcPktHdr *resp_hdr;
@@ -651,7 +651,7 @@ static RPC_STATUS RPCRT_AuthorizeConnection(RpcConnection* conn,
   if (!resp_hdr)
     return E_OUTOFMEMORY;
 
-  status = RPCRT4_SendAuth(conn, resp_hdr, NULL, 0, out.pvBuffer, out.cbBuffer);
+  status = RPCRT4_SendWithAuth(conn, resp_hdr, NULL, 0, out.pvBuffer, out.cbBuffer);
 
   HeapFree(GetProcessHeap(), 0, out.pvBuffer);
   RPCRT4_FreeHeader(resp_hdr);
@@ -672,14 +672,14 @@ RPC_STATUS RPCRT4_Send(RpcConnection *Connection, RpcPktHdr *Header,
 
   if (!Connection->AuthInfo || SecIsValidHandle(&Connection->ctx))
   {
-    return RPCRT4_SendAuth(Connection, Header, Buffer, BufferLength, NULL, 0);
+    return RPCRT4_SendWithAuth(Connection, Header, Buffer, BufferLength, NULL, 0);
   }
 
   /* tack on a negotiate packet */
   r = RPCRT4_ClientAuthorize(Connection, NULL, &out);
   if (r == RPC_S_OK)
   {
-    r = RPCRT4_SendAuth(Connection, Header, Buffer, BufferLength, out.pvBuffer, out.cbBuffer);
+    r = RPCRT4_SendWithAuth(Connection, Header, Buffer, BufferLength, out.pvBuffer, out.cbBuffer);
     HeapFree(GetProcessHeap(), 0, out.pvBuffer);
   }
 
@@ -795,19 +795,22 @@ fail:
 }
 
 /***********************************************************************
- *           RPCRT4_Receive (internal)
+ *           RPCRT4_ReceiveWithAuth (internal)
  *
- * Receive a packet from connection and merge the fragments.
+ * Receive a packet from connection, merge the fragments and return the auth
+ * data.
  */
-RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
-                          PRPC_MESSAGE pMsg)
+RPC_STATUS RPCRT4_ReceiveWithAuth(RpcConnection *Connection, RpcPktHdr **Header,
+                                  PRPC_MESSAGE pMsg,
+                                  unsigned char **auth_data_out,
+                                  unsigned long *auth_length_out)
 {
   RPC_STATUS status;
   DWORD hdr_length;
   unsigned short first_flag;
   unsigned long data_length;
   unsigned long buffer_length;
-  unsigned long auth_length;
+  unsigned long auth_length = 0;
   unsigned char *auth_data = NULL;
   RpcPktHdr *CurrentHeader = NULL;
   void *payload = NULL;
@@ -815,7 +818,7 @@ RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
   *Header = NULL;
   pMsg->Buffer = NULL;
 
-  TRACE("(%p, %p, %p)\n", Connection, Header, pMsg);
+  TRACE("(%p, %p, %p, %p)\n", Connection, Header, pMsg, auth_data_out);
 
   RPCRT4_SetThreadCurrentConnection(Connection);
 
@@ -911,9 +914,7 @@ RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
 
       /* these packets are handled specially, not by the generic SecurePacket
        * function */
-      if (((*Header)->common.ptype != PKT_BIND) &&
-          ((*Header)->common.ptype != PKT_BIND_ACK) &&
-          ((*Header)->common.ptype != PKT_AUTH3))
+      if (!auth_data_out && SecIsValidHandle(&Connection->ctx))
       {
         status = RPCRT4_SecurePacket(Connection, SECURE_PACKET_RECEIVE,
             CurrentHeader, hdr_length,
@@ -947,16 +948,6 @@ RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
   }
   pMsg->BufferLength = buffer_length;
 
-  /* respond to authorization request */
-  if ((*Header)->common.ptype == PKT_BIND_ACK && auth_length > sizeof(RpcAuthVerifier))
-  {
-    status = RPCRT_AuthorizeConnection(Connection,
-                                       auth_data + sizeof(RpcAuthVerifier),
-                                       auth_length);
-    if (status)
-        goto fail;
-  }
-
   /* success */
   status = RPC_S_OK;
 
@@ -970,9 +961,25 @@ fail:
     RPCRT4_FreeHeader(*Header);
     *Header = NULL;
   }
-  HeapFree(GetProcessHeap(), 0, auth_data);
+  if (auth_data_out && status == RPC_S_OK) {
+    *auth_length_out = auth_length;
+    *auth_data_out = auth_data;
+  }
+  else
+    HeapFree(GetProcessHeap(), 0, auth_data);
   HeapFree(GetProcessHeap(), 0, payload);
   return status;
+}
+
+/***********************************************************************
+ *           RPCRT4_Receive (internal)
+ *
+ * Receive a packet from connection and merge the fragments.
+ */
+RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
+                          PRPC_MESSAGE pMsg)
+{
+    return RPCRT4_ReceiveWithAuth(Connection, Header, pMsg, NULL, NULL);
 }
 
 /***********************************************************************

@@ -42,7 +42,6 @@ static const WCHAR wcsInputPinName[] = {'i','n','p','u','t',' ','p','i','n',0};
 
 static const IBaseFilterVtbl DSoundRender_Vtbl;
 static const IPinVtbl DSoundRender_InputPin_Vtbl;
-static const IMemInputPinVtbl MemInputPin_Vtbl; 
 static const IBasicAudioVtbl IBasicAudio_Vtbl;
 static const IReferenceClockVtbl IReferenceClock_Vtbl;
 static const IMediaSeekingVtbl IMediaSeeking_Vtbl;
@@ -62,7 +61,7 @@ typedef struct DSoundRenderImpl
 
     InputPin * pInputPin;
 
-    LPDIRECTSOUND dsound;
+    IDirectSound8 *dsound;
     LPDIRECTSOUNDBUFFER dsbuffer;
     DWORD buf_size;
     DWORD write_pos;
@@ -262,7 +261,7 @@ static HRESULT DSoundRender_Sample(LPVOID iface, IMediaSample * pSample)
         ERR("Cannot get sample time (%x)\n", hr);
 
     if (This->rtLastStop != tStart && (IMediaSample_IsDiscontinuity(pSample) == S_FALSE))
-        FIXME("Unexpected discontinuity: Last: %u.%03u, tStart: %u.%03u\n",
+        WARN("Unexpected discontinuity: Last: %u.%03u, tStart: %u.%03u\n",
             (DWORD)(This->rtLastStop / 10000000), (DWORD)((This->rtLastStop / 10000)%1000),
             (DWORD)(tStart / 10000000), (DWORD)((tStart / 10000)%1000));
     This->rtLastStop = tStop;
@@ -294,7 +293,13 @@ static HRESULT DSoundRender_Sample(LPVOID iface, IMediaSample * pSample)
 
 static HRESULT DSoundRender_QueryAccept(LPVOID iface, const AM_MEDIA_TYPE * pmt)
 {
-    WAVEFORMATEX* format = (WAVEFORMATEX*)pmt->pbFormat;
+    WAVEFORMATEX* format;
+
+    if (!IsEqualIID(&pmt->majortype, &MEDIATYPE_Audio))
+        return S_FALSE;
+
+    format =  (WAVEFORMATEX*)pmt->pbFormat;
+    TRACE("Format = %p\n", format);
     TRACE("wFormatTag = %x %x\n", format->wFormatTag, WAVE_FORMAT_PCM);
     TRACE("nChannels = %d\n", format->nChannels);
     TRACE("nSamplesPerSec = %d\n", format->nAvgBytesPerSec);
@@ -302,9 +307,10 @@ static HRESULT DSoundRender_QueryAccept(LPVOID iface, const AM_MEDIA_TYPE * pmt)
     TRACE("nBlockAlign = %d\n", format->nBlockAlign);
     TRACE("wBitsPerSample = %d\n", format->wBitsPerSample);
 
-    if (IsEqualIID(&pmt->majortype, &MEDIATYPE_Audio) && IsEqualIID(&pmt->subtype, &MEDIASUBTYPE_PCM))
-        return S_OK;
-    return S_FALSE;
+    if (!IsEqualIID(&pmt->subtype, &MEDIASUBTYPE_PCM))
+        return S_FALSE;
+
+    return S_OK;
 }
 
 HRESULT DSoundRender_create(IUnknown * pUnkOuter, LPVOID * ppv)
@@ -337,13 +343,15 @@ HRESULT DSoundRender_create(IUnknown * pUnkOuter, LPVOID * ppv)
     piInput.dir = PINDIR_INPUT;
     piInput.pFilter = (IBaseFilter *)pDSoundRender;
     lstrcpynW(piInput.achName, wcsInputPinName, sizeof(piInput.achName) / sizeof(piInput.achName[0]));
-    hr = InputPin_Construct(&DSoundRender_InputPin_Vtbl, &piInput, DSoundRender_Sample, pDSoundRender, DSoundRender_QueryAccept, NULL, &pDSoundRender->csFilter, (IPin **)&pDSoundRender->pInputPin);
+    hr = InputPin_Construct(&DSoundRender_InputPin_Vtbl, &piInput, DSoundRender_Sample, pDSoundRender, DSoundRender_QueryAccept, NULL, &pDSoundRender->csFilter, NULL, (IPin **)&pDSoundRender->pInputPin);
 
     if (SUCCEEDED(hr))
     {
-        hr = DirectSoundCreate(NULL, &pDSoundRender->dsound, NULL);
+        hr = DirectSoundCreate8(NULL, &pDSoundRender->dsound, NULL);
         if (FAILED(hr))
             ERR("Cannot create Direct Sound object (%x)\n", hr);
+        else
+            IDirectSound_SetCooperativeLevel(pDSoundRender->dsound, GetDesktopWindow(), DSSCL_PRIORITY);
     }
 
     if (SUCCEEDED(hr))
@@ -771,7 +779,7 @@ static HRESULT WINAPI DSoundRender_InputPin_ReceiveConnection(IPin * iface, IPin
             This->pin.pConnectedTo = pReceivePin;
             IPin_AddRef(pReceivePin);
         }
-        else
+        else if (hr != VFW_E_ALREADY_CONNECTED)
         {
             if (DSImpl->dsbuffer)
                 IDirectSoundBuffer_Release(DSImpl->dsbuffer);
@@ -883,19 +891,6 @@ static const IPinVtbl DSoundRender_InputPin_Vtbl =
     DSoundRender_InputPin_BeginFlush,
     InputPin_EndFlush,
     InputPin_NewSegment
-};
-
-static const IMemInputPinVtbl MemInputPin_Vtbl = 
-{
-    MemInputPin_QueryInterface,
-    MemInputPin_AddRef,
-    MemInputPin_Release,
-    MemInputPin_GetAllocator,
-    MemInputPin_NotifyAllocator,
-    MemInputPin_GetAllocatorRequirements,
-    MemInputPin_Receive,
-    MemInputPin_ReceiveMultiple,
-    MemInputPin_ReceiveCanBlock
 };
 
 /*** IUnknown methods ***/

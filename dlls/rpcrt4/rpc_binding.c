@@ -820,6 +820,17 @@ RPC_STATUS WINAPI RpcBindingToStringBindingW( RPC_BINDING_HANDLE Binding, RPC_WS
 }
 
 /***********************************************************************
+ *             I_RpcBindingInqTransportType (RPCRT4.@)
+ */
+RPC_STATUS WINAPI I_RpcBindingInqTransportType( RPC_BINDING_HANDLE Binding, unsigned int * Type )
+{
+
+  FIXME( "(%p,%p): stub\n", Binding, Type);
+  *Type = TRANSPORT_TYPE_LPC;
+  return RPC_S_OK;
+}
+
+/***********************************************************************
  *             I_RpcBindingSetAsync (RPCRT4.@)
  * NOTES
  *  Exists in win9x and winNT, but with different number of arguments
@@ -1404,7 +1415,8 @@ RpcBindingSetAuthInfoExA( RPC_BINDING_HANDLE Binding, RPC_CSTR ServerPrincName,
     return RPC_S_UNKNOWN_AUTHN_LEVEL;
   }
 
-  if (AuthzSvr)
+  /* RPC_C_AUTHN_WINNT ignores the AuthzSvr parameter */
+  if (AuthzSvr && AuthnSvc != RPC_C_AUTHN_WINNT)
   {
     FIXME("unsupported AuthzSvr %u\n", AuthzSvr);
     return RPC_S_UNKNOWN_AUTHZ_SERVICE;
@@ -1533,7 +1545,8 @@ RpcBindingSetAuthInfoExW( RPC_BINDING_HANDLE Binding, RPC_WSTR ServerPrincName, 
     return RPC_S_UNKNOWN_AUTHN_LEVEL;
   }
 
-  if (AuthzSvr)
+  /* RPC_C_AUTHN_WINNT ignores the AuthzSvr parameter */
+  if (AuthzSvr && AuthnSvc != RPC_C_AUTHN_WINNT)
   {
     FIXME("unsupported AuthzSvr %u\n", AuthzSvr);
     return RPC_S_UNKNOWN_AUTHZ_SERVICE;
@@ -1542,7 +1555,7 @@ RpcBindingSetAuthInfoExW( RPC_BINDING_HANDLE Binding, RPC_WSTR ServerPrincName, 
   r = EnumerateSecurityPackagesW(&package_count, &packages);
   if (r != SEC_E_OK)
   {
-    ERR("EnumerateSecurityPackagesA failed with error 0x%08x\n", r);
+    ERR("EnumerateSecurityPackagesW failed with error 0x%08x\n", r);
     return RPC_S_SEC_PKG_ERROR;
   }
 
@@ -1587,7 +1600,7 @@ RpcBindingSetAuthInfoExW( RPC_BINDING_HANDLE Binding, RPC_WSTR ServerPrincName, 
   }
   else
   {
-    ERR("AcquireCredentialsHandleA failed with error 0x%08x\n", r);
+    ERR("AcquireCredentialsHandleW failed with error 0x%08x\n", r);
     return RPC_S_SEC_PKG_ERROR;
   }
 }

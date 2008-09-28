@@ -168,7 +168,7 @@ static const GlPixelFormatDescTemplate gl_formats_template[] = {
     {WINED3DFMT_G16R16F        ,0                                ,0                                      , 0,           0                         ,0
         ,WINED3DFMT_FLAG_FILTERING | WINED3DFMT_FLAG_RENDERTARGET },
     {WINED3DFMT_A16B16G16R16F  ,GL_RGBA16F_ARB                   ,GL_RGBA16F_ARB                         , 0,           GL_RGBA                   ,GL_HALF_FLOAT_ARB
-        ,WINED3DFMT_FLAG_FILTERING | WINED3DFMT_FLAG_RENDERTARGET },
+        ,WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING | WINED3DFMT_FLAG_RENDERTARGET },
     /* Palettized formats */
     {WINED3DFMT_A8P8,           0                                ,0                                      , 0,           0                         ,0
         ,0 },
@@ -241,7 +241,7 @@ static const GlPixelFormatDescTemplate gl_formats_template[] = {
     {WINED3DFMT_D24S8          ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB               , 0,           GL_DEPTH_COMPONENT        ,GL_UNSIGNED_INT
         ,WINED3DFMT_FLAG_FILTERING | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL },
     {WINED3DFMT_D24X8          ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB               , 0,           GL_DEPTH_COMPONENT        ,GL_UNSIGNED_INT
-        ,WINED3DFMT_FLAG_DEPTH },
+        ,WINED3DFMT_FLAG_FILTERING | WINED3DFMT_FLAG_DEPTH },
     {WINED3DFMT_D24X4S4        ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB               , 0,           GL_DEPTH_COMPONENT        ,GL_UNSIGNED_INT
         ,WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL },
     {WINED3DFMT_D16            ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB               , 0,           GL_DEPTH_COMPONENT        ,GL_UNSIGNED_SHORT

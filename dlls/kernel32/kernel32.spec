@@ -415,9 +415,9 @@
 @ stdcall GetACP()
 @ stdcall GetAtomNameA(long ptr long)
 @ stdcall GetAtomNameW(long ptr long)
-@ stdcall GetBinaryType(ptr ptr) GetBinaryTypeA
-@ stdcall GetBinaryTypeA(ptr ptr)
-@ stdcall GetBinaryTypeW(ptr ptr)
+@ stdcall GetBinaryType(str ptr) GetBinaryTypeA
+@ stdcall GetBinaryTypeA(str ptr)
+@ stdcall GetBinaryTypeW(wstr ptr)
 # @ stub GetCPFileNameFromRegistry
 @ stdcall GetCPInfo(long ptr)
 @ stdcall GetCPInfoExA(long long ptr)
@@ -457,7 +457,7 @@
 @ stub GetConsoleCommandHistoryW
 @ stdcall GetConsoleCursorInfo(long ptr)
 @ stub GetConsoleCursorMode
-@ stub GetConsoleDisplayMode
+@ stdcall GetConsoleDisplayMode(ptr)
 @ stub GetConsoleFontInfo
 @ stub GetConsoleFontSize
 @ stub GetConsoleHardwareState
@@ -712,6 +712,7 @@
 @ stdcall InitAtomTable(long)
 @ stdcall InitializeCriticalSection(ptr)
 @ stdcall InitializeCriticalSectionAndSpinCount(ptr long)
+@ stdcall InitializeCriticalSectionEx(ptr long long)
 @ stdcall InitializeSListHead(ptr) ntdll.RtlInitializeSListHead
 @ stdcall InterlockedCompareExchange (ptr long long)
 @ stdcall InterlockedDecrement(ptr)
@@ -963,7 +964,7 @@
 @ stdcall SetConsoleCursorInfo(long ptr)
 @ stub SetConsoleCursorMode
 @ stdcall SetConsoleCursorPosition(long long)
-@ stub SetConsoleDisplayMode
+@ stdcall SetConsoleDisplayMode(long long ptr)
 @ stub SetConsoleFont
 @ stub SetConsoleHardwareState
 @ stub SetConsoleIcon

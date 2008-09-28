@@ -97,6 +97,41 @@ static const RPC_SERVER_INTERFACE IFoo___RpcServerInterface =
 };
 
 static RPC_IF_HANDLE IFoo_v0_0_s_ifspec = (RPC_IF_HANDLE)& IFoo___RpcServerInterface;
+static BOOL use_pointer_ids = FALSE;
+
+static void determine_pointer_marshalling_style(void)
+{
+    RPC_MESSAGE RpcMessage;
+    MIDL_STUB_MESSAGE StubMsg;
+    MIDL_STUB_DESC StubDesc;
+    char ch = 0xde;
+
+    static const unsigned char fmtstr_up_char[] =
+    {
+        0x12, 0x8,      /* FC_UP [simple_pointer] */
+        0x2,            /* FC_CHAR */
+        0x5c,           /* FC_PAD */
+    };
+
+    StubDesc = Object_StubDesc;
+    StubDesc.pFormatTypes = NULL;
+
+    NdrClientInitializeNew(
+                           &RpcMessage,
+                           &StubMsg,
+                           &StubDesc,
+                           0);
+
+    StubMsg.BufferLength = 8;
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), 0, StubMsg.BufferLength);
+    NdrPointerMarshall(&StubMsg, (unsigned char*)&ch, fmtstr_up_char);
+    ok(StubMsg.Buffer == StubMsg.BufferStart + 5, "%p %p\n", StubMsg.Buffer, StubMsg.BufferStart);
+
+    use_pointer_ids = (*(unsigned int *)StubMsg.BufferStart != (unsigned int)&ch);
+    trace("Pointer marshalling using %s\n", use_pointer_ids ? "pointer ids" : "pointer value");
+
+    HeapFree(GetProcessHeap(), 0, StubMsg.BufferStart);
+}
 
 static void test_ndr_simple_type(void)
 {
@@ -423,8 +458,11 @@ static void test_simple_types(void)
 
     ch = 0xa5;
     ch_ptr = &ch;
-    *(void**)wiredata = ch_ptr;
-    wiredata[sizeof(void*)] = ch;
+    if (use_pointer_ids)
+        *(unsigned int *)wiredata = 0x20000;
+    else
+        *(unsigned int *)wiredata = (unsigned int)ch_ptr;
+    wiredata[4] = ch;
  
     test_pointer_marshal(fmtstr_up_char, ch_ptr, 1, wiredata, 5, NULL, 0, "up_char");
     test_pointer_marshal(fmtstr_up_byte, ch_ptr, 1, wiredata, 5, NULL, 0, "up_byte");
@@ -437,21 +475,30 @@ static void test_simple_types(void)
     test_pointer_marshal(fmtstr_rpup_char2, ch_ptr, 1, wiredata, 5, NULL, 0, "rpup_char2");
 
     s = 0xa597;
-    *(void**)wiredata = &s;
-    *(unsigned short*)(wiredata + sizeof(void*)) = s;
+    if (use_pointer_ids)
+        *(unsigned int *)wiredata = 0x20000;
+    else
+        *(unsigned int *)wiredata = (unsigned int)&s;
+    *(unsigned short*)(wiredata + 4) = s;
 
     test_pointer_marshal(fmtstr_up_wchar, &s, 2, wiredata, 6, NULL, 0, "up_wchar");
     test_pointer_marshal(fmtstr_up_short, &s, 2, wiredata, 6, NULL, 0, "up_short");
     test_pointer_marshal(fmtstr_up_ushort, &s, 2, wiredata, 6, NULL, 0, "up_ushort");
 
     i = 0x7fff;
-    *(void**)wiredata = &i;
-    *(unsigned short*)(wiredata + sizeof(void*)) = i;
+    if (use_pointer_ids)
+        *(unsigned int *)wiredata = 0x20000;
+    else
+        *(unsigned int *)wiredata = (unsigned int)&i;
+    *(unsigned short*)(wiredata + 4) = i;
     test_pointer_marshal(fmtstr_up_enum16, &i, 2, wiredata, 6, NULL, 0, "up_enum16");
 
     l = 0xcafebabe;
-    *(void**)wiredata = &l;
-    *(unsigned long*)(wiredata + sizeof(void*)) = l;
+    if (use_pointer_ids)
+        *(unsigned int *)wiredata = 0x20000;
+    else
+        *(unsigned int *)wiredata = (unsigned int)&l;
+    *(unsigned long*)(wiredata + 4) = l;
 
     test_pointer_marshal(fmtstr_up_long, &l, 4, wiredata, 8, NULL, 0, "up_long");
     test_pointer_marshal(fmtstr_up_ulong, &l, 4, wiredata, 8, NULL, 0,  "up_ulong");
@@ -459,20 +506,29 @@ static void test_simple_types(void)
     test_pointer_marshal(fmtstr_up_errorstatus, &l, 4, wiredata, 8, NULL, 0,  "up_errorstatus");
 
     ll = ((ULONGLONG)0xcafebabe) << 32 | 0xdeadbeef;
-    *(void**)wiredata = &ll;
-    *(void**)(wiredata + sizeof(void*)) = NULL;
-    *(ULONGLONG*)(wiredata + 2 * sizeof(void*)) = ll;
+    if (use_pointer_ids)
+        *(unsigned int *)wiredata = 0x20000;
+    else
+        *(unsigned int *)wiredata = (unsigned int)&ll;
+    *(unsigned int **)(wiredata + 4) = 0;
+    *(ULONGLONG*)(wiredata + 8) = ll;
     test_pointer_marshal(fmtstr_up_longlong, &ll, 8, wiredata, 16, NULL, 0, "up_longlong");
 
     f = 3.1415f;
-    *(void**)wiredata = &f;
-    *(float*)(wiredata + sizeof(void*)) = f;
+    if (use_pointer_ids)
+        *(unsigned int *)wiredata = 0x20000;
+    else
+        *(unsigned int *)wiredata = (unsigned int)&f;
+    *(float*)(wiredata + 4) = f;
     test_pointer_marshal(fmtstr_up_float, &f, 4, wiredata, 8, NULL, 0, "up_float");
 
     d = 3.1415;
-    *(void**)wiredata = &d;
-    *(void**)(wiredata + sizeof(void*)) = NULL;
-    *(double*)(wiredata + 2 * sizeof(void*)) = d;
+    if (use_pointer_ids)
+        *(unsigned int *)wiredata = 0x20000;
+    else
+        *(unsigned int *)wiredata = (unsigned int)&d;
+    *(unsigned int *)(wiredata + 4) = 0;
+    *(double*)(wiredata + 8) = d;
     test_pointer_marshal(fmtstr_up_double, &d, 8, wiredata, 16, NULL, 0,  "up_double");
 
 }
@@ -877,6 +933,9 @@ static void test_simple_struct(void)
 
     };
 
+    /* zero the entire structure, including the holes */
+    memset(&s1, 0, sizeof(s1));
+
     /* FC_STRUCT */
     s1.s = 0x1234;
     s1.c = 0xa5;
@@ -888,7 +947,10 @@ static void test_simple_struct(void)
     memcpy(wiredata, &s1, wiredatalen); 
     test_simple_struct_marshal(fmtstr_simple_struct + 4, &s1, 24, wiredata, 24, NULL, 0, "struct");
 
-    *(void**)wiredata = &s1;
+    if (use_pointer_ids)
+        *(unsigned int *)wiredata = 0x20000;
+    else
+        *(unsigned int *)wiredata = (unsigned int)&s1;
     memcpy(wiredata + 4, &s1, wiredatalen);
     if (0)
     {
@@ -897,7 +959,7 @@ static void test_simple_struct(void)
     }
 
     /* zero the entire structure, including the hole */
-    memset(&ps1, 0, sizeof(&ps1));
+    memset(&ps1, 0, sizeof(ps1));
 
     /* FC_PSTRUCT */
     ps1.l1 = 0xdeadbeef;
@@ -905,12 +967,25 @@ static void test_simple_struct(void)
     ps1.pl1 = &l;
     c = 'a';
     ps1.pc1 = &c;
-    memcpy(wiredata + 4, &ps1, 12);
+    *(unsigned int *)(wiredata + 4) = 0xdeadbeef;
+    if (use_pointer_ids)
+    {
+	*(unsigned int *)(wiredata + 8) = 0x20000;
+	*(unsigned int *)(wiredata + 12) = 0x20004;
+    }
+    else
+    {
+	*(unsigned int *)(wiredata + 8) = (unsigned int)&l;
+	*(unsigned int *)(wiredata + 12) = (unsigned int)&c;
+    }
     memcpy(wiredata + 16, &l, 4);
     memcpy(wiredata + 20, &c, 1);
 
     test_simple_struct_marshal(fmtstr_pointer_struct + 4, &ps1, 17, wiredata + 4, 17, ps1_cmp, 2, "pointer_struct");
-    *(void**)wiredata = &ps1;
+    if (use_pointer_ids)
+        *(unsigned int *)wiredata = 0x20000;
+    else
+        *(unsigned int *)wiredata = (unsigned int)&ps1;
     if (0)
     {
     /* one of the unmarshallings crashes Wine */
@@ -1089,7 +1164,7 @@ static void test_client_init(void)
     TEST_ZERO(pPointerQueueState, "%p");
     TEST_ZERO(IgnoreEmbeddedPointers, "%d");
     TEST_ZERO(PointerBufferMark, "%p");
-    TEST_ZERO(fBufferValid, "%d");
+    TEST_ZERO(CorrDespIncrement, "%d");
     TEST_ZERO(uFlags, "%d");
     /* FIXME: UniquePtrCount */
     TEST_ULONG_PTR_UNSET(MaxCount);
@@ -1111,8 +1186,15 @@ static void test_client_init(void)
     TEST_ZERO(fHasReturn, "%d");
     TEST_ZERO(fHasExtensions, "%d");
     TEST_ZERO(fHasNewCorrDesc, "%d");
-    TEST_ZERO(fUnused, "%d");
-    ok(stubMsg.fUnused2 == 0xffffcccc, "stubMsg.fUnused2 should have been 0xcccc instead of 0x%x\n", stubMsg.fUnused2);
+    TEST_ZERO(fIsIn, "%d");
+    TEST_ZERO(fIsOut, "%d");
+    TEST_ZERO(fIsOicf, "%d");
+    TEST_ZERO(fBufferValid, "%d");
+    TEST_ZERO(fHasMemoryValidateCallback, "%d");
+    TEST_ZERO(fInFree, "%d");
+    TEST_ZERO(fNeedMCCP, "%d");
+    TEST_ZERO(fUnused, "0x%x");
+    ok(stubMsg.fUnused2 == 0xffffcccc, "stubMsg.fUnused2 should have been 0xffffcccc instead of 0x%x\n", stubMsg.fUnused2);
     ok(stubMsg.dwDestContext == MSHCTX_DIFFERENTMACHINE, "stubMsg.dwDestContext should have been MSHCTX_DIFFERENTMACHINE instead of %d\n", stubMsg.dwDestContext);
     TEST_ZERO(pvDestContext, "%p");
     TEST_POINTER_UNSET(SavedContextHandles);
@@ -1183,7 +1265,7 @@ todo_wine
     TEST_ZERO(pPointerQueueState, "%p");
     TEST_ZERO(IgnoreEmbeddedPointers, "%d");
     TEST_ZERO(PointerBufferMark, "%p");
-    ok(stubMsg.fBufferValid == 0xcc, "fBufferValid should have been unset instead of 0x%x\n", stubMsg.fBufferValid);
+    ok(stubMsg.CorrDespIncrement == 0xcc, "CorrDespIncrement should have been unset instead of 0x%x\n", stubMsg.CorrDespIncrement);
     TEST_ZERO(uFlags, "%d");
     /* FIXME: UniquePtrCount */
     TEST_ULONG_PTR_UNSET(MaxCount);
@@ -1205,8 +1287,15 @@ todo_wine
     TEST_ZERO(fHasReturn, "%d");
     TEST_ZERO(fHasExtensions, "%d");
     TEST_ZERO(fHasNewCorrDesc, "%d");
-    TEST_ZERO(fUnused, "%d");
-    ok(stubMsg.fUnused2 == 0xffffcccc, "stubMsg.fUnused2 should have been 0xcccc instead of 0x%x\n", stubMsg.fUnused2);
+    TEST_ZERO(fIsIn, "%d");
+    TEST_ZERO(fIsOut, "%d");
+    TEST_ZERO(fIsOicf, "%d");
+    trace("fBufferValid = %d\n", stubMsg.fBufferValid);
+    TEST_ZERO(fHasMemoryValidateCallback, "%d");
+    TEST_ZERO(fInFree, "%d");
+    TEST_ZERO(fNeedMCCP, "%d");
+    TEST_ZERO(fUnused, "0x%x");
+    ok(stubMsg.fUnused2 == 0xffffcccc, "stubMsg.fUnused2 should have been 0xffffcccc instead of 0x%x\n", stubMsg.fUnused2);
     ok(stubMsg.dwDestContext == MSHCTX_DIFFERENTMACHINE, "stubMsg.dwDestContext should have been MSHCTX_DIFFERENTMACHINE instead of %d\n", stubMsg.dwDestContext);
     TEST_ZERO(pvDestContext, "%p");
     TEST_POINTER_UNSET(SavedContextHandles);
@@ -1723,6 +1812,8 @@ static void test_ndr_buffer(void)
     unsigned char *binding;
     RPC_BINDING_HANDLE Handle;
     RPC_STATUS status;
+    ULONG prev_buffer_length;
+    BOOL old_buffer_valid_location;
 
     StubDesc.RpcInterfaceInformation = (void *)&IFoo___RpcServerInterface;
 
@@ -1758,16 +1849,24 @@ static void test_ndr_buffer(void)
     ok(!StubMsg.BufferEnd, "BufferEnd should have been NULL instead of %p\n", StubMsg.BufferEnd);
 todo_wine
     ok(StubMsg.BufferLength == 0, "BufferLength should have left as 0 instead of being set to %d\n", StubMsg.BufferLength);
-    ok(StubMsg.fBufferValid == TRUE, "fBufferValid should have been TRUE instead of 0x%x\n", StubMsg.fBufferValid);
+    old_buffer_valid_location = !StubMsg.fBufferValid;
+    if (old_buffer_valid_location)
+        ok(broken(StubMsg.CorrDespIncrement == TRUE), "fBufferValid should have been TRUE instead of 0x%x\n", StubMsg.CorrDespIncrement);
+    else
+        ok(StubMsg.fBufferValid, "fBufferValid should have been non-zero instead of 0x%x\n", StubMsg.fBufferValid);
 
+    prev_buffer_length = RpcMessage.BufferLength;
     StubMsg.BufferLength = 1;
     NdrFreeBuffer(&StubMsg);
     ok(RpcMessage.Handle != NULL, "RpcMessage.Handle should not have been NULL\n");
     ok(RpcMessage.Buffer != NULL, "RpcMessage.Buffer should not have been NULL\n");
-    ok(RpcMessage.BufferLength == 10, "RpcMessage.BufferLength should have been left as 10 instead of %d\n", RpcMessage.BufferLength);
+    ok(RpcMessage.BufferLength == prev_buffer_length, "RpcMessage.BufferLength should have been left as %d instead of %d\n", prev_buffer_length, RpcMessage.BufferLength);
     ok(StubMsg.Buffer != NULL, "Buffer should not have been NULL\n");
     ok(StubMsg.BufferLength == 1, "BufferLength should have left as 1 instead of being set to %d\n", StubMsg.BufferLength);
-    ok(StubMsg.fBufferValid == FALSE, "fBufferValid should have been FALSE instead of 0x%x\n", StubMsg.fBufferValid);
+    if (old_buffer_valid_location)
+        ok(broken(StubMsg.CorrDespIncrement == FALSE), "fBufferValid should have been FALSE instead of 0x%x\n", StubMsg.CorrDespIncrement);
+    else
+        ok(!StubMsg.fBufferValid, "fBufferValid should have been FALSE instead of %d\n", StubMsg.fBufferValid);
 
     /* attempt double-free */
     NdrFreeBuffer(&StubMsg);
@@ -1823,6 +1922,8 @@ static void test_NdrMapCommAndFaultStatus(void)
 
 START_TEST( ndr_marshall )
 {
+    determine_pointer_marshalling_style();
+
     test_ndr_simple_type();
     test_simple_types();
     test_nontrivial_pointer_types();

@@ -270,8 +270,6 @@ static void InternetReadFile_test(int flags)
 
     CHECK_NOTIFIED(INTERNET_STATUS_HANDLE_CREATED);
     SET_EXPECT(INTERNET_STATUS_HANDLE_CREATED);
-    SET_WINE_ALLOW(INTERNET_STATUS_RESOLVING_NAME);
-    SET_WINE_ALLOW(INTERNET_STATUS_NAME_RESOLVED);
 
     trace("HttpOpenRequestA <--\n");
     hor = HttpOpenRequestA(hic, "GET", "/about/", NULL, NULL, types,
@@ -297,11 +295,8 @@ static void InternetReadFile_test(int flags)
     ok(!strcmp(buffer, "http://www.winehq.org/about/"), "Wrong URL %s\n", buffer);
 
     CHECK_NOTIFIED(INTERNET_STATUS_HANDLE_CREATED);
-    todo_wine
-    {
-        CHECK_NOT_NOTIFIED(INTERNET_STATUS_RESOLVING_NAME);
-        CHECK_NOT_NOTIFIED(INTERNET_STATUS_NAME_RESOLVED);
-    }
+    CHECK_NOT_NOTIFIED(INTERNET_STATUS_RESOLVING_NAME);
+    CHECK_NOT_NOTIFIED(INTERNET_STATUS_NAME_RESOLVED);
     if (first_connection_to_test_url)
     {
         SET_EXPECT(INTERNET_STATUS_RESOLVING_NAME);
@@ -516,8 +511,6 @@ static void InternetReadFileExA_test(int flags)
 
     CHECK_NOTIFIED(INTERNET_STATUS_HANDLE_CREATED);
     SET_EXPECT(INTERNET_STATUS_HANDLE_CREATED);
-    SET_WINE_ALLOW(INTERNET_STATUS_RESOLVING_NAME);
-    SET_WINE_ALLOW(INTERNET_STATUS_NAME_RESOLVED);
 
     trace("HttpOpenRequestA <--\n");
     hor = HttpOpenRequestA(hic, "GET", "/about/", NULL, NULL, types,
@@ -538,11 +531,8 @@ static void InternetReadFileExA_test(int flags)
     if (hor == 0x0) goto abort;
 
     CHECK_NOTIFIED(INTERNET_STATUS_HANDLE_CREATED);
-    todo_wine
-    {
-        CHECK_NOT_NOTIFIED(INTERNET_STATUS_RESOLVING_NAME);
-        CHECK_NOT_NOTIFIED(INTERNET_STATUS_NAME_RESOLVED);
-    }
+    CHECK_NOT_NOTIFIED(INTERNET_STATUS_RESOLVING_NAME);
+    CHECK_NOT_NOTIFIED(INTERNET_STATUS_NAME_RESOLVED);
     if (first_connection_to_test_url)
     {
         SET_EXPECT(INTERNET_STATUS_RESOLVING_NAME);
@@ -1687,7 +1677,7 @@ static void test_header_handling_order(int port)
     size = sizeof(status);
     ret = HttpQueryInfo( request, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &size, NULL );
     ok(ret, "HttpQueryInfo failed\n");
-    ok(status == 200, "request failed with status %u\n", status);
+    ok(status == 200 || status == 400 /* IE6 */, "request failed with status %u\n", status);
 
     InternetCloseHandle(request);
     InternetCloseHandle(connect);
