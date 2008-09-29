@@ -841,7 +841,7 @@ static void _test_elem_collection(unsigned line, IUnknown *unk,
     HRESULT hres;
 
     hres = IUnknown_QueryInterface(unk, &IID_IHTMLElementCollection, (void**)&col);
-    ok(hres == S_OK, "Could not get IHTMLElementCollection: %08x\n", hres);
+    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLElementCollection: %08x\n", hres);
 
     test_disp((IUnknown*)col, &DIID_DispHTMLElementCollection);
 
@@ -881,6 +881,34 @@ static void _test_elem_collection(unsigned line, IUnknown *unk,
     ok_(__FILE__,line) (disp == NULL, "disp != NULL\n");
 
     IHTMLElementCollection_Release(col);
+}
+
+#define test_elem_getelembytag(u,t,l) _test_elem_getelembytag(__LINE__,u,t,l)
+static void _test_elem_getelembytag(unsigned line, IUnknown *unk, elem_type_t type, long exlen)
+{
+    IHTMLElement2 *elem = _get_elem2_iface(line, unk);
+    IHTMLElementCollection *col = NULL;
+    elem_type_t *types = NULL;
+    BSTR tmp;
+    int i;
+    HRESULT hres;
+
+    tmp = a2bstr(elem_type_infos[type].tag);
+    hres = IHTMLElement2_getElementsByTagName(elem, tmp, &col);
+    SysFreeString(tmp);
+    IHTMLElement2_Release(elem);
+    ok_(__FILE__,line) (hres == S_OK, "getElementByTagName failed: %08x\n", hres);
+    ok_(__FILE__,line) (col != NULL, "col == NULL\n");
+
+    if(exlen) {
+        types = HeapAlloc(GetProcessHeap(), 0, exlen*sizeof(elem_type_t));
+        for(i=0; i<exlen; i++)
+            types[i] = type;
+    }
+
+    _test_elem_collection(line, (IUnknown*)col, types, exlen);
+
+    HeapFree(GetProcessHeap(), 0, types);
 }
 
 #define get_first_child(n) _get_first_child(__LINE__,n)
@@ -1333,6 +1361,30 @@ static void _test_node_remove_child(unsigned line, IUnknown *unk, IHTMLDOMNode *
     IHTMLDOMNode_Release(new_node);
 }
 
+#define test_doc_title(d,t) _test_doc_title(__LINE__,d,t)
+static void _test_doc_title(unsigned line, IHTMLDocument2 *doc, const char *extitle)
+{
+    BSTR title = NULL;
+    HRESULT hres;
+
+    hres = IHTMLDocument2_get_title(doc, &title);
+    ok_(__FILE__,line) (hres == S_OK, "get_title failed: %08x\n", hres);
+    ok_(__FILE__,line) (!strcmp_wa(title, extitle), "unexpected title %s\n", dbgstr_w(title));
+    SysFreeString(title);
+}
+
+#define test_doc_set_title(d,t) _test_doc_set_title(__LINE__,d,t)
+static void _test_doc_set_title(unsigned line, IHTMLDocument2 *doc, const char *title)
+{
+    BSTR tmp;
+    HRESULT hres;
+
+    tmp = a2bstr(title);
+    hres = IHTMLDocument2_put_title(doc, tmp);
+    ok_(__FILE__,line) (hres == S_OK, "get_title failed: %08x\n", hres);
+    SysFreeString(tmp);
+}
+
 static void test_elem_col_item(IHTMLElementCollection *col, LPCWSTR n,
         const elem_type_t *elem_types, long len)
 {
@@ -1747,6 +1799,7 @@ static void test_navigator(IHTMLDocument2 *doc)
     IHTMLWindow2 *window;
     IOmNavigator *navigator, *navigator2;
     ULONG ref;
+    BSTR bstr;
     HRESULT hres;
 
     hres = IHTMLDocument2_get_parentWindow(doc, &window);
@@ -1763,6 +1816,12 @@ static void test_navigator(IHTMLDocument2 *doc)
 
     IHTMLWindow2_Release(window);
     IOmNavigator_Release(navigator2);
+
+    hres = IOmNavigator_get_appCodeName(navigator, &bstr);
+    ok(hres == S_OK, "get_appCodeName failed: %08x\n", hres);
+    ok(!strcmp_wa(bstr, "Mozilla"), "Unexpected appCodeName %s\n", dbgstr_w(bstr));
+    SysFreeString(bstr);
+
     ref = IOmNavigator_Release(navigator);
     ok(!ref, "navigator should be destroyed here\n");
 }
@@ -1950,6 +2009,7 @@ static void test_defaults(IHTMLDocument2 *doc)
     IHTMLStyleSheetsCollection_Release(stylesheetcol);
 
     test_default_selection(doc);
+    test_doc_title(doc, "");
 }
 
 static void test_stylesheet(IDispatch *disp)
@@ -2146,6 +2206,10 @@ static void test_elems(IHTMLDocument2 *doc)
         IHTMLDOMNode_Release(node);
         ok(node2 == NULL, "node != NULL\n");
 
+        test_elem_getelembytag((IUnknown*)elem, ET_OPTION, 2);
+        test_elem_getelembytag((IUnknown*)elem, ET_SELECT, 0);
+        test_elem_getelembytag((IUnknown*)elem, ET_HTML, 0);
+
         IHTMLElement_Release(elem);
     }
 
@@ -2300,6 +2364,10 @@ static void test_elems(IHTMLDocument2 *doc)
 
     test_stylesheets(doc);
     test_create_option_elem(doc);
+
+    test_doc_title(doc, "test");
+    test_doc_set_title(doc, "test title");
+    test_doc_title(doc, "test title");
 }
 
 static void test_create_elems(IHTMLDocument2 *doc)

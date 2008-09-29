@@ -97,13 +97,13 @@
 @ stub MIDL_wchar_strcpy
 @ stub MIDL_wchar_strlen
 @ stub MesBufferHandleReset
-@ stub MesDecodeBufferHandleCreate
-@ stub MesDecodeIncrementalHandleCreate
+@ stdcall MesDecodeBufferHandleCreate(ptr long ptr)
+@ stdcall MesDecodeIncrementalHandleCreate(ptr ptr ptr)
 @ stub MesEncodeDynBufferHandleCreate
-@ stub MesEncodeFixedBufferHandleCreate
-@ stub MesEncodeIncrementalHandleCreate
-@ stub MesHandleFree
-@ stub MesIncrementalHandleReset
+@ stdcall MesEncodeFixedBufferHandleCreate(ptr long ptr ptr)
+@ stdcall MesEncodeIncrementalHandleCreate(ptr ptr ptr ptr)
+@ stdcall MesHandleFree(ptr)
+@ stdcall MesIncrementalHandleReset(ptr ptr ptr ptr ptr long)
 @ stub MesInqProcEncodingId
 @ stdcall NDRCContextBinding(ptr)
 @ stdcall NDRCContextMarshall(ptr ptr)
@@ -218,7 +218,7 @@
 @ stdcall NdrMapCommAndFaultStatus(ptr ptr ptr long)
 @ stub NdrMarkNextActivePipe
 @ stub NdrMesProcEncodeDecode2
-@ stub NdrMesProcEncodeDecode
+@ varargs NdrMesProcEncodeDecode(ptr ptr ptr)
 @ stub NdrMesSimpleTypeAlignSize
 @ stub NdrMesSimpleTypeDecode
 @ stub NdrMesSimpleTypeEncode

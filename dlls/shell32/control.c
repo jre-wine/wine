@@ -1,6 +1,7 @@
 /* Control Panel management
  *
  * Copyright 2001 Eric Pouech
+ * Copyright 2008 Owen Rudge
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -33,11 +34,16 @@
 #include "wine/debug.h"
 #include "cpl.h"
 #include "wine/unicode.h"
+#include "commctrl.h"
 
 #define NO_SHLWAPI_REG
 #include "shlwapi.h"
 
 #include "cpanel.h"
+#include "shresdef.h"
+#include "shell32_main.h"
+
+#define MAX_STRING_LEN      1024
 
 WINE_DEFAULT_DEBUG_CHANNEL(shlctrl);
 
@@ -159,107 +165,258 @@ CPlApplet*	Control_LoadApplet(HWND hWnd, LPCWSTR cmd, CPanel* panel)
     return NULL;
 }
 
-static void 	 Control_WndProc_Create(HWND hWnd, const CREATESTRUCTA* cs)
+#define IDC_LISTVIEW        1000
+#define IDC_STATUSBAR       1001
+
+#define NUM_COLUMNS            2
+#define LISTVIEW_DEFSTYLE   (WS_CHILD | WS_VISIBLE | WS_TABSTOP |\
+                             LVS_SORTASCENDING | LVS_AUTOARRANGE | LVS_SINGLESEL)
+
+static BOOL Control_CreateListView (CPanel *panel)
+{
+    RECT ws, sb;
+    WCHAR empty_string[] = {0};
+    WCHAR buf[MAX_STRING_LEN];
+    LVCOLUMNW lvc;
+
+    /* Create list view */
+    GetClientRect(panel->hWndStatusBar, &sb);
+    GetClientRect(panel->hWnd, &ws);
+
+    panel->hWndListView = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW,
+                          empty_string, LISTVIEW_DEFSTYLE | LVS_ICON,
+                          0, 0, ws.right - ws.left, ws.bottom - ws.top -
+                          (sb.bottom - sb.top), panel->hWnd,
+                          (HMENU) IDC_LISTVIEW, panel->hInst, NULL);
+
+    if (!panel->hWndListView)
+        return FALSE;
+
+    /* Create image lists for list view */
+    panel->hImageListSmall = ImageList_Create(GetSystemMetrics(SM_CXSMICON),
+        GetSystemMetrics(SM_CYSMICON), ILC_MASK, 1, 1);
+    panel->hImageListLarge = ImageList_Create(GetSystemMetrics(SM_CXICON),
+        GetSystemMetrics(SM_CYICON), ILC_MASK, 1, 1);
+
+    (void) ListView_SetImageList(panel->hWndListView, panel->hImageListSmall, LVSIL_SMALL);
+    (void) ListView_SetImageList(panel->hWndListView, panel->hImageListLarge, LVSIL_NORMAL);
+
+    /* Create columns for list view */
+    lvc.mask = LVCF_FMT | LVCF_TEXT | LVCF_SUBITEM | LVCF_WIDTH;
+    lvc.pszText = buf;
+    lvc.fmt = LVCFMT_LEFT;
+
+    /* Name column */
+    lvc.iSubItem = 0;
+    lvc.cx = (ws.right - ws.left) / 3;
+    LoadStringW(shell32_hInstance, IDS_CPANEL_NAME, buf, sizeof(buf) / sizeof(buf[0]));
+
+    if (ListView_InsertColumnW(panel->hWndListView, 0, &lvc) == -1)
+        return FALSE;
+
+    /* Description column */
+    lvc.iSubItem = 1;
+    lvc.cx = ((ws.right - ws.left) / 3) * 2;
+    LoadStringW(shell32_hInstance, IDS_CPANEL_DESCRIPTION, buf, sizeof(buf) /
+        sizeof(buf[0]));
+
+    if (ListView_InsertColumnW(panel->hWndListView, 1, &lvc) == -1)
+        return FALSE;
+
+    return(TRUE);
+}
+
+static void 	 Control_WndProc_Create(HWND hWnd, const CREATESTRUCTW* cs)
 {
    CPanel*	panel = (CPanel*)cs->lpCreateParams;
+   HMENU hMenu, hSubMenu;
+   CPlApplet*	applet;
+   MENUITEMINFOW mii;
+   int menucount, i, index;
+   CPlItem *item;
+   LVITEMW lvItem;
+   INITCOMMONCONTROLSEX icex;
+   INT sb_parts;
 
-   SetWindowLongPtrA(hWnd, 0, (LONG_PTR)panel);
-   panel->status = 0;
+   SetWindowLongPtrW(hWnd, 0, (LONG_PTR)panel);
    panel->hWnd = hWnd;
+
+   /* Initialise common control DLL */
+   icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
+   icex.dwICC = ICC_LISTVIEW_CLASSES | ICC_BAR_CLASSES;
+   InitCommonControlsEx(&icex);
+
+   /* create the status bar */
+   if (!(panel->hWndStatusBar = CreateStatusWindowW(WS_CHILD | WS_VISIBLE | CCS_BOTTOM | SBARS_SIZEGRIP, NULL, hWnd, IDC_STATUSBAR)))
+       return;
+
+   sb_parts = -1;
+   SendMessageW(panel->hWndStatusBar, SB_SETPARTS, 1, (LPARAM) &sb_parts);
+
+   /* create the list view */
+   if (!Control_CreateListView(panel))
+       return;
+
+   hMenu = LoadMenuW(shell32_hInstance, MAKEINTRESOURCEW(MENU_CPANEL));
+
+   /* insert menu items for applets */
+   hSubMenu = GetSubMenu(hMenu, 0);
+   menucount = 0;
+
+   for (applet = panel->first; applet; applet = applet->next) {
+      for (i = 0; i < applet->count; i++) {
+         if (!applet->info[i].dwSize)
+            continue;
+
+         /* set up a CPlItem for this particular subprogram */
+         item = HeapAlloc(GetProcessHeap(), 0, sizeof(CPlItem));
+
+         if (!item)
+            continue;
+
+         item->applet = (CPlApplet *) applet;
+         item->id = i;
+
+         mii.cbSize = sizeof(MENUITEMINFOW);
+         mii.fMask = MIIM_ID | MIIM_STRING | MIIM_DATA;
+         mii.dwTypeData = applet->info[i].szName;
+         mii.cch = sizeof(applet->info[i].szName) / sizeof(applet->info[i].szName[0]);
+         mii.wID = IDM_CPANEL_APPLET_BASE + menucount;
+         mii.dwItemData = (DWORD) item;
+
+         if (InsertMenuItemW(hSubMenu, menucount, TRUE, &mii)) {
+            /* add the list view item */
+            index = ImageList_AddIcon(panel->hImageListLarge, applet->info[i].hIcon);
+            ImageList_AddIcon(panel->hImageListSmall, applet->info[i].hIcon);
+
+            lvItem.mask = LVIF_IMAGE | LVIF_TEXT | LVIF_PARAM;
+            lvItem.iItem = menucount;
+            lvItem.iSubItem = 0;
+            lvItem.pszText = applet->info[i].szName;
+            lvItem.iImage = index;
+            lvItem.lParam = (LPARAM) item;
+
+            ListView_InsertItemW(panel->hWndListView, &lvItem);
+
+            /* add the description */
+            ListView_SetItemTextW(panel->hWndListView, menucount, 1,
+                applet->info[i].szInfo);
+
+            /* update menu bar, increment count */
+            DrawMenuBar(hWnd);
+            menucount++;
+         }
+      }
+   }
+
+   panel->total_subprogs = menucount;
+
+   /* check the "large items" icon in the View menu */
+   hSubMenu = GetSubMenu(hMenu, 1);
+   CheckMenuRadioItem(hSubMenu, FCIDM_SHVIEW_BIGICON, FCIDM_SHVIEW_REPORTVIEW,
+      FCIDM_SHVIEW_BIGICON, MF_BYCOMMAND);
+
+   SetMenu(hWnd, hMenu);
 }
 
-#define	XICON	32
-#define XSTEP	128
-#define	YICON	32
-#define YSTEP	64
-
-static BOOL	Control_Localize(const CPanel* panel, int cx, int cy,
-				 CPlApplet** papplet, unsigned* psp)
+static void Control_FreeCPlItems(HWND hWnd, CPanel *panel)
 {
-    unsigned	i, x = (XSTEP-XICON)/2, y = 0;
-    CPlApplet*	applet;
-    RECT	rc;
+    HMENU hMenu, hSubMenu;
+    MENUITEMINFOW mii;
+    int i;
 
-    GetClientRect(panel->hWnd, &rc);
-    for (applet = panel->first; applet; applet = applet->next) {
-        for (i = 0; i < applet->count; i++) {
-	    if (!applet->info[i].dwSize) continue;
-	    if (x + XSTEP >= rc.right - rc.left) {
-	        x = (XSTEP-XICON)/2;
-		y += YSTEP;
-	    }
-	    if (cx >= x && cx < x + XICON && cy >= y && cy < y + YSTEP) {
-	        *papplet = applet;
-	        *psp = i;
-		return TRUE;
-	    }
-	    x += XSTEP;
-	}
+    /* get the File menu */
+    hMenu = GetMenu(hWnd);
+
+    if (!hMenu)
+        return;
+
+    hSubMenu = GetSubMenu(hMenu, 0);
+
+    if (!hSubMenu)
+        return;
+
+    /* loop and free the item data */
+    for (i = IDM_CPANEL_APPLET_BASE; i <= IDM_CPANEL_APPLET_BASE + panel->total_subprogs; i++)
+    {
+        mii.cbSize = sizeof(MENUITEMINFOW);
+        mii.fMask = MIIM_DATA;
+
+        if (!GetMenuItemInfoW(hSubMenu, i, FALSE, &mii))
+            continue;
+
+        HeapFree(GetProcessHeap(), 0, (LPVOID) mii.dwItemData);
     }
-    return FALSE;
 }
 
-static LRESULT Control_WndProc_Paint(const CPanel* panel, WPARAM wParam)
+static void Control_UpdateListViewStyle(CPanel *panel, UINT style, UINT id)
 {
-    HDC		hdc;
-    PAINTSTRUCT	ps;
-    RECT	rc, txtRect;
-    unsigned	i, x = 0, y = 0;
-    CPlApplet*	applet;
-    HGDIOBJ	hOldFont;
+    HMENU hMenu, hSubMenu;
 
-    hdc = (wParam) ? (HDC)wParam : BeginPaint(panel->hWnd, &ps);
-    hOldFont = SelectObject(hdc, GetStockObject(ANSI_VAR_FONT));
-    GetClientRect(panel->hWnd, &rc);
-    for (applet = panel->first; applet; applet = applet->next) {
-        for (i = 0; i < applet->count; i++) {
-	    if (x + XSTEP >= rc.right - rc.left) {
-	        x = 0;
-		y += YSTEP;
-	    }
-	    if (!applet->info[i].dwSize) continue;
-	    DrawIcon(hdc, x + (XSTEP-XICON)/2, y, applet->info[i].hIcon);
-	    txtRect.left = x;
-	    txtRect.right = x + XSTEP;
-	    txtRect.top = y + YICON;
-	    txtRect.bottom = y + YSTEP;
-	    DrawTextW(hdc, applet->info[i].szName, -1, &txtRect,
-		      DT_CENTER | DT_VCENTER);
-	    x += XSTEP;
-	}
-    }
-    SelectObject(hdc, hOldFont);
-    if (!wParam) EndPaint(panel->hWnd, &ps);
-    return 0;
+    SetWindowLongW(panel->hWndListView, GWL_STYLE, LISTVIEW_DEFSTYLE | style);
+
+    /* update the menu */
+    hMenu = GetMenu(panel->hWnd);
+    hSubMenu = GetSubMenu(hMenu, 1);
+
+    CheckMenuRadioItem(hSubMenu, FCIDM_SHVIEW_BIGICON, FCIDM_SHVIEW_REPORTVIEW,
+        id, MF_BYCOMMAND);
 }
 
-static LRESULT Control_WndProc_LButton(CPanel* panel, LPARAM lParam, BOOL up)
+static CPlItem* Control_GetCPlItem_From_MenuID(HWND hWnd, UINT id)
 {
-    unsigned	i;
-    CPlApplet*	applet;
+    HMENU hMenu, hSubMenu;
+    MENUITEMINFOW mii;
 
-    if (Control_Localize(panel, (short)LOWORD(lParam), (short)HIWORD(lParam), &applet, &i)) {
-       if (up) {
-	   if (panel->clkApplet == applet && panel->clkSP == i) {
-	       applet->proc(applet->hWnd, CPL_DBLCLK, i, applet->info[i].lData);
-	   }
-       } else {
-	   panel->clkApplet = applet;
-	   panel->clkSP = i;
-       }
+    /* retrieve the CPlItem structure from the menu item data */
+    hMenu = GetMenu(hWnd);
+
+    if (!hMenu)
+        return NULL;
+
+    hSubMenu = GetSubMenu(hMenu, 0);
+
+    if (!hSubMenu)
+        return NULL;
+
+    mii.cbSize = sizeof(MENUITEMINFOW);
+    mii.fMask = MIIM_DATA;
+
+    if (!GetMenuItemInfoW(hSubMenu, id, FALSE, &mii))
+        return NULL;
+
+    return (CPlItem *) mii.dwItemData;
+}
+
+static CPlItem* Control_GetCPlItem_From_ListView(CPanel *panel)
+{
+    LVITEMW lvItem;
+    int selitem;
+
+    selitem = SendMessageW(panel->hWndListView, LVM_GETNEXTITEM, -1, LVNI_FOCUSED
+        | LVNI_SELECTED);
+
+    if (selitem != -1)
+    {
+        lvItem.iItem = selitem;
+        lvItem.mask = LVIF_PARAM;
+
+        if (SendMessageW(panel->hWndListView, LVM_GETITEMW, 0, (LPARAM) &lvItem))
+            return (CPlItem *) lvItem.lParam;
     }
-    return 0;
+
+    return NULL;
 }
 
 static LRESULT WINAPI	Control_WndProc(HWND hWnd, UINT wMsg,
 					WPARAM lParam1, LPARAM lParam2)
 {
-   CPanel*	panel = (CPanel*)GetWindowLongPtrA(hWnd, 0);
+   CPanel*	panel = (CPanel*)GetWindowLongPtrW(hWnd, 0);
 
    if (panel || wMsg == WM_CREATE) {
       switch (wMsg) {
       case WM_CREATE:
-	 Control_WndProc_Create(hWnd, (CREATESTRUCTA*)lParam2);
+	 Control_WndProc_Create(hWnd, (CREATESTRUCTW*)lParam2);
 	 return 0;
       case WM_DESTROY:
          {
@@ -267,56 +424,185 @@ static LRESULT WINAPI	Control_WndProc(HWND hWnd, UINT wMsg,
 	    while (applet)
 	       applet = Control_UnloadApplet(applet);
          }
+         Control_FreeCPlItems(hWnd, panel);
          PostQuitMessage(0);
 	 break;
-      case WM_PAINT:
-	 return Control_WndProc_Paint(panel, lParam1);
-      case WM_LBUTTONUP:
-	 return Control_WndProc_LButton(panel, lParam2, TRUE);
-      case WM_LBUTTONDOWN:
-	 return Control_WndProc_LButton(panel, lParam2, FALSE);
-/* EPP       case WM_COMMAND: */
-/* EPP 	 return Control_WndProc_Command(mwi, lParam1, lParam2); */
+      case WM_COMMAND:
+         switch (LOWORD(lParam1))
+         {
+             case IDM_CPANEL_EXIT:
+                 SendMessageW(hWnd, WM_CLOSE, 0, 0);
+                 return 0;
+
+             case IDM_CPANEL_ABOUT:
+                 {
+                     WCHAR appName[MAX_STRING_LEN];
+
+                     LoadStringW(shell32_hInstance, IDS_CPANEL_TITLE, appName,
+                         sizeof(appName) / sizeof(appName[0]));
+                     ShellAboutW(hWnd, appName, NULL, NULL);
+
+                     return 0;
+                 }
+
+             case FCIDM_SHVIEW_BIGICON:
+                 Control_UpdateListViewStyle(panel, LVS_ICON, FCIDM_SHVIEW_BIGICON);
+                 return 0;
+
+             case FCIDM_SHVIEW_SMALLICON:
+                 Control_UpdateListViewStyle(panel, LVS_SMALLICON, FCIDM_SHVIEW_SMALLICON);
+                 return 0;
+
+             case FCIDM_SHVIEW_LISTVIEW:
+                 Control_UpdateListViewStyle(panel, LVS_LIST, FCIDM_SHVIEW_LISTVIEW);
+                 return 0;
+
+             case FCIDM_SHVIEW_REPORTVIEW:
+                 Control_UpdateListViewStyle(panel, LVS_REPORT, FCIDM_SHVIEW_REPORTVIEW);
+                 return 0;
+
+             default:
+                 /* check if this is an applet */
+                 if ((LOWORD(lParam1) >= IDM_CPANEL_APPLET_BASE) &&
+                     (LOWORD(lParam1) <= IDM_CPANEL_APPLET_BASE + panel->total_subprogs))
+                 {
+                     CPlItem *item = Control_GetCPlItem_From_MenuID(hWnd, LOWORD(lParam1));
+
+                     /* execute the applet if item is valid */
+                     if (item)
+                         item->applet->proc(item->applet->hWnd, CPL_DBLCLK, item->id,
+                             item->applet->info[item->id].lData);
+
+                     return 0;
+                 }
+
+                 break;
+         }
+
+         break;
+
+      case WM_NOTIFY:
+      {
+          LPNMHDR nmh = (LPNMHDR) lParam2;
+
+          switch (nmh->idFrom)
+          {
+              case IDC_LISTVIEW:
+                  switch (nmh->code)
+                  {
+                      case NM_RETURN:
+                      case NM_DBLCLK:
+                      {
+                          CPlItem *item = Control_GetCPlItem_From_ListView(panel);
+
+                          /* execute the applet if item is valid */
+                          if (item)
+                              item->applet->proc(item->applet->hWnd, CPL_DBLCLK,
+                                  item->id, item->applet->info[item->id].lData);
+
+                          return 0;
+                      }
+                      case LVN_ITEMCHANGED:
+                      {
+                          CPlItem *item = Control_GetCPlItem_From_ListView(panel);
+
+                          /* update the status bar if item is valid */
+                          if (item)
+                              SetWindowTextW(panel->hWndStatusBar,
+                                  item->applet->info[item->id].szInfo);
+
+                          return 0;
+                      }
+                  }
+
+                  break;
+          }
+
+          break;
       }
+
+      case WM_MENUSELECT:
+          /* check if this is an applet */
+          if ((LOWORD(lParam1) >= IDM_CPANEL_APPLET_BASE) &&
+              (LOWORD(lParam1) <= IDM_CPANEL_APPLET_BASE + panel->total_subprogs))
+          {
+              CPlItem *item = Control_GetCPlItem_From_MenuID(hWnd, LOWORD(lParam1));
+
+              /* update the status bar if item is valid */
+              if (item)
+                  SetWindowTextW(panel->hWndStatusBar, item->applet->info[item->id].szInfo);
+          }
+          else
+              SetWindowTextW(panel->hWndStatusBar, NULL);
+
+          return 0;
+
+      case WM_SIZE:
+      {
+          HDWP hdwp;
+          RECT sb;
+
+          hdwp = BeginDeferWindowPos(2);
+
+          if (hdwp == NULL)
+              break;
+
+          GetClientRect(panel->hWndStatusBar, &sb);
+
+          hdwp = DeferWindowPos(hdwp, panel->hWndListView, NULL, 0, 0,
+              LOWORD(lParam2), HIWORD(lParam2) - (sb.bottom - sb.top),
+              SWP_NOZORDER | SWP_NOMOVE);
+
+          if (hdwp == NULL)
+              break;
+
+          hdwp = DeferWindowPos(hdwp, panel->hWndStatusBar, NULL, 0, 0,
+              LOWORD(lParam2), LOWORD(lParam1), SWP_NOZORDER | SWP_NOMOVE);
+
+          if (hdwp != NULL)
+              EndDeferWindowPos(hdwp);
+
+          return 0;
+      }
+     }
    }
 
-   return DefWindowProcA(hWnd, wMsg, lParam1, lParam2);
+   return DefWindowProcW(hWnd, wMsg, lParam1, lParam2);
 }
 
 static void    Control_DoInterface(CPanel* panel, HWND hWnd, HINSTANCE hInst)
 {
-    WNDCLASSA	wc;
+    WNDCLASSW	wc;
     MSG		msg;
-    const CHAR* appName = "Wine Control Panel";
+    WCHAR appName[MAX_STRING_LEN];
+    const WCHAR className[] = {'S','h','e','l','l','_','C','o','n','t','r','o',
+        'l','_','W','n','d','C','l','a','s','s',0};
+
+    LoadStringW(shell32_hInstance, IDS_CPANEL_TITLE, appName, sizeof(appName) / sizeof(appName[0]));
+
     wc.style = CS_HREDRAW|CS_VREDRAW;
     wc.lpfnWndProc = Control_WndProc;
     wc.cbClsExtra = 0;
     wc.cbWndExtra = sizeof(CPlApplet*);
-    wc.hInstance = hInst;
+    wc.hInstance = panel->hInst = hInst;
     wc.hIcon = 0;
-    wc.hCursor = 0;
+    wc.hCursor = LoadCursorW( 0, (LPWSTR)IDC_ARROW );
     wc.hbrBackground = GetStockObject(WHITE_BRUSH);
     wc.lpszMenuName = NULL;
-    wc.lpszClassName = "Shell_Control_WndClass";
+    wc.lpszClassName = className;
 
-    if (!RegisterClassA(&wc)) return;
+    if (!RegisterClassW(&wc)) return;
 
-    CreateWindowExA(0, wc.lpszClassName, appName,
+    CreateWindowExW(0, wc.lpszClassName, appName,
 		    WS_OVERLAPPEDWINDOW | WS_VISIBLE,
 		    CW_USEDEFAULT, CW_USEDEFAULT,
 		    CW_USEDEFAULT, CW_USEDEFAULT,
 		    hWnd, NULL, hInst, panel);
     if (!panel->hWnd) return;
 
-    if (!panel->first) {
-	/* FIXME appName & message should be localized  */
-	MessageBoxA(panel->hWnd, "Cannot load any applets", appName, MB_OK);
-	return;
-    }
-
-    while (GetMessageA(&msg, panel->hWnd, 0, 0)) {
+    while (GetMessageW(&msg, panel->hWnd, 0, 0)) {
         TranslateMessage(&msg);
-        DispatchMessageA(&msg);
+        DispatchMessageW(&msg);
     }
 }
 
@@ -335,7 +621,7 @@ static void Control_RegisterRegistryApplets(HWND hWnd, CPanel *panel, HKEY hkey_
             DWORD nameLen = MAX_PATH;
             DWORD valueLen = MAX_PATH;
 
-            if (RegEnumValueW(hkey, idx, name, &nameLen, NULL, NULL, (LPBYTE)&value, &valueLen) != ERROR_SUCCESS)
+            if (RegEnumValueW(hkey, idx, name, &nameLen, NULL, NULL, (LPBYTE)value, &valueLen) != ERROR_SUCCESS)
                 break;
 
             Control_LoadApplet(hWnd, value, panel);

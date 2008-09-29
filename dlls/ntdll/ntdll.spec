@@ -488,8 +488,8 @@
 @ stdcall RtlCreateSecurityDescriptor(ptr long)
 # @ stub RtlCreateSystemVolumeInformationFolder
 @ stub RtlCreateTagHeap
-# @ stub RtlCreateTimer
-# @ stub RtlCreateTimerQueue
+@ stdcall RtlCreateTimer(ptr ptr ptr ptr long long long)
+@ stdcall RtlCreateTimerQueue(ptr)
 @ stdcall RtlCreateUnicodeString(ptr wstr)
 @ stdcall RtlCreateUnicodeStringFromAsciiz(ptr str)
 @ stub RtlCreateUserProcess
@@ -518,9 +518,9 @@
 @ stdcall RtlDeleteRegistryValue(long ptr ptr)
 @ stdcall RtlDeleteResource(ptr)
 @ stdcall RtlDeleteSecurityObject(ptr)
-# @ stub RtlDeleteTimer
+@ stdcall RtlDeleteTimer(ptr ptr ptr)
 # @ stub RtlDeleteTimerQueue
-# @ stub RtlDeleteTimerQueueEx
+@ stdcall RtlDeleteTimerQueueEx(ptr ptr)
 @ stdcall RtlDeregisterWait(ptr)
 @ stdcall RtlDeregisterWaitEx(ptr ptr)
 @ stdcall RtlDestroyAtomTable(ptr)
@@ -895,7 +895,7 @@
 @ stub RtlUpcaseUnicodeToCustomCPN
 @ stdcall RtlUpcaseUnicodeToMultiByteN(ptr long ptr ptr long)
 @ stdcall RtlUpcaseUnicodeToOemN(ptr long ptr ptr long)
-# @ stub RtlUpdateTimer
+@ stdcall RtlUpdateTimer(ptr ptr long long)
 @ stdcall RtlUpperChar(long)
 @ stdcall RtlUpperString(ptr ptr)
 @ stub RtlUsageHeap

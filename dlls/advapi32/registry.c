@@ -44,9 +44,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(reg);
 
-/* allowed bits for access mask */
-#define KEY_ACCESS_MASK (KEY_ALL_ACCESS | MAXIMUM_ALLOWED)
-
 #define HKEY_SPECIAL_ROOT_FIRST   HKEY_CLASSES_ROOT
 #define HKEY_SPECIAL_ROOT_LAST    HKEY_DYN_DATA
 #define NB_SPECIAL_ROOT_KEYS      ((UINT)HKEY_SPECIAL_ROOT_LAST - (UINT)HKEY_SPECIAL_ROOT_FIRST + 1)
@@ -188,7 +185,6 @@ LSTATUS WINAPI RegCreateKeyExW( HKEY hkey, LPCWSTR name, DWORD reserved, LPWSTR 
     UNICODE_STRING nameW, classW;
 
     if (reserved) return ERROR_INVALID_PARAMETER;
-    if (!(access & KEY_ACCESS_MASK) || (access & ~KEY_ACCESS_MASK)) return ERROR_ACCESS_DENIED;
     if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     attr.Length = sizeof(attr);
@@ -243,7 +239,6 @@ LSTATUS WINAPI RegCreateKeyExA( HKEY hkey, LPCSTR name, DWORD reserved, LPSTR cl
         access = KEY_ALL_ACCESS;  /* Win95 ignores the access mask */
         if (name && *name == '\\') name++; /* win9x,ME ignores one (and only one) beginning backslash */
     }
-    else if (!(access & KEY_ACCESS_MASK) || (access & ~KEY_ACCESS_MASK)) return ERROR_ACCESS_DENIED;
     if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     attr.Length = sizeof(attr);
@@ -470,8 +465,8 @@ LSTATUS WINAPI RegEnumKeyExW( HKEY hkey, DWORD index, LPWSTR name, LPDWORD name_
     KEY_NODE_INFORMATION *info = (KEY_NODE_INFORMATION *)buffer;
     DWORD total_size;
 
-    TRACE( "(%p,%d,%p,%p(%d),%p,%p,%p,%p)\n", hkey, index, name, name_len,
-           name_len ? *name_len : -1, reserved, class, class_len, ft );
+    TRACE( "(%p,%d,%p,%p(%u),%p,%p,%p,%p)\n", hkey, index, name, name_len,
+           name_len ? *name_len : 0, reserved, class, class_len, ft );
 
     if (reserved) return ERROR_INVALID_PARAMETER;
     if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
@@ -534,8 +529,8 @@ LSTATUS WINAPI RegEnumKeyExA( HKEY hkey, DWORD index, LPSTR name, LPDWORD name_l
     KEY_NODE_INFORMATION *info = (KEY_NODE_INFORMATION *)buffer;
     DWORD total_size;
 
-    TRACE( "(%p,%d,%p,%p(%d),%p,%p,%p,%p)\n", hkey, index, name, name_len,
-           name_len ? *name_len : -1, reserved, class, class_len, ft );
+    TRACE( "(%p,%d,%p,%p(%u),%p,%p,%p,%p)\n", hkey, index, name, name_len,
+           name_len ? *name_len : 0, reserved, class, class_len, ft );
 
     if (reserved) return ERROR_INVALID_PARAMETER;
     if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
@@ -1466,6 +1461,8 @@ static VOID ADVAPI_ApplyRestrictions( DWORD dwFlags, DWORD dwType,
  *    expanded and pdwType is set to REG_SZ instead.
  *  - Restrictions are applied after expanding, using RRF_RT_REG_EXPAND_SZ 
  *    without RRF_NOEXPAND is thus not allowed.
+ *    An exception is the case where RRF_RT_ANY is specified, because then
+ *    RRF_NOEXPAND is allowed.
  */
 LSTATUS WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
                           DWORD dwFlags, LPDWORD pdwType, PVOID pvData,
@@ -1481,7 +1478,8 @@ LSTATUS WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
 
     if (pvData && !pcbData)
         return ERROR_INVALID_PARAMETER;
-    if ((dwFlags & RRF_RT_REG_EXPAND_SZ) && !(dwFlags & RRF_NOEXPAND))
+    if ((dwFlags & RRF_RT_REG_EXPAND_SZ) && !(dwFlags & RRF_NOEXPAND) &&
+            ((dwFlags & RRF_RT_ANY) != RRF_RT_ANY))
         return ERROR_INVALID_PARAMETER;
 
     if (pszSubKey && pszSubKey[0])
@@ -1576,7 +1574,8 @@ LSTATUS WINAPI RegGetValueA( HKEY hKey, LPCSTR pszSubKey, LPCSTR pszValue,
 
     if (pvData && !pcbData)
         return ERROR_INVALID_PARAMETER;
-    if ((dwFlags & RRF_RT_REG_EXPAND_SZ) && !(dwFlags & RRF_NOEXPAND))
+    if ((dwFlags & RRF_RT_REG_EXPAND_SZ) && !(dwFlags & RRF_NOEXPAND) &&
+            ((dwFlags & RRF_RT_ANY) != RRF_RT_ANY))
         return ERROR_INVALID_PARAMETER;
 
     if (pszSubKey && pszSubKey[0])

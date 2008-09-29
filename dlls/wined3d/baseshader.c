@@ -154,8 +154,8 @@ int shader_skip_unrecognized(
         tokens_read += shader_get_param(iface, pToken, &param, &addr_token);
         pToken += tokens_read;
 
-        FIXME("Unrecognized opcode param: token=%08x "
-            "addr_token=%08x name=", param, addr_token);
+        FIXME("Unrecognized opcode param: token=0x%08x "
+            "addr_token=0x%08x name=", param, addr_token);
         shader_dump_param(iface, param, addr_token, i);
         FIXME("\n");
         ++i;
@@ -289,7 +289,7 @@ HRESULT shader_get_registers_used(
             local_constant* lconst = HeapAlloc(GetProcessHeap(), 0, sizeof(local_constant));
             if (!lconst) return E_OUTOFMEMORY;
             lconst->idx = *pToken & WINED3DSP_REGNUM_MASK;
-            memcpy(&lconst->value, pToken + 1, 4 * sizeof(DWORD));
+            memcpy(lconst->value, pToken + 1, 4 * sizeof(DWORD));
 
             /* In pixel shader 1.X shaders, the constants are clamped between [-1;1] */
             if(WINED3DSHADER_VERSION_MAJOR(This->baseShader.hex_version) == 1 && pshader) {
@@ -312,7 +312,7 @@ HRESULT shader_get_registers_used(
             local_constant* lconst = HeapAlloc(GetProcessHeap(), 0, sizeof(local_constant));
             if (!lconst) return E_OUTOFMEMORY;
             lconst->idx = *pToken & WINED3DSP_REGNUM_MASK;
-            memcpy(&lconst->value, pToken + 1, 4 * sizeof(DWORD));
+            memcpy(lconst->value, pToken + 1, 4 * sizeof(DWORD));
             list_add_head(&This->baseShader.constantsI, &lconst->entry);
             pToken += curOpcode->num_params;
 
@@ -321,7 +321,7 @@ HRESULT shader_get_registers_used(
             local_constant* lconst = HeapAlloc(GetProcessHeap(), 0, sizeof(local_constant));
             if (!lconst) return E_OUTOFMEMORY;
             lconst->idx = *pToken & WINED3DSP_REGNUM_MASK;
-            memcpy(&lconst->value, pToken + 1, 1 * sizeof(DWORD));
+            memcpy(lconst->value, pToken + 1, 1 * sizeof(DWORD));
             list_add_head(&This->baseShader.constantsB, &lconst->entry);
             pToken += curOpcode->num_params;
 
@@ -511,7 +511,7 @@ static void shader_dump_decl_usage(
             case WINED3DSTT_2D: TRACE("_2d"); break;
             case WINED3DSTT_CUBE: TRACE("_cube"); break;
             case WINED3DSTT_VOLUME: TRACE("_volume"); break;
-            default: TRACE("_unknown_ttype(%08x)", ttype); 
+            default: TRACE("_unknown_ttype(0x%08x)", ttype);
        }
 
     } else { 
@@ -574,7 +574,7 @@ static void shader_dump_decl_usage(
             TRACE("sample");
             break;
         default:
-            FIXME("unknown_semantics(%08x)", usage);
+            FIXME("unknown_semantics(0x%08x)", usage);
         }
     }
 }
@@ -835,7 +835,7 @@ void shader_generate_main(
 
             /* Unknown opcode and its parameters */
             if (NULL == curOpcode) {
-                FIXME("Unrecognized opcode: token=%08x\n", hw_arg.opcode_token);
+                FIXME("Unrecognized opcode: token=0x%08x\n", hw_arg.opcode_token);
                 pToken += shader_skip_unrecognized(iface, pToken); 
 
             /* Nothing to do */
@@ -963,7 +963,7 @@ void shader_trace_init(
 
             if (NULL == curOpcode) {
                 int tokens_read;
-                FIXME("Unrecognized opcode: token=%08x\n", opcode_token);
+                FIXME("Unrecognized opcode: token=0x%08x\n", opcode_token);
                 tokens_read = shader_skip_unrecognized(iface, pToken);
                 pToken += tokens_read;
                 len += tokens_read;

@@ -40,7 +40,7 @@ static inline void clear_unused_channels(IWineD3DSurfaceImpl *This);
 static void surface_remove_pbo(IWineD3DSurfaceImpl *This);
 
 static void surface_bind_and_dirtify(IWineD3DSurfaceImpl *This) {
-    GLint active_texture;
+    int active_sampler;
 
     /* We don't need a specific texture unit, but after binding the texture the current unit is dirty.
      * Read the unit back instead of switching to 0, this avoids messing around with the state manager's
@@ -49,14 +49,18 @@ static void surface_bind_and_dirtify(IWineD3DSurfaceImpl *This) {
      * TODO: Track the current active texture per GL context instead of using glGet
      */
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
+        GLint active_texture;
         ENTER_GL();
         glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
         LEAVE_GL();
-        active_texture -= GL_TEXTURE0_ARB;
+        active_sampler = This->resource.wineD3DDevice->rev_tex_unit_map[active_texture - GL_TEXTURE0_ARB];
     } else {
-        active_texture = 0;
+        active_sampler = 0;
     }
-    IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_SAMPLER(active_texture));
+
+    if (active_sampler != -1) {
+        IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_SAMPLER(active_sampler));
+    }
     IWineD3DSurface_BindTexture((IWineD3DSurface *)This);
 }
 
@@ -89,7 +93,8 @@ static void surface_download_data(IWineD3DSurfaceImpl *This) {
 
     if (This->resource.format == WINED3DFMT_DXT1 ||
             This->resource.format == WINED3DFMT_DXT2 || This->resource.format == WINED3DFMT_DXT3 ||
-            This->resource.format == WINED3DFMT_DXT4 || This->resource.format == WINED3DFMT_DXT5) {
+            This->resource.format == WINED3DFMT_DXT4 || This->resource.format == WINED3DFMT_DXT5 ||
+            This->resource.format == WINED3DFMT_ATI2N) {
         if (!GL_SUPPORT(EXT_TEXTURE_COMPRESSION_S3TC)) { /* We can assume this as the texture would not have been created otherwise */
             FIXME("(%p) : Attempting to lock a compressed texture when texture compression isn't supported by opengl\n", This);
         } else {
@@ -228,7 +233,8 @@ static void surface_download_data(IWineD3DSurfaceImpl *This) {
 static void surface_upload_data(IWineD3DSurfaceImpl *This, GLenum internal, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid *data) {
     if (This->resource.format == WINED3DFMT_DXT1 ||
             This->resource.format == WINED3DFMT_DXT2 || This->resource.format == WINED3DFMT_DXT3 ||
-            This->resource.format == WINED3DFMT_DXT4 || This->resource.format == WINED3DFMT_DXT5) {
+            This->resource.format == WINED3DFMT_DXT4 || This->resource.format == WINED3DFMT_DXT5 ||
+            This->resource.format == WINED3DFMT_ATI2N) {
         if (!GL_SUPPORT(EXT_TEXTURE_COMPRESSION_S3TC)) {
             FIXME("Using DXT1/3/5 without advertized support\n");
         } else {
@@ -292,7 +298,8 @@ static void surface_allocate_surface(IWineD3DSurfaceImpl *This, GLenum internal,
 
     if (This->resource.format == WINED3DFMT_DXT1 ||
             This->resource.format == WINED3DFMT_DXT2 || This->resource.format == WINED3DFMT_DXT3 ||
-            This->resource.format == WINED3DFMT_DXT4 || This->resource.format == WINED3DFMT_DXT5) {
+            This->resource.format == WINED3DFMT_DXT4 || This->resource.format == WINED3DFMT_DXT5 ||
+            This->resource.format == WINED3DFMT_ATI2N) {
         /* glCompressedTexImage2D does not accept NULL pointers, so we cannot allocate a compressed texture without uploading data */
         TRACE("Not allocating compressed surfaces, surface_upload_data will specify them\n");
 
@@ -3751,7 +3758,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_PrivateSetup(IWineD3DSurface *iface) {
     This->glDescription.target           = GL_TEXTURE_2D;
 
     /* Non-power2 support */
-    if (GL_SUPPORT(ARB_TEXTURE_NON_POWER_OF_TWO)) {
+    if (GL_SUPPORT(ARB_TEXTURE_NON_POWER_OF_TWO) || GL_SUPPORT(WINE_NORMALIZED_TEXRECT)) {
         pow2Width = This->currentDesc.Width;
         pow2Height = This->currentDesc.Height;
     } else {
@@ -3767,7 +3774,8 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_PrivateSetup(IWineD3DSurface *iface) {
         WINED3DFORMAT Format = This->resource.format;
         /** TODO: add support for non power two compressed textures **/
         if (Format == WINED3DFMT_DXT1 || Format == WINED3DFMT_DXT2 || Format == WINED3DFMT_DXT3
-            || Format == WINED3DFMT_DXT4 || Format == WINED3DFMT_DXT5) {
+            || Format == WINED3DFMT_DXT4 || Format == WINED3DFMT_DXT5
+            || This->resource.format == WINED3DFMT_ATI2N) {
             FIXME("(%p) Compressed non-power-two textures are not supported w(%d) h(%d)\n",
                   This, This->currentDesc.Width, This->currentDesc.Height);
             return WINED3DERR_NOTAVAILABLE;

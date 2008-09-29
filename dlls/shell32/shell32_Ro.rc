@@ -93,6 +93,28 @@ BEGIN
         END
 END
 
+MENU_CPANEL MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", IDM_CPANEL_EXIT
+    END
+
+    POPUP "&View"
+    BEGIN
+        MENUITEM "Pictograme &mari",    FCIDM_SHVIEW_BIGICON
+        MENUITEM "Pictograme m&ici",    FCIDM_SHVIEW_SMALLICON
+        MENUITEM "&Listă",              FCIDM_SHVIEW_LISTVIEW
+        MENUITEM "&Detailii",           FCIDM_SHVIEW_REPORTVIEW
+    END
+
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About Control Panel...", IDM_CPANEL_ABOUT
+    END
+END
+
 SHBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 188, 192
 STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
 CAPTION "Selectare dosar"
@@ -209,6 +231,10 @@ STRINGTABLE
         IDS_PROGRAMS            "Meniu Start\\Programe"
         IDS_PERSONAL            "Documentele mele"
         IDS_FAVORITES           "Favorite"
+
+        IDS_CPANEL_TITLE        "Wine Control Panel"
+        IDS_CPANEL_NAME         "Name"
+        IDS_CPANEL_DESCRIPTION  "Description"
 }
 
 STRINGTABLE

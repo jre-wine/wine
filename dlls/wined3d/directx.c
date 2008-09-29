@@ -59,6 +59,7 @@ static const struct {
     {"GL_ATI_texture_mirror_once",          ATI_TEXTURE_MIRROR_ONCE,        0                           },
     {"GL_ATI_envmap_bumpmap",               ATI_ENVMAP_BUMPMAP,             0                           },
     {"GL_ATI_fragment_shader",              ATI_FRAGMENT_SHADER,            0                           },
+    {"GL_ATI_texture_compression_3dc",      ATI_TEXTURE_COMPRESSION_3DC,    0                           },
 
     /* ARB */
     {"GL_ARB_color_buffer_float",           ARB_COLOR_BUFFER_FLOAT,         0                           },
@@ -81,7 +82,7 @@ static const struct {
     {"GL_ARB_texture_env_dot3",             ARB_TEXTURE_ENV_DOT3,           0                           },
     {"GL_ARB_texture_float",                ARB_TEXTURE_FLOAT,              0                           },
     {"GL_ARB_texture_mirrored_repeat",      ARB_TEXTURE_MIRRORED_REPEAT,    0                           },
-    {"GL_ARB_texture_non_power_of_two",     ARB_TEXTURE_NON_POWER_OF_TWO,   0                           },
+    {"GL_ARB_texture_non_power_of_two",     ARB_TEXTURE_NON_POWER_OF_TWO,   MAKEDWORD_VERSION(2, 0)     },
     {"GL_ARB_texture_rectangle",            ARB_TEXTURE_RECTANGLE,          0                           },
     {"GL_ARB_vertex_blend",                 ARB_VERTEX_BLEND,               0                           },
     {"GL_ARB_vertex_buffer_object",         ARB_VERTEX_BUFFER_OBJECT,       0                           },
@@ -104,6 +105,7 @@ static const struct {
     {"GL_EXT_stencil_wrap",                 EXT_STENCIL_WRAP,               0                           },
     {"GL_EXT_texture3D",                    EXT_TEXTURE3D,                  MAKEDWORD_VERSION(1, 2)     },
     {"GL_EXT_texture_compression_s3tc",     EXT_TEXTURE_COMPRESSION_S3TC,   0                           },
+    {"GL_EXT_texture_compression_rgtc",     EXT_TEXTURE_COMPRESSION_RGTC,   0                           },
     {"GL_EXT_texture_env_add",              EXT_TEXTURE_ENV_ADD,            0                           },
     {"GL_EXT_texture_env_combine",          EXT_TEXTURE_ENV_COMBINE,        0                           },
     {"GL_EXT_texture_env_dot3",             EXT_TEXTURE_ENV_DOT3,           0                           },
@@ -112,7 +114,6 @@ static const struct {
     {"GL_EXT_texture_lod",                  EXT_TEXTURE_LOD,                0                           },
     {"GL_EXT_texture_lod_bias",             EXT_TEXTURE_LOD_BIAS,           0                           },
     {"GL_EXT_vertex_shader",                EXT_VERTEX_SHADER,              0                           },
-    {"GL_EXT_vertex_weighting",             EXT_VERTEX_WEIGHTING,           0                           },
     {"GL_EXT_gpu_program_parameters",       EXT_GPU_PROGRAM_PARAMETERS,     0                           },
 
     /* NV */
@@ -697,7 +698,7 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
      * Initialize openGL extension related variables
      *  with Default values
      */
-    memset(&gl_info->supported, 0, sizeof(gl_info->supported));
+    memset(gl_info->supported, 0, sizeof(gl_info->supported));
     gl_info->max_buffers        = 1;
     gl_info->max_textures       = 1;
     gl_info->max_texture_stages = 1;
@@ -2372,6 +2373,15 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DFORMAT CheckFormat)
             TRACE_(d3d_caps)("[FAILED]\n");
             return FALSE;
 
+        /* Vendor specific formats */
+        case WINED3DFMT_ATI2N:
+            if(GL_SUPPORT(ATI_TEXTURE_COMPRESSION_3DC) || GL_SUPPORT(EXT_TEXTURE_COMPRESSION_RGTC)) {
+                TRACE_(d3d_caps)("[OK]\n");
+                return TRUE;
+            }
+            TRACE_(d3d_caps)("[FAILED]\n");
+            return FALSE;
+
         case WINED3DFMT_UNKNOWN:
             return FALSE;
 
@@ -2879,9 +2889,6 @@ static const shader_backend_t *select_shader_backend(UINT Adapter, WINED3DDEVTYP
     select_shader_mode(&GLINFO_LOCATION, DeviceType, &ps_selected_mode, &vs_selected_mode);
     if (vs_selected_mode == SHADER_GLSL || ps_selected_mode == SHADER_GLSL) {
         ret = &glsl_shader_backend;
-    } else if (vs_selected_mode == SHADER_ARB && ps_selected_mode != SHADER_NONE &&
-              !GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
-        ret = &atifs_shader_backend;
     } else if (vs_selected_mode == SHADER_ARB || ps_selected_mode == SHADER_ARB) {
         ret = &arb_program_shader_backend;
     } else {
@@ -2895,10 +2902,12 @@ static const struct fragment_pipeline *select_fragment_implementation(UINT Adapt
     int ps_selected_mode;
 
     select_shader_mode(&GLINFO_LOCATION, DeviceType, &ps_selected_mode, &vs_selected_mode);
-    if (ps_selected_mode == SHADER_GLSL || ps_selected_mode == SHADER_ARB) {
-        return &ffp_fragment_pipeline;
-    } else if (ps_selected_mode != SHADER_NONE && !GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
+    if(ps_selected_mode == SHADER_ATI) {
         return &atifs_fragment_pipeline;
+    } else if(GL_SUPPORT(NV_REGISTER_COMBINERS) && GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+        return &nvts_fragment_pipeline;
+    } else if(GL_SUPPORT(NV_REGISTER_COMBINERS)) {
+        return &nvrc_fragment_pipeline;
     } else {
         return &ffp_fragment_pipeline;
     }
@@ -3255,8 +3264,8 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     pCaps->MaxStreamStride     = 1024;
 
     /* d3d9.dll sets D3DDEVCAPS2_CAN_STRETCHRECT_FROM_TEXTURES here because StretchRects is implemented in d3d9 */
-    pCaps->DevCaps2                          = WINED3DDEVCAPS2_STREAMOFFSET;
-    /* TODO: VS3.0 needs at least D3DDEVCAPS2_VERTEXELEMENTSCANSHARESTREAMOFFSET */
+    pCaps->DevCaps2                          = WINED3DDEVCAPS2_STREAMOFFSET |
+                                               WINED3DDEVCAPS2_VERTEXELEMENTSCANSHARESTREAMOFFSET;
     pCaps->MaxNpatchTessellationLevel        = 0;
     pCaps->MasterAdapterOrdinal              = 0;
     pCaps->AdapterOrdinalInGroup             = 0;
@@ -3470,7 +3479,7 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
 
     frag_pipeline = select_fragment_implementation(Adapter, DeviceType);
     object->frag_pipe = frag_pipeline;
-    compile_state_table(object->StateTable, object->multistate_funcs,
+    compile_state_table(object->StateTable, object->multistate_funcs, &GLINFO_LOCATION,
                         ffp_vertexstate_template, frag_pipeline, misc_state_template);
 
     /* Prefer the vtable with functions optimized for single dirtifyable objects if the shader
@@ -3679,21 +3688,6 @@ static void fixup_extensions(WineD3D_GL_Info *gl_info) {
             gl_info->vs_glsl_constantsF = gl_info->vs_arb_constantsF;
         }
 
-        /* MacOS advertises GL_ARB_texture_non_power_of_two on ATI r500 and earlier cards, although
-         * these cards only support GL_ARB_texture_rectangle(D3DPTEXTURECAPS_NONPOW2CONDITIONAL).
-         * If real NP2 textures are used, the driver falls back to software. So remove the supported
-         * flag for this extension
-         */
-        if(gl_info->supported[ARB_TEXTURE_NON_POWER_OF_TWO] && gl_info->gl_vendor == VENDOR_ATI) {
-            if(gl_info->gl_card == CARD_ATI_RADEON_X700 || gl_info->gl_card == CARD_ATI_RADEON_X1600 ||
-               gl_info->gl_card == CARD_ATI_RADEON_9500 || gl_info->gl_card == CARD_ATI_RADEON_8500  ||
-               gl_info->gl_card == CARD_ATI_RADEON_7200 || gl_info->gl_card == CARD_ATI_RAGE_128PRO) {
-                TRACE("GL_ARB_texture_non_power_of_two advertised on R500 or earlier card, removing\n");
-                gl_info->supported[ARB_TEXTURE_NON_POWER_OF_TWO] = FALSE;
-                gl_info->supported[ARB_TEXTURE_RECTANGLE] = TRUE;
-            }
-        }
-
         /* The Intel GPUs on MacOS set the .w register of texcoords to 0.0 by default, which causes problems
          * with fixed function fragment processing. Ideally this flag should be detected with a test shader
          * and OpenGL feedback mode, but some GL implementations (MacOS ATI at least, probably all MacOS ones)
@@ -3712,6 +3706,28 @@ static void fixup_extensions(WineD3D_GL_Info *gl_info) {
            (gl_info->gl_vendor == VENDOR_ATI && gl_info->gl_card != CARD_ATI_RADEON_X1600)) {
             TRACE("Enabling vertex texture coord fixes in vertex shaders\n");
             gl_info->set_texcoord_w = TRUE;
+        }
+    }
+
+    /* MacOS advertises GL_ARB_texture_non_power_of_two on ATI r500 and earlier cards, although
+     * these cards only support GL_ARB_texture_rectangle(D3DPTEXTURECAPS_NONPOW2CONDITIONAL).
+     * If real NP2 textures are used, the driver falls back to software. We could just remove the
+     * extension and use GL_ARB_texture_rectangle instead, but texture_rectangle is inconventient
+     * due to the non-normalized texture coordinates. Thus set an internal extension flag,
+     * GL_WINE_normalized_texrect, which signals the code that it can use non power of two textures
+     * as per GL_ARB_texture_non_power_of_two, but has to stick to the texture_rectangle limits.
+     *
+     * fglrx doesn't advertise GL_ARB_texture_non_power_of_two, but it advertises opengl 2.0 which
+     * has this extension promoted to core. The extension loading code sets this extension supported
+     * due to that, so this code works on fglrx as well.
+     */
+    if(gl_info->supported[ARB_TEXTURE_NON_POWER_OF_TWO] && gl_info->gl_vendor == VENDOR_ATI) {
+        if(gl_info->gl_card == CARD_ATI_RADEON_X700 || gl_info->gl_card == CARD_ATI_RADEON_X1600 ||
+            gl_info->gl_card == CARD_ATI_RADEON_9500 || gl_info->gl_card == CARD_ATI_RADEON_8500  ||
+            gl_info->gl_card == CARD_ATI_RADEON_7200 || gl_info->gl_card == CARD_ATI_RAGE_128PRO) {
+            TRACE("GL_ARB_texture_non_power_of_two advertised on R500 or earlier card, removing\n");
+            gl_info->supported[ARB_TEXTURE_NON_POWER_OF_TWO] = FALSE;
+            gl_info->supported[WINE_NORMALIZED_TEXRECT] = TRUE;
         }
     }
 

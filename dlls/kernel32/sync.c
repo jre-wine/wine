@@ -1047,9 +1047,16 @@ BOOL WINAPI CancelWaitableTimer( HANDLE handle )
  */
 HANDLE WINAPI CreateTimerQueue(void)
 {
-    FIXME("stub\n");
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return NULL;
+    HANDLE q;
+    NTSTATUS status = RtlCreateTimerQueue(&q);
+
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError(status) );
+        return NULL;
+    }
+
+    return q;
 }
 
 
@@ -1058,9 +1065,15 @@ HANDLE WINAPI CreateTimerQueue(void)
  */
 BOOL WINAPI DeleteTimerQueueEx(HANDLE TimerQueue, HANDLE CompletionEvent)
 {
-    FIXME("(%p, %p): stub\n", TimerQueue, CompletionEvent);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
+    NTSTATUS status = RtlDeleteTimerQueueEx(TimerQueue, CompletionEvent);
+
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError(status) );
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 /***********************************************************************
@@ -1072,16 +1085,42 @@ BOOL WINAPI DeleteTimerQueueEx(HANDLE TimerQueue, HANDLE CompletionEvent)
  *
  * RETURNS
  *   nonzero on success or zero on failure
- *
- * BUGS
- *   Unimplemented
  */
 BOOL WINAPI CreateTimerQueueTimer( PHANDLE phNewTimer, HANDLE TimerQueue,
                                    WAITORTIMERCALLBACK Callback, PVOID Parameter,
                                    DWORD DueTime, DWORD Period, ULONG Flags )
 {
-    FIXME("stub\n");
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    NTSTATUS status = RtlCreateTimer(phNewTimer, TimerQueue, Callback,
+                                     Parameter, DueTime, Period, Flags);
+
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError(status) );
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/***********************************************************************
+ *           ChangeTimerQueueTimer  (KERNEL32.@)
+ *
+ * Changes the times at which the timer expires.
+ *
+ * RETURNS
+ *   nonzero on success or zero on failure
+ */
+BOOL WINAPI ChangeTimerQueueTimer( HANDLE TimerQueue, HANDLE Timer,
+                                   ULONG DueTime, ULONG Period )
+{
+    NTSTATUS status = RtlUpdateTimer(TimerQueue, Timer, DueTime, Period);
+
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError(status) );
+        return FALSE;
+    }
+
     return TRUE;
 }
 
@@ -1092,15 +1131,16 @@ BOOL WINAPI CreateTimerQueueTimer( PHANDLE phNewTimer, HANDLE TimerQueue,
  *
  * RETURNS
  *   nonzero on success or zero on failure
- *
- * BUGS
- *   Unimplemented
  */
 BOOL WINAPI DeleteTimerQueueTimer( HANDLE TimerQueue, HANDLE Timer,
                                    HANDLE CompletionEvent )
 {
-    FIXME("stub\n");
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    NTSTATUS status = RtlDeleteTimer(TimerQueue, Timer, CompletionEvent);
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError(status) );
+        return FALSE;
+    }
     return TRUE;
 }
 

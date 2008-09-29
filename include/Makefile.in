@@ -69,8 +69,6 @@ IDL_H_SRCS = \
 	urlhist.idl \
 	urlmon.idl \
 	vmr9.idl \
-	wine/dcetypes.idl \
-	wine/epm.idl \
 	wine/itss.idl \
 	wine/svcctl.idl \
 	wtypes.idl \
@@ -106,6 +104,7 @@ SRCDIR_INCLUDES = \
 	compobj.h \
 	cor.h \
 	corerror.h \
+	corhdr.h \
 	cpl.h \
 	cryptdlg.h \
 	cryptuiapi.h \
@@ -133,6 +132,7 @@ SRCDIR_INCLUDES = \
 	d3dx9core.h \
 	d3dx9math.h \
 	d3dx9math.inl \
+	d3dx9shader.h \
 	d3dx9tex.h \
 	dbghelp.h \
 	dbinit.idl \

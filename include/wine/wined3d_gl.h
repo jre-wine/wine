@@ -2450,23 +2450,6 @@ typedef void (WINE_GLAPI * PGLFNGETCOMPRESSEDTEXIMAGEPROC) (GLenum target, GLint
 #define GL_INCR_WRAP_EXT                  0x8507
 #define GL_DECR_WRAP_EXT                  0x8508
 #endif
-/* GL_EXT_vertex_weighting */
-#ifndef GL_EXT_vertex_weighting
-#define GL_EXT_vertex_weighting 1
-#define GL_MODELVIEW0_STACK_DEPTH_EXT     GL_MODELVIEW_STACK_DEPTH
-#define GL_MODELVIEW1_STACK_DEPTH_EXT     0x8502
-#define GL_MODELVIEW0_MATRIX_EXT          GL_MODELVIEW_MATRIX
-#define GL_MODELVIEW1_MATRIX_EXT          0x8506
-#define GL_VERTEX_WEIGHTING_EXT           0x8509
-#define GL_MODELVIEW0_EXT                 GL_MODELVIEW
-#define GL_MODELVIEW1_EXT                 0x850A
-#define GL_CURRENT_VERTEX_WEIGHT_EXT      0x850B
-#define GL_VERTEX_WEIGHT_ARRAY_EXT        0x850C
-#define GL_VERTEX_WEIGHT_ARRAY_SIZE_EXT   0x850D
-#define GL_VERTEX_WEIGHT_ARRAY_TYPE_EXT   0x850E
-#define GL_VERTEX_WEIGHT_ARRAY_STRIDE_EXT 0x850F
-#define GL_VERTEX_WEIGHT_ARRAY_POINTER_EXT 0x8510
-#endif
 
 /* GL_NV_half_float */
 #ifndef GL_NV_half_float
@@ -3008,6 +2991,19 @@ typedef void (WINE_GLAPI *PGLFNSETFRAGMENTSHADERCONSTANTATI) (GLuint dst, const 
 #define GL_NEGATE_BIT_ATI                   0x00000004
 #define GL_BIAS_BIT_ATI                     0x00000008
 #endif
+/* GL_ATI_texture_compression_3dc */
+#ifndef GL_ATI_texture_compression_3dc
+#define GL_ATI_texture_compression_3dc
+#define GL_COMPRESSED_LUMINANCE_ALPHA_3DC_ATI 0x8837
+#endif
+/* GL_EXT_texture_compression_rgtc */
+#ifndef GL_EXT_texture_compression_rgtc
+#define GL_EXT_texture_compression_rgtc
+#define GL_COMPRESSED_RED_RGTC1_EXT                       0x8DBB
+#define GL_COMPRESSED_SIGNED_RED_RGTC1_EXT                0x8DBC
+#define GL_COMPRESSED_RED_GREEN_RGTC2_EXT                 0x8DBD
+#define GL_COMPRESSED_SIGNED_RED_GREEN_RGTC2_EXT          0x8DBE
+#endif
 
 /* GL_VERSION_2_0 */
 #ifndef GL_VERSION_2_0
@@ -3339,6 +3335,7 @@ typedef enum _GL_SupportedExt {
   EXT_STENCIL_WRAP,
   EXT_TEXTURE3D,
   EXT_TEXTURE_COMPRESSION_S3TC,
+  EXT_TEXTURE_COMPRESSION_RGTC,
   EXT_TEXTURE_FILTER_ANISOTROPIC,
   EXT_TEXTURE_LOD,
   EXT_TEXTURE_LOD_BIAS,
@@ -3346,7 +3343,6 @@ typedef enum _GL_SupportedExt {
   EXT_TEXTURE_ENV_COMBINE,
   EXT_TEXTURE_ENV_DOT3,
   EXT_TEXTURE_SRGB,
-  EXT_VERTEX_WEIGHTING,
   EXT_GPU_PROGRAM_PARAMETERS,
   /* NVIDIA */
   NV_HALF_FLOAT,
@@ -3375,6 +3371,7 @@ typedef enum _GL_SupportedExt {
   EXT_VERTEX_SHADER,
   ATI_ENVMAP_BUMPMAP,
   ATI_FRAGMENT_SHADER,
+  ATI_TEXTURE_COMPRESSION_3DC,
   /* APPLE */
   APPLE_FENCE,
   APPLE_CLIENT_STORAGE,
@@ -3384,6 +3381,9 @@ typedef enum _GL_SupportedExt {
   /* SGI */
   SGI_VIDEO_SYNC,
   SGIS_GENERATE_MIPMAP,
+
+  /* Internally used */
+  WINE_NORMALIZED_TEXRECT,
 
   /* WGL extensions */
   WGL_ARB_PBUFFER,

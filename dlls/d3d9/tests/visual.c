@@ -1,5 +1,5 @@
 /*
- * Copyright 2005, 2007 Henri Verbeet
+ * Copyright 2005, 2007-2008 Henri Verbeet
  * Copyright (C) 2007-2008 Stefan Dösinger(for CodeWeavers)
  * Copyright (C) 2008 Jason Green(for TransGaming)
  *
@@ -5335,10 +5335,10 @@ static void vshader_version_varying_test(IDirect3DDevice9 *device) {
     0x0200001f, 0x8001000a, 0x900f0003,                                     /* dcl_color1 v3                */
     0x0200001f, 0x8000000b, 0x900f0004,                                     /* dcl_fog v4                   */
     0x0200001f, 0x80030005, 0x900f0005,                                     /* dcl_texcoord3 v5             */
-    0x0200001f, 0x80000003, 0x900f0006,
-    0x0200001f, 0x80000006, 0x900f0007,
-    0x0200001f, 0x80000001, 0x900f0008,
-    0x0200001f, 0x8000000c, 0x900f0009,
+    0x0200001f, 0x80000003, 0x900f0006,                                     /* dcl_normal v6                */
+    0x0200001f, 0x80000006, 0x900f0007,                                     /* dcl_tangent v7               */
+    0x0200001f, 0x80000001, 0x900f0008,                                     /* dcl_blendweight v8           */
+    0x0200001f, 0x8000000c, 0x900f0009,                                     /* dcl_depth v9                 */
 
     0x02000001, 0x800f0000, 0xa0e40000,                                     /* mov r0, c0                   */
     0x0200001b, 0xf0e40800, 0xf0e40000,                                     /* loop aL, i0                  */
@@ -5371,9 +5371,9 @@ static void vshader_version_varying_test(IDirect3DDevice9 *device) {
     DWORD vs_2_code[] = {
     0xfffe0200,                                                             /* vs_2_0                       */
     0x0200001f, 0x80000000, 0x900f0000,                                     /* dcl_position v0              */
-    0x05000051, 0xa00f0000, 0x3dcccccd, 0x00000000, 0x00000000, 0x00000000, /* def c0, 0.5, 0.0, 0.0, 0.0   */
-    0x05000051, 0xa00f0001, 0x00000000, 0x3e4ccccd, 0x00000000, 0x00000000, /* def c1, 0.0, 0.5, 0.0, 0.0   */
-    0x05000051, 0xa00f0002, 0x00000000, 0x00000000, 0x3ecccccd, 0x00000000, /* def c2, 0.0, 0.0, 0.5, 0.0   */
+    0x05000051, 0xa00f0000, 0x3dcccccd, 0x00000000, 0x00000000, 0x00000000, /* def c0, 0.1, 0.0, 0.0, 0.0   */
+    0x05000051, 0xa00f0001, 0x00000000, 0x3e4ccccd, 0x00000000, 0x00000000, /* def c1, 0.0, 0.2, 0.0, 0.0   */
+    0x05000051, 0xa00f0002, 0x00000000, 0x00000000, 0x3ecccccd, 0x00000000, /* def c2, 0.0, 0.0, 0.4, 0.0   */
     0x05000051, 0xa00f0003, 0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000, /* def c3, 1.0, 1.0, 1.0, 1.0   */
     0x02000001, 0xd00f0000, 0xa0e40002,                                     /* mov oD0, c2                  */
     0x02000001, 0xd00f0001, 0xa0e40000,                                     /* mov oD1, c0                  */
@@ -5473,19 +5473,13 @@ static void vshader_version_varying_test(IDirect3DDevice9 *device) {
     ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %08x\n", hr);
 
     color = getPixelColor(device, 160, 120);
-    ok((color & 0x00ff0000) >= 0x00190000 && (color & 0x00ff0000) <= 0x00210000 &&
-       (color & 0x0000ff00) >= 0x00003300 && (color & 0x0000ff00) <= 0x00003500 &&
-       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00000068,
-       "vs_3_0 returned color 0x%08x, expected 0x00203366\n", color);
+    ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x1a, 0x34, 0x67), 1),
+       "vs_3_0 returned color 0x%08x, expected 0x00193366\n", color);
     color = getPixelColor(device, 160, 360);
-    ok((color & 0x00ff0000) >= 0x003c0000 && (color & 0x00ff0000) <= 0x004e0000 &&
-       (color & 0x0000ff00) >= 0x00000000 && (color & 0x0000ff00) <= 0x00000000 &&
-       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00000068,
+    ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x4d, 0x00, 0x67), 1),
        "vs_1_1 returned color 0x%08x, expected 0x004c0066\n", color);
     color = getPixelColor(device, 480, 360);
-    ok((color & 0x00ff0000) >= 0x003c0000 && (color & 0x00ff0000) <= 0x004e0000 &&
-       (color & 0x0000ff00) >= 0x00000000 && (color & 0x0000ff00) <= 0x00000000 &&
-       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00000068,
+    ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x4d, 0x00, 0x67), 1),
        "vs_2_0 returned color 0x%08x, expected 0x004c0066\n", color);
 
     /* cleanup */
@@ -5819,6 +5813,8 @@ void test_compare_instructions(IDirect3DDevice9 *device)
 
     hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
     ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %08x\n", hr);
+    hr = IDirect3DDevice9_SetVertexShader(device, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexShader returned %08x\n", hr);
 
     color = getPixelColor(device, 160, 360);
     ok(color == 0x00FF00FF, "Compare test: Quad 1(sge vec) returned color 0x%08x, expected 0x00FF00FF\n", color);
@@ -5923,7 +5919,7 @@ void test_vshader_input(IDirect3DDevice9 *device)
     };
     IDirect3DVertexShader9 *swapped_shader, *texcoord_color_shader, *color_color_shader;
     HRESULT hr;
-    DWORD color, r, g, b;
+    DWORD color;
     float quad1[] =  {
         -1.0,   -1.0,   0.1,    1.0,    0.0,    1.0,    0.0,    0.0,    -1.0,   0.5,    0.0,
          0.0,   -1.0,   0.1,    1.0,    0.0,    1.0,    0.0,    0.0,    -1.0,   0.5,    0.0,
@@ -6098,7 +6094,7 @@ void test_vshader_input(IDirect3DDevice9 *device)
 
         if(i == 3 || i == 2) {
             color = getPixelColor(device, 160, 360);
-            ok(color == 0x00FFFF80 || color == 0x00FFFF7f || color == 0x00FFFF81,
+            ok(color_match(color, D3DCOLOR_ARGB(0x00, 0xff, 0xff, 0x80), 1),
                "Input test: Quad 1(2crd) returned color 0x%08x, expected 0x00FFFF80\n", color);
 
             /* The last value of the read but undefined stream is used, it is 0x00. The defined input is vec4(1, 0, 0, 0) */
@@ -6107,20 +6103,20 @@ void test_vshader_input(IDirect3DDevice9 *device)
                "Input test: Quad 2(1crd) returned color 0x%08x, expected 0x00FFFF00\n", color);
             color = getPixelColor(device, 160, 120);
             /* Same as above, accept both the last used value and 0.0 for the undefined streams */
-            ok(color == 0x00FF0080 || color == 0x00FF007f || color == 0x00FF0081 || color == 0x00FF0000,
+            ok(color_match(color, D3DCOLOR_ARGB(0x00, 0xff, 0x00, 0x80), 1) || color == D3DCOLOR_ARGB(0x00, 0xff, 0x00, 0x00),
                "Input test: Quad 3(2crd-wrongidx) returned color 0x%08x, expected 0x00FF0080\n", color);
 
             color = getPixelColor(device, 480, 160);
             ok(color == 0x00000000, "Input test: Quad 4(2crd-rightorder) returned color 0x%08x, expected 0x00000000\n", color);
         } else if(i == 1) {
             color = getPixelColor(device, 160, 360);
-            ok(color == 0x00FFFF80 || color == 0x00FFFF7f || color == 0x00FFFF81,
+            ok(color_match(color, D3DCOLOR_ARGB(0x00, 0xff, 0xff, 0x80), 1),
                "Input test: Quad 1(2crd) returned color 0x%08x, expected 0x00FFFF80\n", color);
             color = getPixelColor(device, 480, 360);
             /* Accept the clear color as well in this case, since SW VP returns an error */
             ok(color == 0x00FFFF00 || color == 0x00FF0000, "Input test: Quad 2(1crd) returned color 0x%08x, expected 0x00FFFF00\n", color);
             color = getPixelColor(device, 160, 120);
-            ok(color == 0x00FF0080 || color == 0x00FF0000 || color == 0x00FF007f || color == 0x00FF0081,
+            ok(color_match(color, D3DCOLOR_ARGB(0x00, 0xff, 0x00, 0x80), 1) || color == D3DCOLOR_ARGB(0x00, 0xff, 0x00, 0x00),
                "Input test: Quad 3(2crd-wrongidx) returned color 0x%08x, expected 0x00FF0080\n", color);
             color = getPixelColor(device, 480, 160);
             ok(color == 0x00000000, "Input test: Quad 4(2crd-rightorder) returned color 0x%08x, expected 0x00000000\n", color);
@@ -6256,28 +6252,16 @@ void test_vshader_input(IDirect3DDevice9 *device)
         ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %08x\n", hr);
 
         color = getPixelColor(device, 160, 360);
-        r = (color & 0x00ff0000) >> 16;
-        g = (color & 0x0000ff00) >>  8;
-        b = (color & 0x000000ff) >>  0;
-        ok(r >= 0xfe && r <= 0xff && g >= 0x7f && g <= 0x81 && b >= 0x3f && b <= 0x41,
+        ok(color_match(color, D3DCOLOR_ARGB(0x00, 0xff, 0x80, 0x40), 1),
            "Input test: Quad 1(color-texcoord) returned color 0x%08x, expected 0x00ff8040\n", color);
         color = getPixelColor(device, 480, 360);
-        r = (color & 0x00ff0000) >> 16;
-        g = (color & 0x0000ff00) >>  8;
-        b = (color & 0x000000ff) >>  0;
-        ok(r >= 0x3f && r <= 0x41 && g >= 0x7f && g <= 0x81 && b >= 0xfe && b <= 0xff,
+        ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x40, 0x80, 0xff), 1),
            "Input test: Quad 2(color-ubyte) returned color 0x%08x, expected 0x004080ff\n", color);
         color = getPixelColor(device, 160, 120);
-        r = (color & 0x00ff0000) >> 16;
-        g = (color & 0x0000ff00) >>  8;
-        b = (color & 0x000000ff) >>  0;
-        ok(r >= 0xfe && r <= 0xff && g >= 0x7f && g <= 0x81 && b >= 0x3f && b <= 0x41,
+        ok(color_match(color, D3DCOLOR_ARGB(0x00, 0xff, 0x80, 0x40), 1),
            "Input test: Quad 3(color-color) returned color 0x%08x, expected 0x00ff8040\n", color);
         color = getPixelColor(device, 480, 160);
-        r = (color & 0x00ff0000) >> 16;
-        g = (color & 0x0000ff00) >>  8;
-        b = (color & 0x000000ff) >>  0;
-        ok(r >= 0xfe && r <= 0xff && g >= 0xfe && g <= 0xff && b <= 0x01,
+        ok(color_match(color, D3DCOLOR_ARGB(0x00, 0xff, 0xff, 0x00), 1),
            "Input test: Quad 4(color-float) returned color 0x%08x, expected 0x00FFFF00\n", color);
 
         IDirect3DVertexShader9_Release(texcoord_color_shader);
@@ -6377,26 +6361,6 @@ static void srgbtexture_test(IDirect3DDevice9 *device)
 out:
     if(texture) IDirect3DTexture9_Release(texture);
     IDirect3D9_Release(d3d);
-}
-
-/* Return true if color is near the expected value */
-static int color_near(DWORD color, DWORD expected)
-{
-    const BYTE slop = 2;
-
-    BYTE r, g, b;
-    BYTE rx, gx, bx;
-    r = (color & 0x00ff0000) >> 16;
-    g = (color & 0x0000ff00) >>  8;
-    b = (color & 0x000000ff);
-    rx = (expected & 0x00ff0000) >> 16;
-    gx = (expected & 0x0000ff00) >>  8;
-    bx = (expected & 0x000000ff);
-
-    return
-      ((r >= (rx - slop)) && (r <= (rx + slop))) &&
-      ((g >= (gx - slop)) && (g <= (gx + slop))) &&
-      ((b >= (bx - slop)) && (b <= (bx + slop)));
 }
 
 static void shademode_test(IDirect3DDevice9 *device)
@@ -6500,9 +6464,9 @@ static void shademode_test(IDirect3DDevice9 *device)
                 case D3DSHADE_GOURAUD:
                     /* Should be an interpolated blend */
 
-                    ok(color_near(color0, 0x000dca28),
+                    ok(color_match(color0, D3DCOLOR_ARGB(0x00, 0x0d, 0xca, 0x28), 2),
                        "GOURAUD shading has color0 %08x, expected 0x00dca28\n", color0);
-                    ok(color_near(color1, 0x000d45c7),
+                    ok(color_match(color1, D3DCOLOR_ARGB(0x00, 0x0d, 0x45, 0xc7), 2),
                        "GOURAUD shading has color1 %08x, expected 0x000d45c7\n", color1);
 
                     color0_gouraud = color0;
@@ -6512,9 +6476,9 @@ static void shademode_test(IDirect3DDevice9 *device)
                     break;
                 case D3DSHADE_PHONG:
                     /* Should be the same as GOURAUD, since no hardware implements this */
-                    ok(color_near(color0, 0x000dca28),
+                    ok(color_match(color0, D3DCOLOR_ARGB(0x00, 0x0d, 0xca, 0x28), 2),
                        "PHONG shading has color0 %08x, expected 0x000dca28\n", color0);
-                    ok(color_near(color1, 0x000d45c7),
+                    ok(color_match(color1, D3DCOLOR_ARGB(0x00, 0x0d, 0x45, 0xc7), 2),
                        "PHONG shading has color1 %08x, expected 0x000d45c7\n", color1);
 
                     ok(color0 == color0_gouraud, "difference between GOURAUD and PHONG shading detected: %08x %08x\n",
@@ -8747,7 +8711,7 @@ static void stream_test(IDirect3DDevice9 *device)
     BYTE *data;
     DWORD color;
     DWORD ind;
-    int i;
+    unsigned i;
 
     const DWORD shader_code[] =
     {
@@ -9089,7 +9053,7 @@ static void texop_test(IDirect3DDevice9 *device)
     D3DCOLOR color;
     D3DCAPS9 caps;
     HRESULT hr;
-    int i;
+    unsigned i;
 
     static const struct {
         float x, y, z;

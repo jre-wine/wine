@@ -32,7 +32,7 @@
 #endif
 
 /* constructors */
-extern IUnknown         *create_domdoc( void );
+extern IUnknown         *create_domdoc( xmlNodePtr document );
 extern IUnknown         *create_xmldoc( void );
 extern IXMLDOMNode      *create_node( xmlNodePtr node );
 extern IUnknown         *create_basic_node( xmlNodePtr node, IUnknown *pUnkOuter );
@@ -82,6 +82,8 @@ static inline xmlnode *impl_from_IXMLDOMNode( IXMLDOMNode *iface )
     return (xmlnode *)((char*)iface - FIELD_OFFSET(xmlnode, lpVtbl));
 }
 
+extern HRESULT DOMDocument_create_from_xmldoc(xmlDocPtr xmldoc, IXMLDOMDocument2 **document);
+
 #endif
 
 extern IXMLDOMParseError *create_parseError( LONG code, BSTR url, BSTR reason, BSTR srcText,
@@ -90,8 +92,6 @@ extern HRESULT DOMDocument_create( IUnknown *pUnkOuter, LPVOID *ppObj );
 extern HRESULT SchemaCache_create( IUnknown *pUnkOuter, LPVOID *ppObj );
 extern HRESULT XMLDocument_create( IUnknown *pUnkOuter, LPVOID *ppObj );
 extern HRESULT SAXXMLReader_create(IUnknown *pUnkOuter, LPVOID *ppObj );
-
-extern HRESULT DOMDocument_create_from_xmldoc(xmlDocPtr xmldoc, IXMLDOMDocument2 **document);
 
 /* typelibs */
 enum tid_t {

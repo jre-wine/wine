@@ -77,7 +77,7 @@
 @ stdcall GdipCreateBitmapFromGraphics(long long ptr ptr)
 @ stdcall GdipCreateBitmapFromHBITMAP(long long ptr)
 @ stub GdipCreateBitmapFromHICON
-@ stub GdipCreateBitmapFromResource
+@ stdcall GdipCreateBitmapFromResource(long wstr ptr)
 @ stdcall GdipCreateBitmapFromScan0(long long long long ptr ptr)
 @ stdcall GdipCreateBitmapFromStream(ptr ptr)
 @ stdcall GdipCreateBitmapFromStreamICM(ptr ptr)
@@ -147,7 +147,7 @@
 @ stdcall GdipDeletePath(ptr)
 @ stdcall GdipDeletePathIter(ptr)
 @ stdcall GdipDeletePen(ptr)
-@ stub GdipDeletePrivateFontCollection
+@ stdcall GdipDeletePrivateFontCollection(ptr)
 @ stdcall GdipDeleteRegion(ptr)
 @ stdcall GdipDeleteStringFormat(ptr)
 @ stdcall GdipDisposeImage(ptr)
@@ -265,8 +265,8 @@
 @ stub GdipGetEncoderParameterListSize
 @ stub GdipGetFamily
 @ stdcall GdipGetFamilyName(ptr ptr long)
-@ stub GdipGetFontCollectionFamilyCount
-@ stub GdipGetFontCollectionFamilyList
+@ stdcall GdipGetFontCollectionFamilyCount(ptr ptr)
+@ stdcall GdipGetFontCollectionFamilyList(ptr long ptr ptr)
 @ stub GdipGetFontHeight
 @ stdcall GdipGetFontHeightGivenDPI(ptr long ptr)
 @ stdcall GdipGetFontSize(ptr ptr)
@@ -325,8 +325,8 @@
 @ stdcall GdipGetPageUnit(ptr ptr)
 @ stdcall GdipGetPathData(ptr ptr)
 @ stdcall GdipGetPathFillMode(ptr ptr)
-@ stub GdipGetPathGradientBlend
-@ stub GdipGetPathGradientBlendCount
+@ stdcall GdipGetPathGradientBlend(ptr ptr ptr long)
+@ stdcall GdipGetPathGradientBlendCount(ptr ptr)
 @ stub GdipGetPathGradientCenterColor
 @ stdcall GdipGetPathGradientCenterPoint(ptr ptr)
 @ stdcall GdipGetPathGradientCenterPointI(ptr ptr)
@@ -336,8 +336,8 @@
 @ stdcall GdipGetPathGradientPointCount(ptr ptr)
 @ stub GdipGetPathGradientPresetBlend
 @ stub GdipGetPathGradientPresetBlendCount
-@ stub GdipGetPathGradientRect
-@ stub GdipGetPathGradientRectI
+@ stdcall GdipGetPathGradientRect(ptr ptr)
+@ stdcall GdipGetPathGradientRectI(ptr ptr)
 @ stub GdipGetPathGradientSurroundColorCount
 @ stdcall GdipGetPathGradientSurroundColorsWithCount(ptr ptr ptr)
 @ stub GdipGetPathGradientTransform
@@ -423,7 +423,7 @@
 @ stdcall GdipIsMatrixInvertible(ptr ptr)
 @ stdcall GdipIsOutlineVisiblePathPoint(ptr long long ptr ptr ptr)
 @ stdcall GdipIsOutlineVisiblePathPointI(ptr long long ptr ptr ptr)
-@ stub GdipIsStyleAvailable
+@ stdcall GdipIsStyleAvailable(ptr long ptr)
 @ stub GdipIsVisibleClipEmpty
 @ stdcall GdipIsVisiblePathPoint(ptr long long ptr ptr)
 @ stdcall GdipIsVisiblePathPointI(ptr long long ptr ptr)
@@ -449,7 +449,7 @@
 @ stub GdipMultiplyTextureTransform
 @ stdcall GdipMultiplyWorldTransform(ptr ptr long)
 @ stub GdipNewInstalledFontCollection
-@ stub GdipNewPrivateFontCollection
+@ stdcall GdipNewPrivateFontCollection(ptr)
 @ stdcall GdipPathIterCopyData(ptr ptr ptr ptr long long)
 @ stdcall GdipPathIterEnumerate(ptr ptr ptr ptr long)
 @ stdcall GdipPathIterGetCount(ptr ptr)
@@ -464,7 +464,7 @@
 @ stdcall GdipPathIterRewind(ptr)
 @ stub GdipPlayMetafileRecord
 @ stub GdipPlayTSClientRecord
-@ stub GdipPrivateAddFontFile
+@ stdcall GdipPrivateAddFontFile(ptr wstr)
 @ stub GdipPrivateAddMemoryFont
 @ stub GdipRecordMetafile
 @ stub GdipRecordMetafileFileName

@@ -19,7 +19,7 @@
 #ifndef __WINE_D3DX8MESH_H
 #define __WINE_D3DX8MESH_H
 
-#include <d3d8.h>
+#include <d3dx8.h>
 #include <dxfile.h>
 
 #ifdef __cplusplus
@@ -28,6 +28,7 @@ extern "C" {
 
 HRESULT WINAPI D3DXCreateBuffer(DWORD,LPD3DXBUFFER*);
 UINT    WINAPI D3DXGetFVFVertexSize(DWORD);
+BOOL    WINAPI D3DXSphereBoundProbe(CONST D3DXVECTOR3 *,FLOAT,CONST D3DXVECTOR3 *,CONST D3DXVECTOR3 *);
 
 #ifdef __cplusplus
 }

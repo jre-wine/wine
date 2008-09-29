@@ -330,8 +330,7 @@ static void node_to_string(IXMLDOMNode *node, char *buf)
              * results we "fix" it */
             if (r == S_OK)
                 ole_check(IXMLDOMNode_get_nodeType(new_node, &parent_type));
-            /* we need also to workaround the no document node problem - see below */
-            if (((r == S_FALSE && type != NODE_DOCUMENT) || parent_type == NODE_DOCUMENT) && type != NODE_PROCESSING_INSTRUCTION && pos==1)
+            if ((parent_type == NODE_DOCUMENT) && type != NODE_PROCESSING_INSTRUCTION && pos==1)
             {
                 todo_wine ok(FALSE, "The first child of the document node in MSXML is the <?xml ... ?> processing instruction\n");
                 pos++;
@@ -347,15 +346,6 @@ static void node_to_string(IXMLDOMNode *node, char *buf)
             *(buf++) = '.';
     }
 
-    /* currently we can't access document node in wine. All our examples this is the
-     * root node so to be able to test query results we add it */
-    if (type != NODE_DOCUMENT)
-    {
-        todo_wine ok(FALSE, "Document node is not the last returned node!\n");
-        *(buf++) = '.';
-        *(buf++) = 'D';
-        *(buf++) = '1';
-    }
     *buf = 0;
 }
 
@@ -1167,7 +1157,7 @@ todo_wine
     if (list)
     {
         r = IXMLDOMNodeList_QueryInterface(list, &IID_IDispatch, NULL);
-        ok( r == E_INVALIDARG, "ret %08x\n", r );
+        ok( r == E_INVALIDARG || r == E_POINTER, "ret %08x\n", r );
 
         r = IXMLDOMNodeList_get_item(list, 0, NULL);
         ok(r == E_INVALIDARG, "Exected E_INVALIDARG got %08x\n", r);
@@ -1607,8 +1597,11 @@ static void test_get_text(void)
     ok( r == S_OK, "ret %08x\n", r );
     SysFreeString(str);
 
+    if (0) {
+    /* this test crashes on win9x */
     r = IXMLDOMNodeList_QueryInterface(node_list, &IID_IDispatch, NULL);
     ok( r == E_INVALIDARG, "ret %08x\n", r );
+    }
 
     r = IXMLDOMNodeList_get_length( node_list, NULL );
     ok( r == E_INVALIDARG, "ret %08x\n", r );

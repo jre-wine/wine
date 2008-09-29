@@ -58,7 +58,7 @@ static void    WINHELP_DeleteButtons(WINHELP_WINDOW*);
 static void    WINHELP_SetupText(HWND hWnd, WINHELP_WINDOW *win, ULONG relative);
 static void    WINHELP_DeletePageLinks(HLPFILE_PAGE* page);
 
-WINHELP_GLOBALS Globals = {3, NULL, TRUE, NULL, NULL, NULL, NULL, NULL, {{{NULL,NULL}},0}};
+WINHELP_GLOBALS Globals = {3, NULL, TRUE, NULL, NULL, NULL, NULL, NULL, {{{NULL,NULL}},0}, NULL};
 
 #define CTL_ID_BUTTON   0x700
 #define CTL_ID_TEXT     0x701
@@ -228,7 +228,10 @@ static HLPFILE_WINDOWINFO*     WINHELP_GetPopupWindowInfo(HLPFILE* hlpfile,
 
     wi.style = SW_SHOW;
     wi.win_style = WS_POPUP | WS_BORDER;
-    wi.sr_color = parent->info->sr_color;
+    if (parent->page->file->has_popup_color)
+        wi.sr_color = parent->page->file->popup_color;
+    else
+        wi.sr_color = parent->info->sr_color;
     wi.nsr_color = 0xFFFFFF;
 
     return &wi;
@@ -1169,10 +1172,21 @@ static LRESULT CALLBACK WINHELP_ButtonBoxWndProc(HWND hWnd, UINT msg, WPARAM wPa
                                             0, 0, 0, 0,
                                             hWnd, (HMENU) button->wParam,
                                             Globals.hInstance, 0);
-                if (button->hWnd) {
+                if (button->hWnd)
+                {
                     if (Globals.button_proc == NULL)
+                    {
+                        NONCLIENTMETRICSW ncm;
                         Globals.button_proc = (WNDPROC) GetWindowLongPtr(button->hWnd, GWLP_WNDPROC);
+
+                        ncm.cbSize = sizeof(NONCLIENTMETRICSW);
+                        SystemParametersInfoW(SPI_GETNONCLIENTMETRICS,
+                                              sizeof(NONCLIENTMETRICSW), &ncm, 0);
+                        Globals.hButtonFont = CreateFontIndirectW(&ncm.lfMenuFont);
+                    }
                     SetWindowLongPtr(button->hWnd, GWLP_WNDPROC, (LONG_PTR) WINHELP_ButtonWndProc);
+                    if (Globals.hButtonFont)
+                        SendMessage(button->hWnd, WM_SETFONT, (WPARAM)Globals.hButtonFont, TRUE);
                 }
             }
             hDc = GetDC(button->hWnd);
@@ -1579,6 +1593,15 @@ INT_PTR CALLBACK WINHELP_IndexDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
         id->jump = FALSE;
         id->offset = 1;
         return TRUE;
+    case WM_COMMAND:
+        switch (HIWORD(wParam))
+        {
+        case LBN_DBLCLK:
+            if (LOWORD(wParam) == IDC_INDEXLIST)
+                SendMessage(GetParent(hWnd), PSM_PRESSBUTTON, PSBTN_OK, 0);
+            break;
+        }
+        break;
     case WM_NOTIFY:
 	switch (((NMHDR*)lParam)->code)
 	{

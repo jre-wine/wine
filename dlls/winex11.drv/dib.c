@@ -3525,7 +3525,7 @@ static int X11DRV_DIB_SetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
             ERR("Out of memory!\n");
             XDestroyImage( bmpImage );
             wine_tsx11_unlock();
-            return lines;
+            return 0;
         }
     }
     wine_tsx11_unlock();
@@ -3654,7 +3654,7 @@ static int X11DRV_DIB_GetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
             ERR("Out of memory!\n");
             XDestroyImage( bmpImage );
             wine_tsx11_unlock();
-            return lines;
+            return 0;
         }
     }
 
@@ -3998,7 +3998,7 @@ INT X11DRV_SetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan,
       TRACE("syncing compatible set bits to app bits\n");
       if ((tmpheight < 0) ^ (bitmap.bmHeight < 0))
       {
-          dbits = (LPBYTE)bits + (dstwidthb * (lines-1));
+          dbits += dstwidthb * (lines-1);
           dstwidthb = -dstwidthb;
       }
 	  X11DRV_DIB_DoProtectDIBSection( physBitmap, PAGE_READWRITE );

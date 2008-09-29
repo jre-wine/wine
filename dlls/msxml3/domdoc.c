@@ -19,6 +19,7 @@
  */
 
 #define COBJMACROS
+#define NONAMELESSUNION
 
 #include "config.h"
 
@@ -264,7 +265,7 @@ static HRESULT WINAPI bsc_OnDataAvailable(
 
     do
     {
-        hr = IStream_Read(pstgmed->pstm, buf, sizeof(buf), &read);
+        hr = IStream_Read(pstgmed->u.pstm, buf, sizeof(buf), &read);
         if(FAILED(hr))
             break;
 
@@ -299,12 +300,13 @@ static const struct IBindStatusCallbackVtbl bsc_vtbl =
 
 static bsc_t *create_bsc(domdoc *doc)
 {
-    bsc_t *bsc = HeapAlloc(GetProcessHeap(), 0, sizeof(bsc));
+    bsc_t *bsc = HeapAlloc(GetProcessHeap(), 0, sizeof(bsc_t));
 
     bsc->lpVtbl = &bsc_vtbl;
     bsc->ref = 1;
     bsc->doc = doc;
     bsc->binding = NULL;
+    bsc->memstream = NULL;
 
     return bsc;
 }
@@ -2283,6 +2285,20 @@ HRESULT DOMDocument_create(IUnknown *pUnkOuter, LPVOID *ppObj)
         xmlFreeDoc(xmldoc);
 
     return hr;
+}
+
+IUnknown* create_domdoc( xmlNodePtr document )
+{
+    HRESULT hr;
+    LPVOID pObj = NULL;
+
+    TRACE("(%p)\n", document);
+
+    hr = DOMDocument_create_from_xmldoc((xmlDocPtr)document, (IXMLDOMDocument2**)&pObj);
+    if (FAILED(hr))
+        return NULL;
+
+    return (IUnknown*)pObj;
 }
 
 #else

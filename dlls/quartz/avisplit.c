@@ -20,7 +20,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 /* FIXME:
- * - Reference leaks, if they are still existant
+ * - Reference leaks, if they still exist
  * - Files without an index are not handled correctly yet.
  * - When stopping/starting, a sample is lost. This should be compensated by
  *   keeping track of previous index/position.
@@ -147,7 +147,6 @@ static HRESULT AVISplitter_next_request(AVISplitterImpl *This, DWORD streamnumbe
     PullPin *pin = This->Parser.pInputPin;
     IMediaSample *sample = NULL;
     HRESULT hr;
-    BOOL endofstream = FALSE;
 
     TRACE("(%p, %u)->()\n", This, streamnumber);
 
@@ -181,6 +180,14 @@ static HRESULT AVISplitter_next_request(AVISplitterImpl *This, DWORD streamnumbe
             AVISTDINDEX_ENTRY *entry = &index->aIndex[stream->pos];
             BOOL keyframe;
 
+            /* End of file */
+            if (stream->index >= stream->entries)
+            {
+                ERR("END OF STREAM ON %u\n", streamnumber);
+                IMediaSample_Release(sample);
+                return S_FALSE;
+            }
+
             rtSampleStart = index->qwBaseOffset;
             keyframe = !(entry->dwSize >> 31);
             rtSampleStart += entry->dwOffset;
@@ -196,20 +203,21 @@ static HRESULT AVISplitter_next_request(AVISplitterImpl *This, DWORD streamnumbe
             rtSampleStop = rtSampleStart + MEDIATIME_FROM_BYTES(entry->dwSize & ~(1 << 31));
 
             TRACE("offset(%u) size(%u)\n", (DWORD)BYTES_FROM_MEDIATIME(rtSampleStart), (DWORD)BYTES_FROM_MEDIATIME(rtSampleStop - rtSampleStart));
-
-            /* End of file */
-            if (stream->index_next >= stream->entries)
-            {
-                ERR("END OF STREAM ON %u\n", streamnumber);
-                hr = AVISplitter_SendEndOfFile(This, streamnumber);
-                return S_FALSE;
-            }
         }
         else if (This->oldindex)
         {
             DWORD flags = This->oldindex->aIndex[stream->pos].dwFlags;
             DWORD size = This->oldindex->aIndex[stream->pos].dwSize;
             BOOL keyframe;
+
+            /* End of file */
+            if (stream->index)
+            {
+                IMediaSample_Release(sample);
+                ERR("END OF STREAM ON %u\n", streamnumber);
+                return S_FALSE;
+            }
+
             keyframe = !!(flags & AVIIF_KEYFRAME);
 
             rtSampleStart = MEDIATIME_FROM_BYTES(This->offset);
@@ -237,14 +245,11 @@ static HRESULT AVISplitter_next_request(AVISplitterImpl *This, DWORD streamnumbe
             } while (stream->pos_next * sizeof(This->oldindex->aIndex[0]) < This->oldindex->cb
                      && StreamFromFOURCC(This->oldindex->aIndex[stream->pos_next].dwChunkId) != streamnumber);
 
-            /* End of file */
+            /* End of file soon */
             if (stream->pos_next * sizeof(This->oldindex->aIndex[0]) >= This->oldindex->cb)
             {
                 stream->pos_next = 0;
                 ++stream->index_next;
-                ERR("END OF STREAM ON %u\n", streamnumber);
-                hr = AVISplitter_SendEndOfFile(This, streamnumber);
-                endofstream = TRUE;
             }
         }
         else /* TODO: Generate an index automagically */
@@ -253,12 +258,21 @@ static HRESULT AVISplitter_next_request(AVISplitterImpl *This, DWORD streamnumbe
             assert(0);
         }
 
-        hr = IMediaSample_SetTime(sample, &rtSampleStart, &rtSampleStop);
+        if (rtSampleStart != rtSampleStop)
+        {
+            hr = IMediaSample_SetTime(sample, &rtSampleStart, &rtSampleStop);
 
-        hr = IAsyncReader_Request(pin->pReader, sample, streamnumber);
+            hr = IAsyncReader_Request(pin->pReader, sample, streamnumber);
 
-        if (FAILED(hr))
-            assert(IMediaSample_Release(sample) == 0);
+            if (FAILED(hr))
+                assert(IMediaSample_Release(sample) == 0);
+        }
+        else
+        {
+            stream->sample = sample;
+            IMediaSample_SetActualDataLength(sample, 0);
+            SetEvent(stream->packet_queued);
+        }
     }
     else
     {
@@ -269,9 +283,6 @@ static HRESULT AVISplitter_next_request(AVISplitterImpl *This, DWORD streamnumbe
         }
     }
     TRACE("--> %08x\n", hr);
-
-    if (endofstream && hr == S_OK)
-        return S_FALSE;
 
     return hr;
 }
@@ -344,6 +355,8 @@ static DWORD WINAPI AVISplitter_thread_reader(LPVOID data)
         IMediaSample_Release(sample);
         if (hr == S_OK)
             hr = nexthr;
+        if (nexthr == S_FALSE)
+            AVISplitter_SendEndOfFile(This, streamnumber);
     } while (hr == S_OK);
 
     FIXME("Thread %u terminated with hr %08x!\n", streamnumber, hr);
@@ -358,7 +371,10 @@ static HRESULT AVISplitter_Sample(LPVOID iface, IMediaSample * pSample, DWORD_PT
     HRESULT hr = S_OK;
 
     if (!IMediaSample_GetActualDataLength(pSample))
+    {
+        ERR("Received empty sample\n");
         return S_OK;
+    }
 
     /* Send the sample to whatever thread is appropiate
      * That thread should also not have a sample queued at the moment
@@ -376,6 +392,8 @@ static HRESULT AVISplitter_Sample(LPVOID iface, IMediaSample * pSample, DWORD_PT
 
     return hr;
 }
+
+static HRESULT AVISplitter_done_process(LPVOID iface);
 
 /* On the first request we have to be sure that (cStreams-1) samples have
  * already been processed, because otherwise some pins might not ever finish
@@ -406,7 +424,7 @@ static HRESULT AVISplitter_first_request(LPVOID iface)
         stream->pos_next = stream->pos;
         stream->index_next = stream->index;
 
-        /* There should be a a packet queued from AVISplitter_next_request last time
+        /* There should be a packet queued from AVISplitter_next_request last time
          * It needs to be done now because this is the only way to ensure that every
          * stream will have at least 1 packet processed
          * If this is done after the threads start it could go all awkward and we
@@ -420,26 +438,21 @@ static HRESULT AVISplitter_first_request(LPVOID iface)
             assert(hr == S_OK);
             assert(sample);
 
-            /* This should not happen! (Maybe the threads didn't terminate?) */
-            if (dwUser != x - 1)
-            {
-                ERR("dwUser: %lu, x-1: %u\n", dwUser, x-1);
-                assert(dwUser == x - 1);
-            }
             AVISplitter_Sample(iface, sample, dwUser);
             IMediaSample_Release(sample);
         }
 
         hr = AVISplitter_next_request(This, x);
         TRACE("-->%08x\n", hr);
-        /* assert(SUCCEEDED(hr)); * With quick transitions this might not be the case (eg stop->running->stop) */
 
         /* Could be an EOF instead */
         have_sample = (hr == S_OK);
+        if (FAILED(hr))
+            break;
     }
 
     /* FIXME: Don't do this for each pin that sent an EOF */
-    for (x = 0; x < This->Parser.cStreams; ++x)
+    for (x = 0; x < This->Parser.cStreams && SUCCEEDED(hr); ++x)
     {
         struct thread_args *args;
         DWORD tid;
@@ -724,6 +737,15 @@ static HRESULT AVISplitter_ProcessStreamList(AVISplitterImpl * This, const BYTE 
                 CopyMemory(&pvi->bmiHeader, (const BYTE *)(pChunk + 1), pChunk->cb);
                 if (pvi->bmiHeader.biCompression)
                     amt.subtype.Data1 = pvi->bmiHeader.biCompression;
+            }
+            else if (IsEqualIID(&amt.formattype, &FORMAT_WaveFormatEx))
+            {
+                amt.cbFormat = pChunk->cb;
+                if (amt.cbFormat < sizeof(WAVEFORMATEX))
+                    amt.cbFormat = sizeof(WAVEFORMATEX);
+                amt.pbFormat = CoTaskMemAlloc(amt.cbFormat);
+                ZeroMemory(amt.pbFormat, amt.cbFormat);
+                CopyMemory(amt.pbFormat, (const BYTE *)(pChunk + 1), pChunk->cb);
             }
             else
             {
@@ -1092,7 +1114,7 @@ static HRESULT AVISplitter_InputPin_PreConnect(IPin * iface, IPin * pConnectPin,
     props->cbAlign = 1;
     props->cbPrefix = 0;
     /* Comrades, prevent shortage of buffers, or you will feel the consequences! DA! */
-    props->cBuffers = 3 * pAviSplit->Parser.cStreams;
+    props->cBuffers = 2 * pAviSplit->Parser.cStreams;
 
     /* Now peek into the idx1 index, if available */
     if (hr == S_OK && (total - pos) > sizeof(RIFFCHUNK))

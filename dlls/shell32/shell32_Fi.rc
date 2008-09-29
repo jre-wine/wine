@@ -90,6 +90,28 @@ BEGIN
 	END
 END
 
+MENU_CPANEL MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", IDM_CPANEL_EXIT
+    END
+
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Suuret kuvakkeet", FCIDM_SHVIEW_BIGICON
+        MENUITEM "&Pienet kuvakkeet", FCIDM_SHVIEW_SMALLICON
+        MENUITEM "&Lista", FCIDM_SHVIEW_LISTVIEW
+        MENUITEM "&Tiedot", FCIDM_SHVIEW_REPORTVIEW
+    END
+
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About Control Panel...", IDM_CPANEL_ABOUT
+    END
+END
+
 SHBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 188, 192
 STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
 CAPTION "Valitse kansio"
@@ -218,4 +240,8 @@ STRINGTABLE
 	IDS_CDBURN_AREA             "Paikalliset asetukset\\Ohjelmien tiedot\\Microsoft\\CD Burning"
 
 	IDS_NEWFOLDER		"New Folder"
+
+	IDS_CPANEL_TITLE            "Wine Control Panel"
+	IDS_CPANEL_NAME             "Name"
+	IDS_CPANEL_DESCRIPTION      "Description"
 }

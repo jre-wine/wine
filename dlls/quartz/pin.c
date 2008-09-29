@@ -192,18 +192,14 @@ static HRESULT OutputPin_ConnectSpecific(IPin * iface, IPin * pReceivePin, const
             hr = IMemInputPin_GetAllocator(This->pMemInputPin, &pMemAlloc);
 
             if (hr == VFW_E_NO_ALLOCATOR)
-            {
                 /* Input pin provides no allocator, use standard memory allocator */
                 hr = CoCreateInstance(&CLSID_MemoryAllocator, NULL, CLSCTX_INPROC_SERVER, &IID_IMemAllocator, (LPVOID*)&pMemAlloc);
 
-                if (SUCCEEDED(hr))
-                {
-                    hr = IMemInputPin_NotifyAllocator(This->pMemInputPin, pMemAlloc, This->readonly);
-                }
-            }
-
             if (SUCCEEDED(hr))
                 hr = IMemAllocator_SetProperties(pMemAlloc, &This->allocProps, &actual);
+
+            if (SUCCEEDED(hr))
+                hr = IMemInputPin_NotifyAllocator(This->pMemInputPin, pMemAlloc, This->readonly);
 
             if (pMemAlloc)
                 IMemAllocator_Release(pMemAlloc);
@@ -387,6 +383,8 @@ HRESULT WINAPI IPinImpl_Disconnect(IPin * iface)
         {
             IPin_Release(This->pConnectedTo);
             This->pConnectedTo = NULL;
+            FreeMediaType(&This->mtCurrent);
+            ZeroMemory(&This->mtCurrent, sizeof(This->mtCurrent));
             hr = S_OK;
         }
         else
@@ -928,7 +926,7 @@ HRESULT WINAPI OutputPin_Connect(IPin * iface, IPin * pReceivePin, const AM_MEDI
             /* negotiate media type */
 
             IEnumMediaTypes * pEnumCandidates;
-            AM_MEDIA_TYPE * pmtCandidate; /* Candidate media type */
+            AM_MEDIA_TYPE * pmtCandidate = NULL; /* Candidate media type */
 
             if (SUCCEEDED(hr = IPin_EnumMediaTypes(iface, &pEnumCandidates)))
             {
@@ -937,14 +935,20 @@ HRESULT WINAPI OutputPin_Connect(IPin * iface, IPin * pReceivePin, const AM_MEDI
                 /* try this filter's media types first */
                 while (S_OK == IEnumMediaTypes_Next(pEnumCandidates, 1, &pmtCandidate, NULL))
                 {
+                    assert(pmtCandidate);
+                    dump_AM_MEDIA_TYPE(pmtCandidate);
+                    if (!IsEqualGUID(&FORMAT_None, &pmtCandidate->formattype)
+                        && !IsEqualGUID(&GUID_NULL, &pmtCandidate->formattype))
+                        assert(pmtCandidate->pbFormat);
                     if (( !pmt || CompareMediaTypes(pmt, pmtCandidate, TRUE) ) && 
                         (This->pConnectSpecific(iface, pReceivePin, pmtCandidate) == S_OK))
                     {
                         hr = S_OK;
-                        CoTaskMemFree(pmtCandidate);
+                        DeleteMediaType(pmtCandidate);
                         break;
                     }
-                    CoTaskMemFree(pmtCandidate);
+                    DeleteMediaType(pmtCandidate);
+                    pmtCandidate = NULL;
                 }
                 IEnumMediaTypes_Release(pEnumCandidates);
             }
@@ -956,14 +960,20 @@ HRESULT WINAPI OutputPin_Connect(IPin * iface, IPin * pReceivePin, const AM_MEDI
 
                 while (S_OK == IEnumMediaTypes_Next(pEnumCandidates, 1, &pmtCandidate, NULL))
                 {
+                    assert(pmtCandidate);
+                    dump_AM_MEDIA_TYPE(pmtCandidate);
+                    if (!IsEqualGUID(&FORMAT_None, &pmtCandidate->formattype)
+                        && !IsEqualGUID(&GUID_NULL, &pmtCandidate->formattype))
+                        assert(pmtCandidate->pbFormat);
                     if (( !pmt || CompareMediaTypes(pmt, pmtCandidate, TRUE) ) && 
                         (This->pConnectSpecific(iface, pReceivePin, pmtCandidate) == S_OK))
                     {
                         hr = S_OK;
-                        CoTaskMemFree(pmtCandidate);
+                        DeleteMediaType(pmtCandidate);
                         break;
                     }
-                    CoTaskMemFree(pmtCandidate);
+                    DeleteMediaType(pmtCandidate);
+                    pmtCandidate = NULL;
                 } /* while */
                 IEnumMediaTypes_Release(pEnumCandidates);
             } /* if not found */
@@ -1000,6 +1010,8 @@ HRESULT WINAPI OutputPin_Disconnect(IPin * iface)
         {
             IPin_Release(This->pin.pConnectedTo);
             This->pin.pConnectedTo = NULL;
+            FreeMediaType(&This->pin.mtCurrent);
+            ZeroMemory(&This->pin.mtCurrent, sizeof(This->pin.mtCurrent));
             hr = S_OK;
         }
         else
@@ -1551,6 +1563,8 @@ static void CALLBACK PullPin_Thread_Process(PullPin *This)
 
 static void CALLBACK PullPin_Thread_Pause(PullPin *This)
 {
+    PullPin_Flush(This);
+
     EnterCriticalSection(This->pin.pCritSec);
     This->state = Req_Sleepy;
     SetEvent(This->hEventStateChanged);
@@ -1575,16 +1589,6 @@ static void CALLBACK PullPin_Thread_Stop(PullPin *This)
     ExitThread(0);
 }
 
-static void CALLBACK PullPin_Thread_Flush(PullPin *This)
-{
-    PullPin_Flush(This);
-
-    EnterCriticalSection(This->pin.pCritSec);
-    This->state = Req_Sleepy;
-    SetEvent(This->hEventStateChanged);
-    LeaveCriticalSection(This->pin.pCritSec);
-}
-
 static DWORD WINAPI PullPin_Thread_Main(LPVOID pv)
 {
     PullPin *This = pv;
@@ -1603,7 +1607,6 @@ static DWORD WINAPI PullPin_Thread_Main(LPVOID pv)
         case Req_Die: PullPin_Thread_Stop(This); break;
         case Req_Run: PullPin_Thread_Process(This); break;
         case Req_Pause: PullPin_Thread_Pause(This); break;
-        case Req_Flush: PullPin_Thread_Flush(This); break;
         case Req_Sleepy: ERR("Should not be signalled with SLEEPY!\n"); break;
         default: ERR("Unknown state request: %d\n", This->state); break;
         }
@@ -1760,11 +1763,6 @@ HRESULT WINAPI PullPin_BeginFlush(IPin * iface)
             PullPin_PauseProcessing(This);
             PullPin_WaitForStateChange(This, INFINITE);
         }
-
-        This->state = Req_Flush;
-        ResetEvent(This->hEventStateChanged);
-        SetEvent(This->thread_sleepy);
-        PullPin_WaitForStateChange(This, INFINITE);
     }
     LeaveCriticalSection(&This->thread_lock);
 
@@ -1820,6 +1818,9 @@ HRESULT WINAPI PullPin_Disconnect(IPin *iface)
             IPin_Release(This->pin.pConnectedTo);
             This->pin.pConnectedTo = NULL;
             PullPin_StopProcessing(This);
+
+            FreeMediaType(&This->pin.mtCurrent);
+            ZeroMemory(&This->pin.mtCurrent, sizeof(This->pin.mtCurrent));
             hr = S_OK;
         }
         else

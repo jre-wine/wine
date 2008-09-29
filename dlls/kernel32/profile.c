@@ -957,15 +957,15 @@ static INT PROFILE_GetString( LPCWSTR section, LPCWSTR key_name,
     PROFILEKEY *key = NULL;
     static const WCHAR empty_strW[] = { 0 };
 
-    if(!buffer) return 0;
+    if(!buffer || !len) return 0;
 
     if (!def_val) def_val = empty_strW;
     if (key_name)
     {
 	if (!key_name[0])
         {
-            /* Win95 returns 0 on keyname "". Tested with Likse32 bon 000227 */
-            return 0;
+            PROFILE_CopyEntry(buffer, def_val, len, TRUE);
+            return strlenW(buffer);
         }
         key = PROFILE_Find( &CurProfile->section, section, key_name, FALSE, FALSE);
         PROFILE_CopyEntry( buffer, (key && key->value) ? key->value : def_val,
@@ -1084,17 +1084,14 @@ static int PROFILE_GetPrivateProfileString( LPCWSTR section, LPCWSTR entry,
     /* strip any trailing ' ' of def_val. */
     if (def_val)
     {
-        LPCWSTR p = &def_val[strlenW(def_val)]; /* even "" works ! */
+        LPCWSTR p = &def_val[strlenW(def_val) - 1];
 
-	while (p > def_val)
-	{
-	    p--;
-	    if ((*p) != ' ')
-		break;
-	}
-	if (*p == ' ') /* ouch, contained trailing ' ' */
-	{
-	    int len = (int)(p - def_val);
+        while (p > def_val && *p == ' ')
+            p--;
+
+        if (p >= def_val)
+        {
+            int len = (int)(p - def_val) + 1;
 
             defval_tmp = HeapAlloc(GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR));
             memcpy(defval_tmp, def_val, len * sizeof(WCHAR));

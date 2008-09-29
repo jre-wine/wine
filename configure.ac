@@ -27,8 +27,7 @@ AC_ARG_WITH(cms,       AS_HELP_STRING([--without-cms],[do not use CMS (color man
             [if test "x$withval" = "xno"; then ac_cv_header_lcms_h=no; ac_cv_header_lcms_lcms_h=no; fi])
 AC_ARG_WITH(coreaudio, AS_HELP_STRING([--without-coreaudio],[do not use the CoreAudio sound support]),
             [if test "x$withval" = "xno"; then ac_cv_header_CoreAudio_CoreAudio_h=no; fi])
-AC_ARG_WITH(cups,      AS_HELP_STRING([--without-cups],[do not use CUPS]),
-            [if test "x$withval" = "xno"; then ac_cv_header_cups_cups_h=no; fi])
+AC_ARG_WITH(cups,      AS_HELP_STRING([--without-cups],[do not use CUPS]))
 AC_ARG_WITH(curses,    AS_HELP_STRING([--without-curses],[do not use (n)curses]),
             [if test "x$withval" = "xno"; then ac_cv_header_ncurses_h=no; ac_cv_header_curses_h=no; fi])
 AC_ARG_WITH(esd,       AS_HELP_STRING([--without-esd],[do not use the EsounD sound support]))
@@ -238,7 +237,6 @@ AC_CHECK_HEADERS(\
 	arpa/nameser.h \
 	asm/types.h \
 	capi20.h \
-	cups/cups.h \
 	curses.h \
 	direct.h \
 	dlfcn.h \
@@ -337,7 +335,8 @@ AC_CHECK_HEADERS(\
 	termios.h \
 	unistd.h \
 	utime.h \
-	valgrind/memcheck.h
+	valgrind/memcheck.h \
+	valgrind/valgrind.h
 )
 AC_HEADER_STAT()
 
@@ -913,10 +912,11 @@ AC_CHECK_PROG(sane_devel,sane-config,sane-config,no)
 if test "$sane_devel" != "no" -a "x$with_sane" != "xno"
 then
     ac_sane_incl="`$sane_devel --cflags`"
+    ac_sane_libs="`$sane_devel --ldflags`"
     ac_save_CPPFLAGS="$CPPFLAGS"
     CPPFLAGS="$CPPFLAGS $ac_sane_incl"
     AC_CHECK_HEADER(sane/sane.h,
-        [WINE_CHECK_SONAME(sane,sane_init,[AC_SUBST(SANEINCL,"$ac_sane_incl")])])
+        [WINE_CHECK_SONAME(sane,sane_init,[AC_SUBST(SANEINCL,"$ac_sane_incl")],,[$ac_sane_libs])])
     CPPFLAGS="$ac_save_CPPFLAGS"
 fi
 WINE_NOTICE_WITH(sane,[test "x$ac_cv_lib_soname_sane" = "x"],
@@ -943,7 +943,7 @@ then
                                   [AC_DEFINE(HAVE_GPHOTO2, 1, [Define if we have libgphoto2 development environment])
                                    AC_SUBST(GPHOTO2LIBS,"$ac_gphoto2_libs")
                                    AC_SUBST(GPHOTO2INCL,"$ac_gphoto2_incl")],,
-                                  [$GPHOTO2LIBS])])
+                                  [$ac_gphoto2_libs])])
     CPPFLAGS="$ac_save_CPPFLAGS"
 fi
 WINE_NOTICE_WITH(gphoto,[test "$ac_cv_lib_gphoto2_gp_camera_new" != "yes"],
@@ -1062,20 +1062,21 @@ dnl **** Check for EsounD ****
 AC_PATH_PROG(ESDCONFIG, esd-config)
 if test "x$with_esd" != xno -a "x$ESDCONFIG" != x -a "x$ESDCONFIG" != x'"$ESDCONFIG"';
 then
-    ESD_CFLAGS=""
+    ac_esd_incl=""
     for i in `$ESDCONFIG --cflags`
     do
       case "$i" in
-        -I*) ESD_CFLAGS="$ESD_CFLAGS $i";;
+        -I*) ac_esd_incl="$ac_esd_incl $i";;
       esac
     done
-    ESD_LIBS=`$ESDCONFIG --libs`
+    ac_esd_libs=`$ESDCONFIG --libs`
     save_CFLAGS="$CFLAGS"
-    CFLAGS="$CFLAGS $ESD_CFLAGS"
+    CFLAGS="$CFLAGS $ac_esd_incl"
     AC_CHECK_LIB(esd,esd_open_sound,
-        [AC_SUBST(ESDLIBS, $ESD_LIBS)
-         AC_SUBST(ESDINCL, $ESD_CFLAGS)
-         AC_DEFINE(HAVE_ESD, 1, [Define if you have EsounD sound server])])
+        [AC_SUBST(ESDINCL, "$ac_esd_incl")
+         AC_SUBST(ESDLIBS, "$ac_esd_libs")
+         AC_DEFINE(HAVE_ESD, 1, [Define if you have EsounD sound server])],,
+        [$ac_esd_libs])
     CFLAGS="$save_CFLAGS"
 fi
 
@@ -1112,9 +1113,18 @@ WINE_NOTICE_WITH(capi,[test "x$ac_cv_lib_soname_capi20" = "x"],
                  [libcapi20 development files not found, ISDN won't be supported.])
 
 dnl **** Check for cups ****
-if test "$ac_cv_header_cups_cups_h" = "yes"
+AC_SUBST(CUPSINCL,"")
+if test "x$with_cups" != "xno"
 then
-    WINE_CHECK_SONAME(cups,cupsGetDefault)
+    ac_save_CPPFLAGS="$CPPFLAGS"
+    ac_cups_cflags=`cups-config --cflags 2>/dev/null`
+    ac_cups_libs="`cups-config --ldflags 2>/dev/null` `cups-config --libs 2>/dev/null`"
+    CPPFLAGS="$CPPFLAGS $ac_cups_cflags"
+    AC_CHECK_HEADERS(cups/cups.h,
+            [WINE_CHECK_SONAME(cups,cupsGetDefault,
+                       [CUPSINCL="$ac_cups_cflags"],,
+                       [$ac_cups_libs])])
+    CPPFLAGS="$ac_save_CPPFLAGS"
 fi
 WINE_NOTICE_WITH(cups,[test "x$ac_cv_lib_soname_cups" = "x"],
                  [libcups development files not found, CUPS won't be supported.])
@@ -1122,7 +1132,7 @@ WINE_NOTICE_WITH(cups,[test "x$ac_cv_lib_soname_cups" = "x"],
 dnl **** Check for jack ****
 if test "$ac_cv_header_jack_jack_h" = "yes"
 then
-    WINE_CHECK_SONAME(jack,jack_client_new)
+    WINE_CHECK_SONAME(jack,jack_client_new,,,,[[libjack-*[[0-9.]]*]])
 fi
 
 dnl **** Check for fontconfig ****
@@ -1709,6 +1719,7 @@ AC_CONFIG_FILES([dlls/advapi32/tests/Makefile])
 AC_CONFIG_FILES([dlls/advpack/Makefile])
 AC_CONFIG_FILES([dlls/advpack/tests/Makefile])
 AC_CONFIG_FILES([dlls/amstream/Makefile])
+AC_CONFIG_FILES([dlls/appwiz.cpl/Makefile])
 AC_CONFIG_FILES([dlls/atl/Makefile])
 AC_CONFIG_FILES([dlls/avicap32/Makefile])
 AC_CONFIG_FILES([dlls/avifil32/Makefile])
@@ -1792,6 +1803,7 @@ AC_CONFIG_FILES([dlls/dpnaddr/Makefile])
 AC_CONFIG_FILES([dlls/dpnet/Makefile])
 AC_CONFIG_FILES([dlls/dpnhpast/Makefile])
 AC_CONFIG_FILES([dlls/dpnlobby/Makefile])
+AC_CONFIG_FILES([dlls/dpwsockx/Makefile])
 AC_CONFIG_FILES([dlls/dsound/Makefile])
 AC_CONFIG_FILES([dlls/dsound/tests/Makefile])
 AC_CONFIG_FILES([dlls/dssenh/Makefile])
@@ -1884,6 +1896,7 @@ AC_CONFIG_FILES([dlls/msisys.ocx/Makefile])
 AC_CONFIG_FILES([dlls/msnet32/Makefile])
 AC_CONFIG_FILES([dlls/msrle32/Makefile])
 AC_CONFIG_FILES([dlls/mssip32/Makefile])
+AC_CONFIG_FILES([dlls/mstask/Makefile])
 AC_CONFIG_FILES([dlls/msvcirt/Makefile])
 AC_CONFIG_FILES([dlls/msvcr71/Makefile])
 AC_CONFIG_FILES([dlls/msvcrt/Makefile])
@@ -2030,6 +2043,7 @@ AC_CONFIG_FILES([dlls/winequartz.drv/Makefile])
 AC_CONFIG_FILES([dlls/winex11.drv/Makefile])
 AC_CONFIG_FILES([dlls/wing32/Makefile])
 AC_CONFIG_FILES([dlls/winhttp/Makefile])
+AC_CONFIG_FILES([dlls/winhttp/tests/Makefile])
 AC_CONFIG_FILES([dlls/wininet/Makefile])
 AC_CONFIG_FILES([dlls/wininet/tests/Makefile])
 AC_CONFIG_FILES([dlls/winmm/Makefile])

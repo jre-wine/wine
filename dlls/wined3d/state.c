@@ -451,13 +451,12 @@ static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     }
 }
 
+static void state_blendfactor_w(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    WARN("Unsupported in local OpenGL implementation: glBlendColorEXT\n");
+}
+
 static void state_blendfactor(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     float col[4];
-
-    if(!GL_SUPPORT(EXT_BLEND_COLOR)) {
-        WARN("Unsupported in local OpenGL implementation: glBlendColorEXT\n");
-        return;
-    }
 
     TRACE("Setting BlendFactor to %d\n", stateblock->renderState[WINED3DRS_BLENDFACTOR]);
     D3DCOLORTOGLFLOAT4(stateblock->renderState[WINED3DRS_BLENDFACTOR], col);
@@ -594,14 +593,13 @@ static void state_clipping(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
     }
 }
 
+static void state_blendop_w(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    WARN("Unsupported in local OpenGL implementation: glBlendEquation\n");
+}
+
 static void state_blendop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     int blendEquation = GL_FUNC_ADD;
     int blendEquationAlpha = GL_FUNC_ADD;
-
-    if(!GL_SUPPORT(EXT_BLEND_MINMAX)) {
-        WARN("Unsupported in local OpenGL implementation: glBlendEquation\n");
-        return;
-    }
 
     /* BLENDOPALPHA requires GL_EXT_blend_equation_separate, so make sure it is around */
     if(stateblock->renderState[WINED3DRS_BLENDOPALPHA] && !GL_SUPPORT(EXT_BLEND_EQUATION_SEPARATE)) {
@@ -749,24 +747,20 @@ static void state_texfactor(DWORD state, IWineD3DStateBlockImpl *stateblock, Win
     float col[4];
     D3DCOLORTOGLFLOAT4(stateblock->renderState[WINED3DRS_TEXTUREFACTOR], col);
 
-    if (!GL_SUPPORT(NV_REGISTER_COMBINERS)) {
-        /* And now the default texture color as well */
-        for (i = 0; i < GL_LIMITS(texture_stages); i++) {
-            /* Note the WINED3DRS value applies to all textures, but GL has one
-             * per texture, so apply it now ready to be used!
-             */
-            if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-                GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + i));
-                checkGLcall("glActiveTextureARB");
-            } else if (i>0) {
-                FIXME("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
-            }
-
-            glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, &col[0]);
-            checkGLcall("glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, color);");
+    /* And now the default texture color as well */
+    for (i = 0; i < GL_LIMITS(texture_stages); i++) {
+        /* Note the WINED3DRS value applies to all textures, but GL has one
+            * per texture, so apply it now ready to be used!
+            */
+        if (GL_SUPPORT(ARB_MULTITEXTURE)) {
+            GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + i));
+            checkGLcall("glActiveTextureARB");
+        } else if (i>0) {
+            FIXME("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
         }
-    } else {
-        GL_EXTCALL(glCombinerParameterfvNV(GL_CONSTANT_COLOR0_NV, &col[0]));
+
+        glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, &col[0]);
+        checkGLcall("glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, color);");
     }
 }
 
@@ -872,6 +866,24 @@ state_stencil(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *c
     }
 }
 
+static void state_stencilwrite2s(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    DWORD mask;
+
+    if(stateblock->wineD3DDevice->stencilBufferTarget) {
+        mask = stateblock->renderState[WINED3DRS_STENCILWRITEMASK];
+    } else {
+        mask = 0;
+    }
+
+    GL_EXTCALL(glActiveStencilFaceEXT(GL_BACK));
+    checkGLcall("glActiveStencilFaceEXT(GL_BACK)");
+    glStencilMask(mask);
+    checkGLcall("glStencilMask");
+    GL_EXTCALL(glActiveStencilFaceEXT(GL_FRONT));
+    checkGLcall("glActiveStencilFaceEXT(GL_FRONT)");
+    glStencilMask(mask);
+}
+
 static void state_stencilwrite(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD mask;
 
@@ -881,17 +893,7 @@ static void state_stencilwrite(DWORD state, IWineD3DStateBlockImpl *stateblock, 
         mask = 0;
     }
 
-    if(GL_SUPPORT(EXT_STENCIL_TWO_SIDE)) {
-        GL_EXTCALL(glActiveStencilFaceEXT(GL_BACK));
-        checkGLcall("glActiveStencilFaceEXT(GL_BACK)");
-        glStencilMask(mask);
-        checkGLcall("glStencilMask");
-        GL_EXTCALL(glActiveStencilFaceEXT(GL_FRONT));
-        checkGLcall("glActiveStencilFaceEXT(GL_FRONT)");
-        glStencilMask(mask);
-    } else {
-        glStencilMask(mask);
-    }
+    glStencilMask(mask);
     checkGLcall("glStencilMask");
 }
 
@@ -1184,19 +1186,19 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCo
     }
 }
 
+static void state_rangefog_w(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    if(stateblock->renderState[WINED3DRS_RANGEFOGENABLE]) {
+        WARN("Range fog enabled, but not supported by this opengl implementation\n");
+    }
+}
+
 static void state_rangefog(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->renderState[WINED3DRS_RANGEFOGENABLE]) {
-        if (GL_SUPPORT(NV_FOG_DISTANCE)) {
-            glFogi(GL_FOG_DISTANCE_MODE_NV, GL_EYE_RADIAL_NV);
-            checkGLcall("glFogi(GL_FOG_DISTANCE_MODE_NV, GL_EYE_RADIAL_NV)");
-        } else {
-            WARN("Range fog enabled, but not supported by this opengl implementation\n");
-        }
+        glFogi(GL_FOG_DISTANCE_MODE_NV, GL_EYE_RADIAL_NV);
+        checkGLcall("glFogi(GL_FOG_DISTANCE_MODE_NV, GL_EYE_RADIAL_NV)");
     } else {
-        if (GL_SUPPORT(NV_FOG_DISTANCE)) {
-            glFogi(GL_FOG_DISTANCE_MODE_NV, GL_EYE_PLANE_ABSOLUTE_NV);
-            checkGLcall("glFogi(GL_FOG_DISTANCE_MODE_NV, GL_EYE_PLANE_ABSOLUTE_NV)");
-        }
+        glFogi(GL_FOG_DISTANCE_MODE_NV, GL_EYE_PLANE_ABSOLUTE_NV);
+        checkGLcall("glFogi(GL_FOG_DISTANCE_MODE_NV, GL_EYE_PLANE_ABSOLUTE_NV)");
     }
 }
 
@@ -1397,40 +1399,70 @@ static void state_normalize(DWORD state, IWineD3DStateBlockImpl *stateblock, Win
     }
 }
 
-static void state_psizemin(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+static void state_psizemin_w(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     union {
         DWORD d;
         float f;
     } tmpvalue;
 
     tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MIN];
-    if(GL_SUPPORT(ARB_POINT_PARAMETERS)) {
-        GL_EXTCALL(glPointParameterfARB)(GL_POINT_SIZE_MIN_ARB, tmpvalue.f);
-        checkGLcall("glPointParameterfARB(...)");
-    }
-    else if(GL_SUPPORT(EXT_POINT_PARAMETERS)) {
-        GL_EXTCALL(glPointParameterfEXT)(GL_POINT_SIZE_MIN_EXT, tmpvalue.f);
-        checkGLcall("glPointParameterfEXT(...)");
-    } else if(tmpvalue.f != 1.0) {
+    if(tmpvalue.f != 1.0) {
         FIXME("WINED3DRS_POINTSIZE_MIN not supported on this opengl, value is %f\n", tmpvalue.f);
     }
 }
 
-static void state_psizemax(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+static void state_psizemin_ext(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    union {
+        DWORD d;
+        float f;
+    } tmpvalue;
+
+    tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MIN];
+    GL_EXTCALL(glPointParameterfEXT)(GL_POINT_SIZE_MIN_EXT, tmpvalue.f);
+    checkGLcall("glPointParameterfEXT(...)");
+}
+
+static void state_psizemin_arb(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    union {
+        DWORD d;
+        float f;
+    } tmpvalue;
+
+    tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MIN];
+    GL_EXTCALL(glPointParameterfARB)(GL_POINT_SIZE_MIN_ARB, tmpvalue.f);
+    checkGLcall("glPointParameterfARB(...)");
+}
+
+static void state_psizemax_arb(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     union {
         DWORD d;
         float f;
     } tmpvalue;
 
     tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MAX];
-    if(GL_SUPPORT(ARB_POINT_PARAMETERS)) {
-        GL_EXTCALL(glPointParameterfARB)(GL_POINT_SIZE_MAX_ARB, tmpvalue.f);
-        checkGLcall("glPointParameterfARB(...)");
-    }
-    else if(GL_SUPPORT(EXT_POINT_PARAMETERS)) {
-        GL_EXTCALL(glPointParameterfEXT)(GL_POINT_SIZE_MAX_EXT, tmpvalue.f);
-        checkGLcall("glPointParameterfEXT(...)");
-    } else if(tmpvalue.f != 64.0) {
+    GL_EXTCALL(glPointParameterfARB)(GL_POINT_SIZE_MAX_ARB, tmpvalue.f);
+    checkGLcall("glPointParameterfARB(...)");
+}
+
+static void state_psizemax_ext(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    union {
+        DWORD d;
+        float f;
+    } tmpvalue;
+
+    tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MAX];
+    GL_EXTCALL(glPointParameterfEXT)(GL_POINT_SIZE_MAX_EXT, tmpvalue.f);
+    checkGLcall("glPointParameterfEXT(...)");
+}
+
+static void state_psizemax_w(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    union {
+        DWORD d;
+        float f;
+    } tmpvalue;
+
+    tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MAX];
+    if(tmpvalue.f != 64.0) {
         FIXME("WINED3DRS_POINTSIZE_MAX not supported on this opengl, value is %f\n", tmpvalue.f);
     }
 }
@@ -1554,13 +1586,14 @@ static void state_lastpixel(DWORD state, IWineD3DStateBlockImpl *stateblock, Win
     }
 }
 
-static void state_pointsprite(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+static void state_pointsprite_w(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     /* TODO: NV_POINT_SPRITE */
-    if (!GL_SUPPORT(ARB_POINT_SPRITE)) {
+    if (stateblock->renderState[WINED3DRS_POINTSPRITEENABLE]) {
         TRACE("Point sprites not supported\n");
-        return;
     }
+}
 
+static void state_pointsprite(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if (stateblock->renderState[WINED3DRS_POINTSPRITEENABLE]) {
         glEnable(GL_POINT_SPRITE_ARB);
         checkGLcall("glEnable(GL_POINT_SPRITE_ARB)");
@@ -1600,19 +1633,19 @@ static void state_wrap(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DC
     }
 }
 
-static void state_multisampleaa(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    if( GL_SUPPORT(ARB_MULTISAMPLE) ) {
-        if(stateblock->renderState[WINED3DRS_MULTISAMPLEANTIALIAS]) {
-            glEnable(GL_MULTISAMPLE_ARB);
-            checkGLcall("glEnable(GL_MULTISAMPLE_ARB)");
-        } else {
-            glDisable(GL_MULTISAMPLE_ARB);
-            checkGLcall("glDisable(GL_MULTISAMPLE_ARB)");
-        }
+static void state_msaa_w(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    if(stateblock->renderState[WINED3DRS_MULTISAMPLEANTIALIAS]) {
+        WARN("Multisample antialiasing not supported by gl\n");
+    }
+}
+
+static void state_msaa(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    if(stateblock->renderState[WINED3DRS_MULTISAMPLEANTIALIAS]) {
+        glEnable(GL_MULTISAMPLE_ARB);
+        checkGLcall("glEnable(GL_MULTISAMPLE_ARB)");
     } else {
-        if(stateblock->renderState[WINED3DRS_MULTISAMPLEANTIALIAS]) {
-            WARN("Multisample antialiasing not supported by gl\n");
-        }
+        glDisable(GL_MULTISAMPLE_ARB);
+        checkGLcall("glDisable(GL_MULTISAMPLE_ARB)");
     }
 }
 
@@ -1807,6 +1840,1115 @@ static void state_ckeyblend(DWORD state, IWineD3DStateBlockImpl *stateblock, Win
     }
 }
 
+/* Set texture operations up - The following avoids lots of ifdefs in this routine!*/
+#if defined (GL_VERSION_1_3)
+# define useext(A) A
+#elif defined (GL_EXT_texture_env_combine)
+# define useext(A) A##_EXT
+#elif defined (GL_ARB_texture_env_combine)
+# define useext(A) A##_ARB
+#endif
+
+static void get_src_and_opr(DWORD arg, BOOL is_alpha, GLenum* source, GLenum* operand) {
+    /* The WINED3DTA_ALPHAREPLICATE flag specifies the alpha component of the
+    * input should be used for all input components. The WINED3DTA_COMPLEMENT
+    * flag specifies the complement of the input should be used. */
+    BOOL from_alpha = is_alpha || arg & WINED3DTA_ALPHAREPLICATE;
+    BOOL complement = arg & WINED3DTA_COMPLEMENT;
+
+    /* Calculate the operand */
+    if (complement) {
+        if (from_alpha) *operand = GL_ONE_MINUS_SRC_ALPHA;
+        else *operand = GL_ONE_MINUS_SRC_COLOR;
+    } else {
+        if (from_alpha) *operand = GL_SRC_ALPHA;
+        else *operand = GL_SRC_COLOR;
+    }
+
+    /* Calculate the source */
+    switch (arg & WINED3DTA_SELECTMASK) {
+        case WINED3DTA_CURRENT: *source = GL_PREVIOUS_EXT; break;
+        case WINED3DTA_DIFFUSE: *source = GL_PRIMARY_COLOR_EXT; break;
+        case WINED3DTA_TEXTURE: *source = GL_TEXTURE; break;
+        case WINED3DTA_TFACTOR: *source = GL_CONSTANT_EXT; break;
+        case WINED3DTA_SPECULAR:
+            /*
+            * According to the GL_ARB_texture_env_combine specs, SPECULAR is
+            * 'Secondary color' and isn't supported until base GL supports it
+            * There is no concept of temp registers as far as I can tell
+            */
+            FIXME("Unhandled texture arg WINED3DTA_SPECULAR\n");
+            *source = GL_TEXTURE;
+            break;
+        default:
+            FIXME("Unrecognized texture arg %#x\n", arg);
+            *source = GL_TEXTURE;
+            break;
+    }
+}
+
+/* Setup the texture operations texture stage states */
+static void set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP op, DWORD arg1, DWORD arg2, DWORD arg3)
+{
+    GLenum src1, src2, src3;
+    GLenum opr1, opr2, opr3;
+    GLenum comb_target;
+    GLenum src0_target, src1_target, src2_target;
+    GLenum opr0_target, opr1_target, opr2_target;
+    GLenum scal_target;
+    GLenum opr=0, invopr, src3_target, opr3_target;
+    BOOL Handled = FALSE;
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    IWineD3DStateBlockImpl *stateblock = This->stateBlock; /* for GLINFO_LOCATION */
+
+    TRACE("Alpha?(%d), Stage:%d Op(%s), a1(%d), a2(%d), a3(%d)\n", isAlpha, Stage, debug_d3dtop(op), arg1, arg2, arg3);
+
+    /* This is called by a state handler which has the gl lock held and a context for the thread */
+
+        /* Note: Operations usually involve two ars, src0 and src1 and are operations of
+    the form (a1 <operation> a2). However, some of the more complex operations
+    take 3 parameters. Instead of the (sensible) addition of a3, Microsoft added
+    in a third parameter called a0. Therefore these are operations of the form
+    a0 <operation> a1 <operation> a2, i.e., the new parameter goes to the front.
+
+    However, below we treat the new (a0) parameter as src2/opr2, so in the actual
+    functions below, expect their syntax to differ slightly to those listed in the
+    manuals, i.e., replace arg1 with arg3, arg2 with arg1 and arg3 with arg2
+    This affects WINED3DTOP_MULTIPLYADD and WINED3DTOP_LERP                     */
+
+    if (isAlpha) {
+        comb_target = useext(GL_COMBINE_ALPHA);
+        src0_target = useext(GL_SOURCE0_ALPHA);
+        src1_target = useext(GL_SOURCE1_ALPHA);
+        src2_target = useext(GL_SOURCE2_ALPHA);
+        opr0_target = useext(GL_OPERAND0_ALPHA);
+        opr1_target = useext(GL_OPERAND1_ALPHA);
+        opr2_target = useext(GL_OPERAND2_ALPHA);
+        scal_target = GL_ALPHA_SCALE;
+    }
+    else {
+        comb_target = useext(GL_COMBINE_RGB);
+        src0_target = useext(GL_SOURCE0_RGB);
+        src1_target = useext(GL_SOURCE1_RGB);
+        src2_target = useext(GL_SOURCE2_RGB);
+        opr0_target = useext(GL_OPERAND0_RGB);
+        opr1_target = useext(GL_OPERAND1_RGB);
+        opr2_target = useext(GL_OPERAND2_RGB);
+        scal_target = useext(GL_RGB_SCALE);
+    }
+
+        /* If a texture stage references an invalid texture unit the stage just
+        * passes through the result from the previous stage */
+    if (is_invalid_op(This, Stage, op, arg1, arg2, arg3)) {
+        arg1 = WINED3DTA_CURRENT;
+        op = WINED3DTOP_SELECTARG1;
+    }
+
+        /* From MSDN (WINED3DTSS_ALPHAARG1) :
+    The default argument is WINED3DTA_TEXTURE. If no texture is set for this stage,
+    then the default argument is WINED3DTA_DIFFUSE.
+    FIXME? If texture added/removed, may need to reset back as well?    */
+    if (isAlpha && This->stateBlock->textures[Stage] == NULL && arg1 == WINED3DTA_TEXTURE) {
+        get_src_and_opr(WINED3DTA_DIFFUSE, isAlpha, &src1, &opr1);
+    } else {
+        get_src_and_opr(arg1, isAlpha, &src1, &opr1);
+    }
+    get_src_and_opr(arg2, isAlpha, &src2, &opr2);
+    get_src_and_opr(arg3, isAlpha, &src3, &opr3);
+
+    TRACE("ct(%x), 1:(%x,%x), 2:(%x,%x), 3:(%x,%x)\n", comb_target, src1, opr1, src2, opr2, src3, opr3);
+
+    Handled = TRUE; /* Assume will be handled */
+
+    /* Other texture operations require special extensions: */
+    if (GL_SUPPORT(NV_TEXTURE_ENV_COMBINE4)) {
+        if (isAlpha) {
+            opr = GL_SRC_ALPHA;
+            invopr = GL_ONE_MINUS_SRC_ALPHA;
+            src3_target = GL_SOURCE3_ALPHA_NV;
+            opr3_target = GL_OPERAND3_ALPHA_NV;
+        } else {
+            opr = GL_SRC_COLOR;
+            invopr = GL_ONE_MINUS_SRC_COLOR;
+            src3_target = GL_SOURCE3_RGB_NV;
+            opr3_target = GL_OPERAND3_RGB_NV;
+        }
+        switch (op) {
+            case WINED3DTOP_DISABLE: /* Only for alpha */
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_REPLACE");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, GL_PREVIOUS_EXT);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, GL_SRC_ALPHA);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, opr");
+                break;
+                case WINED3DTOP_SELECTARG1:                                          /* = a1 * 1 + 0 * 0 */
+                case WINED3DTOP_SELECTARG2:                                          /* = a2 * 1 + 0 * 0 */
+                    glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                    checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD");
+                    if (op == WINED3DTOP_SELECTARG1) {
+                        glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                        checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                        glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                        checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                    } else {
+                        glTexEnvi(GL_TEXTURE_ENV, src0_target, src2);
+                        checkGLcall("GL_TEXTURE_ENV, src0_target, src2");
+                        glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr2);
+                        checkGLcall("GL_TEXTURE_ENV, opr0_target, opr2");
+                    }
+                    glTexEnvi(GL_TEXTURE_ENV, src1_target, GL_ZERO);
+                    checkGLcall("GL_TEXTURE_ENV, src1_target, GL_ZERO");
+                    glTexEnvi(GL_TEXTURE_ENV, opr1_target, invopr);
+                    checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                    glTexEnvi(GL_TEXTURE_ENV, src2_target, GL_ZERO);
+                    checkGLcall("GL_TEXTURE_ENV, src2_target, GL_ZERO");
+                    glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr);
+                    checkGLcall("GL_TEXTURE_ENV, opr2_target, opr");
+                    glTexEnvi(GL_TEXTURE_ENV, src3_target, GL_ZERO);
+                    checkGLcall("GL_TEXTURE_ENV, src3_target, GL_ZERO");
+                    glTexEnvi(GL_TEXTURE_ENV, opr3_target, opr);
+                    checkGLcall("GL_TEXTURE_ENV, opr3_target, opr");
+                    break;
+
+            case WINED3DTOP_MODULATE:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD"); /* Add = a0*a1 + a2*a3 */
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+                break;
+            case WINED3DTOP_MODULATE2X:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD"); /* Add = a0*a1 + a2*a3 */
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 2);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 2");
+                break;
+            case WINED3DTOP_MODULATE4X:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD"); /* Add = a0*a1 + a2*a3 */
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 4);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 4");
+                break;
+
+            case WINED3DTOP_ADD:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+                break;
+
+            case WINED3DTOP_ADDSIGNED:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, useext(GL_ADD_SIGNED));
+                checkGLcall("GL_TEXTURE_ENV, comb_target, useext(GL_ADD_SIGNED)");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+                break;
+
+            case WINED3DTOP_ADDSIGNED2X:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, useext(GL_ADD_SIGNED));
+                checkGLcall("GL_TEXTURE_ENV, comb_target, useext(GL_ADD_SIGNED)");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 2);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 2");
+                break;
+
+            case WINED3DTOP_ADDSMOOTH:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, src1");
+                switch (opr1) {
+                    case GL_SRC_COLOR: opr = GL_ONE_MINUS_SRC_COLOR; break;
+                    case GL_ONE_MINUS_SRC_COLOR: opr = GL_SRC_COLOR; break;
+                    case GL_SRC_ALPHA: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_ALPHA: opr = GL_SRC_ALPHA; break;
+                }
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, opr");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+                break;
+
+            case WINED3DTOP_BLENDDIFFUSEALPHA:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, useext(GL_PRIMARY_COLOR));
+                checkGLcall("GL_TEXTURE_ENV, src1_target, useext(GL_PRIMARY_COLOR)");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, useext(GL_PRIMARY_COLOR));
+                checkGLcall("GL_TEXTURE_ENV, src3_target, useext(GL_PRIMARY_COLOR)");
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, GL_ONE_MINUS_SRC_ALPHA);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, GL_ONE_MINUS_SRC_ALPHA");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+                break;
+            case WINED3DTOP_BLENDTEXTUREALPHA:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, GL_TEXTURE);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, GL_TEXTURE");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, GL_TEXTURE);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, GL_TEXTURE");
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, GL_ONE_MINUS_SRC_ALPHA);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, GL_ONE_MINUS_SRC_ALPHA");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+                break;
+            case WINED3DTOP_BLENDFACTORALPHA:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, useext(GL_CONSTANT));
+                checkGLcall("GL_TEXTURE_ENV, src1_target, useext(GL_CONSTANT)");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, useext(GL_CONSTANT));
+                checkGLcall("GL_TEXTURE_ENV, src3_target, useext(GL_CONSTANT)");
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, GL_ONE_MINUS_SRC_ALPHA);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, GL_ONE_MINUS_SRC_ALPHA");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+                break;
+            case WINED3DTOP_BLENDTEXTUREALPHAPM:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, GL_TEXTURE);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, GL_TEXTURE");
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, GL_ONE_MINUS_SRC_ALPHA);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, GL_ONE_MINUS_SRC_ALPHA");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+                break;
+            case WINED3DTOP_MODULATEALPHA_ADDCOLOR:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD");  /* Add = a0*a1 + a2*a3 */
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);        /*   a0 = src1/opr1    */
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");    /*   a1 = 1 (see docs) */
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);        /*   a2 = arg2         */
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");     /*  a3 = src1 alpha   */
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, src1");
+                switch (opr) {
+                    case GL_SRC_COLOR: opr = GL_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_COLOR: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                }
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, opr");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+                break;
+            case WINED3DTOP_MODULATECOLOR_ADDALPHA:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src1");
+                switch (opr1) {
+                    case GL_SRC_COLOR: opr = GL_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_COLOR: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                }
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+                break;
+            case WINED3DTOP_MODULATEINVALPHA_ADDCOLOR:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, src1");
+                switch (opr1) {
+                    case GL_SRC_COLOR: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_COLOR: opr = GL_SRC_ALPHA; break;
+                    case GL_SRC_ALPHA: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_ALPHA: opr = GL_SRC_ALPHA; break;
+                }
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, opr");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+                break;
+            case WINED3DTOP_MODULATEINVCOLOR_ADDALPHA:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                switch (opr1) {
+                    case GL_SRC_COLOR: opr = GL_ONE_MINUS_SRC_COLOR; break;
+                    case GL_ONE_MINUS_SRC_COLOR: opr = GL_SRC_COLOR; break;
+                    case GL_SRC_ALPHA: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_ALPHA: opr = GL_SRC_ALPHA; break;
+                }
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src1");
+                switch (opr1) {
+                    case GL_SRC_COLOR: opr = GL_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_COLOR: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                }
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+                break;
+            case WINED3DTOP_MULTIPLYADD:
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src3);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr3);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, GL_ZERO);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, GL_ZERO");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, invopr);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, invopr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, src3_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src3_target, src3");
+                glTexEnvi(GL_TEXTURE_ENV, opr3_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr3_target, opr3");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+                break;
+
+            case WINED3DTOP_BUMPENVMAP:
+            {
+            }
+
+            case WINED3DTOP_BUMPENVMAPLUMINANCE:
+                FIXME("Implement bump environment mapping in GL_NV_texture_env_combine4 path\n");
+
+            default:
+                Handled = FALSE;
+        }
+        if (Handled) {
+            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE4_NV);
+            checkGLcall("GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE4_NV");
+
+            return;
+        }
+    } /* GL_NV_texture_env_combine4 */
+
+    Handled = TRUE; /* Again, assume handled */
+    switch (op) {
+        case WINED3DTOP_DISABLE: /* Only for alpha */
+            glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_REPLACE);
+            checkGLcall("GL_TEXTURE_ENV, comb_target, GL_REPLACE");
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, GL_PREVIOUS_EXT);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, GL_PREVIOUS_EXT");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, GL_SRC_ALPHA);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, GL_SRC_ALPHA");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            break;
+        case WINED3DTOP_SELECTARG1:
+            glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_REPLACE);
+            checkGLcall("GL_TEXTURE_ENV, comb_target, GL_REPLACE");
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            break;
+        case WINED3DTOP_SELECTARG2:
+            glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_REPLACE);
+            checkGLcall("GL_TEXTURE_ENV, comb_target, GL_REPLACE");
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, src2);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, src2");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr2);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, opr2");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            break;
+        case WINED3DTOP_MODULATE:
+            glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_MODULATE);
+            checkGLcall("GL_TEXTURE_ENV, comb_target, GL_MODULATE");
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+            glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+            checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+            glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+            checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            break;
+        case WINED3DTOP_MODULATE2X:
+            glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_MODULATE);
+            checkGLcall("GL_TEXTURE_ENV, comb_target, GL_MODULATE");
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+            glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+            checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+            glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+            checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 2);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 2");
+            break;
+        case WINED3DTOP_MODULATE4X:
+            glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_MODULATE);
+            checkGLcall("GL_TEXTURE_ENV, comb_target, GL_MODULATE");
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+            glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+            checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+            glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+            checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 4);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 4");
+            break;
+        case WINED3DTOP_ADD:
+            glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_ADD);
+            checkGLcall("GL_TEXTURE_ENV, comb_target, GL_ADD");
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+            glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+            checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+            glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+            checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            break;
+        case WINED3DTOP_ADDSIGNED:
+            glTexEnvi(GL_TEXTURE_ENV, comb_target, useext(GL_ADD_SIGNED));
+            checkGLcall("GL_TEXTURE_ENV, comb_target, useext((GL_ADD_SIGNED)");
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+            glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+            checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+            glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+            checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            break;
+        case WINED3DTOP_ADDSIGNED2X:
+            glTexEnvi(GL_TEXTURE_ENV, comb_target, useext(GL_ADD_SIGNED));
+            checkGLcall("GL_TEXTURE_ENV, comb_target, useext(GL_ADD_SIGNED)");
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+            glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+            checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+            glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+            checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 2);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 2");
+            break;
+        case WINED3DTOP_SUBTRACT:
+            if (GL_SUPPORT(ARB_TEXTURE_ENV_COMBINE)) {
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_SUBTRACT);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, useext(GL_SUBTRACT)");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            } else {
+                FIXME("This version of opengl does not support GL_SUBTRACT\n");
+            }
+            break;
+
+        case WINED3DTOP_BLENDDIFFUSEALPHA:
+            glTexEnvi(GL_TEXTURE_ENV, comb_target, useext(GL_INTERPOLATE));
+            checkGLcall("GL_TEXTURE_ENV, comb_target, useext(GL_INTERPOLATE)");
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+            glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+            checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+            glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+            checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+            glTexEnvi(GL_TEXTURE_ENV, src2_target, useext(GL_PRIMARY_COLOR));
+            checkGLcall("GL_TEXTURE_ENV, src2_target, GL_PRIMARY_COLOR");
+            glTexEnvi(GL_TEXTURE_ENV, opr2_target, GL_SRC_ALPHA);
+            checkGLcall("GL_TEXTURE_ENV, opr2_target, GL_SRC_ALPHA");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            break;
+        case WINED3DTOP_BLENDTEXTUREALPHA:
+            glTexEnvi(GL_TEXTURE_ENV, comb_target, useext(GL_INTERPOLATE));
+            checkGLcall("GL_TEXTURE_ENV, comb_target, useext(GL_INTERPOLATE)");
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+            glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+            checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+            glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+            checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+            glTexEnvi(GL_TEXTURE_ENV, src2_target, GL_TEXTURE);
+            checkGLcall("GL_TEXTURE_ENV, src2_target, GL_TEXTURE");
+            glTexEnvi(GL_TEXTURE_ENV, opr2_target, GL_SRC_ALPHA);
+            checkGLcall("GL_TEXTURE_ENV, opr2_target, GL_SRC_ALPHA");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            break;
+        case WINED3DTOP_BLENDFACTORALPHA:
+            glTexEnvi(GL_TEXTURE_ENV, comb_target, useext(GL_INTERPOLATE));
+            checkGLcall("GL_TEXTURE_ENV, comb_target, useext(GL_INTERPOLATE)");
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+            glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+            checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+            glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+            checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+            glTexEnvi(GL_TEXTURE_ENV, src2_target, useext(GL_CONSTANT));
+            checkGLcall("GL_TEXTURE_ENV, src2_target, GL_CONSTANT");
+            glTexEnvi(GL_TEXTURE_ENV, opr2_target, GL_SRC_ALPHA);
+            checkGLcall("GL_TEXTURE_ENV, opr2_target, GL_SRC_ALPHA");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            break;
+        case WINED3DTOP_BLENDCURRENTALPHA:
+            glTexEnvi(GL_TEXTURE_ENV, comb_target, useext(GL_INTERPOLATE));
+            checkGLcall("GL_TEXTURE_ENV, comb_target, useext(GL_INTERPOLATE)");
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+            glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+            checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+            glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+            checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+            glTexEnvi(GL_TEXTURE_ENV, src2_target, useext(GL_PREVIOUS));
+            checkGLcall("GL_TEXTURE_ENV, src2_target, GL_PREVIOUS");
+            glTexEnvi(GL_TEXTURE_ENV, opr2_target, GL_SRC_ALPHA);
+            checkGLcall("GL_TEXTURE_ENV, opr2_target, GL_SRC_ALPHA");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            break;
+        case WINED3DTOP_DOTPRODUCT3:
+            if (GL_SUPPORT(ARB_TEXTURE_ENV_DOT3)) {
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_DOT3_RGBA_ARB);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_DOT3_RGBA_ARB");
+            } else if (GL_SUPPORT(EXT_TEXTURE_ENV_DOT3)) {
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_DOT3_RGBA_EXT);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_DOT3_RGBA_EXT");
+            } else {
+                FIXME("This version of opengl does not support GL_DOT3\n");
+            }
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+            glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+            checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+            glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+            checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            break;
+        case WINED3DTOP_LERP:
+            glTexEnvi(GL_TEXTURE_ENV, comb_target, useext(GL_INTERPOLATE));
+            checkGLcall("GL_TEXTURE_ENV, comb_target, useext(GL_INTERPOLATE)");
+            glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+            checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+            glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+            checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+            glTexEnvi(GL_TEXTURE_ENV, src1_target, src2);
+            checkGLcall("GL_TEXTURE_ENV, src1_target, src2");
+            glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr2);
+            checkGLcall("GL_TEXTURE_ENV, opr1_target, opr2");
+            glTexEnvi(GL_TEXTURE_ENV, src2_target, src3);
+            checkGLcall("GL_TEXTURE_ENV, src2_target, src3");
+            glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr3);
+            checkGLcall("GL_TEXTURE_ENV, opr2_target, opr3");
+            glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+            checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            break;
+        case WINED3DTOP_ADDSMOOTH:
+            if (GL_SUPPORT(ATI_TEXTURE_ENV_COMBINE3)) {
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_MODULATE_ADD_ATI);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_MODULATE_ADD_ATI");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                switch (opr1) {
+                    case GL_SRC_COLOR: opr = GL_ONE_MINUS_SRC_COLOR; break;
+                    case GL_ONE_MINUS_SRC_COLOR: opr = GL_SRC_COLOR; break;
+                    case GL_SRC_ALPHA: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_ALPHA: opr = GL_SRC_ALPHA; break;
+                }
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            } else
+                Handled = FALSE;
+                break;
+        case WINED3DTOP_BLENDTEXTUREALPHAPM:
+            if (GL_SUPPORT(ATI_TEXTURE_ENV_COMBINE3)) {
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_MODULATE_ADD_ATI);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_MODULATE_ADD_ATI");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, GL_TEXTURE);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, GL_TEXTURE");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, GL_ONE_MINUS_SRC_ALPHA);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, GL_ONE_MINUS_SRC_APHA");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            } else
+                Handled = FALSE;
+                break;
+        case WINED3DTOP_MODULATEALPHA_ADDCOLOR:
+            if (GL_SUPPORT(ATI_TEXTURE_ENV_COMBINE3)) {
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_MODULATE_ADD_ATI);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_MODULATE_ADD_ATI");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                switch (opr1) {
+                    case GL_SRC_COLOR: opr = GL_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_COLOR: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                    case GL_SRC_ALPHA: opr = GL_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_ALPHA: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                }
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            } else
+                Handled = FALSE;
+                break;
+        case WINED3DTOP_MODULATECOLOR_ADDALPHA:
+            if (GL_SUPPORT(ATI_TEXTURE_ENV_COMBINE3)) {
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_MODULATE_ADD_ATI);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_MODULATE_ADD_ATI");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, src1");
+                switch (opr1) {
+                    case GL_SRC_COLOR: opr = GL_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_COLOR: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                    case GL_SRC_ALPHA: opr = GL_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_ALPHA: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                }
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, opr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            } else
+                Handled = FALSE;
+                break;
+        case WINED3DTOP_MODULATEINVALPHA_ADDCOLOR:
+            if (GL_SUPPORT(ATI_TEXTURE_ENV_COMBINE3)) {
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_MODULATE_ADD_ATI);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_MODULATE_ADD_ATI");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                switch (opr1) {
+                    case GL_SRC_COLOR: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_COLOR: opr = GL_SRC_ALPHA; break;
+                    case GL_SRC_ALPHA: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_ALPHA: opr = GL_SRC_ALPHA; break;
+                }
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            } else
+                Handled = FALSE;
+                break;
+        case WINED3DTOP_MODULATEINVCOLOR_ADDALPHA:
+            if (GL_SUPPORT(ATI_TEXTURE_ENV_COMBINE3)) {
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_MODULATE_ADD_ATI);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_MODULATE_ADD_ATI");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                switch (opr1) {
+                    case GL_SRC_COLOR: opr = GL_ONE_MINUS_SRC_COLOR; break;
+                    case GL_ONE_MINUS_SRC_COLOR: opr = GL_SRC_COLOR; break;
+                    case GL_SRC_ALPHA: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_ALPHA: opr = GL_SRC_ALPHA; break;
+                }
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, src1");
+                switch (opr1) {
+                    case GL_SRC_COLOR: opr = GL_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_COLOR: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                    case GL_SRC_ALPHA: opr = GL_SRC_ALPHA; break;
+                    case GL_ONE_MINUS_SRC_ALPHA: opr = GL_ONE_MINUS_SRC_ALPHA; break;
+                }
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, opr");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            } else
+                Handled = FALSE;
+                break;
+        case WINED3DTOP_MULTIPLYADD:
+            if (GL_SUPPORT(ATI_TEXTURE_ENV_COMBINE3)) {
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_MODULATE_ADD_ATI);
+                checkGLcall("GL_TEXTURE_ENV, comb_target, GL_MODULATE_ADD_ATI");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, src3);
+                checkGLcall("GL_TEXTURE_ENV, src1_target, src3");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr3);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, opr3");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src2_target, src2");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+                glTexEnvi(GL_TEXTURE_ENV, scal_target, 1);
+                checkGLcall("GL_TEXTURE_ENV, scal_target, 1");
+            } else
+                Handled = FALSE;
+                break;
+        case WINED3DTOP_BUMPENVMAPLUMINANCE:
+            if(GL_SUPPORT(ATI_ENVMAP_BUMPMAP)) {
+                    /* Some apps use BUMPENVMAPLUMINANCE instead of D3DTOP_BUMPENVMAP, although
+                * they check for the non-luminance cap flag. Well, give them what they asked
+                * for :-)
+                    */
+                WARN("Application uses WINED3DTOP_BUMPENVMAPLUMINANCE\n");
+            } else {
+                Handled = FALSE;
+                break;
+            }
+            /* Fall through */
+        case WINED3DTOP_BUMPENVMAP:
+            if(GL_SUPPORT(ATI_ENVMAP_BUMPMAP)) {
+                TRACE("Using ati bumpmap on stage %d, target %d\n", Stage, Stage + 1);
+                glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_BUMP_ENVMAP_ATI);
+                checkGLcall("glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_BUMP_ENVMAP_ATI)");
+                glTexEnvi(GL_TEXTURE_ENV, GL_BUMP_TARGET_ATI, GL_TEXTURE0_ARB + Stage + 1);
+                checkGLcall("glTexEnvi(GL_TEXTURE_ENV, GL_BUMP_TARGET_ATI, GL_TEXTURE0_ARB + Stage + 1)");
+                glTexEnvi(GL_TEXTURE_ENV, src0_target, src3);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src3");
+                glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr3);
+                checkGLcall("GL_TEXTURE_ENV, opr0_target, opr3");
+                glTexEnvi(GL_TEXTURE_ENV, src1_target, src1);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr1);
+                checkGLcall("GL_TEXTURE_ENV, opr1_target, opr1");
+                glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+
+                Handled = TRUE;
+                break;
+            } else if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+                /* Technically texture shader support without register combiners is possible, but not expected to occur
+                 * on real world cards, so for now a fixme should be enough
+                 */
+                FIXME("Implement bump mapping with GL_NV_texture_shader in non register combiner path\n");
+            }
+        default:
+            Handled = FALSE;
+    }
+
+    if (Handled) {
+        BOOL  combineOK = TRUE;
+        if (GL_SUPPORT(NV_TEXTURE_ENV_COMBINE4)) {
+            DWORD op2;
+
+            if (isAlpha) {
+                op2 = This->stateBlock->textureState[Stage][WINED3DTSS_COLOROP];
+            } else {
+                op2 = This->stateBlock->textureState[Stage][WINED3DTSS_ALPHAOP];
+            }
+
+            /* Note: If COMBINE4 in effect can't go back to combine! */
+            switch (op2) {
+                case WINED3DTOP_ADDSMOOTH:
+                case WINED3DTOP_BLENDTEXTUREALPHAPM:
+                case WINED3DTOP_MODULATEALPHA_ADDCOLOR:
+                case WINED3DTOP_MODULATECOLOR_ADDALPHA:
+                case WINED3DTOP_MODULATEINVALPHA_ADDCOLOR:
+                case WINED3DTOP_MODULATEINVCOLOR_ADDALPHA:
+                case WINED3DTOP_MULTIPLYADD:
+                    /* Ignore those implemented in both cases */
+                    switch (op) {
+                        case WINED3DTOP_SELECTARG1:
+                        case WINED3DTOP_SELECTARG2:
+                            combineOK = FALSE;
+                            Handled   = FALSE;
+                            break;
+                        default:
+                            FIXME("Can't use COMBINE4 and COMBINE together, thisop=%s, otherop=%s, isAlpha(%d)\n", debug_d3dtop(op), debug_d3dtop(op2), isAlpha);
+                            return;
+                    }
+            }
+        }
+
+        if (combineOK) {
+            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, useext(GL_COMBINE));
+            checkGLcall("GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, useext(GL_COMBINE)");
+
+            return;
+        }
+    }
+
+    /* After all the extensions, if still unhandled, report fixme */
+    FIXME("Unhandled texture operation %s\n", debug_d3dtop(op));
+}
+
+
 static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
     DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[stage];
@@ -1836,14 +2978,6 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
         }
     }
 
-    if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
-        if(stateblock->lowest_disabled_stage > 0) {
-            glEnable(GL_REGISTER_COMBINERS_NV);
-            GL_EXTCALL(glCombinerParameteriNV(GL_NUM_GENERAL_COMBINERS_NV, stateblock->lowest_disabled_stage));
-        } else {
-            glDisable(GL_REGISTER_COMBINERS_NV);
-        }
-    }
     if(stage >= stateblock->lowest_disabled_stage) {
         TRACE("Stage disabled\n");
         if (mapped_stage != -1) {
@@ -1860,9 +2994,6 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
                 glDisable(GL_TEXTURE_RECTANGLE_ARB);
                 checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
             }
-            if(GL_SUPPORT(NV_TEXTURE_SHADER2) && mapped_stage < GL_LIMITS(textures)) {
-                glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_NONE);
-            }
         }
         /* All done */
         return;
@@ -1875,41 +3006,14 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
         if (tex_used) texture_activate_dimensions(stage, stateblock, context);
     }
 
-    /* Set the texture combiners */
-    if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
-        set_tex_op_nvrc((IWineD3DDevice *)stateblock->wineD3DDevice, FALSE, stage,
-                         stateblock->textureState[stage][WINED3DTSS_COLOROP],
-                         stateblock->textureState[stage][WINED3DTSS_COLORARG1],
-                         stateblock->textureState[stage][WINED3DTSS_COLORARG2],
-                         stateblock->textureState[stage][WINED3DTSS_COLORARG0],
-                         mapped_stage,
-                         stateblock->textureState[stage][WINED3DTSS_RESULTARG]);
-
-        /* In register combiners bump mapping is done in the stage AFTER the one that has the bump map operation set,
-         * thus the texture shader may have to be updated
-         */
-        if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-            BOOL usesBump = (stateblock->textureState[stage][WINED3DTSS_COLOROP] == WINED3DTOP_BUMPENVMAPLUMINANCE ||
-                             stateblock->textureState[stage][WINED3DTSS_COLOROP] == WINED3DTOP_BUMPENVMAP) ? TRUE : FALSE;
-            BOOL usedBump = (context->texShaderBumpMap & 1 << (stage + 1)) ? TRUE : FALSE;
-            if(usesBump != usedBump) {
-                GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage + 1));
-                checkGLcall("glActiveTextureARB");
-                texture_activate_dimensions(stage + 1, stateblock, context);
-                GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
-                checkGLcall("glActiveTextureARB");
-            }
-        }
-    } else {
-        set_tex_op((IWineD3DDevice *)stateblock->wineD3DDevice, FALSE, stage,
-                    stateblock->textureState[stage][WINED3DTSS_COLOROP],
-                    stateblock->textureState[stage][WINED3DTSS_COLORARG1],
-                    stateblock->textureState[stage][WINED3DTSS_COLORARG2],
-                    stateblock->textureState[stage][WINED3DTSS_COLORARG0]);
-    }
+    set_tex_op((IWineD3DDevice *)stateblock->wineD3DDevice, FALSE, stage,
+                stateblock->textureState[stage][WINED3DTSS_COLOROP],
+                stateblock->textureState[stage][WINED3DTSS_COLORARG1],
+                stateblock->textureState[stage][WINED3DTSS_COLORARG2],
+                stateblock->textureState[stage][WINED3DTSS_COLORARG0]);
 }
 
-static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
     DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[stage];
     BOOL tex_used = stateblock->wineD3DDevice->fixed_function_usage_map[stage];
@@ -1985,6 +3089,9 @@ static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
         }
     }
 
+    /* tex_alphaop is shared between the ffp and nvrc because the difference only comes down to
+     * this if block here, and the other code(color keying, texture unit selection) are the same
+     */
     TRACE("Setting alpha op for stage %d\n", stage);
     if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
         set_tex_op_nvrc((IWineD3DDevice *)stateblock->wineD3DDevice, TRUE, stage,
@@ -2001,6 +3108,7 @@ static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock, W
     DWORD texUnit = state - STATE_TRANSFORM(WINED3DTS_TEXTURE0);
     DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[texUnit];
     BOOL generated;
+    int coordIdx;
 
     /* Ignore this when a vertex shader is used, or if the streams aren't sorted out yet */
     if(use_vs(stateblock->wineD3DDevice) ||
@@ -2023,13 +3131,14 @@ static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock, W
         return;
     }
     generated = (stateblock->textureState[texUnit][WINED3DTSS_TEXCOORDINDEX] & 0xFFFF0000) != WINED3DTSS_TCI_PASSTHRU;
+    coordIdx = min(stateblock->textureState[texUnit][WINED3DTSS_TEXCOORDINDEX & 0x0000FFFF], MAX_TEXTURES - 1);
 
     set_texture_matrix(&stateblock->transforms[WINED3DTS_TEXTURE0 + texUnit].u.m[0][0],
                         stateblock->textureState[texUnit][WINED3DTSS_TEXTURETRANSFORMFLAGS],
                         generated,
                         context->last_was_rhw,
-                        stateblock->wineD3DDevice->strided_streams.u.s.texCoords[texUnit].dwStride ?
-                            stateblock->wineD3DDevice->strided_streams.u.s.texCoords[texUnit].dwType:
+                        stateblock->wineD3DDevice->strided_streams.u.s.texCoords[coordIdx].dwStride ?
+                            stateblock->wineD3DDevice->strided_streams.u.s.texCoords[coordIdx].dwType:
                             WINED3DDECLTYPE_UNUSED);
 
     /* The sampler applying function calls us if this changes */
@@ -2344,6 +3453,39 @@ static void tex_bumpenvloffset(DWORD state, IWineD3DStateBlockImpl *stateblock, 
     }
 }
 
+static void sampler_texmatrix(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    BOOL texIsPow2 = FALSE;
+    DWORD sampler = state - STATE_SAMPLER(0);
+    IWineD3DBaseTexture *texture = stateblock->textures[sampler];
+
+    if(!texture) return;
+    /* The fixed function np2 texture emulation uses the texture matrix to fix up the coordinates
+     * IWineD3DBaseTexture::ApplyStateChanges multiplies the set matrix with a fixup matrix. Before the
+     * scaling is reapplied or removed, the texture matrix has to be reapplied
+     *
+     * The mapped stage is alrady active because the sampler() function below, which is part of the
+     * misc pipeline
+     */
+    if(sampler < MAX_TEXTURES) {
+        if(stateblock->textureDimensions[sampler] == GL_TEXTURE_2D ||
+           stateblock->textureDimensions[sampler] == GL_TEXTURE_RECTANGLE_ARB) {
+            if(((IWineD3DTextureImpl *)texture)->baseTexture.pow2Matrix[0] != 1.0 ||
+               ((IWineD3DTextureImpl *)texture)->baseTexture.pow2Matrix[5] != 1.0 ) {
+                texIsPow2 = TRUE;
+            }
+        } else if(stateblock->textureDimensions[sampler] == GL_TEXTURE_CUBE_MAP_ARB) {
+            if(((IWineD3DCubeTextureImpl *)texture)->baseTexture.pow2Matrix[0] != 1.0) {
+                texIsPow2 = TRUE;
+            }
+        }
+
+        if(texIsPow2 || context->lastWasPow2Texture[sampler]) {
+            context->lastWasPow2Texture[sampler] = texIsPow2;
+            transform_texture(STATE_TRANSFORM(WINED3DTS_TEXTURE0 + stateblock->wineD3DDevice->texUnitMap[sampler]), stateblock, context);
+        }
+    }
+}
+
 static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD sampler = state - STATE_SAMPLER(0);
     DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[sampler];
@@ -2375,31 +3517,6 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
     }
 
     if(stateblock->textures[sampler]) {
-        BOOL texIsPow2 = FALSE;
-
-        /* The fixed function np2 texture emulation uses the texture matrix to fix up the coordinates
-         * IWineD3DBaseTexture::ApplyStateChanges multiplies the set matrix with a fixup matrix. Before the
-         * scaling is reapplied or removed, the texture matrix has to be reapplied
-         */
-        if(!GL_SUPPORT(ARB_TEXTURE_NON_POWER_OF_TWO) && sampler < MAX_TEXTURES) {
-            if(stateblock->textureDimensions[sampler] == GL_TEXTURE_2D ||
-               stateblock->textureDimensions[sampler] == GL_TEXTURE_RECTANGLE_ARB) {
-                if(((IWineD3DTextureImpl *) stateblock->textures[sampler])->baseTexture.pow2Matrix[0] != 1.0 ||
-                   ((IWineD3DTextureImpl *) stateblock->textures[sampler])->baseTexture.pow2Matrix[5] != 1.0 ) {
-                    texIsPow2 = TRUE;
-                }
-            } else if(stateblock->textureDimensions[sampler] == GL_TEXTURE_CUBE_MAP_ARB) {
-                if(((IWineD3DCubeTextureImpl *) stateblock->textures[sampler])->baseTexture.pow2Matrix[0] != 1.0) {
-                    texIsPow2 = TRUE;
-                }
-            }
-
-            if(texIsPow2 || context->lastWasPow2Texture[sampler]) {
-                context->lastWasPow2Texture[sampler] = texIsPow2;
-                transform_texture(STATE_TRANSFORM(WINED3DTS_TEXTURE0 + stateblock->wineD3DDevice->texUnitMap[sampler]), stateblock, context);
-            }
-        }
-
         IWineD3DBaseTexture_PreLoad(stateblock->textures[sampler]);
         IWineD3DBaseTexture_ApplyStateChanges(stateblock->textures[sampler], stateblock->textureState[sampler], stateblock->samplerState[sampler]);
 
@@ -2423,10 +3540,6 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
             glEnable(stateblock->textureDimensions[sampler]);
             checkGLcall("glEnable(stateblock->textureDimensions[sampler])");
         } else if(sampler < stateblock->lowest_disabled_stage) {
-            if(!isStateDirty(context, STATE_TEXTURESTAGE(sampler, WINED3DTSS_COLOROP))) {
-                texture_activate_dimensions(sampler, stateblock, context);
-            }
-
             if(stateblock->renderState[WINED3DRS_COLORKEYENABLE] && sampler == 0) {
                 /* If color keying is enabled update the alpha test, it depends on the existence
                  * of a color key in stage 0
@@ -2437,10 +3550,6 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
     } else if(mapped_stage < GL_LIMITS(textures)) {
         if(sampler < stateblock->lowest_disabled_stage) {
             /* TODO: What should I do with pixel shaders here ??? */
-            if(!isStateDirty(context, STATE_TEXTURESTAGE(sampler, WINED3DTSS_COLOROP))) {
-                texture_activate_dimensions(sampler, stateblock, context);
-            }
-
             if(stateblock->renderState[WINED3DRS_COLORKEYENABLE] && sampler == 0) {
                 /* If color keying is enabled update the alpha test, it depends on the existence
                 * of a color key in stage 0
@@ -2453,7 +3562,7 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
     }
 }
 
-static void pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+void apply_pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
     BOOL use_pshader = use_ps(device);
     BOOL use_vshader = use_vs(device);
@@ -2486,7 +3595,8 @@ static void pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
          */
         for(i=0; i < MAX_TEXTURES; i++) {
             if(!isStateDirty(context, STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP))) {
-                tex_colorop(STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP), stateblock, context);
+                device->StateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP)].apply
+                        (STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP), stateblock, context);
             }
         }
         if(context->last_was_pshader)
@@ -2507,57 +3617,36 @@ static void pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     context->last_was_pshader = use_pshader;
 }
 
-static void tex_bumpenvmat(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+static void shader_bumpenvmat(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
-    float mat[2][2];
     if(stateblock->pixelShader && stage != 0 &&
        ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->baseShader.reg_maps.bumpmat[stage]) {
         /* The pixel shader has to know the bump env matrix. Do a constants update if it isn't scheduled
          * anyway
          */
         if(!isStateDirty(context, STATE_PIXELSHADERCONSTANT) &&
-           !isStateDirty(context, STATE_PIXELSHADER)) {
+            !isStateDirty(context, STATE_PIXELSHADER)) {
             shaderconstant(STATE_PIXELSHADERCONSTANT, stateblock, context);
         }
     }
+}
 
-    if(GL_SUPPORT(ATI_ENVMAP_BUMPMAP)) {
-        if(stage >= GL_LIMITS(texture_stages)) {
-            WARN("Bump env matrix of unsupported stage set\n");
-        } else if(GL_SUPPORT(ARB_MULTITEXTURE)) {
-            GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + stage));
-            checkGLcall("GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + stage))");
-        }
-        mat[0][0] = *((float *) &stateblock->textureState[stage][WINED3DTSS_BUMPENVMAT00]);
-        mat[1][0] = *((float *) &stateblock->textureState[stage][WINED3DTSS_BUMPENVMAT01]);
-        mat[0][1] = *((float *) &stateblock->textureState[stage][WINED3DTSS_BUMPENVMAT10]);
-        mat[1][1] = *((float *) &stateblock->textureState[stage][WINED3DTSS_BUMPENVMAT11]);
-        GL_EXTCALL(glTexBumpParameterfvATI(GL_BUMP_ROT_MATRIX_ATI, (float *) mat));
-        checkGLcall("glTexBumpParameterfvATI");
-    } else if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-        /* Direct3D sets the matrix in the stage reading the perturbation map. The result is used to
-         * offset the destination stage(always stage + 1 in d3d). In GL_NV_texture_shader, the bump
-         * map offsetting is done in the stage reading the bump mapped texture, and the perturbation
-         * map is read from a specified source stage(always stage - 1 for d3d). Thus set the matrix
-         * for stage + 1. Keep the nvrc tex unit mapping in mind too
-         */
-        DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[stage + 1];
+static void tex_bumpenvmat(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
+    float mat[2][2];
 
-        if(mapped_stage < GL_LIMITS(textures)) {
-            GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
-            checkGLcall("GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage))");
-
-            /* We can't just pass a pointer to the stateblock to GL due to the different matrix
-             * format(column major vs row major)
-             */
-            mat[0][0] = *((float *) &stateblock->textureState[stage][WINED3DTSS_BUMPENVMAT00]);
-            mat[1][0] = *((float *) &stateblock->textureState[stage][WINED3DTSS_BUMPENVMAT01]);
-            mat[0][1] = *((float *) &stateblock->textureState[stage][WINED3DTSS_BUMPENVMAT10]);
-            mat[1][1] = *((float *) &stateblock->textureState[stage][WINED3DTSS_BUMPENVMAT11]);
-            glTexEnvfv(GL_TEXTURE_SHADER_NV, GL_OFFSET_TEXTURE_MATRIX_NV, (float *) mat);
-            checkGLcall("glTexEnvfv(GL_TEXTURE_SHADER_NV, GL_OFFSET_TEXTURE_MATRIX_NV, mat)");
-        }
+    if(stage >= GL_LIMITS(texture_stages)) {
+        WARN("Bump env matrix of unsupported stage set\n");
+    } else if(GL_SUPPORT(ARB_MULTITEXTURE)) {
+        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + stage));
+        checkGLcall("GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + stage))");
     }
+    mat[0][0] = *((float *) &stateblock->textureState[stage][WINED3DTSS_BUMPENVMAT00]);
+    mat[1][0] = *((float *) &stateblock->textureState[stage][WINED3DTSS_BUMPENVMAT01]);
+    mat[0][1] = *((float *) &stateblock->textureState[stage][WINED3DTSS_BUMPENVMAT10]);
+    mat[1][1] = *((float *) &stateblock->textureState[stage][WINED3DTSS_BUMPENVMAT11]);
+    GL_EXTCALL(glTexBumpParameterfvATI(GL_BUMP_ROT_MATRIX_ATI, (float *) mat));
+    checkGLcall("glTexBumpParameterfvATI");
 }
 
 static void transform_world(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
@@ -2650,6 +3739,25 @@ static void transform_worldex(DWORD state, IWineD3DStateBlockImpl *stateblock, W
     }
 }
 
+static void state_vertexblend_w(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    static BOOL once = FALSE;
+
+    switch(stateblock->renderState[WINED3DRS_VERTEXBLEND]) {
+        case WINED3DVBF_1WEIGHTS:
+        case WINED3DVBF_2WEIGHTS:
+        case WINED3DVBF_3WEIGHTS:
+            if(!once) {
+                once = TRUE;
+                /* TODO: Implement vertex blending in drawStridedSlow */
+                FIXME("Vertex blending enabled, but not supported by hardware\n");
+            }
+            break;
+
+        case WINED3DVBF_TWEENING:
+            WARN("Tweening not supported yet\n");
+    }
+}
+
 static void state_vertexblend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     WINED3DVERTEXBLENDFLAGS val = stateblock->renderState[WINED3DRS_VERTEXBLEND];
 
@@ -2657,42 +3765,29 @@ static void state_vertexblend(DWORD state, IWineD3DStateBlockImpl *stateblock, W
         case WINED3DVBF_1WEIGHTS:
         case WINED3DVBF_2WEIGHTS:
         case WINED3DVBF_3WEIGHTS:
-            if(GL_SUPPORT(ARB_VERTEX_BLEND)) {
-                glEnable(GL_VERTEX_BLEND_ARB);
-                checkGLcall("glEnable(GL_VERTEX_BLEND_ARB)");
+            glEnable(GL_VERTEX_BLEND_ARB);
+            checkGLcall("glEnable(GL_VERTEX_BLEND_ARB)");
 
-                /* D3D adds one more matrix which has weight (1 - sum(weights)). This is enabled at context
-                 * creation with enabling GL_WEIGHT_SUM_UNITY_ARB.
-                 */
-                GL_EXTCALL(glVertexBlendARB(stateblock->renderState[WINED3DRS_VERTEXBLEND] + 1));
+            /* D3D adds one more matrix which has weight (1 - sum(weights)). This is enabled at context
+             * creation with enabling GL_WEIGHT_SUM_UNITY_ARB.
+             */
+            GL_EXTCALL(glVertexBlendARB(stateblock->renderState[WINED3DRS_VERTEXBLEND] + 1));
 
-                if(!stateblock->wineD3DDevice->vertexBlendUsed) {
-                    int i;
-                    for(i = 1; i < GL_LIMITS(blends); i++) {
-                        if(!isStateDirty(context, STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(i)))) {
-                            transform_worldex(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(i)), stateblock, context);
-                        }
+            if(!stateblock->wineD3DDevice->vertexBlendUsed) {
+                int i;
+                for(i = 1; i < GL_LIMITS(blends); i++) {
+                    if(!isStateDirty(context, STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(i)))) {
+                        transform_worldex(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(i)), stateblock, context);
                     }
-                    stateblock->wineD3DDevice->vertexBlendUsed = TRUE;
                 }
-            } else {
-                static BOOL once = FALSE;
-                if(!once) {
-                    once = TRUE;
-                    /* TODO: Implement vertex blending in drawStridedSlow */
-                    FIXME("Vertex blending enabled, but not supported by hardware\n");
-                }
+                stateblock->wineD3DDevice->vertexBlendUsed = TRUE;
             }
             break;
 
         case WINED3DVBF_DISABLE:
         case WINED3DVBF_0WEIGHTS: /* for Indexed vertex blending - not supported */
-            if(GL_SUPPORT(ARB_VERTEX_BLEND)) {
-                glDisable(GL_VERTEX_BLEND_ARB);
-                checkGLcall("glDisable(GL_VERTEX_BLEND_ARB)");
-            } else {
-                TRACE("Vertex blending disabled\n");
-            }
+            glDisable(GL_VERTEX_BLEND_ARB);
+            checkGLcall("glDisable(GL_VERTEX_BLEND_ARB)");
             break;
 
         case WINED3DVBF_TWEENING:
@@ -2880,8 +3975,6 @@ static inline void unloadVertexData(IWineD3DStateBlockImpl *stateblock) {
     }
     if (GL_SUPPORT(ARB_VERTEX_BLEND)) {
         glDisableClientState(GL_WEIGHT_ARRAY_ARB);
-    } else if (GL_SUPPORT(EXT_VERTEX_WEIGHTING)) {
-        glDisableClientState(GL_VERTEX_WEIGHT_ARRAY_EXT);
     }
     unloadTexCoords(stateblock);
 }
@@ -3115,20 +4208,6 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
                     showfixme = FALSE;
                 }
             }
-        } else if (GL_SUPPORT(EXT_VERTEX_WEIGHTING)) {
-            /* FIXME("TODO\n");*/
-#if 0
-
-            GL_EXTCALL(glVertexWeightPointerEXT)(
-                WINED3D_ATR_SIZE(sd->u.s.blendWeights.dwType),
-                WINED3D_ATR_GLTYPE(sd->u.s.blendWeights.dwType),
-                sd->u.s.blendWeights.dwStride,
-                sd->u.s.blendWeights.lpData + stateblock->loadBaseVertexIndex * sd->u.s.blendWeights.dwStride);
-            checkGLcall("glVertexWeightPointerEXT(numBlends, ...)");
-            glEnableClientState(GL_VERTEX_WEIGHT_ARRAY_EXT);
-            checkGLcall("glEnableClientState(GL_VERTEX_WEIGHT_ARRAY_EXT)");
-#endif
-
         } else {
             /* TODO: support blends in drawStridedSlow
              * No need to write a FIXME here, this is done after the general vertex decl decoding
@@ -3161,44 +4240,6 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
         if (GL_SUPPRT(EXT_FOR_COORD) {
              /* make sure fog is disabled */
              glDisableClientState(GL_FOG_COORDINATE_EXT);
-        }
-    }
-#endif
-
-#if 0 /* tangents  ----------------------------------------------*/
-    if (sd->u.s.tangent.lpData || sd->u.s.tangent.VBO ||
-        sd->u.s.binormal.lpData || sd->u.s.binormal.VBO) {
-        /* TODO: tangents*/
-        if (GL_SUPPORT(EXT_COORDINATE_FRAME) {
-            if (sd->u.s.tangent.lpData || sd->u.s.tangent.VBO) {
-                glEnable(GL_TANGENT_ARRAY_EXT);
-                (GL_EXTCALL)(TangentPointerEXT)(
-                    WINED3D_ATR_GLTYPE(sd->u.s.tangent.dwType),
-                    sd->u.s.tangent.dwStride,
-                    sd->u.s.tangent.lpData + stateblock->loadBaseVertexIndex * sd->u.s.tangent.dwStride);
-            } else {
-                    glDisable(GL_TANGENT_ARRAY_EXT);
-            }
-            if (sd->u.s.binormal.lpData || sd->u.s.binormal.VBO) {
-                    glEnable(GL_BINORMAL_ARRAY_EXT);
-                    (GL_EXTCALL)(BinormalPointerEXT)(
-                        WINED3D_ATR_GLTYPE(sd->u.s.binormal.dwType),
-                        sd->u.s.binormal.dwStride,
-                        sd->u.s.binormal.lpData + stateblock->loadBaseVertexIndex * sd->u.s.binormal.dwStride);
-            } else{
-                    glDisable(GL_BINORMAL_ARRAY_EXT);
-            }
-
-        } else {
-            /* don't bother falling back to 'slow' as we don't support software tangents and binormals yet . */
-            /* FIXME: fixme once */
-            TRACE("Hardware support for tangents and binormals is not avaiable, tangents and binormals disabled.\n");
-        }
-    } else {
-        if (GL_SUPPORT(EXT_COORDINATE_FRAME) {
-             /* make sure fog is disabled */
-             glDisable(GL_TANGENT_ARRAY_EXT);
-             glDisable(GL_BINORMAL_ARRAY_EXT);
         }
     }
 #endif
@@ -3459,8 +4500,8 @@ static void streamsrc(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCo
     if (!useVertexShaderFunction && (BUFFER_OR_DATA(position2) || BUFFER_OR_DATA(normal2))) {
         FIXME("Tweening is only valid with vertex shaders\n");
     }
-    if (!useVertexShaderFunction && (BUFFER_OR_DATA(tangent) || BUFFER_OR_DATA(binormal))) {
-        FIXME("Tangent and binormal bump mapping is only valid with vertex shaders\n");
+    if (!useVertexShaderFunction && BUFFER_OR_DATA(binormal)) {
+        FIXME("Binormal bump mapping is only valid with vertex shaders\n");
     }
     if (!useVertexShaderFunction && (BUFFER_OR_DATA(tessFactor) || BUFFER_OR_DATA(fog) || BUFFER_OR_DATA(depth) || BUFFER_OR_DATA(sample))) {
         FIXME("Extended attributes are only valid with vertex shaders\n");
@@ -3798,13 +4839,11 @@ static void scissorrect(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
 }
 
 static void indexbuffer(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    if(GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT)) {
-        if(stateblock->streamIsUP || stateblock->pIndexData == NULL ) {
-            GL_EXTCALL(glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, 0));
-        } else {
-            IWineD3DIndexBufferImpl *ib = (IWineD3DIndexBufferImpl *) stateblock->pIndexData;
-            GL_EXTCALL(glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, ib->vbo));
-        }
+    if(stateblock->streamIsUP || stateblock->pIndexData == NULL ) {
+        GL_EXTCALL(glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, 0));
+    } else {
+        IWineD3DIndexBufferImpl *ib = (IWineD3DIndexBufferImpl *) stateblock->pIndexData;
+        GL_EXTCALL(glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, ib->vbo));
     }
 }
 
@@ -3819,650 +4858,716 @@ static void frontface(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCo
 }
 
 const struct StateEntryTemplate misc_state_template[] = {
-    { STATE_RENDER(WINED3DRS_SRCBLEND),                   { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }},
-    { STATE_RENDER(WINED3DRS_DESTBLEND),                  { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }},
-    { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }},
-    { STATE_RENDER(WINED3DRS_EDGEANTIALIAS),              { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }},
-    { STATE_RENDER(WINED3DRS_ANTIALIASEDLINEENABLE),      { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }},
-    { STATE_RENDER(WINED3DRS_SEPARATEALPHABLENDENABLE),   { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }},
-    { STATE_RENDER(WINED3DRS_SRCBLENDALPHA),              { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }},
-    { STATE_RENDER(WINED3DRS_DESTBLENDALPHA),             { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }},
-    { STATE_RENDER(WINED3DRS_DESTBLENDALPHA),             { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }},
-    { STATE_RENDER(WINED3DRS_BLENDOPALPHA),               { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }},
-    { STATE_STREAMSRC,                                    { STATE_VDECL,                                        streamsrc           }},
-    { STATE_VDECL,                                        { STATE_VDECL,                                        streamsrc           }},
-    { STATE_FRONTFACE,                                    { STATE_FRONTFACE,                                    frontface           }},
-    { STATE_SCISSORRECT,                                  { STATE_SCISSORRECT,                                  scissorrect         }},
+    { STATE_RENDER(WINED3DRS_SRCBLEND),                   { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }, 0                               },
+    { STATE_RENDER(WINED3DRS_DESTBLEND),                  { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }, 0                               },
+    { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }, 0                               },
+    { STATE_RENDER(WINED3DRS_EDGEANTIALIAS),              { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }, 0                               },
+    { STATE_RENDER(WINED3DRS_ANTIALIASEDLINEENABLE),      { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }, 0                               },
+    { STATE_RENDER(WINED3DRS_SEPARATEALPHABLENDENABLE),   { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }, 0                               },
+    { STATE_RENDER(WINED3DRS_SRCBLENDALPHA),              { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }, 0                               },
+    { STATE_RENDER(WINED3DRS_DESTBLENDALPHA),             { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }, 0                               },
+    { STATE_RENDER(WINED3DRS_DESTBLENDALPHA),             { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }, 0                               },
+    { STATE_RENDER(WINED3DRS_BLENDOPALPHA),               { STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         }, 0                               },
+    { STATE_STREAMSRC,                                    { STATE_VDECL,                                        streamsrc           }, 0                               },
+    { STATE_VDECL,                                        { STATE_VDECL,                                        streamsrc           }, 0                               },
+    { STATE_FRONTFACE,                                    { STATE_FRONTFACE,                                    frontface           }, 0                               },
+    { STATE_SCISSORRECT,                                  { STATE_SCISSORRECT,                                  scissorrect         }, 0                               },
     /* TODO: Move shader constant loading to vertex and fragment pipeline repectively, as soon as the pshader and
      * vshader loadings are untied from each other
      */
-    { STATE_VERTEXSHADERCONSTANT,                         { STATE_VERTEXSHADERCONSTANT,                         shaderconstant      }},
-    { STATE_PIXELSHADERCONSTANT,                          { STATE_VERTEXSHADERCONSTANT,                         shaderconstant      }},
+    { STATE_VERTEXSHADERCONSTANT,                         { STATE_VERTEXSHADERCONSTANT,                         shaderconstant      }, 0                               },
+    { STATE_PIXELSHADERCONSTANT,                          { STATE_VERTEXSHADERCONSTANT,                         shaderconstant      }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     shader_bumpenvmat   }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }, 0                               },
 
-    { STATE_VIEWPORT,                                     { STATE_VIEWPORT,                                     viewport_miscpart   }},
-    { STATE_INDEXBUFFER,                                  { STATE_INDEXBUFFER,                                  indexbuffer         }},
-    { STATE_RENDER(WINED3DRS_ANTIALIAS),                  { STATE_RENDER(WINED3DRS_ANTIALIAS),                  state_antialias     }},
-    { STATE_RENDER(WINED3DRS_TEXTUREPERSPECTIVE),         { STATE_RENDER(WINED3DRS_TEXTUREPERSPECTIVE),         state_perspective   }},
-    { STATE_RENDER(WINED3DRS_ZENABLE),                    { STATE_RENDER(WINED3DRS_ZENABLE),                    state_zenable       }},
-    { STATE_RENDER(WINED3DRS_WRAPU),                      { STATE_RENDER(WINED3DRS_WRAPU),                      state_wrapu         }},
-    { STATE_RENDER(WINED3DRS_WRAPV),                      { STATE_RENDER(WINED3DRS_WRAPV),                      state_wrapv         }},
-    { STATE_RENDER(WINED3DRS_FILLMODE),                   { STATE_RENDER(WINED3DRS_FILLMODE),                   state_fillmode      }},
-    { STATE_RENDER(WINED3DRS_SHADEMODE),                  { STATE_RENDER(WINED3DRS_SHADEMODE),                  state_shademode     }},
-    { STATE_RENDER(WINED3DRS_LINEPATTERN),                { STATE_RENDER(WINED3DRS_LINEPATTERN),                state_linepattern   }},
-    { STATE_RENDER(WINED3DRS_MONOENABLE),                 { STATE_RENDER(WINED3DRS_MONOENABLE),                 state_monoenable    }},
-    { STATE_RENDER(WINED3DRS_ROP2),                       { STATE_RENDER(WINED3DRS_ROP2),                       state_rop2          }},
-    { STATE_RENDER(WINED3DRS_PLANEMASK),                  { STATE_RENDER(WINED3DRS_PLANEMASK),                  state_planemask     }},
-    { STATE_RENDER(WINED3DRS_ZWRITEENABLE),               { STATE_RENDER(WINED3DRS_ZWRITEENABLE),               state_zwritenable   }},
-    { STATE_RENDER(WINED3DRS_ALPHATESTENABLE),            { STATE_RENDER(WINED3DRS_ALPHATESTENABLE),            state_alpha         }},
-    { STATE_RENDER(WINED3DRS_ALPHAREF),                   { STATE_RENDER(WINED3DRS_ALPHATESTENABLE),            state_alpha         }},
-    { STATE_RENDER(WINED3DRS_ALPHAFUNC),                  { STATE_RENDER(WINED3DRS_ALPHATESTENABLE),            state_alpha         }},
-    { STATE_RENDER(WINED3DRS_COLORKEYENABLE),             { STATE_RENDER(WINED3DRS_ALPHATESTENABLE),            state_alpha         }},
-    { STATE_RENDER(WINED3DRS_LASTPIXEL),                  { STATE_RENDER(WINED3DRS_LASTPIXEL),                  state_lastpixel     }},
-    { STATE_RENDER(WINED3DRS_CULLMODE),                   { STATE_RENDER(WINED3DRS_CULLMODE),                   state_cullmode      }},
-    { STATE_RENDER(WINED3DRS_ZFUNC),                      { STATE_RENDER(WINED3DRS_ZFUNC),                      state_zfunc         }},
-    { STATE_RENDER(WINED3DRS_DITHERENABLE),               { STATE_RENDER(WINED3DRS_DITHERENABLE),               state_ditherenable  }},
-    { STATE_RENDER(WINED3DRS_SUBPIXEL),                   { STATE_RENDER(WINED3DRS_SUBPIXEL),                   state_subpixel      }},
-    { STATE_RENDER(WINED3DRS_SUBPIXELX),                  { STATE_RENDER(WINED3DRS_SUBPIXELX),                  state_subpixelx     }},
-    { STATE_RENDER(WINED3DRS_STIPPLEDALPHA),              { STATE_RENDER(WINED3DRS_STIPPLEDALPHA),              state_stippledalpha }},
-    { STATE_RENDER(WINED3DRS_ZBIAS),                      { STATE_RENDER(WINED3DRS_ZBIAS),                      state_zbias         }},
-    { STATE_RENDER(WINED3DRS_STIPPLEENABLE),              { STATE_RENDER(WINED3DRS_STIPPLEENABLE),              state_stippleenable }},
-    { STATE_RENDER(WINED3DRS_MIPMAPLODBIAS),              { STATE_RENDER(WINED3DRS_MIPMAPLODBIAS),              state_mipmaplodbias }},
-    { STATE_RENDER(WINED3DRS_ANISOTROPY),                 { STATE_RENDER(WINED3DRS_ANISOTROPY),                 state_anisotropy    }},
-    { STATE_RENDER(WINED3DRS_FLUSHBATCH),                 { STATE_RENDER(WINED3DRS_FLUSHBATCH),                 state_flushbatch    }},
-    { STATE_RENDER(WINED3DRS_TRANSLUCENTSORTINDEPENDENT), { STATE_RENDER(WINED3DRS_TRANSLUCENTSORTINDEPENDENT), state_translucentsi }},
-    { STATE_RENDER(WINED3DRS_STENCILENABLE),              { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }},
-    { STATE_RENDER(WINED3DRS_STENCILFAIL),                { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }},
-    { STATE_RENDER(WINED3DRS_STENCILZFAIL),               { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }},
-    { STATE_RENDER(WINED3DRS_STENCILPASS),                { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }},
-    { STATE_RENDER(WINED3DRS_STENCILFUNC),                { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }},
-    { STATE_RENDER(WINED3DRS_STENCILREF),                 { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }},
-    { STATE_RENDER(WINED3DRS_STENCILMASK),                { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }},
-    { STATE_RENDER(WINED3DRS_STENCILWRITEMASK),           { STATE_RENDER(WINED3DRS_STENCILWRITEMASK),           state_stencilwrite  }},
-    { STATE_RENDER(WINED3DRS_TWOSIDEDSTENCILMODE),        { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }},
-    { STATE_RENDER(WINED3DRS_CCW_STENCILFAIL),            { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }},
-    { STATE_RENDER(WINED3DRS_CCW_STENCILZFAIL),           { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }},
-    { STATE_RENDER(WINED3DRS_CCW_STENCILPASS),            { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }},
-    { STATE_RENDER(WINED3DRS_CCW_STENCILFUNC),            { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }},
-    { STATE_RENDER(WINED3DRS_WRAP0),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP1),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP2),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP3),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP4),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP5),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP6),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP7),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP8),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP9),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP10),                     { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP11),                     { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP12),                     { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP13),                     { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP14),                     { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_WRAP15),                     { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }},
-    { STATE_RENDER(WINED3DRS_EXTENTS),                    { STATE_RENDER(WINED3DRS_EXTENTS),                    state_extents       }},
-    { STATE_RENDER(WINED3DRS_COLORKEYBLENDENABLE),        { STATE_RENDER(WINED3DRS_COLORKEYBLENDENABLE),        state_ckeyblend     }},
-    { STATE_RENDER(WINED3DRS_PATCHEDGESTYLE),             { STATE_RENDER(WINED3DRS_PATCHEDGESTYLE),             state_patchedgestyle}},
-    { STATE_RENDER(WINED3DRS_PATCHSEGMENTS),              { STATE_RENDER(WINED3DRS_PATCHSEGMENTS),              state_patchsegments }},
-    { STATE_RENDER(WINED3DRS_POSITIONDEGREE),             { STATE_RENDER(WINED3DRS_POSITIONDEGREE),             state_positiondegree}},
-    { STATE_RENDER(WINED3DRS_NORMALDEGREE),               { STATE_RENDER(WINED3DRS_NORMALDEGREE),               state_normaldegree  }},
-    { STATE_RENDER(WINED3DRS_MINTESSELLATIONLEVEL),       { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), state_tessellation  }},
-    { STATE_RENDER(WINED3DRS_MAXTESSELLATIONLEVEL),       { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), state_tessellation  }},
-    { STATE_RENDER(WINED3DRS_ADAPTIVETESS_X),             { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), state_tessellation  }},
-    { STATE_RENDER(WINED3DRS_ADAPTIVETESS_Y),             { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), state_tessellation  }},
-    { STATE_RENDER(WINED3DRS_ADAPTIVETESS_Z),             { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), state_tessellation  }},
-    { STATE_RENDER(WINED3DRS_ADAPTIVETESS_W),             { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), state_tessellation  }},
-    { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), state_tessellation  }},
-    { STATE_RENDER(WINED3DRS_MULTISAMPLEANTIALIAS),       { STATE_RENDER(WINED3DRS_MULTISAMPLEANTIALIAS),       state_multisampleaa }},
-    { STATE_RENDER(WINED3DRS_MULTISAMPLEMASK),            { STATE_RENDER(WINED3DRS_MULTISAMPLEMASK),            state_multisampmask }},
-    { STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           { STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           state_colorwrite    }},
-    { STATE_RENDER(WINED3DRS_BLENDOP),                    { STATE_RENDER(WINED3DRS_BLENDOP),                    state_blendop       }},
-    { STATE_RENDER(WINED3DRS_SCISSORTESTENABLE),          { STATE_RENDER(WINED3DRS_SCISSORTESTENABLE),          state_scissor       }},
-    { STATE_RENDER(WINED3DRS_SLOPESCALEDEPTHBIAS),        { STATE_RENDER(WINED3DRS_DEPTHBIAS),                  state_depthbias     }},
-    { STATE_RENDER(WINED3DRS_COLORWRITEENABLE1),          { STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           state_colorwrite    }},
-    { STATE_RENDER(WINED3DRS_COLORWRITEENABLE2),          { STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           state_colorwrite    }},
-    { STATE_RENDER(WINED3DRS_COLORWRITEENABLE3),          { STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           state_colorwrite    }},
-    { STATE_RENDER(WINED3DRS_BLENDFACTOR),                { STATE_RENDER(WINED3DRS_BLENDFACTOR),                state_blendfactor   }},
-    { STATE_RENDER(WINED3DRS_DEPTHBIAS),                  { STATE_RENDER(WINED3DRS_DEPTHBIAS),                  state_depthbias     }},
+    { STATE_VIEWPORT,                                     { STATE_VIEWPORT,                                     viewport_miscpart   }, 0                               },
+    { STATE_INDEXBUFFER,                                  { STATE_INDEXBUFFER,                                  indexbuffer         }, ARB_VERTEX_BUFFER_OBJECT        },
+    { STATE_RENDER(WINED3DRS_ANTIALIAS),                  { STATE_RENDER(WINED3DRS_ANTIALIAS),                  state_antialias     }, 0                               },
+    { STATE_RENDER(WINED3DRS_TEXTUREPERSPECTIVE),         { STATE_RENDER(WINED3DRS_TEXTUREPERSPECTIVE),         state_perspective   }, 0                               },
+    { STATE_RENDER(WINED3DRS_ZENABLE),                    { STATE_RENDER(WINED3DRS_ZENABLE),                    state_zenable       }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAPU),                      { STATE_RENDER(WINED3DRS_WRAPU),                      state_wrapu         }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAPV),                      { STATE_RENDER(WINED3DRS_WRAPV),                      state_wrapv         }, 0                               },
+    { STATE_RENDER(WINED3DRS_FILLMODE),                   { STATE_RENDER(WINED3DRS_FILLMODE),                   state_fillmode      }, 0                               },
+    { STATE_RENDER(WINED3DRS_SHADEMODE),                  { STATE_RENDER(WINED3DRS_SHADEMODE),                  state_shademode     }, 0                               },
+    { STATE_RENDER(WINED3DRS_LINEPATTERN),                { STATE_RENDER(WINED3DRS_LINEPATTERN),                state_linepattern   }, 0                               },
+    { STATE_RENDER(WINED3DRS_MONOENABLE),                 { STATE_RENDER(WINED3DRS_MONOENABLE),                 state_monoenable    }, 0                               },
+    { STATE_RENDER(WINED3DRS_ROP2),                       { STATE_RENDER(WINED3DRS_ROP2),                       state_rop2          }, 0                               },
+    { STATE_RENDER(WINED3DRS_PLANEMASK),                  { STATE_RENDER(WINED3DRS_PLANEMASK),                  state_planemask     }, 0                               },
+    { STATE_RENDER(WINED3DRS_ZWRITEENABLE),               { STATE_RENDER(WINED3DRS_ZWRITEENABLE),               state_zwritenable   }, 0                               },
+    { STATE_RENDER(WINED3DRS_ALPHATESTENABLE),            { STATE_RENDER(WINED3DRS_ALPHATESTENABLE),            state_alpha         }, 0                               },
+    { STATE_RENDER(WINED3DRS_ALPHAREF),                   { STATE_RENDER(WINED3DRS_ALPHATESTENABLE),            state_alpha         }, 0                               },
+    { STATE_RENDER(WINED3DRS_ALPHAFUNC),                  { STATE_RENDER(WINED3DRS_ALPHATESTENABLE),            state_alpha         }, 0                               },
+    { STATE_RENDER(WINED3DRS_COLORKEYENABLE),             { STATE_RENDER(WINED3DRS_ALPHATESTENABLE),            state_alpha         }, 0                               },
+    { STATE_RENDER(WINED3DRS_LASTPIXEL),                  { STATE_RENDER(WINED3DRS_LASTPIXEL),                  state_lastpixel     }, 0                               },
+    { STATE_RENDER(WINED3DRS_CULLMODE),                   { STATE_RENDER(WINED3DRS_CULLMODE),                   state_cullmode      }, 0                               },
+    { STATE_RENDER(WINED3DRS_ZFUNC),                      { STATE_RENDER(WINED3DRS_ZFUNC),                      state_zfunc         }, 0                               },
+    { STATE_RENDER(WINED3DRS_DITHERENABLE),               { STATE_RENDER(WINED3DRS_DITHERENABLE),               state_ditherenable  }, 0                               },
+    { STATE_RENDER(WINED3DRS_SUBPIXEL),                   { STATE_RENDER(WINED3DRS_SUBPIXEL),                   state_subpixel      }, 0                               },
+    { STATE_RENDER(WINED3DRS_SUBPIXELX),                  { STATE_RENDER(WINED3DRS_SUBPIXELX),                  state_subpixelx     }, 0                               },
+    { STATE_RENDER(WINED3DRS_STIPPLEDALPHA),              { STATE_RENDER(WINED3DRS_STIPPLEDALPHA),              state_stippledalpha }, 0                               },
+    { STATE_RENDER(WINED3DRS_ZBIAS),                      { STATE_RENDER(WINED3DRS_ZBIAS),                      state_zbias         }, 0                               },
+    { STATE_RENDER(WINED3DRS_STIPPLEENABLE),              { STATE_RENDER(WINED3DRS_STIPPLEENABLE),              state_stippleenable }, 0                               },
+    { STATE_RENDER(WINED3DRS_MIPMAPLODBIAS),              { STATE_RENDER(WINED3DRS_MIPMAPLODBIAS),              state_mipmaplodbias }, 0                               },
+    { STATE_RENDER(WINED3DRS_ANISOTROPY),                 { STATE_RENDER(WINED3DRS_ANISOTROPY),                 state_anisotropy    }, 0                               },
+    { STATE_RENDER(WINED3DRS_FLUSHBATCH),                 { STATE_RENDER(WINED3DRS_FLUSHBATCH),                 state_flushbatch    }, 0                               },
+    { STATE_RENDER(WINED3DRS_TRANSLUCENTSORTINDEPENDENT), { STATE_RENDER(WINED3DRS_TRANSLUCENTSORTINDEPENDENT), state_translucentsi }, 0                               },
+    { STATE_RENDER(WINED3DRS_STENCILENABLE),              { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }, 0                               },
+    { STATE_RENDER(WINED3DRS_STENCILFAIL),                { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }, 0                               },
+    { STATE_RENDER(WINED3DRS_STENCILZFAIL),               { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }, 0                               },
+    { STATE_RENDER(WINED3DRS_STENCILPASS),                { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }, 0                               },
+    { STATE_RENDER(WINED3DRS_STENCILFUNC),                { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }, 0                               },
+    { STATE_RENDER(WINED3DRS_STENCILREF),                 { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }, 0                               },
+    { STATE_RENDER(WINED3DRS_STENCILMASK),                { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }, 0                               },
+    { STATE_RENDER(WINED3DRS_STENCILWRITEMASK),           { STATE_RENDER(WINED3DRS_STENCILWRITEMASK),           state_stencilwrite2s}, EXT_STENCIL_TWO_SIDE            },
+    { STATE_RENDER(WINED3DRS_STENCILWRITEMASK),           { STATE_RENDER(WINED3DRS_STENCILWRITEMASK),           state_stencilwrite  }, 0                               },
+    { STATE_RENDER(WINED3DRS_TWOSIDEDSTENCILMODE),        { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }, 0                               },
+    { STATE_RENDER(WINED3DRS_CCW_STENCILFAIL),            { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }, 0                               },
+    { STATE_RENDER(WINED3DRS_CCW_STENCILZFAIL),           { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }, 0                               },
+    { STATE_RENDER(WINED3DRS_CCW_STENCILPASS),            { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }, 0                               },
+    { STATE_RENDER(WINED3DRS_CCW_STENCILFUNC),            { STATE_RENDER(WINED3DRS_STENCILENABLE),              state_stencil       }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP0),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP1),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP2),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP3),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP4),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP5),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP6),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP7),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP8),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP9),                      { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP10),                     { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP11),                     { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP12),                     { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP13),                     { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP14),                     { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_WRAP15),                     { STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          }, 0                               },
+    { STATE_RENDER(WINED3DRS_EXTENTS),                    { STATE_RENDER(WINED3DRS_EXTENTS),                    state_extents       }, 0                               },
+    { STATE_RENDER(WINED3DRS_COLORKEYBLENDENABLE),        { STATE_RENDER(WINED3DRS_COLORKEYBLENDENABLE),        state_ckeyblend     }, 0                               },
+    { STATE_RENDER(WINED3DRS_PATCHEDGESTYLE),             { STATE_RENDER(WINED3DRS_PATCHEDGESTYLE),             state_patchedgestyle}, 0                               },
+    { STATE_RENDER(WINED3DRS_PATCHSEGMENTS),              { STATE_RENDER(WINED3DRS_PATCHSEGMENTS),              state_patchsegments }, 0                               },
+    { STATE_RENDER(WINED3DRS_POSITIONDEGREE),             { STATE_RENDER(WINED3DRS_POSITIONDEGREE),             state_positiondegree}, 0                               },
+    { STATE_RENDER(WINED3DRS_NORMALDEGREE),               { STATE_RENDER(WINED3DRS_NORMALDEGREE),               state_normaldegree  }, 0                               },
+    { STATE_RENDER(WINED3DRS_MINTESSELLATIONLEVEL),       { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), state_tessellation  }, 0                               },
+    { STATE_RENDER(WINED3DRS_MAXTESSELLATIONLEVEL),       { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), state_tessellation  }, 0                               },
+    { STATE_RENDER(WINED3DRS_ADAPTIVETESS_X),             { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), state_tessellation  }, 0                               },
+    { STATE_RENDER(WINED3DRS_ADAPTIVETESS_Y),             { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), state_tessellation  }, 0                               },
+    { STATE_RENDER(WINED3DRS_ADAPTIVETESS_Z),             { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), state_tessellation  }, 0                               },
+    { STATE_RENDER(WINED3DRS_ADAPTIVETESS_W),             { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), state_tessellation  }, 0                               },
+    { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), { STATE_RENDER(WINED3DRS_ENABLEADAPTIVETESSELLATION), state_tessellation  }, 0                               },
+    { STATE_RENDER(WINED3DRS_MULTISAMPLEANTIALIAS),       { STATE_RENDER(WINED3DRS_MULTISAMPLEANTIALIAS),       state_msaa          }, ARB_MULTISAMPLE                 },
+    { STATE_RENDER(WINED3DRS_MULTISAMPLEANTIALIAS),       { STATE_RENDER(WINED3DRS_MULTISAMPLEANTIALIAS),       state_msaa_w        }, 0                               },
+    { STATE_RENDER(WINED3DRS_MULTISAMPLEMASK),            { STATE_RENDER(WINED3DRS_MULTISAMPLEMASK),            state_multisampmask }, 0                               },
+    { STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           { STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           state_colorwrite    }, 0                               },
+    { STATE_RENDER(WINED3DRS_BLENDOP),                    { STATE_RENDER(WINED3DRS_BLENDOP),                    state_blendop       }, EXT_BLEND_MINMAX                },
+    { STATE_RENDER(WINED3DRS_BLENDOP),                    { STATE_RENDER(WINED3DRS_BLENDOP),                    state_blendop_w     }, 0                               },
+    { STATE_RENDER(WINED3DRS_SCISSORTESTENABLE),          { STATE_RENDER(WINED3DRS_SCISSORTESTENABLE),          state_scissor       }, 0                               },
+    { STATE_RENDER(WINED3DRS_SLOPESCALEDEPTHBIAS),        { STATE_RENDER(WINED3DRS_DEPTHBIAS),                  state_depthbias     }, 0                               },
+    { STATE_RENDER(WINED3DRS_COLORWRITEENABLE1),          { STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           state_colorwrite    }, 0                               },
+    { STATE_RENDER(WINED3DRS_COLORWRITEENABLE2),          { STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           state_colorwrite    }, 0                               },
+    { STATE_RENDER(WINED3DRS_COLORWRITEENABLE3),          { STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           state_colorwrite    }, 0                               },
+    { STATE_RENDER(WINED3DRS_BLENDFACTOR),                { STATE_RENDER(WINED3DRS_BLENDFACTOR),                state_blendfactor   }, EXT_BLEND_COLOR                 },
+    { STATE_RENDER(WINED3DRS_BLENDFACTOR),                { STATE_RENDER(WINED3DRS_BLENDFACTOR),                state_blendfactor_w }, 0                               },
+    { STATE_RENDER(WINED3DRS_DEPTHBIAS),                  { STATE_RENDER(WINED3DRS_DEPTHBIAS),                  state_depthbias     }, 0                               },
     /* Samplers */
-    { STATE_SAMPLER(0),                                   { STATE_SAMPLER(0),                                   sampler             }},
-    { STATE_SAMPLER(1),                                   { STATE_SAMPLER(1),                                   sampler             }},
-    { STATE_SAMPLER(2),                                   { STATE_SAMPLER(2),                                   sampler             }},
-    { STATE_SAMPLER(3),                                   { STATE_SAMPLER(3),                                   sampler             }},
-    { STATE_SAMPLER(4),                                   { STATE_SAMPLER(4),                                   sampler             }},
-    { STATE_SAMPLER(5),                                   { STATE_SAMPLER(5),                                   sampler             }},
-    { STATE_SAMPLER(6),                                   { STATE_SAMPLER(6),                                   sampler             }},
-    { STATE_SAMPLER(7),                                   { STATE_SAMPLER(7),                                   sampler             }},
-    { STATE_SAMPLER(8),                                   { STATE_SAMPLER(8),                                   sampler             }},
-    { STATE_SAMPLER(9),                                   { STATE_SAMPLER(9),                                   sampler             }},
-    { STATE_SAMPLER(10),                                  { STATE_SAMPLER(10),                                  sampler             }},
-    { STATE_SAMPLER(11),                                  { STATE_SAMPLER(11),                                  sampler             }},
-    { STATE_SAMPLER(12),                                  { STATE_SAMPLER(12),                                  sampler             }},
-    { STATE_SAMPLER(13),                                  { STATE_SAMPLER(13),                                  sampler             }},
-    { STATE_SAMPLER(14),                                  { STATE_SAMPLER(14),                                  sampler             }},
-    { STATE_SAMPLER(15),                                  { STATE_SAMPLER(15),                                  sampler             }},
-    { STATE_SAMPLER(16), /* Vertex sampler 0 */           { STATE_SAMPLER(16),                                  sampler             }},
-    { STATE_SAMPLER(17), /* Vertex sampler 1 */           { STATE_SAMPLER(17),                                  sampler             }},
-    { STATE_SAMPLER(18), /* Vertex sampler 2 */           { STATE_SAMPLER(18),                                  sampler             }},
-    { STATE_SAMPLER(19), /* Vertex sampler 3 */           { STATE_SAMPLER(19),                                  sampler             }},
-    {0 /* Terminate */,                                   { 0,                                                  0                   }},
+    { STATE_SAMPLER(0),                                   { STATE_SAMPLER(0),                                   sampler             }, 0                               },
+    { STATE_SAMPLER(1),                                   { STATE_SAMPLER(1),                                   sampler             }, 0                               },
+    { STATE_SAMPLER(2),                                   { STATE_SAMPLER(2),                                   sampler             }, 0                               },
+    { STATE_SAMPLER(3),                                   { STATE_SAMPLER(3),                                   sampler             }, 0                               },
+    { STATE_SAMPLER(4),                                   { STATE_SAMPLER(4),                                   sampler             }, 0                               },
+    { STATE_SAMPLER(5),                                   { STATE_SAMPLER(5),                                   sampler             }, 0                               },
+    { STATE_SAMPLER(6),                                   { STATE_SAMPLER(6),                                   sampler             }, 0                               },
+    { STATE_SAMPLER(7),                                   { STATE_SAMPLER(7),                                   sampler             }, 0                               },
+    { STATE_SAMPLER(8),                                   { STATE_SAMPLER(8),                                   sampler             }, 0                               },
+    { STATE_SAMPLER(9),                                   { STATE_SAMPLER(9),                                   sampler             }, 0                               },
+    { STATE_SAMPLER(10),                                  { STATE_SAMPLER(10),                                  sampler             }, 0                               },
+    { STATE_SAMPLER(11),                                  { STATE_SAMPLER(11),                                  sampler             }, 0                               },
+    { STATE_SAMPLER(12),                                  { STATE_SAMPLER(12),                                  sampler             }, 0                               },
+    { STATE_SAMPLER(13),                                  { STATE_SAMPLER(13),                                  sampler             }, 0                               },
+    { STATE_SAMPLER(14),                                  { STATE_SAMPLER(14),                                  sampler             }, 0                               },
+    { STATE_SAMPLER(15),                                  { STATE_SAMPLER(15),                                  sampler             }, 0                               },
+    { STATE_SAMPLER(16), /* Vertex sampler 0 */           { STATE_SAMPLER(16),                                  sampler             }, 0                               },
+    { STATE_SAMPLER(17), /* Vertex sampler 1 */           { STATE_SAMPLER(17),                                  sampler             }, 0                               },
+    { STATE_SAMPLER(18), /* Vertex sampler 2 */           { STATE_SAMPLER(18),                                  sampler             }, 0                               },
+    { STATE_SAMPLER(19), /* Vertex sampler 3 */           { STATE_SAMPLER(19),                                  sampler             }, 0                               },
+    {0 /* Terminate */,                                   { 0,                                                  0                   }, 0                               },
 };
 
 const struct StateEntryTemplate ffp_vertexstate_template[] = {
-    { STATE_VDECL,                                        { STATE_VDECL,                                        vertexdeclaration   }},
-    { STATE_VSHADER,                                      { STATE_VDECL,                                        vertexdeclaration   }},
-    { STATE_MATERIAL,                                     { STATE_RENDER(WINED3DRS_SPECULARENABLE),             state_specularenable}},
-    { STATE_RENDER(WINED3DRS_SPECULARENABLE),             { STATE_RENDER(WINED3DRS_SPECULARENABLE),             state_specularenable}},
+    { STATE_VDECL,                                        { STATE_VDECL,                                        vertexdeclaration   }, 0                               },
+    { STATE_VSHADER,                                      { STATE_VDECL,                                        vertexdeclaration   }, 0                               },
+    { STATE_MATERIAL,                                     { STATE_RENDER(WINED3DRS_SPECULARENABLE),             state_specularenable}, 0                               },
+    { STATE_RENDER(WINED3DRS_SPECULARENABLE),             { STATE_RENDER(WINED3DRS_SPECULARENABLE),             state_specularenable}, 0                               },
       /* Clip planes */
-    { STATE_CLIPPLANE(0),                                 { STATE_CLIPPLANE(0),                                 clipplane           }},
-    { STATE_CLIPPLANE(1),                                 { STATE_CLIPPLANE(1),                                 clipplane           }},
-    { STATE_CLIPPLANE(2),                                 { STATE_CLIPPLANE(2),                                 clipplane           }},
-    { STATE_CLIPPLANE(3),                                 { STATE_CLIPPLANE(3),                                 clipplane           }},
-    { STATE_CLIPPLANE(4),                                 { STATE_CLIPPLANE(4),                                 clipplane           }},
-    { STATE_CLIPPLANE(5),                                 { STATE_CLIPPLANE(5),                                 clipplane           }},
-    { STATE_CLIPPLANE(6),                                 { STATE_CLIPPLANE(6),                                 clipplane           }},
-    { STATE_CLIPPLANE(7),                                 { STATE_CLIPPLANE(7),                                 clipplane           }},
-    { STATE_CLIPPLANE(8),                                 { STATE_CLIPPLANE(8),                                 clipplane           }},
-    { STATE_CLIPPLANE(9),                                 { STATE_CLIPPLANE(9),                                 clipplane           }},
-    { STATE_CLIPPLANE(10),                                { STATE_CLIPPLANE(10),                                clipplane           }},
-    { STATE_CLIPPLANE(11),                                { STATE_CLIPPLANE(11),                                clipplane           }},
-    { STATE_CLIPPLANE(12),                                { STATE_CLIPPLANE(12),                                clipplane           }},
-    { STATE_CLIPPLANE(13),                                { STATE_CLIPPLANE(13),                                clipplane           }},
-    { STATE_CLIPPLANE(14),                                { STATE_CLIPPLANE(14),                                clipplane           }},
-    { STATE_CLIPPLANE(15),                                { STATE_CLIPPLANE(15),                                clipplane           }},
-    { STATE_CLIPPLANE(16),                                { STATE_CLIPPLANE(16),                                clipplane           }},
-    { STATE_CLIPPLANE(17),                                { STATE_CLIPPLANE(17),                                clipplane           }},
-    { STATE_CLIPPLANE(18),                                { STATE_CLIPPLANE(18),                                clipplane           }},
-    { STATE_CLIPPLANE(19),                                { STATE_CLIPPLANE(19),                                clipplane           }},
-    { STATE_CLIPPLANE(20),                                { STATE_CLIPPLANE(20),                                clipplane           }},
-    { STATE_CLIPPLANE(21),                                { STATE_CLIPPLANE(21),                                clipplane           }},
-    { STATE_CLIPPLANE(22),                                { STATE_CLIPPLANE(22),                                clipplane           }},
-    { STATE_CLIPPLANE(23),                                { STATE_CLIPPLANE(23),                                clipplane           }},
-    { STATE_CLIPPLANE(24),                                { STATE_CLIPPLANE(24),                                clipplane           }},
-    { STATE_CLIPPLANE(25),                                { STATE_CLIPPLANE(25),                                clipplane           }},
-    { STATE_CLIPPLANE(26),                                { STATE_CLIPPLANE(26),                                clipplane           }},
-    { STATE_CLIPPLANE(27),                                { STATE_CLIPPLANE(27),                                clipplane           }},
-    { STATE_CLIPPLANE(28),                                { STATE_CLIPPLANE(28),                                clipplane           }},
-    { STATE_CLIPPLANE(29),                                { STATE_CLIPPLANE(29),                                clipplane           }},
-    { STATE_CLIPPLANE(30),                                { STATE_CLIPPLANE(30),                                clipplane           }},
-    { STATE_CLIPPLANE(31),                                { STATE_CLIPPLANE(31),                                clipplane           }},
+    { STATE_CLIPPLANE(0),                                 { STATE_CLIPPLANE(0),                                 clipplane           }, 0                               },
+    { STATE_CLIPPLANE(1),                                 { STATE_CLIPPLANE(1),                                 clipplane           }, 0                               },
+    { STATE_CLIPPLANE(2),                                 { STATE_CLIPPLANE(2),                                 clipplane           }, 0                               },
+    { STATE_CLIPPLANE(3),                                 { STATE_CLIPPLANE(3),                                 clipplane           }, 0                               },
+    { STATE_CLIPPLANE(4),                                 { STATE_CLIPPLANE(4),                                 clipplane           }, 0                               },
+    { STATE_CLIPPLANE(5),                                 { STATE_CLIPPLANE(5),                                 clipplane           }, 0                               },
+    { STATE_CLIPPLANE(6),                                 { STATE_CLIPPLANE(6),                                 clipplane           }, 0                               },
+    { STATE_CLIPPLANE(7),                                 { STATE_CLIPPLANE(7),                                 clipplane           }, 0                               },
+    { STATE_CLIPPLANE(8),                                 { STATE_CLIPPLANE(8),                                 clipplane           }, 0                               },
+    { STATE_CLIPPLANE(9),                                 { STATE_CLIPPLANE(9),                                 clipplane           }, 0                               },
+    { STATE_CLIPPLANE(10),                                { STATE_CLIPPLANE(10),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(11),                                { STATE_CLIPPLANE(11),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(12),                                { STATE_CLIPPLANE(12),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(13),                                { STATE_CLIPPLANE(13),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(14),                                { STATE_CLIPPLANE(14),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(15),                                { STATE_CLIPPLANE(15),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(16),                                { STATE_CLIPPLANE(16),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(17),                                { STATE_CLIPPLANE(17),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(18),                                { STATE_CLIPPLANE(18),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(19),                                { STATE_CLIPPLANE(19),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(20),                                { STATE_CLIPPLANE(20),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(21),                                { STATE_CLIPPLANE(21),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(22),                                { STATE_CLIPPLANE(22),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(23),                                { STATE_CLIPPLANE(23),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(24),                                { STATE_CLIPPLANE(24),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(25),                                { STATE_CLIPPLANE(25),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(26),                                { STATE_CLIPPLANE(26),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(27),                                { STATE_CLIPPLANE(27),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(28),                                { STATE_CLIPPLANE(28),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(29),                                { STATE_CLIPPLANE(29),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(30),                                { STATE_CLIPPLANE(30),                                clipplane           }, 0                               },
+    { STATE_CLIPPLANE(31),                                { STATE_CLIPPLANE(31),                                clipplane           }, 0                               },
       /* Lights */
-    { STATE_ACTIVELIGHT(0),                               { STATE_ACTIVELIGHT(0),                               light               }},
-    { STATE_ACTIVELIGHT(1),                               { STATE_ACTIVELIGHT(1),                               light               }},
-    { STATE_ACTIVELIGHT(2),                               { STATE_ACTIVELIGHT(2),                               light               }},
-    { STATE_ACTIVELIGHT(3),                               { STATE_ACTIVELIGHT(3),                               light               }},
-    { STATE_ACTIVELIGHT(4),                               { STATE_ACTIVELIGHT(4),                               light               }},
-    { STATE_ACTIVELIGHT(5),                               { STATE_ACTIVELIGHT(5),                               light               }},
-    { STATE_ACTIVELIGHT(6),                               { STATE_ACTIVELIGHT(6),                               light               }},
-    { STATE_ACTIVELIGHT(7),                               { STATE_ACTIVELIGHT(7),                               light               }},
+    { STATE_ACTIVELIGHT(0),                               { STATE_ACTIVELIGHT(0),                               light               }, 0                               },
+    { STATE_ACTIVELIGHT(1),                               { STATE_ACTIVELIGHT(1),                               light               }, 0                               },
+    { STATE_ACTIVELIGHT(2),                               { STATE_ACTIVELIGHT(2),                               light               }, 0                               },
+    { STATE_ACTIVELIGHT(3),                               { STATE_ACTIVELIGHT(3),                               light               }, 0                               },
+    { STATE_ACTIVELIGHT(4),                               { STATE_ACTIVELIGHT(4),                               light               }, 0                               },
+    { STATE_ACTIVELIGHT(5),                               { STATE_ACTIVELIGHT(5),                               light               }, 0                               },
+    { STATE_ACTIVELIGHT(6),                               { STATE_ACTIVELIGHT(6),                               light               }, 0                               },
+    { STATE_ACTIVELIGHT(7),                               { STATE_ACTIVELIGHT(7),                               light               }, 0                               },
     /* Viewport */
-    { STATE_VIEWPORT,                                     { STATE_VIEWPORT,                                     viewport_vertexpart }},
+    { STATE_VIEWPORT,                                     { STATE_VIEWPORT,                                     viewport_vertexpart }, 0                               },
       /* Transform states follow                    */
-    { STATE_TRANSFORM(WINED3DTS_VIEW),                    { STATE_TRANSFORM(WINED3DTS_VIEW),                    transform_view      }},
-    { STATE_TRANSFORM(WINED3DTS_PROJECTION),              { STATE_TRANSFORM(WINED3DTS_PROJECTION),              transform_projection}},
-    { STATE_TRANSFORM(WINED3DTS_TEXTURE0),                { STATE_TRANSFORM(WINED3DTS_TEXTURE0),                transform_texture   }},
-    { STATE_TRANSFORM(WINED3DTS_TEXTURE1),                { STATE_TRANSFORM(WINED3DTS_TEXTURE1),                transform_texture   }},
-    { STATE_TRANSFORM(WINED3DTS_TEXTURE2),                { STATE_TRANSFORM(WINED3DTS_TEXTURE2),                transform_texture   }},
-    { STATE_TRANSFORM(WINED3DTS_TEXTURE3),                { STATE_TRANSFORM(WINED3DTS_TEXTURE3),                transform_texture   }},
-    { STATE_TRANSFORM(WINED3DTS_TEXTURE4),                { STATE_TRANSFORM(WINED3DTS_TEXTURE4),                transform_texture   }},
-    { STATE_TRANSFORM(WINED3DTS_TEXTURE5),                { STATE_TRANSFORM(WINED3DTS_TEXTURE5),                transform_texture   }},
-    { STATE_TRANSFORM(WINED3DTS_TEXTURE6),                { STATE_TRANSFORM(WINED3DTS_TEXTURE6),                transform_texture   }},
-    { STATE_TRANSFORM(WINED3DTS_TEXTURE7),                { STATE_TRANSFORM(WINED3DTS_TEXTURE7),                transform_texture   }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  0)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  0)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  1)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  1)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  2)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  2)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  3)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  3)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  4)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  4)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  5)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  5)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  6)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  6)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  7)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  7)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  8)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  8)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  9)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  9)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 10)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 10)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 11)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 11)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 12)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 12)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 13)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 13)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 14)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 14)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 15)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 15)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 16)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 16)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 17)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 17)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 18)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 18)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 19)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 19)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 20)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 20)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 21)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 21)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 22)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 22)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 23)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 23)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 24)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 24)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 25)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 25)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 26)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 26)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 27)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 27)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 28)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 28)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 29)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 29)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 30)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 30)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 31)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 31)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 32)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 32)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 33)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 33)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 34)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 34)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 35)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 35)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 36)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 36)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 37)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 37)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 38)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 38)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 39)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 39)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 40)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 40)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 41)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 41)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 42)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 42)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 43)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 43)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 44)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 44)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 45)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 45)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 46)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 46)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 47)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 47)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 48)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 48)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 49)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 49)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 50)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 50)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 51)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 51)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 52)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 52)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 53)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 53)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 54)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 54)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 55)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 55)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 56)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 56)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 57)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 57)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 58)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 58)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 59)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 59)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 60)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 60)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 61)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 61)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 62)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 62)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 63)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 63)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 64)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 64)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 65)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 65)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 66)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 66)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 67)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 67)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 68)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 68)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 69)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 69)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 70)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 70)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 71)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 71)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 72)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 72)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 73)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 73)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 74)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 74)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 75)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 75)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 76)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 76)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 77)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 77)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 78)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 78)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 79)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 79)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 80)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 80)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 81)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 81)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 82)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 82)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 83)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 83)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 84)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 84)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 85)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 85)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 86)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 86)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 87)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 87)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 88)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 88)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 89)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 89)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 90)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 90)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 91)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 91)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 92)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 92)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 93)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 93)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 94)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 94)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 95)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 95)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 96)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 96)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 97)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 97)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 98)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 98)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 99)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 99)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(100)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(100)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(101)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(101)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(102)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(102)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(103)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(103)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(104)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(104)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(105)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(105)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(106)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(106)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(107)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(107)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(108)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(108)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(109)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(109)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(110)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(110)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(111)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(111)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(112)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(112)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(113)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(113)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(114)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(114)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(115)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(115)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(116)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(116)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(117)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(117)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(118)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(118)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(119)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(119)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(120)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(120)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(121)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(121)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(122)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(122)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(123)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(123)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(124)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(124)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(125)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(125)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(126)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(126)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(127)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(127)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(128)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(128)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(129)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(129)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(130)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(130)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(131)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(131)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(132)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(132)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(133)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(133)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(134)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(134)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(135)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(135)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(136)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(136)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(137)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(137)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(138)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(138)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(139)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(139)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(140)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(140)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(141)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(141)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(142)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(142)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(143)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(143)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(144)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(144)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(145)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(145)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(146)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(146)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(147)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(147)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(148)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(148)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(149)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(149)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(150)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(150)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(151)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(151)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(152)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(152)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(153)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(153)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(154)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(154)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(155)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(155)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(156)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(156)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(157)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(157)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(158)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(158)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(159)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(159)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(160)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(160)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(161)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(161)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(162)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(162)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(163)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(163)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(164)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(164)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(165)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(165)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(166)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(166)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(167)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(167)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(168)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(168)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(169)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(169)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(170)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(170)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(171)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(171)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(172)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(172)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(173)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(173)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(174)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(174)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(175)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(175)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(176)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(176)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(177)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(177)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(178)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(178)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(179)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(179)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(180)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(180)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(181)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(181)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(182)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(182)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(183)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(183)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(184)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(184)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(185)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(185)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(186)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(186)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(187)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(187)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(188)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(188)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(189)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(189)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(190)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(190)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(191)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(191)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(192)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(192)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(193)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(193)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(194)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(194)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(195)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(195)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(196)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(196)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(197)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(197)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(198)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(198)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(199)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(199)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(200)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(200)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(201)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(201)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(202)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(202)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(203)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(203)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(204)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(204)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(205)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(205)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(206)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(206)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(207)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(207)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(208)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(208)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(209)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(209)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(210)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(210)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(211)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(211)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(212)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(212)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(213)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(213)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(214)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(214)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(215)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(215)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(216)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(216)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(217)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(217)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(218)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(218)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(219)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(219)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(220)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(220)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(221)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(221)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(222)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(222)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(223)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(223)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(224)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(224)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(225)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(225)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(226)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(226)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(227)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(227)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(228)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(228)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(229)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(229)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(230)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(230)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(231)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(231)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(232)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(232)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(233)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(233)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(234)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(234)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(235)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(235)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(236)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(236)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(237)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(237)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(238)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(238)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(239)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(239)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(240)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(240)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(241)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(241)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(242)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(242)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(243)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(243)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(244)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(244)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(245)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(245)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(246)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(246)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(247)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(247)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(248)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(248)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(249)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(249)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(250)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(250)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(251)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(251)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(252)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(252)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(253)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(253)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(254)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(254)),        transform_world     }},
-    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(255)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(255)),        transform_world     }},
-    { STATE_TEXTURESTAGE(0,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE0),              transform_texture   }},
-    { STATE_TEXTURESTAGE(1,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE1),              transform_texture   }},
-    { STATE_TEXTURESTAGE(2,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE2),              transform_texture   }},
-    { STATE_TEXTURESTAGE(3,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE3),              transform_texture   }},
-    { STATE_TEXTURESTAGE(4,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE4),              transform_texture   }},
-    { STATE_TEXTURESTAGE(5,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE5),              transform_texture   }},
-    { STATE_TEXTURESTAGE(6,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE6),              transform_texture   }},
-    { STATE_TEXTURESTAGE(7,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE7),              transform_texture   }},
+    { STATE_TRANSFORM(WINED3DTS_VIEW),                    { STATE_TRANSFORM(WINED3DTS_VIEW),                    transform_view      }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_PROJECTION),              { STATE_TRANSFORM(WINED3DTS_PROJECTION),              transform_projection}, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_TEXTURE0),                { STATE_TRANSFORM(WINED3DTS_TEXTURE0),                transform_texture   }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_TEXTURE1),                { STATE_TRANSFORM(WINED3DTS_TEXTURE1),                transform_texture   }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_TEXTURE2),                { STATE_TRANSFORM(WINED3DTS_TEXTURE2),                transform_texture   }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_TEXTURE3),                { STATE_TRANSFORM(WINED3DTS_TEXTURE3),                transform_texture   }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_TEXTURE4),                { STATE_TRANSFORM(WINED3DTS_TEXTURE4),                transform_texture   }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_TEXTURE5),                { STATE_TRANSFORM(WINED3DTS_TEXTURE5),                transform_texture   }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_TEXTURE6),                { STATE_TRANSFORM(WINED3DTS_TEXTURE6),                transform_texture   }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_TEXTURE7),                { STATE_TRANSFORM(WINED3DTS_TEXTURE7),                transform_texture   }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  0)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  0)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  1)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  1)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  2)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  2)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  3)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  3)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  4)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  4)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  5)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  5)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  6)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  6)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  7)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  7)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  8)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  8)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  9)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(  9)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 10)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 10)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 11)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 11)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 12)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 12)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 13)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 13)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 14)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 14)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 15)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 15)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 16)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 16)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 17)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 17)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 18)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 18)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 19)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 19)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 20)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 20)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 21)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 21)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 22)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 22)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 23)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 23)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 24)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 24)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 25)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 25)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 26)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 26)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 27)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 27)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 28)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 28)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 29)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 29)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 30)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 30)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 31)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 31)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 32)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 32)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 33)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 33)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 34)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 34)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 35)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 35)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 36)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 36)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 37)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 37)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 38)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 38)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 39)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 39)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 40)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 40)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 41)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 41)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 42)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 42)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 43)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 43)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 44)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 44)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 45)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 45)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 46)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 46)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 47)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 47)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 48)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 48)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 49)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 49)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 50)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 50)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 51)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 51)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 52)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 52)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 53)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 53)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 54)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 54)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 55)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 55)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 56)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 56)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 57)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 57)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 58)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 58)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 59)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 59)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 60)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 60)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 61)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 61)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 62)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 62)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 63)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 63)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 64)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 64)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 65)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 65)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 66)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 66)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 67)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 67)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 68)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 68)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 69)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 69)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 70)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 70)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 71)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 71)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 72)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 72)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 73)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 73)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 74)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 74)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 75)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 75)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 76)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 76)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 77)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 77)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 78)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 78)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 79)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 79)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 80)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 80)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 81)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 81)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 82)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 82)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 83)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 83)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 84)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 84)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 85)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 85)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 86)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 86)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 87)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 87)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 88)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 88)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 89)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 89)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 90)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 90)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 91)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 91)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 92)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 92)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 93)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 93)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 94)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 94)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 95)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 95)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 96)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 96)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 97)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 97)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 98)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 98)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 99)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX( 99)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(100)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(100)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(101)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(101)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(102)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(102)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(103)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(103)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(104)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(104)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(105)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(105)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(106)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(106)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(107)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(107)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(108)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(108)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(109)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(109)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(110)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(110)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(111)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(111)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(112)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(112)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(113)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(113)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(114)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(114)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(115)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(115)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(116)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(116)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(117)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(117)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(118)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(118)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(119)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(119)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(120)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(120)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(121)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(121)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(122)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(122)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(123)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(123)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(124)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(124)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(125)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(125)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(126)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(126)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(127)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(127)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(128)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(128)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(129)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(129)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(130)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(130)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(131)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(131)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(132)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(132)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(133)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(133)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(134)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(134)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(135)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(135)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(136)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(136)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(137)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(137)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(138)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(138)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(139)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(139)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(140)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(140)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(141)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(141)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(142)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(142)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(143)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(143)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(144)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(144)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(145)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(145)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(146)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(146)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(147)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(147)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(148)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(148)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(149)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(149)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(150)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(150)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(151)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(151)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(152)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(152)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(153)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(153)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(154)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(154)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(155)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(155)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(156)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(156)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(157)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(157)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(158)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(158)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(159)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(159)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(160)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(160)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(161)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(161)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(162)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(162)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(163)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(163)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(164)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(164)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(165)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(165)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(166)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(166)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(167)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(167)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(168)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(168)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(169)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(169)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(170)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(170)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(171)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(171)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(172)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(172)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(173)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(173)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(174)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(174)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(175)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(175)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(176)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(176)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(177)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(177)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(178)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(178)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(179)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(179)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(180)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(180)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(181)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(181)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(182)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(182)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(183)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(183)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(184)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(184)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(185)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(185)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(186)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(186)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(187)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(187)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(188)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(188)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(189)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(189)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(190)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(190)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(191)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(191)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(192)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(192)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(193)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(193)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(194)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(194)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(195)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(195)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(196)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(196)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(197)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(197)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(198)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(198)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(199)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(199)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(200)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(200)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(201)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(201)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(202)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(202)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(203)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(203)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(204)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(204)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(205)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(205)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(206)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(206)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(207)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(207)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(208)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(208)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(209)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(209)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(210)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(210)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(211)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(211)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(212)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(212)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(213)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(213)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(214)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(214)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(215)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(215)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(216)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(216)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(217)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(217)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(218)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(218)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(219)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(219)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(220)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(220)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(221)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(221)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(222)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(222)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(223)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(223)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(224)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(224)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(225)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(225)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(226)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(226)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(227)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(227)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(228)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(228)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(229)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(229)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(230)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(230)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(231)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(231)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(232)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(232)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(233)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(233)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(234)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(234)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(235)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(235)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(236)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(236)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(237)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(237)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(238)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(238)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(239)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(239)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(240)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(240)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(241)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(241)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(242)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(242)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(243)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(243)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(244)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(244)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(245)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(245)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(246)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(246)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(247)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(247)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(248)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(248)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(249)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(249)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(250)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(250)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(251)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(251)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(252)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(252)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(253)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(253)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(254)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(254)),        transform_world     }, 0                               },
+    { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(255)),        { STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(255)),        transform_world     }, 0                               },
+    { STATE_TEXTURESTAGE(0,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE0),              transform_texture   }, 0                               },
+    { STATE_TEXTURESTAGE(1,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE1),              transform_texture   }, 0                               },
+    { STATE_TEXTURESTAGE(2,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE2),              transform_texture   }, 0                               },
+    { STATE_TEXTURESTAGE(3,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE3),              transform_texture   }, 0                               },
+    { STATE_TEXTURESTAGE(4,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE4),              transform_texture   }, 0                               },
+    { STATE_TEXTURESTAGE(5,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE5),              transform_texture   }, 0                               },
+    { STATE_TEXTURESTAGE(6,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE6),              transform_texture   }, 0                               },
+    { STATE_TEXTURESTAGE(7,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TRANSFORM(WINED3DTS_TEXTURE7),              transform_texture   }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(0, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(1, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(2, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(3, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(4, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(5, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(6, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(7, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }, 0                               },
       /* Fog */
-    { STATE_RENDER(WINED3DRS_FOGENABLE),                  { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_fog           }},
-    { STATE_RENDER(WINED3DRS_FOGTABLEMODE),               { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_fog           }},
-    { STATE_RENDER(WINED3DRS_FOGSTART),                   { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_fog           }},
-    { STATE_RENDER(WINED3DRS_FOGEND),                     { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_fog           }},
-    { STATE_RENDER(WINED3DRS_FOGVERTEXMODE),              { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_fog           }},
-    { STATE_RENDER(WINED3DRS_FOGCOLOR),                   { STATE_RENDER(WINED3DRS_FOGCOLOR),                   state_fogcolor      }},
-    { STATE_RENDER(WINED3DRS_FOGDENSITY),                 { STATE_RENDER(WINED3DRS_FOGDENSITY),                 state_fogdensity    }},
-    { STATE_RENDER(WINED3DRS_RANGEFOGENABLE),             { STATE_RENDER(WINED3DRS_RANGEFOGENABLE),             state_rangefog      }},
-    { STATE_RENDER(WINED3DRS_CLIPPING),                   { STATE_RENDER(WINED3DRS_CLIPPING),                   state_clipping      }},
-    { STATE_RENDER(WINED3DRS_CLIPPLANEENABLE),            { STATE_RENDER(WINED3DRS_CLIPPING),                   state_clipping      }},
-    { STATE_RENDER(WINED3DRS_LIGHTING),                   { STATE_RENDER(WINED3DRS_LIGHTING),                   state_lighting      }},
-    { STATE_RENDER(WINED3DRS_AMBIENT),                    { STATE_RENDER(WINED3DRS_AMBIENT),                    state_ambient       }},
-    { STATE_RENDER(WINED3DRS_COLORVERTEX),                { STATE_RENDER(WINED3DRS_COLORVERTEX),                state_colormat      }},
-    { STATE_RENDER(WINED3DRS_LOCALVIEWER),                { STATE_RENDER(WINED3DRS_LOCALVIEWER),                state_localviewer   }},
-    { STATE_RENDER(WINED3DRS_NORMALIZENORMALS),           { STATE_RENDER(WINED3DRS_NORMALIZENORMALS),           state_normalize     }},
-    { STATE_RENDER(WINED3DRS_DIFFUSEMATERIALSOURCE),      { STATE_RENDER(WINED3DRS_COLORVERTEX),                state_colormat      }},
-    { STATE_RENDER(WINED3DRS_SPECULARMATERIALSOURCE),     { STATE_RENDER(WINED3DRS_COLORVERTEX),                state_colormat      }},
-    { STATE_RENDER(WINED3DRS_AMBIENTMATERIALSOURCE),      { STATE_RENDER(WINED3DRS_COLORVERTEX),                state_colormat      }},
-    { STATE_RENDER(WINED3DRS_EMISSIVEMATERIALSOURCE),     { STATE_RENDER(WINED3DRS_COLORVERTEX),                state_colormat      }},
-    { STATE_RENDER(WINED3DRS_VERTEXBLEND),                { STATE_RENDER(WINED3DRS_VERTEXBLEND),                state_vertexblend   }},
-    { STATE_RENDER(WINED3DRS_POINTSIZE),                  { STATE_RENDER(WINED3DRS_POINTSCALEENABLE),           state_pscale        }},
-    { STATE_RENDER(WINED3DRS_POINTSIZE_MIN),              { STATE_RENDER(WINED3DRS_POINTSIZE_MIN),              state_psizemin      }},
-    { STATE_RENDER(WINED3DRS_POINTSPRITEENABLE),          { STATE_RENDER(WINED3DRS_POINTSPRITEENABLE),          state_pointsprite   }},
-    { STATE_RENDER(WINED3DRS_POINTSCALEENABLE),           { STATE_RENDER(WINED3DRS_POINTSCALEENABLE),           state_pscale        }},
-    { STATE_RENDER(WINED3DRS_POINTSCALE_A),               { STATE_RENDER(WINED3DRS_POINTSCALEENABLE),           state_pscale        }},
-    { STATE_RENDER(WINED3DRS_POINTSCALE_B),               { STATE_RENDER(WINED3DRS_POINTSCALEENABLE),           state_pscale        }},
-    { STATE_RENDER(WINED3DRS_POINTSCALE_C),               { STATE_RENDER(WINED3DRS_POINTSCALEENABLE),           state_pscale        }},
-    { STATE_RENDER(WINED3DRS_POINTSIZE_MAX),              { STATE_RENDER(WINED3DRS_POINTSIZE_MAX),              state_psizemax      }},
-    {0 /* Terminate */,                                   { 0,                                                  0                   }},
+    { STATE_RENDER(WINED3DRS_FOGENABLE),                  { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_fog           }, 0                               },
+    { STATE_RENDER(WINED3DRS_FOGTABLEMODE),               { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_fog           }, 0                               },
+    { STATE_RENDER(WINED3DRS_FOGSTART),                   { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_fog           }, 0                               },
+    { STATE_RENDER(WINED3DRS_FOGEND),                     { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_fog           }, 0                               },
+    { STATE_RENDER(WINED3DRS_FOGVERTEXMODE),              { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_fog           }, 0                               },
+    { STATE_RENDER(WINED3DRS_FOGCOLOR),                   { STATE_RENDER(WINED3DRS_FOGCOLOR),                   state_fogcolor      }, 0                               },
+    { STATE_RENDER(WINED3DRS_FOGDENSITY),                 { STATE_RENDER(WINED3DRS_FOGDENSITY),                 state_fogdensity    }, 0                               },
+    { STATE_RENDER(WINED3DRS_RANGEFOGENABLE),             { STATE_RENDER(WINED3DRS_RANGEFOGENABLE),             state_rangefog      }, NV_FOG_DISTANCE                 },
+    { STATE_RENDER(WINED3DRS_RANGEFOGENABLE),             { STATE_RENDER(WINED3DRS_RANGEFOGENABLE),             state_rangefog_w    }, 0                               },
+    { STATE_RENDER(WINED3DRS_CLIPPING),                   { STATE_RENDER(WINED3DRS_CLIPPING),                   state_clipping      }, 0                               },
+    { STATE_RENDER(WINED3DRS_CLIPPLANEENABLE),            { STATE_RENDER(WINED3DRS_CLIPPING),                   state_clipping      }, 0                               },
+    { STATE_RENDER(WINED3DRS_LIGHTING),                   { STATE_RENDER(WINED3DRS_LIGHTING),                   state_lighting      }, 0                               },
+    { STATE_RENDER(WINED3DRS_AMBIENT),                    { STATE_RENDER(WINED3DRS_AMBIENT),                    state_ambient       }, 0                               },
+    { STATE_RENDER(WINED3DRS_COLORVERTEX),                { STATE_RENDER(WINED3DRS_COLORVERTEX),                state_colormat      }, 0                               },
+    { STATE_RENDER(WINED3DRS_LOCALVIEWER),                { STATE_RENDER(WINED3DRS_LOCALVIEWER),                state_localviewer   }, 0                               },
+    { STATE_RENDER(WINED3DRS_NORMALIZENORMALS),           { STATE_RENDER(WINED3DRS_NORMALIZENORMALS),           state_normalize     }, 0                               },
+    { STATE_RENDER(WINED3DRS_DIFFUSEMATERIALSOURCE),      { STATE_RENDER(WINED3DRS_COLORVERTEX),                state_colormat      }, 0                               },
+    { STATE_RENDER(WINED3DRS_SPECULARMATERIALSOURCE),     { STATE_RENDER(WINED3DRS_COLORVERTEX),                state_colormat      }, 0                               },
+    { STATE_RENDER(WINED3DRS_AMBIENTMATERIALSOURCE),      { STATE_RENDER(WINED3DRS_COLORVERTEX),                state_colormat      }, 0                               },
+    { STATE_RENDER(WINED3DRS_EMISSIVEMATERIALSOURCE),     { STATE_RENDER(WINED3DRS_COLORVERTEX),                state_colormat      }, 0                               },
+    { STATE_RENDER(WINED3DRS_VERTEXBLEND),                { STATE_RENDER(WINED3DRS_VERTEXBLEND),                state_vertexblend   }, ARB_VERTEX_BLEND                },
+    { STATE_RENDER(WINED3DRS_VERTEXBLEND),                { STATE_RENDER(WINED3DRS_VERTEXBLEND),                state_vertexblend_w }, 0                               },
+    { STATE_RENDER(WINED3DRS_POINTSIZE),                  { STATE_RENDER(WINED3DRS_POINTSCALEENABLE),           state_pscale        }, 0                               },
+    { STATE_RENDER(WINED3DRS_POINTSIZE_MIN),              { STATE_RENDER(WINED3DRS_POINTSIZE_MIN),              state_psizemin_arb  }, ARB_POINT_PARAMETERS            },
+    { STATE_RENDER(WINED3DRS_POINTSIZE_MIN),              { STATE_RENDER(WINED3DRS_POINTSIZE_MIN),              state_psizemin_ext  }, EXT_POINT_PARAMETERS            },
+    { STATE_RENDER(WINED3DRS_POINTSIZE_MIN),              { STATE_RENDER(WINED3DRS_POINTSIZE_MIN),              state_psizemin_w    }, 0                               },
+    { STATE_RENDER(WINED3DRS_POINTSPRITEENABLE),          { STATE_RENDER(WINED3DRS_POINTSPRITEENABLE),          state_pointsprite   }, ARB_POINT_SPRITE                },
+    { STATE_RENDER(WINED3DRS_POINTSPRITEENABLE),          { STATE_RENDER(WINED3DRS_POINTSPRITEENABLE),          state_pointsprite_w }, 0                               },
+    { STATE_RENDER(WINED3DRS_POINTSCALEENABLE),           { STATE_RENDER(WINED3DRS_POINTSCALEENABLE),           state_pscale        }, 0                               },
+    { STATE_RENDER(WINED3DRS_POINTSCALE_A),               { STATE_RENDER(WINED3DRS_POINTSCALEENABLE),           state_pscale        }, 0                               },
+    { STATE_RENDER(WINED3DRS_POINTSCALE_B),               { STATE_RENDER(WINED3DRS_POINTSCALEENABLE),           state_pscale        }, 0                               },
+    { STATE_RENDER(WINED3DRS_POINTSCALE_C),               { STATE_RENDER(WINED3DRS_POINTSCALEENABLE),           state_pscale        }, 0                               },
+    { STATE_RENDER(WINED3DRS_POINTSIZE_MAX),              { STATE_RENDER(WINED3DRS_POINTSIZE_MAX),              state_psizemax_arb  }, ARB_POINT_PARAMETERS            },
+    { STATE_RENDER(WINED3DRS_POINTSIZE_MAX),              { STATE_RENDER(WINED3DRS_POINTSIZE_MAX),              state_psizemax_ext  }, EXT_POINT_PARAMETERS            },
+    { STATE_RENDER(WINED3DRS_POINTSIZE_MAX),              { STATE_RENDER(WINED3DRS_POINTSIZE_MAX),              state_psizemax_w    }, 0                               },
+    /* Samplers for NP2 texture matrix adjustions. They are not needed if GL_ARB_texture_non_power_of_two is supported,
+     * so register a NULL state handler in that case to get the vertex part of sampler() skipped(VTF is handled in the misc states.
+     * otherwise, register sampler_texmatrix, which takes care of updating the texture matrix
+     */
+    { STATE_SAMPLER(0),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
+    { STATE_SAMPLER(0),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(0),                                   { STATE_SAMPLER(0),                                   sampler_texmatrix   }, 0                               },
+    { STATE_SAMPLER(1),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
+    { STATE_SAMPLER(1),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(1),                                   { STATE_SAMPLER(1),                                   sampler_texmatrix   }, 0                               },
+    { STATE_SAMPLER(2),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
+    { STATE_SAMPLER(2),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(2),                                   { STATE_SAMPLER(2),                                   sampler_texmatrix   }, 0                               },
+    { STATE_SAMPLER(3),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
+    { STATE_SAMPLER(3),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(3),                                   { STATE_SAMPLER(3),                                   sampler_texmatrix   }, 0                               },
+    { STATE_SAMPLER(4),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
+    { STATE_SAMPLER(4),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(4),                                   { STATE_SAMPLER(4),                                   sampler_texmatrix   }, 0                               },
+    { STATE_SAMPLER(5),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
+    { STATE_SAMPLER(5),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(5),                                   { STATE_SAMPLER(5),                                   sampler_texmatrix   }, 0                               },
+    { STATE_SAMPLER(6),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
+    { STATE_SAMPLER(6),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(6),                                   { STATE_SAMPLER(6),                                   sampler_texmatrix   }, 0                               },
+    { STATE_SAMPLER(7),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
+    { STATE_SAMPLER(7),                                   { 0,                                                  NULL                }, WINE_NORMALIZED_TEXRECT         },
+    { STATE_SAMPLER(7),                                   { STATE_SAMPLER(7),                                   sampler_texmatrix   }, 0                               },
+    {0 /* Terminate */,                                   { 0,                                                  0                   }, 0                               },
 };
 
 static const struct StateEntryTemplate ffp_fragmentstate_template[] = {
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(0, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(0, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(1, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(1, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(2, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(2, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(3, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(3, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(4, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(4, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(5, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(5, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(6, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(6, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_TEXCOORDINDEX),    { STATE_TEXTURESTAGE(7, WINED3DTSS_TEXCOORDINDEX),    tex_coordindex      }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVLSCALE),    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVLOFFSET),   { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          tex_alphaop         }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         }},
-    { STATE_TEXTURESTAGE(7, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }},
-    { STATE_PIXELSHADER,                                  { STATE_PIXELSHADER,                                  pixelshader         }},
-    { STATE_RENDER(WINED3DRS_SRGBWRITEENABLE),            { STATE_PIXELSHADER,                                  pixelshader         }},
-    { STATE_RENDER(WINED3DRS_BORDERCOLOR),                { STATE_RENDER(WINED3DRS_BORDERCOLOR),                state_bordercolor   }},
-    { STATE_RENDER(WINED3DRS_TEXTUREFACTOR),              { STATE_RENDER(WINED3DRS_TEXTUREFACTOR),              state_texfactor     }},
-    {0 /* Terminate */,                                   { 0,                                                  0                   }},
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(0, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(1, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(2, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(3, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(4, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(5, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(6, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_COLORARG1),        { STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_COLORARG2),        { STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAARG1),        { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAARG2),        { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT01),     { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT10),     { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT11),     { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     tex_bumpenvmat      }, ATI_ENVMAP_BUMPMAP              },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_COLORARG0),        { STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAARG0),        { STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          tex_alphaop         }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_RESULTARG),        { STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         }, 0                               },
+    { STATE_TEXTURESTAGE(7, WINED3DTSS_CONSTANT),         { 0 /* As long as we don't support D3DTA_CONSTANT */, state_nogl          }, 0                               },
+    { STATE_PIXELSHADER,                                  { STATE_PIXELSHADER,                                  apply_pixelshader   }, 0                               },
+    { STATE_RENDER(WINED3DRS_SRGBWRITEENABLE),            { STATE_PIXELSHADER,                                  apply_pixelshader   }, 0                               },
+    { STATE_RENDER(WINED3DRS_BORDERCOLOR),                { STATE_RENDER(WINED3DRS_BORDERCOLOR),                state_bordercolor   }, 0                               },
+    { STATE_RENDER(WINED3DRS_TEXTUREFACTOR),              { STATE_RENDER(WINED3DRS_TEXTUREFACTOR),              state_texfactor     }, 0                               },
+    { STATE_SAMPLER(0),                                   { STATE_SAMPLER(0),                                   sampler_texdim      }, 0                               },
+    { STATE_SAMPLER(1),                                   { STATE_SAMPLER(1),                                   sampler_texdim      }, 0                               },
+    { STATE_SAMPLER(2),                                   { STATE_SAMPLER(2),                                   sampler_texdim      }, 0                               },
+    { STATE_SAMPLER(3),                                   { STATE_SAMPLER(3),                                   sampler_texdim      }, 0                               },
+    { STATE_SAMPLER(4),                                   { STATE_SAMPLER(4),                                   sampler_texdim      }, 0                               },
+    { STATE_SAMPLER(5),                                   { STATE_SAMPLER(5),                                   sampler_texdim      }, 0                               },
+    { STATE_SAMPLER(6),                                   { STATE_SAMPLER(6),                                   sampler_texdim      }, 0                               },
+    { STATE_SAMPLER(7),                                   { STATE_SAMPLER(7),                                   sampler_texdim      }, 0                               },
+    {0 /* Terminate */,                                   { 0,                                                  0                   }, 0                               },
 };
 #undef GLINFO_LOCATION
 
 #define GLINFO_LOCATION (*gl_info)
-static void nvts_enable(IWineD3DDevice *iface, BOOL enable) {
-    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
-    WineD3D_GL_Info *gl_info = &This->adapter->gl_info;
-
-    if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-        if(enable) {
-            glEnable(GL_TEXTURE_SHADER_NV);
-            checkGLcall("glEnable(GL_TEXTURE_SHADER_NV)");
-        } else {
-            glDisable(GL_TEXTURE_SHADER_NV);
-            checkGLcall("glDisable(GL_TEXTURE_SHADER_NV)");
-        }
-    }
-}
+static void ffp_enable(IWineD3DDevice *iface, BOOL enable) { }
 
 static void ffp_fragment_get_caps(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_info, struct fragment_caps *pCaps) {
     pCaps->TextureOpCaps =  WINED3DTEXOPCAPS_ADD         |
@@ -4496,49 +5601,22 @@ static void ffp_fragment_get_caps(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_in
     if (GL_SUPPORT(ARB_TEXTURE_ENV_DOT3))
         pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_DOTPRODUCT3;
 
-    if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
-        pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_MODULATEINVALPHA_ADDCOLOR |
-                WINED3DTEXOPCAPS_MODULATEINVCOLOR_ADDALPHA;
-    }
-
     if(GL_SUPPORT(ATI_ENVMAP_BUMPMAP)) {
         pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_BUMPENVMAP;
-    } else if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-        /* Bump mapping is supported already in NV_TEXTURE_SHADER, but that extension does
-         * not support 3D textures. This asks for trouble if an app uses both bump mapping
-         * and 3D textures. It also allows us to keep the code simpler by having texture
-         * shaders constantly enabled.
-         */
-        pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_BUMPENVMAP;
-        /* TODO: Luminance bump map? */
     }
-
-#if 0
-    /* FIXME: Add
-            pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_BUMPENVMAPLUMINANCE
-            WINED3DTEXOPCAPS_PREMODULATE */
-#endif
 
     pCaps->MaxTextureBlendStages   = GL_LIMITS(texture_stages);
     pCaps->MaxSimultaneousTextures = GL_LIMITS(textures);
-
-    if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
-        pCaps->PrimitiveMiscCaps |=  WINED3DPMISCCAPS_TSSARGTEMP;
-    }
-
-    /* The caps below can be supported but aren't handled yet in utils.c 'd3dta_to_combiner_input', disable them until support is fixed */
-#if 0
-    if (GL_SUPPORT(NV_REGISTER_COMBINERS2))
-    pCaps->PrimitiveMiscCaps |=  WINED3DPMISCCAPS_PERSTAGECONSTANT;
-#endif
-
 }
 
-#undef GLINFO_LOCATION
+static HRESULT ffp_fragment_alloc(IWineD3DDevice *iface) { return WINED3D_OK; }
+static void ffp_fragment_free(IWineD3DDevice *iface) {}
 
 const struct fragment_pipeline ffp_fragment_pipeline = {
-    nvts_enable,
+    ffp_enable,
     ffp_fragment_get_caps,
+    ffp_fragment_alloc,
+    ffp_fragment_free,
     ffp_fragmentstate_template
 };
 
@@ -4561,12 +5639,14 @@ static void multistate_apply_3(DWORD state, IWineD3DStateBlockImpl *stateblock, 
 
 void compile_state_table(struct StateEntry *StateTable,
                          APPLYSTATEFUNC **dev_multistate_funcs,
+                         WineD3D_GL_Info *gl_info,
                          const struct StateEntryTemplate *vertex,
                          const struct fragment_pipeline *fragment,
                          const struct StateEntryTemplate *misc) {
     unsigned int i, type, handlers;
     APPLYSTATEFUNC multistate_funcs[STATE_HIGHEST + 1][3];
     const struct StateEntryTemplate *cur;
+    BOOL set[STATE_HIGHEST + 1];
 
     memset(multistate_funcs, 0, sizeof(multistate_funcs));
 
@@ -4585,7 +5665,33 @@ void compile_state_table(struct StateEntry *StateTable,
         }
         if(!cur) continue;
 
+        /* GL extension filtering should not prevent multiple handlers being applied from different
+         * pipeline parts
+         */
+        memset(set, 0, sizeof(set));
+
         for(i = 0; cur[i].state; i++) {
+
+            /* Only use the first matching state with the available extension from one template.
+             * e.g.
+             * {D3DRS_FOOBAR, {D3DRS_FOOBAR, func1}, XYZ_FANCY},
+             * {D3DRS_FOOBAR, {D3DRS_FOOBAR, func2}, 0        }
+             *
+             * if GL_XYZ_fancy is supported, ignore the 2nd line
+             */
+            if(set[cur[i].state]) continue;
+            /* Skip state lines depending on unsupported extensions */
+            if(cur[i].extension && !GL_SUPPORT(cur[i].extension)) continue;
+            set[cur[i].state] = TRUE;
+            /* In some cases having an extension means that nothing has to be
+             * done for a state, e.g. if GL_ARB_texture_non_power_of_two is
+             * supported, the texture coordinate fixup can be ignored. If the
+             * apply function is used, mark the state set(done above) to prevent
+             * applying later lines, but do not record anything in the state
+             * table
+             */
+            if(!cur[i].content.apply) continue;
+
             handlers = num_handlers(multistate_funcs[cur[i].state]);
             multistate_funcs[cur[i].state][handlers] = cur[i].content.apply;
             switch(handlers) {
@@ -4624,3 +5730,4 @@ void compile_state_table(struct StateEntry *StateTable,
         }
     }
 }
+#undef GLINFO_LOCATION

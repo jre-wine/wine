@@ -176,6 +176,7 @@ typedef struct _IFilterGraphImpl {
     /* IVideoFrameStep */
 
     LONG ref;
+    IUnknown *punkFilterMapper2;
     IFilterMapper2 * pFilterMapper2;
     IBaseFilter ** ppFiltersInGraph;
     LPWSTR * pFilterNames;
@@ -260,6 +261,12 @@ static HRESULT WINAPI FilterGraphInner_QueryInterface(IUnknown * iface,
     } else if (IsEqualGUID(&IID_IMediaPosition, riid)) {
         *ppvObj = &(This->IMediaPosition_vtbl);
         TRACE("   returning IMediaPosition interface (%p)\n", *ppvObj);
+    } else if (IsEqualGUID(&IID_IFilterMapper, riid)) {
+        TRACE("   requesting IFilterMapper interface from aggregated filtermapper (%p)\n", *ppvObj);
+        return IUnknown_QueryInterface(This->punkFilterMapper2, riid, ppvObj);
+    } else if (IsEqualGUID(&IID_IFilterMapper2, riid)) {
+        *ppvObj = This->pFilterMapper2;
+        TRACE("   returning IFilterMapper2 interface from aggregated filtermapper (%p)\n", *ppvObj);
     } else {
         *ppvObj = NULL;
 	FIXME("unknown interface %s\n", debugstr_guid(riid));
@@ -289,6 +296,8 @@ static ULONG WINAPI FilterGraphInner_Release(IUnknown * iface)
     if (ref == 0) {
         int i;
 
+        This->ref = 1; /* guard against reentrancy (aggregation). */
+
         IMediaControl_Stop((IMediaControl*)&(This->IMediaControl_vtbl));
 
         while (This->nFilters)
@@ -302,7 +311,19 @@ static ULONG WINAPI FilterGraphInner_Release(IUnknown * iface)
             if (This->ItfCacheEntries[i].iface)
                 IUnknown_Release(This->ItfCacheEntries[i].iface);
         }
-	IFilterMapper2_Release(This->pFilterMapper2);
+
+        /* AddRef on controlling IUnknown, to compensate for Release of cached IFilterMapper2 interface below.
+
+         * NOTE: Filtergraph_AddRef isn't suitable, because bUnkOuterValid may be FALSE but punkOuter non-NULL
+         * and already passed as punkOuter to filtermapper in FilterGraph_create - this will happen in case of
+         * CoCreateInstance of filtergraph with non-null pUnkOuter and REFIID other than IID_Unknown that is
+         * cleaning up after error. */
+        if (This->pUnkOuter) IUnknown_AddRef(This->pUnkOuter);
+        else IUnknown_AddRef((IUnknown*)&This->IInner_vtbl);
+
+        IFilterMapper2_Release(This->pFilterMapper2);
+        IUnknown_Release(This->punkFilterMapper2);
+
 	CloseHandle(This->hEventCompletion);
 	EventsQueue_Destroy(&This->evqueue);
         This->cs.DebugInfo->Spare[0] = 0;
@@ -494,6 +515,8 @@ static HRESULT WINAPI FilterGraph2_RemoveFilter(IFilterGraph2 *iface, IBaseFilte
                     }
                     h = IPin_Disconnect(ppin);
                     TRACE("Disconnect 2: %08x\n", h);
+
+                    IPin_Release(ppin);
                 }
                 IEnumPins_Release(penumpins);
             }
@@ -750,7 +773,6 @@ static HRESULT GetFilterInfo(IMoniker* pMoniker, GUID* pclsid, VARIANT* pvar)
     HRESULT hr;
 
     VariantInit(pvar);
-    V_VT(pvar) = VT_BSTR;
 
     hr = IMoniker_BindToStorage(pMoniker, NULL, NULL, &IID_IPropertyBag, (LPVOID*)&pPropBagCat);
 
@@ -759,6 +781,8 @@ static HRESULT GetFilterInfo(IMoniker* pMoniker, GUID* pclsid, VARIANT* pvar)
 
     if (SUCCEEDED(hr))
         hr = CLSIDFromString(V_UNION(pvar, bstrVal), pclsid);
+
+    VariantClear(pvar);
 
     if (SUCCEEDED(hr))
         hr = IPropertyBag_Read(pPropBagCat, wszFriendlyName, pvar, NULL);
@@ -970,6 +994,8 @@ static HRESULT WINAPI FilterGraph2_Connect(IFilterGraph2 *iface, IPin *ppinOut, 
             goto error;
         }
 
+        VariantClear(&var);
+
         hr = IBaseFilter_EnumPins(pfilter, &penumpins);
         if (FAILED(hr)) {
             WARN("Enumpins (%x)\n", hr);
@@ -1046,6 +1072,7 @@ static HRESULT WINAPI FilterGraph2_Connect(IFilterGraph2 *iface, IPin *ppinOut, 
         }
 
 error:
+        VariantClear(&var);
         if (ppinfilter) IPin_Release(ppinfilter);
         if (pfilter) {
             IFilterGraph2_RemoveFilter(iface, pfilter);
@@ -1323,6 +1350,9 @@ static HRESULT WINAPI FilterGraph2_Render(IFilterGraph2 *iface, IPin *ppinOut)
                 goto error;
             }
             TRACE("Connected, recursing %s\n",  debugstr_w(V_UNION(&var, bstrVal)));
+
+            VariantClear(&var);
+
             hr = FilterGraph2_RenderRecurse(This, ppinfilter);
             if (FAILED(hr)) {
                 WARN("Unable to connect recursively (%x)\n", hr);
@@ -1332,6 +1362,7 @@ static HRESULT WINAPI FilterGraph2_Render(IFilterGraph2 *iface, IPin *ppinOut)
             break;
 
 error:
+            VariantClear(&var);
             if (pfilter) {
                 IFilterGraph2_RemoveFilter(iface, pfilter);
                 IBaseFilter_Release(pfilter);
@@ -1339,6 +1370,7 @@ error:
             if (!FAILED(hr)) DebugBreak();
         }
 
+        IEnumMoniker_Release(pEnumMoniker);
         if (nbmt)
             DeleteMediaType(mt);
         if (SUCCEEDED(hr))
@@ -5394,11 +5426,31 @@ HRESULT FilterGraph_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     memcpy(&fimpl->timeformatseek, &TIME_FORMAT_MEDIA_TIME, sizeof(GUID));
     fimpl->start_time = fimpl->position = 0;
     fimpl->stop_position = -1;
+    fimpl->punkFilterMapper2 = NULL;
 
-    hr = CoCreateInstance(&CLSID_FilterMapper2, NULL, CLSCTX_INPROC_SERVER, &IID_IFilterMapper2, (LPVOID*)&fimpl->pFilterMapper2);
+    /* create Filtermapper aggregated. */
+    hr = CoCreateInstance(&CLSID_FilterMapper2, pUnkOuter ? pUnkOuter : (IUnknown*)&fimpl->IInner_vtbl, CLSCTX_INPROC_SERVER,
+        &IID_IUnknown, (LPVOID*)&fimpl->punkFilterMapper2);
+
+    if (SUCCEEDED(hr)) {
+        hr = IUnknown_QueryInterface(fimpl->punkFilterMapper2, &IID_IFilterMapper2,  (LPVOID*)&fimpl->pFilterMapper2);
+    }
+
+    if (SUCCEEDED(hr)) {
+        /* Release controlling IUnknown - compensate refcount increase from caching IFilterMapper2 interface. */
+        if (pUnkOuter) IUnknown_Release(pUnkOuter);
+        else IUnknown_Release((IUnknown*)&fimpl->IInner_vtbl);
+    }
+
     if (FAILED(hr)) {
         ERR("Unable to create filter mapper (%x)\n", hr);
-	return hr;
+        if (fimpl->punkFilterMapper2) IUnknown_Release(fimpl->punkFilterMapper2);
+        CloseHandle(fimpl->hEventCompletion);
+        EventsQueue_Destroy(&fimpl->evqueue);
+        fimpl->cs.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection(&fimpl->cs);
+        CoTaskMemFree(fimpl);
+        return hr;
     }
     IFilterGraph2_SetDefaultSyncSource((IFilterGraph2*)fimpl);
 

@@ -1,6 +1,7 @@
 /* Control Panel management
  *
  * Copyright 2001 Eric Pouech
+ * Copyright 2008 Owen Rudge
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -33,13 +34,21 @@ typedef struct CPlApplet {
 } CPlApplet;
 
 typedef struct CPanel {
-    CPlApplet*		first;		/* linked list */
-    HWND		hWnd;
-    unsigned            status;
-    CPlApplet*		clkApplet;
-    unsigned            clkSP;
+    CPlApplet*  first;
+    HWND        hWnd;
+    HINSTANCE   hInst;
+    unsigned    total_subprogs;
+    HWND        hWndListView;
+    HIMAGELIST  hImageListLarge;
+    HIMAGELIST  hImageListSmall;
+    HWND        hWndStatusBar;
 } CPanel;
 
+/* structure to reference an individual control panel item */
+typedef struct CPlItem {
+    CPlApplet *applet;
+    unsigned id;
+} CPlItem;
 
 CPlApplet* Control_LoadApplet(HWND hWnd, LPCWSTR cmd, CPanel* panel);
 CPlApplet* Control_UnloadApplet(CPlApplet* applet);

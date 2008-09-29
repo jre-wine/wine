@@ -86,8 +86,7 @@ typedef enum {
   diUndoSetParagraphFormat, /* 15 */
   diUndoSetCharFormat, /* 16 */
   diUndoEndTransaction, /* 17 - marks the end of a group of changes for undo */
-  diUndoSetDefaultCharFormat, /* 18 */
-  diUndoPotentialEndTransaction, /* 19 - allows grouping typed chars for undo */
+  diUndoPotentialEndTransaction, /* 18 - allows grouping typed chars for undo */
 } ME_DIType;
 
 #define SELECTIONBAR_WIDTH 9
@@ -344,6 +343,9 @@ typedef struct tagME_TextEditor
 
   /* Track previous notified selection */
   CHARRANGE notified_cr;
+
+  /* Cache previously set vertical scrollbar info */
+  SCROLLINFO vert_si;
 } ME_TextEditor;
 
 typedef struct tagME_Context

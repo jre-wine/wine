@@ -816,6 +816,30 @@ static void shader_arb_color_correction(SHADER_OPCODE_ARG* arg) {
             }
             break;
 
+        case WINED3DFMT_ATI2N:
+            /* GL_ATI_texture_compression_3dc returns the two channels as luminance-alpha,
+             * which means the first one is replicated accross .rgb, and the 2nd one is in
+             * .a. We need the 2nd in .g
+             *
+             * GL_EXT_texture_compression_rgtc returns the values in .rg, however, they
+             * are swapped compared to d3d. So swap red and green.
+             */
+            if(GL_SUPPORT(EXT_TEXTURE_COMPRESSION_RGTC)) {
+                shader_addline(arg->buffer, "SWZ %s, %s, %c, %c, 1, 0;\n",
+                               reg, reg, writemask[2], writemask[1]);
+            } else {
+                if(strlen(writemask) == 5) {
+                    shader_addline(arg->buffer, "MOV %s.%c, %s.%c;\n",
+                                reg, writemask[2], reg, writemask[4]);
+                } else if(strlen(writemask) == 2) {
+                    /* Nothing to do */
+                } else {
+                    /* This is bad: We have VL, but we need VU */
+                    FIXME("2 or 3 components sampled from a converted ATI2N texture\n");
+                }
+            }
+            break;
+
             /* stupid compiler */
         default:
             break;
@@ -1694,15 +1718,30 @@ void vshader_hw_map2gl(SHADER_OPCODE_ARG* arg) {
     unsigned int i;
 
     if ((curOpcode->opcode == WINED3DSIO_MOV && dst_regtype == WINED3DSPR_ADDR) || curOpcode->opcode == WINED3DSIO_MOVA) {
+        memset(tmpLine, 0, sizeof(tmpLine));
         if(shader->rel_offset) {
-            memset(tmpLine, 0, sizeof(tmpLine));
             vshader_program_add_param(arg, src[0], TRUE, tmpLine);
             shader_addline(buffer, "ADD TMP.x, %s, helper_const.z;\n", tmpLine);
             shader_addline(buffer, "ARL A0.x, TMP.x;\n");
-            return;
         } else {
-            strcpy(tmpLine, "ARL");
+            /* Apple's ARB_vertex_program implementation does not accept an ARL source argument
+             * with more than one component. Thus replicate the first source argument over all
+             * 4 components. For example, .xyzw -> .x (or better: .xxxx), .zwxy -> .z, etc)
+             */
+            DWORD parm = src[0] & ~(WINED3DVS_SWIZZLE_MASK);
+                   if((src[0] & WINED3DVS_X_W) == WINED3DVS_X_W) {
+                parm |= WINED3DVS_X_W | WINED3DVS_Y_W | WINED3DVS_Z_W | WINED3DVS_W_W;
+            } else if((src[0] & WINED3DVS_X_Z) == WINED3DVS_X_Z) {
+                parm |= WINED3DVS_X_Z | WINED3DVS_Y_Z | WINED3DVS_Z_Z | WINED3DVS_W_Z;
+            } else if((src[0] & WINED3DVS_X_Y) == WINED3DVS_X_Y) {
+                parm |= WINED3DVS_X_Y | WINED3DVS_Y_Y | WINED3DVS_Z_Y | WINED3DVS_W_Y;
+            } else if((src[0] & WINED3DVS_X_X) == WINED3DVS_X_X) {
+                parm |= WINED3DVS_X_X | WINED3DVS_Y_X | WINED3DVS_Z_X | WINED3DVS_W_X;
+            }
+            vshader_program_add_param(arg, parm, TRUE, tmpLine);
+            shader_addline(buffer, "ARL A0.x, %s;\n", tmpLine);
         }
+        return;
     } else
         strcpy(tmpLine, curOpcode->glname);
 

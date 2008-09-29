@@ -97,6 +97,10 @@
 
 #define IDS_NEWFOLDER 142
 
+#define IDS_CPANEL_TITLE            143
+#define IDS_CPANEL_NAME             144
+#define IDS_CPANEL_DESCRIPTION      145
+
 #define IDS_RUNDLG_ERROR            160
 #define IDS_RUNDLG_BROWSE_ERROR     161
 #define IDS_RUNDLG_BROWSE_CAPTION   162
@@ -106,6 +110,11 @@
 #define IDS_LICENSE_CAPTION         257
 
 #define MENU_SHV_FILE 144
+
+#define MENU_CPANEL                 200
+#define IDM_CPANEL_EXIT             201
+#define IDM_CPANEL_ABOUT            202
+#define IDM_CPANEL_APPLET_BASE      210
 
 /* Note: this string is referenced from the registry*/
 #define IDS_RECYCLEBIN_FOLDER_NAME   8964

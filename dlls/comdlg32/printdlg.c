@@ -75,6 +75,11 @@ static const struct pd_flags psd_flags[] = {
 static WNDPROC lpfnStaticWndProc;
 /* the text of the fake document to render for the Page Setup dialog */
 static WCHAR wszFakeDocumentText[1024];
+static const WCHAR pd32_collateW[] = { 'P', 'D', '3', '2', '_', 'C', 'O', 'L', 'L', 'A', 'T', 'E', 0 };
+static const WCHAR pd32_nocollateW[] = { 'P', 'D', '3', '2', '_', 'N', 'O', 'C', 'O', 'L', 'L', 'A', 'T', 'E', 0 };
+static const WCHAR pd32_portraitW[] = { 'P', 'D', '3', '2', '_', 'P', 'O', 'R', 'T', 'R', 'A', 'I', 'T', 0 };
+static const WCHAR pd32_landscapeW[] = { 'P', 'D', '3', '2', '_', 'L', 'A', 'N', 'D', 'S', 'C', 'A', 'P', 'E', 0 };
+static const WCHAR propW[] = {'_','_','W','I','N','E','_','P','R','I','N','T','D','L','G','D','A','T','A',0};
 
 /***********************************************************************
  *    PRINTDLG_OpenDefaultPrinter
@@ -1378,10 +1383,6 @@ static LRESULT PRINTDLG_WMInitDialog(HWND hDlg, WPARAM wParam,
 static LRESULT PRINTDLG_WMInitDialogW(HWND hDlg, WPARAM wParam,
 				     PRINT_PTRW* PrintStructures)
 {
-    static const WCHAR PD32_COLLATE[] = { 'P', 'D', '3', '2', '_', 'C', 'O', 'L', 'L', 'A', 'T', 'E', 0 };
-    static const WCHAR PD32_NOCOLLATE[] = { 'P', 'D', '3', '2', '_', 'N', 'O', 'C', 'O', 'L', 'L', 'A', 'T', 'E', 0 };
-    static const WCHAR PD32_PORTRAIT[] = { 'P', 'D', '3', '2', '_', 'P', 'O', 'R', 'T', 'R', 'A', 'I', 'T', 0 };
-    static const WCHAR PD32_LANDSCAPE[] = { 'P', 'D', '3', '2', '_', 'L', 'A', 'N', 'D', 'S', 'C', 'A', 'P', 'E', 0 };
     LPPRINTDLGW lppd = PrintStructures->lpPrintDlg;
     DEVNAMES *pdn;
     DEVMODEW *pdm;
@@ -1392,15 +1393,15 @@ static LRESULT PRINTDLG_WMInitDialogW(HWND hDlg, WPARAM wParam,
     /* We load these with LoadImage because they are not a standard
        size and we don't want them rescaled */
     PrintStructures->hCollateIcon =
-      LoadImageW(COMDLG32_hInstance, PD32_COLLATE, IMAGE_ICON, 0, 0, 0);
+      LoadImageW(COMDLG32_hInstance, pd32_collateW, IMAGE_ICON, 0, 0, 0);
     PrintStructures->hNoCollateIcon =
-      LoadImageW(COMDLG32_hInstance, PD32_NOCOLLATE, IMAGE_ICON, 0, 0, 0);
+      LoadImageW(COMDLG32_hInstance, pd32_nocollateW, IMAGE_ICON, 0, 0, 0);
 
     /* These can be done with LoadIcon */
     PrintStructures->hPortraitIcon =
-      LoadIconW(COMDLG32_hInstance, PD32_PORTRAIT);
+      LoadIconW(COMDLG32_hInstance, pd32_portraitW);
     PrintStructures->hLandscapeIcon =
-      LoadIconW(COMDLG32_hInstance, PD32_LANDSCAPE);
+      LoadIconW(COMDLG32_hInstance, pd32_landscapeW);
 
     /* display the collate/no_collate icon */
     SendDlgItemMessageW(hDlg, ico3, STM_SETIMAGE, (WPARAM) IMAGE_ICON,
@@ -1882,7 +1883,6 @@ static INT_PTR CALLBACK PrintDlgProcA(HWND hDlg, UINT uMsg, WPARAM wParam,
 static INT_PTR CALLBACK PrintDlgProcW(HWND hDlg, UINT uMsg, WPARAM wParam,
                                       LPARAM lParam)
 {
-    static const WCHAR propW[] = {'_','_','W','I','N','E','_','P','R','I','N','T','D','L','G','D','A','T','A',0};
     PRINT_PTRW* PrintStructures;
     INT_PTR res = FALSE;
 
@@ -3749,19 +3749,93 @@ HRESULT WINAPI PrintDlgExA(LPPRINTDLGEXA lppd)
  * driver-specific property pages.
  *
  * BUGS
- *   Only a Stub
+ *   Not fully implemented
  *
  */
 HRESULT WINAPI PrintDlgExW(LPPRINTDLGEXW lppd)
 {
+    DWORD     ret = E_FAIL;
+    LPVOID    ptr;
 
-    FIXME("(%p) stub\n", lppd);
+    FIXME("(%p) not fully implemented\n", lppd);
+
     if ((lppd == NULL) || (lppd->lStructSize != sizeof(PRINTDLGEXW))) {
         return E_INVALIDARG;
     }
 
     if (!IsWindow(lppd->hwndOwner)) {
         return E_HANDLE;
+    }
+
+    if (lppd->Flags & PD_RETURNDEFAULT) {
+        PRINTER_INFO_2W *pbuf;
+        DRIVER_INFO_2W  *dbuf;
+        HANDLE hprn;
+        DWORD needed = 1024;
+        BOOL bRet;
+
+        if (lppd->hDevMode || lppd->hDevNames) {
+            WARN("hDevMode or hDevNames non-zero for PD_RETURNDEFAULT\n");
+            COMDLG32_SetCommDlgExtendedError(PDERR_RETDEFFAILURE);
+            return E_INVALIDARG;
+        }
+        if (!PRINTDLG_OpenDefaultPrinter(&hprn)) {
+            WARN("Can't find default printer\n");
+            COMDLG32_SetCommDlgExtendedError(PDERR_NODEFAULTPRN);
+            return E_FAIL;
+        }
+
+        pbuf = HeapAlloc(GetProcessHeap(), 0, needed);
+        bRet = GetPrinterW(hprn, 2, (LPBYTE)pbuf, needed, &needed);
+        if (!bRet && (GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
+            HeapFree(GetProcessHeap(), 0, pbuf);
+            pbuf = HeapAlloc(GetProcessHeap(), 0, needed);
+            bRet = GetPrinterW(hprn, 2, (LPBYTE)pbuf, needed, &needed);
+        }
+        if (!bRet) {
+            HeapFree(GetProcessHeap(), 0, pbuf);
+            ClosePrinter(hprn);
+            return E_FAIL;
+        }
+
+        needed = 1024;
+        dbuf = HeapAlloc(GetProcessHeap(), 0, needed);
+        bRet = GetPrinterDriverW(hprn, NULL, 3, (LPBYTE)dbuf, needed, &needed);
+        if (!bRet && (GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
+            HeapFree(GetProcessHeap(), 0, dbuf);
+            dbuf = HeapAlloc(GetProcessHeap(), 0, needed);
+            bRet = GetPrinterDriverW(hprn, NULL, 3, (LPBYTE)dbuf, needed, &needed);
+        }
+        if (!bRet) {
+            ERR("GetPrinterDriverW failed, last error %d, fix your config for printer %s!\n",
+                GetLastError(), debugstr_w(pbuf->pPrinterName));
+            HeapFree(GetProcessHeap(), 0, dbuf);
+            HeapFree(GetProcessHeap(), 0, pbuf);
+            COMDLG32_SetCommDlgExtendedError(PDERR_RETDEFFAILURE);
+            ClosePrinter(hprn);
+            return E_FAIL;
+        }
+        ClosePrinter(hprn);
+
+        PRINTDLG_CreateDevNamesW(&(lppd->hDevNames),
+                      dbuf->pDriverPath,
+                      pbuf->pPrinterName,
+                      pbuf->pPortName);
+        lppd->hDevMode = GlobalAlloc(GMEM_MOVEABLE, pbuf->pDevMode->dmSize +
+                         pbuf->pDevMode->dmDriverExtra);
+        if (lppd->hDevMode) {
+            ptr = GlobalLock(lppd->hDevMode);
+            if (ptr) {
+                memcpy(ptr, pbuf->pDevMode, pbuf->pDevMode->dmSize +
+                    pbuf->pDevMode->dmDriverExtra);
+                GlobalUnlock(lppd->hDevMode);
+                ret = S_OK;
+            }
+        }
+        HeapFree(GetProcessHeap(), 0, pbuf);
+        HeapFree(GetProcessHeap(), 0, dbuf);
+
+        return ret;
     }
 
     return E_NOTIMPL;

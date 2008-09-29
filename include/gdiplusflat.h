@@ -199,12 +199,16 @@ GpStatus WINGDIPAPI GdipGetLineWrapMode(GpLineGradient*,GpWrapMode*);
 GpStatus WINGDIPAPI GdipGetLineRect(GpLineGradient*,GpRectF*);
 GpStatus WINGDIPAPI GdipGetLineRectI(GpLineGradient*,GpRect*);
 GpStatus WINGDIPAPI GdipGetLineColors(GpLineGradient*,ARGB*);
+GpStatus WINGDIPAPI GdipGetPathGradientBlend(GpPathGradient*,REAL*,REAL*,INT);
+GpStatus WINGDIPAPI GdipGetPathGradientBlendCount(GpPathGradient*,INT*);
 GpStatus WINGDIPAPI GdipGetPathGradientCenterColor(GpPathGradient*,ARGB*);
 GpStatus WINGDIPAPI GdipGetPathGradientCenterPoint(GpPathGradient*,GpPointF*);
 GpStatus WINGDIPAPI GdipGetPathGradientCenterPointI(GpPathGradient*,GpPoint*);
 GpStatus WINGDIPAPI GdipGetPathGradientFocusScales(GpPathGradient*,REAL*,REAL*);
 GpStatus WINGDIPAPI GdipGetPathGradientGammaCorrection(GpPathGradient*,BOOL*);
 GpStatus WINGDIPAPI GdipGetPathGradientPointCount(GpPathGradient*,INT*);
+GpStatus WINGDIPAPI GdipGetPathGradientRect(GpPathGradient*,GpRectF*);
+GpStatus WINGDIPAPI GdipGetPathGradientRectI(GpPathGradient*,GpRect*);
 GpStatus WINGDIPAPI GdipGetPathGradientSurroundColorsWithCount(GpPathGradient*,
     ARGB*,INT*);
 GpStatus WINGDIPAPI GdipGetPathGradientWrapMode(GpPathGradient*,GpWrapMode*);
@@ -336,6 +340,7 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromFile(GDIPCONST WCHAR*,GpBitmap**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromFileICM(GDIPCONST WCHAR*,GpBitmap**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromGdiDib(GDIPCONST BITMAPINFO*,VOID*,GpBitmap**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromGraphics(INT,INT,GpGraphics*,GpBitmap**);
+GpStatus WINGDIPAPI GdipCreateBitmapFromResource(HINSTANCE,GDIPCONST WCHAR*,GpBitmap**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromScan0(INT,INT,INT,PixelFormat,BYTE*,
     GpBitmap**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromStream(IStream*,GpBitmap**);
@@ -410,10 +415,18 @@ GpStatus WINGDIPAPI GdipGetCellAscent(GDIPCONST GpFontFamily*, INT, UINT16*);
 GpStatus WINGDIPAPI GdipGetCellDescent(GDIPCONST GpFontFamily*, INT, UINT16*);
 GpStatus WINGDIPAPI GdipGetEmHeight(GDIPCONST GpFontFamily*, INT, UINT16*);
 GpStatus WINGDIPAPI GdipGetLineSpacing(GDIPCONST GpFontFamily*, INT, UINT16*);
+GpStatus WINGDIPAPI GdipIsStyleAvailable(GDIPCONST GpFontFamily *, INT, BOOL*);
 
 GpStatus WINGDIPAPI GdipGetGenericFontFamilySansSerif(GpFontFamily**);
 GpStatus WINGDIPAPI GdipGetGenericFontFamilySerif(GpFontFamily**);
 GpStatus WINGDIPAPI GdipGetGenericFontFamilyMonospace(GpFontFamily**);
+
+GpStatus WINGDIPAPI GdipNewPrivateFontCollection(GpFontCollection**);
+GpStatus WINGDIPAPI GdipDeletePrivateFontCollection(GpFontCollection**);
+GpStatus WINGDIPAPI GdipPrivateAddFontFile(GpFontCollection*, GDIPCONST WCHAR*);
+GpStatus WINGDIPAPI GdipGetFontCollectionFamilyCount(GpFontCollection*, INT*);
+GpStatus WINGDIPAPI GdipGetFontCollectionFamilyList(GpFontCollection*, INT,
+        GpFontFamily*[], INT*);
 
 GpStatus WINGDIPAPI GdipCreateStringFormat(INT,LANGID,GpStringFormat**);
 GpStatus WINGDIPAPI GdipDeleteStringFormat(GpStringFormat*);

@@ -569,6 +569,17 @@ GpStatus WINGDIPAPI GdipGetLineSpacing(GDIPCONST GpFontFamily *family,
     return NotImplemented;
 }
 
+GpStatus WINGDIPAPI GdipIsStyleAvailable(GDIPCONST GpFontFamily* family,
+        INT style, BOOL* IsStyleAvailable)
+{
+    FIXME("%p %d %p stub!\n", family, style, IsStyleAvailable);
+
+    if (!(family && IsStyleAvailable))
+        return InvalidParameter;
+
+    return NotImplemented;
+}
+
 /*****************************************************************************
  * GdipGetGenericFontFamilyMonospace [GDIPLUS.@]
  *
@@ -632,4 +643,59 @@ GpStatus WINGDIPAPI GdipGetGenericFontFamilySansSerif(GpFontFamily **nativeFamil
     if (nativeFamily == NULL) return InvalidParameter;
 
     return GdipCreateFontFamilyFromName(MSSansSerif, NULL, nativeFamily);
+}
+
+GpStatus WINGDIPAPI GdipNewPrivateFontCollection(GpFontCollection** fontCollection)
+{
+    FIXME("stub %p\n", fontCollection);
+
+    if (!fontCollection)
+        return InvalidParameter;
+
+    return NotImplemented;
+}
+
+GpStatus WINGDIPAPI GdipDeletePrivateFontCollection(GpFontCollection **fontCollection)
+{
+    FIXME("stub %p\n", fontCollection);
+
+    if (!fontCollection)
+        return InvalidParameter;
+
+    return NotImplemented;
+}
+
+GpStatus WINGDIPAPI GdipPrivateAddFontFile(GpFontCollection* fontCollection,
+        GDIPCONST WCHAR* filename)
+{
+    FIXME("stub: %p, %s\n", fontCollection, debugstr_w(filename));
+
+    if (!(fontCollection && filename))
+        return InvalidParameter;
+
+    return NotImplemented;
+}
+
+GpStatus WINGDIPAPI GdipGetFontCollectionFamilyCount(
+        GpFontCollection* fontCollection, INT* numFound)
+{
+    FIXME("stub: %p, %p\n", fontCollection, numFound);
+
+    if (!(fontCollection && numFound))
+        return InvalidParameter;
+
+    return NotImplemented;
+}
+
+GpStatus WINGDIPAPI GdipGetFontCollectionFamilyList(
+        GpFontCollection* fontCollection, INT numSought,
+        GpFontFamily* gpfamilies[], INT* numFound)
+{
+    FIXME("stub: %p, %d, %p, %p\n", fontCollection, numSought, gpfamilies,
+            numFound);
+
+    if (!(fontCollection && gpfamilies && numFound))
+        return InvalidParameter;
+
+    return NotImplemented;
 }

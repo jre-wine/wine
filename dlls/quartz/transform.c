@@ -164,6 +164,7 @@ HRESULT TransformFilter_Create(TransformFilterImpl* pTransformFilter, const CLSI
     pTransformFilter->state = State_Stopped;
     pTransformFilter->pClock = NULL;
     ZeroMemory(&pTransformFilter->filterInfo, sizeof(FILTER_INFO));
+    ZeroMemory(&pTransformFilter->pmt, sizeof(pTransformFilter->pmt));
 
     pTransformFilter->ppPins = CoTaskMemAlloc(2 * sizeof(IPin *));
 
@@ -183,7 +184,7 @@ HRESULT TransformFilter_Create(TransformFilterImpl* pTransformFilter, const CLSI
         props.cbAlign = 1;
         props.cbPrefix = 0;
         props.cbBuffer = 0; /* Will be updated at connection time */
-        props.cBuffers = 2;
+        props.cBuffers = 1;
 
         hr = OutputPin_Construct(&TransformFilter_OutputPin_Vtbl, sizeof(OutputPin), &piOutput, &props, pTransformFilter, TransformFilter_Output_QueryAccept, &pTransformFilter->csFilter, &pTransformFilter->ppPins[1]);
 
@@ -288,6 +289,7 @@ static ULONG WINAPI TransformFilter_Release(IBaseFilter * iface)
         DeleteCriticalSection(&This->csFilter);
 
         TRACE("Destroying transform filter\n");
+        FreeMediaType(&This->pmt);
         CoTaskMemFree(This);
 
         return 0;
@@ -603,12 +605,13 @@ static const IPinVtbl TransformFilter_InputPin_Vtbl =
 static HRESULT WINAPI TransformFilter_Output_EnumMediaTypes(IPin * iface, IEnumMediaTypes ** ppEnum)
 {
     IPinImpl *This = (IPinImpl *)iface;
+    TransformFilterImpl *pTransform = (TransformFilterImpl *)This->pinInfo.pFilter;
     ENUMMEDIADETAILS emd;
 
     TRACE("(%p/%p)->(%p)\n", This, iface, ppEnum);
 
     emd.cMediaTypes = 1;
-    emd.pMediaTypes = &This->mtCurrent;
+    emd.pMediaTypes = &pTransform->pmt;
 
     return IEnumMediaTypesImpl_Construct(&emd, ppEnum);
 }

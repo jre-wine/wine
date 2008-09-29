@@ -538,6 +538,7 @@ struct StateEntryTemplate
 {
     DWORD               state;
     struct StateEntry   content;
+    GL_SupportedExt     extension;
 };
 
 struct fragment_caps {
@@ -551,6 +552,8 @@ struct fragment_caps {
 struct fragment_pipeline {
     void (*enable_extension)(IWineD3DDevice *iface, BOOL enable);
     void (*get_caps)(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_info, struct fragment_caps *caps);
+    HRESULT (*alloc_private)(IWineD3DDevice *iface);
+    void (*free_private)(IWineD3DDevice *iface);
     const struct StateEntryTemplate *states;
 };
 
@@ -558,10 +561,13 @@ extern const struct StateEntryTemplate misc_state_template[];
 extern const struct StateEntryTemplate ffp_vertexstate_template[];
 extern const struct fragment_pipeline ffp_fragment_pipeline;
 extern const struct fragment_pipeline atifs_fragment_pipeline;
+extern const struct fragment_pipeline nvts_fragment_pipeline;
+extern const struct fragment_pipeline nvrc_fragment_pipeline;
 
 /* "Base" state table */
 void compile_state_table(struct StateEntry *StateTable,
                          APPLYSTATEFUNC **dev_multistate_funcs,
+                         WineD3D_GL_Info *gl_info,
                          const struct StateEntryTemplate *vertex,
                          const struct fragment_pipeline *fragment,
                          const struct StateEntryTemplate *misc);
@@ -788,6 +794,7 @@ struct IWineD3DDeviceImpl
     int ps_selected_mode;
     const shader_backend_t *shader_backend;
     void *shader_priv;
+    void *fragment_priv;
     struct StateEntry StateTable[STATE_HIGHEST + 1];
     /* Array of functions for states which are handled by more than one pipeline part */
     APPLYSTATEFUNC *multistate_funcs[STATE_HIGHEST + 1];
@@ -1113,6 +1120,7 @@ typedef struct IWineD3DTextureImpl
     UINT                      width;
     UINT                      height;
     UINT                      target;
+    BOOL                      cond_np2;
 
 } IWineD3DTextureImpl;
 
@@ -1722,14 +1730,18 @@ const char *debug_fbostatus(GLenum status);
 const char *debug_glerror(GLenum error);
 const char *debug_d3dbasis(WINED3DBASISTYPE basis);
 const char *debug_d3ddegree(WINED3DDEGREETYPE order);
+const char* debug_d3dtop(WINED3DTEXTUREOP d3dtop);
 
 /* Routines for GL <-> D3D values */
 GLenum StencilOp(DWORD op);
 GLenum CompareFunc(DWORD func);
-void   set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP op, DWORD arg1, DWORD arg2, DWORD arg3);
+BOOL is_invalid_op(IWineD3DDeviceImpl *This, int stage, WINED3DTEXTUREOP op, DWORD arg1, DWORD arg2, DWORD arg3);
 void   set_tex_op_nvrc(IWineD3DDevice *iface, BOOL is_alpha, int stage, WINED3DTEXTUREOP op, DWORD arg1, DWORD arg2, DWORD arg3, INT texture_idx, DWORD dst);
 void   set_texture_matrix(const float *smat, DWORD flags, BOOL calculatedCoords, BOOL transformed, DWORD coordtype);
 void texture_activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context);
+void sampler_texdim(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context);
+void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context);
+void apply_pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context);
 
 void surface_set_compatible_renderbuffer(IWineD3DSurface *iface, unsigned int width, unsigned int height);
 GLenum surface_get_gl_buffer(IWineD3DSurface *iface, IWineD3DSwapChain *swapchain);

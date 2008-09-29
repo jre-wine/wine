@@ -459,11 +459,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateStateBlock(IWineD3DDevice* iface,
         object->changed.pixelShader = TRUE;
 
         /* Pixel Shader Constants */
-        for (i = 0; i < GL_LIMITS(vshader_constantsF); ++i) {
+        for (i = 0; i < GL_LIMITS(pshader_constantsF); ++i) {
             object->contained_ps_consts_f[i] = i;
             object->changed.pixelShaderConstantsF[i] = TRUE;
         }
-        object->num_contained_ps_consts_f = GL_LIMITS(vshader_constantsF);
+        object->num_contained_ps_consts_f = GL_LIMITS(pshader_constantsF);
         for (i = 0; i < MAX_CONST_B; ++i) {
             object->contained_ps_consts_b[i] = i;
             object->changed.pixelShaderConstantsB[i] = TRUE;
@@ -641,7 +641,8 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface, U
        Size = ((max(Width,4) * tableEntry->bpp) * max(Height,4)) >> 1;
 
     } else if (Format == WINED3DFMT_DXT2 || Format == WINED3DFMT_DXT3 ||
-               Format == WINED3DFMT_DXT4 || Format == WINED3DFMT_DXT5) {
+               Format == WINED3DFMT_DXT4 || Format == WINED3DFMT_DXT5 ||
+               Format == WINED3DFMT_ATI2N) {
        Size = ((max(Width,4) * tableEntry->bpp) * max(Height,4));
     } else {
        /* The pitch is a multiple of 4 bytes */
@@ -818,7 +819,17 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateTexture(IWineD3DDevice *iface, U
        is used in combination with texture uploads (RTL_READTEX/RTL_TEXTEX). The reason is that EXT_PALETTED_TEXTURE
        doesn't work in combination with ARB_TEXTURE_RECTANGLE.
     */
-    if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE) &&
+    if(GL_SUPPORT(WINE_NORMALIZED_TEXRECT) && (Width != pow2Width || Height != pow2Height)) {
+        object->baseTexture.pow2Matrix[0] =  1.0;
+        object->baseTexture.pow2Matrix[5] =  1.0;
+        object->baseTexture.pow2Matrix[10] = 1.0;
+        object->baseTexture.pow2Matrix[15] = 1.0;
+        object->target = GL_TEXTURE_2D;
+        object->cond_np2 = TRUE;
+        pow2Width = Width;
+        pow2Height = Height;
+        object->baseTexture.minMipLookup = &minMipLookup_noFilter;
+    } else if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE) &&
        (Width != pow2Width || Height != pow2Height) &&
        !((Format == WINED3DFMT_P8) && GL_SUPPORT(EXT_PALETTED_TEXTURE) && (wined3d_settings.rendertargetlock_mode == RTL_READTEX || wined3d_settings.rendertargetlock_mode == RTL_TEXTEX)))
     {
@@ -827,12 +838,15 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateTexture(IWineD3DDevice *iface, U
         object->baseTexture.pow2Matrix[10] = 1.0;
         object->baseTexture.pow2Matrix[15] = 1.0;
         object->target = GL_TEXTURE_RECTANGLE_ARB;
+        object->cond_np2 = TRUE;
+        object->baseTexture.minMipLookup = &minMipLookup_noFilter;
     } else {
         object->baseTexture.pow2Matrix[0] =  (((float)Width)  / ((float)pow2Width));
         object->baseTexture.pow2Matrix[5] =  (((float)Height) / ((float)pow2Height));
         object->baseTexture.pow2Matrix[10] = 1.0;
         object->baseTexture.pow2Matrix[15] = 1.0;
         object->target = GL_TEXTURE_2D;
+        object->cond_np2 = FALSE;
     }
     TRACE(" xf(%f) yf(%f)\n", object->baseTexture.pow2Matrix[0], object->baseTexture.pow2Matrix[5]);
 
@@ -2131,6 +2145,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
         TRACE("Shader private data couldn't be allocated\n");
         goto err_out;
     }
+    hr = This->frag_pipe->alloc_private(iface);
+    if(FAILED(hr)) {
+        TRACE("Fragment pipeline private data couldn't be allocated\n");
+        goto err_out;
+    }
 
     /* Set up some starting GL setup */
 
@@ -2216,6 +2235,7 @@ err_out:
         This->stateBlock = NULL;
     }
     This->shader_backend->shader_free_private(iface);
+    This->frag_pipe->free_private(iface);
     return hr;
 }
 
@@ -2305,6 +2325,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Uninit3D(IWineD3DDevice *iface, D3DCB_D
 
     /* Destroy the shader backend. Note that this has to happen after all shaders are destroyed. */
     This->shader_backend->shader_free_private(iface);
+    This->frag_pipe->free_private(iface);
 
     /* Release the buffers (with sanity checks)*/
     TRACE("Releasing the depth stencil buffer at %p\n", This->stencilBufferTarget);
@@ -5745,6 +5766,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
     int rowoffset = 0; /* how many bytes to add onto the end of a row to wraparound to the beginning of the next */
     glDescriptor *glDescription = NULL;
     GLenum dummy;
+    int sampler;
     int bpp;
     CONVERT_TYPES convert = NO_CONVERSION;
 
@@ -5915,7 +5937,10 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
     LEAVE_GL();
 
     IWineD3DSurface_ModifyLocation(pDestinationSurface, SFLAG_INTEXTURE, TRUE);
-    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(0));
+    sampler = This->rev_tex_unit_map[0];
+    if (sampler != -1) {
+        IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(sampler));
+    }
 
     return WINED3D_OK;
 }
@@ -6847,7 +6872,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_SetCursorProperties(IWineD3DDevice* i
                 INT height = This->cursorHeight;
                 INT width = This->cursorWidth;
                 INT bpp = tableEntry->bpp;
-                INT i;
+                INT i, sampler;
 
                 /* Reformat the texture memory (pitch and width can be
                  * different) */
@@ -6867,7 +6892,10 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_SetCursorProperties(IWineD3DDevice* i
                     GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
                     checkGLcall("glActiveTextureARB");
                 }
-                IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(0));
+                sampler = This->rev_tex_unit_map[0];
+                if (sampler != -1) {
+                    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(sampler));
+                }
                 /* Create a new cursor texture */
                 glGenTextures(1, &This->cursorTexture);
                 checkGLcall("glGenTextures");
@@ -7029,7 +7057,8 @@ static void updateSurfaceDesc(IWineD3DSurfaceImpl *surface, WINED3DPRESENT_PARAM
     }
     surface->currentDesc.Width = pPresentationParameters->BackBufferWidth;
     surface->currentDesc.Height = pPresentationParameters->BackBufferHeight;
-    if (GL_SUPPORT(ARB_TEXTURE_NON_POWER_OF_TWO) || GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
+    if (GL_SUPPORT(ARB_TEXTURE_NON_POWER_OF_TWO) || GL_SUPPORT(ARB_TEXTURE_RECTANGLE) ||
+        GL_SUPPORT(WINE_NORMALIZED_TEXRECT)) {
         surface->pow2Width = pPresentationParameters->BackBufferWidth;
         surface->pow2Height = pPresentationParameters->BackBufferHeight;
     } else {
@@ -7220,6 +7249,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRE
         This->depth_blt_rb_h = 0;
     }
     This->shader_backend->shader_free_private(iface);
+    This->frag_pipe->free_private(iface);
 
     for (i = 0; i < GL_LIMITS(textures); i++) {
         /* Textures are recreated below */
@@ -7326,6 +7356,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRE
     hr = This->shader_backend->shader_alloc_private(iface);
     if(FAILED(hr)) {
         ERR("Failed to recreate shader private data\n");
+        return hr;
+    }
+    hr = This->frag_pipe->alloc_private(iface);
+    if(FAILED(hr)) {
+        TRACE("Fragment pipeline private data couldn't be allocated\n");
         return hr;
     }
 
