@@ -1,8 +1,14 @@
-wine (1.1.1-1) UNRELEASED; urgency=low
+wine (1.1.1-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.1, released Jul 11, 2008.
+    - Fixes for Photoshop CS3 and Office 2007 installers.
+    - More progress on gdiplus.
+    - Support for Unicode files in regedit.
+    - Improved video playback.
+    - Many Richedit fixes and improvements.
+    - Various bug fixes.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Mon, 29 Sep 2008 04:29:58 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 29 Sep 2008 05:06:27 +0200
 
 wine (1.1.0-1) experimental; urgency=low
 
