@@ -1,8 +1,14 @@
-wine (1.1.2-1) UNRELEASED; urgency=low
+wine (1.1.2-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.2, released Jul 25, 2008.
+    - Control panel improvements and new appwiz panel.
+    - Restructurations of state handling in Direct3D.
+    - Support for timer queue functions.
+    - Many MSXML improvements.
+    - Several fixes to Solaris support.
+    - Various bug fixes.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Tue, 30 Sep 2008 00:05:04 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Tue, 30 Sep 2008 00:10:30 +0200
 
 wine (1.1.1-1) experimental; urgency=low
 
