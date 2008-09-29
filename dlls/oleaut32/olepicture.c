@@ -45,6 +45,22 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef SONAME_LIBJPEG
+/* This is a hack, so jpeglib.h does not redefine INT32 and the like*/
+#define XMD_H
+#define UINT8 JPEG_UINT8
+#define UINT16 JPEG_UINT16
+#define boolean jpeg_boolean
+# include <jpeglib.h>
+#undef UINT8
+#undef UINT16
+#undef boolean
+#endif
+
+#ifdef HAVE_PNG_H
+#include <png.h>
+#endif
+
 /* Must be before wine includes, the header has things conflicting with
  * WINE headers.
  */
@@ -66,23 +82,6 @@
 #include "wine/unicode.h"
 
 #include "wine/wingdi16.h"
-
-#ifdef SONAME_LIBJPEG
-/* This is a hack, so jpeglib.h does not redefine INT32 and the like*/
-#define XMD_H
-#define UINT8 JPEG_UINT8
-#define UINT16 JPEG_UINT16
-#undef FAR
-#define boolean jpeg_boolean
-# include <jpeglib.h>
-#undef jpeg_boolean
-#undef UINT16
-#endif
-
-#ifdef HAVE_PNG_H
-#undef FAR
-#include <png.h>
-#endif
 
 #include "ungif.h"
 
@@ -1008,7 +1007,7 @@ static void *load_libjpeg(void)
 /* for the jpeg decompressor source manager. */
 static void _jpeg_init_source(j_decompress_ptr cinfo) { }
 
-static boolean _jpeg_fill_input_buffer(j_decompress_ptr cinfo) {
+static jpeg_boolean _jpeg_fill_input_buffer(j_decompress_ptr cinfo) {
     ERR("(), should not get here.\n");
     return FALSE;
 }
@@ -1019,7 +1018,7 @@ static void _jpeg_skip_input_data(j_decompress_ptr cinfo,long num_bytes) {
     cinfo->src->bytes_in_buffer -= num_bytes;
 }
 
-static boolean _jpeg_resync_to_restart(j_decompress_ptr cinfo, int desired) {
+static jpeg_boolean _jpeg_resync_to_restart(j_decompress_ptr cinfo, int desired) {
     ERR("(desired=%d), should not get here.\n",desired);
     return FALSE;
 }
@@ -1846,7 +1845,7 @@ static HRESULT WINAPI OLEPictureImpl_Load(IPersistStream* iface,IStream*pStm) {
       TRACE("Reading all data from stream.\n");
       xbuf = HeapAlloc (GetProcessHeap(), HEAP_ZERO_MEMORY, origsize);
       if (headerisdata)
-          memcpy (xbuf, &header, 8);
+          memcpy (xbuf, header, 8);
       while (1) {
           while (xread < origsize) {
               hr = IStream_Read(pStm,xbuf+xread,origsize-xread,&nread);
@@ -1872,7 +1871,7 @@ static HRESULT WINAPI OLEPictureImpl_Load(IPersistStream* iface,IStream*pStm) {
       xbuf = This->data = HeapAlloc (GetProcessHeap(), HEAP_ZERO_MEMORY, This->datalen);
 
       if (headerisdata)
-          memcpy (xbuf, &header, 8);
+          memcpy (xbuf, header, 8);
 
       while (xread < This->datalen) {
           ULONG nread;
@@ -1928,7 +1927,7 @@ static HRESULT WINAPI OLEPictureImpl_Load(IPersistStream* iface,IStream*pStm) {
     FIXME("Unknown magic %04x, %d read bytes:\n",magic,xread);
     hr=E_FAIL;
     for (i=0;i<xread+8;i++) {
-	if (i<8) MESSAGE("%02x ",((unsigned char*)&header)[i]);
+	if (i<8) MESSAGE("%02x ",((unsigned char*)header)[i]);
 	else MESSAGE("%02x ",xbuf[i-8]);
         if (i % 10 == 9) MESSAGE("\n");
     }

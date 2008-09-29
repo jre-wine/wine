@@ -699,10 +699,7 @@ static HDDEDATA CALLBACK server_ddeml_callback(UINT uType, UINT uFmt, HCONV hcon
 
         ptr = (LPSTR)DdeAccessData(hdata, &size);
         ok(!lstrcmpA(ptr, "poke data\r\n"), "Expected 'poke data\\r\\n', got %s\n", ptr);
-        todo_wine
-        {
-            ok(size == 14, "Expected 14, got %d\n", size);
-        }
+        ok(size == 12, "Expected 12, got %d\n", size);
         DdeUnaccessData(hdata);
 
         size = DdeQueryStringA(server_pid, hsz2, str, MAX_PATH, CP_WINANSI);
@@ -981,7 +978,7 @@ static HGLOBAL create_poke()
     DDEPOKE *poke;
     DWORD size;
 
-    size = sizeof(DDEPOKE) + lstrlenA("poke data\r\n") + 1;
+    size = FIELD_OFFSET(DDEPOKE, Value[sizeof("poke data\r\n")]);
     hglobal = GlobalAlloc(GMEM_DDESHARE, size);
     ok(hglobal != 0, "Expected non-NULL hglobal\n");
 
@@ -1979,15 +1976,23 @@ static void test_UnpackDDElParam(void)
     hi = 0xbeef;
     ret = UnpackDDElParam(WM_DDE_ADVISE, (LPARAM)NULL, &lo, &hi);
     ok(ret == FALSE, "Expected FALSE, got %d\n", ret);
-    ok(lo == 0, "Expected 0, got %08lx\n", lo);
-    ok(hi == 0, "Expected 0, got %08lx\n", hi);
+    ok(lo == 0 ||
+       broken(lo == 0xdead), /* win2k */
+       "Expected 0, got %08lx\n", lo);
+    ok(hi == 0 ||
+       broken(hi == 0xbeef), /* win2k */
+       "Expected 0, got %08lx\n", hi);
 
     lo = 0xdead;
     hi = 0xbeef;
     ret = UnpackDDElParam(WM_DDE_ADVISE, 0xcafebabe, &lo, &hi);
     ok(ret == FALSE, "Expected FALSE, got %d\n", ret);
-    ok(lo == 0, "Expected 0, got %08lx\n", lo);
-    ok(hi == 0, "Expected 0, got %08lx\n", hi);
+    ok(lo == 0 ||
+       broken(lo == 0xdead), /* win2k */
+       "Expected 0, got %08lx\n", lo);
+    ok(hi == 0 ||
+       broken(hi == 0xbeef), /* win2k */
+       "Expected 0, got %08lx\n", hi);
 
     hglobal = GlobalAlloc(GMEM_DDESHARE, 2);
     ptr = GlobalLock(hglobal);
@@ -2013,8 +2018,12 @@ static void test_UnpackDDElParam(void)
     hi = 0xbeef;
     ret = UnpackDDElParam(WM_DDE_ACK, 0xcafebabe, &lo, &hi);
     ok(ret == FALSE, "Expected FALSE, got %d\n", ret);
-    ok(lo == 0, "Expected 0, got %08lx\n", lo);
-    ok(hi == 0, "Expected 0, got %08lx\n", hi);
+    ok(lo == 0 ||
+       broken(lo == 0xdead), /* win2k */
+       "Expected 0, got %08lx\n", lo);
+    ok(hi == 0 ||
+       broken(hi == 0xbeef), /* win2k */
+       "Expected 0, got %08lx\n", hi);
 
     lo = 0xdead;
     hi = 0xbeef;
@@ -2027,8 +2036,12 @@ static void test_UnpackDDElParam(void)
     hi = 0xbeef;
     ret = UnpackDDElParam(WM_DDE_DATA, 0xcafebabe, &lo, &hi);
     ok(ret == FALSE, "Expected FALSE, got %d\n", ret);
-    ok(lo == 0, "Expected 0, got %08lx\n", lo);
-    ok(hi == 0, "Expected 0, got %08lx\n", hi);
+    ok(lo == 0 ||
+       broken(lo == 0xdead), /* win2k */
+       "Expected 0, got %08lx\n", lo);
+    ok(hi == 0 ||
+       broken(hi == 0xbeef), /* win2k */
+       "Expected 0, got %08lx\n", hi);
 
     lo = 0xdead;
     hi = 0xbeef;
@@ -2048,8 +2061,12 @@ static void test_UnpackDDElParam(void)
     hi = 0xbeef;
     ret = UnpackDDElParam(WM_DDE_POKE, 0xcafebabe, &lo, &hi);
     ok(ret == FALSE, "Expected FALSE, got %d\n", ret);
-    ok(lo == 0, "Expected 0, got %08lx\n", lo);
-    ok(hi == 0, "Expected 0, got %08lx\n", hi);
+    ok(lo == 0 ||
+       broken(lo == 0xdead), /* win2k */
+       "Expected 0, got %08lx\n", lo);
+    ok(hi == 0 ||
+       broken(hi == 0xbeef), /* win2k */
+       "Expected 0, got %08lx\n", hi);
 
     lo = 0xdead;
     hi = 0xbeef;

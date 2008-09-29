@@ -180,6 +180,25 @@ GpStatus WINGDIPAPI GdipCreateLineBrushFromRectI(GDIPCONST GpRect* rect,
     return GdipCreateLineBrushFromRect(&rectF, startcolor, endcolor, mode, wrap, line);
 }
 
+/* FIXME: angle value completely ignored. Don't know how to use it since native
+          always set Brush rectangle to rect (independetly of this angle).
+          Maybe it's used only on drawing.  */
+GpStatus WINGDIPAPI GdipCreateLineBrushFromRectWithAngle(GDIPCONST GpRectF* rect,
+    ARGB startcolor, ARGB endcolor, REAL angle, BOOL isAngleScalable, GpWrapMode wrap,
+    GpLineGradient **line)
+{
+    return GdipCreateLineBrushFromRect(rect, startcolor, endcolor, LinearGradientModeForwardDiagonal,
+                                       wrap, line);
+}
+
+GpStatus WINGDIPAPI GdipCreateLineBrushFromRectWithAngleI(GDIPCONST GpRect* rect,
+    ARGB startcolor, ARGB endcolor, REAL angle, BOOL isAngleScalable, GpWrapMode wrap,
+    GpLineGradient **line)
+{
+    return GdipCreateLineBrushFromRectI(rect, startcolor, endcolor, LinearGradientModeForwardDiagonal,
+                                        wrap, line);
+}
+
 GpStatus WINGDIPAPI GdipCreatePathGradient(GDIPCONST GpPointF* points,
     INT count, GpWrapMode wrap, GpPathGradient **grad)
 {
@@ -433,6 +452,12 @@ GpStatus WINGDIPAPI GdipCreateTextureIA(GpImage *image,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipCreateTextureIAI(GpImage *image, GDIPCONST GpImageAttributes *imageattr,
+    INT x, INT y, INT width, INT height, GpTexture **texture)
+{
+    return GdipCreateTextureIA(image,imageattr,(REAL)x,(REAL)y,(REAL)width,(REAL)height,texture);
+}
+
 GpStatus WINGDIPAPI GdipGetBrushType(GpBrush *brush, GpBrushType *type)
 {
     if(!brush || !type)  return InvalidParameter;
@@ -472,6 +497,16 @@ GpStatus WINGDIPAPI GdipGetLineGammaCorrection(GpLineGradient *line,
         return InvalidParameter;
 
     *usinggamma = line->gamma;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetLineWrapMode(GpLineGradient *brush, GpWrapMode *wrapmode)
+{
+    if(!brush || !wrapmode)
+        return InvalidParameter;
+
+    *wrapmode = brush->wrap;
 
     return Ok;
 }
@@ -553,6 +588,17 @@ GpStatus WINGDIPAPI GdipGetPathGradientSurroundColorsWithCount(GpPathGradient
         FIXME("not implemented\n");
 
     return NotImplemented;
+}
+
+GpStatus WINGDIPAPI GdipGetPathGradientWrapMode(GpPathGradient *brush,
+    GpWrapMode *wrapmode)
+{
+    if(!brush || !wrapmode)
+        return InvalidParameter;
+
+    *wrapmode = brush->wrap;
+
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipGetSolidFillColor(GpSolidFill *sf, ARGB *argb)

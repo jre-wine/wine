@@ -134,6 +134,7 @@ typedef struct {
 } DispatchEx;
 
 void init_dispex(DispatchEx*,IUnknown*,dispex_static_data_t*);
+BOOL dispex_query_interface(DispatchEx*,REFIID,void**);
 
 typedef struct {
     DispatchEx dispex;
@@ -623,7 +624,8 @@ thread_data_t *get_thread_data(BOOL);
 HWND get_thread_hwnd(void);
 void push_task(task_t*);
 void remove_doc_tasks(const HTMLDocument*);
-DWORD set_task_timer(HTMLDocument*,DWORD,IDispatch*);
+DWORD set_task_timer(HTMLDocument*,DWORD,BOOL,IDispatch*);
+HRESULT clear_task_timer(HTMLDocument*,BOOL,DWORD);
 
 HRESULT get_typeinfo(tid_t,ITypeInfo**);
 void release_typelib(void);

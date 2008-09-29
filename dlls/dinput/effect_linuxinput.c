@@ -53,11 +53,9 @@ struct LinuxInputEffectImpl
     LONG	ref;
     GUID	guid;
 
-    /* Effect data */
-    struct ff_effect effect;
-
-    /* Parent device */
-    int* 	fd;
+    struct ff_effect    effect; /* Effect data */
+    int*                fd;     /* Parent device */
+    struct list        *entry;  /* Entry into the parent's list of effects */
 };
 
 
@@ -191,7 +189,7 @@ static void _dump_DIEFFECT(LPCDIEFFECT eff, REFGUID guid)
     TRACE("  - dwTriggerRepeatInterval: %d\n", eff->dwTriggerRepeatInterval);
     TRACE("  - cAxes: %d\n", eff->cAxes);
     TRACE("  - rgdwAxes: %p\n", eff->rgdwAxes);
-    if (TRACE_ON(dinput)) {
+    if (TRACE_ON(dinput) && eff->rgdwAxes) {
 	TRACE("    ");	
 	for (i = 0; i < eff->cAxes; ++i)
 	    TRACE("%d ", eff->rgdwAxes[i]);
@@ -261,7 +259,7 @@ static HRESULT WINAPI LinuxInputEffectImpl_Download(
 	if (errno == ENOMEM) {
 	    return DIERR_DEVICEFULL;
 	} else {
-	    FIXME("Could not upload effect. Assuming a disconnected device.\n");
+            FIXME("Could not upload effect. Assuming a disconnected device %d \"%s\".\n", *This->fd, strerror(errno));
 	    return DIERR_INPUTLOST;
 	}
     }
@@ -724,17 +722,6 @@ static HRESULT WINAPI LinuxInputEffectImpl_SetParameters(
     return DI_OK;
 }   
 
-static ULONG WINAPI LinuxInputEffectImpl_Release(
-	LPDIRECTINPUTEFFECT iface)
-{
-    LinuxInputEffectImpl *This = (LinuxInputEffectImpl *)iface;
-    ULONG ref = InterlockedDecrement(&(This->ref));
-
-    if (ref == 0)
-        HeapFree(GetProcessHeap(), 0, This);
-    return ref;
-}
-
 static HRESULT WINAPI LinuxInputEffectImpl_Stop(
         LPDIRECTINPUTEFFECT iface)
 {
@@ -768,6 +755,22 @@ static HRESULT WINAPI LinuxInputEffectImpl_Unload(
     return DI_OK;
 }
 
+static ULONG WINAPI LinuxInputEffectImpl_Release(LPDIRECTINPUTEFFECT iface)
+{
+    LinuxInputEffectImpl *This = (LinuxInputEffectImpl *)iface;
+    ULONG ref = InterlockedDecrement(&(This->ref));
+
+    if (ref == 0)
+    {
+        LinuxInputEffectImpl_Stop(iface);
+        LinuxInputEffectImpl_Unload(iface);
+        list_remove(This->entry);
+        HeapFree(GetProcessHeap(), 0, LIST_ENTRY(This->entry, effect_list_item, entry));
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+    return ref;
+}
+
 /******************************************************************************
  *      LinuxInputEffect
  */
@@ -775,6 +778,7 @@ static HRESULT WINAPI LinuxInputEffectImpl_Unload(
 HRESULT linuxinput_create_effect(
 	int* fd,
 	REFGUID rguid,
+        struct list *parent_list_entry,
 	LPDIRECTINPUTEFFECT* peff)
 {
     LinuxInputEffectImpl* newEffect = HeapAlloc(GetProcessHeap(), 
@@ -824,13 +828,15 @@ HRESULT linuxinput_create_effect(
 	    HeapFree(GetProcessHeap(), 0, newEffect);
 	    return DIERR_INVALIDPARAM;
 	default:
-	    FIXME("Unknown force type.\n");
+            FIXME("Unknown force type 0x%x.\n", type);
             HeapFree(GetProcessHeap(), 0, newEffect);
 	    return DIERR_INVALIDPARAM;
     }
 
     /* mark as non-uploaded */
     newEffect->effect.id = -1;
+
+    newEffect->entry = parent_list_entry;
 
     *peff = (LPDIRECTINPUTEFFECT)newEffect; 
 
@@ -869,7 +875,7 @@ HRESULT linuxinput_get_info_A(
     info->dwDynamicParams = info->dwStaticParams;
 
     /* yes, this is windows behavior (print the GUID_Name for name) */
-    strcpy((char*)&(info->tszName), _dump_dinput_GUID(rguid));
+    strcpy((char*)info->tszName, _dump_dinput_GUID(rguid));
 
     return DI_OK;
 }
@@ -904,7 +910,7 @@ HRESULT linuxinput_get_info_W(
 
     /* yes, this is windows behavior (print the GUID_Name for name) */
     MultiByteToWideChar(CP_ACP, 0, _dump_dinput_GUID(rguid), -1, 
-		        (WCHAR*)&(info->tszName), MAX_PATH);
+		        (WCHAR*)info->tszName, MAX_PATH);
 
     return DI_OK;
 }

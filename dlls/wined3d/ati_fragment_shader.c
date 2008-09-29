@@ -850,61 +850,180 @@ static void set_bumpmat(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     mat[1][1] = (mat[1][1] + 1.0) * 0.5;
     GL_EXTCALL(glSetFragmentShaderConstantATI(ATI_FFP_CONST_BUMPMAT(stage), (float *) mat));
     checkGLcall("glSetFragmentShaderConstantATI(ATI_FFP_CONST_BUMPMAT(stage), mat)");
-
-    /* FIXME: This should go away
-     * This is currently needed because atifs borrows a pixel shader implementation
-     * from somewhere else, but consumes bump map matrix change events. The other pixel
-     * shader implementation may need notification about the change to update the texbem
-     * constants. Once ATIFS supports real shaders on its own, and GLSL/ARB have a replacement
-     * pipeline this call can go away
-     *
-     * FIXME2: Even considering this workaround calling FFPStateTable directly isn't nice
-     * as well. Better would be to call the model's table we inherit from, but currently
-     * it is always the FFP table, and as soon as this changes we can remove the call anyway
-     */
-    FFPStateTable[state].apply(state, stateblock, context);
 }
 #undef GLINFO_LOCATION
 
-/* our state table. Borrows lots of stuff from the base implementation */
-struct StateEntry ATIFSStateTable[STATE_HIGHEST + 1];
+static const struct StateEntryTemplate atifs_fragmentstate_template[] = {
+    {STATE_RENDER(WINED3DRS_TEXTUREFACTOR),               { STATE_RENDER(WINED3DRS_TEXTUREFACTOR),              state_texfactor_atifs   }},
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_COLORARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_COLORARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_COLORARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_RESULTARG),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),      { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_COLORARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_COLORARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_COLORARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_RESULTARG),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),      { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_COLORARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_COLORARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_COLORARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_RESULTARG),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),      { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_COLORARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_COLORARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_COLORARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_RESULTARG),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),      { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_COLORARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_COLORARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_COLORARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_RESULTARG),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),      { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_COLORARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_COLORARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_COLORARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_RESULTARG),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),      { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_COLORARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_COLORARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_COLORARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_RESULTARG),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),      { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_COLORARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_COLORARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_COLORARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),           { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAARG1),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAARG2),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAARG0),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_RESULTARG),         { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          set_tex_op_atifs        }},
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),      { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     set_bumpmat             }},
+    {0 /* Terminate */,                                   { 0,                                                  0                       }},
+};
 
-static void init_state_table() {
-    unsigned int i;
-    const DWORD rep = STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP);
-    memcpy(ATIFSStateTable, arb_program_shader_backend.StateTable, sizeof(ATIFSStateTable));
-
-    for(i = 0; i < MAX_TEXTURES; i++) {
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP)].apply = set_tex_op_atifs;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP)].representative = rep;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_COLORARG1)].apply = set_tex_op_atifs;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_COLORARG1)].representative = rep;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_COLORARG2)].apply = set_tex_op_atifs;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_COLORARG2)].representative = rep;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_COLORARG0)].apply = set_tex_op_atifs;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_COLORARG0)].representative = rep;
-
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_ALPHAOP)].apply = set_tex_op_atifs;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_ALPHAOP)].representative = rep;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_ALPHAARG1)].apply = set_tex_op_atifs;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_ALPHAARG1)].representative = rep;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_ALPHAARG2)].apply = set_tex_op_atifs;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_ALPHAARG2)].representative = rep;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_ALPHAARG0)].apply = set_tex_op_atifs;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_ALPHAARG0)].representative = rep;
-
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_RESULTARG)].apply = set_tex_op_atifs;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_RESULTARG)].representative = rep;
-
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_BUMPENVMAT00)].apply = set_bumpmat;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_BUMPENVMAT01)].apply = set_bumpmat;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_BUMPENVMAT10)].apply = set_bumpmat;
-        ATIFSStateTable[STATE_TEXTURESTAGE(i, WINED3DTSS_BUMPENVMAT11)].apply = set_bumpmat;
+static void atifs_enable(IWineD3DDevice *iface, BOOL enable) {
+    if(enable) {
+        glEnable(GL_FRAGMENT_SHADER_ATI);
+        checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
+    } else {
+        glDisable(GL_FRAGMENT_SHADER_ATI);
+        checkGLcall("glDisable(GL_FRAGMENT_SHADER_ATI)");
     }
-
-    ATIFSStateTable[STATE_RENDER(WINED3DRS_TEXTUREFACTOR)].apply = state_texfactor_atifs;
-    ATIFSStateTable[STATE_RENDER(WINED3DRS_TEXTUREFACTOR)].representative = STATE_RENDER(WINED3DRS_TEXTUREFACTOR);
 }
+
+static void atifs_get_caps(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_info, struct fragment_caps *caps) {
+    caps->TextureOpCaps =  WINED3DTEXOPCAPS_DISABLE                     |
+                           WINED3DTEXOPCAPS_SELECTARG1                  |
+                           WINED3DTEXOPCAPS_SELECTARG2                  |
+                           WINED3DTEXOPCAPS_MODULATE4X                  |
+                           WINED3DTEXOPCAPS_MODULATE2X                  |
+                           WINED3DTEXOPCAPS_MODULATE                    |
+                           WINED3DTEXOPCAPS_ADDSIGNED2X                 |
+                           WINED3DTEXOPCAPS_ADDSIGNED                   |
+                           WINED3DTEXOPCAPS_ADD                         |
+                           WINED3DTEXOPCAPS_SUBTRACT                    |
+                           WINED3DTEXOPCAPS_ADDSMOOTH                   |
+                           WINED3DTEXOPCAPS_BLENDCURRENTALPHA           |
+                           WINED3DTEXOPCAPS_BLENDFACTORALPHA            |
+                           WINED3DTEXOPCAPS_BLENDTEXTUREALPHA           |
+                           WINED3DTEXOPCAPS_BLENDDIFFUSEALPHA           |
+                           WINED3DTEXOPCAPS_BLENDTEXTUREALPHAPM         |
+                           WINED3DTEXOPCAPS_MODULATEALPHA_ADDCOLOR      |
+                           WINED3DTEXOPCAPS_MODULATECOLOR_ADDALPHA      |
+                           WINED3DTEXOPCAPS_MODULATEINVCOLOR_ADDALPHA   |
+                           WINED3DTEXOPCAPS_MODULATEINVALPHA_ADDCOLOR   |
+                           WINED3DTEXOPCAPS_DOTPRODUCT3                 |
+                           WINED3DTEXOPCAPS_MULTIPLYADD                 |
+                           WINED3DTEXOPCAPS_LERP                        |
+                           WINED3DTEXOPCAPS_BUMPENVMAP;
+
+    /* TODO: Implement WINED3DTEXOPCAPS_BUMPENVMAPLUMINANCE
+    and WINED3DTEXOPCAPS_PREMODULATE */
+
+    /* GL_ATI_fragment_shader always supports 6 textures, which was the limit on r200 cards
+     * which this extension is exclusively focused on(later cards have GL_ARB_fragment_program).
+     * If the current card has more than 8 fixed function textures in OpenGL's regular fixed
+     * function pipeline then the ATI_fragment_shader backend imposes a stricter limit. This
+     * shouldn't be too hard since Nvidia cards have a limit of 4 textures with the default ffp
+     * pipeline, and almost all games are happy with that. We can however support up to 8
+     * texture stages because we have a 2nd pass limit of 8 instructions, and per stage we use
+     * only 1 instruction.
+     *
+     * The proper fix for this is not to use GL_ATI_fragment_shader on cards newer than the
+     * r200 series and use an ARB or GLSL shader instead
+     */
+    caps->MaxTextureBlendStages   = 8;
+    caps->MaxSimultaneousTextures = 6;
+
+    caps->PrimitiveMiscCaps |= WINED3DPMISCCAPS_TSSARGTEMP;
+}
+
+const struct fragment_pipeline atifs_fragment_pipeline = {
+    atifs_enable,
+    atifs_get_caps,
+    atifs_fragmentstate_template
+};
 
 /* GL_ATI_fragment_shader backend.It borrows a lot from a the
  * ARB shader backend, currently the whole vertex processing
@@ -920,8 +1039,8 @@ static void shader_atifs_select_depth_blt(IWineD3DDevice *iface) {
     arb_program_shader_backend.shader_select_depth_blt(iface);
 }
 
-static void shader_atifs_destroy_depth_blt(IWineD3DDevice *iface) {
-    arb_program_shader_backend.shader_destroy_depth_blt(iface);
+static void shader_atifs_deselect_depth_blt(IWineD3DDevice *iface) {
+    arb_program_shader_backend.shader_deselect_depth_blt(iface);
 }
 
 static void shader_atifs_load_constants(IWineD3DDevice *iface, char usePS, char useVS) {
@@ -982,61 +1101,8 @@ static BOOL shader_atifs_dirty_const(IWineD3DDevice *iface) {
     return arb_program_shader_backend.shader_dirtifyable_constants(iface);
 }
 
-static void shader_atifs_load_init(void) {
-    arb_program_shader_backend.shader_dll_load_init();
-    init_state_table();
-}
-
 static void shader_atifs_get_caps(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_info, struct shader_caps *caps) {
     arb_program_shader_backend.shader_get_caps(devtype, gl_info, caps);
-
-    caps->TextureOpCaps =  WINED3DTEXOPCAPS_DISABLE                     |
-                           WINED3DTEXOPCAPS_SELECTARG1                  |
-                           WINED3DTEXOPCAPS_SELECTARG2                  |
-                           WINED3DTEXOPCAPS_MODULATE4X                  |
-                           WINED3DTEXOPCAPS_MODULATE2X                  |
-                           WINED3DTEXOPCAPS_MODULATE                    |
-                           WINED3DTEXOPCAPS_ADDSIGNED2X                 |
-                           WINED3DTEXOPCAPS_ADDSIGNED                   |
-                           WINED3DTEXOPCAPS_ADD                         |
-                           WINED3DTEXOPCAPS_SUBTRACT                    |
-                           WINED3DTEXOPCAPS_ADDSMOOTH                   |
-                           WINED3DTEXOPCAPS_BLENDCURRENTALPHA           |
-                           WINED3DTEXOPCAPS_BLENDFACTORALPHA            |
-                           WINED3DTEXOPCAPS_BLENDTEXTUREALPHA           |
-                           WINED3DTEXOPCAPS_BLENDDIFFUSEALPHA           |
-                           WINED3DTEXOPCAPS_BLENDTEXTUREALPHAPM         |
-                           WINED3DTEXOPCAPS_MODULATEALPHA_ADDCOLOR      |
-                           WINED3DTEXOPCAPS_MODULATECOLOR_ADDALPHA      |
-                           WINED3DTEXOPCAPS_MODULATEINVCOLOR_ADDALPHA   |
-                           WINED3DTEXOPCAPS_MODULATEINVALPHA_ADDCOLOR   |
-                           WINED3DTEXOPCAPS_DOTPRODUCT3                 |
-                           WINED3DTEXOPCAPS_MULTIPLYADD                 |
-                           WINED3DTEXOPCAPS_LERP                        |
-                           WINED3DTEXOPCAPS_BUMPENVMAP;
-
-    /* TODO: Implement WINED3DTEXOPCAPS_BUMPENVMAPLUMINANCE
-    and WINED3DTEXOPCAPS_PREMODULATE */
-
-    /* GL_ATI_fragment_shader only supports up to 6 textures, which was the limit on r200 cards
-     * which this extension is exclusively focused on(later cards have GL_ARB_fragment_program).
-     * If the current card has more than 8 fixed function textures in OpenGL's regular fixed
-     * function pipeline then the ATI_fragment_shader backend imposes a stricter limit. This
-     * shouldn't be too hard since Nvidia cards have a limit of 4 textures with the default ffp
-     * pipeline, and almost all games are happy with that. We can however support up to 8
-     * texture stages because we have a 2nd pass limit of 8 instructions, and per stage we use
-     * only 1 instruction.
-     *
-     * The proper fix for this is not to use GL_ATI_fragment_shader on cards newer than the
-     * r200 series and use an ARB or GLSL shader instead
-     */
-    if(caps->MaxSimultaneousTextures > 6) {
-        WARN("OpenGL fixed function supports %d simultaneous textures,\n", caps->MaxSimultaneousTextures);
-        WARN("but GL_ATI_fragment_shader limits this to 6\n");
-        caps->MaxSimultaneousTextures = 6;
-    }
-
-    caps->PrimitiveMiscCaps |= WINED3DPMISCCAPS_TSSARGTEMP;
 }
 
 static void shader_atifs_generate_pshader(IWineD3DPixelShader *iface, SHADER_BUFFER *buffer) {
@@ -1047,20 +1113,10 @@ static void shader_atifs_generate_vshader(IWineD3DVertexShader *iface, SHADER_BU
     arb_program_shader_backend.shader_generate_vshader(iface, buffer);
 }
 
-static void shader_atifs_fragment_enable(IWineD3DDevice *iface, BOOL enable) {
-    if(enable) {
-        glEnable(GL_FRAGMENT_SHADER_ATI);
-        checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
-    } else {
-        glDisable(GL_FRAGMENT_SHADER_ATI);
-        checkGLcall("glDisable(GL_FRAGMENT_SHADER_ATI)");
-    }
-}
-
 const shader_backend_t atifs_shader_backend = {
     shader_atifs_select,
     shader_atifs_select_depth_blt,
-    shader_atifs_destroy_depth_blt,
+    shader_atifs_deselect_depth_blt,
     shader_atifs_load_constants,
     shader_atifs_cleanup,
     shader_atifs_color_correction,
@@ -1071,7 +1127,4 @@ const shader_backend_t atifs_shader_backend = {
     shader_atifs_generate_pshader,
     shader_atifs_generate_vshader,
     shader_atifs_get_caps,
-    shader_atifs_load_init,
-    shader_atifs_fragment_enable,
-    ATIFSStateTable
 };

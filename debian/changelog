@@ -1,3 +1,9 @@
+wine (1.1.1-1) UNRELEASED; urgency=low
+
+  * UNRELEASED
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 29 Sep 2008 04:29:58 +0200
+
 wine (1.1.0-1) experimental; urgency=low
 
   * New upstream release 1.1.0, released Jun 27, 2008.

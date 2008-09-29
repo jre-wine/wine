@@ -1161,7 +1161,9 @@ static void test_client_init(void)
     ok(stubMsg.IsClient == 1, "stubMsg.IsClient should have been 1 instead of %u\n", stubMsg.IsClient);
     TEST_ZERO(ReuseBuffer, "%d");
     TEST_ZERO(pAllocAllNodesContext, "%p");
-    TEST_ZERO(pPointerQueueState, "%p");
+    ok(stubMsg.pPointerQueueState == 0 ||
+       broken(stubMsg.pPointerQueueState == (void *)0xcccccccc), /* win2k */
+       "stubMsg.pPointerQueueState should have been unset instead of %p\n", stubMsg.pPointerQueueState);
     TEST_ZERO(IgnoreEmbeddedPointers, "%d");
     TEST_ZERO(PointerBufferMark, "%p");
     TEST_ZERO(CorrDespIncrement, "%d");
@@ -1260,9 +1262,13 @@ todo_wine
     TEST_ULONG_UNSET(MemorySize);
     TEST_POINTER_UNSET(Memory);
     ok(stubMsg.IsClient == 0, "stubMsg.IsClient should have been 0 instead of %u\n", stubMsg.IsClient);
-    TEST_ZERO(ReuseBuffer, "%d");
+    ok(stubMsg.ReuseBuffer == 0 ||
+       broken(stubMsg.ReuseBuffer == 1), /* win2k */
+       "stubMsg.ReuseBuffer should have been set to zero instead of %d\n", stubMsg.ReuseBuffer);
     TEST_ZERO(pAllocAllNodesContext, "%p");
-    TEST_ZERO(pPointerQueueState, "%p");
+    ok(stubMsg.pPointerQueueState == 0 ||
+       broken(stubMsg.pPointerQueueState == (void *)0xcccccccc), /* win2k */
+       "stubMsg.pPointerQueueState should have been unset instead of %p\n", stubMsg.pPointerQueueState);
     TEST_ZERO(IgnoreEmbeddedPointers, "%d");
     TEST_ZERO(PointerBufferMark, "%p");
     ok(stubMsg.CorrDespIncrement == 0xcc, "CorrDespIncrement should have been unset instead of 0x%x\n", stubMsg.CorrDespIncrement);
@@ -1842,7 +1848,9 @@ static void test_ndr_buffer(void)
     ok(ret == StubMsg.Buffer, "NdrGetBuffer should have returned the same value as StubMsg.Buffer instead of %p\n", ret);
     ok(RpcMessage.Handle != NULL, "RpcMessage.Handle should not have been NULL\n");
     ok(RpcMessage.Buffer != NULL, "RpcMessage.Buffer should not have been NULL\n");
-    ok(RpcMessage.BufferLength == 10, "RpcMessage.BufferLength should have been 10 instead of %d\n", RpcMessage.BufferLength);
+    ok(RpcMessage.BufferLength == 10 ||
+       broken(RpcMessage.BufferLength == 12), /* win2k */
+       "RpcMessage.BufferLength should have been 10 instead of %d\n", RpcMessage.BufferLength);
     ok(RpcMessage.RpcFlags == 0, "RpcMessage.RpcFlags should have been 0x0 instead of 0x%lx\n", RpcMessage.RpcFlags);
     ok(StubMsg.Buffer != NULL, "Buffer should not have been NULL\n");
     ok(!StubMsg.BufferStart, "BufferStart should have been NULL instead of %p\n", StubMsg.BufferStart);

@@ -551,6 +551,20 @@ GpStatus WINGDIPAPI GdipGetPathFillMode(GpPath *path, GpFillMode *fillmode)
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipGetPathLastPoint(GpPath* path, GpPointF* lastPoint)
+{
+    INT count;
+
+    if(!path || !lastPoint)
+        return InvalidParameter;
+
+    count = path->pathdata.Count;
+    if(count > 0)
+        *lastPoint = path->pathdata.Points[count-1];
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipGetPathPoints(GpPath *path, GpPointF* points, INT count)
 {
     if(!path)
@@ -716,10 +730,33 @@ GpStatus WINGDIPAPI GdipGetPointCount(GpPath *path, INT *count)
 GpStatus WINGDIPAPI GdipIsOutlineVisiblePathPointI(GpPath* path, INT x, INT y,
     GpPen *pen, GpGraphics *graphics, BOOL *result)
 {
+    return GdipIsOutlineVisiblePathPoint(path, x, y, pen, graphics, result);
+}
+
+GpStatus WINGDIPAPI GdipIsOutlineVisiblePathPoint(GpPath* path, REAL x, REAL y,
+    GpPen *pen, GpGraphics *graphics, BOOL *result)
+{
     static int calls;
 
     if(!path || !pen)
         return InvalidParameter;
+
+    if(!(calls++))
+        FIXME("not implemented\n");
+
+    return NotImplemented;
+}
+
+GpStatus WINGDIPAPI GdipIsVisiblePathPointI(GpPath* path, INT x, INT y, GpGraphics *graphics, BOOL *result)
+{
+    return GdipIsVisiblePathPoint(path, x, y, graphics, result);
+}
+
+GpStatus WINGDIPAPI GdipIsVisiblePathPoint(GpPath* path, REAL x, REAL y, GpGraphics *graphics, BOOL *result)
+{
+    static int calls;
+
+    if(!path) return InvalidParameter;
 
     if(!(calls++))
         FIXME("not implemented\n");
@@ -799,7 +836,7 @@ GpStatus WINGDIPAPI GdipAddPathRectangle(GpPath *path, REAL x, REAL y,
     ptf[1].X = x;
     ptf[1].Y = y+height;
 
-    if((retstat = GdipAddPathLine2(path,(GDIPCONST GpPointF*)&ptf,2)) != Ok)  goto fail;
+    if((retstat = GdipAddPathLine2(path, ptf, 2)) != Ok)  goto fail;
     path->pathdata.Types[path->pathdata.Count-1] |= PathPointTypeCloseSubpath;
 
     /* free backup */

@@ -48,18 +48,6 @@ static const IPinVtbl TransformFilter_InputPin_Vtbl;
 static const IMemInputPinVtbl MemInputPin_Vtbl; 
 static const IPinVtbl TransformFilter_OutputPin_Vtbl;
 
-static HRESULT TransformFilter_Sample(LPVOID iface, IMediaSample * pSample)
-{
-    TransformFilterImpl *This = (TransformFilterImpl *)iface;
-
-    TRACE("%p %p\n", iface, pSample);
-
-    if (This->state == State_Stopped)
-        return S_FALSE;
-
-    return This->pFuncsTable->pfnProcessSampleData(This, pSample);
-}
-
 static HRESULT TransformFilter_Input_QueryAccept(LPVOID iface, const AM_MEDIA_TYPE * pmt)
 {
     TransformFilterImpl* This = (TransformFilterImpl*)iface;
@@ -187,7 +175,7 @@ HRESULT TransformFilter_Create(TransformFilterImpl* pTransformFilter, const CLSI
     piOutput.pFilter = (IBaseFilter *)pTransformFilter;
     lstrcpynW(piOutput.achName, wcsOutputPinName, sizeof(piOutput.achName) / sizeof(piOutput.achName[0]));
 
-    hr = InputPin_Construct(&TransformFilter_InputPin_Vtbl, &piInput, TransformFilter_Sample, pTransformFilter, TransformFilter_Input_QueryAccept, NULL, &pTransformFilter->csFilter, NULL, &pTransformFilter->ppPins[0]);
+    hr = InputPin_Construct(&TransformFilter_InputPin_Vtbl, &piInput, (SAMPLEPROC_PUSH)pFuncsTable->pfnProcessSampleData, pTransformFilter, TransformFilter_Input_QueryAccept, NULL, &pTransformFilter->csFilter, NULL, &pTransformFilter->ppPins[0]);
 
     if (SUCCEEDED(hr))
     {
@@ -349,7 +337,7 @@ static HRESULT WINAPI TransformFilter_Pause(IBaseFilter * iface)
     EnterCriticalSection(&This->csFilter);
     {
         if (This->state == State_Stopped)
-            ((InputPin *)This->ppPins[0])->end_of_stream = 0;
+            IBaseFilter_Run(iface, -1);
 
         This->state = State_Paused;
     }
@@ -368,13 +356,15 @@ static HRESULT WINAPI TransformFilter_Run(IBaseFilter * iface, REFERENCE_TIME tS
     EnterCriticalSection(&This->csFilter);
     {
         if (This->state == State_Stopped)
+        {
             ((InputPin *)This->ppPins[0])->end_of_stream = 0;
+            if (This->pFuncsTable->pfnProcessBegin)
+                This->pFuncsTable->pfnProcessBegin(This);
+            OutputPin_CommitAllocator((OutputPin *)This->ppPins[1]);
+        }
 
         This->rtStreamStart = tStart;
         This->state = State_Running;
-        OutputPin_CommitAllocator((OutputPin *)This->ppPins[1]);
-        if (This->pFuncsTable->pfnProcessBegin)
-            This->pFuncsTable->pfnProcessBegin(This);
     }
     LeaveCriticalSection(&This->csFilter);
 

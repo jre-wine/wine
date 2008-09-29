@@ -886,12 +886,11 @@ static void read_from_framebuffer_texture(IWineD3DSurfaceImpl *This)
     d3dfmt_get_conv(This, TRUE /* We need color keying */, TRUE /* We will use textures */, &format, &internal, &type, &convert, &bpp, This->srgb);
 
     IWineD3DSurface_GetContainer((IWineD3DSurface *) This, &IID_IWineD3DSwapChain, (void **)&swapchain);
-    /* Activate the surface. Set it up for blitting now, although not necessarily needed for LockRect.
-     * Certain graphics drivers seem to dislike some enabled states when reading from opengl, the blitting usage
-     * should help here. Furthermore unlockrect will need the context set up for blitting. The context manager will find
-     * context->last_was_blit set on the unlock.
+    /* Activate the surface to read from. In some situations it isn't the currently active target(e.g. backbuffer
+     * locking during offscreen rendering). RESOURCELOAD is ok because glCopyTexSubImage2D isn't affected by any
+     * states in the stateblock, and no driver was found yet that had bugs in that regard.
      */
-    ActivateContext(device, (IWineD3DSurface *) This, CTXUSAGE_BLIT);
+    ActivateContext(device, (IWineD3DSurface *) This, CTXUSAGE_RESOURCELOAD);
     surface_bind_and_dirtify(This);
     ENTER_GL();
 
@@ -2281,7 +2280,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadTexture(IWineD3DSurface *iface, BO
         IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
         /* Make sure the texture is reloaded because of the color key change, this kills performance though :( */
         /* TODO: This is not necessarily needed with hw palettized texture support */
-        This->Flags &= ~SFLAG_INTEXTURE;
+        IWineD3DSurface_ModifyLocation(iface, SFLAG_INSYSMEM, TRUE);
     } else {
         TRACE("surface is already in texture\n");
         return WINED3D_OK;
@@ -2680,6 +2679,8 @@ static inline void fb_copy_to_texture_direct(IWineD3DSurfaceImpl *This, IWineD3D
     glBindTexture(This->glDescription.target, This->glDescription.textureName);
     checkGLcall("glBindTexture");
     if(!swapchain) {
+        TRACE("Reading from an offscreen target\n");
+        upsidedown = !upsidedown;
         glReadBuffer(myDevice->offscreenBuffer);
     } else {
         GLenum buffer = surface_get_gl_buffer(SrcSurface, (IWineD3DSwapChain *)swapchain);
@@ -2808,6 +2809,8 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
     if(swapchain) {
         glReadBuffer(surface_get_gl_buffer(SrcSurface, (IWineD3DSwapChain *)swapchain));
     } else {
+        TRACE("Reading from an offscreen target\n");
+        upsidedown = !upsidedown;
         glReadBuffer(myDevice->offscreenBuffer);
     }
 
@@ -3192,10 +3195,6 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
             rect.x1 = tmp;
             upsideDown = !upsideDown;
         }
-        if(!srcSwapchain) {
-            TRACE("Reading from an offscreen target\n");
-            upsideDown = !upsideDown;
-        }
 
         if(rect.x2 - rect.x1 != srect.x2 - srect.x1) {
             stretchx = TRUE;
@@ -3276,6 +3275,17 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
             SourceRectangle.top = 0;
             SourceRectangle.bottom = Src->currentDesc.Height;
         }
+
+        /* When blitting from an offscreen surface to a rendertarget, the source
+         * surface is not required to have a palette. Our rendering / conversion
+         * code further down the road retrieves the palette from the surface, so
+         * it must have a palette set. */
+        if((Src->resource.format == WINED3DFMT_P8) && (Src->palette == NULL)) {
+            paletteOverride = TRUE;
+            TRACE("Source surface (%p) lacks palette, overriding palette with palette %p of destination surface (%p)\n", Src, This->palette, This);
+            Src->palette = This->palette;
+        }
+
         if (wined3d_settings.offscreen_rendering_mode == ORM_FBO && GL_SUPPORT(EXT_FRAMEBUFFER_BLIT) &&
             (Flags & (WINEDDBLT_KEYSRC | WINEDDBLT_KEYSRCOVERRIDE)) == 0) {
             TRACE("Using stretch_rect_fbo\n");
@@ -3284,6 +3294,10 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
              */
             stretch_rect_fbo((IWineD3DDevice *)myDevice, SrcSurface, (WINED3DRECT *) &SourceRectangle,
                               (IWineD3DSurface *)This, &rect, Filter, FALSE);
+
+            /* Clear the palette as the surface didn't have a palette attached, it would confuse GetPalette and other calls */
+            if(paletteOverride)
+                Src->palette = NULL;
             return WINED3D_OK;
         }
 
@@ -3311,16 +3325,6 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
         } else {
             /* Do not use color key */
             Src->CKeyFlags &= ~WINEDDSD_CKSRCBLT;
-        }
-
-        /* When blitting from an offscreen surface to a rendertarget, the source
-         * surface is not required to have a palette. Our rendering / conversion
-         * code further down the road retrieves the palette from the surface, so
-         * it must have a palette set. */
-        if((Src->resource.format == WINED3DFMT_P8) && (Src->palette == NULL)) {
-            paletteOverride = TRUE;
-            TRACE("Source surface (%p) lacks palette, overriding palette with palette %p of destination surface (%p)\n", Src, This->palette, This);
-            Src->palette = This->palette;
         }
 
         /* Now load the surface */
@@ -3825,6 +3829,130 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_PrivateSetup(IWineD3DSurface *iface) {
     This->Flags |= SFLAG_INSYSMEM;
 
     return WINED3D_OK;
+}
+
+void surface_modify_ds_location(IWineD3DSurface *iface, DWORD location) {
+    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
+
+    TRACE("(%p) New location %#x\n", This, location);
+
+    if (location & ~SFLAG_DS_LOCATIONS) {
+        FIXME("(%p) Invalid location (%#x) specified\n", This, location);
+    }
+
+    This->Flags &= ~SFLAG_DS_LOCATIONS;
+    This->Flags |= location;
+}
+
+void surface_load_ds_location(IWineD3DSurface *iface, DWORD location) {
+    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
+    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+
+    TRACE("(%p) New location %#x\n", This, location);
+
+    /* TODO: Make this work for modes other than FBO */
+    if (wined3d_settings.offscreen_rendering_mode != ORM_FBO) return;
+
+    if (This->Flags & location) {
+        TRACE("(%p) Location (%#x) is already up to date\n", This, location);
+        return;
+    }
+
+    if (This->current_renderbuffer) {
+        FIXME("(%p) Not supported with fixed up depth stencil\n", This);
+        return;
+    }
+
+    if (location == SFLAG_DS_OFFSCREEN) {
+        if (This->Flags & SFLAG_DS_ONSCREEN) {
+            GLint old_binding = 0;
+
+            TRACE("(%p) Copying onscreen depth buffer to depth texture\n", This);
+
+            ENTER_GL();
+
+            if (!device->depth_blt_texture) {
+                glGenTextures(1, &device->depth_blt_texture);
+            }
+
+            /* Note that we use depth_blt here as well, rather than glCopyTexImage2D
+             * directly on the FBO texture. That's because we need to flip. */
+            GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0));
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_binding);
+            glBindTexture(GL_TEXTURE_2D, device->depth_blt_texture);
+            glCopyTexImage2D(This->glDescription.target,
+                    This->glDescription.level,
+                    This->glDescription.glFormatInternal,
+                    0,
+                    0,
+                    This->currentDesc.Width,
+                    This->currentDesc.Height,
+                    0);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_DEPTH_TEXTURE_MODE_ARB, GL_LUMINANCE);
+            glBindTexture(GL_TEXTURE_2D, old_binding);
+
+            /* Setup the destination */
+            if (!device->depth_blt_rb) {
+                GL_EXTCALL(glGenRenderbuffersEXT(1, &device->depth_blt_rb));
+                checkGLcall("glGenRenderbuffersEXT");
+            }
+            if (device->depth_blt_rb_w != This->currentDesc.Width
+                    || device->depth_blt_rb_h != This->currentDesc.Height) {
+                GL_EXTCALL(glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, device->depth_blt_rb));
+                checkGLcall("glBindRenderbufferEXT");
+                GL_EXTCALL(glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, GL_RGBA8, This->currentDesc.Width, This->currentDesc.Height));
+                checkGLcall("glRenderbufferStorageEXT");
+                device->depth_blt_rb_w = This->currentDesc.Width;
+                device->depth_blt_rb_h = This->currentDesc.Height;
+            }
+
+            bind_fbo((IWineD3DDevice *)device, GL_FRAMEBUFFER_EXT, &device->dst_fbo);
+            GL_EXTCALL(glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_RENDERBUFFER_EXT, device->depth_blt_rb));
+            checkGLcall("glFramebufferRenderbufferEXT");
+            attach_depth_stencil_fbo(device, GL_FRAMEBUFFER_EXT, iface, FALSE);
+
+            /* Do the actual blit */
+            depth_blt((IWineD3DDevice *)device, device->depth_blt_texture);
+            checkGLcall("depth_blt");
+
+            if (device->render_offscreen) {
+                bind_fbo((IWineD3DDevice *)device, GL_FRAMEBUFFER_EXT, &device->fbo);
+            } else {
+                GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0));
+                checkGLcall("glBindFramebuffer()");
+            }
+
+            LEAVE_GL();
+        } else {
+            FIXME("No up to date depth stencil location\n");
+        }
+    } else if (location == SFLAG_DS_ONSCREEN) {
+        if (This->Flags & SFLAG_DS_OFFSCREEN) {
+            TRACE("(%p) Copying depth texture to onscreen depth buffer\n", This);
+
+            ENTER_GL();
+
+            GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0));
+            checkGLcall("glBindFramebuffer()");
+            depth_blt((IWineD3DDevice *)device, This->glDescription.textureName);
+            checkGLcall("depth_blt");
+
+            if (device->render_offscreen) {
+                GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, device->fbo));
+                checkGLcall("glBindFramebuffer()");
+            }
+
+            LEAVE_GL();
+        } else {
+            FIXME("No up to date depth stencil location\n");
+        }
+    } else {
+        ERR("(%p) Invalid location (%#x) specified\n", This, location);
+    }
+
+    This->Flags |= location;
 }
 
 static void WINAPI IWineD3DSurfaceImpl_ModifyLocation(IWineD3DSurface *iface, DWORD flag, BOOL persistent) {

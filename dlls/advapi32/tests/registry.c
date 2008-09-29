@@ -437,7 +437,7 @@ static void create_test_entries(void)
         "RegSetValueExA failed\n");
     ok(!RegSetValueExA(hkey_main,"TP1_SZ",0,REG_SZ, (const BYTE *)sTestpath1, strlen(sTestpath1)+1), 
         "RegSetValueExA failed\n");
-    ok(!RegSetValueExA(hkey_main,"TP1_ZB_SZ",0,REG_SZ, NULL, 0),
+    ok(!RegSetValueExA(hkey_main,"TP1_ZB_SZ",0,REG_SZ, (const BYTE *)"", 0),
        "RegSetValueExA failed\n");
     ok(!RegSetValueExA(hkey_main,"TP2_EXP_SZ",0,REG_EXPAND_SZ, (const BYTE *)sTestpath2, strlen(sTestpath2)+1), 
         "RegSetValueExA failed\n");
@@ -1161,7 +1161,9 @@ static void test_reg_query_value(void)
     SetLastError(0xdeadbeef);
     size = MAX_PATH;
     ret = RegQueryValueA((HKEY)0xcafebabe, "subkey", val, &size);
-    ok(ret == ERROR_INVALID_HANDLE || ret == ERROR_BADKEY, /* Windows 98 returns BADKEY */
+    ok(ret == ERROR_INVALID_HANDLE ||
+       ret == ERROR_BADKEY || /* Windows 98 returns BADKEY */
+       ret == ERROR_ACCESS_DENIED, /* non-admin winxp */
        "Expected ERROR_INVALID_HANDLE or ERROR_BADKEY, got %d\n", ret);
     ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
 

@@ -149,18 +149,27 @@ static void test_SetupGetInfInformation(void)
     SetLastError(0xbeefcafe);
     ret = SetupGetInfInformationA(NULL, INFINFO_INF_SPEC_IS_HINF, NULL, 0, &size);
     ok(ret == FALSE, "Expected SetupGetInfInformation to fail\n");
-    ok(GetLastError() == ERROR_INVALID_HANDLE,
+    ok(GetLastError() == ERROR_INVALID_HANDLE ||
+       broken(GetLastError() == ERROR_BAD_PATHNAME) || /* win95 */
+       broken(GetLastError() == ERROR_FILE_NOT_FOUND) || /* win98 */
+       broken(GetLastError() == ERROR_PATH_NOT_FOUND) || /* NT4 */
+       broken(GetLastError() == ERROR_INVALID_NAME), /* win2k */
        "Expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
     ok(size == 0xdeadbeef, "Expected size to remain unchanged\n");
 
     /* try an invalid inf filename */
-    size = 0xdeadbeef;
-    SetLastError(0xbeefcafe);
-    ret = SetupGetInfInformationA(NULL, INFINFO_INF_NAME_IS_ABSOLUTE, NULL, 0, &size);
-    ok(ret == FALSE, "Expected SetupGetInfInformation to fail\n");
-    ok(GetLastError() == ERROR_INVALID_PARAMETER,
-       "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-    ok(size == 0xdeadbeef, "Expected size to remain unchanged\n");
+    /* do not use NULL as absolute inf filename on win9x (crash) */
+    if ((GetLastError() != ERROR_BAD_PATHNAME) &&   /* win95 */
+        (GetLastError() != ERROR_FILE_NOT_FOUND))  /* win98 */
+    {
+        size = 0xdeadbeef;
+        SetLastError(0xbeefcafe);
+        ret = SetupGetInfInformationA(NULL, INFINFO_INF_NAME_IS_ABSOLUTE, NULL, 0, &size);
+        ok(ret == FALSE, "Expected SetupGetInfInformation to fail\n");
+        ok(GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+        ok(size == 0xdeadbeef, "Expected size to remain unchanged\n");
+    }
 
     create_inf_file(inf_filename);
 

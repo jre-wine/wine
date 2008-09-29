@@ -452,7 +452,7 @@ static void ME_RTFParAttrHook(RTF_Info *info)
   {
   case rtfParDef: /* restores default paragraph attributes */
     fmt.dwMask = PFM_ALIGNMENT | PFM_BORDER | PFM_LINESPACING | PFM_TABSTOPS | PFM_OFFSET |
-        PFM_RIGHTINDENT | PFM_SPACEAFTER | PFM_SPACEBEFORE | PFM_STARTINDENT;
+        PFM_RIGHTINDENT | PFM_SPACEAFTER | PFM_SPACEBEFORE | PFM_STARTINDENT | PFM_TABLE;
     /* TODO: numbering, shading */
     fmt.wAlignment = PFA_LEFT;
     fmt.cTabCount = 0;
@@ -462,8 +462,7 @@ static void ME_RTFParAttrHook(RTF_Info *info)
     fmt.bLineSpacingRule = 0;
     fmt.dySpaceBefore = fmt.dySpaceAfter = 0;
     fmt.dyLineSpacing = 0;
-    RTFFlushOutputBuffer(info);
-    ME_GetParagraph(info->editor->pCursors[0].pRun)->member.para.bTable = FALSE;
+    fmt.wEffects &= ~PFE_TABLE;
     break;
   case rtfInTable:
   {
@@ -472,8 +471,9 @@ static void ME_RTFParAttrHook(RTF_Info *info)
     RTFFlushOutputBuffer(info);
     para = ME_GetParagraph(info->editor->pCursors[0].pRun);
     assert(para->member.para.pCells);
-    para->member.para.bTable = TRUE;
-    return;
+    fmt.dwMask |= PFM_TABLE;
+    fmt.wEffects |= PFE_TABLE;
+    break;
   }
   case rtfFirstIndent:
     ME_GetSelectionParaFormat(info->editor, &fmt);
@@ -1040,13 +1040,16 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
     ME_InternalDeleteText(editor, from, to-from);
   }
   else {
+    ME_DisplayItem *para_item;
     style = editor->pBuffer->pDefaultStyle;
     ME_AddRefStyle(style);
     SendMessageA(editor->hWnd, EM_SETSEL, 0, 0);    
     ME_InternalDeleteText(editor, 0, ME_GetTextLength(editor));
     from = to = 0;
     ME_ClearTempStyle(editor);
-    /* FIXME restore default paragraph formatting ! */
+
+    para_item = ME_GetParagraph(editor->pCursors[0].pRun);
+    ME_SetDefaultParaFormat(para_item->member.para.pFmt);
   }
 
 
@@ -1537,15 +1540,20 @@ ME_KeyDown(ME_TextEditor *editor, WORD nKey)
 {
   BOOL ctrl_is_down = GetKeyState(VK_CONTROL) & 0x8000;
   BOOL shift_is_down = GetKeyState(VK_SHIFT) & 0x8000;
-  
+
+  if (nKey != VK_SHIFT && nKey != VK_CONTROL && nKey != VK_MENU)
+      editor->nSelectionType = stPosition;
+
   switch (nKey)
   {
     case VK_LEFT:
     case VK_RIGHT:
-    case VK_UP:
-    case VK_DOWN:
     case VK_HOME:
     case VK_END:
+        editor->nUDArrowX = -1;
+        /* fall through */
+    case VK_UP:
+    case VK_DOWN:
     case VK_PRIOR:
     case VK_NEXT:
       ME_CommitUndo(editor); /* End coalesced undos for typed characters */
@@ -1553,6 +1561,7 @@ ME_KeyDown(ME_TextEditor *editor, WORD nKey)
       return TRUE;
     case VK_BACK:
     case VK_DELETE:
+      editor->nUDArrowX = -1;
       /* FIXME backspace and delete aren't the same, they act different wrt paragraph style of the merged paragraph */
       if (GetWindowLongW(editor->hWnd, GWL_STYLE) & ES_READONLY)
         return FALSE;
@@ -1583,6 +1592,8 @@ ME_KeyDown(ME_TextEditor *editor, WORD nKey)
       return TRUE;
 
     default:
+      if (nKey != VK_SHIFT && nKey != VK_CONTROL && nKey && nKey != VK_MENU)
+          editor->nUDArrowX = -1;
       if (ctrl_is_down)
       {
         if (nKey == 'W')
@@ -1604,15 +1615,102 @@ ME_KeyDown(ME_TextEditor *editor, WORD nKey)
   return FALSE;
 }
 
-static BOOL ME_SetCursor(ME_TextEditor *editor, int x)
+/* Process the message and calculate the new click count.
+ *
+ * returns: The click count if it is mouse down event, else returns 0. */
+static int ME_CalculateClickCount(HWND hWnd, UINT msg, WPARAM wParam,
+                                  LPARAM lParam)
 {
+    static int clickNum = 0;
+    if (msg < WM_MOUSEFIRST || msg > WM_MOUSELAST)
+        return 0;
+
+    if ((msg == WM_LBUTTONDBLCLK) ||
+        (msg == WM_RBUTTONDBLCLK) ||
+        (msg == WM_MBUTTONDBLCLK) ||
+        (msg == WM_XBUTTONDBLCLK))
+    {
+        msg -= (WM_LBUTTONDBLCLK - WM_LBUTTONDOWN);
+    }
+
+    if ((msg == WM_LBUTTONDOWN) ||
+        (msg == WM_RBUTTONDOWN) ||
+        (msg == WM_MBUTTONDOWN) ||
+        (msg == WM_XBUTTONDOWN))
+    {
+        static MSG prevClickMsg;
+        MSG clickMsg;
+        clickMsg.hwnd = hWnd;
+        clickMsg.message = msg;
+        clickMsg.wParam = wParam;
+        clickMsg.lParam = lParam;
+        clickMsg.time = GetMessageTime();
+        clickMsg.pt.x = (short)LOWORD(lParam);
+        clickMsg.pt.y = (short)HIWORD(lParam);
+        if ((clickNum != 0) &&
+            (clickMsg.message == prevClickMsg.message) &&
+            (clickMsg.hwnd == prevClickMsg.hwnd) &&
+            (clickMsg.wParam == prevClickMsg.wParam) &&
+            (clickMsg.time - prevClickMsg.time < GetDoubleClickTime()) &&
+            (abs(clickMsg.pt.x - prevClickMsg.pt.x) < GetSystemMetrics(SM_CXDOUBLECLK)/2) &&
+            (abs(clickMsg.pt.y - prevClickMsg.pt.y) < GetSystemMetrics(SM_CYDOUBLECLK)/2))
+        {
+            clickNum++;
+        } else {
+            clickNum = 1;
+        }
+        prevClickMsg = clickMsg;
+    } else {
+        return 0;
+    }
+    return clickNum;
+}
+
+static BOOL ME_SetCursor(ME_TextEditor *editor)
+{
+  POINT pt;
+  BOOL isExact;
+  int offset;
+  DWORD messagePos = GetMessagePos();
+  pt.x = (short)LOWORD(messagePos);
+  pt.y = (short)HIWORD(messagePos);
+  ScreenToClient(editor->hWnd, &pt);
   if ((GetWindowLongW(editor->hWnd, GWL_STYLE) & ES_SELECTIONBAR) &&
-      (x < editor->selofs || editor->linesel))
+      (pt.x < editor->selofs ||
+       (editor->nSelectionType == stLine && GetCapture() == editor->hWnd)))
   {
       SetCursor(hLeft);
       return TRUE;
   }
-  return FALSE;
+  offset = ME_CharFromPos(editor, pt.x, pt.y, &isExact);
+  if (isExact)
+  {
+      if (editor->AutoURLDetect_bEnable)
+      {
+          ME_Cursor cursor;
+          ME_Run *run;
+          ME_CursorFromCharOfs(editor, offset, &cursor);
+          run = &cursor.pRun->member.run;
+          if (editor->AutoURLDetect_bEnable &&
+              run->style->fmt.dwMask & CFM_LINK &&
+              run->style->fmt.dwEffects & CFE_LINK)
+          {
+              SetCursor(LoadCursorW(NULL, (WCHAR*)IDC_HAND));
+              return TRUE;
+          }
+      }
+      if (ME_IsSelection(editor))
+      {
+          int selStart, selEnd;
+          ME_GetSelection(editor, &selStart, &selEnd);
+          if (selStart <= offset && selEnd >= offset) {
+              SetCursor(LoadCursorW(NULL, (WCHAR*)IDC_ARROW));
+              return TRUE;
+          }
+      }
+  }
+  SetCursor(LoadCursorW(NULL, (WCHAR*)IDC_IBEAM));
+  return TRUE;
 }
 
 static BOOL ME_ShowContextMenu(ME_TextEditor *editor, int x, int y)
@@ -1648,7 +1746,12 @@ ME_TextEditor *ME_MakeEditor(HWND hWnd) {
   ed->pBuffer = ME_MakeText();
   ed->nZoomNumerator = ed->nZoomDenominator = 0;
   ME_MakeFirstParagraph(ed);
-  ed->bCaretShown = FALSE;
+  /* The four cursors are for:
+   * 0 - The position where the caret is shown
+   * 1 - The anchored end of the selection (for normal selection)
+   * 2 & 3 - The anchored start and end respectively for word, line,
+   * or paragraph selection.
+   */
   ed->nCursors = 4;
   ed->pCursors = ALLOC_N_OBJ(ME_Cursor, ed->nCursors);
   ed->pCursors[0].pRun = ME_FindItemFwd(ed->pBuffer->pFirst, diRun);
@@ -1692,10 +1795,10 @@ ME_TextEditor *ME_MakeEditor(HWND hWnd) {
   
   ME_CheckCharOffsets(ed);
   if (GetWindowLongW(hWnd, GWL_STYLE) & ES_SELECTIONBAR)
-    ed->selofs = 16;
+    ed->selofs = SELECTIONBAR_WIDTH;
   else
     ed->selofs = 0;
-  ed->linesel = 0;
+  ed->nSelectionType = stPosition;
 
   if (GetWindowLongW(hWnd, GWL_STYLE) & ES_PASSWORD)
     ed->cPasswordMask = '*';
@@ -2106,7 +2209,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     if (settings & ECO_AUTOWORDSELECTION)
       FIXME("ECO_AUTOWORDSELECTION not implemented yet!\n");
     if (settings & ECO_SELECTIONBAR)
-        editor->selofs = 16;
+        editor->selofs = SELECTIONBAR_WIDTH;
     else
         editor->selofs = 0;
     ME_WrapMarkedParagraphs(editor);
@@ -2129,6 +2232,8 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     ME_InvalidateSelection(editor);
     ME_SetSelection(editor, wParam, lParam);
     ME_InvalidateSelection(editor);
+    HideCaret(editor->hWnd);
+    ME_ShowCaret(editor);
     ME_SendSelChange(editor);
     return 0;
   }
@@ -2161,6 +2266,8 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     ME_InvalidateSelection(editor);
     end = ME_SetSelection(editor, range.cpMin, range.cpMax);
     ME_InvalidateSelection(editor);
+    HideCaret(editor->hWnd);
+    ME_ShowCaret(editor);
     ME_SendSelChange(editor);
 
     return end;
@@ -2909,7 +3016,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
   case EM_SETZOOM:
     return ME_SetZoom(editor, wParam, lParam);
   case EM_CHARFROMPOS:
-    return ME_CharFromPos(editor, ((POINTL *)lParam)->x, ((POINTL *)lParam)->y);
+    return ME_CharFromPos(editor, ((POINTL *)lParam)->x, ((POINTL *)lParam)->y, NULL);
   case EM_POSFROMCHAR:
   {
     ME_DisplayItem *pRun;
@@ -2961,17 +3068,25 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     ME_DestroyEditor(editor);
     SetWindowLongPtrW(hWnd, 0, 0);
     return 0;
+  case WM_SETCURSOR:
+  {
+    return ME_SetCursor(editor);
+  }
+  case WM_LBUTTONDBLCLK:
   case WM_LBUTTONDOWN:
+  {
     ME_CommitUndo(editor); /* End coalesced undos for typed characters */
     if ((editor->nEventMask & ENM_MOUSEEVENTS) &&
         !ME_FilterEvent(editor, msg, &wParam, &lParam))
       return 0;
     SetFocus(hWnd);
-    ME_LButtonDown(editor, (short)LOWORD(lParam), (short)HIWORD(lParam));
+    ME_LButtonDown(editor, (short)LOWORD(lParam), (short)HIWORD(lParam),
+                   ME_CalculateClickCount(hWnd, msg, wParam, lParam));
     SetCapture(hWnd);
     ME_LinkNotify(editor,msg,wParam,lParam);
-    if (!ME_SetCursor(editor, LOWORD(lParam))) goto do_default;
+    if (!ME_SetCursor(editor)) goto do_default;
     break;
+  }
   case WM_MOUSEMOVE:
     if ((editor->nEventMask & ENM_MOUSEEVENTS) &&
         !ME_FilterEvent(editor, msg, &wParam, &lParam))
@@ -2979,29 +3094,23 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     if (GetCapture() == hWnd)
       ME_MouseMove(editor, (short)LOWORD(lParam), (short)HIWORD(lParam));
     ME_LinkNotify(editor,msg,wParam,lParam);
-    if (!ME_SetCursor(editor, LOWORD(lParam))) goto do_default;
+    /* Set cursor if mouse is captured, since WM_SETCURSOR won't be received. */
+    if (GetCapture() == hWnd)
+        ME_SetCursor(editor);
     break;
   case WM_LBUTTONUP:
     if (GetCapture() == hWnd)
       ReleaseCapture();
+    if (editor->nSelectionType == stDocument)
+      editor->nSelectionType = stPosition;
     if ((editor->nEventMask & ENM_MOUSEEVENTS) &&
         !ME_FilterEvent(editor, msg, &wParam, &lParam))
       return 0;
     else
     {
-      BOOL ret;
-      editor->linesel = 0;
-      ret = ME_SetCursor(editor, LOWORD(lParam));
+      ME_SetCursor(editor);
       ME_LinkNotify(editor,msg,wParam,lParam);
-      if (!ret) goto do_default;
     }
-    break;
-  case WM_LBUTTONDBLCLK:
-    if ((editor->nEventMask & ENM_MOUSEEVENTS) &&
-        !ME_FilterEvent(editor, msg, &wParam, &lParam))
-      return 0;
-    ME_LinkNotify(editor,msg,wParam,lParam);
-    ME_SelectWord(editor);
     break;
   case WM_RBUTTONUP:
   case WM_RBUTTONDOWN:
@@ -3032,8 +3141,8 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     return 0;
   case WM_KILLFOCUS:
     ME_CommitUndo(editor); /* End coalesced undos for typed characters */
-    ME_HideCaret(editor);
     editor->bHaveFocus = FALSE;
+    ME_HideCaret(editor);
     ME_SendOldNotify(editor, EN_KILLFOCUS);
     return 0;
   case WM_ERASEBKGND:
@@ -3124,6 +3233,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
           ME_InsertTextFromCursor(editor, 0, &wstr, 1, style);
         ME_ReleaseStyle(style);
         ME_CommitCoalescingUndo(editor);
+        SetCursor(NULL);
       }
 
       if (editor->AutoURLDetect_bEnable) ME_UpdateSelectionLinkAttribute(editor);
@@ -3426,6 +3536,7 @@ void ME_LinkNotify(ME_TextEditor *editor, UINT msg, WPARAM wParam, LPARAM lParam
 {
   int x,y;
   ME_Cursor tmpCursor;
+  BOOL isExact;
   int nCharOfs; /* The start of the clicked text. Absolute character offset */
 
   ME_Run *tmpRun;
@@ -3433,8 +3544,8 @@ void ME_LinkNotify(ME_TextEditor *editor, UINT msg, WPARAM wParam, LPARAM lParam
   ENLINK info;
   x = (short)LOWORD(lParam);
   y = (short)HIWORD(lParam);
-  nCharOfs = ME_CharFromPos(editor, x, y);
-  if (nCharOfs < 0) return;
+  nCharOfs = ME_CharFromPos(editor, x, y, &isExact);
+  if (!isExact) return;
 
   ME_CursorFromCharOfs(editor, nCharOfs, &tmpCursor);
   tmpRun = &tmpCursor.pRun->member.run;

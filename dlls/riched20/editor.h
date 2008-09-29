@@ -176,12 +176,12 @@ void ME_SetDefaultCharFormat(ME_TextEditor *editor, CHARFORMAT2W *mod);
 
 /* caret.c */
 int ME_SetSelection(ME_TextEditor *editor, int from, int to);
-void ME_SelectWord(ME_TextEditor *editor);
+void ME_SelectByType(ME_TextEditor *editor, ME_SelectionType selectionType);
 void ME_HideCaret(ME_TextEditor *ed);
 void ME_ShowCaret(ME_TextEditor *ed);
 void ME_MoveCaret(ME_TextEditor *ed);
-int ME_CharFromPos(ME_TextEditor *editor, int x, int y);
-void ME_LButtonDown(ME_TextEditor *editor, int x, int y);
+int ME_CharFromPos(ME_TextEditor *editor, int x, int y, BOOL *isExact);
+void ME_LButtonDown(ME_TextEditor *editor, int x, int y, int clickNum);
 void ME_MouseMove(ME_TextEditor *editor, int x, int y);
 void ME_DeleteTextAtCursor(ME_TextEditor *editor, int nCursor, int nChars);
 void ME_InsertTextFromCursor(ME_TextEditor *editor, int nCursor, 
@@ -231,6 +231,7 @@ void ME_GetSelectionParaFormat(ME_TextEditor *editor, PARAFORMAT2 *pFmt);
 void ME_MarkForWrapping(ME_TextEditor *editor, ME_DisplayItem *first, const ME_DisplayItem *last);
 void ME_MarkForPainting(ME_TextEditor *editor, ME_DisplayItem *first, const ME_DisplayItem *last);
 void ME_MarkAllForWrapping(ME_TextEditor *editor);
+void ME_SetDefaultParaFormat(PARAFORMAT2 *pFmt);
 
 /* paint.c */
 void ME_PaintContent(ME_TextEditor *editor, HDC hDC, BOOL bOnlyNew, const RECT *rcUpdate);

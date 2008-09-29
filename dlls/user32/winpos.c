@@ -1882,6 +1882,10 @@ BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
     BOOL ret;
     RECT visible_rect, old_window_rect;
 
+    visible_rect = *window_rect;
+    USER_Driver->pWindowPosChanging( hwnd, insert_after, swp_flags,
+                                     window_rect, client_rect, &visible_rect );
+
     if (!(win = WIN_GetPtr( hwnd ))) return FALSE;
     if (win == WND_DESKTOP || win == WND_OTHER_PROCESS) return FALSE;
 
@@ -1899,18 +1903,18 @@ BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
         req->client.top    = client_rect->top;
         req->client.right  = client_rect->right;
         req->client.bottom = client_rect->bottom;
-        if (!IsRectEmpty( &valid_rects[0] ))
-            wine_server_add_data( req, valid_rects, 2 * sizeof(*valid_rects) );
+        if (memcmp( window_rect, &visible_rect, sizeof(RECT) ) || !IsRectEmpty( &valid_rects[0] ))
+        {
+            wine_server_add_data( req, &visible_rect, sizeof(visible_rect) );
+            if (!IsRectEmpty( &valid_rects[0] ))
+                wine_server_add_data( req, valid_rects, 2 * sizeof(*valid_rects) );
+        }
         if ((ret = !wine_server_call( req )))
         {
             win->dwStyle    = reply->new_style;
             win->dwExStyle  = reply->new_ex_style;
             win->rectWindow = *window_rect;
             win->rectClient = *client_rect;
-            visible_rect.left   = reply->visible.left;
-            visible_rect.top    = reply->visible.top;
-            visible_rect.right  = reply->visible.right;
-            visible_rect.bottom = reply->visible.bottom;
         }
     }
     SERVER_END_REQ;
@@ -1918,13 +1922,12 @@ BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
 
     if (ret)
     {
-        /* FIXME: should update visible rect before invalidating DCE */
         if (((swp_flags & SWP_AGG_NOPOSCHANGE) != SWP_AGG_NOPOSCHANGE) ||
             (swp_flags & (SWP_HIDEWINDOW | SWP_SHOWWINDOW | SWP_STATECHANGED)))
             invalidate_dce( hwnd, &old_window_rect );
 
-        USER_Driver->pSetWindowPos( hwnd, insert_after, swp_flags, window_rect,
-                                    client_rect, &visible_rect, valid_rects );
+        USER_Driver->pWindowPosChanged( hwnd, insert_after, swp_flags, window_rect,
+                                        client_rect, &visible_rect, valid_rects );
     }
     return ret;
 }
@@ -2588,7 +2591,7 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
         if (!((msg.message == WM_KEYDOWN) && (msg.wParam == VK_ESCAPE)) )
         {
             /* NOTE: SWP_NOACTIVATE prevents document window activation in Word 6 */
-            if(!DragFullWindows)
+            if(!DragFullWindows || iconic)
                 SetWindowPos( hwnd, 0, sizingRect.left, sizingRect.top,
                               sizingRect.right - sizingRect.left,
                               sizingRect.bottom - sizingRect.top,

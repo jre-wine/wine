@@ -625,7 +625,8 @@ static HRESULT WINAPI xmlnode_removeChild(
 
     TRACE("%p->(%p, %p)\n", This, childNode, oldChild);
 
-    *oldChild = NULL;
+    if(oldChild)
+        *oldChild = NULL;
 
     if(!childNode) return E_INVALIDARG;
 
@@ -650,8 +651,13 @@ static HRESULT WINAPI xmlnode_removeChild(
     xmlUnlinkNode(child_node_ptr);
 
     IXMLDOMNode_Release(child);
-    IXMLDOMNode_AddRef(childNode);
-    *oldChild = childNode;
+
+    if(oldChild)
+    {
+        IXMLDOMNode_AddRef(childNode);
+        *oldChild = childNode;
+    }
+
     return S_OK;
 }
 
@@ -661,27 +667,16 @@ static HRESULT WINAPI xmlnode_appendChild(
     IXMLDOMNode** outNewChild)
 {
     xmlnode *This = impl_from_IXMLDOMNode( iface );
-    IXMLDOMNode *pAttr = NULL;
+    DOMNodeType type;
     VARIANT var;
+    HRESULT hr;
 
     TRACE("(%p)->(%p,%p)\n", This, newChild, outNewChild);
 
-    /* Cannot Append an Attribute node. */
-    IUnknown_QueryInterface(newChild, &IID_IXMLDOMNode, (LPVOID*)&pAttr);
-    if(pAttr)
-    {
-        xmlnode *ThisNew = impl_from_IXMLDOMNode( pAttr );
-
-        if(ThisNew->node->type == XML_ATTRIBUTE_NODE)
-        {
-            if(outNewChild) *outNewChild = NULL;
-
-            IUnknown_Release(pAttr);
-
-            return E_FAIL;
-        }
-
-        IUnknown_Release(pAttr);
+    hr = IXMLDOMNode_get_nodeType(newChild, &type);
+    if(FAILED(hr) || type == NODE_ATTRIBUTE) {
+        if(outNewChild) *outNewChild = NULL;
+        return E_FAIL;
     }
 
     VariantInit(&var);
@@ -712,8 +707,11 @@ static HRESULT WINAPI xmlnode_get_ownerDocument(
     IXMLDOMNode *iface,
     IXMLDOMDocument** DOMDocument)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+
+    TRACE("%p (%p)\n", This, DOMDocument);
+
+    return DOMDocument_create_from_xmldoc(This->node->doc, (IXMLDOMDocument2**)DOMDocument);
 }
 
 static HRESULT WINAPI xmlnode_cloneNode(

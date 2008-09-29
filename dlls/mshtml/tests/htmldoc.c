@@ -25,6 +25,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "initguid.h"
 #include "ole2.h"
 #include "mshtml.h"
 #include "docobj.h"
@@ -36,7 +37,8 @@
 #include "idispids.h"
 #include "shlguid.h"
 
-#include "initguid.h"
+DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
+DEFINE_GUID(IID_IProxyManager,0x00000008,0x0000,0x0000,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
 DEFINE_OLEGUID(CGID_DocHostCmdPriv, 0x000214D4L, 0, 0);
 
 #define DEFINE_EXPECT(func) \
@@ -3701,20 +3703,33 @@ static void test_QueryInterface(IUnknown *unk)
     IUnknown *qi;
     HRESULT hres;
 
+    static const IID IID_UndocumentedScriptIface =
+        {0x719c3050,0xf9d3,0x11cf,{0xa4,0x93,0x00,0x40,0x05,0x23,0xa8,0xa0}};
+
     qi = (void*)0xdeadbeef;
     hres = IUnknown_QueryInterface(unk, &IID_IRunnableObject, (void**)&qi);
     ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
-    ok(qi == NULL, "runnable=%p, ezpected NULL\n", qi);
+    ok(qi == NULL, "qirunnable=%p, ezpected NULL\n", qi);
 
     qi = (void*)0xdeadbeef;
     hres = IUnknown_QueryInterface(unk, &IID_IHTMLDOMNode, (void**)&qi);
     ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
-    ok(qi == NULL, "runnable=%p, ezpected NULL\n", qi);
+    ok(qi == NULL, "qi=%p, ezpected NULL\n", qi);
 
     qi = (void*)0xdeadbeef;
     hres = IUnknown_QueryInterface(unk, &IID_IHTMLDOMNode2, (void**)&qi);
     ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
-    ok(qi == NULL, "runnable=%p, ezpected NULL\n", qi);
+    ok(qi == NULL, "qi=%p, ezpected NULL\n", qi);
+
+    qi = (void*)0xdeadbeef;
+    hres = IUnknown_QueryInterface(unk, &IID_IPersistPropertyBag, (void**)&qi);
+    ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
+    ok(qi == NULL, "qi=%p, ezpected NULL\n", qi);
+
+    qi = (void*)0xdeadbeef;
+    hres = IUnknown_QueryInterface(unk, &IID_UndocumentedScriptIface, (void**)&qi);
+    ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
+    ok(qi == NULL, "qi=%p, ezpected NULL\n", qi);
 }
 
 static void init_test(enum load_state_t ls) {

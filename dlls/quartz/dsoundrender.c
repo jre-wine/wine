@@ -73,6 +73,8 @@ typedef struct DSoundRenderImpl
     REFERENCE_TIME play_time;
     MediaSeekingImpl mediaSeeking;
 
+    HANDLE state_change, blocked;
+
     long volume;
     long pan;
 } DSoundRenderImpl;
@@ -243,16 +245,27 @@ static HRESULT DSoundRender_Sample(LPVOID iface, IMediaSample * pSample)
      * pause completion here, but for sound playing a single frame doesn't make sense
      */
 
-    if (This->state == State_Paused)
+    EnterCriticalSection(&This->csFilter);
+
+    if (This->pInputPin->end_of_stream || This->pInputPin->flushing)
+    {
+        LeaveCriticalSection(&This->csFilter);
         return S_FALSE;
+    }
 
     if (This->state == State_Stopped)
-        return S_FALSE;
+    {
+        LeaveCriticalSection(&This->csFilter);
+        return VFW_E_WRONG_STATE;
+    }
+
+    SetEvent(This->state_change);
 
     hr = IMediaSample_GetPointer(pSample, &pbSrcStream);
     if (FAILED(hr))
     {
         ERR("Cannot get pointer to sample data (%x)\n", hr);
+        LeaveCriticalSection(&This->csFilter);
         return hr;
     }
 
@@ -269,7 +282,28 @@ static HRESULT DSoundRender_Sample(LPVOID iface, IMediaSample * pSample)
     if (IMediaSample_IsPreroll(pSample) == S_OK)
     {
         TRACE("Preroll!\n");
+        LeaveCriticalSection(&This->csFilter);
         return S_OK;
+    }
+
+    if (This->state == State_Paused)
+    {
+        LeaveCriticalSection(&This->csFilter);
+        WaitForSingleObject(This->blocked, INFINITE);
+        EnterCriticalSection(&This->csFilter);
+        if (This->state == State_Stopped)
+        {
+            LeaveCriticalSection(&This->csFilter);
+            return VFW_E_WRONG_STATE;
+        }
+
+        if (This->state == State_Paused)
+        {
+            /* Assuming we return because of flushing */
+            TRACE("Flushing\n");
+            LeaveCriticalSection(&This->csFilter);
+            return S_OK;
+        }
     }
 
     cbSrcStream = IMediaSample_GetActualDataLength(pSample);
@@ -288,7 +322,9 @@ static HRESULT DSoundRender_Sample(LPVOID iface, IMediaSample * pSample)
     }
 #endif
 
-    return DSoundRender_SendSampleData(This, pbSrcStream, cbSrcStream);
+    hr = DSoundRender_SendSampleData(This, pbSrcStream, cbSrcStream);
+    LeaveCriticalSection(&This->csFilter);
+    return hr;
 }
 
 static HRESULT DSoundRender_QueryAccept(LPVOID iface, const AM_MEDIA_TYPE * pmt)
@@ -358,6 +394,15 @@ HRESULT DSoundRender_create(IUnknown * pUnkOuter, LPVOID * ppv)
     {
         MediaSeekingImpl_Init((IBaseFilter*)pDSoundRender, sound_mod_stop, sound_mod_start, sound_mod_rate, &pDSoundRender->mediaSeeking, &pDSoundRender->csFilter);
         pDSoundRender->mediaSeeking.lpVtbl = &IMediaSeeking_Vtbl;
+
+        pDSoundRender->state_change = CreateEventW(NULL, TRUE, TRUE, NULL);
+        pDSoundRender->blocked = CreateEventW(NULL, FALSE, FALSE, NULL);
+
+        if (!pDSoundRender->state_change || !pDSoundRender->blocked)
+        {
+            IUnknown_Release((IUnknown *)pDSoundRender);
+            return HRESULT_FROM_WIN32(GetLastError());
+        }
 
         *ppv = (LPVOID)pDSoundRender;
     }
@@ -453,6 +498,9 @@ static ULONG WINAPI DSoundRender_Release(IBaseFilter * iface)
         This->csFilter.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->csFilter);
 
+        CloseHandle(This->state_change);
+        CloseHandle(This->blocked);
+
         TRACE("Destroying Audio Renderer\n");
         CoTaskMemFree(This);
         
@@ -497,6 +545,10 @@ static HRESULT WINAPI DSoundRender_Stop(IBaseFilter * iface)
         }
         if (SUCCEEDED(hr))
             This->state = State_Stopped;
+
+        /* Complete our transition */
+        SetEvent(This->state_change);
+        SetEvent(This->blocked);
     }
     LeaveCriticalSection(&This->csFilter);
     
@@ -511,10 +563,13 @@ static HRESULT WINAPI DSoundRender_Pause(IBaseFilter * iface)
     TRACE("(%p/%p)->()\n", This, iface);
 
     EnterCriticalSection(&This->csFilter);
+    if (This->state != State_Paused)
     {
         DWORD state = 0;
         if (This->state == State_Stopped)
+        {
             This->pInputPin->end_of_stream = 0;
+        }
 
         if (This->dsbuffer)
         {
@@ -527,6 +582,9 @@ static HRESULT WINAPI DSoundRender_Pause(IBaseFilter * iface)
         }
         if (SUCCEEDED(hr))
             This->state = State_Paused;
+
+        ResetEvent(This->blocked);
+        ResetEvent(This->state_change);
     }
     LeaveCriticalSection(&This->csFilter);
 
@@ -543,8 +601,18 @@ static HRESULT WINAPI DSoundRender_Run(IBaseFilter * iface, REFERENCE_TIME tStar
     EnterCriticalSection(&This->csFilter);
     {
         This->rtStreamStart = tStart;
+        if (This->state == State_Paused)
+        {
+            /* Unblock our thread, state changing from paused to running doesn't need a reset for state change */
+            SetEvent(This->blocked);
+        }
+        else if (This->state == State_Stopped)
+        {
+            ResetEvent(This->state_change);
+            This->pInputPin->end_of_stream = 0;
+        }
+
         This->state = State_Running;
-        This->pInputPin->end_of_stream = 0;
     }
     LeaveCriticalSection(&This->csFilter);
 
@@ -553,9 +621,15 @@ static HRESULT WINAPI DSoundRender_Run(IBaseFilter * iface, REFERENCE_TIME tStar
 
 static HRESULT WINAPI DSoundRender_GetState(IBaseFilter * iface, DWORD dwMilliSecsTimeout, FILTER_STATE *pState)
 {
+    HRESULT hr;
     DSoundRenderImpl *This = (DSoundRenderImpl *)iface;
 
     TRACE("(%p/%p)->(%d, %p)\n", This, iface, dwMilliSecsTimeout, pState);
+
+    if (WaitForSingleObject(This->state_change, dwMilliSecsTimeout) == WAIT_TIMEOUT)
+        hr = VFW_S_STATE_INTERMEDIATE;
+    else
+        hr = S_OK;
 
     EnterCriticalSection(&This->csFilter);
     {
@@ -816,7 +890,13 @@ static HRESULT WINAPI DSoundRender_InputPin_EndOfStream(IPin * iface)
     EnterCriticalSection(This->pin.pCritSec);
 
     TRACE("(%p/%p)->()\n", This, iface);
-    InputPin_EndOfStream(iface);
+    hr = InputPin_EndOfStream(iface);
+    if (hr != S_OK)
+    {
+        ERR("%08x\n", hr);
+        LeaveCriticalSection(This->pin.pCritSec);
+        return hr;
+    }
 
     hr = IFilterGraph_QueryInterface(me->filterInfo.pGraph, &IID_IMediaEventSink, (LPVOID*)&pEventSink);
     if (SUCCEEDED(hr))
@@ -866,6 +946,27 @@ static HRESULT WINAPI DSoundRender_InputPin_BeginFlush(IPin * iface)
         memset(buffer, 0, size);
         IDirectSoundBuffer_Unlock(pFilter->dsbuffer, buffer, size, NULL, 0);
     }
+
+    if (pFilter->state == State_Paused)
+        SetEvent(pFilter->blocked);
+    LeaveCriticalSection(This->pin.pCritSec);
+
+    return hr;
+}
+
+static HRESULT WINAPI DSoundRender_InputPin_EndFlush(IPin * iface)
+{
+    InputPin *This = (InputPin *)iface;
+    DSoundRenderImpl *pFilter = (DSoundRenderImpl *)This->pin.pinInfo.pFilter;
+    HRESULT hr;
+
+    TRACE("\n");
+
+    EnterCriticalSection(This->pin.pCritSec);
+    hr = InputPin_EndFlush(iface);
+
+    if (pFilter->state == State_Paused)
+        SetEvent(pFilter->blocked);
     LeaveCriticalSection(This->pin.pCritSec);
 
     return hr;
@@ -889,7 +990,7 @@ static const IPinVtbl DSoundRender_InputPin_Vtbl =
     IPinImpl_QueryInternalConnections,
     DSoundRender_InputPin_EndOfStream,
     DSoundRender_InputPin_BeginFlush,
-    InputPin_EndFlush,
+    DSoundRender_InputPin_EndFlush,
     InputPin_NewSegment
 };
 

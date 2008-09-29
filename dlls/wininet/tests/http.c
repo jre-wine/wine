@@ -881,7 +881,7 @@ static void HttpSendRequestEx_test(void)
             NULL, NULL, NULL, INTERNET_FLAG_NO_CACHE_WRITE, 0);
     if (!hRequest && GetLastError() == ERROR_INTERNET_NAME_NOT_RESOLVED)
     {
-        trace( "Network unreachable, skipping test\n" );
+        skip( "Network unreachable, skipping test\n" );
         goto done;
     }
     ok( hRequest != NULL, "Failed to open request handle err %u\n", GetLastError());
@@ -948,7 +948,7 @@ static void InternetOpenRequest_test(void)
     request = HttpOpenRequestA(connect, NULL, "/", NULL, NULL, types, INTERNET_FLAG_NO_CACHE_WRITE, 0);
     if (!request && GetLastError() == ERROR_INTERNET_NAME_NOT_RESOLVED)
     {
-        trace( "Network unreachable, skipping test\n" );
+        skip( "Network unreachable, skipping test\n" );
         goto done;
     }
     ok(request != NULL, "Failed to open request handle err %u\n", GetLastError());
@@ -990,7 +990,7 @@ static void test_http_cache(void)
     request = HttpOpenRequestA(connect, NULL, "/site/about", NULL, NULL, types, INTERNET_FLAG_NEED_FILE, 0);
     if (!request && GetLastError() == ERROR_INTERNET_NAME_NOT_RESOLVED)
     {
-        trace( "Network unreachable, skipping test\n" );
+        skip( "Network unreachable, skipping test\n" );
 
         ok(InternetCloseHandle(connect), "Close connect handle failed\n");
         ok(InternetCloseHandle(session), "Close session handle failed\n");
@@ -1086,7 +1086,7 @@ static void HttpHeaders_test(void)
             NULL, NULL, NULL, INTERNET_FLAG_NO_CACHE_WRITE, 0);
     if (!hRequest && GetLastError() == ERROR_INTERNET_NAME_NOT_RESOLVED)
     {
-        trace( "Network unreachable, skipping test\n" );
+        skip( "Network unreachable, skipping test\n" );
         goto done;
     }
     ok( hRequest != NULL, "Failed to open request handle\n");
@@ -1346,6 +1346,8 @@ static DWORD CALLBACK server_thread(LPVOID param)
     char buffer[0x100];
     WSADATA wsaData;
     int last_request = 0;
+    char host_header[22];
+    static int test_b = 0;
 
     WSAStartup(MAKEWORD(1,1), &wsaData);
 
@@ -1368,6 +1370,8 @@ static DWORD CALLBACK server_thread(LPVOID param)
     listen(s, 0);
 
     SetEvent(si->hEvent);
+
+    sprintf(host_header, "Host: localhost:%d", si->port);
 
     do
     {
@@ -1448,7 +1452,10 @@ static DWORD CALLBACK server_thread(LPVOID param)
         if (strstr(buffer, "/test8"))
         {
             if (!strstr(buffer, "Connection: Close") &&
-                 strstr(buffer, "Connection: Keep-Alive"))
+                 strstr(buffer, "Connection: Keep-Alive") &&
+                !strstr(buffer, "Cache-Control: no-cache") &&
+                !strstr(buffer, "Pragma: no-cache") &&
+                 strstr(buffer, host_header))
                 send(c, okmsg, sizeof okmsg-1, 0);
             else
                 send(c, notokmsg, sizeof notokmsg-1, 0);
@@ -1456,10 +1463,31 @@ static DWORD CALLBACK server_thread(LPVOID param)
         if (strstr(buffer, "/test9"))
         {
             if (!strstr(buffer, "Connection: Close") &&
-                !strstr(buffer, "Connection: Keep-Alive"))
+                !strstr(buffer, "Connection: Keep-Alive") &&
+                !strstr(buffer, "Cache-Control: no-cache") &&
+                !strstr(buffer, "Pragma: no-cache") &&
+                 strstr(buffer, host_header))
                 send(c, okmsg, sizeof okmsg-1, 0);
             else
                 send(c, notokmsg, sizeof notokmsg-1, 0);
+        }
+        if (strstr(buffer, "/testA"))
+        {
+            if (!strstr(buffer, "Connection: Close") &&
+                !strstr(buffer, "Connection: Keep-Alive") &&
+                (strstr(buffer, "Cache-Control: no-cache") ||
+                 strstr(buffer, "Pragma: no-cache")) &&
+                 strstr(buffer, host_header))
+                send(c, okmsg, sizeof okmsg-1, 0);
+            else
+                send(c, notokmsg, sizeof notokmsg-1, 0);
+        }
+        if (!test_b && strstr(buffer, "/testB HTTP/1.1"))
+        {
+            test_b = 1;
+            send(c, okmsg, sizeof okmsg-1, 0);
+            recvfrom(c, buffer, sizeof buffer, 0, NULL, NULL);
+            send(c, okmsg, sizeof okmsg-1, 0);
         }
         if (strstr(buffer, "GET /quit"))
         {
@@ -1723,6 +1751,66 @@ static void test_connection_header(int port)
     ok(status == 200, "request failed with status %u\n", status);
 
     InternetCloseHandle(req);
+
+    req = HttpOpenRequest(con, NULL, "/test9", NULL, NULL, NULL, INTERNET_FLAG_NO_CACHE_WRITE, 0);
+    ok(req != NULL, "HttpOpenRequest failed\n");
+
+    ret = HttpSendRequest(req, NULL, 0, NULL, 0);
+    ok(ret, "HttpSendRequest failed\n");
+
+    status = 0;
+    size = sizeof(status);
+    ret = HttpQueryInfo(req, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &size, NULL);
+    ok(ret, "HttpQueryInfo failed\n");
+    ok(status == 200, "request failed with status %u\n", status);
+
+    InternetCloseHandle(req);
+
+    req = HttpOpenRequest(con, "POST", "/testA", NULL, NULL, NULL, INTERNET_FLAG_NO_CACHE_WRITE, 0);
+    ok(req != NULL, "HttpOpenRequest failed\n");
+
+    ret = HttpSendRequest(req, NULL, 0, NULL, 0);
+    ok(ret, "HttpSendRequest failed\n");
+
+    status = 0;
+    size = sizeof(status);
+    ret = HttpQueryInfo(req, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &size, NULL);
+    ok(ret, "HttpQueryInfo failed\n");
+    ok(status == 200, "request failed with status %u\n", status);
+
+    InternetCloseHandle(req);
+    InternetCloseHandle(con);
+    InternetCloseHandle(ses);
+}
+
+static void test_http1_1(int port)
+{
+    HINTERNET ses, con, req;
+    BOOL ret;
+
+    ses = InternetOpen("winetest", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    ok(ses != NULL, "InternetOpen failed\n");
+
+    con = InternetConnect(ses, "localhost", port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+    ok(con != NULL, "InternetConnect failed\n");
+
+    req = HttpOpenRequest(con, NULL, "/testB", NULL, NULL, NULL, INTERNET_FLAG_KEEP_CONNECTION, 0);
+    ok(req != NULL, "HttpOpenRequest failed\n");
+
+    ret = HttpSendRequest(req, NULL, 0, NULL, 0);
+    if (ret)
+    {
+        InternetCloseHandle(req);
+
+        req = HttpOpenRequest(con, NULL, "/testB", NULL, NULL, NULL, INTERNET_FLAG_KEEP_CONNECTION, 0);
+        ok(req != NULL, "HttpOpenRequest failed\n");
+
+        ret = HttpSendRequest(req, NULL, 0, NULL, 0);
+        todo_wine
+        ok(ret, "HttpSendRequest failed\n");
+    }
+
+    InternetCloseHandle(req);
     InternetCloseHandle(con);
     InternetCloseHandle(ses);
 }
@@ -1751,6 +1839,7 @@ static void test_http_connection(void)
     test_basic_request(si.port, "POST", "/test5");
     test_basic_request(si.port, "GET", "/test6");
     test_connection_header(si.port);
+    test_http1_1(si.port);
 
     /* send the basic request again to shutdown the server thread */
     test_basic_request(si.port, "GET", "/quit");

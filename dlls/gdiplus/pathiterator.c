@@ -87,12 +87,71 @@ GpStatus WINGDIPAPI GdipPathIterCopyData(GpPathIterator* iterator,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipPathIterHasCurve(GpPathIterator* iterator, BOOL* hasCurve)
+{
+    INT i;
+
+    if(!iterator)
+        return InvalidParameter;
+
+    *hasCurve = FALSE;
+
+    for(i = 0; i < iterator->pathdata.Count; i++)
+        if((iterator->pathdata.Types[i] & PathPointTypePathTypeMask) == PathPointTypeBezier){
+            *hasCurve = TRUE;
+            break;
+        }
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipPathIterGetSubpathCount(GpPathIterator* iterator, INT* count)
+{
+    INT i;
+
+    if(!iterator || !count)
+        return InvalidParameter;
+
+    *count = 0;
+    for(i = 0; i < iterator->pathdata.Count; i++){
+        if(iterator->pathdata.Types[i] == PathPointTypeStart)
+            (*count)++;
+    }
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipPathIterNextMarker(GpPathIterator* iterator, INT *resultCount,
+    INT* startIndex, INT* endIndex)
+{
+    INT i;
+
+    if(!iterator || !startIndex || !endIndex)
+        return InvalidParameter;
+
+    *resultCount = 0;
+
+    /* first call could start with second point as all subsequent, cause
+       path couldn't contain only one */
+    for(i = iterator->marker_pos + 1; i < iterator->pathdata.Count; i++){
+        if(iterator->pathdata.Types[i] & PathPointTypePathMarker){
+            *startIndex = iterator->marker_pos;
+            if(iterator->marker_pos > 0) (*startIndex)++;
+            *endIndex   = iterator->marker_pos = i;
+            *resultCount= *endIndex - *startIndex + 1;
+            break;
+        }
+    }
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipPathIterNextSubpath(GpPathIterator* iterator,
     INT *resultCount, INT* startIndex, INT* endIndex, BOOL* isClosed)
 {
     INT i, count;
 
-    if(!iterator)
+    if(!iterator || !startIndex || !endIndex || !isClosed || !resultCount)
         return InvalidParameter;
 
     count = iterator->pathdata.Count;
@@ -140,4 +199,18 @@ GpStatus WINGDIPAPI GdipPathIterGetCount(GpPathIterator* iterator, INT* count)
     *count = iterator->pathdata.Count;
 
     return Ok;
+}
+
+GpStatus WINGDIPAPI GdipPathIterEnumerate(GpPathIterator* iterator, INT* resultCount,
+    GpPointF *points, BYTE *types, INT count)
+{
+    if((count < 0) || !resultCount)
+        return InvalidParameter;
+
+    if(count == 0){
+        *resultCount = 0;
+        return Ok;
+    }
+
+    return GdipPathIterCopyData(iterator, resultCount, points, types, 0, count-1);
 }

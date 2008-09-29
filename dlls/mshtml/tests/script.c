@@ -28,10 +28,13 @@
 #include "ole2.h"
 #include "dispex.h"
 #include "mshtml.h"
+#include "initguid.h"
 #include "activscp.h"
 #include "activdbg.h"
 #include "objsafe.h"
 #include "mshtmdid.h"
+
+DEFINE_GUID(CLSID_IdentityUnmarshal,0x0000001b,0x0000,0x0000,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
 
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
@@ -439,6 +442,7 @@ static HRESULT WINAPI ActiveScriptParse_ParseScriptText(IActiveScriptParse *ifac
         DWORD dwFlags, VARIANT *pvarResult, EXCEPINFO *pexcepinfo)
 {
     IDispatchEx *document;
+    IUnknown *unk;
     VARIANT var;
     DISPPARAMS dp;
     EXCEPINFO ei;
@@ -476,8 +480,10 @@ static HRESULT WINAPI ActiveScriptParse_ParseScriptText(IActiveScriptParse *ifac
 
     tmp = SysAllocString(testW);
     hres = IDispatchEx_GetDispID(document, tmp, fdexNameCaseSensitive, &id);
-    SysFreeString(tmp);
     ok(hres == DISP_E_UNKNOWNNAME, "GetDispID(document) failed: %08x, expected DISP_E_UNKNOWNNAME\n", hres);
+    hres = IDispatchEx_GetDispID(document, tmp, fdexNameCaseSensitive | fdexNameImplicit, &id);
+    ok(hres == DISP_E_UNKNOWNNAME, "GetDispID(document) failed: %08x, expected DISP_E_UNKNOWNNAME\n", hres);
+    SysFreeString(tmp);
 
     id = 0;
     tmp = SysAllocString(testW);
@@ -510,6 +516,12 @@ static HRESULT WINAPI ActiveScriptParse_ParseScriptText(IActiveScriptParse *ifac
     ok(V_I4(&var) == 100, "V_I4(&var) == NULL\n");
 
     IDispatchEx_Release(document);
+
+    unk = (void*)0xdeadbeef;
+    hres = IDispatchEx_GetNameSpaceParent(window_dispex, &unk);
+    ok(hres == S_OK, "GetNameSpaceParent failed: %08x\n", hres);
+    ok(!unk, "unk=%p, expected NULL\n", unk);
+
     return S_OK;
 }
 

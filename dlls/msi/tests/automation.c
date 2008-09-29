@@ -23,6 +23,7 @@
 
 #include <stdio.h>
 
+#include <initguid.h>
 #include <windows.h>
 #include <msiquery.h>
 #include <msidefs.h>
@@ -30,6 +31,8 @@
 #include <fci.h>
 
 #include "wine/test.h"
+
+DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
 
 static const char *msifile = "winetest.msi";
 static const WCHAR szMsifile[] = {'w','i','n','e','t','e','s','t','.','m','s','i',0};
@@ -801,7 +804,7 @@ static HRESULT Installer_RegistryValueI(HKEY hkey, LPCWSTR szKey, int iValue, LP
     V_I4(&vararg) = iValue;
 
     hr = Installer_RegistryValue(hkey, szKey, vararg, &varresult, vtResult);
-    if (vtResult == VT_BSTR) lstrcpyW(szString, V_BSTR(&varresult));
+    if (SUCCEEDED(hr) && vtResult == VT_BSTR) lstrcpyW(szString, V_BSTR(&varresult));
     VariantClear(&varresult);
     return hr;
 }

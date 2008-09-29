@@ -770,6 +770,9 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
                 }
             }
         }
+
+        LEAVE_GL();
+
         /* Now work out what GL support this card really has */
 #define USE_GL_FUNC(type, pfn, ext, replace) { \
             DWORD ver = ver_for_ext(ext); \
@@ -784,6 +787,7 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
         WGL_EXT_FUNCS_GEN;
 #undef USE_GL_FUNC
 
+        ENTER_GL();
         /* Now mark all the extensions supported which are included in the opengl core version. Do this *after*
          * loading the functions, otherwise the code above will load the extension entry points instead of the
          * core functions, which may not work
@@ -2886,6 +2890,20 @@ static const shader_backend_t *select_shader_backend(UINT Adapter, WINED3DDEVTYP
     return ret;
 }
 
+static const struct fragment_pipeline *select_fragment_implementation(UINT Adapter, WINED3DDEVTYPE DeviceType) {
+    int vs_selected_mode;
+    int ps_selected_mode;
+
+    select_shader_mode(&GLINFO_LOCATION, DeviceType, &ps_selected_mode, &vs_selected_mode);
+    if (ps_selected_mode == SHADER_GLSL || ps_selected_mode == SHADER_ARB) {
+        return &ffp_fragment_pipeline;
+    } else if (ps_selected_mode != SHADER_NONE && !GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
+        return &atifs_fragment_pipeline;
+    } else {
+        return &ffp_fragment_pipeline;
+    }
+}
+
 /* Note: d3d8 passes in a pointer to a D3DCAPS8 structure, which is a true
       subset of a D3DCAPS9 structure. However, it has to come via a void *
       as the d3d8 interface cannot import the d3d9 header                  */
@@ -2895,7 +2913,9 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     int vs_selected_mode;
     int ps_selected_mode;
     struct shader_caps shader_caps;
+    struct fragment_caps fragment_caps;
     const shader_backend_t *shader_backend;
+    const struct fragment_pipeline *frag_pipeline = NULL;
 
     TRACE_(d3d_caps)("(%p)->(Adptr:%d, DevType: %x, pCaps: %p)\n", This, Adapter, DeviceType, pCaps);
 
@@ -3254,8 +3274,12 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     shader_backend = select_shader_backend(Adapter, DeviceType);
     shader_backend->shader_get_caps(DeviceType, &GLINFO_LOCATION, &shader_caps);
 
+    memset(&fragment_caps, 0, sizeof(fragment_caps));
+    frag_pipeline = select_fragment_implementation(Adapter, DeviceType);
+    frag_pipeline->get_caps(DeviceType, &GLINFO_LOCATION, &fragment_caps);
+
     /* Add shader misc caps. Only some of them belong to the shader parts of the pipeline */
-    pCaps->PrimitiveMiscCaps |= shader_caps.PrimitiveMiscCaps;
+    pCaps->PrimitiveMiscCaps |= fragment_caps.PrimitiveMiscCaps;
 
     /* This takes care for disabling vertex shader or pixel shader caps while leaving the other one enabled.
      * Ignore shader model capabilities if disabled in config
@@ -3278,9 +3302,10 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
         pCaps->PixelShader1xMaxValue        = shader_caps.PixelShader1xMaxValue;
     }
 
-    pCaps->TextureOpCaps                    = shader_caps.TextureOpCaps;
-    pCaps->MaxTextureBlendStages            = shader_caps.MaxTextureBlendStages;
-    pCaps->MaxSimultaneousTextures          = shader_caps.MaxSimultaneousTextures;
+    pCaps->TextureOpCaps                    = fragment_caps.TextureOpCaps;
+    pCaps->MaxTextureBlendStages            = fragment_caps.MaxTextureBlendStages;
+    pCaps->MaxSimultaneousTextures          = fragment_caps.MaxSimultaneousTextures;
+
     pCaps->VS20Caps                         = shader_caps.VS20Caps;
     pCaps->MaxVShaderInstructionsExecuted   = shader_caps.MaxVShaderInstructionsExecuted;
     pCaps->MaxVertexShader30InstructionSlots= shader_caps.MaxVertexShader30InstructionSlots;
@@ -3389,6 +3414,7 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     IWineD3DDeviceImpl *object  = NULL;
     IWineD3DImpl       *This    = (IWineD3DImpl *)iface;
     WINED3DDISPLAYMODE  mode;
+    const struct fragment_pipeline *frag_pipeline = NULL;
     int i;
 
     /* Validate the adapter number. If no adapters are available(no GL), ignore the adapter
@@ -3441,6 +3467,11 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
 
     select_shader_mode(&GLINFO_LOCATION, DeviceType, &object->ps_selected_mode, &object->vs_selected_mode);
     object->shader_backend = select_shader_backend(Adapter, DeviceType);
+
+    frag_pipeline = select_fragment_implementation(Adapter, DeviceType);
+    object->frag_pipe = frag_pipeline;
+    compile_state_table(object->StateTable, object->multistate_funcs,
+                        ffp_vertexstate_template, frag_pipeline, misc_state_template);
 
     /* Prefer the vtable with functions optimized for single dirtifyable objects if the shader
      * model can deal with that. It is essentially the same, just with adjusted
@@ -3598,7 +3629,7 @@ struct driver_version_information {
 
 static const struct driver_version_information driver_version_table[] = {
     /* Nvidia drivers. Geforce6 and newer cards are supported by the current driver (177.x)*/
-    /* GeforceFX support is up to 173.x, Geforce2MX/3/4 upto 96.x, TNT/Geforce1/2 upto 71.x */
+    /* GeforceFX support is up to 173.x, Geforce2MX/3/4 up to 96.x, TNT/Geforce1/2 up to 71.x */
     /* Note that version numbers >100 lets say 123.45 use >= x.y.11.2345 and not x.y.10.12345 */
     {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCEFX_5200,     7,  15, 11, 7341   },
     {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCEFX_5600,     7,  15, 11, 7341   },

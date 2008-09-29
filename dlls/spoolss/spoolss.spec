@@ -73,8 +73,8 @@
 @ stub GetPrinterDriverW
 @ stub GetPrinterW
 @ stdcall ImpersonatePrinterClient(long)
-@ stub InitializeRouter
-@ stub IsLocalCall
+@ stdcall InitializeRouter()
+@ stdcall IsLocalCall()
 @ stub IsNamedPipeRpcCall
 @ stub LoadDriver
 @ stub LoadDriverFiletoConvertDevmode
@@ -142,7 +142,7 @@
 @ stub UpdatePrinterRegAll
 @ stub UpdatePrinterRegUser
 @ stub WaitForPrinterChange
-@ stub WaitForSpoolerInitialization
+@ stdcall WaitForSpoolerInitialization()
 @ stub WritePrinter
 @ stub XcvDataW
 @ stub bGetDevModePerUser

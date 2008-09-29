@@ -710,7 +710,7 @@ static HRESULT WINAPI FilterGraph2_Reconnect(IFilterGraph2 *iface,
         hr = IPin_Connect(ppin, pConnectedTo, NULL);
     IPin_Release(pConnectedTo);
     if (FAILED(hr))
-        ERR("Reconnecting pins failed, pins are not connected now..\n");
+        WARN("Reconnecting pins failed, pins are not connected now..\n");
     TRACE("(%p->%p) -- %p %p -> %x\n", iface, This, ppin, pConnectedTo, hr);
     return hr;
 }
@@ -785,7 +785,7 @@ static HRESULT GetInternalConnections(IBaseFilter* pfilter, IPin* pinputpin, IPi
         *pppins = CoTaskMemAlloc(sizeof(IPin*)*nb);
         hr = IPin_QueryInternalConnections(pinputpin, *pppins, &nb);
         if (hr != S_OK) {
-            ERR("Error (%x)\n", hr);
+            WARN("Error (%x)\n", hr);
         }
     } else if (hr == E_NOTIMPL) {
         /* Input connected to all outputs */
@@ -795,7 +795,7 @@ static HRESULT GetInternalConnections(IBaseFilter* pfilter, IPin* pinputpin, IPi
         TRACE("E_NOTIMPL\n");
         hr = IBaseFilter_EnumPins(pfilter, &penumpins);
         if (FAILED(hr)) {
-            ERR("filter Enumpins failed (%x)\n", hr);
+            WARN("filter Enumpins failed (%x)\n", hr);
             return hr;
         }
         i = 0;
@@ -822,11 +822,11 @@ static HRESULT GetInternalConnections(IBaseFilter* pfilter, IPin* pinputpin, IPi
         IEnumPins_Release(penumpins);
         nb = i;
         if (FAILED(hr)) {
-            ERR("Next failed (%x)\n", hr);
+            WARN("Next failed (%x)\n", hr);
             return hr;
         }
     } else if (FAILED(hr)) {
-        ERR("Cannot get internal connection (%x)\n", hr);
+        WARN("Cannot get internal connection (%x)\n", hr);
         return hr;
     }
 
@@ -1146,8 +1146,6 @@ static HRESULT WINAPI FilterGraph2_Render(IFilterGraph2 *iface, IPin *ppinOut)
     IMoniker* pMoniker;
     INT x;
 
-    BOOL final = FALSE;
-
     TRACE("(%p/%p)->(%p)\n", This, iface, ppinOut);
 
     if (TRACE_ON(quartz))
@@ -1194,7 +1192,7 @@ static HRESULT WINAPI FilterGraph2_Render(IFilterGraph2 *iface, IPin *ppinOut)
                 hr = IPin_Connect(ppinOut, pin, NULL);
                 if (SUCCEEDED(hr))
                 {
-                    TRACE("Connected succesfully %p/%p, %08x look if we should render more!\n", ppinOut, pin, hr);
+                    TRACE("Connected successfully %p/%p, %08x look if we should render more!\n", ppinOut, pin, hr);
                     IPin_Release(pin);
 
                     hr = FilterGraph2_RenderRecurse(This, pin);
@@ -1239,14 +1237,7 @@ static HRESULT WINAPI FilterGraph2_Render(IFilterGraph2 *iface, IPin *ppinOut)
             WARN("IEnumMediaTypes_Next (%x)\n", hr);
             break;
         }
-        if (!nbmt && !final)
-        {
-            final = TRUE;
-            tab[0] = tab[1] = GUID_NULL;
-            IEnumMediaTypes_Reset(penummt);
-            continue;
-        }
-        else if (!nbmt)
+        if (!nbmt)
         {
             hr = VFW_E_CANNOT_RENDER;
             break;
@@ -1257,7 +1248,7 @@ static HRESULT WINAPI FilterGraph2_Render(IFilterGraph2 *iface, IPin *ppinOut)
             TRACE("SubType %s\n", debugstr_guid(&mt->subtype));
 
             /* Only enumerate once, this doesn't account for all previous ones, but this should be enough nonetheless */
-            if (IsEqualIID(&tab[0], &mt->majortype) && IsEqualIID(&tab[0], &mt->majortype))
+            if (IsEqualIID(&tab[0], &mt->majortype) && IsEqualIID(&tab[1], &mt->subtype))
             {
                 DeleteMediaType(mt);
                 continue;
@@ -1266,7 +1257,7 @@ static HRESULT WINAPI FilterGraph2_Render(IFilterGraph2 *iface, IPin *ppinOut)
             /* Try to find a suitable renderer with the same media type */
             tab[0] = mt->majortype;
             tab[1] = mt->subtype;
-            hr = IFilterMapper2_EnumMatchingFilters(This->pFilterMapper2, &pEnumMoniker, 0, FALSE, MERIT_UNLIKELY, TRUE, 1, tab, NULL, NULL, !final, FALSE, 0, NULL, NULL, NULL);
+            hr = IFilterMapper2_EnumMatchingFilters(This->pFilterMapper2, &pEnumMoniker, 0, FALSE, MERIT_UNLIKELY, TRUE, 1, tab, NULL, NULL, FALSE, FALSE, 0, NULL, NULL, NULL);
             if (FAILED(hr))
             {
                 WARN("Unable to enum filters (%x)\n", hr);
@@ -1395,10 +1386,10 @@ static HRESULT WINAPI FilterGraph2_RenderFile(IFilterGraph2 *iface,
                 INT i;
 
                 hr = IFilterGraph2_Render(iface, ppinreader);
-                ERR("Render %08x\n", hr);
+                TRACE("Render %08x\n", hr);
 
                 for (i = 0; i < This->nFilters; ++i)
-                    FIXME("Filters in chain: %s\n", debugstr_w(This->pFilterNames[i]));
+                    TRACE("Filters in chain: %s\n", debugstr_w(This->pFilterNames[i]));
 
                 if (SUCCEEDED(hr))
                     any = TRUE;
@@ -1498,33 +1489,33 @@ static HRESULT WINAPI FilterGraph2_AddSourceFilter(IFilterGraph2 *iface,
     if (FAILED(hr))
         hr = CoCreateInstance(&CLSID_AsyncReader, NULL, CLSCTX_INPROC_SERVER, &IID_IBaseFilter, (LPVOID*)&preader);
     if (FAILED(hr)) {
-        ERR("Unable to create file source filter (%x)\n", hr);
+        WARN("Unable to create file source filter (%x)\n", hr);
         return hr;
     }
 
     hr = IFilterGraph2_AddFilter(iface, preader, lpcwstrFilterName);
     if (FAILED(hr)) {
-        ERR("Unable add filter (%x)\n", hr);
+        WARN("Unable add filter (%x)\n", hr);
         IBaseFilter_Release(preader);
         return hr;
     }
 
     hr = IBaseFilter_QueryInterface(preader, &IID_IFileSourceFilter, (LPVOID*)&pfile);
     if (FAILED(hr)) {
-        ERR("Unable to get IFileSourceInterface (%x)\n", hr);
+        WARN("Unable to get IFileSourceInterface (%x)\n", hr);
         goto error;
     }
 
     /* Load the file in the file source filter */
     hr = IFileSourceFilter_Load(pfile, lpcwstrFileName, NULL);
     if (FAILED(hr)) {
-        ERR("Load (%x)\n", hr);
+        WARN("Load (%x)\n", hr);
         goto error;
     }
 
     IFileSourceFilter_GetCurFile(pfile, &filename, &mt);
     if (FAILED(hr)) {
-        ERR("GetCurFile (%x)\n", hr);
+        WARN("GetCurFile (%x)\n", hr);
         goto error;
     }
 
@@ -1840,7 +1831,7 @@ static HRESULT SendFilterMessage(IMediaControl *iface, fnFoundFilter FoundFilter
         hr = IBaseFilter_EnumPins(pfilter, &pEnum);
         if (hr != S_OK)
         {
-            ERR("Enum pins failed %x\n", hr);
+            WARN("Enum pins failed %x\n", hr);
             continue;
         }
         /* Check if it is a source filter */
@@ -2090,7 +2081,7 @@ static HRESULT all_renderers_seek(IFilterGraphImpl *This, fnFoundSeek FoundSeek,
         hr = IBaseFilter_EnumPins(pfilter, &pEnum);
         if (hr != S_OK)
         {
-            ERR("Enum pins failed %x\n", hr);
+            WARN("Enum pins failed %x\n", hr);
             continue;
         }
         /* Check if it is a source filter */

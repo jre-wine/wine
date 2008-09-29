@@ -1190,10 +1190,7 @@ static void test_GetDIBits_selected_DIB(UINT bpp)
             break;
         }
     }
-    if (bpp != 1)
-        ok(equalContents, "GetDIBits with %d bpp DIB selected in DC: Invalid DIB bits\n",bpp);
-    else
-        todo_wine ok(equalContents, "GetDIBits with %d bpp DIB selected in DC: Invalid DIB bits\n",bpp);
+    ok(equalContents, "GetDIBits with %d bpp DIB selected in DC: Invalid DIB bits\n",bpp);
 
     HeapFree(GetProcessHeap(), 0, bits2);
     DeleteDC(dc);
@@ -1499,7 +1496,6 @@ static void test_GetDIBits(void)
        "expected bmiColors[0] 0,0,0,0 - got %x %x %x %x\n",
        bi->bmiColors[0].rgbRed, bi->bmiColors[0].rgbGreen,
        bi->bmiColors[0].rgbBlue, bi->bmiColors[0].rgbReserved);
-todo_wine
     ok(bi->bmiColors[1].rgbRed == 0xff && bi->bmiColors[1].rgbGreen == 0xff &&
        bi->bmiColors[1].rgbBlue == 0xff && bi->bmiColors[1].rgbReserved == 0,
        "expected bmiColors[0] 0xff,0xff,0xff,0 - got %x %x %x %x\n",

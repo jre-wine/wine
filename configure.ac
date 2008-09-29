@@ -73,7 +73,7 @@ AC_ARG_WITH(xshape,    AS_HELP_STRING([--without-xshape],[do not use the Xshape 
 AC_ARG_WITH(xshm,      AS_HELP_STRING([--without-xshm],[do not use XShm (shared memory extension)]),
             [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_XShm_h=no; fi])
 AC_ARG_WITH(xslt,      AS_HELP_STRING([--without-xslt],[do not use XSLT]))
-AC_ARG_WITH(xvidmode,  AS_HELP_STRING([--without-xvidmode],[do not use XFree video mode extension]),
+AC_ARG_WITH(xxf86vm,   AS_HELP_STRING([--without-xxf86vm],[do not use XFree video mode extension]),
             [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_xf86vmode_h=no; fi])
 
 AC_ARG_WITH(wine-tools,AS_HELP_STRING([--with-wine-tools=DIR],[use Wine tools from directory DIR]))
@@ -676,13 +676,9 @@ then
         dnl *** Check for XFree86 VMODE extension
         if test "$ac_cv_header_X11_extensions_xf86vmode_h" = "yes"
         then
-                AC_CHECK_LIB(Xxf86vm, XF86VidModeQueryExtension,
-                  [ AC_DEFINE(HAVE_LIBXXF86VM, 1, [Define if you have the Xxf86vm library])
-                     X_PRE_LIBS="$X_PRE_LIBS -lXxf86vm"
-                  ],,
-                  $X_LIBS -lXext -lX11 $X_EXTRA_LIBS)
+            WINE_CHECK_SONAME(Xxf86vm,XF86VidModeQueryExtension,,,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
         fi
-        WINE_NOTICE_WITH(xvidmode,[test "$ac_cv_lib_Xxf86vm_XF86VidModeQueryExtension" != "yes"],
+        WINE_NOTICE_WITH(xxf86vm,[test "x$ac_cv_lib_soname_Xxf86vm" = "x"],
                          [libXxf86vm development files not found, XFree86 Vidmode won't be supported.])
 
         dnl *** Check for Transform functions in Xrender
@@ -974,30 +970,6 @@ fi
 WINE_NOTICE_WITH(cms,[test "$ac_cv_lib_lcms_cmsOpenProfileFromFile" != "yes"],
                  [liblcms development files not found, Color Management won't be supported.])
 
-dnl **** Check for OpenLDAP ***
-AC_SUBST(LDAPLIBS,"")
-if test "$ac_cv_header_ldap_h" = "yes" -a "$ac_cv_header_lber_h" = "yes"
-then
-    AC_CHECK_LIB(ldap_r, ldap_initialize,
-        [AC_CHECK_LIB(lber, ber_init,
-            [AC_DEFINE(HAVE_LDAP, 1, [Define if you have the OpenLDAP development environment])
-             LDAPLIBS="-lldap_r -llber"],,
-             [$LIBPTHREAD])],,
-             [$LIBPTHREAD])
-    WINE_CHECK_LIB_FUNCS(\
-	ldap_count_references \
-	ldap_first_reference \
-	ldap_next_reference \
-	ldap_parse_reference \
-	ldap_parse_sort_control \
-	ldap_parse_sortresponse_control \
-	ldap_parse_vlv_control \
-	ldap_parse_vlvresponse_control,
-        [$LDAPLIBS $LIBPTHREAD])
-fi
-WINE_NOTICE_WITH(ldap,[test "x$LDAPLIBS" = "x"],
-                 [libldap (OpenLDAP) development files not found, LDAP won't be supported.])
-
 dnl **** Check for FreeType 2 ****
 AC_CHECK_PROGS(ft_devel,[freetype-config freetype2-config],false)
 if test "$ft_devel" != "false" -a "x$with_freetype" != "xno"
@@ -1194,7 +1166,7 @@ WINE_WARNING_WITH(jpeg,[test "x$ac_cv_lib_soname_jpeg" = "x"],
 dnl **** Check for libpng ****
 if test "$ac_cv_header_png_h" = "yes"
 then
-    WINE_CHECK_SONAME(png,png_create_read_struct,,,,[[libpng[[0-9]]*]])
+    WINE_CHECK_SONAME(png,png_create_read_struct,,,-lm,[[libpng[[0-9]]*]])
 fi
 WINE_WARNING_WITH(png,[test "x$ac_cv_lib_soname_png" = "x"],
                  [libpng development files not found, PNG won't be supported.])
@@ -1457,6 +1429,32 @@ AC_CHECK_FUNCS(\
 	inet_network \
 	sendmsg \
 )
+
+dnl **** Check for OpenLDAP ***
+AC_SUBST(LDAPLIBS,"")
+if test "$ac_cv_header_ldap_h" = "yes" -a "$ac_cv_header_lber_h" = "yes"
+then
+    AC_CHECK_TYPE(LDAPSortKey,
+        [AC_CHECK_LIB(ldap_r, ldap_initialize,
+            [AC_CHECK_LIB(lber, ber_init,
+                [AC_DEFINE(HAVE_LDAP, 1, [Define if you have the OpenLDAP development environment])
+                 LDAPLIBS="-lldap_r -llber"],,
+                 [$LIBPTHREAD])],,
+                 [$LIBPTHREAD])],,
+        [#include <ldap.h>])
+    WINE_CHECK_LIB_FUNCS(\
+	ldap_count_references \
+	ldap_first_reference \
+	ldap_next_reference \
+	ldap_parse_reference \
+	ldap_parse_sort_control \
+	ldap_parse_sortresponse_control \
+	ldap_parse_vlv_control \
+	ldap_parse_vlvresponse_control,
+        [$LDAPLIBS $LIBPTHREAD])
+fi
+WINE_NOTICE_WITH(ldap,[test "x$LDAPLIBS" = "x"],
+                 [libldap (OpenLDAP) development files not found, LDAP won't be supported.])
 
 dnl **** Check for types ****
 
@@ -1944,6 +1942,7 @@ AC_CONFIG_FILES([dlls/quartz/Makefile])
 AC_CONFIG_FILES([dlls/quartz/tests/Makefile])
 AC_CONFIG_FILES([dlls/query/Makefile])
 AC_CONFIG_FILES([dlls/rasapi32/Makefile])
+AC_CONFIG_FILES([dlls/rasapi32/tests/Makefile])
 AC_CONFIG_FILES([dlls/resutils/Makefile])
 AC_CONFIG_FILES([dlls/riched20/Makefile])
 AC_CONFIG_FILES([dlls/riched20/tests/Makefile])

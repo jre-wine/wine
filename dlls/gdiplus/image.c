@@ -240,6 +240,15 @@ GpStatus WINGDIPAPI GdipBitmapUnlockBits(GpBitmap* bitmap,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipCloneImage(GpImage *image, GpImage **cloneImage)
+{
+    if (!(image && cloneImage)) return InvalidParameter;
+
+    FIXME("stub: %p, %p\n", image, cloneImage);
+
+    return NotImplemented;
+}
+
 GpStatus WINGDIPAPI GdipCreateBitmapFromFile(GDIPCONST WCHAR* filename,
     GpBitmap **bitmap)
 {
@@ -259,6 +268,47 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromFile(GDIPCONST WCHAR* filename,
     IStream_Release(stream);
 
     return stat;
+}
+
+GpStatus WINGDIPAPI GdipCreateBitmapFromGdiDib(GDIPCONST BITMAPINFO* info,
+                                               VOID *bits, GpBitmap **bitmap)
+{
+    DWORD height, stride;
+    PixelFormat format;
+
+    FIXME("(%p, %p, %p) - partially implemented\n", info, bits, bitmap);
+
+    height = abs(info->bmiHeader.biHeight);
+    stride = ((info->bmiHeader.biWidth * info->bmiHeader.biBitCount + 31) >> 3) & ~3;
+
+    if(info->bmiHeader.biHeight > 0) /* bottom-up */
+    {
+        bits = (BYTE*)bits + (height - 1) * stride;
+        stride = -stride;
+    }
+
+    switch(info->bmiHeader.biBitCount) {
+    case 1:
+        format = PixelFormat1bppIndexed;
+        break;
+    case 4:
+        format = PixelFormat4bppIndexed;
+        break;
+    case 8:
+        format = PixelFormat8bppIndexed;
+        break;
+    case 24:
+        format = PixelFormat24bppRGB;
+        break;
+    default:
+        FIXME("don't know how to handle %d bpp\n", info->bmiHeader.biBitCount);
+        *bitmap = NULL;
+        return InvalidParameter;
+    }
+
+    return GdipCreateBitmapFromScan0(info->bmiHeader.biWidth, height, stride, format,
+                                     bits, bitmap);
+
 }
 
 /* FIXME: no icm */

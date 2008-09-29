@@ -31,9 +31,6 @@
 
 #include "wine/test.h"
 
-const CLSID CLSID_DOMDocument2 = {0xf6d90f11, 0x9c73, 0x11d3, {0xb3, 0x2e, 0x00, 0xc0, 0x4f, 0x99, 0x0b, 0xb4}};
-const IID IID_IXMLDOMDocument2 = {0x2933bf95, 0x7b36, 0x11d2, {0xb2, 0x0e, 0x00, 0xc0, 0x4f, 0x98, 0x3e, 0x60}};
-
 static const WCHAR szEmpty[] = { 0 };
 static const WCHAR szIncomplete[] = {
     '<','?','x','m','l',' ',
@@ -332,7 +329,7 @@ static void node_to_string(IXMLDOMNode *node, char *buf)
             /* currently wine doesn't create a node for the <?xml ... ?>. To be able to test query
              * results we "fix" it */
             if (r == S_OK)
-                ole_check(IXMLDOMNode_get_nodeType(node, &parent_type));
+                ole_check(IXMLDOMNode_get_nodeType(new_node, &parent_type));
             /* we need also to workaround the no document node problem - see below */
             if (((r == S_FALSE && type != NODE_DOCUMENT) || parent_type == NODE_DOCUMENT) && type != NODE_PROCESSING_INSTRUCTION && pos==1)
             {
@@ -853,6 +850,7 @@ static void test_domnode( void )
     IXMLDOMNamedNodeMap *map = NULL;
     IXMLDOMNode *node = NULL, *next = NULL;
     IXMLDOMNodeList *list = NULL;
+    IXMLDOMAttribute *attr = NULL;
     DOMNodeType type = NODE_INVALID;
     VARIANT_BOOL b;
     BSTR str;
@@ -900,9 +898,7 @@ static void test_domnode( void )
     {
         owner = NULL;
         r = IXMLDOMNode_get_ownerDocument( element, &owner );
-        todo_wine {
         ok( r == S_OK, "get_ownerDocument return code\n");
-        }
         ok( owner != doc, "get_ownerDocument return\n");
 
         type = NODE_INVALID;
@@ -935,6 +931,11 @@ static void test_domnode( void )
         ok( r == E_FAIL, "getAttribute ret %08x\n", r );
         ok( V_VT(&var) == VT_NULL || V_VT(&var) == VT_EMPTY, "vt = %x\n", V_VT(&var));
         VariantClear(&var);
+
+        attr = (IXMLDOMAttribute*)0xdeadbeef;
+        r = IXMLDOMElement_getAttributeNode( element, str, &attr);
+        ok( r == E_FAIL, "getAttributeNode ret %08x\n", r );
+        ok( attr == NULL, "getAttributeNode ret %p, expected NULL\n", attr );
         SysFreeString( str );
 
         str = SysAllocString( szdl );	
@@ -951,6 +952,13 @@ static void test_domnode( void )
 
         r = IXMLDOMElement_getAttribute( element, str, NULL );
         ok( r == E_INVALIDARG, "getAttribute ret %08x\n", r );
+
+        attr = NULL;
+        r = IXMLDOMElement_getAttributeNode( element, str, &attr);
+        ok( r == S_OK, "GetAttributeNode ret %08x\n", r );
+        ok( attr != NULL, "getAttributeNode returned NULL\n" );
+        if(attr)
+            IXMLDOMAttribute_Release(attr);
 
         SysFreeString( str );
 
@@ -1158,9 +1166,21 @@ todo_wine
 
     if (list)
     {
+        r = IXMLDOMNodeList_QueryInterface(list, &IID_IDispatch, NULL);
+        ok( r == E_INVALIDARG, "ret %08x\n", r );
+
+        r = IXMLDOMNodeList_get_item(list, 0, NULL);
+        ok(r == E_INVALIDARG, "Exected E_INVALIDARG got %08x\n", r);
+
+        r = IXMLDOMNodeList_get_length(list, NULL);
+        ok(r == E_INVALIDARG, "Exected E_INVALIDARG got %08x\n", r);
+
         r = IXMLDOMNodeList_get_length( list, &count );
         ok( r == S_OK, "get_length returns %08x\n", r );
         ok( count == 4, "get_length got %ld\n", count );
+
+        r = IXMLDOMNodeList_nextNode(list, NULL);
+        ok(r == E_INVALIDARG, "Exected E_INVALIDARG got %08x\n", r);
 
         r = IXMLDOMNodeList_nextNode( list, &node );
         ok( r == S_OK, "nextNode returned wrong code\n");
@@ -1238,7 +1258,7 @@ todo_wine
     if (element)
         IXMLDOMElement_Release( element );
     if (doc)
-        IXMLDOMDocument_Release( doc );
+        ok(IXMLDOMDocument_Release( doc ) == 0, "document is not destroyed\n");
 }
 
 static void test_refs(void)
@@ -1478,6 +1498,24 @@ static void test_create(void)
     VariantClear(&var);
     SysFreeString(name);
 
+    /* Create an Attribute */
+    V_VT(&var) = VT_I4;
+    V_I4(&var) = NODE_ATTRIBUTE;
+    str = SysAllocString( szAttribute );
+    r = IXMLDOMDocument_createNode( doc, var, str, NULL, &node );
+    ok( r == S_OK, "returns %08x\n", r );
+    ok( node != NULL, "node was null\n");
+    SysFreeString(str);
+
+    if(r == S_OK)
+    {
+        r = IXMLDOMNode_get_nodeTypeString(node, &str);
+        ok( r == S_OK, "returns %08x\n", r );
+        ok( !lstrcmpW( str, _bstr_("attribute") ), "incorrect nodeTypeString string\n");
+        SysFreeString(str);
+        IXMLDOMNode_Release( node );
+    }
+
     IXMLDOMElement_Release( element );
     IXMLDOMNode_Release( root );
     IXMLDOMDocument_Release( doc );
@@ -1551,6 +1589,7 @@ static void test_get_text(void)
     IXMLDOMNode *node, *node2, *node3;
     IXMLDOMNodeList *node_list;
     IXMLDOMNamedNodeMap *node_map;
+    long len;
 
     r = CoCreateInstance( &CLSID_DOMDocument, NULL, 
         CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
@@ -1567,7 +1606,23 @@ static void test_get_text(void)
     r = IXMLDOMDocument_getElementsByTagName( doc, str, &node_list );
     ok( r == S_OK, "ret %08x\n", r );
     SysFreeString(str);
-    
+
+    r = IXMLDOMNodeList_QueryInterface(node_list, &IID_IDispatch, NULL);
+    ok( r == E_INVALIDARG, "ret %08x\n", r );
+
+    r = IXMLDOMNodeList_get_length( node_list, NULL );
+    ok( r == E_INVALIDARG, "ret %08x\n", r );
+
+    r = IXMLDOMNodeList_get_length( node_list, &len );
+    ok( r == S_OK, "ret %08x\n", r );
+    ok( len == 1, "expect 1 got %ld\n", len );
+
+    r = IXMLDOMNodeList_get_item( node_list, 0, NULL );
+    ok( r == E_INVALIDARG, "ret %08x\n", r );
+
+    r = IXMLDOMNodeList_nextNode( node_list, NULL );
+    ok( r == E_INVALIDARG, "ret %08x\n", r );
+
     r = IXMLDOMNodeList_get_item( node_list, 0, &node );
     ok( r == S_OK, "ret %08x\n", r ); 
     IXMLDOMNodeList_Release( node_list );
@@ -1713,6 +1768,18 @@ static void test_removeChild(void)
     ok( node3 == NULL, "%p\n", node3 );
 
     IXMLDOMNode_Release( node2 );
+    IXMLDOMNode_Release( node4 );
+
+    r = IXMLDOMNodeList_get_item( node_list, 0, &node4 );
+    ok( r == S_OK, "ret %08x\n", r);
+
+    r = IXMLDOMElement_removeChild( element, node4, NULL );
+    ok( r == S_OK, "ret %08x\n", r);
+
+    r = IXMLDOMNode_get_parentNode( node4, &node3 );
+    ok( r == S_FALSE, "ret %08x\n", r);
+    ok( node3 == NULL, "%p\n", node3 );
+
     IXMLDOMNode_Release( node4 );
     IXMLDOMNodeList_Release( node_list2 );
     IXMLDOMNode_Release( node );
@@ -3208,6 +3275,53 @@ static void test_DocumentSaveToDocument(void)
     IXMLDOMDocument_Release(doc);
 }
 
+static void test_DocumentSaveToFile(void)
+{
+    IXMLDOMDocument *doc = NULL;
+    IXMLDOMElement *pRoot;
+    HANDLE file;
+    char buffer[100];
+    DWORD read = 0;
+    HRESULT hr;
+
+    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
+    if( hr != S_OK )
+        return;
+
+    hr = IXMLDOMDocument_createElement(doc, _bstr_("Testing"), &pRoot);
+    ok(hr == S_OK, "ret %08x\n", hr );
+    if(hr == S_OK)
+    {
+        hr = IXMLDOMDocument_appendChild(doc, (IXMLDOMNode*)pRoot, NULL);
+        ok(hr == S_OK, "ret %08x\n", hr );
+        if(hr == S_OK)
+        {
+            VARIANT vFile;
+
+            V_VT(&vFile) = VT_BSTR;
+            V_BSTR(&vFile) = _bstr_("test.xml");
+
+            hr = IXMLDOMDocument_save(doc, vFile);
+            ok(hr == S_OK, "ret %08x\n", hr );
+        }
+    }
+
+    IXMLDOMElement_Release(pRoot);
+    IXMLDOMDocument_Release(doc);
+
+    file = CreateFile("test.xml", GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
+    ok(file != INVALID_HANDLE_VALUE, "Could not open file: %u\n", GetLastError());
+    if(file == INVALID_HANDLE_VALUE)
+        return;
+
+    ReadFile(file, buffer, sizeof(buffer), &read, NULL);
+    ok(read != 0, "could not read file\n");
+    ok(buffer[0] != '<' || buffer[1] != '?', "File contains processing instruction\n");
+
+    CloseHandle(file);
+    DeleteFile("test.xml");
+}
+
 static void test_testTransforms(void)
 {
     IXMLDOMDocument *doc = NULL;
@@ -3334,6 +3448,7 @@ START_TEST(domdoc)
     test_xmlTypes();
     test_nodeTypeTests();
     test_DocumentSaveToDocument();
+    test_DocumentSaveToFile();
     test_testTransforms();
     test_Namespaces();
 

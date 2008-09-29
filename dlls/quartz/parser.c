@@ -219,15 +219,35 @@ HRESULT WINAPI Parser_Stop(IBaseFilter * iface)
 {
     ParserImpl *This = (ParserImpl *)iface;
     PullPin *pin = (PullPin *)This->ppPins[0];
+    int i;
 
     TRACE("()\n");
 
     EnterCriticalSection(&pin->thread_lock);
+
+    IAsyncReader_BeginFlush(This->pInputPin->pReader);
     EnterCriticalSection(&This->csFilter);
+
+    if (This->state == State_Stopped)
     {
-        This->state = State_Stopped;
+        LeaveCriticalSection(&This->csFilter);
+        LeaveCriticalSection(&pin->thread_lock);
+        return S_OK;
     }
+
+    This->state = State_Stopped;
+
+    for (i = 1; i < (This->cStreams + 1); i++)
+    {
+        OutputPin_DecommitAllocator((OutputPin *)This->ppPins[i]);
+    }
+
     LeaveCriticalSection(&This->csFilter);
+
+    PullPin_PauseProcessing(This->pInputPin);
+    PullPin_WaitForStateChange(This->pInputPin, INFINITE);
+    IAsyncReader_EndFlush(This->pInputPin->pReader);
+
     LeaveCriticalSection(&pin->thread_lock);
     return S_OK;
 }
@@ -257,11 +277,10 @@ HRESULT WINAPI Parser_Pause(IBaseFilter * iface)
         EnterCriticalSection(&This->csFilter);
     }
 
-    This->state = State_Paused;
+    if (SUCCEEDED(hr))
+        This->state = State_Paused;
 
     LeaveCriticalSection(&This->csFilter);
-    if (SUCCEEDED(hr))
-        hr = PullPin_PauseProcessing(This->pInputPin);
     LeaveCriticalSection(&pin->thread_lock);
 
     return hr;
@@ -280,8 +299,11 @@ HRESULT WINAPI Parser_Run(IBaseFilter * iface, REFERENCE_TIME tStart)
     EnterCriticalSection(&pin->thread_lock);
     EnterCriticalSection(&This->csFilter);
     {
-        if (This->state == State_Running)
+        HRESULT hr_any = VFW_E_NOT_CONNECTED;
+
+        if (This->state == State_Running || This->state == State_Paused)
         {
+            This->state = State_Running;
             LeaveCriticalSection(&This->csFilter);
             LeaveCriticalSection(&pin->thread_lock);
             return S_OK;
@@ -289,14 +311,14 @@ HRESULT WINAPI Parser_Run(IBaseFilter * iface, REFERENCE_TIME tStart)
 
         This->rtStreamStart = tStart;
 
-        if (SUCCEEDED(hr) && (This->state == State_Stopped))
+        for (i = 1; i < (This->cStreams + 1); i++)
         {
-            for (i = 1; i < (This->cStreams + 1); i++)
-            {
-                OutputPin_CommitAllocator((OutputPin *)This->ppPins[i]);
-            }
+            hr = OutputPin_CommitAllocator((OutputPin *)This->ppPins[i]);
+            if (SUCCEEDED(hr))
+                hr_any = hr;
         }
 
+        hr_any = hr;
         if (SUCCEEDED(hr))
         {
             LeaveCriticalSection(&This->csFilter);

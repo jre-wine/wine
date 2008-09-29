@@ -126,7 +126,8 @@ void init_type_lookup(WineD3D_GL_Info *gl_info);
 #define WINED3D_ATR_NORMALIZED(type)    GLINFO_LOCATION.glTypeLookup[type].normalized
 #define WINED3D_ATR_TYPESIZE(type)      GLINFO_LOCATION.glTypeLookup[type].typesize
 
-/* The following functions convert 16 bit floats in the FLOAT16 data type
+/* float_16_to_32() and float_32_to_16() (see implementation in
+ * surface_base.c) convert 16 bit floats in the FLOAT16 data type
  * to standard C floats and vice versa. They do not depend on the encoding
  * of the C float, so they are platform independent, but slow. On x86 and
  * other IEEE 754 compliant platforms the conversion can be accelerated by
@@ -150,54 +151,6 @@ static inline float float_16_to_32(const unsigned short *in) {
         if(m == 0) return sgn / 0.0; /* +INF / -INF */
         else return 0.0 / 0.0; /* NAN */
     }
-}
-
-static inline unsigned short float_32_to_16(const float *in) {
-    int exp = 0;
-    float tmp = fabs(*in);
-    unsigned int mantissa;
-    unsigned short ret;
-
-    /* Deal with special numbers */
-    if(*in == 0.0) return 0x0000;
-    if(isnan(*in)) return 0x7C01;
-    if(isinf(*in)) return (*in < 0.0 ? 0xFC00 : 0x7c00);
-
-    if(tmp < pow(2, 10)) {
-        do
-        {
-            tmp = tmp * 2.0;
-            exp--;
-        }while(tmp < pow(2, 10));
-    } else if(tmp >= pow(2, 11)) {
-        do
-        {
-            tmp /= 2.0;
-            exp++;
-        }while(tmp >= pow(2, 11));
-    }
-
-    mantissa = (unsigned int) tmp;
-    if(tmp - mantissa >= 0.5) mantissa++; /* round to nearest, away from zero */
-
-    exp += 10;  /* Normalize the mantissa */
-    exp += 15;  /* Exponent is encoded with excess 15 */
-
-    if(exp > 30) { /* too big */
-        ret = 0x7c00; /* INF */
-    } else if(exp <= 0) {
-        /* exp == 0: Non-normalized mantissa. Returns 0x0000 (=0.0) for too small numbers */
-        while(exp <= 0) {
-            mantissa = mantissa >> 1;
-            exp++;
-        }
-        ret = mantissa & 0x3ff;
-    } else {
-        ret = (exp << 10) | (mantissa & 0x3ff);
-    }
-
-    ret |= ((*in < 0.0 ? 1 : 0) << 15); /* Add the sign */
-    return ret;
 }
 
 /**
@@ -265,12 +218,6 @@ typedef struct SHADER_BUFFER {
 } SHADER_BUFFER;
 
 struct shader_caps {
-    DWORD               PrimitiveMiscCaps;
-
-    DWORD               TextureOpCaps;
-    DWORD               MaxTextureBlendStages;
-    DWORD               MaxSimultaneousTextures;
-
     DWORD               VertexShaderVersion;
     DWORD               MaxVertexShaderConst;
 
@@ -289,7 +236,7 @@ struct shader_caps {
 typedef struct {
     void (*shader_select)(IWineD3DDevice *iface, BOOL usePS, BOOL useVS);
     void (*shader_select_depth_blt)(IWineD3DDevice *iface);
-    void (*shader_destroy_depth_blt)(IWineD3DDevice *iface);
+    void (*shader_deselect_depth_blt)(IWineD3DDevice *iface);
     void (*shader_load_constants)(IWineD3DDevice *iface, char usePS, char useVS);
     void (*shader_cleanup)(IWineD3DDevice *iface);
     void (*shader_color_correction)(struct SHADER_OPCODE_ARG *arg);
@@ -300,9 +247,6 @@ typedef struct {
     void (*shader_generate_pshader)(IWineD3DPixelShader *iface, SHADER_BUFFER *buffer);
     void (*shader_generate_vshader)(IWineD3DVertexShader *iface, SHADER_BUFFER *buffer);
     void (*shader_get_caps)(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_info, struct shader_caps *caps);
-    void (*shader_dll_load_init)(void);
-    void (*shader_fragment_enable)(IWineD3DDevice *iface, BOOL enable);
-    const struct StateEntry *StateTable;
 } shader_backend_t;
 
 extern const shader_backend_t atifs_shader_backend;
@@ -312,11 +256,15 @@ extern const shader_backend_t none_shader_backend;
 
 /* GLSL shader private data */
 struct shader_glsl_priv {
+    hash_table_t *glsl_program_lookup;
+    struct glsl_shader_prog_link *glsl_program;
     GLhandleARB             depth_blt_glsl_program_id;
 };
 
 /* ARB_program_shader private data */
 struct shader_arb_priv {
+    GLuint                  current_vprogram_id;
+    GLuint                  current_fprogram_id;
     GLuint                  depth_blt_vprogram_id;
     GLuint                  depth_blt_fprogram_id;
 };
@@ -582,12 +530,41 @@ typedef void (*APPLYSTATEFUNC)(DWORD state, IWineD3DStateBlockImpl *stateblock, 
 
 struct StateEntry
 {
-    DWORD           representative;
-    APPLYSTATEFUNC  apply;
+    DWORD               representative;
+    APPLYSTATEFUNC      apply;
 };
 
+struct StateEntryTemplate
+{
+    DWORD               state;
+    struct StateEntry   content;
+};
+
+struct fragment_caps {
+    DWORD               PrimitiveMiscCaps;
+
+    DWORD               TextureOpCaps;
+    DWORD               MaxTextureBlendStages;
+    DWORD               MaxSimultaneousTextures;
+};
+
+struct fragment_pipeline {
+    void (*enable_extension)(IWineD3DDevice *iface, BOOL enable);
+    void (*get_caps)(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_info, struct fragment_caps *caps);
+    const struct StateEntryTemplate *states;
+};
+
+extern const struct StateEntryTemplate misc_state_template[];
+extern const struct StateEntryTemplate ffp_vertexstate_template[];
+extern const struct fragment_pipeline ffp_fragment_pipeline;
+extern const struct fragment_pipeline atifs_fragment_pipeline;
+
 /* "Base" state table */
-extern const struct StateEntry FFPStateTable[];
+void compile_state_table(struct StateEntry *StateTable,
+                         APPLYSTATEFUNC **dev_multistate_funcs,
+                         const struct StateEntryTemplate *vertex,
+                         const struct fragment_pipeline *fragment,
+                         const struct StateEntryTemplate *misc);
 
 /* The new context manager that should deal with onscreen and offscreen rendering */
 struct WineD3DContext {
@@ -616,6 +593,7 @@ struct WineD3DContext {
     unsigned char           num_untracked_materials;
     GLenum                  untracked_materials[2];
     BOOL                    last_was_blit, last_was_ckey;
+    UINT                    blit_w, blit_h;
     char                    texShaderBumpMap;
     BOOL                    fog_coord;
 
@@ -809,8 +787,11 @@ struct IWineD3DDeviceImpl
     int vs_selected_mode;
     int ps_selected_mode;
     const shader_backend_t *shader_backend;
-    hash_table_t *glsl_program_lookup;
     void *shader_priv;
+    struct StateEntry StateTable[STATE_HIGHEST + 1];
+    /* Array of functions for states which are handled by more than one pipeline part */
+    APPLYSTATEFUNC *multistate_funcs[STATE_HIGHEST + 1];
+    const struct fragment_pipeline *frag_pipe;
 
     /* To store */
     BOOL                    view_ident;        /* true iff view matrix is identity                */
@@ -856,12 +837,14 @@ struct IWineD3DDeviceImpl
 
     /* For rendering to a texture using glCopyTexImage */
     BOOL                    render_offscreen;
-    WINED3D_DEPTHCOPYSTATE  depth_copy_state;
     GLuint                  fbo;
     GLuint                  src_fbo;
     GLuint                  dst_fbo;
     GLenum                  *draw_buffers;
     GLuint                  depth_blt_texture;
+    GLuint                  depth_blt_rb;
+    UINT                    depth_blt_rb_w;
+    UINT                    depth_blt_rb_h;
 
     /* Cursor management */
     BOOL                    bCursorVisible;
@@ -1351,26 +1334,28 @@ void get_drawable_size_pbuffer(IWineD3DSurfaceImpl *This, UINT *width, UINT *hei
 void get_drawable_size_fbo(IWineD3DSurfaceImpl *This, UINT *width, UINT *height);
 
 /* Surface flags: */
-#define SFLAG_OVERSIZE    0x00000001 /* Surface is bigger than gl size, blts only */
-#define SFLAG_CONVERTED   0x00000002 /* Converted for color keying or Palettized */
-#define SFLAG_DIBSECTION  0x00000004 /* Has a DIB section attached for GetDC */
-#define SFLAG_LOCKABLE    0x00000008 /* Surface can be locked */
-#define SFLAG_DISCARD     0x00000010 /* ??? */
-#define SFLAG_LOCKED      0x00000020 /* Surface is locked atm */
-#define SFLAG_INTEXTURE   0x00000040 /* The GL texture contains the newest surface content */
-#define SFLAG_INDRAWABLE  0x00000080 /* The gl drawable contains the most up to date data */
-#define SFLAG_INSYSMEM    0x00000100 /* The system memory copy is most up to date */
-#define SFLAG_NONPOW2     0x00000200 /* Surface sizes are not a power of 2 */
-#define SFLAG_DYNLOCK     0x00000400 /* Surface is often locked by the app */
-#define SFLAG_DYNCHANGE   0x00000C00 /* Surface contents are changed very often, implies DYNLOCK */
-#define SFLAG_DCINUSE     0x00001000 /* Set between GetDC and ReleaseDC calls */
-#define SFLAG_LOST        0x00002000 /* Surface lost flag for DDraw */
-#define SFLAG_USERPTR     0x00004000 /* The application allocated the memory for this surface */
-#define SFLAG_GLCKEY      0x00008000 /* The gl texture was created with a color key */
-#define SFLAG_CLIENT      0x00010000 /* GL_APPLE_client_storage is used on that texture */
-#define SFLAG_ALLOCATED   0x00020000 /* A gl texture is allocated for this surface */
-#define SFLAG_PBO         0x00040000 /* Has a PBO attached for speeding up data transfers for dynamically locked surfaces */
-#define SFLAG_NORMCOORD   0x00080000   /* Set if the GL texture coords are normalized(non-texture rectangle) */
+#define SFLAG_OVERSIZE      0x00000001 /* Surface is bigger than gl size, blts only */
+#define SFLAG_CONVERTED     0x00000002 /* Converted for color keying or Palettized */
+#define SFLAG_DIBSECTION    0x00000004 /* Has a DIB section attached for GetDC */
+#define SFLAG_LOCKABLE      0x00000008 /* Surface can be locked */
+#define SFLAG_DISCARD       0x00000010 /* ??? */
+#define SFLAG_LOCKED        0x00000020 /* Surface is locked atm */
+#define SFLAG_INTEXTURE     0x00000040 /* The GL texture contains the newest surface content */
+#define SFLAG_INDRAWABLE    0x00000080 /* The gl drawable contains the most up to date data */
+#define SFLAG_INSYSMEM      0x00000100 /* The system memory copy is most up to date */
+#define SFLAG_NONPOW2       0x00000200 /* Surface sizes are not a power of 2 */
+#define SFLAG_DYNLOCK       0x00000400 /* Surface is often locked by the app */
+#define SFLAG_DYNCHANGE     0x00000C00 /* Surface contents are changed very often, implies DYNLOCK */
+#define SFLAG_DCINUSE       0x00001000 /* Set between GetDC and ReleaseDC calls */
+#define SFLAG_LOST          0x00002000 /* Surface lost flag for DDraw */
+#define SFLAG_USERPTR       0x00004000 /* The application allocated the memory for this surface */
+#define SFLAG_GLCKEY        0x00008000 /* The gl texture was created with a color key */
+#define SFLAG_CLIENT        0x00010000 /* GL_APPLE_client_storage is used on that texture */
+#define SFLAG_ALLOCATED     0x00020000 /* A gl texture is allocated for this surface */
+#define SFLAG_PBO           0x00040000 /* Has a PBO attached for speeding up data transfers for dynamically locked surfaces */
+#define SFLAG_NORMCOORD     0x00080000 /* Set if the GL texture coords are normalized(non-texture rectangle) */
+#define SFLAG_DS_ONSCREEN   0x00100000 /* Is a depth stencil, last modified onscreen */
+#define SFLAG_DS_OFFSCREEN  0x00200000 /* Is a depth stencil, last modified offscreen */
 
 /* In some conditions the surface memory must not be freed:
  * SFLAG_OVERSIZE: Not all data can be kept in GL
@@ -1382,19 +1367,23 @@ void get_drawable_size_fbo(IWineD3DSurfaceImpl *This, UINT *width, UINT *height)
  * SFLAG_PBO: PBOs don't use 'normal' memory. It is either allocated by the driver or must be NULL.
  * SFLAG_CLIENT: OpenGL uses our memory as backup
  */
-#define SFLAG_DONOTFREE  (SFLAG_OVERSIZE   | \
-                          SFLAG_CONVERTED  | \
-                          SFLAG_DIBSECTION | \
-                          SFLAG_LOCKED     | \
-                          SFLAG_DYNLOCK    | \
-                          SFLAG_DYNCHANGE  | \
-                          SFLAG_USERPTR    | \
-                          SFLAG_PBO        | \
-                          SFLAG_CLIENT)
+#define SFLAG_DONOTFREE     (SFLAG_OVERSIZE   | \
+                             SFLAG_CONVERTED  | \
+                             SFLAG_DIBSECTION | \
+                             SFLAG_LOCKED     | \
+                             SFLAG_DYNLOCK    | \
+                             SFLAG_DYNCHANGE  | \
+                             SFLAG_USERPTR    | \
+                             SFLAG_PBO        | \
+                             SFLAG_CLIENT)
 
-#define SFLAG_LOCATIONS  (SFLAG_INSYSMEM   | \
-                          SFLAG_INTEXTURE  | \
-                          SFLAG_INDRAWABLE)
+#define SFLAG_LOCATIONS     (SFLAG_INSYSMEM   | \
+                             SFLAG_INTEXTURE  | \
+                             SFLAG_INDRAWABLE)
+
+#define SFLAG_DS_LOCATIONS  (SFLAG_DS_ONSCREEN | \
+                             SFLAG_DS_OFFSCREEN)
+
 BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]);
 
 typedef enum {
@@ -1583,9 +1572,6 @@ struct IWineD3DStateBlockImpl
     /* Sampler States */
     DWORD                     samplerState[MAX_COMBINED_SAMPLERS][WINED3D_HIGHEST_SAMPLER_STATE + 1];
 
-    /* Current GLSL Shader Program */
-    struct glsl_shader_prog_link *glsl_program;
-
     /* Scissor test rectangle */
     RECT                      scissorRect;
 
@@ -1697,6 +1683,7 @@ typedef struct IWineD3DSwapChainImpl
     WINED3DPRESENT_PARAMETERS presentParms;
     DWORD                     orig_width, orig_height;
     WINED3DFORMAT             orig_fmt;
+    WINED3DGAMMARAMP          orig_gamma;
 
     long prev_time, frames;   /* Performance tracking */
     unsigned int vSyncCounter;
@@ -1746,6 +1733,8 @@ void texture_activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock
 
 void surface_set_compatible_renderbuffer(IWineD3DSurface *iface, unsigned int width, unsigned int height);
 GLenum surface_get_gl_buffer(IWineD3DSurface *iface, IWineD3DSwapChain *swapchain);
+void surface_modify_ds_location(IWineD3DSurface *iface, DWORD location);
+void surface_load_ds_location(IWineD3DSurface *iface, DWORD location);
 
 BOOL getColorBits(WINED3DFORMAT fmt, short *redSize, short *greenSize, short *blueSize, short *alphaSize, short *totalSize);
 BOOL getDepthStencilBits(WINED3DFORMAT fmt, short *depthSize, short *stencilSize);
@@ -1964,8 +1953,6 @@ extern int shader_addline(
 extern const SHADER_OPCODE* shader_get_opcode(
     IWineD3DBaseShader *iface, 
     const DWORD code);
-
-void delete_glsl_program_entry(IWineD3DDevice *iface, struct glsl_shader_prog_link *entry);
 
 /* Vertex shader utility functions */
 extern BOOL vshader_get_input(
@@ -2435,4 +2422,8 @@ static inline BOOL use_ps(IWineD3DDeviceImpl *device) {
 
 void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, WINED3DRECT *src_rect,
         IWineD3DSurface *dst_surface, WINED3DRECT *dst_rect, const WINED3DTEXTUREFILTERTYPE filter, BOOL flip);
+void bind_fbo(IWineD3DDevice *iface, GLenum target, GLuint *fbo);
+void attach_depth_stencil_fbo(IWineD3DDeviceImpl *This, GLenum fbo_target, IWineD3DSurface *depth_stencil, BOOL use_render_buffer);
+void depth_blt(IWineD3DDevice *iface, GLuint texture);
+
 #endif

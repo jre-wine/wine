@@ -28,11 +28,16 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "initguid.h"
 #include "urlmon.h"
 #include "wininet.h"
 #include "mshtml.h"
 
 #include "wine/test.h"
+
+DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
+DEFINE_GUID(CLSID_IdentityUnmarshal,0x0000001b,0x0000,0x0000,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
+DEFINE_GUID(IID_IBindStatusCallbackHolder,0x79eac9cc,0xbaf9,0x11ce,0x8c,0x82,0x00,0xaa,0x00,0x4b,0xa9,0x0b);
 
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
@@ -154,8 +159,6 @@ static CHAR mime_type[512];
 static IInternetProtocolSink *protocol_sink = NULL;
 static HANDLE complete_event, complete_event2;
 static HRESULT binding_hres;
-
-extern IID IID_IBindStatusCallbackHolder;
 
 static LPCWSTR urls[] = {
     WINE_ABOUT_URL,
@@ -2194,6 +2197,8 @@ static void test_BindToObject(int protocol, BOOL emul)
         SET_EXPECT(Start);
         if(test_protocol == HTTP_TEST)
             SET_EXPECT(Terminate);
+        if(test_protocol == FILE_TEST)
+            SET_EXPECT(OnProgress_MIMETYPEAVAILABLE);
         SET_EXPECT(UnlockRequest);
     }else {
         if(test_protocol == HTTP_TEST) {
@@ -2260,6 +2265,8 @@ static void test_BindToObject(int protocol, BOOL emul)
         CHECK_CALLED(Start);
         if(test_protocol == HTTP_TEST)
             CHECK_CALLED(Terminate);
+        if(test_protocol == FILE_TEST)
+            CLEAR_CALLED(OnProgress_MIMETYPEAVAILABLE); /* not called in IE7 */
         CHECK_CALLED(UnlockRequest);
     }else {
         if(test_protocol == HTTP_TEST) {
@@ -2302,9 +2309,13 @@ static void test_BindToObject(int protocol, BOOL emul)
     if(test_protocol != HTTP_TEST || emul || urls[test_protocol] == SHORT_RESPONSE_URL) {
         ok(IMoniker_Release(mon) == 0, "mon should be destroyed here\n");
         ok(IBindCtx_Release(bctx) == 0, "bctx should be destroyed here\n");
-    }else todo_wine {
-        ok(IMoniker_Release(mon) == 0, "mon should be destroyed here\n");
-        ok(IBindCtx_Release(bctx) == 0, "bctx should be destroyed here\n");
+    }else {
+        todo_wine ok(IMoniker_Release(mon) == 0, "mon should be destroyed here\n");
+
+        if(bindf & BINDF_ASYNCHRONOUS)
+            ok(IBindCtx_Release(bctx) != 0, "bctx should not be destroyed here\n");
+        else
+            todo_wine ok(IBindCtx_Release(bctx) == 0, "bctx should be destroyed here\n");
     }
 
     if(emul)

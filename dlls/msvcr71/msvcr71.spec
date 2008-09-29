@@ -94,8 +94,8 @@
 @ stub ___lc_collate_cp_func
 @ stub ___lc_handle_func
 @ stub ___mb_cur_max_func
-@ stub ___setlc_active_func
-@ stub ___unguarded_readlc_active_add_func
+@ cdecl ___setlc_active_func() msvcrt.___setlc_active_func
+@ cdecl ___unguarded_readlc_active_add_func() msvcrt.___unguarded_readlc_active_add_func
 @ extern __argc msvcrt.__argc
 @ extern __argv msvcrt.__argv
 @ extern __badioinfo msvcrt.__badioinfo
@@ -150,7 +150,7 @@
 @ cdecl __p__winminor() msvcrt.__p__winminor
 @ cdecl __p__winver() msvcrt.__p__winver
 @ cdecl __p__wpgmptr() msvcrt.__p__wpgmptr
-@ stub __pctype_func
+@ cdecl __pctype_func() msvcrt.__p__pctype
 @ extern __pioinfo msvcrt.__pioinfo
 @ stub __pwctype_func
 @ cdecl __pxcptinfoptrs() msvcrt.__pxcptinfoptrs

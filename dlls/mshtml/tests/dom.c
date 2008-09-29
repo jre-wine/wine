@@ -411,6 +411,17 @@ static IHTMLDOMNode *_get_node_iface(unsigned line, IUnknown *unk)
     return node;
 }
 
+#define get_img_iface(u) _get_img_iface(__LINE__,u)
+static IHTMLImgElement *_get_img_iface(unsigned line, IUnknown *unk)
+{
+    IHTMLImgElement *img;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLImgElement, (void**)&img);
+    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLImgElement: %08x\n", hres);
+    return img;
+}
+
 #define test_node_name(u,n) _test_node_name(__LINE__,u,n)
 static void _test_node_name(unsigned line, IUnknown *unk, const char *exname)
 {
@@ -932,18 +943,46 @@ static long _get_node_type(unsigned line, IUnknown *unk)
 #define test_img_set_src(u,s) _test_img_set_src(__LINE__,u,s)
 static void _test_img_set_src(unsigned line, IUnknown *unk, const char *src)
 {
-    IHTMLImgElement *img;
+    IHTMLImgElement *img = _get_img_iface(line, unk);
     BSTR tmp;
     HRESULT hres;
-
-    hres = IUnknown_QueryInterface(unk, &IID_IHTMLImgElement, (void**)&img);
-    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLImgElement: %08x\n", hres);
 
     tmp = a2bstr(src);
     hres = IHTMLImgElement_put_src(img, tmp);
     IHTMLImgElement_Release(img);
     SysFreeString(tmp);
     ok_(__FILE__,line) (hres == S_OK, "put_src failed: %08x\n", hres);
+}
+
+#define test_img_alt(u,a) _test_img_alt(__LINE__,u,a)
+static void _test_img_alt(unsigned line, IUnknown *unk, const char *exalt)
+{
+    IHTMLImgElement *img = _get_img_iface(line, unk);
+    BSTR alt;
+    HRESULT hres;
+
+    hres = IHTMLImgElement_get_alt(img, &alt);
+    ok_(__FILE__,line) (hres == S_OK, "get_alt failed: %08x\n", hres);
+    if(exalt)
+        ok_(__FILE__,line) (!strcmp_wa(alt, exalt), "inexopected alt %s\n", dbgstr_w(alt));
+    else
+        ok_(__FILE__,line) (!alt, "alt != NULL\n");
+    SysFreeString(alt);
+}
+
+#define test_img_set_alt(u,a) _test_img_set_alt(__LINE__,u,a)
+static void _test_img_set_alt(unsigned line, IUnknown *unk, const char *alt)
+{
+    IHTMLImgElement *img = _get_img_iface(line, unk);
+    BSTR tmp;
+    HRESULT hres;
+
+    tmp = a2bstr(alt);
+    hres = IHTMLImgElement_put_alt(img, tmp);
+    ok_(__FILE__,line) (hres == S_OK, "get_alt failed: %08x\n", hres);
+    SysFreeString(tmp);
+
+    _test_img_alt(line, unk, alt);
 }
 
 #define test_input_get_disabled(i,b) _test_input_get_disabled(__LINE__,i,b)
@@ -1778,6 +1817,25 @@ static void test_default_style(IHTMLStyle *style)
     hres = IHTMLStyle_get_textDecorationLineThrough(style, &b);
     ok(hres == S_OK, "get_textDecorationLineThrough failed: %08x\n", hres);
     ok(b == VARIANT_FALSE, "textDecorationLineThrough = %x\n", b);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLStyle_get_width(style, &v);
+    ok(hres == S_OK, "get_width failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v)=%d\n", V_VT(&v));
+    ok(!V_BSTR(&v), "V_BSTR(v)=%p\n", V_BSTR(&v));
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = a2bstr("auto");
+    hres = IHTMLStyle_put_width(style, v);
+    ok(hres == S_OK, "put_width failed: %08x\n", hres);
+    VariantClear(&v);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLStyle_get_width(style, &v);
+    ok(hres == S_OK, "get_width failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v)=%d\n", V_VT(&v));
+    ok(!strcmp_wa(V_BSTR(&v), "auto"), "V_BSTR(v)=%s\n", dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
 }
 
 static void test_default_selection(IHTMLDocument2 *doc)
@@ -1821,7 +1879,7 @@ static void test_default_body(IHTMLBodyElement *body)
 
 static void test_window(IHTMLDocument2 *doc)
 {
-    IHTMLWindow2 *window;
+    IHTMLWindow2 *window, *window2, *self;
     IHTMLDocument2 *doc2 = NULL;
     HRESULT hres;
 
@@ -1835,6 +1893,20 @@ static void test_window(IHTMLDocument2 *doc)
     ok(doc2 != NULL, "doc2 == NULL\n");
 
     IHTMLDocument_Release(doc2);
+
+    hres = IHTMLWindow2_get_window(window, &window2);
+    ok(hres == S_OK, "get_window failed: %08x\n", hres);
+    ok(window2 != NULL, "window2 == NULL\n");
+
+    hres = IHTMLWindow2_get_self(window, &self);
+    ok(hres == S_OK, "get_window failed: %08x\n", hres);
+    ok(window2 != NULL, "self == NULL\n");
+
+    ok(self == window2, "self != window2\n");
+
+    IHTMLWindow2_Release(window2);
+    IHTMLWindow2_Release(self);
+
     IHTMLWindow2_Release(window);
 }
 
@@ -2153,6 +2225,8 @@ static void test_elems(IHTMLDocument2 *doc)
     elem = get_elem_by_id(doc, imgidW, TRUE);
     if(elem) {
         test_img_set_src((IUnknown*)elem, "about:blank");
+        test_img_alt((IUnknown*)elem, NULL);
+        test_img_set_alt((IUnknown*)elem, "alt test");
         IHTMLElement_Release(elem);
     }
 

@@ -187,6 +187,16 @@ GpStatus WINGDIPAPI GdipGetPenDashCap197819(GpPen *pen, GpDashCap *dashCap)
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipGetPenDashCount(GpPen *pen, INT *count)
+{
+    if(!pen || !count)
+        return InvalidParameter;
+
+    *count = pen->numdashes;
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipGetPenDashOffset(GpPen *pen, REAL *offset)
 {
     if(!pen || !offset)
@@ -353,6 +363,16 @@ GpStatus WINGDIPAPI GdipSetPenDashArray(GpPen *pen, GDIPCONST REAL *dash,
     GdipSetPenDashStyle(pen, DashStyleCustom);
     memcpy(pen->dashes, dash, count * sizeof(REAL));
     pen->numdashes = count;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipSetPenDashCap197819(GpPen *pen, GpDashCap dashCap)
+{
+    if(!pen)
+        return InvalidParameter;
+
+    pen->dashcap = dashCap;
 
     return Ok;
 }

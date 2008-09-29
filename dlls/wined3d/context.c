@@ -102,7 +102,7 @@ static WineD3DContext *AddContextToArray(IWineD3DDeviceImpl *This, HWND win_hand
     /* Mark all states dirty to force a proper initialization of the states on the first use of the context
      */
     for(state = 0; state <= STATE_HIGHEST; state++) {
-        Context_MarkStateDirty(This->contexts[This->numContexts], state, This->shader_backend->StateTable);
+        Context_MarkStateDirty(This->contexts[This->numContexts], state, This->StateTable);
     }
 
     This->numContexts++;
@@ -448,7 +448,7 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
     oldDrawable = pwglGetCurrentDC();
     if(oldCtx && oldDrawable) {
         /* See comment in ActivateContext context switching */
-        This->shader_backend->shader_fragment_enable((IWineD3DDevice *) This, FALSE);
+        This->frag_pipe->enable_extension((IWineD3DDevice *) This, FALSE);
     }
     if(pwglMakeCurrent(hdc, ctx) == FALSE) {
         ERR("Cannot activate context to set up defaults\n");
@@ -533,7 +533,7 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
     if(oldDrawable && oldCtx) {
         pwglMakeCurrent(oldDrawable, oldCtx);
     }
-    This->shader_backend->shader_fragment_enable((IWineD3DDevice *) This, TRUE);
+    This->frag_pipe->enable_extension((IWineD3DDevice *) This, TRUE);
 
 out:
     return ret;
@@ -610,6 +610,17 @@ void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context) {
     RemoveContextFromArray(This, context);
 }
 
+static inline void set_blit_dimension(UINT width, UINT height) {
+    glMatrixMode(GL_PROJECTION);
+    checkGLcall("glMatrixMode(GL_PROJECTION)");
+    glLoadIdentity();
+    checkGLcall("glLoadIdentity()");
+    glOrtho(0, width, height, 0, 0.0, -1.0);
+    checkGLcall("glOrtho");
+    glViewport(0, 0, width, height);
+    checkGLcall("glViewport");
+}
+
 /*****************************************************************************
  * SetupForBlit
  *
@@ -630,10 +641,18 @@ void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context) {
  *****************************************************************************/
 static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *context, UINT width, UINT height) {
     int i;
-    const struct StateEntry *StateTable = This->shader_backend->StateTable;
+    const struct StateEntry *StateTable = This->StateTable;
 
     TRACE("Setting up context %p for blitting\n", context);
     if(context->last_was_blit) {
+        if(context->blit_w != width || context->blit_h != height) {
+            set_blit_dimension(width, height);
+            context->blit_w = width; context->blit_h = height;
+            /* No need to dirtify here, the states are still dirtified because they weren't
+             * applied since the last SetupForBlit call. Otherwise last_was_blit would not
+             * be set
+             */
+        }
         TRACE("Context is already set up for blitting, nothing to do\n");
         return;
     }
@@ -756,14 +775,6 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
     checkGLcall("glLoadIdentity()");
     Context_MarkStateDirty(context, STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)), StateTable);
 
-    glMatrixMode(GL_PROJECTION);
-    checkGLcall("glMatrixMode(GL_PROJECTION)");
-    glLoadIdentity();
-    checkGLcall("glLoadIdentity()");
-    glOrtho(0, width, height, 0, 0.0, -1.0);
-    checkGLcall("glOrtho");
-    Context_MarkStateDirty(context, STATE_TRANSFORM(WINED3DTS_PROJECTION), StateTable);
-
     context->last_was_rhw = TRUE;
     Context_MarkStateDirty(context, STATE_VDECL, StateTable); /* because of last_was_rhw = TRUE */
 
@@ -775,11 +786,13 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
     glDisable(GL_CLIP_PLANE5); checkGLcall("glDisable(clip plane 5)");
     Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_CLIPPING), StateTable);
 
-    glViewport(0, 0, width, height);
-    checkGLcall("glViewport");
+    set_blit_dimension(width, height);
+    context->blit_w = width; context->blit_h = height;
     Context_MarkStateDirty(context, STATE_VIEWPORT, StateTable);
+    Context_MarkStateDirty(context, STATE_TRANSFORM(WINED3DTS_PROJECTION), StateTable);
 
-    This->shader_backend->shader_fragment_enable((IWineD3DDevice *) This, FALSE);
+
+    This->frag_pipe->enable_extension((IWineD3DDevice *) This, FALSE);
 }
 
 /*****************************************************************************
@@ -823,7 +836,7 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
     BOOL oldRenderOffscreen = This->render_offscreen;
     const WINED3DFORMAT oldFmt = ((IWineD3DSurfaceImpl *) This->lastActiveRenderTarget)->resource.format;
     const WINED3DFORMAT newFmt = ((IWineD3DSurfaceImpl *) target)->resource.format;
-    const struct StateEntry *StateTable = This->shader_backend->StateTable;
+    const struct StateEntry *StateTable = This->StateTable;
 
     /* To compensate the lack of format switching with some offscreen rendering methods and on onscreen buffers
      * the alpha blend state changes with different render target formats
@@ -998,9 +1011,6 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
         This->isInDraw = oldInDraw;
     }
 
-    if(oldRenderOffscreen != This->render_offscreen && This->depth_copy_state != WINED3D_DCS_NO_COPY) {
-        This->depth_copy_state = WINED3D_DCS_COPY;
-    }
     return context;
 }
 
@@ -1024,7 +1034,7 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
     BYTE                          shift;
     WineD3DContext                *context;
     GLint                         drawBuffer=0;
-    const struct StateEntry       *StateTable = This->shader_backend->StateTable;
+    const struct StateEntry       *StateTable = This->StateTable;
 
     TRACE("(%p): Selecting context for render target %p, thread %d\n", This, target, tid);
     if(This->lastActiveRenderTarget != target || tid != This->lastThread) {
@@ -1047,12 +1057,12 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
         else {
             TRACE("Switching gl ctx to %p, hdc=%p ctx=%p\n", context, context->hdc, context->glCtx);
 
-            This->shader_backend->shader_fragment_enable((IWineD3DDevice *) This, FALSE);
+            This->frag_pipe->enable_extension((IWineD3DDevice *) This, FALSE);
             ret = pwglMakeCurrent(context->hdc, context->glCtx);
             if(ret == FALSE) {
                 ERR("Failed to activate the new context\n");
             } else if(!context->last_was_blit) {
-                This->shader_backend->shader_fragment_enable((IWineD3DDevice *) This, TRUE);
+                This->frag_pipe->enable_extension((IWineD3DDevice *) This, TRUE);
             }
         }
         if(This->activeContext->vshader_const_dirty) {
@@ -1084,7 +1094,7 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
 
         case CTXUSAGE_CLEAR:
             if(context->last_was_blit) {
-                This->shader_backend->shader_fragment_enable((IWineD3DDevice *) This, TRUE);
+                This->frag_pipe->enable_extension((IWineD3DDevice *) This, TRUE);
             }
 
             /* Blending and clearing should be orthogonal, but tests on the nvidia driver show that disabling
@@ -1103,7 +1113,7 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
         case CTXUSAGE_DRAWPRIM:
             /* This needs all dirty states applied */
             if(context->last_was_blit) {
-                This->shader_backend->shader_fragment_enable((IWineD3DDevice *) This, TRUE);
+                This->frag_pipe->enable_extension((IWineD3DDevice *) This, TRUE);
             }
 
             IWineD3DDeviceImpl_FindTexUnitMap(This);

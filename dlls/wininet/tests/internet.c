@@ -73,6 +73,16 @@ static void test_InternetCanonicalizeUrlA(void)
         "got %u and %u with size %u for '%s' (%d)\n",
         res, GetLastError(), dwSize, buffer, lstrlenA(buffer));
 
+    memset(buffer, '#', sizeof(buffer)-1);
+    buffer[sizeof(buffer)-1] = '\0';
+    dwSize = sizeof(buffer);
+    SetLastError(0xdeadbeef);
+    res = InternetCanonicalizeUrlA("file:///C:/Program%20Files/Atmel/AVR%20Tools/STK500/STK500.xml", buffer, &dwSize, ICU_DECODE | ICU_NO_ENCODE);
+    ok(res, "InternetCanonicalizeUrlA failed %u\n", GetLastError());
+    ok(dwSize == lstrlenA(buffer), "got %d expected %d\n", dwSize, lstrlenA(buffer));
+    todo_wine ok(!lstrcmpA("file://C:\\Program Files\\Atmel\\AVR Tools\\STK500\\STK500.xml", buffer),
+       "got %s expected 'file://C:\\Program Files\\Atmel\\AVR Tools\\STK500\\STK500.xml'\n", buffer);
+
     /* buffer is larger as the required size */
     memset(buffer, '#', sizeof(buffer)-1);
     buffer[sizeof(buffer)-1] = '\0';
@@ -113,6 +123,12 @@ static void test_InternetCanonicalizeUrlA(void)
         "got %u and %u with size %u for '%s' (%d)\n",
         res, GetLastError(), dwSize, buffer, lstrlenA(buffer));
 
+    /* test with trailing space */
+    dwSize = 256;
+    res = InternetCanonicalizeUrlA("http://www.winehq.org/index.php?x= ", buffer, &dwSize, ICU_BROWSER_MODE);
+    ok(res == 1, "InternetCanonicalizeUrlA failed\n");
+    ok(!strcmp(buffer, "http://www.winehq.org/index.php?x="), "Trailing space should have been stripped even in ICU_BROWSER_MODE (%s)\n", buffer);
+
     res = InternetSetOptionA(NULL, 0xdeadbeef, buffer, sizeof(buffer));
     ok(!res, "InternetSetOptionA succeeded\n");
     ok(GetLastError() == ERROR_INTERNET_INVALID_OPTION,
@@ -132,6 +148,12 @@ static void test_InternetQueryOptionA(void)
 
   hinet = InternetOpenA(useragent,INTERNET_OPEN_TYPE_DIRECT,NULL,NULL, 0);
   ok((hinet != 0x0),"InternetOpen Failed\n");
+
+  SetLastError(0xdeadbeef);
+  retval=InternetQueryOptionA(NULL,INTERNET_OPTION_USER_AGENT,NULL,&len);
+  err=GetLastError();
+  ok(retval == 0,"Got wrong return value %d\n",retval);
+  ok(err == ERROR_INTERNET_INCORRECT_HANDLE_TYPE, "Got wrong error code%d\n",err);
 
   SetLastError(0xdeadbeef);
   len=strlen(useragent)+1;
@@ -248,7 +270,8 @@ static void test_null(void)
   ok(hc == NULL, "connect failed\n");
 
   hc = InternetOpenUrlW(hi, NULL, NULL, 0, 0, 0);
-  ok(GetLastError() == ERROR_INVALID_PARAMETER, "wrong error\n");
+  ok(GetLastError() == ERROR_INVALID_PARAMETER ||
+     GetLastError() == ERROR_INTERNET_UNRECOGNIZED_SCHEME, "wrong error\n");
   ok(hc == NULL, "connect failed\n");
 
   hc = InternetOpenUrlW(hi, szServer, NULL, 0, 0, 0);

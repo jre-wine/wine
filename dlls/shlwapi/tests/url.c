@@ -103,6 +103,7 @@ static const TEST_URL_CANONICALIZE TEST_CANONICALIZE[] = {
     {"res:///c:\\tests\\foo bar", URL_DONT_SIMPLIFY, S_OK, "res:///c:\\tests\\foo bar", TRUE},
     {"A", 0, S_OK, "A", FALSE},
     {"/uri-res/N2R?urn:sha1:B3K", URL_DONT_ESCAPE_EXTRA_INFO | URL_WININET_COMPATIBILITY /*0x82000000*/, S_OK, "/uri-res/N2R?urn:sha1:B3K", TRUE} /*LimeWire online installer calls this*/,
+    {"http:www.winehq.org/dir/../index.html", 0, S_OK, "http:www.winehq.org/index.html"},
     {"", 0, S_OK, "", FALSE}
 };
 
@@ -233,6 +234,8 @@ static const TEST_URL_COMBINE TEST_COMBINE[] = {
     {"foo:today", "bar:calendar", 0, S_OK, "bar:calendar"},
     {"foo:/today", "foo:calendar", 0, S_OK, "foo:/calendar"},
     {"foo:/today/", "foo:calendar", 0, S_OK, "foo:/today/calendar"},
+    {"mk:@MSITStore:dir/test.chm::dir/index.html", "image.jpg", 0, S_OK, "mk:@MSITStore:dir/test.chm::dir/image.jpg"},
+    {"mk:@MSITStore:dir/test.chm::dir/dir2/index.html", "../image.jpg", 0, S_OK, "mk:@MSITStore:dir/test.chm::dir/image.jpg"}
 };
 
 /* ################ */
@@ -579,6 +582,7 @@ static void test_UrlCanonicalizeW(void)
     DWORD dwSize;
     DWORD urllen;
     HRESULT hr;
+    int i;
 
 
     if (!pUrlCanonicalizeW) {
@@ -628,6 +632,21 @@ static void test_UrlCanonicalizeW(void)
         "got 0x%x with %u and size %u for %u (expected 'S_OK' and size %u)\n",
         hr, GetLastError(), dwSize, lstrlenW(szReturnUrl), urllen);
 
+    /* check that the characters 1..32 are chopped from the end of the string */
+    for (i = 1; i < 65536; i++)
+    {
+        WCHAR szUrl[128];
+        BOOL choped;
+        int pos;
+
+        MultiByteToWideChar(CP_UTF8, 0, "http://www.winehq.org/X", -1, szUrl, 128);
+        pos = lstrlenW(szUrl) - 1;
+        szUrl[pos] = i;
+        urllen = INTERNET_MAX_URL_LENGTH;
+        pUrlCanonicalizeW(szUrl, szReturnUrl, &urllen, 0);
+        choped = lstrlenW(szReturnUrl) < lstrlenW(szUrl);
+        ok(choped == (i <= 32), "Incorrect char chopping for char %d\n", i);
+    }
 }
 
 /* ########################### */
@@ -785,8 +804,8 @@ static void test_UrlUnescape(void)
     DWORD dwEscaped;
     size_t i;
     static char inplace[] = "file:///C:/Program%20Files";
-    static WCHAR inplaceW[] = {'f','i','l','e',':','/','/','/','C',':','/',
-                               'P','r','o','g','r','a','m','%','2','0','F','i','l','e','s',0};
+    static const char expected[] = "file:///C:/Program Files";
+    static WCHAR inplaceW[] = {'f','i','l','e',':','/','/','/','C',':','/','P','r','o','g','r','a','m',' ','F','i','l','e','s',0};
 
     for(i=0; i<sizeof(TEST_URL_UNESCAPE)/sizeof(TEST_URL_UNESCAPE[0]); i++) {
         dwEscaped=INTERNET_MAX_URL_LENGTH;
@@ -805,9 +824,12 @@ static void test_UrlUnescape(void)
 
     dwEscaped = sizeof(inplace);
     ok(UrlUnescapeA(inplace, NULL, &dwEscaped, URL_UNESCAPE_INPLACE) == S_OK, "UrlUnescapeA failed unexpectedly\n");
+    ok(!strcmp(inplace, expected), "got %s expected %s\n", inplace, expected);
+    ok(dwEscaped == 27, "got %d expected 27\n", dwEscaped);
 
     dwEscaped = sizeof(inplaceW);
     ok(UrlUnescapeW(inplaceW, NULL, &dwEscaped, URL_UNESCAPE_INPLACE) == S_OK, "UrlUnescapeW failed unexpectedly\n");
+    ok(dwEscaped == 50, "got %d expected 50\n", dwEscaped);
 }
 
 /* ########################### */

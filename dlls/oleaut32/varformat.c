@@ -284,7 +284,7 @@ typedef struct tagFMT_DATE_HEADER
 #define FMT_STR_COPY_SPACE  0x40 /* Copy len chars with space if no char */
 #define FMT_STR_COPY_SKIP   0x41 /* Copy len chars or skip if no char */
 /* Wine additions */
-#define FMT_WINE_HOURS_12   0x81 /* Hours using 12 hour clockhourCopy len chars or skip if no char */
+#define FMT_WINE_HOURS_12   0x81 /* Hours using 12 hour clock */
 
 /* Named Formats and their tokenised values */
 static const WCHAR szGeneralDate[] = { 'G','e','n','e','r','a','l',' ','D','a','t','e','\0' };
@@ -1463,7 +1463,8 @@ VARIANT_FormatNumber_Bool:
           while (count-- > 0)
             *pBuff++ = '0';
         }
-        if (*pToken == FMT_NUM_COPY_ZERO || have_int > 1 || *prgbDig > 0)
+        if (*pToken == FMT_NUM_COPY_ZERO || have_int > 1 ||
+            (have_int > 0 && *prgbDig > 0))
         {
           dwState |= NUM_WRITE_ON;
           count = min(count_max, have_int);

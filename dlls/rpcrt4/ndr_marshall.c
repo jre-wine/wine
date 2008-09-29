@@ -2114,7 +2114,17 @@ void WINAPI NdrSimpleStructFree(PMIDL_STUB_MESSAGE pStubMsg,
 }
 
 
-static unsigned long EmbeddedComplexSize(const MIDL_STUB_MESSAGE *pStubMsg,
+#include "pshpack1.h"
+typedef struct
+{
+    unsigned char type;
+    unsigned char flags_type; /* flags in upper nibble, type in lower nibble */
+    ULONG low_value;
+    ULONG high_value;
+} NDR_RANGE;
+#include "poppack.h"
+
+static unsigned long EmbeddedComplexSize(MIDL_STUB_MESSAGE *pStubMsg,
                                          PFORMAT_STRING pFormat)
 {
   switch (*pFormat) {
@@ -2128,6 +2138,36 @@ static unsigned long EmbeddedComplexSize(const MIDL_STUB_MESSAGE *pStubMsg,
     return *(const WORD*)&pFormat[2];
   case RPC_FC_USER_MARSHAL:
     return *(const WORD*)&pFormat[4];
+  case RPC_FC_RANGE: {
+    switch (((const NDR_RANGE *)pFormat)->flags_type & 0xf) {
+    case RPC_FC_BYTE:
+    case RPC_FC_CHAR:
+    case RPC_FC_SMALL:
+    case RPC_FC_USMALL:
+        return sizeof(UCHAR);
+    case RPC_FC_WCHAR:
+    case RPC_FC_SHORT:
+    case RPC_FC_USHORT:
+        return sizeof(USHORT);
+    case RPC_FC_LONG:
+    case RPC_FC_ULONG:
+    case RPC_FC_ENUM32:
+        return sizeof(ULONG);
+    case RPC_FC_FLOAT:
+        return sizeof(float);
+    case RPC_FC_DOUBLE:
+        return sizeof(double);
+    case RPC_FC_HYPER:
+        return sizeof(ULONGLONG);
+    case RPC_FC_ERROR_STATUS_T:
+        return sizeof(error_status_t);
+    case RPC_FC_ENUM16:
+        return sizeof(UINT);
+    default:
+        ERR("unknown type 0x%x\n", ((const NDR_RANGE *)pFormat)->flags_type & 0xf);
+        RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    }
+  }
   case RPC_FC_NON_ENCAPSULATED_UNION:
     pFormat += 2;
     if (pStubMsg->fHasNewCorrDesc)
@@ -2213,7 +2253,9 @@ static unsigned char * ComplexMarshall(PMIDL_STUB_MESSAGE pStubMsg,
       unsigned char *saved_buffer;
       int pointer_buffer_mark_set = 0;
       TRACE("pointer=%p <= %p\n", *(unsigned char**)pMemory, pMemory);
-      ALIGN_POINTER_CLEAR(pStubMsg->Buffer, 4);
+      TRACE("pStubMsg->Buffer before %p\n", pStubMsg->Buffer);
+      if (*pPointer != RPC_FC_RP)
+        ALIGN_POINTER_CLEAR(pStubMsg->Buffer, 4);
       saved_buffer = pStubMsg->Buffer;
       if (pStubMsg->PointerBufferMark)
       {
@@ -2221,21 +2263,18 @@ static unsigned char * ComplexMarshall(PMIDL_STUB_MESSAGE pStubMsg,
         pStubMsg->PointerBufferMark = NULL;
         pointer_buffer_mark_set = 1;
       }
-      else
+      else if (*pPointer != RPC_FC_RP)
         safe_buffer_increment(pStubMsg, 4); /* for pointer ID */
       PointerMarshall(pStubMsg, saved_buffer, *(unsigned char**)pMemory, pPointer);
       if (pointer_buffer_mark_set)
       {
         STD_OVERFLOW_CHECK(pStubMsg);
         pStubMsg->PointerBufferMark = pStubMsg->Buffer;
-        if (saved_buffer + 4 > (unsigned char *)pStubMsg->RpcMsg->Buffer + pStubMsg->BufferLength)
-        {
-            ERR("buffer overflow - saved_buffer = %p, BufferEnd = %p\n",
-                saved_buffer, (unsigned char *)pStubMsg->RpcMsg->Buffer + pStubMsg->BufferLength);
-            RpcRaiseException(RPC_X_BAD_STUB_DATA);
-        }
-        pStubMsg->Buffer = saved_buffer + 4;
+        pStubMsg->Buffer = saved_buffer;
+        if (*pPointer != RPC_FC_RP)
+          safe_buffer_increment(pStubMsg, 4); /* for pointer ID */
       }
+      TRACE("pStubMsg->Buffer after %p\n", pStubMsg->Buffer);
       pPointer += 4;
       pMemory += 4;
       break;
@@ -2291,7 +2330,8 @@ static unsigned char * ComplexMarshall(PMIDL_STUB_MESSAGE pStubMsg,
 static unsigned char * ComplexUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
                                          unsigned char *pMemory,
                                          PFORMAT_STRING pFormat,
-                                         PFORMAT_STRING pPointer)
+                                         PFORMAT_STRING pPointer,
+                                         unsigned char fMustAlloc)
 {
   PFORMAT_STRING desc;
   NDR_UNMARSHALL m;
@@ -2339,7 +2379,8 @@ static unsigned char * ComplexUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
       unsigned char *saved_buffer;
       int pointer_buffer_mark_set = 0;
       TRACE("pointer => %p\n", pMemory);
-      ALIGN_POINTER(pStubMsg->Buffer, 4);
+      if (*pPointer != RPC_FC_RP)
+        ALIGN_POINTER(pStubMsg->Buffer, 4);
       saved_buffer = pStubMsg->Buffer;
       if (pStubMsg->PointerBufferMark)
       {
@@ -2347,21 +2388,17 @@ static unsigned char * ComplexUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
         pStubMsg->PointerBufferMark = NULL;
         pointer_buffer_mark_set = 1;
       }
-      else
+      else if (*pPointer != RPC_FC_RP)
         safe_buffer_increment(pStubMsg, 4); /* for pointer ID */
 
-      PointerUnmarshall(pStubMsg, saved_buffer, (unsigned char**)pMemory, *(unsigned char**)pMemory, pPointer, TRUE);
+      PointerUnmarshall(pStubMsg, saved_buffer, (unsigned char**)pMemory, *(unsigned char**)pMemory, pPointer, fMustAlloc);
       if (pointer_buffer_mark_set)
       {
         STD_OVERFLOW_CHECK(pStubMsg);
         pStubMsg->PointerBufferMark = pStubMsg->Buffer;
-        if (saved_buffer + 4 > (unsigned char *)pStubMsg->RpcMsg->Buffer + pStubMsg->BufferLength)
-        {
-            ERR("buffer overflow - saved_buffer = %p, BufferEnd = %p\n",
-                saved_buffer, (unsigned char *)pStubMsg->RpcMsg->Buffer + pStubMsg->BufferLength);
-            RpcRaiseException(RPC_X_BAD_STUB_DATA);
-        }
-        pStubMsg->Buffer = saved_buffer + 4;
+        pStubMsg->Buffer = saved_buffer;
+        if (*pPointer != RPC_FC_RP)
+          safe_buffer_increment(pStubMsg, 4); /* for pointer ID */
       }
       pPointer += 4;
       pMemory += 4;
@@ -2389,8 +2426,14 @@ static unsigned char * ComplexUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
       desc = pFormat + *(const SHORT*)pFormat;
       size = EmbeddedComplexSize(pStubMsg, desc);
       TRACE("embedded complex (size=%ld) => %p\n", size, pMemory);
+      if (fMustAlloc)
+        /* we can't pass fMustAlloc=TRUE into the marshaller for this type
+         * since the type is part of the memory block that is encompassed by
+         * the whole complex type. Memory is forced to allocate when pointers
+         * are set to NULL, so we emulate that part of fMustAlloc=TRUE by
+         * clearing the memory we pass in to the unmarshaller */
+        memset(pMemory, 0, size);
       m = NdrUnmarshaller[*desc & NDR_TABLE_MASK];
-      memset(pMemory, 0, size); /* just in case */
       if (m)
       {
         /* for some reason interface pointers aren't generated as
@@ -2467,7 +2510,11 @@ static unsigned char * ComplexBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
         pStubMsg->PointerLength = pStubMsg->BufferLength;
         pStubMsg->BufferLength = saved_buffer_length;
       }
-      safe_buffer_length_increment(pStubMsg, 4);
+      if (*pPointer != RPC_FC_RP)
+      {
+        ALIGN_LENGTH(pStubMsg->BufferLength, 4);
+        safe_buffer_length_increment(pStubMsg, 4);
+      }
       pPointer += 4;
       pMemory += 4;
       break;
@@ -2601,7 +2648,8 @@ static unsigned char * ComplexFree(PMIDL_STUB_MESSAGE pStubMsg,
 }
 
 static unsigned long ComplexStructMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
-                                       PFORMAT_STRING pFormat)
+                                             PFORMAT_STRING pFormat,
+                                             PFORMAT_STRING pPointer)
 {
   PFORMAT_STRING desc;
   unsigned long size = 0;
@@ -2636,11 +2684,35 @@ static unsigned long ComplexStructMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
       safe_buffer_increment(pStubMsg, 8);
       break;
     case RPC_FC_POINTER:
-      size += 4;
-      safe_buffer_increment(pStubMsg, 4);
+    {
+      unsigned char *saved_buffer;
+      int pointer_buffer_mark_set = 0;
+      if (*pPointer != RPC_FC_RP)
+        ALIGN_POINTER(pStubMsg->Buffer, 4);
+      saved_buffer = pStubMsg->Buffer;
+      if (pStubMsg->PointerBufferMark)
+      {
+        pStubMsg->Buffer = pStubMsg->PointerBufferMark;
+        pStubMsg->PointerBufferMark = NULL;
+        pointer_buffer_mark_set = 1;
+      }
+      else if (*pPointer != RPC_FC_RP)
+        safe_buffer_increment(pStubMsg, 4); /* for pointer ID */
+
       if (!pStubMsg->IgnoreEmbeddedPointers)
-        FIXME("embedded pointers\n");
+        PointerMemorySize(pStubMsg, saved_buffer, pPointer);
+      if (pointer_buffer_mark_set)
+      {
+        STD_OVERFLOW_CHECK(pStubMsg);
+        pStubMsg->PointerBufferMark = pStubMsg->Buffer;
+        pStubMsg->Buffer = saved_buffer;
+        if (*pPointer != RPC_FC_RP)
+          safe_buffer_increment(pStubMsg, 4); /* for pointer ID */
+      }
+      pPointer += 4;
+      size += 4;
       break;
+    }
     case RPC_FC_ALIGNM4:
       ALIGN_LENGTH(size, 4);
       ALIGN_POINTER(pStubMsg->Buffer, 4);
@@ -2779,7 +2851,7 @@ unsigned char * WINAPI NdrComplexStructMarshall(PMIDL_STUB_MESSAGE pStubMsg,
   ALIGN_POINTER_CLEAR(pStubMsg->Buffer, pFormat[1] + 1);
 
   pFormat += 4;
-  if (*(const WORD*)pFormat) conf_array = pFormat + *(const WORD*)pFormat;
+  if (*(const SHORT*)pFormat) conf_array = pFormat + *(const SHORT*)pFormat;
   pFormat += 2;
   if (*(const WORD*)pFormat) pointer_desc = pFormat + *(const WORD*)pFormat;
   pFormat += 2;
@@ -2844,18 +2916,15 @@ unsigned char * WINAPI NdrComplexStructUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
   ALIGN_POINTER(pStubMsg->Buffer, pFormat[1] + 1);
 
   if (fMustAlloc || !*ppMemory)
-  {
     *ppMemory = NdrAllocate(pStubMsg, size);
-    memset(*ppMemory, 0, size);
-  }
 
   pFormat += 4;
-  if (*(const WORD*)pFormat) conf_array = pFormat + *(const WORD*)pFormat;
+  if (*(const SHORT*)pFormat) conf_array = pFormat + *(const SHORT*)pFormat;
   pFormat += 2;
   if (*(const WORD*)pFormat) pointer_desc = pFormat + *(const WORD*)pFormat;
   pFormat += 2;
 
-  pMemory = ComplexUnmarshall(pStubMsg, *ppMemory, pFormat, pointer_desc);
+  pMemory = ComplexUnmarshall(pStubMsg, *ppMemory, pFormat, pointer_desc, fMustAlloc);
 
   if (conf_array)
     NdrConformantArrayUnmarshall(pStubMsg, &pMemory, conf_array, fMustAlloc);
@@ -2906,7 +2975,7 @@ void WINAPI NdrComplexStructBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
   }
 
   pFormat += 4;
-  if (*(const WORD*)pFormat) conf_array = pFormat + *(const WORD*)pFormat;
+  if (*(const SHORT*)pFormat) conf_array = pFormat + *(const SHORT*)pFormat;
   pFormat += 2;
   if (*(const WORD*)pFormat) pointer_desc = pFormat + *(const WORD*)pFormat;
   pFormat += 2;
@@ -2936,16 +3005,19 @@ ULONG WINAPI NdrComplexStructMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
 {
   unsigned size = *(const WORD*)(pFormat+2);
   PFORMAT_STRING conf_array = NULL;
+  PFORMAT_STRING pointer_desc = NULL;
 
   TRACE("(%p,%p)\n", pStubMsg, pFormat);
 
   ALIGN_POINTER(pStubMsg->Buffer, pFormat[1] + 1);
 
   pFormat += 4;
-  if (*(const WORD*)pFormat) conf_array = pFormat + *(const WORD*)pFormat;
-  pFormat += 4;
+  if (*(const SHORT*)pFormat) conf_array = pFormat + *(const SHORT*)pFormat;
+  pFormat += 2;
+  if (*(const WORD*)pFormat) pointer_desc = pFormat + *(const WORD*)pFormat;
+  pFormat += 2;
 
-  ComplexStructMemorySize(pStubMsg, pFormat);
+  ComplexStructMemorySize(pStubMsg, pFormat, pointer_desc);
 
   if (conf_array)
     NdrConformantArrayMemorySize(pStubMsg, conf_array);
@@ -2967,7 +3039,7 @@ void WINAPI NdrComplexStructFree(PMIDL_STUB_MESSAGE pStubMsg,
   TRACE("(%p,%p,%p)\n", pStubMsg, pMemory, pFormat);
 
   pFormat += 4;
-  if (*(const WORD*)pFormat) conf_array = pFormat + *(const WORD*)pFormat;
+  if (*(const SHORT*)pFormat) conf_array = pFormat + *(const SHORT*)pFormat;
   pFormat += 2;
   if (*(const WORD*)pFormat) pointer_desc = pFormat + *(const WORD*)pFormat;
   pFormat += 2;
@@ -3430,17 +3502,14 @@ unsigned char * WINAPI NdrComplexArrayUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
   pFormat = ReadVariance(pStubMsg, pFormat, pStubMsg->MaxCount);
 
   if (fMustAlloc || !*ppMemory)
-  {
     *ppMemory = NdrAllocate(pStubMsg, size);
-    memset(*ppMemory, 0, size);
-  }
 
   ALIGN_POINTER(pStubMsg->Buffer, alignment);
 
   pMemory = *ppMemory;
   count = pStubMsg->ActualCount;
   for (i = 0; i < count; i++)
-    pMemory = ComplexUnmarshall(pStubMsg, pMemory, pFormat, NULL);
+    pMemory = ComplexUnmarshall(pStubMsg, pMemory, pFormat, NULL, fMustAlloc);
 
   if (pointer_buffer_mark_set)
   {
@@ -3562,7 +3631,7 @@ ULONG WINAPI NdrComplexArrayMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
 
   count = pStubMsg->ActualCount;
   for (i = 0; i < count; i++)
-    ComplexStructMemorySize(pStubMsg, pFormat);
+    ComplexStructMemorySize(pStubMsg, pFormat, NULL);
 
   pStubMsg->MemorySize = SavedMemorySize;
 
@@ -5709,16 +5778,6 @@ void WINAPI NdrXmitOrRepAsFree(PMIDL_STUB_MESSAGE pStubMsg,
 {
     FIXME("stub\n");
 }
-
-#include "pshpack1.h"
-typedef struct
-{
-    unsigned char type;
-    unsigned char flags_type; /* flags in upper nibble, type in lower nibble */
-    ULONG low_value;
-    ULONG high_value;
-} NDR_RANGE;
-#include "poppack.h"
 
 /***********************************************************************
  *           NdrRangeMarshall [internal]

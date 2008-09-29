@@ -173,8 +173,6 @@ static ULONG WINAPI IWineD3DDeviceImpl_Release(IWineD3DDevice *iface) {
             GL_EXTCALL(glDeleteFramebuffersEXT(1, &This->dst_fbo));
         }
 
-        if (This->glsl_program_lookup) hash_table_destroy(This->glsl_program_lookup);
-
         /* TODO: Clean up all the surfaces and textures! */
         /* NOTE: You must release the parent if the object was created via a callback
         ** ***************************/
@@ -772,13 +770,7 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateTexture(IWineD3DDevice *iface, U
     TRACE("Format %#x (%s), Pool %#x, ppTexture %p, pSharedHandle %p, parent %p\n",
             Format, debug_d3dformat(Format), Pool, ppTexture, pSharedHandle, parent);
 
-    if((Usage & (WINED3DUSAGE_AUTOGENMIPMAP | WINED3DUSAGE_RENDERTARGET)) ==
-                (WINED3DUSAGE_AUTOGENMIPMAP | WINED3DUSAGE_RENDERTARGET)) {
-        WARN("Application requests both D3DUSAGE_AUTOGENMIPMAP and D3DUSAGE_RENDERTARGET, which are mutually exclusive\n");
-        return WINED3DERR_INVALIDCALL;
-    }
-
-    /* TODO: It should only be possible to create textures for formats 
+    /* TODO: It should only be possible to create textures for formats
              that are reported as supported */
     if (WINED3DFMT_UNKNOWN >= Format) {
         WARN("(%p) : Texture cannot be created with a format of WINED3DFMT_UNKNOWN\n", This);
@@ -1059,12 +1051,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateCubeTexture(IWineD3DDevice *iface
     unsigned int pow2EdgeLength  = EdgeLength;
     const GlPixelFormatDesc *glDesc;
     getFormatDescEntry(Format, &GLINFO_LOCATION, &glDesc);
-
-    if((Usage & (WINED3DUSAGE_AUTOGENMIPMAP | WINED3DUSAGE_RENDERTARGET)) ==
-                (WINED3DUSAGE_AUTOGENMIPMAP | WINED3DUSAGE_RENDERTARGET)) {
-        WARN("Application requests both D3DUSAGE_AUTOGENMIPMAP and D3DUSAGE_RENDERTARGET, which are mutually exclusive\n");
-        return WINED3DERR_INVALIDCALL;
-    }
 
     /* TODO: It should only be possible to create textures for formats 
              that are reported as supported */
@@ -1610,6 +1596,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
     } else {
         object->wantsDepthStencilBuffer = FALSE;
     }
+
+    IWineD3DSwapChain_GetGammaRamp((IWineD3DSwapChain *) object, &object->orig_gamma);
 
     TRACE("Created swapchain %p\n", object);
     TRACE("FrontBuf @ %p, BackBuf @ %p, DepthStencil %d\n",object->frontBuffer, object->backBuffer ? object->backBuffer[0] : NULL, object->wantsDepthStencilBuffer);
@@ -2209,7 +2197,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
     return WINED3D_OK;
 
 err_out:
-    This->shader_backend->shader_free_private(iface);
     HeapFree(GetProcessHeap(), 0, This->render_targets);
     HeapFree(GetProcessHeap(), 0, This->fbo_color_attachments);
     HeapFree(GetProcessHeap(), 0, This->draw_buffers);
@@ -2228,6 +2215,7 @@ err_out:
         IWineD3DStateBlock_Release((IWineD3DStateBlock *) This->stateBlock);
         This->stateBlock = NULL;
     }
+    This->shader_backend->shader_free_private(iface);
     return hr;
 }
 
@@ -2289,8 +2277,12 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Uninit3D(IWineD3DDevice *iface, D3DCB_D
         glDeleteTextures(1, &This->depth_blt_texture);
         This->depth_blt_texture = 0;
     }
-    This->shader_backend->shader_destroy_depth_blt(iface);
-    This->shader_backend->shader_free_private(iface);
+    if (This->depth_blt_rb) {
+        GL_EXTCALL(glDeleteRenderbuffersEXT(1, &This->depth_blt_rb));
+        This->depth_blt_rb = 0;
+        This->depth_blt_rb_w = 0;
+        This->depth_blt_rb_h = 0;
+    }
 
     /* Release the update stateblock */
     if(IWineD3DStateBlock_Release((IWineD3DStateBlock *)This->updateStateBlock) > 0){
@@ -2310,6 +2302,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Uninit3D(IWineD3DDevice *iface, D3DCB_D
             FIXME("(%p) Something's still holding the Update stateblock\n",This);
         }
     }
+
+    /* Destroy the shader backend. Note that this has to happen after all shaders are destroyed. */
+    This->shader_backend->shader_free_private(iface);
 
     /* Release the buffers (with sanity checks)*/
     TRACE("Releasing the depth stencil buffer at %p\n", This->stencilBufferTarget);
@@ -3606,7 +3601,7 @@ UINT count) {
      */
     memset(This->activeContext->vshader_const_dirty + start, 1,
            sizeof(*This->activeContext->vshader_const_dirty) * count);
-    This->highest_dirty_vs_const = max(This->highest_dirty_vs_const, start+count);
+    This->highest_dirty_vs_const = max(This->highest_dirty_vs_const, start+count+1);
 
     IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VERTEXSHADERCONSTANT);
 
@@ -4034,7 +4029,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetPixelShaderConstantF_DirtyConst(
      */
     memset(This->activeContext->pshader_const_dirty + start, 1,
            sizeof(*This->activeContext->pshader_const_dirty) * count);
-    This->highest_dirty_ps_const = max(This->highest_dirty_ps_const, start+count);
+    This->highest_dirty_ps_const = max(This->highest_dirty_ps_const, start+count+1);
 
     IWineD3DDeviceImpl_MarkStateDirty(This, STATE_PIXELSHADERCONSTANT);
 
@@ -4511,7 +4506,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetTextureStageState(IWineD3DDevice *if
     }
 
     if(Stage > This->stateBlock->lowest_disabled_stage &&
-       This->shader_backend->StateTable[STATE_TEXTURESTAGE(0, Type)].representative == STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP)) {
+       This->StateTable[STATE_TEXTURESTAGE(0, Type)].representative == STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP)) {
         /* Colorop change above lowest disabled stage? That won't change anything in the gl setup
          * Changes in other states are important on disabled stages too
          */
@@ -5023,31 +5018,29 @@ HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This,  IWineD3DSurfa
     }
 
     if (Flags & WINED3DCLEAR_ZBUFFER) {
+        DWORD location = This->render_offscreen ? SFLAG_DS_OFFSCREEN : SFLAG_DS_ONSCREEN;
         glDepthMask(GL_TRUE);
         glClearDepth(Z);
         checkGLcall("glClearDepth");
         glMask = glMask | GL_DEPTH_BUFFER_BIT;
         IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(WINED3DRS_ZWRITEENABLE));
 
-        if(This->depth_copy_state == WINED3D_DCS_COPY) {
-            if(vp->X != 0 || vp->Y != 0 ||
-               vp->Width < depth_stencil->currentDesc.Width || vp->Height < depth_stencil->currentDesc.Height) {
-                depth_copy((IWineD3DDevice *) This);
-            }
-            else if(This->stateBlock->renderState[WINED3DRS_SCISSORTESTENABLE] && (
-               This->stateBlock->scissorRect.left > 0 || This->stateBlock->scissorRect.top > 0 ||
-               This->stateBlock->scissorRect.right < depth_stencil->currentDesc.Width ||
-               This->stateBlock->scissorRect.bottom < depth_stencil->currentDesc.Height)) {
-                depth_copy((IWineD3DDevice *) This);
-            }
-            else if(Count > 0 && pRects && (
-               pRects[0].x1 > 0 || pRects[0].y1 > 0 ||
-               pRects[0].x2 < depth_stencil->currentDesc.Width ||
-               pRects[0].y2 < depth_stencil->currentDesc.Height)) {
-                depth_copy((IWineD3DDevice *) This);
-            }
+        if (vp->X != 0 || vp->Y != 0 ||
+                vp->Width < depth_stencil->currentDesc.Width || vp->Height < depth_stencil->currentDesc.Height) {
+            surface_load_ds_location(This->stencilBufferTarget, location);
         }
-        This->depth_copy_state = WINED3D_DCS_INITIAL;
+        else if (This->stateBlock->renderState[WINED3DRS_SCISSORTESTENABLE] && (
+                This->stateBlock->scissorRect.left > 0 || This->stateBlock->scissorRect.top > 0 ||
+                This->stateBlock->scissorRect.right < depth_stencil->currentDesc.Width ||
+                This->stateBlock->scissorRect.bottom < depth_stencil->currentDesc.Height)) {
+            surface_load_ds_location(This->stencilBufferTarget, location);
+        }
+        else if (Count > 0 && pRects && (
+                pRects[0].x1 > 0 || pRects[0].y1 > 0 ||
+                pRects[0].x2 < depth_stencil->currentDesc.Width ||
+                pRects[0].y2 < depth_stencil->currentDesc.Height)) {
+            surface_load_ds_location(This->stencilBufferTarget, location);
+        }
     }
 
     if (Flags & WINED3DCLEAR_TARGET) {
@@ -5137,6 +5130,12 @@ HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This,  IWineD3DSurfa
             target->Flags |= SFLAG_INTEXTURE;
         }
     }
+    if (Flags & WINED3DCLEAR_ZBUFFER) {
+        /* Note that WINED3DCLEAR_ZBUFFER implies a depth stencil exists on the device */
+        DWORD location = This->render_offscreen ? SFLAG_DS_OFFSCREEN : SFLAG_DS_ONSCREEN;
+        surface_modify_ds_location(This->stencilBufferTarget, location);
+    }
+
     LEAVE_GL();
 
     return WINED3D_OK;
@@ -6048,7 +6047,7 @@ static IWineD3DSwapChain *get_swapchain(IWineD3DSurface *target) {
     return NULL;
 }
 
-static void bind_fbo(IWineD3DDevice *iface, GLenum target, GLuint *fbo) {
+void bind_fbo(IWineD3DDevice *iface, GLenum target, GLuint *fbo) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
 
     if (!*fbo) {
@@ -6057,6 +6056,54 @@ static void bind_fbo(IWineD3DDevice *iface, GLenum target, GLuint *fbo) {
     }
     GL_EXTCALL(glBindFramebufferEXT(target, *fbo));
     checkGLcall("glBindFramebuffer()");
+}
+
+/* TODO: Handle stencil attachments */
+void attach_depth_stencil_fbo(IWineD3DDeviceImpl *This, GLenum fbo_target, IWineD3DSurface *depth_stencil, BOOL use_render_buffer) {
+    IWineD3DSurfaceImpl *depth_stencil_impl = (IWineD3DSurfaceImpl *)depth_stencil;
+
+    if (use_render_buffer && depth_stencil_impl->current_renderbuffer) {
+        GL_EXTCALL(glFramebufferRenderbufferEXT(fbo_target, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, depth_stencil_impl->current_renderbuffer->id));
+        checkGLcall("glFramebufferRenderbufferEXT()");
+    } else {
+        IWineD3DBaseTextureImpl *texture_impl;
+        GLenum texttarget, target;
+        GLint old_binding = 0;
+
+        texttarget = depth_stencil_impl->glDescription.target;
+        if(texttarget == GL_TEXTURE_2D) {
+            target = GL_TEXTURE_2D;
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_binding);
+        } else if(texttarget == GL_TEXTURE_RECTANGLE_ARB) {
+            target = GL_TEXTURE_RECTANGLE_ARB;
+            glGetIntegerv(GL_TEXTURE_BINDING_RECTANGLE_ARB, &old_binding);
+        } else {
+            target = GL_TEXTURE_CUBE_MAP_ARB;
+            glGetIntegerv(GL_TEXTURE_BINDING_CUBE_MAP_ARB, &old_binding);
+        }
+
+        IWineD3DSurface_PreLoad(depth_stencil);
+
+        glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(target, GL_DEPTH_TEXTURE_MODE_ARB, GL_LUMINANCE);
+        glBindTexture(target, old_binding);
+
+        /* Update base texture states array */
+        if (SUCCEEDED(IWineD3DSurface_GetContainer(depth_stencil, &IID_IWineD3DBaseTexture, (void **)&texture_impl))) {
+            texture_impl->baseTexture.states[WINED3DTEXSTA_MINFILTER] = WINED3DTEXF_POINT;
+            texture_impl->baseTexture.states[WINED3DTEXSTA_MAGFILTER] = WINED3DTEXF_POINT;
+            if (texture_impl->baseTexture.bindCount) {
+                IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(texture_impl->baseTexture.sampler));
+            }
+
+            IWineD3DBaseTexture_Release((IWineD3DBaseTexture *)texture_impl);
+        }
+
+        GL_EXTCALL(glFramebufferTexture2DEXT(fbo_target, GL_DEPTH_ATTACHMENT_EXT, texttarget,
+                    depth_stencil_impl->glDescription.textureName, depth_stencil_impl->glDescription.level));
+        checkGLcall("glFramebufferTexture2DEXT()");
+    }
 }
 
 static void attach_surface_fbo(IWineD3DDeviceImpl *This, GLenum fbo_target, DWORD idx, IWineD3DSurface *surface) {
@@ -6118,6 +6165,8 @@ static void color_fill_fbo(IWineD3DDevice *iface, IWineD3DSurface *surface, CONS
         TRACE("Surface %p is offscreen\n", surface);
         bind_fbo(iface, GL_FRAMEBUFFER_EXT, &This->dst_fbo);
         attach_surface_fbo(This, GL_FRAMEBUFFER_EXT, 0, surface);
+        GL_EXTCALL(glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, 0));
+        checkGLcall("glFramebufferRenderbufferEXT");
     }
 
     if (rect) {
@@ -6409,53 +6458,11 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_GetDepthStencilSurface(IWineD3DDevice
 /* TODO: Handle stencil attachments */
 static void set_depth_stencil_fbo(IWineD3DDevice *iface, IWineD3DSurface *depth_stencil) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    IWineD3DSurfaceImpl *depth_stencil_impl = (IWineD3DSurfaceImpl *)depth_stencil;
 
     TRACE("Set depth stencil to %p\n", depth_stencil);
 
-    if (depth_stencil_impl) {
-        if (depth_stencil_impl->current_renderbuffer) {
-            GL_EXTCALL(glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, depth_stencil_impl->current_renderbuffer->id));
-            checkGLcall("glFramebufferRenderbufferEXT()");
-        } else {
-            IWineD3DBaseTextureImpl *texture_impl;
-            GLenum texttarget, target;
-            GLint old_binding = 0;
-
-            texttarget = depth_stencil_impl->glDescription.target;
-            if(texttarget == GL_TEXTURE_2D) {
-                target = GL_TEXTURE_2D;
-                glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_binding);
-            } else if(texttarget == GL_TEXTURE_RECTANGLE_ARB) {
-                target = GL_TEXTURE_RECTANGLE_ARB;
-                glGetIntegerv(GL_TEXTURE_BINDING_RECTANGLE_ARB, &old_binding);
-            } else {
-                target = GL_TEXTURE_CUBE_MAP_ARB;
-                glGetIntegerv(GL_TEXTURE_BINDING_CUBE_MAP_ARB, &old_binding);
-            }
-
-            IWineD3DSurface_PreLoad(depth_stencil);
-
-            glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-            glTexParameteri(target, GL_DEPTH_TEXTURE_MODE_ARB, GL_LUMINANCE);
-            glBindTexture(target, old_binding);
-
-            /* Update base texture states array */
-            if (SUCCEEDED(IWineD3DSurface_GetContainer(depth_stencil, &IID_IWineD3DBaseTexture, (void **)&texture_impl))) {
-                texture_impl->baseTexture.states[WINED3DTEXSTA_MINFILTER] = WINED3DTEXF_POINT;
-                texture_impl->baseTexture.states[WINED3DTEXSTA_MAGFILTER] = WINED3DTEXF_POINT;
-                if (texture_impl->baseTexture.bindCount) {
-                    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(texture_impl->baseTexture.sampler));
-                }
-
-                IWineD3DBaseTexture_Release((IWineD3DBaseTexture *)texture_impl);
-            }
-
-            GL_EXTCALL(glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, texttarget,
-                    depth_stencil_impl->glDescription.textureName, depth_stencil_impl->glDescription.level));
-            checkGLcall("glFramebufferTexture2DEXT()");
-        }
+    if (depth_stencil) {
+        attach_depth_stencil_fbo(This, GL_FRAMEBUFFER_EXT, depth_stencil, TRUE);
     } else {
         GL_EXTCALL(glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_TEXTURE_2D, 0, 0));
         checkGLcall("glFramebufferTexture2DEXT()");
@@ -6464,11 +6471,10 @@ static void set_depth_stencil_fbo(IWineD3DDevice *iface, IWineD3DSurface *depth_
 
 static void set_render_target_fbo(IWineD3DDevice *iface, DWORD idx, IWineD3DSurface *render_target) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    IWineD3DSurfaceImpl *rtimpl = (IWineD3DSurfaceImpl *)render_target;
 
     TRACE("Set render target %u to %p\n", idx, render_target);
 
-    if (rtimpl) {
+    if (render_target) {
         attach_surface_fbo(This, GL_FRAMEBUFFER_EXT, idx, render_target);
         This->draw_buffers[idx] = GL_COLOR_ATTACHMENT0_EXT + idx;
     } else {
@@ -6616,6 +6622,8 @@ void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, WINED
         attach_surface_fbo(This, GL_READ_FRAMEBUFFER_EXT, 0, src_surface);
         glReadBuffer(GL_COLOR_ATTACHMENT0_EXT);
         checkGLcall("glReadBuffer()");
+        GL_EXTCALL(glFramebufferRenderbufferEXT(GL_READ_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, 0));
+        checkGLcall("glFramebufferRenderbufferEXT");
     }
     LEAVE_GL();
 
@@ -6651,6 +6659,8 @@ void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, WINED
         attach_surface_fbo(This, GL_DRAW_FRAMEBUFFER_EXT, 0, dst_surface);
         glDrawBuffer(GL_COLOR_ATTACHMENT0_EXT);
         checkGLcall("glDrawBuffer()");
+        GL_EXTCALL(glFramebufferRenderbufferEXT(GL_DRAW_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, 0));
+        checkGLcall("glFramebufferRenderbufferEXT");
     }
     glDisable(GL_SCISSOR_TEST);
     IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(WINED3DRS_SCISSORTESTENABLE));
@@ -6731,13 +6741,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetRenderTarget(IWineD3DDevice *iface, 
          * SetViewport may catch NOP viewport changes, which would occur when switching between equally sized targets
          */
         IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VIEWPORT);
-
-        /* Activate the new render target for now. This shouldn't stay here, but is needed until all methods using gl activate the
-         * ctx properly.
-         * Use resourceload usage, this will just set the drawables and context but not apply any states. The stateblock may be
-         * incomplete or incorrect when SetRenderTarget is called. DrawPrim() will apply the states when it is called.
-         */
-        ActivateContext(This, This->render_targets[0], CTXUSAGE_RESOURCELOAD);
     }
     return WINED3D_OK;
 }
@@ -6759,9 +6762,14 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetDepthStencilSurface(IWineD3DDevice *
         * stencil buffer and incur an extra memory overhead
          ******************************************************/
 
+        if (This->stencilBufferTarget) {
+            ActivateContext(This, This->render_targets[0], CTXUSAGE_RESOURCELOAD);
+            surface_load_ds_location(This->stencilBufferTarget, SFLAG_DS_OFFSCREEN);
+            surface_modify_ds_location(This->stencilBufferTarget, SFLAG_DS_OFFSCREEN);
+        }
+
         tmp = This->stencilBufferTarget;
         This->stencilBufferTarget = pNewZStencil;
-        This->depth_copy_state = WINED3D_DCS_NO_COPY;
         /* should we be calling the parent or the wined3d surface? */
         if (NULL != This->stencilBufferTarget) IWineD3DSurface_AddRef(This->stencilBufferTarget);
         if (NULL != tmp) IWineD3DSurface_Release(tmp);
@@ -7205,7 +7213,12 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRE
         glDeleteTextures(1, &This->depth_blt_texture);
         This->depth_blt_texture = 0;
     }
-    This->shader_backend->shader_destroy_depth_blt(iface);
+    if (This->depth_blt_rb) {
+        GL_EXTCALL(glDeleteRenderbuffersEXT(1, &This->depth_blt_rb));
+        This->depth_blt_rb = 0;
+        This->depth_blt_rb_w = 0;
+        This->depth_blt_rb_h = 0;
+    }
     This->shader_backend->shader_free_private(iface);
 
     for (i = 0; i < GL_LIMITS(textures); i++) {
@@ -7962,7 +7975,7 @@ const DWORD SavedVertexStates_S[NUM_SAVEDVERTEXSTATES_S] = {
 };
 
 void IWineD3DDeviceImpl_MarkStateDirty(IWineD3DDeviceImpl *This, DWORD state) {
-    DWORD rep = This->shader_backend->StateTable[state].representative;
+    DWORD rep = This->StateTable[state].representative;
     DWORD idx;
     BYTE shift;
     UINT i;

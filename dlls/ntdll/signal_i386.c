@@ -575,6 +575,58 @@ static void merge_vm86_pending_flags( EXCEPTION_RECORD *rec )
 #endif /* __HAVE_VM86 */
 
 
+#ifdef __sun
+
+/* We have to workaround two Solaris breakages:
+ * - Solaris doesn't restore %ds and %es before calling the signal handler so exceptions in 16-bit
+ *   code crash badly.
+ * - Solaris inserts a libc trampoline to call our handler, but the trampoline expects that registers
+ *   are setup correctly. So we need to insert our own trampoline below the libc trampoline to set %gs.
+ */
+
+extern int sigaction_syscall( int sig, const struct sigaction *new, struct sigaction *old );
+__ASM_GLOBAL_FUNC( sigaction_syscall,
+                  "call 1f\n"
+                  "1:\tpopl %edx\n\t"
+                  "movl $0x62,%eax\n\t"
+                  "add $[2f-1b],%edx\n\t"
+                  "movl %esp,%ecx\n\t"
+                  "sysenter\n"
+                  "2:\tret" )
+
+/* assume the same libc handler is used for all signals */
+static void (*libc_sigacthandler)( int signal, siginfo_t *siginfo, void *context );
+
+static void wine_sigacthandler( int signal, siginfo_t *siginfo, void *sigcontext )
+{
+    struct ntdll_thread_data *thread_data;
+
+    __asm__ __volatile__("mov %ss,%ax; mov %ax,%ds; mov %ax,%es");
+
+    thread_data = (struct ntdll_thread_data *)get_current_teb()->SystemReserved2;
+    wine_set_fs( thread_data->fs );
+    wine_set_gs( thread_data->gs );
+
+    libc_sigacthandler( signal, siginfo, sigcontext );
+}
+
+static int solaris_sigaction( int sig, const struct sigaction *new, struct sigaction *old )
+{
+    struct sigaction real_act;
+
+    if (sigaction( sig, new, old ) == -1) return -1;
+
+    /* retrieve the real handler and flags with a direct syscall */
+    sigaction_syscall( sig, NULL, &real_act );
+    libc_sigacthandler = real_act.sa_sigaction;
+    real_act.sa_sigaction = wine_sigacthandler;
+    sigaction_syscall( sig, &real_act, NULL );
+    return 0;
+}
+#define sigaction(sig,new,old) solaris_sigaction(sig,new,old)
+
+#endif
+
 typedef void (WINAPI *raise_func)( EXCEPTION_RECORD *rec, CONTEXT *context );
 
 
@@ -582,10 +634,10 @@ typedef void (WINAPI *raise_func)( EXCEPTION_RECORD *rec, CONTEXT *context );
  *           init_handler
  *
  * Handler initialization when the full context is not needed.
+ * Return the stack pointer to use for pushing the exception data.
  */
 static inline void *init_handler( const SIGCONTEXT *sigcontext, WORD *fs, WORD *gs )
 {
-    void *stack = (void *)(ESP_sig(sigcontext) & ~3);
     TEB *teb = get_current_teb();
     struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)teb->SystemReserved2;
 
@@ -601,9 +653,11 @@ static inline void *init_handler( const SIGCONTEXT *sigcontext, WORD *fs, WORD *
     *gs = wine_get_gs();
 #endif
 
+#ifndef __sun  /* see above for Solaris handling */
     wine_set_fs( thread_data->fs );
+    wine_set_gs( thread_data->gs );
+#endif
 
-    /* now restore a proper %gs for the fault handler */
     if (!wine_ldt_is_system(CS_sig(sigcontext)) ||
         !wine_ldt_is_system(SS_sig(sigcontext)))  /* 16-bit mode */
     {
@@ -614,24 +668,9 @@ static inline void *init_handler( const SIGCONTEXT *sigcontext, WORD *fs, WORD *
          * SS is still non-system segment. This is why both CS and SS
          * are checked.
          */
-        wine_set_gs( thread_data->gs );
-        stack = teb->WOW32Reserved;
+        return teb->WOW32Reserved;
     }
-#ifdef __HAVE_VM86
-    else if ((void *)EIP_sig(sigcontext) == vm86_return)  /* vm86 mode */
-    {
-        unsigned int *int_stack = stack;
-        /* fetch the saved %gs from the stack */
-        wine_set_gs( int_stack[0] );
-    }
-#endif
-    else  /* 32-bit mode */
-    {
-#ifdef GS_sig
-        wine_set_gs( GS_sig(sigcontext) );
-#endif
-    }
-    return stack;
+    return (void *)(ESP_sig(sigcontext) & ~3);
 }
 
 
@@ -1533,12 +1572,10 @@ int __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
 
 
 /**********************************************************************
- *		SIGNAL_Init
+ *		signal_init_thread
  */
-BOOL SIGNAL_Init(void)
+void signal_init_thread(void)
 {
-    struct sigaction sig_act;
-
 #ifdef HAVE_SIGALTSTACK
     stack_t ss;
 
@@ -1553,12 +1590,18 @@ BOOL SIGNAL_Init(void)
     ss.ss_sp    = get_signal_stack();
     ss.ss_size  = signal_stack_size;
     ss.ss_flags = 0;
-    if (sigaltstack(&ss, NULL) == -1)
-    {
-        perror( "sigaltstack" );
-        return FALSE;
-    }
+    if (sigaltstack(&ss, NULL) == -1) perror( "sigaltstack" );
 #endif  /* HAVE_SIGALTSTACK */
+
+    ntdll_get_thread_data()->gs = wine_get_gs();
+}
+
+/**********************************************************************
+ *		signal_init_process
+ */
+void signal_init_process(void)
+{
+    struct sigaction sig_act;
 
     sig_act.sa_mask = server_block_set;
     sig_act.sa_flags = SA_SIGINFO | SA_RESTART;
@@ -1594,11 +1637,12 @@ BOOL SIGNAL_Init(void)
     if (sigaction( SIGUSR2, &sig_act, NULL ) == -1) goto error;
 #endif
 
-    return TRUE;
+    signal_init_thread();
+    return;
 
  error:
     perror("sigaction");
-    return FALSE;
+    exit(1);
 }
 
 

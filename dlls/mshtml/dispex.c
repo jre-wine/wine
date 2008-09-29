@@ -407,7 +407,7 @@ static HRESULT WINAPI DispatchEx_GetDispID(IDispatchEx *iface, BSTR bstrName, DW
 
     TRACE("(%p)->(%s %x %p)\n", This, debugstr_w(bstrName), grfdex, pid);
 
-    if(grfdex & ~(fdexNameCaseSensitive|fdexNameEnsure))
+    if(grfdex & ~(fdexNameCaseSensitive|fdexNameEnsure|fdexNameImplicit))
         FIXME("Unsupported grfdex %x\n", grfdex);
 
     data = get_dispex_data(This);
@@ -620,6 +620,29 @@ static IDispatchExVtbl DispatchExVtbl = {
     DispatchEx_GetNextDispID,
     DispatchEx_GetNameSpaceParent
 };
+
+BOOL dispex_query_interface(DispatchEx *This, REFIID riid, void **ppv)
+{
+    static const IID IID_UndocumentedScriptIface =
+        {0x719c3050,0xf9d3,0x11cf,{0xa4,0x93,0x00,0x40,0x05,0x23,0xa8,0xa0}};
+
+    if(IsEqualGUID(&IID_IDispatch, riid)) {
+        TRACE("(%p)->(IID_IDispatch %p)\n", This, ppv);
+        *ppv = DISPATCHEX(This);
+    }else if(IsEqualGUID(&IID_IDispatchEx, riid)) {
+        TRACE("(%p)->(IID_IDispatchEx %p)\n", This, ppv);
+        *ppv = DISPATCHEX(This);
+    }else if(IsEqualGUID(&IID_UndocumentedScriptIface, riid)) {
+        TRACE("(%p)->(IID_UndocumentedScriptIface %p) returning NULL\n", This, ppv);
+        *ppv = NULL;
+    }else {
+        return FALSE;
+    }
+
+    if(*ppv)
+        IUnknown_AddRef((IUnknown*)*ppv);
+    return TRUE;
+}
 
 void init_dispex(DispatchEx *dispex, IUnknown *outer, dispex_static_data_t *data)
 {

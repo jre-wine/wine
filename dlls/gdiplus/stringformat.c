@@ -58,6 +58,16 @@ GpStatus WINGDIPAPI GdipDeleteStringFormat(GpStringFormat *format)
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipStringFormatGetGenericDefault(GpStringFormat **format)
+{
+    if (!format)
+        return InvalidParameter;
+
+    FIXME("stub: %p\n", format);
+
+    return NotImplemented;
+}
+
 GpStatus WINGDIPAPI GdipGetStringFormatAlign(GpStringFormat *format,
     StringAlignment *align)
 {
@@ -65,6 +75,17 @@ GpStatus WINGDIPAPI GdipGetStringFormatAlign(GpStringFormat *format,
         return InvalidParameter;
 
     *align = format->align;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetStringFormatFlags(GDIPCONST GpStringFormat* format,
+        INT* flags)
+{
+    if (!(format && flags))
+        return InvalidParameter;
+
+    *flags = format->attr;
 
     return Ok;
 }
@@ -89,6 +110,17 @@ GpStatus WINGDIPAPI GdipGetStringFormatLineAlign(GpStringFormat *format,
     *align = format->vertalign;
 
     return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetStringFormatMeasurableCharacterRangeCount(
+        GDIPCONST GpStringFormat* format, INT* count)
+{
+    if (!(format && count))
+        return InvalidParameter;
+
+    FIXME("stub: %p %p\n", format, count);
+
+    return NotImplemented;
 }
 
 GpStatus WINGDIPAPI GdipGetStringFormatTrimming(GpStringFormat *format,
@@ -133,6 +165,17 @@ GpStatus WINGDIPAPI GdipSetStringFormatLineAlign(GpStringFormat *format,
     format->vertalign = align;
 
     return Ok;
+}
+
+GpStatus WINGDIPAPI GdipSetStringFormatMeasurableCharacterRanges(GpStringFormat*
+        format, INT rangeCount, GDIPCONST CharacterRange* ranges)
+{
+    if (!(format && rangeCount && ranges))
+        return InvalidParameter;
+
+    FIXME("stub: %p, %d, %p\n", format, rangeCount, ranges);
+
+    return NotImplemented;
 }
 
 GpStatus WINGDIPAPI GdipSetStringFormatTrimming(GpStringFormat *format,

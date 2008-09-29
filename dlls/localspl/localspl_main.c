@@ -31,6 +31,7 @@
 #include "ddk/winsplp.h"
 #include "winuser.h"
 
+#include "wine/list.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
 #include "localspl_private.h"
@@ -49,6 +50,17 @@ typedef struct {
 } apd_data_t;
 
 typedef struct {
+    struct list     entry;
+    LPWSTR          name;
+    LPWSTR          dllname;
+    PMONITORUI      monitorUI;
+    LPMONITOR       monitor;
+    HMODULE         hdll;
+    DWORD           refcount;
+    DWORD           dwMonitorSize;
+} monitor_t;
+
+typedef struct {
     LPCWSTR  envname;
     LPCWSTR  subdir;
     DWORD    driverversion;
@@ -56,12 +68,12 @@ typedef struct {
     LPCWSTR  versionsubdir;
 } printenv_t;
 
+
 /* ############################### */
 
 HINSTANCE LOCALSPL_hInstance = NULL;
 
 static const PRINTPROVIDOR * pp = NULL;
-
 
 static const WCHAR backslashW[] = {'\\',0};
 static const WCHAR configuration_fileW[] = {'C','o','n','f','i','g','u','r','a','t','i','o','n',' ','F','i','l','e',0};
@@ -82,6 +94,11 @@ static const WCHAR help_fileW[] = {'H','e','l','p',' ','F','i','l','e',0};
 static const WCHAR locationW[] = {'L','o','c','a','t','i','o','n',0};
 static const WCHAR manufacturerW[] = {'M','a','n','u','f','a','c','t','u','r','e','r',0};
 static const WCHAR monitorW[] = {'M','o','n','i','t','o','r',0};
+static const WCHAR monitorsW[] = {'S','y','s','t','e','m','\\',
+                                'C','u', 'r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
+                                'C','o','n','t','r','o','l','\\',
+                                'P','r','i','n','t','\\',
+                                'M','o','n','i','t','o','r','s','\\',0};
 static const WCHAR monitorUIW[] = {'M','o','n','i','t','o','r','U','I',0};
 static const WCHAR nameW[] = {'N','a','m','e',0};
 static const WCHAR oem_urlW[] = {'O','E','M',' ','U','r','l',0};
@@ -115,6 +132,7 @@ static const DWORD di_sizeof[] = {0, sizeof(DRIVER_INFO_1W), sizeof(DRIVER_INFO_
                                      sizeof(DRIVER_INFO_3W), sizeof(DRIVER_INFO_4W),
                                      sizeof(DRIVER_INFO_5W), sizeof(DRIVER_INFO_6W),
                                   0, sizeof(DRIVER_INFO_8W)};
+
 
 /******************************************************************
  *  apd_copyfile [internal]
@@ -281,6 +299,102 @@ static const  printenv_t * validate_envW(LPCWSTR env)
 
     TRACE("=> using %p: %s\n", result, debugstr_w(result ? result->envname : NULL));
     return result;
+}
+
+/*****************************************************************************
+ * enumerate the local monitors (INTERNAL)
+ *
+ * returns the needed size (in bytes) for pMonitors
+ * and  *lpreturned is set to number of entries returned in pMonitors
+ *
+ * Language-Monitors are also installed in the same Registry-Location but
+ * they are filtered in Windows (not returned by EnumMonitors).
+ * We do no filtering to simplify our Code.
+ *
+ */
+static DWORD get_local_monitors(DWORD level, LPBYTE pMonitors, DWORD cbBuf, LPDWORD lpreturned)
+{
+    HKEY    hroot = NULL;
+    HKEY    hentry = NULL;
+    LPWSTR  ptr;
+    LPMONITOR_INFO_2W mi;
+    WCHAR   buffer[MAX_PATH];
+    WCHAR   dllname[MAX_PATH];
+    DWORD   dllsize;
+    DWORD   len;
+    DWORD   index = 0;
+    DWORD   needed = 0;
+    DWORD   numentries;
+    DWORD   entrysize;
+
+    entrysize = (level == 1) ? sizeof(MONITOR_INFO_1W) : sizeof(MONITOR_INFO_2W);
+
+    numentries = *lpreturned;       /* this is 0, when we scan the registry */
+    len = entrysize * numentries;
+    ptr = (LPWSTR) &pMonitors[len];
+
+    numentries = 0;
+    len = sizeof(buffer)/sizeof(buffer[0]);
+    buffer[0] = '\0';
+
+    /* Windows creates the "Monitors"-Key on reboot / start "spooler" */
+    if (RegCreateKeyW(HKEY_LOCAL_MACHINE, monitorsW, &hroot) == ERROR_SUCCESS) {
+        /* Scan all Monitor-Registry-Keys */
+        while (RegEnumKeyExW(hroot, index, buffer, &len, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
+            TRACE("Monitor_%d: %s\n", numentries, debugstr_w(buffer));
+            dllsize = sizeof(dllname);
+            dllname[0] = '\0';
+
+            /* The Monitor must have a Driver-DLL */
+            if (RegOpenKeyExW(hroot, buffer, 0, KEY_READ, &hentry) == ERROR_SUCCESS) {
+                if (RegQueryValueExW(hentry, driverW, NULL, NULL, (LPBYTE) dllname, &dllsize) == ERROR_SUCCESS) {
+                    /* We found a valid DLL for this Monitor. */
+                    TRACE("using Driver: %s\n", debugstr_w(dllname));
+                }
+                RegCloseKey(hentry);
+            }
+
+            /* Windows returns only Port-Monitors here, but to simplify our code,
+               we do no filtering for Language-Monitors */
+            if (dllname[0]) {
+                numentries++;
+                needed += entrysize;
+                needed += (len+1) * sizeof(WCHAR);  /* len is lstrlenW(monitorname) */
+                if (level > 1) {
+                    /* we install and return only monitors for "Windows NT x86" */
+                    needed += (lstrlenW(x86_envnameW) +1) * sizeof(WCHAR);
+                    needed += dllsize;
+                }
+
+                /* required size is calculated. Now fill the user-buffer */
+                if (pMonitors && (cbBuf >= needed)){
+                    mi = (LPMONITOR_INFO_2W) pMonitors;
+                    pMonitors += entrysize;
+
+                    TRACE("%p: writing MONITOR_INFO_%dW #%d\n", mi, level, numentries);
+                    mi->pName = ptr;
+                    lstrcpyW(ptr, buffer);      /* Name of the Monitor */
+                    ptr += (len+1);               /* len is lstrlenW(monitorname) */
+                    if (level > 1) {
+                        mi->pEnvironment = ptr;
+                        lstrcpyW(ptr, x86_envnameW); /* fixed to "Windows NT x86" */
+                        ptr += (lstrlenW(x86_envnameW)+1);
+
+                        mi->pDLLName = ptr;
+                        lstrcpyW(ptr, dllname);         /* Name of the Driver-DLL */
+                        ptr += (dllsize / sizeof(WCHAR));
+                    }
+                }
+            }
+            index++;
+            len = sizeof(buffer)/sizeof(buffer[0]);
+            buffer[0] = '\0';
+        }
+        RegCloseKey(hroot);
+    }
+    *lpreturned = numentries;
+    TRACE("need %d byte for %d entries\n", needed, numentries);
+    return needed;
 }
 
 /*****************************************************************************
@@ -582,6 +696,134 @@ static BOOL WINAPI fpAddPrinterDriverEx(LPWSTR pName, DWORD level, LPBYTE pDrive
 
     return myAddPrinterDriverEx(level, pDriverInfo, dwFileCopyFlags, TRUE);
 }
+/******************************************************************
+ * fpDeleteMonitor [exported through PRINTPROVIDOR]
+ *
+ * Delete a specific Printmonitor from a Printing-Environment
+ *
+ * PARAMS
+ *  pName        [I] Servername or NULL (local Computer)
+ *  pEnvironment [I] Printing-Environment of the Monitor or NULL (Default)
+ *  pMonitorName [I] Name of the Monitor, that should be deleted
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE
+ *
+ * NOTES
+ *  pEnvironment is ignored in Windows for the local Computer.
+ *
+ */
+
+BOOL WINAPI fpDeleteMonitor(LPWSTR pName, LPWSTR pEnvironment, LPWSTR pMonitorName)
+{
+    HKEY    hroot = NULL;
+    LONG    lres;
+
+    TRACE("(%s, %s, %s)\n",debugstr_w(pName),debugstr_w(pEnvironment),
+           debugstr_w(pMonitorName));
+
+    lres = copy_servername_from_name(pName, NULL);
+    if (lres) {
+        FIXME("server %s not supported\n", debugstr_w(pName));
+        SetLastError(ERROR_INVALID_NAME);
+        return FALSE;
+    }
+
+    /*  pEnvironment is ignored in Windows for the local Computer */
+    if (!pMonitorName || !pMonitorName[0]) {
+        TRACE("pMonitorName %s is invalid\n", debugstr_w(pMonitorName));
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if(RegCreateKeyW(HKEY_LOCAL_MACHINE, monitorsW, &hroot) != ERROR_SUCCESS) {
+        ERR("unable to create key %s\n", debugstr_w(monitorsW));
+        return FALSE;
+    }
+
+    if(RegDeleteTreeW(hroot, pMonitorName) == ERROR_SUCCESS) {
+        TRACE("%s deleted\n", debugstr_w(pMonitorName));
+        RegCloseKey(hroot);
+        return TRUE;
+    }
+
+    TRACE("%s does not exist\n", debugstr_w(pMonitorName));
+    RegCloseKey(hroot);
+
+    /* NT: ERROR_UNKNOWN_PRINT_MONITOR (3000), 9x: ERROR_INVALID_PARAMETER (87) */
+    SetLastError(ERROR_UNKNOWN_PRINT_MONITOR);
+    return FALSE;
+}
+
+/*****************************************************************************
+ * fpEnumMonitors [exported through PRINTPROVIDOR]
+ *
+ * Enumerate available Port-Monitors
+ *
+ * PARAMS
+ *  pName       [I] Servername or NULL (local Computer)
+ *  Level       [I] Structure-Level (1:Win9x+NT or 2:NT only)
+ *  pMonitors   [O] PTR to Buffer that receives the Result
+ *  cbBuf       [I] Size of Buffer at pMonitors
+ *  pcbNeeded   [O] PTR to DWORD that receives the size in Bytes used / required for pMonitors
+ *  pcReturned  [O] PTR to DWORD that receives the number of Monitors in pMonitors
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE and in pcbNeeded the Bytes required for buffer, if cbBuf is too small
+ *
+ * NOTES
+ *  Windows reads the Registry once and cache the Results.
+ *
+ */
+BOOL WINAPI fpEnumMonitors(LPWSTR pName, DWORD Level, LPBYTE pMonitors, DWORD cbBuf,
+                            LPDWORD pcbNeeded, LPDWORD pcReturned)
+{
+    DWORD   numentries = 0;
+    DWORD   needed = 0;
+    LONG    lres;
+    BOOL    res = FALSE;
+
+    TRACE("(%s, %d, %p, %d, %p, %p)\n", debugstr_w(pName), Level, pMonitors,
+          cbBuf, pcbNeeded, pcReturned);
+
+    lres = copy_servername_from_name(pName, NULL);
+    if (lres) {
+        FIXME("server %s not supported\n", debugstr_w(pName));
+        SetLastError(ERROR_INVALID_NAME);
+        goto em_cleanup;
+    }
+
+    if (!Level || (Level > 2)) {
+        WARN("level (%d) is ignored in win9x\n", Level);
+        SetLastError(ERROR_INVALID_LEVEL);
+        return FALSE;
+    }
+
+    /* Scan all Monitor-Keys */
+    numentries = 0;
+    needed = get_local_monitors(Level, NULL, 0, &numentries);
+
+    /* we calculated the needed buffersize. now do more error-checks */
+    if (cbBuf < needed) {
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        goto em_cleanup;
+    }
+
+    /* fill the Buffer with the Monitor-Keys */
+    needed = get_local_monitors(Level, pMonitors, cbBuf, &numentries);
+    res = TRUE;
+
+em_cleanup:
+    if (pcbNeeded)  *pcbNeeded = needed;
+    if (pcReturned) *pcReturned = numentries;
+
+    TRACE("returning %d with %d (%d byte for %d entries)\n",
+            res, GetLastError(), needed, numentries);
+
+    return (res);
+}
 
 /*****************************************************
  *  get_backend [internal]
@@ -626,7 +868,7 @@ static const PRINTPROVIDOR * get_backend(void)
         NULL,   /* fpGetForm */
         NULL,   /* fpSetForm */
         NULL,   /* fpEnumForms */
-        NULL,   /* fpEnumMonitors */
+        fpEnumMonitors,
         NULL,   /* fpEnumPorts */
         NULL,   /* fpAddPort */
         NULL,   /* fpConfigurePort */
@@ -638,7 +880,7 @@ static const PRINTPROVIDOR * get_backend(void)
         NULL,   /* fpDeletePrinterConnection */
         NULL,   /* fpPrinterMessageBox */
         NULL,   /* fpAddMonitor */
-        NULL,   /* fpDeleteMonitor */
+        fpDeleteMonitor,
         NULL,   /* fpResetPrinter */
         NULL,   /* fpGetPrinterDriverEx */
         NULL,   /* fpFindFirstPrinterChangeNotification */

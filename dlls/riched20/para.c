@@ -28,7 +28,6 @@ static const WCHAR wszParagraphSign[] = {0xB6, 0};
 void ME_MakeFirstParagraph(ME_TextEditor *editor)
 {
   ME_Context c;
-  PARAFORMAT2 fmt;
   CHARFORMAT2W cf;
   LOGFONTW lf;
   HFONT hf;
@@ -61,13 +60,6 @@ void ME_MakeFirstParagraph(ME_TextEditor *editor)
   if (lf.lfStrikeOut) cf.dwEffects |= CFE_STRIKEOUT;
   cf.bPitchAndFamily = lf.lfPitchAndFamily;
   cf.bCharSet = lf.lfCharSet;
-
-  ZeroMemory(&fmt, sizeof(fmt));
-  fmt.cbSize = sizeof(fmt);
-  fmt.dwMask = PFM_ALIGNMENT | PFM_OFFSET | PFM_STARTINDENT | PFM_RIGHTINDENT | PFM_TABSTOPS;
-  fmt.wAlignment = PFA_LEFT;
-
-  *para->member.para.pFmt = fmt;
 
   style = ME_MakeStyle(&cf);
   text->pDefaultStyle = style;
@@ -151,8 +143,6 @@ ME_DisplayItem *ME_SplitParagraph(ME_TextEditor *editor, ME_DisplayItem *run, ME
   new_para->member.para.nFlags = MEPF_REWRAP; /* FIXME copy flags (if applicable) */
   /* FIXME initialize format style and call ME_SetParaFormat blah blah */
   *new_para->member.para.pFmt = *run_para->member.para.pFmt;
-
-  new_para->member.para.bTable = run_para->member.para.bTable;
   
   /* Inherit previous cell definitions if any */
   new_para->member.para.pCells = NULL;
@@ -174,7 +164,9 @@ ME_DisplayItem *ME_SplitParagraph(ME_TextEditor *editor, ME_DisplayItem *run, ME
   }
     
   /* fix paragraph properties. FIXME only needed when called from RTF reader */
-  if (run_para->member.para.pCells && !run_para->member.para.bTable)
+  if (run_para->member.para.pCells &&
+      !(run_para->member.para.pFmt->wEffects & PFE_TABLE
+        && run_para->member.para.pFmt->dwMask & PFM_TABLE))
   {
     /* Paragraph does not have an \intbl keyword, so any table definition
      * stored is invalid */
@@ -375,7 +367,8 @@ void ME_SetParaFormat(ME_TextEditor *editor, ME_DisplayItem *para, const PARAFOR
                       PFM_TABLE)
   /* we take for granted that PFE_xxx is the hiword of the corresponding PFM_xxx */
   if (pFmt->dwMask & EFFECTS_MASK) {
-    para->member.para.pFmt->dwMask &= ~(pFmt->dwMask & EFFECTS_MASK);
+    para->member.para.pFmt->dwMask |= pFmt->dwMask & EFFECTS_MASK;
+    para->member.para.pFmt->wEffects &= ~HIWORD(pFmt->dwMask);
     para->member.para.pFmt->wEffects |= pFmt->wEffects & HIWORD(pFmt->dwMask);
   }
 #undef EFFECTS_MASK
@@ -472,6 +465,7 @@ void ME_GetSelectionParaFormat(ME_TextEditor *editor, PARAFORMAT2 *pFmt)
   ME_GetParaFormat(editor, para, pFmt);
   if (para == para_end) return;
   
+  /* Invalidate values that change across the selected paragraphs. */
   do {
     ZeroMemory(&tmp, sizeof(tmp));
     tmp.cbSize = sizeof(tmp);
@@ -480,8 +474,8 @@ void ME_GetSelectionParaFormat(ME_TextEditor *editor, PARAFORMAT2 *pFmt)
 #define CHECK_FIELD(m, f) \
     if (pFmt->f != tmp.f) pFmt->dwMask &= ~(m);
 
+    pFmt->dwMask &= ~((pFmt->wEffects ^ tmp.wEffects) << 16);
     CHECK_FIELD(PFM_NUMBERING, wNumbering);
-    /* para->member.para.pFmt->wEffects = pFmt->wEffects; */
     assert(tmp.dwMask & PFM_ALIGNMENT);
     CHECK_FIELD(PFM_NUMBERING, wNumbering);
     assert(tmp.dwMask & PFM_STARTINDENT);
@@ -519,4 +513,14 @@ void ME_GetSelectionParaFormat(ME_TextEditor *editor, PARAFORMAT2 *pFmt)
       return;
     para = para->member.para.next_para;
   } while(1);
+}
+
+void ME_SetDefaultParaFormat(PARAFORMAT2 *pFmt)
+{
+    ZeroMemory(pFmt, sizeof(PARAFORMAT2));
+    pFmt->cbSize = sizeof(PARAFORMAT2);
+    pFmt->dwMask = PFM_ALL2;
+    pFmt->wAlignment = PFA_LEFT;
+    pFmt->sStyle = -1;
+    pFmt->bOutlineLevel = TRUE;
 }

@@ -90,6 +90,8 @@ typedef enum {
   diUndoPotentialEndTransaction, /* 19 - allows grouping typed chars for undo */
 } ME_DIType;
 
+#define SELECTIONBAR_WIDTH 9
+
 /******************************** run flags *************************/
 #define MERF_STYLEFLAGS 0x0FFF
 /* run contains non-text content, which has its own rules for wrapping, sizing etc */
@@ -167,8 +169,7 @@ typedef struct tagME_TableCell
 typedef struct tagME_Paragraph
 {
   PARAFORMAT2 *pFmt;
-  
-  BOOL bTable;                       /* this paragraph is a table row */
+
   struct tagME_TableCell *pCells;    /* list of cells and their properties */
   struct tagME_TableCell *pLastCell; /* points to the last cell in the list */
 
@@ -242,6 +243,14 @@ typedef enum {
   umAddBackToUndo
 } ME_UndoMode;
 
+typedef enum {
+  stPosition = 0,
+  stWord,
+  stLine,
+  stParagraph,
+  stDocument
+} ME_SelectionType;
+
 typedef struct tagME_FontTableItem {
   BYTE bCharSet;
   WCHAR *szFaceName;
@@ -290,7 +299,6 @@ typedef struct tagME_TextEditor
 {
   HWND hWnd;
   BOOL bEmulateVersion10;
-  BOOL bCaretShown;
   ME_TextBuffer *pBuffer;
   ME_Cursor *pCursors;
   int nCursors;
@@ -331,7 +339,8 @@ typedef struct tagME_TextEditor
   BOOL bHaveFocus;
   /*for IME */
   int imeStartIndex;
-  DWORD selofs, linesel, sely;
+  DWORD selofs; /* The size of the selection bar on the left side of control */
+  ME_SelectionType nSelectionType;
 
   /* Track previous notified selection */
   CHARRANGE notified_cr;

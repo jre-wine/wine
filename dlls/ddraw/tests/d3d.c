@@ -22,6 +22,7 @@
 
 #include <assert.h>
 #include "wine/test.h"
+#include "initguid.h"
 #include "ddraw.h"
 #include "d3d.h"
 
@@ -327,7 +328,8 @@ static void LightTest(void)
 
     light.dvAttenuation0 = zero / zero; /* NaN */
     rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
-    ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
+    ok(rc==D3D_OK ||
+       broken(rc==DDERR_INVALIDPARAMS), "SetLight returned: %x\n", rc);
 
     /* Directional light ignores attenuation */
     light.dltType = D3DLIGHT_DIRECTIONAL;

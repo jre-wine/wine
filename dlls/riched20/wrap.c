@@ -290,9 +290,13 @@ static ME_DisplayItem *ME_WrapHandleRun(ME_WrapContext *wc, ME_DisplayItem *p)
 
   if (wc->bOverflown) /* just skipping final whitespaces */
   {
-    if (run->nFlags & (MERF_WHITESPACE|MERF_TAB)) {
+    /* End paragraph run can't overflow to the next line by itself. */
+    if (run->nFlags & MERF_ENDPARA)
+      return p->next;
+
+    if (run->nFlags & MERF_WHITESPACE) {
       p->member.run.nFlags |= MERF_SKIPPED;
-      /* wc->pt.x += run->nWidth; */
+      wc->pt.x += run->nWidth;
       /* skip runs consisting of only whitespaces */
       return p->next;
     }
@@ -319,12 +323,6 @@ static ME_DisplayItem *ME_WrapHandleRun(ME_WrapContext *wc, ME_DisplayItem *p)
     p = p->next;
     ME_InsertRowStart(wc, p);
     return p;
-  }
-  /* we're not at the end of the row */
-  if (run->nFlags & MERF_TAB) {
-    /* force recomputation of tabs' size as it depends on position */
-    ME_CalcRunExtent(wc->context, &ME_GetParagraph(p)->member.para,
-                     wc->nRow ? wc->nLeftMargin : wc->nFirstMargin, run);
   }
 
   /* will current run fit? */
@@ -360,8 +358,20 @@ static ME_DisplayItem *ME_WrapHandleRun(ME_WrapContext *wc, ME_DisplayItem *p)
     pp = ME_SplitByBacktracking(wc, p, loc);
     if (pp == wc->pRowStart)
     {
-      /* we had only spaces so far, entire content can be omitted */
-      wc->pt.x = 0;
+      if (run->nFlags & MERF_STARTWHITE)
+      {
+          /* we had only spaces so far, so we must be on the first line of the
+           * paragraph, since no other lines of the paragraph start with spaces. */
+          assert(!wc->nRow);
+          /* The lines will only contain spaces, and the rest of the run will
+           * overflow onto the next line. */
+          wc->bOverflown = TRUE;
+          return p;
+      }
+      /* Couldn't split the first run, possible because we have a large font
+       * with a single character that caused an overflow.
+       */
+      wc->pt.x += run->nWidth;
       return p->next;
     }
     if (p != pp) /* found a suitable split point */
@@ -422,12 +432,6 @@ static void ME_WrapTextParagraph(ME_Context *c, ME_DisplayItem *tp, DWORD begino
     if (tp->member.para.pFmt->wBorders & 4)
       wc.pt.y += border;
   }
-
-  if (c->editor->bWordWrap)
-    wc.nAvailWidth = c->rcView.right - c->rcView.left - wc.nFirstMargin - wc.nRightMargin;
-  else
-    wc.nAvailWidth = ~0u >> 1;
-  wc.pRowStart = NULL;
 
   linespace = ME_GetParaLineSpace(c, &tp->member.para);
 

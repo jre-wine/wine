@@ -99,7 +99,7 @@ HRESULT queryresult_create(xmlNodePtr node, LPWSTR szQuery, IXMLDOMNodeList **ou
 
     *out = (IXMLDOMNodeList *)This;
     hr = S_OK;
-    TRACE("found %d matches\n", This->result->nodesetval->nodeNr);
+    TRACE("found %d matches\n", xmlXPathNodeSetGetLength(This->result->nodesetval));
 
 cleanup:
     if (This != NULL && FAILED(hr))
@@ -117,6 +117,9 @@ static HRESULT WINAPI queryresult_QueryInterface(
     void** ppvObject )
 {
     TRACE("%p %s %p\n", iface, debugstr_guid(riid), ppvObject);
+
+    if(!ppvObject)
+        return E_INVALIDARG;
 
     if ( IsEqualGUID( riid, &IID_IUnknown ) ||
          IsEqualGUID( riid, &IID_IDispatch ) ||
@@ -255,9 +258,12 @@ static HRESULT WINAPI queryresult_get_item(
 
     TRACE("%p %ld\n", This, index);
 
+    if(!listItem)
+        return E_INVALIDARG;
+
     *listItem = NULL;
 
-    if (index < 0 || index >= This->result->nodesetval->nodeNr)
+    if (index < 0 || index >= xmlXPathNodeSetGetLength(This->result->nodesetval))
         return S_FALSE;
 
     *listItem = create_node(This->result->nodesetval->nodeTab[index]);
@@ -274,7 +280,10 @@ static HRESULT WINAPI queryresult_get_length(
 
     TRACE("%p\n", This);
 
-    *listLength = This->result->nodesetval->nodeNr;
+    if(!listLength)
+        return E_INVALIDARG;
+
+    *listLength = xmlXPathNodeSetGetLength(This->result->nodesetval);
     return S_OK;
 }
 
@@ -286,9 +295,12 @@ static HRESULT WINAPI queryresult_nextNode(
 
     TRACE("%p %p\n", This, nextItem );
 
+    if(!nextItem)
+        return E_INVALIDARG;
+
     *nextItem = NULL;
 
-    if (This->resultPos >= This->result->nodesetval->nodeNr)
+    if (This->resultPos >= xmlXPathNodeSetGetLength(This->result->nodesetval))
         return S_FALSE;
 
     *nextItem = create_node(This->result->nodesetval->nodeTab[This->resultPos]);

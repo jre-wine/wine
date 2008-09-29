@@ -36,9 +36,12 @@
 #include <winnls.h>
 #include <winerror.h>
 #include <winnt.h>
+#include <initguid.h>
 #include <wtypes.h>
 #include <olectl.h>
 #include <ocidl.h>
+
+DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
 
 static WCHAR MSSansSerif_font[] = {'M','S',' ','S','a','n','s',' ','S','e','r','i','f',0};
 static WCHAR system_font[] = { 'S','y','s','t','e','m',0 };
@@ -769,8 +772,9 @@ static void test_AddRefHfont(void)
 
     /* Decrement reference for destroyed hfnt1 */
     hres = IFont_ReleaseHfont(ifnt2,hfnt1);
-    ok(hres == S_OK,
-        "IFont_AddRefHfont: (Release ref) Expected S_OK but got 0x%08x\n",
+    ok(hres == S_OK ||
+       hres == S_FALSE, /* <= win2k */
+        "IFont_AddRefHfont: (Release ref) Expected S_OK or S_FALSE but got 0x%08x\n",
         hres);
 
     /* Shows that releasing all IFONT's does clear the HFONT cache. */

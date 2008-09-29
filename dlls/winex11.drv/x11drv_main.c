@@ -525,7 +525,7 @@ static BOOL process_attach(void)
     xinerama_init( WidthOfScreen(screen), HeightOfScreen(screen) );
     X11DRV_Settings_Init();
 
-#ifdef HAVE_LIBXXF86VM
+#ifdef SONAME_LIBXXF86VM
     /* initialize XVidMode */
     X11DRV_XF86VM_Init();
 #endif
@@ -537,6 +537,9 @@ static BOOL process_attach(void)
     X11DRV_XComposite_Init();
 #endif
 
+#ifdef HAVE_XKB
+    if (use_xkb) use_xkb = XkbUseExtension( gdi_display, NULL, NULL );
+#endif
     X11DRV_InitKeyboard( gdi_display );
     X11DRV_InitClipboard();
     if (use_xim) use_xim = X11DRV_InitXIM( input_style );
@@ -569,7 +572,7 @@ static void thread_detach(void)
  */
 static void process_detach(void)
 {
-#ifdef HAVE_LIBXXF86VM
+#ifdef SONAME_LIBXXF86VM
     /* cleanup XVidMode */
     X11DRV_XF86VM_Cleanup();
 #endif
@@ -637,18 +640,8 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
     fcntl( ConnectionNumber(data->display), F_SETFD, 1 ); /* set close on exec flag */
 
 #ifdef HAVE_XKB
-    if (use_xkb)
-    {
-        use_xkb = XkbUseExtension( data->display, NULL, NULL );
-        if (use_xkb)
-        {
-            /* Hack: dummy call to XkbKeysymToModifiers to force initialisation of Xkb internals */
-            /* This works around an Xlib bug where it tries to get the display lock */
-            /* twice during XFilterEvents if Xkb hasn't been initialised yet. */
-            XkbKeysymToModifiers( data->display, 'A' );
-            XkbSetDetectableAutoRepeat( data->display, True, NULL );
-        }
-    }
+    if (use_xkb && XkbUseExtension( data->display, NULL, NULL ))
+        XkbSetDetectableAutoRepeat( data->display, True, NULL );
 #endif
 
     if (TRACE_ON(synchronous)) XSynchronize( data->display, True );

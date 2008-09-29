@@ -97,6 +97,11 @@
 
 #define IDS_NEWFOLDER 142
 
+#define IDS_RUNDLG_ERROR            160
+#define IDS_RUNDLG_BROWSE_ERROR     161
+#define IDS_RUNDLG_BROWSE_CAPTION   162
+#define IDS_RUNDLG_BROWSE_FILTER    163
+
 #define IDS_LICENSE                 256
 #define IDS_LICENSE_CAPTION         257
 
@@ -171,5 +176,12 @@ FIXME: Need to add them, but for now just let them use the same: searching.avi
 #define IDC_ABOUT_STATIC_TEXT1   100
 #define IDC_ABOUT_STATIC_TEXT2   101
 #define IDC_ABOUT_STATIC_TEXT3   102
+
+/* run dialog */
+#define IDC_RUNDLG_DESCRIPTION  12289
+#define IDC_RUNDLG_BROWSE       12288
+#define IDC_RUNDLG_ICON         12297
+#define IDC_RUNDLG_EDITPATH     12298
+#define IDC_RUNDLG_LABEL        12305
 
 #endif

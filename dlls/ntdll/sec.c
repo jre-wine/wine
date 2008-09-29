@@ -35,8 +35,8 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
-#include "wine/exception.h"
 #include "ntdll_misc.h"
+#include "wine/exception.h"
 #include "wine/library.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -1577,7 +1577,7 @@ NtAccessCheck(
         wine_server_add_data( req, sacl, sd.sacl_len );
         wine_server_add_data( req, dacl, sd.dacl_len );
 
-        wine_server_set_reply( req, &PrivilegeSet->Privilege, *ReturnLength - FIELD_OFFSET( PRIVILEGE_SET, Privilege ) );
+        wine_server_set_reply( req, PrivilegeSet->Privilege, *ReturnLength - FIELD_OFFSET( PRIVILEGE_SET, Privilege ) );
 
         status = wine_server_call( req );
 

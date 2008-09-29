@@ -1050,14 +1050,14 @@ BOOL WINAPI InternetCloseHandle(HINTERNET hInternet)
 /***********************************************************************
  *           ConvertUrlComponentValue (Internal)
  *
- * Helper function for InternetCrackUrlW
+ * Helper function for InternetCrackUrlA
  *
  */
 static void ConvertUrlComponentValue(LPSTR* lppszComponent, LPDWORD dwComponentLen,
                                      LPWSTR lpwszComponent, DWORD dwwComponentLen,
                                      LPCSTR lpszStart, LPCWSTR lpwszStart)
 {
-    TRACE("%p %d %p %d %p %p\n", lppszComponent, *dwComponentLen, lpwszComponent, dwwComponentLen, lpszStart, lpwszStart);
+    TRACE("%p %d %p %d %p %p\n", *lppszComponent, *dwComponentLen, lpwszComponent, dwwComponentLen, lpszStart, lpwszStart);
     if (*dwComponentLen != 0)
     {
         DWORD nASCIILength=WideCharToMultiByte(CP_ACP,0,lpwszComponent,dwwComponentLen,NULL,0,NULL,NULL);
@@ -1091,9 +1091,13 @@ BOOL WINAPI InternetCrackUrlA(LPCSTR lpszUrl, DWORD dwUrlLength, DWORD dwFlags,
 {
   DWORD nLength;
   URL_COMPONENTSW UCW;
-  WCHAR* lpwszUrl;
+  BOOL ret = FALSE;
+  WCHAR *lpwszUrl, *hostname = NULL, *username = NULL, *password = NULL, *path = NULL,
+        *scheme = NULL, *extra = NULL;
 
-  TRACE("(%s %u %x %p)\n", debugstr_a(lpszUrl), dwUrlLength, dwFlags, lpUrlComponents);
+  TRACE("(%s %u %x %p)\n",
+        lpszUrl ? debugstr_an(lpszUrl, dwUrlLength ? dwUrlLength : strlen(lpszUrl)) : "(null)",
+        dwUrlLength, dwFlags, lpUrlComponents);
 
   if (!lpszUrl || !*lpszUrl || !lpUrlComponents ||
           lpUrlComponents->dwStructSize != sizeof(URL_COMPONENTSA))
@@ -1115,53 +1119,92 @@ BOOL WINAPI InternetCrackUrlA(LPCSTR lpszUrl, DWORD dwUrlLength, DWORD dwFlags,
 
   memset(&UCW,0,sizeof(UCW));
   UCW.dwStructSize = sizeof(URL_COMPONENTSW);
-  if(lpUrlComponents->dwHostNameLength!=0)
-      UCW.dwHostNameLength= lpUrlComponents->dwHostNameLength;
-  if(lpUrlComponents->dwUserNameLength!=0)
-      UCW.dwUserNameLength=lpUrlComponents->dwUserNameLength;
-  if(lpUrlComponents->dwPasswordLength!=0)
-      UCW.dwPasswordLength=lpUrlComponents->dwPasswordLength;
-  if(lpUrlComponents->dwUrlPathLength!=0)
-      UCW.dwUrlPathLength=lpUrlComponents->dwUrlPathLength;
-  if(lpUrlComponents->dwSchemeLength!=0)
-      UCW.dwSchemeLength=lpUrlComponents->dwSchemeLength;
-  if(lpUrlComponents->dwExtraInfoLength!=0)
-      UCW.dwExtraInfoLength=lpUrlComponents->dwExtraInfoLength;
-  if(!InternetCrackUrlW(lpwszUrl,nLength,dwFlags,&UCW))
+  if (lpUrlComponents->dwHostNameLength)
   {
-      HeapFree(GetProcessHeap(), 0, lpwszUrl);
-      return FALSE;
+    UCW.dwHostNameLength = lpUrlComponents->dwHostNameLength;
+    if (lpUrlComponents->lpszHostName)
+    {
+      hostname = HeapAlloc(GetProcessHeap(), 0, UCW.dwHostNameLength * sizeof(WCHAR));
+      UCW.lpszHostName = hostname;
+    }
   }
+  if (lpUrlComponents->dwUserNameLength)
+  {
+    UCW.dwUserNameLength = lpUrlComponents->dwUserNameLength;
+    if (lpUrlComponents->lpszUserName)
+    {
+      username = HeapAlloc(GetProcessHeap(), 0, UCW.dwUserNameLength * sizeof(WCHAR));
+      UCW.lpszUserName = username;
+    }
+  }
+  if (lpUrlComponents->dwPasswordLength)
+  {
+    UCW.dwPasswordLength = lpUrlComponents->dwPasswordLength;
+    if (lpUrlComponents->lpszPassword)
+    {
+      password = HeapAlloc(GetProcessHeap(), 0, UCW.dwPasswordLength * sizeof(WCHAR));
+      UCW.lpszPassword = password;
+    }
+  }
+  if (lpUrlComponents->dwUrlPathLength)
+  {
+    UCW.dwUrlPathLength = lpUrlComponents->dwUrlPathLength;
+    if (lpUrlComponents->lpszUrlPath)
+    {
+      path = HeapAlloc(GetProcessHeap(), 0, UCW.dwUrlPathLength * sizeof(WCHAR));
+      UCW.lpszUrlPath = path;
+    }
+  }
+  if (lpUrlComponents->dwSchemeLength)
+  {
+    UCW.dwSchemeLength = lpUrlComponents->dwSchemeLength;
+    if (lpUrlComponents->lpszScheme)
+    {
+      scheme = HeapAlloc(GetProcessHeap(), 0, UCW.dwSchemeLength * sizeof(WCHAR));
+      UCW.lpszScheme = scheme;
+    }
+  }
+  if (lpUrlComponents->dwExtraInfoLength)
+  {
+    UCW.dwExtraInfoLength = lpUrlComponents->dwExtraInfoLength;
+    if (lpUrlComponents->lpszExtraInfo)
+    {
+      extra = HeapAlloc(GetProcessHeap(), 0, UCW.dwExtraInfoLength * sizeof(WCHAR));
+      UCW.lpszExtraInfo = extra;
+    }
+  }
+  if ((ret = InternetCrackUrlW(lpwszUrl, nLength, dwFlags, &UCW)))
+  {
+    ConvertUrlComponentValue(&lpUrlComponents->lpszHostName, &lpUrlComponents->dwHostNameLength,
+                             UCW.lpszHostName, UCW.dwHostNameLength, lpszUrl, lpwszUrl);
+    ConvertUrlComponentValue(&lpUrlComponents->lpszUserName, &lpUrlComponents->dwUserNameLength,
+                             UCW.lpszUserName, UCW.dwUserNameLength, lpszUrl, lpwszUrl);
+    ConvertUrlComponentValue(&lpUrlComponents->lpszPassword, &lpUrlComponents->dwPasswordLength,
+                             UCW.lpszPassword, UCW.dwPasswordLength, lpszUrl, lpwszUrl);
+    ConvertUrlComponentValue(&lpUrlComponents->lpszUrlPath, &lpUrlComponents->dwUrlPathLength,
+                             UCW.lpszUrlPath, UCW.dwUrlPathLength, lpszUrl, lpwszUrl);
+    ConvertUrlComponentValue(&lpUrlComponents->lpszScheme, &lpUrlComponents->dwSchemeLength,
+                             UCW.lpszScheme, UCW.dwSchemeLength, lpszUrl, lpwszUrl);
+    ConvertUrlComponentValue(&lpUrlComponents->lpszExtraInfo, &lpUrlComponents->dwExtraInfoLength,
+                             UCW.lpszExtraInfo, UCW.dwExtraInfoLength, lpszUrl, lpwszUrl);
 
-  ConvertUrlComponentValue(&lpUrlComponents->lpszHostName, &lpUrlComponents->dwHostNameLength,
-                           UCW.lpszHostName, UCW.dwHostNameLength,
-                           lpszUrl, lpwszUrl);
-  ConvertUrlComponentValue(&lpUrlComponents->lpszUserName, &lpUrlComponents->dwUserNameLength,
-                           UCW.lpszUserName, UCW.dwUserNameLength,
-                           lpszUrl, lpwszUrl);
-  ConvertUrlComponentValue(&lpUrlComponents->lpszPassword, &lpUrlComponents->dwPasswordLength,
-                           UCW.lpszPassword, UCW.dwPasswordLength,
-                           lpszUrl, lpwszUrl);
-  ConvertUrlComponentValue(&lpUrlComponents->lpszUrlPath, &lpUrlComponents->dwUrlPathLength,
-                           UCW.lpszUrlPath, UCW.dwUrlPathLength,
-                           lpszUrl, lpwszUrl);
-  ConvertUrlComponentValue(&lpUrlComponents->lpszScheme, &lpUrlComponents->dwSchemeLength,
-                           UCW.lpszScheme, UCW.dwSchemeLength,
-                           lpszUrl, lpwszUrl);
-  ConvertUrlComponentValue(&lpUrlComponents->lpszExtraInfo, &lpUrlComponents->dwExtraInfoLength,
-                           UCW.lpszExtraInfo, UCW.dwExtraInfoLength,
-                           lpszUrl, lpwszUrl);
-  lpUrlComponents->nScheme=UCW.nScheme;
-  lpUrlComponents->nPort=UCW.nPort;
+    lpUrlComponents->nScheme = UCW.nScheme;
+    lpUrlComponents->nPort = UCW.nPort;
+
+    TRACE("%s: scheme(%s) host(%s) path(%s) extra(%s)\n", lpszUrl,
+          debugstr_an(lpUrlComponents->lpszScheme, lpUrlComponents->dwSchemeLength),
+          debugstr_an(lpUrlComponents->lpszHostName, lpUrlComponents->dwHostNameLength),
+          debugstr_an(lpUrlComponents->lpszUrlPath, lpUrlComponents->dwUrlPathLength),
+          debugstr_an(lpUrlComponents->lpszExtraInfo, lpUrlComponents->dwExtraInfoLength));
+  }
   HeapFree(GetProcessHeap(), 0, lpwszUrl);
-  
-  TRACE("%s: scheme(%s) host(%s) path(%s) extra(%s)\n", lpszUrl,
-          debugstr_an(lpUrlComponents->lpszScheme,lpUrlComponents->dwSchemeLength),
-          debugstr_an(lpUrlComponents->lpszHostName,lpUrlComponents->dwHostNameLength),
-          debugstr_an(lpUrlComponents->lpszUrlPath,lpUrlComponents->dwUrlPathLength),
-          debugstr_an(lpUrlComponents->lpszExtraInfo,lpUrlComponents->dwExtraInfoLength));
-
-  return TRUE;
+  HeapFree(GetProcessHeap(), 0, hostname);
+  HeapFree(GetProcessHeap(), 0, username);
+  HeapFree(GetProcessHeap(), 0, password);
+  HeapFree(GetProcessHeap(), 0, path);
+  HeapFree(GetProcessHeap(), 0, scheme);
+  HeapFree(GetProcessHeap(), 0, extra);
+  return ret;
 }
 
 static const WCHAR url_schemes[][7] =
@@ -1268,10 +1311,10 @@ BOOL WINAPI InternetCrackUrlW(LPCWSTR lpszUrl_orig, DWORD dwUrlLength_orig, DWOR
     LPCWSTR lpszcp = NULL;
     LPWSTR  lpszUrl_decode = NULL;
     DWORD dwUrlLength = dwUrlLength_orig;
-    const WCHAR lpszSeparators[3]={';','?',0};
-    const WCHAR lpszSlash[2]={'/',0};
 
-    TRACE("(%s %u %x %p)\n", debugstr_w(lpszUrl), dwUrlLength, dwFlags, lpUC);
+    TRACE("(%s %u %x %p)\n",
+          lpszUrl ? debugstr_wn(lpszUrl, dwUrlLength ? dwUrlLength : strlenW(lpszUrl)) : "(null)",
+          dwUrlLength, dwFlags, lpUC);
 
     if (!lpszUrl_orig || !*lpszUrl_orig || !lpUC)
     {
@@ -1282,16 +1325,33 @@ BOOL WINAPI InternetCrackUrlW(LPCWSTR lpszUrl_orig, DWORD dwUrlLength_orig, DWOR
 
     if (dwFlags & ICU_DECODE)
     {
-	lpszUrl_decode=HeapAlloc( GetProcessHeap(), 0,  dwUrlLength * sizeof (WCHAR) );
-	if( InternetCanonicalizeUrlW(lpszUrl_orig, lpszUrl_decode, &dwUrlLength, dwFlags))
-	{
-	    lpszUrl =  lpszUrl_decode;
-	}
+        WCHAR *url_tmp;
+        DWORD len = dwUrlLength + 1;
+
+        if (!(url_tmp = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR))))
+        {
+            INTERNET_SetLastError(ERROR_OUTOFMEMORY);
+            return FALSE;
+        }
+        memcpy(url_tmp, lpszUrl_orig, dwUrlLength * sizeof(WCHAR));
+        url_tmp[dwUrlLength] = 0;
+        if (!(lpszUrl_decode = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR))))
+        {
+            HeapFree(GetProcessHeap(), 0, url_tmp);
+            INTERNET_SetLastError(ERROR_OUTOFMEMORY);
+            return FALSE;
+        }
+        if (InternetCanonicalizeUrlW(url_tmp, lpszUrl_decode, &len, ICU_DECODE | ICU_NO_ENCODE))
+        {
+            dwUrlLength = len;
+            lpszUrl = lpszUrl_decode;
+        }
+        HeapFree(GetProcessHeap(), 0, url_tmp);
     }
     lpszap = lpszUrl;
     
     /* Determine if the URI is absolute. */
-    while (*lpszap != '\0')
+    while (lpszap - lpszUrl < dwUrlLength)
     {
         if (isalnumW(*lpszap))
         {
@@ -1315,7 +1375,9 @@ BOOL WINAPI InternetCrackUrlW(LPCWSTR lpszUrl_orig, DWORD dwUrlLength_orig, DWOR
     lpUC->nPort = INTERNET_INVALID_PORT_NUMBER;
 
     /* Parse <params> */
-    lpszParam = strpbrkW(lpszap, lpszSeparators);
+    if (!(lpszParam = memchrW(lpszap, ';', dwUrlLength - (lpszap - lpszUrl))))
+        lpszParam = memchrW(lpszap, '?', dwUrlLength - (lpszap - lpszUrl));
+
     SetUrlComponentValueW(&lpUC->lpszExtraInfo, &lpUC->dwExtraInfoLength,
                           lpszParam, lpszParam ? dwUrlLength-(lpszParam-lpszUrl) : 0);
 
@@ -1336,7 +1398,7 @@ BOOL WINAPI InternetCrackUrlW(LPCWSTR lpszUrl_orig, DWORD dwUrlLength_orig, DWOR
         {
             lpszcp += 2;
 
-            lpszNetLoc = strpbrkW(lpszcp, lpszSlash);
+            lpszNetLoc = memchrW(lpszcp, '/', dwUrlLength - (lpszcp - lpszUrl));
             if (lpszParam)
             {
                 if (lpszNetLoc)
@@ -1356,7 +1418,7 @@ BOOL WINAPI InternetCrackUrlW(LPCWSTR lpszUrl_orig, DWORD dwUrlLength_orig, DWOR
                 /* [<user>[<:password>]@]<host>[:<port>] */
                 /* First find the user and password if they exist */
 
-                lpszHost = strchrW(lpszcp, '@');
+                lpszHost = memchrW(lpszcp, '@', dwUrlLength - (lpszcp - lpszUrl));
                 if (lpszHost == NULL || lpszHost > lpszNetLoc)
                 {
                     /* username and password not specified. */
@@ -1465,7 +1527,7 @@ BOOL WINAPI InternetCrackUrlW(LPCWSTR lpszUrl_orig, DWORD dwUrlLength_orig, DWOR
      * <protocol>:[//<net_loc>][/path][;<params>][?<query>][#<fragment>]
      *                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
      */
-    if (lpszcp != 0 && *lpszcp != '\0' && (!lpszParam || lpszcp < lpszParam))
+    if (lpszcp != 0 && lpszcp - lpszUrl < dwUrlLength && (!lpszParam || lpszcp < lpszParam))
     {
         INT len;
 
@@ -1479,7 +1541,7 @@ BOOL WINAPI InternetCrackUrlW(LPCWSTR lpszUrl_orig, DWORD dwUrlLength_orig, DWOR
             /* Leave the parameter list in lpszUrlPath.  Strip off any trailing
              * newlines if necessary.
              */
-            LPWSTR lpsznewline = strchrW(lpszcp, '\n');
+            LPWSTR lpsznewline = memchrW(lpszcp, '\n', dwUrlLength - (lpszcp - lpszUrl));
             if (lpsznewline != NULL)
                 len = lpsznewline - lpszcp;
             else
@@ -1592,7 +1654,7 @@ BOOL WINAPI InternetCanonicalizeUrlW(LPCWSTR lpszUrl, LPWSTR lpszBuffer,
     DWORD dwURLFlags = URL_WININET_COMPATIBILITY | URL_ESCAPE_UNSAFE;
 
     TRACE("(%s, %p, %p, 0x%08x) bufferlength: %d\n", debugstr_w(lpszUrl), lpszBuffer,
-        lpdwBufferLength, lpdwBufferLength ? *lpdwBufferLength : -1, dwFlags);
+          lpdwBufferLength, dwFlags, lpdwBufferLength ? *lpdwBufferLength : -1);
 
     if(dwFlags & ICU_DECODE)
     {
@@ -1904,7 +1966,7 @@ static BOOL INET_QueryOptionHelper(BOOL bIsUnicode, HINTERNET hInternet, DWORD d
 
             TRACE("INTERNET_OPTION_USER_AGENT\n");
 
-            if (lpwhh->htype != INTERNET_HANDLE_TYPE_INTERNET)
+            if (!lpwhh || lpwhh->htype != INTERNET_HANDLE_TYPE_INTERNET)
             {
                 INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
                 return FALSE;

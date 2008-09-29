@@ -66,7 +66,8 @@ void __wine_init_codepages( const union cptable *ansi, const union cptable *oem,
 int ntdll_umbstowcs(DWORD flags, const char* src, int srclen, WCHAR* dst, int dstlen)
 {
 #ifdef __APPLE__
-    flags |= MB_COMPOSITE;  /* work around broken Mac OS X filesystem that enforces decomposed Unicode */
+    /* work around broken Mac OS X filesystem that enforces decomposed Unicode */
+    if (!unix_table) flags |= MB_COMPOSITE;
 #endif
     return (unix_table) ?
         wine_cp_mbstowcs( unix_table, flags, src, srclen, dst, dstlen ) :
@@ -1591,6 +1592,8 @@ NTSTATUS WINAPI RtlFindCharInUnicodeString(
  */
 BOOLEAN WINAPI RtlIsTextUnicode( LPCVOID buf, INT len, INT *pf )
 {
+    static const WCHAR std_control_chars[] = {'\r','\n','\t',' ',0x3000,0};
+    static const WCHAR byterev_control_chars[] = {0x0d00,0x0a00,0x0900,0x2000,0x0030,0};
     const WCHAR *s = buf;
     int i;
     unsigned int flags = ~0U, out_flags = 0;
@@ -1645,6 +1648,30 @@ BOOLEAN WINAPI RtlIsTextUnicode( LPCVOID buf, INT len, INT *pf )
             if (!(s[i] & 0xff) || !(s[i] >> 8))
             {
                 out_flags |= IS_TEXT_UNICODE_NULL_BYTES;
+                break;
+            }
+        }
+    }
+
+    if (flags & IS_TEXT_UNICODE_CONTROLS)
+    {
+        for (i = 0; i < len; i++)
+        {
+            if (strchrW(std_control_chars, s[i]))
+            {
+                out_flags |= IS_TEXT_UNICODE_CONTROLS;
+                break;
+            }
+        }
+    }
+
+    if (flags & IS_TEXT_UNICODE_REVERSE_CONTROLS)
+    {
+        for (i = 0; i < len; i++)
+        {
+            if (strchrW(byterev_control_chars, s[i]))
+            {
+                out_flags |= IS_TEXT_UNICODE_REVERSE_CONTROLS;
                 break;
             }
         }

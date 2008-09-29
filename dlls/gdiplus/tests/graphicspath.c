@@ -602,6 +602,8 @@ static void test_polygon(void)
     points[4].X = 20.0;
     points[4].Y = 0.0;
 
+    GdipCreatePath(FillModeAlternate, &path);
+
     /* NULL args */
     status = GdipAddPathPolygon(NULL, points, 5);
     expect(InvalidParameter, status);
@@ -611,7 +613,6 @@ static void test_polygon(void)
     status = GdipAddPathPolygon(path, points, 2);
     expect(InvalidParameter, status);
 
-    GdipCreatePath(FillModeAlternate, &path);
     /* to test how it prolongs not empty path */
     status = GdipAddPathLine(path, 5.0, 5.0, 6.0, 8.0);
     expect(Ok, status);
@@ -619,6 +620,8 @@ static void test_polygon(void)
     expect(Ok, status);
     /* check resulting path */
     ok_path(path, poly_path, sizeof(poly_path)/sizeof(path_test_t), FALSE);
+
+    GdipDeletePath(path);
 }
 
 static path_test_t rect_path[] = {
@@ -668,6 +671,31 @@ static void test_rect(void)
     GdipDeletePath(path);
 }
 
+static void test_lastpoint(void)
+{
+    GpStatus status;
+    GpPath *path;
+    GpPointF ptf;
+
+    GdipCreatePath(FillModeAlternate, &path);
+    status = GdipAddPathRectangle(path, 5.0, 5.0, 100.0, 50.0);
+    expect(Ok, status);
+
+    /* invalid args */
+    status = GdipGetPathLastPoint(NULL, &ptf);
+    expect(InvalidParameter, status);
+    status = GdipGetPathLastPoint(path, NULL);
+    expect(InvalidParameter, status);
+    status = GdipGetPathLastPoint(NULL, NULL);
+    expect(InvalidParameter, status);
+
+    status = GdipGetPathLastPoint(path, &ptf);
+    expect(Ok, status);
+    expect(TRUE, (ptf.X == 5.0) && (ptf.Y == 55.0));
+
+    GdipDeletePath(path);
+}
+
 START_TEST(graphicspath)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -690,6 +718,7 @@ START_TEST(graphicspath)
     test_linei();
     test_rect();
     test_polygon();
+    test_lastpoint();
 
     GdiplusShutdown(gdiplusToken);
 }
