@@ -1,8 +1,17 @@
-wine (1.1.0-1) UNRELEASED; urgency=low
+wine (1.1.0-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.0, released Jun 27, 2008.
+    - Many more gdiplus functions implemented.
+    - Improved graphics tablet support.
+    - Many Richedit fixes and improvements.
+    - Support for HWND_MESSAGE windows.
+    - A lot of new MSHTML functions.
+    - Many fixes in MSI registry handling.
+    - Initial implementation of the inetmib1 DLL.
+    - Improvements to the quartz renderers.
+    - Various bug fixes.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Mon, 29 Sep 2008 01:41:11 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 29 Sep 2008 02:49:02 +0200
 
 wine (1.0.0-1) unstable; urgency=high
 
