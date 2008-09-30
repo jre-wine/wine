@@ -40,6 +40,7 @@ dlls/kernel32/nls/winerr_deu.mc.rc
 dlls/kernel32/nls/winerr_enu.mc.rc
 dlls/kernel32/nls/winerr_fra.mc.rc
 dlls/kernel32/nls/winerr_kor.mc.rc
+dlls/kernel32/nls/winerr_nor.mc.rc
 dlls/keyboard.drv16
 dlls/krnl386.exe16
 dlls/libd3dx9.def
@@ -270,6 +271,7 @@ programs/winetest/d3d9_test.exe
 programs/winetest/d3drm_test.exe
 programs/winetest/d3dx8_test.exe
 programs/winetest/d3dx9_36_test.exe
+programs/winetest/d3dxof_test.exe
 programs/winetest/ddraw_test.exe
 programs/winetest/dinput_test.exe
 programs/winetest/dnsapi_test.exe
@@ -296,6 +298,7 @@ programs/winetest/msacm32_test.exe
 programs/winetest/mscms_test.exe
 programs/winetest/mshtml_test.exe
 programs/winetest/msi_test.exe
+programs/winetest/mstask_test.exe
 programs/winetest/msvcrt_test.exe
 programs/winetest/msvcrtd_test.exe
 programs/winetest/msxml3_test.exe

@@ -105,8 +105,8 @@ static GLenum d3dta_to_combiner_input(DWORD d3dta, DWORD stage, INT texture_idx)
 }
 
 static GLenum invert_mapping(GLenum mapping) {
-    if (mapping == GL_UNSIGNED_INVERT_NV) return GL_SIGNED_IDENTITY_NV;
-    else if (mapping == GL_SIGNED_IDENTITY_NV) return GL_UNSIGNED_INVERT_NV;
+    if (mapping == GL_UNSIGNED_INVERT_NV) return GL_UNSIGNED_IDENTITY_NV;
+    else if (mapping == GL_UNSIGNED_IDENTITY_NV) return GL_UNSIGNED_INVERT_NV;
 
     FIXME("Unhandled mapping %#x\n", mapping);
     return mapping;
@@ -116,7 +116,7 @@ static void get_src_and_opr_nvrc(DWORD stage, DWORD arg, BOOL is_alpha, GLenum* 
     /* The WINED3DTA_COMPLEMENT flag specifies the complement of the input should
     * be used. */
     if (arg & WINED3DTA_COMPLEMENT) *mapping = GL_UNSIGNED_INVERT_NV;
-    else *mapping = GL_SIGNED_IDENTITY_NV;
+    else *mapping = GL_UNSIGNED_IDENTITY_NV; /* Clamp all values to positive ranges */
 
     /* The WINED3DTA_ALPHAREPLICATE flag specifies the alpha component of the input
     * should be used for all input components. */
@@ -558,7 +558,6 @@ void nvts_texdim(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext
     */
     if(mapped_stage == -1 || mapped_stage >= GL_LIMITS(textures)) return;
     if(sampler >= stateblock->lowest_disabled_stage) return;
-    if(use_ps(stateblock->wineD3DDevice)) return;
     if(isStateDirty(context, STATE_TEXTURESTAGE(sampler, WINED3DTSS_COLOROP))) return;
 
     nvts_activate_dimensions(sampler, stateblock, context);
@@ -672,6 +671,11 @@ static void nvrc_fragment_free(IWineD3DDevice *iface) {}
  * are available(geforce 3 and newer), while nvrc_fragment_pipeline uses only the
  * register combiners extension(Pre-GF3).
  */
+
+static BOOL nvts_conv_supported(WINED3DFORMAT fmt) {
+    TRACE("Checking shader format support for format %s: [FAILED]", debug_d3dformat(fmt));
+    return FALSE;
+}
 
 const struct StateEntryTemplate nvrc_fragmentstate_template[] = {
     { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          { STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          nvrc_colorop        }, 0                               },
@@ -805,6 +809,7 @@ const struct fragment_pipeline nvts_fragment_pipeline = {
     nvrc_fragment_get_caps,
     nvrc_fragment_alloc,
     nvrc_fragment_free,
+    nvts_conv_supported,
     nvrc_fragmentstate_template
 };
 
@@ -813,5 +818,6 @@ const struct fragment_pipeline nvrc_fragment_pipeline = {
     nvrc_fragment_get_caps,
     nvrc_fragment_alloc,
     nvrc_fragment_free,
+    nvts_conv_supported,
     nvrc_fragmentstate_template
 };

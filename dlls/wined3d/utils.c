@@ -5,7 +5,7 @@
  * Copyright 2003-2004 Raphael Junqueira
  * Copyright 2004 Christian Costa
  * Copyright 2005 Oliver Stieber
- * Copyright 2006-2007 Henri Verbeet
+ * Copyright 2006-2008 Henri Verbeet
  * Copyright 2007-2008 Stefan Dösinger for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
@@ -42,8 +42,8 @@ static const StaticPixelFormatDesc formats[] = {
   /*{WINED3DFORMAT          ,alphamask  ,redmask    ,greenmask  ,bluemask   ,bpp    ,depth  ,stencil,    isFourcc*/
     {WINED3DFMT_UNKNOWN     ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,0      ,0          ,FALSE },
     /* FourCC formats, kept here to have WINED3DFMT_R8G8B8(=20) at position 20 */
-    {WINED3DFMT_UYVY        ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,0      ,0          ,TRUE  },
-    {WINED3DFMT_YUY2        ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,0      ,0          ,TRUE  },
+    {WINED3DFMT_UYVY        ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,0      ,0          ,TRUE  },
+    {WINED3DFMT_YUY2        ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,0      ,0          ,TRUE  },
     {WINED3DFMT_YV12        ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,0      ,0          ,TRUE  },
     {WINED3DFMT_DXT1        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,0      ,0          ,TRUE  },
     {WINED3DFMT_DXT2        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,0      ,0          ,TRUE  },
@@ -134,10 +134,16 @@ static const GlPixelFormatDescTemplate gl_formats_template[] = {
     {WINED3DFMT_UNKNOWN        ,0                                ,0                                      , 0,           0                         ,0
         ,0 },
     /* FourCC formats */
-    {WINED3DFMT_UYVY           ,0                                ,0                                      , 0,           0                         ,0
-        ,0 },
-    {WINED3DFMT_YUY2           ,0                                ,0                                      , 0,           0                         ,0
-        ,0 },
+    /* GL_APPLE_ycbcr_422 claims that its '2YUV' format, which is supported via the UNSIGNED_SHORT_8_8_REV_APPLE type
+     * is equivalent to 'UYVY' format on Windows, and the 'YUVS' via UNSIGNED_SHORT_8_8_APPLE equates to 'YUY2'. The
+     * d3d9 test however shows that the opposite is true. Since the extension is from 2002, it predates the x86 based
+     * Macs, so probably the endianess differs. This could be tested as soon as we have a Windows and MacOS on a big
+     * endian machine
+     */
+    {WINED3DFMT_UYVY           ,GL_RGB                           ,GL_RGB                                 , 0,           GL_YCBCR_422_APPLE        ,UNSIGNED_SHORT_8_8_APPLE
+        ,WINED3DFMT_FLAG_FILTERING },
+    {WINED3DFMT_YUY2           ,GL_RGB                           ,GL_RGB                                 , 0,           GL_YCBCR_422_APPLE        ,UNSIGNED_SHORT_8_8_REV_APPLE
+        ,WINED3DFMT_FLAG_FILTERING },
     {WINED3DFMT_DXT1           ,GL_COMPRESSED_RGBA_S3TC_DXT1_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT , 0,           GL_RGBA                   ,GL_UNSIGNED_BYTE
         ,WINED3DFMT_FLAG_FILTERING },
     {WINED3DFMT_DXT2           ,GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT , 0,           GL_RGBA                   ,GL_UNSIGNED_BYTE
@@ -407,6 +413,21 @@ BOOL initPixelFormats(WineD3D_GL_Info *gl_info)
         gl_info->gl_formats[dst].conversion_group= WINED3DFMT_ATI2N;
     }
 
+    if(!GL_SUPPORT(APPLE_YCBCR_422)) {
+        dst = getFmtIdx(WINED3DFMT_YUY2);
+        gl_info->gl_formats[dst].glInternal = GL_LUMINANCE_ALPHA;
+        gl_info->gl_formats[dst].glGammaInternal = GL_LUMINANCE_ALPHA; /* not srgb */
+        gl_info->gl_formats[dst].glFormat = GL_LUMINANCE_ALPHA;
+        gl_info->gl_formats[dst].glType = GL_UNSIGNED_BYTE;
+        gl_info->gl_formats[dst].conversion_group = WINED3DFMT_YUY2;
+
+        dst = getFmtIdx(WINED3DFMT_UYVY);
+        gl_info->gl_formats[dst].glInternal = GL_LUMINANCE_ALPHA;
+        gl_info->gl_formats[dst].glGammaInternal = GL_LUMINANCE_ALPHA; /* not srgb */
+        gl_info->gl_formats[dst].glFormat = GL_LUMINANCE_ALPHA;
+        gl_info->gl_formats[dst].glType = GL_UNSIGNED_BYTE;
+        gl_info->gl_formats[dst].conversion_group = WINED3DFMT_UYVY;
+    }
     return TRUE;
 }
 
@@ -1560,7 +1581,7 @@ hash_table_t *hash_table_create(hash_function_t *hash_function, compare_function
     }
     table->bucket_count = initial_size;
 
-    table->entries = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, table->grow_size * sizeof(hash_table_entry_t));
+    table->entries = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, table->grow_size * sizeof(struct hash_table_entry_t));
     if (!table->entries)
     {
         ERR("Failed to allocate table entries, returning NULL.\n");
@@ -1576,12 +1597,15 @@ hash_table_t *hash_table_create(hash_function_t *hash_function, compare_function
     return table;
 }
 
-void hash_table_destroy(hash_table_t *table)
+void hash_table_destroy(hash_table_t *table, void (*free_value)(void *value, void *cb), void *cb)
 {
     unsigned int i = 0;
 
     for (i = 0; i < table->entry_count; ++i)
     {
+        if(free_value) {
+            free_value(table->entries[i].value, cb);
+        }
         HeapFree(GetProcessHeap(), 0, table->entries[i].key);
     }
 
@@ -1590,12 +1614,12 @@ void hash_table_destroy(hash_table_t *table)
     HeapFree(GetProcessHeap(), 0, table);
 }
 
-static inline hash_table_entry_t *hash_table_get_by_idx(hash_table_t *table, void *key, unsigned int idx)
+static inline struct hash_table_entry_t *hash_table_get_by_idx(hash_table_t *table, void *key, unsigned int idx)
 {
-    hash_table_entry_t *entry;
+    struct hash_table_entry_t *entry;
 
     if (table->buckets[idx].next)
-        LIST_FOR_EACH_ENTRY(entry, &(table->buckets[idx]), hash_table_entry_t, entry)
+        LIST_FOR_EACH_ENTRY(entry, &(table->buckets[idx]), struct hash_table_entry_t, entry)
             if (table->compare_function(entry->key, key)) return entry;
 
     return NULL;
@@ -1604,7 +1628,7 @@ static inline hash_table_entry_t *hash_table_get_by_idx(hash_table_t *table, voi
 static BOOL hash_table_resize(hash_table_t *table, unsigned int new_bucket_count)
 {
     unsigned int new_entry_count = 0;
-    hash_table_entry_t *new_entries;
+    struct hash_table_entry_t *new_entries;
     struct list *new_buckets;
     unsigned int grow_size = new_bucket_count - (new_bucket_count >> 2);
     unsigned int i;
@@ -1616,7 +1640,7 @@ static BOOL hash_table_resize(hash_table_t *table, unsigned int new_bucket_count
         return FALSE;
     }
 
-    new_entries = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, grow_size * sizeof(hash_table_entry_t));
+    new_entries = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, grow_size * sizeof(struct hash_table_entry_t));
     if (!new_entries)
     {
         ERR("Failed to allocate new entries, returning FALSE.\n");
@@ -1628,12 +1652,12 @@ static BOOL hash_table_resize(hash_table_t *table, unsigned int new_bucket_count
     {
         if (table->buckets[i].next)
         {
-            hash_table_entry_t *entry, *entry2;
+            struct hash_table_entry_t *entry, *entry2;
 
-            LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &table->buckets[i], hash_table_entry_t, entry)
+            LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &table->buckets[i], struct hash_table_entry_t, entry)
             {
                 int j;
-                hash_table_entry_t *new_entry = new_entries + (new_entry_count++);
+                struct hash_table_entry_t *new_entry = new_entries + (new_entry_count++);
                 *new_entry = *entry;
 
                 j = new_entry->hash & (new_bucket_count - 1);
@@ -1664,7 +1688,7 @@ void hash_table_put(hash_table_t *table, void *key, void *value)
 {
     unsigned int idx;
     unsigned int hash;
-    hash_table_entry_t *entry;
+    struct hash_table_entry_t *entry;
 
     hash = table->hash_function(key);
     idx = hash & (table->bucket_count - 1);
@@ -1718,7 +1742,7 @@ void hash_table_put(hash_table_t *table, void *key, void *value)
         struct list *elem = list_head(&table->free_entries);
 
         list_remove(elem);
-        entry = LIST_ENTRY(elem, hash_table_entry_t, entry);
+        entry = LIST_ENTRY(elem, struct hash_table_entry_t, entry);
     } else {
         entry = table->entries + (table->entry_count++);
     }
@@ -1741,7 +1765,7 @@ void hash_table_remove(hash_table_t *table, void *key)
 void *hash_table_get(hash_table_t *table, void *key)
 {
     unsigned int idx;
-    hash_table_entry_t *entry;
+    struct hash_table_entry_t *entry;
 
     idx = table->hash_function(key) & (table->bucket_count - 1);
     entry = hash_table_get_by_idx(table, key, idx);
@@ -1750,7 +1774,7 @@ void *hash_table_get(hash_table_t *table, void *key)
 }
 
 #define GLINFO_LOCATION stateblock->wineD3DDevice->adapter->gl_info
-void gen_ffp_op(IWineD3DStateBlockImpl *stateblock, struct texture_stage_op op[MAX_TEXTURES]) {
+void gen_ffp_op(IWineD3DStateBlockImpl *stateblock, struct ffp_settings *settings, BOOL ignore_textype) {
 #define ARG1 0x01
 #define ARG2 0x02
 #define ARG0 0x04
@@ -1785,47 +1809,73 @@ void gen_ffp_op(IWineD3DStateBlockImpl *stateblock, struct texture_stage_op op[M
     };
     unsigned int i;
     DWORD ttff;
+    DWORD cop, aop, carg0, carg1, carg2, aarg0, aarg1, aarg2;
 
     for(i = 0; i < GL_LIMITS(texture_stages); i++) {
         IWineD3DBaseTextureImpl *texture;
+        settings->op[i].padding = 0;
         if(stateblock->textureState[i][WINED3DTSS_COLOROP] == WINED3DTOP_DISABLE) {
-            op[i].cop = WINED3DTOP_DISABLE;
-            op[i].aop = WINED3DTOP_DISABLE;
-            op[i].carg0 = op[i].carg1 = op[i].carg2 = 0xffffffff;
-            op[i].aarg0 = op[i].aarg1 = op[i].aarg2 = 0xffffffff;
-            op[i].color_correction = WINED3DFMT_UNKNOWN;
-            op[i].dst = 0xffffffff;
+            settings->op[i].cop = WINED3DTOP_DISABLE;
+            settings->op[i].aop = WINED3DTOP_DISABLE;
+            settings->op[i].carg0 = settings->op[i].carg1 = settings->op[i].carg2 = ARG_UNUSED;
+            settings->op[i].aarg0 = settings->op[i].aarg1 = settings->op[i].aarg2 = ARG_UNUSED;
+            settings->op[i].color_correction = WINED3DFMT_UNKNOWN;
+            settings->op[i].dst = resultreg;
+            settings->op[i].tex_type = tex_1d;
+            settings->op[i].projected = proj_none;
             i++;
             break;
         }
 
         texture = (IWineD3DBaseTextureImpl *) stateblock->textures[i];
-        op[i].color_correction = texture ? texture->baseTexture.shader_conversion_group : WINED3DFMT_UNKNOWN;
-
-        op[i].cop = stateblock->textureState[i][WINED3DTSS_COLOROP];
-        op[i].aop = stateblock->textureState[i][WINED3DTSS_ALPHAOP];
-
-        op[i].carg1 = (args[op[i].cop] & ARG1) ? stateblock->textureState[i][WINED3DTSS_COLORARG1] : 0xffffffff;
-        op[i].carg2 = (args[op[i].cop] & ARG2) ? stateblock->textureState[i][WINED3DTSS_COLORARG2] : 0xffffffff;
-        op[i].carg0 = (args[op[i].cop] & ARG0) ? stateblock->textureState[i][WINED3DTSS_COLORARG0] : 0xffffffff;
-
-        if(is_invalid_op(stateblock->wineD3DDevice, i, op[i].cop, op[i].carg1, op[i].carg2, op[i].carg0)) {
-            op[i].carg0 = 0xffffffff;
-            op[i].carg2 = 0xffffffff;
-            op[i].carg1 = WINED3DTA_CURRENT;
-            op[i].cop = WINED3DTOP_SELECTARG1;
+        if(texture) {
+            settings->op[i].color_correction = texture->baseTexture.shader_conversion_group;
+            if(ignore_textype) {
+                settings->op[i].tex_type = tex_1d;
+            } else {
+                switch(stateblock->textureDimensions[i]) {
+                    case GL_TEXTURE_1D:
+                        settings->op[i].tex_type = tex_1d;
+                        break;
+                    case GL_TEXTURE_2D:
+                        settings->op[i].tex_type = tex_2d;
+                        break;
+                    case GL_TEXTURE_3D:
+                        settings->op[i].tex_type = tex_3d;
+                        break;
+                    case GL_TEXTURE_CUBE_MAP_ARB:
+                        settings->op[i].tex_type = tex_cube;
+                        break;
+                    case GL_TEXTURE_RECTANGLE_ARB:
+                        settings->op[i].tex_type = tex_rect;
+                        break;
+                }
+            }
+        } else {
+            settings->op[i].color_correction = WINED3DFMT_UNKNOWN;
+            settings->op[i].tex_type = tex_1d;
         }
 
-        op[i].aarg1 = (args[op[i].aop] & ARG1) ? stateblock->textureState[i][WINED3DTSS_ALPHAARG1] : 0xffffffff;
-        op[i].aarg2 = (args[op[i].aop] & ARG2) ? stateblock->textureState[i][WINED3DTSS_ALPHAARG2] : 0xffffffff;
-        op[i].aarg0 = (args[op[i].aop] & ARG0) ? stateblock->textureState[i][WINED3DTSS_ALPHAARG0] : 0xffffffff;
+        cop = stateblock->textureState[i][WINED3DTSS_COLOROP];
+        aop = stateblock->textureState[i][WINED3DTSS_ALPHAOP];
 
-        if(is_invalid_op(stateblock->wineD3DDevice, i, op[i].aop, op[i].aarg1, op[i].aarg2, op[i].aarg0)) {
-            op[i].aarg0 = 0xffffffff;
-            op[i].aarg2 = 0xffffffff;
-            op[i].aarg1 = WINED3DTA_CURRENT;
-            op[i].aop = WINED3DTOP_SELECTARG1;
-        } else if(i == 0 && stateblock->textures[0] &&
+        carg1 = (args[cop] & ARG1) ? stateblock->textureState[i][WINED3DTSS_COLORARG1] : 0xffffffff;
+        carg2 = (args[cop] & ARG2) ? stateblock->textureState[i][WINED3DTSS_COLORARG2] : 0xffffffff;
+        carg0 = (args[cop] & ARG0) ? stateblock->textureState[i][WINED3DTSS_COLORARG0] : 0xffffffff;
+
+        if(is_invalid_op(stateblock->wineD3DDevice, i, cop,
+                         carg1, carg2, carg0)) {
+            carg0 = 0xffffffff;
+            carg2 = 0xffffffff;
+            carg1 = WINED3DTA_CURRENT;
+            cop = WINED3DTOP_SELECTARG1;
+        }
+
+        aarg1 = (args[aop] & ARG1) ? stateblock->textureState[i][WINED3DTSS_ALPHAARG1] : 0xffffffff;
+        aarg2 = (args[aop] & ARG2) ? stateblock->textureState[i][WINED3DTSS_ALPHAARG2] : 0xffffffff;
+        aarg0 = (args[aop] & ARG0) ? stateblock->textureState[i][WINED3DTSS_ALPHAARG0] : 0xffffffff;
+
+        if(i == 0 && stateblock->textures[0] &&
                   stateblock->renderState[WINED3DRS_COLORKEYENABLE] &&
                  (stateblock->textureDimensions[0] == GL_TEXTURE_2D ||
                   stateblock->textureDimensions[0] == GL_TEXTURE_RECTANGLE_ARB)) {
@@ -1834,71 +1884,113 @@ void gen_ffp_op(IWineD3DStateBlockImpl *stateblock, struct texture_stage_op op[M
             if(surf->CKeyFlags & WINEDDSD_CKSRCBLT &&
                getFormatDescEntry(surf->resource.format, NULL, NULL)->alphaMask == 0x00000000) {
 
-                if(op[0].aop == WINED3DTOP_DISABLE) {
-                    op[0].aarg1 = WINED3DTA_TEXTURE;
-                    op[0].aop = WINED3DTOP_SELECTARG1;
+                if(aop == WINED3DTOP_DISABLE) {
+                   aarg1 = WINED3DTA_TEXTURE;
+                   aop = WINED3DTOP_SELECTARG1;
                 }
-                else if(op[0].aop == WINED3DTOP_SELECTARG1 && op[0].aarg1 != WINED3DTA_TEXTURE) {
+                else if(aop == WINED3DTOP_SELECTARG1 && aarg1 != WINED3DTA_TEXTURE) {
                     if (stateblock->renderState[WINED3DRS_ALPHABLENDENABLE]) {
-                        op[0].aarg2 = WINED3DTA_TEXTURE;
-                        op[0].aop = WINED3DTOP_MODULATE;
+                        aarg2 = WINED3DTA_TEXTURE;
+                        aop = WINED3DTOP_MODULATE;
                     }
-                    else op[0].aarg1 = WINED3DTA_TEXTURE;
+                    else aarg1 = WINED3DTA_TEXTURE;
                 }
-                else if(op[0].aop == WINED3DTOP_SELECTARG2 && op[0].aarg2 != WINED3DTA_TEXTURE) {
+                else if(aop == WINED3DTOP_SELECTARG2 && aarg2 != WINED3DTA_TEXTURE) {
                     if (stateblock->renderState[WINED3DRS_ALPHABLENDENABLE]) {
-                        op[0].aarg1 = WINED3DTA_TEXTURE;
-                        op[0].aop = WINED3DTOP_MODULATE;
+                        aarg1 = WINED3DTA_TEXTURE;
+                        aop = WINED3DTOP_MODULATE;
                     }
-                    else op[0].aarg2 = WINED3DTA_TEXTURE;
+                    else aarg2 = WINED3DTA_TEXTURE;
                 }
             }
         }
 
-        if(op[i].carg1 == WINED3DTA_TEXTURE || op[i].carg2 == WINED3DTA_TEXTURE || op[i].carg0 == WINED3DTA_TEXTURE ||
-           op[i].aarg1 == WINED3DTA_TEXTURE || op[i].aarg2 == WINED3DTA_TEXTURE || op[i].aarg0 == WINED3DTA_TEXTURE) {
+        if(is_invalid_op(stateblock->wineD3DDevice, i, aop,
+           aarg1, aarg2, aarg0)) {
+               aarg0 = 0xffffffff;
+               aarg2 = 0xffffffff;
+               aarg1 = WINED3DTA_CURRENT;
+               aop = WINED3DTOP_SELECTARG1;
+        }
+
+        if(carg1 == WINED3DTA_TEXTURE || carg2 == WINED3DTA_TEXTURE || carg0 == WINED3DTA_TEXTURE ||
+           aarg1 == WINED3DTA_TEXTURE || aarg2 == WINED3DTA_TEXTURE || aarg0 == WINED3DTA_TEXTURE) {
             ttff = stateblock->textureState[i][WINED3DTSS_TEXTURETRANSFORMFLAGS];
             if(ttff == (WINED3DTTFF_PROJECTED | WINED3DTTFF_COUNT3)) {
-                op[i].projected = proj_count3;
+                settings->op[i].projected = proj_count3;
             } else if(ttff == (WINED3DTTFF_PROJECTED | WINED3DTTFF_COUNT4)) {
-                op[i].projected = proj_count4;
+                settings->op[i].projected = proj_count4;
             } else {
-                op[i].projected = proj_none;
+                settings->op[i].projected = proj_none;
             }
         } else {
-            op[i].projected = proj_none;
+            settings->op[i].projected = proj_none;
         }
 
-        op[i].dst = stateblock->textureState[i][WINED3DTSS_RESULTARG];
+        settings->op[i].cop = cop;
+        settings->op[i].aop = aop;
+        settings->op[i].carg0 = carg0;
+        settings->op[i].carg1 = carg1;
+        settings->op[i].carg2 = carg2;
+        settings->op[i].aarg0 = aarg0;
+        settings->op[i].aarg1 = aarg1;
+        settings->op[i].aarg2 = aarg2;
+
+        if(stateblock->textureState[i][WINED3DTSS_RESULTARG] == WINED3DTA_TEMP) {
+            settings->op[i].dst = tempreg;
+        } else {
+            settings->op[i].dst = resultreg;
+        }
     }
 
     /* Clear unsupported stages */
     for(; i < MAX_TEXTURES; i++) {
-        memset(&op[i], 0xff, sizeof(op[i]));
+        memset(&settings->op[i], 0xff, sizeof(settings->op[i]));
+    }
+
+    if(stateblock->renderState[WINED3DRS_FOGENABLE] == FALSE) {
+        settings->fog = FOG_OFF;
+    } else if(stateblock->renderState[WINED3DRS_FOGTABLEMODE] == WINED3DFOG_NONE) {
+        switch(stateblock->renderState[WINED3DRS_FOGVERTEXMODE]) {
+            case WINED3DFOG_NONE:
+            case WINED3DFOG_LINEAR:
+                settings->fog = FOG_LINEAR;
+                break;
+            case WINED3DFOG_EXP:
+                settings->fog = FOG_EXP;
+                break;
+            case WINED3DFOG_EXP2:
+                settings->fog = FOG_EXP2;
+                break;
+        }
+    } else {
+        switch(stateblock->renderState[WINED3DRS_FOGTABLEMODE]) {
+            case WINED3DFOG_LINEAR:
+                settings->fog = FOG_LINEAR;
+                break;
+            case WINED3DFOG_EXP:
+                settings->fog = FOG_EXP;
+                break;
+            case WINED3DFOG_EXP2:
+                settings->fog = FOG_EXP2;
+                break;
+        }
     }
 }
 #undef GLINFO_LOCATION
 
-struct ffp_desc *find_ffp_shader(struct list *shaders, struct texture_stage_op op[MAX_TEXTURES])
+struct ffp_desc *find_ffp_shader(hash_table_t *fragment_shaders, struct ffp_settings *settings)
 {
-    struct ffp_desc *entry;
+    return (struct ffp_desc *)hash_table_get(fragment_shaders, settings);}
 
-    /* TODO: Optimize this. Finding the shader can be optimized by e.g. sorting the list,
-     * or maybe consider using hashtables
+void add_ffp_shader(hash_table_t *shaders, struct ffp_desc *desc) {
+    struct ffp_settings *key = HeapAlloc(GetProcessHeap(), 0, sizeof(*key));
+    /* Note that the key is the implementation independent part of the ffp_desc structure,
+     * whereas desc points to an extended structure with implementation specific parts.
+     * Make a copy of the key because hash_table_put takes ownership of it
      */
-    LIST_FOR_EACH_ENTRY(entry, shaders, struct ffp_desc, entry) {
-        if(memcmp(op, entry->op, sizeof(struct texture_stage_op) * MAX_TEXTURES) == 0) {
-            TRACE("Found shader entry %p\n", entry);
-            return entry;
-        }
-    }
-
-    TRACE("Shader not found\n");
-    return NULL;
-}
-
-void add_ffp_shader(struct list *shaders, struct ffp_desc *desc) {
-    list_add_head(shaders, &desc->entry);
+    *key = desc->settings;
+    hash_table_put(shaders, key, desc);
 }
 
 /* Activates the texture dimension according to the bound D3D texture.
@@ -1989,9 +2081,41 @@ void sampler_texdim(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
     */
     if(mapped_stage == -1 || mapped_stage >= GL_LIMITS(textures)) return;
     if(sampler >= stateblock->lowest_disabled_stage) return;
-    if(use_ps(stateblock->wineD3DDevice)) return;
     if(isStateDirty(context, STATE_TEXTURESTAGE(sampler, WINED3DTSS_COLOROP))) return;
 
     texture_activate_dimensions(sampler, stateblock, context);
 }
 #undef GLINFO_LOCATION
+
+unsigned int ffp_program_key_hash(void *key) {
+    struct ffp_settings *k = (struct ffp_settings *)key;
+    unsigned int hash = 0, i;
+    DWORD *blob;
+
+    /* This takes the texture op settings of stage 0 and 1 into account.
+     * how exactly depends on the memory laybout of the compiler, but it
+     * should not matter too much. Stages > 1 are used rarely, so there's
+     * no need to process them. Even if they're used it is likely that
+     * the ffp setup has distinct stage 0 and 1 settings.
+     */
+    for(i = 0; i < 2; i++) {
+        blob = (DWORD *) &k->op[i];
+        hash ^= blob[0] ^ blob[1];
+    }
+
+    hash += ~(hash << 15);
+    hash ^=  (hash >> 10);
+    hash +=  (hash << 3);
+    hash ^=  (hash >> 6);
+    hash += ~(hash << 11);
+    hash ^=  (hash >> 16);
+
+    return hash;
+}
+
+BOOL ffp_program_key_compare(void *keya, void *keyb) {
+    struct ffp_settings *ka = (struct ffp_settings *)keya;
+    struct ffp_settings *kb = (struct ffp_settings *)keyb;
+
+    return memcmp(ka, kb, sizeof(*ka)) == 0;
+}

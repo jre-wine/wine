@@ -790,6 +790,8 @@ extern UINT MSIREG_DeleteLocalUserDataComponentKey(LPCWSTR szComponent);
 extern UINT MSIREG_DeleteUserDataComponentKey(LPCWSTR szComponent);
 extern UINT MSIREG_DeleteUserUpgradeCodesKey(LPCWSTR szUpgradeCode);
 extern UINT MSIREG_OpenClassesUpgradeCodesKey(LPCWSTR szUpgradeCode, HKEY* key, BOOL create);
+extern UINT MSIREG_DeleteLocalClassesProductKey(LPCWSTR szProductCode);
+extern UINT MSIREG_DeleteLocalClassesFeaturesKey(LPCWSTR szProductCode);
 
 extern LPWSTR msi_reg_get_val_str( HKEY hkey, LPCWSTR name );
 extern BOOL msi_reg_get_val_dword( HKEY hkey, LPCWSTR name, DWORD *val);
@@ -859,8 +861,40 @@ static inline void msi_feature_set_state( MSIFEATURE *feature, INSTALLSTATE stat
 
 static inline void msi_component_set_state( MSICOMPONENT *comp, INSTALLSTATE state )
 {
-    comp->ActionRequest = state;
-    comp->Action = state;
+    if (state == INSTALLSTATE_ABSENT)
+    {
+        switch (comp->Installed)
+        {
+            case INSTALLSTATE_LOCAL:
+            case INSTALLSTATE_SOURCE:
+            case INSTALLSTATE_DEFAULT:
+                comp->ActionRequest = state;
+                comp->Action = state;
+                break;
+            default:
+                comp->ActionRequest = INSTALLSTATE_UNKNOWN;
+                comp->Action = INSTALLSTATE_UNKNOWN;
+        }
+    }
+    else if (state == INSTALLSTATE_SOURCE)
+    {
+        switch (comp->Installed)
+        {
+            case INSTALLSTATE_ABSENT:
+            case INSTALLSTATE_SOURCE:
+                comp->ActionRequest = state;
+                comp->Action = state;
+                break;
+            default:
+                comp->ActionRequest = INSTALLSTATE_UNKNOWN;
+                comp->Action = INSTALLSTATE_UNKNOWN;
+        }
+    }
+    else
+    {
+        comp->ActionRequest = state;
+        comp->Action = state;
+    }
 }
 
 /* actions in other modules */
@@ -906,10 +940,27 @@ extern UINT msi_create_component_directories( MSIPACKAGE *package );
 extern void msi_ui_error( DWORD msg_id, DWORD type );
 extern UINT msi_set_last_used_source(LPCWSTR product, LPCWSTR usersid,
                         MSIINSTALLCONTEXT context, DWORD options, LPCWSTR value);
+
+/* media */
+
+typedef BOOL (*PMSICABEXTRACTCB)(MSIPACKAGE *, LPCWSTR, DWORD, LPWSTR *, DWORD *, PVOID);
+
+#define MSICABEXTRACT_BEGINEXTRACT  0x01
+#define MSICABEXTRACT_FILEEXTRACTED 0x02
+
+typedef struct
+{
+    MSIPACKAGE* package;
+    MSIMEDIAINFO *mi;
+    PMSICABEXTRACTCB cb;
+    LPWSTR curfile;
+    PVOID user;
+} MSICABDATA;
+
+extern UINT ready_media(MSIPACKAGE *package, MSIFILE *file, MSIMEDIAINFO *mi);
 extern UINT msi_load_media_info(MSIPACKAGE *package, MSIFILE *file, MSIMEDIAINFO *mi);
 extern void msi_free_media_info(MSIMEDIAINFO *mi);
-extern BOOL msi_cabextract(MSIPACKAGE* package, MSIMEDIAINFO *mi, PFNFDINOTIFY notify, LPVOID data);
-extern UINT msi_extract_file(MSIPACKAGE *package, MSIFILE *file, LPWSTR destdir);
+extern BOOL msi_cabextract(MSIPACKAGE* package, MSIMEDIAINFO *mi, LPVOID data);
 extern UINT find_published_source(MSIPACKAGE *package, MSIMEDIAINFO *mi);
 
 /* control event stuff */

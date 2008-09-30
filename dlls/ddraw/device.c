@@ -5543,6 +5543,7 @@ IDirect3DDeviceImpl_7_SetMaterial(IDirect3DDevice7 *iface,
     HRESULT hr;
     TRACE("(%p)->(%p): Relay!\n", This, Mat);
 
+    if (!Mat) return DDERR_INVALIDPARAMS;
     /* Note: D3DMATERIAL7 is compatible with WINED3DMATERIAL */
     EnterCriticalSection(&ddraw_cs);
     hr = IWineD3DDevice_SetMaterial(This->wineD3DDevice,
@@ -6289,7 +6290,7 @@ static void copy_mipmap_chain(IDirect3DDeviceImpl *device,
         if (src_level->surface_desc.dwWidth == dest_level->surface_desc.dwWidth &&
             src_level->surface_desc.dwHeight == dest_level->surface_desc.dwHeight)
         {
-            /* Try UpdateSurface that may perform a more direct opengl loading. But skip this is destination is paletted texture and has no palette.
+            /* Try UpdateSurface that may perform a more direct opengl loading. But skip this if destination is paletted texture and has no palette.
              * Some games like Sacrifice set palette after Load, and it is a waste of effort to try to load texture without palette and generates
              * warnings in wined3d. */
 	    if (!palette_missing)

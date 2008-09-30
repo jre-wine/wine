@@ -702,6 +702,25 @@ static void PROFILE_ReleaseFile(void)
     ZeroMemory(&CurProfile->LastWriteTime, sizeof(CurProfile->LastWriteTime));
 }
 
+/***********************************************************************
+ *
+ * Compares a file time with the current time. If the file time is
+ * at least 2.1 seconds in the past, return true.
+ *
+ * Intended as cache safety measure: The time resolution on FAT is
+ * two seconds, so files that are not at least two seconds old might
+ * keep their time even on modification, so don't cache them.
+ */
+static BOOL is_not_current(FILETIME * ft)
+{
+    FILETIME Now;
+    LONGLONG ftll, nowll;
+    GetSystemTimeAsFileTime(&Now);
+    ftll = ((LONGLONG)ft->dwHighDateTime << 32) + ft->dwLowDateTime;
+    nowll = ((LONGLONG)Now.dwHighDateTime << 32) + Now.dwLowDateTime;
+    TRACE("%08x;%08x\n",(unsigned)ftll+21000000,(unsigned)nowll);
+    return ftll + 21000000 < nowll;
+}
 
 /***********************************************************************
  *           PROFILE_Open
@@ -755,7 +774,7 @@ static BOOL PROFILE_Open( LPCWSTR filename, BOOL write_access )
     TRACE("path: %s\n", debugstr_w(buffer));
 
     hFile = CreateFileW(buffer, GENERIC_READ | (write_access ? GENERIC_WRITE : 0),
-                        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 
     if ((hFile == INVALID_HANDLE_VALUE) && (GetLastError() != ERROR_FILE_NOT_FOUND))
@@ -780,15 +799,17 @@ static BOOL PROFILE_Open( LPCWSTR filename, BOOL write_access )
 
             if (hFile != INVALID_HANDLE_VALUE)
             {
-                if (TRACE_ON(profile))
+                GetFileTime(hFile, NULL, NULL, &LastWriteTime);
+                if (!memcmp( &CurProfile->LastWriteTime, &LastWriteTime, sizeof(FILETIME) ) &&
+                    is_not_current(&LastWriteTime))
+                    TRACE("(%s): already opened (mru=%d)\n",
+                          debugstr_w(buffer), i);
+                else
                 {
-                    GetFileTime(hFile, NULL, NULL, &LastWriteTime);
-                    if (memcmp(&CurProfile->LastWriteTime, &LastWriteTime, sizeof(FILETIME)))
-                        TRACE("(%s): already opened (mru=%d)\n",
-                              debugstr_w(buffer), i);
-                    else
-                        TRACE("(%s): already opened, needs refreshing (mru=%d)\n",
-                              debugstr_w(buffer), i);
+                    TRACE("(%s): already opened, needs refreshing (mru=%d)\n",
+                          debugstr_w(buffer), i);
+                    CurProfile->section = PROFILE_Load(hFile, &CurProfile->encoding);
+                    CurProfile->LastWriteTime = LastWriteTime;
                 }
                 CloseHandle(hFile);
             }

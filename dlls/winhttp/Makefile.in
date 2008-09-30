@@ -4,9 +4,13 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = winhttp.dll
 IMPORTLIB = winhttp
-IMPORTS   = kernel32
+IMPORTS   = wininet kernel32
 
-C_SRCS	  = main.c
+C_SRCS = \
+	handle.c \
+	main.c \
+	request.c \
+	session.c
 
 @MAKE_DLL_RULES@
 

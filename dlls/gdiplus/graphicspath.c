@@ -33,39 +33,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
 
-/* make sure path has enough space for len more points */
-static BOOL lengthen_path(GpPath *path, INT len)
-{
-    /* initial allocation */
-    if(path->datalen == 0){
-        path->datalen = len * 2;
-
-        path->pathdata.Points = GdipAlloc(path->datalen * sizeof(PointF));
-        if(!path->pathdata.Points)   return FALSE;
-
-        path->pathdata.Types = GdipAlloc(path->datalen);
-        if(!path->pathdata.Types){
-            GdipFree(path->pathdata.Points);
-            return FALSE;
-        }
-    }
-    /* reallocation, double size of arrays */
-    else if(path->datalen - path->pathdata.Count < len){
-        while(path->datalen - path->pathdata.Count < len)
-            path->datalen *= 2;
-
-        path->pathdata.Points = HeapReAlloc(GetProcessHeap(), 0,
-            path->pathdata.Points, path->datalen * sizeof(PointF));
-        if(!path->pathdata.Points)  return FALSE;
-
-        path->pathdata.Types = HeapReAlloc(GetProcessHeap(), 0,
-            path->pathdata.Types, path->datalen);
-        if(!path->pathdata.Types)   return FALSE;
-    }
-
-    return TRUE;
-}
-
 GpStatus WINGDIPAPI GdipAddPathArc(GpPath *path, REAL x1, REAL y1, REAL x2,
     REAL y2, REAL startAngle, REAL sweepAngle)
 {
@@ -194,6 +161,206 @@ GpStatus WINGDIPAPI GdipAddPathBeziersI(GpPath *path, GDIPCONST GpPoint *points,
     GdipFree(ptsF);
 
     return ret;
+}
+
+GpStatus WINGDIPAPI GdipAddPathClosedCurve(GpPath *path, GDIPCONST GpPointF *points,
+    INT count)
+{
+    return GdipAddPathClosedCurve2(path, points, count, 1.0);
+}
+
+GpStatus WINGDIPAPI GdipAddPathClosedCurveI(GpPath *path, GDIPCONST GpPoint *points,
+    INT count)
+{
+    return GdipAddPathClosedCurve2I(path, points, count, 1.0);
+}
+
+GpStatus WINGDIPAPI GdipAddPathClosedCurve2(GpPath *path, GDIPCONST GpPointF *points,
+    INT count, REAL tension)
+{
+    INT i, len_pt = (count + 1)*3-2;
+    GpPointF *pt;
+    GpPointF *pts;
+    REAL x1, x2, y1, y2;
+    GpStatus stat;
+
+    if(!path || !points || count <= 1)
+        return InvalidParameter;
+
+    pt = GdipAlloc(len_pt * sizeof(GpPointF));
+    pts = GdipAlloc((count + 1)*sizeof(GpPointF));
+    if(!pt || !pts){
+        GdipFree(pt);
+        GdipFree(pts);
+        return OutOfMemory;
+    }
+
+    /* copy source points to extend with the last one */
+    memcpy(pts, points, sizeof(GpPointF)*count);
+    pts[count] = pts[0];
+
+    tension = tension * TENSION_CONST;
+
+    for(i = 0; i < count-1; i++){
+        calc_curve_bezier(&(pts[i]), tension, &x1, &y1, &x2, &y2);
+
+        pt[3*i+2].X = x1;
+        pt[3*i+2].Y = y1;
+        pt[3*i+3].X = pts[i+1].X;
+        pt[3*i+3].Y = pts[i+1].Y;
+        pt[3*i+4].X = x2;
+        pt[3*i+4].Y = y2;
+    }
+
+    /* points [len_pt-2] and [0] are calculated
+       separetely to connect splines properly */
+    pts[0] = points[count-1];
+    pts[1] = points[0]; /* equals to start and end of a resulting path */
+    pts[2] = points[1];
+
+    calc_curve_bezier(pts, tension, &x1, &y1, &x2, &y2);
+    pt[len_pt-2].X = x1;
+    pt[len_pt-2].Y = y1;
+    pt[0].X = pts[1].X;
+    pt[0].Y = pts[1].Y;
+    pt[1].X = x2;
+    pt[1].Y = y2;
+    /* close path */
+    pt[len_pt-1].X = pt[0].X;
+    pt[len_pt-1].Y = pt[0].Y;
+
+    stat = GdipAddPathBeziers(path, pt, len_pt);
+
+    /* close figure */
+    if(stat == Ok){
+        INT count = path->pathdata.Count;
+        path->pathdata.Types[count - 1] |= PathPointTypeCloseSubpath;
+        path->newfigure = TRUE;
+    }
+
+    GdipFree(pts);
+    GdipFree(pt);
+
+    return stat;
+}
+
+GpStatus WINGDIPAPI GdipAddPathClosedCurve2I(GpPath *path, GDIPCONST GpPoint *points,
+    INT count, REAL tension)
+{
+    GpPointF *ptf;
+    INT i;
+    GpStatus stat;
+
+    if(!path || !points || count <= 1)
+        return InvalidParameter;
+
+    ptf = GdipAlloc(sizeof(GpPointF)*count);
+    if(!ptf)
+        return OutOfMemory;
+
+    for(i = 0; i < count; i++){
+        ptf[i].X = (REAL)points[i].X;
+        ptf[i].Y = (REAL)points[i].Y;
+    }
+
+    stat = GdipAddPathClosedCurve2(path, ptf, count, tension);
+
+    GdipFree(ptf);
+
+    return stat;
+}
+
+GpStatus WINGDIPAPI GdipAddPathCurve(GpPath *path, GDIPCONST GpPointF *points, INT count)
+{
+    if(!path || !points || count <= 1)
+        return InvalidParameter;
+
+   return GdipAddPathCurve2(path, points, count, 1.0);
+}
+
+GpStatus WINGDIPAPI GdipAddPathCurveI(GpPath *path, GDIPCONST GpPoint *points, INT count)
+{
+    if(!path || !points || count <= 1)
+        return InvalidParameter;
+
+   return GdipAddPathCurve2I(path, points, count, 1.0);
+}
+
+GpStatus WINGDIPAPI GdipAddPathCurve2(GpPath *path, GDIPCONST GpPointF *points, INT count,
+    REAL tension)
+{
+    INT i, len_pt = count*3-2;
+    GpPointF *pt;
+    REAL x1, x2, y1, y2;
+    GpStatus stat;
+
+    if(!path || !points || count <= 1)
+        return InvalidParameter;
+
+    pt = GdipAlloc(len_pt * sizeof(GpPointF));
+    if(!pt)
+        return OutOfMemory;
+
+    tension = tension * TENSION_CONST;
+
+    calc_curve_bezier_endp(points[0].X, points[0].Y, points[1].X, points[1].Y,
+        tension, &x1, &y1);
+
+    pt[0].X = points[0].X;
+    pt[0].Y = points[0].Y;
+    pt[1].X = x1;
+    pt[1].Y = y1;
+
+    for(i = 0; i < count-2; i++){
+        calc_curve_bezier(&(points[i]), tension, &x1, &y1, &x2, &y2);
+
+        pt[3*i+2].X = x1;
+        pt[3*i+2].Y = y1;
+        pt[3*i+3].X = points[i+1].X;
+        pt[3*i+3].Y = points[i+1].Y;
+        pt[3*i+4].X = x2;
+        pt[3*i+4].Y = y2;
+    }
+
+    calc_curve_bezier_endp(points[count-1].X, points[count-1].Y,
+        points[count-2].X, points[count-2].Y, tension, &x1, &y1);
+
+    pt[len_pt-2].X = x1;
+    pt[len_pt-2].Y = y1;
+    pt[len_pt-1].X = points[count-1].X;
+    pt[len_pt-1].Y = points[count-1].Y;
+
+    stat = GdipAddPathBeziers(path, pt, len_pt);
+
+    GdipFree(pt);
+
+    return stat;
+}
+
+GpStatus WINGDIPAPI GdipAddPathCurve2I(GpPath *path, GDIPCONST GpPoint *points,
+    INT count, REAL tension)
+{
+    GpPointF *ptf;
+    INT i;
+    GpStatus stat;
+
+    if(!path || !points || count <= 1)
+        return InvalidParameter;
+
+    ptf = GdipAlloc(sizeof(GpPointF)*count);
+    if(!ptf)
+        return OutOfMemory;
+
+    for(i = 0; i < count; i++){
+        ptf[i].X = (REAL)points[i].X;
+        ptf[i].Y = (REAL)points[i].Y;
+    }
+
+    stat = GdipAddPathCurve2(path, ptf, count, tension);
+
+    GdipFree(ptf);
+
+    return stat;
 }
 
 GpStatus WINGDIPAPI GdipAddPathEllipse(GpPath *path, REAL x, REAL y, REAL width,
@@ -344,6 +511,57 @@ GpStatus WINGDIPAPI GdipAddPathPath(GpPath *path, GDIPCONST GpPath* addingPath,
     path->pathdata.Count += count;
 
     return Ok;
+}
+
+GpStatus WINGDIPAPI GdipAddPathPie(GpPath *path, REAL x, REAL y, REAL width, REAL height,
+    REAL startAngle, REAL sweepAngle)
+{
+    GpPointF *ptf;
+    GpStatus status;
+    INT i, count;
+
+    if(!path)
+        return InvalidParameter;
+
+    count = arc2polybezier(NULL, x, y, width, height, startAngle, sweepAngle);
+
+    if(count == 0)
+        return Ok;
+
+    ptf = GdipAlloc(sizeof(GpPointF)*count);
+    if(!ptf)
+        return OutOfMemory;
+
+    arc2polybezier(ptf, x, y, width, height, startAngle, sweepAngle);
+
+    status = GdipAddPathLine(path, (width - x)/2, (height - y)/2, ptf[0].X, ptf[0].Y);
+    if(status != Ok){
+        GdipFree(ptf);
+        return status;
+    }
+    /* one spline is already added as a line endpoint */
+    if(!lengthen_path(path, count - 1)){
+        GdipFree(ptf);
+        return OutOfMemory;
+    }
+
+    memcpy(&(path->pathdata.Points[path->pathdata.Count]), &(ptf[1]),sizeof(GpPointF)*(count-1));
+    for(i = 0; i < count-1; i++)
+        path->pathdata.Types[path->pathdata.Count+i] = PathPointTypeBezier;
+
+    path->pathdata.Count += count-1;
+
+    GdipClosePathFigure(path);
+
+    GdipFree(ptf);
+
+    return status;
+}
+
+GpStatus WINGDIPAPI GdipAddPathPieI(GpPath *path, INT x, INT y, INT width, INT height,
+    REAL startAngle, REAL sweepAngle)
+{
+    return GdipAddPathPieI(path, (REAL)x, (REAL)y, (REAL)width, (REAL)height, startAngle, sweepAngle);
 }
 
 GpStatus WINGDIPAPI GdipAddPathPolygon(GpPath *path, GDIPCONST GpPointF *points, INT count)
@@ -723,6 +941,60 @@ GpStatus WINGDIPAPI GdipGetPointCount(GpPath *path, INT *count)
         return InvalidParameter;
 
     *count = path->pathdata.Count;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipReversePath(GpPath* path)
+{
+    INT i, count;
+    INT start = 0; /* position in reversed path */
+    GpPathData revpath;
+
+    if(!path)
+        return InvalidParameter;
+
+    count = path->pathdata.Count;
+
+    if(count == 0) return Ok;
+
+    revpath.Points = GdipAlloc(sizeof(GpPointF)*count);
+    revpath.Types  = GdipAlloc(sizeof(BYTE)*count);
+    revpath.Count  = count;
+    if(!revpath.Points || !revpath.Types){
+        GdipFree(revpath.Points);
+        GdipFree(revpath.Types);
+        return OutOfMemory;
+    }
+
+    for(i = 0; i < count; i++){
+
+        /* find next start point */
+        if(path->pathdata.Types[count-i-1] == PathPointTypeStart){
+            INT j;
+            for(j = start; j <= i; j++){
+                revpath.Points[j] = path->pathdata.Points[count-j-1];
+                revpath.Types[j] = path->pathdata.Types[count-j-1];
+            }
+            /* mark start point */
+            revpath.Types[start] = PathPointTypeStart;
+            /* set 'figure' endpoint type */
+            if(i-start > 1){
+                revpath.Types[i] = path->pathdata.Types[count-start-1] & ~PathPointTypePathTypeMask;
+                revpath.Types[i] |= revpath.Types[i-1];
+            }
+            else
+                revpath.Types[i] = path->pathdata.Types[start];
+
+            start = i+1;
+        }
+    }
+
+    memcpy(path->pathdata.Points, revpath.Points, sizeof(GpPointF)*count);
+    memcpy(path->pathdata.Types,  revpath.Types,  sizeof(BYTE)*count);
+
+    GdipFree(revpath.Points);
+    GdipFree(revpath.Types);
 
     return Ok;
 }

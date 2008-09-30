@@ -3528,18 +3528,7 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
             checkGLcall("glTexEnvi(GL_TEXTURE_LOD_BIAS_EXT, ...)");
         }
 
-        if (stateblock->wineD3DDevice->ps_selected_mode != SHADER_NONE && stateblock->pixelShader &&
-            ((IWineD3DPixelShaderImpl *)stateblock->pixelShader)->baseShader.function) {
-            /* Using a pixel shader? Verify the sampler types */
-
-            /* Make sure that the texture dimensions are enabled. I don't have to disable the other
-             * dimensions because the shader knows from which texture type to sample from. For the sake of
-             * debugging all dimensions could be enabled and a texture with some ugly pink bound to the unused
-             * dimensions. This should make wrong sampling sources visible :-)
-             */
-            glEnable(stateblock->textureDimensions[sampler]);
-            checkGLcall("glEnable(stateblock->textureDimensions[sampler])");
-        } else if(sampler < stateblock->lowest_disabled_stage) {
+        if(!use_ps(stateblock->wineD3DDevice) && sampler < stateblock->lowest_disabled_stage) {
             if(stateblock->renderState[WINED3DRS_COLORKEYENABLE] && sampler == 0) {
                 /* If color keying is enabled update the alpha test, it depends on the existence
                  * of a color key in stage 0
@@ -3562,11 +3551,26 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
     }
 }
 
+void apply_pshader_fog(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
+
+    if (use_ps(device)) {
+        if(!context->last_was_pshader) {
+            state_fog(state, stateblock, context);
+        }
+        context->last_was_pshader = TRUE;
+    } else {
+        if(context->last_was_pshader) {
+            state_fog(state, stateblock, context);
+        }
+        context->last_was_pshader = FALSE;
+    }
+}
+
 void apply_pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
     BOOL use_pshader = use_ps(device);
     BOOL use_vshader = use_vs(device);
-    BOOL update_fog = FALSE;
     int i;
 
     if (use_pshader) {
@@ -3580,7 +3584,6 @@ void apply_pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DC
                     sampler(STATE_SAMPLER(i), stateblock, context);
                 }
             }
-            update_fog = TRUE;
         } else {
            /* Otherwise all samplers were activated by the code above in earlier draws, or by sampler()
             * if a different texture was bound. I don't have to do anything.
@@ -3599,8 +3602,6 @@ void apply_pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DC
                         (STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP), stateblock, context);
             }
         }
-        if(context->last_was_pshader)
-            update_fog = TRUE;
     }
 
     if(!isStateDirty(context, device->StateTable[STATE_VSHADER].representative)) {
@@ -3610,11 +3611,6 @@ void apply_pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DC
             shaderconstant(STATE_VERTEXSHADERCONSTANT, stateblock, context);
         }
     }
-
-    if(update_fog)
-        state_fog(state, stateblock, context);
-
-    context->last_was_pshader = use_pshader;
 }
 
 static void shader_bumpenvmat(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
@@ -5406,6 +5402,8 @@ const struct StateEntryTemplate ffp_vertexstate_template[] = {
     { STATE_RENDER(WINED3DRS_POINTSIZE_MAX),              { STATE_RENDER(WINED3DRS_POINTSIZE_MAX),              state_psizemax_arb  }, ARB_POINT_PARAMETERS            },
     { STATE_RENDER(WINED3DRS_POINTSIZE_MAX),              { STATE_RENDER(WINED3DRS_POINTSIZE_MAX),              state_psizemax_ext  }, EXT_POINT_PARAMETERS            },
     { STATE_RENDER(WINED3DRS_POINTSIZE_MAX),              { STATE_RENDER(WINED3DRS_POINTSIZE_MAX),              state_psizemax_w    }, 0                               },
+    /* pixel shaders need a different fog input */
+    { STATE_PIXELSHADER,                                  { STATE_PIXELSHADER,                                  apply_pshader_fog   }, 0                               },
     /* Samplers for NP2 texture matrix adjustions. They are not needed if GL_ARB_texture_non_power_of_two is supported,
      * so register a NULL state handler in that case to get the vertex part of sampler() skipped(VTF is handled in the misc states.
      * otherwise, register sampler_texmatrix, which takes care of updating the texture matrix
@@ -5611,12 +5609,17 @@ static void ffp_fragment_get_caps(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_in
 
 static HRESULT ffp_fragment_alloc(IWineD3DDevice *iface) { return WINED3D_OK; }
 static void ffp_fragment_free(IWineD3DDevice *iface) {}
+static BOOL ffp_conv_supported(WINED3DFORMAT fmt) {
+    TRACE("Checking shader format support for format %s: [FAILED]", debug_d3dformat(fmt));
+    return FALSE;
+}
 
 const struct fragment_pipeline ffp_fragment_pipeline = {
     ffp_enable,
     ffp_fragment_get_caps,
     ffp_fragment_alloc,
     ffp_fragment_free,
+    ffp_conv_supported,
     ffp_fragmentstate_template
 };
 

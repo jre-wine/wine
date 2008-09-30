@@ -266,8 +266,28 @@ static void test_SIPRetrieveSubjectGUID(void)
     /* Clean up */
     DeleteFileA(tempfile);
 
+    /* Create a file with just the .cab header 'MSCF' */
+    SetLastError(0xdeadbeef);
+    file = CreateFileA(tempfile, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "failed with %u\n", GetLastError());
+    WriteFile(file, cabFileData, 4, &written, NULL);
+    CloseHandle(file);
+
+    SetLastError(0xdeadbeef);
+    memset(&subject, 1, sizeof(GUID));
+    ret = CryptSIPRetrieveSubjectGuid(tempfileW, NULL, &subject);
+    ok( ret, "CryptSIPRetrieveSubjectGuid failed: %d (0x%08x)\n",
+            GetLastError(), GetLastError() );
+    ok ( !memcmp(&subject, &cabGUID, sizeof(GUID)),
+        "Expected GUID %s for cabinet file, not %s\n", show_guid(&cabGUID, guid1), show_guid(&subject, guid2));
+
+    /* Clean up */
+    DeleteFileA(tempfile);
+
     /* Create a .cab file */
-    file = CreateFileW(tempfileW, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+    SetLastError(0xdeadbeef);
+    file = CreateFileA(tempfile, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "failed with %u\n", GetLastError());
     WriteFile(file, cabFileData, sizeof(cabFileData), &written, NULL);
     CloseHandle(file);
 
@@ -278,8 +298,9 @@ static void test_SIPRetrieveSubjectGUID(void)
             GetLastError(), GetLastError() );
     ok ( !memcmp(&subject, &cabGUID, sizeof(GUID)),
         "Expected GUID %s for cabinet file, not %s\n", show_guid(&cabGUID, guid1), show_guid(&subject, guid2));
+
     /* Clean up */
-    DeleteFileW(tempfileW);
+    DeleteFileA(tempfile);
 }
 
 static void test_SIPLoad(void)
@@ -289,7 +310,7 @@ static void test_SIPLoad(void)
     static GUID dummySubject = { 0xdeadbeef, 0xdead, 0xbeef, { 0xde,0xad,0xbe,0xef,0xde,0xad,0xbe,0xef }};
     static GUID unknown      = { 0xC689AABA, 0x8E78, 0x11D0, { 0x8C,0x47,0x00,0xC0,0x4F,0xC2,0x95,0xEE }}; /* WINTRUST.DLL */
     static GUID unknown2     = { 0xDE351A43, 0x8E59, 0x11D0, { 0x8C,0x47,0x00,0xC0,0x4F,0xC2,0x95,0xEE }}; /* WINTRUST.DLL */
-    /* The next SIP is available on Windows (not on a clean Wine install) */
+    /* The next SIP is available on Windows and on Wine */
     static GUID unknown3     = { 0x000C10F1, 0x0000, 0x0000, { 0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46 }}; /* MSISIP.DLL */
     SIP_DISPATCH_INFO sdi;
     HMODULE hCrypt;
@@ -382,24 +403,21 @@ static void test_SIPLoad(void)
         /* As msisip.dll is not checked yet by any of the previous calls, the
          * function DllCanUnloadNow will be checked again in msisip.dll (it's not present)
          */
-        todo_wine
-        {
-            ok( sdi.pfGet != (pCryptSIPGetSignedDataMsg)0xdeadbeef, "Expected a function pointer to be loaded.\n");
+        ok( sdi.pfGet != (pCryptSIPGetSignedDataMsg)0xdeadbeef, "Expected a function pointer to be loaded.\n");
 
-            /* This is another SIP but this test proves the function addresses are the same as
-             * in the previous test.
-             */
-            if (funcCryptSIPGetSignedDataMsg && funcCryptSIPPutSignedDataMsg && funcCryptSIPCreateIndirectData &&
-                funcCryptSIPVerifyIndirectData && funcCryptSIPRemoveSignedDataMsg)
-                ok (sdi.pfGet == funcCryptSIPGetSignedDataMsg &&
-                    sdi.pfPut == funcCryptSIPPutSignedDataMsg &&
-                    sdi.pfCreate == funcCryptSIPCreateIndirectData &&
-                    sdi.pfVerify == funcCryptSIPVerifyIndirectData &&
-                    sdi.pfRemove == funcCryptSIPRemoveSignedDataMsg,
-                    "Expected function addresses to be from crypt32\n");
-            else
-                trace("Couldn't load function pointers\n");
-        }
+        /* This is another SIP but this test proves the function addresses are the same as
+         * in the previous test.
+         */
+        if (funcCryptSIPGetSignedDataMsg && funcCryptSIPPutSignedDataMsg && funcCryptSIPCreateIndirectData &&
+            funcCryptSIPVerifyIndirectData && funcCryptSIPRemoveSignedDataMsg)
+            ok (sdi.pfGet == funcCryptSIPGetSignedDataMsg &&
+                sdi.pfPut == funcCryptSIPPutSignedDataMsg &&
+                sdi.pfCreate == funcCryptSIPCreateIndirectData &&
+                sdi.pfVerify == funcCryptSIPVerifyIndirectData &&
+                sdi.pfRemove == funcCryptSIPRemoveSignedDataMsg,
+                "Expected function addresses to be from crypt32\n");
+        else
+            trace("Couldn't load function pointers\n");
     }
 
     /* Reserved parameter not 0 */

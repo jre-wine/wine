@@ -80,6 +80,7 @@ struct IWineD3DSurface;
 #define WINEDDERR_SURFACEBUSY                       MAKE_WINED3DHRESULT(430)
 #define WINEDDERR_INVALIDRECT                       MAKE_WINED3DHRESULT(150)
 #define WINEDDERR_NOCLIPLIST                        MAKE_WINED3DHRESULT(205)
+#define WINEDDERR_OVERLAYNOTVISIBLE                 MAKE_WINED3DHRESULT(577)
 #define WINED3DOK_NOAUTOGEN                         MAKE_WINED3DSTATUS(2159)
 
  /*****************************************************************************
@@ -366,15 +367,16 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
     STDMETHOD(CreateVolume)(THIS_ UINT Width, UINT Height, UINT Depth, DWORD Usage, WINED3DFORMAT Format, WINED3DPOOL Pool, struct IWineD3DVolume** ppVolumeTexture, HANDLE* pSharedHandle, IUnknown *parent) PURE;
     STDMETHOD(CreateCubeTexture)(THIS_ UINT EdgeLength, UINT Levels, DWORD Usage, WINED3DFORMAT Format, WINED3DPOOL Pool, struct IWineD3DCubeTexture** ppCubeTexture, HANDLE* pSharedHandle, IUnknown *parent, D3DCB_CREATESURFACEFN pFn) PURE;
     STDMETHOD(CreateQuery)(THIS_ WINED3DQUERYTYPE Type, struct IWineD3DQuery **ppQuery, IUnknown *pParent);
-    STDMETHOD(CreateAdditionalSwapChain)(THIS_ WINED3DPRESENT_PARAMETERS *pPresentationParameters, struct IWineD3DSwapChain **pSwapChain, IUnknown *pParent, D3DCB_CREATERENDERTARGETFN pFn, D3DCB_CREATEDEPTHSTENCILSURFACEFN pFn2);
+    STDMETHOD(CreateAdditionalSwapChain)(THIS_ WINED3DPRESENT_PARAMETERS *pPresentationParameters, struct IWineD3DSwapChain **pSwapChain, IUnknown *pParent, D3DCB_CREATERENDERTARGETFN pFn, D3DCB_CREATEDEPTHSTENCILSURFACEFN pFn2, WINED3DSURFTYPE surface_type);
     STDMETHOD(CreateVertexDeclaration)(THIS_ struct IWineD3DVertexDeclaration** ppDecl, IUnknown* pParent, const WINED3DVERTEXELEMENT *elements, UINT element_count) PURE;
     STDMETHOD(CreateVertexDeclarationFromFVF)(THIS_ struct IWineD3DVertexDeclaration** ppDecl, IUnknown* pParent, DWORD Fvf) PURE;
     STDMETHOD(CreateVertexShader)(THIS_ struct IWineD3DVertexDeclaration *vertex_declaration, CONST DWORD* pFunction, struct IWineD3DVertexShader** ppShader, IUnknown *pParent) PURE;
     STDMETHOD(CreatePixelShader)(THIS_ CONST DWORD* pFunction, struct IWineD3DPixelShader** ppShader, IUnknown *pParent) PURE;
     STDMETHOD_(HRESULT,CreatePalette)(THIS_ DWORD Flags, PALETTEENTRY *PalEnt, struct IWineD3DPalette **Palette, IUnknown *Parent);
     STDMETHOD(Init3D)(THIS_ WINED3DPRESENT_PARAMETERS* pPresentationParameters, D3DCB_CREATEADDITIONALSWAPCHAIN D3DCB_CreateAdditionalSwapChain);
+    STDMETHOD(InitGDI)(THIS_ WINED3DPRESENT_PARAMETERS* pPresentationParameters, D3DCB_CREATEADDITIONALSWAPCHAIN D3DCB_CreateAdditionalSwapChain);
     STDMETHOD(Uninit3D)(THIS, D3DCB_DESTROYSURFACEFN pFn, D3DCB_DESTROYSWAPCHAINFN pFn2);
-    STDMETHOD_(void, SetFullscreen)(THIS_ BOOL fullscreen);
+    STDMETHOD(UninitGDI)(THIS, D3DCB_DESTROYSWAPCHAINFN pFn2);
     STDMETHOD_(void, SetMultithreaded)(THIS);
     STDMETHOD(EvictManagedResources)(THIS) PURE;
     STDMETHOD_(UINT, GetAvailableTextureMem)(THIS) PURE;
@@ -384,8 +386,6 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
     STDMETHOD(GetDirect3D)(THIS_ IWineD3D** ppD3D) PURE;
     STDMETHOD(GetDisplayMode)(THIS_ UINT iSwapChain, WINED3DDISPLAYMODE* pMode) PURE;
     STDMETHOD(SetDisplayMode)(THIS_ UINT iSwapChain, WINED3DDISPLAYMODE* pMode) PURE;
-    STDMETHOD(GetHWND)(THIS_ HWND *hwnd) PURE;
-    STDMETHOD(SetHWND)(THIS_ HWND hwnd) PURE;
     STDMETHOD_(UINT, GetNumberOfSwapChains)(THIS) PURE;
     STDMETHOD(GetRasterStatus)(THIS_ UINT iSwapChain, WINED3DRASTER_STATUS* pRasterStatus) PURE;
     STDMETHOD(GetSwapChain)(THIS_ UINT iSwapChain, struct IWineD3DSwapChain **pSwapChain) PURE;
@@ -507,15 +507,16 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
 #define IWineD3DDevice_CreateVolume(p,a,b,c,d,e,f,g,h,i)        (p)->lpVtbl->CreateVolume(p,a,b,c,d,e,f,g,h,i)
 #define IWineD3DDevice_CreateCubeTexture(p,a,b,c,d,e,f,g,h,i)   (p)->lpVtbl->CreateCubeTexture(p,a,b,c,d,e,f,g,h,i)
 #define IWineD3DDevice_CreateQuery(p,a,b,c)                     (p)->lpVtbl->CreateQuery(p,a,b,c)
-#define IWineD3DDevice_CreateAdditionalSwapChain(p,a,b,c,d,e)   (p)->lpVtbl->CreateAdditionalSwapChain(p,a,b,c,d,e)
+#define IWineD3DDevice_CreateAdditionalSwapChain(p,a,b,c,d,e,f) (p)->lpVtbl->CreateAdditionalSwapChain(p,a,b,c,d,e,f)
 #define IWineD3DDevice_CreateVertexDeclaration(p,a,b,c,d)       (p)->lpVtbl->CreateVertexDeclaration(p,a,b,c,d)
 #define IWineD3DDevice_CreateVertexDeclarationFromFVF(p,a,b,c)  (p)->lpVtbl->CreateVertexDeclarationFromFVF(p,a,b,c)
 #define IWineD3DDevice_CreateVertexShader(p,a,b,c,d)            (p)->lpVtbl->CreateVertexShader(p,a,b,c,d)
 #define IWineD3DDevice_CreatePixelShader(p,a,b,c)               (p)->lpVtbl->CreatePixelShader(p,a,b,c)
 #define IWineD3DDevice_CreatePalette(p, a, b, c, d)             (p)->lpVtbl->CreatePalette(p, a, b, c, d)
 #define IWineD3DDevice_Init3D(p, a, b)                          (p)->lpVtbl->Init3D(p, a, b)
+#define IWineD3DDevice_InitGDI(p, a, b)                         (p)->lpVtbl->InitGDI(p, a, b)
 #define IWineD3DDevice_Uninit3D(p, a, b)                        (p)->lpVtbl->Uninit3D(p, a, b)
-#define IWineD3DDevice_SetFullscreen(p, a)                      (p)->lpVtbl->SetFullscreen(p, a)
+#define IWineD3DDevice_UninitGDI(p, a)                          (p)->lpVtbl->UninitGDI(p, a)
 #define IWineD3DDevice_SetMultithreaded(p)                      (p)->lpVtbl->SetMultithreaded(p)
 #define IWineD3DDevice_EvictManagedResources(p)                 (p)->lpVtbl->EvictManagedResources(p)
 #define IWineD3DDevice_GetAvailableTextureMem(p)                (p)->lpVtbl->GetAvailableTextureMem(p)
@@ -525,8 +526,6 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
 #define IWineD3DDevice_GetDirect3D(p,a)                         (p)->lpVtbl->GetDirect3D(p,a)
 #define IWineD3DDevice_GetDisplayMode(p,a,b)                    (p)->lpVtbl->GetDisplayMode(p,a,b)
 #define IWineD3DDevice_SetDisplayMode(p,a,b)                    (p)->lpVtbl->SetDisplayMode(p,a,b)
-#define IWineD3DDevice_GetHWND(p, a)                            (p)->lpVtbl->GetHWND(p, a)
-#define IWineD3DDevice_SetHWND(p, a)                            (p)->lpVtbl->SetHWND(p, a)
 #define IWineD3DDevice_GetNumberOfSwapChains(p)                 (p)->lpVtbl->GetNumberOfSwapChains(p)
 #define IWineD3DDevice_Reset(p,a)                               (p)->lpVtbl->Reset(p,a)
 #define IWineD3DDevice_SetDialogBoxMode(p,a)                    (p)->lpVtbl->SetDialogBoxMode(p,a)
@@ -1174,6 +1173,7 @@ DECLARE_INTERFACE_(IWineD3DSurface,IWineD3DResource)
     STDMETHOD_(void,ModifyLocation)(THIS_ DWORD flag, BOOL persistent);
     STDMETHOD(LoadLocation)(THIS_ DWORD flag, const RECT *rect);
     STDMETHOD_(WINED3DSURFTYPE,GetImplType)(THIS);
+    STDMETHOD(DrawOverlay)(THIS);
 };
 #undef INTERFACE
 
@@ -1234,6 +1234,7 @@ DECLARE_INTERFACE_(IWineD3DSurface,IWineD3DResource)
 #define IWineD3DSurface_ModifyLocation(p,a,b)        (p)->lpVtbl->ModifyLocation(p,a,b)
 #define IWineD3DSurface_LoadLocation(p,a,b)          (p)->lpVtbl->LoadLocation(p,a,b)
 #define IWineD3DSurface_GetImplType(p)               (p)->lpVtbl->GetImplType(p)
+#define IWineD3DSurface_DrawOverlay(p)               (p)->lpVtbl->DrawOverlay(p)
 #endif
 
 /*****************************************************************************
@@ -1420,6 +1421,7 @@ DECLARE_INTERFACE_(IWineD3DSwapChain,IWineD3DBase)
     STDMETHOD_(void, Destroy)(THIS_ D3DCB_DESTROYSURFACEFN pFn) PURE;
     STDMETHOD(GetDevice)(THIS_ IWineD3DDevice **ppDevice) PURE;
     STDMETHOD(Present)(THIS_ CONST RECT *pSourceRect, CONST RECT *pDestRect, HWND hDestWindowOverride, CONST RGNDATA *pDirtyRegion, DWORD dwFlags) PURE;
+    STDMETHOD(SetDestWindowOverride)(THIS_ HWND window);
     STDMETHOD(GetFrontBufferData)(THIS_ IWineD3DSurface *pDestSurface) PURE;
     STDMETHOD(GetBackBuffer)(THIS_ UINT iBackBuffer, WINED3DBACKBUFFER_TYPE Type, IWineD3DSurface **ppBackBuffer) PURE;
     STDMETHOD(GetRasterStatus)(THIS_ WINED3DRASTER_STATUS *pRasterStatus) PURE;
@@ -1441,6 +1443,7 @@ DECLARE_INTERFACE_(IWineD3DSwapChain,IWineD3DBase)
 #define IWineD3DSwapChain_Destroy(p,a)                 (p)->lpVtbl->Destroy(p,a)
 #define IWineD3DSwapChain_GetDevice(p,a)               (p)->lpVtbl->GetDevice(p,a)
 #define IWineD3DSwapChain_Present(p,a,b,c,d,e)         (p)->lpVtbl->Present(p,a,b,c,d,e)
+#define IWineD3DSwapChain_SetDestWindowOverride(p,a)   (p)->lpVtbl->SetDestWindowOverride(p,a)
 #define IWineD3DSwapChain_GetFrontBufferData(p,a)      (p)->lpVtbl->GetFrontBufferData(p,a)
 #define IWineD3DSwapChain_GetBackBuffer(p,a,b,c)       (p)->lpVtbl->GetBackBuffer(p,a,b,c)
 #define IWineD3DSwapChain_GetRasterStatus(p,a)         (p)->lpVtbl->GetRasterStatus(p,a)

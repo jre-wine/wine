@@ -16,6 +16,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "corerror.h"
 #include "mstask_private.h"
 #include "wine/debug.h"
 
@@ -99,9 +100,10 @@ static HRESULT WINAPI MSTASK_ITaskScheduler_Activate(
         REFIID riid,
         IUnknown **ppunk)
 {
-    FIXME("%p, %s, %s, %p: stub\n", iface, debugstr_w(pwszName),
+    TRACE("%p, %s, %s, %p: stub\n", iface, debugstr_w(pwszName),
             debugstr_guid(riid), ppunk);
-    return E_NOTIMPL;
+    FIXME("Partial stub always returning COR_E_FILENOTFOUND\n");
+    return COR_E_FILENOTFOUND;
 }
 
 static HRESULT WINAPI MSTASK_ITaskScheduler_Delete(
@@ -119,9 +121,18 @@ static HRESULT WINAPI MSTASK_ITaskScheduler_NewWorkItem(
         REFIID riid,
         IUnknown **ppunk)
 {
-    FIXME("%p, %s, %s, %s, %p: stub\n", iface, debugstr_w(pwszTaskName),
+    HRESULT hr;
+    TRACE("(%p, %s, %s, %s, %p)\n", iface, debugstr_w(pwszTaskName),
             debugstr_guid(rclsid) ,debugstr_guid(riid),  ppunk);
-    return E_NOTIMPL;
+
+    if (!IsEqualGUID(rclsid, &CLSID_CTask))
+        return CLASS_E_CLASSNOTAVAILABLE;
+
+    if (!IsEqualGUID(riid, &IID_ITask))
+        return E_NOINTERFACE;
+
+    hr = TaskConstructor(pwszTaskName, (LPVOID *)ppunk);
+    return hr;
 }
 
 static HRESULT WINAPI MSTASK_ITaskScheduler_AddWorkItem(

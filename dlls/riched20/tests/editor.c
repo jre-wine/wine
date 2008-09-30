@@ -1087,6 +1087,27 @@ static void test_EM_SETTEXTMODE(void)
   DestroyWindow(hwndRichEdit);
 }
 
+static void test_SETPARAFORMAT(void)
+{
+  HWND hwndRichEdit = new_richedit(NULL);
+  PARAFORMAT2 fmt;
+  HRESULT ret;
+  fmt.cbSize = sizeof(PARAFORMAT2);
+  fmt.dwMask = PFM_ALIGNMENT;
+  fmt.wAlignment = PFA_LEFT;
+
+  ret = SendMessage(hwndRichEdit, EM_SETPARAFORMAT, 0, (LPARAM) &fmt);
+  ok(ret != 0, "expected non-zero got %d\n", ret);
+
+  fmt.cbSize = sizeof(PARAFORMAT2);
+  fmt.dwMask = -1;
+  ret = SendMessage(hwndRichEdit, EM_GETPARAFORMAT, 0, (LPARAM) &fmt);
+  ok(ret == PFM_ALL2, "expected %x got %x\n", PFM_ALL2, ret);
+  ok(fmt.dwMask == PFM_ALL2, "expected %x got %x\n", PFM_ALL2, fmt.dwMask);
+
+  DestroyWindow(hwndRichEdit);
+}
+
 static void test_TM_PLAINTEXT(void)
 {
   /*Tests plain text properties*/
@@ -3180,6 +3201,12 @@ static void test_EM_SETTEXTEX(void)
   WCHAR TestItem1[] = {'T', 'e', 's', 't', 
                        'S', 'o', 'm', 'e', 
                        'T', 'e', 'x', 't', 0}; 
+  WCHAR TestItem1alt[] = {'T', 'T', 'e', 's',
+                          't', 'S', 'o', 'm',
+                          'e', 'T', 'e', 'x',
+                          't', 't', 'S', 'o',
+                          'm', 'e', 'T', 'e',
+                          'x', 't', 0};
   WCHAR TestItem2[] = {'T', 'e', 's', 't',
                        'S', 'o', 'm', 'e',
                        'T', 'e', 'x', 't',
@@ -3208,6 +3235,7 @@ static void test_EM_SETTEXTEX(void)
                        ' ','\r', 0};
 #define MAX_BUF_LEN 1024
   WCHAR buf[MAX_BUF_LEN];
+  char bufACP[MAX_BUF_LEN];
   char * p;
   int result;
   CHARRANGE cr;
@@ -3227,7 +3255,7 @@ static void test_EM_SETTEXTEX(void)
       "EM_GETTEXTEX results not what was set by EM_SETTEXTEX\n");
 
   /* Unlike WM_SETTEXT/WM_GETTEXT pair, EM_SETTEXTEX/EM_GETTEXTEX does not
-     convert \r to \r\n on return
+     convert \r to \r\n on return: !ST_SELECTION && Unicode && !\rtf
    */
   setText.codepage = 1200;  /* no constant for unicode */
   getText.codepage = 1200;  /* no constant for unicode */
@@ -3273,7 +3301,7 @@ static void test_EM_SETTEXTEX(void)
       "EM_GETTEXTEX results not what was set by EM_SETTEXTEX\n");
 
 
-  /* \r\n pairs get changed into \r */
+  /* \r\n pairs get changed into \r: !ST_SELECTION && Unicode && !\rtf */
   setText.codepage = 1200;  /* no constant for unicode */
   getText.codepage = 1200;  /* no constant for unicode */
   getText.cb = MAX_BUF_LEN;
@@ -3286,7 +3314,7 @@ static void test_EM_SETTEXTEX(void)
   ok(lstrcmpW(buf, TestItem3_after) == 0,
       "EM_SETTEXTEX did not convert properly\n");
 
-  /* \n also gets changed to \r */
+  /* \n also gets changed to \r: !ST_SELECTION && Unicode && !\rtf */
   setText.codepage = 1200;  /* no constant for unicode */
   getText.codepage = 1200;  /* no constant for unicode */
   getText.cb = MAX_BUF_LEN;
@@ -3299,7 +3327,7 @@ static void test_EM_SETTEXTEX(void)
   ok(lstrcmpW(buf, TestItem3_after) == 0,
       "EM_SETTEXTEX did not convert properly\n");
 
-  /* \r\r\n gets changed into single space */
+  /* \r\r\n gets changed into single space: !ST_SELECTION && Unicode && !\rtf */
   setText.codepage = 1200;  /* no constant for unicode */
   getText.codepage = 1200;  /* no constant for unicode */
   getText.cb = MAX_BUF_LEN;
@@ -3312,6 +3340,7 @@ static void test_EM_SETTEXTEX(void)
   ok(lstrcmpW(buf, TestItem4_after) == 0,
       "EM_SETTEXTEX did not convert properly\n");
 
+  /* !ST_SELECTION && Unicode && !\rtf */
   result = SendMessage(hwndRichEdit, EM_SETTEXTEX, 
                        (WPARAM)&setText, (LPARAM) NULL);
   SendMessage(hwndRichEdit, EM_GETTEXTEX, (WPARAM)&getText, (LPARAM) buf);
@@ -3321,14 +3350,14 @@ static void test_EM_SETTEXTEX(void)
   ok(lstrlenW(buf) == 0,
       "EM_SETTEXTEX with NULL lParam should clear rich edit.\n");
   
-  /* put some text back */
+  /* put some text back: !ST_SELECTION && Unicode && !\rtf */
   setText.flags = 0;
   SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&setText, (LPARAM) TestItem1);
   /* select some text */
   cr.cpMax = 1;
   cr.cpMin = 3;
   SendMessage(hwndRichEdit, EM_EXSETSEL, 0, (LPARAM) &cr);
-  /* replace current selection */
+  /* replace current selection: ST_SELECTION && Unicode && !\rtf */
   setText.flags = ST_SELECTION;
   result = SendMessage(hwndRichEdit, EM_SETTEXTEX, 
                        (WPARAM)&setText, (LPARAM) NULL);
@@ -3337,14 +3366,14 @@ static void test_EM_SETTEXTEX(void)
       " with no text should return 0. Got %i\n",
       result);
   
-  /* put some text back */
+  /* put some text back: !ST_SELECTION && Unicode && !\rtf */
   setText.flags = 0;
   SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&setText, (LPARAM) TestItem1);
   /* select some text */
   cr.cpMax = 1;
   cr.cpMin = 3;
   SendMessage(hwndRichEdit, EM_EXSETSEL, 0, (LPARAM) &cr);
-  /* replace current selection */
+  /* replace current selection: ST_SELECTION && Unicode && !\rtf */
   setText.flags = ST_SELECTION;
   result = SendMessage(hwndRichEdit, EM_SETTEXTEX,
                        (WPARAM)&setText, (LPARAM) TestItem1);
@@ -3369,6 +3398,7 @@ static void test_EM_SETTEXTEX(void)
               (WPARAM)(SF_RTF), (LPARAM)&es);
   trace("EM_STREAMOUT produced: \n%s\n", (char *)buf);
 
+  /* !ST_SELECTION && !Unicode && \rtf */
   setText.codepage = CP_ACP;/* EM_STREAMOUT saved as ANSI string */
   getText.codepage = 1200;  /* no constant for unicode */
   getText.cb = MAX_BUF_LEN;
@@ -3381,6 +3411,66 @@ static void test_EM_SETTEXTEX(void)
   SendMessage(hwndRichEdit, EM_GETTEXTEX, (WPARAM)&getText, (LPARAM) buf);
   ok(lstrcmpW(buf, TestItem1) == 0,
       "EM_GETTEXTEX results not what was set by EM_SETTEXTEX\n");
+
+  /* The following test demonstrates that EM_SETTEXTEX supports RTF strings with a selection */
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) "TestSomeText"); /* TestItem1 */
+  p = (char *)buf;
+  es.dwCookie = (DWORD_PTR)&p;
+  es.dwError = 0;
+  es.pfnCallback = test_WM_SETTEXT_esCallback;
+  memset(buf, 0, sizeof(buf));
+  SendMessage(hwndRichEdit, EM_STREAMOUT,
+              (WPARAM)(SF_RTF), (LPARAM)&es);
+  trace("EM_STREAMOUT produced: \n%s\n", (char *)buf);
+
+  /* select some text */
+  cr.cpMax = 1;
+  cr.cpMin = 3;
+  SendMessage(hwndRichEdit, EM_EXSETSEL, 0, (LPARAM) &cr);
+
+  /* ST_SELECTION && !Unicode && \rtf */
+  setText.codepage = CP_ACP;/* EM_STREAMOUT saved as ANSI string */
+  getText.codepage = 1200;  /* no constant for unicode */
+  getText.cb = MAX_BUF_LEN;
+  getText.flags = GT_DEFAULT;
+  getText.lpDefaultChar = NULL;
+  getText.lpUsedDefChar = NULL;
+
+  setText.flags = ST_SELECTION;
+  SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&setText, (LPARAM) buf);
+  SendMessage(hwndRichEdit, EM_GETTEXTEX, (WPARAM)&getText, (LPARAM) buf);
+  ok(lstrcmpW(buf, TestItem1alt) == 0,
+      "EM_GETTEXTEX results not what was set by EM_SETTEXTEX when"
+      " using ST_SELECTION on an RTF string and non-Unicode\n");
+
+  /* The following test demonstrates that EM_SETTEXTEX replacing a selection */
+  setText.codepage = 1200;  /* no constant for unicode */
+  getText.codepage = CP_ACP;
+  getText.cb = MAX_BUF_LEN;
+
+  setText.flags = 0;
+  SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&setText, (LPARAM) TestItem1); /* TestItem1 */
+  SendMessage(hwndRichEdit, EM_GETTEXTEX, (WPARAM)&getText, (LPARAM) bufACP);
+
+  /* select some text */
+  cr.cpMax = 1;
+  cr.cpMin = 3;
+  SendMessage(hwndRichEdit, EM_EXSETSEL, 0, (LPARAM) &cr);
+
+  /* ST_SELECTION && !Unicode && !\rtf */
+  setText.codepage = CP_ACP;
+  getText.codepage = 1200;  /* no constant for unicode */
+  getText.cb = MAX_BUF_LEN;
+  getText.flags = GT_DEFAULT;
+  getText.lpDefaultChar = NULL;
+  getText.lpUsedDefChar = NULL;
+
+  setText.flags = ST_SELECTION;
+  SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&setText, (LPARAM) bufACP);
+  SendMessage(hwndRichEdit, EM_GETTEXTEX, (WPARAM)&getText, (LPARAM) buf);
+  ok(lstrcmpW(buf, TestItem1alt) == 0,
+      "EM_GETTEXTEX results not what was set by EM_SETTEXTEX when"
+      " using ST_SELECTION and non-Unicode\n");
 
 
   DestroyWindow(hwndRichEdit);
@@ -5327,6 +5417,7 @@ START_TEST( editor )
   test_undo_coalescing();
   test_word_movement();
   test_EM_CHARFROMPOS();
+  test_SETPARAFORMAT();
 
   /* Set the environment variable WINETEST_RICHED20 to keep windows
    * responsive and open for 30 seconds. This is useful for debugging.

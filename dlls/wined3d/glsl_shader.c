@@ -70,7 +70,8 @@ void print_glsl_info_log(WineD3D_GL_Info *gl_info, GLhandleARB obj) {
         "Vertex shader(s) linked, no fragment shader(s) defined.",          /* fglrx, no \n   */
         "Fragment shader was successfully compiled to run on hardware.\nWARNING: 0:1: extension 'GL_ARB_draw_buffers' is not supported",
         "Fragment shader(s) linked, no vertex shader(s) defined.",          /* fglrx, no \n   */
-        "Fragment shader(s) linked, no vertex shader(s) defined. \n "       /* fglrx, with \n */
+        "Fragment shader(s) linked, no vertex shader(s) defined. \n ",      /* fglrx, with \n */
+        "WARNING: 0:2: extension 'GL_ARB_draw_buffers' is not supported\n"  /* MacOS ati      */
     };
 
     GL_EXTCALL(glGetObjectParameterivARB(obj,
@@ -1346,7 +1347,7 @@ static void shader_glsl_color_correction(SHADER_OPCODE_ARG* arg) {
 
         case WINED3DFMT_ATI2N:
             /* GL_ATI_texture_compression_3dc returns the two channels as luminance-alpha,
-             * which means the first one is replicated accross .rgb, and the 2nd one is in
+             * which means the first one is replicated across .rgb, and the 2nd one is in
              * .a. We need the 2nd in .g
              *
              * GL_EXT_texture_compression_rgtc returns the values in .rg, however, they
@@ -3527,7 +3528,7 @@ static void shader_glsl_free(IWineD3DDevice *iface) {
         GL_EXTCALL(glDeleteObjectARB(priv->depth_blt_glsl_program_id));
     }
 
-    hash_table_destroy(priv->glsl_program_lookup);
+    hash_table_destroy(priv->glsl_program_lookup, NULL, NULL);
 
     HeapFree(GetProcessHeap(), 0, This->shader_priv);
     This->shader_priv = NULL;
@@ -3731,6 +3732,23 @@ static void shader_glsl_get_caps(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_inf
     TRACE_(d3d_caps)("Hardware pixel shader version %d.%d enabled (GLSL)\n", (pCaps->PixelShaderVersion >> 8) & 0xff, pCaps->PixelShaderVersion & 0xff);
 }
 
+static BOOL shader_glsl_conv_supported(WINED3DFORMAT fmt) {
+    TRACE("Checking shader format support for format %s:", debug_d3dformat(fmt));
+    switch(fmt) {
+        case WINED3DFMT_V8U8:
+        case WINED3DFMT_V16U16:
+        case WINED3DFMT_X8L8V8U8:
+        case WINED3DFMT_L6V5U5:
+        case WINED3DFMT_Q8W8V8U8:
+        case WINED3DFMT_ATI2N:
+            TRACE("[OK]\n");
+            return TRUE;
+        default:
+            TRACE("[FAILED\n");
+            return FALSE;
+    }
+}
+
 const shader_backend_t glsl_shader_backend = {
     shader_glsl_select,
     shader_glsl_select_depth_blt,
@@ -3745,4 +3763,5 @@ const shader_backend_t glsl_shader_backend = {
     shader_glsl_generate_pshader,
     shader_glsl_generate_vshader,
     shader_glsl_get_caps,
+    shader_glsl_conv_supported,
 };

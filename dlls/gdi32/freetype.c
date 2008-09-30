@@ -335,6 +335,7 @@ struct tagGdiFont {
     FONTSIGNATURE fs;
     GdiFont *base_font;
     VOID *GSUB_Table;
+    DWORD cache_num;
 };
 
 typedef struct {
@@ -3113,7 +3114,14 @@ static GdiFont *find_in_cache(HFONT hfont, const LOGFONTW *plf, const FMAT2 *pma
     return NULL;
 }
 
-    
+static void add_to_cache(GdiFont *font)
+{
+    static DWORD cache_num = 1;
+
+    font->cache_num = cache_num++;
+    list_add_head(&gdi_font_list, &font->entry);
+}
+
 /*************************************************************
  * create_child_font_list
  */
@@ -3547,6 +3555,12 @@ found:
         /* Windows uses integer scaling factors for bitmap fonts */
         INT scale, scaled_height;
 
+        /* FIXME: rotation of bitmap fonts is ignored */
+        height = abs(GDI_ROUND( (double)height * ret->font_desc.matrix.eM22 ));
+        if (ret->aveWidth)
+            ret->aveWidth = (double)ret->aveWidth * ret->font_desc.matrix.eM11;
+        ret->font_desc.matrix.eM11 = ret->font_desc.matrix.eM22 = 1.0;
+
         if (height != 0) height = diff;
         height += face->size.height;
 
@@ -3604,7 +3618,7 @@ found:
 
     TRACE("caching: gdiFont=%p  hfont=%p\n", ret, hfont);
 
-    list_add_head(&gdi_font_list, &ret->entry);
+    add_to_cache(ret);
     LeaveCriticalSection( &freetype_cs );
     return ret;
 }
@@ -4348,17 +4362,6 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
     if (!font->gm[original_index / GM_BLOCK_SIZE])
         font->gm[original_index / GM_BLOCK_SIZE] = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY, sizeof(GM) * GM_BLOCK_SIZE);
 
-    if(font->orientation || (format != GGO_METRICS && format != GGO_BITMAP && format != WINE_GGO_GRAY16_BITMAP) || lpmat)
-        load_flags |= FT_LOAD_NO_BITMAP;
-
-    err = pFT_Load_Glyph(ft_face, glyph_index, load_flags);
-
-    if(err) {
-        WARN("FT_Load_Glyph on index %x returns %d\n", glyph_index, err);
-        LeaveCriticalSection( &freetype_cs );
-	return GDI_ERROR;
-    }
-	
     /* Scaling factor */
     if (font->aveWidth)
     {
@@ -4371,13 +4374,6 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
     }
     else
         widthRatio = font->scale_y;
-
-    left = (INT)(ft_face->glyph->metrics.horiBearingX) & -64;
-    right = (INT)((ft_face->glyph->metrics.horiBearingX + ft_face->glyph->metrics.width) + 63) & -64;
-
-    adv = (INT)((ft_face->glyph->metrics.horiAdvance) + 63) >> 6;
-    lsb = left >> 6;
-    bbx = (right - left) >> 6;
 
     /* Scaling transform */
     if (widthRatio != 1.0 || font->scale_y != 1.0)
@@ -4445,6 +4441,24 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
         pFT_Matrix_Multiply(&extraMat, &transMatUnrotated);
         needsTransform = TRUE;
     }
+
+    if (needsTransform || (format != GGO_METRICS && format != GGO_BITMAP && format != WINE_GGO_GRAY16_BITMAP))
+        load_flags |= FT_LOAD_NO_BITMAP;
+
+    err = pFT_Load_Glyph(ft_face, glyph_index, load_flags);
+
+    if(err) {
+        WARN("FT_Load_Glyph on index %x returns %d\n", glyph_index, err);
+        LeaveCriticalSection( &freetype_cs );
+        return GDI_ERROR;
+    }
+
+    left = (INT)(ft_face->glyph->metrics.horiBearingX) & -64;
+    right = (INT)((ft_face->glyph->metrics.horiBearingX + ft_face->glyph->metrics.width) + 63) & -64;
+
+    adv = (INT)((ft_face->glyph->metrics.horiAdvance) + 63) >> 6;
+    lsb = left >> 6;
+    bbx = (right - left) >> 6;
 
     if(!needsTransform) {
 	top = (ft_face->glyph->metrics.horiBearingY + 63) & -64;
@@ -5745,6 +5759,22 @@ BOOL WINAPI GetRasterizerCaps( LPRASTERIZER_STATUS lprs, UINT cbNumBytes)
     lprs->nSize = sizeof(RASTERIZER_STATUS);
     lprs->wFlags = TT_AVAILABLE | TT_ENABLED | (hinting ? WINE_TT_HINTER_ENABLED : 0);
     lprs->nLanguageID = 0;
+    return TRUE;
+}
+
+/*************************************************************
+ *     WineEngRealizationInfo
+ */
+BOOL WineEngRealizationInfo(GdiFont *font, realization_info_t *info)
+{
+    FIXME("(%p, %p): stub!\n", font, info);
+
+    info->flags = 1;
+    if(FT_IS_SCALABLE(font->ft_face))
+        info->flags |= 2;
+
+    info->cache_num = font->cache_num;
+    info->unknown2 = -1;
     return TRUE;
 }
 

@@ -258,6 +258,7 @@ static DWORD CALLBACK iocp_poller(LPVOID Arg)
             callback( err, transferred, overlapped );
         }
     }
+    return 0;
 }
 
 /***********************************************************************
@@ -643,7 +644,7 @@ static inline void queue_move_timer(struct queue_timer *t, ULONGLONG time,
 
 static void queue_timer_expire(struct timer_queue *q)
 {
-    struct queue_timer *t;
+    struct queue_timer *t = NULL;
 
     RtlEnterCriticalSection(&q->cs);
     if (list_head(&q->timers))
@@ -656,9 +657,9 @@ static void queue_timer_expire(struct timer_queue *q)
                 t, t->period ? queue_current_time() + t->period : EXPIRE_NEVER,
                 FALSE);
         }
+        else
+            t = NULL;
     }
-    else
-        t = NULL;
     RtlLeaveCriticalSection(&q->cs);
 
     if (t)
@@ -816,8 +817,13 @@ NTSTATUS WINAPI RtlDeleteTimerQueueEx(HANDLE TimerQueue, HANDLE CompletionEvent)
 {
     struct timer_queue *q = TimerQueue;
     struct queue_timer *t, *temp;
-    HANDLE thread = q->thread;
+    HANDLE thread;
     NTSTATUS status;
+
+    if (!q)
+        return STATUS_INVALID_HANDLE;
+
+    thread = q->thread;
 
     RtlEnterCriticalSection(&q->cs);
     q->quit = TRUE;
@@ -851,6 +857,31 @@ NTSTATUS WINAPI RtlDeleteTimerQueueEx(HANDLE TimerQueue, HANDLE CompletionEvent)
     return status;
 }
 
+static struct timer_queue *default_timer_queue;
+
+static struct timer_queue *get_timer_queue(HANDLE TimerQueue)
+{
+    if (TimerQueue)
+        return TimerQueue;
+    else
+    {
+        if (!default_timer_queue)
+        {
+            HANDLE q;
+            NTSTATUS status = RtlCreateTimerQueue(&q);
+            if (status == STATUS_SUCCESS)
+            {
+                PVOID p = interlocked_cmpxchg_ptr(
+                    (void **) &default_timer_queue, q, NULL);
+                if (p)
+                    /* Got beat to the punch.  */
+                    RtlDeleteTimerQueueEx(p, NULL);
+            }
+        }
+        return default_timer_queue;
+    }
+}
+
 /***********************************************************************
  *              RtlCreateTimer   (NTDLL.@)
  *
@@ -882,8 +913,12 @@ NTSTATUS WINAPI RtlCreateTimer(PHANDLE NewTimer, HANDLE TimerQueue,
                                ULONG Flags)
 {
     NTSTATUS status;
-    struct timer_queue *q = TimerQueue;
-    struct queue_timer *t = RtlAllocateHeap(GetProcessHeap(), 0, sizeof *t);
+    struct queue_timer *t;
+    struct timer_queue *q = get_timer_queue(TimerQueue);
+    if (!q)
+        return STATUS_NO_MEMORY;
+
+    t = RtlAllocateHeap(GetProcessHeap(), 0, sizeof *t);
     if (!t)
         return STATUS_NO_MEMORY;
 
@@ -933,8 +968,8 @@ NTSTATUS WINAPI RtlCreateTimer(PHANDLE NewTimer, HANDLE TimerQueue,
 NTSTATUS WINAPI RtlUpdateTimer(HANDLE TimerQueue, HANDLE Timer,
                                DWORD DueTime, DWORD Period)
 {
-    struct timer_queue *q = TimerQueue;
     struct queue_timer *t = Timer;
+    struct timer_queue *q = t->q;
 
     RtlEnterCriticalSection(&q->cs);
     /* Can't change a timer if it was once-only or destroyed.  */
@@ -969,8 +1004,8 @@ NTSTATUS WINAPI RtlUpdateTimer(HANDLE TimerQueue, HANDLE Timer,
 NTSTATUS WINAPI RtlDeleteTimer(HANDLE TimerQueue, HANDLE Timer,
                                HANDLE CompletionEvent)
 {
-    struct timer_queue *q = TimerQueue;
     struct queue_timer *t = Timer;
+    struct timer_queue *q = t->q;
     NTSTATUS status = STATUS_PENDING;
     HANDLE event = NULL;
 

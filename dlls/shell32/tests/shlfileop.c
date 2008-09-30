@@ -154,19 +154,45 @@ static void clean_after_shfo_tests(void)
 static void test_get_file_info(void)
 {
     DWORD rc, rc2;
-    SHFILEINFO shfi, shfi2;
+    SHFILEINFOA shfi, shfi2;
+    SHFILEINFOW shfiw;
     char notepad[MAX_PATH];
+
+    /* Test whether fields of SHFILEINFOA are always cleared */
+    memset(&shfi, 0xcf, sizeof(shfi));
+    rc=SHGetFileInfoA("", 0, &shfi, sizeof(shfi), 0);
+    ok(rc, "SHGetFileInfoA('' | 0) should not fail\n");
+    todo_wine ok(shfi.hIcon == 0, "SHGetFileInfoA('' | 0) did not clear hIcon\n");
+    todo_wine ok(shfi.szDisplayName[0] == 0, "SHGetFileInfoA('' | 0) did not clear szDisplayName[0]\n");
+    todo_wine ok(shfi.szTypeName[0] == 0, "SHGetFileInfoA('' | 0) did not clear szTypeName[0]\n");
+    ok(shfi.iIcon == 0xcfcfcfcf, "SHGetFileInfoA('' | 0) should not clear iIcon\n");
+    ok(shfi.dwAttributes == 0xcfcfcfcf, "SHGetFileInfoA('' | 0) should not clear dwAttributes\n");
+
+    /* Test whether fields of SHFILEINFOW are always cleared */
+    memset(&shfiw, 0xcf, sizeof(shfiw));
+    rc=SHGetFileInfoW(NULL, 0, &shfiw, sizeof(shfiw), 0);
+    todo_wine ok(!rc, "SHGetFileInfoW(NULL | 0) should fail\n");
+    ok(shfiw.hIcon == (HANDLE) 0xcfcfcfcf, "SHGetFileInfoW(NULL | 0) should not clear hIcon\n");
+    todo_wine ok(shfiw.szDisplayName[0] == 0xcfcf, "SHGetFileInfoW(NULL | 0) should not clear szDisplayName[0]\n");
+    todo_wine ok(shfiw.szTypeName[0] == 0xcfcf, "SHGetFileInfoW(NULL | 0) should not clear szTypeName[0]\n");
+    todo_wine ok(shfiw.iIcon == 0xcfcfcfcf, "SHGetFileInfoW(NULL | 0) should not clear iIcon\n");
+    ok(shfiw.dwAttributes == 0xcfcfcfcf, "SHGetFileInfoW(NULL | 0) should not clear dwAttributes\n");
+
 
     /* Test some flag combinations that MSDN claims are not allowed,
      * but which work anyway
      */
-    shfi.dwAttributes=0xdeadbeef;
+    memset(&shfi, 0xcf, sizeof(shfi));
     rc=SHGetFileInfoA("c:\\nonexistent", FILE_ATTRIBUTE_DIRECTORY,
                       &shfi, sizeof(shfi),
                       SHGFI_ATTRIBUTES | SHGFI_USEFILEATTRIBUTES);
     todo_wine ok(rc, "SHGetFileInfoA(c:\\nonexistent | SHGFI_ATTRIBUTES) failed\n");
     if (rc)
-        ok(shfi.dwAttributes != 0xdeadbeef, "dwFileAttributes is not set\n");
+        ok(shfi.dwAttributes != 0xcfcfcfcf, "dwFileAttributes is not set\n");
+    todo_wine ok(shfi.hIcon == 0, "SHGetFileInfoA(c:\\nonexistent | SHGFI_ATTRIBUTES) did not clear hIcon\n");
+    todo_wine ok(shfi.szDisplayName[0] == 0, "SHGetFileInfoA(c:\\nonexistent | SHGFI_ATTRIBUTES) did not clear szDisplayName[0]\n");
+    todo_wine ok(shfi.szTypeName[0] == 0, "SHGetFileInfoA(c:\\nonexistent | SHGFI_ATTRIBUTES) did not clear szTypeName[0]\n");
+    ok(shfi.iIcon == 0xcfcfcfcf, "SHGetFileInfoA(c:\\nonexistent | SHGFI_ATTRIBUTES) should not clear iIcon\n");
 
     rc=SHGetFileInfoA("c:\\nonexistent", FILE_ATTRIBUTE_DIRECTORY,
                       &shfi, sizeof(shfi),
@@ -228,6 +254,48 @@ static void test_get_file_info(void)
         ok(lstrcmpi(shfi2.szDisplayName, shfi.szDisplayName) == 0, "wrong display name %s != %s\n", shfi.szDisplayName, shfi2.szDisplayName);
         ok(shfi2.iIcon == shfi.iIcon, "wrong icon index %d != %d\n", shfi.iIcon, shfi2.iIcon);
     }
+}
+
+static void test_get_file_info_iconlist(void)
+{
+    /* Test retrieving a handle to the system image list, and
+     * what that returns for hIcon
+     */
+    HRESULT hr;
+    HIMAGELIST hSysImageList;
+    LPITEMIDLIST pidList;
+    SHFILEINFOA shInfoa;
+    SHFILEINFOW shInfow;
+
+    hr = SHGetSpecialFolderLocation(NULL, CSIDL_DESKTOP, &pidList);
+    if (!SUCCEEDED(hr)) {
+         skip("can't get desktop pidl\n");
+         return;
+    }
+
+    memset(&shInfoa, 0xcf, sizeof(shInfoa));
+    hSysImageList = (HIMAGELIST) SHGetFileInfoA((const char *)pidList, 0,
+            &shInfoa, sizeof(shInfoa),
+	    SHGFI_SYSICONINDEX | SHGFI_SMALLICON | SHGFI_PIDL);
+    ok(hSysImageList != INVALID_HANDLE_VALUE, "Can't get handle for CSIDL_DESKTOP imagelist\n");
+    todo_wine ok(shInfoa.hIcon == 0, "SHGetFileInfoA(CSIDL_DESKTOP, SHGFI_SYSICONINDEX|SHGFI_SMALLICON|SHGFI_PIDL) did not clear hIcon\n");
+    todo_wine ok(shInfoa.szTypeName[0] == 0, "SHGetFileInfoA(CSIDL_DESKTOP, SHGFI_SYSICONINDEX|SHGFI_SMALLICON|SHGFI_PIDL) did not clear szTypeName[0]\n");
+    ok(shInfoa.iIcon != 0xcfcfcfcf, "SHGetFileInfoA(CSIDL_DESKTOP, SHGFI_SYSICONINDEX|SHGFI_SMALLICON|SHGFI_PIDL) should set iIcon\n");
+    ok(shInfoa.dwAttributes == 0xcfcfcfcf, "SHGetFileInfoA(CSIDL_DESKTOP, SHGFI_SYSICONINDEX|SHGFI_SMALLICON|SHGFI_PIDL) should not change dwAttributes\n");
+    CloseHandle(hSysImageList);
+
+    memset(&shInfow, 0xcf, sizeof(shInfow));
+    hSysImageList = (HIMAGELIST) SHGetFileInfoW((const WCHAR *)pidList, 0,
+            &shInfow, sizeof(shInfow),
+	    SHGFI_SYSICONINDEX | SHGFI_SMALLICON | SHGFI_PIDL);
+    ok(hSysImageList != INVALID_HANDLE_VALUE, "Can't get handle for CSIDL_DESKTOP imagelist\n");
+    todo_wine ok(shInfow.hIcon == 0, "SHGetFileInfoW(CSIDL_DESKTOP, SHGFI_SYSICONINDEX|SHGFI_SMALLICON|SHGFI_PIDL) did not clear hIcon\n");
+    ok(shInfow.szTypeName[0] == 0, "SHGetFileInfoW(CSIDL_DESKTOP, SHGFI_SYSICONINDEX|SHGFI_SMALLICON|SHGFI_PIDL) did not clear szTypeName[0]\n");
+    ok(shInfow.iIcon != 0xcfcfcfcf, "SHGetFileInfoW(CSIDL_DESKTOP, SHGFI_SYSICONINDEX|SHGFI_SMALLICON|SHGFI_PIDL) should set iIcon\n");
+    ok(shInfow.dwAttributes == 0xcfcfcfcf, "SHGetFileInfoW(CSIDL_DESKTOP, SHGFI_SYSICONINDEX|SHGFI_SMALLICON|SHGFI_PIDL) should not change dwAttributes\n");
+    CloseHandle(hSysImageList);
+
+    ILFree(pidList);
 }
 
 
@@ -319,14 +387,17 @@ static void test_delete(void)
     ok(file_exists("test1.txt"), "test1.txt should not have been removed\n");
 
     /* try to delete an invalid filename */
-    init_shfo_tests();
-    shfo.pFrom = "\0";
-    shfo.fFlags &= ~FOF_FILESONLY;
-    shfo.fAnyOperationsAborted = FALSE;
-    ret = SHFileOperation(&shfo);
-    ok(ret == ERROR_ACCESS_DENIED, "Expected ERROR_ACCESS_DENIED, got %d\n", ret);
-    ok(!shfo.fAnyOperationsAborted, "Expected no aborted operations\n");
-    ok(file_exists("test1.txt"), "Expected test1.txt to exist\n");
+    if (0) {
+        /* this crashes on win9x */
+        init_shfo_tests();
+        shfo.pFrom = "\0";
+        shfo.fFlags &= ~FOF_FILESONLY;
+        shfo.fAnyOperationsAborted = FALSE;
+        ret = SHFileOperation(&shfo);
+        ok(ret == ERROR_ACCESS_DENIED, "Expected ERROR_ACCESS_DENIED, got %d\n", ret);
+        ok(!shfo.fAnyOperationsAborted, "Expected no aborted operations\n");
+        ok(file_exists("test1.txt"), "Expected test1.txt to exist\n");
+    }
 
     /* try an invalid function */
     init_shfo_tests();
@@ -337,18 +408,22 @@ static void test_delete(void)
     ok(file_exists("test1.txt"), "Expected test1.txt to exist\n");
 
     /* try an invalid list, only one null terminator */
-    init_shfo_tests();
-    shfo.pFrom = "";
-    shfo.wFunc = FO_DELETE;
-    ret = SHFileOperation(&shfo);
-    ok(ret == ERROR_ACCESS_DENIED, "Expected ERROR_ACCESS_DENIED, got %d\n", ret);
-    ok(file_exists("test1.txt"), "Expected test1.txt to exist\n");
+    if (0) {
+        /* this crashes on win9x */
+        init_shfo_tests();
+        shfo.pFrom = "";
+        shfo.wFunc = FO_DELETE;
+        ret = SHFileOperation(&shfo);
+        ok(ret == ERROR_ACCESS_DENIED, "Expected ERROR_ACCESS_DENIED, got %d\n", ret);
+        ok(file_exists("test1.txt"), "Expected test1.txt to exist\n");
+    }
 
     /* delete a dir, and then a file inside the dir, same as
     * deleting a nonexistent file
     */
     init_shfo_tests();
     shfo.pFrom = "testdir2\0testdir2\\one.txt\0";
+    shfo.wFunc = FO_DELETE;
     ret = SHFileOperation(&shfo);
     ok(ret == ERROR_PATH_NOT_FOUND, "Expected ERROR_PATH_NOT_FOUND, got %d\n", ret);
     ok(!file_exists("testdir2"), "Expected testdir2 to not exist\n");
@@ -595,6 +670,8 @@ static void test_copy(void)
     init_shfo_tests();
     shfo.pFrom = from;
     shfo.pTo = to;
+    /* suppress the error-dialog in win9x here */
+    shfo.fFlags |= FOF_NOERRORUI;
     set_curr_dir_path(from, "test1.txt\0test2.txt\0");
     set_curr_dir_path(to, "test3.txt\0");
     retval = SHFileOperation(&shfo);
@@ -604,6 +681,7 @@ static void test_copy(void)
 
     /* try to copy many files to nonexistent directory */
     DeleteFile(to);
+    shfo.fFlags &= ~FOF_NOERRORUI;
     shfo.fAnyOperationsAborted = FALSE;
     retval = SHFileOperation(&shfo);
         ok(retval == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", retval);
@@ -956,32 +1034,37 @@ static void test_copy(void)
     ok(DeleteFileA("two.txt"), "Expected file to exist\n");
     ok(RemoveDirectoryA("threedir"), "Expected dir to exist\n");
 
-    createTestFile("one.txt");
-    createTestFile("two.txt");
+    if (0) {
+        /* this crashes on win9x */
+        createTestFile("one.txt");
+        createTestFile("two.txt");
 
-    /* pTo contains bogus 2nd name longer than MAX_PATH,
-     * multiple source files, FOF_MULTIDESTFILES
-     * dest dir does not exist
-     */
-    memset(to, 'a', 2 * MAX_PATH);
-    memset(to+MAX_PATH*2, 0, 2);
-    lstrcpyA(to, "threedir");
-    shfo.pFrom = "one.txt\0two.txt\0";
-    shfo.pTo = to;
-    shfo.fFlags = FOF_MULTIDESTFILES | FOF_NOCONFIRMATION |
-                  FOF_SILENT | FOF_NOERRORUI;
-    retval = SHFileOperation(&shfo);
-    ok(retval == ERROR_CANCELLED ||
-       retval == ERROR_SUCCESS, /* win2k3 */
-       "Expected ERROR_CANCELLED or ERROR_SUCCESS, got %d\n", retval);
-    ok(!DeleteFileA("threedir\\one.txt"), "Expected file to not exist\n");
-    ok(!DeleteFileA("threedir\\two.txt"), "Expected file to not exist\n");
-    ok(DeleteFileA("one.txt"), "Expected file to exist\n");
-    ok(DeleteFileA("two.txt"), "Expected file to exist\n");
-    ok(!RemoveDirectoryA("threedir"), "Expected dir to not exist\n");
+        /* pTo contains bogus 2nd name longer than MAX_PATH,
+         * multiple source files, FOF_MULTIDESTFILES
+         * dest dir does not exist
+         */
 
-    /* file exists in win2k */
-    DeleteFileA("threedir");
+        memset(to, 'a', 2 * MAX_PATH);
+        memset(to+MAX_PATH*2, 0, 2);
+        lstrcpyA(to, "threedir");
+        shfo.pFrom = "one.txt\0two.txt\0";
+        shfo.pTo = to;
+        shfo.fFlags = FOF_MULTIDESTFILES | FOF_NOCONFIRMATION |
+                      FOF_SILENT | FOF_NOERRORUI;
+        retval = SHFileOperation(&shfo);
+        ok(retval == ERROR_CANCELLED ||
+           retval == ERROR_SUCCESS, /* win2k3 */
+           "Expected ERROR_CANCELLED or ERROR_SUCCESS, got %d\n", retval);
+        ok(!DeleteFileA("threedir\\one.txt"), "Expected file to not exist\n");
+        ok(!DeleteFileA("threedir\\two.txt"), "Expected file to not exist\n");
+        ok(DeleteFileA("one.txt"), "Expected file to exist\n");
+        ok(DeleteFileA("two.txt"), "Expected file to exist\n");
+        ok(!RemoveDirectoryA("threedir"), "Expected dir to not exist\n");
+
+        /* file exists in win2k */
+        DeleteFileA("threedir");
+    }
+
 
     createTestFile("one.txt");
     createTestFile("two.txt");
@@ -1432,6 +1515,7 @@ START_TEST(shlfileop)
 
     init_shfo_tests();
     test_get_file_info();
+    test_get_file_info_iconlist();
     clean_after_shfo_tests();
 
     init_shfo_tests();

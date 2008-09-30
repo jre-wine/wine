@@ -586,8 +586,9 @@ static void test_lookupPrivilegeName(void)
     luid.LowPart = SE_CREATE_TOKEN_PRIVILEGE;
     cchName = sizeof(buf);
     ret = pLookupPrivilegeNameA("b0gu5.Nam3", &luid, buf, &cchName);
-    ok( !ret && GetLastError() == RPC_S_SERVER_UNAVAILABLE,
-     "LookupPrivilegeNameA didn't fail with RPC_S_SERVER_UNAVAILABLE: %d\n",
+    ok( !ret && (GetLastError() == RPC_S_SERVER_UNAVAILABLE ||
+                 GetLastError() == RPC_S_INVALID_NET_ADDR) /* w2k8 */,
+     "LookupPrivilegeNameA didn't fail with RPC_S_SERVER_UNAVAILABLE or RPC_S_INVALID_NET_ADDR: %d\n",
      GetLastError());
 }
 
@@ -644,8 +645,9 @@ static void test_lookupPrivilegeValue(void)
 
     /* check a bogus system name */
     ret = pLookupPrivilegeValueA("b0gu5.Nam3", "SeCreateTokenPrivilege", &luid);
-    ok( !ret && GetLastError() == RPC_S_SERVER_UNAVAILABLE,
-     "LookupPrivilegeValueA didn't fail with RPC_S_SERVER_UNAVAILABLE: %d\n",
+    ok( !ret && (GetLastError() == RPC_S_SERVER_UNAVAILABLE ||
+                GetLastError() == RPC_S_INVALID_NET_ADDR) /* w2k8 */,
+     "LookupPrivilegeValueA didn't fail with RPC_S_SERVER_UNAVAILABLE or RPC_S_INVALID_NET_ADDR: %d\n",
      GetLastError());
     /* check a NULL string */
     ret = pLookupPrivilegeValueA(NULL, 0, &luid);
@@ -2483,6 +2485,49 @@ static void test_acls(void)
     ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "InitializeAcl(-1) failed with error %d\n", GetLastError());
 }
 
+static void test_GetSecurityInfo(void)
+{
+    HANDLE obj;
+    PSECURITY_DESCRIPTOR sd;
+    PSID owner, group;
+    PACL dacl;
+    DWORD ret;
+
+    /* Create something.  Files have lots of associated security info.  */
+    obj = CreateFile(myARGV[0], GENERIC_READ, FILE_SHARE_READ, NULL,
+                     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (obj == INVALID_HANDLE_VALUE)
+    {
+        skip("Couldn't create an object for GetSecurityInfo test\n");
+        return;
+    }
+
+    ret = GetSecurityInfo(obj, SE_FILE_OBJECT,
+                          OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                          &owner, &group, &dacl, NULL, &sd);
+    ok(ret == ERROR_SUCCESS, "GetSecurityInfo returned %d\n", ret);
+    ok(sd != NULL, "GetSecurityInfo\n");
+    ok(owner != NULL, "GetSecurityInfo\n");
+    ok(group != NULL, "GetSecurityInfo\n");
+    ok(dacl != NULL, "GetSecurityInfo\n");
+    ok(IsValidAcl(dacl), "GetSecurityInfo\n");
+
+    LocalFree(sd);
+
+    /* If we don't ask for the security descriptor, Windows will still give us
+       the other stuff, leaving us no way to free it.  */
+    ret = GetSecurityInfo(obj, SE_FILE_OBJECT,
+                          OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                          &owner, &group, &dacl, NULL, NULL);
+    ok(ret == ERROR_SUCCESS, "GetSecurityInfo returned %d\n", ret);
+    ok(owner != NULL, "GetSecurityInfo\n");
+    ok(group != NULL, "GetSecurityInfo\n");
+    ok(dacl != NULL, "GetSecurityInfo\n");
+    ok(IsValidAcl(dacl), "GetSecurityInfo\n");
+
+    CloseHandle(obj);
+}
+
 START_TEST(security)
 {
     init();
@@ -2511,4 +2556,5 @@ START_TEST(security)
     test_ConvertSecurityDescriptorToString();
     test_PrivateObjectSecurity();
     test_acls();
+    test_GetSecurityInfo();
 }

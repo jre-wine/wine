@@ -793,6 +793,11 @@ static HRESULT WINAPI DP_IF_AddPlayerToGroup
   TRACE( "(%p)->(%p,0x%08x,0x%08x,%u)\n",
          This, lpMsgHdr, idGroup, idPlayer, bAnsi );
 
+  if( This->dp2->connectionInitialized == NO_PROVIDER )
+  {
+    return DPERR_UNINITIALIZED;
+  }
+
   /* Find the group */
   if( ( lpGData = DP_FindAnyGroup( This, idGroup ) ) == NULL )
   {
@@ -1015,6 +1020,11 @@ static HRESULT WINAPI DP_IF_CreateGroup
   TRACE( "(%p)->(%p,%p,%p,%p,0x%08x,0x%08x,%u)\n",
          This, lpMsgHdr, lpidGroup, lpGroupName, lpData, dwDataSize,
          dwFlags, bAnsi );
+
+  if( This->dp2->connectionInitialized == NO_PROVIDER )
+  {
+    return DPERR_UNINITIALIZED;
+  }
 
   /* If the name is not specified, we must provide one */
   if( DPID_UNKNOWN == *lpidGroup )
@@ -1408,6 +1418,10 @@ static HRESULT WINAPI DP_IF_CreatePlayer
   TRACE( "(%p)->(%p,%p,%p,%p,0x%08x,0x%08x,%u)\n",
          This, lpidPlayer, lpPlayerName, hEvent, lpData,
          dwDataSize, dwFlags, bAnsi );
+  if( This->dp2->connectionInitialized == NO_PROVIDER )
+  {
+    return DPERR_UNINITIALIZED;
+  }
 
   if( dwFlags == 0 )
   {
@@ -1607,6 +1621,11 @@ static HRESULT WINAPI DirectPlay2AImpl_CreatePlayer
 {
   IDirectPlay2Impl *This = (IDirectPlay2Impl *)iface;
 
+  if( lpidPlayer == NULL )
+  {
+    return DPERR_INVALIDPARAMS;
+  }
+
   if( dwFlags & DPPLAYER_SERVERPLAYER )
   {
     *lpidPlayer = DPID_SERVERPLAYER;
@@ -1625,6 +1644,11 @@ static HRESULT WINAPI DirectPlay2WImpl_CreatePlayer
             HANDLE hEvent, LPVOID lpData, DWORD dwDataSize, DWORD dwFlags )
 {
   IDirectPlay2Impl *This = (IDirectPlay2Impl *)iface;
+
+  if( lpidPlayer == NULL )
+  {
+    return DPERR_INVALIDPARAMS;
+  }
 
   if( dwFlags & DPPLAYER_SERVERPLAYER )
   {
@@ -2202,6 +2226,10 @@ static HRESULT WINAPI DP_IF_EnumSessions
   TRACE( "(%p)->(%p,0x%08x,%p,%p,0x%08x,%u)\n",
          This, lpsd, dwTimeout, lpEnumSessionsCallback2, lpContext, dwFlags,
          bAnsi );
+  if( This->dp2->connectionInitialized == NO_PROVIDER )
+  {
+    return DPERR_UNINITIALIZED;
+  }
 
   /* Can't enumerate if the interface is already open */
   if( This->dp2->bConnectionOpen )
@@ -2379,6 +2407,11 @@ static HRESULT WINAPI DP_IF_GetPlayerCaps
   DPSP_GETCAPSDATA data;
 
   TRACE("(%p)->(0x%08x,%p,0x%08x)\n", This, idPlayer, lpDPCaps, dwFlags);
+
+  if ( This->dp2->connectionInitialized == NO_PROVIDER )
+  {
+    return DPERR_UNINITIALIZED;
+  }
 
   /* Query the service provider */
   data.idPlayer = idPlayer;
@@ -2679,6 +2712,11 @@ static HRESULT WINAPI DP_IF_GetPlayerName
   FIXME( "(%p)->(0x%08x,%p,%p,%u): ANSI\n",
          This, idPlayer, lpData, lpdwDataSize, bAnsi );
 
+  if( This->dp2->connectionInitialized == NO_PROVIDER )
+  {
+    return DPERR_UNINITIALIZED;
+  }
+
   if( ( lpPList = DP_FindPlayer( This, idPlayer ) ) == NULL )
   {
     return DPERR_INVALIDPLAYER;
@@ -2822,6 +2860,17 @@ static HRESULT WINAPI DP_SecureOpen
 
   FIXME( "(%p)->(%p,0x%08x,%p,%p): partial stub\n",
          This, lpsd, dwFlags, lpSecurity, lpCredentials );
+
+  if( This->dp2->connectionInitialized == NO_PROVIDER )
+  {
+    return DPERR_UNINITIALIZED;
+  }
+
+  if( lpsd->dwSize != sizeof(DPSESSIONDESC2) )
+  {
+    TRACE( ": rejecting invalid dpsd size (%d).\n", lpsd->dwSize );
+    return DPERR_INVALIDPARAMS;
+  }
 
   if( This->dp2->bConnectionOpen )
   {
@@ -3129,6 +3178,11 @@ static HRESULT WINAPI DP_IF_SetPlayerData
   TRACE( "(%p)->(0x%08x,%p,0x%08x,0x%08x,%u)\n",
          This, idPlayer, lpData, dwDataSize, dwFlags, bAnsi );
 
+  if( This->dp2->connectionInitialized == NO_PROVIDER )
+  {
+    return DPERR_UNINITIALIZED;
+  }
+
   /* Parameter check */
   if( ( lpData == NULL ) &&
       ( dwDataSize != 0 )
@@ -3187,6 +3241,11 @@ static HRESULT WINAPI DP_IF_SetPlayerName
 
   TRACE( "(%p)->(0x%08x,%p,0x%08x,%u)\n",
          This, idPlayer, lpPlayerName, dwFlags, bAnsi );
+
+  if( This->dp2->connectionInitialized == NO_PROVIDER )
+  {
+    return DPERR_UNINITIALIZED;
+  }
 
   if( ( lpPList = DP_FindPlayer( This, idPlayer ) ) == NULL )
   {
@@ -3400,6 +3459,11 @@ static HRESULT WINAPI DP_IF_AddGroupToGroup
 
   TRACE( "(%p)->(0x%08x,0x%08x)\n", This, idParentGroup, idGroup );
 
+  if( This->dp2->connectionInitialized == NO_PROVIDER )
+  {
+    return DPERR_UNINITIALIZED;
+  }
+
   if( DP_FindAnyGroup( (IDirectPlay2AImpl*)This, idParentGroup ) == NULL )
   {
     return DPERR_INVALIDGROUP;
@@ -3456,6 +3520,11 @@ static HRESULT WINAPI DP_IF_CreateGroupInGroup
   TRACE( "(%p)->(0x%08x,%p,%p,%p,0x%08x,0x%08x,%u)\n",
          This, idParentGroup, lpidGroup, lpGroupName, lpData,
          dwDataSize, dwFlags, bAnsi );
+
+  if( This->dp2->connectionInitialized == NO_PROVIDER )
+  {
+    return DPERR_UNINITIALIZED;
+  }
 
   /* Verify that the specified parent is valid */
   if( ( lpGParentData = DP_FindAnyGroup( (IDirectPlay2AImpl*)This,
@@ -3760,7 +3829,7 @@ static HRESULT WINAPI DirectPlay3AImpl_EnumConnections
 
       /* The enumeration will return FALSE if we are not to continue */
       if( !lpEnumCallback( &serviceProviderGUID, lpAddressBuffer, dwAddressBufferSize,
-                           &dpName, DPCONNECTION_DIRECTPLAY, lpContext ) )
+                           &dpName, dwFlags, lpContext ) )
       {
          return DP_OK;
       }
@@ -3868,7 +3937,7 @@ static HRESULT WINAPI DirectPlay3AImpl_EnumConnections
 
       /* The enumeration will return FALSE if we are not to continue */
       if( !lpEnumCallback( &serviceProviderGUID, lpAddressBuffer, dwAddressBufferSize,
-                           &dpName, DPCONNECTION_DIRECTPLAYLOBBY, lpContext ) )
+                           &dpName, dwFlags, lpContext ) )
       {
          HeapFree( GetProcessHeap(), 0, lpAddressBuffer );
          return DP_OK;
@@ -3899,6 +3968,11 @@ static HRESULT WINAPI DP_IF_EnumGroupsInGroup
   FIXME( "(%p)->(0x%08x,%p,%p,%p,0x%08x,%u): semi stub\n",
          This, idGroup, lpguidInstance, lpEnumPlayersCallback2,
          lpContext, dwFlags, bAnsi );
+
+  if( This->dp2->connectionInitialized == NO_PROVIDER )
+  {
+    return DPERR_UNINITIALIZED;
+  }
 
   if( ( lpGData = DP_FindAnyGroup( (IDirectPlay2AImpl*)This, idGroup ) ) == NULL )
   {
@@ -4227,9 +4301,19 @@ static HRESULT WINAPI DP_IF_InitializeConnection
 
   TRACE("(%p)->(%p,0x%08x,%u)\n", This, lpConnection, dwFlags, bAnsi );
 
+  if ( lpConnection == NULL )
+  {
+    return DPERR_INVALIDPARAMS;
+  }
+
   if( dwFlags != 0 )
   {
     return DPERR_INVALIDFLAGS;
+  }
+
+  if( This->dp2->connectionInitialized != NO_PROVIDER )
+  {
+    return DPERR_ALREADYINITIALIZED;
   }
 
   /* Find out what the requested SP is and how large this buffer is */
@@ -4491,6 +4575,11 @@ static HRESULT WINAPI DP_SendEx
          ": stub\n",
          This, idFrom, idTo, dwFlags, lpData, dwDataSize, dwPriority,
          dwTimeout, lpContext, lpdwMsgID, bAnsi );
+
+  if( This->dp2->connectionInitialized == NO_PROVIDER )
+  {
+    return DPERR_UNINITIALIZED;
+  }
 
   /* FIXME: Add parameter checking */
   /* FIXME: First call to this needs to acquire a message id which will be
@@ -5393,7 +5482,7 @@ static BOOL CALLBACK cbDPCreateEnumConnections(
  *
  */
 HRESULT WINAPI DirectPlayCreate
-( LPGUID lpGUID, LPDIRECTPLAY2 *lplpDP, IUnknown *pUnk)
+( LPGUID lpGUID, LPDIRECTPLAY *lplpDP, IUnknown *pUnk )
 {
   HRESULT hr;
   LPDIRECTPLAY3A lpDP3A;
@@ -5405,6 +5494,12 @@ HRESULT WINAPI DirectPlayCreate
   {
     return CLASS_E_NOAGGREGATION;
   }
+
+  if( (lplpDP == NULL) || (lpGUID == NULL) )
+  {
+    return DPERR_INVALIDPARAMS;
+  }
+
 
   /* Create an IDirectPlay object. We don't support that so we'll cheat and
      give them an IDirectPlay2A object and hope that doesn't cause problems */

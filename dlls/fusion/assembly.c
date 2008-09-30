@@ -58,7 +58,7 @@ struct tagASSEMBLY
     HANDLE hmap;
     BYTE *data;
 
-    IMAGE_NT_HEADERS32 *nthdr;
+    IMAGE_NT_HEADERS *nthdr;
     IMAGE_COR20_HEADER *corhdr;
 
     METADATAHDR *metadatahdr;
@@ -632,8 +632,8 @@ static HRESULT parse_clr_metadata(ASSEMBLY *assembly)
         else if (!lstrcmpA(stream, "#Blob") || !lstrcmpA(stream, "Blob"))
             assembly->blobs = (BYTE *)assembly_data_offset(assembly, ofs);
 
-        ptr += lstrlenA(stream);
-        while (!*ptr) ptr++;
+        ptr += lstrlenA(stream) + 1;
+        ptr = (BYTE *)(((UINT_PTR)ptr + 3) & ~3); /* align on DWORD boundary */
     }
 
     return S_OK;
@@ -647,7 +647,15 @@ static HRESULT parse_pe_header(ASSEMBLY *assembly)
     if (!assembly->nthdr)
         return E_FAIL;
 
-    datadirs = assembly->nthdr->OptionalHeader.DataDirectory;
+    if (assembly->nthdr->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64)
+    {
+        IMAGE_OPTIONAL_HEADER64 *opthdr =
+                (IMAGE_OPTIONAL_HEADER64 *)&assembly->nthdr->OptionalHeader;
+        datadirs = opthdr->DataDirectory;
+    }
+    else
+        datadirs = assembly->nthdr->OptionalHeader.DataDirectory;
+
     if (!datadirs)
         return E_FAIL;
 
@@ -747,7 +755,7 @@ static LPSTR assembly_dup_str(ASSEMBLY *assembly, DWORD index)
 HRESULT assembly_get_name(ASSEMBLY *assembly, LPSTR *name)
 {
     BYTE *ptr;
-    ULONG offset;
+    LONG offset;
     DWORD stridx;
 
     offset = assembly->tables[TableFromToken(mdtAssembly)].offset;
@@ -839,7 +847,7 @@ static BYTE *assembly_get_blob(ASSEMBLY *assembly, WORD index, ULONG *size)
 
 static void bytes_to_str(BYTE *bytes, DWORD len, LPSTR str)
 {
-    int i;
+    DWORD i;
 
     static const char hexval[16] = {
         '0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'
@@ -859,7 +867,8 @@ static void bytes_to_str(BYTE *bytes, DWORD len, LPSTR str)
 HRESULT assembly_get_pubkey_token(ASSEMBLY *assembly, LPSTR *token)
 {
     ASSEMBLYTABLE *asmtbl;
-    ULONG i, offset, size;
+    ULONG i, size;
+    LONG offset;
     BYTE *hashdata;
     HCRYPTPROV crypt;
     HCRYPTHASH hash;

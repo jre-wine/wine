@@ -23,6 +23,8 @@
 #include <windef.h>
 #include <winbase.h>
 #include <winerror.h>
+#define CMSG_SIGNER_ENCODE_INFO_HAS_CMS_FIELDS
+#define CMSG_SIGNED_ENCODE_INFO_HAS_CMS_FIELDS
 #include <wincrypt.h>
 
 #include "wine/test.h"
@@ -383,9 +385,10 @@ static void test_data_msg_update(void)
     /* Can't update a message with no data */
     SetLastError(0xdeadbeef);
     ret = CryptMsgUpdate(msg, NULL, 0, TRUE);
-    /* NT: E_INVALIDARG, 9x: unchanged */
-    ok(!ret && (GetLastError() == E_INVALIDARG || GetLastError() == 0xdeadbeef),
-       "Expected E_INVALIDARG or 0xdeadbeef, got 0x%x\n", GetLastError());
+    /* This test returns FALSE on XP and earlier but TRUE on Vista, so can't be tested.
+     * GetLastError is either E_INVALIDARG (NT) or unset (9x/Vista), so it doesn't
+     * make sense to test this.
+     */
 
     /* Curiously, a valid update will now fail as well, presumably because of
      * the last (invalid, but final) update.
@@ -809,10 +812,11 @@ static void test_hash_msg_get_param(void)
     /* By getting the hash, further updates are not allowed */
     SetLastError(0xdeadbeef);
     ret = CryptMsgUpdate(msg, msgData, sizeof(msgData), TRUE);
-    /* NT: NTE_BAD_HASH_STATE, 9x: NTE_BAD_ALGID */
     ok(!ret &&
-       (GetLastError() == NTE_BAD_HASH_STATE || GetLastError() == NTE_BAD_ALGID),
-       "Expected NTE_BAD_HASH_STATE or NTE_BAD_ALGID, got 0x%x\n", GetLastError());
+       (GetLastError() == NTE_BAD_HASH_STATE /* NT */ ||
+        GetLastError() == NTE_BAD_ALGID /* 9x */ ||
+        GetLastError() == CRYPT_E_MSG_ERROR /* Vista */),
+       "Expected NTE_BAD_HASH_STATE or NTE_BAD_ALGID or CRYPT_E_MSG_ERROR, got 0x%x\n", GetLastError());
 
     /* Even after a final update, the hash data aren't available */
     SetLastError(0xdeadbeef);
@@ -857,10 +861,11 @@ static void test_hash_msg_get_param(void)
      */
     SetLastError(0xdeadbeef);
     ret = CryptMsgUpdate(msg, msgData, sizeof(msgData), TRUE);
-    /* NT: NTE_BAD_HASH_STATE, 9x: NTE_BAD_ALGID */
     ok(!ret &&
-       (GetLastError() == NTE_BAD_HASH_STATE || GetLastError() == NTE_BAD_ALGID),
-       "Expected NTE_BAD_HASH_STATE or NTE_BAD_ALGID, got 0x%x\n", GetLastError());
+       (GetLastError() == NTE_BAD_HASH_STATE /* NT */ ||
+        GetLastError() == NTE_BAD_ALGID /* 9x */ ||
+        GetLastError() == CRYPT_E_MSG_ERROR /* Vista */),
+       "Expected NTE_BAD_HASH_STATE or NTE_BAD_ALGID or CRYPT_E_MSG_ERROR, got 0x%x\n", GetLastError());
 
     CryptMsgClose(msg);
 }
@@ -1101,6 +1106,24 @@ static void test_signed_msg_open(void)
         CryptMsgClose(msg);
     }
 
+    /* pCertInfo must still be set, but can be empty if the SignerId's issuer
+     * and serial number are set.
+     */
+    certInfo.Issuer.cbData = 0;
+    certInfo.SerialNumber.cbData = 0;
+    signer.SignerId.dwIdChoice = CERT_ID_ISSUER_SERIAL_NUMBER;
+    signer.SignerId.IssuerSerialNumber.Issuer.cbData =
+     sizeof(encodedCommonName);
+    signer.SignerId.IssuerSerialNumber.Issuer.pbData =
+     (BYTE *)encodedCommonName;
+    signer.SignerId.IssuerSerialNumber.SerialNumber.cbData =
+     sizeof(serialNum);
+    signer.SignerId.IssuerSerialNumber.SerialNumber.pbData = (BYTE *)serialNum;
+    msg = CryptMsgOpenToEncode(PKCS_7_ASN_ENCODING, 0, CMSG_SIGNED, &signInfo,
+     NULL, NULL);
+    ok(msg != NULL, "CryptMsgOpenToEncode failed: %x\n", GetLastError());
+    CryptMsgClose(msg);
+
     CryptReleaseContext(signer.hCryptProv, 0);
     pCryptAcquireContextA(&signer.hCryptProv, cspNameA, MS_DEF_PROV_A,
      PROV_RSA_FULL, CRYPT_DELETEKEYSET);
@@ -1318,6 +1341,12 @@ static const BYTE signedContent[] = {
 static const BYTE signedHash[] = {
 0x08,0xd6,0xc0,0x5a,0x21,0x51,0x2a,0x79,0xa1,0xdf,0xeb,0x9d,0x2a,0x8f,0x26,
 0x2f };
+static const BYTE signedKeyIdEmptyContent[] = {
+0x30,0x46,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x07,0x02,0xa0,0x39,
+0x30,0x37,0x02,0x01,0x03,0x31,0x0e,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,0x86,
+0xf7,0x0d,0x02,0x05,0x05,0x00,0x30,0x02,0x06,0x00,0x31,0x1e,0x30,0x1c,0x02,
+0x01,0x03,0x80,0x01,0x01,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,
+0x02,0x05,0x05,0x00,0x30,0x04,0x06,0x00,0x05,0x00,0x04,0x00 };
 static const BYTE signedEncodedSigner[] = {
 0x30,0x75,0x02,0x01,0x01,0x30,0x1a,0x30,0x15,0x31,0x13,0x30,0x11,0x06,0x03,
 0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,0x67,0x00,
@@ -1629,6 +1658,23 @@ static void test_signed_msg_encoding(void)
 
     CryptMsgClose(msg);
 
+    certInfo.SerialNumber.cbData = 0;
+    certInfo.Issuer.cbData = 0;
+    signer.SignerId.dwIdChoice = CERT_ID_KEY_IDENTIFIER;
+    signer.SignerId.KeyId.cbData = sizeof(serialNum);
+    signer.SignerId.KeyId.pbData = (BYTE *)serialNum;
+    msg = CryptMsgOpenToEncode(PKCS_7_ASN_ENCODING, 0, CMSG_SIGNED, &signInfo,
+     NULL, NULL);
+    ok(msg != NULL, "CryptMsgOpenToEncode failed: %x\n", GetLastError());
+    check_param("signed key id empty content", msg, CMSG_CONTENT_PARAM,
+     signedKeyIdEmptyContent, sizeof(signedKeyIdEmptyContent));
+    CryptMsgClose(msg);
+
+    certInfo.SerialNumber.cbData = sizeof(serialNum);
+    certInfo.SerialNumber.pbData = serialNum;
+    certInfo.Issuer.cbData = sizeof(encodedCommonName);
+    certInfo.Issuer.pbData = encodedCommonName;
+    signer.SignerId.dwIdChoice = 0;
     msg = CryptMsgOpenToEncode(PKCS_7_ASN_ENCODING, 0, CMSG_SIGNED, &signInfo,
      NULL, NULL);
     ok(msg != NULL, "CryptMsgOpenToEncode failed: %x\n", GetLastError());
@@ -1838,6 +1884,87 @@ static void test_signed_msg_get_param(void)
 
     CryptMsgClose(msg);
 
+    /* Opening the message using the CMS fields.. */
+    certInfo.SerialNumber.cbData = 0;
+    certInfo.Issuer.cbData = 0;
+    signer.SignerId.dwIdChoice = CERT_ID_ISSUER_SERIAL_NUMBER;
+    signer.SignerId.IssuerSerialNumber.Issuer.cbData =
+     sizeof(encodedCommonName);
+    signer.SignerId.IssuerSerialNumber.Issuer.pbData =
+     (BYTE *)encodedCommonName;
+    signer.SignerId.IssuerSerialNumber.SerialNumber.cbData =
+     sizeof(serialNum);
+    signer.SignerId.IssuerSerialNumber.SerialNumber.pbData = (BYTE *)serialNum;
+    ret = pCryptAcquireContextA(&signer.hCryptProv, cspNameA, NULL,
+     PROV_RSA_FULL, CRYPT_NEWKEYSET);
+    if (!ret && GetLastError() == NTE_EXISTS)
+        ret = pCryptAcquireContextA(&signer.hCryptProv, cspNameA, NULL,
+         PROV_RSA_FULL, 0);
+    ok(ret, "CryptAcquireContextW failed: %x\n", GetLastError());
+    msg = CryptMsgOpenToEncode(PKCS_7_ASN_ENCODING,
+     CMSG_CRYPT_RELEASE_CONTEXT_FLAG, CMSG_SIGNED, &signInfo, NULL, NULL);
+    ok(msg != NULL, "CryptMsgOpenToEncode failed: %x\n", GetLastError());
+    /* still results in the version being 1 when the issuer and serial number
+     * are used and no additional CMS fields are used.
+     */
+    size = sizeof(value);
+    ret = CryptMsgGetParam(msg, CMSG_VERSION_PARAM, 0, (LPBYTE)&value, &size);
+    ok(ret, "CryptMsgGetParam failed: %08x\n", GetLastError());
+    ok(value == CMSG_SIGNED_DATA_V1, "expected version 1, got %d\n", value);
+    /* Apparently the encoded signer can be retrieved.. */
+    ret = CryptMsgGetParam(msg, CMSG_ENCODED_SIGNER, 0, NULL, &size);
+    ok(ret, "CryptMsgGetParam failed: %08x\n", GetLastError());
+    /* but the signer info, CMS signer info, and cert ID can't be. */
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetParam(msg, CMSG_SIGNER_INFO_PARAM, 0, NULL, &size);
+    ok(!ret && GetLastError() == CRYPT_E_INVALID_MSG_TYPE,
+     "expected CRYPT_E_INVALID_MSG_TYPE, got %08x\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetParam(msg, CMSG_CMS_SIGNER_INFO_PARAM, 0, NULL, &size);
+    ok(!ret && GetLastError() == CRYPT_E_INVALID_MSG_TYPE,
+     "expected CRYPT_E_INVALID_MSG_TYPE, got %08x\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetParam(msg, CMSG_SIGNER_CERT_ID_PARAM, 0, NULL, &size);
+    ok(!ret && GetLastError() == CRYPT_E_INVALID_MSG_TYPE,
+     "expected CRYPT_E_INVALID_MSG_TYPE, got %08x\n", GetLastError());
+    CryptMsgClose(msg);
+
+    /* Using the KeyId field of the SignerId results in the version becoming
+     * the CMS version.
+     */
+    signer.SignerId.dwIdChoice = CERT_ID_KEY_IDENTIFIER;
+    signer.SignerId.KeyId.cbData = sizeof(serialNum);
+    signer.SignerId.KeyId.pbData = (BYTE *)serialNum;
+    ret = CryptAcquireContextW(&signer.hCryptProv, cspNameW, NULL,
+     PROV_RSA_FULL, CRYPT_NEWKEYSET);
+    if (!ret && GetLastError() == NTE_EXISTS)
+        ret = CryptAcquireContextW(&signer.hCryptProv, cspNameW, NULL,
+         PROV_RSA_FULL, 0);
+    ok(ret, "CryptAcquireContextW failed: %x\n", GetLastError());
+    msg = CryptMsgOpenToEncode(PKCS_7_ASN_ENCODING,
+     CMSG_CRYPT_RELEASE_CONTEXT_FLAG, CMSG_SIGNED, &signInfo, NULL, NULL);
+    ok(msg != NULL, "CryptMsgOpenToEncode failed: %x\n", GetLastError());
+    size = sizeof(value);
+    ret = CryptMsgGetParam(msg, CMSG_VERSION_PARAM, 0, (LPBYTE)&value, &size);
+    ok(value == CMSG_SIGNED_DATA_V3, "expected version 3, got %d\n", value);
+    /* Even for a CMS message, the signer can be retrieved.. */
+    ret = CryptMsgGetParam(msg, CMSG_ENCODED_SIGNER, 0, NULL, &size);
+    ok(ret, "CryptMsgGetParam failed: %08x\n", GetLastError());
+    /* but the signer info, CMS signer info, and cert ID can't be. */
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetParam(msg, CMSG_SIGNER_INFO_PARAM, 0, NULL, &size);
+    ok(!ret && GetLastError() == CRYPT_E_INVALID_MSG_TYPE,
+     "expected CRYPT_E_INVALID_MSG_TYPE, got %08x\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetParam(msg, CMSG_CMS_SIGNER_INFO_PARAM, 0, NULL, &size);
+    ok(!ret && GetLastError() == CRYPT_E_INVALID_MSG_TYPE,
+     "expected CRYPT_E_INVALID_MSG_TYPE, got %08x\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetParam(msg, CMSG_SIGNER_CERT_ID_PARAM, 0, NULL, &size);
+    ok(!ret && GetLastError() == CRYPT_E_INVALID_MSG_TYPE,
+     "expected CRYPT_E_INVALID_MSG_TYPE, got %08x\n", GetLastError());
+    CryptMsgClose(msg);
+
     CryptReleaseContext(signer.hCryptProv, 0);
     pCryptAcquireContextA(&signer.hCryptProv, cspNameA, MS_DEF_PROV_A,
      PROV_RSA_FULL, CRYPT_DELETEKEYSET);
@@ -1953,7 +2080,6 @@ static void test_decode_msg_update(void)
     msg = CryptMsgOpenToDecode(PKCS_7_ASN_ENCODING, 0, 0, 0, NULL, &streamInfo);
     SetLastError(0xdeadbeef);
     ret = CryptMsgUpdate(msg, msgData, sizeof(msgData), TRUE);
-    todo_wine
     ok(!ret && GetLastError() == CRYPT_E_ASN1_BADTAG,
      "Expected CRYPT_E_ASN1_BADTAG, got %x\n", GetLastError());
     CryptMsgClose(msg);
@@ -2138,9 +2264,56 @@ static void compare_signer_info(const CMSG_SIGNER_INFO *got,
     /* FIXME: check more things */
 }
 
+static void compare_cms_signer_info(const CMSG_CMS_SIGNER_INFO *got,
+ const CMSG_CMS_SIGNER_INFO *expected)
+{
+    ok(got->dwVersion == expected->dwVersion, "Expected version %d, got %d\n",
+     expected->dwVersion, got->dwVersion);
+    ok(got->SignerId.dwIdChoice == expected->SignerId.dwIdChoice,
+     "Expected id choice %d, got %d\n", expected->SignerId.dwIdChoice,
+     got->SignerId.dwIdChoice);
+    if (got->SignerId.dwIdChoice == expected->SignerId.dwIdChoice)
+    {
+        if (got->SignerId.dwIdChoice == CERT_ID_ISSUER_SERIAL_NUMBER)
+        {
+            ok(got->SignerId.IssuerSerialNumber.Issuer.cbData ==
+             expected->SignerId.IssuerSerialNumber.Issuer.cbData,
+             "Expected issuer size %d, got %d\n",
+             expected->SignerId.IssuerSerialNumber.Issuer.cbData,
+             got->SignerId.IssuerSerialNumber.Issuer.cbData);
+            ok(!memcmp(got->SignerId.IssuerSerialNumber.Issuer.pbData,
+             expected->SignerId.IssuerSerialNumber.Issuer.pbData,
+             got->SignerId.IssuerSerialNumber.Issuer.cbData),
+             "Unexpected issuer\n");
+            ok(got->SignerId.IssuerSerialNumber.SerialNumber.cbData ==
+             expected->SignerId.IssuerSerialNumber.SerialNumber.cbData,
+             "Expected serial number size %d, got %d\n",
+             expected->SignerId.IssuerSerialNumber.SerialNumber.cbData,
+             got->SignerId.IssuerSerialNumber.SerialNumber.cbData);
+            ok(!memcmp(got->SignerId.IssuerSerialNumber.SerialNumber.pbData,
+             expected->SignerId.IssuerSerialNumber.SerialNumber.pbData,
+             got->SignerId.IssuerSerialNumber.SerialNumber.cbData),
+             "Unexpected serial number\n");
+        }
+        else
+        {
+            ok(got->SignerId.KeyId.cbData == expected->SignerId.KeyId.cbData,
+             "expected key id size %d, got %d\n",
+             expected->SignerId.KeyId.cbData, got->SignerId.KeyId.cbData);
+            ok(!memcmp(expected->SignerId.KeyId.pbData,
+             got->SignerId.KeyId.pbData, got->SignerId.KeyId.cbData),
+             "unexpected key id\n");
+        }
+    }
+    /* FIXME: check more things */
+}
+
 static const BYTE signedWithCertAndCrlComputedHash[] = {
 0x08,0xd6,0xc0,0x5a,0x21,0x51,0x2a,0x79,0xa1,0xdf,0xeb,0x9d,0x2a,0x8f,0x26,
 0x2f };
+static BYTE keyIdIssuer[] = {
+0x30,0x13,0x31,0x11,0x30,0x0f,0x06,0x0a,0x2b,0x06,0x01,0x04,0x01,0x82,0x37,
+0x0a,0x07,0x01,0x04,0x01,0x01 };
 
 static void test_decode_msg_get_param(void)
 {
@@ -2227,6 +2400,31 @@ static void test_decode_msg_get_param(void)
         compare_signer_info((CMSG_SIGNER_INFO *)buf, &signer);
         CryptMemFree(buf);
     }
+    /* Getting the CMS signer info of a PKCS7 message is possible. */
+    size = 0;
+    ret = CryptMsgGetParam(msg, CMSG_CMS_SIGNER_INFO_PARAM, 0, NULL, &size);
+    ok(ret, "CryptMsgGetParam failed: %08x\n", GetLastError());
+    if (ret)
+        buf = CryptMemAlloc(size);
+    else
+        buf = NULL;
+    if (buf)
+    {
+        CMSG_CMS_SIGNER_INFO signer = { 0 };
+
+        signer.dwVersion = 1;
+        signer.SignerId.dwIdChoice = CERT_ID_ISSUER_SERIAL_NUMBER;
+        signer.SignerId.IssuerSerialNumber.Issuer.cbData =
+         sizeof(encodedCommonName);
+        signer.SignerId.IssuerSerialNumber.Issuer.pbData = encodedCommonName;
+        signer.SignerId.IssuerSerialNumber.SerialNumber.cbData =
+         sizeof(serialNum);
+        signer.SignerId.IssuerSerialNumber.SerialNumber.pbData = serialNum;
+        signer.HashAlgorithm.pszObjId = oid_rsa_md5;
+        CryptMsgGetParam(msg, CMSG_CMS_SIGNER_INFO_PARAM, 0, buf, &size);
+        compare_cms_signer_info((CMSG_CMS_SIGNER_INFO *)buf, &signer);
+        CryptMemFree(buf);
+    }
     /* index is ignored when getting signer count */
     size = sizeof(value);
     ret = CryptMsgGetParam(msg, CMSG_SIGNER_COUNT_PARAM, 1, &value, &size);
@@ -2255,6 +2453,66 @@ static void test_decode_msg_get_param(void)
     check_param("signed with cert and CRL computed hash", msg,
      CMSG_COMPUTED_HASH_PARAM, signedWithCertAndCrlComputedHash,
      sizeof(signedWithCertAndCrlComputedHash));
+    CryptMsgClose(msg);
+
+    msg = CryptMsgOpenToDecode(PKCS_7_ASN_ENCODING, 0, 0, 0, NULL, NULL);
+    ret = CryptMsgUpdate(msg, signedKeyIdEmptyContent,
+     sizeof(signedKeyIdEmptyContent), TRUE);
+    ok(ret, "CryptMsgUpdate failed: %08x\n", GetLastError());
+    size = sizeof(value);
+    ret = CryptMsgGetParam(msg, CMSG_SIGNER_COUNT_PARAM, 0, &value, &size);
+    ok(ret, "CryptMsgGetParam failed: %08x\n", GetLastError());
+    ok(value == 1, "Expected 1 signer, got %d\n", value);
+    /* Getting the regular (non-CMS) signer info from a CMS message is also
+     * possible..
+     */
+    size = 0;
+    ret = CryptMsgGetParam(msg, CMSG_SIGNER_INFO_PARAM, 0, NULL, &size);
+    ok(ret, "CryptMsgGetParam failed: %08x\n", GetLastError());
+    if (ret)
+        buf = CryptMemAlloc(size);
+    else
+        buf = NULL;
+    if (buf)
+    {
+        CMSG_SIGNER_INFO signer;
+        BYTE zero = 0;
+
+        /* and here's the little oddity:  for a CMS message using the key id
+         * variant of a SignerId, retrieving the CMSG_SIGNER_INFO param yields
+         * a signer with a zero (not empty) serial number, and whose issuer is
+         * an RDN with OID szOID_KEYID_RDN, value type CERT_RDN_OCTET_STRING,
+         * and value of the key id.
+         */
+        signer.dwVersion = CMSG_SIGNED_DATA_V3;
+        signer.Issuer.cbData = sizeof(keyIdIssuer);
+        signer.Issuer.pbData = keyIdIssuer;
+        signer.SerialNumber.cbData = 1;
+        signer.SerialNumber.pbData = &zero;
+        CryptMsgGetParam(msg, CMSG_SIGNER_INFO_PARAM, 0, buf, &size);
+        compare_signer_info((CMSG_SIGNER_INFO *)buf, &signer);
+        CryptMemFree(buf);
+    }
+    size = 0;
+    ret = CryptMsgGetParam(msg, CMSG_CMS_SIGNER_INFO_PARAM, 0, NULL, &size);
+    ok(ret, "CryptMsgGetParam failed: %08x\n", GetLastError());
+    if (ret)
+        buf = CryptMemAlloc(size);
+    else
+        buf = NULL;
+    if (buf)
+    {
+        CMSG_CMS_SIGNER_INFO signer = { 0 };
+
+        signer.dwVersion = CMSG_SIGNED_DATA_V3;
+        signer.SignerId.dwIdChoice = CERT_ID_KEY_IDENTIFIER;
+        signer.SignerId.KeyId.cbData = sizeof(serialNum);
+        signer.SignerId.KeyId.pbData = (BYTE *)serialNum;
+        signer.HashAlgorithm.pszObjId = oid_rsa_md5;
+        CryptMsgGetParam(msg, CMSG_CMS_SIGNER_INFO_PARAM, 0, buf, &size);
+        compare_cms_signer_info((CMSG_CMS_SIGNER_INFO *)buf, &signer);
+        CryptMemFree(buf);
+    }
     CryptMsgClose(msg);
 }
 
@@ -2462,24 +2720,30 @@ static void test_msg_control(void)
     /* Again, cert info needs to have a public key set */
     SetLastError(0xdeadbeef);
     ret = CryptMsgControl(msg, 0, CMSG_CTRL_VERIFY_SIGNATURE, &certInfo);
-    ok(!ret && GetLastError() == CRYPT_E_ASN1_EOD,
-     "Expected CRYPT_E_ASN1_EOD, got %08x\n", GetLastError());
+    ok(!ret &&
+     (GetLastError() == CRYPT_E_ASN1_EOD ||
+      GetLastError() == TRUST_E_NOSIGNATURE /* Vista */),
+     "Expected CRYPT_E_ASN1_EOD or TRUST_E_NOSIGNATURE, got %08x\n", GetLastError());
     /* The public key is supposed to be in encoded form.. */
     certInfo.SubjectPublicKeyInfo.Algorithm.pszObjId = oid_rsa_rsa;
     certInfo.SubjectPublicKeyInfo.PublicKey.cbData = sizeof(aKey);
     certInfo.SubjectPublicKeyInfo.PublicKey.pbData = aKey;
     SetLastError(0xdeadbeef);
     ret = CryptMsgControl(msg, 0, CMSG_CTRL_VERIFY_SIGNATURE, &certInfo);
-    ok(!ret && GetLastError() == CRYPT_E_ASN1_BADTAG,
-     "Expected CRYPT_E_ASN1_BADTAG, got %08x\n", GetLastError());
+    ok(!ret &&
+     (GetLastError() == CRYPT_E_ASN1_BADTAG ||
+      GetLastError() == TRUST_E_NOSIGNATURE /* Vista */),
+     "Expected CRYPT_E_ASN1_BADTAG or TRUST_E_NOSIGNATURE, got %08x\n", GetLastError());
     /* but not as a X509_PUBLIC_KEY_INFO.. */
     certInfo.SubjectPublicKeyInfo.Algorithm.pszObjId = NULL;
     certInfo.SubjectPublicKeyInfo.PublicKey.cbData = sizeof(encodedPubKey);
     certInfo.SubjectPublicKeyInfo.PublicKey.pbData = encodedPubKey;
     SetLastError(0xdeadbeef);
     ret = CryptMsgControl(msg, 0, CMSG_CTRL_VERIFY_SIGNATURE, &certInfo);
-    ok(!ret && GetLastError() == CRYPT_E_ASN1_BADTAG,
-     "Expected CRYPT_E_ASN1_BADTAG, got %08x\n", GetLastError());
+    ok(!ret &&
+     (GetLastError() == CRYPT_E_ASN1_BADTAG ||
+      GetLastError() == TRUST_E_NOSIGNATURE /* Vista */),
+     "Expected CRYPT_E_ASN1_BADTAG or TRUST_E_NOSIGNATURE, got %08x\n", GetLastError());
     /* This decodes successfully, but it doesn't match any key in the message */
     certInfo.SubjectPublicKeyInfo.PublicKey.cbData = sizeof(mod_encoded);
     certInfo.SubjectPublicKeyInfo.PublicKey.pbData = mod_encoded;
@@ -2490,8 +2754,10 @@ static void test_msg_control(void)
      * now.
      */
     todo_wine
-    ok(!ret && GetLastError() == NTE_BAD_SIGNATURE,
-     "Expected NTE_BAD_SIGNATURE, got %08x\n", GetLastError());
+    ok(!ret &&
+     (GetLastError() == NTE_BAD_SIGNATURE ||
+      GetLastError() == TRUST_E_NOSIGNATURE /* Vista */),
+     "Expected NTE_BAD_SIGNATURE or TRUST_E_NOSIGNATURE, got %08x\n", GetLastError());
     CryptMsgClose(msg);
     /* A message with no data doesn't have a valid signature */
     msg = CryptMsgOpenToDecode(PKCS_7_ASN_ENCODING, 0, 0, 0, NULL, NULL);
@@ -2502,8 +2768,10 @@ static void test_msg_control(void)
     certInfo.SubjectPublicKeyInfo.PublicKey.pbData = pubKey;
     SetLastError(0xdeadbeef);
     ret = CryptMsgControl(msg, 0, CMSG_CTRL_VERIFY_SIGNATURE, &certInfo);
-    ok(!ret && GetLastError() == NTE_BAD_SIGNATURE,
-     "Expected NTE_BAD_SIGNATURE, got %08x\n", GetLastError());
+    ok(!ret &&
+     (GetLastError() == NTE_BAD_SIGNATURE ||
+      GetLastError() == TRUST_E_NOSIGNATURE /* Vista */),
+     "Expected NTE_BAD_SIGNATURE or TRUST_E_NOSIGNATURE, got %08x\n", GetLastError());
     CryptMsgClose(msg);
     /* Finally, this succeeds */
     msg = CryptMsgOpenToDecode(PKCS_7_ASN_ENCODING, 0, 0, 0, NULL, NULL);
@@ -2512,182 +2780,6 @@ static void test_msg_control(void)
     ret = CryptMsgControl(msg, 0, CMSG_CTRL_VERIFY_SIGNATURE, &certInfo);
     ok(ret, "CryptMsgControl failed: %08x\n", GetLastError());
     CryptMsgClose(msg);
-}
-
-static void test_msg_get_signer_count(void)
-{
-    LONG count;
-
-    SetLastError(0xdeadbeef);
-    count = CryptGetMessageSignerCount(0, NULL, 0);
-    ok(count == -1, "Expected -1, got %d\n", count);
-    ok(GetLastError() == E_INVALIDARG, "Expected E_INVALIDARG, got %08x\n",
-     GetLastError());
-    SetLastError(0xdeadbeef);
-    count = CryptGetMessageSignerCount(PKCS_7_ASN_ENCODING, NULL, 0);
-    ok(count == -1, "Expected -1, got %d\n", count);
-    ok(GetLastError() == CRYPT_E_ASN1_EOD,
-     "Expected CRYPT_E_ASN1_EOD, got %08x\n", GetLastError());
-    SetLastError(0xdeadbeef);
-    count = CryptGetMessageSignerCount(PKCS_7_ASN_ENCODING,
-     dataEmptyBareContent, sizeof(dataEmptyBareContent));
-    ok(count == -1, "Expected -1, got %d\n", count);
-    ok(GetLastError() == CRYPT_E_ASN1_BADTAG,
-     "Expected CRYPT_E_ASN1_BADTAG, got %08x\n", GetLastError());
-    SetLastError(0xdeadbeef);
-    count = CryptGetMessageSignerCount(PKCS_7_ASN_ENCODING,
-     dataEmptyContent, sizeof(dataEmptyContent));
-    ok(count == -1, "Expected -1, got %d\n", count);
-    ok(GetLastError() == CRYPT_E_INVALID_MSG_TYPE,
-     "Expected CRYPT_E_INVALID_MSG_TYPE, got %08x\n", GetLastError());
-    SetLastError(0xdeadbeef);
-    count = CryptGetMessageSignerCount(PKCS_7_ASN_ENCODING,
-     signedEmptyBareContent, sizeof(signedEmptyBareContent));
-    ok(count == -1, "Expected -1, got %d\n", count);
-    ok(GetLastError() == CRYPT_E_ASN1_BADTAG,
-     "Expected CRYPT_E_ASN1_BADTAG, got %08x\n", GetLastError());
-    count = CryptGetMessageSignerCount(PKCS_7_ASN_ENCODING,
-     signedEmptyContent, sizeof(signedEmptyContent));
-    ok(count == 1, "Expected 1, got %d\n", count);
-}
-
-static const BYTE signedWithCertEmptyContent[] = {
-0x30,0x81,0xdf,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x07,0x02,0xa0,
-0x81,0xd1,0x30,0x81,0xce,0x02,0x01,0x01,0x31,0x0e,0x30,0x0c,0x06,0x08,0x2a,
-0x86,0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x30,0x02,0x06,0x00,0xa0,0x7c,
-0x30,0x7a,0x02,0x01,0x01,0x30,0x02,0x06,0x00,0x30,0x15,0x31,0x13,0x30,0x11,
-0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,
-0x67,0x00,0x30,0x22,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,0x31,0x30,
-0x30,0x30,0x30,0x30,0x30,0x5a,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,
-0x31,0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x15,0x31,0x13,0x30,0x11,0x06,
-0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,0x67,
-0x00,0x30,0x07,0x30,0x02,0x06,0x00,0x03,0x01,0x00,0xa3,0x16,0x30,0x14,0x30,
-0x12,0x06,0x03,0x55,0x1d,0x13,0x01,0x01,0xff,0x04,0x08,0x30,0x06,0x01,0x01,
-0xff,0x02,0x01,0x01,0x31,0x37,0x30,0x35,0x02,0x01,0x01,0x30,0x1a,0x30,0x15,
-0x31,0x13,0x30,0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,
-0x20,0x4c,0x61,0x6e,0x67,0x00,0x02,0x01,0x01,0x30,0x0c,0x06,0x08,0x2a,0x86,
-0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x30,0x04,0x06,0x00,0x05,0x00,0x04,
-0x00 };
-static const BYTE signedWithCertContent[] = {
-0x30,0x82,0x01,0x32,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x07,0x02,
-0xa0,0x82,0x01,0x23,0x30,0x82,0x01,0x1f,0x02,0x01,0x01,0x31,0x0e,0x30,0x0c,
-0x06,0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x30,0x13,0x06,
-0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x07,0x01,0xa0,0x06,0x04,0x04,0x01,
-0x02,0x03,0x04,0xa0,0x7c,0x30,0x7a,0x02,0x01,0x01,0x30,0x02,0x06,0x00,0x30,
-0x15,0x31,0x13,0x30,0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,
-0x6e,0x20,0x4c,0x61,0x6e,0x67,0x00,0x30,0x22,0x18,0x0f,0x31,0x36,0x30,0x31,
-0x30,0x31,0x30,0x31,0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x18,0x0f,0x31,0x36,
-0x30,0x31,0x30,0x31,0x30,0x31,0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x15,
-0x31,0x13,0x30,0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,
-0x20,0x4c,0x61,0x6e,0x67,0x00,0x30,0x07,0x30,0x02,0x06,0x00,0x03,0x01,0x00,
-0xa3,0x16,0x30,0x14,0x30,0x12,0x06,0x03,0x55,0x1d,0x13,0x01,0x01,0xff,0x04,
-0x08,0x30,0x06,0x01,0x01,0xff,0x02,0x01,0x01,0x31,0x77,0x30,0x75,0x02,0x01,
-0x01,0x30,0x1a,0x30,0x15,0x31,0x13,0x30,0x11,0x06,0x03,0x55,0x04,0x03,0x13,
-0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,0x67,0x00,0x02,0x01,0x01,0x30,
-0x0c,0x06,0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x30,0x04,
-0x06,0x00,0x05,0x00,0x04,0x40,0x81,0xa6,0x70,0xb3,0xef,0x59,0xd1,0x66,0xd1,
-0x9b,0xc0,0x9a,0xb6,0x9a,0x5e,0x6d,0x6f,0x6d,0x0d,0x59,0xa9,0xaa,0x6e,0xe9,
-0x2c,0xa0,0x1e,0xee,0xc2,0x60,0xbc,0x59,0xbe,0x3f,0x63,0x06,0x8d,0xc9,0x11,
-0x1d,0x23,0x64,0x92,0xef,0x2e,0xfc,0x57,0x29,0xa4,0xaf,0xe0,0xee,0x93,0x19,
-0x39,0x51,0xe4,0x44,0xb8,0x0b,0x28,0xf4,0xa8,0x0d };
-static const BYTE signedWithCertWithPubKeyContent[] = {
-0x30,0x81,0xfc,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x07,0x02,0xa0,
-0x81,0xee,0x30,0x81,0xeb,0x02,0x01,0x01,0x31,0x0e,0x30,0x0c,0x06,0x08,0x2a,
-0x86,0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x30,0x02,0x06,0x00,0xa0,0x81,
-0x98,0x30,0x81,0x95,0x02,0x01,0x01,0x30,0x02,0x06,0x00,0x30,0x15,0x31,0x13,
-0x30,0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,
-0x61,0x6e,0x67,0x00,0x30,0x22,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,
-0x31,0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,
-0x31,0x30,0x31,0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x15,0x31,0x13,0x30,
-0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,
-0x6e,0x67,0x00,0x30,0x22,0x30,0x0d,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,
-0x01,0x01,0x01,0x05,0x00,0x03,0x11,0x00,0x00,0x01,0x02,0x03,0x04,0x05,0x06,
-0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,0xa3,0x16,0x30,0x14,0x30,0x12,
-0x06,0x03,0x55,0x1d,0x13,0x01,0x01,0xff,0x04,0x08,0x30,0x06,0x01,0x01,0xff,
-0x02,0x01,0x01,0x31,0x37,0x30,0x35,0x02,0x01,0x01,0x30,0x1a,0x30,0x15,0x31,
-0x13,0x30,0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,
-0x4c,0x61,0x6e,0x67,0x00,0x02,0x01,0x01,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,
-0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x30,0x04,0x06,0x00,0x05,0x00,0x04,0x00 };
-
-static void test_verify_message_signature(void)
-{
-    BOOL ret;
-    CRYPT_VERIFY_MESSAGE_PARA para = { 0 };
-    PCCERT_CONTEXT cert;
-    DWORD cbDecoded;
-
-    SetLastError(0xdeadbeef);
-    ret = CryptVerifyMessageSignature(NULL, 0, NULL, 0, NULL, 0, NULL);
-    ok(!ret && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
-    SetLastError(0xdeadbeef);
-    ret = CryptVerifyMessageSignature(&para, 0, NULL, 0, NULL, 0, NULL);
-    ok(!ret && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
-    para.cbSize = sizeof(para);
-    SetLastError(0xdeadbeef);
-    ret = CryptVerifyMessageSignature(&para, 0, NULL, 0, NULL, 0, NULL);
-    ok(!ret && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
-    para.cbSize = 0;
-    para.dwMsgAndCertEncodingType = PKCS_7_ASN_ENCODING;
-    SetLastError(0xdeadbeef);
-    ret = CryptVerifyMessageSignature(&para, 0, NULL, 0, NULL, 0, NULL);
-    ok(!ret && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
-    para.cbSize = sizeof(para);
-    SetLastError(0xdeadbeef);
-    ret = CryptVerifyMessageSignature(&para, 0, NULL, 0, NULL, 0, NULL);
-    ok(!ret && GetLastError() == CRYPT_E_ASN1_EOD,
-     "Expected CRYPT_E_ASN1_EOD, got %08x\n", GetLastError());
-    /* Check whether cert is set on error */
-    cert = (PCCERT_CONTEXT)0xdeadbeef;
-    ret = CryptVerifyMessageSignature(&para, 0, NULL, 0, NULL, 0, &cert);
-    ok(cert == NULL, "Expected NULL cert\n");
-    /* Check whether cbDecoded is set on error */
-    cbDecoded = 0xdeadbeef;
-    ret = CryptVerifyMessageSignature(&para, 0, NULL, 0, NULL, &cbDecoded,
-     NULL);
-    ok(!cbDecoded, "Expected 0\n");
-    SetLastError(0xdeadbeef);
-    ret = CryptVerifyMessageSignature(&para, 0, dataEmptyBareContent,
-     sizeof(dataEmptyBareContent), NULL, 0, NULL);
-    ok(!ret && GetLastError() == CRYPT_E_ASN1_BADTAG,
-     "Expected CRYPT_E_ASN1_BADTAG, got %08x\n", GetLastError());
-    SetLastError(0xdeadbeef);
-    ret = CryptVerifyMessageSignature(&para, 0, dataEmptyContent,
-     sizeof(dataEmptyContent), NULL, 0, NULL);
-    ok(!ret && GetLastError() == CRYPT_E_UNEXPECTED_MSG_TYPE,
-     "Expected CRYPT_E_UNEXPECTED_MSG_TYPE, got %08x\n", GetLastError());
-    SetLastError(0xdeadbeef);
-    ret = CryptVerifyMessageSignature(&para, 0, signedEmptyBareContent,
-     sizeof(signedEmptyBareContent), NULL, 0, NULL);
-    ok(!ret && GetLastError() == CRYPT_E_ASN1_BADTAG,
-     "Expected CRYPT_E_ASN1_BADTAG, got %08x\n", GetLastError());
-    SetLastError(0xdeadbeef);
-    ret = CryptVerifyMessageSignature(&para, 0, signedEmptyContent,
-     sizeof(signedEmptyContent), NULL, 0, NULL);
-    ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
-     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
-    SetLastError(0xdeadbeef);
-    ret = CryptVerifyMessageSignature(&para, 0, signedContent,
-     sizeof(signedContent), NULL, 0, NULL);
-    ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
-     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
-    /* FIXME: Windows fails with CRYPT_E_NOT_FOUND for these messages, but
-     * their signer certs have invalid public keys that fail to decode.  In
-     * Wine therefore the failure is an ASN error.  Need some messages with
-     * valid public keys and invalid signatures to check against.
-     */
-    ret = CryptVerifyMessageSignature(&para, 0, signedWithCertEmptyContent,
-     sizeof(signedWithCertEmptyContent), NULL, 0, NULL);
-    ok(!ret, "Expected failure\n");
-    ret = CryptVerifyMessageSignature(&para, 0, signedWithCertContent,
-     sizeof(signedWithCertContent), NULL, 0, NULL);
-    ok(!ret, "Expected failure\n");
-    ret = CryptVerifyMessageSignature(&para, 0, signedWithCertWithPubKeyContent,
-     sizeof(signedWithCertWithPubKeyContent), NULL, 0, NULL);
-    ok(!ret, "Expected failure\n");
 }
 
 /* win9x has much less parameter checks and will crash on many tests
@@ -2724,6 +2816,121 @@ static BOOL detect_nt(void)
     return TRUE;
 }
 
+static void test_msg_get_and_verify_signer(void)
+{
+    BOOL ret;
+    HCRYPTMSG msg;
+    PCCERT_CONTEXT signer;
+    DWORD signerIndex;
+    HCERTSTORE store;
+
+    /* Crash */
+    if (0)
+    {
+        ret = CryptMsgGetAndVerifySigner(NULL, 0, NULL, 0, NULL, NULL);
+        ret = CryptMsgGetAndVerifySigner(NULL, 0, NULL, 0, NULL, &signerIndex);
+    }
+
+    msg = CryptMsgOpenToDecode(PKCS_7_ASN_ENCODING, 0, 0, 0, NULL, NULL);
+    /* An empty message has no signer */
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetAndVerifySigner(msg, 0, NULL, 0, NULL, NULL);
+    ok(!ret && GetLastError() == CRYPT_E_NO_TRUSTED_SIGNER,
+     "expected CRYPT_E_NO_TRUSTED_SIGNER, got 0x%08x\n", GetLastError());
+    /* The signer is cleared on error */
+    signer = (PCCERT_CONTEXT)0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetAndVerifySigner(msg, 0, NULL, 0, &signer, NULL);
+    ok(!ret && GetLastError() == CRYPT_E_NO_TRUSTED_SIGNER,
+     "expected CRYPT_E_NO_TRUSTED_SIGNER, got 0x%08x\n", GetLastError());
+    ok(!signer, "expected signer to be NULL\n");
+    /* The signer index is also cleared on error */
+    signerIndex = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetAndVerifySigner(msg, 0, NULL, 0, NULL, &signerIndex);
+    ok(!ret && GetLastError() == CRYPT_E_NO_TRUSTED_SIGNER,
+     "expected CRYPT_E_NO_TRUSTED_SIGNER, got 0x%08x\n", GetLastError());
+    ok(!signerIndex, "expected 0, got %d\n", signerIndex);
+    /* An unsigned message (msgData isn't a signed message at all)
+     * likewise has no signer.
+     */
+    CryptMsgUpdate(msg, msgData, sizeof(msgData), TRUE);
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetAndVerifySigner(msg, 0, NULL, 0, NULL, NULL);
+    ok(!ret && GetLastError() == CRYPT_E_NO_TRUSTED_SIGNER,
+     "expected CRYPT_E_NO_TRUSTED_SIGNER, got 0x%08x\n", GetLastError());
+    CryptMsgClose(msg);
+
+    msg = CryptMsgOpenToDecode(PKCS_7_ASN_ENCODING, 0, 0, 0, NULL, NULL);
+    /* A "signed" message created with no signer cert likewise has no signer */
+    CryptMsgUpdate(msg, signedEmptyContent, sizeof(signedEmptyContent), TRUE);
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetAndVerifySigner(msg, 0, NULL, 0, NULL, NULL);
+    ok(!ret && GetLastError() == CRYPT_E_NO_TRUSTED_SIGNER,
+     "expected CRYPT_E_NO_TRUSTED_SIGNER, got 0x%08x\n", GetLastError());
+    CryptMsgClose(msg);
+
+    msg = CryptMsgOpenToDecode(PKCS_7_ASN_ENCODING, 0, 0, 0, NULL, NULL);
+    /* A signed message succeeds, .. */
+    CryptMsgUpdate(msg, signedWithCertWithValidPubKeyContent,
+     sizeof(signedWithCertWithValidPubKeyContent), TRUE);
+    ret = CryptMsgGetAndVerifySigner(msg, 0, NULL, 0, NULL, NULL);
+    ok(ret, "CryptMsgGetAndVerifySigner failed: 0x%08x\n", GetLastError());
+    /* the signer index can be retrieved, .. */
+    signerIndex = 0xdeadbeef;
+    ret = CryptMsgGetAndVerifySigner(msg, 0, NULL, 0, NULL, &signerIndex);
+    ok(ret, "CryptMsgGetAndVerifySigner failed: 0x%08x\n", GetLastError());
+    ok(signerIndex == 0, "expected 0, got %d\n", signerIndex);
+    /* as can the signer cert. */
+    signer = (PCCERT_CONTEXT)0xdeadbeef;
+    ret = CryptMsgGetAndVerifySigner(msg, 0, NULL, 0, &signer, NULL);
+    ok(ret, "CryptMsgGetAndVerifySigner failed: 0x%08x\n", GetLastError());
+    ok(signer != NULL && signer != (PCCERT_CONTEXT)0xdeadbeef,
+     "expected a valid signer\n");
+    if (signer && signer != (PCCERT_CONTEXT)0xdeadbeef)
+        CertFreeCertificateContext(signer);
+    /* Specifying CMSG_USE_SIGNER_INDEX_FLAG and an invalid signer index fails
+     */
+    signerIndex = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetAndVerifySigner(msg, 0, NULL, CMSG_USE_SIGNER_INDEX_FLAG,
+     NULL, &signerIndex);
+    ok(!ret && GetLastError() == CRYPT_E_INVALID_INDEX,
+     "expected CRYPT_E_INVALID_INDEX, got 0x%08x\n", GetLastError());
+    /* Specifying CMSG_TRUSTED_SIGNER_FLAG and no cert stores causes the
+     * message signer not to be found.
+     */
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetAndVerifySigner(msg, 0, NULL, CMSG_TRUSTED_SIGNER_FLAG,
+     NULL, NULL);
+    ok(!ret && GetLastError() == CRYPT_E_NO_TRUSTED_SIGNER,
+     "expected CRYPT_E_NO_TRUSTED_SIGNER, got 0x%08x\n", GetLastError());
+    /* Specifying CMSG_TRUSTED_SIGNER_FLAG and an empty cert store also causes
+     * the message signer not to be found.
+     */
+    store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0,
+     CERT_STORE_CREATE_NEW_FLAG, NULL);
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetAndVerifySigner(msg, 1, &store, CMSG_TRUSTED_SIGNER_FLAG,
+     NULL, NULL);
+    ok(!ret && GetLastError() == CRYPT_E_NO_TRUSTED_SIGNER,
+     "expected CRYPT_E_NO_TRUSTED_SIGNER, got 0x%08x\n", GetLastError());
+    ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
+     v1CertWithValidPubKey, sizeof(v1CertWithValidPubKey),
+     CERT_STORE_ADD_ALWAYS, NULL);
+    ok(ret, "CertAddEncodedCertificateToStore failed: 0x%08x\n",
+     GetLastError());
+    /* Specifying CMSG_TRUSTED_SIGNER_FLAG with a cert store that contains
+     * the signer succeeds.
+     */
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgGetAndVerifySigner(msg, 1, &store, CMSG_TRUSTED_SIGNER_FLAG,
+     NULL, NULL);
+    ok(ret, "CryptMsgGetAndVerifySigner failed: 0x%08x\n", GetLastError());
+    CertCloseStore(store, 0);
+    CryptMsgClose(msg);
+}
+
 START_TEST(msg)
 {
     init_function_pointers();
@@ -2742,7 +2949,5 @@ START_TEST(msg)
     test_signed_msg();
     test_decode_msg();
 
-    /* simplified message functions */
-    test_msg_get_signer_count();
-    test_verify_message_signature();
+    test_msg_get_and_verify_signer();
 }

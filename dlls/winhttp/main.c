@@ -84,91 +84,6 @@ HRESULT WINAPI DllUnregisterServer(void)
 }
 
 /***********************************************************************
- *          WinHttpCheckPlatform (winhttp.@)
- */
-BOOL WINAPI WinHttpCheckPlatform(void)
-{
-    FIXME("stub\n");
-    SetLastError(ERROR_NOT_SUPPORTED);
-    return FALSE;
-}
-
-/***********************************************************************
- *          WinHttpDetectAutoProxyConfigUrl (winhttp.@)
- */
-BOOL WINAPI WinHttpDetectAutoProxyConfigUrl(DWORD flags, LPWSTR *url)
-{
-    FIXME("(%x %p)\n", flags, url);
-
-    SetLastError(ERROR_WINHTTP_AUTODETECTION_FAILED);
-    return FALSE;
-}
-
-/***********************************************************************
- *          WinHttpGetIEProxyConfigForCurrentUser (winhttp.@)
- */
-BOOL WINAPI WinHttpGetIEProxyConfigForCurrentUser(WINHTTP_CURRENT_USER_IE_PROXY_CONFIG* config)
-{
-    if(!config)
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-
-    /* TODO: read from HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings */
-    FIXME("returning no proxy used\n");
-    config->fAutoDetect = FALSE;
-    config->lpszAutoConfigUrl = NULL;
-    config->lpszProxy = NULL;
-    config->lpszProxyBypass = NULL;
-
-    SetLastError(ERROR_SUCCESS);
-    return TRUE;
-}
-
-/***********************************************************************
- *          WinHttpOpen (winhttp.@)
- */
-HINTERNET WINAPI WinHttpOpen(LPCWSTR pwszUserAgent, DWORD dwAccessType,
-                             LPCWSTR pwszProxyName, LPCWSTR pwszProxyByPass,
-                             DWORD dwFlags)
-{
-    FIXME("(%s, %d, %s, %s, 0x%x): stub\n", debugstr_w(pwszUserAgent),
-        dwAccessType, debugstr_w(pwszProxyName), debugstr_w(pwszProxyByPass),
-        dwFlags);
-
-    SetLastError(ERROR_NOT_SUPPORTED);
-    return NULL;
-}
-
-/***********************************************************************
- *          WinHttpConnect (winhttp.@)
- */
-
-HINTERNET WINAPI WinHttpConnect (HINTERNET hSession, LPCWSTR pwszServerName,
-                                 INTERNET_PORT nServerPort, DWORD dwReserved)
-{
-    FIXME("(%s, %d, 0x%x): stub\n", debugstr_w(pwszServerName), nServerPort, dwReserved);
-
-    SetLastError(ERROR_NOT_SUPPORTED);
-    return NULL;
-}
-
-/***********************************************************************
- *          WinHttpOpenRequest (winhttp.@)
- */
-HINTERNET WINAPI WinHttpOpenRequest (HINTERNET hConnect, LPCWSTR pwszVerb, LPCWSTR pwszObjectName,
-                                     LPCWSTR pwszVersion, LPCWSTR pwszReferrer, LPCWSTR* ppwszAcceptTypes,
-                                     DWORD dwFlags)
-{
-    FIXME("(%s, %s, %s, %s, 0x%x): stub\n", debugstr_w(pwszVerb), debugstr_w(pwszObjectName),
-          debugstr_w(pwszVersion), debugstr_w(pwszReferrer), dwFlags);
-
-    SetLastError(ERROR_NOT_SUPPORTED);
-    return NULL;
-}
-
-/***********************************************************************
  *          WinHttpSendRequest (winhttp.@)
  */
 BOOL WINAPI WinHttpSendRequest (HINTERNET hRequest, LPCWSTR pwszHeaders, DWORD dwHeadersLength,
@@ -238,12 +153,34 @@ BOOL WINAPI WinHttpReadData (HINTERNET hInternet, LPVOID lpBuffer, DWORD dwNumbe
 }
 
 /***********************************************************************
- *          WinHttpReadData (winhttp.@)
+ *          WinHttpWriteData (winhttp.@)
  */
-BOOL WINAPI WinHttpCloseHandle (HINTERNET hInternet)
+BOOL WINAPI WinHttpWriteData (HINTERNET hRequest, LPCVOID lpBuffer,
+                              DWORD dwNumberOfBytesToWrite, LPDWORD lpdwNumberOfBytesWritten)
 {
-    FIXME("stub\n");
+    FIXME("(%p, %d, %p): stub\n", lpBuffer, dwNumberOfBytesToWrite, lpdwNumberOfBytesWritten);
 
     SetLastError(ERROR_NOT_SUPPORTED);
     return FALSE;
+}
+
+BOOL WINAPI InternetCrackUrlW( LPCWSTR, DWORD, DWORD, LPURL_COMPONENTSW );
+BOOL WINAPI InternetCreateUrlW( LPURL_COMPONENTS, DWORD, LPWSTR, LPDWORD );
+
+/***********************************************************************
+ *          WinHttpCrackUrl (winhttp.@)
+ */
+BOOL WINAPI WinHttpCrackUrl( LPCWSTR url, DWORD len, DWORD flags, LPURL_COMPONENTSW components )
+{
+    TRACE("%s, %d, %x, %p\n", debugstr_w(url), len, flags, components);
+    return InternetCrackUrlW( url, len, flags, components );
+}
+
+/***********************************************************************
+ *          WinHttpCreateUrl (winhttp.@)
+ */
+BOOL WINAPI WinHttpCreateUrl( LPURL_COMPONENTS comps, DWORD flags, LPWSTR url, LPDWORD len )
+{
+    TRACE("%p, 0x%08x, %p, %p\n", comps, flags, url, len);
+    return InternetCreateUrlW( comps, flags, url, len );
 }

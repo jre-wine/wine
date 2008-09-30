@@ -42,7 +42,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
 
 /* looks-right constants */
-#define TENSION_CONST (0.3)
 #define ANCHOR_WIDTH (2.0)
 #define MAX_ITERS (50)
 
@@ -192,34 +191,6 @@ static void draw_pie(GpGraphics *graphics, REAL x, REAL y, REAL width,
 
     Pie(graphics->hdc, pti[0].x, pti[0].y, pti[1].x, pti[1].y, pti[2].x,
         pti[2].y, pti[3].x, pti[3].y);
-}
-
-/* GdipDrawCurve helper function.
- * Calculates Bezier points from cardinal spline points. */
-static void calc_curve_bezier(CONST GpPointF *pts, REAL tension, REAL *x1,
-    REAL *y1, REAL *x2, REAL *y2)
-{
-    REAL xdiff, ydiff;
-
-    /* calculate tangent */
-    xdiff = pts[2].X - pts[0].X;
-    ydiff = pts[2].Y - pts[0].Y;
-
-    /* apply tangent to get control points */
-    *x1 = pts[1].X - tension * xdiff;
-    *y1 = pts[1].Y - tension * ydiff;
-    *x2 = pts[1].X + tension * xdiff;
-    *y2 = pts[1].Y + tension * ydiff;
-}
-
-/* GdipDrawCurve helper function.
- * Calculates Bezier points from cardinal spline endpoints. */
-static void calc_curve_bezier_endp(REAL xend, REAL yend, REAL xadj, REAL yadj,
-    REAL tension, REAL *x, REAL *y)
-{
-    /* tangent at endpoints is the line from the endpoint to the adjacent point */
-    *x = roundr(tension * (xadj - xend) + xend);
-    *y = roundr(tension * (yadj - yend) + yend);
 }
 
 /* Draws the linecap the specified color and size on the hdc.  The linecap is in
@@ -1830,6 +1801,62 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipFillClosedCurve2(GpGraphics *graphics, GpBrush *brush,
+    GDIPCONST GpPointF *points, INT count, REAL tension, GpFillMode fill)
+{
+    GpPath *path;
+    GpStatus stat;
+
+    if(!graphics || !brush || !points)
+        return InvalidParameter;
+
+    stat = GdipCreatePath(fill, &path);
+    if(stat != Ok)
+        return stat;
+
+    stat = GdipAddPathClosedCurve2(path, points, count, tension);
+    if(stat != Ok){
+        GdipDeletePath(path);
+        return stat;
+    }
+
+    stat = GdipFillPath(graphics, brush, path);
+    if(stat != Ok){
+        GdipDeletePath(path);
+        return stat;
+    }
+
+    GdipDeletePath(path);
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipFillClosedCurve2I(GpGraphics *graphics, GpBrush *brush,
+    GDIPCONST GpPoint *points, INT count, REAL tension, GpFillMode fill)
+{
+    GpPointF *ptf;
+    GpStatus stat;
+    INT i;
+
+    if(!points || count <= 0)
+        return InvalidParameter;
+
+    ptf = GdipAlloc(sizeof(GpPointF)*count);
+    if(!ptf)
+        return OutOfMemory;
+
+    for(i = 0;i < count;i++){
+        ptf[i].X = (REAL)points[i].X;
+        ptf[i].Y = (REAL)points[i].Y;
+    }
+
+    stat = GdipFillClosedCurve2(graphics, brush, ptf, count, tension, fill);
+
+    GdipFree(ptf);
+
+    return stat;
+}
+
 GpStatus WINGDIPAPI GdipFillEllipse(GpGraphics *graphics, GpBrush *brush, REAL x,
     REAL y, REAL width, REAL height)
 {
@@ -2002,6 +2029,18 @@ end:
     GdipFree(pti);
 
     return retval;
+}
+
+GpStatus WINGDIPAPI GdipFillPolygon2(GpGraphics *graphics, GpBrush *brush,
+    GDIPCONST GpPointF *points, INT count)
+{
+    return GdipFillPolygon(graphics, brush, points, count, FillModeAlternate);
+}
+
+GpStatus WINGDIPAPI GdipFillPolygon2I(GpGraphics *graphics, GpBrush *brush,
+    GDIPCONST GpPoint *points, INT count)
+{
+    return GdipFillPolygonI(graphics, brush, points, count, FillModeAlternate);
 }
 
 GpStatus WINGDIPAPI GdipFillRectangle(GpGraphics *graphics, GpBrush *brush,
@@ -2356,6 +2395,21 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
 
     GdipFree(stringdup);
     DeleteObject(SelectObject(graphics->hdc, oldfont));
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipResetWorldTransform(GpGraphics *graphics)
+{
+    if(!graphics)
+        return InvalidParameter;
+
+    graphics->worldtrans->matrix[0] = 1.0;
+    graphics->worldtrans->matrix[1] = 0.0;
+    graphics->worldtrans->matrix[2] = 0.0;
+    graphics->worldtrans->matrix[3] = 1.0;
+    graphics->worldtrans->matrix[4] = 0.0;
+    graphics->worldtrans->matrix[5] = 0.0;
 
     return Ok;
 }

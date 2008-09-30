@@ -71,7 +71,7 @@ static const struct epm_endpoints
     { "ncacn_np", "\\pipe\\epmapper" },
     { "ncacn_ip_tcp", "135" },
     { "ncacn_ip_udp", "135" },
-    { "ncalprc", "epmapper" },
+    { "ncalrpc", "epmapper" },
     { "ncacn_http", "593" },
 };
 
@@ -153,7 +153,7 @@ static RPC_STATUS get_epm_handle_client(RPC_BINDING_HANDLE handle, RPC_BINDING_H
 
 static RPC_STATUS get_epm_handle_server(RPC_BINDING_HANDLE *epm_handle)
 {
-    unsigned char string_binding[] = "ncacn_np:.[\\pipe\\epmapper]";
+    unsigned char string_binding[] = "ncacn_np:.[\\\\pipe\\\\epmapper]";
 
     return RpcBindingFromStringBindingA(string_binding, epm_handle);
 }
@@ -447,6 +447,9 @@ RPC_STATUS WINAPI RpcEpResolveBinding( RPC_BINDING_HANDLE Binding, RPC_IF_HANDLE
   return EPT_S_NOT_REGISTERED;
 }
 
+/*****************************************************************************
+ * TowerExplode (RPCRT4.@)
+ */
 RPC_STATUS WINAPI TowerExplode(
     const twr_t *tower, PRPC_SYNTAX_IDENTIFIER object, PRPC_SYNTAX_IDENTIFIER syntax,
     char **protseq, char **endpoint, char **address)

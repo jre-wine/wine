@@ -154,6 +154,7 @@ BASEDIRS = \
 	msi \
 	msimg32 \
 	msimtf \
+	msisip \
 	msisys.ocx \
 	msnet32 \
 	msrle32 \
@@ -303,6 +304,7 @@ TESTSUBDIRS = \
 	d3drm/tests \
 	d3dx8/tests \
 	d3dx9_36/tests \
+	d3dxof/tests \
 	ddraw/tests \
 	dinput/tests \
 	dnsapi/tests \
@@ -329,6 +331,7 @@ TESTSUBDIRS = \
 	mscms/tests \
 	mshtml/tests \
 	msi/tests \
+	mstask/tests \
 	msvcrt/tests \
 	msvcrtd/tests \
 	msxml3/tests \

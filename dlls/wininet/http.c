@@ -2195,15 +2195,16 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
             else
                 headers = lpwhr->lpszRawHeaders;
 
-            len = (strlenW(headers) + 1) * sizeof(WCHAR);
-            if (len > *lpdwBufferLength)
+            len = strlenW(headers) * sizeof(WCHAR);
+            if (len + sizeof(WCHAR) > *lpdwBufferLength)
             {
+                len += sizeof(WCHAR);
                 INTERNET_SetLastError(ERROR_INSUFFICIENT_BUFFER);
                 ret = FALSE;
             }
             else if (lpBuffer)
             {
-                memcpy(lpBuffer, headers, len);
+                memcpy(lpBuffer, headers, len + sizeof(WCHAR));
                 TRACE("returning data: %s\n", debugstr_wn(lpBuffer, len / sizeof(WCHAR)));
                 ret = TRUE;
             }
@@ -4060,9 +4061,9 @@ BOOL HTTP_FinishedReading(LPWININETHTTPREQW lpwhr)
 
     /* as per RFC 2068, S8.1.2.1, if the client is HTTP/1.1 then assume that
      * the connection is keep-alive by default */
-    if (!HTTP_HttpQueryInfoW(lpwhr, HTTP_QUERY_VERSION, szVersion,
-                             &dwBufferSize, NULL) ||
-        strcmpiW(szVersion, g_szHttp1_1))
+    if (HTTP_HttpQueryInfoW(lpwhr, HTTP_QUERY_VERSION, szVersion,
+                             &dwBufferSize, NULL) &&
+        !strcmpiW(szVersion, g_szHttp1_1))
     {
         keepalive = TRUE;
     }

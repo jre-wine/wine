@@ -38,6 +38,7 @@
 #define INCH_HIMETRIC (2540)
 
 #define VERSION_MAGIC 0xdbc01001
+#define TENSION_CONST (0.3)
 
 COLORREF ARGB2COLORREF(ARGB color);
 extern INT arc2polybezier(GpPointF * points, REAL x1, REAL y1, REAL x2, REAL y2,
@@ -45,6 +46,13 @@ extern INT arc2polybezier(GpPointF * points, REAL x1, REAL y1, REAL x2, REAL y2,
 extern REAL gdiplus_atan2(REAL dy, REAL dx);
 extern GpStatus hresult_to_status(HRESULT res);
 extern REAL convert_unit(HDC hdc, GpUnit unit);
+
+extern void calc_curve_bezier(CONST GpPointF *pts, REAL tension, REAL *x1,
+    REAL *y1, REAL *x2, REAL *y2);
+extern void calc_curve_bezier_endp(REAL xend, REAL yend, REAL xadj, REAL yadj,
+    REAL tension, REAL *x, REAL *y);
+
+extern BOOL lengthen_path(GpPath *path, INT len);
 
 static inline INT roundr(REAL x)
 {
@@ -72,6 +80,7 @@ struct GpPen{
     INT numdashes;
     REAL offset;    /* dash offset */
     GpBrush *brush;
+    GpPenAlignment align;
 };
 
 struct GpGraphics{
@@ -149,6 +158,8 @@ struct GpCustomLineCap{
     BOOL fill;      /* TRUE for fill, FALSE for stroke */
     GpLineCap cap;  /* as far as I can tell, this value is ignored */
     REAL inset;     /* how much to adjust the end of the line */
+    GpLineJoin join;
+    REAL scale;
 };
 
 struct GpImage{
@@ -186,10 +197,15 @@ struct GpFont{
 struct GpStringFormat{
     INT attr;
     LANGID lang;
+    LANGID digitlang;
     StringAlignment align;
     StringTrimming trimming;
     HotkeyPrefix hkprefix;
     StringAlignment vertalign;
+    StringDigitSubstitute digitsub;
+    INT tabcount;
+    REAL firsttab;
+    REAL *tabs;
 };
 
 struct GpFontCollection{

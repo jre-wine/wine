@@ -169,10 +169,8 @@ static DWORD CRYPT_AddPrefixA(LPCSTR prefix, LPSTR psz, DWORD csz)
     {
         chars = min(lstrlenA(prefix), csz);
         memcpy(psz, prefix, chars);
-        csz -= chars;
         *(psz + chars) = '=';
         chars++;
-        csz--;
     }
     else
         chars = lstrlenA(prefix) + 1;
@@ -249,7 +247,6 @@ DWORD WINAPI CertNameToStrA(DWORD dwCertEncodingType, PCERT_NAME_BLOB pName,
                     chars = CRYPT_AddPrefixA(prefix,
                      psz ? psz + ret : NULL, psz ? csz - ret - 1 : 0);
                     ret += chars;
-                    csz -= chars;
                 }
                 /* FIXME: handle quoting */
                 chars = CertRDNValueToStrA(
@@ -277,7 +274,6 @@ DWORD WINAPI CertNameToStrA(DWORD dwCertEncodingType, PCERT_NAME_BLOB pName,
     if (psz && csz)
     {
         *(psz + ret) = '\0';
-        csz--;
         ret++;
     }
     else
@@ -305,10 +301,8 @@ static DWORD CRYPT_AddPrefixAToW(LPCSTR prefix, LPWSTR psz, DWORD csz)
         chars = min(lstrlenA(prefix), csz);
         for (i = 0; i < chars; i++)
             *(psz + i) = prefix[i];
-        csz -= chars;
         *(psz + chars) = '=';
         chars++;
-        csz--;
     }
     else
         chars = lstrlenA(prefix) + 1;
@@ -330,10 +324,8 @@ static DWORD CRYPT_AddPrefixW(LPCWSTR prefix, LPWSTR psz, DWORD csz)
     {
         chars = min(lstrlenW(prefix), csz);
         memcpy(psz, prefix, chars * sizeof(WCHAR));
-        csz -= chars;
         *(psz + chars) = '=';
         chars++;
-        csz--;
     }
     else
         chars = lstrlenW(prefix) + 1;
@@ -406,7 +398,6 @@ DWORD WINAPI CertNameToStrW(DWORD dwCertEncodingType, PCERT_NAME_BLOB pName,
                     chars = CRYPT_AddPrefixW(prefixW,
                      psz ? psz + ret : NULL, psz ? csz - ret - 1 : 0);
                     ret += chars;
-                    csz -= chars;
                 }
                 else if (prefixA)
                 {
@@ -414,7 +405,6 @@ DWORD WINAPI CertNameToStrW(DWORD dwCertEncodingType, PCERT_NAME_BLOB pName,
                     chars = CRYPT_AddPrefixAToW(prefixA,
                      psz ? psz + ret : NULL, psz ? csz - ret - 1 : 0);
                     ret += chars;
-                    csz -= chars;
                 }
                 /* FIXME: handle quoting */
                 chars = CertRDNValueToStrW(
@@ -442,7 +432,6 @@ DWORD WINAPI CertNameToStrW(DWORD dwCertEncodingType, PCERT_NAME_BLOB pName,
     if (psz && csz)
     {
         *(psz + ret) = '\0';
-        csz--;
         ret++;
     }
     else

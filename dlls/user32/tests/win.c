@@ -2265,6 +2265,7 @@ static void test_SetActiveWindow(HWND hwnd)
 {
     HWND hwnd2;
 
+    flush_events( TRUE );
     ShowWindow(hwnd, SW_HIDE);
     SetFocus(0);
     SetActiveWindow(0);
@@ -2320,6 +2321,7 @@ static void test_SetForegroundWindow(HWND hwnd)
     BOOL ret;
     HWND hwnd2;
 
+    flush_events( TRUE );
     ShowWindow(hwnd, SW_HIDE);
     SetFocus(0);
     SetActiveWindow(0);
@@ -2551,6 +2553,7 @@ static void test_keyboard_input(HWND hwnd)
     MSG msg;
     BOOL ret;
 
+    flush_events( TRUE );
     ShowWindow(hwnd, SW_SHOW);
     UpdateWindow(hwnd);
     flush_events( TRUE );
@@ -4783,8 +4786,11 @@ static void test_hwnd_message(void)
 
     found = FindWindowExA( 0, 0, 0, "message window" );
     ok( found == hwnd, "didn't find message window %p/%p\n", found, hwnd );
+    SetLastError(0xdeadbeef);
     found = FindWindowExA( GetDesktopWindow(), 0, 0, "message window" );
     ok( found == 0, "found message window %p/%p\n", found, hwnd );
+    todo_wine
+        ok(GetLastError() == ERROR_FILE_NOT_FOUND, "ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
     if (parent)
     {
         found = FindWindowExA( parent, 0, 0, "message window" );

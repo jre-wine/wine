@@ -40,9 +40,30 @@ extern ClassFactoryImpl MSTASK_ClassFactory;
 
 typedef struct
 {
+    const ITaskTriggerVtbl *lpVtbl;
+    LONG ref;
+} TaskTriggerImpl;
+extern HRESULT TaskTriggerConstructor(LPVOID *ppObj);
+
+typedef struct
+{
     const ITaskSchedulerVtbl *lpVtbl;
     LONG ref;
 } TaskSchedulerImpl;
 extern HRESULT TaskSchedulerConstructor(LPVOID *ppObj);
+
+typedef struct
+{
+    const ITaskVtbl *lpVtbl;
+    const IPersistFileVtbl *persistVtbl;
+    LONG ref;
+    LPWSTR taskName;
+    LPWSTR applicationName;
+    LPWSTR parameters;
+    LPWSTR comment;
+    DWORD maxRunTime;
+    LPWSTR accountName;
+} TaskImpl;
+extern HRESULT TaskConstructor(LPCWSTR pwszTaskName, LPVOID *ppObj);
 
 #endif /* __MSTASK_PRIVATE_H__ */

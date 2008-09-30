@@ -242,33 +242,33 @@ done:
     return NULL;
 }
 
-BOOL CreateKey(HWND hwnd, HKEY hKeyRoot, LPCTSTR keyPath, LPTSTR keyName)
+BOOL CreateKey(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPWSTR keyName)
 {
     BOOL result = FALSE;
     LONG lRet = ERROR_SUCCESS;
     HKEY retKey = NULL;
-    TCHAR newKey[MAX_NEW_KEY_LEN - 4];
+    WCHAR newKey[MAX_NEW_KEY_LEN - 4];
     int keyNum;
     HKEY hKey;
          
-    lRet = RegOpenKeyEx(hKeyRoot, keyPath, 0, KEY_CREATE_SUB_KEY, &hKey);
+    lRet = RegOpenKeyExW(hKeyRoot, keyPath, 0, KEY_CREATE_SUB_KEY, &hKey);
     if (lRet != ERROR_SUCCESS) {
 	error_code_messagebox(hwnd, lRet);
 	goto done;
     }
 
-    if (!LoadString(GetModuleHandle(0), IDS_NEWKEY, newKey, COUNT_OF(newKey))) goto done;
+    if (!LoadStringW(GetModuleHandle(0), IDS_NEWKEY, newKey, COUNT_OF(newKey))) goto done;
 
     /* try to find out a name for the newly create key (max 100 times) */
     for (keyNum = 1; keyNum < 100; keyNum++) {
-	wsprintf(keyName, newKey, keyNum);
-	lRet = RegOpenKey(hKey, keyName, &retKey);
+	wsprintfW(keyName, newKey, keyNum);
+	lRet = RegOpenKeyW(hKey, keyName, &retKey);
 	if (lRet != ERROR_SUCCESS) break;
 	RegCloseKey(retKey);
     }
     if (lRet == ERROR_SUCCESS) goto done;
     
-    lRet = RegCreateKey(hKey, keyName, &retKey);
+    lRet = RegCreateKeyW(hKey, keyName, &retKey);
     if (lRet != ERROR_SUCCESS) {
 	error_code_messagebox(hwnd, lRet);
 	goto done;
@@ -386,22 +386,23 @@ done:
     return result;
 }
 
-BOOL DeleteKey(HWND hwnd, HKEY hKeyRoot, LPCTSTR keyPath)
+BOOL DeleteKey(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath)
 {
     BOOL result = FALSE;
     LONG lRet;
     HKEY hKey;
-    
-    lRet = RegOpenKeyEx(hKeyRoot, keyPath, 0, KEY_READ|KEY_SET_VALUE, &hKey);
+    CHAR* keyPathA = GetMultiByteString(keyPath);
+
+    lRet = RegOpenKeyExW(hKeyRoot, keyPath, 0, KEY_READ|KEY_SET_VALUE, &hKey);
     if (lRet != ERROR_SUCCESS) {
 	error_code_messagebox(hwnd, lRet);
 	return FALSE;
     }
     
-    if (messagebox(hwnd, MB_YESNO | MB_ICONEXCLAMATION, IDS_DELETE_BOX_TITLE, IDS_DELETE_BOX_TEXT, keyPath) != IDYES)
+    if (messagebox(hwnd, MB_YESNO | MB_ICONEXCLAMATION, IDS_DELETE_BOX_TITLE, IDS_DELETE_BOX_TEXT, keyPathA) != IDYES)
 	goto done;
 	
-    lRet = SHDeleteKey(hKeyRoot, keyPath);
+    lRet = SHDeleteKeyW(hKeyRoot, keyPath);
     if (lRet != ERROR_SUCCESS) {
 	error(hwnd, IDS_BAD_KEY, keyPath);
 	goto done;
@@ -410,24 +411,33 @@ BOOL DeleteKey(HWND hwnd, HKEY hKeyRoot, LPCTSTR keyPath)
     
 done:
     RegCloseKey(hKey);
+    HeapFree(GetProcessHeap(), 0, keyPathA);
     return result;
 }
 
-BOOL DeleteValue(HWND hwnd, HKEY hKeyRoot, LPCTSTR keyPath, LPCTSTR valueName, BOOL showMessageBox)
+BOOL DeleteValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName, BOOL showMessageBox)
 {
     BOOL result = FALSE;
     LONG lRet;
     HKEY hKey;
-    LPCSTR visibleValueName = valueName ? valueName : g_pszDefaultValueName;
+    LPCWSTR visibleValueName = valueName ? valueName : g_pszDefaultValueNameW;
+    WCHAR empty = 0;
 
-    lRet = RegOpenKeyEx(hKeyRoot, keyPath, 0, KEY_READ | KEY_SET_VALUE, &hKey);
+    lRet = RegOpenKeyExW(hKeyRoot, keyPath, 0, KEY_READ | KEY_SET_VALUE, &hKey);
     if (lRet != ERROR_SUCCESS) return FALSE;
 
     if (showMessageBox)
-        if (messagebox(hwnd, MB_YESNO | MB_ICONEXCLAMATION, IDS_DELETE_BOX_TITLE, IDS_DELETE_BOX_TEXT, visibleValueName) != IDYES)
+    {
+        LPSTR visibleValueNameA = GetMultiByteString(visibleValueName);
+        if (messagebox(hwnd, MB_YESNO | MB_ICONEXCLAMATION, IDS_DELETE_BOX_TITLE, IDS_DELETE_BOX_TEXT, visibleValueNameA) != IDYES)
+        {
+                HeapFree(GetProcessHeap(), 0, visibleValueNameA);
 	        goto done;
+        }
+        HeapFree(GetProcessHeap(), 0, visibleValueNameA);
+    }
 
-    lRet = RegDeleteValue(hKey, valueName ? valueName : "");
+    lRet = RegDeleteValueW(hKey, valueName ? valueName : &empty);
     if (lRet != ERROR_SUCCESS && valueName) {
         error(hwnd, IDS_BAD_VALUE, valueName);
     }

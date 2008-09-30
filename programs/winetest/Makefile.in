@@ -39,6 +39,7 @@ TESTBINS = \
 	d3drm_test.exe \
 	d3dx8_test.exe \
 	d3dx9_36_test.exe \
+	d3dxof_test.exe \
 	ddraw_test.exe \
 	dinput_test.exe \
 	dnsapi_test.exe \
@@ -65,6 +66,7 @@ TESTBINS = \
 	mscms_test.exe \
 	mshtml_test.exe \
 	msi_test.exe \
+	mstask_test.exe \
 	msvcrt_test.exe \
 	msvcrtd_test.exe \
 	msxml3_test.exe \
@@ -138,6 +140,8 @@ d3dx8_test.exe: $(DLLDIR)/d3dx8/tests/d3dx8_test.exe$(DLLEXT)
 	cp $(DLLDIR)/d3dx8/tests/d3dx8_test.exe$(DLLEXT) $@ && $(STRIP) $@
 d3dx9_36_test.exe: $(DLLDIR)/d3dx9_36/tests/d3dx9_36_test.exe$(DLLEXT)
 	cp $(DLLDIR)/d3dx9_36/tests/d3dx9_36_test.exe$(DLLEXT) $@ && $(STRIP) $@
+d3dxof_test.exe: $(DLLDIR)/d3dxof/tests/d3dxof_test.exe$(DLLEXT)
+	cp $(DLLDIR)/d3dxof/tests/d3dxof_test.exe$(DLLEXT) $@ && $(STRIP) $@
 ddraw_test.exe: $(DLLDIR)/ddraw/tests/ddraw_test.exe$(DLLEXT)
 	cp $(DLLDIR)/ddraw/tests/ddraw_test.exe$(DLLEXT) $@ && $(STRIP) $@
 dinput_test.exe: $(DLLDIR)/dinput/tests/dinput_test.exe$(DLLEXT)
@@ -190,6 +194,8 @@ mshtml_test.exe: $(DLLDIR)/mshtml/tests/mshtml_test.exe$(DLLEXT)
 	cp $(DLLDIR)/mshtml/tests/mshtml_test.exe$(DLLEXT) $@ && $(STRIP) $@
 msi_test.exe: $(DLLDIR)/msi/tests/msi_test.exe$(DLLEXT)
 	cp $(DLLDIR)/msi/tests/msi_test.exe$(DLLEXT) $@ && $(STRIP) $@
+mstask_test.exe: $(DLLDIR)/mstask/tests/mstask_test.exe$(DLLEXT)
+	cp $(DLLDIR)/mstask/tests/mstask_test.exe$(DLLEXT) $@ && $(STRIP) $@
 msvcrt_test.exe: $(DLLDIR)/msvcrt/tests/msvcrt_test.exe$(DLLEXT)
 	cp $(DLLDIR)/msvcrt/tests/msvcrt_test.exe$(DLLEXT) $@ && $(STRIP) $@
 msvcrtd_test.exe: $(DLLDIR)/msvcrtd/tests/msvcrtd_test.exe$(DLLEXT)

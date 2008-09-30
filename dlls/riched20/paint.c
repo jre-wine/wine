@@ -32,13 +32,35 @@ void ME_PaintContent(ME_TextEditor *editor, HDC hDC, BOOL bOnlyNew, const RECT *
   yoffset = ME_GetYScrollPos(editor);
   ME_InitContext(&c, editor, hDC);
   SetBkMode(hDC, TRANSPARENT);
-  ME_MoveCaret(editor);
+  ME_MoveCaret(editor); /* Calls ME_WrapMarkedParagraphs */
   item = editor->pBuffer->pFirst->next;
   c.pt.y -= yoffset;
   while(item != editor->pBuffer->pLast) {
+    int yTextOffset = 0;
     int ye;
     assert(item->type == diParagraph);
-    ye = c.pt.y + item->member.para.nHeight;
+    if (item->member.para.pCell
+        != item->member.para.next_para->member.para.pCell)
+    {
+      ME_Cell *cell = NULL;
+      cell = &ME_FindItemBack(item->member.para.next_para, diCell)->member.cell;
+      ye = cell->pt.y + cell->nHeight - yoffset;
+    } else {
+      ye = c.pt.y + item->member.para.nHeight;
+    }
+    if (!(item->member.para.nFlags & MEPF_ROWEND) &&
+        item->member.para.pCell != item->member.para.prev_para->member.para.pCell)
+    {
+      ME_DisplayItem *cell;
+      if (item->member.para.prev_para->member.para.nFlags & MEPF_ROWSTART)
+        cell = item->member.para.pCell;
+      else
+        cell = item->member.para.prev_para->member.para.pCell;
+      assert(cell);
+      /* the border shifts the text down */
+      yTextOffset = cell->member.cell.yTextOffset;
+      ye += yTextOffset;
+    }
     if (!bOnlyNew || (item->member.para.nFlags & MEPF_REPAINT))
     {
       BOOL bPaint = (rcUpdate == NULL);
@@ -46,12 +68,39 @@ void ME_PaintContent(ME_TextEditor *editor, HDC hDC, BOOL bOnlyNew, const RECT *
         bPaint = c.pt.y<rcUpdate->bottom && ye>rcUpdate->top;
       if (bPaint)
       {
+        c.pt.y += yTextOffset;
         ME_DrawParagraph(&c, item);
-        if (!rcUpdate || (rcUpdate->top<=c.pt.y && rcUpdate->bottom>=ye))
+        if (!rcUpdate || (rcUpdate->top<=c.pt.y-yTextOffset && rcUpdate->bottom>=ye))
           item->member.para.nFlags &= ~MEPF_REPAINT;
       }
     }
-    c.pt.y = ye;
+    if (item->member.para.pCell)
+    {
+      ME_Cell *cell = &item->member.para.pCell->member.cell;
+      ME_DisplayItem *next_para = item->member.para.next_para;
+      c.pt.x = cell->pt.x + cell->nWidth;
+      if (item->member.para.pCell == next_para->member.para.pCell &&
+          !(next_para->member.para.nFlags & (MEPF_ROWSTART|MEPF_ROWEND)))
+      {
+        c.pt.y = ye;
+      } else {
+        if (next_para->member.para.nFlags & MEPF_ROWSTART)
+        {
+          cell = &ME_FindItemFwd(next_para, diCell)->member.cell;
+        }
+        else if (next_para->member.para.nFlags & MEPF_ROWEND)
+        {
+          cell = &cell->next_cell->member.cell;
+        }
+        else
+        {
+          cell = &next_para->member.para.pCell->member.cell;
+        }
+        c.pt.y = cell->pt.y - yoffset;
+      }
+    } else if (!(item->member.para.nFlags & MEPF_ROWSTART)) {
+      c.pt.y = ye;
+    }
     item = item->member.para.next_para;
   }
   if (c.pt.y<c.rcView.bottom) {
@@ -394,19 +443,19 @@ static void ME_DrawRun(ME_Context *c, int x, int y, ME_DisplayItem *rundi, ME_Pa
     if (runofs >= nSelFrom && runofs < nSelTo)
     {
       ME_HighlightSpace(c, x, y, wszSpace, 1, run->style, 0, 0, 1,
-                        c->pt.y + start->member.row.nYPos,
+                        c->pt.y + start->member.row.pt.y,
                         start->member.row.nHeight);
     }
     return;
   }
 
-  if (run->nFlags & (MERF_TAB | MERF_CELL))
+  if (run->nFlags & (MERF_TAB | MERF_ENDCELL))
   {
     /* wszSpace is used instead of the tab character because otherwise
      * an unwanted symbol can be inserted instead. */
     ME_DrawTextWithStyle(c, x, y, wszSpace, 1, run->style, run->nWidth,
                          nSelFrom-runofs,nSelTo-runofs,
-                         c->pt.y + start->member.row.nYPos,
+                         c->pt.y + start->member.row.pt.y,
                          start->member.row.nHeight);
     return;
   }
@@ -420,13 +469,13 @@ static void ME_DrawRun(ME_Context *c, int x, int y, ME_DisplayItem *rundi, ME_Pa
       ME_String *szMasked = ME_MakeStringR(c->editor->cPasswordMask,ME_StrVLen(run->strText));
       ME_DrawTextWithStyle(c, x, y,
         szMasked->szData, ME_StrVLen(szMasked), run->style, run->nWidth,
-        nSelFrom-runofs,nSelTo-runofs, c->pt.y+start->member.row.nYPos, start->member.row.nHeight);
+        nSelFrom-runofs,nSelTo-runofs, c->pt.y+start->member.row.pt.y, start->member.row.nHeight);
       ME_DestroyString(szMasked);
     }
     else
       ME_DrawTextWithStyle(c, x, y,
         run->strText->szData, ME_StrVLen(run->strText), run->style, run->nWidth,
-        nSelFrom-runofs,nSelTo-runofs, c->pt.y+start->member.row.nYPos, start->member.row.nHeight);
+        nSelFrom-runofs,nSelTo-runofs, c->pt.y+start->member.row.pt.y, start->member.row.nHeight);
   }
 }
 
@@ -516,14 +565,45 @@ static void ME_DrawParaDecoration(ME_Context* c, ME_Paragraph* para, int y, RECT
 {
   int           idx, border_width, top_border, bottom_border;
   RECT          rc;
+  BOOL          hasParaBorder;
 
   SetRectEmpty(bounds);
   if (!(para->pFmt->dwMask & (PFM_BORDER | PFM_SPACEBEFORE | PFM_SPACEAFTER))) return;
 
   border_width = top_border = bottom_border = 0;
   idx = (para->pFmt->wBorders >> 8) & 0xF;
-  if ((para->pFmt->dwMask & PFM_BORDER) && idx != 0 && (para->pFmt->wBorders & 0xF))
+  hasParaBorder = (!(c->editor->bEmulateVersion10 &&
+                     para->pFmt->dwMask & PFM_TABLE &&
+                     para->pFmt->wEffects & PFE_TABLE) &&
+                   (para->pFmt->dwMask & PFM_BORDER) &&
+                    idx != 0 &&
+                    (para->pFmt->wBorders & 0xF));
+  if (hasParaBorder)
   {
+    /* FIXME: wBorders is not stored as MSDN says in v1.0 - 4.1 of richedit
+     * controls. It actually stores the paragraph or row border style. Although
+     * the value isn't used for drawing, it is used for streaming out rich text.
+     *
+     * wBorders stores the border style for each side (top, left, bottom, right)
+     * using nibble (4 bits) to store each border style.  The rich text format
+     * control words, and their associated value are the following:
+     *   \brdrdash       0
+     *   \brdrdashsm     1
+     *   \brdrdb         2
+     *   \brdrdot        3
+     *   \brdrhair       4
+     *   \brdrs          5
+     *   \brdrth         6
+     *   \brdrtriple     7
+     *
+     * The order of the sides stored actually differs from v1.0 to 3.0 and v4.1.
+     * The mask corresponding to each side for the version are the following:
+     *     mask       v1.0-3.0    v4.1
+     *     0x000F     top         left
+     *     0x00F0     left        top
+     *     0x0F00     bottom      right
+     *     0xF000     right       bottom
+     */
     if (para->pFmt->wBorders & 0x00B0)
       FIXME("Unsupported border flags %x\n", para->pFmt->wBorders);
     border_width = ME_GetParaBorderWidth(c->editor, para->pFmt->wBorders);
@@ -551,7 +631,9 @@ static void ME_DrawParaDecoration(ME_Context* c, ME_Paragraph* para, int y, RECT
     FillRect(c->hDC, &rc, c->editor->hbrBackground);
   }
 
-  if ((para->pFmt->dwMask & PFM_BORDER) && idx != 0 && (para->pFmt->wBorders & 0xF)) {
+  /* Native richedit doesn't support paragraph borders in v1.0 - 4.1,
+   * but might support it in later versions. */
+  if (hasParaBorder) {
     int         pen_width;
     COLORREF    pencr;
     HPEN        pen = NULL, oldpen = NULL;
@@ -630,28 +712,234 @@ static void ME_DrawParaDecoration(ME_Context* c, ME_Paragraph* para, int y, RECT
   }
 }
 
+static void ME_DrawTableBorders(ME_Context *c, ME_DisplayItem *paragraph)
+{
+  ME_Paragraph *para = &paragraph->member.para;
+  if (!c->editor->bEmulateVersion10) /* v4.1 */
+  {
+    if (para->pCell)
+    {
+      RECT rc;
+      ME_Cell *cell = &para->pCell->member.cell;
+      ME_DisplayItem *paraAfterRow;
+      HPEN pen, oldPen;
+      LOGBRUSH logBrush;
+      HBRUSH brush;
+      COLORREF color;
+      POINT oldPt;
+      int width;
+      BOOL atTop = (para->pCell != para->prev_para->member.para.pCell);
+      BOOL atBottom = (para->pCell != para->next_para->member.para.pCell);
+      int top = (atTop ? cell->pt.y : para->pt.y) - ME_GetYScrollPos(c->editor);
+      int bottom = (atBottom ?
+                    cell->pt.y + cell->nHeight - ME_GetYScrollPos(c->editor):
+                    top + para->nHeight + (atTop ? cell->yTextOffset : 0));
+      rc.left = cell->pt.x;
+      rc.right = rc.left + cell->nWidth;
+      if (atTop) {
+        /* Erase gap before text if not all borders are the same height. */
+        width = max(ME_twips2pointsY(c, cell->border.top.width), 1);
+        rc.top = top + width;
+        width = cell->yTextOffset - width;
+        rc.bottom = rc.top + width;
+        if (width) {
+          FillRect(c->hDC, &rc, c->editor->hbrBackground);
+        }
+      }
+      /* Draw cell borders.
+       * The borders borders are draw in is left, top, bottom, right in order
+       * to be consistent with native richedit.  This is noticeable from the
+       * overlap of borders of different colours. */
+      if (!(para->nFlags & MEPF_ROWEND)) {
+        rc.top = top;
+        rc.bottom = bottom;
+        if (cell->border.left.width > 0)
+        {
+          color = cell->border.left.colorRef;
+          width = max(ME_twips2pointsX(c, cell->border.left.width), 1);
+        } else {
+          color = RGB(192,192,192);
+          width = 1;
+        }
+        logBrush.lbStyle = BS_SOLID;
+        logBrush.lbColor = color;
+        logBrush.lbHatch = 0;
+        pen = ExtCreatePen(PS_GEOMETRIC|PS_SOLID|PS_ENDCAP_FLAT|PS_JOIN_MITER,
+                           width, &logBrush, 0, NULL);
+        oldPen = SelectObject(c->hDC, pen);
+        MoveToEx(c->hDC, rc.left, rc.top, &oldPt);
+        LineTo(c->hDC, rc.left, rc.bottom);
+        SelectObject(c->hDC, oldPen);
+        DeleteObject(pen);
+        MoveToEx(c->hDC, oldPt.x, oldPt.y, NULL);
+      }
+
+      if (atTop) {
+        if (cell->border.top.width > 0)
+        {
+          brush = CreateSolidBrush(cell->border.top.colorRef);
+          width = max(ME_twips2pointsY(c, cell->border.top.width), 1);
+        } else {
+          brush = GetStockObject(LTGRAY_BRUSH);
+          width = 1;
+        }
+        rc.top = top;
+        rc.bottom = rc.top + width;
+        FillRect(c->hDC, &rc, brush);
+        if (cell->border.top.width > 0)
+          DeleteObject(brush);
+      }
+
+      /* Draw the bottom border if at the last paragraph in the cell, and when
+       * in the last row of the table. */
+      if (atBottom) {
+        int oldLeft = rc.left;
+        width = max(ME_twips2pointsY(c, cell->border.bottom.width), 1);
+        paraAfterRow = ME_GetTableRowEnd(paragraph)->member.para.next_para;
+        if (paraAfterRow->member.para.nFlags & MEPF_ROWSTART) {
+          ME_DisplayItem *nextEndCell;
+          nextEndCell = ME_FindItemBack(ME_GetTableRowEnd(paraAfterRow), diCell);
+          assert(nextEndCell && !nextEndCell->member.cell.next_cell);
+          rc.left = nextEndCell->member.cell.pt.x;
+          /* FIXME: Native draws FROM the bottom of the table rather than
+           * TO the bottom of the table in this case, but just doing so here
+           * will case the next row to erase the border. */
+          /*
+          rc.top = bottom;
+          rc.bottom = rc.top + width;
+           */
+        }
+        if (rc.left < rc.right) {
+          if (cell->border.bottom.width > 0) {
+            brush = CreateSolidBrush(cell->border.bottom.colorRef);
+          } else {
+            brush = GetStockObject(LTGRAY_BRUSH);
+          }
+          rc.bottom = bottom;
+          rc.top = rc.bottom - width;
+          FillRect(c->hDC, &rc, brush);
+          if (cell->border.bottom.width > 0)
+            DeleteObject(brush);
+        }
+        rc.left = oldLeft;
+      }
+
+      /* Right border only drawn if at the end of the table row. */
+      if (!cell->next_cell->member.cell.next_cell &&
+          !(para->nFlags & MEPF_ROWSTART))
+      {
+        rc.top = top;
+        rc.bottom = bottom;
+        if (cell->border.right.width > 0) {
+          color = cell->border.right.colorRef;
+          width = max(ME_twips2pointsX(c, cell->border.right.width), 1);
+        } else {
+          color = RGB(192,192,192);
+          width = 1;
+        }
+        logBrush.lbStyle = BS_SOLID;
+        logBrush.lbColor = color;
+        logBrush.lbHatch = 0;
+        pen = ExtCreatePen(PS_GEOMETRIC|PS_SOLID|PS_ENDCAP_FLAT|PS_JOIN_MITER,
+                           width, &logBrush, 0, NULL);
+        oldPen = SelectObject(c->hDC, pen);
+        MoveToEx(c->hDC, rc.right - 1, rc.top, &oldPt);
+        LineTo(c->hDC, rc.right - 1, rc.bottom);
+        SelectObject(c->hDC, oldPen);
+        DeleteObject(pen);
+        MoveToEx(c->hDC, oldPt.x, oldPt.y, NULL);
+      }
+    }
+  } else { /* v1.0 - 3.0 */
+    /* Draw simple table border */
+    if (para->pFmt->dwMask & PFM_TABLE && para->pFmt->wEffects & PFE_TABLE) {
+      HPEN pen = NULL, oldpen = NULL;
+      int i, firstX, startX, endX, rowY, rowBottom, nHeight;
+      POINT oldPt;
+      PARAFORMAT2 *pNextFmt;
+
+      pen = CreatePen(PS_SOLID, 0, para->border.top.colorRef);
+      oldpen = SelectObject(c->hDC, pen);
+
+      /* Find the start relative to the text */
+      firstX = ME_FindItemFwd(paragraph, diRun)->member.run.pt.x;
+      /* Go back by the horizontal gap, which is stored in dxOffset */
+      firstX -= ME_twips2pointsX(c, para->pFmt->dxOffset);
+      /* The left edge, stored in dxStartIndent affected just the first edge */
+      startX = firstX - ME_twips2pointsX(c, para->pFmt->dxStartIndent);
+      rowY = c->pt.y;
+      if (para->pFmt->dwMask & PFM_SPACEBEFORE)
+        rowY += ME_twips2pointsY(c, para->pFmt->dySpaceBefore);
+      nHeight = ME_FindItemFwd(paragraph, diStartRow)->member.row.nHeight;
+      rowBottom = rowY + nHeight;
+
+      /* Draw horizontal lines */
+      MoveToEx(c->hDC, firstX, rowY, &oldPt);
+      i = para->pFmt->cTabCount - 1;
+      endX = startX + ME_twips2pointsX(c, para->pFmt->rgxTabs[i] & 0x00ffffff) + 1;
+      LineTo(c->hDC, endX, rowY);
+      pNextFmt = para->next_para->member.para.pFmt;
+      /* The bottom of the row only needs to be drawn if the next row is
+       * not a table. */
+      if (!(pNextFmt && pNextFmt->dwMask & PFM_TABLE && pNextFmt->wEffects &&
+            para->nRows == 1))
+      {
+        /* Decrement rowBottom to draw the bottom line within the row, and
+         * to not draw over this line when drawing the vertical lines. */
+        rowBottom--;
+        MoveToEx(c->hDC, firstX, rowBottom, NULL);
+        LineTo(c->hDC, endX, rowBottom);
+      }
+
+      /* Draw vertical lines */
+      MoveToEx(c->hDC, firstX, rowY, NULL);
+      LineTo(c->hDC, firstX, rowBottom);
+      for (i = 0; i < para->pFmt->cTabCount; i++)
+      {
+        int rightBoundary = para->pFmt->rgxTabs[i] & 0x00ffffff;
+        endX = startX + ME_twips2pointsX(c, rightBoundary);
+        MoveToEx(c->hDC, endX, rowY, NULL);
+        LineTo(c->hDC, endX, rowBottom);
+      }
+
+      MoveToEx(c->hDC, oldPt.x, oldPt.y, NULL);
+      SelectObject(c->hDC, oldpen);
+      DeleteObject(pen);
+    }
+  }
+}
+
 void ME_DrawParagraph(ME_Context *c, ME_DisplayItem *paragraph) {
   int align = SetTextAlign(c->hDC, TA_BASELINE);
   ME_DisplayItem *p;
   ME_Run *run;
   ME_Paragraph *para = NULL;
-  RECT rc, rcPara, bounds;
+  RECT rc, bounds;
   int y = c->pt.y;
-  int height = 0, baseline = 0, no=0, pno = 0;
-  int xs = 0, xe = 0;
+  int height = 0, baseline = 0, no=0;
   BOOL visible = FALSE;
 
   c->pt.x = c->rcView.left;
-  rcPara.left = c->rcView.left;
-  rcPara.right = c->rcView.right;
+  rc.left = c->rcView.left;
+  rc.right = c->rcView.right;
   for (p = paragraph; p!=paragraph->member.para.next_para; p = p->next) {
     switch(p->type) {
       case diParagraph:
         para = &p->member.para;
         assert(para);
-        pno = 0;
-        xs = c->rcView.left + ME_twips2pointsX(c, para->pFmt->dxStartIndent);
-        xe = c->rcView.right - ME_twips2pointsX(c, para->pFmt->dxRightIndent);
+        if (para->pCell)
+        {
+          ME_Cell *cell = &para->pCell->member.cell;
+          rc.left = cell->pt.x;
+          rc.right = rc.left + cell->nWidth;
+        }
+        if (para->nFlags & MEPF_ROWSTART) {
+          ME_Cell *cell = &para->next_para->member.para.pCell->member.cell;
+          rc.right = cell->pt.x;
+        } else if (para->nFlags & MEPF_ROWEND) {
+          ME_Cell *cell = &para->prev_para->member.para.pCell->member.cell;
+          rc.left = cell->pt.x + cell->nWidth;
+        }
         ME_DrawParaDecoration(c, para, y, &bounds);
         y += bounds.top;
         break;
@@ -659,22 +947,18 @@ void ME_DrawParagraph(ME_Context *c, ME_DisplayItem *paragraph) {
         /* we should have seen a diParagraph before */
         assert(para);
         y += height;
-        rcPara.top = y;
-        rcPara.bottom = y+p->member.row.nHeight;
-        visible = RectVisible(c->hDC, &rcPara);
-        if (visible) {
-          /* left margin */
-          rc.left = c->rcView.left + bounds.left;
-          rc.right = xs;
-          rc.top = y;
+        rc.top = y;
+        if (para->nFlags & MEPF_ROWSTART) {
+          ME_Cell *cell = &para->next_para->member.para.pCell->member.cell;
+          rc.bottom = y + cell->nHeight;
+        } else if (para->nFlags & MEPF_ROWEND) {
+          ME_Cell *cell = &para->prev_para->member.para.pCell->member.cell;
+          rc.bottom = y + cell->nHeight;
+        } else {
           rc.bottom = y+p->member.row.nHeight;
-          FillRect(c->hDC, &rc, c->editor->hbrBackground);
-          /* right margin */
-          rc.left = xe;
-          rc.right = c->rcView.right - bounds.right;
-          FillRect(c->hDC, &rc, c->editor->hbrBackground);
-          rc.left = xs;
-          rc.right = xe;
+        }
+        visible = RectVisible(c->hDC, &rc);
+        if (visible) {
           FillRect(c->hDC, &rc, c->editor->hbrBackground);
         }
         if (me_debug)
@@ -686,11 +970,9 @@ void ME_DrawParagraph(ME_Context *c, ME_DisplayItem *paragraph) {
           pt.y = 12+y;
           ME_DebugWrite(c->hDC, &pt, buf);
         }
-        
+
         height = p->member.row.nHeight;
         baseline = p->member.row.nBaseline;
-        if (!pno++)
-          xe += ME_twips2pointsX(c, para->pFmt->dxOffset);
         break;
       case diRun:
         assert(para);
@@ -721,11 +1003,27 @@ void ME_DrawParagraph(ME_Context *c, ME_DisplayItem *paragraph) {
         }
         /* c->pt.x += p->member.run.nWidth; */
         break;
+      case diCell:
+        /* Clear any space at the bottom of the cell after the text. */
+        if (para->nFlags & MEPF_ROWSTART)
+          break;
+        y += height;
+        rc.top = y;
+        rc.bottom = p->member.cell.pt.y + p->member.cell.nHeight
+                    - ME_GetYScrollPos(c->editor);
+        if (RectVisible(c->hDC, &rc))
+        {
+          FillRect(c->hDC, &rc, c->editor->hbrBackground);
+        }
+        break;
       default:
         break;
     }
     no++;
   }
+
+  ME_DrawTableBorders(c, paragraph);
+
   SetTextAlign(c->hDC, align);
 }
 
@@ -867,7 +1165,7 @@ void ME_EnsureVisible(ME_TextEditor *editor, ME_DisplayItem *pRun)
   assert(pRow);
   assert(pPara);
   
-  y = pPara->member.para.nYPos+pRow->member.row.nYPos;
+  y = pPara->member.para.pt.y+pRow->member.row.pt.y;
   yheight = pRow->member.row.nHeight;
   yold = ME_GetYScrollPos(editor);
   yrel = y - yold;

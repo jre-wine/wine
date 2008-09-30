@@ -98,7 +98,7 @@
 @ stub NetGroupAddUser
 @ stub NetGroupDel
 @ stub NetGroupDelUser
-@ stub NetGroupEnum
+@ stdcall NetGroupEnum(wstr long ptr long ptr ptr ptr)
 @ stub NetGroupGetInfo
 @ stub NetGroupGetUsers
 @ stub NetGroupSetInfo
@@ -217,7 +217,7 @@
 @ stub NetWkstaTransportAdd
 @ stub NetWkstaTransportDel
 @ stdcall NetWkstaTransportEnum (wstr long ptr long ptr ptr ptr)
-@ stub NetWkstaUserEnum
+@ stdcall NetWkstaUserEnum(wstr long ptr long ptr ptr ptr)
 @ stdcall NetWkstaUserGetInfo(wstr long ptr)
 @ stub NetWkstaUserSetInfo
 @ stdcall NetapipBufferAllocate(long ptr) NetApiBufferAllocate

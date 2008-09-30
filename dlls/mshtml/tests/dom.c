@@ -496,6 +496,9 @@ static void _test_elem_offset(unsigned line, IUnknown *unk)
     hres = IHTMLElement_get_offsetTop(elem, &l);
     ok_(__FILE__,line) (hres == S_OK, "get_offsetTop failed: %08x\n", hres);
 
+    hres = IHTMLElement_get_offsetHeight(elem, &l);
+    ok_(__FILE__,line) (hres == S_OK, "get_offsetHeight failed: %08x\n", hres);
+
     IHTMLElement_Release(elem);
 }
 
@@ -966,6 +969,75 @@ static long _get_node_type(unsigned line, IUnknown *unk)
     IHTMLDOMNode_Release(node);
 
     return type;
+}
+
+#define elem_get_scroll_height(u) _elem_get_scroll_height(__LINE__,u)
+static long _elem_get_scroll_height(unsigned line, IUnknown *unk)
+{
+    IHTMLElement2 *elem = _get_elem2_iface(line, unk);
+    IHTMLTextContainer *txtcont;
+    long l = -1, l2 = -1;
+    HRESULT hres;
+
+    hres = IHTMLElement2_get_scrollHeight(elem, &l);
+    ok_(__FILE__,line) (hres == S_OK, "get_scrollHeight failed: %08x\n", hres);
+    IHTMLElement2_Release(elem);
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLTextContainer, (void**)&txtcont);
+    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLTextContainer: %08x\n", hres);
+
+    hres = IHTMLTextContainer_get_scrollHeight(txtcont, &l2);
+    IHTMLTextContainer_Release(txtcont);
+    ok_(__FILE__,line) (hres == S_OK, "IHTMLTextContainer::get_scrollHeight failed: %ld\n", l2);
+    ok_(__FILE__,line) (l == l2, "unexpected height %ld, expected %ld\n", l2, l);
+
+    return l;
+}
+
+#define elem_get_scroll_width(u) _elem_get_scroll_width(__LINE__,u)
+static long _elem_get_scroll_width(unsigned line, IUnknown *unk)
+{
+    IHTMLElement2 *elem = _get_elem2_iface(line, unk);
+    IHTMLTextContainer *txtcont;
+    long l = -1, l2 = -1;
+    HRESULT hres;
+
+    hres = IHTMLElement2_get_scrollWidth(elem, &l);
+    ok_(__FILE__,line) (hres == S_OK, "get_scrollWidth failed: %08x\n", hres);
+    IHTMLElement2_Release(elem);
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLTextContainer, (void**)&txtcont);
+    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLTextContainer: %08x\n", hres);
+
+    hres = IHTMLTextContainer_get_scrollWidth(txtcont, &l2);
+    IHTMLTextContainer_Release(txtcont);
+    ok_(__FILE__,line) (hres == S_OK, "IHTMLTextContainer::get_scrollWidth failed: %ld\n", l2);
+    ok_(__FILE__,line) (l == l2, "unexpected width %ld, expected %ld\n", l2, l);
+
+    return l;
+}
+
+#define elem_get_scroll_top(u) _elem_get_scroll_top(__LINE__,u)
+static long _elem_get_scroll_top(unsigned line, IUnknown *unk)
+{
+    IHTMLElement2 *elem = _get_elem2_iface(line, unk);
+    IHTMLTextContainer *txtcont;
+    long l = -1, l2 = -1;
+    HRESULT hres;
+
+    hres = IHTMLElement2_get_scrollTop(elem, &l);
+    ok_(__FILE__,line) (hres == S_OK, "get_scrollTop failed: %08x\n", hres);
+    IHTMLElement2_Release(elem);
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLTextContainer, (void**)&txtcont);
+    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLTextContainer: %08x\n", hres);
+
+    hres = IHTMLTextContainer_get_scrollTop(txtcont, &l2);
+    IHTMLTextContainer_Release(txtcont);
+    ok_(__FILE__,line) (hres == S_OK, "IHTMLTextContainer::get_scrollTop failed: %ld\n", l2);
+    ok_(__FILE__,line) (l == l2, "unexpected top %ld, expected %ld\n", l2, l);
+
+    return l;
 }
 
 #define test_img_set_src(u,s) _test_img_set_src(__LINE__,u,s)
@@ -1822,6 +1894,12 @@ static void test_navigator(IHTMLDocument2 *doc)
     ok(!strcmp_wa(bstr, "Mozilla"), "Unexpected appCodeName %s\n", dbgstr_w(bstr));
     SysFreeString(bstr);
 
+    bstr = NULL;
+    hres = IOmNavigator_get_platform(navigator, &bstr);
+    ok(hres == S_OK, "get_appMinorVersion failed: %08x\n", hres);
+    ok(!strcmp_wa(bstr, "Win32"), "unexpected platform %s\n", dbgstr_w(bstr));
+    SysFreeString(bstr);
+
     ref = IOmNavigator_Release(navigator);
     ok(!ref, "navigator should be destroyed here\n");
 }
@@ -1927,6 +2005,7 @@ static void test_default_selection(IHTMLDocument2 *doc)
 
 static void test_default_body(IHTMLBodyElement *body)
 {
+    long l;
     BSTR bstr;
     HRESULT hres;
 
@@ -1934,6 +2013,13 @@ static void test_default_body(IHTMLBodyElement *body)
     hres = IHTMLBodyElement_get_background(body, &bstr);
     ok(hres == S_OK, "get_background failed: %08x\n", hres);
     ok(bstr == NULL, "bstr != NULL\n");
+
+    l = elem_get_scroll_height((IUnknown*)body);
+    ok(l != -1, "scrollHeight == -1\n");
+    l = elem_get_scroll_width((IUnknown*)body);
+    ok(l != -1, "scrollWidth == -1\n");
+    l = elem_get_scroll_top((IUnknown*)body);
+    ok(!l, "scrollWidth = %ld\n", l);
 }
 
 static void test_window(IHTMLDocument2 *doc)

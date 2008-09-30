@@ -439,6 +439,30 @@ static const CHAR pp_install_exec_seq_dat[] = "Action\tCondition\tSequence\n"
                                               "PublishProduct\tPUBLISH_PRODUCT=1 Or FULL=1\t6400\n"
                                               "InstallFinalize\t\t6600";
 
+static const CHAR ppc_component_dat[] = "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
+                                        "s72\tS38\ts72\ti2\tS255\tS72\n"
+                                        "Component\tComponent\n"
+                                        "maximus\t{DF2CBABC-3BCC-47E5-A998-448D1C0C895B}\tMSITESTDIR\t0\tUILevel=5\tmaximus\n"
+                                        "augustus\t{5AD3C142-CEF8-490D-B569-784D80670685}\tMSITESTDIR\t1\t\taugustus\n";
+
+static const CHAR ppc_file_dat[] = "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
+                                   "s72\ts72\tl255\ti4\tS72\tS20\tI2\ti2\n"
+                                   "File\tFile\n"
+                                   "maximus\tmaximus\tmaximus\t500\t\t\t8192\t1\n"
+                                   "augustus\taugustus\taugustus\t500\t\t\t8192\t2";
+
+static const CHAR ppc_media_dat[] = "DiskId\tLastSequence\tDiskPrompt\tCabinet\tVolumeLabel\tSource\n"
+                                    "i2\ti4\tL64\tS255\tS32\tS72\n"
+                                    "Media\tDiskId\n"
+                                    "1\t2\t\t\tDISK1\t\n";
+
+static const CHAR ppc_feature_comp_dat[] = "Feature_\tComponent_\n"
+                                           "s38\ts72\n"
+                                           "FeatureComponents\tFeature_\tComponent_\n"
+                                           "feature\tmaximus\n"
+                                           "feature\taugustus\n"
+                                           "montecristo\tmaximus";
+
 static const CHAR tp_component_dat[] = "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
                                        "s72\tS38\ts72\ti2\tS255\tS72\n"
                                        "Component\tComponent\n"
@@ -527,7 +551,8 @@ static const CHAR rem_remove_files_dat[] = "FileKey\tComponent_\tFileName\tDirPr
                                            "attoparsec\tlithium\tattoparsec\tMSITESTDIR\t2\n"
                                            "storeys\thydrogen\tstoreys\tMSITESTDIR\t3\n"
                                            "block\thelium\tblock\tMSITESTDIR\t3\n"
-                                           "siriometer\tlithium\tsiriometer\tMSITESTDIR\t3\n";
+                                           "siriometer\tlithium\tsiriometer\tMSITESTDIR\t3\n"
+                                           "nanoacre\thydrogen\t\tCABOUTDIR\t3\n";
 
 static const CHAR mov_move_file_dat[] = "FileKey\tComponent_\tSourceName\tDestName\tSourceFolder\tDestFolder\tOptions\n"
                                         "s72\ts72\tS255\tS255\tS72\ts72\ti2\n"
@@ -704,6 +729,35 @@ static const CHAR sp_directory_dat[] = "Directory\tDirectory_Parent\tDefaultDir\
                                        "MSITESTDIR\tProgramFilesFolder\tmsitest:.\n"
                                        "ONEDIR\tMSITESTDIR\t.:shortone|longone\n"
                                        "TWODIR\tONEDIR\t.:shorttwo|longtwo";
+
+static const CHAR mcp_component_dat[] = "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
+                                        "s72\tS38\ts72\ti2\tS255\tS72\n"
+                                        "Component\tComponent\n"
+                                        "hydrogen\t{C844BD1E-1907-4C00-8BC9-150BD70DF0A1}\tMSITESTDIR\t2\t\thydrogen\n"
+                                        "helium\t{5AD3C142-CEF8-490D-B569-784D80670685}\tMSITESTDIR\t2\t\thelium\n"
+                                        "lithium\t{4AF28FFC-71C7-4307-BDE4-B77C5338F56F}\tMSITESTDIR\t2\tPROPVAR=42\tlithium\n";
+
+static const CHAR mcp_feature_dat[] = "Feature\tFeature_Parent\tTitle\tDescription\tDisplay\tLevel\tDirectory_\tAttributes\n"
+                                      "s38\tS38\tL64\tL255\tI2\ti2\tS72\ti2\n"
+                                      "Feature\tFeature\n"
+                                      "hydroxyl\t\thydroxyl\thydroxyl\t2\t1\tTARGETDIR\t0\n"
+                                      "heliox\t\theliox\theliox\t2\t5\tTARGETDIR\t0\n"
+                                      "lithia\t\tlithia\tlithia\t2\t10\tTARGETDIR\t0";
+
+static const CHAR mcp_feature_comp_dat[] = "Feature_\tComponent_\n"
+                                           "s38\ts72\n"
+                                           "FeatureComponents\tFeature_\tComponent_\n"
+                                           "hydroxyl\thydrogen\n"
+                                           "heliox\thelium\n"
+                                           "lithia\tlithium";
+
+static const CHAR mcomp_file_dat[] = "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
+                                     "s72\ts72\tl255\ti4\tS72\tS20\tI2\ti2\n"
+                                     "File\tFile\n"
+                                     "hydrogen\thydrogen\thydrogen\t0\t\t\t8192\t1\n"
+                                     "helium\thelium\thelium\t0\t\t\t8192\t1\n"
+                                     "lithium\tlithium\tlithium\t0\t\t\t8192\t1\n"
+                                     "beryllium\tmissingcomp\tberyllium\t0\t\t\t8192\t1";
 
 typedef struct _msi_table
 {
@@ -903,6 +957,18 @@ static const msi_table pp_tables[] =
     ADD_TABLE(property),
 };
 
+static const msi_table ppc_tables[] =
+{
+    ADD_TABLE(ppc_component),
+    ADD_TABLE(directory),
+    ADD_TABLE(rof_feature),
+    ADD_TABLE(ppc_feature_comp),
+    ADD_TABLE(ppc_file),
+    ADD_TABLE(pp_install_exec_seq),
+    ADD_TABLE(ppc_media),
+    ADD_TABLE(property),
+};
+
 static const msi_table tp_tables[] =
 {
     ADD_TABLE(tp_component),
@@ -1063,6 +1129,30 @@ static const msi_table sp_tables[] =
     ADD_TABLE(ci2_feature_comp),
     ADD_TABLE(ci2_file),
     ADD_TABLE(install_exec_seq),
+    ADD_TABLE(rof_media),
+    ADD_TABLE(property),
+};
+
+static const msi_table mcp_tables[] =
+{
+    ADD_TABLE(mcp_component),
+    ADD_TABLE(directory),
+    ADD_TABLE(mcp_feature),
+    ADD_TABLE(mcp_feature_comp),
+    ADD_TABLE(rem_file),
+    ADD_TABLE(rem_install_exec_seq),
+    ADD_TABLE(rof_media),
+    ADD_TABLE(property),
+};
+
+static const msi_table mcomp_tables[] =
+{
+    ADD_TABLE(mcp_component),
+    ADD_TABLE(directory),
+    ADD_TABLE(mcp_feature),
+    ADD_TABLE(mcp_feature_comp),
+    ADD_TABLE(mcomp_file),
+    ADD_TABLE(rem_install_exec_seq),
     ADD_TABLE(rof_media),
     ADD_TABLE(property),
 };
@@ -2948,7 +3038,7 @@ static void test_publish_processcomponents(void)
 
     static const CHAR keyfmt[] =
         "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\"
-        "UserData\\%s\\Components\\CBABC2FDCCB35E749A8944D8C1C098B5";
+        "UserData\\%s\\Components\\%s";
     static const CHAR compkey[] =
         "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\Components";
 
@@ -2962,7 +3052,7 @@ static void test_publish_processcomponents(void)
     CreateDirectoryA("msitest", NULL);
     create_file("msitest\\maximus", 500);
 
-    create_database(msifile, pp_tables, sizeof(pp_tables) / sizeof(msi_table));
+    create_database(msifile, ppc_tables, sizeof(ppc_tables) / sizeof(msi_table));
 
     MsiSetInternalUI(INSTALLUILEVEL_FULL, NULL);
 
@@ -2972,7 +3062,7 @@ static void test_publish_processcomponents(void)
     ok(delete_pf("msitest\\maximus", TRUE), "File not installed\n");
     ok(delete_pf("msitest", FALSE), "File not installed\n");
 
-    sprintf(keypath, keyfmt, usersid);
+    sprintf(keypath, keyfmt, usersid, "CBABC2FDCCB35E749A8944D8C1C098B5");
 
     res = RegOpenKeyA(HKEY_LOCAL_MACHINE, keypath, &comp);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
@@ -2991,13 +3081,32 @@ static void test_publish_processcomponents(void)
     RegDeleteKeyA(comp, "");
     RegCloseKey(comp);
 
+    sprintf(keypath, keyfmt, usersid, "241C3DA58FECD0945B9687D408766058");
+
+    res = RegOpenKeyA(HKEY_LOCAL_MACHINE, keypath, &comp);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    size = MAX_PATH;
+    res = RegQueryValueExA(comp, "84A88FD7F6998CE40A22FB59F6B9C2BB",
+                           NULL, NULL, (LPBYTE)val, &size);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    ok(!lstrcmpA(val, "01\\msitest\\augustus"),
+       "Expected \"01\\msitest\\augustus\", got \"%s\"\n", val);
+
+    res = RegOpenKeyA(HKEY_LOCAL_MACHINE, compkey, &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %d\n", res);
+
+    RegDeleteValueA(comp, "84A88FD7F6998CE40A22FB59F6B9C2BB");
+    RegDeleteKeyA(comp, "");
+    RegCloseKey(comp);
+
     /* ProcessComponents, machine */
     r = MsiInstallProductA(msifile, "PROCESS_COMPONENTS=1 ALLUSERS=1");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(delete_pf("msitest\\maximus", TRUE), "File not installed\n");
     ok(delete_pf("msitest", FALSE), "File not installed\n");
 
-    sprintf(keypath, keyfmt, "S-1-5-18");
+    sprintf(keypath, keyfmt, "S-1-5-18", "CBABC2FDCCB35E749A8944D8C1C098B5");
 
     res = RegOpenKeyA(HKEY_LOCAL_MACHINE, keypath, &comp);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
@@ -3008,6 +3117,25 @@ static void test_publish_processcomponents(void)
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
     ok(!lstrcmpA(val, "C:\\Program Files\\msitest\\maximus"),
        "Expected \"%s\", got \"%s\"\n", "C:\\Program Files\\msitest\\maximus", val);
+
+    res = RegOpenKeyA(HKEY_LOCAL_MACHINE, compkey, &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %d\n", res);
+
+    RegDeleteValueA(comp, "84A88FD7F6998CE40A22FB59F6B9C2BB");
+    RegDeleteKeyA(comp, "");
+    RegCloseKey(comp);
+
+    sprintf(keypath, keyfmt, "S-1-5-18", "241C3DA58FECD0945B9687D408766058");
+
+    res = RegOpenKeyA(HKEY_LOCAL_MACHINE, keypath, &comp);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    size = MAX_PATH;
+    res = RegQueryValueExA(comp, "84A88FD7F6998CE40A22FB59F6B9C2BB",
+                           NULL, NULL, (LPBYTE)val, &size);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    ok(!lstrcmpA(val, "01\\msitest\\augustus"),
+       "Expected \"01\\msitest\\augustus\", got \"%s\"\n", val);
 
     res = RegOpenKeyA(HKEY_LOCAL_MACHINE, compkey, &hkey);
     ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %d\n", res);
@@ -3221,9 +3349,9 @@ static void test_publish(void)
     /* no UnpublishFeatures */
     r = MsiInstallProductA(msifile, "REMOVE=ALL");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!pf_exists("msitest\\maximus"), "File deleted\n");
     todo_wine
     {
-        ok(!pf_exists("msitest\\maximus"), "File deleted\n");
         ok(!pf_exists("msitest"), "File deleted\n");
     }
 
@@ -3299,7 +3427,7 @@ static void test_publish(void)
     /* UnpublishFeatures, only feature removed.  Only works when entire product is removed */
     r = MsiInstallProductA(msifile, "UNPUBLISH_FEATURES=1 REMOVE=feature");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(pf_exists("msitest\\maximus"), "File deleted\n");
+    todo_wine ok(pf_exists("msitest\\maximus"), "File deleted\n");
     ok(pf_exists("msitest"), "File deleted\n");
 
     state = MsiQueryProductState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
@@ -3351,7 +3479,10 @@ static void test_publish(void)
     /* complete install */
     r = MsiInstallProductA(msifile, "FULL=1");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(pf_exists("msitest\\maximus"), "File not installed\n");
+    todo_wine
+    {
+        ok(pf_exists("msitest\\maximus"), "File not installed\n");
+    }
     ok(pf_exists("msitest"), "File not installed\n");
 
     state = MsiQueryProductState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
@@ -3403,9 +3534,9 @@ static void test_publish(void)
     /* UnpublishFeatures, both features removed */
     r = MsiInstallProductA(msifile, "UNPUBLISH_FEATURES=1 REMOVE=feature,montecristo");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!pf_exists("msitest\\maximus"), "File not deleted\n");
     todo_wine
     {
-        ok(!pf_exists("msitest\\maximus"), "File not deleted\n");
         ok(!pf_exists("msitest"), "File not deleted\n");
     }
 
@@ -3481,9 +3612,9 @@ static void test_publish(void)
     /* complete uninstall */
     r = MsiInstallProductA(msifile, "FULL=1 REMOVE=ALL");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!pf_exists("msitest\\maximus"), "File not deleted\n");
     todo_wine
     {
-        ok(!pf_exists("msitest\\maximus"), "File not deleted\n");
         ok(!pf_exists("msitest"), "File not deleted\n");
     }
 
@@ -3682,9 +3813,9 @@ static void test_publishsourcelist(void)
     /* complete uninstall */
     r = MsiInstallProductA(msifile, "FULL=1 REMOVE=ALL");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!pf_exists("msitest\\maximus"), "File not deleted\n");
     todo_wine
     {
-        ok(!pf_exists("msitest\\maximus"), "File not deleted\n");
         ok(!pf_exists("msitest"), "File not deleted\n");
     }
 
@@ -4112,13 +4243,10 @@ static void test_removefiles(void)
 
     r = MsiInstallProductA(msifile, "REMOVE=ALL");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(!pf_exists("msitest\\hydrogen"), "File not deleted\n");
     ok(!pf_exists("msitest\\helium"), "File not deleted\n");
     ok(delete_pf("msitest\\lithium", TRUE), "File deleted\n");
-    todo_wine
-    {
-        ok(!pf_exists("msitest\\hydrogen"), "File not deleted\n");
-        ok(delete_pf("msitest", FALSE), "File deleted\n");
-    }
+    ok(delete_pf("msitest", FALSE), "File deleted\n");
 
     create_pf("msitest", FALSE);
     create_pf("msitest\\hydrogen", TRUE);
@@ -4134,13 +4262,10 @@ static void test_removefiles(void)
 
     r = MsiInstallProductA(msifile, "REMOVE=ALL");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(!pf_exists("msitest\\hydrogen"), "File not deleted\n");
     ok(delete_pf("msitest\\helium", TRUE), "File deleted\n");
     ok(delete_pf("msitest\\lithium", TRUE), "File deleted\n");
-    todo_wine
-    {
-        ok(!pf_exists("msitest\\hydrogen"), "File not deleted\n");
-        ok(delete_pf("msitest", FALSE), "File deleted\n");
-    }
+    ok(delete_pf("msitest", FALSE), "File deleted\n");
 
     create_pf("msitest", FALSE);
     create_pf("msitest\\furlong", TRUE);
@@ -4152,25 +4277,25 @@ static void test_removefiles(void)
     create_pf("msitest\\storeys", TRUE);
     create_pf("msitest\\block", TRUE);
     create_pf("msitest\\siriometer", TRUE);
+    create_pf("msitest\\cabout", FALSE);
+    create_pf("msitest\\cabout\\blocker", TRUE);
 
     r = MsiInstallProductA(msifile, NULL);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
     ok(pf_exists("msitest\\hydrogen"), "File not installed\n");
     ok(!pf_exists("msitest\\helium"), "File installed\n");
     ok(pf_exists("msitest\\lithium"), "File not installed\n");
+    ok(!pf_exists("msitest\\furlong"), "File not deleted\n");
+    ok(!pf_exists("msitest\\firkin"), "File not deleted\n");
+    ok(!pf_exists("msitest\\fortnight"), "File not deleted\n");
     ok(pf_exists("msitest\\becquerel"), "File not installed\n");
     ok(pf_exists("msitest\\dioptre"), "File not installed\n");
     ok(pf_exists("msitest\\attoparsec"), "File not installed\n");
+    ok(!pf_exists("msitest\\storeys"), "File not deleted\n");
+    ok(!pf_exists("msitest\\block"), "File not deleted\n");
+    ok(!pf_exists("msitest\\siriometer"), "File not deleted\n");
+    ok(pf_exists("msitest\\cabout"), "Directory removed\n");
     ok(pf_exists("msitest"), "File not installed\n");
-    todo_wine
-    {
-        ok(!pf_exists("msitest\\firkin"), "File not deleted\n");
-        ok(!pf_exists("msitest\\fortnight"), "File not deleted\n");
-        ok(!pf_exists("msitest\\furlong"), "File not deleted\n");
-        ok(!pf_exists("msitest\\storeys"), "File not deleted\n");
-        ok(!pf_exists("msitest\\block"), "File not deleted\n");
-        ok(!pf_exists("msitest\\siriometer"), "File not deleted\n");
-    }
 
     create_pf("msitest\\furlong", TRUE);
     create_pf("msitest\\firkin", TRUE);
@@ -4181,22 +4306,35 @@ static void test_removefiles(void)
 
     r = MsiInstallProductA(msifile, "REMOVE=ALL");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(!delete_pf("msitest\\hydrogen", TRUE), "File not deleted\n");
     ok(!delete_pf("msitest\\helium", TRUE), "File not deleted\n");
     ok(delete_pf("msitest\\lithium", TRUE), "File deleted\n");
     ok(delete_pf("msitest\\furlong", TRUE), "File deleted\n");
     ok(delete_pf("msitest\\firkin", TRUE), "File deleted\n");
     ok(delete_pf("msitest\\fortnight", TRUE), "File deleted\n");
+    ok(!delete_pf("msitest\\becquerel", TRUE), "File not deleted\n");
+    ok(!delete_pf("msitest\\dioptre", TRUE), "File not deleted\n");
     ok(delete_pf("msitest\\attoparsec", TRUE), "File deleted\n");
+    ok(!delete_pf("msitest\\storeys", TRUE), "File not deleted\n");
+    ok(!delete_pf("msitest\\block", TRUE), "File not deleted\n");
     ok(delete_pf("msitest\\siriometer", TRUE), "File deleted\n");
-    todo_wine
-    {
-        ok(!delete_pf("msitest\\hydrogen", TRUE), "File not deleted\n");
-        ok(!delete_pf("msitest\\becquerel", TRUE), "File not deleted\n");
-        ok(!delete_pf("msitest\\dioptre", TRUE), "File not deleted\n");
-        ok(!delete_pf("msitest\\storeys", TRUE), "File not deleted\n");
-        ok(!delete_pf("msitest\\block", TRUE), "File not deleted\n");
-    }
-    ok(delete_pf("msitest", FALSE), "File deleted\n");
+    ok(pf_exists("msitest\\cabout"), "Directory deleted\n");
+    ok(pf_exists("msitest"), "Directory deleted\n");
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(delete_pf("msitest\\hydrogen", TRUE), "File not installed\n");
+    ok(!delete_pf("msitest\\helium", TRUE), "File installed\n");
+    ok(delete_pf("msitest\\lithium", TRUE), "File not installed\n");
+    ok(pf_exists("msitest\\cabout"), "Directory deleted\n");
+    ok(pf_exists("msitest"), "Directory deleted\n");
+
+    delete_pf("msitest\\cabout\\blocker", TRUE);
+
+    r = MsiInstallProductA(msifile, "REMOVE=ALL");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(!delete_pf("msitest\\cabout", FALSE), "Directory not deleted\n");
+    ok(delete_pf("msitest", FALSE), "Directory deleted\n");
 
     DeleteFile(msifile);
     DeleteFile("msitest\\hydrogen");
@@ -4951,6 +5089,313 @@ static void test_sourcepath(void)
     DeleteFileA(msifile);
 }
 
+static void test_MsiConfigureProductEx(void)
+{
+    UINT r;
+    LONG res;
+    DWORD type, size;
+    HKEY props, source;
+    CHAR keypath[MAX_PATH * 2];
+    CHAR localpack[MAX_PATH];
+
+    CreateDirectoryA("msitest", NULL);
+    create_file("msitest\\hydrogen", 500);
+    create_file("msitest\\helium", 500);
+    create_file("msitest\\lithium", 500);
+
+    create_database(msifile, mcp_tables, sizeof(mcp_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    /* NULL szProduct */
+    r = MsiConfigureProductExA(NULL, INSTALLLEVEL_DEFAULT,
+                               INSTALLSTATE_DEFAULT, "PROPVAR=42");
+    ok(r == ERROR_INVALID_PARAMETER,
+       "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
+
+    /* empty szProduct */
+    r = MsiConfigureProductExA("", INSTALLLEVEL_DEFAULT,
+                               INSTALLSTATE_DEFAULT, "PROPVAR=42");
+    ok(r == ERROR_INVALID_PARAMETER,
+       "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
+
+    /* garbage szProduct */
+    r = MsiConfigureProductExA("garbage", INSTALLLEVEL_DEFAULT,
+                               INSTALLSTATE_DEFAULT, "PROPVAR=42");
+    ok(r == ERROR_INVALID_PARAMETER,
+       "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
+
+    /* guid without brackets */
+    r = MsiConfigureProductExA("6700E8CF-95AB-4D9C-BC2C-15840DEA7A5D",
+                               INSTALLLEVEL_DEFAULT, INSTALLSTATE_DEFAULT,
+                               "PROPVAR=42");
+    ok(r == ERROR_INVALID_PARAMETER,
+       "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
+
+    /* guid with brackets */
+    r = MsiConfigureProductExA("{6700E8CF-95AB-4D9C-BC2C-15840DEA7A5D}",
+                               INSTALLLEVEL_DEFAULT, INSTALLSTATE_DEFAULT,
+                               "PROPVAR=42");
+    ok(r == ERROR_UNKNOWN_PRODUCT,
+       "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+
+    /* same length as guid, but random */
+    r = MsiConfigureProductExA("A938G02JF-2NF3N93-VN3-2NNF-3KGKALDNF93",
+                               INSTALLLEVEL_DEFAULT, INSTALLSTATE_DEFAULT,
+                               "PROPVAR=42");
+    ok(r == ERROR_UNKNOWN_PRODUCT,
+       "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+
+    /* product not installed yet */
+    r = MsiConfigureProductExA("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}",
+                               INSTALLLEVEL_DEFAULT, INSTALLSTATE_DEFAULT,
+                               "PROPVAR=42");
+    ok(r == ERROR_UNKNOWN_PRODUCT,
+       "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+
+    /* install the product, per-user unmanaged */
+    r = MsiInstallProductA(msifile, "INSTALLLEVEL=10 PROPVAR=42");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(pf_exists("msitest\\hydrogen"), "File not installed\n");
+    ok(pf_exists("msitest\\helium"), "File not installed\n");
+    ok(pf_exists("msitest\\lithium"), "File not installed\n");
+    ok(pf_exists("msitest"), "File not installed\n");
+
+    /* product is installed per-user managed, remove it */
+    r = MsiConfigureProductExA("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}",
+                               INSTALLLEVEL_DEFAULT, INSTALLSTATE_ABSENT,
+                               "PROPVAR=42");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!delete_pf("msitest\\hydrogen", TRUE), "File not removed\n");
+    ok(!delete_pf("msitest\\helium", TRUE), "File not removed\n");
+    ok(!delete_pf("msitest\\lithium", TRUE), "File not removed\n");
+    todo_wine
+    {
+        ok(!delete_pf("msitest", FALSE), "File not removed\n");
+    }
+
+    /* product has been removed */
+    r = MsiConfigureProductExA("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}",
+                               INSTALLLEVEL_DEFAULT, INSTALLSTATE_DEFAULT,
+                               "PROPVAR=42");
+    ok(r == ERROR_UNKNOWN_PRODUCT,
+       "Expected ERROR_UNKNOWN_PRODUCT, got %u\n", r);
+
+    /* install the product, machine */
+    r = MsiInstallProductA(msifile, "ALLUSERS=1 INSTALLLEVEL=10 PROPVAR=42");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(pf_exists("msitest\\hydrogen"), "File not installed\n");
+    ok(pf_exists("msitest\\helium"), "File not installed\n");
+    ok(pf_exists("msitest\\lithium"), "File not installed\n");
+    ok(pf_exists("msitest"), "File not installed\n");
+
+    /* product is installed machine, remove it */
+    r = MsiConfigureProductExA("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}",
+                               INSTALLLEVEL_DEFAULT, INSTALLSTATE_ABSENT,
+                               "PROPVAR=42");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!delete_pf("msitest\\hydrogen", TRUE), "File not removed\n");
+    ok(!delete_pf("msitest\\helium", TRUE), "File not removed\n");
+    ok(!delete_pf("msitest\\lithium", TRUE), "File not removed\n");
+    todo_wine
+    {
+        ok(!delete_pf("msitest", FALSE), "File not removed\n");
+    }
+
+    /* product has been removed */
+    r = MsiConfigureProductExA("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}",
+                               INSTALLLEVEL_DEFAULT, INSTALLSTATE_DEFAULT,
+                               "PROPVAR=42");
+    ok(r == ERROR_UNKNOWN_PRODUCT,
+       "Expected ERROR_UNKNOWN_PRODUCT, got %u\n", r);
+
+    /* install the product, machine */
+    r = MsiInstallProductA(msifile, "ALLUSERS=1 INSTALLLEVEL=10 PROPVAR=42");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(pf_exists("msitest\\hydrogen"), "File not installed\n");
+    ok(pf_exists("msitest\\helium"), "File not installed\n");
+    ok(pf_exists("msitest\\lithium"), "File not installed\n");
+    ok(pf_exists("msitest"), "File not installed\n");
+
+    DeleteFileA(msifile);
+
+    /* local msifile is removed */
+    r = MsiConfigureProductExA("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}",
+                               INSTALLLEVEL_DEFAULT, INSTALLSTATE_ABSENT,
+                               "PROPVAR=42");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!delete_pf("msitest\\hydrogen", TRUE), "File not removed\n");
+    ok(!delete_pf("msitest\\helium", TRUE), "File not removed\n");
+    ok(!delete_pf("msitest\\lithium", TRUE), "File not removed\n");
+    todo_wine
+    {
+        ok(!delete_pf("msitest", FALSE), "File not removed\n");
+    }
+
+    create_database(msifile, mcp_tables, sizeof(mcp_tables) / sizeof(msi_table));
+
+    /* install the product, machine */
+    r = MsiInstallProductA(msifile, "ALLUSERS=1 INSTALLLEVEL=10 PROPVAR=42");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(pf_exists("msitest\\hydrogen"), "File not installed\n");
+    ok(pf_exists("msitest\\helium"), "File not installed\n");
+    ok(pf_exists("msitest\\lithium"), "File not installed\n");
+    ok(pf_exists("msitest"), "File not installed\n");
+
+    DeleteFileA(msifile);
+
+    lstrcpyA(keypath, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Products\\");
+    lstrcatA(keypath, "84A88FD7F6998CE40A22FB59F6B9C2BB\\InstallProperties");
+
+    res = RegOpenKeyA(HKEY_LOCAL_MACHINE, keypath, &props);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegSetValueExA(props, "LocalPackage", 0, REG_SZ,
+                         (const BYTE *)"C:\\idontexist.msi", 18);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* LocalPackage is used to find the cached msi package */
+    r = MsiConfigureProductExA("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}",
+                               INSTALLLEVEL_DEFAULT, INSTALLSTATE_ABSENT,
+                               "PROPVAR=42");
+    ok(r == ERROR_INSTALL_SOURCE_ABSENT,
+       "Expected ERROR_INSTALL_SOURCE_ABSENT, got %d\n", r);
+    ok(pf_exists("msitest\\hydrogen"), "File not installed\n");
+    ok(pf_exists("msitest\\helium"), "File not installed\n");
+    ok(pf_exists("msitest\\lithium"), "File not installed\n");
+    ok(pf_exists("msitest"), "File not installed\n");
+
+    RegCloseKey(props);
+    create_database(msifile, mcp_tables, sizeof(mcp_tables) / sizeof(msi_table));
+
+    /* LastUsedSource (local msi package) can be used as a last resort */
+    r = MsiConfigureProductExA("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}",
+                               INSTALLLEVEL_DEFAULT, INSTALLSTATE_ABSENT,
+                               "PROPVAR=42");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!delete_pf("msitest\\hydrogen", TRUE), "File not removed\n");
+    ok(!delete_pf("msitest\\helium", TRUE), "File not removed\n");
+    ok(!delete_pf("msitest\\lithium", TRUE), "File not removed\n");
+    todo_wine
+    {
+        ok(!delete_pf("msitest", FALSE), "File not removed\n");
+    }
+
+    /* install the product, machine */
+    r = MsiInstallProductA(msifile, "ALLUSERS=1 INSTALLLEVEL=10 PROPVAR=42");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(pf_exists("msitest\\hydrogen"), "File not installed\n");
+    ok(pf_exists("msitest\\helium"), "File not installed\n");
+    ok(pf_exists("msitest\\lithium"), "File not installed\n");
+    ok(pf_exists("msitest"), "File not installed\n");
+
+    lstrcpyA(keypath, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Products\\");
+    lstrcatA(keypath, "84A88FD7F6998CE40A22FB59F6B9C2BB\\InstallProperties");
+
+    res = RegOpenKeyA(HKEY_LOCAL_MACHINE, keypath, &props);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegSetValueExA(props, "LocalPackage", 0, REG_SZ,
+                         (const BYTE *)"C:\\idontexist.msi", 18);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    lstrcpyA(keypath, "SOFTWARE\\Classes\\Installer\\Products\\");
+    lstrcatA(keypath, "84A88FD7F6998CE40A22FB59F6B9C2BB\\SourceList");
+
+    res = RegOpenKeyA(HKEY_LOCAL_MACHINE, keypath, &source);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    type = REG_SZ;
+    size = MAX_PATH;
+    res = RegQueryValueExA(source, "PackageName", NULL, &type,
+                           (LPBYTE)localpack, &size);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegSetValueExA(source, "PackageName", 0, REG_SZ,
+                         (const BYTE *)"idontexist.msi", 15);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* SourceList is altered */
+    r = MsiConfigureProductExA("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}",
+                               INSTALLLEVEL_DEFAULT, INSTALLSTATE_ABSENT,
+                               "PROPVAR=42");
+    ok(r == ERROR_INSTALL_SOURCE_ABSENT,
+       "Expected ERROR_INSTALL_SOURCE_ABSENT, got %d\n", r);
+    ok(pf_exists("msitest\\hydrogen"), "File not installed\n");
+    ok(pf_exists("msitest\\helium"), "File not installed\n");
+    ok(pf_exists("msitest\\lithium"), "File not installed\n");
+    ok(pf_exists("msitest"), "File not installed\n");
+
+    /* restore the SourceList */
+    res = RegSetValueExA(source, "PackageName", 0, REG_SZ,
+                         (const BYTE *)localpack, lstrlenA(localpack) + 1);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* finally remove the product */
+    r = MsiConfigureProductExA("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}",
+                               INSTALLLEVEL_DEFAULT, INSTALLSTATE_ABSENT,
+                               "PROPVAR=42");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!delete_pf("msitest\\hydrogen", TRUE), "File not removed\n");
+    ok(!delete_pf("msitest\\helium", TRUE), "File not removed\n");
+    ok(!delete_pf("msitest\\lithium", TRUE), "File not removed\n");
+    todo_wine
+    {
+        ok(!delete_pf("msitest", FALSE), "File not removed\n");
+    }
+
+    DeleteFileA(msifile);
+    RegCloseKey(source);
+    RegCloseKey(props);
+    DeleteFileA("msitest\\hydrogen");
+    DeleteFileA("msitest\\helium");
+    DeleteFileA("msitest\\lithium");
+    RemoveDirectoryA("msitest");
+}
+
+static void test_missingcomponent(void)
+{
+    UINT r;
+
+    CreateDirectoryA("msitest", NULL);
+    create_file("msitest\\hydrogen", 500);
+    create_file("msitest\\helium", 500);
+    create_file("msitest\\lithium", 500);
+    create_file("beryllium", 500);
+
+    create_database(msifile, mcomp_tables, sizeof(mcomp_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, "INSTALLLEVEL=10 PROPVAR=42");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(pf_exists("msitest\\hydrogen"), "File not installed\n");
+    ok(pf_exists("msitest\\helium"), "File not installed\n");
+    ok(pf_exists("msitest\\lithium"), "File not installed\n");
+    ok(!pf_exists("msitest\\beryllium"), "File installed\n");
+    ok(pf_exists("msitest"), "File not installed\n");
+
+    r = MsiInstallProductA(msifile, "REMOVE=ALL INSTALLLEVEL=10 PROPVAR=42");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(!delete_pf("msitest\\hydrogen", TRUE), "File not removed\n");
+    ok(!delete_pf("msitest\\helium", TRUE), "File not removed\n");
+    ok(!delete_pf("msitest\\lithium", TRUE), "File not removed\n");
+    ok(!pf_exists("msitest\\beryllium"), "File installed\n");
+    todo_wine
+    {
+        ok(!delete_pf("msitest", FALSE), "File not removed\n");
+    }
+
+    DeleteFileA(msifile);
+    DeleteFileA("msitest\\hydrogen");
+    DeleteFileA("msitest\\helium");
+    DeleteFileA("msitest\\lithium");
+    DeleteFileA("beryllium");
+    RemoveDirectoryA("msitest");
+}
+
 START_TEST(install)
 {
     DWORD len;
@@ -5003,6 +5448,8 @@ START_TEST(install)
     test_customaction51();
     test_installstate();
     test_sourcepath();
+    test_MsiConfigureProductEx();
+    test_missingcomponent();
 
     SetCurrentDirectoryA(prev_path);
 }

@@ -171,20 +171,6 @@ END
  Dialog
 */
 
-IDD_ABOUTBOX DIALOG DISCARDABLE  22, 17, 259, 210
-STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
-CAPTION "О программе Диспетчер задач WINE"
-FONT 8, "MS Shell Dlg"
-BEGIN
-    CONTROL         "Task Manager v1.0\nCopyright (C) 1999 - 2001\nby Brian Palmer (brianp@reactos.org)",
-                    IDC_STATIC,"Static",SS_LEFTNOWORDWRAP | WS_GROUP,53,28,
-                    122,26
-    DEFPUSHBUTTON   "OK",IDOK,183,189,44,14,WS_GROUP
-    ICON            IDI_TASKMANAGER,IDC_STATIC,19,30,20,20
-    EDITTEXT        IDC_LICENSE_EDIT,53,63,174,107,ES_MULTILINE |
-                    ES_READONLY | WS_VSCROLL
-END
-
 IDD_TASKMGR_DIALOG DIALOG DISCARDABLE  0, 0, 264, 246
 STYLE DS_CENTER | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP |
     WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU |
@@ -202,9 +188,9 @@ FONT 8, "MS Shell Dlg"
 BEGIN
     CONTROL         "List2",IDC_APPLIST,"SysListView32",LVS_REPORT |
                     LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,7,7,233,177
-    PUSHBUTTON      "&Новая задача...",IDC_NEWTASK,187,189,53,14
-    PUSHBUTTON      "П&ереключиться",IDC_SWITCHTO,131,189,53,14,WS_DISABLED
-    PUSHBUTTON      "Снять &задачу",IDC_ENDTASK,75,189,53,14,WS_DISABLED
+    PUSHBUTTON      "&Новая задача...",IDC_NEWTASK,177,189,63,14
+    PUSHBUTTON      "П&ереключиться",IDC_SWITCHTO,111,189,63,14,WS_DISABLED
+    PUSHBUTTON      "Снять &задачу",IDC_ENDTASK,45,189,63,14,WS_DISABLED
 END
 
 IDD_PROCESS_PAGE DIALOG DISCARDABLE  0, 0, 247, 210
@@ -364,65 +350,65 @@ BEGIN
                     WS_DISABLED | WS_TABSTOP,175,119,41,10
 END
 
-IDD_COLUMNS_DIALOG DIALOG DISCARDABLE  0, 0, 195, 199
+IDD_COLUMNS_DIALOG DIALOG DISCARDABLE  20, 20, 244, 199
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Выбор столбцов"
 FONT 8, "MS Shell Dlg"
 BEGIN
-    DEFPUSHBUTTON   "OK",IDOK,84,178,50,14
-    PUSHBUTTON      "Отмена",IDCANCEL,138,178,50,14
+    DEFPUSHBUTTON   "OK",IDOK,132,176,50,14
+    PUSHBUTTON      "Отмена",IDCANCEL,186,176,50,14
     LTEXT           "Выберите столбцы, которые появятся на странице процессов диспетчера задач.",
-                    IDC_STATIC,7,7,181,17
+                    IDC_STATIC,7,4,227,19
     CONTROL         "&Имя образа",IDC_IMAGENAME,"Button",BS_AUTOCHECKBOX |
-                    WS_DISABLED | WS_TABSTOP,7,28,56,10
+                    WS_DISABLED | WS_TABSTOP,7,26,105,10
     CONTROL         "Иденти&ф. процесса (PID)",IDC_PID,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,7,39,88,10
+                    BS_AUTOCHECKBOX | WS_TABSTOP,7,37,105,10
     CONTROL         "&Загрузка ЦП",IDC_CPUUSAGE,"Button",BS_AUTOCHECKBOX |
-                    WS_TABSTOP,7,50,53,10
+                    WS_TABSTOP,7,48,105,10
     CONTROL         "&Время ЦП",IDC_CPUTIME,"Button",BS_AUTOCHECKBOX |
-                    WS_TABSTOP,7,61,48,10
+                    WS_TABSTOP,7,59,105,10
     CONTROL         "&Память - использование",IDC_MEMORYUSAGE,"Button",BS_AUTOCHECKBOX |
-                    WS_TABSTOP,7,72,63,10
+                    WS_TABSTOP,7,70,105,10
     CONTROL         "Память - изме&нение",IDC_MEMORYUSAGEDELTA,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,7,83,82,10
+                    BS_AUTOCHECKBOX | WS_TABSTOP,7,81,105,10
     CONTROL         "Память - &максимум",IDC_PEAKMEMORYUSAGE,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,7,94,82,10
+                    BS_AUTOCHECKBOX | WS_TABSTOP,7,92,105,10
     CONTROL         "&Ошибок страницы",IDC_PAGEFAULTS,"Button",BS_AUTOCHECKBOX |
-                    WS_TABSTOP,7,105,53,10
+                    WS_TABSTOP,7,103,105,10
     CONTROL         "Об&ъекты USER",IDC_USEROBJECTS,"Button",BS_AUTOCHECKBOX |
-                    WS_TABSTOP,7,116,62,10
+                    WS_TABSTOP,7,114,105,10
     CONTROL         "Число чтений",IDC_IOREADS,"Button",BS_AUTOCHECKBOX |
-                    WS_TABSTOP,7,127,49,10
+                    WS_TABSTOP,7,125,105,10
     CONTROL         "Прочитано байт",IDC_IOREADBYTES,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,7,138,65,10
+                    BS_AUTOCHECKBOX | WS_TABSTOP,7,136,105,10
     CONTROL         "Код се&анса",IDC_SESSIONID,"Button",BS_AUTOCHECKBOX |
-                    WS_TABSTOP,7,149,50,10
+                    WS_TABSTOP,7,147,105,10
     CONTROL         "Им&я пользователя",IDC_USERNAME,"Button",BS_AUTOCHECKBOX |
-                    WS_TABSTOP,7,160,51,10
+                    WS_TABSTOP,7,158,105,10
     CONTROL         "Ошибок &страницы - изменение",IDC_PAGEFAULTSDELTA,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,107,28,72,10
+                    BS_AUTOCHECKBOX | WS_TABSTOP,118,26,120,10
     CONTROL         "Объем вирту&альной памяти",IDC_VIRTUALMEMORYSIZE,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,107,39,77,10
+                    BS_AUTOCHECKBOX | WS_TABSTOP,118,37,120,10
     CONTROL         "Вы&гружаемый пул",IDC_PAGEDPOOL,"Button",BS_AUTOCHECKBOX |
-                    WS_TABSTOP,107,50,53,10
+                    WS_TABSTOP,118,48,120,10
     CONTROL         "Невыгружаемый п&ул",IDC_NONPAGEDPOOL,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,107,61,67,10
+                    BS_AUTOCHECKBOX | WS_TABSTOP,118,59,120,10
     CONTROL         "&Базовый приоритет",IDC_BASEPRIORITY,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,107,72,55,10
+                    BS_AUTOCHECKBOX | WS_TABSTOP,118,70,120,10
     CONTROL         "Счетчик &дескрипторов",IDC_HANDLECOUNT,"Button",BS_AUTOCHECKBOX |
-                    WS_TABSTOP,107,83,59,10
+                    WS_TABSTOP,118,81,120,10
     CONTROL         "С&четчик потоков",IDC_THREADCOUNT,"Button",BS_AUTOCHECKBOX |
-                    WS_TABSTOP,107,94,59,10
+                    WS_TABSTOP,118,92,120,10
     CONTROL         "Объ&екты GDI",IDC_GDIOBJECTS,"Button",BS_AUTOCHECKBOX |
-                    WS_TABSTOP,107,105,55,10
+                    WS_TABSTOP,118,103,120,10
     CONTROL         "Число записей",IDC_IOWRITES,"Button",BS_AUTOCHECKBOX |
-                    WS_TABSTOP,107,116,49,10
+                    WS_TABSTOP,118,114,120,10
     CONTROL         "Записано байт",IDC_IOWRITEBYTES,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,107,127,65,10
+                    BS_AUTOCHECKBOX | WS_TABSTOP,118,125,120,10
     CONTROL         "Прочий ввод-вывод",IDC_IOOTHER,"Button",BS_AUTOCHECKBOX |
-                    WS_TABSTOP,107,138,46,10
+                    WS_TABSTOP,118,136,120,10
     CONTROL         "Прочих байт при вводе-выводе",IDC_IOOTHERBYTES,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,107,149,65,10
+                    BS_AUTOCHECKBOX | WS_TABSTOP,118,147,120,10
 END
 
 /*
@@ -433,7 +419,7 @@ STRINGTABLE DISCARDABLE
 BEGIN
     IDS_APP_TITLE           "Диспетчер задач"
     IDC_TASKMGR             "Диспетчер задач"
-    IDS_RUNDLG_CAPTION      "Create New Task"
+    IDS_RUNDLG_CAPTION      "Создать новую задачу"
 END
 
 STRINGTABLE DISCARDABLE
@@ -497,5 +483,4 @@ BEGIN
     ID_PROCESS_PAGE_SETPRIORITY_BELOWNORMAL
     "Устанавливает класс приоритета НИЖЕ СРЕДНЕГО для процесса"
     ID_PROCESS_PAGE_SETPRIORITY_LOW "Устанавливает класс приоритета НИЗКИЙ для процесса"
-    IDS_LICENSE             "This program is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.\r\n\r\nThis program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.\r\n\r\nYou should have received a copy of the GNU General Public License along with this program; if not, write to the Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA."
 END

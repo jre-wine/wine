@@ -48,6 +48,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(ddraw);
 static BOOL IDirectDrawImpl_DDSD_Match(const DDSURFACEDESC2* requested, const DDSURFACEDESC2* provided);
 static HRESULT WINAPI IDirectDrawImpl_AttachD3DDevice(IDirectDrawImpl *This, IDirectDrawSurfaceImpl *primary);
 static HRESULT WINAPI IDirectDrawImpl_CreateNewSurface(IDirectDrawImpl *This, DDSURFACEDESC2 *pDDSD, IDirectDrawSurfaceImpl **ppSurf, UINT level);
+static HRESULT WINAPI IDirectDrawImpl_CreateGDISwapChain(IDirectDrawImpl *This, IDirectDrawSurfaceImpl *primary);
 
 /* Device identifier. Don't relay it to WineD3D */
 static const DDDEVICEIDENTIFIER2 deviceidentifier =
@@ -356,7 +357,6 @@ IDirectDrawImpl_SetCooperativeLevel(IDirectDraw7 *iface,
 {
     ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
     HWND window;
-    HRESULT hr;
 
     TRACE("(%p)->(%p,%08x)\n",This,hwnd,cooplevel);
     DDRAW_dump_cooperativelevel(cooplevel);
@@ -364,13 +364,7 @@ IDirectDrawImpl_SetCooperativeLevel(IDirectDraw7 *iface,
     EnterCriticalSection(&ddraw_cs);
 
     /* Get the old window */
-    hr = IWineD3DDevice_GetHWND(This->wineD3DDevice, &window);
-    if(hr != D3D_OK)
-    {
-        ERR("IWineD3DDevice::GetHWND failed, hr = %08x\n", hr);
-        LeaveCriticalSection(&ddraw_cs);
-        return hr;
-    }
+    window = This->dest_window;
 
     /* Tests suggest that we need one of them: */
     if(!(cooplevel & (DDSCL_SETFOCUSWINDOW |
@@ -412,7 +406,7 @@ IDirectDrawImpl_SetCooperativeLevel(IDirectDraw7 *iface,
         hwnd = NULL;
 
         /* Use the focus window for drawing too */
-        IWineD3DDevice_SetHWND(This->wineD3DDevice, This->focuswindow);
+        This->dest_window = This->focuswindow;
 
         /* Destroy the device window, if we have one */
         if(This->devicewindow)
@@ -449,11 +443,8 @@ IDirectDrawImpl_SetCooperativeLevel(IDirectDraw7 *iface,
             !(This->devicewindow) &&
             (hwnd != window) )
         {
-            IWineD3DDevice_SetHWND(This->wineD3DDevice, hwnd);
+            This->dest_window = hwnd;
         }
-
-        IWineD3DDevice_SetFullscreen(This->wineD3DDevice,
-                                     FALSE);
     }
     else if(cooplevel & DDSCL_FULLSCREEN)
     {
@@ -473,8 +464,6 @@ IDirectDrawImpl_SetCooperativeLevel(IDirectDraw7 *iface,
         */
 
         This->cooperative_level &= ~DDSCL_NORMAL;
-        IWineD3DDevice_SetFullscreen(This->wineD3DDevice,
-                                     TRUE);
 
         /* Don't override focus windows or private device windows */
         if( hwnd &&
@@ -482,7 +471,7 @@ IDirectDrawImpl_SetCooperativeLevel(IDirectDraw7 *iface,
             !(This->devicewindow) &&
             (hwnd != window) )
         {
-            IWineD3DDevice_SetHWND(This->wineD3DDevice, hwnd);
+            This->dest_window = hwnd;
         }
     }
     else if(cooplevel & DDSCL_EXCLUSIVE)
@@ -506,8 +495,8 @@ IDirectDrawImpl_SetCooperativeLevel(IDirectDraw7 *iface,
             ShowWindow(devicewindow, SW_SHOW);   /* Just to be sure */
             TRACE("(%p) Created a DDraw device window. HWND=%p\n", This, devicewindow);
 
-            IWineD3DDevice_SetHWND(This->wineD3DDevice, devicewindow);
             This->devicewindow = devicewindow;
+            This->dest_window = devicewindow;
         }
     }
 
@@ -700,6 +689,10 @@ IDirectDrawImpl_GetCaps(IDirectDraw7 *iface,
                         DDCAPS *HELCaps)
 {
     ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    DDCAPS caps;
+    WINED3DCAPS winecaps;
+    HRESULT hr;
+    DDSCAPS2 ddscaps = {0, 0, 0, 0};
     TRACE("(%p)->(%p,%p)\n", This, DriverCaps, HELCaps);
 
     /* One structure must be != NULL */
@@ -709,9 +702,55 @@ IDirectDrawImpl_GetCaps(IDirectDraw7 *iface,
         return DDERR_INVALIDPARAMS;
     }
 
+    memset(&caps, 0, sizeof(caps));
+    memset(&winecaps, 0, sizeof(winecaps));
+    caps.dwSize = sizeof(caps);
+    EnterCriticalSection(&ddraw_cs);
+    hr = IWineD3DDevice_GetDeviceCaps(This->wineD3DDevice, &winecaps);
+    if(FAILED(hr)) {
+        WARN("IWineD3DDevice::GetDeviceCaps failed\n");
+        LeaveCriticalSection(&ddraw_cs);
+        return hr;
+    }
+
+    hr = IDirectDraw7_GetAvailableVidMem(iface, &ddscaps, &caps.dwVidMemTotal, &caps.dwVidMemFree);
+    LeaveCriticalSection(&ddraw_cs);
+    if(FAILED(hr)) {
+        WARN("IDirectDraw7::GetAvailableVidMem failed\n");
+        return hr;
+    }
+
+    caps.dwCaps = winecaps.DirectDrawCaps.Caps;
+    caps.dwCaps2 = winecaps.DirectDrawCaps.Caps2;
+    caps.dwCKeyCaps = winecaps.DirectDrawCaps.CKeyCaps;
+    caps.dwFXCaps = winecaps.DirectDrawCaps.FXCaps;
+    caps.dwPalCaps = winecaps.DirectDrawCaps.PalCaps;
+    caps.ddsCaps.dwCaps = winecaps.DirectDrawCaps.ddsCaps;
+    caps.dwSVBCaps = winecaps.DirectDrawCaps.SVBCaps;
+    caps.dwSVBCKeyCaps = winecaps.DirectDrawCaps.SVBCKeyCaps;
+    caps.dwSVBFXCaps = winecaps.DirectDrawCaps.SVBFXCaps;
+    caps.dwVSBCaps = winecaps.DirectDrawCaps.VSBCaps;
+    caps.dwVSBCKeyCaps = winecaps.DirectDrawCaps.VSBCKeyCaps;
+    caps.dwVSBFXCaps = winecaps.DirectDrawCaps.VSBFXCaps;
+    caps.dwSSBCaps = winecaps.DirectDrawCaps.SSBCaps;
+    caps.dwSSBCKeyCaps = winecaps.DirectDrawCaps.SSBCKeyCaps;
+    caps.dwSSBFXCaps = winecaps.DirectDrawCaps.SSBFXCaps;
+
+    /* Even if WineD3D supports 3D rendering, remove the cap if ddraw is configured
+     * not to use it
+     */
+    if(DefaultSurfaceType == SURFACE_GDI) {
+        caps.dwCaps &= ~DDCAPS_3D;
+        caps.ddsCaps.dwCaps &= ~(DDSCAPS_3DDEVICE | DDSCAPS_MIPMAP | DDSCAPS_TEXTURE | DDSCAPS_ZBUFFER);
+    }
+    if(winecaps.DirectDrawCaps.StrideAlign != 0) {
+        caps.dwCaps |= DDCAPS_ALIGNSTRIDE;
+        caps.dwAlignStrideAlign = winecaps.DirectDrawCaps.StrideAlign;
+    }
+
     if(DriverCaps)
     {
-        DD_STRUCT_COPY_BYSIZE(DriverCaps, &This->caps);
+        DD_STRUCT_COPY_BYSIZE(DriverCaps, &caps);
         if (TRACE_ON(ddraw))
         {
             TRACE("Driver Caps :\n");
@@ -721,7 +760,7 @@ IDirectDrawImpl_GetCaps(IDirectDraw7 *iface,
     }
     if(HELCaps)
     {
-        DD_STRUCT_COPY_BYSIZE(HELCaps, &This->caps);
+        DD_STRUCT_COPY_BYSIZE(HELCaps, &caps);
         if (TRACE_ON(ddraw))
         {
             TRACE("HEL Caps :\n");
@@ -840,9 +879,40 @@ IDirectDrawImpl_GetFourCCCodes(IDirectDraw7 *iface,
                                DWORD *NumCodes, DWORD *Codes)
 {
     ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
-    FIXME("(%p)->(%p, %p): Stub!\n", This, NumCodes, Codes);
+    WINED3DFORMAT formats[] = {
+        WINED3DFMT_YUY2, WINED3DFMT_UYVY,
+        WINED3DFMT_DXT1, WINED3DFMT_DXT2, WINED3DFMT_DXT3, WINED3DFMT_DXT4, WINED3DFMT_DXT5,
+    };
+    DWORD count = 0, i, outsize;
+    HRESULT hr;
+    WINED3DDISPLAYMODE d3ddm;
+    TRACE("(%p)->(%p, %p)\n", This, NumCodes, Codes);
 
-    if(NumCodes) *NumCodes = 0;
+    IWineD3DDevice_GetDisplayMode(This->wineD3DDevice,
+                                  0 /* swapchain 0 */,
+                                  &d3ddm);
+
+    outsize = NumCodes && Codes ? *NumCodes : 0;
+
+    for(i = 0; i < (sizeof(formats) / sizeof(formats[0])); i++) {
+        hr = IWineD3D_CheckDeviceFormat(This->wineD3D,
+                                        WINED3DADAPTER_DEFAULT,
+                                        WINED3DDEVTYPE_HAL,
+                                        d3ddm.Format /* AdapterFormat */,
+                                        0 /* usage */,
+                                        WINED3DRTYPE_SURFACE,
+                                        formats[i]);
+        if(SUCCEEDED(hr)) {
+            if(count < outsize) {
+                Codes[count] = formats[i];
+            }
+            count++;
+        }
+    }
+    if(NumCodes) {
+        TRACE("Returning %u FourCC codes\n", count);
+        *NumCodes = count;
+    }
 
     return DD_OK;
 }
@@ -1576,6 +1646,7 @@ IDirectDrawImpl_RecreateSurfacesCallback(IDirectDrawSurface7 *surf,
     IUnknown *Parent;
     IParentImpl *parImpl = NULL;
     IWineD3DSurface *wineD3DSurface;
+    IWineD3DSwapChain *swapchain;
     HRESULT hr;
     void *tmp;
     IWineD3DClipper *clipper = NULL;
@@ -1600,6 +1671,8 @@ IDirectDrawImpl_RecreateSurfacesCallback(IDirectDrawSurface7 *surf,
     if(surfImpl->ImplType == This->ImplType) return DDENUMRET_OK; /* Continue */
 
     /* Get the objects */
+    swapchain = surfImpl->wineD3DSwapChain;
+    surfImpl->wineD3DSwapChain = NULL;
     wineD3DSurface = surfImpl->WineD3DSurface;
     IWineD3DSurface_GetParent(wineD3DSurface, &Parent);
     IUnknown_Release(Parent); /* For the getParent */
@@ -1631,6 +1704,17 @@ IDirectDrawImpl_RecreateSurfacesCallback(IDirectDrawSurface7 *surf,
     hr = IWineD3DSurface_GetDesc(wineD3DSurface, &Desc);
     if(hr != D3D_OK) return hr;
 
+    if(swapchain) {
+        /* If there's a swapchain, it owns the IParent interface. Create a new one for the
+         * new surface
+         */
+        parImpl = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*parImpl));
+        ICOM_INIT_INTERFACE(parImpl, IParent, IParent_Vtbl);
+        parImpl->ref = 1;
+
+        Parent = (IUnknown *) parImpl;
+    }
+
     /* Create the new surface */
     hr = IWineD3DDevice_CreateSurface(This->wineD3DDevice,
                                       Width, Height, Format,
@@ -1661,10 +1745,23 @@ IDirectDrawImpl_RecreateSurfacesCallback(IDirectDrawSurface7 *surf,
     }
     /* TODO: Copy the surface content, except for render targets */
 
-    if(IWineD3DSurface_Release(wineD3DSurface) == 0)
-        TRACE("Surface released successful, next surface\n");
-    else
-        ERR("Something's still holding the old WineD3DSurface\n");
+    /* If there's a swapchain, it owns the wined3d surfaces. So Destroy
+     * the swapchain
+     */
+    if(swapchain) {
+        /* The backbuffers have the swapchain set as well, but the primary
+         * owns it and destroys it
+         */
+        if(surfImpl->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE) {
+            IWineD3DDevice_UninitGDI(This->wineD3DDevice, D3D7CB_DestroySwapChain);
+        }
+        surfImpl->isRenderTarget = FALSE;
+    } else {
+        if(IWineD3DSurface_Release(wineD3DSurface) == 0)
+            TRACE("Surface released successful, next surface\n");
+        else
+            ERR("Something's still holding the old WineD3DSurface\n");
+    }
 
     surfImpl->ImplType = This->ImplType;
 
@@ -1925,7 +2022,6 @@ IDirectDrawImpl_CreateNewSurface(IDirectDrawImpl *This,
     }
     /* Get the correct wined3d usage */
     if (pDDSD->ddsCaps.dwCaps & (DDSCAPS_PRIMARYSURFACE |
-                                 DDSCAPS_BACKBUFFER     |
                                  DDSCAPS_3DDEVICE       ) )
     {
         Usage |= WINED3DUSAGE_RENDERTARGET;
@@ -2661,6 +2757,8 @@ IDirectDrawImpl_CreateSurface(IDirectDraw7 *iface,
             LeaveCriticalSection(&ddraw_cs);
             return hr;
         }
+    } else if(!(This->d3d_initialized) && desc2.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE) {
+        IDirectDrawImpl_CreateGDISwapChain(This, object);
     }
 
     /* Addref the ddraw interface to keep an reference for each surface */
@@ -3067,6 +3165,7 @@ D3D7CB_CreateAdditionalSwapChain(IUnknown *device,
     IParentImpl *object = NULL;
     HRESULT res = D3D_OK;
     IWineD3DSwapChain *swapchain;
+    IDirectDrawSurfaceImpl *iterator;
     TRACE("(%p) call back\n", device);
 
     object = HeapAlloc(GetProcessHeap(),  HEAP_ZERO_MEMORY, sizeof(IParentImpl));
@@ -3085,7 +3184,8 @@ D3D7CB_CreateAdditionalSwapChain(IUnknown *device,
                                                    &swapchain, 
                                                    (IUnknown*) ICOM_INTERFACE(object, IParent),
                                                    D3D7CB_CreateRenderTarget,
-                                                   D3D7CB_CreateDepthStencilSurface);
+                                                   D3D7CB_CreateDepthStencilSurface,
+                                                   This->ImplType);
     if (res != D3D_OK)
     {
         FIXME("(%p) call to IWineD3DDevice_CreateAdditionalSwapChain failed\n", This);
@@ -3096,9 +3196,57 @@ D3D7CB_CreateAdditionalSwapChain(IUnknown *device,
     {
         *ppSwapChain = swapchain;
         object->child = (IUnknown *) swapchain;
+        This->d3d_target->wineD3DSwapChain = swapchain;
+        iterator = This->d3d_target->complex_array[0];
+        while(iterator) {
+            iterator->wineD3DSwapChain = swapchain;
+            iterator = iterator->complex_array[0];
+        }
     }
 
     return res;
+}
+
+static HRESULT WINAPI IDirectDrawImpl_CreateGDISwapChain(IDirectDrawImpl *This,
+                                                         IDirectDrawSurfaceImpl *primary) {
+    HRESULT hr;
+    WINED3DPRESENT_PARAMETERS presentation_parameters;
+    HWND window;
+
+    window = This->dest_window;
+
+    memset(&presentation_parameters, 0, sizeof(presentation_parameters));
+
+    /* Use the surface description for the device parameters, not the
+     * Device settings. The app might render to an offscreen surface
+     */
+    presentation_parameters.BackBufferWidth                 = primary->surface_desc.dwWidth;
+    presentation_parameters.BackBufferHeight                = primary->surface_desc.dwHeight;
+    presentation_parameters.BackBufferFormat                = PixelFormat_DD2WineD3D(&primary->surface_desc.u4.ddpfPixelFormat);
+    presentation_parameters.BackBufferCount                 = (primary->surface_desc.dwFlags & DDSD_BACKBUFFERCOUNT) ? primary->surface_desc.dwBackBufferCount : 0;
+    presentation_parameters.MultiSampleType                 = WINED3DMULTISAMPLE_NONE;
+    presentation_parameters.MultiSampleQuality              = 0;
+    presentation_parameters.SwapEffect                      = WINED3DSWAPEFFECT_FLIP;
+    presentation_parameters.hDeviceWindow                   = window;
+    presentation_parameters.Windowed                        = !(This->cooperative_level & DDSCL_FULLSCREEN);
+    presentation_parameters.EnableAutoDepthStencil          = FALSE; /* Not on GDI swapchains */
+    presentation_parameters.AutoDepthStencilFormat          = 0;
+    presentation_parameters.Flags                           = 0;
+    presentation_parameters.FullScreen_RefreshRateInHz      = WINED3DPRESENT_RATE_DEFAULT; /* Default rate: It's already set */
+    presentation_parameters.PresentationInterval            = WINED3DPRESENT_INTERVAL_DEFAULT;
+
+    This->d3d_target = primary;
+    hr = IWineD3DDevice_InitGDI(This->wineD3DDevice,
+                                &presentation_parameters,
+                                D3D7CB_CreateAdditionalSwapChain);
+    This->d3d_target = NULL;
+
+    if (hr != D3D_OK)
+    {
+        FIXME("(%p) call to IWineD3DDevice_CreateAdditionalSwapChain failed\n", This);
+        primary->wineD3DSwapChain = NULL;
+    }
+    return hr;
 }
 
 /*****************************************************************************
@@ -3119,20 +3267,11 @@ IDirectDrawImpl_AttachD3DDevice(IDirectDrawImpl *This,
                                 IDirectDrawSurfaceImpl *primary)
 {
     HRESULT hr;
-    HWND                  window;
+    HWND                  window = This->dest_window;
 
     WINED3DPRESENT_PARAMETERS localParameters;
 
     TRACE("(%p)->(%p)\n", This, primary);
-
-    /* Get the window */
-    hr = IWineD3DDevice_GetHWND(This->wineD3DDevice,
-                                &window);
-    if(hr != D3D_OK)
-    {
-        ERR("IWineD3DDevice::GetHWND failed\n");
-        return hr;
-    }
 
     /* If there's no window, create a hidden window. WineD3D needs it */
     if(window == 0)
@@ -3145,12 +3284,12 @@ IDirectDrawImpl_AttachD3DDevice(IDirectDrawImpl *This,
 
         ShowWindow(window, SW_HIDE);   /* Just to be sure */
         WARN("(%p) No window for the Direct3DDevice, created a hidden window. HWND=%p\n", This, window);
-        This->d3d_window = window;
     }
     else
     {
         TRACE("(%p) Using existing window %p for Direct3D rendering\n", This, window);
     }
+    This->d3d_window = window;
 
     /* Store the future Render Target surface */
     This->d3d_target = primary;

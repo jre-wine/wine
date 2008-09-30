@@ -129,9 +129,9 @@
 @ stdcall CryptGetOIDFunctionAddress(long long str long ptr ptr)
 @ stdcall CryptGetOIDFunctionValue(long str str wstr ptr ptr ptr)
 @ stdcall CryptHashCertificate(long long long ptr long ptr ptr)
-@ stub CryptHashMessage
+@ stdcall CryptHashMessage(ptr long long ptr ptr ptr ptr ptr ptr)
 @ stdcall CryptHashPublicKeyInfo(long long long long ptr ptr ptr)
-@ stub CryptHashToBeSigned
+@ stdcall CryptHashToBeSigned(ptr long ptr long ptr ptr)
 @ stub CryptImportPKCS8
 @ stdcall CryptImportPublicKeyInfo(long long ptr ptr)
 @ stdcall CryptImportPublicKeyInfoEx(long long ptr long long ptr ptr)
@@ -148,13 +148,14 @@
 @ stub CryptMsgCountersignEncoded
 @ stdcall CryptMsgDuplicate(ptr)
 @ stub CryptMsgEncodeAndSignCTL
-@ stub CryptMsgGetAndVerifySigner
+@ stdcall CryptMsgGetAndVerifySigner(ptr long ptr long ptr ptr)
 @ stdcall CryptMsgGetParam(ptr long long ptr ptr)
 @ stdcall CryptMsgOpenToDecode(long long long long ptr ptr)
 @ stdcall CryptMsgOpenToEncode(long long long ptr str ptr)
 @ stub CryptMsgSignCTL
 @ stdcall CryptMsgUpdate(ptr ptr long long)
 @ stub CryptMsgVerifyCountersignatureEncoded
+@ stdcall CryptMsgVerifyCountersignatureEncodedEx(ptr long ptr long ptr long long ptr long ptr)
 @ stdcall CryptProtectData(ptr wstr ptr ptr ptr long ptr)
 @ stdcall CryptQueryObject(long ptr long long long ptr ptr ptr ptr ptr ptr)
 @ stdcall CryptRegisterDefaultOIDFunction(long str long wstr)

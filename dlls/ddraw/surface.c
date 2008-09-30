@@ -307,40 +307,46 @@ IDirectDrawSurfaceImpl_Release(IDirectDrawSurface7 *iface)
             IWineD3DBaseTexture_Release(This->wineD3DTexture);
         }
         /* If it's the RenderTarget, destroy the d3ddevice */
-        else if( (ddraw->d3d_initialized) && (This == ddraw->d3d_target))
+        else if(This->wineD3DSwapChain)
         {
-            TRACE("(%p) Destroying the render target, uninitializing D3D\n", This);
+            if((ddraw->d3d_initialized) && (This == ddraw->d3d_target)) {
+                TRACE("(%p) Destroying the render target, uninitializing D3D\n", This);
 
-            /* Unset any index buffer, just to be sure */
-            IWineD3DDevice_SetIndices(ddraw->wineD3DDevice, NULL);
-            IWineD3DDevice_SetDepthStencilSurface(ddraw->wineD3DDevice, NULL);
-            IWineD3DDevice_SetVertexDeclaration(ddraw->wineD3DDevice, NULL);
-            for(i = 0; i < ddraw->numConvertedDecls; i++)
-            {
-                IWineD3DVertexDeclaration_Release(ddraw->decls[i].decl);
-            }
-            HeapFree(GetProcessHeap(), 0, ddraw->decls);
-            ddraw->numConvertedDecls = 0;
-
-            if(IWineD3DDevice_Uninit3D(ddraw->wineD3DDevice, D3D7CB_DestroyDepthStencilSurface, D3D7CB_DestroySwapChain) != D3D_OK)
-            {
-                /* Not good */
-                ERR("(%p) Failed to uninit 3D\n", This);
-            }
-            else
-            {
-                /* Free the d3d window if one was created */
-                if(ddraw->d3d_window != 0)
+                /* Unset any index buffer, just to be sure */
+                IWineD3DDevice_SetIndices(ddraw->wineD3DDevice, NULL);
+                IWineD3DDevice_SetDepthStencilSurface(ddraw->wineD3DDevice, NULL);
+                IWineD3DDevice_SetVertexDeclaration(ddraw->wineD3DDevice, NULL);
+                for(i = 0; i < ddraw->numConvertedDecls; i++)
                 {
-                    TRACE(" (%p) Destroying the hidden render window %p\n", This, ddraw->d3d_window);
-                    DestroyWindow(ddraw->d3d_window);
-                    ddraw->d3d_window = 0;
+                    IWineD3DVertexDeclaration_Release(ddraw->decls[i].decl);
                 }
-                /* Unset the pointers */
-            }
+                HeapFree(GetProcessHeap(), 0, ddraw->decls);
+                ddraw->numConvertedDecls = 0;
 
-            ddraw->d3d_initialized = FALSE;
-            ddraw->d3d_target = NULL;
+                if(IWineD3DDevice_Uninit3D(ddraw->wineD3DDevice, D3D7CB_DestroyDepthStencilSurface, D3D7CB_DestroySwapChain) != D3D_OK)
+                {
+                    /* Not good */
+                    ERR("(%p) Failed to uninit 3D\n", This);
+                }
+                else
+                {
+                    /* Free the d3d window if one was created */
+                    if(ddraw->d3d_window != 0)
+                    {
+                        TRACE(" (%p) Destroying the hidden render window %p\n", This, ddraw->d3d_window);
+                        DestroyWindow(ddraw->d3d_window);
+                        ddraw->d3d_window = 0;
+                    }
+                    /* Unset the pointers */
+                }
+
+                This->wineD3DSwapChain = NULL; /* Uninit3D releases the swapchain */
+                ddraw->d3d_initialized = FALSE;
+                ddraw->d3d_target = NULL;
+            } else {
+                IWineD3DDevice_UninitGDI(ddraw->wineD3DDevice, D3D7CB_DestroySwapChain);
+                This->wineD3DSwapChain = NULL;
+            }
 
             /* Reset to the default surface implementation type. This is needed if apps use
              * non render target surfaces and expect blits to work after destroying the render
@@ -710,7 +716,7 @@ IDirectDrawSurfaceImpl_Flip(IDirectDrawSurface7 *iface,
     /* Flip has to be called from a front buffer
      * What about overlay surfaces, AFAIK they can flip too?
      */
-    if( !(This->surface_desc.ddsCaps.dwCaps & DDSCAPS_FRONTBUFFER) )
+    if( !(This->surface_desc.ddsCaps.dwCaps & (DDSCAPS_FRONTBUFFER | DDSCAPS_OVERLAY)) )
         return DDERR_INVALIDOBJECT; /* Unchecked */
 
     EnterCriticalSection(&ddraw_cs);
@@ -1841,7 +1847,13 @@ IDirectDrawSurfaceImpl_UpdateOverlay(IDirectDrawSurface7 *iface,
                                        Flags,
                                        (WINEDDOVERLAYFX *) FX);
     LeaveCriticalSection(&ddraw_cs);
-    return hr;
+    switch(hr) {
+        case WINED3DERR_INVALIDCALL:        return DDERR_INVALIDPARAMS;
+        case WINEDDERR_NOTAOVERLAYSURFACE:  return DDERR_NOTAOVERLAYSURFACE;
+        case WINEDDERR_OVERLAYNOTVISIBLE:   return DDERR_OVERLAYNOTVISIBLE;
+        default:
+            return hr;
+    }
 }
 
 /*****************************************************************************
@@ -2198,6 +2210,7 @@ IDirectDrawSurfaceImpl_SetClipper(IDirectDrawSurface7 *iface,
 {
     ICOM_THIS_FROM(IDirectDrawSurfaceImpl, IDirectDrawSurface7, iface);
     IDirectDrawClipperImpl *oldClipper = This->clipper;
+    HWND clipWindow;
     HRESULT hr;
     TRACE("(%p)->(%p)\n",This,Clipper);
 
@@ -2216,6 +2229,22 @@ IDirectDrawSurfaceImpl_SetClipper(IDirectDrawSurface7 *iface,
         IDirectDrawClipper_Release(ICOM_INTERFACE(oldClipper, IDirectDrawClipper));
 
     hr = IWineD3DSurface_SetClipper(This->WineD3DSurface, This->clipper ? This->clipper->wineD3DClipper : NULL);
+
+    if(This->wineD3DSwapChain) {
+        clipWindow = NULL;
+        if(Clipper) {
+            IDirectDrawClipper_GetHWnd(Clipper, &clipWindow);
+        }
+
+        if(clipWindow) {
+            IWineD3DSwapChain_SetDestWindowOverride(This->wineD3DSwapChain,
+                                                    clipWindow);
+        } else {
+            IWineD3DSwapChain_SetDestWindowOverride(This->wineD3DSwapChain,
+                                                    This->ddraw->d3d_window);
+        }
+    }
+
     LeaveCriticalSection(&ddraw_cs);
     return hr;
 }

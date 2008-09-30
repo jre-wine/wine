@@ -239,8 +239,15 @@ static BOOL WINAPI CertContext_GetProperty(void *context, DWORD dwPropId,
              pvData, pcbData);
             break;
         case CERT_SIGNATURE_HASH_PROP_ID:
-            FIXME("CERT_SIGNATURE_HASH_PROP_ID unimplemented\n");
-            SetLastError(CRYPT_E_NOT_FOUND);
+            ret = CryptHashToBeSigned(0, pCertContext->dwCertEncodingType,
+             pCertContext->pbCertEncoded, pCertContext->cbCertEncoded, pvData,
+             pcbData);
+            if (ret && pvData)
+            {
+                CRYPT_DATA_BLOB blob = { *pcbData, pvData };
+
+                ret = CertContext_SetProperty(context, dwPropId, 0, &blob);
+            }
             break;
         case CERT_KEY_IDENTIFIER_PROP_ID:
         {
@@ -1136,6 +1143,32 @@ static BOOL compare_existing_cert(PCCERT_CONTEXT pCertContext, DWORD dwType,
      pCertContext->pCertInfo, toCompare->pCertInfo);
 }
 
+static BOOL compare_cert_by_signature_hash(PCCERT_CONTEXT pCertContext, DWORD dwType,
+ DWORD dwFlags, const void *pvPara)
+{
+    const CRYPT_HASH_BLOB *hash = (const CRYPT_HASH_BLOB *)pvPara;
+    DWORD size = 0;
+    BOOL ret;
+
+    ret = CertGetCertificateContextProperty(pCertContext,
+     CERT_SIGNATURE_HASH_PROP_ID, NULL, &size);
+    if (ret && size == hash->cbData)
+    {
+        LPBYTE buf = CryptMemAlloc(size);
+
+        if (buf)
+        {
+            CertGetCertificateContextProperty(pCertContext,
+             CERT_SIGNATURE_HASH_PROP_ID, buf, &size);
+            ret = !memcmp(buf, hash->pbData, size);
+            CryptMemFree(buf);
+        }
+    }
+    else
+        ret = FALSE;
+    return ret;
+}
+
 PCCERT_CONTEXT WINAPI CertFindCertificateInStore(HCERTSTORE hCertStore,
  DWORD dwCertEncodingType, DWORD dwFlags, DWORD dwType, const void *pvPara,
  PCCERT_CONTEXT pPrevCertContext)
@@ -1171,6 +1204,9 @@ PCCERT_CONTEXT WINAPI CertFindCertificateInStore(HCERTSTORE hCertStore,
         break;
     case CERT_COMPARE_EXISTING:
         compare = compare_existing_cert;
+        break;
+    case CERT_COMPARE_SIGNATURE_HASH:
+        compare = compare_cert_by_signature_hash;
         break;
     default:
         FIXME("find type %08x unimplemented\n", dwType);
@@ -1526,6 +1562,51 @@ BOOL WINAPI CryptHashPublicKeyInfo(HCRYPTPROV_LEGACY hCryptProv, ALG_ID Algid,
             }
             LocalFree(buf);
         }
+    }
+    return ret;
+}
+
+BOOL WINAPI CryptHashToBeSigned(HCRYPTPROV_LEGACY hCryptProv,
+ DWORD dwCertEncodingType, const BYTE *pbEncoded, DWORD cbEncoded,
+ BYTE *pbComputedHash, DWORD *pcbComputedHash)
+{
+    BOOL ret;
+    CERT_SIGNED_CONTENT_INFO *info;
+    DWORD size;
+
+    TRACE("(%08lx, %08x, %p, %d, %p, %d)\n", hCryptProv, dwCertEncodingType,
+     pbEncoded, cbEncoded, pbComputedHash, *pcbComputedHash);
+
+    ret = CryptDecodeObjectEx(dwCertEncodingType, X509_CERT,
+     pbEncoded, cbEncoded, CRYPT_DECODE_ALLOC_FLAG, NULL, (void *)&info, &size);
+    if (ret)
+    {
+        PCCRYPT_OID_INFO oidInfo;
+        HCRYPTHASH hHash;
+
+        if (!hCryptProv)
+            hCryptProv = CRYPT_GetDefaultProvider();
+        oidInfo = CryptFindOIDInfo(CRYPT_OID_INFO_OID_KEY,
+         info->SignatureAlgorithm.pszObjId, 0);
+        if (!oidInfo)
+        {
+            SetLastError(NTE_BAD_ALGID);
+            ret = FALSE;
+        }
+        else
+        {
+            ret = CryptCreateHash(hCryptProv, oidInfo->u.Algid, 0, 0, &hHash);
+            if (ret)
+            {
+                ret = CryptHashData(hHash, info->ToBeSigned.pbData,
+                 info->ToBeSigned.cbData, 0);
+                if (ret)
+                    ret = CryptGetHashParam(hHash, HP_HASHVAL, pbComputedHash,
+                     pcbComputedHash, 0);
+                CryptDestroyHash(hHash);
+            }
+        }
+        LocalFree(info);
     }
     return ret;
 }

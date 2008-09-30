@@ -311,7 +311,7 @@
 @ stub IoAllocateController
 @ stub IoAllocateDriverObjectExtension
 @ stub IoAllocateErrorLogEntry
-@ stub IoAllocateIrp
+@ stdcall IoAllocateIrp(long long)
 @ stdcall IoAllocateMdl(ptr long long long ptr)
 @ stdcall IoAllocateWorkItem(ptr)
 @ stub IoAssignResources
@@ -355,7 +355,7 @@
 @ stub IoDeleteController
 @ stdcall IoDeleteDevice(ptr)
 @ stdcall IoDeleteDriver(ptr)
-@ stub IoDeleteSymbolicLink
+@ stdcall IoDeleteSymbolicLink(ptr)
 @ stub IoDetachDevice
 @ stub IoDeviceHandlerObjectSize
 @ stub IoDeviceHandlerObjectType
@@ -370,7 +370,7 @@
 @ stub IoForwardIrpSynchronously
 @ stub IoFreeController
 @ stub IoFreeErrorLogEntry
-@ stub IoFreeIrp
+@ stdcall IoFreeIrp(ptr)
 @ stub IoFreeMdl
 @ stub IoFreeWorkItem
 @ stub IoGetAttachedDevice
@@ -397,7 +397,7 @@
 @ stub IoGetRequestorSessionId
 @ stub IoGetStackLimits
 @ stub IoGetTopLevelIrp
-@ stub IoInitializeIrp
+@ stdcall IoInitializeIrp(ptr long long)
 @ stub IoInitializeRemoveLockEx
 @ stub IoInitializeTimer
 @ stub IoInvalidateDeviceRelations

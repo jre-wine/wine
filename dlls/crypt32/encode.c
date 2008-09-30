@@ -1,5 +1,5 @@
 /*
- * Copyright 2005-2007 Juan Lang
+ * Copyright 2005-2008 Juan Lang
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -1404,6 +1404,96 @@ static BOOL WINAPI CRYPT_AsnEncodeUnicodeName(DWORD dwCertEncodingType,
     return ret;
 }
 
+static BOOL WINAPI CRYPT_AsnEncodeSMIMECapability(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded)
+{
+    BOOL ret = FALSE;
+
+    __TRY
+    {
+        const CRYPT_SMIME_CAPABILITY *capability =
+         (const CRYPT_SMIME_CAPABILITY *)pvStructInfo;
+
+        if (!capability->pszObjId)
+            SetLastError(E_INVALIDARG);
+        else
+        {
+            struct AsnEncodeSequenceItem items[] = {
+             { capability->pszObjId, CRYPT_AsnEncodeOid, 0 },
+             { &capability->Parameters, CRYPT_CopyEncodedBlob, 0 },
+            };
+
+            ret = CRYPT_AsnEncodeSequence(dwCertEncodingType, items,
+             sizeof(items) / sizeof(items[0]), dwFlags, pEncodePara, pbEncoded,
+             pcbEncoded);
+        }
+    }
+    __EXCEPT_PAGE_FAULT
+    {
+        SetLastError(STATUS_ACCESS_VIOLATION);
+    }
+    __ENDTRY
+    return ret;
+}
+
+static BOOL WINAPI CRYPT_AsnEncodeSMIMECapabilities(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded)
+{
+    BOOL ret = FALSE;
+
+    __TRY
+    {
+        DWORD bytesNeeded, dataLen, lenBytes, i;
+        const CRYPT_SMIME_CAPABILITIES *capabilities =
+         (const CRYPT_SMIME_CAPABILITIES *)pvStructInfo;
+
+        ret = TRUE;
+        for (i = 0, dataLen = 0; ret && i < capabilities->cCapability; i++)
+        {
+            DWORD size;
+
+            ret = CRYPT_AsnEncodeSMIMECapability(dwCertEncodingType, NULL,
+             &capabilities->rgCapability[i], 0, NULL, NULL, &size);
+            if (ret)
+                dataLen += size;
+        }
+        CRYPT_EncodeLen(dataLen, NULL, &lenBytes);
+        bytesNeeded = 1 + lenBytes + dataLen;
+        if (!pbEncoded)
+            *pcbEncoded = bytesNeeded;
+        else
+        {
+            if ((ret = CRYPT_EncodeEnsureSpace(dwFlags, pEncodePara, pbEncoded,
+             pcbEncoded, bytesNeeded)))
+            {
+                if (dwFlags & CRYPT_ENCODE_ALLOC_FLAG)
+                    pbEncoded = *(BYTE **)pbEncoded;
+                *pbEncoded++ = ASN_SEQUENCEOF;
+                CRYPT_EncodeLen(dataLen, pbEncoded, &lenBytes);
+                pbEncoded += lenBytes;
+                for (i = 0; i < capabilities->cCapability; i++)
+                {
+                    DWORD size = dataLen;
+
+                    ret = CRYPT_AsnEncodeSMIMECapability(dwCertEncodingType,
+                     NULL, &capabilities->rgCapability[i], 0, NULL, pbEncoded,
+                     &size);
+                    pbEncoded += size;
+                    dataLen -= size;
+                }
+            }
+        }
+    }
+    __EXCEPT_PAGE_FAULT
+    {
+        SetLastError(STATUS_ACCESS_VIOLATION);
+    }
+    __ENDTRY
+    return ret;
+}
+
 static BOOL WINAPI CRYPT_AsnEncodePKCSAttribute(DWORD dwCertEncodingType,
  LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
  PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded)
@@ -1561,6 +1651,14 @@ static BOOL CRYPT_AsnEncodeUnicodeStringCoerce(const CERT_NAME_VALUE *value,
     return ret;
 }
 
+static void CRYPT_FreeSpace(PCRYPT_ENCODE_PARA pEncodePara, LPVOID pv)
+{
+    if (pEncodePara && pEncodePara->pfnFree)
+        pEncodePara->pfnFree(pv);
+    else
+        LocalFree(pv);
+}
+
 static BOOL CRYPT_AsnEncodeNumericString(const CERT_NAME_VALUE *value,
  DWORD dwFlags, PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded,
  DWORD *pcbEncoded)
@@ -1602,7 +1700,7 @@ static BOOL CRYPT_AsnEncodeNumericString(const CERT_NAME_VALUE *value,
                 }
             }
             if (!ret && (dwFlags & CRYPT_ENCODE_ALLOC_FLAG))
-                CryptMemFree(*(BYTE **)pbEncoded);
+                CRYPT_FreeSpace(pEncodePara, *(BYTE **)pbEncoded);
         }
     }
     return ret;
@@ -1656,7 +1754,7 @@ static BOOL CRYPT_AsnEncodePrintableString(const CERT_NAME_VALUE *value,
                 }
             }
             if (!ret && (dwFlags & CRYPT_ENCODE_ALLOC_FLAG))
-                CryptMemFree(*(BYTE **)pbEncoded);
+                CRYPT_FreeSpace(pEncodePara, *(BYTE **)pbEncoded);
         }
     }
     return ret;
@@ -1703,7 +1801,7 @@ static BOOL CRYPT_AsnEncodeIA5String(const CERT_NAME_VALUE *value,
                 }
             }
             if (!ret && (dwFlags & CRYPT_ENCODE_ALLOC_FLAG))
-                CryptMemFree(*(BYTE **)pbEncoded);
+                CRYPT_FreeSpace(pEncodePara, *(BYTE **)pbEncoded);
         }
     }
     return ret;
@@ -3411,7 +3509,96 @@ static BOOL WINAPI CRYPT_AsnEncodePKCSSignerInfo(DWORD dwCertEncodingType,
     return ret;
 }
 
-BOOL CRYPT_AsnEncodePKCSSignedInfo(CRYPT_SIGNED_INFO *signedInfo, void *pvData,
+static BOOL WINAPI CRYPT_AsnEncodeCMSSignerInfo(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded)
+{
+    BOOL ret = FALSE;
+
+    if (!(dwCertEncodingType & PKCS_7_ASN_ENCODING))
+    {
+        SetLastError(E_INVALIDARG);
+        return FALSE;
+    }
+
+    __TRY
+    {
+        const CMSG_CMS_SIGNER_INFO *info = (const CMSG_CMS_SIGNER_INFO *)pvStructInfo;
+
+        if (info->SignerId.dwIdChoice != CERT_ID_ISSUER_SERIAL_NUMBER &&
+         info->SignerId.dwIdChoice != CERT_ID_KEY_IDENTIFIER)
+            SetLastError(E_INVALIDARG);
+        else if (info->SignerId.dwIdChoice == CERT_ID_ISSUER_SERIAL_NUMBER &&
+         !info->SignerId.u.IssuerSerialNumber.Issuer.cbData)
+            SetLastError(E_INVALIDARG);
+        else
+        {
+            struct AsnEncodeSequenceItem items[7] = {
+             { &info->dwVersion,     CRYPT_AsnEncodeInt, 0 },
+            };
+            struct AsnEncodeTagSwappedItem swapped[3] = { { 0 } };
+            DWORD cItem = 1, cSwapped = 0;
+
+            if (info->SignerId.dwIdChoice == CERT_ID_ISSUER_SERIAL_NUMBER)
+            {
+                items[cItem].pvStructInfo =
+                 &info->SignerId.u.IssuerSerialNumber.Issuer;
+                items[cItem].encodeFunc =
+                 CRYPT_AsnEncodeIssuerSerialNumber;
+                cItem++;
+            }
+            else
+            {
+                swapped[cSwapped].tag = ASN_CONTEXT | 0;
+                swapped[cSwapped].pvStructInfo = &info->SignerId.u.KeyId;
+                swapped[cSwapped].encodeFunc = CRYPT_AsnEncodeOctets;
+                items[cItem].pvStructInfo = &swapped[cSwapped];
+                items[cItem].encodeFunc = CRYPT_AsnEncodeSwapTag;
+                cSwapped++;
+                cItem++;
+            }
+            items[cItem].pvStructInfo = &info->HashAlgorithm;
+            items[cItem].encodeFunc = CRYPT_AsnEncodeAlgorithmIdWithNullParams;
+            cItem++;
+            if (info->AuthAttrs.cAttr)
+            {
+                swapped[cSwapped].tag = ASN_CONTEXT | ASN_CONSTRUCTOR | 0;
+                swapped[cSwapped].pvStructInfo = &info->AuthAttrs;
+                swapped[cSwapped].encodeFunc = CRYPT_AsnEncodePKCSAttributes;
+                items[cItem].pvStructInfo = &swapped[cSwapped];
+                items[cItem].encodeFunc = CRYPT_AsnEncodeSwapTag;
+                cSwapped++;
+                cItem++;
+            }
+            items[cItem].pvStructInfo = &info->HashEncryptionAlgorithm;
+            items[cItem].encodeFunc = CRYPT_AsnEncodeAlgorithmIdWithNullParams;
+            cItem++;
+            items[cItem].pvStructInfo = &info->EncryptedHash;
+            items[cItem].encodeFunc = CRYPT_AsnEncodeOctets;
+            cItem++;
+            if (info->UnauthAttrs.cAttr)
+            {
+                swapped[cSwapped].tag = ASN_CONTEXT | ASN_CONSTRUCTOR | 1;
+                swapped[cSwapped].pvStructInfo = &info->UnauthAttrs;
+                swapped[cSwapped].encodeFunc = CRYPT_AsnEncodePKCSAttributes;
+                items[cItem].pvStructInfo = &swapped[cSwapped];
+                items[cItem].encodeFunc = CRYPT_AsnEncodeSwapTag;
+                cSwapped++;
+                cItem++;
+            }
+            ret = CRYPT_AsnEncodeSequence(dwCertEncodingType, items, cItem,
+             dwFlags, pEncodePara, pbEncoded, pcbEncoded);
+        }
+    }
+    __EXCEPT_PAGE_FAULT
+    {
+        SetLastError(STATUS_ACCESS_VIOLATION);
+    }
+    __ENDTRY
+    return ret;
+}
+
+BOOL CRYPT_AsnEncodeCMSSignedInfo(CRYPT_SIGNED_INFO *signedInfo, void *pvData,
  DWORD *pcbData)
 {
     struct AsnEncodeSequenceItem items[7] = {
@@ -3427,9 +3614,9 @@ BOOL CRYPT_AsnEncodePKCSSignedInfo(CRYPT_SIGNED_INFO *signedInfo, void *pvData,
     {
         digestAlgorithmsSet.cItems = signedInfo->cSignerInfo;
         digestAlgorithmsSet.items = signedInfo->rgSignerInfo;
-        digestAlgorithmsSet.itemSize = sizeof(CMSG_SIGNER_INFO);
+        digestAlgorithmsSet.itemSize = sizeof(CMSG_CMS_SIGNER_INFO);
         digestAlgorithmsSet.itemOffset =
-         offsetof(CMSG_SIGNER_INFO, HashAlgorithm);
+         offsetof(CMSG_CMS_SIGNER_INFO, HashAlgorithm);
         digestAlgorithmsSet.encode = CRYPT_AsnEncodeAlgorithmIdWithNullParams;
         items[cItem].pvStructInfo = &digestAlgorithmsSet;
         items[cItem].encodeFunc = CRYPT_DEREncodeItemsAsSet;
@@ -3472,9 +3659,9 @@ BOOL CRYPT_AsnEncodePKCSSignedInfo(CRYPT_SIGNED_INFO *signedInfo, void *pvData,
     {
         signerSet.cItems = signedInfo->cSignerInfo;
         signerSet.items = signedInfo->rgSignerInfo;
-        signerSet.itemSize = sizeof(CMSG_SIGNER_INFO);
+        signerSet.itemSize = sizeof(CMSG_CMS_SIGNER_INFO);
         signerSet.itemOffset = 0;
-        signerSet.encode = CRYPT_AsnEncodePKCSSignerInfo;
+        signerSet.encode = CRYPT_AsnEncodeCMSSignerInfo;
         items[cItem].pvStructInfo = &signerSet;
         items[cItem].encodeFunc = CRYPT_DEREncodeItemsAsSet;
         cItem++;
@@ -3587,6 +3774,9 @@ static CryptEncodeObjectExFunc CRYPT_GetBuiltinEncoder(DWORD dwCertEncodingType,
         case LOWORD(X509_ENHANCED_KEY_USAGE):
             encodeFunc = CRYPT_AsnEncodeEnhancedKeyUsage;
             break;
+        case LOWORD(PKCS_SMIME_CAPABILITIES):
+            encodeFunc = CRYPT_AsnEncodeSMIMECapabilities;
+            break;
         case LOWORD(PKCS_ATTRIBUTES):
             encodeFunc = CRYPT_AsnEncodePKCSAttributes;
             break;
@@ -3599,11 +3789,16 @@ static CryptEncodeObjectExFunc CRYPT_GetBuiltinEncoder(DWORD dwCertEncodingType,
         case LOWORD(PKCS7_SIGNER_INFO):
             encodeFunc = CRYPT_AsnEncodePKCSSignerInfo;
             break;
+        case LOWORD(CMS_SIGNER_INFO):
+            encodeFunc = CRYPT_AsnEncodeCMSSignerInfo;
+            break;
         }
     }
     else if (!strcmp(lpszStructType, szOID_CERT_EXTENSIONS))
         encodeFunc = CRYPT_AsnEncodeExtensions;
     else if (!strcmp(lpszStructType, szOID_RSA_signingTime))
+        encodeFunc = CRYPT_AsnEncodeUtcTime;
+    else if (!strcmp(lpszStructType, szOID_RSA_SMIMECapabilities))
         encodeFunc = CRYPT_AsnEncodeUtcTime;
     else if (!strcmp(lpszStructType, szOID_AUTHORITY_KEY_IDENTIFIER))
         encodeFunc = CRYPT_AsnEncodeAuthorityKeyId;

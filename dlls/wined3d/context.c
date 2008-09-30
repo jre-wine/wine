@@ -29,6 +29,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 
 #define GLINFO_LOCATION This->adapter->gl_info
 
+/* The last used device.
+ *
+ * If the application creates multiple devices and switches between them, ActivateContext has to
+ * change the opengl context. This flag allows to keep track which device is active
+ */
+static IWineD3DDeviceImpl *last_device;
+
 /*****************************************************************************
  * Context_MarkStateDirty
  *
@@ -122,17 +129,19 @@ static int WineD3D_ChoosePixelFormat(IWineD3DDeviceImpl *This, HDC hdc, WINED3DF
         BOOL exact_alpha;
         BOOL exact_color;
     } matches[] = {
-        /* First, try without aux buffers - this is the most common cause
-         * for not finding a pixel format. Also some drivers(the open source ones)
+        /* First, try without alpha match buffers. MacOS supports aux buffers only
+         * on A8R8G8B8, and we prefer better offscreen rendering over an alpha match.
+         * Then try without aux buffers - this is the most common cause for not
+         * finding a pixel format. Also some drivers(the open source ones)
          * only offer 32 bit ARB pixel formats. First try without an exact alpha
          * match, then try without an exact alpha and color match.
          */
-        { TRUE,  TRUE,  TRUE  },
         { FALSE, TRUE,  TRUE  },
-        { TRUE,  FALSE, TRUE  },
-        { TRUE,  FALSE, FALSE },
+        { TRUE,  TRUE,  TRUE  },
         { FALSE, FALSE, TRUE  },
         { FALSE, FALSE, FALSE },
+        { TRUE,  FALSE, TRUE  },
+        { TRUE,  FALSE, FALSE },
     };
 
     int i = 0;
@@ -476,6 +485,13 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
 
     TRACE("Successfully created new context %p\n", ret);
 
+    ret->fbo_color_attachments = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IWineD3DSurface *) * GL_LIMITS(buffers));
+    if (!ret->fbo_color_attachments)
+    {
+        ERR("Out of memory!\n");
+        goto out;
+    }
+
     /* Set up the context defaults */
     oldCtx  = pwglGetCurrentContext();
     oldDrawable = pwglGetCurrentDC();
@@ -538,9 +554,6 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         checkGLcall("glEnable(GL_WEIGHT_SUM_UNITY_ARB)");
     }
     if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-        glEnable(GL_TEXTURE_SHADER_NV);
-        checkGLcall("glEnable(GL_TEXTURE_SHADER_NV)");
-
         /* Set up the previous texture input for all shader units. This applies to bump mapping, and in d3d
          * the previous texture where to source the offset from is always unit - 1.
          */
@@ -565,11 +578,16 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
      */
     if(oldDrawable && oldCtx) {
         pwglMakeCurrent(oldDrawable, oldCtx);
+    } else {
+        last_device = This;
     }
     This->frag_pipe->enable_extension((IWineD3DDevice *) This, TRUE);
 
-out:
     return ret;
+
+out:
+    HeapFree(GetProcessHeap(), 0, ret->fbo_color_attachments);
+    return NULL;
 }
 
 /*****************************************************************************
@@ -630,7 +648,23 @@ void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context) {
     TRACE("Destroying ctx %p\n", context);
     if(pwglGetCurrentContext() == context->glCtx){
         pwglMakeCurrent(NULL, NULL);
+    } else {
+        last_device = NULL;
     }
+
+    /* FIXME: We probably need an active context to do this... */
+    if (context->fbo) {
+        GL_EXTCALL(glDeleteFramebuffersEXT(1, &context->fbo));
+    }
+    if (context->src_fbo) {
+        GL_EXTCALL(glDeleteFramebuffersEXT(1, &context->src_fbo));
+    }
+    if (context->dst_fbo) {
+        GL_EXTCALL(glDeleteFramebuffersEXT(1, &context->dst_fbo));
+    }
+
+    HeapFree(GetProcessHeap(), 0, context->fbo_color_attachments);
+    context->fbo_color_attachments = NULL;
 
     if(context->isPBuffer) {
         GL_EXTCALL(wglReleasePbufferDCARB(context->pbuffer, context->hdc));
@@ -720,6 +754,10 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
             }
             glDisable(GL_TEXTURE_3D);
             checkGLcall("glDisable GL_TEXTURE_3D");
+            if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
+                glDisable(GL_TEXTURE_RECTANGLE_ARB);
+                checkGLcall("glDisable GL_TEXTURE_RECTANGLE_ARB");
+            }
             glDisable(GL_TEXTURE_2D);
             checkGLcall("glDisable GL_TEXTURE_2D");
 
@@ -745,6 +783,10 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
     }
     glDisable(GL_TEXTURE_3D);
     checkGLcall("glDisable GL_TEXTURE_3D");
+    if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
+        glDisable(GL_TEXTURE_RECTANGLE_ARB);
+        checkGLcall("glDisable GL_TEXTURE_RECTANGLE_ARB");
+    }
     glDisable(GL_TEXTURE_2D);
     checkGLcall("glDisable GL_TEXTURE_2D");
 
@@ -874,7 +916,7 @@ static WineD3DContext *findThreadContextForSwapChain(IWineD3DSwapChain *swapchai
  * Returns: The needed context
  *
  *****************************************************************************/
-static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, DWORD tid, GLint *buffer) {
+static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, DWORD tid) {
     IWineD3DSwapChain *swapchain = NULL;
     HRESULT hr;
     BOOL readTexture = wined3d_settings.offscreen_rendering_mode != ORM_FBO && This->render_offscreen;
@@ -910,11 +952,6 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
          * rendering. No context change is needed in that case
          */
 
-        if(((IWineD3DSwapChainImpl *) swapchain)->frontBuffer == target) {
-            *buffer = GL_FRONT;
-        } else {
-            *buffer = GL_BACK;
-        }
         if(wined3d_settings.offscreen_rendering_mode == ORM_PBUFFER) {
             if(This->pbufferContext && tid == This->pbufferContext->tid) {
                 This->pbufferContext->tid = 0;
@@ -933,7 +970,6 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
     } else {
         TRACE("Rendering offscreen\n");
         This->render_offscreen = TRUE;
-        *buffer = This->offscreenBuffer;
 
         switch(wined3d_settings.offscreen_rendering_mode) {
             case ORM_FBO:
@@ -1060,6 +1096,47 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
     return context;
 }
 
+static void apply_draw_buffer(IWineD3DDeviceImpl *This, IWineD3DSurface *target, BOOL blit)
+{
+    HRESULT hr;
+    IWineD3DSwapChain *swapchain;
+
+    hr = IWineD3DSurface_GetContainer(target, &IID_IWineD3DSwapChain, (void **)&swapchain);
+    if (SUCCEEDED(hr))
+    {
+        IWineD3DSwapChain_Release((IUnknown *)swapchain);
+        glDrawBuffer(surface_get_gl_buffer(target, swapchain));
+        checkGLcall("glDrawBuffers()");
+    }
+    else
+    {
+        if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
+        {
+            if (!blit)
+            {
+                if (GL_SUPPORT(ARB_DRAW_BUFFERS))
+                {
+                    GL_EXTCALL(glDrawBuffersARB(GL_LIMITS(buffers), This->draw_buffers));
+                    checkGLcall("glDrawBuffers()");
+                }
+                else
+                {
+                    glDrawBuffer(This->draw_buffers[0]);
+                    checkGLcall("glDrawBuffer()");
+                }
+            } else {
+                glDrawBuffer(GL_COLOR_ATTACHMENT0_EXT);
+                checkGLcall("glDrawBuffer()");
+            }
+        }
+        else
+        {
+            glDrawBuffer(This->offscreenBuffer);
+            checkGLcall("glDrawBuffer()");
+        }
+    }
+}
+
 /*****************************************************************************
  * ActivateContext
  *
@@ -1079,12 +1156,12 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
     DWORD                         dirtyState, idx;
     BYTE                          shift;
     WineD3DContext                *context;
-    GLint                         drawBuffer=0;
     const struct StateEntry       *StateTable = This->StateTable;
 
     TRACE("(%p): Selecting context for render target %p, thread %d\n", This, target, tid);
     if(This->lastActiveRenderTarget != target || tid != This->lastThread) {
-        context = FindContext(This, target, tid, &drawBuffer);
+        context = FindContext(This, target, tid);
+        context->draw_buffer_dirty = TRUE;
         This->lastActiveRenderTarget = target;
         This->lastThread = tid;
     } else {
@@ -1093,7 +1170,7 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
     }
 
     /* Activate the opengl context */
-    if(context != This->activeContext) {
+    if(last_device != This || context != This->activeContext) {
         BOOL ret;
 
         /* Prevent an unneeded context switch as those are expensive */
@@ -1120,17 +1197,48 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
                    sizeof(*This->activeContext->pshader_const_dirty) * GL_LIMITS(pshader_constantsF));
         }
         This->activeContext = context;
+        last_device = This;
     }
 
     /* We only need ENTER_GL for the gl calls made below and for the helper functions which make GL calls */
     ENTER_GL();
-    /* Select the right draw buffer. It is selected in FindContext. */
-    if(drawBuffer && context->last_draw_buffer != drawBuffer) {
-        TRACE("Drawing to buffer: %#x\n", drawBuffer);
-        context->last_draw_buffer = drawBuffer;
 
-        glDrawBuffer(drawBuffer);
-        checkGLcall("glDrawBuffer");
+    switch (usage) {
+        case CTXUSAGE_CLEAR:
+        case CTXUSAGE_DRAWPRIM:
+            if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+                apply_fbo_state((IWineD3DDevice *)This);
+            }
+            if (context->draw_buffer_dirty) {
+                apply_draw_buffer(This, target, FALSE);
+                context->draw_buffer_dirty = FALSE;
+            }
+            break;
+
+        case CTXUSAGE_BLIT:
+            if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+                if (This->render_offscreen) {
+                    FIXME("Activating for CTXUSAGE_BLIT for an offscreen target with ORM_FBO. This should be avoided.\n");
+                    bind_fbo((IWineD3DDevice *)This, GL_FRAMEBUFFER_EXT, &context->dst_fbo);
+                    attach_surface_fbo(This, GL_FRAMEBUFFER_EXT, 0, target);
+                    GL_EXTCALL(glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, 0));
+                    checkGLcall("glFramebufferRenderbufferEXT");
+                } else {
+                    GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0));
+                    checkGLcall("glFramebufferRenderbufferEXT");
+                }
+                context->draw_buffer_dirty = TRUE;
+            }
+            if (context->draw_buffer_dirty) {
+                apply_draw_buffer(This, target, TRUE);
+                if (wined3d_settings.offscreen_rendering_mode != ORM_FBO) {
+                    context->draw_buffer_dirty = FALSE;
+                }
+            }
+            break;
+
+        default:
+            break;
     }
 
     switch(usage) {

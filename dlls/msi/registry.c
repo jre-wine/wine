@@ -1088,6 +1088,23 @@ UINT MSIREG_OpenLocalClassesProductKey(LPCWSTR szProductCode, HKEY *key, BOOL cr
     return RegOpenKeyW(HKEY_LOCAL_MACHINE, keypath, key);
 }
 
+UINT MSIREG_DeleteLocalClassesProductKey(LPCWSTR szProductCode)
+{
+    WCHAR squished_pc[GUID_SIZE];
+    WCHAR keypath[0x200];
+
+    TRACE("%s\n", debugstr_w(szProductCode));
+
+    if (!squash_guid(szProductCode, squished_pc))
+        return ERROR_FUNCTION_FAILED;
+
+    TRACE("squished (%s)\n", debugstr_w(squished_pc));
+
+    sprintfW(keypath, szInstaller_LocalClassesProd_fmt, squished_pc);
+
+    return RegDeleteTreeW(HKEY_LOCAL_MACHINE, keypath);
+}
+
 UINT MSIREG_OpenLocalClassesFeaturesKey(LPCWSTR szProductCode, HKEY *key, BOOL create)
 {
     WCHAR squished_pc[GUID_SIZE];
@@ -1106,6 +1123,23 @@ UINT MSIREG_OpenLocalClassesFeaturesKey(LPCWSTR szProductCode, HKEY *key, BOOL c
         return RegCreateKeyW(HKEY_LOCAL_MACHINE, keypath, key);
 
     return RegOpenKeyW(HKEY_LOCAL_MACHINE, keypath, key);
+}
+
+UINT MSIREG_DeleteLocalClassesFeaturesKey(LPCWSTR szProductCode)
+{
+    WCHAR squished_pc[GUID_SIZE];
+    WCHAR keypath[0x200];
+
+    TRACE("%s\n", debugstr_w(szProductCode));
+
+    if (!squash_guid(szProductCode, squished_pc))
+        return ERROR_FUNCTION_FAILED;
+
+    TRACE("squished (%s)\n", debugstr_w(squished_pc));
+
+    sprintfW(keypath, szInstaller_LocalClassesFeat_fmt, squished_pc);
+
+    return RegDeleteTreeW(HKEY_LOCAL_MACHINE, keypath);
 }
 
 UINT MSIREG_OpenLocalManagedProductKey(LPCWSTR szProductCode, HKEY *key, BOOL create)
@@ -1697,6 +1731,36 @@ UINT WINAPI MsiEnumRelatedProductsA(LPCSTR szUpgradeCode, DWORD dwReserved,
     }
     msi_free( szwUpgradeCode);
     return r;
+}
+
+/***********************************************************************
+ * MsiEnumPatchesExA            [MSI.@]
+ */
+UINT WINAPI MsiEnumPatchesExA(LPCSTR szProductCode, LPCSTR szUserSid,
+        DWORD dwContext, DWORD dwFilter, DWORD dwIndex, LPSTR szPatchCode,
+        LPSTR szTargetProductCode, MSIINSTALLCONTEXT *pdwTargetProductContext,
+        LPSTR szTargetUserSid, LPSTR pcchTargetUserSid)
+{
+    FIXME("(%s, %s, %d, %d, %d, %p, %p, %p, %p, %p) stub!\n",
+          debugstr_a(szProductCode), debugstr_a(szUserSid), dwContext, dwFilter,
+          dwIndex, szPatchCode, szTargetProductCode, pdwTargetProductContext,
+          szTargetUserSid, pcchTargetUserSid);
+    return ERROR_NO_MORE_ITEMS;
+}
+
+/***********************************************************************
+ * MsiEnumPatchesW            [MSI.@]
+ */
+UINT WINAPI MsiEnumPatchesExW(LPCWSTR szProductCode, LPCWSTR szUserSid,
+        DWORD dwContext, DWORD dwFilter, DWORD dwIndex, LPWSTR szPatchCode,
+        LPWSTR szTargetProductCode, MSIINSTALLCONTEXT *pdwTargetProductContext,
+        LPWSTR szTargetUserSid, LPWSTR pcchTargetUserSid)
+{
+    FIXME("(%s, %s, %d, %d, %d, %p, %p, %p, %p, %p) stub!\n",
+          debugstr_w(szProductCode), debugstr_w(szUserSid), dwContext, dwFilter,
+          dwIndex, szPatchCode, szTargetProductCode, pdwTargetProductContext,
+          szTargetUserSid, pcchTargetUserSid);
+    return ERROR_NO_MORE_ITEMS;
 }
 
 /***********************************************************************

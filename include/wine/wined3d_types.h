@@ -1112,6 +1112,27 @@ typedef struct _WINED3DPSHADERCAPS2_0 {
   INT    NumInstructionSlots;
 } WINED3DPSHADERCAPS2_0;
 
+typedef struct _WINEDDCAPS {
+    DWORD Caps;
+    DWORD Caps2;
+    DWORD CKeyCaps;
+    DWORD FXCaps;
+    DWORD FXAlphaCaps;
+    DWORD PalCaps;
+    DWORD SVCaps;
+    DWORD SVBCaps;
+    DWORD SVBCKeyCaps;
+    DWORD SVBFXCaps;
+    DWORD VSBCaps;
+    DWORD VSBCKeyCaps;
+    DWORD VSBFXCaps;
+    DWORD SSBCaps;
+    DWORD SSBCKeyCaps;
+    DWORD SSBFXCaps;
+    DWORD ddsCaps;
+    DWORD StrideAlign;
+} WINEDDCAPS;
+
 typedef struct _WINED3DCAPS {
   WINED3DDEVTYPE      DeviceType;
   UINT                AdapterOrdinal;
@@ -1204,6 +1225,7 @@ typedef struct _WINED3DCAPS {
   DWORD               Reserved2;/* Not in the microsoft headers but documented */
   DWORD               Reserved3;
 
+  WINEDDCAPS          DirectDrawCaps;
 } WINED3DCAPS;
 
 typedef enum _WINED3DSTATEBLOCKTYPE {
@@ -1351,7 +1373,6 @@ typedef enum _WINED3DSURFTYPE {
     SURFACE_UNKNOWN    = 0,   /* Default / Unknown surface type */
     SURFACE_OPENGL,           /* OpenGL surface: Renders using libGL, needed for 3D */
     SURFACE_GDI,              /* User surface. No 3D, DirectDraw rendering with GDI */
-    SURFACE_XRENDER           /* Future dreams: Use XRENDER / EXA / whatever stuff */
 } WINED3DSURFTYPE;
 
 #define WINED3DCAPS2_NO2DDURING3DSCENE                 0x00000002L
@@ -1780,5 +1801,29 @@ typedef struct _WINEDDOVERLAYFX
 #define WINEDDFLIP_INTERVAL2                    0x02000000
 #define WINEDDFLIP_INTERVAL3                    0x03000000
 #define WINEDDFLIP_INTERVAL4                    0x04000000
+
+#define WINEDDOVER_ALPHADEST                    0x00000001
+#define WINEDDOVER_ALPHADESTCONSTOVERRIDE       0x00000002
+#define WINEDDOVER_ALPHADESTNEG                 0x00000004
+#define WINEDDOVER_ALPHADESTSURFACEOVERRIDE     0x00000008
+#define WINEDDOVER_ALPHAEDGEBLEND               0x00000010
+#define WINEDDOVER_ALPHASRC                     0x00000020
+#define WINEDDOVER_ALPHASRCCONSTOVERRIDE        0x00000040
+#define WINEDDOVER_ALPHASRCNEG                  0x00000080
+#define WINEDDOVER_ALPHASRCSURFACEOVERRIDE      0x00000100
+#define WINEDDOVER_HIDE                         0x00000200
+#define WINEDDOVER_KEYDEST                      0x00000400
+#define WINEDDOVER_KEYDESTOVERRIDE              0x00000800
+#define WINEDDOVER_KEYSRC                       0x00001000
+#define WINEDDOVER_KEYSRCOVERRIDE               0x00002000
+#define WINEDDOVER_SHOW                         0x00004000
+#define WINEDDOVER_ADDDIRTYRECT                 0x00008000
+#define WINEDDOVER_REFRESHDIRTYRECTS            0x00010000
+#define WINEDDOVER_REFRESHALL                   0x00020000
+#define WINEDDOVER_DDFX                         0x00080000
+#define WINEDDOVER_AUTOFLIP                     0x00100000
+#define WINEDDOVER_BOB                          0x00200000
+#define WINEDDOVER_OVERRIDEBOBWEAVE             0x00400000
+#define WINEDDOVER_INTERLEAVED                  0x00800000
 
 #endif

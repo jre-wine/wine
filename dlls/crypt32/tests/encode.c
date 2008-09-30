@@ -5160,6 +5160,162 @@ static void test_decodePKCSAttributes(DWORD dwEncoding)
     }
 }
 
+static const BYTE singleCapability[] = {
+0x30,0x06,0x30,0x04,0x06,0x02,0x2d,0x06 };
+static const BYTE twoCapabilities[] = {
+0x30,0x0c,0x30,0x04,0x06,0x02,0x2d,0x06,0x30,0x04,0x06,0x02,0x2a,0x03 };
+static const BYTE singleCapabilitywithNULL[] = {
+0x30,0x08,0x30,0x06,0x06,0x02,0x2d,0x06,0x05,0x00 };
+
+static void test_encodePKCSSMimeCapabilities(DWORD dwEncoding)
+{
+    static char oid1[] = "1.5.6", oid2[] = "1.2.3";
+    BOOL ret;
+    LPBYTE buf = NULL;
+    DWORD size = 0;
+    CRYPT_SMIME_CAPABILITY capability[2];
+    CRYPT_SMIME_CAPABILITIES capabilities;
+
+    /* An empty capabilities is allowed */
+    capabilities.cCapability = 0;
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_SMIME_CAPABILITIES,
+     &capabilities, CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(emptySequence), "unexpected size %d\n", size);
+        ok(!memcmp(buf, emptySequence, size), "unexpected value\n");
+        LocalFree(buf);
+    }
+    /* A non-empty capabilities with an empty capability (lacking an OID) is
+     * not allowed
+     */
+    capability[0].pszObjId = NULL;
+    capability[0].Parameters.cbData = 0;
+    capabilities.cCapability = 1;
+    capabilities.rgCapability = capability;
+    SetLastError(0xdeadbeef);
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_SMIME_CAPABILITIES,
+     &capabilities, CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(!ret && GetLastError() == E_INVALIDARG,
+     "expected E_INVALIDARG, got %08x\n", GetLastError());
+    capability[0].pszObjId = oid1;
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_SMIME_CAPABILITIES,
+     &capabilities, CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(singleCapability), "unexpected size %d\n", size);
+        ok(!memcmp(buf, singleCapability, size), "unexpected value\n");
+        LocalFree(buf);
+    }
+    capability[1].pszObjId = oid2;
+    capability[1].Parameters.cbData = 0;
+    capabilities.cCapability = 2;
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_SMIME_CAPABILITIES,
+     &capabilities, CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(twoCapabilities), "unexpected size %d\n", size);
+        ok(!memcmp(buf, twoCapabilities, size), "unexpected value\n");
+        LocalFree(buf);
+    }
+}
+
+static void compareSMimeCapabilities(LPCSTR header,
+ const CRYPT_SMIME_CAPABILITIES *expected, const CRYPT_SMIME_CAPABILITIES *got)
+{
+    DWORD i;
+
+    ok(got->cCapability == expected->cCapability,
+     "%s: expected %d capabilities, got %d\n", header, expected->cCapability,
+     got->cCapability);
+    for (i = 0; i < expected->cCapability; i++)
+    {
+        ok(!strcmp(expected->rgCapability[i].pszObjId,
+         got->rgCapability[i].pszObjId), "%s[%d]: expected %s, got %s\n",
+         header, i, expected->rgCapability[i].pszObjId,
+         got->rgCapability[i].pszObjId);
+        ok(expected->rgCapability[i].Parameters.cbData ==
+         got->rgCapability[i].Parameters.cbData,
+         "%s[%d]: expected %d bytes, got %d\n", header, i,
+         expected->rgCapability[i].Parameters.cbData,
+         got->rgCapability[i].Parameters.cbData);
+        if (expected->rgCapability[i].Parameters.cbData)
+            ok(!memcmp(expected->rgCapability[i].Parameters.pbData,
+             got->rgCapability[i].Parameters.pbData,
+             expected->rgCapability[i].Parameters.cbData),
+             "%s[%d]: unexpected value\n", header, i);
+    }
+}
+
+static void test_decodePKCSSMimeCapabilities(DWORD dwEncoding)
+{
+    static char oid1[] = "1.5.6", oid2[] = "1.2.3";
+    BOOL ret;
+    DWORD size = 0;
+    CRYPT_SMIME_CAPABILITY capability[2];
+    CRYPT_SMIME_CAPABILITIES capabilities, *ptr;
+
+    SetLastError(0xdeadbeef);
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_SMIME_CAPABILITIES,
+     emptySequence, sizeof(emptySequence),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&ptr, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        capabilities.cCapability = 0;
+        compareSMimeCapabilities("empty capabilities", &capabilities, ptr);
+        LocalFree(ptr);
+    }
+    SetLastError(0xdeadbeef);
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_SMIME_CAPABILITIES,
+     singleCapability, sizeof(singleCapability), CRYPT_DECODE_ALLOC_FLAG, NULL,
+     (BYTE *)&ptr, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        capability[0].pszObjId = oid1;
+        capability[0].Parameters.cbData = 0;
+        capabilities.cCapability = 1;
+        capabilities.rgCapability = capability;
+        compareSMimeCapabilities("single capability", &capabilities, ptr);
+        LocalFree(ptr);
+    }
+    SetLastError(0xdeadbeef);
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_SMIME_CAPABILITIES,
+     singleCapabilitywithNULL, sizeof(singleCapabilitywithNULL),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&ptr, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        BYTE NULLparam[] = {0x05, 0x00};
+        capability[0].pszObjId = oid1;
+        capability[0].Parameters.cbData = 2;
+        capability[0].Parameters.pbData = NULLparam;
+        capabilities.cCapability = 1;
+        capabilities.rgCapability = capability;
+        compareSMimeCapabilities("single capability with NULL", &capabilities,
+         ptr);
+        LocalFree(ptr);
+    }
+    SetLastError(0xdeadbeef);
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_SMIME_CAPABILITIES,
+    twoCapabilities, sizeof(twoCapabilities), CRYPT_DECODE_ALLOC_FLAG, NULL,
+    (BYTE *)&ptr, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        capability[0].Parameters.cbData = 0;
+        capability[1].pszObjId = oid2;
+        capability[1].Parameters.cbData = 0;
+        capabilities.cCapability = 2;
+        compareSMimeCapabilities("two capabilities", &capabilities, ptr);
+        LocalFree(ptr);
+    }
+}
+
 static BYTE encodedCommonNameNoNull[] = { 0x30,0x14,0x31,0x12,0x30,0x10,
  0x06,0x03,0x55,0x04,0x03,0x13,0x09,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,
  0x67 };
@@ -5479,6 +5635,322 @@ static void test_decodePKCSSignerInfo(DWORD dwEncoding)
          info->AuthAttrs.rgAttr[0].rgValue[0].cbData);
         ok(!memcmp(info->AuthAttrs.rgAttr[0].rgValue[0].pbData,
          encodedCommonName, sizeof(encodedCommonName)), "Unexpected value\n");
+        LocalFree(buf);
+    }
+}
+
+static const BYTE CMSSignerWithKeyId[] = {
+0x30,0x14,0x02,0x01,0x00,0x80,0x01,0x01,0x30,0x04,0x06,0x00,0x05,0x00,0x30,
+0x04,0x06,0x00,0x05,0x00,0x04,0x00 };
+
+static void test_encodeCMSSignerInfo(DWORD dwEncoding)
+{
+    BOOL ret;
+    LPBYTE buf = NULL;
+    DWORD size = 0;
+    CMSG_CMS_SIGNER_INFO info = { 0 };
+    static char oid1[] = "1.2.3", oid2[] = "1.5.6";
+
+    SetLastError(0xdeadbeef);
+    ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(!ret && GetLastError() == E_INVALIDARG,
+     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+    info.SignerId.dwIdChoice = CERT_ID_ISSUER_SERIAL_NUMBER;
+    SetLastError(0xdeadbeef);
+    ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(!ret && GetLastError() == E_INVALIDARG,
+     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+    /* To be encoded, a signer must have a valid cert ID, where a valid ID may
+     * be a key id or a issuer serial number with at least the issuer set, and
+     * the encoding must include PKCS_7_ASN_ENCODING.
+     * (That isn't enough to be decoded, see decoding tests.)
+     */
+    info.SignerId.IssuerSerialNumber.Issuer.cbData =
+     sizeof(encodedCommonNameNoNull);
+    info.SignerId.IssuerSerialNumber.Issuer.pbData = encodedCommonNameNoNull;
+    SetLastError(0xdeadbeef);
+    ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    if (!(dwEncoding & PKCS_7_ASN_ENCODING))
+        ok(!ret && GetLastError() == E_INVALIDARG,
+         "Expected E_INVALIDARG, got %08x\n", GetLastError());
+    else
+    {
+        ok(ret, "CryptEncodeObjectEx failed: %x\n", GetLastError());
+        if (buf)
+        {
+            ok(size == sizeof(minimalPKCSSigner), "Unexpected size %d\n", size);
+            ok(!memcmp(buf, minimalPKCSSigner, size), "Unexpected value\n");
+            LocalFree(buf);
+        }
+    }
+    info.SignerId.IssuerSerialNumber.SerialNumber.cbData = sizeof(serialNum);
+    info.SignerId.IssuerSerialNumber.SerialNumber.pbData = (BYTE *)serialNum;
+    SetLastError(0xdeadbeef);
+    ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    if (!(dwEncoding & PKCS_7_ASN_ENCODING))
+        ok(!ret && GetLastError() == E_INVALIDARG,
+         "Expected E_INVALIDARG, got %08x\n", GetLastError());
+    else
+    {
+        ok(ret, "CryptEncodeObjectEx failed: %x\n", GetLastError());
+        if (buf)
+        {
+            ok(size == sizeof(PKCSSignerWithSerial), "Unexpected size %d\n",
+             size);
+            ok(!memcmp(buf, PKCSSignerWithSerial, size), "Unexpected value\n");
+            LocalFree(buf);
+        }
+    }
+    info.SignerId.dwIdChoice = CERT_ID_KEY_IDENTIFIER;
+    info.SignerId.KeyId.cbData = sizeof(serialNum);
+    info.SignerId.KeyId.pbData = (BYTE *)serialNum;
+    SetLastError(0xdeadbeef);
+    ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    if (!(dwEncoding & PKCS_7_ASN_ENCODING))
+        ok(!ret && GetLastError() == E_INVALIDARG,
+         "Expected E_INVALIDARG, got %08x\n", GetLastError());
+    else
+    {
+        ok(ret, "CryptEncodeObjectEx failed: %x\n", GetLastError());
+        if (buf)
+        {
+            ok(size == sizeof(CMSSignerWithKeyId), "Unexpected size %d\n",
+             size);
+            ok(!memcmp(buf, CMSSignerWithKeyId, size), "Unexpected value\n");
+            LocalFree(buf);
+        }
+    }
+    /* While a CERT_ID can have a hash type, that's not allowed in CMS, where
+     * only the IssuerAndSerialNumber and SubjectKeyIdentifier types are allowed
+     * (see RFC 3852, section 5.3.)
+     */
+    info.SignerId.dwIdChoice = CERT_ID_SHA1_HASH;
+    info.SignerId.HashId.cbData = sizeof(hash);
+    info.SignerId.HashId.pbData = (BYTE *)hash;
+    SetLastError(0xdeadbeef);
+    ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(!ret && GetLastError() == E_INVALIDARG,
+     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+    /* Now with a hash algo */
+    info.SignerId.dwIdChoice = CERT_ID_ISSUER_SERIAL_NUMBER;
+    info.SignerId.IssuerSerialNumber.Issuer.cbData =
+     sizeof(encodedCommonNameNoNull);
+    info.SignerId.IssuerSerialNumber.Issuer.pbData = encodedCommonNameNoNull;
+    info.HashAlgorithm.pszObjId = oid1;
+    SetLastError(0xdeadbeef);
+    ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    if (!(dwEncoding & PKCS_7_ASN_ENCODING))
+        ok(!ret && GetLastError() == E_INVALIDARG,
+         "Expected E_INVALIDARG, got %08x\n", GetLastError());
+    else
+    {
+        ok(ret, "CryptEncodeObjectEx failed: %x\n", GetLastError());
+        if (buf)
+        {
+            ok(size == sizeof(PKCSSignerWithHashAlgo), "Unexpected size %d\n",
+             size);
+            ok(!memcmp(buf, PKCSSignerWithHashAlgo, size),
+             "Unexpected value\n");
+            LocalFree(buf);
+        }
+    }
+    info.HashEncryptionAlgorithm.pszObjId = oid2;
+    SetLastError(0xdeadbeef);
+    ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    if (!(dwEncoding & PKCS_7_ASN_ENCODING))
+        ok(!ret && GetLastError() == E_INVALIDARG,
+         "Expected E_INVALIDARG, got %08x\n", GetLastError());
+    else
+    {
+        ok(ret, "CryptEncodeObjectEx failed: %x\n", GetLastError());
+        if (buf)
+        {
+            ok(size == sizeof(PKCSSignerWithHashAndEncryptionAlgo),
+             "Unexpected size %d\n", size);
+            ok(!memcmp(buf, PKCSSignerWithHashAndEncryptionAlgo, size),
+             "Unexpected value\n");
+            LocalFree(buf);
+        }
+    }
+    info.EncryptedHash.cbData = sizeof(hash);
+    info.EncryptedHash.pbData = (BYTE *)hash;
+    SetLastError(0xdeadbeef);
+    ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    if (!(dwEncoding & PKCS_7_ASN_ENCODING))
+        ok(!ret && GetLastError() == E_INVALIDARG,
+         "Expected E_INVALIDARG, got %08x\n", GetLastError());
+    else
+    {
+        ok(ret, "CryptEncodeObjectEx failed: %x\n", GetLastError());
+        if (buf)
+        {
+            ok(size == sizeof(PKCSSignerWithHash), "Unexpected size %d\n",
+             size);
+            ok(!memcmp(buf, PKCSSignerWithHash, size), "Unexpected value\n");
+            LocalFree(buf);
+        }
+    }
+}
+
+static void test_decodeCMSSignerInfo(DWORD dwEncoding)
+{
+    BOOL ret;
+    LPBYTE buf = NULL;
+    DWORD size = 0;
+    CMSG_CMS_SIGNER_INFO *info;
+    static char oid1[] = "1.2.3", oid2[] = "1.5.6";
+
+    /* A CMS signer can't be decoded without a serial number. */
+    SetLastError(0xdeadbeef);
+    ret = CryptDecodeObjectEx(dwEncoding, CMS_SIGNER_INFO,
+     minimalPKCSSigner, sizeof(minimalPKCSSigner),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(!ret && GetLastError() == CRYPT_E_ASN1_CORRUPT,
+     "Expected CRYPT_E_ASN1_CORRUPT, got %x\n", GetLastError());
+    ret = CryptDecodeObjectEx(dwEncoding, CMS_SIGNER_INFO,
+     PKCSSignerWithSerial, sizeof(PKCSSignerWithSerial),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %x\n", GetLastError());
+    if (buf)
+    {
+        info = (CMSG_CMS_SIGNER_INFO *)buf;
+        ok(info->dwVersion == 0, "Expected version 0, got %d\n",
+         info->dwVersion);
+        ok(info->SignerId.dwIdChoice == CERT_ID_ISSUER_SERIAL_NUMBER,
+         "Expected CERT_ID_ISSUER_SERIAL_NUMBER, got %d\n",
+         info->SignerId.dwIdChoice);
+        ok(info->SignerId.IssuerSerialNumber.Issuer.cbData ==
+         sizeof(encodedCommonNameNoNull), "Unexpected size %d\n",
+         info->SignerId.IssuerSerialNumber.Issuer.cbData);
+        ok(!memcmp(info->SignerId.IssuerSerialNumber.Issuer.pbData,
+         encodedCommonNameNoNull,
+         info->SignerId.IssuerSerialNumber.Issuer.cbData),
+         "Unexpected value\n");
+        ok(info->SignerId.IssuerSerialNumber.SerialNumber.cbData ==
+         sizeof(serialNum), "Unexpected size %d\n",
+         info->SignerId.IssuerSerialNumber.SerialNumber.cbData);
+        ok(!memcmp(info->SignerId.IssuerSerialNumber.SerialNumber.pbData,
+         serialNum, sizeof(serialNum)), "Unexpected value\n");
+        LocalFree(buf);
+    }
+    ret = CryptDecodeObjectEx(dwEncoding, CMS_SIGNER_INFO,
+     PKCSSignerWithHashAlgo, sizeof(PKCSSignerWithHashAlgo),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %x\n", GetLastError());
+    if (buf)
+    {
+        info = (CMSG_CMS_SIGNER_INFO *)buf;
+        ok(info->dwVersion == 0, "Expected version 0, got %d\n",
+         info->dwVersion);
+        ok(info->SignerId.dwIdChoice == CERT_ID_ISSUER_SERIAL_NUMBER,
+         "Expected CERT_ID_ISSUER_SERIAL_NUMBER, got %d\n",
+         info->SignerId.dwIdChoice);
+        ok(info->SignerId.IssuerSerialNumber.Issuer.cbData ==
+         sizeof(encodedCommonNameNoNull), "Unexpected size %d\n",
+         info->SignerId.IssuerSerialNumber.Issuer.cbData);
+        ok(!memcmp(info->SignerId.IssuerSerialNumber.Issuer.pbData,
+         encodedCommonNameNoNull,
+         info->SignerId.IssuerSerialNumber.Issuer.cbData),
+         "Unexpected value\n");
+        ok(info->SignerId.IssuerSerialNumber.SerialNumber.cbData ==
+         sizeof(serialNum), "Unexpected size %d\n",
+         info->SignerId.IssuerSerialNumber.SerialNumber.cbData);
+        ok(!memcmp(info->SignerId.IssuerSerialNumber.SerialNumber.pbData,
+         serialNum, sizeof(serialNum)), "Unexpected value\n");
+        ok(!strcmp(info->HashAlgorithm.pszObjId, oid1),
+         "Expected %s, got %s\n", oid1, info->HashAlgorithm.pszObjId);
+        LocalFree(buf);
+    }
+    ret = CryptDecodeObjectEx(dwEncoding, CMS_SIGNER_INFO,
+     PKCSSignerWithHashAndEncryptionAlgo,
+     sizeof(PKCSSignerWithHashAndEncryptionAlgo), CRYPT_DECODE_ALLOC_FLAG,
+     NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %x\n", GetLastError());
+    if (buf)
+    {
+        info = (CMSG_CMS_SIGNER_INFO *)buf;
+        ok(info->dwVersion == 0, "Expected version 0, got %d\n",
+         info->dwVersion);
+        ok(info->SignerId.dwIdChoice == CERT_ID_ISSUER_SERIAL_NUMBER,
+         "Expected CERT_ID_ISSUER_SERIAL_NUMBER, got %d\n",
+         info->SignerId.dwIdChoice);
+        ok(info->SignerId.IssuerSerialNumber.Issuer.cbData ==
+         sizeof(encodedCommonNameNoNull), "Unexpected size %d\n",
+         info->SignerId.IssuerSerialNumber.Issuer.cbData);
+        ok(!memcmp(info->SignerId.IssuerSerialNumber.Issuer.pbData,
+         encodedCommonNameNoNull,
+         info->SignerId.IssuerSerialNumber.Issuer.cbData),
+         "Unexpected value\n");
+        ok(info->SignerId.IssuerSerialNumber.SerialNumber.cbData ==
+         sizeof(serialNum), "Unexpected size %d\n",
+         info->SignerId.IssuerSerialNumber.SerialNumber.cbData);
+        ok(!memcmp(info->SignerId.IssuerSerialNumber.SerialNumber.pbData,
+         serialNum, sizeof(serialNum)), "Unexpected value\n");
+        ok(!strcmp(info->HashAlgorithm.pszObjId, oid1),
+         "Expected %s, got %s\n", oid1, info->HashAlgorithm.pszObjId);
+        ok(!strcmp(info->HashEncryptionAlgorithm.pszObjId, oid2),
+         "Expected %s, got %s\n", oid2, info->HashEncryptionAlgorithm.pszObjId);
+        LocalFree(buf);
+    }
+    ret = CryptDecodeObjectEx(dwEncoding, CMS_SIGNER_INFO,
+     PKCSSignerWithHash, sizeof(PKCSSignerWithHash),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %x\n", GetLastError());
+    if (buf)
+    {
+        info = (CMSG_CMS_SIGNER_INFO *)buf;
+        ok(info->dwVersion == 0, "Expected version 0, got %d\n",
+         info->dwVersion);
+        ok(info->SignerId.dwIdChoice == CERT_ID_ISSUER_SERIAL_NUMBER,
+         "Expected CERT_ID_ISSUER_SERIAL_NUMBER, got %d\n",
+         info->SignerId.dwIdChoice);
+        ok(info->SignerId.IssuerSerialNumber.Issuer.cbData ==
+         sizeof(encodedCommonNameNoNull), "Unexpected size %d\n",
+         info->SignerId.IssuerSerialNumber.Issuer.cbData);
+        ok(!memcmp(info->SignerId.IssuerSerialNumber.Issuer.pbData,
+         encodedCommonNameNoNull,
+         info->SignerId.IssuerSerialNumber.Issuer.cbData),
+         "Unexpected value\n");
+        ok(info->SignerId.IssuerSerialNumber.SerialNumber.cbData ==
+         sizeof(serialNum), "Unexpected size %d\n",
+         info->SignerId.IssuerSerialNumber.SerialNumber.cbData);
+        ok(!memcmp(info->SignerId.IssuerSerialNumber.SerialNumber.pbData,
+         serialNum, sizeof(serialNum)), "Unexpected value\n");
+        ok(!strcmp(info->HashAlgorithm.pszObjId, oid1),
+         "Expected %s, got %s\n", oid1, info->HashAlgorithm.pszObjId);
+        ok(!strcmp(info->HashEncryptionAlgorithm.pszObjId, oid2),
+         "Expected %s, got %s\n", oid2, info->HashEncryptionAlgorithm.pszObjId);
+        ok(info->EncryptedHash.cbData == sizeof(hash), "Unexpected size %d\n",
+         info->EncryptedHash.cbData);
+        ok(!memcmp(info->EncryptedHash.pbData, hash, sizeof(hash)),
+         "Unexpected value\n");
+        LocalFree(buf);
+    }
+    ret = CryptDecodeObjectEx(dwEncoding, CMS_SIGNER_INFO,
+     CMSSignerWithKeyId, sizeof(CMSSignerWithKeyId),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %x\n", GetLastError());
+    if (buf)
+    {
+        info = (CMSG_CMS_SIGNER_INFO *)buf;
+        ok(info->dwVersion == 0, "Expected version 0, got %d\n",
+         info->dwVersion);
+        ok(info->SignerId.dwIdChoice == CERT_ID_KEY_IDENTIFIER,
+         "Expected CERT_ID_KEY_IDENTIFIER, got %d\n",
+         info->SignerId.dwIdChoice);
+        ok(info->SignerId.KeyId.cbData == sizeof(serialNum),
+         "Unexpected size %d\n", info->SignerId.KeyId.cbData);
+        ok(!memcmp(info->SignerId.KeyId.pbData, serialNum, sizeof(serialNum)),
+         "Unexpected value\n");
         LocalFree(buf);
     }
 }
@@ -5967,8 +6439,12 @@ START_TEST(encode)
         test_decodePKCSAttribute(encodings[i]);
         test_encodePKCSAttributes(encodings[i]);
         test_decodePKCSAttributes(encodings[i]);
+        test_encodePKCSSMimeCapabilities(encodings[i]);
+        test_decodePKCSSMimeCapabilities(encodings[i]);
         test_encodePKCSSignerInfo(encodings[i]);
         test_decodePKCSSignerInfo(encodings[i]);
+        test_encodeCMSSignerInfo(encodings[i]);
+        test_decodeCMSSignerInfo(encodings[i]);
         test_encodeNameConstraints(encodings[i]);
         test_decodeNameConstraints(encodings[i]);
     }

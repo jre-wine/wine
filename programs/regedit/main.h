@@ -91,6 +91,18 @@ extern TCHAR szTitle[];
 extern const TCHAR szFrameClass[];
 extern const TCHAR szChildClass[];
 extern TCHAR g_pszDefaultValueName[];
+extern WCHAR g_pszDefaultValueNameW[];
+
+/* Registry class names and their indexes */
+extern const WCHAR* reg_class_namesW[];
+#define INDEX_HKEY_LOCAL_MACHINE    0
+#define INDEX_HKEY_USERS            1
+#define INDEX_HKEY_CLASSES_ROOT     2
+#define INDEX_HKEY_CURRENT_CONFIG   3
+#define INDEX_HKEY_CURRENT_USER     4
+#define INDEX_HKEY_DYN_DATA         5
+
+
 
 /* about.c */
 extern void ShowAboutBox(HWND hWnd);
@@ -98,6 +110,7 @@ extern void ShowAboutBox(HWND hWnd);
 /* childwnd.c */
 extern LPCTSTR GetRootKeyName(HKEY hRootKey);
 extern LPTSTR GetItemFullPath(HWND hwndTV, HTREEITEM hItem, BOOL bFull);
+extern LPWSTR GetItemFullPathW(HWND hwndTV, HTREEITEM hItem, BOOL bFull);
 extern LRESULT CALLBACK ChildWndProc(HWND, UINT, WPARAM, LPARAM);
 
 /* framewnd.c */
@@ -119,18 +132,19 @@ extern HWND CreateTreeView(HWND hwndParent, LPTSTR pHostName, UINT id);
 extern BOOL RefreshTreeView(HWND hWndTV);
 extern BOOL OnTreeExpanding(HWND hWnd, NMTREEVIEW* pnmtv);
 extern LPTSTR GetItemPath(HWND hwndTV, HTREEITEM hItem, HKEY* phRootKey);
+extern LPWSTR GetItemPathW(HWND hwndTV, HTREEITEM hItem, HKEY* phRootKey);
 extern BOOL DeleteNode(HWND hwndTV, HTREEITEM hItem);
-extern HTREEITEM InsertNode(HWND hwndTV, HTREEITEM hItem, LPTSTR name);
+extern HTREEITEM InsertNode(HWND hwndTV, HTREEITEM hItem, LPWSTR name);
 extern HWND StartKeyRename(HWND hwndTV);
 extern HTREEITEM FindPathInTree(HWND hwndTV, LPCTSTR lpKeyName);
 extern HTREEITEM FindNext(HWND hwndTV, HTREEITEM hItem, LPCTSTR sstring, int mode, int *row);
 
 /* edit.c */
-extern BOOL CreateKey(HWND hwnd, HKEY hKeyRoot, LPCTSTR keyPath, LPTSTR newKeyName);
+extern BOOL CreateKey(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPWSTR newKeyName);
 extern BOOL CreateValue(HWND hwnd, HKEY hKeyRoot, LPCTSTR keyPath, DWORD valueType, LPTSTR valueName);
 extern BOOL ModifyValue(HWND hwnd, HKEY hKeyRoot, LPCTSTR keyPath, LPCTSTR valueName);
-extern BOOL DeleteKey(HWND hwnd, HKEY hKeyRoot, LPCTSTR keyPath);
-extern BOOL DeleteValue(HWND hwnd, HKEY hKeyRoot, LPCTSTR keyPath, LPCTSTR valueName, BOOL showMessageBox);
+extern BOOL DeleteKey(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath);
+extern BOOL DeleteValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName, BOOL showMessageBox);
 extern BOOL RenameValue(HWND hwnd, HKEY hRootKey, LPCTSTR keyPath, LPCTSTR oldName, LPCTSTR newName);
 extern BOOL RenameKey(HWND hwnd, HKEY hRootKey, LPCTSTR keyPath, LPCTSTR newName);
 extern void error(HWND hwnd, INT resId, ...);

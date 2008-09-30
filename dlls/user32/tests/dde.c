@@ -291,11 +291,8 @@ static void test_ddeml_client(void)
     DdeGetLastError(client_pid);
     hdata = DdeClientTransaction(NULL, 0, conversation, item, CF_TEXT, XTYP_REQUEST, default_timeout, &res);
     ret = DdeGetLastError(client_pid);
-    ok(ret == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", ret);
-    todo_wine
-    {
-        ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %08x\n", res);
-    }
+    ok(ret == DMLERR_NO_ERROR, "Expected DMLERR_NO_ERROR, got %d\n", ret);
+    ok(res == DDE_FNOTPROCESSED, "Expected DDE_FNOTPROCESSED, got %08x\n", res);
     if (hdata == NULL)
         ok(FALSE, "hdata is NULL\n");
     else
@@ -313,11 +310,9 @@ static void test_ddeml_client(void)
     DdeGetLastError(client_pid);
     hdata = DdeClientTransaction(NULL, 0, conversation, item, CF_TEXT, XTYP_REQUEST, default_timeout, &res);
     ret = DdeGetLastError(client_pid);
-    todo_wine
-    {
-        ok(res == DDE_FNOTPROCESSED, "Expected DDE_FNOTPROCESSED, got %d\n", res);
-        ok(ret == DMLERR_MEMORY_ERROR, "Expected DMLERR_MEMORY_ERROR, got %d\n", ret);
-    }
+    ok(res == DDE_FNOTPROCESSED, "Expected DDE_FNOTPROCESSED, got %d\n", res);
+todo_wine
+    ok(ret == DMLERR_MEMORY_ERROR, "Expected DMLERR_MEMORY_ERROR, got %d\n", ret);
     if (hdata == NULL)
         ok(FALSE, "hdata is NULL\n");
     else
@@ -336,10 +331,7 @@ static void test_ddeml_client(void)
     hdata = DdeClientTransaction(NULL, 0, conversation, item, CF_TEXT, XTYP_REQUEST, default_timeout, &res);
     ret = DdeGetLastError(client_pid);
     ok(ret == DMLERR_NO_ERROR, "Expected DMLERR_NO_ERROR, got %d\n", ret);
-    todo_wine
-    {
-        ok(res == DDE_FNOTPROCESSED, "Expected DDE_FNOTPROCESSED, got %d\n", res);
-    }
+    ok(res == DDE_FNOTPROCESSED, "Expected DDE_FNOTPROCESSED, got %d\n", res);
     if (hdata == NULL)
         ok(FALSE, "hdata is NULL\n");
     else
@@ -441,10 +433,7 @@ static void test_ddeml_client(void)
     ret = DdeGetLastError(client_pid);
     ok(op == NULL, "Expected NULL, got %p\n", op);
     ok(res == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", res);
-    todo_wine
-    {
-        ok(ret == DMLERR_INVALIDPARAMETER, "Expected DMLERR_INVALIDPARAMETER, got %d\n", ret);
-    }
+    ok(ret == DMLERR_INVALIDPARAMETER, "Expected DMLERR_INVALIDPARAMETER, got %d\n", ret);
 
     DdeFreeStringHandle(client_pid, topic);
     DdeFreeDataHandle(hdata);
@@ -457,10 +446,7 @@ static void test_ddeml_client(void)
     hdata = DdeClientTransaction(NULL, 0, conversation, item, CF_TEXT, XTYP_REQUEST, default_timeout, &res);
     ret = DdeGetLastError(client_pid);
     ok(ret == DMLERR_NO_ERROR, "Expected DMLERR_NO_ERROR, got %d\n", ret);
-    todo_wine
-    {
-        ok(res == DDE_FNOTPROCESSED, "Expected DDE_FNOTPROCESSED, got %d\n", res);
-    }
+    ok(res == DDE_FNOTPROCESSED, "Expected DDE_FNOTPROCESSED, got %d\n", res);
     if (hdata == NULL)
         ok(FALSE, "hdata is NULL\n");
     else
@@ -665,7 +651,6 @@ static HDDEDATA CALLBACK server_ddeml_callback(UINT uType, UINT uFmt, HCONV hcon
 
         if (msg_index == 5)
         {
-            todo_wine
             {
                 ok(!lstrcmpA(str, ""), "Expected empty string, got %s\n", str);
                 ok(size == 1, "Expected 1, got %d\n", size);
@@ -707,7 +692,6 @@ static HDDEDATA CALLBACK server_ddeml_callback(UINT uType, UINT uFmt, HCONV hcon
         size = DdeQueryStringA(server_pid, hsz2, str, MAX_PATH, CP_WINANSI);
         if (msg_index == 7)
         {
-            todo_wine
             {
                 ok(!lstrcmpA(str, ""), "Expected empty string, got %s\n", str);
                 ok(size == 1, "Expected 1, got %d\n", size);
@@ -1388,6 +1372,53 @@ todo_wine {
     DestroyWindow(hwnd_server);
 }
 
+static void test_initialisation(void)
+{
+    UINT ret;
+    DWORD res;
+    HDDEDATA hdata;
+    HSZ server, topic, item;
+    DWORD client_pid;
+    HCONV conversation;
+
+    /* Initialise without a valid server window. */
+    client_pid = 0;
+    ret = DdeInitializeA(&client_pid, client_ddeml_callback, APPCMD_CLIENTONLY, 0);
+    ok(ret == DMLERR_NO_ERROR, "Expected DMLERR_NO_ERROR, got %d\n", ret);
+
+
+    server = DdeCreateStringHandleA(client_pid, "TestDDEService", CP_WINANSI);
+    topic = DdeCreateStringHandleA(client_pid, "TestDDETopic", CP_WINANSI);
+
+    DdeGetLastError(client_pid);
+
+    /* There is no server window so no conversation can be extracted */
+    conversation = DdeConnect(client_pid, server, topic, NULL);
+    ok(conversation == NULL, "Expected NULL conversation, %p\n", conversation);
+    ret = DdeGetLastError(client_pid);
+    ok(ret == DMLERR_NO_CONV_ESTABLISHED, "Expected DMLERR_NO_CONV_ESTABLISHED, got %d\n", ret);
+
+    DdeFreeStringHandle(client_pid, server);
+
+    item = DdeCreateStringHandleA(client_pid, "request", CP_WINANSI);
+
+    /* There is no converstation so an invalild parameter results */
+    res = 0xdeadbeef;
+    DdeGetLastError(client_pid);
+    hdata = DdeClientTransaction(NULL, 0, conversation, item, CF_TEXT, XTYP_REQUEST, default_timeout, &res);
+    ret = DdeGetLastError(client_pid);
+todo_wine
+    ok(ret == DMLERR_INVALIDPARAMETER, "Expected DMLERR_INVALIDPARAMETER, got %d\n", ret);
+    ok(res == 0xdeadbeef, "Expected 0xdeadbeef, got %08x\n", res);
+
+    DdeFreeStringHandle(client_pid, server);
+    ret = DdeDisconnect(conversation);
+    ok(ret == FALSE, "Expected FALSE, got %d\n", ret);
+
+    ret = DdeUninitialize(client_pid);
+    ok(ret == TRUE, "Expected TRUE, got %d\n", ret);
+}
+
 static void test_DdeCreateStringHandleW(DWORD dde_inst, int codepage)
 {
     static const WCHAR dde_string[] = {'D','D','E',' ','S','t','r','i','n','g',0};
@@ -1666,7 +1697,7 @@ static void test_DdeCreateStringHandle(void)
     ret = DdeInitializeW(&dde_inst, client_ddeml_callback, APPCMD_CLIENTONLY, 0);
     if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        trace("Skipping the DDE test on a Win9x platform\n");
+        skip("DdeInitialize is unimplemented\n");
         return;
     }
 
@@ -2103,6 +2134,8 @@ START_TEST(dde)
 
         return;
     }
+
+    test_initialisation();
 
     ZeroMemory(&startup, sizeof(STARTUPINFO));
     sprintf(buffer, "%s dde ddeml", argv[0]);

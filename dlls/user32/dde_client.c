@@ -191,6 +191,7 @@ HCONV WINAPI DdeConnect(DWORD idInst, HSZ hszService, HSZ hszTopic,
     {
 	WARN("Done with INITIATE, but no Server window available\n");
 	pConv = NULL;
+	pInstance->lastError = DMLERR_NO_CONV_ESTABLISHED;
 	goto theEnd;
     }
     TRACE("Connected to Server window (%p)\n", pConv->hwndServer);
@@ -921,6 +922,7 @@ static WDML_QUEUE_STATE WDML_HandleReply(WDML_CONV* pConv, MSG* msg, HDDEDATA* h
 
     if (pConv->transactions)
     {
+	if (ack) *ack = DDE_FNOTPROCESSED;
 	/* first check message against a pending transaction, if any */
 	switch (pXAct->ddeMsg)
 	{
@@ -1153,6 +1155,11 @@ HDDEDATA WINAPI DdeClientTransaction(LPBYTE pData, DWORD cbData, HCONV hConv, HS
     {
     case XTYP_EXECUTE:
         /* Windows simply ignores hszItem and wFmt in this case */
+	if (pData == NULL)
+	{
+	    pConv->instance->lastError = DMLERR_INVALIDPARAMETER;
+	    return 0;
+	}
 	pXAct = WDML_ClientQueueExecute(pConv, pData, cbData);
 	break;
     case XTYP_POKE:

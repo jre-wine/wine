@@ -84,7 +84,6 @@ ME_DisplayItem *ME_FindItemFwdOrHere(ME_DisplayItem *di, ME_DIType nTypeOrClass)
 BOOL ME_DITypesEqual(ME_DIType type, ME_DIType nTypeOrClass);
 ME_DisplayItem *ME_MakeDI(ME_DIType type);
 void ME_DestroyDisplayItem(ME_DisplayItem *item);
-void ME_DestroyTableCellList(ME_DisplayItem *item);
 void ME_DumpDocument(ME_TextBuffer *buffer);
 const char *ME_GetDITypeName(ME_DIType type);
 
@@ -183,7 +182,7 @@ void ME_MoveCaret(ME_TextEditor *ed);
 int ME_CharFromPos(ME_TextEditor *editor, int x, int y, BOOL *isExact);
 void ME_LButtonDown(ME_TextEditor *editor, int x, int y, int clickNum);
 void ME_MouseMove(ME_TextEditor *editor, int x, int y);
-void ME_DeleteTextAtCursor(ME_TextEditor *editor, int nCursor, int nChars);
+BOOL ME_DeleteTextAtCursor(ME_TextEditor *editor, int nCursor, int nChars);
 void ME_InsertTextFromCursor(ME_TextEditor *editor, int nCursor, 
                              const WCHAR *str, int len, ME_Style *style);
 void ME_InsertEndRowFromCursor(ME_TextEditor *editor, int nCursor);
@@ -199,8 +198,7 @@ BOOL ME_IsSelection(ME_TextEditor *editor);
 void ME_DeleteSelection(ME_TextEditor *editor);
 void ME_SendSelChange(ME_TextEditor *editor);
 void ME_InsertOLEFromCursor(ME_TextEditor *editor, const REOBJECT* reo, int nCursor);
-void ME_InsertTableCellFromCursor(ME_TextEditor *editor, int nCursor);
-void ME_InternalDeleteText(ME_TextEditor *editor, int nOfs, int nChars);
+BOOL ME_InternalDeleteText(ME_TextEditor *editor, int nOfs, int nChars, BOOL bForce);
 int ME_GetTextLength(ME_TextEditor *editor);
 int ME_GetTextLengthEx(ME_TextEditor *editor, const GETTEXTLENGTHEX *how);
 ME_Style *ME_GetSelectionInsertStyle(ME_TextEditor *editor);
@@ -219,12 +217,13 @@ void ME_SendRequestResize(ME_TextEditor *editor, BOOL force);
 ME_DisplayItem *ME_GetParagraph(ME_DisplayItem *run); 
 void ME_GetSelectionParas(ME_TextEditor *editor, ME_DisplayItem **para, ME_DisplayItem **para_end);
 void ME_MakeFirstParagraph(ME_TextEditor *editor);
-ME_DisplayItem *ME_SplitParagraph(ME_TextEditor *editor, ME_DisplayItem *rp, ME_Style *style, int numCR, int numLF);
-ME_DisplayItem *ME_JoinParagraphs(ME_TextEditor *editor, ME_DisplayItem *tp);
+ME_DisplayItem *ME_SplitParagraph(ME_TextEditor *editor, ME_DisplayItem *rp, ME_Style *style, int numCR, int numLF, int paraFlags);
+ME_DisplayItem *ME_JoinParagraphs(ME_TextEditor *editor, ME_DisplayItem *tp,
+                                  BOOL keepFirstParaFormat);
 void ME_DumpParaStyle(ME_Paragraph *s);
 void ME_DumpParaStyleToBuf(const PARAFORMAT2 *pFmt, char buf[2048]);
-void ME_SetParaFormat(ME_TextEditor *editor, ME_DisplayItem *para, const PARAFORMAT2 *pFmt);
-void ME_SetSelectionParaFormat(ME_TextEditor *editor, const PARAFORMAT2 *pFmt);
+BOOL ME_SetParaFormat(ME_TextEditor *editor, ME_DisplayItem *para, const PARAFORMAT2 *pFmt);
+BOOL ME_SetSelectionParaFormat(ME_TextEditor *editor, const PARAFORMAT2 *pFmt);
 void ME_GetParaFormat(ME_TextEditor *editor, const ME_DisplayItem *para, PARAFORMAT2 *pFmt);
 void ME_GetSelectionParaFormat(ME_TextEditor *editor, PARAFORMAT2 *pFmt);
 /* marks from first up to (but not including) last */
@@ -285,6 +284,21 @@ extern BOOL ME_FindNextURLCandidate(ME_TextEditor *editor, int sel_min, int sel_
 extern BOOL ME_IsCandidateAnURL(ME_TextEditor *editor, int sel_min, int sel_max);
 BOOL ME_UpdateLinkAttribute(ME_TextEditor *editor, int sel_min, int sel_max);
 void ME_UpdateSelectionLinkAttribute(ME_TextEditor *editor);
+
+/* table.c */
+BOOL ME_IsInTable(ME_DisplayItem *pItem);
+ME_DisplayItem *ME_InsertTableRowStartFromCursor(ME_TextEditor *editor);
+ME_DisplayItem *ME_InsertTableRowStartAtParagraph(ME_TextEditor *editor,
+                                                  ME_DisplayItem *para);
+ME_DisplayItem *ME_InsertTableCellFromCursor(ME_TextEditor *editor);
+ME_DisplayItem *ME_InsertTableRowEndFromCursor(ME_TextEditor *editor);
+ME_DisplayItem *ME_GetTableRowEnd(ME_DisplayItem *para);
+ME_DisplayItem *ME_GetTableRowStart(ME_DisplayItem *para);
+void ME_CheckTablesForCorruption(ME_TextEditor *editor);
+void ME_ProtectPartialTableDeletion(ME_TextEditor *editor, int nOfs,int *nChars);
+void ME_TabPressedInTable(ME_TextEditor *editor, BOOL bSelectedRow);
+struct RTFTable *ME_MakeTableDef(ME_TextEditor *editor);
+void ME_InitTableDef(ME_TextEditor *editor, struct RTFTable *tableDef);
 
 /* undo.c */
 ME_UndoItem *ME_AddUndoItem(ME_TextEditor *editor, ME_DIType type, const ME_DisplayItem *pdi);

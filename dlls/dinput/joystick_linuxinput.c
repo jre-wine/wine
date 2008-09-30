@@ -802,7 +802,7 @@ static HRESULT WINAPI JoystickAImpl_GetDeviceState(
     joy_polldev(This);
 
     /* convert and copy data to user supplied buffer */
-    fill_DataFormat(ptr, &This->js, &This->base.data_format);
+    fill_DataFormat(ptr, len, &This->js, &This->base.data_format);
 
     return DI_OK;
 }
@@ -883,6 +883,26 @@ static HRESULT WINAPI JoystickAImpl_SetProperty(LPDIRECTINPUTDEVICE8A iface,
       LPCDIPROPDWORD pd = (LPCDIPROPDWORD)ph;
 
       FIXME("DIPROP_AUTOCENTER(%d)\n", pd->dwData);
+      break;
+    }
+    case (DWORD)DIPROP_SATURATION: {
+      LPCDIPROPDWORD pd = (LPCDIPROPDWORD)ph;
+
+      if (ph->dwHow == DIPH_DEVICE) {
+        int i;
+
+        TRACE("saturation(%d) all\n", pd->dwData);
+        for (i = 0; i < This->base.data_format.wine_df->dwNumObjs; i++)
+          This->props[i].lSaturation = pd->dwData;
+      } else {
+          int obj = find_property(&This->base.data_format, ph);
+
+          if (obj < 0) return DIERR_OBJECTNOTFOUND;
+
+          TRACE("saturation(%d) obj=%d\n", pd->dwData, obj);
+          This->props[obj].lSaturation = pd->dwData;
+      }
+      fake_current_js_state(This);
       break;
     }
     default:
@@ -975,6 +995,17 @@ static HRESULT WINAPI JoystickAImpl_GetProperty(LPDIRECTINPUTDEVICE8A iface,
 
         pd->dwData = This->props[obj].lDeadZone;
         TRACE("deadzone(%d) obj=%d\n", pd->dwData, obj);
+        break;
+    }
+    case (DWORD) DIPROP_SATURATION:
+    {
+        LPDIPROPDWORD pd = (LPDIPROPDWORD)pdiph;
+        int obj = find_property(&This->base.data_format, pdiph);
+
+        if (obj < 0) return DIERR_OBJECTNOTFOUND;
+
+        pd->dwData = This->props[obj].lSaturation;
+        TRACE("saturation(%d) obj=%d\n", pd->dwData, obj);
         break;
     }
 

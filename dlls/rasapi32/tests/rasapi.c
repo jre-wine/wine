@@ -24,6 +24,7 @@
 #include <windef.h>
 #include <winbase.h>
 #include "ras.h"
+#include "raserror.h"
 
 static HMODULE hmodule;
 static DWORD (WINAPI *pRasEnumDevicesA)(LPRASDEVINFOA, LPDWORD, LPDWORD);
@@ -54,7 +55,11 @@ static void test_rasenum(void)
 
     /* create the return buffer */
     result = pRasEnumDevicesA(NULL, &bufsize, &cDevices);
-    trace("RasEnumDevicesA: buffersize %d\n", cb);
+    if(ERROR_RASMAN_CANNOT_INITIALIZE == result) {
+        win_skip("RAS configuration problem\n");
+        return;
+    }
+    trace("RasEnumDevicesA: returned %d buffersize %d\n", result, cb);
     ok(result == ERROR_BUFFER_TOO_SMALL,
     "Expected ERROR_BUFFER_TOO_SMALL, got %08d\n", result);
 
@@ -101,8 +106,9 @@ static void test_rasenum(void)
     rasDevInfo[0].dwSize = sizeof(RASDEVINFOA);
     cb = 0;
     result = pRasEnumDevicesA(rasDevInfo, &cb, &cDevices);
-    ok(result == ERROR_BUFFER_TOO_SMALL,
-    "Expected ERROR_BUFFER_TOO_SMALL, got %08d\n", result);
+    ok(result == ERROR_BUFFER_TOO_SMALL ||
+    result == ERROR_INVALID_SIZE, /* vista, 2k8 */
+    "Expected ERROR_BUFFER_TOO_SMALL/ERROR_INVALID_SIZE, got %08d\n", result);
 
     rasDevInfo[0].dwSize = sizeof(RASDEVINFOA);
     cb = bufsize -1;

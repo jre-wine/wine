@@ -128,8 +128,6 @@ struct IDirectDrawImpl
     DWORD                   orig_width, orig_height;
     DWORD                   orig_bpp;
 
-    DDCAPS                  caps;
-
     /* D3D things */
     IDirectDrawSurfaceImpl  *d3d_target;
     HWND                    d3d_window;
@@ -139,6 +137,7 @@ struct IDirectDrawImpl
     /* Various HWNDs */
     HWND                    focuswindow;
     HWND                    devicewindow;
+    HWND                    dest_window;
 
     /* The surface type to request */
     WINED3DSURFTYPE         ImplType;
@@ -230,6 +229,7 @@ struct IDirectDrawSurfaceImpl
     IDirectDrawImpl         *ddraw;
     IWineD3DSurface         *WineD3DSurface;
     IWineD3DBaseTexture     *wineD3DTexture;
+    IWineD3DSwapChain       *wineD3DSwapChain;
 
     /* This implementation handles attaching surfaces to other surfaces */
     IDirectDrawSurfaceImpl  *next_attached;

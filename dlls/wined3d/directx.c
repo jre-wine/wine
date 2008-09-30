@@ -29,7 +29,6 @@
 #define DEBUG_SINGLE_MODE 0
 #endif
 
-
 #include "config.h"
 #include <assert.h>
 #include "wined3d_private.h"
@@ -150,6 +149,9 @@ static int numAdapters = 0;
 static struct WineD3DAdapter Adapters[1];
 
 static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType, WINED3DFORMAT AdapterFormat, DWORD Usage, WINED3DRESOURCETYPE RType, WINED3DFORMAT CheckFormat);
+static const struct fragment_pipeline *select_fragment_implementation(UINT Adapter, WINED3DDEVTYPE DeviceType);
+static const shader_backend_t *select_shader_backend(UINT Adapter, WINED3DDEVTYPE DeviceType);
+static const struct blit_shader *select_blit_implementation(UINT Adapter, WINED3DDEVTYPE DeviceType);
 
 /* lookup tables */
 int minLookup[MAX_LOOKUPS];
@@ -1961,31 +1963,40 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceType(IWineD3D *iface, UINT Adapter
 
 #define GLINFO_LOCATION Adapters[Adapter].gl_info
 /* Check if we support bumpmapping for a format */
-static BOOL CheckBumpMapCapability(UINT Adapter, WINED3DFORMAT CheckFormat)
+static BOOL CheckBumpMapCapability(UINT Adapter, WINED3DDEVTYPE DeviceType, WINED3DFORMAT CheckFormat)
 {
-    if(GL_SUPPORT(NV_REGISTER_COMBINERS) && GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-        switch (CheckFormat) {
-            case WINED3DFMT_V8U8:
+    const struct fragment_pipeline *fp;
+    const GlPixelFormatDesc *glDesc;
+
+    switch(CheckFormat) {
+        case WINED3DFMT_V8U8:
+        case WINED3DFMT_V16U16:
+        case WINED3DFMT_L6V5U5:
+        case WINED3DFMT_X8L8V8U8:
+        case WINED3DFMT_Q8W8V8U8:
+            getFormatDescEntry(CheckFormat, &GLINFO_LOCATION, &glDesc);
+            if(glDesc->conversion_group == WINED3DFMT_UNKNOWN) {
+                /* We have a GL extension giving native support */
                 TRACE_(d3d_caps)("[OK]\n");
                 return TRUE;
-            /* TODO: Other bump map formats */
-            default:
-                TRACE_(d3d_caps)("[FAILED]\n");
-                return FALSE;
-        }
-    }
-    if(GL_SUPPORT(ATI_ENVMAP_BUMPMAP) || GL_SUPPORT(ATI_FRAGMENT_SHADER)) {
-        switch (CheckFormat) {
-            case WINED3DFMT_V8U8:
+            }
+
+            /* No native support: Ask the fixed function pipeline implementation if it
+             * can deal with the conversion
+             */
+            fp = select_fragment_implementation(Adapter, DeviceType);
+            if(fp->conv_supported(CheckFormat)) {
                 TRACE_(d3d_caps)("[OK]\n");
                 return TRUE;
-            default:
+            } else {
                 TRACE_(d3d_caps)("[FAILED]\n");
                 return FALSE;
-        }
+            }
+
+        default:
+            TRACE_(d3d_caps)("[FAILED]\n");
+            return FALSE;
     }
-    TRACE_(d3d_caps)("[FAILED]\n");
-    return FALSE;
 }
 
 /* Check if the given DisplayFormat + DepthStencilFormat combination is valid for the Adapter */
@@ -2172,8 +2183,12 @@ static BOOL CheckWrapAndMipCapability(UINT Adapter, WINED3DFORMAT CheckFormat) {
 }
 
 /* Check if a texture format is supported on the given adapter */
-static BOOL CheckTextureCapability(UINT Adapter, WINED3DFORMAT CheckFormat)
+static BOOL CheckTextureCapability(UINT Adapter, WINED3DDEVTYPE DeviceType, WINED3DFORMAT CheckFormat)
 {
+    const shader_backend_t *shader_backend;
+    const struct fragment_pipeline *fp;
+    const GlPixelFormatDesc *glDesc;
+
     switch (CheckFormat) {
 
         /*****
@@ -2233,53 +2248,33 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DFORMAT CheckFormat)
 
         /*****
          *  Not supported everywhere(depends on GL_ATI_envmap_bumpmap or
-         *  GL_NV_texture_shader), but advertized to make apps happy.
-         *  Enable some because games often fail when they are not available
-         *  and are still playable even without bump mapping
+         *  GL_NV_texture_shader). Emulated by shaders
          */
         case WINED3DFMT_V8U8:
-            if(GL_SUPPORT(NV_TEXTURE_SHADER) || GL_SUPPORT(ATI_ENVMAP_BUMPMAP) ||
-               GL_SUPPORT(ATI_FRAGMENT_SHADER)) {
-                return TRUE;
-            }
-            if(GL_SUPPORT(ARB_FRAGMENT_SHADER) || GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
-                /* Shader emulated */
-                return TRUE;
-            }
-            TRACE_(d3d_caps)("[FAILED] - No converted formats on volumes\n");
-            return FALSE;
-
         case WINED3DFMT_X8L8V8U8:
         case WINED3DFMT_L6V5U5:
-            if(GL_SUPPORT(ARB_FRAGMENT_SHADER) || GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
-                /* Shader emulated */
-                return TRUE;
-            }
-            WARN_(d3d_caps)("[FAILED]\n");
-            return FALSE;
-
         case WINED3DFMT_Q8W8V8U8:
         case WINED3DFMT_V16U16:
-            if(GL_SUPPORT(NV_TEXTURE_SHADER)) {
-                WARN_(d3d_caps)("[Not supported, but pretended to do]\n");
-                return TRUE;
-            }
-            if(GL_SUPPORT(ARB_FRAGMENT_SHADER) || GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
-                /* Shader emulated */
-                return TRUE;
-            }
-            TRACE_(d3d_caps)("[FAILED] - No converted formats on volumes\n");
-            return FALSE;
-
-        /* Those are not advertized by the nvidia windows driver, and not
-         * supported natively by GL_NV_texture_shader or GL_ATI_envmap_bumpmap.
-         * WINED3DFMT_A2W10V10U10 could be loaded into shaders using the unsigned
-         * ARGB format if needed
-         */
         case WINED3DFMT_W11V11U10:
         case WINED3DFMT_A2W10V10U10:
-            WARN_(d3d_caps)("[FAILED]\n");
-            return FALSE;
+            getFormatDescEntry(CheckFormat, &GLINFO_LOCATION, &glDesc);
+            if(glDesc->conversion_group == WINED3DFMT_UNKNOWN) {
+                /* We have a GL extension giving native support */
+                TRACE_(d3d_caps)("[OK]\n");
+                return TRUE;
+            }
+
+            /* No native support: Ask the fixed function pipeline implementation if it
+             * can deal with the conversion
+             */
+            shader_backend = select_shader_backend(Adapter, DeviceType);
+            if(shader_backend->shader_conv_supported(CheckFormat)) {
+                TRACE_(d3d_caps)("[OK]\n");
+                return TRUE;
+            } else {
+                TRACE_(d3d_caps)("[FAILED]\n");
+                return FALSE;
+            }
 
         case WINED3DFMT_DXT1:
         case WINED3DFMT_DXT2:
@@ -2311,10 +2306,14 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DFORMAT CheckFormat)
             TRACE_(d3d_caps)("[FAILED]\n"); /* Enable when implemented */
             return FALSE;
 
-        /* YUV formats, not supported for now */
+        /* YUV formats */
         case WINED3DFMT_UYVY:
         case WINED3DFMT_YUY2:
-            TRACE_(d3d_caps)("[FAILED]\n"); /* Enable when implemented */
+            if(GL_SUPPORT(APPLE_YCBCR_422)) {
+                TRACE_(d3d_caps)("[OK]\n");
+                return TRUE;
+            }
+            TRACE_(d3d_caps)("[FAILED]\n");
             return FALSE;
 
             /* Not supported */
@@ -2376,6 +2375,14 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DFORMAT CheckFormat)
         /* Vendor specific formats */
         case WINED3DFMT_ATI2N:
             if(GL_SUPPORT(ATI_TEXTURE_COMPRESSION_3DC) || GL_SUPPORT(EXT_TEXTURE_COMPRESSION_RGTC)) {
+                shader_backend = select_shader_backend(Adapter, DeviceType);
+                fp = select_fragment_implementation(Adapter, DeviceType);
+                if(shader_backend->shader_conv_supported(CheckFormat) &&
+                   fp->conv_supported(CheckFormat)) {
+                    TRACE_(d3d_caps)("[OK]\n");
+                    return TRUE;
+                }
+
                 TRACE_(d3d_caps)("[OK]\n");
                 return TRUE;
             }
@@ -2389,6 +2396,26 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DFORMAT CheckFormat)
             ERR("Unhandled format=%s\n", debug_d3dformat(CheckFormat));
             break;
     }
+    return FALSE;
+}
+
+static BOOL CheckSurfaceCapability(UINT Adapter, WINED3DFORMAT AdapterFormat, WINED3DDEVTYPE DeviceType, WINED3DFORMAT CheckFormat) {
+    const struct blit_shader *blitter;
+
+    /* All format that are supported for textures are supported for surfaces as well */
+    if(CheckTextureCapability(Adapter, DeviceType, CheckFormat)) return TRUE;
+    /* All depth stencil formats are supported on surfaces */
+    if(CheckDepthStencilCapability(Adapter, AdapterFormat, CheckFormat)) return TRUE;
+
+    /* If opengl can't process the format natively, the blitter may be able to convert it */
+    blitter = select_blit_implementation(Adapter, DeviceType);
+    if(blitter->conv_supported(CheckFormat)) {
+        TRACE_(d3d_caps)("[OK]\n");
+        return TRUE;
+    }
+
+    /* Reject other formats */
+    TRACE_(d3d_caps)("[FAILED]\n");
     return FALSE;
 }
 
@@ -2445,7 +2472,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
          */
         if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
             /* Check if the texture format is around */
-            if(CheckTextureCapability(Adapter, CheckFormat)) {
+            if(CheckTextureCapability(Adapter, DeviceType, CheckFormat)) {
                 if(Usage & WINED3DUSAGE_AUTOGENMIPMAP) {
                     /* Check for automatic mipmap generation support */
                     if(GL_SUPPORT(SGIS_GENERATE_MIPMAP)) {
@@ -2547,33 +2574,39 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
          *                - D3DUSAGE_RENDERTARGET
          */
 
-        if(Usage & WINED3DUSAGE_DEPTHSTENCIL) {
-            if(CheckDepthStencilCapability(Adapter, AdapterFormat, CheckFormat)) {
-                UsageCaps |= WINED3DUSAGE_DEPTHSTENCIL;
-            } else {
-                TRACE_(d3d_caps)("[FAILED] - No depthstencil support\n");
-                return WINED3DERR_NOTAVAILABLE;
+        if(CheckSurfaceCapability(Adapter, AdapterFormat, DeviceType, CheckFormat)) {
+            if(Usage & WINED3DUSAGE_DEPTHSTENCIL) {
+                if(CheckDepthStencilCapability(Adapter, AdapterFormat, CheckFormat)) {
+                    UsageCaps |= WINED3DUSAGE_DEPTHSTENCIL;
+                } else {
+                    TRACE_(d3d_caps)("[FAILED] - No depthstencil support\n");
+                    return WINED3DERR_NOTAVAILABLE;
+                }
             }
+
+            if(Usage & WINED3DUSAGE_RENDERTARGET) {
+                if(CheckRenderTargetCapability(AdapterFormat, CheckFormat)) {
+                    UsageCaps |= WINED3DUSAGE_RENDERTARGET;
+                } else {
+                    TRACE_(d3d_caps)("[FAILED] - No rendertarget support\n");
+                    return WINED3DERR_NOTAVAILABLE;
+                }
+            }
+
+            /* Check QUERY_POSTPIXELSHADER_BLENDING support */
+            if(Usage & WINED3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING) {
+                if(CheckPostPixelShaderBlendingCapability(Adapter, CheckFormat)) {
+                    UsageCaps |= WINED3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING;
+                } else {
+                    TRACE_(d3d_caps)("[FAILED] - No query post pixelshader blending support\n");
+                    return WINED3DERR_NOTAVAILABLE;
+                }
+            }
+        } else {
+            TRACE_(d3d_caps)("[FAILED] - Not supported for plain surfaces\n");
+            return WINED3DERR_NOTAVAILABLE;
         }
 
-        if(Usage & WINED3DUSAGE_RENDERTARGET) {
-            if(CheckRenderTargetCapability(AdapterFormat, CheckFormat)) {
-                UsageCaps |= WINED3DUSAGE_RENDERTARGET;
-            } else {
-                TRACE_(d3d_caps)("[FAILED] - No rendertarget support\n");
-                 return WINED3DERR_NOTAVAILABLE;
-            }
-        }
-
-        /* Check QUERY_POSTPIXELSHADER_BLENDING support */
-        if(Usage & WINED3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING) {
-            if(CheckPostPixelShaderBlendingCapability(Adapter, CheckFormat)) {
-                UsageCaps |= WINED3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING;
-            } else {
-                TRACE_(d3d_caps)("[FAILED] - No query post pixelshader blending support\n");
-                return WINED3DERR_NOTAVAILABLE;
-            }
-        }
     } else if(RType == WINED3DRTYPE_TEXTURE) {
         /* Texture allows:
          *                - D3DUSAGE_AUTOGENMIPMAP
@@ -2588,7 +2621,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
          */
 
         /* Check if the texture format is around */
-        if(CheckTextureCapability(Adapter, CheckFormat)) {
+        if(CheckTextureCapability(Adapter, DeviceType, CheckFormat)) {
             if(Usage & WINED3DUSAGE_AUTOGENMIPMAP) {
                 /* Check for automatic mipmap generation support */
                 if(GL_SUPPORT(SGIS_GENERATE_MIPMAP)) {
@@ -2628,7 +2661,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
 
             /* Check QUERY_LEGACYBUMPMAP support */
             if(Usage & WINED3DUSAGE_QUERY_LEGACYBUMPMAP) {
-                if(CheckBumpMapCapability(Adapter, CheckFormat)) {
+                if(CheckBumpMapCapability(Adapter, DeviceType, CheckFormat)) {
                     UsageCaps |= WINED3DUSAGE_QUERY_LEGACYBUMPMAP;
                 } else {
                     TRACE_(d3d_caps)("[FAILED] - No legacy bumpmap support\n");
@@ -2711,7 +2744,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
 
         /* Check volume texture and volume usage caps */
         if(GL_SUPPORT(EXT_TEXTURE3D)) {
-            if(CheckTextureCapability(Adapter, CheckFormat) == FALSE) {
+            if(CheckTextureCapability(Adapter, DeviceType, CheckFormat) == FALSE) {
                 TRACE_(d3d_caps)("[FAILED] - Format not supported\n");
                 return WINED3DERR_NOTAVAILABLE;
             }
@@ -2902,7 +2935,9 @@ static const struct fragment_pipeline *select_fragment_implementation(UINT Adapt
     int ps_selected_mode;
 
     select_shader_mode(&GLINFO_LOCATION, DeviceType, &ps_selected_mode, &vs_selected_mode);
-    if(ps_selected_mode == SHADER_ATI) {
+    if((ps_selected_mode == SHADER_ARB || ps_selected_mode == SHADER_GLSL) && GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
+        return &arbfp_fragment_pipeline;
+    } else if(ps_selected_mode == SHADER_ATI) {
         return &atifs_fragment_pipeline;
     } else if(GL_SUPPORT(NV_REGISTER_COMBINERS) && GL_SUPPORT(NV_TEXTURE_SHADER2)) {
         return &nvts_fragment_pipeline;
@@ -2910,6 +2945,18 @@ static const struct fragment_pipeline *select_fragment_implementation(UINT Adapt
         return &nvrc_fragment_pipeline;
     } else {
         return &ffp_fragment_pipeline;
+    }
+}
+
+static const struct blit_shader *select_blit_implementation(UINT Adapter, WINED3DDEVTYPE DeviceType) {
+    int vs_selected_mode;
+    int ps_selected_mode;
+
+    select_shader_mode(&GLINFO_LOCATION, DeviceType, &ps_selected_mode, &vs_selected_mode);
+    if((ps_selected_mode == SHADER_ARB || ps_selected_mode == SHADER_GLSL) && GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
+        return &arbfp_blit;
+    } else {
+        return &ffp_blit;
     }
 }
 
@@ -2925,6 +2972,7 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     struct fragment_caps fragment_caps;
     const shader_backend_t *shader_backend;
     const struct fragment_pipeline *frag_pipeline = NULL;
+    DWORD ckey_caps, blit_caps, fx_caps;
 
     TRACE_(d3d_caps)("(%p)->(Adptr:%d, DevType: %x, pCaps: %p)\n", This, Adapter, DeviceType, pCaps);
 
@@ -3087,6 +3135,7 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
 
     pCaps->TextureCaps =  WINED3DPTEXTURECAPS_ALPHA              |
                           WINED3DPTEXTURECAPS_ALPHAPALETTE       |
+                          WINED3DPTEXTURECAPS_TRANSPARENCY       |
                           WINED3DPTEXTURECAPS_BORDER             |
                           WINED3DPTEXTURECAPS_MIPMAP             |
                           WINED3DPTEXTURECAPS_PROJECTED          |
@@ -3411,6 +3460,72 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     } else
         pCaps->DeclTypes                         = 0;
 
+    /* Set DirectDraw helper Caps */
+    ckey_caps =                         WINEDDCKEYCAPS_DESTBLT              |
+                                        WINEDDCKEYCAPS_SRCBLT;
+    fx_caps =                           WINEDDFXCAPS_BLTALPHA               |
+                                        WINEDDFXCAPS_BLTMIRRORLEFTRIGHT     |
+                                        WINEDDFXCAPS_BLTMIRRORUPDOWN        |
+                                        WINEDDFXCAPS_BLTROTATION90          |
+                                        WINEDDFXCAPS_BLTSHRINKX             |
+                                        WINEDDFXCAPS_BLTSHRINKXN            |
+                                        WINEDDFXCAPS_BLTSHRINKY             |
+                                        WINEDDFXCAPS_BLTSHRINKXN            |
+                                        WINEDDFXCAPS_BLTSTRETCHX            |
+                                        WINEDDFXCAPS_BLTSTRETCHXN           |
+                                        WINEDDFXCAPS_BLTSTRETCHY            |
+                                        WINEDDFXCAPS_BLTSTRETCHYN;
+    blit_caps =                         WINEDDCAPS_BLT                      |
+                                        WINEDDCAPS_BLTCOLORFILL             |
+                                        WINEDDCAPS_BLTDEPTHFILL             |
+                                        WINEDDCAPS_BLTSTRETCH               |
+                                        WINEDDCAPS_CANBLTSYSMEM             |
+                                        WINEDDCAPS_CANCLIP                  |
+                                        WINEDDCAPS_CANCLIPSTRETCHED         |
+                                        WINEDDCAPS_COLORKEY                 |
+                                        WINEDDCAPS_COLORKEYHWASSIST         |
+                                        WINEDDCAPS_ALIGNBOUNDARYSRC;
+
+    /* Fill the ddraw caps structure */
+    pCaps->DirectDrawCaps.Caps =        WINEDDCAPS_GDI                      |
+                                        WINEDDCAPS_PALETTE                  |
+                                        blit_caps;
+    pCaps->DirectDrawCaps.Caps2 =       WINEDDCAPS2_CERTIFIED                |
+                                        WINEDDCAPS2_NOPAGELOCKREQUIRED       |
+                                        WINEDDCAPS2_PRIMARYGAMMA             |
+                                        WINEDDCAPS2_WIDESURFACES             |
+                                        WINEDDCAPS2_CANRENDERWINDOWED;
+    pCaps->DirectDrawCaps.SVBCaps =     blit_caps;
+    pCaps->DirectDrawCaps.SVBCKeyCaps = ckey_caps;
+    pCaps->DirectDrawCaps.SVBFXCaps =   fx_caps;
+    pCaps->DirectDrawCaps.VSBCaps =     blit_caps;
+    pCaps->DirectDrawCaps.VSBCKeyCaps = ckey_caps;
+    pCaps->DirectDrawCaps.VSBFXCaps =   fx_caps;
+    pCaps->DirectDrawCaps.SSBCaps =     blit_caps;
+    pCaps->DirectDrawCaps.SSBCKeyCaps = ckey_caps;
+    pCaps->DirectDrawCaps.SSBFXCaps =   fx_caps;
+
+    pCaps->DirectDrawCaps.ddsCaps =     WINEDDSCAPS_ALPHA                   |
+                                        WINEDDSCAPS_BACKBUFFER              |
+                                        WINEDDSCAPS_FLIP                    |
+                                        WINEDDSCAPS_FRONTBUFFER             |
+                                        WINEDDSCAPS_OFFSCREENPLAIN          |
+                                        WINEDDSCAPS_PALETTE                 |
+                                        WINEDDSCAPS_PRIMARYSURFACE          |
+                                        WINEDDSCAPS_SYSTEMMEMORY            |
+                                        WINEDDSCAPS_VIDEOMEMORY             |
+                                        WINEDDSCAPS_VISIBLE;
+    pCaps->DirectDrawCaps.StrideAlign = DDRAW_PITCH_ALIGNMENT;
+
+    /* Set D3D caps if OpenGL is available. */
+    if(Adapters[Adapter].opengl) {
+        pCaps->DirectDrawCaps.ddsCaps |=WINEDDSCAPS_3DDEVICE                |
+                                        WINEDDSCAPS_MIPMAP                  |
+                                        WINEDDSCAPS_TEXTURE                 |
+                                        WINEDDSCAPS_ZBUFFER;
+        pCaps->DirectDrawCaps.Caps |=   WINEDDCAPS_3D;
+    }
+
     return WINED3D_OK;
 }
 
@@ -3452,9 +3567,9 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     list_init(&object->shaders);
 
     if(This->dxVersion == 7) {
-        object->surface_alignment = 8;
+        object->surface_alignment = DDRAW_PITCH_ALIGNMENT;
     } else {
-        object->surface_alignment = 4;
+        object->surface_alignment = D3D8_PITCH_ALIGNMENT;
     }
     object->posFixup[0] = 1.0; /* This is needed to get the x coord unmodified through a MAD */
 
@@ -3481,6 +3596,7 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     object->frag_pipe = frag_pipeline;
     compile_state_table(object->StateTable, object->multistate_funcs, &GLINFO_LOCATION,
                         ffp_vertexstate_template, frag_pipeline, misc_state_template);
+    object->blitter = select_blit_implementation(Adapter, DeviceType);
 
     /* Prefer the vtable with functions optimized for single dirtifyable objects if the shader
      * model can deal with that. It is essentially the same, just with adjusted
@@ -3731,6 +3847,29 @@ static void fixup_extensions(WineD3D_GL_Info *gl_info) {
         }
     }
 
+    /*  The nVidia GeForceFX series reports OpenGL 2.0 capabilities with the latest drivers versions, but
+     *  doesn't explicitly advertise the ARB_tex_npot extension in the GL extension string.
+     *  This usually means that ARB_tex_npot is supported in hardware as long as the application is staying
+     *  within the limits enforced by the ARB_texture_rectangle extension. This however is not true for the
+     *  FX series, which instantly falls back to a slower software path as soon as ARB_tex_npot is used.
+     *  We therefore completly remove ARB_tex_npot from the list of supported extensions.
+     *
+     *  Note that wine_normalized_texrect can't be used in this case because internally it uses ARB_tex_npot,
+     *  triggering the software fallback. There is not much we can do here apart from disabling the
+     *  software-emulated extension and reenable ARB_tex_rect (which was previously disabled
+     *  in IWineD3DImpl_FillGLCaps).
+     *  This fixup removes performance problems on both the FX 5900 and FX 5700 (e.g. for framebuffer
+     *  post-processing effects in the game "Max Payne 2").
+     *  The behaviour can be verified through a simple test app attached in bugreport #14724.
+     */
+    if(gl_info->supported[ARB_TEXTURE_NON_POWER_OF_TWO] && gl_info->gl_vendor == VENDOR_NVIDIA) {
+        if(gl_info->gl_card == CARD_NVIDIA_GEFORCEFX_5800 || gl_info->gl_card == CARD_NVIDIA_GEFORCEFX_5600) {
+            TRACE("GL_ARB_texture_non_power_of_two advertised through OpenGL 2.0 on NV FX card, removing\n");
+            gl_info->supported[ARB_TEXTURE_NON_POWER_OF_TWO] = FALSE;
+            gl_info->supported[ARB_TEXTURE_RECTANGLE] = TRUE;
+        }
+    }
+
     /* Find out if PBOs work as they are supposed to */
     test_pbo_functionality(gl_info);
 
@@ -3888,7 +4027,7 @@ void fillGLAttribFuncs(WineD3D_GL_Info *gl_info) {
 
 #define PUSH1(att)        attribs[nAttribs++] = (att);
 BOOL InitAdapters(void) {
-    static HMODULE mod_gl;
+    static HMODULE mod_gl, mod_win32gl;
     BOOL ret;
     int ps_selected_mode, vs_selected_mode;
 
@@ -3907,10 +4046,16 @@ BOOL InitAdapters(void) {
             ERR("Can't load opengl32.dll!\n");
             goto nogl_adapter;
         }
+        mod_win32gl = mod_gl;
 #else
 #define USE_GL_FUNC(pfn) pfn = (void*)pwglGetProcAddress(#pfn);
         /* To bypass the opengl32 thunks load wglGetProcAddress from gdi32 (glXGetProcAddress wrapper) instead of opengl32's */
         mod_gl = GetModuleHandleA("gdi32.dll");
+        mod_win32gl = LoadLibraryA("opengl32.dll");
+        if(!mod_win32gl) {
+            ERR("Can't load opengl32.dll!\n");
+            goto nogl_adapter;
+        }
 #endif
     }
 
@@ -3927,6 +4072,12 @@ BOOL InitAdapters(void) {
 /* Dynamically load all GL core functions */
     GL_FUNCS_GEN;
 #undef USE_GL_FUNC
+
+    /* Load glFinish and glFlush from opengl32.dll even if we're not using WIN32 opengl
+     * otherwise because we have to use winex11.drv's override
+     */
+    glFinish = (void*)GetProcAddress(mod_win32gl, "glFinish");
+    glFlush = (void*)GetProcAddress(mod_win32gl, "glFlush");
 
     /* For now only one default adapter */
     {

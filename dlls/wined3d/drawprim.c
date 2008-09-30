@@ -5,7 +5,7 @@
  * Copyright 2002-2004 Raphael Junqueira
  * Copyright 2004 Christian Costa
  * Copyright 2005 Oliver Stieber
- * Copyright 2006 Henri Verbeet
+ * Copyright 2006, 2008 Henri Verbeet
  * Copyright 2007-2008 Stefan Dösinger for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
@@ -922,8 +922,6 @@ void drawPrimitive(IWineD3DDevice *iface,
                    int   minIndex) {
 
     IWineD3DDeviceImpl           *This = (IWineD3DDeviceImpl *)iface;
-    IWineD3DSwapChain            *swapchain;
-    IWineD3DBaseTexture          *texture = NULL;
     IWineD3DSurfaceImpl          *target;
     int i;
 
@@ -932,44 +930,16 @@ void drawPrimitive(IWineD3DDevice *iface,
     /* Invalidate the back buffer memory so LockRect will read it the next time */
     for(i = 0; i < GL_LIMITS(buffers); i++) {
         target = (IWineD3DSurfaceImpl *) This->render_targets[i];
-
-        /* TODO: Only do all that if we're going to change anything
-         * Texture container dirtification does not work quite right yet
-         */
-        if(target /*&& target->Flags & (SFLAG_INTEXTURE | SFLAG_INSYSMEM)*/) {
-            swapchain = NULL;
-            texture = NULL;
-
-            if(i == 0) {
-                IWineD3DSurface_GetContainer((IWineD3DSurface *) target, &IID_IWineD3DSwapChain, (void **)&swapchain);
-
-                /* Need the surface in the drawable! */
-                IWineD3DSurface_LoadLocation((IWineD3DSurface *) target, SFLAG_INDRAWABLE, NULL);
-
-                /* TODO: Move fbo logic to ModifyLocation */
-                IWineD3DSurface_ModifyLocation((IWineD3DSurface *) target, SFLAG_INDRAWABLE, TRUE);
-                if(swapchain) {
-                    /* Onscreen target. Invalidate system memory copy and texture copy */
-                    IWineD3DSwapChain_Release(swapchain);
-                } else if(wined3d_settings.offscreen_rendering_mode != ORM_FBO) {
-                    /* Non-FBO target: Invalidate system copy, texture copy and dirtify the container */
-                    /* TODO: Move container dirtification to ModifyLocation */
-                    IWineD3DSurface_GetContainer((IWineD3DSurface *) target, &IID_IWineD3DBaseTexture, (void **)&texture);
-
-                    if(texture) {
-                        IWineD3DBaseTexture_SetDirty(texture, TRUE);
-                        IWineD3DTexture_Release(texture);
-                    }
-                } else {
-                    /* FBO offscreen target. Texture == Drawable */
-                    target->Flags |= SFLAG_INTEXTURE;
-                }
-            } else {
-                /* Must be an fbo render target */
-                IWineD3DSurface_ModifyLocation((IWineD3DSurface *) target, SFLAG_INDRAWABLE, TRUE);
-                target->Flags |=  SFLAG_INTEXTURE;
-            }
+        if (target) {
+            IWineD3DSurface_LoadLocation((IWineD3DSurface *) target, SFLAG_INDRAWABLE, NULL);
+            IWineD3DSurface_ModifyLocation((IWineD3DSurface *) target, SFLAG_INDRAWABLE, TRUE);
         }
+    }
+
+    if (This->stencilBufferTarget) {
+        DWORD location = This->render_offscreen ? SFLAG_DS_OFFSCREEN : SFLAG_DS_ONSCREEN;
+        surface_load_ds_location(This->stencilBufferTarget, location);
+        surface_modify_ds_location(This->stencilBufferTarget, location);
     }
 
     /* Signals other modules that a drawing is in progress and the stateblock finalized */
@@ -977,20 +947,8 @@ void drawPrimitive(IWineD3DDevice *iface,
 
     /* Ok, we will be updating the screen from here onwards so grab the lock */
 
-    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
-        ENTER_GL();
-        apply_fbo_state(iface);
-        LEAVE_GL();
-    }
-
     ActivateContext(This, This->render_targets[0], CTXUSAGE_DRAWPRIM);
     ENTER_GL();
-
-    if (This->stencilBufferTarget) {
-        DWORD location = This->render_offscreen ? SFLAG_DS_OFFSCREEN : SFLAG_DS_ONSCREEN;
-        surface_load_ds_location(This->stencilBufferTarget, location);
-        surface_modify_ds_location(This->stencilBufferTarget, location);
-    }
 
     {
         GLenum glPrimType;

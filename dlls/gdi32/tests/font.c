@@ -30,7 +30,7 @@
 
 #include "wine/test.h"
 
-#define near_match(a, b) (abs((a) - (b)) <= 4)
+#define near_match(a, b) (abs((a) - (b)) <= 6)
 #define expect(expected, got) ok(got == expected, "Expected %.8x, got %.8x\n", expected, got)
 
 LONG  (WINAPI *pGdiGetCharDimensions)(HDC hdc, LPTEXTMETRICW lptm, LONG *height);
@@ -533,7 +533,7 @@ static void test_outline_font(void)
     trace("gm.gmCellIncX %d, width_orig %d\n", gm.gmCellIncX, width_orig);
     pt.x = width_orig; pt.y = 0;
     LPtoDP(hdc, &pt, 1);
-    ok(gm.gmCellIncX == pt.x, "incX %d != %d\n", gm.gmCellIncX, pt.x);
+    ok(near_match(gm.gmCellIncX, pt.x), "incX %d != %d\n", gm.gmCellIncX, pt.x);
     ok(gm.gmCellIncY == 0, "incY %d != 0\n", gm.gmCellIncY);
     /* with a custom matrix */
     memset(&gm, 0, sizeof(gm));
@@ -543,7 +543,7 @@ static void test_outline_font(void)
     trace("gm.gmCellIncX %d, width_orig %d\n", gm.gmCellIncX, width_orig);
     pt.x = width_orig; pt.y = 0;
     LPtoDP(hdc, &pt, 1);
-    ok(gm.gmCellIncX == (pt.x + 1)/2, "incX %d != %d\n", gm.gmCellIncX, (pt.x + 1)/2);
+    ok(near_match(gm.gmCellIncX, (pt.x + 1)/2), "incX %d != %d\n", gm.gmCellIncX, (pt.x + 1)/2);
     ok(gm.gmCellIncY == 0, "incY %d != 0\n", gm.gmCellIncY);
     SelectObject(hdc, old_hfont);
 
@@ -2363,7 +2363,13 @@ static void test_GetTextFace(void)
 
     /* 'W' case.  */
     memcpy(fW.lfFaceName, faceW, sizeof faceW);
+    SetLastError(0xdeadbeef);
     f = CreateFontIndirectW(&fW);
+    if (!f && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        win_skip("CreateFontIndirectW is not implemented\n");
+        return;
+    }
     ok(f != NULL, "CreateFontIndirectW failed\n");
 
     dc = GetDC(NULL);

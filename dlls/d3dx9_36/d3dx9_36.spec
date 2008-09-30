@@ -88,7 +88,7 @@
 @ stub D3DXCreateSkinInfoFromBlendedMesh
 @ stub D3DXCreateSkinInfoFVF
 @ stub D3DXCreateSphere
-@ stub D3DXCreateSprite
+@ stdcall D3DXCreateSprite(ptr ptr)
 @ stub D3DXCreateTeapot
 @ stub D3DXCreateTextA
 @ stub D3DXCreateTextW
@@ -156,7 +156,7 @@
 @ stdcall D3DXGetImageInfoFromFileW(ptr ptr) d3dx8.D3DXGetImageInfoFromFileW
 @ stdcall D3DXGetImageInfoFromResourceA(long ptr ptr) d3dx8.D3DXGetImageInfoFromResourceA
 @ stdcall D3DXGetImageInfoFromResourceW(long ptr ptr) d3dx8.D3DXGetImageInfoFromResourceW
-@ stub D3DXGetPixelShaderProfile
+@ stdcall D3DXGetPixelShaderProfile(ptr)
 @ stub D3DXGetShaderConstantTable
 @ stub D3DXGetShaderConstantTableEx
 @ stub D3DXGetShaderInputSemantics
@@ -164,7 +164,7 @@
 @ stub D3DXGetShaderSamplers
 @ stdcall D3DXGetShaderSize(ptr)
 @ stdcall D3DXGetShaderVersion(ptr)
-@ stub D3DXGetVertexShaderProfile
+@ stdcall D3DXGetVertexShaderProfile(ptr)
 @ stdcall D3DXIntersect(ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr) d3dx8.D3DXIntersect
 @ stdcall D3DXIntersectSubset(ptr long ptr ptr ptr ptr ptr ptr ptr ptr ptr) d3dx8.D3DXIntersectSubset
 @ stdcall D3DXIntersectTri(ptr ptr ptr ptr ptr ptr ptr ptr) d3dx8.D3DXIntersectTri

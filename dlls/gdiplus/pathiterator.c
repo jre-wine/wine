@@ -153,6 +153,30 @@ GpStatus WINGDIPAPI GdipPathIterNextMarker(GpPathIterator* iterator, INT *result
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipPathIterNextMarkerPath(GpPathIterator* iterator, INT* result,
+    GpPath* path)
+{
+    INT start, end;
+
+    if(!iterator || !result)
+        return InvalidParameter;
+
+    GdipPathIterNextMarker(iterator, result, &start, &end);
+    /* return path */
+    if(((*result) > 0) && path){
+        GdipResetPath(path);
+
+        if(!lengthen_path(path, *result))
+            return OutOfMemory;
+
+        memcpy(path->pathdata.Points, &(iterator->pathdata.Points[start]), sizeof(GpPointF)*(*result));
+        memcpy(path->pathdata.Types,  &(iterator->pathdata.Types[start]),  sizeof(BYTE)*(*result));
+        path->pathdata.Count = *result;
+    }
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipPathIterNextSubpath(GpPathIterator* iterator,
     INT *resultCount, INT* startIndex, INT* endIndex, BOOL* isClosed)
 {
@@ -164,8 +188,10 @@ GpStatus WINGDIPAPI GdipPathIterNextSubpath(GpPathIterator* iterator,
     count = iterator->pathdata.Count;
 
     /* iterator created with NULL path */
-    if(count == 0)
+    if(count == 0){
+        *resultCount = 0;
         return Ok;
+    }
 
     if(iterator->subpath_pos == count){
         *startIndex = *endIndex = *resultCount = 0;
@@ -224,4 +250,38 @@ GpStatus WINGDIPAPI GdipPathIterEnumerate(GpPathIterator* iterator, INT* resultC
     }
 
     return GdipPathIterCopyData(iterator, resultCount, points, types, 0, count-1);
+}
+
+GpStatus WINGDIPAPI GdipPathIterIsValid(GpPathIterator* iterator, BOOL* valid)
+{
+    if(!iterator || !valid)
+        return InvalidParameter;
+
+    *valid = TRUE;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipPathIterNextSubpathPath(GpPathIterator* iter, INT* result,
+    GpPath* path, BOOL* closed)
+{
+    INT start, end;
+
+    if(!iter || !result || !closed)
+        return InvalidParameter;
+
+    GdipPathIterNextSubpath(iter, result, &start, &end, closed);
+    /* return path */
+    if(((*result) > 0) && path){
+        GdipResetPath(path);
+
+        if(!lengthen_path(path, *result))
+            return OutOfMemory;
+
+        memcpy(path->pathdata.Points, &(iter->pathdata.Points[start]), sizeof(GpPointF)*(*result));
+        memcpy(path->pathdata.Types,  &(iter->pathdata.Types[start]),  sizeof(BYTE)*(*result));
+        path->pathdata.Count = *result;
+    }
+
+    return Ok;
 }

@@ -116,6 +116,8 @@ GpStatus WINGDIPAPI GdipCreatePen2(GpBrush *brush, REAL width, GpUnit unit,
     gp_pen->miterlimit = 10.0;
     gp_pen->dash = DashStyleSolid;
     gp_pen->offset = 0.0;
+    gp_pen->customstart = NULL;
+    gp_pen->customend = NULL;
 
     if(!((gp_pen->unit == UnitWorld) || (gp_pen->unit == UnitPixel))) {
         FIXME("UnitWorld, UnitPixel only supported units\n");
@@ -161,6 +163,32 @@ GpStatus WINGDIPAPI GdipGetPenColor(GpPen *pen, ARGB *argb)
         return NotImplemented;
 
     return GdipGetSolidFillColor(((GpSolidFill*)pen->brush), argb);
+}
+
+GpStatus WINGDIPAPI GdipGetPenCustomEndCap(GpPen *pen, GpCustomLineCap** customCap)
+{
+    if(!pen || !customCap)
+        return InvalidParameter;
+
+    if(!pen->customend){
+        *customCap = NULL;
+        return Ok;
+    }
+
+    return GdipCloneCustomLineCap(pen->customend, customCap);
+}
+
+GpStatus WINGDIPAPI GdipGetPenCustomStartCap(GpPen *pen, GpCustomLineCap** customCap)
+{
+    if(!pen || !customCap)
+        return InvalidParameter;
+
+    if(!pen->customstart){
+        *customCap = NULL;
+        return Ok;
+    }
+
+    return GdipCloneCustomLineCap(pen->customstart, customCap);
 }
 
 GpStatus WINGDIPAPI GdipGetPenDashArray(GpPen *pen, REAL *dash, INT count)
@@ -237,6 +265,16 @@ GpStatus WINGDIPAPI GdipGetPenLineJoin(GpPen *pen, GpLineJoin *lineJoin)
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipGetPenMode(GpPen *pen, GpPenAlignment *mode)
+{
+    if(!pen || !mode)
+        return InvalidParameter;
+
+    *mode = pen->align;
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipGetPenMiterLimit(GpPen *pen, REAL *miterLimit)
 {
     if(!pen || !miterLimit)
@@ -302,7 +340,8 @@ GpStatus WINGDIPAPI GdipSetPenCustomEndCap(GpPen *pen, GpCustomLineCap* customCa
     GpCustomLineCap * cap;
     GpStatus ret;
 
-    if(!pen || !customCap) return InvalidParameter;
+    /* native crashes on pen == NULL, customCap != NULL */
+    if(!customCap) return InvalidParameter;
 
     if((ret = GdipCloneCustomLineCap(customCap, &cap)) == Ok){
         GdipDeleteCustomLineCap(pen->customend);
@@ -318,7 +357,8 @@ GpStatus WINGDIPAPI GdipSetPenCustomStartCap(GpPen *pen, GpCustomLineCap* custom
     GpCustomLineCap * cap;
     GpStatus ret;
 
-    if(!pen || !customCap) return InvalidParameter;
+    /* native crashes on pen == NULL, customCap != NULL */
+    if(!customCap) return InvalidParameter;
 
     if((ret = GdipCloneCustomLineCap(customCap, &cap)) == Ok){
         GdipDeleteCustomLineCap(pen->customstart);
@@ -481,12 +521,11 @@ GpStatus WINGDIPAPI GdipSetPenWidth(GpPen *pen, REAL width)
     return Ok;
 }
 
-
-GpStatus WINGDIPAPI GdipSetPenMode(GpPen *pen, GpPenAlignment penAlignment)
+GpStatus WINGDIPAPI GdipSetPenMode(GpPen *pen, GpPenAlignment mode)
 {
     if(!pen)    return InvalidParameter;
 
-    FIXME("stub (%d)\n", penAlignment);
+    pen->align = mode;
 
     return Ok;
 }

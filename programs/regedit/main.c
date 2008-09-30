@@ -30,9 +30,21 @@
 #include "main.h"
 
 TCHAR g_pszDefaultValueName[64];
+WCHAR g_pszDefaultValueNameW[64];
 
 BOOL ProcessCmdLine(LPSTR lpCmdLine);
 
+static const WCHAR hkey_local_machine[] = {'H','K','E','Y','_','L','O','C','A','L','_','M','A','C','H','I','N','E',0};
+static const WCHAR hkey_users[] = {'H','K','E','Y','_','U','S','E','R','S',0};
+static const WCHAR hkey_classes_root[] = {'H','K','E','Y','_','C','L','A','S','S','E','S','_','R','O','O','T',0};
+static const WCHAR hkey_current_config[] = {'H','K','E','Y','_','C','U','R','R','E','N','T','_','C','O','N','F','I','G',0};
+static const WCHAR hkey_current_user[] = {'H','K','E','Y','_','C','U','R','R','E','N','T','_','U','S','E','R',0};
+static const WCHAR hkey_dyn_data[] = {'H','K','E','Y','_','D','Y','N','_','D','A','T','A',0};
+
+const WCHAR *reg_class_namesW[] = {hkey_local_machine, hkey_users,
+                                   hkey_classes_root, hkey_current_config,
+                                   hkey_current_user, hkey_dyn_data
+                                  };
 
 /*******************************************************************************
  * Global Variables:
@@ -171,6 +183,7 @@ int APIENTRY WinMain(HINSTANCE hInstance,
     /* Initialize global strings */
     LoadString(hInstance, IDS_APP_TITLE, szTitle, COUNT_OF(szTitle));
     LoadString(hInstance, IDS_REGISTRY_DEFAULT_VALUE, g_pszDefaultValueName, COUNT_OF(g_pszDefaultValueName));
+    LoadStringW(hInstance, IDS_REGISTRY_DEFAULT_VALUE, g_pszDefaultValueNameW, COUNT_OF(g_pszDefaultValueNameW));
 
     /* Store instance handle in our global variable */
     hInst = hInstance;
