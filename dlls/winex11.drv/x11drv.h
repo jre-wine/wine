@@ -609,6 +609,7 @@ enum x11drv_atoms
     XATOM__NET_WM_STATE_MAXIMIZED_VERT,
     XATOM__NET_WM_STATE_SKIP_PAGER,
     XATOM__NET_WM_STATE_SKIP_TASKBAR,
+    XATOM__NET_WM_WINDOW_OPACITY,
     XATOM__NET_WM_WINDOW_TYPE,
     XATOM__NET_WM_WINDOW_TYPE_DIALOG,
     XATOM__NET_WM_WINDOW_TYPE_NORMAL,
@@ -668,6 +669,7 @@ enum x11drv_window_messages
     WM_X11DRV_ACQUIRE_SELECTION = 0x80001000,
     WM_X11DRV_DELETE_WINDOW,
     WM_X11DRV_SET_WIN_FORMAT,
+    WM_X11DRV_SET_WIN_REGION,
     WM_X11DRV_RESIZE_DESKTOP
 };
 
@@ -715,7 +717,6 @@ extern struct x11drv_win_data *X11DRV_create_win_data( HWND hwnd );
 extern Window X11DRV_get_whole_window( HWND hwnd );
 extern Window X11DRV_get_client_window( HWND hwnd );
 extern XIC X11DRV_get_ic( HWND hwnd );
-extern BOOL X11DRV_set_win_format( HWND hwnd, XID fbconfig );
 
 extern int pixelformat_from_fbconfig_id( XID fbconfig_id );
 extern XVisualInfo *visual_from_fbconfig_id( XID fbconfig_id );

@@ -27,10 +27,13 @@
 #define SUBCLASS_NAME "MyStatusBar"
 
 #define expect(expected,got) ok (expected == got,"Expected %d, got %d\n",expected,got)
-#define expect_rect(_left,_top,_right,_bottom,got) do { RECT _rcExp = {_left, _top, _right, _bottom}; \
-        ok(memcmp(&_rcExp, &(got), sizeof(RECT)) == 0, "Expected rect {%d,%d, %d,%d}, got {%d,%d, %d,%d}\n", \
-        _rcExp.left, _rcExp.top, _rcExp.right, _rcExp.bottom, \
-        (got).left, (got).top, (got).right, (got).bottom); } while (0)
+#define expect_rect(_left,_top,_right,_bottom,got) do { \
+        RECT exp = {abs(got.left - _left), abs(got.top - _top), \
+                    abs(got.right - _right), abs(got.bottom - _bottom)}; \
+        ok(exp.left <= 2 && exp.top <= 2 && exp.right <= 2 && exp.bottom <= 2, \
+           "Expected rect {%d,%d, %d,%d}, got {%d,%d, %d,%d}\n", \
+           _left, _top, _right, _bottom, \
+           (got).left, (got).top, (got).right, (got).bottom); } while (0)
 
 static HINSTANCE hinst;
 static WNDPROC g_status_wndproc;
@@ -163,28 +166,33 @@ static void test_height(void)
 
     g_wmsize_count = 0;
     SendMessage(hwndStatus, WM_SETFONT, (WPARAM)hFont, TRUE);
+    if (!g_wmsize_count)
+    {
+        skip("Status control not resized in win95, skipping broken tests.");
+        return;
+    }
     ok(g_wmsize_count > 0, "WM_SETFONT should issue WM_SIZE\n");
 
     GetClientRect(hwndStatus, &rc2);
-    todo_wine expect_rect(0, 0, 672, 42, rc2); /* GetTextMetrics returns invalid tmInternalLeading for this font */
+    expect_rect(0, 0, 672, 42, rc2); /* GetTextMetrics returns invalid tmInternalLeading for this font */
 
     g_wmsize_count = 0;
     SendMessage(hwndStatus, WM_SETFONT, (WPARAM)hFont, TRUE);
     ok(g_wmsize_count > 0, "WM_SETFONT should issue WM_SIZE\n");
 
     GetClientRect(hwndStatus, &rc2);
-    todo_wine expect_rect(0, 0, 672, 42, rc2);
+    expect_rect(0, 0, 672, 42, rc2);
 
     /* minheight < fontsize - no effects*/
     SendMessage(hwndStatus, SB_SETMINHEIGHT, 12, 0);
     SendMessage(hwndStatus, WM_SIZE, 0, 0);
     GetClientRect(hwndStatus, &rc2);
-    todo_wine expect_rect(0, 0, 672, 42, rc2);
+    expect_rect(0, 0, 672, 42, rc2);
 
     /* minheight > fontsize - has an effect after WM_SIZE */
     SendMessage(hwndStatus, SB_SETMINHEIGHT, 60, 0);
     GetClientRect(hwndStatus, &rc2);
-    todo_wine expect_rect(0, 0, 672, 42, rc2);
+    expect_rect(0, 0, 672, 42, rc2);
     SendMessage(hwndStatus, WM_SIZE, 0, 0);
     GetClientRect(hwndStatus, &rc2);
     expect_rect(0, 0, 672, 62, rc2);
@@ -194,7 +202,7 @@ static void test_height(void)
     expect_rect(0, 0, 672, 62, rc2);
     SendMessage(hwndStatus, WM_SIZE, 0, 0);
     GetClientRect(hwndStatus, &rc2);
-    todo_wine expect_rect(0, 0, 672, 42, rc2);
+    expect_rect(0, 0, 672, 42, rc2);
     hFontSm = CreateFont(9, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, ANSI_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, FF_DONTCARE, "Tahoma");
     SendMessage(hwndStatus, WM_SETFONT, (WPARAM)hFontSm, TRUE);
@@ -300,18 +308,28 @@ static void test_status_control(void)
 
     /* Set background color */
     r = SendMessage(hWndStatus, SB_SETBKCOLOR , 0, RGB(255,0,0));
-    expect(CLR_DEFAULT,r);
+    ok(r == CLR_DEFAULT ||
+       broken(r == 0), /* win95 */
+       "Expected %d, got %d\n", CLR_DEFAULT, r);
     r = SendMessage(hWndStatus, SB_SETBKCOLOR , 0, CLR_DEFAULT);
-    expect(RGB(255,0,0),r);
+    ok(r == RGB(255,0,0) ||
+       broken(r == 0), /* win95 */
+       "Expected %d, got %d\n", RGB(255,0,0), r);
 
     /* Add an icon to the status bar */
     hIcon = LoadIcon(NULL, IDI_QUESTION);
     r = SendMessage(hWndStatus, SB_SETICON, 1, (LPARAM) NULL);
-    ok(r != 0, "Expected non-zero, got %d\n", r);
+    ok(r != 0 ||
+       broken(r == 0), /* win95 */
+       "Expected non-zero, got %d\n", r);
     r = SendMessage(hWndStatus, SB_SETICON, 1, (LPARAM) hIcon);
-    ok(r != 0, "Expected non-zero, got %d\n", r);
+    ok(r != 0 ||
+       broken(r == 0), /* win95 */
+       "Expected non-zero, got %d\n", r);
     r = SendMessage(hWndStatus, SB_SETICON, 1, (LPARAM) NULL);
-    ok(r != 0, "Expected non-zero, got %d\n", r);
+    ok(r != 0 ||
+       broken(r == 0), /* win95 */
+       "Expected non-zero, got %d\n", r);
 
     /* Set the Unicode format */
     r = SendMessage(hWndStatus, SB_SETUNICODEFORMAT, FALSE, 0);
@@ -320,7 +338,9 @@ static void test_status_control(void)
     r = SendMessage(hWndStatus, SB_SETUNICODEFORMAT, TRUE, 0);
     expect(FALSE,r);
     r = SendMessage(hWndStatus, SB_GETUNICODEFORMAT, 0, 0);
-    expect(TRUE,r);
+    ok(r == TRUE ||
+       broken(r == FALSE), /* win95 */
+       "Expected TRUE, got %d\n", r);
 
     /* Reset number of parts */
     r = SendMessage(hWndStatus, SB_SETPARTS, 2, (LPARAM)nParts);
@@ -346,8 +366,11 @@ static void test_status_control(void)
     todo_wine
     {
         SendMessage(hWndStatus, SB_SETTIPTEXT, 0,(LPARAM) "Tooltip Text");
+        lstrcpyA(charArray, "apple");
         SendMessage(hWndStatus, SB_GETTIPTEXT, MAKEWPARAM (0, 20),(LPARAM) charArray);
-        ok(strcmp(charArray,"Tooltip Text") == 0, "Expected Tooltip Text, got %s\n", charArray);
+        ok(strcmp(charArray,"Tooltip Text") == 0 ||
+           broken(!strcmp(charArray, "apple")), /* win95 */
+           "Expected Tooltip Text, got %s\n", charArray);
     }
 
     /* Make simple */

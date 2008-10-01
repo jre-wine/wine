@@ -381,6 +381,8 @@ LONG WINAPI WinVerifyTrust( HWND hwnd, GUID *ActionID, LPVOID ActionData )
         err = WINTRUST_PublishedSoftware(hwnd, ActionID, ActionData);
     else
     {
+        DWORD stateAction;
+
         /* Check known actions to warn of possible problems */
         if (!IsEqualGUID(ActionID, &unknown) &&
          !IsEqualGUID(ActionID, &generic_verify_v2) &&
@@ -388,7 +390,14 @@ LONG WINAPI WinVerifyTrust( HWND hwnd, GUID *ActionID, LPVOID ActionData )
          !IsEqualGUID(ActionID, &generic_chain_verify))
             WARN("unknown action %s, default behavior may not be right\n",
              debugstr_guid(ActionID));
-        switch (actionData->dwStateAction)
+        if (WVT_ISINSTRUCT(WINTRUST_DATA, actionData->cbStruct, dwStateAction))
+            stateAction = actionData->dwStateAction;
+        else
+        {
+            TRACE("no dwStateAction, assuming WTD_STATEACTION_IGNORE\n");
+            stateAction = WTD_STATEACTION_IGNORE;
+        }
+        switch (stateAction)
         {
         case WTD_STATEACTION_IGNORE:
             err = WINTRUST_DefaultVerifyAndClose(hwnd, ActionID, ActionData);
@@ -598,6 +607,8 @@ BOOL WINAPI WINTRUST_AddStore(CRYPT_PROVIDER_DATA *data, HCERTSTORE store)
 {
     BOOL ret = FALSE;
 
+    TRACE("(%p, %p)\n", data, store);
+
     if (data->chStores)
         data->pahStores = WINTRUST_ReAlloc(data->pahStores,
          (data->chStores + 1) * sizeof(HCERTSTORE));
@@ -620,6 +631,8 @@ BOOL WINAPI WINTRUST_AddSgnr(CRYPT_PROVIDER_DATA *data,
  BOOL fCounterSigner, DWORD idxSigner, CRYPT_PROVIDER_SGNR *sgnr)
 {
     BOOL ret = FALSE;
+
+    TRACE("(%p, %d, %d, %p)\n", data, fCounterSigner, idxSigner, sgnr);
 
     if (sgnr->cbStruct > sizeof(CRYPT_PROVIDER_SGNR))
     {
@@ -671,6 +684,9 @@ BOOL WINAPI WINTRUST_AddCert(CRYPT_PROVIDER_DATA *data, DWORD idxSigner,
  BOOL fCounterSigner, DWORD idxCounterSigner, PCCERT_CONTEXT pCert2Add)
 {
     BOOL ret = FALSE;
+
+    TRACE("(%p, %d, %d, %d, %p)\n", data, idxSigner, fCounterSigner,
+     idxSigner, pCert2Add);
 
     if (fCounterSigner)
     {

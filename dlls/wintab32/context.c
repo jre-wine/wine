@@ -435,13 +435,12 @@ HCTX WINAPI WTOpenW(HWND hWnd, LPLOGCONTEXTW lpLogCtx, BOOL fEnable)
 {
     LPOPENCONTEXT newcontext;
 
-    TRACE("(%p, %p, %u)\n", hWnd, lpLogCtx, fEnable);
+    TRACE("hWnd=%p, lpLogCtx=%p, fEnable=%u\n", hWnd, lpLogCtx, fEnable);
     DUMPCONTEXT(*lpLogCtx);
 
     newcontext = HeapAlloc(GetProcessHeap(), 0 , sizeof(OPENCONTEXT));
     newcontext->context = *lpLogCtx;
     newcontext->hwndOwner = hWnd;
-    newcontext->enabled = fEnable;
     newcontext->ActiveCursor = -1;
     newcontext->QueueSize = 10;
     newcontext->PacketsQueued = 0;
@@ -458,7 +457,17 @@ HCTX WINAPI WTOpenW(HWND hWnd, LPLOGCONTEXTW lpLogCtx, BOOL fEnable)
     TABLET_PostTabletMessage(newcontext, _WT_CTXOPEN(newcontext->context.lcMsgBase), (WPARAM)newcontext->handle,
                       newcontext->context.lcStatus, TRUE);
 
-    newcontext->context.lcStatus = CXS_ONTOP;
+    if (fEnable)
+    {
+        newcontext->enabled = TRUE;
+        /* TODO: Add to top of overlap order */
+        newcontext->context.lcStatus = CXS_ONTOP;
+    }
+    else
+    {
+        newcontext->enabled = FALSE;
+        newcontext->context.lcStatus = CXS_DISABLED;
+    }
 
     TABLET_PostTabletMessage(newcontext, _WT_CTXOVERLAP(newcontext->context.lcMsgBase),
                             (WPARAM)newcontext->handle,
@@ -613,15 +622,27 @@ BOOL WINAPI WTEnable(HCTX hCtx, BOOL fEnable)
 {
     LPOPENCONTEXT context;
 
-    TRACE("(%p, %u)\n", hCtx, fEnable);
+    TRACE("hCtx=%p, fEnable=%u\n", hCtx, fEnable);
 
-    if (!hCtx) return 0;
+    if (!hCtx) return FALSE;
 
     EnterCriticalSection(&csTablet);
     context = TABLET_FindOpenContext(hCtx);
-    if(!fEnable)
+    /* if we want to enable and it is not enabled then */
+    if(fEnable && !context->enabled)
+    {
+        context->enabled = TRUE;
+        /* TODO: Add to top of overlap order */
+        context->context.lcStatus = CXS_ONTOP;
+    }
+    /* if we want to disable and it is not disabled then */
+    else if (!fEnable && context->enabled)
+    {
+        context->enabled = FALSE;
+        /* TODO: Remove from overlap order?? needs a test */
+        context->context.lcStatus = CXS_DISABLED;
         TABLET_FlushQueue(context);
-    context->enabled = fEnable;
+    }
     LeaveCriticalSection(&csTablet);
 
     return TRUE;
@@ -629,10 +650,32 @@ BOOL WINAPI WTEnable(HCTX hCtx, BOOL fEnable)
 
 /***********************************************************************
  *		WTOverlap (WINTAB32.41)
+ *
+ *		Move context to top or bottom of overlap order
  */
 BOOL WINAPI WTOverlap(HCTX hCtx, BOOL fToTop)
 {
-    FIXME("(%p, %u): stub\n", hCtx, fToTop);
+    LPOPENCONTEXT context;
+
+    TRACE("hCtx=%p, fToTop=%u\n", hCtx, fToTop);
+
+    if (!hCtx) return FALSE;
+
+    EnterCriticalSection(&csTablet);
+    context = TABLET_FindOpenContext(hCtx);
+    if (fToTop)
+    {
+        /* TODO: Move context to top of overlap order */
+        FIXME("Not moving context to top of overlap order\n");
+        context->context.lcStatus = CXS_ONTOP;
+    }
+    else
+    {
+        /* TODO: Move context to bottom of overlap order */
+        FIXME("Not moving context to bottom of overlap order\n");
+        context->context.lcStatus = CXS_OBSCURED;
+    }
+    LeaveCriticalSection(&csTablet);
 
     return TRUE;
 }

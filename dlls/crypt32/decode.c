@@ -475,6 +475,11 @@ static BOOL CRYPT_AsnDecodeSequence(struct AsnDecodeSequenceItem items[],
      cbEncoded, dwFlags, pDecodePara, pvStructInfo, *pcbStructInfo,
      startingPointer);
 
+    if (!cbEncoded)
+    {
+        SetLastError(CRYPT_E_ASN1_EOD);
+        return FALSE;
+    }
     if (pbEncoded[0] == ASN_SEQUENCE)
     {
         DWORD dataLen;
@@ -2581,7 +2586,7 @@ static BOOL CRYPT_AsnDecodeAltNameEntry(const BYTE *pbEncoded, DWORD cbEncoded,
             {
                 *pcbStructInfo = bytesNeeded;
                 /* MS used values one greater than the asn1 ones.. sigh */
-                entry->dwAltNameChoice = (pbEncoded[0] & 0x7f) + 1;
+                entry->dwAltNameChoice = (pbEncoded[0] & ASN_TYPE_MASK) + 1;
                 switch (pbEncoded[0] & ASN_TYPE_MASK)
                 {
                 case 1: /* rfc822Name */
@@ -2599,7 +2604,6 @@ static BOOL CRYPT_AsnDecodeAltNameEntry(const BYTE *pbEncoded, DWORD cbEncoded,
                     break;
                 }
                 case 4: /* directoryName */
-                    entry->dwAltNameChoice = CERT_ALT_NAME_DIRECTORY_NAME;
                     /* The data are memory-equivalent with the IPAddress case,
                      * fall-through
                      */

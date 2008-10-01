@@ -24,7 +24,7 @@
 #include "config.h"
 #include "wined3d_private.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(d3d);
+WINE_DEFAULT_DEBUG_CHANNEL(d3d_texture);
 #define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
 
 static const GLenum cube_targets[6] = {
@@ -47,7 +47,7 @@ static HRESULT WINAPI IWineD3DCubeTextureImpl_QueryInterface(IWineD3DCubeTexture
         || IsEqualGUID(riid, &IID_IWineD3DBase)
         || IsEqualGUID(riid, &IID_IWineD3DResource)
         || IsEqualGUID(riid, &IID_IWineD3DBaseTexture)
-        || IsEqualGUID(riid, &IID_IWineD3DTexture)) {
+        || IsEqualGUID(riid, &IID_IWineD3DCubeTexture)) {
         IUnknown_AddRef(iface);
         *ppobj = This;
         return S_OK;
@@ -123,7 +123,6 @@ static void WINAPI IWineD3DCubeTextureImpl_PreLoad(IWineD3DCubeTexture *iface) {
         srgb_was_toggled = (This->baseTexture.is_srgb != srgb_mode);
         This->baseTexture.is_srgb = srgb_mode;
     }
-    IWineD3DCubeTexture_BindTexture(iface);
 
     if (This->resource.format == WINED3DFMT_P8 || This->resource.format == WINED3DFMT_A8P8) {
         for (i = 0; i < This->baseTexture.levels; i++) {

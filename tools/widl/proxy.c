@@ -109,100 +109,19 @@ static void init_proxy(const statement_list_t *stmts)
   print_proxy( "\n");
   print_proxy( "#include \"%s\"\n", header_name);
   print_proxy( "\n");
-  print_proxy( "#ifndef USE_COMPILER_EXCEPTIONS\n");
-  print_proxy( "\n");
-  print_proxy( "#include \"wine/exception.h\"\n");
-  print_proxy( "#undef RpcTryExcept\n");
-  print_proxy( "#undef RpcExcept\n");
-  print_proxy( "#undef RpcEndExcept\n");
-  print_proxy( "#undef RpcTryFinally\n");
-  print_proxy( "#undef RpcFinally\n");
-  print_proxy( "#undef RpcEndFinally\n");
-  print_proxy( "#undef RpcExceptionCode\n");
+  write_exceptions( proxy );
   print_proxy( "\n");
   print_proxy( "struct __proxy_frame\n");
   print_proxy( "{\n");
-  print_proxy( "    EXCEPTION_REGISTRATION_RECORD frame;\n");
-  print_proxy( "    sigjmp_buf                    jmp;\n");
-  print_proxy( "    DWORD                         code;\n");
-  print_proxy( "    MIDL_STUB_MESSAGE            *stub;\n");
-  print_proxy( "    void                         *this;\n");
-  print_proxy( "    int                           fullptr;\n");
+  print_proxy( "    __DECL_EXCEPTION_FRAME;\n");
+  print_proxy( "    MIDL_STUB_MESSAGE _StubMsg;\n");
+  print_proxy( "    void             *This;\n");
   print_proxy( "};\n");
   print_proxy( "\n");
-  print_proxy("static void __proxy_finally_handler( struct __proxy_frame *frame )\n");
+  print_proxy("static int __proxy_filter( struct __proxy_frame *__frame )\n");
   print_proxy( "{\n");
-  print_proxy( "    if (frame->fullptr) NdrFullPointerXlatFree( frame->stub->FullPtrXlatTables );\n");
-  print_proxy( "    if (frame->this) NdrProxyFreeBuffer( frame->this, frame->stub );\n" );
-  print_proxy( "}\n\n");
-  print_proxy( "static DWORD __proxy_exception_handler( EXCEPTION_RECORD *record,\n");
-  print_proxy( "                                        EXCEPTION_REGISTRATION_RECORD *frame,\n");
-  print_proxy( "                                        CONTEXT *context,\n");
-  print_proxy( "                                        EXCEPTION_REGISTRATION_RECORD **pdispatcher )\n");
-  print_proxy( "{\n");
-  print_proxy( "    struct __proxy_frame *proxy_frame = (struct __proxy_frame *)frame;\n");
-  print_proxy( "\n");
-  print_proxy( "    if (record->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND | EH_NESTED_CALL))\n");
-  print_proxy( "    {\n" );
-  print_proxy( "        if (record->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND))\n");
-  print_proxy( "            __proxy_finally_handler( proxy_frame );\n");
-  print_proxy( "        return ExceptionContinueSearch;\n");
-  print_proxy( "    }\n" );
-  print_proxy( "    if (proxy_frame->stub->dwStubPhase == PROXY_SENDRECEIVE)\n");
-  print_proxy( "        return ExceptionContinueSearch;\n");
-  print_proxy( "\n");
-  print_proxy( "    proxy_frame->code = record->ExceptionCode;\n");
-  print_proxy( "    __wine_rtl_unwind( frame, record );\n");
-  print_proxy( "    __proxy_finally_handler( proxy_frame );\n");
-  print_proxy( "    __wine_pop_frame( frame );\n");
-  print_proxy( "    siglongjmp( proxy_frame->jmp, 1 );\n");
+  print_proxy( "    return (__frame->_StubMsg.dwStubPhase != PROXY_SENDRECEIVE);\n");
   print_proxy( "}\n");
-  print_proxy( "\n");
-  print_proxy( "#define RpcTryExcept \\\n");
-  print_proxy( "    do { \\\n");
-  print_proxy( "        struct __proxy_frame __proxy_frame; \\\n");
-  print_proxy( "        __proxy_frame.frame.Handler = __proxy_exception_handler; \\\n");
-  print_proxy( "        __proxy_frame.stub = &_StubMsg; \\\n");
-  print_proxy( "        if (!sigsetjmp( __proxy_frame.jmp, 0 )) \\\n");
-  print_proxy( "        { \\\n");
-  print_proxy( "            __wine_push_frame( &__proxy_frame.frame ); \\\n");
-  print_proxy( "            {\n");
-  print_proxy( "\n");
-  print_proxy( "#define RpcExcept(expr) \\\n");
-  print_proxy( "            } \\\n");
-  print_proxy( "            __wine_pop_frame( &__proxy_frame.frame ); \\\n");
-  print_proxy( "        } \\\n");
-  print_proxy( "        else \\\n");
-  print_proxy( "        {\n");
-  print_proxy( "\n");
-  print_proxy( "#define RpcEndExcept \\\n");
-  print_proxy( "        } \\\n");
-  print_proxy( "    } while(0);\n");
-  print_proxy( "\n");
-  print_proxy( "#define RpcExceptionCode() (__proxy_frame.code)\n");
-  print_proxy( "\n");
-  print_proxy( "#define RpcTryFinallyProxy(ptr) \\\n");
-  print_proxy("    __proxy_frame.this = This; \\\n");
-  print_proxy("    __proxy_frame.fullptr = ptr;\n");
-  print_proxy( "\n");
-  print_proxy( "#define RpcFinallyProxy \\\n");
-  print_proxy("    __proxy_frame.this = 0; \\\n");
-  print_proxy("    __proxy_frame.fullptr = 0;\n");
-  print_proxy( "\n");
-  print_proxy( "#define RpcTryFinallyStub\n");
-  print_proxy( "\n");
-  print_proxy( "#define RpcFinallyStub\n");
-  print_proxy( "\n");
-  print_proxy( "#define RpcEndFinally\n");
-  print_proxy( "\n");
-  print_proxy( "#else /* USE_COMPILER_EXCEPTIONS */\n");
-  print_proxy( "\n");
-  print_proxy( "#define RpcTryFinallyProxy(ptr) RpcTryFinally\n");
-  print_proxy( "#define RpcTryFinallyStub RpcTryFinally\n");
-  print_proxy( "#define RpcFinallyProxy RpcFinally\n");
-  print_proxy( "#define RpcFinallyStub RpcFinally\n");
-  print_proxy( "\n");
-  print_proxy( "#endif /* USE_COMPILER_EXCEPTIONS */\n");
   print_proxy( "\n");
   write_formatstringsdecl(proxy, indent, stmts, need_proxy);
   write_stubdescproto();
@@ -284,7 +203,7 @@ static void proxy_check_pointers( const var_list_t *args )
   }
 }
 
-static void free_variable( const var_t *arg )
+static void free_variable( const var_t *arg, const char *local_var_prefix )
 {
   unsigned int type_offset = arg->type->typestring_offset;
   expr_t *iid;
@@ -293,10 +212,10 @@ static void free_variable( const var_t *arg )
 
   if (size)
   {
-    print_proxy( "_StubMsg.MaxCount = " );
-    write_expr(proxy, size, 0, 1, NULL, NULL);
+    print_proxy( "__frame->_StubMsg.MaxCount = " );
+    write_expr(proxy, size, 0, 1, NULL, NULL, local_var_prefix);
     fprintf(proxy, ";\n\n");
-    print_proxy( "NdrClearOutParameters( &_StubMsg, ");
+    print_proxy( "NdrClearOutParameters( &__frame->_StubMsg, ");
     fprintf(proxy, "&__MIDL_TypeFormatString.Format[%u], ", type_offset );
     fprintf(proxy, "(void*)%s );\n", arg->name );
     return;
@@ -321,11 +240,11 @@ static void free_variable( const var_t *arg )
     iid = get_attrp( arg->attrs, ATTR_IIDIS );
     if( iid )
     {
-      print_proxy( "_StubMsg.MaxCount = (unsigned long) " );
-      write_expr(proxy, iid, 1, 1, NULL, NULL);
+      print_proxy( "__frame->_StubMsg.MaxCount = (unsigned long) " );
+      write_expr(proxy, iid, 1, 1, NULL, NULL, local_var_prefix);
       print_proxy( ";\n\n" );
     }
-    print_proxy( "NdrClearOutParameters( &_StubMsg, ");
+    print_proxy( "NdrClearOutParameters( &__frame->_StubMsg, ");
     fprintf(proxy, "&__MIDL_TypeFormatString.Format[%u], ", type_offset );
     fprintf(proxy, "(void*)%s );\n", arg->name );
     break;
@@ -335,7 +254,7 @@ static void free_variable( const var_t *arg )
   }
 }
 
-static void proxy_free_variables( var_list_t *args )
+static void proxy_free_variables( var_list_t *args, const char *local_var_prefix )
 {
   const var_t *arg;
 
@@ -343,7 +262,7 @@ static void proxy_free_variables( var_list_t *args )
   LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
     if (is_attr(arg->attrs, ATTR_OUT))
     {
-      free_variable( arg );
+      free_variable( arg, local_var_prefix );
       fprintf(proxy, "\n");
     }
 }
@@ -358,12 +277,23 @@ static void gen_proxy(type_t *iface, const func_t *cur, int idx,
   if (!callconv) callconv = "";
 
   indent = 0;
+  print_proxy( "static void __finally_%s_%s_Proxy( struct __proxy_frame *__frame )\n",
+               iface->name, get_name(def) );
+  print_proxy( "{\n");
+  indent++;
+  if (has_full_pointer) write_full_pointer_free(proxy, indent, cur);
+  print_proxy( "NdrProxyFreeBuffer( __frame->This, &__frame->_StubMsg );\n" );
+  indent--;
+  print_proxy( "}\n");
+  print_proxy( "\n");
+
   write_type_decl_left(proxy, get_func_return_type(cur));
   print_proxy( " %s %s_%s_Proxy(\n", callconv, iface->name, get_name(def));
   write_args(proxy, cur->args, iface->name, 1, TRUE);
   print_proxy( ")\n");
   print_proxy( "{\n");
   indent ++;
+  print_proxy( "struct __proxy_frame __f, * const __frame = &__f;\n" );
   /* local variables */
   if (has_ret) {
     print_proxy( "" );
@@ -371,13 +301,15 @@ static void gen_proxy(type_t *iface, const func_t *cur, int idx,
     print_proxy( " _RetVal;\n");
   }
   print_proxy( "RPC_MESSAGE _RpcMessage;\n" );
-  print_proxy( "MIDL_STUB_MESSAGE _StubMsg;\n" );
   if (has_ret) {
     if (decl_indirect(get_func_return_type(cur)))
       print_proxy("void *_p_%s = &%s;\n",
                  "_RetVal", "_RetVal");
   }
   print_proxy( "\n");
+
+  print_proxy( "RpcExceptionInit( __proxy_filter, __finally_%s_%s_Proxy );\n", iface->name, get_name(def) );
+  print_proxy( "__frame->This = This;\n" );
 
   if (has_full_pointer)
     write_full_pointer_init(proxy, indent, cur, FALSE);
@@ -388,31 +320,31 @@ static void gen_proxy(type_t *iface, const func_t *cur, int idx,
   print_proxy( "RpcTryExcept\n" );
   print_proxy( "{\n" );
   indent++;
-  print_proxy( "NdrProxyInitialize(This, &_RpcMessage, &_StubMsg, &Object_StubDesc, %d);\n", idx);
+  print_proxy( "NdrProxyInitialize(This, &_RpcMessage, &__frame->_StubMsg, &Object_StubDesc, %d);\n", idx);
   proxy_check_pointers( cur->args );
 
-  print_proxy( "RpcTryFinallyProxy(%d)\n", has_full_pointer );
+  print_proxy( "RpcTryFinally\n" );
   print_proxy( "{\n" );
   indent++;
 
-  write_remoting_arguments(proxy, indent, cur, PASS_IN, PHASE_BUFFERSIZE);
+  write_remoting_arguments(proxy, indent, cur, "", PASS_IN, PHASE_BUFFERSIZE);
 
-  print_proxy( "NdrProxyGetBuffer(This, &_StubMsg);\n" );
+  print_proxy( "NdrProxyGetBuffer(This, &__frame->_StubMsg);\n" );
 
-  write_remoting_arguments(proxy, indent, cur, PASS_IN, PHASE_MARSHAL);
+  write_remoting_arguments(proxy, indent, cur, "", PASS_IN, PHASE_MARSHAL);
 
-  print_proxy( "NdrProxySendReceive(This, &_StubMsg);\n" );
+  print_proxy( "NdrProxySendReceive(This, &__frame->_StubMsg);\n" );
   fprintf(proxy, "\n");
-  print_proxy( "_StubMsg.BufferStart = _RpcMessage.Buffer;\n" );
-  print_proxy( "_StubMsg.BufferEnd   = _StubMsg.BufferStart + _RpcMessage.BufferLength;\n\n" );
+  print_proxy( "__frame->_StubMsg.BufferStart = _RpcMessage.Buffer;\n" );
+  print_proxy( "__frame->_StubMsg.BufferEnd   = __frame->_StubMsg.BufferStart + _RpcMessage.BufferLength;\n\n" );
 
   print_proxy("if ((_RpcMessage.DataRepresentation & 0xffff) != NDR_LOCAL_DATA_REPRESENTATION)\n");
   indent++;
-  print_proxy("NdrConvert( &_StubMsg, &__MIDL_ProcFormatString.Format[%u]);\n", proc_offset );
+  print_proxy("NdrConvert( &__frame->_StubMsg, &__MIDL_ProcFormatString.Format[%u]);\n", proc_offset );
   indent--;
   fprintf(proxy, "\n");
 
-  write_remoting_arguments(proxy, indent, cur, PASS_OUT, PHASE_UNMARSHAL);
+  write_remoting_arguments(proxy, indent, cur, "", PASS_OUT, PHASE_UNMARSHAL);
 
   if (has_ret)
   {
@@ -420,27 +352,25 @@ static void gen_proxy(type_t *iface, const func_t *cur, int idx,
           print_proxy("MIDL_memset(&%s, 0, sizeof(%s));\n", "_RetVal", "_RetVal");
       else if (is_ptr(get_func_return_type(cur)) || is_array(get_func_return_type(cur)))
           print_proxy("%s = 0;\n", "_RetVal");
-      write_remoting_arguments(proxy, indent, cur, PASS_RETURN, PHASE_UNMARSHAL);
+      write_remoting_arguments(proxy, indent, cur, "", PASS_RETURN, PHASE_UNMARSHAL);
   }
 
   indent--;
   print_proxy( "}\n");
-  print_proxy( "RpcFinallyProxy\n" );
+  print_proxy( "RpcFinally\n" );
   print_proxy( "{\n" );
   indent++;
-  if (has_full_pointer)
-    write_full_pointer_free(proxy, indent, cur);
-  print_proxy( "NdrProxyFreeBuffer(This, &_StubMsg);\n" );
+  print_proxy( "__finally_%s_%s_Proxy( __frame );\n", iface->name, get_name(def) );
   indent--;
   print_proxy( "}\n");
   print_proxy( "RpcEndFinally\n" );
   indent--;
   print_proxy( "}\n" );
-  print_proxy( "RpcExcept(_StubMsg.dwStubPhase != PROXY_SENDRECEIVE)\n" );
+  print_proxy( "RpcExcept(__frame->_StubMsg.dwStubPhase != PROXY_SENDRECEIVE)\n" );
   print_proxy( "{\n" );
   if (has_ret) {
     indent++;
-    proxy_free_variables( cur->args );
+    proxy_free_variables( cur->args, "" );
     print_proxy( "_RetVal = NdrProxyErrorHandler(RpcExceptionCode());\n" );
     indent--;
   }
@@ -464,6 +394,24 @@ static void gen_stub(type_t *iface, const func_t *cur, const char *cas,
   int has_full_pointer = is_full_pointer_function(cur);
 
   indent = 0;
+  print_proxy( "struct __frame_%s_%s_Stub\n{\n", iface->name, get_name(def));
+  indent++;
+  print_proxy( "__DECL_EXCEPTION_FRAME\n" );
+  print_proxy( "MIDL_STUB_MESSAGE _StubMsg;\n");
+  print_proxy( "%s * _This;\n", iface->name );
+  declare_stub_args( proxy, indent, cur );
+  indent--;
+  print_proxy( "};\n\n" );
+
+  print_proxy( "static void __finally_%s_%s_Stub(", iface->name, get_name(def) );
+  print_proxy( " struct __frame_%s_%s_Stub *__frame )\n{\n", iface->name, get_name(def) );
+  indent++;
+  write_remoting_arguments(proxy, indent, cur, "__frame->", PASS_OUT, PHASE_FREE);
+  if (has_full_pointer)
+    write_full_pointer_free(proxy, indent, cur);
+  indent--;
+  print_proxy( "}\n\n" );
+
   print_proxy( "void __RPC_STUB %s_%s_Stub(\n", iface->name, get_name(def));
   indent++;
   print_proxy( "IRpcStubBuffer* This,\n");
@@ -473,80 +421,78 @@ static void gen_stub(type_t *iface, const func_t *cur, const char *cas,
   indent--;
   print_proxy( "{\n");
   indent++;
-  print_proxy("%s * _This = (%s*)((CStdStubBuffer*)This)->pvServerObject;\n", iface->name, iface->name);
-  print_proxy("MIDL_STUB_MESSAGE _StubMsg;\n");
-  declare_stub_args( proxy, indent, cur );
-  fprintf(proxy, "\n");
+  print_proxy( "struct __frame_%s_%s_Stub __f, * const __frame = &__f;\n\n",
+               iface->name, get_name(def) );
+
+  print_proxy("__frame->_This = (%s*)((CStdStubBuffer*)This)->pvServerObject;\n\n", iface->name);
 
   /* FIXME: trace */
 
-  print_proxy("NdrStubInitialize(_pRpcMessage, &_StubMsg, &Object_StubDesc, _pRpcChannelBuffer);\n");
+  print_proxy("NdrStubInitialize(_pRpcMessage, &__frame->_StubMsg, &Object_StubDesc, _pRpcChannelBuffer);\n");
   fprintf(proxy, "\n");
+  print_proxy( "RpcExceptionInit( 0, __finally_%s_%s_Stub );\n", iface->name, get_name(def) );
 
-  write_parameters_init(proxy, indent, cur);
+  write_parameters_init(proxy, indent, cur, "__frame->");
 
-  print_proxy("RpcTryFinallyStub\n");
+  print_proxy("RpcTryFinally\n");
   print_proxy("{\n");
   indent++;
   if (has_full_pointer)
     write_full_pointer_init(proxy, indent, cur, TRUE);
   print_proxy("if ((_pRpcMessage->DataRepresentation & 0xffff) != NDR_LOCAL_DATA_REPRESENTATION)\n");
   indent++;
-  print_proxy("NdrConvert( &_StubMsg, &__MIDL_ProcFormatString.Format[%u]);\n", proc_offset );
+  print_proxy("NdrConvert( &__frame->_StubMsg, &__MIDL_ProcFormatString.Format[%u]);\n", proc_offset );
   indent--;
   fprintf(proxy, "\n");
 
-  write_remoting_arguments(proxy, indent, cur, PASS_IN, PHASE_UNMARSHAL);
+  write_remoting_arguments(proxy, indent, cur, "__frame->", PASS_IN, PHASE_UNMARSHAL);
   fprintf(proxy, "\n");
 
-  assign_stub_out_args( proxy, indent, cur );
+  assign_stub_out_args( proxy, indent, cur, "__frame->" );
 
   print_proxy("*_pdwStubPhase = STUB_CALL_SERVER;\n");
   fprintf(proxy, "\n");
   print_proxy("");
-  if (has_ret) fprintf(proxy, "_RetVal = ");
+  if (has_ret) fprintf(proxy, "__frame->_RetVal = ");
   if (cas) fprintf(proxy, "%s_%s_Stub", iface->name, cas);
-  else fprintf(proxy, "_This->lpVtbl->%s", get_name(def));
-  fprintf(proxy, "(_This");
+  else fprintf(proxy, "__frame->_This->lpVtbl->%s", get_name(def));
+  fprintf(proxy, "(__frame->_This");
 
   if (cur->args)
   {
       LIST_FOR_EACH_ENTRY( arg, cur->args, const var_t, entry )
-          fprintf(proxy, ", %s%s", arg->type->declarray ? "*" : "", get_name(arg));
+          fprintf(proxy, ", %s__frame->%s", arg->type->declarray ? "*" : "", arg->name);
   }
   fprintf(proxy, ");\n");
   fprintf(proxy, "\n");
   print_proxy("*_pdwStubPhase = STUB_MARSHAL;\n");
   fprintf(proxy, "\n");
 
-  write_remoting_arguments(proxy, indent, cur, PASS_OUT, PHASE_BUFFERSIZE);
+  write_remoting_arguments(proxy, indent, cur, "__frame->", PASS_OUT, PHASE_BUFFERSIZE);
 
   if (!is_void(get_func_return_type(cur)))
-    write_remoting_arguments(proxy, indent, cur, PASS_RETURN, PHASE_BUFFERSIZE);
+    write_remoting_arguments(proxy, indent, cur, "__frame->", PASS_RETURN, PHASE_BUFFERSIZE);
 
-  print_proxy("NdrStubGetBuffer(This, _pRpcChannelBuffer, &_StubMsg);\n");
+  print_proxy("NdrStubGetBuffer(This, _pRpcChannelBuffer, &__frame->_StubMsg);\n");
 
-  write_remoting_arguments(proxy, indent, cur, PASS_OUT, PHASE_MARSHAL);
+  write_remoting_arguments(proxy, indent, cur, "__frame->", PASS_OUT, PHASE_MARSHAL);
   fprintf(proxy, "\n");
 
   /* marshall the return value */
   if (!is_void(get_func_return_type(cur)))
-    write_remoting_arguments(proxy, indent, cur, PASS_RETURN, PHASE_MARSHAL);
+    write_remoting_arguments(proxy, indent, cur, "__frame->", PASS_RETURN, PHASE_MARSHAL);
 
   indent--;
   print_proxy("}\n");
-  print_proxy("RpcFinallyStub\n");
+  print_proxy("RpcFinally\n");
   print_proxy("{\n");
-
-  write_remoting_arguments(proxy, indent+1, cur, PASS_OUT, PHASE_FREE);
-
-  if (has_full_pointer)
-    write_full_pointer_free(proxy, indent, cur);
-
+  indent++;
+  print_proxy( "__finally_%s_%s_Stub( __frame );\n", iface->name, get_name(def) );
+  indent--;
   print_proxy("}\n");
   print_proxy("RpcEndFinally\n");
 
-  print_proxy("_pRpcMessage->BufferLength = _StubMsg.Buffer - (unsigned char *)_pRpcMessage->Buffer;\n");
+  print_proxy("_pRpcMessage->BufferLength = __frame->_StubMsg.Buffer - (unsigned char *)_pRpcMessage->Buffer;\n");
   indent--;
 
   print_proxy("}\n");

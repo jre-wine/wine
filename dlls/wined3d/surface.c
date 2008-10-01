@@ -46,6 +46,11 @@ static void surface_bind_and_dirtify(IWineD3DSurfaceImpl *This) {
      * Read the unit back instead of switching to 0, this avoids messing around with the state manager's
      * gl states. The current texture unit should always be a valid one.
      *
+     * To be more specific, this is tricky because we can implicitly be called
+     * from sampler() in state.c. This means we can't touch anything other than
+     * whatever happens to be the currently active texture, or we would risk
+     * marking already applied sampler states dirty again.
+     *
      * TODO: Track the current active texture per GL context instead of using glGet
      */
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
@@ -396,7 +401,7 @@ void surface_set_compatible_renderbuffer(IWineD3DSurface *iface, unsigned int wi
 
         GL_EXTCALL(glGenRenderbuffersEXT(1, &renderbuffer));
         GL_EXTCALL(glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, renderbuffer));
-        GL_EXTCALL(glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, glDesc->glFormat, width, height));
+        GL_EXTCALL(glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, glDesc->glInternal, width, height));
 
         entry = HeapAlloc(GetProcessHeap(), 0, sizeof(renderbuffer_entry_t));
         entry->width = width;
@@ -624,7 +629,7 @@ static void WINAPI IWineD3DSurfaceImpl_UnLoad(IWineD3DSurface *iface) {
 
 void WINAPI IWineD3DSurfaceImpl_SetGlTextureDesc(IWineD3DSurface *iface, UINT textureName, int target) {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
-    TRACE("(%p) : setting textureName %u, target %i\n", This, textureName, target);
+    TRACE("(%p) : setting textureName %u, target %#x\n", This, textureName, target);
     if (This->glDescription.textureName == 0 && textureName != 0) {
         IWineD3DSurface_ModifyLocation(iface, SFLAG_INTEXTURE, FALSE);
         if((This->Flags & SFLAG_LOCATIONS) == 0) {
@@ -2447,6 +2452,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_SaveSnapshot(IWineD3DSurface *iface, const ch
 
     } else { /* bind the real texture, and make sure it up to date */
         IWineD3DSurface_PreLoad(iface);
+        surface_bind_and_dirtify(This);
     }
     allocatedMemory = HeapAlloc(GetProcessHeap(), 0, width  * height * 4);
     ENTER_GL();
@@ -3989,17 +3995,17 @@ void surface_load_ds_location(IWineD3DSurface *iface, DWORD location) {
                 device->depth_blt_rb_h = This->currentDesc.Height;
             }
 
-            bind_fbo((IWineD3DDevice *)device, GL_FRAMEBUFFER_EXT, &device->activeContext->dst_fbo);
+            context_bind_fbo((IWineD3DDevice *)device, GL_FRAMEBUFFER_EXT, &device->activeContext->dst_fbo);
             GL_EXTCALL(glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_RENDERBUFFER_EXT, device->depth_blt_rb));
             checkGLcall("glFramebufferRenderbufferEXT");
-            attach_depth_stencil_fbo(device, GL_FRAMEBUFFER_EXT, iface, FALSE);
+            context_attach_depth_stencil_fbo(device, GL_FRAMEBUFFER_EXT, iface, FALSE);
 
             /* Do the actual blit */
             depth_blt((IWineD3DDevice *)device, device->depth_blt_texture, This->currentDesc.Width, This->currentDesc.Height);
             checkGLcall("depth_blt");
 
-            if (device->render_offscreen) {
-                bind_fbo((IWineD3DDevice *)device, GL_FRAMEBUFFER_EXT, &device->activeContext->fbo);
+            if (device->activeContext->current_fbo) {
+                context_bind_fbo((IWineD3DDevice *)device, GL_FRAMEBUFFER_EXT, &device->activeContext->current_fbo->id);
             } else {
                 GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0));
                 checkGLcall("glBindFramebuffer()");
@@ -4020,8 +4026,8 @@ void surface_load_ds_location(IWineD3DSurface *iface, DWORD location) {
             depth_blt((IWineD3DDevice *)device, This->glDescription.textureName, This->currentDesc.Width, This->currentDesc.Height);
             checkGLcall("depth_blt");
 
-            if (device->render_offscreen) {
-                GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, device->activeContext->fbo));
+            if (device->activeContext->current_fbo) {
+                GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, device->activeContext->current_fbo->id));
                 checkGLcall("glBindFramebuffer()");
             }
 

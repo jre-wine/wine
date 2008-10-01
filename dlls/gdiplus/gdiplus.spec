@@ -281,8 +281,8 @@
 @ stub GdipGetHemfFromMetafile
 @ stub GdipGetImageAttributesAdjustedPalette
 @ stdcall GdipGetImageBounds(ptr ptr ptr)
-@ stub GdipGetImageDecoders
-@ stub GdipGetImageDecodersSize
+@ stdcall GdipGetImageDecoders(long long ptr)
+@ stdcall GdipGetImageDecodersSize(ptr ptr)
 @ stdcall GdipGetImageDimension(ptr ptr ptr)
 @ stdcall GdipGetImageEncoders(long long ptr)
 @ stdcall GdipGetImageEncodersSize(ptr ptr)
@@ -370,11 +370,11 @@
 @ stdcall GdipGetPenWidth(ptr ptr)
 @ stdcall GdipGetPixelOffsetMode(ptr ptr)
 @ stdcall GdipGetPointCount(ptr ptr)
-@ stub GdipGetPropertyCount
-@ stub GdipGetPropertyIdList
-@ stub GdipGetPropertyItem
+@ stdcall GdipGetPropertyCount(ptr ptr)
+@ stdcall GdipGetPropertyIdList(ptr long ptr)
+@ stdcall GdipGetPropertyItem(ptr long long ptr)
 @ stdcall GdipGetPropertyItemSize(ptr long ptr)
-@ stub GdipGetPropertySize
+@ stdcall GdipGetPropertySize(ptr ptr ptr)
 @ stdcall GdipGetRegionBounds(ptr ptr ptr)
 @ stdcall GdipGetRegionBoundsI(ptr ptr ptr)
 @ stdcall GdipGetRegionData(ptr ptr long ptr)
@@ -581,7 +581,7 @@
 @ stub GdipSetPenUnit
 @ stdcall GdipSetPenWidth(ptr long)
 @ stdcall GdipSetPixelOffsetMode(ptr long)
-@ stub GdipSetPropertyItem
+@ stdcall GdipSetPropertyItem(ptr ptr)
 @ stub GdipSetRenderingOrigin
 @ stdcall GdipSetSmoothingMode(ptr long)
 @ stdcall GdipSetSolidFillColor(ptr ptr)
@@ -602,7 +602,7 @@
 @ stdcall GdipStartPathFigure(ptr)
 @ stdcall GdipStringFormatGetGenericDefault(ptr)
 @ stdcall GdipStringFormatGetGenericTypographic(ptr)
-@ stub GdipTestControl
+@ stdcall GdipTestControl(long ptr)
 @ stdcall GdipTransformMatrixPoints(ptr ptr long)
 @ stdcall GdipTransformMatrixPointsI(ptr ptr long)
 @ stdcall GdipTransformPath(ptr ptr)

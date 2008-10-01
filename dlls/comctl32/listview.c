@@ -257,6 +257,7 @@ typedef struct tagLISTVIEW_INFO
   HIMAGELIST himlState;
   BOOL bLButtonDown;
   BOOL bRButtonDown;
+  BOOL bDragging;
   POINT ptClickPos;         /* point where the user clicked */ 
   BOOL bNoItemMetrics;		/* flags if item metrics are not yet computed */
   INT nItemHeight;
@@ -541,7 +542,7 @@ static inline int lstrncmpiW(LPCWSTR s1, LPCWSTR s2, int n)
 {
     int res;
 
-    n = min(min(n, strlenW(s1)), strlenW(s2));
+    n = min(min(n, lstrlenW(s1)), lstrlenW(s2));
     res = CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, s1, n, s2, n);
     return res ? res - sizeof(WCHAR) : res;
 }
@@ -822,7 +823,7 @@ static BOOL notify_deleteitem(const LISTVIEW_INFO *infoPtr, INT nItem)
     return IsWindow(hwnd);
 }
 
-static int get_ansi_notification(INT unicodeNotificationCode)
+static int get_ansi_notification(UINT unicodeNotificationCode)
 {
     switch (unicodeNotificationCode)
     {
@@ -846,11 +847,12 @@ static int get_ansi_notification(INT unicodeNotificationCode)
   pdi : dispinfo structure (can be unicode or ansi)
   isW : TRUE if dispinfo is Unicode
 */
-static BOOL notify_dispinfoT(const LISTVIEW_INFO *infoPtr, INT notificationCode, LPNMLVDISPINFOW pdi, BOOL isW)
+static BOOL notify_dispinfoT(const LISTVIEW_INFO *infoPtr, UINT notificationCode, LPNMLVDISPINFOW pdi, BOOL isW)
 {
     BOOL bResult = FALSE;
     BOOL convertToAnsi = FALSE, convertToUnicode = FALSE;
-    INT cchTempBufMax = 0, savCchTextMax = 0, realNotifCode;
+    INT cchTempBufMax = 0, savCchTextMax = 0;
+    UINT realNotifCode;
     LPWSTR pszTempBuf = NULL, savPszText = NULL;
 
     if ((pdi->item.mask & LVIF_TEXT) && is_textT(pdi->item.pszText, isW))
@@ -3321,21 +3323,37 @@ static LRESULT LISTVIEW_MouseMove(LISTVIEW_INFO *infoPtr, WORD fwKeys, INT x, IN
     if (!(fwKeys & MK_LBUTTON))
         infoPtr->bLButtonDown = FALSE;
 
-    if (infoPtr->bLButtonDown && DragDetect(infoPtr->hwndSelf, infoPtr->ptClickPos))
+    if (infoPtr->bLButtonDown)
     {
-        LVHITTESTINFO lvHitTestInfo;
-        NMLISTVIEW nmlv;
+        MSG msg;
+        BOOL skip = FALSE;
+        /* Check to see if we got a WM_LBUTTONUP, and skip the DragDetect.
+         * Otherwise, DragDetect will eat it.
+         */
+        if (PeekMessageW(&msg, 0, WM_MOUSEFIRST, WM_MOUSELAST, PM_NOREMOVE))
+            if (msg.message == WM_LBUTTONUP)
+                skip = TRUE;
 
-        lvHitTestInfo.pt = infoPtr->ptClickPos;
-        LISTVIEW_HitTest(infoPtr, &lvHitTestInfo, TRUE, TRUE);
+        if (!skip && DragDetect(infoPtr->hwndSelf, infoPtr->ptClickPos))
+        {
+            LVHITTESTINFO lvHitTestInfo;
+            NMLISTVIEW nmlv;
 
-        ZeroMemory(&nmlv, sizeof(nmlv));
-        nmlv.iItem = lvHitTestInfo.iItem;
-        nmlv.ptAction = infoPtr->ptClickPos;
+            lvHitTestInfo.pt = infoPtr->ptClickPos;
+            LISTVIEW_HitTest(infoPtr, &lvHitTestInfo, TRUE, TRUE);
 
-        notify_listview(infoPtr, LVN_BEGINDRAG, &nmlv);
+            ZeroMemory(&nmlv, sizeof(nmlv));
+            nmlv.iItem = lvHitTestInfo.iItem;
+            nmlv.ptAction = infoPtr->ptClickPos;
 
-        return 0;
+            if (!infoPtr->bDragging)
+            {
+                notify_listview(infoPtr, LVN_BEGINDRAG, &nmlv);
+                infoPtr->bDragging = TRUE;
+            }
+
+            return 0;
+        }
     }
     else
         infoPtr->bLButtonDown = FALSE;
@@ -8593,6 +8611,7 @@ static LRESULT LISTVIEW_LButtonDown(LISTVIEW_INFO *infoPtr, WORD wKey, INT x, IN
   /* set left button down flag and record the click position */
   infoPtr->bLButtonDown = TRUE;
   infoPtr->ptClickPos = pt;
+  infoPtr->bDragging = FALSE;
 
   lvHitTestInfo.pt.x = x;
   lvHitTestInfo.pt.y = y;
@@ -8703,6 +8722,12 @@ static LRESULT LISTVIEW_LButtonUp(LISTVIEW_INFO *infoPtr, WORD wKey, INT x, INT 
 
     /* set left button flag */
     infoPtr->bLButtonDown = FALSE;
+
+    if (infoPtr->bDragging)
+    {
+        infoPtr->bDragging = FALSE;
+        return 0;
+    }
 
     /* if we clicked on a selected item, edit the label */
     if(lvHitTestInfo.iItem == infoPtr->nEditLabelItem && (lvHitTestInfo.flags & LVHT_ONITEMLABEL))

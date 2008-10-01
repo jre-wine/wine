@@ -52,6 +52,7 @@ static const struct message create_parent_window_seq[] = {
     { WM_CREATE, sent },
     { WM_SHOWWINDOW, sent|wparam, 1 },
     { WM_WINDOWPOSCHANGING, sent|wparam, 0 },
+    { WM_QUERYNEWPALETTE, sent|optional },
     { WM_WINDOWPOSCHANGING, sent|wparam, 0 },
     { WM_ACTIVATEAPP, sent|wparam, 1 },
     { WM_NCACTIVATE, sent|wparam, 1 },
@@ -69,7 +70,7 @@ static const struct message create_parent_window_seq[] = {
 
 static const struct message create_monthcal_control_seq[] = {
     { WM_NOTIFYFORMAT, sent|lparam, 0, NF_QUERY },
-    { WM_QUERYUISTATE, sent },
+    { WM_QUERYUISTATE, sent|optional },
     { WM_GETFONT, sent },
     { WM_PARENTNOTIFY, sent|wparam, WM_CREATE},
     { 0 }
@@ -77,7 +78,7 @@ static const struct message create_monthcal_control_seq[] = {
 
 static const struct message create_monthcal_multi_sel_style_seq[] = {
     { WM_NOTIFYFORMAT, sent|lparam, 0, NF_QUERY },
-    { WM_QUERYUISTATE, sent },
+    { WM_QUERYUISTATE, sent|optional },
     { WM_GETFONT, sent },
     { 0 }
 };
@@ -382,8 +383,9 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
     LRESULT ret;
     struct message msg;
 
-    /* do not log painting messages */
-    if (message != WM_PAINT &&
+    /* log system messages, except for painting */
+    if (message < WM_USER &&
+        message != WM_PAINT &&
         message != WM_ERASEBKGND &&
         message != WM_NCPAINT &&
         message != WM_NCHITTEST &&
@@ -653,6 +655,7 @@ static void test_monthcal_firstDay(HWND hwnd)
     /* check for locale first day */
     if(GetLocaleInfo(lcid, LOCALE_IFIRSTDAYOFWEEK, b, 128)){
         fday = atoi(b);
+        trace("fday: %d\n", fday);
         res = SendMessage(hwnd, MCM_GETFIRSTDAYOFWEEK, 0, 0);
         expect(fday, res);
         prev = fday;

@@ -47,6 +47,8 @@ void dump_region(HRGN hrgn);
 static HWND (WINAPI *pGetAncestor)(HWND,UINT);
 static BOOL (WINAPI *pGetWindowInfo)(HWND,WINDOWINFO*);
 static UINT (WINAPI *pGetWindowModuleFileNameA)(HWND,LPSTR,UINT);
+static BOOL (WINAPI *pGetLayeredWindowAttributes)(HWND,COLORREF*,BYTE*,DWORD*);
+static BOOL (WINAPI *pSetLayeredWindowAttributes)(HWND,COLORREF,BYTE,DWORD);
 
 static BOOL test_lbuttondown_flag;
 static HWND hwndMessage;
@@ -3904,7 +3906,7 @@ static LRESULT CALLBACK minmax_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
 }
 
 static int expected_cx, expected_cy;
-static RECT expected_rect;
+static RECT expected_rect, broken_rect;
 
 static LRESULT CALLBACK winsizes_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
@@ -3928,8 +3930,10 @@ static LRESULT CALLBACK winsizes_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM
                hwnd, msg, cs->cx, cs->cy, rect.left, rect.top, rect.right, rect.bottom );
         ok( cs->cx == expected_cx, "wrong x size %d/%d\n", cs->cx, expected_cx );
         ok( cs->cy == expected_cy, "wrong y size %d/%d\n", cs->cy, expected_cy );
-        ok( rect.right - rect.left == expected_rect.right - expected_rect.left &&
-            rect.bottom - rect.top == expected_rect.bottom - expected_rect.top,
+        ok( (rect.right - rect.left == expected_rect.right - expected_rect.left &&
+             rect.bottom - rect.top == expected_rect.bottom - expected_rect.top) ||
+            broken( rect.right - rect.left == broken_rect.right - broken_rect.left &&
+                    rect.bottom - rect.top == broken_rect.bottom - broken_rect.top),
             "wrong rect %d,%d-%d,%d / %d,%d-%d,%d\n",
             rect.left, rect.top, rect.right, rect.bottom,
             expected_rect.left, expected_rect.top, expected_rect.right, expected_rect.bottom );
@@ -4210,6 +4214,7 @@ static void test_CreateWindow(void)
 
     expected_cx = expected_cy = 200000;
     SetRect( &expected_rect, 0, 0, 200000, 200000 );
+    broken_rect = expected_rect;
     hwnd = CreateWindowExA(0, "Sizes_WndClass", NULL, WS_CHILD, 300000, 300000, 200000, 200000, parent, 0, 0, NULL);
     ok( hwnd != 0, "creation failed err %u\n", GetLastError());
     GetClientRect( hwnd, &rc );
@@ -4219,6 +4224,7 @@ static void test_CreateWindow(void)
 
     expected_cx = expected_cy = -10;
     SetRect( &expected_rect, 0, 0, 0, 0 );
+    broken_rect = expected_rect;
     hwnd = CreateWindowExA(0, "Sizes_WndClass", NULL, WS_CHILD, -20, -20, -10, -10, parent, 0, 0, NULL);
     ok( hwnd != 0, "creation failed err %u\n", GetLastError());
     GetClientRect( hwnd, &rc );
@@ -4228,6 +4234,7 @@ static void test_CreateWindow(void)
 
     expected_cx = expected_cy = -200000;
     SetRect( &expected_rect, 0, 0, 0, 0 );
+    broken_rect = expected_rect;
     hwnd = CreateWindowExA(0, "Sizes_WndClass", NULL, WS_CHILD, -300000, -300000, -200000, -200000, parent, 0, 0, NULL);
     ok( hwnd != 0, "creation failed err %u\n", GetLastError());
     GetClientRect( hwnd, &rc );
@@ -4243,21 +4250,23 @@ static void test_CreateWindow(void)
     expected_cx = 100;
     expected_cy = 0x7fffffff;
     SetRect( &expected_rect, 10, 10, 110, 0x7fffffff );
+    SetRect( &broken_rect, 10, 10, 110, 0x7fffffffU + 10 );
     hwnd = CreateWindowExA(0, "Sizes_WndClass", NULL, WS_CHILD, 10, 10, 100, 0x7fffffff, parent, 0, 0, NULL);
     ok( hwnd != 0, "creation failed err %u\n", GetLastError());
     GetClientRect( hwnd, &rc );
     ok( rc.right == 100, "invalid rect right %u\n", rc.right );
-    ok( rc.bottom == 0x7fffffff - 10, "invalid rect bottom %u\n", rc.bottom );
+    ok( rc.bottom == 0x7fffffff - 10 || broken(rc.bottom == 0), "invalid rect bottom %u\n", rc.bottom );
     DestroyWindow(hwnd);
 
     expected_cx = 0x7fffffff;
     expected_cy = 0x7fffffff;
     SetRect( &expected_rect, 20, 10, 0x7fffffff, 0x7fffffff );
+    SetRect( &broken_rect, 20, 10, 0x7fffffffU + 20, 0x7fffffffU + 10 );
     hwnd = CreateWindowExA(0, "Sizes_WndClass", NULL, WS_CHILD, 20, 10, 0x7fffffff, 0x7fffffff, parent, 0, 0, NULL);
     ok( hwnd != 0, "creation failed err %u\n", GetLastError());
     GetClientRect( hwnd, &rc );
-    ok( rc.right == 0x7fffffff - 20, "invalid rect right %u\n", rc.right );
-    ok( rc.bottom == 0x7fffffff - 10, "invalid rect bottom %u\n", rc.bottom );
+    ok( rc.right == 0x7fffffff - 20 || broken(rc.right == 0), "invalid rect right %u\n", rc.right );
+    ok( rc.bottom == 0x7fffffff - 10 || broken(rc.bottom == 0), "invalid rect bottom %u\n", rc.bottom );
     DestroyWindow(hwnd);
 
     /* top level window */
@@ -4633,10 +4642,7 @@ static LRESULT CALLBACK TestExposedRegion_WndProc(HWND hwnd, UINT msg, WPARAM wP
         if(waitResult != WAIT_TIMEOUT)
         {
             GetUpdateRect(hwnd, &updateRect, FALSE);
-todo_wine
-{
-            ok(!IsRectEmpty(&updateRect), "Exposed rect should not be empty\n");
-}
+            ok(IsRectEmpty(&updateRect), "Exposed rect should be empty\n");
         }
 
         return 1;
@@ -4789,8 +4795,7 @@ static void test_hwnd_message(void)
     SetLastError(0xdeadbeef);
     found = FindWindowExA( GetDesktopWindow(), 0, 0, "message window" );
     ok( found == 0, "found message window %p/%p\n", found, hwnd );
-    todo_wine
-        ok(GetLastError() == ERROR_FILE_NOT_FOUND, "ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
+    ok( GetLastError() == 0xdeadbeef, "expected deadbeef, got %d\n", GetLastError() );
     if (parent)
     {
         found = FindWindowExA( parent, 0, 0, "message window" );
@@ -4809,11 +4814,94 @@ static void test_hwnd_message(void)
     DestroyWindow(hwnd);
 }
 
+static void test_layered_window(void)
+{
+    HWND hwnd;
+    COLORREF key = 0;
+    BYTE alpha = 0;
+    DWORD flags = 0;
+    BOOL ret;
+
+    if (!pGetLayeredWindowAttributes || !pSetLayeredWindowAttributes)
+    {
+        win_skip( "layered windows not supported\n" );
+        return;
+    }
+    hwnd = CreateWindowExA(0, "MainWindowClass", "message window", WS_CAPTION,
+                           100, 100, 200, 200, 0, 0, 0, NULL);
+    assert( hwnd );
+    ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
+    ok( !ret, "GetLayeredWindowAttributes should fail on non-layered window\n" );
+    ret = pSetLayeredWindowAttributes( hwnd, 0, 0, LWA_ALPHA );
+    ok( !ret, "SetLayeredWindowAttributes should fail on non-layered window\n" );
+    SetWindowLong( hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_EXSTYLE) | WS_EX_LAYERED );
+    ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
+    ok( !ret, "GetLayeredWindowAttributes should fail on layered but not initialized window\n" );
+    ret = pSetLayeredWindowAttributes( hwnd, 0x123456, 44, LWA_ALPHA );
+    ok( ret, "SetLayeredWindowAttributes should succeed on layered window\n" );
+    ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
+    ok( ret, "GetLayeredWindowAttributes should succeed on layered window\n" );
+    ok( key == 0x123456, "wrong color key %x\n", key );
+    ok( alpha == 44, "wrong alpha %u\n", alpha );
+    ok( flags == LWA_ALPHA, "wrong flags %x\n", flags );
+
+    /* clearing WS_EX_LAYERED resets attributes */
+    SetWindowLong( hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_EXSTYLE) & ~WS_EX_LAYERED );
+    ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
+    ok( !ret, "GetLayeredWindowAttributes should fail on no longer layered window\n" );
+    SetWindowLong( hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_EXSTYLE) | WS_EX_LAYERED );
+    ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
+    ok( !ret, "GetLayeredWindowAttributes should fail on layered but not initialized window\n" );
+    ret = pSetLayeredWindowAttributes( hwnd, 0x654321, 22, LWA_COLORKEY | LWA_ALPHA );
+    ok( ret, "SetLayeredWindowAttributes should succeed on layered window\n" );
+    ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
+    ok( ret, "GetLayeredWindowAttributes should succeed on layered window\n" );
+    ok( key == 0x654321, "wrong color key %x\n", key );
+    ok( alpha == 22, "wrong alpha %u\n", alpha );
+    ok( flags == (LWA_COLORKEY | LWA_ALPHA), "wrong flags %x\n", flags );
+
+    ret = pSetLayeredWindowAttributes( hwnd, 0x888888, 33, LWA_COLORKEY );
+    ok( ret, "SetLayeredWindowAttributes should succeed on layered window\n" );
+    alpha = 0;
+    ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
+    ok( ret, "GetLayeredWindowAttributes should succeed on layered window\n" );
+    ok( key == 0x888888, "wrong color key %x\n", key );
+    /* alpha not changed on vista if LWA_ALPHA is not set */
+    ok( alpha == 22 || alpha == 33, "wrong alpha %u\n", alpha );
+    ok( flags == LWA_COLORKEY, "wrong flags %x\n", flags );
+
+    /* color key always changed */
+    ret = pSetLayeredWindowAttributes( hwnd, 0x999999, 44, 0 );
+    ok( ret, "SetLayeredWindowAttributes should succeed on layered window\n" );
+    alpha = 0;
+    ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
+    ok( ret, "GetLayeredWindowAttributes should succeed on layered window\n" );
+    ok( key == 0x999999, "wrong color key %x\n", key );
+    ok( alpha == 22 || alpha == 44, "wrong alpha %u\n", alpha );
+    ok( flags == 0, "wrong flags %x\n", flags );
+
+    /* default alpha is 0 */
+    SetWindowLong( hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_EXSTYLE) & ~WS_EX_LAYERED );
+    SetWindowLong( hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_EXSTYLE) | WS_EX_LAYERED );
+    ret = pSetLayeredWindowAttributes( hwnd, 0x222222, 55, 0 );
+    ok( ret, "SetLayeredWindowAttributes should succeed on layered window\n" );
+    ret = pGetLayeredWindowAttributes( hwnd, &key, &alpha, &flags );
+    ok( ret, "GetLayeredWindowAttributes should succeed on layered window\n" );
+    ok( key == 0x222222, "wrong color key %x\n", key );
+    ok( alpha == 0 || alpha == 55, "wrong alpha %u\n", alpha );
+    ok( flags == 0, "wrong flags %x\n", flags );
+
+    DestroyWindow( hwnd );
+}
+
 START_TEST(win)
 {
-    pGetAncestor = (void *)GetProcAddress( GetModuleHandleA("user32.dll"), "GetAncestor" );
-    pGetWindowInfo = (void *)GetProcAddress( GetModuleHandleA("user32.dll"), "GetWindowInfo" );
-    pGetWindowModuleFileNameA = (void *)GetProcAddress( GetModuleHandleA("user32.dll"), "GetWindowModuleFileNameA" );
+    HMODULE user32 = GetModuleHandleA( "user32.dll" );
+    pGetAncestor = (void *)GetProcAddress( user32, "GetAncestor" );
+    pGetWindowInfo = (void *)GetProcAddress( user32, "GetWindowInfo" );
+    pGetWindowModuleFileNameA = (void *)GetProcAddress( user32, "GetWindowModuleFileNameA" );
+    pGetLayeredWindowAttributes = (void *)GetProcAddress( user32, "GetLayeredWindowAttributes" );
+    pSetLayeredWindowAttributes = (void *)GetProcAddress( user32, "SetLayeredWindowAttributes" );
 
     if (!RegisterWindowClasses()) assert(0);
 
@@ -4878,6 +4966,7 @@ START_TEST(win)
     test_gettext();
     test_GetUpdateRect();
     test_Expose();
+    test_layered_window();
 
     /* add the tests above this line */
     UnhookWindowsHookEx(hhook);

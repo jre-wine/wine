@@ -3,6 +3,7 @@
  *
  * Copyright 2002 Martin Wilck
  * Copyright 2005 Thomas Kho
+ * Copyright 2008 Jeff Zaroyko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -1012,13 +1013,14 @@ static void test_so_reuseaddr(void)
     rc = setsockopt(s2, SOL_SOCKET, SO_REUSEADDR, (char*)&reuse, sizeof(reuse));
     ok(rc==0, "setsockopt() failed error: %d\n", WSAGetLastError());
 
-    todo_wine {
+    /* On Win2k3 and above, all SO_REUSEADDR seems to do is to allow binding to
+     * a port immediately after closing another socket on that port, so
+     * basically following the BSD socket semantics here. */
+    closesocket(s1);
     rc = bind(s2, (struct sockaddr*)&saddr, sizeof(saddr));
     ok(rc==0, "bind() failed error: %d\n", WSAGetLastError());
-    }
 
     closesocket(s2);
-    closesocket(s1);
 }
 
 /************* Array containing the tests to run **********/
@@ -1685,7 +1687,9 @@ static void test_select(void)
     ok ( (ret == 0), "closesocket failed unexpectedly: %d\n", ret);
 
     WaitForSingleObject (thread_handle, 1000);
-    ok ( (thread_params.ReadKilled), "closesocket did not wakeup select\n");
+    ok ( (thread_params.ReadKilled) ||
+         broken(thread_params.ReadKilled == 0), /*Win98*/
+            "closesocket did not wakeup select\n");
 
 }
 
@@ -1856,6 +1860,7 @@ static void test_getsockname(void)
     int sa_set_len = sizeof(struct sockaddr_in);
     int sa_get_len = sa_set_len;
     static const unsigned char null_padding[] = {0,0,0,0,0,0,0,0};
+    int ret;
 
     if(WSAStartup(MAKEWORD(2,0), &wsa)){
         trace("Winsock failed: %d. Aborting test\n", WSAGetLastError());
@@ -1898,7 +1903,8 @@ static void test_getsockname(void)
         return;
     }
 
-    ok(memcmp(sa_get.sin_zero, null_padding, 8) == 0,
+    ret = memcmp(sa_get.sin_zero, null_padding, 8);
+    ok(ret == 0 || broken(ret != 0), /* NT4 */
             "getsockname did not zero the sockaddr_in structure\n");
 
     closesocket(sock);
@@ -1989,13 +1995,55 @@ static void test_inet_addr(void)
     ok(addr == INADDR_NONE, "inet_addr succeeded unexpectedly\n");
 }
 
+static void test_ioctlsocket(void)
+{
+    SOCKET sock;
+    int ret;
+    long cmds[] = {FIONBIO, FIONREAD, SIOCATMARK};
+    int i;
+
+    sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ok(sock != INVALID_SOCKET, "Creating the socket failed: %d\n", WSAGetLastError());
+    if(sock == INVALID_SOCKET)
+    {
+        skip("Can't continue without a socket.\n");
+        return;
+    }
+
+    for(i = 0; i < sizeof(cmds)/sizeof(long); i++)
+    {
+        /* broken apps like defcon pass the argp value directly instead of a pointer to it */
+        ret = ioctlsocket(sock, cmds[i], (u_long *)1);
+        ok(ret == SOCKET_ERROR, "ioctlsocket succeeded unexpectedly\n");
+        ret = WSAGetLastError();
+        ok(ret == WSAEFAULT, "expected WSAEFAULT, got %d instead\n", ret);
+    }
+}
+
+static int drain_pause=0;
 static DWORD WINAPI drain_socket_thread(LPVOID arg)
 {
     char buffer[1024];
     SOCKET sock = *(SOCKET*)arg;
+    int ret;
 
-    while (recv(sock, buffer, sizeof(buffer), 0) > 0)
-        ;
+    while ((ret = recv(sock, buffer, sizeof(buffer), 0)) != 0)
+    {
+        if (ret < 0)
+        {
+            if (WSAGetLastError() == WSAEWOULDBLOCK)
+            {
+                fd_set readset;
+                FD_ZERO(&readset);
+                FD_SET(sock, &readset);
+                select(0, &readset, NULL, NULL, NULL);
+                while (drain_pause)
+                    Sleep(100);
+            }
+            else
+                break;
+        }
+    }
     return 0;
 }
 
@@ -2051,15 +2099,41 @@ static void test_write_events(void)
     SOCKET dst = INVALID_SOCKET;
     HANDLE hThread = NULL;
     HANDLE hEvent = INVALID_HANDLE_VALUE;
-    int len;
+    char *buffer = NULL;
+    int bufferSize = 1024*1024;
     u_long one = 1;
     int ret;
     DWORD id;
+    WSANETWORKEVENTS netEvents;
+    DWORD dwRet;
 
     if (tcp_socketpair(&src, &dst) != 0)
     {
         ok(0, "creating socket pair failed, skipping test\n");
         return;
+    }
+
+    /* On Windows it seems when a non-blocking socket sends to a
+       blocking socket on the same host, the send() is BLOCKING,
+       so make both sockets non-blocking */
+    ret = ioctlsocket(src, FIONBIO, &one);
+    if (ret)
+    {
+        ok(0, "ioctlsocket failed, error %d\n", WSAGetLastError());
+        goto end;
+    }
+    ret = ioctlsocket(dst, FIONBIO, &one);
+    if (ret)
+    {
+        ok(0, "ioctlsocket failed, error %d\n", WSAGetLastError());
+        goto end;
+    }
+
+    buffer = HeapAlloc(GetProcessHeap(), 0, bufferSize);
+    if (buffer == NULL)
+    {
+        ok(0, "could not allocate memory for test\n");
+        goto end;
     }
 
     hThread = CreateThread(NULL, 0, drain_socket_thread, &dst, 0, &id);
@@ -2076,13 +2150,6 @@ static void test_write_events(void)
         goto end;
     }
 
-    ret = ioctlsocket(src, FIONBIO, &one);
-    if (ret)
-    {
-        ok(0, "ioctlsocket failed, error %d\n", WSAGetLastError());
-        goto end;
-    }
-
     ret = WSAEventSelect(src, hEvent, FD_WRITE | FD_CLOSE);
     if (ret)
     {
@@ -2090,41 +2157,75 @@ static void test_write_events(void)
         goto end;
     }
 
-    for (len = 100; len > 0; --len)
+    /* FD_WRITE should be set initially, and allow us to send at least 1 byte */
+    dwRet = WaitForSingleObject(hEvent, 5000);
+    if (dwRet != WAIT_OBJECT_0)
     {
-         WSANETWORKEVENTS netEvents;
-         DWORD dwRet = WaitForSingleObject(hEvent, 5000);
-         if (dwRet != WAIT_OBJECT_0)
-         {
-             ok(0, "WaitForSingleObject failed, error %d\n", dwRet);
-             goto end;
-         }
+        ok(0, "Initial WaitForSingleObject failed, error %d\n", dwRet);
+        goto end;
+    }
+    ret = WSAEnumNetworkEvents(src, NULL, &netEvents);
+    if (ret)
+    {
+        ok(0, "WSAEnumNetworkEvents failed, error %d\n", ret);
+        goto end;
+    }
+    if (netEvents.lNetworkEvents & FD_WRITE)
+    {
+        ret = send(src, "a", 1, 0);
+        ok(ret == 1, "sending 1 byte failed, error %d\n", WSAGetLastError());
+        if (ret != 1)
+            goto end;
+    }
+    else
+    {
+        ok(0, "FD_WRITE not among initial events\n");
+        goto end;
+    }
 
-         ret = WSAEnumNetworkEvents(src, NULL, &netEvents);
-         if (ret)
-         {
-             ok(0, "WSAEnumNetworkEvents failed, error %d\n", ret);
-             goto end;
-         }
+    /* Now FD_WRITE should not be set, because the socket send buffer isn't full yet */
+    dwRet = WaitForSingleObject(hEvent, 2000);
+    if (dwRet == WAIT_OBJECT_0)
+    {
+        ok(0, "WaitForSingleObject should have timed out, but succeeded!\n");
+        goto end;
+    }
 
-         if (netEvents.lNetworkEvents & FD_WRITE)
-         {
-             ret = send(src, "a", 1, 0);
-             if (ret < 0 && WSAGetLastError() != WSAEWOULDBLOCK)
-             {
-                 ok(0, "send failed, error %d\n", WSAGetLastError());
-                 goto end;
-             }
-         }
-
-         if (netEvents.lNetworkEvents & FD_CLOSE)
-         {
-             ok(0, "unexpected close\n");
-             goto end;
-         }
+    /* Now if we send a ton of data and the 'server' does not drain it fast
+     * enough (set drain_pause to be sure), the socket send buffer will only
+     * take some of it, and we will get a short write. This will trigger
+     * another FD_WRITE event as soon as data is sent and more space becomes
+     * available, but not any earlier. */
+    drain_pause=1;
+    do
+    {
+        ret = send(src, buffer, bufferSize, 0);
+    } while (ret == bufferSize);
+    drain_pause=0;
+    if (ret >= 0 || WSAGetLastError() == WSAEWOULDBLOCK)
+    {
+        dwRet = WaitForSingleObject(hEvent, 5000);
+        ok(dwRet == WAIT_OBJECT_0, "Waiting failed with %d\n", dwRet);
+        if (dwRet == WAIT_OBJECT_0)
+        {
+            ret = WSAEnumNetworkEvents(src, NULL, &netEvents);
+            ok(ret == 0, "WSAEnumNetworkEvents failed, error %d\n", ret);
+            if (ret == 0)
+                goto end;
+            ok(netEvents.lNetworkEvents & FD_WRITE,
+                "FD_WRITE event not set as expected, events are 0x%x\n", netEvents.lNetworkEvents);
+        }
+        else
+            goto end;
+    }
+    else
+    {
+        ok(0, "sending a lot of data failed with error %d\n", WSAGetLastError());
+        goto end;
     }
 
 end:
+    HeapFree(GetProcessHeap(), 0, buffer);
     if (src != INVALID_SOCKET)
         closesocket(src);
     if (dst != INVALID_SOCKET)
@@ -2241,6 +2342,7 @@ START_TEST( sock )
     test_accept();
     test_getsockname();
     test_inet_addr();
+    test_ioctlsocket();
     test_dns();
     test_gethostbyname_hack();
 

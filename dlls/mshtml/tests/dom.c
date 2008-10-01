@@ -257,7 +257,7 @@ static const elem_type_info_t elem_type_infos[] = {
     {"HTML",      elem_iids,        NULL},
     {"HEAD",      elem_iids,        NULL},
     {"TITLE",     elem_iids,        NULL},
-    {"BODY",      body_iids,        NULL},
+    {"BODY",      body_iids,        &DIID_DispHTMLBody},
     {"A",         anchor_iids,      NULL},
     {"INPUT",     input_iids,       &DIID_DispHTMLInputElement},
     {"SELECT",    select_iids,      &DIID_DispHTMLSelectElement},
@@ -1052,6 +1052,30 @@ static long _elem_get_scroll_top(unsigned line, IUnknown *unk)
     ok_(__FILE__,line) (l == l2, "unexpected top %ld, expected %ld\n", l2, l);
 
     return l;
+}
+
+#define elem_get_scroll_left(u) _elem_get_scroll_left(__LINE__,u)
+static void _elem_get_scroll_left(unsigned line, IUnknown *unk)
+{
+    IHTMLElement2 *elem = _get_elem2_iface(line, unk);
+    IHTMLTextContainer *txtcont;
+    long l = -1, l2 = -1;
+    HRESULT hres;
+
+    hres = IHTMLElement2_get_scrollLeft(elem, NULL);
+    ok(hres == E_INVALIDARG, "expect E_INVALIDARG got 0x%08x\n", hres);
+
+    hres = IHTMLElement2_get_scrollLeft(elem, &l);
+    ok(hres == S_OK, "get_scrollTop failed: %08x\n", hres);
+    IHTMLElement2_Release(elem);
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLTextContainer, (void**)&txtcont);
+    ok(hres == S_OK, "Could not get IHTMLTextContainer: %08x\n", hres);
+
+    hres = IHTMLTextContainer_get_scrollLeft(txtcont, &l2);
+    IHTMLTextContainer_Release(txtcont);
+    ok(hres == S_OK, "IHTMLTextContainer::get_scrollLeft failed: %ld\n", l2);
+    ok(l == l2, "unexpected left %ld, expected %ld\n", l2, l);
 }
 
 #define test_img_set_src(u,s) _test_img_set_src(__LINE__,u,s)
@@ -1987,6 +2011,24 @@ static void test_default_style(IHTMLStyle *style)
     ok(V_VT(&v) == VT_BSTR, "V_VT(v)=%d\n", V_VT(&v));
     ok(!strcmp_wa(V_BSTR(&v), "auto"), "V_BSTR(v)=%s\n", dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
+
+    /* margin tests */
+    str = (void*)0xdeadbeef;
+    hres = IHTMLStyle_get_margin(style, &str);
+    ok(hres == S_OK, "get_margin failed: %08x\n", hres);
+    ok(!str, "margin = %s\n", dbgstr_w(str));
+
+    str = a2bstr("1");
+    hres = IHTMLStyle_put_margin(style, str);
+    ok(hres == S_OK, "get_margin failed: %08x\n", hres);
+    SysFreeString(str);
+
+    hres = IHTMLStyle_get_margin(style, &str);
+    ok(hres == S_OK, "get_margin failed: %08x\n", hres);
+    ok(strcmp_wa(str, "1"), "margin = %s\n", dbgstr_w(str));
+
+    hres = IHTMLStyle_put_margin(style, NULL);
+    ok(hres == S_OK, "get_margin failed: %08x\n", hres);
 }
 
 static void test_default_selection(IHTMLDocument2 *doc)
@@ -2022,6 +2064,10 @@ static void test_default_body(IHTMLBodyElement *body)
     long l;
     BSTR bstr;
     HRESULT hres;
+    VARIANT v;
+    WCHAR sBodyText[] = {'#','F','F','0','0','0','0',0};
+    WCHAR sTextInvalid[] = {'I','n','v','a','l','i','d',0};
+    WCHAR sResInvalid[] = {'#','0','0','a','0','d','0',0};
 
     bstr = (void*)0xdeadbeef;
     hres = IHTMLBodyElement_get_background(body, &bstr);
@@ -2033,7 +2079,71 @@ static void test_default_body(IHTMLBodyElement *body)
     l = elem_get_scroll_width((IUnknown*)body);
     ok(l != -1, "scrollWidth == -1\n");
     l = elem_get_scroll_top((IUnknown*)body);
-    ok(!l, "scrollWidth = %ld\n", l);
+    ok(!l, "scrollTop = %ld\n", l);
+    elem_get_scroll_left((IUnknown*)body);
+
+    /* get_text tests */
+    hres = IHTMLBodyElement_get_text(body, &v);
+    ok(hres == S_OK, "expect S_OK got 0x%08d\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "Expected VT_BSTR got %d\n", V_VT(&v));
+    ok(bstr == NULL, "bstr != NULL\n");
+
+
+    /* get_text - Invalid Text */
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = SysAllocString(sTextInvalid);
+    hres = IHTMLBodyElement_put_text(body, v);
+    ok(hres == S_OK, "expect S_OK got 0x%08d\n", hres);
+
+    V_VT(&v) = VT_NULL;
+    hres = IHTMLBodyElement_get_text(body, &v);
+    ok(hres == S_OK, "expect S_OK got 0x%08d\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "Expected VT_BSTR got %d\n", V_VT(&v));
+    ok(!lstrcmpW(sResInvalid, V_BSTR(&v)), "bstr != sResInvalid\n");
+    VariantClear(&v);
+
+    /* get_text - Valid Text */
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = SysAllocString(sBodyText);
+    hres = IHTMLBodyElement_put_text(body, v);
+    ok(hres == S_OK, "expect S_OK got 0x%08d\n", hres);
+
+    V_VT(&v) = VT_NULL;
+    hres = IHTMLBodyElement_get_text(body, &v);
+    ok(hres == S_OK, "expect S_OK got 0x%08d\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "Expected VT_BSTR got %d\n", V_VT(&v));
+    ok(lstrcmpW(bstr, V_BSTR(&v)), "bstr != V_BSTR(&v)\n");
+    VariantClear(&v);
+}
+
+static void test_body_funs(IHTMLBodyElement *body)
+{
+    static WCHAR sRed[] = {'r','e','d',0};
+    static WCHAR sRedbg[] = {'#','f','f','0','0','0','0',0};
+    VARIANT vbg;
+    VARIANT vDefaultbg;
+    HRESULT hres;
+
+    hres = IHTMLBodyElement_get_bgColor(body, &vDefaultbg);
+    ok(hres == S_OK, "get_background failed: %08x\n", hres);
+    ok(V_VT(&vDefaultbg) == VT_BSTR, "bstr != NULL\n");
+
+    V_VT(&vbg) = VT_BSTR;
+    V_BSTR(&vbg) = SysAllocString(sRed);
+    hres = IHTMLBodyElement_put_bgColor(body, vbg);
+    ok(hres == S_OK, "get_background failed: %08x\n", hres);
+    VariantClear(&vbg);
+
+    hres = IHTMLBodyElement_get_bgColor(body, &vbg);
+    ok(hres == S_OK, "get_background failed: %08x\n", hres);
+    ok(V_VT(&vDefaultbg) == VT_BSTR, "V_VT(&vDefaultbg) != VT_BSTR\n");
+    ok(!lstrcmpW(V_BSTR(&vbg), sRedbg), "Unexpected type %s\n", dbgstr_w(V_BSTR(&vbg)));
+    VariantClear(&vbg);
+
+    /* Restore Originial */
+    hres = IHTMLBodyElement_put_bgColor(body, vDefaultbg);
+    ok(hres == S_OK, "get_background failed: %08x\n", hres);
+    VariantClear(&vDefaultbg);
 }
 
 static void test_window(IHTMLDocument2 *doc)
@@ -2091,6 +2201,7 @@ static void test_defaults(IHTMLDocument2 *doc)
     hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLBodyElement, (void**)&body);
     ok(hres == S_OK, "Could not get IHTMBodyElement: %08x\n", hres);
     test_default_body(body);
+    test_body_funs(body);
     IHTMLBodyElement_Release(body);
 
     hres = IHTMLElement_get_style(elem, &style);

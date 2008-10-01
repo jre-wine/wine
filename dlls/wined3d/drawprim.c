@@ -1024,11 +1024,11 @@ void drawPrimitive(IWineD3DDevice *iface,
         if (primCounter >= 0) {
             WINED3DLOCKED_RECT r;
             char buffer[80];
-            IWineD3DSurface_LockRect(This->renderTarget, &r, NULL, WINED3DLOCK_READONLY);
-            sprintf(buffer, "/tmp/backbuffer_%d.tga", primCounter);
+            IWineD3DSurface_LockRect(This->render_targets[0], &r, NULL, WINED3DLOCK_READONLY);
+            sprintf(buffer, "/tmp/backbuffer_%ld.tga", primCounter);
             TRACE("Saving screenshot %s\n", buffer);
-            IWineD3DSurface_SaveSnapshot(This->renderTarget, buffer);
-            IWineD3DSurface_UnlockRect(This->renderTarget);
+            IWineD3DSurface_SaveSnapshot(This->render_targets[0], buffer);
+            IWineD3DSurface_UnlockRect(This->render_targets[0]);
 
 #ifdef SHOW_TEXTURE_MAKEUP
            {
@@ -1036,7 +1036,7 @@ void drawPrimitive(IWineD3DDevice *iface,
             int textureNo;
             for (textureNo = 0; textureNo < MAX_COMBINED_SAMPLERS; ++textureNo) {
                 if (This->stateBlock->textures[textureNo] != NULL) {
-                    sprintf(buffer, "/tmp/texture_%p_%d_%d.tga", This->stateBlock->textures[textureNo], primCounter, textureNo);
+                    sprintf(buffer, "/tmp/texture_%p_%ld_%d.tga", This->stateBlock->textures[textureNo], primCounter, textureNo);
                     TRACE("Saving texture %s\n", buffer);
                     if (IWineD3DBaseTexture_GetType(This->stateBlock->textures[textureNo]) == WINED3DRTYPE_TEXTURE) {
                             IWineD3DTexture_GetSurfaceLevel((IWineD3DTexture *)This->stateBlock->textures[textureNo], 0, &pSur);
@@ -1050,7 +1050,7 @@ void drawPrimitive(IWineD3DDevice *iface,
            }
 #endif
         }
-        TRACE("drawprim #%d\n", primCounter);
+        TRACE("drawprim #%ld\n", primCounter);
         ++primCounter;
     }
 #endif
@@ -1076,7 +1076,7 @@ static void normalize_normal(float *n) {
  * attributes to numbered shader attributes, so we have to store them and rebind them as needed
  * in drawprim.
  *
- * To read back, the opengl feedback mode is used. This creates a proplem because we want
+ * To read back, the opengl feedback mode is used. This creates a problem because we want
  * untransformed, unlit vertices, but feedback runs everything through transform and lighting.
  * Thus disable lighting and set identity matrices to get unmodified colors and positions.
  * To overcome clipping find the biggest x, y and z values of the vertices in the patch and scale

@@ -223,7 +223,7 @@ static void testLoadLibraryEx(void)
     HANDLE hfile;
 
     hfile = CreateFileA("testfile.dll", GENERIC_READ | GENERIC_WRITE,
-                        FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE,
                         NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
     ok(hfile != INVALID_HANDLE_VALUE, "Expected a valid file handle\n");
 
@@ -231,24 +231,28 @@ static void testLoadLibraryEx(void)
     SetLastError(0xdeadbeef);
     hmodule = LoadLibraryExA(NULL, NULL, 0);
     ok(hmodule == 0, "Expected 0, got %p\n", hmodule);
-    ok(GetLastError() == ERROR_MOD_NOT_FOUND,
-       "Expected ERROR_MOD_NOT_FOUND, got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_MOD_NOT_FOUND ||
+       GetLastError() == ERROR_INVALID_PARAMETER, /* win9x */
+       "Expected ERROR_MOD_NOT_FOUND or ERROR_INVALID_PARAMETER, got %d\n",
+       GetLastError());
 
     /* empty lpFileName */
     SetLastError(0xdeadbeef);
     hmodule = LoadLibraryExA("", NULL, 0);
     ok(hmodule == 0, "Expected 0, got %p\n", hmodule);
-    ok(GetLastError() == ERROR_MOD_NOT_FOUND,
-       "Expected ERROR_MOD_NOT_FOUND, got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_MOD_NOT_FOUND ||
+       GetLastError() == ERROR_DLL_NOT_FOUND, /* win9x */
+       "Expected ERROR_MOD_NOT_FOUND or ERROR_DLL_NOT_FOUND, got %d\n",
+       GetLastError());
 
     /* hFile is non-NULL */
     SetLastError(0xdeadbeef);
     hmodule = LoadLibraryExA("testfile.dll", hfile, 0);
     ok(hmodule == 0, "Expected 0, got %p\n", hmodule);
     ok(GetLastError() == ERROR_SHARING_VIOLATION ||
-       GetLastError() == ERROR_INVALID_PARAMETER, /* win2k3 */
-       "Expected ERROR_SHARING_VIOLATION or ERROR_INVALID_PARAMETER, got %d\n",
-       GetLastError());
+       GetLastError() == ERROR_INVALID_PARAMETER || /* win2k3 */
+       GetLastError() == ERROR_FILE_NOT_FOUND, /* win9x */
+       "Unexpected last error, got %d\n", GetLastError());
 
     /* try to open a file that is locked */
     SetLastError(0xdeadbeef);
@@ -256,8 +260,10 @@ static void testLoadLibraryEx(void)
     ok(hmodule == 0, "Expected 0, got %p\n", hmodule);
     todo_wine
     {
-        ok(GetLastError() == ERROR_SHARING_VIOLATION,
-           "Expected ERROR_SHARING_VIOLATION, got %d\n", GetLastError());
+        ok(GetLastError() == ERROR_SHARING_VIOLATION ||
+           GetLastError() == ERROR_FILE_NOT_FOUND, /* win9x */
+           "Expected ERROR_SHARING_VIOLATION or ERROR_FILE_NOT_FOUND, got %d\n",
+           GetLastError());
     }
 
     /* lpFileName does not matter */
@@ -277,8 +283,10 @@ static void testLoadLibraryEx(void)
     ok(hmodule == 0, "Expected 0, got %p\n", hmodule);
     todo_wine
     {
-        ok(GetLastError() == ERROR_FILE_INVALID,
-          "Expected ERROR_FILE_INVALID, got %d\n", GetLastError());
+        ok(GetLastError() == ERROR_FILE_INVALID ||
+           GetLastError() == ERROR_BAD_FORMAT, /* win9x */
+           "Expected ERROR_FILE_INVALID or ERROR_BAD_FORMAT, got %d\n",
+           GetLastError());
     }
 
     DeleteFileA("testfile.dll");
@@ -292,8 +300,9 @@ static void testLoadLibraryEx(void)
     SetLastError(0xdeadbeef);
     hmodule = LoadLibraryExA(path, NULL, LOAD_LIBRARY_AS_DATAFILE);
     ok(hmodule != 0, "Expected valid module handle\n");
-    ok(GetLastError() == 0xdeadbeef,
-       "Expected 0xdeadbeef, got %d\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef ||
+       GetLastError() == ERROR_SUCCESS, /* win9x */
+       "Expected 0xdeadbeef or ERROR_SUCCESS, got %d\n", GetLastError());
 
     CloseHandle(hmodule);
 
@@ -301,8 +310,9 @@ static void testLoadLibraryEx(void)
     SetLastError(0xdeadbeef);
     hmodule = LoadLibraryExA("kernel32.dll", NULL, LOAD_LIBRARY_AS_DATAFILE);
     ok(hmodule != 0, "Expected valid module handle\n");
-    ok(GetLastError() == 0xdeadbeef,
-       "Expected 0xdeadbeef, got %d\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef ||
+       GetLastError() == ERROR_SUCCESS, /* win9x */
+       "Expected 0xdeadbeef or ERROR_SUCCESS, got %d\n", GetLastError());
 
     CloseHandle(hmodule);
 
@@ -318,7 +328,8 @@ static void testLoadLibraryEx(void)
     {
         ok(hmodule == 0, "Expected 0, got %p\n", hmodule);
     }
-    ok(GetLastError() == ERROR_FILE_NOT_FOUND,
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND ||
+       broken(GetLastError() == ERROR_INVALID_HANDLE),  /* nt4 */
        "Expected ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
 }
 

@@ -79,15 +79,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3dxof);
 
 #define CLSIDFMT "<%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X>"
 
-typedef struct {
-  /* Buffer to parse */
-  LPBYTE buffer;
-  DWORD rem_bytes;
-  /* Misc info */
-  BOOL txt;
-  BYTE value[100];
-  IDirectXFileImpl* pdxf;
-} parse_buffer;
+#define MAX_INPUT_SIZE 1000000
+#define MAX_DATA_SIZE 100000
 
 static const struct IDirectXFileVtbl IDirectXFile_Vtbl;
 static const struct IDirectXFileBinaryVtbl IDirectXFileBinary_Vtbl;
@@ -96,6 +89,9 @@ static const struct IDirectXFileDataReferenceVtbl IDirectXFileDataReference_Vtbl
 static const struct IDirectXFileEnumObjectVtbl IDirectXFileEnumObject_Vtbl;
 static const struct IDirectXFileObjectVtbl IDirectXFileObject_Vtbl;
 static const struct IDirectXFileSaveObjectVtbl IDirectXFileSaveObject_Vtbl;
+
+static BOOL parse_object_parts(parse_buffer * buf, BOOL allow_optional);
+static BOOL parse_object(parse_buffer * buf);
 
 HRESULT IDirectXFileImpl_Create(IUnknown* pUnkOuter, LPVOID* ppObj)
 {
@@ -254,6 +250,28 @@ static HRESULT WINAPI IDirectXFileImpl_CreateEnumObject(IDirectXFile* iface, LPV
 
   object->source = dwLoadOptions;
   object->hFile = hFile;
+  object->pDirectXFile = This;
+  object->buf.pdxf = This;
+  object->buf.txt = TRUE;
+  object->buf.cur_subobject = 0;
+
+  object->buf.buffer = HeapAlloc(GetProcessHeap(), 0, MAX_INPUT_SIZE+1);
+  if (!object->buf.buffer)
+  {
+    WARN("Out of memory\n");
+    hr = DXFILEERR_BADALLOC;
+    goto error;
+  }
+
+  ReadFile(hFile, object->buf.buffer, MAX_INPUT_SIZE+1, &object->buf.rem_bytes, NULL);
+  if (object->buf.rem_bytes > MAX_INPUT_SIZE)
+  {
+    FIXME("File size > %d not supported yet\n", MAX_INPUT_SIZE);
+    HeapFree(GetProcessHeap(), 0, object->buf.buffer);
+    hr = DXFILEERR_PARSEERROR;
+    goto error;
+  }
+  TRACE("Read %d bytes\n", object->buf.rem_bytes);
 
   *ppEnumObj = (LPDIRECTXFILEENUMOBJECT)object;
 
@@ -500,7 +518,7 @@ static BOOL is_name(parse_buffer* buf)
   BOOL error = 0;
   while (!is_separator(c = *(buf->buffer+pos)))
   {
-    if (!(((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) || ((c >= '0') && (c <= '9'))))
+    if (!(((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) || ((c >= '0') && (c <= '9')) || (c == '_')))
       error = 1;
     tmp[pos++] = c;
   }
@@ -517,6 +535,36 @@ static BOOL is_name(parse_buffer* buf)
 
   TRACE("Found name %s\n", tmp);
   strcpy((char*)buf->value, tmp);
+
+  return TRUE;
+}
+
+static BOOL is_float(parse_buffer* buf)
+{
+  char tmp[50];
+  DWORD pos = 0;
+  char c;
+  float decimal;
+  BOOL dot = 0;
+
+  while (!is_separator(c = *(buf->buffer+pos)))
+  {
+    if (!((!pos && (c == '-')) || ((c >= '0') && (c <= '9')) || (!dot && (c == '.'))))
+      return FALSE;
+    if (c == '.')
+      dot = TRUE;
+    tmp[pos++] = c;
+  }
+  tmp[pos] = 0;
+
+  buf->buffer += pos;
+  buf->rem_bytes -= pos;
+
+  sscanf(tmp, "%f", &decimal);
+
+  TRACE("Found float %s - %f\n", tmp, decimal);
+
+  *(float*)buf->value = decimal;
 
   return TRUE;
 }
@@ -543,7 +591,7 @@ static BOOL is_integer(parse_buffer* buf)
 
   TRACE("Found integer %s - %d\n", tmp, integer);
 
-  *(WORD*)buf->value = integer;
+  *(DWORD*)buf->value = integer;
 
   return TRUE;
 }
@@ -608,6 +656,11 @@ static WORD parse_TOKEN_dbg_opt(parse_buffer * buf, BOOL show_token)
           token = TOKEN_INTEGER;
           break;
         }
+        if (is_float(buf))
+        {
+          token = TOKEN_FLOAT;
+          break;
+        }
         if (is_name(buf))
         {
           token = TOKEN_NAME;
@@ -623,44 +676,82 @@ static WORD parse_TOKEN_dbg_opt(parse_buffer * buf, BOOL show_token)
   {
     if (!read_bytes(buf, &token, 2))
       return 0;
-  }
 
-  switch(token)
-  {
-    case TOKEN_NAME:
-    case TOKEN_STRING:
-    case TOKEN_INTEGER:
-    case TOKEN_GUID:
-    case TOKEN_INTEGER_LIST:
-    case TOKEN_FLOAT_LIST:
-    case TOKEN_OBRACE:
-    case TOKEN_CBRACE:
-    case TOKEN_OPAREN:
-    case TOKEN_CPAREN:
-    case TOKEN_OBRACKET:
-    case TOKEN_CBRACKET:
-    case TOKEN_OANGLE:
-    case TOKEN_CANGLE:
-    case TOKEN_DOT:
-    case TOKEN_COMMA:
-    case TOKEN_SEMICOLON:
-    case TOKEN_TEMPLATE:
-    case TOKEN_WORD:
-    case TOKEN_DWORD:
-    case TOKEN_FLOAT:
-    case TOKEN_DOUBLE:
-    case TOKEN_CHAR:
-    case TOKEN_UCHAR:
-    case TOKEN_SWORD:
-    case TOKEN_SDWORD:
-    case TOKEN_VOID:
-    case TOKEN_LPSTR:
-    case TOKEN_UNICODE:
-    case TOKEN_CSTRING:
-    case TOKEN_ARRAY:
-      break;
-    default:
-      return 0;
+    switch(token)
+    {
+      case TOKEN_NAME:
+        {
+          DWORD count;
+          char strname[100];
+
+          if (!read_bytes(buf, &count, 4))
+            return 0;
+          if (!read_bytes(buf, strname, count))
+            return 0;
+          strname[count] = 0;
+          /*TRACE("name = %s\n", strname);*/
+
+          strcpy((char*)buf->value, strname);
+        }
+        break;
+      case TOKEN_INTEGER:
+        {
+          DWORD integer;
+
+          if (!read_bytes(buf, &integer, 4))
+            return 0;
+          /*TRACE("integer = %ld\n", integer);*/
+
+          *(DWORD*)buf->value = integer;
+        }
+        break;
+      case TOKEN_GUID:
+        {
+          char strguid[38];
+          GUID class_id;
+
+          if (!read_bytes(buf, &class_id, 16))
+            return 0;
+          sprintf(strguid, CLSIDFMT, class_id.Data1, class_id.Data2, class_id.Data3, class_id.Data4[0],
+            class_id.Data4[1], class_id.Data4[2], class_id.Data4[3], class_id.Data4[4], class_id.Data4[5],
+            class_id.Data4[6], class_id.Data4[7]);
+          /*TRACE("guid = {%s}\n", strguid);*/
+
+          *(GUID*)buf->value = class_id;
+        }
+        break;
+      case TOKEN_STRING:
+      case TOKEN_INTEGER_LIST:
+      case TOKEN_FLOAT_LIST:
+      case TOKEN_OBRACE:
+      case TOKEN_CBRACE:
+      case TOKEN_OPAREN:
+      case TOKEN_CPAREN:
+      case TOKEN_OBRACKET:
+      case TOKEN_CBRACKET:
+      case TOKEN_OANGLE:
+      case TOKEN_CANGLE:
+      case TOKEN_DOT:
+      case TOKEN_COMMA:
+      case TOKEN_SEMICOLON:
+      case TOKEN_TEMPLATE:
+      case TOKEN_WORD:
+      case TOKEN_DWORD:
+      case TOKEN_FLOAT:
+      case TOKEN_DOUBLE:
+      case TOKEN_CHAR:
+      case TOKEN_UCHAR:
+      case TOKEN_SWORD:
+      case TOKEN_SDWORD:
+      case TOKEN_VOID:
+      case TOKEN_LPSTR:
+      case TOKEN_UNICODE:
+      case TOKEN_CSTRING:
+      case TOKEN_ARRAY:
+        break;
+      default:
+        return 0;
+    }
   }
 
   if (show_token)
@@ -758,64 +849,6 @@ static inline BOOL is_primitive_type(WORD token)
   return ret;
 }
 
-static BOOL parse_name(parse_buffer * buf)
-{
-  DWORD count;
-  char strname[100];
-
-  if (parse_TOKEN(buf) != TOKEN_NAME)
-    return FALSE;
-  if (buf->txt)
-    return TRUE;
-  if (!read_bytes(buf, &count, 4))
-    return FALSE;
-  if (!read_bytes(buf, strname, count))
-    return FALSE;
-  strname[count] = 0;
-  /*TRACE("name = %s\n", strname);*/
-
-  strcpy((char*)buf->value, strname);
-
-  return TRUE;
-}
-
-static BOOL parse_class_id(parse_buffer * buf)
-{
-  char strguid[38];
-  GUID class_id;
-
-  if (parse_TOKEN(buf) != TOKEN_GUID)
-    return FALSE;
-  if (buf->txt)
-    return TRUE;
-  if (!read_bytes(buf, &class_id, 16))
-    return FALSE;
-  sprintf(strguid, CLSIDFMT, class_id.Data1, class_id.Data2, class_id.Data3, class_id.Data4[0],
-    class_id.Data4[1], class_id.Data4[2], class_id.Data4[3], class_id.Data4[4], class_id.Data4[5], class_id.Data4[6], class_id.Data4[7]);
-  /*TRACE("guid = {%s}\n", strguid);*/
-
-  *(GUID*)buf->value = class_id;
-
-  return TRUE;
-}
-
-static BOOL parse_integer(parse_buffer * buf)
-{
-  DWORD integer;
-
-  if (parse_TOKEN(buf) != TOKEN_INTEGER)
-    return FALSE;
-  if (buf->txt)
-    return TRUE;
-  if (!read_bytes(buf, &integer, 4))
-    return FALSE;
-  /*TRACE("integer = %ld\n", integer);*/
-
-  *(DWORD*)buf->value = integer;
-
-  return TRUE;
-}
-
 static BOOL parse_template_option_info(parse_buffer * buf)
 {
   xtemplate* cur_template = &buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates];
@@ -833,12 +866,11 @@ static BOOL parse_template_option_info(parse_buffer * buf)
   {
     while (1)
     {
-      if (!parse_name(buf))
+      if (parse_TOKEN(buf) != TOKEN_NAME)
         return FALSE;
       strcpy(cur_template->childs[cur_template->nb_childs], (char*)buf->value);
       if (check_TOKEN(buf) == TOKEN_GUID)
-        if (!parse_class_id(buf))
-          return FALSE;
+        parse_TOKEN(buf);
       cur_template->nb_childs++;
       if (check_TOKEN(buf) != TOKEN_COMMA)
         break;
@@ -852,19 +884,25 @@ static BOOL parse_template_option_info(parse_buffer * buf)
 
 static BOOL parse_template_members_list(parse_buffer * buf)
 {
-  parse_buffer save1;
   int idx_member = 0;
   member* cur_member;
 
   while (1)
   {
+    BOOL array = 0;
+    int nb_dims = 0;
     cur_member = &buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates].members[idx_member];
-    save1 = *buf;
+
+    if (check_TOKEN(buf) == TOKEN_ARRAY)
+    {
+      parse_TOKEN(buf);
+      array = 1;
+    }
 
     if (check_TOKEN(buf) == TOKEN_NAME)
     {
-      if (!parse_name(buf))
-        break;
+      cur_member->type = parse_TOKEN(buf);
+      cur_member->idx_template = 0;
       while (cur_member->idx_template < buf->pdxf->nb_xtemplates)
       {
         if (!strcmp((char*)buf->value, buf->pdxf->xtemplates[cur_member->idx_template].name))
@@ -876,50 +914,18 @@ static BOOL parse_template_members_list(parse_buffer * buf)
         TRACE("Reference to a nonexistent template '%s'\n", (char*)buf->value);
         return FALSE;
       }
-      if (check_TOKEN(buf) == TOKEN_NAME)
-        if (!parse_name(buf))
-          break;
-      if (parse_TOKEN(buf) != TOKEN_SEMICOLON)
-        break;
-      cur_member->type = TOKEN_NAME;
-      strcpy(cur_member->name, (char*)buf->value);
-      idx_member++;
     }
-    else if (check_TOKEN(buf) == TOKEN_ARRAY)
-    {
-      parse_buffer save2;
-      WORD token;
-      int nb_dims = 0;
+    else if (is_primitive_type(check_TOKEN(buf)))
+      cur_member->type = parse_TOKEN(buf);
+    else
+      break;
 
-      parse_TOKEN(buf);
-      token = check_TOKEN(buf);
-      if (is_primitive_type(token))
-      {
-        parse_TOKEN(buf);
-        cur_member->type = token;
-      }
-      else
-      {
-        if (!parse_name(buf))
-          break;
-        cur_member->type = TOKEN_NAME;
-        cur_member->idx_template = 0;
-        while (cur_member->idx_template < buf->pdxf->nb_xtemplates)
-        {
-          if (!strcmp((char*)buf->value, buf->pdxf->xtemplates[cur_member->idx_template].name))
-            break;
-          cur_member->idx_template++;
-        }
-        if (cur_member->idx_template == buf->pdxf->nb_xtemplates)
-        {
-          TRACE("Reference to nonexistent template '%s'\n", (char*)buf->value);
-          return FALSE;
-        }
-      }
-      if (!parse_name(buf))
-        break;
-      strcpy(cur_member->name, (char*)buf->value);
-      save2 = *buf;
+    if (parse_TOKEN(buf) != TOKEN_NAME)
+      return FALSE;
+    strcpy(cur_member->name, (char*)buf->value);
+
+    if (array)
+    {
       while (check_TOKEN(buf) == TOKEN_OBRACKET)
       {
         if (nb_dims)
@@ -930,47 +936,32 @@ static BOOL parse_template_members_list(parse_buffer * buf)
         parse_TOKEN(buf);
         if (check_TOKEN(buf) == TOKEN_INTEGER)
         {
-          if (!parse_integer(buf))
-            break;
+          parse_TOKEN(buf);
           cur_member->dim_fixed[nb_dims] = TRUE;
           cur_member->dim_value[nb_dims] = *(DWORD*)buf->value;
         }
         else
         {
-          if (!parse_name(buf))
-            break;
+          if (parse_TOKEN(buf) != TOKEN_NAME)
+            return FALSE;
           cur_member->dim_fixed[nb_dims] = FALSE;
           /* Hack: Assume array size is specified in previous member */
           cur_member->dim_value[nb_dims] = idx_member - 1;
         }
         if (parse_TOKEN(buf) != TOKEN_CBRACKET)
-          break;
-        save2 = *buf;
+          return FALSE;
         nb_dims++;
       }
-      *buf = save2;
-      if (parse_TOKEN(buf) != TOKEN_SEMICOLON)
-        break;
+      if (!nb_dims)
+        return FALSE;
       cur_member->nb_dims = nb_dims;
-      idx_member++;
     }
-    else if (is_primitive_type(check_TOKEN(buf)))
-    {
-      cur_member->type = check_TOKEN(buf);
-      parse_TOKEN(buf);
-      if (check_TOKEN(buf) == TOKEN_NAME)
-        if (!parse_name(buf))
-          break;
-      strcpy(cur_member->name, (char*)buf->value);
-      if (parse_TOKEN(buf) != TOKEN_SEMICOLON)
-        break;
-      idx_member++;
-    }
-    else
-      break;
+    if (parse_TOKEN(buf) != TOKEN_SEMICOLON)
+      return FALSE;
+
+    idx_member++;
   }
 
-  *buf = save1;
   buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates].nb_members = idx_member;
 
   return TRUE;
@@ -978,26 +969,15 @@ static BOOL parse_template_members_list(parse_buffer * buf)
 
 static BOOL parse_template_parts(parse_buffer * buf)
 {
+  if (!parse_template_members_list(buf))
+    return FALSE;
   if (check_TOKEN(buf) == TOKEN_OBRACKET)
   {
     parse_TOKEN(buf);
     if (!parse_template_option_info(buf))
       return FALSE;
     if (parse_TOKEN(buf) != TOKEN_CBRACKET)
-      return FALSE;
-  }
-  else
-  {
-    if (!parse_template_members_list(buf))
-      return FALSE;
-    if (check_TOKEN(buf) == TOKEN_OBRACKET)
-    {
-      parse_TOKEN(buf);
-      if (!parse_template_option_info(buf))
-        return FALSE;
-      if (parse_TOKEN(buf) != TOKEN_CBRACKET)
-       return FALSE;
-    }
+     return FALSE;
   }
 
   return TRUE;
@@ -1007,12 +987,12 @@ static BOOL parse_template(parse_buffer * buf)
 {
   if (parse_TOKEN(buf) != TOKEN_TEMPLATE)
     return FALSE;
-  if (!parse_name(buf))
+  if (parse_TOKEN(buf) != TOKEN_NAME)
     return FALSE;
   strcpy(buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates].name, (char*)buf->value);
   if (parse_TOKEN(buf) != TOKEN_OBRACE)
     return FALSE;
-  if (!parse_class_id(buf))
+  if (parse_TOKEN(buf) != TOKEN_GUID)
     return FALSE;
   buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates].class_id = *(GUID*)buf->value;
   if (!parse_template_parts(buf))
@@ -1046,7 +1026,7 @@ static HRESULT WINAPI IDirectXFileImpl_RegisterTemplates(IDirectXFile* iface, LP
   buf.txt = FALSE;
   buf.pdxf = This;
 
-  FIXME("(%p/%p)->(%p,%d) partial stub!\n", This, iface, pvData, cbSize);
+  TRACE("(%p/%p)->(%p,%d)\n", This, iface, pvData, cbSize);
 
   if (!pvData)
     return DXFILEERR_BADVALUE;
@@ -1354,18 +1334,28 @@ static HRESULT WINAPI IDirectXFileDataImpl_GetName(IDirectXFileData* iface, LPST
 {
   IDirectXFileDataImpl *This = (IDirectXFileDataImpl *)iface;
 
-  FIXME("(%p/%p)->(%p,%p) stub!\n", This, iface, pstrNameBuf, pdwBufLen); 
+  TRACE("(%p/%p)->(%p,%p)\n", This, iface, pstrNameBuf, pdwBufLen);
 
-  return DXFILEERR_BADVALUE;
+  if (!pstrNameBuf)
+    return DXFILEERR_BADVALUE;
+
+  strcpy(pstrNameBuf, This->pobj->name);
+
+  return DXFILE_OK;
 }
 
 static HRESULT WINAPI IDirectXFileDataImpl_GetId(IDirectXFileData* iface, LPGUID pGuid)
 {
   IDirectXFileDataImpl *This = (IDirectXFileDataImpl *)iface;
 
-  FIXME("(%p/%p)->(%p) stub!\n", This, iface, pGuid); 
+  TRACE("(%p/%p)->(%p)\n", This, iface, pGuid);
 
-  return DXFILEERR_BADVALUE;
+  if (!pGuid)
+    return DXFILEERR_BADVALUE;
+
+  memcpy(pGuid, &This->pobj->class_id, 16);
+
+  return DXFILE_OK;
 }
 
 /*** IDirectXFileData methods ***/
@@ -1373,18 +1363,37 @@ static HRESULT WINAPI IDirectXFileDataImpl_GetData(IDirectXFileData* iface, LPCS
 {
   IDirectXFileDataImpl *This = (IDirectXFileDataImpl *)iface;
 
-  FIXME("(%p/%p)->(%s,%p,%p) stub!\n", This, iface, szMember, pcbSize, ppvData); 
+  TRACE("(%p/%p)->(%s,%p,%p)\n", This, iface, szMember, pcbSize, ppvData);
 
-  return DXFILEERR_BADVALUE;
+  if (!pcbSize || !ppvData)
+    return DXFILEERR_BADVALUE;
+
+  if (szMember)
+  {
+    FIXME("Specifying a member is not supported yet!\n");
+    return DXFILEERR_BADVALUE;
+  }
+
+  *pcbSize = This->pobj->size;
+  *ppvData = This->pobj->pdata;
+
+  return DXFILE_OK;
 }
 
 static HRESULT WINAPI IDirectXFileDataImpl_GetType(IDirectXFileData* iface, const GUID** pguid)
 {
   IDirectXFileDataImpl *This = (IDirectXFileDataImpl *)iface;
+  static GUID guid;
 
-  FIXME("(%p/%p)->(%p) stub!\n", This, iface, pguid); 
+  TRACE("(%p/%p)->(%p)\n", This, iface, pguid);
 
-  return DXFILEERR_BADVALUE;
+  if (!pguid)
+    return DXFILEERR_BADVALUE;
+
+  memcpy(&guid, &This->pobj->type, 16);
+  *pguid = &guid;
+
+  return DXFILE_OK;
 }
 
 static HRESULT WINAPI IDirectXFileDataImpl_GetNextObject(IDirectXFileData* iface, LPDIRECTXFILEOBJECT* ppChildObj)
@@ -1392,6 +1401,9 @@ static HRESULT WINAPI IDirectXFileDataImpl_GetNextObject(IDirectXFileData* iface
   IDirectXFileDataImpl *This = (IDirectXFileDataImpl *)iface;
 
   FIXME("(%p/%p)->(%p) stub!\n", This, iface, ppChildObj); 
+
+  if (This->cur_enum_object >= This->pobj->nb_childs)
+    return DXFILEERR_NOMOREOBJECTS;
 
   return DXFILEERR_BADVALUE;
 }
@@ -1594,6 +1606,248 @@ static ULONG WINAPI IDirectXFileEnumObjectImpl_Release(IDirectXFileEnumObject* i
   return ref;
 }
 
+static BOOL parse_object_members_list(parse_buffer * buf)
+{
+  DWORD token;
+  int i;
+  xtemplate* pt = buf->pxt[buf->level];
+  DWORD last_dword = 0;
+
+  for (i = 0; i < pt->nb_members; i++)
+  {
+    int nb_elems, k;
+
+    if (pt->members[i].nb_dims > 1)
+    {
+      FIXME("Arrays with dimension > 1 not yet supported\n");
+      return FALSE;
+    }
+    else if (pt->members[i].nb_dims)
+    {
+      if (!pt->members[i].dim_fixed[0])
+      {
+        if (!i)
+        {
+          FIXME("Array with variable must be preceded by the size\n");
+          return FALSE;
+        }
+        nb_elems = last_dword;
+        /*FIXME("Arrays with variable size not yet supported\n");
+        return FALSE;*/
+      }
+      else
+        nb_elems = pt->members[i].dim_value[0];
+    }
+    else
+      nb_elems = 1;
+
+    for (k = 0; k < nb_elems; k++)
+    {
+      if (k)
+      {
+        if (parse_TOKEN(buf) != TOKEN_COMMA)
+          return FALSE;
+      }
+
+      if (pt->members[i].type == TOKEN_NAME)
+      {
+        int j;
+
+        TRACE("Found suboject %s\n", buf->pdxf->xtemplates[pt->members[i].idx_template].name);
+        buf->level++;
+        /* To do template lookup */
+        for (j = 0; j < buf->pdxf->nb_xtemplates; j++)
+        {
+          if (!strcmp(buf->pdxf->xtemplates[pt->members[i].idx_template].name, buf->pdxf->xtemplates[j].name))
+          {
+            buf->pxt[buf->level] = &buf->pdxf->xtemplates[j];
+            break;
+          }
+        }
+        if (j == buf->pdxf->nb_xtemplates)
+        {
+          FIXME("Unknown template %s\n", (char*)buf->value);
+          buf->level--;
+          return FALSE;
+        }
+        TRACE("Enter %s\n", buf->pdxf->xtemplates[pt->members[i].idx_template].name);
+        if (!parse_object_parts(buf, FALSE))
+        {
+          buf->level--;
+          return FALSE;
+        }
+        buf->level--;
+        /*if (parse_TOKEN(buf) != TOKEN_SEMICOLON)
+          return FALSE;*/
+      }
+      else
+      {
+        token = check_TOKEN(buf);
+        if (token == TOKEN_INTEGER)
+        {
+          parse_TOKEN(buf);
+          last_dword = *(DWORD*)buf->value;
+          TRACE("%s = %d\n", pt->members[i].name, *(DWORD*)buf->value);
+          /* Assume larger size */
+          if ((buf->cur_pdata - buf->pxo->pdata + 4) > MAX_DATA_SIZE)
+          {
+            WARN("Buffer too small\n");
+            return FALSE;
+          }
+          if (pt->members[i].type == TOKEN_WORD)
+          {
+            *(((WORD*)(buf->cur_pdata))) = (WORD)(*(DWORD*)buf->value);
+            buf->cur_pdata += 2;
+          }
+          else if (pt->members[i].type == TOKEN_DWORD)
+          {
+            *(((DWORD*)(buf->cur_pdata))) = (DWORD)(*(DWORD*)buf->value);
+            buf->cur_pdata += 4;
+          }
+          else
+          {
+            FIXME("Token %d not supported\n", pt->members[i].type);
+            return FALSE;
+          }
+        }
+        else if (token == TOKEN_FLOAT)
+        {
+          parse_TOKEN(buf);
+          TRACE("%s = %f\n", pt->members[i].name, *(float*)buf->value);
+          /* Assume larger size */
+          if ((buf->cur_pdata - buf->pxo->pdata + 4) > MAX_DATA_SIZE)
+          {
+            WARN("Buffer too small\n");
+            return FALSE;
+          }
+          if (pt->members[i].type == TOKEN_FLOAT)
+          {
+            *(((float*)(buf->cur_pdata))) = (float)(*(float*)buf->value);
+            buf->cur_pdata += 4;
+          }
+          else
+          {
+            FIXME("Token %d not supported\n", pt->members[i].type);
+            return FALSE;
+          }
+        }
+        else
+          return FALSE;
+      }
+    }
+
+    token = parse_TOKEN(buf);
+    if (token != TOKEN_SEMICOLON)
+    {
+      /* Allow comma instead of semicolon in some specific cases */
+      if (!((token == TOKEN_COMMA) && ((i+1) < pt->nb_members) && (pt->members[i].type == pt->members[i+1].type)
+        && (!pt->members[i].nb_dims) && (!pt->members[i+1].nb_dims)))
+        return FALSE;
+    }
+  }
+
+  return TRUE;
+}
+
+static BOOL parse_object_parts(parse_buffer * buf, BOOL allow_optional)
+{
+  if (!parse_object_members_list(buf))
+    return FALSE;
+
+  if (allow_optional)
+  {
+    /* Skip trailing semicolon */
+    while (check_TOKEN(buf) == TOKEN_SEMICOLON)
+      parse_TOKEN(buf);
+
+    while (1)
+    {
+      if (check_TOKEN(buf) == TOKEN_OBRACE)
+      {
+        parse_TOKEN(buf);
+        if (parse_TOKEN(buf) != TOKEN_NAME)
+          return FALSE;
+        if (parse_TOKEN(buf) != TOKEN_CBRACE)
+          return FALSE;
+      }
+      else if (check_TOKEN(buf) == TOKEN_NAME)
+      {
+        TRACE("Enter optional %s\n", (char*)buf->value);
+        buf->level++;
+        if (!parse_object(buf))
+        {
+          buf->level--;
+          return FALSE;
+        }
+        buf->level--;
+      }
+      else
+        break;
+    }
+  }
+
+  return TRUE;
+}
+
+static BOOL parse_object(parse_buffer * buf)
+{
+  int i;
+
+  if (parse_TOKEN(buf) != TOKEN_NAME)
+    return FALSE;
+
+  /* To do template lookup */
+  for (i = 0; i < buf->pdxf->nb_xtemplates; i++)
+  {
+    if (!strcmp((char*)buf->value, buf->pdxf->xtemplates[i].name))
+    {
+      buf->pxt[buf->level] = &buf->pdxf->xtemplates[i];
+      memcpy(&buf->pxo->type, &buf->pdxf->xtemplates[i].class_id, 16);
+      break;
+    }
+  }
+  if (i == buf->pdxf->nb_xtemplates)
+  {
+    FIXME("Unknown template %s\n", (char*)buf->value);
+    return FALSE;
+  }
+
+  if (check_TOKEN(buf) == TOKEN_NAME)
+  {
+    parse_TOKEN(buf);
+    strcpy(buf->pxo->name, (char*)buf->value);
+  }
+  else
+    buf->pxo->name[0] = 0;
+
+  if (parse_TOKEN(buf) != TOKEN_OBRACE)
+    return FALSE;
+  if (check_TOKEN(buf) == TOKEN_GUID)
+  {
+    parse_TOKEN(buf);
+    memcpy(&buf->pxo->class_id, buf->value, 16);
+  }
+  else
+    memset(&buf->pxo->class_id, 0, 16);
+
+  if (!parse_object_parts(buf, TRUE))
+    return FALSE;
+  if (parse_TOKEN(buf) != TOKEN_CBRACE)
+    return FALSE;
+
+  if (buf->txt)
+  {
+    /* Go to the next object */
+    while (buf->rem_bytes && is_space(*buf->buffer))
+    {
+      buf->buffer++;
+      buf->rem_bytes--;
+    }
+  }
+
+  return TRUE;
+}
+
 /*** IDirectXFileEnumObject methods ***/
 static HRESULT WINAPI IDirectXFileEnumObjectImpl_GetNextDataObject(IDirectXFileEnumObject* iface, LPDIRECTXFILEDATA* ppDataObj)
 {
@@ -1603,9 +1857,39 @@ static HRESULT WINAPI IDirectXFileEnumObjectImpl_GetNextDataObject(IDirectXFileE
   
   FIXME("(%p/%p)->(%p) stub!\n", This, iface, ppDataObj); 
 
+  /*printf("%d\n", This->buf.rem_bytes);*/
+
+  if (!This->buf.rem_bytes)
+    return DXFILEERR_NOMOREOBJECTS;
+
   hr = IDirectXFileDataImpl_Create(&object);
   if (!SUCCEEDED(hr))
     return hr;
+
+  This->buf.pxo = &This->xobjects[This->nb_xobjects][This->buf.cur_subobject];
+  TRACE("Start %d %d\n", This->nb_xobjects, This->buf.cur_subobject);
+
+  This->buf.pxo->pdata = HeapAlloc(GetProcessHeap(), 0, MAX_DATA_SIZE);
+  if (!This->buf.pxo->pdata)
+  {
+    WARN("Out of memory\n");
+    return DXFILEERR_BADALLOC;
+  }
+  This->buf.cur_pdata = This->buf.pxo->pdata;
+  This->buf.level = 0;
+
+  This->buf.pxo->pdata = This->buf.cur_pdata;
+
+  if (!parse_object(&This->buf))
+  {
+    TRACE("Object is not correct\n");
+    HeapFree(GetProcessHeap(), 0, This->buf.pxo->pdata);
+    return DXFILEERR_PARSEERROR;
+  }
+
+  This->buf.pxo->size = This->buf.cur_pdata - This->buf.pxo->pdata;
+
+  object->pobj = This->buf.pxo;
 
   *ppDataObj = (LPDIRECTXFILEDATA)object;
 

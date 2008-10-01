@@ -468,6 +468,7 @@ static BOOL WINAPI CertContext_SetProperty(void *context, DWORD dwPropId,
         case CERT_SIGNATURE_HASH_PROP_ID:
         case CERT_ISSUER_PUBLIC_KEY_MD5_HASH_PROP_ID:
         case CERT_SUBJECT_NAME_MD5_HASH_PROP_ID:
+        case CERT_EXTENDED_ERROR_INFO_PROP_ID:
         case CERT_SUBJECT_PUBLIC_KEY_MD5_HASH_PROP_ID:
         case CERT_ENROLLMENT_PROP_ID:
         case CERT_CROSS_CERT_DIST_POINTS_PROP_ID:
@@ -606,6 +607,11 @@ static BOOL CRYPT_AcquirePrivateKeyFromProvInfo(PCCERT_CONTEXT pCert,
                 ret = CertGetCertificateContextProperty(pCert,
                  CERT_KEY_PROV_INFO_PROP_ID, info, &size);
                 allocated = TRUE;
+            }
+            else
+            {
+                SetLastError(ERROR_OUTOFMEMORY);
+                ret = FALSE;
             }
         }
         else

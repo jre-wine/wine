@@ -737,15 +737,12 @@ static HRESULT  WINAPI  IDirect3DDevice9Impl_GetDepthStencilSurface(LPDIRECT3DDE
 
     EnterCriticalSection(&d3d9_cs);
     hr = IWineD3DDevice_GetDepthStencilSurface(This->WineD3DDevice,&pZStencilSurface);
-    if(hr == D3D_OK) {
-        if(pZStencilSurface != NULL){
-            IWineD3DSurface_GetParent(pZStencilSurface,(IUnknown**)ppZStencilSurface);
-            IWineD3DSurface_Release(pZStencilSurface);
-        } else {
-            *ppZStencilSurface = NULL;
-        }
+    if (hr == WINED3D_OK) {
+        IWineD3DSurface_GetParent(pZStencilSurface,(IUnknown**)ppZStencilSurface);
+        IWineD3DSurface_Release(pZStencilSurface);
     } else {
-        WARN("Call to IWineD3DDevice_GetDepthStencilSurface failed\n");
+        if (hr != WINED3DERR_NOTFOUND)
+                WARN("Call to IWineD3DDevice_GetDepthStencilSurface failed with 0x%08x\n", hr);
         *ppZStencilSurface = NULL;
     }
     LeaveCriticalSection(&d3d9_cs);
@@ -1171,13 +1168,13 @@ static HRESULT  WINAPI  IDirect3DDevice9Impl_SetNPatchMode(LPDIRECT3DDEVICE9EX i
 
 static float    WINAPI  IDirect3DDevice9Impl_GetNPatchMode(LPDIRECT3DDEVICE9EX iface) {
     IDirect3DDevice9Impl *This = (IDirect3DDevice9Impl *)iface;
-    HRESULT hr;
+    float ret;
     TRACE("(%p) Relay\n" , This);
 
     EnterCriticalSection(&d3d9_cs);
-    hr = IWineD3DDevice_GetNPatchMode(This->WineD3DDevice);
+    ret = IWineD3DDevice_GetNPatchMode(This->WineD3DDevice);
     LeaveCriticalSection(&d3d9_cs);
-    return hr;
+    return ret;
 }
 
 static HRESULT WINAPI IDirect3DDevice9Impl_DrawPrimitive(LPDIRECT3DDEVICE9EX iface, D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount) {

@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define NONAMELESSUNION
+
 #include "config.h"
 #include "windef.h"
 #include "wingdi.h"
@@ -25,6 +27,60 @@
 #include "d3dx9.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dx);
+
+/*************************************************************************
+ * D3DXMatrixDecompose
+ */
+HRESULT WINAPI D3DXMatrixDecompose(D3DXVECTOR3 *poutscale, D3DXQUATERNION *poutrotation, D3DXVECTOR3 *pouttranslation, D3DXMATRIX *pm)
+{
+    D3DXMATRIX normalized;
+    D3DXVECTOR3 vec;
+
+    if (!pm)
+    {
+     return D3DERR_INVALIDCALL;
+    }
+
+    /*Compute the scaling part.*/
+    vec.x=pm->u.m[0][0];
+    vec.y=pm->u.m[0][1];
+    vec.z=pm->u.m[0][2];
+    poutscale->x=D3DXVec3Length(&vec);
+
+    vec.x=pm->u.m[1][0];
+    vec.y=pm->u.m[1][1];
+    vec.z=pm->u.m[1][2];
+    poutscale->y=D3DXVec3Length(&vec);
+
+    vec.x=pm->u.m[2][0];
+    vec.y=pm->u.m[2][1];
+    vec.z=pm->u.m[2][2];
+    poutscale->z=D3DXVec3Length(&vec);
+
+    /*Compute the translation part.*/
+    pouttranslation->x=pm->u.m[3][0];
+    pouttranslation->y=pm->u.m[3][1];
+    pouttranslation->z=pm->u.m[3][2];
+
+    /*Let's calculate the rotation now*/
+    if ( (poutscale->x == 0.0f) || (poutscale->y == 0.0f) || (poutscale->z == 0.0f) )
+    {
+     return D3DERR_INVALIDCALL;
+    }
+
+    normalized.u.m[0][0]=pm->u.m[0][0]/poutscale->x;
+    normalized.u.m[0][1]=pm->u.m[0][1]/poutscale->x;
+    normalized.u.m[0][2]=pm->u.m[0][2]/poutscale->x;
+    normalized.u.m[1][0]=pm->u.m[1][0]/poutscale->y;
+    normalized.u.m[1][1]=pm->u.m[1][1]/poutscale->y;
+    normalized.u.m[1][2]=pm->u.m[1][2]/poutscale->y;
+    normalized.u.m[2][0]=pm->u.m[2][0]/poutscale->z;
+    normalized.u.m[2][1]=pm->u.m[2][1]/poutscale->z;
+    normalized.u.m[2][2]=pm->u.m[2][2]/poutscale->z;
+
+    D3DXQuaternionRotationMatrix(poutrotation,&normalized);
+    return S_OK;
+}
 
 /*************************************************************************
  * D3DXPlaneTransformArray

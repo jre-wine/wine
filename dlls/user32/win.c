@@ -536,7 +536,7 @@ HWND WIN_SetOwner( HWND hwnd, HWND owner )
 ULONG WIN_SetStyle( HWND hwnd, ULONG set_bits, ULONG clear_bits )
 {
     BOOL ok;
-    ULONG new_style, old_style = 0;
+    STYLESTRUCT style;
     WND *win = WIN_GetPtr( hwnd );
 
     if (!win || win == WND_DESKTOP) return 0;
@@ -547,32 +547,33 @@ ULONG WIN_SetStyle( HWND hwnd, ULONG set_bits, ULONG clear_bits )
                  set_bits, clear_bits, hwnd );
         return 0;
     }
-    new_style = (win->dwStyle | set_bits) & ~clear_bits;
-    if (new_style == win->dwStyle)
+    style.styleOld = win->dwStyle;
+    style.styleNew = (win->dwStyle | set_bits) & ~clear_bits;
+    if (style.styleNew == style.styleOld)
     {
         WIN_ReleasePtr( win );
-        return new_style;
+        return style.styleNew;
     }
     SERVER_START_REQ( set_window_info )
     {
         req->handle = hwnd;
         req->flags  = SET_WIN_STYLE;
-        req->style  = new_style;
+        req->style  = style.styleNew;
         req->extra_offset = -1;
         if ((ok = !wine_server_call( req )))
         {
-            old_style = reply->old_style;
-            win->dwStyle = new_style;
+            style.styleOld = reply->old_style;
+            win->dwStyle = style.styleNew;
         }
     }
     SERVER_END_REQ;
     WIN_ReleasePtr( win );
     if (ok)
     {
-        USER_Driver->pSetWindowStyle( hwnd, old_style );
-        if ((old_style ^ new_style) & WS_VISIBLE) invalidate_dce( hwnd, NULL );
+        USER_Driver->pSetWindowStyle( hwnd, GWL_STYLE, &style );
+        if ((style.styleOld ^ style.styleNew) & WS_VISIBLE) invalidate_dce( hwnd, NULL );
     }
-    return old_style;
+    return style.styleOld;
 }
 
 
@@ -1070,6 +1071,9 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
     wndPtr->hIconSmall     = 0;
     wndPtr->hSysMenu       = 0;
     wndPtr->flags         |= (flags & WIN_ISWIN32);
+
+    wndPtr->min_pos.x = wndPtr->min_pos.y = -1;
+    wndPtr->max_pos.x = wndPtr->max_pos.y = -1;
 
     if (wndPtr->dwStyle & WS_SYSMENU) SetSystemMenu( hwnd, 0 );
 
@@ -2131,10 +2135,11 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
 
     if (!ok) return 0;
 
-    if (offset == GWL_STYLE) USER_Driver->pSetWindowStyle( hwnd, retval );
-
     if (offset == GWL_STYLE || offset == GWL_EXSTYLE)
+    {
+        USER_Driver->pSetWindowStyle( hwnd, offset, &style );
         SendMessageW( hwnd, WM_STYLECHANGED, offset, (LPARAM)&style );
+    }
 
     return retval;
 }
@@ -3319,22 +3324,109 @@ BOOL WINAPI SwitchDesktop( HDESK hDesktop)
 /*****************************************************************************
  *              SetLayeredWindowAttributes (USER32.@)
  */
-BOOL WINAPI SetLayeredWindowAttributes( HWND hWnd, COLORREF rgbKey, 
-                                        BYTE bAlpha, DWORD dwFlags )
+BOOL WINAPI SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha, DWORD flags )
 {
-    FIXME("(%p,0x%.8x,%d,%d): stub!\n", hWnd, rgbKey, bAlpha, dwFlags);
-    return TRUE;
+    BOOL ret;
+
+    TRACE("(%p,%08x,%d,%x): stub!\n", hwnd, key, alpha, flags);
+
+    SERVER_START_REQ( set_window_layered_info )
+    {
+        req->handle = hwnd;
+        req->color_key = key;
+        req->alpha = alpha;
+        req->flags = flags;
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+
+    if (ret) USER_Driver->pSetLayeredWindowAttributes( hwnd, key, alpha, flags );
+
+    return ret;
 }
+
 
 /*****************************************************************************
  *              GetLayeredWindowAttributes (USER32.@)
  */
-BOOL WINAPI GetLayeredWindowAttributes( HWND hWnd, COLORREF *prgbKey,
-                                        BYTE *pbAlpha, DWORD *pdwFlags )
+BOOL WINAPI GetLayeredWindowAttributes( HWND hwnd, COLORREF *key, BYTE *alpha, DWORD *flags )
 {
-    FIXME("(%p,%p,%p,%p): stub!\n", hWnd, prgbKey, pbAlpha, pdwFlags);
-    return FALSE;
+    BOOL ret;
+
+    SERVER_START_REQ( get_window_layered_info )
+    {
+        req->handle = hwnd;
+        if ((ret = !wine_server_call_err( req )))
+        {
+            if (key) *key = reply->color_key;
+            if (alpha) *alpha = reply->alpha;
+            if (flags) *flags = reply->flags;
+        }
+    }
+    SERVER_END_REQ;
+
+    return ret;
 }
+
+
+/*****************************************************************************
+ *              UpdateLayeredWindowIndirect  (USER32.@)
+ */
+BOOL WINAPI UpdateLayeredWindowIndirect( HWND hwnd, const UPDATELAYEREDWINDOWINFO *info )
+{
+    BYTE alpha = 0xff;
+
+    if (!(info->dwFlags & ULW_EX_NORESIZE) && (info->pptDst || info->psize))
+    {
+        int x = 0, y = 0, cx = 0, cy = 0;
+        DWORD flags = SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW | SWP_NOSENDCHANGING;
+
+        if (info->pptDst)
+        {
+            x = info->pptDst->x;
+            y = info->pptDst->y;
+            flags &= ~SWP_NOMOVE;
+        }
+        if (info->psize)
+        {
+            cx = info->psize->cx;
+            cy = info->psize->cy;
+            flags &= ~SWP_NOSIZE;
+        }
+        TRACE( "moving window %p pos %d,%d %dx%x\n", hwnd, x, y, cx, cy );
+        SetWindowPos( hwnd, 0, x, y, cx, cy, flags );
+    }
+
+    if (info->hdcSrc)
+    {
+        RECT rect;
+        HDC hdc = GetDCEx( hwnd, 0, DCX_CACHE );
+
+        if (hdc)
+        {
+            int x = 0, y = 0;
+
+            GetClientRect( hwnd, &rect );
+            if (info->pptSrc)
+            {
+                x = info->pptSrc->x;
+                y = info->pptSrc->y;
+            }
+            /* FIXME: intersect rect with info->prcDirty */
+            TRACE( "copying window %p pos %d,%d\n", hwnd, x, y );
+            BitBlt( hdc, rect.left, rect.top, rect.right, rect.bottom,
+                    info->hdcSrc, rect.left + x, rect.top + y, SRCCOPY );
+            ReleaseDC( hwnd, hdc );
+        }
+    }
+
+    if (info->pblend && !(info->dwFlags & ULW_OPAQUE)) alpha = info->pblend->SourceConstantAlpha;
+    TRACE( "setting window %p alpha %u\n", hwnd, alpha );
+    USER_Driver->pSetLayeredWindowAttributes( hwnd, info->crKey, alpha,
+                                              info->dwFlags & (LWA_ALPHA | LWA_COLORKEY) );
+    return TRUE;
+}
+
 
 /*****************************************************************************
  *              UpdateLayeredWindow (USER32.@)
@@ -3343,14 +3435,19 @@ BOOL WINAPI UpdateLayeredWindow( HWND hwnd, HDC hdcDst, POINT *pptDst, SIZE *psi
                                  HDC hdcSrc, POINT *pptSrc, COLORREF crKey, BLENDFUNCTION *pblend,
                                  DWORD dwFlags)
 {
-    static int once;
-    if (!once)
-    {
-        once = 1;
-        FIXME("(%p,%p,%p,%p,%p,%p,0x%08x,%p,%d): stub!\n",
-              hwnd, hdcDst, pptDst, psize, hdcSrc, pptSrc, crKey, pblend, dwFlags);
-    }
-    return 0;
+    UPDATELAYEREDWINDOWINFO info;
+
+    info.cbSize   = sizeof(info);
+    info.hdcDst   = hdcDst;
+    info.pptDst   = pptDst;
+    info.psize    = psize;
+    info.hdcSrc   = hdcSrc;
+    info.pptSrc   = pptSrc;
+    info.crKey    = crKey;
+    info.pblend   = pblend;
+    info.dwFlags  = dwFlags;
+    info.prcDirty = NULL;
+    return UpdateLayeredWindowIndirect( hwnd, &info );
 }
 
 /* 64bit versions */

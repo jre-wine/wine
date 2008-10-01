@@ -871,9 +871,9 @@ static void test_DeleteFileW( void )
     ret = CreateDirectoryW(pathW, NULL);
     ok(ret == TRUE, "couldn't create directory deletefile\n");
     ret = DeleteFileW(pathW);
-    todo_wine ok(ret == FALSE, "DeleteFile should fail for empty directories\n");
+    ok(ret == FALSE, "DeleteFile should fail for empty directories\n");
     ret = RemoveDirectoryW(pathW);
-    todo_wine ok(ret == TRUE, "expected to remove directory deletefile\n");
+    ok(ret == TRUE, "expected to remove directory deletefile\n");
 
     /* test DeleteFile on non-empty directory */
     ret = CreateDirectoryW(pathW, NULL);
@@ -881,7 +881,7 @@ static void test_DeleteFileW( void )
     ret = CreateDirectoryW(pathsubW, NULL);
     ok(ret == TRUE, "couldn't create directory deletefile\\sub\n");
     ret = DeleteFileW(pathW);
-    todo_wine ok(ret == FALSE, "DeleteFile should fail for non-empty directories\n");
+    ok(ret == FALSE, "DeleteFile should fail for non-empty directories\n");
     ret = RemoveDirectoryW(pathsubW);
     ok(ret == TRUE, "expected to remove directory deletefile\\sub\n");
     ret = RemoveDirectoryW(pathW);
@@ -1612,18 +1612,25 @@ static void test_async_file_errors(void)
     szFile[0] = '\0';
     GetWindowsDirectoryA(szFile, sizeof(szFile)/sizeof(szFile[0])-1-strlen("\\win.ini"));
     strcat(szFile, "\\win.ini");
-    hFile = CreateFileA(szFile, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_ALWAYS, FILE_FLAG_OVERLAPPED, NULL);
-    ok(hFile != NULL, "CreateFileA(%s ...) failed\n", szFile);
+    hFile = CreateFileA(szFile, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        NULL, OPEN_ALWAYS, FILE_FLAG_OVERLAPPED, NULL);
+    if (hFile == INVALID_HANDLE_VALUE)  /* win9x doesn't like FILE_SHARE_DELETE */
+        hFile = CreateFileA(szFile, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                            NULL, OPEN_ALWAYS, FILE_FLAG_OVERLAPPED, NULL);
+    ok(hFile != INVALID_HANDLE_VALUE, "CreateFileA(%s ...) failed\n", szFile);
     while (TRUE)
     {
         BOOL res;
+        DWORD count;
         while (WaitForSingleObjectEx(hSem, INFINITE, TRUE) == WAIT_IO_COMPLETION)
             ;
         res = ReadFileEx(hFile, lpBuffer, 4096, &ovl, FileIOComplete);
         /*printf("Offset = %ld, result = %s\n", ovl.Offset, res ? "TRUE" : "FALSE");*/
         if (!res)
             break;
-        S(U(ovl)).Offset += 4096;
+        if (!GetOverlappedResult(hFile, &ovl, &count, FALSE))
+            break;
+        S(U(ovl)).Offset += count;
         /* i/o completion routine only called if ReadFileEx returned success.
          * we only care about violations of this rule so undo what should have
          * been done */
@@ -2074,7 +2081,9 @@ static void test_ReplaceFileA(void)
     ret = GetFileTime(hReplacedFile, NULL, NULL, &ftReplaced);
     ok( ret, "GetFileTime error (backup %d\n", GetLastError());
     ok(CompareFileTime(&ftReplaced, &ftReplacement) == 0,
-        "replaced file has wrong filetime\n");
+       "replaced file has wrong filetime %x%08x / %x%08x\n",
+       ftReplaced.dwHighDateTime, ftReplaced.dwLowDateTime,
+       ftReplacement.dwHighDateTime, ftReplacement.dwLowDateTime );
     CloseHandle(hReplacedFile);
 
     /* re-create replacement file for pass w/o backup (blank) */

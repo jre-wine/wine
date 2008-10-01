@@ -985,15 +985,172 @@ BOOL WINAPI ImmGetCompositionFontW(HIMC hIMC, LPLOGFONTW lplf)
     return TRUE;
 }
 
-/***********************************************************************
- *		ImmGetCompositionStringA (IMM32.@)
- */
-LONG WINAPI ImmGetCompositionStringA(
-  HIMC hIMC, DWORD dwIndex, LPVOID lpBuf, DWORD dwBufLen)
+
+/* Helpers for the GetCompositionString functions */
+
+static INT CopyCompStringIMEtoClient(InputContextData *data, LPBYTE source, INT slen, LPBYTE target, INT tlen,
+                                     BOOL unicode )
 {
-    BOOL isString = FALSE;
-    LPBYTE buffer = NULL;
-    CHAR *buf = NULL;
+    INT rc;
+
+    if (is_himc_ime_unicode(data) && !unicode)
+        rc = WideCharToMultiByte(CP_ACP, 0, (LPWSTR)source, slen, (LPSTR)target, tlen, NULL, NULL);
+    else if (!is_himc_ime_unicode(data) && unicode)
+        rc = MultiByteToWideChar(CP_ACP, 0, (LPSTR)source, slen, (LPWSTR)target, tlen) * sizeof(WCHAR);
+    else
+    {
+        int dlen = (unicode)?sizeof(WCHAR):sizeof(CHAR);
+        memcpy( target, source, min(slen,tlen)*dlen);
+        rc = slen*dlen;
+    }
+
+    return rc;
+}
+
+static INT CopyCompAttrIMEtoClient(InputContextData *data, LPBYTE source, INT slen, LPBYTE ssource, INT sslen,
+                                   LPBYTE target, INT tlen, BOOL unicode )
+{
+    INT rc;
+
+    if (is_himc_ime_unicode(data) && !unicode)
+    {
+        rc = WideCharToMultiByte(CP_ACP, 0, (LPWSTR)ssource, sslen, NULL, 0, NULL, NULL);
+        if (tlen)
+        {
+            const BYTE *src = source;
+            LPBYTE dst = target;
+            int i, j = 0, k = 0;
+
+            if (rc < tlen)
+                tlen = rc;
+            for (i = 0; i < sslen; ++i)
+            {
+                int len;
+
+                len = WideCharToMultiByte(CP_ACP, 0, (LPCWSTR)ssource + i, 1,
+                                          NULL, 0, NULL, NULL);
+                for (; len > 0; --len)
+                {
+                    dst[j++] = src[k];
+
+                    if (j >= tlen)
+                        goto end;
+                }
+                ++k;
+            }
+        end:
+            rc = j;
+        }
+    }
+    else if (!is_himc_ime_unicode(data) && unicode)
+    {
+        rc = MultiByteToWideChar(CP_ACP, 0, (LPSTR)ssource, sslen, NULL, 0);
+        if (tlen)
+        {
+            const BYTE *src = source;
+            LPBYTE dst = target;
+            int i, j = 0;
+
+            if (rc < tlen)
+                tlen = rc;
+            for (i = 0; i < sslen; ++i)
+            {
+                if (IsDBCSLeadByte(((LPSTR)ssource)[i]))
+                    continue;
+
+                dst[j++] = src[i];
+
+                if (j >= tlen)
+                    break;
+            }
+            rc = j;
+        }
+    }
+    else
+    {
+        memcpy( target, source, min(slen,tlen));
+        rc = slen;
+    }
+
+    return rc;
+}
+
+static INT CopyCompClauseIMEtoClient(InputContextData *data, LPBYTE source, INT slen, LPBYTE ssource, INT sslen,
+                                     LPBYTE target, INT tlen, BOOL unicode )
+{
+    INT rc;
+
+    if (is_himc_ime_unicode(data) && !unicode)
+    {
+        if (tlen)
+        {
+            int i;
+
+            if (slen < tlen)
+                tlen = slen;
+            tlen /= sizeof (DWORD);
+            for (i = 0; i < tlen; ++i)
+            {
+                ((DWORD *)target)[i] = WideCharToMultiByte(CP_ACP, 0, (LPWSTR)ssource,
+                                                          ((DWORD *)source)[i],
+                                                          NULL, 0,
+                                                          NULL, NULL);
+            }
+            rc = sizeof (DWORD) * i;
+        }
+        else
+            rc = slen;
+    }
+    else if (!is_himc_ime_unicode(data) && unicode)
+    {
+        if (tlen)
+        {
+            int i;
+
+            if (slen < tlen)
+                tlen = slen;
+            tlen /= sizeof (DWORD);
+            for (i = 0; i < tlen; ++i)
+            {
+                ((DWORD *)target)[i] = MultiByteToWideChar(CP_ACP, 0, (LPSTR)ssource,
+                                                          ((DWORD *)source)[i],
+                                                          NULL, 0);
+            }
+            rc = sizeof (DWORD) * i;
+        }
+        else
+            rc = slen;
+    }
+    else
+    {
+        memcpy( target, source, min(slen,tlen));
+        rc = slen;
+    }
+
+    return rc;
+}
+
+static INT CopyCompOffsetIMEtoClient(InputContextData *data, DWORD offset, LPBYTE ssource, BOOL unicode)
+{
+    int rc;
+
+    if (is_himc_ime_unicode(data) && !unicode)
+    {
+        rc = WideCharToMultiByte(CP_ACP, 0, (LPWSTR)ssource, offset, NULL, 0, NULL, NULL);
+    }
+    else if (!is_himc_ime_unicode(data) && unicode)
+    {
+        rc = MultiByteToWideChar(CP_ACP, 0, (LPSTR)ssource, offset, NULL, 0);
+    }
+    else
+        rc = offset;
+
+    return rc;
+}
+
+static LONG ImmGetCompositionStringT( HIMC hIMC, DWORD dwIndex, LPVOID lpBuf,
+                                      DWORD dwBufLen, BOOL unicode)
+{
     LONG rc = 0;
     InputContextData *data = (InputContextData*)hIMC;
     LPCOMPOSITIONSTRING compstr;
@@ -1013,119 +1170,84 @@ LONG WINAPI ImmGetCompositionStringA(
     switch (dwIndex)
     {
     case GCS_RESULTSTR:
-        if (compstr->dwResultStrLen > 0 && compstr->dwResultStrOffset > 0)
-        {
-            isString = TRUE;
-            buffer = compdata + compstr->dwResultStrOffset;
-            rc =  compstr->dwResultStrLen;
-            TRACE("GCS_RESULTSTR %p %i\n", buffer, rc);
-        }
+        TRACE("GCS_RESULTSTR\n");
+        rc = CopyCompStringIMEtoClient(data, compdata + compstr->dwResultStrOffset, compstr->dwResultStrLen, lpBuf, dwBufLen, unicode);
         break;
     case GCS_COMPSTR:
-        if (compstr->dwCompStrLen > 0 && compstr->dwCompStrOffset > 0)
-        {
-            isString = TRUE;
-            buffer = compdata + compstr->dwCompStrOffset;
-            rc = compstr->dwCompStrLen;
-            TRACE("GCS_COMPSTR %p %i\n", buffer, rc);
-        }
+        TRACE("GCS_COMPSTR\n");
+        rc = CopyCompStringIMEtoClient(data, compdata + compstr->dwCompStrOffset, compstr->dwCompStrLen, lpBuf, dwBufLen, unicode);
         break;
     case GCS_COMPATTR:
-        if (compstr->dwCompAttrLen > 0 && compstr->dwCompAttrOffset > 0)
-        {
-            buffer = compdata + compstr->dwCompAttrOffset;
-            rc = compstr->dwCompAttrLen;
-            TRACE("GCS_COMPATTR %p %i\n", buffer, rc);
-        }
+        TRACE("GCS_COMPATTR\n");
+        rc = CopyCompAttrIMEtoClient(data, compdata + compstr->dwCompAttrOffset, compstr->dwCompAttrLen,
+                                     compdata + compstr->dwCompStrOffset, compstr->dwCompStrLen,
+                                     lpBuf, dwBufLen, unicode);
         break;
     case GCS_COMPCLAUSE:
-        if (compstr->dwCompClauseLen > 0 && compstr->dwCompClauseOffset > 0)
-        {
-            buffer = compdata + compstr->dwCompClauseOffset;
-            rc = compstr->dwCompClauseLen;
-            TRACE("GCS_COMPCLAUSE %p %i\n", buffer, rc);
-        }
+        TRACE("GCS_COMPCLAUSE\n");
+        rc = CopyCompClauseIMEtoClient(data, compdata + compstr->dwCompClauseOffset,compstr->dwCompClauseLen,
+                                       compdata + compstr->dwCompStrOffset, compstr->dwCompStrLen,
+                                       lpBuf, dwBufLen, unicode);
         break;
     case GCS_RESULTCLAUSE:
-        if (compstr->dwResultClauseLen > 0 && compstr->dwResultClauseOffset > 0)
-        {
-            buffer = compdata + compstr->dwResultClauseOffset;
-            rc = compstr->dwResultClauseLen;
-            TRACE("GCS_RESULTCLAUSE %p %i\n", buffer, rc);
-        }
+        TRACE("GCS_RESULTCLAUSE\n");
+        rc = CopyCompClauseIMEtoClient(data, compdata + compstr->dwResultClauseOffset,compstr->dwResultClauseLen,
+                                       compdata + compstr->dwResultStrOffset, compstr->dwResultStrLen,
+                                       lpBuf, dwBufLen, unicode);
         break;
     case GCS_RESULTREADSTR:
-        if (compstr->dwResultReadStrLen > 0 && compstr->dwResultReadStrOffset > 0)
-        {
-            isString = TRUE;
-            buffer = compdata + compstr->dwResultReadStrOffset;
-            rc =  compstr->dwResultReadStrLen;
-            TRACE("GCS_RESULTREADSTR %p %i\n",buffer, rc);
-        }
+        TRACE("GCS_RESULTREADSTR\n");
+        rc = CopyCompStringIMEtoClient(data, compdata + compstr->dwResultReadStrOffset, compstr->dwResultReadStrLen, lpBuf, dwBufLen, unicode);
         break;
     case GCS_RESULTREADCLAUSE:
-        if (compstr->dwResultReadClauseLen > 0 && compstr->dwResultReadClauseOffset > 0)
-        {
-            buffer = compdata + compstr->dwResultReadClauseOffset;
-            rc = compstr->dwResultReadClauseLen;
-            TRACE("GCS_RESULTREADCLAUSE %p %i\n", buffer, rc);
-        }
+        TRACE("GCS_RESULTREADCLAUSE\n");
+        rc = CopyCompClauseIMEtoClient(data, compdata + compstr->dwResultReadClauseOffset,compstr->dwResultReadClauseLen,
+                                       compdata + compstr->dwResultStrOffset, compstr->dwResultStrLen,
+                                       lpBuf, dwBufLen, unicode);
         break;
     case GCS_COMPREADSTR:
-        if (compstr->dwCompReadStrLen > 0 && compstr->dwCompReadStrOffset > 0)
-        {
-            isString = TRUE;
-            buffer = compdata + compstr->dwCompReadStrOffset;
-            rc = compstr->dwCompReadStrLen;
-            TRACE("GCS_COMPREADSTR %p %i\n", buffer, rc);
-        }
+        TRACE("GCS_COMPREADSTR\n");
+        rc = CopyCompStringIMEtoClient(data, compdata + compstr->dwCompReadStrOffset, compstr->dwCompReadStrLen, lpBuf, dwBufLen, unicode);
         break;
     case GCS_COMPREADATTR:
-        if (compstr->dwCompReadAttrLen > 0 && compstr->dwCompReadAttrOffset > 0)
-        {
-            buffer = compdata + compstr->dwCompReadAttrOffset;
-            rc = compstr->dwCompReadAttrLen;
-            TRACE("GCS_COMPREADATTR %p %i\n", buffer, rc);
-        }
+        TRACE("GCS_COMPREADATTR\n");
+        rc = CopyCompAttrIMEtoClient(data, compdata + compstr->dwCompReadAttrOffset, compstr->dwCompReadAttrLen,
+                                     compdata + compstr->dwCompReadStrOffset, compstr->dwCompReadStrLen,
+                                     lpBuf, dwBufLen, unicode);
         break;
     case GCS_COMPREADCLAUSE:
-        if (compstr->dwCompReadClauseLen > 0 && compstr->dwCompReadClauseOffset > 0)
-        {
-            buffer = compdata + compstr->dwCompReadClauseOffset;
-            rc = compstr->dwCompReadClauseLen;
-            TRACE("GCS_COMPREADCLAUSE %p %i\n", buffer, rc);
-        }
+        TRACE("GCS_COMPREADCLAUSE\n");
+        rc = CopyCompClauseIMEtoClient(data, compdata + compstr->dwCompReadClauseOffset,compstr->dwCompReadClauseLen,
+                                       compdata + compstr->dwCompStrOffset, compstr->dwCompStrLen,
+                                       lpBuf, dwBufLen, unicode);
         break;
     case GCS_CURSORPOS:
         TRACE("GCS_CURSORPOS\n");
-        rc = compstr->dwCursorPos;
+        rc = CopyCompOffsetIMEtoClient(data, compstr->dwCursorPos, compdata + compstr->dwCompStrOffset, unicode);
         break;
     case GCS_DELTASTART:
         TRACE("GCS_DELTASTART\n");
-        rc = compstr->dwDeltaStart;
+        rc = CopyCompOffsetIMEtoClient(data, compstr->dwDeltaStart, compdata + compstr->dwCompStrOffset, unicode);
         break;
     default:
         FIXME("Unhandled index 0x%x\n",dwIndex);
         break;
     }
 
-    if ( isString && buffer && is_himc_ime_unicode(data))
-    {
-        INT len = WideCharToMultiByte(CP_ACP, 0, (LPCWSTR)buffer, rc, NULL, 0, NULL, NULL);
-        buf = HeapAlloc( GetProcessHeap(), 0, len );
-        if ( buf )
-            rc = WideCharToMultiByte(CP_ACP, 0, (LPCWSTR)buffer, rc, buf, len, NULL, NULL);
-        buffer = (LPBYTE)buf;
-    }
-
-    if ( lpBuf && buffer && dwBufLen >= rc)
-        memcpy(lpBuf, buffer, rc);
-
-    HeapFree( GetProcessHeap(), 0, buf );
     ImmUnlockIMCC(data->IMC.hCompStr);
 
     return rc;
 }
+
+/***********************************************************************
+ *		ImmGetCompositionStringA (IMM32.@)
+ */
+LONG WINAPI ImmGetCompositionStringA(
+  HIMC hIMC, DWORD dwIndex, LPVOID lpBuf, DWORD dwBufLen)
+{
+    return ImmGetCompositionStringT(hIMC, dwIndex, lpBuf, dwBufLen, FALSE);
+}
+
 
 /***********************************************************************
  *		ImmGetCompositionStringW (IMM32.@)
@@ -1134,144 +1256,7 @@ LONG WINAPI ImmGetCompositionStringW(
   HIMC hIMC, DWORD dwIndex,
   LPVOID lpBuf, DWORD dwBufLen)
 {
-    BOOL isString = FALSE;
-    LPBYTE buffer = NULL;
-    WCHAR *buf = NULL;
-    LONG rc = 0;
-    InputContextData *data = (InputContextData*)hIMC;
-    LPCOMPOSITIONSTRING compstr;
-    LPBYTE compdata;
-
-    TRACE("(%p, 0x%x, %p, %d)\n", hIMC, dwIndex, lpBuf, dwBufLen);
-
-    if (!data)
-       return FALSE;
-
-    if (!data->IMC.hCompStr)
-       return FALSE;
-
-    compdata = ImmLockIMCC(data->IMC.hCompStr);
-    compstr = (LPCOMPOSITIONSTRING)compdata;
-
-    switch (dwIndex)
-    {
-    case GCS_RESULTSTR:
-        if (compstr->dwResultStrLen > 0 && compstr->dwResultStrOffset > 0)
-        {
-            isString = TRUE;
-            buffer = compdata + compstr->dwResultStrOffset;
-            rc =  compstr->dwResultStrLen;
-            TRACE("GCS_RESULTSTR %p %i\n", buffer, rc);
-        }
-        break;
-    case GCS_RESULTREADSTR:
-        if (compstr->dwResultReadStrLen > 0 && compstr->dwResultReadStrOffset > 0)
-        {
-            isString = TRUE;
-            buffer = compdata + compstr->dwResultReadStrOffset;
-            rc =  compstr->dwResultReadStrLen;
-            TRACE("GCS_RESULTREADSTR %p %i\n",buffer, rc);
-        }
-        break;
-    case GCS_COMPSTR:
-        if (compstr->dwCompStrLen > 0 && compstr->dwCompStrOffset > 0)
-        {
-            isString = TRUE;
-            buffer = compdata + compstr->dwCompStrOffset;
-            rc = compstr->dwCompStrLen;
-            TRACE("GCS_COMPSTR %p %i\n", buffer, rc);
-        }
-        break;
-    case GCS_COMPATTR:
-        if (compstr->dwCompAttrLen > 0 && compstr->dwCompAttrOffset > 0)
-        {
-            buffer = compdata + compstr->dwCompAttrOffset;
-            rc = compstr->dwCompAttrLen;
-            TRACE("GCS_COMPATTR %p %i\n", buffer, rc);
-        }
-        break;
-    case GCS_COMPCLAUSE:
-        if (compstr->dwCompClauseLen > 0 && compstr->dwCompClauseOffset > 0)
-        {
-            buffer = compdata + compstr->dwCompClauseOffset;
-            rc = compstr->dwCompClauseLen;
-            TRACE("GCS_COMPCLAUSE %p %i\n", buffer, rc);
-        }
-        break;
-    case GCS_COMPREADSTR:
-        if (compstr->dwCompReadStrLen > 0 && compstr->dwCompReadStrOffset > 0)
-        {
-            isString = TRUE;
-            buffer = compdata + compstr->dwCompReadStrOffset;
-            rc = compstr->dwCompReadStrLen;
-            TRACE("GCS_COMPREADSTR %p %i\n", buffer, rc);
-        }
-        break;
-    case GCS_COMPREADATTR:
-        if (compstr->dwCompReadAttrLen > 0 && compstr->dwCompReadAttrOffset > 0)
-        {
-            buffer = compdata + compstr->dwCompReadAttrOffset;
-            rc = compstr->dwCompReadAttrLen;
-            TRACE("GCS_COMPREADATTR %p %i\n", buffer, rc);
-        }
-        break;
-    case GCS_COMPREADCLAUSE:
-        if (compstr->dwCompReadClauseLen > 0 && compstr->dwCompReadClauseOffset > 0)
-        {
-            buffer = compdata + compstr->dwCompReadClauseOffset;
-            rc = compstr->dwCompReadClauseLen;
-            TRACE("GCS_COMPREADCLAUSE %p %i\n", buffer, rc);
-        }
-        break;
-    case GCS_RESULTREADCLAUSE:
-        if (compstr->dwResultReadClauseLen > 0 && compstr->dwResultReadClauseOffset > 0)
-        {
-            buffer = compdata + compstr->dwResultReadClauseOffset;
-            rc = compstr->dwResultReadClauseLen;
-            TRACE("GCS_RESULTREADCLAUSE %p %i\n", buffer, rc);
-        }
-        break;
-    case GCS_RESULTCLAUSE:
-        if (compstr->dwResultClauseLen > 0 && compstr->dwResultClauseOffset > 0)
-        {
-            buffer = compdata + compstr->dwResultClauseOffset;
-            rc = compstr->dwResultClauseLen;
-            TRACE("GCS_RESULTCLAUSE %p %i\n", buffer, rc);
-        }
-        break;
-    case GCS_CURSORPOS:
-        TRACE("GCS_CURSORPOS\n");
-        rc = compstr->dwCursorPos;
-        break;
-    case GCS_DELTASTART:
-        TRACE("GCS_DELTASTART\n");
-        rc = compstr->dwDeltaStart;
-        break;
-    default:
-        FIXME("Unhandled index 0x%x\n",dwIndex);
-        break;
-    }
-
-    if ( isString && buffer )
-    {
-        if ( !is_himc_ime_unicode(data) )
-        {
-            INT len = MultiByteToWideChar( CP_ACP, 0, (LPCSTR)buffer, rc, NULL, 0 );
-            buf = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
-            if ( buf )
-                rc = MultiByteToWideChar( CP_ACP, 0, (LPCSTR)buffer, rc, buf, len );
-            buffer = (LPBYTE)buf;
-        }
-        rc *= sizeof(WCHAR);
-    }
-
-    if ( lpBuf && buffer && dwBufLen >= rc )
-        memcpy( lpBuf, buffer, rc );
-
-    HeapFree( GetProcessHeap(), 0, buf );
-    ImmUnlockIMCC(data->IMC.hCompStr);
-
-    return rc;
+    return ImmGetCompositionStringT(hIMC, dwIndex, lpBuf, dwBufLen, TRUE);
 }
 
 /***********************************************************************

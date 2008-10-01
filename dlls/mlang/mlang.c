@@ -2093,8 +2093,8 @@ static HRESULT WINAPI fnIMultiLanguage_GetCharsetInfo(
     BSTR Charset,
     PMIMECSETINFO pCharsetInfo)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    ICOM_THIS_MULTI(MLang_impl, vtbl_IMultiLanguage, iface);
+    return IMultiLanguage3_GetCharsetInfo((IMultiLanguage3*)&This->vtbl_IMultiLanguage3, Charset, pCharsetInfo);
 }
 
 static HRESULT WINAPI fnIMultiLanguage_IsConvertible(
@@ -3049,7 +3049,9 @@ static HRESULT WINAPI fnIMLangFontLink2_GetStrCodePages( IMLangFontLink2* This,
         DWORD *pdwCodePages, long *pcchCodePages)
 {
     FIXME("(%p)->%s %li %x %p %p\n",This, debugstr_wn(pszSrc,cchSrc),cchSrc,dwPriorityCodePages,pdwCodePages,pcchCodePages);
-    return E_NOTIMPL;
+    *pdwCodePages = 0;
+    *pcchCodePages = 1;
+    return S_OK;
 }
 
 static HRESULT WINAPI fnIMLangFontLink2_CodePageToCodePages(IMLangFontLink2* This,

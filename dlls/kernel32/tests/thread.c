@@ -104,13 +104,15 @@ CreateThread
    certain chunks of code at a time, and we know which one is executing
    it.  It basically makes multithreaded execution linear, which defeats
    the purpose of multiple threads, but makes testing easy.  */
-static HANDLE all_synced;
+static HANDLE start_event, stop_event;
 static LONG num_syncing_threads, num_synced;
 
 static void init_thread_sync_helpers(LONG num_threads)
 {
-  all_synced = CreateEvent(NULL, FALSE, FALSE, NULL);
-  ok(all_synced != NULL, "CreateEvent failed\n");
+  start_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+  ok(start_event != NULL, "CreateEvent failed\n");
+  stop_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+  ok(stop_event != NULL, "CreateEvent failed\n");
   num_syncing_threads = num_threads;
   num_synced = 0;
 }
@@ -120,13 +122,13 @@ static BOOL sync_threads_and_run_one(DWORD sync_id, DWORD my_id)
   LONG num = InterlockedIncrement(&num_synced);
   assert(0 < num && num <= num_syncing_threads);
   if (num == num_syncing_threads)
-    /* FIXME: MSDN claims PulseEvent is unreliable.  For a test this isn't
-       so important, but we could use condition variables with more effort.
-       The given approach is clearer, though.  */
-    PulseEvent(all_synced);
+  {
+      ResetEvent( stop_event );
+      SetEvent( start_event );
+  }
   else
   {
-    DWORD ret = WaitForSingleObject(all_synced, 60000);
+    DWORD ret = WaitForSingleObject(start_event, 10000);
     ok(ret == WAIT_OBJECT_0, "WaitForSingleObject failed\n");
   }
   return sync_id == my_id;
@@ -137,18 +139,21 @@ static void resync_after_run(void)
   LONG num = InterlockedDecrement(&num_synced);
   assert(0 <= num && num < num_syncing_threads);
   if (num == 0)
-    PulseEvent(all_synced);
+  {
+      ResetEvent( start_event );
+      SetEvent( stop_event );
+  }
   else
   {
-    DWORD ret = WaitForSingleObject(all_synced, 60000);
+    DWORD ret = WaitForSingleObject(stop_event, 10000);
     ok(ret == WAIT_OBJECT_0, "WaitForSingleObject failed\n");
   }
 }
 
 static void cleanup_thread_sync_helpers(void)
 {
-  CloseHandle(all_synced);
-  all_synced = NULL;
+  CloseHandle(start_event);
+  CloseHandle(stop_event);
 }
 
 DWORD tlsIndex;
@@ -372,6 +377,7 @@ static VOID test_CreateThread_basic(void)
    int error;
    DWORD i,j;
    DWORD GLE, ret;
+   DWORD tid;
 
    /* lstrlenA contains an exception handler so this makes sure exceptions work in the main thread */
    ok( lstrlenA( (char *)0xdeadbeef ) == 0, "lstrlenA: unexpected success\n" );
@@ -429,7 +435,7 @@ static VOID test_CreateThread_basic(void)
 
   /* Test how passing NULL as a pointer to threadid works */
   SetLastError(0xFACEaBAD);
-  thread[0] = CreateThread(NULL,0,threadFunc2,NULL,0,NULL);
+  thread[0] = CreateThread(NULL,0,threadFunc2,NULL,0,&tid);
   GLE = GetLastError();
   if (thread[0]) { /* NT */
     ok(GLE==0xFACEaBAD, "CreateThread set last error to %d, expected 4207848365\n", GLE);
@@ -477,7 +483,9 @@ static VOID test_CreateThread_suspended(void)
   ok(suspend_count == -1, "SuspendThread returned %d, expected -1\n", suspend_count);
 
   suspend_count = ResumeThread(thread);
-  ok(suspend_count == 0, "ResumeThread returned %d, expected 0\n", suspend_count);
+  ok(suspend_count == 0 ||
+     broken(suspend_count == -1), /* win9x */
+     "ResumeThread returned %d, expected 0\n", suspend_count);
 
   ok(CloseHandle(thread)!=0,"CloseHandle failed\n");
 }
@@ -1125,7 +1133,7 @@ static DWORD WINAPI TLS_ThreadProc(LPVOID p)
   if (sync_threads_and_run_one(0, id))
   {
     HANDLE thread;
-    DWORD waitret;
+    DWORD waitret, tid;
 
     val = TlsGetValue(TLS_index0);
     ok(GetLastError() == ERROR_SUCCESS, "TlsGetValue failed\n");
@@ -1135,7 +1143,7 @@ static DWORD WINAPI TLS_ThreadProc(LPVOID p)
     ok(GetLastError() == ERROR_SUCCESS, "TlsGetValue failed\n");
     ok(val == (LPVOID) 2, "TLS slot not initialized correctly\n");
 
-    thread = CreateThread(NULL, 0, TLS_InheritanceProc, 0, 0, NULL);
+    thread = CreateThread(NULL, 0, TLS_InheritanceProc, 0, 0, &tid);
     ok(thread != NULL, "CreateThread failed\n");
     waitret = WaitForSingleObject(thread, 60000);
     ok(waitret == WAIT_OBJECT_0, "WaitForSingleObject failed\n");
@@ -1173,7 +1181,9 @@ static void test_TLS(void)
 
   for (i = 0; i < 2; ++i)
   {
-    threads[i] = CreateThread(NULL, 0, TLS_ThreadProc, (LPVOID) i, 0, NULL);
+    DWORD tid;
+
+    threads[i] = CreateThread(NULL, 0, TLS_ThreadProc, (LPVOID) i, 0, &tid);
     ok(threads[i] != NULL, "CreateThread failed\n");
   }
 
@@ -1221,7 +1231,8 @@ START_TEST(thread)
        while (1)
        {
            HANDLE hThread;
-           hThread = CreateThread(NULL, 0, threadFunc2, NULL, 0, NULL);
+           DWORD tid;
+           hThread = CreateThread(NULL, 0, threadFunc2, NULL, 0, &tid);
            ok(hThread != NULL, "CreateThread failed, error %u\n",
               GetLastError());
            ok(WaitForSingleObject(hThread, 200) == WAIT_OBJECT_0,

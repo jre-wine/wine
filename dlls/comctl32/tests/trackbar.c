@@ -40,6 +40,7 @@ static const struct message create_parent_wnd_seq[] = {
     { WM_CREATE, sent },
     { WM_SHOWWINDOW, sent|wparam, 1 },
     { WM_WINDOWPOSCHANGING, sent|wparam, 0 },
+    { WM_QUERYNEWPALETTE, sent|optional },
     { WM_WINDOWPOSCHANGING, sent|wparam, 0 },
     { WM_ACTIVATEAPP, sent|wparam, 1 },
     { WM_NCACTIVATE, sent|wparam, 1 },
@@ -65,7 +66,7 @@ static const struct message parent_empty_test_seq[] = {
 
 static const struct message parent_create_trackbar_wnd_seq[] = {
     { WM_NOTIFYFORMAT, sent},
-    { 0x0129, sent}, /* should be WM_QUERYUISTATE instead of 0x0129 */
+    { WM_QUERYUISTATE, sent|optional},
     { WM_WINDOWPOSCHANGING, sent},
     { WM_NCACTIVATE, sent},
     { PBT_APMRESUMECRITICAL, sent},
@@ -79,6 +80,7 @@ static const struct message parent_create_trackbar_wnd_seq[] = {
 };
 
 static const struct message parent_new_window_test_seq[] = {
+    { WM_QUERYNEWPALETTE, sent|optional },
     { WM_WINDOWPOSCHANGING, sent},
     { WM_NCACTIVATE, sent},
     { PBT_APMRESUMECRITICAL, sent},
@@ -86,7 +88,7 @@ static const struct message parent_new_window_test_seq[] = {
     { WM_IME_NOTIFY, sent|defwinproc|optional},
     { WM_SETFOCUS, sent|defwinproc},
     { WM_NOTIFYFORMAT, sent},
-    { 0x0129, sent}, /* should be WM_QUERYUISTATE instead of 0x0129*/
+    { WM_QUERYUISTATE, sent|optional},
     {0}
 };
 
@@ -392,8 +394,9 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
     LRESULT ret;
     struct message msg;
 
-    /* do not log painting messages */
-    if (message != WM_PAINT &&
+    /* log system messages, except for painting */
+    if (message < WM_USER &&
+        message != WM_PAINT &&
         message != WM_ERASEBKGND &&
         message != WM_NCPAINT &&
         message != WM_NCHITTEST &&

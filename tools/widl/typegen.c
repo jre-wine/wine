@@ -341,26 +341,30 @@ void print(FILE *file, int indent, const char *format, va_list va)
 }
 
 
-static void write_var_init(FILE *file, int indent, const type_t *t, const char *n)
+static void write_var_init(FILE *file, int indent, const type_t *t, const char *n, const char *local_var_prefix)
 {
     if (decl_indirect(t))
-        print_file(file, indent, "MIDL_memset(&%s, 0, sizeof(%s));\n", n, n);
+    {
+        print_file(file, indent, "MIDL_memset(&%s%s, 0, sizeof(%s%s));\n",
+                   local_var_prefix, n, local_var_prefix, n);
+        print_file(file, indent, "%s_p_%s = &%s%s;\n", local_var_prefix, n, local_var_prefix, n);
+    }
     else if (is_ptr(t) || is_array(t))
-        print_file(file, indent, "%s = 0;\n", n);
+        print_file(file, indent, "%s%s = 0;\n", local_var_prefix, n);
 }
 
-void write_parameters_init(FILE *file, int indent, const func_t *func)
+void write_parameters_init(FILE *file, int indent, const func_t *func, const char *local_var_prefix)
 {
     const var_t *var;
 
     if (!is_void(get_func_return_type(func)))
-        write_var_init(file, indent, get_func_return_type(func), "_RetVal");
+        write_var_init(file, indent, get_func_return_type(func), "_RetVal", local_var_prefix);
 
     if (!func->args)
         return;
 
     LIST_FOR_EACH_ENTRY( var, func->args, const var_t, entry )
-        write_var_init(file, indent, var->type, var->name);
+        write_var_init(file, indent, var->type, var->name, local_var_prefix);
 
     fprintf(file, "\n");
 }
@@ -897,14 +901,14 @@ int is_full_pointer_function(const func_t *func)
 
 void write_full_pointer_init(FILE *file, int indent, const func_t *func, int is_server)
 {
-    print_file(file, indent, "_StubMsg.FullPtrXlatTables = NdrFullPointerXlatInit(0,%s);\n",
+    print_file(file, indent, "__frame->_StubMsg.FullPtrXlatTables = NdrFullPointerXlatInit(0,%s);\n",
                    is_server ? "XLAT_SERVER" : "XLAT_CLIENT");
     fprintf(file, "\n");
 }
 
 void write_full_pointer_free(FILE *file, int indent, const func_t *func)
 {
-    print_file(file, indent, "NdrFullPointerXlatFree(_StubMsg.FullPtrXlatTables);\n");
+    print_file(file, indent, "NdrFullPointerXlatFree(__frame->_StubMsg.FullPtrXlatTables);\n");
     fprintf(file, "\n");
 }
 
@@ -2631,7 +2635,7 @@ static unsigned int get_function_buffer_size( const func_t *func, enum pass pass
 }
 
 static void print_phase_function(FILE *file, int indent, const char *type,
-                                 enum remoting_phase phase,
+                                 const char *local_var_prefix, enum remoting_phase phase,
                                  const var_t *var, unsigned int type_offset)
 {
     const char *function;
@@ -2656,10 +2660,11 @@ static void print_phase_function(FILE *file, int indent, const char *type,
 
     print_file(file, indent, "Ndr%s%s(\n", type, function);
     indent++;
-    print_file(file, indent, "&_StubMsg,\n");
-    print_file(file, indent, "%s%s%s%s,\n",
+    print_file(file, indent, "&__frame->_StubMsg,\n");
+    print_file(file, indent, "%s%s%s%s%s,\n",
                (phase == PHASE_UNMARSHAL) ? "(unsigned char **)" : "(unsigned char *)",
                (phase == PHASE_UNMARSHAL || decl_indirect(var->type)) ? "&" : "",
+               local_var_prefix,
                (phase == PHASE_UNMARSHAL && decl_indirect(var->type)) ? "_p_" : "",
                var->name);
     print_file(file, indent, "(PFORMAT_STRING)&__MIDL_TypeFormatString.Format[%d]%s\n",
@@ -2669,8 +2674,8 @@ static void print_phase_function(FILE *file, int indent, const char *type,
     indent--;
 }
 
-void print_phase_basetype(FILE *file, int indent, enum remoting_phase phase,
-                          enum pass pass, const var_t *var,
+void print_phase_basetype(FILE *file, int indent, const char *local_var_prefix,
+                          enum remoting_phase phase, enum pass pass, const var_t *var,
                           const char *varname)
 {
     type_t *type = var->type;
@@ -2728,8 +2733,8 @@ void print_phase_basetype(FILE *file, int indent, enum remoting_phase phase,
     }
 
     if (phase == PHASE_MARSHAL)
-        print_file(file, indent, "MIDL_memset(_StubMsg.Buffer, 0, (0x%x - (long)_StubMsg.Buffer) & 0x%x);\n", alignment, alignment - 1);
-    print_file(file, indent, "_StubMsg.Buffer = (unsigned char *)(((long)_StubMsg.Buffer + %u) & ~0x%x);\n",
+        print_file(file, indent, "MIDL_memset(__frame->_StubMsg.Buffer, 0, (0x%x - (long)__frame->_StubMsg.Buffer) & 0x%x);\n", alignment, alignment - 1);
+    print_file(file, indent, "__frame->_StubMsg.Buffer = (unsigned char *)(((long)__frame->_StubMsg.Buffer + %u) & ~0x%x);\n",
                 alignment - 1, alignment - 1);
 
     if (phase == PHASE_MARSHAL)
@@ -2737,17 +2742,17 @@ void print_phase_basetype(FILE *file, int indent, enum remoting_phase phase,
         print_file(file, indent, "*(");
         write_type_decl(file, is_ptr(type) ? type->ref : type, NULL);
         if (is_ptr(type))
-            fprintf(file, " *)_StubMsg.Buffer = *");
+            fprintf(file, " *)__frame->_StubMsg.Buffer = *");
         else
-            fprintf(file, " *)_StubMsg.Buffer = ");
-        fprintf(file, "%s", varname);
+            fprintf(file, " *)__frame->_StubMsg.Buffer = ");
+        fprintf(file, "%s%s", local_var_prefix, varname);
         fprintf(file, ";\n");
     }
     else if (phase == PHASE_UNMARSHAL)
     {
-        print_file(file, indent, "if (_StubMsg.Buffer + sizeof(");
+        print_file(file, indent, "if (__frame->_StubMsg.Buffer + sizeof(");
         write_type_decl(file, is_ptr(type) ? type->ref : type, NULL);
-        fprintf(file, ") > _StubMsg.BufferEnd)\n");
+        fprintf(file, ") > __frame->_StubMsg.BufferEnd)\n");
         print_file(file, indent, "{\n");
         print_file(file, indent + 1, "RpcRaiseException(RPC_X_BAD_STUB_DATA);\n");
         print_file(file, indent, "}\n");
@@ -2755,16 +2760,16 @@ void print_phase_basetype(FILE *file, int indent, enum remoting_phase phase,
             print_file(file, indent, "");
         else
             print_file(file, indent, "*");
-        fprintf(file, "%s", varname);
+        fprintf(file, "%s%s", local_var_prefix, varname);
         if (pass == PASS_IN && is_ptr(type))
             fprintf(file, " = (");
         else
             fprintf(file, " = *(");
         write_type_decl(file, is_ptr(type) ? type->ref : type, NULL);
-        fprintf(file, " *)_StubMsg.Buffer;\n");
+        fprintf(file, " *)__frame->_StubMsg.Buffer;\n");
     }
 
-    print_file(file, indent, "_StubMsg.Buffer += sizeof(");
+    print_file(file, indent, "__frame->_StubMsg.Buffer += sizeof(");
     write_type_decl(file, var->type, NULL);
     fprintf(file, ");\n");
 }
@@ -2794,9 +2799,8 @@ expr_t *get_size_is_expr(const type_t *t, const char *name)
     return x;
 }
 
-static void write_parameter_conf_or_var_exprs(FILE *file, int indent,
-                                              enum remoting_phase phase,
-                                              const var_t *var)
+static void write_parameter_conf_or_var_exprs(FILE *file, int indent, const char *local_var_prefix,
+                                              enum remoting_phase phase, const var_t *var)
 {
     const type_t *type = var->type;
     /* get fundamental type for the argument */
@@ -2812,16 +2816,16 @@ static void write_parameter_conf_or_var_exprs(FILE *file, int indent,
             {
                 if (type->size_is)
                 {
-                    print_file(file, indent, "_StubMsg.MaxCount = (unsigned long)");
-                    write_expr(file, type->size_is, 1, 1, NULL, NULL);
+                    print_file(file, indent, "__frame->_StubMsg.MaxCount = (unsigned long)");
+                    write_expr(file, type->size_is, 1, 1, NULL, NULL, local_var_prefix);
                     fprintf(file, ";\n\n");
                 }
                 if (type->length_is)
                 {
-                    print_file(file, indent, "_StubMsg.Offset = (unsigned long)0;\n"); /* FIXME */
-                               print_file(file, indent, "_StubMsg.ActualCount = (unsigned long)");
-                               write_expr(file, type->length_is, 1, 1, NULL, NULL);
-                               fprintf(file, ";\n\n");
+                    print_file(file, indent, "__frame->_StubMsg.Offset = (unsigned long)0;\n"); /* FIXME */
+                    print_file(file, indent, "__frame->_StubMsg.ActualCount = (unsigned long)");
+                    write_expr(file, type->length_is, 1, 1, NULL, NULL, local_var_prefix);
+                    fprintf(file, ";\n\n");
                 }
             }
             break;
@@ -2830,8 +2834,8 @@ static void write_parameter_conf_or_var_exprs(FILE *file, int indent,
         {
             if (is_conformance_needed_for_phase(phase))
             {
-                print_file(file, indent, "_StubMsg.MaxCount = (unsigned long)");
-                write_expr(file, get_attrp(var->attrs, ATTR_SWITCHIS), 1, 1, NULL, NULL);
+                print_file(file, indent, "__frame->_StubMsg.MaxCount = (unsigned long)");
+                write_expr(file, get_attrp(var->attrs, ATTR_SWITCHIS), 1, 1, NULL, NULL, local_var_prefix);
                 fprintf(file, ";\n\n");
             }
             break;
@@ -2842,8 +2846,8 @@ static void write_parameter_conf_or_var_exprs(FILE *file, int indent,
 
             if (is_conformance_needed_for_phase(phase) && (iid = get_attrp( var->attrs, ATTR_IIDIS )))
             {
-                print_file( file, indent, "_StubMsg.MaxCount = (unsigned long) " );
-                write_expr( file, iid, 1, 1, NULL, NULL );
+                print_file( file, indent, "__frame->_StubMsg.MaxCount = (unsigned long) " );
+                write_expr( file, iid, 1, 1, NULL, NULL, local_var_prefix );
                 fprintf( file, ";\n\n" );
             }
             break;
@@ -2855,9 +2859,8 @@ static void write_parameter_conf_or_var_exprs(FILE *file, int indent,
     }
 }
 
-static void write_remoting_arg(FILE *file, int indent, const func_t *func,
-                              enum pass pass, enum remoting_phase phase,
-                              const var_t *var)
+static void write_remoting_arg(FILE *file, int indent, const func_t *func, const char *local_var_prefix,
+                               enum pass pass, enum remoting_phase phase, const var_t *var)
 {
     int in_attr, out_attr, pointer_type;
     const type_t *type = var->type;
@@ -2886,7 +2889,7 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func,
             break;
         }
 
-    write_parameter_conf_or_var_exprs(file, indent, phase, var);
+    write_parameter_conf_or_var_exprs(file, indent, local_var_prefix, phase, var);
     rtype = type->type;
 
     if (is_context_handle(type))
@@ -2900,15 +2903,15 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func,
                  * be direct, otherwise it is a pointer */
                 int is_ch_ptr = is_aliaschain_attr(type, ATTR_CONTEXTHANDLE) ? FALSE : TRUE;
                 print_file(file, indent, "NdrClientContextMarshall(\n");
-                print_file(file, indent + 1, "&_StubMsg,\n");
-                print_file(file, indent + 1, "(NDR_CCONTEXT)%s%s,\n", is_ch_ptr ? "*" : "", var->name);
+                print_file(file, indent + 1, "&__frame->_StubMsg,\n");
+                print_file(file, indent + 1, "(NDR_CCONTEXT)%s%s%s,\n", is_ch_ptr ? "*" : "", local_var_prefix, var->name);
                 print_file(file, indent + 1, "%s);\n", in_attr && out_attr ? "1" : "0");
             }
             else
             {
                 print_file(file, indent, "NdrServerContextNewMarshall(\n");
-                print_file(file, indent + 1, "&_StubMsg,\n");
-                print_file(file, indent + 1, "(NDR_SCONTEXT)%s,\n", var->name);
+                print_file(file, indent + 1, "&__frame->_StubMsg,\n");
+                print_file(file, indent + 1, "(NDR_SCONTEXT)%s%s,\n", local_var_prefix, var->name);
                 print_file(file, indent + 1, "(NDR_RUNDOWN)%s_rundown,\n", get_context_handle_type_name(var->type));
                 print_file(file, indent + 1, "(PFORMAT_STRING)&__MIDL_TypeFormatString.Format[%d]);\n", start_offset);
             }
@@ -2918,36 +2921,37 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func,
             if (pass == PASS_OUT)
             {
                 if (!in_attr)
-                    print_file(file, indent, "*%s = 0;\n", var->name);
+                    print_file(file, indent, "*%s%s = 0;\n", local_var_prefix, var->name);
                 print_file(file, indent, "NdrClientContextUnmarshall(\n");
-                print_file(file, indent + 1, "&_StubMsg,\n");
-                print_file(file, indent + 1, "(NDR_CCONTEXT *)%s,\n", var->name);
-                print_file(file, indent + 1, "_Handle);\n");
+                print_file(file, indent + 1, "&__frame->_StubMsg,\n");
+                print_file(file, indent + 1, "(NDR_CCONTEXT *)%s%s,\n", local_var_prefix, var->name);
+                print_file(file, indent + 1, "__frame->_Handle);\n");
             }
             else
             {
-                print_file(file, indent, "%s = NdrServerContextNewUnmarshall(\n", var->name);
-                print_file(file, indent + 1, "&_StubMsg,\n");
+                print_file(file, indent, "%s%s = NdrServerContextNewUnmarshall(\n", local_var_prefix, var->name);
+                print_file(file, indent + 1, "&__frame->_StubMsg,\n");
                 print_file(file, indent + 1, "(PFORMAT_STRING)&__MIDL_TypeFormatString.Format[%d]);\n", start_offset);
             }
         }
     }
     else if (is_user_type(var->type))
     {
-        print_phase_function(file, indent, "UserMarshal", phase, var, start_offset);
+        print_phase_function(file, indent, "UserMarshal", local_var_prefix, phase, var, start_offset);
     }
     else if (is_string_type(var->attrs, var->type))
     {
         if (is_array(type) && !is_conformant_array(type))
-            print_phase_function(file, indent, "NonConformantString", phase, var, start_offset);
+            print_phase_function(file, indent, "NonConformantString", local_var_prefix,
+                                 phase, var, start_offset);
         else
         {
             if (phase == PHASE_FREE || pass == PASS_RETURN || pointer_type == RPC_FC_UP)
-                print_phase_function(file, indent, "Pointer", phase, var,
+                print_phase_function(file, indent, "Pointer", local_var_prefix, phase, var,
                                      start_offset - (type->size_is ? 4 : 2));
             else
-                print_phase_function(file, indent, "ConformantString", phase, var,
-                                     start_offset);
+                print_phase_function(file, indent, "ConformantString", local_var_prefix,
+                                     phase, var, start_offset);
         }
     }
     else if (is_array(type))
@@ -2978,7 +2982,7 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func,
         }
 
         if (pointer_type != RPC_FC_RP) array_type = "Pointer";
-        print_phase_function(file, indent, array_type, phase, var, start_offset);
+        print_phase_function(file, indent, array_type, local_var_prefix, phase, var, start_offset);
         if (phase == PHASE_FREE && pointer_type == RPC_FC_RP)
         {
             /* these are all unmarshalled by allocating memory */
@@ -2987,16 +2991,16 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func,
                 ((type->type == RPC_FC_SMVARRAY || type->type == RPC_FC_LGVARRAY) && in_attr) ||
                 (type->type == RPC_FC_CARRAY && !in_attr))
             {
-                print_file(file, indent, "if (%s)\n", var->name);
+                print_file(file, indent, "if (%s%s)\n", local_var_prefix, var->name);
                 indent++;
-                print_file(file, indent, "_StubMsg.pfnFree(%s);\n", var->name);
+                print_file(file, indent, "__frame->_StubMsg.pfnFree(%s%s);\n", local_var_prefix, var->name);
             }
         }
     }
     else if (!is_ptr(var->type) && is_base_type(rtype))
     {
         if (phase != PHASE_FREE)
-            print_phase_basetype(file, indent, phase, pass, var, var->name);
+            print_phase_basetype(file, indent, local_var_prefix, phase, pass, var, var->name);
     }
     else if (!is_ptr(var->type))
     {
@@ -3004,38 +3008,38 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func,
         {
         case RPC_FC_STRUCT:
         case RPC_FC_PSTRUCT:
-            print_phase_function(file, indent, "SimpleStruct", phase, var, start_offset);
+            print_phase_function(file, indent, "SimpleStruct", local_var_prefix, phase, var, start_offset);
             break;
         case RPC_FC_CSTRUCT:
         case RPC_FC_CPSTRUCT:
-            print_phase_function(file, indent, "ConformantStruct", phase, var, start_offset);
+            print_phase_function(file, indent, "ConformantStruct", local_var_prefix, phase, var, start_offset);
             break;
         case RPC_FC_CVSTRUCT:
-            print_phase_function(file, indent, "ConformantVaryingStruct", phase, var, start_offset);
+            print_phase_function(file, indent, "ConformantVaryingStruct", local_var_prefix, phase, var, start_offset);
             break;
         case RPC_FC_BOGUS_STRUCT:
-            print_phase_function(file, indent, "ComplexStruct", phase, var, start_offset);
+            print_phase_function(file, indent, "ComplexStruct", local_var_prefix, phase, var, start_offset);
             break;
         case RPC_FC_RP:
             if (is_base_type( var->type->ref->type ))
             {
-                print_phase_basetype(file, indent, phase, pass, var, var->name);
+                print_phase_basetype(file, indent, local_var_prefix, phase, pass, var, var->name);
             }
             else if (var->type->ref->type == RPC_FC_STRUCT)
             {
                 if (phase != PHASE_BUFFERSIZE && phase != PHASE_FREE)
-                    print_phase_function(file, indent, "SimpleStruct", phase, var, start_offset + 4);
+                    print_phase_function(file, indent, local_var_prefix, "SimpleStruct", phase, var, start_offset + 4);
             }
             else
             {
                 expr_t *iid;
                 if ((iid = get_attrp( var->attrs, ATTR_IIDIS )))
                 {
-                    print_file( file, indent, "_StubMsg.MaxCount = (unsigned long) " );
-                    write_expr( file, iid, 1, 1, NULL, NULL );
+                    print_file( file, indent, "__frame->_StubMsg.MaxCount = (unsigned long) " );
+                    write_expr( file, iid, 1, 1, NULL, NULL, local_var_prefix );
                     fprintf( file, ";\n\n" );
                 }
-                print_phase_function(file, indent, "Pointer", phase, var, start_offset);
+                print_phase_function(file, indent, "Pointer", local_var_prefix, phase, var, start_offset);
             }
             break;
         default:
@@ -3047,31 +3051,31 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func,
         if (last_ptr(var->type) && (pointer_type == RPC_FC_RP) && is_base_type(rtype))
         {
             if (phase != PHASE_FREE)
-                print_phase_basetype(file, indent, phase, pass, var, var->name);
+                print_phase_basetype(file, indent, local_var_prefix, phase, pass, var, var->name);
         }
         else if (last_ptr(var->type) && (pointer_type == RPC_FC_RP) && (rtype == RPC_FC_STRUCT))
         {
             if (phase != PHASE_BUFFERSIZE && phase != PHASE_FREE)
-                print_phase_function(file, indent, "SimpleStruct", phase, var, start_offset + 4);
+                print_phase_function(file, indent, "SimpleStruct", local_var_prefix, phase, var, start_offset + 4);
         }
         else
         {
             if (var->type->ref->type == RPC_FC_IP)
-                print_phase_function(file, indent, "InterfacePointer", phase, var, start_offset);
+                print_phase_function(file, indent, "InterfacePointer", local_var_prefix, phase, var, start_offset);
             else
-                print_phase_function(file, indent, "Pointer", phase, var, start_offset);
+                print_phase_function(file, indent, "Pointer", local_var_prefix, phase, var, start_offset);
         }
     }
     fprintf(file, "\n");
 }
 
-void write_remoting_arguments(FILE *file, int indent, const func_t *func,
+void write_remoting_arguments(FILE *file, int indent, const func_t *func, const char *local_var_prefix,
                               enum pass pass, enum remoting_phase phase)
 {
     if (phase == PHASE_BUFFERSIZE && pass != PASS_RETURN)
     {
         unsigned int size = get_function_buffer_size( func, pass );
-        print_file(file, indent, "_StubMsg.BufferLength = %u;\n", size);
+        print_file(file, indent, "__frame->_StubMsg.BufferLength = %u;\n", size);
     }
 
     if (pass == PASS_RETURN)
@@ -3080,7 +3084,7 @@ void write_remoting_arguments(FILE *file, int indent, const func_t *func,
         var = *func->def;
         var.type = get_func_return_type(func);
         var.name = xstrdup( "_RetVal" );
-        write_remoting_arg( file, indent, func, pass, phase, &var );
+        write_remoting_arg( file, indent, func, local_var_prefix, pass, phase, &var );
         free( var.name );
     }
     else
@@ -3089,7 +3093,7 @@ void write_remoting_arguments(FILE *file, int indent, const func_t *func,
         if (!func->args)
             return;
         LIST_FOR_EACH_ENTRY( var, func->args, const var_t, entry )
-            write_remoting_arg( file, indent, func, pass, phase, var );
+            write_remoting_arg( file, indent, func, local_var_prefix, pass, phase, var );
     }
 }
 
@@ -3196,21 +3200,20 @@ void declare_stub_args( FILE *file, int indent, const func_t *func )
             write_type_decl_left(file, var->type);
             fprintf(file, " ");
             if (var->type->declarray) {
-                fprintf(file, "(*%s)", get_name(var));
+                fprintf(file, "(*%s)", var->name);
             } else
-                fprintf(file, "%s", get_name(var));
+                fprintf(file, "%s", var->name);
             write_type_right(file, var->type, FALSE);
             fprintf(file, ";\n");
 
             if (decl_indirect(var->type))
-                print_file(file, indent, "void *_p_%s = &%s;\n",
-                           var->name, var->name);
+                print_file(file, indent, "void *_p_%s;\n", var->name);
         }
     }
 }
 
 
-void assign_stub_out_args( FILE *file, int indent, const func_t *func )
+void assign_stub_out_args( FILE *file, int indent, const func_t *func, const char *local_var_prefix )
 {
     int in_attr, out_attr;
     int i = 0, sep = 0;
@@ -3229,12 +3232,12 @@ void assign_stub_out_args( FILE *file, int indent, const func_t *func )
 
         if (!in_attr)
         {
-            print_file(file, indent, "%s", get_name(var));
+            print_file(file, indent, "%s%s", local_var_prefix, var->name);
 
             if (is_context_handle(var->type))
             {
                 fprintf(file, " = NdrContextHandleInitialize(\n");
-                print_file(file, indent + 1, "&_StubMsg,\n");
+                print_file(file, indent + 1, "&__frame->_StubMsg,\n");
                 print_file(file, indent + 1, "(PFORMAT_STRING)&__MIDL_TypeFormatString.Format[%d]);\n",
                            var->type->typestring_offset);
             }
@@ -3243,10 +3246,10 @@ void assign_stub_out_args( FILE *file, int indent, const func_t *func )
                 unsigned int size, align = 0;
                 type_t *type = var->type;
 
-                fprintf(file, " = NdrAllocate(&_StubMsg, ");
+                fprintf(file, " = NdrAllocate(&__frame->_StubMsg, ");
                 for ( ; type->size_is ; type = type->ref)
                 {
-                    write_expr(file, type->size_is, TRUE, TRUE, NULL, NULL);
+                    write_expr(file, type->size_is, TRUE, TRUE, NULL, NULL, local_var_prefix);
                     fprintf(file, " * ");
                 }
                 size = type_memsize(type, &align);
@@ -3254,9 +3257,9 @@ void assign_stub_out_args( FILE *file, int indent, const func_t *func )
             }
             else if (!is_string)
             {
-                fprintf(file, " = &_W%u;\n", i);
+                fprintf(file, " = &%s_W%u;\n", local_var_prefix, i);
                 if (is_ptr(var->type) && !last_ptr(var->type))
-                    print_file(file, indent, "_W%u = 0;\n", i);
+                    print_file(file, indent, "%s_W%u = 0;\n", local_var_prefix, i);
                 i++;
             }
 
@@ -3288,7 +3291,7 @@ int write_expr_eval_routines(FILE *file, const char *iface)
                     name, var_name, name, eval->baseoff);
         print_file(file, 1, "pStubMsg->Offset = 0;\n"); /* FIXME */
         print_file(file, 1, "pStubMsg->MaxCount = (unsigned long)");
-        write_expr(file, eval->expr, 1, 1, var_name_expr, eval->structure);
+        write_expr(file, eval->expr, 1, 1, var_name_expr, eval->structure, "");
         fprintf(file, ";\n");
         print_file(file, 0, "}\n\n");
         callback_offset++;
@@ -3371,4 +3374,118 @@ void write_endpoints( FILE *f, const char *prefix, const str_list_t *list )
 
 error:
     error("Invalid endpoint syntax '%s'\n", endpoint->str);
+}
+
+void write_exceptions( FILE *file )
+{
+    fprintf( file, "#ifndef USE_COMPILER_EXCEPTIONS\n");
+    fprintf( file, "\n");
+    fprintf( file, "#include \"wine/exception.h\"\n");
+    fprintf( file, "#undef RpcTryExcept\n");
+    fprintf( file, "#undef RpcExcept\n");
+    fprintf( file, "#undef RpcEndExcept\n");
+    fprintf( file, "#undef RpcTryFinally\n");
+    fprintf( file, "#undef RpcFinally\n");
+    fprintf( file, "#undef RpcEndFinally\n");
+    fprintf( file, "#undef RpcExceptionCode\n");
+    fprintf( file, "#undef RpcAbnormalTermination\n");
+    fprintf( file, "\n");
+    fprintf( file, "struct __exception_frame;\n");
+    fprintf( file, "typedef int (*__filter_func)(EXCEPTION_RECORD *, struct __exception_frame *);\n");
+    fprintf( file, "typedef void (*__finally_func)(struct __exception_frame *);\n");
+    fprintf( file, "\n");
+    fprintf( file, "#define __DECL_EXCEPTION_FRAME \\\n");
+    fprintf( file, "    EXCEPTION_REGISTRATION_RECORD frame; \\\n");
+    fprintf( file, "    __filter_func                 filter; \\\n");
+    fprintf( file, "    __finally_func                finally; \\\n");
+    fprintf( file, "    sigjmp_buf                    jmp; \\\n");
+    fprintf( file, "    DWORD                         code; \\\n");
+    fprintf( file, "    unsigned char                 abnormal_termination; \\\n");
+    fprintf( file, "    unsigned char                 filter_level; \\\n");
+    fprintf( file, "    unsigned char                 finally_level;\n");
+    fprintf( file, "\n");
+    fprintf( file, "struct __exception_frame\n{\n");
+    fprintf( file, "    __DECL_EXCEPTION_FRAME;\n");
+    fprintf( file, "};\n");
+    fprintf( file, "\n");
+    fprintf( file, "static DWORD __widl_exception_handler( EXCEPTION_RECORD *record,\n");
+    fprintf( file, "                                       EXCEPTION_REGISTRATION_RECORD *frame,\n");
+    fprintf( file, "                                       CONTEXT *context,\n");
+    fprintf( file, "                                       EXCEPTION_REGISTRATION_RECORD **pdispatcher )\n");
+    fprintf( file, "{\n");
+    fprintf( file, "    struct __exception_frame *exc_frame = (struct __exception_frame *)frame;\n");
+    fprintf( file, "\n");
+    fprintf( file, "    if (record->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND | EH_NESTED_CALL))\n");
+    fprintf( file, "    {\n" );
+    fprintf( file, "        if (exc_frame->finally_level && (record->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND)))\n");
+    fprintf( file, "        {\n" );
+    fprintf( file, "            exc_frame->abnormal_termination = 1;\n");
+    fprintf( file, "            exc_frame->finally( exc_frame );\n");
+    fprintf( file, "        }\n" );
+    fprintf( file, "        return ExceptionContinueSearch;\n");
+    fprintf( file, "    }\n" );
+    fprintf( file, "    exc_frame->code = record->ExceptionCode;\n");
+    fprintf( file, "    if (exc_frame->filter_level && exc_frame->filter( record, exc_frame ) == EXCEPTION_EXECUTE_HANDLER)\n" );
+    fprintf( file, "    {\n");
+    fprintf( file, "        __wine_rtl_unwind( frame, record );\n");
+    fprintf( file, "        if (exc_frame->finally_level > exc_frame->filter_level)\n" );
+    fprintf( file, "        {\n");
+    fprintf( file, "            exc_frame->abnormal_termination = 1;\n");
+    fprintf( file, "            exc_frame->finally( exc_frame );\n");
+    fprintf( file, "            __wine_pop_frame( frame );\n");
+    fprintf( file, "        }\n");
+    fprintf( file, "        exc_frame->filter_level = 0;\n");
+    fprintf( file, "        siglongjmp( exc_frame->jmp, 1 );\n");
+    fprintf( file, "    }\n");
+    fprintf( file, "    return ExceptionContinueSearch;\n");
+    fprintf( file, "}\n");
+    fprintf( file, "\n");
+    fprintf( file, "#define RpcTryExcept \\\n");
+    fprintf( file, "    if (!sigsetjmp( __frame->jmp, 0 )) \\\n");
+    fprintf( file, "    { \\\n");
+    fprintf( file, "        if (!__frame->finally_level) \\\n" );
+    fprintf( file, "            __wine_push_frame( &__frame->frame ); \\\n");
+    fprintf( file, "        __frame->filter_level = __frame->finally_level + 1;\n" );
+    fprintf( file, "\n");
+    fprintf( file, "#define RpcExcept(expr) \\\n");
+    fprintf( file, "        if (!__frame->finally_level) \\\n" );
+    fprintf( file, "            __wine_pop_frame( &__frame->frame ); \\\n");
+    fprintf( file, "        __frame->filter_level = 0; \\\n" );
+    fprintf( file, "    } \\\n");
+    fprintf( file, "    else \\\n");
+    fprintf( file, "\n");
+    fprintf( file, "#define RpcEndExcept\n");
+    fprintf( file, "\n");
+    fprintf( file, "#define RpcExceptionCode() (__frame->code)\n");
+    fprintf( file, "\n");
+    fprintf( file, "#define RpcTryFinally \\\n");
+    fprintf( file, "    if (!__frame->filter_level) \\\n");
+    fprintf( file, "        __wine_push_frame( &__frame->frame ); \\\n");
+    fprintf( file, "    __frame->finally_level = __frame->filter_level + 1;\n");
+    fprintf( file, "\n");
+    fprintf( file, "#define RpcFinally \\\n");
+    fprintf( file, "    if (!__frame->filter_level) \\\n");
+    fprintf( file, "        __wine_pop_frame( &__frame->frame ); \\\n");
+    fprintf( file, "    __frame->finally_level = 0;\n");
+    fprintf( file, "\n");
+    fprintf( file, "#define RpcEndFinally\n");
+    fprintf( file, "\n");
+    fprintf( file, "#define RpcAbnormalTermination() (__frame->abnormal_termination)\n");
+    fprintf( file, "\n");
+    fprintf( file, "#define RpcExceptionInit(filter_func,finally_func) \\\n");
+    fprintf( file, "    do { \\\n");
+    fprintf( file, "        __frame->frame.Handler = __widl_exception_handler; \\\n");
+    fprintf( file, "        __frame->filter = (__filter_func)(filter_func); \\\n" );
+    fprintf( file, "        __frame->finally = (__finally_func)(finally_func); \\\n");
+    fprintf( file, "        __frame->abnormal_termination = 0; \\\n");
+    fprintf( file, "        __frame->filter_level = 0; \\\n");
+    fprintf( file, "        __frame->finally_level = 0; \\\n");
+    fprintf( file, "    } while (0)\n");
+    fprintf( file, "\n");
+    fprintf( file, "#else /* USE_COMPILER_EXCEPTIONS */\n");
+    fprintf( file, "\n");
+    fprintf( file, "#define RpcExceptionInit(filter_func,finally_func) do {} while(0)\n");
+    fprintf( file, "#define __DECL_EXCEPTION_FRAME\n");
+    fprintf( file, "\n");
+    fprintf( file, "#endif /* USE_COMPILER_EXCEPTIONS */\n");
 }

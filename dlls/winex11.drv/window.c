@@ -336,11 +336,23 @@ static void sync_window_style( Display *display, struct x11drv_win_data *data )
  *
  * Update the X11 window region.
  */
-static void sync_window_region( Display *display, struct x11drv_win_data *data, HRGN hrgn )
+static void sync_window_region( Display *display, struct x11drv_win_data *data, HRGN win_region )
 {
 #ifdef HAVE_LIBXSHAPE
+    HRGN hrgn = win_region;
+
     if (!data->whole_window) return;
     data->shaped = FALSE;
+
+    if (hrgn == (HRGN)1)  /* hack: win_region == 1 means retrieve region from server */
+    {
+        if (!(hrgn = CreateRectRgn( 0, 0, 0, 0 ))) return;
+        if (GetWindowRgn( data->hwnd, hrgn ) == ERROR)
+        {
+            DeleteObject( hrgn );
+            hrgn = 0;
+        }
+    }
 
     if (!hrgn)
     {
@@ -364,7 +376,30 @@ static void sync_window_region( Display *display, struct x11drv_win_data *data, 
             data->shaped = TRUE;
         }
     }
+    if (hrgn && hrgn != win_region) DeleteObject( hrgn );
 #endif  /* HAVE_LIBXSHAPE */
+}
+
+
+/***********************************************************************
+ *              sync_window_opacity
+ */
+static void sync_window_opacity( Display *display, Window win,
+                                 COLORREF key, BYTE alpha, DWORD flags )
+{
+    unsigned long opacity = 0xffffffff;
+
+    if (flags & LWA_ALPHA) opacity = (0xffffffff / 0xff) * alpha;
+
+    if (flags & LWA_COLORKEY) FIXME("LWA_COLORKEY not supported\n");
+
+    wine_tsx11_lock();
+    if (opacity == 0xffffffff)
+        XDeleteProperty( display, win, x11drv_atom(_NET_WM_WINDOW_OPACITY) );
+    else
+        XChangeProperty( display, win, x11drv_atom(_NET_WM_WINDOW_OPACITY),
+                         XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&opacity, 1 );
+    wine_tsx11_unlock();
 }
 
 
@@ -412,9 +447,9 @@ static void sync_window_text( Display *display, Window win, const WCHAR *text )
 
 
 /***********************************************************************
- *              X11DRV_set_win_format
+ *              set_win_format
  */
-BOOL X11DRV_set_win_format( HWND hwnd, XID fbconfig_id )
+static BOOL set_win_format( HWND hwnd, XID fbconfig_id )
 {
     struct x11drv_win_data *data;
     XVisualInfo *vis;
@@ -1181,8 +1216,10 @@ static void sync_window_position( Display *display, struct x11drv_win_data *data
     /* resizing a managed maximized window is not allowed */
     if (!(style & WS_MAXIMIZE) || !data->managed)
     {
-        if ((changes.width = data->whole_rect.right - data->whole_rect.left) <= 0) changes.width = 1;
-        if ((changes.height = data->whole_rect.bottom - data->whole_rect.top) <= 0) changes.height = 1;
+        changes.width = data->whole_rect.right - data->whole_rect.left;
+        changes.height = data->whole_rect.bottom - data->whole_rect.top;
+        /* if window rect is empty force size to 1x1 */
+        if (changes.width <= 0 || changes.height <= 0) changes.width = changes.height = 1;
         mask |= CWWidth | CWHeight;
     }
 
@@ -1327,7 +1364,9 @@ static Window create_whole_window( Display *display, struct x11drv_win_data *dat
     int cx, cy, mask;
     XSetWindowAttributes attr;
     WCHAR text[1024];
-    HRGN hrgn;
+    COLORREF key;
+    BYTE alpha;
+    DWORD layered_flags;
 
     if (!(cx = data->window_rect.right - data->window_rect.left)) cx = 1;
     if (!(cy = data->window_rect.bottom - data->window_rect.top)) cy = 1;
@@ -1375,11 +1414,12 @@ static Window create_whole_window( Display *display, struct x11drv_win_data *dat
     sync_window_text( display, data->whole_window, text );
 
     /* set the window region */
-    if ((hrgn = CreateRectRgn( 0, 0, 0, 0 )))
-    {
-        if (GetWindowRgn( data->hwnd, hrgn ) != ERROR) sync_window_region( display, data, hrgn );
-        DeleteObject( hrgn );
-    }
+    sync_window_region( display, data, (HRGN)1 );
+
+    /* set the window opacity */
+    if (!GetLayeredWindowAttributes( data->hwnd, &key, &alpha, &layered_flags )) layered_flags = 0;
+    sync_window_opacity( display, data->whole_window, key, alpha, layered_flags );
+
     wine_tsx11_lock();
     XFlush( display );  /* make sure the window exists before we start painting to it */
     wine_tsx11_unlock();
@@ -1446,16 +1486,15 @@ void X11DRV_SetWindowText( HWND hwnd, LPCWSTR text )
  *
  * Update the X state of a window to reflect a style change
  */
-void X11DRV_SetWindowStyle( HWND hwnd, DWORD old_style )
+void X11DRV_SetWindowStyle( HWND hwnd, INT offset, STYLESTRUCT *style )
 {
     struct x11drv_win_data *data;
-    DWORD new_style, changed;
+    DWORD changed;
 
     if (hwnd == GetDesktopWindow()) return;
-    new_style = GetWindowLongW( hwnd, GWL_STYLE );
-    changed = new_style ^ old_style;
+    changed = style->styleNew ^ style->styleOld;
 
-    if ((changed & WS_VISIBLE) && (new_style & WS_VISIBLE))
+    if (offset == GWL_STYLE && (changed & WS_VISIBLE) && (style->styleNew & WS_VISIBLE))
     {
         /* we don't unmap windows, that causes trouble with the window manager */
         if (!(data = X11DRV_get_win_data( hwnd )) &&
@@ -1465,20 +1504,27 @@ void X11DRV_SetWindowStyle( HWND hwnd, DWORD old_style )
         {
             Display *display = thread_display();
             set_wm_hints( display, data );
-            if (!data->mapped) map_window( display, data, new_style );
+            if (!data->mapped) map_window( display, data, style->styleNew );
         }
     }
 
-    if (changed & WS_DISABLED)
+    if (offset == GWL_STYLE && (changed & WS_DISABLED))
     {
         data = X11DRV_get_win_data( hwnd );
         if (data && data->wm_hints)
         {
             wine_tsx11_lock();
-            data->wm_hints->input = !(new_style & WS_DISABLED);
+            data->wm_hints->input = !(style->styleNew & WS_DISABLED);
             XSetWMHints( thread_display(), data->whole_window, data->wm_hints );
             wine_tsx11_unlock();
         }
+    }
+
+    if (offset == GWL_EXSTYLE && (changed & WS_EX_LAYERED))
+    {
+        /* changing WS_EX_LAYERED resets attributes */
+        if ((data = X11DRV_get_win_data( hwnd )) && data->whole_window)
+            sync_window_opacity( thread_display(), data->whole_window, 0, 0, 0 );
     }
 }
 
@@ -2070,6 +2116,7 @@ UINT X11DRV_ShowWindow( HWND hwnd, INT cmd, RECT *rect, UINT swp )
 
     if (!data || !data->whole_window || !data->managed || !data->mapped || data->iconic) return swp;
     if (style & WS_MINIMIZE) return swp;
+    if (IsRectEmpty( rect )) return swp;
 
     /* only fetch the new rectangle if the ShowWindow was a result of a window manager event */
 
@@ -2142,14 +2189,52 @@ int X11DRV_SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL redraw )
     {
         sync_window_region( thread_display(), data, hrgn );
     }
-    else if (GetWindowThreadProcessId( hwnd, NULL ) != GetCurrentThreadId())
+    else if (X11DRV_get_whole_window( hwnd ))
     {
-        FIXME( "not supported on other thread window %p\n", hwnd );
-        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        return FALSE;
+        SendMessageW( hwnd, WM_X11DRV_SET_WIN_REGION, 0, 0 );
     }
-
     return TRUE;
+}
+
+
+/***********************************************************************
+ *		SetLayeredWindowAttributes  (X11DRV.@)
+ *
+ * Set transparency attributes for a layered window.
+ */
+void X11DRV_SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha, DWORD flags )
+{
+    Window win = X11DRV_get_whole_window( hwnd );
+
+    if (win) sync_window_opacity( thread_display(), win, key, alpha, flags );
+}
+
+
+/**********************************************************************
+ *           X11DRV_WindowMessage   (X11DRV.@)
+ */
+LRESULT X11DRV_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
+{
+    struct x11drv_win_data *data;
+
+    switch(msg)
+    {
+    case WM_X11DRV_ACQUIRE_SELECTION:
+        return X11DRV_AcquireClipboard( hwnd );
+    case WM_X11DRV_DELETE_WINDOW:
+        return SendMessageW( hwnd, WM_SYSCOMMAND, SC_CLOSE, 0 );
+    case WM_X11DRV_SET_WIN_FORMAT:
+        return set_win_format( hwnd, (XID)wp );
+    case WM_X11DRV_SET_WIN_REGION:
+        if ((data = X11DRV_get_win_data( hwnd ))) sync_window_region( thread_display(), data, (HRGN)1 );
+        return 0;
+    case WM_X11DRV_RESIZE_DESKTOP:
+        X11DRV_resize_desktop( LOWORD(lp), HIWORD(lp) );
+        return 0;
+    default:
+        FIXME( "got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, wp, lp );
+        return 0;
+    }
 }
 
 
@@ -2259,8 +2344,8 @@ LRESULT X11DRV_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam )
     xev.xclient.display = display;
     xev.xclient.send_event = True;
     xev.xclient.format = 32;
-    xev.xclient.data.l[0] = x; /* x coord */
-    xev.xclient.data.l[1] = y; /* y coord */
+    xev.xclient.data.l[0] = x - virtual_screen_rect.left; /* x coord */
+    xev.xclient.data.l[1] = y - virtual_screen_rect.top;  /* y coord */
     xev.xclient.data.l[2] = dir; /* direction */
     xev.xclient.data.l[3] = 1; /* button */
     xev.xclient.data.l[4] = 0; /* unused */

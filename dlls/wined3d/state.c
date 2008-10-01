@@ -3210,6 +3210,8 @@ static void loadTexCoords(IWineD3DStateBlockImpl *stateblock, WineDirect3DVertex
             GL_EXTCALL(glMultiTexCoord4fARB(GL_TEXTURE0_ARB + textureNo, 0, 0, 0, 1));
         }
     }
+
+    checkGLcall("loadTexCoords");
 }
 
 static void tex_coordindex(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
@@ -3487,6 +3489,7 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
 
     if(stateblock->textures[sampler]) {
         IWineD3DBaseTexture_PreLoad(stateblock->textures[sampler]);
+        IWineD3DBaseTexture_BindTexture(stateblock->textures[sampler]);
         IWineD3DBaseTexture_ApplyStateChanges(stateblock->textures[sampler], stateblock->textureState[sampler], stateblock->samplerState[sampler]);
 
         if (GL_SUPPORT(EXT_TEXTURE_LOD_BIAS)) {
@@ -3911,13 +3914,34 @@ static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock
             of Z buffer precision and the clear values do not match in the z test. Thus scale
             [0;1] to [-1;1], so when gl undoes that we utilize the full z range
          */
-        glTranslatef(1.0 / stateblock->viewport.Width, -1.0/ stateblock->viewport.Height, -1.0);
-        checkGLcall("glTranslatef (1.0 / width, -1.0 / height, -1.0)");
+
+        /*
+         * Careful with the order of operations here, we're essentially working backwards:
+         * x = x + 1/w;
+         * y = (y - 1/h) * flip;
+         * z = z * 2 - 1;
+         *
+         * Becomes:
+         * glTranslatef(0.0, 0.0, -1.0);
+         * glScalef(1.0, 1.0, 2.0);
+         *
+         * glScalef(1.0, flip, 1.0);
+         * glTranslatef(1/w, -1/h, 0.0);
+         *
+         * This is equivalent to:
+         * glTranslatef(1/w, -flip/h, -1.0)
+         * glScalef(1.0, flip, 2.0);
+         */
+
         if (stateblock->wineD3DDevice->render_offscreen) {
             /* D3D texture coordinates are flipped compared to OpenGL ones, so
              * render everything upside down when rendering offscreen. */
+            glTranslatef(1.0 / stateblock->viewport.Width, 1.0 / stateblock->viewport.Height, -1.0);
+            checkGLcall("glTranslatef(1.0 / width, 1.0 / height, -1.0)");
             glScalef(1.0, -1.0, 2.0);
         } else {
+            glTranslatef(1.0 / stateblock->viewport.Width, -1.0 / stateblock->viewport.Height, -1.0);
+            checkGLcall("glTranslatef(1.0 / width, -1.0 / height, -1.0)");
             glScalef(1.0, 1.0, 2.0);
         }
         checkGLcall("glScalef");

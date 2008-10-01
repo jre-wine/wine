@@ -39,6 +39,22 @@ WINE_DECLARE_DEBUG_CHANNEL(d3d_caps);
 
 #define GLINFO_LOCATION      (*gl_info)
 
+/* Internally used shader constants. Applications can use constants 0 to GL_LIMITS(vshader_constantsF) - 1,
+ * so upload them above that
+ */
+#define ARB_SHADER_PRIVCONST_BASE GL_LIMITS(vshader_constantsF)
+#define ARB_SHADER_PRIVCONST_POS ARB_SHADER_PRIVCONST_BASE + 0
+
+/* ARB_program_shader private data */
+struct shader_arb_priv {
+    GLuint                  current_vprogram_id;
+    GLuint                  current_fprogram_id;
+    GLuint                  depth_blt_vprogram_id;
+    GLuint                  depth_blt_fprogram_id;
+    BOOL                    use_arbfp_fixed_func;
+    struct hash_table_t     *fragment_shaders;
+};
+
 /********************************************************
  * ARB_[vertex/fragment]_program helper functions follow
  ********************************************************/
@@ -150,7 +166,7 @@ static unsigned int shader_arb_load_constantsF(IWineD3DBaseShaderImpl* This, Win
  * We only support float constants in ARB at the moment, so don't 
  * worry about the Integers or Booleans
  */
-void shader_arb_load_constants(
+static void shader_arb_load_constants(
     IWineD3DDevice* device,
     char usePixelShader,
     char useVertexShader) {
@@ -234,7 +250,7 @@ void shader_arb_load_constants(
 }
 
 /* Generate the variable & register declarations for the ARB_vertex_program output target */
-void shader_generate_arb_declarations(
+static void shader_generate_arb_declarations(
     IWineD3DBaseShader *iface,
     shader_reg_maps* reg_maps,
     SHADER_BUFFER* buffer,
@@ -1908,7 +1924,7 @@ static void shader_arb_deselect_depth_blt(IWineD3DDevice *iface) {
         checkGLcall("glEnable(GL_FRAGMENT_PROGRAM_ARB);");
 
         TRACE("(%p) : Bound fragment program %u and enabled GL_FRAGMENT_PROGRAM_ARB\n", This, priv->current_fprogram_id);
-    } else if(GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
+    } else if(!priv->use_arbfp_fixed_func) {
         glDisable(GL_FRAGMENT_PROGRAM_ARB);
         checkGLcall("glDisable(GL_FRAGMENT_PROGRAM_ARB)");
     }
@@ -2894,9 +2910,10 @@ static GLuint gen_arbfp_ffp_shader(struct ffp_settings *settings, IWineD3DStateB
     if (glGetError() == GL_INVALID_OPERATION) {
         GLint pos;
         glGetIntegerv(GL_PROGRAM_ERROR_POSITION_ARB, &pos);
-        FIXME("Vertex program error at position %d: %s\n", pos,
+        FIXME("Fragment program error at position %d: %s\n", pos,
               debugstr_a((const char *)glGetString(GL_PROGRAM_ERROR_STRING_ARB)));
     }
+    HeapFree(GetProcessHeap(), 0, buffer.buffer);
     return ret;
 }
 
@@ -3194,7 +3211,7 @@ static void arbfp_blit_free(IWineD3DDevice *iface) {
     LEAVE_GL();
 }
 
-BOOL gen_planar_yuv_read(SHADER_BUFFER *buffer, WINED3DFORMAT fmt, GLenum textype, char *luminance) {
+static BOOL gen_planar_yuv_read(SHADER_BUFFER *buffer, WINED3DFORMAT fmt, GLenum textype, char *luminance) {
     char chroma;
     const char *tex, *texinstr;
 
@@ -3280,7 +3297,7 @@ BOOL gen_planar_yuv_read(SHADER_BUFFER *buffer, WINED3DFORMAT fmt, GLenum textyp
     return TRUE;
 }
 
-BOOL gen_yv12_read(SHADER_BUFFER *buffer, WINED3DFORMAT fmt, GLenum textype, char *luminance) {
+static BOOL gen_yv12_read(SHADER_BUFFER *buffer, WINED3DFORMAT fmt, GLenum textype, char *luminance) {
     const char *tex;
 
     switch(textype) {
@@ -3425,7 +3442,7 @@ BOOL gen_yv12_read(SHADER_BUFFER *buffer, WINED3DFORMAT fmt, GLenum textype, cha
     return TRUE;
 }
 
-GLuint gen_yuv_shader(IWineD3DDeviceImpl *device, WINED3DFORMAT fmt, GLenum textype) {
+static GLuint gen_yuv_shader(IWineD3DDeviceImpl *device, WINED3DFORMAT fmt, GLenum textype) {
     GLenum shader;
     SHADER_BUFFER buffer;
     char luminance_component;
@@ -3441,7 +3458,10 @@ GLuint gen_yuv_shader(IWineD3DDeviceImpl *device, WINED3DFORMAT fmt, GLenum text
     checkGLcall("GL_EXTCALL(glGenProgramsARB(1, &shader))");
     GL_EXTCALL(glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, shader));
     checkGLcall("glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, shader)");
-    if(!shader) return 0;
+    if(!shader) {
+        HeapFree(GetProcessHeap(), 0, buffer.buffer);
+        return 0;
+    }
 
     /* The YUY2 and UYVY formats contain two pixels packed into a 32 bit macropixel,
      * giving effectively 16 bit per pixel. The color consists of a luminance(Y) and
@@ -3490,10 +3510,12 @@ GLuint gen_yuv_shader(IWineD3DDeviceImpl *device, WINED3DFORMAT fmt, GLenum text
 
     if(fmt == WINED3DFMT_UYVY || fmt ==WINED3DFMT_YUY2) {
         if(gen_planar_yuv_read(&buffer, fmt, textype, &luminance_component) == FALSE) {
+            HeapFree(GetProcessHeap(), 0, buffer.buffer);
             return 0;
         }
     } else {
         if(gen_yv12_read(&buffer, fmt, textype, &luminance_component) == FALSE) {
+            HeapFree(GetProcessHeap(), 0, buffer.buffer);
             return 0;
         }
     }
@@ -3518,6 +3540,7 @@ GLuint gen_yuv_shader(IWineD3DDeviceImpl *device, WINED3DFORMAT fmt, GLenum text
         FIXME("Fragment program error at position %d: %s\n", pos,
               debugstr_a((const char *)glGetString(GL_PROGRAM_ERROR_STRING_ARB)));
     }
+    HeapFree(GetProcessHeap(), 0, buffer.buffer);
 
     if(fmt == WINED3DFMT_YUY2) {
         if(textype == GL_TEXTURE_RECTANGLE_ARB) {
@@ -3552,7 +3575,7 @@ static HRESULT arbfp_blit_set(IWineD3DDevice *iface, WINED3DFORMAT fmt, GLenum t
 
     if(glDesc->conversion_group != WINED3DFMT_YUY2 && glDesc->conversion_group != WINED3DFMT_UYVY &&
        glDesc->conversion_group != WINED3DFMT_YV12) {
-        ERR("Format: %s\n", debug_d3dformat(glDesc->conversion_group));
+        TRACE("Format: %s\n", debug_d3dformat(glDesc->conversion_group));
         /* Don't bother setting up a shader for unconverted formats */
         glEnable(textype);
         checkGLcall("glEnable(textype)");

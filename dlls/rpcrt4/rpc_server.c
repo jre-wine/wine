@@ -147,10 +147,11 @@ static RpcServerInterface* RPCRT4_find_interface(UUID* object,
 static void RPCRT4_release_server_interface(RpcServerInterface *sif)
 {
   if (!InterlockedDecrement(&sif->CurrentCalls) &&
-      sif->CallsCompletedEvent) {
+      sif->Delete) {
     /* sif must have been removed from server_interfaces before
      * CallsCompletedEvent is set */
-    SetEvent(sif->CallsCompletedEvent);
+    if (sif->CallsCompletedEvent)
+      SetEvent(sif->CallsCompletedEvent);
     HeapFree(GetProcessHeap(), 0, sif);
   }
 }
@@ -351,7 +352,7 @@ static void RPCRT4_process_packet(RpcConnection* conn, RpcPktHdr* hdr, RPC_MESSA
   }
 
   /* clean up */
-  I_RpcFreeBuffer(msg);
+  I_RpcFree(msg->Buffer);
   RPCRT4_FreeHeader(hdr);
   HeapFree(GetProcessHeap(), 0, msg);
 }
@@ -387,6 +388,7 @@ static DWORD CALLBACK RPCRT4_io_thread(LPVOID the_arg)
     packet = HeapAlloc(GetProcessHeap(), 0, sizeof(RpcPacket));
     if (!packet) {
       I_RpcFree(msg->Buffer);
+      RPCRT4_FreeHeader(hdr);
       HeapFree(GetProcessHeap(), 0, msg);
       break;
     }
@@ -396,6 +398,7 @@ static DWORD CALLBACK RPCRT4_io_thread(LPVOID the_arg)
     if (!QueueUserWorkItem(RPCRT4_worker_thread, packet, WT_EXECUTELONGFUNCTION)) {
       ERR("couldn't queue work item for worker thread, error was %d\n", GetLastError());
       I_RpcFree(msg->Buffer);
+      RPCRT4_FreeHeader(hdr);
       HeapFree(GetProcessHeap(), 0, msg);
       HeapFree(GetProcessHeap(), 0, packet);
       break;
@@ -888,8 +891,10 @@ RPC_STATUS WINAPI RpcServerUnregisterIf( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid
     if ((!IfSpec || !memcmp(&If->InterfaceId, &cif->If->InterfaceId, sizeof(RPC_SYNTAX_IDENTIFIER))) &&
         UuidEqual(MgrTypeUuid, &cif->MgrTypeUuid, &status)) {
       list_remove(&cif->entry);
+      TRACE("unregistering cif %p\n", cif);
       if (cif->CurrentCalls) {
         completed = FALSE;
+        cif->Delete = TRUE;
         if (WaitForCallsToComplete)
           cif->CallsCompletedEvent = event = CreateEventW(NULL, FALSE, FALSE, NULL);
       }

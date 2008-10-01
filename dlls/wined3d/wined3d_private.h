@@ -255,23 +255,6 @@ extern const shader_backend_t glsl_shader_backend;
 extern const shader_backend_t arb_program_shader_backend;
 extern const shader_backend_t none_shader_backend;
 
-/* GLSL shader private data */
-struct shader_glsl_priv {
-    struct hash_table_t *glsl_program_lookup;
-    struct glsl_shader_prog_link *glsl_program;
-    GLhandleARB             depth_blt_glsl_program_id;
-};
-
-/* ARB_program_shader private data */
-struct shader_arb_priv {
-    GLuint                  current_vprogram_id;
-    GLuint                  current_fprogram_id;
-    GLuint                  depth_blt_vprogram_id;
-    GLuint                  depth_blt_fprogram_id;
-    BOOL                    use_arbfp_fixed_func;
-    struct hash_table_t     *fragment_shaders;
-};
-
 /* X11 locking */
 
 extern void (*wine_tsx11_lock_ptr)(void);
@@ -475,8 +458,6 @@ extern glAttribFunc normal_funcs[WINED3DDECLTYPE_UNUSED];
 #define GET_TEXCOORD_SIZE_FROM_FVF(d3dvtVertexType, tex_num) \
     (((((d3dvtVertexType) >> (16 + (2 * (tex_num)))) + 1) & 0x03) + 1)
 
-void depth_copy(IWineD3DDevice *iface);
-
 /* Routines and structures related to state management */
 typedef struct WineD3DContext WineD3DContext;
 typedef void (*APPLYSTATEFUNC)(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *ctx);
@@ -632,9 +613,8 @@ struct WineD3DContext {
     GLint                   aux_buffers;
 
     /* FBOs */
-    IWineD3DSurface       **fbo_color_attachments;
-    IWineD3DSurface        *fbo_depth_attachment;
-    GLuint                  fbo;
+    struct list             fbo_list;
+    struct fbo_entry        *current_fbo;
     GLuint                  src_fbo;
     GLuint                  dst_fbo;
 };
@@ -649,7 +629,9 @@ typedef enum ContextUsage {
 void ActivateContext(IWineD3DDeviceImpl *device, IWineD3DSurface *target, ContextUsage usage);
 WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, HWND win, BOOL create_pbuffer, const WINED3DPRESENT_PARAMETERS *pPresentParms);
 void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context);
-void apply_fbo_state(IWineD3DDevice *iface);
+void context_bind_fbo(IWineD3DDevice *iface, GLenum target, GLuint *fbo);
+void context_attach_depth_stencil_fbo(IWineD3DDeviceImpl *This, GLenum fbo_target, IWineD3DSurface *depth_stencil, BOOL use_render_buffer);
+void context_attach_surface_fbo(IWineD3DDeviceImpl *This, GLenum fbo_target, DWORD idx, IWineD3DSurface *surface);
 
 void delete_opengl_contexts(IWineD3DDevice *iface, IWineD3DSwapChain *swapchain);
 HRESULT create_primary_opengl_context(IWineD3DDevice *iface, IWineD3DSwapChain *swapchain);
@@ -1277,6 +1259,15 @@ typedef struct {
     UINT height;
 } renderbuffer_entry_t;
 
+struct fbo_entry
+{
+    struct list entry;
+    IWineD3DSurface **render_targets;
+    IWineD3DSurface *depth_stencil;
+    BOOL attached;
+    GLuint id;
+};
+
 /*****************************************************************************
  * IWineD3DClipp implementation structure
  */
@@ -1893,34 +1884,6 @@ unsigned int count_bits(unsigned int mask);
 
 typedef void (*SHADER_HANDLER) (struct SHADER_OPCODE_ARG*);
 
-/* Struct to maintain a list of GLSL shader programs and their associated pixel and
- * vertex shaders.  A list of this type is maintained on the DeviceImpl, and is only
- * used if the user is using GLSL shaders. */
-struct glsl_shader_prog_link {
-    struct list             vshader_entry;
-    struct list             pshader_entry;
-    GLhandleARB             programId;
-    GLhandleARB             *vuniformF_locations;
-    GLhandleARB             *puniformF_locations;
-    GLhandleARB             vuniformI_locations[MAX_CONST_I];
-    GLhandleARB             puniformI_locations[MAX_CONST_I];
-    GLhandleARB             posFixup_location;
-    GLhandleARB             bumpenvmat_location[MAX_TEXTURES];
-    GLhandleARB             luminancescale_location[MAX_TEXTURES];
-    GLhandleARB             luminanceoffset_location[MAX_TEXTURES];
-    GLhandleARB             srgb_comparison_location;
-    GLhandleARB             srgb_mul_low_location;
-    GLhandleARB             ycorrection_location;
-    GLenum                  vertex_color_clamp;
-    GLhandleARB             vshader;
-    GLhandleARB             pshader;
-};
-
-typedef struct {
-    GLhandleARB vshader;
-    GLhandleARB pshader;
-} glsl_program_key_t;
-
 /* TODO: Make this dynamic, based on shader limits ? */
 #define MAX_REG_ADDR 1
 #define MAX_REG_TEMP 32
@@ -2058,12 +2021,6 @@ extern BOOL vshader_input_is_color(
 
 extern HRESULT allocate_shader_constants(IWineD3DStateBlockImpl* object);
 
-/* ARB_[vertex/fragment]_program helper functions */
-extern void shader_arb_load_constants(
-    IWineD3DDevice* device,
-    char usePixelShader,
-    char useVertexShader);
-
 /* ARB shader program Prototypes */
 extern void shader_hw_def(SHADER_OPCODE_ARG *arg);
 
@@ -2103,10 +2060,6 @@ extern void vshader_hw_rsq_rcp(SHADER_OPCODE_ARG* arg);
 
 /* GLSL helper functions */
 extern void shader_glsl_add_instruction_modifiers(SHADER_OPCODE_ARG *arg);
-extern void shader_glsl_load_constants(
-    IWineD3DDevice* device,
-    char usePixelShader,
-    char useVertexShader);
 
 /** The following translate DirectX pixel/vertex shader opcodes to GLSL lines */
 extern void shader_glsl_cross(SHADER_OPCODE_ARG* arg);
@@ -2165,10 +2118,6 @@ extern void pshader_glsl_texreg2ar(SHADER_OPCODE_ARG* arg);
 extern void pshader_glsl_texreg2gb(SHADER_OPCODE_ARG* arg);
 extern void pshader_glsl_texreg2rgb(SHADER_OPCODE_ARG* arg);
 extern void pshader_glsl_dp2add(SHADER_OPCODE_ARG* arg);
-extern void pshader_glsl_input_pack(
-   SHADER_BUFFER* buffer,
-   semantic* semantics_out,
-   IWineD3DPixelShader *iface);
 
 /*****************************************************************************
  * IDirect3DBaseShader implementation structure
@@ -2236,18 +2185,6 @@ extern HRESULT shader_get_registers_used(
     CONST DWORD* pToken,
     IWineD3DStateBlockImpl *stateBlock);
 
-extern void shader_generate_glsl_declarations(
-    IWineD3DBaseShader *iface,
-    shader_reg_maps* reg_maps,
-    SHADER_BUFFER* buffer,
-    WineD3D_GL_Info* gl_info);
-
-extern void shader_generate_arb_declarations(
-    IWineD3DBaseShader *iface,
-    shader_reg_maps* reg_maps,
-    SHADER_BUFFER* buffer,
-    WineD3D_GL_Info* gl_info);
-
 extern void shader_generate_main(
     IWineD3DBaseShader *iface,
     SHADER_BUFFER* buffer,
@@ -2276,10 +2213,6 @@ extern int shader_get_param(
 extern int shader_skip_unrecognized(
     IWineD3DBaseShader* iface,
     const DWORD* pToken);
-
-extern void print_glsl_info_log(
-    WineD3D_GL_Info *gl_info,
-    GLhandleARB obj);
 
 static inline int shader_get_regtype(const DWORD param) {
     return (((param & WINED3DSP_REGTYPE_MASK) >> WINED3DSP_REGTYPE_SHIFT) |
@@ -2349,12 +2282,6 @@ static inline BOOL shader_constant_is_local(IWineD3DBaseShaderImpl* This, DWORD 
     return FALSE;
 
 }
-
-/* Internally used shader constants. Applications can use constants 0 to GL_LIMITS(vshader_constantsF) - 1,
- * so upload them above that
- */
-#define ARB_SHADER_PRIVCONST_BASE GL_LIMITS(vshader_constantsF)
-#define ARB_SHADER_PRIVCONST_POS ARB_SHADER_PRIVCONST_BASE + 0
 
 /*****************************************************************************
  * IDirect3DVertexShader implementation structure
@@ -2514,9 +2441,7 @@ static inline BOOL use_ps(IWineD3DDeviceImpl *device) {
 
 void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, WINED3DRECT *src_rect,
         IWineD3DSurface *dst_surface, WINED3DRECT *dst_rect, const WINED3DTEXTUREFILTERTYPE filter, BOOL flip);
-void bind_fbo(IWineD3DDevice *iface, GLenum target, GLuint *fbo);
-void attach_depth_stencil_fbo(IWineD3DDeviceImpl *This, GLenum fbo_target, IWineD3DSurface *depth_stencil, BOOL use_render_buffer);
-void attach_surface_fbo(IWineD3DDeviceImpl *This, GLenum fbo_target, DWORD idx, IWineD3DSurface *surface);
 void depth_blt(IWineD3DDevice *iface, GLuint texture, GLsizei w, GLsizei h);
 
+void context_destroy_fbo_entry(IWineD3DDeviceImpl *This, struct fbo_entry *entry);
 #endif

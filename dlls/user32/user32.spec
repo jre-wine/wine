@@ -475,7 +475,7 @@
 @ stdcall LockSetForegroundWindow (long)
 @ stub LockWindowStation
 @ stdcall LockWindowUpdate(long)
-@ stub LockWorkStation
+@ stdcall LockWorkStation()
 @ stdcall LookupIconIdFromDirectory(ptr long)
 @ stdcall LookupIconIdFromDirectoryEx(ptr long long long long)
 @ stub MBToWCSEx
@@ -727,6 +727,7 @@
 # @ stub UnregisterMessagePumpHook
 # @ stub UnregisterUserApiHook
 @ stdcall UpdateLayeredWindow(long long ptr ptr long ptr long ptr long)
+@ stdcall UpdateLayeredWindowIndirect(long ptr)
 @ stub UpdatePerUserSystemParameters
 @ stdcall UpdateWindow(long)
 @ stdcall User32InitializeImmEntryTable(ptr)

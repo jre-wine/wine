@@ -2574,6 +2574,7 @@ static void test_msg_control(void)
         ok(!ret && GetLastError() == E_INVALIDARG,
          "Expected E_INVALIDARG, got %08x\n", GetLastError());
     }
+    ret = CryptMsgUpdate(msg, NULL, 0, TRUE);
     /* or after an update. */
     for (i = 1; have_nt && (i <= CMSG_CTRL_ADD_CMS_SIGNER_INFO); i++)
     {
@@ -2838,6 +2839,39 @@ static void test_msg_control(void)
     msg = CryptMsgOpenToDecode(PKCS_7_ASN_ENCODING, 0, 0, 0, NULL, NULL);
     CryptMsgUpdate(msg, signedWithCertWithValidPubKeyContent,
      sizeof(signedWithCertWithValidPubKeyContent), TRUE);
+    ret = CryptMsgControl(msg, 0, CMSG_CTRL_VERIFY_SIGNATURE, &certInfo);
+    ok(ret, "CryptMsgControl failed: %08x\n", GetLastError());
+    CryptMsgClose(msg);
+
+    /* Test verifying signature of a detached signed message */
+    msg = CryptMsgOpenToDecode(PKCS_7_ASN_ENCODING, CMSG_DETACHED_FLAG, 0, 0,
+     NULL, NULL);
+    ret = CryptMsgUpdate(msg, detachedSignedContent,
+     sizeof(detachedSignedContent), TRUE);
+    ok(ret, "CryptMsgUpdate failed: %08x\n", GetLastError());
+    /* Can't verify the sig without having updated the data */
+    SetLastError(0xdeadbeef);
+    ret = CryptMsgControl(msg, 0, CMSG_CTRL_VERIFY_SIGNATURE, &certInfo);
+    ok(!ret && GetLastError() == NTE_BAD_SIGNATURE,
+     "expected NTE_BAD_SIGNATURE, got %08x\n", GetLastError());
+    /* Now that the signature's been checked, can't do the final update */
+    ret = CryptMsgUpdate(msg, msgData, sizeof(msgData), TRUE);
+    todo_wine
+    ok(!ret &&
+     (GetLastError() == NTE_BAD_HASH_STATE ||
+      GetLastError() == CRYPT_E_MSG_ERROR), /* Vista */
+     "expected NTE_BAD_HASH_STATE or CRYPT_E_MSG_ERROR, got %08x\n", GetLastError());
+    CryptMsgClose(msg);
+    /* Updating with the detached portion of the message and the data of the
+     * the message allows the sig to be verified.
+     */
+    msg = CryptMsgOpenToDecode(PKCS_7_ASN_ENCODING, CMSG_DETACHED_FLAG, 0, 0,
+     NULL, NULL);
+    ret = CryptMsgUpdate(msg, detachedSignedContent,
+     sizeof(detachedSignedContent), TRUE);
+    ok(ret, "CryptMsgUpdate failed: %08x\n", GetLastError());
+    ret = CryptMsgUpdate(msg, msgData, sizeof(msgData), TRUE);
+    ok(ret, "CryptMsgUpdate failed: %08x\n", GetLastError());
     ret = CryptMsgControl(msg, 0, CMSG_CTRL_VERIFY_SIGNATURE, &certInfo);
     ok(ret, "CryptMsgControl failed: %08x\n", GetLastError());
     CryptMsgClose(msg);

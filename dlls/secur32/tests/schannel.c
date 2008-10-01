@@ -230,12 +230,14 @@ static void testAcquireSecurityContext(void)
     memset(&schanCred, 0, sizeof(schanCred));
     st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_OUTBOUND,
      NULL, &schanCred, NULL, NULL, NULL, NULL);
-    ok(st == SEC_E_INTERNAL_ERROR, "Expected SEC_E_INTERNAL_ERROR, got %08x\n",
-     st);
+    ok(st == SEC_E_INTERNAL_ERROR ||
+       st == SEC_E_UNKNOWN_CREDENTIALS /* Vista/win2k8 */,
+       "Expected SEC_E_INTERNAL_ERROR or SEC_E_UNKNOWN_CREDENTIALS, got %08x\n", st);
     st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_INBOUND,
      NULL, &schanCred, NULL, NULL, NULL, NULL);
-    ok(st == SEC_E_INTERNAL_ERROR, "Expected SEC_E_INTERNAL_ERROR, got %08x\n",
-     st);
+    ok(st == SEC_E_INTERNAL_ERROR ||
+       st == SEC_E_UNKNOWN_CREDENTIALS /* Vista/win2k8 */,
+       "Expected SEC_E_INTERNAL_ERROR or SEC_E_UNKNOWN_CREDENTIALS, got %08x\n", st);
 
     /* No cert in SCHANNEL_CRED succeeds for outbound.. */
     schanCred.dwVersion = SCHANNEL_CRED_VERSION;
@@ -246,8 +248,9 @@ static void testAcquireSecurityContext(void)
     /* but fails for inbound. */
     st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_INBOUND,
      NULL, &schanCred, NULL, NULL, &cred, NULL);
-    ok(st == SEC_E_NO_CREDENTIALS, "Expected SEC_E_NO_CREDENTIALS, got %08x\n",
-     st);
+    ok(st == SEC_E_NO_CREDENTIALS ||
+       st == SEC_E_OK /* Vista/win2k8 */,
+       "Expected SEC_E_NO_CREDENTIALS or SEC_E_OK, got %08x\n", st);
 
     if (0)
     {
@@ -264,12 +267,12 @@ static void testAcquireSecurityContext(void)
     schanCred.paCred = &certs[0];
     st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_OUTBOUND,
      NULL, &schanCred, NULL, NULL, NULL, NULL);
-    ok(st == SEC_E_UNKNOWN_CREDENTIALS || SEC_E_NO_CREDENTIALS,
+    ok(st == SEC_E_UNKNOWN_CREDENTIALS || st == SEC_E_NO_CREDENTIALS,
      "Expected SEC_E_UNKNOWN_CREDENTIALS or SEC_E_NO_CREDENTIALS, got %08x\n",
      st);
     st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_INBOUND,
      NULL, &schanCred, NULL, NULL, NULL, NULL);
-    ok(st == SEC_E_UNKNOWN_CREDENTIALS || SEC_E_NO_CREDENTIALS,
+    ok(st == SEC_E_UNKNOWN_CREDENTIALS || st == SEC_E_NO_CREDENTIALS,
      "Expected SEC_E_UNKNOWN_CREDENTIALS or SEC_E_NO_CREDENTIALS, got %08x\n",
      st);
 
@@ -280,14 +283,16 @@ static void testAcquireSecurityContext(void)
     schanCred.paCred = &certs[1];
     st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_OUTBOUND,
      NULL, &schanCred, NULL, NULL, &cred, NULL);
-    ok(st == SEC_E_UNKNOWN_CREDENTIALS || SEC_E_NO_CREDENTIALS,
-     "Expected SEC_E_UNKNOWN_CREDENTIALS or SEC_E_NO_CREDENTIALS, got %08x\n",
-     st);
+    ok(st == SEC_E_UNKNOWN_CREDENTIALS || st == SEC_E_NO_CREDENTIALS ||
+       st == SEC_E_INTERNAL_ERROR, /* win2k */
+     "Expected SEC_E_UNKNOWN_CREDENTIALS, SEC_E_NO_CREDENTIALS "
+     "or SEC_E_INTERNAL_ERROR, got %08x\n", st);
     st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_INBOUND,
      NULL, &schanCred, NULL, NULL, NULL, NULL);
-    ok(st == SEC_E_UNKNOWN_CREDENTIALS || SEC_E_NO_CREDENTIALS,
-     "Expected SEC_E_UNKNOWN_CREDENTIALS or SEC_E_NO_CREDENTIALS, got %08x\n",
-     st);
+    ok(st == SEC_E_UNKNOWN_CREDENTIALS || st == SEC_E_NO_CREDENTIALS ||
+       st == SEC_E_INTERNAL_ERROR, /* win2k */
+     "Expected SEC_E_UNKNOWN_CREDENTIALS, SEC_E_NO_CREDENTIALS "
+     "or SEC_E_INTERNAL_ERROR, got %08x\n", st);
 
     /* Good cert, with CRYPT_KEY_PROV_INFO set before it's had a key loaded. */
     if (pCertSetCertificateContextProperty)
@@ -328,21 +333,25 @@ static void testAcquireSecurityContext(void)
         schanCred.dwVersion = SCH_CRED_V1;
         st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_OUTBOUND,
          NULL, &schanCred, NULL, NULL, &cred, NULL);
-        ok(st == SEC_E_INTERNAL_ERROR,
-         "Expected SEC_E_INTERNAL_ERROR, got %08x\n", st);
+        ok(st == SEC_E_INTERNAL_ERROR ||
+           st == SEC_E_UNKNOWN_CREDENTIALS /* Vista/win2k8 */,
+           "Expected SEC_E_INTERNAL_ERROR or SEC_E_UNKNOWN_CREDENTIALS, got %08x\n", st);
         st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_INBOUND,
          NULL, &schanCred, NULL, NULL, &cred, NULL);
-        ok(st == SEC_E_INTERNAL_ERROR,
-         "Expected SEC_E_INTERNAL_ERROR, got %08x\n", st);
+        ok(st == SEC_E_INTERNAL_ERROR ||
+           st == SEC_E_UNKNOWN_CREDENTIALS /* Vista/win2k8 */,
+           "Expected SEC_E_INTERNAL_ERROR or SEC_E_UNKNOWN_CREDENTIALS, got %08x\n", st);
         schanCred.dwVersion = SCH_CRED_V2;
         st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_OUTBOUND,
          NULL, &schanCred, NULL, NULL, &cred, NULL);
-        ok(st == SEC_E_INTERNAL_ERROR,
-         "Expected SEC_E_INTERNAL_ERROR, got %08x\n", st);
+        ok(st == SEC_E_INTERNAL_ERROR ||
+           st == SEC_E_UNKNOWN_CREDENTIALS /* Vista/win2k8 */,
+           "Expected SEC_E_INTERNAL_ERROR or SEC_E_UNKNOWN_CREDENTIALS, got %08x\n", st);
         st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_INBOUND,
          NULL, &schanCred, NULL, NULL, &cred, NULL);
-        ok(st == SEC_E_INTERNAL_ERROR,
-         "Expected SEC_E_INTERNAL_ERROR, got %08x\n", st);
+        ok(st == SEC_E_INTERNAL_ERROR ||
+           st == SEC_E_UNKNOWN_CREDENTIALS /* Vista/win2k8 */,
+           "Expected SEC_E_INTERNAL_ERROR or SEC_E_UNKNOWN_CREDENTIALS, got %08x\n", st);
 
         /* Succeeds on V3 or higher */
         schanCred.dwVersion = SCH_CRED_V3;
@@ -374,19 +383,22 @@ static void testAcquireSecurityContext(void)
         schanCred.paCred = certs;
         st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_OUTBOUND,
          NULL, &schanCred, NULL, NULL, &cred, NULL);
-        ok(st == SEC_E_UNKNOWN_CREDENTIALS,
-         "Expected SEC_E_UNKNOWN_CREDENTIALS, got %08x\n", st);
+        ok(st == SEC_E_UNKNOWN_CREDENTIALS ||
+           st == SEC_E_NO_CREDENTIALS /* Vista/win2k8 */,
+           "Expected SEC_E_UNKNOWN_CREDENTIALS or SEC_E_NO_CREDENTIALS, got %08x\n", st);
         st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_INBOUND,
          NULL, &schanCred, NULL, NULL, &cred, NULL);
-        ok(st == SEC_E_UNKNOWN_CREDENTIALS,
-         "Expected SEC_E_UNKNOWN_CREDENTIALS, got %08x\n", st);
+        ok(st == SEC_E_UNKNOWN_CREDENTIALS ||
+           st == SEC_E_NO_CREDENTIALS,
+           "Expected SEC_E_UNKNOWN_CREDENTIALS, got %08x\n", st);
         tmp = certs[0];
         certs[0] = certs[1];
         certs[1] = tmp;
         st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_OUTBOUND,
          NULL, &schanCred, NULL, NULL, &cred, NULL);
-        ok(st == SEC_E_UNKNOWN_CREDENTIALS,
-         "Expected SEC_E_UNKNOWN_CREDENTIALS, got %08x\n", st);
+        ok(st == SEC_E_UNKNOWN_CREDENTIALS ||
+           st == SEC_E_NO_CREDENTIALS,
+           "Expected SEC_E_UNKNOWN_CREDENTIALS, got %08x\n", st);
         st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_INBOUND,
          NULL, &schanCred, NULL, NULL, &cred, NULL);
         ok(st == SEC_E_UNKNOWN_CREDENTIALS,

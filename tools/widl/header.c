@@ -150,28 +150,8 @@ static void write_field(FILE *h, var_t *v)
 {
   if (!v) return;
   if (v->type) {
-    const char *name = v->name;
-    if (name == NULL) {
-      switch (v->type->type) {
-      case RPC_FC_STRUCT:
-      case RPC_FC_CVSTRUCT:
-      case RPC_FC_CPSTRUCT:
-      case RPC_FC_CSTRUCT:
-      case RPC_FC_PSTRUCT:
-      case RPC_FC_BOGUS_STRUCT:
-      case RPC_FC_ENCAPSULATED_UNION:
-        name = "DUMMYSTRUCTNAME";
-        break;
-      case RPC_FC_NON_ENCAPSULATED_UNION:
-        name = "DUMMYUNIONNAME";
-        break;
-      default:
-        /* ? */
-        break;
-      }
-    }
     indent(h, 0);
-    write_type_def_or_decl(h, v->type, TRUE, "%s", name);
+    write_type_def_or_decl(h, v->type, TRUE, "%s", v->name);
     fprintf(h, ";\n");
   }
 }
@@ -194,7 +174,7 @@ static void write_enums(FILE *h, var_list_t *enums)
       fprintf(h, "%s", get_name(v));
       if (v->eval) {
         fprintf(h, " = ");
-        write_expr(h, v->eval, 0, 1, NULL, NULL);
+        write_expr(h, v->eval, 0, 1, NULL, NULL, "");
       }
     }
     if (list_next( enums, &v->entry )) fprintf(h, ",\n");
@@ -499,7 +479,7 @@ void write_declaration(const var_t *v, int is_in_interface)
   if (is_const_decl(v) && v->eval)
   {
     fprintf(header, "#define %s (", v->name);
-    write_expr(header, v->eval, 0, 1, NULL, NULL);
+    write_expr(header, v->eval, 0, 1, NULL, NULL, "");
     fprintf(header, ")\n\n");
   }
   else if (v->type->type != RPC_FC_FUNCTION || !is_in_interface)

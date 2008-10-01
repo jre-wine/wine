@@ -23,7 +23,7 @@
 #include "config.h"
 #include "wined3d_private.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(d3d);
+WINE_DEFAULT_DEBUG_CHANNEL(d3d_texture);
 #define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
 
 /* *******************************************
@@ -99,8 +99,6 @@ static void WINAPI IWineD3DVolumeTextureImpl_PreLoad(IWineD3DVolumeTexture *ifac
     BOOL srgb_was_toggled = FALSE;
 
     TRACE("(%p) : About to load texture\n", This);
-
-    IWineD3DVolumeTexture_BindTexture(iface);
 
     if(!device->isInDraw) {
         ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);

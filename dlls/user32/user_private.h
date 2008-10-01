@@ -150,10 +150,11 @@ typedef struct tagUSER_DRIVER {
     BOOL   (*pScrollDC)(HDC, INT, INT, const RECT *, const RECT *, HRGN, LPRECT);
     void   (*pSetCapture)(HWND,UINT);
     void   (*pSetFocus)(HWND);
+    void   (*pSetLayeredWindowAttributes)(HWND,COLORREF,BYTE,DWORD);
     void   (*pSetParent)(HWND,HWND,HWND);
     int    (*pSetWindowRgn)(HWND,HRGN,BOOL);
     void   (*pSetWindowIcon)(HWND,UINT,HICON);
-    void   (*pSetWindowStyle)(HWND,DWORD);
+    void   (*pSetWindowStyle)(HWND,INT,STYLESTRUCT*);
     void   (*pSetWindowText)(HWND,LPCWSTR);
     UINT   (*pShowWindow)(HWND,INT,RECT*,UINT);
     LRESULT (*pSysCommand)(HWND,WPARAM,LPARAM);

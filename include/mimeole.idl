@@ -40,6 +40,13 @@ cpp_quote("#define MIME_E_BOUNDARY_MISMATCH      0x800cce04")
 cpp_quote("#define MIME_E_NOT_FOUND              0x800cce05")
 cpp_quote("#define MIME_E_NO_DATA                0x800cce05")
 cpp_quote("#define MIME_E_BUFFER_TOO_SMALL       0x800cce06")
+cpp_quote("#define MIME_E_INVALID_ITEM_FLAGS     0x800cce07")
+cpp_quote("#define MIME_E_ONE_LINE_ITEME         0x800cce08")
+cpp_quote("#define MIME_E_INVALID_HANDLE         0x800cce09")
+cpp_quote("#define MIME_E_CHARSET_TRANSLATE      0x800cce0a")
+cpp_quote("#define MIME_E_NOT_INITIALIZED        0x800cce0b")
+
+cpp_quote("#define MIME_E_INVALID_CHARSET_TYPE   0x800cce31")
 
 cpp_quote("#define MIME_E_INVALID_TEXT_TYPE      0x800cce38")
 
@@ -245,6 +252,9 @@ library MIMEOLE
         HRESULT GetCodePageInfo(
             [in]        CODEPAGEID cpiCodePage,
             [in, out]   LPCODEPAGEINFO pCodePageInfo);
+        HRESULT CanConvertCodePages(
+            [in]        CODEPAGEID cpiSource,
+            [in]        CODEPAGEID cpiDest);
         HRESULT DecodeHeader(
             [in]        HCHARSET hCharset,
             [in]        LPCSTR pszData,
@@ -266,22 +276,22 @@ library MIMEOLE
             [in]        CODEPAGEID cpiDest,
             [in]        LPPROPVARIANT pIn,
             [in, out]   LPPROPVARIANT pOut);
-        HRESULT MLANG_ConvertInetReset();
+        HRESULT MLANG_ConvertInetReset(void);
         HRESULT MLANG_ConvertInetString(
             [in]        CODEPAGEID cpiSource,
             [in]        CODEPAGEID cpiDest,
             [in]        LPCSTR pSource,
             [in]        int *pnSizeOfSource,
-            [out]       LPSTR pDestination,
+            [in,out,unique]  LPSTR pDestination,
             [in]        int *pnDstSize);
         HRESULT Rfc1522Decode(
             [in]        LPCSTR pszValue,
-            [in]        LPCSTR pszCharset,
+            [in,ref]    LPSTR pszCharset,
             [in]        ULONG cchmax,
             [out]       LPSTR *ppszDecoded);
         HRESULT Rfc1522Encode(
             [in]        LPCSTR pszValue,
-            [in]         HCHARSET hCharset,
+            [in]        HCHARSET hCharset,
             [out]       LPSTR *ppszEncoded);
     }
 
@@ -1064,6 +1074,8 @@ cpp_quote("#endif")
     ]
     interface IMimeEnumProperties : IUnknown
     {
+        typedef [unique] IMimeEnumProperties *LPMIMEENUMPROPERTIES;
+
         typedef struct tagENUMPROPERTY
         {
             LPSTR       pszName;
@@ -1071,7 +1083,22 @@ cpp_quote("#endif")
             DWORD       dwPropId;
         } ENUMPROPERTY, *LPENUMPROPERTY;
 
-        /* FIXME: fill this in */
+        HRESULT Next(
+            [in]      ULONG cFetch,
+            [in, out] LPENUMPROPERTY prgProp,
+            [out]     ULONG *pcFetched);
+
+        HRESULT Skip(
+            [in]      ULONG cItems);
+
+        HRESULT Reset(void);
+
+        HRESULT Clone(
+            [out]      IMimeEnumProperties **ppEnum);
+
+        HRESULT Count(
+            [out]      ULONG *pcItems);
+
     }
 
     [
