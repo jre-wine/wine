@@ -200,7 +200,7 @@ install-arch32-stamp: build-arch32-stamp
 	mv debian/tmp/usr/bin/wine-preloader debian/tmp/usr/lib/wine/wine-preloader
 	mv debian/tmp/usr/bin/wineserver debian/tmp/usr/lib/wine/wineserver
 	# install manpages
-	$(MAKE) -C build32/documentation install prefix=`pwd`/debian/tmp/usr
+	$(MAKE) -C build32/documentation install-man prefix=`pwd`/debian/tmp/usr
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
 	# install winelib programs
 	$(MAKE) -C build32/programs install prefix=`pwd`/debian/tmp/usr
@@ -222,7 +222,7 @@ install-arch64-stamp: build-arch64-stamp
 	mv debian/tmp/usr/bin/wine debian/tmp/usr/lib/wine/wine.bin
 	mv debian/tmp/usr/bin/wineserver debian/tmp/usr/lib/wine/wineserver
 	# install manpages
-	$(MAKE) -C build64/documentation install prefix=`pwd`/debian/tmp/usr
+	$(MAKE) -C build64/documentation install-man prefix=`pwd`/debian/tmp/usr
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
 	# install winelib programs
 	$(MAKE) -C build64/programs install prefix=`pwd`/debian/tmp/usr
