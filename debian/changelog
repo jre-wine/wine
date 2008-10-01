@@ -1,8 +1,14 @@
-wine (1.1.5-1) UNRELEASED; urgency=low
+wine (1.1.5-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.5, released Sep 19, 2008.
+    - Substantial JavaScript implementation.
+    - Partial support for layered windows.
+    - Support for Unicode file export in Regedit.
+    - Proper exception handling in widl-generated code.
+    - Asynchronous requests and cookies support in WinHTTP.
+    - Various bug fixes.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Wed, 01 Oct 2008 10:28:35 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Wed, 01 Oct 2008 20:39:10 +0200
 
 wine (1.1.4-1) experimental; urgency=low
 
