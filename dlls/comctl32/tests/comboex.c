@@ -228,7 +228,8 @@ static void test_WM_LBUTTONDOWN(void)
     result = SendMessage(hCombo, WM_LBUTTONDOWN, 0, MAKELPARAM(x, y));
     ok(result, "WM_LBUTTONDOWN was not processed. LastError=%d\n",
        GetLastError());
-    ok(GetFocus() == hCombo,
+    ok(GetFocus() == hCombo ||
+       broken(GetFocus() != hCombo), /* win98 */
        "Focus not on ComboBoxEx's ComboBox Control, instead on %p\n",
        GetFocus());
     ok(SendMessage(hComboEx, CB_GETDROPPEDSTATE, 0, 0),
@@ -239,7 +240,8 @@ static void test_WM_LBUTTONDOWN(void)
     result = SendMessage(hCombo, WM_LBUTTONUP, 0, MAKELPARAM(x, y));
     ok(result, "WM_LBUTTONUP was not processed. LastError=%d\n",
        GetLastError());
-    ok(GetFocus() == hCombo,
+    ok(GetFocus() == hCombo ||
+       broken(GetFocus() != hCombo), /* win98 */
        "Focus not on ComboBoxEx's ComboBox Control, instead on %p\n",
        GetFocus());
 
@@ -251,14 +253,16 @@ static void test_WM_LBUTTONDOWN(void)
     result = SendMessage(hList, WM_MOUSEMOVE, 0, MAKELPARAM(x, y));
     ok(!result, "WM_MOUSEMOVE was not processed. LastError=%d\n",
        GetLastError());
-    ok(GetFocus() == hCombo,
+    ok(GetFocus() == hCombo ||
+       broken(GetFocus() != hCombo), /* win98 */
        "Focus not on ComboBoxEx's ComboBox Control, instead on %p\n",
        GetFocus());
 
     result = SendMessage(hList, WM_LBUTTONDOWN, 0, MAKELPARAM(x, y));
     ok(!result, "WM_LBUTTONDOWN was not processed. LastError=%d\n",
        GetLastError());
-    ok(GetFocus() == hCombo,
+    ok(GetFocus() == hCombo ||
+       broken(GetFocus() != hCombo), /* win98 */
        "Focus not on ComboBoxEx's ComboBox Control, instead on %p\n",
        GetFocus());
     ok(SendMessage(hComboEx, CB_GETDROPPEDSTATE, 0, 0),
@@ -267,13 +271,19 @@ static void test_WM_LBUTTONDOWN(void)
     result = SendMessage(hList, WM_LBUTTONUP, 0, MAKELPARAM(x, y));
     ok(!result, "WM_LBUTTONUP was not processed. LastError=%d\n",
        GetLastError());
-    todo_wine ok(GetFocus() == hEdit,
+    todo_wine ok(GetFocus() == hEdit ||
+       broken(GetFocus() == hCombo), /* win98 */
        "Focus not on ComboBoxEx's Edit Control, instead on %p\n",
        GetFocus());
-    ok(!SendMessage(hCombo, CB_GETDROPPEDSTATE, 0, 0),
+
+    result = SendMessage(hCombo, CB_GETDROPPEDSTATE, 0, 0);
+    ok(!result ||
+       broken(result != 0), /* win98 */
        "The dropdown list should have been rolled up.\n");
     idx = SendMessage(hComboEx, CB_GETCURSEL, 0, 0);
-    ok(idx == 4, "Current Selection: expected %d, got %d\n", 4, idx);
+    ok(idx == 4 ||
+       broken(idx == -1), /* win98 */
+       "Current Selection: expected %d, got %d\n", 4, idx);
 
     DestroyWindow(hComboEx);
 }

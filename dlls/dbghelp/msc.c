@@ -1952,18 +1952,6 @@ static void pdb_convert_symbol_file(const PDB_SYMBOLS* symbols,
     }
 }
 
-static BOOL CALLBACK pdb_match(const char* file, void* user)
-{
-    /* accept first file that exists */
-    HANDLE h = CreateFileA(file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    TRACE("match with %s returns %p\n", file, h);
-    if (INVALID_HANDLE_VALUE != h) {
-        CloseHandle(h);
-        return FALSE;
-    }
-    return TRUE;
-}
-
 static HANDLE open_pdb_file(const struct process* pcs,
                             const struct pdb_lookup* lookup)
 {
@@ -1974,15 +1962,12 @@ static HANDLE open_pdb_file(const struct process* pcs,
     switch (lookup->kind)
     {
     case PDB_JG:
-        ret = SymFindFileInPath(pcs->handle, NULL, lookup->filename, 
-                                (PVOID)(DWORD_PTR)lookup->u.jg.timestamp,
-                                lookup->age, 0, SSRVOPT_DWORD,
-                                dbg_file_path, pdb_match, NULL);
+        ret = path_find_symbol_file(pcs, lookup->filename, NULL, lookup->u.jg.timestamp,
+                                    lookup->age, dbg_file_path);
         break;
     case PDB_DS:
-        ret = SymFindFileInPath(pcs->handle, NULL, lookup->filename, 
-                                (PVOID)&lookup->u.ds.guid, lookup->age, 0, 
-                                SSRVOPT_GUIDPTR, dbg_file_path, pdb_match, NULL);
+        ret = path_find_symbol_file(pcs, lookup->filename, &lookup->u.ds.guid, 0,
+                                    lookup->age, dbg_file_path);
         break;
     }
     if (!ret)
@@ -2496,7 +2481,7 @@ static BOOL codeview_process_info(const struct process* pcs,
         pdb_lookup.kind = PDB_JG;
         pdb_lookup.u.jg.timestamp = pdb->timestamp;
         pdb_lookup.u.jg.toc = NULL;
-        pdb_lookup.age = pdb->unknown;
+        pdb_lookup.age = pdb->age;
         ret = pdb_process_file(pcs, msc_dbg, &pdb_lookup);
         break;
     }
@@ -2504,13 +2489,13 @@ static BOOL codeview_process_info(const struct process* pcs,
     {
         const OMFSignatureRSDS* rsds = (const OMFSignatureRSDS*)msc_dbg->root;
 
-        TRACE("Got RSDS type of PDB file: guid=%s unk=%08x name=%s\n",
-              wine_dbgstr_guid(&rsds->guid), rsds->unknown, rsds->name);
+        TRACE("Got RSDS type of PDB file: guid=%s age=%08x name=%s\n",
+              wine_dbgstr_guid(&rsds->guid), rsds->age, rsds->name);
         pdb_lookup.filename = rsds->name;
         pdb_lookup.kind = PDB_DS;
         pdb_lookup.u.ds.guid = rsds->guid;
         pdb_lookup.u.ds.toc = NULL;
-        pdb_lookup.age = rsds->unknown;
+        pdb_lookup.age = rsds->age;
         ret = pdb_process_file(pcs, msc_dbg, &pdb_lookup);
         break;
     }

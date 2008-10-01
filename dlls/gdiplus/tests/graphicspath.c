@@ -214,6 +214,8 @@ static void test_line2(void)
     expect(Ok, status);
 
     ok_path(path, line2_path, sizeof(line2_path)/sizeof(path_test_t), FALSE);
+
+    GdipDeletePath(path);
 }
 
 static path_test_t arc_path[] = {
@@ -283,6 +285,8 @@ static void test_arc(void)
     expect(Ok, status);
 
     ok_path(path, arc_path, sizeof(arc_path)/sizeof(path_test_t), FALSE);
+
+    GdipDeletePath(path);
 }
 
 static void test_worldbounds(void)
@@ -882,6 +886,105 @@ static void test_addpie(void)
     GdipDeletePath(path);
 }
 
+static path_test_t flattenellipse_path[] = {
+    {100.0, 25.0,PathPointTypeStart, 0, 0}, /*0*/
+    {99.0, 30.0, PathPointTypeLine,  0, 0}, /*1*/
+    {96.0, 34.8, PathPointTypeLine,  0, 0}, /*2*/
+    {91.5, 39.0, PathPointTypeLine,  0, 0}, /*3*/
+    {85.5, 42.8, PathPointTypeLine,  0, 0}, /*4*/
+    {69.5, 48.0, PathPointTypeLine,  0, 1}, /*5*/
+    {50.0, 50.0, PathPointTypeLine,  0, 1}, /*6*/
+    {30.5, 48.0, PathPointTypeLine,  0, 1}, /*7*/
+    {14.8, 42.8, PathPointTypeLine,  0, 1}, /*8*/
+    {8.5,  39.0, PathPointTypeLine,  0, 1}, /*9*/
+    {4.0,  34.8, PathPointTypeLine,  0, 1}, /*10*/
+    {1.0,  30.0, PathPointTypeLine,  0, 1}, /*11*/
+    {0.0,  25.0, PathPointTypeLine,  0, 1}, /*12*/
+    {1.0,  20.0, PathPointTypeLine,  0, 1}, /*13*/
+    {4.0,  15.3, PathPointTypeLine,  0, 1}, /*14*/
+    {8.5,  11.0, PathPointTypeLine,  0, 1}, /*15*/
+    {14.8, 7.3,  PathPointTypeLine,  0, 1}, /*16*/
+    {30.5, 2.0,  PathPointTypeLine,  0, 1}, /*17*/
+    {50.0, 0.0,  PathPointTypeLine,  0, 1}, /*18*/
+    {69.5, 2.0,  PathPointTypeLine,  0, 1}, /*19*/
+    {85.5, 7.3,  PathPointTypeLine,  0, 1}, /*20*/
+    {91.5, 11.0, PathPointTypeLine,  0, 1}, /*21*/
+    {96.0, 15.3, PathPointTypeLine,  0, 1}, /*22*/
+    {99.0, 20.0, PathPointTypeLine,  0, 1}, /*23*/
+    {100.0,25.0, PathPointTypeLine | PathPointTypeCloseSubpath,  0, 1}  /*24*/
+    };
+
+static path_test_t flattenarc_path[] = {
+    {100.0, 25.0,PathPointTypeStart, 0, 0}, /*0*/
+    {99.0, 30.0, PathPointTypeLine,  0, 0}, /*1*/
+    {96.0, 34.8, PathPointTypeLine,  0, 0}, /*2*/
+    {91.5, 39.0, PathPointTypeLine,  0, 0}, /*3*/
+    {85.5, 42.8, PathPointTypeLine,  0, 0}, /*4*/
+    {69.5, 48.0, PathPointTypeLine,  0, 1}, /*5*/
+    {50.0, 50.0, PathPointTypeLine,  0, 1}  /*6*/
+    };
+
+static path_test_t flattenquater_path[] = {
+    {100.0, 50.0,PathPointTypeStart, 0, 0}, /*0*/
+    {99.0, 60.0, PathPointTypeLine,  0, 0}, /*1*/
+    {96.0, 69.5, PathPointTypeLine,  0, 0}, /*2*/
+    {91.5, 78.0, PathPointTypeLine,  0, 0}, /*3*/
+    {85.5, 85.5, PathPointTypeLine,  0, 0}, /*4*/
+    {78.0, 91.5, PathPointTypeLine,  0, 0}, /*5*/
+    {69.5, 96.0, PathPointTypeLine,  0, 0}, /*6*/
+    {60.0, 99.0, PathPointTypeLine,  0, 0}, /*7*/
+    {50.0, 100.0,PathPointTypeLine,  0, 0}  /*8*/
+    };
+
+static void test_flatten(void)
+{
+    GpStatus status;
+    GpPath *path;
+    GpMatrix *m;
+
+    status = GdipCreatePath(FillModeAlternate, &path);
+    expect(Ok, status);
+    status = GdipCreateMatrix(&m);
+    expect(Ok, status);
+
+    /* NULL arguments */
+    status = GdipFlattenPath(NULL, NULL, 0.0);
+    expect(InvalidParameter, status);
+    status = GdipFlattenPath(NULL, m, 0.0);
+    expect(InvalidParameter, status);
+
+    /* flatten empty path */
+    status = GdipFlattenPath(path, NULL, 1.0);
+    expect(Ok, status);
+
+    status = GdipAddPathEllipse(path, 0.0, 0.0, 100.0, 50.0);
+    expect(Ok, status);
+
+    status = GdipFlattenPath(path, NULL, 1.0);
+    expect(Ok, status);
+    ok_path(path, flattenellipse_path, sizeof(flattenellipse_path)/sizeof(path_test_t), TRUE);
+
+    status = GdipResetPath(path);
+    expect(Ok, status);
+    status = GdipAddPathArc(path, 0.0, 0.0, 100.0, 50.0, 0.0, 90.0);
+    expect(Ok, status);
+    status = GdipFlattenPath(path, NULL, 1.0);
+    expect(Ok, status);
+    ok_path(path, flattenarc_path, sizeof(flattenarc_path)/sizeof(path_test_t), TRUE);
+
+    /* easy case - quater of a full circle */
+    status = GdipResetPath(path);
+    expect(Ok, status);
+    status = GdipAddPathArc(path, 0.0, 0.0, 100.0, 100.0, 0.0, 90.0);
+    expect(Ok, status);
+    status = GdipFlattenPath(path, NULL, 1.0);
+    expect(Ok, status);
+    ok_path(path, flattenquater_path, sizeof(flattenquater_path)/sizeof(path_test_t), FALSE);
+
+    GdipDeleteMatrix(m);
+    GdipDeletePath(path);
+}
+
 START_TEST(graphicspath)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -909,6 +1012,7 @@ START_TEST(graphicspath)
     test_addclosedcurve();
     test_reverse();
     test_addpie();
+    test_flatten();
 
     GdiplusShutdown(gdiplusToken);
 }

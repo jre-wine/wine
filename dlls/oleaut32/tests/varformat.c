@@ -324,9 +324,10 @@ static void test_VarFormat(void)
   VARFMT(VT_I4,V_I4,1,"000###",S_OK,"000001");
   VARFMT(VT_I4,V_I4,1,"#00##00#0",S_OK,"00000001");
   VARFMT(VT_I4,V_I4,1,"1#####0000",S_OK,"10001");
-  todo_wine {
   VARFMT(VT_I4,V_I4,100000,"#,###,###,###",S_OK,"100,000");
-  }
+  VARFMT(VT_I4,V_I4,1,"0,000,000,000",S_OK,"0,000,000,001");
+  VARFMT(VT_I4,V_I4,123456789,"#,#.#",S_OK,"123,456,789.");
+  VARFMT(VT_I4,V_I4,123456789,"###, ###, ###",S_OK,"123, 456, 789");
   VARFMT(VT_R8,V_R8,1.23456789,"0#.0#0#0#0#0",S_OK,"01.234567890");
   VARFMT(VT_R8,V_R8,1.2,"0#.0#0#0#0#0",S_OK,"01.200000000");
   VARFMT(VT_R8,V_R8,9.87654321,"#0.#0#0#0#0#",S_OK,"9.87654321");
@@ -369,9 +370,9 @@ static void test_VarFormat(void)
   VARFMT(VT_R8,V_R8,47.11,".0000E+0",S_OK,".4711E+2");
   VARFMT(VT_R8,V_R8,3.0401e-13,"#####.####e-0%",S_OK,"30401.e-15%");
   VARFMT(VT_R8,V_R8,1.57,"0.00",S_OK,"1.57");
-  todo_wine {
   VARFMT(VT_R8,V_R8,-1.57,"0.00",S_OK,"-1.57");
-  }
+  VARFMT(VT_R8,V_R8,-1.57,"#.##",S_OK,"-1.57");
+  VARFMT(VT_R8,V_R8,-0.1,".#",S_OK,"-.1");
 
 
   /* 'out' is not cleared */

@@ -101,6 +101,8 @@ static NTSTATUS (WINAPI *pNtQueryObject)(HANDLE,OBJECT_INFORMATION_CLASS,PVOID,U
 static DWORD (WINAPI *pSetEntriesInAclW)(ULONG, PEXPLICIT_ACCESSW, PACL, PACL*);
 static BOOL (WINAPI *pSetSecurityDescriptorControl)(PSECURITY_DESCRIPTOR, SECURITY_DESCRIPTOR_CONTROL,
                                                     SECURITY_DESCRIPTOR_CONTROL);
+static DWORD (WINAPI *pGetSecurityInfo)(HANDLE, SE_OBJECT_TYPE, SECURITY_INFORMATION,
+                                        PSID*, PSID*, PACL*, PACL*, PSECURITY_DESCRIPTOR*);
 
 static HMODULE hmod;
 static int     myARGC;
@@ -149,6 +151,7 @@ static void init(void)
     pMakeSelfRelativeSD = (void *)GetProcAddress(hmod, "MakeSelfRelativeSD");
     pSetEntriesInAclW = (void *)GetProcAddress(hmod, "SetEntriesInAclW");
     pSetSecurityDescriptorControl = (void *)GetProcAddress(hmod, "SetSecurityDescriptorControl");
+    pGetSecurityInfo = (void *)GetProcAddress(hmod, "GetSecurityInfo");
 
     myARGC = winetest_get_mainargs( &myARGV );
 }
@@ -1702,8 +1705,10 @@ static void test_security_descriptor(void)
     }
 }
 
-#define TEST_GRANTED_ACCESS(a,b) test_granted_access(a,b,__LINE__)
-static void test_granted_access(HANDLE handle, ACCESS_MASK access, int line)
+#define TEST_GRANTED_ACCESS(a,b) test_granted_access(a,b,0,__LINE__)
+#define TEST_GRANTED_ACCESS2(a,b,c) test_granted_access(a,b,c,__LINE__)
+static void test_granted_access(HANDLE handle, ACCESS_MASK access,
+                                ACCESS_MASK alt, int line)
 {
     OBJECT_BASIC_INFORMATION obj_info;
     NTSTATUS status;
@@ -1717,8 +1722,13 @@ static void test_granted_access(HANDLE handle, ACCESS_MASK access, int line)
     status = pNtQueryObject( handle, ObjectBasicInformation, &obj_info,
                              sizeof(obj_info), NULL );
     ok_(__FILE__, line)(!status, "NtQueryObject with err: %08x\n", status);
-    ok_(__FILE__, line)(obj_info.GrantedAccess == access, "Granted access should "
-        "be 0x%08x, instead of 0x%08x\n", access, obj_info.GrantedAccess);
+    if (alt)
+        ok_(__FILE__, line)(obj_info.GrantedAccess == access ||
+            obj_info.GrantedAccess == alt, "Granted access should be 0x%08x "
+            "or 0x%08x, instead of 0x%08x\n", access, alt, obj_info.GrantedAccess);
+    else
+        ok_(__FILE__, line)(obj_info.GrantedAccess == access, "Granted access should "
+            "be 0x%08x, instead of 0x%08x\n", access, obj_info.GrantedAccess);
 }
 
 #define CHECK_SET_SECURITY(o,i,e) \
@@ -1830,7 +1840,8 @@ static void test_process_security(void)
     /* Doesn't matter what ACL say we should get full access for ourselves */
     ok(CreateProcessA( NULL, buffer, &psa, NULL, FALSE, 0, NULL, NULL, &startup, &info ),
         "CreateProcess with err:%d\n", GetLastError());
-    TEST_GRANTED_ACCESS( info.hProcess, PROCESS_ALL_ACCESS );
+    TEST_GRANTED_ACCESS2( info.hProcess, PROCESS_ALL_ACCESS,
+                          STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL );
     winetest_wait_child_process( info.hProcess );
 
     CloseHandle( info.hProcess );
@@ -1879,7 +1890,8 @@ static void test_process_security_child(void)
     ok(DuplicateHandle( GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(),
                         &handle, 0, TRUE, DUPLICATE_SAME_ACCESS ),
        "duplicating handle err:%d\n", GetLastError());
-    TEST_GRANTED_ACCESS( handle, PROCESS_ALL_ACCESS );
+    TEST_GRANTED_ACCESS2( handle, PROCESS_ALL_ACCESS,
+                          STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL );
 
     CloseHandle( handle );
 
@@ -1887,7 +1899,8 @@ static void test_process_security_child(void)
     ok(DuplicateHandle( GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(),
                         &handle, PROCESS_ALL_ACCESS, TRUE, 0 ),
        "duplicating handle err:%d\n", GetLastError());
-    TEST_GRANTED_ACCESS( handle, PROCESS_ALL_ACCESS );
+    TEST_GRANTED_ACCESS2( handle, PROCESS_ALL_ACCESS,
+                          PROCESS_ALL_ACCESS | PROCESS_QUERY_LIMITED_INFORMATION );
     ok(DuplicateHandle( GetCurrentProcess(), handle, GetCurrentProcess(),
                         &handle1, PROCESS_VM_READ, TRUE, 0 ),
        "duplicating handle err:%d\n", GetLastError());
@@ -2493,6 +2506,12 @@ static void test_GetSecurityInfo(void)
     PACL dacl;
     DWORD ret;
 
+    if (!pGetSecurityInfo)
+    {
+        win_skip("GetSecurityInfo is not available\n");
+        return;
+    }
+
     /* Create something.  Files have lots of associated security info.  */
     obj = CreateFile(myARGV[0], GENERIC_READ, FILE_SHARE_READ, NULL,
                      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -2502,9 +2521,15 @@ static void test_GetSecurityInfo(void)
         return;
     }
 
-    ret = GetSecurityInfo(obj, SE_FILE_OBJECT,
+    ret = pGetSecurityInfo(obj, SE_FILE_OBJECT,
                           OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
                           &owner, &group, &dacl, NULL, &sd);
+    if (ret == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        win_skip("GetSecurityInfo is not implemented\n");
+        CloseHandle(obj);
+        return;
+    }
     ok(ret == ERROR_SUCCESS, "GetSecurityInfo returned %d\n", ret);
     ok(sd != NULL, "GetSecurityInfo\n");
     ok(owner != NULL, "GetSecurityInfo\n");
@@ -2516,7 +2541,7 @@ static void test_GetSecurityInfo(void)
 
     /* If we don't ask for the security descriptor, Windows will still give us
        the other stuff, leaving us no way to free it.  */
-    ret = GetSecurityInfo(obj, SE_FILE_OBJECT,
+    ret = pGetSecurityInfo(obj, SE_FILE_OBJECT,
                           OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
                           &owner, &group, &dacl, NULL, NULL);
     ok(ret == ERROR_SUCCESS, "GetSecurityInfo returned %d\n", ret);

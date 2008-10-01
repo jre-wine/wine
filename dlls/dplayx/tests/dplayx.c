@@ -695,6 +695,8 @@ static void init_TCPIP_provider( LPDIRECTPLAY4 pDP,
     hr = IDirectPlayX_InitializeConnection( pDP, pAddress, 0 );
     todo_wine checkHR( DP_OK, hr );
 
+    HeapFree( GetProcessHeap(), 0, pAddress );
+
 }
 
 static BOOL CALLBACK EnumSessions_cb_join( LPCDPSESSIONDESC2 lpThisSD,
@@ -1222,8 +1224,6 @@ static LPDIRECTPLAY4 create_session(DPSESSIONDESC2 *lpdpsd)
     DPNAME name;
     DPID dpid;
     HRESULT hr;
-
-    CoInitialize(NULL);
 
     CoCreateInstance( &CLSID_DirectPlay, NULL, CLSCTX_ALL,
                       &IID_IDirectPlay4A, (LPVOID*) &pDP );
@@ -1781,6 +1781,7 @@ static void test_SessionDesc(void)
     checkStr( "S1,S1,S1,S1,S1,S1,", callbackData.szTrace1 );
     checkStr( "90,90,90,90,90,90,", callbackData.szTrace2 );
 
+    HeapFree( GetProcessHeap(), 0, lpDataMsg );
     for (i=0; i<2; i++)
     {
         HeapFree( GetProcessHeap(), 0, lpData[i] );
@@ -3179,7 +3180,7 @@ static void test_CreateGroup(void)
 
 
     groupName.dwSize = sizeof(DPNAME);
-    groupName.lpszShortNameA = (LPSTR) lpData;
+    U1(groupName).lpszShortNameA = (LPSTR) lpData;
 
 
     hr = IDirectPlayX_CreateGroup( pDP, &idGroup,
@@ -3198,14 +3199,14 @@ static void test_CreateGroup(void)
         hr = IDirectPlayX_Receive( pDP, &idFrom, &idTo, 0,
                                    (LPVOID) lpDataGet, &dwDataSizeGet );
         checkHR( DP_OK, hr );
-        if ( NULL == lpDataGet->dpnName.lpszShortNameA )
+        if ( NULL == U1(lpDataGet->dpnName).lpszShortNameA )
         {
             check( 48, dwDataSizeGet );
         }
         else
         {
             check( 48 + dwDataSize, dwDataSizeGet );
-            checkStr( lpData, lpDataGet->dpnName.lpszShortNameA );
+            checkStr( lpData, U1(lpDataGet->dpnName).lpszShortNameA );
         }
         check( DPID_SYSMSG, idFrom );
         checkConv( DPSYS_CREATEPLAYERORGROUP, lpDataGet->dwType, dpMsgType2str );
@@ -5305,7 +5306,7 @@ static void test_Receive(void)
             check( DPPLAYERTYPE_PLAYER,   lpDataCreate->dwPlayerType );
             checkLP( NULL,                lpDataCreate->lpData );
             check( 0,                     lpDataCreate->dwDataSize );
-            checkLP( NULL,                lpDataCreate->dpnName.lpszShortNameA );
+            checkLP( NULL,                U1(lpDataCreate->dpnName).lpszShortNameA );
             check( 0,                     lpDataCreate->dpIdParent );
         }
         else  /* Player destruction */
@@ -5319,7 +5320,7 @@ static void test_Receive(void)
             check( 0,                     lpDataDestroy->dwLocalDataSize );
             checkLP( NULL,                lpDataDestroy->lpRemoteData );
             check( 0,                     lpDataDestroy->dwRemoteDataSize );
-            checkLP( NULL,                lpDataDestroy->dpnName.lpszShortNameA );
+            checkLP( NULL,                U1(lpDataDestroy->dpnName).lpszShortNameA );
             check( 0,                     lpDataDestroy->dpIdParent );
         }
 
@@ -6208,6 +6209,7 @@ static void test_remote_data_replication(void)
     checkStr( "", callbackData.szTrace1 );
 
 
+    HeapFree( GetProcessHeap(), 0, lpDataGet );
     HeapFree( GetProcessHeap(), 0, lpData );
     IDirectPlayX_Release( pDP[0] );
     IDirectPlayX_Release( pDP[1] );

@@ -148,7 +148,7 @@ static const struct {
 static int numAdapters = 0;
 static struct WineD3DAdapter Adapters[1];
 
-static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType, WINED3DFORMAT AdapterFormat, DWORD Usage, WINED3DRESOURCETYPE RType, WINED3DFORMAT CheckFormat);
+static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType, WINED3DFORMAT AdapterFormat, DWORD Usage, WINED3DRESOURCETYPE RType, WINED3DFORMAT CheckFormat, WINED3DSURFTYPE SurfaceType);
 static const struct fragment_pipeline *select_fragment_implementation(UINT Adapter, WINED3DDEVTYPE DeviceType);
 static const shader_backend_t *select_shader_backend(UINT Adapter, WINED3DDEVTYPE DeviceType);
 static const struct blit_shader *select_blit_implementation(UINT Adapter, WINED3DDEVTYPE DeviceType);
@@ -1446,11 +1446,12 @@ static HRESULT  WINAPI IWineD3DImpl_RegisterSoftwareDevice(IWineD3D *iface, void
 static HMONITOR WINAPI IWineD3DImpl_GetAdapterMonitor(IWineD3D *iface, UINT Adapter) {
     IWineD3DImpl *This = (IWineD3DImpl *)iface;
 
+    TRACE_(d3d_caps)("(%p)->(%d)\n", This, Adapter);
+
     if (Adapter >= IWineD3DImpl_GetAdapterCount(iface)) {
         return NULL;
     }
 
-    TRACE_(d3d_caps)("(%p)->(%d)\n", This, Adapter);
     return MonitorFromPoint(Adapters[Adapter].monitorPoint, MONITOR_DEFAULTTOPRIMARY);
 }
 
@@ -1953,7 +1954,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceType(IWineD3D *iface, UINT Adapter
     }
 
     /* Use CheckDeviceFormat to see if the BackBufferFormat is usable with the given DisplayFormat */
-    hr = IWineD3DImpl_CheckDeviceFormat(iface, Adapter, DeviceType, DisplayFormat, WINED3DUSAGE_RENDERTARGET, WINED3DRTYPE_SURFACE, BackBufferFormat);
+    hr = IWineD3DImpl_CheckDeviceFormat(iface, Adapter, DeviceType, DisplayFormat, WINED3DUSAGE_RENDERTARGET, WINED3DRTYPE_SURFACE, BackBufferFormat, SURFACE_OPENGL);
     if(FAILED(hr))
         TRACE_(d3d_caps)("Unsupported display/backbuffer format combination %s/%s\n", debug_d3dformat(DisplayFormat), debug_d3dformat(BackBufferFormat));
 
@@ -2201,7 +2202,6 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DDEVTYPE DeviceType, WINE
         case WINED3DFMT_X1R5G5B5:
         case WINED3DFMT_A1R5G5B5:
         case WINED3DFMT_A4R4G4B4:
-        case WINED3DFMT_R3G3B2:
         case WINED3DFMT_A8:
         case WINED3DFMT_X4R4G4B4:
         case WINED3DFMT_A8B8G8R8:
@@ -2211,6 +2211,10 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DDEVTYPE DeviceType, WINE
         case WINED3DFMT_G16R16:
             TRACE_(d3d_caps)("[OK]\n");
             return TRUE;
+
+        case WINED3DFMT_R3G3B2:
+            TRACE_(d3d_caps)("[FAILED] - Not supported on Windows\n");
+            return FALSE;
 
         /*****
          *  supported: Palettized
@@ -2227,10 +2231,14 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DDEVTYPE DeviceType, WINE
          */
         case WINED3DFMT_L8:
         case WINED3DFMT_A8L8:
-        case WINED3DFMT_A4L4:
         case WINED3DFMT_L16:
             TRACE_(d3d_caps)("[OK]\n");
             return TRUE;
+
+        /* Not supported on Windows, thus disabled */
+        case WINED3DFMT_A4L4:
+            TRACE_(d3d_caps)("[FAILED] - not supported on windows\n");
+            return FALSE;
 
         /*****
          *  Supported: Depth/Stencil formats
@@ -2256,7 +2264,6 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DDEVTYPE DeviceType, WINE
         case WINED3DFMT_Q8W8V8U8:
         case WINED3DFMT_V16U16:
         case WINED3DFMT_W11V11U10:
-        case WINED3DFMT_A2W10V10U10:
             getFormatDescEntry(CheckFormat, &GLINFO_LOCATION, &glDesc);
             if(glDesc->conversion_group == WINED3DFMT_UNKNOWN) {
                 /* We have a GL extension giving native support */
@@ -2296,6 +2303,7 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DDEVTYPE DeviceType, WINE
         case WINED3DFMT_INDEX16:
         case WINED3DFMT_INDEX32:
         case WINED3DFMT_Q16W16V16U16:
+        case WINED3DFMT_A2W10V10U10:
             TRACE_(d3d_caps)("[FAILED]\n"); /* Enable when implemented */
             return FALSE;
 
@@ -2313,6 +2321,9 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DDEVTYPE DeviceType, WINE
                 TRACE_(d3d_caps)("[OK]\n");
                 return TRUE;
             }
+            TRACE_(d3d_caps)("[FAILED]\n");
+            return FALSE;
+        case WINED3DFMT_YV12:
             TRACE_(d3d_caps)("[FAILED]\n");
             return FALSE;
 
@@ -2389,6 +2400,17 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DDEVTYPE DeviceType, WINE
             TRACE_(d3d_caps)("[FAILED]\n");
             return FALSE;
 
+        case WINED3DFMT_NVHU:
+        case WINED3DFMT_NVHS:
+            /* These formats seem to be similar to the HILO formats in GL_NV_texture_shader. NVHU
+             * is said to be GL_UNSIGNED_HILO16, NVHS GL_SIGNED_HILO16. Rumours say that d3d computes
+             * a 3rd channel similarly to D3DFMT_CxV8U8(So NVHS could be called D3DFMT_CxV16U16).
+             * ATI refused to support formats which can easilly be emulated with pixel shaders, so
+             * Applications have to deal with not having NVHS and NVHU.
+             */
+            TRACE_(d3d_caps)("[FAILED]\n");
+            return FALSE;
+
         case WINED3DFMT_UNKNOWN:
             return FALSE;
 
@@ -2399,8 +2421,36 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DDEVTYPE DeviceType, WINE
     return FALSE;
 }
 
-static BOOL CheckSurfaceCapability(UINT Adapter, WINED3DFORMAT AdapterFormat, WINED3DDEVTYPE DeviceType, WINED3DFORMAT CheckFormat) {
+static BOOL CheckSurfaceCapability(UINT Adapter, WINED3DFORMAT AdapterFormat, WINED3DDEVTYPE DeviceType, WINED3DFORMAT CheckFormat, WINED3DSURFTYPE SurfaceType) {
     const struct blit_shader *blitter;
+
+    if(SurfaceType == SURFACE_GDI) {
+        switch(CheckFormat) {
+            case WINED3DFMT_R8G8B8:
+            case WINED3DFMT_A8R8G8B8:
+            case WINED3DFMT_X8R8G8B8:
+            case WINED3DFMT_R5G6B5:
+            case WINED3DFMT_X1R5G5B5:
+            case WINED3DFMT_A1R5G5B5:
+            case WINED3DFMT_A4R4G4B4:
+            case WINED3DFMT_R3G3B2:
+            case WINED3DFMT_A8:
+            case WINED3DFMT_A8R3G3B2:
+            case WINED3DFMT_X4R4G4B4:
+            case WINED3DFMT_A2B10G10R10:
+            case WINED3DFMT_A8B8G8R8:
+            case WINED3DFMT_X8B8G8R8:
+            case WINED3DFMT_G16R16:
+            case WINED3DFMT_A2R10G10B10:
+            case WINED3DFMT_A16B16G16R16:
+            case WINED3DFMT_P8:
+                TRACE_(d3d_caps)("[OK]\n");
+                return TRUE;
+            default:
+                TRACE_(d3d_caps)("[FAILED] - not available on GDI surfaces\n");
+                return FALSE;
+        }
+    }
 
     /* All format that are supported for textures are supported for surfaces as well */
     if(CheckTextureCapability(Adapter, DeviceType, CheckFormat)) return TRUE;
@@ -2443,7 +2493,8 @@ static BOOL CheckVertexTextureCapability(UINT Adapter, WINED3DFORMAT CheckFormat
 }
 
 static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType, 
-                                              WINED3DFORMAT AdapterFormat, DWORD Usage, WINED3DRESOURCETYPE RType, WINED3DFORMAT CheckFormat) {
+        WINED3DFORMAT AdapterFormat, DWORD Usage, WINED3DRESOURCETYPE RType, WINED3DFORMAT CheckFormat,
+        WINED3DSURFTYPE SurfaceType) {
     IWineD3DImpl *This = (IWineD3DImpl *)iface;
     DWORD UsageCaps = 0;
 
@@ -2461,6 +2512,12 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
     }
 
     if(RType == WINED3DRTYPE_CUBETEXTURE) {
+
+        if(SurfaceType != SURFACE_OPENGL) {
+            TRACE("[FAILED]\n");
+            return WINED3DERR_NOTAVAILABLE;
+        }
+
         /* Cubetexture allows:
          *                    - D3DUSAGE_AUTOGENMIPMAP
          *                    - D3DUSAGE_DEPTHSTENCIL
@@ -2574,7 +2631,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
          *                - D3DUSAGE_RENDERTARGET
          */
 
-        if(CheckSurfaceCapability(Adapter, AdapterFormat, DeviceType, CheckFormat)) {
+        if(CheckSurfaceCapability(Adapter, AdapterFormat, DeviceType, CheckFormat, SurfaceType)) {
             if(Usage & WINED3DUSAGE_DEPTHSTENCIL) {
                 if(CheckDepthStencilCapability(Adapter, AdapterFormat, CheckFormat)) {
                     UsageCaps |= WINED3DUSAGE_DEPTHSTENCIL;
@@ -2619,6 +2676,11 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
          *                - D3DUSAGE_TEXTAPI (d3d9ex)
          *                - D3DUSAGE_QUERY_WRAPANDMIP
          */
+
+        if(SurfaceType != SURFACE_OPENGL) {
+            TRACE("[FAILED]\n");
+            return WINED3DERR_NOTAVAILABLE;
+        }
 
         /* Check if the texture format is around */
         if(CheckTextureCapability(Adapter, DeviceType, CheckFormat)) {
@@ -2741,6 +2803,11 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
          *                      - D3DUSAGE_SOFTWAREPROCESSING
          *                      - D3DUSAGE_QUERY_WRAPANDMIP
          */
+
+        if(SurfaceType != SURFACE_OPENGL) {
+            TRACE("[FAILED]\n");
+            return WINED3DERR_NOTAVAILABLE;
+        }
 
         /* Check volume texture and volume usage caps */
         if(GL_SUPPORT(EXT_TEXTURE3D)) {
@@ -2874,7 +2941,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
         /* For instance vertexbuffer/indexbuffer aren't supported yet because no Windows drivers seem to offer it */
         TRACE_(d3d_caps)("Unhandled resource type D3DRTYPE_INDEXBUFFER / D3DRTYPE_VERTEXBUFFER\n");
         return WINED3DERR_NOTAVAILABLE;
-     }
+    }
 
     /* This format is nothing special and it is supported perfectly.
      * However, ati and nvidia driver on windows do not mark this format as
@@ -3244,12 +3311,14 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     } else
         pCaps->VolumeTextureAddressCaps = 0;
 
-    pCaps->LineCaps = WINED3DLINECAPS_TEXTURE |
-                      WINED3DLINECAPS_ZTEST;
-                      /* FIXME: Add
-                        WINED3DLINECAPS_BLEND
-                        WINED3DLINECAPS_ALPHACMP
-                        WINED3DLINECAPS_FOG */
+    pCaps->LineCaps = WINED3DLINECAPS_TEXTURE       |
+                      WINED3DLINECAPS_ZTEST         |
+                      WINED3DLINECAPS_BLEND         |
+                      WINED3DLINECAPS_ALPHACMP      |
+                      WINED3DLINECAPS_FOG;
+    /* WINED3DLINECAPS_ANTIALIAS is not supported on Windows, and dx and gl seem to have a different
+     * idea how generating the smoothing alpha values works; the result is different
+     */
 
     pCaps->MaxTextureWidth  = GL_LIMITS(texture_size);
     pCaps->MaxTextureHeight = GL_LIMITS(texture_size);
@@ -3540,6 +3609,7 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     WINED3DDISPLAYMODE  mode;
     const struct fragment_pipeline *frag_pipeline = NULL;
     int i;
+    struct fragment_caps ffp_caps;
 
     /* Validate the adapter number. If no adapters are available(no GL), ignore the adapter
      * number and create a device without a 3D adapter for 2D only operation.
@@ -3592,10 +3662,15 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     select_shader_mode(&GLINFO_LOCATION, DeviceType, &object->ps_selected_mode, &object->vs_selected_mode);
     object->shader_backend = select_shader_backend(Adapter, DeviceType);
 
+    memset(&ffp_caps, 0, sizeof(ffp_caps));
     frag_pipeline = select_fragment_implementation(Adapter, DeviceType);
     object->frag_pipe = frag_pipeline;
+    frag_pipeline->get_caps(DeviceType, &GLINFO_LOCATION, &ffp_caps);
+    object->max_ffp_textures = ffp_caps.MaxSimultaneousTextures;
+    object->max_ffp_texture_stages = ffp_caps.MaxTextureBlendStages;
     compile_state_table(object->StateTable, object->multistate_funcs, &GLINFO_LOCATION,
                         ffp_vertexstate_template, frag_pipeline, misc_state_template);
+
     object->blitter = select_blit_implementation(Adapter, DeviceType);
 
     /* Prefer the vtable with functions optimized for single dirtifyable objects if the shader
@@ -3707,7 +3782,7 @@ static void test_pbo_functionality(WineD3D_GL_Info *gl_info) {
     while(glGetError());
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, 0);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 4, 4, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, 0);
     checkGLcall("Specifying the PBO test texture\n");
 
     GL_EXTCALL(glGenBuffersARB(1, &pbo));
@@ -3852,7 +3927,7 @@ static void fixup_extensions(WineD3D_GL_Info *gl_info) {
      *  This usually means that ARB_tex_npot is supported in hardware as long as the application is staying
      *  within the limits enforced by the ARB_texture_rectangle extension. This however is not true for the
      *  FX series, which instantly falls back to a slower software path as soon as ARB_tex_npot is used.
-     *  We therefore completly remove ARB_tex_npot from the list of supported extensions.
+     *  We therefore completely remove ARB_tex_npot from the list of supported extensions.
      *
      *  Note that wine_normalized_texrect can't be used in this case because internally it uses ARB_tex_npot,
      *  triggering the software fallback. There is not much we can do here apart from disabling the
@@ -3888,7 +3963,7 @@ static void fixup_extensions(WineD3D_GL_Info *gl_info) {
     }
 }
 
-void invalid_func(void *data) {
+static void WINE_GLAPI invalid_func(void *data) {
     ERR("Invalid vertex attribute function called\n");
     DebugBreak();
 }
@@ -3898,7 +3973,7 @@ void invalid_func(void *data) {
 /* Helper functions for providing vertex data to opengl. The arrays are initialized based on
  * the extension detection and are used in drawStridedSlow
  */
-static void position_d3dcolor(void *data) {
+static void WINE_GLAPI position_d3dcolor(void *data) {
     DWORD pos = *((DWORD *) data);
 
     FIXME("Add a test for fixed function position from d3dcolor type\n");
@@ -3907,7 +3982,7 @@ static void position_d3dcolor(void *data) {
                D3DCOLOR_B_B(pos),
                D3DCOLOR_B_A(pos));
 }
-static void position_float4(void *data) {
+static void WINE_GLAPI position_float4(void *data) {
     GLfloat *pos = (float *) data;
 
     if (pos[3] < eps && pos[3] > -eps)
@@ -3919,7 +3994,7 @@ static void position_float4(void *data) {
     }
 }
 
-static void diffuse_d3dcolor(void *data) {
+static void WINE_GLAPI diffuse_d3dcolor(void *data) {
     DWORD diffuseColor = *((DWORD *) data);
 
     glColor4ub(D3DCOLOR_B_R(diffuseColor),
@@ -3928,14 +4003,14 @@ static void diffuse_d3dcolor(void *data) {
                D3DCOLOR_B_A(diffuseColor));
 }
 
-static void specular_d3dcolor(void *data) {
+static void WINE_GLAPI specular_d3dcolor(void *data) {
     DWORD specularColor = *((DWORD *) data);
 
     GL_EXTCALL(glSecondaryColor3ubEXT)(D3DCOLOR_B_R(specularColor),
                                        D3DCOLOR_B_G(specularColor),
                                        D3DCOLOR_B_B(specularColor));
 }
-static void warn_no_specular_func(void *data) {
+static void WINE_GLAPI warn_no_specular_func(void *data) {
     WARN("GL_EXT_secondary_color not supported\n");
 }
 

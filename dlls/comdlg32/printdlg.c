@@ -309,8 +309,13 @@ static BOOL PRINTDLG_UpdatePrintDlgA(HWND hDlg,
         if (IsDlgButtonChecked(hDlg, rad3) == BST_CHECKED) { /* Pages */
 	    WORD nToPage;
 	    WORD nFromPage;
+            BOOL translated;
 	    nFromPage = GetDlgItemInt(hDlg, edt1, NULL, FALSE);
-	    nToPage   = GetDlgItemInt(hDlg, edt2, NULL, FALSE);
+	    nToPage   = GetDlgItemInt(hDlg, edt2, &translated, FALSE);
+
+	    /* if no ToPage value is entered, use the FromPage value */
+	    if(!translated) nToPage = nFromPage;
+
 	    if (nFromPage < lppd->nMinPage || nFromPage > lppd->nMaxPage ||
 		nToPage < lppd->nMinPage || nToPage > lppd->nMaxPage) {
 	        WCHAR resourcestr[256];
@@ -407,8 +412,13 @@ static BOOL PRINTDLG_UpdatePrintDlgW(HWND hDlg,
         if (IsDlgButtonChecked(hDlg, rad3) == BST_CHECKED) { /* Pages */
 	    WORD nToPage;
 	    WORD nFromPage;
+            BOOL translated;
 	    nFromPage = GetDlgItemInt(hDlg, edt1, NULL, FALSE);
-	    nToPage   = GetDlgItemInt(hDlg, edt2, NULL, FALSE);
+	    nToPage   = GetDlgItemInt(hDlg, edt2, &translated, FALSE);
+
+	    /* if no ToPage value is entered, use the FromPage value */
+	    if(!translated) nToPage = nFromPage;
+
 	    if (nFromPage < lppd->nMinPage || nFromPage > lppd->nMaxPage ||
 		nToPage < lppd->nMinPage || nToPage > lppd->nMaxPage) {
 	        WCHAR resourcestr[256];
@@ -946,9 +956,12 @@ BOOL PRINTDLG_ChangePrinterA(HWND hDlg, char *name,
     lpdm = PrintStructures->lpDevMode;  /* use this as a shortcut */
 
     if(!(lppd->Flags & PD_PRINTSETUP)) {
-      /* Print range (All/Range/Selection) */
-        SetDlgItemInt(hDlg, edt1, lppd->nFromPage, FALSE);
-	SetDlgItemInt(hDlg, edt2, lppd->nToPage, FALSE);
+	/* Print range (All/Range/Selection) */
+	if(lppd->nFromPage != 0xffff)
+	    SetDlgItemInt(hDlg, edt1, lppd->nFromPage, FALSE);
+	if(lppd->nToPage != 0xffff)
+	    SetDlgItemInt(hDlg, edt2, lppd->nToPage, FALSE);
+
 	CheckRadioButton(hDlg, rad1, rad3, rad1);		/* default */
 	if (lppd->Flags & PD_NOSELECTION)
 	    EnableWindow(GetDlgItem(hDlg, rad2), FALSE);
@@ -1150,9 +1163,12 @@ static BOOL PRINTDLG_ChangePrinterW(HWND hDlg, WCHAR *name,
     lpdm = PrintStructures->lpDevMode;  /* use this as a shortcut */
 
     if(!(lppd->Flags & PD_PRINTSETUP)) {
-      /* Print range (All/Range/Selection) */
-        SetDlgItemInt(hDlg, edt1, lppd->nFromPage, FALSE);
-	SetDlgItemInt(hDlg, edt2, lppd->nToPage, FALSE);
+	/* Print range (All/Range/Selection) */
+	if(lppd->nFromPage != 0xffff)
+	    SetDlgItemInt(hDlg, edt1, lppd->nFromPage, FALSE);
+	if(lppd->nToPage != 0xffff)
+	    SetDlgItemInt(hDlg, edt2, lppd->nToPage, FALSE);
+
 	CheckRadioButton(hDlg, rad1, rad3, rad1);		/* default */
 	if (lppd->Flags & PD_NOSELECTION)
 	    EnableWindow(GetDlgItem(hDlg, rad2), FALSE);

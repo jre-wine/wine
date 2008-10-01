@@ -64,11 +64,14 @@ RC_SRCS = ole32res.rc
 
 RC_SRCS16 = version16.rc
 
-IDL_H_SRCS = \
-	dcom.idl
-
 IDL_C_SRCS = \
 	irot.idl
+
+IDL_P_SRCS = \
+	dcom.idl \
+	ole32_objidl.idl \
+	ole32_oleidl.idl \
+	ole32_unknwn.idl
 
 @MAKE_DLL_RULES@
 

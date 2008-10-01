@@ -14,15 +14,15 @@
 @ stdcall WinHttpGetProxyForUrl(ptr wstr ptr ptr)
 @ stdcall WinHttpOpen(wstr long wstr wstr long)
 @ stdcall WinHttpOpenRequest(ptr wstr wstr wstr wstr ptr long)
-@ stub WinHttpQueryAuthSchemes
+@ stdcall WinHttpQueryAuthSchemes(ptr ptr ptr ptr)
 @ stdcall WinHttpQueryDataAvailable(ptr ptr)
 @ stdcall WinHttpQueryHeaders(ptr long wstr ptr ptr ptr)
 @ stdcall WinHttpQueryOption(ptr long ptr ptr)
 @ stdcall WinHttpReadData(ptr ptr long ptr)
 @ stdcall WinHttpReceiveResponse(ptr ptr)
 @ stdcall WinHttpSendRequest(ptr wstr long ptr long long ptr)
-@ stub WinHttpSetCredentials
-@ stdcall WinHttpSetDefaultProxyConfiguration(ptr long long wstr ptr ptr)
+@ stdcall WinHttpSetCredentials(ptr long long wstr ptr ptr)
+@ stdcall WinHttpSetDefaultProxyConfiguration(ptr)
 @ stdcall WinHttpSetOption(ptr long ptr long)
 @ stdcall WinHttpSetStatusCallback(ptr ptr long ptr)
 @ stdcall WinHttpSetTimeouts(ptr long long long long)

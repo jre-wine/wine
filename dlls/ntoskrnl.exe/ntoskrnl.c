@@ -31,7 +31,7 @@
 #include "windef.h"
 #include "winternl.h"
 #include "excpt.h"
-#include "ddk/wdm.h"
+#include "ddk/ntddk.h"
 #include "wine/unicode.h"
 #include "wine/server.h"
 #include "wine/debug.h"
@@ -451,6 +451,45 @@ NTSTATUS WINAPI IoDeleteSymbolicLink( UNICODE_STRING *name )
 
 
 /***********************************************************************
+ *           IoGetDeviceObjectPointer   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS  WINAPI IoGetDeviceObjectPointer( UNICODE_STRING *name, ACCESS_MASK access, PFILE_OBJECT *file, PDEVICE_OBJECT *device )
+{
+    FIXME( "stub: %s %x %p %p\n", debugstr_us(name), access, file, device );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
+ *           IoGetRelatedDeviceObject    (NTOSKRNL.EXE.@)
+ */
+PDEVICE_OBJECT WINAPI IoGetRelatedDeviceObject( PFILE_OBJECT obj )
+{
+    FIXME( "stub: %p\n", obj );
+    return NULL;
+}
+
+
+/***********************************************************************
+ *           IoRegisterDriverReinitialization    (NTOSKRNL.EXE.@)
+ */
+void WINAPI IoRegisterDriverReinitialization( PDRIVER_OBJECT obj, PDRIVER_REINITIALIZE reinit, PVOID context )
+{
+    FIXME( "stub: %p %p %p\n", obj, reinit, context );
+}
+
+
+/***********************************************************************
+ *           IoRegisterShutdownNotification    (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoRegisterShutdownNotification( PDEVICE_OBJECT obj )
+{
+    FIXME( "stub: %p\n", obj );
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
  *           IofCompleteRequest   (NTOSKRNL.EXE.@)
  */
 #ifdef DEFINE_FASTCALL2_ENTRYPOINT
@@ -738,6 +777,29 @@ void WINAPI MmResetDriverPaging(PVOID AddrInSection)
 {
     TRACE("%p\n", AddrInSection);
 }
+
+
+ /***********************************************************************
+ *           ObReferenceObjectByHandle    (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI ObReferenceObjectByHandle( HANDLE obj, ACCESS_MASK access,
+                                           POBJECT_TYPE type,
+                                           KPROCESSOR_MODE mode, PVOID* ptr,
+                                           POBJECT_HANDLE_INFORMATION info)
+{
+    FIXME( "stub: %p %x %p %d %p %p\n", obj, access, type, mode, ptr, info);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
+ *           ObfDereferenceObject   (NTOSKRNL.EXE.@)
+ */
+void WINAPI ObfDereferenceObject( VOID *obj )
+{
+    FIXME( "stub: %p\n", obj );
+}
+
 
 /***********************************************************************
  *           PsCreateSystemThread   (NTOSKRNL.EXE.@)

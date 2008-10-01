@@ -59,7 +59,7 @@ static void test_OpenRequest (void)
     ok(request != NULL, "WinHttpOpenrequest failed to open a request, error: %u.\n", GetLastError());
 
     ret = WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, NULL, 0, 0, 0);
-    todo_wine ok(ret == TRUE, "WinHttpSendRequest failed: %u\n", GetLastError());
+    ok(ret == TRUE, "WinHttpSendRequest failed: %u\n", GetLastError());
     ret = WinHttpCloseHandle(request);
     ok(ret == TRUE, "WinHttpCloseHandle failed on closing request, got %d.\n", ret);
 
@@ -111,27 +111,25 @@ static void test_SendRequest (void)
     ok(request != NULL, "WinHttpOpenrequest failed to open a request, error: %u.\n", GetLastError());
 
     ret = WinHttpSendRequest(request, content_type, header_len, post_data, optional_len, total_len, 0);
-    todo_wine ok(ret == TRUE, "WinHttpSendRequest failed: %u\n", GetLastError());
+    ok(ret == TRUE, "WinHttpSendRequest failed: %u\n", GetLastError());
 
     for (i = 3; post_data[i]; i++)
     {
         bytes_rw = -1;
         ret = WinHttpWriteData(request, &post_data[i], 1, &bytes_rw);
-        todo_wine ok(ret == TRUE, "WinHttpWriteData failed: %u.\n", GetLastError());
-        todo_wine ok(bytes_rw == 1, "WinHttpWriteData failed, wrote %u bytes instead of 1 byte.\n", bytes_rw);
+        ok(ret == TRUE, "WinHttpWriteData failed: %u.\n", GetLastError());
+        ok(bytes_rw == 1, "WinHttpWriteData failed, wrote %u bytes instead of 1 byte.\n", bytes_rw);
     }
 
     ret = WinHttpReceiveResponse(request, NULL);
-    todo_wine ok(ret == TRUE, "WinHttpReceiveResponse failed: %u.\n", GetLastError());
+    ok(ret == TRUE, "WinHttpReceiveResponse failed: %u.\n", GetLastError());
 
     bytes_rw = -1;
     ret = WinHttpReadData(request, buffer, sizeof(buffer) - 1, &bytes_rw);
-    todo_wine ok(ret == TRUE, "WinHttpReadData failed: %u.\n", GetLastError());
+    ok(ret == TRUE, "WinHttpReadData failed: %u.\n", GetLastError());
 
-    todo_wine ok(bytes_rw == strlen(test_post), "Read %u bytes instead of %d.\n",
-        bytes_rw, lstrlen(test_post));
-    todo_wine ok(strncmp(buffer, test_post, bytes_rw) == 0,
-        "Data read did not match, got '%s'.\n", buffer);
+    ok(bytes_rw == strlen(test_post), "Read %u bytes instead of %d.\n", bytes_rw, lstrlen(test_post));
+    ok(strncmp(buffer, test_post, bytes_rw) == 0, "Data read did not match, got '%s'.\n", buffer);
 
     ret = WinHttpCloseHandle(request);
     ok(ret == TRUE, "WinHttpCloseHandle failed on closing request, got %d.\n", ret);
@@ -252,7 +250,7 @@ static void test_WinHttpAddHeaders(void)
     len = sizeof(buffer);
     ret = WinHttpQueryHeaders(request, WINHTTP_QUERY_CUSTOM | WINHTTP_QUERY_FLAG_REQUEST_HEADERS,
         test_header_name, buffer, &len, &index);
-    ok(ret == FALSE, "WinHttpQueryHeaders unexpectedly succeeded, found 'Warning' header.");
+    ok(ret == FALSE, "WinHttpQueryHeaders unexpectedly succeeded, found 'Warning' header.\n");
     ret = WinHttpAddRequestHeaders(request, test_headers[0], -1L, WINHTTP_ADDREQ_FLAG_ADD);
     ok(ret == TRUE, "WinHttpAddRequestHeader failed to add new header, got %d with error %u.\n", ret, GetLastError());
 
@@ -269,13 +267,15 @@ static void test_WinHttpAddHeaders(void)
         test_header_name, buffer, &len, &index);
     ok(ret == FALSE, "WinHttpQueryHeaders unexpectedly succeeded, second index should not exist.\n");
 
-    /* Try to fetch the header info with a buffer thats big enough to fit string but not NULL terminator. */
+    /* Try to fetch the header info with a buffer that's big enough to fit the
+     * string but not the NULL terminator.
+     */
     index = 0;
     len = 5*sizeof(WCHAR);
     memcpy(buffer, check_buffer, sizeof(buffer));
     ret = WinHttpQueryHeaders(request, WINHTTP_QUERY_CUSTOM | WINHTTP_QUERY_FLAG_REQUEST_HEADERS,
         test_header_name, buffer, &len, &index);
-    ok(ret == FALSE, "WinHttpQueryHeaders unexpectedly succeeded with a buffer thats too small.\n");
+    ok(ret == FALSE, "WinHttpQueryHeaders unexpectedly succeeded with a buffer that's too small.\n");
     ok(memcmp(buffer, check_buffer, sizeof(buffer)) == 0,
             "WinHttpQueryHeaders failed, modified the buffer when it should not have.\n");
     ok(len == 6*sizeof(WCHAR), "WinHttpQueryHeaders returned invalid length, expected 12, got %d\n", len);
@@ -287,11 +287,11 @@ static void test_WinHttpAddHeaders(void)
     ret = WinHttpQueryHeaders(request, WINHTTP_QUERY_RAW_HEADERS_CRLF | WINHTTP_QUERY_FLAG_REQUEST_HEADERS,
         test_header_name, NULL, &len, &index);
     ok(ret == FALSE, "WinHttpQueryHeaders unexpectedly succeeded.\n");
-    todo_wine ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Expected ERROR_INSUFFICIENT_BUFFER, got %u\n", GetLastError());
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Expected ERROR_INSUFFICIENT_BUFFER, got %u\n", GetLastError());
     ok(len > 40, "WinHttpQueryHeaders returned invalid length: expected greater than 40, got %d\n", len);
     ok(index == 0, "WinHttpQueryHeaders incorrectly incremented header index.\n");
 
-    /* Try with a NULL buffer and a length thats too small */
+    /* Try with a NULL buffer and a length that's too small */
     index = 0;
     len = 10;
     SetLastError(0xdeadbeef);
@@ -330,6 +330,30 @@ static void test_WinHttpAddHeaders(void)
     ok(memcmp(buffer + lstrlenW(buffer) - 4, test_header_end, sizeof(test_header_end)) == 0,
         "WinHttpQueryHeaders returned invalid end of header string.\n");
     ok(index == 0, "WinHttpQueryHeaders incremented header index.\n");
+
+    index = 0;
+    len = 0;
+    SetLastError(0xdeadbeef);
+    ret = WinHttpQueryHeaders(request, WINHTTP_QUERY_RAW_HEADERS | WINHTTP_QUERY_FLAG_REQUEST_HEADERS,
+        test_header_name, NULL, &len, &index);
+    ok(ret == FALSE, "WinHttpQueryHeaders unexpectedly succeeded.\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+        "WinHttpQueryHeaders set incorrect error: expected ERROR_INSUFFICIENT_BUFFER, got %u\n", GetLastError());
+    ok(len > 40, "WinHttpQueryHeaders returned invalid length: expected greater than 40, got %d\n", len);
+    ok(index == 0, "WinHttpQueryHeaders failed: index was incremented.\n");
+
+    oldlen = len;
+    index = 0;
+    len = sizeof(buffer);
+    memset(buffer, 0xff, sizeof(buffer));
+    ret = WinHttpQueryHeaders(request, WINHTTP_QUERY_RAW_HEADERS | WINHTTP_QUERY_FLAG_REQUEST_HEADERS,
+        test_header_name, buffer, &len, &index);
+    ok(ret == TRUE, "WinHttpQueryHeaders failed %u\n", GetLastError());
+    ok(len + sizeof(WCHAR) <= oldlen, "resulting length longer than advertized\n");
+    ok((len < sizeof(buffer) - sizeof(WCHAR)) && !buffer[len / sizeof(WCHAR)] && !buffer[len / sizeof(WCHAR) - 1],
+        "no double NULL terminator\n");
+    ok(!memcmp(buffer, test_header_begin, sizeof(test_header_begin)), "invalid beginning of header string\n");
+    ok(index == 0, "header index was incremented\n");
 
     /* tests for more indices */
     ret = WinHttpAddRequestHeaders(request, test_headers[1], -1L, WINHTTP_ADDREQ_FLAG_ADD);
@@ -527,6 +551,113 @@ static void test_WinHttpAddHeaders(void)
 
 }
 
+static void test_secure_connection(void)
+{
+    static const WCHAR google[] = {'w','w','w','.','g','o','o','g','l','e','.','c','o','m',0};
+
+    HANDLE ses, con, req;
+    DWORD size, status, policy;
+    BOOL ret;
+
+    ses = WinHttpOpen(test_useragent, 0, NULL, NULL, 0);
+    ok(ses != NULL, "failed to open session %u\n", GetLastError());
+
+    policy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+    ret = WinHttpSetOption(ses, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy));
+    ok(ret, "failed to set redirect policy %u\n", GetLastError());
+
+    con = WinHttpConnect(ses, google, 443, 0);
+    ok(con != NULL, "failed to open a connection %u\n", GetLastError());
+
+    /* try without setting WINHTTP_FLAG_SECURE */
+    req = WinHttpOpenRequest(con, NULL, NULL, NULL, NULL, NULL, 0);
+    ok(req != NULL, "failed to open a request %u\n", GetLastError());
+
+    ret = WinHttpSendRequest(req, NULL, 0, NULL, 0, 0, 0);
+    ok(ret, "failed to send request %u\n", GetLastError());
+
+    ret = WinHttpReceiveResponse(req, NULL);
+    ok(!ret, "succeeded unexpectedly\n");
+
+    size = 0;
+    ret = WinHttpQueryHeaders(req, WINHTTP_QUERY_RAW_HEADERS_CRLF, NULL, NULL, &size, NULL);
+    ok(!ret, "succeeded unexpectedly\n");
+
+    WinHttpCloseHandle(req);
+
+    req = WinHttpOpenRequest(con, NULL, NULL, NULL, NULL, NULL, WINHTTP_FLAG_SECURE);
+    ok(req != NULL, "failed to open a request %u\n", GetLastError());
+
+    ret = WinHttpSendRequest(req, NULL, 0, NULL, 0, 0, 0);
+    ok(ret, "failed to send request %u\n", GetLastError());
+
+    ret = WinHttpReceiveResponse(req, NULL);
+    ok(ret, "failed to receive response %u\n", GetLastError());
+
+    size = sizeof(status);
+    ret = WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL);
+    ok(ret, "failed unexpectedly %u\n", GetLastError());
+    ok(status == 200, "request failed unexpectedly %u\n", status);
+
+    size = 0;
+    ret = WinHttpQueryHeaders(req, WINHTTP_QUERY_RAW_HEADERS_CRLF, NULL, NULL, &size, NULL);
+    ok(!ret, "succeeded unexpectedly\n");
+
+    WinHttpCloseHandle(req);
+    WinHttpCloseHandle(con);
+    WinHttpCloseHandle(ses);
+}
+
+static void test_request_parameter_defaults(void)
+{
+    static const WCHAR empty[] = {0};
+    static const WCHAR codeweavers[] = {'c','o','d','e','w','e','a','v','e','r','s','.','c','o','m',0};
+
+    HANDLE ses, con, req;
+    DWORD size, status;
+    BOOL ret;
+
+    ses = WinHttpOpen(test_useragent, 0, NULL, NULL, 0);
+    ok(ses != NULL, "failed to open session %u\n", GetLastError());
+
+    con = WinHttpConnect(ses, codeweavers, 0, 0);
+    ok(con != NULL, "failed to open a connection %u\n", GetLastError());
+
+    req = WinHttpOpenRequest(con, NULL, NULL, NULL, NULL, NULL, 0);
+    ok(req != NULL, "failed to open a request %u\n", GetLastError());
+
+    ret = WinHttpSendRequest(req, NULL, 0, NULL, 0, 0, 0);
+    ok(ret, "failed to send request %u\n", GetLastError());
+
+    ret = WinHttpReceiveResponse(req, NULL);
+    ok(ret, "failed to receive response %u\n", GetLastError());
+
+    size = sizeof(status);
+    ret = WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL);
+    ok(ret, "failed unexpectedly %u\n", GetLastError());
+    ok(status == 200, "request failed unexpectedly %u\n", status);
+
+    WinHttpCloseHandle(req);
+
+    req = WinHttpOpenRequest(con, empty, empty, empty, NULL, NULL, 0);
+    ok(req != NULL, "failed to open a request %u\n", GetLastError());
+
+    ret = WinHttpSendRequest(req, NULL, 0, NULL, 0, 0, 0);
+    ok(ret, "failed to send request %u\n", GetLastError());
+
+    ret = WinHttpReceiveResponse(req, NULL);
+    ok(ret, "failed to receive response %u\n", GetLastError());
+
+    size = sizeof(status);
+    ret = WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL);
+    ok(ret, "failed unexpectedly %u\n", GetLastError());
+    ok(status == 200, "request failed unexpectedly %u\n", status);
+
+    WinHttpCloseHandle(req);
+    WinHttpCloseHandle(con);
+    WinHttpCloseHandle(ses);
+}
+
 START_TEST (winhttp)
 {
     test_OpenRequest();
@@ -534,4 +665,6 @@ START_TEST (winhttp)
     test_WinHttpTimeFromSystemTime();
     test_WinHttpTimeToSystemTime();
     test_WinHttpAddHeaders();
+    test_secure_connection();
+    test_request_parameter_defaults();
 }

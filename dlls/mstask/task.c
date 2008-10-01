@@ -94,8 +94,8 @@ static HRESULT WINAPI MSTASK_ITask_CreateTrigger(
         WORD *piNewTrigger,
         ITaskTrigger **ppTrigger)
 {
-    FIXME("(%p, %p, %p): stub\n", iface, piNewTrigger, ppTrigger);
-    return E_NOTIMPL;
+    TRACE("(%p, %p, %p)\n", iface, piNewTrigger, ppTrigger);
+    return TaskTriggerConstructor((LPVOID *)ppTrigger);
 }
 
 static HRESULT WINAPI MSTASK_ITask_DeleteTrigger(
@@ -652,7 +652,9 @@ static HRESULT WINAPI MSTASK_IPersistFile_Save(
         BOOL fRemember)
 {
     FIXME("(%p, %p, %d): stub\n", iface, pszFileName, fRemember);
-    return E_NOTIMPL;
+    WARN("Returning S_OK but not writing to disk: %s %d\n",
+            debugstr_w(pszFileName), fRemember);
+    return S_OK;
 }
 
 static HRESULT WINAPI MSTASK_IPersistFile_SaveCompleted(

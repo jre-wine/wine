@@ -33,10 +33,142 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
 
+typedef struct path_list_node_t path_list_node_t;
+struct path_list_node_t {
+    GpPointF pt;
+    BYTE type; /* PathPointTypeStart or PathPointTypeLine */
+    path_list_node_t *next;
+};
+
+/* init list */
+static BOOL init_path_list(path_list_node_t **node, REAL x, REAL y)
+{
+    *node = GdipAlloc(sizeof(path_list_node_t));
+    if(!*node)
+        return FALSE;
+
+    (*node)->pt.X = x;
+    (*node)->pt.Y = y;
+    (*node)->type = PathPointTypeStart;
+    (*node)->next = NULL;
+
+    return TRUE;
+}
+
+/* free all nodes including argument */
+static void free_path_list(path_list_node_t *node)
+{
+    path_list_node_t *n = node;
+
+    while(n){
+        n = n->next;
+        GdipFree(node);
+        node = n;
+    }
+}
+
+/* Add a node after 'node' */
+/*
+ * Returns
+ *  pointer on success
+ *  NULL    on allocation problems
+ */
+static path_list_node_t* add_path_list_node(path_list_node_t *node, REAL x, REAL y, BOOL type)
+{
+    path_list_node_t *new;
+
+    new = GdipAlloc(sizeof(path_list_node_t));
+    if(!new)
+        return NULL;
+
+    new->pt.X  = x;
+    new->pt.Y  = y;
+    new->type  = type;
+    new->next  = node->next;
+    node->next = new;
+
+    return new;
+}
+
+/* returns element count */
+static INT path_list_count(path_list_node_t *node)
+{
+    INT count = 1;
+
+    while((node = node->next))
+        ++count;
+
+    return count;
+}
+
+/* GdipFlattenPath helper */
+/*
+ * Used to recursively flatten single Bezier curve
+ * Parameters:
+ *  - start   : pointer to start point node;
+ *  - (x2, y2): first control point;
+ *  - (x3, y3): second control point;
+ *  - end     : pointer to end point node
+ *  - flatness: admissible error of linear approximation.
+ *
+ * Return value:
+ *  TRUE : success
+ *  FALSE: out of memory
+ *
+ * TODO: used quality criteria should be revised to match native as
+ *       closer as possible.
+ */
+static BOOL flatten_bezier(path_list_node_t *start, REAL x2, REAL y2, REAL x3, REAL y3,
+                           path_list_node_t *end, REAL flatness)
+{
+    /* this 5 middle points with start/end define to half-curves */
+    GpPointF mp[5];
+    GpPointF pt, pt_st;
+    path_list_node_t *node;
+
+    /* calculate bezier curve middle points == new control points */
+    mp[0].X = (start->pt.X + x2) / 2.0;
+    mp[0].Y = (start->pt.Y + y2) / 2.0;
+    /* middle point between control points */
+    pt.X = (x2 + x3) / 2.0;
+    pt.Y = (y2 + y3) / 2.0;
+    mp[1].X = (mp[0].X + pt.X) / 2.0;
+    mp[1].Y = (mp[0].Y + pt.Y) / 2.0;
+    mp[4].X = (end->pt.X + x3) / 2.0;
+    mp[4].Y = (end->pt.Y + y3) / 2.0;
+    mp[3].X = (mp[4].X + pt.X) / 2.0;
+    mp[3].Y = (mp[4].Y + pt.Y) / 2.0;
+
+    mp[2].X = (mp[1].X + mp[3].X) / 2.0;
+    mp[2].Y = (mp[1].Y + mp[3].Y) / 2.0;
+
+    pt = end->pt;
+    pt_st = start->pt;
+    /* check flatness as a half of distance between middle point and a linearized path */
+    if(fabs(((pt.Y - pt_st.Y)*mp[2].X + (pt_st.X - pt.X)*mp[2].Y +
+        (pt_st.Y*pt.X - pt_st.X*pt.Y))) <=
+        (0.5 * flatness*sqrtf((powf(pt.Y - pt_st.Y, 2.0) + powf(pt_st.X - pt.X, 2.0))))){
+        return TRUE;
+    }
+    else
+        /* add a middle point */
+        if(!(node = add_path_list_node(start, mp[2].X, mp[2].Y, PathPointTypeLine)))
+            return FALSE;
+
+    /* do the same with halfs */
+    flatten_bezier(start, mp[0].X, mp[0].Y, mp[1].X, mp[1].Y, node, flatness);
+    flatten_bezier(node,  mp[3].X, mp[3].Y, mp[4].X, mp[4].Y, end,  flatness);
+
+    return TRUE;
+}
+
 GpStatus WINGDIPAPI GdipAddPathArc(GpPath *path, REAL x1, REAL y1, REAL x2,
     REAL y2, REAL startAngle, REAL sweepAngle)
 {
     INT count, old_count, i;
+
+    TRACE("(%p, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f)\n",
+          path, x1, y1, x2, y2, startAngle, sweepAngle);
 
     if(!path)
         return InvalidParameter;
@@ -67,6 +199,9 @@ GpStatus WINGDIPAPI GdipAddPathArc(GpPath *path, REAL x1, REAL y1, REAL x2,
 GpStatus WINGDIPAPI GdipAddPathArcI(GpPath *path, INT x1, INT y1, INT x2,
    INT y2, REAL startAngle, REAL sweepAngle)
 {
+    TRACE("(%p, %d, %d, %d, %d, %.2f, %.2f)\n",
+          path, x1, y1, x2, y2, startAngle, sweepAngle);
+
     return GdipAddPathArc(path,(REAL)x1,(REAL)y1,(REAL)x2,(REAL)y2,startAngle,sweepAngle);
 }
 
@@ -74,6 +209,9 @@ GpStatus WINGDIPAPI GdipAddPathBezier(GpPath *path, REAL x1, REAL y1, REAL x2,
     REAL y2, REAL x3, REAL y3, REAL x4, REAL y4)
 {
     INT old_count;
+
+    TRACE("(%p, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f)\n",
+          path, x1, y1, x2, y2, x3, y3, x4, y4);
 
     if(!path)
         return InvalidParameter;
@@ -107,6 +245,9 @@ GpStatus WINGDIPAPI GdipAddPathBezier(GpPath *path, REAL x1, REAL y1, REAL x2,
 GpStatus WINGDIPAPI GdipAddPathBezierI(GpPath *path, INT x1, INT y1, INT x2,
     INT y2, INT x3, INT y3, INT x4, INT y4)
 {
+    TRACE("(%p, %d, %d, %d, %d, %d, %d, %d, %d)\n",
+          path, x1, y1, x2, y2, x3, y3, x4, y4);
+
     return GdipAddPathBezier(path,(REAL)x1,(REAL)y1,(REAL)x2,(REAL)y2,(REAL)x3,(REAL)y3,
                                   (REAL)x4,(REAL)y4);
 }
@@ -115,6 +256,8 @@ GpStatus WINGDIPAPI GdipAddPathBeziers(GpPath *path, GDIPCONST GpPointF *points,
     INT count)
 {
     INT i, old_count;
+
+    TRACE("(%p, %p, %d)\n", path, points, count);
 
     if(!path || !points || ((count - 1) % 3))
         return InvalidParameter;
@@ -145,6 +288,8 @@ GpStatus WINGDIPAPI GdipAddPathBeziersI(GpPath *path, GDIPCONST GpPoint *points,
     GpStatus ret;
     INT i;
 
+    TRACE("(%p, %p, %d)\n", path, points, count);
+
     if(!points || ((count - 1) % 3))
         return InvalidParameter;
 
@@ -166,12 +311,16 @@ GpStatus WINGDIPAPI GdipAddPathBeziersI(GpPath *path, GDIPCONST GpPoint *points,
 GpStatus WINGDIPAPI GdipAddPathClosedCurve(GpPath *path, GDIPCONST GpPointF *points,
     INT count)
 {
+    TRACE("(%p, %p, %d)\n", path, points, count);
+
     return GdipAddPathClosedCurve2(path, points, count, 1.0);
 }
 
 GpStatus WINGDIPAPI GdipAddPathClosedCurveI(GpPath *path, GDIPCONST GpPoint *points,
     INT count)
 {
+    TRACE("(%p, %p, %d)\n", path, points, count);
+
     return GdipAddPathClosedCurve2I(path, points, count, 1.0);
 }
 
@@ -183,6 +332,8 @@ GpStatus WINGDIPAPI GdipAddPathClosedCurve2(GpPath *path, GDIPCONST GpPointF *po
     GpPointF *pts;
     REAL x1, x2, y1, y2;
     GpStatus stat;
+
+    TRACE("(%p, %p, %d, %.2f)\n", path, points, count, tension);
 
     if(!path || !points || count <= 1)
         return InvalidParameter;
@@ -251,6 +402,8 @@ GpStatus WINGDIPAPI GdipAddPathClosedCurve2I(GpPath *path, GDIPCONST GpPoint *po
     INT i;
     GpStatus stat;
 
+    TRACE("(%p, %p, %d, %.2f)\n", path, points, count, tension);
+
     if(!path || !points || count <= 1)
         return InvalidParameter;
 
@@ -272,18 +425,22 @@ GpStatus WINGDIPAPI GdipAddPathClosedCurve2I(GpPath *path, GDIPCONST GpPoint *po
 
 GpStatus WINGDIPAPI GdipAddPathCurve(GpPath *path, GDIPCONST GpPointF *points, INT count)
 {
+    TRACE("(%p, %p, %d)\n", path, points, count);
+
     if(!path || !points || count <= 1)
         return InvalidParameter;
 
-   return GdipAddPathCurve2(path, points, count, 1.0);
+    return GdipAddPathCurve2(path, points, count, 1.0);
 }
 
 GpStatus WINGDIPAPI GdipAddPathCurveI(GpPath *path, GDIPCONST GpPoint *points, INT count)
 {
+    TRACE("(%p, %p, %d)\n", path, points, count);
+
     if(!path || !points || count <= 1)
         return InvalidParameter;
 
-   return GdipAddPathCurve2I(path, points, count, 1.0);
+    return GdipAddPathCurve2I(path, points, count, 1.0);
 }
 
 GpStatus WINGDIPAPI GdipAddPathCurve2(GpPath *path, GDIPCONST GpPointF *points, INT count,
@@ -293,6 +450,8 @@ GpStatus WINGDIPAPI GdipAddPathCurve2(GpPath *path, GDIPCONST GpPointF *points, 
     GpPointF *pt;
     REAL x1, x2, y1, y2;
     GpStatus stat;
+
+    TRACE("(%p, %p, %d, %.2f)\n", path, points, count, tension);
 
     if(!path || !points || count <= 1)
         return InvalidParameter;
@@ -344,6 +503,8 @@ GpStatus WINGDIPAPI GdipAddPathCurve2I(GpPath *path, GDIPCONST GpPoint *points,
     INT i;
     GpStatus stat;
 
+    TRACE("(%p, %p, %d, %.2f)\n", path, points, count, tension);
+
     if(!path || !points || count <= 1)
         return InvalidParameter;
 
@@ -367,6 +528,8 @@ GpStatus WINGDIPAPI GdipAddPathEllipse(GpPath *path, REAL x, REAL y, REAL width,
     REAL height)
 {
     INT old_count, numpts;
+
+    TRACE("(%p, %.2f, %.2f, %.2f, %.2f)\n", path, x, y, width, height);
 
     if(!path)
         return InvalidParameter;
@@ -396,6 +559,8 @@ GpStatus WINGDIPAPI GdipAddPathEllipse(GpPath *path, REAL x, REAL y, REAL width,
 GpStatus WINGDIPAPI GdipAddPathEllipseI(GpPath *path, INT x, INT y, INT width,
     INT height)
 {
+    TRACE("(%p, %d, %d, %d, %d)\n", path, x, y, width, height);
+
     return GdipAddPathEllipse(path,(REAL)x,(REAL)y,(REAL)width,(REAL)height);
 }
 
@@ -403,6 +568,8 @@ GpStatus WINGDIPAPI GdipAddPathLine2(GpPath *path, GDIPCONST GpPointF *points,
     INT count)
 {
     INT i, old_count;
+
+    TRACE("(%p, %p, %d)\n", path, points, count);
 
     if(!path || !points)
         return InvalidParameter;
@@ -434,6 +601,8 @@ GpStatus WINGDIPAPI GdipAddPathLine2I(GpPath *path, GDIPCONST GpPoint *points, I
     INT i;
     GpStatus stat;
 
+    TRACE("(%p, %p, %d)\n", path, points, count);
+
     if(count <= 0)
         return InvalidParameter;
 
@@ -455,6 +624,8 @@ GpStatus WINGDIPAPI GdipAddPathLine2I(GpPath *path, GDIPCONST GpPoint *points, I
 GpStatus WINGDIPAPI GdipAddPathLine(GpPath *path, REAL x1, REAL y1, REAL x2, REAL y2)
 {
     INT old_count;
+
+    TRACE("(%p, %.2f, %.2f, %.2f, %.2f)\n", path, x1, y1, x2, y2);
 
     if(!path)
         return InvalidParameter;
@@ -481,6 +652,8 @@ GpStatus WINGDIPAPI GdipAddPathLine(GpPath *path, REAL x1, REAL y1, REAL x2, REA
 
 GpStatus WINGDIPAPI GdipAddPathLineI(GpPath *path, INT x1, INT y1, INT x2, INT y2)
 {
+    TRACE("(%p, %d, %d, %d, %d)\n", path, x1, y1, x2, y2);
+
     return GdipAddPathLine(path, (REAL)x1, (REAL)y1, (REAL)x2, (REAL)y2);
 }
 
@@ -488,6 +661,8 @@ GpStatus WINGDIPAPI GdipAddPathPath(GpPath *path, GDIPCONST GpPath* addingPath,
     BOOL connect)
 {
     INT old_count, count;
+
+    TRACE("(%p, %p, %d)\n", path, addingPath, connect);
 
     if(!path || !addingPath)
         return InvalidParameter;
@@ -519,6 +694,9 @@ GpStatus WINGDIPAPI GdipAddPathPie(GpPath *path, REAL x, REAL y, REAL width, REA
     GpPointF *ptf;
     GpStatus status;
     INT i, count;
+
+    TRACE("(%p, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f)\n",
+          path, x, y, width, height, startAngle, sweepAngle);
 
     if(!path)
         return InvalidParameter;
@@ -561,12 +739,17 @@ GpStatus WINGDIPAPI GdipAddPathPie(GpPath *path, REAL x, REAL y, REAL width, REA
 GpStatus WINGDIPAPI GdipAddPathPieI(GpPath *path, INT x, INT y, INT width, INT height,
     REAL startAngle, REAL sweepAngle)
 {
+    TRACE("(%p, %d, %d, %d, %d, %.2f, %.2f)\n",
+          path, x, y, width, height, startAngle, sweepAngle);
+
     return GdipAddPathPieI(path, (REAL)x, (REAL)y, (REAL)width, (REAL)height, startAngle, sweepAngle);
 }
 
 GpStatus WINGDIPAPI GdipAddPathPolygon(GpPath *path, GDIPCONST GpPointF *points, INT count)
 {
     INT old_count;
+
+    TRACE("(%p, %p, %d)\n", path, points, count);
 
     if(!path || !points || count < 3)
         return InvalidParameter;
@@ -594,6 +777,8 @@ GpStatus WINGDIPAPI GdipAddPathPolygonI(GpPath *path, GDIPCONST GpPoint *points,
     GpStatus status;
     INT i;
 
+    TRACE("(%p, %p, %d)\n", path, points, count);
+
     if(!points || count < 3)
         return InvalidParameter;
 
@@ -615,6 +800,8 @@ GpStatus WINGDIPAPI GdipAddPathPolygonI(GpPath *path, GDIPCONST GpPoint *points,
 
 GpStatus WINGDIPAPI GdipClonePath(GpPath* path, GpPath **clone)
 {
+    TRACE("(%p, %p)\n", path, clone);
+
     if(!path || !clone)
         return InvalidParameter;
 
@@ -641,6 +828,8 @@ GpStatus WINGDIPAPI GdipClonePath(GpPath* path, GpPath **clone)
 
 GpStatus WINGDIPAPI GdipClosePathFigure(GpPath* path)
 {
+    TRACE("(%p)\n", path);
+
     if(!path)
         return InvalidParameter;
 
@@ -655,6 +844,8 @@ GpStatus WINGDIPAPI GdipClosePathFigure(GpPath* path)
 GpStatus WINGDIPAPI GdipClosePathFigures(GpPath* path)
 {
     INT i;
+
+    TRACE("(%p)\n", path);
 
     if(!path)
         return InvalidParameter;
@@ -671,6 +862,8 @@ GpStatus WINGDIPAPI GdipClosePathFigures(GpPath* path)
 
 GpStatus WINGDIPAPI GdipCreatePath(GpFillMode fill, GpPath **path)
 {
+    TRACE("(%d, %p)\n", fill, path);
+
     if(!path)
         return InvalidParameter;
 
@@ -686,6 +879,8 @@ GpStatus WINGDIPAPI GdipCreatePath(GpFillMode fill, GpPath **path)
 GpStatus WINGDIPAPI GdipCreatePath2(GDIPCONST GpPointF* points,
     GDIPCONST BYTE* types, INT count, GpFillMode fill, GpPath **path)
 {
+    TRACE("(%p, %p, %d, %d, %p)\n", points, types, count, fill, path);
+
     if(!path)
         return InvalidParameter;
 
@@ -720,6 +915,8 @@ GpStatus WINGDIPAPI GdipCreatePath2I(GDIPCONST GpPoint* points,
     GpStatus ret;
     INT i;
 
+    TRACE("(%p, %p, %d, %d, %p)\n", points, types, count, fill, path);
+
     ptF = GdipAlloc(sizeof(GpPointF)*count);
 
     for(i = 0;i < count; i++){
@@ -736,6 +933,8 @@ GpStatus WINGDIPAPI GdipCreatePath2I(GDIPCONST GpPoint* points,
 
 GpStatus WINGDIPAPI GdipDeletePath(GpPath *path)
 {
+    TRACE("(%p)\n", path);
+
     if(!path)
         return InvalidParameter;
 
@@ -746,8 +945,114 @@ GpStatus WINGDIPAPI GdipDeletePath(GpPath *path)
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipFlattenPath(GpPath *path, GpMatrix* matrix, REAL flatness)
+{
+    path_list_node_t *list, *node;
+    GpPointF pt;
+    INT i = 1;
+    INT startidx = 0;
+
+    TRACE("(%p, %p, %.2f)\n", path, matrix, flatness);
+
+    if(!path)
+        return InvalidParameter;
+
+    if(matrix){
+        WARN("transformation not supported yet!\n");
+        return NotImplemented;
+    }
+
+    if(path->pathdata.Count == 0)
+        return Ok;
+
+    pt = path->pathdata.Points[0];
+    if(!init_path_list(&list, pt.X, pt.Y))
+        return OutOfMemory;
+
+    node = list;
+
+    while(i < path->pathdata.Count){
+
+        BYTE type = path->pathdata.Types[i] & PathPointTypePathTypeMask;
+        path_list_node_t *start;
+
+        pt = path->pathdata.Points[i];
+
+        /* save last start point index */
+        if(type == PathPointTypeStart)
+            startidx = i;
+
+        /* always add line points and start points */
+        if((type == PathPointTypeStart) || (type == PathPointTypeLine)){
+            type = (path->pathdata.Types[i] & ~PathPointTypeBezier) | PathPointTypeLine;
+            if(!add_path_list_node(node, pt.X, pt.Y, type))
+                goto memout;
+
+            node = node->next;
+            continue;
+        }
+
+        /* Bezier curve always stored as 4 points */
+        if((path->pathdata.Types[i-1] & PathPointTypePathTypeMask) != PathPointTypeStart){
+            type = (path->pathdata.Types[i] & ~PathPointTypeBezier) | PathPointTypeLine;
+            if(!add_path_list_node(node, pt.X, pt.Y, type))
+                goto memout;
+
+            node = node->next;
+        }
+
+        /* test for closed figure */
+        if(path->pathdata.Types[i+1] & PathPointTypeCloseSubpath){
+            pt = path->pathdata.Points[startidx];
+            ++i;
+        }
+        else
+        {
+            i += 2;
+            pt = path->pathdata.Points[i];
+        };
+
+        start = node;
+        /* add Bezier end point */
+        type = (path->pathdata.Types[i] & ~PathPointTypeBezier) | PathPointTypeLine;
+        if(!add_path_list_node(node, pt.X, pt.Y, type))
+            goto memout;
+        node = node->next;
+
+        /* flatten curve */
+        if(!flatten_bezier(start, path->pathdata.Points[i-2].X, path->pathdata.Points[i-2].Y,
+                                  path->pathdata.Points[i-1].X, path->pathdata.Points[i-1].Y,
+                           node, flatness))
+            goto memout;
+
+        ++i;
+    }/* while */
+
+    /* store path data back */
+    i = path_list_count(list);
+    if(!lengthen_path(path, i))
+        goto memout;
+    path->pathdata.Count = i;
+
+    node = list;
+    for(i = 0; i < path->pathdata.Count; i++){
+        path->pathdata.Points[i] = node->pt;
+        path->pathdata.Types[i]  = node->type;
+        node = node->next;
+    }
+
+    free_path_list(list);
+    return Ok;
+
+memout:
+    free_path_list(list);
+    return OutOfMemory;
+}
+
 GpStatus WINGDIPAPI GdipGetPathData(GpPath *path, GpPathData* pathData)
 {
+    TRACE("(%p, %p)\n", path, pathData);
+
     if(!path || !pathData)
         return InvalidParameter;
 
@@ -761,6 +1066,8 @@ GpStatus WINGDIPAPI GdipGetPathData(GpPath *path, GpPathData* pathData)
 
 GpStatus WINGDIPAPI GdipGetPathFillMode(GpPath *path, GpFillMode *fillmode)
 {
+    TRACE("(%p, %p)\n", path, fillmode);
+
     if(!path || !fillmode)
         return InvalidParameter;
 
@@ -772,6 +1079,8 @@ GpStatus WINGDIPAPI GdipGetPathFillMode(GpPath *path, GpFillMode *fillmode)
 GpStatus WINGDIPAPI GdipGetPathLastPoint(GpPath* path, GpPointF* lastPoint)
 {
     INT count;
+
+    TRACE("(%p, %p)\n", path, lastPoint);
 
     if(!path || !lastPoint)
         return InvalidParameter;
@@ -785,6 +1094,8 @@ GpStatus WINGDIPAPI GdipGetPathLastPoint(GpPath* path, GpPointF* lastPoint)
 
 GpStatus WINGDIPAPI GdipGetPathPoints(GpPath *path, GpPointF* points, INT count)
 {
+    TRACE("(%p, %p, %d)\n", path, points, count);
+
     if(!path)
         return InvalidParameter;
 
@@ -801,6 +1112,8 @@ GpStatus WINGDIPAPI GdipGetPathPointsI(GpPath *path, GpPoint* points, INT count)
     GpStatus ret;
     GpPointF *ptf;
     INT i;
+
+    TRACE("(%p, %p, %d)\n", path, points, count);
 
     if(count <= 0)
         return InvalidParameter;
@@ -821,6 +1134,8 @@ GpStatus WINGDIPAPI GdipGetPathPointsI(GpPath *path, GpPoint* points, INT count)
 
 GpStatus WINGDIPAPI GdipGetPathTypes(GpPath *path, BYTE* types, INT count)
 {
+    TRACE("(%p, %p, %d)\n", path, types, count);
+
     if(!path)
         return InvalidParameter;
 
@@ -842,6 +1157,8 @@ GpStatus WINGDIPAPI GdipGetPathWorldBounds(GpPath* path, GpRectF* bounds,
     GpPointF * points, temp_pts[4];
     INT count, i;
     REAL path_width = 1.0, width, height, temp, low_x, low_y, high_x, high_y;
+
+    TRACE("(%p, %p, %p, %p)\n", path, bounds, matrix, pen);
 
     /* Matrix and pen can be null. */
     if(!path || !bounds)
@@ -923,6 +1240,8 @@ GpStatus WINGDIPAPI GdipGetPathWorldBoundsI(GpPath* path, GpRect* bounds,
     GpStatus ret;
     GpRectF boundsF;
 
+    TRACE("(%p, %p, %p, %p)\n", path, bounds, matrix, pen);
+
     ret = GdipGetPathWorldBounds(path,&boundsF,matrix,pen);
 
     if(ret == Ok){
@@ -937,6 +1256,8 @@ GpStatus WINGDIPAPI GdipGetPathWorldBoundsI(GpPath* path, GpRect* bounds,
 
 GpStatus WINGDIPAPI GdipGetPointCount(GpPath *path, INT *count)
 {
+    TRACE("(%p, %p)\n", path, count);
+
     if(!path)
         return InvalidParameter;
 
@@ -950,6 +1271,8 @@ GpStatus WINGDIPAPI GdipReversePath(GpPath* path)
     INT i, count;
     INT start = 0; /* position in reversed path */
     GpPathData revpath;
+
+    TRACE("(%p)\n", path);
 
     if(!path)
         return InvalidParameter;
@@ -1002,6 +1325,8 @@ GpStatus WINGDIPAPI GdipReversePath(GpPath* path)
 GpStatus WINGDIPAPI GdipIsOutlineVisiblePathPointI(GpPath* path, INT x, INT y,
     GpPen *pen, GpGraphics *graphics, BOOL *result)
 {
+    TRACE("(%p, %d, %d, %p, %p, %p)\n", path, x, y, pen, graphics, result);
+
     return GdipIsOutlineVisiblePathPoint(path, x, y, pen, graphics, result);
 }
 
@@ -1021,6 +1346,8 @@ GpStatus WINGDIPAPI GdipIsOutlineVisiblePathPoint(GpPath* path, REAL x, REAL y,
 
 GpStatus WINGDIPAPI GdipIsVisiblePathPointI(GpPath* path, INT x, INT y, GpGraphics *graphics, BOOL *result)
 {
+    TRACE("(%p, %d, %d, %p, %p)\n", path, x, y, graphics, result);
+
     return GdipIsVisiblePathPoint(path, x, y, graphics, result);
 }
 
@@ -1038,6 +1365,8 @@ GpStatus WINGDIPAPI GdipIsVisiblePathPoint(GpPath* path, REAL x, REAL y, GpGraph
 
 GpStatus WINGDIPAPI GdipStartPathFigure(GpPath *path)
 {
+    TRACE("(%p)\n", path);
+
     if(!path)
         return InvalidParameter;
 
@@ -1048,6 +1377,8 @@ GpStatus WINGDIPAPI GdipStartPathFigure(GpPath *path)
 
 GpStatus WINGDIPAPI GdipResetPath(GpPath *path)
 {
+    TRACE("(%p)\n", path);
+
     if(!path)
         return InvalidParameter;
 
@@ -1060,6 +1391,8 @@ GpStatus WINGDIPAPI GdipResetPath(GpPath *path)
 
 GpStatus WINGDIPAPI GdipSetPathFillMode(GpPath *path, GpFillMode fill)
 {
+    TRACE("(%p, %d)\n", path, fill);
+
     if(!path)
         return InvalidParameter;
 
@@ -1070,6 +1403,8 @@ GpStatus WINGDIPAPI GdipSetPathFillMode(GpPath *path, GpFillMode fill)
 
 GpStatus WINGDIPAPI GdipTransformPath(GpPath *path, GpMatrix *matrix)
 {
+    TRACE("(%p, %p)\n", path, matrix);
+
     if(!path)
         return InvalidParameter;
 
@@ -1087,6 +1422,8 @@ GpStatus WINGDIPAPI GdipAddPathRectangle(GpPath *path, REAL x, REAL y,
     GpPointF ptf[2];
     GpStatus retstat;
     BOOL old_new;
+
+    TRACE("(%p, %.2f, %.2f, %.2f, %.2f)\n", path, x, y, width, height);
 
     if(!path || width < 0.0 || height < 0.0)
         return InvalidParameter;
@@ -1127,6 +1464,8 @@ fail:
 GpStatus WINGDIPAPI GdipAddPathRectangleI(GpPath *path, INT x, INT y,
     INT width, INT height)
 {
+    TRACE("(%p, %d, %d, %d, %d)\n", path, x, y, width, height);
+
     return GdipAddPathRectangle(path,(REAL)x,(REAL)y,(REAL)width,(REAL)height);
 }
 
@@ -1135,6 +1474,8 @@ GpStatus WINGDIPAPI GdipAddPathRectangles(GpPath *path, GDIPCONST GpRectF *rects
     GpPath *backup;
     GpStatus retstat;
     INT i;
+
+    TRACE("(%p, %p, %d)\n", path, rects, count);
 
     /* count == 0 - verified condition  */
     if(!path || !rects || count == 0)
@@ -1171,6 +1512,8 @@ GpStatus WINGDIPAPI GdipAddPathRectanglesI(GpPath *path, GDIPCONST GpRect *rects
     GpStatus retstat;
     INT i;
 
+    TRACE("(%p, %p, %d)\n", path, rects, count);
+
     if(!rects || count == 0)
         return InvalidParameter;
 
@@ -1196,6 +1539,8 @@ GpStatus WINGDIPAPI GdipSetPathMarker(GpPath* path)
 {
     INT count;
 
+    TRACE("(%p)\n", path);
+
     if(!path)
         return InvalidParameter;
 
@@ -1212,6 +1557,8 @@ GpStatus WINGDIPAPI GdipClearPathMarkers(GpPath* path)
 {
     INT count;
     INT i;
+
+    TRACE("(%p)\n", path);
 
     if(!path)
         return InvalidParameter;

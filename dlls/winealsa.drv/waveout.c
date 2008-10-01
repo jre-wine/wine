@@ -575,7 +575,6 @@ static DWORD wodOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
     unsigned int                period_time = 20000;
     snd_pcm_uframes_t           buffer_size;
     snd_pcm_uframes_t           period_size;
-    snd_pcm_uframes_t           boundary;
     int                         flags;
     int                         err=0;
     int                         dir=0;
@@ -758,13 +757,11 @@ static DWORD wodOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
     err = snd_pcm_hw_params_get_buffer_size(hw_params, &buffer_size);
 
     snd_pcm_sw_params_current(pcm, sw_params);
-    snd_pcm_sw_params_get_boundary(sw_params, &boundary);
 
     EXIT_ON_ERROR( snd_pcm_sw_params_set_start_threshold(pcm, sw_params, 1), MMSYSERR_ERROR, "unable to set start threshold");
     EXIT_ON_ERROR( snd_pcm_sw_params_set_silence_size(pcm, sw_params, 0), MMSYSERR_ERROR, "unable to set silence size");
     EXIT_ON_ERROR( snd_pcm_sw_params_set_avail_min(pcm, sw_params, period_size), MMSYSERR_ERROR, "unable to set avail min");
     EXIT_ON_ERROR( snd_pcm_sw_params_set_silence_threshold(pcm, sw_params, 0), MMSYSERR_ERROR, "unable to set silence threshold");
-    EXIT_ON_ERROR( snd_pcm_sw_params_set_stop_threshold(pcm, sw_params, boundary), MMSYSERR_ERROR, "unable to set stop threshold");
     EXIT_ON_ERROR( snd_pcm_sw_params(pcm, sw_params), MMSYSERR_ERROR, "unable to set sw params for playback");
 #undef EXIT_ON_ERROR
 
@@ -1131,7 +1128,7 @@ static DWORD wodDevInterfaceSize(UINT wDevID, LPDWORD dwParam1)
 {
     TRACE("(%u, %p)\n", wDevID, dwParam1);
 
-    *dwParam1 = MultiByteToWideChar(CP_ACP, 0, WOutDev[wDevID].interface_name, -1,
+    *dwParam1 = MultiByteToWideChar(CP_UNIXCP, 0, WOutDev[wDevID].interface_name, -1,
                                     NULL, 0 ) * sizeof(WCHAR);
     return MMSYSERR_NOERROR;
 }
@@ -1141,10 +1138,10 @@ static DWORD wodDevInterfaceSize(UINT wDevID, LPDWORD dwParam1)
  */
 static DWORD wodDevInterface(UINT wDevID, PWCHAR dwParam1, DWORD dwParam2)
 {
-    if (dwParam2 >= MultiByteToWideChar(CP_ACP, 0, WOutDev[wDevID].interface_name, -1,
+    if (dwParam2 >= MultiByteToWideChar(CP_UNIXCP, 0, WOutDev[wDevID].interface_name, -1,
                                         NULL, 0 ) * sizeof(WCHAR))
     {
-        MultiByteToWideChar(CP_ACP, 0, WOutDev[wDevID].interface_name, -1,
+        MultiByteToWideChar(CP_UNIXCP, 0, WOutDev[wDevID].interface_name, -1,
                             dwParam1, dwParam2 / sizeof(WCHAR));
 	return MMSYSERR_NOERROR;
     }

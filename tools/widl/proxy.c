@@ -115,6 +115,9 @@ static void init_proxy(const statement_list_t *stmts)
   print_proxy( "#undef RpcTryExcept\n");
   print_proxy( "#undef RpcExcept\n");
   print_proxy( "#undef RpcEndExcept\n");
+  print_proxy( "#undef RpcTryFinally\n");
+  print_proxy( "#undef RpcFinally\n");
+  print_proxy( "#undef RpcEndFinally\n");
   print_proxy( "#undef RpcExceptionCode\n");
   print_proxy( "\n");
   print_proxy( "struct __proxy_frame\n");
@@ -123,8 +126,15 @@ static void init_proxy(const statement_list_t *stmts)
   print_proxy( "    sigjmp_buf                    jmp;\n");
   print_proxy( "    DWORD                         code;\n");
   print_proxy( "    MIDL_STUB_MESSAGE            *stub;\n");
+  print_proxy( "    void                         *this;\n");
+  print_proxy( "    int                           fullptr;\n");
   print_proxy( "};\n");
   print_proxy( "\n");
+  print_proxy("static void __proxy_finally_handler( struct __proxy_frame *frame )\n");
+  print_proxy( "{\n");
+  print_proxy( "    if (frame->fullptr) NdrFullPointerXlatFree( frame->stub->FullPtrXlatTables );\n");
+  print_proxy( "    if (frame->this) NdrProxyFreeBuffer( frame->this, frame->stub );\n" );
+  print_proxy( "}\n\n");
   print_proxy( "static DWORD __proxy_exception_handler( EXCEPTION_RECORD *record,\n");
   print_proxy( "                                        EXCEPTION_REGISTRATION_RECORD *frame,\n");
   print_proxy( "                                        CONTEXT *context,\n");
@@ -133,12 +143,17 @@ static void init_proxy(const statement_list_t *stmts)
   print_proxy( "    struct __proxy_frame *proxy_frame = (struct __proxy_frame *)frame;\n");
   print_proxy( "\n");
   print_proxy( "    if (record->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND | EH_NESTED_CALL))\n");
+  print_proxy( "    {\n" );
+  print_proxy( "        if (record->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND))\n");
+  print_proxy( "            __proxy_finally_handler( proxy_frame );\n");
   print_proxy( "        return ExceptionContinueSearch;\n");
+  print_proxy( "    }\n" );
   print_proxy( "    if (proxy_frame->stub->dwStubPhase == PROXY_SENDRECEIVE)\n");
   print_proxy( "        return ExceptionContinueSearch;\n");
   print_proxy( "\n");
   print_proxy( "    proxy_frame->code = record->ExceptionCode;\n");
   print_proxy( "    __wine_rtl_unwind( frame, record );\n");
+  print_proxy( "    __proxy_finally_handler( proxy_frame );\n");
   print_proxy( "    __wine_pop_frame( frame );\n");
   print_proxy( "    siglongjmp( proxy_frame->jmp, 1 );\n");
   print_proxy( "}\n");
@@ -165,6 +180,27 @@ static void init_proxy(const statement_list_t *stmts)
   print_proxy( "    } while(0);\n");
   print_proxy( "\n");
   print_proxy( "#define RpcExceptionCode() (__proxy_frame.code)\n");
+  print_proxy( "\n");
+  print_proxy( "#define RpcTryFinallyProxy(ptr) \\\n");
+  print_proxy("    __proxy_frame.this = This; \\\n");
+  print_proxy("    __proxy_frame.fullptr = ptr;\n");
+  print_proxy( "\n");
+  print_proxy( "#define RpcFinallyProxy \\\n");
+  print_proxy("    __proxy_frame.this = 0; \\\n");
+  print_proxy("    __proxy_frame.fullptr = 0;\n");
+  print_proxy( "\n");
+  print_proxy( "#define RpcTryFinallyStub\n");
+  print_proxy( "\n");
+  print_proxy( "#define RpcFinallyStub\n");
+  print_proxy( "\n");
+  print_proxy( "#define RpcEndFinally\n");
+  print_proxy( "\n");
+  print_proxy( "#else /* USE_COMPILER_EXCEPTIONS */\n");
+  print_proxy( "\n");
+  print_proxy( "#define RpcTryFinallyProxy(ptr) RpcTryFinally\n");
+  print_proxy( "#define RpcTryFinallyStub RpcTryFinally\n");
+  print_proxy( "#define RpcFinallyProxy RpcFinally\n");
+  print_proxy( "#define RpcFinallyStub RpcFinally\n");
   print_proxy( "\n");
   print_proxy( "#endif /* USE_COMPILER_EXCEPTIONS */\n");
   print_proxy( "\n");
@@ -198,6 +234,11 @@ int cant_be_null(const var_t *v)
   /* Search backwards for the most recent pointer attribute.  */
   const attr_list_t *attrs = v->attrs;
   const type_t *type = v->type;
+
+  /* context handles have their own checking so they can be null for the
+   * purposes of null ref pointer checking */
+  if (is_aliaschain_attr(type, ATTR_CONTEXTHANDLE))
+      return 0;
 
   if (! attrs && type)
   {
@@ -318,9 +359,7 @@ static void gen_proxy(type_t *iface, const func_t *cur, int idx,
 
   indent = 0;
   write_type_decl_left(proxy, get_func_return_type(cur));
-  print_proxy( " %s %s_", callconv, iface->name);
-  write_name(proxy, def);
-  print_proxy( "_Proxy(\n");
+  print_proxy( " %s %s_%s_Proxy(\n", callconv, iface->name, get_name(def));
   write_args(proxy, cur->args, iface->name, 1, TRUE);
   print_proxy( ")\n");
   print_proxy( "{\n");
@@ -352,7 +391,7 @@ static void gen_proxy(type_t *iface, const func_t *cur, int idx,
   print_proxy( "NdrProxyInitialize(This, &_RpcMessage, &_StubMsg, &Object_StubDesc, %d);\n", idx);
   proxy_check_pointers( cur->args );
 
-  print_proxy( "RpcTryFinally\n" );
+  print_proxy( "RpcTryFinallyProxy(%d)\n", has_full_pointer );
   print_proxy( "{\n" );
   indent++;
 
@@ -386,7 +425,7 @@ static void gen_proxy(type_t *iface, const func_t *cur, int idx,
 
   indent--;
   print_proxy( "}\n");
-  print_proxy( "RpcFinally\n" );
+  print_proxy( "RpcFinallyProxy\n" );
   print_proxy( "{\n" );
   indent++;
   if (has_full_pointer)
@@ -425,9 +464,7 @@ static void gen_stub(type_t *iface, const func_t *cur, const char *cas,
   int has_full_pointer = is_full_pointer_function(cur);
 
   indent = 0;
-  print_proxy( "void __RPC_STUB %s_", iface->name);
-  write_name(proxy, def);
-  print_proxy( "_Stub(\n");
+  print_proxy( "void __RPC_STUB %s_%s_Stub(\n", iface->name, get_name(def));
   indent++;
   print_proxy( "IRpcStubBuffer* This,\n");
   print_proxy( "IRpcChannelBuffer *_pRpcChannelBuffer,\n");
@@ -448,7 +485,7 @@ static void gen_stub(type_t *iface, const func_t *cur, const char *cas,
 
   write_parameters_init(proxy, indent, cur);
 
-  print_proxy("RpcTryFinally\n");
+  print_proxy("RpcTryFinallyStub\n");
   print_proxy("{\n");
   indent++;
   if (has_full_pointer)
@@ -469,22 +506,13 @@ static void gen_stub(type_t *iface, const func_t *cur, const char *cas,
   print_proxy("");
   if (has_ret) fprintf(proxy, "_RetVal = ");
   if (cas) fprintf(proxy, "%s_%s_Stub", iface->name, cas);
-  else
-  {
-      fprintf(proxy, "_This->lpVtbl->");
-      write_name(proxy, def);
-  }
+  else fprintf(proxy, "_This->lpVtbl->%s", get_name(def));
   fprintf(proxy, "(_This");
 
   if (cur->args)
   {
       LIST_FOR_EACH_ENTRY( arg, cur->args, const var_t, entry )
-      {
-          fprintf(proxy, ", ");
-          if (arg->type->declarray)
-              fprintf(proxy, "*");
-          write_name(proxy, arg);
-      }
+          fprintf(proxy, ", %s%s", arg->type->declarray ? "*" : "", get_name(arg));
   }
   fprintf(proxy, ");\n");
   fprintf(proxy, "\n");
@@ -507,7 +535,7 @@ static void gen_stub(type_t *iface, const func_t *cur, const char *cas,
 
   indent--;
   print_proxy("}\n");
-  print_proxy("RpcFinally\n");
+  print_proxy("RpcFinallyStub\n");
   print_proxy("{\n");
 
   write_remoting_arguments(proxy, indent+1, cur, PASS_OUT, PHASE_FREE);
@@ -525,40 +553,38 @@ static void gen_stub(type_t *iface, const func_t *cur, const char *cas,
   print_proxy("\n");
 }
 
-static int write_proxy_methods(type_t *iface)
+static int write_proxy_methods(type_t *iface, int skip)
 {
   const func_t *cur;
   int i = 0;
 
-  if (iface->ref) i = write_proxy_methods(iface->ref);
+  if (iface->ref) i = write_proxy_methods(iface->ref, iface->ref->ref != NULL);
   if (iface->funcs) LIST_FOR_EACH_ENTRY( cur, iface->funcs, const func_t, entry ) {
     var_t *def = cur->def;
     if (!is_callas(def->attrs)) {
       if (i) fprintf(proxy, ",\n");
-      print_proxy( "%s_", iface->name);
-      write_name(proxy, def);
-      fprintf(proxy, "_Proxy");
+      if (skip) print_proxy( "0  /* %s_%s_Proxy */", iface->name, get_name(def));
+      else print_proxy( "%s_%s_Proxy", iface->name, get_name(def));
       i++;
     }
   }
   return i;
 }
 
-static int write_stub_methods(type_t *iface)
+static int write_stub_methods(type_t *iface, int skip)
 {
   const func_t *cur;
   int i = 0;
 
-  if (iface->ref) i = write_stub_methods(iface->ref);
+  if (iface->ref) i = write_stub_methods(iface->ref, TRUE);
   else return i; /* skip IUnknown */
 
   if (iface->funcs) LIST_FOR_EACH_ENTRY( cur, iface->funcs, const func_t, entry ) {
     var_t *def = cur->def;
     if (!is_local(def->attrs)) {
       if (i) fprintf(proxy,",\n");
-      print_proxy( "%s_", iface->name);
-      write_name(proxy, def);
-      fprintf(proxy, "_Stub");
+      if (skip) print_proxy("STUB_FORWARDING_FUNCTION");
+      else print_proxy( "%s_%s_Stub", iface->name, get_name(def));
       i++;
     }
   }
@@ -613,7 +639,7 @@ static void write_proxy(type_t *iface, unsigned int *proc_offset)
   print_proxy( "},\n");
   print_proxy( "{\n");
   indent++;
-  write_proxy_methods(iface);
+  write_proxy_methods(iface, FALSE);
   fprintf(proxy, "\n");
   indent--;
   print_proxy( "}\n");
@@ -625,7 +651,7 @@ static void write_proxy(type_t *iface, unsigned int *proc_offset)
   print_proxy( "static const PRPC_STUB_FUNCTION %s_table[] =\n", iface->name);
   print_proxy( "{\n");
   indent++;
-  stubs = write_stub_methods(iface);
+  stubs = write_stub_methods(iface, FALSE);
   fprintf(proxy, "\n");
   indent--;
   fprintf(proxy, "};\n");

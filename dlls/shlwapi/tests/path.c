@@ -891,7 +891,9 @@ static void test_PathCanonicalizeA(void)
     res = PathCanonicalizeA(dest, "C:\\one/.\\two\\..");
     ok(res, "Expected success\n");
     ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
-    ok(!lstrcmp(dest, "C:\\one/."), "Expected C:\\one/., got %s\n", dest);
+    ok(!lstrcmp(dest, "C:\\one/.") ||
+       !lstrcmp(dest, "C:\\one/"), /* Vista */
+       "Expected \"C:\\one/.\" or \"C:\\one/\", got \"%s\"\n", dest);
 
     /* try forward slashes with change dirs
      * NOTE: if there is a forward slash in between two backslashes,
@@ -913,7 +915,8 @@ static void test_PathCanonicalizeA(void)
     ok(!res, "Expected failure\n");
     todo_wine
     {
-        ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
+        ok(GetLastError() == 0xdeadbeef || GetLastError() == ERROR_FILENAME_EXCED_RANGE /* Vista */,
+        "Expected 0xdeadbeef or ERROR_FILENAME_EXCED_RANGE, got %d\n", GetLastError());
     }
     ok(lstrlen(too_long) == LONG_LEN - 1, "Expected length LONG_LEN - 1, got %i\n", lstrlen(too_long));
 }
@@ -1012,7 +1015,9 @@ static void test_PathBuildRootA(void)
     lstrcpy(path, "aaaaaaaaa");
     root = PathBuildRootA(path, -1);
     ok(root == path, "Expected root == path, got %p\n", root);
-    ok(!lstrcmp(path, "aaaaaaaaa"), "Expected aaaaaaaaa, got %s\n", path);
+    ok(!lstrcmp(path, "aaaaaaaaa") ||
+       lstrlenA(path) == 0, /* Vista */
+       "Expected aaaaaaaaa or empty string, got %s\n", path);
     ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
 
     /* test a drive number greater than 25 */
@@ -1020,7 +1025,9 @@ static void test_PathBuildRootA(void)
     lstrcpy(path, "aaaaaaaaa");
     root = PathBuildRootA(path, 26);
     ok(root == path, "Expected root == path, got %p\n", root);
-    ok(!lstrcmp(path, "aaaaaaaaa"), "Expected aaaaaaaaa, got %s\n", path);
+    ok(!lstrcmp(path, "aaaaaaaaa") ||
+       lstrlenA(path) == 0, /* Vista */
+       "Expected aaaaaaaaa or empty string, got %s\n", path);
     ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
 
     /* length of path is less than 4 */

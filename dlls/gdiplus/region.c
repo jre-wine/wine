@@ -73,14 +73,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
  *
  */
 
-typedef enum RegionType
-{
-    RegionDataRect          = 0x10000000,
-    RegionDataPath          = 0x10000001,
-    RegionDataEmptyRect     = 0x10000002,
-    RegionDataInfiniteRect  = 0x10000003,
-} RegionType;
-
 #define FLAGS_NOFLAGS   0x0
 #define FLAGS_INTPATH   0x4000
 
@@ -141,35 +133,17 @@ static inline GpStatus init_region(GpRegion* region, const RegionType type)
     return Ok;
 }
 
-static inline void delete_element(region_element* element)
-{
-    switch(element->type)
-    {
-        case RegionDataRect:
-            break;
-        case RegionDataPath:
-            GdipDeletePath(element->elementdata.pathdata.path);
-            break;
-        case RegionDataEmptyRect:
-        case RegionDataInfiniteRect:
-            break;
-        default:
-            delete_element(element->elementdata.combine.left);
-            delete_element(element->elementdata.combine.right);
-            GdipFree(element->elementdata.combine.left);
-            GdipFree(element->elementdata.combine.right);
-            break;
-    }
-}
-
 static inline GpStatus clone_element(const region_element* element,
         region_element** element2)
 {
     GpStatus stat;
 
-    *element2 = GdipAlloc(sizeof(region_element));
-    if (!*element2)
-        return OutOfMemory;
+    /* root node is allocated with GpRegion */
+    if(!*element2){
+        *element2 = GdipAlloc(sizeof(region_element));
+        if (!*element2)
+            return OutOfMemory;
+    }
 
     (*element2)->type = element->type;
 
@@ -188,6 +162,9 @@ static inline GpStatus clone_element(const region_element* element,
             if (stat != Ok) goto clone_out;
             break;
         default:
+            (*element2)->elementdata.combine.left  = NULL;
+            (*element2)->elementdata.combine.right = NULL;
+
             stat = clone_element(element->elementdata.combine.left,
                     &(*element2)->elementdata.combine.left);
             if (stat != Ok) goto clone_out;
@@ -250,6 +227,9 @@ GpStatus WINGDIPAPI GdipCloneRegion(GpRegion *region, GpRegion **clone)
     return clone_element(&region->node, &element);
 }
 
+/*****************************************************************************
+ * GdipCombineRegionPath [GDIPLUS.@]
+ */
 GpStatus WINGDIPAPI GdipCombineRegionPath(GpRegion *region, GpPath *path, CombineMode mode)
 {
     GpRegion *path_region;
@@ -264,6 +244,13 @@ GpStatus WINGDIPAPI GdipCombineRegionPath(GpRegion *region, GpPath *path, Combin
     stat = GdipCreateRegionPath(path, &path_region);
     if (stat != Ok)
         return stat;
+
+    /* simply replace region data */
+    if(mode == CombineModeReplace){
+        delete_element(&region->node);
+        memcpy(region, path_region, sizeof(GpRegion));
+        return Ok;
+    }
 
     left = GdipAlloc(sizeof(region_element));
     if (!left)
@@ -286,6 +273,9 @@ out:
     return stat;
 }
 
+/*****************************************************************************
+ * GdipCombineRegionRect [GDIPLUS.@]
+ */
 GpStatus WINGDIPAPI GdipCombineRegionRect(GpRegion *region,
         GDIPCONST GpRectF *rect, CombineMode mode)
 {
@@ -301,6 +291,13 @@ GpStatus WINGDIPAPI GdipCombineRegionRect(GpRegion *region,
     stat = GdipCreateRegionRect(rect, &rect_region);
     if (stat != Ok)
         return stat;
+
+    /* simply replace region data */
+    if(mode == CombineModeReplace){
+        delete_element(&region->node);
+        memcpy(region, rect_region, sizeof(GpRegion));
+        return Ok;
+    }
 
     left = GdipAlloc(sizeof(region_element));
     if (!left)
@@ -323,6 +320,9 @@ out:
     return stat;
 }
 
+/*****************************************************************************
+ * GdipCombineRegionRectI [GDIPLUS.@]
+ */
 GpStatus WINGDIPAPI GdipCombineRegionRectI(GpRegion *region,
         GDIPCONST GpRect *rect, CombineMode mode)
 {
@@ -344,13 +344,24 @@ GpStatus WINGDIPAPI GdipCombineRegionRectI(GpRegion *region,
 GpStatus WINGDIPAPI GdipCombineRegionRegion(GpRegion *region1,
         GpRegion *region2, CombineMode mode)
 {
-    region_element *left, *right;
+    region_element *left, *right = NULL;
     GpStatus stat;
+    GpRegion *reg2copy;
 
     TRACE("%p %p %d\n", region1, region2, mode);
 
     if(!(region1 && region2))
         return InvalidParameter;
+
+    /* simply replace region data */
+    if(mode == CombineModeReplace){
+        stat = GdipCloneRegion(region2, &reg2copy);
+        if(stat != Ok)  return stat;
+
+        delete_element(&region1->node);
+        memcpy(region1, reg2copy, sizeof(GpRegion));
+        return Ok;
+    }
 
     left  = GdipAlloc(sizeof(region_element));
     if (!left)
@@ -371,12 +382,15 @@ GpStatus WINGDIPAPI GdipCombineRegionRegion(GpRegion *region1,
     return Ok;
 }
 
+/*****************************************************************************
+ * GdipCreateRegion [GDIPLUS.@]
+ */
 GpStatus WINGDIPAPI GdipCreateRegion(GpRegion **region)
 {
+    TRACE("%p\n", region);
+
     if(!region)
         return InvalidParameter;
-
-    TRACE("%p\n", region);
 
     *region = GdipAlloc(sizeof(GpRegion));
     if(!*region)
@@ -503,6 +517,9 @@ GpStatus WINGDIPAPI GdipCreateRegionPath(GpPath *path, GpRegion **region)
     return Ok;
 }
 
+/*****************************************************************************
+ * GdipCreateRegionRect [GDIPLUS.@]
+ */
 GpStatus WINGDIPAPI GdipCreateRegionRect(GDIPCONST GpRectF *rect,
         GpRegion **region)
 {
@@ -715,10 +732,11 @@ GpStatus WINGDIPAPI GdipGetRegionData(GpRegion *region, BYTE *buffer, UINT size,
 {
     INT filled = 0;
 
+    TRACE("%p, %p, %d, %p\n", region, buffer, size, needed);
+
     if (!(region && buffer && size))
         return InvalidParameter;
 
-    TRACE("%p, %p, %d, %p\n", region, buffer, size, needed);
     memcpy(buffer, &region->header, sizeof(region->header));
     filled += sizeof(region->header) / sizeof(DWORD);
     /* With few exceptions, everything written is DWORD aligned,
@@ -731,12 +749,15 @@ GpStatus WINGDIPAPI GdipGetRegionData(GpRegion *region, BYTE *buffer, UINT size,
     return Ok;
 }
 
+/*****************************************************************************
+ * GdipGetRegionDataSize [GDIPLUS.@]
+ */
 GpStatus WINGDIPAPI GdipGetRegionDataSize(GpRegion *region, UINT *needed)
 {
+    TRACE("%p, %p\n", region, needed);
+
     if (!(region && needed))
         return InvalidParameter;
-
-    TRACE("%p, %p\n", region, needed);
 
     /* header.size doesn't count header.size and header.checksum */
     *needed = region->header.size + sizeof(DWORD) * 2;
@@ -757,9 +778,14 @@ GpStatus WINGDIPAPI GdipGetRegionHRgn(GpRegion *region, GpGraphics *graphics, HR
 
 GpStatus WINGDIPAPI GdipIsEmptyRegion(GpRegion *region, GpGraphics *graphics, BOOL *res)
 {
-    FIXME("(%p, %p, %p): stub\n", region, graphics, res);
+    TRACE("(%p, %p, %p)\n", region, graphics, res);
 
-    return NotImplemented;
+    if(!region || !graphics || !res)
+        return InvalidParameter;
+
+    *res = (region->node.type == RegionDataEmptyRect);
+
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipIsEqualRegion(GpRegion *region, GpRegion *region2, GpGraphics *graphics,
@@ -770,13 +796,25 @@ GpStatus WINGDIPAPI GdipIsEqualRegion(GpRegion *region, GpRegion *region2, GpGra
     return NotImplemented;
 }
 
+/*****************************************************************************
+ * GdipIsInfiniteRegion [GDIPLUS.@]
+ */
 GpStatus WINGDIPAPI GdipIsInfiniteRegion(GpRegion *region, GpGraphics *graphics, BOOL *res)
 {
-    FIXME("(%p, %p, %p): stub\n", region, graphics, res);
+    /* I think graphics is ignored here */
+    TRACE("(%p, %p, %p)\n", region, graphics, res);
 
-    return NotImplemented;
+    if(!region || !graphics || !res)
+        return InvalidParameter;
+
+    *res = (region->node.type == RegionDataInfiniteRect);
+
+    return Ok;
 }
 
+/*****************************************************************************
+ * GdipSetEmpty [GDIPLUS.@]
+ */
 GpStatus WINGDIPAPI GdipSetEmpty(GpRegion *region)
 {
     GpStatus stat;
@@ -796,10 +834,10 @@ GpStatus WINGDIPAPI GdipSetInfinite(GpRegion *region)
 {
     GpStatus stat;
 
+    TRACE("%p\n", region);
+
     if (!region)
         return InvalidParameter;
-
-    TRACE("%p\n", region);
 
     delete_element(&region->node);
     stat = init_region(region, RegionDataInfiniteRect);

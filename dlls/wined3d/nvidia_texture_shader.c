@@ -673,7 +673,7 @@ static void nvrc_fragment_free(IWineD3DDevice *iface) {}
  */
 
 static BOOL nvts_conv_supported(WINED3DFORMAT fmt) {
-    TRACE("Checking shader format support for format %s: [FAILED]", debug_d3dformat(fmt));
+    TRACE("Checking shader format support for format %s: [FAILED]\n", debug_d3dformat(fmt));
     return FALSE;
 }
 
@@ -810,7 +810,8 @@ const struct fragment_pipeline nvts_fragment_pipeline = {
     nvrc_fragment_alloc,
     nvrc_fragment_free,
     nvts_conv_supported,
-    nvrc_fragmentstate_template
+    nvrc_fragmentstate_template,
+    FALSE /* we cannot disable projected textures. The vertex pipe has to do it */
 };
 
 const struct fragment_pipeline nvrc_fragment_pipeline = {
@@ -819,5 +820,6 @@ const struct fragment_pipeline nvrc_fragment_pipeline = {
     nvrc_fragment_alloc,
     nvrc_fragment_free,
     nvts_conv_supported,
-    nvrc_fragmentstate_template
+    nvrc_fragmentstate_template,
+    FALSE /* we cannot disable projected textures. The vertex pipe has to do it */
 };

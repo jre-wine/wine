@@ -27,6 +27,8 @@
 
 #include "wine/debug.h"
 
+#include "winhttp_private.h"
+
 WINE_DEFAULT_DEBUG_CHANNEL(winhttp);
 
 /******************************************************************
@@ -83,86 +85,8 @@ HRESULT WINAPI DllUnregisterServer(void)
     return S_OK;
 }
 
-/***********************************************************************
- *          WinHttpSendRequest (winhttp.@)
- */
-BOOL WINAPI WinHttpSendRequest (HINTERNET hRequest, LPCWSTR pwszHeaders, DWORD dwHeadersLength,
-                                LPVOID lpOptional, DWORD dwOptionalLength, DWORD dwTotalLength,
-                                DWORD_PTR dwContext)
-{
-    FIXME("(%s, %d, %d, %d): stub\n", debugstr_w(pwszHeaders), dwHeadersLength, dwOptionalLength, dwTotalLength);
-
-    SetLastError(ERROR_NOT_SUPPORTED);
-    return FALSE;
-}
-
-/***********************************************************************
- *          WinHttpQueryOption (winhttp.@)
- */
-BOOL WINAPI WinHttpQueryOption (HINTERNET hInternet, DWORD dwOption, LPVOID lpBuffer, LPDWORD lpdwBufferLength)
-{
-    FIXME("(%d): stub\n", dwOption);
-
-    SetLastError(ERROR_NOT_SUPPORTED);
-    return FALSE;
-}
-
-/***********************************************************************
- *          WinHttpQueryDataAvailable (winhttp.@)
- */
-BOOL WINAPI WinHttpQueryDataAvailable (HINTERNET hInternet, LPDWORD lpdwNumberOfBytesAvailable)
-{
-    FIXME("stub\n");
-
-    SetLastError(ERROR_NOT_SUPPORTED);
-    return FALSE;
-}
-
-/***********************************************************************
- *          WinHttpReceiveResponse (winhttp.@)
- */
-BOOL WINAPI WinHttpReceiveResponse (HINTERNET hRequest, LPVOID lpReserved)
-{
-    FIXME("stub\n");
-
-    SetLastError(ERROR_NOT_SUPPORTED);
-    return FALSE;
-}
-
-/***********************************************************************
- *          WinHttpSetOption (winhttp.@)
- */
-BOOL WINAPI WinHttpSetOption (HINTERNET hInternet, DWORD dwOption, LPVOID lpBuffer, DWORD dwBufferLength)
-{
-    FIXME("stub\n");
-
-    SetLastError(ERROR_NOT_SUPPORTED);
-    return FALSE;
-}
-
-/***********************************************************************
- *          WinHttpReadData (winhttp.@)
- */
-BOOL WINAPI WinHttpReadData (HINTERNET hInternet, LPVOID lpBuffer, DWORD dwNumberOfBytesToRead,
-                             LPDWORD lpdwNumberOfBytesRead)
-{
-    FIXME("(%d): stub\n", dwNumberOfBytesToRead);
-
-    SetLastError(ERROR_NOT_SUPPORTED);
-    return FALSE;
-}
-
-/***********************************************************************
- *          WinHttpWriteData (winhttp.@)
- */
-BOOL WINAPI WinHttpWriteData (HINTERNET hRequest, LPCVOID lpBuffer,
-                              DWORD dwNumberOfBytesToWrite, LPDWORD lpdwNumberOfBytesWritten)
-{
-    FIXME("(%p, %d, %p): stub\n", lpBuffer, dwNumberOfBytesToWrite, lpdwNumberOfBytesWritten);
-
-    SetLastError(ERROR_NOT_SUPPORTED);
-    return FALSE;
-}
+#define SCHEME_HTTP  3
+#define SCHEME_HTTPS 4
 
 BOOL WINAPI InternetCrackUrlW( LPCWSTR, DWORD, DWORD, LPURL_COMPONENTSW );
 BOOL WINAPI InternetCreateUrlW( LPURL_COMPONENTS, DWORD, LPWSTR, LPDWORD );
@@ -172,8 +96,22 @@ BOOL WINAPI InternetCreateUrlW( LPURL_COMPONENTS, DWORD, LPWSTR, LPDWORD );
  */
 BOOL WINAPI WinHttpCrackUrl( LPCWSTR url, DWORD len, DWORD flags, LPURL_COMPONENTSW components )
 {
+    BOOL ret;
+
     TRACE("%s, %d, %x, %p\n", debugstr_w(url), len, flags, components);
-    return InternetCrackUrlW( url, len, flags, components );
+
+    if ((ret = InternetCrackUrlW( url, len, flags, components )))
+    {
+        /* fix up an incompatibility between wininet and winhttp */
+        if (components->nScheme == SCHEME_HTTP) components->nScheme = INTERNET_SCHEME_HTTP;
+        else if (components->nScheme == SCHEME_HTTPS) components->nScheme = INTERNET_SCHEME_HTTPS;
+        else
+        {
+            set_last_error( ERROR_WINHTTP_UNRECOGNIZED_SCHEME );
+            return FALSE;
+        }
+    }
+    return ret;
 }
 
 /***********************************************************************

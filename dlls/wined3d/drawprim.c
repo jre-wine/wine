@@ -32,14 +32,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d_draw);
 #include <stdio.h>
 #include <math.h>
 
-#if 0 /* TODO */
-extern IWineD3DVertexShaderImpl*            VertexShaders[64];
-extern IWineD3DVertexDeclarationImpl*       VertexShaderDeclarations[64];
-extern IWineD3DPixelShaderImpl*             PixelShaders[64];
-
-#undef GL_VERSION_1_4 /* To be fixed, caused by mesa headers */
-#endif
-
 /* Issues the glBegin call for gl given the primitive type and count */
 static DWORD primitiveToGl(WINED3DPRIMITIVETYPE PrimitiveType,
                     DWORD            NumPrimitives,
@@ -276,12 +268,9 @@ static void drawStridedFast(IWineD3DDevice *iface,UINT numberOfVertices, GLenum 
 #endif
 
     } else {
-
-        /* Note first is now zero as we shuffled along earlier */
-        TRACE("(%p) : glDrawArrays(%x, 0, %d)\n", This, glPrimitiveType, numberOfVertices);
+        TRACE("(%p) : glDrawArrays(%#x, %d, %d)\n", This, glPrimitiveType, startVertex, numberOfVertices);
         glDrawArrays(glPrimitiveType, startVertex, numberOfVertices);
         checkGLcall("glDrawArrays");
-
     }
 
     return;
@@ -688,7 +677,7 @@ static void drawStridedSlowVs(IWineD3DDevice *iface, WineDirect3DVertexStridedDa
     }
 
     /* Start drawing in GL */
-    VTRACE(("glBegin(%x)\n", glPrimType));
+    VTRACE(("glBegin(%x)\n", glPrimitiveType));
     glBegin(glPrimitiveType);
 
     for (vx_index = 0; vx_index < numberOfVertices; ++vx_index) {
@@ -719,11 +708,11 @@ static void drawStridedSlowVs(IWineD3DDevice *iface, WineDirect3DVertexStridedDa
     glEnd();
 }
 
-void depth_blt(IWineD3DDevice *iface, GLuint texture) {
+void depth_blt(IWineD3DDevice *iface, GLuint texture, GLsizei w, GLsizei h) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     GLint old_binding = 0;
 
-    glPushAttrib(GL_ENABLE_BIT | GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+    glPushAttrib(GL_ENABLE_BIT | GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT | GL_VIEWPORT_BIT);
 
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
@@ -734,6 +723,7 @@ void depth_blt(IWineD3DDevice *iface, GLuint texture) {
     glDepthFunc(GL_ALWAYS);
     glDepthMask(GL_TRUE);
     glBlendFunc(GL_ZERO, GL_ONE);
+    glViewport(0, 0, w, h);
 
     GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_binding);
@@ -936,20 +926,21 @@ void drawPrimitive(IWineD3DDevice *iface,
         }
     }
 
+    /* Signals other modules that a drawing is in progress and the stateblock finalized */
+    This->isInDraw = TRUE;
+
+    ActivateContext(This, This->render_targets[0], CTXUSAGE_DRAWPRIM);
+
     if (This->stencilBufferTarget) {
+        /* Note that this depends on the ActivateContext call above to set
+         * This->render_offscreen properly */
         DWORD location = This->render_offscreen ? SFLAG_DS_OFFSCREEN : SFLAG_DS_ONSCREEN;
         surface_load_ds_location(This->stencilBufferTarget, location);
         surface_modify_ds_location(This->stencilBufferTarget, location);
     }
 
-    /* Signals other modules that a drawing is in progress and the stateblock finalized */
-    This->isInDraw = TRUE;
-
     /* Ok, we will be updating the screen from here onwards so grab the lock */
-
-    ActivateContext(This, This->render_targets[0], CTXUSAGE_DRAWPRIM);
     ENTER_GL();
-
     {
         GLenum glPrimType;
         BOOL emulation = FALSE;

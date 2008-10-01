@@ -136,12 +136,12 @@ static int WineD3D_ChoosePixelFormat(IWineD3DDeviceImpl *This, HDC hdc, WINED3DF
          * only offer 32 bit ARB pixel formats. First try without an exact alpha
          * match, then try without an exact alpha and color match.
          */
-        { FALSE, TRUE,  TRUE  },
         { TRUE,  TRUE,  TRUE  },
-        { FALSE, FALSE, TRUE  },
-        { FALSE, FALSE, FALSE },
         { TRUE,  FALSE, TRUE  },
+        { FALSE, TRUE,  TRUE  },
+        { FALSE, FALSE, TRUE  },
         { TRUE,  FALSE, FALSE },
+        { FALSE, FALSE, FALSE },
     };
 
     int i = 0;
@@ -176,7 +176,7 @@ static int WineD3D_ChoosePixelFormat(IWineD3DDeviceImpl *This, HDC hdc, WINED3DF
         getDepthStencilBits(DepthStencilFormat, &depthBits, &stencilBits);
     }
 
-    for(matchtry = 0; matchtry < (sizeof(matches) / sizeof(matches[0])); matchtry++) {
+    for(matchtry = 0; matchtry < (sizeof(matches) / sizeof(matches[0])) && !iPixelFormat; matchtry++) {
         for(i=0; i<nCfgs; i++) {
             BOOL exactDepthMatch = TRUE;
             cfgs = &This->adapter->cfgs[i];
@@ -632,6 +632,25 @@ static void RemoveContextFromArray(IWineD3DDeviceImpl *This, WineD3DContext *con
     HeapFree(GetProcessHeap(), 0, oldArray);
 }
 
+static void destroy_fbo(IWineD3DDeviceImpl *This, const GLuint *fbo)
+{
+    int i = 0;
+
+    GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, *fbo));
+    checkGLcall("glBindFramebuffer()");
+    for (i = 0; i < GL_LIMITS(buffers); ++i)
+    {
+        GL_EXTCALL(glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT + i, GL_TEXTURE_2D, 0, 0));
+        checkGLcall("glFramebufferTexture2D()");
+    }
+    GL_EXTCALL(glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_TEXTURE_2D, 0, 0));
+    checkGLcall("glFramebufferTexture2D()");
+    GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0));
+    checkGLcall("glBindFramebuffer()");
+    GL_EXTCALL(glDeleteFramebuffersEXT(1, fbo));
+    checkGLcall("glDeleteFramebuffers()");
+}
+
 /*****************************************************************************
  * DestroyContext
  *
@@ -644,28 +663,36 @@ static void RemoveContextFromArray(IWineD3DDeviceImpl *This, WineD3DContext *con
  *****************************************************************************/
 void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context) {
 
-    /* check that we are the current context first */
     TRACE("Destroying ctx %p\n", context);
-    if(pwglGetCurrentContext() == context->glCtx){
-        pwglMakeCurrent(NULL, NULL);
-    } else {
+
+    /* The correct GL context needs to be active to cleanup the GL resources below */
+    if(pwglGetCurrentContext() != context->glCtx){
+        pwglMakeCurrent(context->hdc, context->glCtx);
         last_device = NULL;
     }
 
-    /* FIXME: We probably need an active context to do this... */
+    ENTER_GL();
+
     if (context->fbo) {
-        GL_EXTCALL(glDeleteFramebuffersEXT(1, &context->fbo));
+        TRACE("Destroy FBO %d\n", context->fbo);
+        destroy_fbo(This, &context->fbo);
     }
     if (context->src_fbo) {
-        GL_EXTCALL(glDeleteFramebuffersEXT(1, &context->src_fbo));
+        TRACE("Destroy src FBO %d\n", context->src_fbo);
+        destroy_fbo(This, &context->src_fbo);
     }
     if (context->dst_fbo) {
-        GL_EXTCALL(glDeleteFramebuffersEXT(1, &context->dst_fbo));
+        TRACE("Destroy dst FBO %d\n", context->dst_fbo);
+        destroy_fbo(This, &context->dst_fbo);
     }
+
+    LEAVE_GL();
 
     HeapFree(GetProcessHeap(), 0, context->fbo_color_attachments);
     context->fbo_color_attachments = NULL;
 
+    /* Cleanup the GL context */
+    pwglMakeCurrent(NULL, NULL);
     if(context->isPBuffer) {
         GL_EXTCALL(wglReleasePbufferDCARB(context->pbuffer, context->hdc));
         GL_EXTCALL(wglDestroyPbufferARB(context->pbuffer));
@@ -735,10 +762,6 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
     /* Disable all textures. The caller can then bind a texture it wants to blit
      * from
      */
-    if(GL_SUPPORT(NV_REGISTER_COMBINERS)) {
-        glDisable(GL_REGISTER_COMBINERS_NV);
-        checkGLcall("glDisable(GL_REGISTER_COMBINERS_NV)");
-    }
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
         /* The blitting code uses (for now) the fixed function pipeline, so make sure to reset all fixed
          * function texture unit. No need to care for higher samplers
@@ -849,11 +872,6 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
         glDisable(GL_COLOR_SUM_EXT);
         Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_SPECULARENABLE), StateTable);
         checkGLcall("glDisable(GL_COLOR_SUM_EXT)");
-    }
-    if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
-        GL_EXTCALL(glFinalCombinerInputNV(GL_VARIABLE_B_NV, GL_SPARE0_NV, GL_UNSIGNED_IDENTITY_NV, GL_RGB));
-        Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_SPECULARENABLE), StateTable);
-        checkGLcall("glFinalCombinerInputNV");
     }
 
     /* Setup transforms */

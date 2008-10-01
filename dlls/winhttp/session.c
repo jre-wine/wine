@@ -24,7 +24,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "winhttp.h"
 
 #include "winhttp_private.h"
@@ -39,7 +38,7 @@ void set_last_error( DWORD error )
 
 void send_callback( object_header_t *hdr, DWORD status, LPVOID info, DWORD buflen )
 {
-    TRACE("%p, %u, %p, %u\n", hdr, status, info, buflen);
+    TRACE("%p, 0x%08x, %p, %u\n", hdr, status, info, buflen);
 
     if (hdr->notify_mask & status) hdr->callback( hdr->handle, hdr->context, status, info, buflen );
 }
@@ -70,11 +69,36 @@ static void session_destroy( object_header_t *hdr )
     heap_free( session );
 }
 
+static BOOL session_set_option( object_header_t *hdr, DWORD option, LPVOID buffer, DWORD buflen )
+{
+    switch (option)
+    {
+    case WINHTTP_OPTION_PROXY:
+    {
+        WINHTTP_PROXY_INFO *pi = buffer;
+
+        FIXME("%u %s %s\n", pi->dwAccessType, debugstr_w(pi->lpszProxy), debugstr_w(pi->lpszProxyBypass));
+        return TRUE;
+    }
+    case WINHTTP_OPTION_REDIRECT_POLICY:
+    {
+        DWORD policy = *(DWORD *)buffer;
+
+        TRACE("0x%x\n", policy);
+        hdr->redirect_policy = policy;
+        return TRUE;
+    }
+    default:
+        FIXME("unimplemented option %u\n", option);
+        return TRUE;
+    }
+}
+
 static const object_vtbl_t session_vtbl =
 {
     session_destroy,
     NULL,
-    NULL
+    session_set_option
 };
 
 /***********************************************************************
@@ -171,13 +195,17 @@ HINTERNET WINAPI WinHttpConnect( HINTERNET hsession, LPCWSTR server, INTERNET_PO
     connect->hdr.flags = session->hdr.flags;
     connect->hdr.callback = session->hdr.callback;
     connect->hdr.notify_mask = session->hdr.notify_mask;
+    connect->hdr.context = session->hdr.context;
 
     addref_object( &session->hdr );
     connect->session = session;
     list_add_head( &session->hdr.children, &connect->hdr.entry );
 
     if (server && !(connect->hostname = strdupW( server ))) goto end;
-    connect->hostport = port;
+    connect->hostport = port ? port : (connect->hdr.flags & WINHTTP_FLAG_SECURE ? 443 : 80);
+
+    if (server && !(connect->servername = strdupW( server ))) goto end;
+    connect->serverport = port ? port : (connect->hdr.flags & WINHTTP_FLAG_SECURE ? 443 : 80);
 
     if (!(hconnect = alloc_handle( &connect->hdr ))) goto end;
     connect->hdr.handle = hconnect;
@@ -217,11 +245,71 @@ static void request_destroy( object_header_t *hdr )
     heap_free( request );
 }
 
+static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buffer, LPDWORD buflen )
+{
+    switch (option)
+    {
+    case WINHTTP_OPTION_SECURITY_FLAGS:
+    {
+        DWORD flags = 0;
+
+        if (hdr->flags & WINHTTP_FLAG_SECURE) flags |= SECURITY_FLAG_SECURE;
+        *(DWORD *)buffer = flags;
+        *buflen = sizeof(DWORD);
+        return TRUE;
+    }
+    default:
+        FIXME("unimplemented option %u\n", option);
+        return FALSE;
+    }
+}
+
+static BOOL request_set_option( object_header_t *hdr, DWORD option, LPVOID buffer, DWORD buflen )
+{
+    switch (option)
+    {
+    case WINHTTP_OPTION_PROXY:
+    {
+        WINHTTP_PROXY_INFO *pi = buffer;
+
+        FIXME("%u %s %s\n", pi->dwAccessType, debugstr_w(pi->lpszProxy), debugstr_w(pi->lpszProxyBypass));
+        return TRUE;
+    }
+    case WINHTTP_OPTION_DISABLE_FEATURE:
+    {
+        DWORD disable = *(DWORD *)buffer;
+
+        TRACE("0x%x\n", disable);
+        hdr->disable_flags &= disable;
+        return TRUE;
+    }
+    case WINHTTP_OPTION_AUTOLOGON_POLICY:
+    {
+        DWORD policy = *(DWORD *)buffer;
+
+        TRACE("0x%x\n", policy);
+        hdr->logon_policy = policy;
+        return TRUE;
+    }
+    case WINHTTP_OPTION_REDIRECT_POLICY:
+    {
+        DWORD policy = *(DWORD *)buffer;
+
+        TRACE("0x%x\n", policy);
+        hdr->redirect_policy = policy;
+        return TRUE;
+    }
+    default:
+        FIXME("unimplemented option %u\n", option);
+        return TRUE;
+    }
+}
+
 static const object_vtbl_t request_vtbl =
 {
     request_destroy,
-    NULL,
-    NULL
+    request_query_option,
+    request_set_option
 };
 
 /***********************************************************************
@@ -230,10 +318,6 @@ static const object_vtbl_t request_vtbl =
 HINTERNET WINAPI WinHttpOpenRequest( HINTERNET hconnect, LPCWSTR verb, LPCWSTR object, LPCWSTR version,
                                      LPCWSTR referrer, LPCWSTR *types, DWORD flags )
 {
-    static const WCHAR get[] = {'G','E','T',0};
-    static const WCHAR slash[] = {'/',0};
-    static const WCHAR http1_1[] = {'H','T','T','P','/','1','.','1',0};
-
     request_t *request;
     connect_t *connect;
     HINTERNET hrequest = NULL;
@@ -263,18 +347,17 @@ HINTERNET WINAPI WinHttpOpenRequest( HINTERNET hconnect, LPCWSTR verb, LPCWSTR o
     request->hdr.flags = flags;
     request->hdr.callback = connect->hdr.callback;
     request->hdr.notify_mask = connect->hdr.notify_mask;
+    request->hdr.context = connect->hdr.context;
 
     addref_object( &connect->hdr );
     request->connect = connect;
     list_add_head( &connect->hdr.children, &request->hdr.entry );
 
-    if (!verb) verb = get;
-    if (!object) object = slash;
-    if (!version) version = http1_1;
+    if (!netconn_init( &request->netconn, request->hdr.flags & WINHTTP_FLAG_SECURE )) goto end;
 
-    if (!(request->verb = strdupW( verb ))) goto end;
-    if (!(request->path = strdupW( object ))) goto end;
-    if (!(request->version = strdupW( version ))) goto end;
+    if (verb && !(request->verb = strdupW( verb ))) goto end;
+    if (object && !(request->path = strdupW( object ))) goto end;
+    if (version && !(request->version = strdupW( version ))) goto end;
 
     if (!(hrequest = alloc_handle( &request->hdr ))) goto end;
     request->hdr.handle = hrequest;
@@ -305,6 +388,91 @@ BOOL WINAPI WinHttpCloseHandle( HINTERNET handle )
     release_object( hdr );
     free_handle( handle );
     return TRUE;
+}
+
+static BOOL query_option( object_header_t *hdr, DWORD option, LPVOID buffer, LPDWORD buflen )
+{
+    BOOL ret = FALSE;
+
+    switch (option)
+    {
+    case WINHTTP_OPTION_CONTEXT_VALUE:
+    {
+        *(DWORD_PTR *)buffer = hdr->context;
+        *buflen = sizeof(DWORD_PTR);
+        return TRUE;
+    }
+    default:
+    {
+        if (hdr->vtbl->query_option) ret = hdr->vtbl->query_option( hdr, option, buffer, buflen );
+        else FIXME("unimplemented option %u\n", option);
+    }
+    }
+    return ret;
+}
+
+/***********************************************************************
+ *          WinHttpQueryOption (winhttp.@)
+ */
+BOOL WINAPI WinHttpQueryOption( HINTERNET handle, DWORD option, LPVOID buffer, LPDWORD buflen )
+{
+    BOOL ret = FALSE;
+    object_header_t *hdr;
+
+    TRACE("%p, %u, %p, %p\n", handle, option, buffer, buflen);
+
+    if (!(hdr = grab_object( handle )))
+    {
+        set_last_error( ERROR_INVALID_HANDLE );
+        return FALSE;
+    }
+
+    ret = query_option( hdr, option, buffer, buflen );
+
+    release_object( hdr );
+    return ret;
+}
+
+static BOOL set_option( object_header_t *hdr, DWORD option, LPVOID buffer, DWORD buflen )
+{
+    BOOL ret = TRUE;
+
+    switch (option)
+    {
+    case WINHTTP_OPTION_CONTEXT_VALUE:
+    {
+        hdr->context = *(DWORD_PTR *)buffer;
+        return TRUE;
+    }
+    default:
+    {
+        if (hdr->vtbl->set_option) ret = hdr->vtbl->set_option( hdr, option, buffer, buflen );
+        else FIXME("unimplemented option %u\n", option);
+    }
+    }
+    return ret;
+}
+
+/***********************************************************************
+ *          WinHttpSetOption (winhttp.@)
+ */
+BOOL WINAPI WinHttpSetOption( HINTERNET handle, DWORD option, LPVOID buffer, DWORD buflen )
+{
+    BOOL ret = FALSE;
+    object_header_t *hdr;
+
+    TRACE("%p, %u, %p, %u\n", handle, option, buffer, buflen);
+
+    if (!(hdr = grab_object( handle )))
+    {
+        set_last_error( ERROR_INVALID_HANDLE );
+        return FALSE;
+    }
+
+    ret = set_option( hdr, option, buffer, buflen );
+
+    release_object( hdr );
+    return ret;
 }
 
 /***********************************************************************

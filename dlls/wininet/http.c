@@ -74,6 +74,7 @@ static const WCHAR szProxy_Authorization[] = { 'P','r','o','x','y','-','A','u','
 static const WCHAR szStatus[] = { 'S','t','a','t','u','s',0 };
 static const WCHAR szKeepAlive[] = {'K','e','e','p','-','A','l','i','v','e',0};
 static const WCHAR szGET[] = { 'G','E','T', 0 };
+static const WCHAR szCrLf[] = {'\r','\n', 0};
 
 #define MAXHOSTNAME 100
 #define MAX_FIELD_VALUE_LEN 256
@@ -256,7 +257,6 @@ static LPWSTR HTTP_BuildHeaderRequestString( LPWININETHTTPREQW lpwhr, LPCWSTR ve
     LPWSTR p;
 
     static const WCHAR szSpace[] = { ' ',0 };
-    static const WCHAR szcrlf[] = {'\r','\n', 0};
     static const WCHAR szColon[] = { ':',' ',0 };
     static const WCHAR sztwocrlf[] = {'\r','\n','\r','\n', 0};
 
@@ -277,7 +277,7 @@ static LPWSTR HTTP_BuildHeaderRequestString( LPWININETHTTPREQW lpwhr, LPCWSTR ve
     {
         if (lpwhr->pCustHeaders[i].wFlags & HDR_ISREQUEST)
         {
-            req[n++] = szcrlf;
+            req[n++] = szCrLf;
             req[n++] = lpwhr->pCustHeaders[i].lpszField;
             req[n++] = szColon;
             req[n++] = lpwhr->pCustHeaders[i].lpszValue;
@@ -2187,7 +2187,7 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
     case HTTP_QUERY_RAW_HEADERS_CRLF:
         {
             LPWSTR headers;
-            DWORD len;
+            DWORD len = 0;
             BOOL ret = FALSE;
 
             if (request_only)
@@ -2195,7 +2195,9 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
             else
                 headers = lpwhr->lpszRawHeaders;
 
-            len = strlenW(headers) * sizeof(WCHAR);
+            if (headers)
+                len = strlenW(headers) * sizeof(WCHAR);
+
             if (len + sizeof(WCHAR) > *lpdwBufferLength)
             {
                 len += sizeof(WCHAR);
@@ -2204,7 +2206,13 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
             }
             else if (lpBuffer)
             {
-                memcpy(lpBuffer, headers, len + sizeof(WCHAR));
+                if (headers)
+                    memcpy(lpBuffer, headers, len + sizeof(WCHAR));
+                else
+                {
+                    len = strlenW(szCrLf) * sizeof(WCHAR);
+                    memcpy(lpBuffer, szCrLf, sizeof(szCrLf));
+                }
                 TRACE("returning data: %s\n", debugstr_wn(lpBuffer, len / sizeof(WCHAR)));
                 ret = TRUE;
             }
@@ -2216,7 +2224,6 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
         }
     case HTTP_QUERY_RAW_HEADERS:
         {
-            static const WCHAR szCrLf[] = {'\r','\n',0};
             LPWSTR * ppszRawHeaderLines = HTTP_Tokenize(lpwhr->lpszRawHeaders, szCrLf);
             DWORD i, size = 0;
             LPWSTR pszString = (WCHAR*)lpBuffer;
@@ -3136,14 +3143,13 @@ static void HTTP_InsertCookies(LPWININETHTTPREQW lpwhr)
     {
         int cnt = 0;
         static const WCHAR szCookie[] = {'C','o','o','k','i','e',':',' ',0};
-        static const WCHAR szcrlf[] = {'\r','\n',0};
 
-        size = sizeof(szCookie) + nCookieSize * sizeof(WCHAR) + sizeof(szcrlf);
+        size = sizeof(szCookie) + nCookieSize * sizeof(WCHAR) + sizeof(szCrLf);
         if ((lpszCookies = HeapAlloc(GetProcessHeap(), 0, size)))
         {
             cnt += sprintfW(lpszCookies, szCookie);
             InternetGetCookieW(lpszUrl, NULL, lpszCookies + cnt, &nCookieSize);
-            strcatW(lpszCookies, szcrlf);
+            strcatW(lpszCookies, szCrLf);
 
             HTTP_HttpAddRequestHeadersW(lpwhr, lpszCookies, strlenW(lpszCookies), HTTP_ADDREQ_FLAG_ADD);
             HeapFree(GetProcessHeap(), 0, lpszCookies);
@@ -3713,7 +3719,6 @@ static INT HTTP_GetResponseHeaders(LPWININETHTTPREQW lpwhr, BOOL clear)
     DWORD buflen = MAX_REPLY_LEN;
     BOOL bSuccess = FALSE;
     INT  rc = 0;
-    static const WCHAR szCrLf[] = {'\r','\n',0};
     static const WCHAR szHundred[] = {'1','0','0',0};
     char bufferA[MAX_REPLY_LEN];
     LPWSTR status_code, status_text;

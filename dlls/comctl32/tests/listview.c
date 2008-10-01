@@ -48,7 +48,10 @@ static const struct message create_parent_wnd_seq[] = {
     { WM_CREATE,            sent },
     { WM_SHOWWINDOW,        sent|wparam, 1 },
     { WM_WINDOWPOSCHANGING, sent|wparam, 0 },
+    { WM_QUERYNEWPALETTE,   sent|optional },
     { WM_WINDOWPOSCHANGING, sent|wparam, 0 },
+    { WM_WINDOWPOSCHANGED,  sent|optional },
+    { WM_NCCALCSIZE,        sent|wparam|optional, 1 },
     { WM_ACTIVATEAPP,       sent|wparam, 1 },
     { WM_NCACTIVATE,        sent|wparam, 1 },
     { WM_ACTIVATE,          sent|wparam, 1 },
@@ -732,7 +735,9 @@ static void test_columns(void)
 
     /* Check its width */
     rc = ListView_GetColumnWidth(hwnd, 0);
-    ok(rc==10, "Inserting column with no mask failed to set width to 10 with %d\n", rc);
+    ok(rc==10 ||
+       broken(rc==0), /* win9x */
+       "Inserting column with no mask failed to set width to 10 with %d\n", rc);
 
     DestroyWindow(hwnd);
 }
@@ -872,7 +877,9 @@ static void test_icon_spacing(void)
     trace("test icon spacing\n");
 
     r = SendMessage(hwnd, LVM_SETICONSPACING, 0, (LPARAM) MAKELONG(20, 30));
-    expect(MAKELONG(w,h), r);
+    ok(r == MAKELONG(w, h) ||
+       broken(r == MAKELONG(w, w)), /* win98 */
+       "Expected %d, got %d\n", MAKELONG(w, h), r);
 
     r = SendMessage(hwnd, LVM_SETICONSPACING, 0, (LPARAM) MAKELONG(25, 35));
     expect(MAKELONG(20,30), r);

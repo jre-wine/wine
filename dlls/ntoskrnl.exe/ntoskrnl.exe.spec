@@ -48,7 +48,7 @@
 @ stub KefReleaseSpinLockFromDpcLevel
 @ stub KiAcquireSpinLock
 @ stub KiReleaseSpinLock
-@ stub ObfDereferenceObject
+@ stdcall ObfDereferenceObject(ptr)
 @ stub ObfReferenceObject
 @ stub RtlPrefetchMemoryNonTemporal
 @ cdecl -i386 -norelay RtlUlongByteSwap() ntdll.RtlUlongByteSwap
@@ -382,7 +382,7 @@
 @ stub IoGetDeviceAttachmentBaseRef
 @ stub IoGetDeviceInterfaceAlias
 @ stub IoGetDeviceInterfaces
-@ stub IoGetDeviceObjectPointer
+@ stdcall IoGetDeviceObjectPointer(ptr long ptr ptr)
 @ stub IoGetDeviceProperty
 @ stub IoGetDeviceToVerify
 @ stub IoGetDiskDeviceObject
@@ -391,7 +391,7 @@
 @ stub IoGetFileObjectGenericMapping
 @ stub IoGetInitialStack
 @ stub IoGetLowerDeviceObject
-@ stub IoGetRelatedDeviceObject
+@ stdcall IoGetRelatedDeviceObject(ptr)
 @ stub IoGetRequestorProcess
 @ stub IoGetRequestorProcessId
 @ stub IoGetRequestorSessionId
@@ -426,12 +426,12 @@
 @ stub IoReadTransferCount
 @ stub IoRegisterBootDriverReinitialization
 @ stub IoRegisterDeviceInterface
-@ stub IoRegisterDriverReinitialization
+@ stdcall IoRegisterDriverReinitialization(ptr ptr ptr)
 @ stub IoRegisterFileSystem
 @ stub IoRegisterFsRegistrationChange
 @ stub IoRegisterLastChanceShutdownNotification
 @ stub IoRegisterPlugPlayNotification
-@ stub IoRegisterShutdownNotification
+@ stdcall IoRegisterShutdownNotification(ptr)
 @ stub IoReleaseCancelSpinLock
 @ stub IoReleaseRemoveLockAndWaitEx
 @ stub IoReleaseRemoveLockEx
@@ -809,7 +809,7 @@
 @ stub ObOpenObjectByPointer
 @ stub ObQueryNameString
 @ stub ObQueryObjectAuditingByHandle
-@ stub ObReferenceObjectByHandle
+@ stdcall ObReferenceObjectByHandle(long long ptr long ptr ptr)
 @ stub ObReferenceObjectByName
 @ stub ObReferenceObjectByPointer
 @ stub ObReferenceSecurityDescriptor

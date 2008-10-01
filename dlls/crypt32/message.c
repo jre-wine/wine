@@ -263,3 +263,58 @@ BOOL WINAPI CryptHashMessage(PCRYPT_HASH_MESSAGE_PARA pHashPara,
     }
     return ret;
 }
+
+BOOL WINAPI CryptVerifyDetachedMessageHash(PCRYPT_HASH_MESSAGE_PARA pHashPara,
+ BYTE *pbDetachedHashBlob, DWORD cbDetachedHashBlob, DWORD cToBeHashed,
+ const BYTE *rgpbToBeHashed[], DWORD rgcbToBeHashed[], BYTE *pbComputedHash,
+ DWORD *pcbComputedHash)
+{
+    HCRYPTMSG msg;
+    BOOL ret = FALSE;
+
+    TRACE("(%p, %p, %d, %d, %p, %p, %p, %p)\n", pHashPara, pbDetachedHashBlob,
+     cbDetachedHashBlob, cToBeHashed, rgpbToBeHashed, rgcbToBeHashed,
+     pbComputedHash, pcbComputedHash);
+
+    if (pHashPara->cbSize != sizeof(CRYPT_HASH_MESSAGE_PARA))
+    {
+        SetLastError(E_INVALIDARG);
+        return FALSE;
+    }
+    if (GET_CMSG_ENCODING_TYPE(pHashPara->dwMsgEncodingType) !=
+     PKCS_7_ASN_ENCODING)
+    {
+        SetLastError(E_INVALIDARG);
+        return FALSE;
+    }
+    msg = CryptMsgOpenToDecode(pHashPara->dwMsgEncodingType, CMSG_DETACHED_FLAG,
+     0, pHashPara->hCryptProv, NULL, NULL);
+    if (msg)
+    {
+        DWORD i;
+
+        ret = CryptMsgUpdate(msg, pbDetachedHashBlob, cbDetachedHashBlob, TRUE);
+        if (ret)
+        {
+            if (cToBeHashed)
+            {
+                for (i = 0; ret && i < cToBeHashed; i++)
+                {
+                    ret = CryptMsgUpdate(msg, rgpbToBeHashed[i],
+                     rgcbToBeHashed[i], i == cToBeHashed - 1 ? TRUE : FALSE);
+                }
+            }
+            else
+                ret = CryptMsgUpdate(msg, NULL, 0, TRUE);
+        }
+        if (ret)
+        {
+            ret = CryptMsgControl(msg, 0, CMSG_CTRL_VERIFY_HASH, NULL);
+            if (ret && pcbComputedHash)
+                ret = CryptMsgGetParam(msg, CMSG_COMPUTED_HASH_PARAM, 0,
+                 pbComputedHash, pcbComputedHash);
+        }
+        CryptMsgClose(msg);
+    }
+    return ret;
+}

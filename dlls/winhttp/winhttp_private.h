@@ -32,13 +32,16 @@
 #ifdef HAVE_NETDB_H
 # include <netdb.h>
 #endif
+#if defined(__MINGW32__) || defined (_MSC_VER)
+# include <ws2tcpip.h>
+#endif
 
 typedef struct _object_header_t object_header_t;
 
 typedef struct
 {
     void (*destroy)( object_header_t * );
-    BOOL (*query_option)( object_header_t *, DWORD, void *, DWORD *, BOOL );
+    BOOL (*query_option)( object_header_t *, DWORD, void *, DWORD * );
     BOOL (*set_option)( object_header_t *, DWORD, void *, DWORD );
 } object_vtbl_t;
 
@@ -48,6 +51,9 @@ struct _object_header_t
     HINTERNET handle;
     const object_vtbl_t *vtbl;
     DWORD flags;
+    DWORD disable_flags;
+    DWORD logon_policy;
+    DWORD redirect_policy;
     DWORD error;
     DWORD_PTR context;
     LONG refs;
@@ -84,6 +90,9 @@ typedef struct
 typedef struct
 {
     int socket;
+    BOOL secure; /* SSL active on connection? */
+    void *ssl_ctx;
+    void *ssl_conn;
     char *peek_msg;
     char *peek_msg_mem;
     size_t peek_len;
@@ -120,6 +129,19 @@ BOOL free_handle( HINTERNET );
 
 void set_last_error( DWORD );
 void send_callback( object_header_t *, DWORD, LPVOID, DWORD );
+void close_connection( request_t * );
+
+BOOL netconn_close( netconn_t * );
+BOOL netconn_connect( netconn_t *, const struct sockaddr *, unsigned int );
+BOOL netconn_connected( netconn_t * );
+BOOL netconn_create( netconn_t *, int, int, int );
+BOOL netconn_get_next_line( netconn_t *, char *, DWORD * );
+BOOL netconn_init( netconn_t *, BOOL );
+BOOL netconn_query_data_available( netconn_t *, DWORD * );
+BOOL netconn_recv( netconn_t *, void *, size_t, int, int * );
+BOOL netconn_resolve( WCHAR *, INTERNET_PORT, struct sockaddr_in * );
+BOOL netconn_secure_connect( netconn_t * );
+BOOL netconn_send( netconn_t *, const void *, size_t, int, int * );
 
 static inline void *heap_alloc( SIZE_T size )
 {
@@ -153,6 +175,30 @@ static inline WCHAR *strdupW( const WCHAR *src )
     if (!src) return NULL;
     dst = heap_alloc( (strlenW( src ) + 1) * sizeof(WCHAR) );
     if (dst) strcpyW( dst, src );
+    return dst;
+}
+
+static inline WCHAR *strdupAW( const char *src )
+{
+    WCHAR *dst = NULL;
+    if (src)
+    {
+        DWORD len = MultiByteToWideChar( CP_ACP, 0, src, -1, NULL, 0 );
+        if ((dst = heap_alloc( len * sizeof(WCHAR) )))
+            MultiByteToWideChar( CP_ACP, 0, src, -1, dst, len );
+    }
+    return dst;
+}
+
+static inline char *strdupWA( const WCHAR *src )
+{
+    char *dst = NULL;
+    if (src)
+    {
+        int len = WideCharToMultiByte( CP_ACP, 0, src, -1, NULL, 0, NULL, NULL );
+        if ((dst = heap_alloc( len )))
+            WideCharToMultiByte( CP_ACP, 0, src, -1, dst, len, NULL, NULL );
+    }
     return dst;
 }
 

@@ -59,6 +59,10 @@ static void test_rasenum(void)
         win_skip("RAS configuration problem\n");
         return;
     }
+    if(ERROR_SUCCESS == result) {
+        win_skip("RasEnumDevicesA found nothing to enumerate\n");
+        return;
+    }
     trace("RasEnumDevicesA: returned %d buffersize %d\n", result, cb);
     ok(result == ERROR_BUFFER_TOO_SMALL,
     "Expected ERROR_BUFFER_TOO_SMALL, got %08d\n", result);
@@ -73,28 +77,32 @@ static void test_rasenum(void)
     /* test first parameter */
     cb = bufsize;
     result = pRasEnumDevicesA(NULL, &cb, &cDevices);
-    ok(result == ERROR_BUFFER_TOO_SMALL,
+    ok(result == ERROR_BUFFER_TOO_SMALL ||
+    result == ERROR_INVALID_USER_BUFFER, /* win98 */
     "Expected ERROR_BUFFER_TOO_SMALL, got %08d\n", result);
 
     rasDevInfo[0].dwSize = 0;
     cb = bufsize;
     result = pRasEnumDevicesA(rasDevInfo, &cb, &cDevices);
     todo_wine
-    ok(result == ERROR_INVALID_SIZE,
+    ok(result == ERROR_INVALID_SIZE ||
+    result == ERROR_INVALID_USER_BUFFER, /* win98 */
     "Expected ERROR_INVALID_SIZE, got %08d\n", result);
 
     rasDevInfo[0].dwSize = sizeof(RASDEVINFOA) -1;
     cb = bufsize;
     result = pRasEnumDevicesA(rasDevInfo, &cb, &cDevices);
     todo_wine
-    ok(result == ERROR_INVALID_SIZE,
+    ok(result == ERROR_INVALID_SIZE ||
+    result == ERROR_INVALID_USER_BUFFER, /* win98 */
     "Expected ERROR_INVALID_SIZE, got %08d\n", result);
 
     rasDevInfo[0].dwSize = sizeof(RASDEVINFOA) +1;
     cb = bufsize;
     result = pRasEnumDevicesA(rasDevInfo, &cb, &cDevices);
     todo_wine
-    ok(result == ERROR_INVALID_SIZE,
+    ok(result == ERROR_INVALID_SIZE ||
+    result == ERROR_INVALID_USER_BUFFER, /* win98 */
     "Expected ERROR_INVALID_SIZE, got %08d\n", result);
 
     /* test second parameter */
@@ -135,14 +143,16 @@ static void test_rasenum(void)
     "Expected ERROR_INVALID_PARAMETER, got %08d\n", result);
 
     result = pRasEnumDevicesA(NULL, &cb, NULL);
-    ok(result == ERROR_INVALID_PARAMETER,
+    ok(result == ERROR_INVALID_PARAMETER ||
+    result == ERROR_INVALID_USER_BUFFER, /* win98 */
     "Expected ERROR_INVALID_PARAMETER, got %08d\n", result);
 
     cb = 0;
     rasDevInfo[0].dwSize = 0;
     result = pRasEnumDevicesA(rasDevInfo, &cb, &cDevices);
     todo_wine
-    ok(result == ERROR_INVALID_SIZE,
+    ok(result == ERROR_INVALID_SIZE ||
+    broken(result == ERROR_BUFFER_TOO_SMALL), /* win98 */
     "Expected ERROR_INVALID_SIZE, got %08d\n", result);
 
     HeapFree(GetProcessHeap(), 0, rasDevInfo);

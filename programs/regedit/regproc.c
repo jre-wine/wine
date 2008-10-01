@@ -70,13 +70,17 @@ if (!(p)) \
  */
 WCHAR* GetWideString(const char* strA)
 {
-    WCHAR* strW = NULL;
-    int len = MultiByteToWideChar(CP_ACP, 0, strA, -1, NULL, 0);
+    if(strA)
+    {
+        WCHAR* strW = NULL;
+        int len = MultiByteToWideChar(CP_ACP, 0, strA, -1, NULL, 0);
 
-    strW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
-    CHECK_ENOUGH_MEMORY(strW);
-    MultiByteToWideChar(CP_ACP, 0, strA, -1, strW, len);
-    return strW;
+        strW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        CHECK_ENOUGH_MEMORY(strW);
+        MultiByteToWideChar(CP_ACP, 0, strA, -1, strW, len);
+        return strW;
+    }
+    return NULL;
 }
 
 /******************************************************************************
@@ -85,13 +89,17 @@ WCHAR* GetWideString(const char* strA)
  */
 char* GetMultiByteString(const WCHAR* strW)
 {
-    char* strA = NULL;
-    int len = WideCharToMultiByte(CP_ACP, 0, strW, -1, NULL, 0, NULL, NULL);
+    if(strW)
+    {
+        char* strA = NULL;
+        int len = WideCharToMultiByte(CP_ACP, 0, strW, -1, NULL, 0, NULL, NULL);
 
-    strA = HeapAlloc(GetProcessHeap(), 0, len);
-    CHECK_ENOUGH_MEMORY(strA);
-    WideCharToMultiByte(CP_ACP, 0, strW, -1, strA, len, NULL, NULL);
-    return strA;
+        strA = HeapAlloc(GetProcessHeap(), 0, len);
+        CHECK_ENOUGH_MEMORY(strA);
+        WideCharToMultiByte(CP_ACP, 0, strW, -1, strA, len, NULL, NULL);
+        return strA;
+    }
+    return NULL;
 }
 
 /******************************************************************************
@@ -113,28 +121,28 @@ static BOOL convertHexToDWord(WCHAR* str, DWORD *dw)
 /******************************************************************************
  * Converts a hex comma separated values list into a binary string.
  */
-static BYTE* convertHexCSVToHex(WCHAR *strW, DWORD *size)
+static BYTE* convertHexCSVToHex(WCHAR *str, DWORD *size)
 {
-    char *s;
+    WCHAR *s;
     BYTE *d, *data;
-    char* strA = GetMultiByteString(strW);
 
     /* The worst case is 1 digit + 1 comma per byte */
-    *size=(strlen(strA)+1)/2;
+    *size=(lstrlenW(str)+1)/2;
     data=HeapAlloc(GetProcessHeap(), 0, *size);
     CHECK_ENOUGH_MEMORY(data);
 
-    s = strA;
+    s = str;
     d = data;
     *size=0;
     while (*s != '\0') {
         UINT wc;
-        char *end;
+        WCHAR *end;
 
-        wc = strtoul(s,&end,16);
+        wc = strtoulW(s,&end,16);
         if (end == s || wc > 0xff || (*end && *end != ',')) {
+            char* strA = GetMultiByteString(s);
             fprintf(stderr,"%s: ERROR converting CSV hex stream. Invalid value at '%s'\n",
-                    getAppName(), s);
+                    getAppName(), strA);
             HeapFree(GetProcessHeap(), 0, data);
             HeapFree(GetProcessHeap(), 0, strA);
             return NULL;
@@ -144,8 +152,6 @@ static BYTE* convertHexCSVToHex(WCHAR *strW, DWORD *size)
         if (*end) end++;
         s = end;
     }
-
-    HeapFree(GetProcessHeap(), 0, strA);
 
     return data;
 }
@@ -666,13 +672,22 @@ void processRegLinesA(FILE *in)
             if (s_eol > line && *(s_eol-1) == '\\') {
                 int c;
                 s = s_eol-1;
-                /* The following error protection could be made more self-
-                 * correcting but I thought it not worth trying.
-                 */
-                if ((c = fgetc (in)) == EOF || c != ' ' ||
-                        (c = fgetc (in)) == EOF || c != ' ')
+
+                do
+                {
+                    c = fgetc(in);
+                } while(c == ' ' || c == '\t');
+
+                if(c == EOF)
+                {
                     fprintf(stderr,"%s: ERROR - invalid continuation.\n",
                             getAppName());
+                }
+                else
+                {
+                    *s = c;
+                    s++;
+                }
                 continue;
             }
 
@@ -1150,6 +1165,7 @@ BOOL export_registry_key(CHAR *file_name, CHAR *reg_key_name)
         fclose(file);
     }
     HeapFree(GetProcessHeap(), 0, reg_key_name);
+    HeapFree(GetProcessHeap(), 0, val_name_buf);
     HeapFree(GetProcessHeap(), 0, val_buf);
     return TRUE;
 }

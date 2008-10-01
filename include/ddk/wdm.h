@@ -89,6 +89,8 @@ typedef struct _ETHREAD *PETHREAD;
 typedef struct _KTHREAD *PKTHREAD;
 typedef struct _EPROCESS *PEPROCESS;
 typedef struct _IO_WORKITEM *PIO_WORKITEM;
+typedef struct _OBJECT_TYPE *POBJECT_TYPE;
+typedef struct _OBJECT_HANDLE_INFORMATION *POBJECT_HANDLE_INFORMATION;
 
 #define MAXIMUM_VOLUME_LABEL_LENGTH       (32 * sizeof(WCHAR))
 
@@ -941,6 +943,8 @@ void      WINAPI IoDeleteDriver(DRIVER_OBJECT*);
 NTSTATUS  WINAPI IoDeleteSymbolicLink(UNICODE_STRING*);
 void      WINAPI IoFreeIrp(IRP*);
 PEPROCESS WINAPI IoGetCurrentProcess(void);
+NTSTATUS  WINAPI IoGetDeviceObjectPointer(UNICODE_STRING*,ACCESS_MASK,PFILE_OBJECT*,PDEVICE_OBJECT*);
+PDEVICE_OBJECT WINAPI IoGetRelatedDeviceObject(PFILE_OBJECT);
 void      WINAPI IoInitializeIrp(IRP*,USHORT,CCHAR);
 
 PKTHREAD  WINAPI KeGetCurrentThread(void);
@@ -950,6 +954,8 @@ ULONG     WINAPI KeQueryTimeIncrement(void);
 
 PVOID     WINAPI MmAllocateNonCachedMemory(SIZE_T);
 void      WINAPI MmFreeNonCachedMemory(PVOID,SIZE_T);
+
+NTSTATUS  WINAPI ObReferenceObjectByHandle(HANDLE,ACCESS_MASK,POBJECT_TYPE,KPROCESSOR_MODE,PVOID*,POBJECT_HANDLE_INFORMATION);
 
 NTSTATUS  WINAPI PsCreateSystemThread(PHANDLE,ULONG,POBJECT_ATTRIBUTES,HANDLE,PCLIENT_ID,PKSTART_ROUTINE,PVOID);
 #define          PsGetCurrentProcess() IoGetCurrentProcess()

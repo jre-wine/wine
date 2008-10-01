@@ -126,7 +126,7 @@ static void test_SetApplicationName_GetApplicationName(void)
         CoTaskMemFree(stored_name);
     }
 
-    /* Set application name to a non-existent application and then get
+    /* Set application name to a nonexistent application and then get
      * the application name that is actually stored */
     hres = ITask_SetApplicationName(test_task, non_application_name);
     ok(hres == S_OK, "Failed setting name %s: %08x\n",
@@ -170,8 +170,8 @@ static void test_SetApplicationName_GetApplicationName(void)
         CoTaskMemFree(stored_name);
     }
 
-    /* After having a valid application name set, set application name
-     * to a non-existant application and then get the name that is
+    /* After having a valid application name set, set application the name
+     * to a nonexistent application and then get the name that is
      * actually stored */
     hres = ITask_SetApplicationName(test_task, non_application_name);
     ok(hres == S_OK, "Failed setting name %s: %08x\n",
@@ -218,7 +218,7 @@ static void test_CreateTrigger(void)
     }
 
     hres = ITask_CreateTrigger(test_task, &trigger_index, &test_trigger);
-    todo_wine ok(hres == S_OK, "Failed to create trigger: 0x%08x\n", hres);
+    ok(hres == S_OK, "Failed to create trigger: 0x%08x\n", hres);
     if (hres != S_OK)
     {
         cleanup_task();
@@ -448,7 +448,14 @@ static void test_SetAccountInformation_GetAccountInformation(void)
     /* Get account information before it is set */
     hres = ITask_GetAccountInformation(test_task, &account_name);
     /* WinXP returns HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND): 0x80070002 but
-     * Win2K returns SCHED_E_CANNOT_OPEN_TASK: 0x8004130d */
+     * Win2K returns SCHED_E_CANNOT_OPEN_TASK: 0x8004130d
+     * Win9x doesn't support security services */
+    if (hres == SCHED_E_NO_SECURITY_SERVICES)
+    {
+        win_skip("Security services are not supported\n");
+        cleanup_task();
+        return;
+    }
     ok(hres == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) ||
             hres == SCHED_E_CANNOT_OPEN_TASK,
             "Unset account name generated: 0x%08x\n", hres);

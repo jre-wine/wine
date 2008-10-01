@@ -2685,6 +2685,33 @@ typedef struct _CRL_FIND_ISSUED_FOR_PARA
     PCCERT_CONTEXT pIssuerCert;
 } CRL_FIND_ISSUED_FOR_PARA, *PCRL_FIND_ISSUED_FOR_PARA;
 
+#define CTL_FIND_ANY       0
+#define CTL_FIND_SHA1_HASH 1
+#define CTL_FIND_MD5_HASH  2
+#define CTL_FIND_USAGE     3
+#define CTL_FIND_SUBJECT   4
+#define CTL_FIND_EXISTING  5
+
+typedef struct _CTL_FIND_USAGE_PARA
+{
+    DWORD           cbSize;
+    CTL_USAGE       SubjectUsage;
+    CRYPT_DATA_BLOB ListIdentifier;
+    PCERT_INFO      pSigner;
+} CTL_FIND_USAGE_PARA, *PCTL_FIND_USAGE_PARA;
+
+#define CTL_FIND_NO_LIST_ID_CBDATA 0xffffffff
+#define CTL_FIND_NO_SIGNER_PTR     ((PCERT_INFO)-1)
+#define CTL_FIND_SAME_USAGE_FLAG   0x00000001
+
+typedef struct _CTL_FIND_SUBJECT_PARA
+{
+    DWORD                cbSize;
+    PCTL_FIND_USAGE_PARA pUsagePara;
+    DWORD                dwSubjectType;
+    void                *pvSubject;
+} CTL_FIND_SUBJECT_PARA, *PCTL_FIND_SUBJECT_PARA;
+
 /* PFN_CERT_STORE_PROV_WRITE_CERT dwFlags values */
 #define CERT_STORE_PROV_WRITE_ADD_FLAG 0x1
 
@@ -2947,8 +2974,8 @@ typedef struct _CRL_FIND_ISSUED_FOR_PARA
 #endif
 #define szOID_REMOVE_CERTIFICATE             "1.3.6.1.4.1.311.10.8.1"
 #define szOID_CROSS_CERT_DIST_POINTS         "1.3.6.1.4.1.311.10.9.1"
-#define szOID_CTL                            "1.3.6.1.4.1.311.10.10.1"
-#define szOID_SORTED_CTL                     "1.3.6.1.4.1.311.10.10.1.1"
+#define szOID_CTL                            "1.3.6.1.4.1.311.10.1"
+#define szOID_SORTED_CTL                     "1.3.6.1.4.1.311.10.1.1"
 #define szOID_ANY_APPLICATION_POLICY         "1.3.6.1.4.1.311.10.12.1"
 #define szOID_RENEWAL_CERTIFICATE            "1.3.6.1.4.1.311.13.1"
 #define szOID_ENROLLMENT_NAME_VALUE_PAIR     "1.3.6.1.4.1.311.13.2.1"
@@ -3779,8 +3806,8 @@ WINADVAPI BOOL WINAPI CryptVerifySignatureW (HCRYPTHASH, CONST BYTE *, DWORD, HC
 #define               CryptVerifySignature WINELIB_NAME_AW(CryptVerifySignature)
 
 /* crypt32.dll functions */
-LPVOID WINAPI CryptMemAlloc(ULONG cbSize);
-LPVOID WINAPI CryptMemRealloc(LPVOID pv, ULONG cbSize);
+LPVOID WINAPI CryptMemAlloc(ULONG cbSize) __WINE_ALLOC_SIZE(1);
+LPVOID WINAPI CryptMemRealloc(LPVOID pv, ULONG cbSize) __WINE_ALLOC_SIZE(2);
 VOID   WINAPI CryptMemFree(LPVOID pv);
 
 BOOL WINAPI CryptBinaryToStringA(const BYTE *pbBinary,

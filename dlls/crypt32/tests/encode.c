@@ -4775,6 +4775,733 @@ static void test_decodeAuthorityKeyId2(DWORD dwEncoding)
     }
 }
 
+static const BYTE authorityInfoAccessWithUrl[] = {
+0x30,0x19,0x30,0x17,0x06,0x02,0x2a,0x03,0x86,0x11,0x68,0x74,0x74,0x70,0x3a,
+0x2f,0x2f,0x77,0x69,0x6e,0x65,0x68,0x71,0x2e,0x6f,0x72,0x67 };
+static const BYTE authorityInfoAccessWithUrlAndIPAddr[] = {
+0x30,0x29,0x30,0x17,0x06,0x02,0x2a,0x03,0x86,0x11,0x68,0x74,0x74,0x70,0x3a,
+0x2f,0x2f,0x77,0x69,0x6e,0x65,0x68,0x71,0x2e,0x6f,0x72,0x67,0x30,0x0e,0x06,
+0x02,0x2d,0x06,0x87,0x08,0x30,0x06,0x87,0x04,0x7f,0x00,0x00,0x01 };
+
+static void test_encodeAuthorityInfoAccess(DWORD dwEncoding)
+{
+    static char oid1[] = "1.2.3";
+    static char oid2[] = "1.5.6";
+    BOOL ret;
+    BYTE *buf = NULL;
+    DWORD size = 0;
+    CERT_ACCESS_DESCRIPTION accessDescription[2];
+    CERT_AUTHORITY_INFO_ACCESS aia;
+
+    memset(accessDescription, 0, sizeof(accessDescription));
+    aia.cAccDescr = 0;
+    aia.rgAccDescr = NULL;
+    /* Having no access descriptions is allowed */
+    ret = CryptEncodeObjectEx(dwEncoding, X509_AUTHORITY_INFO_ACCESS, &aia,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(emptySequence), "unexpected size %d\n", size);
+        ok(!memcmp(buf, emptySequence, size), "unexpected value\n");
+        LocalFree(buf);
+        buf = NULL;
+    }
+    /* It can't have an empty access method */
+    aia.cAccDescr = 1;
+    aia.rgAccDescr = accessDescription;
+    ret = CryptEncodeObjectEx(dwEncoding, X509_AUTHORITY_INFO_ACCESS, &aia,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(!ret && GetLastError() == E_INVALIDARG,
+     "expected E_INVALIDARG, got %08x\n", GetLastError());
+    /* It can't have an empty location */
+    accessDescription[0].pszAccessMethod = oid1;
+    SetLastError(0xdeadbeef);
+    ret = CryptEncodeObjectEx(dwEncoding, X509_AUTHORITY_INFO_ACCESS, &aia,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(!ret && GetLastError() == E_INVALIDARG,
+     "expected E_INVALIDARG, got %08x\n", GetLastError());
+    accessDescription[0].AccessLocation.dwAltNameChoice = CERT_ALT_NAME_URL;
+    U(accessDescription[0].AccessLocation).pwszURL = (LPWSTR)url;
+    ret = CryptEncodeObjectEx(dwEncoding, X509_AUTHORITY_INFO_ACCESS, &aia,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(authorityInfoAccessWithUrl), "unexpected size %d\n",
+         size);
+        ok(!memcmp(buf, authorityInfoAccessWithUrl, size),
+         "unexpected value\n");
+        LocalFree(buf);
+        buf = NULL;
+    }
+    accessDescription[1].pszAccessMethod = oid2;
+    accessDescription[1].AccessLocation.dwAltNameChoice =
+     CERT_ALT_NAME_IP_ADDRESS;
+    U(accessDescription[1].AccessLocation).IPAddress.cbData =
+     sizeof(encodedIPAddr);
+    U(accessDescription[1].AccessLocation).IPAddress.pbData =
+     (LPBYTE)encodedIPAddr;
+    aia.cAccDescr = 2;
+    ret = CryptEncodeObjectEx(dwEncoding, X509_AUTHORITY_INFO_ACCESS, &aia,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(authorityInfoAccessWithUrlAndIPAddr),
+         "unexpected size %d\n", size);
+        ok(!memcmp(buf, authorityInfoAccessWithUrlAndIPAddr, size),
+         "unexpected value\n");
+        LocalFree(buf);
+        buf = NULL;
+    }
+}
+
+static void compareAuthorityInfoAccess(LPCSTR header,
+ const CERT_AUTHORITY_INFO_ACCESS *expected,
+ const CERT_AUTHORITY_INFO_ACCESS *got)
+{
+    DWORD i;
+
+    ok(expected->cAccDescr == got->cAccDescr,
+     "%s: expected %d access descriptions, got %d\n", header,
+     expected->cAccDescr, got->cAccDescr);
+    for (i = 0; i < expected->cAccDescr; i++)
+    {
+        ok(!strcmp(expected->rgAccDescr[i].pszAccessMethod,
+         got->rgAccDescr[i].pszAccessMethod), "%s[%d]: expected %s, got %s\n",
+         header, i, expected->rgAccDescr[i].pszAccessMethod,
+         got->rgAccDescr[i].pszAccessMethod);
+        compareAltNameEntry(&expected->rgAccDescr[i].AccessLocation,
+         &got->rgAccDescr[i].AccessLocation);
+    }
+}
+
+static void test_decodeAuthorityInfoAccess(DWORD dwEncoding)
+{
+    static char oid1[] = "1.2.3";
+    static char oid2[] = "1.5.6";
+    BOOL ret;
+    LPBYTE buf = NULL;
+    DWORD size = 0;
+
+    ret = CryptDecodeObjectEx(dwEncoding, X509_AUTHORITY_INFO_ACCESS,
+     emptySequence, sizeof(emptySequence), CRYPT_DECODE_ALLOC_FLAG, NULL,
+     (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %x\n", GetLastError());
+    if (buf)
+    {
+        CERT_AUTHORITY_INFO_ACCESS aia = { 0, NULL };
+
+        compareAuthorityInfoAccess("empty AIA", &aia,
+         (CERT_AUTHORITY_INFO_ACCESS *)buf);
+        LocalFree(buf);
+        buf = NULL;
+    }
+    ret = CryptDecodeObjectEx(dwEncoding, X509_AUTHORITY_INFO_ACCESS,
+     authorityInfoAccessWithUrl, sizeof(authorityInfoAccessWithUrl),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %x\n", GetLastError());
+    if (buf)
+    {
+        CERT_ACCESS_DESCRIPTION accessDescription;
+        CERT_AUTHORITY_INFO_ACCESS aia;
+
+        accessDescription.pszAccessMethod = oid1;
+        accessDescription.AccessLocation.dwAltNameChoice = CERT_ALT_NAME_URL;
+        U(accessDescription.AccessLocation).pwszURL = (LPWSTR)url;
+        aia.cAccDescr = 1;
+        aia.rgAccDescr = &accessDescription;
+        compareAuthorityInfoAccess("AIA with URL", &aia,
+         (CERT_AUTHORITY_INFO_ACCESS *)buf);
+        LocalFree(buf);
+        buf = NULL;
+    }
+    ret = CryptDecodeObjectEx(dwEncoding, X509_AUTHORITY_INFO_ACCESS,
+     authorityInfoAccessWithUrlAndIPAddr,
+     sizeof(authorityInfoAccessWithUrlAndIPAddr), CRYPT_DECODE_ALLOC_FLAG,
+     NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %x\n", GetLastError());
+    if (buf)
+    {
+        CERT_ACCESS_DESCRIPTION accessDescription[2];
+        CERT_AUTHORITY_INFO_ACCESS aia;
+
+        accessDescription[0].pszAccessMethod = oid1;
+        accessDescription[0].AccessLocation.dwAltNameChoice = CERT_ALT_NAME_URL;
+        U(accessDescription[0].AccessLocation).pwszURL = (LPWSTR)url;
+        accessDescription[1].pszAccessMethod = oid2;
+        accessDescription[1].AccessLocation.dwAltNameChoice =
+         CERT_ALT_NAME_IP_ADDRESS;
+        U(accessDescription[1].AccessLocation).IPAddress.cbData =
+         sizeof(encodedIPAddr);
+        U(accessDescription[1].AccessLocation).IPAddress.pbData =
+         (LPBYTE)encodedIPAddr;
+        aia.cAccDescr = 2;
+        aia.rgAccDescr = accessDescription;
+        compareAuthorityInfoAccess("AIA with URL and IP addr", &aia,
+         (CERT_AUTHORITY_INFO_ACCESS *)buf);
+        LocalFree(buf);
+        buf = NULL;
+    }
+}
+
+static const BYTE emptyCTL[] = {
+0x30,0x17,0x30,0x00,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,0x31,0x30,
+0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x02,0x06,0x00 };
+static const BYTE emptyCTLWithVersion1[] = {
+0x30,0x1a,0x02,0x01,0x01,0x30,0x00,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,
+0x30,0x31,0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x02,0x06,0x00 };
+static const BYTE ctlWithUsageIdentifier[] = {
+0x30,0x1b,0x30,0x04,0x06,0x02,0x2a,0x03,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,
+0x31,0x30,0x31,0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x02,0x06,0x00 };
+static const BYTE ctlWithListIdentifier[] = {
+0x30,0x1a,0x30,0x00,0x04,0x01,0x01,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,
+0x30,0x31,0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x02,0x06,0x00 };
+static const BYTE ctlWithSequenceNumber[] = {
+0x30,0x1a,0x30,0x00,0x02,0x01,0x01,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,
+0x30,0x31,0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x02,0x06,0x00 };
+static const BYTE ctlWithThisUpdate[] = {
+0x30,0x15,0x30,0x00,0x17,0x0d,0x30,0x35,0x30,0x36,0x30,0x36,0x31,0x36,0x31,
+0x30,0x30,0x30,0x5a,0x30,0x02,0x06,0x00 };
+static const BYTE ctlWithThisAndNextUpdate[] = {
+0x30,0x24,0x30,0x00,0x17,0x0d,0x30,0x35,0x30,0x36,0x30,0x36,0x31,0x36,0x31,
+0x30,0x30,0x30,0x5a,0x17,0x0d,0x30,0x35,0x30,0x36,0x30,0x36,0x31,0x36,0x31,
+0x30,0x30,0x30,0x5a,0x30,0x02,0x06,0x00 };
+static const BYTE ctlWithAlgId[] = {
+0x30,0x1b,0x30,0x00,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,0x31,0x30,
+0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x06,0x06,0x02,0x2d,0x06,0x05,0x00 };
+static const BYTE ctlWithBogusEntry[] = {
+0x30,0x29,0x30,0x00,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,0x31,0x30,
+0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x02,0x06,0x00,0x30,0x10,0x30,0x0e,0x04,
+0x01,0x01,0x31,0x09,0x30,0x07,0x06,0x02,0x2a,0x03,0x31,0x01,0x01 };
+static const BYTE ctlWithOneEntry[] = {
+0x30,0x2a,0x30,0x00,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,0x31,0x30,
+0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x02,0x06,0x00,0x30,0x11,0x30,0x0f,0x04,
+0x01,0x01,0x31,0x0a,0x30,0x08,0x06,0x02,0x2a,0x03,0x31,0x02,0x30,0x00 };
+static const BYTE ctlWithTwoEntries[] = {
+0x30,0x41,0x30,0x00,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,0x31,0x30,
+0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x02,0x06,0x00,0x30,0x28,0x30,0x0f,0x04,
+0x01,0x01,0x31,0x0a,0x30,0x08,0x06,0x02,0x2a,0x03,0x31,0x02,0x30,0x00,0x30,
+0x15,0x04,0x01,0x01,0x31,0x10,0x30,0x0e,0x06,0x02,0x2d,0x06,0x31,0x08,0x30,
+0x06,0x87,0x04,0x7f,0x00,0x00,0x01 };
+
+static void test_encodeCTL(DWORD dwEncoding)
+{
+    static char oid1[] = "1.2.3";
+    static char oid2[] = "1.5.6";
+    char *pOid1 = oid1;
+    BOOL ret;
+    BYTE *buf = NULL;
+    DWORD size = 0;
+    CTL_INFO info;
+    SYSTEMTIME thisUpdate = { 2005, 6, 1, 6, 16, 10, 0, 0 };
+    CTL_ENTRY ctlEntry[2];
+    CRYPT_ATTRIBUTE attr1, attr2;
+    CRYPT_ATTR_BLOB value1, value2;
+
+    memset(&info, 0, sizeof(info));
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_CTL, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(emptyCTL), "unexpected size %d\n", size);
+        ok(!memcmp(buf, emptyCTL, size), "unexpected value\n");
+        LocalFree(buf);
+        buf = NULL;
+    }
+    info.dwVersion = 1;
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_CTL, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(emptyCTLWithVersion1), "unexpected size %d\n", size);
+        ok(!memcmp(buf, emptyCTLWithVersion1, size), "unexpected value\n");
+        LocalFree(buf);
+        buf = NULL;
+    }
+    info.dwVersion = 0;
+    info.SubjectUsage.cUsageIdentifier = 1;
+    info.SubjectUsage.rgpszUsageIdentifier = &pOid1;
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_CTL, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(ctlWithUsageIdentifier), "unexpected size %d\n",
+         size);
+        ok(!memcmp(buf, ctlWithUsageIdentifier, size), "unexpected value\n");
+        LocalFree(buf);
+        buf = NULL;
+    }
+    info.SubjectUsage.cUsageIdentifier = 0;
+    info.ListIdentifier.cbData = sizeof(serialNum);
+    info.ListIdentifier.pbData = (LPBYTE)serialNum;
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_CTL, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(ctlWithListIdentifier), "unexpected size %d\n", size);
+        ok(!memcmp(buf, ctlWithListIdentifier, size), "unexpected value\n");
+        LocalFree(buf);
+        buf = NULL;
+    }
+    info.ListIdentifier.cbData = 0;
+    info.SequenceNumber.cbData = sizeof(serialNum);
+    info.SequenceNumber.pbData = (LPBYTE)serialNum;
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_CTL, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(ctlWithSequenceNumber), "unexpected size %d\n",
+         size);
+        ok(!memcmp(buf, ctlWithSequenceNumber, size), "unexpected value\n");
+        LocalFree(buf);
+        buf = NULL;
+    }
+    info.SequenceNumber.cbData = 0;
+    SystemTimeToFileTime(&thisUpdate, &info.ThisUpdate);
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_CTL, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(ctlWithThisUpdate), "unexpected size %d\n", size);
+        ok(!memcmp(buf, ctlWithThisUpdate, size), "unexpected value\n");
+        LocalFree(buf);
+        buf = NULL;
+    }
+    SystemTimeToFileTime(&thisUpdate, &info.NextUpdate);
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_CTL, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(ctlWithThisAndNextUpdate), "unexpected size %d\n",
+         size);
+        ok(!memcmp(buf, ctlWithThisAndNextUpdate, size), "unexpected value\n");
+        LocalFree(buf);
+        buf = NULL;
+    }
+    info.ThisUpdate.dwLowDateTime = info.ThisUpdate.dwHighDateTime = 0;
+    info.NextUpdate.dwLowDateTime = info.NextUpdate.dwHighDateTime = 0;
+    info.SubjectAlgorithm.pszObjId = oid2;
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_CTL, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(ctlWithAlgId), "unexpected size %d\n", size);
+        ok(!memcmp(buf, ctlWithAlgId, size), "unexpected value\n");
+        LocalFree(buf);
+        buf = NULL;
+    }
+    /* The value is supposed to be asn.1 encoded, so this'll fail to decode
+     * (see tests below) but it'll encode fine.
+     */
+    info.SubjectAlgorithm.pszObjId = NULL;
+    value1.cbData = sizeof(serialNum);
+    value1.pbData = (LPBYTE)serialNum;
+    attr1.pszObjId = oid1;
+    attr1.cValue = 1;
+    attr1.rgValue = &value1;
+    ctlEntry[0].SubjectIdentifier.cbData = sizeof(serialNum);
+    ctlEntry[0].SubjectIdentifier.pbData = (LPBYTE)serialNum;
+    ctlEntry[0].cAttribute = 1;
+    ctlEntry[0].rgAttribute = &attr1;
+    info.cCTLEntry = 1;
+    info.rgCTLEntry = ctlEntry;
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_CTL, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(ctlWithBogusEntry), "unexpected size %d\n", size);
+        ok(!memcmp(buf, ctlWithBogusEntry, size), "unexpected value\n");
+        LocalFree(buf);
+        buf = NULL;
+    }
+    value1.cbData = sizeof(emptySequence);
+    value1.pbData = (LPBYTE)emptySequence;
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_CTL, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(ctlWithOneEntry), "unexpected size %d\n", size);
+        ok(!memcmp(buf, ctlWithOneEntry, size), "unexpected value\n");
+        LocalFree(buf);
+        buf = NULL;
+    }
+    value2.cbData = sizeof(encodedIPAddr);
+    value2.pbData = (LPBYTE)encodedIPAddr;
+    attr2.pszObjId = oid2;
+    attr2.cValue = 1;
+    attr2.rgValue = &value2;
+    ctlEntry[1].SubjectIdentifier.cbData = sizeof(serialNum);
+    ctlEntry[1].SubjectIdentifier.pbData = (LPBYTE)serialNum;
+    ctlEntry[1].cAttribute = 1;
+    ctlEntry[1].rgAttribute = &attr2;
+    info.cCTLEntry = 2;
+    ret = CryptEncodeObjectEx(dwEncoding, PKCS_CTL, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        ok(size == sizeof(ctlWithTwoEntries), "unexpected size %d\n", size);
+        ok(!memcmp(buf, ctlWithTwoEntries, size), "unexpected value\n");
+        LocalFree(buf);
+        buf = NULL;
+    }
+}
+
+static void compareCTLInfo(LPCSTR header, const CTL_INFO *expected,
+ const CTL_INFO *got)
+{
+    DWORD i, j, k;
+
+    ok(expected->dwVersion == got->dwVersion,
+     "%s: expected version %d, got %d\n", header, expected->dwVersion,
+     got->dwVersion);
+    ok(expected->SubjectUsage.cUsageIdentifier ==
+     got->SubjectUsage.cUsageIdentifier,
+     "%s: expected %d usage identifiers, got %d\n", header,
+     expected->SubjectUsage.cUsageIdentifier,
+     got->SubjectUsage.cUsageIdentifier);
+    for (i = 0; i < expected->SubjectUsage.cUsageIdentifier; i++)
+        ok(!strcmp(expected->SubjectUsage.rgpszUsageIdentifier[i],
+         got->SubjectUsage.rgpszUsageIdentifier[i]),
+         "%s[%d]: expected %s, got %s\n", header, i,
+         expected->SubjectUsage.rgpszUsageIdentifier[i],
+         got->SubjectUsage.rgpszUsageIdentifier[i]);
+    ok(expected->ListIdentifier.cbData == got->ListIdentifier.cbData,
+     "%s: expected list identifier of %d bytes, got %d\n", header,
+     expected->ListIdentifier.cbData, got->ListIdentifier.cbData);
+    if (expected->ListIdentifier.cbData)
+        ok(!memcmp(expected->ListIdentifier.pbData, got->ListIdentifier.pbData,
+         expected->ListIdentifier.cbData),
+         "%s: unexpected list identifier value\n", header);
+    ok(expected->SequenceNumber.cbData == got->SequenceNumber.cbData,
+     "%s: expected sequence number of %d bytes, got %d\n", header,
+     expected->SequenceNumber.cbData, got->SequenceNumber.cbData);
+    if (expected->SequenceNumber.cbData)
+        ok(!memcmp(expected->SequenceNumber.pbData, got->SequenceNumber.pbData,
+         expected->SequenceNumber.cbData),
+         "%s: unexpected sequence number value\n", header);
+    ok(!memcmp(&expected->ThisUpdate, &got->ThisUpdate, sizeof(FILETIME)),
+     "%s: expected this update = (%d, %d), got (%d, %d)\n", header,
+     expected->ThisUpdate.dwLowDateTime, expected->ThisUpdate.dwHighDateTime,
+     got->ThisUpdate.dwLowDateTime, got->ThisUpdate.dwHighDateTime);
+    ok(!memcmp(&expected->NextUpdate, &got->NextUpdate, sizeof(FILETIME)),
+     "%s: expected next update = (%d, %d), got (%d, %d)\n", header,
+     expected->NextUpdate.dwLowDateTime, expected->NextUpdate.dwHighDateTime,
+     got->NextUpdate.dwLowDateTime, got->NextUpdate.dwHighDateTime);
+    if (expected->SubjectAlgorithm.pszObjId &&
+     *expected->SubjectAlgorithm.pszObjId && !got->SubjectAlgorithm.pszObjId)
+        ok(0, "%s: expected subject algorithm %s, got NULL\n", header,
+         expected->SubjectAlgorithm.pszObjId);
+    if (expected->SubjectAlgorithm.pszObjId && got->SubjectAlgorithm.pszObjId)
+        ok(!strcmp(expected->SubjectAlgorithm.pszObjId,
+         got->SubjectAlgorithm.pszObjId),
+         "%s: expected subject algorithm %s, got %s\n", header,
+         expected->SubjectAlgorithm.pszObjId, got->SubjectAlgorithm.pszObjId);
+    ok(expected->SubjectAlgorithm.Parameters.cbData ==
+     got->SubjectAlgorithm.Parameters.cbData,
+     "%s: expected subject algorithm parameters of %d bytes, got %d\n", header,
+     expected->SubjectAlgorithm.Parameters.cbData,
+     got->SubjectAlgorithm.Parameters.cbData);
+    if (expected->SubjectAlgorithm.Parameters.cbData)
+        ok(!memcmp(expected->SubjectAlgorithm.Parameters.pbData,
+         got->SubjectAlgorithm.Parameters.pbData,
+         expected->SubjectAlgorithm.Parameters.cbData),
+         "%s: unexpected subject algorithm parameter value\n", header);
+    ok(expected->cCTLEntry == got->cCTLEntry,
+     "%s: expected %d CTL entries, got %d\n", header, expected->cCTLEntry,
+     got->cCTLEntry);
+    for (i = 0; i < expected->cCTLEntry; i++)
+    {
+        ok(expected->rgCTLEntry[i].SubjectIdentifier.cbData ==
+         got->rgCTLEntry[i].SubjectIdentifier.cbData,
+         "%s[%d]: expected subject identifier of %d bytes, got %d\n",
+         header, i, expected->rgCTLEntry[i].SubjectIdentifier.cbData,
+         got->rgCTLEntry[i].SubjectIdentifier.cbData);
+        if (expected->rgCTLEntry[i].SubjectIdentifier.cbData)
+            ok(!memcmp(expected->rgCTLEntry[i].SubjectIdentifier.pbData,
+             got->rgCTLEntry[i].SubjectIdentifier.pbData,
+             expected->rgCTLEntry[i].SubjectIdentifier.cbData),
+             "%s[%d]: unexpected subject identifier value\n",
+             header, i);
+        for (j = 0; j < expected->rgCTLEntry[i].cAttribute; j++)
+        {
+            ok(!strcmp(expected->rgCTLEntry[i].rgAttribute[j].pszObjId,
+             got->rgCTLEntry[i].rgAttribute[j].pszObjId),
+             "%s[%d][%d]: expected attribute OID %s, got %s\n", header, i, j,
+             expected->rgCTLEntry[i].rgAttribute[j].pszObjId,
+             got->rgCTLEntry[i].rgAttribute[j].pszObjId);
+            for (k = 0; k < expected->rgCTLEntry[i].rgAttribute[j].cValue; k++)
+            {
+                ok(expected->rgCTLEntry[i].rgAttribute[j].rgValue[k].cbData ==
+                 got->rgCTLEntry[i].rgAttribute[j].rgValue[k].cbData,
+                 "%s[%d][%d][%d]: expected value of %d bytes, got %d\n",
+                 header, i, j, k,
+                 expected->rgCTLEntry[i].rgAttribute[j].rgValue[k].cbData,
+                 got->rgCTLEntry[i].rgAttribute[j].rgValue[k].cbData);
+                if (expected->rgCTLEntry[i].rgAttribute[j].rgValue[k].cbData)
+                    ok(!memcmp(
+                     expected->rgCTLEntry[i].rgAttribute[j].rgValue[k].pbData,
+                     got->rgCTLEntry[i].rgAttribute[j].rgValue[k].pbData,
+                     expected->rgCTLEntry[i].rgAttribute[j].rgValue[k].cbData),
+                     "%s[%d][%d][%d]: unexpected value\n",
+                     header, i, j, k);
+            }
+        }
+    }
+    ok(expected->cExtension == got->cExtension,
+     "%s: expected %d extensions, got %d\n", header, expected->cExtension,
+     got->cExtension);
+    for (i = 0; i < expected->cExtension; i++)
+    {
+        ok(!strcmp(expected->rgExtension[i].pszObjId,
+         got->rgExtension[i].pszObjId), "%s[%d]: expected %s, got %s\n",
+         header, i, expected->rgExtension[i].pszObjId,
+         got->rgExtension[i].pszObjId);
+        ok(expected->rgExtension[i].fCritical == got->rgExtension[i].fCritical,
+         "%s[%d]: expected fCritical = %d, got %d\n", header, i,
+         expected->rgExtension[i].fCritical, got->rgExtension[i].fCritical);
+        ok(expected->rgExtension[i].Value.cbData ==
+         got->rgExtension[i].Value.cbData,
+         "%s[%d]: expected extension value to have %d bytes, got %d\n",
+         header, i, expected->rgExtension[i].Value.cbData,
+         got->rgExtension[i].Value.cbData);
+        if (expected->rgExtension[i].Value.cbData)
+            ok(!memcmp(expected->rgExtension[i].Value.pbData,
+             got->rgExtension[i].Value.pbData,
+             expected->rgExtension[i].Value.cbData),
+             "%s[%d]: unexpected extension value\n", header, i);
+    }
+}
+
+static const BYTE signedCTL[] = {
+0x30,0x81,0xc7,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x07,0x02,0xa0,
+0x81,0xb9,0x30,0x81,0xb6,0x02,0x01,0x01,0x31,0x0e,0x30,0x0c,0x06,0x08,0x2a,
+0x86,0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x30,0x28,0x06,0x09,0x2a,0x86,
+0x48,0x86,0xf7,0x0d,0x01,0x07,0x01,0xa0,0x1b,0x04,0x19,0x30,0x17,0x30,0x00,
+0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,0x31,0x30,0x30,0x30,0x30,0x30,
+0x30,0x5a,0x30,0x02,0x06,0x00,0x31,0x77,0x30,0x75,0x02,0x01,0x01,0x30,0x1a,
+0x30,0x15,0x31,0x13,0x30,0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,
+0x61,0x6e,0x20,0x4c,0x61,0x6e,0x67,0x00,0x02,0x01,0x01,0x30,0x0c,0x06,0x08,
+0x2a,0x86,0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x30,0x04,0x06,0x00,0x05,
+0x00,0x04,0x40,0xca,0xd8,0x32,0xd1,0xbd,0x97,0x61,0x54,0xd6,0x80,0xcf,0x0d,
+0xbd,0xa2,0x42,0xc7,0xca,0x37,0x91,0x7d,0x9d,0xac,0x8c,0xdf,0x05,0x8a,0x39,
+0xc6,0x07,0xc1,0x37,0xe6,0xb9,0xd1,0x0d,0x26,0xec,0xa5,0xb0,0x8a,0x51,0x26,
+0x2b,0x4f,0x73,0x44,0x86,0x83,0x5e,0x2b,0x6e,0xcc,0xf8,0x1b,0x85,0x53,0xe9,
+0x7a,0x80,0x8f,0x6b,0x42,0x19,0x93 };
+static const BYTE signedCTLWithCTLInnerContent[] = {
+0x30,0x82,0x01,0x0f,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x07,0x02,
+0xa0,0x82,0x01,0x00,0x30,0x81,0xfd,0x02,0x01,0x01,0x31,0x0e,0x30,0x0c,0x06,
+0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x30,0x30,0x06,0x09,
+0x2b,0x06,0x01,0x04,0x01,0x82,0x37,0x0a,0x01,0xa0,0x23,0x30,0x21,0x30,0x00,
+0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,0x31,0x30,0x30,0x30,0x30,0x30,
+0x30,0x5a,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,
+0x00,0x31,0x81,0xb5,0x30,0x81,0xb2,0x02,0x01,0x01,0x30,0x1a,0x30,0x15,0x31,
+0x13,0x30,0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,
+0x4c,0x61,0x6e,0x67,0x00,0x02,0x01,0x01,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,
+0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0xa0,0x3b,0x30,0x18,0x06,0x09,0x2a,0x86,
+0x48,0x86,0xf7,0x0d,0x01,0x09,0x03,0x31,0x0b,0x06,0x09,0x2b,0x06,0x01,0x04,
+0x01,0x82,0x37,0x0a,0x01,0x30,0x1f,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,
+0x01,0x09,0x04,0x31,0x12,0x04,0x10,0x54,0x71,0xbc,0xe1,0x56,0x31,0xa2,0xf9,
+0x65,0x70,0x34,0xf8,0xe2,0xe9,0xb4,0xf4,0x30,0x04,0x06,0x00,0x05,0x00,0x04,
+0x40,0x2f,0x1b,0x9f,0x5a,0x4a,0x15,0x73,0xfa,0xb1,0x93,0x3d,0x09,0x52,0xdf,
+0x6b,0x98,0x4b,0x13,0x5e,0xe7,0xbf,0x65,0xf4,0x9c,0xc2,0xb1,0x77,0x09,0xb1,
+0x66,0x4d,0x72,0x0d,0xb1,0x1a,0x50,0x20,0xe0,0x57,0xa2,0x39,0xc7,0xcd,0x7f,
+0x8e,0xe7,0x5f,0x76,0x2b,0xd1,0x6a,0x82,0xb3,0x30,0x25,0x61,0xf6,0x25,0x23,
+0x57,0x6c,0x0b,0x47,0xb8 };
+
+static void test_decodeCTL(DWORD dwEncoding)
+{
+    static char oid1[] = "1.2.3";
+    static char oid2[] = "1.5.6";
+    static BYTE nullData[] = { 5,0 };
+    char *pOid1 = oid1;
+    BOOL ret;
+    BYTE *buf = NULL;
+    DWORD size = 0;
+    CTL_INFO info;
+    SYSTEMTIME thisUpdate = { 2005, 6, 1, 6, 16, 10, 0, 0 };
+    CTL_ENTRY ctlEntry[2];
+    CRYPT_ATTRIBUTE attr1, attr2;
+    CRYPT_ATTR_BLOB value1, value2;
+
+    memset(&info, 0, sizeof(info));
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_CTL, emptyCTL, sizeof(emptyCTL),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        compareCTLInfo("empty CTL", &info, (CTL_INFO *)buf);
+        LocalFree(buf);
+        buf = NULL;
+    }
+    info.dwVersion = 1;
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_CTL, emptyCTLWithVersion1,
+     sizeof(emptyCTLWithVersion1), CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf,
+     &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        compareCTLInfo("v1 CTL", &info, (CTL_INFO *)buf);
+        LocalFree(buf);
+        buf = NULL;
+    }
+    info.dwVersion = 0;
+    info.SubjectUsage.cUsageIdentifier = 1;
+    info.SubjectUsage.rgpszUsageIdentifier = &pOid1;
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_CTL, ctlWithUsageIdentifier,
+     sizeof(ctlWithUsageIdentifier), CRYPT_DECODE_ALLOC_FLAG, NULL,
+     (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        compareCTLInfo("CTL with usage identifier", &info, (CTL_INFO *)buf);
+        LocalFree(buf);
+        buf = NULL;
+    }
+    info.SubjectUsage.cUsageIdentifier = 0;
+    info.ListIdentifier.cbData = sizeof(serialNum);
+    info.ListIdentifier.pbData = (LPBYTE)serialNum;
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_CTL, ctlWithListIdentifier,
+     sizeof(ctlWithListIdentifier), CRYPT_DECODE_ALLOC_FLAG, NULL,
+     (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        compareCTLInfo("CTL with list identifier", &info, (CTL_INFO *)buf);
+        LocalFree(buf);
+        buf = NULL;
+    }
+    info.ListIdentifier.cbData = 0;
+    info.SequenceNumber.cbData = sizeof(serialNum);
+    info.SequenceNumber.pbData = (LPBYTE)serialNum;
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_CTL, ctlWithSequenceNumber,
+     sizeof(ctlWithSequenceNumber), CRYPT_DECODE_ALLOC_FLAG, NULL,
+     (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        compareCTLInfo("CTL with sequence number", &info, (CTL_INFO *)buf);
+        LocalFree(buf);
+        buf = NULL;
+    }
+    info.SequenceNumber.cbData = 0;
+    SystemTimeToFileTime(&thisUpdate, &info.ThisUpdate);
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_CTL, ctlWithThisUpdate,
+     sizeof(ctlWithThisUpdate), CRYPT_DECODE_ALLOC_FLAG, NULL,
+     (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        compareCTLInfo("CTL with this update", &info, (CTL_INFO *)buf);
+        LocalFree(buf);
+        buf = NULL;
+    }
+    SystemTimeToFileTime(&thisUpdate, &info.NextUpdate);
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_CTL, ctlWithThisAndNextUpdate,
+     sizeof(ctlWithThisAndNextUpdate), CRYPT_DECODE_ALLOC_FLAG, NULL,
+     (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        compareCTLInfo("CTL with this and next update", &info, (CTL_INFO *)buf);
+        LocalFree(buf);
+        buf = NULL;
+    }
+    info.ThisUpdate.dwLowDateTime = info.ThisUpdate.dwHighDateTime = 0;
+    info.NextUpdate.dwLowDateTime = info.NextUpdate.dwHighDateTime = 0;
+    info.SubjectAlgorithm.pszObjId = oid2;
+    info.SubjectAlgorithm.Parameters.cbData = sizeof(nullData);
+    info.SubjectAlgorithm.Parameters.pbData = nullData;
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_CTL, ctlWithAlgId,
+     sizeof(ctlWithAlgId), CRYPT_DECODE_ALLOC_FLAG, NULL,
+     (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        compareCTLInfo("CTL with algorithm identifier", &info, (CTL_INFO *)buf);
+        LocalFree(buf);
+        buf = NULL;
+    }
+    SetLastError(0xdeadbeef);
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_CTL, ctlWithBogusEntry,
+     sizeof(ctlWithBogusEntry), CRYPT_DECODE_ALLOC_FLAG, NULL,
+     (BYTE *)&buf, &size);
+    ok(!ret && (GetLastError() == CRYPT_E_ASN1_EOD || CRYPT_E_ASN1_CORRUPT),
+     "expected CRYPT_E_ASN1_EOD or CRYPT_E_ASN1_CORRUPT, got %08x\n",
+     GetLastError());
+    info.SubjectAlgorithm.Parameters.cbData = 0;
+    info.ThisUpdate.dwLowDateTime = info.ThisUpdate.dwHighDateTime = 0;
+    info.NextUpdate.dwLowDateTime = info.NextUpdate.dwHighDateTime = 0;
+    info.SubjectAlgorithm.pszObjId = oid2;
+    info.SubjectAlgorithm.pszObjId = NULL;
+    value1.cbData = sizeof(emptySequence);
+    value1.pbData = (LPBYTE)emptySequence;
+    attr1.pszObjId = oid1;
+    attr1.cValue = 1;
+    attr1.rgValue = &value1;
+    ctlEntry[0].SubjectIdentifier.cbData = sizeof(serialNum);
+    ctlEntry[0].SubjectIdentifier.pbData = (LPBYTE)serialNum;
+    ctlEntry[0].cAttribute = 1;
+    ctlEntry[0].rgAttribute = &attr1;
+    info.cCTLEntry = 1;
+    info.rgCTLEntry = ctlEntry;
+    SetLastError(0xdeadbeef);
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_CTL, ctlWithOneEntry,
+     sizeof(ctlWithOneEntry), CRYPT_DECODE_ALLOC_FLAG, NULL,
+     (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        compareCTLInfo("CTL with one entry", &info, (CTL_INFO *)buf);
+        LocalFree(buf);
+        buf = NULL;
+    }
+    value2.cbData = sizeof(encodedIPAddr);
+    value2.pbData = (LPBYTE)encodedIPAddr;
+    attr2.pszObjId = oid2;
+    attr2.cValue = 1;
+    attr2.rgValue = &value2;
+    ctlEntry[1].SubjectIdentifier.cbData = sizeof(serialNum);
+    ctlEntry[1].SubjectIdentifier.pbData = (LPBYTE)serialNum;
+    ctlEntry[1].cAttribute = 1;
+    ctlEntry[1].rgAttribute = &attr2;
+    info.cCTLEntry = 2;
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_CTL, ctlWithTwoEntries,
+     sizeof(ctlWithTwoEntries), CRYPT_DECODE_ALLOC_FLAG, NULL,
+     (BYTE *)&buf, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (buf)
+    {
+        compareCTLInfo("CTL with two entries", &info, (CTL_INFO *)buf);
+        LocalFree(buf);
+        buf = NULL;
+    }
+    /* A signed CTL isn't decodable, even if the inner content is a CTL */
+    SetLastError(0xdeadbeef);
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_CTL, signedCTL,
+     sizeof(signedCTL), CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(!ret && GetLastError() == CRYPT_E_ASN1_BADTAG,
+     "expected CRYPT_E_ASN1_BADTAG, got %08x\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = CryptDecodeObjectEx(dwEncoding, PKCS_CTL,
+     signedCTLWithCTLInnerContent, sizeof(signedCTLWithCTLInnerContent),
+     CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(!ret && GetLastError() == CRYPT_E_ASN1_BADTAG,
+     "expected CRYPT_E_ASN1_BADTAG, got %08x\n", GetLastError());
+}
+
 static const BYTE emptyPKCSContentInfo[] = { 0x30,0x04,0x06,0x02,0x2a,0x03 };
 static const BYTE emptyPKCSContentInfoExtraBytes[] = { 0x30,0x04,0x06,0x02,0x2a,
  0x03,0,0,0,0,0,0 };
@@ -5660,16 +6387,17 @@ static void test_encodeCMSSignerInfo(DWORD dwEncoding)
     SetLastError(0xdeadbeef);
     ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
      CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
-    ok(!ret && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+    ok(!ret, "Expected failure, got %d\n", ret);
+    ok(GetLastError() == E_INVALIDARG,
+       "Expected E_INVALIDARG, got %08x\n", GetLastError());
     /* To be encoded, a signer must have a valid cert ID, where a valid ID may
      * be a key id or a issuer serial number with at least the issuer set, and
      * the encoding must include PKCS_7_ASN_ENCODING.
      * (That isn't enough to be decoded, see decoding tests.)
      */
-    info.SignerId.IssuerSerialNumber.Issuer.cbData =
+    U(info.SignerId).IssuerSerialNumber.Issuer.cbData =
      sizeof(encodedCommonNameNoNull);
-    info.SignerId.IssuerSerialNumber.Issuer.pbData = encodedCommonNameNoNull;
+    U(info.SignerId).IssuerSerialNumber.Issuer.pbData = encodedCommonNameNoNull;
     SetLastError(0xdeadbeef);
     ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
      CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
@@ -5686,8 +6414,8 @@ static void test_encodeCMSSignerInfo(DWORD dwEncoding)
             LocalFree(buf);
         }
     }
-    info.SignerId.IssuerSerialNumber.SerialNumber.cbData = sizeof(serialNum);
-    info.SignerId.IssuerSerialNumber.SerialNumber.pbData = (BYTE *)serialNum;
+    U(info.SignerId).IssuerSerialNumber.SerialNumber.cbData = sizeof(serialNum);
+    U(info.SignerId).IssuerSerialNumber.SerialNumber.pbData = (BYTE *)serialNum;
     SetLastError(0xdeadbeef);
     ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
      CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
@@ -5706,8 +6434,8 @@ static void test_encodeCMSSignerInfo(DWORD dwEncoding)
         }
     }
     info.SignerId.dwIdChoice = CERT_ID_KEY_IDENTIFIER;
-    info.SignerId.KeyId.cbData = sizeof(serialNum);
-    info.SignerId.KeyId.pbData = (BYTE *)serialNum;
+    U(info.SignerId).KeyId.cbData = sizeof(serialNum);
+    U(info.SignerId).KeyId.pbData = (BYTE *)serialNum;
     SetLastError(0xdeadbeef);
     ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
      CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
@@ -5730,8 +6458,8 @@ static void test_encodeCMSSignerInfo(DWORD dwEncoding)
      * (see RFC 3852, section 5.3.)
      */
     info.SignerId.dwIdChoice = CERT_ID_SHA1_HASH;
-    info.SignerId.HashId.cbData = sizeof(hash);
-    info.SignerId.HashId.pbData = (BYTE *)hash;
+    U(info.SignerId).HashId.cbData = sizeof(hash);
+    U(info.SignerId).HashId.pbData = (BYTE *)hash;
     SetLastError(0xdeadbeef);
     ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
      CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
@@ -5739,9 +6467,9 @@ static void test_encodeCMSSignerInfo(DWORD dwEncoding)
      "Expected E_INVALIDARG, got %08x\n", GetLastError());
     /* Now with a hash algo */
     info.SignerId.dwIdChoice = CERT_ID_ISSUER_SERIAL_NUMBER;
-    info.SignerId.IssuerSerialNumber.Issuer.cbData =
+    U(info.SignerId).IssuerSerialNumber.Issuer.cbData =
      sizeof(encodedCommonNameNoNull);
-    info.SignerId.IssuerSerialNumber.Issuer.pbData = encodedCommonNameNoNull;
+    U(info.SignerId).IssuerSerialNumber.Issuer.pbData = encodedCommonNameNoNull;
     info.HashAlgorithm.pszObjId = oid1;
     SetLastError(0xdeadbeef);
     ret = CryptEncodeObjectEx(dwEncoding, CMS_SIGNER_INFO, &info,
@@ -5828,17 +6556,17 @@ static void test_decodeCMSSignerInfo(DWORD dwEncoding)
         ok(info->SignerId.dwIdChoice == CERT_ID_ISSUER_SERIAL_NUMBER,
          "Expected CERT_ID_ISSUER_SERIAL_NUMBER, got %d\n",
          info->SignerId.dwIdChoice);
-        ok(info->SignerId.IssuerSerialNumber.Issuer.cbData ==
+        ok(U(info->SignerId).IssuerSerialNumber.Issuer.cbData ==
          sizeof(encodedCommonNameNoNull), "Unexpected size %d\n",
-         info->SignerId.IssuerSerialNumber.Issuer.cbData);
-        ok(!memcmp(info->SignerId.IssuerSerialNumber.Issuer.pbData,
+         U(info->SignerId).IssuerSerialNumber.Issuer.cbData);
+        ok(!memcmp(U(info->SignerId).IssuerSerialNumber.Issuer.pbData,
          encodedCommonNameNoNull,
-         info->SignerId.IssuerSerialNumber.Issuer.cbData),
+         U(info->SignerId).IssuerSerialNumber.Issuer.cbData),
          "Unexpected value\n");
-        ok(info->SignerId.IssuerSerialNumber.SerialNumber.cbData ==
+        ok(U(info->SignerId).IssuerSerialNumber.SerialNumber.cbData ==
          sizeof(serialNum), "Unexpected size %d\n",
-         info->SignerId.IssuerSerialNumber.SerialNumber.cbData);
-        ok(!memcmp(info->SignerId.IssuerSerialNumber.SerialNumber.pbData,
+         U(info->SignerId).IssuerSerialNumber.SerialNumber.cbData);
+        ok(!memcmp(U(info->SignerId).IssuerSerialNumber.SerialNumber.pbData,
          serialNum, sizeof(serialNum)), "Unexpected value\n");
         LocalFree(buf);
     }
@@ -5854,17 +6582,17 @@ static void test_decodeCMSSignerInfo(DWORD dwEncoding)
         ok(info->SignerId.dwIdChoice == CERT_ID_ISSUER_SERIAL_NUMBER,
          "Expected CERT_ID_ISSUER_SERIAL_NUMBER, got %d\n",
          info->SignerId.dwIdChoice);
-        ok(info->SignerId.IssuerSerialNumber.Issuer.cbData ==
+        ok(U(info->SignerId).IssuerSerialNumber.Issuer.cbData ==
          sizeof(encodedCommonNameNoNull), "Unexpected size %d\n",
-         info->SignerId.IssuerSerialNumber.Issuer.cbData);
-        ok(!memcmp(info->SignerId.IssuerSerialNumber.Issuer.pbData,
+         U(info->SignerId).IssuerSerialNumber.Issuer.cbData);
+        ok(!memcmp(U(info->SignerId).IssuerSerialNumber.Issuer.pbData,
          encodedCommonNameNoNull,
-         info->SignerId.IssuerSerialNumber.Issuer.cbData),
+         U(info->SignerId).IssuerSerialNumber.Issuer.cbData),
          "Unexpected value\n");
-        ok(info->SignerId.IssuerSerialNumber.SerialNumber.cbData ==
+        ok(U(info->SignerId).IssuerSerialNumber.SerialNumber.cbData ==
          sizeof(serialNum), "Unexpected size %d\n",
-         info->SignerId.IssuerSerialNumber.SerialNumber.cbData);
-        ok(!memcmp(info->SignerId.IssuerSerialNumber.SerialNumber.pbData,
+         U(info->SignerId).IssuerSerialNumber.SerialNumber.cbData);
+        ok(!memcmp(U(info->SignerId).IssuerSerialNumber.SerialNumber.pbData,
          serialNum, sizeof(serialNum)), "Unexpected value\n");
         ok(!strcmp(info->HashAlgorithm.pszObjId, oid1),
          "Expected %s, got %s\n", oid1, info->HashAlgorithm.pszObjId);
@@ -5883,17 +6611,17 @@ static void test_decodeCMSSignerInfo(DWORD dwEncoding)
         ok(info->SignerId.dwIdChoice == CERT_ID_ISSUER_SERIAL_NUMBER,
          "Expected CERT_ID_ISSUER_SERIAL_NUMBER, got %d\n",
          info->SignerId.dwIdChoice);
-        ok(info->SignerId.IssuerSerialNumber.Issuer.cbData ==
+        ok(U(info->SignerId).IssuerSerialNumber.Issuer.cbData ==
          sizeof(encodedCommonNameNoNull), "Unexpected size %d\n",
-         info->SignerId.IssuerSerialNumber.Issuer.cbData);
-        ok(!memcmp(info->SignerId.IssuerSerialNumber.Issuer.pbData,
+         U(info->SignerId).IssuerSerialNumber.Issuer.cbData);
+        ok(!memcmp(U(info->SignerId).IssuerSerialNumber.Issuer.pbData,
          encodedCommonNameNoNull,
-         info->SignerId.IssuerSerialNumber.Issuer.cbData),
+         U(info->SignerId).IssuerSerialNumber.Issuer.cbData),
          "Unexpected value\n");
-        ok(info->SignerId.IssuerSerialNumber.SerialNumber.cbData ==
+        ok(U(info->SignerId).IssuerSerialNumber.SerialNumber.cbData ==
          sizeof(serialNum), "Unexpected size %d\n",
-         info->SignerId.IssuerSerialNumber.SerialNumber.cbData);
-        ok(!memcmp(info->SignerId.IssuerSerialNumber.SerialNumber.pbData,
+         U(info->SignerId).IssuerSerialNumber.SerialNumber.cbData);
+        ok(!memcmp(U(info->SignerId).IssuerSerialNumber.SerialNumber.pbData,
          serialNum, sizeof(serialNum)), "Unexpected value\n");
         ok(!strcmp(info->HashAlgorithm.pszObjId, oid1),
          "Expected %s, got %s\n", oid1, info->HashAlgorithm.pszObjId);
@@ -5913,17 +6641,17 @@ static void test_decodeCMSSignerInfo(DWORD dwEncoding)
         ok(info->SignerId.dwIdChoice == CERT_ID_ISSUER_SERIAL_NUMBER,
          "Expected CERT_ID_ISSUER_SERIAL_NUMBER, got %d\n",
          info->SignerId.dwIdChoice);
-        ok(info->SignerId.IssuerSerialNumber.Issuer.cbData ==
+        ok(U(info->SignerId).IssuerSerialNumber.Issuer.cbData ==
          sizeof(encodedCommonNameNoNull), "Unexpected size %d\n",
-         info->SignerId.IssuerSerialNumber.Issuer.cbData);
-        ok(!memcmp(info->SignerId.IssuerSerialNumber.Issuer.pbData,
+         U(info->SignerId).IssuerSerialNumber.Issuer.cbData);
+        ok(!memcmp(U(info->SignerId).IssuerSerialNumber.Issuer.pbData,
          encodedCommonNameNoNull,
-         info->SignerId.IssuerSerialNumber.Issuer.cbData),
+         U(info->SignerId).IssuerSerialNumber.Issuer.cbData),
          "Unexpected value\n");
-        ok(info->SignerId.IssuerSerialNumber.SerialNumber.cbData ==
+        ok(U(info->SignerId).IssuerSerialNumber.SerialNumber.cbData ==
          sizeof(serialNum), "Unexpected size %d\n",
-         info->SignerId.IssuerSerialNumber.SerialNumber.cbData);
-        ok(!memcmp(info->SignerId.IssuerSerialNumber.SerialNumber.pbData,
+         U(info->SignerId).IssuerSerialNumber.SerialNumber.cbData);
+        ok(!memcmp(U(info->SignerId).IssuerSerialNumber.SerialNumber.pbData,
          serialNum, sizeof(serialNum)), "Unexpected value\n");
         ok(!strcmp(info->HashAlgorithm.pszObjId, oid1),
          "Expected %s, got %s\n", oid1, info->HashAlgorithm.pszObjId);
@@ -5947,9 +6675,9 @@ static void test_decodeCMSSignerInfo(DWORD dwEncoding)
         ok(info->SignerId.dwIdChoice == CERT_ID_KEY_IDENTIFIER,
          "Expected CERT_ID_KEY_IDENTIFIER, got %d\n",
          info->SignerId.dwIdChoice);
-        ok(info->SignerId.KeyId.cbData == sizeof(serialNum),
-         "Unexpected size %d\n", info->SignerId.KeyId.cbData);
-        ok(!memcmp(info->SignerId.KeyId.pbData, serialNum, sizeof(serialNum)),
+        ok(U(info->SignerId).KeyId.cbData == sizeof(serialNum),
+         "Unexpected size %d\n", U(info->SignerId).KeyId.cbData);
+        ok(!memcmp(U(info->SignerId).KeyId.pbData, serialNum, sizeof(serialNum)),
          "Unexpected value\n");
         LocalFree(buf);
     }
@@ -6433,6 +7161,10 @@ START_TEST(encode)
         test_decodeAuthorityKeyId(encodings[i]);
         test_encodeAuthorityKeyId2(encodings[i]);
         test_decodeAuthorityKeyId2(encodings[i]);
+        test_encodeAuthorityInfoAccess(encodings[i]);
+        test_decodeAuthorityInfoAccess(encodings[i]);
+        test_encodeCTL(encodings[i]);
+        test_decodeCTL(encodings[i]);
         test_encodePKCSContentInfo(encodings[i]);
         test_decodePKCSContentInfo(encodings[i]);
         test_encodePKCSAttribute(encodings[i]);

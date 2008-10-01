@@ -33,6 +33,7 @@
 #include "objidl.h"
 #include "winnls.h"
 #include "wine/list.h"
+#include "wine/debug.h"
 
 #define MSI_DATASIZEMASK 0x00ff
 #define MSITYPE_VALID    0x0100
@@ -655,8 +656,6 @@ extern HRESULT msi_init_string_table( IStorage *stg );
 extern string_table *msi_load_string_table( IStorage *stg, UINT *bytes_per_strref );
 extern UINT msi_save_string_table( const string_table *st, IStorage *storage );
 
-
-extern void msi_table_set_strref(UINT bytes_per_strref);
 extern BOOL TABLE_Exists( MSIDATABASE *db, LPCWSTR name );
 extern MSICONDITION MSI_DatabaseIsTablePersistent( MSIDATABASE *db, LPCWSTR table );
 
@@ -853,15 +852,63 @@ extern UINT ACTION_PerformUIAction(MSIPACKAGE *package, const WCHAR *action, UIN
 extern void ACTION_FinishCustomActions( const MSIPACKAGE* package);
 extern UINT ACTION_CustomAction(MSIPACKAGE *package,const WCHAR *action, UINT script, BOOL execute);
 
-static inline void msi_feature_set_state( MSIFEATURE *feature, INSTALLSTATE state )
+static inline void msi_feature_set_state(MSIPACKAGE *package,
+                                         MSIFEATURE *feature,
+                                         INSTALLSTATE state)
 {
-    feature->ActionRequest = state;
-    feature->Action = state;
+    if (!package->ProductCode)
+    {
+        feature->ActionRequest = state;
+        feature->Action = state;
+    }
+    else if (state == INSTALLSTATE_ABSENT)
+    {
+        switch (feature->Installed)
+        {
+            case INSTALLSTATE_ABSENT:
+                feature->ActionRequest = INSTALLSTATE_UNKNOWN;
+                feature->Action = INSTALLSTATE_UNKNOWN;
+                break;
+            default:
+                feature->ActionRequest = state;
+                feature->Action = state;
+        }
+    }
+    else if (state == INSTALLSTATE_SOURCE)
+    {
+        switch (feature->Installed)
+        {
+            case INSTALLSTATE_ABSENT:
+            case INSTALLSTATE_SOURCE:
+                feature->ActionRequest = state;
+                feature->Action = state;
+                break;
+            case INSTALLSTATE_LOCAL:
+                feature->ActionRequest = INSTALLSTATE_LOCAL;
+                feature->Action = INSTALLSTATE_LOCAL;
+                break;
+            default:
+                feature->ActionRequest = INSTALLSTATE_UNKNOWN;
+                feature->Action = INSTALLSTATE_UNKNOWN;
+        }
+    }
+    else
+    {
+        feature->ActionRequest = state;
+        feature->Action = state;
+    }
 }
 
-static inline void msi_component_set_state( MSICOMPONENT *comp, INSTALLSTATE state )
+static inline void msi_component_set_state(MSIPACKAGE *package,
+                                           MSICOMPONENT *comp,
+                                           INSTALLSTATE state)
 {
-    if (state == INSTALLSTATE_ABSENT)
+    if (!package->ProductCode)
+    {
+        comp->ActionRequest = state;
+        comp->Action = state;
+    }
+    else if (state == INSTALLSTATE_ABSENT)
     {
         switch (comp->Installed)
         {
@@ -878,16 +925,16 @@ static inline void msi_component_set_state( MSICOMPONENT *comp, INSTALLSTATE sta
     }
     else if (state == INSTALLSTATE_SOURCE)
     {
-        switch (comp->Installed)
+        if (comp->Installed == INSTALLSTATE_ABSENT ||
+            (comp->Installed == INSTALLSTATE_SOURCE && comp->hasLocalFeature))
         {
-            case INSTALLSTATE_ABSENT:
-            case INSTALLSTATE_SOURCE:
-                comp->ActionRequest = state;
-                comp->Action = state;
-                break;
-            default:
-                comp->ActionRequest = INSTALLSTATE_UNKNOWN;
-                comp->Action = INSTALLSTATE_UNKNOWN;
+            comp->ActionRequest = state;
+            comp->Action = state;
+        }
+        else
+        {
+            comp->ActionRequest = INSTALLSTATE_UNKNOWN;
+            comp->Action = INSTALLSTATE_UNKNOWN;
         }
     }
     else
@@ -993,21 +1040,25 @@ extern const WCHAR cszRootDrive[];
 extern const WCHAR cszbs[];
 
 /* memory allocation macro functions */
+static void *msi_alloc( size_t len ) __WINE_ALLOC_SIZE(1);
 static inline void *msi_alloc( size_t len )
 {
     return HeapAlloc( GetProcessHeap(), 0, len );
 }
 
+static void *msi_alloc_zero( size_t len ) __WINE_ALLOC_SIZE(1);
 static inline void *msi_alloc_zero( size_t len )
 {
     return HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, len );
 }
 
+static void *msi_realloc( void *mem, size_t len ) __WINE_ALLOC_SIZE(2);
 static inline void *msi_realloc( void *mem, size_t len )
 {
     return HeapReAlloc( GetProcessHeap(), 0, mem, len );
 }
 
+static void *msi_realloc_zero( void *mem, size_t len ) __WINE_ALLOC_SIZE(2);
 static inline void *msi_realloc_zero( void *mem, size_t len )
 {
     return HeapReAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, mem, len );

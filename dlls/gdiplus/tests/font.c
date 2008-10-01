@@ -41,12 +41,13 @@ static const char *debugstr_w(LPCWSTR str)
 
 static void test_createfont(void)
 {
-    GpFontFamily* fontfamily = NULL;
+    GpFontFamily* fontfamily = NULL, *fontfamily2;
     GpFont* font = NULL;
     GpStatus stat;
     Unit unit;
     UINT i;
     REAL size;
+    WCHAR familyname[LF_FACESIZE];
 
     stat = GdipCreateFontFamilyFromName(nonexistent, NULL, &fontfamily);
     expect (FontFamilyNotFound, stat);
@@ -64,6 +65,15 @@ static void test_createfont(void)
     stat = GdipGetFontUnit (font, &unit);
     expect (Ok, stat);
     expect (UnitPoint, unit);
+
+    stat = GdipGetFamily(font, &fontfamily2);
+    expect(Ok, stat);
+    stat = GdipGetFamilyName(fontfamily2, familyname, 0);
+    expect(Ok, stat);
+    ok (lstrcmpiW(arial, familyname) == 0, "Expected arial, got %s\n",
+            debugstr_w(familyname));
+    stat = GdipDeleteFontFamily(fontfamily2);
+    expect(Ok, stat);
 
     /* Test to see if returned size is based on unit (its not) */
     GdipGetFontSize(font, &size);
@@ -92,6 +102,7 @@ static void test_logfont(void)
     GpStatus stat;
     GpGraphics *graphics;
     HDC hdc = GetDC(0);
+    INT style;
 
     GdipCreateFromHDC(hdc, &graphics);
     memset(&lfw, 0, sizeof(LOGFONTW));
@@ -101,9 +112,7 @@ static void test_logfont(void)
     lfw.lfFaceName[0] = 0;
     stat = GdipCreateFontFromLogfontW(hdc, &lfw, &font);
 
-todo_wine {
     expect(NotTrueTypeFont, stat);
-}
 
     memcpy(&lfw.lfFaceName, arial, 6 * sizeof(WCHAR));
 
@@ -160,6 +169,11 @@ todo_wine {
     expect(0, lfw2.lfClipPrecision);
     expect(0, lfw2.lfQuality);
     expect(0, lfw2.lfPitchAndFamily);
+
+    stat = GdipGetFontStyle(font, &style);
+    expect(Ok, stat);
+    ok (style == (FontStyleItalic | FontStyleUnderline | FontStyleStrikeout),
+            "Expected , got %d\n", style);
 
     GdipDeleteFont(font);
 

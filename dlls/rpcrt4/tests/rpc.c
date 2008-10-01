@@ -328,7 +328,9 @@ static void test_towers(void)
     BOOL same;
 
     ret = TowerConstruct(&mapi_if_id, &ndr_syntax, "ncacn_ip_tcp", "135", "10.0.0.1", &tower);
-    ok(ret == RPC_S_OK, "TowerConstruct failed with error %ld\n", ret);
+    ok(ret == RPC_S_OK ||
+       broken(ret == RPC_S_INVALID_RPC_PROTSEQ), /* Vista */
+       "TowerConstruct failed with error %ld\n", ret);
     if (ret == RPC_S_INVALID_RPC_PROTSEQ)
     {
         /* Windows Vista fails with this error and crashes if we continue */
@@ -704,8 +706,16 @@ static void test_endpoint_mapper(RPC_CSTR protseq, RPC_CSTR address,
 
     RpcStringFree(&binding);
 
+    status = RpcBindingReset(handle);
+    ok(status == RPC_S_OK, "%s: RpcBindingReset failed with error %lu\n", protseq, status);
+
+    RpcStringFree(&binding);
+
     status = RpcEpResolveBinding(handle, IFoo_v0_0_s_ifspec);
     ok(status == RPC_S_OK, "%s: RpcEpResolveBinding failed with error %lu\n", protseq, status);
+
+    status = RpcBindingReset(handle);
+    ok(status == RPC_S_OK, "%s: RpcBindingReset failed with error %lu\n", protseq, status);
 
     status = RpcBindingFree(&handle);
     ok(status == RPC_S_OK, "%s: RpcBindingFree failed with error %lu\n", protseq, status);

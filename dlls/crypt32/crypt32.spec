@@ -38,7 +38,7 @@
 @ stdcall CertEnumSystemStore(long ptr ptr ptr)
 @ stdcall CertFindAttribute(str long ptr)
 @ stdcall CertFindCRLInStore(long long long long ptr ptr)
-@ stub CertFindCTLInStore
+@ stdcall CertFindCTLInStore(long long long long ptr ptr)
 @ stdcall CertFindCertificateInStore(long long long long ptr ptr)
 @ stdcall CertFindCertificateInCRL(ptr ptr long ptr ptr)
 @ stdcall CertFindExtension(str long ptr)
@@ -185,7 +185,7 @@
 @ stub CryptUnregisterOIDInfo
 @ stdcall CryptVerifyCertificateSignature(long long ptr long ptr)
 @ stdcall CryptVerifyCertificateSignatureEx(long long long ptr long ptr long ptr)
-@ stub CryptVerifyDetachedMessageHash
+@ stdcall CryptVerifyDetachedMessageHash(ptr ptr long long ptr ptr ptr ptr)
 @ stub CryptVerifyDetachedMessageSignature
 @ stub CryptVerifyMessageHash
 @ stdcall CryptVerifyMessageSignature(ptr long ptr long ptr ptr ptr)

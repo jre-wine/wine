@@ -29,8 +29,7 @@
 #define REGEDIT_DECLARE_FUNCTIONS
 #include "main.h"
 
-TCHAR g_pszDefaultValueName[64];
-WCHAR g_pszDefaultValueNameW[64];
+WCHAR g_pszDefaultValueName[64];
 
 BOOL ProcessCmdLine(LPSTR lpCmdLine);
 
@@ -80,6 +79,7 @@ const TCHAR szChildClass[] = {'R','E','G','E','D','I','T',0};
 
 static BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
+    WCHAR empty = 0;
     WNDCLASSEX wcFrame = {
                              sizeof(WNDCLASSEX),
                              CS_HREDRAW | CS_VREDRAW/*style*/,
@@ -116,8 +116,8 @@ static BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     ATOM hChildWndClass = RegisterClassEx(&wcChild); /* register child windows class */
     hChildWndClass = hChildWndClass; /* warning eater */
 
-    hMenuFrame = LoadMenu(hInstance, MAKEINTRESOURCE(IDR_REGEDIT_MENU));
-    hPopupMenus = LoadMenu(hInstance, MAKEINTRESOURCE(IDR_POPUP_MENUS));
+    hMenuFrame = LoadMenuW(hInstance, MAKEINTRESOURCEW(IDR_REGEDIT_MENU));
+    hPopupMenus = LoadMenuW(hInstance, MAKEINTRESOURCEW(IDR_POPUP_MENUS));
 
     /* Initialize the Windows Common Controls DLL */
     InitCommonControls();
@@ -140,8 +140,8 @@ static BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     }
 
     /* Create the status bar */
-    hStatusBar = CreateStatusWindow(WS_VISIBLE|WS_CHILD|WS_CLIPSIBLINGS|SBT_NOBORDERS,
-                                    _T(""), hFrameWnd, STATUS_WINDOW);
+    hStatusBar = CreateStatusWindowW(WS_VISIBLE|WS_CHILD|WS_CLIPSIBLINGS|SBT_NOBORDERS,
+                                    &empty, hFrameWnd, STATUS_WINDOW);
     if (hStatusBar) {
         /* Create the status bar panes */
         SetupStatusBar(hFrameWnd, FALSE);
@@ -182,8 +182,7 @@ int APIENTRY WinMain(HINSTANCE hInstance,
 
     /* Initialize global strings */
     LoadString(hInstance, IDS_APP_TITLE, szTitle, COUNT_OF(szTitle));
-    LoadString(hInstance, IDS_REGISTRY_DEFAULT_VALUE, g_pszDefaultValueName, COUNT_OF(g_pszDefaultValueName));
-    LoadStringW(hInstance, IDS_REGISTRY_DEFAULT_VALUE, g_pszDefaultValueNameW, COUNT_OF(g_pszDefaultValueNameW));
+    LoadStringW(hInstance, IDS_REGISTRY_DEFAULT_VALUE, g_pszDefaultValueName, COUNT_OF(g_pszDefaultValueName));
 
     /* Store instance handle in our global variable */
     hInst = hInstance;

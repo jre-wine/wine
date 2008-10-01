@@ -310,7 +310,7 @@ DECLARE_INTERFACE_(IWineD3D, IWineD3DBase)
     STDMETHOD(CheckDeviceMultiSampleType)(THIS_ UINT  Adapter, WINED3DDEVTYPE  DeviceType, WINED3DFORMAT  SurfaceFormat, BOOL  Windowed, WINED3DMULTISAMPLE_TYPE  MultiSampleType, DWORD *pQuality) PURE;
     STDMETHOD(CheckDepthStencilMatch)(THIS_ UINT  Adapter, WINED3DDEVTYPE  DeviceType, WINED3DFORMAT  AdapterFormat, WINED3DFORMAT  RenderTargetFormat, WINED3DFORMAT  DepthStencilFormat) PURE;
     STDMETHOD(CheckDeviceType)(THIS_ UINT  Adapter, WINED3DDEVTYPE  CheckType, WINED3DFORMAT  DisplayFormat, WINED3DFORMAT  BackBufferFormat, BOOL  Windowed) PURE;
-    STDMETHOD(CheckDeviceFormat)(THIS_ UINT  Adapter, WINED3DDEVTYPE  DeviceType, WINED3DFORMAT  AdapterFormat, DWORD  Usage, WINED3DRESOURCETYPE  RType, WINED3DFORMAT  CheckFormat) PURE;
+    STDMETHOD(CheckDeviceFormat)(THIS_ UINT  Adapter, WINED3DDEVTYPE  DeviceType, WINED3DFORMAT  AdapterFormat, DWORD  Usage, WINED3DRESOURCETYPE  RType, WINED3DFORMAT  CheckFormat, WINED3DSURFTYPE SurfaceType) PURE;
     STDMETHOD(CheckDeviceFormatConversion)(THIS_ UINT Adapter, WINED3DDEVTYPE DeviceType, WINED3DFORMAT SourceFormat, WINED3DFORMAT TargetFormat) PURE;
     STDMETHOD(GetDeviceCaps)(THIS_ UINT  Adapter, WINED3DDEVTYPE  DeviceType, WINED3DCAPS *pCaps) PURE;
     STDMETHOD(CreateDevice)(THIS_ UINT  Adapter, WINED3DDEVTYPE  DeviceType,HWND  hFocusWindow, DWORD  BehaviorFlags, struct IWineD3DDevice **ppReturnedDeviceInterface, IUnknown *parent) PURE;
@@ -336,7 +336,7 @@ DECLARE_INTERFACE_(IWineD3D, IWineD3DBase)
 #define IWineD3D_CheckDeviceMultiSampleType(p,a,b,c,d,e,f) (p)->lpVtbl->CheckDeviceMultiSampleType(p,a,b,c,d,e,f)
 #define IWineD3D_CheckDepthStencilMatch(p,a,b,c,d,e)      (p)->lpVtbl->CheckDepthStencilMatch(p,a,b,c,d,e)
 #define IWineD3D_CheckDeviceType(p,a,b,c,d,e)             (p)->lpVtbl->CheckDeviceType(p,a,b,c,d,e)
-#define IWineD3D_CheckDeviceFormat(p,a,b,c,d,e,f)         (p)->lpVtbl->CheckDeviceFormat(p,a,b,c,d,e,f)
+#define IWineD3D_CheckDeviceFormat(p,a,b,c,d,e,f,g)       (p)->lpVtbl->CheckDeviceFormat(p,a,b,c,d,e,f,g)
 #define IWineD3D_CheckDeviceFormatConversion(p,a,b,c,d)   (p)->lpVtbl->CheckDeviceFormatConversion(p,a,b,c,d)
 #define IWineD3D_GetDeviceCaps(p,a,b,c)                   (p)->lpVtbl->GetDeviceCaps(p,a,b,c)
 #define IWineD3D_CreateDevice(p,a,b,c,d,e,f)              (p)->lpVtbl->CreateDevice(p,a,b,c,d,e,f)
@@ -810,7 +810,6 @@ DECLARE_INTERFACE_(IWineD3DBaseTexture,IWineD3DResource)
     STDMETHOD_(BOOL, SetDirty)(THIS_ BOOL) PURE;
     STDMETHOD_(BOOL, GetDirty)(THIS) PURE;
     STDMETHOD(BindTexture)(THIS) PURE;
-    STDMETHOD(UnBindTexture)(THIS) PURE;
     STDMETHOD_(UINT, GetTextureDimensions)(THIS) PURE;
     STDMETHOD_(BOOL, IsCondNP2)(THIS) PURE;
     STDMETHOD_(void, ApplyStateChanges)(THIS_ const DWORD textureStates[WINED3D_HIGHEST_TEXTURE_STATE + 1], const DWORD samplerStates[WINED3D_HIGHEST_SAMPLER_STATE + 1]) PURE;
@@ -846,7 +845,6 @@ DECLARE_INTERFACE_(IWineD3DBaseTexture,IWineD3DResource)
 #define IWineD3DBaseTexture_GetDirty(p)                (p)->lpVtbl->GetDirty(p)
 /*** internal methods ***/
 #define IWineD3DBaseTexture_BindTexture(p)             (p)->lpVtbl->BindTexture(p)
-#define IWineD3DBaseTexture_UnBindTexture(p)           (p)->lpVtbl->UnBindTexture(p)
 #define IWineD3DBaseTexture_GetTextureDimensions(p)    (p)->lpVtbl->GetTextureDimensions(p)
 #define IWineD3DBaseTexture_IsCondNP2(p)               (p)->lpVtbl->IsCondNP2(p)
 #define IWineD3DBaseTexture_ApplyStateChanges(p,a,b)   (p)->lpVtbl->ApplyStateChanges(p,a,b)
@@ -884,7 +882,6 @@ DECLARE_INTERFACE_(IWineD3DTexture,IWineD3DBaseTexture)
     STDMETHOD_(BOOL, SetDirty)(THIS_ BOOL) PURE;
     STDMETHOD_(BOOL, GetDirty)(THIS) PURE;
     STDMETHOD(BindTexture)(THIS) PURE;
-    STDMETHOD(UnBindTexture)(THIS) PURE;
     STDMETHOD_(UINT, GetTextureDimensions)(THIS) PURE;
     STDMETHOD_(BOOL, IsCondNP2)(THIS) PURE;
     STDMETHOD_(void, ApplyStateChanges)(THIS_ const DWORD textureStates[WINED3D_HIGHEST_TEXTURE_STATE + 1], const DWORD samplerStates[WINED3D_HIGHEST_SAMPLER_STATE + 1]) PURE;
@@ -925,7 +922,6 @@ DECLARE_INTERFACE_(IWineD3DTexture,IWineD3DBaseTexture)
 #define IWineD3DTexture_SetDirty(p,a)              (p)->lpVtbl->SetDirty(p,a)
 #define IWineD3DTexture_GetDirty(p)                (p)->lpVtbl->GetDirty(p)
 #define IWineD3DTexture_BindTexture(p)             (p)->lpVtbl->BindTexture(p)
-#define IWineD3DTexture_UnBindTexture(p)           (p)->lpVtbl->UnBindTexture(p)
 #define IWineD3DTexture_GetTextureDimensions(p)    (p)->lpVtbl->GetTextureDimensions(p)
 #define IWineD3DTexture_IsCondNP2(p)               (p)->lpVtbl->IsCondNP2(p)
 #define IWineD3DTexture_ApplyStateChanges(p,a,b)   (p)->lpVtbl->ApplyStateChanges(p,a,b)
@@ -970,7 +966,6 @@ DECLARE_INTERFACE_(IWineD3DCubeTexture,IWineD3DBaseTexture)
     STDMETHOD_(BOOL, SetDirty)(THIS_ BOOL) PURE;
     STDMETHOD_(BOOL, GetDirty)(THIS) PURE;
     STDMETHOD(BindTexture)(THIS) PURE;
-    STDMETHOD(UnBindTexture)(THIS) PURE;
     STDMETHOD_(UINT, GetTextureDimensions)(THIS) PURE;
     STDMETHOD_(BOOL, IsCondNP2)(THIS) PURE;
     STDMETHOD_(void, ApplyStateChanges)(THIS_ DWORD const textureStates[WINED3D_HIGHEST_TEXTURE_STATE + 1], const DWORD samplerStates[WINED3D_HIGHEST_SAMPLER_STATE + 1]) PURE;
@@ -1011,7 +1006,6 @@ DECLARE_INTERFACE_(IWineD3DCubeTexture,IWineD3DBaseTexture)
 #define IWineD3DCubeTexture_SetDirty(p,a)              (p)->lpVtbl->SetDirty(p,a)
 #define IWineD3DCubeTexture_GetDirty(p)                (p)->lpVtbl->GetDirty(p)
 #define IWineD3DCubeTexture_BindTexture(p)              (p)->lpVtbl->BindTexture(p)
-#define IWineD3DCubeTexture_UnBindTexture(p)            (p)->lpVtbl->UnBindTexture(p)
 #define IWineD3DCubeTexture_GetTextureDimensions(p)     (p)->lpVtbl->GetTextureDimensions(p)
 #define IWineD3DCubeTexture_IsCondNP2(p)               (p)->lpVtbl->IsCondNP2(p)
 #define IWineD3DCubeTexture_ApplyStateChanges(p,a,b)   (p)->lpVtbl->ApplyStateChanges(p,a,b)
@@ -1057,7 +1051,6 @@ DECLARE_INTERFACE_(IWineD3DVolumeTexture,IWineD3DBaseTexture)
     STDMETHOD_(BOOL, SetDirty)(THIS_ BOOL) PURE;
     STDMETHOD_(BOOL, GetDirty)(THIS) PURE;
     STDMETHOD(BindTexture)(THIS) PURE;
-    STDMETHOD(UnBindTexture)(THIS) PURE;
     STDMETHOD_(UINT, GetTextureDimensions)(THIS) PURE;
     STDMETHOD_(BOOL, IsCondNP2)(THIS) PURE;
     STDMETHOD_(void, ApplyStateChanges)(THIS_ const DWORD textureStates[WINED3D_HIGHEST_TEXTURE_STATE + 1], const DWORD samplerStates[WINED3D_HIGHEST_SAMPLER_STATE + 1]) PURE;
@@ -1098,7 +1091,6 @@ DECLARE_INTERFACE_(IWineD3DVolumeTexture,IWineD3DBaseTexture)
 #define IWineD3DVolumeTexture_SetDirty(p,a)              (p)->lpVtbl->SetDirty(p,a)
 #define IWineD3DVolumeTexture_GetDirty(p)                (p)->lpVtbl->GetDirty(p)
 #define IWineD3DVolumeTexture_BindTexture(p)              (p)->lpVtbl->BindTexture(p)
-#define IWineD3DVolumeTexture_UnBindTexture(p)            (p)->lpVtbl->UnBindTexture(p)
 #define IWineD3DVolumeTexture_GetTextureDimensions(p)     (p)->lpVtbl->GetTextureDimensions(p)
 #define IWineD3DVolumeTexture_IsCondNP2(p)               (p)->lpVtbl->IsCondNP2(p)
 #define IWineD3DVolumeTexture_ApplyStateChanges(p,a,b)   (p)->lpVtbl->ApplyStateChanges(p,a,b)

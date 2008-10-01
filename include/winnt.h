@@ -162,6 +162,12 @@ extern "C" {
 # define DECLSPEC_HIDDEN
 #endif
 
+#if defined(__GNUC__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 3)))
+#define __WINE_ALLOC_SIZE(x) __attribute__((__alloc_size__(x)))
+#else
+#define __WINE_ALLOC_SIZE(x)
+#endif
+
 /* Anonymous union/struct handling */
 
 #ifndef NONAMELESSSTRUCT
@@ -4008,6 +4014,13 @@ typedef enum tagSID_NAME_USE {
 #define MUTEX_MODIFY_STATE         0x0001
 #define MUTEX_ALL_ACCESS           (STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE|0x1)
 
+#define JOB_OBJECT_ASSIGN_PROCESS           0x0001
+#define JOB_OBJECT_SET_ATTRIBUTES           0x0002
+#define JOB_OBJECT_QUERY                    0x0004
+#define JOB_OBJECT_TERMINATE                0x0008
+#define JOB_OBJECT_SET_SECURITY_ATTRIBUTES  0x0010
+#define JOB_OBJECT_ALL_ACCESS               (STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE|0x1f)
+
 #define TIMER_QUERY_STATE          0x0001
 #define TIMER_MODIFY_STATE         0x0002
 #define TIMER_ALL_ACCESS           (STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE|0x3)
@@ -4023,6 +4036,7 @@ typedef enum tagSID_NAME_USE {
 #define PROCESS_SET_INFORMATION    0x0200
 #define PROCESS_QUERY_INFORMATION  0x0400
 #define PROCESS_SUSPEND_RESUME     0x0800
+#define PROCESS_QUERY_LIMITED_INFORMATION 0x1000
 #define PROCESS_ALL_ACCESS         (STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE|0xfff)
 
 #define THREAD_TERMINATE           0x0001
@@ -4118,6 +4132,7 @@ typedef struct _QUOTA_LIMITS_EX {
 #define FILE_ATTRIBUTE_SYSTEM              0x00000004
 #define FILE_ATTRIBUTE_DIRECTORY           0x00000010
 #define FILE_ATTRIBUTE_ARCHIVE             0x00000020
+#define FILE_ATTRIBUTE_DEVICE              0x00000040
 #define FILE_ATTRIBUTE_NORMAL              0x00000080
 #define FILE_ATTRIBUTE_TEMPORARY           0x00000100
 #define FILE_ATTRIBUTE_SPARSE_FILE         0x00000200
@@ -4898,6 +4913,21 @@ typedef enum _ACTIVATION_CONTEXT_INFO_CLASS {
 #define ACTIVATION_CONTEXT_SECTION_COM_PROGID_REDIRECTION        7
 #define ACTIVATION_CONTEXT_SECTION_GLOBAL_OBJECT_RENAME_TABLE    8
 #define ACTIVATION_CONTEXT_SECTION_CLR_SURROGATES                9
+
+typedef enum _JOBOBJECTINFOCLASS
+{
+    JobObjectBasicAccountingInformation = 1,
+    JobObjectBasicLimitInformation,
+    JobObjectBasicProcessIdList,
+    JobObjectBasicUIRestrictions,
+    JobObjectSecurityLimitInformation,
+    JobObjectEndOfJobTimeInformation,
+    JobObjectAssociateCompletionPortInformation,
+    JobObjectBasicAndIoAccountingInformation,
+    JobObjectExtendedLimitInformation,
+    JobObjectJobSetInformation,
+    MaxJobObjectInfoClass
+} JOBOBJECTINFOCLASS;
 
 #ifdef __cplusplus
 }

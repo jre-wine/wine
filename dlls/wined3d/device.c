@@ -586,7 +586,9 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface, U
     IWineD3DDeviceImpl  *This = (IWineD3DDeviceImpl *)iface;    
     IWineD3DSurfaceImpl *object; /*NOTE: impl ref allowed since this is a create function */
     unsigned int Size       = 1;
-    const StaticPixelFormatDesc *tableEntry = getFormatDescEntry(Format, NULL, NULL);
+    const GlPixelFormatDesc *glDesc;
+    const StaticPixelFormatDesc *tableEntry = getFormatDescEntry(Format, &GLINFO_LOCATION, &glDesc);
+    UINT mul_4w, mul_4h;
     TRACE("(%p) Create surface\n",This);
     
     /** FIXME: Check ranges on the inputs are valid 
@@ -624,21 +626,25 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface, U
      *  it is based around 4x4 pixel blocks it requires padding, so allocate enough
      *  space!
       *********************************/
+    mul_4w = (Width + 3) & ~3;
+    mul_4h = (Height + 3) & ~3;
     if (WINED3DFMT_UNKNOWN == Format) {
         Size = 0;
     } else if (Format == WINED3DFMT_DXT1) {
         /* DXT1 is half byte per pixel */
-       Size = ((max(Width,4) * tableEntry->bpp) * max(Height,4)) >> 1;
+        Size = (mul_4w * tableEntry->bpp * mul_4h) >> 1;
 
     } else if (Format == WINED3DFMT_DXT2 || Format == WINED3DFMT_DXT3 ||
                Format == WINED3DFMT_DXT4 || Format == WINED3DFMT_DXT5 ||
                Format == WINED3DFMT_ATI2N) {
-       Size = ((max(Width,4) * tableEntry->bpp) * max(Height,4));
+        Size = (mul_4w * tableEntry->bpp * mul_4h);
     } else {
        /* The pitch is a multiple of 4 bytes */
         Size = ((Width * tableEntry->bpp) + This->surface_alignment - 1) & ~(This->surface_alignment - 1);
-       Size *= Height;
+        Size *= Height;
     }
+
+    if(glDesc->heightscale != 0.0) Size *= glDesc->heightscale;
 
     /** Create and initialise the surface resource **/
     D3DCREATERESOURCEOBJECTINSTANCE(object,Surface,WINED3DRTYPE_SURFACE, Size)
@@ -650,6 +656,7 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface, U
     object->currentDesc.MultiSampleType    = MultiSample;
     object->currentDesc.MultiSampleQuality = MultisampleQuality;
     object->glDescription.level            = Level;
+    object->heightscale                    = glDesc->heightscale != 0.0 ? glDesc->heightscale : 1.0;
     list_init(&object->overlays);
 
     /* Flags */
@@ -1735,7 +1742,7 @@ static unsigned int ConvertFvfToDeclaration(IWineD3DDeviceImpl *This, /* For the
     BOOL has_specular = (fvf & WINED3DFVF_SPECULAR) !=0;
 
     DWORD num_textures = (fvf & WINED3DFVF_TEXCOUNT_MASK) >> WINED3DFVF_TEXCOUNT_SHIFT;
-    DWORD texcoords = (fvf & 0x00FF0000) >> 16;
+    DWORD texcoords = (fvf & 0xFFFF0000) >> 16;
 
     WINED3DVERTEXELEMENT end_element = WINED3DDECL_END();
     WINED3DVERTEXELEMENT *elements = NULL;
@@ -2171,10 +2178,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
     create_dummy_textures(This);
 
     ENTER_GL();
-
-#if 0
-    IWineD3DImpl_CheckGraphicsMemory();
-#endif
 
     { /* Set a default viewport */
         WINED3DVIEWPORT vp;
@@ -3750,7 +3753,8 @@ static void device_map_fixed_function_samplers(IWineD3DDeviceImpl *This) {
 
     device_update_fixed_function_usage_map(This);
 
-    if (!GL_SUPPORT(NV_REGISTER_COMBINERS) || This->stateBlock->lowest_disabled_stage <= GL_LIMITS(textures)) {
+    if (This->max_ffp_textures == This->max_ffp_texture_stages ||
+        This->stateBlock->lowest_disabled_stage <= This->max_ffp_textures) {
         for (i = 0; i < This->stateBlock->lowest_disabled_stage; ++i) {
             if (!This->fixed_function_usage_map[i]) continue;
 
@@ -4603,9 +4607,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetTextureStageState(IWineD3DDevice *if
             This->stateBlock->lowest_disabled_stage = i;
             TRACE("New lowest disabled: %d\n", i);
         }
-        if(GL_SUPPORT(NV_REGISTER_COMBINERS) && !This->stateBlock->pixelShader) {
-            /* TODO: Built a stage -> texture unit mapping for register combiners */
-        }
     }
 
     IWineD3DDeviceImpl_MarkStateDirty(This, STATE_TEXTURESTAGE(Stage, Type));
@@ -4997,6 +4998,7 @@ HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This,  IWineD3DSurfa
     WINED3DVIEWPORT *vp = &This->stateBlock->viewport;
     UINT drawable_width, drawable_height;
     IWineD3DSurfaceImpl *depth_stencil = (IWineD3DSurfaceImpl *) This->stencilBufferTarget;
+    IWineD3DSwapChainImpl *swapchain = NULL;
 
     /* When we're clearing parts of the drawable, make sure that the target surface is well up to date in the
      * drawable. After the clear we'll mark the drawable up to date, so we have to make sure that this is true
@@ -5153,10 +5155,6 @@ HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This,  IWineD3DSurfa
          * it is most likely more efficient to perform a clear on the sysmem copy too instead of downloading it
          */
         IWineD3DSurface_ModifyLocation(This->lastActiveRenderTarget, SFLAG_INDRAWABLE, TRUE);
-        /* TODO: Move the fbo logic into ModifyLocation() */
-        if(This->render_offscreen && wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
-            target->Flags |= SFLAG_INTEXTURE;
-        }
     }
     if (Flags & WINED3DCLEAR_ZBUFFER) {
         /* Note that WINED3DCLEAR_ZBUFFER implies a depth stencil exists on the device */
@@ -5165,6 +5163,14 @@ HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This,  IWineD3DSurfa
     }
 
     LEAVE_GL();
+
+    IWineD3DSurface_GetContainer( (IWineD3DSurface *) target, &IID_IWineD3DSwapChain, (void **)&swapchain);
+    if (swapchain) {
+        if (target == (IWineD3DSurfaceImpl*) swapchain->frontBuffer) {
+            glFlush();
+        }
+        IWineD3DSwapChain_Release((IWineD3DSwapChain *) swapchain);
+    }
 
     return WINED3D_OK;
 }
@@ -5578,10 +5584,46 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_GetFrontBufferData(IWineD3DDevice *if
 
 static HRESULT  WINAPI  IWineD3DDeviceImpl_ValidateDevice(IWineD3DDevice *iface, DWORD* pNumPasses) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    IWineD3DBaseTextureImpl *texture;
+    const GlPixelFormatDesc *gl_info;
+    DWORD i;
+
+    TRACE("(%p) : %p\n", This, pNumPasses);
+
+    for(i = 0; i < MAX_COMBINED_SAMPLERS; i++) {
+        if(This->stateBlock->samplerState[i][WINED3DSAMP_MINFILTER] == WINED3DTEXF_NONE) {
+            WARN("Sampler state %u has minfilter D3DTEXF_NONE, returning D3DERR_UNSUPPORTEDTEXTUREFILTER\n", i);
+            return WINED3DERR_UNSUPPORTEDTEXTUREFILTER;
+        }
+        if(This->stateBlock->samplerState[i][WINED3DSAMP_MAGFILTER] == WINED3DTEXF_NONE) {
+            WARN("Sampler state %u has magfilter D3DTEXF_NONE, returning D3DERR_UNSUPPORTEDTEXTUREFILTER\n", i);
+            return WINED3DERR_UNSUPPORTEDTEXTUREFILTER;
+        }
+
+        texture = (IWineD3DBaseTextureImpl *) This->stateBlock->textures[i];
+        if(!texture) continue;
+        getFormatDescEntry(texture->resource.format, &GLINFO_LOCATION, &gl_info);
+        if(gl_info->Flags & WINED3DFMT_FLAG_FILTERING) continue;
+
+        if(This->stateBlock->samplerState[i][WINED3DSAMP_MAGFILTER] != WINED3DTEXF_POINT) {
+            WARN("Non-filterable texture and mag filter enabled on samper %u, returning E_FAIL\n", i);
+            return E_FAIL;
+        }
+        if(This->stateBlock->samplerState[i][WINED3DSAMP_MINFILTER] != WINED3DTEXF_POINT) {
+            WARN("Non-filterable texture and min filter enabled on samper %u, returning E_FAIL\n", i);
+            return E_FAIL;
+        }
+        if(This->stateBlock->samplerState[i][WINED3DSAMP_MIPFILTER] != WINED3DTEXF_NONE &&
+           This->stateBlock->samplerState[i][WINED3DSAMP_MIPFILTER] != WINED3DTEXF_POINT /* sic! */) {
+            WARN("Non-filterable texture and mip filter enabled on samper %u, returning E_FAIL\n", i);
+            return E_FAIL;
+        }
+    }
+
     /* return a sensible default */
     *pNumPasses = 1;
-    /* TODO: If the window is minimized then validate device should return something other than WINED3D_OK */
-    FIXME("(%p) : stub\n", This);
+
+    TRACE("returning D3D_OK\n");
     return WINED3D_OK;
 }
 
@@ -6085,6 +6127,7 @@ void bind_fbo(IWineD3DDevice *iface, GLenum target, GLuint *fbo) {
     if (!*fbo) {
         GL_EXTCALL(glGenFramebuffersEXT(1, fbo));
         checkGLcall("glGenFramebuffersEXT()");
+        TRACE("Created FBO %d\n", *fbo);
     }
     GL_EXTCALL(glBindFramebufferEXT(target, *fbo));
     checkGLcall("glBindFramebuffer()");
@@ -6116,6 +6159,7 @@ void attach_depth_stencil_fbo(IWineD3DDeviceImpl *This, GLenum fbo_target, IWine
 
         IWineD3DSurface_PreLoad(depth_stencil);
 
+        glBindTexture(target, depth_stencil_impl->glDescription.textureName);
         glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(target, GL_DEPTH_TEXTURE_MODE_ARB, GL_LUMINANCE);
@@ -6158,6 +6202,7 @@ void attach_surface_fbo(IWineD3DDeviceImpl *This, GLenum fbo_target, DWORD idx, 
 
     IWineD3DSurface_PreLoad(surface);
 
+    glBindTexture(target, surface_impl->glDescription.textureName);
     glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glBindTexture(target, old_binding);
@@ -7591,12 +7636,6 @@ static void WINAPI IWineD3DDeviceImpl_ResourceReleased(IWineD3DDevice *iface, IW
                         This->stateBlock->streamSource[streamNumber] = 0;
                     }
                 }
-#if 0   /* TODO: Manage internal tracking properly so that 'this shouldn't happen' */
-                 else { /* This shouldn't happen */
-                    FIXME("Calling application has released the device before relasing all the resources bound to the device\n");
-                }
-#endif
-
             }
         }
         break;

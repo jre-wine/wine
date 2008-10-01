@@ -2,6 +2,7 @@
  * Unit tests for file functions in Wine
  *
  * Copyright (c) 2002, 2004 Jakob Eriksson
+ * Copyright (c) 2008 Jeff Zaroyko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -841,6 +842,10 @@ static void test_DeleteFileA( void )
 static void test_DeleteFileW( void )
 {
     BOOL ret;
+    WCHAR pathW[MAX_PATH];
+    WCHAR pathsubW[MAX_PATH];
+    static const WCHAR dirW[] = {'d','e','l','e','t','e','f','i','l','e',0};
+    static const WCHAR subdirW[] = {'\\','s','u','b',0};
     static const WCHAR emptyW[]={'\0'};
 
     ret = DeleteFileW(NULL);
@@ -852,6 +857,35 @@ static void test_DeleteFileW( void )
     ret = DeleteFileW(emptyW);
     ok(!ret && GetLastError() == ERROR_PATH_NOT_FOUND,
        "DeleteFileW(\"\") returned ret=%d error=%d\n",ret,GetLastError());
+
+    /* test DeleteFile on empty directory */
+    ret = GetTempPathW(MAX_PATH, pathW);
+    if (ret + sizeof(dirW)/sizeof(WCHAR)-1 + sizeof(subdirW)/sizeof(WCHAR)-1 >= MAX_PATH)
+    {
+        ok(0, "MAX_PATH exceeded in constructing paths\n");
+        return;
+    }
+    lstrcatW(pathW, dirW);
+    lstrcpyW(pathsubW, pathW);
+    lstrcatW(pathsubW, subdirW);
+    ret = CreateDirectoryW(pathW, NULL);
+    ok(ret == TRUE, "couldn't create directory deletefile\n");
+    ret = DeleteFileW(pathW);
+    todo_wine ok(ret == FALSE, "DeleteFile should fail for empty directories\n");
+    ret = RemoveDirectoryW(pathW);
+    todo_wine ok(ret == TRUE, "expected to remove directory deletefile\n");
+
+    /* test DeleteFile on non-empty directory */
+    ret = CreateDirectoryW(pathW, NULL);
+    ok(ret == TRUE, "couldn't create directory deletefile\n");
+    ret = CreateDirectoryW(pathsubW, NULL);
+    ok(ret == TRUE, "couldn't create directory deletefile\\sub\n");
+    ret = DeleteFileW(pathW);
+    todo_wine ok(ret == FALSE, "DeleteFile should fail for non-empty directories\n");
+    ret = RemoveDirectoryW(pathsubW);
+    ok(ret == TRUE, "expected to remove directory deletefile\\sub\n");
+    ret = RemoveDirectoryW(pathW);
+    ok(ret == TRUE, "expected to remove directory deletefile\n");
 }
 
 #define IsDotDir(x)     ((x[0] == '.') && ((x[1] == 0) || ((x[1] == '.') && (x[2] == 0))))
@@ -1353,7 +1387,9 @@ static void test_FindFirstFileA(void)
     ok( 0 == lstrcmpiA(data.cFileName, "nul"), "wrong name %s\n", data.cFileName );
     ok( 0 == data.nFileSizeHigh, "wrong size %d\n", data.nFileSizeHigh );
     ok( 0 == data.nFileSizeLow, "wrong size %d\n", data.nFileSizeLow );
-    ok( FILE_ATTRIBUTE_ARCHIVE == data.dwFileAttributes, "wrong attributes %x\n", data.dwFileAttributes );
+    ok( FILE_ATTRIBUTE_ARCHIVE == data.dwFileAttributes ||
+        FILE_ATTRIBUTE_DEVICE == data.dwFileAttributes /* Win9x */,
+        "wrong attributes %x\n", data.dwFileAttributes );
     SetLastError( 0xdeadbeaf );
     ok( !FindNextFileA( handle, &data ), "FindNextFileA succeeded\n" );
     ok( GetLastError() == ERROR_NO_MORE_FILES, "bad error %d\n", GetLastError() );
@@ -1368,7 +1404,9 @@ static void test_FindFirstFileA(void)
     ok( 0 == lstrcmpiA(data.cFileName, "lpt1"), "wrong name %s\n", data.cFileName );
     ok( 0 == data.nFileSizeHigh, "wrong size %d\n", data.nFileSizeHigh );
     ok( 0 == data.nFileSizeLow, "wrong size %d\n", data.nFileSizeLow );
-    ok( FILE_ATTRIBUTE_ARCHIVE == data.dwFileAttributes, "wrong attributes %x\n", data.dwFileAttributes );
+    ok( FILE_ATTRIBUTE_ARCHIVE == data.dwFileAttributes ||
+        FILE_ATTRIBUTE_DEVICE == data.dwFileAttributes /* Win9x */,
+        "wrong attributes %x\n", data.dwFileAttributes );
     SetLastError( 0xdeadbeaf );
     ok( !FindNextFileA( handle, &data ), "FindNextFileA succeeded\n" );
     ok( GetLastError() == ERROR_NO_MORE_FILES, "bad error %d\n", GetLastError() );
@@ -1663,7 +1701,7 @@ static void test_OpenFile(void)
     BOOL ret;
     DWORD retval;
     
-    static const char *file = "\\regsvr32.exe";
+    static const char *file = "\\regedit.exe";
     static const char *foo = ".\\foo-bar-foo.baz";
     static const char *foo_too_long = ".\\foo-bar-foo.baz+++++++++++++++"
         "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
@@ -1678,7 +1716,7 @@ static void test_OpenFile(void)
     UINT length;
     
     /* Check for existing file */
-    length = GetSystemDirectoryA(buff, MAX_PATH);
+    length = GetWindowsDirectoryA(buff, MAX_PATH);
 
     if (length + lstrlen(file) < MAX_PATH)
     {

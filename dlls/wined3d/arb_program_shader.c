@@ -645,15 +645,15 @@ static void gen_color_correction(SHADER_BUFFER *buffer, const char *reg, const c
         case WINED3DFMT_V16U16:
             if(GL_SUPPORT(NV_TEXTURE_SHADER) ||
               (GL_SUPPORT(ATI_ENVMAP_BUMPMAP) && fmt == WINED3DFMT_V8U8)) {
-#if 0
-                /* The 3rd channel returns 1.0 in d3d, but 0.0 in gl. Fix this while we're at it :-)
-                 * disabled until an application that needs it is found because it causes unneeded
-                 * shader recompilation in some game
-                 */
-                if(strlen(writemask) >= 4) {
-                    shader_addline(buffer, "MOV %s.%c, %s;\n", reg, one);
+                if(0) {
+                    /* The 3rd channel returns 1.0 in d3d, but 0.0 in gl. Fix this while we're at it :-)
+                     * disabled until an application that needs it is found because it causes unneeded
+                     * shader recompilation in some game
+                     */
+                    if(strlen(writemask) >= 4) {
+                        shader_addline(buffer, "MOV %s.%c, %s;\n", reg, writemask[3], one);
+                    }
                 }
-#endif
             } else {
                 /* Correct the sign, but leave the blue as it is - it was loaded correctly already
                  * ARB shaders are a bit picky wrt writemasks and swizzles. If we're free to scale
@@ -1958,6 +1958,28 @@ static BOOL shader_arb_dirty_const(IWineD3DDevice *iface) {
     return TRUE;
 }
 
+static void arbfp_add_sRGB_correction(SHADER_BUFFER *buffer, const char *fragcolor, const char *tmp1,
+                                      const char *tmp2, const char *tmp3, const char *tmp4) {
+    /* Perform sRGB write correction. See GLX_EXT_framebuffer_sRGB */
+
+    /* Calculate the > 0.0031308 case */
+    shader_addline(buffer, "POW %s.x, %s.x, srgb_pow.x;\n", tmp1, fragcolor);
+    shader_addline(buffer, "POW %s.y, %s.y, srgb_pow.y;\n", tmp1, fragcolor);
+    shader_addline(buffer, "POW %s.z, %s.z, srgb_pow.z;\n", tmp1, fragcolor);
+    shader_addline(buffer, "MUL %s, %s, srgb_mul_hi;\n", tmp1, tmp1);
+    shader_addline(buffer, "SUB %s, %s, srgb_sub_hi;\n", tmp1, tmp1);
+    /* Calculate the < case */
+    shader_addline(buffer, "MUL %s, srgb_mul_low, %s;\n", tmp2, fragcolor);
+    /* Get 1.0 / 0.0 masks for > 0.0031308 and < 0.0031308 */
+    shader_addline(buffer, "SLT %s, srgb_comparison, %s;\n", tmp3, fragcolor);
+    shader_addline(buffer, "SGE %s, srgb_comparison, %s;\n", tmp4, fragcolor);
+    /* Store the components > 0.0031308 in the destination */
+    shader_addline(buffer, "MUL %s, %s, %s;\n", fragcolor, tmp1, tmp3);
+    /* Add the components that are < 0.0031308 */
+    shader_addline(buffer, "MAD result.color.xyz, %s, %s, %s;\n", tmp2, tmp4, fragcolor);
+    /* [0.0;1.0] clamping. Not needed, this is done implicitly */
+}
+
 static void shader_arb_generate_pshader(IWineD3DPixelShader *iface, SHADER_BUFFER *buffer) {
     IWineD3DPixelShaderImpl *This = (IWineD3DPixelShaderImpl *)iface;
     shader_reg_maps* reg_maps = &This->baseShader.reg_maps;
@@ -2002,24 +2024,7 @@ static void shader_arb_generate_pshader(IWineD3DPixelShader *iface, SHADER_BUFFE
         fragcolor = "TMP_COLOR";
     }
     if(This->srgb_enabled) {
-        /* Perform sRGB write correction. See GLX_EXT_framebuffer_sRGB */
-
-        /* Calculate the > 0.0031308 case */
-        shader_addline(buffer, "POW TMP.x, %s.x, srgb_pow.x;\n", fragcolor);
-        shader_addline(buffer, "POW TMP.y, %s.y, srgb_pow.y;\n", fragcolor);
-        shader_addline(buffer, "POW TMP.z, %s.z, srgb_pow.z;\n", fragcolor);
-        shader_addline(buffer, "MUL TMP, TMP, srgb_mul_hi;\n");
-        shader_addline(buffer, "SUB TMP, TMP, srgb_sub_hi;\n");
-        /* Calculate the < case */
-        shader_addline(buffer, "MUL TMP2, srgb_mul_low, %s;\n", fragcolor);
-        /* Get 1.0 / 0.0 masks for > 0.0031308 and < 0.0031308 */
-        shader_addline(buffer, "SLT TA, srgb_comparison, %s;\n", fragcolor);
-        shader_addline(buffer, "SGE TB, srgb_comparison, %s;\n", fragcolor);
-        /* Store the components > 0.0031308 in the destination */
-        shader_addline(buffer, "MUL %s, TMP, TA;\n", fragcolor);
-        /* Add the components that are < 0.0031308 */
-        shader_addline(buffer, "MAD result.color.xyz, TMP2, TB, %s;\n", fragcolor);
-        /* [0.0;1.0] clamping. Not needed, this is done implicitly */
+        arbfp_add_sRGB_correction(buffer, fragcolor, "TMP", "TMP2", "TA", "TB");
     }
     if (This->baseShader.hex_version < WINED3DPS_VERSION(3,0)) {
         shader_addline(buffer, "LRP result.color.rgb, TMP_FOG.x, %s, state.fog.color;\n", fragcolor);
@@ -2061,7 +2066,8 @@ static void shader_arb_generate_vshader(IWineD3DVertexShader *iface, SHADER_BUFF
     IWineD3DVertexShaderImpl *This = (IWineD3DVertexShaderImpl *)iface;
     shader_reg_maps* reg_maps = &This->baseShader.reg_maps;
     CONST DWORD *function = This->baseShader.function;
-    WineD3D_GL_Info *gl_info = &((IWineD3DDeviceImpl *)This->baseShader.device)->adapter->gl_info;
+    IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *)This->baseShader.device;
+    WineD3D_GL_Info *gl_info = &device->adapter->gl_info;
     local_constant* lconst;
 
     /*  Create the hw ARB shader */
@@ -2095,7 +2101,7 @@ static void shader_arb_generate_vshader(IWineD3DVertexShader *iface, SHADER_BUFF
     if(!GL_SUPPORT(NV_VERTEX_PROGRAM)) {
         shader_addline(buffer, "MOV result.color.secondary, -helper_const.wwwy;\n");
 
-        if((GLINFO_LOCATION).set_texcoord_w) {
+        if((GLINFO_LOCATION).set_texcoord_w && !device->frag_pipe->ffp_proj_control) {
             int i;
             for(i = 0; i < min(8, MAX_REG_TEXCRD); i++) {
                 if(This->baseShader.reg_maps.texcoord_mask[i] != 0 &&
@@ -2215,9 +2221,11 @@ const shader_backend_t arb_program_shader_backend = {
 };
 
 /* ARB_fragment_program fixed function pipeline replacement definitions */
-#define ARB_FFP_CONST_TFACTOR     0
-#define ARB_FFP_CONST_CONSTANT(i) ((ARB_FFP_CONST_TFACTOR) + 1 + i)
-#define ARB_FFP_CONST_BUMPMAT(i)  ((ARB_FFP_CONST_CONSTANT(7)) + 1 + i)
+#define ARB_FFP_CONST_TFACTOR           0
+#define ARB_FFP_CONST_SPECULAR_ENABLE   ((ARB_FFP_CONST_TFACTOR) + 1)
+#define ARB_FFP_CONST_CONSTANT(i)       ((ARB_FFP_CONST_SPECULAR_ENABLE) + 1 + i)
+#define ARB_FFP_CONST_BUMPMAT(i)        ((ARB_FFP_CONST_CONSTANT(7)) + 1 + i)
+#define ARB_FFP_CONST_LUMINANCE(i)      ((ARB_FFP_CONST_BUMPMAT(7)) + 1 + i)
 
 struct arbfp_ffp_desc
 {
@@ -2302,10 +2310,10 @@ static void arbfp_get_caps(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_info, str
                            WINED3DTEXOPCAPS_DOTPRODUCT3                 |
                            WINED3DTEXOPCAPS_MULTIPLYADD                 |
                            WINED3DTEXOPCAPS_LERP                        |
-                           WINED3DTEXOPCAPS_BUMPENVMAP;
+                           WINED3DTEXOPCAPS_BUMPENVMAP                  |
+                           WINED3DTEXOPCAPS_BUMPENVMAPLUMINANCE;
 
-    /* TODO: Implement WINED3DTEXOPCAPS_BUMPENVMAPLUMINANCE
-    and WINED3DTEXOPCAPS_PREMODULATE */
+    /* TODO: Implement WINED3DTEXOPCAPS_PREMODULATE */
 
     caps->MaxTextureBlendStages   = 8;
     caps->MaxSimultaneousTextures = min(GL_LIMITS(fragment_samplers), 8);
@@ -2330,6 +2338,31 @@ static void state_texfactor_arbfp(DWORD state, IWineD3DStateBlockImpl *statebloc
         device = stateblock->wineD3DDevice;
         device->activeContext->pshader_const_dirty[ARB_FFP_CONST_TFACTOR] = 1;
         device->highest_dirty_ps_const = max(device->highest_dirty_ps_const, ARB_FFP_CONST_TFACTOR + 1);
+    }
+}
+
+static void state_arb_specularenable(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    float col[4];
+    IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
+
+    /* Do not overwrite pixel shader constants if a pshader is in use */
+    if(use_ps(device)) return;
+
+    if(stateblock->renderState[WINED3DRS_SPECULARENABLE]) {
+        /* The specular color has no alpha */
+        col[0] = 1.0; col[1] = 1.0;
+        col[2] = 1.0; col[3] = 0.0;
+    } else {
+        col[0] = 0.0; col[1] = 0.0;
+        col[2] = 0.0; col[3] = 0.0;
+    }
+    GL_EXTCALL(glProgramEnvParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB, ARB_FFP_CONST_SPECULAR_ENABLE, col));
+    checkGLcall("glProgramEnvParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB, ARB_FFP_CONST_SPECULAR_ENABLE, col)");
+
+    if(device->shader_backend == &arb_program_shader_backend) {
+        device = stateblock->wineD3DDevice;
+        device->activeContext->pshader_const_dirty[ARB_FFP_CONST_SPECULAR_ENABLE] = 1;
+        device->highest_dirty_ps_const = max(device->highest_dirty_ps_const, ARB_FFP_CONST_SPECULAR_ENABLE + 1);
     }
 }
 
@@ -2363,6 +2396,39 @@ static void set_bumpmat_arbfp(DWORD state, IWineD3DStateBlockImpl *stateblock, W
     if(device->shader_backend == &arb_program_shader_backend) {
         device->activeContext->pshader_const_dirty[ARB_FFP_CONST_BUMPMAT(stage)] = 1;
         device->highest_dirty_ps_const = max(device->highest_dirty_ps_const, ARB_FFP_CONST_BUMPMAT(stage) + 1);
+    }
+}
+
+static void tex_bumpenvlum_arbfp(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
+    IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
+    float param[4];
+
+    if(use_ps(device)) {
+        if(stage != 0 &&
+           ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->baseShader.reg_maps.luminanceparams[stage]) {
+            /* The pixel shader has to know the luminance offset. Do a constants update if it
+             * isn't scheduled anyway
+             */
+            if(!isStateDirty(context, STATE_PIXELSHADERCONSTANT)) {
+                device->StateTable[STATE_PIXELSHADERCONSTANT].apply(STATE_PIXELSHADERCONSTANT, stateblock, context);
+            }
+        }
+        /* Exit now, don't set the bumpmat below, otherwise we may overwrite pixel shader constants */
+        return;
+    }
+
+    param[0] = *((float *) &stateblock->textureState[stage][WINED3DTSS_BUMPENVLSCALE]);
+    param[1] = *((float *) &stateblock->textureState[stage][WINED3DTSS_BUMPENVLOFFSET]);
+    param[2] = 0.0;
+    param[3] = 0.0;
+
+    GL_EXTCALL(glProgramEnvParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB, ARB_FFP_CONST_LUMINANCE(stage), param));
+    checkGLcall("glProgramEnvParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB, ARB_FFP_CONST_LUMINANCE(stage), param)");
+
+    if(device->shader_backend == &arb_program_shader_backend) {
+        device->activeContext->pshader_const_dirty[ARB_FFP_CONST_LUMINANCE(stage)] = 1;
+        device->highest_dirty_ps_const = max(device->highest_dirty_ps_const, ARB_FFP_CONST_LUMINANCE(stage) + 1);
     }
 }
 
@@ -2425,10 +2491,16 @@ static const char *get_argreg(SHADER_BUFFER *buffer, DWORD argnum, unsigned int 
         if(argnum == 1) ret = "arg1";
         if(argnum == 2) ret = "arg2";
     }
+    if(arg & WINED3DTA_ALPHAREPLICATE) {
+        shader_addline(buffer, "MOV arg%u, %s.a;\n", argnum, ret);
+        if(argnum == 0) ret = "arg0";
+        if(argnum == 1) ret = "arg1";
+        if(argnum == 2) ret = "arg2";
+    }
     return ret;
 }
 
-static void gen_ffp_instr(SHADER_BUFFER *buffer, unsigned int stage, BOOL color, BOOL alpha, BOOL last,
+static void gen_ffp_instr(SHADER_BUFFER *buffer, unsigned int stage, BOOL color, BOOL alpha,
                           DWORD dst, DWORD op, DWORD dw_arg0, DWORD dw_arg1, DWORD dw_arg2) {
     const char *dstmask, *dstreg, *arg0, *arg1, *arg2;
     unsigned int mul = 1;
@@ -2438,9 +2510,7 @@ static void gen_ffp_instr(SHADER_BUFFER *buffer, unsigned int stage, BOOL color,
     else if(color) dstmask = ".rgb";
     else dstmask = ".a";
 
-    if(dst == tempreg && last) FIXME("Last texture stage writes to D3DTA_TEMP\n");
     if(dst == tempreg) dstreg = "tempreg";
-    else if(last) dstreg = "result.color";
     else dstreg = "ret";
 
     arg0 = get_argreg(buffer, 0, stage, dw_arg0);
@@ -2510,7 +2580,8 @@ static void gen_ffp_instr(SHADER_BUFFER *buffer, unsigned int stage, BOOL color,
             break;
 
         case WINED3DTOP_BLENDTEXTUREALPHAPM:
-            shader_addline(buffer, "SUB arg0.a, const.x, %s;\n", arg1);
+            arg0 = get_argreg(buffer, 0, stage, WINED3DTA_TEXTURE);
+            shader_addline(buffer, "SUB arg0.a, const.x, %s.a;\n", arg0);
             shader_addline(buffer, "MAD_SAT %s%s, %s, arg0.a, %s;\n", dstreg, dstmask, arg2, arg1);
             break;
 
@@ -2573,13 +2644,15 @@ static GLuint gen_arbfp_ffp_shader(struct ffp_settings *settings, IWineD3DStateB
     SHADER_BUFFER buffer;
     BOOL tex_read[MAX_TEXTURES] = {FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE};
     BOOL bump_used[MAX_TEXTURES] = {FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE};
+    BOOL luminance_used[MAX_TEXTURES] = {FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE};
     const char *textype;
     const char *instr, *sat;
     char colorcor_dst[8];
     GLuint ret;
     DWORD arg0, arg1, arg2;
     BOOL tempreg_used = FALSE, tfactor_used = FALSE;
-    BOOL last = FALSE;
+    BOOL op_equal;
+    const char *final_combiner_src = "ret";
 
     /* Find out which textures are read */
     for(stage = 0; stage < MAX_TEXTURES; stage++) {
@@ -2592,6 +2665,7 @@ static GLuint gen_arbfp_ffp_shader(struct ffp_settings *settings, IWineD3DStateB
         if(arg2 == WINED3DTA_TEXTURE) tex_read[stage] = TRUE;
 
         if(settings->op[stage].cop == WINED3DTOP_BLENDTEXTUREALPHA) tex_read[stage] = TRUE;
+        if(settings->op[stage].cop == WINED3DTOP_BLENDTEXTUREALPHAPM) tex_read[stage] = TRUE;
         if(settings->op[stage].cop == WINED3DTOP_BUMPENVMAP) {
             bump_used[stage] = TRUE;
             tex_read[stage] = TRUE;
@@ -2599,6 +2673,9 @@ static GLuint gen_arbfp_ffp_shader(struct ffp_settings *settings, IWineD3DStateB
         if(settings->op[stage].cop == WINED3DTOP_BUMPENVMAPLUMINANCE) {
             bump_used[stage] = TRUE;
             tex_read[stage] = TRUE;
+            luminance_used[stage] = TRUE;
+        } else if(settings->op[stage].cop == WINED3DTOP_BLENDFACTORALPHA) {
+            tfactor_used = TRUE;
         }
 
         if(arg0 == WINED3DTA_TFACTOR || arg1 == WINED3DTA_TFACTOR || arg2 == WINED3DTA_TFACTOR) {
@@ -2644,7 +2721,7 @@ static GLuint gen_arbfp_ffp_shader(struct ffp_settings *settings, IWineD3DStateB
 
     shader_addline(&buffer, "PARAM const = {1, 2, 4, 0.5};\n");
     shader_addline(&buffer, "TEMP ret;\n");
-    if(tempreg_used) shader_addline(&buffer, "TEMP tempreg;\n");
+    if(tempreg_used || settings->sRGB_write) shader_addline(&buffer, "TEMP tempreg;\n");
     shader_addline(&buffer, "TEMP arg0;\n");
     shader_addline(&buffer, "TEMP arg1;\n");
     shader_addline(&buffer, "TEMP arg2;\n");
@@ -2653,9 +2730,25 @@ static GLuint gen_arbfp_ffp_shader(struct ffp_settings *settings, IWineD3DStateB
         shader_addline(&buffer, "TEMP tex%u;\n", stage);
         if(!bump_used[stage]) continue;
         shader_addline(&buffer, "PARAM bumpmat%u = program.env[%u];\n", stage, ARB_FFP_CONST_BUMPMAT(stage));
+        if(!luminance_used[stage]) continue;
+        shader_addline(&buffer, "PARAM luminance%u = program.env[%u];\n", stage, ARB_FFP_CONST_LUMINANCE(stage));
     }
     if(tfactor_used) {
         shader_addline(&buffer, "PARAM tfactor = program.env[%u];\n", ARB_FFP_CONST_TFACTOR);
+    }
+        shader_addline(&buffer, "PARAM specular_enable = program.env[%u];\n", ARB_FFP_CONST_SPECULAR_ENABLE);
+
+    if(settings->sRGB_write) {
+        shader_addline(&buffer, "PARAM srgb_mul_low = {%f, %f, %f, 1.0};\n",
+                       srgb_mul_low, srgb_mul_low, srgb_mul_low);
+        shader_addline(&buffer, "PARAM srgb_comparison =  {%f, %f, %f, %f};\n",
+                       srgb_cmp, srgb_cmp, srgb_cmp, srgb_cmp);
+        shader_addline(&buffer, "PARAM srgb_pow =  {%f, %f, %f, 1.0};\n",
+                       srgb_pow, srgb_pow, srgb_pow);
+        shader_addline(&buffer, "PARAM srgb_mul_hi =  {%f, %f, %f, 1.0};\n",
+                       srgb_mul_high, srgb_mul_high, srgb_mul_high);
+        shader_addline(&buffer, "PARAM srgb_sub_hi =  {%f, %f, %f, 0.0};\n",
+                       srgb_sub_high, srgb_sub_high, srgb_sub_high);
     }
 
     /* Generate texture sampling instructions) */
@@ -2680,11 +2773,12 @@ static GLuint gen_arbfp_ffp_shader(struct ffp_settings *settings, IWineD3DStateB
 
         if(settings->op[stage].projected == proj_none) {
             instr = "TEX";
-        } else if(settings->op[stage].projected == proj_count4) {
+        } else if(settings->op[stage].projected == proj_count4 ||
+                  settings->op[stage].projected == proj_count3) {
             instr = "TXP";
         } else {
+            FIXME("Unexpected projection mode %d\n", settings->op[stage].projected);
             instr = "TXP";
-            ERR("Implement proj_count3\n");
         }
 
         if(stage > 0 &&
@@ -2694,7 +2788,32 @@ static GLuint gen_arbfp_ffp_shader(struct ffp_settings *settings, IWineD3DStateB
             shader_addline(&buffer, "DP3 ret.r, arg1, tex%u;\n", stage - 1);
             shader_addline(&buffer, "SWZ arg1, bumpmat%u, y, w, 0, 0;\n", stage - 1);
             shader_addline(&buffer, "DP3 ret.g, arg1, tex%u;\n", stage - 1);
-            shader_addline(&buffer, "ADD ret, ret, fragment.texcoord[%u];\n", stage);
+
+            /* with projective textures, texbem only divides the static texture coord, not the displacement,
+             * so multiply the displacement with the dividing parameter before passing it to TXP
+             */
+            if (settings->op[stage].projected != proj_none) {
+                if(settings->op[stage].projected == proj_count4) {
+                    shader_addline(&buffer, "MOV ret.a, fragment.texcoord[%u].a;\n", stage);
+                    shader_addline(&buffer, "MUL ret.rgb, ret, fragment.texcoord[%u].a, fragment.texcoord[%u];\n", stage, stage);
+                } else {
+                    shader_addline(&buffer, "MOV ret.a, fragment.texcoord[%u].b;\n", stage);
+                    shader_addline(&buffer, "MAD ret.rgb, ret, fragment.texcoord[%u].b, fragment.texcoord[%u];\n", stage, stage);
+                }
+            } else {
+                shader_addline(&buffer, "ADD ret, ret, fragment.texcoord[%u];\n", stage);
+            }
+
+            shader_addline(&buffer, "%s%s tex%u, ret, texture[%u], %s;\n",
+                           instr, sat, stage, stage, textype);
+            if(settings->op[stage - 1].cop == WINED3DTOP_BUMPENVMAPLUMINANCE) {
+                shader_addline(&buffer, "MAD_SAT ret.r, tex%u.b, luminance%u.r, luminance%u.g;\n",
+                               stage - 1, stage - 1, stage - 1);
+                shader_addline(&buffer, "MUL tex%u, tex%u, ret.r;\n", stage, stage);
+            }
+        } else if(settings->op[stage].projected == proj_count3) {
+            shader_addline(&buffer, "MOV ret, fragment.texcoord[%u];\n", stage);
+            shader_addline(&buffer, "MOV ret.a, ret.b;\n");
             shader_addline(&buffer, "%s%s tex%u, ret, texture[%u], %s;\n",
                             instr, sat, stage, stage, textype);
         } else {
@@ -2711,44 +2830,58 @@ static GLuint gen_arbfp_ffp_shader(struct ffp_settings *settings, IWineD3DStateB
     for(stage = 0; stage < MAX_TEXTURES; stage++) {
         if(settings->op[stage].cop == WINED3DTOP_DISABLE) {
             if(stage == 0) {
-                shader_addline(&buffer, "MOV result.color, fragment.color.primary;\n");
+                final_combiner_src = "fragment.color.primary";
             }
             break;
-        } else if(stage == (MAX_TEXTURES - 1)) {
-            last = TRUE;
-        } else if(settings->op[stage + 1].cop == WINED3DTOP_DISABLE) {
-            last = TRUE;
+        }
+
+        if(settings->op[stage].cop == WINED3DTOP_SELECTARG1 &&
+           settings->op[stage].aop == WINED3DTOP_SELECTARG1) {
+            op_equal = settings->op[stage].carg1 == settings->op[stage].aarg1;
+        } else if(settings->op[stage].cop == WINED3DTOP_SELECTARG1 &&
+                  settings->op[stage].aop == WINED3DTOP_SELECTARG2) {
+            op_equal = settings->op[stage].carg1 == settings->op[stage].aarg2;
+        } else if(settings->op[stage].cop == WINED3DTOP_SELECTARG2 &&
+                  settings->op[stage].aop == WINED3DTOP_SELECTARG1) {
+            op_equal = settings->op[stage].carg2 == settings->op[stage].aarg1;
+        } else if(settings->op[stage].cop == WINED3DTOP_SELECTARG2 &&
+                  settings->op[stage].aop == WINED3DTOP_SELECTARG2) {
+            op_equal = settings->op[stage].carg2 == settings->op[stage].aarg2;
+        } else {
+            op_equal = settings->op[stage].aop   == settings->op[stage].cop &&
+                       settings->op[stage].carg0 == settings->op[stage].aarg0 &&
+                       settings->op[stage].carg1 == settings->op[stage].aarg1 &&
+                       settings->op[stage].carg2 == settings->op[stage].aarg2;
         }
 
         if(settings->op[stage].aop == WINED3DTOP_DISABLE) {
-            gen_ffp_instr(&buffer, stage, TRUE, FALSE, last, settings->op[stage].dst,
+            gen_ffp_instr(&buffer, stage, TRUE, FALSE, settings->op[stage].dst,
                           settings->op[stage].cop, settings->op[stage].carg0,
                           settings->op[stage].carg1, settings->op[stage].carg2);
-            if(last && stage == 0) {
-                shader_addline(&buffer, "MOV result.color.a, fragment.color.primary.a;\n");
-            } else if(last) {
-                shader_addline(&buffer, "MOV result.color.a, ret.a;\n");
-            } else if(stage == 0) {
+            if(stage == 0) {
                 shader_addline(&buffer, "MOV ret.a, fragment.color.primary.a;\n");
             }
-        } else if(settings->op[stage].aop   == settings->op[stage].cop &&
-                  settings->op[stage].carg0 == settings->op[stage].aarg0 &&
-                  settings->op[stage].carg1 == settings->op[stage].aarg1 &&
-                  settings->op[stage].carg2 == settings->op[stage].aarg2) {
-            gen_ffp_instr(&buffer, stage, TRUE, TRUE, last, settings->op[stage].dst,
+        } else if(op_equal) {
+            gen_ffp_instr(&buffer, stage, TRUE, TRUE, settings->op[stage].dst,
                           settings->op[stage].cop, settings->op[stage].carg0,
                           settings->op[stage].carg1, settings->op[stage].carg2);
         } else {
-            gen_ffp_instr(&buffer, stage, TRUE, FALSE, last, settings->op[stage].dst,
+            gen_ffp_instr(&buffer, stage, TRUE, FALSE, settings->op[stage].dst,
                           settings->op[stage].cop, settings->op[stage].carg0,
                           settings->op[stage].carg1, settings->op[stage].carg2);
-            gen_ffp_instr(&buffer, stage, FALSE, TRUE, last, settings->op[stage].dst,
+            gen_ffp_instr(&buffer, stage, FALSE, TRUE, settings->op[stage].dst,
                           settings->op[stage].aop, settings->op[stage].aarg0,
                           settings->op[stage].aarg1, settings->op[stage].aarg2);
         }
     }
 
-    /* TODO: Generate sRGB write color correction */
+    if(settings->sRGB_write) {
+        shader_addline(&buffer, "MAD ret, fragment.color.secondary, specular_enable, %s;\n", final_combiner_src);
+        arbfp_add_sRGB_correction(&buffer, "ret", "arg0", "arg1", "arg2", "tempreg");
+        shader_addline(&buffer, "MOV result.color.a, ret.a;\n");
+    } else {
+        shader_addline(&buffer, "MAD result.color, fragment.color.secondary, specular_enable, %s;\n", final_combiner_src);
+    }
 
     /* Footer */
     shader_addline(&buffer, "END\n");
@@ -2776,7 +2909,19 @@ static void fragment_prog_arbfp(DWORD state, IWineD3DStateBlockImpl *stateblock,
     struct arbfp_ffp_desc *desc;
     unsigned int i;
 
-    if(isStateDirty(context, STATE_RENDER(WINED3DRS_FOGENABLE))) return;
+    if(isStateDirty(context, STATE_RENDER(WINED3DRS_FOGENABLE))) {
+        if(use_pshader) {
+            IWineD3DPixelShader_CompileShader(stateblock->pixelShader);
+        } else if(device->shader_backend == &arb_program_shader_backend && context->last_was_pshader) {
+            /* Reload fixed function constants since they collide with the pixel shader constants */
+            for(i = 0; i < MAX_TEXTURES; i++) {
+                set_bumpmat_arbfp(STATE_TEXTURESTAGE(i, WINED3DTSS_BUMPENVMAT00), stateblock, context);
+            }
+            state_texfactor_arbfp(STATE_RENDER(WINED3DRS_TEXTUREFACTOR), stateblock, context);
+            state_arb_specularenable(STATE_RENDER(WINED3DRS_SPECULARENABLE), stateblock, context);
+        }
+        return;
+    }
 
     if(use_pshader) {
         IWineD3DPixelShader_CompileShader(stateblock->pixelShader);
@@ -2815,6 +2960,7 @@ static void fragment_prog_arbfp(DWORD state, IWineD3DStateBlockImpl *stateblock,
                 set_bumpmat_arbfp(STATE_TEXTURESTAGE(i, WINED3DTSS_BUMPENVMAT00), stateblock, context);
             }
             state_texfactor_arbfp(STATE_RENDER(WINED3DRS_TEXTUREFACTOR), stateblock, context);
+            state_arb_specularenable(STATE_RENDER(WINED3DRS_SPECULARENABLE), stateblock, context);
         }
     }
 
@@ -2851,6 +2997,12 @@ static void state_arbfp_fog(DWORD state, IWineD3DStateBlockImpl *stateblock, Win
     }
 }
 
+static void textransform(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    if(!isStateDirty(context, STATE_PIXELSHADER)) {
+        fragment_prog_arbfp(state, stateblock, context);
+    }
+}
+
 #undef GLINFO_LOCATION
 
 static const struct StateEntryTemplate arbfp_fragmentstate_template[] = {
@@ -2868,6 +3020,8 @@ static const struct StateEntryTemplate arbfp_fragmentstate_template[] = {
     {STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVLSCALE),     { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
+    {STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVLOFFSET),    { STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
     {STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),           { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
     {STATE_TEXTURESTAGE(1, WINED3DTSS_COLORARG1),         { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
     {STATE_TEXTURESTAGE(1, WINED3DTSS_COLORARG2),         { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
@@ -2881,6 +3035,8 @@ static const struct StateEntryTemplate arbfp_fragmentstate_template[] = {
     {STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVLSCALE),     { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
+    {STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVLOFFSET),    { STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
     {STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),           { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
     {STATE_TEXTURESTAGE(2, WINED3DTSS_COLORARG1),         { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
     {STATE_TEXTURESTAGE(2, WINED3DTSS_COLORARG2),         { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
@@ -2894,6 +3050,8 @@ static const struct StateEntryTemplate arbfp_fragmentstate_template[] = {
     {STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVLSCALE),     { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
+    {STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVLOFFSET),    { STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
     {STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),           { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
     {STATE_TEXTURESTAGE(3, WINED3DTSS_COLORARG1),         { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
     {STATE_TEXTURESTAGE(3, WINED3DTSS_COLORARG2),         { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
@@ -2907,6 +3065,8 @@ static const struct StateEntryTemplate arbfp_fragmentstate_template[] = {
     {STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVLSCALE),     { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
+    {STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVLOFFSET),    { STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
     {STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),           { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
     {STATE_TEXTURESTAGE(4, WINED3DTSS_COLORARG1),         { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
     {STATE_TEXTURESTAGE(4, WINED3DTSS_COLORARG2),         { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
@@ -2920,6 +3080,8 @@ static const struct StateEntryTemplate arbfp_fragmentstate_template[] = {
     {STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVLSCALE),     { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
+    {STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVLOFFSET),    { STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
     {STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),           { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
     {STATE_TEXTURESTAGE(5, WINED3DTSS_COLORARG1),         { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
     {STATE_TEXTURESTAGE(5, WINED3DTSS_COLORARG2),         { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
@@ -2933,6 +3095,8 @@ static const struct StateEntryTemplate arbfp_fragmentstate_template[] = {
     {STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVLSCALE),     { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
+    {STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVLOFFSET),    { STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
     {STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),           { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
     {STATE_TEXTURESTAGE(6, WINED3DTSS_COLORARG1),         { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
     {STATE_TEXTURESTAGE(6, WINED3DTSS_COLORARG2),         { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
@@ -2946,6 +3110,8 @@ static const struct StateEntryTemplate arbfp_fragmentstate_template[] = {
     {STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVLSCALE),     { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
+    {STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVLOFFSET),    { STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
     {STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),           { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
     {STATE_TEXTURESTAGE(7, WINED3DTSS_COLORARG1),         { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
     {STATE_TEXTURESTAGE(7, WINED3DTSS_COLORARG2),         { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
@@ -2959,6 +3125,8 @@ static const struct StateEntryTemplate arbfp_fragmentstate_template[] = {
     {STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT01),      { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT10),      { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
     {STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT11),      { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVMAT00),     set_bumpmat_arbfp       }, 0                               },
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVLSCALE),     { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
+    {STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVLOFFSET),    { STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlum_arbfp    }, 0                               },
     { STATE_SAMPLER(0),                                   { STATE_SAMPLER(0),                                   sampler_texdim          }, 0                               },
     { STATE_SAMPLER(1),                                   { STATE_SAMPLER(1),                                   sampler_texdim          }, 0                               },
     { STATE_SAMPLER(2),                                   { STATE_SAMPLER(2),                                   sampler_texdim          }, 0                               },
@@ -2971,6 +3139,16 @@ static const struct StateEntryTemplate arbfp_fragmentstate_template[] = {
     { STATE_RENDER(WINED3DRS_FOGENABLE),                  { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_arbfp_fog         }, 0                               },
     { STATE_RENDER(WINED3DRS_FOGTABLEMODE),               { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_arbfp_fog         }, 0                               },
     { STATE_RENDER(WINED3DRS_FOGVERTEXMODE),              { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_arbfp_fog         }, 0                               },
+    { STATE_RENDER(WINED3DRS_SRGBWRITEENABLE),            { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
+    {STATE_TEXTURESTAGE(0,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TEXTURESTAGE(0, WINED3DTSS_TEXTURETRANSFORMFLAGS), textransform      }, 0                               },
+    {STATE_TEXTURESTAGE(1,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TEXTURESTAGE(1, WINED3DTSS_TEXTURETRANSFORMFLAGS), textransform      }, 0                               },
+    {STATE_TEXTURESTAGE(2,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TEXTURESTAGE(2, WINED3DTSS_TEXTURETRANSFORMFLAGS), textransform      }, 0                               },
+    {STATE_TEXTURESTAGE(3,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TEXTURESTAGE(3, WINED3DTSS_TEXTURETRANSFORMFLAGS), textransform      }, 0                               },
+    {STATE_TEXTURESTAGE(4,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TEXTURESTAGE(4, WINED3DTSS_TEXTURETRANSFORMFLAGS), textransform      }, 0                               },
+    {STATE_TEXTURESTAGE(5,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TEXTURESTAGE(5, WINED3DTSS_TEXTURETRANSFORMFLAGS), textransform      }, 0                               },
+    {STATE_TEXTURESTAGE(6,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TEXTURESTAGE(6, WINED3DTSS_TEXTURETRANSFORMFLAGS), textransform      }, 0                               },
+    {STATE_TEXTURESTAGE(7,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TEXTURESTAGE(7, WINED3DTSS_TEXTURETRANSFORMFLAGS), textransform      }, 0                               },
+    { STATE_RENDER(WINED3DRS_SPECULARENABLE),             { STATE_RENDER(WINED3DRS_SPECULARENABLE),             state_arb_specularenable}, 0                               },
     {0 /* Terminate */,                                   { 0,                                                  0                       }, 0                               },
 };
 
@@ -2980,7 +3158,8 @@ const struct fragment_pipeline arbfp_fragment_pipeline = {
     arbfp_alloc,
     arbfp_free,
     shader_arb_conv_supported,
-    arbfp_fragmentstate_template
+    arbfp_fragmentstate_template,
+    TRUE /* We can disable projected textures */
 };
 
 #define GLINFO_LOCATION device->adapter->gl_info
@@ -2988,6 +3167,7 @@ const struct fragment_pipeline arbfp_fragment_pipeline = {
 struct arbfp_blit_priv {
     GLenum yuy2_rect_shader, yuy2_2d_shader;
     GLenum uyvy_rect_shader, uyvy_2d_shader;
+    GLenum yv12_rect_shader, yv12_2d_shader;
 };
 
 static HRESULT arbfp_blit_alloc(IWineD3DDevice *iface) {
@@ -3008,23 +3188,23 @@ static void arbfp_blit_free(IWineD3DDevice *iface) {
     GL_EXTCALL(glDeleteProgramsARB(1, &priv->yuy2_2d_shader));
     GL_EXTCALL(glDeleteProgramsARB(1, &priv->uyvy_rect_shader));
     GL_EXTCALL(glDeleteProgramsARB(1, &priv->uyvy_2d_shader));
+    GL_EXTCALL(glDeleteProgramsARB(1, &priv->yv12_rect_shader));
+    GL_EXTCALL(glDeleteProgramsARB(1, &priv->yv12_2d_shader));
     checkGLcall("Delete yuv programs\n");
     LEAVE_GL();
 }
 
-GLenum gen_yuv_shader(IWineD3DDeviceImpl *device, WINED3DFORMAT fmt, GLenum textype) {
-    GLenum shader;
-    SHADER_BUFFER buffer;
+BOOL gen_planar_yuv_read(SHADER_BUFFER *buffer, WINED3DFORMAT fmt, GLenum textype, char *luminance) {
+    char chroma;
     const char *tex, *texinstr;
-    char chroma, luminance;
-    struct arbfp_blit_priv *priv = (struct arbfp_blit_priv *) device->blit_priv;
 
-    /* Shader header */
-    buffer.bsize = 0;
-    buffer.lineNo = 0;
-    buffer.newline = TRUE;
-    buffer.buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, SHADER_PGMSIZE);
-
+    if(fmt == WINED3DFMT_UYVY) {
+        chroma = 'r';
+        *luminance = 'a';
+    } else {
+        chroma = 'a';
+        *luminance = 'r';
+    }
     switch(textype) {
         case GL_TEXTURE_2D:             tex = "2D";     texinstr = "TXP"; break;
         case GL_TEXTURE_RECTANGLE_ARB:  tex = "RECT";   texinstr = "TEX"; break;
@@ -3033,16 +3213,229 @@ GLenum gen_yuv_shader(IWineD3DDeviceImpl *device, WINED3DFORMAT fmt, GLenum text
              * properly in the texture to find the correct chroma values
              */
             FIXME("Implement yuv correction for non-2d, non-rect textures\n");
-            return 0;
+            return FALSE;
     }
 
-    if(fmt == WINED3DFMT_UYVY) {
-        chroma = 'r';
-        luminance = 'a';
+    /* First we have to read the chroma values. This means we need at least two pixels(no filtering),
+     * or 4 pixels(with filtering). To get the unmodified chromas, we have to rid ourselves of the
+     * filtering when we sample the texture.
+     *
+     * These are the rules for reading the chroma:
+     *
+     * Even pixel: Cr
+     * Even pixel: U
+     * Odd pixel: V
+     *
+     * So we have to get the sampling x position in non-normalized coordinates in integers
+     */
+    if(textype != GL_TEXTURE_RECTANGLE_ARB) {
+        shader_addline(buffer, "MUL texcrd.rg, fragment.texcoord[0], size.x;\n");
+        shader_addline(buffer, "MOV texcrd.a, size.x;\n");
     } else {
-        chroma = 'a';
-        luminance = 'r';
+        shader_addline(buffer, "MOV texcrd, fragment.texcoord[0];\n");
     }
+    /* We must not allow filtering between pixel x and x+1, this would mix U and V
+     * Vertical filtering is ok. However, bear in mind that the pixel center is at
+     * 0.5, so add 0.5.
+     */
+    shader_addline(buffer, "FLR texcrd.x, texcrd.x;\n");
+    shader_addline(buffer, "ADD texcrd.x, texcrd.x, coef.y;\n");
+
+    /* Divide the x coordinate by 0.5 and get the fraction. This gives 0.25 and 0.75 for the
+     * even and odd pixels respectively
+     */
+    shader_addline(buffer, "MUL texcrd2, texcrd, coef.y;\n");
+    shader_addline(buffer, "FRC texcrd2, texcrd2;\n");
+
+    /* Sample Pixel 1 */
+    shader_addline(buffer, "%s luminance, texcrd, texture[0], %s;\n", texinstr, tex);
+
+    /* Put the value into either of the chroma values */
+    shader_addline(buffer, "SGE temp.x, texcrd2.x, coef.y;\n");
+    shader_addline(buffer, "MUL chroma.r, luminance.%c, temp.x;\n", chroma);
+    shader_addline(buffer, "SLT temp.x, texcrd2.x, coef.y;\n");
+    shader_addline(buffer, "MUL chroma.g, luminance.%c, temp.x;\n", chroma);
+
+    /* Sample pixel 2. If we read an even pixel(SLT above returned 1), sample
+     * the pixel right to the current one. Otherwise, sample the left pixel.
+     * Bias and scale the SLT result to -1;1 and add it to the texcrd.x.
+     */
+    shader_addline(buffer, "MAD temp.x, temp.x, coef.z, -coef.x;\n");
+    shader_addline(buffer, "ADD texcrd.x, texcrd, temp.x;\n");
+    shader_addline(buffer, "%s luminance, texcrd, texture[0], %s;\n", texinstr, tex);
+
+    /* Put the value into the other chroma */
+    shader_addline(buffer, "SGE temp.x, texcrd2.x, coef.y;\n");
+    shader_addline(buffer, "MAD chroma.g, luminance.%c, temp.x, chroma.g;\n", chroma);
+    shader_addline(buffer, "SLT temp.x, texcrd2.x, coef.y;\n");
+    shader_addline(buffer, "MAD chroma.r, luminance.%c, temp.x, chroma.r;\n", chroma);
+
+    /* TODO: If filtering is enabled, sample a 2nd pair of pixels left or right of
+     * the current one and lerp the two U and V values
+     */
+
+    /* This gives the correctly filtered luminance value */
+    shader_addline(buffer, "TEX luminance, fragment.texcoord[0], texture[0], %s;\n", tex);
+
+    return TRUE;
+}
+
+BOOL gen_yv12_read(SHADER_BUFFER *buffer, WINED3DFORMAT fmt, GLenum textype, char *luminance) {
+    const char *tex;
+
+    switch(textype) {
+        case GL_TEXTURE_2D:             tex = "2D";     break;
+        case GL_TEXTURE_RECTANGLE_ARB:  tex = "RECT";   break;
+        default:
+            FIXME("Implement yv12 correction for non-2d, non-rect textures\n");
+            return FALSE;
+    }
+
+    /* YV12 surfaces contain a WxH sized luminance plane, followed by a (W/2)x(H/2)
+     * V and a (W/2)x(H/2) U plane, each with 8 bit per pixel. So the effective
+     * bitdepth is 12 bits per pixel. Since the U and V planes have only half the
+     * pitch of the luminance plane, the packing into the gl texture is a bit
+     * unfortunate. If the whole texture is interpreted as luminance data it looks
+     * approximately like this:
+     *
+     *        +----------------------------------+----
+     *        |                                  |
+     *        |                                  |
+     *        |                                  |
+     *        |                                  |
+     *        |                                  |   2
+     *        |            LUMINANCE             |   -
+     *        |                                  |   3
+     *        |                                  |
+     *        |                                  |
+     *        |                                  |
+     *        |                                  |
+     *        +----------------+-----------------+----
+     *        |                |                 |
+     *        |  U even rows   |  U odd rows     |
+     *        |                |                 |   1
+     *        +----------------+------------------   -
+     *        |                |                 |   3
+     *        |  V even rows   |  V odd rows     |
+     *        |                |                 |
+     *        +----------------+-----------------+----
+     *        |                |                 |
+     *        |     0.5        |       0.5       |
+     *
+     * So it appears as if there are 4 chroma images, but in fact the odd rows
+     * in the chroma images are in the same row as the even ones. So its is
+     * kinda tricky to read
+     *
+     * When reading from rectangle textures, keep in mind that the input y coordinates
+     * go from 0 to d3d_height, whereas the opengl texture height is 1.5 * d3d_height
+     */
+    shader_addline(buffer, "PARAM yv12_coef = {%f, %f, %f, %f};\n",
+                   2.0 / 3.0, 1.0 / 6.0, (2.0 / 3.0) + (1.0 / 6.0), 1.0 / 3.0);
+
+    shader_addline(buffer, "MOV texcrd, fragment.texcoord[0];\n");
+    /* the chroma planes have only half the width */
+    shader_addline(buffer, "MUL texcrd.x, texcrd.x, coef.y;\n");
+
+    /* The first value is between 2/3 and 5/6th of the texture's height, so scale+bias
+     * the coordinate. Also read the right side of the image when reading odd lines
+     *
+     * Don't forget to clamp the y values in into the range, otherwise we'll get filtering
+     * bleeding
+     */
+    if(textype == GL_TEXTURE_2D) {
+
+        shader_addline(buffer, "RCP chroma.w, size.y;\n");
+
+        shader_addline(buffer, "MUL texcrd2.y, texcrd.y, size.y;\n");
+
+        shader_addline(buffer, "FLR texcrd2.y, texcrd2.y;\n");
+        shader_addline(buffer, "MAD texcrd.y, texcrd.y, yv12_coef.y, yv12_coef.x;\n");
+
+        /* Read odd lines from the right side(add size * 0.5 to the x coordinate */
+        shader_addline(buffer, "ADD texcrd2.x, texcrd2.y, yv12_coef.y;\n"); /* To avoid 0.5 == 0.5 comparisons */
+        shader_addline(buffer, "FRC texcrd2.x, texcrd2.x;\n");
+        shader_addline(buffer, "SGE texcrd2.x, texcrd2.x, coef.y;\n");
+        shader_addline(buffer, "MAD texcrd.x, texcrd2.x, coef.y, texcrd.x;\n");
+
+        /* clamp, keep the half pixel origin in mind */
+        shader_addline(buffer, "MAD temp.y, coef.y, chroma.w, yv12_coef.x;\n");
+        shader_addline(buffer, "MAX texcrd.y, temp.y, texcrd.y;\n");
+        shader_addline(buffer, "MAD temp.y, -coef.y, chroma.w, yv12_coef.z;\n");
+        shader_addline(buffer, "MIN texcrd.y, temp.y, texcrd.y;\n");
+    } else {
+        /* Read from [size - size+size/4] */
+        shader_addline(buffer, "FLR texcrd.y, texcrd.y;\n");
+        shader_addline(buffer, "MAD texcrd.y, texcrd.y, coef.w, size.y;\n");
+
+        /* Read odd lines from the right side(add size * 0.5 to the x coordinate */
+        shader_addline(buffer, "ADD texcrd2.x, texcrd.y, yv12_coef.y;\n"); /* To avoid 0.5 == 0.5 comparisons */
+        shader_addline(buffer, "FRC texcrd2.x, texcrd2.x;\n");
+        shader_addline(buffer, "SGE texcrd2.x, texcrd2.x, coef.y;\n");
+        shader_addline(buffer, "MUL texcrd2.x, texcrd2.x, size.x;\n");
+        shader_addline(buffer, "MAD texcrd.x, texcrd2.x, coef.y, texcrd.x;\n");
+
+        /* Make sure to read exactly from the pixel center */
+        shader_addline(buffer, "FLR texcrd.y, texcrd.y;\n");
+        shader_addline(buffer, "ADD texcrd.y, texcrd.y, coef.y;\n");
+
+        /* Clamp */
+        shader_addline(buffer, "MAD temp.y, size.y, coef.w, size.y;\n");
+        shader_addline(buffer, "ADD temp.y, temp.y, -coef.y;\n");
+        shader_addline(buffer, "MIN texcrd.y, temp.y, texcrd.y;\n");
+        shader_addline(buffer, "ADD temp.y, size.y, -coef.y;\n");
+        shader_addline(buffer, "MAX texcrd.y, temp.y, texcrd.y;\n");
+    }
+    /* Read the texture, put the result into the output register */
+    shader_addline(buffer, "TEX temp, texcrd, texture[0], %s;\n", tex);
+    shader_addline(buffer, "MOV chroma.r, temp.a;\n");
+
+    /* The other chroma value is 1/6th of the texture lower, from 5/6th to 6/6th
+     * No need to clamp because we're just reusing the already clamped value from above
+     */
+    if(textype == GL_TEXTURE_2D) {
+        shader_addline(buffer, "ADD texcrd.y, texcrd.y, yv12_coef.y;\n");
+    } else {
+        shader_addline(buffer, "MAD texcrd.y, size.y, coef.w, texcrd.y;\n");
+    }
+    shader_addline(buffer, "TEX temp, texcrd, texture[0], %s;\n", tex);
+    shader_addline(buffer, "MOV chroma.g, temp.a;\n");
+
+    /* Sample the luminance value. It is in the top 2/3rd of the texture, so scale the y coordinate.
+     * Clamp the y coordinate to prevent the chroma values from bleeding into the sampled luminance
+     * values due to filtering
+     */
+    shader_addline(buffer, "MOV texcrd, fragment.texcoord[0];\n");
+    if(textype == GL_TEXTURE_2D) {
+        /* Multiply the y coordinate by 2/3 and clamp it */
+        shader_addline(buffer, "MUL texcrd.y, texcrd.y, yv12_coef.x;\n");
+        shader_addline(buffer, "MAD temp.y, -coef.y, chroma.w, yv12_coef.x;\n");
+        shader_addline(buffer, "MIN texcrd.y, temp.y, texcrd.y;\n");
+        shader_addline(buffer, "TEX luminance, texcrd, texture[0], %s;\n", tex);
+    } else {
+        /* Reading from texture_rectangles is pretty streightforward, just use the unmodified
+         * texture coordinate. It is still a good idea to clamp it though, since the opengl texture
+         * is bigger
+         */
+        shader_addline(buffer, "ADD temp.x, size.y, -coef.y;\n");
+        shader_addline(buffer, "MIN texcrd.y, texcrd.y, size.x;\n");
+        shader_addline(buffer, "TEX luminance, texcrd, texture[0], %s;\n", tex);
+    }
+    *luminance = 'a';
+
+    return TRUE;
+}
+
+GLuint gen_yuv_shader(IWineD3DDeviceImpl *device, WINED3DFORMAT fmt, GLenum textype) {
+    GLenum shader;
+    SHADER_BUFFER buffer;
+    char luminance_component;
+    struct arbfp_blit_priv *priv = (struct arbfp_blit_priv *) device->blit_priv;
+
+    /* Shader header */
+    buffer.bsize = 0;
+    buffer.lineNo = 0;
+    buffer.newline = TRUE;
+    buffer.buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, SHADER_PGMSIZE);
 
     GL_EXTCALL(glGenProgramsARB(1, &shader));
     checkGLcall("GL_EXTCALL(glGenProgramsARB(1, &shader))");
@@ -3091,70 +3484,19 @@ GLenum gen_yuv_shader(IWineD3DDeviceImpl *device, WINED3DFORMAT fmt, GLenum text
     shader_addline(&buffer, "TEMP chroma;\n");
     shader_addline(&buffer, "TEMP texcrd;\n");
     shader_addline(&buffer, "TEMP texcrd2;\n");
-    shader_addline(&buffer, "PARAM coef = {1.0, 0.5, 2.0, 0.0};\n");
+    shader_addline(&buffer, "PARAM coef = {1.0, 0.5, 2.0, 0.25};\n");
     shader_addline(&buffer, "PARAM yuv_coef = {1.403, 0.344, 0.714, 1.770};\n");
     shader_addline(&buffer, "PARAM size = program.local[0];\n");
 
-    /* First we have to read the chroma values. This means we need at least two pixels(no filtering),
-     * or 4 pixels(with filtering). To get the unmodified chromas, we have to rid ourselves of the
-     * filtering when we sample the texture.
-     *
-     * These are the rules for reading the chroma:
-     *
-     * Even pixel: Cr
-     * Even pixel: U
-     * Odd pixel: V
-     *
-     * So we have to get the sampling x position in non-normalized coordinates in integers
-     */
-    if(textype != GL_TEXTURE_RECTANGLE_ARB) {
-        shader_addline(&buffer, "MUL texcrd.rg, fragment.texcoord[0], size.x;\n");
-        shader_addline(&buffer, "MOV texcrd.a, size.x;\n");
+    if(fmt == WINED3DFMT_UYVY || fmt ==WINED3DFMT_YUY2) {
+        if(gen_planar_yuv_read(&buffer, fmt, textype, &luminance_component) == FALSE) {
+            return 0;
+        }
     } else {
-        shader_addline(&buffer, "MOV texcrd, fragment.texcoord[0];\n");
+        if(gen_yv12_read(&buffer, fmt, textype, &luminance_component) == FALSE) {
+            return 0;
+        }
     }
-    /* We must not allow filtering between pixel x and x+1, this would mix U and V
-     * Vertical filtering is ok. However, bear in mind that the pixel center is at
-     * 0.5, so add 0.5.
-     */
-    shader_addline(&buffer, "FLR texcrd.x, texcrd.x;\n");
-    shader_addline(&buffer, "ADD texcrd.x, texcrd.x, coef.y;\n");
-
-    /* Divide the x coordinate by 0.5 and get the fraction. This gives 0.25 and 0.75 for the
-     * even and odd pixels respectively
-     */
-    shader_addline(&buffer, "MUL texcrd2, texcrd, coef.y;\n");
-    shader_addline(&buffer, "FRC texcrd2, texcrd2;\n");
-
-    /* Sample Pixel 1 */
-    shader_addline(&buffer, "%s luminance, texcrd, texture[0], %s;\n", texinstr, tex);
-
-    /* Put the value into either of the chroma values */
-    shader_addline(&buffer, "SGE temp.x, texcrd2.x, coef.y;\n");
-    shader_addline(&buffer, "MUL chroma.r, luminance.%c, temp.x;\n", chroma);
-    shader_addline(&buffer, "SLT temp.x, texcrd2.x, coef.y;\n");
-    shader_addline(&buffer, "MUL chroma.g, luminance.%c, temp.x;\n", chroma);
-
-    /* Sample pixel 2. If we read an even pixel(SLT above returned 1), sample
-     * the pixel right to the current one. Otherwise, sample the left pixel.
-     * Bias and scale the SLT result to -1;1 and add it to the texcrd.x.
-     */
-    shader_addline(&buffer, "MAD temp.x, temp.x, coef.z, -coef.x;\n");
-    shader_addline(&buffer, "ADD texcrd.x, texcrd, temp.x;\n");
-    shader_addline(&buffer, "%s luminance, texcrd, texture[0], %s;\n", texinstr, tex);
-
-    /* Put the value into the other chroma */
-    shader_addline(&buffer, "SGE temp.x, texcrd2.x, coef.y;\n");
-    shader_addline(&buffer, "MAD chroma.g, luminance.%c, temp.x, chroma.g;\n", chroma);
-    shader_addline(&buffer, "SLT temp.x, texcrd2.x, coef.y;\n");
-    shader_addline(&buffer, "MAD chroma.r, luminance.%c, temp.x, chroma.r;\n", chroma);
-
-    /* TODO: If filtering is enabled, sample a 2nd pair of pixels left or right of
-     * the current one and lerp the two U and V values
-     */
-
-    /* This gives the correctly filtered luminance value */
-    shader_addline(&buffer, "TEX luminance, fragment.texcoord[0], texture[0], %s;\n", tex);
 
     /* Calculate the final result. Formula is taken from
      * http://www.fourcc.org/fccyvrgb.php. Note that the chroma
@@ -3162,10 +3504,10 @@ GLenum gen_yuv_shader(IWineD3DDeviceImpl *device, WINED3DFORMAT fmt, GLenum text
      */
     shader_addline(&buffer, "SUB chroma.rg, chroma, coef.y;\n");
 
-    shader_addline(&buffer, "MAD result.color.r, chroma.r, yuv_coef.x, luminance.%c;\n", luminance);
-    shader_addline(&buffer, "MAD temp.r, -chroma.g, yuv_coef.y, luminance.%c;\n", luminance);
+    shader_addline(&buffer, "MAD result.color.r, chroma.r, yuv_coef.x, luminance.%c;\n", luminance_component);
+    shader_addline(&buffer, "MAD temp.r, -chroma.g, yuv_coef.y, luminance.%c;\n", luminance_component);
     shader_addline(&buffer, "MAD result.color.g, -chroma.r, yuv_coef.z, temp.r;\n");
-    shader_addline(&buffer, "MAD result.color.b, chroma.g, yuv_coef.w, luminance.%c;\n", luminance);
+    shader_addline(&buffer, "MAD result.color.b, chroma.g, yuv_coef.w, luminance.%c;\n", luminance_component);
     shader_addline(&buffer, "END\n");
 
     GL_EXTCALL(glProgramStringARB(GL_FRAGMENT_PROGRAM_ARB, GL_PROGRAM_FORMAT_ASCII_ARB, strlen(buffer.buffer), buffer.buffer));
@@ -3183,11 +3525,17 @@ GLenum gen_yuv_shader(IWineD3DDeviceImpl *device, WINED3DFORMAT fmt, GLenum text
         } else {
             priv->yuy2_2d_shader = shader;
         }
-    } else {
+    } else if(fmt == WINED3DFMT_UYVY) {
         if(textype == GL_TEXTURE_RECTANGLE_ARB) {
             priv->uyvy_rect_shader = shader;
         } else {
             priv->uyvy_2d_shader = shader;
+        }
+    } else {
+        if(textype == GL_TEXTURE_RECTANGLE_ARB) {
+            priv->yv12_rect_shader = shader;
+        } else {
+            priv->yv12_2d_shader = shader;
         }
     }
     return shader;
@@ -3202,7 +3550,9 @@ static HRESULT arbfp_blit_set(IWineD3DDevice *iface, WINED3DFORMAT fmt, GLenum t
 
     getFormatDescEntry(fmt, &GLINFO_LOCATION, &glDesc);
 
-    if(glDesc->conversion_group != WINED3DFMT_YUY2 && glDesc->conversion_group != WINED3DFMT_UYVY) {
+    if(glDesc->conversion_group != WINED3DFMT_YUY2 && glDesc->conversion_group != WINED3DFMT_UYVY &&
+       glDesc->conversion_group != WINED3DFMT_YV12) {
+        ERR("Format: %s\n", debug_d3dformat(glDesc->conversion_group));
         /* Don't bother setting up a shader for unconverted formats */
         glEnable(textype);
         checkGLcall("glEnable(textype)");
@@ -3215,11 +3565,17 @@ static HRESULT arbfp_blit_set(IWineD3DDevice *iface, WINED3DFORMAT fmt, GLenum t
         } else {
             shader = priv->yuy2_2d_shader;
         }
-    } else {
+    } else if(glDesc->conversion_group == WINED3DFMT_UYVY) {
         if(textype == GL_TEXTURE_RECTANGLE_ARB) {
             shader = priv->uyvy_rect_shader;
         } else {
             shader = priv->uyvy_2d_shader;
+        }
+    } else {
+        if(textype == GL_TEXTURE_RECTANGLE_ARB) {
+            shader = priv->yv12_rect_shader;
+        } else {
+            shader = priv->yv12_2d_shader;
         }
     }
 
@@ -3258,6 +3614,7 @@ static BOOL arbfp_blit_conv_supported(WINED3DFORMAT fmt) {
     switch(fmt) {
         case WINED3DFMT_YUY2:
         case WINED3DFMT_UYVY:
+        case WINED3DFMT_YV12:
             TRACE("[OK]\n");
             return TRUE;
         default:

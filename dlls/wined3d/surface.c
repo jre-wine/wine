@@ -231,6 +231,9 @@ static void surface_download_data(IWineD3DSurfaceImpl *This) {
 /* This call just uploads data, the caller is responsible for activating the
  * right context and binding the correct texture. */
 static void surface_upload_data(IWineD3DSurfaceImpl *This, GLenum internal, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid *data) {
+
+    if(This->heightscale != 1.0 && This->heightscale != 0.0) height *= This->heightscale;
+
     if (This->resource.format == WINED3DFMT_DXT1 ||
             This->resource.format == WINED3DFMT_DXT2 || This->resource.format == WINED3DFMT_DXT3 ||
             This->resource.format == WINED3DFMT_DXT4 || This->resource.format == WINED3DFMT_DXT5 ||
@@ -292,6 +295,8 @@ static void surface_upload_data(IWineD3DSurfaceImpl *This, GLenum internal, GLsi
 static void surface_allocate_surface(IWineD3DSurfaceImpl *This, GLenum internal, GLsizei width, GLsizei height, GLenum format, GLenum type) {
     BOOL enable_client_storage = FALSE;
     BYTE *mem = NULL;
+
+    if(This->heightscale != 1.0 && This->heightscale != 0.0) height *= This->heightscale;
 
     TRACE("(%p) : Creating surface (target %#x)  level %d, d3d format %s, internal format %#x, width %d, height %d, gl format %#x, gl type=%#x\n", This,
             This->glDescription.target, This->glDescription.level, debug_d3dformat(This->resource.format), internal, width, height, format, type);
@@ -955,6 +960,9 @@ static void surface_prepare_system_memory(IWineD3DSurfaceImpl *This) {
      */
     if(GL_SUPPORT(ARB_PIXEL_BUFFER_OBJECT) && (This->Flags & SFLAG_DYNLOCK) && !(This->Flags & (SFLAG_PBO | SFLAG_CONVERTED | SFLAG_NONPOW2)) && (This->resource.pool != WINED3DPOOL_SYSTEMMEM)) {
         GLenum error;
+        IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+
+        ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
         ENTER_GL();
 
         GL_EXTCALL(glGenBuffersARB(1, &This->pbo));
@@ -1312,14 +1320,6 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
             case RTL_READTEX:
             case RTL_TEXTEX:
                 ActivateContext(myDevice, iface, CTXUSAGE_BLIT);
-                ENTER_GL();
-                if (This->glDescription.textureName == 0) {
-                    glGenTextures(1, &This->glDescription.textureName);
-                    checkGLcall("glGenTextures");
-                }
-                glBindTexture(This->glDescription.target, This->glDescription.textureName);
-                checkGLcall("glBindTexture(This->glDescription.target, This->glDescription.textureName)");
-                LEAVE_GL();
                 IWineD3DSurface_LoadLocation(iface, SFLAG_INTEXTURE, NULL /* partial texture loading not supported yet */);
                 /* drop through */
 
@@ -1533,7 +1533,11 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
              * in which the main render target uses p8. Some games like GTA Vice City use P8 for texturing which
              * conflicts with this.
              */
-            if( !(GL_SUPPORT(EXT_PALETTED_TEXTURE) || (GL_SUPPORT(ARB_FRAGMENT_PROGRAM) && primary_render_target_is_p8(device))) || colorkey_active || !use_texturing ) {
+            if( !(GL_SUPPORT(EXT_PALETTED_TEXTURE) ||
+                  (GL_SUPPORT(ARB_FRAGMENT_PROGRAM) &&
+                   device->render_targets &&
+                   This == (IWineD3DSurfaceImpl*)device->render_targets[0])) ||
+                colorkey_active || !use_texturing ) {
                 *format = GL_RGBA;
                 *internal = GL_RGBA;
                 *type = GL_UNSIGNED_BYTE;
@@ -3364,7 +3368,6 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
         WINEDDCOLORKEY oldBltCKey = Src->SrcBltCKey;
         RECT SourceRectangle;
         BOOL paletteOverride = FALSE;
-        GLenum buffer;
 
         TRACE("Blt from surface %p to rendertarget %p\n", Src, This);
 
@@ -3434,39 +3437,22 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
         /* Now load the surface */
         IWineD3DSurface_PreLoad((IWineD3DSurface *) Src);
 
-
         /* Activate the destination context, set it up for blitting */
         ActivateContext(myDevice, (IWineD3DSurface *) This, CTXUSAGE_BLIT);
 
-        if(!dstSwapchain) {
-            TRACE("Drawing to offscreen buffer\n");
-            buffer = myDevice->offscreenBuffer;
-        } else {
-            buffer = surface_get_gl_buffer((IWineD3DSurface *)This, (IWineD3DSwapChain *)dstSwapchain);
-
-            /* Front buffer coordinates are screen coordinates, while OpenGL coordinates are
-             * window relative. Also beware of the origin difference(top left vs bottom left).
-             * Also beware that the front buffer's surface size is screen width x screen height,
-             * whereas the real gl drawable size is the size of the window.
-             */
-            if(buffer == GL_FRONT) {
-                RECT windowsize;
-                POINT offset = {0,0};
-                UINT h;
-                ClientToScreen(dstSwapchain->win_handle, &offset);
-                GetClientRect(dstSwapchain->win_handle, &windowsize);
-                h = windowsize.bottom - windowsize.top;
-                rect.x1 -= offset.x; rect.x2 -=offset.x;
-                rect.y1 -= offset.y; rect.y2 -=offset.y;
-                rect.y1 += This->currentDesc.Height - h; rect.y2 += This->currentDesc.Height - h;
-            }
-            TRACE("Drawing to %#x buffer\n", buffer);
+        if (dstSwapchain && (IWineD3DSurface *)This == dstSwapchain->frontBuffer) {
+            RECT windowsize;
+            POINT offset = {0,0};
+            UINT h;
+            ClientToScreen(dstSwapchain->win_handle, &offset);
+            GetClientRect(dstSwapchain->win_handle, &windowsize);
+            h = windowsize.bottom - windowsize.top;
+            rect.x1 -= offset.x; rect.x2 -=offset.x;
+            rect.y1 -= offset.y; rect.y2 -=offset.y;
+            rect.y1 += This->currentDesc.Height - h; rect.y2 += This->currentDesc.Height - h;
         }
 
         ENTER_GL();
-        glDrawBuffer(buffer);
-        checkGLcall("glDrawBuffer");
-
         myDevice->blitter->set_shader((IWineD3DDevice *) myDevice, Src->resource.format,
                                        Src->glDescription.target, Src->pow2Width, Src->pow2Height);
 
@@ -3539,13 +3525,6 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
         /* Leave the opengl state valid for blitting */
         myDevice->blitter->unset_shader((IWineD3DDevice *) myDevice);
 
-        /* The draw buffer should only need to be restored if we were drawing to the front buffer, and there is a back buffer.
-         * otherwise the context manager should choose between GL_BACK / offscreenDrawBuffer
-         */
-        if(dstSwapchain && This == (IWineD3DSurfaceImpl *) dstSwapchain->frontBuffer && dstSwapchain->backBuffer) {
-            glDrawBuffer(GL_BACK);
-            checkGLcall("glDrawBuffer");
-        }
         /* Restore the color key parameters */
         Src->CKeyFlags = oldCKeyFlags;
         Src->SrcBltCKey = oldBltCKey;
@@ -3565,10 +3544,6 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
          * is outdated now
          */
         IWineD3DSurface_ModifyLocation((IWineD3DSurface *) This, SFLAG_INDRAWABLE, TRUE);
-        /* TODO: This should be moved to ModifyLocation() */
-        if(!(dstSwapchain || wined3d_settings.offscreen_rendering_mode != ORM_FBO)) {
-            This->Flags |= SFLAG_INTEXTURE;
-        }
 
         return WINED3D_OK;
     } else {
@@ -3804,15 +3779,6 @@ HRESULT WINAPI IWineD3DSurfaceImpl_RealizePalette(IWineD3DSurface *iface) {
 
         if((This->resource.usage & WINED3DUSAGE_RENDERTARGET) && (convert == NO_CONVERSION))
         {
-            ENTER_GL();
-            if (This->glDescription.textureName == 0) {
-                glGenTextures(1, &This->glDescription.textureName);
-                checkGLcall("glGenTextures");
-            }
-            glBindTexture(This->glDescription.target, This->glDescription.textureName);
-            checkGLcall("glBindTexture(This->glDescription.target, This->glDescription.textureName)");
-            LEAVE_GL();
-
             /* Make sure the texture is up to date. This call doesn't do anything if the texture is already up to date. */
             IWineD3DSurface_LoadLocation(iface, SFLAG_INTEXTURE, NULL);
 
@@ -3821,10 +3787,6 @@ HRESULT WINAPI IWineD3DSurfaceImpl_RealizePalette(IWineD3DSurface *iface) {
 
             /* Re-upload the palette */
             d3dfmt_p8_upload_palette(iface, convert);
-
-            /* Without this some palette updates are missed. This at least happens on Nvidia drivers but
-             * it works fine using Mesa. */
-            glFlush();
         } else {
             if(!(This->Flags & SFLAG_INSYSMEM)) {
                 TRACE("Palette changed with surface that does not have an up to date system memory copy\n");
@@ -4033,7 +3995,7 @@ void surface_load_ds_location(IWineD3DSurface *iface, DWORD location) {
             attach_depth_stencil_fbo(device, GL_FRAMEBUFFER_EXT, iface, FALSE);
 
             /* Do the actual blit */
-            depth_blt((IWineD3DDevice *)device, device->depth_blt_texture);
+            depth_blt((IWineD3DDevice *)device, device->depth_blt_texture, This->currentDesc.Width, This->currentDesc.Height);
             checkGLcall("depth_blt");
 
             if (device->render_offscreen) {
@@ -4055,7 +4017,7 @@ void surface_load_ds_location(IWineD3DSurface *iface, DWORD location) {
 
             GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0));
             checkGLcall("glBindFramebuffer()");
-            depth_blt((IWineD3DDevice *)device, This->glDescription.textureName);
+            depth_blt((IWineD3DDevice *)device, This->glDescription.textureName, This->currentDesc.Width, This->currentDesc.Height);
             checkGLcall("depth_blt");
 
             if (device->render_offscreen) {

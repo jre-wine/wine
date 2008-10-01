@@ -73,6 +73,12 @@ static void create_dde_window(HWND *hwnd, LPCSTR name, WNDPROC wndproc)
     assert(*hwnd);
 }
 
+static void destroy_dde_window(HWND *hwnd, LPCSTR name)
+{
+    DestroyWindow(*hwnd);
+    UnregisterClass(name, GetModuleHandleA(0));
+}
+
 static LRESULT WINAPI dde_server_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     UINT_PTR lo, hi;
@@ -243,7 +249,7 @@ static void test_msg_server(HANDLE hproc, HANDLE hthread)
         while (PeekMessage(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
     }
 
-    DestroyWindow(hwnd);
+    destroy_dde_window(&hwnd, "dde_server");
     GetExitCodeProcess( hproc, &res );
     ok( !res, "client failed with %u error(s)\n", res );
 }
@@ -1107,7 +1113,7 @@ static void test_msg_client()
 
     flush_events();
 
-    DestroyWindow(client_hwnd);
+    destroy_dde_window(&client_hwnd, "dde_client");
 }
 
 static LRESULT WINAPI hook_dde_client_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
@@ -1170,7 +1176,6 @@ static LRESULT WINAPI dde_server_wndprocW(HWND hwnd, UINT msg, WPARAM wparam, LP
         ack.fBusy = 0;
 
         cmd = GlobalLock((HGLOBAL)hi);
-
         if (!cmd || (lstrcmpA(cmd, exec_cmdA) && lstrcmpW((LPCWSTR)cmd, exec_cmdW)))
         {
             trace("ignoring unknown WM_DDE_EXECUTE command\n");
@@ -2116,6 +2121,278 @@ static void test_UnpackDDElParam(void)
     ok(hi == 0xcafebabe, "Expected 0xcafebabe, got %08lx\n", hi);
 }
 
+static HDDEDATA CALLBACK server_end_to_end_callback(UINT uType, UINT uFmt, HCONV hconv,
+                                               HSZ hsz1, HSZ hsz2, HDDEDATA hdata,
+                                               ULONG_PTR dwData1, ULONG_PTR dwData2)
+{
+    DWORD size, rsize;
+    char str[MAX_PATH];
+    static int msg_index = 0;
+    static HCONV conversation = 0;
+    static char test_cmd[] = "test dde command";
+    static WCHAR test_cmd_w[] = {'t','e','s','t',' ','d','d','e',' ','c','o','m','m','a','n','d',0};
+    static char test_service [] = "TestDDEService";
+    static char test_topic [] = "TestDDETopic";
+
+    msg_index++;
+
+    switch (uType)
+    {
+    case XTYP_REGISTER:
+    {
+        ok(msg_index == 1 || msg_index == 7 || msg_index == 13 || msg_index == 19,
+                             "Expected 1, 7, 13 or 19, got %d\n", msg_index);
+        return (HDDEDATA)TRUE;
+        break;
+    }
+
+    case XTYP_CONNECT:
+    {
+        ok(msg_index == 2 || msg_index == 8 || msg_index == 14 || msg_index == 20,
+                             "Expected 2, 8, 14 or 20, got %d\n", msg_index);
+        ok(uFmt == 0, "Expected 0, got %d, msg_index=%d\n", uFmt, msg_index);
+        ok(hconv == 0, "Expected 0, got %p, msg_index=%d\n", hconv, msg_index);
+        ok(hdata == 0, "Expected 0, got %p, msg_index=%d\n", hdata, msg_index);
+        ok(dwData1 != 0, "Expected not 0, got %08lx, msg_index=%d\n", dwData1, msg_index);
+        ok(dwData2 == FALSE, "Expected FALSE, got %08lx, msg_index=%d\n", dwData2, msg_index);
+
+        size = DdeQueryStringA(server_pid, hsz1, str, MAX_PATH, CP_WINANSI);
+        ok(!lstrcmpA(str, test_topic), "Expected %s, got %s, msg_index=%d\n",
+                             test_topic, str, msg_index);
+        ok(size == 12, "Expected 12, got %d, msg_index=%d\n", size, msg_index);
+
+        size = DdeQueryStringA(server_pid, hsz2, str, MAX_PATH, CP_WINANSI);
+        ok(!lstrcmpA(str, test_service), "Expected %s, got %s, msg_index=%d\n",
+                             test_service, str, msg_index);
+        ok(size == 14, "Expected 14, got %d, msg_index=%d\n", size, msg_index);
+
+        return (HDDEDATA) TRUE;
+        break;
+    }
+    case XTYP_CONNECT_CONFIRM:
+    {
+        ok(msg_index == 3 || msg_index == 9  ||  msg_index == 15 ||  msg_index == 21,
+                             "Expected 3, 9, 15 or 21 got %d\n", msg_index);
+        conversation = hconv;
+        return (HDDEDATA) TRUE;
+    }
+    case XTYP_EXECUTE:
+    {
+        BYTE *buffer = NULL;
+
+        ok(msg_index == 4 || msg_index == 5 || msg_index == 10 || msg_index == 11 ||
+           msg_index == 16 || msg_index == 17 || msg_index == 22 || msg_index == 23,
+           "Expected 4, 5, 10, 11, 16, 17, 22 or 23, got %d\n", msg_index);
+        ok(uFmt == 0, "Expected 0, got %d\n", uFmt);
+        ok(hconv == conversation, "Expected conversation handle, got %p, msg_index=%d\n",
+                             hconv, msg_index);
+        ok(dwData1 == 0, "Expected 0, got %08lx, msg_index=%d\n", dwData1, msg_index);
+        ok(dwData2 == 0, "Expected 0, got %08lx, msg_index=%d\n", dwData2, msg_index);
+        ok(hsz2 == 0, "Expected 0, got %p, msg_index=%d\n", hsz2, msg_index);
+        size = DdeQueryStringA(server_pid, hsz1, str, MAX_PATH, CP_WINANSI);
+        ok(!lstrcmpA(str, test_topic), "Expected %s, got %s, msg_index=%d\n",
+                             test_topic, str, msg_index);
+        ok(size == 12, "Expected 12, got %d, msg_index=%d\n", size, msg_index);
+        ok(size == 12, "Expected 12, got %d, msg_index=%d\n", size, msg_index);
+
+        size = DdeGetData(hdata, NULL, 0, 0);
+        if (msg_index == 10 || msg_index ==11 || msg_index == 16 || msg_index ==17)
+          if (msg_index == 10 || msg_index == 16)
+          todo_wine
+            ok(size == 34, "Expected that size should be 34 not %d, msg_index=%d\n",
+                             size, msg_index);
+          else
+            ok(size == 34, "Expected that size should be 34 not %d, msg_index=%d\n",
+                             size, msg_index);
+        else
+        if (msg_index ==22)
+        todo_wine
+            ok(size == 9, "Expected that size should be 9 not %d, msg_index=%d\n",
+                             size, msg_index);
+        else
+          if (msg_index == 5)
+          todo_wine
+            ok(size == 17, "Expected that size should be 17 not %d, msg_index=%d\n",
+                             size, msg_index);
+          else
+            ok(size == 17, "Expected that size should be 17 not %d, msg_index=%d\n",
+                             size, msg_index);
+        ok((buffer = HeapAlloc(GetProcessHeap(), 0, size)) != NULL, "should not be null\n");
+        rsize = DdeGetData(hdata, buffer, size, 0);
+        if (msg_index == 10 || msg_index == 11 || msg_index == 16 || msg_index ==17)
+        {
+            ok(rsize == size, "Incorrect size returned, expected %d got %d, msg_index=%d\n",
+                             size, rsize, msg_index);
+          if (msg_index == 10 || msg_index == 16)
+          todo_wine {
+            ok(!lstrcmpW((WCHAR*)buffer, test_cmd_w),
+                             "Expected \"Test dde command\", msg_index=%d\n",
+                             msg_index);
+            ok(size == 34, "Expected 34, got %d, msg_index=%d\n", size, msg_index);
+          } else
+          {
+            ok(!lstrcmpW((WCHAR*)buffer, test_cmd_w),
+                             "Expected \"Test dde command\", msg_index=%d\n",
+                             msg_index);
+            ok(size == 34, "Expected 34, got %d, msg_index=%d\n", size, msg_index);
+          }
+        }else if (msg_index == 22)
+        {
+            ok(rsize == size, "Incorrect size returned, expected %d got %d, msg_index=%d\n",
+                             size, rsize, msg_index);
+        } else
+        {
+            ok(rsize == size, "Incorrect size returned, expected %d got %d, msg_index=%d\n",
+                             size, rsize, msg_index);
+          if (msg_index == 5)
+          todo_wine {
+            ok(!lstrcmpA((CHAR*)buffer, test_cmd), "Expected %s, got %s, msg_index=%d\n",
+                             test_cmd, buffer, msg_index);
+            ok(size == 17, "Expected size should be 17, got %d, msg_index=%d\n", size, msg_index);
+          }
+          else
+          {
+            ok(!lstrcmpA((CHAR*)buffer, test_cmd), "Expected %s, got %s, msg_index=%d\n",
+                             test_cmd, buffer, msg_index);
+            ok(size == 17, "Expected size should be 17, got %d, msg_index=%d\n", size, msg_index);
+          }
+
+        }
+
+        return (HDDEDATA) DDE_FACK;
+    }
+    case XTYP_DISCONNECT:
+    {
+        return (HDDEDATA) TRUE;
+        break;
+    }
+
+    default:
+        ok(FALSE, "Unhandled msg: %08x, msg_index=%d\n", uType, msg_index);
+    }
+
+    return NULL;
+}
+
+static HDDEDATA CALLBACK client_end_to_end_callback(UINT uType, UINT uFmt, HCONV hconv,
+                                               HSZ hsz1, HSZ hsz2, HDDEDATA hdata,
+                                               ULONG_PTR dwData1, ULONG_PTR dwData2)
+{
+    switch (uType)
+    {
+    case XTYP_DISCONNECT:
+    {
+        return (HDDEDATA) TRUE;
+        break;
+    }
+
+    default:
+        ok(FALSE, "Unhandled msg: %08x\n", uType);
+    }
+
+    return NULL;
+}
+
+static void test_end_to_end_client(BOOL type_a)
+{
+    DWORD  ret, err;
+    DWORD client_pid = 0;
+    HSZ server, topic;
+    HCONV hconv;
+    HDDEDATA hdata;
+    static char test_cmd[] = "test dde command";
+    static WCHAR test_cmd_w[] = {'t','e','s','t',' ','d','d','e',' ','c','o','m','m','a','n','d',0};
+    static char test_service[] = "TestDDEService";
+    static WCHAR test_service_w[] = {'T','e','s','t','D','D','E','S','e','r','v','i','c','e',0};
+    static char test_topic[] = "TestDDETopic";
+    static WCHAR test_topic_w[] = {'T','e','s','t','D','D','E','T','o','p','i','c',0};
+
+    trace("Start end to end client %d\n", type_a);
+
+    if (type_a)
+        ret = DdeInitializeA(&client_pid, client_end_to_end_callback, APPCMD_CLIENTONLY, 0);
+    else
+        ret = DdeInitializeW(&client_pid, client_end_to_end_callback, APPCMD_CLIENTONLY, 0);
+    ok(ret == DMLERR_NO_ERROR, "Expected DMLERR_NO_ERROR, got %x\n", ret);
+
+    if (type_a)
+    {
+        server = DdeCreateStringHandleA(client_pid, test_service, CP_WINANSI);
+        topic = DdeCreateStringHandleA(client_pid, test_topic, CP_WINANSI);
+    }
+    else {
+        server = DdeCreateStringHandleW(client_pid, test_service_w, CP_WINUNICODE);
+        topic = DdeCreateStringHandleW(client_pid, test_topic_w, CP_WINUNICODE);
+    }
+
+    DdeGetLastError(client_pid);
+    hconv = DdeConnect(client_pid, server, topic, NULL);
+    ok(hconv != NULL, "Expected non-NULL conversation\n");
+    ret = DdeGetLastError(client_pid);
+    ok(ret == DMLERR_NO_ERROR, "Expected DMLERR_NO_ERROR, got %x\n", ret);
+    DdeFreeStringHandle(client_pid, server);
+
+    /* Test both A and W data being passed to DdeClientTransaction */
+    hdata = DdeClientTransaction((LPBYTE)test_cmd, strlen(test_cmd) + 1,
+            hconv, (HSZ)0xdead, 0xbeef, XTYP_EXECUTE, 1000, &ret);
+    ok(hdata != NULL, "DdeClientTransaction failed\n");
+    ok(ret == DDE_FACK, "wrong status code %x\n", ret);
+    err = DdeGetLastError(client_pid);
+    ok(err == DMLERR_NO_ERROR, "wrong dde error %x\n", err);
+
+    hdata = DdeClientTransaction((LPBYTE)test_cmd_w, lstrlenW(test_cmd_w) * sizeof(WCHAR) + 2,
+            hconv, (HSZ)0xdead, 0xbeef, XTYP_EXECUTE, 1000, &ret);
+    ok(hdata != NULL, "DdeClientTransaction failed\n");
+    ok(ret == DDE_FACK, "wrong status code %x\n", ret);
+    err = DdeGetLastError(client_pid);
+    ok(err == DMLERR_NO_ERROR, "wrong dde error %x\n", err);
+
+    DdeFreeStringHandle(client_pid, topic);
+    ret = DdeDisconnect(hconv);
+    ok(ret == TRUE, "Expected TRUE, got %x\n", ret);
+
+    ret = DdeUninitialize(client_pid);
+    ok(ret == TRUE, "Expected TRUE, got %x\n", ret);
+
+}
+
+static void test_end_to_end_server(HANDLE hproc, HANDLE hthread, BOOL type_a)
+{
+    MSG msg;
+    HSZ server;
+    BOOL ret;
+    DWORD res;
+    HDDEDATA hdata;
+    static CHAR test_service[] = "TestDDEService";
+
+    trace("start end to end server %d\n", type_a);
+    server_pid = 0;
+
+    if (type_a)
+        res = DdeInitializeA(&server_pid, server_end_to_end_callback, APPCLASS_STANDARD, 0);
+    else
+        res = DdeInitializeW(&server_pid, server_end_to_end_callback, APPCLASS_STANDARD, 0);
+    ok(res == DMLERR_NO_ERROR, "Expected DMLERR_NO_ERROR, got %d\n", res);
+
+    server = DdeCreateStringHandleA(server_pid, test_service, CP_WINANSI);
+    ok(server != NULL, "Expected non-NULL string handle\n");
+
+    hdata = DdeNameService(server_pid, server, 0, DNS_REGISTER);
+    ok(hdata == (HDDEDATA)TRUE, "Expected TRUE, got %p\n", hdata);
+    ResumeThread( hthread );
+
+
+    while (MsgWaitForMultipleObjects( 1, &hproc, FALSE, INFINITE, QS_ALLINPUT ) != 0)
+    {
+        while (PeekMessage(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
+    }
+
+    ret = DdeUninitialize(server_pid);
+    ok(ret == TRUE, "Expected TRUE, got %d\n", ret);
+    GetExitCodeProcess( hproc, &res );
+    ok( !res, "client failed with %u error(s)\n", res );
+}
+
 START_TEST(dde)
 {
     int argc;
@@ -2131,6 +2408,10 @@ START_TEST(dde)
             test_ddeml_client();
         else if (!lstrcmpA(argv[2], "msg"))
             test_msg_client();
+        else if (!lstrcmpA(argv[2], "enda"))
+            test_end_to_end_client(TRUE);
+        else if (!lstrcmpA(argv[2], "endw"))
+            test_end_to_end_client(FALSE);
 
         return;
     }
@@ -2153,6 +2434,32 @@ START_TEST(dde)
                    0, NULL, NULL, &startup, &proc);
 
     test_ddeml_server(proc.hProcess);
+
+    /* Test the combinations of A and W interfaces with A and W data
+       end to end to ensure that data conversions are accurate */
+    sprintf(buffer, "%s dde enda", argv[0]);
+    CreateProcessA(NULL, buffer, NULL, NULL, FALSE,
+                   CREATE_SUSPENDED, NULL, NULL, &startup, &proc);
+
+    test_end_to_end_server(proc.hProcess, proc.hThread, TRUE);
+
+    sprintf(buffer, "%s dde endw", argv[0]);
+    CreateProcessA(NULL, buffer, NULL, NULL, FALSE,
+                   CREATE_SUSPENDED, NULL, NULL, &startup, &proc);
+
+    test_end_to_end_server(proc.hProcess, proc.hThread, FALSE);
+
+    sprintf(buffer, "%s dde enda", argv[0]);
+    CreateProcessA(NULL, buffer, NULL, NULL, FALSE,
+                   CREATE_SUSPENDED, NULL, NULL, &startup, &proc);
+
+    test_end_to_end_server(proc.hProcess, proc.hThread, FALSE);
+
+    sprintf(buffer, "%s dde endw", argv[0]);
+    CreateProcessA(NULL, buffer, NULL, NULL, FALSE,
+                   CREATE_SUSPENDED, NULL, NULL, &startup, &proc);
+
+    test_end_to_end_server(proc.hProcess, proc.hThread, TRUE);
 
     test_dde_aw_transaction();
 

@@ -22,7 +22,6 @@
 
 #include "winreg.h"
 #include "advpub.h"
-#include "activscp.h"
 #include "activaut.h"
 #include "objsafe.h"
 
@@ -161,7 +160,7 @@ static HRESULT register_inf(BOOL doregister)
     STRTABLEA strtable;
     STRENTRYA pse[7];
     static CLSID const *clsids[7];
-    int i = 0;
+    unsigned int i = 0;
 
     static const WCHAR advpackW[] = {'a','d','v','p','a','c','k','.','d','l','l',0};
 
