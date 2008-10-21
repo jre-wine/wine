@@ -165,7 +165,7 @@ Description: Windows API implementation - camera module
 
 Package: libwine-jack
 Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Depends: ${shlibs:Depends}
 Description: Windows API implementation - JACK sound module
  Wine is a free MS-Windows API implementation.

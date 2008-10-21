@@ -1,3 +1,13 @@
+wine (1.0.0-1.1) unstable; urgency=low
+
+  * Non-maintainer upload.
+  * Disable libwine-jack on amd64 and kfreebsd-amd64 as libjack's
+    callback architecture does not seem to work too well between
+    wine using 32 bit libjack and jackd using 64 bit.
+    Closes: #493169
+
+ -- Thomas Viehmann <tv@beamnet.de>  Sun, 12 Oct 2008 10:57:43 +0200
+
 wine (1.0.0-1) unstable; urgency=high
 
   * New upstream release 1.0, released Jun 17, 2008.

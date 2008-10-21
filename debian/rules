@@ -302,7 +302,11 @@ endif
 	mv debian/libwine/usr/lib/wine/d3dxof*   debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/glu32*    debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/opengl32* debian/libwine-gl/usr/lib/wine
+ifeq ($(DEB_HOST_GNU_CPU),x86_64)
+	rm debian/libwine/usr/lib/wine/winejack*
+else
 	mv debian/libwine/usr/lib/wine/winejack* debian/libwine-jack/usr/lib/wine
+endif
 	mv debian/libwine/usr/lib/wine/wldap32*  debian/libwine-ldap/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/winenas*  debian/libwine-nas/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/wineps*   debian/libwine-print/usr/lib/wine
