@@ -16,6 +16,7 @@ fi
 # build changelog
 git-dch --release --auto --full --meta \
  --debian-tag="wine-$last_version" \
+ --debian-branch=lenny \
  --git-log="--first-parent"
 # commit changelog
 version=`dpkg-parsechangelog|sed -n 's/Version: \(.*\)/\1/p'`
@@ -26,5 +27,6 @@ export DEB_FIXDIFF=yes
 git-buildpackage --git-pristine-tar \
  --git-upstream-tag="wine-%(version)s" \
  --git-debian-tag="wine-%(version)s" \
+ --git-debian-branch=lenny \
  --git-tag \
  "$@"
