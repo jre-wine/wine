@@ -1,3 +1,9 @@
+wine (1.0.1-1) UNRELEASED; urgency=low
+
+  * UNRELEASED
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Thu, 30 Oct 2008 15:35:32 +0100
+
 wine (1.0.0-1.1) unstable; urgency=low
 
   * Non-maintainer upload.

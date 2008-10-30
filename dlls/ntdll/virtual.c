@@ -1107,8 +1107,14 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
         rel = (IMAGE_BASE_RELOCATION *)(ptr + relocs->VirtualAddress);
         end = (IMAGE_BASE_RELOCATION *)(ptr + relocs->VirtualAddress + relocs->Size);
 
-        while (rel < end && rel->SizeOfBlock)
+        while (rel <= end - 1 && rel->SizeOfBlock)
         {
+            if (rel->VirtualAddress >= total_size)
+            {
+                WARN_(module)( "invalid address %p in relocation %p\n", ptr + rel->VirtualAddress, rel );
+                status = STATUS_ACCESS_VIOLATION;
+                goto error;
+            }
             rel = LdrProcessRelocationBlock( ptr + rel->VirtualAddress,
                                              (rel->SizeOfBlock - sizeof(*rel)) / sizeof(USHORT),
                                              (USHORT *)(rel + 1), delta );
@@ -1239,6 +1245,21 @@ NTSTATUS virtual_alloc_thread_stack( void *base, SIZE_T size )
 done:
     server_leave_uninterrupted_section( &csVirtual, &sigset );
     return status;
+}
+
+
+/***********************************************************************
+ *           virtual_clear_thread_stack
+ *
+ * Clear the stack contents before calling the main entry point, some broken apps need that.
+ */
+void virtual_clear_thread_stack(void)
+{
+    void *stack = NtCurrentTeb()->Tib.StackLimit;
+    size_t size = (char *)NtCurrentTeb()->Tib.StackBase - (char *)NtCurrentTeb()->Tib.StackLimit;
+
+    wine_anon_mmap( stack, size, PROT_READ | PROT_WRITE, MAP_FIXED );
+    if (force_exec_prot) mprotect( stack, size, PROT_READ | PROT_WRITE | PROT_EXEC );
 }
 
 

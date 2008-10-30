@@ -28,6 +28,7 @@
 #include "Es.rc"
 #include "Fr.rc"
 #include "It.rc"
+#include "Ja.rc"
 #include "Ko.rc"
 #include "Nl.rc"
 #include "No.rc"
@@ -37,6 +38,7 @@
 #include "Ru.rc"
 #include "Si.rc"
 #include "Tr.rc"
+#include "Zh.rc"
 
 /*
  * Icon

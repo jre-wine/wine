@@ -31,7 +31,7 @@
 #include <winerror.h>
 
 #define MAX_CLIENTS 4      /* Max number of clients */
-#define NUM_TESTS   3      /* Number of tests performed */
+#define NUM_TESTS   4      /* Number of tests performed */
 #define FIRST_CHAR 'A'     /* First character in transferred pattern */
 #define BIND_SLEEP 10      /* seconds to wait between attempts to bind() */
 #define BIND_TRIES 6       /* Number of bind() attempts */
@@ -265,6 +265,16 @@ static int do_synchronous_recv ( SOCKET s, char *buf, int buflen, int recvlen )
     int n = 1;
     for ( p = buf; n > 0 && p < last; p += n )
         n = recv ( s, p, min ( recvlen, last - p ), 0 );
+    wsa_ok ( n, 0 <=, "do_synchronous_recv (%x): error %d:\n" );
+    return p - buf;
+}
+
+static int do_synchronous_recvfrom ( SOCKET s, char *buf, int buflen,int flags,struct sockaddr *from, socklen_t *fromlen, int recvlen )
+{
+    char* last = buf + buflen, *p;
+    int n = 1;
+    for ( p = buf; n > 0 && p < last; p += n )
+      n = recvfrom ( s, p, min ( recvlen, last - p ), 0, from, fromlen );
     wsa_ok ( n, 0 <=, "do_synchronous_recv (%x): error %d:\n" );
     return p - buf;
 }
@@ -615,6 +625,76 @@ static VOID WINAPI simple_client ( client_params *par )
     n_recvd = do_synchronous_recv ( mem->s, mem->recv_buf, n_expected, par->buflen );
     ok ( n_recvd == n_expected,
          "simple_client (%x): received less data than expected: %d of %d\n", id, n_recvd, n_expected );
+
+    /* check data */
+    p = test_buffer ( mem->recv_buf, gen->chunk_size, gen->n_chunks );
+    ok ( p == NULL, "simple_client (%x): test pattern error: %d\n", id, p - mem->recv_buf);
+
+    /* cleanup */
+    read_zero_bytes ( mem->s );
+    trace ( "simple_client (%x) exiting\n", id );
+    client_stop ();
+}
+
+/*
+ * simple_mixed_client: mixing send and recvfrom
+ */
+static VOID WINAPI simple_mixed_client ( client_params *par )
+{
+    test_params *gen = par->general;
+    client_memory *mem;
+    int n_sent, n_recvd, n_expected = gen->n_chunks * gen->chunk_size, id;
+    char *p;
+    socklen_t fromLen = sizeof(mem->addr);
+    struct sockaddr test;
+
+    id = GetCurrentThreadId();
+    trace ( "simple_client (%x): starting\n", id );
+    /* wait here because we want to call set_so_opentype before creating a socket */
+    WaitForSingleObject ( server_ready, INFINITE );
+    trace ( "simple_client (%x): server ready\n", id );
+
+    check_so_opentype ();
+    set_so_opentype ( FALSE ); /* non-overlapped */
+    client_start ( par );
+    mem = TlsGetValue ( tls );
+
+    /* Connect */
+    wsa_ok ( connect ( mem->s, (struct sockaddr*) &mem->addr, sizeof ( mem->addr ) ),
+             0 ==, "simple_client (%x): connect error: %d\n" );
+    ok ( set_blocking ( mem->s, TRUE ) == 0,
+         "simple_client (%x): failed to set blocking mode\n", id );
+    trace ( "simple_client (%x) connected\n", id );
+
+    /* send data to server */
+    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, par->buflen );
+    ok ( n_sent == n_expected,
+         "simple_client (%x): sent less data than expected: %d of %d\n", id, n_sent, n_expected );
+
+    /* shutdown send direction */
+    wsa_ok ( shutdown ( mem->s, SD_SEND ), 0 ==, "simple_client (%x): shutdown failed: %d\n" );
+
+    /* this shouldn't change, since lpFrom, is not updated on
+       connection oriented sockets - exposed by bug 11640
+    */
+    ((struct sockaddr_in*)&test)->sin_addr.s_addr = inet_addr("0.0.0.0");
+
+    /* Receive data echoed back & check it */
+    n_recvd = do_synchronous_recvfrom ( mem->s,
+					mem->recv_buf,
+					n_expected,
+					0,
+					(struct sockaddr *)&test,
+					&fromLen,
+					par->buflen );
+    ok ( n_recvd == n_expected,
+         "simple_client (%x): received less data than expected: %d of %d\n", id, n_recvd, n_expected );
+
+    /* check that lpFrom was not updated */
+    ok(0 ==
+       strcmp(
+	      inet_ntoa(((struct sockaddr_in*)&test)->sin_addr),
+	      "0.0.0.0"), "lpFrom shouldn't be updated on connection oriented sockets\n");
 
     /* check data */
     p = test_buffer ( mem->recv_buf, gen->chunk_size, gen->n_chunks );
@@ -1008,6 +1088,27 @@ static test_setup tests [NUM_TESTS] =
             64
         },
         simple_client,
+        {
+            NULL,
+            0,
+            128
+        }
+    },
+        /* Test 3: synchronous mixed client and server */
+    {
+        {
+            STD_STREAM_SOCKET,
+            2048,
+            16,
+            2
+        },
+        simple_server,
+        {
+            NULL,
+            0,
+            64
+        },
+        simple_mixed_client,
         {
             NULL,
             0,
@@ -1891,9 +1992,23 @@ static DWORD WINAPI drain_socket_thread(LPVOID arg)
 {
     char buffer[1024];
     SOCKET sock = *(SOCKET*)arg;
+    int ret;
 
-    while (recv(sock, buffer, sizeof(buffer), 0) > 0)
-        ;
+    while ((ret = recv(sock, buffer, sizeof(buffer), 0)) != 0)
+    {
+        if (ret < 0)
+        {
+            if (WSAGetLastError() == WSAEWOULDBLOCK)
+            {
+                fd_set readset;
+                FD_ZERO(&readset);
+                FD_SET(sock, &readset);
+                select(0, &readset, NULL, NULL, NULL);
+            }
+            else
+                break;
+        }
+    }
     return 0;
 }
 
@@ -1949,15 +2064,41 @@ static void test_write_events(void)
     SOCKET dst = INVALID_SOCKET;
     HANDLE hThread = NULL;
     HANDLE hEvent = INVALID_HANDLE_VALUE;
-    int len;
+    char *buffer = NULL;
+    int bufferSize = 1024*1024;
     u_long one = 1;
     int ret;
     DWORD id;
+    WSANETWORKEVENTS netEvents;
+    DWORD dwRet;
 
     if (tcp_socketpair(&src, &dst) != 0)
     {
         ok(0, "creating socket pair failed, skipping test\n");
         return;
+    }
+
+    /* On Windows it seems when a non-blocking socket sends to a
+       blocking socket on the same host, the send() is BLOCKING,
+       so make both sockets non-blocking */
+    ret = ioctlsocket(src, FIONBIO, &one);
+    if (ret)
+    {
+        ok(0, "ioctlsocket failed, error %d\n", WSAGetLastError());
+        goto end;
+    }
+    ret = ioctlsocket(dst, FIONBIO, &one);
+    if (ret)
+    {
+        ok(0, "ioctlsocket failed, error %d\n", WSAGetLastError());
+        goto end;
+    }
+
+    buffer = HeapAlloc(GetProcessHeap(), 0, bufferSize);
+    if (buffer == NULL)
+    {
+        ok(0, "could not allocate memory for test\n");
+        goto end;
     }
 
     hThread = CreateThread(NULL, 0, drain_socket_thread, &dst, 0, &id);
@@ -1974,13 +2115,6 @@ static void test_write_events(void)
         goto end;
     }
 
-    ret = ioctlsocket(src, FIONBIO, &one);
-    if (ret)
-    {
-        ok(0, "ioctlsocket failed, error %d\n", WSAGetLastError());
-        goto end;
-    }
-
     ret = WSAEventSelect(src, hEvent, FD_WRITE | FD_CLOSE);
     if (ret)
     {
@@ -1988,41 +2122,72 @@ static void test_write_events(void)
         goto end;
     }
 
-    for (len = 100; len > 0; --len)
+    /* FD_WRITE should be set initially, and allow us to send at least 1 byte */
+    dwRet = WaitForSingleObject(hEvent, 5000);
+    if (dwRet != WAIT_OBJECT_0)
     {
-         WSANETWORKEVENTS netEvents;
-         DWORD dwRet = WaitForSingleObject(hEvent, 5000);
-         if (dwRet != WAIT_OBJECT_0)
-         {
-             ok(0, "WaitForSingleObject failed, error %d\n", dwRet);
-             goto end;
-         }
+        ok(0, "Initial WaitForSingleObject failed, error %d\n", dwRet);
+        goto end;
+    }
+    ret = WSAEnumNetworkEvents(src, NULL, &netEvents);
+    if (ret)
+    {
+        ok(0, "WSAEnumNetworkEvents failed, error %d\n", ret);
+        goto end;
+    }
+    if (netEvents.lNetworkEvents & FD_WRITE)
+    {
+        ret = send(src, "a", 1, 0);
+        ok(ret == 1, "sending 1 byte failed, error %d\n", WSAGetLastError());
+        if (ret != 1)
+            goto end;
+    }
+    else
+    {
+        ok(0, "FD_WRITE not among initial events\n");
+        goto end;
+    }
 
-         ret = WSAEnumNetworkEvents(src, NULL, &netEvents);
-         if (ret)
-         {
-             ok(0, "WSAEnumNetworkEvents failed, error %d\n", ret);
-             goto end;
-         }
+    /* Now FD_WRITE should not be set, because the socket send buffer isn't full yet */
+    dwRet = WaitForSingleObject(hEvent, 2000);
+    if (dwRet == WAIT_OBJECT_0)
+    {
+        ok(0, "WaitForSingleObject should have timed out, but succeeded!\n");
+        goto end;
+    }
 
-         if (netEvents.lNetworkEvents & FD_WRITE)
-         {
-             ret = send(src, "a", 1, 0);
-             if (ret < 0 && WSAGetLastError() != WSAEWOULDBLOCK)
-             {
-                 ok(0, "send failed, error %d\n", WSAGetLastError());
-                 goto end;
-             }
-         }
-
-         if (netEvents.lNetworkEvents & FD_CLOSE)
-         {
-             ok(0, "unexpected close\n");
-             goto end;
-         }
+    /* Now if we send a tonne of data, the socket send buffer will only take some of it,
+       and we will get a short write, which will trigger another FD_WRITE event
+       as soon as data is sent and more space becomes available, but not any earlier. */
+    do
+    {
+        ret = send(src, buffer, bufferSize, 0);
+    } while (ret == bufferSize);
+    if (ret >= 0 || WSAGetLastError() == WSAEWOULDBLOCK)
+    {
+        dwRet = WaitForSingleObject(hEvent, 5000);
+        ok(dwRet == WAIT_OBJECT_0, "Waiting failed with %d\n", dwRet);
+        if (dwRet == WAIT_OBJECT_0)
+        {
+            ret = WSAEnumNetworkEvents(src, NULL, &netEvents);
+            ok(ret == 0, "WSAEnumNetworkEvents failed, error %d\n", ret);
+            if (ret == 0)
+                goto end;
+            ok(netEvents.lNetworkEvents & FD_WRITE,
+                "FD_WRITE event not set as expected, events are 0x%x\n", netEvents.lNetworkEvents);
+        }
+        else
+            goto end;
+    }
+    else
+    {
+        ok(0, "sending a lot of data failed with error %d\n", WSAGetLastError());
+        goto end;
     }
 
 end:
+    if (buffer != NULL)
+        HeapFree(GetProcessHeap(), 0, buffer);
     if (src != INVALID_SOCKET)
         closesocket(src);
     if (dst != INVALID_SOCKET)
@@ -2078,6 +2243,34 @@ end:
         closesocket(v6);
 }
 
+static void test_WSASendTo(void)
+{
+    SOCKET s;
+    struct sockaddr_in addr;
+    char buf[12] = "hello world";
+    WSABUF data_buf;
+    DWORD bytesSent;
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(139);
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    data_buf.len = sizeof(buf);
+    data_buf.buf = buf;
+
+    if( (s = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET) {
+        ok(0, "socket() failed error: %d\n", WSAGetLastError());
+        return;
+    }
+
+    WSASetLastError(12345);
+    if(WSASendTo(s, &data_buf, 1, &bytesSent, 0, (struct sockaddr*)&addr, sizeof(addr), NULL, NULL)) {
+        ok(0, "WSASendTo() failed error: %d\n", WSAGetLastError());
+        return;
+    }
+    ok(!WSAGetLastError(), "WSAGetLastError() should return zero after "
+            "a successful call to WSASendTo()\n");
+}
+
 /**************** Main program  ***************/
 
 START_TEST( sock )
@@ -2116,6 +2309,8 @@ START_TEST( sock )
 
     test_send();
     test_write_events();
+
+    test_WSASendTo();
 
     test_ipv6only();
 
