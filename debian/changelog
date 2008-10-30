@@ -1,8 +1,15 @@
-wine (1.0.1-1) UNRELEASED; urgency=low
+wine (1.0.1-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.0.1, released Oct 17, 2008.
+    - This is a maintenance release from the 1.0 stable branch.
+      It contains only translation updates and small bug fixes.
+  * Recommend ttf-liberation, and changed msttcorefonts suggestion to
+    ttf-mscorefonts-installer. Closes: #490861.
+  * Removed application/x-zip-compressed from wine.desktop.
+    Closes: #452957.
+  * Updated build scripts for lenny branch.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Thu, 30 Oct 2008 15:35:32 +0100
+ -- Ove Kaaven <ovek@arcticnet.no>  Thu, 30 Oct 2008 17:32:46 +0100
 
 wine (1.0.0-1.1) unstable; urgency=low
 
