@@ -1,8 +1,21 @@
-wine (1.1.6-1) UNRELEASED; urgency=low
+wine (1.1.6-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.6, released Oct 10, 2008.
+    - Beginnings of schannel implementation using GnuTLS.
+    - Many fixes from various code analysis tools.
+    - Support for X11 desktop work area.
+    - Fixes for Richedit tables.
+    - More complete JavaScript support.
+    - Various bug fixes.
+  * Added build-dependency alternatives libgl1-mesa-dev and libglu1-mesa-dev.
+  * Removed fontforge from Build-Depends (for a while now, upstream has
+    shipped pre-built fonts in the tarball, and they no longer build the
+    fonts at compile time by default, in order to work around bugs in
+    various fontforge versions).
+  * Added libgnutls-dev to Build-Depends (why can't Wine settle with
+    *either* OpenSSL *or* GnuTLS, instead of requiring both?)
 
- -- Ove Kaaven <ovek@arcticnet.no>  Thu, 01 Jan 2009 05:49:17 +0100
+ -- Ove Kaaven <ovek@arcticnet.no>  Thu, 01 Jan 2009 10:31:39 +0100
 
 wine (1.1.5-1) experimental; urgency=low
 
