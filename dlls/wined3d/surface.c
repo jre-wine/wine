@@ -39,6 +39,53 @@ static void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES conve
 static inline void clear_unused_channels(IWineD3DSurfaceImpl *This);
 static void surface_remove_pbo(IWineD3DSurfaceImpl *This);
 
+void surface_force_reload(IWineD3DSurface *iface)
+{
+    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
+
+    This->Flags &= ~SFLAG_ALLOCATED;
+}
+
+void surface_set_texture_name(IWineD3DSurface *iface, GLuint name)
+{
+    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
+
+    TRACE("(%p) : setting texture name %u\n", This, name);
+
+    if (!This->glDescription.textureName && name)
+    {
+        /* FIXME: We shouldn't need to remove SFLAG_INTEXTURE if the
+         * surface has no texture name yet. See if we can get rid of this. */
+        if (This->Flags & SFLAG_INTEXTURE)
+            ERR("Surface has SFLAG_INTEXTURE set, but no texture name\n");
+        IWineD3DSurface_ModifyLocation(iface, SFLAG_INTEXTURE, FALSE);
+    }
+
+    This->glDescription.textureName = name;
+    surface_force_reload(iface);
+}
+
+void surface_set_texture_target(IWineD3DSurface *iface, GLenum target)
+{
+    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
+
+    TRACE("(%p) : setting target %#x\n", This, target);
+
+    if (This->glDescription.target != target)
+    {
+        if (target == GL_TEXTURE_RECTANGLE_ARB)
+        {
+            This->Flags &= ~SFLAG_NORMCOORD;
+        }
+        else if (This->glDescription.target == GL_TEXTURE_RECTANGLE_ARB)
+        {
+            This->Flags |= SFLAG_NORMCOORD;
+        }
+    }
+    This->glDescription.target = target;
+    surface_force_reload(iface);
+}
+
 static void surface_bind_and_dirtify(IWineD3DSurfaceImpl *This) {
     int active_sampler;
 
@@ -627,32 +674,6 @@ static void WINAPI IWineD3DSurfaceImpl_UnLoad(IWineD3DSurface *iface) {
    IWineD3DSurface IWineD3DSurface parts follow
    ****************************************************** */
 
-void WINAPI IWineD3DSurfaceImpl_SetGlTextureDesc(IWineD3DSurface *iface, UINT textureName, int target) {
-    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
-    TRACE("(%p) : setting textureName %u, target %#x\n", This, textureName, target);
-    if (This->glDescription.textureName == 0 && textureName != 0) {
-        IWineD3DSurface_ModifyLocation(iface, SFLAG_INTEXTURE, FALSE);
-        if((This->Flags & SFLAG_LOCATIONS) == 0) {
-            /* In 1.0-rc4 and earlier, AddDirtyRect was called in the place of this if condition.
-             * This had the problem that a correctly set INDRAWABLE flag was removed if the PreLoad
-             * during the offscreen rendering readback triggered the creation of the GL texture.
-             * The change intended to keep the INDRAWABLE intact. To prevent unintended side effects
-             * before release, set the INSYSMEM flag like the old AddDirtyRect did.
-             */
-            WARN("Wine 1.0 safety path hit\n");
-            This->Flags |= SFLAG_INSYSMEM;
-        }
-    }
-    if(target == GL_TEXTURE_RECTANGLE_ARB && This->glDescription.target != target) {
-        This->Flags &= ~SFLAG_NORMCOORD;
-    } else if(This->glDescription.target == GL_TEXTURE_RECTANGLE_ARB && target != GL_TEXTURE_RECTANGLE_ARB) {
-        This->Flags |= SFLAG_NORMCOORD;
-    }
-    This->glDescription.textureName = textureName;
-    This->glDescription.target      = target;
-    This->Flags &= ~SFLAG_ALLOCATED;
-}
-
 void WINAPI IWineD3DSurfaceImpl_GetGlDesc(IWineD3DSurface *iface, glDescriptor **glDescription) {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
     TRACE("(%p) : returning %p\n", This, &This->glDescription);
@@ -1081,7 +1102,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
             case RTL_AUTO:
             case RTL_READDRAW:
             case RTL_READTEX:
-                IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, pRect);
+                IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, pass_rect);
                 break;
 
             case RTL_DISABLE:
@@ -2365,6 +2386,19 @@ static void WINAPI IWineD3DSurfaceImpl_BindTexture(IWineD3DSurface *iface) {
                 glGenTextures(1, &This->glDescription.textureName);
                 checkGLcall("glGenTextures");
                 TRACE("Surface %p given name %d\n", This, This->glDescription.textureName);
+
+                glBindTexture(This->glDescription.target, This->glDescription.textureName);
+                checkGLcall("glBindTexture");
+                glTexParameteri(This->glDescription.target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                checkGLcall("glTexParameteri(dimension, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)");
+                glTexParameteri(This->glDescription.target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                checkGLcall("glTexParameteri(dimension, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)");
+                glTexParameteri(This->glDescription.target, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+                checkGLcall("glTexParameteri(dimension, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE)");
+                glTexParameteri(This->glDescription.target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                checkGLcall("glTexParameteri(dimension, GL_TEXTURE_MIN_FILTER, GL_NEAREST)");
+                glTexParameteri(This->glDescription.target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                checkGLcall("glTexParameteri(dimension, GL_TEXTURE_MAG_FILTER, GL_NEAREST)");
             }
             /* This is where we should be reducing the amount of GLMemoryUsed */
         } else if (This->glDescription.textureName) {
@@ -3446,6 +3480,12 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
         /* Activate the destination context, set it up for blitting */
         ActivateContext(myDevice, (IWineD3DSurface *) This, CTXUSAGE_BLIT);
 
+        /* The coordinates of the ddraw front buffer are always fullscreen ('screen coordinates',
+         * while OpenGL coordinates are window relative.
+         * Also beware of the origin difference(top left vs bottom left).
+         * Also beware that the front buffer's surface size is screen width x screen height,
+         * whereas the real gl drawable size is the size of the window.
+         */
         if (dstSwapchain && (IWineD3DSurface *)This == dstSwapchain->frontBuffer) {
             RECT windowsize;
             POINT offset = {0,0};
@@ -4596,7 +4636,6 @@ const IWineD3DSurfaceVtbl IWineD3DSurface_Vtbl =
     IWineD3DSurfaceImpl_BindTexture,
     IWineD3DSurfaceImpl_SaveSnapshot,
     IWineD3DSurfaceImpl_SetContainer,
-    IWineD3DSurfaceImpl_SetGlTextureDesc,
     IWineD3DSurfaceImpl_GetGlDesc,
     IWineD3DSurfaceImpl_GetData,
     IWineD3DSurfaceImpl_SetFormat,

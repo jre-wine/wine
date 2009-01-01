@@ -53,7 +53,7 @@ static void testQuery(void)
 {
     BOOL (WINAPI *pQuery)(BYTE, SnmpVarBindList *, AsnInteger32 *,
         AsnInteger32 *);
-    BOOL ret, moreData;
+    BOOL ret, moreData, noChange;
     SnmpVarBindList list;
     AsnInteger32 error, index;
     UINT bogus[] = { 1,2,3,4 };
@@ -66,7 +66,7 @@ static void testQuery(void)
     UINT mib2IpAddr[] = { 1,3,6,1,2,1,4,20,1,1 };
     UINT mib2IpRouteTable[] = { 1,3,6,1,2,1,4,21,1,1 };
     UINT mib2UdpTable[] = { 1,3,6,1,2,1,7,5,1,1 };
-    SnmpVarBind vars[3], vars2[3];
+    SnmpVarBind vars[3], vars2[3], vars3[3];
     UINT entry;
 
     pQuery = (void *)GetProcAddress(inetmib1, "SnmpExtensionQuery");
@@ -106,9 +106,14 @@ static void testQuery(void)
     index = 0xdeadbeef;
     ret = pQuery(SNMP_PDU_GET, &list, &error, &index);
     ok(ret, "SnmpExtensionQuery failed: %d\n", GetLastError());
-    ok(error == SNMP_ERRORSTATUS_NOERROR,
-        "expected SNMP_ERRORSTATUS_NOERROR, got %d\n", error);
-    ok(index == 0, "expected index 0, got %d\n", index);
+    ok(error == SNMP_ERRORSTATUS_NOERROR ||
+        error == ERROR_FILE_NOT_FOUND /* Win9x */,
+        "expected SNMP_ERRORSTATUS_NOERROR or ERROR_FILE_NOT_FOUND, got %d\n",
+        error);
+    if (error == SNMP_ERRORSTATUS_NOERROR)
+        ok(index == 0, "expected index 0, got %d\n", index);
+    else if (error == ERROR_FILE_NOT_FOUND)
+        ok(index == 1, "expected index 1, got %d\n", index);
     /* The OID isn't changed either: */
     ok(!strcmp("1.2.3.4", SnmpUtilOidToA(&vars[0].name)),
         "expected 1.2.3.4, got %s\n", SnmpUtilOidToA(&vars[0].name));
@@ -157,6 +162,7 @@ static void testQuery(void)
     SnmpUtilOidCpy(&vars2[2].name, &vars[2].name);
     list.list = vars2;
     moreData = TRUE;
+    noChange = FALSE;
     entry = 0;
     do {
         SetLastError(0xdeadbeef);
@@ -180,6 +186,15 @@ static void testQuery(void)
         else if (SnmpUtilOidNCmp(&vars2[2].name, &vars[2].name,
             vars[2].name.idLength))
             moreData = FALSE;
+        else if (!SnmpUtilOidCmp(&vars[0].name, &vars2[0].name) ||
+         !SnmpUtilOidCmp(&vars[0].name, &vars2[0].name) ||
+         !SnmpUtilOidCmp(&vars[0].name, &vars2[0].name))
+        {
+            /* If the OID isn't modified, the function isn't implemented on this
+             * platform, skip the remaining tests.
+             */
+            noChange = TRUE;
+        }
         if (moreData)
         {
             UINT lastID;
@@ -224,14 +239,16 @@ static void testQuery(void)
                 "expected a value of 0, 1, or 2, got %u\n",
                 vars2[2].value.asnValue.unsigned32);
         }
-    } while (moreData);
+        else if (noChange)
+            skip("no change in OID, no MIB2 IF table implementation\n");
+    } while (moreData && !noChange);
     SnmpUtilVarBindFree(&vars2[0]);
     SnmpUtilVarBindFree(&vars2[1]);
     SnmpUtilVarBindFree(&vars2[2]);
 
     /* Even though SnmpExtensionInit says this DLL supports the MIB2 system
-     * variables, the first variable it returns a value for is the first
-     * interface.
+     * variables, on recent systems (at least Win2k) the first variable it
+     * returns a value for is the first interface.
      */
     vars[0].name.idLength = sizeof(mib2System) / sizeof(mib2System[0]);
     vars[0].name.ids = mib2System;
@@ -240,15 +257,18 @@ static void testQuery(void)
     list.len = 1;
     list.list = vars2;
     moreData = TRUE;
+    noChange = FALSE;
     ret = pQuery(SNMP_PDU_GETNEXT, &list, &error, &index);
     ok(ret, "SnmpExtensionQuery failed: %d\n", GetLastError());
     ok(error == SNMP_ERRORSTATUS_NOERROR,
         "expected SNMP_ERRORSTATUS_NOERROR, got %d\n", error);
     ok(index == 0, "expected index 0, got %d\n", index);
-    vars[0].name.idLength = sizeof(mib2If) / sizeof(mib2If[0]);
-    vars[0].name.ids = mib2If;
-    ok(!SnmpUtilOidNCmp(&vars2[0].name, &vars[0].name, vars[0].name.idLength),
-        "expected 1.3.6.1.2.1.2, got %s\n", SnmpUtilOidToA(&vars2[0].name));
+    vars3[0].name.idLength = sizeof(mib2If) / sizeof(mib2If[0]);
+    vars3[0].name.ids = mib2If;
+    ok(!SnmpUtilOidNCmp(&vars2[0].name, &vars[0].name, vars[0].name.idLength) ||
+       !SnmpUtilOidNCmp(&vars2[0].name, &vars3[0].name, vars3[0].name.idLength),
+        "expected 1.3.6.1.2.1.1 or 1.3.6.1.2.1.2, got %s\n",
+        SnmpUtilOidToA(&vars2[0].name));
     SnmpUtilVarBindFree(&vars2[0]);
 
     /* Check the type and OIDs of the IP address table */
@@ -272,6 +292,13 @@ static void testQuery(void)
         else if (SnmpUtilOidNCmp(&vars2[0].name, &vars[0].name,
             vars[0].name.idLength))
             moreData = FALSE;
+        else if (!SnmpUtilOidCmp(&vars2[0].name, &vars[0].name))
+        {
+            /* If the OID isn't modified, the function isn't implemented on this
+             * platform, skip the remaining tests.
+             */
+            noChange = TRUE;
+        }
         if (moreData)
         {
             /* Make sure the size of the OID is right.
@@ -304,7 +331,9 @@ static void testQuery(void)
                 }
             }
         }
-    } while (moreData);
+        else if (noChange)
+            skip("no change in OID, no MIB2 IP address table implementation\n");
+    } while (moreData && !noChange);
     SnmpUtilVarBindFree(&vars2[0]);
 
     /* Check the type and OIDs of the IP route table */
@@ -315,6 +344,7 @@ static void testQuery(void)
     list.len = 1;
     list.list = vars2;
     moreData = TRUE;
+    noChange = FALSE;
     do {
         ret = pQuery(SNMP_PDU_GETNEXT, &list, &error, &index);
         ok(ret, "SnmpExtensionQuery failed: %d\n", GetLastError());
@@ -328,13 +358,20 @@ static void testQuery(void)
         else if (SnmpUtilOidNCmp(&vars2[0].name, &vars[0].name,
             vars[0].name.idLength))
             moreData = FALSE;
+        else if (!SnmpUtilOidCmp(&vars2[0].name, &vars[0].name))
+        {
+            /* If the OID isn't modified, the function isn't implemented on this
+             * platform, skip the remaining tests.
+             */
+            noChange = TRUE;
+        }
         if (moreData)
         {
             /* Make sure the size of the OID is right.
              * FIXME: don't know if IPv6 addrs are shared with this table.
              * Don't think so, but I'm not certain.
              */
-            ok(vars2[0].name.idLength = vars[0].name.idLength + 4,
+            ok(vars2[0].name.idLength == vars[0].name.idLength + 4,
                 "expected length %d, got %d\n", vars[0].name.idLength + 4,
                 vars2[0].name.idLength);
             /* Make sure the type is right */
@@ -360,7 +397,9 @@ static void testQuery(void)
                 }
             }
         }
-    } while (moreData);
+        else if (noChange)
+            skip("no change in OID, no MIB2 IP route table implementation\n");
+    } while (moreData && !noChange);
     SnmpUtilVarBindFree(&vars2[0]);
 
     /* Check the type and OIDs of the UDP table */
@@ -371,6 +410,7 @@ static void testQuery(void)
     list.len = 1;
     list.list = vars2;
     moreData = TRUE;
+    noChange = FALSE;
     do {
         ret = pQuery(SNMP_PDU_GETNEXT, &list, &error, &index);
         ok(ret, "SnmpExtensionQuery failed: %d\n", GetLastError());
@@ -392,6 +432,13 @@ static void testQuery(void)
         else if (SnmpUtilOidNCmp(&vars2[0].name, &vars[0].name,
             vars[0].name.idLength))
             moreData = FALSE;
+        else if (!SnmpUtilOidCmp(&vars2[0].name, &vars[0].name))
+        {
+            /* If the OID isn't modified, the function isn't implemented on this
+             * platform, skip the remaining tests.
+             */
+            noChange = TRUE;
+        }
         if (moreData)
         {
             /* Make sure the size of the OID is right. */
@@ -422,7 +469,9 @@ static void testQuery(void)
                 }
             }
         }
-    } while (moreData);
+        else if (noChange)
+            skip("no change in OID, no MIB2 UDP table implementation\n");
+    } while (moreData && !noChange);
     SnmpUtilVarBindFree(&vars2[0]);
 }
 

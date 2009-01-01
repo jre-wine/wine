@@ -250,7 +250,7 @@ static HRESULT WINAPI MimeInternat_FindCharset(IMimeInternational *iface, LPCSTR
 
     LIST_FOR_EACH_ENTRY(charset, &This->charsets, charset_entry, entry)
     {
-        if(!strcmp(charset->cs_info.szName, pszCharset))
+        if(!lstrcmpiA(charset->cs_info.szName, pszCharset))
         {
             *phCharset = charset->cs_info.hCharset;
             hr = S_OK;
@@ -547,6 +547,22 @@ HRESULT WINAPI MimeOleGetInternat(IMimeInternational **internat)
     return S_OK;
 }
 
+HRESULT WINAPI MimeOleFindCharset(LPCSTR name, LPHCHARSET charset)
+{
+    IMimeInternational *internat;
+    HRESULT hr;
+
+    TRACE("(%s, %p)\n", debugstr_a(name), charset);
+
+    hr = MimeOleGetInternat(&internat);
+    if(SUCCEEDED(hr))
+    {
+        hr = IMimeInternational_FindCharset(internat, name, charset);
+        IMimeInternational_Release(internat);
+    }
+    return hr;
+}
+
 HRESULT WINAPI MimeOleGetCharsetInfo(HCHARSET hCharset, LPINETCSETINFO pCsetInfo)
 {
     IMimeInternational *internat;
@@ -560,5 +576,21 @@ HRESULT WINAPI MimeOleGetCharsetInfo(HCHARSET hCharset, LPINETCSETINFO pCsetInfo
         hr = IMimeInternational_GetCharsetInfo(internat, hCharset, pCsetInfo);
         IMimeInternational_Release(internat);
     }
-    return S_OK;
+    return hr;
+}
+
+HRESULT WINAPI MimeOleGetDefaultCharset(LPHCHARSET charset)
+{
+    IMimeInternational *internat;
+    HRESULT hr;
+
+    TRACE("(%p)\n", charset);
+
+    hr = MimeOleGetInternat(&internat);
+    if(SUCCEEDED(hr))
+    {
+        hr = IMimeInternational_GetDefaultCharset(internat, charset);
+        IMimeInternational_Release(internat);
+    }
+    return hr;
 }

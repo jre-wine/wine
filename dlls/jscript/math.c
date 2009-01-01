@@ -16,6 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <math.h>
+
 #include "jscript.h"
 
 #include "wine/debug.h"
@@ -105,11 +107,29 @@ static HRESULT Math_SQRT1_2(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAM
     return E_NOTIMPL;
 }
 
+/* ECMA-262 3rd Edition    15.8.2.12 */
 static HRESULT Math_abs(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    VARIANT v;
+    DOUBLE d;
+    HRESULT hres;
+
+    TRACE("\n");
+
+    if(!arg_cnt(dp)) {
+        FIXME("arg_cnt = 0\n");
+        return E_NOTIMPL;
+    }
+
+    hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
+    if(FAILED(hres))
+        return hres;
+
+    d = num_val(&v);
+    if(retv)
+        num_set_val(retv, d < 0.0 ? -d : d);
+    return S_OK;
 }
 
 static HRESULT Math_acos(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
@@ -140,11 +160,27 @@ static HRESULT Math_atan2(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS 
     return E_NOTIMPL;
 }
 
+/* ECMA-262 3rd Edition    15.8.2.6 */
 static HRESULT Math_ceil(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    VARIANT v;
+    HRESULT hres;
+
+    TRACE("\n");
+
+    if(!arg_cnt(dp)) {
+        FIXME("arg_cnt = 0\n");
+        return E_NOTIMPL;
+    }
+
+    hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
+    if(FAILED(hres))
+        return hres;
+
+    if(retv)
+        num_set_val(retv, ceil(num_val(&v)));
+    return S_OK;
 }
 
 static HRESULT Math_cos(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
@@ -175,25 +211,107 @@ static HRESULT Math_log(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *d
     return E_NOTIMPL;
 }
 
+/* ECMA-262 3rd Edition    15.8.2.11 */
 static HRESULT Math_max(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    DOUBLE max, d;
+    VARIANT v;
+    DWORD i;
+    HRESULT hres;
+
+    TRACE("\n");
+
+    /* FIXME: Handle NaN */
+
+    if(!arg_cnt(dp)) {
+        FIXME("arg_cnt = 0\n");
+        return E_NOTIMPL;
+    }
+
+    hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
+    if(FAILED(hres))
+        return hres;
+
+    max = num_val(&v);
+    for(i=1; i < arg_cnt(dp); i++) {
+        hres = to_number(dispex->ctx, get_arg(dp, i), ei, &v);
+        if(FAILED(hres))
+            return hres;
+
+        d = num_val(&v);
+        if(d > max)
+            max = d;
+    }
+
+    if(retv)
+        num_set_val(retv, max);
+    return S_OK;
 }
 
+/* ECMA-262 3rd Edition    15.8.2.12 */
 static HRESULT Math_min(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    DOUBLE min, d;
+    VARIANT v;
+    DWORD i;
+    HRESULT hres;
+
+    TRACE("\n");
+
+    /* FIXME: Handle NaN */
+
+    if(!arg_cnt(dp)) {
+        FIXME("arg_cnt = 0\n");
+        return E_NOTIMPL;
+    }
+
+    hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
+    if(FAILED(hres))
+        return hres;
+
+    min = num_val(&v);
+    for(i=1; i < arg_cnt(dp); i++) {
+        hres = to_number(dispex->ctx, get_arg(dp, i), ei, &v);
+        if(FAILED(hres))
+            return hres;
+
+        d = num_val(&v);
+        if(d < min)
+            min = d;
+    }
+
+    if(retv)
+        num_set_val(retv, min);
+    return S_OK;
 }
 
+/* ECMA-262 3rd Edition    15.8.2.13 */
 static HRESULT Math_pow(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    VARIANT x, y;
+    HRESULT hres;
+
+    TRACE("\n");
+
+    if(arg_cnt(dp) < 2) {
+        FIXME("unimplemented arg_cnt %d\n", arg_cnt(dp));
+        return E_NOTIMPL;
+    }
+
+    hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &x);
+    if(FAILED(hres))
+        return hres;
+
+    hres = to_number(dispex->ctx, get_arg(dp, 1), ei, &y);
+    if(FAILED(hres))
+        return hres;
+
+    if(retv)
+        num_set_val(retv, pow(num_val(&x), num_val(&y)));
+    return S_OK;
 }
 
 static HRESULT Math_random(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
@@ -203,11 +321,27 @@ static HRESULT Math_random(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS
     return E_NOTIMPL;
 }
 
+/* ECMA-262 3rd Edition    15.8.2.15 */
 static HRESULT Math_round(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    VARIANT v;
+    HRESULT hres;
+
+    TRACE("\n");
+
+    if(!arg_cnt(dp)) {
+        FIXME("arg_cnt = 0\n");
+        return E_NOTIMPL;
+    }
+
+    hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
+    if(FAILED(hres))
+        return hres;
+
+    if(retv)
+        num_set_val(retv, floor(num_val(&v)+0.5));
+    return S_OK;
 }
 
 static HRESULT Math_sin(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,

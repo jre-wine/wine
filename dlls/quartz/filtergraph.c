@@ -1367,7 +1367,7 @@ error:
                 IFilterGraph2_RemoveFilter(iface, pfilter);
                 IBaseFilter_Release(pfilter);
             }
-            if (!FAILED(hr)) DebugBreak();
+            if (SUCCEEDED(hr)) DebugBreak();
         }
 
         IEnumMoniker_Release(pEnumMoniker);
@@ -2091,7 +2091,7 @@ static ULONG WINAPI MediaSeeking_Release(IMediaSeeking *iface) {
     return Filtergraph_Release(This);
 }
 
-typedef HRESULT WINAPI (*fnFoundSeek)(IFilterGraphImpl *This, IMediaSeeking*, DWORD_PTR arg);
+typedef HRESULT (WINAPI *fnFoundSeek)(IFilterGraphImpl *This, IMediaSeeking*, DWORD_PTR arg);
 
 static HRESULT all_renderers_seek(IFilterGraphImpl *This, fnFoundSeek FoundSeek, DWORD_PTR arg) {
     BOOL allnotimpl = TRUE;
@@ -2140,7 +2140,7 @@ static HRESULT all_renderers_seek(IFilterGraphImpl *This, fnFoundSeek FoundSeek,
             IMediaSeeking_Release(seek);
             if (hr_return != E_NOTIMPL)
                 allnotimpl = FALSE;
-            if (hr_return == S_OK || (FAILED(hr) && hr != E_NOTIMPL && !FAILED(hr_return)))
+            if (hr_return == S_OK || (FAILED(hr) && hr != E_NOTIMPL && SUCCEEDED(hr_return)))
                 hr_return = hr;
         }
     }
@@ -2570,8 +2570,10 @@ static HRESULT WINAPI MediaPosition_get_Duration(IMediaPosition * iface, REFTIME
 }
 
 static HRESULT WINAPI MediaPosition_put_CurrentPosition(IMediaPosition * iface, REFTIME llTime){
-    FIXME("(%p)->(%f) stub!\n", iface, llTime);
-    return E_NOTIMPL;
+    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaPosition_vtbl, iface);
+    LONGLONG reftime = llTime;
+
+    return IMediaSeeking_SetPositions((IMediaSeeking *)&This->IMediaSeeking_vtbl, &reftime, AM_SEEKING_AbsolutePositioning, NULL, AM_SEEKING_NoPositioning);
 }
 
 static HRESULT WINAPI MediaPosition_get_CurrentPosition(IMediaPosition * iface, REFTIME *pllTime){

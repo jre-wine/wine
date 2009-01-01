@@ -67,6 +67,7 @@ typedef struct {
 } xobject_member;
 
 struct _xobject {
+   struct _xobject* ptarget;
    char name[MAX_NAME_LEN];
    GUID class_id;
    GUID type;
@@ -75,6 +76,7 @@ struct _xobject {
    ULONG nb_members;
    xobject_member members[MAX_MEMBERS];
    ULONG nb_childs;
+   ULONG nb_subobjects;
    struct _xobject * childs[MAX_CHILDS];
 };
 
@@ -97,11 +99,14 @@ typedef struct {
     LONG ref;
     xobject* pobj;
     int cur_enum_object;
+    BOOL from_ref;
+    ULONG level;
 } IDirectXFileDataImpl;
 
 typedef struct {
     IDirectXFileDataReference lpVtbl;
     LONG ref;
+    xobject* ptarget;
 } IDirectXFileDataReferenceImpl;
 
 typedef struct {
@@ -114,10 +119,15 @@ typedef struct {
   LPBYTE buffer;
   DWORD rem_bytes;
   /* Misc info */
+  WORD current_token;
+  BOOL token_present;
   BOOL txt;
   ULONG cur_subobject;
   LPBYTE cur_pdata;
   BYTE value[100];
+  xobject* pxo_globals;
+  ULONG nb_pxo_globals;
+  xobject* pxo_tab;
   IDirectXFileImpl* pdxf;
   xobject* pxo;
   xtemplate* pxt[MAX_SUBOBJECTS];

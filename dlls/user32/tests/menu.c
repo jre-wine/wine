@@ -2005,9 +2005,10 @@ static void test_menu_hilitemenuitem( void )
 static void check_menu_items(HMENU hmenu, UINT checked_cmd, UINT checked_type,
                              UINT checked_state)
 {
-    UINT i, count;
+    INT i, count;
 
     count = GetMenuItemCount(hmenu);
+    ok (count != -1, "GetMenuItemCount returned -1\n");
 
     for (i = 0; i < count; i++)
     {
@@ -2148,7 +2149,7 @@ static void test_menu_resource_layout(void)
         { MF_SEPARATOR, MF_GRAYED|MF_DISABLED, 8, "" }
     };
     HMENU hmenu;
-    UINT count, i;
+    INT count, i;
     BOOL ret;
 
     hmenu = LoadMenuIndirect(&menu_template);

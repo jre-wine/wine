@@ -81,6 +81,8 @@ ok(Math !== undefined, "Math is undefined");
 ok(Math.prototype === undefined, "Math.prototype is not undefined");
 ok(Function.prototype !== undefined, "Function.prototype is undefined");
 ok(Function.prototype.prototype === undefined, "Function.prototype is not undefined");
+ok(Date.prototype !== undefined, "Date.prototype is undefined");
+ok(Date.prototype.prototype === undefined, "Date.prototype is not undefined");
 
 Function.prototype.test = true;
 ok(testFunc1.test === true, "testFunc1.test !== true");
@@ -142,6 +144,15 @@ ok(obj2.pvar === 3, "obj2.pvar is not 3");
 var obj3 = new Object;
 ok(typeof(obj3) === "object", "typeof(obj3) is not object");
 
+for(var iter in "test")
+    ok(false, "unexpected forin call, test = " + iter);
+
+for(var iter in null)
+    ok(false, "unexpected forin call, test = " + iter);
+
+for(var iter in false)
+    ok(false, "unexpected forin call, test = " + iter);
+
 tmp = 0;
 if(true)
     tmp = 1;
@@ -163,6 +174,10 @@ tmp = 0;
 if(true)
     tmp = 1;
 ok(tmp === 1, "tmp !== 1, if(true) not evaluated?");
+
+if(false) {
+}else {
+}
 
 var obj3 = { prop1: 1,  prop2: typeof(false) };
 ok(obj3.prop1 === 1, "obj3.prop1 is not 1");
@@ -233,6 +248,18 @@ tmp = 3/2;
 ok(tmp === 1.5, "3/2 !== 1.5");
 ok(getVT(tmp) === "VT_R8", "getVT(3/2) !== VT_R8");
 
+tmp = 3%2;
+ok(tmp === 1, "3%2 = " + tmp);
+
+tmp = 4%2;
+ok(tmp ===0, "4%2 = " + tmp);
+
+tmp = 3.5%1.5;
+ok(tmp === 0.5, "3.5%1.5 = " + tmp);
+
+tmp = 3%true;
+ok(tmp === 0, "3%true = " + tmp);
+
 tmp = "ab" + "cd";
 ok(tmp === "abcd", "\"ab\" + \"cd\" !== \"abcd\"");
 
@@ -251,6 +278,10 @@ ok(tmp === 3, "tmp !=== 3");
 tmp = 5;
 ok((tmp /= 2) === 2.5, "tmp /= 2 !== 2.5");
 ok(tmp === 2.5, "tmp !=== 2.5");
+
+tmp = 3;
+ok((tmp %= 2) === 1, "tmp %= 2 !== 1");
+ok(tmp === 1, "tmp !== 1");
 
 tmp = 8;
 ok((tmp <<= 1) === 16, "tmp <<= 1 !== 16");
@@ -344,6 +375,16 @@ ok(+3 === 3, "+3 !== 3");
 ok(+true === 1, "+true !== 1");
 ok(+false === 0, "+false !== 0");
 ok(+null === 0, "+null !== 0");
+ok(+"0" === 0, "+'0' !== 0");
+ok(+"3" === 3, "+'3' !== 3");
+ok(+"-3" === -3, "+'-3' !== -3");
+ok(+"0xff" === 255, "+'0xff' !== 255");
+ok(+"3e3" === 3000, "+'3e3' !== 3000");
+
+tmp = new Number(1);
+ok(+tmp === 1, "ToNumber(new Number(1)) = " + (+tmp));
+tmp = new String("1");
+ok(+tmp === 1, "ToNumber(new String('1')) = " + (+tmp));
 
 ok("" + 0 === "0", "\"\" + 0 !== \"0\"");
 ok("" + 123 === "123", "\"\" + 123 !== \"123\"");
@@ -352,6 +393,8 @@ ok("" + null === "null", "\"\" + null !== \"null\"");
 ok("" + undefined === "undefined", "\"\" + undefined !== \"undefined\"");
 ok("" + true === "true", "\"\" + true !== \"true\"");
 ok("" + false === "false", "\"\" + false !== \"false\"");
+ok("" + 0.5 === "0.5", "'' + 0.5 = " + 0.5);
+ok("" + (-0.5432) === "-0.5432", "'' + (-0.5432) = " + (-0.5432));
 
 ok(1 < 3.4, "1 < 3.4 failed");
 ok(!(3.4 < 1), "3.4 < 1");
@@ -587,6 +630,11 @@ ok(tmp["3"] === 2, "tmp[3] !== 2");
 ok(tmp["6"] === true, "tmp[6] !== true");
 ok(tmp[2] === 1, "tmp[2] !== 1");
 
+ok([1,].length === 2, "[1,].length !== 2");
+ok([,,].length === 3, "[,,].length !== 3");
+ok([,].length === 2, "[].length != 2");
+ok([].length === 0, "[].length != 0");
+
 tmp = 0;
 while(tmp < 4) {
     ok(tmp < 4, "tmp >= 4");
@@ -617,7 +665,7 @@ do {
     ok(tmp === 0, "tmp !=== 0");
     tmp++;
 } while(false);
-ok(tmp === 1, "tmp !== 4");
+ok(tmp === 1, "tmp !== 1");
 
 tmp = 0;
 while(tmp < 4) {
@@ -697,5 +745,32 @@ for(iter in tmp)
 tmp.testWith = true;
 with(tmp)
     ok(testWith === true, "testWith !== true");
+
+if(false) {
+    var varTest1 = true;
+}
+
+ok(varTest1 === undefined, "varTest1 = " + varTest1);
+ok(varTest2 === undefined, "varTest2 = " + varTest1);
+
+var varTest2;
+
+function varTestFunc(varTest3) {
+    var varTest3;
+
+    ok(varTest3 === 3, "varTest3 = " + varTest3);
+    ok(varTest4 === undefined, "varTest4 = " + varTest4);
+
+    var varTest4;
+}
+
+varTestFunc(3);
+
+deleteTest = 1;
+delete deleteTest;
+try {
+    tmp = deleteTest;
+    ok(false, "deleteTest not throwed exception?");
+}catch(ex) {}
 
 reportSuccess();

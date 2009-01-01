@@ -26,6 +26,7 @@
 #include "ole2.h"
 
 #include "mshtml_private.h"
+#include "htmlevent.h"
 
 #include "wine/debug.h"
 
@@ -76,6 +77,7 @@ eventid_t str_to_eid(LPCWSTR str)
 }
 
 typedef struct {
+    DispatchEx dispex;
     const IHTMLEventObjVtbl  *lpIHTMLEventObjVtbl;
     LONG ref;
 } HTMLEventObj;
@@ -93,12 +95,11 @@ static HRESULT WINAPI HTMLEventObj_QueryInterface(IHTMLEventObj *iface, REFIID r
     if(IsEqualGUID(&IID_IUnknown, riid)) {
         TRACE("(%p)->(IID_IUnknown %p)\n", This, ppv);
         *ppv = HTMLEVENTOBJ(This);
-    }else if(IsEqualGUID(&IID_IDispatch, riid)) {
-        TRACE("(%p)->(IID_IDispatch %p)\n", This, ppv);
-        *ppv = HTMLEVENTOBJ(This);
     }else if(IsEqualGUID(&IID_IHTMLEventObj, riid)) {
         TRACE("(%p)->(IID_IHTMLEventObj %p)\n", This, ppv);
         *ppv = HTMLEVENTOBJ(This);
+    }else if(dispex_query_interface(&This->dispex, riid, ppv)) {
+        return *ppv ? S_OK : E_NOINTERFACE;
     }
 
     if(*ppv) {
@@ -380,6 +381,18 @@ static const IHTMLEventObjVtbl HTMLEventObjVtbl = {
     HTMLEventObj_get_srcFilter
 };
 
+static const tid_t HTMLEventObj_iface_tids[] = {
+    IHTMLEventObj_tid,
+    0
+};
+
+static dispex_static_data_t HTMLEventObj_dispex = {
+    NULL,
+    DispCEventObj_tid,
+    NULL,
+    HTMLEventObj_iface_tids
+};
+
 static IHTMLEventObj *create_event(void)
 {
     HTMLEventObj *ret;
@@ -387,6 +400,8 @@ static IHTMLEventObj *create_event(void)
     ret = heap_alloc(sizeof(*ret));
     ret->lpIHTMLEventObjVtbl = &HTMLEventObjVtbl;
     ret->ref = 1;
+
+    init_dispex(&ret->dispex, (IUnknown*)HTMLEVENTOBJ(ret), &HTMLEventObj_dispex);
 
     return HTMLEVENTOBJ(ret);
 }
@@ -421,9 +436,17 @@ static HRESULT set_node_event_disp(HTMLDOMNode *node, eventid_t eid, IDispatch *
     IDispatch_AddRef(disp);
     node->event_target->event_table[eid] = disp;
 
-    if((event_info[eid].flags & EVENT_DEFAULTLISTENER) && !node->doc->nscontainer->event_vector[eid]) {
-        node->doc->nscontainer->event_vector[eid] = TRUE;
-        add_nsevent_listener(node->doc->nscontainer, event_info[eid].name);
+    if(event_info[eid].flags & EVENT_DEFAULTLISTENER) {
+        if(!node->doc->nscontainer->event_vector) {
+            node->doc->nscontainer->event_vector = heap_alloc_zero(EVENTID_LAST*sizeof(BOOL));
+            if(!node->doc->nscontainer->event_vector)
+                return E_OUTOFMEMORY;
+        }
+
+        if(!node->doc->nscontainer->event_vector[eid]) {
+            node->doc->nscontainer->event_vector[eid] = TRUE;
+            add_nsevent_listener(node->doc->nscontainer, event_info[eid].name);
+        }
     }
 
     return S_OK;

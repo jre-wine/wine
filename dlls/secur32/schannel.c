@@ -18,15 +18,123 @@
  * FIXME: It should be rather obvious that this file is empty of any
  * implementation.
  */
+#include "config.h"
+#include "wine/port.h"
+
 #include <stdarg.h>
+#ifdef SONAME_LIBGNUTLS
+#include <gnutls/gnutls.h>
+#endif
+
 #include "windef.h"
 #include "winbase.h"
+#include "winnls.h"
 #include "sspi.h"
 #include "schannel.h"
 #include "secur32_priv.h"
 #include "wine/debug.h"
+#include "wine/library.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(secur32);
+
+#ifdef SONAME_LIBGNUTLS
+
+static void *libgnutls_handle;
+#define MAKE_FUNCPTR(f) static typeof(f) * p##f
+MAKE_FUNCPTR(gnutls_certificate_allocate_credentials);
+MAKE_FUNCPTR(gnutls_certificate_free_credentials);
+MAKE_FUNCPTR(gnutls_global_deinit);
+MAKE_FUNCPTR(gnutls_global_init);
+MAKE_FUNCPTR(gnutls_global_set_log_function);
+MAKE_FUNCPTR(gnutls_global_set_log_level);
+MAKE_FUNCPTR(gnutls_perror);
+#undef MAKE_FUNCPTR
+
+#define SCHAN_INVALID_HANDLE ~0UL
+
+enum schan_handle_type
+{
+    SCHAN_HANDLE_CRED,
+    SCHAN_HANDLE_FREE
+};
+
+struct schan_handle
+{
+    void *object;
+    enum schan_handle_type type;
+};
+
+struct schan_credentials
+{
+    ULONG credential_use;
+    gnutls_certificate_credentials credentials;
+};
+
+static struct schan_handle *schan_handle_table;
+static struct schan_handle *schan_free_handles;
+static SIZE_T schan_handle_table_size;
+static SIZE_T schan_handle_count;
+
+static ULONG_PTR schan_alloc_handle(void *object, enum schan_handle_type type)
+{
+    struct schan_handle *handle;
+
+    if (schan_free_handles)
+    {
+        /* Use a free handle */
+        handle = schan_free_handles;
+        if (handle->type != SCHAN_HANDLE_FREE)
+        {
+            ERR("Handle %d(%p) is in the free list, but has type %#x.\n", (handle-schan_handle_table), handle, handle->type);
+            return SCHAN_INVALID_HANDLE;
+        }
+        schan_free_handles = (struct schan_handle *)handle->object;
+        handle->object = object;
+        handle->type = type;
+
+        return handle - schan_handle_table;
+    }
+    if (!(schan_handle_count < schan_handle_table_size))
+    {
+        /* Grow the table */
+        SIZE_T new_size = schan_handle_table_size + (schan_handle_table_size >> 1);
+        struct schan_handle *new_table = HeapReAlloc(GetProcessHeap(), 0, schan_handle_table, new_size * sizeof(*schan_handle_table));
+        if (!new_table)
+        {
+            ERR("Failed to grow the handle table\n");
+            return SCHAN_INVALID_HANDLE;
+        }
+        schan_handle_table = new_table;
+        schan_handle_table_size = new_size;
+    }
+
+    handle = &schan_handle_table[schan_handle_count++];
+    handle->object = object;
+    handle->type = type;
+
+    return handle - schan_handle_table;
+}
+
+static void *schan_free_handle(ULONG_PTR handle_idx, enum schan_handle_type type)
+{
+    struct schan_handle *handle;
+    void *object;
+
+    if (handle_idx == SCHAN_INVALID_HANDLE) return NULL;
+    handle = &schan_handle_table[handle_idx];
+    if (handle->type != type)
+    {
+        ERR("Handle %ld(%p) is not of type %#x\n", handle_idx, handle, type);
+        return NULL;
+    }
+
+    object = handle->object;
+    handle->object = schan_free_handles;
+    handle->type = SCHAN_HANDLE_FREE;
+    schan_free_handles = handle;
+
+    return object;
+}
 
 static SECURITY_STATUS schan_QueryCredentialsAttributes(
  PCredHandle phCredential, ULONG ulAttribute, const VOID *pBuffer)
@@ -156,7 +264,10 @@ static SECURITY_STATUS schan_CheckCreds(const SCHANNEL_CRED *schanCred)
 static SECURITY_STATUS schan_AcquireClientCredentials(const SCHANNEL_CRED *schanCred,
  PCredHandle phCredential, PTimeStamp ptsExpiry)
 {
+    struct schan_credentials *creds;
     SECURITY_STATUS st = SEC_E_OK;
+
+    TRACE("schanCred %p, phCredential %p, ptsExpiry %p\n", schanCred, phCredential, ptsExpiry);
 
     if (schanCred)
     {
@@ -170,7 +281,26 @@ static SECURITY_STATUS schan_AcquireClientCredentials(const SCHANNEL_CRED *schan
      */
     if (st == SEC_E_OK)
     {
-        phCredential->dwUpper = SECPKG_CRED_OUTBOUND;
+        ULONG_PTR handle;
+        int ret;
+
+        creds = HeapAlloc(GetProcessHeap(), 0, sizeof(*creds));
+        if (!creds) return SEC_E_INSUFFICIENT_MEMORY;
+
+        handle = schan_alloc_handle(creds, SCHAN_HANDLE_CRED);
+        if (handle == SCHAN_INVALID_HANDLE) goto fail;
+
+        creds->credential_use = SECPKG_CRED_OUTBOUND;
+        ret = pgnutls_certificate_allocate_credentials(&creds->credentials);
+        if (ret != GNUTLS_E_SUCCESS)
+        {
+            pgnutls_perror(ret);
+            goto fail;
+        }
+
+        phCredential->dwLower = handle;
+        phCredential->dwUpper = 0;
+
         /* Outbound credentials have no expiry */
         if (ptsExpiry)
         {
@@ -179,6 +309,10 @@ static SECURITY_STATUS schan_AcquireClientCredentials(const SCHANNEL_CRED *schan
         }
     }
     return st;
+
+fail:
+    HeapFree(GetProcessHeap(), 0, creds);
+    return SEC_E_INTERNAL_ERROR;
 }
 
 static SECURITY_STATUS schan_AcquireServerCredentials(const SCHANNEL_CRED *schanCred,
@@ -186,12 +320,30 @@ static SECURITY_STATUS schan_AcquireServerCredentials(const SCHANNEL_CRED *schan
 {
     SECURITY_STATUS st;
 
+    TRACE("schanCred %p, phCredential %p, ptsExpiry %p\n", schanCred, phCredential, ptsExpiry);
+
     if (!schanCred) return SEC_E_NO_CREDENTIALS;
 
     st = schan_CheckCreds(schanCred);
     if (st == SEC_E_OK)
     {
-        phCredential->dwUpper = SECPKG_CRED_INBOUND;
+        ULONG_PTR handle;
+        struct schan_credentials *creds;
+
+        creds = HeapAlloc(GetProcessHeap(), 0, sizeof(*creds));
+        if (!creds) return SEC_E_INSUFFICIENT_MEMORY;
+        creds->credential_use = SECPKG_CRED_INBOUND;
+
+        handle = schan_alloc_handle(creds, SCHAN_HANDLE_CRED);
+        if (handle == SCHAN_INVALID_HANDLE)
+        {
+            HeapFree(GetProcessHeap(), 0, creds);
+            return SEC_E_INTERNAL_ERROR;
+        }
+
+        phCredential->dwLower = handle;
+        phCredential->dwUpper = 0;
+
         /* FIXME: get expiry from cert */
     }
     return st;
@@ -238,34 +390,20 @@ static SECURITY_STATUS SEC_ENTRY schan_AcquireCredentialsHandleW(
 static SECURITY_STATUS SEC_ENTRY schan_FreeCredentialsHandle(
  PCredHandle phCredential)
 {
-    FIXME("(%p): stub\n", phCredential);
+    struct schan_credentials *creds;
+
+    TRACE("phCredential %p\n", phCredential);
+
+    if (!phCredential) return SEC_E_INVALID_HANDLE;
+
+    creds = schan_free_handle(phCredential->dwLower, SCHAN_HANDLE_CRED);
+    if (!creds) return SEC_E_INVALID_HANDLE;
+
+    if (creds->credential_use == SECPKG_CRED_OUTBOUND)
+        pgnutls_certificate_free_credentials(creds->credentials);
+    HeapFree(GetProcessHeap(), 0, creds);
+
     return SEC_E_OK;
-}
-
-/***********************************************************************
- *              InitializeSecurityContextA
- */
-static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextA(
- PCredHandle phCredential, PCtxtHandle phContext, SEC_CHAR *pszTargetName,
- ULONG fContextReq, ULONG Reserved1, ULONG TargetDataRep,
- PSecBufferDesc pInput, ULONG Reserved2, PCtxtHandle phNewContext,
- PSecBufferDesc pOutput, ULONG *pfContextAttr, PTimeStamp ptsExpiry)
-{
-    SECURITY_STATUS ret;
-
-    TRACE("%p %p %s %d %d %d %p %d %p %p %p %p\n", phCredential, phContext,
-     debugstr_a(pszTargetName), fContextReq, Reserved1, TargetDataRep, pInput,
-     Reserved1, phNewContext, pOutput, pfContextAttr, ptsExpiry);
-    if(phCredential)
-    {
-        FIXME("stub\n");
-        ret = SEC_E_UNSUPPORTED_FUNCTION;
-    }
-    else
-    {
-        ret = SEC_E_INVALID_HANDLE;
-    }
-    return ret;
 }
 
 /***********************************************************************
@@ -274,7 +412,7 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextA(
 static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
  PCredHandle phCredential, PCtxtHandle phContext, SEC_WCHAR *pszTargetName,
  ULONG fContextReq, ULONG Reserved1, ULONG TargetDataRep,
- PSecBufferDesc pInput,ULONG Reserved2, PCtxtHandle phNewContext,
+ PSecBufferDesc pInput, ULONG Reserved2, PCtxtHandle phNewContext,
  PSecBufferDesc pOutput, ULONG *pfContextAttr, PTimeStamp ptsExpiry)
 {
     SECURITY_STATUS ret;
@@ -292,6 +430,43 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
         ret = SEC_E_INVALID_HANDLE;
     }
     return ret;
+}
+
+/***********************************************************************
+ *              InitializeSecurityContextA
+ */
+static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextA(
+ PCredHandle phCredential, PCtxtHandle phContext, SEC_CHAR *pszTargetName,
+ ULONG fContextReq, ULONG Reserved1, ULONG TargetDataRep,
+ PSecBufferDesc pInput, ULONG Reserved2, PCtxtHandle phNewContext,
+ PSecBufferDesc pOutput, ULONG *pfContextAttr, PTimeStamp ptsExpiry)
+{
+    SECURITY_STATUS ret;
+    SEC_WCHAR *target_name = NULL;
+
+    TRACE("%p %p %s %d %d %d %p %d %p %p %p %p\n", phCredential, phContext,
+     debugstr_a(pszTargetName), fContextReq, Reserved1, TargetDataRep, pInput,
+     Reserved1, phNewContext, pOutput, pfContextAttr, ptsExpiry);
+
+    if (pszTargetName)
+    {
+        INT len = MultiByteToWideChar(CP_ACP, 0, pszTargetName, -1, NULL, 0);
+        target_name = HeapAlloc(GetProcessHeap(), 0, len * sizeof(*target_name));
+        MultiByteToWideChar(CP_ACP, 0, pszTargetName, -1, target_name, len);
+    }
+
+    ret = schan_InitializeSecurityContextW(phCredential, phContext, target_name,
+            fContextReq, Reserved1, TargetDataRep, pInput, Reserved2,
+            phNewContext, pOutput, pfContextAttr, ptsExpiry);
+
+    HeapFree(GetProcessHeap(), 0, target_name);
+
+    return ret;
+}
+
+static void schan_gnutls_log(int level, const char *msg)
+{
+    TRACE("<%d> %s", level, msg);
 }
 
 static const SecurityFunctionTableA schanTableA = {
@@ -362,8 +537,35 @@ static const WCHAR schannelDllName[] = { 's','c','h','a','n','n','e','l','.','d'
 
 void SECUR32_initSchannelSP(void)
 {
-    SecureProvider *provider = SECUR32_addProvider(&schanTableA, &schanTableW,
-     schannelDllName);
+    SecureProvider *provider;
+
+
+    libgnutls_handle = wine_dlopen(SONAME_LIBGNUTLS, RTLD_NOW, NULL, 0);
+    if (!libgnutls_handle)
+    {
+        WARN("Failed to load libgnutls.\n");
+        return;
+    }
+
+#define LOAD_FUNCPTR(f) \
+    if (!(p##f = wine_dlsym(libgnutls_handle, #f, NULL, 0))) \
+    { \
+        ERR("Failed to load %s\n", #f); \
+        wine_dlclose(libgnutls_handle, NULL, 0); \
+        libgnutls_handle = NULL; \
+        return; \
+    }
+
+    LOAD_FUNCPTR(gnutls_certificate_allocate_credentials)
+    LOAD_FUNCPTR(gnutls_certificate_free_credentials)
+    LOAD_FUNCPTR(gnutls_global_deinit)
+    LOAD_FUNCPTR(gnutls_global_init)
+    LOAD_FUNCPTR(gnutls_global_set_log_function)
+    LOAD_FUNCPTR(gnutls_global_set_log_level)
+    LOAD_FUNCPTR(gnutls_perror)
+#undef LOAD_FUNCPTR
+
+    provider = SECUR32_addProvider(&schanTableA, &schanTableW, schannelDllName);
 
     if (provider)
     {
@@ -393,5 +595,28 @@ void SECUR32_initSchannelSP(void)
 
         SECUR32_addPackages(provider, sizeof(info) / sizeof(info[0]), NULL,
          info);
+
+        schan_handle_table = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 64 * sizeof(*schan_handle_table));
+        schan_handle_table_size = 64;
+
+        pgnutls_global_init();
+        if (TRACE_ON(secur32))
+        {
+            pgnutls_global_set_log_level(4);
+            pgnutls_global_set_log_function(schan_gnutls_log);
+        }
     }
 }
+
+void SECUR32_deinitSchannelSP(void)
+{
+    pgnutls_global_deinit();
+    if (libgnutls_handle) wine_dlclose(libgnutls_handle, NULL, 0);
+}
+
+#else /* SONAME_LIBGNUTLS */
+
+void SECUR32_initSchannelSP(void) {}
+void SECUR32_deinitSchannelSP(void) {}
+
+#endif /* SONAME_LIBGNUTLS */

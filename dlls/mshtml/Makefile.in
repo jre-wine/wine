@@ -15,13 +15,17 @@ C_SRCS = \
 	htmlanchor.c \
 	htmlbody.c \
 	htmlcomment.c \
+	htmlcurstyle.c \
 	htmldoc.c \
 	htmldoc3.c \
 	htmldoc5.c \
 	htmlelem.c \
 	htmlelem2.c \
+	htmlelem3.c \
+	htmlelemcol.c \
 	htmlevent.c \
 	htmlgeneric.c \
+	htmliframe.c \
 	htmlimg.c \
 	htmlinput.c \
 	htmllocation.c \
@@ -30,8 +34,10 @@ C_SRCS = \
 	htmlscript.c \
 	htmlselect.c \
 	htmlstyle.c \
+	htmlstyle2.c \
 	htmlstylesheet.c \
 	htmltable.c \
+	htmltablerow.c \
 	htmltextarea.c \
 	htmltextcont.c \
 	htmltextnode.c \

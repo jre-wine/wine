@@ -77,7 +77,8 @@ static void context_apply_attachment_filter_states(IWineD3DDevice *iface, IWineD
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     const IWineD3DSurfaceImpl *surface_impl = (IWineD3DSurfaceImpl *)surface;
     IWineD3DBaseTextureImpl *texture_impl;
-    BOOL update_minfilter, update_magfilter;
+    BOOL update_minfilter = FALSE;
+    BOOL update_magfilter = FALSE;
 
     /* Update base texture states array */
     if (SUCCEEDED(IWineD3DSurface_GetContainer(surface, &IID_IWineD3DBaseTexture, (void **)&texture_impl)))
@@ -225,7 +226,7 @@ static struct fbo_entry *context_create_fbo_entry(IWineD3DDevice *iface)
     return entry;
 }
 
-void context_destroy_fbo_entry(IWineD3DDeviceImpl *This, struct fbo_entry *entry)
+static void context_destroy_fbo_entry(IWineD3DDeviceImpl *This, struct fbo_entry *entry)
 {
     if (entry->id)
     {
@@ -317,6 +318,46 @@ static void context_apply_fbo_state(IWineD3DDevice *iface)
     }
 
     context_check_fbo_status(iface);
+}
+
+void context_resource_released(IWineD3DDevice *iface, IWineD3DResource *resource, WINED3DRESOURCETYPE type)
+{
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    UINT i;
+
+    switch(type)
+    {
+        case WINED3DRTYPE_SURFACE:
+        {
+            for (i = 0; i < This->numContexts; ++i)
+            {
+                struct fbo_entry *entry, *entry2;
+
+                LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &This->contexts[i]->fbo_list, struct fbo_entry, entry)
+                {
+                    BOOL destroyed = FALSE;
+                    UINT j;
+
+                    for (j = 0; !destroyed && j < GL_LIMITS(buffers); ++j)
+                    {
+                        if (entry->render_targets[j] == (IWineD3DSurface *)resource)
+                        {
+                            context_destroy_fbo_entry(This, entry);
+                            destroyed = TRUE;
+                        }
+                    }
+
+                    if (!destroyed && entry->depth_stencil == (IWineD3DSurface *)resource)
+                        context_destroy_fbo_entry(This, entry);
+                }
+            }
+
+            break;
+        }
+
+        default:
+            break;
+    }
 }
 
 /*****************************************************************************
@@ -429,7 +470,6 @@ static int WineD3D_ChoosePixelFormat(IWineD3DDeviceImpl *This, HDC hdc, WINED3DF
 
     int i = 0;
     int nCfgs = This->adapter->nCfgs;
-    WineD3D_PixelFormat *cfgs = This->adapter->cfgs;
 
     TRACE("ColorFormat=%s, DepthStencilFormat=%s, auxBuffers=%d, numSamples=%d, pbuffer=%d, findCompatible=%d\n",
           debug_d3dformat(ColorFormat), debug_d3dformat(DepthStencilFormat), auxBuffers, numSamples, pbuffer, findCompatible);
@@ -462,64 +502,64 @@ static int WineD3D_ChoosePixelFormat(IWineD3DDeviceImpl *This, HDC hdc, WINED3DF
     for(matchtry = 0; matchtry < (sizeof(matches) / sizeof(matches[0])) && !iPixelFormat; matchtry++) {
         for(i=0; i<nCfgs; i++) {
             BOOL exactDepthMatch = TRUE;
-            cfgs = &This->adapter->cfgs[i];
+            WineD3D_PixelFormat *cfg = &This->adapter->cfgs[i];
 
             /* For now only accept RGBA formats. Perhaps some day we will
              * allow floating point formats for pbuffers. */
-            if(cfgs->iPixelType != WGL_TYPE_RGBA_ARB)
+            if(cfg->iPixelType != WGL_TYPE_RGBA_ARB)
                 continue;
 
             /* In window mode (!pbuffer) we need a window drawable format and double buffering. */
-            if(!pbuffer && !(cfgs->windowDrawable && cfgs->doubleBuffer))
+            if(!pbuffer && !(cfg->windowDrawable && cfg->doubleBuffer))
                 continue;
 
             /* We like to have aux buffers in backbuffer mode */
-            if(auxBuffers && !cfgs->auxBuffers && matches[matchtry].require_aux)
+            if(auxBuffers && !cfg->auxBuffers && matches[matchtry].require_aux)
                 continue;
 
             /* In pbuffer-mode we need a pbuffer-capable format but we don't want double buffering */
-            if(pbuffer && (!cfgs->pbufferDrawable || cfgs->doubleBuffer))
+            if(pbuffer && (!cfg->pbufferDrawable || cfg->doubleBuffer))
                 continue;
 
             if(matches[matchtry].exact_color) {
-                if(cfgs->redSize != redBits)
+                if(cfg->redSize != redBits)
                     continue;
-                if(cfgs->greenSize != greenBits)
+                if(cfg->greenSize != greenBits)
                     continue;
-                if(cfgs->blueSize != blueBits)
+                if(cfg->blueSize != blueBits)
                     continue;
             } else {
-                if(cfgs->redSize < redBits)
+                if(cfg->redSize < redBits)
                     continue;
-                if(cfgs->greenSize < greenBits)
+                if(cfg->greenSize < greenBits)
                     continue;
-                if(cfgs->blueSize < blueBits)
+                if(cfg->blueSize < blueBits)
                     continue;
             }
             if(matches[matchtry].exact_alpha) {
-                if(cfgs->alphaSize != alphaBits)
+                if(cfg->alphaSize != alphaBits)
                     continue;
             } else {
-                if(cfgs->alphaSize < alphaBits)
+                if(cfg->alphaSize < alphaBits)
                     continue;
             }
 
             /* We try to locate a format which matches our requirements exactly. In case of
              * depth it is no problem to emulate 16-bit using e.g. 24-bit, so accept that. */
-            if(cfgs->depthSize < depthBits)
+            if(cfg->depthSize < depthBits)
                 continue;
-            else if(cfgs->depthSize > depthBits)
+            else if(cfg->depthSize > depthBits)
                 exactDepthMatch = FALSE;
 
             /* In all cases make sure the number of stencil bits matches our requirements
              * even when we don't need stencil because it could affect performance EXCEPT
              * on cards which don't offer depth formats without stencil like the i915 drivers
              * on Linux. */
-            if(stencilBits != cfgs->stencilSize && !(This->adapter->brokenStencil && stencilBits <= cfgs->stencilSize))
+            if(stencilBits != cfg->stencilSize && !(This->adapter->brokenStencil && stencilBits <= cfg->stencilSize))
                 continue;
 
             /* Check multisampling support */
-            if(cfgs->numSamples != numSamples)
+            if(cfg->numSamples != numSamples)
                 continue;
 
             /* When we have passed all the checks then we have found a format which matches our
@@ -530,13 +570,13 @@ static int WineD3D_ChoosePixelFormat(IWineD3DDeviceImpl *This, HDC hdc, WINED3DF
 
             /* Exit the loop as we have found a format :) */
             if(exactDepthMatch) {
-                iPixelFormat = cfgs->iPixelFormat;
+                iPixelFormat = cfg->iPixelFormat;
                 break;
             } else if(!iPixelFormat) {
                 /* In the end we might end up with a format which doesn't exactly match our depth
                  * requirements. Accept the first format we found because formats with higher iPixelFormat
                  * values tend to have more extended capabilities (e.g. multisampling) which we don't need. */
-                iPixelFormat = cfgs->iPixelFormat;
+                iPixelFormat = cfg->iPixelFormat;
             }
         }
     }
@@ -1453,12 +1493,13 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
         else {
             TRACE("Switching gl ctx to %p, hdc=%p ctx=%p\n", context, context->hdc, context->glCtx);
 
-            This->frag_pipe->enable_extension((IWineD3DDevice *) This, FALSE);
             ret = pwglMakeCurrent(context->hdc, context->glCtx);
             if(ret == FALSE) {
                 ERR("Failed to activate the new context\n");
             } else if(!context->last_was_blit) {
                 This->frag_pipe->enable_extension((IWineD3DDevice *) This, TRUE);
+            } else {
+                This->frag_pipe->enable_extension((IWineD3DDevice *) This, FALSE);
             }
         }
         if(This->activeContext->vshader_const_dirty) {

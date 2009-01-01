@@ -274,6 +274,11 @@ typedef struct tagMSIVIEWOPS
      * sort - orders the table by columns
      */
     UINT (*sort)( struct tagMSIVIEW *view, column_info *columns );
+
+    /*
+     * drop - drops the table from the database
+     */
+    UINT (*drop)( struct tagMSIVIEW *view );
 } MSIVIEWOPS;
 
 struct tagMSIVIEW
@@ -448,7 +453,6 @@ typedef struct tagMSIFILE
     INT Attributes;
     INT Sequence;
     msi_file_state state;
-    LPWSTR  SourcePath;
     LPWSTR  TargetPath;
     BOOL IsCompressed;
     MSIFILEHASHINFO hash;
@@ -699,6 +703,8 @@ extern UINT MSI_RecordSetStream( MSIRECORD *, UINT, IStream * );
 extern UINT MSI_RecordDataSize( MSIRECORD *, UINT );
 extern UINT MSI_RecordStreamToFile( MSIRECORD *, UINT, LPCWSTR );
 extern UINT MSI_RecordCopyField( MSIRECORD *, UINT, MSIRECORD *, UINT );
+extern MSIRECORD *MSI_CloneRecord( MSIRECORD * );
+extern BOOL MSI_RecordsAreEqual( MSIRECORD *, MSIRECORD * );
 
 /* stream internals */
 extern UINT get_raw_stream( MSIHANDLE hdb, LPCWSTR stname, IStream **stm );
@@ -964,10 +970,12 @@ extern LPWSTR msi_dup_property(MSIPACKAGE *package, LPCWSTR prop);
 extern int msi_get_property_int( MSIPACKAGE *package, LPCWSTR prop, int def );
 extern LPWSTR resolve_folder(MSIPACKAGE *package, LPCWSTR name, BOOL source,
                       BOOL set_prop, BOOL load_prop, MSIFOLDER **folder);
+extern LPWSTR resolve_file_source(MSIPACKAGE *package, MSIFILE *file);
 extern MSICOMPONENT *get_loaded_component( MSIPACKAGE* package, LPCWSTR Component );
 extern MSIFEATURE *get_loaded_feature( MSIPACKAGE* package, LPCWSTR Feature );
 extern MSIFILE *get_loaded_file( MSIPACKAGE* package, LPCWSTR file );
 extern MSIFOLDER *get_loaded_folder( MSIPACKAGE *package, LPCWSTR dir );
+extern void msi_reset_folders( MSIPACKAGE *package, BOOL source );
 extern int track_tempfile(MSIPACKAGE *package, LPCWSTR path);
 extern UINT schedule_action(MSIPACKAGE *package, UINT script, LPCWSTR action);
 extern void msi_free_action_script(MSIPACKAGE *package, UINT script);

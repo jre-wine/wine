@@ -57,7 +57,7 @@ static BOOL get_item_path(HWND hwndTV, HTREEITEM hItem, HKEY* phKey, LPWSTR* pKe
 
     item.mask = TVIF_PARAM;
     item.hItem = hItem;
-    if (!TreeView_GetItem(hwndTV, &item)) return FALSE;
+    if (!TreeView_GetItemW(hwndTV, &item)) return FALSE;
 
     if (item.lParam) {
     /* found root key with valid key value */
@@ -216,7 +216,7 @@ static BOOL match_item(HWND hwndTV, HTREEITEM hItem, LPCWSTR sstring, int mode, 
     item.hItem = hItem;
     item.pszText = keyname;
     item.cchTextMax = KEY_MAX_LEN;
-    if (!TreeView_GetItem(hwndTV, &item)) return FALSE;
+    if (!TreeView_GetItemW(hwndTV, &item)) return FALSE;
     if ((mode & SEARCH_KEYS) && match_string(keyname, sstring, mode)) {
         *row = -1;
         return TRUE;
@@ -267,7 +267,10 @@ static BOOL match_item(HWND hwndTV, HTREEITEM hItem, LPCWSTR sstring, int mode, 
             if ((mode & SEARCH_CONTENT) && (type == REG_EXPAND_SZ || type == REG_SZ)) {
                 LPWSTR buffer;
                 buffer = HeapAlloc(GetProcessHeap(), 0, lenValue);
-                RegEnumValueW(hKey, i, valName, &lenName, NULL, &type, (LPBYTE)buffer, &lenValue);
+                if (!buffer)
+                    break;
+                if (ERROR_SUCCESS != RegEnumValueW(hKey, i, NULL, NULL, NULL, &type, (LPBYTE)buffer, &lenValue))
+                    break;
                 if (match_string(buffer, sstring, mode)) {
                     HeapFree(GetProcessHeap(), 0, buffer);
                     RegCloseKey(hKey);

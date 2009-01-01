@@ -36,6 +36,7 @@
 #include <math.h>
 #include <errno.h>
 
+#include "wine/unicode.h"
 #include "wordpad.h"
 
 #ifdef NONAMELESSUNION
@@ -49,11 +50,10 @@
 #endif
 
 /* use LoadString */
-static const WCHAR xszAppTitle[] = {'W','i','n','e',' ','W','o','r','d','p','a','d',0};
+static const WCHAR wszAppTitle[] = {'W','i','n','e',' ','W','o','r','d','p','a','d',0};
 
 static const WCHAR wszRichEditClass[] = {'R','I','C','H','E','D','I','T','2','0','W',0};
 static const WCHAR wszMainWndClass[] = {'W','O','R','D','P','A','D','T','O','P',0};
-static const WCHAR wszAppTitle[] = {'W','i','n','e',' ','W','o','r','d','p','a','d',0};
 
 static const WCHAR stringFormat[] = {'%','2','d','\0'};
 
@@ -317,7 +317,7 @@ static void populate_size_list(HWND hSizeListWnd)
     HDC hdc = GetDC(hMainWnd);
     static const unsigned choices[] = {8,9,10,11,12,14,16,18,20,22,24,26,28,36,48,72};
     WCHAR buffer[3];
-    int i;
+    size_t i;
     DWORD fontStyle;
 
     ZeroMemory(&fmt, sizeof(fmt));
@@ -440,7 +440,7 @@ static void set_font(LPCWSTR wszFaceName)
 
     populate_size_list(hSizeListWnd);
 
-    SendMessageW(hFontListEditWnd, WM_SETTEXT, 0, (LPARAM)(LPWSTR)wszFaceName);
+    SendMessageW(hFontListEditWnd, WM_SETTEXT, 0, (LPARAM)wszFaceName);
 }
 
 static void set_default_font(void)
@@ -478,7 +478,7 @@ static void on_fontlist_modified(LPWSTR wszNewFaceName)
         set_font((LPCWSTR) wszNewFaceName);
 }
 
-static void add_font(LPCWSTR fontName, DWORD fontType, HWND hListWnd, NEWTEXTMETRICEXW *ntmc)
+static void add_font(LPCWSTR fontName, DWORD fontType, HWND hListWnd, const NEWTEXTMETRICEXW *ntmc)
 {
     COMBOBOXEXITEMW cbItem;
     WCHAR buffer[MAX_PATH];
@@ -557,7 +557,7 @@ static void dialog_choose_font(void)
 }
 
 
-int CALLBACK enum_font_proc(const LOGFONTW *lpelfe, const TEXTMETRICW *lpntme,
+static int CALLBACK enum_font_proc(const LOGFONTW *lpelfe, const TEXTMETRICW *lpntme,
                             DWORD FontType, LPARAM lParam)
 {
     HWND hListWnd = (HWND) lParam;
@@ -565,7 +565,7 @@ int CALLBACK enum_font_proc(const LOGFONTW *lpelfe, const TEXTMETRICW *lpntme,
     if(SendMessageW(hListWnd, CB_FINDSTRINGEXACT, -1, (LPARAM)lpelfe->lfFaceName) == CB_ERR)
     {
 
-        add_font((LPWSTR)lpelfe->lfFaceName, FontType, hListWnd, (NEWTEXTMETRICEXW*)lpntme);
+        add_font(lpelfe->lfFaceName, FontType, hListWnd, (const NEWTEXTMETRICEXW*)lpntme);
     }
 
     return 1;
@@ -1061,7 +1061,7 @@ static void dialog_viewproperties(void)
 {
     PROPSHEETPAGEW psp[2];
     PROPSHEETHEADERW psh;
-    int i;
+    size_t i;
     HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hMainWnd, GWLP_HINSTANCE);
     LPCPROPSHEETPAGEW ppsp = (LPCPROPSHEETPAGEW)&psp;
 
@@ -1153,7 +1153,7 @@ static void HandleCommandLine(LPWSTR cmdline)
     }
 
     if (opt_print)
-        MessageBox(hMainWnd, "Printing not implemented", "WordPad", MB_OK);
+        MessageBoxW(hMainWnd, MAKEINTRESOURCEW(STRING_PRINTING_NOT_IMPLEMENTED), wszAppTitle, MB_OK);
 }
 
 static LRESULT handle_findmsg(LPFINDREPLACEW pFr)
@@ -1285,21 +1285,18 @@ static void append_current_units(LPWSTR buffer)
 static void number_with_units(LPWSTR buffer, int number)
 {
     float converted = (float)number / TWIPS_PER_CM;
-    char string[MAX_STRING_LEN];
+    static const WCHAR fmt[] = {'%','.','2','f',' ','%','s','\0'};
 
-    sprintf(string, "%.2f ", converted);
-    lstrcatA(string, units_cmA);
-    MultiByteToWideChar(CP_ACP, 0, string, -1, buffer, MAX_STRING_LEN);
+    sprintfW(buffer, fmt, converted, units_cmW);
 }
 
 static BOOL get_comboexlist_selection(HWND hComboEx, LPWSTR wszBuffer, UINT bufferLength)
 {
-    HANDLE hHeap;
-    COMBOBOXEXITEM cbItem;
+    COMBOBOXEXITEMW cbItem;
     COMBOBOXINFO cbInfo;
     HWND hCombo, hList;
     int idx, result;
-    char *szBuffer;
+
     hCombo = (HWND)SendMessage(hComboEx, CBEM_GETCOMBOCONTROL, 0, 0);
     if (!hCombo)
         return FALSE;
@@ -1312,22 +1309,13 @@ static BOOL get_comboexlist_selection(HWND hComboEx, LPWSTR wszBuffer, UINT buff
     if (idx < 0)
         return FALSE;
 
-    hHeap = GetProcessHeap();
-    szBuffer = HeapAlloc(hHeap, HEAP_ZERO_MEMORY, bufferLength);
     ZeroMemory(&cbItem, sizeof(cbItem));
     cbItem.mask = CBEIF_TEXT;
     cbItem.iItem = idx;
-    cbItem.pszText = szBuffer;
+    cbItem.pszText = wszBuffer;
     cbItem.cchTextMax = bufferLength-1;
-    result = SendMessage(hComboEx, CBEM_GETITEM, 0, (LPARAM)&cbItem);
-    if (!result)
-    {
-        HeapFree(hHeap, 0, szBuffer);
-        return FALSE;
-    }
+    result = SendMessageW(hComboEx, CBEM_GETITEM, 0, (LPARAM)&cbItem);
 
-    result = MultiByteToWideChar(CP_ACP, 0, szBuffer, -1, wszBuffer, bufferLength);
-    HeapFree(hHeap, 0, szBuffer);
     return result != 0;
 }
 
@@ -1946,8 +1934,8 @@ static LRESULT OnNotify( HWND hWnd, LPARAM lParam)
 
         sprintf( buf,"selection = %d..%d, line count=%ld",
                  pSC->chrg.cpMin, pSC->chrg.cpMax,
-        SendMessage(hwndEditor, EM_GETLINECOUNT, 0, 0));
-        SetWindowText(GetDlgItem(hWnd, IDC_STATUSBAR), buf);
+                SendMessage(hwndEditor, EM_GETLINECOUNT, 0, 0));
+        SetWindowTextA(GetDlgItem(hWnd, IDC_STATUSBAR), buf);
         SendMessage(hWnd, WM_USER, 0, 0);
         return 1;
     }
@@ -2136,7 +2124,7 @@ static LRESULT OnCommand( HWND hWnd, WPARAM wParam, LPARAM lParam)
         TEXTRANGEW tr;
 
         GetWindowTextW(hwndEditor, data, nLen+1);
-        MessageBoxW(NULL, data, xszAppTitle, MB_OK);
+        MessageBoxW(NULL, data, wszAppTitle, MB_OK);
 
         HeapFree( GetProcessHeap(), 0, data);
         data = HeapAlloc(GetProcessHeap(), 0, (nLen+1)*sizeof(WCHAR));
@@ -2144,7 +2132,7 @@ static LRESULT OnCommand( HWND hWnd, WPARAM wParam, LPARAM lParam)
         tr.chrg.cpMax = nLen;
         tr.lpstrText = data;
         SendMessage (hwndEditor, EM_GETTEXTRANGE, 0, (LPARAM)&tr);
-        MessageBoxW(NULL, data, xszAppTitle, MB_OK);
+        MessageBoxW(NULL, data, wszAppTitle, MB_OK);
         HeapFree( GetProcessHeap(), 0, data );
 
         /* SendMessage(hwndEditor, EM_SETSEL, 0, -1); */
@@ -2184,7 +2172,7 @@ static LRESULT OnCommand( HWND hWnd, WPARAM wParam, LPARAM lParam)
         SendMessage(hwndEditor, EM_GETSELTEXT, 0, (LPARAM)data);
         sprintf(buf, "Start = %d, End = %d", range.cpMin, range.cpMax);
         MessageBoxA(hWnd, buf, "Editor", MB_OK);
-        MessageBoxW(hWnd, data, xszAppTitle, MB_OK);
+        MessageBoxW(hWnd, data, wszAppTitle, MB_OK);
         HeapFree( GetProcessHeap(), 0, data);
         /* SendMessage(hwndEditor, EM_SETSEL, 0, -1); */
         return 0;

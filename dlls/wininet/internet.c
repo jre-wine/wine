@@ -113,7 +113,7 @@ HINTERNET WININET_AllocHandle( LPWININETHANDLEHEADER info )
     {
         num = HANDLE_CHUNK_SIZE;
         p = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, 
-                   sizeof (UINT)* num);
+                   sizeof (*WININET_Handles)* num);
         if( !p )
             goto end;
         WININET_Handles = p;
@@ -123,7 +123,7 @@ HINTERNET WININET_AllocHandle( LPWININETHANDLEHEADER info )
     {
         num = WININET_dwMaxHandles + HANDLE_CHUNK_SIZE;
         p = HeapReAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
-                   WININET_Handles, sizeof (UINT)* num);
+                   WININET_Handles, sizeof (*WININET_Handles)* num);
         if( !p )
             goto end;
         WININET_Handles = p;
@@ -2259,9 +2259,14 @@ BOOL WINAPI InternetSetOptionW(HINTERNET hInternet, DWORD dwOption,
     {
     case INTERNET_OPTION_CALLBACK:
       {
-        INTERNET_STATUS_CALLBACK callback = *(INTERNET_STATUS_CALLBACK *)lpBuffer;
-        ret = (set_status_callback(lpwhh, callback, TRUE) != INTERNET_INVALID_STATUS_CALLBACK);
-        break;
+        if (!lpwhh)
+        {
+            INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
+            return FALSE;
+        }
+        WININET_Release(lpwhh);
+        INTERNET_SetLastError(ERROR_INTERNET_OPTION_NOT_SETTABLE);
+        return FALSE;
       }
     case INTERNET_OPTION_HTTP_VERSION:
       {
@@ -2384,12 +2389,15 @@ BOOL WINAPI InternetSetOptionA(HINTERNET hInternet, DWORD dwOption,
     case INTERNET_OPTION_CALLBACK:
         {
         LPWININETHANDLEHEADER lpwh;
-        INTERNET_STATUS_CALLBACK callback = *(INTERNET_STATUS_CALLBACK *)lpBuffer;
 
-        if (!(lpwh = WININET_GetObject(hInternet))) return FALSE;
-        r = (set_status_callback(lpwh, callback, FALSE) != INTERNET_INVALID_STATUS_CALLBACK);
+        if (!(lpwh = WININET_GetObject(hInternet)))
+        {
+            INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
+            return FALSE;
+        }
         WININET_Release(lpwh);
-        return r;
+        INTERNET_SetLastError(ERROR_INTERNET_OPTION_NOT_SETTABLE);
+        return FALSE;
         }
     case INTERNET_OPTION_PROXY:
         {
@@ -2478,6 +2486,18 @@ BOOL WINAPI InternetTimeFromSystemTimeA( const SYSTEMTIME* time, DWORD format, L
 
     TRACE( "%p 0x%08x %p 0x%08x\n", time, format, string, size );
 
+    if (!time || !string || format != INTERNET_RFC1123_FORMAT)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (size < INTERNET_RFC1123_BUFSIZE * sizeof(*string))
+    {
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        return FALSE;
+    }
+
     ret = InternetTimeFromSystemTimeW( time, format, stringW, sizeof(stringW) );
     if (ret) WideCharToMultiByte( CP_ACP, 0, stringW, -1, string, size, NULL, NULL );
 
@@ -2495,10 +2515,17 @@ BOOL WINAPI InternetTimeFromSystemTimeW( const SYSTEMTIME* time, DWORD format, L
 
     TRACE( "%p 0x%08x %p 0x%08x\n", time, format, string, size );
 
-    if (!time || !string) return FALSE;
-
-    if (format != INTERNET_RFC1123_FORMAT || size < INTERNET_RFC1123_BUFSIZE * sizeof(WCHAR))
+    if (!time || !string || format != INTERNET_RFC1123_FORMAT)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
+    }
+
+    if (size < INTERNET_RFC1123_BUFSIZE * sizeof(*string))
+    {
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        return FALSE;
+    }
 
     sprintfW( string, date,
               WININET_wkday[time->wDayOfWeek],

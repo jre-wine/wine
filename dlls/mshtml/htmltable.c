@@ -37,6 +37,7 @@ typedef struct {
     const IHTMLTableVtbl  *lpHTMLTableVtbl;
 
     ConnectionPoint cp;
+    nsIDOMHTMLTableElement *nstable;
 } HTMLTable;
 
 #define HTMLTABLE(x)  ((IHTMLTable*)  &(x)->lpHTMLTableVtbl)
@@ -273,8 +274,21 @@ static HRESULT WINAPI HTMLTable_refresh(IHTMLTable *iface)
 static HRESULT WINAPI HTMLTable_get_rows(IHTMLTable *iface, IHTMLElementCollection **p)
 {
     HTMLTable *This = HTMLTABLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsIDOMHTMLCollection *nscol;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    nsres = nsIDOMHTMLTableElement_GetRows(This->nstable, &nscol);
+    if(NS_FAILED(nsres)) {
+        ERR("GetRows failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    *p = create_collection_from_htmlcol(This->element.node.doc, (IUnknown*)HTMLTABLE(This), nscol);
+
+    nsIDOMHTMLCollection_Release(nscol);
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLTable_put_width(IHTMLTable *iface, VARIANT v)
@@ -529,6 +543,10 @@ static HRESULT HTMLTable_QI(HTMLDOMNode *iface, REFIID riid, void **ppv)
 static void HTMLTable_destructor(HTMLDOMNode *iface)
 {
     HTMLTable *This = HTMLTABLE_NODE_THIS(iface);
+
+    if(This->nstable)
+        nsIDOMHTMLTableElement_Release(This->nstable);
+
     HTMLElement_destructor(&This->element.node);
 }
 
@@ -539,16 +557,39 @@ static const NodeImplVtbl HTMLTableImplVtbl = {
     HTMLTable_destructor
 };
 
+static const tid_t HTMLTable_iface_tids[] = {
+    IHTMLDOMNode_tid,
+    IHTMLDOMNode2_tid,
+    IHTMLElement_tid,
+    IHTMLElement2_tid,
+    IHTMLElement3_tid,
+    IHTMLTable_tid,
+    0
+};
+
+static dispex_static_data_t HTMLTable_dispex = {
+    NULL,
+    DispHTMLTable_tid,
+    NULL,
+    HTMLTable_iface_tids
+};
+
 HTMLElement *HTMLTable_Create(nsIDOMHTMLElement *nselem)
 {
     HTMLTable *ret = heap_alloc_zero(sizeof(HTMLTable));
-
-    HTMLElement_Init(&ret->element);
+    nsresult nsres;
 
     ret->element.node.vtbl = &HTMLTableImplVtbl;
     ret->lpHTMLTableVtbl = &HTMLTableVtbl;
 
+    init_dispex(&ret->element.node.dispex, (IUnknown*)HTMLTABLE(ret), &HTMLTable_dispex);
+    HTMLElement_Init(&ret->element);
+
     ConnectionPoint_Init(&ret->cp, &ret->element.cp_container, &DIID_HTMLTableEvents);
+
+    nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLTableElement, (void**)&ret->nstable);
+    if(NS_FAILED(nsres))
+        ERR("Could not get nsIDOMHTMLTableElement iface: %08x\n", nsres);
 
     return &ret->element;
 }

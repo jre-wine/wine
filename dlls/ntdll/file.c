@@ -2264,10 +2264,18 @@ NTSTATUS WINAPI NtQueryVolumeInformationFile( HANDLE handle, PIO_STATUS_BLOCK io
                 }
                 bsize = stfs.f_bsize;
 #endif
-                info->BytesPerSector = 512;
-                info->SectorsPerAllocationUnit = 8;
-                info->TotalAllocationUnits.QuadPart = bsize * stfs.f_blocks / (512 * 8);
-                info->AvailableAllocationUnits.QuadPart = bsize * stfs.f_bavail / (512 * 8);
+                if (bsize == 2048)  /* assume CD-ROM */
+                {
+                    info->BytesPerSector = 2048;
+                    info->SectorsPerAllocationUnit = 1;
+                }
+                else
+                {
+                    info->BytesPerSector = 512;
+                    info->SectorsPerAllocationUnit = 8;
+                }
+                info->TotalAllocationUnits.QuadPart = bsize * stfs.f_blocks / (info->BytesPerSector * info->SectorsPerAllocationUnit);
+                info->AvailableAllocationUnits.QuadPart = bsize * stfs.f_bavail / (info->BytesPerSector * info->SectorsPerAllocationUnit);
                 io->Information = sizeof(*info);
                 io->u.Status = STATUS_SUCCESS;
             }
@@ -2305,6 +2313,59 @@ NTSTATUS WINAPI NtQueryVolumeInformationFile( HANDLE handle, PIO_STATUS_BLOCK io
     }
     if (needs_close) close( fd );
     return io->u.Status;
+}
+
+
+/******************************************************************
+ *		NtQueryEaFile  (NTDLL.@)
+ *
+ * Read extended attributes from NTFS files.
+ *
+ * PARAMS
+ *  hFile         [I] File handle, must be opened with FILE_READ_EA access
+ *  iosb          [O] Receives information about the operation on return
+ *  buffer        [O] Output buffer
+ *  length        [I] Length of output buffer
+ *  single_entry  [I] Only read and return one entry
+ *  ea_list       [I] Optional list with names of EAs to return
+ *  ea_list_len   [I] Length of ea_list in bytes
+ *  ea_index      [I] Optional pointer to 1-based index of attribute to return
+ *  restart       [I] restart EA scan
+ *
+ * RETURNS
+ *  Success: 0. Atrributes read into buffer
+ *  Failure: An NTSTATUS error code describing the error.
+ */
+NTSTATUS WINAPI NtQueryEaFile( HANDLE hFile, PIO_STATUS_BLOCK iosb, PVOID buffer, ULONG length,
+                               BOOLEAN single_entry, PVOID ea_list, ULONG ea_list_len,
+                               PULONG ea_index, BOOLEAN restart )
+{
+    FIXME("(%p,%p,%p,%d,%d,%p,%d,%p,%d) stub\n",
+            hFile, iosb, buffer, length, single_entry, ea_list,
+            ea_list_len, ea_index, restart);
+    return STATUS_ACCESS_DENIED;
+}
+
+
+/******************************************************************
+ *		NtSetEaFile  (NTDLL.@)
+ *
+ * Update extended attributes for NTFS files.
+ *
+ * PARAMS
+ *  hFile         [I] File handle, must be opened with FILE_READ_EA access
+ *  iosb          [O] Receives information about the operation on return
+ *  buffer        [I] Buffer with EA information
+ *  length        [I] Length of buffer
+ *
+ * RETURNS
+ *  Success: 0. Attributes are updated
+ *  Failure: An NTSTATUS error code describing the error.
+ */
+NTSTATUS WINAPI NtSetEaFile( HANDLE hFile, PIO_STATUS_BLOCK iosb, PVOID buffer, ULONG length )
+{
+    FIXME("(%p,%p,%p,%d) stub\n", hFile, iosb, buffer, length);
+    return STATUS_ACCESS_DENIED;
 }
 
 
@@ -2355,6 +2416,7 @@ NTSTATUS WINAPI NtLockFile( HANDLE hFile, HANDLE lock_granted_event,
     NTSTATUS    ret;
     HANDLE      handle;
     BOOLEAN     async;
+    static BOOLEAN     warn = TRUE;
 
     if (apc || io_status || key)
     {
@@ -2362,7 +2424,11 @@ NTSTATUS WINAPI NtLockFile( HANDLE hFile, HANDLE lock_granted_event,
         return STATUS_NOT_IMPLEMENTED;
     }
 
-    if (apc_user) FIXME("I/O completion on lock not implemented yet\n");
+    if (apc_user && warn)
+    {
+        FIXME("I/O completion on lock not implemented yet\n");
+        warn = FALSE;
+    }
 
     for (;;)
     {

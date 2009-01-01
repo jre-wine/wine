@@ -115,9 +115,7 @@ static BOOL HTTP_InsertCustomHeader(LPWININETHTTPREQW lpwhr, LPHTTPHEADERW lpHdr
 static INT HTTP_GetCustomHeaderIndex(LPWININETHTTPREQW lpwhr, LPCWSTR lpszField, INT index, BOOL Request);
 static BOOL HTTP_DeleteCustomHeader(LPWININETHTTPREQW lpwhr, DWORD index);
 static LPWSTR HTTP_build_req( LPCWSTR *list, int len );
-static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD
-        dwInfoLevel, LPVOID lpBuffer, LPDWORD lpdwBufferLength, LPDWORD
-        lpdwIndex);
+static BOOL HTTP_HttpQueryInfoW(LPWININETHTTPREQW, DWORD, LPVOID, LPDWORD, LPDWORD);
 static BOOL HTTP_HandleRedirect(LPWININETHTTPREQW lpwhr, LPCWSTR lpszUrl);
 static UINT HTTP_DecodeBase64(LPCWSTR base64, LPSTR bin);
 static BOOL HTTP_VerifyValidHeader(LPWININETHTTPREQW lpwhr, LPCWSTR field);
@@ -145,21 +143,26 @@ static LPWSTR * HTTP_Tokenize(LPCWSTR string, LPCWSTR token_string)
     int i;
     LPCWSTR next_token;
 
-    /* empty string has no tokens */
-    if (*string)
-        tokens++;
-    /* count tokens */
-    for (i = 0; string[i]; i++)
-        if (!strncmpW(string+i, token_string, strlenW(token_string)))
-        {
-            DWORD j;
+    if (string)
+    {
+        /* empty string has no tokens */
+        if (*string)
             tokens++;
-            /* we want to skip over separators, but not the null terminator */
-            for (j = 0; j < strlenW(token_string) - 1; j++)
-                if (!string[i+j])
-                    break;
-            i += j;
+        /* count tokens */
+        for (i = 0; string[i]; i++)
+        {
+            if (!strncmpW(string+i, token_string, strlenW(token_string)))
+            {
+                DWORD j;
+                tokens++;
+                /* we want to skip over separators, but not the null terminator */
+                for (j = 0; j < strlenW(token_string) - 1; j++)
+                    if (!string[i+j])
+                        break;
+                i += j;
+            }
         }
+    }
 
     /* add 1 for terminating NULL */
     token_array = HeapAlloc(GetProcessHeap(), 0, (tokens+1) * sizeof(*token_array));
@@ -311,82 +314,84 @@ static void HTTP_ProcessCookies( LPWININETHTTPREQW lpwhr )
 {
     static const WCHAR szSet_Cookie[] = { 'S','e','t','-','C','o','o','k','i','e',0 };
     int HeaderIndex;
+    int numCookies = 0;
     LPHTTPHEADERW setCookieHeader;
 
-    HeaderIndex = HTTP_GetCustomHeaderIndex(lpwhr, szSet_Cookie, 0, FALSE);
-    if (HeaderIndex == -1)
-            return;
-    setCookieHeader = &lpwhr->pCustHeaders[HeaderIndex];
-
-    if (!(lpwhr->hdr.dwFlags & INTERNET_FLAG_NO_COOKIES) && setCookieHeader->lpszValue)
+    while((HeaderIndex = HTTP_GetCustomHeaderIndex(lpwhr, szSet_Cookie, numCookies, FALSE)) != -1)
     {
-        int nPosStart = 0, nPosEnd = 0, len;
-        static const WCHAR szFmt[] = { 'h','t','t','p',':','/','/','%','s','/',0};
+        setCookieHeader = &lpwhr->pCustHeaders[HeaderIndex];
 
-        while (setCookieHeader->lpszValue[nPosEnd] != '\0')
+        if (!(lpwhr->hdr.dwFlags & INTERNET_FLAG_NO_COOKIES) && setCookieHeader->lpszValue)
         {
-            LPWSTR buf_cookie, cookie_name, cookie_data;
-            LPWSTR buf_url;
-            LPWSTR domain = NULL;
-            LPHTTPHEADERW Host;
+            int nPosStart = 0, nPosEnd = 0, len;
+            static const WCHAR szFmt[] = { 'h','t','t','p',':','/','/','%','s','/',0};
 
-            int nEqualPos = 0;
-            while (setCookieHeader->lpszValue[nPosEnd] != ';' && setCookieHeader->lpszValue[nPosEnd] != ',' &&
-                   setCookieHeader->lpszValue[nPosEnd] != '\0')
+            while (setCookieHeader->lpszValue[nPosEnd] != '\0')
             {
-                nPosEnd++;
-            }
-            if (setCookieHeader->lpszValue[nPosEnd] == ';')
-            {
-                /* fixme: not case sensitive, strcasestr is gnu only */
-                int nDomainPosEnd = 0;
-                int nDomainPosStart = 0, nDomainLength = 0;
-                static const WCHAR szDomain[] = {'d','o','m','a','i','n','=',0};
-                LPWSTR lpszDomain = strstrW(&setCookieHeader->lpszValue[nPosEnd], szDomain);
-                if (lpszDomain)
-                { /* they have specified their own domain, lets use it */
-                    while (lpszDomain[nDomainPosEnd] != ';' && lpszDomain[nDomainPosEnd] != ',' &&
-                           lpszDomain[nDomainPosEnd] != '\0')
-                    {
-                        nDomainPosEnd++;
-                    }
-                    nDomainPosStart = strlenW(szDomain);
-                    nDomainLength = (nDomainPosEnd - nDomainPosStart) + 1;
-                    domain = HeapAlloc(GetProcessHeap(), 0, (nDomainLength + 1)*sizeof(WCHAR));
-                    lstrcpynW(domain, &lpszDomain[nDomainPosStart], nDomainLength + 1);
+                LPWSTR buf_cookie, cookie_name, cookie_data;
+                LPWSTR buf_url;
+                LPWSTR domain = NULL;
+                LPHTTPHEADERW Host;
+
+                int nEqualPos = 0;
+                while (setCookieHeader->lpszValue[nPosEnd] != ';' && setCookieHeader->lpszValue[nPosEnd] != ',' &&
+                       setCookieHeader->lpszValue[nPosEnd] != '\0')
+                {
+                    nPosEnd++;
                 }
-            }
-            if (setCookieHeader->lpszValue[nPosEnd] == '\0') break;
-            buf_cookie = HeapAlloc(GetProcessHeap(), 0, ((nPosEnd - nPosStart) + 1)*sizeof(WCHAR));
-            lstrcpynW(buf_cookie, &setCookieHeader->lpszValue[nPosStart], (nPosEnd - nPosStart) + 1);
-            TRACE("%s\n", debugstr_w(buf_cookie));
-            while (buf_cookie[nEqualPos] != '=' && buf_cookie[nEqualPos] != '\0')
-            {
-                nEqualPos++;
-            }
-            if (buf_cookie[nEqualPos] == '\0' || buf_cookie[nEqualPos + 1] == '\0')
-            {
+                if (setCookieHeader->lpszValue[nPosEnd] == ';')
+                {
+                    /* fixme: not case sensitive, strcasestr is gnu only */
+                    int nDomainPosEnd = 0;
+                    int nDomainPosStart = 0, nDomainLength = 0;
+                    static const WCHAR szDomain[] = {'d','o','m','a','i','n','=',0};
+                    LPWSTR lpszDomain = strstrW(&setCookieHeader->lpszValue[nPosEnd], szDomain);
+                    if (lpszDomain)
+                    { /* they have specified their own domain, lets use it */
+                        while (lpszDomain[nDomainPosEnd] != ';' && lpszDomain[nDomainPosEnd] != ',' &&
+                               lpszDomain[nDomainPosEnd] != '\0')
+                        {
+                            nDomainPosEnd++;
+                        }
+                        nDomainPosStart = strlenW(szDomain);
+                        nDomainLength = (nDomainPosEnd - nDomainPosStart) + 1;
+                        domain = HeapAlloc(GetProcessHeap(), 0, (nDomainLength + 1)*sizeof(WCHAR));
+                        lstrcpynW(domain, &lpszDomain[nDomainPosStart], nDomainLength + 1);
+                    }
+                }
+                if (setCookieHeader->lpszValue[nPosEnd] == '\0') break;
+                buf_cookie = HeapAlloc(GetProcessHeap(), 0, ((nPosEnd - nPosStart) + 1)*sizeof(WCHAR));
+                lstrcpynW(buf_cookie, &setCookieHeader->lpszValue[nPosStart], (nPosEnd - nPosStart) + 1);
+                TRACE("%s\n", debugstr_w(buf_cookie));
+                while (buf_cookie[nEqualPos] != '=' && buf_cookie[nEqualPos] != '\0')
+                {
+                    nEqualPos++;
+                }
+                if (buf_cookie[nEqualPos] == '\0' || buf_cookie[nEqualPos + 1] == '\0')
+                {
+                    HeapFree(GetProcessHeap(), 0, buf_cookie);
+                    break;
+                }
+
+                cookie_name = HeapAlloc(GetProcessHeap(), 0, (nEqualPos + 1)*sizeof(WCHAR));
+                lstrcpynW(cookie_name, buf_cookie, nEqualPos + 1);
+                cookie_data = &buf_cookie[nEqualPos + 1];
+
+                Host = HTTP_GetHeader(lpwhr,szHost);
+                len = lstrlenW((domain ? domain : (Host?Host->lpszValue:NULL))) +
+                    strlenW(lpwhr->lpszPath) + 9;
+                buf_url = HeapAlloc(GetProcessHeap(), 0, len*sizeof(WCHAR));
+                sprintfW(buf_url, szFmt, (domain ? domain : (Host?Host->lpszValue:NULL))); /* FIXME PATH!!! */
+                InternetSetCookieW(buf_url, cookie_name, cookie_data);
+
+                HeapFree(GetProcessHeap(), 0, buf_url);
                 HeapFree(GetProcessHeap(), 0, buf_cookie);
-                break;
+                HeapFree(GetProcessHeap(), 0, cookie_name);
+                HeapFree(GetProcessHeap(), 0, domain);
+                nPosStart = nPosEnd;
             }
-
-            cookie_name = HeapAlloc(GetProcessHeap(), 0, (nEqualPos + 1)*sizeof(WCHAR));
-            lstrcpynW(cookie_name, buf_cookie, nEqualPos + 1);
-            cookie_data = &buf_cookie[nEqualPos + 1];
-
-            Host = HTTP_GetHeader(lpwhr,szHost);
-            len = lstrlenW((domain ? domain : (Host?Host->lpszValue:NULL))) + 
-                strlenW(lpwhr->lpszPath) + 9;
-            buf_url = HeapAlloc(GetProcessHeap(), 0, len*sizeof(WCHAR));
-            sprintfW(buf_url, szFmt, (domain ? domain : (Host?Host->lpszValue:NULL))); /* FIXME PATH!!! */
-            InternetSetCookieW(buf_url, cookie_name, cookie_data);
-
-            HeapFree(GetProcessHeap(), 0, buf_url);
-            HeapFree(GetProcessHeap(), 0, buf_cookie);
-            HeapFree(GetProcessHeap(), 0, cookie_name);
-            HeapFree(GetProcessHeap(), 0, domain);
-            nPosStart = nPosEnd;
         }
+        numCookies++;
     }
 }
 
@@ -1948,7 +1953,7 @@ HINTERNET WINAPI HTTP_HttpOpenRequestW(LPWININETHTTPSESSIONW lpwhs,
         lpwhr->lpszPath = HeapAlloc(GetProcessHeap(), 0, len*sizeof(WCHAR));
         rc = UrlEscapeW(lpszObjectName, lpwhr->lpszPath, &len,
                    URL_ESCAPE_SPACES_ONLY);
-        if (rc)
+        if (rc != S_OK)
         {
             ERR("Unable to escape string!(%s) (%d)\n",debugstr_w(lpszObjectName),rc);
             strcpyW(lpwhr->lpszPath,lpszObjectName);
@@ -2167,7 +2172,7 @@ static const LPCWSTR header_lookup[] = {
 /***********************************************************************
  *           HTTP_HttpQueryInfoW (internal)
  */
-static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLevel,
+static BOOL HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLevel,
 	LPVOID lpBuffer, LPDWORD lpdwBufferLength, LPDWORD lpdwIndex)
 {
     LPHTTPHEADERW lphttpHdr = NULL;
@@ -2181,6 +2186,7 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
     switch (level)
     {
     case HTTP_QUERY_CUSTOM:
+        if (!lpBuffer) return FALSE;
         index = HTTP_GetCustomHeaderIndex(lpwhr, lpBuffer, requested_index, request_only);
         break;
 
@@ -2226,7 +2232,7 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
         {
             LPWSTR * ppszRawHeaderLines = HTTP_Tokenize(lpwhr->lpszRawHeaders, szCrLf);
             DWORD i, size = 0;
-            LPWSTR pszString = (WCHAR*)lpBuffer;
+            LPWSTR pszString = lpBuffer;
 
             for (i = 0; ppszRawHeaderLines[i]; i++)
                 size += strlenW(ppszRawHeaderLines[i]) + 1;
@@ -2238,17 +2244,17 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
                 INTERNET_SetLastError(ERROR_INSUFFICIENT_BUFFER);
                 return FALSE;
             }
-
-            for (i = 0; ppszRawHeaderLines[i]; i++)
+            if (pszString)
             {
-                DWORD len = strlenW(ppszRawHeaderLines[i]);
-                memcpy(pszString, ppszRawHeaderLines[i], (len+1)*sizeof(WCHAR));
-                pszString += len+1;
+                for (i = 0; ppszRawHeaderLines[i]; i++)
+                {
+                    DWORD len = strlenW(ppszRawHeaderLines[i]);
+                    memcpy(pszString, ppszRawHeaderLines[i], (len+1)*sizeof(WCHAR));
+                    pszString += len+1;
+                }
+                *pszString = '\0';
+                TRACE("returning data: %s\n", debugstr_wn(lpBuffer, size));
             }
-            *pszString = '\0';
-
-            TRACE("returning data: %s\n", debugstr_wn((WCHAR*)lpBuffer, size));
-
             *lpdwBufferLength = size * sizeof(WCHAR);
             HTTP_FreeTokens(ppszRawHeaderLines);
 
@@ -2264,11 +2270,12 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
                 INTERNET_SetLastError(ERROR_INSUFFICIENT_BUFFER);
                 return FALSE;
             }
-            memcpy(lpBuffer, lpwhr->lpszStatusText, (len+1)*sizeof(WCHAR));
+            if (lpBuffer)
+            {
+                memcpy(lpBuffer, lpwhr->lpszStatusText, (len + 1) * sizeof(WCHAR));
+                TRACE("returning data: %s\n", debugstr_wn(lpBuffer, len));
+            }
             *lpdwBufferLength = len * sizeof(WCHAR);
-
-            TRACE("returning data: %s\n", debugstr_wn((WCHAR*)lpBuffer, len));
-
             return TRUE;
         }
         break;
@@ -2282,11 +2289,12 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
                 INTERNET_SetLastError(ERROR_INSUFFICIENT_BUFFER);
                 return FALSE;
             }
-            memcpy(lpBuffer, lpwhr->lpszVersion, (len+1)*sizeof(WCHAR));
+            if (lpBuffer)
+            {
+                memcpy(lpBuffer, lpwhr->lpszVersion, (len + 1) * sizeof(WCHAR));
+                TRACE("returning data: %s\n", debugstr_wn(lpBuffer, len));
+            }
             *lpdwBufferLength = len * sizeof(WCHAR);
-
-            TRACE("returning data: %s\n", debugstr_wn((WCHAR*)lpBuffer, len));
-
             return TRUE;
         }
         break;
@@ -2314,14 +2322,13 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
         (*lpdwIndex)++;
 
     /* coalesce value to requested type */
-    if (dwInfoLevel & HTTP_QUERY_FLAG_NUMBER)
+    if (dwInfoLevel & HTTP_QUERY_FLAG_NUMBER && lpBuffer)
     {
-	*(int *)lpBuffer = atoiW(lphttpHdr->lpszValue);
-	bSuccess = TRUE;
-
-	TRACE(" returning number : %d\n", *(int *)lpBuffer);
+        *(int *)lpBuffer = atoiW(lphttpHdr->lpszValue);
+        TRACE(" returning number: %d\n", *(int *)lpBuffer);
+        bSuccess = TRUE;
     }
-    else if (dwInfoLevel & HTTP_QUERY_FLAG_SYSTEMTIME)
+    else if (dwInfoLevel & HTTP_QUERY_FLAG_SYSTEMTIME && lpBuffer)
     {
         time_t tmpTime;
         struct tm tmpTM;
@@ -2330,24 +2337,22 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
         tmpTime = ConvertTimeString(lphttpHdr->lpszValue);
 
         tmpTM = *gmtime(&tmpTime);
-        STHook = (SYSTEMTIME *) lpBuffer;
-        if(STHook==NULL)
-            return bSuccess;
+        STHook = (SYSTEMTIME *)lpBuffer;
+        if (!STHook) return bSuccess;
 
-	STHook->wDay = tmpTM.tm_mday;
-	STHook->wHour = tmpTM.tm_hour;
-	STHook->wMilliseconds = 0;
-	STHook->wMinute = tmpTM.tm_min;
-	STHook->wDayOfWeek = tmpTM.tm_wday;
-	STHook->wMonth = tmpTM.tm_mon + 1;
-	STHook->wSecond = tmpTM.tm_sec;
-	STHook->wYear = tmpTM.tm_year;
+        STHook->wDay = tmpTM.tm_mday;
+        STHook->wHour = tmpTM.tm_hour;
+        STHook->wMilliseconds = 0;
+        STHook->wMinute = tmpTM.tm_min;
+        STHook->wDayOfWeek = tmpTM.tm_wday;
+        STHook->wMonth = tmpTM.tm_mon + 1;
+        STHook->wSecond = tmpTM.tm_sec;
+        STHook->wYear = tmpTM.tm_year;
+        bSuccess = TRUE;
 	
-	bSuccess = TRUE;
-	
-	TRACE(" returning time : %04d/%02d/%02d - %d - %02d:%02d:%02d.%02d\n", 
-	      STHook->wYear, STHook->wMonth, STHook->wDay, STHook->wDayOfWeek,
-	      STHook->wHour, STHook->wMinute, STHook->wSecond, STHook->wMilliseconds);
+        TRACE(" returning time: %04d/%02d/%02d - %d - %02d:%02d:%02d.%02d\n",
+              STHook->wYear, STHook->wMonth, STHook->wDay, STHook->wDayOfWeek,
+              STHook->wHour, STHook->wMinute, STHook->wSecond, STHook->wMilliseconds);
     }
     else if (lphttpHdr->lpszValue)
     {
@@ -2359,12 +2364,13 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
             INTERNET_SetLastError(ERROR_INSUFFICIENT_BUFFER);
             return bSuccess;
         }
-
-        memcpy(lpBuffer, lphttpHdr->lpszValue, len);
+        if (lpBuffer)
+        {
+            memcpy(lpBuffer, lphttpHdr->lpszValue, len);
+            TRACE(" returning string: %s\n", debugstr_w(lpBuffer));
+        }
         *lpdwBufferLength = len - sizeof(WCHAR);
         bSuccess = TRUE;
-
-	TRACE(" returning string : %s\n", debugstr_w(lpBuffer));
     }
     return bSuccess;
 }
@@ -3045,7 +3051,7 @@ static BOOL HTTP_HandleRedirect(LPWININETHTTPREQW lpwhr, LPCWSTR lpszUrl)
         lpwhr->lpszPath = HeapAlloc(GetProcessHeap(), 0, needed*sizeof(WCHAR));
         rc = UrlEscapeW(path, lpwhr->lpszPath, &needed,
                         URL_ESCAPE_SPACES_ONLY);
-        if (rc)
+        if (rc != S_OK)
         {
             ERR("Unable to escape string!(%s) (%d)\n",debugstr_w(path),rc);
             strcpyW(lpwhr->lpszPath,path);
@@ -3484,11 +3490,32 @@ static DWORD HTTPSESSION_QueryOption(WININETHANDLEHEADER *hdr, DWORD option, voi
     return INET_QueryOption(option, buffer, size, unicode);
 }
 
+static DWORD HTTPSESSION_SetOption(WININETHANDLEHEADER *hdr, DWORD option, void *buffer, DWORD size)
+{
+    WININETHTTPSESSIONW *ses = (WININETHTTPSESSIONW*)hdr;
+
+    switch(option) {
+    case INTERNET_OPTION_USERNAME:
+    {
+        if (!(ses->lpszUserName = WININET_strdupW(buffer))) break;
+        return ERROR_SUCCESS;
+    }
+    case INTERNET_OPTION_PASSWORD:
+    {
+        if (!(ses->lpszPassword = WININET_strdupW(buffer))) break;
+        return ERROR_SUCCESS;
+    }
+    default: break;
+    }
+
+    return ERROR_INTERNET_INVALID_OPTION;
+}
+
 static const HANDLEHEADERVtbl HTTPSESSIONVtbl = {
     HTTPSESSION_Destroy,
     NULL,
     HTTPSESSION_QueryOption,
-    NULL,
+    HTTPSESSION_SetOption,
     NULL,
     NULL,
     NULL,

@@ -69,7 +69,7 @@ static const property_t default_props[] =
     {"Content-Type",                 PID_HDR_CNTTYPE,    MPF_MIME | MPF_HASPARAMS,        VT_LPSTR},
     {"Content-Transfer-Encoding",    PID_HDR_CNTXFER,    MPF_MIME,                        VT_LPSTR},
     {"Content-ID",                   PID_HDR_CNTID,      MPF_MIME,                        VT_LPSTR},
-    {"Content-Disposition",          PID_HDR_CNTDISP,    MPF_MIME,                        VT_LPSTR},
+    {"Content-Disposition",          PID_HDR_CNTDISP,    MPF_MIME | MPF_HASPARAMS,        VT_LPSTR},
     {"To",                           PID_HDR_TO,         MPF_ADDRESS,                     VT_LPSTR},
     {"Cc",                           PID_HDR_CC,         MPF_ADDRESS,                     VT_LPSTR},
     {"Sender",                       PID_HDR_SENDER,     MPF_ADDRESS,                     VT_LPSTR},
@@ -820,8 +820,26 @@ static HRESULT WINAPI MimeBody_SetOption(
                                 const TYPEDID oid,
                                 LPCPROPVARIANT pValue)
 {
-    FIXME("(%p)->(%08x, %p): stub\n", iface, oid, pValue);
-    return E_NOTIMPL;
+    HRESULT hr = E_NOTIMPL;
+    TRACE("(%p)->(%08x, %p)\n", iface, oid, pValue);
+
+    if(pValue->vt != TYPEDID_TYPE(oid))
+    {
+        WARN("Called with vartype %04x and oid %08x\n", pValue->vt, oid);
+        return E_INVALIDARG;
+    }
+
+    switch(oid)
+    {
+    case OID_SECURITY_HWND_OWNER:
+        FIXME("OID_SECURITY_HWND_OWNER (value %08x): ignoring\n", pValue->u.ulVal);
+        hr = S_OK;
+        break;
+    default:
+        FIXME("Unhandled oid %08x\n", oid);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI MimeBody_GetOption(
@@ -846,8 +864,17 @@ static HRESULT WINAPI MimeBody_IsType(
                              IMimeBody* iface,
                              IMSGBODYTYPE bodytype)
 {
-    FIXME("(%p)->(%d): stub\n", iface, bodytype);
-    return E_NOTIMPL;
+    MimeBody *This = impl_from_IMimeBody(iface);
+
+    TRACE("(%p)->(%d)\n", iface, bodytype);
+    switch(bodytype)
+    {
+    case IBT_EMPTY:
+        return This->data ? S_FALSE : S_OK;
+    default:
+        FIXME("Unimplemented bodytype %d - returning S_OK\n", bodytype);
+    }
+    return S_OK;
 }
 
 static HRESULT WINAPI MimeBody_SetDisplayName(
@@ -2172,8 +2199,30 @@ static HRESULT WINAPI MimeMessage_SetOption(
     const TYPEDID oid,
     LPCPROPVARIANT pValue)
 {
-    FIXME("(%p)->(%08x, %p)\n", iface, oid, pValue);
-    return E_NOTIMPL;
+    HRESULT hr = E_NOTIMPL;
+    TRACE("(%p)->(%08x, %p)\n", iface, oid, pValue);
+
+    if(pValue->vt != TYPEDID_TYPE(oid))
+    {
+        WARN("Called with vartype %04x and oid %08x\n", pValue->vt, oid);
+        return E_INVALIDARG;
+    }
+
+    switch(oid)
+    {
+    case OID_HIDE_TNEF_ATTACHMENTS:
+        FIXME("OID_HIDE_TNEF_ATTACHMENTS (value %d): ignoring\n", pValue->u.boolVal);
+        hr = S_OK;
+        break;
+    case OID_SHOW_MACBINARY:
+        FIXME("OID_SHOW_MACBINARY (value %d): ignoring\n", pValue->u.boolVal);
+        hr = S_OK;
+        break;
+    default:
+        FIXME("Unhandled oid %08x\n", oid);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI MimeMessage_GetOption(

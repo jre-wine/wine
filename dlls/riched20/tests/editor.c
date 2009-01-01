@@ -21,6 +21,7 @@
 */
 
 #include <stdarg.h>
+#include <stdio.h>
 #include <assert.h>
 #include <windef.h>
 #include <winbase.h>
@@ -305,7 +306,7 @@ static void test_EM_GETLINE(void)
   {
     int nCopied;
     int expected_nCopied = min(gl[i].buffer_len, strlen(gl[i].text));
-    int expected_bytes_written = min(gl[i].buffer_len, strlen(gl[i].text) + 1);
+    int expected_bytes_written = min(gl[i].buffer_len, strlen(gl[i].text));
     memset(dest, 0xBB, nBuf);
     *(WORD *) dest = gl[i].buffer_len;
 
@@ -323,11 +324,37 @@ static void test_EM_GETLINE(void)
          !strncmp(dest+2, origdest+2, nBuf-2), "buffer_len=1\n");
     else
     {
+      /* Prepare hex strings of buffers to dump on failure. */
+      char expectedbuf[1024];
+      char resultbuf[1024];
+      int j;
+      resultbuf[0] = '\0';
+      for (j = 0; j < 32; j++)
+        sprintf(resultbuf+strlen(resultbuf), "%02x", dest[j] & 0xFF);
+      expectedbuf[0] = '\0';
+      for (j = 0; j < expected_bytes_written; j++) /* Written bytes */
+        sprintf(expectedbuf+strlen(expectedbuf), "%02x", gl[i].text[j] & 0xFF);
+      for (; j < gl[i].buffer_len; j++) /* Ignored bytes */
+        sprintf(expectedbuf+strlen(expectedbuf), "??");
+      for (; j < 32; j++) /* Bytes after declared buffer size */
+        sprintf(expectedbuf+strlen(expectedbuf), "%02x", origdest[j] & 0xFF);
+
+      /* Test the part of the buffer that is expected to be written according
+       * to the MSDN documentation fo EM_GETLINE, which does not state that
+       * a NULL terminating character will be added unless no text is copied.
+       *
+       * Windows 95, 98 & NT do not append a NULL terminating character, but
+       * Windows 2000 and up do append a NULL terminating character if there
+       * is space in the buffer. The test will ignore this difference. */
       ok(!strncmp(dest, gl[i].text, expected_bytes_written),
-         "%d: expected_bytes_written=%d\n", i, expected_bytes_written);
-      ok(!strncmp(dest + expected_bytes_written, origdest
-                  + expected_bytes_written, nBuf - expected_bytes_written),
-         "%d: expected_bytes_written=%d\n", i, expected_bytes_written);
+         "%d: expected_bytes_written=%d\n" "expected=0x%s\n" "but got= 0x%s\n",
+         i, expected_bytes_written, expectedbuf, resultbuf);
+      /* Test the part of the buffer after the declared length to make sure
+       * there are no buffer overruns. */
+      ok(!strncmp(dest + gl[i].buffer_len, origdest + gl[i].buffer_len,
+                  nBuf - gl[i].buffer_len),
+         "%d: expected_bytes_written=%d\n" "expected=0x%s\n" "but got= 0x%s\n",
+         i, expected_bytes_written, expectedbuf, resultbuf);
     }
   }
 
@@ -392,7 +419,6 @@ static void line_scroll(HWND hwnd, int amount)
 static void test_EM_SCROLLCARET(void)
 {
   int prevY, curY;
-  HWND hwndRichEdit = new_richedit(NULL);
   const char text[] = "aa\n"
       "this is a long line of text that should be longer than the "
       "control's width\n"
@@ -402,6 +428,14 @@ static void test_EM_SCROLLCARET(void)
       "ff\n"
       "gg\n"
       "hh\n";
+  /* The richedit window height needs to be large enough vertically to fit in
+   * more than two lines of text, so the new_richedit function can't be used
+   * since a height of 60 was not large enough on some systems.
+   */
+  HWND hwndRichEdit = CreateWindow(RICHEDIT_CLASS, NULL,
+                                   ES_MULTILINE|WS_POPUP|WS_HSCROLL|WS_VSCROLL|WS_VISIBLE,
+                                   0, 0, 200, 80, NULL, NULL, hmoduleRichEdit, NULL);
+  ok(hwndRichEdit != NULL, "class: %s, error: %d\n", RICHEDIT_CLASS, (int) GetLastError());
 
   /* Can't verify this */
   SendMessage(hwndRichEdit, EM_SCROLLCARET, 0, 0);
@@ -1101,6 +1135,7 @@ static void test_SETPARAFORMAT(void)
   HWND hwndRichEdit = new_richedit(NULL);
   PARAFORMAT2 fmt;
   HRESULT ret;
+  LONG expectedMask = PFM_ALL2 & ~PFM_TABLEROWDELIMITER;
   fmt.cbSize = sizeof(PARAFORMAT2);
   fmt.dwMask = PFM_ALIGNMENT;
   fmt.wAlignment = PFA_LEFT;
@@ -1111,8 +1146,14 @@ static void test_SETPARAFORMAT(void)
   fmt.cbSize = sizeof(PARAFORMAT2);
   fmt.dwMask = -1;
   ret = SendMessage(hwndRichEdit, EM_GETPARAFORMAT, 0, (LPARAM) &fmt);
-  ok(ret == PFM_ALL2, "expected %x got %x\n", PFM_ALL2, ret);
-  ok(fmt.dwMask == PFM_ALL2, "expected %x got %x\n", PFM_ALL2, fmt.dwMask);
+  /* Ignore the PFM_TABLEROWDELIMITER bit because it changes
+   * between richedit different native builds of riched20.dll
+   * used on different Windows versions. */
+  ret &= ~PFM_TABLEROWDELIMITER;
+  fmt.dwMask &= ~PFM_TABLEROWDELIMITER;
+
+  ok(ret == expectedMask, "expected %x got %x\n", expectedMask, ret);
+  ok(fmt.dwMask == expectedMask, "expected %x got %x\n", expectedMask, fmt.dwMask);
 
   DestroyWindow(hwndRichEdit);
 }
@@ -3481,6 +3522,28 @@ static void test_EM_SETTEXTEX(void)
       "EM_GETTEXTEX results not what was set by EM_SETTEXTEX when"
       " using ST_SELECTION and non-Unicode\n");
 
+  /* Test setting text using rich text format */
+  setText.flags = 0;
+  setText.codepage = CP_ACP;
+  SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&setText, (LPARAM)"{\\rtf richtext}");
+  getText.codepage = CP_ACP;
+  getText.cb = MAX_BUF_LEN;
+  getText.flags = GT_DEFAULT;
+  getText.lpDefaultChar = NULL;
+  getText.lpUsedDefChar = NULL;
+  SendMessage(hwndRichEdit, EM_GETTEXTEX, (WPARAM)&getText, (LPARAM) bufACP);
+  ok(!strcmp(bufACP, "richtext"), "expected 'richtext' but got '%s'\n", bufACP);
+
+  setText.flags = 0;
+  setText.codepage = CP_ACP;
+  SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&setText, (LPARAM)"{\\urtf morerichtext}");
+  getText.codepage = CP_ACP;
+  getText.cb = MAX_BUF_LEN;
+  getText.flags = GT_DEFAULT;
+  getText.lpDefaultChar = NULL;
+  getText.lpUsedDefChar = NULL;
+  SendMessage(hwndRichEdit, EM_GETTEXTEX, (WPARAM)&getText, (LPARAM) bufACP);
+  ok(!strcmp(bufACP, "morerichtext"), "expected 'morerichtext' but got '%s'\n", bufACP);
 
   DestroyWindow(hwndRichEdit);
 }

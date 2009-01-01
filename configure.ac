@@ -38,6 +38,7 @@ AC_ARG_WITH(freetype,  AS_HELP_STRING([--without-freetype],[do not use the FreeT
 AC_ARG_WITH(gphoto,    AS_HELP_STRING([--without-gphoto],[do not use gphoto (Digital Camera support)]))
 AC_ARG_WITH(glu,       AS_HELP_STRING([--without-glu],[do not use the GLU library]),
             [if test "x$withval" = "xno"; then ac_cv_header_GL_glu_h=no; fi])
+AC_ARG_WITH(gnutls,    AS_HELP_STRING([--without-gnutls],[do not use GnuTLS (schannel support)]))
 AC_ARG_WITH(hal,       AS_HELP_STRING([--without-hal],[do not use HAL (dynamic device support)]))
 AC_ARG_WITH(jack,      AS_HELP_STRING([--without-jack],[do not use the Jack sound support]),
             [if test "x$withval" = "xno"; then ac_cv_header_jack_jack_h=no; fi])
@@ -236,6 +237,7 @@ AC_CHECK_HEADERS(\
 	capi20.h \
 	curses.h \
 	direct.h \
+	dirent.h \
 	dlfcn.h \
 	elf.h \
 	float.h \
@@ -782,12 +784,14 @@ This probably prevents linking to OpenGL. Try deleting the file and restarting c
          else
              opengl_msg="OpenGL development headers not found."
 	 fi
+         test -n "$opengl_msg" && enable_opengl32=${enable_opengl32:-no}
+         test "x$ac_cv_lib_soname_GLU" = "x" && enable_glu32=${enable_glu32:-no}
+    else
+         enable_opengl32=${enable_opengl32:-no}
+         enable_glu32=${enable_glu32:-no}
     fi
     WINE_WARNING_WITH(opengl,[test -n "$opengl_msg"],[$opengl_msg
 OpenGL and Direct3D won't be supported.])
-
-    test -n "$opengl_msg" && enable_opengl32=${enable_opengl32:-no}
-    test "x$ac_cv_lib_soname_GLU" = "x" && enable_glu32=${enable_glu32:-no}
 
     dnl **** Check for NAS ****
     AC_SUBST(NASLIBS,"")
@@ -899,6 +903,21 @@ then
 fi
 WINE_NOTICE_WITH(hal,[test "x$ac_cv_lib_soname_hal" = "x"],
                  [libhal development files not found, no dynamic device support.])
+
+dnl **** Check for libgnutls ****
+if test "x$with_gnutls" != "xno" -a "$PKG_CONFIG" != "false"
+then
+    ac_save_CPPFLAGS="$CPPFLAGS"
+    ac_gnutls_libs="`$PKG_CONFIG --libs gnutls 2>/dev/null`"
+    ac_gnutls_cflags="`$PKG_CONFIG --cflags gnutls 2>/dev/null`"
+    CPPFLAGS="$CPPFLAGS $ac_gnutls_cflags"
+    AC_CHECK_HEADER(gnutls/gnutls.h,
+        [WINE_CHECK_SONAME(gnutls,gnutls_global_init,
+            [AC_SUBST(GNUTLSINCL,"$ac_gnutls_cflags")],,[$ac_gnutls_libs])])
+    CPPFLAGS="$ac_save_CPPFLAGS"
+fi
+WINE_NOTICE_WITH(gnutls,[test "x$ac_cv_lib_soname_gnutls" = "x"],
+                 [libgnutls development files not found, no schannel support.])
 
 dnl **** Check which curses lib to use ***
 CURSESLIBS=""
@@ -1231,6 +1250,7 @@ then
   WINE_TRY_CFLAGS([-fshort-wchar],
                   [AC_DEFINE(CC_FLAG_SHORT_WCHAR, "-fshort-wchar",
                              [Specifies the compiler flag that forces a short wchar_t])])
+  WINE_TRY_CFLAGS([-fno-builtin],[AC_SUBST(BUILTINFLAG,"-fno-builtin")])
   WINE_TRY_CFLAGS([-fno-strict-aliasing])
   WINE_TRY_CFLAGS([-Wdeclaration-after-statement])
   WINE_TRY_CFLAGS([-Wwrite-strings])
@@ -1245,17 +1265,6 @@ then
   if test "$ac_cv_c_string_h_warnings" = "no"
   then
     EXTRACFLAGS="$EXTRACFLAGS -Wpointer-arith"
-  fi
-
-  AC_SUBST(BUILTINFLAG,"")
-  saved_CFLAGS="$CFLAGS"
-  CFLAGS="$CFLAGS -Werror"
-  AC_CACHE_CHECK([for builtin wchar inlines], ac_cv_c_builtin_wchar_ctype,
-      AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[]], [[int iswlower(unsigned short);]])],[ac_cv_c_builtin_wchar_ctype=no],[ac_cv_c_builtin_wchar_ctype=yes]))
-  CFLAGS="$saved_CFLAGS"
-  if test "$ac_cv_c_builtin_wchar_ctype" = "yes"
-  then
-    BUILTINFLAG="-fno-builtin"
   fi
 fi
 
@@ -1386,6 +1395,7 @@ AC_CHECK_FUNCS(\
 	prctl \
 	pread \
 	pwrite \
+	readdir \
 	readlink \
 	rfork \
 	sched_yield \
@@ -2053,6 +2063,7 @@ WINE_CONFIG_MAKEFILE([dlls/wintab32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_D
 WINE_CONFIG_MAKEFILE([dlls/wintrust/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/wintrust/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/wldap32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wldap32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/wmi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/wnaspi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/wow32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])

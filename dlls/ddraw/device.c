@@ -1165,7 +1165,7 @@ IDirect3DDeviceImpl_7_EnumTextureFormats(IDirect3DDevice7 *iface,
     ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice7, iface);
     HRESULT hr;
     WINED3DDISPLAYMODE mode;
-    int i;
+    unsigned int i;
 
     WINED3DFORMAT FormatList[] = {
         /* 32 bit */
@@ -1328,7 +1328,7 @@ IDirect3DDeviceImpl_2_EnumTextureFormats(IDirect3DDevice2 *iface,
 {
     ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice2, iface);
     HRESULT hr;
-    int i;
+    unsigned int i;
     WINED3DDISPLAYMODE mode;
 
     WINED3DFORMAT FormatList[] = {
@@ -3248,7 +3248,7 @@ IDirect3DDeviceImpl_7_SetTransform(IDirect3DDevice7 *iface,
                                    D3DMATRIX *Matrix)
 {
     ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice7, iface);
-    D3DTRANSFORMSTATETYPE type = TransformStateType;
+    D3DTRANSFORMSTATETYPE type;
     HRESULT hr;
     TRACE("(%p)->(%08x,%p): Relay\n", This, TransformStateType, Matrix);
 
@@ -3343,7 +3343,7 @@ IDirect3DDeviceImpl_7_GetTransform(IDirect3DDevice7 *iface,
                                    D3DMATRIX *Matrix)
 {
     ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice7, iface);
-    D3DTRANSFORMSTATETYPE type = TransformStateType;
+    D3DTRANSFORMSTATETYPE type;
     HRESULT hr;
     TRACE("(%p)->(%08x,%p): Relay\n", This, TransformStateType, Matrix);
 
@@ -3982,7 +3982,7 @@ IDirect3DDeviceImpl_7_DrawPrimitiveStrided(IDirect3DDevice7 *iface,
 {
     ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice7, iface);
     WineDirect3DVertexStridedData WineD3DStrided;
-    int i;
+    DWORD i;
     UINT PrimitiveCount;
     HRESULT hr;
 
@@ -4160,7 +4160,7 @@ IDirect3DDeviceImpl_7_DrawIndexedPrimitiveStrided(IDirect3DDevice7 *iface,
 {
     ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice7, iface);
     WineDirect3DVertexStridedData WineD3DStrided;
-    int i;
+    DWORD i;
     UINT PrimitiveCount;
     HRESULT hr;
 

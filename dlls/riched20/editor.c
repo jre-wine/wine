@@ -2103,10 +2103,29 @@ static BOOL ME_SetCursor(ME_TextEditor *editor)
   POINT pt;
   BOOL isExact;
   int offset;
+  SCROLLBARINFO sbi;
   DWORD messagePos = GetMessagePos();
   pt.x = (short)LOWORD(messagePos);
   pt.y = (short)HIWORD(messagePos);
+
+  sbi.cbSize = sizeof(sbi);
+  GetScrollBarInfo(editor->hWnd, OBJID_HSCROLL, &sbi);
+  if (!(sbi.rgstate[0] & (STATE_SYSTEM_INVISIBLE|STATE_SYSTEM_OFFSCREEN)) &&
+      PtInRect(&sbi.rcScrollBar, pt))
+  {
+      SetCursor(LoadCursorW(NULL, (WCHAR*)IDC_ARROW));
+      return TRUE;
+  }
+  sbi.cbSize = sizeof(sbi);
+  GetScrollBarInfo(editor->hWnd, OBJID_VSCROLL, &sbi);
+  if (!(sbi.rgstate[0] & (STATE_SYSTEM_INVISIBLE|STATE_SYSTEM_OFFSCREEN)) &&
+      PtInRect(&sbi.rcScrollBar, pt))
+  {
+      SetCursor(LoadCursorW(NULL, (WCHAR*)IDC_ARROW));
+      return TRUE;
+  }
   ScreenToClient(editor->hWnd, &pt);
+
   if ((GetWindowLongW(editor->hWnd, GWL_STYLE) & ES_SELECTIONBAR) &&
       (pt.x < editor->selofs ||
        (editor->nSelectionType == stLine && GetCapture() == editor->hWnd)))
@@ -2210,7 +2229,7 @@ ME_TextEditor *ME_MakeEditor(HWND hWnd) {
   ed->nLastSelStart = ed->nLastSelEnd = 0;
   ed->pLastSelStartPara = ed->pLastSelEndPara = ME_FindItemFwd(ed->pBuffer->pFirst, diParagraph);
   ed->bRedraw = TRUE;
-  ed->bWordWrap = (GetWindowLongW(hWnd, GWL_STYLE) & WS_HSCROLL) ? FALSE : TRUE;
+  ed->bWordWrap = (GetWindowLongW(hWnd, GWL_STYLE) & (WS_HSCROLL|ES_AUTOHSCROLL)) ? FALSE : TRUE;
   ed->bHideSelection = FALSE;
   ed->nInvalidOfs = -1;
   ed->pfnWordBreak = NULL;
@@ -2741,8 +2760,9 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
       ME_GetSelection(editor, &from, &to);
       style = ME_GetSelectionInsertStyle(editor);
       ME_InternalDeleteText(editor, from, to - from, FALSE);
-      if (pStruct->codepage != 1200 && lParam && !strncmp((char *)lParam, "{\\rtf", 5))
-          ME_StreamInRTFString(editor, 1, (char *)lParam);
+      if (pStruct->codepage != 1200 && lParam &&
+          (!strncmp((char *)lParam, "{\\rtf", 5) || !strncmp((char *)lParam, "{\\urtf}", 6)))
+        ME_StreamInRTFString(editor, 1, (char *)lParam);
       else ME_InsertTextFromCursor(editor, 0, wszText, len, style);
       ME_ReleaseStyle(style);
 
@@ -2750,8 +2770,9 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     }
     else {
       ME_InternalDeleteText(editor, 0, ME_GetTextLength(editor), FALSE);
-      if (pStruct->codepage != 1200 && lParam && !strncmp((char *)lParam, "{\\rtf", 5))
-          ME_StreamInRTFString(editor, 0, (char *)lParam);
+      if (pStruct->codepage != 1200 && lParam &&
+          (!strncmp((char *)lParam, "{\\rtf", 5) || !strncmp((char *)lParam, "{\\urtf}", 6)))
+        ME_StreamInRTFString(editor, 0, (char *)lParam);
       else ME_InsertTextFromCursor(editor, 0, wszText, len, editor->pBuffer->pDefaultStyle);
       len = 1;
 

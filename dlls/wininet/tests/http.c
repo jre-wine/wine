@@ -105,10 +105,6 @@ static CHAR status_string[MAX_INTERNET_STATUS][MAX_STATUS_NAME];
 static HANDLE hCompleteEvent;
 
 static INTERNET_STATUS_CALLBACK (WINAPI *pInternetSetStatusCallbackA)(HINTERNET ,INTERNET_STATUS_CALLBACK);
-static BOOL (WINAPI *pInternetTimeFromSystemTimeA)(CONST SYSTEMTIME *,DWORD ,LPSTR ,DWORD);
-static BOOL (WINAPI *pInternetTimeFromSystemTimeW)(CONST SYSTEMTIME *,DWORD ,LPWSTR ,DWORD);
-static BOOL (WINAPI *pInternetTimeToSystemTimeA)(LPCSTR ,SYSTEMTIME *,DWORD);
-static BOOL (WINAPI *pInternetTimeToSystemTimeW)(LPCWSTR ,SYSTEMTIME *,DWORD);
 
 
 static VOID WINAPI callback(
@@ -245,7 +241,6 @@ static VOID WINAPI callback(
 static void InternetReadFile_test(int flags)
 {
     BOOL res;
-    DWORD rc;
     CHAR buffer[4000];
     DWORD length;
     DWORD out;
@@ -301,6 +296,12 @@ static void InternetReadFile_test(int flags)
     ok(res, "InternetQueryOptionA(INTERNET_OPTION_URL) failed: %u\n", GetLastError());
     ok(!strcmp(buffer, "http://www.winehq.org/about/"), "Wrong URL %s\n", buffer);
 
+    length = sizeof(buffer);
+    res = HttpQueryInfoA(hor, HTTP_QUERY_RAW_HEADERS, buffer, &length, 0x0);
+    ok(res, "HttpQueryInfoA(HTTP_QUERY_RAW_HEADERS) failed with error %d\n", GetLastError());
+    ok(length == 0, "HTTP_QUERY_RAW_HEADERS: expected length 0, but got %d\n", length);
+    ok(!strcmp(buffer, ""), "HTTP_QUERY_RAW_HEADERS: expected string \"\", but got \"%s\"\n", buffer);
+
     CHECK_NOTIFIED(INTERNET_STATUS_HANDLE_CREATED);
     CHECK_NOT_NOTIFIED(INTERNET_STATUS_RESOLVING_NAME);
     CHECK_NOT_NOTIFIED(INTERNET_STATUS_NAME_RESOLVED);
@@ -336,12 +337,12 @@ static void InternetReadFile_test(int flags)
 
     trace("HttpSendRequestA -->\n");
     SetLastError(0xdeadbeef);
-    rc = HttpSendRequestA(hor, "", -1, NULL, 0);
+    res = HttpSendRequestA(hor, "", -1, NULL, 0);
     if (flags & INTERNET_FLAG_ASYNC)
-        ok(((rc == 0)&&(GetLastError() == ERROR_IO_PENDING)),
+        ok(!res && (GetLastError() == ERROR_IO_PENDING),
             "Asynchronous HttpSendRequest NOT returning 0 with error ERROR_IO_PENDING\n");
     else
-        ok((rc != 0) || GetLastError() == ERROR_INTERNET_NAME_NOT_RESOLVED,
+        ok(res || (GetLastError() == ERROR_INTERNET_NAME_NOT_RESOLVED),
            "Synchronous HttpSendRequest returning 0, error %u\n", GetLastError());
     trace("HttpSendRequestA <--\n");
 
@@ -372,17 +373,17 @@ static void InternetReadFile_test(int flags)
     CLEAR_NOTIFIED(INTERNET_STATUS_CONNECTED_TO_SERVER);
 
     length = 4;
-    rc = InternetQueryOptionA(hor,INTERNET_OPTION_REQUEST_FLAGS,&out,&length);
-    trace("Option 0x17 -> %i  %i\n",rc,out);
+    res = InternetQueryOptionA(hor,INTERNET_OPTION_REQUEST_FLAGS,&out,&length);
+    ok(res, "InternetQueryOptionA(INTERNET_OPTION_REQUEST) failed with error %d\n", GetLastError());
 
     length = 100;
-    rc = InternetQueryOptionA(hor,INTERNET_OPTION_URL,buffer,&length);
-    trace("Option 0x22 -> %i  %s\n",rc,buffer);
+    res = InternetQueryOptionA(hor,INTERNET_OPTION_URL,buffer,&length);
+    ok(res, "InternetQueryOptionA(INTERNET_OPTION_URL) failed with error %d\n", GetLastError());
 
-    length = 4000;
-    rc = HttpQueryInfoA(hor,HTTP_QUERY_RAW_HEADERS,buffer,&length,0x0);
+    length = sizeof(buffer);
+    res = HttpQueryInfoA(hor,HTTP_QUERY_RAW_HEADERS,buffer,&length,0x0);
+    ok(res, "HttpQueryInfoA(HTTP_QUERY_RAW_HEADERS) failed with error %d\n", GetLastError());
     buffer[length]=0;
-    trace("Option 0x16 -> %i  %s\n",rc,buffer);
 
     length = sizeof(buffer);
     res = InternetQueryOptionA(hor, INTERNET_OPTION_URL, buffer, &length);
@@ -390,17 +391,17 @@ static void InternetReadFile_test(int flags)
     ok(!strcmp(buffer, "http://www.winehq.org/site/about"), "Wrong URL %s\n", buffer);
 
     length = 16;
-    rc = HttpQueryInfoA(hor,HTTP_QUERY_CONTENT_LENGTH,&buffer,&length,0x0);
-    trace("Option 0x5 -> %i  %s  (%u)\n",rc,buffer,GetLastError());
+    res = HttpQueryInfoA(hor,HTTP_QUERY_CONTENT_LENGTH,&buffer,&length,0x0);
+    trace("Option 0x5 -> %i  %s  (%u)\n",res,buffer,GetLastError());
 
     length = 100;
-    rc = HttpQueryInfoA(hor,HTTP_QUERY_CONTENT_TYPE,buffer,&length,0x0);
+    res = HttpQueryInfoA(hor,HTTP_QUERY_CONTENT_TYPE,buffer,&length,0x0);
     buffer[length]=0;
-    trace("Option 0x1 -> %i  %s\n",rc,buffer);
+    trace("Option 0x1 -> %i  %s\n",res,buffer);
 
     SetLastError(0xdeadbeef);
-    rc = InternetReadFile(NULL, buffer, 100, &length);
-    ok(!rc, "InternetReadFile should have failed\n");
+    res = InternetReadFile(NULL, buffer, 100, &length);
+    ok(!res, "InternetReadFile should have failed\n");
     ok(GetLastError() == ERROR_INVALID_HANDLE,
         "InternetReadFile should have set last error to ERROR_INVALID_HANDLE instead of %u\n",
         GetLastError());
@@ -414,13 +415,13 @@ static void InternetReadFile_test(int flags)
     {
         if (flags & INTERNET_FLAG_ASYNC)
             SET_EXPECT(INTERNET_STATUS_REQUEST_COMPLETE);
-        rc = InternetQueryDataAvailable(hor,&length,0x0,0x0);
-        ok(!(rc == 0 && length != 0),"InternetQueryDataAvailable failed with non-zero length\n");
-        ok(rc != 0 || ((flags & INTERNET_FLAG_ASYNC) && GetLastError() == ERROR_IO_PENDING),
+        res = InternetQueryDataAvailable(hor,&length,0x0,0x0);
+        ok(!(!res && length != 0),"InternetQueryDataAvailable failed with non-zero length\n");
+        ok(res || ((flags & INTERNET_FLAG_ASYNC) && GetLastError() == ERROR_IO_PENDING),
            "InternetQueryDataAvailable failed, error %d\n", GetLastError());
         if (flags & INTERNET_FLAG_ASYNC)
         {
-            if (rc != 0)
+            if (res)
             {
                 CHECK_NOT_NOTIFIED(INTERNET_STATUS_REQUEST_COMPLETE);
             }
@@ -436,11 +437,11 @@ static void InternetReadFile_test(int flags)
             char *buffer;
             buffer = HeapAlloc(GetProcessHeap(),0,length+1);
 
-            rc = InternetReadFile(hor,buffer,length,&length);
+            res = InternetReadFile(hor,buffer,length,&length);
 
             buffer[length]=0;
 
-            trace("ReadFile -> %i %i\n",rc,length);
+            trace("ReadFile -> %s %i\n",res?"TRUE":"FALSE",length);
 
             HeapFree(GetProcessHeap(),0,buffer);
         }
@@ -456,11 +457,11 @@ abort:
         SET_WINE_ALLOW(INTERNET_STATUS_CLOSING_CONNECTION);
         SET_WINE_ALLOW(INTERNET_STATUS_CONNECTION_CLOSED);
         SetLastError(0xdeadbeef);
-        rc = InternetCloseHandle(hor);
-        ok ((rc != 0), "InternetCloseHandle of handle opened by HttpOpenRequestA failed\n");
+        res = InternetCloseHandle(hor);
+        ok (res, "InternetCloseHandle of handle opened by HttpOpenRequestA failed\n");
         SetLastError(0xdeadbeef);
-        rc = InternetCloseHandle(hor);
-        ok ((rc == 0), "Double close of handle opened by HttpOpenRequestA succeeded\n");
+        res = InternetCloseHandle(hor);
+        ok (!res, "Double close of handle opened by HttpOpenRequestA succeeded\n");
         ok (GetLastError() == ERROR_INVALID_HANDLE,
             "Double close of handle should have set ERROR_INVALID_HANDLE instead of %u\n",
             GetLastError());
@@ -471,8 +472,8 @@ abort:
      * INTERNET_STATUS_HANDLE_CLOSING notifications matches the number expected. */
     if (hi != 0x0) {
       SET_WINE_ALLOW(INTERNET_STATUS_HANDLE_CLOSING);
-      rc = InternetCloseHandle(hi);
-      ok ((rc != 0), "InternetCloseHandle of handle opened by InternetOpenA failed\n");
+      res = InternetCloseHandle(hi);
+      ok (res, "InternetCloseHandle of handle opened by InternetOpenA failed\n");
       if (flags & INTERNET_FLAG_ASYNC)
           Sleep(100);
     }
@@ -781,91 +782,6 @@ static void InternetOpenUrlA_test(void)
 
   InternetCloseHandle(myhttp);
   InternetCloseHandle(myhinternet);
-}
-
-static void InternetTimeFromSystemTimeA_test(void)
-{
-    BOOL ret;
-    static const SYSTEMTIME time = { 2005, 1, 5, 7, 12, 6, 35, 0 };
-    char string[INTERNET_RFC1123_BUFSIZE];
-    static const char expect[] = "Fri, 07 Jan 2005 12:06:35 GMT";
-
-    ret = pInternetTimeFromSystemTimeA( &time, INTERNET_RFC1123_FORMAT, string, sizeof(string) );
-    ok( ret, "InternetTimeFromSystemTimeA failed (%u)\n", GetLastError() );
-
-    ok( !memcmp( string, expect, sizeof(expect) ),
-        "InternetTimeFromSystemTimeA failed (%u)\n", GetLastError() );
-}
-
-static void InternetTimeFromSystemTimeW_test(void)
-{
-    BOOL ret;
-    static const SYSTEMTIME time = { 2005, 1, 5, 7, 12, 6, 35, 0 };
-    WCHAR string[INTERNET_RFC1123_BUFSIZE + 1];
-    static const WCHAR expect[] = { 'F','r','i',',',' ','0','7',' ','J','a','n',' ','2','0','0','5',' ',
-                                    '1','2',':','0','6',':','3','5',' ','G','M','T',0 };
-
-    ret = pInternetTimeFromSystemTimeW( &time, INTERNET_RFC1123_FORMAT, string, sizeof(string) );
-    ok( ret, "InternetTimeFromSystemTimeW failed (%u)\n", GetLastError() );
-
-    ok( !memcmp( string, expect, sizeof(expect) ),
-        "InternetTimeFromSystemTimeW failed (%u)\n", GetLastError() );
-}
-
-static void InternetTimeToSystemTimeA_test(void)
-{
-    BOOL ret;
-    SYSTEMTIME time;
-    static const SYSTEMTIME expect = { 2005, 1, 5, 7, 12, 6, 35, 0 };
-    static const char string[] = "Fri, 07 Jan 2005 12:06:35 GMT";
-    static const char string2[] = " fri 7 jan 2005 12 06 35";
-
-    ret = pInternetTimeToSystemTimeA( string, &time, 0 );
-    ok( ret, "InternetTimeToSystemTimeA failed (%u)\n", GetLastError() );
-    ok( !memcmp( &time, &expect, sizeof(expect) ),
-        "InternetTimeToSystemTimeA failed (%u)\n", GetLastError() );
-
-    ret = pInternetTimeToSystemTimeA( string2, &time, 0 );
-    ok( ret, "InternetTimeToSystemTimeA failed (%u)\n", GetLastError() );
-    ok( !memcmp( &time, &expect, sizeof(expect) ),
-        "InternetTimeToSystemTimeA failed (%u)\n", GetLastError() );
-}
-
-static void InternetTimeToSystemTimeW_test(void)
-{
-    BOOL ret;
-    SYSTEMTIME time;
-    static const SYSTEMTIME expect = { 2005, 1, 5, 7, 12, 6, 35, 0 };
-    static const WCHAR string[] = { 'F','r','i',',',' ','0','7',' ','J','a','n',' ','2','0','0','5',' ',
-                                    '1','2',':','0','6',':','3','5',' ','G','M','T',0 };
-    static const WCHAR string2[] = { ' ','f','r','i',' ','7',' ','j','a','n',' ','2','0','0','5',' ',
-                                     '1','2',' ','0','6',' ','3','5',0 };
-    static const WCHAR string3[] = { 'F','r',0 };
-
-    ret = pInternetTimeToSystemTimeW( NULL, NULL, 0 );
-    ok( !ret, "InternetTimeToSystemTimeW succeeded (%u)\n", GetLastError() );
-
-    ret = pInternetTimeToSystemTimeW( NULL, &time, 0 );
-    ok( !ret, "InternetTimeToSystemTimeW succeeded (%u)\n", GetLastError() );
-
-    ret = pInternetTimeToSystemTimeW( string, NULL, 0 );
-    ok( !ret, "InternetTimeToSystemTimeW succeeded (%u)\n", GetLastError() );
-
-    ret = pInternetTimeToSystemTimeW( string, &time, 0 );
-    ok( ret, "InternetTimeToSystemTimeW failed (%u)\n", GetLastError() );
-
-    ret = pInternetTimeToSystemTimeW( string, &time, 0 );
-    ok( ret, "InternetTimeToSystemTimeW failed (%u)\n", GetLastError() );
-    ok( !memcmp( &time, &expect, sizeof(expect) ),
-        "InternetTimeToSystemTimeW failed (%u)\n", GetLastError() );
-
-    ret = pInternetTimeToSystemTimeW( string2, &time, 0 );
-    ok( ret, "InternetTimeToSystemTimeW failed (%u)\n", GetLastError() );
-    ok( !memcmp( &time, &expect, sizeof(expect) ),
-        "InternetTimeToSystemTimeW failed (%u)\n", GetLastError() );
-
-    ret = pInternetTimeToSystemTimeW( string3, &time, 0 );
-    ok( ret, "InternetTimeToSystemTimeW failed (%u)\n", GetLastError() );
 }
 
 static void HttpSendRequestEx_test(void)
@@ -2073,7 +1989,7 @@ static void test_open_url_async(void)
 {
     BOOL ret;
     HINTERNET ses, req;
-    DWORD size;
+    DWORD size, error;
     struct context ctx;
     ULONG type;
 
@@ -2082,6 +1998,17 @@ static void test_open_url_async(void)
 
     ses = InternetOpen("AdvancedInstaller", 0, NULL, NULL, INTERNET_FLAG_ASYNC);
     ok(ses != NULL, "InternetOpen failed\n");
+
+    SetLastError(0xdeadbeef);
+    ret = InternetSetOptionA(NULL, INTERNET_OPTION_CALLBACK, &cb, sizeof(DWORD_PTR));
+    error = GetLastError();
+    ok(!ret, "InternetSetOptionA succeeded\n");
+    ok(error == ERROR_INTERNET_INCORRECT_HANDLE_TYPE, "got %u expected ERROR_INTERNET_INCORRECT_HANDLE_TYPE\n", error);
+
+    ret = InternetSetOptionA(ses, INTERNET_OPTION_CALLBACK, &cb, sizeof(DWORD_PTR));
+    error = GetLastError();
+    ok(!ret, "InternetSetOptionA failed\n");
+    ok(error == ERROR_INTERNET_OPTION_NOT_SETTABLE, "got %u expected ERROR_INTERNET_OPTION_NOT_SETTABLE\n", error);
 
     pInternetSetStatusCallbackA(ses, cb);
     ResetEvent(ctx.event);
@@ -2157,10 +2084,6 @@ START_TEST(http)
     HMODULE hdll;
     hdll = GetModuleHandleA("wininet.dll");
     pInternetSetStatusCallbackA = (void*)GetProcAddress(hdll, "InternetSetStatusCallbackA");
-    pInternetTimeFromSystemTimeA = (void*)GetProcAddress(hdll, "InternetTimeFromSystemTimeA");
-    pInternetTimeFromSystemTimeW = (void*)GetProcAddress(hdll, "InternetTimeFromSystemTimeW");
-    pInternetTimeToSystemTimeA = (void*)GetProcAddress(hdll, "InternetTimeToSystemTimeA");
-    pInternetTimeToSystemTimeW = (void*)GetProcAddress(hdll, "InternetTimeToSystemTimeW");
 
     if (!pInternetSetStatusCallbackA)
         skip("skipping the InternetReadFile tests\n");
@@ -2175,15 +2098,6 @@ START_TEST(http)
     InternetOpenRequest_test();
     test_http_cache();
     InternetOpenUrlA_test();
-    if (!pInternetTimeFromSystemTimeA)
-        skip("skipping the InternetTime tests\n");
-    else
-    {
-        InternetTimeFromSystemTimeA_test();
-        InternetTimeFromSystemTimeW_test();
-        InternetTimeToSystemTimeA_test();
-        InternetTimeToSystemTimeW_test();
-    }
     HttpSendRequestEx_test();
     HttpHeaders_test();
     test_http_connection();

@@ -22,8 +22,8 @@
 26 stdcall MsiDatabaseGetPrimaryKeysW(long wstr ptr)
 27 stdcall MsiDatabaseImportA(str str long)
 28 stdcall MsiDatabaseImportW(wstr wstr long)
-29 stub MsiDatabaseMergeA
-30 stub MsiDatabaseMergeW
+29 stdcall MsiDatabaseMergeA(long long str)
+30 stdcall MsiDatabaseMergeW(long long wstr)
 31 stdcall MsiDatabaseOpenViewA(long str ptr)
 32 stdcall MsiDatabaseOpenViewW(long wstr ptr)
 33 stdcall MsiDoActionA(long str)
@@ -77,7 +77,7 @@
 81 stdcall MsiGetUserInfoA(str ptr ptr ptr ptr ptr ptr)
 82 stdcall MsiGetUserInfoW(wstr ptr ptr ptr ptr ptr ptr)
 83 stub MsiInstallMissingComponentA
-84 stub MsiInstallMissingComponentW
+84 stdcall MsiInstallMissingComponentW(wstr wstr long)
 85 stub MsiInstallMissingFileA
 86 stub MsiInstallMissingFileW
 87 stdcall MsiInstallProductA(str str)
@@ -270,11 +270,11 @@
 274 stdcall MsiSourceListAddMediaDiskW(wstr wstr long long long wstr wstr)
 275 stub MsiSourceListClearMediaDiskA
 276 stub MsiSourceListClearMediaDiskW
-277 stub MsiDetermineApplicablePatchesA
-278 stub MsiDetermineApplicablePatchesW
+277 stdcall MsiDetermineApplicablePatchesA(str long ptr)
+278 stdcall MsiDetermineApplicablePatchesW(wstr long ptr)
 279 stub MsiMessageBoxExA
 280 stub MsiMessageBoxExW
-281 stub MsiSetExternalUIRecord
+281 stdcall MsiSetExternalUIRecord(ptr long ptr ptr)
 
 @ stdcall -private DllCanUnloadNow()
 @ stdcall -private DllGetClassObject(ptr ptr ptr)

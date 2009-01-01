@@ -70,6 +70,7 @@ DEFINE_OLEGUID(CGID_DocHostCmdPriv, 0x000214D4L, 0, 0);
 
 static IOleDocumentView *view = NULL;
 static HWND container_hwnd = NULL, hwnd = NULL, last_hwnd = NULL;
+static BOOL show_fail;
 
 DEFINE_EXPECT(LockContainer);
 DEFINE_EXPECT(SetActiveObject);
@@ -138,6 +139,10 @@ DEFINE_EXPECT(RequestUIActivate);
 DEFINE_EXPECT(InPlaceFrame_SetBorderSpace);
 DEFINE_EXPECT(InPlaceUIWindow_SetActiveObject);
 DEFINE_EXPECT(GetExternal);
+DEFINE_EXPECT(EnableModeless_TRUE);
+DEFINE_EXPECT(EnableModeless_FALSE);
+DEFINE_EXPECT(Frame_EnableModeless_TRUE);
+DEFINE_EXPECT(Frame_EnableModeless_FALSE);
 
 static IUnknown *doc_unk;
 static BOOL expect_LockContainer_fLock;
@@ -651,11 +656,13 @@ static HRESULT WINAPI PropertyNotifySink_OnChanged(IPropertyNotifySink *iface, D
             readystate_set_loading = FALSE;
             load_state = LD_LOADING;
         }
-        test_readyState(NULL);
+        if(!editmode || load_state != LD_LOADING || !called_Exec_Explorer_69)
+            test_readyState(NULL);
         return S_OK;
     case 1005:
         CHECK_EXPECT(OnChanged_1005);
-        test_readyState(NULL);
+        if(!editmode)
+            test_readyState(NULL);
         load_state = LD_INTERACTIVE;
         return S_OK;
     }
@@ -1308,7 +1315,10 @@ static HRESULT WINAPI InPlaceFrame_SetStatusText(IOleInPlaceFrame *iface, LPCOLE
 
 static HRESULT WINAPI InPlaceFrame_EnableModeless(IOleInPlaceFrame *iface, BOOL fEnable)
 {
-    ok(0, "unexpected call\n");
+    if(fEnable)
+        CHECK_EXPECT(Frame_EnableModeless_TRUE);
+    else
+        CHECK_EXPECT(Frame_EnableModeless_FALSE);
     return E_NOTIMPL;
 }
 
@@ -1728,6 +1738,14 @@ static HRESULT WINAPI DocumentSite_ActivateMe(IOleDocumentSite *iface, IOleDocum
                 expect_status_text = (load_state == LD_COMPLETE ? (LPCOLESTR)0xdeadbeef : NULL);
 
                 hres = IOleDocumentView_Show(view, TRUE);
+                if(FAILED(hres)) {
+                    win_skip("Show failed\n");
+                    if(activeobj)
+                        IOleInPlaceActiveObject_Release(activeobj);
+                    IOleDocument_Release(document);
+                    show_fail = TRUE;
+                    return S_OK;
+                }
                 ok(hres == S_OK, "Show failed: %08x\n", hres);
 
                 CHECK_CALLED(CanInPlaceActivate);
@@ -1922,7 +1940,10 @@ static HRESULT WINAPI DocHostUIHandler_UpdateUI(IDocHostUIHandler2 *iface)
 
 static HRESULT WINAPI DocHostUIHandler_EnableModeless(IDocHostUIHandler2 *iface, BOOL fEnable)
 {
-    ok(0, "unexpected call\n");
+    if(fEnable)
+        CHECK_EXPECT(EnableModeless_TRUE);
+    else
+        CHECK_EXPECT(EnableModeless_FALSE);
     return E_NOTIMPL;
 }
 
@@ -2725,6 +2746,10 @@ static void test_download(BOOL verb_done, BOOL css_dwl, BOOL css_try_dwl)
         SET_EXPECT(UnlockRequest);
     }
     SET_EXPECT(Exec_Explorer_69);
+    SET_EXPECT(EnableModeless_TRUE); /* IE7 */
+    SET_EXPECT(Frame_EnableModeless_TRUE); /* IE7 */
+    SET_EXPECT(EnableModeless_FALSE); /* IE7 */
+    SET_EXPECT(Frame_EnableModeless_FALSE); /* IE7 */
     SET_EXPECT(OnChanged_1005);
     SET_EXPECT(OnChanged_READYSTATE);
     SET_EXPECT(Exec_SETPROGRESSPOS);
@@ -2732,6 +2757,7 @@ static void test_download(BOOL verb_done, BOOL css_dwl, BOOL css_try_dwl)
     SET_EXPECT(Exec_ShellDocView_103);
     SET_EXPECT(Exec_MSHTML_PARSECOMPLETE);
     SET_EXPECT(Exec_HTTPEQUIV_DONE);
+    SET_EXPECT(SetStatusText);
     expect_status_text = (LPWSTR)0xdeadbeef; /* TODO */
 
     while(!called_Exec_HTTPEQUIV_DONE && GetMessage(&msg, NULL, 0, 0)) {
@@ -2772,6 +2798,10 @@ static void test_download(BOOL verb_done, BOOL css_dwl, BOOL css_try_dwl)
         }
     }
     SET_CALLED(Exec_Explorer_69);
+    SET_CALLED(EnableModeless_TRUE); /* IE7 */
+    SET_CALLED(Frame_EnableModeless_TRUE); /* IE7 */
+    SET_CALLED(EnableModeless_FALSE); /* IE7 */
+    SET_CALLED(Frame_EnableModeless_FALSE); /* IE7 */
     CHECK_CALLED(OnChanged_1005);
     CHECK_CALLED(OnChanged_READYSTATE);
     CHECK_CALLED(Exec_SETPROGRESSPOS);
@@ -2779,6 +2809,7 @@ static void test_download(BOOL verb_done, BOOL css_dwl, BOOL css_try_dwl)
     SET_CALLED(Exec_ShellDocView_103);
     CHECK_CALLED(Exec_MSHTML_PARSECOMPLETE);
     CHECK_CALLED(Exec_HTTPEQUIV_DONE);
+    SET_CALLED(SetStatusText);
 
     load_state = LD_COMPLETE;
 
@@ -3777,7 +3808,7 @@ static void test_HTMLDocument(BOOL do_load)
         test_OnAmbientPropertyChange2(unk);
 
     hres = test_Activate(unk, CLIENTSITE_EXPECTPATH);
-    if(FAILED(hres)) {
+    if(FAILED(hres) || show_fail) {
         IUnknown_Release(unk);
         return;
     }
@@ -3873,6 +3904,10 @@ static void test_HTMLDocument_hlink(void)
     test_GetCurMoniker(unk, NULL, NULL);
     test_Persist(unk);
     test_Navigate(unk);
+    if(show_fail) {
+        IUnknown_Release(unk);
+        return;
+    }
 
     test_download(FALSE, TRUE, TRUE);
 
@@ -3919,6 +3954,11 @@ static void test_HTMLDocument_StreamLoad(void)
     test_ConnectionPointContainer(unk);
     test_ClientSite(oleobj, CLIENTSITE_EXPECTPATH);
     test_DoVerb(oleobj);
+    if(show_fail) {
+        IUnknown_Release(unk);
+        IOleObject_Release(oleobj);
+        return;
+    }
     test_MSHTML_QueryStatus(unk, OLECMDF_SUPPORTED);
 
     IOleObject_Release(oleobj);
@@ -3994,6 +4034,11 @@ static void test_editing_mode(BOOL do_load)
     test_ConnectionPointContainer(unk);
     test_ClientSite(oleobj, CLIENTSITE_EXPECTPATH);
     test_DoVerb(oleobj);
+    if(show_fail) {
+        IOleObject_Release(oleobj);
+        IUnknown_Release(unk);
+        return;
+    }
     test_edit_uiactivate(oleobj);
 
     test_MSHTML_QueryStatus(unk, OLECMDF_SUPPORTED);
@@ -4007,7 +4052,11 @@ static void test_editing_mode(BOOL do_load)
 
     test_MSHTML_QueryStatus(unk, OLECMDF_SUPPORTED);
     test_download(TRUE, do_load, do_load);
+
+    SET_EXPECT(SetStatusText); /* ignore race in native mshtml */
     test_timer(EXPECT_UPDATEUI);
+    SET_CALLED(SetStatusText);
+
     test_MSHTML_QueryStatus(unk, OLECMDF_SUPPORTED|OLECMDF_ENABLED);
 
     if(!do_load) {

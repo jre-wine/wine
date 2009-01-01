@@ -61,24 +61,29 @@ typedef struct event_target_t event_target_t;
 /* NOTE: make sure to keep in sync with dispex.c */
 typedef enum {
     NULL_tid,
+    DispCEventObj_tid,
     DispDOMChildrenCollection_tid,
     DispHTMLBody_tid,
     DispHTMLCommentElement_tid,
+    DispHTMLCurrentStyle_tid,
     DispHTMLDocument_tid,
     DispHTMLDOMTextNode_tid,
     DispHTMLElementCollection_tid,
     DispHTMLGenericElement_tid,
+    DispHTMLIFrame_tid,
     DispHTMLImg_tid,
     DispHTMLInputElement_tid,
     DispHTMLOptionElement_tid,
     DispHTMLSelectElement_tid,
     DispHTMLStyle_tid,
+    DispHTMLTable_tid,
+    DispHTMLTableRow_tid,
     DispHTMLUnknownElement_tid,
     DispHTMLWindow2_tid,
     IHTMLBodyElement_tid,
     IHTMLBodyElement2_tid,
     IHTMLCommentElement_tid,
-    IHTMLControlElement_tid,
+    IHTMLCurrentStyle_tid,
     IHTMLDocument2_tid,
     IHTMLDocument3_tid,
     IHTMLDocument4_tid,
@@ -92,12 +97,17 @@ typedef enum {
     IHTMLElement3_tid,
     IHTMLElement4_tid,
     IHTMLElementCollection_tid,
+    IHTMLEventObj_tid,
+    IHTMLFrameBase2_tid,
     IHTMLGenericElement_tid,
     IHTMLImgElement_tid,
     IHTMLInputElement_tid,
     IHTMLOptionElement_tid,
     IHTMLSelectElement_tid,
     IHTMLStyle_tid,
+    IHTMLStyle2_tid,
+    IHTMLTable_tid,
+    IHTMLTableRow_tid,
     IHTMLTextContainer_tid,
     IHTMLUniqueName_tid,
     IHTMLWindow2_tid,
@@ -105,14 +115,6 @@ typedef enum {
     IOmNavigator_tid,
     LAST_tid
 } tid_t;
-
-typedef enum {
-    EVENTID_CHANGE,
-    EVENTID_CLICK,
-    EVENTID_KEYUP,
-    EVENTID_LOAD,
-    EVENTID_LAST
-} eventid_t;
 
 typedef struct dispex_data_t dispex_data_t;
 typedef struct dispex_dynamic_data_t dispex_dynamic_data_t;
@@ -143,6 +145,7 @@ typedef struct {
 
 void init_dispex(DispatchEx*,IUnknown*,dispex_static_data_t*);
 BOOL dispex_query_interface(DispatchEx*,REFIID,void**);
+HRESULT dispex_get_dprop_ref(DispatchEx*,const WCHAR*,BOOL,VARIANT**);
 
 typedef struct {
     DispatchEx dispex;
@@ -165,6 +168,11 @@ typedef enum {
     BROWSEMODE,
     EDITMODE        
 } USERMODE;
+
+typedef enum {
+    SCRIPTMODE_GECKO,
+    SCRIPTMODE_ACTIVESCRIPT
+} SCRIPTMODE;
 
 typedef struct {
     const IConnectionPointContainerVtbl  *lpConnectionPointContainerVtbl;
@@ -233,6 +241,7 @@ struct HTMLDocument {
 
     NSContainer *nscontainer;
     HTMLWindow *window;
+    nsIDOMHTMLDocument *nsdoc;
 
     IOleClientSite *client;
     IDocHostUIHandler *hostui;
@@ -255,6 +264,7 @@ struct HTMLDocument {
     DOCHOSTUIINFO hostinfo;
 
     USERMODE usermode;
+    SCRIPTMODE scriptmode;
     READYSTATE readystate;
     BOOL in_place_active;
     BOOL ui_active;
@@ -322,7 +332,7 @@ struct NSContainer {
     nsChannelBSC *bscallback; /* hack */
     HWND reset_focus; /* hack */
 
-    BOOL event_vector[EVENTID_LAST];
+    BOOL *event_vector;
 };
 
 typedef struct {
@@ -346,6 +356,8 @@ typedef struct {
 typedef struct {
     HRESULT (*qi)(HTMLDOMNode*,REFIID,void**);
     void (*destructor)(HTMLDOMNode*);
+    HRESULT (*put_disabled)(HTMLDOMNode*,VARIANT_BOOL);
+    HRESULT (*get_disabled)(HTMLDOMNode*,VARIANT_BOOL*);
 } NodeImplVtbl;
 
 struct HTMLDOMNode {
@@ -369,6 +381,7 @@ typedef struct {
 
     const IHTMLElementVtbl   *lpHTMLElementVtbl;
     const IHTMLElement2Vtbl  *lpHTMLElement2Vtbl;
+    const IHTMLElement3Vtbl  *lpHTMLElement3Vtbl;
 
     nsIDOMHTMLElement *nselem;
 } HTMLElement;
@@ -429,6 +442,7 @@ typedef struct {
 
 #define HTMLELEM(x)      ((IHTMLElement*)                 &(x)->lpHTMLElementVtbl)
 #define HTMLELEM2(x)     ((IHTMLElement2*)                &(x)->lpHTMLElement2Vtbl)
+#define HTMLELEM3(x)     ((IHTMLElement3*)                &(x)->lpHTMLElement3Vtbl)
 #define HTMLDOMNODE(x)   ((IHTMLDOMNode*)                 &(x)->lpHTMLDOMNodeVtbl)
 #define HTMLDOMNODE2(x)  ((IHTMLDOMNode2*)                &(x)->lpHTMLDOMNode2Vtbl)
 
@@ -450,7 +464,6 @@ HTMLWindow *nswindow_to_window(const nsIDOMWindow*);
 HTMLOptionElementFactory *HTMLOptionElementFactory_Create(HTMLDocument*);
 HTMLLocation *HTMLLocation_Create(HTMLDocument*);
 IOmNavigator *OmNavigator_Create(void);
-void setup_nswindow(HTMLWindow*);
 
 void HTMLDocument_HTMLDocument3_Init(HTMLDocument*);
 void HTMLDocument_HTMLDocument5_Init(HTMLDocument*);
@@ -461,6 +474,8 @@ void HTMLDocument_View_Init(HTMLDocument*);
 void HTMLDocument_Window_Init(HTMLDocument*);
 void HTMLDocument_Service_Init(HTMLDocument*);
 void HTMLDocument_Hlink_Init(HTMLDocument*);
+
+HRESULT HTMLCurrentStyle_Create(HTMLElement*,IHTMLCurrentStyle**);
 
 void ConnectionPoint_Init(ConnectionPoint*,ConnectionPointContainer*,REFIID);
 void ConnectionPointContainer_Init(ConnectionPointContainer*,IUnknown*);
@@ -512,12 +527,7 @@ void get_editor_controller(NSContainer*);
 void init_nsevents(NSContainer*);
 void add_nsevent_listener(NSContainer*,LPCWSTR);
 nsresult get_nsinterface(nsISupports*,REFIID,void**);
-
-void check_event_attr(HTMLDocument*,nsIDOMElement*);
-void release_event_target(event_target_t*);
-void fire_event(HTMLDocument*,eventid_t,nsIDOMNode*);
-HRESULT set_node_event(HTMLDOMNode*,eventid_t,VARIANT*);
-eventid_t str_to_eid(LPCWSTR);
+void update_nsdocument(HTMLDocument*);
 
 void set_document_bscallback(HTMLDocument*,nsChannelBSC*);
 void set_current_mon(HTMLDocument*,IMoniker*);
@@ -545,18 +555,21 @@ HTMLElement *HTMLElement_Create(HTMLDocument*,nsIDOMNode*,BOOL);
 HTMLElement *HTMLCommentElement_Create(HTMLDocument*,nsIDOMNode*);
 HTMLElement *HTMLAnchorElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLBodyElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLIFrame_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLImgElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLInputElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLOptionElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLScriptElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLSelectElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLTable_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLTableRow_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLTextAreaElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLGenericElement_Create(nsIDOMHTMLElement*);
 
 void HTMLDOMNode_Init(HTMLDocument*,HTMLDOMNode*,nsIDOMNode*);
 void HTMLElement_Init(HTMLElement*);
 void HTMLElement2_Init(HTMLElement*);
+void HTMLElement3_Init(HTMLElement*);
 void HTMLTextContainer_Init(HTMLTextContainer*);
 
 HRESULT HTMLDOMNode_QI(HTMLDOMNode*,REFIID,void**);
@@ -572,9 +585,12 @@ void release_script_hosts(HTMLDocument*);
 void connect_scripts(HTMLDocument*);
 void doc_insert_script(HTMLDocument*,nsIDOMHTMLScriptElement*);
 IDispatch *script_parse_event(HTMLDocument*,LPCWSTR);
+void set_script_mode(HTMLDocument*,SCRIPTMODE);
 
-IHTMLElementCollection *create_all_collection(HTMLDOMNode*);
+IHTMLElementCollection *HTMLElementCollection_Create(IUnknown*,HTMLElement**,DWORD);
+IHTMLElementCollection *create_all_collection(HTMLDOMNode*,BOOL);
 IHTMLElementCollection *create_collection_from_nodelist(HTMLDocument*,IUnknown*,nsIDOMNodeList*);
+IHTMLElementCollection *create_collection_from_htmlcol(HTMLDocument*,IUnknown*,nsIDOMHTMLCollection*);
 
 /* commands */
 typedef struct {
@@ -639,6 +655,8 @@ HRESULT clear_task_timer(HTMLDocument*,BOOL,DWORD);
 HRESULT get_typeinfo(tid_t,ITypeInfo**);
 void release_typelib(void);
 void call_disp_func(HTMLDocument*,IDispatch*);
+
+const char *debugstr_variant(const VARIANT*);
 
 DEFINE_GUID(CLSID_AboutProtocol, 0x3050F406, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_JSProtocol, 0x3050F3B2, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);

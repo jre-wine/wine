@@ -487,6 +487,7 @@ static void test_Get_Release_DC(void)
     GpRect   rect[2];
     GpRegion *clip;
     INT i;
+    BOOL res;
 
     pt[0].X = 10;
     pt[0].Y = 10;
@@ -674,6 +675,10 @@ static void test_Get_Release_DC(void)
     expect(ObjectBusy, status); status = Ok;
     status = GdipGraphicsClear(graphics, 0xdeadbeef);
     expect(ObjectBusy, status); status = Ok;
+    status = GdipIsVisiblePoint(graphics, 0.0, 0.0, &res);
+    expect(ObjectBusy, status); status = Ok;
+    status = GdipIsVisiblePointI(graphics, 0, 0, &res);
+    expect(ObjectBusy, status); status = Ok;
     /* GdipMeasureCharacterRanges */
     /* GdipMeasureString */
     status = GdipResetClip(graphics);
@@ -705,6 +710,10 @@ static void test_Get_Release_DC(void)
     status = GdipSetWorldTransform(graphics, m);
     expect(ObjectBusy, status); status = Ok;
     status = GdipTranslateWorldTransform(graphics, 0.0, 0.0, MatrixOrderPrepend);
+    expect(ObjectBusy, status); status = Ok;
+    status = GdipSetClipPath(graphics, path, CombineModeReplace);
+    expect(ObjectBusy, status); status = Ok;
+    status = GdipSetClipRect(graphics, 0.0, 0.0, 10.0, 10.0, CombineModeReplace);
     expect(ObjectBusy, status); status = Ok;
     status = GdipSetClipRectI(graphics, 0, 0, 10, 10, CombineModeReplace);
     expect(ObjectBusy, status); status = Ok;
@@ -800,6 +809,11 @@ static void test_get_set_clip(void)
     status = GdipSetClipRegion(NULL, NULL, CombineModeReplace);
     expect(InvalidParameter, status);
     status = GdipSetClipRegion(graphics, NULL, CombineModeReplace);
+    expect(InvalidParameter, status);
+
+    status = GdipSetClipPath(NULL, NULL, CombineModeReplace);
+    expect(InvalidParameter, status);
+    status = GdipSetClipPath(graphics, NULL, CombineModeReplace);
     expect(InvalidParameter, status);
 
     res = FALSE;

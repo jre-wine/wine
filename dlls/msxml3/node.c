@@ -609,8 +609,59 @@ static HRESULT WINAPI xmlnode_replaceChild(
     IXMLDOMNode* oldChild,
     IXMLDOMNode** outOldChild)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    xmlNode *old_child_ptr, *new_child_ptr;
+    xmlDocPtr leaving_doc;
+    xmlNode *my_ancestor;
+    IXMLDOMNode *realOldChild;
+    HRESULT hr;
+
+    TRACE("%p->(%p,%p,%p)\n",This,newChild,oldChild,outOldChild);
+
+    /* Do not believe any documentation telling that newChild == NULL
+       means removal. It does certainly *not* apply to msxml3! */
+    if(!newChild || !oldChild)
+        return E_INVALIDARG;
+
+    if(outOldChild)
+        *outOldChild = NULL;
+
+    hr = IXMLDOMNode_QueryInterface(oldChild,&IID_IXMLDOMNode,(LPVOID*)&realOldChild);
+    if(FAILED(hr))
+        return hr;
+
+    old_child_ptr = impl_from_IXMLDOMNode(realOldChild)->node;
+    IXMLDOMNode_Release(realOldChild);
+    if(old_child_ptr->parent != This->node)
+    {
+        WARN("childNode %p is not a child of %p\n", oldChild, iface);
+        return E_INVALIDARG;
+    }
+
+    new_child_ptr = impl_from_IXMLDOMNode(newChild)->node;
+    my_ancestor = This->node;
+    while(my_ancestor)
+    {
+        if(my_ancestor == new_child_ptr)
+        {
+            WARN("tried to create loop\n");
+            return E_FAIL;
+        }
+        my_ancestor = my_ancestor->parent;
+    }
+
+    leaving_doc = new_child_ptr->doc;
+    xmldoc_add_ref(old_child_ptr->doc);
+    xmlReplaceNode(old_child_ptr, new_child_ptr);
+    xmldoc_release(leaving_doc);
+
+    if(outOldChild)
+    {
+        IXMLDOMNode_AddRef(oldChild);
+        *outOldChild = oldChild;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlnode_removeChild(
@@ -619,29 +670,23 @@ static HRESULT WINAPI xmlnode_removeChild(
     IXMLDOMNode** oldChild)
 {
     xmlnode *This = impl_from_IXMLDOMNode( iface );
-    xmlNode *ancestor, *child_node_ptr;
+    xmlNode *child_node_ptr;
     HRESULT hr;
     IXMLDOMNode *child;
 
     TRACE("%p->(%p, %p)\n", This, childNode, oldChild);
 
+    if(!childNode) return E_INVALIDARG;
+
     if(oldChild)
         *oldChild = NULL;
-
-    if(!childNode) return E_INVALIDARG;
 
     hr = IXMLDOMNode_QueryInterface(childNode, &IID_IXMLDOMNode, (LPVOID)&child);
     if(FAILED(hr))
         return hr;
 
-    child_node_ptr = ancestor = impl_from_IXMLDOMNode(child)->node;
-    while(ancestor->parent)
-    {
-        if(ancestor->parent == This->node)
-            break;
-        ancestor = ancestor->parent;
-    }
-    if(!ancestor->parent)
+    child_node_ptr = impl_from_IXMLDOMNode(child)->node;
+    if(child_node_ptr->parent != This->node)
     {
         WARN("childNode %p is not a child of %p\n", childNode, iface);
         IXMLDOMNode_Release(child);
@@ -1085,6 +1130,37 @@ static BSTR EnsureCorrectEOL(BSTR sInput)
     return sNew;
 }
 
+/* Removes encoding information and last character (nullbyte) */
+static BSTR EnsureNoEncoding(BSTR sInput)
+{
+    static const WCHAR wszEncoding[] = {'e','n','c','o','d','i','n','g','='};
+    BSTR sNew;
+    WCHAR *pBeg, *pEnd;
+
+    pBeg = sInput;
+    while(*pBeg != '\n' && memcmp(pBeg, wszEncoding, sizeof(wszEncoding)))
+        pBeg++;
+
+    if(*pBeg == '\n')
+    {
+        SysReAllocStringLen(&sInput, sInput, SysStringLen(sInput)-1);
+        return sInput;
+    }
+    pBeg--;
+
+    pEnd = pBeg + sizeof(wszEncoding)/sizeof(WCHAR) + 2;
+    while(*pEnd != '\"') pEnd++;
+    pEnd++;
+
+    sNew = SysAllocStringLen(NULL,
+            pBeg-sInput + SysStringLen(sInput)-(pEnd-sInput)-1);
+    memcpy(sNew, sInput, (pBeg-sInput)*sizeof(WCHAR));
+    memcpy(&sNew[pBeg-sInput], pEnd, (SysStringLen(sInput)-(pEnd-sInput)-1)*sizeof(WCHAR));
+
+    SysFreeString(sInput);
+    return sNew;
+}
+
 /*
  * We are trying to replicate the same behaviour as msxml by converting
  * line endings to \r\n and using idents as \t. The problem is that msxml
@@ -1123,7 +1199,18 @@ static HRESULT WINAPI xmlnode_get_xml(
             else
                 bstrContent = bstr_from_xmlChar(pContent);
 
-            *xmlString = This->node->type == XML_ELEMENT_NODE ? EnsureCorrectEOL(bstrContent) : bstrContent;
+            switch(This->node->type)
+            {
+                case XML_ELEMENT_NODE:
+                    *xmlString = EnsureCorrectEOL(bstrContent);
+                    break;
+                case XML_DOCUMENT_NODE:
+                    *xmlString = EnsureCorrectEOL(bstrContent);
+                    *xmlString = EnsureNoEncoding(*xmlString);
+                    break;
+                default:
+                    *xmlString = bstrContent;
+            }
         }
 
         xmlBufferFree(pXmlBuf);

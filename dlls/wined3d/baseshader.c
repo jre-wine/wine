@@ -790,6 +790,7 @@ void shader_generate_main(
 
     IWineD3DBaseShaderImpl* This = (IWineD3DBaseShaderImpl*) iface;
     IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *) This->baseShader.device; /* To access shader backend callbacks */
+    const SHADER_HANDLER *handler_table = device->shader_backend->shader_instruction_handler_table;
     const DWORD *pToken = pFunction;
     const SHADER_OPCODE *curOpcode = NULL;
     SHADER_HANDLER hw_fct = NULL;
@@ -828,10 +829,8 @@ void shader_generate_main(
             /* Select handler */
             if (curOpcode == NULL)
                 hw_fct = NULL;
-            else if (This->baseShader.shader_mode == SHADER_GLSL)
-                hw_fct = curOpcode->hw_glsl_fct;
-            else if (This->baseShader.shader_mode == SHADER_ARB)
-                hw_fct = curOpcode->hw_fct;
+            else
+                hw_fct = handler_table[curOpcode->handler_idx];
 
             /* Unknown opcode and its parameters */
             if (NULL == curOpcode) {
@@ -883,6 +882,8 @@ void shader_generate_main(
                 device->shader_backend->shader_color_correction(&hw_arg);
 
                 /* Process instruction modifiers for GLSL apps ( _sat, etc. ) */
+                /* FIXME: This should be internal to the shader backend.
+                 * Also, right now this is the only reason "shader_mode" exists. */
                 if (This->baseShader.shader_mode == SHADER_GLSL)
                     shader_glsl_add_instruction_modifiers(&hw_arg);
 
@@ -1089,6 +1090,7 @@ void shader_trace_init(
     }
 }
 
+static const SHADER_HANDLER shader_none_instruction_handler_table[WINED3DSIH_TABLE_SIZE] = {0};
 static void shader_none_select(IWineD3DDevice *iface, BOOL usePS, BOOL useVS) {}
 static void shader_none_select_depth_blt(IWineD3DDevice *iface) {}
 static void shader_none_deselect_depth_blt(IWineD3DDevice *iface) {}
@@ -1132,6 +1134,7 @@ static BOOL shader_none_conv_supported(WINED3DFORMAT fmt) {
 }
 
 const shader_backend_t none_shader_backend = {
+    shader_none_instruction_handler_table,
     shader_none_select,
     shader_none_select_depth_blt,
     shader_none_deselect_depth_blt,

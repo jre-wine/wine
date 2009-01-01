@@ -16,6 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <math.h>
+
 #include "jscript.h"
 #include "engine.h"
 
@@ -203,13 +205,6 @@ void exec_release(exec_ctx_t *ctx)
     heap_free(ctx);
 }
 
-static HRESULT dispex_get_id(IDispatchEx *dispex, BSTR name, DWORD flags, DISPID *id)
-{
-    *id = 0;
-
-    return IDispatchEx_GetDispID(dispex, name, flags|fdexNameCaseSensitive, id);
-}
-
 static HRESULT disp_get_id(IDispatch *disp, BSTR name, DWORD flags, DISPID *id)
 {
     IDispatchEx *dispex;
@@ -223,7 +218,8 @@ static HRESULT disp_get_id(IDispatch *disp, BSTR name, DWORD flags, DISPID *id)
         return IDispatch_GetIDsOfNames(disp, &IID_NULL, &name, 1, 0, id);
     }
 
-    hres = dispex_get_id(dispex, name, flags, id);
+    *id = 0;
+    hres = IDispatchEx_GetDispID(dispex, name, flags|fdexNameCaseSensitive, id);
     IDispatchEx_Release(dispex);
     return hres;
 }
@@ -276,16 +272,6 @@ static HRESULT disp_cmp(IDispatch *disp1, IDispatch *disp2, BOOL *ret)
     IUnknown_Release(unk1);
     IUnknown_Release(unk2);
     return S_OK;
-}
-
-static inline BOOL is_num_vt(enum VARENUM vt)
-{
-    return vt == VT_I4 || vt == VT_R8;
-}
-
-static inline DOUBLE num_val(const VARIANT *v)
-{
-    return V_VT(v) == VT_I4 ? V_I4(v) : V_R8(v);
 }
 
 /* ECMA-262 3rd Edition    11.9.6 */
@@ -367,6 +353,7 @@ HRESULT exec_source(exec_ctx_t *ctx, parser_ctx_t *parser, source_elements_t *so
     script_ctx_t *script = parser->script;
     function_declaration_t *func;
     parser_ctx_t *prev_parser;
+    var_list_t *var;
     VARIANT val, tmp;
     statement_t *stat;
     exec_ctx_t *prev_ctx;
@@ -377,14 +364,23 @@ HRESULT exec_source(exec_ctx_t *ctx, parser_ctx_t *parser, source_elements_t *so
         DispatchEx *func_obj;
         VARIANT var;
 
-        hres = create_source_function(parser, func->parameter_list, func->source_elements, ctx->scope_chain, &func_obj);
+        hres = create_source_function(parser, func->parameter_list, func->source_elements,
+                ctx->scope_chain, func->src_str, func->src_len, &func_obj);
         if(FAILED(hres))
             return hres;
 
         V_VT(&var) = VT_DISPATCH;
         V_DISPATCH(&var) = (IDispatch*)_IDispatchEx_(func_obj);
         hres = jsdisp_propput_name(ctx->var_disp, func->identifier, script->lcid, &var, ei, NULL);
-        IDispatchEx_Release(_IDispatchEx_(func_obj));
+        jsdisp_release(func_obj);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    for(var = source->variables; var; var = var->next) {
+        DISPID id = 0;
+
+        hres = jsdisp_get_id(ctx->var_disp, var->identifier, fdexNameEnsure, &id);
         if(FAILED(hres))
             return hres;
     }
@@ -442,7 +438,7 @@ static HRESULT identifier_eval(exec_ctx_t *ctx, BSTR identifier, DWORD flags, ex
     TRACE("%s\n", debugstr_w(identifier));
 
     for(scope = ctx->scope_chain; scope; scope = scope->next) {
-        hres = dispex_get_id(_IDispatchEx_(scope->obj), identifier, 0, &id);
+        hres = jsdisp_get_id(scope->obj, identifier, 0, &id);
         if(SUCCEEDED(hres))
             break;
     }
@@ -452,7 +448,7 @@ static HRESULT identifier_eval(exec_ctx_t *ctx, BSTR identifier, DWORD flags, ex
         return S_OK;
     }
 
-    hres = dispex_get_id(_IDispatchEx_(ctx->parser->script->global), identifier, 0, &id);
+    hres = jsdisp_get_id(ctx->parser->script->global, identifier, 0, &id);
     if(SUCCEEDED(hres)) {
         exprval_set_idref(ret, (IDispatch*)_IDispatchEx_(ctx->parser->script->global), id);
         return S_OK;
@@ -469,14 +465,14 @@ static HRESULT identifier_eval(exec_ctx_t *ctx, BSTR identifier, DWORD flags, ex
         return S_OK;
     }
 
-    hres = dispex_get_id(_IDispatchEx_(ctx->parser->script->script_disp), identifier, 0, &id);
+    hres = jsdisp_get_id(ctx->parser->script->script_disp, identifier, 0, &id);
     if(SUCCEEDED(hres)) {
         exprval_set_idref(ret, (IDispatch*)_IDispatchEx_(ctx->parser->script->script_disp), id);
         return S_OK;
     }
 
     if(flags & EXPR_NEWREF) {
-        hres = dispex_get_id(_IDispatchEx_(ctx->var_disp), identifier, fdexNameEnsure, &id);
+        hres = jsdisp_get_id(ctx->var_disp, identifier, fdexNameEnsure, &id);
         if(FAILED(hres))
             return hres;
 
@@ -523,25 +519,23 @@ HRESULT block_statement_eval(exec_ctx_t *ctx, statement_t *_stat, return_type_t 
 static HRESULT variable_list_eval(exec_ctx_t *ctx, variable_declaration_t *var_list, jsexcept_t *ei)
 {
     variable_declaration_t *iter;
-    HRESULT hres = E_FAIL;
+    HRESULT hres = S_OK;
 
     for(iter = var_list; iter; iter = iter->next) {
+        exprval_t exprval;
         VARIANT val;
 
-        if(iter->expr) {
-            exprval_t exprval;
+        if(!iter->expr)
+            continue;
 
-            hres = expr_eval(ctx, iter->expr, 0, ei, &exprval);
-            if(FAILED(hres))
-                break;
+        hres = expr_eval(ctx, iter->expr, 0, ei, &exprval);
+        if(FAILED(hres))
+            break;
 
-            hres = exprval_to_value(ctx->parser->script, &exprval, ei, &val);
-            exprval_release(&exprval);
-            if(FAILED(hres))
-                break;
-        }else {
-            V_VT(&val) = VT_EMPTY;
-        }
+        hres = exprval_to_value(ctx->parser->script, &exprval, ei, &val);
+        exprval_release(&exprval);
+        if(FAILED(hres))
+            break;
 
         hres = jsdisp_propput_name(ctx->var_disp, iter->identifier, ctx->parser->script->lcid, &val, ei, NULL/*FIXME*/);
         VariantClear(&val);
@@ -793,9 +787,10 @@ HRESULT forin_statement_eval(exec_ctx_t *ctx, statement_t *_stat, return_type_t 
         return hres;
 
     if(V_VT(&val) != VT_DISPATCH) {
-        FIXME("in vt %d\n", V_VT(&val));
+        TRACE("in vt %d\n", V_VT(&val));
         VariantClear(&val);
-        return E_NOTIMPL;
+        V_VT(ret) = VT_EMPTY;
+        return S_OK;
     }
 
     hres = IDispatch_QueryInterface(V_DISPATCH(&val), &IID_IDispatchEx, (void**)&in_obj);
@@ -959,7 +954,8 @@ HRESULT with_statement_eval(exec_ctx_t *ctx, statement_t *_stat, return_type_t *
 
     hres = scope_push(ctx->scope_chain, obj, &ctx->scope_chain);
     jsdisp_release(obj);
-    if(FAILED(hres));
+    if(FAILED(hres))
+        return hres;
 
     hres = stat_eval(ctx, stat->statement, rt, ret);
 
@@ -1251,7 +1247,8 @@ HRESULT function_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD fla
 
     TRACE("\n");
 
-    hres = create_source_function(ctx->parser, expr->parameter_list, expr->source_elements, ctx->scope_chain, &dispex);
+    hres = create_source_function(ctx->parser, expr->parameter_list, expr->source_elements, ctx->scope_chain,
+            expr->src_str, expr->src_len, &dispex);
     if(FAILED(hres))
         return hres;
 
@@ -1936,9 +1933,9 @@ static HRESULT add_eval(exec_ctx_t *ctx, VARIANT *lval, VARIANT *rval, jsexcept_
             memcpy(V_BSTR(retv)+len1, rstr, (len2+1)*sizeof(WCHAR));
         }
 
-        if(lstr && V_VT(&l) != VT_BSTR)
+        if(V_VT(&l) != VT_BSTR)
             SysFreeString(lstr);
-        if(rstr && V_VT(&r) != VT_BSTR)
+        if(V_VT(&r) != VT_BSTR)
             SysFreeString(rstr);
     }else {
         VARIANT nl, nr;
@@ -2051,10 +2048,31 @@ HRESULT div_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags, j
 }
 
 /* ECMA-262 3rd Edition    11.5.3 */
-HRESULT mod_expression_eval(exec_ctx_t *ctx, expression_t *expr, DWORD flags, jsexcept_t *ei, exprval_t *ret)
+static HRESULT mod_eval(exec_ctx_t *ctx, VARIANT *lval, VARIANT *rval, jsexcept_t *ei, VARIANT *retv)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    VARIANT lnum, rnum;
+    HRESULT hres;
+
+    hres = to_number(ctx->parser->script, lval, ei, &lnum);
+    if(FAILED(hres))
+        return hres;
+
+    hres = to_number(ctx->parser->script, rval, ei, &rnum);
+    if(FAILED(hres))
+        return hres;
+
+    num_set_val(retv, fmod(num_val(&lnum), num_val(&rnum)));
+    return S_OK;
+}
+
+/* ECMA-262 3rd Edition    11.5.3 */
+HRESULT mod_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags, jsexcept_t *ei, exprval_t *ret)
+{
+    binary_expression_t *expr = (binary_expression_t*)_expr;
+
+    TRACE("\n");
+
+    return binary_expr_eval(ctx, expr, mod_eval, ei, ret);
 }
 
 /* ECMA-262 3rd Edition    11.4.2 */
@@ -2072,6 +2090,17 @@ HRESULT delete_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags
         return hres;
 
     switch(exprval.type) {
+    case EXPRVAL_IDREF: {
+        IDispatchEx *dispex;
+
+        hres = IDispatch_QueryInterface(exprval.u.nameref.disp, &IID_IDispatchEx, (void**)&dispex);
+        if(SUCCEEDED(hres)) {
+            hres = IDispatchEx_DeleteMemberByDispID(dispex, exprval.u.idref.id);
+            b = VARIANT_TRUE;
+            IDispatchEx_Release(dispex);
+        }
+        break;
+    }
     case EXPRVAL_NAMEREF: {
         IDispatchEx *dispex;
 
@@ -2865,10 +2894,8 @@ HRESULT assign_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags
         hres = put_value(ctx->parser->script, &exprval, &rval, ei);
 
     exprval_release(&exprval);
-    if(FAILED(hres)) {
-        VariantClear(&rval);
+    if(FAILED(hres))
         return hres;
-    }
 
     ret->type = EXPRVAL_VARIANT;
     ret->u.var = rval;
@@ -2946,10 +2973,13 @@ HRESULT assign_div_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD f
 }
 
 /* ECMA-262 3rd Edition    11.13.2 */
-HRESULT assign_mod_expression_eval(exec_ctx_t *ctx, expression_t *expr, DWORD flags, jsexcept_t *ei, exprval_t *ret)
+HRESULT assign_mod_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags, jsexcept_t *ei, exprval_t *ret)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    binary_expression_t *expr = (binary_expression_t*)_expr;
+
+    TRACE("\n");
+
+    return assign_oper_eval(ctx, expr->expression1, expr->expression2, mod_eval, ei, ret);
 }
 
 /* ECMA-262 3rd Edition    11.13.2 */

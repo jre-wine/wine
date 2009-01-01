@@ -1,7 +1,7 @@
 /*
  * Some tests for OpenGL functions
  *
- * Copyright (C) 2007 Roderick Colenbrander
+ * Copyright (C) 2007-2008 Roderick Colenbrander
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,8 +22,25 @@
 #include <wingdi.h>
 #include "wine/test.h"
 
+const unsigned char * WINAPI glGetString(unsigned int);
+#define GL_VENDOR 0x1F00
+#define GL_RENDERER 0x1F01
+#define GL_VERSION 0x1F02
+
 #define MAX_FORMATS 256
 typedef void* HPBUFFERARB;
+
+/* WGL_ARB_create_context */
+HGLRC (WINAPI *pwglCreateContextAttribsARB)(HDC hDC, HGLRC hShareContext, const int *attribList);
+/* GetLastError */
+#define ERROR_INVALID_VERSION_ARB 0x2095
+#define WGL_CONTEXT_MAJOR_VERSION_ARB 0x2091
+#define WGL_CONTEXT_MINOR_VERSION_ARB 0x2092
+#define WGL_CONTEXT_LAYER_PLANE_ARB 0x2093
+#define WGL_CONTEXT_FLAGS_ARB 0x2094
+/* Flags for WGL_CONTEXT_FLAGS_ARB */
+#define WGL_CONTEXT_DEBUG_BIT_ARB 0x0001
+#define WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB	0x0002
 
 /* WGL_ARB_extensions_string */
 static const char* (WINAPI *pwglGetExtensionsStringARB)(HDC);
@@ -58,6 +75,9 @@ static void init_functions(void)
     p ## func = (void*)wglGetProcAddress(#func); \
     if(!p ## func) \
       trace("wglGetProcAddress(%s) failed\n", #func);
+
+    /* WGL_ARB_create_context */
+    GET_PROC(wglCreateContextAttribsARB);
 
     /* WGL_ARB_extensions_string */
     GET_PROC(wglGetExtensionsStringARB)
@@ -269,10 +289,6 @@ static void test_makecurrent(HDC winhdc)
 {
     BOOL ret;
     HGLRC hglrc;
-    HDC hdc;
-
-    hdc = GetDC(0);
-    ok( hdc != 0, "GetDC(0) failed\n" );
 
     hglrc = wglCreateContext(winhdc);
     ok( hglrc != 0, "wglCreateContext failed\n" );
@@ -281,15 +297,6 @@ static void test_makecurrent(HDC winhdc)
     ok( ret, "wglMakeCurrent failed\n" );
 
     ok( wglGetCurrentContext() == hglrc, "wrong context\n" );
-
-    SetLastError( 0xdeadbeef );
-    ret = wglMakeCurrent( hdc, hglrc );
-    ok( !ret, "wglMakeCurrent succeeded\n" );
-    ok( GetLastError() == ERROR_INVALID_PIXEL_FORMAT, "last error %u\n", GetLastError() );
-
-    ok( wglGetCurrentContext() == hglrc, "wrong context\n" );
-
-    ReleaseDC( 0, hdc );
 }
 
 static void test_colorbits(HDC hdc)
@@ -408,6 +415,108 @@ static void test_dc(HWND hwnd, HDC hdc)
     }
 }
 
+static void test_opengl3(HDC hdc)
+{
+    /* Try to create a context using an invalid OpenGL version namely 0.x */
+    {
+        HGLRC gl3Ctx;
+        int attribs[] = {WGL_CONTEXT_MAJOR_VERSION_ARB, 0, 0};
+
+        gl3Ctx = pwglCreateContextAttribsARB(hdc, 0, attribs);
+        ok(gl3Ctx == 0, "wglCreateContextAttribs with major version=0 should fail!\n");
+
+        if(gl3Ctx)
+            wglDeleteContext(gl3Ctx);
+    }
+
+    /* Try to create a context compatible with OpenGL 1.x; 1.0-2.1 is allowed */
+    {
+        HGLRC gl3Ctx;
+        int attribs[] = {WGL_CONTEXT_MAJOR_VERSION_ARB, 1, 0};
+
+        gl3Ctx = pwglCreateContextAttribsARB(hdc, 0, attribs);
+        ok(gl3Ctx != 0, "pwglCreateContextAttribsARB for a 1.x context failed!\n");
+        wglDeleteContext(gl3Ctx);
+    }
+
+    /* Try to pass an invalid HDC */
+    {
+        HGLRC gl3Ctx;
+        DWORD error;
+        gl3Ctx = pwglCreateContextAttribsARB((HDC)0xdeadbeef, 0, 0);
+        ok(gl3Ctx == 0, "pwglCreateContextAttribsARB using an invalid HDC passed\n");
+        error = GetLastError();
+        ok(error == ERROR_DC_NOT_FOUND, "Expected ERROR_DC_NOT_FOUND, got error=%x\n", error);
+        wglDeleteContext(gl3Ctx);
+    }
+
+    /* Try to pass an invalid shareList */
+    {
+        HGLRC gl3Ctx;
+        DWORD error;
+        gl3Ctx = pwglCreateContextAttribsARB(hdc, (HGLRC)0xdeadbeef, 0);
+        ok(gl3Ctx == 0, "pwglCreateContextAttribsARB using an invalid shareList passed\n");
+        error = GetLastError();
+        ok(error == ERROR_INVALID_OPERATION, "Expected ERROR_INVALID_OPERATION, got error=%x\n", error);
+        wglDeleteContext(gl3Ctx);
+    }
+
+    /* Try to create an OpenGL 3.0 context */
+    {
+        int attribs[] = {WGL_CONTEXT_MAJOR_VERSION_ARB, 3, WGL_CONTEXT_MINOR_VERSION_ARB, 0, 0};
+        HGLRC gl3Ctx = pwglCreateContextAttribsARB(hdc, 0, attribs);
+
+        if(gl3Ctx == NULL)
+        {
+            skip("Skipping the rest of the WGL_ARB_create_context test due to lack of OpenGL 3.0\n");
+            return;
+        }
+
+        wglDeleteContext(gl3Ctx);
+    }
+
+    /* Test matching an OpenGL 3.0 context with an older one, OpenGL 3.0 should allow it until the new object model is introduced in a future revision */
+    {
+        HGLRC glCtx = wglCreateContext(hdc);
+
+        int attribs[] = {WGL_CONTEXT_MAJOR_VERSION_ARB, 3, WGL_CONTEXT_MINOR_VERSION_ARB, 0, 0};
+        int attribs_future[] = {WGL_CONTEXT_FLAGS_ARB, WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB, WGL_CONTEXT_MAJOR_VERSION_ARB, 3, WGL_CONTEXT_MINOR_VERSION_ARB, 0, 0};
+
+        HGLRC gl3Ctx = pwglCreateContextAttribsARB(hdc, glCtx, attribs);
+        ok(gl3Ctx != NULL, "Sharing of a display list between OpenGL 3.0 and OpenGL 1.x/2.x failed!\n");
+        if(gl3Ctx)
+            wglDeleteContext(gl3Ctx);
+
+        gl3Ctx = pwglCreateContextAttribsARB(hdc, glCtx, attribs_future);
+        ok(gl3Ctx != NULL, "Sharing of a display list between a forward compatible OpenGL 3.0 context and OpenGL 1.x/2.x failed!\n");
+        if(gl3Ctx)
+            wglDeleteContext(gl3Ctx);
+
+        if(glCtx)
+            wglDeleteContext(glCtx);
+    }
+
+    /* Try to create an OpenGL 3.0 context and test windowless rendering */
+    {
+        HGLRC gl3Ctx;
+        int attribs[] = {WGL_CONTEXT_MAJOR_VERSION_ARB, 3, WGL_CONTEXT_MINOR_VERSION_ARB, 0, 0};
+        BOOL res;
+
+        gl3Ctx = pwglCreateContextAttribsARB(hdc, 0, attribs);
+        ok(gl3Ctx != 0, "pwglCreateContextAttribsARB for a 3.0 context failed!\n");
+
+        /* OpenGL 3.0 allows offscreen rendering WITHOUT a drawable */
+        /* NOTE: Nvidia's 177.89 beta drivers don't allow this yet */
+        res = wglMakeCurrent(0, gl3Ctx);
+        ok(res == TRUE, "OpenGL 3.0 should allow windowless rendering, but the test failed!\n");
+        if(res)
+            wglMakeCurrent(0, 0);
+
+        if(gl3Ctx)
+            wglDeleteContext(gl3Ctx);
+    }
+}
+
 START_TEST(opengl)
 {
     HWND hwnd;
@@ -431,6 +540,14 @@ START_TEST(opengl)
         0,                     /* reserved */
         0, 0, 0                /* layer masks */
     };
+
+    init_functions();
+    /* The lack of wglGetExtensionsStringARB in general means broken software rendering or the lack of decent OpenGL support, skip tests in such cases */
+    if (!pwglGetExtensionsStringARB)
+    {
+        skip("wglGetExtensionsStringARB is not available\n");
+        return;
+    }
 
     hwnd = CreateWindow("static", "Title", WS_OVERLAPPEDWINDOW,
                         10, 10, 200, 200, NULL, NULL, NULL, NULL);
@@ -462,22 +579,23 @@ START_TEST(opengl)
         hglrc = wglCreateContext(hdc);
         res = wglMakeCurrent(hdc, hglrc);
         ok(res, "wglMakeCurrent failed!\n");
-        init_functions();
+        if(res)
+        {
+            trace("OpenGL renderer: %s\n", glGetString(GL_RENDERER));
+            trace("OpenGL driver version: %s\n", glGetString(GL_VERSION));
+            trace("OpenGL vendor: %s\n", glGetString(GL_VENDOR));
+        }
 
         test_makecurrent(hdc);
         test_setpixelformat(hdc);
         test_colorbits(hdc);
         test_gdi_dbuf(hdc);
 
-        if (!pwglGetExtensionsStringARB)
-        {
-            skip("wglGetExtensionsStringARB is not available\n");
-            DestroyWindow(hwnd);
-            return;
-        }
-
         wgl_extensions = pwglGetExtensionsStringARB(hdc);
         if(wgl_extensions == NULL) skip("Skipping opengl32 tests because this OpenGL implementation doesn't support WGL extensions!\n");
+
+        if(strstr(wgl_extensions, "WGL_ARB_create_context"))
+            test_opengl3(hdc);
 
         if(strstr(wgl_extensions, "WGL_ARB_make_current_read"))
             test_make_current_read(hdc);

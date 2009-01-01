@@ -372,6 +372,24 @@ done:
     return r;
 }
 
+UINT WINAPI MsiDetermineApplicablePatchesA(LPCSTR szProductPackagePath,
+        DWORD cPatchInfo, PMSIPATCHSEQUENCEINFOA pPatchInfo)
+{
+    FIXME("(%s, %d, %p): stub!\n", debugstr_a(szProductPackagePath),
+          cPatchInfo, pPatchInfo);
+
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+UINT WINAPI MsiDetermineApplicablePatchesW(LPCWSTR szProductPackagePath,
+        DWORD cPatchInfo, PMSIPATCHSEQUENCEINFOW pPatchInfo)
+{
+    FIXME("(%s, %d, %p): stub!\n", debugstr_w(szProductPackagePath),
+          cPatchInfo, pPatchInfo);
+
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
 static UINT msi_open_package(LPCWSTR product, MSIINSTALLCONTEXT context,
                              MSIPACKAGE **package)
 {
@@ -3019,5 +3037,26 @@ UINT WINAPI MsiIsProductElevatedA( LPCSTR szProduct, BOOL *pfElevated )
     FIXME("%s %p - stub\n",
           debugstr_a( szProduct ), pfElevated );
     *pfElevated = TRUE;
+    return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ * MsiSetExternalUIRecord     [MSI.@]
+ */
+UINT WINAPI MsiSetExternalUIRecord( INSTALLUI_HANDLER_RECORD puiHandler,
+                                    DWORD dwMessageFilter, LPVOID pvContext,
+                                    PINSTALLUI_HANDLER_RECORD ppuiPrevHandler)
+{
+    FIXME("%p %08x %p %p\n", puiHandler, dwMessageFilter ,pvContext,
+                             ppuiPrevHandler);
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/***********************************************************************
+ * MsiInstallMissingComponentW     [MSI.@]
+ */
+UINT WINAPI MsiInstallMissingComponentW(LPCWSTR szProduct, LPCWSTR szComponent, INSTALLSTATE eInstallState)
+{
+    FIXME("(%s %s %d\n", debugstr_w(szProduct), debugstr_w(szComponent), eInstallState);
     return ERROR_SUCCESS;
 }

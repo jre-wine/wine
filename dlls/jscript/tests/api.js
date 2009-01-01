@@ -16,12 +16,90 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-var tmp;
+var tmp, i;
+
+i = parseInt("0");
+ok(i === 0, "parseInt('0') = " + i);
+i = parseInt("123");
+ok(i === 123, "parseInt('123') = " + i);
+i = parseInt("-123");
+ok(i === -123, "parseInt('-123') = " + i);
+i = parseInt("0xff");
+ok(i === 0xff, "parseInt('0xff') = " + i);
+i = parseInt("11", 8);
+ok(i === 9, "parseInt('11', 8) = " + i);
+i = parseInt("1j", 22);
+ok(i === 41, "parseInt('1j', 32) = " + i);
+i = parseInt("123", 0);
+ok(i === 123, "parseInt('123', 0) = " + i);
+i = parseInt("123", 10, "test");
+ok(i === 123, "parseInt('123', 10, 'test') = " + i);
+i = parseInt("11", "8");
+ok(i === 9, "parseInt('11', '8') = " + i);
+
+tmp = encodeURI("abc");
+ok(tmp === "abc", "encodeURI('abc') = " + tmp);
+tmp = encodeURI("{abc}");
+ok(tmp === "%7Babc%7D", "encodeURI('{abc}') = " + tmp);
+tmp = encodeURI("");
+ok(tmp === "", "encodeURI('') = " + tmp);
+tmp = encodeURI("\01\02\03\04");
+ok(tmp === "%01%02%03%04", "encodeURI('\\01\\02\\03\\04') = " + tmp);
+tmp = encodeURI("{#@}");
+ok(tmp === "%7B#@%7D", "encodeURI('{#@}') = " + tmp);
+tmp = encodeURI("\xa1 ");
+ok(tmp === "%C2%A1%20", "encodeURI(\\xa1 ) = " + tmp);
+tmp = encodeURI("\xffff");
+ok(tmp.length === 8, "encodeURI('\\xffff').length = " + tmp.length);
+tmp = encodeURI("abcABC123;/?:@&=+$,-_.!~*'()");
+ok(tmp === "abcABC123;/?:@&=+$,-_.!~*'()", "encodeURI('abcABC123;/?:@&=+$,-_.!~*'()') = " + tmp);
+tmp = encodeURI();
+ok(tmp === "undefined", "encodeURI() = " + tmp);
+tmp = encodeURI("abc", "test");
+ok(tmp === "abc", "encodeURI('abc') = " + tmp);
+
+tmp = "" + new Object();
+ok(tmp === "[object Object]", "'' + new Object() = " + tmp);
 
 ok("".length === 0, "\"\".length = " + "".length);
 ok(getVT("".length) == "VT_I4", "\"\".length = " + "".length);
 ok("abc".length === 3, "\"abc\".length = " + "abc".length);
 ok(String.prototype.length === 0, "String.prototype.length = " + String.prototype.length);
+
+tmp = "".toString();
+ok(tmp === "", "''.toString() = " + tmp);
+tmp = "test".toString();
+ok(tmp === "test", "''.toString() = " + tmp);
+tmp = "test".toString(3);
+ok(tmp === "test", "''.toString(3) = " + tmp);
+
+tmp = "".valueOf();
+ok(tmp === "", "''.valueOf() = " + tmp);
+tmp = "test".valueOf();
+ok(tmp === "test", "''.valueOf() = " + tmp);
+tmp = "test".valueOf(3);
+ok(tmp === "test", "''.valueOf(3) = " + tmp);
+
+var str = new String("test");
+ok(str.toString() === "test", "str.toString() = " + str.toString());
+var str = new String();
+ok(str.toString() === "", "str.toString() = " + str.toString());
+var str = new String("test", "abc");
+ok(str.toString() === "test", "str.toString() = " + str.toString());
+
+tmp = "value " + str;
+ok(tmp === "value test", "'value ' + str = " + tmp);
+
+tmp = String();
+ok(tmp === "", "String() = " + tmp);
+tmp = String(false);
+ok(tmp === "false", "String(false) = " + tmp);
+tmp = String(null);
+ok(tmp === "null", "String(null) = " + tmp);
+tmp = String("test");
+ok(tmp === "test", "String('test') = " + tmp);
+tmp = String("test", "abc");
+ok(tmp === "test", "String('test','abc') = " + tmp);
 
 tmp = "abc".charAt(0);
 ok(tmp === "a", "'abc',charAt(0) = " + tmp);
@@ -40,6 +118,135 @@ ok(tmp === "", "'abc',charAt(-1) = " + tmp);
 tmp = "abc".charAt(0,2);
 ok(tmp === "a", "'abc',charAt(0.2) = " + tmp);
 
+tmp = "abc".charCodeAt(0);
+ok(tmp === 0x61, "'abc'.charCodeAt(0) = " + tmp);
+tmp = "abc".charCodeAt(1);
+ok(tmp === 0x62, "'abc'.charCodeAt(1) = " + tmp);
+tmp = "abc".charCodeAt(2);
+ok(tmp === 0x63, "'abc'.charCodeAt(2) = " + tmp);
+tmp = "abc".charCodeAt();
+ok(tmp === 0x61, "'abc'.charCodeAt() = " + tmp);
+tmp = "abc".charCodeAt(true);
+ok(tmp === 0x62, "'abc'.charCodeAt(true) = " + tmp);
+tmp = "abc".charCodeAt(0,2);
+ok(tmp === 0x61, "'abc'.charCodeAt(0,2) = " + tmp);
+
+tmp = "abcd".substring(1,3);
+ok(tmp === "bc", "'abcd'.substring(1,3) = " + tmp);
+tmp = "abcd".substring(-1,3);
+ok(tmp === "abc", "'abcd'.substring(-1,3) = " + tmp);
+tmp = "abcd".substring(1,6);
+ok(tmp === "bcd", "'abcd'.substring(1,6) = " + tmp);
+tmp = "abcd".substring(3,1);
+ok(tmp === "bc", "'abcd'.substring(3,1) = " + tmp);
+tmp = "abcd".substring(2,2);
+ok(tmp === "", "'abcd'.substring(2,2) = " + tmp);
+tmp = "abcd".substring(true,"3");
+ok(tmp === "bc", "'abcd'.substring(true,'3') = " + tmp);
+tmp = "abcd".substring(1,3,2);
+ok(tmp === "bc", "'abcd'.substring(1,3,2) = " + tmp);
+tmp = "abcd".substring();
+ok(tmp === "abcd", "'abcd'.substring() = " + tmp);
+
+tmp = "abcd".slice(1,3);
+ok(tmp === "bc", "'abcd'.slice(1,3) = " + tmp);
+tmp = "abcd".slice(1,-1);
+ok(tmp === "bc", "'abcd'.slice(1,-1) = " + tmp);
+tmp = "abcd".slice(-3,3);
+ok(tmp === "bc", "'abcd'.slice(-3,3) = " + tmp);
+tmp = "abcd".slice(-6,3);
+ok(tmp === "abc", "'abcd'.slice(-6,3) = " + tmp);
+tmp = "abcd".slice(3,1);
+ok(tmp === "", "'abcd'.slice(3,1) = " + tmp);
+tmp = "abcd".slice(true,3);
+ok(tmp === "bc", "'abcd'.slice(true,3) = " + tmp);
+tmp = "abcd".slice();
+ok(tmp === "abcd", "'abcd'.slice() = " + tmp);
+tmp = "abcd".slice(1);
+ok(tmp === "bcd", "'abcd'.slice(1) = " + tmp);
+
+tmp = "abc".concat(["d",1],2,false);
+ok(tmp === "abcd,12false", "concat returned " + tmp);
+var arr = new Array(2,"a");
+arr.concat = String.prototype.concat;
+tmp = arr.concat("d");
+ok(tmp === "2,ad", "arr.concat = " + tmp);
+
+m = "a+bcabc".match("a+");
+ok(typeof(m) === "object", "typeof m is not object");
+ok(m.length === 1, "m.length is not 1");
+ok(m["0"] === "a", "m[0] is not \"ab\"");
+
+r = "- [test] -".replace("[test]", "success");
+ok(r === "- success -", "r = " + r + " expected '- success -'");
+
+r = "- [test] -".replace("[test]", "success", "test");
+ok(r === "- success -", "r = " + r + " expected '- success -'");
+
+r = "test".replace();
+ok(r === "test", "r = " + r + " expected 'test'");
+
+function replaceFunc3(m, off, str) {
+    ok(arguments.length === 3, "arguments.length = " + arguments.length);
+    ok(m === "[test]", "m = " + m + " expected [test1]");
+    ok(off === 1, "off = " + off + " expected 0");
+    ok(str === "-[test]-", "str = " + arguments[3]);
+    return "ret";
+}
+
+r = "-[test]-".replace("[test]", replaceFunc3);
+ok(r === "-ret-", "r = " + r + " expected '-ret-'");
+
+r = "-[test]-".replace("[test]", replaceFunc3, "test");
+ok(r === "-ret-", "r = " + r + " expected '-ret-'");
+
+r = "1,2,3".split(",");
+ok(typeof(r) === "object", "typeof(r) = " + typeof(r));
+ok(r.length === 3, "r.length = " + r.length);
+ok(r[0] === "1", "r[0] = " + r[0]);
+ok(r[1] === "2", "r[1] = " + r[1]);
+ok(r[2] === "3", "r[2] = " + r[2]);
+
+
+r = "1,2,3".split(",*");
+ok(r.length === 1, "r.length = " + r.length);
+ok(r[0] === "1,2,3", "r[0] = " + r[0]);
+
+r = "123".split("");
+ok(r.length === 3, "r.length = " + r.length);
+ok(r[0] === "1", "r[0] = " + r[0]);
+ok(r[1] === "2", "r[1] = " + r[1]);
+ok(r[2] === "3", "r[2] = " + r[2]);
+
+r = "123".split(2);
+ok(r.length === 2, "r.length = " + r.length);
+ok(r[0] === "1", "r[0] = " + r[0]);
+ok(r[1] === "3", "r[1] = " + r[1]);
+
+r = "1,2,".split(",");
+ok(typeof(r) === "object", "typeof(r) = " + typeof(r));
+ok(r.length === 3, "r.length = " + r.length);
+ok(r[0] === "1", "r[0] = " + r[0]);
+ok(r[1] === "2", "r[1] = " + r[1]);
+ok(r[2] === "", "r[2] = " + r[2]);
+
+tmp = "abcd".indexOf("bc",0);
+ok(tmp === 1, "indexOf = " + tmp);
+tmp = "abcd".indexOf("bc",1);
+ok(tmp === 1, "indexOf = " + tmp);
+tmp = "abcd".indexOf("bc");
+ok(tmp === 1, "indexOf = " + tmp);
+tmp = "abcd".indexOf("ac");
+ok(tmp === -1, "indexOf = " + tmp);
+tmp = "abcd".indexOf("bc",2);
+ok(tmp === -1, "indexOf = " + tmp);
+tmp = "abcd".indexOf("a",0);
+ok(tmp === 0, "indexOf = " + tmp);
+tmp = "abcd".indexOf("bc",0,"test");
+ok(tmp === 1, "indexOf = " + tmp);
+tmp = "abcd".indexOf();
+ok(tmp == -1, "indexOf = " + tmp);
+
 var arr = new Array();
 ok(typeof(arr) === "object", "arr () is not object");
 ok((arr.length === 0), "arr.length is not 0");
@@ -55,9 +262,191 @@ ok(arr["2"] === "test", "arr[2] is not \"test\"");
 arr["7"] = true;
 ok((arr.length === 8), "arr.length is not 8");
 
+tmp = "" + [];
+ok(tmp === "", "'' + [] = " + tmp);
+tmp = "" + [1,true];
+ok(tmp === "1,true", "'' + [1,true] = " + tmp);
+
 var arr = new Array(6);
 ok(typeof(arr) === "object", "arr (6) is not object");
 ok((arr.length === 6), "arr.length is not 6");
 ok(arr["0"] === undefined, "arr[0] is not undefined");
+
+ok(arr.push() === 6, "arr.push() !== 6");
+ok(arr.push(1) === 7, "arr.push(1) !== 7");
+ok(arr[6] === 1, "arr[6] != 1");
+ok(arr.length === 7, "arr.length != 10");
+ok(arr.push(true, 'b', false) === 10, "arr.push(true, 'b', false) !== 10");
+ok(arr[8] === "b", "arr[8] != 'b'");
+ok(arr.length === 10, "arr.length != 10");
+
+arr = [3,4,5];
+tmp = arr.pop();
+ok(arr.length === 2, "arr.length = " + arr.length);
+ok(tmp === 5, "pop() = " + tmp);
+tmp = arr.pop(2);
+ok(arr.length === 1, "arr.length = " + arr.length);
+ok(tmp === 4, "pop() = " + tmp);
+tmp = arr.pop();
+ok(arr.length === 0, "arr.length = " + arr.length);
+ok(tmp === 3, "pop() = " + tmp);
+for(tmp in arr)
+    ok(false, "not deleted " + tmp);
+tmp = arr.pop();
+ok(arr.length === 0, "arr.length = " + arr.length);
+ok(tmp === undefined, "tmp = " + tmp);
+arr = [,,,,,];
+tmp = arr.pop();
+ok(arr.length === 5, "arr.length = " + arr.length);
+ok(tmp === undefined, "tmp = " + tmp);
+
+arr = [1,2,null,false,undefined,,"a"];
+
+tmp = arr.join();
+ok(tmp === "1,2,,false,,,a", "arr.join() = " + tmp);
+tmp = arr.join(";");
+ok(tmp === "1;2;;false;;;a", "arr.join(';') = " + tmp);
+tmp = arr.join(";","test");
+ok(tmp === "1;2;;false;;;a", "arr.join(';') = " + tmp);
+tmp = arr.join("");
+ok(tmp === "12falsea", "arr.join('') = " + tmp);
+
+tmp = arr.toString();
+ok(tmp === "1,2,,false,,,a", "arr.toString() = " + tmp);
+tmp = arr.toString("test");
+ok(tmp === "1,2,,false,,,a", "arr.toString() = " + tmp);
+
+arr = [5,true,2,-1,3,false,"2.5"];
+tmp = arr.sort(function(x,y) { return y-x; });
+ok(tmp === arr, "tmp !== arr");
+tmp = [5,3,"2.5",2,true,false,-1];
+for(var i=0; i < arr.length; i++)
+    ok(arr[i] === tmp[i], "arr[" + i + "] = " + arr[i] + " expected " + tmp[i]);
+
+arr = [5,false,2,0,"abc",3,"a",-1];
+tmp = arr.sort();
+ok(tmp === arr, "tmp !== arr");
+tmp = [-1,0,2,3,5,"a","abc",false];
+for(var i=0; i < arr.length; i++)
+    ok(arr[i] === tmp[i], "arr[" + i + "] = " + arr[i] + " expected " + tmp[i]);
+
+arr = ["a", "b", "ab"];
+tmp = ["a", "ab", "b"];
+ok(arr.sort() === arr, "arr.sort() !== arr");
+for(var i=0; i < arr.length; i++)
+    ok(arr[i] === tmp[i], "arr[" + i + "] = " + arr[i] + " expected " + tmp[i]);
+
+var num = new Number(6);
+arr = [0,1,2];
+tmp = arr.concat(3, [4,5], num);
+ok(tmp !== arr, "tmp === arr");
+for(var i=0; i<6; i++)
+    ok(tmp[i] === i, "tmp[" + i + "] = " + tmp[i]);
+ok(tmp[6] === num, "tmp[6] !== num");
+ok(tmp.length === 7, "tmp.length = " + tmp.length);
+
+arr = [].concat();
+ok(arr.length === 0, "arr.length = " + arr.length);
+
+arr = [1,];
+tmp = arr.concat([2]);
+ok(tmp.length === 3, "tmp.length = " + tmp.length);
+ok(tmp[1] === undefined, "tmp[1] = " + tmp[1]);
+
+var num = new Number(2);
+ok(num.toString() === "2", "num(2).toString !== 2");
+var num = new Number();
+ok(num.toString() === "0", "num().toString !== 0");
+
+ok(Number() === 0, "Number() = " + Number());
+ok(Number(false) === 0, "Number(false) = " + Number(false));
+ok(Number("43") === 43, "Number('43') = " + Number("43"));
+
+tmp = Math.min(1);
+ok(tmp === 1, "Math.min(1) = " + tmp);
+
+tmp = Math.min(1, false);
+ok(tmp === 0, "Math.min(1, false) = " + tmp);
+
+tmp = Math.min(1, false, true, null, -3);
+ok(tmp === -3, "Math.min(1, false, true, null, -3) = " + tmp);
+
+tmp = Math.max(1);
+ok(tmp === 1, "Math.max(1) = " + tmp);
+
+tmp = Math.max(true, 0);
+ok(tmp === 1, "Math.max(true, 0) = " + tmp);
+
+tmp = Math.max(-2, false, true, null, 1);
+ok(tmp === 1, "Math.max(-2, false, true, null, 1) = " + tmp);
+
+tmp = Math.round(0.5);
+ok(tmp === 1, "Math.round(0.5) = " + tmp);
+
+tmp = Math.round(-0.5);
+ok(tmp === 0, "Math.round(-0.5) = " + tmp);
+
+tmp = Math.round(1.1);
+ok(tmp === 1, "Math.round(1.1) = " + tmp);
+
+tmp = Math.round(true);
+ok(tmp === 1, "Math.round(true) = " + tmp);
+
+tmp = Math.round(1.1, 3, 4);
+ok(tmp === 1, "Math.round(1.1, 3, 4) = " + tmp);
+
+tmp = Math.ceil(0.5);
+ok(tmp === 1, "Math.ceil(0.5) = " + tmp);
+
+tmp = Math.ceil(-0.5);
+ok(tmp === 0, "Math.ceil(-0.5) = " + tmp);
+
+tmp = Math.ceil(1.1);
+ok(tmp === 2, "Math.round(1.1) = " + tmp);
+
+tmp = Math.ceil(true);
+ok(tmp === 1, "Math.ceil(true) = " + tmp);
+
+tmp = Math.ceil(1.1, 3, 4);
+ok(tmp === 2, "Math.ceil(1.1, 3, 4) = " + tmp);
+
+tmp = Math.abs(3);
+ok(tmp === 3, "Math.abs(3) = " + tmp);
+
+tmp = Math.abs(-3);
+ok(tmp === 3, "Math.abs(-3) = " + tmp);
+
+tmp = Math.abs(true);
+ok(tmp === 1, "Math.abs(true) = " + tmp);
+
+tmp = Math.abs(-3, 2);
+ok(tmp === 3, "Math.abs(-3, 2) = " + tmp);
+
+tmp = Math.pow(2, 2);
+ok(tmp === 4, "Math.pow(2, 2) = " + tmp);
+
+tmp = Math.pow(4, 0.5);
+ok(tmp === 2, "Math.pow(2, 2) = " + tmp);
+
+tmp = Math.pow(2, 2, 3);
+ok(tmp === 4, "Math.pow(2, 2, 3) = " + tmp);
+
+var func = function  (a) {
+        var a = 1;
+        if(a) return;
+    }.toString();
+ok(func.toString() === "function  (a) {\n        var a = 1;\n        if(a) return;\n    }",
+   "func.toString() = " + func.toString());
+ok("" + func === "function  (a) {\n        var a = 1;\n        if(a) return;\n    }",
+   "'' + func.toString() = " + func);
+
+function testFuncToString(x,y) {
+    return x+y;
+}
+
+ok(testFuncToString.toString() === "function testFuncToString(x,y) {\n    return x+y;\n}",
+   "testFuncToString.toString() = " + testFuncToString.toString());
+ok("" + testFuncToString === "function testFuncToString(x,y) {\n    return x+y;\n}",
+   "'' + testFuncToString = " + testFuncToString);
 
 reportSuccess();

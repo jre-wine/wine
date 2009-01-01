@@ -308,8 +308,11 @@ static void test_dib_info(HBITMAP hbm, const void *bits, const BITMAPINFOHEADER 
     buf = HeapAlloc(GetProcessHeap(), 0, bm.bmWidthBytes * bm.bmHeight + 4096);
 
     /* GetBitmapBits returns not 32-bit aligned data */
+    SetLastError(0xdeadbeef);
     ret = GetBitmapBits(hbm, 0, NULL);
-    ok(ret == bm_width_bytes * bm.bmHeight, "%d != %d\n", ret, bm_width_bytes * bm.bmHeight);
+    ok(ret == bm_width_bytes * bm.bmHeight ||
+        broken(ret == 0 && GetLastError() == ERROR_INVALID_PARAMETER), /* Win9x */
+        "%d != %d\n", ret, bm_width_bytes * bm.bmHeight);
 
     memset(buf, 0xAA, bm.bmWidthBytes * bm.bmHeight + 4096);
     ret = GetBitmapBits(hbm, bm.bmWidthBytes * bm.bmHeight + 4096, buf);
@@ -1734,22 +1737,29 @@ static void test_GetDIBits_BI_BITFIELDS(void)
         memset(dibinfo, 0, sizeof(dibinfo_buf));
         dibinfo->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
         dibinfo->bmiHeader.biSizeImage = 0xdeadbeef;
+        SetLastError(0xdeadbeef);
         ret = GetDIBits(hdc, hbm, 0, 0, bits, dibinfo, DIB_RGB_COLORS);
+        if (ret == 0 && GetLastError() == ERROR_INVALID_PARAMETER)
+            win_skip("Win9x/WinMe doesn't handle 0 for the number of scan lines\n");
+        else
+        {
+            ok(ret == 1, "GetDIBits failed ret %u err %u\n",ret,GetLastError());
 
-        ok( !bitmasks[0], "red mask is set\n" );
-        ok( !bitmasks[1], "green mask is set\n" );
-        ok( !bitmasks[2], "blue mask is set\n" );
-        ok( dibinfo->bmiHeader.biSizeImage != 0xdeadbeef, "size image not set\n" );
+            ok( !bitmasks[0], "red mask is set\n" );
+            ok( !bitmasks[1], "green mask is set\n" );
+            ok( !bitmasks[2], "blue mask is set\n" );
+            ok( dibinfo->bmiHeader.biSizeImage != 0xdeadbeef, "size image not set\n" );
 
-        memset(bitmasks, 0, 3*sizeof(DWORD));
-        dibinfo->bmiHeader.biSizeImage = 0xdeadbeef;
-        ret = GetDIBits(hdc, hbm, 0, 0, bits, dibinfo, DIB_RGB_COLORS);
-        ok(ret == 1, "GetDIBits failed ret %u err %u\n",ret,GetLastError());
+            memset(bitmasks, 0, 3*sizeof(DWORD));
+            dibinfo->bmiHeader.biSizeImage = 0xdeadbeef;
+            ret = GetDIBits(hdc, hbm, 0, 0, bits, dibinfo, DIB_RGB_COLORS);
+            ok(ret == 1, "GetDIBits failed ret %u err %u\n",ret,GetLastError());
 
-        ok( bitmasks[0] != 0, "red mask is not set\n" );
-        ok( bitmasks[1] != 0, "green mask is not set\n" );
-        ok( bitmasks[2] != 0, "blue mask is not set\n" );
-        ok( dibinfo->bmiHeader.biSizeImage != 0xdeadbeef, "size image not set\n" );
+            ok( bitmasks[0] != 0, "red mask is not set\n" );
+            ok( bitmasks[1] != 0, "green mask is not set\n" );
+            ok( bitmasks[2] != 0, "blue mask is not set\n" );
+            ok( dibinfo->bmiHeader.biSizeImage != 0xdeadbeef, "size image not set\n" );
+        }
     }
     else skip("not in 16 bpp BI_BITFIELDS mode, skipping that test\n");
 

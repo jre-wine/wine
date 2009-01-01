@@ -135,6 +135,7 @@ static HWND hwnd;
 
 static int init(void) {
     WNDCLASSEX wc;
+    HIMC imc;
 
     wc.cbSize        = sizeof(WNDCLASSEX);
     wc.style         = 0;
@@ -157,6 +158,14 @@ static int init(void) {
                           240, 120, NULL, NULL, GetModuleHandle(0), NULL);
     if (!hwnd)
         return 0;
+
+    imc = ImmGetContext(hwnd);
+    if (!imc)
+    {
+        skip("IME support not implemented\n");
+        return 0;
+    }
+    ImmReleaseContext(hwnd, imc);
 
     ShowWindow(hwnd, SW_SHOWNORMAL);
     UpdateWindow(hwnd);
@@ -245,11 +254,29 @@ static int test_ImmGetCompositionString(void)
     return 0;
 }
 
+static int test_ImmIME(void)
+{
+    HIMC imc;
+
+    imc = ImmGetContext(hwnd);
+    if (imc)
+    {
+        BOOL rc;
+        rc = ImmConfigureIMEA(imc, NULL, IME_CONFIG_REGISTERWORD, NULL);
+        ok (rc == 0, "ImmConfigureIMEA did not fail\n");
+        rc = ImmConfigureIMEW(imc, NULL, IME_CONFIG_REGISTERWORD, NULL);
+        ok (rc == 0, "ImmConfigureIMEW did not fail\n");
+    }
+    ImmReleaseContext(hwnd,imc);
+    return 0;
+}
+
 START_TEST(imm32) {
     if (init())
     {
         test_ImmNotifyIME();
         test_ImmGetCompositionString();
+        test_ImmIME();
     }
     cleanup();
 }

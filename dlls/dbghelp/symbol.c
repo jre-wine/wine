@@ -795,7 +795,7 @@ static BOOL symt_enum_locals_helper(struct module_pair* pair,
 {
     struct symt*        lsym = NULL;
     DWORD               pc = pair->pcs->ctx_frame.InstructionOffset;
-    int                 i;
+    unsigned int        i;
 
     for (i=0; i<vector_length(v); i++)
     {
@@ -1715,4 +1715,50 @@ BOOL WINAPI SymSearchW(HANDLE hProcess, ULONG64 BaseOfDll, DWORD Index,
     HeapFree(GetProcessHeap(), 0, maskA);
 
     return ret;
+}
+
+/******************************************************************
+ *		SymAddSymbol (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymAddSymbol(HANDLE hProcess, ULONG64 BaseOfDll, PCSTR name,
+                         DWORD64 addr, DWORD size, DWORD flags)
+{
+    WCHAR       nameW[MAX_SYM_NAME];
+
+    MultiByteToWideChar(CP_ACP, 0, name, -1, nameW, sizeof(nameW) / sizeof(WCHAR));
+    return SymAddSymbolW(hProcess, BaseOfDll, nameW, addr, size, flags);
+}
+
+/******************************************************************
+ *		SymAddSymbolW (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymAddSymbolW(HANDLE hProcess, ULONG64 BaseOfDll, PCWSTR name,
+                          DWORD64 addr, DWORD size, DWORD flags)
+{
+    struct module_pair  pair;
+
+    TRACE("(%p %s %s %u)\n", hProcess, wine_dbgstr_w(name), wine_dbgstr_longlong(addr), size);
+
+    pair.pcs = process_find_by_handle(hProcess);
+    if (!pair.pcs) return FALSE;
+    pair.requested = module_find_by_addr(pair.pcs, BaseOfDll, DMT_UNKNOWN);
+    if (!module_get_debug(&pair)) return FALSE;
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+/******************************************************************
+ *		SymSetScopeFromAddr (DBGHELP.@)
+ */
+BOOL WINAPI SymSetScopeFromAddr(HANDLE hProcess, ULONG64 addr)
+{
+    struct process*     pcs;
+
+    FIXME("(%p %s): stub\n", hProcess, wine_dbgstr_longlong(addr));
+
+    if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
+    return TRUE;
 }

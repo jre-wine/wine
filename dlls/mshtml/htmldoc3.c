@@ -103,7 +103,6 @@ static HRESULT WINAPI HTMLDocument3_createTextNode(IHTMLDocument3 *iface, BSTR t
                                                    IHTMLDOMNode **newTextNode)
 {
     HTMLDocument *This = HTMLDOC3_THIS(iface);
-    nsIDOMDocument *nsdoc;
     nsIDOMText *nstext;
     HTMLDOMNode *node;
     nsAString text_str;
@@ -111,12 +110,14 @@ static HRESULT WINAPI HTMLDocument3_createTextNode(IHTMLDocument3 *iface, BSTR t
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_w(text), newTextNode);
 
-    nsIWebNavigation_GetDocument(This->nscontainer->navigation, &nsdoc);
+    if(!This->nsdoc) {
+        WARN("NULL nsdoc\n");
+        return E_UNEXPECTED;
+    }
 
     nsAString_Init(&text_str, text);
-    nsres = nsIDOMDocument_CreateTextNode(nsdoc, &text_str, &nstext);
+    nsres = nsIDOMHTMLDocument_CreateTextNode(This->nsdoc, &text_str, &nstext);
     nsAString_Finish(&text_str);
-    nsIDOMDocument_Release(nsdoc);
     if(NS_FAILED(nsres)) {
         ERR("CreateTextNode failed: %08x\n", nsres);
         return E_FAIL;
@@ -133,31 +134,26 @@ static HRESULT WINAPI HTMLDocument3_createTextNode(IHTMLDocument3 *iface, BSTR t
 static HRESULT WINAPI HTMLDocument3_get_documentElement(IHTMLDocument3 *iface, IHTMLElement **p)
 {
     HTMLDocument *This = HTMLDOC3_THIS(iface);
-    nsIDOMDocument *nsdoc;
-    HTMLDOMNode *node;
     nsIDOMElement *nselem = NULL;
+    HTMLDOMNode *node;
     nsresult nsres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    if(!This->nscontainer) {
-        *p = NULL;
-        return S_OK;
+    if(!This->nsdoc) {
+        WARN("NULL nsdoc\n");
+        return E_UNEXPECTED;
     }
 
-    nsres = nsIWebNavigation_GetDocument(This->nscontainer->navigation, &nsdoc);
-    if(NS_FAILED(nsres))
-        ERR("GetDocument failed: %08x\n", nsres);
-
-    if(nsdoc) {
-        nsres = nsIDOMHTMLDocument_GetDocumentElement(nsdoc, &nselem);
-        if(NS_FAILED(nsres))
-            ERR("GetDocumentElement failed: %08x\n", nsres);
+    nsres = nsIDOMHTMLDocument_GetDocumentElement(This->nsdoc, &nselem);
+    if(NS_FAILED(nsres)) {
+        ERR("GetDocumentElement failed: %08x\n", nsres);
+        return E_FAIL;
     }
+
     if(nselem) {
         node = get_node(This, (nsIDOMNode *)nselem, TRUE);
-        nsIDOMDocument_Release(nsdoc);
-
+        nsIDOMElement_Release(nselem);
         IHTMLDOMNode_QueryInterface(HTMLDOMNODE(node), &IID_IHTMLElement, (void**)p);
     }else {
         *p = NULL;
@@ -425,37 +421,36 @@ static HRESULT WINAPI HTMLDocument3_getElementById(IHTMLDocument3 *iface, BSTR v
                                                    IHTMLElement **pel)
 {
     HTMLDocument *This = HTMLDOC3_THIS(iface);
-    nsIDOMDocument *nsdoc = NULL;
-    nsIDOMElement *nselem = NULL;
+    nsIDOMElement *nselem;
     HTMLDOMNode *node;
     nsAString id_str;
     nsresult nsres;
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_w(v), pel);
 
-    *pel = NULL;
-
-    if(!This->nscontainer)
-        return S_OK;
-
-    nsres = nsIWebNavigation_GetDocument(This->nscontainer->navigation, &nsdoc);
-    if(NS_FAILED(nsres) || !nsdoc)
-        return S_OK;
-
-    nsAString_Init(&id_str, v);
-    nsIDOMDocument_GetElementById(nsdoc, &id_str, &nselem);
-    nsIDOMDocument_Release(nsdoc);
-    nsAString_Finish(&id_str);
-
-    if(!nselem) {
-        *pel = NULL;
-        return S_OK;
+    if(!This->nsdoc) {
+        WARN("NULL nsdoc\n");
+        return E_UNEXPECTED;
     }
 
-    node = get_node(This, (nsIDOMNode*)nselem, TRUE);
-    nsIDOMElement_Release(nselem);
+    nsAString_Init(&id_str, v);
+    nsres = nsIDOMHTMLDocument_GetElementById(This->nsdoc, &id_str, &nselem);
+    nsAString_Finish(&id_str);
+    if(FAILED(nsres)) {
+        ERR("GetElementById failed: %08x\n", nsres);
+        return E_FAIL;
+    }
 
-    return IHTMLDOMNode_QueryInterface(HTMLDOMNODE(node), &IID_IHTMLElement, (void**)pel);
+    if(nselem) {
+        node = get_node(This, (nsIDOMNode*)nselem, TRUE);
+        nsIDOMElement_Release(nselem);
+
+        IHTMLDOMNode_QueryInterface(HTMLDOMNODE(node), &IID_IHTMLElement, (void**)pel);
+    }else {
+        *pel = NULL;
+    }
+
+    return S_OK;
 }
 
 

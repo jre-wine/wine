@@ -360,17 +360,31 @@ static void test_Input_whitebox(void)
     DestroyWindow(hWndTest);
 }
 
-static void empty_message_queue(void) {
+/* try to make sure pending X events have been processed before continuing */
+static void empty_message_queue(void)
+{
     MSG msg;
-    while(PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+    int diff = 200;
+    int min_timeout = 50;
+    DWORD time = GetTickCount() + diff;
+
+    while (diff > 0)
+    {
+        if (MsgWaitForMultipleObjects(0, NULL, FALSE, min_timeout, QS_ALLINPUT) == WAIT_TIMEOUT) break;
+        while (PeekMessage(&msg, 0, 0, 0, PM_REMOVE))
+        {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+        diff = time - GetTickCount();
+        min_timeout = 20;
     }
 }
 
 struct transition_s {
     WORD wVk;
     BYTE before_state;
+    BYTE optional;
 };
 
 typedef enum {
@@ -401,6 +415,7 @@ struct sendinput_test_s {
     struct message expected_messages[MAXKEYMESSAGES+1];
 } sendinput_test[] = {
     /* test ALT+F */
+    /* 0 */
     {VK_LMENU, 0, 0, {{VK_MENU, 0x00}, {VK_LMENU, 0x00}, {0}},
         {{WM_SYSKEYDOWN, hook|wparam, VK_LMENU}, {WM_SYSKEYDOWN}, {0}}},
     {'F', 0, 0, {{'F', 0x00}, {0}},
@@ -413,6 +428,7 @@ struct sendinput_test_s {
         {{WM_KEYUP, hook}, {WM_KEYUP}, {0}}},
 
     /* test CTRL+O */
+    /* 4 */
     {VK_LCONTROL, 0, 0, {{VK_CONTROL, 0x00}, {VK_LCONTROL, 0x00}, {0}},
         {{WM_KEYDOWN, hook}, {WM_KEYDOWN}, {0}}},
     {'O', 0, 0, {{'O', 0x00}, {0}},
@@ -423,6 +439,7 @@ struct sendinput_test_s {
         {{WM_KEYUP, hook}, {WM_KEYUP}, {0}}},
 
     /* test ALT+CTRL+X */
+    /* 8 */
     {VK_LMENU, 0, 0, {{VK_MENU, 0x00}, {VK_LMENU, 0x00}, {0}},
         {{WM_SYSKEYDOWN, hook}, {WM_SYSKEYDOWN}, {0}}},
     {VK_LCONTROL, 0, 0, {{VK_CONTROL, 0x00}, {VK_LCONTROL, 0x00}, {0}},
@@ -437,6 +454,7 @@ struct sendinput_test_s {
         {{WM_KEYUP, hook}, {WM_KEYUP}, {0}}},
 
     /* test SHIFT+A */
+    /* 14 */
     {VK_LSHIFT, 0, 0, {{VK_SHIFT, 0x00}, {VK_LSHIFT, 0x00}, {0}},
         {{WM_KEYDOWN, hook}, {WM_KEYDOWN}, {0}}},
     {'A', 0, 0, {{'A', 0x00}, {0}},
@@ -447,16 +465,19 @@ struct sendinput_test_s {
         {{WM_KEYUP, hook}, {WM_KEYUP}, {0}}},
     /* test L-SHIFT & R-SHIFT: */
     /* RSHIFT == LSHIFT */
+    /* 18 */
     {VK_RSHIFT, 0, 0,
-        {{VK_SHIFT, 0x00}, {VK_LSHIFT, 0x00}, {0}},
+     /* recent windows versions (>= w2k3) correctly report an RSHIFT transition */
+       {{VK_SHIFT, 0x00}, {VK_LSHIFT, 0x00, TRUE}, {VK_RSHIFT, 0x00, TRUE}, {0}},
         {{WM_KEYDOWN, hook|wparam, VK_RSHIFT},
         {WM_KEYDOWN}, {0}}},
     {VK_RSHIFT, KEYEVENTF_KEYUP, 0,
-        {{VK_SHIFT, 0x80}, {VK_LSHIFT, 0x80}, {0}},
+       {{VK_SHIFT, 0x80}, {VK_LSHIFT, 0x80, TRUE}, {VK_RSHIFT, 0x80, TRUE}, {0}},
         {{WM_KEYUP, hook, hook|wparam, VK_RSHIFT},
         {WM_KEYUP}, {0}}},
 
     /* LSHIFT | KEYEVENTF_EXTENDEDKEY == RSHIFT */
+    /* 20 */
     {VK_LSHIFT, KEYEVENTF_EXTENDEDKEY, 0,
         {{VK_SHIFT, 0x00}, {VK_RSHIFT, 0x00}, {0}},
         {{WM_KEYDOWN, hook|wparam|lparam, VK_LSHIFT, LLKHF_EXTENDED},
@@ -466,6 +487,7 @@ struct sendinput_test_s {
         {{WM_KEYUP, hook|wparam|lparam, VK_LSHIFT, LLKHF_UP|LLKHF_EXTENDED},
         {WM_KEYUP, wparam|lparam, VK_SHIFT, KF_UP}, {0}}},
     /* RSHIFT | KEYEVENTF_EXTENDEDKEY == RSHIFT */
+    /* 22 */
     {VK_RSHIFT, KEYEVENTF_EXTENDEDKEY, 0,
         {{VK_SHIFT, 0x00}, {VK_RSHIFT, 0x00}, {0}},
         {{WM_KEYDOWN, hook|wparam|lparam, VK_RSHIFT, LLKHF_EXTENDED},
@@ -480,6 +502,7 @@ struct sendinput_test_s {
        winXP+ - Attempts to convert key to L/R key but not always correct
     */
     /* SHIFT == LSHIFT */
+    /* 24 */
     {VK_SHIFT, 0, 0,
         {{VK_SHIFT, 0x00}, {VK_LSHIFT, 0x00}, {0}},
         {{WM_KEYDOWN, hook/* |wparam */|lparam, VK_SHIFT, 0},
@@ -489,6 +512,7 @@ struct sendinput_test_s {
         {{WM_KEYUP, hook/*|wparam*/|lparam, VK_SHIFT, LLKHF_UP},
         {WM_KEYUP, wparam|lparam, VK_SHIFT, KF_UP}, {0}}},
     /* SHIFT | KEYEVENTF_EXTENDEDKEY == RSHIFT */
+    /* 26 */
     {VK_SHIFT, KEYEVENTF_EXTENDEDKEY, 0,
         {{VK_SHIFT, 0x00}, {VK_RSHIFT, 0x00}, {0}},
         {{WM_KEYDOWN, hook/*|wparam*/|lparam, VK_SHIFT, LLKHF_EXTENDED},
@@ -500,6 +524,7 @@ struct sendinput_test_s {
 
     /* test L-CONTROL & R-CONTROL: */
     /* RCONTROL == LCONTROL */
+    /* 28 */
     {VK_RCONTROL, 0, 0,
         {{VK_CONTROL, 0x00}, {VK_LCONTROL, 0x00}, {0}},
         {{WM_KEYDOWN, hook|wparam, VK_RCONTROL},
@@ -509,6 +534,7 @@ struct sendinput_test_s {
         {{WM_KEYUP, hook|wparam, VK_RCONTROL},
         {WM_KEYUP, wparam|lparam, VK_CONTROL, KF_UP}, {0}}},
     /* LCONTROL | KEYEVENTF_EXTENDEDKEY == RCONTROL */
+    /* 30 */
     {VK_LCONTROL, KEYEVENTF_EXTENDEDKEY, 0,
         {{VK_CONTROL, 0x00}, {VK_RCONTROL, 0x00}, {0}},
         {{WM_KEYDOWN, hook|wparam|lparam, VK_LCONTROL, LLKHF_EXTENDED},
@@ -518,6 +544,7 @@ struct sendinput_test_s {
         {{WM_KEYUP, hook|wparam|lparam, VK_LCONTROL, LLKHF_UP|LLKHF_EXTENDED},
         {WM_KEYUP, wparam|lparam, VK_CONTROL, KF_UP|KF_EXTENDED}, {0}}},
     /* RCONTROL | KEYEVENTF_EXTENDEDKEY == RCONTROL */
+    /* 32 */
     {VK_RCONTROL, KEYEVENTF_EXTENDEDKEY, 0,
         {{VK_CONTROL, 0x00}, {VK_RCONTROL, 0x00}, {0}},
         {{WM_KEYDOWN, hook|wparam|lparam, VK_RCONTROL, LLKHF_EXTENDED},
@@ -527,6 +554,7 @@ struct sendinput_test_s {
         {{WM_KEYUP, hook|wparam|lparam, VK_RCONTROL, LLKHF_UP|LLKHF_EXTENDED},
         {WM_KEYUP, wparam|lparam, VK_CONTROL, KF_UP|KF_EXTENDED}, {0}}},
     /* CONTROL == LCONTROL */
+    /* 34 */
     {VK_CONTROL, 0, 0,
         {{VK_CONTROL, 0x00}, {VK_LCONTROL, 0x00}, {0}},
         {{WM_KEYDOWN, hook/*|wparam, VK_CONTROL*/},
@@ -536,6 +564,7 @@ struct sendinput_test_s {
         {{WM_KEYUP, hook/*|wparam, VK_CONTROL*/},
         {WM_KEYUP, wparam|lparam, VK_CONTROL, KF_UP}, {0}}},
     /* CONTROL | KEYEVENTF_EXTENDEDKEY == RCONTROL */
+    /* 36 */
     {VK_CONTROL, KEYEVENTF_EXTENDEDKEY, 0,
         {{VK_CONTROL, 0x00}, {VK_RCONTROL, 0x00}, {0}},
         {{WM_KEYDOWN, hook/*|wparam*/|lparam, VK_CONTROL, LLKHF_EXTENDED},
@@ -547,6 +576,7 @@ struct sendinput_test_s {
 
     /* test L-MENU & R-MENU: */
     /* RMENU == LMENU */
+    /* 38 */
     {VK_RMENU, 0, 0,
         {{VK_MENU, 0x00}, {VK_LMENU, 0x00}, {0}},
         {{WM_SYSKEYDOWN, hook|wparam, VK_RMENU},
@@ -557,6 +587,7 @@ struct sendinput_test_s {
         {WM_SYSKEYUP, wparam|lparam, VK_MENU, KF_UP},
         {WM_SYSCOMMAND}, {0}}},
     /* LMENU | KEYEVENTF_EXTENDEDKEY == RMENU */
+    /* 40 */
     {VK_LMENU, KEYEVENTF_EXTENDEDKEY, 0,
         {{VK_MENU, 0x00}, {VK_RMENU, 0x00}, {0}},
         {{WM_SYSKEYDOWN, hook|wparam|lparam, VK_LMENU, LLKHF_EXTENDED},
@@ -567,6 +598,7 @@ struct sendinput_test_s {
         {WM_SYSKEYUP, wparam|lparam, VK_MENU, KF_UP|KF_EXTENDED},
         {WM_SYSCOMMAND}, {0}}},
     /* RMENU | KEYEVENTF_EXTENDEDKEY == RMENU */
+    /* 42 */
     {VK_RMENU, KEYEVENTF_EXTENDEDKEY, 0,
         {{VK_MENU, 0x00}, {VK_RMENU, 0x00}, {0}},
         {{WM_SYSKEYDOWN, hook|wparam|lparam, VK_RMENU, LLKHF_EXTENDED},
@@ -577,6 +609,7 @@ struct sendinput_test_s {
         {WM_SYSKEYUP, wparam|lparam, VK_MENU, KF_UP|KF_EXTENDED},
         {WM_SYSCOMMAND}, {0}}},
     /* MENU == LMENU */
+    /* 44 */
     {VK_MENU, 0, 0,
         {{VK_MENU, 0x00}, {VK_LMENU, 0x00}, {0}},
         {{WM_SYSKEYDOWN, hook/*|wparam, VK_MENU*/},
@@ -587,6 +620,7 @@ struct sendinput_test_s {
         {WM_SYSKEYUP, wparam|lparam, VK_MENU, KF_UP},
         {WM_SYSCOMMAND}, {0}}},
     /* MENU | KEYEVENTF_EXTENDEDKEY == RMENU */
+    /* 46 */
     {VK_MENU, KEYEVENTF_EXTENDEDKEY, 0,
         {{VK_MENU, 0x00}, {VK_RMENU, 0x00}, {0}},
         {{WM_SYSKEYDOWN, hook/*|wparam*/|lparam, VK_MENU, LLKHF_EXTENDED},
@@ -598,6 +632,7 @@ struct sendinput_test_s {
         {WM_SYSCOMMAND}, {0}}},
 
     /* test LSHIFT & RSHIFT */
+    /* 48 */
     {VK_LSHIFT, 0, 0,
         {{VK_SHIFT, 0x00}, {VK_LSHIFT, 0x00}, {0}},
         {{WM_KEYDOWN, hook|wparam|lparam, VK_LSHIFT, 0},
@@ -637,15 +672,15 @@ static void compare_and_check(int id, BYTE *ks1, BYTE *ks2, struct sendinput_tes
         {
             failcount++;
             todo_wine {
-                ok(matched, "%02d: %02x from %02x -> %02x "
-                   "instead of %02x -> %02x\n", id, t->wVk,
-                   ks1[t->wVk]&0x80, ks2[t->wVk]&0x80, t->before_state,
+                ok(matched, "%2d (%x/%x): %02x from %02x -> %02x "
+                   "instead of %02x -> %02x\n", id, test->wVk, test->dwFlags,
+                   t->wVk, ks1[t->wVk]&0x80, ks2[t->wVk]&0x80, t->before_state,
                    ~t->before_state&0x80);
             }
         } else {
-            ok(matched, "%02d: %02x from %02x -> %02x "
-               "instead of %02x -> %02x\n", id, t->wVk,
-               ks1[t->wVk]&0x80, ks2[t->wVk]&0x80, t->before_state,
+            ok(matched || t->optional, "%2d (%x/%x): %02x from %02x -> %02x "
+               "instead of %02x -> %02x\n", id, test->wVk, test->dwFlags,
+               t->wVk, ks1[t->wVk]&0x80, ks2[t->wVk]&0x80, t->before_state,
                ~t->before_state&0x80);
         }
         ks2[t->wVk] = ks1[t->wVk]; /* clear the match */
@@ -656,11 +691,12 @@ static void compare_and_check(int id, BYTE *ks1, BYTE *ks2, struct sendinput_tes
         {
             failcount++;
             todo_wine
-                ok(FALSE, "%02d: %02x from %02x -> %02x unexpected\n", id, i, ks1[i], ks2[i]);
+                ok(FALSE, "%2d (%x/%x): %02x from %02x -> %02x unexpected\n",
+                   id, test->wVk, test->dwFlags, i, ks1[i], ks2[i]);
         }
         else
-            ok(ks2[i] == ks1[i], "%02d: %02x from %02x -> %02x unexpected\n",
-               id, i, ks1[i], ks2[i]);
+            ok(ks2[i] == ks1[i], "%2d (%x/%x): %02x from %02x -> %02x unexpected\n",
+               id, test->wVk, test->dwFlags, i, ks1[i], ks2[i]);
 
     while (expected->message && actual_cnt < sent_messages_cnt)
     {
@@ -669,8 +705,8 @@ static void compare_and_check(int id, BYTE *ks1, BYTE *ks2, struct sendinput_tes
         if (expected->message == actual->message)
         {
             ok((expected->flags & hook) == (actual->flags & hook),
-               "%x/%x: the msg 0x%04x should have been sent by a hook\n",
-               test->wVk, test->dwFlags, expected->message);
+               "%2d (%x/%x): the msg 0x%04x should have been sent by a hook\n",
+               id, test->wVk, test->dwFlags, expected->message);
 
             if (expected->flags & wparam)
             {
@@ -678,13 +714,13 @@ static void compare_and_check(int id, BYTE *ks1, BYTE *ks2, struct sendinput_tes
                 {
                     failcount++;
                     todo_wine
-                        ok(FALSE, "%x/%x: in msg 0x%04x expecting wParam 0x%lx got 0x%lx\n",
-                           test->wVk, test->dwFlags, expected->message, expected->wParam, actual->wParam);
+                        ok(FALSE, "%2d (%x/%x): in msg 0x%04x expecting wParam 0x%lx got 0x%lx\n",
+                           id, test->wVk, test->dwFlags, expected->message, expected->wParam, actual->wParam);
                 }
                 else
                     ok(expected->wParam == actual->wParam,
-                       "%x/%x: in msg 0x%04x expecting wParam 0x%lx got 0x%lx\n",
-                       test->wVk, test->dwFlags, expected->message, expected->wParam, actual->wParam);
+                       "%2d (%x/%x): in msg 0x%04x expecting wParam 0x%lx got 0x%lx\n",
+                       id, test->wVk, test->dwFlags, expected->message, expected->wParam, actual->wParam);
             }
             if (expected->flags & lparam)
             {
@@ -692,13 +728,13 @@ static void compare_and_check(int id, BYTE *ks1, BYTE *ks2, struct sendinput_tes
                 {
                     failcount++;
                     todo_wine
-                        ok(FALSE, "%x/%x: in msg 0x%04x expecting lParam 0x%lx got 0x%lx\n",
-                           test->wVk, test->dwFlags, expected->message, expected->lParam, actual->lParam);
+                        ok(FALSE, "%2d (%x/%x): in msg 0x%04x expecting lParam 0x%lx got 0x%lx\n",
+                           id, test->wVk, test->dwFlags, expected->message, expected->lParam, actual->lParam);
                 }
                 else
                     ok(expected->lParam == actual->lParam,
-                       "%x/%x: in msg 0x%04x expecting lParam 0x%lx got 0x%lx\n",
-                       test->wVk, test->dwFlags, expected->message, expected->lParam, actual->lParam);
+                       "%2d (%x/%x): in msg 0x%04x expecting lParam 0x%lx got 0x%lx\n",
+                       id, test->wVk, test->dwFlags, expected->message, expected->lParam, actual->lParam);
             }
         }
         else if (expected->flags & optional)
@@ -711,13 +747,13 @@ static void compare_and_check(int id, BYTE *ks1, BYTE *ks2, struct sendinput_tes
             failcount++;
             todo_wine
             ok(FALSE,
-               "%x/%x: the msg 0x%04x was expected, but got msg 0x%04x instead\n",
-               test->wVk, test->dwFlags, expected->message, actual->message);
+               "%2d (%x/%x): the msg 0x%04x was expected, but got msg 0x%04x instead\n",
+               id, test->wVk, test->dwFlags, expected->message, actual->message);
         }
         else
             ok(FALSE,
-               "%x/%x: the msg 0x%04x was expected, but got msg 0x%04x instead\n",
-               test->wVk, test->dwFlags, expected->message, actual->message);
+               "%2d (%x/%x): the msg 0x%04x was expected, but got msg 0x%04x instead\n",
+               id, test->wVk, test->dwFlags, expected->message, actual->message);
 
         actual_cnt++;
         expected++;
@@ -733,17 +769,17 @@ static void compare_and_check(int id, BYTE *ks1, BYTE *ks2, struct sendinput_tes
         {
             failcount++;
             todo_wine
-                ok(FALSE, "%x/%x: the msg sequence is not complete: expected %04x - actual %04x\n",
-                   test->wVk, test->dwFlags, expected->message, sent_messages[actual_cnt].message);
+                ok(FALSE, "%2d (%x/%x): the msg sequence is not complete: expected %04x - actual %04x\n",
+                   id, test->wVk, test->dwFlags, expected->message, sent_messages[actual_cnt].message);
         }
         else
-            ok(FALSE, "%x/%x: the msg sequence is not complete: expected %04x - actual %04x\n",
-               test->wVk, test->dwFlags, expected->message, sent_messages[actual_cnt].message);
+            ok(FALSE, "%2d (%x/%x): the msg sequence is not complete: expected %04x - actual %04x\n",
+               id, test->wVk, test->dwFlags, expected->message, sent_messages[actual_cnt].message);
     }
 
     if( test->_todo_wine && !failcount) /* succeeded yet marked todo */
         todo_wine
-            ok(TRUE, "%x/%x: marked \"todo_wine\" but succeeds\n", test->wVk, test->dwFlags);
+            ok(TRUE, "%2d (%x/%x): marked \"todo_wine\" but succeeds\n", id, test->wVk, test->dwFlags);
 
     sent_messages_cnt = 0;
 }
@@ -1008,19 +1044,19 @@ static void test_GetMouseMovePointsEx(void)
     SetLastError(MYERROR);
     retval = pGetMouseMovePointsEx(0, &in, out, BUFLIM, GMMP_USE_DISPLAY_POINTS);
     ok(retval == -1, "expected GetMouseMovePointsEx to fail, got %d\n", retval);
-    ok(ERROR_INVALID_PARAMETER == GetLastError(),
+    ok(GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == MYERROR,
        "expected error ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
 
     SetLastError(MYERROR);
     retval = pGetMouseMovePointsEx(sizeof(MOUSEMOVEPOINT)-1, &in, out, BUFLIM, GMMP_USE_DISPLAY_POINTS);
     ok(retval == -1, "expected GetMouseMovePointsEx to fail, got %d\n", retval);
-    ok(ERROR_INVALID_PARAMETER == GetLastError(),
+    ok(GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == MYERROR,
        "expected error ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
 
     SetLastError(MYERROR);
     retval = pGetMouseMovePointsEx(sizeof(MOUSEMOVEPOINT)+1, &in, out, BUFLIM, GMMP_USE_DISPLAY_POINTS);
     ok(retval == -1, "expected GetMouseMovePointsEx to fail, got %d\n", retval);
-    ok(ERROR_INVALID_PARAMETER == GetLastError(),
+    ok(GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == MYERROR,
        "expected error ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
 
     /* test second and third parameter
@@ -1028,7 +1064,7 @@ static void test_GetMouseMovePointsEx(void)
     SetLastError(MYERROR);
     retval = pGetMouseMovePointsEx(sizeof(MOUSEMOVEPOINT), NULL, out, BUFLIM, GMMP_USE_DISPLAY_POINTS);
     ok(retval == -1, "expected GetMouseMovePointsEx to fail, got %d\n", retval);
-    ok(ERROR_NOACCESS == GetLastError(),
+    ok(GetLastError() == ERROR_NOACCESS || GetLastError() == MYERROR,
        "expected error ERROR_NOACCESS, got %u\n", GetLastError());
 
     SetLastError(MYERROR);
@@ -1059,7 +1095,7 @@ static void test_GetMouseMovePointsEx(void)
     count = -1;
     retval = pGetMouseMovePointsEx(sizeof(MOUSEMOVEPOINT), &in, out, count, GMMP_USE_DISPLAY_POINTS);
     ok(retval == count, "expected GetMouseMovePointsEx to fail, got %d\n", retval);
-    ok(ERROR_INVALID_PARAMETER == GetLastError(),
+    ok(GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == MYERROR,
        "expected error ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
 
     SetLastError(MYERROR);
@@ -1083,7 +1119,7 @@ static void test_GetMouseMovePointsEx(void)
     SetLastError(MYERROR);
     retval = pGetMouseMovePointsEx(sizeof(MOUSEMOVEPOINT), &in, out, BUFLIM+1, GMMP_USE_DISPLAY_POINTS);
     ok(retval == -1, "expected GetMouseMovePointsEx to fail, got %d\n", retval);
-    ok(ERROR_INVALID_PARAMETER == GetLastError(),
+    ok(GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == MYERROR,
        "expected error ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
 
     /* it was not possible to force an error with the fifth parameter on win2k */
@@ -1092,25 +1128,25 @@ static void test_GetMouseMovePointsEx(void)
     SetLastError(MYERROR);
     retval = pGetMouseMovePointsEx(sizeof(MOUSEMOVEPOINT)-1, NULL, out, BUFLIM, GMMP_USE_DISPLAY_POINTS);
     ok(retval == -1, "expected GetMouseMovePointsEx to fail, got %d\n", retval);
-    ok(ERROR_INVALID_PARAMETER == GetLastError(),
+    ok(GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == MYERROR,
        "expected error ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
 
     SetLastError(MYERROR);
     retval = pGetMouseMovePointsEx(sizeof(MOUSEMOVEPOINT)-1, &in, NULL, BUFLIM, GMMP_USE_DISPLAY_POINTS);
     ok(retval == -1, "expected GetMouseMovePointsEx to fail, got %d\n", retval);
-    ok(ERROR_INVALID_PARAMETER == GetLastError(),
+    ok(GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == MYERROR,
        "expected error ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
 
     SetLastError(MYERROR);
     retval = pGetMouseMovePointsEx(sizeof(MOUSEMOVEPOINT), NULL, out, BUFLIM+1, GMMP_USE_DISPLAY_POINTS);
     ok(retval == -1, "expected GetMouseMovePointsEx to fail, got %d\n", retval);
-    ok(ERROR_INVALID_PARAMETER == GetLastError(),
+    ok(GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == MYERROR,
        "expected error ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
 
     SetLastError(MYERROR);
     retval = pGetMouseMovePointsEx(sizeof(MOUSEMOVEPOINT), &in, NULL, BUFLIM+1, GMMP_USE_DISPLAY_POINTS);
     ok(retval == -1, "expected GetMouseMovePointsEx to fail, got %d\n", retval);
-    ok(ERROR_INVALID_PARAMETER == GetLastError(),
+    ok(GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == MYERROR,
        "expected error ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
 
 #undef BUFLIM

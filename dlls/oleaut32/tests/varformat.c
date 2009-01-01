@@ -67,7 +67,7 @@ static inline int strcmpW( const WCHAR *str1, const WCHAR *str2 )
   if (hres == S_OK) { \
     ok(str && strcmpW(str,szResult1) == 0, \
        "VarFormatNumber (vt %d): string different\n", vt); \
-    if (str) SysFreeString(str); \
+    SysFreeString(str); \
   }
 
 static void test_VarFormatNumber(void)
@@ -137,7 +137,7 @@ static const char *szVarFmtFail = "VT %d|0x%04x Format %s: expected 0x%08x, '%s'
   ok(hres == ret && (FAILED(ret) || !strcmp(buff, str)), \
      szVarFmtFail, \
      (vt)&VT_TYPEMASK,(vt)&~VT_TYPEMASK,fmt?fmt:"<null>",ret,str,hres,buff); \
-  if (out) SysFreeString(out); \
+  SysFreeString(out); \
   } while(0)
 
 typedef struct tagFMTRES
@@ -328,6 +328,8 @@ static void test_VarFormat(void)
   VARFMT(VT_I4,V_I4,1,"0,000,000,000",S_OK,"0,000,000,001");
   VARFMT(VT_I4,V_I4,123456789,"#,#.#",S_OK,"123,456,789.");
   VARFMT(VT_I4,V_I4,123456789,"###, ###, ###",S_OK,"123, 456, 789");
+  VARFMT(VT_I4,V_I4,1,"#;-#",S_OK,"1");
+  VARFMT(VT_I4,V_I4,-1,"#;-#",S_OK,"-1");
   VARFMT(VT_R8,V_R8,1.23456789,"0#.0#0#0#0#0",S_OK,"01.234567890");
   VARFMT(VT_R8,V_R8,1.2,"0#.0#0#0#0#0",S_OK,"01.200000000");
   VARFMT(VT_R8,V_R8,9.87654321,"#0.#0#0#0#0#",S_OK,"9.87654321");

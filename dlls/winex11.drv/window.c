@@ -105,11 +105,17 @@ static BOOL is_window_managed( HWND hwnd, UINT swp_flags, const RECT *window_rec
     if (style & WS_THICKFRAME) return TRUE;
     if (style & WS_POPUP)
     {
+        HMONITOR hmon;
+        MONITORINFO mi;
+
         /* popup with sysmenu == caption are managed */
         if (style & WS_SYSMENU) return TRUE;
         /* full-screen popup windows are managed */
-        if (window_rect->left <= 0 && window_rect->right >= screen_width &&
-            window_rect->top <= 0 && window_rect->bottom >= screen_height)
+        hmon = MonitorFromWindow( hwnd, MONITOR_DEFAULTTOPRIMARY );
+        mi.cbSize = sizeof( mi );
+        GetMonitorInfoW( hmon, &mi );
+        if (window_rect->left <= mi.rcWork.left && window_rect->right >= mi.rcWork.right &&
+            window_rect->top <= mi.rcWork.top && window_rect->bottom >= mi.rcWork.bottom)
             return TRUE;
     }
     /* application windows are managed */
@@ -2204,9 +2210,18 @@ int X11DRV_SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL redraw )
  */
 void X11DRV_SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha, DWORD flags )
 {
-    Window win = X11DRV_get_whole_window( hwnd );
+    struct x11drv_win_data *data = X11DRV_get_win_data( hwnd );
 
-    if (win) sync_window_opacity( thread_display(), win, key, alpha, flags );
+    if (data)
+    {
+        if (data->whole_window)
+            sync_window_opacity( thread_display(), data->whole_window, key, alpha, flags );
+    }
+    else
+    {
+        Window win = X11DRV_get_whole_window( hwnd );
+        if (win) sync_window_opacity( gdi_display, win, key, alpha, flags );
+    }
 }
 
 

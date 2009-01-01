@@ -398,7 +398,7 @@
 @ stub GdipGetTextContrast
 @ stdcall GdipGetTextRenderingHint(ptr ptr)
 @ stub GdipGetTextureImage
-@ stub GdipGetTextureTransform
+@ stdcall GdipGetTextureTransform(ptr ptr)
 @ stub GdipGetTextureWrapMode
 @ stub GdipGetVisibleClipBounds
 @ stub GdipGetVisibleClipBoundsI
@@ -427,8 +427,8 @@
 @ stub GdipIsVisibleClipEmpty
 @ stdcall GdipIsVisiblePathPoint(ptr long long ptr ptr)
 @ stdcall GdipIsVisiblePathPointI(ptr long long ptr ptr)
-@ stub GdipIsVisiblePoint
-@ stub GdipIsVisiblePointI
+@ stdcall GdipIsVisiblePoint(ptr long long ptr)
+@ stdcall GdipIsVisiblePointI(ptr long long ptr)
 @ stub GdipIsVisibleRect
 @ stub GdipIsVisibleRectI
 @ stub GdipIsVisibleRegionPoint
@@ -467,8 +467,8 @@
 @ stdcall GdipPrivateAddFontFile(ptr wstr)
 @ stub GdipPrivateAddMemoryFont
 @ stub GdipRecordMetafile
-@ stub GdipRecordMetafileFileName
-@ stub GdipRecordMetafileFileNameI
+@ stdcall GdipRecordMetafileFileName(wstr long long ptr long wstr ptr)
+@ stdcall GdipRecordMetafileFileNameI(wstr long long ptr long wstr ptr)
 @ stub GdipRecordMetafileI
 @ stub GdipRecordMetafileStream
 @ stub GdipRecordMetafileStreamI
@@ -481,7 +481,7 @@
 @ stdcall GdipResetPath(ptr)
 @ stub GdipResetPathGradientTransform
 @ stub GdipResetPenTransform
-@ stub GdipResetTextureTransform
+@ stdcall GdipResetTextureTransform(ptr)
 @ stdcall GdipResetWorldTransform(ptr)
 @ stdcall GdipRestoreGraphics(ptr long)
 @ stdcall GdipReversePath(ptr)
@@ -508,8 +508,8 @@
 @ stdcall GdipSetAdjustableArrowCapWidth(ptr long)
 @ stub GdipSetClipGraphics
 @ stub GdipSetClipHrgn
-@ stub GdipSetClipPath
-@ stub GdipSetClipRect
+@ stdcall GdipSetClipPath(ptr ptr long)
+@ stdcall GdipSetClipRect(ptr long long long long long)
 @ stdcall GdipSetClipRectI(ptr long long long long long)
 @ stdcall GdipSetClipRegion(ptr ptr long)
 @ stdcall GdipSetCompositingMode(ptr long)
@@ -548,7 +548,7 @@
 @ stdcall GdipSetPageScale(ptr long)
 @ stdcall GdipSetPageUnit(ptr long)
 @ stdcall GdipSetPathFillMode(ptr long)
-@ stub GdipSetPathGradientBlend
+@ stdcall GdipSetPathGradientBlend(ptr ptr ptr long)
 @ stdcall GdipSetPathGradientCenterColor(ptr long)
 @ stdcall GdipSetPathGradientCenterPoint(ptr ptr)
 @ stdcall GdipSetPathGradientCenterPointI(ptr ptr)

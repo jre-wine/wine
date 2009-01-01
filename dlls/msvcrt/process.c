@@ -96,7 +96,7 @@ static void msvcrt_search_executable(const MSVCRT_wchar_t *name, MSVCRT_wchar_t 
     if (path_len + name_len <= MAX_PATH - 2)
     {
       memcpy(buffer, env, path_len * sizeof(MSVCRT_wchar_t));
-      if (buffer[path_len] != '/' || buffer[path_len] != '\\')
+      if (buffer[path_len] != '/' && buffer[path_len] != '\\')
       {
         buffer[path_len++] = '\\';
         buffer[path_len] = '\0';
@@ -1125,9 +1125,8 @@ MSVCRT_FILE* CDECL MSVCRT__wpopen(const MSVCRT_wchar_t* command, const MSVCRT_wc
   strcpyW(fullcmd, comspec);
   strcatW(fullcmd, flag);
   strcatW(fullcmd, command);
-  HeapFree(GetProcessHeap(), 0, comspec);
 
-  if (msvcrt_spawn(MSVCRT__P_NOWAIT, NULL, fullcmd, NULL, 1) == -1)
+  if (msvcrt_spawn(MSVCRT__P_NOWAIT, comspec, fullcmd, NULL, 1) == -1)
   {
     MSVCRT__close(fds[fdToOpen]);
     ret = NULL;
@@ -1138,6 +1137,7 @@ MSVCRT_FILE* CDECL MSVCRT__wpopen(const MSVCRT_wchar_t* command, const MSVCRT_wc
     if (!ret)
       MSVCRT__close(fds[fdToOpen]);
   }
+  HeapFree(GetProcessHeap(), 0, comspec);
   HeapFree(GetProcessHeap(), 0, fullcmd);
   MSVCRT__dup2(fdStdHandle, fdToDup);
   MSVCRT__close(fdStdHandle);

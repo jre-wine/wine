@@ -109,7 +109,7 @@ static const MSICOLUMNINFO _Columns_cols[4] = {
 };
 
 static const MSICOLUMNINFO _Tables_cols[1] = {
-    { szTables,  1, szName,   MSITYPE_VALID | MSITYPE_STRING | 64, 0, 0, NULL },
+    { szTables,  1, szName,   MSITYPE_VALID | MSITYPE_STRING | MSITYPE_KEY | 64, 0, 0, NULL },
 };
 
 #define MAX_STREAM_NAME 0x1f
@@ -585,6 +585,8 @@ static UINT table_get_column_info( MSIDATABASE *db, LPCWSTR name, MSICOLUMNINFO 
     if( r != ERROR_SUCCESS )
         return r;
 
+    *pcount = column_count;
+
     /* if there's no columns, there's no table */
     if( column_count == 0 )
         return ERROR_INVALID_PARAMETER;
@@ -603,7 +605,6 @@ static UINT table_get_column_info( MSIDATABASE *db, LPCWSTR name, MSICOLUMNINFO 
     }
 
     *pcols = columns;
-    *pcount = column_count;
 
     return r;
 }
@@ -1034,6 +1035,9 @@ static void msi_update_table_columns( MSIDATABASE *db, LPCWSTR name )
     msi_free( table->colinfo );
     table_get_column_info( db, name, &table->colinfo, &table->col_count );
 
+    if (!table->col_count)
+        return;
+
     size = msi_table_get_row_size( db, table->colinfo, table->col_count );
     offset = table->colinfo[table->col_count - 1].offset;
 
@@ -1073,20 +1077,12 @@ BOOL TABLE_Exists( MSIDATABASE *db, LPCWSTR name )
     count = table->row_count;
     for( i=0; i<count; i++ )
         if( table->data[ i ][ 0 ] == table_id )
-            break;
-
-    if (i!=count)
-        return TRUE;
+            return TRUE;
 
     count = table->nonpersistent_row_count;
     for( i=0; i<count; i++ )
         if( table->nonpersistent_data[ i ][ 0 ] == table_id )
-            break;
-
-    if (i!=count)
-        return TRUE;
-
-    TRACE("Searched %d tables, but %d was not found\n", count, table_id );
+            return TRUE;
 
     return FALSE;
 }
@@ -2058,6 +2054,53 @@ static UINT TABLE_sort(struct tagMSIVIEW *view, column_info *columns)
     return ERROR_SUCCESS;
 }
 
+static UINT TABLE_drop(struct tagMSIVIEW *view)
+{
+    MSITABLEVIEW *tv = (MSITABLEVIEW*)view;
+    MSIVIEW *tables = NULL;
+    MSIRECORD *rec = NULL;
+    UINT r, row;
+    INT i;
+
+    TRACE("dropping table %s\n", debugstr_w(tv->name));
+
+    for (i = tv->table->col_count - 1; i >= 0; i--)
+    {
+        r = TABLE_remove_column(view, tv->table->colinfo[i].tablename,
+                                tv->table->colinfo[i].number);
+        if (r != ERROR_SUCCESS)
+            return r;
+    }
+
+    rec = MSI_CreateRecord(1);
+    if (!rec)
+        return ERROR_OUTOFMEMORY;
+
+    MSI_RecordSetStringW(rec, 1, tv->name);
+
+    r = TABLE_CreateView(tv->db, szTables, &tables);
+    if (r != ERROR_SUCCESS)
+        return r;
+
+    r = msi_table_find_row((MSITABLEVIEW *)tables, rec, &row);
+    if (r != ERROR_SUCCESS)
+        goto done;
+
+    r = TABLE_delete_row(tables, row);
+    if (r != ERROR_SUCCESS)
+        goto done;
+
+    list_remove(&tv->table->entry);
+    free_table(tv->table);
+    TABLE_delete(view);
+
+done:
+    msiobj_release(&rec->hdr);
+    tables->ops->delete(tables);
+
+    return r;
+}
+
 static const MSIVIEWOPS table_ops =
 {
     TABLE_fetch_int,
@@ -2078,6 +2121,7 @@ static const MSIVIEWOPS table_ops =
     TABLE_add_column,
     TABLE_remove_column,
     TABLE_sort,
+    TABLE_drop,
 };
 
 UINT TABLE_CreateView( MSIDATABASE *db, LPCWSTR name, MSIVIEW **view )
