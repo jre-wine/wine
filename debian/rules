@@ -281,8 +281,8 @@ ifeq (,$(AMD64_COPY))
 	dh_install -s --list-missing
 
 	# patch marlett.ttf due to fontforge bug #458234
-	mensis -script debian/marlett.mensis debian/libwine/usr/share/wine/fonts/marlett.ttf
-	rm -f debian/libwine/usr/share/wine/fonts/marlett.ttf~
+	#mensis -script debian/marlett.mensis debian/libwine/usr/share/wine/fonts/marlett.ttf
+	#rm -f debian/libwine/usr/share/wine/fonts/marlett.ttf~
 
 	# split up libwine
 ifeq ($(DEB_HOST_GNU_SYSTEM),linux-gnu)
