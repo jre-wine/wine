@@ -773,4 +773,102 @@ try {
     ok(false, "deleteTest not throwed exception?");
 }catch(ex) {}
 
+if (false)
+    if (true)
+        ok(false, "if evaluated");
+    else
+        ok(false, "else should be associated with nearest if statement");
+
+if (true)
+    if (false)
+        ok(false, "if evaluated");
+    else
+        ok(true, "else should be associated with nearest if statement");
+
+ok(isNaN(NaN) === true, "isNaN(NaN) !== true");
+ok(isNaN(0.5) === false, "isNaN(0.5) !== false");
+ok(isNaN(Infinity) === false, "isNaN(Infinity) !== false");
+ok(isNaN() === true, "isNaN() !== true");
+ok(isNaN(NaN, 0) === true, "isNaN(NaN, 0) !== true");
+ok(isNaN(0.5, NaN) === false, "isNaN(0.5, NaN) !== false");
+ok(isNaN(+undefined) === true, "isNaN(+undefined) !== true");
+
+ok(isFinite(0.5) === true, "isFinite(0.5) !== true");
+ok(isFinite(Infinity) === false, "isFinite(Infinity) !== fals");
+ok(isFinite(-Infinity) === false, "isFinite(Infinity) !== fals");
+ok(isFinite(NaN) === false, "isFinite(NaN) !== false");
+ok(isFinite(0.5, NaN) === true, "isFinite(0.5, NaN) !== true");
+ok(isFinite(NaN, 0.5) === false, "isFinite(NaN, 0.5) !== false");
+ok(isFinite() === false, "isFinite() !== false");
+
+ok((1 < NaN) === false, "(1 < NaN) !== false");
+ok((1 > NaN) === false, "(1 > NaN) !== false");
+ok((1 <= NaN) === false, "(1 <= NaN) !== false");
+ok((1 >= NaN) === false, "(1 >= NaN) !== false");
+ok((NaN < 1) === false, "(NaN < 1) !== false");
+ok((NaN > 1) === false, "(NaN > 1) !== false");
+ok((NaN <= 1) === false, "(NaN <= 1) !== false");
+ok((NaN >= 1) === false, "(NaN >= 1) !== false");
+ok((Infinity < 2) === false, "(Infinity < 2) !== false");
+ok((Infinity > 2) === true, "(Infinity > 2) !== true");
+ok((-Infinity < 2) === true, "(-Infinity < 2) !== true");
+
+ok(isNaN(+"test") === true, "isNaN(+'test') !== true");
+ok(isNaN(+"123t") === true, "isNaN(+'123t') !== true");
+ok(isNaN(+"Infinity x") === true, "isNaN(+'Infinity x') !== true");
+ok(+"Infinity" === Infinity, "+'Infinity' !== Infinity");
+ok(+" Infinity " === Infinity, "+' Infinity ' !== Infinity");
+ok(+"-Infinity" === -Infinity, "+'-Infinity' !== -Infinity");
+
+ok((NaN !== NaN) === true, "(NaN !== NaN) !== true");
+ok((NaN === NaN) === false, "(NaN === NaN) !== false");
+ok((Infinity !== NaN) === true, "(Infinity !== NaN) !== true");
+ok((Infinity !== NaN) === true, "(Infinity !== NaN) !== true");
+ok((0 === NaN) === false, "(0 === NaN) !== false");
+
+ok((NaN != NaN) === true, "(NaN !== NaN) != true");
+ok((NaN == NaN) === false, "(NaN === NaN) != false");
+ok((Infinity != NaN) === true, "(Infinity != NaN) !== true");
+ok((Infinity != NaN) === true, "(Infinity != NaN) !== true");
+ok((0 == NaN) === false, "(0 === NaN) != false");
+
+
+ok(typeof(testFunc2) === "function", "typeof(testFunc2) = " + typeof(testFunc2));
+tmp = testFunc2(1);
+ok(tmp === 2, "testFunc2(1) = " + tmp);
+function testFunc2(x) { return x+1; }
+
+ok(typeof(testFunc3) === "function", "typeof(testFunc3) = " + typeof(testFunc3));
+tmp = testFunc3(1);
+ok(tmp === 3, "testFunc3(1) = " + tmp);
+tmp = function testFunc3(x) { return x+2; };
+
+tmp = testFunc4(1);
+ok(tmp === 5, "testFunc4(1) = " + tmp);
+tmp = function testFunc4(x) { return x+3; };
+tmp = testFunc4(1);
+testFunc4 = 1;
+ok(testFunc4 === 1, "testFunc4 = " + testFunc4);
+ok(tmp === 5, "testFunc4(1) = " + tmp);
+tmp = function testFunc4(x) { return x+4; };
+ok(testFunc4 === 1, "testFunc4 = " + testFunc4);
+
+function testEmbededFunctions() {
+    ok(typeof(testFunc5) === "function", "typeof(testFunc5) = " + typeof(testFunc5));
+    tmp = testFunc5(1);
+    ok(tmp === 3, "testFunc5(1) = " + tmp);
+    tmp = function testFunc5(x) { return x+2; };
+
+    tmp = testFunc6(1);
+    ok(tmp === 5, "testFunc6(1) = " + tmp);
+    tmp = function testFunc6(x) { return x+3; };
+    tmp = testFunc6(1);
+    ok(tmp === 5, "testFunc6(1) = " + tmp);
+    tmp = function testFunc6(x) { return x+4; };
+    testFunc6 = 1;
+    ok(testFunc6 === 1, "testFunc4 = " + testFunc6);
+}
+
+testEmbededFunctions();
+
 reportSuccess();

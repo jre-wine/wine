@@ -128,7 +128,8 @@ static BOOL SOFTPUB_GetSIP(CRYPT_PROVIDER_DATA *data)
 /* Assumes data->u.pPDSip has been loaded, and data->u.pPDSip->pSip allocated.
  * Calls data->u.pPDSip->pSip->pfGet to construct data->hMsg.
  */
-static BOOL SOFTPUB_GetMessageFromFile(CRYPT_PROVIDER_DATA *data)
+static BOOL SOFTPUB_GetMessageFromFile(CRYPT_PROVIDER_DATA *data, HANDLE file,
+ LPCWSTR filePath)
 {
     BOOL ret;
     LPBYTE buf = NULL;
@@ -144,9 +145,8 @@ static BOOL SOFTPUB_GetMessageFromFile(CRYPT_PROVIDER_DATA *data)
 
     data->u.pPDSip->psSipSubjectInfo->cbSize = sizeof(SIP_SUBJECTINFO);
     data->u.pPDSip->psSipSubjectInfo->pgSubjectType = &data->u.pPDSip->gSubject;
-    data->u.pPDSip->psSipSubjectInfo->hFile = data->pWintrustData->u.pFile->hFile;
-    data->u.pPDSip->psSipSubjectInfo->pwsFileName =
-     data->pWintrustData->u.pFile->pcwszFilePath;
+    data->u.pPDSip->psSipSubjectInfo->hFile = file;
+    data->u.pPDSip->psSipSubjectInfo->pwsFileName = filePath;
     data->u.pPDSip->psSipSubjectInfo->hProv = data->hProv;
     ret = data->u.pPDSip->pSip->pfGet(data->u.pPDSip->psSipSubjectInfo,
      &data->dwEncoding, 0, &size, 0);
@@ -249,6 +249,123 @@ error:
     return ret;
 }
 
+static BOOL SOFTPUB_LoadCertMessage(CRYPT_PROVIDER_DATA *data)
+{
+    BOOL ret;
+
+    if (data->pWintrustData->u.pCert &&
+     data->pWintrustData->u.pCert->cbStruct == sizeof(WINTRUST_CERT_INFO))
+    {
+        if (data->psPfns)
+        {
+            CRYPT_PROVIDER_SGNR signer = { sizeof(signer), { 0 } };
+            DWORD i;
+
+            /* Add a signer with nothing but the time to verify, so we can
+             * add a cert to it
+             */
+            if (data->pWintrustData->u.pCert->psftVerifyAsOf)
+                data->sftSystemTime = signer.sftVerifyAsOf;
+            else
+            {
+                SYSTEMTIME sysTime;
+
+                GetSystemTime(&sysTime);
+                SystemTimeToFileTime(&sysTime, &signer.sftVerifyAsOf);
+            }
+            ret = data->psPfns->pfnAddSgnr2Chain(data, FALSE, 0, &signer);
+            if (ret)
+            {
+                ret = data->psPfns->pfnAddCert2Chain(data, 0, FALSE, 0,
+                 data->pWintrustData->u.pCert->psCertContext);
+                for (i = 0; ret && i < data->pWintrustData->u.pCert->chStores;
+                 i++)
+                    ret = data->psPfns->pfnAddStore2Chain(data,
+                     data->pWintrustData->u.pCert->pahStores[i]);
+            }
+        }
+        else
+        {
+            /* Do nothing!?  See the tests */
+            ret = TRUE;
+        }
+    }
+    else
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        ret = FALSE;
+    }
+    return ret;
+}
+
+static BOOL SOFTPUB_LoadFileMessage(CRYPT_PROVIDER_DATA *data)
+{
+    BOOL ret;
+
+    if (!data->pWintrustData->u.pFile)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        ret = FALSE;
+        goto error;
+    }
+    ret = SOFTPUB_OpenFile(data);
+    if (!ret)
+        goto error;
+    ret = SOFTPUB_GetFileSubject(data);
+    if (!ret)
+        goto error;
+    ret = SOFTPUB_GetSIP(data);
+    if (!ret)
+        goto error;
+    ret = SOFTPUB_GetMessageFromFile(data, data->pWintrustData->u.pFile->hFile,
+     data->pWintrustData->u.pFile->pcwszFilePath);
+    if (!ret)
+        goto error;
+    ret = SOFTPUB_CreateStoreFromMessage(data);
+    if (!ret)
+        goto error;
+    ret = SOFTPUB_DecodeInnerContent(data);
+error:
+    return ret;
+}
+
+static BOOL SOFTPUB_LoadCatalogMessage(CRYPT_PROVIDER_DATA *data)
+{
+    BOOL ret;
+    HANDLE catalog = INVALID_HANDLE_VALUE;
+
+    if (!data->pWintrustData->u.pCatalog)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    catalog = CreateFileW(data->pWintrustData->u.pCatalog->pcwszCatalogFilePath,
+     GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+     NULL);
+    if (catalog == INVALID_HANDLE_VALUE)
+        return FALSE;
+    ret = CryptSIPRetrieveSubjectGuid(
+     data->pWintrustData->u.pCatalog->pcwszCatalogFilePath, catalog,
+     &data->u.pPDSip->gSubject);
+    if (!ret)
+        goto error;
+    ret = SOFTPUB_GetSIP(data);
+    if (!ret)
+        goto error;
+    ret = SOFTPUB_GetMessageFromFile(data, catalog,
+     data->pWintrustData->u.pCatalog->pcwszCatalogFilePath);
+    if (!ret)
+        goto error;
+    ret = SOFTPUB_CreateStoreFromMessage(data);
+    if (!ret)
+        goto error;
+    ret = SOFTPUB_DecodeInnerContent(data);
+    /* FIXME: this loads the catalog file, but doesn't validate the member. */
+error:
+    CloseHandle(catalog);
+    return ret;
+}
+
 HRESULT WINAPI SoftpubLoadMessage(CRYPT_PROVIDER_DATA *data)
 {
     BOOL ret;
@@ -261,73 +378,13 @@ HRESULT WINAPI SoftpubLoadMessage(CRYPT_PROVIDER_DATA *data)
     switch (data->pWintrustData->dwUnionChoice)
     {
     case WTD_CHOICE_CERT:
-        if (data->pWintrustData->u.pCert &&
-         data->pWintrustData->u.pCert->cbStruct == sizeof(WINTRUST_CERT_INFO))
-        {
-            if (data->psPfns)
-            {
-                CRYPT_PROVIDER_SGNR signer = { sizeof(signer), { 0 } };
-                DWORD i;
-
-                /* Add a signer with nothing but the time to verify, so we can
-                 * add a cert to it
-                 */
-                if (data->pWintrustData->u.pCert->psftVerifyAsOf)
-                    data->sftSystemTime = signer.sftVerifyAsOf;
-                else
-                {
-                    SYSTEMTIME sysTime;
-
-                    GetSystemTime(&sysTime);
-                    SystemTimeToFileTime(&sysTime, &signer.sftVerifyAsOf);
-                }
-                ret = data->psPfns->pfnAddSgnr2Chain(data, FALSE, 0, &signer);
-                if (!ret)
-                    goto error;
-                ret = data->psPfns->pfnAddCert2Chain(data, 0, FALSE, 0,
-                 data->pWintrustData->u.pCert->psCertContext);
-                if (!ret)
-                    goto error;
-                for (i = 0; ret && i < data->pWintrustData->u.pCert->chStores;
-                 i++)
-                    ret = data->psPfns->pfnAddStore2Chain(data,
-                     data->pWintrustData->u.pCert->pahStores[i]);
-            }
-            else
-            {
-                /* Do nothing!?  See the tests */
-                ret = TRUE;
-            }
-        }
-        else
-        {
-            SetLastError(ERROR_INVALID_PARAMETER);
-            ret = FALSE;
-        }
+        ret = SOFTPUB_LoadCertMessage(data);
         break;
     case WTD_CHOICE_FILE:
-        if (!data->pWintrustData->u.pFile)
-        {
-            SetLastError(ERROR_INVALID_PARAMETER);
-            ret = FALSE;
-            goto error;
-        }
-        ret = SOFTPUB_OpenFile(data);
-        if (!ret)
-            goto error;
-        ret = SOFTPUB_GetFileSubject(data);
-        if (!ret)
-            goto error;
-        ret = SOFTPUB_GetSIP(data);
-        if (!ret)
-            goto error;
-        ret = SOFTPUB_GetMessageFromFile(data);
-        if (!ret)
-            goto error;
-        ret = SOFTPUB_CreateStoreFromMessage(data);
-        if (!ret)
-            goto error;
-        ret = SOFTPUB_DecodeInnerContent(data);
+        ret = SOFTPUB_LoadFileMessage(data);
+        break;
+    case WTD_CHOICE_CATALOG:
+        ret = SOFTPUB_LoadCatalogMessage(data);
         break;
     default:
         FIXME("unimplemented for %d\n", data->pWintrustData->dwUnionChoice);
@@ -335,7 +392,6 @@ HRESULT WINAPI SoftpubLoadMessage(CRYPT_PROVIDER_DATA *data)
         ret = FALSE;
     }
 
-error:
     if (!ret)
         data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_OBJPROV] =
          GetLastError();

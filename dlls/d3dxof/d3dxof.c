@@ -92,6 +92,48 @@ static const struct IDirectXFileSaveObjectVtbl IDirectXFileSaveObject_Vtbl;
 
 static BOOL parse_object_parts(parse_buffer * buf, BOOL allow_optional);
 static BOOL parse_object(parse_buffer * buf);
+static const char* get_primitive_string(WORD token);
+
+static void dump_template(xtemplate* templates_array, xtemplate* ptemplate)
+{
+  int j, k;
+  GUID* clsid;
+
+  clsid = &ptemplate->class_id;
+
+  DPRINTF("template %s\n", ptemplate->name);
+  DPRINTF("{\n");
+  DPRINTF(CLSIDFMT "\n", clsid->Data1, clsid->Data2, clsid->Data3, clsid->Data4[0],
+  clsid->Data4[1], clsid->Data4[2], clsid->Data4[3], clsid->Data4[4], clsid->Data4[5], clsid->Data4[6], clsid->Data4[7]);
+  for (j = 0; j < ptemplate->nb_members; j++)
+  {
+    if (ptemplate->members[j].nb_dims)
+      DPRINTF("array ");
+    if (ptemplate->members[j].type == TOKEN_NAME)
+      DPRINTF("%s ", templates_array[ptemplate->members[j].idx_template].name);
+    else
+      DPRINTF("%s ", get_primitive_string(ptemplate->members[j].type));
+    DPRINTF("%s", ptemplate->members[j].name);
+    for (k = 0; k < ptemplate->members[j].nb_dims; k++)
+    {
+      if (ptemplate->members[j].dim_fixed[k])
+        DPRINTF("[%d]", ptemplate->members[j].dim_value[k]);
+      else
+        DPRINTF("[%s]", ptemplate->members[ptemplate->members[j].dim_value[k]].name);
+    }
+    DPRINTF(";\n");
+  }
+  if (ptemplate->open)
+    DPRINTF("[...]\n");
+  else if (ptemplate->nb_childs)
+  {
+    DPRINTF("[%s", ptemplate->childs[0]);
+    for (j = 1; j < ptemplate->nb_childs; j++)
+      DPRINTF(",%s", ptemplate->childs[j]);
+    DPRINTF("]\n");
+  }
+  DPRINTF("}\n");
+}
 
 HRESULT IDirectXFileImpl_Create(IUnknown* pUnkOuter, LPVOID* ppObj)
 {
@@ -597,6 +639,43 @@ static BOOL is_integer(parse_buffer* buf)
   return TRUE;
 }
 
+static BOOL is_string(parse_buffer* buf)
+{
+  char tmp[32];
+  DWORD pos = 1;
+  char c;
+  BOOL ok = 0;
+
+  if (*buf->buffer != '"')
+    return FALSE;
+  tmp[0] = '"';
+
+  while (!is_separator(c = *(buf->buffer+pos)) && (pos < 32))
+  {
+    tmp[pos++] = c;
+    if (c == '"')
+    {
+      ok = 1;
+      break;
+    }
+  }
+  tmp[pos] = 0;
+
+  if (!ok)
+  {
+    TRACE("Wrong string %s\n", tmp);
+    return FALSE;
+  }
+
+  buf->buffer += pos;
+  buf->rem_bytes -= pos;
+
+  TRACE("Found string %s\n", tmp);
+  strcpy((char*)buf->value, tmp);
+
+  return TRUE;
+}
+
 static WORD parse_TOKEN(parse_buffer * buf)
 {
   WORD token;
@@ -660,6 +739,11 @@ static WORD parse_TOKEN(parse_buffer * buf)
         if (is_float(buf))
         {
           token = TOKEN_FLOAT;
+          break;
+        }
+        if (is_string(buf))
+        {
+          token = TOKEN_LPSTR;
           break;
         }
         if (is_name(buf))
@@ -1081,46 +1165,7 @@ static HRESULT WINAPI IDirectXFileImpl_RegisterTemplates(IDirectXFile* iface, LP
     {
       TRACE("Template successfully parsed:\n");
       if (TRACE_ON(d3dxof))
-      {
-        int i,j,k;
-        GUID* clsid;
-
-        i = This->nb_xtemplates - 1;
-        clsid = &This->xtemplates[i].class_id;
-
-        DPRINTF("template %s\n", This->xtemplates[i].name);
-        DPRINTF("{\n");
-        DPRINTF(CLSIDFMT "\n", clsid->Data1, clsid->Data2, clsid->Data3, clsid->Data4[0],
-          clsid->Data4[1], clsid->Data4[2], clsid->Data4[3], clsid->Data4[4], clsid->Data4[5], clsid->Data4[6], clsid->Data4[7]);
-        for (j = 0; j < This->xtemplates[i].nb_members; j++)
-        {
-          if (This->xtemplates[i].members[j].nb_dims)
-            DPRINTF("array ");
-          if (This->xtemplates[i].members[j].type == TOKEN_NAME)
-            DPRINTF("%s ", This->xtemplates[This->xtemplates[i].members[j].idx_template].name);
-          else
-            DPRINTF("%s ", get_primitive_string(This->xtemplates[i].members[j].type));
-          DPRINTF("%s", This->xtemplates[i].members[j].name);
-          for (k = 0; k < This->xtemplates[i].members[j].nb_dims; k++)
-          {
-            if (This->xtemplates[i].members[j].dim_fixed[k])
-              DPRINTF("[%d]", This->xtemplates[i].members[j].dim_value[k]);
-            else
-              DPRINTF("[%s]", This->xtemplates[i].members[This->xtemplates[i].members[j].dim_value[k]].name);
-          }
-          DPRINTF(";\n");
-        }
-        if (This->xtemplates[i].open)
-          DPRINTF("[...]\n");
-        else if (This->xtemplates[i].nb_childs)
-        {
-          DPRINTF("[%s", This->xtemplates[i].childs[0]);
-          for (j = 1; j < This->xtemplates[i].nb_childs; j++)
-            DPRINTF(",%s", This->xtemplates[i].childs[j]);
-          DPRINTF("]\n");
-        }
-        DPRINTF("}\n");
-      }
+        dump_template(This->xtemplates, &This->xtemplates[This->nb_xtemplates - 1]);
     }
   }
 
@@ -1808,8 +1853,34 @@ static BOOL parse_object_members_list(parse_buffer * buf)
             return FALSE;
           }
         }
+        else if (token == TOKEN_LPSTR)
+        {
+          static char fake_string[] = "Fake string";
+          get_TOKEN(buf);
+          TRACE("%s = %s\n", pt->members[i].name, (char*)buf->value);
+          /* Assume larger size */
+          if ((buf->cur_pdata - buf->pxo->pdata + 4) > MAX_DATA_SIZE)
+          {
+            WARN("Buffer too small\n");
+            return FALSE;
+          }
+          if (pt->members[i].type == TOKEN_LPSTR)
+          {
+            /* Use a fake string for now */
+            *(((LPCSTR*)(buf->cur_pdata))) = fake_string;
+            buf->cur_pdata += 4;
+          }
+          else
+          {
+            FIXME("Token %d not supported\n", pt->members[i].type);
+            return FALSE;
+          }
+        }
         else
+	{
+          FIXME("Unexpected token %d\n", token);
           return FALSE;
+        }
       }
     }
 
@@ -1865,7 +1936,7 @@ _exit:
           return FALSE;
         }
         buf->pxo->childs[buf->pxo->nb_childs] = &buf->pxo_tab[buf->cur_subobject++];
-        buf->pxo->childs[buf->pxo->nb_childs]->ptarget = &buf->pxo_globals[i*MAX_SUBOBJECTS];
+        buf->pxo->childs[buf->pxo->nb_childs]->ptarget = &buf->pxo_globals[i*MAX_SUBOBJECTS+j];
         buf->pxo->nb_childs++;
       }
       else if (check_TOKEN(buf) == TOKEN_NAME)
@@ -1961,7 +2032,7 @@ static HRESULT WINAPI IDirectXFileEnumObjectImpl_GetNextDataObject(IDirectXFileE
   IDirectXFileDataImpl* object;
   HRESULT hr;
   LPBYTE pdata;
-  
+
   TRACE("(%p/%p)->(%p)\n", This, iface, ppDataObj);
 
   if (!This->buf.rem_bytes)

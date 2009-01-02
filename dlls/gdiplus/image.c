@@ -253,6 +253,8 @@ GpStatus WINGDIPAPI GdipCloneImage(GpImage *image, GpImage **cloneImage)
     IStream* stream;
     HRESULT hr;
     INT size;
+    LARGE_INTEGER move;
+    GpStatus stat = GenericError;
 
     TRACE("%p, %p\n", image, cloneImage);
 
@@ -263,15 +265,6 @@ GpStatus WINGDIPAPI GdipCloneImage(GpImage *image, GpImage **cloneImage)
     if (FAILED(hr))
         return GenericError;
 
-    *cloneImage = GdipAlloc(sizeof(GpImage));
-    if (!*cloneImage)
-    {
-        IStream_Release(stream);
-        return OutOfMemory;
-    }
-    (*cloneImage)->type = image->type;
-    (*cloneImage)->flags = image->flags;
-
     hr = IPicture_SaveAsFile(image->picture, stream, FALSE, &size);
     if(FAILED(hr))
     {
@@ -279,21 +272,18 @@ GpStatus WINGDIPAPI GdipCloneImage(GpImage *image, GpImage **cloneImage)
         goto out;
     }
 
-    hr = OleLoadPicture(stream, size, FALSE, &IID_IPicture,
-            (LPVOID*) &(*cloneImage)->picture);
+    /* Set seek pointer back to the beginning of the picture */
+    move.QuadPart = 0;
+    hr = IStream_Seek(stream, move, STREAM_SEEK_SET, NULL);
     if (FAILED(hr))
-    {
-        WARN("Failed to load image from stream\n");
         goto out;
-    }
 
-    IStream_Release(stream);
-    return Ok;
+    stat = GdipLoadImageFromStream(stream, cloneImage);
+    if (stat != Ok) WARN("Failed to load image from stream\n");
+
 out:
     IStream_Release(stream);
-    GdipFree(*cloneImage);
-    *cloneImage = NULL;
-    return GenericError;
+    return stat;
 }
 
 GpStatus WINGDIPAPI GdipCreateBitmapFromFile(GDIPCONST WCHAR* filename,
@@ -450,7 +440,9 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromScan0(INT width, INT height, INT stride,
 
     TRACE("%d %d %d %d %p %p\n", width, height, stride, format, scan0, bitmap);
 
-    if(!bitmap || width <= 0 || height <= 0 || (scan0 && (stride % 4))){
+    if (!bitmap) return InvalidParameter;
+
+    if(width <= 0 || height <= 0 || (scan0 && (stride % 4))){
         *bitmap = NULL;
         return InvalidParameter;
     }

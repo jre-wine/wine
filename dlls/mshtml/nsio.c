@@ -67,6 +67,23 @@ typedef struct {
 
 static nsresult create_uri(nsIURI*,NSContainer*,nsIWineURI**);
 
+HRESULT nsuri_to_url(LPCWSTR nsuri, BSTR *ret)
+{
+    const WCHAR *ptr = nsuri;
+
+    static const WCHAR wine_prefixW[] = {'w','i','n','e',':'};
+
+    if(!strncmpW(nsuri, wine_prefixW, sizeof(wine_prefixW)/sizeof(WCHAR)))
+        ptr += sizeof(wine_prefixW)/sizeof(WCHAR);
+
+    *ret = SysAllocString(ptr);
+    if(!*ret)
+        return E_OUTOFMEMORY;
+
+    TRACE("%s -> %s\n", debugstr_w(nsuri), debugstr_w(*ret));
+    return S_OK;
+}
+
 static BOOL exec_shldocvw_67(HTMLDocument *doc, LPCWSTR url)
 {
     IOleCommandTarget *cmdtrg = NULL;
@@ -1566,7 +1583,7 @@ static nsresult NSAPI nsURI_SchemeIs(nsIWineURI *iface, const char *scheme, PRBo
         WCHAR buf[INTERNET_MAX_SCHEME_LENGTH];
         int len = MultiByteToWideChar(CP_ACP, 0, scheme, -1, buf, sizeof(buf)/sizeof(WCHAR))-1;
 
-        *_retval = strlenW(This->wine_url) > len
+        *_retval = lstrlenW(This->wine_url) > len
             && This->wine_url[len] == ':'
             && !memcmp(buf, This->wine_url, len*sizeof(WCHAR));
         return NS_OK;

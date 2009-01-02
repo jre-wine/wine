@@ -27,13 +27,8 @@
 #include <stdio.h>
 #include <sys/time.h>
 
-#include "windef.h"
-#include "winbase.h"
-#include "winreg.h"
-#include "winuser.h"
-
-#include "wine/debug.h"
 #include "mountmgr.h"
+#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mountmgr);
 
@@ -47,7 +42,7 @@ static void appeared_callback( DADiskRef disk, void *context )
     const void *ref;
     char device[64];
     char mount_point[PATH_MAX];
-    const char *type = NULL;
+    DWORD type = DRIVE_UNKNOWN;
 
     if (!dict) return;
 
@@ -69,12 +64,12 @@ static void appeared_callback( DADiskRef disk, void *context )
     {
         if (!CFStringCompare( ref, CFSTR("cd9660"), 0 ) ||
             !CFStringCompare( ref, CFSTR("udf"), 0 ))
-            type = "cdrom";
+            type = DRIVE_CDROM;
     }
 
     TRACE( "got mount notification for '%s' on '%s'\n", device, mount_point );
 
-    add_dos_device( device, device, mount_point, type );
+    add_dos_device( -1, device, device, mount_point, type );
 done:
     CFRelease( dict );
 }
@@ -103,7 +98,7 @@ static void disappeared_callback( DADiskRef disk, void *context )
 
     TRACE( "got unmount notification for '%s'\n", device );
 
-    remove_dos_device( device );
+    remove_dos_device( -1, device );
 done:
     CFRelease( dict );
 }

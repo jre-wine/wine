@@ -16,6 +16,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
 #include <math.h>
 
 #include "jscript.h"
@@ -243,26 +246,26 @@ static HRESULT str_to_number(BSTR str, VARIANT *ret)
     while(isspaceW(*ptr))
         ptr++;
 
-    if(!strncmpW(ptr, infinityW, sizeof(infinityW)/sizeof(WCHAR))) {
-        ptr += sizeof(infinityW)/sizeof(WCHAR);
-        while(*ptr && isspaceW(*ptr))
-            ptr++;
-
-        if(*ptr) {
-            FIXME("NaN\n");
-            return E_NOTIMPL;
-        }
-
-        FIXME("inf\n");
-        return E_NOTIMPL;
-    }
-
     if(*ptr == '-') {
         neg = TRUE;
         ptr++;
     }else if(*ptr == '+') {
         ptr++;
-    }else if(*ptr == '0' && ptr[1] == 'x') {
+    }
+
+    if(!strncmpW(ptr, infinityW, sizeof(infinityW)/sizeof(WCHAR))) {
+        ptr += sizeof(infinityW)/sizeof(WCHAR);
+        while(*ptr && isspaceW(*ptr))
+            ptr++;
+
+        if(*ptr)
+            num_set_nan(ret);
+        else
+            num_set_inf(ret, !neg);
+        return S_OK;
+    }
+
+    if(*ptr == '0' && ptr[1] == 'x') {
         DWORD l = 0;
 
         ptr += 2;
@@ -310,8 +313,8 @@ static HRESULT str_to_number(BSTR str, VARIANT *ret)
         ptr++;
 
     if(*ptr) {
-        FIXME("NaN\n");
-        return E_NOTIMPL;
+        num_set_nan(ret);
+        return S_OK;
     }
 
     if(neg)
@@ -325,6 +328,9 @@ static HRESULT str_to_number(BSTR str, VARIANT *ret)
 HRESULT to_number(script_ctx_t *ctx, VARIANT *v, jsexcept_t *ei, VARIANT *ret)
 {
     switch(V_VT(v)) {
+    case VT_EMPTY:
+        num_set_nan(ret);
+        break;
     case VT_NULL:
         V_VT(ret) = VT_I4;
         V_I4(ret) = 0;

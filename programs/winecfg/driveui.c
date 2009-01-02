@@ -33,6 +33,7 @@
 #include <shlwapi.h>
 #include <shlobj.h>
 
+#include <wine/unicode.h>
 #include <wine/debug.h>
 
 #include "winecfg.h"
@@ -311,12 +312,12 @@ static void on_add_click(HWND dialog)
 
     if (new == 'C')
     {
-        char label[64];
-        LoadStringA (GetModuleHandle (NULL), IDS_SYSTEM_DRIVE_LABEL, label,
-            sizeof(label)/sizeof(label[0])); 
-        add_drive(new, "../drive_c", label, "", DRIVE_FIXED);
+        WCHAR label[64];
+        LoadStringW (GetModuleHandle (NULL), IDS_SYSTEM_DRIVE_LABEL, label,
+                     sizeof(label)/sizeof(label[0]));
+        add_drive(new, "../drive_c", NULL, label, 0, DRIVE_FIXED);
     }
-    else add_drive(new, "/", "", "", DRIVE_UNKNOWN);
+    else add_drive(new, "/", NULL, NULL, 0, DRIVE_UNKNOWN);
 
     fill_drives_list(dialog);
 
@@ -333,6 +334,7 @@ static void on_add_click(HWND dialog)
     SetFocus(GetDlgItem(dialog, IDC_LIST_DRIVES));
 
     update_controls(dialog);
+    SendMessage(GetParent(dialog), PSM_CHANGED, (WPARAM) dialog, 0);
 }
 
 static void on_remove_click(HWND dialog)
@@ -371,14 +373,15 @@ static void on_remove_click(HWND dialog)
     SetFocus(GetDlgItem(dialog, IDC_LIST_DRIVES));
 
     update_controls(dialog);
+    SendMessage(GetParent(dialog), PSM_CHANGED, (WPARAM) dialog, 0);
 }
 
 static void update_controls(HWND dialog)
 {
+    static const WCHAR emptyW[1];
     char *path;
     unsigned int type;
-    char *label;
-    char *serial;
+    char serial[16];
     const char *device;
     int i, selection = -1;
     LVITEM item;
@@ -433,11 +436,10 @@ static void update_controls(HWND dialog)
     EnableWindow( GetDlgItem( dialog, IDC_COMBO_TYPE ), (current_drive->letter != 'C') );
 
     /* removeable media properties */
-    label = current_drive->label;
-    set_text(dialog, IDC_EDIT_LABEL, label);
+    set_textW(dialog, IDC_EDIT_LABEL, current_drive->label ? current_drive->label : emptyW);
 
     /* set serial edit text */
-    serial = current_drive->serial;
+    sprintf( serial, "%X", current_drive->serial );
     set_text(dialog, IDC_EDIT_SERIAL, serial);
 
     /* TODO: get the device here to put into the edit box */
@@ -482,13 +484,12 @@ static void on_edit_changed(HWND dialog, WORD id)
     {
         case IDC_EDIT_LABEL:
         {
-            char *label;
-
-            label = get_text(dialog, id);
+            WCHAR *label = get_textW(dialog, id);
             HeapFree(GetProcessHeap(), 0, current_drive->label);
-            current_drive->label = label ? label :  strdupA("");
+            current_drive->label = label;
+            current_drive->modified = TRUE;
 
-            WINE_TRACE("set label to %s\n", current_drive->label);
+            WINE_TRACE("set label to %s\n", wine_dbgstr_w(current_drive->label));
 
             /* enable the apply button  */
             SendMessage(GetParent(dialog), PSM_CHANGED, (WPARAM) dialog, 0);
@@ -502,6 +503,7 @@ static void on_edit_changed(HWND dialog, WORD id)
             path = get_text(dialog, id);
             HeapFree(GetProcessHeap(), 0, current_drive->unixpath);
             current_drive->unixpath = path ? path : strdupA("drive_c");
+            current_drive->modified = TRUE;
 
             WINE_TRACE("set path to %s\n", current_drive->unixpath);
 
@@ -518,10 +520,10 @@ static void on_edit_changed(HWND dialog, WORD id)
             char *serial;
 
             serial = get_text(dialog, id);
-            HeapFree(GetProcessHeap(), 0, current_drive->serial);
-            current_drive->serial = serial ? serial : strdupA("");
+            current_drive->serial = strtoul( serial, NULL, 16 );
+            current_drive->modified = TRUE;
 
-            WINE_TRACE("set serial to %s\n", current_drive->serial);
+            WINE_TRACE("set serial to %08x\n", current_drive->serial);
 
             /* enable the apply button  */
             SendMessage(GetParent(dialog), PSM_CHANGED, (WPARAM) dialog, 0);
@@ -753,15 +755,13 @@ DriveDlgProc (HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam)
 
                 case IDC_RADIO_ASSIGN:
                 {
-                    char *str;
-
-                    str = get_text(dialog, IDC_EDIT_LABEL);
+                    WCHAR *str = get_textW(dialog, IDC_EDIT_LABEL);
                     HeapFree(GetProcessHeap(), 0, current_drive->label);
-                    current_drive->label = str ? str : strdupA("");
+                    current_drive->label = str;
 
-                    str = get_text(dialog, IDC_EDIT_SERIAL);
-                    HeapFree(GetProcessHeap(), 0, current_drive->serial);
-                    current_drive->serial = str ? str : strdupA("");
+                    str = get_textW(dialog, IDC_EDIT_SERIAL);
+                    current_drive->serial = strtoulW( str, NULL, 16 );
+                    current_drive->modified = TRUE;
 
                     /* TODO: we don't have a device at this point */
 
@@ -793,6 +793,7 @@ DriveDlgProc (HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam)
                     enable_labelserial_box(dialog, mode);
 
                     current_drive->type = type_pairs[selection].sCode;
+                    current_drive->modified = TRUE;
                     break;
                 }
 

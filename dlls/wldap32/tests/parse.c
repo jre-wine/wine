@@ -34,7 +34,7 @@ static void test_ldap_parse_sort_control( LDAP *ld )
     LDAPMessage *res = NULL;
     struct l_timeval timeout;
 
-    key.sk_attrtype = (char *)"cn";
+    key.sk_attrtype = (char *)"ou";
     key.sk_matchruleoid = NULL;
     key.sk_reverseorder = FALSE;
 
@@ -47,7 +47,13 @@ static void test_ldap_parse_sort_control( LDAP *ld )
     ctrls[1] = NULL;
     timeout.tv_sec = 20;
     timeout.tv_usec = 0;
-    ret = ldap_search_ext_sA( ld, (char *)"", LDAP_SCOPE_SUBTREE, (char *)"(cn=Verisign*)", NULL, 0, ctrls, NULL, &timeout, 10, &res );
+    ret = ldap_search_ext_sA( ld, (char *)"", LDAP_SCOPE_ONELEVEL, (char *)"(ou=*)", NULL, 0, ctrls, NULL, &timeout, 10, &res );
+    if (ret == LDAP_SERVER_DOWN)
+    {
+        skip("test server can't be reached\n");
+        ldap_control_free( sort );
+        return;
+    }
     ok( !ret, "ldap_search_ext_sA failed 0x%x\n", ret );
     ok( res != NULL, "expected res != NULL\n" );
 
@@ -79,7 +85,7 @@ START_TEST (parse)
 {
     LDAP *ld;
 
-    ld = ldap_initA((char *)"directory.verisign.com", 389 );
+    ld = ldap_initA((char *)"ldap.itd.umich.edu", 389 );
     ok( ld != NULL, "ldap_init failed\n" );
 
     test_ldap_parse_sort_control( ld );

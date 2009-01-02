@@ -37,6 +37,7 @@
 #include "wineboot_Nl.rc"
 #include "wineboot_No.rc"
 #include "wineboot_Pl.rc"
+#include "wineboot_Pt.rc"
 #include "wineboot_Ro.rc"
 #include "wineboot_Ru.rc"
 #include "wineboot_Si.rc"

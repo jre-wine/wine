@@ -128,6 +128,7 @@ HRESULT disp_propput(IDispatch*,DISPID,LCID,VARIANT*,jsexcept_t*,IServiceProvide
 HRESULT jsdisp_propget(DispatchEx*,DISPID,LCID,VARIANT*,jsexcept_t*,IServiceProvider*);
 HRESULT jsdisp_propput_name(DispatchEx*,const WCHAR*,LCID,VARIANT*,jsexcept_t*,IServiceProvider*);
 HRESULT jsdisp_propput_idx(DispatchEx*,DWORD,LCID,VARIANT*,jsexcept_t*,IServiceProvider*);
+HRESULT jsdisp_propget_name(DispatchEx*,LPCWSTR,LCID,VARIANT*,jsexcept_t*,IServiceProvider*);
 HRESULT jsdisp_propget_idx(DispatchEx*,DWORD,LCID,VARIANT*,jsexcept_t*,IServiceProvider*);
 HRESULT jsdisp_get_id(DispatchEx*,const WCHAR*,DWORD,DISPID*);
 
@@ -240,6 +241,28 @@ static inline void num_set_val(VARIANT *v, DOUBLE d)
         V_VT(v) = VT_R8;
         V_R8(v) = d;
     }
+}
+
+static inline void num_set_nan(VARIANT *v)
+{
+    V_VT(v) = VT_R8;
+#ifdef NAN
+    V_R8(v) = NAN;
+#else
+    V_UI8(v) = (ULONGLONG)0x7ff80000<<32;
+#endif
+}
+
+static inline void num_set_inf(VARIANT *v, BOOL positive)
+{
+    V_VT(v) = VT_R8;
+#ifdef INFINITY
+    V_R8(v) = positive ? INFINITY : -INFINITY;
+#else
+    V_UI8(v) = (ULONGLONG)0x7ff00000<<32;
+    if(!positive)
+        V_R8(v) = -V_R8(v);
+#endif
 }
 
 const char *debugstr_variant(const VARIANT*);

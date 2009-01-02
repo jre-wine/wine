@@ -28,6 +28,7 @@
 #include "iccvid_Nl.rc"
 #include "iccvid_No.rc"
 #include "iccvid_Pl.rc"
+#include "iccvid_Pt.rc"
 #include "iccvid_Ro.rc"
 #include "iccvid_Ru.rc"
 #include "iccvid_Si.rc"

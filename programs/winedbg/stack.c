@@ -3,7 +3,7 @@
  *
  * Copyright 1995 Alexandre Julliard
  * Copyright 1996 Eric Youngdale
- * Copyright 1999 Ove Kåven
+ * Copyright 1999 Ove KÃ¥ven
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -391,7 +391,8 @@ static void backtrace_all(void)
             }
 
             dbg_printf("\nBacktracing for thread %04x in process %04x (%s):\n",
-                       entry.th32ThreadID, dbg_curr_pid, dbg_curr_process->imageName);
+                       entry.th32ThreadID, dbg_curr_pid,
+                       dbg_W2A(dbg_curr_process->imageName, -1));
             backtrace_tid(dbg_curr_process, entry.th32ThreadID);
         }
         while (Thread32Next(snapshot, &entry));

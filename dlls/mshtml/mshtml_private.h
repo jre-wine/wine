@@ -276,6 +276,7 @@ struct HTMLDocument {
 
     DWORD update;
 
+    event_target_t *event_target;
     ConnectionPointContainer cp_container;
     ConnectionPoint cp_htmldocevents;
     ConnectionPoint cp_htmldocevents2;
@@ -458,8 +459,9 @@ typedef struct {
 
 HRESULT HTMLDocument_Create(IUnknown*,REFIID,void**);
 HRESULT HTMLLoadOptions_Create(IUnknown*,REFIID,void**);
+HRESULT create_doc_from_nsdoc(nsIDOMHTMLDocument*,HTMLDocument**);
 
-HTMLWindow *HTMLWindow_Create(HTMLDocument*);
+HRESULT HTMLWindow_Create(HTMLDocument*,nsIDOMWindow*,HTMLWindow**);
 HTMLWindow *nswindow_to_window(const nsIDOMWindow*);
 HTMLOptionElementFactory *HTMLOptionElementFactory_Create(HTMLDocument*);
 HTMLLocation *HTMLLocation_Create(HTMLDocument*);
@@ -499,6 +501,8 @@ void close_gecko(void);
 void register_nsservice(nsIComponentRegistrar*,nsIServiceManager*);
 void init_nsio(nsIComponentManager*,nsIComponentRegistrar*);
 BOOL install_wine_gecko(BOOL);
+
+HRESULT nsuri_to_url(LPCWSTR,BSTR*);
 
 void hlink_frame_navigate(HTMLDocument*,IHlinkFrame*,LPCWSTR,nsIInputStream*,DWORD);
 
@@ -548,6 +552,7 @@ IHTMLStyleSheetsCollection *HTMLStyleSheetsCollection_Create(nsIDOMStyleSheetLis
 
 void detach_selection(HTMLDocument*);
 void detach_ranges(HTMLDocument*);
+HRESULT get_node_text(HTMLDOMNode*,BSTR*);
 
 HTMLDOMNode *HTMLDOMTextNode_Create(HTMLDocument*,nsIDOMNode*);
 
@@ -654,7 +659,7 @@ HRESULT clear_task_timer(HTMLDocument*,BOOL,DWORD);
 
 HRESULT get_typeinfo(tid_t,ITypeInfo**);
 void release_typelib(void);
-void call_disp_func(HTMLDocument*,IDispatch*);
+void call_disp_func(HTMLDocument*,IDispatch*,IDispatch*);
 
 const char *debugstr_variant(const VARIANT*);
 

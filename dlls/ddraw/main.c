@@ -3,7 +3,7 @@
  * Copyright 1997-1999 Marcus Meissner
  * Copyright 1998 Lionel Ulmer
  * Copyright 2000-2001 TransGaming Technologies Inc.
- * Copyright 2006 Stefan Dösinger
+ * Copyright 2006 Stefan DÃ¶singer
  * Copyright 2008 Denver Gingerich
  *
  * This file contains the (internal) driver registration functions,
@@ -47,9 +47,7 @@
 
 #include "ddraw_private.h"
 
-typedef IWineD3D* (WINAPI *fnWineDirect3DCreate)(UINT, UINT, IUnknown *);
-
-static fnWineDirect3DCreate pWineDirect3DCreate;
+static typeof(WineDirect3DCreate) *pWineDirect3DCreate;
 
 WINE_DEFAULT_DEBUG_CHANNEL(ddraw);
 
@@ -88,8 +86,8 @@ BOOL LoadWineD3D(void)
         hWineD3D = LoadLibraryA("wined3d");
         if (hWineD3D)
         {
-            pWineDirect3DCreate = (fnWineDirect3DCreate) GetProcAddress(hWineD3D, "WineDirect3DCreate");
-            pWineDirect3DCreateClipper = (fnWineDirect3DCreateClipper) GetProcAddress(hWineD3D, "WineDirect3DCreateClipper");
+            pWineDirect3DCreate = (typeof(WineDirect3DCreate) *)GetProcAddress(hWineD3D, "WineDirect3DCreate");
+            pWineDirect3DCreateClipper = (typeof(WineDirect3DCreateClipper) *) GetProcAddress(hWineD3D, "WineDirect3DCreateClipper");
             return TRUE;
         }
     }
@@ -208,7 +206,7 @@ DDRAW_Create(const GUID *guid,
      * but DirectDraw specific management, like DDSURFACEDESC and DDPIXELFORMAT
      * structure handling is handled in this lib.
      */
-    wineD3D = pWineDirect3DCreate(0 /* SDKVersion */, 7 /* DXVersion */, (IUnknown *) This /* Parent */);
+    wineD3D = pWineDirect3DCreate(7 /* DXVersion */, (IUnknown *) This /* Parent */);
     if(!wineD3D)
     {
         ERR("Failed to initialise WineD3D\n");

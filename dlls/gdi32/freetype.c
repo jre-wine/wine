@@ -33,7 +33,9 @@
 # include <sys/mman.h>
 #endif
 #include <string.h>
-#include <dirent.h>
+#ifdef HAVE_DIRENT_H
+# include <dirent.h>
+#endif
 #include <stdio.h>
 #include <assert.h>
 
@@ -1077,7 +1079,7 @@ static WCHAR *get_familyname(FT_Face ft_face)
 
     if(get_name_table_entry(ft_face, &name))
     {
-        int i;
+        FT_UInt i;
 
         /* String is not nul terminated and string_len is a byte length. */
         family = HeapAlloc(GetProcessHeap(), 0, name.string_len + 2);
@@ -2883,7 +2885,7 @@ static GdiFont *alloc_font(void)
 static void free_font(GdiFont *font)
 {
     struct list *cursor, *cursor2;
-    int i;
+    DWORD i;
 
     LIST_FOR_EACH_SAFE(cursor, cursor2, &font->child_fonts)
     {

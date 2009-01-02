@@ -3,7 +3,7 @@
  *
  * Copyright 2006 Jason Green 
  * Copyright 2006-2007 Henri Verbeet
- * Copyright 2007-2008 Stefan Dösinger for CodeWeavers
+ * Copyright 2007-2008 Stefan DÃ¶singer for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -2564,7 +2564,7 @@ static void pshader_glsl_texm3x3(SHADER_OPCODE_ARG* arg) {
 }
 
 /** Process the WINED3DSIO_TEXM3X3SPEC instruction in GLSL 
- * Peform the final texture lookup based on the previous 2 3x3 matrix multiplies */
+ * Perform the final texture lookup based on the previous 2 3x3 matrix multiplies */
 static void pshader_glsl_texm3x3spec(SHADER_OPCODE_ARG* arg) {
 
     IWineD3DPixelShaderImpl* shader = (IWineD3DPixelShaderImpl*) arg->shader;
@@ -2598,7 +2598,7 @@ static void pshader_glsl_texm3x3spec(SHADER_OPCODE_ARG* arg) {
 }
 
 /** Process the WINED3DSIO_TEXM3X3VSPEC instruction in GLSL 
- * Peform the final texture lookup based on the previous 2 3x3 matrix multiplies */
+ * Perform the final texture lookup based on the previous 2 3x3 matrix multiplies */
 static void pshader_glsl_texm3x3vspec(SHADER_OPCODE_ARG* arg) {
 
     IWineD3DPixelShaderImpl* shader = (IWineD3DPixelShaderImpl*) arg->shader;
@@ -3458,15 +3458,16 @@ static void shader_glsl_select_depth_blt(IWineD3DDevice *iface) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     WineD3D_GL_Info *gl_info = &This->adapter->gl_info;
     struct shader_glsl_priv *priv = (struct shader_glsl_priv *) This->shader_priv;
-    static GLhandleARB loc = -1;
 
     if (!priv->depth_blt_glsl_program_id) {
+        GLhandleARB loc;
         priv->depth_blt_glsl_program_id = create_glsl_blt_shader(gl_info);
         loc = GL_EXTCALL(glGetUniformLocationARB(priv->depth_blt_glsl_program_id, "sampler"));
+        GL_EXTCALL(glUseProgramObjectARB(priv->depth_blt_glsl_program_id));
+        GL_EXTCALL(glUniform1iARB(loc, 0));
+    } else {
+        GL_EXTCALL(glUseProgramObjectARB(priv->depth_blt_glsl_program_id));
     }
-
-    GL_EXTCALL(glUseProgramObjectARB(priv->depth_blt_glsl_program_id));
-    GL_EXTCALL(glUniform1iARB(loc, 0));
 }
 
 static void shader_glsl_deselect_depth_blt(IWineD3DDevice *iface) {

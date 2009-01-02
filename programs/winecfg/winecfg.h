@@ -90,24 +90,27 @@ INT_PTR CALLBACK AudioDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPara
 INT_PTR CALLBACK ThemeDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 /* Drive management  */
-void load_drives(void);
+BOOL load_drives(void);
 int autodetect_drives(void);
 
 struct drive
 {
     char letter;
     char *unixpath;
-    char *label;
-    char *serial;
+    char *device;
+    WCHAR *label;
+    DWORD serial;
     DWORD type; /* one of the DRIVE_ constants from winbase.h  */
 
     BOOL in_use;
+    BOOL modified;
 };
 
 #define DRIVE_MASK_BIT(B) (1 << (toupper(B) - 'A'))
 
 long drive_available_mask(char letter);
-BOOL add_drive(const char letter, const char *targetpath, const char *label, const char *serial, unsigned int type);
+BOOL add_drive(char letter, const char *targetpath, const char *device,
+               const WCHAR *label, DWORD serial, DWORD type);
 void delete_drive(struct drive *pDrive);
 void apply_drive_changes(void);
 BOOL browse_for_unix_folder(HWND dialog, WCHAR *pszPath);

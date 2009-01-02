@@ -4,7 +4,7 @@
  * Copyright 2002-2003 The wine-d3d team
  * Copyright 2002-2003 Raphael Junqueira
  * Copyright 2005 Oliver Stieber
- * Copyright 2006 Stefan Dösinger for CodeWeavers
+ * Copyright 2006 Stefan DÃ¶singer for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -343,7 +343,7 @@ DECLARE_INTERFACE_(IWineD3D, IWineD3DBase)
 #endif
 
 /* Define the main WineD3D entrypoint */
-IWineD3D* WINAPI WineDirect3DCreate(UINT SDKVersion, UINT dxVersion, IUnknown *parent);
+IWineD3D* WINAPI WineDirect3DCreate(UINT dxVersion, IUnknown *parent);
 
 /*****************************************************************************
  * IWineD3DDevice interface 

@@ -16,6 +16,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
 #include <math.h>
 
 #include "jscript.h"
@@ -364,14 +367,14 @@ HRESULT exec_source(exec_ctx_t *ctx, parser_ctx_t *parser, source_elements_t *so
         DispatchEx *func_obj;
         VARIANT var;
 
-        hres = create_source_function(parser, func->parameter_list, func->source_elements,
-                ctx->scope_chain, func->src_str, func->src_len, &func_obj);
+        hres = create_source_function(parser, func->expr->parameter_list, func->expr->source_elements,
+                ctx->scope_chain, func->expr->src_str, func->expr->src_len, &func_obj);
         if(FAILED(hres))
             return hres;
 
         V_VT(&var) = VT_DISPATCH;
         V_DISPATCH(&var) = (IDispatch*)_IDispatchEx_(func_obj);
-        hres = jsdisp_propput_name(ctx->var_disp, func->identifier, script->lcid, &var, ei, NULL);
+        hres = jsdisp_propput_name(ctx->var_disp, func->expr->identifier, script->lcid, &var, ei, NULL);
         jsdisp_release(func_obj);
         if(FAILED(hres))
             return hres;
@@ -1241,26 +1244,25 @@ static HRESULT assign_oper_eval(exec_ctx_t *ctx, expression_t *lexpr, expression
 HRESULT function_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags, jsexcept_t *ei, exprval_t *ret)
 {
     function_expression_t *expr = (function_expression_t*)_expr;
-    DispatchEx *dispex;
     VARIANT var;
     HRESULT hres;
 
     TRACE("\n");
 
-    hres = create_source_function(ctx->parser, expr->parameter_list, expr->source_elements, ctx->scope_chain,
-            expr->src_str, expr->src_len, &dispex);
-    if(FAILED(hres))
-        return hres;
-
-    V_VT(&var) = VT_DISPATCH;
-    V_DISPATCH(&var) = (IDispatch*)_IDispatchEx_(dispex);
-
     if(expr->identifier) {
-        hres = jsdisp_propput_name(ctx->var_disp, expr->identifier, ctx->parser->script->lcid, &var, ei, NULL/*FIXME*/);
-        if(FAILED(hres)) {
-            jsdisp_release(dispex);
+        hres = jsdisp_propget_name(ctx->var_disp, expr->identifier, ctx->parser->script->lcid, &var, ei, NULL/*FIXME*/);
+        if(FAILED(hres))
             return hres;
-        }
+    }else {
+        DispatchEx *dispex;
+
+        hres = create_source_function(ctx->parser, expr->parameter_list, expr->source_elements, ctx->scope_chain,
+                expr->src_str, expr->src_len, &dispex);
+        if(FAILED(hres))
+            return hres;
+
+        V_VT(&var) = VT_DISPATCH;
+        V_DISPATCH(&var) = (IDispatch*)_IDispatchEx_(dispex);
     }
 
     ret->type = EXPRVAL_VARIANT;
@@ -2599,7 +2601,7 @@ HRESULT not_equal2_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD f
 }
 
 /* ECMA-262 3rd Edition    11.8.5 */
-static HRESULT less_eval(exec_ctx_t *ctx, VARIANT *lval, VARIANT *rval, jsexcept_t *ei, BOOL *ret)
+static HRESULT less_eval(exec_ctx_t *ctx, VARIANT *lval, VARIANT *rval, BOOL greater, jsexcept_t *ei, BOOL *ret)
 {
     VARIANT l, r, ln, rn;
     HRESULT hres;
@@ -2615,7 +2617,7 @@ static HRESULT less_eval(exec_ctx_t *ctx, VARIANT *lval, VARIANT *rval, jsexcept
     }
 
     if(V_VT(&l) == VT_BSTR && V_VT(&r) == VT_BSTR) {
-        *ret = strcmpW(V_BSTR(&l), V_BSTR(&r)) < 0;
+        *ret = (strcmpW(V_BSTR(&l), V_BSTR(&r)) < 0) ^ greater;
         SysFreeString(V_BSTR(&l));
         SysFreeString(V_BSTR(&r));
         return S_OK;
@@ -2629,10 +2631,14 @@ static HRESULT less_eval(exec_ctx_t *ctx, VARIANT *lval, VARIANT *rval, jsexcept
     if(FAILED(hres))
         return hres;
 
-    if(V_VT(&ln) == VT_I4 && V_VT(&rn) == VT_I4)
-        *ret = V_I4(&ln) < V_I4(&rn);
-    else
-        *ret = num_val(&ln) < num_val(&rn);
+    if(V_VT(&ln) == VT_I4 && V_VT(&rn) == VT_I4) {
+        *ret = (V_I4(&ln) < V_I4(&rn)) ^ greater;
+    }else  {
+        DOUBLE ld = num_val(&ln);
+        DOUBLE rd = num_val(&rn);
+
+        *ret = !isnan(ld) && !isnan(rd) && ((ld < rd) ^ greater);
+    }
 
     return S_OK;
 }
@@ -2651,7 +2657,7 @@ HRESULT less_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags, 
     if(FAILED(hres))
         return hres;
 
-    hres = less_eval(ctx, &lval, &rval, ei, &b);
+    hres = less_eval(ctx, &lval, &rval, FALSE, ei, &b);
     VariantClear(&lval);
     VariantClear(&rval);
     if(FAILED(hres))
@@ -2674,13 +2680,13 @@ HRESULT lesseq_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags
     if(FAILED(hres))
         return hres;
 
-    hres = less_eval(ctx, &rval, &lval, ei, &b);
+    hres = less_eval(ctx, &rval, &lval, TRUE, ei, &b);
     VariantClear(&lval);
     VariantClear(&rval);
     if(FAILED(hres))
         return hres;
 
-    return return_bool(ret, !b);
+    return return_bool(ret, b);
 }
 
 /* ECMA-262 3rd Edition    11.8.2 */
@@ -2697,7 +2703,7 @@ HRESULT greater_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flag
     if(FAILED(hres))
         return hres;
 
-    hres = less_eval(ctx, &rval, &lval, ei, &b);
+    hres = less_eval(ctx, &rval, &lval, FALSE, ei, &b);
     VariantClear(&lval);
     VariantClear(&rval);
     if(FAILED(hres))
@@ -2720,13 +2726,13 @@ HRESULT greatereq_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD fl
     if(FAILED(hres))
         return hres;
 
-    hres = less_eval(ctx, &lval, &rval, ei, &b);
+    hres = less_eval(ctx, &lval, &rval, TRUE, ei, &b);
     VariantClear(&lval);
     VariantClear(&rval);
     if(FAILED(hres))
         return hres;
 
-    return return_bool(ret, !b);
+    return return_bool(ret, b);
 }
 
 /* ECMA-262 3rd Edition    11.4.8 */

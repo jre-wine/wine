@@ -16,6 +16,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
+#include <math.h>
+
 #include "jscript.h"
 #include "engine.h"
 
@@ -103,15 +108,37 @@ static HRESULT constructor_call(DispatchEx *constr, LCID lcid, WORD flags, DISPP
 static HRESULT JSGlobal_NaN(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    TRACE("\n");
+
+    switch(flags) {
+    case DISPATCH_PROPERTYGET:
+        num_set_nan(retv);
+        break;
+
+    default:
+        FIXME("unimplemented flags %x\n", flags);
+        return E_NOTIMPL;
+    }
+
+    return S_OK;
 }
 
 static HRESULT JSGlobal_Infinity(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    TRACE("\n");
+
+    switch(flags) {
+    case DISPATCH_PROPERTYGET:
+        num_set_inf(retv, TRUE);
+        break;
+
+    default:
+        FIXME("unimplemented flags %x\n", flags);
+        return E_NOTIMPL;
+    }
+
+    return S_OK;
 }
 
 static HRESULT JSGlobal_Array(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
@@ -252,15 +279,54 @@ static HRESULT JSGlobal_eval(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARA
 static HRESULT JSGlobal_isNaN(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    VARIANT_BOOL ret = VARIANT_FALSE;
+    VARIANT num;
+    HRESULT hres;
+
+    TRACE("\n");
+
+    if(arg_cnt(dp)) {
+        hres = to_number(dispex->ctx, get_arg(dp,0), ei, &num);
+        if(FAILED(hres))
+            return hres;
+
+        if(V_VT(&num) == VT_R8 && isnan(V_R8(&num)))
+            ret = VARIANT_TRUE;
+    }else {
+        ret = VARIANT_TRUE;
+    }
+
+    if(retv) {
+        V_VT(retv) = VT_BOOL;
+        V_BOOL(retv) = ret;
+    }
+    return S_OK;
 }
 
 static HRESULT JSGlobal_isFinite(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    VARIANT_BOOL ret = VARIANT_FALSE;
+    HRESULT hres;
+
+    TRACE("\n");
+
+    if(arg_cnt(dp)) {
+        VARIANT num;
+
+        hres = to_number(dispex->ctx, get_arg(dp,0), ei, &num);
+        if(FAILED(hres))
+            return hres;
+
+        if(V_VT(&num) != VT_R8 || (!isinf(V_R8(&num)) && !isnan(V_R8(&num))))
+            ret = VARIANT_TRUE;
+    }
+
+    if(retv) {
+        V_VT(retv) = VT_BOOL;
+        V_BOOL(retv) = ret;
+    }
+    return S_OK;
 }
 
 static INT char_to_int(WCHAR c)

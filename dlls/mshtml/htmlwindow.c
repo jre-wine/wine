@@ -504,8 +504,13 @@ static HRESULT WINAPI HTMLWindow2_get_document(IHTMLWindow2 *iface, IHTMLDocumen
 static HRESULT WINAPI HTMLWindow2_get_event(IHTMLWindow2 *iface, IHTMLEventObj **p)
 {
     HTMLWindow *This = HTMLWINDOW2_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(This->event)
+        IHTMLEventObj_AddRef(This->event);
+    *p = This->event;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLWindow2_get__newEnum(IHTMLWindow2 *iface, IUnknown **p)
@@ -1177,29 +1182,31 @@ static dispex_static_data_t HTMLWindow_dispex = {
     HTMLWindow_iface_tids
 };
 
-HTMLWindow *HTMLWindow_Create(HTMLDocument *doc)
+HRESULT HTMLWindow_Create(HTMLDocument *doc, nsIDOMWindow *nswindow, HTMLWindow **ret)
 {
-    HTMLWindow *ret = heap_alloc_zero(sizeof(HTMLWindow));
+    HTMLWindow *window;
 
-    ret->lpHTMLWindow2Vtbl = &HTMLWindow2Vtbl;
-    ret->lpHTMLWindow3Vtbl = &HTMLWindow3Vtbl;
-    ret->lpIDispatchExVtbl = &WindowDispExVtbl;
-    ret->ref = 1;
-    ret->doc = doc;
+    window = heap_alloc_zero(sizeof(HTMLWindow));
+    if(!window)
+        return E_OUTOFMEMORY;
 
-    init_dispex(&ret->dispex, (IUnknown*)HTMLWINDOW2(ret), &HTMLWindow_dispex);
+    window->lpHTMLWindow2Vtbl = &HTMLWindow2Vtbl;
+    window->lpHTMLWindow3Vtbl = &HTMLWindow3Vtbl;
+    window->lpIDispatchExVtbl = &WindowDispExVtbl;
+    window->ref = 1;
+    window->doc = doc;
 
-    if(doc->nscontainer) {
-        nsresult nsres;
+    init_dispex(&window->dispex, (IUnknown*)HTMLWINDOW2(window), &HTMLWindow_dispex);
 
-        nsres = nsIWebBrowser_GetContentDOMWindow(doc->nscontainer->webbrowser, &ret->nswindow);
-        if(NS_FAILED(nsres))
-            ERR("GetContentDOMWindow failed: %08x\n", nsres);
+    if(nswindow) {
+        nsIDOMWindow_AddRef(nswindow);
+        window->nswindow = nswindow;
     }
 
-    list_add_head(&window_list, &ret->entry);
+    list_add_head(&window_list, &window->entry);
 
-    return ret;
+    *ret = window;
+    return S_OK;
 }
 
 HTMLWindow *nswindow_to_window(const nsIDOMWindow *nswindow)

@@ -6,7 +6,7 @@
  * Copyright 2003-2004 Raphael Junqueira
  * Copyright 2004 Christian Costa
  * Copyright 2005 Oliver Stieber
- * Copyright 2006-2008 Stefan Dösinger for CodeWeavers
+ * Copyright 2006-2008 Stefan DÃ¶singer for CodeWeavers
  * Copyright 2006-2008 Henri Verbeet
  * Copyright 2007 Andrew Riedi
  *
@@ -1550,8 +1550,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
     /** FIXME: Handle stencil appropriately via EnableAutoDepthStencil / AutoDepthStencilFormat **/
 
     object->context = HeapAlloc(GetProcessHeap(), 0, sizeof(object->context));
-    if(!object->context)
-        return E_OUTOFMEMORY;
+    if(!object->context) {
+        ERR("Failed to create the context array\n");
+        hr = E_OUTOFMEMORY;
+        goto error;
+    }
     object->num_contexts = 1;
 
     if(surface_type == SURFACE_OPENGL) {
@@ -1677,7 +1680,7 @@ error:
         HeapFree(GetProcessHeap(), 0, object->backBuffer);
         object->backBuffer = NULL;
     }
-    if(object->context[0])
+    if(object->context && object->context[0])
         DestroyContext(This, object->context[0]);
     if(object->frontBuffer) {
         IWineD3DSurface_GetParent(object->frontBuffer, &bufferParent);
@@ -5176,8 +5179,7 @@ HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This,  IWineD3DSurfa
 
     LEAVE_GL();
 
-    IWineD3DSurface_GetContainer( (IWineD3DSurface *) target, &IID_IWineD3DSwapChain, (void **)&swapchain);
-    if (swapchain) {
+    if (SUCCEEDED(IWineD3DSurface_GetContainer((IWineD3DSurface *)target, &IID_IWineD3DSwapChain, (void **)&swapchain))) {
         if (target == (IWineD3DSurfaceImpl*) swapchain->frontBuffer) {
             glFlush();
         }
@@ -5878,11 +5880,11 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
 
     ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
 
-    ENTER_GL();
-
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
+        ENTER_GL();
         GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
         checkGLcall("glActiveTextureARB");
+        LEAVE_GL();
     }
 
     /* Make sure the surface is loaded and up to date */
@@ -5921,6 +5923,8 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
         /* need to lock the surface to get the data */
         FIXME("Surfaces has no allocated memory, but should be an in memory only surface\n");
     }
+
+    ENTER_GL();
 
     /* TODO: Cube and volume support */
     if(rowoffset != 0){
@@ -7013,10 +7017,13 @@ void delete_opengl_contexts(IWineD3DDevice *iface, IWineD3DSwapChain *swapchain_
         This->depth_blt_rb_w = 0;
         This->depth_blt_rb_h = 0;
     }
+    LEAVE_GL();
+
     This->blitter->free_private(iface);
     This->frag_pipe->free_private(iface);
     This->shader_backend->shader_free_private(iface);
 
+    ENTER_GL();
     for (i = 0; i < GL_LIMITS(textures); i++) {
         /* Textures are recreated below */
         glDeleteTextures(1, &This->dummyTextureName[i]);

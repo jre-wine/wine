@@ -32,6 +32,27 @@
 static const char msifile[] = "winetest.msi";
 char CURR_DIR[MAX_PATH];
 
+static void get_user_sid(LPSTR *usersid)
+{
+    HANDLE token;
+    BYTE buf[1024];
+    DWORD size;
+    PTOKEN_USER user;
+    HMODULE hadvapi32 = GetModuleHandleA("advapi32.dll");
+    static BOOL (WINAPI *pConvertSidToStringSidA)(PSID, LPSTR*);
+
+    *usersid = NULL;
+    pConvertSidToStringSidA = (void *)GetProcAddress(hadvapi32, "ConvertSidToStringSidA");
+    if (!pConvertSidToStringSidA)
+        return;
+
+    OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token);
+    size = sizeof(buf);
+    GetTokenInformation(token, TokenUser, (void *)buf, size, &size);
+    user = (PTOKEN_USER)buf;
+    pConvertSidToStringSidA(user->User.Sid, usersid);
+}
+
 /* RegDeleteTreeW from dlls/advapi32/registry.c */
 LSTATUS WINAPI package_RegDeleteTreeW(HKEY hKey, LPCWSTR lpszSubKey)
 {
@@ -94,6 +115,150 @@ cleanup:
     if(lpszSubKey)
         RegCloseKey(hSubKey);
     return ret;
+}
+
+static BOOL squash_guid(LPCWSTR in, LPWSTR out)
+{
+    DWORD i,n=1;
+    GUID guid;
+
+    if (FAILED(CLSIDFromString((LPOLESTR)in, &guid)))
+        return FALSE;
+
+    for(i=0; i<8; i++)
+        out[7-i] = in[n++];
+    n++;
+    for(i=0; i<4; i++)
+        out[11-i] = in[n++];
+    n++;
+    for(i=0; i<4; i++)
+        out[15-i] = in[n++];
+    n++;
+    for(i=0; i<2; i++)
+    {
+        out[17+i*2] = in[n++];
+        out[16+i*2] = in[n++];
+    }
+    n++;
+    for( ; i<8; i++)
+    {
+        out[17+i*2] = in[n++];
+        out[16+i*2] = in[n++];
+    }
+    out[32]=0;
+    return TRUE;
+}
+
+static void set_component_path(LPCSTR filename, MSIINSTALLCONTEXT context,
+                               LPCSTR guid, LPSTR usersid, BOOL dir)
+{
+    WCHAR guidW[MAX_PATH];
+    WCHAR squashedW[MAX_PATH];
+    CHAR squashed[MAX_PATH];
+    CHAR comppath[MAX_PATH];
+    CHAR prodpath[MAX_PATH];
+    CHAR path[MAX_PATH];
+    LPCSTR prod = NULL;
+    HKEY hkey;
+
+    MultiByteToWideChar(CP_ACP, 0, guid, -1, guidW, MAX_PATH);
+    squash_guid(guidW, squashedW);
+    WideCharToMultiByte(CP_ACP, 0, squashedW, -1, squashed, MAX_PATH, NULL, NULL);
+
+    if (context == MSIINSTALLCONTEXT_MACHINE)
+    {
+        prod = "3D0DAE300FACA1300AD792060BCDAA92";
+        sprintf(comppath,
+                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\"
+                "Installer\\UserData\\S-1-5-18\\Components\\%s", squashed);
+        lstrcpyA(prodpath,
+                 "SOFTWARE\\Classes\\Installer\\"
+                 "Products\\3D0DAE300FACA1300AD792060BCDAA92");
+    }
+    else if (context == MSIINSTALLCONTEXT_USERUNMANAGED)
+    {
+        prod = "7D2F387510109040002000060BECB6AB";
+        sprintf(comppath,
+                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\"
+                "Installer\\UserData\\%s\\Components\\%s", usersid, squashed);
+        sprintf(prodpath,
+                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\"
+                "Installer\\%s\\Installer\\Products\\"
+                "7D2F387510109040002000060BECB6AB", usersid);
+    }
+    else if (context == MSIINSTALLCONTEXT_USERMANAGED)
+    {
+        prod = "7D2F387510109040002000060BECB6AB";
+        sprintf(comppath,
+                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\"
+                "Installer\\UserData\\%s\\Components\\%s", usersid, squashed);
+        sprintf(prodpath,
+                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\"
+                "Installer\\Managed\\%s\\Installer\\Products\\"
+                "7D2F387510109040002000060BECB6AB", usersid);
+    }
+
+    RegCreateKeyA(HKEY_LOCAL_MACHINE, comppath, &hkey);
+
+    lstrcpyA(path, CURR_DIR);
+    lstrcatA(path, "\\");
+    if (!dir) lstrcatA(path, filename);
+
+    RegSetValueExA(hkey, prod, 0, REG_SZ, (LPBYTE)path, lstrlenA(path));
+    RegCloseKey(hkey);
+
+    RegCreateKeyA(HKEY_LOCAL_MACHINE, prodpath, &hkey);
+    RegCloseKey(hkey);
+}
+
+static void delete_component_path(LPCSTR guid, MSIINSTALLCONTEXT context, LPSTR usersid)
+{
+    WCHAR guidW[MAX_PATH];
+    WCHAR squashedW[MAX_PATH];
+    WCHAR substrW[MAX_PATH];
+    CHAR squashed[MAX_PATH];
+    CHAR comppath[MAX_PATH];
+    CHAR prodpath[MAX_PATH];
+
+    MultiByteToWideChar(CP_ACP, 0, guid, -1, guidW, MAX_PATH);
+    squash_guid(guidW, squashedW);
+    WideCharToMultiByte(CP_ACP, 0, squashedW, -1, squashed, MAX_PATH, NULL, NULL);
+
+    if (context == MSIINSTALLCONTEXT_MACHINE)
+    {
+        sprintf(comppath,
+                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\"
+                "Installer\\UserData\\S-1-5-18\\Components\\%s", squashed);
+        lstrcpyA(prodpath,
+                 "SOFTWARE\\Classes\\Installer\\"
+                 "Products\\3D0DAE300FACA1300AD792060BCDAA92");
+    }
+    else if (context == MSIINSTALLCONTEXT_USERUNMANAGED)
+    {
+        sprintf(comppath,
+                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\"
+                "Installer\\UserData\\%s\\Components\\%s", usersid, squashed);
+        sprintf(prodpath,
+                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\"
+                "Installer\\%s\\Installer\\Products\\"
+                "7D2F387510109040002000060BECB6AB", usersid);
+    }
+    else if (context == MSIINSTALLCONTEXT_USERMANAGED)
+    {
+        sprintf(comppath,
+                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\"
+                "Installer\\UserData\\%s\\Components\\%s", usersid, squashed);
+        sprintf(prodpath,
+                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\"
+                "Installer\\Managed\\%s\\Installer\\Products\\"
+                "7D2F387510109040002000060BECB6AB", usersid);
+    }
+
+    MultiByteToWideChar(CP_ACP, 0, comppath, -1, substrW, MAX_PATH);
+    package_RegDeleteTreeW(HKEY_LOCAL_MACHINE, substrW);
+
+    MultiByteToWideChar(CP_ACP, 0, prodpath, -1, substrW, MAX_PATH);
+    package_RegDeleteTreeW(HKEY_LOCAL_MACHINE, substrW);
 }
 
 static UINT do_query(MSIHANDLE hdb, const char *query, MSIHANDLE *phrec)
@@ -301,6 +466,19 @@ static UINT create_complocator_table( MSIHANDLE hdb )
             "CREATE TABLE `CompLocator` ("
             "`Signature_` CHAR(72) NOT NULL, "
             "`ComponentId` CHAR(38) NOT NULL, "
+            "`Type` SHORT "
+            "PRIMARY KEY `Signature_`)" );
+}
+
+static UINT create_inilocator_table( MSIHANDLE hdb )
+{
+    return run_query( hdb,
+            "CREATE TABLE `IniLocator` ("
+            "`Signature_` CHAR(72) NOT NULL, "
+            "`FileName` CHAR(255) NOT NULL, "
+            "`Section` CHAR(96)NOT NULL, "
+            "`Key` CHAR(128)NOT NULL, "
+            "`Field` SHORT, "
             "`Type` SHORT "
             "PRIMARY KEY `Signature_`)" );
 }
@@ -541,6 +719,22 @@ static UINT add_complocator_entry( MSIHANDLE hdb, const char *values )
     return r;
 }
 
+static UINT add_inilocator_entry( MSIHANDLE hdb, const char *values )
+{
+    char insert[] = "INSERT INTO `IniLocator` "
+            "(`Signature_`, `FileName`, `Section`, `Key`, `Field`, `Type`) "
+            "VALUES( %s )";
+    char *query;
+    UINT sz, r;
+
+    sz = strlen(values) + sizeof insert;
+    query = HeapAlloc(GetProcessHeap(),0,sz);
+    sprintf(query,insert,values);
+    r = run_query( hdb, query );
+    HeapFree(GetProcessHeap(), 0, query);
+    return r;
+}
+
 static UINT set_summary_info(MSIHANDLE hdb)
 {
     UINT res;
@@ -643,6 +837,68 @@ static void create_test_file(const CHAR *name)
     WriteFile(file, name, strlen(name), &written, NULL);
     WriteFile(file, "\n", strlen("\n"), &written, NULL);
     CloseHandle(file);
+}
+
+typedef struct _tagVS_VERSIONINFO
+{
+    WORD wLength;
+    WORD wValueLength;
+    WORD wType;
+    WCHAR szKey[1];
+    WORD wPadding1[1];
+    VS_FIXEDFILEINFO Value;
+    WORD wPadding2[1];
+    WORD wChildren[1];
+} VS_VERSIONINFO;
+
+#define roundoffs(a, b, r) (((BYTE *)(b) - (BYTE *)(a) + ((r) - 1)) & ~((r) - 1))
+#define roundpos(a, b, r) (((BYTE *)(a)) + roundoffs(a, b, r))
+
+static BOOL create_file_with_version(const CHAR *name, LONG ms, LONG ls)
+{
+    VS_VERSIONINFO *pVerInfo;
+    VS_FIXEDFILEINFO *pFixedInfo;
+    LPBYTE buffer, ofs;
+    CHAR path[MAX_PATH];
+    DWORD handle, size;
+    HANDLE resource;
+    BOOL ret = FALSE;
+
+    GetSystemDirectory(path, MAX_PATH);
+    lstrcatA(path, "\\kernel32.dll");
+
+    CopyFileA(path, name, FALSE);
+
+    size = GetFileVersionInfoSize(path, &handle);
+    buffer = HeapAlloc(GetProcessHeap(), 0, size);
+
+    GetFileVersionInfoA(path, 0, size, buffer);
+
+    pVerInfo = (VS_VERSIONINFO *)buffer;
+    ofs = (BYTE *)&pVerInfo->szKey[lstrlenW(pVerInfo->szKey) + 1];
+    pFixedInfo = (VS_FIXEDFILEINFO *)roundpos(pVerInfo, ofs, 4);
+
+    pFixedInfo->dwFileVersionMS = ms;
+    pFixedInfo->dwFileVersionLS = ls;
+    pFixedInfo->dwProductVersionMS = ms;
+    pFixedInfo->dwProductVersionLS = ls;
+
+    resource = BeginUpdateResource(name, FALSE);
+    if (!resource)
+        goto done;
+
+    if (!UpdateResource(resource, RT_VERSION, MAKEINTRESOURCE(VS_VERSION_INFO),
+                   MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL), buffer, size))
+        goto done;
+
+    if (!EndUpdateResource(resource, FALSE))
+        goto done;
+
+    ret = TRUE;
+
+done:
+    HeapFree(GetProcessHeap(), 0, buffer);
+    return ret;
 }
 
 static void test_createpackage(void)
@@ -5591,9 +5847,1452 @@ static void test_appsearch(void)
 
     r = MsiGetPropertyA( hpkg, "WEBBROWSERPROG", prop, &size );
     ok( r == ERROR_SUCCESS, "get property failed: %d\n", r);
-    ok( lstrlenA(prop) != 0, "Expected non-zero length\n");
+    todo_wine
+    {
+        ok( lstrlenA(prop) != 0, "Expected non-zero length\n");
+    }
 
     MsiCloseHandle( hpkg );
+    DeleteFileA(msifile);
+}
+
+static void test_appsearch_complocator(void)
+{
+    MSIHANDLE hpkg, hdb;
+    CHAR path[MAX_PATH];
+    CHAR prop[MAX_PATH];
+    LPSTR usersid;
+    DWORD size;
+    UINT r;
+
+    get_user_sid(&usersid);
+    if (!usersid)
+    {
+        skip("ConvertSidToStringSidA is not available\n");
+        return;
+    }
+
+    create_test_file("FileName1");
+    create_test_file("FileName4");
+    set_component_path("FileName1", MSIINSTALLCONTEXT_MACHINE,
+                       "{A8AE6692-96BA-4198-8399-145D7D1D0D0E}", NULL, FALSE);
+
+    create_test_file("FileName2");
+    set_component_path("FileName2", MSIINSTALLCONTEXT_USERUNMANAGED,
+                       "{1D2CE6F3-E81C-4949-AB81-78D7DAD2AF2E}", usersid, FALSE);
+
+    create_test_file("FileName3");
+    set_component_path("FileName3", MSIINSTALLCONTEXT_USERMANAGED,
+                       "{19E0B999-85F5-4973-A61B-DBE4D66ECB1D}", usersid, FALSE);
+
+    create_test_file("FileName5");
+    set_component_path("FileName5", MSIINSTALLCONTEXT_MACHINE,
+                       "{F0CCA976-27A3-4808-9DDD-1A6FD50A0D5A}", NULL, TRUE);
+
+    create_test_file("FileName6");
+    set_component_path("FileName6", MSIINSTALLCONTEXT_MACHINE,
+                       "{C0ECD96F-7898-4410-9667-194BD8C1B648}", NULL, TRUE);
+
+    create_test_file("FileName7");
+    set_component_path("FileName7", MSIINSTALLCONTEXT_MACHINE,
+                       "{DB20F535-9C26-4127-9C2B-CC45A8B51DA1}", NULL, FALSE);
+
+    /* dir is FALSE, but we're pretending it's a directory */
+    set_component_path("IDontExist\\", MSIINSTALLCONTEXT_MACHINE,
+                       "{91B7359B-07F2-4221-AA8D-DE102BB87A5F}", NULL, FALSE);
+
+    create_file_with_version("FileName8.dll", MAKELONG(2, 1), MAKELONG(4, 3));
+    set_component_path("FileName8.dll", MSIINSTALLCONTEXT_MACHINE,
+                       "{4A2E1B5B-4034-4177-833B-8CC35F1B3EF1}", NULL, FALSE);
+
+    create_file_with_version("FileName9.dll", MAKELONG(1, 2), MAKELONG(3, 4));
+    set_component_path("FileName9.dll", MSIINSTALLCONTEXT_MACHINE,
+                       "{A204DF48-7346-4635-BA2E-66247DBAC9DF}", NULL, FALSE);
+
+    create_file_with_version("FileName10.dll", MAKELONG(2, 1), MAKELONG(4, 3));
+    set_component_path("FileName10.dll", MSIINSTALLCONTEXT_MACHINE,
+                       "{EC30CE73-4CF9-4908-BABD-1ED82E1515FD}", NULL, FALSE);
+
+    hdb = create_package_db();
+    ok(hdb, "Expected a valid database handle\n");
+
+    r = create_appsearch_table(hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP1', 'NewSignature1'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP2', 'NewSignature2'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP3', 'NewSignature3'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP4', 'NewSignature4'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP5', 'NewSignature5'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP6', 'NewSignature6'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP7', 'NewSignature7'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP8', 'NewSignature8'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP9', 'NewSignature9'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP10', 'NewSignature10'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP11', 'NewSignature11'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP12', 'NewSignature12'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = create_complocator_table(hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* published component, machine, file, signature, misdbLocatorTypeFile */
+    r = add_complocator_entry(hdb, "'NewSignature1', '{A8AE6692-96BA-4198-8399-145D7D1D0D0E}', 1");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* published component, user-unmanaged, file, signature, misdbLocatorTypeFile */
+    r = add_complocator_entry(hdb, "'NewSignature2', '{1D2CE6F3-E81C-4949-AB81-78D7DAD2AF2E}', 1");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* published component, user-managed, file, signature, misdbLocatorTypeFile */
+    r = add_complocator_entry(hdb, "'NewSignature3', '{19E0B999-85F5-4973-A61B-DBE4D66ECB1D}', 1");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* published component, machine, file, signature, misdbLocatorTypeDirectory */
+    r = add_complocator_entry(hdb, "'NewSignature4', '{A8AE6692-96BA-4198-8399-145D7D1D0D0E}', 0");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* published component, machine, dir, signature, misdbLocatorTypeDirectory */
+    r = add_complocator_entry(hdb, "'NewSignature5', '{F0CCA976-27A3-4808-9DDD-1A6FD50A0D5A}', 0");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* published component, machine, dir, no signature, misdbLocatorTypeDirectory */
+    r = add_complocator_entry(hdb, "'NewSignature6', '{C0ECD96F-7898-4410-9667-194BD8C1B648}', 0");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* published component, machine, file, no signature, misdbLocatorTypeFile */
+    r = add_complocator_entry(hdb, "'NewSignature7', '{DB20F535-9C26-4127-9C2B-CC45A8B51DA1}', 1");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* unpublished component, no signature, misdbLocatorTypeDir */
+    r = add_complocator_entry(hdb, "'NewSignature8', '{FB671D5B-5083-4048-90E0-481C48D8F3A5}', 0");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* published component, no signature, dir does not exist misdbLocatorTypeDir */
+    r = add_complocator_entry(hdb, "'NewSignature9', '{91B7359B-07F2-4221-AA8D-DE102BB87A5F}', 0");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* published component, signature w/ ver, misdbLocatorTypeFile */
+    r = add_complocator_entry(hdb, "'NewSignature10', '{4A2E1B5B-4034-4177-833B-8CC35F1B3EF1}', 1");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* published component, signature w/ ver, ver > max, misdbLocatorTypeFile */
+    r = add_complocator_entry(hdb, "'NewSignature11', '{A204DF48-7346-4635-BA2E-66247DBAC9DF}', 1");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* published component, signature w/ ver, sig->name ignored, misdbLocatorTypeFile */
+    r = add_complocator_entry(hdb, "'NewSignature12', '{EC30CE73-4CF9-4908-BABD-1ED82E1515FD}', 1");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = create_signature_table(hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_signature_entry(hdb, "'NewSignature1', 'FileName1', '', '', '', '', '', '', ''");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_signature_entry(hdb, "'NewSignature2', 'FileName2', '', '', '', '', '', '', ''");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_signature_entry(hdb, "'NewSignature3', 'FileName3', '', '', '', '', '', '', ''");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_signature_entry(hdb, "'NewSignature4', 'FileName4', '', '', '', '', '', '', ''");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_signature_entry(hdb, "'NewSignature5', 'FileName5', '', '', '', '', '', '', ''");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_signature_entry(hdb, "'NewSignature10', 'FileName8.dll', '1.1.1.1', '2.1.1.1', '', '', '', '', ''");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_signature_entry(hdb, "'NewSignature11', 'FileName9.dll', '1.1.1.1', '2.1.1.1', '', '', '', '', ''");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_signature_entry(hdb, "'NewSignature12', 'ignored', '1.1.1.1', '2.1.1.1', '', '', '', '', ''");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    hpkg = package_from_db(hdb);
+    ok(hpkg, "Expected a valid package handle\n");
+
+    r = MsiSetPropertyA(hpkg, "SIGPROP8", "october");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = MsiDoAction(hpkg, "AppSearch");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\FileName1", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP1", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\FileName2", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP2", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\FileName3", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP3", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\FileName4", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP4", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\FileName5", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP5", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP6", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP7", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP8", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, "october"), "Expected \"october\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP9", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\FileName8.dll", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP10", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP11", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\FileName10.dll", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP12", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    delete_component_path("{A8AE6692-96BA-4198-8399-145D7D1D0D0E}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+    delete_component_path("{1D2CE6F3-E81C-4949-AB81-78D7DAD2AF2E}",
+                          MSIINSTALLCONTEXT_USERUNMANAGED, usersid);
+    delete_component_path("{19E0B999-85F5-4973-A61B-DBE4D66ECB1D}",
+                          MSIINSTALLCONTEXT_USERMANAGED, usersid);
+    delete_component_path("{F0CCA976-27A3-4808-9DDD-1A6FD50A0D5A}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+    delete_component_path("{C0ECD96F-7898-4410-9667-194BD8C1B648}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+    delete_component_path("{DB20F535-9C26-4127-9C2B-CC45A8B51DA1}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+    delete_component_path("{91B7359B-07F2-4221-AA8D-DE102BB87A5F}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+    delete_component_path("{4A2E1B5B-4034-4177-833B-8CC35F1B3EF1}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+    delete_component_path("{A204DF48-7346-4635-BA2E-66247DBAC9DF}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+    delete_component_path("{EC30CE73-4CF9-4908-BABD-1ED82E1515FD}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+
+    DeleteFileA("FileName1");
+    DeleteFileA("FileName2");
+    DeleteFileA("FileName3");
+    DeleteFileA("FileName4");
+    DeleteFileA("FileName5");
+    DeleteFileA("FileName6");
+    DeleteFileA("FileName7");
+    DeleteFileA("FileName8.dll");
+    DeleteFileA("FileName9.dll");
+    DeleteFileA("FileName10.dll");
+    MsiCloseHandle(hpkg);
+    DeleteFileA(msifile);
+}
+
+static void test_appsearch_reglocator(void)
+{
+    MSIHANDLE hpkg, hdb;
+    CHAR path[MAX_PATH];
+    CHAR prop[MAX_PATH];
+    DWORD binary[2];
+    DWORD size, val;
+    BOOL space, version;
+    HKEY hklm, classes;
+    HKEY hkcu, users;
+    LPCSTR str;
+    LPSTR ptr;
+    LONG res;
+    UINT r;
+
+    version = TRUE;
+    if (!create_file_with_version("test.dll", MAKELONG(2, 1), MAKELONG(4, 3)))
+        version = FALSE;
+
+    DeleteFileA("test.dll");
+
+    res = RegCreateKeyA(HKEY_CLASSES_ROOT, "Software\\Wine", &classes);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegSetValueExA(classes, "Value1", 0, REG_SZ,
+                         (const BYTE *)"regszdata", 10);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegCreateKeyA(HKEY_CURRENT_USER, "Software\\Wine", &hkcu);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegSetValueExA(hkcu, "Value1", 0, REG_SZ,
+                         (const BYTE *)"regszdata", 10);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    users = 0;
+    res = RegCreateKeyA(HKEY_USERS, "S-1-5-18\\Software\\Wine", &users);
+    ok(res == ERROR_SUCCESS ||
+       broken(res == ERROR_INVALID_PARAMETER),
+       "Expected ERROR_SUCCESS, got %d\n", res);
+
+    if (res == ERROR_SUCCESS)
+    {
+        res = RegSetValueExA(users, "Value1", 0, REG_SZ,
+                             (const BYTE *)"regszdata", 10);
+        ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    }
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, "Software\\Wine", &hklm);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegSetValueA(hklm, NULL, REG_SZ, "defvalue", 8);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegSetValueExA(hklm, "Value1", 0, REG_SZ,
+                         (const BYTE *)"regszdata", 10);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    val = 42;
+    res = RegSetValueExA(hklm, "Value2", 0, REG_DWORD,
+                         (const BYTE *)&val, sizeof(DWORD));
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    val = -42;
+    res = RegSetValueExA(hklm, "Value3", 0, REG_DWORD,
+                         (const BYTE *)&val, sizeof(DWORD));
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegSetValueExA(hklm, "Value4", 0, REG_EXPAND_SZ,
+                         (const BYTE *)"%PATH%", 7);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegSetValueExA(hklm, "Value5", 0, REG_EXPAND_SZ,
+                         (const BYTE *)"my%NOVAR%", 10);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegSetValueExA(hklm, "Value6", 0, REG_MULTI_SZ,
+                         (const BYTE *)"one\0two\0", 9);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    binary[0] = 0x1234abcd;
+    binary[1] = 0x567890ef;
+    res = RegSetValueExA(hklm, "Value7", 0, REG_BINARY,
+                         (const BYTE *)binary, sizeof(binary));
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegSetValueExA(hklm, "Value8", 0, REG_SZ,
+                         (const BYTE *)"#regszdata", 11);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    create_test_file("FileName1");
+    sprintf(path, "%s\\FileName1", CURR_DIR);
+    res = RegSetValueExA(hklm, "Value9", 0, REG_SZ,
+                         (const BYTE *)path, lstrlenA(path) + 1);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    sprintf(path, "%s\\FileName2", CURR_DIR);
+    res = RegSetValueExA(hklm, "Value10", 0, REG_SZ,
+                         (const BYTE *)path, lstrlenA(path) + 1);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    lstrcpyA(path, CURR_DIR);
+    res = RegSetValueExA(hklm, "Value11", 0, REG_SZ,
+                         (const BYTE *)path, lstrlenA(path) + 1);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    res = RegSetValueExA(hklm, "Value12", 0, REG_SZ,
+                         (const BYTE *)"", 1);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    create_file_with_version("FileName3.dll", MAKELONG(2, 1), MAKELONG(4, 3));
+    sprintf(path, "%s\\FileName3.dll", CURR_DIR);
+    res = RegSetValueExA(hklm, "Value13", 0, REG_SZ,
+                         (const BYTE *)path, lstrlenA(path) + 1);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    create_file_with_version("FileName4.dll", MAKELONG(1, 2), MAKELONG(3, 4));
+    sprintf(path, "%s\\FileName4.dll", CURR_DIR);
+    res = RegSetValueExA(hklm, "Value14", 0, REG_SZ,
+                         (const BYTE *)path, lstrlenA(path) + 1);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    create_file_with_version("FileName5.dll", MAKELONG(2, 1), MAKELONG(4, 3));
+    sprintf(path, "%s\\FileName5.dll", CURR_DIR);
+    res = RegSetValueExA(hklm, "Value15", 0, REG_SZ,
+                         (const BYTE *)path, lstrlenA(path) + 1);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    sprintf(path, "\"%s\\FileName1\" -option", CURR_DIR);
+    res = RegSetValueExA(hklm, "value16", 0, REG_SZ,
+                         (const BYTE *)path, lstrlenA(path) + 1);
+
+    space = (strchr(CURR_DIR, ' ')) ? TRUE : FALSE;
+    sprintf(path, "%s\\FileName1 -option", CURR_DIR);
+    res = RegSetValueExA(hklm, "value17", 0, REG_SZ,
+                         (const BYTE *)path, lstrlenA(path) + 1);
+
+    hdb = create_package_db();
+    ok(hdb, "Expected a valid database handle\n");
+
+    r = create_appsearch_table(hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP1', 'NewSignature1'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP2', 'NewSignature2'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP3', 'NewSignature3'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP4', 'NewSignature4'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP5', 'NewSignature5'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP6', 'NewSignature6'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP7', 'NewSignature7'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP8', 'NewSignature8'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP9', 'NewSignature9'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP10', 'NewSignature10'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP11', 'NewSignature11'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP12', 'NewSignature12'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP13', 'NewSignature13'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP14', 'NewSignature14'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP15', 'NewSignature15'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP16', 'NewSignature16'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP17', 'NewSignature17'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP18', 'NewSignature18'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP19', 'NewSignature19'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP20', 'NewSignature20'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP21', 'NewSignature21'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP22', 'NewSignature22'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP23', 'NewSignature23'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP24', 'NewSignature24'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP25', 'NewSignature25'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP26', 'NewSignature26'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP27', 'NewSignature27'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP28', 'NewSignature28'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP29', 'NewSignature29'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP30', 'NewSignature30'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = create_reglocator_table(hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeRawValue, REG_SZ */
+    str = "'NewSignature1', 2, 'Software\\Wine', 'Value1', 2";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeRawValue, positive DWORD */
+    str = "'NewSignature2', 2, 'Software\\Wine', 'Value2', 2";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeRawValue, negative DWORD */
+    str = "'NewSignature3', 2, 'Software\\Wine', 'Value3', 2";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeRawValue, REG_EXPAND_SZ */
+    str = "'NewSignature4', 2, 'Software\\Wine', 'Value4', 2";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeRawValue, REG_EXPAND_SZ */
+    str = "'NewSignature5', 2, 'Software\\Wine', 'Value5', 2";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeRawValue, REG_MULTI_SZ */
+    str = "'NewSignature6', 2, 'Software\\Wine', 'Value6', 2";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeRawValue, REG_BINARY */
+    str = "'NewSignature7', 2, 'Software\\Wine', 'Value7', 2";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeRawValue, REG_SZ first char is # */
+    str = "'NewSignature8', 2, 'Software\\Wine', 'Value8', 2";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeFileName, signature, file exists */
+    str = "'NewSignature9', 2, 'Software\\Wine', 'Value9', 1";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeFileName, signature, file does not exist */
+    str = "'NewSignature10', 2, 'Software\\Wine', 'Value10', 1";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeFileName, no signature */
+    str = "'NewSignature11', 2, 'Software\\Wine', 'Value9', 1";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeDirectory, no signature, file exists */
+    str = "'NewSignature12', 2, 'Software\\Wine', 'Value9', 0";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeDirectory, no signature, directory exists */
+    str = "'NewSignature13', 2, 'Software\\Wine', 'Value11', 0";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeDirectory, signature, file exists */
+    str = "'NewSignature14', 2, 'Software\\Wine', 'Value9', 0";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKCR, msidbLocatorTypeRawValue, REG_SZ */
+    str = "'NewSignature15', 0, 'Software\\Wine', 'Value1', 2";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKCU, msidbLocatorTypeRawValue, REG_SZ */
+    str = "'NewSignature16', 1, 'Software\\Wine', 'Value1', 2";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKU, msidbLocatorTypeRawValue, REG_SZ */
+    str = "'NewSignature17', 3, 'S-1-5-18\\Software\\Wine', 'Value1', 2";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeRawValue, REG_SZ, NULL Name */
+    str = "'NewSignature18', 2, 'Software\\Wine', '', 2";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeRawValue, REG_SZ, key does not exist */
+    str = "'NewSignature19', 2, 'Software\\IDontExist', '', 2";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeRawValue, REG_SZ, value is empty */
+    str = "'NewSignature20', 2, 'Software\\Wine', 'Value12', 2";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeFileName, signature, file exists w/ version */
+    str = "'NewSignature21', 2, 'Software\\Wine', 'Value13', 1";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeFileName, file exists w/ version, version > max */
+    str = "'NewSignature22', 2, 'Software\\Wine', 'Value14', 1";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeFileName, file exists w/ version, sig->name ignored */
+    str = "'NewSignature23', 2, 'Software\\Wine', 'Value15', 1";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeFileName, no signature, directory exists */
+    str = "'NewSignature24', 2, 'Software\\Wine', 'Value11', 1";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeFileName, no signature, file does not exist */
+    str = "'NewSignature25', 2, 'Software\\Wine', 'Value10', 1";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeDirectory, signature, directory exists */
+    str = "'NewSignature26', 2, 'Software\\Wine', 'Value11', 0";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeDirectory, signature, file does not exist */
+    str = "'NewSignature27', 2, 'Software\\Wine', 'Value10', 0";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeDirectory, no signature, file does not exist */
+    str = "'NewSignature28', 2, 'Software\\Wine', 'Value10', 0";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeFile, file exists, in quotes */
+    str = "'NewSignature29', 2, 'Software\\Wine', 'Value16', 1";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* HKLM, msidbLocatorTypeFile, file exists, no quotes */
+    str = "'NewSignature30', 2, 'Software\\Wine', 'Value17', 1";
+    r = add_reglocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = create_signature_table(hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature9', 'FileName1', '', '', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature10', 'FileName2', '', '', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature14', 'FileName1', '', '', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature21', 'FileName3.dll', '1.1.1.1', '2.1.1.1', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature22', 'FileName4.dll', '1.1.1.1', '2.1.1.1', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature23', 'ignored', '1.1.1.1', '2.1.1.1', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    ptr = strrchr(CURR_DIR, '\\') + 1;
+    sprintf(path, "'NewSignature26', '%s', '', '', '', '', '', '', ''", ptr);
+    r = add_signature_entry(hdb, path);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature27', 'FileName2', '', '', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature29', 'FileName1', '', '', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature30', 'FileName1', '', '', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    hpkg = package_from_db(hdb);
+    ok(hpkg, "Expected a valid package handle\n");
+
+    r = MsiDoAction(hpkg, "AppSearch");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP1", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, "regszdata"),
+       "Expected \"regszdata\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP2", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, "#42"), "Expected \"#42\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP3", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, "#-42"), "Expected \"#-42\", got \"%s\"\n", prop);
+
+    ExpandEnvironmentStringsA("%PATH%", path, MAX_PATH);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP4", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP5", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop,
+       "my%NOVAR%"), "Expected \"my%%NOVAR%%\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP6", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    todo_wine
+    {
+        ok(!memcmp(prop, "\0one\0two\0\0", 10),
+           "Expected \"\\0one\\0two\\0\\0\"\n");
+    }
+
+    size = MAX_PATH;
+    lstrcpyA(path, "#xCDAB3412EF907856");
+    r = MsiGetPropertyA(hpkg, "SIGPROP7", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP8", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, "##regszdata"),
+       "Expected \"##regszdata\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\FileName1", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP9", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP10", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP11", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP12", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP13", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP14", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP15", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, "regszdata"),
+       "Expected \"regszdata\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP16", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, "regszdata"),
+       "Expected \"regszdata\", got \"%s\"\n", prop);
+
+    if (users)
+    {
+        size = MAX_PATH;
+        r = MsiGetPropertyA(hpkg, "SIGPROP17", prop, &size);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(prop, "regszdata"),
+           "Expected \"regszdata\", got \"%s\"\n", prop);
+    }
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP18", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, "defvalue"),
+       "Expected \"defvalue\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP19", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP20", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    if (version)
+    {
+        size = MAX_PATH;
+        sprintf(path, "%s\\FileName3.dll", CURR_DIR);
+        r = MsiGetPropertyA(hpkg, "SIGPROP21", prop, &size);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+        size = MAX_PATH;
+        r = MsiGetPropertyA(hpkg, "SIGPROP22", prop, &size);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+        size = MAX_PATH;
+        sprintf(path, "%s\\FileName5.dll", CURR_DIR);
+        r = MsiGetPropertyA(hpkg, "SIGPROP23", prop, &size);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+    }
+
+    size = MAX_PATH;
+    lstrcpyA(path, CURR_DIR);
+    ptr = strrchr(path, '\\') + 1;
+    *ptr = '\0';
+    r = MsiGetPropertyA(hpkg, "SIGPROP24", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP25", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP26", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP27", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP28", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\FileName1", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP29", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\FileName1", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP30", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    if (space)
+        ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+    else
+        todo_wine ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    RegSetValueA(hklm, NULL, REG_SZ, "", 0);
+    RegDeleteValueA(hklm, "Value1");
+    RegDeleteValueA(hklm, "Value2");
+    RegDeleteValueA(hklm, "Value3");
+    RegDeleteValueA(hklm, "Value4");
+    RegDeleteValueA(hklm, "Value5");
+    RegDeleteValueA(hklm, "Value6");
+    RegDeleteValueA(hklm, "Value7");
+    RegDeleteValueA(hklm, "Value8");
+    RegDeleteValueA(hklm, "Value9");
+    RegDeleteValueA(hklm, "Value10");
+    RegDeleteValueA(hklm, "Value11");
+    RegDeleteValueA(hklm, "Value12");
+    RegDeleteValueA(hklm, "Value13");
+    RegDeleteValueA(hklm, "Value14");
+    RegDeleteValueA(hklm, "Value15");
+    RegDeleteValueA(hklm, "Value16");
+    RegDeleteValueA(hklm, "Value17");
+    RegDeleteKeyA(hklm, "");
+    RegCloseKey(hklm);
+
+    RegDeleteValueA(classes, "Value1");
+    RegDeleteKeyA(classes, "");
+    RegCloseKey(classes);
+
+    RegDeleteValueA(hkcu, "Value1");
+    RegDeleteKeyA(hkcu, "");
+    RegCloseKey(hkcu);
+
+    RegDeleteValueA(users, "Value1");
+    RegDeleteKeyA(users, "");
+    RegCloseKey(users);
+
+    DeleteFileA("FileName1");
+    DeleteFileA("FileName3.dll");
+    DeleteFileA("FileName4.dll");
+    DeleteFileA("FileName5.dll");
+    MsiCloseHandle(hpkg);
+    DeleteFileA(msifile);
+}
+
+static void delete_win_ini(LPCSTR file)
+{
+    CHAR path[MAX_PATH];
+
+    GetWindowsDirectoryA(path, MAX_PATH);
+    lstrcatA(path, "\\");
+    lstrcatA(path, file);
+
+    DeleteFileA(path);
+}
+
+static void test_appsearch_inilocator(void)
+{
+    MSIHANDLE hpkg, hdb;
+    CHAR path[MAX_PATH];
+    CHAR prop[MAX_PATH];
+    BOOL version;
+    LPCSTR str;
+    LPSTR ptr;
+    DWORD size;
+    UINT r;
+
+    version = TRUE;
+    if (!create_file_with_version("test.dll", MAKELONG(2, 1), MAKELONG(4, 3)))
+        version = FALSE;
+
+    DeleteFileA("test.dll");
+
+    WritePrivateProfileStringA("Section", "Key", "keydata,field2", "IniFile.ini");
+
+    create_test_file("FileName1");
+    sprintf(path, "%s\\FileName1", CURR_DIR);
+    WritePrivateProfileStringA("Section", "Key2", path, "IniFile.ini");
+
+    WritePrivateProfileStringA("Section", "Key3", CURR_DIR, "IniFile.ini");
+
+    sprintf(path, "%s\\IDontExist", CURR_DIR);
+    WritePrivateProfileStringA("Section", "Key4", path, "IniFile.ini");
+
+    create_file_with_version("FileName2.dll", MAKELONG(2, 1), MAKELONG(4, 3));
+    sprintf(path, "%s\\FileName2.dll", CURR_DIR);
+    WritePrivateProfileStringA("Section", "Key5", path, "IniFile.ini");
+
+    create_file_with_version("FileName3.dll", MAKELONG(1, 2), MAKELONG(3, 4));
+    sprintf(path, "%s\\FileName3.dll", CURR_DIR);
+    WritePrivateProfileStringA("Section", "Key6", path, "IniFile.ini");
+
+    create_file_with_version("FileName4.dll", MAKELONG(2, 1), MAKELONG(4, 3));
+    sprintf(path, "%s\\FileName4.dll", CURR_DIR);
+    WritePrivateProfileStringA("Section", "Key7", path, "IniFile.ini");
+
+    hdb = create_package_db();
+    ok(hdb, "Expected a valid database handle\n");
+
+    r = create_appsearch_table(hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP1', 'NewSignature1'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP2', 'NewSignature2'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP3', 'NewSignature3'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP4', 'NewSignature4'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP5', 'NewSignature5'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP6', 'NewSignature6'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP7', 'NewSignature7'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP8', 'NewSignature8'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP9', 'NewSignature9'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP10', 'NewSignature10'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP11', 'NewSignature11'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP12', 'NewSignature12'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = create_inilocator_table(hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* msidbLocatorTypeRawValue, field 1 */
+    str = "'NewSignature1', 'IniFile.ini', 'Section', 'Key', 1, 2";
+    r = add_inilocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* msidbLocatorTypeRawValue, field 2 */
+    str = "'NewSignature2', 'IniFile.ini', 'Section', 'Key', 2, 2";
+    r = add_inilocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* msidbLocatorTypeRawValue, entire field */
+    str = "'NewSignature3', 'IniFile.ini', 'Section', 'Key', 0, 2";
+    r = add_inilocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* msidbLocatorTypeFile */
+    str = "'NewSignature4', 'IniFile.ini', 'Section', 'Key2', 1, 1";
+    r = add_inilocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* msidbLocatorTypeDirectory, file */
+    str = "'NewSignature5', 'IniFile.ini', 'Section', 'Key2', 1, 0";
+    r = add_inilocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* msidbLocatorTypeDirectory, directory */
+    str = "'NewSignature6', 'IniFile.ini', 'Section', 'Key3', 1, 0";
+    r = add_inilocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* msidbLocatorTypeFile, file, no signature */
+    str = "'NewSignature7', 'IniFile.ini', 'Section', 'Key2', 1, 1";
+    r = add_inilocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* msidbLocatorTypeFile, dir, no signature */
+    str = "'NewSignature8', 'IniFile.ini', 'Section', 'Key3', 1, 1";
+    r = add_inilocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* msidbLocatorTypeFile, file does not exist */
+    str = "'NewSignature9', 'IniFile.ini', 'Section', 'Key4', 1, 1";
+    r = add_inilocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* msidbLocatorTypeFile, signature with version */
+    str = "'NewSignature10', 'IniFile.ini', 'Section', 'Key5', 1, 1";
+    r = add_inilocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* msidbLocatorTypeFile, signature with version, ver > max */
+    str = "'NewSignature11', 'IniFile.ini', 'Section', 'Key6', 1, 1";
+    r = add_inilocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* msidbLocatorTypeFile, signature with version, sig->name ignored */
+    str = "'NewSignature12', 'IniFile.ini', 'Section', 'Key7', 1, 1";
+    r = add_inilocator_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = create_signature_table(hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_signature_entry(hdb, "'NewSignature4', 'FileName1', '', '', '', '', '', '', ''");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_signature_entry(hdb, "'NewSignature9', 'IDontExist', '', '', '', '', '', '', ''");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_signature_entry(hdb, "'NewSignature10', 'FileName2.dll', '1.1.1.1', '2.1.1.1', '', '', '', '', ''");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_signature_entry(hdb, "'NewSignature11', 'FileName3.dll', '1.1.1.1', '2.1.1.1', '', '', '', '', ''");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_signature_entry(hdb, "'NewSignature12', 'ignored', '1.1.1.1', '2.1.1.1', '', '', '', '', ''");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    hpkg = package_from_db(hdb);
+    ok(hpkg, "Expected a valid package handle\n");
+
+    r = MsiDoAction(hpkg, "AppSearch");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP1", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, "keydata"), "Expected \"keydata\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP2", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, "field2"), "Expected \"field2\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP3", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, "keydata,field2"),
+       "Expected \"keydata,field2\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\FileName1", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP4", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP5", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP6", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP7", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    lstrcpyA(path, CURR_DIR);
+    ptr = strrchr(path, '\\');
+    *(ptr + 1) = '\0';
+    r = MsiGetPropertyA(hpkg, "SIGPROP8", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP9", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    if (version)
+    {
+        size = MAX_PATH;
+        sprintf(path, "%s\\FileName2.dll", CURR_DIR);
+        r = MsiGetPropertyA(hpkg, "SIGPROP10", prop, &size);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+        size = MAX_PATH;
+        r = MsiGetPropertyA(hpkg, "SIGPROP11", prop, &size);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+        size = MAX_PATH;
+        sprintf(path, "%s\\FileName4.dll", CURR_DIR);
+        r = MsiGetPropertyA(hpkg, "SIGPROP12", prop, &size);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+    }
+
+    delete_win_ini("IniFile.ini");
+    DeleteFileA("FileName1");
+    DeleteFileA("FileName2.dll");
+    DeleteFileA("FileName3.dll");
+    DeleteFileA("FileName4.dll");
+    MsiCloseHandle(hpkg);
+    DeleteFileA(msifile);
+}
+
+static void test_appsearch_drlocator(void)
+{
+    MSIHANDLE hpkg, hdb;
+    CHAR path[MAX_PATH];
+    CHAR prop[MAX_PATH];
+    BOOL version;
+    LPCSTR str;
+    DWORD size;
+    UINT r;
+
+    version = TRUE;
+    if (!create_file_with_version("test.dll", MAKELONG(2, 1), MAKELONG(4, 3)))
+        version = FALSE;
+
+    DeleteFileA("test.dll");
+
+    create_test_file("FileName1");
+    CreateDirectoryA("one", NULL);
+    CreateDirectoryA("one\\two", NULL);
+    CreateDirectoryA("one\\two\\three", NULL);
+    create_test_file("one\\two\\three\\FileName2");
+    CreateDirectoryA("another", NULL);
+    create_file_with_version("FileName3.dll", MAKELONG(2, 1), MAKELONG(4, 3));
+    create_file_with_version("FileName4.dll", MAKELONG(1, 2), MAKELONG(3, 4));
+    create_file_with_version("FileName5.dll", MAKELONG(2, 1), MAKELONG(4, 3));
+
+    hdb = create_package_db();
+    ok(hdb, "Expected a valid database handle\n");
+
+    r = create_appsearch_table(hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP1', 'NewSignature1'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP2', 'NewSignature2'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP3', 'NewSignature3'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP4', 'NewSignature4'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP5', 'NewSignature5'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP6', 'NewSignature6'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP7', 'NewSignature7'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP8', 'NewSignature8'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP9', 'NewSignature9'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = add_appsearch_entry(hdb, "'SIGPROP10', 'NewSignature10'");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = create_drlocator_table(hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* no parent, full path, depth 0, signature */
+    sprintf(path, "'NewSignature1', '', '%s', 0", CURR_DIR);
+    r = add_drlocator_entry(hdb, path);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* no parent, full path, depth 0, no signature */
+    sprintf(path, "'NewSignature2', '', '%s', 0", CURR_DIR);
+    r = add_drlocator_entry(hdb, path);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* no parent, relative path, depth 0, no signature */
+    sprintf(path, "'NewSignature3', '', '%s', 0", CURR_DIR + 3);
+    r = add_drlocator_entry(hdb, path);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* no parent, full path, depth 2, signature */
+    sprintf(path, "'NewSignature4', '', '%s', 2", CURR_DIR);
+    r = add_drlocator_entry(hdb, path);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* no parent, full path, depth 3, signature */
+    sprintf(path, "'NewSignature5', '', '%s', 3", CURR_DIR);
+    r = add_drlocator_entry(hdb, path);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* no parent, full path, depth 1, signature is dir */
+    sprintf(path, "'NewSignature6', '', '%s', 1", CURR_DIR);
+    r = add_drlocator_entry(hdb, path);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* parent is in DrLocator, relative path, depth 0, signature */
+    sprintf(path, "'NewSignature7', 'NewSignature1', 'one\\two\\three', 1");
+    r = add_drlocator_entry(hdb, path);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* no parent, full path, depth 0, signature w/ version */
+    sprintf(path, "'NewSignature8', '', '%s', 0", CURR_DIR);
+    r = add_drlocator_entry(hdb, path);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* no parent, full path, depth 0, signature w/ version, ver > max */
+    sprintf(path, "'NewSignature9', '', '%s', 0", CURR_DIR);
+    r = add_drlocator_entry(hdb, path);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* no parent, full path, depth 0, signature w/ version, sig->name not ignored */
+    sprintf(path, "'NewSignature10', '', '%s', 0", CURR_DIR);
+    r = add_drlocator_entry(hdb, path);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = create_signature_table(hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature1', 'FileName1', '', '', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature4', 'FileName2', '', '', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature5', 'FileName2', '', '', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature6', 'another', '', '', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature7', 'FileName2', '', '', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature8', 'FileName3.dll', '1.1.1.1', '2.1.1.1', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature9', 'FileName4.dll', '1.1.1.1', '2.1.1.1', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    str = "'NewSignature10', 'necessary', '1.1.1.1', '2.1.1.1', '', '', '', '', ''";
+    r = add_signature_entry(hdb, str);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    hpkg = package_from_db(hdb);
+    ok(hpkg, "Expected a valid package handle\n");
+
+    r = MsiDoAction(hpkg, "AppSearch");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\FileName1", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP1", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP2", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP3", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP4", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\one\\two\\three\\FileName2", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP5", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    size = MAX_PATH;
+    r = MsiGetPropertyA(hpkg, "SIGPROP6", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+    size = MAX_PATH;
+    sprintf(path, "%s\\one\\two\\three\\FileName2", CURR_DIR);
+    r = MsiGetPropertyA(hpkg, "SIGPROP7", prop, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+    if (version)
+    {
+        size = MAX_PATH;
+        sprintf(path, "%s\\FileName3.dll", CURR_DIR);
+        r = MsiGetPropertyA(hpkg, "SIGPROP8", prop, &size);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
+
+        size = MAX_PATH;
+        r = MsiGetPropertyA(hpkg, "SIGPROP9", prop, &size);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+
+        size = MAX_PATH;
+        r = MsiGetPropertyA(hpkg, "SIGPROP10", prop, &size);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(prop, ""), "Expected \"\", got \"%s\"\n", prop);
+    }
+
+    DeleteFileA("FileName1");
+    DeleteFileA("FileName3.dll");
+    DeleteFileA("FileName4.dll");
+    DeleteFileA("FileName5.dll");
+    DeleteFileA("one\\two\\three\\FileName2");
+    RemoveDirectoryA("one\\two\\three");
+    RemoveDirectoryA("one\\two");
+    RemoveDirectoryA("one");
+    RemoveDirectoryA("another");
+    MsiCloseHandle(hpkg);
     DeleteFileA(msifile);
 }
 
@@ -6214,95 +7913,6 @@ static void test_ccpsearch(void)
     DeleteFileA(msifile);
 }
 
-static BOOL squash_guid(LPCWSTR in, LPWSTR out)
-{
-    DWORD i,n=1;
-    GUID guid;
-
-    if (FAILED(CLSIDFromString((LPOLESTR)in, &guid)))
-        return FALSE;
-
-    for(i=0; i<8; i++)
-        out[7-i] = in[n++];
-    n++;
-    for(i=0; i<4; i++)
-        out[11-i] = in[n++];
-    n++;
-    for(i=0; i<4; i++)
-        out[15-i] = in[n++];
-    n++;
-    for(i=0; i<2; i++)
-    {
-        out[17+i*2] = in[n++];
-        out[16+i*2] = in[n++];
-    }
-    n++;
-    for( ; i<8; i++)
-    {
-        out[17+i*2] = in[n++];
-        out[16+i*2] = in[n++];
-    }
-    out[32]=0;
-    return TRUE;
-}
-
-static void set_component_path(LPCSTR filename, LPCSTR guid)
-{
-    WCHAR guidW[MAX_PATH];
-    WCHAR squashedW[MAX_PATH];
-    CHAR squashed[MAX_PATH];
-    CHAR substr[MAX_PATH];
-    CHAR path[MAX_PATH];
-    HKEY hkey;
-
-    MultiByteToWideChar(CP_ACP, 0, guid, -1, guidW, MAX_PATH);
-    squash_guid(guidW, squashedW);
-    WideCharToMultiByte(CP_ACP, 0, squashedW, -1, squashed, MAX_PATH, NULL, NULL);
-
-    lstrcpyA(substr, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\"
-                    "Installer\\UserData\\S-1-5-18\\Components\\");
-    lstrcatA(substr, squashed);
-
-    RegCreateKeyA(HKEY_LOCAL_MACHINE, substr, &hkey);
-
-    lstrcpyA(path, CURR_DIR);
-    lstrcatA(path, "\\");
-    lstrcatA(path, filename);
-
-    /* just using a random squashed product code */
-    RegSetValueExA(hkey, "7D2F387510109040002000060BECB6AB", 0,
-                   REG_SZ, (LPBYTE)path, lstrlenA(path));
-
-    RegCloseKey(hkey);
-
-    lstrcpyA(substr, "SOFTWARE\\Classes\\Installer\\Products\\7D2F387510109040002000060BECB6AB");
-    RegCreateKeyA(HKEY_LOCAL_MACHINE, substr, &hkey);
-}
-
-static void delete_component_path(LPCSTR guid)
-{
-    WCHAR guidW[MAX_PATH];
-    WCHAR squashedW[MAX_PATH];
-    WCHAR substrW[MAX_PATH];
-    CHAR squashed[MAX_PATH];
-    CHAR substr[MAX_PATH];
-
-    MultiByteToWideChar(CP_ACP, 0, guid, -1, guidW, MAX_PATH);
-    squash_guid(guidW, squashedW);
-    WideCharToMultiByte(CP_ACP, 0, squashedW, -1, squashed, MAX_PATH, NULL, NULL);
-
-    lstrcpyA(substr, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\"
-                    "Installer\\UserData\\S-1-5-18\\Components\\");
-    lstrcatA(substr, squashed);
-
-    MultiByteToWideChar(CP_ACP, 0, substr, -1, substrW, MAX_PATH);
-    package_RegDeleteTreeW(HKEY_LOCAL_MACHINE, substrW);
-
-    lstrcpyA(substr, "SOFTWARE\\Classes\\Installer\\Products\\7D2F387510109040002000060BECB6AB");
-    MultiByteToWideChar(CP_ACP, 0, substr, -1, substrW, MAX_PATH);
-    package_RegDeleteTreeW(HKEY_LOCAL_MACHINE, substrW);
-}
-
 static void test_complocator(void)
 {
     MSIHANDLE hdb, hpkg;
@@ -6465,14 +8075,22 @@ static void test_complocator(void)
     CreateDirectoryA("olorotitan", NULL);
     CreateDirectoryA("pantydraco", NULL);
 
-    set_component_path("abelisaurus", "{E3619EED-305A-418C-B9C7-F7D7377F0934}");
-    set_component_path("bactrosaurus", "{D56B688D-542F-42Ef-90FD-B6DA76EE8119}");
-    set_component_path("echinodon", "{A19E16C5-C75D-4699-8111-C4338C40C3CB}");
-    set_component_path("falcarius", "{17762FA1-A7AE-4CC6-8827-62873C35361D}");
-    set_component_path("iguanodon", "{8E0DA02E-F6A7-4A8F-B25D-6F564C492308}");
-    set_component_path("jobaria", "{243C22B1-8C51-4151-B9D1-1AE5265E079E}");
-    set_component_path("megaraptor", "{8B1034B7-BD5E-41ac-B52C-0105D3DFD74D}");
-    set_component_path("neosodon", "{0B499649-197A-48EF-93D2-AF1C17ED6E90}");
+    set_component_path("abelisaurus", MSIINSTALLCONTEXT_MACHINE,
+                       "{E3619EED-305A-418C-B9C7-F7D7377F0934}", NULL, FALSE);
+    set_component_path("bactrosaurus", MSIINSTALLCONTEXT_MACHINE,
+                       "{D56B688D-542F-42Ef-90FD-B6DA76EE8119}", NULL, FALSE);
+    set_component_path("echinodon", MSIINSTALLCONTEXT_MACHINE,
+                       "{A19E16C5-C75D-4699-8111-C4338C40C3CB}", NULL, FALSE);
+    set_component_path("falcarius", MSIINSTALLCONTEXT_MACHINE,
+                       "{17762FA1-A7AE-4CC6-8827-62873C35361D}", NULL, FALSE);
+    set_component_path("iguanodon", MSIINSTALLCONTEXT_MACHINE,
+                       "{8E0DA02E-F6A7-4A8F-B25D-6F564C492308}", NULL, FALSE);
+    set_component_path("jobaria", MSIINSTALLCONTEXT_MACHINE,
+                       "{243C22B1-8C51-4151-B9D1-1AE5265E079E}", NULL, FALSE);
+    set_component_path("megaraptor", MSIINSTALLCONTEXT_MACHINE,
+                       "{8B1034B7-BD5E-41ac-B52C-0105D3DFD74D}", NULL, FALSE);
+    set_component_path("neosodon", MSIINSTALLCONTEXT_MACHINE,
+                       "{0B499649-197A-48EF-93D2-AF1C17ED6E90}", NULL, FALSE);
 
     r = MsiDoAction(hpkg, "AppSearch");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -6590,14 +8208,22 @@ static void test_complocator(void)
     RemoveDirectoryA("neosodon");
     RemoveDirectoryA("olorotitan");
     RemoveDirectoryA("pantydraco");
-    delete_component_path("{E3619EED-305A-418C-B9C7-F7D7377F0934}");
-    delete_component_path("{D56B688D-542F-42Ef-90FD-B6DA76EE8119}");
-    delete_component_path("{A19E16C5-C75D-4699-8111-C4338C40C3CB}");
-    delete_component_path("{17762FA1-A7AE-4CC6-8827-62873C35361D}");
-    delete_component_path("{8E0DA02E-F6A7-4A8F-B25D-6F564C492308}");
-    delete_component_path("{243C22B1-8C51-4151-B9D1-1AE5265E079E}");
-    delete_component_path("{8B1034B7-BD5E-41ac-B52C-0105D3DFD74D}");
-    delete_component_path("{0B499649-197A-48EF-93D2-AF1C17ED6E90}");
+    delete_component_path("{E3619EED-305A-418C-B9C7-F7D7377F0934}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+    delete_component_path("{D56B688D-542F-42Ef-90FD-B6DA76EE8119}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+    delete_component_path("{A19E16C5-C75D-4699-8111-C4338C40C3CB}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+    delete_component_path("{17762FA1-A7AE-4CC6-8827-62873C35361D}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+    delete_component_path("{8E0DA02E-F6A7-4A8F-B25D-6F564C492308}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+    delete_component_path("{243C22B1-8C51-4151-B9D1-1AE5265E079E}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+    delete_component_path("{8B1034B7-BD5E-41ac-B52C-0105D3DFD74D}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
+    delete_component_path("{0B499649-197A-48EF-93D2-AF1C17ED6E90}",
+                          MSIINSTALLCONTEXT_MACHINE, NULL);
     DeleteFileA(msifile);
 }
 
@@ -8050,6 +9676,10 @@ START_TEST(package)
     test_getproperty();
     test_removefiles();
     test_appsearch();
+    test_appsearch_complocator();
+    test_appsearch_reglocator();
+    test_appsearch_inilocator();
+    test_appsearch_drlocator();
     test_featureparents();
     test_installprops();
     test_launchconditions();

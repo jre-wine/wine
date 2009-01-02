@@ -27,16 +27,12 @@
 #include <stdio.h>
 #include <sys/time.h>
 
-#include "windef.h"
-#include "winbase.h"
-#include "winreg.h"
-#include "winuser.h"
+#include "mountmgr.h"
 #include "excpt.h"
 
 #include "wine/library.h"
 #include "wine/exception.h"
 #include "wine/debug.h"
-#include "mountmgr.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mountmgr);
 
@@ -117,6 +113,7 @@ static void new_device( LibHalContext *ctx, const char *udi )
     char *mount_point = NULL;
     char *device = NULL;
     char *type = NULL;
+    DWORD drive_type;
 
     p_dbus_error_init( &error );
 
@@ -135,7 +132,10 @@ static void new_device( LibHalContext *ctx, const char *udi )
     if (!(type = p_libhal_device_get_property_string( ctx, parent, "storage.drive_type", &error )))
         p_dbus_error_free( &error );  /* ignore error */
 
-    add_dos_device( udi, device, mount_point, type );
+    if (type && !strcmp( type, "cdrom" )) drive_type = DRIVE_CDROM;
+    else drive_type = DRIVE_REMOVABLE;  /* FIXME: default to removable */
+
+    add_dos_device( -1, udi, device, mount_point, drive_type );
 
     /* add property watch for mount point */
     p_libhal_device_add_property_watch( ctx, udi, &error );
@@ -155,7 +155,7 @@ static void removed_device( LibHalContext *ctx, const char *udi )
 
     TRACE( "removed %s\n", wine_dbgstr_a(udi) );
 
-    if (remove_dos_device( udi ))
+    if (!remove_dos_device( -1, udi ))
     {
         p_dbus_error_init( &error );
         p_libhal_device_remove_property_watch( ctx, udi, &error );

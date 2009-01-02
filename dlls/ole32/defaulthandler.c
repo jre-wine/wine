@@ -64,6 +64,13 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
+enum storage_state
+{
+    storage_state_uninitialised,
+    storage_state_initialised,
+    storage_state_loaded
+};
+
 /****************************************************************************
  * DefaultHandler
  *
@@ -119,6 +126,10 @@ struct DefaultHandler
 
   /* connection cookie for the advise on the delegate OLE object */
   DWORD dwAdvConn;
+
+  /* storage passed to Load or InitNew */
+  IStorage *storage;
+  enum storage_state storage_state;
 };
 
 typedef struct DefaultHandler DefaultHandler;
@@ -621,8 +632,15 @@ static HRESULT WINAPI DefaultHandler_EnumVerbs(
 static HRESULT WINAPI DefaultHandler_Update(
 	    IOleObject*        iface)
 {
-  FIXME(": Stub\n");
-  return E_NOTIMPL;
+    DefaultHandler *This = impl_from_IOleObject(iface);
+    TRACE("(%p)\n", iface);
+
+    if (!object_is_running(This))
+    {
+        FIXME("Should run object\n");
+        return E_NOTIMPL;
+    }
+    return IOleObject_Update(This->pOleDelegate);
 }
 
 /************************************************************************
@@ -635,9 +653,13 @@ static HRESULT WINAPI DefaultHandler_Update(
 static HRESULT WINAPI DefaultHandler_IsUpToDate(
 	    IOleObject*        iface)
 {
-  TRACE("(%p)\n", iface);
+    DefaultHandler *This = impl_from_IOleObject(iface);
+    TRACE("(%p)\n", iface);
 
-  return OLE_E_NOTRUNNING;
+    if (object_is_running(This))
+        return IOleObject_IsUpToDate(This->pOleDelegate);
+
+    return OLE_E_NOTRUNNING;
 }
 
 /************************************************************************
@@ -682,6 +704,8 @@ static HRESULT WINAPI DefaultHandler_GetUserType(
   DefaultHandler *This = impl_from_IOleObject(iface);
 
   TRACE("(%p, %d, %p)\n", iface, dwFormOfType, pszUserType);
+  if (object_is_running(This))
+    return IOleObject_GetUserType(This->pOleDelegate, dwFormOfType, pszUserType);
 
   return OleRegGetUserType(&This->clsid, dwFormOfType, pszUserType);
 }
@@ -1289,7 +1313,12 @@ static HRESULT WINAPI DefaultHandler_Run(
     IOleObject_QueryInterface(This->pOleDelegate, &IID_IPersistStorage,
                               (void **)&This->pPSDelegate);
     if (This->pPSDelegate)
-      hr = IPersistStorage_InitNew(This->pPSDelegate, NULL);
+    {
+      if(This->storage_state == storage_state_initialised)
+        hr = IPersistStorage_InitNew(This->pPSDelegate, This->storage);
+      else if(This->storage_state == storage_state_loaded)
+        hr = IPersistStorage_Load(This->pPSDelegate, This->storage);
+    }
   }
 
   if (SUCCEEDED(hr) && This->containerApp)
@@ -1503,9 +1532,18 @@ static HRESULT WINAPI DefaultHandler_IPersistStorage_GetClassID(
 static HRESULT WINAPI DefaultHandler_IPersistStorage_IsDirty(
             IPersistStorage*     iface)
 {
-  DefaultHandler *This = impl_from_IPersistStorage(iface);
+    DefaultHandler *This = impl_from_IPersistStorage(iface);
+    HRESULT hr;
 
-  return IPersistStorage_IsDirty(This->dataCache_PersistStg);
+    TRACE("(%p)\n", iface);
+
+    hr = IPersistStorage_IsDirty(This->dataCache_PersistStg);
+    if(hr != S_FALSE) return hr;
+
+    if(object_is_running(This))
+        hr = IPersistStorage_IsDirty(This->pPSDelegate);
+
+    return hr;
 }
 
 /************************************************************************
@@ -1516,9 +1554,24 @@ static HRESULT WINAPI DefaultHandler_IPersistStorage_InitNew(
            IPersistStorage*     iface,
            IStorage*            pStg)
 {
-  DefaultHandler *This = impl_from_IPersistStorage(iface);
+    DefaultHandler *This = impl_from_IPersistStorage(iface);
+    HRESULT hr;
 
-  return IPersistStorage_InitNew(This->dataCache_PersistStg, pStg);
+    TRACE("(%p)->(%p)\n", iface, pStg);
+
+    hr = IPersistStorage_InitNew(This->dataCache_PersistStg, pStg);
+
+    if(SUCCEEDED(hr) && object_is_running(This))
+        hr = IPersistStorage_InitNew(This->pPSDelegate, pStg);
+
+    if(SUCCEEDED(hr))
+    {
+        IStorage_AddRef(pStg);
+        This->storage = pStg;
+        This->storage_state = storage_state_initialised;
+    }
+
+    return hr;
 }
 
 
@@ -1530,9 +1583,23 @@ static HRESULT WINAPI DefaultHandler_IPersistStorage_Load(
            IPersistStorage*     iface,
            IStorage*            pStg)
 {
-  DefaultHandler *This = impl_from_IPersistStorage(iface);
+    DefaultHandler *This = impl_from_IPersistStorage(iface);
+    HRESULT hr;
 
-  return IPersistStorage_Load(This->dataCache_PersistStg, pStg);
+    TRACE("(%p)->(%p)\n", iface, pStg);
+
+    hr = IPersistStorage_Load(This->dataCache_PersistStg, pStg);
+
+    if(SUCCEEDED(hr) && object_is_running(This))
+        hr = IPersistStorage_Load(This->pPSDelegate, pStg);
+
+    if(SUCCEEDED(hr))
+    {
+        IStorage_AddRef(pStg);
+        This->storage = pStg;
+        This->storage_state = storage_state_loaded;
+    }
+    return hr;
 }
 
 
@@ -1543,11 +1610,18 @@ static HRESULT WINAPI DefaultHandler_IPersistStorage_Load(
 static HRESULT WINAPI DefaultHandler_IPersistStorage_Save(
            IPersistStorage*     iface,
            IStorage*            pStgSave,
-           BOOL                 fSaveAsLoad)
+           BOOL                 fSameAsLoad)
 {
-  DefaultHandler *This = impl_from_IPersistStorage(iface);
+    DefaultHandler *This = impl_from_IPersistStorage(iface);
+    HRESULT hr;
 
-  return IPersistStorage_Save(This->dataCache_PersistStg, pStgSave, fSaveAsLoad);
+    TRACE("(%p)->(%p, %d)\n", iface, pStgSave, fSameAsLoad);
+
+    hr = IPersistStorage_Save(This->dataCache_PersistStg, pStgSave, fSameAsLoad);
+    if(SUCCEEDED(hr) && object_is_running(This))
+        hr = IPersistStorage_Save(This->pPSDelegate, pStgSave, fSameAsLoad);
+
+    return hr;
 }
 
 
@@ -1559,9 +1633,25 @@ static HRESULT WINAPI DefaultHandler_IPersistStorage_SaveCompleted(
            IPersistStorage*     iface,
            IStorage*            pStgNew)
 {
-  DefaultHandler *This = impl_from_IPersistStorage(iface);
+    DefaultHandler *This = impl_from_IPersistStorage(iface);
+    HRESULT hr;
 
-  return IPersistStorage_SaveCompleted(This->dataCache_PersistStg, pStgNew);
+    TRACE("(%p)->(%p)\n", iface, pStgNew);
+
+    hr = IPersistStorage_SaveCompleted(This->dataCache_PersistStg, pStgNew);
+
+    if(SUCCEEDED(hr) && object_is_running(This))
+        hr = IPersistStorage_SaveCompleted(This->pPSDelegate, pStgNew);
+
+    if(pStgNew)
+    {
+        IStorage_AddRef(pStgNew);
+        if(This->storage) IStorage_Release(This->storage);
+        This->storage = pStgNew;
+        This->storage_state = storage_state_loaded;
+    }
+
+    return hr;
 }
 
 
@@ -1572,9 +1662,21 @@ static HRESULT WINAPI DefaultHandler_IPersistStorage_SaveCompleted(
 static HRESULT WINAPI DefaultHandler_IPersistStorage_HandsOffStorage(
             IPersistStorage*     iface)
 {
-  DefaultHandler *This = impl_from_IPersistStorage(iface);
+    DefaultHandler *This = impl_from_IPersistStorage(iface);
+    HRESULT hr;
 
-  return IPersistStorage_HandsOffStorage(This->dataCache_PersistStg);
+    TRACE("(%p)\n", iface);
+
+    hr = IPersistStorage_HandsOffStorage(This->dataCache_PersistStg);
+
+    if(SUCCEEDED(hr) && object_is_running(This))
+        hr = IPersistStorage_HandsOffStorage(This->pPSDelegate);
+
+    if(This->storage) IStorage_Release(This->storage);
+    This->storage = NULL;
+    This->storage_state = storage_state_uninitialised;
+
+    return hr;
 }
 
 
@@ -1734,6 +1836,8 @@ static DefaultHandler* DefaultHandler_Construct(
   This->pDataDelegate = NULL;
 
   This->dwAdvConn = 0;
+  This->storage = NULL;
+  This->storage_state = storage_state_uninitialised;
 
   return This;
 }
@@ -1773,6 +1877,12 @@ static void DefaultHandler_Destroy(
   {
     IDataAdviseHolder_Release(This->dataAdviseHolder);
     This->dataAdviseHolder = NULL;
+  }
+
+  if (This->storage)
+  {
+    IStorage_Release(This->storage);
+    This->storage = NULL;
   }
 
   HeapFree(GetProcessHeap(), 0, This);

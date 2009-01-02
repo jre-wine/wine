@@ -1693,8 +1693,12 @@ static void testVerifyCertSig(HCRYPTPROV csp, const CRYPT_DATA_BLOB *toBeSigned,
         certBlob.pbData = (void *)0xdeadbeef;
         ret = pCryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
          CRYPT_VERIFY_CERT_SIGN_SUBJECT_BLOB, &certBlob, 0, NULL, 0, NULL);
-        ok(!ret && GetLastError() == STATUS_ACCESS_VIOLATION,
-         "Expected STATUS_ACCESS_VIOLATION, got %08x\n", GetLastError());
+        ok(!ret && (GetLastError() == STATUS_ACCESS_VIOLATION ||
+                    GetLastError() == CRYPT_E_ASN1_EOD /* Win9x */ ||
+                    GetLastError() == CRYPT_E_ASN1_BADTAG /* Win98 */),
+         "Expected STATUS_ACCESS_VIOLATION, CRYPT_E_ASN1_EOD, OR CRYPT_E_ASN1_BADTAG, got %08x\n",
+         GetLastError());
+
         certBlob.cbData = size;
         certBlob.pbData = cert;
         ret = pCryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
@@ -2632,7 +2636,6 @@ static void testHashToBeSigned(void)
     }
     SetLastError(0xdeadbeef);
     ret = CryptHashToBeSigned(0, 0, NULL, 0, NULL, &size);
-    todo_wine
     ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
      "expected ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
     SetLastError(0xdeadbeef);

@@ -657,6 +657,11 @@ static int pf_vsnprintf( pf_output *out, const WCHAR *format, va_list valist )
         flags.Format = *p;
         r = 0;
 
+        if (flags.Format == '$')
+        {
+            FIXME("Positional parameters are not supported (%s)\n", wine_dbgstr_w(format));
+            return -1;
+        }
         /* output a string */
         if(  flags.Format == 's' || flags.Format == 'S' )
             r = pf_handle_string_format( out, va_arg(valist, const void*), -1,
@@ -876,6 +881,15 @@ int CDECL MSVCRT_vswprintf( MSVCRT_wchar_t* str, const MSVCRT_wchar_t* format, v
 }
 
 /*********************************************************************
+ *		vswprintf_s (MSVCRT.@)
+ */
+int CDECL MSVCRT_vswprintf_s( MSVCRT_wchar_t* str, MSVCRT_size_t num, const MSVCRT_wchar_t* format, va_list args )
+{
+    /* FIXME: must handle positional arguments */
+    return MSVCRT_vsnwprintf( str, num, format, args );
+}
+
+/*********************************************************************
  *		wcscoll (MSVCRT.@)
  */
 int CDECL MSVCRT_wcscoll( const MSVCRT_wchar_t* str1, const MSVCRT_wchar_t* str2 )
@@ -1020,7 +1034,7 @@ INT CDECL MSVCRT_iswxdigit( MSVCRT_wchar_t wc )
  */
 INT CDECL MSVCRT_wcscpy_s( MSVCRT_wchar_t* wcDest, MSVCRT_size_t numElement, const  MSVCRT_wchar_t *wcSrc)
 {
-    INT size = 0;
+    MSVCRT_size_t size = 0;
 
     if(!wcDest || !numElement)
         return MSVCRT_EINVAL;
@@ -1053,7 +1067,7 @@ INT CDECL MSVCRT_wcscpy_s( MSVCRT_wchar_t* wcDest, MSVCRT_size_t numElement, con
 INT CDECL MSVCRT_wcsncpy_s( MSVCRT_wchar_t* wcDest, MSVCRT_size_t numElement, const MSVCRT_wchar_t *wcSrc,
                             MSVCRT_size_t count )
 {
-    INT size = 0;
+    MSVCRT_size_t size = 0;
 
     if (!wcDest || !numElement)
         return MSVCRT_EINVAL;
@@ -1076,4 +1090,30 @@ INT CDECL MSVCRT_wcsncpy_s( MSVCRT_wchar_t* wcDest, MSVCRT_size_t numElement, co
     wcDest[size] = '\0';
 
     return 0;
+}
+
+/******************************************************************
+ *		wcscat_s (MSVCRT.@)
+ *
+ */
+INT CDECL MSVCRT_wcscat_s(MSVCRT_wchar_t* dst, MSVCRT_size_t elem, const MSVCRT_wchar_t* src)
+{
+    MSVCRT_wchar_t* ptr = dst;
+
+    if (!dst || elem == 0) return MSVCRT_EINVAL;
+    if (!src)
+    {
+        dst[0] = '\0';
+        return MSVCRT_EINVAL;
+    }
+
+    /* seek to end of dst string (or elem if no end of string is found */
+    while (ptr < dst + elem && *ptr != '\0') ptr++;
+    while (ptr < dst + elem)
+    {
+        if ((*ptr++ = *src++) == '\0') return 0;
+    }
+    /* not enough space */
+    dst[0] = '\0';
+    return MSVCRT_ERANGE;
 }

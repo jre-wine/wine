@@ -399,7 +399,7 @@
 @ stdcall GdipGetTextRenderingHint(ptr ptr)
 @ stub GdipGetTextureImage
 @ stdcall GdipGetTextureTransform(ptr ptr)
-@ stub GdipGetTextureWrapMode
+@ stdcall GdipGetTextureWrapMode(ptr ptr)
 @ stub GdipGetVisibleClipBounds
 @ stub GdipGetVisibleClipBoundsI
 @ stdcall GdipGetWorldTransform(ptr ptr)
@@ -506,7 +506,7 @@
 @ stdcall GdipSetAdjustableArrowCapHeight(ptr long)
 @ stdcall GdipSetAdjustableArrowCapMiddleInset(ptr long)
 @ stdcall GdipSetAdjustableArrowCapWidth(ptr long)
-@ stub GdipSetClipGraphics
+@ stdcall GdipSetClipGraphics(ptr ptr long)
 @ stub GdipSetClipHrgn
 @ stdcall GdipSetClipPath(ptr ptr long)
 @ stdcall GdipSetClipRect(ptr long long long long long)
@@ -596,7 +596,7 @@
 @ stub GdipSetTextContrast
 @ stdcall GdipSetTextRenderingHint(ptr long)
 @ stdcall GdipSetTextureTransform(ptr ptr)
-@ stub GdipSetTextureWrapMode
+@ stdcall GdipSetTextureWrapMode(ptr long)
 @ stdcall GdipSetWorldTransform(ptr ptr)
 @ stdcall GdipShearMatrix(ptr long long long)
 @ stdcall GdipStartPathFigure(ptr)

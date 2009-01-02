@@ -49,10 +49,14 @@ static const char elem_test_str[] =
     "<script id=\"sc\" type=\"text/javascript\"></script>"
     "<test />"
     "<img id=\"imgid\"/>"
-    "<iframe src=\"about:blank\"></iframe>"
+    "<iframe src=\"about:blank\" id=\"ifr\"></iframe>"
     "</body></html>";
 static const char indent_test_str[] =
     "<html><head><title>test</title></head><body>abc<br /><a href=\"about:blank\">123</a></body></html>";
+static const char cond_comment_str[] =
+    "<html><head><title>test</title></head><body>"
+    "<!--[if gte IE 4]> <br> <![endif]-->"
+    "</body></html>";
 
 static const WCHAR noneW[] = {'N','o','n','e',0};
 
@@ -387,6 +391,21 @@ static BSTR a2bstr(const char *str)
     return ret;
 }
 
+static BOOL iface_cmp(IUnknown *iface1, IUnknown *iface2)
+{
+    IUnknown *unk1, *unk2;
+
+    if(iface1 == iface2)
+        return TRUE;
+
+    IUnknown_QueryInterface(iface1, &IID_IUnknown, (void**)&unk1);
+    IUnknown_Release(unk1);
+    IUnknown_QueryInterface(iface1, &IID_IUnknown, (void**)&unk2);
+    IUnknown_Release(unk2);
+
+    return unk1 == unk2;
+}
+
 static IHTMLDocument2 *create_document(void)
 {
     IHTMLDocument2 *doc;
@@ -542,6 +561,58 @@ static void _test_elem_type(unsigned line, IUnknown *unk, elem_type_t type)
 
     if(elem_type_infos[type].dispiid)
         _test_disp(line, unk, elem_type_infos[type].dispiid);
+}
+
+#define get_node_type(n) _get_node_type(__LINE__,n)
+static long _get_node_type(unsigned line, IUnknown *unk)
+{
+    IHTMLDOMNode *node = _get_node_iface(line, unk);
+    long type = -1;
+    HRESULT hres;
+
+    hres = IHTMLDOMNode_get_nodeType(node, &type);
+    ok(hres == S_OK, "get_nodeType failed: %08x\n", hres);
+
+    IHTMLDOMNode_Release(node);
+
+    return type;
+}
+
+#define get_child_nodes(u) _get_child_nodes(__LINE__,u)
+static IHTMLDOMChildrenCollection *_get_child_nodes(unsigned line, IUnknown *unk)
+{
+    IHTMLDOMNode *node = _get_node_iface(line, unk);
+    IHTMLDOMChildrenCollection *col = NULL;
+    IDispatch *disp;
+    HRESULT hres;
+
+    hres = IHTMLDOMNode_get_childNodes(node, &disp);
+    IHTMLDOMNode_Release(node);
+    ok_(__FILE__,line) (hres == S_OK, "get_childNodes failed: %08x\n", hres);
+    if(FAILED(hres))
+        return NULL;
+
+    hres = IDispatch_QueryInterface(disp, &IID_IHTMLDOMChildrenCollection, (void**)&col);
+    IDispatch_Release(disp);
+    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLDOMChildrenCollection: %08x\n", hres);
+
+    return col;
+}
+
+#define get_child_item(c,i) _get_child_item(__LINE__,c,i)
+static IHTMLDOMNode *_get_child_item(unsigned line, IHTMLDOMChildrenCollection *col, long idx)
+{
+    IHTMLDOMNode *node = NULL;
+    IDispatch *disp;
+    HRESULT hres;
+
+    hres = IHTMLDOMChildrenCollection_item(col, idx, &disp);
+    ok(hres == S_OK, "item failed: %08x\n", hres);
+
+    node = _get_node_iface(line, (IUnknown*)disp);
+    IDispatch_Release(disp);
+
+    return node;
 }
 
 #define test_elem_attr(e,n,v) _test_elem_attr(__LINE__,e,n,v)
@@ -999,6 +1070,57 @@ static void _test_elem_getelembytag(unsigned line, IUnknown *unk, elem_type_t ty
     HeapFree(GetProcessHeap(), 0, types);
 }
 
+#define test_elem_innertext(e,t) _test_elem_innertext(__LINE__,e,t)
+static void _test_elem_innertext(unsigned line, IHTMLElement *elem, const char *extext)
+{
+    BSTR text = NULL;
+    HRESULT hres;
+
+    hres = IHTMLElement_get_innerText(elem, &text);
+    ok_(__FILE__,line) (hres == S_OK, "get_innerText failed: %08x\n", hres);
+    ok_(__FILE__,line) (!strcmp_wa(text, extext), "get_innerText returned %s expected %s\n",
+                        dbgstr_w(text), extext);
+    SysFreeString(text);
+}
+
+#define test_elem_set_innertext(e,t) _test_elem_set_innertext(__LINE__,e,t)
+static void _test_elem_set_innertext(unsigned line, IHTMLElement *elem, const char *text)
+{
+    IHTMLDOMChildrenCollection *col;
+    BSTR str;
+    HRESULT hres;
+
+    str = a2bstr(text);
+    hres = IHTMLElement_put_innerText(elem, str);
+    ok_(__FILE__,line) (hres == S_OK, "put_innerText failed: %08x\n", hres);
+    SysFreeString(str);
+
+    _test_elem_innertext(line, elem, text);
+
+
+    col = _get_child_nodes(line, (IUnknown*)elem);
+    ok(col != NULL, "col == NULL\n");
+    if(col) {
+        long length = 0, type;
+        IHTMLDOMNode *node;
+
+        hres = IHTMLDOMChildrenCollection_get_length(col, &length);
+        ok(hres == S_OK, "get_length failed: %08x\n", hres);
+        ok(length == 1, "length = %ld\n", length);
+
+        node = _get_child_item(line, col, 0);
+        ok(node != NULL, "node == NULL\n");
+        if(node) {
+            type = _get_node_type(line, (IUnknown*)node);
+            ok(type == 3, "type=%ld\n", type);
+            IHTMLDOMNode_Release(node);
+        }
+
+        IHTMLDOMChildrenCollection_Release(col);
+    }
+
+}
+
 #define get_first_child(n) _get_first_child(__LINE__,n)
 static IHTMLDOMNode *_get_first_child(unsigned line, IUnknown *unk)
 {
@@ -1039,21 +1161,6 @@ static IHTMLDOMNode *_test_node_get_parent(unsigned line, IUnknown *unk)
     ok_(__FILE__,line) (hres == S_OK, "get_parentNode failed: %08x\n", hres);
 
     return parent;
-}
-
-#define get_node_type(n) _get_node_type(__LINE__,n)
-static long _get_node_type(unsigned line, IUnknown *unk)
-{
-    IHTMLDOMNode *node = _get_node_iface(line, unk);
-    long type = -1;
-    HRESULT hres;
-
-    hres = IHTMLDOMNode_get_nodeType(node, &type);
-    ok(hres == S_OK, "get_nodeType failed: %08x\n", hres);
-
-    IHTMLDOMNode_Release(node);
-
-    return type;
 }
 
 #define test_elem_get_parent(u) _test_elem_get_parent(__LINE__,u)
@@ -1213,6 +1320,20 @@ static void _elem_get_scroll_left(unsigned line, IUnknown *unk)
     ok(l == l2, "unexpected left %ld, expected %ld\n", l2, l);
 }
 
+#define test_img_src(i,s) _test_img_src(__LINE__,i,s)
+static void _test_img_src(unsigned line, IUnknown *unk, const char *exsrc)
+{
+    IHTMLImgElement *img = _get_img_iface(line, unk);
+    BSTR src;
+    HRESULT hres;
+
+    hres = IHTMLImgElement_get_src(img, &src);
+    IHTMLImgElement_Release(img);
+    ok_(__FILE__,line) (hres == S_OK, "get_src failed: %08x\n", hres);
+    ok_(__FILE__,line) (!strcmp_wa(src, exsrc), "get_src returned %s expected %s\n", dbgstr_w(src), exsrc);
+    SysFreeString(src);
+}
+
 #define test_img_set_src(u,s) _test_img_set_src(__LINE__,u,s)
 static void _test_img_set_src(unsigned line, IUnknown *unk, const char *src)
 {
@@ -1225,6 +1346,8 @@ static void _test_img_set_src(unsigned line, IUnknown *unk, const char *src)
     IHTMLImgElement_Release(img);
     SysFreeString(tmp);
     ok_(__FILE__,line) (hres == S_OK, "put_src failed: %08x\n", hres);
+
+    _test_img_src(line, unk, src);
 }
 
 #define test_img_alt(u,a) _test_img_alt(__LINE__,u,a)
@@ -1282,6 +1405,50 @@ static void _test_input_set_disabled(unsigned line, IHTMLInputElement *input, VA
     _test_input_get_disabled(line, input, b);
 }
 
+#define test_input_get_defaultchecked(i,b) _test_input_get_defaultchecked(__LINE__,i,b)
+static void _test_input_get_defaultchecked(unsigned line, IHTMLInputElement *input, VARIANT_BOOL exb)
+{
+    VARIANT_BOOL checked = 100;
+    HRESULT hres;
+
+    hres = IHTMLInputElement_get_defaultChecked(input, &checked);
+    ok_(__FILE__,line) (hres == S_OK, "get_defaultChecked failed: %08x\n", hres);
+    ok_(__FILE__,line) (checked == exb, "checked=%x, expected %x\n", checked, exb);
+}
+
+#define test_input_set_defaultchecked(i,b) _test_input_set_defaultchecked(__LINE__,i,b)
+static void _test_input_set_defaultchecked(unsigned line, IHTMLInputElement *input, VARIANT_BOOL b)
+{
+    HRESULT hres;
+
+    hres = IHTMLInputElement_put_defaultChecked(input, b);
+    ok_(__FILE__,line) (hres == S_OK, "get_defaultChecked failed: %08x\n", hres);
+
+    _test_input_get_defaultchecked(line, input, b);
+}
+
+#define test_input_get_checked(i,b) _test_input_get_checked(__LINE__,i,b)
+static void _test_input_get_checked(unsigned line, IHTMLInputElement *input, VARIANT_BOOL exb)
+{
+    VARIANT_BOOL checked = 100;
+    HRESULT hres;
+
+    hres = IHTMLInputElement_get_checked(input, &checked);
+    ok_(__FILE__,line) (hres == S_OK, "get_checked failed: %08x\n", hres);
+    ok_(__FILE__,line) (checked == exb, "checked=%x, expected %x\n", checked, exb);
+}
+
+#define test_input_set_checked(i,b) _test_input_set_checked(__LINE__,i,b)
+static void _test_input_set_checked(unsigned line, IHTMLInputElement *input, VARIANT_BOOL b)
+{
+    HRESULT hres;
+
+    hres = IHTMLInputElement_put_checked(input, b);
+    ok_(__FILE__,line) (hres == S_OK, "get_checked failed: %08x\n", hres);
+
+    _test_input_get_checked(line, input, b);
+}
+
 #define test_input_value(o,t) _test_input_value(__LINE__,o,t)
 static void _test_input_value(unsigned line, IUnknown *unk, const char *exval)
 {
@@ -1321,27 +1488,6 @@ static void _test_input_put_value(unsigned line, IUnknown *unk, const char *val)
     ok_(__FILE__,line) (hres == S_OK, "get_value failed: %08x\n", hres);
     SysFreeString(bstr);
     IHTMLInputElement_Release(input);
-}
-
-#define get_child_nodes(u) _get_child_nodes(__LINE__,u)
-static IHTMLDOMChildrenCollection *_get_child_nodes(unsigned line, IUnknown *unk)
-{
-    IHTMLDOMNode *node = _get_node_iface(line, unk);
-    IHTMLDOMChildrenCollection *col = NULL;
-    IDispatch *disp;
-    HRESULT hres;
-
-    hres = IHTMLDOMNode_get_childNodes(node, &disp);
-    IHTMLDOMNode_Release(node);
-    ok_(__FILE__,line) (hres == S_OK, "get_childNodes failed: %08x\n", hres);
-    if(FAILED(hres))
-        return NULL;
-
-    hres = IDispatch_QueryInterface(disp, &IID_IHTMLDOMChildrenCollection, (void**)&col);
-    IDispatch_Release(disp);
-    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLDOMChildrenCollection: %08x\n", hres);
-
-    return col;
 }
 
 #define test_elem_class(u,c) _test_elem_class(__LINE__,u,c)
@@ -1401,22 +1547,6 @@ static void _test_elem_set_class(unsigned line, IUnknown *unk, const char *class
     SysFreeString(tmp);
 
     _test_elem_class(line, unk, class);
-}
-
-#define get_child_item(c,i) _get_child_item(__LINE__,c,i)
-static IHTMLDOMNode *_get_child_item(unsigned line, IHTMLDOMChildrenCollection *col, long idx)
-{
-    IHTMLDOMNode *node = NULL;
-    IDispatch *disp;
-    HRESULT hres;
-
-    hres = IHTMLDOMChildrenCollection_item(col, idx, &disp);
-    ok(hres == S_OK, "item failed: %08x\n", hres);
-
-    node = _get_node_iface(line, (IUnknown*)disp);
-    IDispatch_Release(disp);
-
-    return node;
 }
 
 #define test_elem_id(e,i) _test_elem_id(__LINE__,e,i)
@@ -1592,6 +1722,23 @@ static IHTMLDOMNode *_test_node_append_child(unsigned line, IUnknown *node_unk, 
     return new_child;
 }
 
+#define test_node_insertbefore(n,c,v) _test_node_insertbefore(__LINE__,n,c,v)
+static IHTMLDOMNode *_test_node_insertbefore(unsigned line, IUnknown *node_unk, IHTMLDOMNode *child, VARIANT *var)
+{
+    IHTMLDOMNode *node = _get_node_iface(line, node_unk);
+    IHTMLDOMNode *new_child = NULL;
+    HRESULT hres;
+
+    hres = IHTMLDOMNode_insertBefore(node, child, *var, &new_child);
+    ok_(__FILE__,line) (hres == S_OK, "insertBefore failed: %08x\n", hres);
+    ok_(__FILE__,line) (new_child != NULL, "new_child == NULL\n");
+    /* TODO  ok_(__FILE__,line) (new_child != child, "new_child == child\n"); */
+
+    IHTMLDOMNode_Release(node);
+
+    return new_child;
+}
+
 #define test_node_remove_child(n,c) _test_node_remove_child(__LINE__,n,c)
 static void _test_node_remove_child(unsigned line, IUnknown *unk, IHTMLDOMNode *child)
 {
@@ -1600,7 +1747,7 @@ static void _test_node_remove_child(unsigned line, IUnknown *unk, IHTMLDOMNode *
     HRESULT hres;
 
     hres = IHTMLDOMNode_removeChild(node, child, &new_node);
-    ok_(__FILE__,line) (hres == S_OK, "appendChild failed: %08x\n", hres);
+    ok_(__FILE__,line) (hres == S_OK, "removeChild failed: %08x\n", hres);
     ok_(__FILE__,line) (new_node != NULL, "new_node == NULL\n");
     /* TODO ok_(__FILE__,line) (new_node != child, "new_node == child\n"); */
 
@@ -2053,6 +2200,8 @@ static void test_navigator(IHTMLDocument2 *doc)
     BSTR bstr;
     HRESULT hres;
 
+    static const WCHAR v40[] = {'4','.','0'};
+
     hres = IHTMLDocument2_get_parentWindow(doc, &window);
     ok(hres == S_OK, "parentWidnow failed: %08x\n", hres);
 
@@ -2075,8 +2224,14 @@ static void test_navigator(IHTMLDocument2 *doc)
 
     bstr = NULL;
     hres = IOmNavigator_get_platform(navigator, &bstr);
-    ok(hres == S_OK, "get_appMinorVersion failed: %08x\n", hres);
+    ok(hres == S_OK, "get_platform failed: %08x\n", hres);
     ok(!strcmp_wa(bstr, "Win32"), "unexpected platform %s\n", dbgstr_w(bstr));
+    SysFreeString(bstr);
+
+    bstr = NULL;
+    hres = IOmNavigator_get_appVersion(navigator, &bstr);
+    ok(hres == S_OK, "get_appVersion failed: %08x\n", hres);
+    ok(!memcmp(bstr, v40, sizeof(v40)), "appVersion is %s\n", dbgstr_w(bstr));
     SysFreeString(bstr);
 
     ref = IOmNavigator_Release(navigator);
@@ -2240,6 +2395,17 @@ static void test_default_style(IHTMLStyle *style)
     ok(!strcmp_wa(V_BSTR(&v), "3px"), "V_BSTR(v) = %s\n", dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
 
+    V_VT(&v) = VT_NULL;
+    hres = IHTMLStyle_put_left(style, v);
+    ok(hres == S_OK, "put_left failed: %08x\n", hres);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLStyle_get_left(style, &v);
+    ok(hres == S_OK, "get_left failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v)=%d\n", V_VT(&v));
+    ok(!V_BSTR(&v), "V_BSTR(v) != NULL\n");
+    VariantClear(&v);
+
     V_VT(&v) = VT_EMPTY;
     hres = IHTMLStyle_get_top(style, &v);
     ok(hres == S_OK, "get_top failed: %08x\n", hres);
@@ -2258,6 +2424,17 @@ static void test_default_style(IHTMLStyle *style)
     ok(hres == S_OK, "get_top failed: %08x\n", hres);
     ok(V_VT(&v) == VT_BSTR, "V_VT(v)=%d\n", V_VT(&v));
     ok(!strcmp_wa(V_BSTR(&v), "3px"), "V_BSTR(v) = %s\n", dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_NULL;
+    hres = IHTMLStyle_put_top(style, v);
+    ok(hres == S_OK, "put_top failed: %08x\n", hres);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLStyle_get_top(style, &v);
+    ok(hres == S_OK, "get_top failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v)=%d\n", V_VT(&v));
+    ok(!V_BSTR(&v), "V_BSTR(v) != NULL\n");
     VariantClear(&v);
 
     V_VT(&v) = VT_EMPTY;
@@ -2630,6 +2807,86 @@ static void test_table_elem(IHTMLElement *elem)
     IHTMLTable_Release(table);
 }
 
+static void doc_write(IHTMLDocument2 *doc, const char *text)
+{
+    SAFEARRAYBOUND dim;
+    SAFEARRAY *sa;
+    VARIANT *var;
+    BSTR str;
+    HRESULT hres;
+
+    dim.lLbound = 0;
+    dim.cElements = 1;
+    sa = SafeArrayCreate(VT_VARIANT, 1, &dim);
+    SafeArrayAccessData(sa, (void**)&var);
+    V_VT(var) = VT_BSTR;
+    V_BSTR(var) = str = a2bstr(text);
+    SafeArrayUnaccessData(sa);
+
+    hres = IHTMLDocument2_write(doc, sa);
+    ok(hres == S_OK, "write failed: %08x\n", hres);
+
+    SysFreeString(str);
+    SafeArrayDestroy(sa);
+}
+
+static void test_iframe_elem(IHTMLElement *elem)
+{
+    IHTMLElementCollection *col;
+    IHTMLDocument2 *content_doc;
+    IHTMLWindow2 *content_window;
+    IHTMLFrameBase2 *base2;
+    IDispatch *disp;
+    VARIANT errv;
+    BSTR str;
+    HRESULT hres;
+
+    static const elem_type_t all_types[] = {
+        ET_HTML,
+        ET_HEAD,
+        ET_TITLE,
+        ET_BODY,
+        ET_BR
+    };
+
+    hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLFrameBase2, (void**)&base2);
+    ok(hres == S_OK, "Could not get IHTMFrameBase2 iface: %08x\n", hres);
+
+    content_window = NULL;
+    hres = IHTMLFrameBase2_get_contentWindow(base2, &content_window);
+    IHTMLFrameBase2_Release(base2);
+    ok(hres == S_OK, "get_contentWindow failed: %08x\n", hres);
+    ok(content_window != NULL, "contentWindow = NULL\n");
+
+    content_doc = NULL;
+    hres = IHTMLWindow2_get_document(content_window, &content_doc);
+    IHTMLWindow2_Release(content_window);
+    ok(hres == S_OK, "get_document failed: %08x\n", hres);
+    ok(content_doc != NULL, "content_doc = NULL\n");
+
+    str = a2bstr("text/html");
+    V_VT(&errv) = VT_ERROR;
+    disp = NULL;
+    hres = IHTMLDocument2_open(content_doc, str, errv, errv, errv, &disp);
+    SysFreeString(str);
+    ok(hres == S_OK, "open failed: %08x\n", hres);
+    ok(disp != NULL, "disp == NULL\n");
+    ok(iface_cmp((IUnknown*)disp, (IUnknown*)content_window), "disp != content_window\n");
+    IDispatch_Release(disp);
+
+    doc_write(content_doc, "<html><head><title>test</title></head><body><br /></body></html>");
+
+    hres = IHTMLDocument2_get_all(content_doc, &col);
+    ok(hres == S_OK, "get_all failed: %08x\n", hres);
+    test_elem_collection((IUnknown*)col, all_types, sizeof(all_types)/sizeof(all_types[0]));
+    IHTMLElementCollection_Release(col);
+
+    hres = IHTMLDocument2_close(content_doc);
+    ok(hres == S_OK, "close failed: %08x\n", hres);
+
+    IHTMLDocument2_Release(content_doc);
+}
+
 static void test_stylesheet(IDispatch *disp)
 {
     IHTMLStyleSheetRulesCollection *col = NULL;
@@ -2748,6 +3005,7 @@ static void test_elems(IHTMLDocument2 *doc)
     static const WCHAR xxxW[] = {'x','x','x',0};
     static const WCHAR tblW[] = {'t','b','l',0};
     static const WCHAR row2W[] = {'r','o','w','2',0};
+    static const WCHAR ifrW[] = {'i','f','r',0};
 
     static const elem_type_t all_types[] = {
         ET_HTML,
@@ -2846,6 +3104,8 @@ static void test_elems(IHTMLDocument2 *doc)
         test_elem_getelembytag((IUnknown*)elem, ET_SELECT, 0);
         test_elem_getelembytag((IUnknown*)elem, ET_HTML, 0);
 
+        test_elem_innertext(elem, "opt1opt2");
+
         IHTMLElement_Release(elem);
     }
 
@@ -2922,12 +3182,21 @@ static void test_elems(IHTMLDocument2 *doc)
         test_elem_set_tabindex((IUnknown*)elem, 3);
         test_elem_title((IUnknown*)elem, "test title");
 
+        test_input_get_defaultchecked(input, VARIANT_FALSE);
+        test_input_set_defaultchecked(input, VARIANT_TRUE);
+        test_input_set_defaultchecked(input, VARIANT_FALSE);
+
+        test_input_get_checked(input, VARIANT_FALSE);
+        test_input_set_checked(input, VARIANT_TRUE);
+        test_input_set_checked(input, VARIANT_FALSE);
+
         IHTMLInputElement_Release(input);
         IHTMLElement_Release(elem);
     }
 
     elem = get_elem_by_id(doc, imgidW, TRUE);
     if(elem) {
+        test_img_src((IUnknown*)elem, "");
         test_img_set_src((IUnknown*)elem, "about:blank");
         test_img_alt((IUnknown*)elem, NULL);
         test_img_set_alt((IUnknown*)elem, "alt test");
@@ -2945,6 +3214,13 @@ static void test_elems(IHTMLDocument2 *doc)
     ok(elem != NULL, "elem == NULL\n");
     if(elem) {
         test_tr_elem(elem);
+        IHTMLElement_Release(elem);
+    }
+
+    elem = get_doc_elem_by_id(doc, ifrW);
+    ok(elem != NULL, "elem == NULL\n");
+    if(elem) {
+        test_iframe_elem(elem);
         IHTMLElement_Release(elem);
     }
 
@@ -3023,6 +3299,11 @@ static void test_elems(IHTMLDocument2 *doc)
     test_stylesheets(doc);
     test_create_option_elem(doc);
 
+    elem = get_doc_elem_by_id(doc, tblW);
+    ok(elem != NULL, "elem = NULL\n");
+    test_elem_set_innertext(elem, "inner text");
+    IHTMLElement_Release(elem);
+
     test_doc_title(doc, "test");
     test_doc_set_title(doc, "test title");
     test_doc_title(doc, "test title");
@@ -3031,8 +3312,9 @@ static void test_elems(IHTMLDocument2 *doc)
 static void test_create_elems(IHTMLDocument2 *doc)
 {
     IHTMLElement *elem, *body, *elem2;
-    IHTMLDOMNode *node;
+    IHTMLDOMNode *node, *node2, *node3;
     IDispatch *disp;
+    VARIANT var;
     long type;
     HRESULT hres;
 
@@ -3067,14 +3349,29 @@ static void test_create_elems(IHTMLDocument2 *doc)
     IDispatch_Release(disp);
     test_node_has_child((IUnknown*)body, VARIANT_FALSE);
 
-    IHTMLElement_Release(body);
     IHTMLElement_Release(elem);
     IHTMLDOMNode_Release(node);
 
     node = test_create_text(doc, "test");
     test_ifaces((IUnknown*)node, text_iids);
     test_disp((IUnknown*)node, &DIID_DispHTMLDOMTextNode);
+
+    V_VT(&var) = VT_NULL;
+    node2 = test_node_insertbefore((IUnknown*)body, node, &var);
     IHTMLDOMNode_Release(node);
+
+    node = test_create_text(doc, "insert ");
+
+    V_VT(&var) = VT_DISPATCH;
+    V_DISPATCH(&var) = (IDispatch*)node2;
+    node3 = test_node_insertbefore((IUnknown*)body, node, &var);
+    IHTMLDOMNode_Release(node);
+    IHTMLDOMNode_Release(node2);
+    IHTMLDOMNode_Release(node3);
+
+    test_elem_innertext(body, "insert test");
+
+    IHTMLElement_Release(body);
 }
 
 static void test_exec(IUnknown *unk, const GUID *grpid, DWORD cmdid, VARIANT *in, VARIANT *out)
@@ -3129,6 +3426,25 @@ static void test_indent(IHTMLDocument2 *doc)
     hres = IHTMLDocument2_get_all(doc, &col);
     ok(hres == S_OK, "get_all failed: %08x\n", hres);
     test_elem_collection((IUnknown*)col, indent_types, sizeof(indent_types)/sizeof(indent_types[0]));
+    IHTMLElementCollection_Release(col);
+}
+
+static void test_cond_comment(IHTMLDocument2 *doc)
+{
+    IHTMLElementCollection *col;
+    HRESULT hres;
+
+    static const elem_type_t all_types[] = {
+        ET_HTML,
+        ET_HEAD,
+        ET_TITLE,
+        ET_BODY,
+        ET_BR
+    };
+
+    hres = IHTMLDocument2_get_all(doc, &col);
+    ok(hres == S_OK, "get_all failed: %08x\n", hres);
+    test_elem_collection((IUnknown*)col, all_types, sizeof(all_types)/sizeof(all_types[0]));
     IHTMLElementCollection_Release(col);
 }
 
@@ -3315,6 +3631,7 @@ START_TEST(dom)
     run_domtest(doc_blank, test_create_elems);
     run_domtest(doc_blank, test_defaults);
     run_domtest(indent_test_str, test_indent);
+    run_domtest(cond_comment_str, test_cond_comment);
 
     CoUninitialize();
     gecko_installer_workaround(FALSE);

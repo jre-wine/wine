@@ -1,8 +1,8 @@
-#!/bin/bash
+#!/bin/sh
 # WINE Installation script
 # Can do almost everything from compiling to configuring...
 #
-# Copyright 1999 Ove Kåven
+# Copyright 1999 Ove KÃ¥ven
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -22,13 +22,11 @@
 #--- defaults (change these if you are a packager)
 CONFARGS=""                   # configure args, e.g. --prefix=/usr
 
-# functions
-
-function std_sleep {
+std_sleep() {
   sleep 1
 }
 
-function conf_yesno_answer {
+conf_yesno_answer() {
   unset ANSWER
   while [ "$ANSWER" != 'yes' ] && [ "$ANSWER" != 'no' ]
   do {

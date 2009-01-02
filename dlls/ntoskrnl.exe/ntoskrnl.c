@@ -153,6 +153,7 @@ static NTSTATUS process_ioctl( DEVICE_OBJECT *device, ULONG code, void *in_buff,
     irp.UserBuffer = out_buff;
     irp.MdlAddress = &mdl;
     irp.Tail.Overlay.s.u.CurrentStackLocation = &irpsp;
+    irp.UserIosb = NULL;
 
     irpsp.MajorFunction = IRP_MJ_DEVICE_CONTROL;
     irpsp.Parameters.DeviceIoControl.OutputBufferLength = *out_size;
@@ -160,6 +161,7 @@ static NTSTATUS process_ioctl( DEVICE_OBJECT *device, ULONG code, void *in_buff,
     irpsp.Parameters.DeviceIoControl.IoControlCode = code;
     irpsp.Parameters.DeviceIoControl.Type3InputBuffer = in_buff;
     irpsp.DeviceObject = device;
+    irpsp.CompletionRoutine = NULL;
 
     mdl.Next = NULL;
     mdl.Size = 0;
@@ -541,8 +543,28 @@ NTSTATUS WINAPI IoCreateSymbolicLink( UNICODE_STRING *name, UNICODE_STRING *targ
  */
 NTSTATUS WINAPI IoDeleteSymbolicLink( UNICODE_STRING *name )
 {
-    FIXME( "%s\n", debugstr_us(name) );
-    return STATUS_SUCCESS;
+    HANDLE handle;
+    OBJECT_ATTRIBUTES attr;
+    NTSTATUS status;
+
+    attr.Length                   = sizeof(attr);
+    attr.RootDirectory            = 0;
+    attr.ObjectName               = name;
+    attr.Attributes               = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor       = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    if (!(status = NtOpenSymbolicLinkObject( &handle, 0, &attr )))
+    {
+        SERVER_START_REQ( unlink_object )
+        {
+            req->handle = handle;
+            status = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        NtClose( handle );
+    }
+    return status;
 }
 
 

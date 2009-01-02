@@ -2,7 +2,7 @@
  * SHLWAPI ordinal functions
  *
  * Copyright 1997 Marcus Meissner
- *           1998 Jürgen Schmied
+ *           1998 JÃ¼rgen Schmied
  *           2001-2003 Jon Griffiths
  *
  * This library is free software; you can redistribute it and/or
@@ -3689,6 +3689,30 @@ DWORD WINAPI MLClearMLHInstance(DWORD x)
 {
 	FIXME("(0x%08x)stub\n", x);
 	return 0xabba1247;
+}
+
+/*************************************************************************
+ * @ [SHLWAPI.432]
+ *
+ * See SHSendMessageBroadcastW
+ *
+ */
+DWORD WINAPI SHSendMessageBroadcastA(UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    return SendMessageTimeoutA(HWND_BROADCAST, uMsg, wParam, lParam,
+                               SMTO_ABORTIFHUNG, 2000, NULL);
+}
+
+/*************************************************************************
+ * @ [SHLWAPI.433]
+ *
+ * A wrapper for sending Broadcast Messages to all top level Windows
+ *
+ */
+DWORD WINAPI SHSendMessageBroadcastW(UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    return SendMessageTimeoutW(HWND_BROADCAST, uMsg, wParam, lParam,
+                               SMTO_ABORTIFHUNG, 2000, NULL);
 }
 
 /*************************************************************************

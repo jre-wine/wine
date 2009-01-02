@@ -1,5 +1,5 @@
 /*
- * Copyright 2006 Stefan Dösinger
+ * Copyright 2006 Stefan DÃ¶singer
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -414,8 +414,7 @@ struct IDirectDrawClipperImpl
 
 const IDirectDrawClipperVtbl IDirectDrawClipper_Vtbl;
 
-typedef IWineD3DClipper* (WINAPI *fnWineDirect3DCreateClipper)(IUnknown *);
-fnWineDirect3DCreateClipper pWineDirect3DCreateClipper;
+typeof(WineDirect3DCreateClipper) *pWineDirect3DCreateClipper;
 
 /*****************************************************************************
  * IDirectDrawPalette implementation structure

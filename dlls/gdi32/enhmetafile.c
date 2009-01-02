@@ -278,8 +278,8 @@ HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, BOOL on_disk )
  */
 static BOOL EMF_Delete_HENHMETAFILE( HENHMETAFILE hmf )
 {
-    ENHMETAFILEOBJ *metaObj = (ENHMETAFILEOBJ *)GDI_GetObjPtr( hmf,
-							   ENHMETAFILE_MAGIC );
+    ENHMETAFILEOBJ *metaObj = GDI_GetObjPtr( hmf, ENHMETAFILE_MAGIC );
+
     if(!metaObj) return FALSE;
 
     if(metaObj->on_disk)
@@ -297,7 +297,7 @@ static BOOL EMF_Delete_HENHMETAFILE( HENHMETAFILE hmf )
 static ENHMETAHEADER *EMF_GetEnhMetaHeader( HENHMETAFILE hmf )
 {
     ENHMETAHEADER *ret = NULL;
-    ENHMETAFILEOBJ *metaObj = (ENHMETAFILEOBJ *)GDI_GetObjPtr( hmf, ENHMETAFILE_MAGIC );
+    ENHMETAFILEOBJ *metaObj = GDI_GetObjPtr( hmf, ENHMETAFILE_MAGIC );
     TRACE("hmf %p -> enhmetaObj %p\n", hmf, metaObj);
     if (metaObj)
     {
@@ -692,6 +692,7 @@ static BOOL emr_produces_output(int type)
     case EMR_LINETO:
     case EMR_ARCTO:
     case EMR_POLYDRAW:
+    case EMR_GDICOMMENT:
     case EMR_FILLRGN:
     case EMR_FRAMERGN:
     case EMR_INVERTRGN:
@@ -755,10 +756,6 @@ BOOL WINAPI PlayEnhMetaFileRecord(
   if (!mr) return FALSE;
 
   type = mr->iType;
-
-  /* In Win9x mode we update the xform if the record will produce output */
-  if ( IS_WIN9X() && emr_produces_output(type) )
-     EMF_Update_MF_Xform(hdc, info);
 
   TRACE("record %s\n", get_emr_name(type));
   switch(type)
@@ -2193,13 +2190,6 @@ BOOL WINAPI PlayEnhMetaFileRecord(
   TRACE("L:0,0 - 1000,1000 -> D:%d,%d - %d,%d\n", tmprc.left,
 	tmprc.top, tmprc.right, tmprc.bottom);
 
-  if ( !IS_WIN9X() )
-  {
-    /* WinNT - update the transform (win9x updates when the next graphics output
-       record is played). */
-    EMF_Update_MF_Xform(hdc, info);
-  }
-
   return TRUE;
 }
 
@@ -2405,9 +2395,19 @@ BOOL WINAPI EnumEnhMetaFile(
     while(ret && offset < emh->nBytes)
     {
 	emr = (ENHMETARECORD *)((char *)emh + offset);
+
+        /* In Win9x mode we update the xform if the record will produce output */
+        if (hdc && IS_WIN9X() && emr_produces_output(emr->iType))
+            EMF_Update_MF_Xform(hdc, info);
+
 	TRACE("Calling EnumFunc with record %s, size %d\n", get_emr_name(emr->iType), emr->nSize);
 	ret = (*callback)(hdc, ht, emr, emh->nHandles, (LPARAM)data);
 	offset += emr->nSize;
+
+        /* WinNT - update the transform (win9x updates when the next graphics
+           output record is played). */
+        if (hdc && !IS_WIN9X())
+            EMF_Update_MF_Xform(hdc, info);
     }
 
     if (hdc)

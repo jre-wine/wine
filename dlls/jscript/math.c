@@ -16,6 +16,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
 #include <math.h>
 
 #include "jscript.h"
@@ -118,8 +121,9 @@ static HRESULT Math_abs(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *d
     TRACE("\n");
 
     if(!arg_cnt(dp)) {
-        FIXME("arg_cnt = 0\n");
-        return E_NOTIMPL;
+        if(retv)
+            num_set_nan(retv);
+        return S_OK;
     }
 
     hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
@@ -170,8 +174,9 @@ static HRESULT Math_ceil(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *
     TRACE("\n");
 
     if(!arg_cnt(dp)) {
-        FIXME("arg_cnt = 0\n");
-        return E_NOTIMPL;
+        if(retv)
+            num_set_nan(retv);
+        return S_OK;
     }
 
     hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
@@ -200,8 +205,24 @@ static HRESULT Math_exp(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *d
 static HRESULT Math_floor(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    VARIANT v;
+    HRESULT hres;
+
+    TRACE("\n");
+
+    if(!arg_cnt(dp)) {
+        if(retv)
+            num_set_nan(retv);
+        return S_OK;
+    }
+
+    hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
+    if(FAILED(hres))
+        return hres;
+
+    if(retv)
+        num_set_val(retv, floor(num_val(&v)));
+    return S_OK;
 }
 
 static HRESULT Math_log(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
@@ -222,11 +243,10 @@ static HRESULT Math_max(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *d
 
     TRACE("\n");
 
-    /* FIXME: Handle NaN */
-
     if(!arg_cnt(dp)) {
-        FIXME("arg_cnt = 0\n");
-        return E_NOTIMPL;
+        if(retv)
+            num_set_inf(retv, FALSE);
+        return S_OK;
     }
 
     hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
@@ -240,7 +260,7 @@ static HRESULT Math_max(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *d
             return hres;
 
         d = num_val(&v);
-        if(d > max)
+        if(d > max || isnan(d))
             max = d;
     }
 
@@ -260,11 +280,10 @@ static HRESULT Math_min(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *d
 
     TRACE("\n");
 
-    /* FIXME: Handle NaN */
-
     if(!arg_cnt(dp)) {
-        FIXME("arg_cnt = 0\n");
-        return E_NOTIMPL;
+        if(retv)
+            num_set_inf(retv, TRUE);
+        return S_OK;
     }
 
     hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
@@ -278,7 +297,7 @@ static HRESULT Math_min(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *d
             return hres;
 
         d = num_val(&v);
-        if(d < min)
+        if(d < min || isnan(d))
             min = d;
     }
 

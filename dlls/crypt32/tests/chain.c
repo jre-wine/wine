@@ -1163,6 +1163,38 @@ typedef struct _SimpleChainStatusCheck
     const CERT_TRUST_STATUS *rgElementStatus;
 } SimpleChainStatusCheck;
 
+static void checkElementStatus(const CERT_TRUST_STATUS *expected,
+ const CERT_TRUST_STATUS *got, const CERT_TRUST_STATUS *ignore,
+ DWORD todo, DWORD testIndex, DWORD chainIndex, DWORD elementIndex)
+{
+    if (todo & TODO_ERROR && got->dwErrorStatus != expected->dwErrorStatus)
+        todo_wine
+        ok(got->dwErrorStatus == expected->dwErrorStatus,
+         "Chain %d, element [%d,%d]: expected error %08x, got %08x\n",
+         testIndex, chainIndex, elementIndex, expected->dwErrorStatus,
+         got->dwErrorStatus);
+    else
+        ok(got->dwErrorStatus == expected->dwErrorStatus ||
+         broken((got->dwErrorStatus & ~ignore->dwErrorStatus) ==
+         expected->dwErrorStatus),
+         "Chain %d, element [%d,%d]: expected error %08x, got %08x\n",
+         testIndex, chainIndex, elementIndex, expected->dwErrorStatus,
+         got->dwErrorStatus);
+    if (todo & TODO_INFO && got->dwInfoStatus != expected->dwInfoStatus)
+        todo_wine
+        ok(got->dwInfoStatus == expected->dwInfoStatus,
+         "Chain %d, element [%d,%d]: expected info %08x, got %08x\n",
+         testIndex, chainIndex, elementIndex, expected->dwInfoStatus,
+         got->dwInfoStatus);
+    else
+        ok(got->dwInfoStatus == expected->dwInfoStatus ||
+         broken((got->dwInfoStatus & ~ignore->dwInfoStatus) ==
+         expected->dwInfoStatus),
+         "Chain %d, element [%d,%d]: expected info %08x, got %08x\n",
+         testIndex, chainIndex, elementIndex, expected->dwInfoStatus,
+         got->dwInfoStatus);
+}
+
 static void checkSimpleChainStatus(const CERT_SIMPLE_CHAIN *simpleChain,
  const SimpleChainStatusCheck *simpleChainStatus,
  const CERT_TRUST_STATUS *ignore, DWORD todo, DWORD testIndex, DWORD chainIndex)
@@ -1180,41 +1212,9 @@ static void checkSimpleChainStatus(const CERT_SIMPLE_CHAIN *simpleChain,
         DWORD i;
 
         for (i = 0; i < simpleChain->cElement; i++)
-        {
-            DWORD error =
-             simpleChain->rgpElement[i]->TrustStatus.dwErrorStatus &
-             ~ignore->dwErrorStatus;
-            DWORD info =
-             simpleChain->rgpElement[i]->TrustStatus.dwInfoStatus &
-             ~ignore->dwInfoStatus;
-
-            if (todo & TODO_ERROR && error !=
-             simpleChainStatus->rgElementStatus[i].dwErrorStatus)
-                todo_wine ok(error ==
-                 simpleChainStatus->rgElementStatus[i].dwErrorStatus,
-                 "Chain %d, element [%d,%d]: expected error %08x, got %08x\n",
-                 testIndex, chainIndex, i,
-                 simpleChainStatus->rgElementStatus[i].dwErrorStatus, error);
-            else
-                ok(error ==
-                 simpleChainStatus->rgElementStatus[i].dwErrorStatus,
-                 "Chain %d, element [%d,%d]: expected error %08x, got %08x\n",
-                 testIndex, chainIndex, i,
-                 simpleChainStatus->rgElementStatus[i].dwErrorStatus, error);
-            if (todo & TODO_INFO && info !=
-             simpleChainStatus->rgElementStatus[i].dwInfoStatus)
-                todo_wine ok(info ==
-                 simpleChainStatus->rgElementStatus[i].dwInfoStatus,
-                 "Chain %d, element [%d,%d]: expected info %08x, got %08x\n",
-                 testIndex, chainIndex, i,
-                 simpleChainStatus->rgElementStatus[i].dwInfoStatus, info);
-            else
-                ok(info ==
-                 simpleChainStatus->rgElementStatus[i].dwInfoStatus,
-                 "Chain %d, element [%d,%d]: expected info %08x, got %08x\n",
-                 testIndex, chainIndex, i,
-                 simpleChainStatus->rgElementStatus[i].dwInfoStatus, info);
-        }
+            checkElementStatus(&simpleChainStatus->rgElementStatus[i],
+             &simpleChain->rgpElement[i]->TrustStatus, ignore, todo, testIndex,
+             chainIndex, i);
     }
 }
 
@@ -1229,30 +1229,41 @@ typedef struct _ChainStatusCheck
 static void checkChainStatus(PCCERT_CHAIN_CONTEXT chain,
  const ChainStatusCheck *chainStatus, DWORD todo, DWORD testIndex)
 {
-    DWORD error = chainStatus->status.dwErrorStatus &
-     ~chainStatus->statusToIgnore.dwErrorStatus;
-    DWORD info = chainStatus->status.dwInfoStatus &
-     ~chainStatus->statusToIgnore.dwInfoStatus;
-
     ok(chain->cChain == chainStatus->cChain,
      "Chain %d: expected %d simple chains, got %d\n", testIndex,
      chainStatus->cChain, chain->cChain);
-    if (todo & TODO_ERROR && error != chainStatus->status.dwErrorStatus)
-        todo_wine ok(error == chainStatus->status.dwErrorStatus,
+    if (todo & TODO_ERROR &&
+     chain->TrustStatus.dwErrorStatus != chainStatus->status.dwErrorStatus)
+        todo_wine ok(chain->TrustStatus.dwErrorStatus ==
+         chainStatus->status.dwErrorStatus,
          "Chain %d: expected error %08x, got %08x\n",
-         testIndex, chainStatus->status.dwErrorStatus, error);
+         testIndex, chainStatus->status.dwErrorStatus,
+         chain->TrustStatus.dwErrorStatus);
     else
-        ok(error == chainStatus->status.dwErrorStatus,
+        ok(chain->TrustStatus.dwErrorStatus ==
+         chainStatus->status.dwErrorStatus ||
+         broken((chain->TrustStatus.dwErrorStatus &
+         ~chainStatus->statusToIgnore.dwErrorStatus) ==
+         chainStatus->status.dwErrorStatus),
          "Chain %d: expected error %08x, got %08x\n",
-         testIndex, chainStatus->status.dwErrorStatus, error);
-    if (todo & TODO_INFO && info != chainStatus->status.dwInfoStatus)
-        todo_wine ok(info == chainStatus->status.dwInfoStatus,
+         testIndex, chainStatus->status.dwErrorStatus,
+         chain->TrustStatus.dwErrorStatus);
+    if (todo & TODO_INFO &&
+     chain->TrustStatus.dwInfoStatus != chainStatus->status.dwInfoStatus)
+        todo_wine ok(chain->TrustStatus.dwInfoStatus ==
+         chainStatus->status.dwInfoStatus,
          "Chain %d: expected info %08x, got %08x\n",
-         testIndex, chainStatus->status.dwInfoStatus, info);
+         testIndex, chainStatus->status.dwInfoStatus,
+         chain->TrustStatus.dwInfoStatus);
     else
-        ok(info == chainStatus->status.dwInfoStatus,
+        ok(chain->TrustStatus.dwInfoStatus ==
+         chainStatus->status.dwInfoStatus ||
+         broken((chain->TrustStatus.dwInfoStatus &
+         ~chainStatus->statusToIgnore.dwInfoStatus) ==
+         chainStatus->status.dwInfoStatus),
          "Chain %d: expected info %08x, got %08x\n",
-         testIndex, chainStatus->status.dwInfoStatus, info);
+         testIndex, chainStatus->status.dwInfoStatus,
+         chain->TrustStatus.dwInfoStatus);
     if (chain->cChain == chainStatus->cChain)
     {
         DWORD i;
@@ -1341,8 +1352,7 @@ static CONST_DATA_BLOB chain5[] = {
 };
 static const CERT_TRUST_STATUS elementStatus5[] = {
  { CERT_TRUST_NO_ERROR, CERT_TRUST_HAS_NAME_MATCH_ISSUER },
- { CERT_TRUST_HAS_NOT_DEFINED_NAME_CONSTRAINT |
-   CERT_TRUST_HAS_NOT_PERMITTED_NAME_CONSTRAINT |
+ { CERT_TRUST_HAS_NOT_PERMITTED_NAME_CONSTRAINT |
    CERT_TRUST_IS_UNTRUSTED_ROOT,
    CERT_TRUST_HAS_NAME_MATCH_ISSUER | CERT_TRUST_IS_SELF_SIGNED },
 };
@@ -1501,8 +1511,7 @@ static ChainCheck chainCheck[] = {
      1, simpleStatus4 }, 0 },
  { { sizeof(chain5) / sizeof(chain5[0]), chain5 },
    { { 0, CERT_TRUST_HAS_PREFERRED_ISSUER },
-     { CERT_TRUST_HAS_NOT_DEFINED_NAME_CONSTRAINT |
-       CERT_TRUST_HAS_NOT_PERMITTED_NAME_CONSTRAINT |
+     { CERT_TRUST_HAS_NOT_PERMITTED_NAME_CONSTRAINT |
        CERT_TRUST_IS_UNTRUSTED_ROOT, 0 }, 1, simpleStatus5 }, 0 },
  { { sizeof(chain6) / sizeof(chain6[0]), chain6 },
    { { 0, CERT_TRUST_HAS_PREFERRED_ISSUER },
@@ -1518,7 +1527,7 @@ static ChainCheck chainCheck[] = {
    TODO_ERROR },
  { { sizeof(chain9) / sizeof(chain9[0]), chain9 },
    { { CERT_TRUST_IS_NOT_TIME_NESTED, CERT_TRUST_HAS_PREFERRED_ISSUER },
-     { CERT_TRUST_HAS_NOT_SUPPORTED_NAME_CONSTRAINT |
+     { CERT_TRUST_IS_PARTIAL_CHAIN |
        CERT_TRUST_INVALID_BASIC_CONSTRAINTS | CERT_TRUST_IS_CYCLIC, 0 },
      1, simpleStatus9 },
    TODO_INFO },
@@ -1530,7 +1539,8 @@ static ChainCheck chainCheck[] = {
      { CERT_TRUST_IS_UNTRUSTED_ROOT, 0 }, 1, simpleStatus10 }, 0 },
  { { sizeof(chain12) / sizeof(chain12[0]), chain12 },
    { { 0, CERT_TRUST_HAS_PREFERRED_ISSUER },
-     { CERT_TRUST_IS_UNTRUSTED_ROOT, 0 }, 1, simpleStatus12 }, 0 },
+     { CERT_TRUST_IS_UNTRUSTED_ROOT | CERT_TRUST_IS_NOT_SIGNATURE_VALID, 0 },
+     1, simpleStatus12 }, 0 },
  { { sizeof(chain13) / sizeof(chain13[0]), chain13 },
    { { CERT_TRUST_IS_NOT_TIME_NESTED, CERT_TRUST_HAS_PREFERRED_ISSUER },
      { CERT_TRUST_IS_UNTRUSTED_ROOT, 0 }, 1, simpleStatus13 },
@@ -1563,10 +1573,9 @@ static ChainCheck chainCheckNoStore[] = {
    0 },
  { { sizeof(chain8) / sizeof(chain8[0]), chain8 },
    { { 0, CERT_TRUST_HAS_PREFERRED_ISSUER },
-     { CERT_TRUST_INVALID_BASIC_CONSTRAINTS | CERT_TRUST_IS_UNTRUSTED_ROOT |
-       CERT_TRUST_IS_NOT_TIME_VALID, 0 },
+     { CERT_TRUST_IS_PARTIAL_CHAIN, 0 },
      1, simpleStatus8NoStore },
-   TODO_INFO },
+   TODO_ERROR | TODO_INFO },
 };
 
 /* Wednesday, Oct 1, 2007 */
@@ -1660,7 +1669,7 @@ typedef struct _ChainPolicyCheck
     DWORD                    todo;
 } ChainPolicyCheck;
 
-static ChainPolicyCheck basePolicyCheck[] = {
+static const ChainPolicyCheck basePolicyCheck[] = {
  { { sizeof(chain0) / sizeof(chain0[0]), chain0 },
    { 0, CERT_E_UNTRUSTEDROOT, 0, 1, NULL }, 0 },
  { { sizeof(chain1) / sizeof(chain1[0]), chain1 },
@@ -1691,7 +1700,7 @@ static ChainPolicyCheck basePolicyCheck[] = {
    { 0, CERT_E_UNTRUSTEDROOT, 0, 0, NULL }, 0 },
 };
 
-static ChainPolicyCheck authenticodePolicyCheck[] = {
+static const ChainPolicyCheck authenticodePolicyCheck[] = {
  { { sizeof(chain0) / sizeof(chain0[0]), chain0 },
    { 0, CERT_E_UNTRUSTEDROOT, 0, 1, NULL }, 0 },
  { { sizeof(chain1) / sizeof(chain1[0]), chain1 },
@@ -1722,7 +1731,7 @@ static ChainPolicyCheck authenticodePolicyCheck[] = {
    { 0, CERT_E_UNTRUSTEDROOT, 0, 0, NULL }, 0 },
 };
 
-static ChainPolicyCheck basicConstraintsPolicyCheck[] = {
+static const ChainPolicyCheck basicConstraintsPolicyCheck[] = {
  { { sizeof(chain0) / sizeof(chain0[0]), chain0 },
    { 0, 0, -1, -1, NULL }, 0 },
  { { sizeof(chain1) / sizeof(chain1[0]), chain1 },
@@ -1762,7 +1771,7 @@ static const char *num_to_str(WORD num)
     return buf;
 }
 
-static void checkChainPolicyStatus(LPCSTR policy, ChainPolicyCheck *check,
+static void checkChainPolicyStatus(LPCSTR policy, const ChainPolicyCheck *check,
  DWORD testIndex)
 {
     PCCERT_CHAIN_CONTEXT chain = getChain(&check->certs, 0, TRUE, &oct2007,
@@ -1775,7 +1784,9 @@ static void checkChainPolicyStatus(LPCSTR policy, ChainPolicyCheck *check,
          &policyStatus);
 
         if (check->todo & TODO_POLICY)
-            todo_wine ok(ret, "%d: CertVerifyCertificateChainPolicy failed: %08x\n",
+            todo_wine ok(ret,
+             "%s[%d]: CertVerifyCertificateChainPolicy failed: %08x\n",
+             HIWORD(policy) ? policy : num_to_str(LOWORD(policy)),
              testIndex, GetLastError());
         else
         {
@@ -1786,36 +1797,46 @@ static void checkChainPolicyStatus(LPCSTR policy, ChainPolicyCheck *check,
                 pCertFreeCertificateChain(chain);
                 return;
             }
-            ok(ret, "%d: CertVerifyCertificateChainPolicy failed: %08x\n",
-             testIndex, GetLastError());
+            ok(ret, "%s[%d]: CertVerifyCertificateChainPolicy failed: %08x\n",
+             HIWORD(policy) ? policy : num_to_str(LOWORD(policy)), testIndex,
+             GetLastError());
         }
         if (ret)
         {
             if (check->todo & TODO_ERROR)
                 todo_wine ok(policyStatus.dwError == check->status.dwError,
-                 "%d: expected %08x, got %08x\n", testIndex,
-                 check->status.dwError, policyStatus.dwError);
+                 "%s[%d]: expected %08x, got %08x\n",
+                 HIWORD(policy) ? policy : num_to_str(LOWORD(policy)),
+                 testIndex, check->status.dwError, policyStatus.dwError);
             else
                 ok(policyStatus.dwError == check->status.dwError,
-                 "%d: expected %08x, got %08x\n", testIndex,
-                 check->status.dwError, policyStatus.dwError);
+                 "%s[%d]: expected %08x, got %08x\n",
+                 HIWORD(policy) ? policy : num_to_str(LOWORD(policy)),
+                 testIndex, check->status.dwError, policyStatus.dwError);
             if (check->todo & TODO_CHAINS)
                 todo_wine ok(policyStatus.lChainIndex ==
-                 check->status.lChainIndex, "%d: expected %d, got %d\n",
+                 check->status.lChainIndex, "%s[%d]: expected %d, got %d\n",
+                 HIWORD(policy) ? policy : num_to_str(LOWORD(policy)),
                  testIndex, check->status.lChainIndex,
                  policyStatus.lChainIndex);
             else
                 ok(policyStatus.lChainIndex == check->status.lChainIndex,
-                 "%d: expected %d, got %d\n", testIndex,
+                 "%s[%d]: expected %d, got %d\n",
+                 HIWORD(policy) ? policy : num_to_str(LOWORD(policy)),
+                 testIndex,
                  check->status.lChainIndex, policyStatus.lChainIndex);
             if (check->todo & TODO_ELEMENTS)
                 todo_wine ok(policyStatus.lElementIndex ==
                  check->status.lElementIndex,
-                 "%d: expected %d, got %d\n", testIndex,
+                 "%s[%d]: expected %d, got %d\n",
+                 HIWORD(policy) ? policy : num_to_str(LOWORD(policy)),
+                 testIndex,
                  check->status.lElementIndex, policyStatus.lElementIndex);
             else
                 ok(policyStatus.lElementIndex == check->status.lElementIndex,
-                 "%d: expected %d, got %d\n", testIndex,
+                 "%s[%d]: expected %d, got %d\n",
+                 HIWORD(policy) ? policy : num_to_str(LOWORD(policy)),
+                 testIndex,
                  check->status.lElementIndex, policyStatus.lElementIndex);
         }
         pCertFreeCertificateChain(chain);

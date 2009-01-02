@@ -116,6 +116,25 @@ static void DoLoadStrings(void)
     LoadStringW(hInstance, STRING_UNITS_CM, units_cmW, MAX_STRING_LEN);
 }
 
+/* Show a message box with resource strings */
+static int MessageBoxWithResStringW(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT uType)
+{
+    MSGBOXPARAMSW params;
+
+    params.cbSize             = sizeof(params);
+    params.hwndOwner          = hWnd;
+    params.hInstance          = GetModuleHandleW(0);
+    params.lpszText           = lpText;
+    params.lpszCaption        = lpCaption;
+    params.dwStyle            = uType;
+    params.lpszIcon           = NULL;
+    params.dwContextHelpId    = 0;
+    params.lpfnMsgBoxCallback = NULL;
+    params.dwLanguageId       = 0;
+    return MessageBoxIndirectW(&params);
+}
+
+
 static void AddButton(HWND hwndToolBar, int nImage, int nCommand)
 {
     TBBUTTON button;
@@ -289,7 +308,7 @@ static void on_sizelist_modified(HWND hwndSizeList, LPWSTR wszNewFontSize)
         } else
         {
             SetWindowTextW(hwndSizeList, sizeBuffer);
-            MessageBoxW(hMainWnd, MAKEINTRESOURCEW(STRING_INVALID_NUMBER),
+            MessageBoxWithResStringW(hMainWnd, MAKEINTRESOURCEW(STRING_INVALID_NUMBER),
                         wszAppTitle, MB_OK | MB_ICONINFORMATION);
         }
     }
@@ -747,8 +766,8 @@ static void DoOpenFile(LPCWSTR szOpenFileName)
         else if (!memcmp(STG_magic, fileStart, sizeof(STG_magic)))
         {
             CloseHandle(hFile);
-            MessageBoxW(hMainWnd, MAKEINTRESOURCEW(STRING_OLE_STORAGE_NOT_SUPPORTED), wszAppTitle,
-                        MB_OK | MB_ICONEXCLAMATION);
+            MessageBoxWithResStringW(hMainWnd, MAKEINTRESOURCEW(STRING_OLE_STORAGE_NOT_SUPPORTED),
+                    wszAppTitle, MB_OK | MB_ICONEXCLAMATION);
             return;
         }
     }
@@ -810,7 +829,10 @@ static void DoSaveFile(LPCWSTR wszSaveFileName, WPARAM format)
         WriteFile(hFile, &unicode, sizeof(unicode), &writeOut, 0);
 
         if(writeOut != sizeof(unicode))
+        {
+            CloseHandle(hFile);
             return;
+        }
     }
 
     stream.dwCookie = (DWORD_PTR)hFile;
@@ -860,7 +882,7 @@ static void DialogSaveFile(void)
     {
         if(fileformat_flags(sfn.nFilterIndex-1) != SF_RTF)
         {
-            if(MessageBoxW(hMainWnd, MAKEINTRESOURCEW(STRING_SAVE_LOSEFORMATTING),
+            if(MessageBoxWithResStringW(hMainWnd, MAKEINTRESOURCEW(STRING_SAVE_LOSEFORMATTING),
                            wszAppTitle, MB_YESNO | MB_ICONEXCLAMATION) != IDYES)
             {
                 continue;
@@ -977,13 +999,15 @@ static INT_PTR CALLBACK formatopts_proc(HWND hWnd, UINT message, WPARAM wParam, 
 
                 sprintf(id, "%d\n", (int)ps->lParam);
                 SetWindowTextA(hIdWnd, id);
-                if(wordWrap[ps->lParam] == ID_WORDWRAP_WINDOW)
+                if(wordWrap[ps->lParam] == ID_WORDWRAP_NONE)
+                    wrap = IDC_PAGEFMT_WN;
+                else if(wordWrap[ps->lParam] == ID_WORDWRAP_WINDOW)
                     wrap = IDC_PAGEFMT_WW;
                 else if(wordWrap[ps->lParam] == ID_WORDWRAP_MARGIN)
                     wrap = IDC_PAGEFMT_WM;
 
                 if(wrap != -1)
-                    CheckRadioButton(hWnd, IDC_PAGEFMT_WW,
+                    CheckRadioButton(hWnd, IDC_PAGEFMT_WN,
                                      IDC_PAGEFMT_WM, wrap);
 
                 if(barState[ps->lParam] & (1 << BANDID_TOOLBAR))
@@ -1000,9 +1024,10 @@ static INT_PTR CALLBACK formatopts_proc(HWND hWnd, UINT message, WPARAM wParam, 
         case WM_COMMAND:
             switch(LOWORD(wParam))
             {
+                case IDC_PAGEFMT_WN:
                 case IDC_PAGEFMT_WW:
                 case IDC_PAGEFMT_WM:
-                    CheckRadioButton(hWnd, IDC_PAGEFMT_WW, IDC_PAGEFMT_WM,
+                    CheckRadioButton(hWnd, IDC_PAGEFMT_WN, IDC_PAGEFMT_WM,
                                      LOWORD(wParam));
                     break;
 
@@ -1026,7 +1051,9 @@ static INT_PTR CALLBACK formatopts_proc(HWND hWnd, UINT message, WPARAM wParam, 
 
                     GetWindowTextA(hIdWnd, sid, 4);
                     id = atoi(sid);
-                    if(IsDlgButtonChecked(hWnd, IDC_PAGEFMT_WW))
+                    if(IsDlgButtonChecked(hWnd, IDC_PAGEFMT_WN))
+                        wordWrap[id] = ID_WORDWRAP_NONE;
+                    else if(IsDlgButtonChecked(hWnd, IDC_PAGEFMT_WW))
                         wordWrap[id] = ID_WORDWRAP_WINDOW;
                     else if(IsDlgButtonChecked(hWnd, IDC_PAGEFMT_WM))
                         wordWrap[id] = ID_WORDWRAP_MARGIN;
@@ -1153,7 +1180,7 @@ static void HandleCommandLine(LPWSTR cmdline)
     }
 
     if (opt_print)
-        MessageBoxW(hMainWnd, MAKEINTRESOURCEW(STRING_PRINTING_NOT_IMPLEMENTED), wszAppTitle, MB_OK);
+        MessageBoxWithResStringW(hMainWnd, MAKEINTRESOURCEW(STRING_PRINTING_NOT_IMPLEMENTED), wszAppTitle, MB_OK);
 }
 
 static LRESULT handle_findmsg(LPFINDREPLACEW pFr)
@@ -1231,7 +1258,7 @@ static LRESULT handle_findmsg(LPFINDREPLACEW pFr)
         if(ret == -1)
         {
             pFr->lCustData = -1;
-            MessageBoxW(hMainWnd, MAKEINTRESOURCEW(STRING_SEARCH_FINISHED), wszAppTitle,
+            MessageBoxWithResStringW(hMainWnd, MAKEINTRESOURCEW(STRING_SEARCH_FINISHED), wszAppTitle,
                         MB_OK | MB_ICONASTERISK);
         } else
         {
@@ -1271,7 +1298,7 @@ static void dialog_find(LPFINDREPLACEW fr, BOOL replace)
 
 static int current_units_to_twips(float number)
 {
-    int twips = (int)(number * TWIPS_PER_CM);
+    int twips = (int)(number * 1000.0 / (float)CENTMM_PER_INCH *  (float)TWIPS_PER_INCH);
     return twips;
 }
 
@@ -1284,10 +1311,10 @@ static void append_current_units(LPWSTR buffer)
 
 static void number_with_units(LPWSTR buffer, int number)
 {
-    float converted = (float)number / TWIPS_PER_CM;
     static const WCHAR fmt[] = {'%','.','2','f',' ','%','s','\0'};
+    float converted = (float)number / (float)TWIPS_PER_INCH *(float)CENTMM_PER_INCH / 1000.0;
 
-    sprintfW(buffer, fmt, converted, units_cmW);
+    wsprintfW(buffer, fmt, converted, units_cmW);
 }
 
 static BOOL get_comboexlist_selection(HWND hComboEx, LPWSTR wszBuffer, UINT bufferLength)
@@ -1495,7 +1522,7 @@ static INT_PTR CALLBACK paraformat_proc(HWND hWnd, UINT message, WPARAM wParam, 
 
                         if(ret != 3)
                         {
-                            MessageBoxW(hMainWnd, MAKEINTRESOURCEW(STRING_INVALID_NUMBER),
+                            MessageBoxWithResStringW(hMainWnd, MAKEINTRESOURCEW(STRING_INVALID_NUMBER),
                                         wszAppTitle, MB_OK | MB_ICONASTERISK);
                             return FALSE;
                         } else
@@ -1607,7 +1634,7 @@ static INT_PTR CALLBACK tabstops_proc(HWND hWnd, UINT message, WPARAM wParam, LP
 
                             if(!number_from_string(buffer, &number, TRUE))
                             {
-                                MessageBoxW(hWnd, MAKEINTRESOURCEW(STRING_INVALID_NUMBER),
+                                MessageBoxWithResStringW(hWnd, MAKEINTRESOURCEW(STRING_INVALID_NUMBER),
                                              wszAppTitle, MB_OK | MB_ICONINFORMATION);
                             } else
                             {
@@ -1809,14 +1836,14 @@ static LRESULT OnCreate( HWND hWnd )
     hDLL = LoadLibraryW(wszRichEditDll);
     if(!hDLL)
     {
-        MessageBoxW(hWnd, MAKEINTRESOURCEW(STRING_LOAD_RICHED_FAILED), wszAppTitle,
+        MessageBoxWithResStringW(hWnd, MAKEINTRESOURCEW(STRING_LOAD_RICHED_FAILED), wszAppTitle,
                     MB_OK | MB_ICONEXCLAMATION);
         PostQuitMessage(1);
     }
 
     hEditorWnd = CreateWindowExW(WS_EX_CLIENTEDGE, wszRichEditClass, NULL,
       WS_CHILD|WS_VISIBLE|ES_SELECTIONBAR|ES_MULTILINE|ES_AUTOVSCROLL
-      |ES_WANTRETURN|WS_VSCROLL|ES_NOHIDESEL,
+      |ES_WANTRETURN|WS_VSCROLL|ES_NOHIDESEL|WS_HSCROLL,
       0, 0, 1000, 100, hWnd, (HMENU)IDC_EDITOR, hInstance, NULL);
 
     if (!hEditorWnd)

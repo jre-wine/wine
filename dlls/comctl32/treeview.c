@@ -751,7 +751,7 @@ TREEVIEW_UpdateDispInfo(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *wineItem,
 					   (LPSTR)callback.item.pszText, -1,
                                            NULL, 0);
 	    buflen = max((len)*sizeof(WCHAR), TEXT_CALLBACK_SIZE);
-	    newText = (LPWSTR)ReAlloc(wineItem->pszText, buflen);
+            newText = ReAlloc(wineItem->pszText, buflen);
 
 	    TRACE("returned str %s, len=%d, buflen=%d\n",
 		  debugstr_a((LPSTR)callback.item.pszText), len, buflen);
@@ -793,7 +793,7 @@ TREEVIEW_UpdateDispInfo(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *wineItem,
 					  (LPSTR)callback.item.pszText, -1,
                                            NULL, 0);
 	    buflen = max((len)*sizeof(WCHAR), TEXT_CALLBACK_SIZE);
-	    newText = (LPWSTR)Alloc(buflen);
+            newText = Alloc(buflen);
 
 	    TRACE("same buffer str %s, len=%d, buflen=%d\n",
 		  debugstr_a((LPSTR)callback.item.pszText), len, buflen);
@@ -3010,8 +3010,8 @@ TREEVIEW_Sort(TREEVIEW_INFO *infoPtr, HTREEITEM parent,
 	/* The order of DPA entries has been changed, so fixup the
 	 * nextSibling and prevSibling pointers. */
 
-	item = (HTREEITEM)DPA_GetPtr(sortList, count++);
-	while ((nextItem = (HTREEITEM)DPA_GetPtr(sortList, count++)) != NULL)
+        item = DPA_GetPtr(sortList, count++);
+        while ((nextItem = DPA_GetPtr(sortList, count++)) != NULL)
 	{
 	    /* link the two current item together */
 	    item->nextSibling = nextItem;
@@ -4896,7 +4896,7 @@ TREEVIEW_Create(HWND hwnd, const CREATESTRUCTW *lpcs)
 
     TRACE("wnd %p, style %x\n", hwnd, GetWindowLongW(hwnd, GWL_STYLE));
 
-    infoPtr = (TREEVIEW_INFO *)Alloc(sizeof(TREEVIEW_INFO));
+    infoPtr = Alloc(sizeof(TREEVIEW_INFO));
 
     if (infoPtr == NULL)
     {

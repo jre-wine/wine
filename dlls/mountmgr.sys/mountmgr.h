@@ -18,8 +18,41 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <stdarg.h>
+
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
+
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
+#include "windef.h"
+#include "winbase.h"
+#include "winternl.h"
+#include "winioctl.h"
+#include "ntddstor.h"
+#include "ntddcdrm.h"
+#include "ddk/wdm.h"
+#define WINE_MOUNTMGR_EXTENSIONS
+#include "ddk/mountmgr.h"
+
 extern void initialize_hal(void);
 extern void initialize_diskarbitration(void);
-extern BOOL add_dos_device( const char *udi, const char *device,
-                            const char *mount_point, const char *type );
-extern BOOL remove_dos_device( const char *udi );
+
+/* device functions */
+
+extern NTSTATUS add_dos_device( int letter, const char *udi, const char *device,
+                                const char *mount_point, DWORD type );
+extern NTSTATUS remove_dos_device( int letter, const char *udi );
+extern NTSTATUS query_dos_device( int letter, DWORD *type, const char **device, const char **mount_point );
+extern NTSTATUS WINAPI harddisk_driver_entry( DRIVER_OBJECT *driver, UNICODE_STRING *path );
+
+/* mount point functions */
+
+struct mount_point;
+
+extern struct mount_point *add_dosdev_mount_point( DEVICE_OBJECT *device, UNICODE_STRING *device_name,
+                                                   int drive, const void *id, unsigned int id_len );
+extern struct mount_point *add_volume_mount_point( DEVICE_OBJECT *device, UNICODE_STRING *device_name,
+                                                   int drive, const void *id, unsigned int id_len );
+extern void delete_mount_point( struct mount_point *mount );
+extern void set_mount_point_id( struct mount_point *mount, const void *id, unsigned int id_len );

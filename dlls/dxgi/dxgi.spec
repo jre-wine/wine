@@ -1,0 +1,1 @@
+@ stdcall CreateDXGIFactory(ptr ptr)

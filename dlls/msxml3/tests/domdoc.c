@@ -724,6 +724,30 @@ static void test_domdoc( void )
         ok( !lstrcmpW( str, _bstr_("Begin This &is a Middle; test <>\\Append End") ), "incorrect get_text string\n");
         SysFreeString(str);
 
+        /* test put_data */
+        V_VT(&var) = VT_BSTR;
+        V_BSTR(&var) = SysAllocString(szstr1);
+        r = IXMLDOMText_put_nodeValue(nodetext, var);
+        ok(r == S_OK, "ret %08x\n", r );
+        VariantClear(&var);
+
+        r = IXMLDOMText_get_text(nodetext, &str);
+        ok(r == S_OK, "ret %08x\n", r );
+        ok( !lstrcmpW( str, szstr1 ), "incorrect get_text string\n");
+        SysFreeString(str);
+
+        /* test put_data */
+        V_VT(&var) = VT_I4;
+        V_I4(&var) = 99;
+        r = IXMLDOMText_put_nodeValue(nodetext, var);
+        ok(r == S_OK, "ret %08x\n", r );
+        VariantClear(&var);
+
+        r = IXMLDOMText_get_text(nodetext, &str);
+        ok(r == S_OK, "ret %08x\n", r );
+        ok( !lstrcmpW( str, _bstr_("99") ), "incorrect get_text string\n");
+        SysFreeString(str);
+
         IXMLDOMText_Release( nodetext );
     }
 
@@ -1003,6 +1027,9 @@ todo_wine
         SysFreeString( str );
 
 	/* test indexed access of attributes */
+        r = IXMLDOMNamedNodeMap_get_length( map, NULL );
+        ok ( r == E_INVALIDARG, "get_length should return E_INVALIDARG\n");
+
         r = IXMLDOMNamedNodeMap_get_length( map, &count );
         ok ( r == S_OK, "get_length wrong code\n");
         ok ( count == 1, "get_length != 1\n");
@@ -1383,14 +1410,12 @@ static void test_create(void)
 
     V_VT(&var) = VT_R4;
     V_R4(&var) = NODE_ELEMENT;
-    str = SysAllocString( szlc );
     r = IXMLDOMDocument_createNode( doc, var, str, NULL, &node );
     ok( r == S_OK, "returns %08x\n", r );
     if( SUCCEEDED(r) ) IXMLDOMNode_Release( node );
 
     V_VT(&var) = VT_BSTR;
     V_BSTR(&var) = SysAllocString( szOne );
-    str = SysAllocString( szlc );
     r = IXMLDOMDocument_createNode( doc, var, str, NULL, &node );
     ok( r == S_OK, "returns %08x\n", r );
     if( SUCCEEDED(r) ) IXMLDOMNode_Release( node );
@@ -1398,7 +1423,6 @@ static void test_create(void)
 
     V_VT(&var) = VT_BSTR;
     V_BSTR(&var) = SysAllocString( szOneGarbage );
-    str = SysAllocString( szlc );
     r = IXMLDOMDocument_createNode( doc, var, str, NULL, &node );
     ok( r == E_INVALIDARG, "returns %08x\n", r );
     if( SUCCEEDED(r) ) IXMLDOMNode_Release( node );
@@ -1406,7 +1430,6 @@ static void test_create(void)
 
     V_VT(&var) = VT_I4;
     V_I4(&var) = NODE_ELEMENT;
-    str = SysAllocString( szlc );
     r = IXMLDOMDocument_createNode( doc, var, str, NULL, &node );
     ok( r == S_OK, "returns %08x\n", r );
     r = IXMLDOMDocument_appendChild( doc, node, &root );
@@ -1426,6 +1449,7 @@ static void test_create(void)
     str = SysAllocString( szbs );
     r = IXMLDOMDocument_createNode( doc, var, str, NULL, &node );
     ok( r == S_OK, "returns %08x\n", r );
+    SysFreeString( str );
 
     ref = IXMLDOMNode_AddRef( node );
     ok(ref == 2, "ref = %d\n", ref);
@@ -1985,6 +2009,91 @@ static void test_replaceChild(void)
     IXMLDOMDocument_Release( doc );
 }
 
+static void test_removeNamedItem(void)
+{
+    IXMLDOMDocument *doc;
+    IXMLDOMElement *element;
+    IXMLDOMNode *pr_node, *removed_node, *removed_node2;
+    IXMLDOMNodeList *root_list;
+    IXMLDOMNamedNodeMap * pr_attrs;
+    VARIANT_BOOL b;
+    BSTR str;
+    long len;
+    HRESULT r;
+
+    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
+        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
+    if( r != S_OK )
+        return;
+
+    str = SysAllocString( szComplete4 );
+    r = IXMLDOMDocument_loadXML( doc, str, &b );
+    ok( r == S_OK, "loadXML failed\n");
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    SysFreeString( str );
+
+    r = IXMLDOMDocument_get_documentElement( doc, &element );
+    ok( r == S_OK, "ret %08x\n", r);
+
+    r = IXMLDOMElement_get_childNodes( element, &root_list );
+    ok( r == S_OK, "ret %08x\n", r);
+
+    r = IXMLDOMNodeList_get_item( root_list, 1, &pr_node );
+    ok( r == S_OK, "ret %08x\n", r);
+
+    r = IXMLDOMNode_get_attributes( pr_node, &pr_attrs );
+    ok( r == S_OK, "ret %08x\n", r);
+
+    r = IXMLDOMNamedNodeMap_get_length( pr_attrs, &len );
+    ok( r == S_OK, "ret %08x\n", r);
+    ok( len == 3, "length %ld\n", len);
+
+    removed_node = (void*)0xdeadbeef;
+    r = IXMLDOMNamedNodeMap_removeNamedItem( pr_attrs, NULL, &removed_node);
+    ok ( r == E_INVALIDARG, "ret %08x\n", r);
+    ok ( removed_node == (void*)0xdeadbeef, "removed_node == %p\n", removed_node);
+
+    removed_node = (void*)0xdeadbeef;
+    str = SysAllocString(szvr);
+    r = IXMLDOMNamedNodeMap_removeNamedItem( pr_attrs, str, &removed_node);
+    ok ( r == S_OK, "ret %08x\n", r);
+
+    removed_node2 = (void*)0xdeadbeef;
+    r = IXMLDOMNamedNodeMap_removeNamedItem( pr_attrs, str, &removed_node2);
+    ok ( r == S_FALSE, "ret %08x\n", r);
+    ok ( removed_node2 == NULL, "removed_node == %p\n", removed_node2 );
+
+    r = IXMLDOMNamedNodeMap_get_length( pr_attrs, &len );
+    ok( r == S_OK, "ret %08x\n", r);
+    ok( len == 2, "length %ld\n", len);
+
+    r = IXMLDOMNamedNodeMap_setNamedItem( pr_attrs, removed_node, NULL);
+    ok ( r == S_OK, "ret %08x\n", r);
+    IXMLDOMNode_Release(removed_node);
+
+    r = IXMLDOMNamedNodeMap_get_length( pr_attrs, &len );
+    ok( r == S_OK, "ret %08x\n", r);
+    ok( len == 3, "length %ld\n", len);
+
+    r = IXMLDOMNamedNodeMap_removeNamedItem( pr_attrs, str, NULL);
+    ok ( r == S_OK, "ret %08x\n", r);
+
+    r = IXMLDOMNamedNodeMap_get_length( pr_attrs, &len );
+    ok( r == S_OK, "ret %08x\n", r);
+    ok( len == 2, "length %ld\n", len);
+
+    r = IXMLDOMNamedNodeMap_removeNamedItem( pr_attrs, str, NULL);
+    ok ( r == S_FALSE, "ret %08x\n", r);
+
+    SysFreeString(str);
+
+    IXMLDOMNamedNodeMap_Release( pr_attrs );
+    IXMLDOMNode_Release( pr_node );
+    IXMLDOMNodeList_Release( root_list );
+    IXMLDOMElement_Release( element );
+    IXMLDOMDocument_Release( doc );
+}
+
 static void test_XMLHTTP(void)
 {
     static const WCHAR wszBody[] = {'m','o','d','e','=','T','e','s','t',0};
@@ -2030,6 +2139,8 @@ static void test_XMLHTTP(void)
         ok(!memcmp(bstrResponse, wszExpectedResponse, sizeof(wszExpectedResponse)), "bstrResponse differs from what was expected\n");
         SysFreeString(bstrResponse);
     }
+
+    IXMLHttpRequest_Release(pXMLHttpRequest);
 }
 
 static void test_IXMLDOMDocument2(void)
@@ -3563,6 +3674,7 @@ static void test_testTransforms(void)
         hr = IXMLDOMDocument_transformNode(doc, pNode, &bOut);
         ok(hr == S_OK, "ret %08x\n", hr );
         ok( compareIgnoreReturns( bOut, _bstr_(szTransformOutput)), "Stylesheet output not correct\n");
+        SysFreeString(bOut);
 
         IXMLDOMNode_Release(pNode);
     }
@@ -3686,6 +3798,7 @@ START_TEST(domdoc)
     test_get_childNodes();
     test_removeChild();
     test_replaceChild();
+    test_removeNamedItem();
     test_XMLHTTP();
     test_IXMLDOMDocument2();
     test_XPath();

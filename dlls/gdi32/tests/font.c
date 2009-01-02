@@ -106,7 +106,7 @@ static void check_font(const char* test, const LOGFONTA* lf, HFONT hfont)
         minlen++;
     minlen += FIELD_OFFSET(LOGFONTA, lfFaceName) + 1;
     ok(ret == sizeof(LOGFONTA) || ret == minlen, "%s: GetObject returned %d\n", test, ret);
-    ok(!memcmp(&lf, &lf, FIELD_OFFSET(LOGFONTA, lfFaceName)), "%s: fonts don't match\n", test);
+    ok(!memcmp(lf, &getobj_lf, FIELD_OFFSET(LOGFONTA, lfFaceName)), "%s: fonts don't match\n", test);
     ok(!lstrcmpA(lf->lfFaceName, getobj_lf.lfFaceName),
        "%s: font names don't match: %s != %s\n", test, lf->lfFaceName, getobj_lf.lfFaceName);
 }
@@ -1571,7 +1571,7 @@ static void test_GetFontUnicodeRanges(void)
     ReleaseDC(NULL, hdc);
 }
 
-#define MAX_ENUM_FONTS 256
+#define MAX_ENUM_FONTS 4096
 
 struct enum_font_data
 {
@@ -1596,6 +1596,8 @@ static INT CALLBACK arial_enum_proc(const LOGFONT *lf, const TEXTMETRIC *tm, DWO
 #endif
     if (efd->total < MAX_ENUM_FONTS)
         efd->lf[efd->total++] = *lf;
+    else
+        trace("enum tests invalid; you have more than %d fonts\n", MAX_ENUM_FONTS);
 
     return 1;
 }
@@ -1608,6 +1610,8 @@ static INT CALLBACK arial_enum_procw(const LOGFONTW *lf, const TEXTMETRICW *tm, 
 
     if (efd->total < MAX_ENUM_FONTS)
         efd->lf[efd->total++] = *lf;
+    else
+        trace("enum tests invalid; you have more than %d fonts\n", MAX_ENUM_FONTS);
 
     return 1;
 }

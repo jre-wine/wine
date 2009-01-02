@@ -193,7 +193,7 @@ static inline void wstrbuf_finish(wstrbuf_t *buf)
 static void wstrbuf_append_len(wstrbuf_t *buf, LPCWSTR str, int len)
 {
     if(buf->len+len >= buf->size) {
-        buf->size = 2*buf->len+len;
+        buf->size = 2*buf->size+len;
         buf->buf = heap_realloc(buf->buf, buf->size * sizeof(WCHAR));
     }
 
@@ -210,7 +210,7 @@ static void wstrbuf_append_nodetxt(wstrbuf_t *buf, LPCWSTR str, int len)
     TRACE("%s\n", debugstr_wn(str, len));
 
     if(buf->len+len >= buf->size) {
-        buf->size = 2*buf->len+len;
+        buf->size = 2*buf->size+len;
         buf->buf = heap_realloc(buf->buf, buf->size * sizeof(WCHAR));
     }
 
@@ -252,7 +252,7 @@ static void wstrbuf_append_node(wstrbuf_t *buf, nsIDOMNode *node)
         wstrbuf_append_nodetxt(buf, data, strlenW(data));
         nsAString_Finish(&data_str);
 
-       nsIDOMText_Release(nstext);
+        nsIDOMText_Release(nstext);
 
         break;
     }
@@ -264,6 +264,21 @@ static void wstrbuf_append_node(wstrbuf_t *buf, nsIDOMNode *node)
             static const WCHAR endl2W[] = {'\r','\n','\r','\n'};
             wstrbuf_append_len(buf, endl2W, 4);
         }
+    }
+}
+
+static void wstrbuf_append_node_rec(wstrbuf_t *buf, nsIDOMNode *node)
+{
+    nsIDOMNode *iter, *tmp;
+
+    wstrbuf_append_node(buf, node);
+
+    nsIDOMNode_GetFirstChild(node, &iter);
+    while(iter) {
+        wstrbuf_append_node_rec(buf, iter);
+        nsIDOMNode_GetNextSibling(iter, &tmp);
+        nsIDOMNode_Release(iter);
+        iter = tmp;
     }
 }
 
@@ -527,6 +542,27 @@ static void range_to_string(HTMLTxtRange *This, wstrbuf_t *buf)
         if(p)
             *p = 0;
     }
+}
+
+HRESULT get_node_text(HTMLDOMNode *node, BSTR *ret)
+{
+    wstrbuf_t buf;
+    HRESULT hres = S_OK;
+
+    wstrbuf_init(&buf);
+    wstrbuf_append_node_rec(&buf, node->nsnode);
+    if(buf.buf) {
+        *ret = SysAllocString(buf.buf);
+        if(!*ret)
+            hres = E_OUTOFMEMORY;
+    }else {
+        *ret = NULL;
+    }
+    wstrbuf_finish(&buf);
+
+    if(SUCCEEDED(hres))
+        TRACE("ret %s\n", debugstr_w(*ret));
+    return hres;
 }
 
 static WCHAR get_pos_char(const dompos_t *pos)

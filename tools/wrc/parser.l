@@ -103,6 +103,8 @@ cident	[a-zA-Z_][0-9a-zA-Z_]*
 #include <string.h>
 #include <ctype.h>
 #include <assert.h>
+#include <errno.h>
+#include <limits.h>
 
 #ifndef HAVE_UNISTD_H
 #define YY_NO_UNISTD_H
@@ -295,6 +297,19 @@ static struct keyword *iskeyword(char *kw)
 		return kwp;
 }
 
+/* converts an integer in string form to an unsigned long and prints an error
+ * on overflow */
+static unsigned long xstrtoul(const char *nptr, char **endptr, int base)
+{
+    unsigned long l;
+
+    errno = 0;
+    l = strtoul(nptr, endptr, base);
+    if (l == ULONG_MAX && errno == ERANGE)
+        parser_error("integer constant %s is too large\n", nptr);
+    return l;
+}
+
 %}
 
 /*
@@ -359,7 +374,7 @@ static struct keyword *iskeyword(char *kw)
         yy_pop_state();
         while (*p < '0' || *p > '9') p++;
         current_codepage = strtol( p, NULL, 10 );
-        if (current_codepage && current_codepage != CP_UTF8 && !wine_cp_get_table( current_codepage ))
+        if (current_codepage != CP_UTF8 && !wine_cp_get_table( current_codepage ))
         {
             parser_error("Codepage %d not supported", current_codepage);
             current_codepage = 0;
@@ -378,9 +393,9 @@ static struct keyword *iskeyword(char *kw)
 \{			return tBEGIN;
 \}			return tEND;
 
-[0-9]+[lL]?		{ parser_lval.num = strtoul(yytext,  0, 10); return toupper(yytext[yyleng-1]) == 'L' ? tLNUMBER : tNUMBER; }
-0[xX][0-9A-Fa-f]+[lL]?	{ parser_lval.num = strtoul(yytext,  0, 16); return toupper(yytext[yyleng-1]) == 'L' ? tLNUMBER : tNUMBER; }
-0[oO][0-7]+[lL]?	{ parser_lval.num = strtoul(yytext+2, 0, 8); return toupper(yytext[yyleng-1]) == 'L' ? tLNUMBER : tNUMBER; }
+[0-9]+[lL]?		{ parser_lval.num = xstrtoul(yytext,  0, 10); return toupper(yytext[yyleng-1]) == 'L' ? tLNUMBER : tNUMBER; }
+0[xX][0-9A-Fa-f]+[lL]?	{ parser_lval.num = xstrtoul(yytext,  0, 16); return toupper(yytext[yyleng-1]) == 'L' ? tLNUMBER : tNUMBER; }
+0[oO][0-7]+[lL]?	{ parser_lval.num = xstrtoul(yytext+2, 0, 8); return toupper(yytext[yyleng-1]) == 'L' ? tLNUMBER : tNUMBER; }
 
 	/*
 	 * The next two rules scan identifiers and filenames.

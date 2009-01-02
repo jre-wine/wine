@@ -142,7 +142,6 @@ typedef struct
 #define BUTTON_SPACINGY         3
 #define FLAT_BTN_SPACINGX       8
 #define DEFAULT_MIN_TAB_WIDTH   54
-#define DEFAULT_TAB_WIDTH_FIXED 96
 #define DEFAULT_PADDING_X       6
 #define EXTRA_ICON_PADDING      3
 
@@ -2940,7 +2939,7 @@ static LRESULT TAB_Create (HWND hwnd, WPARAM wParam, LPARAM lParam)
   HFONT hOldFont;
   DWORD dwStyle;
 
-  infoPtr = (TAB_INFO *)Alloc (sizeof(TAB_INFO));
+  infoPtr = Alloc (sizeof(TAB_INFO));
 
   SetWindowLongPtrW(hwnd, 0, (DWORD_PTR)infoPtr);
 
@@ -3019,7 +3018,7 @@ static LRESULT TAB_Create (HWND hwnd, WPARAM wParam, LPARAM lParam)
 
   /* Initialize the width of a tab. */
   if (dwStyle & TCS_FIXEDWIDTH)
-    infoPtr->tabWidth = DEFAULT_TAB_WIDTH_FIXED;
+    infoPtr->tabWidth = GetDeviceCaps(hdc, LOGPIXELSX);
 
   infoPtr->tabMinWidth = -1;
 

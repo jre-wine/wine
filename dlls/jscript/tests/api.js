@@ -362,11 +362,26 @@ ok(Number() === 0, "Number() = " + Number());
 ok(Number(false) === 0, "Number(false) = " + Number(false));
 ok(Number("43") === 43, "Number('43') = " + Number("43"));
 
+tmp = (new Number(1)).valueOf();
+ok(tmp === 1, "(new Number(1)).valueOf = " + tmp);
+tmp = (new Number(1,2)).valueOf();
+ok(tmp === 1, "(new Number(1,2)).valueOf = " + tmp);
+tmp = (new Number()).valueOf();
+ok(tmp === 0, "(new Number()).valueOf = " + tmp);
+tmp = Number.prototype.valueOf();
+ok(tmp === 0, "Number.prototype.valueOf = " + tmp);
+
 tmp = Math.min(1);
 ok(tmp === 1, "Math.min(1) = " + tmp);
 
 tmp = Math.min(1, false);
 ok(tmp === 0, "Math.min(1, false) = " + tmp);
+
+tmp = Math.min();
+ok(tmp === Infinity, "Math.min() = " + tmp);
+
+tmp = Math.min(1, NaN, -Infinity, false);
+ok(isNaN(tmp), "Math.min(1, NaN, -Infinity, false) is not NaN");
 
 tmp = Math.min(1, false, true, null, -3);
 ok(tmp === -3, "Math.min(1, false, true, null, -3) = " + tmp);
@@ -379,6 +394,12 @@ ok(tmp === 1, "Math.max(true, 0) = " + tmp);
 
 tmp = Math.max(-2, false, true, null, 1);
 ok(tmp === 1, "Math.max(-2, false, true, null, 1) = " + tmp);
+
+tmp = Math.max();
+ok(tmp === -Infinity, "Math.max() = " + tmp);
+
+tmp = Math.max(true, NaN, 0);
+ok(isNaN(tmp), "Math.max(true, NaN, 0) is not NaN");
 
 tmp = Math.round(0.5);
 ok(tmp === 1, "Math.round(0.5) = " + tmp);
@@ -410,6 +431,27 @@ ok(tmp === 1, "Math.ceil(true) = " + tmp);
 tmp = Math.ceil(1.1, 3, 4);
 ok(tmp === 2, "Math.ceil(1.1, 3, 4) = " + tmp);
 
+tmp = Math.ceil();
+ok(isNaN(tmp), "ceil() is not NaN");
+
+tmp = Math.floor(0.5);
+ok(tmp === 0, "Math.floor(0.5) = " + tmp);
+
+tmp = Math.floor(-0.5);
+ok(tmp === -1, "Math.floor(-0.5) = " + tmp);
+
+tmp = Math.floor(1.1);
+ok(tmp === 1, "Math.floor(1.1) = " + tmp);
+
+tmp = Math.floor(true);
+ok(tmp === 1, "Math.floor(true) = " + tmp);
+
+tmp = Math.floor(1.1, 3, 4);
+ok(tmp === 1, "Math.floor(1.1, 3, 4) = " + tmp);
+
+tmp = Math.floor();
+ok(isNaN(tmp), "floor is not NaN");
+
 tmp = Math.abs(3);
 ok(tmp === 3, "Math.abs(3) = " + tmp);
 
@@ -418,6 +460,15 @@ ok(tmp === 3, "Math.abs(-3) = " + tmp);
 
 tmp = Math.abs(true);
 ok(tmp === 1, "Math.abs(true) = " + tmp);
+
+tmp = Math.abs();
+ok(isNaN(tmp), "Math.abs() is not NaN");
+
+tmp = Math.abs(NaN);
+ok(isNaN(tmp), "Math.abs() is not NaN");
+
+tmp = Math.abs(-Infinity);
+ok(tmp === Infinity, "Math.abs(-Infinite) = " + tmp);
 
 tmp = Math.abs(-3, 2);
 ok(tmp === 3, "Math.abs(-3, 2) = " + tmp);
@@ -448,5 +499,11 @@ ok(testFuncToString.toString() === "function testFuncToString(x,y) {\n    return
    "testFuncToString.toString() = " + testFuncToString.toString());
 ok("" + testFuncToString === "function testFuncToString(x,y) {\n    return x+y;\n}",
    "'' + testFuncToString = " + testFuncToString);
+
+var date = new Date();
+
+date = new Date(100);
+ok(date.getTime() === 100, "date.getTime() = " + date.getTime());
+ok(Date.prototype.getTime() === 0, "date.prototype.getTime() = " + Date.prototype.getTime());
 
 reportSuccess();
