@@ -1,8 +1,13 @@
-wine (1.1.7-1) UNRELEASED; urgency=low
+wine (1.1.7-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.7, released Oct 24, 2008.
+    - Improved device management for DOS drives.
+    - Many Richedit fixes.
+    - Various installer fixes, particularly for IE 7.
+    - First steps of Direct3D 10 implementation.
+    - Various bug fixes.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Fri, 02 Jan 2009 05:19:10 +0100
+ -- Ove Kaaven <ovek@arcticnet.no>  Fri, 02 Jan 2009 09:18:43 +0100
 
 wine (1.1.6-1) experimental; urgency=low
 
