@@ -1,8 +1,13 @@
-wine (1.1.8-1) UNRELEASED; urgency=low
+wine (1.1.8-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.8, released Nov 7, 2008.
+    - Substantial parts of inetcomm implemented (for Outlook).
+    - Still better crypt32 support.
+    - Memory management improvements.
+    - Theming support for buttons.
+    - Various bug fixes.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sat, 03 Jan 2009 13:14:21 +0100
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 03 Jan 2009 14:14:41 +0100
 
 wine (1.1.7-1) experimental; urgency=low
 
