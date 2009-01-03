@@ -3114,6 +3114,19 @@ static GdiFont *find_in_cache(HFONT hfont, const LOGFONTW *plf, const FMAT2 *pma
     fd.can_use_bitmap = can_use_bitmap;
     calc_hash(&fd);
 
+    /* try the child list */
+    LIST_FOR_EACH(font_elem_ptr, &child_font_list) {
+        ret = LIST_ENTRY(font_elem_ptr, struct tagGdiFont, entry);
+        if(!fontcmp(ret, &fd)) {
+            if(!can_use_bitmap && !FT_IS_SCALABLE(ret->ft_face)) continue;
+            LIST_FOR_EACH(hfontlist_elem_ptr, &ret->hfontlist) {
+                hflist = LIST_ENTRY(hfontlist_elem_ptr, struct tagHFONTLIST, entry);
+                if(hflist->hfont == hfont)
+                    return ret;
+            }
+        }
+    }
+
     /* try the in-use list */
     LIST_FOR_EACH(font_elem_ptr, &gdi_font_list) {
         ret = LIST_ENTRY(font_elem_ptr, struct tagGdiFont, entry);
@@ -3306,6 +3319,14 @@ GdiFont *WineEngCreateFontInstance(DC *dc, HFONT hfont)
            font scaling abilities. */
         dcmat.eM11 = dcmat.eM22 = fabs(dc->xformWorld2Vport.eM22);
         dcmat.eM21 = dcmat.eM12 = 0;
+    }
+
+    /* Try to avoid not necessary glyph transformations */
+    if (dcmat.eM21 == 0.0 && dcmat.eM12 == 0.0 && dcmat.eM11 == dcmat.eM22)
+    {
+        lf.lfHeight *= fabs(dcmat.eM11);
+        lf.lfWidth *= fabs(dcmat.eM11);
+        dcmat.eM11 = dcmat.eM22 = 1.0;
     }
 
     TRACE("DC transform %f %f %f %f\n", dcmat.eM11, dcmat.eM12,
@@ -4360,6 +4381,11 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
         original_index = glyph_index;
     }
 
+    if(format & GGO_UNHINTED) {
+        load_flags |= FT_LOAD_NO_HINTING;
+        format &= ~GGO_UNHINTED;
+    }
+
     /* tategaki never appears to happen to lower glyph index */
     if (glyph_index < TATEGAKI_LOWER_BOUND )
         tategaki = FALSE;
@@ -4588,9 +4614,8 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
 	    ft_bitmap.pixel_mode = ft_pixel_mode_mono;
 	    ft_bitmap.buffer = buf;
 
-		if(needsTransform) {
-			pFT_Outline_Transform(&ft_face->glyph->outline, &transMat);
-	    }
+	    if(needsTransform)
+		pFT_Outline_Transform(&ft_face->glyph->outline, &transMat);
 
 	    pFT_Outline_Translate(&ft_face->glyph->outline, -left, -bottom );
 
@@ -5340,6 +5365,7 @@ static BOOL load_child_font(GdiFont *font, CHILD_FONT *child)
         return FALSE;
     }
 
+    child->font->font_desc = font->font_desc;
     child->font->ntmFlags = child->face->ntmFlags;
     child->font->orientation = font->orientation;
     child->font->scale_y = font->scale_y;

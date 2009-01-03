@@ -288,7 +288,8 @@ static void ui_actioninfo(MSIPACKAGE *package, LPCWSTR action, BOOL start,
     msiobj_release(&row->hdr);
 }
 
-UINT msi_parse_command_line( MSIPACKAGE *package, LPCWSTR szCommandLine )
+UINT msi_parse_command_line( MSIPACKAGE *package, LPCWSTR szCommandLine,
+                             BOOL preserve_case )
 {
     LPCWSTR ptr,ptr2;
     BOOL quote;
@@ -323,6 +324,10 @@ UINT msi_parse_command_line( MSIPACKAGE *package, LPCWSTR szCommandLine )
         prop = msi_alloc((len+1)*sizeof(WCHAR));
         memcpy(prop,ptr,len*sizeof(WCHAR));
         prop[len]=0;
+
+        if (!preserve_case)
+            struprW(prop);
+
         ptr2++;
        
         len = 0; 
@@ -727,7 +732,7 @@ UINT MSI_InstallPackage( MSIPACKAGE *package, LPCWSTR szPackagePath,
         msi_set_sourcedir_props(package, FALSE);
     }
 
-    msi_parse_command_line( package, szCommandLine );
+    msi_parse_command_line( package, szCommandLine, FALSE );
 
     msi_apply_transforms( package );
     msi_apply_patches( package );
@@ -3577,22 +3582,19 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
     if (!msi_check_publish(package))
         return ERROR_SUCCESS;
 
+    rc = MSIREG_OpenProductKey(package->ProductCode, package->Context,
+                               &hukey, TRUE);
+    if (rc != ERROR_SUCCESS)
+        goto end;
+
     if (package->Context == MSIINSTALLCONTEXT_MACHINE)
     {
-        rc = MSIREG_OpenLocalClassesProductKey(package->ProductCode, &hukey, TRUE);
-        if (rc != ERROR_SUCCESS)
-            goto end;
-
         rc = MSIREG_OpenLocalUserDataProductKey(package->ProductCode, &hudkey, TRUE);
         if (rc != ERROR_SUCCESS)
             goto end;
     }
     else
     {
-        rc = MSIREG_OpenUserProductsKey(package->ProductCode, &hukey, TRUE);
-        if (rc != ERROR_SUCCESS)
-            goto end;
-
         rc = MSIREG_OpenUserDataProductKey(package->ProductCode, &hudkey, TRUE);
         if (rc != ERROR_SUCCESS)
             goto end;
@@ -3622,9 +3624,10 @@ end:
 static UINT ITERATE_WriteIniValues(MSIRECORD *row, LPVOID param)
 {
     MSIPACKAGE *package = (MSIPACKAGE*)param;
-    LPCWSTR component,section,key,value,identifier,filename,dirproperty;
+    LPCWSTR component, section, key, value, identifier, dirproperty;
     LPWSTR deformated_section, deformated_key, deformated_value;
-    LPWSTR folder, fullname = NULL;
+    LPWSTR folder, filename, fullname = NULL;
+    LPCWSTR filenameptr;
     MSIRECORD * uirow;
     INT action;
     MSICOMPONENT *comp;
@@ -3647,7 +3650,6 @@ static UINT ITERATE_WriteIniValues(MSIRECORD *row, LPVOID param)
     comp->Action = INSTALLSTATE_LOCAL;
 
     identifier = MSI_RecordGetString(row,1); 
-    filename = MSI_RecordGetString(row,2);
     dirproperty = MSI_RecordGetString(row,3);
     section = MSI_RecordGetString(row,4);
     key = MSI_RecordGetString(row,5);
@@ -3657,6 +3659,12 @@ static UINT ITERATE_WriteIniValues(MSIRECORD *row, LPVOID param)
     deformat_string(package,section,&deformated_section);
     deformat_string(package,key,&deformated_key);
     deformat_string(package,value,&deformated_value);
+
+    filename = msi_dup_record_field(row, 2);
+    if (filename && (filenameptr = strchrW(filename, '|')))
+        filenameptr++;
+    else
+        filenameptr = filename;
 
     if (dirproperty)
     {
@@ -3673,7 +3681,7 @@ static UINT ITERATE_WriteIniValues(MSIRECORD *row, LPVOID param)
         goto cleanup;
     }
 
-    fullname = build_directory_name(2, folder, filename);
+    fullname = build_directory_name(2, folder, filenameptr);
 
     if (action == 0)
     {
@@ -3708,7 +3716,9 @@ static UINT ITERATE_WriteIniValues(MSIRECORD *row, LPVOID param)
     MSI_RecordSetStringW(uirow,4,deformated_value);
     ui_actiondata(package,szWriteIniValues,uirow);
     msiobj_release( &uirow->hdr );
+
 cleanup:
+    msi_free(filename);
     msi_free(fullname);
     msi_free(folder);
     msi_free(deformated_key);
@@ -3831,29 +3841,15 @@ static UINT ACTION_PublishFeatures(MSIPACKAGE *package)
     if (!msi_check_publish(package))
         return ERROR_SUCCESS;
 
-    if (package->Context == MSIINSTALLCONTEXT_MACHINE)
-    {
-        rc = MSIREG_OpenLocalClassesFeaturesKey(package->ProductCode,
-                                                &hkey, TRUE);
-        if (rc != ERROR_SUCCESS)
-            goto end;
+    rc = MSIREG_OpenFeaturesKey(package->ProductCode, package->Context,
+                                &hkey, TRUE);
+    if (rc != ERROR_SUCCESS)
+        goto end;
 
-        rc = MSIREG_OpenLocalUserDataFeaturesKey(package->ProductCode,
-                                                 &userdata, TRUE);
-        if (rc != ERROR_SUCCESS)
-            goto end;
-    }
-    else
-    {
-        rc = MSIREG_OpenUserFeaturesKey(package->ProductCode, &hkey, TRUE);
-        if (rc != ERROR_SUCCESS)
-            goto end;
-
-        rc = MSIREG_OpenUserDataFeaturesKey(package->ProductCode,
-                                            &userdata, TRUE);
-        if (rc != ERROR_SUCCESS)
-            goto end;
-    }
+    rc = MSIREG_OpenUserDataFeaturesKey(package->ProductCode, package->Context,
+                                        &userdata, TRUE);
+    if (rc != ERROR_SUCCESS)
+        goto end;
 
     /* here the guids are base 85 encoded */
     LIST_FOR_EACH_ENTRY( feature, &package->features, MSIFEATURE, entry )
@@ -3951,14 +3947,16 @@ static UINT msi_unpublish_feature(MSIPACKAGE *package, MSIFEATURE *feature)
 
     TRACE("unpublishing feature %s\n", debugstr_w(feature->Feature));
 
-    r = MSIREG_OpenUserFeaturesKey(package->ProductCode, &hkey, FALSE);
+    r = MSIREG_OpenFeaturesKey(package->ProductCode, package->Context,
+                               &hkey, FALSE);
     if (r == ERROR_SUCCESS)
     {
         RegDeleteValueW(hkey, feature->Feature);
         RegCloseKey(hkey);
     }
 
-    r = MSIREG_OpenUserDataFeaturesKey(package->ProductCode, &hkey, FALSE);
+    r = MSIREG_OpenUserDataFeaturesKey(package->ProductCode, package->Context,
+                                       &hkey, FALSE);
     if (r == ERROR_SUCCESS)
     {
         RegDeleteValueW(hkey, feature->Feature);
@@ -5762,9 +5760,6 @@ static UINT install_assembly(MSIPACKAGE *package, MSIASSEMBLY *assembly,
         return ERROR_SUCCESS;
     }
 
-    if (!init_functionpointers() || !pCreateAssemblyCache)
-        return ERROR_FUNCTION_FAILED;
-
     hr = pCreateAssemblyCache(&cache, 0);
     if (FAILED(hr))
         goto done;
@@ -5783,8 +5778,137 @@ done:
 typedef struct tagASSEMBLY_LIST
 {
     MSIPACKAGE *package;
+    IAssemblyCache *cache;
     struct list *assemblies;
 } ASSEMBLY_LIST;
+
+typedef struct tagASSEMBLY_NAME
+{
+    LPWSTR name;
+    LPWSTR version;
+    LPWSTR culture;
+    LPWSTR pubkeytoken;
+} ASSEMBLY_NAME;
+
+static UINT parse_assembly_name(MSIRECORD *rec, LPVOID param)
+{
+    ASSEMBLY_NAME *asmname = (ASSEMBLY_NAME *)param;
+    LPCWSTR name = MSI_RecordGetString(rec, 2);
+    LPWSTR val = msi_dup_record_field(rec, 3);
+
+    static const WCHAR Name[] = {'N','a','m','e',0};
+    static const WCHAR Version[] = {'V','e','r','s','i','o','n',0};
+    static const WCHAR Culture[] = {'C','u','l','t','u','r','e',0};
+    static const WCHAR PublicKeyToken[] = {
+        'P','u','b','l','i','c','K','e','y','T','o','k','e','n',0};
+
+    if (!lstrcmpW(name, Name))
+        asmname->name = val;
+    else if (!lstrcmpW(name, Version))
+        asmname->version = val;
+    else if (!lstrcmpW(name, Culture))
+        asmname->culture = val;
+    else if (!lstrcmpW(name, PublicKeyToken))
+        asmname->pubkeytoken = val;
+    else
+        msi_free(val);
+
+    return ERROR_SUCCESS;
+}
+
+static void append_str(LPWSTR *str, DWORD *size, LPCWSTR append)
+{
+    if (!*str)
+    {
+        *size = lstrlenW(append) + 1;
+        *str = msi_alloc((*size) * sizeof(WCHAR));
+        lstrcpyW(*str, append);
+        return;
+    }
+
+    (*size) += lstrlenW(append);
+    *str = msi_realloc(*str, (*size) * sizeof(WCHAR));
+    lstrcatW(*str, append);
+}
+
+static BOOL check_assembly_installed(MSIDATABASE *db, IAssemblyCache *cache,
+                                     MSICOMPONENT *comp)
+{
+    ASSEMBLY_INFO asminfo;
+    ASSEMBLY_NAME name;
+    MSIQUERY *view;
+    LPWSTR disp;
+    DWORD size;
+    BOOL found;
+    UINT r;
+
+    static const WCHAR separator[] = {',',' ',0};
+    static const WCHAR Version[] = {'V','e','r','s','i','o','n','=',0};
+    static const WCHAR Culture[] = {'C','u','l','t','u','r','e','=',0};
+    static const WCHAR PublicKeyToken[] = {
+        'P','u','b','l','i','c','K','e','y','T','o','k','e','n','=',0};
+    static const WCHAR query[] = {
+        'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
+        '`','M','s','i','A','s','s','e','m','b','l','y','N','a','m','e','`',' ',
+        'W','H','E','R','E',' ','`','C','o','m','p','o','n','e','n','t','_','`',
+        '=','\'','%','s','\'',0};
+
+    disp = NULL;
+    found = FALSE;
+    ZeroMemory(&name, sizeof(ASSEMBLY_NAME));
+    ZeroMemory(&asminfo, sizeof(ASSEMBLY_INFO));
+
+    r = MSI_OpenQuery(db, &view, query, comp->Component);
+    if (r != ERROR_SUCCESS)
+        return ERROR_SUCCESS;
+
+    MSI_IterateRecords(view, NULL, parse_assembly_name, &name);
+    msiobj_release(&view->hdr);
+
+    if (!name.name)
+    {
+        ERR("No assembly name specified!\n");
+        goto done;
+    }
+
+    append_str(&disp, &size, name.name);
+
+    if (name.version)
+    {
+        append_str(&disp, &size, separator);
+        append_str(&disp, &size, Version);
+        append_str(&disp, &size, name.version);
+    }
+
+    if (name.culture)
+    {
+        append_str(&disp, &size, separator);
+        append_str(&disp, &size, Culture);
+        append_str(&disp, &size, name.culture);
+    }
+
+    if (name.pubkeytoken)
+    {
+        append_str(&disp, &size, separator);
+        append_str(&disp, &size, PublicKeyToken);
+        append_str(&disp, &size, name.pubkeytoken);
+    }
+
+    asminfo.cbAssemblyInfo = sizeof(ASSEMBLY_INFO);
+    IAssemblyCache_QueryAssemblyInfo(cache, QUERYASMINFO_FLAG_VALIDATE,
+                                     disp, &asminfo);
+    found = (asminfo.dwAssemblyFlags == ASSEMBLYINFO_FLAG_INSTALLED);
+
+done:
+    msiobj_release(&view->hdr);
+    msi_free(disp);
+    msi_free(name.name);
+    msi_free(name.version);
+    msi_free(name.culture);
+    msi_free(name.pubkeytoken);
+
+    return found;
+}
 
 static UINT load_assembly(MSIRECORD *rec, LPVOID param)
 {
@@ -5817,17 +5941,20 @@ static UINT load_assembly(MSIRECORD *rec, LPVOID param)
     assembly->manifest = strdupW(MSI_RecordGetString(rec, 3));
     assembly->application = strdupW(MSI_RecordGetString(rec, 4));
     assembly->attributes = MSI_RecordGetInteger(rec, 5);
-    assembly->installed = FALSE;
+    assembly->installed = check_assembly_installed(list->package->db,
+                                                   list->cache,
+                                                   assembly->component);
 
     list_add_head(list->assemblies, &assembly->entry);
-
     return ERROR_SUCCESS;
 }
 
 static UINT load_assemblies(MSIPACKAGE *package, struct list *assemblies)
 {
-    MSIQUERY *view;
+    IAssemblyCache *cache = NULL;
     ASSEMBLY_LIST list;
+    MSIQUERY *view;
+    HRESULT hr;
     UINT r;
 
     static const WCHAR query[] =
@@ -5838,11 +5965,18 @@ static UINT load_assemblies(MSIPACKAGE *package, struct list *assemblies)
     if (r != ERROR_SUCCESS)
         return ERROR_SUCCESS;
 
+    hr = pCreateAssemblyCache(&cache, 0);
+    if (FAILED(hr))
+        return ERROR_FUNCTION_FAILED;
+
     list.package = package;
+    list.cache = cache;
     list.assemblies = assemblies;
 
     r = MSI_IterateRecords(view, NULL, load_assembly, &list);
     msiobj_release(&view->hdr);
+
+    IAssemblyCache_Release(cache);
 
     return r;
 }
@@ -5919,6 +6053,9 @@ static UINT ACTION_MsiPublishAssemblies( MSIPACKAGE *package )
     struct list assemblies = LIST_INIT(assemblies);
     MSIASSEMBLY *assembly;
     MSIMEDIAINFO *mi;
+
+    if (!init_functionpointers() || !pCreateAssemblyCache)
+        return ERROR_FUNCTION_FAILED;
 
     r = load_assemblies(package, &assemblies);
     if (r != ERROR_SUCCESS)

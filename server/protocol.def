@@ -1316,13 +1316,13 @@ enum char_info_mode
     unsigned int access;        /* wanted access rights */
     unsigned int attributes;    /* object attributes */
     file_pos_t   size;          /* mapping size */
-    int          protect;       /* protection flags (see below) */
+    unsigned int protect;       /* protection flags (see below) */
     obj_handle_t file_handle;   /* file handle */
     VARARG(objattr,object_attributes); /* object attributes */
 @REPLY
     obj_handle_t handle;        /* handle to the mapping */
 @END
-/* protection flags */
+/* per-page protection flags */
 #define VPROT_READ       0x01
 #define VPROT_WRITE      0x02
 #define VPROT_EXEC       0x04
@@ -1330,7 +1330,11 @@ enum char_info_mode
 #define VPROT_GUARD      0x10
 #define VPROT_NOCACHE    0x20
 #define VPROT_COMMITTED  0x40
-#define VPROT_IMAGE      0x80
+/* per-mapping protection flags */
+#define VPROT_IMAGE      0x0100  /* mapping for an exe image */
+#define VPROT_SYSTEM     0x0200  /* system view (underlying mmap not under our control) */
+#define VPROT_VALLOC     0x0400  /* allocated by VirtualAlloc */
+#define VPROT_NOEXEC     0x0800  /* don't force exec permission */
 
 
 /* Open a mapping */
@@ -1347,6 +1351,7 @@ enum char_info_mode
 /* Get information about a file mapping */
 @REQ(get_mapping_info)
     obj_handle_t handle;        /* handle to the mapping */
+    unsigned int access;        /* wanted access rights */
 @REPLY
     file_pos_t   size;          /* mapping size */
     int          protect;       /* protection flags */
@@ -1354,6 +1359,24 @@ enum char_info_mode
     void*        base;          /* default base addr (for VPROT_IMAGE mapping) */
     obj_handle_t mapping;       /* duplicate mapping handle unless removable */
     obj_handle_t shared_file;   /* shared mapping file handle */
+@END
+
+
+/* Get a range of committed pages in a file mapping */
+@REQ(get_mapping_committed_range)
+    obj_handle_t handle;        /* handle to the mapping */
+    file_pos_t   offset;        /* starting offset (page-aligned, in bytes) */
+@REPLY
+    file_pos_t   size;          /* size of range starting at offset (page-aligned, in bytes) */
+    int          committed;     /* whether it is a committed range */
+@END
+
+
+/* Add a range to the committed pages in a file mapping */
+@REQ(add_mapping_committed_range)
+    obj_handle_t handle;        /* handle to the mapping */
+    file_pos_t   offset;        /* starting offset (page-aligned, in bytes) */
+    file_pos_t   size;          /* size to set (page-aligned, in bytes) or 0 if only retrieving */
 @END
 
 

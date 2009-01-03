@@ -97,7 +97,7 @@ void Font_DrawText(HDC hDC, LPWSTR lpwszText, int x, int y)
 
     hFontDC = CreateCompatibleDC(hDC);
     hFontBitmap = LoadBitmap(hInst, MAKEINTRESOURCE(IDB_FONT));
-    hOldBitmap = (HBITMAP)SelectObject(hFontDC, hFontBitmap);
+    hOldBitmap = SelectObject(hFontDC, hFontBitmap);
 
     for (i = 0; lpwszText[i]; i++) {
         if ((lpwszText[i] >= '0') && (lpwszText[i] <= '9')) {
@@ -1076,7 +1076,7 @@ int APIENTRY WinMain(HINSTANCE hInstance,
         tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED; 
 
         /* Get the debug privilege for this process. */
-        AdjustTokenPrivileges(hToken, FALSE, &tkp, 0, (PTOKEN_PRIVILEGES)NULL, 0); 
+        AdjustTokenPrivileges(hToken, FALSE, &tkp, 0, NULL, 0);
     }
 
     /* Load our settings from the registry */

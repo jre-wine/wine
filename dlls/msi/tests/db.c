@@ -241,85 +241,38 @@ static UINT create_binary_table( MSIHANDLE hdb )
             "PRIMARY KEY `Name` )" );
 }
 
-static UINT add_component_entry( MSIHANDLE hdb, const char *values )
-{
-    char insert[] = "INSERT INTO `Component`  "
-            "(`Component`, `ComponentId`, `Directory_`, `Attributes`, `Condition`, `KeyPath`) "
-            "VALUES( %s )";
-    char *query;
-    UINT sz, r;
+#define make_add_entry(type, qtext) \
+    static UINT add##_##type##_##entry( MSIHANDLE hdb, const char *values ) \
+    { \
+        char insert[] = qtext; \
+        char *query; \
+        UINT sz, r; \
+        sz = strlen(values) + sizeof insert; \
+        query = HeapAlloc(GetProcessHeap(),0,sz); \
+        sprintf(query,insert,values); \
+        r = run_query( hdb, 0, query ); \
+        HeapFree(GetProcessHeap(), 0, query); \
+        return r; \
+    }
 
-    sz = strlen(values) + sizeof insert;
-    query = HeapAlloc(GetProcessHeap(),0,sz);
-    sprintf(query,insert,values);
-    r = run_query( hdb, 0, query );
-    HeapFree(GetProcessHeap(), 0, query);
-    return r;
-}
+make_add_entry(component,
+               "INSERT INTO `Component`  "
+               "(`Component`, `ComponentId`, `Directory_`, "
+               "`Attributes`, `Condition`, `KeyPath`) VALUES( %s )")
 
-static UINT add_custom_action_entry( MSIHANDLE hdb, const char *values )
-{
-    char insert[] = "INSERT INTO `CustomAction`  "
-            "(`Action`, `Type`, `Source`, `Target`) "
-            "VALUES( %s )";
-    char *query;
-    UINT sz, r;
+make_add_entry(custom_action,
+               "INSERT INTO `CustomAction`  "
+               "(`Action`, `Type`, `Source`, `Target`) VALUES( %s )")
 
-    sz = strlen(values) + sizeof insert;
-    query = HeapAlloc(GetProcessHeap(),0,sz);
-    sprintf(query,insert,values);
-    r = run_query( hdb, 0, query );
-    HeapFree(GetProcessHeap(), 0, query);
-    return r;
-}
+make_add_entry(feature_components,
+               "INSERT INTO `FeatureComponents` "
+               "(`Feature_`, `Component_`) VALUES( %s )")
 
-static UINT add_feature_components_entry( MSIHANDLE hdb, const char *values )
-{
-    char insert[] = "INSERT INTO `FeatureComponents` "
-            "(`Feature_`, `Component_`) "
-            "VALUES( %s )";
-    char *query;
-    UINT sz, r;
+make_add_entry(std_dlls,
+               "INSERT INTO `StdDlls` (`File`, `Binary_`) VALUES( %s )")
 
-    sz = strlen(values) + sizeof insert;
-    query = HeapAlloc(GetProcessHeap(),0,sz);
-    sprintf(query,insert,values);
-    r = run_query( hdb, 0, query );
-    HeapFree(GetProcessHeap(), 0, query);
-    return r;
-}
-
-static UINT add_std_dlls_entry( MSIHANDLE hdb, const char *values )
-{
-    char insert[] = "INSERT INTO `StdDlls` "
-            "(`File`, `Binary_`) "
-            "VALUES( %s )";
-    char *query;
-    UINT sz, r;
-
-    sz = strlen(values) + sizeof insert;
-    query = HeapAlloc(GetProcessHeap(),0,sz);
-    sprintf(query,insert,values);
-    r = run_query( hdb, 0, query );
-    HeapFree(GetProcessHeap(), 0, query);
-    return r;
-}
-
-static UINT add_binary_entry( MSIHANDLE hdb, const char *values )
-{
-    char insert[] = "INSERT INTO `Binary` "
-            "(`Name`, `Data`) "
-            "VALUES( %s )";
-    char *query;
-    UINT sz, r;
-
-    sz = strlen(values) + sizeof insert;
-    query = HeapAlloc(GetProcessHeap(),0,sz);
-    sprintf(query,insert,values);
-    r = run_query( hdb, 0, query );
-    HeapFree(GetProcessHeap(), 0, query);
-    return r;
-}
+make_add_entry(binary,
+               "INSERT INTO `Binary` (`Name`, `Data`) VALUES( %s )")
 
 static void test_msiinsert(void)
 {
@@ -6860,15 +6813,13 @@ static void test_dbmerge(void)
     r = run_query(hdb, 0, query);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    create_file_data("codepage.idt", "\r\n\r\n28603\t_ForceCodepage\r\n", 0);
+    create_file_data("codepage.idt", "\r\n\r\n850\t_ForceCodepage\r\n", 0);
 
     GetCurrentDirectoryA(MAX_PATH, buf);
     r = MsiDatabaseImportA(hdb, buf, "codepage.idt");
     todo_wine
     {
-        ok(r == ERROR_SUCCESS ||
-           broken(r == ERROR_FUNCTION_FAILED), /* win9x */
-           "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     }
 
     query = "DROP TABLE `One`";

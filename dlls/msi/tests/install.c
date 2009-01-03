@@ -504,7 +504,7 @@ static const CHAR adm_admin_exec_seq_dat[] = "Action\tCondition\tSequence\n"
 static const CHAR amp_component_dat[] = "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
                                         "s72\tS38\ts72\ti2\tS255\tS72\n"
                                         "Component\tComponent\n"
-                                        "augustus\t\tMSITESTDIR\t0\tMYPROP=2718\taugustus\n";
+                                        "augustus\t\tMSITESTDIR\t0\tMYPROP=2718 and MyProp=42\taugustus\n";
 
 static const CHAR rem_component_dat[] = "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
                                         "s72\tS38\ts72\ti2\tS255\tS72\n"
@@ -1186,6 +1186,18 @@ static const msi_table ai_tables[] =
     ADD_TABLE(ai_file),
     ADD_TABLE(install_exec_seq),
     ADD_TABLE(media),
+    ADD_TABLE(property)
+};
+
+static const msi_table pc_tables[] =
+{
+    ADD_TABLE(ca51_component),
+    ADD_TABLE(directory),
+    ADD_TABLE(rof_feature),
+    ADD_TABLE(ci2_feature_comp),
+    ADD_TABLE(ci2_file),
+    ADD_TABLE(install_exec_seq),
+    ADD_TABLE(rof_media),
     ADD_TABLE(property)
 };
 
@@ -4228,7 +4240,8 @@ static void set_admin_property_stream(LPCSTR file)
 
     /* AdminProperties */
     static const WCHAR stmname[] = {0x41ca,0x4330,0x3e71,0x44b5,0x4233,0x45f5,0x422c,0x4836,0};
-    static const WCHAR data[] = {'M','Y','P','R','O','P','=','2','7','1','8',0};
+    static const WCHAR data[] = {'M','Y','P','R','O','P','=','2','7','1','8',' ',
+        'M','y','P','r','o','p','=','4','2',0};
 
     MultiByteToWideChar(CP_ACP, 0, file, -1, fileW, MAX_PATH);
 
@@ -5086,6 +5099,12 @@ static void test_sourcepath(void)
 {
     UINT r, i;
 
+    if (!winetest_interactive)
+    {
+        skip("Run in interactive mode to run source path tests.\n");
+        return;
+    }
+
     create_database(msifile, sp_tables, sizeof(sp_tables) / sizeof(msi_table));
 
     MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
@@ -5553,6 +5572,27 @@ static void test_adminimage(void)
     RemoveDirectoryA("msitest");
 }
 
+static void test_propcase(void)
+{
+    UINT r;
+
+    CreateDirectoryA("msitest", NULL);
+    create_file("msitest\\augustus", 500);
+
+    create_database(msifile, pc_tables, sizeof(pc_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, "MyProp=42");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(delete_pf("msitest\\augustus", TRUE), "File not installed\n");
+    ok(delete_pf("msitest", FALSE), "File not installed\n");
+
+    DeleteFile(msifile);
+    DeleteFile("msitest\\augustus");
+    RemoveDirectory("msitest");
+}
+
 START_TEST(install)
 {
     DWORD len;
@@ -5625,6 +5665,7 @@ START_TEST(install)
     test_missingcomponent();
     test_sourcedirprop();
     test_adminimage();
+    test_propcase();
 
     DeleteFileA("msitest.log");
 

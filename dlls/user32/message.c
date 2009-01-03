@@ -2022,64 +2022,60 @@ static inline void call_sendmsg_callback( SENDASYNCPROC callback, HWND hwnd, UIN
  * Peek for a message matching the given parameters. Return FALSE if none available.
  * All pending sent messages are processed before returning.
  */
-static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags )
+static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags, UINT changed_mask )
 {
     LRESULT result;
     ULONG_PTR extra_info = 0;
     struct user_thread_info *thread_info = get_user_thread_info();
     struct received_message_info info, *old_info;
-    unsigned int wake_mask, changed_mask = HIWORD(flags);
     unsigned int hw_id = 0;  /* id of previous hardware message */
+    char local_buffer[256];
+    void *buffer = local_buffer;
+    size_t buffer_size = sizeof(local_buffer);
 
     if (!first && !last) last = ~0;
-    if (!changed_mask) changed_mask = QS_ALLINPUT;
-    wake_mask = changed_mask & (QS_SENDMESSAGE | QS_SMRESULT);
 
     for (;;)
     {
         NTSTATUS res;
-        void *buffer = NULL;
-        size_t size = 0, buffer_size = 0;
+        size_t size = 0;
 
-        do  /* loop while buffer is too small */
+        SERVER_START_REQ( get_message )
         {
-            if (buffer_size && !(buffer = HeapAlloc( GetProcessHeap(), 0, buffer_size )))
-                return FALSE;
-            SERVER_START_REQ( get_message )
+            req->flags     = flags;
+            req->get_win   = hwnd;
+            req->get_first = first;
+            req->get_last  = last;
+            req->hw_id     = hw_id;
+            req->wake_mask = changed_mask & (QS_SENDMESSAGE | QS_SMRESULT);
+            req->changed_mask = changed_mask;
+            wine_server_set_reply( req, buffer, buffer_size );
+            if (!(res = wine_server_call( req )))
             {
-                req->flags     = flags;
-                req->get_win   = hwnd;
-                req->get_first = first;
-                req->get_last  = last;
-                req->hw_id     = hw_id;
-                req->wake_mask = wake_mask;
-                req->changed_mask = changed_mask;
-                if (buffer_size) wine_server_set_reply( req, buffer, buffer_size );
-                if (!(res = wine_server_call( req )))
-                {
-                    size = wine_server_reply_size( reply );
-                    info.type        = reply->type;
-                    info.msg.hwnd    = reply->win;
-                    info.msg.message = reply->msg;
-                    info.msg.wParam  = reply->wparam;
-                    info.msg.lParam  = reply->lparam;
-                    info.msg.time    = reply->time;
-                    info.msg.pt.x    = reply->x;
-                    info.msg.pt.y    = reply->y;
-                    hw_id            = reply->hw_id;
-                    extra_info       = reply->info;
-                    thread_info->active_hooks = reply->active_hooks;
-                }
-                else
-                {
-                    HeapFree( GetProcessHeap(), 0, buffer );
-                    buffer_size = reply->total;
-                }
+                size = wine_server_reply_size( reply );
+                info.type        = reply->type;
+                info.msg.hwnd    = reply->win;
+                info.msg.message = reply->msg;
+                info.msg.wParam  = reply->wparam;
+                info.msg.lParam  = reply->lparam;
+                info.msg.time    = reply->time;
+                info.msg.pt.x    = reply->x;
+                info.msg.pt.y    = reply->y;
+                hw_id            = reply->hw_id;
+                extra_info       = reply->info;
+                thread_info->active_hooks = reply->active_hooks;
             }
-            SERVER_END_REQ;
-        } while (res == STATUS_BUFFER_OVERFLOW);
+            else buffer_size = reply->total;
+        }
+        SERVER_END_REQ;
 
-        if (res) return FALSE;
+        if (res)
+        {
+            if (buffer != local_buffer) HeapFree( GetProcessHeap(), 0, buffer );
+            if (res != STATUS_BUFFER_OVERFLOW) return FALSE;
+            if (!(buffer = HeapAlloc( GetProcessHeap(), 0, buffer_size ))) return FALSE;
+            continue;
+        }
 
         TRACE( "got type %d msg %x (%s) hwnd %p wp %lx lp %lx\n",
                info.type, info.msg.message,
@@ -2101,16 +2097,16 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
         case MSG_CALLBACK_RESULT:
             if (size >= sizeof(struct callback_msg_data))
             {
-                const struct callback_msg_data *data = (const struct callback_msg_data *)buffer;
+                const struct callback_msg_data *data = buffer;
                 call_sendmsg_callback( data->callback, info.msg.hwnd,
                                        info.msg.message, data->data, data->result );
             }
-            goto next;
+            continue;
         case MSG_WINEVENT:
             if (size >= sizeof(struct winevent_msg_data))
             {
                 WINEVENTPROC hook_proc;
-                const struct winevent_msg_data *data = (const struct winevent_msg_data *)buffer;
+                const struct winevent_msg_data *data = buffer;
 
                 hook_proc = data->hook_proc;
                 size -= sizeof(*data);
@@ -2124,7 +2120,7 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
                     if (!(hook_proc = get_hook_proc( hook_proc, module )))
                     {
                         ERR( "invalid winevent hook module name %s\n", debugstr_w(module) );
-                        goto next;
+                        continue;
                     }
                 }
 
@@ -2143,7 +2139,7 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
                              data->hook, info.msg.message, info.msg.hwnd, info.msg.wParam,
                              info.msg.lParam, data->tid, info.msg.time);
             }
-            goto next;
+            continue;
         case MSG_OTHER_PROCESS:
             info.flags = ISMEX_SEND;
             if (!unpack_message( info.msg.hwnd, info.msg.message, &info.msg.wParam,
@@ -2151,7 +2147,7 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
             {
                 /* ignore it */
                 reply_message( &info, 0, TRUE );
-                goto next;
+                continue;
             }
             break;
         case MSG_HARDWARE:
@@ -2159,20 +2155,34 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
                                            hwnd, first, last, flags & PM_REMOVE ))
             {
                 TRACE("dropping msg %x\n", info.msg.message );
-                goto next;  /* ignore it */
+                continue;  /* ignore it */
             }
             thread_info->GetMessagePosVal = MAKELONG( info.msg.pt.x, info.msg.pt.y );
             /* fall through */
         case MSG_POSTED:
-            thread_info->GetMessageExtraInfoVal = extra_info;
+            if (info.msg.message & 0x80000000)  /* internal message */
+            {
+                if (flags & PM_REMOVE)
+                    handle_internal_message( info.msg.hwnd, info.msg.message,
+                                             info.msg.wParam, info.msg.lParam );
+                else
+                    peek_message( msg, info.msg.hwnd, info.msg.message,
+                                  info.msg.message, flags | PM_REMOVE, changed_mask );
+                continue;
+            }
 	    if (info.msg.message >= WM_DDE_FIRST && info.msg.message <= WM_DDE_LAST)
 	    {
 		if (!unpack_dde_message( info.msg.hwnd, info.msg.message, &info.msg.wParam,
                                          &info.msg.lParam, &buffer, size ))
-                    goto next;  /* ignore it */
+                    continue;  /* ignore it */
 	    }
             *msg = info.msg;
-            HeapFree( GetProcessHeap(), 0, buffer );
+            msg->pt.x = (short)LOWORD( thread_info->GetMessagePosVal );
+            msg->pt.y = (short)HIWORD( thread_info->GetMessagePosVal );
+            thread_info->GetMessageTimeVal = info.msg.time;
+            thread_info->GetMessageExtraInfoVal = extra_info;
+            if (buffer != local_buffer) HeapFree( GetProcessHeap(), 0, buffer );
+            HOOK_CallHooks( WH_GETMESSAGE, HC_ACTION, flags & PM_REMOVE, (LPARAM)msg, TRUE );
             return TRUE;
         }
 
@@ -2186,9 +2196,7 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
         thread_info->receive_info = old_info;
 
         /* if some PM_QS* flags were specified, only handle sent messages from now on */
-        if (HIWORD(flags)) flags = PM_QS_SENDMESSAGE | LOWORD(flags);
-    next:
-        HeapFree( GetProcessHeap(), 0, buffer );
+        if (HIWORD(flags) && !changed_mask) flags = PM_QS_SENDMESSAGE | LOWORD(flags);
     }
 }
 
@@ -2201,7 +2209,7 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
 static inline void process_sent_messages(void)
 {
     MSG msg;
-    peek_message( &msg, 0, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE );
+    peek_message( &msg, 0, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE, 0 );
 }
 
 
@@ -2860,7 +2868,6 @@ void WINAPI PostQuitMessage( INT exit_code )
  */
 BOOL WINAPI PeekMessageW( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags )
 {
-    struct user_thread_info *thread_info = get_user_thread_info();
     MSG msg;
 
     USER_CheckNotLock();
@@ -2868,40 +2875,17 @@ BOOL WINAPI PeekMessageW( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT f
     /* check for graphics events */
     USER_Driver->pMsgWaitForMultipleObjectsEx( 0, NULL, 0, QS_ALLINPUT, 0 );
 
-    hwnd = WIN_GetFullHandle( hwnd );
-
-    for (;;)
+    if (!peek_message( &msg, hwnd, first, last, flags, 0 ))
     {
-        if (!peek_message( &msg, hwnd, first, last, flags ))
+        if (!(flags & PM_NOYIELD))
         {
-            if (!(flags & PM_NOYIELD))
-            {
-                DWORD count;
-                ReleaseThunkLock(&count);
-                NtYieldExecution();
-                if (count) RestoreThunkLock(count);
-            }
-            return FALSE;
+            DWORD count;
+            ReleaseThunkLock(&count);
+            NtYieldExecution();
+            if (count) RestoreThunkLock(count);
         }
-        if (msg.message & 0x80000000)
-        {
-            if (!(flags & PM_REMOVE))
-            {
-                /* Have to remove the message explicitly.
-                   Do this before handling it, because the message handler may
-                   call PeekMessage again */
-                peek_message( &msg, msg.hwnd, msg.message, msg.message, flags | PM_REMOVE );
-            }
-            handle_internal_message( msg.hwnd, msg.message, msg.wParam, msg.lParam );
-        }
-        else break;
+        return FALSE;
     }
-
-    thread_info->GetMessageTimeVal = msg.time;
-    msg.pt.x = (short)LOWORD( thread_info->GetMessagePosVal );
-    msg.pt.y = (short)HIWORD( thread_info->GetMessagePosVal );
-
-    HOOK_CallHooks( WH_GETMESSAGE, HC_ACTION, flags & PM_REMOVE, (LPARAM)&msg, TRUE );
 
     /* copy back our internal safe copy of message data to msg_out.
      * msg_out is a variable from the *program*, so it can't be used
@@ -2935,7 +2919,12 @@ BOOL WINAPI PeekMessageA( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
 BOOL WINAPI GetMessageW( MSG *msg, HWND hwnd, UINT first, UINT last )
 {
     HANDLE server_queue = get_server_queue_handle();
-    int mask = QS_POSTMESSAGE | QS_SENDMESSAGE;  /* Always selected */
+    unsigned int mask = QS_POSTMESSAGE | QS_SENDMESSAGE;  /* Always selected */
+
+    USER_CheckNotLock();
+
+    /* check for graphics events */
+    USER_Driver->pMsgWaitForMultipleObjectsEx( 0, NULL, 0, QS_ALLINPUT, 0 );
 
     if (first || last)
     {
@@ -2948,7 +2937,7 @@ BOOL WINAPI GetMessageW( MSG *msg, HWND hwnd, UINT first, UINT last )
     }
     else mask = QS_ALLINPUT;
 
-    while (!PeekMessageW( msg, hwnd, first, last, PM_REMOVE | PM_NOYIELD | (mask << 16) ))
+    while (!peek_message( msg, hwnd, first, last, PM_REMOVE | (mask << 16), mask ))
     {
         DWORD dwlc;
 

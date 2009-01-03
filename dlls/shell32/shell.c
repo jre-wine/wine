@@ -198,7 +198,7 @@ HGLOBAL16 WINAPI InternalExtractIcon16(HINSTANCE16 hInstance,
 	  return 0;
 
 	hRet = GlobalAlloc16(GMEM_FIXED | GMEM_ZEROINIT, sizeof(*RetPtr) * n);
-	RetPtr = (HICON16*)GlobalLock16(hRet);
+        RetPtr = GlobalLock16(hRet);
 
 	if (nIconIndex == (UINT16)-1)  /* get number of icons */
 	{
@@ -319,7 +319,7 @@ SEGPTR WINAPI FindEnvironmentString16(LPCSTR str)
 
     if( lpString )		/*  offset should be small enough */
 	return spEnv + (lpString - lpEnv);
-    return (SEGPTR)NULL;
+    return 0;
 }
 
 /*************************************************************************

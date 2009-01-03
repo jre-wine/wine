@@ -1167,9 +1167,16 @@ static void checkElementStatus(const CERT_TRUST_STATUS *expected,
  const CERT_TRUST_STATUS *got, const CERT_TRUST_STATUS *ignore,
  DWORD todo, DWORD testIndex, DWORD chainIndex, DWORD elementIndex)
 {
-    if (todo & TODO_ERROR && got->dwErrorStatus != expected->dwErrorStatus)
-        todo_wine
+    if (got->dwErrorStatus == expected->dwErrorStatus)
         ok(got->dwErrorStatus == expected->dwErrorStatus,
+         "Chain %d, element [%d,%d]: expected error %08x, got %08x\n",
+         testIndex, chainIndex, elementIndex, expected->dwErrorStatus,
+         got->dwErrorStatus);
+    else if (todo & TODO_ERROR)
+        todo_wine
+        ok(got->dwErrorStatus == expected->dwErrorStatus ||
+         broken((got->dwErrorStatus & ~ignore->dwErrorStatus) ==
+         expected->dwErrorStatus),
          "Chain %d, element [%d,%d]: expected error %08x, got %08x\n",
          testIndex, chainIndex, elementIndex, expected->dwErrorStatus,
          got->dwErrorStatus);
@@ -1180,9 +1187,16 @@ static void checkElementStatus(const CERT_TRUST_STATUS *expected,
          "Chain %d, element [%d,%d]: expected error %08x, got %08x\n",
          testIndex, chainIndex, elementIndex, expected->dwErrorStatus,
          got->dwErrorStatus);
-    if (todo & TODO_INFO && got->dwInfoStatus != expected->dwInfoStatus)
-        todo_wine
+    if (got->dwInfoStatus == expected->dwInfoStatus)
         ok(got->dwInfoStatus == expected->dwInfoStatus,
+         "Chain %d, element [%d,%d]: expected info %08x, got %08x\n",
+         testIndex, chainIndex, elementIndex, expected->dwInfoStatus,
+         got->dwInfoStatus);
+    else if (todo & TODO_INFO)
+        todo_wine
+        ok(got->dwInfoStatus == expected->dwInfoStatus ||
+         broken((got->dwInfoStatus & ~ignore->dwInfoStatus) ==
+         expected->dwInfoStatus),
          "Chain %d, element [%d,%d]: expected info %08x, got %08x\n",
          testIndex, chainIndex, elementIndex, expected->dwInfoStatus,
          got->dwInfoStatus);
@@ -1402,8 +1416,10 @@ static CONST_DATA_BLOB chain9[] = {
  { sizeof(chain7_1), chain7_1 },
 };
 static const CERT_TRUST_STATUS elementStatus9[] = {
- { CERT_TRUST_NO_ERROR, CERT_TRUST_HAS_NAME_MATCH_ISSUER },
- { CERT_TRUST_INVALID_BASIC_CONSTRAINTS, CERT_TRUST_HAS_NAME_MATCH_ISSUER },
+ { CERT_TRUST_NO_ERROR,
+   CERT_TRUST_HAS_NAME_MATCH_ISSUER | CERT_TRUST_HAS_PREFERRED_ISSUER },
+ { CERT_TRUST_INVALID_BASIC_CONSTRAINTS,
+   CERT_TRUST_HAS_NAME_MATCH_ISSUER | CERT_TRUST_HAS_PREFERRED_ISSUER },
  { CERT_TRUST_INVALID_BASIC_CONSTRAINTS | CERT_TRUST_IS_CYCLIC,
    CERT_TRUST_HAS_NAME_MATCH_ISSUER },
 };
@@ -1509,8 +1525,12 @@ static ChainCheck chainCheck[] = {
      { CERT_TRUST_INVALID_BASIC_CONSTRAINTS | CERT_TRUST_IS_UNTRUSTED_ROOT |
        CERT_TRUST_IS_NOT_TIME_VALID, 0 },
      1, simpleStatus4 }, 0 },
+ /* Windows versions prior to Vista/2008 incorrectly set
+  * CERT_TRUST_HAS_NOT_DEFINED_NAME_CONSTRAINT on this chain, so ignore it.
+  */
  { { sizeof(chain5) / sizeof(chain5[0]), chain5 },
-   { { 0, CERT_TRUST_HAS_PREFERRED_ISSUER },
+   { { CERT_TRUST_HAS_NOT_DEFINED_NAME_CONSTRAINT,
+       CERT_TRUST_HAS_PREFERRED_ISSUER },
      { CERT_TRUST_HAS_NOT_PERMITTED_NAME_CONSTRAINT |
        CERT_TRUST_IS_UNTRUSTED_ROOT, 0 }, 1, simpleStatus5 }, 0 },
  { { sizeof(chain6) / sizeof(chain6[0]), chain6 },
@@ -1575,7 +1595,7 @@ static ChainCheck chainCheckNoStore[] = {
    { { 0, CERT_TRUST_HAS_PREFERRED_ISSUER },
      { CERT_TRUST_IS_PARTIAL_CHAIN, 0 },
      1, simpleStatus8NoStore },
-   TODO_ERROR | TODO_INFO },
+   TODO_INFO },
 };
 
 /* Wednesday, Oct 1, 2007 */
@@ -1804,15 +1824,23 @@ static void checkChainPolicyStatus(LPCSTR policy, const ChainPolicyCheck *check,
         if (ret)
         {
             if (check->todo & TODO_ERROR)
-                todo_wine ok(policyStatus.dwError == check->status.dwError,
+                todo_wine ok(policyStatus.dwError == check->status.dwError ||
+                 broken(policyStatus.dwError == CERT_TRUST_NO_ERROR),
                  "%s[%d]: expected %08x, got %08x\n",
                  HIWORD(policy) ? policy : num_to_str(LOWORD(policy)),
                  testIndex, check->status.dwError, policyStatus.dwError);
             else
-                ok(policyStatus.dwError == check->status.dwError,
+                ok(policyStatus.dwError == check->status.dwError ||
+                 broken(policyStatus.dwError == CERT_TRUST_NO_ERROR),
                  "%s[%d]: expected %08x, got %08x\n",
                  HIWORD(policy) ? policy : num_to_str(LOWORD(policy)),
                  testIndex, check->status.dwError, policyStatus.dwError);
+            if (policyStatus.dwError != check->status.dwError)
+            {
+                skip("error doesn't match, not checking indexes\n");
+                pCertFreeCertificateChain(chain);
+                return;
+            }
             if (check->todo & TODO_CHAINS)
                 todo_wine ok(policyStatus.lChainIndex ==
                  check->status.lChainIndex, "%s[%d]: expected %d, got %d\n",

@@ -2757,7 +2757,7 @@ INT WINAPI WSASendTo( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
         if (!wsa->completion_func)
         {
             if (cvalue) WS_AddCompletion( s, cvalue, STATUS_SUCCESS, n );
-            SetEvent( lpOverlapped->hEvent );
+            if (lpOverlapped->hEvent) SetEvent( lpOverlapped->hEvent );
             HeapFree( GetProcessHeap(), 0, wsa );
         }
         else NtQueueApcThread( GetCurrentThread(), (PNTAPCFUNC)ws2_async_apc,
@@ -4279,7 +4279,7 @@ INT WINAPI WSARecvFrom( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
             if (!wsa->completion_func)
             {
                 if (cvalue) WS_AddCompletion( s, cvalue, STATUS_SUCCESS, n );
-                SetEvent( lpOverlapped->hEvent );
+                if (lpOverlapped->hEvent) SetEvent( lpOverlapped->hEvent );
                 HeapFree( GetProcessHeap(), 0, wsa );
             }
             else NtQueueApcThread( GetCurrentThread(), (PNTAPCFUNC)ws2_async_apc,
@@ -4386,11 +4386,13 @@ SOCKET WINAPI WSAAccept( SOCKET s, struct WS_sockaddr *addr, LPINT addrlen,
 
        if (cs == SOCKET_ERROR) return SOCKET_ERROR;
 
+       if (!lpfnCondition) return cs;
+
        CallerId.buf = (char *)&src_addr;
        CallerId.len = sizeof(src_addr);
 
        CallerData.buf = NULL;
-       CallerData.len = (ULONG)NULL;
+       CallerData.len = 0;
 
        WS_getsockname(cs, &dst_addr, &size);
 
@@ -4428,7 +4430,7 @@ SOCKET WINAPI WSAAccept( SOCKET s, struct WS_sockaddr *addr, LPINT addrlen,
                        FIXME("Unknown return type from Condition function\n");
                        SetLastError(WSAENOTSOCK);
                        return SOCKET_ERROR;
-               }
+       }
 }
 
 /***********************************************************************

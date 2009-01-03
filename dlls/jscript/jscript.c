@@ -36,6 +36,7 @@ typedef struct {
     DWORD safeopt;
     script_ctx_t *ctx;
     LONG thread_id;
+    LCID lcid;
 
     IActiveScriptSite *site;
 
@@ -127,6 +128,26 @@ static void exec_queued_code(JScript *This)
     clear_script_queue(This);
 }
 
+static HRESULT set_ctx_site(JScript *This)
+{
+    HRESULT hres;
+
+    This->ctx->lcid = This->lcid;
+
+    if(!This->ctx->script_disp) {
+        hres = create_dispex(This->ctx, NULL, NULL, &This->ctx->script_disp);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    hres = init_global(This->ctx);
+    if(FAILED(hres))
+        return hres;
+
+    change_state(This, SCRIPTSTATE_INITIALIZED);
+    return S_OK;
+}
+
 #define ACTSCRIPT_THIS(iface) DEFINE_THIS(JScript, IActiveScript, iface)
 
 static HRESULT WINAPI JScript_QueryInterface(IActiveScript *iface, REFIID riid, void **ppv)
@@ -211,22 +232,6 @@ static HRESULT WINAPI JScript_SetScriptSite(IActiveScript *iface,
     if(This->site)
         return E_UNEXPECTED;
 
-    if(!This->ctx) {
-        hres = IActiveScriptParse_InitNew(ASPARSE(This));
-        if(FAILED(hres))
-            return hres;
-    }
-
-    if(!This->ctx->script_disp) {
-        hres = create_dispex(This->ctx, NULL, NULL, &This->ctx->script_disp);
-        if(FAILED(hres))
-            return hres;
-    }
-
-    hres = init_global(This->ctx);
-    if(FAILED(hres))
-        return hres;
-
     if(InterlockedCompareExchange(&This->thread_id, GetCurrentThreadId(), 0))
         return E_UNEXPECTED;
 
@@ -237,8 +242,7 @@ static HRESULT WINAPI JScript_SetScriptSite(IActiveScript *iface,
     if(hres == S_OK)
         This->ctx->lcid = lcid;
 
-    change_state(This, SCRIPTSTATE_INITIALIZED);
-    return S_OK;
+    return This->ctx ? set_ctx_site(This) : S_OK;
 }
 
 static HRESULT WINAPI JScript_GetScriptSite(IActiveScript *iface, REFIID riid,
@@ -260,6 +264,7 @@ static HRESULT WINAPI JScript_SetScriptState(IActiveScript *iface, SCRIPTSTATE s
 
     switch(ss) {
     case SCRIPTSTATE_STARTED:
+    case SCRIPTSTATE_CONNECTED: /* FIXME */
         if(This->ctx->state == SCRIPTSTATE_CLOSED)
             return E_UNEXPECTED;
 
@@ -304,9 +309,15 @@ static HRESULT WINAPI JScript_Close(IActiveScript *iface)
     if(This->thread_id != GetCurrentThreadId())
         return E_UNEXPECTED;
 
-    clear_script_queue(This);
-
     if(This->ctx) {
+        if(This->ctx->state == SCRIPTSTATE_CONNECTED)
+            change_state(This, SCRIPTSTATE_DISCONNECTED);
+
+        clear_script_queue(This);
+
+        if(This->ctx->state == SCRIPTSTATE_DISCONNECTED)
+            change_state(This, SCRIPTSTATE_INITIALIZED);
+
         if(This->ctx->named_items) {
             named_item_t *iter, *iter2;
 
@@ -315,6 +326,7 @@ static HRESULT WINAPI JScript_Close(IActiveScript *iface)
                 iter2 = iter->next;
 
                 IDispatch_Release(iter->disp);
+                heap_free(iter->name);
                 heap_free(iter);
                 iter = iter2;
             }
@@ -379,6 +391,13 @@ static HRESULT WINAPI JScript_AddNamedItem(IActiveScript *iface,
 
     item->disp = disp;
     item->flags = dwFlags;
+    item->name = heap_strdupW(pstrName);
+    if(!item->name) {
+        IDispatch_Release(disp);
+        heap_free(item);
+        return E_OUTOFMEMORY;
+    }
+
     item->next = This->ctx->named_items;
     This->ctx->named_items = item;
 
@@ -517,7 +536,7 @@ static HRESULT WINAPI JScriptParse_InitNew(IActiveScriptParse *iface)
         return E_UNEXPECTED;
     }
 
-    return S_OK;
+    return This->site ? set_ctx_site(This) : S_OK;
 }
 
 static HRESULT WINAPI JScriptParse_AddScriptlet(IActiveScriptParse *iface,

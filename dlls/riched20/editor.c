@@ -1952,7 +1952,7 @@ static DWORD CALLBACK ME_ReadFromHGLOBALUnicode(DWORD_PTR dwCookie, LPBYTE lpBuf
 
   cb = cb >> 1;
   pDest = (WORD *)lpBuff;
-  pSrc = (WORD *)GlobalLock(pData->hData);
+  pSrc = GlobalLock(pData->hData);
   for (i = 0; i<cb && pSrc[pData->nLength+i]; i++) {
     pDest[i] = pSrc[pData->nLength+i];
   }
@@ -1969,7 +1969,7 @@ static DWORD CALLBACK ME_ReadFromHGLOBALRTF(DWORD_PTR dwCookie, LPBYTE lpBuff, L
   BYTE *pSrc, *pDest;
 
   pDest = lpBuff;
-  pSrc = (BYTE *)GlobalLock(pData->hData);
+  pSrc = GlobalLock(pData->hData);
   for (i = 0; i<cb && pSrc[pData->nLength+i]; i++) {
     pDest[i] = pSrc[pData->nLength+i];
   }
@@ -3203,7 +3203,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     if (unicode)
     {
         memcpy((LPWSTR)lParam, bufferW, wParam * sizeof(WCHAR));
-        if (lstrlenW(bufferW) >= wParam) rc = 0;
+        if (strlenW(bufferW) >= wParam) rc = 0;
     }
     else
     {
@@ -3338,7 +3338,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     {
       if (run && (run->member.run.nFlags & MERF_ENDPARA))
       {
-        unsigned int i;
+        int i;
         /* Write as many \r as encoded in end-of-paragraph, space allowing */
         for (i = 0; i < run->member.run.nCR && nCharsLeft > 0; i++, nCharsLeft--)
         {
@@ -3544,6 +3544,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
         nCharOfs = lParam;
     nLength = ME_GetTextLength(editor);
     nCharOfs = min(nCharOfs, nLength);
+    nCharOfs = max(nCharOfs, 0);
 
     ME_RunOfsFromCharOfs(editor, nCharOfs, &pRun, &nOffset);
     assert(pRun->type == diRun);
@@ -4148,7 +4149,9 @@ LRESULT WINAPI RichEdit10ANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM 
   {
     ME_TextEditor *editor = (ME_TextEditor *)GetWindowLongPtrW(hWnd, 0);
     
+    TRACE("Emulating version 1.0 (hWnd=%p)\n", hWnd);
     editor->bEmulateVersion10 = TRUE;
+    editor->bWordWrap = (GetWindowLongW(hWnd, GWL_STYLE) & ES_AUTOHSCROLL) ? FALSE : TRUE;
     editor->pBuffer->pLast->member.para.nCharOfs = 2;
     assert(editor->pBuffer->pLast->prev->type == diRun);
     assert(editor->pBuffer->pLast->prev->member.run.nFlags & MERF_ENDPARA);
@@ -4329,7 +4332,7 @@ static BOOL ME_RegisterEditorClass(HINSTANCE hInstance)
   wcW.hInstance = NULL; /* hInstance would register DLL-local class */
   wcW.hIcon = NULL;
   wcW.hCursor = LoadCursorW(NULL, MAKEINTRESOURCEW(IDC_IBEAM));
-  wcW.hbrBackground = (HBRUSH)GetStockObject(NULL_BRUSH);
+  wcW.hbrBackground = GetStockObject(NULL_BRUSH);
   wcW.lpszMenuName = NULL;
 
   if (is_version_nt())
@@ -4355,7 +4358,7 @@ static BOOL ME_RegisterEditorClass(HINSTANCE hInstance)
   wcA.hInstance = NULL; /* hInstance would register DLL-local class */
   wcA.hIcon = NULL;
   wcA.hCursor = LoadCursorW(NULL, MAKEINTRESOURCEW(IDC_IBEAM));
-  wcA.hbrBackground = (HBRUSH)GetStockObject(NULL_BRUSH);
+  wcA.hbrBackground = GetStockObject(NULL_BRUSH);
   wcA.lpszMenuName = NULL;
   wcA.lpszClassName = "RichEdit20A";
   if (!RegisterClassA(&wcA)) return FALSE;
@@ -4647,7 +4650,7 @@ BOOL ME_IsCandidateAnURL(ME_TextEditor *editor, int sel_min, int sel_max)
   };
   LPWSTR bufferW = NULL;
   WCHAR bufW[32];
-  int i;
+  unsigned int i;
 
   if (sel_max == -1) sel_max = ME_GetTextLength(editor);
   assert(sel_min <= sel_max);
@@ -4655,9 +4658,9 @@ BOOL ME_IsCandidateAnURL(ME_TextEditor *editor, int sel_min, int sel_max)
   {
     if (sel_max - sel_min < prefixes[i].length) continue;
     if (bufferW == NULL) {
-      bufferW = (LPWSTR)heap_alloc((sel_max - sel_min + 1) * sizeof(WCHAR));
+      bufferW = heap_alloc((sel_max - sel_min + 1) * sizeof(WCHAR));
     }
-    ME_GetTextW(editor, bufferW, sel_min, min(sel_max - sel_min, strlen(prefixes[i].text)), 0);
+    ME_GetTextW(editor, bufferW, sel_min, min(sel_max - sel_min, lstrlenA(prefixes[i].text)), 0);
     MultiByteToWideChar(CP_ACP, 0, prefixes[i].text, -1, bufW, 32);
     if (!lstrcmpW(bufW, bufferW))
     {

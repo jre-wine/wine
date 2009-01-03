@@ -33,8 +33,8 @@
 #ifdef __APPLE__
 
 asm(".zerofill WINE_DOS, WINE_DOS, ___wine_dos, 0x60000000");
-asm(".zerofill WINE_SHARED_HEAP, WINE_SHARED_HEAP, ___wine_shared_heap, 0x02000000");
-extern char __wine_dos[0x60000000], __wine_shared_heap[0x02000000];
+asm(".zerofill WINE_SHARED_HEAP, WINE_SHARED_HEAP, ___wine_shared_heap, 0x03000000");
+extern char __wine_dos[0x60000000], __wine_shared_heap[0x03000000];
 
 static const struct wine_preload_info wine_main_preload_info[] =
 {
@@ -106,7 +106,7 @@ int main( int argc, char *argv[] )
             reserve_area( wine_main_preload_info[i].addr, wine_main_preload_info[i].size );
     }
 
-    wine_pthread_set_functions( &pthread_functions, sizeof(pthread_functions) );
+    init_pthread_functions();
     wine_init( argc, argv, error, sizeof(error) );
     fprintf( stderr, "wine: failed to initialize: %s\n", error );
     exit(1);

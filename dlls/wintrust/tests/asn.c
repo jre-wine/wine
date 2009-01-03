@@ -29,6 +29,71 @@
 static BOOL (WINAPI *pCryptDecodeObjectEx)(DWORD,LPCSTR,const BYTE*,DWORD,DWORD,PCRYPT_DECODE_PARA,void*,DWORD*);
 static BOOL (WINAPI *pCryptEncodeObjectEx)(DWORD,LPCSTR,const void*,DWORD,PCRYPT_ENCODE_PARA,void*,DWORD*);
 
+static const BYTE falseCriteria[] = { 0x30,0x06,0x01,0x01,0x00,0x01,0x01,0x00 };
+static const BYTE trueCriteria[] = { 0x30,0x06,0x01,0x01,0xff,0x01,0x01,0xff };
+
+static void test_encodeSPCFinancialCriteria(void)
+{
+    BOOL ret;
+    DWORD size = 0;
+    LPBYTE buf;
+    SPC_FINANCIAL_CRITERIA criteria = { FALSE, FALSE };
+
+    if (!pCryptEncodeObjectEx)
+    {
+        skip("CryptEncodeObjectEx() is not available. Skipping the encodeFinancialCriteria tests\n");
+        return;
+    }
+    ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_FINANCIAL_CRITERIA_STRUCT,
+     &criteria, CRYPT_ENCODE_ALLOC_FLAG, NULL, &buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(falseCriteria), "Unexpected size %d\n", size);
+        ok(!memcmp(buf, falseCriteria, size), "Unexpected value\n");
+        LocalFree(buf);
+    }
+    criteria.fFinancialInfoAvailable = criteria.fMeetsCriteria = TRUE;
+    ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, SPC_FINANCIAL_CRITERIA_STRUCT,
+     &criteria, CRYPT_ENCODE_ALLOC_FLAG, NULL, &buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(trueCriteria), "Unexpected size %d\n", size);
+        ok(!memcmp(buf, trueCriteria, size), "Unexpected value\n");
+        LocalFree(buf);
+    }
+}
+
+static void test_decodeSPCFinancialCriteria(void)
+{
+    BOOL ret;
+    SPC_FINANCIAL_CRITERIA criteria;
+    DWORD size = sizeof(criteria);
+
+    if (!pCryptDecodeObjectEx)
+    {
+        skip("CryptDecodeObjectEx() is not available. Skipping the decodeSPCFinancialCriteria tests\n");
+        return;
+    }
+
+    ret = pCryptDecodeObjectEx(X509_ASN_ENCODING, SPC_FINANCIAL_CRITERIA_STRUCT,
+     falseCriteria, sizeof(falseCriteria), 0, NULL, &criteria, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        ok(!criteria.fFinancialInfoAvailable, "expected FALSE\n");
+        ok(!criteria.fMeetsCriteria, "expected FALSE\n");
+    }
+    ret = pCryptDecodeObjectEx(X509_ASN_ENCODING, SPC_FINANCIAL_CRITERIA_STRUCT,
+     trueCriteria, sizeof(trueCriteria), 0, NULL, &criteria, &size);
+    ok(ret, "CryptDecodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        ok(criteria.fFinancialInfoAvailable, "expected TRUE\n");
+        ok(criteria.fMeetsCriteria, "expected TRUE\n");
+    }
+}
 
 static WCHAR url[] = { 'h','t','t','p',':','/','/','w','i','n','e','h','q','.',
  'o','r','g',0 };
@@ -727,6 +792,8 @@ START_TEST(asn)
     pCryptDecodeObjectEx = (void*)GetProcAddress(hCrypt32, "CryptDecodeObjectEx");
     pCryptEncodeObjectEx = (void*)GetProcAddress(hCrypt32, "CryptEncodeObjectEx");
 
+    test_encodeSPCFinancialCriteria();
+    test_decodeSPCFinancialCriteria();
     test_encodeSPCLink();
     test_decodeSPCLink();
     test_encodeSPCPEImage();

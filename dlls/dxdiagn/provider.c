@@ -172,6 +172,20 @@ static inline HRESULT add_prop_bool( IDxDiagContainer* cont, LPCWSTR prop, BOOL 
     return IDxDiagContainerImpl_AddProp( cont, prop, &var );
 }
 
+static inline HRESULT add_prop_ull_as_str( IDxDiagContainer* cont, LPCWSTR prop, ULONGLONG data )
+{
+    HRESULT hr;
+    VARIANT var;
+
+    V_VT( &var ) = VT_UI8;
+    V_UI8( &var ) = data;
+    VariantChangeType( &var, &var, 0, VT_BSTR );
+    hr = IDxDiagContainerImpl_AddProp( cont, prop, &var );
+    VariantClear( &var );
+
+    return hr;
+}
+
 /**
  * @param szFilePath: usually GetSystemDirectoryW
  * @param szFileName: name of the dll without path
@@ -203,8 +217,8 @@ static HRESULT DXDiag_AddFileDescContainer(IDxDiagContainer* pSubCont, const WCH
   UINT uiLength;
   VS_FIXEDFILEINFO* pFileInfo;
 
-  FIXME("(%p,%s)\n", pSubCont, debugstr_w(szFileName));
-  
+  TRACE("(%p,%s)\n", pSubCont, debugstr_w(szFileName));
+
   lstrcpyW(szFile, szFilePath);
   lstrcatW(szFile, szSlashSep);
   lstrcatW(szFile, szFileName);
@@ -253,16 +267,18 @@ static HRESULT DXDiag_InitDXDiagSystemInfoContainer(IDxDiagContainer* pSubCont) 
   static const WCHAR szDirectXVersionLongEnglish[] = {'s','z','D','i','r','e','c','t','X','V','e','r','s','i','o','n','L','o','n','g','E','n','g','l','i','s','h',0};
   static const WCHAR szDirectXVersionLongEnglish_v[] = {'=',' ','"','D','i','r','e','c','t','X',' ','9','.','0','c',' ','(','4','.','0','9','.','0','0','0','0','.','0','9','0','4',')',0};
   static const WCHAR ullPhysicalMemory[] = {'u','l','l','P','h','y','s','i','c','a','l','M','e','m','o','r','y',0};
+  static const WCHAR ullUsedPageFile[]   = {'u','l','l','U','s','e','d','P','a','g','e','F','i','l','e',0};
+  static const WCHAR ullAvailPageFile[]  = {'u','l','l','A','v','a','i','l','P','a','g','e','F','i','l','e',0};
   /*static const WCHAR szDxDiagVersion[] = {'s','z','D','x','D','i','a','g','V','e','r','s','i','o','n',0};*/
-  /*szWindowsDir*/
-  /*szWindowsDir*/
+  static const WCHAR szWindowsDir[] = {'s','z','W','i','n','d','o','w','s','D','i','r',0};
   static const WCHAR dwOSMajorVersion[] = {'d','w','O','S','M','a','j','o','r','V','e','r','s','i','o','n',0};
   static const WCHAR dwOSMinorVersion[] = {'d','w','O','S','M','i','n','o','r','V','e','r','s','i','o','n',0};
   static const WCHAR dwOSBuildNumber[] = {'d','w','O','S','B','u','i','l','d','N','u','m','b','e','r',0};
   static const WCHAR dwOSPlatformID[] = {'d','w','O','S','P','l','a','t','f','o','r','m','I','D',0};
+  static const WCHAR szCSDVersion[] = {'s','z','C','S','D','V','e','r','s','i','o','n',0};
   MEMORYSTATUSEX msex;
   OSVERSIONINFOW info;
-  VARIANT v;
+  WCHAR buffer[MAX_PATH];
 
   add_prop_ui4(pSubCont, dwDirectXVersionMajor, 9);
   add_prop_ui4(pSubCont, dwDirectXVersionMinor, 0);
@@ -273,11 +289,9 @@ static HRESULT DXDiag_InitDXDiagSystemInfoContainer(IDxDiagContainer* pSubCont) 
 
   msex.dwLength = sizeof(msex);
   GlobalMemoryStatusEx( &msex );
-  V_VT(&v) = VT_UI8;
-  V_UI8(&v) = msex.ullTotalPhys;
-  VariantChangeType(&v, &v, 0, VT_BSTR);
-  IDxDiagContainerImpl_AddProp(pSubCont, ullPhysicalMemory, &v);
-  VariantClear(&v);
+  add_prop_ull_as_str(pSubCont, ullPhysicalMemory, msex.ullTotalPhys);
+  add_prop_ull_as_str(pSubCont, ullUsedPageFile, msex.ullTotalPageFile - msex.ullAvailPageFile);
+  add_prop_ull_as_str(pSubCont, ullAvailPageFile, msex.ullAvailPageFile);
 
   info.dwOSVersionInfoSize = sizeof(info);
   GetVersionExW( &info );
@@ -285,6 +299,10 @@ static HRESULT DXDiag_InitDXDiagSystemInfoContainer(IDxDiagContainer* pSubCont) 
   add_prop_ui4(pSubCont, dwOSMinorVersion, info.dwMinorVersion);
   add_prop_ui4(pSubCont, dwOSBuildNumber,  info.dwBuildNumber);
   add_prop_ui4(pSubCont, dwOSPlatformID,   info.dwPlatformId);
+  add_prop_str(pSubCont, szCSDVersion,     info.szCSDVersion);
+
+  GetWindowsDirectoryW(buffer, MAX_PATH);
+  add_prop_str(pSubCont, szWindowsDir, buffer);
 
   return S_OK;
 }
@@ -598,13 +616,13 @@ static HRESULT DXDiag_InitDXDiagDirectShowFiltersContainer(IDxDiagContainer* pSu
 	IEnumMoniker* pEnum = NULL;
 	IMoniker* pMoniker = NULL;
         hr = ICreateDevEnum_CreateClassEnumerator(pCreateDevEnum, &clsidCat, &pEnum, 0);        
-        FIXME("\tClassEnumerator for clsid(%s) pEnum(%p)\n", debugstr_guid(&clsidCat), pEnum);
+        TRACE("\tClassEnumerator for clsid(%s) pEnum(%p)\n", debugstr_guid(&clsidCat), pEnum);
         if (FAILED(hr) || pEnum == NULL) {
           goto class_enum_failed;
         }
         while (NULL != pEnum && S_OK == IEnumMoniker_Next(pEnum, 1, &pMoniker, NULL)) {          
 	  IPropertyBag* pPropFilterBag = NULL;
-          FIXME("\tIEnumMoniker_Next(%p, 1, %p)\n", pEnum, pMoniker);
+          TRACE("\tIEnumMoniker_Next(%p, 1, %p)\n", pEnum, pMoniker);
 	  hr = IMoniker_BindToStorage(pMoniker, NULL, NULL, &IID_IPropertyBag, (void**) &pPropFilterBag);
 	  if (SUCCEEDED(hr)) {
 	    LPBYTE pData = NULL;
@@ -619,11 +637,11 @@ static HRESULT DXDiag_InitDXDiagDirectShowFiltersContainer(IDxDiagContainer* pSu
 
 	    hr = IPropertyBag_Read(pPropFilterBag, wszFriendlyName, &v, 0);
 	    hr = IDxDiagContainerImpl_AddProp(pSubCont, szName, &v);
-	    FIXME("\tName:%s\n", debugstr_w(V_BSTR(&v)));
+            TRACE("\tName:%s\n", debugstr_w(V_BSTR(&v)));
 	    VariantClear(&v);
 
 	    hr = IPropertyBag_Read(pPropFilterBag, wszClsidName, &v, 0);
-	    FIXME("\tClsid:%s\n", debugstr_w(V_BSTR(&v)));
+            TRACE("\tClsid:%s\n", debugstr_w(V_BSTR(&v)));
 	    hr = IDxDiagContainerImpl_AddProp(pSubCont, szClsidFilter, &v);
 	    VariantClear(&v);
 

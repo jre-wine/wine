@@ -318,7 +318,7 @@ static void test_status_control(void)
 
     /* Add an icon to the status bar */
     hIcon = LoadIcon(NULL, IDI_QUESTION);
-    r = SendMessage(hWndStatus, SB_SETICON, 1, (LPARAM) NULL);
+    r = SendMessage(hWndStatus, SB_SETICON, 1, 0);
     ok(r != 0 ||
        broken(r == 0), /* win95 */
        "Expected non-zero, got %d\n", r);
@@ -326,7 +326,7 @@ static void test_status_control(void)
     ok(r != 0 ||
        broken(r == 0), /* win95 */
        "Expected non-zero, got %d\n", r);
-    r = SendMessage(hWndStatus, SB_SETICON, 1, (LPARAM) NULL);
+    r = SendMessage(hWndStatus, SB_SETICON, 1, 0);
     ok(r != 0 ||
        broken(r == 0), /* win95 */
        "Expected non-zero, got %d\n", r);
@@ -347,8 +347,8 @@ static void test_status_control(void)
     expect(TRUE,r);
 
     /* Set the minimum height and get rectangle information again */
-    SendMessage(hWndStatus, SB_SETMINHEIGHT, 50, (LPARAM) 0);
-    r = SendMessage(hWndStatus, WM_SIZE, 0, (LPARAM) 0);
+    SendMessage(hWndStatus, SB_SETMINHEIGHT, 50, 0);
+    r = SendMessage(hWndStatus, WM_SIZE, 0, 0);
     expect(0,r);
     r = SendMessage(hWndStatus, SB_GETRECT, 0, (LPARAM)&rc);
     expect(TRUE,r);

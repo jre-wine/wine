@@ -304,7 +304,7 @@ static BOOL CRYPT_AddCertToSimpleChain(PCertificateChainEngine engine,
                 chain->rgpElement[chain->cElement - 2]->TrustStatus.dwInfoStatus
                  = subjectInfoStatus;
             /* FIXME: initialize the rest of element */
-            if (chain->cElement % engine->CycleDetectionModulus)
+            if (!(chain->cElement % engine->CycleDetectionModulus))
                 CRYPT_CheckSimpleChainForCycles(chain);
             CRYPT_CombineTrustStatus(&chain->TrustStatus,
              &element->TrustStatus);
@@ -917,6 +917,7 @@ static BOOL CRYPT_BuildSimpleChain(PCertificateChainEngine engine,
         else
         {
             TRACE("Couldn't find issuer, halting chain creation\n");
+            chain->TrustStatus.dwErrorStatus |= CERT_TRUST_IS_PARTIAL_CHAIN;
             break;
         }
     }

@@ -2439,7 +2439,7 @@ static char KEYBOARD_MapDeadKeysym(KeySym keysym)
  * FIXME : should do the above (return 2 for non matching deadchar+char combinations)
  *
  */
-INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
+INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState,
 		     LPWSTR bufW, int bufW_size, UINT flags, HKL hkl)
 {
     Display *display = thread_init_display();
@@ -2703,8 +2703,7 @@ INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
 found:
     if (buf != lpChar)
         HeapFree(GetProcessHeap(), 0, lpChar);
-    TRACE_(key)("ToUnicode about to return %d with char %x %s\n",
-		ret, (ret && bufW) ? bufW[0] : 0, bufW ? "" : "(no buffer)");
+    TRACE_(key)("returning %d with %s\n", ret, debugstr_wn(bufW, ret));
     return ret;
 }
 

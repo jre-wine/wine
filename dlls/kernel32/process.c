@@ -970,8 +970,6 @@ void __wine_kernel_init(void)
 
     /* Initialize everything */
 
-    PTHREAD_Init();
-
     setbuf(stdout,NULL);
     setbuf(stderr,NULL);
     kernel32_handle = GetModuleHandleW(kernel32W);
@@ -1076,7 +1074,7 @@ static char **build_argv( const WCHAR *cmdlineW, int reserved )
     int in_quotes,bcount,len;
 
     len = WideCharToMultiByte( CP_UNIXCP, 0, cmdlineW, -1, NULL, 0, NULL, NULL );
-    if (!(cmdline = malloc(len))) return NULL;
+    if (!(cmdline = HeapAlloc( GetProcessHeap(), 0, len ))) return NULL;
     WideCharToMultiByte( CP_UNIXCP, 0, cmdlineW, -1, cmdline, len, NULL, NULL );
 
     argc=reserved+1;
@@ -1108,11 +1106,14 @@ static char **build_argv( const WCHAR *cmdlineW, int reserved )
         }
         s++;
     }
-    argv=malloc(argc*sizeof(*argv));
-    if (!argv)
+    if (!(argv = HeapAlloc( GetProcessHeap(), 0, argc*sizeof(*argv) + len )))
+    {
+        HeapFree( GetProcessHeap(), 0, cmdline );
         return NULL;
+    }
 
-    arg=d=s=cmdline;
+    arg = d = s = (char *)(argv + argc);
+    memcpy( d, cmdline, len );
     bcount=0;
     in_quotes=0;
     argc=reserved;
@@ -1164,22 +1165,10 @@ static char **build_argv( const WCHAR *cmdlineW, int reserved )
     }
     argv[argc]=NULL;
 
+    HeapFree( GetProcessHeap(), 0, cmdline );
     return argv;
 }
 
-
-/***********************************************************************
- *           alloc_env_string
- *
- * Allocate an environment string; helper for build_envp
- */
-static char *alloc_env_string( const char *name, const char *value )
-{
-    char *ret = malloc( strlen(name) + strlen(value) + 1 );
-    strcpy( ret, name );
-    strcat( ret, value );
-    return ret;
-}
 
 /***********************************************************************
  *           build_envp
@@ -1188,28 +1177,45 @@ static char *alloc_env_string( const char *name, const char *value )
  */
 static char **build_envp( const WCHAR *envW )
 {
+    static const char * const unix_vars[] = { "PATH", "TEMP", "TMP", "HOME" };
+
     const WCHAR *end;
     char **envp;
     char *env, *p;
     int count = 0, length;
+    unsigned int i;
 
     for (end = envW; *end; count++) end += strlenW(end) + 1;
     end++;
     length = WideCharToMultiByte( CP_UNIXCP, 0, envW, end - envW, NULL, 0, NULL, NULL );
-    if (!(env = malloc( length ))) return NULL;
+    if (!(env = HeapAlloc( GetProcessHeap(), 0, length ))) return NULL;
     WideCharToMultiByte( CP_UNIXCP, 0, envW, end - envW, env, length, NULL, NULL );
 
-    count += 4;
+    for (p = env; *p; p += strlen(p) + 1)
+        if (is_special_env_var( p )) length += 4; /* prefix it with "WINE" */
 
-    if ((envp = malloc( count * sizeof(*envp) )))
+    for (i = 0; i < sizeof(unix_vars)/sizeof(unix_vars[0]); i++)
+    {
+        if (!(p = getenv(unix_vars[i]))) continue;
+        length += strlen(unix_vars[i]) + strlen(p) + 2;
+        count++;
+    }
+
+    if ((envp = HeapAlloc( GetProcessHeap(), 0, count * sizeof(*envp) + length )))
     {
         char **envptr = envp;
+        char *dst = (char *)(envp + count);
 
         /* some variables must not be modified, so we get them directly from the unix env */
-        if ((p = getenv("PATH"))) *envptr++ = alloc_env_string( "PATH=", p );
-        if ((p = getenv("TEMP"))) *envptr++ = alloc_env_string( "TEMP=", p );
-        if ((p = getenv("TMP")))  *envptr++ = alloc_env_string( "TMP=", p );
-        if ((p = getenv("HOME"))) *envptr++ = alloc_env_string( "HOME=", p );
+        for (i = 0; i < sizeof(unix_vars)/sizeof(unix_vars[0]); i++)
+        {
+            if (!(p = getenv(unix_vars[i]))) continue;
+            *envptr++ = strcpy( dst, unix_vars[i] );
+            strcat( dst, "=" );
+            strcat( dst, p );
+            dst += strlen(dst) + 1;
+        }
+
         /* now put the Windows environment strings */
         for (p = env; *p; p += strlen(p) + 1)
         {
@@ -1217,12 +1223,19 @@ static char **build_envp( const WCHAR *envW )
             if (!strncmp( p, "WINEPRELOADRESERVE=", sizeof("WINEPRELOADRESERVE=")-1 )) continue;
             if (!strncmp( p, "WINESERVERSOCKET=", sizeof("WINESERVERSOCKET=")-1 )) continue;
             if (is_special_env_var( p ))  /* prefix it with "WINE" */
-                *envptr++ = alloc_env_string( "WINE", p );
+            {
+                *envptr++ = strcpy( dst, "WINE" );
+                strcat( dst, p );
+            }
             else
-                *envptr++ = p;
+            {
+                *envptr++ = strcpy( dst, p );
+            }
+            dst += strlen(dst) + 1;
         }
         *envptr = 0;
     }
+    HeapFree( GetProcessHeap(), 0, env );
     return envp;
 }
 
@@ -1237,6 +1250,7 @@ static int fork_and_exec( const char *filename, const WCHAR *cmdline, const WCHA
 {
     int fd[2], stdin_fd = -1, stdout_fd = -1;
     int pid, err;
+    char **argv, **envp;
 
     if (!env) env = GetEnvironmentStringsW();
 
@@ -1268,10 +1282,11 @@ static int fork_and_exec( const char *filename, const WCHAR *cmdline, const WCHA
         wine_server_handle_to_fd( hstdout, FILE_WRITE_DATA, &stdout_fd, NULL );
     }
 
+    argv = build_argv( cmdline, 0 );
+    envp = build_envp( env );
+
     if (!(pid = fork()))  /* child */
     {
-        char **argv = build_argv( cmdline, 0 );
-        char **envp = build_envp( env );
         close( fd[0] );
 
         if (flags & (CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE | DETACHED_PROCESS))
@@ -1316,6 +1331,8 @@ static int fork_and_exec( const char *filename, const WCHAR *cmdline, const WCHA
         write( fd[1], &err, sizeof(err) );
         _exit(1);
     }
+    HeapFree( GetProcessHeap(), 0, argv );
+    HeapFree( GetProcessHeap(), 0, envp );
     if (stdin_fd != -1) close( stdin_fd );
     if (stdout_fd != -1) close( stdout_fd );
     close( fd[1] );
@@ -1428,6 +1445,7 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
     HANDLE process_info, hstdin, hstdout;
     WCHAR *env_end;
     char *winedebug = NULL;
+    char **argv;
     RTL_USER_PROCESS_PARAMETERS *params;
     int socketfd[2], stdin_fd = -1, stdout_fd = -1;
     pid_t pid;
@@ -1526,11 +1544,11 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
     if (hstdout) wine_server_handle_to_fd( hstdout, FILE_WRITE_DATA, &stdout_fd, NULL );
 
     /* create the child process */
+    argv = build_argv( cmd_line, 1 );
 
     if (exec_only || !(pid = fork()))  /* child */
     {
         char preloader_reserve[64], socket_env[64];
-        char **argv = build_argv( cmd_line, 1 );
 
         if (flags & (CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE | DETACHED_PROCESS))
         {
@@ -1579,6 +1597,7 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
     if (stdin_fd != -1) close( stdin_fd );
     if (stdout_fd != -1) close( stdout_fd );
     close( socketfd[0] );
+    HeapFree( GetProcessHeap(), 0, argv );
     HeapFree( GetProcessHeap(), 0, winedebug );
     if (pid == -1)
     {

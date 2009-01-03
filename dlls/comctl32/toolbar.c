@@ -912,8 +912,7 @@ TOOLBAR_DrawButton (HWND hwnd, TBUTTON_INFO *btnPtr, HDC hdc, DWORD dwBaseCustDr
         rcText.right -= GetSystemMetrics(SM_CXEDGE);
         if (dwStyle & TBSTYLE_LIST)
         {
-            if (TOOLBAR_IsValidBitmapIndex(infoPtr,btnPtr->iBitmap))
-                rcText.left += infoPtr->nBitmapWidth + infoPtr->iListGap + 2;
+            rcText.left += infoPtr->nBitmapWidth + infoPtr->iListGap + 2;
         }
         else
         {
@@ -1330,7 +1329,7 @@ TOOLBAR_WrapToolbar( HWND hwnd, DWORD dwStyle )
 	    cx = (btnPtr[i].iBitmap > 0) ?
 			btnPtr[i].iBitmap : SEPARATOR_WIDTH;
 	else
-	    cx = infoPtr->nButtonWidth;
+	    cx = (btnPtr[i].cx) ? btnPtr[i].cx : infoPtr->nButtonWidth;
 
 	/* Two or more adjacent separators form a separator group.   */
 	/* The first separator in a group should be wrapped to the   */
@@ -1574,15 +1573,11 @@ static inline SIZE TOOLBAR_MeasureButton(const TOOLBAR_INFO *infoPtr, SIZE sizeS
             sizeButton.cy += infoPtr->szPadding.cy;
 
         /* calculate button width */
-        if (bHasBitmap)
-        {
-            sizeButton.cx = 2*GetSystemMetrics(SM_CXEDGE) +
-                infoPtr->nBitmapWidth + infoPtr->iListGap;
-            if (sizeString.cx > 0)
-                sizeButton.cx += sizeString.cx + infoPtr->szPadding.cx;
-        }
-        else
-            sizeButton.cx = sizeString.cx + infoPtr->szPadding.cx;
+        sizeButton.cx = 2*GetSystemMetrics(SM_CXEDGE) +
+            infoPtr->nBitmapWidth + infoPtr->iListGap;
+        if (sizeString.cx > 0)
+            sizeButton.cx += sizeString.cx + infoPtr->szPadding.cx;
+
     }
     else
     {
@@ -1598,8 +1593,8 @@ static inline SIZE TOOLBAR_MeasureButton(const TOOLBAR_INFO *infoPtr, SIZE sizeS
         {
             sizeButton.cy = sizeString.cy + infoPtr->szPadding.cy +
                 NONLIST_NOTEXT_OFFSET;
-            sizeButton.cx = 2*GetSystemMetrics(SM_CXEDGE) +
-                infoPtr->szPadding.cx + sizeString.cx;
+            sizeButton.cx = infoPtr->szPadding.cx +
+                max(2*GetSystemMetrics(SM_CXEDGE) + sizeString.cx, infoPtr->nBitmapWidth);
         }
     }
     return sizeButton;
@@ -2665,7 +2660,7 @@ TOOLBAR_AddBitmapToImageList(TOOLBAR_INFO *infoPtr, HIMAGELIST himlDef, const TB
     TRACE("adding hInst=%p nID=%d nButtons=%d\n", bitmap->hInst, bitmap->nID, bitmap->nButtons);
     /* Add bitmaps to the default image list */
     if (bitmap->hInst == NULL)         /* a handle was passed */
-        hbmLoad = (HBITMAP)CopyImage(ULongToHandle(bitmap->nID), IMAGE_BITMAP, 0, 0, 0);
+        hbmLoad = CopyImage(ULongToHandle(bitmap->nID), IMAGE_BITMAP, 0, 0, 0);
     else
         hbmLoad = CreateMappedBitmap(bitmap->hInst, bitmap->nID, 0, NULL, 0);
 
@@ -5177,7 +5172,7 @@ TOOLBAR_SetVersion (HWND hwnd, INT iVersion)
     infoPtr->iVersion = iVersion;
 
     if (infoPtr->iVersion >= 5)
-        TOOLBAR_SetUnicodeFormat(hwnd, (WPARAM)TRUE, (LPARAM)0);
+        TOOLBAR_SetUnicodeFormat(hwnd, TRUE, 0);
 
     return iOldVersion;
 }

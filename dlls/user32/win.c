@@ -1231,7 +1231,8 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
 
     /* send the size messages */
 
-    if (!(wndPtr = WIN_GetPtr(hwnd))) return 0;
+    if (!(wndPtr = WIN_GetPtr( hwnd )) ||
+          wndPtr == WND_OTHER_PROCESS || wndPtr == WND_DESKTOP) return 0;
     if (!(wndPtr->flags & WIN_NEED_SIZE))
     {
         rect = wndPtr->rectClient;
@@ -3143,7 +3144,7 @@ BOOL WINAPI FlashWindow( HWND hWnd, BOOL bInvert )
         else wparam = (hWnd == GetForegroundWindow());
 
         WIN_ReleasePtr( wndPtr );
-        SendMessageW( hWnd, WM_NCACTIVATE, wparam, (LPARAM)0 );
+        SendMessageW( hWnd, WM_NCACTIVATE, wparam, 0 );
         return wparam;
     }
 }

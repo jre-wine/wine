@@ -1671,7 +1671,7 @@ struct create_mapping_request
     unsigned int access;
     unsigned int attributes;
     file_pos_t   size;
-    int          protect;
+    unsigned int protect;
     obj_handle_t file_handle;
     /* VARARG(objattr,object_attributes); */
 };
@@ -1688,7 +1688,11 @@ struct create_mapping_reply
 #define VPROT_GUARD      0x10
 #define VPROT_NOCACHE    0x20
 #define VPROT_COMMITTED  0x40
-#define VPROT_IMAGE      0x80
+
+#define VPROT_IMAGE      0x0100
+#define VPROT_SYSTEM     0x0200
+#define VPROT_VALLOC     0x0400
+#define VPROT_NOEXEC     0x0800
 
 
 
@@ -1712,6 +1716,7 @@ struct get_mapping_info_request
 {
     struct request_header __header;
     obj_handle_t handle;
+    unsigned int access;
 };
 struct get_mapping_info_reply
 {
@@ -1722,6 +1727,35 @@ struct get_mapping_info_reply
     void*        base;
     obj_handle_t mapping;
     obj_handle_t shared_file;
+};
+
+
+
+struct get_mapping_committed_range_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    file_pos_t   offset;
+};
+struct get_mapping_committed_range_reply
+{
+    struct reply_header __header;
+    file_pos_t   size;
+    int          committed;
+};
+
+
+
+struct add_mapping_committed_range_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    file_pos_t   offset;
+    file_pos_t   size;
+};
+struct add_mapping_committed_range_reply
+{
+    struct reply_header __header;
 };
 
 
@@ -4385,6 +4419,8 @@ enum request
     REQ_create_mapping,
     REQ_open_mapping,
     REQ_get_mapping_info,
+    REQ_get_mapping_committed_range,
+    REQ_add_mapping_committed_range,
     REQ_create_snapshot,
     REQ_next_process,
     REQ_next_thread,
@@ -4627,6 +4663,8 @@ union generic_request
     struct create_mapping_request create_mapping_request;
     struct open_mapping_request open_mapping_request;
     struct get_mapping_info_request get_mapping_info_request;
+    struct get_mapping_committed_range_request get_mapping_committed_range_request;
+    struct add_mapping_committed_range_request add_mapping_committed_range_request;
     struct create_snapshot_request create_snapshot_request;
     struct next_process_request next_process_request;
     struct next_thread_request next_thread_request;
@@ -4867,6 +4905,8 @@ union generic_reply
     struct create_mapping_reply create_mapping_reply;
     struct open_mapping_reply open_mapping_reply;
     struct get_mapping_info_reply get_mapping_info_reply;
+    struct get_mapping_committed_range_reply get_mapping_committed_range_reply;
+    struct add_mapping_committed_range_reply add_mapping_committed_range_reply;
     struct create_snapshot_reply create_snapshot_reply;
     struct next_process_reply next_process_reply;
     struct next_thread_reply next_thread_reply;
@@ -5031,6 +5071,6 @@ union generic_reply
     struct set_window_layered_info_reply set_window_layered_info_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 343
+#define SERVER_PROTOCOL_VERSION 346
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

@@ -342,6 +342,7 @@ HANDLE thread_init(void)
     user_shared_data->TickCountLowDeprecated = user_shared_data->u.TickCount.LowPart;
     user_shared_data->TickCountMultiplier = 1 << 24;
 
+    pthread_init();
     return exe_file;
 }
 
@@ -604,8 +605,28 @@ error:
  */
 void WINAPI RtlExitUserThread( ULONG status )
 {
-    LdrShutdownThread();
-    server_exit_thread( status );
+    BOOL last;
+
+    SERVER_START_REQ( terminate_thread )
+    {
+        /* send the exit code to the server */
+        req->handle    = GetCurrentThread();
+        req->exit_code = status;
+        wine_server_call( req );
+        last = reply->last;
+    }
+    SERVER_END_REQ;
+
+    if (last)
+    {
+        LdrShutdownProcess();
+        exit( status );
+    }
+    else
+    {
+        LdrShutdownThread();
+        server_exit_thread( status );
+    }
 }
 
 

@@ -57,7 +57,7 @@ typedef struct {
 struct shader_glsl_priv {
     struct hash_table_t *glsl_program_lookup;
     struct glsl_shader_prog_link *glsl_program;
-    GLhandleARB             depth_blt_glsl_program_id;
+    GLhandleARB depth_blt_program[tex_type_count];
 };
 
 /* Struct to maintain data about a linked GLSL program */
@@ -1296,8 +1296,7 @@ static void shader_glsl_color_correction(SHADER_OPCODE_ARG* arg) {
     switch(fmt) {
         case WINED3DFMT_V8U8:
         case WINED3DFMT_V16U16:
-            if(GL_SUPPORT(NV_TEXTURE_SHADER) ||
-              (GL_SUPPORT(ATI_ENVMAP_BUMPMAP) && fmt == WINED3DFMT_V8U8)) {
+            if(GL_SUPPORT(NV_TEXTURE_SHADER) && fmt == WINED3DFMT_V8U8) {
                 /* The 3rd channel returns 1.0 in d3d, but 0.0 in gl. Fix this while we're at it :-) */
                 mask = shader_glsl_add_dst_param(arg, arg->dst, WINED3DSP_WRITEMASK_2, &dst_param);
                 mask_size = shader_glsl_get_write_mask_size(mask);
@@ -2213,13 +2212,18 @@ static void pshader_glsl_tex(SHADER_OPCODE_ARG* arg) {
 
     /* 1.0-1.4: Use destination register as sampler source.
      * 2.0+: Use provided sampler source. */
-    if (hex_version < WINED3DPS_VERSION(1,4)) {
-        DWORD flags;
-
+    if (hex_version < WINED3DPS_VERSION(2,0)) {
         sampler_idx = arg->dst & WINED3DSP_REGNUM_MASK;
-        flags = deviceImpl->stateBlock->textureState[sampler_idx][WINED3DTSS_TEXTURETRANSFORMFLAGS];
+    } else {
+        sampler_idx = arg->src[1] & WINED3DSP_REGNUM_MASK;
+    }
+    sampler_type = arg->reg_maps->samplers[sampler_idx] & WINED3DSP_TEXTURETYPE_MASK;
 
-        if (flags & WINED3DTTFF_PROJECTED) {
+    if (hex_version < WINED3DPS_VERSION(1,4)) {
+        DWORD flags = deviceImpl->stateBlock->textureState[sampler_idx][WINED3DTSS_TEXTURETRANSFORMFLAGS];
+
+        /* Projected cube textures don't make a lot of sense, the resulting coordinates stay the same. */
+        if (flags & WINED3DTTFF_PROJECTED && sampler_type != WINED3DSTT_CUBE) {
             projected = TRUE;
             switch (flags & ~WINED3DTTFF_PROJECTED) {
                 case WINED3DTTFF_COUNT1: FIXME("WINED3DTTFF_PROJECTED with WINED3DTTFF_COUNT1?\n"); break;
@@ -2233,7 +2237,6 @@ static void pshader_glsl_tex(SHADER_OPCODE_ARG* arg) {
         }
     } else if (hex_version < WINED3DPS_VERSION(2,0)) {
         DWORD src_mod = arg->src[0] & WINED3DSP_SRCMOD_MASK;
-        sampler_idx = arg->dst & WINED3DSP_REGNUM_MASK;
 
         if (src_mod == WINED3DSPSM_DZ) {
             projected = TRUE;
@@ -2245,7 +2248,6 @@ static void pshader_glsl_tex(SHADER_OPCODE_ARG* arg) {
             projected = FALSE;
         }
     } else {
-        sampler_idx = arg->src[1] & WINED3DSP_REGNUM_MASK;
         if(arg->opcode_token & WINED3DSI_TEXLD_PROJECT) {
                 /* ps 2.0 texldp instruction always divides by the fourth component. */
                 projected = TRUE;
@@ -2260,7 +2262,6 @@ static void pshader_glsl_tex(SHADER_OPCODE_ARG* arg) {
         texrect = TRUE;
     }
 
-    sampler_type = arg->reg_maps->samplers[sampler_idx] & WINED3DSP_TEXTURETYPE_MASK;
     shader_glsl_get_sample_function(sampler_type, projected, texrect, &sample_function);
     mask |= sample_function.coord_mask;
 
@@ -3041,7 +3042,7 @@ static GLhandleARB generate_param_reorder_function(IWineD3DVertexShader *vertexs
     IWineD3DVertexShaderImpl *vs = (IWineD3DVertexShaderImpl *) vertexshader;
     IWineD3DPixelShaderImpl *ps = (IWineD3DPixelShaderImpl *) pixelshader;
     IWineD3DDeviceImpl *device;
-    DWORD vs_major = vs ? WINED3DSHADER_VERSION_MAJOR(vs->baseShader.hex_version) : 0;
+    DWORD vs_major = WINED3DSHADER_VERSION_MAJOR(vs->baseShader.hex_version);
     DWORD ps_major = ps ? WINED3DSHADER_VERSION_MAJOR(ps->baseShader.hex_version) : 0;
     unsigned int i;
     SHADER_BUFFER buffer;
@@ -3379,7 +3380,7 @@ static void set_glsl_shader_program(IWineD3DDevice *iface, BOOL use_ps, BOOL use
     }
 }
 
-static GLhandleARB create_glsl_blt_shader(WineD3D_GL_Info *gl_info) {
+static GLhandleARB create_glsl_blt_shader(WineD3D_GL_Info *gl_info, enum tex_types tex_type) {
     GLhandleARB program_id;
     GLhandleARB vshader_id, pshader_id;
     const char *blt_vshader[] = {
@@ -3388,26 +3389,51 @@ static GLhandleARB create_glsl_blt_shader(WineD3D_GL_Info *gl_info) {
         "{\n"
         "    gl_Position = gl_Vertex;\n"
         "    gl_FrontColor = vec4(1.0);\n"
-        "    gl_TexCoord[0].x = (gl_Vertex.x * 0.5) + 0.5;\n"
-        "    gl_TexCoord[0].y = (-gl_Vertex.y * 0.5) + 0.5;\n"
+        "    gl_TexCoord[0] = gl_MultiTexCoord0;\n"
         "}\n"
     };
 
-    const char *blt_pshader[] = {
+    const char *blt_pshaders[tex_type_count] = {
+        /* tex_1d */
+        NULL,
+        /* tex_2d */
         "#version 120\n"
         "uniform sampler2D sampler;\n"
         "void main(void)\n"
         "{\n"
         "    gl_FragDepth = texture2D(sampler, gl_TexCoord[0].xy).x;\n"
-        "}\n"
+        "}\n",
+        /* tex_3d */
+        NULL,
+        /* tex_cube */
+        "#version 120\n"
+        "uniform samplerCube sampler;\n"
+        "void main(void)\n"
+        "{\n"
+        "    gl_FragDepth = textureCube(sampler, gl_TexCoord[0].xyz).x;\n"
+        "}\n",
+        /* tex_rect */
+        "#version 120\n"
+        "#extension GL_ARB_texture_rectangle : enable\n"
+        "uniform sampler2DRect sampler;\n"
+        "void main(void)\n"
+        "{\n"
+        "    gl_FragDepth = texture2DRect(sampler, gl_TexCoord[0].xy).x;\n"
+        "}\n",
     };
+
+    if (!blt_pshaders[tex_type])
+    {
+        FIXME("tex_type %#x not supported\n", tex_type);
+        tex_type = tex_2d;
+    }
 
     vshader_id = GL_EXTCALL(glCreateShaderObjectARB(GL_VERTEX_SHADER_ARB));
     GL_EXTCALL(glShaderSourceARB(vshader_id, 1, blt_vshader, NULL));
     GL_EXTCALL(glCompileShaderARB(vshader_id));
 
     pshader_id = GL_EXTCALL(glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB));
-    GL_EXTCALL(glShaderSourceARB(pshader_id, 1, blt_pshader, NULL));
+    GL_EXTCALL(glShaderSourceARB(pshader_id, 1, &blt_pshaders[tex_type], NULL));
     GL_EXTCALL(glCompileShaderARB(pshader_id));
 
     program_id = GL_EXTCALL(glCreateProgramObjectARB());
@@ -3454,19 +3480,20 @@ static void shader_glsl_select(IWineD3DDevice *iface, BOOL usePS, BOOL useVS) {
     checkGLcall("glUseProgramObjectARB");
 }
 
-static void shader_glsl_select_depth_blt(IWineD3DDevice *iface) {
+static void shader_glsl_select_depth_blt(IWineD3DDevice *iface, enum tex_types tex_type) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     WineD3D_GL_Info *gl_info = &This->adapter->gl_info;
     struct shader_glsl_priv *priv = (struct shader_glsl_priv *) This->shader_priv;
+    GLhandleARB *blt_program = &priv->depth_blt_program[tex_type];
 
-    if (!priv->depth_blt_glsl_program_id) {
+    if (!*blt_program) {
         GLhandleARB loc;
-        priv->depth_blt_glsl_program_id = create_glsl_blt_shader(gl_info);
-        loc = GL_EXTCALL(glGetUniformLocationARB(priv->depth_blt_glsl_program_id, "sampler"));
-        GL_EXTCALL(glUseProgramObjectARB(priv->depth_blt_glsl_program_id));
+        *blt_program = create_glsl_blt_shader(gl_info, tex_type);
+        loc = GL_EXTCALL(glGetUniformLocationARB(*blt_program, "sampler"));
+        GL_EXTCALL(glUseProgramObjectARB(*blt_program));
         GL_EXTCALL(glUniform1iARB(loc, 0));
     } else {
-        GL_EXTCALL(glUseProgramObjectARB(priv->depth_blt_glsl_program_id));
+        GL_EXTCALL(glUseProgramObjectARB(*blt_program));
     }
 }
 
@@ -3559,9 +3586,14 @@ static void shader_glsl_free(IWineD3DDevice *iface) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     WineD3D_GL_Info *gl_info = &This->adapter->gl_info;
     struct shader_glsl_priv *priv = (struct shader_glsl_priv *)This->shader_priv;
+    int i;
 
-    if(priv->depth_blt_glsl_program_id) {
-        GL_EXTCALL(glDeleteObjectARB(priv->depth_blt_glsl_program_id));
+    for (i = 0; i < tex_type_count; ++i)
+    {
+        if (priv->depth_blt_program[i])
+        {
+            GL_EXTCALL(glDeleteObjectARB(priv->depth_blt_program[i]));
+        }
     }
 
     hash_table_destroy(priv->glsl_program_lookup, NULL, NULL);
