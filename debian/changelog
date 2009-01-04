@@ -1,8 +1,23 @@
-wine (1.1.9-1) UNRELEASED; urgency=low
+wine (1.1.9-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.9, released Nov 21, 2008.
+    - A large number of regression test fixes.
+    - Performance improvements in memory management.
+    - Improved POP3 support in inetcomm.
+    - Initial implementation of the XInput DLL.
+    - Various bug fixes.
+  * Made the debian/maint/import script run date in the C locale.
+  * Upstream added a --disable-tests configure option. Since the Debian
+    packaging currently makes no use of the tests (the buildds probably
+    couldn't run them anyway since they probably need an X display),
+    I'll use this option, to shorten the build time a little bit.
+  * Support the "parallel" option of DEB_BUILD_OPTIONS.
+    Upgraded Standards-Version to 3.8.0.
+  * The wineshelllink script has been obsoleted. Thus, it's no longer
+    packaged, and bugs about it no longer applies.
+    (Closes: #480069, #83259)
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sun, 04 Jan 2009 04:44:32 +0100
+ -- Ove Kaaven <ovek@arcticnet.no>  Sun, 04 Jan 2009 09:35:46 +0100
 
 wine (1.1.8-1) experimental; urgency=low
 
