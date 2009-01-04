@@ -9,7 +9,6 @@ debian/tmp/usr/bin/winecfg
 debian/tmp/usr/bin/wineconsole
 debian/tmp/usr/bin/winepath
 debian/tmp/usr/bin/wineprefixcreate
-debian/tmp/usr/bin/wineshelllink
 debian/tmp/usr/lib/wine/cmd.exe.so
 debian/tmp/usr/lib/wine/eject.exe.so
 debian/tmp/usr/lib/wine/expand.exe.so
