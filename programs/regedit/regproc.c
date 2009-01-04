@@ -860,7 +860,7 @@ static void REGPROC_print_error(void)
         exit(1);
     }
     puts(lpMsgBuf);
-    LocalFree((HLOCAL)lpMsgBuf);
+    LocalFree(lpMsgBuf);
     exit(1);
 }
 
@@ -883,6 +883,26 @@ static void REGPROC_resize_char_buffer(WCHAR **buffer, DWORD *len, DWORD require
             *buffer = HeapAlloc(GetProcessHeap(), 0, *len * sizeof(**buffer));
         else
             *buffer = HeapReAlloc(GetProcessHeap(), 0, *buffer, *len * sizeof(**buffer));
+        CHECK_ENOUGH_MEMORY(*buffer);
+    }
+}
+
+/******************************************************************************
+ * Same as REGPROC_resize_char_buffer() but on a regular buffer.
+ *
+ * Parameters:
+ * buffer - pointer to a buffer
+ * len - current size of the buffer in bytes
+ * required_size - size of the data to place in the buffer in bytes
+ */
+static void REGPROC_resize_binary_buffer(BYTE **buffer, DWORD *size, DWORD required_size)
+{
+    if (required_size > *size) {
+        *size = required_size;
+        if (!*buffer)
+            *buffer = HeapAlloc(GetProcessHeap(), 0, *size);
+        else
+            *buffer = HeapReAlloc(GetProcessHeap(), 0, *buffer, *size);
         CHECK_ENOUGH_MEMORY(*buffer);
     }
 }
@@ -927,12 +947,10 @@ static void REGPROC_export_string(WCHAR **line_buf, DWORD *line_buf_size, DWORD 
 
 static void REGPROC_export_binary(WCHAR **line_buf, DWORD *line_buf_size, DWORD *line_len, DWORD type, BYTE *value, DWORD value_size, BOOL unicode)
 {
-    DWORD i, hex_pos, data_pos, column;
+    DWORD hex_pos, data_pos;
     const WCHAR *hex_prefix;
     const WCHAR hex[] = {'h','e','x',':',0};
     WCHAR hex_buf[17];
-    const WCHAR format[] = {'%','0','2','x',0};
-    const WCHAR comma[] = {',',0};
     const WCHAR concat[] = {'\\','\n',' ',' ',0};
     DWORD concat_prefix, concat_len;
     const WCHAR newline[] = {'\n',0};
@@ -969,29 +987,33 @@ static void REGPROC_export_binary(WCHAR **line_buf, DWORD *line_buf_size, DWORD 
     *line_len += *line_len / (REG_FILE_HEX_LINE_LEN - concat_prefix) * concat_len;
     REGPROC_resize_char_buffer(line_buf, line_buf_size, *line_len);
     lstrcpyW(*line_buf + hex_pos, hex_prefix);
-    column = data_pos; /* no line wrap yet */
-    i = 0;
-    while (1)
+    if (value_size)
     {
-        sprintfW(*line_buf + data_pos, format, (unsigned int)value[i]);
-        data_pos += 2;
-        if (++i == value_size)
-            break;
+        const WCHAR format[] = {'%','0','2','x',0};
+        DWORD i, column;
 
-        lstrcpyW(*line_buf + data_pos, comma);
-        data_pos++;
-        column += 3;
+        column = data_pos; /* no line wrap yet */
+        i = 0;
+        while (1)
+        {
+            sprintfW(*line_buf + data_pos, format, (unsigned int)value[i]);
+            data_pos += 2;
+            if (++i == value_size)
+                break;
 
-        /* wrap the line */
-        if (column >= REG_FILE_HEX_LINE_LEN) {
-            lstrcpyW(*line_buf + data_pos, concat);
-            data_pos += concat_len;
-            column = concat_prefix;
+            (*line_buf)[data_pos++] = ',';
+            column += 3;
+
+            /* wrap the line */
+            if (column >= REG_FILE_HEX_LINE_LEN) {
+                lstrcpyW(*line_buf + data_pos, concat);
+                data_pos += concat_len;
+                column = concat_prefix;
+            }
         }
     }
     lstrcpyW(*line_buf + data_pos, newline);
-    if (value_multibyte)
-        HeapFree(GetProcessHeap(), 0, value_multibyte);
+    HeapFree(GetProcessHeap(), 0, value_multibyte);
 }
 
 /******************************************************************************
@@ -1054,13 +1076,7 @@ static void export_hkey(FILE *file, HKEY key,
                                max_sub_key_len + curr_len + 1);
     REGPROC_resize_char_buffer(val_name_buf, val_name_size,
                                max_val_name_len);
-    if (max_val_size > *val_size) {
-        *val_size = max_val_size;
-        if (!*val_buf) *val_buf = HeapAlloc(GetProcessHeap(), 0, *val_size);
-        else *val_buf = HeapReAlloc(GetProcessHeap(), 0, *val_buf, *val_size);
-        CHECK_ENOUGH_MEMORY(val_buf);
-    }
-
+    REGPROC_resize_binary_buffer(val_buf, val_size, max_val_size);
     REGPROC_resize_char_buffer(line_buf, line_buf_size, lstrlenW(*reg_key_name_buf) + 4);
     /* output data for the current key */
     sprintfW(*line_buf, key_format, *reg_key_name_buf);
@@ -1075,7 +1091,11 @@ static void export_hkey(FILE *file, HKEY key,
         DWORD val_size1 = *val_size;
         ret = RegEnumValueW(key, i, *val_name_buf, &val_name_size1, NULL,
                            &value_type, *val_buf, &val_size1);
-        if (ret != ERROR_SUCCESS) {
+        if (ret == ERROR_MORE_DATA) {
+            /* Increase the size of the buffers and retry */
+            REGPROC_resize_char_buffer(val_name_buf, val_name_size, val_name_size1);
+            REGPROC_resize_binary_buffer(val_buf, val_size, val_size1);
+        } else if (ret != ERROR_SUCCESS) {
             more_data = FALSE;
             if (ret != ERROR_NO_MORE_ITEMS) {
                 REGPROC_print_error();
@@ -1166,7 +1186,10 @@ static void export_hkey(FILE *file, HKEY key,
 
         ret = RegEnumKeyExW(key, i, *reg_key_name_buf + curr_len + 1, &buf_size,
                            NULL, NULL, NULL, NULL);
-        if (ret != ERROR_SUCCESS && ret != ERROR_MORE_DATA) {
+        if (ret == ERROR_MORE_DATA) {
+            /* Increase the size of the buffer and retry */
+            REGPROC_resize_char_buffer(reg_key_name_buf, reg_key_name_size, curr_len + 1 + buf_size);
+        } else if (ret != ERROR_SUCCESS) {
             more_data = FALSE;
             if (ret != ERROR_NO_MORE_ITEMS) {
                 REGPROC_print_error();

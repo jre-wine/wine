@@ -33,7 +33,10 @@
 /* Tests for My Network Places */
 static void test_parse_for_entire_network(void)
 {
-    static const WCHAR entire_network_path[] = {
+    static WCHAR my_network_places_path[] = {
+        ':',':','{','2','0','8','D','2','C','6','0','-','3','A','E','A','-',
+                    '1','0','6','9','-','A','2','D','7','-','0','8','0','0','2','B','3','0','3','0','9','D','}', 0 };
+    static WCHAR entire_network_path[] = {
         ':',':','{','2','0','8','D','2','C','6','0','-','3','A','E','A','-',
                     '1','0','6','9','-','A','2','D','7','-','0','8','0','0','2','B','3','0','3','0','9','D',
                 '}','\\','E','n','t','i','r','e','N','e','t','w','o','r','k',0 };
@@ -48,7 +51,30 @@ static void test_parse_for_entire_network(void)
     hr = SHGetDesktopFolder(&psfDesktop);
     ok(hr == S_OK, "SHGetDesktopFolder failed with error 0x%x\n", hr);
 
-    hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, (LPWSTR)entire_network_path, &eaten, &pidl, &attr);
+    hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, my_network_places_path, &eaten, &pidl, &attr);
+    ok(hr == S_OK, "IShellFolder_ParseDisplayName failed with error 0x%x\n", hr);
+    todo_wine
+    ok(eaten == 0xdeadbeef, "eaten should not have been set to %u\n", eaten);
+    expected_attr = SFGAO_HASSUBFOLDER|SFGAO_FOLDER|SFGAO_FILESYSANCESTOR|SFGAO_DROPTARGET|SFGAO_HASPROPSHEET|SFGAO_CANRENAME|SFGAO_CANLINK;
+    todo_wine
+    ok((attr == expected_attr) || /* Win9x, NT4 */
+       (attr == (expected_attr | SFGAO_STREAM)) || /* W2K */
+       (attr == (expected_attr | SFGAO_CANDELETE)) || /* XP, W2K3 */
+       (attr == (expected_attr | SFGAO_CANDELETE | SFGAO_NONENUMERATED)), /* Vista */
+       "Unexpected attributes : %08x\n", attr);
+
+    ILFree(pidl);
+
+    /* Start clean again */
+    eaten = 0xdeadbeef;
+    attr = ~0;
+
+    hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, entire_network_path, &eaten, &pidl, &attr);
+    if (hr == HRESULT_FROM_WIN32(ERROR_BAD_NET_NAME) || hr == HRESULT_FROM_WIN32(ERROR_INVALID_PARAMETER))
+    {
+        win_skip("'EntireNetwork' is not available on Win9x, NT4 and Vista\n");
+        return;
+    }
     ok(hr == S_OK, "IShellFolder_ParseDisplayName failed with error 0x%x\n", hr);
     todo_wine
     ok(eaten == 0xdeadbeef, "eaten should not have been set to %u\n", eaten);
@@ -66,7 +92,7 @@ static void test_parse_for_entire_network(void)
 static void test_parse_for_control_panel(void)
 {
     /* path of My Computer\Control Panel */
-    static const WCHAR control_panel_path[] = {
+    static WCHAR control_panel_path[] = {
         ':',':','{','2','0','D','0','4','F','E','0','-','3','A','E','A','-','1','0','6','9','-','A','2','D','8','-','0','8','0','0','2','B','3','0','3','0','9','D','}','\\',
         ':',':','{','2','1','E','C','2','0','2','0','-','3','A','E','A','-','1','0','6','9','-','A','2','D','D','-','0','8','0','0','2','B','3','0','3','0','9','D','}', 0 };
     IShellFolder *psfDesktop;
@@ -74,17 +100,20 @@ static void test_parse_for_control_panel(void)
     DWORD eaten = 0xdeadbeef;
     LPITEMIDLIST pidl;
     DWORD attr = ~0;
-    DWORD expected_attr;
 
     hr = SHGetDesktopFolder(&psfDesktop);
     ok(hr == S_OK, "SHGetDesktopFolder failed with error 0x%x\n", hr);
 
-    hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, (LPWSTR)control_panel_path, &eaten, &pidl, &attr);
+    hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, control_panel_path, &eaten, &pidl, &attr);
     ok(hr == S_OK, "IShellFolder_ParseDisplayName failed with error 0x%x\n", hr);
     todo_wine ok(eaten == 0xdeadbeef, "eaten should not have been set to %u\n", eaten);
-
-    expected_attr = SFGAO_CANLINK | SFGAO_FOLDER | SFGAO_HASSUBFOLDER;
-    todo_wine ok(attr == expected_attr, "attr should be 0x%x, not 0x%x\n", expected_attr, attr);
+    todo_wine
+    ok((attr == (SFGAO_CANLINK | SFGAO_FOLDER)) || /* Win9x, NT4 */
+       (attr == (SFGAO_CANLINK | SFGAO_FOLDER | SFGAO_HASSUBFOLDER | SFGAO_STREAM)) || /* W2K */
+       (attr == (SFGAO_CANLINK | SFGAO_FOLDER | SFGAO_HASSUBFOLDER)) || /* W2K, XP, W2K3 */
+       (attr == (SFGAO_CANLINK | SFGAO_NONENUMERATED)) || /* Vista */
+       (attr == SFGAO_CANLINK), /* Vista, W2K8 */
+       "Unexpected attributes : %08x\n", attr);
 
     ILFree(pidl);
 }

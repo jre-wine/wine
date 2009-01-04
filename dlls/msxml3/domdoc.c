@@ -209,6 +209,20 @@ HRESULT xmldoc_remove_orphan(xmlDocPtr doc, xmlNodePtr node)
     return S_FALSE;
 }
 
+static HRESULT attach_xmldoc( IXMLDOMNode *node, xmlDocPtr xml )
+{
+    xmlnode *This = impl_from_IXMLDOMNode( node );
+
+    if(This->node)
+        xmldoc_release(This->node->doc);
+
+    This->node = (xmlNodePtr) xml;
+    if(This->node)
+        xmldoc_add_ref(This->node->doc);
+
+    return S_OK;
+}
+
 static inline domdoc *impl_from_IXMLDOMDocument2( IXMLDOMDocument2 *iface )
 {
     return (domdoc *)((char*)iface - FIELD_OFFSET(domdoc, lpVtbl));
@@ -331,9 +345,8 @@ static HRESULT WINAPI xmldoc_IPersistStream_Load(
     }
 
     xmldoc->_private = create_priv();
-    attach_xmlnode( This->node, (xmlNodePtr)xmldoc );
 
-    return S_OK;
+    return attach_xmldoc( This->node, xmldoc );
 }
 
 static HRESULT WINAPI xmldoc_IPersistStream_Save(
@@ -1310,7 +1323,7 @@ static HRESULT domdoc_onDataAvailable(void *obj, char *ptr, DWORD len)
     xmldoc = doparse( ptr, len );
     if(xmldoc) {
         xmldoc->_private = create_priv();
-        attach_xmlnode(This->node, (xmlNodePtr) xmldoc);
+        return attach_xmldoc(This->node, xmldoc);
     }
 
     return S_OK;
@@ -1350,8 +1363,6 @@ static HRESULT WINAPI domdoc_load(
 
     assert( This->node );
 
-    attach_xmlnode(This->node, NULL);
-
     switch( V_VT(&xmlSource) )
     {
     case VT_BSTR:
@@ -1365,11 +1376,12 @@ static HRESULT WINAPI domdoc_load(
             {
                 domdoc *newDoc = impl_from_IXMLDOMDocument2( pNewDoc );
                 xmldoc = xmlCopyDoc(get_doc(newDoc), 1);
-                attach_xmlnode(This->node, (xmlNodePtr) xmldoc);
+                hr = attach_xmldoc(This->node, xmldoc);
 
-                *isSuccessful = VARIANT_TRUE;
+                if(SUCCEEDED(hr))
+                    *isSuccessful = VARIANT_TRUE;
 
-                return S_OK;
+                return hr;
             }
         }
         hr = IUnknown_QueryInterface(V_UNKNOWN(&xmlSource), &IID_IStream, (void**)&pStream);
@@ -1426,8 +1438,9 @@ static HRESULT WINAPI domdoc_load(
     if(!filename || FAILED(hr)) {
         xmldoc = xmlNewDoc(NULL);
         xmldoc->_private = create_priv();
-        attach_xmlnode(This->node, (xmlNodePtr) xmldoc);
-        hr = S_FALSE;
+        hr = attach_xmldoc(This->node, xmldoc);
+        if(SUCCEEDED(hr))
+            hr = S_FALSE;
     }
 
     TRACE("ret (%d)\n", hr);
@@ -1529,13 +1542,11 @@ static HRESULT WINAPI domdoc_loadXML(
     xmlDocPtr xmldoc = NULL;
     char *str;
     int len;
-    HRESULT hr = S_FALSE;
+    HRESULT hr = S_FALSE, hr2;
 
     TRACE("%p %s %p\n", This, debugstr_w( bstrXML ), isSuccessful );
 
     assert ( This->node );
-
-    attach_xmlnode( This->node, NULL );
 
     if ( isSuccessful )
     {
@@ -1558,7 +1569,9 @@ static HRESULT WINAPI domdoc_loadXML(
         xmldoc = xmlNewDoc(NULL);
 
     xmldoc->_private = create_priv();
-    attach_xmlnode( This->node, (xmlNodePtr) xmldoc );
+    hr2 = attach_xmldoc( This->node, xmldoc );
+    if( FAILED(hr2) )
+        hr = hr2;
 
     return hr;
 }

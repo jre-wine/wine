@@ -985,7 +985,7 @@ LPITEMIDLIST WINAPI ILCreateFromPathAW (LPCVOID path)
  *  is used to avoid having to verify the current path element on disk, so
  *  that creating an ItemIDList from a nonexistent path still can work.
  */
-static HRESULT WINAPI _ILParsePathW(LPCWSTR path, LPWIN32_FIND_DATAW lpFindFile,
+static HRESULT _ILParsePathW(LPCWSTR path, LPWIN32_FIND_DATAW lpFindFile,
                              BOOL bBindCtx, LPITEMIDLIST *ppidl, LPDWORD prgfInOut)
 {
     LPSHELLFOLDER pSF = NULL;
@@ -1322,7 +1322,14 @@ HRESULT WINAPI SHBindToParent(LPCITEMIDLIST pidl, REFIID riid, LPVOID *ppv, LPCI
  *
  *************************************************************************
  */
-LPITEMIDLIST _ILAlloc(PIDLTYPE type, unsigned int size)
+
+/* Basic PIDL constructor.  Allocates size + 5 bytes, where:
+ * - two bytes are SHITEMID.cb
+ * - one byte is PIDLDATA.type
+ * - two bytes are the NULL PIDL terminator
+ * Sets type of the returned PIDL to type.
+ */
+static LPITEMIDLIST _ILAlloc(PIDLTYPE type, unsigned int size)
 {
     LPITEMIDLIST pidlOut = NULL;
 

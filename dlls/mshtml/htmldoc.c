@@ -370,29 +370,129 @@ static HRESULT WINAPI HTMLDocument_get_images(IHTMLDocument2 *iface, IHTMLElemen
 static HRESULT WINAPI HTMLDocument_get_applets(IHTMLDocument2 *iface, IHTMLElementCollection **p)
 {
     HTMLDocument *This = HTMLDOC_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsIDOMHTMLCollection *nscoll = NULL;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_INVALIDARG;
+
+    *p = NULL;
+
+    if(!This->nsdoc) {
+        WARN("NULL nsdoc\n");
+        return E_UNEXPECTED;
+    }
+
+    nsres = nsIDOMHTMLDocument_GetApplets(This->nsdoc, &nscoll);
+    if(NS_FAILED(nsres)) {
+        ERR("GetApplets failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    if(nscoll) {
+        *p = create_collection_from_htmlcol(This, (IUnknown*)HTMLDOC(This), nscoll);
+        nsIDOMElement_Release(nscoll);
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument_get_links(IHTMLDocument2 *iface, IHTMLElementCollection **p)
 {
     HTMLDocument *This = HTMLDOC_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsIDOMHTMLCollection *nscoll = NULL;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_INVALIDARG;
+
+    *p = NULL;
+
+    if(!This->nsdoc) {
+        WARN("NULL nsdoc\n");
+        return E_UNEXPECTED;
+    }
+
+    nsres = nsIDOMHTMLDocument_GetLinks(This->nsdoc, &nscoll);
+    if(NS_FAILED(nsres)) {
+        ERR("GetLinks failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    if(nscoll) {
+        *p = create_collection_from_htmlcol(This, (IUnknown*)HTMLDOC(This), nscoll);
+        nsIDOMElement_Release(nscoll);
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument_get_forms(IHTMLDocument2 *iface, IHTMLElementCollection **p)
 {
     HTMLDocument *This = HTMLDOC_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsIDOMHTMLCollection *nscoll = NULL;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_INVALIDARG;
+
+    *p = NULL;
+
+    if(!This->nsdoc) {
+        WARN("NULL nsdoc\n");
+        return E_UNEXPECTED;
+    }
+
+    nsres = nsIDOMHTMLDocument_GetForms(This->nsdoc, &nscoll);
+    if(NS_FAILED(nsres)) {
+        ERR("GetForms failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    if(nscoll) {
+        *p = create_collection_from_htmlcol(This, (IUnknown*)HTMLDOC(This), nscoll);
+        nsIDOMElement_Release(nscoll);
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument_get_anchors(IHTMLDocument2 *iface, IHTMLElementCollection **p)
 {
     HTMLDocument *This = HTMLDOC_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsIDOMHTMLCollection *nscoll = NULL;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_INVALIDARG;
+
+    *p = NULL;
+
+    if(!This->nsdoc) {
+        WARN("NULL nsdoc\n");
+        return E_UNEXPECTED;
+    }
+
+    nsres = nsIDOMHTMLDocument_GetAnchors(This->nsdoc, &nscoll);
+    if(NS_FAILED(nsres)) {
+        ERR("GetAnchors failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    if(nscoll) {
+        *p = create_collection_from_htmlcol(This, (IUnknown*)HTMLDOC(This), nscoll);
+        nsIDOMElement_Release(nscoll);
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument_put_title(IHTMLDocument2 *iface, BSTR v)

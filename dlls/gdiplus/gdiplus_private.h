@@ -54,6 +54,8 @@ extern void calc_curve_bezier_endp(REAL xend, REAL yend, REAL xadj, REAL yadj,
 
 extern BOOL lengthen_path(GpPath *path, INT len);
 
+extern GpStatus trace_path(GpGraphics *graphics, GpPath *path);
+
 typedef struct region_element region_element;
 extern inline void delete_element(region_element *element);
 
@@ -197,7 +199,7 @@ struct GpBitmap{
 };
 
 struct GpCachedBitmap{
-    GpBitmap *bmp;
+    GpImage *image;
 };
 
 struct GpImageAttributes{
@@ -207,6 +209,8 @@ struct GpImageAttributes{
 struct GpFont{
     LOGFONTW lfw;
     REAL emSize;
+    UINT height;
+    LONG line_spacing;
     Unit unit;
 };
 
@@ -225,7 +229,8 @@ struct GpStringFormat{
 };
 
 struct GpFontCollection{
-    GpFontFamily* FontFamilies;
+    GpFontFamily **FontFamilies;
+    INT count;
 };
 
 struct GpFontFamily{

@@ -161,8 +161,11 @@ static IDirect3DDevice9 *init_d3d9(void)
     if (!d3d9_create) return NULL;
 
     d3d9_ptr = d3d9_create(D3D_SDK_VERSION);
-    ok(d3d9_ptr != NULL, "Failed to create IDirect3D9 object\n");
-    if (!d3d9_ptr) return NULL;
+    if (!d3d9_ptr)
+    {
+        skip("could not create D3D9\n");
+        return NULL;
+    }
 
     ZeroMemory(&present_parameters, sizeof(present_parameters));
     present_parameters.Windowed = FALSE;
@@ -8679,7 +8682,7 @@ struct formats {
 };
 
 const struct formats test_formats[] = {
-  { "D3DFMT_G16R16", D3DFMT_G16R16, 0x00181800, 0x002010ff},
+  { "D3DFMT_G16R16", D3DFMT_G16R16, 0x001818ff, 0x002010ff},
   { "D3DFMT_R16F", D3DFMT_R16F, 0x0018ffff, 0x0020ffff },
   { "D3DFMT_G16R16F", D3DFMT_G16R16F, 0x001818ff, 0x002010ff },
   { "D3DFMT_A16B16G16R16F", D3DFMT_A16B16G16R16F, 0x00181800, 0x00201000 },

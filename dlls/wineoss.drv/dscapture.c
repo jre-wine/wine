@@ -138,11 +138,11 @@ struct IDsCaptureDriverBufferImpl
     int                                 fd;
 };
 
-static HRESULT WINAPI IDsCaptureDriverPropertySetImpl_Create(
+static HRESULT IDsCaptureDriverPropertySetImpl_Create(
     IDsCaptureDriverBufferImpl * dscdb,
     IDsCaptureDriverPropertySetImpl **pdscdps);
 
-static HRESULT WINAPI IDsCaptureDriverNotifyImpl_Create(
+static HRESULT IDsCaptureDriverNotifyImpl_Create(
     IDsCaptureDriverBufferImpl * dsdcb,
     IDsCaptureDriverNotifyImpl **pdscdn);
 
@@ -317,10 +317,10 @@ static HRESULT WINAPI IDsCaptureDriverNotifyImpl_SetNotificationPositions(
     }
 
     if (TRACE_ON(dscapture)) {
-        int i;
+        DWORD i;
         for (i=0;i<howmuch;i++)
-            TRACE("notify at %d to 0x%08x\n",
-                notify[i].dwOffset,(DWORD)notify[i].hEventNotify);
+            TRACE("notify at %d to 0x%08lx\n",
+                notify[i].dwOffset,(DWORD_PTR)notify[i].hEventNotify);
     }
 
     /* Make an internal copy of the caller-supplied array.
@@ -1232,7 +1232,7 @@ static const IDsCaptureDriverVtbl dscdvt =
     IDsCaptureDriverImpl_CreateCaptureBuffer
 };
 
-static HRESULT WINAPI IDsCaptureDriverPropertySetImpl_Create(
+static HRESULT IDsCaptureDriverPropertySetImpl_Create(
     IDsCaptureDriverBufferImpl * dscdb,
     IDsCaptureDriverPropertySetImpl **pdscdps)
 {
@@ -1255,7 +1255,7 @@ static HRESULT WINAPI IDsCaptureDriverPropertySetImpl_Create(
     return DS_OK;
 }
 
-static HRESULT WINAPI IDsCaptureDriverNotifyImpl_Create(
+static HRESULT IDsCaptureDriverNotifyImpl_Create(
     IDsCaptureDriverBufferImpl * dscdb,
     IDsCaptureDriverNotifyImpl **pdscdn)
 {

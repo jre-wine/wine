@@ -81,7 +81,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3dxof);
 #define CLSIDFMT "<%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X>"
 
 #define MAX_INPUT_SIZE 2000000
-#define MAX_DATA_SIZE 200000
+#define MAX_DATA_SIZE 400000
 
 static const struct IDirectXFileVtbl IDirectXFile_Vtbl;
 static const struct IDirectXFileBinaryVtbl IDirectXFileBinary_Vtbl;
@@ -96,6 +96,8 @@ static BOOL parse_object(parse_buffer * buf);
 static const char* get_primitive_string(WORD token);
 static WORD check_TOKEN(parse_buffer * buf);
 static BOOL parse_template(parse_buffer * buf);
+static HRESULT IDirectXFileDataReferenceImpl_Create(IDirectXFileDataReferenceImpl** ppObj);
+static HRESULT IDirectXFileEnumObjectImpl_Create(IDirectXFileEnumObjectImpl** ppObj);
 
 static void dump_template(xtemplate* templates_array, xtemplate* ptemplate)
 {
@@ -498,7 +500,7 @@ static WORD get_operator_token(char c)
 static BOOL is_keyword(parse_buffer* buf, const char* keyword)
 {
   DWORD len = strlen(keyword);
-  if (!strncmp((char*)buf->buffer, keyword,len) && is_separator(*(buf->buffer+len)))
+  if (!strncasecmp((char*)buf->buffer, keyword,len) && is_separator(*(buf->buffer+len)))
   {
     buf->buffer += len;
     buf->rem_bytes -= len;
@@ -804,7 +806,7 @@ static WORD parse_TOKEN(parse_buffer * buf)
       if (!read_bytes(buf, &token, 2))
         return 0;
 
-      /* Convert integer and float list into sereparate elements */
+      /* Convert integer and float list into separate elements */
       if (token == TOKEN_INTEGER_LIST)
       {
         if (!read_bytes(buf, &nb_elem, 4))
@@ -1100,9 +1102,9 @@ static BOOL parse_template_members_list(parse_buffer * buf)
     {
       while (check_TOKEN(buf) == TOKEN_OBRACKET)
       {
-        if (nb_dims)
+        if (nb_dims >= MAX_ARRAY_DIM)
         {
-          FIXME("No support for multi-dimensional array yet\n");
+          FIXME("Too many dimensions (%d) for multi-dimensional array\n", nb_dims + 1);
           return FALSE;
         }
         get_TOKEN(buf);
@@ -1114,11 +1116,33 @@ static BOOL parse_template_members_list(parse_buffer * buf)
         }
         else
         {
+          int i;
           if (get_TOKEN(buf) != TOKEN_NAME)
             return FALSE;
+          for (i = 0; i < idx_member; i++)
+          {
+            if (!strcmp((char*)buf->value, buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates].members[i].name))
+            {
+              if (buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates].members[i].nb_dims)
+              {
+                ERR("Array cannot be used to specify variable array size\n");
+                return FALSE;
+              }
+              if (buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates].members[i].type != TOKEN_DWORD)
+              {
+                FIXME("Only DWORD supported to specify variable array size\n");
+                return FALSE;
+              }
+              break;
+            }
+          }
+          if (i == idx_member)
+          {
+            ERR("Reference to unknown member %s\n", (char*)buf->value);
+            return FALSE;
+          }
           cur_member->dim_fixed[nb_dims] = FALSE;
-          /* Hack: Assume array size is specified in previous member */
-          cur_member->dim_value[nb_dims] = idx_member - 1;
+          cur_member->dim_value[nb_dims] = i;
         }
         if (get_TOKEN(buf) != TOKEN_CBRACKET)
           return FALSE;
@@ -1155,6 +1179,40 @@ static BOOL parse_template_parts(parse_buffer * buf)
   return TRUE;
 }
 
+static void go_to_next_definition(parse_buffer * buf)
+{
+  while (buf->rem_bytes)
+  {
+    char c = *buf->buffer;
+    if ((c == '#') || (c == '/'))
+    {
+      read_bytes(buf, &c, 1);
+      /* Handle comment (# or //) */
+      if (c == '/')
+      {
+        if (!read_bytes(buf, &c, 1))
+          return;
+        if (c != '/')
+          return;
+      }
+      c = 0;
+      while (c != 0x0A)
+      {
+        if (!read_bytes(buf, &c, 1))
+          return;
+      }
+      continue;
+    }
+    else if (is_space(*buf->buffer))
+    {
+      buf->buffer++;
+      buf->rem_bytes--;
+    }
+    else
+      break;
+  }
+}
+
 static BOOL parse_template(parse_buffer * buf)
 {
   if (get_TOKEN(buf) != TOKEN_TEMPLATE)
@@ -1174,11 +1232,7 @@ static BOOL parse_template(parse_buffer * buf)
   if (buf->txt)
   {
     /* Go to the next template */
-    while (buf->rem_bytes && is_space(*buf->buffer))
-    {
-      buf->buffer++;
-      buf->rem_bytes--;
-    }
+    go_to_next_definition(buf);
   }
 
   TRACE("%d - %s - %s\n", buf->pdxf->nb_xtemplates, buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates].name, debugstr_guid(&buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates].class_id));
@@ -1283,22 +1337,6 @@ static const IDirectXFileVtbl IDirectXFile_Vtbl =
   IDirectXFileImpl_CreateSaveObject,
   IDirectXFileImpl_RegisterTemplates
 };
-
-HRESULT IDirectXFileBinaryImpl_Create(IDirectXFileBinaryImpl** ppObj)
-{
-    IDirectXFileBinaryImpl* object;
-
-    TRACE("(%p)\n", ppObj);
-      
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectXFileBinaryImpl));
-    
-    object->lpVtbl.lpVtbl = &IDirectXFileBinary_Vtbl;
-    object->ref = 1;
-
-    *ppObj = object;
-    
-    return DXFILE_OK;
-}
 
 /*** IUnknown methods ***/
 static HRESULT WINAPI IDirectXFileBinaryImpl_QueryInterface(IDirectXFileBinary* iface, REFIID riid, void** ppvObject)
@@ -1407,7 +1445,7 @@ static const IDirectXFileBinaryVtbl IDirectXFileBinary_Vtbl =
     IDirectXFileBinaryImpl_Read
 };
 
-HRESULT IDirectXFileDataImpl_Create(IDirectXFileDataImpl** ppObj)
+static HRESULT IDirectXFileDataImpl_Create(IDirectXFileDataImpl** ppObj)
 {
     IDirectXFileDataImpl* object;
 
@@ -1627,7 +1665,7 @@ static const IDirectXFileDataVtbl IDirectXFileData_Vtbl =
     IDirectXFileDataImpl_AddBinaryObject
 };
 
-HRESULT IDirectXFileDataReferenceImpl_Create(IDirectXFileDataReferenceImpl** ppObj)
+static HRESULT IDirectXFileDataReferenceImpl_Create(IDirectXFileDataReferenceImpl** ppObj)
 {
     IDirectXFileDataReferenceImpl* object;
 
@@ -1755,7 +1793,7 @@ static const IDirectXFileDataReferenceVtbl IDirectXFileDataReference_Vtbl =
     IDirectXFileDataReferenceImpl_Resolve
 };
 
-HRESULT IDirectXFileEnumObjectImpl_Create(IDirectXFileEnumObjectImpl** ppObj)
+static HRESULT IDirectXFileEnumObjectImpl_Create(IDirectXFileEnumObjectImpl** ppObj)
 {
     IDirectXFileEnumObjectImpl* object;
 
@@ -1825,31 +1863,20 @@ static BOOL parse_object_members_list(parse_buffer * buf)
 
   for (i = 0; i < pt->nb_members; i++)
   {
-    int nb_elems, k;
+    int k;
+    int nb_elems = 1;
 
-    if (pt->members[i].nb_dims > 1)
+    buf->pxo->members[i].start = buf->cur_pdata;
+
+    for (k = 0; k < pt->members[i].nb_dims; k++)
     {
-      FIXME("Arrays with dimension > 1 not yet supported\n");
-      return FALSE;
-    }
-    else if (pt->members[i].nb_dims)
-    {
-      if (!pt->members[i].dim_fixed[0])
-      {
-        if (!i)
-        {
-          FIXME("Array with variable must be preceded by the size\n");
-          return FALSE;
-        }
-        nb_elems = last_dword;
-        /*FIXME("Arrays with variable size not yet supported\n");
-        return FALSE;*/
-      }
+      if (pt->members[i].dim_fixed[k])
+        nb_elems *= pt->members[i].dim_value[k];
       else
-        nb_elems = pt->members[i].dim_value[0];
+        nb_elems *= *(DWORD*)buf->pxo->members[pt->members[i].dim_value[k]].start;
     }
-    else
-      nb_elems = 1;
+
+    TRACE("Elements to consider: %d\n", nb_elems);
 
     for (k = 0; k < nb_elems; k++)
     {
@@ -1863,7 +1890,7 @@ static BOOL parse_object_members_list(parse_buffer * buf)
         else
         {
           /* Allow comma omission */
-          if (!((token == TOKEN_FLOAT)))
+          if (!((token == TOKEN_FLOAT) || (token == TOKEN_INTEGER)))
             return FALSE;
         }
       }
@@ -1872,7 +1899,7 @@ static BOOL parse_object_members_list(parse_buffer * buf)
       {
         int j;
 
-        TRACE("Found suboject %s\n", buf->pdxf->xtemplates[pt->members[i].idx_template].name);
+        TRACE("Found sub-object %s\n", buf->pdxf->xtemplates[pt->members[i].idx_template].name);
         buf->level++;
         /* To do template lookup */
         for (j = 0; j < buf->pdxf->nb_xtemplates; j++)
@@ -1896,8 +1923,6 @@ static BOOL parse_object_members_list(parse_buffer * buf)
           return FALSE;
         }
         buf->level--;
-        /*if (get_TOKEN(buf) != TOKEN_SEMICOLON)
-          return FALSE;*/
       }
       else
       {
@@ -1987,10 +2012,10 @@ static BOOL parse_object_members_list(parse_buffer * buf)
       }
     }
 
-    if (buf->txt)
+    if (buf->txt && (check_TOKEN(buf) != TOKEN_CBRACE))
     {
       token = get_TOKEN(buf);
-      if (token != TOKEN_SEMICOLON)
+      if ((token != TOKEN_SEMICOLON) && (token != TOKEN_COMMA))
       {
         /* Allow comma instead of semicolon in some specific cases */
         if (!((token == TOKEN_COMMA) && ((i+1) < pt->nb_members) && (pt->members[i].type == pt->members[i+1].type)
@@ -2127,11 +2152,7 @@ static BOOL parse_object(parse_buffer * buf)
   if (buf->txt)
   {
     /* Go to the next object */
-    while (buf->rem_bytes && is_space(*buf->buffer))
-    {
-      buf->buffer++;
-      buf->rem_bytes--;
-    }
+    go_to_next_definition(buf);
   }
 
   return TRUE;
@@ -2241,22 +2262,6 @@ static const IDirectXFileEnumObjectVtbl IDirectXFileEnumObject_Vtbl =
     IDirectXFileEnumObjectImpl_GetDataObjectByName
 };
 
-HRESULT IDirectXFileObjectImpl_Create(IDirectXFileObjectImpl** ppObj)
-{
-    IDirectXFileObjectImpl* object;
-
-    TRACE("(%p)\n", ppObj);
-      
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectXFileObjectImpl));
-    
-    object->lpVtbl.lpVtbl = &IDirectXFileObject_Vtbl;
-    object->ref = 1;
-
-    *ppObj = object;
-    
-    return S_OK;
-}
-
 /*** IUnknown methods ***/
 static HRESULT WINAPI IDirectXFileObjectImpl_QueryInterface(IDirectXFileObject* iface, REFIID riid, void** ppvObject)
 {
@@ -2326,22 +2331,6 @@ static const IDirectXFileObjectVtbl IDirectXFileObject_Vtbl =
     IDirectXFileObjectImpl_GetName,
     IDirectXFileObjectImpl_GetId
 };
-
-HRESULT IDirectXFileSaveObjectImpl_Create(IDirectXFileSaveObjectImpl** ppObj)
-{
-    IDirectXFileSaveObjectImpl* object;
-
-    TRACE("(%p)\n", ppObj);
-
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectXFileSaveObjectImpl));
-    
-    object->lpVtbl.lpVtbl = &IDirectXFileSaveObject_Vtbl;
-    object->ref = 1;
-
-    *ppObj = object;
-    
-    return S_OK;
-}
 
 /*** IUnknown methods ***/
 static HRESULT WINAPI IDirectXFileSaveObjectImpl_QueryInterface(IDirectXFileSaveObject* iface, REFIID riid, void** ppvObject)

@@ -2737,7 +2737,7 @@ static BOOL FTP_InitListenSocket(LPWININETFTPSESSIONW lpwfs)
     lpwfs->lstnSocketAddress = lpwfs->socketAddress;
 
     /* and get the system to assign us a port */
-    lpwfs->lstnSocketAddress.sin_port = htons((u_short) 0);
+    lpwfs->lstnSocketAddress.sin_port = htons(0);
 
     if (bind(lpwfs->lstnSocket,(struct sockaddr *) &lpwfs->lstnSocketAddress, sizeof(struct sockaddr_in)) == -1)
     {
@@ -3220,7 +3220,7 @@ static void FTPFINDNEXT_Destroy(WININETHANDLEHEADER *hdr)
     HeapFree(GetProcessHeap(), 0, lpwfn);
 }
 
-static DWORD WINAPI FTPFINDNEXT_FindNextFileProc(WININETFTPFINDNEXTW *find, LPVOID data)
+static DWORD FTPFINDNEXT_FindNextFileProc(WININETFTPFINDNEXTW *find, LPVOID data)
 {
     WIN32_FIND_DATAW *find_data = data;
     DWORD res = ERROR_SUCCESS;

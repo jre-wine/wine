@@ -67,7 +67,7 @@ static void dump_uints( const int *ptr, int len )
 
 static void dump_timeout( const timeout_t *time )
 {
-    fprintf( stderr, get_timeout_str(*time) );
+    fputs( get_timeout_str(*time), stderr );
 }
 
 static void dump_file_pos( const file_pos_t *pos )
@@ -4582,6 +4582,7 @@ static const struct
     { "HANDLE_NOT_CLOSABLE",         STATUS_HANDLE_NOT_CLOSABLE },
     { "ILLEGAL_FUNCTION",            STATUS_ILLEGAL_FUNCTION },
     { "INSTANCE_NOT_AVAILABLE",      STATUS_INSTANCE_NOT_AVAILABLE },
+    { "INSUFFICIENT_RESOURCES",      STATUS_INSUFFICIENT_RESOURCES },
     { "INVALID_CID",                 STATUS_INVALID_CID },
     { "INVALID_DEVICE_REQUEST",      STATUS_INVALID_DEVICE_REQUEST },
     { "INVALID_FILE_FOR_SECTION",    STATUS_INVALID_FILE_FOR_SECTION },

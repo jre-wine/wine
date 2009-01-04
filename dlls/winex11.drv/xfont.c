@@ -3117,7 +3117,7 @@ static X_PHYSFONT XFONT_RealizeFont( LPLOGFONT16 plf,
 		    lfSub.lfCharSet = (BYTE)(charset_sub & 0xff);
 		    lfSub.lfFaceName[0] = '\0'; /* FIXME? */
 		    /* this font has sub font */
-		    if ( i == 0 ) pfo->prefobjs[0] = (X_PHYSFONT)0;
+                    if ( i == 0 ) pfo->prefobjs[0] = 0;
 		    pfo->prefobjs[i] =
 			XFONT_RealizeFont( &lfSub, &faceMatchedSub,
 					   TRUE, charset_sub,
@@ -3177,15 +3177,6 @@ fontObject* XFONT_GetFontObject( X_PHYSFONT pFont )
 XFontStruct* XFONT_GetFontStruct( X_PHYSFONT pFont )
 {
     if( CHECK_PFONT(pFont) ) return __PFONT(pFont)->fs;
-    return NULL;
-}
-
-/***********************************************************************
- *           XFONT_GetFontInfo
- */
-LPIFONTINFO16 XFONT_GetFontInfo( X_PHYSFONT pFont )
-{
-    if( CHECK_PFONT(pFont) ) return &(__PFONT(pFont)->fi->df);
     return NULL;
 }
 

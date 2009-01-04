@@ -618,7 +618,7 @@ static BOOL HTTP_DoAuthorization( LPWININETHTTPREQW lpwhr, LPCWSTR pszAuthValue,
 /***********************************************************************
  *           HTTP_HttpAddRequestHeadersW (internal)
  */
-static BOOL WINAPI HTTP_HttpAddRequestHeadersW(LPWININETHTTPREQW lpwhr,
+static BOOL HTTP_HttpAddRequestHeadersW(LPWININETHTTPREQW lpwhr,
 	LPCWSTR lpszHeader, DWORD dwHeaderLength, DWORD dwModifier)
 {
     LPWSTR lpszStart;
@@ -773,8 +773,8 @@ BOOL WINAPI HttpEndRequestA(HINTERNET hRequest,
 
     ptr = lpBuffersOut;
     if (ptr)
-        lpBuffersOutW = (LPINTERNET_BUFFERSW)HeapAlloc(GetProcessHeap(),
-                HEAP_ZERO_MEMORY, sizeof(INTERNET_BUFFERSW));
+        lpBuffersOutW = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                sizeof(INTERNET_BUFFERSW));
     else
         lpBuffersOutW = NULL;
 
@@ -1617,6 +1617,16 @@ static DWORD HTTPREQ_SetOption(WININETHANDLEHEADER *hdr, DWORD option, void *buf
 
         return NETCON_set_timeout(&req->netConnection, option == INTERNET_OPTION_SEND_TIMEOUT,
                     *(DWORD*)buffer);
+
+    case INTERNET_OPTION_USERNAME:
+        HeapFree(GetProcessHeap(), 0, req->lpHttpSession->lpszUserName);
+        if (!(req->lpHttpSession->lpszUserName = WININET_strdupW(buffer))) return ERROR_OUTOFMEMORY;
+        return ERROR_SUCCESS;
+
+    case INTERNET_OPTION_PASSWORD:
+        HeapFree(GetProcessHeap(), 0, req->lpHttpSession->lpszPassword);
+        if (!(req->lpHttpSession->lpszPassword = WININET_strdupW(buffer))) return ERROR_OUTOFMEMORY;
+        return ERROR_SUCCESS;
     }
 
     return ERROR_INTERNET_INVALID_OPTION;
@@ -2334,8 +2344,7 @@ static BOOL HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLevel,
         return bSuccess;
     }
 
-    if (lpdwIndex)
-        (*lpdwIndex)++;
+    if (lpdwIndex && level != HTTP_QUERY_STATUS_CODE) (*lpdwIndex)++;
 
     /* coalesce value to requested type */
     if (dwInfoLevel & HTTP_QUERY_FLAG_NUMBER && lpBuffer)
@@ -3509,12 +3518,14 @@ static DWORD HTTPSESSION_SetOption(WININETHANDLEHEADER *hdr, DWORD option, void 
     switch(option) {
     case INTERNET_OPTION_USERNAME:
     {
-        if (!(ses->lpszUserName = WININET_strdupW(buffer))) break;
+        HeapFree(GetProcessHeap(), 0, ses->lpszUserName);
+        if (!(ses->lpszUserName = WININET_strdupW(buffer))) return ERROR_OUTOFMEMORY;
         return ERROR_SUCCESS;
     }
     case INTERNET_OPTION_PASSWORD:
     {
-        if (!(ses->lpszPassword = WININET_strdupW(buffer))) break;
+        HeapFree(GetProcessHeap(), 0, ses->lpszPassword);
+        if (!(ses->lpszPassword = WININET_strdupW(buffer))) return ERROR_OUTOFMEMORY;
         return ERROR_SUCCESS;
     }
     default: break;

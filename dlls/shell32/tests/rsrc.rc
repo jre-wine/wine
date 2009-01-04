@@ -1,7 +1,6 @@
-/*
- * RPCSS definitions
+/* String resource for shlfolder test.
  *
- * Copyright (C) 2002 Greg Turner
+ * Copyright 2008 Vincent Povirk for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,9 +17,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __WINE_RPCSS_H
-#define __WINE_RPCSS_H
+#include "windef.h"
+#include "winuser.h"
 
-#include "windows.h"
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 
-#endif /* __WINE_RPCSS_H */
+STRINGTABLE
+{
+  1 "Folder Name Resource"
+}

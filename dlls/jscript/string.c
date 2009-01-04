@@ -123,6 +123,33 @@ static HRESULT String_valueOf(DispatchEx *dispex, LCID lcid, WORD flags, DISPPAR
     return String_toString(dispex, lcid, flags, dp, retv, ei, sp);
 }
 
+static HRESULT do_attributeless_tag_format(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
+        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp, const WCHAR *tagname)
+{
+    static const WCHAR tagfmt[] = {'<','%','s','>','%','s','<','/','%','s','>',0};
+    StringInstance *string;
+    BSTR ret;
+
+    if(!is_class(dispex, JSCLASS_STRING)) {
+        WARN("this is not a string object\n");
+        return E_NOTIMPL;
+    }
+
+    string = (StringInstance*)dispex;
+
+    if(retv) {
+        ret = SysAllocStringLen(NULL, string->length + 2*strlenW(tagname) + 5);
+        if(!ret)
+            return E_OUTOFMEMORY;
+
+        sprintfW(ret, tagfmt, tagname, string->str, tagname);
+
+        V_VT(retv) = VT_BSTR;
+        V_BSTR(retv) = ret;
+    }
+    return S_OK;
+}
+
 static HRESULT String_anchor(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
@@ -133,22 +160,22 @@ static HRESULT String_anchor(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARA
 static HRESULT String_big(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    static const WCHAR bigtagW[] = {'B','I','G',0};
+    return do_attributeless_tag_format(dispex, lcid, flags, dp, retv, ei, sp, bigtagW);
 }
 
 static HRESULT String_blink(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    static const WCHAR blinktagW[] = {'B','L','I','N','K',0};
+    return do_attributeless_tag_format(dispex, lcid, flags, dp, retv, ei, sp, blinktagW);
 }
 
 static HRESULT String_bold(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    static const WCHAR boldtagW[] = {'B',0};
+    return do_attributeless_tag_format(dispex, lcid, flags, dp, retv, ei, sp, boldtagW);
 }
 
 /* ECMA-262 3rd Edition    15.5.4.5 */
@@ -302,8 +329,8 @@ static HRESULT String_concat(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARA
 static HRESULT String_fixed(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    static const WCHAR fixedtagW[] = {'T','T',0};
+    return do_attributeless_tag_format(dispex, lcid, flags, dp, retv, ei, sp, fixedtagW);
 }
 
 static HRESULT String_fontcolor(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
@@ -391,8 +418,8 @@ static HRESULT String_indexOf(DispatchEx *dispex, LCID lcid, WORD flags, DISPPAR
 static HRESULT String_italics(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    static const WCHAR italicstagW[] = {'I',0};
+    return do_attributeless_tag_format(dispex, lcid, flags, dp, retv, ei, sp, italicstagW);
 }
 
 static HRESULT String_lastIndexOf(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
@@ -839,8 +866,8 @@ static HRESULT String_slice(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAM
 static HRESULT String_small(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    static const WCHAR smalltagW[] = {'S','M','A','L','L',0};
+    return do_attributeless_tag_format(dispex, lcid, flags, dp, retv, ei, sp, smalltagW);
 }
 
 static HRESULT String_split(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
@@ -970,8 +997,8 @@ static HRESULT String_split(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAM
 static HRESULT String_strike(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    static const WCHAR striketagW[] = {'S','T','R','I','K','E',0};
+    return do_attributeless_tag_format(dispex, lcid, flags, dp, retv, ei, sp, striketagW);
 }
 
 static HRESULT String_sub(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
@@ -1069,15 +1096,67 @@ static HRESULT String_sup(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS 
 static HRESULT String_toLowerCase(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    StringInstance *string;
+    const WCHAR* str;
+    DWORD length;
+    BSTR bstr;
+
+    TRACE("\n");
+
+    if(is_class(dispex, JSCLASS_STRING)) {
+        string = (StringInstance*)dispex;
+
+        length = string->length;
+        str = string->str;
+    }else {
+        FIXME("not string this not supported\n");
+        return E_NOTIMPL;
+    }
+
+    if(retv) {
+        bstr = SysAllocStringLen(str, length);
+        if (!bstr)
+            return E_OUTOFMEMORY;
+
+        strlwrW(bstr);
+
+        V_VT(retv) = VT_BSTR;
+        V_BSTR(retv) = bstr;
+    }
+    return S_OK;
 }
 
 static HRESULT String_toUpperCase(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    StringInstance *string;
+    const WCHAR* str;
+    DWORD length;
+    BSTR bstr;
+
+    TRACE("\n");
+
+    if(is_class(dispex, JSCLASS_STRING)) {
+        string = (StringInstance*)dispex;
+
+        length = string->length;
+        str = string->str;
+    }else {
+        FIXME("not string this not supported\n");
+        return E_NOTIMPL;
+    }
+
+    if(retv) {
+        bstr = SysAllocStringLen(str, length);
+        if (!bstr)
+            return E_OUTOFMEMORY;
+
+        struprW(bstr);
+
+        V_VT(retv) = VT_BSTR;
+        V_BSTR(retv) = bstr;
+    }
+    return S_OK;
 }
 
 static HRESULT String_toLocaleLowerCase(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,

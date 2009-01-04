@@ -247,6 +247,91 @@ ok(tmp === 1, "indexOf = " + tmp);
 tmp = "abcd".indexOf();
 ok(tmp == -1, "indexOf = " + tmp);
 
+tmp = "".toLowerCase();
+ok(tmp === "", "''.toLowerCase() = " + tmp);
+tmp = "test".toLowerCase();
+ok(tmp === "test", "''.toLowerCase() = " + tmp);
+tmp = "test".toLowerCase(3);
+ok(tmp === "test", "''.toLowerCase(3) = " + tmp);
+tmp = "tEsT".toLowerCase();
+ok(tmp === "test", "''.toLowerCase() = " + tmp);
+tmp = "tEsT".toLowerCase(3);
+ok(tmp === "test", "''.toLowerCase(3) = " + tmp);
+
+tmp = "".toUpperCase();
+ok(tmp === "", "''.toUpperCase() = " + tmp);
+tmp = "TEST".toUpperCase();
+ok(tmp === "TEST", "''.toUpperCase() = " + tmp);
+tmp = "TEST".toUpperCase(3);
+ok(tmp === "TEST", "''.toUpperCase(3) = " + tmp);
+tmp = "tEsT".toUpperCase();
+ok(tmp === "TEST", "''.toUpperCase() = " + tmp);
+tmp = "tEsT".toUpperCase(3);
+ok(tmp === "TEST", "''.toUpperCase(3) = " + tmp);
+
+tmp = "".big();
+ok(tmp === "<BIG></BIG>", "''.big() = " + tmp);
+tmp = "".big(3);
+ok(tmp === "<BIG></BIG>", "''.big(3) = " + tmp);
+tmp = "test".big();
+ok(tmp === "<BIG>test</BIG>", "'test'.big() = " + tmp);
+tmp = "test".big(3);
+ok(tmp === "<BIG>test</BIG>", "'test'.big(3) = " + tmp);
+
+tmp = "".blink();
+ok(tmp === "<BLINK></BLINK>", "''.blink() = " + tmp);
+tmp = "".blink(3);
+ok(tmp === "<BLINK></BLINK>", "''.blink(3) = " + tmp);
+tmp = "test".blink();
+ok(tmp === "<BLINK>test</BLINK>", "'test'.blink() = " + tmp);
+tmp = "test".blink(3);
+ok(tmp === "<BLINK>test</BLINK>", "'test'.blink(3) = " + tmp);
+
+tmp = "".bold();
+ok(tmp === "<B></B>", "''.bold() = " + tmp);
+tmp = "".bold(3);
+ok(tmp === "<B></B>", "''.bold(3) = " + tmp);
+tmp = "test".bold();
+ok(tmp === "<B>test</B>", "'test'.bold() = " + tmp);
+tmp = "test".bold(3);
+ok(tmp === "<B>test</B>", "'test'.bold(3) = " + tmp);
+
+tmp = "".fixed();
+ok(tmp === "<TT></TT>", "''.fixed() = " + tmp);
+tmp = "".fixed(3);
+ok(tmp === "<TT></TT>", "''.fixed(3) = " + tmp);
+tmp = "test".fixed();
+ok(tmp === "<TT>test</TT>", "'test'.fixed() = " + tmp);
+tmp = "test".fixed(3);
+ok(tmp === "<TT>test</TT>", "'test'.fixed(3) = " + tmp);
+
+tmp = "".italics();
+ok(tmp === "<I></I>", "''.italics() = " + tmp);
+tmp = "".italics(3);
+ok(tmp === "<I></I>", "''.italics(3) = " + tmp);
+tmp = "test".italics();
+ok(tmp === "<I>test</I>", "'test'.italics() = " + tmp);
+tmp = "test".italics(3);
+ok(tmp === "<I>test</I>", "'test'.italics(3) = " + tmp);
+
+tmp = "".small();
+ok(tmp === "<SMALL></SMALL>", "''.small() = " + tmp);
+tmp = "".small(3);
+ok(tmp === "<SMALL></SMALL>", "''.small(3) = " + tmp);
+tmp = "test".small();
+ok(tmp === "<SMALL>test</SMALL>", "'test'.small() = " + tmp);
+tmp = "test".small(3);
+ok(tmp === "<SMALL>test</SMALL>", "'test'.small(3) = " + tmp);
+
+tmp = "".strike();
+ok(tmp === "<STRIKE></STRIKE>", "''.strike() = " + tmp);
+tmp = "".strike(3);
+ok(tmp === "<STRIKE></STRIKE>", "''.strike(3) = " + tmp);
+tmp = "test".strike();
+ok(tmp === "<STRIKE>test</STRIKE>", "'test'.strike() = " + tmp);
+tmp = "test".strike(3);
+ok(tmp === "<STRIKE>test</STRIKE>", "'test'.strike(3) = " + tmp);
+
 var arr = new Array();
 ok(typeof(arr) === "object", "arr () is not object");
 ok((arr.length === 0), "arr.length is not 0");

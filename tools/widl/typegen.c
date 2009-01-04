@@ -1864,8 +1864,9 @@ static size_t write_struct_tfs(FILE *file, type_t *type,
            nothing is written to file yet.  On the actual writing pass,
            this will have been updated.  */
         unsigned int absoff = type->ptrdesc ? type->ptrdesc : *tfsoff;
-        short reloff = absoff - *tfsoff;
-        print_file(file, 2, "NdrFcShort(0x%hx),\t/* Offset= %hd (%u) */\n",
+        int reloff = absoff - *tfsoff;
+        assert( reloff >= 0 );
+        print_file(file, 2, "NdrFcShort(0x%x),\t/* Offset= %d (%u) */\n",
                    reloff, reloff, absoff);
         *tfsoff += 2;
     }
@@ -2254,6 +2255,8 @@ static size_t write_typeformatstring_var(FILE *file, int indent, const func_t *f
         if (is_base_type(type->type))
             return 0;
 
+        if (processed(type)) return type->typestring_offset;
+
         switch (type->type)
         {
         case RPC_FC_STRUCT:
@@ -2505,19 +2508,8 @@ static unsigned int get_required_buffer_size_type(
             return 0;
 
         case RPC_FC_STRUCT:
-        case RPC_FC_PSTRUCT:
-        {
-            size_t size = 0;
-            const var_t *field;
             if (!type->fields_or_args) return 0;
-            LIST_FOR_EACH_ENTRY( field, type->fields_or_args, const var_t, entry )
-            {
-                unsigned int alignment;
-                size += get_required_buffer_size_type(field->type, field->name,
-                                                      &alignment);
-            }
-            return size;
-        }
+            return fields_memsize(type->fields_or_args, alignment);
 
         case RPC_FC_RP:
             return
@@ -2539,75 +2531,26 @@ static unsigned int get_required_buffer_size(const var_t *var, unsigned int *ali
 {
     int in_attr = is_attr(var->attrs, ATTR_IN);
     int out_attr = is_attr(var->attrs, ATTR_OUT);
-    const type_t *t;
 
     if (!in_attr && !out_attr)
         in_attr = 1;
 
     *alignment = 0;
 
-    for (t = var->type; is_ptr(t); t = t->ref)
-        if (is_attr(t->attrs, ATTR_CONTEXTHANDLE))
+    if ((pass == PASS_IN && in_attr) || (pass == PASS_OUT && out_attr) ||
+        pass == PASS_RETURN)
+    {
+        if (is_ptrchain_attr(var, ATTR_CONTEXTHANDLE))
         {
             *alignment = 4;
             return 20;
         }
 
-    if (pass == PASS_OUT)
-    {
-        if (out_attr && is_ptr(var->type))
-        {
-            type_t *type = var->type;
-
-            if (type->type == RPC_FC_STRUCT)
-            {
-                const var_t *field;
-                unsigned int size = 36;
-
-                if (!type->fields_or_args) return size;
-                LIST_FOR_EACH_ENTRY( field, type->fields_or_args, const var_t, entry )
-                {
-                    unsigned int align;
-                    size += get_required_buffer_size_type(
-                        field->type, field->name, &align);
-                }
-                return size;
-            }
-        }
-        return 0;
+        if (!is_string_type(var->attrs, var->type))
+            return get_required_buffer_size_type(var->type, var->name,
+                                                 alignment);
     }
-    else
-    {
-        if ((!out_attr || in_attr) && !var->type->size_is
-            && !is_attr(var->attrs, ATTR_STRING) && !var->type->declarray)
-        {
-            if (is_ptr(var->type))
-            {
-                type_t *type = var->type;
-
-                if (is_base_type(type->type))
-                {
-                    return 25;
-                }
-                else if (type->type == RPC_FC_STRUCT)
-                {
-                    unsigned int size = 36;
-                    const var_t *field;
-
-                    if (!type->fields_or_args) return size;
-                    LIST_FOR_EACH_ENTRY( field, type->fields_or_args, const var_t, entry )
-                    {
-                        unsigned int align;
-                        size += get_required_buffer_size_type(
-                            field->type, field->name, &align);
-                    }
-                    return size;
-                }
-            }
-        }
-
-        return get_required_buffer_size_type(var->type, var->name, alignment);
-    }
+    return 0;
 }
 
 static unsigned int get_function_buffer_size( const func_t *func, enum pass pass )
@@ -2770,7 +2713,7 @@ void print_phase_basetype(FILE *file, int indent, const char *local_var_prefix,
     }
 
     print_file(file, indent, "__frame->_StubMsg.Buffer += sizeof(");
-    write_type_decl(file, var->type, NULL);
+    write_type_decl(file, is_ptr(type) ? type->ref : type, NULL);
     fprintf(file, ");\n");
 }
 
@@ -3020,47 +2963,29 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func, const
         case RPC_FC_BOGUS_STRUCT:
             print_phase_function(file, indent, "ComplexStruct", local_var_prefix, phase, var, start_offset);
             break;
-        case RPC_FC_RP:
-            if (is_base_type( var->type->ref->type ))
-            {
-                print_phase_basetype(file, indent, local_var_prefix, phase, pass, var, var->name);
-            }
-            else if (var->type->ref->type == RPC_FC_STRUCT)
-            {
-                if (phase != PHASE_BUFFERSIZE && phase != PHASE_FREE)
-                    print_phase_function(file, indent, local_var_prefix, "SimpleStruct", phase, var, start_offset + 4);
-            }
-            else
-            {
-                expr_t *iid;
-                if ((iid = get_attrp( var->attrs, ATTR_IIDIS )))
-                {
-                    print_file( file, indent, "__frame->_StubMsg.MaxCount = (unsigned long) " );
-                    write_expr( file, iid, 1, 1, NULL, NULL, local_var_prefix );
-                    fprintf( file, ";\n\n" );
-                }
-                print_phase_function(file, indent, "Pointer", local_var_prefix, phase, var, start_offset);
-            }
-            break;
         default:
             error("write_remoting_arguments: Unsupported type: %s (0x%02x)\n", var->name, rtype);
         }
     }
     else
     {
-        if (last_ptr(var->type) && (pointer_type == RPC_FC_RP) && is_base_type(rtype))
+        const type_t *ref = type->ref;
+        if (type->type == RPC_FC_RP && is_base_type(ref->type))
         {
             if (phase != PHASE_FREE)
                 print_phase_basetype(file, indent, local_var_prefix, phase, pass, var, var->name);
         }
-        else if (last_ptr(var->type) && (pointer_type == RPC_FC_RP) && (rtype == RPC_FC_STRUCT))
+        else if (type->type == RPC_FC_RP && ref->type == RPC_FC_STRUCT &&
+                 !is_user_type(ref))
         {
             if (phase != PHASE_BUFFERSIZE && phase != PHASE_FREE)
-                print_phase_function(file, indent, "SimpleStruct", local_var_prefix, phase, var, start_offset + 4);
+                print_phase_function(file, indent, "SimpleStruct",
+                                     local_var_prefix, phase, var,
+                                     ref->typestring_offset);
         }
         else
         {
-            if (var->type->ref->type == RPC_FC_IP)
+            if (ref->type == RPC_FC_IP)
                 print_phase_function(file, indent, "InterfacePointer", local_var_prefix, phase, var, start_offset);
             else
                 print_phase_function(file, indent, "Pointer", local_var_prefix, phase, var, start_offset);

@@ -505,7 +505,7 @@ static void GenerateIMECHARMessages(HIMC hIMC, LPWSTR String, DWORD length)
 {
     LPINPUTCONTEXT lpIMC;
     LPTRANSMSG lpTransMsg;
-    INT i;
+    DWORD i;
 
     if (length <= 0)
         return;
@@ -983,22 +983,6 @@ void IME_SetOpenStatus(BOOL fOpen)
 
     if (!myPrivate->bInternalState && fOpen == TRUE)
         ImmSetOpenStatus(RealIMC(FROM_X11), fOpen);
-}
-
-LRESULT IME_SendMessageToSelectedHWND(UINT msg, WPARAM wParam, LPARAM lParam)
-{
-    LPINPUTCONTEXT lpIMC;
-    LRESULT rc = 0;
-
-    if (!hSelectedFrom)
-        return rc;
-
-    lpIMC = LockRealIMC(FROM_X11);
-    if (lpIMC)
-        rc = SendMessageW(lpIMC->hWnd,msg,wParam,lParam);
-
-    UnlockRealIMC(FROM_X11);
-    return rc;
 }
 
 INT IME_GetCursorPos(void)

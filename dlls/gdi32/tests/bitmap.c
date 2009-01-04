@@ -1956,11 +1956,17 @@ static void test_CreateBitmap(void)
         bmp.bmPlanes = 1;
         bmp.bmBitsPixel = i;
         bmp.bmBits = NULL;
+        SetLastError(0xdeadbeef);
         bm = CreateBitmapIndirect(&bmp);
         if(i > 32) {
             DWORD error = GetLastError();
-            ok(bm == 0, "CreateBitmapIndirect for %d bpp succeeded\n", i);
-            ok(error == ERROR_INVALID_PARAMETER, "Got error %d, expected ERROR_INVALID_PARAMETER\n", error);
+            ok(bm == 0 ||
+               broken(bm != 0), /* Win9x and WinMe */
+               "CreateBitmapIndirect for %d bpp succeeded\n", i);
+            ok(error == ERROR_INVALID_PARAMETER ||
+               broken(error == 0xdeadbeef), /* Win9x and WinME */
+               "Got error %d, expected ERROR_INVALID_PARAMETER\n", error);
+            DeleteObject(bm);
             continue;
         }
         ok(bm != 0, "CreateBitmapIndirect error %u\n", GetLastError());
@@ -1978,7 +1984,9 @@ static void test_CreateBitmap(void)
         } else if(i <= 32) {
             expect = 32;
         }
-        ok(bmp.bmBitsPixel == expect, "CreateBitmapIndirect for a %d bpp bitmap created a %d bpp bitmap, expected %d\n",
+        ok(bmp.bmBitsPixel == expect ||
+           broken(bmp.bmBitsPixel == i), /* Win9x and WinMe */
+           "CreateBitmapIndirect for a %d bpp bitmap created a %d bpp bitmap, expected %d\n",
            i, bmp.bmBitsPixel, expect);
         DeleteObject(bm);
     }
@@ -2013,21 +2021,27 @@ static void test_bitmapinfoheadersize(void)
 
     SetLastError(0xdeadbeef);
     hdib = CreateDIBSection(hdc, &bmi, 0, NULL, NULL, 0);
-    ok(hdib != NULL, "CreateDIBSection error %d\n", GetLastError());
+    ok(hdib != NULL ||
+       broken(!hdib), /* Win98, WinMe */
+       "CreateDIBSection error %d\n", GetLastError());
     DeleteObject(hdib);
 
     bmi.bmiHeader.biSize = sizeof(BITMAPINFO);
 
     SetLastError(0xdeadbeef);
     hdib = CreateDIBSection(hdc, &bmi, 0, NULL, NULL, 0);
-    ok(hdib != NULL, "CreateDIBSection error %d\n", GetLastError());
+    ok(hdib != NULL ||
+       broken(!hdib), /* Win98, WinMe */
+       "CreateDIBSection error %d\n", GetLastError());
     DeleteObject(hdib);
 
     bmi.bmiHeader.biSize++;
 
     SetLastError(0xdeadbeef);
     hdib = CreateDIBSection(hdc, &bmi, 0, NULL, NULL, 0);
-    ok(hdib != NULL, "CreateDIBSection error %d\n", GetLastError());
+    ok(hdib != NULL ||
+       broken(!hdib), /* Win98, WinMe */
+       "CreateDIBSection error %d\n", GetLastError());
     DeleteObject(hdib);
 
     bmi.bmiHeader.biSize = sizeof(BITMAPV4HEADER);
@@ -2041,7 +2055,9 @@ static void test_bitmapinfoheadersize(void)
 
     SetLastError(0xdeadbeef);
     hdib = CreateDIBSection(hdc, &bmi, 0, NULL, NULL, 0);
-    ok(hdib != NULL, "CreateDIBSection error %d\n", GetLastError());
+    ok(hdib != NULL ||
+       broken(!hdib), /* Win95 */
+       "CreateDIBSection error %d\n", GetLastError());
     DeleteObject(hdib);
 
     memset(&bci, 0, sizeof(BITMAPCOREINFO));
@@ -2212,11 +2228,11 @@ static void test_clipping(void)
 
     bmpDst = CreateDIBSection( hdcDst, &bmpinfo, DIB_RGB_COLORS, &bits, NULL, 0 );
     ok(bmpDst != NULL, "Couldn't create destination bitmap\n");
-    oldDst = (HBITMAP)SelectObject( hdcDst, bmpDst );
+    oldDst = SelectObject( hdcDst, bmpDst );
 
     bmpSrc = CreateDIBSection( hdcSrc, &bmpinfo, DIB_RGB_COLORS, &bits, NULL, 0 );
     ok(bmpSrc != NULL, "Couldn't create source bitmap\n");
-    oldSrc = (HBITMAP)SelectObject( hdcSrc, bmpSrc );
+    oldSrc = SelectObject( hdcSrc, bmpSrc );
 
     result = BitBlt( hdcDst, 0, 0, 100, 100, hdcSrc, 100, 100, SRCCOPY );
     ok(result, "BitBlt failed\n");

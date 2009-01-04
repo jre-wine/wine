@@ -35,7 +35,7 @@
 
 #include "ddcomimpl.h"
 
-#include "wine/wined3d_interface.h"
+#include "wine/wined3d.h"
 #include "wine/list.h"
 
 /*****************************************************************************
@@ -633,7 +633,6 @@ const IDirect3DVertexBufferVtbl IDirect3DVertexBuffer1_Vtbl;
 void PixelFormat_WineD3DtoDD(DDPIXELFORMAT *DDPixelFormat, WINED3DFORMAT WineD3DFormat);
 WINED3DFORMAT PixelFormat_DD2WineD3D(const DDPIXELFORMAT *DDPixelFormat);
 void DDRAW_dump_surface_desc(const DDSURFACEDESC2 *lpddsd);
-void DDRAW_dump_pixelformat(const DDPIXELFORMAT *PixelFormat);
 void dump_D3DMATRIX(const D3DMATRIX *mat);
 void DDRAW_dump_DDCAPS(const DDCAPS *lpcaps);
 DWORD get_flexible_vertex_size(DWORD d3dvtVertexType);

@@ -97,6 +97,12 @@ HRESULT WINAPI CreateDXGIFactory(REFIID riid, void **factory)
 
     EnterCriticalSection(&dxgi_cs);
     object->wined3d = WineDirect3DCreate(10, (IUnknown *)object);
+    if(!object->wined3d)
+    {
+        hr = DXGI_ERROR_UNSUPPORTED;
+        LeaveCriticalSection(&dxgi_cs);
+        goto fail;
+    }
 
     object->adapter_count = IWineD3D_GetAdapterCount(object->wined3d);
     LeaveCriticalSection(&dxgi_cs);
@@ -110,7 +116,7 @@ HRESULT WINAPI CreateDXGIFactory(REFIID riid, void **factory)
 
     for (i = 0; i < object->adapter_count; ++i)
     {
-        struct dxgi_adapter *adapter = HeapAlloc(GetProcessHeap(), 0, sizeof(**object->adapters));
+        struct dxgi_adapter *adapter = HeapAlloc(GetProcessHeap(), 0, sizeof(*adapter));
         if (!adapter)
         {
             UINT j;

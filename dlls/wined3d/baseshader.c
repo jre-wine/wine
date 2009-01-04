@@ -29,8 +29,11 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_shader);
+WINE_DECLARE_DEBUG_CHANNEL(d3d);
 
 #define GLNAME_REQUIRE_GLSL  ((const char *)1)
+
+static void shader_dump_param(const DWORD param, const DWORD addr_token, int input, DWORD shader_version);
 
 static inline BOOL shader_is_version_token(DWORD token) {
     return shader_is_pshader_version(token) ||
@@ -73,38 +76,33 @@ int shader_addline(
     return 0;
 }
 
-const SHADER_OPCODE* shader_get_opcode(
-    IWineD3DBaseShader *iface, const DWORD code) {
-
-    IWineD3DBaseShaderImpl *This = (IWineD3DBaseShaderImpl*) iface;
-
+const SHADER_OPCODE *shader_get_opcode(const SHADER_OPCODE *opcode_table, DWORD shader_version, DWORD code)
+{
     DWORD i = 0;
-    DWORD hex_version = This->baseShader.hex_version;
-    const SHADER_OPCODE *shader_ins = This->baseShader.shader_ins;
 
     /** TODO: use dichotomic search */
-    while (NULL != shader_ins[i].name) {
-        if (((code & WINED3DSI_OPCODE_MASK) == shader_ins[i].opcode) &&
-            (((hex_version >= shader_ins[i].min_version) && (hex_version <= shader_ins[i].max_version)) ||
-            ((shader_ins[i].min_version == 0) && (shader_ins[i].max_version == 0)))) {
-            return &shader_ins[i];
+    while (opcode_table[i].name)
+    {
+        if ((code & WINED3DSI_OPCODE_MASK) == opcode_table[i].opcode
+                && shader_version >= opcode_table[i].min_version
+                && (!opcode_table[i].max_version || shader_version <= opcode_table[i].max_version))
+        {
+            return &opcode_table[i];
         }
         ++i;
     }
-    FIXME("Unsupported opcode %#x(%d) masked %#x, shader version %#x\n", 
-       code, code, code & WINED3DSI_OPCODE_MASK, hex_version);
+
+    FIXME("Unsupported opcode %#x(%d) masked %#x, shader version %#x\n",
+            code, code, code & WINED3DSI_OPCODE_MASK, shader_version);
+
     return NULL;
 }
 
 /* Read a parameter opcode from the input stream,
  * and possibly a relative addressing token.
  * Return the number of tokens read */
-int shader_get_param(
-    IWineD3DBaseShader* iface,
-    const DWORD* pToken,
-    DWORD* param,
-    DWORD* addr_token) {
-
+static int shader_get_param(IWineD3DBaseShader *iface, const DWORD *pToken, DWORD *param, DWORD *addr_token)
+{
     /* PS >= 3.0 have relative addressing (with token)
      * VS >= 2.0 have relative addressing (with token)
      * VS >= 1.0 < 2.0 have relative addressing (without token)
@@ -139,11 +137,9 @@ static inline int shader_skip_opcode(
  * Note: This function assumes source or destination token format.
  * It will not work with specially-formatted tokens like DEF or DCL, 
  * but hopefully those would be recognized */
-
-int shader_skip_unrecognized(
-    IWineD3DBaseShader* iface,
-    const DWORD* pToken) {
-
+static int shader_skip_unrecognized(IWineD3DBaseShader *iface, const DWORD *pToken)
+{
+    DWORD shader_version = ((IWineD3DBaseShaderImpl *)iface)->baseShader.hex_version;
     int tokens_read = 0;
     int i = 0;
 
@@ -156,7 +152,7 @@ int shader_skip_unrecognized(
 
         FIXME("Unrecognized opcode param: token=0x%08x "
             "addr_token=0x%08x name=", param, addr_token);
-        shader_dump_param(iface, param, addr_token, i);
+        shader_dump_param(param, addr_token, i, shader_version);
         FIXME("\n");
         ++i;
     }
@@ -165,9 +161,8 @@ int shader_skip_unrecognized(
 
 /* Convert floating point offset relative
  * to a register file to an absolute offset for float constants */
-
-unsigned int shader_get_float_offset(const DWORD reg) {
-
+static unsigned int shader_get_float_offset(const DWORD reg)
+{
      unsigned int regnum = reg & WINED3DSP_REGNUM_MASK;
      int regtype = shader_get_regtype(reg);
 
@@ -208,6 +203,8 @@ HRESULT shader_get_registers_used(
     IWineD3DStateBlockImpl *stateBlock) {
 
     IWineD3DBaseShaderImpl* This = (IWineD3DBaseShaderImpl*) iface;
+    const SHADER_OPCODE *shader_ins = This->baseShader.shader_ins;
+    DWORD shader_version = This->baseShader.hex_version;
     unsigned int cur_loop_depth = 0, max_loop_depth = 0;
 
     /* There are some minor differences between pixel and vertex shaders */
@@ -245,7 +242,7 @@ HRESULT shader_get_registers_used(
 
         /* Fetch opcode */
         opcode_token = *pToken++;
-        curOpcode = shader_get_opcode(iface, opcode_token);
+        curOpcode = shader_get_opcode(shader_ins, shader_version, opcode_token);
 
         /* Unhandled opcode, and its parameters */
         if (NULL == curOpcode) {
@@ -495,11 +492,8 @@ HRESULT shader_get_registers_used(
     return WINED3D_OK;
 }
 
-static void shader_dump_decl_usage(
-    IWineD3DBaseShaderImpl* This,
-    DWORD decl, 
-    DWORD param) {
-
+static void shader_dump_decl_usage(DWORD decl, DWORD param, DWORD shader_version)
+{
     DWORD regtype = shader_get_regtype(param);
 
     TRACE("dcl");
@@ -520,8 +514,7 @@ static void shader_dump_decl_usage(
         DWORD idx = (decl & WINED3DSP_DCL_USAGEINDEX_MASK) >> WINED3DSP_DCL_USAGEINDEX_SHIFT;
 
         /* Pixel shaders 3.0 don't have usage semantics */
-        char pshader = shader_is_pshader_version(This->baseShader.hex_version);
-        if (pshader && This->baseShader.hex_version < WINED3DPS_VERSION(3,0))
+        if (shader_is_pshader_version(shader_version) && shader_version < WINED3DPS_VERSION(3,0))
             return;
         else
             TRACE("_");
@@ -579,20 +572,16 @@ static void shader_dump_decl_usage(
     }
 }
 
-static void shader_dump_arr_entry(
-    IWineD3DBaseShader *iface,
-    const DWORD param,
-    const DWORD addr_token,
-    unsigned int reg,
-    int input) {
-
+static void shader_dump_arr_entry(const DWORD param, const DWORD addr_token,
+        unsigned int reg, int input, DWORD shader_version)
+{
     char relative =
         ((param & WINED3DSHADER_ADDRESSMODE_MASK) == WINED3DSHADER_ADDRMODE_RELATIVE);
 
     if (relative) {
         TRACE("[");
         if (addr_token)
-            shader_dump_param(iface, addr_token, 0, input);
+            shader_dump_param(addr_token, 0, input, shader_version);
         else
             TRACE("a0.x");
         TRACE(" + ");
@@ -602,13 +591,8 @@ static void shader_dump_arr_entry(
          TRACE("]");
 }
 
-void shader_dump_param(
-    IWineD3DBaseShader *iface,
-    const DWORD param, 
-    const DWORD addr_token,
-    int input) {
-
-    IWineD3DBaseShaderImpl* This = (IWineD3DBaseShaderImpl*) iface;
+static void shader_dump_param(const DWORD param, const DWORD addr_token, int input, DWORD shader_version)
+{
     static const char * const rastout_reg_names[] = { "oPos", "oFog", "oPts" };
     static const char * const misctype_reg_names[] = { "vPos", "vFace"};
     char swizzle_reg_chars[4];
@@ -618,7 +602,7 @@ void shader_dump_param(
     DWORD modifier = param & WINED3DSP_SRCMOD_MASK;
 
     /* There are some minor differences between pixel and vertex shaders */
-    char pshader = shader_is_pshader_version(This->baseShader.hex_version);
+    char pshader = shader_is_pshader_version(shader_version);
 
     /* For one, we'd prefer color components to be shown for pshaders.
      * FIXME: use the swizzle function for this */
@@ -650,14 +634,14 @@ void shader_dump_param(
             break;
         case WINED3DSPR_INPUT:
             TRACE("v");
-            shader_dump_arr_entry(iface, param, addr_token, reg, input);
+            shader_dump_arr_entry(param, addr_token, reg, input, shader_version);
             break;
         case WINED3DSPR_CONST:
         case WINED3DSPR_CONST2:
         case WINED3DSPR_CONST3:
         case WINED3DSPR_CONST4:
             TRACE("c");
-            shader_dump_arr_entry(iface, param, addr_token, shader_get_float_offset(param), input);
+            shader_dump_arr_entry(param, addr_token, shader_get_float_offset(param), input, shader_version);
             break;
         case WINED3DSPR_TEXTURE: /* vs: case D3DSPR_ADDR */
             TRACE("%c%u", (pshader? 't':'a'), reg);
@@ -679,20 +663,20 @@ void shader_dump_param(
             /* Vertex shaders >= 3.0 use general purpose output registers
              * (WINED3DSPR_OUTPUT), which can include an address token */
 
-            if (WINED3DSHADER_VERSION_MAJOR(This->baseShader.hex_version) >= 3) {
+            if (WINED3DSHADER_VERSION_MAJOR(shader_version) >= 3) {
                 TRACE("o");
-                shader_dump_arr_entry(iface, param, addr_token, reg, input);
+                shader_dump_arr_entry(param, addr_token, reg, input, shader_version);
             }
             else 
                TRACE("oT%u", reg);
             break;
         case WINED3DSPR_CONSTINT:
             TRACE("i");
-            shader_dump_arr_entry(iface, param, addr_token, reg, input);
+            shader_dump_arr_entry(param, addr_token, reg, input, shader_version);
             break;
         case WINED3DSPR_CONSTBOOL:
             TRACE("b");
-            shader_dump_arr_entry(iface, param, addr_token, reg, input);
+            shader_dump_arr_entry(param, addr_token, reg, input, shader_version);
             break;
         case WINED3DSPR_LABEL:
             TRACE("l%u", reg);
@@ -778,19 +762,79 @@ void shader_dump_param(
     }
 }
 
+static void shader_color_correction(IWineD3DBaseShaderImpl *shader,
+        IWineD3DDeviceImpl *device, const struct SHADER_OPCODE_ARG *arg)
+{
+    DWORD hex_version = shader->baseShader.hex_version;
+    IWineD3DBaseTextureImpl *texture;
+    struct color_fixup_desc fixup;
+    BOOL recorded = FALSE;
+    DWORD sampler_idx;
+    UINT i;
+
+    switch(arg->opcode->opcode)
+    {
+        case WINED3DSIO_TEX:
+            if (hex_version < WINED3DPS_VERSION(2,0)) sampler_idx = arg->dst & WINED3DSP_REGNUM_MASK;
+            else sampler_idx = arg->src[1] & WINED3DSP_REGNUM_MASK;
+            break;
+
+        case WINED3DSIO_TEXLDL:
+            FIXME("Add color fixup for vertex texture WINED3DSIO_TEXLDL\n");
+            return;
+
+        case WINED3DSIO_TEXDP3TEX:
+        case WINED3DSIO_TEXM3x3TEX:
+        case WINED3DSIO_TEXM3x3SPEC:
+        case WINED3DSIO_TEXM3x3VSPEC:
+        case WINED3DSIO_TEXBEM:
+        case WINED3DSIO_TEXREG2AR:
+        case WINED3DSIO_TEXREG2GB:
+        case WINED3DSIO_TEXREG2RGB:
+            sampler_idx = arg->dst & WINED3DSP_REGNUM_MASK;
+            break;
+
+        default:
+            /* Not a texture sampling instruction, nothing to do */
+            return;
+    };
+
+    texture = (IWineD3DBaseTextureImpl *)device->stateBlock->textures[sampler_idx];
+    if (texture) fixup = texture->baseTexture.shader_color_fixup;
+    else fixup = COLOR_FIXUP_IDENTITY;
+
+    /* before doing anything, record the sampler with the format in the format conversion list,
+     * but check if it's not there already */
+    for (i = 0; i < shader->baseShader.num_sampled_samplers; ++i)
+    {
+        if (shader->baseShader.sampled_samplers[i] == sampler_idx)
+        {
+            recorded = TRUE;
+            break;
+        }
+    }
+
+    if (!recorded)
+    {
+        shader->baseShader.sampled_samplers[shader->baseShader.num_sampled_samplers] = sampler_idx;
+        ++shader->baseShader.num_sampled_samplers;
+    }
+
+    device->shader_backend->shader_color_correction(arg, fixup);
+}
+
 /** Shared code in order to generate the bulk of the shader string.
     Use the shader_header_fct & shader_footer_fct to add strings
     that are specific to pixel or vertex functions
     NOTE: A description of how to parse tokens can be found on msdn */
-void shader_generate_main(
-    IWineD3DBaseShader *iface,
-    SHADER_BUFFER* buffer,
-    shader_reg_maps* reg_maps,
-    CONST DWORD* pFunction) {
-
+void shader_generate_main(IWineD3DBaseShader *iface, SHADER_BUFFER* buffer,
+        const shader_reg_maps* reg_maps, CONST DWORD* pFunction)
+{
     IWineD3DBaseShaderImpl* This = (IWineD3DBaseShaderImpl*) iface;
     IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *) This->baseShader.device; /* To access shader backend callbacks */
+    const SHADER_OPCODE *opcode_table = This->baseShader.shader_ins;
     const SHADER_HANDLER *handler_table = device->shader_backend->shader_instruction_handler_table;
+    DWORD shader_version = This->baseShader.hex_version;
     const DWORD *pToken = pFunction;
     const SHADER_OPCODE *curOpcode = NULL;
     SHADER_HANDLER hw_fct = NULL;
@@ -824,7 +868,7 @@ void shader_generate_main(
 
             /* Read opcode */
             hw_arg.opcode_token = *pToken++;
-            curOpcode = shader_get_opcode(iface, hw_arg.opcode_token);
+            curOpcode = shader_get_opcode(opcode_table, shader_version, hw_arg.opcode_token);
 
             /* Select handler */
             if (curOpcode == NULL)
@@ -879,7 +923,7 @@ void shader_generate_main(
                 hw_fct(&hw_arg);
 
                 /* Add color correction if needed */
-                device->shader_backend->shader_color_correction(&hw_arg);
+                shader_color_correction(This, device, &hw_arg);
 
                 /* Process instruction modifiers for GLSL apps ( _sat, etc. ) */
                 /* FIXME: This should be internal to the shader backend.
@@ -899,8 +943,8 @@ void shader_generate_main(
     }
 }
 
-void shader_dump_ins_modifiers(const DWORD output) {
-
+static void shader_dump_ins_modifiers(const DWORD output)
+{
     DWORD shift = (output & WINED3DSP_DSTSHIFT_MASK) >> WINED3DSP_DSTSHIFT_SHIFT;
     DWORD mmask = output & WINED3DSP_DSTMOD_MASK;
 
@@ -959,7 +1003,7 @@ void shader_trace_init(
                 continue;
             }
             opcode_token = *pToken++;
-            curOpcode = shader_get_opcode(iface, opcode_token);
+            curOpcode = shader_get_opcode(This->baseShader.shader_ins, This->baseShader.hex_version, opcode_token);
             len++;
 
             if (NULL == curOpcode) {
@@ -975,10 +1019,10 @@ void shader_trace_init(
                     DWORD usage = *pToken;
                     DWORD param = *(pToken + 1);
 
-                    shader_dump_decl_usage(This, usage, param);
+                    shader_dump_decl_usage(usage, param, This->baseShader.hex_version);
                     shader_dump_ins_modifiers(param);
                     TRACE(" ");
-                    shader_dump_param(iface, param, 0, 0);
+                    shader_dump_param(param, 0, 0, This->baseShader.hex_version);
                     pToken += 2;
                     len += 2;
 
@@ -1022,7 +1066,7 @@ void shader_trace_init(
                      * the destination token. */
                     if (opcode_token & WINED3DSHADER_INSTRUCTION_PREDICATED) {
                         TRACE("(");
-                        shader_dump_param(iface, *(pToken + 2), 0, 1);
+                        shader_dump_param(*(pToken + 2), 0, 1, This->baseShader.hex_version);
                         TRACE(") ");
                     }
                     if (opcode_token & WINED3DSI_COISSUE) {
@@ -1061,7 +1105,7 @@ void shader_trace_init(
 
                         shader_dump_ins_modifiers(param);
                         TRACE(" ");
-                        shader_dump_param(iface, param, addr_token, 0);
+                        shader_dump_param(param, addr_token, 0, This->baseShader.hex_version);
                     }
 
                     /* Predication token - already printed out, just skip it */
@@ -1078,7 +1122,7 @@ void shader_trace_init(
                         len += tokens_read;
 
                         TRACE((i == 0)? " " : ", ");
-                        shader_dump_param(iface, param, addr_token, 1);
+                        shader_dump_param(param, addr_token, 1, This->baseShader.hex_version);
                     }
                 }
                 TRACE("\n");
@@ -1096,41 +1140,45 @@ static void shader_none_select_depth_blt(IWineD3DDevice *iface, enum tex_types t
 static void shader_none_deselect_depth_blt(IWineD3DDevice *iface) {}
 static void shader_none_load_constants(IWineD3DDevice *iface, char usePS, char useVS) {}
 static void shader_none_cleanup(IWineD3DDevice *iface) {}
-static void shader_none_color_correction(SHADER_OPCODE_ARG* arg) {}
+static void shader_none_color_correction(const struct SHADER_OPCODE_ARG *arg, struct color_fixup_desc fixup) {}
 static void shader_none_destroy(IWineD3DBaseShader *iface) {}
 static HRESULT shader_none_alloc(IWineD3DDevice *iface) {return WINED3D_OK;}
 static void shader_none_free(IWineD3DDevice *iface) {}
 static BOOL shader_none_dirty_const(IWineD3DDevice *iface) {return FALSE;}
-static void shader_none_generate_pshader(IWineD3DPixelShader *iface, SHADER_BUFFER *buffer) {
+static GLuint shader_none_generate_pshader(IWineD3DPixelShader *iface, SHADER_BUFFER *buffer) {
     FIXME("NONE shader backend asked to generate a pixel shader\n");
+    return 0;
 }
 static void shader_none_generate_vshader(IWineD3DVertexShader *iface, SHADER_BUFFER *buffer) {
     FIXME("NONE shader backend asked to generate a vertex shader\n");
 }
 
 #define GLINFO_LOCATION      (*gl_info)
-static void shader_none_get_caps(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_info, struct shader_caps *pCaps) {
+static void shader_none_get_caps(WINED3DDEVTYPE devtype, const WineD3D_GL_Info *gl_info, struct shader_caps *pCaps)
+{
     /* Set the shader caps to 0 for the none shader backend */
     pCaps->VertexShaderVersion  = 0;
     pCaps->PixelShaderVersion    = 0;
     pCaps->PixelShader1xMaxValue = 0.0;
 }
 #undef GLINFO_LOCATION
-static BOOL shader_none_conv_supported(WINED3DFORMAT fmt) {
-    TRACE("Checking shader format support for format %s", debug_d3dformat(fmt));
-    switch(fmt) {
-        /* Faked to make some apps happy. */
-        case WINED3DFMT_V8U8:
-        case WINED3DFMT_V16U16:
-        case WINED3DFMT_L6V5U5:
-        case WINED3DFMT_X8L8V8U8:
-        case WINED3DFMT_Q8W8V8U8:
-            TRACE("[OK]\n");
-            return TRUE;
-        default:
-            TRACE("[FAILED]\n");
-            return FALSE;
+static BOOL shader_none_color_fixup_supported(struct color_fixup_desc fixup)
+{
+    if (TRACE_ON(d3d_shader) && TRACE_ON(d3d))
+    {
+        TRACE("Checking support for fixup:\n");
+        dump_color_fixup_desc(fixup);
     }
+
+    /* Faked to make some apps happy. */
+    if (!is_yuv_fixup(fixup))
+    {
+        TRACE("[OK]\n");
+        return TRUE;
+    }
+
+    TRACE("[FAILED]\n");
+    return FALSE;
 }
 
 const shader_backend_t none_shader_backend = {
@@ -1148,7 +1196,7 @@ const shader_backend_t none_shader_backend = {
     shader_none_generate_pshader,
     shader_none_generate_vshader,
     shader_none_get_caps,
-    shader_none_conv_supported
+    shader_none_color_fixup_supported,
 };
 
 /* *******************************************

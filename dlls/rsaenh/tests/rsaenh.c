@@ -146,9 +146,16 @@ static void clean_up_base_environment(void)
 {
     BOOL result;
 
+    SetLastError(0xdeadbeef);
     result = CryptReleaseContext(hProv, 1);
-    ok(!result && GetLastError()==NTE_BAD_FLAGS, "%08x\n", GetLastError());
+    ok(!result || broken(result) /* Win98 */, "Expected failure\n");
+    ok(GetLastError()==NTE_BAD_FLAGS, "Expected NTE_BAD_FLAGS, got %08x\n", GetLastError());
         
+    /* Just to prove that Win98 also released the CSP */
+    SetLastError(0xdeadbeef);
+    result = CryptReleaseContext(hProv, 0);
+    ok(!result && GetLastError()==ERROR_INVALID_PARAMETER, "%08x\n", GetLastError());
+
     CryptAcquireContext(&hProv, szContainer, szProvider, PROV_RSA_FULL, CRYPT_DELETEKEYSET);
 }
 
@@ -167,6 +174,11 @@ static int init_aes_environment(void)
      * This provider is available on Windows XP, Windows 2003 and Vista.      */
 
     result = CryptAcquireContext(&hProv, szContainer, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT);
+    if (!result && GetLastError() == NTE_PROV_TYPE_NOT_DEF)
+    {
+        win_skip("RSA_ASE provider not supported\n");
+        return 0;
+    }
     ok(!result && GetLastError()==NTE_BAD_FLAGS, "%d, %08x\n", result, GetLastError());
 
     if (!CryptAcquireContext(&hProv, szContainer, NULL, PROV_RSA_AES, 0))
@@ -731,9 +743,9 @@ static void test_aes(int keylen)
 
 static void test_rc2(void)
 {
-    static const BYTE rc2encrypted[16] = { 
-        0x02, 0x34, 0x7d, 0xf6, 0x1d, 0xc5, 0x9b, 0x8b, 
-        0x2e, 0x0d, 0x63, 0x80, 0x72, 0xc1, 0xc2, 0xb1 };
+    static const BYTE rc2_40_encrypted[16] = {
+        0xc0, 0x9a, 0xe4, 0x2f, 0x0a, 0x47, 0x67, 0x11,
+        0xfb, 0x18, 0x87, 0xce, 0x0c, 0x75, 0x07, 0xb1 };
     static const BYTE rc2_128_encrypted[] = {
         0x82,0x81,0xf7,0xff,0xdd,0xd7,0x88,0x8c,0x2a,0x2a,0xc0,0xce,0x4c,0x89,
         0xb6,0x66 };
@@ -761,7 +773,7 @@ static void test_rc2(void)
         result = CryptGetHashParam(hHash, HP_HASHVAL, pbHashValue, &dwLen, 0);
         ok(result, "%08x\n", GetLastError());
 
-        result = CryptDeriveKey(hProv, CALG_RC2, hHash, 56 << 16, &hKey);
+        result = CryptDeriveKey(hProv, CALG_RC2, hHash, 40 << 16, &hKey);
         ok(result, "%08x\n", GetLastError());
 
         dwLen = sizeof(DWORD);
@@ -806,7 +818,7 @@ static void test_rc2(void)
         result = CryptEncrypt(hKey, 0, TRUE, 0, pbData, &dwDataLen, 24);
         ok(result, "%08x\n", GetLastError());
 
-        ok(!memcmp(pbData, rc2encrypted, 8), "RC2 encryption failed!\n");
+        ok(!memcmp(pbData, rc2_40_encrypted, 16), "RC2 encryption failed!\n");
 
         result = CryptGetKeyParam(hKey, KP_IV, NULL, &dwLen, 0);
         ok(result, "%08x\n", GetLastError());
@@ -828,7 +840,9 @@ static void test_rc2(void)
         salt.cbData = 25;
         SetLastError(0xdeadbeef);
         result = CryptSetKeyParam(hKey, KP_SALT_EX, (BYTE *)&salt, 0);
-        ok(!result && GetLastError() == NTE_BAD_DATA, "%08x\n", GetLastError());
+        ok(!result ||
+           broken(result), /* Win9x, WinMe, NT4, W2K */
+           "%08x\n", GetLastError());
 
         result = CryptDestroyKey(hKey);
         ok(result, "%08x\n", GetLastError());
@@ -866,7 +880,7 @@ static void test_rc2(void)
         CryptGetKeyParam(hKey, KP_KEYLEN, (BYTE *)&dwKeyLen, &dwLen, 0);
         ok(dwKeyLen == 56, "%d (%08x)\n", dwKeyLen, GetLastError());
         CryptGetKeyParam(hKey, KP_EFFECTIVE_KEYLEN, (BYTE *)&dwKeyLen, &dwLen, 0);
-        ok(dwKeyLen == 56, "%d (%08x)\n", dwKeyLen, GetLastError());
+        ok(dwKeyLen == 56 || broken(dwKeyLen == 40), "%d (%08x)\n", dwKeyLen, GetLastError());
 
         dwKeyLen = 128;
         result = CryptSetKeyParam(hKey, KP_EFFECTIVE_KEYLEN, (LPBYTE)&dwKeyLen, 0);
@@ -980,7 +994,9 @@ static void test_rc4(void)
         salt.cbData = 25;
         SetLastError(0xdeadbeef);
         result = CryptSetKeyParam(hKey, KP_SALT_EX, (BYTE *)&salt, 0);
-        ok(!result && GetLastError() == NTE_BAD_DATA, "%08x\n", GetLastError());
+        ok(!result ||
+           broken(result), /* Win9x, WinMe, NT4, W2K */
+           "%08x\n", GetLastError());
 
         result = CryptDestroyKey(hKey);
         ok(result, "%08x\n", GetLastError());
@@ -1037,13 +1053,13 @@ static void test_mac(void) {
     BOOL result;
     DWORD dwLen;
     BYTE abData[256], abEnc[264];
-    static const BYTE mac[8] = { 0x0d, 0x3e, 0x15, 0x6b, 0x85, 0x63, 0x5c, 0x11 };
+    static const BYTE mac_40[8] = { 0xb7, 0xa2, 0x46, 0xe9, 0x11, 0x31, 0xe0, 0xad};
     int i;
 
     for (i=0; i<sizeof(abData)/sizeof(BYTE); i++) abData[i] = (BYTE)i;
     for (i=0; i<sizeof(abData)/sizeof(BYTE); i++) abEnc[i] = (BYTE)i;
 
-    if (!derive_key(CALG_RC2, &hKey, 56)) return;
+    if (!derive_key(CALG_RC2, &hKey, 40)) return;
 
     dwLen = 256;
     result = CryptEncrypt(hKey, 0, TRUE, 0, abEnc, &dwLen, 264);
@@ -1060,7 +1076,7 @@ static void test_mac(void) {
     result = CryptGetHashParam(hHash, HP_HASHVAL, abData, &dwLen, 0);
     ok(result && dwLen == 8, "%08x, dwLen: %d\n", GetLastError(), dwLen);
 
-    ok(!memcmp(abData, mac, sizeof(mac)), "MAC failed!\n");
+    ok(!memcmp(abData, mac_40, sizeof(mac_40)), "MAC failed!\n");
     
     result = CryptDestroyHash(hHash);
     ok(result, "%08x\n", GetLastError());
@@ -1071,8 +1087,11 @@ static void test_mac(void) {
     /* Provoke errors */
     if (!derive_key(CALG_RC4, &hKey, 56)) return;
 
+    SetLastError(0xdeadbeef);
     result = CryptCreateHash(hProv, CALG_MAC, hKey, 0, &hHash);
-    ok(!result && GetLastError() == NTE_BAD_KEY, "%08x\n", GetLastError());
+    ok((!result && GetLastError() == NTE_BAD_KEY) ||
+            broken(result), /* Win9x, WinMe, NT4, W2K */
+            "%08x\n", GetLastError());
 
     result = CryptDestroyKey(hKey);
     ok(result, "%08x\n", GetLastError());
@@ -1420,10 +1439,11 @@ static void test_verify_signature(void) {
     if (result) return;
 
     /* check that we get a bad signature error when the signature is too short*/
+    SetLastError(0xdeadbeef);
     result = CryptVerifySignature(hHash, abSignatureMD2, 64, hPubSignKey, NULL, 0);
-    ok(!result && NTE_BAD_SIGNATURE == GetLastError(),
-     "Expected NTE_BAD_SIGNATURE error, got %08x\n", GetLastError());
-    if (result) return;
+    ok((!result && NTE_BAD_SIGNATURE == GetLastError()) ||
+     broken(result), /* Win9x, WinMe, NT4 */
+     "Expected NTE_BAD_SIGNATURE, got %08x\n",  GetLastError());
 
     result = CryptVerifySignature(hHash, abSignatureMD2, 128, hPubSignKey, NULL, 0);
     ok(result, "%08x\n", GetLastError());
@@ -1623,6 +1643,11 @@ static void test_schannel_provider(void)
     };
     
     result = CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_SCHANNEL, CRYPT_VERIFYCONTEXT|CRYPT_NEWKEYSET);
+    if (!result)
+    {
+        win_skip("no PROV_RSA_SCHANNEL support\n");
+        return;
+    }
     ok (result, "%08x\n", GetLastError());
     if (result)
         CryptReleaseContext(hProv, 0);
@@ -1757,8 +1782,13 @@ static void test_enum_container(void)
 
     /* If PP_ENUMCONTAINERS is queried with CRYPT_FIRST and abData == NULL, it returns
      * the maximum legal length of container names (which is MAX_PATH + 1 == 261) */
+    SetLastError(0xdeadbeef);
     result = CryptGetProvParam(hProv, PP_ENUMCONTAINERS, NULL, &dwBufferLen, CRYPT_FIRST);
-    ok (result && dwBufferLen == MAX_PATH + 1, "%08x\n", GetLastError());
+    ok (result, "%08x\n", GetLastError());
+    ok (dwBufferLen == MAX_PATH + 1 ||
+        broken(dwBufferLen == 10) || /* Win9x, WinMe */
+        broken(dwBufferLen == 55), /* NT4 */
+        "Expected dwBufferLen to be (MAX_PATH + 1), it was : %d\n", dwBufferLen);
 
     /* If the result fits into abContainerName dwBufferLen is left untouched */
     dwBufferLen = (DWORD)sizeof(abContainerName);

@@ -182,7 +182,7 @@ static void cleanup(void) {
     UnregisterClass(wndcls, GetModuleHandle(0));
 }
 
-static int test_ImmNotifyIME(void) {
+static void test_ImmNotifyIME(void) {
     static const char string[] = "wine";
     char resstr[16] = "";
     HIMC imc;
@@ -225,11 +225,9 @@ static int test_ImmNotifyIME(void) {
 
     msg_spy_flush_msgs();
     ImmReleaseContext(hwnd, imc);
-
-    return 0;
 }
 
-static int test_ImmGetCompositionString(void)
+static void test_ImmGetCompositionString(void)
 {
     HIMC imc;
     static const WCHAR string[] = {'w','i','n','e',0x65e5,0x672c,0x8a9e};
@@ -251,10 +249,50 @@ static int test_ImmGetCompositionString(void)
         ok(len==alen,"GCS_COMPATTR(A) not returning correct count\n");
     }
     ImmReleaseContext(hwnd, imc);
-    return 0;
 }
 
-static int test_ImmIME(void)
+static void test_ImmSetCompositionString(void)
+{
+    HIMC imc;
+    BOOL ret;
+
+    SetLastError(0xdeadbeef);
+    imc = ImmGetContext(hwnd);
+    ok(imc != 0, "ImmGetContext() failed. Last error: %u\n", GetLastError());
+    if (!imc)
+        return;
+
+    SetLastError(0xdeadbeef);
+    ret = ImmSetCompositionStringW(imc, SCS_SETSTR, NULL, 0, NULL, 0);
+    todo_wine
+    ok(!ret, "ImmSetCompositionStringW() failed. Last error: %u\n",
+        GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = ImmSetCompositionStringW(imc, SCS_SETSTR | SCS_CHANGEATTR,
+        NULL, 0, NULL, 0);
+    todo_wine
+    ok(!ret, "ImmSetCompositionStringW() failed. Last error: %u\n",
+        GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = ImmSetCompositionStringW(imc, SCS_SETSTR | SCS_CHANGECLAUSE,
+        NULL, 0, NULL, 0);
+    todo_wine
+    ok(!ret, "ImmSetCompositionStringW() failed. Last error: %u\n",
+        GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = ImmSetCompositionStringW(imc, SCS_CHANGEATTR | SCS_CHANGECLAUSE,
+        NULL, 0, NULL, 0);
+    todo_wine
+    ok(!ret, "ImmSetCompositionStringW() failed. Last error: %u\n",
+        GetLastError());
+
+    ImmReleaseContext(hwnd, imc);
+}
+
+static void test_ImmIME(void)
 {
     HIMC imc;
 
@@ -268,7 +306,6 @@ static int test_ImmIME(void)
         ok (rc == 0, "ImmConfigureIMEW did not fail\n");
     }
     ImmReleaseContext(hwnd,imc);
-    return 0;
 }
 
 START_TEST(imm32) {
@@ -276,6 +313,7 @@ START_TEST(imm32) {
     {
         test_ImmNotifyIME();
         test_ImmGetCompositionString();
+        test_ImmSetCompositionString();
         test_ImmIME();
     }
     cleanup();

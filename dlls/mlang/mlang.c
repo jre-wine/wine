@@ -1393,12 +1393,12 @@ typedef struct tagMLang_impl
     DWORD total_cp, total_scripts;
 } MLang_impl;
 
-static ULONG WINAPI MLang_AddRef( MLang_impl* This)
+static ULONG MLang_AddRef( MLang_impl* This)
 {
     return InterlockedIncrement(&This->ref);
 }
 
-static ULONG WINAPI MLang_Release( MLang_impl* This )
+static ULONG MLang_Release( MLang_impl* This )
 {
     ULONG ref = InterlockedDecrement(&This->ref);
 
@@ -1413,7 +1413,7 @@ static ULONG WINAPI MLang_Release( MLang_impl* This )
     return ref;
 }
 
-static HRESULT WINAPI MLang_QueryInterface(
+static HRESULT MLang_QueryInterface(
         MLang_impl* This,
         REFIID riid,
         void** ppvObject)
@@ -1853,8 +1853,27 @@ static HRESULT WINAPI fnIMLangFontLink_GetCharCodePages(
         WCHAR chSrc,
         DWORD* pdwCodePages)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    int i;
+    CHAR buf;
+    BOOL used_dc;
+    DWORD codePages;
+
+    *pdwCodePages = 0;
+
+    for (i = 0; i < sizeof(mlang_data)/sizeof(mlang_data[0]); i++)
+    {
+        WideCharToMultiByte(mlang_data[i].family_codepage, WC_NO_BEST_FIT_CHARS,
+            &chSrc, 1, &buf, 1, NULL, &used_dc);
+
+        /* If default char is not used, current codepage include the given symbol */
+        if (!used_dc)
+        {
+            IMLangFontLink_CodePageToCodePages(iface,
+                mlang_data[i].family_codepage, &codePages);
+            *pdwCodePages |= codePages;
+        }
+    }
+    return S_OK;
 }
 
 static HRESULT WINAPI fnIMLangFontLink_GetStrCodePages(

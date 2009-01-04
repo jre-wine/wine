@@ -40,13 +40,13 @@ static const char range_test2_str[] =
     "<html><body>abc<hr />123<br /><hr />def</body></html>";
 static const char elem_test_str[] =
     "<html><head><title>test</title><style>.body { margin-right: 0px; }</style>"
-    "<body>text test<!-- a comment -->"
+    "<body onload=\"Testing()\">text test<!-- a comment -->"
     "<a href=\"http://test\" name=\"x\">link</a>"
     "<input id=\"in\" class=\"testclass\" tabIndex=\"2\" title=\"test title\" />"
     "<select id=\"s\"><option id=\"x\" value=\"val1\">opt1</option><option id=\"y\">opt2</option></select>"
     "<textarea id=\"X\">text text</textarea>"
     "<table id=\"tbl\"><tbody><tr></tr><tr id=\"row2\"><td>td1 text</td><td>td2 text</td></tr></tbody></table>"
-    "<script id=\"sc\" type=\"text/javascript\"></script>"
+    "<script id=\"sc\" type=\"text/javascript\"><!--\nfunction Testing() {}\n// -->\n</script>"
     "<test />"
     "<img id=\"imgid\"/>"
     "<iframe src=\"about:blank\" id=\"ifr\"></iframe>"
@@ -409,12 +409,21 @@ static BOOL iface_cmp(IUnknown *iface1, IUnknown *iface2)
 static IHTMLDocument2 *create_document(void)
 {
     IHTMLDocument2 *doc;
+    IHTMLDocument5 *doc5;
     HRESULT hres;
 
     hres = CoCreateInstance(&CLSID_HTMLDocument, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
             &IID_IHTMLDocument2, (void**)&doc);
     ok(hres == S_OK, "CoCreateInstance failed: %08x\n", hres);
 
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IHTMLDocument5, (void**)&doc5);
+    if(FAILED(hres)) {
+        win_skip("Could not get IHTMLDocument5, probably too old IE\n");
+        IHTMLDocument2_Release(doc);
+        return NULL;
+    }
+
+    IHTMLDocument5_Release(doc5);
     return doc;
 }
 
@@ -2284,6 +2293,7 @@ static void test_default_style(IHTMLStyle *style)
     BSTR str;
     HRESULT hres;
     float f;
+    BSTR sOverflowDefault;
 
     test_disp((IUnknown*)style, &DIID_DispHTMLStyle);
     test_ifaces((IUnknown*)style, style_iids);
@@ -2592,6 +2602,48 @@ static void test_default_style(IHTMLStyle *style)
     ok(V_I4(&v) == 1, "V_I4(v) = %d\n", V_I4(&v));
     VariantClear(&v);
 
+    /* overflow */
+    hres = IHTMLStyle_get_overflow(style, NULL);
+    ok(hres == E_INVALIDARG, "get_overflow failed: %08x\n", hres);
+
+    hres = IHTMLStyle_get_overflow(style, &sOverflowDefault);
+    ok(hres == S_OK, "get_overflow failed: %08x\n", hres);
+
+    str = a2bstr("test");
+    hres = IHTMLStyle_put_overflow(style, str);
+    ok(hres == E_INVALIDARG, "put_overflow failed: %08x\n", hres);
+    SysFreeString(str);
+
+    str = a2bstr("visible");
+    hres = IHTMLStyle_put_overflow(style, str);
+    ok(hres == S_OK, "put_overflow failed: %08x\n", hres);
+    SysFreeString(str);
+
+    str = a2bstr("scroll");
+    hres = IHTMLStyle_put_overflow(style, str);
+    ok(hres == S_OK, "put_overflow failed: %08x\n", hres);
+    SysFreeString(str);
+
+    str = a2bstr("hidden");
+    hres = IHTMLStyle_put_overflow(style, str);
+    ok(hres == S_OK, "put_overflow failed: %08x\n", hres);
+    SysFreeString(str);
+
+    str = a2bstr("auto");
+    hres = IHTMLStyle_put_overflow(style, str);
+    ok(hres == S_OK, "put_overflow failed: %08x\n", hres);
+    SysFreeString(str);
+
+    hres = IHTMLStyle_get_overflow(style, &str);
+    ok(hres == S_OK, "get_overflow failed: %08x\n", hres);
+    ok(!strcmp_wa(str, "auto"), "str=%s\n", dbgstr_w(str));
+    SysFreeString(str);
+
+    /* restore overflow default */
+    hres = IHTMLStyle_put_overflow(style, sOverflowDefault);
+    ok(hres == S_OK, "put_overflow failed: %08x\n", hres);
+    SysFreeString(sOverflowDefault);
+
     hres = IHTMLStyle_QueryInterface(style, &IID_IHTMLStyle2, (void**)&style2);
     ok(hres == S_OK, "Could not get IHTMLStyle2 iface: %08x\n", hres);
     if(SUCCEEDED(hres)) {
@@ -2765,7 +2817,7 @@ static void test_defaults(IHTMLDocument2 *doc)
     IHTMLStyle *style;
     long l;
     HRESULT hres;
-    IHTMLElementCollection *colimages;
+    IHTMLElementCollection *collection;
 
     hres = IHTMLDocument2_get_body(doc, &elem);
     ok(hres == S_OK, "get_body failed: %08x\n", hres);
@@ -2773,12 +2825,56 @@ static void test_defaults(IHTMLDocument2 *doc)
     hres = IHTMLDocument2_get_images(doc, NULL);
     ok(hres == E_INVALIDARG, "hres %08x\n", hres);
 
-    hres = IHTMLDocument2_get_images(doc, &colimages);
+    hres = IHTMLDocument2_get_images(doc, &collection);
     ok(hres == S_OK, "get_images failed: %08x\n", hres);
     if(hres == S_OK)
     {
-        test_elem_collection((IUnknown*)colimages, NULL, 0);
-        IHTMLElementCollection_Release(colimages);
+        test_elem_collection((IUnknown*)collection, NULL, 0);
+        IHTMLElementCollection_Release(collection);
+    }
+
+    hres = IHTMLDocument2_get_applets(doc, NULL);
+    ok(hres == E_INVALIDARG, "hres %08x\n", hres);
+
+    hres = IHTMLDocument2_get_applets(doc, &collection);
+    ok(hres == S_OK, "get_applets failed: %08x\n", hres);
+    if(hres == S_OK)
+    {
+        test_elem_collection((IUnknown*)collection, NULL, 0);
+        IHTMLElementCollection_Release(collection);
+    }
+
+    hres = IHTMLDocument2_get_links(doc, NULL);
+    ok(hres == E_INVALIDARG, "hres %08x\n", hres);
+
+    hres = IHTMLDocument2_get_links(doc, &collection);
+    ok(hres == S_OK, "get_links failed: %08x\n", hres);
+    if(hres == S_OK)
+    {
+        test_elem_collection((IUnknown*)collection, NULL, 0);
+        IHTMLElementCollection_Release(collection);
+    }
+
+    hres = IHTMLDocument2_get_forms(doc, NULL);
+    ok(hres == E_INVALIDARG, "hres %08x\n", hres);
+
+    hres = IHTMLDocument2_get_forms(doc, &collection);
+    ok(hres == S_OK, "get_forms failed: %08x\n", hres);
+    if(hres == S_OK)
+    {
+        test_elem_collection((IUnknown*)collection, NULL, 0);
+        IHTMLElementCollection_Release(collection);
+    }
+
+    hres = IHTMLDocument2_get_anchors(doc, NULL);
+    ok(hres == E_INVALIDARG, "hres %08x\n", hres);
+
+    hres = IHTMLDocument2_get_anchors(doc, &collection);
+    ok(hres == S_OK, "get_anchors failed: %08x\n", hres);
+    if(hres == S_OK)
+    {
+        test_elem_collection((IUnknown*)collection, NULL, 0);
+        IHTMLElementCollection_Release(collection);
     }
 
     hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLBodyElement, (void**)&body);
@@ -3061,7 +3157,7 @@ static void test_elems(IHTMLDocument2 *doc)
     IDispatch *disp;
     long type;
     HRESULT hres;
-    IHTMLElementCollection *colimages;
+    IHTMLElementCollection *collection;
 
     static const WCHAR imgidW[] = {'i','m','g','i','d',0};
     static const WCHAR inW[] = {'i','n',0};
@@ -3110,14 +3206,34 @@ static void test_elems(IHTMLDocument2 *doc)
     test_elem_col_item(col, xW, item_types, sizeof(item_types)/sizeof(item_types[0]));
     IHTMLElementCollection_Release(col);
 
-    hres = IHTMLDocument2_get_images(doc, &colimages);
+    hres = IHTMLDocument2_get_images(doc, &collection);
     ok(hres == S_OK, "get_images failed: %08x\n", hres);
     if(hres == S_OK)
     {
         static const elem_type_t images_types[] = {ET_IMG};
-        test_elem_collection((IUnknown*)colimages, images_types, 1);
+        test_elem_collection((IUnknown*)collection, images_types, 1);
 
-        IHTMLElementCollection_Release(colimages);
+        IHTMLElementCollection_Release(collection);
+    }
+
+    hres = IHTMLDocument2_get_links(doc, &collection);
+    ok(hres == S_OK, "get_links failed: %08x\n", hres);
+    if(hres == S_OK)
+    {
+        static const elem_type_t images_types[] = {ET_A};
+        test_elem_collection((IUnknown*)collection, images_types, 1);
+
+        IHTMLElementCollection_Release(collection);
+    }
+
+    hres = IHTMLDocument2_get_anchors(doc, &collection);
+    ok(hres == S_OK, "get_anchors failed: %08x\n", hres);
+    if(hres == S_OK)
+    {
+        static const elem_type_t anchor_types[] = {ET_A};
+        test_elem_collection((IUnknown*)collection, anchor_types, 1);
+
+        IHTMLElementCollection_Release(collection);
     }
 
     elem = get_doc_elem(doc);
@@ -3386,6 +3502,27 @@ static void test_elems(IHTMLDocument2 *doc)
     test_doc_title(doc, "test");
     test_doc_set_title(doc, "test title");
     test_doc_title(doc, "test title");
+
+    disp = NULL;
+    hres = IHTMLDocument2_get_Script(doc, &disp);
+    ok(hres == S_OK, "get_Script failed: %08x\n", hres);
+    if(hres == S_OK)
+    {
+        IDispatchEx *dispex;
+        hres = IDispatch_QueryInterface(disp, &IID_IDispatchEx, (void**)&dispex);
+        ok(hres == S_OK, "IDispatch_QueryInterface failed: %08x\n", hres);
+        if(hres == S_OK)
+        {
+            DISPID pid = -1;
+            BSTR str = a2bstr("Testing");
+            hres = IDispatchEx_GetDispID(dispex, str, 1, &pid);
+            todo_wine ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
+            todo_wine ok(pid != -1, "pid == -1\n");
+            SysFreeString(str);
+            IDispatchEx_Release(dispex);
+        }
+    }
+    IDispatch_Release(disp);
 }
 
 static void test_create_elems(IHTMLDocument2 *doc)
@@ -3645,6 +3782,9 @@ static void run_domtest(const char *str, domtest_t test)
     HRESULT hres;
 
     doc = create_doc_with_string(str);
+    if(!doc)
+        return;
+
     do_advise((IUnknown*)doc, &IID_IPropertyNotifySink, (IUnknown*)&PropertyNotifySink);
 
     while(!doc_complete && GetMessage(&msg, NULL, 0, 0)) {
