@@ -6,12 +6,16 @@ export SHELL=bash
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
-ifneq (,$(findstring noopt,$(DEB_BUILD_OPTIONS)))
+ifneq (,$(filter noopt,$(DEB_BUILD_OPTIONS)))
 CFLAGS=-O0 -g
 else
 CFLAGS=-O2 -g
 endif
 LDFLAGS=
+ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+MAKEFLAGS += -j$(NUMJOBS)
+endif
 
 CONFIGOPTS = --with-x --enable-opengl --disable-tests
 
