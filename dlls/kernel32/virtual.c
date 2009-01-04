@@ -469,8 +469,8 @@ HANDLE WINAPI OpenFileMappingW( DWORD access, BOOL inherit, LPCWSTR name)
     attr.SecurityQualityOfService = NULL;
     RtlInitUnicodeString( &nameW, name );
 
-    if (access & FILE_MAP_COPY) access |= SECTION_MAP_READ;
-    access |= STANDARD_RIGHTS_REQUIRED | SECTION_QUERY;
+    if (access == FILE_MAP_COPY) access = SECTION_MAP_READ;
+    access |= SECTION_QUERY;
 
     if (GetVersion() & 0x80000000)
     {
@@ -543,6 +543,8 @@ LPVOID WINAPI MapViewOfFileEx( HANDLE handle, DWORD access,
     else if (access & FILE_MAP_COPY) protect = PAGE_WRITECOPY;
     else protect = PAGE_NOACCESS;
 
+    if (access & FILE_MAP_EXECUTE) protect <<= 4;
+
     if ((status = NtMapViewOfSection( handle, GetCurrentProcess(), &addr, 0, 0, &offset,
                                       &count, ViewShare, 0, protect )))
     {
@@ -596,6 +598,33 @@ BOOL WINAPI FlushViewOfFile( LPCVOID base, SIZE_T size )
         else SetLastError( RtlNtStatusToDosError(status) );
     }
     return !status;
+}
+
+
+/***********************************************************************
+ *             GetWriteWatch   (KERNEL32.@)
+ */
+UINT WINAPI GetWriteWatch( DWORD flags, LPVOID base, SIZE_T size, LPVOID *addresses,
+                           ULONG_PTR *count, ULONG *granularity )
+{
+    NTSTATUS status;
+
+    status = NtGetWriteWatch( GetCurrentProcess(), flags, base, size, addresses, count, granularity );
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return status ? ~0u : 0;
+}
+
+
+/***********************************************************************
+ *             ResetWriteWatch   (KERNEL32.@)
+ */
+UINT WINAPI ResetWriteWatch( LPVOID base, SIZE_T size )
+{
+    NTSTATUS status;
+
+    status = NtResetWriteWatch( GetCurrentProcess(), base, size );
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return status ? ~0u : 0;
 }
 
 

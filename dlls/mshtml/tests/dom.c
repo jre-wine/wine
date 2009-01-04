@@ -1184,6 +1184,7 @@ static void _test_elem3_get_disabled(unsigned line, IUnknown *unk, VARIANT_BOOL 
     VARIANT_BOOL disabled = 100;
     HRESULT hres;
 
+    if (!elem3) return;
     hres = IHTMLElement3_get_disabled(elem3, &disabled);
     ok_(__FILE__,line) (hres == S_OK, "get_disabled failed: %08x\n", hres);
     ok_(__FILE__,line) (disabled == exb, "disabled=%x, expected %x\n", disabled, exb);
@@ -1196,6 +1197,7 @@ static void _test_elem3_set_disabled(unsigned line, IUnknown *unk, VARIANT_BOOL 
     IHTMLElement3 *elem3 = _get_elem3_iface(line, unk);
     HRESULT hres;
 
+    if (!elem3) return;
     hres = IHTMLElement3_put_disabled(elem3, b);
     ok_(__FILE__,line) (hres == S_OK, "get_disabled failed: %08x\n", hres);
 
@@ -2281,6 +2283,7 @@ static void test_default_style(IHTMLStyle *style)
     VARIANT v;
     BSTR str;
     HRESULT hres;
+    float f;
 
     test_disp((IUnknown*)style, &DIID_DispHTMLStyle);
     test_ifaces((IUnknown*)style, style_iids);
@@ -2382,11 +2385,40 @@ static void test_default_style(IHTMLStyle *style)
     ok(!V_BSTR(&v), "V_BSTR(v) != NULL\n");
     VariantClear(&v);
 
+    /* Test posLeft */
+    hres = IHTMLStyle_get_posLeft(style, NULL);
+    ok(hres == E_POINTER, "get_left failed: %08x\n", hres);
+
+    f = 1.0f;
+    hres = IHTMLStyle_get_posLeft(style, &f);
+    ok(hres == S_OK, "get_left failed: %08x\n", hres);
+    ok(f == 0.0, "expected 0.0 got %f\n", f);
+
+    hres = IHTMLStyle_put_posLeft(style, 4.9f);
+    ok(hres == S_OK, "get_left failed: %08x\n", hres);
+
+    hres = IHTMLStyle_get_posLeft(style, &f);
+    ok(hres == S_OK, "get_left failed: %08x\n", hres);
+    ok(f == 4.0, "expected 4.0 got %f\n", f);
+
+    /* Ensure left is updated correctly. */
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLStyle_get_left(style, &v);
+    ok(hres == S_OK, "get_left failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v)=%d\n", V_VT(&v));
+    ok(!strcmp_wa(V_BSTR(&v), "4px"), "V_BSTR(v) = %s\n", dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
+
+    /* Test left */
     V_VT(&v) = VT_BSTR;
     V_BSTR(&v) = a2bstr("3px");
     hres = IHTMLStyle_put_left(style, v);
     ok(hres == S_OK, "put_left failed: %08x\n", hres);
     VariantClear(&v);
+
+    hres = IHTMLStyle_get_posLeft(style, &f);
+    ok(hres == S_OK, "get_left failed: %08x\n", hres);
+    ok(f == 3.0, "expected 3.0 got %f\n", f);
 
     V_VT(&v) = VT_EMPTY;
     hres = IHTMLStyle_get_left(style, &v);
@@ -2413,6 +2445,22 @@ static void test_default_style(IHTMLStyle *style)
     ok(!V_BSTR(&v), "V_BSTR(v) != NULL\n");
     VariantClear(&v);
 
+    /* Test posTop */
+    hres = IHTMLStyle_get_posTop(style, NULL);
+    ok(hres == E_POINTER, "get_left failed: %08x\n", hres);
+
+    f = 1.0f;
+    hres = IHTMLStyle_get_posTop(style, &f);
+    ok(hres == S_OK, "get_left failed: %08x\n", hres);
+    ok(f == 0.0, "expected 0.0 got %f\n", f);
+
+    hres = IHTMLStyle_put_posTop(style, 4.9f);
+    ok(hres == S_OK, "get_left failed: %08x\n", hres);
+
+    hres = IHTMLStyle_get_posTop(style, &f);
+    ok(hres == S_OK, "get_left failed: %08x\n", hres);
+    ok(f == 4.0, "expected 4.0 got %f\n", f);
+
     V_VT(&v) = VT_BSTR;
     V_BSTR(&v) = a2bstr("3px");
     hres = IHTMLStyle_put_top(style, v);
@@ -2425,6 +2473,10 @@ static void test_default_style(IHTMLStyle *style)
     ok(V_VT(&v) == VT_BSTR, "V_VT(v)=%d\n", V_VT(&v));
     ok(!strcmp_wa(V_BSTR(&v), "3px"), "V_BSTR(v) = %s\n", dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
+
+    hres = IHTMLStyle_get_posTop(style, &f);
+    ok(hres == S_OK, "get_left failed: %08x\n", hres);
+    ok(f == 3.0, "expected 3.0 got %f\n", f);
 
     V_VT(&v) = VT_NULL;
     hres = IHTMLStyle_put_top(style, v);
@@ -2713,9 +2765,21 @@ static void test_defaults(IHTMLDocument2 *doc)
     IHTMLStyle *style;
     long l;
     HRESULT hres;
+    IHTMLElementCollection *colimages;
 
     hres = IHTMLDocument2_get_body(doc, &elem);
     ok(hres == S_OK, "get_body failed: %08x\n", hres);
+
+    hres = IHTMLDocument2_get_images(doc, NULL);
+    ok(hres == E_INVALIDARG, "hres %08x\n", hres);
+
+    hres = IHTMLDocument2_get_images(doc, &colimages);
+    ok(hres == S_OK, "get_images failed: %08x\n", hres);
+    if(hres == S_OK)
+    {
+        test_elem_collection((IUnknown*)colimages, NULL, 0);
+        IHTMLElementCollection_Release(colimages);
+    }
 
     hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLBodyElement, (void**)&body);
     ok(hres == S_OK, "Could not get IHTMBodyElement: %08x\n", hres);
@@ -2851,6 +2915,7 @@ static void test_iframe_elem(IHTMLElement *elem)
 
     hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLFrameBase2, (void**)&base2);
     ok(hres == S_OK, "Could not get IHTMFrameBase2 iface: %08x\n", hres);
+    if (!base2) return;
 
     content_window = NULL;
     hres = IHTMLFrameBase2_get_contentWindow(base2, &content_window);
@@ -2996,6 +3061,7 @@ static void test_elems(IHTMLDocument2 *doc)
     IDispatch *disp;
     long type;
     HRESULT hres;
+    IHTMLElementCollection *colimages;
 
     static const WCHAR imgidW[] = {'i','m','g','i','d',0};
     static const WCHAR inW[] = {'i','n',0};
@@ -3044,6 +3110,16 @@ static void test_elems(IHTMLDocument2 *doc)
     test_elem_col_item(col, xW, item_types, sizeof(item_types)/sizeof(item_types[0]));
     IHTMLElementCollection_Release(col);
 
+    hres = IHTMLDocument2_get_images(doc, &colimages);
+    ok(hres == S_OK, "get_images failed: %08x\n", hres);
+    if(hres == S_OK)
+    {
+        static const elem_type_t images_types[] = {ET_IMG};
+        test_elem_collection((IUnknown*)colimages, images_types, 1);
+
+        IHTMLElementCollection_Release(colimages);
+    }
+
     elem = get_doc_elem(doc);
     ok(hres == S_OK, "get_documentElement failed: %08x\n", hres);
     hres = IHTMLElement_get_all(elem, &disp);
@@ -3082,12 +3158,15 @@ static void test_elems(IHTMLDocument2 *doc)
         node = test_node_get_parent((IUnknown*)node2);
         IHTMLDOMNode_Release(node2);
         ok(node != NULL, "node == NULL\n");
-        test_node_name((IUnknown*)node, "#document");
-        type = get_node_type((IUnknown*)node);
-        ok(type == 9, "type=%ld, expected 9\n", type);
-        node2 = test_node_get_parent((IUnknown*)node);
-        IHTMLDOMNode_Release(node);
-        ok(node2 == NULL, "node != NULL\n");
+        if (node)
+        {
+            test_node_name((IUnknown*)node, "#document");
+            type = get_node_type((IUnknown*)node);
+            ok(type == 9, "type=%ld, expected 9\n", type);
+            node2 = test_node_get_parent((IUnknown*)node);
+            IHTMLDOMNode_Release(node);
+            ok(node2 == NULL, "node != NULL\n");
+        }
 
         elem2 = test_elem_get_parent((IUnknown*)elem);
         ok(elem2 != NULL, "elem2 == NULL\n");

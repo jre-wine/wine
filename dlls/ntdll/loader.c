@@ -715,7 +715,8 @@ static WINE_MODREF *alloc_module( HMODULE hModule, LPCWSTR filename )
     else p = wm->ldr.FullDllName.Buffer;
     RtlInitUnicodeString( &wm->ldr.BaseDllName, p );
 
-    if (nt->FileHeader.Characteristics & IMAGE_FILE_DLL)
+    if (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_NATIVE &&
+        (nt->FileHeader.Characteristics & IMAGE_FILE_DLL))
     {
         wm->ldr.Flags |= LDR_IMAGE_IS_DLL;
         if (nt->OptionalHeader.AddressOfEntryPoint)
@@ -1315,12 +1316,10 @@ static WCHAR *get_builtin_fullname( const WCHAR *path, const char *filename )
 static void load_builtin_callback( void *module, const char *filename )
 {
     static const WCHAR emptyW[1];
-    void *addr;
     IMAGE_NT_HEADERS *nt;
     WINE_MODREF *wm;
     WCHAR *fullname;
     const WCHAR *load_path;
-    SIZE_T size;
 
     if (!module)
     {
@@ -1333,10 +1332,10 @@ static void load_builtin_callback( void *module, const char *filename )
         builtin_load_info->status = STATUS_INVALID_IMAGE_FORMAT;
         return;
     }
-    addr = module;
-    size = nt->OptionalHeader.SizeOfImage;
-    NtAllocateVirtualMemory( NtCurrentProcess(), &addr, 0, &size,
-                             MEM_SYSTEM | MEM_IMAGE, PAGE_EXECUTE_WRITECOPY );
+    virtual_create_system_view( module, nt->OptionalHeader.SizeOfImage,
+                                VPROT_SYSTEM | VPROT_IMAGE | VPROT_COMMITTED |
+                                VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC );
+
     /* create the MODREF */
 
     if (!(fullname = get_builtin_fullname( builtin_load_info->filename, filename )))

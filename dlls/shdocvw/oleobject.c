@@ -83,7 +83,7 @@ static void create_shell_embedding_hwnd(WebBrowser *This)
             CS_DBLCLKS,
             shell_embedding_proc,
             0, 0 /* native uses 8 */, NULL, NULL, NULL,
-            (HBRUSH)COLOR_WINDOWFRAME, NULL,
+            (HBRUSH)(COLOR_WINDOW + 1), NULL,
             wszShellEmbedding,
             NULL
         };
@@ -890,6 +890,16 @@ static const IOleCommandTargetVtbl OleCommandTargetVtbl = {
 
 void WebBrowser_OleObject_Init(WebBrowser *This)
 {
+    DWORD dpi_x;
+    DWORD dpi_y;
+    HDC hdc;
+
+    /* default aspect ratio is 96dpi / 96dpi */
+    hdc = GetDC(0);
+    dpi_x = GetDeviceCaps(hdc, LOGPIXELSX);
+    dpi_y = GetDeviceCaps(hdc, LOGPIXELSY);
+    ReleaseDC(0, hdc);
+
     This->lpOleObjectVtbl              = &OleObjectVtbl;
     This->lpOleInPlaceObjectVtbl       = &OleInPlaceObjectVtbl;
     This->lpOleControlVtbl             = &OleControlVtbl;
@@ -907,8 +917,9 @@ void WebBrowser_OleObject_Init(WebBrowser *This)
     memset(&This->clip_rect, 0, sizeof(RECT));
     memset(&This->frameinfo, 0, sizeof(OLEINPLACEFRAMEINFO));
 
-    This->extent.cx = 1323;
-    This->extent.cy = 529;
+    /* Default size is 50x20 pixels, in himetric units */
+    This->extent.cx = MulDiv( 50, 2540, dpi_x );
+    This->extent.cy = MulDiv( 20, 2540, dpi_y );
 }
 
 void WebBrowser_OleObject_Destroy(WebBrowser *This)

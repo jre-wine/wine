@@ -395,7 +395,7 @@
 @ stdcall GdipGetStringFormatTabStopCount(ptr ptr)
 @ stdcall GdipGetStringFormatTabStops(ptr long ptr ptr)
 @ stdcall GdipGetStringFormatTrimming(ptr ptr)
-@ stub GdipGetTextContrast
+@ stdcall GdipGetTextContrast(ptr ptr)
 @ stdcall GdipGetTextRenderingHint(ptr ptr)
 @ stub GdipGetTextureImage
 @ stdcall GdipGetTextureTransform(ptr ptr)
@@ -593,7 +593,7 @@
 @ stdcall GdipSetStringFormatMeasurableCharacterRanges(ptr long ptr)
 @ stdcall GdipSetStringFormatTabStops(ptr long long ptr)
 @ stdcall GdipSetStringFormatTrimming(ptr long)
-@ stub GdipSetTextContrast
+@ stdcall GdipSetTextContrast(ptr long)
 @ stdcall GdipSetTextRenderingHint(ptr long)
 @ stdcall GdipSetTextureTransform(ptr ptr)
 @ stdcall GdipSetTextureWrapMode(ptr long)

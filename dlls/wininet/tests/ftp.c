@@ -66,6 +66,8 @@ static void test_connect(HINTERNET hInternet)
      * anonymous : NULL
      * NULL      : IEUser@
      * NULL      : NULL
+     * ""        : IEUser@
+     * ""        : NULL
      */
 
     SetLastError(0xdeadbeef);
@@ -83,6 +85,13 @@ static void test_connect(HINTERNET hInternet)
     hFtp = InternetConnect(hInternet, "ftp.winehq.org", INTERNET_DEFAULT_FTP_PORT, NULL, "IEUser@", INTERNET_SERVICE_FTP, INTERNET_FLAG_PASSIVE, 0);
     ok ( hFtp == NULL, "Expected InternetConnect to fail\n");
     ok ( GetLastError() == ERROR_INVALID_PARAMETER,
+        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    hFtp = InternetConnect(hInternet, "ftp.winehq.org", INTERNET_DEFAULT_FTP_PORT, "", "IEUser@",
+            INTERNET_SERVICE_FTP, INTERNET_FLAG_PASSIVE, 0);
+    ok(!hFtp, "Expected InternetConnect to fail\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
         "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
 
     /* Using a NULL username and password will be interpreted as anonymous ftp. The username will be 'anonymous' the password
@@ -103,6 +112,20 @@ static void test_connect(HINTERNET hInternet)
     ok ( hFtp != NULL, "InternetConnect failed : %d\n", GetLastError());
     ok ( GetLastError() == ERROR_SUCCESS,
         "ERROR_SUCCESS, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    hFtp = InternetConnect(hInternet, "ftp.winehq.org", INTERNET_DEFAULT_FTP_PORT, "", NULL,
+            INTERNET_SERVICE_FTP, INTERNET_FLAG_PASSIVE, 0);
+    if (!hFtp)
+    {
+        ok(GetLastError() == ERROR_INTERNET_LOGIN_FAILURE,
+                "Expected ERROR_INTERNET_LOGIN_FAILURE, got %d\n", GetLastError());
+    }
+    else
+    {
+        ok(GetLastError() == ERROR_SUCCESS,
+                "Expected ERROR_SUCCESS, got %d\n", GetLastError());
+    }
 }
 
 static void test_createdir(HINTERNET hFtp, HINTERNET hConnect)
@@ -385,7 +408,9 @@ static void test_openfile(HINTERNET hFtp, HINTERNET hConnect)
     SetLastError(0xdeadbeef);
     hOpenFile = FtpOpenFileA(hFtp, "welcome.msg", GENERIC_READ, FTP_TRANSFER_TYPE_ASCII, 0);
     ok ( hOpenFile != NULL, "Expected FtpOpenFileA to succeed\n");
-    ok ( GetLastError() == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", GetLastError());
+    ok ( GetLastError() == ERROR_SUCCESS ||
+        broken(GetLastError() == ERROR_FILE_NOT_FOUND), /* Win98 */
+        "Expected ERROR_SUCCESS, got %u\n", GetLastError());
 
     if (hOpenFile)
     {

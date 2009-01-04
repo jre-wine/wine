@@ -165,7 +165,8 @@ STATIC_IMPLIBEXT = $(IMPLIBEXT:def=def.a)
 
 IMPORT_SYMLINKS = \
 	libd3dx9.$(IMPLIBEXT) \
-	libwinspool.$(IMPLIBEXT)
+	libwinspool.$(IMPLIBEXT) \
+	libxinput.$(IMPLIBEXT)
 
 IMPORT_LIBS = \
 	$(IMPORT_SYMLINKS) \
@@ -198,6 +199,7 @@ IMPORT_LIBS = \
 	cryptui/libcryptui.$(IMPLIBEXT) \
 	ctl3d32/libctl3d32.$(IMPLIBEXT) \
 	d3d10/libd3d10.$(IMPLIBEXT) \
+	d3d10core/libd3d10core.$(IMPLIBEXT) \
 	d3d8/libd3d8.$(IMPLIBEXT) \
 	d3d9/libd3d9.$(IMPLIBEXT) \
 	d3dim/libd3dim.$(IMPLIBEXT) \
@@ -311,11 +313,13 @@ IMPORT_LIBS = \
 	wow32/libwow32.$(IMPLIBEXT) \
 	ws2_32/libws2_32.$(IMPLIBEXT) \
 	wsock32/libwsock32.$(IMPLIBEXT) \
-	wtsapi32/libwtsapi32.$(IMPLIBEXT)
+	wtsapi32/libwtsapi32.$(IMPLIBEXT) \
+	xinput1_3/libxinput.$(IMPLIBEXT)
 
 CROSS_IMPLIBS = \
 	libd3dx9.a \
 	libwinspool.a \
+	libxinput.a \
 	activeds/libactiveds.a \
 	advapi32/libadvapi32.a \
 	advpack/libadvpack.a \
@@ -338,6 +342,7 @@ CROSS_IMPLIBS = \
 	cryptui/libcryptui.a \
 	ctl3d32/libctl3d32.a \
 	d3d10/libd3d10.a \
+	d3d10core/libd3d10core.a \
 	d3d8/libd3d8.a \
 	d3d9/libd3d9.a \
 	d3dim/libd3dim.a \
@@ -449,13 +454,16 @@ CROSS_IMPLIBS = \
 	wow32/libwow32.a \
 	ws2_32/libws2_32.a \
 	wsock32/libwsock32.a \
-	wtsapi32/libwtsapi32.a
+	wtsapi32/libwtsapi32.a \
+	xinput1_3/libxinput.a
 
 $(TESTSUBDIRS:%=%/__crosstest__): $(CROSS_IMPLIBS)
 
 implib: $(IMPORT_LIBS)
 
-.PHONY: implib
+testsubdirs: $(TESTSUBDIRS)
+
+.PHONY: implib testsubdirs
 
 activeds/libactiveds.def activeds/libactiveds.a: activeds/activeds.spec $(WINEBUILD)
 	@cd activeds && $(MAKE) `basename $@`
@@ -522,6 +530,9 @@ ctl3d32/libctl3d32.def ctl3d32/libctl3d32.a: ctl3d32/ctl3d32.spec $(WINEBUILD)
 
 d3d10/libd3d10.def d3d10/libd3d10.a: d3d10/d3d10.spec $(WINEBUILD)
 	@cd d3d10 && $(MAKE) `basename $@`
+
+d3d10core/libd3d10core.def d3d10core/libd3d10core.a: d3d10core/d3d10core.spec $(WINEBUILD)
+	@cd d3d10core && $(MAKE) `basename $@`
 
 d3d8/libd3d8.def d3d8/libd3d8.a: d3d8/d3d8.spec $(WINEBUILD)
 	@cd d3d8 && $(MAKE) `basename $@`
@@ -865,6 +876,9 @@ wsock32/libwsock32.def wsock32/libwsock32.a: wsock32/wsock32.spec $(WINEBUILD)
 wtsapi32/libwtsapi32.def wtsapi32/libwtsapi32.a: wtsapi32/wtsapi32.spec $(WINEBUILD)
 	@cd wtsapi32 && $(MAKE) `basename $@`
 
+xinput1_3/libxinput.def xinput1_3/libxinput.a: xinput1_3/xinput1_3.spec $(WINEBUILD)
+	@cd xinput1_3 && $(MAKE) `basename $@`
+
 libd3dx9.a: d3dx9_36/libd3dx9.a
 	$(RM) $@ && $(LN_S) d3dx9_36/libd3dx9.a $@
 
@@ -876,6 +890,12 @@ libwinspool.a: winspool.drv/libwinspool.a
 
 libwinspool.def: winspool.drv/libwinspool.def
 	$(RM) $@ && $(LN_S) winspool.drv/libwinspool.def $@
+
+libxinput.a: xinput1_3/libxinput.a
+	$(RM) $@ && $(LN_S) xinput1_3/libxinput.a $@
+
+libxinput.def: xinput1_3/libxinput.def
+	$(RM) $@ && $(LN_S) xinput1_3/libxinput.def $@
 
 $(BUILDSUBDIRS): $(IMPORT_LIBS)
 $(INSTALLSUBDIRS:%=%/__install__) $(INSTALLSUBDIRS:%=%/__install-lib__): $(IMPORT_LIBS)

@@ -42,31 +42,106 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
 HRESULT WINAPI D3D10CreateDevice(IDXGIAdapter *adapter, D3D10_DRIVER_TYPE driver_type,
         HMODULE swrast, UINT flags, UINT sdk_version, ID3D10Device **device)
 {
-    struct d3d10_device *object;
+    IDXGIFactory *factory;
+    HRESULT hr;
 
-    FIXME("adapter %p, driver_type %s, swrast %p, flags %#x, sdk_version %d, device %p partial stub!\n",
+    TRACE("adapter %p, driver_type %s, swrast %p, flags %#x, sdk_version %d, device %p\n",
             adapter, debug_d3d10_driver_type(driver_type), swrast, flags, sdk_version, device);
 
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
-    if (!object)
+    if (adapter)
     {
-        ERR("Failed to allocate D3D device object memory\n");
-        return E_OUTOFMEMORY;
+        IDXGIAdapter_AddRef(adapter);
+        hr = IDXGIAdapter_GetParent(adapter, &IID_IDXGIFactory, (void **)&factory);
+        if (FAILED(hr))
+        {
+            WARN("Failed to get dxgi factory, returning %#x\n", hr);
+            return hr;
+        }
+    }
+    else
+    {
+        hr = CreateDXGIFactory(&IID_IDXGIFactory, (void **)&factory);
+        if (FAILED(hr))
+        {
+            WARN("Failed to create dxgi factory, returning %#x\n", hr);
+            return hr;
+        }
+
+        switch(driver_type)
+        {
+            case D3D10_DRIVER_TYPE_HARDWARE:
+            {
+                hr = IDXGIFactory_EnumAdapters(factory, 0, &adapter);
+                if (FAILED(hr))
+                {
+                    WARN("No adapters found, returning %#x\n", hr);
+                    IDXGIFactory_Release(factory);
+                    return hr;
+                }
+                break;
+            }
+
+            case D3D10_DRIVER_TYPE_NULL:
+                FIXME("NULL device not implemented, falling back to refrast\n");
+            case D3D10_DRIVER_TYPE_REFERENCE:
+            {
+                HMODULE refrast = LoadLibraryA("d3d10ref.dll");
+                if (!refrast)
+                {
+                    WARN("Failed to load refrast, returning E_FAIL\n");
+                    IDXGIFactory_Release(factory);
+                    return E_FAIL;
+                }
+                hr = IDXGIFactory_CreateSoftwareAdapter(factory, refrast, &adapter);
+                FreeLibrary(refrast);
+                if (FAILED(hr))
+                {
+                    WARN("Failed to create a software adapter, returning %#x\n", hr);
+                    IDXGIFactory_Release(factory);
+                    return hr;
+                }
+                break;
+            }
+
+            case D3D10_DRIVER_TYPE_SOFTWARE:
+            {
+                if (!swrast)
+                {
+                    WARN("Software device requested, but NULL swrast passed, returning E_FAIL\n");
+                    IDXGIFactory_Release(factory);
+                    return E_FAIL;
+                }
+                hr = IDXGIFactory_CreateSoftwareAdapter(factory, swrast, &adapter);
+                if (FAILED(hr))
+                {
+                    WARN("Failed to create a software adapter, returning %#x\n", hr);
+                    IDXGIFactory_Release(factory);
+                    return hr;
+                }
+                break;
+            }
+        }
     }
 
-    object->vtbl = &d3d10_device_vtbl;
-    object->refcount = 1;
-    *device = (ID3D10Device *)object;
+    hr = D3D10CoreCreateDevice(factory, adapter, flags, 0, device);
+    IDXGIAdapter_Release(adapter);
+    IDXGIFactory_Release(factory);
+    if (FAILED(hr))
+    {
+        WARN("Failed to create a device, returning %#x\n", hr);
+        return hr;
+    }
 
-    TRACE("Created ID3D10Device %p\n", object);
+    TRACE("Created ID3D10Device %p\n", *device);
 
-    return S_OK;
+    return hr;
 }
 
 HRESULT WINAPI D3D10CreateDeviceAndSwapChain(IDXGIAdapter *adapter, D3D10_DRIVER_TYPE driver_type,
         HMODULE swrast, UINT flags, UINT sdk_version, DXGI_SWAP_CHAIN_DESC *swapchain_desc,
         IDXGISwapChain **swapchain, ID3D10Device **device)
 {
+    IDXGIDevice *dxgi_device;
     IDXGIFactory *factory;
     HRESULT hr;
 
@@ -79,22 +154,40 @@ HRESULT WINAPI D3D10CreateDeviceAndSwapChain(IDXGIAdapter *adapter, D3D10_DRIVER
     if (FAILED(hr))
     {
         WARN("Failed to create a device, returning %#x\n", hr);
+        *device = NULL;
         return hr;
     }
 
     TRACE("Created ID3D10Device %p\n", *device);
 
-    hr = CreateDXGIFactory(&IID_IDXGIFactory, (void **)&factory);
+    hr = ID3D10Device_QueryInterface(*device, &IID_IDXGIDevice, (void **)&dxgi_device);
     if (FAILED(hr))
     {
+        ERR("Failed to get a dxgi device from the d3d10 device, returning %#x\n", hr);
         ID3D10Device_Release(*device);
         *device = NULL;
-
-        WARN("Failed to create a DXGI factory, returning %#x\n", hr);
         return hr;
     }
 
-    TRACE("Created IDXGIFactory %p\n", factory);
+    hr = IDXGIDevice_GetAdapter(dxgi_device, &adapter);
+    IDXGIDevice_Release(dxgi_device);
+    if (FAILED(hr))
+    {
+        ERR("Failed to get the device adapter, returning %#x\n", hr);
+        ID3D10Device_Release(*device);
+        *device = NULL;
+        return hr;
+    }
+
+    hr = IDXGIAdapter_GetParent(adapter, &IID_IDXGIFactory, (void **)&factory);
+    IDXGIAdapter_Release(adapter);
+    if (FAILED(hr))
+    {
+        ERR("Failed to get the adapter factory, returning %#x\n", hr);
+        ID3D10Device_Release(*device);
+        *device = NULL;
+        return hr;
+    }
 
     hr = IDXGIFactory_CreateSwapChain(factory, (IUnknown *)*device, swapchain_desc, swapchain);
     IDXGIFactory_Release(factory);

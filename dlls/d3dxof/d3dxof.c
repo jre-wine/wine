@@ -38,7 +38,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3dxof);
 
 #define MAKEFOUR(a,b,c,d) ((DWORD)a + ((DWORD)b << 8) + ((DWORD)c << 16) + ((DWORD)d << 24))
 #define XOFFILE_FORMAT_MAGIC         MAKEFOUR('x','o','f',' ')
-#define XOFFILE_FORMAT_VERSION       MAKEFOUR('0','3','0','2')
+#define XOFFILE_FORMAT_VERSION_302   MAKEFOUR('0','3','0','2')
+#define XOFFILE_FORMAT_VERSION_303   MAKEFOUR('0','3','0','3')
 #define XOFFILE_FORMAT_BINARY        MAKEFOUR('b','i','n',' ')
 #define XOFFILE_FORMAT_TEXT          MAKEFOUR('t','x','t',' ')
 #define XOFFILE_FORMAT_COMPRESSED    MAKEFOUR('c','m','p',' ')
@@ -79,8 +80,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3dxof);
 
 #define CLSIDFMT "<%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X>"
 
-#define MAX_INPUT_SIZE 1000000
-#define MAX_DATA_SIZE 100000
+#define MAX_INPUT_SIZE 2000000
+#define MAX_DATA_SIZE 200000
 
 static const struct IDirectXFileVtbl IDirectXFile_Vtbl;
 static const struct IDirectXFileBinaryVtbl IDirectXFileBinary_Vtbl;
@@ -93,6 +94,8 @@ static const struct IDirectXFileSaveObjectVtbl IDirectXFileSaveObject_Vtbl;
 static BOOL parse_object_parts(parse_buffer * buf, BOOL allow_optional);
 static BOOL parse_object(parse_buffer * buf);
 static const char* get_primitive_string(WORD token);
+static WORD check_TOKEN(parse_buffer * buf);
+static BOOL parse_template(parse_buffer * buf);
 
 static void dump_template(xtemplate* templates_array, xtemplate* ptemplate)
 {
@@ -202,6 +205,7 @@ static HRESULT WINAPI IDirectXFileImpl_CreateEnumObject(IDirectXFile* iface, LPV
   DWORD header[4];
   DWORD size;
   HANDLE hFile = INVALID_HANDLE_VALUE;
+  LPDXFILELOADMEMORY lpdxflm = NULL;
 
   TRACE("(%p/%p)->(%p,%x,%p)\n", This, iface, pvSource, dwLoadOptions, ppEnumObj);
 
@@ -230,14 +234,14 @@ static HRESULT WINAPI IDirectXFileImpl_CreateEnumObject(IDirectXFile* iface, LPV
       hr = DXFILEERR_BADFILETYPE;
       goto error;
     }
+  }
+  else if (dwLoadOptions == DXFILELOAD_FROMMEMORY)
+  {
+    lpdxflm = (LPDXFILELOADMEMORY)pvSource;
 
-    if (TRACE_ON(d3dxof))
-    {
-      char string[17];
-      memcpy(string, header, 16);
-      string[16] = 0;
-      TRACE("header = '%s'\n", string);
-    }
+    TRACE("Source in memory at %p with size %d\n", lpdxflm->lpMemory, lpdxflm->dSize);
+
+    memcpy(header, (char*)lpdxflm->lpMemory, 16);
   }
   else
   {
@@ -246,13 +250,21 @@ static HRESULT WINAPI IDirectXFileImpl_CreateEnumObject(IDirectXFile* iface, LPV
     goto error;
   }
 
+  if (TRACE_ON(d3dxof))
+  {
+    char string[17];
+    memcpy(string, header, 16);
+    string[16] = 0;
+    TRACE("header = '%s'\n", string);
+  }
+
   if (header[0] != XOFFILE_FORMAT_MAGIC)
   {
     hr = DXFILEERR_BADFILETYPE;
     goto error;
   }
 
-  if (header[1] != XOFFILE_FORMAT_VERSION)
+  if ((header[1] != XOFFILE_FORMAT_VERSION_302) && (header[1] != XOFFILE_FORMAT_VERSION_303))
   {
     hr = DXFILEERR_BADFILEVERSION;
     goto error;
@@ -261,13 +273,6 @@ static HRESULT WINAPI IDirectXFileImpl_CreateEnumObject(IDirectXFile* iface, LPV
   if ((header[2] != XOFFILE_FORMAT_BINARY) && (header[2] != XOFFILE_FORMAT_TEXT) && (header[2] != XOFFILE_FORMAT_COMPRESSED))
   {
     hr = DXFILEERR_BADFILETYPE;
-    goto error;
-  }
-
-  if (header[2] == XOFFILE_FORMAT_BINARY)
-  {
-    FIXME("Binary format not supported yet\n");
-    hr = DXFILEERR_NOTDONEYET;
     goto error;
   }
 
@@ -294,29 +299,62 @@ static HRESULT WINAPI IDirectXFileImpl_CreateEnumObject(IDirectXFile* iface, LPV
   object->hFile = hFile;
   object->pDirectXFile = This;
   object->buf.pdxf = This;
-  object->buf.txt = TRUE;
+  object->buf.txt = (header[2] == XOFFILE_FORMAT_TEXT);
   object->buf.token_present = FALSE;
   object->buf.cur_subobject = 0;
 
-  object->buf.buffer = HeapAlloc(GetProcessHeap(), 0, MAX_INPUT_SIZE+1);
-  if (!object->buf.buffer)
+  if (dwLoadOptions == DXFILELOAD_FROMFILE)
   {
-    WARN("Out of memory\n");
-    hr = DXFILEERR_BADALLOC;
-    goto error;
+    object->buf.buffer = HeapAlloc(GetProcessHeap(), 0, MAX_INPUT_SIZE+1);
+    if (!object->buf.buffer)
+    {
+      WARN("Out of memory\n");
+      hr = DXFILEERR_BADALLOC;
+      goto error;
+    }
+
+    ReadFile(hFile, object->buf.buffer, MAX_INPUT_SIZE+1, &object->buf.rem_bytes, NULL);
+    if (object->buf.rem_bytes > MAX_INPUT_SIZE)
+    {
+      FIXME("File size > %d not supported yet\n", MAX_INPUT_SIZE);
+      HeapFree(GetProcessHeap(), 0, object->buf.buffer);
+      hr = DXFILEERR_PARSEERROR;
+      goto error;
+    }
+  }
+  else
+  {
+    object->buf.buffer = ((LPBYTE)lpdxflm->lpMemory) + 16;
+    object->buf.rem_bytes = lpdxflm->dSize;
   }
 
-  ReadFile(hFile, object->buf.buffer, MAX_INPUT_SIZE+1, &object->buf.rem_bytes, NULL);
-  if (object->buf.rem_bytes > MAX_INPUT_SIZE)
-  {
-    FIXME("File size > %d not supported yet\n", MAX_INPUT_SIZE);
-    HeapFree(GetProcessHeap(), 0, object->buf.buffer);
-    hr = DXFILEERR_PARSEERROR;
-    goto error;
-  }
   TRACE("Read %d bytes\n", object->buf.rem_bytes);
 
   *ppEnumObj = (LPDIRECTXFILEENUMOBJECT)object;
+
+  while (object->buf.rem_bytes && (check_TOKEN(&object->buf) == TOKEN_TEMPLATE))
+  {
+    if (!parse_template(&object->buf))
+    {
+      TRACE("Template is not correct\n");
+      hr = DXFILEERR_BADVALUE;
+      goto error;
+    }
+    else
+    {
+      TRACE("Template successfully parsed:\n");
+      if (TRACE_ON(d3dxof))
+        dump_template(This->xtemplates, &This->xtemplates[This->nb_xtemplates - 1]);
+    }
+  }
+
+  if (TRACE_ON(d3dxof))
+  {
+    int i;
+    TRACE("Registered templates (%d):\n", This->nb_xtemplates);
+    for (i = 0; i < This->nb_xtemplates; i++)
+      DPRINTF("%s - %s\n", This->xtemplates[i].name, debugstr_guid(&This->xtemplates[i].class_id));
+  }
 
   return DXFILE_OK;
 
@@ -561,7 +599,7 @@ static BOOL is_name(parse_buffer* buf)
   BOOL error = 0;
   while (!is_separator(c = *(buf->buffer+pos)))
   {
-    if (!(((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) || ((c >= '0') && (c <= '9')) || (c == '_')))
+    if (!(((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) || ((c >= '0') && (c <= '9')) || (c == '_') || (c == '-')))
       error = 1;
     tmp[pos++] = c;
   }
@@ -642,22 +680,21 @@ static BOOL is_integer(parse_buffer* buf)
 static BOOL is_string(parse_buffer* buf)
 {
   char tmp[32];
-  DWORD pos = 1;
+  DWORD pos = 0;
   char c;
   BOOL ok = 0;
 
   if (*buf->buffer != '"')
     return FALSE;
-  tmp[0] = '"';
 
-  while (!is_separator(c = *(buf->buffer+pos)) && (pos < 32))
+  while (!is_separator(c = *(buf->buffer+pos+1)) && (pos < 31))
   {
-    tmp[pos++] = c;
     if (c == '"')
     {
       ok = 1;
       break;
     }
+    tmp[pos++] = c;
   }
   tmp[pos] = 0;
 
@@ -667,8 +704,8 @@ static BOOL is_string(parse_buffer* buf)
     return FALSE;
   }
 
-  buf->buffer += pos;
-  buf->rem_bytes -= pos;
+  buf->buffer += pos + 2;
+  buf->rem_bytes -= pos + 2;
 
   TRACE("Found string %s\n", tmp);
   strcpy((char*)buf->value, tmp);
@@ -759,10 +796,50 @@ static WORD parse_TOKEN(parse_buffer * buf)
   }
   else
   {
-    if (!read_bytes(buf, &token, 2))
-      return 0;
+    static int nb_elem;
+    static int is_float;
 
-    switch(token)
+    if (!nb_elem)
+    {
+      if (!read_bytes(buf, &token, 2))
+        return 0;
+
+      /* Convert integer and float list into sereparate elements */
+      if (token == TOKEN_INTEGER_LIST)
+      {
+        if (!read_bytes(buf, &nb_elem, 4))
+          return 0;
+        token = TOKEN_INTEGER;
+        is_float = FALSE;
+        TRACE("Integer list (TOKEN_INTEGER_LIST) of size %d\n", nb_elem);
+      }
+      else if (token == TOKEN_FLOAT_LIST)
+      {
+        if (!read_bytes(buf, &nb_elem, 4))
+          return 0;
+        token = TOKEN_FLOAT;
+        is_float = TRUE;
+        TRACE("Float list (TOKEN_FLOAT_LIST) of size %d\n", nb_elem);
+      }
+    }
+
+    if (nb_elem)
+    {
+      token = is_float ? TOKEN_FLOAT : TOKEN_INTEGER;
+      nb_elem--;
+        {
+          DWORD integer;
+
+          if (!read_bytes(buf, &integer, 4))
+            return 0;
+
+          *(DWORD*)buf->value = integer;
+        }
+      dump_TOKEN(token);
+      return token;
+    }
+
+    switch (token)
     {
       case TOKEN_NAME:
         {
@@ -792,7 +869,7 @@ static WORD parse_TOKEN(parse_buffer * buf)
         break;
       case TOKEN_GUID:
         {
-          char strguid[38];
+          char strguid[39];
           GUID class_id;
 
           if (!read_bytes(buf, &class_id, 16))
@@ -806,8 +883,25 @@ static WORD parse_TOKEN(parse_buffer * buf)
         }
         break;
       case TOKEN_STRING:
-      case TOKEN_INTEGER_LIST:
-      case TOKEN_FLOAT_LIST:
+        {
+          DWORD count;
+          WORD tmp_token;
+          char strname[100];
+          if (!read_bytes(buf, &count, 4))
+            return 0;
+          if (!read_bytes(buf, strname, count))
+            return 0;
+          strname[count] = 0;
+          if (!read_bytes(buf, &tmp_token, 2))
+            return 0;
+          if ((tmp_token != TOKEN_COMMA) && (tmp_token != TOKEN_SEMICOLON))
+            ERR("No comma or semicolon (got %d)\n", tmp_token);
+          /*TRACE("name = %s\n", strname);*/
+
+          strcpy((char*)buf->value, strname);
+          token = TOKEN_LPSTR;
+        }
+        break;
       case TOKEN_OBRACE:
       case TOKEN_CBRACE:
       case TOKEN_OPAREN:
@@ -1128,7 +1222,7 @@ static HRESULT WINAPI IDirectXFileImpl_RegisterTemplates(IDirectXFile* iface, LP
 
   read_bytes(&buf, &token_header, 4);
 
-  if (token_header != XOFFILE_FORMAT_VERSION)
+  if ((token_header != XOFFILE_FORMAT_VERSION_302) && (token_header != XOFFILE_FORMAT_VERSION_303))
     return DXFILEERR_BADFILEVERSION;
 
   read_bytes(&buf, &token_header, 4);
@@ -1714,7 +1808,10 @@ static ULONG WINAPI IDirectXFileEnumObjectImpl_Release(IDirectXFileEnumObject* i
   TRACE("(%p/%p): ReleaseRef to %d\n", iface, This, ref);
 
   if (!ref)
+  {
+    CloseHandle(This->hFile);
     HeapFree(GetProcessHeap(), 0, This);
+  }
 
   return ref;
 }
@@ -1756,7 +1853,7 @@ static BOOL parse_object_members_list(parse_buffer * buf)
 
     for (k = 0; k < nb_elems; k++)
     {
-      if (k)
+      if (buf->txt && k)
       {
         token = check_TOKEN(buf);
         if (token == TOKEN_COMMA)
@@ -1811,9 +1908,9 @@ static BOOL parse_object_members_list(parse_buffer * buf)
           last_dword = *(DWORD*)buf->value;
           TRACE("%s = %d\n", pt->members[i].name, *(DWORD*)buf->value);
           /* Assume larger size */
-          if ((buf->cur_pdata - buf->pxo->pdata + 4) > MAX_DATA_SIZE)
+          if ((buf->cur_pdata - buf->pdata + 4) > MAX_DATA_SIZE)
           {
-            WARN("Buffer too small\n");
+            FIXME("Buffer too small\n");
             return FALSE;
           }
           if (pt->members[i].type == TOKEN_WORD)
@@ -1837,9 +1934,9 @@ static BOOL parse_object_members_list(parse_buffer * buf)
           get_TOKEN(buf);
           TRACE("%s = %f\n", pt->members[i].name, *(float*)buf->value);
           /* Assume larger size */
-          if ((buf->cur_pdata - buf->pxo->pdata + 4) > MAX_DATA_SIZE)
+          if ((buf->cur_pdata - buf->pdata + 4) > MAX_DATA_SIZE)
           {
-            WARN("Buffer too small\n");
+            FIXME("Buffer too small\n");
             return FALSE;
           }
           if (pt->members[i].type == TOKEN_FLOAT)
@@ -1855,19 +1952,25 @@ static BOOL parse_object_members_list(parse_buffer * buf)
         }
         else if (token == TOKEN_LPSTR)
         {
-          static char fake_string[] = "Fake string";
           get_TOKEN(buf);
           TRACE("%s = %s\n", pt->members[i].name, (char*)buf->value);
           /* Assume larger size */
-          if ((buf->cur_pdata - buf->pxo->pdata + 4) > MAX_DATA_SIZE)
+          if ((buf->cur_pdata - buf->pdata + 4) > MAX_DATA_SIZE)
           {
-            WARN("Buffer too small\n");
+            FIXME("Buffer too small\n");
             return FALSE;
           }
           if (pt->members[i].type == TOKEN_LPSTR)
           {
-            /* Use a fake string for now */
-            *(((LPCSTR*)(buf->cur_pdata))) = fake_string;
+            int len = strlen((char*)buf->value) + 1;
+            if ((buf->cur_pstrings - buf->pstrings + len) > MAX_STRINGS_BUFFER)
+            {
+              FIXME("Buffer too small %p %p %d\n", buf->cur_pstrings, buf->pstrings, len);
+              return FALSE;
+            }
+            strcpy((char*)buf->cur_pstrings, (char*)buf->value);
+            *(((LPCSTR*)(buf->cur_pdata))) = (char*)buf->cur_pstrings;
+            buf->cur_pstrings += len;
             buf->cur_pdata += 4;
           }
           else
@@ -1884,13 +1987,16 @@ static BOOL parse_object_members_list(parse_buffer * buf)
       }
     }
 
-    token = get_TOKEN(buf);
-    if (token != TOKEN_SEMICOLON)
+    if (buf->txt)
     {
-      /* Allow comma instead of semicolon in some specific cases */
-      if (!((token == TOKEN_COMMA) && ((i+1) < pt->nb_members) && (pt->members[i].type == pt->members[i+1].type)
-        && (!pt->members[i].nb_dims) && (!pt->members[i+1].nb_dims)))
-        return FALSE;
+      token = get_TOKEN(buf);
+      if (token != TOKEN_SEMICOLON)
+      {
+        /* Allow comma instead of semicolon in some specific cases */
+        if (!((token == TOKEN_COMMA) && ((i+1) < pt->nb_members) && (pt->members[i].type == pt->members[i+1].type)
+          && (!pt->members[i].nb_dims) && (!pt->members[i+1].nb_dims)))
+          return FALSE;
+      }
     }
   }
 
@@ -1958,6 +2064,12 @@ _exit:
       else
         break;
     }
+  }
+
+  if (buf->pxo->nb_childs > MAX_CHILDS)
+  {
+    FIXME("Too many childs %d\n", buf->pxo->nb_childs);
+    return FALSE;
   }
 
   return TRUE;
@@ -2032,8 +2144,15 @@ static HRESULT WINAPI IDirectXFileEnumObjectImpl_GetNextDataObject(IDirectXFileE
   IDirectXFileDataImpl* object;
   HRESULT hr;
   LPBYTE pdata;
+  LPBYTE pstrings;
 
   TRACE("(%p/%p)->(%p)\n", This, iface, ppDataObj);
+
+  if (This->nb_xobjects >= MAX_OBJECTS)
+  {
+    ERR("Too many objects\n");
+    return DXFILEERR_NOMOREOBJECTS;
+  }
 
   if (!This->buf.rem_bytes)
     return DXFILEERR_NOMOREOBJECTS;
@@ -2047,6 +2166,7 @@ static HRESULT WINAPI IDirectXFileEnumObjectImpl_GetNextDataObject(IDirectXFileE
   This->buf.pxo_tab = &This->xobjects[This->nb_xobjects][0];
   This->buf.cur_subobject = 0;
   This->buf.pxo = &This->buf.pxo_tab[This->buf.cur_subobject++];
+  This->buf.level = 0;
 
   pdata = HeapAlloc(GetProcessHeap(), 0, MAX_DATA_SIZE);
   if (!pdata)
@@ -2054,18 +2174,33 @@ static HRESULT WINAPI IDirectXFileEnumObjectImpl_GetNextDataObject(IDirectXFileE
     WARN("Out of memory\n");
     return DXFILEERR_BADALLOC;
   }
-  This->buf.cur_pdata = pdata;
-  This->buf.level = 0;
+  This->buf.cur_pdata = This->buf.pdata = pdata;
+
+  pstrings = HeapAlloc(GetProcessHeap(), 0, MAX_STRINGS_BUFFER);
+  if (!pstrings)
+  {
+    WARN("Out of memory\n");
+    HeapFree(GetProcessHeap(), 0, This->buf.pxo->pdata);
+    return DXFILEERR_BADALLOC;
+  }
+  This->buf.cur_pstrings = This->buf.pstrings = pstrings;
 
   if (!parse_object(&This->buf))
   {
     TRACE("Object is not correct\n");
     HeapFree(GetProcessHeap(), 0, This->buf.pxo->pdata);
+    HeapFree(GetProcessHeap(), 0, This->buf.pstrings);
     return DXFILEERR_PARSEERROR;
   }
 
   This->buf.pxo->nb_subobjects = This->buf.cur_subobject;
+  if (This->buf.cur_subobject > MAX_SUBOBJECTS)
+  {
+    FIXME("Too many suobjects %d\n", This->buf.cur_subobject);
+    return DXFILEERR_BADALLOC;
+  }
 
+  object->pstrings = pstrings;
   object->pobj = This->buf.pxo;
   object->cur_enum_object = 0;
   object->level = 0;

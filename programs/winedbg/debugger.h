@@ -395,6 +395,14 @@ extern void             symbol_info(const char* str);
 extern void             symbol_print_local(const SYMBOL_INFO* sym, ULONG base, BOOL detailed);
 extern int              symbol_info_locals(void);
 extern BOOL             symbol_is_local(const char* name);
+struct sgv_data;
+typedef enum sym_get_lval (*symbol_picker_t)(const char* name, const struct sgv_data* sgv,
+                                             struct dbg_lvalue* rtn);
+extern symbol_picker_t symbol_current_picker;
+extern enum sym_get_lval symbol_picker_interactive(const char* name, const struct sgv_data* sgv,
+                                                   struct dbg_lvalue* rtn);
+extern enum sym_get_lval symbol_picker_scoped(const char* name, const struct sgv_data* sgv,
+                                              struct dbg_lvalue* rtn);
 
   /* tgt_active.c */
 extern void             dbg_run_debuggee(const char* args);
@@ -450,7 +458,7 @@ extern void             dbg_del_thread(struct dbg_thread* t);
 extern BOOL             dbg_init(HANDLE hProc, const WCHAR* in, BOOL invade);
 extern BOOL             dbg_load_module(HANDLE hProc, HANDLE hFile, const WCHAR* name, DWORD base, DWORD size);
 extern BOOL             dbg_get_debuggee_info(HANDLE hProcess, IMAGEHLP_MODULE* imh_mod);
-extern void             dbg_set_option(const char*, BOOL);
+extern void             dbg_set_option(const char*, const char*);
 
   /* gdbproxy.c */
 extern int              gdb_main(int argc, char* argv[]);

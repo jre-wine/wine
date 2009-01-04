@@ -8874,7 +8874,6 @@ static void test_PeekMessage(void)
     DWORD tid, qstatus;
     UINT qs_all_input = QS_ALLINPUT;
     UINT qs_input = QS_INPUT;
-    UINT qs_sendmessage = 0;
     BOOL ret;
     struct peekmsg_info info;
 
@@ -8965,11 +8964,10 @@ static void test_PeekMessage(void)
     ok(!ret,
        "PeekMessageA should have returned FALSE instead of msg %04x\n",
         msg.message);
-    if (!sequence_cnt)  /* nt4 needs explicit PM_QS_SENDMESSAGE to process sent messages */
+    if (!sequence_cnt)  /* nt4 doesn't fetch anything with PM_QS_* flags */
     {
-        qs_sendmessage = QS_SENDMESSAGE;
-        ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | ((qs_input|qs_sendmessage) << 16));
-        ok(!ret, "PeekMessageA should have returned FALSE instead of msg %04x\n", msg.message);
+        win_skip( "PM_QS_* flags not supported in PeekMessage\n" );
+        goto done;
     }
     ok_sequence(WmUser, "WmUser", FALSE);
 
@@ -8986,7 +8984,7 @@ static void test_PeekMessage(void)
        "wrong qstatus %08x\n", qstatus);
 
     msg.message = 0;
-    ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | PM_QS_POSTMESSAGE | (qs_sendmessage << 16) );
+    ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | PM_QS_POSTMESSAGE );
     ok(!ret,
        "PeekMessageA should have returned FALSE instead of msg %04x\n",
         msg.message);
@@ -9222,19 +9220,25 @@ todo_wine {
     qstatus = GetQueueStatus(qs_all_input);
     ok(qstatus == MAKELONG(QS_POSTMESSAGE, QS_POSTMESSAGE|QS_KEY), "wrong qstatus %08x\n", qstatus);
 
-    ret = GetMessageA( &msg, 0, 0, 0 );
-    ok(ret && msg.message == WM_CHAR && msg.wParam == 'z',
-       "got %d and %04x wParam %08lx instead of TRUE and WM_CHAR wParam 'z'\n",
-       ret, msg.message, msg.wParam);
-    qstatus = GetQueueStatus(qs_all_input);
-    ok(qstatus == MAKELONG(0, QS_KEY), "wrong qstatus %08x\n", qstatus);
+    if (qstatus)
+    {
+        ret = GetMessageA( &msg, 0, 0, 0 );
+        ok(ret && msg.message == WM_CHAR && msg.wParam == 'z',
+           "got %d and %04x wParam %08lx instead of TRUE and WM_CHAR wParam 'z'\n",
+           ret, msg.message, msg.wParam);
+        qstatus = GetQueueStatus(qs_all_input);
+        ok(qstatus == MAKELONG(0, QS_KEY), "wrong qstatus %08x\n", qstatus);
+    }
 
-    ret = GetMessageA( &msg, 0, 0, 0 );
-    ok(ret && msg.message == WM_KEYDOWN && msg.wParam == 'N',
-       "got %d and %04x wParam %08lx instead of TRUE and WM_KEYDOWN wParam 'N'\n",
-       ret, msg.message, msg.wParam);
-    qstatus = GetQueueStatus(qs_all_input);
-    ok(qstatus == 0, "wrong qstatus %08x\n", qstatus);
+    if (qstatus)
+    {
+        ret = GetMessageA( &msg, 0, 0, 0 );
+        ok(ret && msg.message == WM_KEYDOWN && msg.wParam == 'N',
+           "got %d and %04x wParam %08lx instead of TRUE and WM_KEYDOWN wParam 'N'\n",
+           ret, msg.message, msg.wParam);
+        qstatus = GetQueueStatus(qs_all_input);
+        ok(qstatus == 0, "wrong qstatus %08x\n", qstatus);
+    }
 
     keybd_event('N', 0, 0, 0);
     qstatus = GetQueueStatus(qs_all_input);
@@ -9244,19 +9248,25 @@ todo_wine {
     qstatus = GetQueueStatus(qs_all_input);
     ok(qstatus == MAKELONG(QS_POSTMESSAGE, QS_POSTMESSAGE|QS_KEY), "wrong qstatus %08x\n", qstatus);
 
-    ret = GetMessageA( &msg, 0, WM_KEYDOWN, WM_KEYUP );
-    ok(ret && msg.message == WM_KEYDOWN && msg.wParam == 'N',
-       "got %d and %04x wParam %08lx instead of TRUE and WM_KEYDOWN wParam 'N'\n",
-       ret, msg.message, msg.wParam);
-    qstatus = GetQueueStatus(qs_all_input);
-    ok(qstatus == MAKELONG(0, QS_POSTMESSAGE), "wrong qstatus %08x\n", qstatus);
+    if (qstatus & (QS_KEY << 16))
+    {
+        ret = GetMessageA( &msg, 0, WM_KEYDOWN, WM_KEYUP );
+        ok(ret && msg.message == WM_KEYDOWN && msg.wParam == 'N',
+           "got %d and %04x wParam %08lx instead of TRUE and WM_KEYDOWN wParam 'N'\n",
+           ret, msg.message, msg.wParam);
+        qstatus = GetQueueStatus(qs_all_input);
+        ok(qstatus == MAKELONG(0, QS_POSTMESSAGE), "wrong qstatus %08x\n", qstatus);
+    }
 
-    ret = GetMessageA( &msg, 0, WM_CHAR, WM_CHAR );
-    ok(ret && msg.message == WM_CHAR && msg.wParam == 'z',
-       "got %d and %04x wParam %08lx instead of TRUE and WM_CHAR wParam 'z'\n",
-       ret, msg.message, msg.wParam);
-    qstatus = GetQueueStatus(qs_all_input);
-    ok(qstatus == 0, "wrong qstatus %08x\n", qstatus);
+    if (qstatus)
+    {
+        ret = GetMessageA( &msg, 0, WM_CHAR, WM_CHAR );
+        ok(ret && msg.message == WM_CHAR && msg.wParam == 'z',
+           "got %d and %04x wParam %08lx instead of TRUE and WM_CHAR wParam 'z'\n",
+           ret, msg.message, msg.wParam);
+        qstatus = GetQueueStatus(qs_all_input);
+        ok(qstatus == 0, "wrong qstatus %08x\n", qstatus);
+    }
 
     keybd_event('N', 0, KEYEVENTF_KEYUP, 0);
     qstatus = GetQueueStatus(qs_all_input);
@@ -9273,21 +9283,26 @@ todo_wine {
     ok(qstatus == MAKELONG(QS_SENDMESSAGE, QS_SENDMESSAGE|QS_POSTMESSAGE|QS_KEY),
        "wrong qstatus %08x\n", qstatus);
 
-    ret = GetMessageA( &msg, 0, WM_KEYDOWN, WM_KEYUP );
-    ok(ret && msg.message == WM_KEYUP && msg.wParam == 'N',
-       "got %d and %04x wParam %08lx instead of TRUE and WM_KEYDOWN wParam 'N'\n",
-       ret, msg.message, msg.wParam);
-    ok_sequence(WmUser, "WmUser", FALSE);
-    qstatus = GetQueueStatus(qs_all_input);
-    ok(qstatus == MAKELONG(0, QS_POSTMESSAGE), "wrong qstatus %08x\n", qstatus);
+    if (qstatus & (QS_KEY << 16))
+    {
+        ret = GetMessageA( &msg, 0, WM_KEYDOWN, WM_KEYUP );
+        ok(ret && msg.message == WM_KEYUP && msg.wParam == 'N',
+           "got %d and %04x wParam %08lx instead of TRUE and WM_KEYDOWN wParam 'N'\n",
+           ret, msg.message, msg.wParam);
+        ok_sequence(WmUser, "WmUser", FALSE);
+        qstatus = GetQueueStatus(qs_all_input);
+        ok(qstatus == MAKELONG(0, QS_POSTMESSAGE), "wrong qstatus %08x\n", qstatus);
+    }
 
-    ret = GetMessageA( &msg, 0, WM_CHAR, WM_CHAR );
-    ok(ret && msg.message == WM_CHAR && msg.wParam == 'z',
-       "got %d and %04x wParam %08lx instead of TRUE and WM_CHAR wParam 'z'\n",
-       ret, msg.message, msg.wParam);
-    qstatus = GetQueueStatus(qs_all_input);
-    ok(qstatus == 0, "wrong qstatus %08x\n", qstatus);
-
+    if (qstatus)
+    {
+        ret = GetMessageA( &msg, 0, WM_CHAR, WM_CHAR );
+        ok(ret && msg.message == WM_CHAR && msg.wParam == 'z',
+           "got %d and %04x wParam %08lx instead of TRUE and WM_CHAR wParam 'z'\n",
+           ret, msg.message, msg.wParam);
+        qstatus = GetQueueStatus(qs_all_input);
+        ok(qstatus == 0, "wrong qstatus %08x\n", qstatus);
+    }
 done:
     trace("signalling to exit\n");
     SetEvent(info.hevent[EV_STOP]);

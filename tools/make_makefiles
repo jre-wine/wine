@@ -237,7 +237,7 @@ sub update_makefiles(@)
         my $args = "";
         if ($rules eq $makerules{"MAKE_DLL_RULES"}) { $args = ",[dlls],[ALL_DLL_DIRS]"; }
         elsif ($rules eq $makerules{"MAKE_IMPLIB_RULES"}) { $args = ",[dlls],[ALL_IMPLIB_DIRS]"; }
-        elsif ($rules eq $makerules{"MAKE_TEST_RULES"}) { $args = ",[dlls],[ALL_TEST_DIRS]"; }
+        elsif ($rules eq $makerules{"MAKE_TEST_RULES"}) { $args = ",[dlls],[ALL_TEST_DIRS],[enable_tests]"; }
         elsif ($rules eq $makerules{"MAKE_PROG_RULES"})
         {
             (my $name = $file) =~ s/^programs\/(.*)\/Makefile/$1/;
@@ -413,7 +413,8 @@ sub update_dlls(@)
     $text .= "\n\n";
     $text .= "\$(TESTSUBDIRS:%=%/__crosstest__): \$(CROSS_IMPLIBS)\n\n";
     $text .= "implib: \$(IMPORT_LIBS)\n\n";
-    $text .= ".PHONY: implib\n\n";
+    $text .= "testsubdirs: \$(TESTSUBDIRS)\n\n";
+    $text .= ".PHONY: implib testsubdirs\n\n";
 
     foreach my $mod (sort keys %importlibs)
     {

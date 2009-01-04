@@ -416,6 +416,11 @@ static void test_format_object(void)
     ok(ret, "CryptFormatObject failed: %d\n", GetLastError());
     if (ret)
     {
+        if (size == 0 && GetLastError() == ERROR_FILE_NOT_FOUND)
+        {
+            win_skip("CryptFormatObject has no default implementation\n");
+            return;
+        }
         ok(size == sizeof(WCHAR), "unexpected size %d\n", size);
         str = HeapAlloc(GetProcessHeap(), 0, size);
         SetLastError(0xdeadbeef);
@@ -452,7 +457,7 @@ static void test_format_object(void)
         ret = pCryptFormatObject(X509_ASN_ENCODING, 0, 0, NULL, NULL,
          encodedBigInt, sizeof(encodedBigInt), str, &size);
         ok(ret, "CryptFormatObject failed: %d\n", GetLastError());
-        ok(!lstrcmpW(str, encodedBigIntStr), "unexpected format string\n");
+        ok(!lstrcmpiW(str, encodedBigIntStr), "unexpected format string\n");
         HeapFree(GetProcessHeap(), 0, str);
     }
     /* When called with the default encoding type for any undefined struct
@@ -462,8 +467,10 @@ static void test_format_object(void)
     SetLastError(0xdeadbeef);
     ret = pCryptFormatObject(X509_ASN_ENCODING, 0, CRYPT_FORMAT_STR_NO_HEX,
      NULL, NULL, NULL, 0, NULL, &size);
-    ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
-     "expected ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
+    ok(!ret, "CryptFormatObject succeeded\n");
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND ||
+     GetLastError() == 0xdeadbeef, /* Vista, W2K8 */
+     "expected ERROR_FILE_NOT_FOUND or no change, got %d\n", GetLastError());
     /* When called to format an AUTHORITY_KEY_ID2_INFO, it fails when no
      * data are given.
      */

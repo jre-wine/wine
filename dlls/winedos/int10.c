@@ -171,7 +171,7 @@ static const INT10_MODE INT10_modelist[] =
     {0x0001,    TEXT, 40, 25,  9, 16,  360,  400,  0,  16, 8, TRUE},   /* VGA text mode 1 */
     {0x0002,    TEXT, 80, 25,  9, 16,  360,  400,  0,  16, 8, TRUE},   /* VGA text mode 2 */
     {0x0003,    TEXT, 80, 25,  9, 16,  360,  400,  0,  16, 8, TRUE},   /* VGA text mode 3 */
-    {0x0004, GRAPHIC, 40, 25,  8,  8,  320,  200,  2,   4, 1, FALSE},   /* VGA graphics mode 4 */
+    {0x0004, GRAPHIC, 40, 25,  8,  8,  320,  200,  2,   4, 1, TRUE},   /* VGA graphics mode 4 */
     {0x0005, GRAPHIC, 40, 25,  8,  8,  320,  200,  2,   4, 1, FALSE},   /* VGA graphics mode 5 */
     {0x0006, GRAPHIC, 80, 25,  8,  8,  640,  200,  1,   2, 1, FALSE},   /* VGA graphics mode 6 */
     {0x0007,    TEXT, 80, 25,  9, 16,  720,  400,  0,   0, 8, FALSE},   /* VGA text mode 7 - FIXME bad default address */
@@ -1242,11 +1242,27 @@ void WINAPI DOSVM_Int10Handler( CONTEXT86 *context )
                apparently, the foreground or attribute of the background
                with this call, so we should check first to see what the
                foreground already is... FIXME */
-            FIXME("Set Background/Border Color: %d/%d\n",
-               BH_reg(context), BL_reg(context));
+
+            /* For CGA modes, background color change is the same as writing
+               to I/O address 0x3d9 bit 4  */
+            if(data->VideoMode >= 4 && data->VideoMode <= 6)
+            {
+              VGA_SetBright((BL_reg(context) & 0x10) && 1);
+              VGA_UpdatePalette();
+            }
+            else FIXME("Set Background/Border Color: %d/%d\n",
+              BH_reg(context), BL_reg(context));
             break;
         case 0x01: /* SET PALETTE */
-            FIXME("Set Palette - Not Supported\n");
+
+            /* For CGA modes, palette color change is the same as writing
+               to I/O address 0x3d9 bit 5 */
+            if(data->VideoMode >= 4 && data->VideoMode <= 6)
+	    {
+              VGA_SetPaletteIndex(BL_reg(context) & 1);
+              VGA_UpdatePalette();
+            }
+            else FIXME("Set Palette - Not Supported: %02X\n", BL_reg(context));
             break;
         default:
             FIXME("INT 10 AH = 0x0b BH = 0x%x - Unknown\n",
@@ -1256,8 +1272,13 @@ void WINAPI DOSVM_Int10Handler( CONTEXT86 *context )
         break;
 
     case 0x0c: /* WRITE GRAPHICS PIXEL */
-        /* Not in graphics mode, can ignore w/o error */
-        FIXME("Write Graphics Pixel - Not Supported\n");
+
+        /* Only supported in CGA mode for now */
+        if(data->VideoMode >= 4 && data->VideoMode <= 6)
+        {
+          VGA_WritePixel(AL_reg(context), BH_reg(context), CX_reg(context), DX_reg(context));
+        }
+        else FIXME("Write pixel not implemented for current mode\n");
         break;
 
     case 0x0d: /* READ GRAPHICS PIXEL */

@@ -1814,8 +1814,19 @@ static void test_GetControlInfo(IUnknown *unk)
 static void test_Extent(IUnknown *unk)
 {
     IOleObject *oleobj;
-    SIZE size;
+    SIZE size, expected;
     HRESULT hres;
+    DWORD dpi_x;
+    DWORD dpi_y;
+    HDC hdc;
+
+    /* default aspect ratio is 96dpi / 96dpi */
+    hdc = GetDC(0);
+    dpi_x = GetDeviceCaps(hdc, LOGPIXELSX);
+    dpi_y = GetDeviceCaps(hdc, LOGPIXELSY);
+    ReleaseDC(0, hdc);
+    if (dpi_x != 96 || dpi_y != 96)
+        trace("dpi: %d / %d\n", dpi_y, dpi_y);
 
     hres = IUnknown_QueryInterface(unk, &IID_IOleObject, (void**)&oleobj);
     ok(hres == S_OK, "Could not get IOleObkect: %08x\n", hres);
@@ -1825,7 +1836,11 @@ static void test_Extent(IUnknown *unk)
     size.cx = size.cy = 0xdeadbeef;
     hres = IOleObject_GetExtent(oleobj, DVASPECT_CONTENT, &size);
     ok(hres == S_OK, "GetExtent failed: %08x\n", hres);
-    ok(size.cx == 1323 && size.cy == 529, "size = {%d %d}\n", size.cx, size.cy);
+    /* Default size is 50x20 pixels, in himetric units */
+    expected.cx = MulDiv( 50, 2540, dpi_x );
+    expected.cy = MulDiv( 20, 2540, dpi_y );
+    ok(size.cx == expected.cx && size.cy == expected.cy, "size = {%d %d} (expected %d %d)\n",
+       size.cx, size.cy, expected.cx, expected.cy );
 
     size.cx = 800;
     size.cy = 700;
@@ -1983,31 +1998,37 @@ static void test_QueryInterface(IUnknown *unk)
     IOleInPlaceSite *inplace = (void*)0xdeadbeef;
     IOleCache *cache = (void*)0xdeadbeef;
     IObjectWithSite *site = (void*)0xdeadbeef;
+    IViewObjectEx *viewex = (void*)0xdeadbeef;
     HRESULT hres;
 
     hres = IUnknown_QueryInterface(unk, &IID_IQuickActivate, (void**)&qa);
     ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
-    ok(qa == NULL, "qa=%p, ezpected NULL\n", qa);
+    ok(qa == NULL, "qa=%p, expected NULL\n", qa);
 
     hres = IUnknown_QueryInterface(unk, &IID_IRunnableObject, (void**)&runnable);
     ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
-    ok(runnable == NULL, "runnable=%p, ezpected NULL\n", runnable);
+    ok(runnable == NULL, "runnable=%p, expected NULL\n", runnable);
 
     hres = IUnknown_QueryInterface(unk, &IID_IPerPropertyBrowsing, (void**)&propbrowse);
     ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
-    ok(propbrowse == NULL, "propbrowse=%p, ezpected NULL\n", runnable);
+    ok(propbrowse == NULL, "propbrowse=%p, expected NULL\n", propbrowse);
 
     hres = IUnknown_QueryInterface(unk, &IID_IOleCache, (void**)&cache);
     ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
-    ok(cache == NULL, "cache=%p, ezpected NULL\n", runnable);
+    ok(cache == NULL, "cache=%p, expected NULL\n", cache);
 
     hres = IUnknown_QueryInterface(unk, &IID_IOleInPlaceSite, (void**)&inplace);
     ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
-    ok(inplace == NULL, "inplace=%p, ezpected NULL\n", runnable);
+    ok(inplace == NULL, "inplace=%p, expected NULL\n", inplace);
 
     hres = IUnknown_QueryInterface(unk, &IID_IObjectWithSite, (void**)&site);
     ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
-    ok(site == NULL, "inplace=%p, ezpected NULL\n", runnable);
+    ok(site == NULL, "site=%p, expected NULL\n", site);
+
+    hres = IUnknown_QueryInterface(unk, &IID_IViewObjectEx, (void**)&viewex);
+    ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
+    ok(viewex == NULL, "viewex=%p, expected NULL\n", viewex);
+
 }
 
 static void test_WebBrowser(void)

@@ -796,7 +796,7 @@ static void test_CreatePipe(void)
     size = 32768;
     buffer = HeapAlloc( GetProcessHeap(), 0, size );
     for (i = 0; i < size; i++) buffer[i] = i;
-    ok(CreatePipe(&piperead, &pipewrite, &pipe_attr, size) != 0, "CreatePipe failed\n");
+    ok(CreatePipe(&piperead, &pipewrite, &pipe_attr, (size + 24)) != 0, "CreatePipe failed\n");
     ok(WriteFile(pipewrite, buffer, size, &written, NULL), "Write to anonymous pipe failed\n");
     ok(written == size, "Write to anonymous pipe wrote %d bytes\n", written);
     /* and close the write end, read should still succeed*/
@@ -955,10 +955,7 @@ static void test_ImpersonateNamedPipeClient(HANDLE hClientToken, DWORD security_
     SetLastError(0xdeadbeef);
     ret = ImpersonateNamedPipeClient(hPipeServer);
     error = GetLastError();
-    todo_wine
-    ok(!ret &&
-       (error == ERROR_CANNOT_IMPERSONATE ||
-        error == 0xdeadbeef), /* win2k3 */
+    ok(ret /* win2k3 */ || (error == ERROR_CANNOT_IMPERSONATE),
        "ImpersonateNamedPipeClient should have failed with ERROR_CANNOT_IMPERSONATE instead of %d\n", GetLastError());
 
     ret = ConnectNamedPipe(hPipeServer, NULL);

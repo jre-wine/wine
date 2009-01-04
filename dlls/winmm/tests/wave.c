@@ -789,13 +789,13 @@ static void wave_out_test_deviceOut(int device, double duration,
             }
         }
 
-        /* Check the sound duration was between -2% and +10% of the expected value */
+        /* Check the sound duration was between -10% and +25% of the expected value */
         end=GetTickCount();
         actual = (end - start) / 1000.0;
         if (winetest_debug > 1)
             trace("sound duration=%g ms\n",1000*actual);
-        ok((actual > (0.97 * (duration+paused))) &&
-           (actual < (1.1 * (duration+paused))),
+        ok((actual > (0.9 * (duration+paused))) &&
+           (actual < (1.25 * (duration+paused))),
            "The sound played for %g ms instead of %g ms\n",
            1000*actual,1000*(duration+paused));
         for (i = 0; i < headers; i++) {
@@ -891,9 +891,10 @@ static void wave_out_test_device(int device)
        "expected, got %s\n", dev_name(device),wave_out_error(rc));
 
     rc=waveOutGetDevCapsW(device,&capsW,4);
-    ok(rc==MMSYSERR_NOERROR || rc==MMSYSERR_NOTSUPPORTED,
-       "waveOutGetDevCapsW(%s): MMSYSERR_NOERROR or MMSYSERR_NOTSUPPORTED "
-       "expected, got %s\n",dev_name(device),wave_out_error(rc));
+    ok(rc==MMSYSERR_NOERROR || rc==MMSYSERR_NOTSUPPORTED ||
+       rc==MMSYSERR_INVALPARAM, /* Vista, W2K8 */
+       "waveOutGetDevCapsW(%s): unexpected return value %s\n",
+       dev_name(device),wave_out_error(rc));
 
     nameA=NULL;
     rc=waveOutMessage((HWAVEOUT)device, DRV_QUERYDEVICEINTERFACESIZE,

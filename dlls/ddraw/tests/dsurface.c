@@ -2249,7 +2249,7 @@ static void PrivateDataTest(void)
     }
     hr = IDirectDrawSurface_QueryInterface(surface, &IID_IDirectDrawSurface7, (void **) &surface7);
     ok(hr == DD_OK, "IDirectDrawSurface_QueryInterface failed with %08x\n", hr);
-    if(!surface)
+    if(!surface7)
     {
         IDirectDrawSurface_Release(surface);
         return;
@@ -2750,8 +2750,21 @@ static void SurfaceCapsTest(void)
 
 START_TEST(dsurface)
 {
+    HRESULT ret;
+    IDirectDraw4 *dd4;
+
     if (!CreateDirectDraw())
         return;
+
+    ret = IDirectDraw_QueryInterface(lpDD, &IID_IDirectDraw4, (void **) &dd4);
+    if (ret == E_NOINTERFACE)
+    {
+        win_skip("DirectDraw4 and higher are not supported\n");
+        ReleaseDirectDraw();
+        return;
+    }
+    IDirectDraw_Release(dd4);
+
     MipMapCreationTest();
     SrcColorKey32BlitTest();
     QueryInterface();

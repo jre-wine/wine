@@ -3137,7 +3137,7 @@ size_t get_size_procformatstring(const statement_list_t *stmts, type_pred_t pred
             size += get_size_procformatstring(stmt->u.lib->stmts, pred) - 1;
             continue;
         }
-        else if (stmt->type != STMT_TYPE && stmt->u.type->type != RPC_FC_IP)
+        else if (stmt->type != STMT_TYPE || stmt->u.type->type != RPC_FC_IP)
             continue;
 
         iface = stmt->u.type;
@@ -3348,7 +3348,7 @@ void write_endpoints( FILE *f, const char *prefix, const str_list_t *list )
     const char *p;
 
     /* this should be an array of RPC_PROTSEQ_ENDPOINT but we want const strings */
-    print_file( f, 0, "static const unsigned char * %s__RpcProtseqEndpoint[][2] =\n{\n", prefix );
+    print_file( f, 0, "static const unsigned char * const %s__RpcProtseqEndpoint[][2] =\n{\n", prefix );
     LIST_FOR_EACH_ENTRY( endpoint, list, const struct str_list_entry_t, entry )
     {
         print_file( f, 1, "{ (const unsigned char *)\"" );
@@ -3405,7 +3405,7 @@ void write_exceptions( FILE *file )
     fprintf( file, "    unsigned char                 finally_level;\n");
     fprintf( file, "\n");
     fprintf( file, "struct __exception_frame\n{\n");
-    fprintf( file, "    __DECL_EXCEPTION_FRAME;\n");
+    fprintf( file, "    __DECL_EXCEPTION_FRAME\n");
     fprintf( file, "};\n");
     fprintf( file, "\n");
     fprintf( file, "static DWORD __widl_exception_handler( EXCEPTION_RECORD *record,\n");

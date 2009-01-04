@@ -763,6 +763,7 @@ GpStatus WINGDIPAPI GdipCreateFromHDC2(HDC hdc, HANDLE hDevice, GpGraphics **gra
     (*graphics)->unit = UnitDisplay;
     (*graphics)->scale = 1.0;
     (*graphics)->busy = FALSE;
+    (*graphics)->textcontrast = 4;
 
     return Ok;
 }
@@ -2507,6 +2508,18 @@ GpStatus WINGDIPAPI GdipGetSmoothingMode(GpGraphics *graphics, SmoothingMode *mo
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipGetTextContrast(GpGraphics *graphics, UINT *contrast)
+{
+    TRACE("(%p, %p)\n", graphics, contrast);
+
+    if(!graphics || !contrast)
+        return InvalidParameter;
+
+    *contrast = graphics->textcontrast;
+
+    return Ok;
+}
+
 /* FIXME: Text rendering hint is not used anywhere except the getter/setter. */
 GpStatus WINGDIPAPI GdipGetTextRenderingHint(GpGraphics *graphics,
     TextRenderingHint *hint)
@@ -2937,6 +2950,18 @@ GpStatus WINGDIPAPI GdipSetSmoothingMode(GpGraphics *graphics, SmoothingMode mod
         return ObjectBusy;
 
     graphics->smoothing = mode;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipSetTextContrast(GpGraphics *graphics, UINT contrast)
+{
+    TRACE("(%p, %d)\n", graphics, contrast);
+
+    if(!graphics)
+        return InvalidParameter;
+
+    graphics->textcontrast = contrast;
 
     return Ok;
 }

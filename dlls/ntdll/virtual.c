@@ -134,7 +134,7 @@ static void *working_set_limit;
    ((void *)((UINT_PTR)(addr) & ~(UINT_PTR)(mask)))
 
 #define ROUND_SIZE(addr,size) \
-   (((UINT)(size) + ((UINT_PTR)(addr) & page_mask) + page_mask) & ~page_mask)
+   (((SIZE_T)(size) + ((UINT_PTR)(addr) & page_mask) + page_mask) & ~page_mask)
 
 #define VIRTUAL_DEBUG_DUMP_VIEW(view) \
     do { if (TRACE_ON(virtual)) VIRTUAL_DumpView(view); } while (0)
@@ -755,63 +755,6 @@ done:
 
 
 /***********************************************************************
- *           unaligned_mmap
- *
- * Linux kernels before 2.4.x can support non page-aligned offsets, as
- * long as the offset is aligned to the filesystem block size. This is
- * a big performance gain so we want to take advantage of it.
- *
- * However, when we use 64-bit file support this doesn't work because
- * glibc rejects unaligned offsets. Also glibc 2.1.3 mmap64 is broken
- * in that it rounds unaligned offsets down to a page boundary. For
- * these reasons we do a direct system call here.
- */
-static void *unaligned_mmap( void *addr, size_t length, unsigned int prot,
-                             unsigned int flags, int fd, off_t offset )
-{
-#if defined(linux) && defined(__i386__) && defined(__GNUC__)
-    if (!(offset >> 32) && (offset & page_mask))
-    {
-        int ret;
-
-        struct
-        {
-            void        *addr;
-            unsigned int length;
-            unsigned int prot;
-            unsigned int flags;
-            unsigned int fd;
-            unsigned int offset;
-        } args;
-
-        args.addr   = addr;
-        args.length = length;
-        args.prot   = prot;
-        args.flags  = flags;
-        args.fd     = fd;
-        args.offset = offset;
-
-        __asm__ __volatile__("push %%ebx\n\t"
-                             "movl %2,%%ebx\n\t"
-                             "int $0x80\n\t"
-                             "popl %%ebx"
-                             : "=a" (ret)
-                             : "0" (90), /* SYS_mmap */
-                               "q" (&args)
-                             : "memory" );
-        if (ret < 0 && ret > -4096)
-        {
-            errno = -ret;
-            ret = -1;
-        }
-        return (void *)ret;
-    }
-#endif
-    return mmap( addr, length, prot, flags, fd, offset );
-}
-
-
-/***********************************************************************
  *           map_file_into_view
  *
  * Wrapper for mmap() to map a file into a view, falling back to read if mmap fails.
@@ -832,7 +775,7 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
     {
         int flags = MAP_FIXED | (shared_write ? MAP_SHARED : MAP_PRIVATE);
 
-        if (unaligned_mmap( (char *)view->base + start, size, prot, flags, fd, offset ) != (void *)-1)
+        if (mmap( (char *)view->base + start, size, prot, flags, fd, offset ) != (void *)-1)
             goto done;
 
         /* mmap() failed; if this is because the file offset is not    */
@@ -914,6 +857,66 @@ static NTSTATUS decommit_pages( struct file_view *view, size_t start, size_t siz
         return STATUS_SUCCESS;
     }
     return FILE_GetNtStatus();
+}
+
+
+/***********************************************************************
+ *           allocate_dos_memory
+ *
+ * Allocate the DOS memory range.
+ */
+static NTSTATUS allocate_dos_memory( struct file_view **view, unsigned int vprot )
+{
+    size_t size;
+    void *addr = NULL;
+    void * const low_64k = (void *)0x10000;
+    const size_t dosmem_size = 0x110000;
+    int unix_prot = VIRTUAL_GetUnixProt( vprot );
+    struct list *ptr;
+
+    /* check for existing view */
+
+    if ((ptr = list_head( &views_list )))
+    {
+        struct file_view *first_view = LIST_ENTRY( ptr, struct file_view, entry );
+        if (first_view->base < (void *)dosmem_size) return STATUS_CONFLICTING_ADDRESSES;
+    }
+
+    /* check without the first 64K */
+
+    if (wine_mmap_is_in_reserved_area( low_64k, dosmem_size - 0x10000 ) != 1)
+    {
+        addr = wine_anon_mmap( low_64k, dosmem_size - 0x10000, unix_prot, 0 );
+        if (addr != low_64k)
+        {
+            if (addr != (void *)-1) munmap( addr, dosmem_size - 0x10000 );
+            return map_view( view, NULL, dosmem_size, 0xffff, 0, vprot );
+        }
+    }
+
+    /* now try to allocate the low 64K too */
+
+    if (wine_mmap_is_in_reserved_area( NULL, 0x10000 ) != 1)
+    {
+        addr = wine_anon_mmap( (void *)page_size, 0x10000 - page_size, unix_prot, 0 );
+        if (addr == (void *)page_size)
+        {
+            addr = NULL;
+            TRACE( "successfully mapped low 64K range\n" );
+        }
+        else
+        {
+            if (addr != (void *)-1) munmap( addr, 0x10000 - page_size );
+            addr = low_64k;
+            TRACE( "failed to map low 64K range\n" );
+        }
+    }
+
+    /* now reserve the whole range */
+
+    size = (char *)dosmem_size - (char *)addr;
+    wine_anon_mmap( addr, size, unix_prot, MAP_FIXED );
+    return create_view( view, addr, size, vprot );
 }
 
 
@@ -1286,6 +1289,51 @@ void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info )
 
 
 /***********************************************************************
+ *           virtual_create_system_view
+ */
+NTSTATUS virtual_create_system_view( void *base, SIZE_T size, DWORD vprot )
+{
+    FILE_VIEW *view;
+    NTSTATUS status;
+    sigset_t sigset;
+
+    size = ROUND_SIZE( base, size );
+    base = ROUND_ADDR( base, page_mask );
+    server_enter_uninterrupted_section( &csVirtual, &sigset );
+    status = create_view( &view, base, size, vprot );
+    if (!status) TRACE( "created %p-%p\n", base, (char *)base + size );
+    server_leave_uninterrupted_section( &csVirtual, &sigset );
+    return status;
+}
+
+
+/***********************************************************************
+ *           virtual_free_system_view
+ */
+SIZE_T virtual_free_system_view( PVOID *addr_ptr )
+{
+    FILE_VIEW *view;
+    sigset_t sigset;
+    SIZE_T size = 0;
+    char *base = ROUND_ADDR( *addr_ptr, page_mask );
+
+    server_enter_uninterrupted_section( &csVirtual, &sigset );
+    if ((view = VIRTUAL_FindView( base )))
+    {
+        TRACE( "freeing %p-%p\n", view->base, (char *)view->base + view->size );
+        /* return the values that the caller should use to unmap the area */
+        *addr_ptr = view->base;
+        /* make sure we don't munmap anything from a reserved area */
+        if (!wine_mmap_is_in_reserved_area( view->base, view->size )) size = view->size;
+        view->protect |= VPROT_SYSTEM;
+        delete_view( view );
+    }
+    server_leave_uninterrupted_section( &csVirtual, &sigset );
+    return size;
+}
+
+
+/***********************************************************************
  *           virtual_alloc_thread_stack
  */
 NTSTATUS virtual_alloc_thread_stack( void *base, SIZE_T size )
@@ -1518,6 +1566,9 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG zero_
 
     if (is_beyond_limit( 0, size, working_set_limit )) return STATUS_WORKING_SET_LIMIT_RANGE;
 
+    vprot = VIRTUAL_GetProt( protect ) | VPROT_VALLOC;
+    if (type & MEM_COMMIT) vprot |= VPROT_COMMITTED;
+
     if (*ret)
     {
         if (type & MEM_RESERVE) /* Round down to 64k boundary */
@@ -1525,6 +1576,20 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG zero_
         else
             base = ROUND_ADDR( *ret, page_mask );
         size = (((UINT_PTR)*ret + size + page_mask) & ~page_mask) - (UINT_PTR)base;
+
+        /* address 1 is magic to mean DOS area */
+        if (!base && *ret == (void *)1 && size == 0x110000)
+        {
+            server_enter_uninterrupted_section( &csVirtual, &sigset );
+            status = allocate_dos_memory( &view, vprot );
+            if (status == STATUS_SUCCESS)
+            {
+                *ret = view->base;
+                *size_ptr = view->size;
+            }
+            server_leave_uninterrupted_section( &csVirtual, &sigset );
+            return status;
+        }
 
         /* disallow low 64k, wrap-around and kernel space */
         if (((char *)base < (char *)0x10000) ||
@@ -1540,34 +1605,23 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG zero_
 
     /* Compute the alloc type flags */
 
-    if (!(type & MEM_SYSTEM))
+    if (!(type & (MEM_COMMIT | MEM_RESERVE)) ||
+        (type & ~(MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN | MEM_WRITE_WATCH | MEM_RESET)))
     {
-        if (!(type & (MEM_COMMIT | MEM_RESERVE)) ||
-            (type & ~(MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN | MEM_WRITE_WATCH | MEM_RESET)))
-        {
-            WARN("called with wrong alloc type flags (%08x) !\n", type);
-            return STATUS_INVALID_PARAMETER;
-        }
-        if (type & MEM_WRITE_WATCH)
-        {
-            FIXME("MEM_WRITE_WATCH type not supported\n");
-            return STATUS_NOT_SUPPORTED;
-        }
+        WARN("called with wrong alloc type flags (%08x) !\n", type);
+        return STATUS_INVALID_PARAMETER;
     }
-    vprot = VIRTUAL_GetProt( protect ) | VPROT_VALLOC;
-    if (type & MEM_COMMIT) vprot |= VPROT_COMMITTED;
+    if (type & MEM_WRITE_WATCH)
+    {
+        FIXME("MEM_WRITE_WATCH type not supported\n");
+        return STATUS_INVALID_PARAMETER;
+    }
 
     /* Reserve the memory */
 
     if (use_locks) server_enter_uninterrupted_section( &csVirtual, &sigset );
 
-    if (type & MEM_SYSTEM)
-    {
-        if (type & MEM_IMAGE) vprot |= VPROT_IMAGE | VPROT_NOEXEC;
-        status = create_view( &view, base, size, vprot | VPROT_COMMITTED | VPROT_SYSTEM );
-        if (status == STATUS_SUCCESS) base = view->base;
-    }
-    else if ((type & MEM_RESERVE) || !base)
+    if ((type & MEM_RESERVE) || !base)
     {
         status = map_view( &view, base, size, mask, type & MEM_TOP_DOWN, vprot );
         if (status == STATUS_SUCCESS) base = view->base;
@@ -1644,7 +1698,7 @@ NTSTATUS WINAPI NtFreeVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T *si
     base = ROUND_ADDR( addr, page_mask );
 
     /* avoid freeing the DOS area when a broken app passes a NULL pointer */
-    if (!base && !(type & MEM_SYSTEM)) return STATUS_INVALID_PARAMETER;
+    if (!base) return STATUS_INVALID_PARAMETER;
 
     server_enter_uninterrupted_section( &csVirtual, &sigset );
 
@@ -1653,15 +1707,6 @@ NTSTATUS WINAPI NtFreeVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T *si
         !(view->protect & VPROT_VALLOC))
     {
         status = STATUS_INVALID_PARAMETER;
-    }
-    else if (type & MEM_SYSTEM)
-    {
-        /* return the values that the caller should use to unmap the area */
-        *addr_ptr = view->base;
-        if (!wine_mmap_is_in_reserved_area( view->base, view->size )) *size_ptr = view->size;
-        else *size_ptr = 0;  /* make sure we don't munmap anything from a reserved area */
-        view->protect |= VPROT_SYSTEM;
-        delete_view( view );
     }
     else if (type == MEM_RELEASE)
     {
@@ -2343,6 +2388,29 @@ NTSTATUS WINAPI NtFlushVirtualMemory( HANDLE process, LPCVOID *addr_ptr,
     }
     server_leave_uninterrupted_section( &csVirtual, &sigset );
     return status;
+}
+
+
+/***********************************************************************
+ *             NtGetWriteWatch   (NTDLL.@)
+ *             ZwGetWriteWatch   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtGetWriteWatch( HANDLE process, ULONG flags, PVOID base, SIZE_T size, PVOID *addresses,
+                                 ULONG_PTR *count, ULONG *granularity )
+{
+    FIXME( "%p %x %p-%p %p %lu\n", process, flags, base, (char *)base + size, addresses, *count );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
+ *             NtResetWriteWatch   (NTDLL.@)
+ *             ZwResetWriteWatch   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtResetWriteWatch( HANDLE process, PVOID base, SIZE_T size )
+{
+    FIXME( "%p %p-%p\n", process, base, (char *)base + size );
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 

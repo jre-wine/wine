@@ -504,7 +504,7 @@ static void test_trustee(void)
 #define SE_DEBUG_PRIVILEGE               20L
 #define SE_AUDIT_PRIVILEGE               21L
 #define SE_SYSTEM_ENVIRONMENT_PRIVILEGE  22L
-#define SE_CHANGE_NOTIFY_PRIVILLEGE      23L
+#define SE_CHANGE_NOTIFY_PRIVILEGE       23L
 #define SE_REMOTE_SHUTDOWN_PRIVILEGE     24L
 #define SE_UNDOCK_PRIVILEGE              25L
 #define SE_SYNC_AGENT_PRIVILEGE          26L
@@ -579,7 +579,7 @@ static void test_lookupPrivilegeName(void)
      "SeCreateTokenPrivilege (got %d, expected %d)\n", cchName,
      (int)strlen("SeCreateTokenPrivilege"));
     /* check known values */
-    for (i = SE_MIN_WELL_KNOWN_PRIVILEGE; i < SE_MAX_WELL_KNOWN_PRIVILEGE; i++)
+    for (i = SE_MIN_WELL_KNOWN_PRIVILEGE; i <= SE_MAX_WELL_KNOWN_PRIVILEGE; i++)
     {
         luid.LowPart = i;
         cchName = sizeof(buf);
@@ -634,7 +634,7 @@ static void test_lookupPrivilegeValue(void)
      { "SeDebugPrivilege", SE_DEBUG_PRIVILEGE },
      { "SeAuditPrivilege", SE_AUDIT_PRIVILEGE },
      { "SeSystemEnvironmentPrivilege", SE_SYSTEM_ENVIRONMENT_PRIVILEGE },
-     { "SeChangeNotifyPrivilege", SE_CHANGE_NOTIFY_PRIVILLEGE },
+     { "SeChangeNotifyPrivilege", SE_CHANGE_NOTIFY_PRIVILEGE },
      { "SeRemoteShutdownPrivilege", SE_REMOTE_SHUTDOWN_PRIVILEGE },
      { "SeUndockPrivilege", SE_UNDOCK_PRIVILEGE },
      { "SeSyncAgentPrivilege", SE_SYNC_AGENT_PRIVILEGE },
@@ -728,13 +728,13 @@ static void test_FileSecurity(void)
 
     /* Create a temporary directory and in it a temporary file */
     strcat (strcpy (path, wintmpdir), "rary");
-    SetLastError (NO_ERROR);
+    SetLastError(0xdeadbeef);
     rc = CreateDirectoryA (path, NULL);
     ok (rc || GetLastError() == ERROR_ALREADY_EXISTS, "CreateDirectoryA "
         "failed for '%s' with %d\n", path, GetLastError());
 
     strcat (strcpy (file, path), "\\ess");
-    SetLastError (NO_ERROR);
+    SetLastError(0xdeadbeef);
     fh = CreateFileA (file, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
     ok (fh != INVALID_HANDLE_VALUE, "CreateFileA "
         "failed for '%s' with %d\n", file, GetLastError());
@@ -744,8 +744,12 @@ static void test_FileSecurity(void)
 
     /* Get size needed */
     retSize = 0;
-    SetLastError (NO_ERROR);
+    SetLastError(0xdeadbeef);
     rc = pGetFileSecurityA (file, request, NULL, 0, &retSize);
+    if (!rc && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)) {
+        win_skip("GetFileSecurityA is not implemented\n");
+        goto cleanup;
+    }
     ok (!rc, "GetFileSecurityA "
         "was expected to fail for '%s'\n", file);
     ok (GetLastError() == ERROR_INSUFFICIENT_BUFFER, "GetFileSecurityA "
@@ -757,22 +761,18 @@ static void test_FileSecurity(void)
 
     /* Get security descriptor for real */
     retSize = 0;
-    SetLastError (NO_ERROR);
+    SetLastError(0xdeadbeef);
     rc = pGetFileSecurityA (file, request, sd, sdSize, &retSize);
     ok (rc, "GetFileSecurityA "
-        "was not expected to fail '%s'\n", file);
-    ok (GetLastError () == NO_ERROR, "GetFileSecurityA "
-        "returned %d; expected NO_ERROR\n", GetLastError ());
+        "was not expected to fail '%s': %d\n", file, GetLastError());
     ok (retSize == sdSize, "GetFileSecurityA "
         "returned size %d; expected %d\n", retSize, sdSize);
 
     /* Use it to set security descriptor */
-    SetLastError (NO_ERROR);
+    SetLastError(0xdeadbeef);
     rc = pSetFileSecurityA (file, request, sd);
     ok (rc, "SetFileSecurityA "
-        "was not expected to fail '%s'\n", file);
-    ok (GetLastError () == NO_ERROR, "SetFileSecurityA "
-        "returned %d; expected NO_ERROR\n", GetLastError ());
+        "was not expected to fail '%s': %d\n", file, GetLastError());
 
     HeapFree (GetProcessHeap (), 0, sd);
 
@@ -780,7 +780,7 @@ static void test_FileSecurity(void)
 
     /* Get size needed */
     retSize = 0;
-    SetLastError (NO_ERROR);
+    SetLastError(0xdeadbeef);
     rc = pGetFileSecurityA (path, request, NULL, 0, &retSize);
     ok (!rc, "GetFileSecurityA "
         "was expected to fail for '%s'\n", path);
@@ -793,38 +793,32 @@ static void test_FileSecurity(void)
 
     /* Get security descriptor for real */
     retSize = 0;
-    SetLastError (NO_ERROR);
+    SetLastError(0xdeadbeef);
     rc = pGetFileSecurityA (path, request, sd, sdSize, &retSize);
     ok (rc, "GetFileSecurityA "
-        "was not expected to fail '%s'\n", path);
-    ok (GetLastError () == NO_ERROR, "GetFileSecurityA "
-        "returned %d; expected NO_ERROR\n", GetLastError ());
+        "was not expected to fail '%s': %d\n", path, GetLastError());
     ok (retSize == sdSize, "GetFileSecurityA "
         "returned size %d; expected %d\n", retSize, sdSize);
 
     /* Use it to set security descriptor */
-    SetLastError (NO_ERROR);
+    SetLastError(0xdeadbeef);
     rc = pSetFileSecurityA (path, request, sd);
     ok (rc, "SetFileSecurityA "
-        "was not expected to fail '%s'\n", path);
-    ok (GetLastError () == NO_ERROR, "SetFileSecurityA "
-        "returned %d; expected NO_ERROR\n", GetLastError ());
-
+        "was not expected to fail '%s': %d\n", path, GetLastError());
     HeapFree (GetProcessHeap (), 0, sd);
-
-    /* Remove temporary file and directory */
-    DeleteFileA (file);
-    RemoveDirectoryA (path);
 
     /* Old test */
     strcpy (wintmpdir, "\\Should not exist");
-    SetLastError (NO_ERROR);
+    SetLastError(0xdeadbeef);
     rc = pGetFileSecurityA (wintmpdir, OWNER_SECURITY_INFORMATION, NULL, 0, &sdSize);
     ok (!rc, "GetFileSecurityA should fail for not existing directories/files\n");
-    ok ((GetLastError() == ERROR_FILE_NOT_FOUND ) ||
-        (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED),
-        "last error ERROR_FILE_NOT_FOUND / ERROR_CALL_NOT_IMPLEMENTED (98) "
-        "expected, got %d\n", GetLastError());
+    ok (GetLastError() == ERROR_FILE_NOT_FOUND,
+        "last error ERROR_FILE_NOT_FOUND expected, got %d\n", GetLastError());
+
+cleanup:
+    /* Remove temporary file and directory */
+    DeleteFileA(file);
+    RemoveDirectoryA(path);
 }
 
 static void test_AccessCheck(void)

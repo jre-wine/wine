@@ -36,10 +36,11 @@
 #define MAX_NAME_LEN 32
 #define MAX_ARRAY_DIM 1
 #define MAX_MEMBERS 50
-#define MAX_CHILDS 10
+#define MAX_CHILDS 20
 #define MAX_TEMPLATES 200
-#define MAX_OBJECTS 200
-#define MAX_SUBOBJECTS 20
+#define MAX_OBJECTS 500
+#define MAX_SUBOBJECTS 120
+#define MAX_STRINGS_BUFFER 200
 
 typedef struct {
     DWORD type;
@@ -101,6 +102,7 @@ typedef struct {
     int cur_enum_object;
     BOOL from_ref;
     ULONG level;
+    LPBYTE pstrings;
 } IDirectXFileDataImpl;
 
 typedef struct {
@@ -124,6 +126,7 @@ typedef struct {
   BOOL txt;
   ULONG cur_subobject;
   LPBYTE cur_pdata;
+  LPBYTE cur_pstrings;
   BYTE value[100];
   xobject* pxo_globals;
   ULONG nb_pxo_globals;
@@ -132,6 +135,8 @@ typedef struct {
   xobject* pxo;
   xtemplate* pxt[MAX_SUBOBJECTS];
   ULONG level;
+  LPBYTE pdata;
+  LPBYTE pstrings;
 } parse_buffer;
 
 typedef struct {

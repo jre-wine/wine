@@ -604,8 +604,198 @@ static BOOL WINAPI CRYPT_FormatHexString(DWORD dwCertEncodingType,
 
 #define MAX_STRING_RESOURCE_LEN 128
 
-static const WCHAR crlf[] = { '\r','\n',0 };
 static const WCHAR commaSpace[] = { ',',' ',0 };
+
+struct BitToString
+{
+    BYTE bit;
+    int id;
+    WCHAR str[MAX_STRING_RESOURCE_LEN];
+};
+
+static BOOL CRYPT_FormatBits(BYTE bits, const struct BitToString *map,
+ DWORD mapEntries, void *pbFormat, DWORD *pcbFormat, BOOL *first)
+{
+    DWORD bytesNeeded = sizeof(WCHAR);
+    int i;
+    BOOL ret = TRUE, localFirst = *first;
+
+    for (i = 0; i < mapEntries; i++)
+        if (bits & map[i].bit)
+        {
+            if (!localFirst)
+                bytesNeeded += strlenW(commaSpace) * sizeof(WCHAR);
+            localFirst = FALSE;
+            bytesNeeded += strlenW(map[i].str) * sizeof(WCHAR);
+        }
+    if (!pbFormat)
+    {
+        *first = localFirst;
+        *pcbFormat = bytesNeeded;
+    }
+    else if (*pcbFormat < bytesNeeded)
+    {
+        *first = localFirst;
+        *pcbFormat = bytesNeeded;
+        SetLastError(ERROR_MORE_DATA);
+        ret = FALSE;
+    }
+    else
+    {
+        LPWSTR str = pbFormat;
+
+        localFirst = *first;
+        *pcbFormat = bytesNeeded;
+        for (i = 0; i < mapEntries; i++)
+            if (bits & map[i].bit)
+            {
+                if (!localFirst)
+                {
+                    strcpyW(str, commaSpace);
+                    str += strlenW(commaSpace);
+                }
+                localFirst = FALSE;
+                strcpyW(str, map[i].str);
+                str += strlenW(map[i].str);
+            }
+        *first = localFirst;
+    }
+    return ret;
+}
+
+static struct BitToString keyUsageByte0Map[] = {
+ { CERT_DIGITAL_SIGNATURE_KEY_USAGE, IDS_DIGITAL_SIGNATURE, { 0 } },
+ { CERT_NON_REPUDIATION_KEY_USAGE, IDS_NON_REPUDIATION, { 0 } },
+ { CERT_KEY_ENCIPHERMENT_KEY_USAGE, IDS_KEY_ENCIPHERMENT, { 0 } },
+ { CERT_DATA_ENCIPHERMENT_KEY_USAGE, IDS_DATA_ENCIPHERMENT, { 0 } },
+ { CERT_KEY_AGREEMENT_KEY_USAGE, IDS_KEY_AGREEMENT, { 0 } },
+ { CERT_KEY_CERT_SIGN_KEY_USAGE, IDS_CERT_SIGN, { 0 } },
+ { CERT_OFFLINE_CRL_SIGN_KEY_USAGE, IDS_OFFLINE_CRL_SIGN, { 0 } },
+ { CERT_CRL_SIGN_KEY_USAGE, IDS_CRL_SIGN, { 0 } },
+ { CERT_ENCIPHER_ONLY_KEY_USAGE, IDS_ENCIPHER_ONLY, { 0 } },
+};
+static struct BitToString keyUsageByte1Map[] = {
+ { CERT_DECIPHER_ONLY_KEY_USAGE, IDS_DECIPHER_ONLY, { 0 } },
+};
+
+static BOOL WINAPI CRYPT_FormatKeyUsage(DWORD dwCertEncodingType,
+ DWORD dwFormatType, DWORD dwFormatStrType, void *pFormatStruct,
+ LPCSTR lpszStructType, const BYTE *pbEncoded, DWORD cbEncoded, void *pbFormat,
+ DWORD *pcbFormat)
+{
+    DWORD size;
+    CRYPT_BIT_BLOB *bits;
+    BOOL ret;
+
+    if (!cbEncoded)
+    {
+        SetLastError(E_INVALIDARG);
+        return FALSE;
+    }
+    if ((ret = CryptDecodeObjectEx(dwCertEncodingType, X509_KEY_USAGE,
+     pbEncoded, cbEncoded, CRYPT_DECODE_ALLOC_FLAG, NULL, &bits, &size)))
+    {
+        WCHAR infoNotAvailable[MAX_STRING_RESOURCE_LEN];
+        DWORD bytesNeeded = sizeof(WCHAR);
+
+        LoadStringW(hInstance, IDS_INFO_NOT_AVAILABLE, infoNotAvailable,
+         sizeof(infoNotAvailable) / sizeof(infoNotAvailable[0]));
+        if (!bits->cbData || bits->cbData > 2)
+        {
+            bytesNeeded += strlenW(infoNotAvailable) * sizeof(WCHAR);
+            if (!pbFormat)
+                *pcbFormat = bytesNeeded;
+            else if (*pcbFormat < bytesNeeded)
+            {
+                *pcbFormat = bytesNeeded;
+                SetLastError(ERROR_MORE_DATA);
+                ret = FALSE;
+            }
+            else
+            {
+                LPWSTR str = pbFormat;
+
+                *pcbFormat = bytesNeeded;
+                strcpyW(str, infoNotAvailable);
+            }
+        }
+        else
+        {
+            static BOOL stringsLoaded = FALSE;
+            int i;
+            DWORD bitStringLen;
+            BOOL first = TRUE;
+
+            if (!stringsLoaded)
+            {
+                for (i = 0;
+                 i < sizeof(keyUsageByte0Map) / sizeof(keyUsageByte0Map[0]);
+                 i++)
+                    LoadStringW(hInstance, keyUsageByte0Map[i].id,
+                     keyUsageByte0Map[i].str, MAX_STRING_RESOURCE_LEN);
+                for (i = 0;
+                 i < sizeof(keyUsageByte1Map) / sizeof(keyUsageByte1Map[0]);
+                 i++)
+                    LoadStringW(hInstance, keyUsageByte1Map[i].id,
+                     keyUsageByte1Map[i].str, MAX_STRING_RESOURCE_LEN);
+                stringsLoaded = TRUE;
+            }
+            CRYPT_FormatBits(bits->pbData[0], keyUsageByte0Map,
+             sizeof(keyUsageByte0Map) / sizeof(keyUsageByte0Map[0]),
+             NULL, &bitStringLen, &first);
+            bytesNeeded += bitStringLen;
+            if (bits->cbData == 2)
+            {
+                CRYPT_FormatBits(bits->pbData[1], keyUsageByte1Map,
+                 sizeof(keyUsageByte1Map) / sizeof(keyUsageByte1Map[0]),
+                 NULL, &bitStringLen, &first);
+                bytesNeeded += bitStringLen;
+            }
+            bytesNeeded += 3 * sizeof(WCHAR); /* " (" + ")" */
+            CRYPT_FormatHexString(0, 0, 0, NULL, NULL, bits->pbData,
+             bits->cbData, NULL, &size);
+            bytesNeeded += size;
+            if (!pbFormat)
+                *pcbFormat = bytesNeeded;
+            else if (*pcbFormat < bytesNeeded)
+            {
+                *pcbFormat = bytesNeeded;
+                SetLastError(ERROR_MORE_DATA);
+                ret = FALSE;
+            }
+            else
+            {
+                LPWSTR str = pbFormat;
+
+                bitStringLen = bytesNeeded;
+                first = TRUE;
+                CRYPT_FormatBits(bits->pbData[0], keyUsageByte0Map,
+                 sizeof(keyUsageByte0Map) / sizeof(keyUsageByte0Map[0]),
+                 str, &bitStringLen, &first);
+                str += bitStringLen / sizeof(WCHAR) - 1;
+                if (bits->cbData == 2)
+                {
+                    bitStringLen = bytesNeeded;
+                    CRYPT_FormatBits(bits->pbData[1], keyUsageByte1Map,
+                     sizeof(keyUsageByte1Map) / sizeof(keyUsageByte1Map[0]),
+                     str, &bitStringLen, &first);
+                    str += bitStringLen / sizeof(WCHAR) - 1;
+                }
+                *str++ = ' ';
+                *str++ = '(';
+                CRYPT_FormatHexString(0, 0, 0, NULL, NULL, bits->pbData,
+                 bits->cbData, str, &size);
+                str += size / sizeof(WCHAR) - 1;
+                *str++ = ')';
+                *str = 0;
+            }
+        }
+        LocalFree(bits);
+    }
+    return ret;
+}
+
+static const WCHAR crlf[] = { '\r','\n',0 };
 
 static WCHAR subjectTypeHeader[MAX_STRING_RESOURCE_LEN];
 static WCHAR subjectTypeCA[MAX_STRING_RESOURCE_LEN];
@@ -751,6 +941,7 @@ static BOOL CRYPT_FormatCertSerialNumber(CRYPT_DATA_BLOB *serialNum, LPWSTR str,
 }
 
 static const WCHAR indent[] = { ' ',' ',' ',' ',' ',0 };
+static const WCHAR colonCrlf[] = { ':','\r','\n',0 };
 
 static BOOL CRYPT_FormatAltNameEntry(DWORD dwFormatStrType, DWORD indentLevel,
  CERT_ALT_NAME_ENTRY *entry, LPWSTR str, DWORD *pcbStr)
@@ -761,6 +952,7 @@ static BOOL CRYPT_FormatAltNameEntry(DWORD dwFormatStrType, DWORD indentLevel,
     WCHAR ipAddrBuf[32];
     WCHAR maskBuf[16];
     DWORD bytesNeeded = sizeof(WCHAR);
+    DWORD strType = CERT_X500_NAME_STR | CERT_NAME_STR_REVERSE_FLAG;
 
     if (dwFormatStrType & CRYPT_FORMAT_STR_MULTI_LINE)
         bytesNeeded += indentLevel * strlenW(indent) * sizeof(WCHAR);
@@ -778,6 +970,24 @@ static BOOL CRYPT_FormatAltNameEntry(DWORD dwFormatStrType, DWORD indentLevel,
         bytesNeeded += strlenW(entry->u.pwszDNSName) * sizeof(WCHAR);
         ret = TRUE;
         break;
+    case CERT_ALT_NAME_DIRECTORY_NAME:
+    {
+        DWORD directoryNameLen;
+
+        if (dwFormatStrType & CRYPT_FORMAT_STR_MULTI_LINE)
+            strType |= CERT_NAME_STR_CRLF_FLAG;
+        directoryNameLen = cert_name_to_str_with_indent(X509_ASN_ENCODING,
+         indentLevel + 1, &entry->u.DirectoryName, strType, NULL, 0);
+        LoadStringW(hInstance, IDS_ALT_NAME_DIRECTORY_NAME, buf,
+         sizeof(buf) / sizeof(buf[0]));
+        bytesNeeded += (directoryNameLen - 1) * sizeof(WCHAR);
+        if (dwFormatStrType & CRYPT_FORMAT_STR_MULTI_LINE)
+            bytesNeeded += strlenW(colonCrlf) * sizeof(WCHAR);
+        else
+            bytesNeeded += sizeof(WCHAR); /* '=' */
+        ret = TRUE;
+        break;
+    }
     case CERT_ALT_NAME_URL:
         LoadStringW(hInstance, IDS_ALT_NAME_URL, buf,
          sizeof(buf) / sizeof(buf[0]));
@@ -877,6 +1087,18 @@ static BOOL CRYPT_FormatAltNameEntry(DWORD dwFormatStrType, DWORD indentLevel,
             case CERT_ALT_NAME_URL:
                 strcpyW(str, entry->u.pwszURL);
                 break;
+            case CERT_ALT_NAME_DIRECTORY_NAME:
+                if (dwFormatStrType & CRYPT_FORMAT_STR_MULTI_LINE)
+                {
+                    strcpyW(str, colonCrlf);
+                    str += strlenW(colonCrlf);
+                }
+                else
+                    *str++ = '=';
+                cert_name_to_str_with_indent(X509_ASN_ENCODING,
+                 indentLevel + 1, &entry->u.DirectoryName, strType, str,
+                 bytesNeeded / sizeof(WCHAR));
+                break;
             case CERT_ALT_NAME_IP_ADDRESS:
                 if (dwFormatStrType & CRYPT_FORMAT_STR_MULTI_LINE)
                 {
@@ -968,17 +1190,49 @@ static BOOL CRYPT_FormatAltNameInfo(DWORD dwFormatStrType, DWORD indentLevel,
     return ret;
 }
 
+static const WCHAR colonSep[] = { ':',' ',0 };
+
+static BOOL WINAPI CRYPT_FormatAltName(DWORD dwCertEncodingType,
+ DWORD dwFormatType, DWORD dwFormatStrType, void *pFormatStruct,
+ LPCSTR lpszStructType, const BYTE *pbEncoded, DWORD cbEncoded, void *pbFormat,
+ DWORD *pcbFormat)
+{
+    BOOL ret;
+    CERT_ALT_NAME_INFO *info;
+    DWORD size;
+
+    if ((ret = CryptDecodeObjectEx(dwCertEncodingType, X509_ALTERNATE_NAME,
+     pbEncoded, cbEncoded, CRYPT_DECODE_ALLOC_FLAG, NULL, &info, &size)))
+    {
+        ret = CRYPT_FormatAltNameInfo(dwFormatStrType, 0, info, pbFormat, pcbFormat);
+        LocalFree(info);
+    }
+    return ret;
+}
+
 static BOOL CRYPT_FormatCertIssuer(DWORD dwFormatStrType,
  CERT_ALT_NAME_INFO *issuer, LPWSTR str, DWORD *pcbStr)
 {
     WCHAR buf[MAX_STRING_RESOURCE_LEN];
-    DWORD bytesNeeded;
+    DWORD bytesNeeded, sepLen;
+    LPCWSTR sep;
     BOOL ret;
 
     LoadStringW(hInstance, IDS_CERT_ISSUER, buf, sizeof(buf) / sizeof(buf[0]));
-    ret = CRYPT_FormatAltNameInfo(dwFormatStrType, 0, issuer, NULL,
+    ret = CRYPT_FormatAltNameInfo(dwFormatStrType, 1, issuer, NULL,
      &bytesNeeded);
     bytesNeeded += strlenW(buf) * sizeof(WCHAR);
+    if (dwFormatStrType & CRYPT_FORMAT_STR_MULTI_LINE)
+    {
+        sep = colonCrlf;
+        sepLen = strlenW(colonCrlf) * sizeof(WCHAR);
+    }
+    else
+    {
+        sep = colonSep;
+        sepLen = strlenW(colonSep) * sizeof(WCHAR);
+    }
+    bytesNeeded += sepLen;
     if (ret)
     {
         if (!str)
@@ -993,9 +1247,11 @@ static BOOL CRYPT_FormatCertIssuer(DWORD dwFormatStrType,
         {
             *pcbStr = bytesNeeded;
             strcpyW(str, buf);
-            str += strlenW(str);
             bytesNeeded -= strlenW(str) * sizeof(WCHAR);
-            ret = CRYPT_FormatAltNameInfo(dwFormatStrType, 0, issuer, str,
+            str += strlenW(str);
+            strcpyW(str, sep);
+            str += sepLen / sizeof(WCHAR);
+            ret = CRYPT_FormatAltNameInfo(dwFormatStrType, 1, issuer, str,
              &bytesNeeded);
         }
     }
@@ -1089,9 +1345,13 @@ static BOOL WINAPI CRYPT_FormatAuthorityKeyId2(DWORD dwCertEncodingType,
                 if (info->KeyId.cbData)
                 {
                     needSeparator = TRUE;
+                    /* Overestimate size available, it's already been checked
+                     * above.
+                     */
+                    size = bytesNeeded;
                     ret = CRYPT_FormatKeyId(&info->KeyId, str, &size);
                     if (ret)
-                        str += size / sizeof(WCHAR);
+                        str += size / sizeof(WCHAR) - 1;
                 }
                 if (info->AuthorityCertIssuer.cAltEntry)
                 {
@@ -1101,10 +1361,14 @@ static BOOL WINAPI CRYPT_FormatAuthorityKeyId2(DWORD dwCertEncodingType,
                         str += sepLen / sizeof(WCHAR);
                     }
                     needSeparator = TRUE;
+                    /* Overestimate size available, it's already been checked
+                     * above.
+                     */
+                    size = bytesNeeded;
                     ret = CRYPT_FormatCertIssuer(dwFormatStrType,
                      &info->AuthorityCertIssuer, str, &size);
                     if (ret)
-                        str += size / sizeof(WCHAR);
+                        str += size / sizeof(WCHAR) - 1;
                 }
                 if (info->AuthorityCertSerialNumber.cbData)
                 {
@@ -1113,6 +1377,10 @@ static BOOL WINAPI CRYPT_FormatAuthorityKeyId2(DWORD dwCertEncodingType,
                         strcpyW(str, sep);
                         str += sepLen / sizeof(WCHAR);
                     }
+                    /* Overestimate size available, it's already been checked
+                     * above.
+                     */
+                    size = bytesNeeded;
                     ret = CRYPT_FormatCertSerialNumber(
                      &info->AuthorityCertSerialNumber, str, &size);
                 }
@@ -1123,16 +1391,14 @@ static BOOL WINAPI CRYPT_FormatAuthorityKeyId2(DWORD dwCertEncodingType,
     return ret;
 }
 
-static const WCHAR colonCrlf[] = { ':','\r','\n',0 };
-
 static WCHAR aia[MAX_STRING_RESOURCE_LEN];
 static WCHAR accessMethod[MAX_STRING_RESOURCE_LEN];
 static WCHAR ocsp[MAX_STRING_RESOURCE_LEN];
 static WCHAR caIssuers[MAX_STRING_RESOURCE_LEN];
 static WCHAR unknown[MAX_STRING_RESOURCE_LEN];
 static WCHAR accessLocation[MAX_STRING_RESOURCE_LEN];
-static BOOL WINAPI CRYPT_FormatAuthorityInfoAccess(DWORD dwCertEncodingType,
 
+static BOOL WINAPI CRYPT_FormatAuthorityInfoAccess(DWORD dwCertEncodingType,
  DWORD dwFormatType, DWORD dwFormatStrType, void *pFormatStruct,
  LPCSTR lpszStructType, const BYTE *pbEncoded, DWORD cbEncoded, void *pbFormat,
  DWORD *pcbFormat)
@@ -1175,7 +1441,6 @@ static BOOL WINAPI CRYPT_FormatAuthorityInfoAccess(DWORD dwCertEncodingType,
         }
         else
         {
-            static const WCHAR colonSep[] = { ':',' ',0 };
             static const WCHAR numFmt[] = { '%','d',0 };
             static const WCHAR equal[] = { '=',0 };
             static BOOL stringsLoaded = FALSE;
@@ -1349,7 +1614,7 @@ static BOOL WINAPI CRYPT_FormatAuthorityInfoAccess(DWORD dwCertEncodingType,
 static WCHAR keyCompromise[MAX_STRING_RESOURCE_LEN];
 static WCHAR caCompromise[MAX_STRING_RESOURCE_LEN];
 static WCHAR affiliationChanged[MAX_STRING_RESOURCE_LEN];
-static WCHAR superceded[MAX_STRING_RESOURCE_LEN];
+static WCHAR superseded[MAX_STRING_RESOURCE_LEN];
 static WCHAR operationCeased[MAX_STRING_RESOURCE_LEN];
 static WCHAR certificateHold[MAX_STRING_RESOURCE_LEN];
 
@@ -1364,7 +1629,7 @@ static struct reason_map_entry reason_map[] = {
  { CRL_REASON_CA_COMPROMISE_FLAG, caCompromise, IDS_REASON_CA_COMPROMISE },
  { CRL_REASON_AFFILIATION_CHANGED_FLAG, affiliationChanged,
    IDS_REASON_AFFILIATION_CHANGED },
- { CRL_REASON_SUPERSEDED_FLAG, superceded, IDS_REASON_SUPERCEDED },
+ { CRL_REASON_SUPERSEDED_FLAG, superseded, IDS_REASON_SUPERSEDED },
  { CRL_REASON_CESSATION_OF_OPERATION_FLAG, operationCeased,
    IDS_REASON_CESSATION_OF_OPERATION },
  { CRL_REASON_CERTIFICATE_HOLD_FLAG, certificateHold,
@@ -1458,7 +1723,6 @@ static BOOL WINAPI CRYPT_FormatCRLDistPoints(DWORD dwCertEncodingType,
      pbEncoded, cbEncoded, CRYPT_DECODE_ALLOC_FLAG, NULL, &info, &size)))
     {
         static const WCHAR numFmt[] = { '%','d',0 };
-        static const WCHAR colonSep[] = { ':',' ',0 };
         static const WCHAR commaSep[] = { ',',' ',0 };
         static const WCHAR colon[] = { ':',0 };
         static BOOL stringsLoaded = FALSE;
@@ -1505,15 +1769,17 @@ static BOOL WINAPI CRYPT_FormatCRLDistPoints(DWORD dwCertEncodingType,
              CRL_DIST_POINT_NO_NAME)
             {
                 bytesNeeded += strlenW(distPointName) * sizeof(WCHAR);
-                bytesNeeded += strlenW(colon) * sizeof(WCHAR);
+                bytesNeeded += strlenW(nameSep) * sizeof(WCHAR);
                 if (distPoint->DistPointName.dwDistPointNameChoice ==
                  CRL_DIST_POINT_FULL_NAME)
                     bytesNeeded += strlenW(fullName) * sizeof(WCHAR);
                 else
                     bytesNeeded += strlenW(rdnName) * sizeof(WCHAR);
                 bytesNeeded += strlenW(nameSep) * sizeof(WCHAR);
+                if (dwFormatStrType & CRYPT_FORMAT_STR_MULTI_LINE)
+                    bytesNeeded += 2 * strlenW(indent) * sizeof(WCHAR);
                 /* The indent level (3) is higher than when used as the issuer,
-                 * because the name is suppordinate to the name type (full vs.
+                 * because the name is subordinate to the name type (full vs.
                  * RDN.)
                  */
                 ret = CRYPT_FormatAltNameInfo(dwFormatStrType, 3,
@@ -1614,8 +1880,15 @@ static BOOL WINAPI CRYPT_FormatCRLDistPoints(DWORD dwCertEncodingType,
 
                         strcpyW(str, distPointName);
                         str += strlenW(distPointName);
-                        strcpyW(str, colon);
-                        str += strlenW(colon);
+                        strcpyW(str, nameSep);
+                        str += strlenW(nameSep);
+                        if (dwFormatStrType & CRYPT_FORMAT_STR_MULTI_LINE)
+                        {
+                            strcpyW(str, indent);
+                            str += strlenW(indent);
+                            strcpyW(str, indent);
+                            str += strlenW(indent);
+                        }
                         if (distPoint->DistPointName.dwDistPointNameChoice ==
                          CRL_DIST_POINT_FULL_NAME)
                         {
@@ -1769,6 +2042,112 @@ static BOOL WINAPI CRYPT_FormatEnhancedKeyUsage(DWORD dwCertEncodingType,
     return ret;
 }
 
+static struct BitToString netscapeCertTypeMap[] = {
+ { NETSCAPE_SSL_CLIENT_AUTH_CERT_TYPE, IDS_NETSCAPE_SSL_CLIENT, { 0 } },
+ { NETSCAPE_SSL_SERVER_AUTH_CERT_TYPE, IDS_NETSCAPE_SSL_SERVER, { 0 } },
+ { NETSCAPE_SMIME_CERT_TYPE, IDS_NETSCAPE_SMIME, { 0 } },
+ { NETSCAPE_SIGN_CERT_TYPE, IDS_NETSCAPE_SIGN, { 0 } },
+ { NETSCAPE_SSL_CA_CERT_TYPE, IDS_NETSCAPE_SSL_CA, { 0 } },
+ { NETSCAPE_SMIME_CA_CERT_TYPE, IDS_NETSCAPE_SMIME_CA, { 0 } },
+ { NETSCAPE_SIGN_CA_CERT_TYPE, IDS_NETSCAPE_SIGN_CA, { 0 } },
+};
+
+static BOOL WINAPI CRYPT_FormatNetscapeCertType(DWORD dwCertEncodingType,
+ DWORD dwFormatType, DWORD dwFormatStrType, void *pFormatStruct,
+ LPCSTR lpszStructType, const BYTE *pbEncoded, DWORD cbEncoded, void *pbFormat,
+ DWORD *pcbFormat)
+{
+    DWORD size;
+    CRYPT_BIT_BLOB *bits;
+    BOOL ret;
+
+    if (!cbEncoded)
+    {
+        SetLastError(E_INVALIDARG);
+        return FALSE;
+    }
+    if ((ret = CryptDecodeObjectEx(dwCertEncodingType, X509_BITS,
+     pbEncoded, cbEncoded, CRYPT_DECODE_ALLOC_FLAG, NULL, &bits, &size)))
+    {
+        WCHAR infoNotAvailable[MAX_STRING_RESOURCE_LEN];
+        DWORD bytesNeeded = sizeof(WCHAR);
+
+        LoadStringW(hInstance, IDS_INFO_NOT_AVAILABLE, infoNotAvailable,
+         sizeof(infoNotAvailable) / sizeof(infoNotAvailable[0]));
+        if (!bits->cbData || bits->cbData > 1)
+        {
+            bytesNeeded += strlenW(infoNotAvailable) * sizeof(WCHAR);
+            if (!pbFormat)
+                *pcbFormat = bytesNeeded;
+            else if (*pcbFormat < bytesNeeded)
+            {
+                *pcbFormat = bytesNeeded;
+                SetLastError(ERROR_MORE_DATA);
+                ret = FALSE;
+            }
+            else
+            {
+                LPWSTR str = pbFormat;
+
+                *pcbFormat = bytesNeeded;
+                strcpyW(str, infoNotAvailable);
+            }
+        }
+        else
+        {
+            static BOOL stringsLoaded = FALSE;
+            int i;
+            DWORD bitStringLen;
+            BOOL first = TRUE;
+
+            if (!stringsLoaded)
+            {
+                for (i = 0; i < sizeof(netscapeCertTypeMap) /
+                 sizeof(netscapeCertTypeMap[0]); i++)
+                    LoadStringW(hInstance, netscapeCertTypeMap[i].id,
+                     netscapeCertTypeMap[i].str, MAX_STRING_RESOURCE_LEN);
+                stringsLoaded = TRUE;
+            }
+            CRYPT_FormatBits(bits->pbData[0], netscapeCertTypeMap,
+             sizeof(netscapeCertTypeMap) / sizeof(netscapeCertTypeMap[0]),
+             NULL, &bitStringLen, &first);
+            bytesNeeded += bitStringLen;
+            bytesNeeded += 3 * sizeof(WCHAR); /* " (" + ")" */
+            CRYPT_FormatHexString(0, 0, 0, NULL, NULL, bits->pbData,
+             bits->cbData, NULL, &size);
+            bytesNeeded += size;
+            if (!pbFormat)
+                *pcbFormat = bytesNeeded;
+            else if (*pcbFormat < bytesNeeded)
+            {
+                *pcbFormat = bytesNeeded;
+                SetLastError(ERROR_MORE_DATA);
+                ret = FALSE;
+            }
+            else
+            {
+                LPWSTR str = pbFormat;
+
+                bitStringLen = bytesNeeded;
+                first = TRUE;
+                CRYPT_FormatBits(bits->pbData[0], netscapeCertTypeMap,
+                 sizeof(netscapeCertTypeMap) / sizeof(netscapeCertTypeMap[0]),
+                 str, &bitStringLen, &first);
+                str += bitStringLen / sizeof(WCHAR) - 1;
+                *str++ = ' ';
+                *str++ = '(';
+                CRYPT_FormatHexString(0, 0, 0, NULL, NULL, bits->pbData,
+                 bits->cbData, str, &size);
+                str += size / sizeof(WCHAR) - 1;
+                *str++ = ')';
+                *str = 0;
+            }
+        }
+        LocalFree(bits);
+    }
+    return ret;
+}
+
 static WCHAR financialCriteria[MAX_STRING_RESOURCE_LEN];
 static WCHAR available[MAX_STRING_RESOURCE_LEN];
 static WCHAR notAvailable[MAX_STRING_RESOURCE_LEN];
@@ -1891,6 +2270,12 @@ static CryptFormatObjectFunc CRYPT_GetBuiltinFormatFunction(DWORD encodingType,
     {
         switch (LOWORD(lpszStructType))
         {
+        case LOWORD(X509_KEY_USAGE):
+            format = CRYPT_FormatKeyUsage;
+            break;
+        case LOWORD(X509_ALTERNATE_NAME):
+            format = CRYPT_FormatAltName;
+            break;
         case LOWORD(X509_BASIC_CONSTRAINTS2):
             format = CRYPT_FormatBasicConstraints2;
             break;
@@ -1911,6 +2296,16 @@ static CryptFormatObjectFunc CRYPT_GetBuiltinFormatFunction(DWORD encodingType,
             break;
         }
     }
+    else if (!strcmp(lpszStructType, szOID_SUBJECT_ALT_NAME))
+        format = CRYPT_FormatAltName;
+    else if (!strcmp(lpszStructType, szOID_ISSUER_ALT_NAME))
+        format = CRYPT_FormatAltName;
+    else if (!strcmp(lpszStructType, szOID_KEY_USAGE))
+        format = CRYPT_FormatKeyUsage;
+    else if (!strcmp(lpszStructType, szOID_SUBJECT_ALT_NAME2))
+        format = CRYPT_FormatAltName;
+    else if (!strcmp(lpszStructType, szOID_ISSUER_ALT_NAME2))
+        format = CRYPT_FormatAltName;
     else if (!strcmp(lpszStructType, szOID_BASIC_CONSTRAINTS2))
         format = CRYPT_FormatBasicConstraints2;
     else if (!strcmp(lpszStructType, szOID_AUTHORITY_INFO_ACCESS))
@@ -1921,10 +2316,10 @@ static CryptFormatObjectFunc CRYPT_GetBuiltinFormatFunction(DWORD encodingType,
         format = CRYPT_FormatCRLDistPoints;
     else if (!strcmp(lpszStructType, szOID_ENHANCED_KEY_USAGE))
         format = CRYPT_FormatEnhancedKeyUsage;
+    else if (!strcmp(lpszStructType, szOID_NETSCAPE_CERT_TYPE))
+        format = CRYPT_FormatNetscapeCertType;
     else if (!strcmp(lpszStructType, SPC_FINANCIAL_CRITERIA_OBJID))
         format = CRYPT_FormatSpcFinancialCriteria;
-    if (!format && !(formatStrType & CRYPT_FORMAT_STR_NO_HEX))
-        format = CRYPT_FormatHexString;
     return format;
 }
 
@@ -1950,6 +2345,9 @@ BOOL WINAPI CryptFormatObject(DWORD dwCertEncodingType, DWORD dwFormatType,
         CryptGetOIDFunctionAddress(set, dwCertEncodingType, lpszStructType, 0,
          (void **)&format, &hFunc);
     }
+    if (!format && (dwCertEncodingType & CERT_ENCODING_TYPE_MASK) ==
+     X509_ASN_ENCODING && !(dwFormatStrType & CRYPT_FORMAT_STR_NO_HEX))
+        format = CRYPT_FormatHexString;
     if (format)
         ret = format(dwCertEncodingType, dwFormatType, dwFormatStrType,
          pFormatStruct, lpszStructType, pbEncoded, cbEncoded, pbFormat,
