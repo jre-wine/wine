@@ -155,7 +155,6 @@ build: build-indep build-arch
 
 clean-arch32:
 	dh_testdir
-	dh_testroot
 	rm -f install-arch32-stamp build-arch32-stamp configure-arch32-stamp
 #	-$(MAKE) -C build32 distclean
 ifeq (,$(DEB_SAVEBUILD))
@@ -166,7 +165,6 @@ endif
 
 clean-arch64:
 	dh_testdir
-	dh_testroot
 	rm -f install-arch64-stamp build-arch64-stamp configure-arch64-stamp
 #	-$(MAKE) -C build64 distclean
 ifeq (,$(DEB_SAVEBUILD))
