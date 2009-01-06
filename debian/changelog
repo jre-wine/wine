@@ -1,8 +1,17 @@
-wine (1.1.10-1) UNRELEASED; urgency=low
+wine (1.1.10-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.10, released Dec 5, 2008.
+    - Support for virtual memory write watches.
+    - Workarounds for the WINAPI compiler bug on Mac OS.
+    - Several fixes for the 64-bit build.
+    - Some more GdiPlus functions.
+    - Various bug fixes.
+  * Try again to run debian/maint/import's date in the C locale.
+  * Comment out currently-unnecessary mensis invocation in debian/rules.
+    Closes: #510762.
+  * Removed unneeded dh_testroot from the clean-arch32/arch64 rules.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sun, 04 Jan 2009 18:05:54 +0100
+ -- Ove Kaaven <ovek@arcticnet.no>  Tue, 06 Jan 2009 13:56:41 +0100
 
 wine (1.1.9-1) experimental; urgency=low
 
