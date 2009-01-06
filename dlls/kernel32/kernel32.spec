@@ -452,7 +452,7 @@
 @ stub GetConsoleAliasExesLengthA
 @ stub GetConsoleAliasExesLengthW
 @ stub GetConsoleAliasExesW
-@ stub GetConsoleAliasW
+@ stdcall GetConsoleAliasW(wstr ptr long wstr)
 @ stub GetConsoleAliasesA
 @ stub GetConsoleAliasesLengthA
 @ stub GetConsoleAliasesLengthW
@@ -722,12 +722,12 @@
 @ stdcall InitializeCriticalSectionAndSpinCount(ptr long)
 @ stdcall InitializeCriticalSectionEx(ptr long long)
 @ stdcall InitializeSListHead(ptr) ntdll.RtlInitializeSListHead
-@ stdcall InterlockedCompareExchange (ptr long long)
-@ stdcall InterlockedDecrement(ptr)
-@ stdcall InterlockedExchange(ptr long)
-@ stdcall InterlockedExchangeAdd (ptr long )
+@ stdcall -arch=i386 InterlockedCompareExchange (ptr long long)
+@ stdcall -arch=i386 InterlockedDecrement(ptr)
+@ stdcall -arch=i386 InterlockedExchange(ptr long)
+@ stdcall -arch=i386 InterlockedExchangeAdd (ptr long )
 @ stdcall InterlockedFlushSList(ptr) ntdll.RtlInterlockedFlushSList
-@ stdcall InterlockedIncrement(ptr)
+@ stdcall -arch=i386 InterlockedIncrement(ptr)
 @ stdcall InterlockedPopEntrySList(ptr) ntdll.RtlInterlockedPopEntrySList
 @ stdcall InterlockedPushEntrySList(ptr ptr) ntdll.RtlInterlockedPushEntrySList
 @ stub InvalidateConsoleDIBits
@@ -923,8 +923,10 @@
 @ stdcall -register RtlCaptureContext(ptr) ntdll.RtlCaptureContext
 # @ stub RtlCaptureStackBackTrace ( -> ntdll.RtlCaptureStackBackTrace)
 @ stdcall RtlFillMemory(ptr long long) ntdll.RtlFillMemory
+@ stdcall -arch=x86_64 RtlLookupFunctionEntry(long ptr ptr) ntdll.RtlLookupFunctionEntry
 @ stdcall RtlMoveMemory(ptr ptr long) ntdll.RtlMoveMemory
 @ stdcall RtlUnwind(ptr ptr ptr long) ntdll.RtlUnwind
+@ stdcall -arch=x86_64 RtlVirtualUnwind(long long long ptr ptr ptr ptr ptr) ntdll.RtlVirtualUnwind
 @ stdcall RtlZeroMemory(ptr long) ntdll.RtlZeroMemory
 @ stdcall -i386 -norelay SMapLS()
 @ stdcall -i386 -norelay SMapLS_IP_EBP_12()

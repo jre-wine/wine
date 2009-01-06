@@ -54,6 +54,26 @@ WINE_DEFAULT_DEBUG_CHANNEL(ntoskrnl);
 
 
 #ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT( ExAcquireFastMutex )
+VOID WINAPI __regs_ExAcquireFastMutex(PFAST_MUTEX FastMutex)
+#else
+VOID WINAPI ExAcquireFastMutex(PFAST_MUTEX FastMutex)
+#endif
+{
+    FIXME("%p: stub\n", FastMutex);
+}
+
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT( ExReleaseFastMutex )
+VOID WINAPI __regs_ExReleaseFastMutex(PFAST_MUTEX FastMutex)
+#else
+VOID WINAPI ExReleaseFastMutex(PFAST_MUTEX FastMutex)
+#endif
+{
+    FIXME("%p: stub\n", FastMutex);
+}
+
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
 DEFINE_FASTCALL1_ENTRYPOINT( KfAcquireSpinLock )
 KIRQL WINAPI __regs_KfAcquireSpinLock(PKSPIN_LOCK SpinLock)
 #else

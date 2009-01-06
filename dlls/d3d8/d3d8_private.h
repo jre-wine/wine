@@ -170,7 +170,7 @@ typedef void * shader_handle;
 struct FvfToDecl
 {
     DWORD fvf;
-    IWineD3DVertexDeclaration *decl;
+    struct IDirect3DVertexDeclaration8 *decl;
 };
 
 struct IDirect3DDevice8Impl
@@ -531,11 +531,12 @@ typedef struct {
     DWORD elements_size; /* Size of elements, in bytes */
 
     IWineD3DVertexDeclaration *wined3d_vertex_declaration;
+    DWORD shader_handle;
 } IDirect3DVertexDeclaration8Impl;
 
 
 /*****************************************************************************
- * IDirect3DVertexShader9 interface
+ * IDirect3DVertexShader8 interface
  */
 #define INTERFACE IDirect3DVertexShader8
 DECLARE_INTERFACE_(IDirect3DVertexShader8, IUnknown)
@@ -544,9 +545,6 @@ DECLARE_INTERFACE_(IDirect3DVertexShader8, IUnknown)
     STDMETHOD_(HRESULT,QueryInterface)(THIS_ REFIID riid, void** ppvObject) PURE;
     STDMETHOD_(ULONG,AddRef)(THIS) PURE;
     STDMETHOD_(ULONG,Release)(THIS) PURE;
-    /*** IDirect3DVertexShader9 methods ***/
-    STDMETHOD(GetDevice)(THIS_ struct IDirect3DDevice8** ppDevice) PURE;
-    STDMETHOD(GetFunction)(THIS_ void*, UINT* pSizeOfData) PURE;
 };
 #undef INTERFACE
 
@@ -554,16 +552,13 @@ DECLARE_INTERFACE_(IDirect3DVertexShader8, IUnknown)
 #define IDirect3DVertexShader8_QueryInterface(p,a,b)  (p)->lpVtbl->QueryInterface(p,a,b)
 #define IDirect3DVertexShader8_AddRef(p)              (p)->lpVtbl->AddRef(p)
 #define IDirect3DVertexShader8_Release(p)             (p)->lpVtbl->Release(p)
-/*** IDirect3DVertexShader8 methods ***/
-#define IDirect3DVertexShader8_GetDevice(p,a)         (p)->lpVtbl->GetDevice(p,a)
-#define IDirect3DVertexShader8_GetFunction(p,a,b)     (p)->lpVtbl->GetFunction(p,a,b)
 
 /* ------------------------- */
 /* IDirect3DVertexShader8Impl */
 /* ------------------------- */
 
 /*****************************************************************************
- * IDirect3DPixelShader9 interface
+ * IDirect3DPixelShader8 interface
  */
 #define INTERFACE IDirect3DPixelShader8
 DECLARE_INTERFACE_(IDirect3DPixelShader8,IUnknown)
@@ -572,9 +567,6 @@ DECLARE_INTERFACE_(IDirect3DPixelShader8,IUnknown)
     STDMETHOD_(HRESULT,QueryInterface)(THIS_ REFIID riid, void** ppvObject) PURE;
     STDMETHOD_(ULONG,AddRef)(THIS) PURE;
     STDMETHOD_(ULONG,Release)(THIS) PURE;
-    /*** IDirect3DPixelShader8 methods ***/
-    STDMETHOD(GetDevice)(THIS_ struct IDirect3DDevice8** ppDevice) PURE;
-    STDMETHOD(GetFunction)(THIS_ void*, UINT* pSizeOfData) PURE;
 };
 #undef INTERFACE
 
@@ -582,10 +574,6 @@ DECLARE_INTERFACE_(IDirect3DPixelShader8,IUnknown)
 #define IDirect3DPixelShader8_QueryInterface(p,a,b)  (p)->lpVtbl->QueryInterface(p,a,b)
 #define IDirect3DPixelShader8_AddRef(p)              (p)->lpVtbl->AddRef(p)
 #define IDirect3DPixelShader8_Release(p)             (p)->lpVtbl->Release(p)
-/*** IDirect3DPixelShader8 methods ***/
-#define IDirect3DPixelShader8_GetDevice(p,a)         (p)->lpVtbl->GetDevice(p,a)
-#define IDirect3DPixelShader8_GetFunction(p,a,b)     (p)->lpVtbl->GetFunction(p,a,b)
-
 
 /*****************************************************************************
  * Predeclare the interface implementation structures
@@ -600,7 +588,6 @@ struct IDirect3DVertexShader8Impl {
   const IDirect3DVertexShader8Vtbl *lpVtbl;
   LONG ref;
 
-  DWORD                             handle;
   IDirect3DVertexDeclaration8      *vertex_declaration;
   IWineD3DVertexShader             *wineD3DVertexShader;
 };
@@ -624,7 +611,6 @@ typedef struct IDirect3DPixelShader8Impl {
     LONG                             ref;
 
     DWORD                            handle;
-    /* The device, to be replaced by an IDirect3DDeviceImpl */
     IWineD3DPixelShader             *wineD3DPixelShader;
 } IDirect3DPixelShader8Impl;
 
@@ -638,11 +624,6 @@ UINT convert_to_wined3d_declaration(const DWORD *d3d8_elements, DWORD *d3d8_elem
 size_t parse_token(const DWORD* pToken);
 
 /* Callbacks */
-extern HRESULT WINAPI D3D8CB_CreateSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
-                                         WINED3DFORMAT Format, DWORD Usage, WINED3DPOOL Pool, UINT Level,
-                                         WINED3DCUBEMAP_FACES Face, IWineD3DSurface** ppSurface,
-                                         HANDLE* pSharedHandle);
-
 extern HRESULT WINAPI D3D8CB_CreateVolume(IUnknown  *pDevice, IUnknown *pSuperior, UINT Width, UINT Height, UINT Depth,
                                           WINED3DFORMAT  Format, WINED3DPOOL Pool, DWORD Usage,
                                           IWineD3DVolume **ppVolume,

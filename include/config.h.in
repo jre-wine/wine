@@ -234,6 +234,9 @@
 /* Define if we have libgphoto2 development environment */
 #undef HAVE_GPHOTO2
 
+/* Define to 1 if you have the <grp.h> header file. */
+#undef HAVE_GRP_H
+
 /* Define to 1 if you have the <hal/libhal.h> header file. */
 #undef HAVE_HAL_LIBHAL_H
 
@@ -894,6 +897,9 @@
 /* Define to 1 if you have the <sys/user.h> header file. */
 #undef HAVE_SYS_USER_H
 
+/* Define to 1 if you have the <sys/utsname.h> header file. */
+#undef HAVE_SYS_UTSNAME_H
+
 /* Define to 1 if you have the <sys/vfs.h> header file. */
 #undef HAVE_SYS_VFS_H
 
@@ -935,9 +941,6 @@
 
 /* Define to 1 if you have the <valgrind/valgrind.h> header file. */
 #undef HAVE_VALGRIND_VALGRIND_H
-
-/* Define if we have va_copy */
-#undef HAVE_VA_COPY
 
 /* Define to 1 if you have the `vsnprintf' function. */
 #undef HAVE_VSNPRINTF
@@ -999,6 +1002,9 @@
 /* Define if Xrender has the XRenderSetPictureTransform function */
 #undef HAVE_XRENDERSETPICTURETRANSFORM
 
+/* Define to 1 if you have the `_mkdir' function. */
+#undef HAVE__MKDIR
+
 /* Define to 1 if you have the `_pclose' function. */
 #undef HAVE__PCLOSE
 
@@ -1028,9 +1034,6 @@
 
 /* Define to 1 if you have the `_vsnprintf' function. */
 #undef HAVE__VSNPRINTF
-
-/* Define if we have __va_copy */
-#undef HAVE___VA_COPY
 
 /* Define to the address where bug reports for this package should be sent. */
 #undef PACKAGE_BUGREPORT

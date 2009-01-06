@@ -99,15 +99,11 @@ static void surface_bind_and_dirtify(IWineD3DSurfaceImpl *This) {
      *
      * TODO: Track the current active texture per GL context instead of using glGet
      */
-    if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-        GLint active_texture;
-        ENTER_GL();
-        glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
-        LEAVE_GL();
-        active_sampler = This->resource.wineD3DDevice->rev_tex_unit_map[active_texture - GL_TEXTURE0_ARB];
-    } else {
-        active_sampler = 0;
-    }
+    GLint active_texture;
+    ENTER_GL();
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
+    LEAVE_GL();
+    active_sampler = This->resource.wineD3DDevice->rev_tex_unit_map[active_texture - GL_TEXTURE0_ARB];
 
     if (active_sampler != -1) {
         IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_SAMPLER(active_sampler));
@@ -1700,6 +1696,14 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
             *target_bpp = 2;
             break;
 
+        case WINED3DFMT_G16R16:
+            *convert = CONVERT_G16R16;
+            *format = GL_RGB;
+            *internal = GL_RGB16_EXT;
+            *type = GL_UNSIGNED_SHORT;
+            *target_bpp = 6;
+            break;
+
         default:
             break;
     }
@@ -2022,6 +2026,27 @@ static HRESULT d3dfmt_convert_surface(const BYTE *src, BYTE *dst, UINT pitch, UI
                     /* A */ Dest[1] = (color & 0xf0) << 0;
                     /* L */ Dest[0] = (color & 0x0f) << 4;
                     Dest += 2;
+                }
+            }
+            break;
+        }
+
+        case CONVERT_G16R16:
+        {
+            unsigned int x, y;
+            const WORD *Source;
+            WORD *Dest;
+
+            for(y = 0; y < height; y++) {
+                Source = (const WORD *)(src + y * pitch);
+                Dest = (WORD *) (dst + y * outpitch);
+                for (x = 0; x < width; x++ ) {
+                    WORD green = (*Source++);
+                    WORD red = (*Source++);
+                    Dest[0] = green;
+                    Dest[1] = red;
+                    Dest[2] = 0xffff;
+                    Dest += 3;
                 }
             }
             break;

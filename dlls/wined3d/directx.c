@@ -82,6 +82,7 @@ static const struct {
     {"GL_ARB_texture_mirrored_repeat",      ARB_TEXTURE_MIRRORED_REPEAT,    0                           },
     {"GL_ARB_texture_non_power_of_two",     ARB_TEXTURE_NON_POWER_OF_TWO,   MAKEDWORD_VERSION(2, 0)     },
     {"GL_ARB_texture_rectangle",            ARB_TEXTURE_RECTANGLE,          0                           },
+    {"GL_ARB_texture_rg",                   ARB_TEXTURE_RG,                 0                           },
     {"GL_ARB_vertex_blend",                 ARB_VERTEX_BLEND,               0                           },
     {"GL_ARB_vertex_buffer_object",         ARB_VERTEX_BUFFER_OBJECT,       0                           },
     {"GL_ARB_vertex_program",               ARB_VERTEX_PROGRAM,             0                           },
@@ -109,6 +110,7 @@ static const struct {
     {"GL_EXT_texture_env_combine",          EXT_TEXTURE_ENV_COMBINE,        0                           },
     {"GL_EXT_texture_env_dot3",             EXT_TEXTURE_ENV_DOT3,           0                           },
     {"GL_EXT_texture_sRGB",                 EXT_TEXTURE_SRGB,               0                           },
+    {"GL_EXT_texture_swizzle",              EXT_TEXTURE_SWIZZLE,            0                           },
     {"GL_EXT_texture_filter_anisotropic",   EXT_TEXTURE_FILTER_ANISOTROPIC, 0                           },
     {"GL_EXT_texture_lod",                  EXT_TEXTURE_LOD,                0                           },
     {"GL_EXT_texture_lod_bias",             EXT_TEXTURE_LOD_BIAS,           0                           },
@@ -187,7 +189,6 @@ glAttribFunc diffuse_funcs[WINED3DDECLTYPE_UNUSED];
 glAttribFunc specular_funcs[WINED3DDECLTYPE_UNUSED];
 glAttribFunc normal_funcs[WINED3DDECLTYPE_UNUSED];
 glMultiTexCoordFunc multi_texcoord_funcs[WINED3DDECLTYPE_UNUSED];
-glAttribFunc texcoord_funcs[WINED3DDECLTYPE_UNUSED];
 
 /**
  * Note: GL seems to trap if GetDeviceCaps is called before any HWND's created,
@@ -714,7 +715,7 @@ static BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
     gl_info->max_texture_stages = 1;
     gl_info->max_fragment_samplers = 1;
     gl_info->max_vertex_samplers = 0;
-    gl_info->max_combined_samplers = 0;
+    gl_info->max_combined_samplers = gl_info->max_fragment_samplers + gl_info->max_vertex_samplers;
     gl_info->max_sampler_stages = 1;
     gl_info->ps_arb_version = PS_VERSION_NOT_SUPPORTED;
     gl_info->ps_arb_max_temps = 0;
@@ -2360,6 +2361,10 @@ static BOOL CheckTextureCapability(UINT Adapter, WINED3DDEVTYPE DeviceType, WINE
 
         case WINED3DFMT_G16R16F:
         case WINED3DFMT_G32R32F:
+            if(GL_SUPPORT(ARB_TEXTURE_RG)) {
+                TRACE_(d3d_caps)("[OK]\n");
+                return TRUE;
+            }
             TRACE_(d3d_caps)("[FAILED]\n");
             return FALSE;
 
@@ -3688,14 +3693,6 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
 
     object->blitter = select_blit_implementation(Adapter, DeviceType);
 
-    /* Prefer the vtable with functions optimized for single dirtifyable objects if the shader
-     * model can deal with that. It is essentially the same, just with adjusted
-     * Set*ShaderConstantF implementations
-     */
-    if(object->shader_backend->shader_dirtifyable_constants((IWineD3DDevice *) object)) {
-        object->lpVtbl  = &IWineD3DDevice_DirtyConst_Vtbl;
-    }
-
     /* set the state of the device to valid */
     object->state = WINED3D_OK;
 
@@ -4154,35 +4151,11 @@ static void fillGLAttribFuncs(const WineD3D_GL_Info *gl_info)
         multi_texcoord_funcs[WINED3DDECLTYPE_FLOAT16_2] = invalid_texcoord_func;
         multi_texcoord_funcs[WINED3DDECLTYPE_FLOAT16_4] = invalid_texcoord_func;
     }
-
-    texcoord_funcs[WINED3DDECLTYPE_FLOAT1]      = (glAttribFunc)glTexCoord1fv;
-    texcoord_funcs[WINED3DDECLTYPE_FLOAT2]      = (glAttribFunc)glTexCoord2fv;
-    texcoord_funcs[WINED3DDECLTYPE_FLOAT3]      = (glAttribFunc)glTexCoord3fv;
-    texcoord_funcs[WINED3DDECLTYPE_FLOAT4]      = (glAttribFunc)glTexCoord4fv;
-    texcoord_funcs[WINED3DDECLTYPE_D3DCOLOR]    = invalid_func;
-    texcoord_funcs[WINED3DDECLTYPE_UBYTE4]      = invalid_func;
-    texcoord_funcs[WINED3DDECLTYPE_SHORT2]      = (glAttribFunc)glTexCoord2sv;
-    texcoord_funcs[WINED3DDECLTYPE_SHORT4]      = (glAttribFunc)glTexCoord4sv;
-    texcoord_funcs[WINED3DDECLTYPE_UBYTE4N]     = invalid_func;
-    texcoord_funcs[WINED3DDECLTYPE_SHORT2N]     = invalid_func;
-    texcoord_funcs[WINED3DDECLTYPE_SHORT4N]     = invalid_func;
-    texcoord_funcs[WINED3DDECLTYPE_USHORT2N]    = invalid_func;
-    texcoord_funcs[WINED3DDECLTYPE_USHORT4N]    = invalid_func;
-    texcoord_funcs[WINED3DDECLTYPE_UDEC3]       = invalid_func;
-    texcoord_funcs[WINED3DDECLTYPE_DEC3N]       = invalid_func;
-    if (GL_SUPPORT(NV_HALF_FLOAT))
-    {
-        texcoord_funcs[WINED3DDECLTYPE_FLOAT16_2]   = (glAttribFunc)GL_EXTCALL(glTexCoord2hvNV);
-        texcoord_funcs[WINED3DDECLTYPE_FLOAT16_4]   = (glAttribFunc)GL_EXTCALL(glTexCoord4hvNV);
-    } else {
-        texcoord_funcs[WINED3DDECLTYPE_FLOAT16_2]   = invalid_func;
-        texcoord_funcs[WINED3DDECLTYPE_FLOAT16_4]   = invalid_func;
-    }
 }
 
 #define PUSH1(att)        attribs[nAttribs++] = (att);
 BOOL InitAdapters(void) {
-    static HMODULE mod_gl, mod_win32gl;
+    static HMODULE mod_gl;
     BOOL ret;
     int ps_selected_mode, vs_selected_mode;
 
@@ -4206,11 +4179,6 @@ BOOL InitAdapters(void) {
 #define USE_GL_FUNC(pfn) pfn = (void*)pwglGetProcAddress(#pfn);
         /* To bypass the opengl32 thunks load wglGetProcAddress from gdi32 (glXGetProcAddress wrapper) instead of opengl32's */
         mod_gl = GetModuleHandleA("gdi32.dll");
-        mod_win32gl = LoadLibraryA("opengl32.dll");
-        if(!mod_win32gl) {
-            ERR("Can't load opengl32.dll!\n");
-            goto nogl_adapter;
-        }
 #endif
     }
 
@@ -4231,8 +4199,13 @@ BOOL InitAdapters(void) {
     /* Load glFinish and glFlush from opengl32.dll even if we're not using WIN32 opengl
      * otherwise because we have to use winex11.drv's override
      */
-    glFinish = (void*)GetProcAddress(mod_win32gl, "glFinish");
-    glFlush = (void*)GetProcAddress(mod_win32gl, "glFlush");
+#ifdef USE_WIN32_OPENGL
+    glFinish = (void*)GetProcAddress(mod_gl, "glFinish");
+    glFlush = (void*)GetProcAddress(mod_gl, "glFlush");
+#else
+    glFinish = (void*)pwglGetProcAddress("wglFinish");
+    glFlush = (void*)pwglGetProcAddress("wglFlush");
+#endif
 
     /* For now only one default adapter */
     {
@@ -4375,6 +4348,7 @@ BOOL InitAdapters(void) {
         }
 
         fixup_extensions(&Adapters[0].gl_info);
+        add_gl_compat_wrappers(&Adapters[0].gl_info);
 
         WineD3D_ReleaseFakeGLContext();
 

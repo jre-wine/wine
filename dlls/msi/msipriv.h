@@ -144,6 +144,12 @@ typedef struct tagMSIMEDIAINFO
     WCHAR source[MAX_PATH];
 } MSIMEDIAINFO;
 
+typedef struct tagMSIPATCHINFO
+{
+    LPWSTR patchcode;
+    LPWSTR transforms;
+} MSIPATCHINFO;
+
 typedef struct _column_info
 {
     LPCWSTR table;
@@ -294,6 +300,7 @@ typedef struct tagMSIPACKAGE
 {
     MSIOBJECTHDR hdr;
     MSIDATABASE *db;
+    MSIPATCHINFO *patch;
     struct list components;
     struct list features;
     struct list files;
@@ -773,23 +780,22 @@ extern UINT MSIREG_OpenInstallerFeaturesKey(LPCWSTR szProduct, HKEY* key, BOOL c
 UINT MSIREG_OpenUserDataFeaturesKey(LPCWSTR szProduct, MSIINSTALLCONTEXT context,
                                     HKEY *key, BOOL create);
 extern UINT MSIREG_OpenUserComponentsKey(LPCWSTR szComponent, HKEY* key, BOOL create);
-extern UINT MSIREG_OpenLocalUserDataComponentKey(LPCWSTR szComponent, HKEY *key, BOOL create);
-extern UINT MSIREG_OpenUserDataComponentKey(LPCWSTR szComponent, HKEY *key, BOOL create);
+extern UINT MSIREG_OpenUserDataComponentKey(LPCWSTR szComponent, LPCWSTR szUserSid,
+                                            HKEY *key, BOOL create);
 extern UINT MSIREG_OpenPatchesKey(LPCWSTR szPatch, HKEY* key, BOOL create);
-extern UINT MSIREG_OpenUserDataProductKey(LPCWSTR szProduct, HKEY* key, BOOL create);
-extern UINT MSIREG_OpenLocalUserDataProductKey(LPCWSTR szProduct, HKEY* key, BOOL create);
-extern UINT MSIREG_OpenCurrentUserInstallProps(LPCWSTR szProduct, HKEY* key, BOOL create);
-extern UINT MSIREG_OpenLocalSystemInstallProps(LPCWSTR szProduct, HKEY* key, BOOL create);
+extern UINT MSIREG_OpenUserDataProductKey(LPCWSTR szProduct, MSIINSTALLCONTEXT dwContext,
+                                          LPCWSTR szUserSid, HKEY *key, BOOL create);
+extern UINT MSIREG_OpenUserDataPatchKey(LPCWSTR szPatch, MSIINSTALLCONTEXT dwContext,
+                                        HKEY *key, BOOL create);
+extern UINT MSIREG_OpenInstallProps(LPCWSTR szProduct, MSIINSTALLCONTEXT dwContext,
+                                    LPCWSTR szUserSid, HKEY *key, BOOL create);
 extern UINT MSIREG_OpenUpgradeCodesKey(LPCWSTR szProduct, HKEY* key, BOOL create);
 extern UINT MSIREG_OpenUserUpgradeCodesKey(LPCWSTR szProduct, HKEY* key, BOOL create);
 extern UINT MSIREG_DeleteProductKey(LPCWSTR szProduct);
 extern UINT MSIREG_DeleteUserProductKey(LPCWSTR szProduct);
 extern UINT MSIREG_DeleteUserDataProductKey(LPCWSTR szProduct);
-extern UINT MSIREG_OpenLocalSystemProductKey(LPCWSTR szProductCode, HKEY *key, BOOL create);
-extern UINT MSIREG_OpenLocalSystemComponentKey(LPCWSTR szComponent, HKEY *key, BOOL create);
 extern UINT MSIREG_DeleteUserFeaturesKey(LPCWSTR szProduct);
-extern UINT MSIREG_DeleteLocalUserDataComponentKey(LPCWSTR szComponent);
-extern UINT MSIREG_DeleteUserDataComponentKey(LPCWSTR szComponent);
+extern UINT MSIREG_DeleteUserDataComponentKey(LPCWSTR szComponent, LPCWSTR szUserSid);
 extern UINT MSIREG_DeleteUserUpgradeCodesKey(LPCWSTR szUpgradeCode);
 extern UINT MSIREG_OpenClassesUpgradeCodesKey(LPCWSTR szUpgradeCode, HKEY* key, BOOL create);
 extern UINT MSIREG_DeleteLocalClassesProductKey(LPCWSTR szProductCode);
@@ -1040,9 +1046,9 @@ extern void ui_actiondata(MSIPACKAGE *, LPCWSTR, MSIRECORD *);
 /* string consts use a number of places  and defined in helpers.c*/
 extern const WCHAR cszSourceDir[];
 extern const WCHAR cszSOURCEDIR[];
-extern const WCHAR szProductCode[];
 extern const WCHAR cszRootDrive[];
 extern const WCHAR cszbs[];
+extern const WCHAR szLocalSid[];
 
 /* memory allocation macro functions */
 static void *msi_alloc( size_t len ) __WINE_ALLOC_SIZE(1);

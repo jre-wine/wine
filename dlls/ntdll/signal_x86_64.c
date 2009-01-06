@@ -474,7 +474,7 @@ static int set_handler( int sig, void (*func)() )
 /***********************************************************************
  *           __wine_set_signal_handler   (NTDLL.@)
  */
-int __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
+int CDECL __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
 {
     if (sig > sizeof(handlers) / sizeof(handlers[0])) return -1;
     if (handlers[sig] != NULL) return -2;
@@ -514,6 +514,30 @@ void signal_init_process(void)
  error:
     perror("sigaction");
     exit(1);
+}
+
+
+/**********************************************************************
+ *              RtlLookupFunctionEntry   (NTDLL.@)
+ */
+PRUNTIME_FUNCTION WINAPI RtlLookupFunctionEntry( ULONG64 pc, ULONG64 *base,
+                                                 UNWIND_HISTORY_TABLE *table )
+{
+    FIXME("stub\n");
+    return NULL;
+}
+
+
+/**********************************************************************
+ *              RtlVirtualUnwind   (NTDLL.@)
+ */
+PVOID WINAPI RtlVirtualUnwind ( ULONG type, ULONG64 base, ULONG64 pc,
+                                RUNTIME_FUNCTION *function, CONTEXT *context,
+                                PVOID *data, ULONG64 *frame,
+                                KNONVOLATILE_CONTEXT_POINTERS *ctx_ptr )
+{
+    FIXME("stub\n");
+    return NULL;
 }
 
 

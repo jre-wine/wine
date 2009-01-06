@@ -25,7 +25,6 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <stdlib.h>
-#include <malloc.h>
 #include <memory.h>
 #include <stdio.h>
 #include <winnt.h>
@@ -754,7 +753,7 @@ LPWSTR GetLastErrorText(LPWSTR lpwszBuf, DWORD dwSize)
         sprintfW(lpwszBuf, wszFormat, lpwszTemp, GetLastError());
     }
     if (lpwszTemp) {
-        LocalFree((HLOCAL)lpwszTemp);
+        LocalFree(lpwszTemp);
     }
     return lpwszBuf;
 }

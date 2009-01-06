@@ -760,13 +760,14 @@ static void test_FileSecurity(void)
     sd = HeapAlloc (GetProcessHeap (), 0, sdSize);
 
     /* Get security descriptor for real */
-    retSize = 0;
+    retSize = -1;
     SetLastError(0xdeadbeef);
     rc = pGetFileSecurityA (file, request, sd, sdSize, &retSize);
     ok (rc, "GetFileSecurityA "
         "was not expected to fail '%s': %d\n", file, GetLastError());
-    ok (retSize == sdSize, "GetFileSecurityA "
-        "returned size %d; expected %d\n", retSize, sdSize);
+    ok (retSize == sdSize ||
+        broken(retSize == 0), /* NT4 */
+        "GetFileSecurityA returned size %d; expected %d\n", retSize, sdSize);
 
     /* Use it to set security descriptor */
     SetLastError(0xdeadbeef);
@@ -792,13 +793,14 @@ static void test_FileSecurity(void)
     sd = HeapAlloc (GetProcessHeap (), 0, sdSize);
 
     /* Get security descriptor for real */
-    retSize = 0;
+    retSize = -1;
     SetLastError(0xdeadbeef);
     rc = pGetFileSecurityA (path, request, sd, sdSize, &retSize);
     ok (rc, "GetFileSecurityA "
         "was not expected to fail '%s': %d\n", path, GetLastError());
-    ok (retSize == sdSize, "GetFileSecurityA "
-        "returned size %d; expected %d\n", retSize, sdSize);
+    ok (retSize == sdSize ||
+        broken(retSize == 0), /* NT4 */
+        "GetFileSecurityA returned size %d; expected %d\n", retSize, sdSize);
 
     /* Use it to set security descriptor */
     SetLastError(0xdeadbeef);
@@ -1726,25 +1728,33 @@ static void test_LookupAccountName(void)
     sid_use = 0xcafebabe;
     SetLastError(0xdeadbeef);
     ret = LookupAccountNameA(NULL, NULL, NULL, &sid_size, NULL, &domain_size, &sid_use);
-    ok(!ret, "Expected 0, got %d\n", ret);
-    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
-       "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
-    ok(sid_size != 0, "Expected non-zero sid size\n");
-    ok(domain_size != 0, "Expected non-zero domain size\n");
-    ok(sid_use == 0xcafebabe, "Expected 0xcafebabe, got %d\n", sid_use);
+    if (!ret && GetLastError() == ERROR_NONE_MAPPED)
+        win_skip("NULL account name doesn't work on NT4\n");
+    else
+    {
+        ok(!ret, "Expected 0, got %d\n", ret);
+        ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+           "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+        ok(sid_size != 0, "Expected non-zero sid size\n");
+        ok(domain_size != 0, "Expected non-zero domain size\n");
+        ok(sid_use == 0xcafebabe, "Expected 0xcafebabe, got %d\n", sid_use);
 
-    psid = HeapAlloc(GetProcessHeap(), 0, sid_size);
-    domain = HeapAlloc(GetProcessHeap(), 0, domain_size);
+        psid = HeapAlloc(GetProcessHeap(), 0, sid_size);
+        domain = HeapAlloc(GetProcessHeap(), 0, domain_size);
 
-    /* try NULL account name */
-    ret = LookupAccountNameA(NULL, NULL, psid, &sid_size, domain, &domain_size, &sid_use);
-    get_sid_info(psid, &account, &sid_dom);
-    ok(ret, "Failed to lookup account name\n");
-    /* Using a fixed string will not work on different locales */
-    ok(!lstrcmp(account, domain),
-       "Got %s for account and %s for domain, these should be the same\n",
-       account, domain);
-    ok(sid_use == SidTypeDomain, "Expected SidTypeDomain (%d), got %d\n", SidTypeDomain, sid_use);
+        /* try NULL account name */
+        ret = LookupAccountNameA(NULL, NULL, psid, &sid_size, domain, &domain_size, &sid_use);
+        get_sid_info(psid, &account, &sid_dom);
+        ok(ret, "Failed to lookup account name\n");
+        /* Using a fixed string will not work on different locales */
+        ok(!lstrcmp(account, domain),
+           "Got %s for account and %s for domain, these should be the same\n",
+           account, domain);
+        ok(sid_use == SidTypeDomain, "Expected SidTypeDomain (%d), got %d\n", SidTypeDomain, sid_use);
+
+        HeapFree(GetProcessHeap(), 0, psid);
+        HeapFree(GetProcessHeap(), 0, domain);
+    }
 
     /* try an invalid account name */
     SetLastError(0xdeadbeef);
@@ -1768,9 +1778,6 @@ static void test_LookupAccountName(void)
        "Expected RPC_S_SERVER_UNAVAILABLE or RPC_S_INVALID_NET_ADDR, got %d\n", GetLastError());
     ok(sid_size == 0, "Expected 0, got %d\n", sid_size);
     ok(domain_size == 0, "Expected 0, got %d\n", domain_size);
-
-    HeapFree(GetProcessHeap(), 0, psid);
-    HeapFree(GetProcessHeap(), 0, domain);
 }
 
 static void test_security_descriptor(void)
@@ -2158,7 +2165,10 @@ static void test_SetEntriesInAcl(void)
         return;
     }
     ok(res == ERROR_SUCCESS, "SetEntriesInAclW failed: %u\n", res);
-    ok(NewAcl == NULL, "NewAcl=%p, expected NULL\n", NewAcl);
+    ok(NewAcl == NULL ||
+        broken(NewAcl != NULL), /* NT4 */
+        "NewAcl=%p, expected NULL\n", NewAcl);
+    LocalFree(NewAcl);
 
     OldAcl = HeapAlloc(GetProcessHeap(), 0, 256);
     res = InitializeAcl(OldAcl, 256, ACL_REVISION);
@@ -2208,7 +2218,9 @@ static void test_SetEntriesInAcl(void)
 
         ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_BAD_FORM;
         res = pSetEntriesInAclW(1, &ExplicitAccess, OldAcl, &NewAcl);
-        ok(res == ERROR_INVALID_PARAMETER, "SetEntriesInAclW failed: %u\n", res);
+        ok(res == ERROR_INVALID_PARAMETER ||
+            broken(res == ERROR_NOT_SUPPORTED), /* NT4 */
+            "SetEntriesInAclW failed: %u\n", res);
         ok(NewAcl == NULL ||
             broken(NewAcl != NULL), /* NT4 */
             "returned acl wasn't NULL: %p\n", NewAcl);
@@ -2216,7 +2228,9 @@ static void test_SetEntriesInAcl(void)
         ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_USER;
         ExplicitAccess.Trustee.MultipleTrusteeOperation = TRUSTEE_IS_IMPERSONATE;
         res = pSetEntriesInAclW(1, &ExplicitAccess, OldAcl, &NewAcl);
-        ok(res == ERROR_INVALID_PARAMETER, "SetEntriesInAclW failed: %u\n", res);
+        ok(res == ERROR_INVALID_PARAMETER ||
+            broken(res == ERROR_NOT_SUPPORTED), /* NT4 */
+            "SetEntriesInAclW failed: %u\n", res);
         ok(NewAcl == NULL ||
             broken(NewAcl != NULL), /* NT4 */
             "returned acl wasn't NULL: %p\n", NewAcl);
@@ -2277,7 +2291,8 @@ static void test_GetNamedSecurityInfoA(void)
 
     ret = GetSecurityDescriptorControl(pSecDesc, &control, &revision);
     ok(ret, "GetSecurityDescriptorControl failed with error %d\n", GetLastError());
-    ok((control & (SE_SELF_RELATIVE|SE_DACL_PRESENT)) == (SE_SELF_RELATIVE|SE_DACL_PRESENT),
+    ok((control & (SE_SELF_RELATIVE|SE_DACL_PRESENT)) == (SE_SELF_RELATIVE|SE_DACL_PRESENT) ||
+        broken((control & (SE_SELF_RELATIVE|SE_DACL_PRESENT)) == SE_DACL_PRESENT), /* NT4 */
         "control (0x%x) doesn't have (SE_SELF_RELATIVE|SE_DACL_PRESENT) flags set\n", control);
     ok(revision == SECURITY_DESCRIPTOR_REVISION1, "revision was %d instead of 1\n", revision);
     ret = GetSecurityDescriptorOwner(pSecDesc, &owner, &owner_defaulted);
@@ -2286,6 +2301,7 @@ static void test_GetNamedSecurityInfoA(void)
     ret = GetSecurityDescriptorGroup(pSecDesc, &group, &group_defaulted);
     ok(ret, "GetSecurityDescriptorGroup failed with error %d\n", GetLastError());
     ok(group != NULL, "group should not be NULL\n");
+    LocalFree(pSecDesc);
 }
 
 static void test_ConvertStringSecurityDescriptor(void)
@@ -2755,11 +2771,17 @@ static void test_acls(void)
     ret = IsValidAcl(pAcl);
     ok(ret, "IsValidAcl failed with error %d\n", GetLastError());
 
+    SetLastError(0xdeadbeef);
     ret = InitializeAcl(pAcl, sizeof(buffer), ACL_REVISION4);
-    ok(ret, "InitializeAcl(ACL_REVISION4) failed with error %d\n", GetLastError());
+    if (GetLastError() != ERROR_INVALID_PARAMETER)
+    {
+        ok(ret, "InitializeAcl(ACL_REVISION4) failed with error %d\n", GetLastError());
 
-    ret = IsValidAcl(pAcl);
-    ok(ret, "IsValidAcl failed with error %d\n", GetLastError());
+        ret = IsValidAcl(pAcl);
+        ok(ret, "IsValidAcl failed with error %d\n", GetLastError());
+    }
+    else
+        win_skip("ACL_REVISION4 is not implemented on NT4\n");
 
     SetLastError(0xdeadbeef);
     ret = InitializeAcl(pAcl, sizeof(buffer), -1);

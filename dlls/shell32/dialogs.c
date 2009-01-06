@@ -211,35 +211,29 @@ static INT_PTR CALLBACK RunDlgProc (HWND hwnd, UINT message, WPARAM wParam, LPAR
                     if ((ic = GetWindowTextLengthW (htxt)))
                         {
                         WCHAR *psz, *parent=NULL ;
-                        LPCWSTR working_dir ;
+                        SHELLEXECUTEINFOW sei ;
+
+                        ZeroMemory (&sei, sizeof(sei)) ;
+                        sei.cbSize = sizeof(sei) ;
                         psz = HeapAlloc( GetProcessHeap(), 0, (ic + 1)*sizeof(WCHAR) );
                         GetWindowTextW (htxt, psz, ic + 1) ;
 
                         /* according to http://www.codeproject.com/KB/shell/runfiledlg.aspx we should send a
                          * WM_NOTIFY before execution */
 
+                        sei.hwnd = hwnd;
+                        sei.nShow = SW_SHOWNORMAL;
+                        sei.lpFile = psz;
+
                         if (prfdp->lpstrDirectory)
-                            working_dir = prfdp->lpstrDirectory;
+                            sei.lpDirectory = prfdp->lpstrDirectory;
                         else
-                            working_dir = parent = RunDlg_GetParentDir(psz);
+                            sei.lpDirectory = parent = RunDlg_GetParentDir(sei.lpFile);
 
-                        if (ShellExecuteW(hwnd, NULL, psz, NULL, working_dir, SW_SHOWNORMAL) < (HINSTANCE)33)
+                        if (ShellExecuteExW( &sei ) < 33)
                             {
-                            char *pszSysMsg = NULL ;
-                            char szMsg[256];
-                            FormatMessageA (
-                                FORMAT_MESSAGE_ALLOCATE_BUFFER |
-                                FORMAT_MESSAGE_FROM_SYSTEM |
-                                FORMAT_MESSAGE_IGNORE_INSERTS,
-                                NULL, GetLastError (),
-                                MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                                (LPSTR)&pszSysMsg, 0, NULL
-                                ) ;
-                            sprintf (szMsg, "Error: %s", pszSysMsg) ;
-                            LocalFree ((HLOCAL)pszSysMsg) ;
-                            MessageBoxA (hwnd, szMsg, "Nix", MB_OK | MB_ICONEXCLAMATION) ;
-
                             HeapFree(GetProcessHeap(), 0, psz);
+                            HeapFree(GetProcessHeap(), 0, parent);
                             SendMessageA (htxt, CB_SETEDITSEL, 0, MAKELPARAM (0, -1)) ;
                             return TRUE ;
                             }

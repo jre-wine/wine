@@ -233,7 +233,7 @@ double CDECL MSVCRT_difftime(MSVCRT_time_t time1, MSVCRT_time_t time2)
 /*********************************************************************
  *		_ftime (MSVCRT.@)
  */
-void CDECL _ftime(struct MSVCRT__timeb *buf)
+void CDECL MSVCRT__ftime(struct MSVCRT__timeb *buf)
 {
   TIME_ZONE_INFORMATION tzinfo;
   FILETIME ft;
@@ -260,7 +260,7 @@ MSVCRT_time_t CDECL MSVCRT_time(MSVCRT_time_t* buf)
   MSVCRT_time_t curtime;
   struct MSVCRT__timeb tb;
 
-  _ftime(&tb);
+  MSVCRT__ftime(&tb);
 
   curtime = tb.time;
   return buf ? *buf = curtime : curtime;
@@ -377,7 +377,7 @@ MSVCRT_size_t CDECL MSVCRT_wcsftime( MSVCRT_wchar_t *str, MSVCRT_size_t max,
     char *s, *fmt;
     MSVCRT_size_t len;
 
-    TRACE("%p %d %s %p\n", str, max, debugstr_w(format), mstm );
+    TRACE("%p %ld %s %p\n", str, max, debugstr_w(format), mstm );
 
     len = WideCharToMultiByte( CP_UNIXCP, 0, format, -1, NULL, 0, NULL, NULL );
     if (!(fmt = MSVCRT_malloc( len ))) return 0;

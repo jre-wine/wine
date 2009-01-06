@@ -395,10 +395,10 @@ static void drawStridedSlow(IWineD3DDevice *iface, const WineDirect3DVertexStrid
             continue;
         }
 
-        if(sd->u.s.texCoords[textureNo].lpData)
+        if(sd->u.s.texCoords[coordIdx].lpData)
         {
-            texCoords[textureNo] =
-                    sd->u.s.texCoords[textureNo].lpData + streamOffset[sd->u.s.texCoords[textureNo].streamNo];
+            texCoords[coordIdx] =
+                    sd->u.s.texCoords[coordIdx].lpData + streamOffset[sd->u.s.texCoords[coordIdx].streamNo];
             tex_mask |= (1 << textureNo);
         }
         else
@@ -440,21 +440,15 @@ static void drawStridedSlow(IWineD3DDevice *iface, const WineDirect3DVertexStrid
         {
             int coord_idx;
             const void *ptr;
+            int texture_idx;
 
             if (!(tmp_tex_mask & 1)) continue;
 
             coord_idx = This->stateBlock->textureState[texture][WINED3DTSS_TEXCOORDINDEX];
             ptr = texCoords[coord_idx] + (SkipnStrides * sd->u.s.texCoords[coord_idx].dwStride);
 
-            if (GL_SUPPORT(ARB_MULTITEXTURE))
-            {
-                int texture_idx = This->texUnitMap[texture];
-                multi_texcoord_funcs[sd->u.s.texCoords[coord_idx].dwType](GL_TEXTURE0_ARB + texture_idx, ptr);
-            }
-            else
-            {
-                texcoord_funcs[sd->u.s.texCoords[coord_idx].dwType](ptr);
-            }
+            texture_idx = This->texUnitMap[texture];
+            multi_texcoord_funcs[sd->u.s.texCoords[coord_idx].dwType](GL_TEXTURE0_ARB + texture_idx, ptr);
         }
 
         /* Diffuse -------------------------------- */
@@ -1092,11 +1086,11 @@ HRESULT tesselate_rectpatch(IWineD3DDeviceImpl *This,
     checkGLcall("glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)");
     IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(WINED3DRS_FILLMODE));
     if(patch->has_normals) {
-        const GLfloat black[4] = {0, 0, 0, 0};
-        const GLfloat red[4]   = {1, 0, 0, 0};
-        const GLfloat green[4] = {0, 1, 0, 0};
-        const GLfloat blue[4]  = {0, 0, 1, 0};
-        const GLfloat white[4] = {1, 1, 1, 1};
+        static const GLfloat black[] = {0, 0, 0, 0};
+        static const GLfloat red[]   = {1, 0, 0, 0};
+        static const GLfloat green[] = {0, 1, 0, 0};
+        static const GLfloat blue[]  = {0, 0, 1, 0};
+        static const GLfloat white[] = {1, 1, 1, 1};
         glEnable(GL_LIGHTING);
         checkGLcall("glEnable(GL_LIGHTING)");
         glLightModelfv(GL_LIGHT_MODEL_AMBIENT, black);
@@ -1263,9 +1257,9 @@ HRESULT tesselate_rectpatch(IWineD3DDeviceImpl *This,
 
     if(patch->has_normals) {
         /* Now do the same with reverse light directions */
-        const GLfloat x[4] = {-1,  0,  0, 0};
-        const GLfloat y[4] = { 0, -1,  0, 0};
-        const GLfloat z[4] = { 0,  0, -1, 0};
+        static const GLfloat x[] = {-1,  0,  0, 0};
+        static const GLfloat y[] = { 0, -1,  0, 0};
+        static const GLfloat z[] = { 0,  0, -1, 0};
         glLightfv(GL_LIGHT0, GL_POSITION, x);
         glLightfv(GL_LIGHT1, GL_POSITION, y);
         glLightfv(GL_LIGHT2, GL_POSITION, z);

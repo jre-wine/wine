@@ -61,6 +61,8 @@ static const WCHAR attrFontSize[] =
     {'f','o','n','t','-','s','i','z','e',0};
 static const WCHAR attrFontStyle[] =
     {'f','o','n','t','-','s','t','y','l','e',0};
+static const WCHAR attrFontVariant[] =
+    {'f','o','n','t','-','v','a','r','i','a','n','t',0};
 static const WCHAR attrFontWeight[] =
     {'f','o','n','t','-','w','e','i','g','h','t',0};
 static const WCHAR attrHeight[] =
@@ -111,6 +113,7 @@ static const struct{
     {attrFontFamily,           DISPID_IHTMLSTYLE_FONTFAMILY},
     {attrFontSize,             DISPID_IHTMLSTYLE_FONTSIZE},
     {attrFontStyle,            DISPID_IHTMLSTYLE_FONTSTYLE},
+    {attrFontVariant,          DISPID_IHTMLSTYLE_FONTVARIANT},
     {attrFontWeight,           DISPID_IHTMLSTYLE_FONTWEIGHT},
     {attrHeight,               DISPID_IHTMLSTYLE_HEIGHT},
     {attrLeft,                 DISPID_IHTMLSTYLE_LEFT},
@@ -133,6 +136,8 @@ static const WCHAR valLineThrough[] =
     {'l','i','n','e','-','t','h','r','o','u','g','h',0};
 static const WCHAR valUnderline[] =
     {'u','n','d','e','r','l','i','n','e',0};
+static const WCHAR szNormal[] =
+    {'n','o','r','m','a','l',0};
 
 static const WCHAR px_formatW[] = {'%','d','p','x',0};
 static const WCHAR emptyW[] = {0};
@@ -515,8 +520,19 @@ static HRESULT WINAPI HTMLStyle_get_fontFamily(IHTMLStyle *iface, BSTR *p)
 static HRESULT WINAPI HTMLStyle_put_fontStyle(IHTMLStyle *iface, BSTR v)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    static const WCHAR szItalic[]  = {'i','t','a','l','i','c',0};
+    static const WCHAR szOblique[]  = {'o','b','l','i','q','u','e',0};
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    /* fontStyle can only be one of the follow values. */
+    if(!v || strcmpiW(szNormal, v) == 0 || strcmpiW(szItalic, v) == 0 ||
+             strcmpiW(szOblique, v) == 0)
+    {
+        return set_nsstyle_attr(This->nsstyle, STYLEID_FONT_STYLE, v, 0);
+    }
+
+    return E_INVALIDARG;
 }
 
 static HRESULT WINAPI HTMLStyle_get_fontStyle(IHTMLStyle *iface, BSTR *p)
@@ -531,15 +547,28 @@ static HRESULT WINAPI HTMLStyle_get_fontStyle(IHTMLStyle *iface, BSTR *p)
 static HRESULT WINAPI HTMLStyle_put_fontVariant(IHTMLStyle *iface, BSTR v)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    static const WCHAR szCaps[]  = {'s','m','a','l','l','-','c','a','p','s',0};
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    /* fontVariant can only be one of the follow values. */
+    if(!v || strcmpiW(szNormal, v) == 0 || strcmpiW(szCaps, v) == 0)
+    {
+        return set_nsstyle_attr(This->nsstyle, STYLEID_FONT_VARIANT, v, 0);
+    }
+
+    return E_INVALIDARG;
 }
 
 static HRESULT WINAPI HTMLStyle_get_fontVariant(IHTMLStyle *iface, BSTR *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!p)
+       return E_INVALIDARG;
+
+    return get_style_attr(This, STYLEID_FONT_VARIANT, p);
 }
 
 static HRESULT WINAPI HTMLStyle_put_fontWeight(IHTMLStyle *iface, BSTR v)
@@ -686,8 +715,10 @@ static HRESULT WINAPI HTMLStyle_put_backgroundImage(IHTMLStyle *iface, BSTR v)
 static HRESULT WINAPI HTMLStyle_get_backgroundImage(IHTMLStyle *iface, BSTR *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_style_attr(This, STYLEID_BACKGROUND_IMAGE, p);
 }
 
 static HRESULT WINAPI HTMLStyle_put_backgroundRepeat(IHTMLStyle *iface, BSTR v)
@@ -1703,8 +1734,8 @@ static HRESULT WINAPI HTMLStyle_get_left(IHTMLStyle *iface, VARIANT *p)
 static HRESULT WINAPI HTMLStyle_get_position(IHTMLStyle *iface, BSTR *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p)\n", This, p);
+    return IHTMLStyle2_get_position(HTMLSTYLE2(This), p);
 }
 
 static HRESULT WINAPI HTMLStyle_put_zIndex(IHTMLStyle *iface, VARIANT v)
@@ -1716,6 +1747,13 @@ static HRESULT WINAPI HTMLStyle_put_zIndex(IHTMLStyle *iface, VARIANT v)
     switch(V_VT(&v)) {
     case VT_BSTR:
         return set_style_attr(This, STYLEID_Z_INDEX, V_BSTR(&v), 0);
+    case VT_I4: {
+        WCHAR value[14];
+        static const WCHAR format[] = {'%','d',0};
+
+        wsprintfW(value, format, V_I4(&v));
+        return set_style_attr(This, STYLEID_Z_INDEX, value, 0);
+    }
     default:
         FIXME("unimplemented vt %d\n", V_VT(&v));
         return E_NOTIMPL;
@@ -1909,29 +1947,49 @@ static HRESULT WINAPI HTMLStyle_get_posLeft(IHTMLStyle *iface, float *p)
 static HRESULT WINAPI HTMLStyle_put_posWidth(IHTMLStyle *iface, float v)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->()\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%f)\n", This, v);
+
+    return set_style_pos(This, STYLEID_WIDTH, v);
 }
 
 static HRESULT WINAPI HTMLStyle_get_posWidth(IHTMLStyle *iface, float *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->()\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_POINTER;
+
+    if(get_nsstyle_pos(This, STYLEID_WIDTH, p) != S_OK)
+        *p = 0.0f;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLStyle_put_posHeight(IHTMLStyle *iface, float v)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->()\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%f)\n", This, v);
+
+    return set_style_pos(This, STYLEID_HEIGHT, v);
 }
 
 static HRESULT WINAPI HTMLStyle_get_posHeight(IHTMLStyle *iface, float *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->()\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_POINTER;
+
+    if(get_nsstyle_pos(This, STYLEID_HEIGHT, p) != S_OK)
+        *p = 0.0f;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLStyle_put_cursor(IHTMLStyle *iface, BSTR v)

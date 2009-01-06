@@ -23,6 +23,10 @@
 #include "config.h"
 #include "wine/port.h"
 
+#if defined(__MINGW32__) || defined (_MSC_VER)
+#include <ws2tcpip.h>
+#endif
+
 #include <sys/types.h>
 #ifdef HAVE_POLL_H
 #include <poll.h>
@@ -769,7 +773,7 @@ DWORD NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value
     tv.tv_usec = (value % 1000) * 1000;
 
     result = setsockopt(connection->socketFD, SOL_SOCKET,
-                        send ? SO_SNDTIMEO : SO_RCVTIMEO, &tv,
+                        send ? SO_SNDTIMEO : SO_RCVTIMEO, (void*)&tv,
                         sizeof(tv));
 
     if (result == -1)

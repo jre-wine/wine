@@ -459,6 +459,27 @@ static HRESULT identifier_eval(exec_ctx_t *ctx, BSTR identifier, DWORD flags, ex
 
     for(item = ctx->parser->script->named_items; item; item = item->next) {
         if((item->flags & SCRIPTITEM_ISVISIBLE) && !strcmpW(item->name, identifier)) {
+            if(!item->disp) {
+                IUnknown *unk;
+
+                if(!ctx->parser->script->site)
+                    break;
+
+                hres = IActiveScriptSite_GetItemInfo(ctx->parser->script->site, identifier,
+                                                     SCRIPTINFO_IUNKNOWN, &unk, NULL);
+                if(FAILED(hres)) {
+                    WARN("GetItemInfo failed: %08x\n", hres);
+                    break;
+                }
+
+                hres = IUnknown_QueryInterface(unk, &IID_IDispatch, (void**)&item->disp);
+                IUnknown_Release(unk);
+                if(FAILED(hres)) {
+                    WARN("object does not implement IDispatch\n");
+                    break;
+                }
+            }
+
             ret->type = EXPRVAL_VARIANT;
             V_VT(&ret->u.var) = VT_DISPATCH;
             V_DISPATCH(&ret->u.var) = item->disp;
@@ -468,9 +489,11 @@ static HRESULT identifier_eval(exec_ctx_t *ctx, BSTR identifier, DWORD flags, ex
     }
 
     for(item = ctx->parser->script->named_items; item; item = item->next) {
-        hres = disp_get_id(item->disp, identifier, 0, &id);
-        if(SUCCEEDED(hres))
-            break;
+        if(item->flags & SCRIPTITEM_GLOBALMEMBERS) {
+            hres = disp_get_id(item->disp, identifier, 0, &id);
+            if(SUCCEEDED(hres))
+                break;
+        }
     }
 
     if(item) {
@@ -1499,7 +1522,7 @@ HRESULT new_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags, j
 HRESULT call_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags, jsexcept_t *ei, exprval_t *ret)
 {
     call_expression_t *expr = (call_expression_t*)_expr;
-    VARIANT func, var;
+    VARIANT var;
     exprval_t exprval;
     DISPPARAMS dp;
     HRESULT hres;
@@ -1520,7 +1543,7 @@ HRESULT call_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags, 
                 V_VT(&var) = VT_EMPTY;
             break;
         default:
-            FIXME("unimplemented type %d\n", V_VT(&func));
+            FIXME("unimplemented type %d\n", exprval.type);
             hres = E_NOTIMPL;
         }
 

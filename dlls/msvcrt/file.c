@@ -451,9 +451,9 @@ static void msvcrt_int_to_base32(int num, char *str)
 }
 
 /*********************************************************************
- *		__p__iob(MSVCRT.@)
+ *		__iob_func(MSVCRT.@)
  */
-MSVCRT_FILE * CDECL __p__iob(void)
+MSVCRT_FILE * CDECL MSVCRT___iob_func(void)
 {
  return &MSVCRT__iob[0];
 }
@@ -1167,9 +1167,9 @@ int CDECL MSVCRT__fstat64(int fd, struct MSVCRT__stat64* buf)
       msvcrt_set_errno(ERROR_INVALID_PARAMETER);
       return -1;
     }
-    buf->st_mode = S_IFREG | S_IREAD;
+    buf->st_mode = S_IFREG | 0444;
     if (!(hfi.dwFileAttributes & FILE_ATTRIBUTE_READONLY))
-      buf->st_mode |= S_IWRITE;
+      buf->st_mode |= 0222;
     buf->st_size  = ((__int64)hfi.nFileSizeHigh << 32) + hfi.nFileSizeLow;
     RtlTimeToSecondsSince1970((LARGE_INTEGER *)&hfi.ftLastAccessTime, &dw);
     buf->st_atime = dw;
@@ -1244,12 +1244,12 @@ int CDECL _futime(int fd, struct MSVCRT__utimbuf *t)
 /*********************************************************************
  *		_get_osfhandle (MSVCRT.@)
  */
-long CDECL _get_osfhandle(int fd)
+MSVCRT_intptr_t CDECL _get_osfhandle(int fd)
 {
   HANDLE hand = msvcrt_fdtoh(fd);
   TRACE(":fd (%d) handle (%p)\n",fd,hand);
 
-  return (long)hand;
+  return (MSVCRT_intptr_t)hand;
 }
 
 /*********************************************************************
@@ -1599,7 +1599,7 @@ int CDECL _wcreat(const MSVCRT_wchar_t *path, int flags)
 /*********************************************************************
  *		_open_osfhandle (MSVCRT.@)
  */
-int CDECL _open_osfhandle(long handle, int oflags)
+int CDECL _open_osfhandle(MSVCRT_intptr_t handle, int oflags)
 {
   int fd;
 
@@ -2309,7 +2309,7 @@ MSVCRT_wint_t CDECL MSVCRT_fgetwc(MSVCRT_FILE* file)
     }
     
   c = MSVCRT_fgetc(file);
-  if ((*__p___mb_cur_max() > 1) && MSVCRT_isleadbyte(c))
+  if ((MSVCRT___mb_cur_max > 1) && MSVCRT_isleadbyte(c))
     {
       FIXME("Treat Multibyte characters\n");
     }
@@ -2597,6 +2597,7 @@ MSVCRT_size_t CDECL MSVCRT_fread(void *ptr, MSVCRT_size_t size, MSVCRT_size_t nm
 
   /* first buffered data */
   if(file->_cnt>0) {
+     while (file->_cnt>0 && rcnt > 0) {
 	int pcnt= (rcnt>file->_cnt)? file->_cnt:rcnt;
 	memcpy(ptr, file->_ptr, pcnt);
 	file->_cnt -= pcnt;
@@ -2606,6 +2607,7 @@ MSVCRT_size_t CDECL MSVCRT_fread(void *ptr, MSVCRT_size_t size, MSVCRT_size_t nm
 	read += pcnt ;
 	rcnt -= pcnt ;
         ptr = (char*)ptr + pcnt;
+     }
   } else if(!(file->_flag & MSVCRT__IOREAD )) {
 	if(file->_flag & MSVCRT__IORW) {
 		file->_flag |= MSVCRT__IOREAD;

@@ -1919,8 +1919,8 @@ static inline int get_dos_prefix_len( const UNICODE_STRING *name )
  * element doesn't have to exist; in that case STATUS_NO_SUCH_FILE is
  * returned, but the unix name is still filled in properly.
  */
-NTSTATUS wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRING *unix_name_ret,
-                                    UINT disposition, BOOLEAN check_case )
+NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRING *unix_name_ret,
+                                          UINT disposition, BOOLEAN check_case )
 {
     static const WCHAR unixW[] = {'u','n','i','x'};
     static const WCHAR invalid_charsW[] = { INVALID_NT_CHARS, 0 };
@@ -2302,7 +2302,7 @@ static void WINAPI read_changes_user_apc( void *arg, IO_STATUS_BLOCK *io, ULONG 
     RtlFreeHeap( GetProcessHeap(), 0, info );
 }
 
-static NTSTATUS read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, NTSTATUS status, ULONG_PTR *total )
+static NTSTATUS read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, NTSTATUS status, ULONG *total )
 {
     struct read_changes_info *info = user;
     char path[PATH_MAX];
@@ -2311,7 +2311,7 @@ static NTSTATUS read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, NTSTATUS st
 
     SERVER_START_REQ( read_change )
     {
-        req->handle = info->FileHandle;
+        req->handle = wine_server_obj_handle( info->FileHandle );
         wine_server_set_reply( req, path, PATH_MAX );
         ret = wine_server_call( req );
         action = reply->action;
@@ -2396,7 +2396,7 @@ NtNotifyChangeDirectoryFile( HANDLE FileHandle, HANDLE Event,
 
     SERVER_START_REQ( read_directory_changes )
     {
-        req->handle     = FileHandle;
+        req->handle     = wine_server_obj_handle( FileHandle );
         req->filter     = CompletionFilter;
         req->want_data  = (Buffer != NULL);
         req->subtree    = WatchTree;
@@ -2404,7 +2404,7 @@ NtNotifyChangeDirectoryFile( HANDLE FileHandle, HANDLE Event,
         req->async.iosb     = IoStatusBlock;
         req->async.arg      = info;
         req->async.apc      = read_changes_user_apc;
-        req->async.event    = Event;
+        req->async.event    = wine_server_obj_handle( Event );
         req->async.cvalue   = cvalue;
         status = wine_server_call( req );
     }

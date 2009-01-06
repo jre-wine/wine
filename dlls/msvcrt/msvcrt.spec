@@ -45,28 +45,28 @@
 @ cdecl -i386 -norelay ?before@type_info@@QBEHABV1@@Z(ptr) __thiscall_MSVCRT_type_info_before
 @ cdecl -i386 -norelay ?name@type_info@@QBEPBDXZ() __thiscall_MSVCRT_type_info_name
 @ cdecl -i386 -norelay ?raw_name@type_info@@QBEPBDXZ() __thiscall_MSVCRT_type_info_raw_name
-@ cdecl ?set_new_handler@@YAP6AXXZP6AXXZ@Z(ptr) MSVCRT__set_new_handler
+@ cdecl ?set_new_handler@@YAP6AXXZP6AXXZ@Z(ptr) MSVCRT_set_new_handler
 @ cdecl ?set_terminate@@YAP6AXXZP6AXXZ@Z(ptr) MSVCRT_set_terminate
 @ cdecl ?set_unexpected@@YAP6AXXZP6AXXZ@Z(ptr) MSVCRT_set_unexpected
 @ cdecl ?terminate@@YAXXZ() MSVCRT_terminate
 @ cdecl ?unexpected@@YAXXZ() MSVCRT_unexpected
 @ cdecl -i386 -norelay ?what@exception@@UBEPBDXZ() __thiscall_MSVCRT_what_exception
-@ cdecl _CIacos()
-@ cdecl _CIasin()
-@ cdecl _CIatan()
-@ cdecl _CIatan2()
-@ cdecl _CIcos()
-@ cdecl _CIcosh()
-@ cdecl _CIexp()
-@ cdecl _CIfmod()
-@ cdecl _CIlog()
-@ cdecl _CIlog10()
-@ cdecl _CIpow()
-@ cdecl _CIsin()
-@ cdecl _CIsinh()
-@ cdecl _CIsqrt()
-@ cdecl _CItan()
-@ cdecl _CItanh()
+@ cdecl -arch=i386 _CIacos()
+@ cdecl -arch=i386 _CIasin()
+@ cdecl -arch=i386 _CIatan()
+@ cdecl -arch=i386 _CIatan2()
+@ cdecl -arch=i386 _CIcos()
+@ cdecl -arch=i386 _CIcosh()
+@ cdecl -arch=i386 _CIexp()
+@ cdecl -arch=i386 _CIfmod()
+@ cdecl -arch=i386 _CIlog()
+@ cdecl -arch=i386 _CIlog10()
+@ cdecl -arch=i386 _CIpow()
+@ cdecl -arch=i386 _CIsin()
+@ cdecl -arch=i386 _CIsinh()
+@ cdecl -arch=i386 _CIsqrt()
+@ cdecl -arch=i386 _CItan()
+@ cdecl -arch=i386 _CItanh()
 @ cdecl _CxxThrowException(long long)
 @ cdecl -i386 -norelay _EH_prolog()
 @ cdecl _Getdays()
@@ -84,6 +84,12 @@
 @ cdecl __RTDynamicCast(ptr long ptr ptr long) MSVCRT___RTDynamicCast
 @ cdecl __RTtypeid(ptr) MSVCRT___RTtypeid
 @ cdecl __STRINGTOLD(ptr ptr str long)
+@ stub ___lc_codepage_func
+@ stub ___lc_collate_cp_func
+@ stub ___lc_handle_func
+@ cdecl ___mb_cur_max_func() MSVCRT____mb_cur_max_func
+@ cdecl ___setlc_active_func() MSVCRT____setlc_active_func
+@ cdecl ___unguarded_readlc_active_add_func() MSVCRT____unguarded_readlc_active_add_func
 @ extern __argc MSVCRT___argc
 @ extern __argv MSVCRT___argv
 @ extern __badioinfo MSVCRT___badioinfo
@@ -97,7 +103,7 @@
 @ stub __get_app_type
 @ cdecl __getmainargs(ptr ptr ptr long ptr)
 @ extern __initenv MSVCRT___initenv
-@ cdecl __iob_func() __p__iob
+@ cdecl __iob_func() MSVCRT___iob_func
 @ cdecl __isascii(long) MSVCRT___isascii
 @ cdecl __iscsym(long) MSVCRT___iscsym
 @ cdecl __iscsymf(long) MSVCRT___iscsymf
@@ -107,40 +113,40 @@
 @ extern __lc_handle MSVCRT___lc_handle
 @ cdecl __lconv_init()
 @ extern __mb_cur_max MSVCRT___mb_cur_max
-@ cdecl __p___argc()
-@ cdecl __p___argv()
-@ cdecl __p___initenv()
-@ cdecl __p___mb_cur_max()
-@ cdecl __p___wargv()
-@ cdecl __p___winitenv()
-@ cdecl __p__acmdln()
-@ cdecl __p__amblksiz()
-@ cdecl __p__commode()
-@ cdecl __p__daylight() MSVCRT___p__daylight
-@ cdecl __p__dstbias()
-@ cdecl __p__environ()
-@ stub __p__fileinfo #()
-@ cdecl __p__fmode()
-@ cdecl __p__iob()
-@ stub __p__mbcasemap #()
-@ cdecl __p__mbctype()
-@ cdecl __p__osver()
-@ cdecl __p__pctype()
-@ cdecl __p__pgmptr()
-@ stub __p__pwctype #()
-@ cdecl __p__timezone() MSVCRT___p__timezone
-@ cdecl __p__tzname()
-@ cdecl __p__wcmdln()
-@ cdecl __p__wenviron()
-@ cdecl __p__winmajor()
-@ cdecl __p__winminor()
-@ cdecl __p__winver()
-@ cdecl __p__wpgmptr()
+@ cdecl -arch=i386 __p___argc()
+@ cdecl -arch=i386 __p___argv()
+@ cdecl -arch=i386 __p___initenv()
+@ cdecl -arch=i386 __p___mb_cur_max() MSVCRT____mb_cur_max_func
+@ cdecl -arch=i386 __p___wargv()
+@ cdecl -arch=i386 __p___winitenv()
+@ cdecl -arch=i386 __p__acmdln()
+@ cdecl -arch=i386 __p__amblksiz()
+@ cdecl -arch=i386 __p__commode()
+@ cdecl -arch=i386 __p__daylight() MSVCRT___p__daylight
+@ cdecl -arch=i386 __p__dstbias()
+@ cdecl -arch=i386 __p__environ()
+@ stub -arch=i386 __p__fileinfo #()
+@ cdecl -arch=i386 __p__fmode()
+@ cdecl -arch=i386 __p__iob() MSVCRT___iob_func
+@ stub -arch=i386 __p__mbcasemap #()
+@ cdecl -arch=i386 __p__mbctype()
+@ cdecl -arch=i386 __p__osver()
+@ cdecl -arch=i386 __p__pctype() MSVCRT___pctype_func
+@ cdecl -arch=i386 __p__pgmptr()
+@ stub -arch=i386 __p__pwctype #()
+@ cdecl -arch=i386 __p__timezone() MSVCRT___p__timezone
+@ cdecl -arch=i386 __p__tzname()
+@ cdecl -arch=i386 __p__wcmdln()
+@ cdecl -arch=i386 __p__wenviron()
+@ cdecl -arch=i386 __p__winmajor()
+@ cdecl -arch=i386 __p__winminor()
+@ cdecl -arch=i386 __p__winver()
+@ cdecl -arch=i386 __p__wpgmptr()
+@ cdecl __pctype_func() MSVCRT___pctype_func
 @ extern __pioinfo MSVCRT___pioinfo
 @ stub __pxcptinfoptrs #()
 @ cdecl __set_app_type(long) MSVCRT___set_app_type
 @ extern __setlc_active MSVCRT___setlc_active
-@ cdecl ___setlc_active_func() MSVCRT____setlc_active_func
 @ cdecl __setusermatherr(ptr) MSVCRT___setusermatherr
 @ cdecl __threadhandle() kernel32.GetCurrentThread
 @ cdecl __threadid() kernel32.GetCurrentThreadId
@@ -148,7 +154,6 @@
 @ cdecl __unDName(ptr str long ptr ptr long)
 @ cdecl __unDNameEx(ptr str long ptr ptr ptr long)
 @ extern __unguarded_readlc_active MSVCRT___unguarded_readlc_active
-@ cdecl ___unguarded_readlc_active_add_func() MSVCRT____unguarded_readlc_active_add_func
 @ extern __wargv MSVCRT___wargv
 @ cdecl __wgetmainargs(ptr ptr ptr long ptr)
 @ extern __winitenv MSVCRT___winitenv
@@ -257,7 +262,7 @@
 @ cdecl _fstat(long ptr) MSVCRT__fstat
 @ cdecl _fstat64(long ptr) MSVCRT__fstat64
 @ cdecl _fstati64(long ptr) MSVCRT__fstati64
-@ cdecl _ftime(ptr)
+@ cdecl _ftime(ptr) MSVCRT__ftime
 @ cdecl -ret64 _ftol() ntdll._ftol
 @ cdecl _fullpath(ptr str long)
 @ cdecl _futime(long ptr)

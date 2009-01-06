@@ -132,6 +132,7 @@
 #include "ws2tcpip.h"
 #include "ws2spi.h"
 #include "wsipx.h"
+#include "mstcpip.h"
 #include "winnt.h"
 #include "iphlpapi.h"
 #include "wine/server.h"
@@ -422,7 +423,7 @@ static void _enable_event( HANDLE s, unsigned int event,
 {
     SERVER_START_REQ( enable_socket_event )
     {
-        req->handle = s;
+        req->handle = wine_server_obj_handle( s );
         req->mask   = event;
         req->sstate = sstate;
         req->cstate = cstate;
@@ -436,7 +437,7 @@ static int _is_blocking(SOCKET s)
     int ret;
     SERVER_START_REQ( get_socket_event )
     {
-        req->handle  = SOCKET2HANDLE(s);
+        req->handle  = wine_server_obj_handle( SOCKET2HANDLE(s) );
         req->service = FALSE;
         req->c_event = 0;
         wine_server_call( req );
@@ -451,7 +452,7 @@ static unsigned int _get_sock_mask(SOCKET s)
     unsigned int ret;
     SERVER_START_REQ( get_socket_event )
     {
-        req->handle  = SOCKET2HANDLE(s);
+        req->handle  = wine_server_obj_handle( SOCKET2HANDLE(s) );
         req->service = FALSE;
         req->c_event = 0;
         wine_server_call( req );
@@ -474,7 +475,7 @@ static int _get_sock_error(SOCKET s, unsigned int bit)
 
     SERVER_START_REQ( get_socket_event )
     {
-        req->handle  = SOCKET2HANDLE(s);
+        req->handle  = wine_server_obj_handle( SOCKET2HANDLE(s) );
         req->service = FALSE;
         req->c_event = 0;
         wine_server_set_reply( req, events, sizeof(events) );
@@ -542,7 +543,7 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID fImpLoad)
  */
 static int convert_sockopt(INT *level, INT *optname)
 {
-  int i;
+  unsigned int i;
   switch (*level)
   {
      case WS_SOL_SOCKET:
@@ -658,7 +659,7 @@ static inline int do_block( int fd, int events, int timeout )
 
 static int
 convert_af_w2u(int windowsaf) {
-    int i;
+    unsigned int i;
 
     for (i=0;i<sizeof(ws_af_map)/sizeof(ws_af_map[0]);i++)
     	if (ws_af_map[i][0] == windowsaf)
@@ -669,7 +670,7 @@ convert_af_w2u(int windowsaf) {
 
 static int
 convert_af_u2w(int unixaf) {
-    int i;
+    unsigned int i;
 
     for (i=0;i<sizeof(ws_af_map)/sizeof(ws_af_map[0]);i++)
     	if (ws_af_map[i][1] == unixaf)
@@ -680,7 +681,7 @@ convert_af_u2w(int unixaf) {
 
 static int
 convert_proto_w2u(int windowsproto) {
-    int i;
+    unsigned int i;
 
     for (i=0;i<sizeof(ws_proto_map)/sizeof(ws_proto_map[0]);i++)
     	if (ws_proto_map[i][0] == windowsproto)
@@ -691,7 +692,7 @@ convert_proto_w2u(int windowsproto) {
 
 static int
 convert_proto_u2w(int unixproto) {
-    int i;
+    unsigned int i;
 
     for (i=0;i<sizeof(ws_proto_map)/sizeof(ws_proto_map[0]);i++)
     	if (ws_proto_map[i][1] == unixproto)
@@ -702,7 +703,7 @@ convert_proto_u2w(int unixproto) {
 
 static int
 convert_socktype_w2u(int windowssocktype) {
-    int i;
+    unsigned int i;
 
     for (i=0;i<sizeof(ws_socktype_map)/sizeof(ws_socktype_map[0]);i++)
     	if (ws_socktype_map[i][0] == windowssocktype)
@@ -713,7 +714,7 @@ convert_socktype_w2u(int windowssocktype) {
 
 static int
 convert_socktype_u2w(int unixsocktype) {
-    int i;
+    unsigned int i;
 
     for (i=0;i<sizeof(ws_socktype_map)/sizeof(ws_socktype_map[0]);i++)
     	if (ws_socktype_map[i][1] == unixsocktype)
@@ -1123,7 +1124,7 @@ static int WS2_recv( int fd, struct ws2_async *wsa )
  *
  * Handler for overlapped recv() operations.
  */
-static NTSTATUS WS2_async_recv( void* user, IO_STATUS_BLOCK* iosb, NTSTATUS status, ULONG_PTR *total )
+static NTSTATUS WS2_async_recv( void* user, IO_STATUS_BLOCK* iosb, NTSTATUS status, ULONG *total )
 {
     ws2_async* wsa = user;
     int result = 0, fd;
@@ -1224,7 +1225,7 @@ static int WS2_send( int fd, struct ws2_async *wsa )
  *
  * Handler for overlapped send() operations.
  */
-static NTSTATUS WS2_async_send(void* user, IO_STATUS_BLOCK* iosb, NTSTATUS status, ULONG_PTR *total )
+static NTSTATUS WS2_async_send(void* user, IO_STATUS_BLOCK* iosb, NTSTATUS status, ULONG *total )
 {
     ws2_async* wsa = user;
     int result = 0, fd;
@@ -1279,7 +1280,7 @@ static NTSTATUS WS2_async_send(void* user, IO_STATUS_BLOCK* iosb, NTSTATUS statu
  *
  * Handler for shutdown() operations on overlapped sockets.
  */
-static NTSTATUS WS2_async_shutdown( void* user, PIO_STATUS_BLOCK iosb, NTSTATUS status )
+static NTSTATUS WS2_async_shutdown( void* user, PIO_STATUS_BLOCK iosb, NTSTATUS status, ULONG *total )
 {
     ws2_async* wsa = user;
     int fd, err = 1;
@@ -1299,6 +1300,7 @@ static NTSTATUS WS2_async_shutdown( void* user, PIO_STATUS_BLOCK iosb, NTSTATUS 
         status = err ? wsaErrno() : STATUS_SUCCESS;
         break;
     }
+    *total = 0;
     iosb->u.Status = status;
     return status;
 }
@@ -1325,7 +1327,7 @@ static int WS2_register_async_shutdown( SOCKET s, int type )
 
     SERVER_START_REQ( register_async )
     {
-        req->handle = wsa->hSocket;
+        req->handle = wine_server_obj_handle( wsa->hSocket );
         req->type   = type;
         req->async.callback = WS2_async_shutdown;
         req->async.iosb     = &wsa->local_iosb;
@@ -1371,11 +1373,11 @@ SOCKET WINAPI WS_accept(SOCKET s, struct WS_sockaddr *addr,
         }
         SERVER_START_REQ( accept_socket )
         {
-            req->lhandle    = SOCKET2HANDLE(s);
+            req->lhandle    = wine_server_obj_handle( SOCKET2HANDLE(s) );
             req->access     = GENERIC_READ|GENERIC_WRITE|SYNCHRONIZE;
             req->attributes = OBJ_INHERIT;
             set_error( wine_server_call( req ) );
-            as = HANDLE2SOCKET( reply->handle );
+            as = HANDLE2SOCKET( wine_server_ptr_handle( reply->handle ));
         }
         SERVER_END_REQ;
         if (as)
@@ -2317,6 +2319,49 @@ INT WINAPI WSAIoctl(SOCKET s,
        WSASetLastError(WSAEOPNOTSUPP);
        return SOCKET_ERROR;
 
+   case WS_SIO_KEEPALIVE_VALS:
+   {
+        int fd;
+        struct tcp_keepalive *k = lpvInBuffer;
+        int keepalive = k->onoff ? 1 : 0;
+        int keepidle = k->keepalivetime / 1000;
+        int keepintvl = k->keepaliveinterval / 1000;
+
+        if (!lpvInBuffer)
+        {
+            WSASetLastError(WSAEINVAL);
+            return SOCKET_ERROR;
+        }
+
+        TRACE("onoff: %d, keepalivetime: %d, keepaliveinterval: %d\n", keepalive, keepidle, keepintvl);
+
+        fd = get_sock_fd(s, 0, NULL);
+        if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (void *)&keepalive, sizeof(int)) == -1)
+        {
+            release_sock_fd(s, fd);
+            WSASetLastError(WSAEINVAL);
+            return SOCKET_ERROR;
+        }
+#if defined(TCP_KEEPIDLE) && defined(TCP_KEEPINTVL)
+        if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, (void *)&keepidle, sizeof(int)) == -1)
+        {
+            release_sock_fd(s, fd);
+            WSASetLastError(WSAEINVAL);
+            return SOCKET_ERROR;
+        }
+        if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, (void *)&keepintvl, sizeof(int)) == -1)
+        {
+            release_sock_fd(s, fd);
+            WSASetLastError(WSAEINVAL);
+            return SOCKET_ERROR;
+        }
+#else
+        FIXME("ignoring keepalive interval and timeout\n");
+#endif
+
+        release_sock_fd(s, fd);
+        break;
+   }
    default:
        FIXME("unsupported WS_IOCTL cmd (%08x)\n", dwIoControlCode);
        WSASetLastError(WSAEOPNOTSUPP);
@@ -2479,7 +2524,7 @@ int WINAPI WS_recvfrom(SOCKET s, char *buf, INT len, int flags,
 static struct pollfd *fd_sets_to_poll( const WS_fd_set *readfds, const WS_fd_set *writefds,
                                        const WS_fd_set *exceptfds, int *count_ptr )
 {
-    int i, j = 0, count = 0;
+    unsigned int i, j = 0, count = 0;
     struct pollfd *fds;
 
     if (readfds) count += readfds->fd_count;
@@ -2517,7 +2562,7 @@ static struct pollfd *fd_sets_to_poll( const WS_fd_set *readfds, const WS_fd_set
 static void release_poll_fds( const WS_fd_set *readfds, const WS_fd_set *writefds,
                               const WS_fd_set *exceptfds, struct pollfd *fds )
 {
-    int i, j = 0;
+    unsigned int i, j = 0;
 
     if (readfds)
     {
@@ -2545,7 +2590,7 @@ static void release_poll_fds( const WS_fd_set *readfds, const WS_fd_set *writefd
 static int get_poll_results( WS_fd_set *readfds, WS_fd_set *writefds, WS_fd_set *exceptfds,
                              const struct pollfd *fds )
 {
-    int i, j = 0, k, total = 0;
+    unsigned int i, j = 0, k, total = 0;
 
     if (readfds)
     {
@@ -2603,13 +2648,14 @@ int WINAPI WS_select(int nfds, WS_fd_set *ws_readfds,
 }
 
 /* helper to send completion messages for client-only i/o operation case */
-static void WS_AddCompletion( SOCKET sock, ULONG_PTR CompletionValue, NTSTATUS CompletionStatus, ULONG_PTR Information )
+static void WS_AddCompletion( SOCKET sock, ULONG_PTR CompletionValue, NTSTATUS CompletionStatus,
+                              ULONG Information )
 {
     NTSTATUS status;
 
     SERVER_START_REQ( add_fd_completion )
     {
-        req->handle      = SOCKET2HANDLE(sock);
+        req->handle      = wine_server_obj_handle( SOCKET2HANDLE(sock) );
         req->cvalue      = CompletionValue;
         req->status      = CompletionStatus;
         req->information = Information;
@@ -2734,13 +2780,13 @@ INT WINAPI WSASendTo( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
 
             SERVER_START_REQ( register_async )
             {
-                req->handle = wsa->hSocket;
+                req->handle = wine_server_obj_handle( wsa->hSocket );
                 req->type   = ASYNC_TYPE_WRITE;
                 req->async.callback = WS2_async_send;
                 req->async.iosb     = iosb;
                 req->async.arg      = wsa;
                 req->async.apc      = ws2_async_apc;
-                req->async.event    = lpCompletionRoutine ? 0 : lpOverlapped->hEvent;
+                req->async.event    = wine_server_obj_handle( lpCompletionRoutine ? 0 : lpOverlapped->hEvent );
                 req->async.cvalue   = cvalue;
                 err = wine_server_call( req );
             }
@@ -3374,7 +3420,8 @@ void WINAPI WS_freeaddrinfo(struct WS_addrinfo *res)
 
 /* helper functions for getaddrinfo()/getnameinfo() */
 static int convert_aiflag_w2u(int winflags) {
-    int i, unixflags = 0;
+    unsigned int i;
+    int unixflags = 0;
 
     for (i=0;i<sizeof(ws_aiflag_map)/sizeof(ws_aiflag_map[0]);i++)
         if (ws_aiflag_map[i][0] & winflags) {
@@ -3387,7 +3434,8 @@ static int convert_aiflag_w2u(int winflags) {
 }
 
 static int convert_niflag_w2u(int winflags) {
-    int i, unixflags = 0;
+    unsigned int i;
+    int unixflags = 0;
 
     for (i=0;i<sizeof(ws_niflag_map)/sizeof(ws_niflag_map[0]);i++)
         if (ws_niflag_map[i][0] & winflags) {
@@ -3400,7 +3448,8 @@ static int convert_niflag_w2u(int winflags) {
 }
 
 static int convert_aiflag_u2w(int unixflags) {
-    int i, winflags = 0;
+    unsigned int i;
+    int winflags = 0;
 
     for (i=0;i<sizeof(ws_aiflag_map)/sizeof(ws_aiflag_map[0]);i++)
         if (ws_aiflag_map[i][1] & unixflags) {
@@ -3625,9 +3674,9 @@ int WINAPI WSAEnumNetworkEvents(SOCKET s, WSAEVENT hEvent, LPWSANETWORKEVENTS lp
 
     SERVER_START_REQ( get_socket_event )
     {
-        req->handle  = SOCKET2HANDLE(s);
+        req->handle  = wine_server_obj_handle( SOCKET2HANDLE(s) );
         req->service = TRUE;
-        req->c_event = hEvent;
+        req->c_event = wine_server_obj_handle( hEvent );
         wine_server_set_reply( req, lpEvent->iErrorCode, sizeof(lpEvent->iErrorCode) );
         if (!(ret = wine_server_call(req))) lpEvent->lNetworkEvents = reply->pmask & reply->mask;
     }
@@ -3648,9 +3697,9 @@ int WINAPI WSAEventSelect(SOCKET s, WSAEVENT hEvent, LONG lEvent)
 
     SERVER_START_REQ( set_socket_event )
     {
-        req->handle = SOCKET2HANDLE(s);
+        req->handle = wine_server_obj_handle( SOCKET2HANDLE(s) );
         req->mask   = lEvent;
-        req->event  = hEvent;
+        req->event  = wine_server_obj_handle( hEvent );
         req->window = 0;
         req->msg    = 0;
         ret = wine_server_call( req );
@@ -3717,10 +3766,10 @@ INT WINAPI WSAAsyncSelect(SOCKET s, HWND hWnd, UINT uMsg, LONG lEvent)
 
     SERVER_START_REQ( set_socket_event )
     {
-        req->handle = SOCKET2HANDLE(s);
+        req->handle = wine_server_obj_handle( SOCKET2HANDLE(s) );
         req->mask   = lEvent;
         req->event  = 0;
-        req->window = hWnd;
+        req->window = wine_server_user_handle( hWnd );
         req->msg    = uMsg;
         ret = wine_server_call( req );
     }
@@ -3840,7 +3889,7 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
         req->attributes = OBJ_INHERIT;
         req->flags      = dwFlags;
         set_error( wine_server_call( req ) );
-        ret = HANDLE2SOCKET( reply->handle );
+        ret = HANDLE2SOCKET( wine_server_ptr_handle( reply->handle ));
     }
     SERVER_END_REQ;
     if (ret)
@@ -4257,13 +4306,13 @@ INT WINAPI WSARecvFrom( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
 
                 SERVER_START_REQ( register_async )
                 {
-                    req->handle = wsa->hSocket;
+                    req->handle = wine_server_obj_handle( wsa->hSocket );
                     req->type   = ASYNC_TYPE_READ;
                     req->async.callback = WS2_async_recv;
                     req->async.iosb     = iosb;
                     req->async.arg      = wsa;
                     req->async.apc      = ws2_async_apc;
-                    req->async.event    = lpCompletionRoutine ? 0 : lpOverlapped->hEvent;
+                    req->async.event    = wine_server_obj_handle( lpCompletionRoutine ? 0 : lpOverlapped->hEvent );
                     req->async.cvalue   = cvalue;
                     err = wine_server_call( req );
                 }
@@ -4412,8 +4461,8 @@ SOCKET WINAPI WSAAccept( SOCKET s, struct WS_sockaddr *addr, LPINT addrlen,
                case CF_DEFER:
                        SERVER_START_REQ( set_socket_deferred )
                        {
-                           req->handle = SOCKET2HANDLE(s);
-                           req->deferred = SOCKET2HANDLE(cs);
+                           req->handle = wine_server_obj_handle( SOCKET2HANDLE(s) );
+                           req->deferred = wine_server_obj_handle( SOCKET2HANDLE(cs) );
                            if ( !wine_server_call_err ( req ) )
                            {
                                SetLastError( WSATRY_AGAIN );
@@ -4708,7 +4757,7 @@ INT WINAPI WSAAddressToStringA( LPSOCKADDR sockaddr, DWORD len,
                                 LPWSAPROTOCOL_INFOA info, LPSTR string,
                                 LPDWORD lenstr )
 {
-    INT size;
+    DWORD size;
     CHAR buffer[22]; /* 12 digits + 3 dots + ':' + 5 digits + '\0' */
     CHAR *p;
 
@@ -4769,7 +4818,7 @@ INT WINAPI WSAAddressToStringW( LPSOCKADDR sockaddr, DWORD len,
                                 LPWSAPROTOCOL_INFOW info, LPWSTR string,
                                 LPDWORD lenstr )
 {
-    INT size;
+    DWORD size;
     WCHAR buffer[22]; /* 12 digits + 3 dots + ':' + 5 digits + '\0' */
     static const WCHAR format[] = { '%','u','.','%','u','.','%','u','.','%','u',':','%','u',0 };
     WCHAR *p;
@@ -4792,7 +4841,7 @@ INT WINAPI WSAAddressToStringW( LPSOCKADDR sockaddr, DWORD len,
     p = strchrW( buffer, ':' );
     if (!((SOCKADDR_IN *)sockaddr)->sin_port) *p = 0;
 
-    size = lstrlenW( buffer );
+    size = strlenW( buffer );
 
     if (*lenstr <  size)
     {

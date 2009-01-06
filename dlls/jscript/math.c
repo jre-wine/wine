@@ -29,7 +29,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(jscript);
 
 static const WCHAR EW[] = {'E',0};
 static const WCHAR LOG2EW[] = {'L','O','G','2','E',0};
-static const WCHAR LOG10EW[] = {'L','O','G','1','0',0};
+static const WCHAR LOG10EW[] = {'L','O','G','1','0','E',0};
 static const WCHAR LN2W[] = {'L','N','2',0};
 static const WCHAR LN10W[] = {'L','N','1','0',0};
 static const WCHAR PIW[] = {'P','I',0};
@@ -54,25 +54,43 @@ static const WCHAR sinW[] = {'s','i','n',0};
 static const WCHAR sqrtW[] = {'s','q','r','t',0};
 static const WCHAR tanW[] = {'t','a','n',0};
 
+static HRESULT math_constant(DOUBLE val, WORD flags, VARIANT *retv)
+{
+    switch(flags) {
+    case DISPATCH_PROPERTYGET:
+        V_VT(retv) = VT_R8;
+        V_R8(retv) = val;
+        return S_OK;
+    case DISPATCH_PROPERTYPUT:
+        return S_OK;
+    }
+
+    FIXME("unhandled flags %x\n", flags);
+    return E_NOTIMPL;
+}
+
+/* ECMA-262 3rd Edition    15.8.1.1 */
 static HRESULT Math_E(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    TRACE("\n");
+    return math_constant(M_E, flags, retv);
 }
 
+/* ECMA-262 3rd Edition    15.8.1.4 */
 static HRESULT Math_LOG2E(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    TRACE("\n");
+    return math_constant(M_LOG2E, flags, retv);
 }
 
+/* ECMA-262 3rd Edition    15.8.1.4 */
 static HRESULT Math_LOG10E(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    TRACE("\n");
+    return math_constant(M_LOG10E, flags, retv);
 }
 
 static HRESULT Math_LN2(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
@@ -89,11 +107,12 @@ static HRESULT Math_LN10(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *
     return E_NOTIMPL;
 }
 
+/* ECMA-262 3rd Edition    15.8.1.6 */
 static HRESULT Math_PI(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    TRACE("\n");
+    return math_constant(M_PI, flags, retv);
 }
 
 static HRESULT Math_SQRT2(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
@@ -386,10 +405,10 @@ static HRESULT Math_tan(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *d
 
 static const builtin_prop_t Math_props[] = {
     {EW,        Math_E,        0},
-    {LOG2EW,    Math_LOG2E,    0},
-    {LOG10EW,   Math_LOG10E,   0},
-    {LN2W,      Math_LN2,      0},
     {LN10W,     Math_LN10,     0},
+    {LN2W,      Math_LN2,      0},
+    {LOG10EW,   Math_LOG10E,   0},
+    {LOG2EW,    Math_LOG2E,    0},
     {PIW,       Math_PI,       0},
     {SQRT1_2W,  Math_SQRT1_2,  0},
     {SQRT2W,    Math_SQRT2,    0},

@@ -249,7 +249,7 @@ static void free_variable( const var_t *arg, const char *local_var_prefix )
     iid = get_attrp( arg->attrs, ATTR_IIDIS );
     if( iid )
     {
-      print_proxy( "__frame->_StubMsg.MaxCount = (unsigned long) " );
+      print_proxy( "__frame->_StubMsg.MaxCount = (ULONG_PTR) " );
       write_expr(proxy, iid, 1, 1, NULL, NULL, local_var_prefix);
       print_proxy( ";\n\n" );
     }
@@ -543,7 +543,7 @@ static int write_stub_methods(type_t *iface, int skip)
   const func_t *cur;
   int i = 0;
 
-  if (iface->ref) i = write_stub_methods(iface->ref, TRUE);
+  if (iface->ref) i = write_stub_methods(iface->ref, need_delegation(iface));
   else return i; /* skip IUnknown */
 
   if (iface->funcs) LIST_FOR_EACH_ENTRY( cur, iface->funcs, const func_t, entry ) {
@@ -831,12 +831,12 @@ void write_proxies(const statement_list_t *stmts)
 
   fprintf(proxy, "const ExtendedProxyFileInfo %s_ProxyFileInfo DECLSPEC_HIDDEN =\n", file_id);
   fprintf(proxy, "{\n");
-  fprintf(proxy, "    (const PCInterfaceProxyVtblList*)&_%s_ProxyVtblList,\n", file_id);
-  fprintf(proxy, "    (const PCInterfaceStubVtblList*)&_%s_StubVtblList,\n", file_id);
+  fprintf(proxy, "    (const PCInterfaceProxyVtblList*)_%s_ProxyVtblList,\n", file_id);
+  fprintf(proxy, "    (const PCInterfaceStubVtblList*)_%s_StubVtblList,\n", file_id);
   fprintf(proxy, "    _%s_InterfaceNamesList,\n", file_id);
   if (have_baseiid) fprintf(proxy, "    _%s_BaseIIDList,\n", file_id);
   else fprintf(proxy, "    0,\n");
-  fprintf(proxy, "    &_%s_IID_Lookup,\n", file_id);
+  fprintf(proxy, "    _%s_IID_Lookup,\n", file_id);
   fprintf(proxy, "    %d,\n", count);
   fprintf(proxy, "    1,\n");
   fprintf(proxy, "    0,\n");

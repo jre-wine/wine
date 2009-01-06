@@ -24,7 +24,6 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <stdlib.h>
-#include <malloc.h>
 #include <memory.h>
 #include <tchar.h>
 #include <stdio.h>
@@ -378,7 +377,7 @@ void GraphCtrl_Paint(TGraphCtrl* this, HWND hWnd, HDC dc)
     /*  to avoid flicker, establish a memory dc, draw to it */
     /*  and then BitBlt it to the client */
     memDC = CreateCompatibleDC(dc);
-    memBitmap = (HBITMAP)CreateCompatibleBitmap(dc, this->m_nClientWidth, this->m_nClientHeight);
+    memBitmap = CreateCompatibleBitmap(dc, this->m_nClientWidth, this->m_nClientHeight);
     oldBitmap = SelectObject(memDC, memBitmap);
 
     if (memDC != NULL) 

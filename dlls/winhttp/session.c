@@ -253,10 +253,10 @@ HINTERNET WINAPI WinHttpConnect( HINTERNET hsession, LPCWSTR server, INTERNET_PO
     list_add_head( &session->hdr.children, &connect->hdr.entry );
 
     if (server && !(connect->hostname = strdupW( server ))) goto end;
-    connect->hostport = port ? port : (connect->hdr.flags & WINHTTP_FLAG_SECURE ? 443 : 80);
+    connect->hostport = port;
 
     if (server && !(connect->servername = strdupW( server ))) goto end;
-    connect->serverport = port ? port : (connect->hdr.flags & WINHTTP_FLAG_SECURE ? 443 : 80);
+    connect->serverport = port;
 
     if (!(hconnect = alloc_handle( &connect->hdr ))) goto end;
     connect->hdr.handle = hconnect;
@@ -276,7 +276,7 @@ end:
 static void request_destroy( object_header_t *hdr )
 {
     request_t *request = (request_t *)hdr;
-    int i;
+    DWORD i;
 
     TRACE("%p\n", request);
 
@@ -468,11 +468,24 @@ HINTERNET WINAPI WinHttpOpenRequest( HINTERNET hconnect, LPCWSTR verb, LPCWSTR o
     if (!netconn_init( &request->netconn, request->hdr.flags & WINHTTP_FLAG_SECURE )) goto end;
 
     if (!verb || !verb[0]) verb = getW;
-    if (!object || !object[0]) object = slashW;
-    if (!version || !version[0]) version = http1_1;
-
     if (!(request->verb = strdupW( verb ))) goto end;
-    if (!(request->path = strdupW( object ))) goto end;
+
+    if (object)
+    {
+        WCHAR *path, *p;
+        unsigned int len;
+
+        len = strlenW( object ) + 1;
+        if (object[0] != '/') len++;
+        if (!(p = path = heap_alloc( len * sizeof(WCHAR) ))) goto end;
+
+        if (object[0] != '/') *p++ = '/';
+        strcpyW( p, object );
+        request->path = path;
+    }
+    else if (!(request->path = strdupW( slashW ))) goto end;
+
+    if (!version || !version[0]) version = http1_1;
     if (!(request->version = strdupW( version ))) goto end;
 
     if (!(hrequest = alloc_handle( &request->hdr ))) goto end;

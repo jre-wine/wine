@@ -400,6 +400,7 @@ static void test_domdoc( void )
     IXMLDOMAttribute *node_attr = NULL;
     IXMLDOMNode *nodeChild = NULL;
     IXMLDOMProcessingInstruction *nodePI = NULL;
+    ISupportErrorInfo *support_error = NULL;
     VARIANT_BOOL b;
     VARIANT var;
     BSTR str;
@@ -862,6 +863,15 @@ static void test_domdoc( void )
         IXMLDOMProcessingInstruction_Release(nodePI);
     }
 
+    r = IXMLDOMDocument_QueryInterface( doc, &IID_ISupportErrorInfo, (LPVOID*)&support_error );
+    ok( r == S_OK, "ret %08x\n", r );
+    if(r == S_OK)
+    {
+        r = ISupportErrorInfo_InterfaceSupportsErrorInfo( support_error, &IID_IXMLDOMDocument );
+        todo_wine ok( r == S_OK, "ret %08x\n", r );
+        ISupportErrorInfo_Release( support_error );
+    }
+
     r = IXMLDOMDocument_Release( doc );
     ok( r == 0, "document ref count incorrect\n");
 
@@ -958,9 +968,19 @@ static void test_domnode( void )
         ok( V_VT(&var) == VT_NULL || V_VT(&var) == VT_EMPTY, "vt = %x\n", V_VT(&var));
         VariantClear(&var);
 
+        r = IXMLDOMElement_getAttributeNode( element, str, NULL);
+        ok( r == E_FAIL, "getAttributeNode ret %08x\n", r );
+
         attr = (IXMLDOMAttribute*)0xdeadbeef;
         r = IXMLDOMElement_getAttributeNode( element, str, &attr);
         ok( r == E_FAIL, "getAttributeNode ret %08x\n", r );
+        ok( attr == NULL, "getAttributeNode ret %p, expected NULL\n", attr );
+        SysFreeString( str );
+
+        attr = (IXMLDOMAttribute*)0xdeadbeef;
+        str = _bstr_("nonExisitingAttribute");
+        r = IXMLDOMElement_getAttributeNode( element, str, &attr);
+        ok( r == S_FALSE, "getAttributeNode ret %08x\n", r );
         ok( attr == NULL, "getAttributeNode ret %p, expected NULL\n", attr );
         SysFreeString( str );
 

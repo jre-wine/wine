@@ -643,10 +643,10 @@ DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT86 *context )
 
 	      if (outp)
 		/* FIXME: Check segment is readable.  */
-		(void)0;
+		;
 	      else
 		/* FIXME: Check segment is writable.  */
-		(void)0;
+		;
 
 	      if (repX)
               {
@@ -895,7 +895,7 @@ LONG CALLBACK INSTR_vectored_handler( EXCEPTION_POINTERS *ptrs )
 /***********************************************************************
  *           INSTR_CallBuiltinHandler
  */
-void INSTR_CallBuiltinHandler( CONTEXT86 *context, BYTE intnum )
+static void INSTR_CallBuiltinHandler( CONTEXT86 *context, BYTE intnum )
 {
     if (!winedos.CallBuiltinHandler) load_winedos();
     if (winedos.CallBuiltinHandler) winedos.CallBuiltinHandler( context, intnum );

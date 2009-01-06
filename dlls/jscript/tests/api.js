@@ -332,6 +332,24 @@ ok(tmp === "<STRIKE>test</STRIKE>", "'test'.strike() = " + tmp);
 tmp = "test".strike(3);
 ok(tmp === "<STRIKE>test</STRIKE>", "'test'.strike(3) = " + tmp);
 
+tmp = "".sub();
+ok(tmp === "<SUB></SUB>", "''.sub() = " + tmp);
+tmp = "".sub(3);
+ok(tmp === "<SUB></SUB>", "''.sub(3) = " + tmp);
+tmp = "test".sub();
+ok(tmp === "<SUB>test</SUB>", "'test'.sub() = " + tmp);
+tmp = "test".sub(3);
+ok(tmp === "<SUB>test</SUB>", "'test'.sub(3) = " + tmp);
+
+tmp = "".sup();
+ok(tmp === "<SUP></SUP>", "''.sup() = " + tmp);
+tmp = "".sup(3);
+ok(tmp === "<SUP></SUP>", "''.sup(3) = " + tmp);
+tmp = "test".sup();
+ok(tmp === "<SUP>test</SUP>", "'test'.sup() = " + tmp);
+tmp = "test".sup(3);
+ok(tmp === "<SUP>test</SUP>", "'test'.sup(3) = " + tmp);
+
 var arr = new Array();
 ok(typeof(arr) === "object", "arr () is not object");
 ok((arr.length === 0), "arr.length is not 0");
@@ -590,5 +608,25 @@ var date = new Date();
 date = new Date(100);
 ok(date.getTime() === 100, "date.getTime() = " + date.getTime());
 ok(Date.prototype.getTime() === 0, "date.prototype.getTime() = " + Date.prototype.getTime());
+
+ok(typeof(Math.PI) === "number", "typeof(Math.PI) = " + typeof(Math.PI));
+ok(Math.floor(Math.PI*100) === 314, "Math.PI = " + Math.PI);
+Math.PI = "test";
+ok(Math.floor(Math.PI*100) === 314, "modified Math.PI = " + Math.PI);
+
+ok(typeof(Math.E) === "number", "typeof(Math.E) = " + typeof(Math.E));
+ok(Math.floor(Math.E*100) === 271, "Math.E = " + Math.E);
+Math.E = "test";
+ok(Math.floor(Math.E*100) === 271, "modified Math.E = " + Math.E);
+
+ok(typeof(Math.LOG2E) === "number", "typeof(Math.LOG2E) = " + typeof(Math.LOG2E));
+ok(Math.floor(Math.LOG2E*100) === 144, "Math.LOG2E = " + Math.LOG2E);
+Math.LOG2E = "test";
+ok(Math.floor(Math.LOG2E*100) === 144, "modified Math.LOG2E = " + Math.LOG2E);
+
+ok(typeof(Math.LOG10E) === "number", "typeof(Math.LOG10E) = " + typeof(Math.LOG10E));
+ok(Math.floor(Math.LOG10E*100) === 43, "Math.LOG10E = " + Math.LOG10E);
+Math.LOG10E = "test";
+ok(Math.floor(Math.LOG10E*100) === 43, "modified Math.LOG10E = " + Math.LOG10E);
 
 reportSuccess();

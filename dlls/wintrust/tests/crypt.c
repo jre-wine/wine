@@ -1,6 +1,7 @@
 /* Unit test suite for wintrust crypt functions
  *
  * Copyright 2007 Paul Vriens
+ * Copyright 2008 Hans Leidekker for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -27,12 +28,63 @@
 #include "wine/test.h"
 
 static char selfname[MAX_PATH];
-
 static CHAR CURR_DIR[MAX_PATH];
+
+/*
+ * Minimalistic catalog file. To reconstruct, save text below as winetest.cdf,
+ * convert to DOS line endings and run 'makecat /cat winetest.cdf'
+ */
+
+/*
+[CatalogHeader]
+Name=winetest.cat
+ResultDir=.\
+PublicVersion=0x00000001
+EncodingType=
+CATATTR1=0x10010001:attr1:value1
+CATATTR2=0x10010001:attr2:value2
+
+[CatalogFiles]
+hashme=.\winetest.cdf
+*/
+
+const BYTE test_catalog[] = {
+    0x30, 0x82, 0x01, 0xbc, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02, 0xa0,
+    0x82, 0x01, 0xad, 0x30, 0x82, 0x01, 0xa9, 0x02, 0x01, 0x01, 0x31, 0x00, 0x30, 0x82, 0x01, 0x9e,
+    0x06, 0x09, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x0a, 0x01, 0xa0, 0x82, 0x01, 0x8f, 0x30,
+    0x82, 0x01, 0x8b, 0x30, 0x0c, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x0c, 0x01,
+    0x01, 0x04, 0x10, 0xfa, 0x55, 0x2c, 0xc2, 0xf6, 0xcc, 0xdd, 0x11, 0x2a, 0x9c, 0x00, 0x14, 0x22,
+    0xec, 0x8f, 0x3b, 0x17, 0x0d, 0x30, 0x38, 0x31, 0x32, 0x31, 0x38, 0x31, 0x31, 0x32, 0x36, 0x34,
+    0x38, 0x5a, 0x30, 0x0e, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x0c, 0x01, 0x02,
+    0x05, 0x00, 0x30, 0x81, 0xdd, 0x30, 0x81, 0xda, 0x04, 0x0e, 0x68, 0x00, 0x61, 0x00, 0x73, 0x00,
+    0x68, 0x00, 0x6d, 0x00, 0x65, 0x00, 0x00, 0x00, 0x31, 0x81, 0xc7, 0x30, 0x61, 0x06, 0x0a, 0x2b,
+    0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x04, 0x31, 0x53, 0x30, 0x51, 0x30, 0x2c, 0x06,
+    0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x19, 0xa2, 0x1e, 0x80, 0x1c, 0x00,
+    0x3c, 0x00, 0x3c, 0x00, 0x3c, 0x00, 0x4f, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6f, 0x00, 0x6c, 0x00,
+    0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3e, 0x00, 0x3e, 0x00, 0x3e, 0x30, 0x21, 0x30, 0x09, 0x06,
+    0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14, 0xed, 0xd6, 0x9c, 0x9c, 0xb2, 0xfc,
+    0xaa, 0x03, 0xe8, 0xd3, 0x20, 0xf6, 0xab, 0x28, 0xc3, 0xff, 0xbd, 0x07, 0x36, 0xf5, 0x30, 0x62,
+    0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x0c, 0x02, 0x02, 0x31, 0x54, 0x30, 0x52,
+    0x1e, 0x4c, 0x00, 0x7b, 0x00, 0x44, 0x00, 0x45, 0x00, 0x33, 0x00, 0x35, 0x00, 0x31, 0x00, 0x41,
+    0x00, 0x34, 0x00, 0x32, 0x00, 0x2d, 0x00, 0x38, 0x00, 0x45, 0x00, 0x35, 0x00, 0x39, 0x00, 0x2d,
+    0x00, 0x31, 0x00, 0x31, 0x00, 0x44, 0x00, 0x30, 0x00, 0x2d, 0x00, 0x38, 0x00, 0x43, 0x00, 0x34,
+    0x00, 0x37, 0x00, 0x2d, 0x00, 0x30, 0x00, 0x30, 0x00, 0x43, 0x00, 0x30, 0x00, 0x34, 0x00, 0x46,
+    0x00, 0x43, 0x00, 0x32, 0x00, 0x39, 0x00, 0x35, 0x00, 0x45, 0x00, 0x45, 0x00, 0x7d, 0x02, 0x02,
+    0x02, 0x00, 0xa0, 0x6a, 0x30, 0x68, 0x30, 0x32, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82,
+    0x37, 0x0c, 0x02, 0x01, 0x04, 0x24, 0x30, 0x22, 0x1e, 0x0a, 0x00, 0x61, 0x00, 0x74, 0x00, 0x74,
+    0x00, 0x72, 0x00, 0x32, 0x02, 0x04, 0x10, 0x01, 0x00, 0x01, 0x04, 0x0e, 0x76, 0x00, 0x61, 0x00,
+    0x6c, 0x00, 0x75, 0x00, 0x65, 0x00, 0x32, 0x00, 0x00, 0x00, 0x30, 0x32, 0x06, 0x0a, 0x2b, 0x06,
+    0x01, 0x04, 0x01, 0x82, 0x37, 0x0c, 0x02, 0x01, 0x04, 0x24, 0x30, 0x22, 0x1e, 0x0a, 0x00, 0x61,
+    0x00, 0x74, 0x00, 0x74, 0x00, 0x72, 0x00, 0x31, 0x02, 0x04, 0x10, 0x01, 0x00, 0x01, 0x04, 0x0e,
+    0x76, 0x00, 0x61, 0x00, 0x6c, 0x00, 0x75, 0x00, 0x65, 0x00, 0x31, 0x00, 0x00, 0x00, 0x31, 0x00,
+};
 
 static BOOL (WINAPI * pCryptCATAdminAcquireContext)(HCATADMIN*, const GUID*, DWORD);
 static BOOL (WINAPI * pCryptCATAdminReleaseContext)(HCATADMIN, DWORD);
 static BOOL (WINAPI * pCryptCATAdminCalcHashFromFileHandle)(HANDLE hFile, DWORD*, BYTE*, DWORD);
+static HCATINFO (WINAPI * pCryptCATAdminAddCatalog)(HCATADMIN, PWSTR, PWSTR, DWORD);
+static BOOL (WINAPI * pCryptCATAdminRemoveCatalog)(HCATADMIN, LPCWSTR, DWORD);
+static BOOL (WINAPI * pCryptCATAdminReleaseCatalogContext)(HCATADMIN, HCATINFO, DWORD);
 
 static void InitFunctionPtrs(void)
 {
@@ -47,24 +99,22 @@ static void InitFunctionPtrs(void)
     WINTRUST_GET_PROC(CryptCATAdminAcquireContext)
     WINTRUST_GET_PROC(CryptCATAdminReleaseContext)
     WINTRUST_GET_PROC(CryptCATAdminCalcHashFromFileHandle)
+    WINTRUST_GET_PROC(CryptCATAdminAddCatalog)
+    WINTRUST_GET_PROC(CryptCATAdminRemoveCatalog)
+    WINTRUST_GET_PROC(CryptCATAdminReleaseCatalogContext)
 
 #undef WINTRUST_GET_PROC
 }
+
+static GUID dummy = {0xdeadbeef,0xdead,0xbeef,{0xde,0xad,0xbe,0xef,0xde,0xad,0xbe,0xef}};
 
 static void test_context(void)
 {
     BOOL ret;
     HCATADMIN hca;
-    static GUID dummy   = { 0xdeadbeef, 0xdead, 0xbeef, { 0xde,0xad,0xbe,0xef,0xde,0xad,0xbe,0xef }};
     static GUID unknown = { 0xC689AABA, 0x8E78, 0x11D0, { 0x8C,0x47,0x00,0xC0,0x4F,0xC2,0x95,0xEE }}; /* WINTRUST.DLL */
     CHAR windir[MAX_PATH], catroot[MAX_PATH], catroot2[MAX_PATH], dummydir[MAX_PATH];
     DWORD attrs;
-
-    if (!pCryptCATAdminAcquireContext || !pCryptCATAdminReleaseContext)
-    {
-        skip("CryptCATAdminAcquireContext and/or CryptCATAdminReleaseContext are not available\n");
-        return;
-    }
 
     /* When CryptCATAdminAcquireContext is successful it will create
      * several directories if they don't exist:
@@ -102,23 +152,16 @@ static void test_context(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
 
     /* NULL GUID */
-    SetLastError(0xdeadbeef);
     ret = pCryptCATAdminAcquireContext(&hca, NULL, 0);
     ok(ret, "Expected success\n");
-    ok(GetLastError() == ERROR_SUCCESS ||
-       GetLastError() == 0xdeadbeef /* Vista */,
-       "Expected ERROR_SUCCESS or 0xdeadbeef, got %d\n", GetLastError());
     ok(hca != NULL, "Expected a context handle, got NULL\n");
 
     /* All NULL */
     SetLastError(0xdeadbeef);
     ret = pCryptCATAdminReleaseContext(NULL, 0);
-    todo_wine
-    {
     ok(!ret, "Expected failure\n");
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-    }
 
     /* Proper release */
     SetLastError(0xdeadbeef);
@@ -130,12 +173,9 @@ static void test_context(void)
     /* Try to release a second time */
     SetLastError(0xdeadbeef);
     ret = pCryptCATAdminReleaseContext(hca, 0);
-    todo_wine
-    {
     ok(!ret, "Expected failure\n");
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-    }
 
     /* NULL context handle and dummy GUID */
     SetLastError(0xdeadbeef);
@@ -154,12 +194,8 @@ static void test_context(void)
      * save to remove files and directories from CatRoot/CatRoot2.
      */
 
-    SetLastError(0xdeadbeef);
     ret = pCryptCATAdminAcquireContext(&hca, &dummy, 0);
     ok(ret, "Expected success\n");
-    ok(GetLastError() == ERROR_SUCCESS ||
-       GetLastError() == 0xdeadbeef /* Vista */,
-       "Expected ERROR_SUCCESS or 0xdeadbeef, got %d\n", GetLastError());
     ok(hca != NULL, "Expected a context handle, got NULL\n");
 
     GetWindowsDirectoryA(windir, MAX_PATH);
@@ -169,20 +205,14 @@ static void test_context(void)
     lstrcatA(catroot2, "\\system32\\CatRoot2");
 
     attrs = GetFileAttributes(catroot);
-    /* On a clean Wine this will fail. When a native wintrust.dll was used in the past
-     * some tests will succeed.
-     */
-    todo_wine
-        ok(attrs != INVALID_FILE_ATTRIBUTES,
-            "Expected the CatRoot directory to exist\n");
+    ok(attrs != INVALID_FILE_ATTRIBUTES, "Expected the CatRoot directory to exist\n");
 
     /* Windows creates the GUID directory in capitals */
     lstrcpyA(dummydir, catroot);
     lstrcatA(dummydir, "\\{DEADBEEF-DEAD-BEEF-DEAD-BEEFDEADBEEF}");
     attrs = GetFileAttributes(dummydir);
-    todo_wine
-        ok(attrs != INVALID_FILE_ATTRIBUTES,
-            "Expected CatRoot\\{DEADBEEF-DEAD-BEEF-DEAD-BEEFDEADBEEF} directory to exist\n");
+    ok(attrs != INVALID_FILE_ATTRIBUTES,
+       "Expected CatRoot\\{DEADBEEF-DEAD-BEEF-DEAD-BEEFDEADBEEF} directory to exist\n");
 
     /* Only present on XP or higher. */
     attrs = GetFileAttributes(catroot2);
@@ -199,24 +229,16 @@ static void test_context(void)
     ok(ret, "Expected success\n");
 
     /* Correct context handle and GUID */
-    SetLastError(0xdeadbeef);
     ret = pCryptCATAdminAcquireContext(&hca, &unknown, 0);
     ok(ret, "Expected success\n");
-    ok(GetLastError() == ERROR_SUCCESS ||
-       GetLastError() == 0xdeadbeef /* Vista */,
-       "Expected ERROR_SUCCESS or 0xdeadbeef, got %d\n", GetLastError());
     ok(hca != NULL, "Expected a context handle, got NULL\n");
 
     ret = pCryptCATAdminReleaseContext(hca, 0);
     ok(ret, "Expected success\n");
 
     /* Flags not equal to 0 */
-    SetLastError(0xdeadbeef);
     ret = pCryptCATAdminAcquireContext(&hca, &unknown, 1);
     ok(ret, "Expected success\n");
-    ok(GetLastError() == ERROR_SUCCESS ||
-       GetLastError() == 0xdeadbeef /* Vista */,
-       "Expected ERROR_SUCCESS or 0xdeadbeef, got %d\n", GetLastError());
     ok(hca != NULL, "Expected a context handle, got NULL\n");
 
     ret = pCryptCATAdminReleaseContext(hca, 0);
@@ -234,84 +256,61 @@ static void test_calchash(void)
     CHAR temp[MAX_PATH];
     DWORD written;
 
-    if (!pCryptCATAdminCalcHashFromFileHandle)
-    {
-        skip("CryptCATAdminCalcHashFromFileHandle is not available\n");
-        return;
-    }
-    
     /* All NULL */
     SetLastError(0xdeadbeef);
     ret = pCryptCATAdminCalcHashFromFileHandle(NULL, NULL, NULL, 0);
-    todo_wine
-    {
     ok(!ret, "Expected failure\n");
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-    }
 
     /* NULL filehandle, rest is legal */
     SetLastError(0xdeadbeef);
     ret = pCryptCATAdminCalcHashFromFileHandle(NULL, &hashsize, NULL, 0);
-    todo_wine
-    {
     ok(!ret, "Expected failure\n");
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-    }
 
     /* Correct filehandle, rest is NULL */
     file = CreateFileA(selfname, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
     SetLastError(0xdeadbeef);
     ret = pCryptCATAdminCalcHashFromFileHandle(file, NULL, NULL, 0);
-    todo_wine
-    {
     ok(!ret, "Expected failure\n");
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-    }
     CloseHandle(file);
 
     /* All OK, but dwFlags set to 1 */
     file = CreateFileA(selfname, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
     SetLastError(0xdeadbeef);
     ret = pCryptCATAdminCalcHashFromFileHandle(file, &hashsize, NULL, 1);
-    todo_wine
-    {
     ok(!ret, "Expected failure\n");
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-    }
     CloseHandle(file);
 
     /* All OK, requesting the size of the hash */
-    file = CreateFileA(selfname, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+    file = CreateFileA(selfname, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "CreateFile failed %u\n", GetLastError());
     SetLastError(0xdeadbeef);
     ret = pCryptCATAdminCalcHashFromFileHandle(file, &hashsize, NULL, 0);
-    ok(ret, "Expected success\n");
-    todo_wine
-    {
+    ok(ret, "Expected success %u\n", GetLastError());
     ok(hashsize == 20," Expected a hash size of 20, got %d\n", hashsize);
     ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
        "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
-    }
     CloseHandle(file);
 
     /* All OK, retrieve the hash
      * Double the hash buffer to see what happens to the size parameter
      */
-    file = CreateFileA(selfname, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+    file = CreateFileA(selfname, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     hashsize *= 2;
     hash = HeapAlloc(GetProcessHeap(), 0, hashsize);
     SetLastError(0xdeadbeef);
     ret = pCryptCATAdminCalcHashFromFileHandle(file, &hashsize, hash, 0);
-    ok(ret, "Expected success\n");
-    todo_wine
-    {
+    ok(ret, "Expected success %u\n", GetLastError());
     ok(hashsize == 20," Expected a hash size of 20, got %d\n", hashsize);
     ok(GetLastError() == ERROR_SUCCESS,
        "Expected ERROR_SUCCESS, got %d\n", GetLastError());
-    }
     CloseHandle(file);
     HeapFree(GetProcessHeap(), 0, hash);
 
@@ -331,18 +330,100 @@ static void test_calchash(void)
     SetLastError(0xdeadbeef);
     ret = pCryptCATAdminCalcHashFromFileHandle(file, &hashsize, hash, 0);
     ok(ret, "Expected success\n");
-    todo_wine
-    {
     ok(GetLastError() == ERROR_SUCCESS,
        "Expected ERROR_SUCCESS, got %d\n", GetLastError());
     ok(hashsize == sizeof(expectedhash) &&
        !memcmp(hash, expectedhash, sizeof(expectedhash)),
        "Hashes didn't match\n");
-    }
     CloseHandle(file);
 
     HeapFree(GetProcessHeap(), 0, hash);
     DeleteFileA(temp);
+}
+
+static void test_CryptCATAdminAddRemoveCatalog(void)
+{
+    static WCHAR basenameW[] = {'w','i','n','e','t','e','s','t','.','c','a','t',0};
+    HCATADMIN hcatadmin;
+    HCATINFO hcatinfo;
+    WCHAR tmpfileW[MAX_PATH];
+    char tmpfile[MAX_PATH];
+    HANDLE file;
+    DWORD error, written;
+    BOOL ret;
+
+    if (!pCryptCATAdminRemoveCatalog)
+    {
+        /* NT4 and W2K do have CryptCATAdminAddCatalog !! */
+        win_skip("CryptCATAdminRemoveCatalog is not available\n");
+        return;
+    }
+
+    if (!GetTempFileNameA(CURR_DIR, "cat", 0, tmpfile)) return;
+    DeleteFileA(tmpfile);
+    file = CreateFileA(tmpfile, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "CreateFileA failed %u\n", GetLastError());
+    CloseHandle(file);
+
+    ret = pCryptCATAdminAcquireContext(&hcatadmin, &dummy, 0);
+    ok(ret, "CryptCATAdminAcquireContext failed %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    hcatinfo = pCryptCATAdminAddCatalog(NULL, NULL, NULL, 0);
+    error = GetLastError();
+    ok(hcatinfo == NULL, "CryptCATAdminAddCatalog succeeded\n");
+    ok(error == ERROR_INVALID_PARAMETER, "got %u expected ERROR_INVALID_PARAMTER\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    hcatinfo = pCryptCATAdminAddCatalog(hcatadmin, NULL, NULL, 0);
+    error = GetLastError();
+    ok(hcatinfo == NULL, "CryptCATAdminAddCatalog succeeded\n");
+    ok(error == ERROR_INVALID_PARAMETER, "got %u expected INVALID_PARAMTER\n", GetLastError());
+
+    MultiByteToWideChar(0, 0, tmpfile, -1, tmpfileW, MAX_PATH);
+
+    SetLastError(0xdeadbeef);
+    hcatinfo = pCryptCATAdminAddCatalog(hcatadmin, tmpfileW, basenameW, 0);
+    error = GetLastError();
+    todo_wine {
+    ok(hcatinfo == NULL, "CryptCATAdminAddCatalog succeeded\n");
+    ok(error == ERROR_BAD_FORMAT, "got %u expected ERROR_BAD_FORMAT\n", GetLastError());
+    }
+
+    SetLastError(0xdeadbeef);
+    hcatinfo = pCryptCATAdminAddCatalog(hcatadmin, tmpfileW, basenameW, 1);
+    error = GetLastError();
+    ok(hcatinfo == NULL, "CryptCATAdminAddCatalog succeeded\n");
+    ok(error == ERROR_INVALID_PARAMETER, "got %u expected ERROR_INVALID_PARAMTER\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    hcatinfo = pCryptCATAdminAddCatalog(hcatadmin, tmpfileW, NULL, 0);
+    error = GetLastError();
+    ok(hcatinfo == NULL, "CryptCATAdminAddCatalog succeeded\n");
+    todo_wine ok(error == ERROR_BAD_FORMAT, "got %u expected ERROR_BAD_FORMAT\n", GetLastError());
+
+    DeleteFileA(tmpfile);
+    file = CreateFileA(tmpfile, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "CreateFileA failed %u\n", GetLastError());
+    WriteFile(file, test_catalog, sizeof(test_catalog), &written, NULL);
+    CloseHandle(file);
+
+    hcatinfo = pCryptCATAdminAddCatalog(hcatadmin, tmpfileW, NULL, 0);
+    todo_wine ok(hcatinfo != NULL, "CryptCATAdminAddCatalog failed %u\n", GetLastError());
+
+    hcatinfo = pCryptCATAdminAddCatalog(hcatadmin, tmpfileW, basenameW, 0);
+    ok(hcatinfo != NULL, "CryptCATAdminAddCatalog failed %u\n", GetLastError());
+
+    ret = pCryptCATAdminReleaseCatalogContext(hcatadmin, hcatinfo, 0);
+    ok(ret, "CryptCATAdminReleaseCatalogContext failed %u\n", GetLastError());
+
+    ret = pCryptCATAdminRemoveCatalog(hcatadmin, tmpfileW, 0);
+    ok(ret, "CryptCATAdminRemoveCatalog failed %u\n", GetLastError());
+
+    ret = pCryptCATAdminReleaseContext(hcatadmin, 0);
+    ok(ret, "CryptCATAdminReleaseContext failed %u\n", GetLastError());
+
+    DeleteFileA(tmpfile);
 }
 
 START_TEST(crypt)
@@ -352,6 +433,12 @@ START_TEST(crypt)
 
     InitFunctionPtrs();
 
+    if (!pCryptCATAdminAcquireContext)
+    {
+        win_skip("CryptCATAdmin functions are not available\n");
+        return;
+    }
+
     myARGC = winetest_get_mainargs(&myARGV);
     strcpy(selfname, myARGV[0]);
 
@@ -359,4 +446,5 @@ START_TEST(crypt)
    
     test_context();
     test_calchash();
+    test_CryptCATAdminAddRemoveCatalog();
 }

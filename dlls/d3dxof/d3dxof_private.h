@@ -40,7 +40,7 @@
 #define MAX_TEMPLATES 200
 #define MAX_OBJECTS 500
 #define MAX_SUBOBJECTS 500
-#define MAX_STRINGS_BUFFER 200
+#define MAX_STRINGS_BUFFER 10000
 
 typedef struct {
     DWORD type;
@@ -55,6 +55,7 @@ typedef struct {
     char name[MAX_NAME_LEN];
     GUID class_id;
     BOOL open;
+    BOOL binary;
     ULONG nb_childs;
     char childs[MAX_CHILDS][MAX_NAME_LEN];
     ULONG nb_members;
@@ -68,6 +69,7 @@ typedef struct {
 } xobject_member;
 
 struct _xobject {
+   BOOL binary;
    struct _xobject* ptarget;
    char name[MAX_NAME_LEN];
    GUID class_id;

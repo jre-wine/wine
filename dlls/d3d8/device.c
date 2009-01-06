@@ -36,6 +36,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d8);
 
+static HRESULT WINAPI D3D8CB_CreateSurface(IUnknown*,IUnknown*,UINT,UINT,WINED3DFORMAT,DWORD,WINED3DPOOL,UINT,WINED3DCUBEMAP_FACES,IWineD3DSurface**,HANDLE*);
+
+
 /* Shader handle functions */
 static shader_handle *alloc_shader_handle(IDirect3DDevice8Impl *This) {
     if (This->free_shader_handles) {
@@ -104,7 +107,7 @@ static ULONG WINAPI IDirect3DDevice8Impl_Release(LPDIRECT3DDEVICE8 iface) {
         This->inDestruction = TRUE;
 
         for(i = 0; i < This->numConvertedDecls; i++) {
-            IWineD3DVertexDeclaration_Release(This->decls[i].decl);
+            IDirect3DVertexDeclaration8_Release(This->decls[i].decl);
         }
         HeapFree(GetProcessHeap(), 0, This->decls);
 
@@ -1537,6 +1540,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateVertexShader(LPDIRECT3DDEVICE8 
     IDirect3DVertexShader8Impl *object;
     IWineD3DVertexDeclaration *wined3d_vertex_declaration;
     const DWORD *token = pDeclaration;
+    shader_handle *handle;
 
     /* Test if the vertex declaration is valid */
     while (D3DVSD_END() != *token) {
@@ -1575,41 +1579,57 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateVertexShader(LPDIRECT3DDEVICE8 
         *ppShader = 0;
         return D3DERR_INVALIDCALL;
     }
-    wined3d_vertex_declaration = ((IDirect3DVertexDeclaration8Impl *)object->vertex_declaration)->wined3d_vertex_declaration;
 
-    /* Usage is missing ... Use SetRenderState to set the sw vp render state in SetVertexShader */
-    hrc = IWineD3DDevice_CreateVertexShader(This->WineD3DDevice, wined3d_vertex_declaration, pFunction, &object->wineD3DVertexShader, (IUnknown *)object);
-
-    if (FAILED(hrc)) {
-        /* free up object */
-        FIXME("Call to IWineD3DDevice_CreateVertexShader failed\n");
+    handle = alloc_shader_handle(This);
+    if (!handle)
+    {
+        ERR("Failed to allocate shader handle\n");
+        LeaveCriticalSection(&d3d8_cs);
+        IDirect3DVertexDeclaration8_Release(object->vertex_declaration);
         HeapFree(GetProcessHeap(), 0, object);
         *ppShader = 0;
-    } else {
-        /* TODO: Store the VS declarations locally so that they can be dereferenced with a value higher than VS_HIGHESTFIXEDFXF */
-        shader_handle *handle = alloc_shader_handle(This);
-        if (!handle) {
-            ERR("Failed to allocate shader handle\n");
-            IDirect3DVertexShader8_Release((IUnknown *)object);
-            hrc = E_OUTOFMEMORY;
-        } else {
-            *handle = object;
-            object->handle = (handle - This->shader_handles) + VS_HIGHESTFIXEDFXF + 1;
-            *ppShader = object->handle;
+        return E_OUTOFMEMORY;
+    }
+    else
+    {
+        DWORD shader_handle = (handle - This->shader_handles) + VS_HIGHESTFIXEDFXF + 1;
+        *handle = object;
+        *ppShader = ((IDirect3DVertexDeclaration8Impl *)object->vertex_declaration)->shader_handle = shader_handle;
+    }
 
+    wined3d_vertex_declaration = ((IDirect3DVertexDeclaration8Impl *)object->vertex_declaration)->wined3d_vertex_declaration;
+
+    if (pFunction)
+    {
+        /* Usage is missing ... Use SetRenderState to set the sw vp render state in SetVertexShader */
+        hrc = IWineD3DDevice_CreateVertexShader(This->WineD3DDevice, wined3d_vertex_declaration,
+                pFunction, &object->wineD3DVertexShader, (IUnknown *)object);
+
+        if (FAILED(hrc))
+        {
+            /* free up object */
+            FIXME("Call to IWineD3DDevice_CreateVertexShader failed\n");
+            free_shader_handle(This, handle);
+            IDirect3DVertexDeclaration8_Release(object->vertex_declaration);
+            HeapFree(GetProcessHeap(), 0, object);
+            *ppShader = 0;
+        }
+        else
+        {
             load_local_constants(pDeclaration, object->wineD3DVertexShader);
             TRACE("(%p) : returning %p (handle %#x)\n", This, object, *ppShader);
         }
     }
+
     LeaveCriticalSection(&d3d8_cs);
 
     return hrc;
 }
 
-static IWineD3DVertexDeclaration *IDirect3DDevice8Impl_FindDecl(IDirect3DDevice8Impl *This, DWORD fvf)
+static IDirect3DVertexDeclaration8Impl *IDirect3DDevice8Impl_FindDecl(IDirect3DDevice8Impl *This, DWORD fvf)
 {
+    IDirect3DVertexDeclaration8Impl *d3d8_declaration;
     HRESULT hr;
-    IWineD3DVertexDeclaration* pDecl = NULL;
     int p, low, high; /* deliberately signed */
     struct FvfToDecl *convertedDecls = This->decls;
 
@@ -1622,7 +1642,7 @@ static IWineD3DVertexDeclaration *IDirect3DDevice8Impl_FindDecl(IDirect3DDevice8
         TRACE("%d ", p);
         if(convertedDecls[p].fvf == fvf) {
             TRACE("found %p\n", convertedDecls[p].decl);
-            return convertedDecls[p].decl;
+            return (IDirect3DVertexDeclaration8Impl *)convertedDecls[p].decl;
         } else if(convertedDecls[p].fvf < fvf) {
             low = p + 1;
         } else {
@@ -1631,11 +1651,27 @@ static IWineD3DVertexDeclaration *IDirect3DDevice8Impl_FindDecl(IDirect3DDevice8
     }
     TRACE("not found. Creating and inserting at position %d.\n", low);
 
+    d3d8_declaration = HeapAlloc(GetProcessHeap(), 0, sizeof(*d3d8_declaration));
+    if (!d3d8_declaration)
+    {
+        ERR("Memory allocation failed.\n");
+        return NULL;
+    }
+
+    d3d8_declaration->ref_count = 1;
+    d3d8_declaration->lpVtbl = &Direct3DVertexDeclaration8_Vtbl;
+    d3d8_declaration->elements = NULL;
+    d3d8_declaration->elements_size = 0;
+    d3d8_declaration->shader_handle = fvf;
+
     hr = IWineD3DDevice_CreateVertexDeclarationFromFVF(This->WineD3DDevice,
-                                                       &pDecl,
-                                                       (IUnknown *) This,
-                                                       fvf);
-    if (FAILED(hr)) return NULL;
+            &d3d8_declaration->wined3d_vertex_declaration, (IUnknown *)d3d8_declaration, fvf);
+    if (FAILED(hr))
+    {
+        ERR("Failed to create wined3d vertex declaration.\n");
+        HeapFree(GetProcessHeap(), 0, d3d8_declaration);
+        return NULL;
+    }
 
     if(This->declArraySize == This->numConvertedDecls) {
         int grow = This->declArraySize / 2;
@@ -1643,7 +1679,7 @@ static IWineD3DVertexDeclaration *IDirect3DDevice8Impl_FindDecl(IDirect3DDevice8
                                      sizeof(convertedDecls[0]) * (This->numConvertedDecls + grow));
         if(!convertedDecls) {
             /* This will destroy it */
-            IWineD3DVertexDeclaration_Release(pDecl);
+            IDirect3DVertexDeclaration8_Release((IDirect3DVertexDeclaration8 *)d3d8_declaration);
             return NULL;
         }
         This->decls = convertedDecls;
@@ -1651,12 +1687,12 @@ static IWineD3DVertexDeclaration *IDirect3DDevice8Impl_FindDecl(IDirect3DDevice8
     }
 
     memmove(convertedDecls + low + 1, convertedDecls + low, sizeof(convertedDecls[0]) * (This->numConvertedDecls - low));
-    convertedDecls[low].decl = pDecl;
+    convertedDecls[low].decl = (IDirect3DVertexDeclaration8 *)d3d8_declaration;
     convertedDecls[low].fvf = fvf;
     This->numConvertedDecls++;
 
-    TRACE("Returning %p. %d decls in array\n", pDecl, This->numConvertedDecls);
-    return pDecl;
+    TRACE("Returning %p. %u decls in array\n", d3d8_declaration, This->numConvertedDecls);
+    return d3d8_declaration;
 }
 
 static HRESULT WINAPI IDirect3DDevice8Impl_SetVertexShader(LPDIRECT3DDEVICE8 iface, DWORD pShader) {
@@ -1666,9 +1702,9 @@ static HRESULT WINAPI IDirect3DDevice8Impl_SetVertexShader(LPDIRECT3DDEVICE8 ifa
     TRACE("(%p) : Relay\n", This);
     EnterCriticalSection(&d3d8_cs);
     if (VS_HIGHESTFIXEDFXF >= pShader) {
-        TRACE("Setting FVF, %d %d\n", VS_HIGHESTFIXEDFXF, pShader);
-        IWineD3DDevice_SetFVF(This->WineD3DDevice, pShader);
-        IWineD3DDevice_SetVertexDeclaration(This->WineD3DDevice, IDirect3DDevice8Impl_FindDecl(This, pShader));
+        TRACE("Setting FVF, %#x\n", pShader);
+        IWineD3DDevice_SetVertexDeclaration(This->WineD3DDevice,
+                IDirect3DDevice8Impl_FindDecl(This, pShader)->wined3d_vertex_declaration);
         IWineD3DDevice_SetVertexShader(This->WineD3DDevice, NULL);
     } else {
         TRACE("Setting shader\n");
@@ -1677,9 +1713,19 @@ static HRESULT WINAPI IDirect3DDevice8Impl_SetVertexShader(LPDIRECT3DDEVICE8 ifa
             hrc = D3DERR_INVALIDCALL;
         } else {
             IDirect3DVertexShader8Impl *shader = This->shader_handles[pShader - (VS_HIGHESTFIXEDFXF + 1)];
-            IWineD3DDevice_SetVertexDeclaration(This->WineD3DDevice,
-                    shader ? ((IDirect3DVertexDeclaration8Impl *)shader->vertex_declaration)->wined3d_vertex_declaration : NULL);
-            hrc = IWineD3DDevice_SetVertexShader(This->WineD3DDevice, 0 == shader ? NULL : shader->wineD3DVertexShader);
+
+            if (shader)
+            {
+                hrc = IWineD3DDevice_SetVertexDeclaration(This->WineD3DDevice,
+                        ((IDirect3DVertexDeclaration8Impl *)shader->vertex_declaration)->wined3d_vertex_declaration);
+                if (SUCCEEDED(hrc))
+                    hrc = IWineD3DDevice_SetVertexShader(This->WineD3DDevice, shader->wineD3DVertexShader);
+            }
+            else
+            {
+                hrc = IWineD3DDevice_SetVertexDeclaration(This->WineD3DDevice, NULL);
+                if (SUCCEEDED(hrc)) hrc = IWineD3DDevice_SetVertexShader(This->WineD3DDevice, NULL);
+            }
         }
     }
     TRACE("(%p) : returning hr(%u)\n", This, hrc);
@@ -1690,24 +1736,36 @@ static HRESULT WINAPI IDirect3DDevice8Impl_SetVertexShader(LPDIRECT3DDEVICE8 ifa
 
 static HRESULT WINAPI IDirect3DDevice8Impl_GetVertexShader(LPDIRECT3DDEVICE8 iface, DWORD* ppShader) {
     IDirect3DDevice8Impl *This = (IDirect3DDevice8Impl *)iface;
-    IWineD3DVertexShader *pShader;
-    HRESULT hrc = D3D_OK;
+    IWineD3DVertexDeclaration *wined3d_declaration;
+    HRESULT hrc;
 
     TRACE("(%p) : Relay  device@%p\n", This, This->WineD3DDevice);
     EnterCriticalSection(&d3d8_cs);
-    hrc = IWineD3DDevice_GetVertexShader(This->WineD3DDevice, &pShader);
-    if (D3D_OK == hrc) {
-        if(0 != pShader) {
-            IDirect3DVertexShader8Impl *d3d8_shader;
-            hrc = IWineD3DVertexShader_GetParent(pShader, (IUnknown **)&d3d8_shader);
-            IWineD3DVertexShader_Release(pShader);
-            *ppShader = d3d8_shader->handle;
-        } else {
+
+    hrc = IWineD3DDevice_GetVertexDeclaration(This->WineD3DDevice, &wined3d_declaration);
+    if (SUCCEEDED(hrc))
+    {
+        if (wined3d_declaration)
+        {
+            IDirect3DVertexDeclaration8 *d3d8_declaration;
+            hrc = IWineD3DVertexDeclaration_GetParent(wined3d_declaration, (IUnknown **)&d3d8_declaration);
+            IWineD3DVertexDeclaration_Release(wined3d_declaration);
+            if (SUCCEEDED(hrc))
+            {
+                *ppShader = ((IDirect3DVertexDeclaration8Impl *)d3d8_declaration)->shader_handle;
+                IDirect3DVertexDeclaration8_Release(d3d8_declaration);
+            }
+        }
+        else
+        {
             *ppShader = 0;
             hrc = D3D_OK;
         }
-    } else {
-        WARN("(%p) : Call to IWineD3DDevice_GetVertexShader failed %u (device %p)\n", This, hrc, This->WineD3DDevice);
+    }
+    else
+    {
+        WARN("(%p) : Call to IWineD3DDevice_GetVertexDeclaration failed %#x (device %p)\n",
+                This, hrc, This->WineD3DDevice);
     }
     TRACE("(%p) : returning %#x\n", This, *ppShader);
     LeaveCriticalSection(&d3d8_cs);
@@ -1819,7 +1877,16 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetVertexShaderFunction(LPDIRECT3DDEV
     }
 
     shader = This->shader_handles[pVertexShader - (VS_HIGHESTFIXEDFXF + 1)];
-    hr = IWineD3DVertexShader_GetFunction(shader->wineD3DVertexShader, pData, pSizeOfData);
+    if (shader->wineD3DVertexShader)
+    {
+        hr = IWineD3DVertexShader_GetFunction(shader->wineD3DVertexShader, pData, pSizeOfData);
+    }
+    else
+    {
+        *pSizeOfData = 0;
+        hr = D3D_OK;
+    }
+
     LeaveCriticalSection(&d3d8_cs);
     return hr;
 }
@@ -2207,7 +2274,7 @@ const IDirect3DDevice8Vtbl Direct3DDevice8_Vtbl =
 };
 
 /* Internal function called back during the CreateDevice to create a render target  */
-HRESULT WINAPI D3D8CB_CreateSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
+static HRESULT WINAPI D3D8CB_CreateSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
                                          WINED3DFORMAT Format, DWORD Usage, WINED3DPOOL Pool, UINT Level,
                                          WINED3DCUBEMAP_FACES Face, IWineD3DSurface **ppSurface,
                                          HANDLE *pSharedHandle) {

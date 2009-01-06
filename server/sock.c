@@ -272,14 +272,14 @@ static void sock_wake_up( struct sock *sock, int pollev )
     }
     if (sock->window)
     {
-        if (debug_level) fprintf(stderr, "signalling events %x win %p\n", events, sock->window );
+        if (debug_level) fprintf(stderr, "signalling events %x win %08x\n", events, sock->window );
         for (i = 0; i < FD_MAX_EVENTS; i++)
         {
             int event = event_bitorder[i];
             if (sock->pmask & (1 << event))
             {
-                unsigned int lparam = (1 << event) | (sock->errors[event] << 16);
-                post_message( sock->window, sock->message, (unsigned long)sock->wparam, lparam );
+                lparam_t lparam = (1 << event) | (sock->errors[event] << 16);
+                post_message( sock->window, sock->message, sock->wparam, lparam );
             }
         }
         sock->pmask = 0;

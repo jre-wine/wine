@@ -75,6 +75,7 @@ PUBLIC_IDL_H_SRCS = \
 	wine/itss.idl \
 	wine/svcctl.idl \
 	wtypes.idl \
+	wuapi.idl \
 	xmldom.idl \
 	xmldso.idl
 
@@ -287,8 +288,10 @@ SRCDIR_INCLUDES = \
 	msidefs.h \
 	msiquery.h \
 	mssip.h \
+	mstcpip.h \
 	msvcrt/conio.h \
 	msvcrt/crtdbg.h \
+	msvcrt/crtdefs.h \
 	msvcrt/ctype.h \
 	msvcrt/direct.h \
 	msvcrt/dirent.h \
@@ -304,6 +307,7 @@ SRCDIR_INCLUDES = \
 	msvcrt/math.h \
 	msvcrt/mbctype.h \
 	msvcrt/mbstring.h \
+	msvcrt/memory.h \
 	msvcrt/process.h \
 	msvcrt/search.h \
 	msvcrt/setjmp.h \

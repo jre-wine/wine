@@ -348,6 +348,7 @@ typedef struct {
     nsIInputStream *post_data_stream;
     nsILoadGroup *load_group;
     nsIInterfaceRequestor *notif_callback;
+    nsISupports *owner;
     nsLoadFlags load_flags;
     nsIURI *original_uri;
     char *content_type;
@@ -500,6 +501,7 @@ BOOL load_gecko(BOOL);
 void close_gecko(void);
 void register_nsservice(nsIComponentRegistrar*,nsIServiceManager*);
 void init_nsio(nsIComponentManager*,nsIComponentRegistrar*);
+void release_nsio(void);
 BOOL install_wine_gecko(BOOL);
 
 HRESULT nsuri_to_url(LPCWSTR,BSTR*);
@@ -667,10 +669,6 @@ DEFINE_GUID(CLSID_ResProtocol, 0x3050F3BC, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,
 DEFINE_GUID(CLSID_SysimageProtocol, 0x76E67A63, 0x06E9, 0x11D2, 0xA8,0x40, 0x00,0x60,0x08,0x05,0x93,0x82);
 
 DEFINE_GUID(CLSID_CMarkup,0x3050f4fb,0x98b5,0x11cf,0xbb,0x82,0x00,0xaa,0x00,0xbd,0xce,0x0b);
-
-extern LONG module_ref;
-#define LOCK_MODULE()   InterlockedIncrement(&module_ref)
-#define UNLOCK_MODULE() InterlockedDecrement(&module_ref)
 
 /* memory allocation functions */
 

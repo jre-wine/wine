@@ -138,6 +138,9 @@ static HRESULT WINAPI HTMLDocument_QueryInterface(IHTMLDocument2 *iface, REFIID 
     }else if(IsEqualGUID(&IID_IPersistPropertyBag, riid)) {
         TRACE("(%p)->(IID_IPersistPropertyBag %p) returning NULL\n", This, ppvObject);
         return E_NOINTERFACE;
+    }else if(IsEqualGUID(&IID_IMarshal, riid)) {
+        TRACE("(%p)->(IID_IMarshal %p) returning NULL\n", This, ppvObject);
+        return E_NOINTERFACE;
     }else if(dispex_query_interface(&This->dispex, riid, ppvObject)) {
         return *ppvObject ? S_OK : E_NOINTERFACE;
     }
@@ -214,8 +217,6 @@ static ULONG WINAPI HTMLDocument_Release(IHTMLDocument2 *iface)
             NSContainer_Release(This->nscontainer);
 
         heap_free(This);
-
-        UNLOCK_MODULE();
     }
 
     return ref;
@@ -1809,8 +1810,6 @@ HRESULT HTMLDocument_Create(IUnknown *pUnkOuter, REFIID riid, void** ppvObject)
     IHTMLDocument_Release(HTMLDOC(doc));
     if(FAILED(hres))
         return hres;
-
-    LOCK_MODULE();
 
     doc->nscontainer = NSContainer_Create(doc, NULL);
     update_nsdocument(doc);

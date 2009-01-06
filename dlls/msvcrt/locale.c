@@ -32,7 +32,6 @@
 
 #include "msvcrt.h"
 #include "mtdll.h"
-#include "msvcrt/mbctype.h"
 
 #include "wine/debug.h"
 
@@ -52,14 +51,6 @@ HANDLE MSVCRT___lc_handle[MSVCRT_LC_MAX - MSVCRT_LC_MIN + 1] = { 0 };
 /* MT */
 #define LOCK_LOCALE   _mlock(_SETLOCALE_LOCK);
 #define UNLOCK_LOCALE _munlock(_SETLOCALE_LOCK);
-
-/* ctype data modified when the locale changes */
-extern WORD MSVCRT__ctype [257];
-extern WORD MSVCRT_current_ctype[257];
-extern WORD* MSVCRT__pctype;
-
-/* mbctype data modified when the locale changes */
-extern int MSVCRT___mb_cur_max;
 
 #define MSVCRT_LEADBYTE  0x8000
 

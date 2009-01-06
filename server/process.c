@@ -477,7 +477,7 @@ static void startup_info_dump( struct object *obj, int verbose )
     struct startup_info *info = (struct startup_info *)obj;
     assert( obj->ops == &startup_info_ops );
 
-    fprintf( stderr, "Startup info in=%p out=%p err=%p\n",
+    fprintf( stderr, "Startup info in=%04x out=%04x err=%04x\n",
              info->hstdin, info->hstdout, info->hstderr );
 }
 
@@ -860,30 +860,6 @@ struct process_snapshot *process_snap( int *count )
     }
     return snapshot;
 }
-
-/* take a snapshot of the modules of a process */
-struct module_snapshot *module_snap( struct process *process, int *count )
-{
-    struct module_snapshot *snapshot, *ptr;
-    struct process_dll *dll;
-    int total = 0;
-
-    LIST_FOR_EACH_ENTRY( dll, &process->dlls, struct process_dll, entry ) total++;
-    if (!(snapshot = mem_alloc( sizeof(*snapshot) * total ))) return NULL;
-
-    ptr = snapshot;
-    LIST_FOR_EACH_ENTRY( dll, &process->dlls, struct process_dll, entry )
-    {
-        ptr->base     = dll->base;
-        ptr->size     = dll->size;
-        ptr->namelen  = dll->namelen;
-        ptr->filename = memdup( dll->filename, dll->namelen );
-        ptr++;
-    }
-    *count = total;
-    return snapshot;
-}
-
 
 /* create a new process */
 DECL_HANDLER(new_process)

@@ -26,7 +26,6 @@
 #include <ctype.h>
 #include <commctrl.h>
 #include <stdlib.h>
-#include <malloc.h>
 #include <memory.h>
 #include <stdio.h>
 #include <winnt.h>
@@ -112,7 +111,7 @@ static int     list_channel_CB(HANDLE hProcess, void* addr, struct __wine_debug_
     char        val[2];
     LVITEMA     lvitem;
     int         index;
-    HWND        hChannelLV = (HWND)user;
+    HWND        hChannelLV = user;
 
     lvitem.mask = LVIF_TEXT;
     lvitem.pszText = channel->name;

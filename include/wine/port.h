@@ -114,6 +114,10 @@ struct statvfs
 #define RTLD_GLOBAL  0x100
 #endif
 
+#ifdef HAVE__MKDIR
+#define mkdir(path,mode) _mkdir(path)
+#endif
+
 #if !defined(HAVE_FTRUNCATE) && defined(HAVE_CHSIZE)
 #define ftruncate chsize
 #endif
@@ -170,10 +174,6 @@ struct statvfs
 # define S_ISREG(mod) (((mod) & _S_IFMT) == _S_IFREG)
 #endif
 
-#ifndef S_IWUSR
-# define S_IWUSR 0
-#endif
-
 /* So we open files in 64 bit access mode on Linux */
 #ifndef O_LARGEFILE
 # define O_LARGEFILE 0
@@ -185,16 +185,6 @@ struct statvfs
 
 #ifndef O_BINARY
 # define O_BINARY 0
-#endif
-
-#if !defined(S_IXUSR) && defined(S_IEXEC)
-# define S_IXUSR S_IEXEC
-#endif
-#if !defined(S_IXGRP) && defined(S_IEXEC)
-# define S_IXGRP S_IEXEC
-#endif
-#if !defined(S_IXOTH) && defined(S_IEXEC)
-# define S_IXOTH S_IEXEC
 #endif
 
 
@@ -380,7 +370,7 @@ extern int spawnvp(int mode, const char *cmdname, const char * const argv[]);
 
 /* Interlocked functions */
 
-#if defined(__i386__) && defined(__GNUC__)
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
 
 extern inline int interlocked_cmpxchg( int *dest, int xchg, int compare );
 extern inline void *interlocked_cmpxchg_ptr( void **dest, void *xchg, void *compare );
@@ -400,8 +390,13 @@ extern inline int interlocked_cmpxchg( int *dest, int xchg, int compare )
 extern inline void *interlocked_cmpxchg_ptr( void **dest, void *xchg, void *compare )
 {
     void *ret;
+#ifdef __x86_64__
+    __asm__ __volatile__( "lock; cmpxchgq %2,(%1)"
+                          : "=a" (ret) : "r" (dest), "r" (xchg), "0" (compare) : "memory" );
+#else
     __asm__ __volatile__( "lock; cmpxchgl %2,(%1)"
                           : "=a" (ret) : "r" (dest), "r" (xchg), "0" (compare) : "memory" );
+#endif
     return ret;
 }
 
@@ -416,8 +411,13 @@ extern inline int interlocked_xchg( int *dest, int val )
 extern inline void *interlocked_xchg_ptr( void **dest, void *val )
 {
     void *ret;
+#ifdef __x86_64__
+    __asm__ __volatile__( "lock; xchgq %0,(%1)"
+                          : "=r" (ret) :"r" (dest), "0" (val) : "memory" );
+#else
     __asm__ __volatile__( "lock; xchgl %0,(%1)"
                           : "=r" (ret) : "r" (dest), "0" (val) : "memory" );
+#endif
     return ret;
 }
 
@@ -429,7 +429,7 @@ extern inline int interlocked_xchg_add( int *dest, int incr )
     return ret;
 }
 
-#else  /* __i386___ && __GNUC__ */
+#else  /* __GNUC__ */
 
 extern int interlocked_cmpxchg( int *dest, int xchg, int compare );
 extern void *interlocked_cmpxchg_ptr( void **dest, void *xchg, void *compare );
@@ -438,7 +438,7 @@ extern int interlocked_xchg( int *dest, int val );
 extern void *interlocked_xchg_ptr( void **dest, void *val );
 extern int interlocked_xchg_add( int *dest, int incr );
 
-#endif  /* __i386___ && __GNUC__ */
+#endif  /* __GNUC__ */
 
 #else /* NO_LIBWINE_PORT */
 

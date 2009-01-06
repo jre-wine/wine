@@ -503,7 +503,7 @@ static DWORD VIRTUAL_GetWin32Prot( BYTE vprot )
 
 
 /***********************************************************************
- *           VIRTUAL_GetProt
+ *           get_vprot_flags
  *
  * Build page protections from Win32 flags.
  *
@@ -513,41 +513,40 @@ static DWORD VIRTUAL_GetWin32Prot( BYTE vprot )
  * RETURNS
  *	Value of page protection flags
  */
-static BYTE VIRTUAL_GetProt( DWORD protect )
+static NTSTATUS get_vprot_flags( DWORD protect, unsigned int *vprot )
 {
-    BYTE vprot;
-
     switch(protect & 0xff)
     {
     case PAGE_READONLY:
-        vprot = VPROT_READ;
+        *vprot = VPROT_READ;
         break;
     case PAGE_READWRITE:
-        vprot = VPROT_READ | VPROT_WRITE;
+        *vprot = VPROT_READ | VPROT_WRITE;
         break;
     case PAGE_WRITECOPY:
-        vprot = VPROT_READ | VPROT_WRITECOPY;
+        *vprot = VPROT_READ | VPROT_WRITECOPY;
         break;
     case PAGE_EXECUTE:
-        vprot = VPROT_EXEC;
+        *vprot = VPROT_EXEC;
         break;
     case PAGE_EXECUTE_READ:
-        vprot = VPROT_EXEC | VPROT_READ;
+        *vprot = VPROT_EXEC | VPROT_READ;
         break;
     case PAGE_EXECUTE_READWRITE:
-        vprot = VPROT_EXEC | VPROT_READ | VPROT_WRITE;
+        *vprot = VPROT_EXEC | VPROT_READ | VPROT_WRITE;
         break;
     case PAGE_EXECUTE_WRITECOPY:
-        vprot = VPROT_EXEC | VPROT_READ | VPROT_WRITECOPY;
+        *vprot = VPROT_EXEC | VPROT_READ | VPROT_WRITECOPY;
         break;
     case PAGE_NOACCESS:
-    default:
-        vprot = 0;
+        *vprot = 0;
         break;
+    default:
+        return STATUS_INVALID_PARAMETER;
     }
-    if (protect & PAGE_GUARD) vprot |= VPROT_GUARD;
-    if (protect & PAGE_NOCACHE) vprot |= VPROT_NOCACHE;
-    return vprot;
+    if (protect & PAGE_GUARD) *vprot |= VPROT_GUARD;
+    if (protect & PAGE_NOCACHE) *vprot |= VPROT_NOCACHE;
+    return STATUS_SUCCESS;
 }
 
 
@@ -875,7 +874,7 @@ static SIZE_T get_committed_size( struct file_view *view, void *base, BYTE *vpro
         SIZE_T ret = 0;
         SERVER_START_REQ( get_mapping_committed_range )
         {
-            req->handle = view->mapping;
+            req->handle = wine_server_obj_handle( view->mapping );
             req->offset = start << page_shift;
             if (!wine_server_call( req ))
             {
@@ -1632,7 +1631,8 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG zero_
 
     if (is_beyond_limit( 0, size, working_set_limit )) return STATUS_WORKING_SET_LIMIT_RANGE;
 
-    vprot = VIRTUAL_GetProt( protect ) | VPROT_VALLOC;
+    if ((status = get_vprot_flags( protect, &vprot ))) return status;
+    vprot |= VPROT_VALLOC;
     if (type & MEM_COMMIT) vprot |= VPROT_COMMITTED;
 
     if (*ret)
@@ -1696,7 +1696,7 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG zero_
         {
             SERVER_START_REQ( add_mapping_committed_range )
             {
-                req->handle = view->mapping;
+                req->handle = wine_server_obj_handle( view->mapping );
                 req->offset = (char *)base - (char *)view->base;
                 req->size   = size;
                 wine_server_call( req );
@@ -1811,6 +1811,7 @@ NTSTATUS WINAPI NtProtectVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T 
     NTSTATUS status = STATUS_SUCCESS;
     char *base;
     BYTE vprot;
+    unsigned int new_vprot;
     SIZE_T size = *size_ptr;
     LPVOID addr = *addr_ptr;
 
@@ -1843,6 +1844,8 @@ NTSTATUS WINAPI NtProtectVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T 
 
     size = ROUND_SIZE( addr, size );
     base = ROUND_ADDR( addr, page_mask );
+    if ((status = get_vprot_flags( new_prot, &new_vprot ))) return status;
+    new_vprot |= VPROT_COMMITTED;
 
     server_enter_uninterrupted_section( &csVirtual, &sigset );
 
@@ -1856,8 +1859,7 @@ NTSTATUS WINAPI NtProtectVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T 
         if (get_committed_size( view, base, &vprot ) >= size && (vprot & VPROT_COMMITTED))
         {
             if (old_prot) *old_prot = VIRTUAL_GetWin32Prot( vprot );
-            vprot = VIRTUAL_GetProt( new_prot ) | VPROT_COMMITTED;
-            if (!VIRTUAL_SetProt( view, base, size, vprot )) status = STATUS_ACCESS_DENIED;
+            if (!VIRTUAL_SetProt( view, base, size, new_vprot )) status = STATUS_ACCESS_DENIED;
         }
         else status = STATUS_NOT_COMMITTED;
     }
@@ -1965,6 +1967,8 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
             info->Protect           = result.virtual_query.prot;
             info->AllocationProtect = result.virtual_query.alloc_prot;
             info->Type              = result.virtual_query.alloc_type;
+            if (info->RegionSize != result.virtual_query.size)  /* truncated */
+                return STATUS_INVALID_PARAMETER;  /* FIXME */
             if (res_len) *res_len = sizeof(*info);
         }
         return result.virtual_query.status;
@@ -2135,7 +2139,9 @@ NTSTATUS WINAPI NtCreateSection( HANDLE *handle, ACCESS_MASK access, const OBJEC
 
     if (len > MAX_PATH*sizeof(WCHAR)) return STATUS_NAME_TOO_LONG;
 
-    objattr.rootdir = attr ? attr->RootDirectory : 0;
+    if ((ret = get_vprot_flags( protect, &vprot ))) return ret;
+
+    objattr.rootdir = wine_server_obj_handle( attr ? attr->RootDirectory : 0 );
     objattr.sd_len = 0;
     objattr.name_len = len;
     if (attr)
@@ -2144,7 +2150,6 @@ NTSTATUS WINAPI NtCreateSection( HANDLE *handle, ACCESS_MASK access, const OBJEC
         if (ret != STATUS_SUCCESS) return ret;
     }
 
-    vprot = VIRTUAL_GetProt( protect );
     if (!(sec_flags & SEC_RESERVE)) vprot |= VPROT_COMMITTED;
     if (sec_flags & SEC_NOCACHE) vprot |= VPROT_NOCACHE;
     if (sec_flags & SEC_IMAGE) vprot |= VPROT_IMAGE;
@@ -2155,14 +2160,14 @@ NTSTATUS WINAPI NtCreateSection( HANDLE *handle, ACCESS_MASK access, const OBJEC
     {
         req->access      = access;
         req->attributes  = (attr) ? attr->Attributes : 0;
-        req->file_handle = file;
+        req->file_handle = wine_server_obj_handle( file );
         req->size        = size ? size->QuadPart : 0;
         req->protect     = vprot;
         wine_server_add_data( req, &objattr, sizeof(objattr) );
         if (objattr.sd_len) wine_server_add_data( req, sd, objattr.sd_len );
         if (len) wine_server_add_data( req, attr->ObjectName->Buffer, len );
         ret = wine_server_call( req );
-        *handle = reply->handle;
+        *handle = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
 
@@ -2187,9 +2192,9 @@ NTSTATUS WINAPI NtOpenSection( HANDLE *handle, ACCESS_MASK access, const OBJECT_
     {
         req->access  = access;
         req->attributes = attr->Attributes;
-        req->rootdir = attr->RootDirectory;
+        req->rootdir = wine_server_obj_handle( attr->RootDirectory );
         wine_server_add_data( req, attr->ObjectName->Buffer, len );
-        if (!(ret = wine_server_call( req ))) *handle = reply->handle;
+        if (!(ret = wine_server_call( req ))) *handle = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
     return ret;
@@ -2205,7 +2210,7 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
                                     SECTION_INHERIT inherit, ULONG alloc_type, ULONG protect )
 {
     NTSTATUS res;
-    ULONGLONG full_size;
+    mem_size_t full_size;
     ACCESS_MASK access;
     SIZE_T size = 0;
     SIZE_T mask = get_mask( zero_bits );
@@ -2236,7 +2241,7 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
         memset( &call, 0, sizeof(call) );
 
         call.map_view.type        = APC_MAP_VIEW;
-        call.map_view.handle      = handle;
+        call.map_view.handle      = wine_server_obj_handle( handle );
         call.map_view.addr        = *addr_ptr;
         call.map_view.size        = *size_ptr;
         call.map_view.offset      = offset.QuadPart;
@@ -2276,23 +2281,27 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
 
     SERVER_START_REQ( get_mapping_info )
     {
-        req->handle = handle;
+        req->handle = wine_server_obj_handle( handle );
         req->access = access;
         res = wine_server_call( req );
         map_vprot   = reply->protect;
         base        = reply->base;
         full_size   = reply->size;
         header_size = reply->header_size;
-        dup_mapping = reply->mapping;
-        shared_file = reply->shared_file;
+        dup_mapping = wine_server_ptr_handle( reply->mapping );
+        shared_file = wine_server_ptr_handle( reply->shared_file );
     }
     SERVER_END_REQ;
     if (res) return res;
 
     size = full_size;
-    if (sizeof(size) < sizeof(full_size) && (size != full_size))
-        ERR( "Sizes larger than 4Gb (%x%08x) not supported on this platform\n",
-             (DWORD)(full_size >> 32), (DWORD)full_size );
+    if (size != full_size)
+    {
+        WARN( "Sizes larger than 4Gb (%s) not supported on this platform\n",
+              wine_dbgstr_longlong(full_size) );
+        if (dup_mapping) NtClose( dup_mapping );
+        return STATUS_INVALID_PARAMETER;
+    }
 
     if ((res = server_get_unix_fd( handle, 0, &unix_handle, &needs_close, NULL, NULL ))) goto done;
 
@@ -2331,7 +2340,8 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
 
     server_enter_uninterrupted_section( &csVirtual, &sigset );
 
-    vprot = VIRTUAL_GetProt( protect ) | (map_vprot & VPROT_COMMITTED);
+    get_vprot_flags( protect, &vprot );
+    vprot |= (map_vprot & VPROT_COMMITTED);
     res = map_view( &view, *addr_ptr, size, mask, FALSE, vprot );
     if (res)
     {
@@ -2538,7 +2548,7 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
 
     SERVER_START_REQ( read_process_memory )
     {
-        req->handle = process;
+        req->handle = wine_server_obj_handle( process );
         req->addr   = (void *)addr;
         wine_server_set_reply( req, buffer, size );
         if ((status = wine_server_call( req ))) size = 0;
@@ -2560,7 +2570,7 @@ NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *bu
 
     SERVER_START_REQ( write_process_memory )
     {
-        req->handle     = process;
+        req->handle     = wine_server_obj_handle( process );
         req->addr       = addr;
         wine_server_add_data( req, buffer, size );
         if ((status = wine_server_call( req ))) size = 0;

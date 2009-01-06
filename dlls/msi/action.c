@@ -480,6 +480,44 @@ static UINT msi_check_patch_applicable( MSIPACKAGE *package, MSISUMMARYINFO *si 
     return ret;
 }
 
+static UINT msi_set_media_source_prop(MSIPACKAGE *package)
+{
+    MSIQUERY *view;
+    MSIRECORD *rec = NULL;
+    LPWSTR patch;
+    LPCWSTR prop;
+    UINT r;
+
+    static const WCHAR szPatch[] = {'P','A','T','C','H',0};
+    static const WCHAR query[] = {'S','E','L','E','C','T',' ',
+        '`','S','o','u','r','c','e','`',' ','F','R','O','M',' ',
+        '`','M','e','d','i','a','`',' ','W','H','E','R','E',' ',
+        '`','S','o','u','r','c','e','`',' ','I','S',' ',
+        'N','O','T',' ','N','U','L','L',0};
+
+    r = MSI_DatabaseOpenViewW(package->db, query, &view);
+    if (r != ERROR_SUCCESS)
+        return r;
+
+    r = MSI_ViewExecute(view, 0);
+    if (r != ERROR_SUCCESS)
+        goto done;
+
+    if (MSI_ViewFetch(view, &rec) == ERROR_SUCCESS)
+    {
+        prop = MSI_RecordGetString(rec, 1);
+        patch = msi_dup_property(package, szPatch);
+        MSI_SetPropertyW(package, prop, patch);
+        msi_free(patch);
+    }
+
+done:
+    if (rec) msiobj_release(&rec->hdr);
+    msiobj_release(&view->hdr);
+
+    return r;
+}
+
 static UINT msi_parse_patch_summary( MSIPACKAGE *package, MSIDATABASE *patch_db )
 {
     MSISUMMARYINFO *si;
@@ -490,19 +528,32 @@ static UINT msi_parse_patch_summary( MSIPACKAGE *package, MSIDATABASE *patch_db 
     if (!si)
         return ERROR_FUNCTION_FAILED;
 
-    msi_check_patch_applicable( package, si );
+    if (msi_check_patch_applicable( package, si ) != ERROR_SUCCESS)
+    {
+        TRACE("Patch not applicable\n");
+        return ERROR_SUCCESS;
+    }
+
+    package->patch = msi_alloc(sizeof(MSIPATCHINFO));
+    if (!package->patch)
+        return ERROR_OUTOFMEMORY;
+
+    package->patch->patchcode = msi_suminfo_dup_string(si, PID_REVNUMBER);
+    if (!package->patch->patchcode)
+        return ERROR_OUTOFMEMORY;
 
     /* enumerate the substorage */
     str = msi_suminfo_dup_string( si, PID_LASTAUTHOR );
+    package->patch->transforms = str;
+
     substorage = msi_split_string( str, ';' );
     for ( i = 0; substorage && substorage[i] && r == ERROR_SUCCESS; i++ )
         r = msi_apply_substorage_transform( package, patch_db, substorage[i] );
+
     msi_free( substorage );
-    msi_free( str );
-
-    /* FIXME: parse the sources in PID_REVNUMBER and do something with them... */
-
     msiobj_release( &si->hdr );
+
+    msi_set_media_source_prop(package);
 
     return r;
 }
@@ -2859,9 +2910,11 @@ static UINT ACTION_ProcessComponents(MSIPACKAGE *package)
                 continue;
 
             if (package->Context == MSIINSTALLCONTEXT_MACHINE)
-                rc = MSIREG_OpenLocalUserDataComponentKey(comp->ComponentId, &hkey, TRUE);
+                rc = MSIREG_OpenUserDataComponentKey(comp->ComponentId, szLocalSid,
+                                                     &hkey, TRUE);
             else
-                rc = MSIREG_OpenUserDataComponentKey(comp->ComponentId, &hkey, TRUE);
+                rc = MSIREG_OpenUserDataComponentKey(comp->ComponentId, NULL,
+                                                     &hkey, TRUE);
 
             if (rc != ERROR_SUCCESS)
                 continue;
@@ -2920,9 +2973,9 @@ static UINT ACTION_ProcessComponents(MSIPACKAGE *package)
         else if (ACTION_VerifyComponentForAction(comp, INSTALLSTATE_ABSENT))
         {
             if (package->Context == MSIINSTALLCONTEXT_MACHINE)
-                MSIREG_DeleteLocalUserDataComponentKey(comp->ComponentId);
+                MSIREG_DeleteUserDataComponentKey(comp->ComponentId, szLocalSid);
             else
-                MSIREG_DeleteUserDataComponentKey(comp->ComponentId);
+                MSIREG_DeleteUserDataComponentKey(comp->ComponentId, NULL);
         }
 
         /* UI stuff */
@@ -3566,6 +3619,39 @@ static BOOL msi_check_unpublish(MSIPACKAGE *package)
     return TRUE;
 }
 
+static UINT msi_publish_patch(MSIPACKAGE *package, HKEY prodkey, HKEY hudkey)
+{
+    WCHAR patch_squashed[GUID_SIZE];
+    HKEY patches;
+    LONG res;
+    UINT r = ERROR_FUNCTION_FAILED;
+
+    static const WCHAR szPatches[] = {'P','a','t','c','h','e','s',0};
+
+    res = RegCreateKeyExW(prodkey, szPatches, 0, NULL, 0, KEY_ALL_ACCESS, NULL,
+                          &patches, NULL);
+    if (res != ERROR_SUCCESS)
+        return ERROR_FUNCTION_FAILED;
+
+    squash_guid(package->patch->patchcode, patch_squashed);
+
+    res = RegSetValueExW(patches, szPatches, 0, REG_MULTI_SZ,
+                         (const BYTE *)patch_squashed,
+                         (lstrlenW(patch_squashed) + 1) * sizeof(WCHAR));
+    if (res != ERROR_SUCCESS)
+        goto done;
+
+    res = RegSetValueExW(patches, patch_squashed, 0, REG_SZ,
+                         (const BYTE *)package->patch->transforms,
+                         (lstrlenW(package->patch->transforms) + 1) * sizeof(WCHAR));
+    if (res == ERROR_SUCCESS)
+        r = ERROR_SUCCESS;
+
+done:
+    RegCloseKey(patches);
+    return r;
+}
+
 /*
  * 99% of the work done here is only done for 
  * advertised installs. However this is where the
@@ -3587,22 +3673,21 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
     if (rc != ERROR_SUCCESS)
         goto end;
 
-    if (package->Context == MSIINSTALLCONTEXT_MACHINE)
-    {
-        rc = MSIREG_OpenLocalUserDataProductKey(package->ProductCode, &hudkey, TRUE);
-        if (rc != ERROR_SUCCESS)
-            goto end;
-    }
-    else
-    {
-        rc = MSIREG_OpenUserDataProductKey(package->ProductCode, &hudkey, TRUE);
-        if (rc != ERROR_SUCCESS)
-            goto end;
-    }
+    rc = MSIREG_OpenUserDataProductKey(package->ProductCode, package->Context,
+                                       NULL, &hudkey, TRUE);
+    if (rc != ERROR_SUCCESS)
+        goto end;
 
     rc = msi_publish_upgrade_code(package);
     if (rc != ERROR_SUCCESS)
         goto end;
+
+    if (package->patch)
+    {
+        rc = msi_publish_patch(package, hukey, hudkey);
+        if (rc != ERROR_SUCCESS)
+            goto end;
+    }
 
     rc = msi_publish_product_properties(package, hukey);
     if (rc != ERROR_SUCCESS)
@@ -4164,18 +4249,10 @@ static UINT ACTION_RegisterProduct(MSIPACKAGE *package)
     if (rc != ERROR_SUCCESS)
         return rc;
 
-    if (package->Context == MSIINSTALLCONTEXT_MACHINE)
-    {
-        rc = MSIREG_OpenLocalSystemInstallProps(package->ProductCode, &props, TRUE);
-        if (rc != ERROR_SUCCESS)
-            goto done;
-    }
-    else
-    {
-        rc = MSIREG_OpenCurrentUserInstallProps(package->ProductCode, &props, TRUE);
-        if (rc != ERROR_SUCCESS)
-            goto done;
-    }
+    rc = MSIREG_OpenInstallProps(package->ProductCode, package->Context,
+                                 NULL, &props, TRUE);
+    if (rc != ERROR_SUCCESS)
+        goto done;
 
     msi_make_package_local(package, props);
 
@@ -4433,11 +4510,8 @@ static UINT ACTION_RegisterUser(MSIPACKAGE *package)
     if (!productid)
         return ERROR_SUCCESS;
 
-    if (package->Context == MSIINSTALLCONTEXT_MACHINE)
-        rc = MSIREG_OpenLocalSystemInstallProps(package->ProductCode, &hkey, TRUE);
-    else
-        rc = MSIREG_OpenCurrentUserInstallProps(package->ProductCode, &hkey, TRUE);
-
+    rc = MSIREG_OpenInstallProps(package->ProductCode, package->Context,
+                                 NULL, &hkey, TRUE);
     if (rc != ERROR_SUCCESS)
         goto end;
 

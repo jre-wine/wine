@@ -120,7 +120,8 @@ static void vshader_set_limits(
       /* Must match D3DCAPS9.MaxVertexShaderConst: at least 256 for vs_2_0 */
       This->baseShader.limits.constant_float = GL_LIMITS(vshader_constantsF);
 
-      switch (This->baseShader.hex_version) {
+      switch (This->baseShader.reg_maps.shader_version)
+      {
           case WINED3DVS_VERSION(1,0):
           case WINED3DVS_VERSION(1,1):
                    This->baseShader.limits.temporary = 12;
@@ -161,7 +162,7 @@ static void vshader_set_limits(
                    This->baseShader.limits.sampler = 0;
                    This->baseShader.limits.label = 16;
                    FIXME("Unrecognized vertex shader version %#x\n",
-                       This->baseShader.hex_version);
+                           This->baseShader.reg_maps.shader_version);
       }
 }
 
@@ -325,42 +326,55 @@ static void IWineD3DVertexShaderImpl_GenerateShader(IWineD3DVertexShader *iface,
 
     find_swizzled_attribs(decl, This);
 
-#if 0 /* FIXME: Use the buffer that is held by the device, this is ok since fixups will be skipped for software shaders
-        it also requires entering a critical section but cuts down the runtime footprint of wined3d and any memory fragmentation that may occur... */
-    if (This->device->fixupVertexBufferSize < SHADER_PGMSIZE) {
-        HeapFree(GetProcessHeap(), 0, This->fixupVertexBuffer);
-        This->fixupVertexBuffer = HeapAlloc(GetProcessHeap() , 0, SHADER_PGMSIZE);
-        This->fixupVertexBufferSize = PGMSIZE;
-        This->fixupVertexBuffer[0] = 0;
-    }
-    buffer.buffer = This->device->fixupVertexBuffer;
-#else
-    buffer.buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, SHADER_PGMSIZE); 
-#endif
-    buffer.bsize = 0;
-    buffer.lineNo = 0;
-    buffer.newline = TRUE;
-
+    shader_buffer_init(&buffer);
     ((IWineD3DDeviceImpl *)This->baseShader.device)->shader_backend->shader_generate_vshader(iface, &buffer);
-
-#if 1 /* if were using the data buffer of device then we don't need to free it */
-  HeapFree(GetProcessHeap(), 0, buffer.buffer);
-#endif
+    shader_buffer_free(&buffer);
 }
 
 /* *******************************************
    IWineD3DVertexShader IUnknown parts follow
    ******************************************* */
 static HRESULT  WINAPI IWineD3DVertexShaderImpl_QueryInterface(IWineD3DVertexShader *iface, REFIID riid, LPVOID *ppobj) {
-    return IWineD3DBaseShaderImpl_QueryInterface((IWineD3DBaseShader *) iface, riid, ppobj);
+    TRACE("iface %p, riid %s, ppobj %p\n", iface, debugstr_guid(riid), ppobj);
+
+    if (IsEqualGUID(riid, &IID_IWineD3DVertexShader)
+            || IsEqualGUID(riid, &IID_IWineD3DBaseShader)
+            || IsEqualGUID(riid, &IID_IWineD3DBase)
+            || IsEqualGUID(riid, &IID_IUnknown))
+    {
+        IUnknown_AddRef(iface);
+        *ppobj = iface;
+        return S_OK;
+    }
+
+    WARN("%s not implemented, returning E_NOINTERFACE\n", debugstr_guid(riid));
+
+    *ppobj = NULL;
+    return E_NOINTERFACE;
 }
 
 static ULONG  WINAPI IWineD3DVertexShaderImpl_AddRef(IWineD3DVertexShader *iface) {
-    return IWineD3DBaseShaderImpl_AddRef((IWineD3DBaseShader *) iface);
+    IWineD3DVertexShaderImpl *This = (IWineD3DVertexShaderImpl *)iface;
+    ULONG refcount = InterlockedIncrement(&This->baseShader.ref);
+
+    TRACE("%p increasing refcount to %u\n", This, refcount);
+
+    return refcount;
 }
 
 static ULONG WINAPI IWineD3DVertexShaderImpl_Release(IWineD3DVertexShader *iface) {
-    return IWineD3DBaseShaderImpl_Release((IWineD3DBaseShader *) iface);
+    IWineD3DVertexShaderImpl *This = (IWineD3DVertexShaderImpl *)iface;
+    ULONG refcount = InterlockedDecrement(&This->baseShader.ref);
+
+    TRACE("%p decreasing refcount to %u\n", This, refcount);
+
+    if (!refcount)
+    {
+        shader_cleanup((IWineD3DBaseShader *)iface);
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+
+    return refcount;
 }
 
 /* *******************************************
@@ -398,16 +412,10 @@ static HRESULT WINAPI IWineD3DVertexShaderImpl_GetFunction(IWineD3DVertexShader*
          * return D3DERR_MOREDATA. That's not actually true. */
         return WINED3DERR_INVALIDCALL;
     }
-    if (NULL == This->baseShader.function) { /* no function defined */
-        TRACE("(%p) : GetFunction no User Function defined using NULL to %p\n", This, pData);
-        (*(DWORD **) pData) = NULL;
-    } else {
-        if(This->baseShader.functionLength == 0){
 
-        }
-        TRACE("(%p) : GetFunction copying to %p\n", This, pData);
-        memcpy(pData, This->baseShader.function, This->baseShader.functionLength);
-    }
+    TRACE("(%p) : GetFunction copying to %p\n", This, pData);
+    memcpy(pData, This->baseShader.function, This->baseShader.functionLength);
+
     return WINED3D_OK;
 }
 
@@ -425,8 +433,7 @@ static HRESULT WINAPI IWineD3DVertexShaderImpl_SetFunction(IWineD3DVertexShader 
     TRACE("(%p) : pFunction %p\n", iface, pFunction);
 
     /* First pass: trace shader */
-    shader_trace_init((IWineD3DBaseShader*) This, pFunction);
-    vshader_set_limits(This);
+    if (TRACE_ON(d3d_shader)) shader_trace_init(pFunction, This->baseShader.shader_ins);
 
     /* Initialize immediate constant lists */
     list_init(&This->baseShader.constantsF);
@@ -438,8 +445,10 @@ static HRESULT WINAPI IWineD3DVertexShaderImpl_SetFunction(IWineD3DVertexShader 
     This->max_rel_offset = 0;
     memset(reg_maps, 0, sizeof(shader_reg_maps));
     hr = shader_get_registers_used((IWineD3DBaseShader*) This, reg_maps,
-       This->semantics_in, This->semantics_out, pFunction, NULL);
+            This->semantics_in, This->semantics_out, pFunction);
     if (hr != WINED3D_OK) return hr;
+
+    vshader_set_limits(This);
 
     This->baseShader.shader_mode = deviceImpl->vs_selected_mode;
 
@@ -462,16 +471,9 @@ static HRESULT WINAPI IWineD3DVertexShaderImpl_SetFunction(IWineD3DVertexShader 
     This->baseShader.load_local_constsF = This->baseShader.reg_maps.usesrelconstF && !list_empty(&This->baseShader.constantsF);
 
     /* copy the function ... because it will certainly be released by application */
-    if (NULL != pFunction) {
-        void *function;
-
-        function = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, This->baseShader.functionLength);
-        if (!function) return E_OUTOFMEMORY;
-        memcpy(function, pFunction, This->baseShader.functionLength);
-        This->baseShader.function = function;
-    } else {
-        This->baseShader.function = NULL;
-    }
+    This->baseShader.function = HeapAlloc(GetProcessHeap(), 0, This->baseShader.functionLength);
+    if (!This->baseShader.function) return E_OUTOFMEMORY;
+    memcpy(This->baseShader.function, pFunction, This->baseShader.functionLength);
 
     return WINED3D_OK;
 }
@@ -597,12 +599,6 @@ HRESULT IWineD3DVertexShaderImpl_CompileShader(IWineD3DVertexShader *iface) {
         }
 
         deviceImpl->shader_backend->shader_destroy((IWineD3DBaseShader *) iface);
-    }
-
-    /* We don't need to compile */
-    if (!function) {
-        This->baseShader.is_compiled = TRUE;
-        return WINED3D_OK;
     }
 
     /* Generate the HW shader */

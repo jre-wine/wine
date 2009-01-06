@@ -172,24 +172,20 @@ static inline BOOL call_dll_entry_point( DLLENTRYPROC proc, void *module,
 #endif /* __i386__ */
 
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__x86_64__)
 /*************************************************************************
  *		stub_entry_point
  *
  * Entry point for stub functions.
  */
-static void stub_entry_point( const char *dll, const char *name, ... )
+static void stub_entry_point( const char *dll, const char *name, void *ret_addr )
 {
     EXCEPTION_RECORD rec;
 
     rec.ExceptionCode           = EXCEPTION_WINE_STUB;
     rec.ExceptionFlags          = EH_NONCONTINUABLE;
     rec.ExceptionRecord         = NULL;
-#ifdef __GNUC__
-    rec.ExceptionAddress        = __builtin_return_address(0);
-#else
-    rec.ExceptionAddress        = *((void **)&dll - 1);
-#endif
+    rec.ExceptionAddress        = ret_addr;
     rec.NumberParameters        = 2;
     rec.ExceptionInformation[0] = (ULONG_PTR)dll;
     rec.ExceptionInformation[1] = (ULONG_PTR)name;
@@ -198,17 +194,29 @@ static void stub_entry_point( const char *dll, const char *name, ... )
 
 
 #include "pshpack1.h"
+#ifdef __i386__
 struct stub
 {
-    BYTE        popl_eax;   /* popl %eax */
     BYTE        pushl1;     /* pushl $name */
     const char *name;
     BYTE        pushl2;     /* pushl $dll */
     const char *dll;
-    BYTE        pushl_eax;  /* pushl %eax */
-    BYTE        jmp;        /* jmp stub_entry_point */
+    BYTE        call;       /* call stub_entry_point */
     DWORD       entry;
 };
+#else
+struct stub
+{
+    BYTE movq_rdi[2];      /* movq $dll,%rdi */
+    const char *dll;
+    BYTE movq_rsi[2];      /* movq $name,%rsi */
+    const char *name;
+    BYTE movq_rsp_rdx[4];  /* movq (%rsp),%rdx */
+    BYTE movq_rax[2];      /* movq $entry, %rax */
+    const void* entry;
+    BYTE jmpq_rax[2];      /* jmp %rax */
+};
+#endif
 #include "poppack.h"
 
 /*************************************************************************
@@ -233,14 +241,30 @@ static ULONG_PTR allocate_stub( const char *dll, const char *name )
             return 0xdeadbeef;
     }
     stub = &stubs[nb_stubs++];
-    stub->popl_eax  = 0x58;  /* popl %eax */
+#ifdef __i386__
     stub->pushl1    = 0x68;  /* pushl $name */
     stub->name      = name;
     stub->pushl2    = 0x68;  /* pushl $dll */
     stub->dll       = dll;
-    stub->pushl_eax = 0x50;  /* pushl %eax */
-    stub->jmp       = 0xe9;  /* jmp stub_entry_point */
+    stub->call      = 0xe8;  /* call stub_entry_point */
     stub->entry     = (BYTE *)stub_entry_point - (BYTE *)(&stub->entry + 1);
+#else
+    stub->movq_rdi[0]     = 0x48;  /* movq $dll,%rdi */
+    stub->movq_rdi[1]     = 0xbf;
+    stub->dll             = dll;
+    stub->movq_rsi[0]     = 0x48;  /* movq $name,%rsi */
+    stub->movq_rsi[1]     = 0xbe;
+    stub->name            = name;
+    stub->movq_rsp_rdx[0] = 0x48;  /* movq (%rsp),%rdx */
+    stub->movq_rsp_rdx[1] = 0x8b;
+    stub->movq_rsp_rdx[2] = 0x14;
+    stub->movq_rsp_rdx[3] = 0x24;
+    stub->movq_rax[0]     = 0x48;  /* movq $entry, %rax */
+    stub->movq_rax[1]     = 0xb8;
+    stub->entry           = stub_entry_point;
+    stub->jmpq_rax[0]     = 0xff;  /* jmp %rax */
+    stub->jmpq_rax[1]     = 0xe0;
+#endif
     return (ULONG_PTR)stub;
 }
 
@@ -682,6 +706,44 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
 
 
 /*************************************************************************
+ *		is_dll_native_subsystem
+ *
+ * Check if dll is a proper native driver.
+ * Some dlls (corpol.dll from IE6 for instance) are incorrectly marked as native
+ * while being perfectly normal DLLs.  This heuristic should catch such breakages.
+ */
+static BOOL is_dll_native_subsystem( HMODULE module, const IMAGE_NT_HEADERS *nt, LPCWSTR filename )
+{
+    static const WCHAR ntdllW[]    = {'n','t','d','l','l','.','d','l','l',0};
+    static const WCHAR kernel32W[] = {'k','e','r','n','e','l','3','2','.','d','l','l',0};
+    const IMAGE_IMPORT_DESCRIPTOR *imports;
+    DWORD i, size;
+    WCHAR buffer[16];
+
+    if (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_NATIVE) return FALSE;
+    if (nt->OptionalHeader.SectionAlignment < getpagesize()) return TRUE;
+
+    if ((imports = RtlImageDirectoryEntryToData( module, TRUE,
+                                                 IMAGE_DIRECTORY_ENTRY_IMPORT, &size )))
+    {
+        for (i = 0; imports[i].Name; i++)
+        {
+            const char *name = get_rva( module, imports[i].Name );
+            DWORD len = strlen(name);
+            if (len * sizeof(WCHAR) >= sizeof(buffer)) continue;
+            ascii_to_unicode( buffer, name, len + 1 );
+            if (!strcmpiW( buffer, ntdllW ) || !strcmpiW( buffer, kernel32W ))
+            {
+                TRACE( "%s imports %s, assuming not native\n", debugstr_w(filename), debugstr_w(buffer) );
+                return FALSE;
+            }
+        }
+    }
+    return TRUE;
+}
+
+
+/*************************************************************************
  *		alloc_module
  *
  * Allocate a WINE_MODREF structure and add it to the process list
@@ -715,8 +777,7 @@ static WINE_MODREF *alloc_module( HMODULE hModule, LPCWSTR filename )
     else p = wm->ldr.FullDllName.Buffer;
     RtlInitUnicodeString( &wm->ldr.BaseDllName, p );
 
-    if (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_NATIVE &&
-        (nt->FileHeader.Characteristics & IMAGE_FILE_DLL))
+    if ((nt->FileHeader.Characteristics & IMAGE_FILE_DLL) && !is_dll_native_subsystem( hModule, nt, p ))
     {
         wm->ldr.Flags |= LDR_IMAGE_IS_DLL;
         if (nt->OptionalHeader.AddressOfEntryPoint)
@@ -1427,7 +1488,7 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
     size.QuadPart = 0;
 
     status = NtCreateSection( &mapping, STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_READ,
-                              &attr, &size, 0, SEC_IMAGE, file );
+                              &attr, &size, PAGE_READONLY, SEC_IMAGE, file );
     if (status != STATUS_SUCCESS) return status;
 
     module = NULL;
@@ -1467,7 +1528,7 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
 
     SERVER_START_REQ( load_dll )
     {
-        req->handle     = file;
+        req->handle     = wine_server_obj_handle( file );
         req->base       = module;
         req->size       = nt->OptionalHeader.SizeOfImage;
         req->dbg_offset = nt->FileHeader.PointerToSymbolTable;
@@ -2551,7 +2612,7 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
  *
  * Windows and system dir initialization once kernel32 has been loaded.
  */
-void __wine_init_windows_dir( const WCHAR *windir, const WCHAR *sysdir )
+void CDECL __wine_init_windows_dir( const WCHAR *windir, const WCHAR *sysdir )
 {
     PLIST_ENTRY mark, entry;
     LPWSTR buffer, p;

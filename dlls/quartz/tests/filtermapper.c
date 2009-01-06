@@ -57,7 +57,11 @@ static BOOL enum_find_filter(const WCHAR *wszFilterName, IEnumMoniker *pEnum)
 
         if (SUCCEEDED(hr))
         {
-            if (!lstrcmpW((WCHAR*)V_UNION(&var, bstrVal), wszFilterName)) found = TRUE;
+            CHAR val1[512], val2[512];
+
+            WideCharToMultiByte(CP_ACP, 0, (WCHAR*)V_UNION(&var, bstrVal), -1, val1, sizeof(val1), 0, 0);
+            WideCharToMultiByte(CP_ACP, 0, wszFilterName, -1, val2, sizeof(val2), 0, 0);
+            if (!lstrcmpA(val1, val2)) found = TRUE;
         }
 
         IPropertyBag_Release(pPropBagCat);
@@ -179,10 +183,13 @@ static void test_legacy_filter_registration(void)
     IFilterMapper *pMapper = NULL;
     HRESULT hr;
     static const WCHAR wszFilterName[] = {'T', 'e', 's', 't', 'f', 'i', 'l', 't', 'e', 'r', 0 };
+    static const CHAR szFilterName[] = "Testfilter";
     static const WCHAR wszPinName[] = {'P', 'i', 'n', '1', 0 };
     CLSID clsidFilter;
     WCHAR wszRegKey[MAX_PATH];
+    CHAR szRegKey[MAX_PATH];
     static const WCHAR wszClsid[] = {'C','L','S','I','D', 0};
+    static const CHAR szClsid[] = "CLSID";
     static const WCHAR wszSlash[] = {'\\', 0};
     LONG lRet;
     HKEY hKey = NULL;
@@ -211,15 +218,16 @@ static void test_legacy_filter_registration(void)
     lRet = StringFromGUID2(&clsidFilter, wszRegKey + lstrlenW(wszRegKey), MAX_PATH - lstrlenW(wszRegKey));
     ok(lRet > 0, "StringFromGUID2 failed\n");
     if (!lRet) goto out;
+    WideCharToMultiByte(CP_ACP, 0, wszRegKey, -1, szRegKey, sizeof(szRegKey), 0, 0);
 
     /* Register---- functions need a filter class key to write pin and pin media type data to. Create a bogus
      * class key for it. */
-    lRet = RegCreateKeyExW(HKEY_CLASSES_ROOT, wszRegKey, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, NULL);
-    ok(lRet == ERROR_SUCCESS, "RegCreateKeyExW failed with %x\n", HRESULT_FROM_WIN32(lRet));
+    lRet = RegCreateKeyExA(HKEY_CLASSES_ROOT, szRegKey, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, NULL);
+    ok(lRet == ERROR_SUCCESS, "RegCreateKeyExA failed with %x\n", HRESULT_FROM_WIN32(lRet));
 
     /* Set default value - this is interpreted as "friendly name" later. */
-    lRet = RegSetValueExW(hKey, NULL, 0, REG_SZ, (LPBYTE)wszFilterName, (lstrlenW(wszFilterName) + 1) * 2);
-    ok(lRet == ERROR_SUCCESS, "RegSetValueExW failed with %x\n", HRESULT_FROM_WIN32(lRet));
+    lRet = RegSetValueExA(hKey, NULL, 0, REG_SZ, (LPBYTE)szFilterName, lstrlenA(szFilterName) + 1);
+    ok(lRet == ERROR_SUCCESS, "RegSetValueExA failed with %x\n", HRESULT_FROM_WIN32(lRet));
 
     if (hKey) RegCloseKey(hKey);
     hKey = NULL;
@@ -256,7 +264,10 @@ static void test_legacy_filter_registration(void)
 
         while(!found && IEnumRegFilters_Next(pRegEnum, 1, &prgf, &cFetched) == S_OK)
         {
-            if (!lstrcmpW(prgf->Name, wszFilterName)) found = TRUE;
+            CHAR val[512];
+
+            WideCharToMultiByte(CP_ACP, 0, prgf->Name, -1, val, sizeof(val), 0, 0);
+            if (!lstrcmpA(val, szFilterName)) found = TRUE;
 
             CoTaskMemFree(prgf);
         }
@@ -268,14 +279,15 @@ static void test_legacy_filter_registration(void)
     hr = IFilterMapper_UnregisterFilter(pMapper, clsidFilter);
     ok(hr == S_OK, "FilterMapper_UnregisterFilter failed with %x\n", hr);
 
-    lRet = RegOpenKeyExW(HKEY_CLASSES_ROOT, wszClsid, 0, KEY_WRITE | DELETE, &hKey);
-    ok(lRet == ERROR_SUCCESS, "RegOpenKeyExW failed with %x\n", HRESULT_FROM_WIN32(lRet));
+    lRet = RegOpenKeyExA(HKEY_CLASSES_ROOT, szClsid, 0, KEY_WRITE | DELETE, &hKey);
+    ok(lRet == ERROR_SUCCESS, "RegOpenKeyExA failed with %x\n", HRESULT_FROM_WIN32(lRet));
 
     lRet = StringFromGUID2(&clsidFilter, wszRegKey, MAX_PATH);
     ok(lRet > 0, "StringFromGUID2 failed\n");
+    WideCharToMultiByte(CP_ACP, 0, wszRegKey, -1, szRegKey, sizeof(szRegKey), 0, 0);
 
-    lRet = RegDeleteKeyW(hKey, wszRegKey);
-    ok(lRet == ERROR_SUCCESS, "RegDeleteKeyW failed with %x\n", HRESULT_FROM_WIN32(lRet));
+    lRet = RegDeleteKeyA(hKey, szRegKey);
+    ok(lRet == ERROR_SUCCESS, "RegDeleteKeyA failed with %x\n", HRESULT_FROM_WIN32(lRet));
 
     if (hKey) RegCloseKey(hKey);
     hKey = NULL;
@@ -343,6 +355,86 @@ static void test_ifiltermapper_from_filtergraph(void)
     if (pgraph2) IFilterGraph2_Release(pgraph2);
 }
 
+static void test_register_filter_with_null_clsMinorType(void)
+{
+    IFilterMapper2 *pMapper = NULL;
+    HRESULT hr;
+    REGFILTER2 rgf2;
+    REGFILTERPINS rgPins;
+    REGFILTERPINS2 rgPins2;
+    REGPINTYPES rgPinType;
+    static WCHAR wszPinName[] = {'P', 'i', 'n', 0 };
+    static const WCHAR wszFilterName1[] = {'T', 'e', 's', 't', 'f', 'i', 'l', 't', 'e', 'r', '1', 0 };
+    static const WCHAR wszFilterName2[] = {'T', 'e', 's', 't', 'f', 'i', 'l', 't', 'e', 'r', '2', 0 };
+    CLSID clsidFilter1;
+    CLSID clsidFilter2;
+
+    hr = CoCreateInstance(&CLSID_FilterMapper2, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IFilterMapper2, (LPVOID*)&pMapper);
+    ok(hr == S_OK, "CoCreateInstance failed with %x\n", hr);
+    if (FAILED(hr)) goto out;
+
+    hr = CoCreateGuid(&clsidFilter1);
+    ok(hr == S_OK, "CoCreateGuid failed with %x\n", hr);
+    hr = CoCreateGuid(&clsidFilter2);
+    ok(hr == S_OK, "CoCreateGuid failed with %x\n", hr);
+
+    rgPinType.clsMajorType = &GUID_NULL;
+    /* Make sure quartz accepts it without crashing */
+    rgPinType.clsMinorType = NULL;
+
+    /* Test with pin descript version 1 */
+    ZeroMemory(&rgf2, sizeof(rgf2));
+    rgf2.dwVersion = 1;
+    rgf2.dwMerit = MERIT_UNLIKELY;
+    S(U(rgf2)).cPins = 1;
+    S(U(rgf2)).rgPins = &rgPins;
+
+    rgPins.strName = wszPinName;
+    rgPins.bRendered = 1;
+    rgPins.bOutput = 0;
+    rgPins.bZero = 0;
+    rgPins.bMany = 0;
+    rgPins.clsConnectsToFilter = NULL;
+    rgPins.strConnectsToPin = NULL;
+    rgPins.nMediaTypes = 1;
+    rgPins.lpMediaType = &rgPinType;
+
+    hr = IFilterMapper2_RegisterFilter(pMapper, &clsidFilter1, wszFilterName1, NULL,
+                    &CLSID_LegacyAmFilterCategory, NULL, &rgf2);
+    ok(hr == S_OK, "IFilterMapper2_RegisterFilter failed with %x\n", hr);
+
+    hr = IFilterMapper2_UnregisterFilter(pMapper, &CLSID_LegacyAmFilterCategory, NULL, &clsidFilter1);
+    ok(hr == S_OK, "FilterMapper_UnregisterFilter failed with %x\n", hr);
+
+    /* Test with pin descript version 2 */
+    ZeroMemory(&rgf2, sizeof(rgf2));
+    rgf2.dwVersion = 2;
+    rgf2.dwMerit = MERIT_UNLIKELY;
+    S1(U(rgf2)).cPins2 = 1;
+    S1(U(rgf2)).rgPins2 = &rgPins2;
+
+    rgPins2.dwFlags = REG_PINFLAG_B_RENDERER;
+    rgPins2.cInstances = 1;
+    rgPins2.nMediaTypes = 1;
+    rgPins2.lpMediaType = &rgPinType;
+    rgPins2.nMediums = 0;
+    rgPins2.lpMedium = NULL;
+    rgPins2.clsPinCategory = NULL;
+
+    hr = IFilterMapper2_RegisterFilter(pMapper, &clsidFilter2, wszFilterName2, NULL,
+                    &CLSID_LegacyAmFilterCategory, NULL, &rgf2);
+    ok(hr == S_OK, "IFilterMapper2_RegisterFilter failed with %x\n", hr);
+
+    hr = IFilterMapper2_UnregisterFilter(pMapper, &CLSID_LegacyAmFilterCategory, NULL, &clsidFilter2);
+    ok(hr == S_OK, "FilterMapper_UnregisterFilter failed with %x\n", hr);
+
+    out:
+
+    if (pMapper) IFilterMapper2_Release(pMapper);
+}
+
+
 START_TEST(filtermapper)
 {
     CoInitialize(NULL);
@@ -350,6 +442,7 @@ START_TEST(filtermapper)
     test_fm2_enummatchingfilters();
     test_legacy_filter_registration();
     test_ifiltermapper_from_filtergraph();
+    test_register_filter_with_null_clsMinorType();
 
     CoUninitialize();
 }

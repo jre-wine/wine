@@ -147,10 +147,23 @@ static int running_on_visible_desktop (void)
 
 static void print_version (void)
 {
+#ifdef __i386__
+    static const char platform[] = "i386";
+#elif defined(__x86_64__)
+    static const char platform[] = "x86_64";
+#elif defined(__sparc__)
+    static const char platform[] = "sparc";
+#elif defined(__ALPHA__)
+    static const char platform[] = "alpha";
+#elif defined(__powerpc__)
+    static const char platform[] = "powerpc";
+#endif
     OSVERSIONINFOEX ver;
-    BOOL ext;
+    BOOL ext, wow64;
     int is_win2k3_r2;
-    const char *(*wine_get_build_id)(void);
+    const char *(CDECL *wine_get_build_id)(void);
+    void (CDECL *wine_get_host_version)( const char **sysname, const char **release );
+    BOOL (WINAPI *pIsWow64Process)(HANDLE hProcess, PBOOL Wow64Process);
 
     ver.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
     if (!(ext = GetVersionEx ((OSVERSIONINFO *) &ver)))
@@ -159,7 +172,10 @@ static void print_version (void)
 	if (!GetVersionEx ((OSVERSIONINFO *) &ver))
 	    report (R_FATAL, "Can't get OS version.");
     }
+    pIsWow64Process = (void *)GetProcAddress(GetModuleHandleA("kernel32.dll"),"IsWow64Process");
+    if (!pIsWow64Process || !pIsWow64Process( GetCurrentProcess(), &wow64 )) wow64 = FALSE;
 
+    xprintf ("    Platform=%s%s\n", platform, wow64 ? " (WOW64)" : "");
     xprintf ("    bRunningUnderWine=%d\n", running_under_wine ());
     xprintf ("    bRunningOnVisibleDesktop=%d\n", running_on_visible_desktop ());
     xprintf ("    dwMajorVersion=%u\n    dwMinorVersion=%u\n"
@@ -168,8 +184,14 @@ static void print_version (void)
              ver.dwPlatformId, ver.szCSDVersion);
 
     wine_get_build_id = (void *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_build_id");
+    wine_get_host_version = (void *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_host_version");
     if (wine_get_build_id) xprintf( "    WineBuild=%s\n", wine_get_build_id() );
-
+    if (wine_get_host_version)
+    {
+        const char *sysname, *release;
+        wine_get_host_version( &sysname, &release );
+        xprintf( "    Host system=%s\n    Host version=%s\n", sysname, release );
+    }
     is_win2k3_r2 = GetSystemMetrics(SM_SERVERR2);
     if(is_win2k3_r2)
         xprintf("    R2 build number=%d\n", is_win2k3_r2);
@@ -643,28 +665,28 @@ usage (void)
 "  -t TAG   include TAG of characters [-.0-9a-zA-Z] in the report\n");
 }
 
-int WINAPI WinMain (HINSTANCE hInst, HINSTANCE hPrevInst,
-                    LPSTR cmdLine, int cmdShow)
+int main( int argc, char *argv[] )
 {
     char *logname = NULL;
     const char *cp, *submit = NULL;
     int reset_env = 1;
     int poweroff = 0;
     int interactive = 1;
+    int i;
 
     if (!LoadStringA( 0, IDS_BUILD_ID, build_id, sizeof(build_id) )) build_id[0] = 0;
 
-    cmdLine = strtok (cmdLine, whitespace);
-    while (cmdLine) {
-        if (cmdLine[0] != '-' || cmdLine[2]) {
+    for (i = 1; argv[i]; i++)
+    {
+        if (argv[i][0] != '-' || argv[i][2]) {
             if (nb_filters == sizeof(filters)/sizeof(filters[0]))
             {
                 report (R_ERROR, "Too many test filters specified");
                 exit (2);
             }
-            filters[nb_filters++] = xstrdup( cmdLine );
+            filters[nb_filters++] = argv[i];
         }
-        else switch (cmdLine[1]) {
+        else switch (argv[i][1]) {
         case 'c':
             report (R_TEXTMODE);
             interactive = 0;
@@ -684,16 +706,28 @@ int WINAPI WinMain (HINSTANCE hInst, HINSTANCE hPrevInst,
             interactive = 0;
             break;
         case 's':
-            submit = strtok (NULL, whitespace);
+            if (!(submit = argv[++i]))
+            {
+                usage();
+                exit( 2 );
+            }
             if (tag)
                 report (R_WARNING, "ignoring tag for submission");
             send_file (submit);
             break;
         case 'o':
-            logname = strtok (NULL, whitespace);
+            if (!(logname = argv[++i]))
+            {
+                usage();
+                exit( 2 );
+            }
             break;
         case 't':
-            tag = strtok (NULL, whitespace);
+            if (!(tag = argv[++i]))
+            {
+                usage();
+                exit( 2 );
+            }
             if (strlen (tag) > MAXTAGLEN)
                 report (R_FATAL, "tag is too long (maximum %d characters)",
                         MAXTAGLEN);
@@ -705,11 +739,10 @@ int WINAPI WinMain (HINSTANCE hInst, HINSTANCE hPrevInst,
             }
             break;
         default:
-            report (R_ERROR, "invalid option: -%c", cmdLine[1]);
+            report (R_ERROR, "invalid option: -%c", argv[i][1]);
             usage ();
             exit (2);
         }
-        cmdLine = strtok (NULL, whitespace);
     }
     if (!submit) {
         report (R_STATUS, "Starting up");

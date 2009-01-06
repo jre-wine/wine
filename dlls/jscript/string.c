@@ -1004,8 +1004,8 @@ static HRESULT String_strike(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARA
 static HRESULT String_sub(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    static const WCHAR subtagW[] = {'S','U','B',0};
+    return do_attributeless_tag_format(dispex, lcid, flags, dp, retv, ei, sp, subtagW);
 }
 
 /* ECMA-262 3rd Edition    15.5.4.15 */
@@ -1089,8 +1089,8 @@ static HRESULT String_substr(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARA
 static HRESULT String_sup(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    static const WCHAR suptagW[] = {'S','U','P',0};
+    return do_attributeless_tag_format(dispex, lcid, flags, dp, retv, ei, sp, suptagW);
 }
 
 static HRESULT String_toLowerCase(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
@@ -1261,9 +1261,9 @@ static const builtin_prop_t String_props[] = {
     {smallW,                 String_small,                 PROPF_METHOD},
     {splitW,                 String_split,                 PROPF_METHOD},
     {strikeW,                String_strike,                PROPF_METHOD},
-    {substringW,             String_substring,             PROPF_METHOD},
-    {substrW,                String_substr,                PROPF_METHOD},
     {subW,                   String_sub,                   PROPF_METHOD},
+    {substrW,                String_substr,                PROPF_METHOD},
+    {substringW,             String_substring,             PROPF_METHOD},
     {supW,                   String_sup,                   PROPF_METHOD},
     {toLocaleLowerCaseW,     String_toLocaleLowerCase,     PROPF_METHOD},
     {toLocaleUpperCaseW,     String_toLocaleUpperCase,     PROPF_METHOD},
