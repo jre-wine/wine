@@ -1,0 +1,21 @@
+.TH "winemine" "1" "2008\-09\-22"
+.SH "NAME" 
+winemine \- minesweeper game using wine(1)
+
+.SH "SYNOPSIS"
+.PP
+.B winemine 
+
+.SH "DESCRIPTION" 
+.PP
+This manual page documents briefly the \fBwinemine\fR command.
+.PP
+\fBwinemine\fR is a minesweeper game, similar to the one usually found on
+Windows\(tm systems.
+
+.SH "SEE ALSO"
+.BR wine (1)
+
+.SH "AUTHOR"
+This manual page was written by Francois Wendling <frwendling@free.fr> for the
+Debian GNU/Linux system (but may be used by others).

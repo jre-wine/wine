@@ -1,0 +1,55 @@
+.TH "winepath" "1" "2008\-09\-20"
+
+.SH "NAME" 
+winepath \- Convert PATH(s) to Unix or Windows long or short paths.
+
+.SH "SYNOPSIS"
+.PP
+.B winepath 
+[
+.I OPTION
+]
+[
+.I PATH
+]
+
+.SH "DESCRIPTION" 
+.PP
+This manual page documents briefly the \fBwinepath\fR command.
+.PP
+.B winepath 
+converts PATH(s) to Unix or Windows long or short paths.
+
+
+.SH "OPTIONS"
+.TP
+.BR  \-u ", " \-\-unix
+converts a Windows path to a Unix path.
+.TP
+.BR \-w ", " \-\-windows
+converts a Unix path to a long Windows path.
+.TP
+.BR \-l ", " \-\-long 
+converts the short Windows path of an existing file or directory to the long
+format.
+.TP
+.BR \-s ", " \-\-short 
+converts the long Windows path of an existing file or directory to the short
+format.
+.TP
+.BR \-h ", " \-\-help
+shows this help message and exit.
+.TP
+.BR \-v ", " \-\-version 
+shows version information and exit.
+
+.SH "SEE ALSO"
+.BR wine (1)
+
+.SH "AUTHOR"
+.PP
+.B winepath
+is Copyright \(co 2002 Alexandre Julliard. 
+
+This manual page was written by Francois Wendling <frwendling@free.fr> for the
+Debian GNU/Linux system (but may be used by others).

@@ -1,0 +1,73 @@
+.TH "wine\-font\-convert" "1" "2008\-09\-21"
+.SH "NAME" 
+wine\-font\-convert \- wine(1) font converter
+
+.SH "SYNOPSIS"
+.PP
+.B wine\-font\-convert 
+[
+.B \-q
+] [
+.B \-c
+.I charset
+] [
+.B \-t 
+.I fontdir
+] [
+.B 
+\-b 
+.I bdftopcf
+] [
+.B \-f 
+.I fnt2bdf
+] [
+.B \-p 
+.I pattern
+]
+.I windir
+
+.SH "DESCRIPTION" 
+.PP
+This manual page documents briefly the \fBwine\-font\-convert\fR command.
+.PP
+\fBwine\-font\-convert\fR  scans \fIwindir\fR and its subdirectories for
+bitmap\-fonts in Windows\(tm format, converts them to PCF\-fonts and installs
+them. If X is running, the X fontpath is re\-adjusted.
+
+
+.SH "OPTIONS"
+.TP
+.BR \-q
+Quits operation.
+.TP
+.BI "\-c " charset
+Specifies the charset name for OEM_CHARSET fonts. (Default: winsys)
+.TP
+.BI "\-t " fontdir
+Specifies the directory to install the converted fonts in. This directory
+should be a known font directory to X. (Default: /usr/X11R6/lib/X11/fonts/misc)
+.TP
+.BI "\-b " bdftopcf
+Specifies the name of the program to call for bdf to pcf conversion. (Default:
+/usr/X11R6/bin/bdftopcf)
+.TP
+.BI "\-f " fnt2bdf  
+Specifies the name of the program to call for winfont to bdf conversion. (Default:
+/usr/bin/fnt2bdf)
+.TP
+.BI "\-p " pattern  
+Specifies the \fIpattern\fR of the filenames to look for. By default, the
+utility will look for the pattern *.fon (case insensitive).
+.TP
+.BR \-?
+Shows a short help message.
+
+.SH "SEE ALSO"
+.BR wine "(1), " fnt2bdf "(1), " bdftopcf (1)
+
+.SH "AUTHOR"
+.PP
+Copyright 2000 Peter Ganten
+.PP
+This manual page was written by Francois Wendling <frwendling@free.fr> for the
+Debian GNU/Linux system (but may be used by others).

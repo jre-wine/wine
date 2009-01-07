@@ -1,0 +1,8 @@
+debian/regedit.man
+debian/regsvr32.man
+debian/uninstaller.man
+debian/wine-auto.man
+debian/wineboot.man
+debian/winebrowser.man
+debian/winecfg.man
+debian/winepath.man

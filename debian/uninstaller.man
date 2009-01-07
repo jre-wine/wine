@@ -1,0 +1,25 @@
+.TH "uninstaller" "1" "2008\-09\-22"
+.SH "NAME" 
+uninstaller \- uninstaller for programs using the wine(1) registry
+
+.SH "SYNOPSIS"
+.PP
+.B uninstaller 
+
+.SH "DESCRIPTION" 
+.PP
+This manual page documents briefly the \fBuninstaller\fR command.
+.PP
+\fBuninstaller\fR is a GUI uninstaller for all setup programs that put an
+uninstall entry into the \fBwine\fR(1) registry, like InstallShield or the WISE installer
+systems. Note that .msi installers are not supported by \fBuninstaller\fR.
+
+.SH "SEE ALSO"
+.BR wine (1)
+
+.SH "AUTHORS"
+.PP
+\fBuninstaller\fR  was written by Andreas Mohr, Hannu Valtonen and Jonathan Ernst.
+.PP
+This manual page was written by Francois Wendling <frwendling@free.fr> for the
+Debian GNU/Linux system (but may be used by others).

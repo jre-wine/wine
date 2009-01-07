@@ -1,0 +1,30 @@
+.TH "winefile" "1" "2008-09-20"
+
+.SH "NAME" 
+winefile \- The Wine file manager
+
+.SH "SYNOPSIS"
+.PP
+.B winefile 
+.RI [ " path " ]
+
+.SH "DESCRIPTION" 
+.PP
+This manual page documents briefly the \fBwinefile\fR command.
+.PP
+.B winefile
+is the Wine file manager, featuring a look and feel similar to Windows\(tm file manager. If 
+.I path 
+is specified, then 
+.B winefile 
+will be opened in the specified 
+.IR path .
+
+
+.SH "SEE ALSO"
+.BR wine (1)
+
+.SH "AUTHOR"
+
+This manual page was written by Francois Wendling <frwendling@free.fr> for the
+Debian GNU/Linux system (but may be used by others).

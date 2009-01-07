@@ -1,0 +1,42 @@
+.TH "regsvr32" "1" "2008\-09\-21"
+.SH "NAME" 
+regsvr32 \- (Un)Register DLL libraries for use in wine(1)
+
+.SH "SYNOPSIS"
+.PP
+.B regsvr32 
+[
+.I OPTIONS
+]
+.I dllname 
+[ dllname... ]
+
+.SH "DESCRIPTION" 
+.PP
+This manual page documents briefly the \fBregsvr32\fR command.
+.PP
+.B regsvr32 
+manages the Windows\(tm libraries (DLLs) for use in \fBwine\fR(1). Note that 
+.B regsvr32
+uses Windows\(tm\-like option switches.
+
+.SH "OPTIONS"
+.TP
+.BR /u
+unregisters server.
+.TP
+.BR /s 
+silent, shows no message box.
+.TP
+\fB/i\fR[\fI:cmdline\fR]
+calls DllInstall passing it an optional \fIcmdline\fR. Used with \fB/u\fR, it calls dll uninstall.
+.TP
+.BR /n  
+does not call DllRegisterServer. This option must be used with \fB/i\fR.
+
+.SH "SEE ALSO"
+.BR wine (1)
+
+.SH "AUTHOR"
+This manual page was written by Francois Wendling <frwendling@free.fr> for the
+Debian GNU/Linux system (but may be used by others).

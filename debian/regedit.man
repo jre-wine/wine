@@ -1,0 +1,70 @@
+.TH "regedit" "1" "2008\-09\-21"
+.SH "NAME" 
+regedit \- the wine(1) registry editor.
+
+.SH "SYNOPSIS"
+.\" 1 
+.B regedit 
+.I filename
+.\" 2
+.br
+.B regedit 
+\-E 
+.I filename 
+[
+.I regpath
+]
+.\" 3
+.br
+.B regedit 
+\-D 
+.I regpath
+
+.SH "DESCRIPTION" 
+.PP
+This manual page documents briefly the \fBregedit\fR command.
+.PP
+.B regedit 
+is the \fBwine\fR(1) registry editor, featuring the look and feel of the
+regedit application on Windows\(tm systems, if 
+.B regedit
+is used without arguments. It is also command\-line compatible with Windows\(tm regedit.
+.PP 
+The switches are case\-insensitive and can be prefixed either by '\-' or '/'.
+
+.SH "OPTIONS"
+.TP
+\fB\-E\fR \fIfile\fR [ \fIregpath\fR ]
+Exports the content of the specified registry key to the specified \fIfile\fR. It exports
+the whole registry if no key is specified.
+.TP
+.BI "\-D " regpath
+Deletes the specified registry key.
+.TP
+.BR \-S 
+Runs silently. It can be used with any other switch. 
+.TP
+.BR  \-V 
+Uses advanced mode. It can be used with any other switch. This switch is ignored, it
+exists for compatibility with Windows\(tm regedit.
+.TP
+.BI  "\-L " location
+Specifies the \fIlocation\fR of the system.dat file. It can be used with any
+other switch. This switch is ignored and exists for compatibility with
+Windows\(tm regedit.
+.TP
+.BI "\-R " location
+Specifies the \fIlocation\fR of the user.dat file. It can be used with any
+other switch. This switch is ignored and exists for compatibility with
+Windows\(tm regedit.
+.TP
+.BR  \-? 
+Prints a help message. Any other switches are ignored.
+
+
+.SH "SEE ALSO"
+.BR wine "(1), " regsvr32 (1)
+
+.SH "AUTHOR"
+This manual page was written by Francois Wendling <frwendling@free.fr> for the
+Debian GNU/Linux system (but may be used by others).

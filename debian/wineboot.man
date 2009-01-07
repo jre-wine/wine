@@ -1,0 +1,57 @@
+.TH "wineboot" "1" "2008\-09\-21"
+
+.SH "NAME" 
+wineboot \- perform startup or shutdown tasks in your wine(1) environment.
+
+.SH "SYNOPSIS"
+.PP
+.B wineboot 
+[
+.I OPTIONS
+]
+
+.SH "DESCRIPTION" 
+.PP
+This manual page documents briefly the \fBwineboot\fR command.
+.PP
+.B wineboot 
+performs tasks that would be done on a real Windows\(tm environment, like
+restarting or shutting down the system. It's useful for example if a software
+installation program asks you to reboot your computer to finish the
+installation process.
+
+.B wineboot
+also updates the WINEPREFIX directory if wine.inf changes.
+
+.SH "OPTIONS"
+.TP
+.BR \-h ", "\-\-help
+Display a help message.
+.TP
+.BR \-e ", "\-\-end\-session
+End the current session cleanly.
+.TP
+.BR \-f ", "\-\-force
+Force exit for processes that don't exit cleanly.
+.TP
+.BR \-i ", "\-\-init
+Perform initialization for first Wine instance.
+.TP
+.BR \-k ", " \-\-kill
+Kill running processes without any cleanup.
+.TP
+.BR \-r ", "\-\-restart
+Restart only, don't do normal startup operations.
+.TP
+.BR \-s ", "\-\-shutdown
+Shutdown only, don't reboot.
+.TP
+.BR \-u ", "\-\-update
+Update the wineprefix directory.
+
+.SH "SEE ALSO"
+.BR wine "(1), " regsvr32 (1)
+
+.SH "AUTHOR"
+This manual page was written by Francois Wendling <frwendling@free.fr> for the
+Debian GNU/Linux system (but may be used by others).

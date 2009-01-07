@@ -1,0 +1,23 @@
+.TH "progman" "1" "2008\-09\-22"
+
+.SH "NAME" 
+progman \- wine(1) program manager
+
+.SH "SYNOPSIS"
+.PP
+.B progman 
+
+.SH "DESCRIPTION" 
+.PP
+This manual page documents briefly the \fBprogman\fR command.
+.PP
+\fBprogman\fR is the \fBwine\fR(1) program manager, featuring a look and feel
+similar to Windows\(tm 3.x program manager. Windows\(tm 3.x\-compatible programs
+are used to put icons in it during the software installation process.
+
+.SH "SEE ALSO"
+.BR wine (1)
+
+.SH "AUTHOR"
+This manual page was written by Francois Wendling <frwendling@free.fr> for the
+Debian GNU/Linux system (but may be used by others).

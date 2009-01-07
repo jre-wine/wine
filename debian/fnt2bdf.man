@@ -1,0 +1,46 @@
+.TH "fnt2bdf" "1" "2008\-09\-21"
+
+.SH "NAME" 
+fnt2bdf \- converts a fnt font to a bdf font
+
+.SH "SYNOPSIS"
+.PP
+.B fnt2bdf 
+[
+.B \-t
+] [
+.B \-c
+.I charset
+] [
+.B \-o
+.I basename
+] 
+.I inputfile
+
+.SH "DESCRIPTION" 
+.PP
+This manual page documents briefly the \fBfnt2bdf\fR command.
+.PP
+\fBfnt2bdf\fR converts a FNT font to a BDF font. \fIinputfile\fR can be a
+Windows\(tm .fon, .fnt, .dll, or .exe file.
+
+.SH "OPTIONS"
+.TP
+.BI "\-c "charset
+Specifies the \fIcharset\fR name for OEM_CHARSET fonts.
+.TP
+.BI "\-o "basename
+Specifies the basic output filename.
+.TP
+.BR  \-t
+Outputs files by point size instead of pixel height.
+
+.SH "EXAMPLE"
+\fBfnt2bdf\fR \-c winsys vgasys.fnt
+
+.SH "SEE ALSO"
+.BR  wine "(1), " wine\-font\-convert "(1), " bdftopcf (1)
+
+.SH "AUTHOR"
+This manual page was written by Francois Wendling <frwendling@free.fr> for the
+Debian GNU/Linux system (but may be used by others).

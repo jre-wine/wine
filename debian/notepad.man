@@ -1,0 +1,26 @@
+.TH "notepad" "1" "2008-09-21"
+
+.SH "NAME" 
+notepad \- the wine(1) text editor
+
+.SH "SYNOPSIS"
+.PP
+.B notepad 
+[ 
+.I filename
+]
+
+.SH "DESCRIPTION" 
+.PP
+This manual page documents briefly the \fBnotepad\fR command.
+.PP
+\fBnotepad\fR is a simple text editor, featuring the Windows\(tm notepad look
+and feel. If \fIfilename\fR is not specified, the editor will start with an
+empty buffer.
+
+.SH "SEE ALSO"
+.BR wine (1)
+
+.SH "AUTHOR"
+This manual page was written by Francois Wendling <frwendling@free.fr> for the
+Debian GNU/Linux system (but may be used by others).
