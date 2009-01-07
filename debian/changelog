@@ -1,8 +1,21 @@
-wine (1.1.11-1) UNRELEASED; urgency=low
+wine (1.1.11-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.11, released Dec 20, 2008.
+    - Numerous fixes for IE7 support.
+    - Support for 64-bit cross-compile using Mingw64.
+    - User interface support for crypto certificates.
+    - Better support for MSI installation patches.
+    - Various Direct3D optimizations.
+    - Various bug fixes.
+  * Add dh_installman to debian/rules.
+  * Added manpages written by Francois Wendling. (Closes: #284295,
+    #284297, #284300, #284301, #284302, #284303, #284304, #284305,
+    #83263, #83265, #83268, #83269, #83270, #83271)
+  * Try to install wine-kthread, wine-pthread, and wine-preloader only
+    if they were built (basically only on i386 systems with glibc).
+    Closes: #511077.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Tue, 06 Jan 2009 15:42:21 +0100
+ -- Ove Kaaven <ovek@arcticnet.no>  Wed, 07 Jan 2009 19:10:30 +0100
 
 wine (1.1.10-1) experimental; urgency=low
 
