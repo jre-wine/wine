@@ -65,6 +65,8 @@ BUILDS = build32
 NATIVE_BUILD = build32
 endif
 
+LOADERS = wine-kthread wine-pthread wine-preloader
+
 configure-ia32: configure-ia32-stamp
 configure-ia32-stamp:
 	dh_testdir
@@ -197,9 +199,10 @@ install-arch32-stamp: build-arch32-stamp
 	$(MAKE) -C build32 install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/lib
 	# move the real binaries into /usr/lib/wine
 	mv debian/tmp/usr/bin/wine debian/tmp/usr/lib/wine/wine.bin
-	mv debian/tmp/usr/bin/wine-kthread debian/tmp/usr/lib/wine/wine-kthread
-	mv debian/tmp/usr/bin/wine-pthread debian/tmp/usr/lib/wine/wine-pthread
-	mv debian/tmp/usr/bin/wine-preloader debian/tmp/usr/lib/wine/wine-preloader
+	for ldr in $(LOADERS); do \
+	 [ ! -f debian/tmp/usr/bin/$$ldr ] || \
+	 mv debian/tmp/usr/bin/$$ldr debian/tmp/usr/lib/wine; \
+	done
 	mv debian/tmp/usr/bin/wineserver debian/tmp/usr/lib/wine/wineserver
 	# install manpages
 	$(MAKE) -C build32/documentation install-man prefix=`pwd`/debian/tmp/usr
@@ -281,6 +284,12 @@ ifeq (,$(AMD64_COPY))
 	# distribute files into debian/<packagename>
 	# according to the <packagename>.install files
 	dh_install -s --list-missing
+	# certain binaries are only compiled on some platforms;
+	# if they were compiled on the current one, install them
+	for ldr in $(LOADERS); do \
+	 [ ! -f debian/tmp/usr/lib/wine/$$ldr ] || \
+	 mv debian/tmp/usr/lib/wine/$$ldr debian/libwine/usr/lib/wine; \
+	done
 
 	# patch marlett.ttf due to fontforge bug #458234
 	#mensis -script debian/marlett.mensis debian/libwine/usr/share/wine/fonts/marlett.ttf
