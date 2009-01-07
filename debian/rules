@@ -311,6 +311,7 @@ endif
 endif
 
 	dh_installdocs -s
+	dh_installman -s
 #	dh_installmenu -s
 	dh_installdebconf -s
 	dh_installmime -s
