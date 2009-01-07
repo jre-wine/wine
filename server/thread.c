@@ -58,7 +58,7 @@ struct thread_wait
     struct thread          *thread;     /* owner thread */
     int                     count;      /* count of objects */
     int                     flags;
-    void                   *cookie;     /* magic cookie to return to client */
+    client_ptr_t            cookie;     /* magic cookie to return to client */
     timeout_t               timeout;
     struct timeout_user    *user;
     struct wait_queue_entry queues[1];
@@ -154,7 +154,7 @@ static inline void init_thread_structure( struct thread *thread )
     thread->unix_tid        = -1;  /* not known yet */
     thread->context         = NULL;
     thread->suspend_context = NULL;
-    thread->teb             = NULL;
+    thread->teb             = 0;
     thread->debug_ctx       = NULL;
     thread->debug_event     = NULL;
     thread->debug_break     = 0;
@@ -188,9 +188,9 @@ static inline void init_thread_structure( struct thread *thread )
 }
 
 /* check if address looks valid for a client-side data structure (TEB etc.) */
-static inline int is_valid_address( void *addr )
+static inline int is_valid_address( client_ptr_t addr )
 {
-    return addr && !((unsigned long)addr % sizeof(int));
+    return addr && !(addr % sizeof(int));
 }
 
 /* create a new thread */
@@ -291,8 +291,8 @@ static void dump_thread( struct object *obj, int verbose )
     struct thread *thread = (struct thread *)obj;
     assert( obj->ops == &thread_ops );
 
-    fprintf( stderr, "Thread id=%04x unix pid=%d unix tid=%d teb=%p state=%d\n",
-             thread->id, thread->unix_pid, thread->unix_tid, thread->teb, thread->state );
+    fprintf( stderr, "Thread id=%04x unix pid=%d unix tid=%d state=%d\n",
+             thread->id, thread->unix_pid, thread->unix_tid, thread->state );
 }
 
 static int thread_signaled( struct object *obj, struct thread *thread )
@@ -560,11 +560,12 @@ static int check_wait( struct thread *thread )
 }
 
 /* send the wakeup signal to a thread */
-static int send_thread_wakeup( struct thread *thread, void *cookie, int signaled )
+static int send_thread_wakeup( struct thread *thread, client_ptr_t cookie, int signaled )
 {
     struct wake_up_reply reply;
     int ret;
 
+    memset( &reply, 0, sizeof(reply) );
     reply.cookie   = cookie;
     reply.signaled = signaled;
     if ((ret = write( get_unix_fd( thread->wait_fd ), &reply, sizeof(reply) )) == sizeof(reply))
@@ -583,15 +584,14 @@ static int send_thread_wakeup( struct thread *thread, void *cookie, int signaled
 int wake_thread( struct thread *thread )
 {
     int signaled, count;
-    void *cookie;
+    client_ptr_t cookie;
 
     for (count = 0; thread->wait; count++)
     {
         if ((signaled = check_wait( thread )) == -1) break;
 
         cookie = thread->wait->cookie;
-        if (debug_level) fprintf( stderr, "%04x: *wakeup* signaled=%d cookie=%p\n",
-                                  thread->id, signaled, cookie );
+        if (debug_level) fprintf( stderr, "%04x: *wakeup* signaled=%d\n", thread->id, signaled );
         end_wait( thread );
         if (send_thread_wakeup( thread, cookie, signaled ) == -1) /* error */
 	    break;
@@ -604,14 +604,13 @@ static void thread_timeout( void *ptr )
 {
     struct thread_wait *wait = ptr;
     struct thread *thread = wait->thread;
-    void *cookie = wait->cookie;
+    client_ptr_t cookie = wait->cookie;
 
     wait->user = NULL;
     if (thread->wait != wait) return; /* not the top-level wait, ignore it */
     if (thread->suspend + thread->process->suspend > 0) return;  /* suspended, ignore it */
 
-    if (debug_level) fprintf( stderr, "%04x: *wakeup* signaled=%d cookie=%p\n",
-                              thread->id, (int)STATUS_TIMEOUT, cookie );
+    if (debug_level) fprintf( stderr, "%04x: *wakeup* signaled=TIMEOUT\n", thread->id );
     end_wait( thread );
     if (send_thread_wakeup( thread, cookie, STATUS_TIMEOUT ) == -1) return;
     /* check if other objects have become signaled in the meantime */
@@ -634,7 +633,7 @@ static int signal_object( obj_handle_t handle )
 }
 
 /* select on a list of handles */
-static timeout_t select_on( unsigned int count, void *cookie, const obj_handle_t *handles,
+static timeout_t select_on( unsigned int count, client_ptr_t cookie, const obj_handle_t *handles,
                             int flags, timeout_t timeout, obj_handle_t signal_obj )
 {
     int ret;
@@ -916,7 +915,7 @@ void kill_thread( struct thread *thread, int violent_death )
     if (thread->wait)
     {
         while (thread->wait) end_wait( thread );
-        send_thread_wakeup( thread, NULL, STATUS_PENDING );
+        send_thread_wakeup( thread, 0, STATUS_PENDING );
         /* if it is waiting on the socket, we don't need to send a SIGQUIT */
         violent_death = 0;
     }
@@ -1033,7 +1032,7 @@ DECL_HANDLER(init_thread)
     if (!(current->wait_fd  = create_anonymous_fd( &thread_fd_ops, wait_fd, &current->obj, 0 )))
         return;
 
-    if (!is_valid_address(req->teb) || !is_valid_address(req->peb) || !is_valid_address(req->ldt_copy))
+    if (!is_valid_address(req->teb) || !is_valid_address(req->peb))
     {
         set_error( STATUS_INVALID_PARAMETER );
         return;
@@ -1047,7 +1046,6 @@ DECL_HANDLER(init_thread)
     {
         process->unix_pid = current->unix_pid;
         process->peb      = req->peb;
-        process->ldt_copy = req->ldt_copy;
         reply->info_size  = init_process( current );
     }
     else
@@ -1055,7 +1053,7 @@ DECL_HANDLER(init_thread)
         if (process->unix_pid != current->unix_pid)
             process->unix_pid = -1;  /* can happen with linuxthreads */
         if (current->suspend + process->suspend > 0) stop_thread( current );
-        generate_debug_event( current, CREATE_THREAD_DEBUG_EVENT, req->entry );
+        generate_debug_event( current, CREATE_THREAD_DEBUG_EVENT, &req->entry );
     }
     debug_level = max( debug_level, req->debug_level );
 
@@ -1197,7 +1195,9 @@ DECL_HANDLER(select)
         }
         else if (apc->result.type == APC_ASYNC_IO)
         {
-            if (apc->owner) async_set_result( apc->owner, apc->result.async_io.status, apc->result.async_io.total );
+            if (apc->owner)
+                async_set_result( apc->owner, apc->result.async_io.status,
+                                  apc->result.async_io.total, apc->result.async_io.apc );
         }
         wake_up( &apc->obj, 0 );
         close_handle( current->process, req->prev_apc );
@@ -1242,7 +1242,7 @@ DECL_HANDLER(queue_apc)
     {
     case APC_NONE:
     case APC_USER:
-        thread = get_thread_from_handle( req->thread, THREAD_SET_CONTEXT );
+        thread = get_thread_from_handle( req->handle, THREAD_SET_CONTEXT );
         break;
     case APC_VIRTUAL_ALLOC:
     case APC_VIRTUAL_FREE:
@@ -1251,13 +1251,13 @@ DECL_HANDLER(queue_apc)
     case APC_VIRTUAL_LOCK:
     case APC_VIRTUAL_UNLOCK:
     case APC_UNMAP_VIEW:
-        process = get_process_from_handle( req->process, PROCESS_VM_OPERATION );
+        process = get_process_from_handle( req->handle, PROCESS_VM_OPERATION );
         break;
     case APC_VIRTUAL_QUERY:
-        process = get_process_from_handle( req->process, PROCESS_QUERY_INFORMATION );
+        process = get_process_from_handle( req->handle, PROCESS_QUERY_INFORMATION );
         break;
     case APC_MAP_VIEW:
-        process = get_process_from_handle( req->process, PROCESS_VM_OPERATION );
+        process = get_process_from_handle( req->handle, PROCESS_VM_OPERATION );
         if (process && process != current->process)
         {
             /* duplicate the handle into the target process */
@@ -1272,7 +1272,7 @@ DECL_HANDLER(queue_apc)
         }
         break;
     case APC_CREATE_THREAD:
-        process = get_process_from_handle( req->process, PROCESS_CREATE_THREAD );
+        process = get_process_from_handle( req->handle, PROCESS_CREATE_THREAD );
         break;
     default:
         set_error( STATUS_INVALID_PARAMETER );

@@ -54,6 +54,7 @@ typedef struct _KSERVICE_TABLE_DESCRIPTOR
 KSERVICE_TABLE_DESCRIPTOR KeServiceDescriptorTable[4] = { { 0 } };
 
 typedef void (WINAPI *PCREATE_PROCESS_NOTIFY_ROUTINE)(HANDLE,HANDLE,BOOLEAN);
+typedef void (WINAPI *PCREATE_THREAD_NOTIFY_ROUTINE)(HANDLE,HANDLE,BOOLEAN);
 
 static struct list Irps = LIST_INIT(Irps);
 
@@ -224,7 +225,7 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
             {
                 code     = reply->code;
                 ioctl    = reply->next;
-                device   = reply->user_ptr;
+                device   = wine_server_get_ptr( reply->user_ptr );
                 in_size  = reply->in_size;
                 out_size = reply->out_size;
             }
@@ -267,7 +268,7 @@ NTSTATUS WINAPI IoAllocateDriverObjectExtension( PDRIVER_OBJECT DriverObject,
                                                  ULONG DriverObjectExtensionSize,
                                                  PVOID *DriverObjectExtension )
 {
-    FIXME( "%p, %p, %u, %p\n", DriverObject, ClientIdentificationAddress,
+    FIXME( "stub: %p, %p, %u, %p\n", DriverObject, ClientIdentificationAddress,
             DriverObjectExtensionSize, DriverObjectExtension );
     return STATUS_NOT_IMPLEMENTED;
 }
@@ -279,7 +280,7 @@ NTSTATUS WINAPI IoAllocateDriverObjectExtension( PDRIVER_OBJECT DriverObject,
 PVOID WINAPI IoGetDriverObjectExtension( PDRIVER_OBJECT DriverObject,
                                          PVOID ClientIdentificationAddress )
 {
-    FIXME( "%p, %p\n", DriverObject, ClientIdentificationAddress );
+    FIXME( "stub: %p, %p\n", DriverObject, ClientIdentificationAddress );
     return NULL;
 }
 
@@ -490,7 +491,7 @@ NTSTATUS WINAPI IoCreateDevice( DRIVER_OBJECT *driver, ULONG ext_size,
         req->attributes = 0;
         req->rootdir    = 0;
         req->manager    = wine_server_obj_handle( manager );
-        req->user_ptr   = device;
+        req->user_ptr   = wine_server_client_ptr( device );
         if (name) wine_server_add_data( req, name->Buffer, name->Length );
         if (!(status = wine_server_call( req ))) handle = wine_server_ptr_handle( reply->handle );
     }
@@ -862,11 +863,20 @@ void WINAPI ExFreePoolWithTag( void *ptr, ULONG tag )
 
 
 /***********************************************************************
+ *           KeInitializeEvent   (NTOSKRNL.EXE.@)
+ */
+void WINAPI KeInitializeEvent( PRKEVENT Event, EVENT_TYPE Type, BOOLEAN State )
+{
+    FIXME( "stub: %p %d %d\n", Event, Type, State );
+}
+
+
+/***********************************************************************
  *           KeInitializeSpinLock   (NTOSKRNL.EXE.@)
  */
 void WINAPI KeInitializeSpinLock( PKSPIN_LOCK SpinLock )
 {
-    FIXME("%p\n", SpinLock);
+    FIXME( "stub: %p\n", SpinLock );
 }
 
 
@@ -875,7 +885,7 @@ void WINAPI KeInitializeSpinLock( PKSPIN_LOCK SpinLock )
  */
 void WINAPI KeInitializeTimerEx( PKTIMER Timer, TIMER_TYPE Type )
 {
-    FIXME("%p %d\n", Timer, Type);
+    FIXME( "stub: %p %d\n", Timer, Type );
 }
 
 
@@ -1100,6 +1110,17 @@ NTSTATUS WINAPI PsSetCreateProcessNotifyRoutine( PCREATE_PROCESS_NOTIFY_ROUTINE 
     FIXME( "stub: %p %d\n", callback, remove );
     return STATUS_SUCCESS;
 }
+
+
+/***********************************************************************
+ *           PsSetCreateThreadNotifyRoutine   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI PsSetCreateThreadNotifyRoutine( PCREATE_THREAD_NOTIFY_ROUTINE NotifyRoutine )
+{
+    FIXME( "stub: %p\n", NotifyRoutine );
+    return STATUS_SUCCESS;
+}
+
 
 /***********************************************************************
  *           MmGetSystemRoutineAddress   (NTOSKRNL.EXE.@)

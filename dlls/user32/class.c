@@ -135,7 +135,7 @@ static BOOL set_server_info( HWND hwnd, INT offset, LONG_PTR newval, UINT size )
         {
         case GCW_ATOM:
             req->flags = SET_CLASS_ATOM;
-            req->atom = newval;
+            req->atom = LOWORD(newval);
         case GCL_STYLE:
             req->flags = SET_CLASS_STYLE;
             req->style = newval;
@@ -146,7 +146,7 @@ static BOOL set_server_info( HWND hwnd, INT offset, LONG_PTR newval, UINT size )
             break;
         case GCLP_HMODULE:
             req->flags = SET_CLASS_INSTANCE;
-            req->instance = (void *)newval;
+            req->instance = wine_server_client_ptr( (void *)newval );
             break;
         default:
             assert( offset >= 0 );
@@ -275,7 +275,7 @@ void CLASS_FreeModuleClasses( HMODULE16 hModule )
             SERVER_START_REQ( destroy_class )
             {
                 req->atom = class->atomName;
-                req->instance = class->hInstance;
+                req->instance = wine_server_client_ptr( class->hInstance );
                 ret = !wine_server_call_err( req );
             }
             SERVER_END_REQ;
@@ -354,10 +354,10 @@ static CLASS *CLASS_RegisterClass( LPCWSTR name, HINSTANCE hInstance, BOOL local
     {
         req->local      = local;
         req->style      = style;
-        req->instance   = hInstance;
+        req->instance   = wine_server_client_ptr( hInstance );
         req->extra      = classExtra;
         req->win_extra  = winExtra;
-        req->client_ptr = classPtr;
+        req->client_ptr = wine_server_client_ptr( classPtr );
         req->atom       = classPtr->atomName;
         if (!req->atom && name) wine_server_add_data( req, name, strlenW(name) * sizeof(WCHAR) );
         ret = !wine_server_call_err( req );
@@ -625,10 +625,10 @@ BOOL WINAPI UnregisterClassW( LPCWSTR className, HINSTANCE hInstance )
 
     SERVER_START_REQ( destroy_class )
     {
-        req->instance = hInstance;
+        req->instance = wine_server_client_ptr( hInstance );
         if (!(req->atom = get_int_atom_value(className)) && className)
             wine_server_add_data( req, className, strlenW(className) * sizeof(WCHAR) );
-        if (!wine_server_call_err( req )) classPtr = reply->client_ptr;
+        if (!wine_server_call_err( req )) classPtr = wine_server_get_ptr( reply->client_ptr );
     }
     SERVER_END_REQ;
 
@@ -718,7 +718,7 @@ static ULONG_PTR CLASS_GetClassLong( HWND hwnd, INT offset, UINT size,
                     retvalue = reply->old_extra;
                     break;
                 case GCLP_HMODULE:
-                    retvalue = (ULONG_PTR)reply->old_instance;
+                    retvalue = (ULONG_PTR)wine_server_get_ptr( reply->old_instance );
                     break;
                 case GCW_ATOM:
                     retvalue = reply->old_atom;

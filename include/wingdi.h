@@ -771,6 +771,8 @@ typedef struct tagXFORM
 #define PROOF_QUALITY          2
 #define NONANTIALIASED_QUALITY 3
 #define ANTIALIASED_QUALITY    4
+#define CLEARTYPE_QUALITY          5
+#define CLEARTYPE_NATURAL_QUALITY  6
 
   /* lfPitchAndFamily pitch values */
 #define DEFAULT_PITCH       0x00
@@ -1297,7 +1299,11 @@ typedef struct
 #define GGO_UNHINTED        0x100
 
 #ifdef __WINESRC__
-#define WINE_GGO_GRAY16_BITMAP 0x7f
+#define WINE_GGO_GRAY16_BITMAP 0x10
+#define WINE_GGO_HRGB_BITMAP   0x11
+#define WINE_GGO_HBGR_BITMAP   0x12
+#define WINE_GGO_VRGB_BITMAP   0x13
+#define WINE_GGO_VBGR_BITMAP   0x14
 #endif
 
 typedef struct
@@ -1424,6 +1430,7 @@ typedef struct
 #define TT_ENABLED          0x0002
 
 #ifdef __WINESRC__
+#define WINE_TT_SUBPIXEL_RENDERING_ENABLED 0x4000
 #define WINE_TT_HINTER_ENABLED 0x8000
 #endif
 

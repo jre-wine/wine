@@ -127,8 +127,6 @@ static void init_proxy(const statement_list_t *stmts)
   print_proxy( "    return (__frame->_StubMsg.dwStubPhase != PROXY_SENDRECEIVE);\n");
   print_proxy( "}\n");
   print_proxy( "\n");
-  write_formatstringsdecl(proxy, indent, stmts, need_proxy);
-  write_stubdescproto();
 }
 
 static void clear_output_vars( const var_list_t *args )
@@ -163,6 +161,9 @@ int cant_be_null(const var_t *v)
   if (is_aliaschain_attr(type, ATTR_CONTEXTHANDLE))
       return 0;
 
+  if (is_user_type(type))
+      return 0;
+
   if (! attrs && type)
   {
     attrs = type->attrs;
@@ -194,6 +195,24 @@ int cant_be_null(const var_t *v)
 static int need_delegation(const type_t *iface)
 {
     return iface->ref && iface->ref->ref && iface->ref->ignore;
+}
+
+static int get_delegation_indirect(const type_t *iface, const type_t ** delegate_to)
+{
+  const type_t * cur_iface;
+  for (cur_iface = iface; cur_iface != NULL; cur_iface = cur_iface->ref)
+    if (need_delegation(cur_iface))
+    {
+      if(delegate_to)
+        *delegate_to = cur_iface->ref;
+      return 1;
+    }
+  return 0;
+}
+
+static int need_delegation_indirect(const type_t *iface)
+{
+  return get_delegation_indirect(iface, NULL);
 }
 
 static void proxy_check_pointers( const var_list_t *args )
@@ -625,7 +644,7 @@ static void write_proxy(type_t *iface, unsigned int *proc_offset)
   fprintf(proxy, "};\n");
   print_proxy( "\n");
   print_proxy( "static %sCInterfaceStubVtbl _%sStubVtbl =\n",
-               need_delegation(iface) ? "" : "const ", iface->name);
+               need_delegation_indirect(iface) ? "" : "const ", iface->name);
   print_proxy( "{\n");
   indent++;
   print_proxy( "{\n");
@@ -638,7 +657,7 @@ static void write_proxy(type_t *iface, unsigned int *proc_offset)
   print_proxy( "},\n", iface->name);
   print_proxy( "{\n");
   indent++;
-  print_proxy( "CStdStubBuffer_%s\n", need_delegation(iface) ? "DELEGATING_METHODS" : "METHODS");
+  print_proxy( "CStdStubBuffer_%s\n", need_delegation_indirect(iface) ? "DELEGATING_METHODS" : "METHODS");
   indent--;
   print_proxy( "}\n");
   indent--;
@@ -743,20 +762,13 @@ static type_t **sort_interfaces( const statement_list_t *stmts, int *count )
     return ifaces;
 }
 
-void write_proxies(const statement_list_t *stmts)
+static void write_proxy_routines(const statement_list_t *stmts)
 {
   int expr_eval_routines;
-  char *file_id = proxy_token;
-  int i, count, have_baseiid;
   unsigned int proc_offset = 0;
-  type_t **interfaces;
 
-  if (!do_proxies) return;
-  if (do_everything && !need_proxy_file(stmts)) return;
-
-  init_proxy(stmts);
-  if(!proxy) return;
-
+  write_formatstringsdecl(proxy, indent, stmts, need_proxy);
+  write_stubdescproto();
   write_proxy_stmts(stmts, &proc_offset);
 
   expr_eval_routines = write_expr_eval_routines(proxy, proxy_token);
@@ -765,12 +777,48 @@ void write_proxies(const statement_list_t *stmts)
   write_user_quad_list(proxy);
   write_stubdesc(expr_eval_routines);
 
-  print_proxy( "#if !defined(__RPC_WIN32__)\n");
+  print_proxy( "#if !defined(__RPC_WIN%u__)\n", pointer_size == 8 ? 64 : 32);
   print_proxy( "#error Currently only Wine and WIN32 are supported.\n");
   print_proxy( "#endif\n");
   print_proxy( "\n");
   write_procformatstring(proxy, stmts, need_proxy);
   write_typeformatstring(proxy, stmts, need_proxy);
+
+}
+
+void write_proxies(const statement_list_t *stmts)
+{
+  char *file_id = proxy_token;
+  int i, count, have_baseiid;
+  type_t **interfaces;
+  const type_t * delegate_to;
+
+  if (!do_proxies) return;
+  if (do_everything && !need_proxy_file(stmts)) return;
+
+  init_proxy(stmts);
+  if(!proxy) return;
+
+  if (do_win32 && do_win64)
+  {
+      fprintf(proxy, "\n#ifndef _WIN64\n\n");
+      pointer_size = 4;
+      write_proxy_routines( stmts );
+      fprintf(proxy, "\n#else /* _WIN64 */\n\n");
+      pointer_size = 8;
+      write_proxy_routines( stmts );
+      fprintf(proxy, "#endif /* _WIN64 */\n\n");
+  }
+  else if (do_win32)
+  {
+      pointer_size = 4;
+      write_proxy_routines( stmts );
+  }
+  else if (do_win64)
+  {
+      pointer_size = 8;
+      write_proxy_routines( stmts );
+  }
 
   interfaces = sort_interfaces(stmts, &count);
   fprintf(proxy, "static const CInterfaceProxyVtbl* const _%s_ProxyVtblList[] =\n", file_id);
@@ -797,14 +845,14 @@ void write_proxies(const statement_list_t *stmts)
   fprintf(proxy, "};\n");
   fprintf(proxy, "\n");
 
-  if ((have_baseiid = does_any_iface(stmts, need_delegation)))
+  if ((have_baseiid = does_any_iface(stmts, need_delegation_indirect)))
   {
       fprintf(proxy, "static const IID * _%s_BaseIIDList[] =\n", file_id);
       fprintf(proxy, "{\n");
       for (i = 0; i < count; i++)
       {
-          if (need_delegation(interfaces[i]))
-              fprintf( proxy, "    &IID_%s,  /* %s */\n", interfaces[i]->ref->name, interfaces[i]->name );
+          if (get_delegation_indirect(interfaces[i], &delegate_to))
+              fprintf( proxy, "    &IID_%s,  /* %s */\n", delegate_to->name, interfaces[i]->name );
           else
               fprintf( proxy, "    0,\n" );
       }

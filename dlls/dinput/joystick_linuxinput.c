@@ -215,67 +215,78 @@ static struct JoyDev *joydevs = NULL;
 
 static void find_joydevs(void)
 {
-  int i;
+    int i;
 
-  if (have_joydevs!=-1) {
-    return;
-  }
+    if (InterlockedCompareExchange(&have_joydevs, 0, -1) != -1)
+        /* Someone beat us to it */
+        return;
 
-  have_joydevs = 0;
+    for (i = 0; i < MAX_JOYDEV; i++)
+    {
+        char buf[MAX_PATH];
+        struct JoyDev joydev = {0};
+        int fd;
+        int no_ff_check = 0;
+        int j;
+        struct JoyDev *new_joydevs;
 
-  for (i=0;i<MAX_JOYDEV;i++) {
-    char	buf[MAX_PATH];
-    struct JoyDev joydev = {0};
-    int fd;
-    int no_ff_check = 0;
-    int j;
+        snprintf(buf, sizeof(buf), EVDEVPREFIX"%d", i);
 
-    snprintf(buf,MAX_PATH,EVDEVPREFIX"%d",i);
-    buf[MAX_PATH-1] = 0;
+        if ((fd = open(buf, O_RDWR)) == -1)
+        {
+            fd = open(buf, O_RDONLY);
+            no_ff_check = 1;
+        }
 
-    if ((fd=open(buf, O_RDWR))==-1) {
-      fd = open(buf, O_RDONLY);
-      no_ff_check = 1;
-    }
+        if (fd == -1)
+        {
+            WARN("Failed to open \"%s\": %d %s\n", buf, errno, strerror(errno));
+            continue;
+        }
 
-    if (fd!=-1) {
+        if (ioctl(fd, EVIOCGBIT(0, sizeof(joydev.evbits)), joydev.evbits) == -1)
+        {
+            WARN("ioct(EVIOCGBIT, 0) failed: %d %s\n", errno, strerror(errno));
+            close(fd);
+            continue;
+        }
+        if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(joydev.absbits)), joydev.absbits) == -1)
+        {
+            WARN("ioct(EVIOCGBIT, EV_ABS) failed: %d %s\n", errno, strerror(errno));
+            close(fd);
+            continue;
+        }
+        if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(joydev.keybits)), joydev.keybits) == -1)
+        {
+            WARN("ioct(EVIOCGBIT, EV_KEY) failed: %d %s\n", errno, strerror(errno));
+            close(fd);
+            continue;
+        }
 
-      if ((-1==ioctl(fd,EVIOCGBIT(0,sizeof(joydev.evbits)),joydev.evbits))) {
-        perror("EVIOCGBIT 0");
-        close(fd);
-        continue; 
-      }
-      if (-1==ioctl(fd,EVIOCGBIT(EV_ABS,sizeof(joydev.absbits)),joydev.absbits)) {
-        perror("EVIOCGBIT EV_ABS");
-        close(fd);
-        continue;
-      }
-      if (-1==ioctl(fd,EVIOCGBIT(EV_KEY,sizeof(joydev.keybits)),joydev.keybits)) {
-        perror("EVIOCGBIT EV_KEY");
-        close(fd);
-        continue;
-      }
-      /* A true joystick has at least axis X and Y, and at least 1
-       * button. copied from linux/drivers/input/joydev.c */
-      if (test_bit(joydev.absbits,ABS_X) && test_bit(joydev.absbits,ABS_Y) &&
-          (   test_bit(joydev.keybits,BTN_TRIGGER)	||
-              test_bit(joydev.keybits,BTN_A) 	||
-              test_bit(joydev.keybits,BTN_1)
-          )
-         ) {
+        /* A true joystick has at least axis X and Y, and at least 1
+         * button. copied from linux/drivers/input/joydev.c */
+        if (!test_bit(joydev.absbits, ABS_X) || !test_bit(joydev.absbits, ABS_Y) ||
+            !(test_bit(joydev.keybits, BTN_TRIGGER) ||
+              test_bit(joydev.keybits, BTN_A) ||
+              test_bit(joydev.keybits, BTN_1)))
+        {
+            close(fd);
+            continue;
+        }
 
-        if (!(joydev.device = HeapAlloc(GetProcessHeap(), 0, strlen(buf) + 1))) {
-          close(fd);
-          continue;
+        if (!(joydev.device = HeapAlloc(GetProcessHeap(), 0, strlen(buf) + 1)))
+        {
+            close(fd);
+            continue;
         }
         strcpy(joydev.device, buf);
 
         buf[MAX_PATH - 1] = 0;
         if (ioctl(fd, EVIOCGNAME(MAX_PATH - 1), buf) != -1 &&
             (joydev.name = HeapAlloc(GetProcessHeap(), 0, strlen(buf) + 1)))
-          strcpy(joydev.name, buf);
+            strcpy(joydev.name, buf);
         else
-          joydev.name = joydev.device;
+            joydev.name = joydev.device;
 
 	joydev.guid = DInput_Wine_Joystick_Base_GUID;
 	joydev.guid.Data3 += have_joydevs;
@@ -297,9 +308,11 @@ static void find_joydevs(void)
         }
 #endif
 
-	for (j=0;j<ABS_MAX;j++) {
-	  if (test_bit(joydev.absbits,j)) {
-	    if (-1!=ioctl(fd,EVIOCGABS(j),&(joydev.axes[j]))) {
+        for (j = 0; j < ABS_MAX;j ++)
+        {
+            if (!test_bit(joydev.absbits, j)) continue;
+            if (ioctl(fd, EVIOCGABS(j), &(joydev.axes[j])) != -1)
+            {
 	      TRACE(" ... with axis %d: cur=%d, min=%d, max=%d, fuzz=%d, flat=%d\n",
 		  j,
 		  joydev.axes[j].value,
@@ -309,21 +322,24 @@ static void find_joydevs(void)
 		  joydev.axes[j].flat
 		  );
 	    }
-	  }
 	}
 
-	if (have_joydevs==0) {
-	  joydevs = HeapAlloc(GetProcessHeap(), 0, sizeof(struct JoyDev));
-	} else {
-	  HeapReAlloc(GetProcessHeap(), 0, joydevs, (1+have_joydevs) * sizeof(struct JoyDev));
-	}
-	memcpy(joydevs+have_joydevs, &joydev, sizeof(struct JoyDev));
+        if (!have_joydevs)
+            new_joydevs = HeapAlloc(GetProcessHeap(), 0, sizeof(struct JoyDev));
+        else
+            new_joydevs = HeapReAlloc(GetProcessHeap(), 0, joydevs, (1 + have_joydevs) * sizeof(struct JoyDev));
+
+        if (!new_joydevs)
+        {
+            close(fd);
+            continue;
+        }
+        joydevs = new_joydevs;
+        memcpy(joydevs + have_joydevs, &joydev, sizeof(joydev));
         have_joydevs++;
-      }
 
-      close(fd);
+        close(fd);
     }
-  }
 }
 
 static void fill_joystick_dideviceinstanceA(LPDIDEVICEINSTANCEA lpddi, DWORD version, int id)
@@ -626,24 +642,29 @@ static HRESULT WINAPI JoystickAImpl_Acquire(LPDIRECTINPUTDEVICE8A iface)
 
     TRACE("(this=%p)\n",This);
 
-    res = IDirectInputDevice2AImpl_Acquire(iface);
-    if (res==DI_OK) {
-      if (-1==(This->joyfd=open(This->joydev->device,O_RDWR))) {
-        if (-1==(This->joyfd=open(This->joydev->device,O_RDONLY))) {
-          /* Couldn't open the device at all */
-          perror(This->joydev->device);
-          IDirectInputDevice2AImpl_Unacquire(iface);
-          return DIERR_NOTFOUND;
-        } else {
-          /* Couldn't open in r/w but opened in read-only. */
-          WARN("Could not open %s in read-write mode.  Force feedback will be disabled.\n", This->joydev->device);
+    if ((res = IDirectInputDevice2AImpl_Acquire(iface)) != DI_OK)
+    {
+        WARN("Failed to acquire: %x\n", res);
+        return res;
+    }
+
+    if ((This->joyfd = open(This->joydev->device, O_RDWR)) == -1)
+    {
+        if ((This->joyfd = open(This->joydev->device, O_RDONLY)) == -1)
+        {
+            /* Couldn't open the device at all */
+            ERR("Failed to open device %s: %d %s\n", This->joydev->device, errno, strerror(errno));
+            IDirectInputDevice2AImpl_Unacquire(iface);
+            return DIERR_NOTFOUND;
         }
-      }
     }
     else
-        WARN("Failed to acquire: %x\n", res);
+    {
+        /* Couldn't open in r/w but opened in read-only. */
+        WARN("Could not open %s in read-write mode.  Force feedback will be disabled.\n", This->joydev->device);
+    }
 
-    return res;
+    return DI_OK;
 }
 
 /******************************************************************************

@@ -52,12 +52,39 @@ DWORD WINAPI suErrorToIds16( WORD w1, WORD w2 )
 }
 
 /***********************************************************************
+ *              CM_Connect_MachineA  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Connect_MachineA(PCSTR name, PHMACHINE machine)
+{
+  FIXME("(%s %p) stub\n", name, machine);
+  return CR_ACCESS_DENIED;
+}
+
+/***********************************************************************
  *		CM_Connect_MachineW  (SETUPAPI.@)
  */
 CONFIGRET WINAPI CM_Connect_MachineW(PCWSTR name, PHMACHINE machine)
 {
   FIXME("\n");
   return  CR_ACCESS_DENIED;
+}
+
+/***********************************************************************
+ *              CM_Create_DevNodeA  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Create_DevNodeA(PDEVINST pdnDevInst, DEVINSTID_A pDeviceID, DEVINST dnParent, ULONG ulFlags)
+{
+  FIXME("(%p %s 0x%08x 0x%08x) stub\n", pdnDevInst, pDeviceID, dnParent, ulFlags);
+  return CR_SUCCESS;
+}
+
+/***********************************************************************
+ *              CM_Create_DevNodeW  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Create_DevNodeW(PDEVINST pdnDevInst, DEVINSTID_W pDeviceID, DEVINST dnParent, ULONG ulFlags)
+{
+  FIXME("(%p %s 0x%08x 0x%08x) stub\n", pdnDevInst, debugstr_w(pDeviceID), dnParent, ulFlags);
+  return CR_SUCCESS;
 }
 
 /***********************************************************************
@@ -202,6 +229,15 @@ BOOL WINAPI SetupDiGetINFClassW(PCWSTR inf, LPGUID class_guid, PWSTR class_name,
 }
 
 /***********************************************************************
+ *      SetupDiDestroyClassImageList (SETUPAPI.@)
+ */
+BOOL WINAPI SetupDiDestroyClassImageList(PSP_CLASSIMAGELIST_DATA ClassListImageData)
+{
+    FIXME("(%p) stub\n", ClassListImageData);
+    return TRUE;
+}
+
+/***********************************************************************
  *      SetupPromptForDiskA (SETUPAPI.@)
  */
 UINT WINAPI SetupPromptForDiskA(HWND hwndParent, PCSTR DialogTitle, PCSTR DiskName,
@@ -227,4 +263,24 @@ UINT WINAPI SetupPromptForDiskW(HWND hwndParent, PCWSTR DialogTitle, PCWSTR Disk
           debugstr_w(TagFile), DiskPromptStyle, PathBuffer, PathBufferSize,
           PathRequiredSize);
     return 0;
+}
+
+/***********************************************************************
+ *      CM_Locate_DevNodeA (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Locate_DevNodeA(PDEVINST pdnDevInst, DEVINSTID_A pDeviceID, ULONG ulFlags)
+{
+    FIXME("%p %s 0x%08x: stub\n", pdnDevInst, debugstr_a(pDeviceID), ulFlags);
+
+    return CR_FAILURE;
+}
+
+/***********************************************************************
+ *      CM_Locate_DevNodeW (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Locate_DevNodeW(PDEVINST pdnDevInst, DEVINSTID_W pDeviceID, ULONG ulFlags)
+{
+    FIXME("%p %s 0x%08x: stub\n", pdnDevInst, debugstr_w(pDeviceID), ulFlags);
+
+    return CR_FAILURE;
 }

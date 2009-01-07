@@ -162,7 +162,7 @@ NTSTATUS WINAPI NtQueryInformationProcess(
                         if ((ret = wine_server_call( req )) == STATUS_SUCCESS)
                         {
                             pbi.ExitStatus = reply->exit_code;
-                            pbi.PebBaseAddress = reply->peb;
+                            pbi.PebBaseAddress = wine_server_get_ptr( reply->peb );
                             pbi.AffinityMask = reply->affinity & affinity_mask;
                             pbi.BasePriority = reply->priority;
                             pbi.UniqueProcessId = reply->pid;
@@ -315,7 +315,7 @@ NTSTATUS WINAPI NtQueryInformationProcess(
             UNICODE_STRING *image_file_name_str = ProcessInformation;
 
             req->handle = wine_server_obj_handle( ProcessHandle );
-            req->base_address = NULL; /* main module */
+            req->base_address = 0; /* main module */
             wine_server_set_reply( req, image_file_name_str ? image_file_name_str + 1 : NULL,
                                    ProcessInformationLength > sizeof(UNICODE_STRING) ? ProcessInformationLength - sizeof(UNICODE_STRING) : 0 );
             ret = wine_server_call( req );

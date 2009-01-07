@@ -67,22 +67,76 @@ static BYTE parport_8255[4] = {0x4f, 0x20, 0xff, 0xff};
 
 static BYTE cmosaddress;
 
-/* if you change anything here, use IO_FixCMOSCheckSum below to compute
- * the checksum and put the right values in.
- */
+static int cmos_image_initialized = 0;
+
 static BYTE cmosimage[64] =
 {
-  0x27, 0x34, 0x31, 0x47, 0x16, 0x15, 0x00, 0x01,
-  0x04, 0x94, 0x26, 0x02, 0x50, 0x80, 0x00, 0x00,
-  0x40, 0xb1, 0x00, 0x9c, 0x01, 0x80, 0x02, 0x00,
-  0x1c, 0x00, 0x00, 0xad, 0x02, 0x10, 0x00, 0x00,
-  0x08, 0x00, 0x00, 0x26, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x3f, 0x03, 0x19,  /* last 2 bytes are checksum */
-  0x00, 0x1c, 0x19, 0x81, 0x00, 0x0e, 0x00, 0x80,
-  0x1b, 0x7b, 0x21, 0x00, 0x00, 0x00, 0x05, 0x5f
+  0x27, /* 0x00: seconds */
+  0x34, /* 0X01: seconds alarm */
+  0x31, /* 0x02: minutes */
+  0x47, /* 0x03: minutes alarm */
+  0x16, /* 0x04: hour */
+  0x15, /* 0x05: hour alarm */
+  0x00, /* 0x06: week day */
+  0x01, /* 0x07: month day */
+  0x04, /* 0x08: month */
+  0x94, /* 0x09: year */
+  0x26, /* 0x0a: state A */
+  0x02, /* 0x0b: state B */
+  0x50, /* 0x0c: state C */
+  0x80, /* 0x0d: state D */
+  0x00, /* 0x0e: state diagnostic */
+  0x00, /* 0x0f: state state shutdown */
+  0x40, /* 0x10: floppy type */
+  0xb1, /* 0x11: reserved */
+  0x00, /* 0x12: HD type */
+  0x9c, /* 0x13: reserved */
+  0x01, /* 0x14: equipment */
+  0x80, /* 0x15: low base memory */
+  0x02, /* 0x16: high base memory (0x280 => 640KB) */
+  0x00, /* 0x17: low extended memory */
+  0x3b, /* 0x18: high extended memory (0x3b00 => 15MB) */
+  0x00, /* 0x19: HD 1 extended type byte */
+  0x00, /* 0x1a: HD 2 extended type byte */
+  0xad, /* 0x1b: reserved */
+  0x02, /* 0x1c: reserved */
+  0x10, /* 0x1d: reserved */
+  0x00, /* 0x1e: reserved */
+  0x00, /* 0x1f: installed features */
+  0x08, /* 0x20: HD 1 low cylinder number */
+  0x00, /* 0x21: HD 1 high cylinder number */
+  0x00, /* 0x22: HD 1 heads */
+  0x26, /* 0x23: HD 1 low pre-compensation start */
+  0x00, /* 0x24: HD 1 high pre-compensation start */
+  0x00, /* 0x25: HD 1 low landing zone */
+  0x00, /* 0x26: HD 1 high landing zone */
+  0x00, /* 0x27: HD 1 sectors */
+  0x00, /* 0x28: options 1 */
+  0x00, /* 0x29: reserved */
+  0x00, /* 0x2a: reserved */
+  0x00, /* 0x2b: options 2 */
+  0x00, /* 0x2c: options 3 */
+  0x3f, /* 0x2d: reserved  */
+  0xcc, /* 0x2e: low CMOS ram checksum (computed automatically) */
+  0xcc, /* 0x2f: high CMOS ram checksum (computed automatically) */
+  0x00, /* 0x30: low extended memory byte */
+  0x1c, /* 0x31: high extended memory byte */
+  0x19, /* 0x32: century byte */
+  0x81, /* 0x33: setup information */
+  0x00, /* 0x34: CPU speed */
+  0x0e, /* 0x35: HD 2 low cylinder number */
+  0x00, /* 0x36: HD 2 high cylinder number */
+  0x80, /* 0x37: HD 2 heads */
+  0x1b, /* 0x38: HD 2 low pre-compensation start */
+  0x7b, /* 0x39: HD 2 high pre-compensation start */
+  0x21, /* 0x3a: HD 2 low landing zone */
+  0x00, /* 0x3b: HD 2 high landing zone */
+  0x00, /* 0x3c: HD 2 sectors */
+  0x00, /* 0x3d: reserved */
+  0x05, /* 0x3e: reserved */
+  0x5f  /* 0x3f: reserved */
 };
 
-#if 0
 static void IO_FixCMOSCheckSum(void)
 {
 	WORD sum = 0;
@@ -92,9 +146,8 @@ static void IO_FixCMOSCheckSum(void)
 		sum += cmosimage[i];
 	cmosimage[0x2e] = sum >> 8; /* yes, this IS hi byte !! */
 	cmosimage[0x2f] = sum & 0xff;
-	MESSAGE("calculated hi %02x, lo %02x\n", cmosimage[0x2e], cmosimage[0x2f]);
+	TRACE("calculated hi %02x, lo %02x\n", cmosimage[0x2e], cmosimage[0x2f]);
 }
-#endif
 
 #ifdef DIRECT_IO_ACCESS
 
@@ -403,6 +456,11 @@ DWORD WINAPI DOSVM_inport( int port, int size )
         res = (DWORD)cmosaddress;
         break;
     case 0x71:
+        if (!cmos_image_initialized)
+        {
+            IO_FixCMOSCheckSum();
+            cmos_image_initialized = 1;
+        }
         res = (DWORD)cmosimage[cmosaddress & 0x3f];
         break;
     case 0x200:
@@ -450,8 +508,8 @@ DWORD WINAPI DOSVM_inport( int port, int size )
     case 0x3dd:
     case 0x3de:
     case 0x3df:
-        if(size > 1)
-           FIXME("Trying to read more than one byte from VGA!\n");
+        if (size > 1)
+            FIXME("Trying to read more than one byte from VGA!\n");
         res = (DWORD)VGA_ioport_in( port );
         break;
     case 0x00:
@@ -621,6 +679,11 @@ void WINAPI DOSVM_outport( int port, int size, DWORD value )
         cmosaddress = (BYTE)value & 0x7f;
         break;
     case 0x71:
+        if (!cmos_image_initialized)
+        {
+            IO_FixCMOSCheckSum();
+            cmos_image_initialized = 1;
+        }
         cmosimage[cmosaddress & 0x3f] = (BYTE)value;
         break;
     case 0x226:

@@ -483,8 +483,8 @@ extern const shader_backend_t none_shader_backend;
 
 /* X11 locking */
 
-extern void (*wine_tsx11_lock_ptr)(void);
-extern void (*wine_tsx11_unlock_ptr)(void);
+extern void (* CDECL wine_tsx11_lock_ptr)(void);
+extern void (* CDECL wine_tsx11_unlock_ptr)(void);
 
 /* As GLX relies on X, this is needed */
 extern int num_lock;
@@ -531,9 +531,7 @@ extern int num_lock;
 
 #define MAX_STREAMS  16  /* Maximum possible streams - used for fixed size arrays
                             See MaxStreams in MSDN under GetDeviceCaps */
-                         /* Maximum number of constants provided to the shaders */
-#define HIGHEST_TRANSFORMSTATE 512 
-                         /* Highest value in WINED3DTRANSFORMSTATETYPE */
+#define HIGHEST_TRANSFORMSTATE WINED3DTS_WORLDMATRIX(255) /* Highest value in WINED3DTRANSFORMSTATETYPE */
 
 /* Checking of API calls */
 /* --------------------- */
@@ -801,21 +799,26 @@ struct WineD3DContext {
     DWORD                   tid;    /* Thread ID which owns this context at the moment */
 
     /* Stores some information about the context state for optimization */
-    BOOL                    draw_buffer_dirty;
-    BOOL                    last_was_rhw;      /* true iff last draw_primitive was in xyzrhw mode */
-    BOOL                    last_was_pshader;
-    BOOL                    last_was_vshader;
-    BOOL                    last_was_foggy_shader;
-    BOOL                    namedArraysLoaded, numberedArraysLoaded;
+    WORD draw_buffer_dirty : 1;
+    WORD last_was_rhw : 1;              /* true iff last draw_primitive was in xyzrhw mode */
+    WORD last_was_pshader : 1;
+    WORD last_was_vshader : 1;
+    WORD last_was_foggy_shader : 1;
+    WORD namedArraysLoaded : 1;
+    WORD numberedArraysLoaded : 1;
+    WORD last_was_blit : 1;
+    WORD last_was_ckey : 1;
+    WORD fog_coord : 1;
+    WORD isPBuffer : 1;
+    WORD fog_enabled : 1;
+    WORD num_untracked_materials : 2;   /* Max value 2 */
+    WORD padding : 2;
+    BYTE texShaderBumpMap;              /* MAX_TEXTURES, 8 */
+    BYTE lastWasPow2Texture;            /* MAX_TEXTURES, 8 */
     DWORD                   numbered_array_mask;
-    BOOL                    lastWasPow2Texture[MAX_TEXTURES];
     GLenum                  tracking_parm;     /* Which source is tracking current colour         */
-    unsigned char           num_untracked_materials;
     GLenum                  untracked_materials[2];
-    BOOL                    last_was_blit, last_was_ckey;
     UINT                    blit_w, blit_h;
-    char                    texShaderBumpMap;
-    BOOL                    fog_coord;
 
     char                    *vshader_const_dirty, *pshader_const_dirty;
 
@@ -824,7 +827,6 @@ struct WineD3DContext {
     HWND                    win_handle;
     HDC                     hdc;
     HPBUFFERARB             pbuffer;
-    BOOL                    isPBuffer;
     GLint                   aux_buffers;
 
     /* FBOs */
@@ -834,7 +836,6 @@ struct WineD3DContext {
     GLuint                  dst_fbo;
 
     /* Extension emulation */
-    BOOL                    fog_enabled;
     GLint                   gl_fog_source;
     GLfloat                 fog_coord_value;
     GLfloat                 color[4], fogstart, fogend, fogcolor[4];
@@ -1062,19 +1063,30 @@ struct IWineD3DDeviceImpl
 
     unsigned int max_ffp_textures, max_ffp_texture_stages;
 
-    /* To store */
-    BOOL                    view_ident;        /* true iff view matrix is identity                */
-    BOOL                    untransformed;
-    BOOL                    vertexBlendUsed;   /* To avoid needless setting of the blend matrices */
+    WORD view_ident : 1;                /* true iff view matrix is identity */
+    WORD untransformed : 1;
+    WORD vertexBlendUsed : 1;           /* To avoid needless setting of the blend matrices */
+    WORD isRecordingState : 1;
+    WORD isInDraw : 1;
+    WORD render_offscreen : 1;
+    WORD bCursorVisible : 1;
+    WORD haveHardwareCursor : 1;
+    WORD d3d_initialized : 1;
+    WORD inScene : 1;                   /* A flag to check for proper BeginScene / EndScene call pairs */
+    WORD softwareVertexProcessing : 1;  /* process vertex shaders using software or hardware */
+    WORD useDrawStridedSlow : 1;
+    WORD instancedDraw : 1;
+    WORD padding : 3;
+
+    BYTE fixed_function_usage_map;      /* MAX_TEXTURES, 8 */
+
 #define DDRAW_PITCH_ALIGNMENT 8
 #define D3D8_PITCH_ALIGNMENT 4
     unsigned char           surface_alignment; /* Line Alignment of surfaces                      */
 
     /* State block related */
-    BOOL                    isRecordingState;
     IWineD3DStateBlockImpl *stateBlock;
     IWineD3DStateBlockImpl *updateStateBlock;
-    BOOL                   isInDraw;
 
     /* Internal use fields  */
     WINED3DDEVICE_CREATION_PARAMETERS createParms;
@@ -1104,7 +1116,6 @@ struct IWineD3DDeviceImpl
     UINT                    paletteConversionShader;
 
     /* For rendering to a texture using glCopyTexImage */
-    BOOL                    render_offscreen;
     GLenum                  *draw_buffers;
     GLuint                  depth_blt_texture;
     GLuint                  depth_blt_rb;
@@ -1112,14 +1123,12 @@ struct IWineD3DDeviceImpl
     UINT                    depth_blt_rb_h;
 
     /* Cursor management */
-    BOOL                    bCursorVisible;
     UINT                    xHotSpot;
     UINT                    yHotSpot;
     UINT                    xScreenSpace;
     UINT                    yScreenSpace;
     UINT                    cursorWidth, cursorHeight;
     GLuint                  cursorTexture;
-    BOOL                    haveHardwareCursor;
     HCURSOR                 hardwareCursor;
 
     /* The Wine logo surface */
@@ -1128,18 +1137,8 @@ struct IWineD3DDeviceImpl
     /* Textures for when no other textures are mapped */
     UINT                          dummyTextureName[MAX_TEXTURES];
 
-    /* Debug stream management */
-    BOOL                     debug;
-
     /* Device state management */
     HRESULT                 state;
-    BOOL                    d3d_initialized;
-
-    /* A flag to check for proper BeginScene / EndScene call pairs */
-    BOOL inScene;
-
-    /* process vertex shaders using software or hardware */
-    BOOL softwareVertexProcessing;
 
     /* DirectDraw stuff */
     DWORD ddraw_width, ddraw_height;
@@ -1151,13 +1150,10 @@ struct IWineD3DDeviceImpl
     /* With register combiners we can skip junk texture stages */
     DWORD                     texUnitMap[MAX_COMBINED_SAMPLERS];
     DWORD                     rev_tex_unit_map[MAX_COMBINED_SAMPLERS];
-    BOOL                      fixed_function_usage_map[MAX_TEXTURES];
 
     /* Stream source management */
     WineDirect3DVertexStridedData strided_streams;
     const WineDirect3DVertexStridedData *up_strided;
-    BOOL                      useDrawStridedSlow;
-    BOOL                      instancedDraw;
 
     /* Context management */
     WineD3DContext          **contexts;                  /* Dynamic array containing pointers to context structures */
@@ -1762,27 +1758,28 @@ extern const IWineD3DVertexDeclarationVtbl IWineD3DVertexDeclaration_Vtbl;
 /*   Note: Very long winded but gl Lists are not flexible enough */
 /*   to resolve everything we need, so doing it manually for now */
 typedef struct SAVEDSTATES {
-        BOOL                      indices;
-        BOOL                      material;
-        BOOL                      streamSource[MAX_STREAMS];
-        BOOL                      streamFreq[MAX_STREAMS];
-        BOOL                      textures[MAX_COMBINED_SAMPLERS];
-        BOOL                      transform[HIGHEST_TRANSFORMSTATE + 1];
-        BOOL                      viewport;
-        BOOL                      renderState[WINEHIGHEST_RENDER_STATE + 1];
-        BOOL                      textureState[MAX_TEXTURES][WINED3D_HIGHEST_TEXTURE_STATE + 1];
-        BOOL                      samplerState[MAX_COMBINED_SAMPLERS][WINED3D_HIGHEST_SAMPLER_STATE + 1];
-        BOOL                      clipplane[MAX_CLIPPLANES];
-        BOOL                      vertexDecl;
-        BOOL                      pixelShader;
-        WORD                      pixelShaderConstantsB;
-        WORD                      pixelShaderConstantsI;
-        BOOL                     *pixelShaderConstantsF;
-        BOOL                      vertexShader;
-        WORD                      vertexShaderConstantsB;
-        WORD                      vertexShaderConstantsI;
-        BOOL                     *vertexShaderConstantsF;
-        BOOL                      scissorRect;
+    WORD streamSource;              /* MAX_STREAMS, 16 */
+    WORD streamFreq;                /* MAX_STREAMS, 16 */
+    BOOL textures[MAX_COMBINED_SAMPLERS];
+    BOOL transform[HIGHEST_TRANSFORMSTATE + 1];
+    BOOL renderState[WINEHIGHEST_RENDER_STATE + 1];
+    BOOL textureState[MAX_TEXTURES][WINED3D_HIGHEST_TEXTURE_STATE + 1];
+    BOOL samplerState[MAX_COMBINED_SAMPLERS][WINED3D_HIGHEST_SAMPLER_STATE + 1];
+    DWORD clipplane;                /* WINED3DMAXUSERCLIPPLANES, 32 */
+    WORD pixelShaderConstantsB;     /* MAX_CONST_B, 16 */
+    WORD pixelShaderConstantsI;     /* MAX_CONST_I, 16 */
+    BOOL *pixelShaderConstantsF;
+    WORD vertexShaderConstantsB;    /* MAX_CONST_B, 16 */
+    WORD vertexShaderConstantsI;    /* MAX_CONST_I, 16 */
+    BOOL *vertexShaderConstantsF;
+    BYTE indices : 1;
+    BYTE material : 1;
+    BYTE viewport : 1;
+    BYTE vertexDecl : 1;
+    BYTE pixelShader : 1;
+    BYTE vertexShader : 1;
+    BYTE scissorRect : 1;
+    BYTE padding : 1;
 } SAVEDSTATES;
 
 struct StageState {
@@ -2132,7 +2129,6 @@ typedef enum COMPARISON_TYPE {
 typedef struct SHADER_OPCODE {
     unsigned int  opcode;
     const char*   name;
-    const char*   glname;
     char          dst_token;
     CONST UINT    num_params;
     enum WINED3D_SHADER_INSTRUCTION_HANDLER handler_idx;
@@ -2463,15 +2459,17 @@ typedef struct {
 const StaticPixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt,
         const WineD3D_GL_Info *gl_info, const struct GlPixelFormatDesc **glDesc);
 
-static inline BOOL use_vs(IWineD3DDeviceImpl *device) {
-    return (device->vs_selected_mode != SHADER_NONE
-            && device->stateBlock->vertexShader
-            && !device->strided_streams.u.s.position_transformed);
+static inline BOOL use_vs(IWineD3DStateBlockImpl *stateblock)
+{
+    return (stateblock->vertexShader
+            && !stateblock->wineD3DDevice->strided_streams.u.s.position_transformed
+            && stateblock->wineD3DDevice->vs_selected_mode != SHADER_NONE);
 }
 
-static inline BOOL use_ps(IWineD3DDeviceImpl *device) {
-    return (device->ps_selected_mode != SHADER_NONE
-            && device->stateBlock->pixelShader);
+static inline BOOL use_ps(IWineD3DStateBlockImpl *stateblock)
+{
+    return (stateblock->pixelShader
+            && stateblock->wineD3DDevice->ps_selected_mode != SHADER_NONE);
 }
 
 void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, WINED3DRECT *src_rect,

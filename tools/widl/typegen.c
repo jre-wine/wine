@@ -36,7 +36,7 @@
 #include "utils.h"
 #include "parser.h"
 #include "header.h"
-#include "wine/list.h"
+#include "typetree.h"
 
 #include "typegen.h"
 #include "expr.h"
@@ -120,6 +120,199 @@ const char *string_of_type(unsigned char type)
     }
 }
 
+static int get_struct_type(const type_t *type)
+{
+  int has_pointer = 0;
+  int has_conformance = 0;
+  int has_variance = 0;
+  var_t *field;
+  var_list_t *fields;
+
+  if (type->type != RPC_FC_STRUCT) return type->type;
+
+  fields = type_struct_get_fields(type);
+
+  if (get_padding(fields))
+    return RPC_FC_BOGUS_STRUCT;
+
+  if (fields) LIST_FOR_EACH_ENTRY( field, fields, var_t, entry )
+  {
+    type_t *t = field->type;
+
+    if (is_user_type(t))
+      return RPC_FC_BOGUS_STRUCT;
+
+    if (field->type->declarray)
+    {
+        if (is_string_type(field->attrs, field->type))
+        {
+            if (is_conformant_array(field->type))
+                has_conformance = 1;
+            has_variance = 1;
+            continue;
+        }
+
+        if (is_array(field->type->ref))
+            return RPC_FC_BOGUS_STRUCT;
+
+        if (is_conformant_array(field->type))
+        {
+            has_conformance = 1;
+            if (field->type->declarray && list_next(fields, &field->entry))
+                error_loc("field '%s' deriving from a conformant array must be the last field in the structure\n",
+                        field->name);
+        }
+        if (field->type->length_is)
+            has_variance = 1;
+
+        t = field->type->ref;
+    }
+
+    switch (get_struct_type(t))
+    {
+    /*
+     * RPC_FC_BYTE, RPC_FC_STRUCT, etc
+     *  Simple types don't effect the type of struct.
+     *  A struct containing a simple struct is still a simple struct.
+     *  So long as we can block copy the data, we return RPC_FC_STRUCT.
+     */
+    case 0: /* void pointer */
+    case RPC_FC_BYTE:
+    case RPC_FC_CHAR:
+    case RPC_FC_SMALL:
+    case RPC_FC_USMALL:
+    case RPC_FC_WCHAR:
+    case RPC_FC_SHORT:
+    case RPC_FC_USHORT:
+    case RPC_FC_LONG:
+    case RPC_FC_ULONG:
+    case RPC_FC_INT3264:
+    case RPC_FC_UINT3264:
+    case RPC_FC_HYPER:
+    case RPC_FC_FLOAT:
+    case RPC_FC_DOUBLE:
+    case RPC_FC_STRUCT:
+    case RPC_FC_ENUM32:
+      break;
+
+    case RPC_FC_RP:
+      return RPC_FC_BOGUS_STRUCT;
+
+    case RPC_FC_UP:
+    case RPC_FC_FP:
+    case RPC_FC_OP:
+      if (pointer_size != 4)
+        return RPC_FC_BOGUS_STRUCT;
+      /* pointers to interfaces aren't really pointers and have to be
+       * marshalled specially so they make the structure complex */
+      if (t->ref->type == RPC_FC_IP)
+        return RPC_FC_BOGUS_STRUCT;
+      has_pointer = 1;
+      break;
+
+    case RPC_FC_CARRAY:
+    case RPC_FC_CVARRAY:
+    case RPC_FC_BOGUS_ARRAY:
+    {
+      unsigned int ptr_type = get_attrv(field->attrs, ATTR_POINTERTYPE);
+      if (!ptr_type || ptr_type == RPC_FC_RP)
+        return RPC_FC_BOGUS_STRUCT;
+      else if (pointer_size != 4)
+        return RPC_FC_BOGUS_STRUCT;
+      has_pointer = 1;
+      break;
+    }
+
+    /*
+     * Propagate member attributes
+     *  a struct should be at least as complex as its member
+     */
+    case RPC_FC_CVSTRUCT:
+      has_conformance = 1;
+      has_variance = 1;
+      has_pointer = 1;
+      break;
+
+    case RPC_FC_CPSTRUCT:
+      has_conformance = 1;
+      if (list_next( fields, &field->entry ))
+          error_loc("field '%s' deriving from a conformant array must be the last field in the structure\n",
+                  field->name);
+      has_pointer = 1;
+      break;
+
+    case RPC_FC_CSTRUCT:
+      has_conformance = 1;
+      if (list_next( fields, &field->entry ))
+          error_loc("field '%s' deriving from a conformant array must be the last field in the structure\n",
+                  field->name);
+      break;
+
+    case RPC_FC_PSTRUCT:
+      has_pointer = 1;
+      break;
+
+    default:
+      error_loc("Unknown struct member %s with type (0x%02x)\n", field->name, t->type);
+      /* fallthru - treat it as complex */
+
+    /* as soon as we see one of these these members, it's bogus... */
+    case RPC_FC_ENCAPSULATED_UNION:
+    case RPC_FC_NON_ENCAPSULATED_UNION:
+    case RPC_FC_BOGUS_STRUCT:
+    case RPC_FC_ENUM16:
+      return RPC_FC_BOGUS_STRUCT;
+    }
+  }
+
+  if( has_variance )
+  {
+    if ( has_conformance )
+      return RPC_FC_CVSTRUCT;
+    else
+      return RPC_FC_BOGUS_STRUCT;
+  }
+  if( has_conformance && has_pointer )
+    return RPC_FC_CPSTRUCT;
+  if( has_conformance )
+    return RPC_FC_CSTRUCT;
+  if( has_pointer )
+    return RPC_FC_PSTRUCT;
+  return RPC_FC_STRUCT;
+}
+
+static int get_array_type(const type_t *type)
+{
+    if (is_array(type))
+    {
+        const type_t *rt = type->ref;
+        if (is_user_type(rt))
+            return RPC_FC_BOGUS_ARRAY;
+        switch (get_struct_type(rt))
+        {
+        case RPC_FC_BOGUS_STRUCT:
+        case RPC_FC_NON_ENCAPSULATED_UNION:
+        case RPC_FC_ENCAPSULATED_UNION:
+        case RPC_FC_ENUM16:
+            return RPC_FC_BOGUS_ARRAY;
+            /* FC_RP should be above, but widl overuses these, and will break things.  */
+        case RPC_FC_UP:
+        case RPC_FC_RP:
+            if (rt->ref->type == RPC_FC_IP) return RPC_FC_BOGUS_ARRAY;
+            break;
+        }
+
+        if (type->type == RPC_FC_LGFARRAY || type->type == RPC_FC_LGVARRAY)
+        {
+            unsigned int align = 0;
+            size_t size = type_memsize(type, &align);
+            if (size * type->dim <= 0xffff)
+                return (type->type == RPC_FC_LGFARRAY) ? RPC_FC_SMFARRAY : RPC_FC_SMVARRAY;
+        }
+    }
+    return type->type;
+}
+
 int is_struct(unsigned char type)
 {
     switch (type)
@@ -138,7 +331,7 @@ int is_struct(unsigned char type)
 
 static int is_non_complex_struct(const type_t *type)
 {
-    switch (type->type)
+    switch (get_struct_type(type))
     {
     case RPC_FC_STRUCT:
     case RPC_FC_PSTRUCT:
@@ -173,8 +366,9 @@ static int type_has_pointers(const type_t *type)
         return type_has_pointers(type->ref);
     else if (is_struct(type->type))
     {
+        var_list_t *fields = type_struct_get_fields(type);
         const var_t *field;
-        if (type->fields_or_args) LIST_FOR_EACH_ENTRY( field, type->fields_or_args, const var_t, entry )
+        if (fields) LIST_FOR_EACH_ENTRY( field, fields, const var_t, entry )
         {
             if (type_has_pointers(field->type))
                 return TRUE;
@@ -184,13 +378,7 @@ static int type_has_pointers(const type_t *type)
     {
         var_list_t *fields;
         const var_t *field;
-        if (type->type == RPC_FC_ENCAPSULATED_UNION)
-        {
-            const var_t *uv = LIST_ENTRY(list_tail(type->fields_or_args), const var_t, entry);
-            fields = uv->type->fields_or_args;
-        }
-        else
-            fields = type->fields_or_args;
+        fields = type_union_get_cases(type);
         if (fields) LIST_FOR_EACH_ENTRY( field, fields, const var_t, entry )
         {
             if (field->type && type_has_pointers(field->type))
@@ -213,8 +401,9 @@ static int type_has_full_pointer(const type_t *type)
         return type_has_full_pointer(type->ref);
     else if (is_struct(type->type))
     {
+        var_list_t *fields = type_struct_get_fields(type);
         const var_t *field;
-        if (type->fields_or_args) LIST_FOR_EACH_ENTRY( field, type->fields_or_args, const var_t, entry )
+        if (fields) LIST_FOR_EACH_ENTRY( field, fields, const var_t, entry )
         {
             if (type_has_full_pointer(field->type))
                 return TRUE;
@@ -224,13 +413,7 @@ static int type_has_full_pointer(const type_t *type)
     {
         var_list_t *fields;
         const var_t *field;
-        if (type->type == RPC_FC_ENCAPSULATED_UNION)
-        {
-            const var_t *uv = LIST_ENTRY(list_tail(type->fields_or_args), const var_t, entry);
-            fields = uv->type->fields_or_args;
-        }
-        else
-            fields = type->fields_or_args;
+        fields = type_union_get_cases(type);
         if (fields) LIST_FOR_EACH_ENTRY( field, fields, const var_t, entry )
         {
             if (field->type && type_has_full_pointer(field->type))
@@ -381,6 +564,8 @@ static void write_formatdesc(FILE *f, int indent, const char *str)
 
 void write_formatstringsdecl(FILE *f, int indent, const statement_list_t *stmts, type_pred_t pred)
 {
+    clear_all_offsets();
+
     print_file(f, indent, "#define TYPE_FORMAT_STRING_SIZE %d\n",
                get_size_typeformatstring(stmts, pred));
 
@@ -654,8 +839,9 @@ static size_t write_conf_or_var_desc(FILE *file, const type_t *structure,
         unsigned char param_type = 0;
         size_t offset = 0;
         const var_t *var;
+        var_list_t *fields = type_struct_get_fields(structure);
 
-        if (structure->fields_or_args) LIST_FOR_EACH_ENTRY( var, structure->fields_or_args, const var_t, entry )
+        if (fields) LIST_FOR_EACH_ENTRY( var, fields, const var_t, entry )
         {
             unsigned int align = 0;
             /* FIXME: take alignment into account */
@@ -827,7 +1013,8 @@ size_t type_memsize(const type_t *t, unsigned int *align)
     }
     else if (is_ptr(t) || is_conformant_array(t))
     {
-        size = sizeof(void *);
+        assert( pointer_size );
+        size = pointer_size;
         if (size > *align) *align = size;
     }
     else switch (t->type)
@@ -865,11 +1052,13 @@ size_t type_memsize(const type_t *t, unsigned int *align)
     case RPC_FC_CSTRUCT:
     case RPC_FC_PSTRUCT:
     case RPC_FC_BOGUS_STRUCT:
-        size = fields_memsize(t->fields_or_args, align);
+        size = fields_memsize(type_struct_get_fields(t), align);
         break;
     case RPC_FC_ENCAPSULATED_UNION:
+        size = fields_memsize(type_encapsulated_union_get_fields(t), align);
+        break;
     case RPC_FC_NON_ENCAPSULATED_UNION:
-        size = union_memsize(t->fields_or_args, align);
+        size = union_memsize(type_union_get_cases(t), align);
         break;
     case RPC_FC_SMFARRAY:
     case RPC_FC_LGFARRAY:
@@ -971,7 +1160,7 @@ static int user_type_has_variable_size(const type_t *t)
     if (is_ptr(t))
         return TRUE;
     else
-        switch (t->type)
+        switch (get_struct_type(t))
         {
         case RPC_FC_PSTRUCT:
         case RPC_FC_CSTRUCT:
@@ -1063,7 +1252,7 @@ static void write_member_type(FILE *file, const type_t *cont,
     }
     else if (is_ptr(type) || is_conformant_array(type))
     {
-        unsigned char fc = (cont->type == RPC_FC_BOGUS_STRUCT
+        unsigned char fc = (get_struct_type(cont) == RPC_FC_BOGUS_STRUCT
                             ? RPC_FC_POINTER
                             : RPC_FC_LONG);
         print_file(file, 2, "0x%x,\t/* %s */\n", fc, string_of_type(fc));
@@ -1087,7 +1276,7 @@ static void write_end(FILE *file, unsigned int *tfsoff)
 static void write_descriptors(FILE *file, type_t *type, unsigned int *tfsoff)
 {
     unsigned int offset = 0;
-    var_list_t *fs = type->fields_or_args;
+    var_list_t *fs = type_struct_get_fields(type);
     var_t *f;
 
     if (fs) LIST_FOR_EACH_ENTRY(f, fs, var_t, entry)
@@ -1164,7 +1353,7 @@ static int write_no_repeat_pointer_descriptions(
     if (is_non_complex_struct(type))
     {
         const var_t *v;
-        LIST_FOR_EACH_ENTRY( v, type->fields_or_args, const var_t, entry )
+        LIST_FOR_EACH_ENTRY( v, type_struct_get_fields(type), const var_t, entry )
         {
             if (offset_in_memory && offset_in_buffer)
             {
@@ -1242,7 +1431,7 @@ static int write_pointer_description_offsets(
     {
         /* otherwise search for interesting fields to parse */
         const var_t *v;
-        LIST_FOR_EACH_ENTRY( v, type->fields_or_args, const var_t, entry )
+        LIST_FOR_EACH_ENTRY( v, type_struct_get_fields(type), const var_t, entry )
         {
             if (offset_in_memory && offset_in_buffer)
             {
@@ -1284,8 +1473,9 @@ static int write_fixed_array_pointer_descriptions(
 {
     unsigned int align;
     int pointer_count = 0;
+    int real_type = get_array_type( type );
 
-    if (type->type == RPC_FC_SMFARRAY || type->type == RPC_FC_LGFARRAY)
+    if (real_type == RPC_FC_SMFARRAY || real_type == RPC_FC_LGFARRAY)
     {
         unsigned int temp = 0;
         /* unfortunately, this needs to be done in two passes to avoid
@@ -1317,7 +1507,7 @@ static int write_fixed_array_pointer_descriptions(
     else if (is_struct(type->type))
     {
         const var_t *v;
-        LIST_FOR_EACH_ENTRY( v, type->fields_or_args, const var_t, entry )
+        LIST_FOR_EACH_ENTRY( v, type_struct_get_fields(type), const var_t, entry )
         {
             if (offset_in_memory && offset_in_buffer)
             {
@@ -1436,7 +1626,7 @@ static int write_varying_array_pointer_descriptions(
     else if (is_struct(type->type))
     {
         const var_t *v;
-        LIST_FOR_EACH_ENTRY( v, type->fields_or_args, const var_t, entry )
+        LIST_FOR_EACH_ENTRY( v, type_struct_get_fields(type), const var_t, entry )
         {
             if (offset_in_memory && offset_in_buffer)
             {
@@ -1506,7 +1696,7 @@ static void write_pointer_description(FILE *file, type_t *type,
     if ((!type->declarray || !current_structure) && is_conformant_array(type))
         write_conformant_array_pointer_descriptions(
             file, NULL, type, 0, typestring_offset);
-    else if (type->type == RPC_FC_CPSTRUCT)
+    else if (get_struct_type(type) == RPC_FC_CPSTRUCT)
     {
         unsigned int align = 0;
         type_t *carray = find_array_or_string_in_struct(type)->type;
@@ -1625,6 +1815,7 @@ static size_t write_array_tfs(FILE *file, const attr_list_t *attrs, type_t *type
     unsigned int align = 0;
     size_t size;
     size_t start_offset;
+    int real_type;
     int has_pointer;
     int pointer_type = get_attrv(attrs, ATTR_POINTERTYPE);
     unsigned int baseoff
@@ -1642,20 +1833,19 @@ static size_t write_array_tfs(FILE *file, const attr_list_t *attrs, type_t *type
 
     align = 0;
     size = type_memsize((is_conformant_array(type) ? type->ref : type), &align);
+    real_type = get_array_type( type );
 
     start_offset = *typestring_offset;
     update_tfsoff(type, start_offset, file);
     print_start_tfs_comment(file, type, start_offset);
-    print_file(file, 2, "0x%02x,\t/* %s */\n", type->type, string_of_type(type->type));
+    print_file(file, 2, "0x%02x,\t/* %s */\n", real_type, string_of_type(real_type));
     print_file(file, 2, "0x%x,\t/* %d */\n", align - 1, align - 1);
     *typestring_offset += 2;
 
     align = 0;
-    if (type->type != RPC_FC_BOGUS_ARRAY)
+    if (real_type != RPC_FC_BOGUS_ARRAY)
     {
-        unsigned char tc = type->type;
-
-        if (tc == RPC_FC_LGFARRAY || tc == RPC_FC_LGVARRAY)
+        if (real_type == RPC_FC_LGFARRAY || real_type == RPC_FC_LGVARRAY)
         {
             print_file(file, 2, "NdrFcLong(0x%x),\t/* %lu */\n", size, size);
             *typestring_offset += 4;
@@ -1671,12 +1861,12 @@ static size_t write_array_tfs(FILE *file, const attr_list_t *attrs, type_t *type
                 += write_conf_or_var_desc(file, current_structure, baseoff,
                                           type, size_is);
 
-        if (type->type == RPC_FC_SMVARRAY || type->type == RPC_FC_LGVARRAY)
+        if (real_type == RPC_FC_SMVARRAY || real_type == RPC_FC_LGVARRAY)
         {
             unsigned int elalign = 0;
             size_t elsize = type_memsize(type->ref, &elalign);
 
-            if (type->type == RPC_FC_LGVARRAY)
+            if (real_type == RPC_FC_LGVARRAY)
             {
                 print_file(file, 2, "NdrFcLong(0x%x),\t/* %lu */\n", type->dim, type->dim);
                 *typestring_offset += 4;
@@ -1729,19 +1919,22 @@ static size_t write_array_tfs(FILE *file, const attr_list_t *attrs, type_t *type
 
 static const var_t *find_array_or_string_in_struct(const type_t *type)
 {
+    const var_list_t *fields = type_struct_get_fields(type);
     const var_t *last_field;
     const type_t *ft;
+    int real_type;
 
-    if (!type->fields_or_args || list_empty(type->fields_or_args))
+    if (!fields || list_empty(fields))
         return NULL;
 
-    last_field = LIST_ENTRY( list_tail(type->fields_or_args), const var_t, entry );
+    last_field = LIST_ENTRY( list_tail(fields), const var_t, entry );
     ft = last_field->type;
 
     if (ft->declarray && is_conformant_array(ft))
         return last_field;
 
-    if (ft->type == RPC_FC_CSTRUCT || ft->type == RPC_FC_CPSTRUCT || ft->type == RPC_FC_CVSTRUCT)
+    real_type = get_struct_type( type );
+    if (real_type == RPC_FC_CSTRUCT || real_type == RPC_FC_CPSTRUCT || real_type == RPC_FC_CVSTRUCT)
         return find_array_or_string_in_struct(ft);
     else
         return NULL;
@@ -1754,8 +1947,9 @@ static void write_struct_members(FILE *file, const type_t *type,
     unsigned short offset = 0;
     int salign = -1;
     int padding;
+    var_list_t *fields = type_struct_get_fields(type);
 
-    if (type->fields_or_args) LIST_FOR_EACH_ENTRY( field, type->fields_or_args, const var_t, entry )
+    if (fields) LIST_FOR_EACH_ENTRY( field, fields, const var_t, entry )
     {
         type_t *ft = field->type;
         if (!ft->declarray || !is_conformant_array(ft))
@@ -1812,6 +2006,8 @@ static size_t write_struct_tfs(FILE *file, type_t *type,
     unsigned int align = 0;
     unsigned int corroff;
     var_t *f;
+    int real_type = get_struct_type( type );
+    var_list_t *fields = type_struct_get_fields(type);
 
     guard_rec(type);
     current_structure = type;
@@ -1821,7 +2017,7 @@ static size_t write_struct_tfs(FILE *file, type_t *type,
         error("structure size for %s exceeds %d bytes by %d bytes\n",
               name, USHRT_MAX, total_size - USHRT_MAX);
 
-    if (type->fields_or_args) LIST_FOR_EACH_ENTRY(f, type->fields_or_args, var_t, entry)
+    if (fields) LIST_FOR_EACH_ENTRY(f, fields, var_t, entry)
         has_pointers |= write_embedded_types(file, f->attrs, f->type, f->name,
                                              FALSE, tfsoff);
     if (!has_pointers) has_pointers = type_has_pointers(type);
@@ -1829,7 +2025,7 @@ static size_t write_struct_tfs(FILE *file, type_t *type,
     array = find_array_or_string_in_struct(type);
     if (array && !processed(array->type))
         array_offset
-            = is_attr(array->attrs, ATTR_STRING)
+            = is_string_type(array->attrs, array->type)
             ? write_string_tfs(file, array->attrs, array->type, array->name, tfsoff)
             : write_array_tfs(file, array->attrs, array->type, array->name, tfsoff);
 
@@ -1839,7 +2035,7 @@ static size_t write_struct_tfs(FILE *file, type_t *type,
     start_offset = *tfsoff;
     update_tfsoff(type, start_offset, file);
     print_start_tfs_comment(file, type, start_offset);
-    print_file(file, 2, "0x%x,\t/* %s */\n", type->type, string_of_type(type->type));
+    print_file(file, 2, "0x%x,\t/* %s */\n", real_type, string_of_type(real_type));
     print_file(file, 2, "0x%x,\t/* %d */\n", align - 1, align - 1);
     print_file(file, 2, "NdrFcShort(0x%x),\t/* %d */\n", total_size, total_size);
     *tfsoff += 4;
@@ -1852,13 +2048,13 @@ static size_t write_struct_tfs(FILE *file, type_t *type,
                    reloff, reloff, absoff);
         *tfsoff += 2;
     }
-    else if (type->type == RPC_FC_BOGUS_STRUCT)
+    else if (real_type == RPC_FC_BOGUS_STRUCT)
     {
         print_file(file, 2, "NdrFcShort(0x0),\n");
         *tfsoff += 2;
     }
 
-    if (type->type == RPC_FC_BOGUS_STRUCT)
+    if (real_type == RPC_FC_BOGUS_STRUCT)
     {
         /* On the sizing pass, type->ptrdesc may be zero, but it's ok as
            nothing is written to file yet.  On the actual writing pass,
@@ -1870,9 +2066,9 @@ static size_t write_struct_tfs(FILE *file, type_t *type,
                    reloff, reloff, absoff);
         *tfsoff += 2;
     }
-    else if ((type->type == RPC_FC_PSTRUCT) ||
-             (type->type == RPC_FC_CPSTRUCT) ||
-             (type->type == RPC_FC_CVSTRUCT && has_pointers))
+    else if ((real_type == RPC_FC_PSTRUCT) ||
+             (real_type == RPC_FC_CPSTRUCT) ||
+             (real_type == RPC_FC_CVSTRUCT && has_pointers))
     {
         print_file(file, 2, "0x%x, /* FC_PP */\n", RPC_FC_PP);
         print_file(file, 2, "0x%x, /* FC_PAD */\n", RPC_FC_PAD);
@@ -1884,13 +2080,12 @@ static size_t write_struct_tfs(FILE *file, type_t *type,
 
     write_struct_members(file, type, &corroff, tfsoff);
 
-    if (type->type == RPC_FC_BOGUS_STRUCT)
+    if (real_type == RPC_FC_BOGUS_STRUCT)
     {
-        const var_list_t *fs = type->fields_or_args;
         const var_t *f;
 
         type->ptrdesc = *tfsoff;
-        if (fs) LIST_FOR_EACH_ENTRY(f, fs, const var_t, entry)
+        if (fields) LIST_FOR_EACH_ENTRY(f, fields, const var_t, entry)
         {
             type_t *ft = f->type;
             if (is_ptr(ft))
@@ -1994,13 +2189,7 @@ static size_t write_union_tfs(FILE *file, type_t *type, unsigned int *tfsoff)
 
     guard_rec(type);
 
-    if (type->type == RPC_FC_ENCAPSULATED_UNION)
-    {
-        const var_t *uv = LIST_ENTRY(list_tail(type->fields_or_args), const var_t, entry);
-        fields = uv->type->fields_or_args;
-    }
-    else
-        fields = type->fields_or_args;
+    fields = type_union_get_cases(type);
 
     if (fields) LIST_FOR_EACH_ENTRY(f, fields, var_t, entry)
     {
@@ -2016,7 +2205,7 @@ static size_t write_union_tfs(FILE *file, type_t *type, unsigned int *tfsoff)
     print_start_tfs_comment(file, type, start_offset);
     if (type->type == RPC_FC_ENCAPSULATED_UNION)
     {
-        const var_t *sv = LIST_ENTRY(list_head(type->fields_or_args), const var_t, entry);
+        const var_t *sv = type_union_get_switch_value(type);
         const type_t *st = sv->type;
 
         switch (st->type)
@@ -2474,7 +2663,7 @@ static unsigned int get_required_buffer_size_type(
     }
     else
     {
-        switch (type->type)
+        switch (get_struct_type(type))
         {
         case RPC_FC_BYTE:
         case RPC_FC_CHAR:
@@ -2508,12 +2697,12 @@ static unsigned int get_required_buffer_size_type(
             return 0;
 
         case RPC_FC_STRUCT:
-            if (!type->fields_or_args) return 0;
-            return fields_memsize(type->fields_or_args, alignment);
+            if (!type_struct_get_fields(type)) return 0;
+            return fields_memsize(type_struct_get_fields(type), alignment);
 
         case RPC_FC_RP:
             return
-                is_base_type( type->ref->type ) || type->ref->type == RPC_FC_STRUCT
+                is_base_type( type->ref->type ) || get_struct_type(type->ref) == RPC_FC_STRUCT
                 ? get_required_buffer_size_type( type->ref, name, alignment )
                 : 0;
 
@@ -2833,7 +3022,7 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func, const
         }
 
     write_parameter_conf_or_var_exprs(file, indent, local_var_prefix, phase, var);
-    rtype = type->type;
+    rtype = get_struct_type(type);
 
     if (is_context_handle(type))
     {
@@ -2899,7 +3088,7 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func, const
     }
     else if (is_array(type))
     {
-        unsigned char tc = type->type;
+        unsigned char tc = get_array_type( type );
         const char *array_type = "FixedArray";
 
         /* We already have the size_is expression since it's at the
@@ -2929,10 +3118,10 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func, const
         if (phase == PHASE_FREE && pointer_type == RPC_FC_RP)
         {
             /* these are all unmarshalled by allocating memory */
-            if (type->type == RPC_FC_BOGUS_ARRAY ||
-                type->type == RPC_FC_CVARRAY ||
-                ((type->type == RPC_FC_SMVARRAY || type->type == RPC_FC_LGVARRAY) && in_attr) ||
-                (type->type == RPC_FC_CARRAY && !in_attr))
+            if (tc == RPC_FC_BOGUS_ARRAY ||
+                tc == RPC_FC_CVARRAY ||
+                ((tc == RPC_FC_SMVARRAY || tc == RPC_FC_LGVARRAY) && in_attr) ||
+                (tc == RPC_FC_CARRAY && !in_attr))
             {
                 print_file(file, indent, "if (%s%s)\n", local_var_prefix, var->name);
                 indent++;
@@ -2975,7 +3164,7 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func, const
             if (phase != PHASE_FREE)
                 print_phase_basetype(file, indent, local_var_prefix, phase, pass, var, var->name);
         }
-        else if (type->type == RPC_FC_RP && ref->type == RPC_FC_STRUCT &&
+        else if (type->type == RPC_FC_RP && get_struct_type(ref) == RPC_FC_STRUCT &&
                  !is_user_type(ref))
         {
             if (phase != PHASE_BUFFERSIZE && phase != PHASE_FREE)
@@ -3102,7 +3291,7 @@ void declare_stub_args( FILE *file, int indent, const func_t *func )
 
     LIST_FOR_EACH_ENTRY( var, func->args, const var_t, entry )
     {
-        int is_string = is_attr(var->attrs, ATTR_STRING);
+        int is_string = is_string_type(var->attrs, var->type);
 
         in_attr = is_attr(var->attrs, ATTR_IN);
         out_attr = is_attr(var->attrs, ATTR_OUT);
@@ -3149,7 +3338,7 @@ void assign_stub_out_args( FILE *file, int indent, const func_t *func, const cha
 
     LIST_FOR_EACH_ENTRY( var, func->args, const var_t, entry )
     {
-        int is_string = is_attr(var->attrs, ATTR_STRING);
+        int is_string = is_string_type(var->attrs, var->type);
         in_attr = is_attr(var->attrs, ATTR_IN);
         out_attr = is_attr(var->attrs, ATTR_OUT);
         if (!out_attr && !in_attr)

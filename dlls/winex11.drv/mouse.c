@@ -89,7 +89,7 @@ POINT cursor_pos;
 static DWORD last_time_modified;
 static RECT cursor_clip; /* Cursor clipping rect */
 
-BOOL X11DRV_SetCursorPos( INT x, INT y );
+BOOL CDECL X11DRV_SetCursorPos( INT x, INT y );
 
 
 /***********************************************************************
@@ -399,6 +399,47 @@ void X11DRV_send_mouse_input( HWND hwnd, DWORD flags, DWORD x, DWORD y,
 }
 
 
+/***********************************************************************
+ *              check_alpha_zero
+ *
+ * Generally 32 bit bitmaps have an alpha channel which is used in favor of the
+ * AND mask.  However, if all pixels have alpha = 0x00, the bitmap is treated
+ * like one without alpha and the masks are used.  As soon as one pixel has
+ * alpha != 0x00, and the mask ignored as described in the docs.
+ *
+ * This is most likely for applications which create the bitmaps with
+ * CreateDIBitmap, which creates a device dependent bitmap, so the format that
+ * arrives when loading depends on the screen's bpp.  Apps that were written at
+ * 8 / 16 bpp times do not know about the 32 bit alpha, so they would get a
+ * completely transparent cursor on 32 bit displays.
+ *
+ * Non-32 bit bitmaps always use the AND mask.
+ */
+static BOOL check_alpha_zero(CURSORICONINFO *ptr, unsigned char *xor_bits)
+{
+    int x, y;
+    unsigned char *xor_ptr;
+
+    if (ptr->bBitsPerPixel == 32)
+    {
+        for (y = 0; y < ptr->nHeight; ++y)
+        {
+            xor_ptr = xor_bits + (y * ptr->nWidthBytes);
+            for (x = 0; x < ptr->nWidth; ++x)
+            {
+                if (xor_ptr[3] != 0x00)
+                {
+                    return FALSE;
+                }
+                xor_ptr+=4;
+            }
+        }
+    }
+
+    return TRUE;
+}
+
+
 #ifdef SONAME_LIBXCURSOR
 
 /***********************************************************************
@@ -434,12 +475,12 @@ static XcursorImage *create_cursor_image( CURSORICONINFO *ptr )
     XcursorPixel *pixel_ptr;
     XcursorImage *image;
     unsigned char tmp;
-    BOOL alpha_zero = TRUE;
+    BOOL alpha_zero;
 
-    and_width_bytes = ptr->nWidth / 8;
-    xor_width_bytes = and_width_bytes * ptr->bBitsPerPixel;
+    and_width_bytes = 2 * ((ptr->nWidth+15) / 16);
+    xor_width_bytes = ptr->nWidthBytes;
 
-    and_size = ptr->nWidth * ptr->nHeight / 8;
+    and_size = ptr->nHeight * and_width_bytes;
     and_ptr = and_bits = (unsigned char *)(ptr + 1);
 
     xor_ptr = xor_bits = and_ptr + and_size;
@@ -447,36 +488,7 @@ static XcursorImage *create_cursor_image( CURSORICONINFO *ptr )
     image = pXcursorImageCreate( ptr->nWidth, ptr->nHeight );
     pixel_ptr = image->pixels;
 
-    /* Generally 32 bit bitmaps have an alpha channel which is used in favor
-     * of the AND mask. However, if all pixels have alpha = 0x00, the bitmap
-     * is treated like one without alpha and the masks are used. As soon as
-     * one pixel has alpha != 0x00, and the mask ignored as described in the
-     * docs.
-     *
-     * This is most likely for applications which create the bitmaps with
-     * CreateDIBitmap, which creates a device dependent bitmap, so the format
-     * that arrives when loading depends on the screen's bpp. Apps that were
-     * written at 8 / 16 bpp times do not know about the 32 bit alpha, so
-     * they would get a completely transparent cursor on 32 bit displays.
-     *
-     * Non-32 bit bitmaps always use the AND mask
-     */
-    if(ptr->bBitsPerPixel == 32)
-    {
-        for (y = 0; alpha_zero && y < ptr->nHeight; ++y)
-        {
-            xor_ptr = xor_bits + (y * xor_width_bytes);
-            for (x = 0; x < ptr->nWidth; ++x)
-            {
-                if (xor_ptr[3] != 0x00)
-                {
-                    alpha_zero = FALSE;
-                    break;
-                }
-                xor_ptr+=4;
-            }
-        }
-    }
+    alpha_zero = check_alpha_zero(ptr, xor_bits);
 
     /* On windows, to calculate the color for a pixel, first an AND is done
      * with the background and the "and" bitmap, then an XOR with the "xor"
@@ -618,6 +630,7 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
     Cursor cursor = None;
     POINT hotspot;
     char *bitMask32 = NULL;
+    BOOL alpha_zero = TRUE;
 
 #ifdef SONAME_LIBXCURSOR
     if (pXcursorImageLoadCursor) return create_xcursor_cursor( display, ptr );
@@ -733,6 +746,7 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
                   ptr->nWidth, ptr->nHeight);
             }
             ymax = (ptr->nHeight > 32) ? 32 : ptr->nHeight;
+            alpha_zero = check_alpha_zero(ptr, theImage);
 
             memset(pXorBits, 0, 128);
             for (y=0; y<ymax; y++)
@@ -841,7 +855,7 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
         /* Now create the 2 pixmaps for bits and mask */
 
         pixmapBits = XCreatePixmap( display, root_window, ptr->nWidth, ptr->nHeight, 1 );
-        if (ptr->bBitsPerPixel != 32)
+        if (alpha_zero)
         {
             pixmapMaskInv = XCreatePixmap( display, root_window, ptr->nWidth, ptr->nHeight, 1 );
             pixmapMask = XCreatePixmap( display, root_window, ptr->nWidth, ptr->nHeight, 1 );
@@ -901,7 +915,6 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
             pixmapMask = XCreateBitmapFromData( display, root_window,
                                                 bitMask32, ptr->nWidth,
                                                 ptr->nHeight );
-            HeapFree( GetProcessHeap(), 0, bitMask32 );
         }
 
         /* Make sure hotspot is valid */
@@ -924,6 +937,7 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
         if (pixmapBits) XFreePixmap( display, pixmapBits );
         if (pixmapMask) XFreePixmap( display, pixmapMask );
         if (pixmapMaskInv) XFreePixmap( display, pixmapMaskInv );
+        HeapFree( GetProcessHeap(), 0, bitMask32 );
         XFreeGC( display, gc );
     }
     return cursor;
@@ -933,7 +947,7 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
 /***********************************************************************
  *		SetCursor (X11DRV.@)
  */
-void X11DRV_SetCursor( CURSORICONINFO *lpCursor )
+void CDECL X11DRV_SetCursor( CURSORICONINFO *lpCursor )
 {
     struct x11drv_thread_data *data = x11drv_init_thread_data();
     Cursor cursor;
@@ -965,7 +979,7 @@ void X11DRV_SetCursor( CURSORICONINFO *lpCursor )
 /***********************************************************************
  *		SetCursorPos (X11DRV.@)
  */
-BOOL X11DRV_SetCursorPos( INT x, INT y )
+BOOL CDECL X11DRV_SetCursorPos( INT x, INT y )
 {
     Display *display = thread_init_display();
     POINT pt;
@@ -994,7 +1008,7 @@ BOOL X11DRV_SetCursorPos( INT x, INT y )
 /***********************************************************************
  *		GetCursorPos (X11DRV.@)
  */
-BOOL X11DRV_GetCursorPos(LPPOINT pos)
+BOOL CDECL X11DRV_GetCursorPos(LPPOINT pos)
 {
     Display *display = thread_init_display();
     Window root, child;
@@ -1024,7 +1038,7 @@ BOOL X11DRV_GetCursorPos(LPPOINT pos)
  *
  * Set the cursor clipping rectangle.
  */
-BOOL X11DRV_ClipCursor( LPCRECT clip )
+BOOL CDECL X11DRV_ClipCursor( LPCRECT clip )
 {
     if (!IntersectRect( &cursor_clip, &virtual_screen_rect, clip ))
         cursor_clip = virtual_screen_rect;

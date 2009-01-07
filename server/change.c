@@ -1139,12 +1139,12 @@ DECL_HANDLER(read_directory_changes)
         return;
     }
 
-    dir = get_dir_obj( current->process, req->handle, 0 );
+    dir = get_dir_obj( current->process, req->async.handle, 0 );
     if (!dir)
         return;
 
     /* requests don't timeout */
-    if (!(async = fd_queue_async( dir->fd, &req->async, ASYNC_TYPE_WAIT, 0 ))) goto end;
+    if (!(async = fd_queue_async( dir->fd, &req->async, ASYNC_TYPE_WAIT ))) goto end;
 
     /* assign it once */
     if (!dir->filter)

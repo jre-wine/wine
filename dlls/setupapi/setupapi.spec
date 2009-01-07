@@ -18,10 +18,10 @@
 @ stub CM_Add_Range
 @ stub CM_Add_Res_Des
 @ stub CM_Add_Res_Des_Ex
-@ stub CM_Connect_MachineA
+@ stdcall CM_Connect_MachineA(str ptr)
 @ stdcall CM_Connect_MachineW(wstr ptr)
-@ stub CM_Create_DevNodeA
-@ stub CM_Create_DevNodeW
+@ stdcall CM_Create_DevNodeA(ptr str long long)
+@ stdcall CM_Create_DevNodeW(ptr wstr long long)
 @ stub CM_Create_DevNode_ExA
 @ stub CM_Create_DevNode_ExW
 @ stub CM_Create_Range_List
@@ -128,8 +128,8 @@
 @ stub CM_Intersect_Range_List
 @ stub CM_Invert_Range_List
 @ stub CM_Is_Dock_Station_Present
-@ stub CM_Locate_DevNodeA
-@ stub CM_Locate_DevNodeW
+@ stdcall CM_Locate_DevNodeA(ptr str long)
+@ stdcall CM_Locate_DevNodeW(ptr wstr long)
 @ stub CM_Locate_DevNode_ExA
 @ stub CM_Locate_DevNode_ExW
 @ stub CM_Merge_Range_List
@@ -297,7 +297,7 @@
 @ stub SetupDiDeleteDeviceInterfaceData
 @ stdcall SetupDiDeleteDeviceInterfaceRegKey(ptr ptr long)
 @ stub SetupDiDeleteDeviceRegKey
-@ stub SetupDiDestroyClassImageList
+@ stdcall SetupDiDestroyClassImageList(ptr)
 @ stdcall SetupDiDestroyDeviceInfoList(long)
 @ stub SetupDiDestroyDriverInfoList
 @ stub SetupDiDrawMiniIcon

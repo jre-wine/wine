@@ -42,6 +42,8 @@
 #define MAX_SUBOBJECTS 500
 #define MAX_STRINGS_BUFFER 10000
 
+#define MAX_DATA_SIZE 400000
+
 typedef struct {
     DWORD type;
     LONG idx_template;
@@ -63,7 +65,7 @@ typedef struct {
 } xtemplate;
 
 typedef struct {
-    char name[MAX_NAME_LEN];
+    char* name;
     LPBYTE start;
     ULONG size;
 } xobject_member;
@@ -104,6 +106,7 @@ typedef struct {
     int cur_enum_object;
     BOOL from_ref;
     ULONG level;
+    LPBYTE pdata;
     LPBYTE pstrings;
 } IDirectXFileDataImpl;
 
@@ -130,7 +133,7 @@ typedef struct {
   LPBYTE cur_pdata;
   LPBYTE cur_pstrings;
   BYTE value[100];
-  xobject* pxo_globals;
+  xobject** pxo_globals;
   ULONG nb_pxo_globals;
   xobject* pxo_tab;
   IDirectXFileImpl* pdxf;
@@ -149,7 +152,8 @@ typedef struct {
     parse_buffer buf;
     IDirectXFileImpl* pDirectXFile;
     ULONG nb_xobjects;
-    xobject xobjects[MAX_OBJECTS][MAX_SUBOBJECTS];
+    xobject* xobjects[MAX_OBJECTS];
+    IDirectXFileData* pRefObjects[MAX_OBJECTS];
 } IDirectXFileEnumObjectImpl;
 
 typedef struct {
@@ -160,5 +164,11 @@ typedef struct {
 HRESULT IDirectXFileImpl_Create(IUnknown *pUnkOuter, LPVOID *ppObj);
 HRESULT IDirectXFileFileObjectImpl_Create(IDirectXFileObjectImpl** ppObj);
 HRESULT IDirectXFileFileSaveObjectImpl_Create(IDirectXFileSaveObjectImpl** ppObj);
+
+BOOL read_bytes(parse_buffer * buf, LPVOID data, DWORD size);
+BOOL parse_template(parse_buffer * buf);
+void dump_template(xtemplate* templates_array, xtemplate* ptemplate);
+BOOL is_template_available(parse_buffer * buf);
+BOOL parse_object(parse_buffer * buf);
 
 #endif /* __D3DXOF_PRIVATE_INCLUDED__ */

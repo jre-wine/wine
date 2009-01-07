@@ -1769,7 +1769,7 @@ void default_poll_event( struct fd *fd, int event )
     else if (!fd->inode) set_fd_events( fd, fd->fd_ops->get_poll_events( fd ) );
 }
 
-struct async *fd_queue_async( struct fd *fd, const async_data_t *data, int type, int count )
+struct async *fd_queue_async( struct fd *fd, const async_data_t *data, int type )
 {
     struct async_queue *queue;
     struct async *async;
@@ -1830,7 +1830,7 @@ void default_fd_queue_async( struct fd *fd, const async_data_t *data, int type, 
 {
     struct async *async;
 
-    if ((async = fd_queue_async( fd, data, type, count )))
+    if ((async = fd_queue_async( fd, data, type )))
     {
         release_object( async );
         set_error( STATUS_PENDING );
@@ -1912,7 +1912,7 @@ static void unmount_device( struct fd *device_fd )
 
 /* default ioctl() routine */
 obj_handle_t default_fd_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async,
-                               const void *data, data_size_t size )
+                               int blocking, const void *data, data_size_t size )
 {
     switch(code)
     {
@@ -2011,11 +2011,11 @@ DECL_HANDLER(get_handle_fd)
 DECL_HANDLER(ioctl)
 {
     unsigned int access = (req->code >> 14) & (FILE_READ_DATA|FILE_WRITE_DATA);
-    struct fd *fd = get_handle_fd_obj( current->process, req->handle, access );
+    struct fd *fd = get_handle_fd_obj( current->process, req->async.handle, access );
 
     if (fd)
     {
-        reply->wait = fd->fd_ops->ioctl( fd, req->code, &req->async,
+        reply->wait = fd->fd_ops->ioctl( fd, req->code, &req->async, req->blocking,
                                          get_req_data(), get_req_data_size() );
         reply->options = fd->options;
         release_object( fd );
@@ -2041,7 +2041,7 @@ DECL_HANDLER(register_async)
         return;
     }
 
-    if ((fd = get_handle_fd_obj( current->process, req->handle, access )))
+    if ((fd = get_handle_fd_obj( current->process, req->async.handle, access )))
     {
         if (get_unix_fd( fd ) != -1) fd->fd_ops->queue_async( fd, &req->async, req->type, req->count );
         release_object( fd );

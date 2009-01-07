@@ -256,19 +256,6 @@ static BOOL CreateRenderingSubsystem(VideoRendererImpl* This)
     return TRUE;
 }
 
-static const IMemInputPinVtbl MemInputPin_Vtbl = 
-{
-    MemInputPin_QueryInterface,
-    MemInputPin_AddRef,
-    MemInputPin_Release,
-    MemInputPin_GetAllocator,
-    MemInputPin_NotifyAllocator,
-    MemInputPin_GetAllocatorRequirements,
-    MemInputPin_Receive,
-    MemInputPin_ReceiveMultiple,
-    MemInputPin_ReceiveCanBlock
-};
-
 static DWORD VideoRenderer_SendSampleData(VideoRendererImpl* This, LPBYTE data, DWORD size)
 {
     AM_MEDIA_TYPE amt;
@@ -277,7 +264,7 @@ static DWORD VideoRenderer_SendSampleData(VideoRendererImpl* This, LPBYTE data, 
     HDC hDC;
     BITMAPINFOHEADER *bmiHeader;
 
-    TRACE("%p %p %d\n", This, data, size);
+    TRACE("(%p)->(%p, %d)\n", This, data, size);
 
     sdesc.dwSize = sizeof(sdesc);
     hr = IPin_ConnectionMediaType((IPin *)This->pInputPin, &amt);
@@ -356,6 +343,8 @@ static HRESULT VideoRenderer_Sample(LPVOID iface, IMediaSample * pSample)
     REFERENCE_TIME tStart, tStop;
     HRESULT hr;
 
+    TRACE("(%p)->(%p)\n", iface, pSample);
+
     EnterCriticalSection(&This->csFilter);
 
     if (This->pInputPin->flushing || This->pInputPin->end_of_stream)
@@ -369,8 +358,6 @@ static HRESULT VideoRenderer_Sample(LPVOID iface, IMediaSample * pSample)
         LeaveCriticalSection(&This->csFilter);
         return VFW_E_WRONG_STATE;
     }
-
-    TRACE("%p %p\n", iface, pSample);
 
     hr = IMediaSample_GetTime(pSample, &tStart, &tStop);
     if (FAILED(hr))
@@ -571,7 +558,7 @@ static const IMediaSeekingVtbl VideoRendererImpl_Seeking_Vtbl =
 
 static HRESULT VideoRendererImpl_Change(IBaseFilter *iface)
 {
-    TRACE("(%p)\n", iface);
+    TRACE("(%p)->()\n", iface);
     return S_OK;
 }
 
@@ -961,9 +948,7 @@ static HRESULT WINAPI VideoRenderer_FindPin(IBaseFilter * iface, LPCWSTR Id, IPi
 {
     VideoRendererImpl *This = (VideoRendererImpl *)iface;
 
-    TRACE("(%p/%p)->(%p,%p)\n", This, iface, debugstr_w(Id), ppPin);
-
-    FIXME("VideoRenderer::FindPin(...)\n");
+    FIXME("(%p/%p)->(%p,%p): stub !!!\n", This, iface, debugstr_w(Id), ppPin);
 
     /* FIXME: critical section */
 
@@ -1541,6 +1526,8 @@ static HRESULT WINAPI Basicvideo_GetCurrentImage(IBasicVideo *iface,
     AM_MEDIA_TYPE *amt = &This->pInputPin->pin.mtCurrent;
     char *ptr;
 
+    FIXME("(%p/%p)->(%p, %p): partial stub\n", This, iface, pBufferSize, pDIBImage);
+
     EnterCriticalSection(&This->csFilter);
 
     if (!This->sample_held)
@@ -1548,8 +1535,6 @@ static HRESULT WINAPI Basicvideo_GetCurrentImage(IBasicVideo *iface,
          LeaveCriticalSection(&This->csFilter);
          return (This->state == State_Paused ? E_UNEXPECTED : VFW_E_NOT_PAUSED);
     }
-
-    FIXME("(%p/%p)->(%p, %p): partial stub\n", This, iface, pBufferSize, pDIBImage);
 
     if (IsEqualIID(&amt->formattype, &FORMAT_VideoInfo))
     {
@@ -1815,7 +1800,7 @@ static HRESULT WINAPI Videowindow_put_AutoShow(IVideoWindow *iface,
 
     TRACE("(%p/%p)->(%ld)\n", This, iface, AutoShow);
 
-    This->AutoShow = 1; /* FXIME: Should be AutoShow */;
+    This->AutoShow = 1; /* FIXME: Should be AutoShow */;
 
     return S_OK;
 }

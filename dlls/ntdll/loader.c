@@ -1447,11 +1447,11 @@ static void load_builtin_callback( void *module, const char *filename )
     SERVER_START_REQ( load_dll )
     {
         req->handle     = 0;
-        req->base       = module;
+        req->base       = wine_server_client_ptr( module );
         req->size       = nt->OptionalHeader.SizeOfImage;
         req->dbg_offset = nt->FileHeader.PointerToSymbolTable;
         req->dbg_size   = nt->FileHeader.NumberOfSymbols;
-        req->name       = &wm->ldr.FullDllName.Buffer;
+        req->name       = wine_server_client_ptr( &wm->ldr.FullDllName.Buffer );
         wine_server_add_data( req, wm->ldr.FullDllName.Buffer, wm->ldr.FullDllName.Length );
         wine_server_call( req );
     }
@@ -1529,11 +1529,11 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
     SERVER_START_REQ( load_dll )
     {
         req->handle     = wine_server_obj_handle( file );
-        req->base       = module;
+        req->base       = wine_server_client_ptr( module );
         req->size       = nt->OptionalHeader.SizeOfImage;
         req->dbg_offset = nt->FileHeader.PointerToSymbolTable;
         req->dbg_size   = nt->FileHeader.NumberOfSymbols;
-        req->name       = &wm->ldr.FullDllName.Buffer;
+        req->name       = wine_server_client_ptr( &wm->ldr.FullDllName.Buffer );
         wine_server_add_data( req, wm->ldr.FullDllName.Buffer, wm->ldr.FullDllName.Length );
         wine_server_call( req );
     }
@@ -2101,7 +2101,7 @@ NTSTATUS WINAPI LdrAddRefDll( ULONG flags, HMODULE module )
  * Apply relocations to a given page of a mapped PE image.
  */
 IMAGE_BASE_RELOCATION * WINAPI LdrProcessRelocationBlock( void *page, UINT count,
-                                                          USHORT *relocs, INT delta )
+                                                          USHORT *relocs, INT_PTR delta )
 {
     while (count--)
     {
@@ -2111,6 +2111,7 @@ IMAGE_BASE_RELOCATION * WINAPI LdrProcessRelocationBlock( void *page, UINT count
         {
         case IMAGE_REL_BASED_ABSOLUTE:
             break;
+#ifdef __i386__
         case IMAGE_REL_BASED_HIGH:
             *(short *)((char *)page + offset) += HIWORD(delta);
             break;
@@ -2120,6 +2121,11 @@ IMAGE_BASE_RELOCATION * WINAPI LdrProcessRelocationBlock( void *page, UINT count
         case IMAGE_REL_BASED_HIGHLOW:
             *(int *)((char *)page + offset) += delta;
             break;
+#elif defined(__x86_64__)
+        case IMAGE_REL_BASED_DIR64:
+            *(INT_PTR *)((char *)page + offset) += delta;
+            break;
+#endif
         default:
             FIXME("Unknown/unsupported fixup type %x.\n", type);
             return NULL;
@@ -2258,7 +2264,7 @@ static void free_modref( WINE_MODREF *wm )
 
     SERVER_START_REQ( unload_dll )
     {
-        req->base = wm->ldr.BaseAddress;
+        req->base = wine_server_client_ptr( wm->ldr.BaseAddress );
         wine_server_call( req );
     }
     SERVER_END_REQ;
@@ -2652,7 +2658,7 @@ void __wine_process_init(void)
     WINE_MODREF *wm;
     NTSTATUS status;
     ANSI_STRING func_name;
-    void (* DECLSPEC_NORETURN init_func)(void);
+    void (* DECLSPEC_NORETURN CDECL init_func)(void);
     extern mode_t FILE_umask;
 
     main_exe_file = thread_init();

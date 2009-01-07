@@ -159,6 +159,10 @@ AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
      AC_MSG_ERROR([could not find Wine tools in $with_wine_tools.])
    fi])
 AC_SUBST(TOOLSDIR,$wine_cv_toolsdir)
+if test "$cross_compiling" = "yes"
+then
+    AC_SUBST(TARGET,"$host_alias")
+fi
 
 AC_PATH_XTRA
 
@@ -278,6 +282,7 @@ AC_CHECK_HEADERS(\
 	linux/major.h \
 	linux/param.h \
 	linux/serial.h \
+	linux/types.h \
 	linux/ucdrom.h \
 	mach/mach.h \
 	mach/machine.h \
@@ -339,7 +344,6 @@ AC_CHECK_HEADERS(\
 	sys/statvfs.h \
 	sys/strtio.h \
 	sys/syscall.h \
-	sys/sysctl.h \
 	sys/time.h \
 	sys/times.h \
 	sys/uio.h \
@@ -358,7 +362,7 @@ AC_HEADER_STAT()
 
 dnl **** Checks for headers that depend on other ones ****
 
-AC_CHECK_HEADERS([sys/mount.h sys/statfs.h sys/user.h sys/vfs.h],,,
+AC_CHECK_HEADERS([sys/mount.h sys/statfs.h sys/sysctl.h sys/user.h sys/vfs.h],,,
     [#include <sys/types.h>
      #ifdef HAVE_SYS_PARAM_H
      # include <sys/param.h>
@@ -428,6 +432,9 @@ AC_CHECK_HEADERS([linux/ipx.h],,,
      #endif
      #ifdef HAVE_SYS_SOCKET_H
      # include <sys/socket.h>
+     #endif
+     #ifdef HAVE_LINUX_TYPES_H
+     # include <linux/types.h>
      #endif])
 
 AC_CHECK_HEADERS([resolv.h],,,
@@ -924,7 +931,7 @@ then
     ac_gnutls_cflags="`$PKG_CONFIG --cflags gnutls 2>/dev/null`"
     CPPFLAGS="$CPPFLAGS $ac_gnutls_cflags"
     AC_CHECK_HEADER(gnutls/gnutls.h,
-        [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <gnutls/gnutls.h>]], [[typeof(gnutls_transport_set_errno) *pfunc;]])],
+        [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <gnutls/gnutls.h>]], [[typeof(gnutls_mac_get_key_size) *pfunc;]])],
             [WINE_CHECK_SONAME(gnutls,gnutls_global_init,
                 [AC_SUBST(GNUTLSINCL,"$ac_gnutls_cflags")],,[$ac_gnutls_libs])])])
     CPPFLAGS="$ac_save_CPPFLAGS"
@@ -995,9 +1002,15 @@ dnl **** Check for resolver library ***
 AC_SUBST(RESOLVLIBS,"")
 if test "$ac_cv_header_resolv_h" = "yes"
 then
-    AC_CHECK_LIB(resolv, res_query,
+    ac_save_LIBS="$LIBS"
+    LIBS="$LIBS -lresolv"
+    AC_LINK_IFELSE([AC_LANG_PROGRAM([[#ifdef HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
+#include <resolv.h>]],[[res_init();]])],
         [AC_DEFINE(HAVE_RESOLV, 1, [Define if you have the resolver library and header])
          RESOLVLIBS="-lresolv"])
+    LIBS="$ac_save_LIBS"
 fi
 
 dnl **** Check for LittleCMS ***
@@ -1033,6 +1046,7 @@ then
                          freetype/ftoutln.h \
                          freetype/ftwinfnt.h \
                          freetype/ftmodapi.h \
+                         freetype/ftlcdfil.h \
                          freetype/internal/sfnt.h,,,
                          [#ifdef HAVE_FT2BUILD_H
                           # include <ft2build.h>
@@ -1198,7 +1212,7 @@ WINE_WARNING_WITH(jpeg,[test "x$ac_cv_lib_soname_jpeg" = "x"],
 dnl **** Check for libpng ****
 if test "$ac_cv_header_png_h" = "yes"
 then
-    WINE_CHECK_SONAME(png,png_create_read_struct,,,-lm,[[libpng[[0-9]]*]])
+    WINE_CHECK_SONAME(png,png_create_read_struct,,,-lm -lz,[[libpng[[0-9]]*]])
 fi
 WINE_WARNING_WITH(png,[test "x$ac_cv_lib_soname_png" = "x"],
                  [libpng ${notice_platform}development files not found, PNG won't be supported.])
@@ -1326,7 +1340,7 @@ dnl Mingw needs explicit msvcrt for linking libwine and winsock for wininet
 case $host_os in
   mingw32*)
     AC_SUBST(CRTLIBS,"-lmsvcrt")
-    AC_SUBST(SOCKETLIBS,"-lws2_32")
+    AC_SUBST(SOCKETLIBS,"-L\$(TOPOBJDIR)/dlls/ws2_32 -lws2_32")
     ;;
 esac
 
@@ -1347,7 +1361,6 @@ esac
 dnl **** Check for functions ****
 
 AC_CHECK_FUNCS(\
-	_mkdir \
 	_pclose \
 	_popen \
 	_snprintf \
@@ -1379,6 +1392,7 @@ AC_CHECK_FUNCS(\
 	gettid \
 	gettimeofday \
 	getuid \
+	inet_ntop \
 	inet_pton \
 	kqueue \
 	lstat \
@@ -1401,6 +1415,7 @@ AC_CHECK_FUNCS(\
 	sigaltstack \
 	sigprocmask \
 	snprintf \
+	socketpair \
 	spawnvp \
 	statfs \
 	statvfs \
@@ -1411,6 +1426,7 @@ AC_CHECK_FUNCS(\
 	strtold \
 	strtoll \
 	strtoull \
+	symlink \
 	tcgetattr \
 	thr_kill2 \
 	timegm \
@@ -1479,6 +1495,15 @@ then
 fi
 WINE_NOTICE_WITH(ldap,[test "x$LDAPLIBS" = "x"],
                  [libldap (OpenLDAP) ${notice_platform}development files not found, LDAP won't be supported.])
+
+AC_CACHE_CHECK([whether mkdir takes only one argument],
+   	wine_cv_one_arg_mkdir,
+	AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <sys/stat.h>]],[[mkdir("foo");]])],
+                          [wine_cv_one_arg_mkdir=yes],[wine_cv_one_arg_mkdir=no]))
+if test "$wine_cv_one_arg_mkdir" = "yes"
+then
+  AC_DEFINE(HAVE_ONE_ARG_MKDIR, 1, [Define if mkdir takes only one argument])
+fi
 
 dnl **** Check for types ****
 

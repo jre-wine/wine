@@ -48,6 +48,7 @@ MAKE_FUNCPTR(gnutls_alert_get);
 MAKE_FUNCPTR(gnutls_alert_get_name);
 MAKE_FUNCPTR(gnutls_certificate_allocate_credentials);
 MAKE_FUNCPTR(gnutls_certificate_free_credentials);
+MAKE_FUNCPTR(gnutls_cipher_get);
 MAKE_FUNCPTR(gnutls_credentials_set);
 MAKE_FUNCPTR(gnutls_deinit);
 MAKE_FUNCPTR(gnutls_global_deinit);
@@ -56,8 +57,12 @@ MAKE_FUNCPTR(gnutls_global_set_log_function);
 MAKE_FUNCPTR(gnutls_global_set_log_level);
 MAKE_FUNCPTR(gnutls_handshake);
 MAKE_FUNCPTR(gnutls_init);
+MAKE_FUNCPTR(gnutls_mac_get);
+MAKE_FUNCPTR(gnutls_mac_get_key_size);
 MAKE_FUNCPTR(gnutls_perror);
 MAKE_FUNCPTR(gnutls_set_default_priority);
+MAKE_FUNCPTR(gnutls_record_recv);
+MAKE_FUNCPTR(gnutls_record_send);
 MAKE_FUNCPTR(gnutls_transport_set_errno);
 MAKE_FUNCPTR(gnutls_transport_set_ptr);
 MAKE_FUNCPTR(gnutls_transport_set_pull_function);
@@ -607,13 +612,32 @@ static int schan_init_sec_ctx_get_next_buffer(const struct schan_transport *t, s
     if (s->current_buffer_idx == -1)
     {
         int idx = schan_find_sec_buffer_idx(s->desc, 0, SECBUFFER_TOKEN);
-        if (idx != -1 && !s->desc->pBuffers[idx].pvBuffer
-                && (t->ctx->req_ctx_attr & ISC_REQ_ALLOCATE_MEMORY))
-            s->allow_buffer_resize = TRUE;
+        if (t->ctx->req_ctx_attr & ISC_REQ_ALLOCATE_MEMORY)
+        {
+            if (idx == -1)
+            {
+                idx = schan_find_sec_buffer_idx(s->desc, 0, SECBUFFER_EMPTY);
+                if (idx != -1) s->desc->pBuffers[idx].BufferType = SECBUFFER_TOKEN;
+            }
+            if (idx != -1 && !s->desc->pBuffers[idx].pvBuffer) s->allow_buffer_resize = TRUE;
+        }
         return idx;
     }
 
     return -1;
+}
+
+static void dump_buffer_desc(SecBufferDesc *desc)
+{
+    unsigned int i;
+
+    if (!desc) return;
+    TRACE("Buffer desc %p:\n", desc);
+    for (i = 0; i < desc->cBuffers; ++i)
+    {
+        SecBuffer *b = &desc->pBuffers[i];
+        TRACE("\tbuffer %u: cbBuffer %ld, BufferType %#lx pvBuffer %p\n", i, b->cbBuffer, b->BufferType, b->pvBuffer);
+    }
 }
 
 /***********************************************************************
@@ -634,6 +658,9 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
     TRACE("%p %p %s %d %d %d %p %d %p %p %p %p\n", phCredential, phContext,
      debugstr_w(pszTargetName), fContextReq, Reserved1, TargetDataRep, pInput,
      Reserved1, phNewContext, pOutput, pfContextAttr, ptsExpiry);
+
+    dump_buffer_desc(pInput);
+    dump_buffer_desc(pOutput);
 
     if (!phContext)
     {
@@ -778,6 +805,284 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextA(
     return ret;
 }
 
+static unsigned int schannel_get_cipher_block_size(gnutls_cipher_algorithm_t cipher)
+{
+    const struct
+    {
+        gnutls_cipher_algorithm_t cipher;
+        unsigned int block_size;
+    }
+    algorithms[] =
+    {
+        {GNUTLS_CIPHER_3DES_CBC, 8},
+        {GNUTLS_CIPHER_AES_128_CBC, 16},
+        {GNUTLS_CIPHER_AES_256_CBC, 16},
+        {GNUTLS_CIPHER_ARCFOUR_128, 1},
+        {GNUTLS_CIPHER_ARCFOUR_40, 1},
+        {GNUTLS_CIPHER_DES_CBC, 8},
+        {GNUTLS_CIPHER_NULL, 1},
+        {GNUTLS_CIPHER_RC2_40_CBC, 8},
+    };
+    unsigned int i;
+
+    for (i = 0; i < sizeof(algorithms) / sizeof(*algorithms); ++i)
+    {
+        if (algorithms[i].cipher == cipher)
+            return algorithms[i].block_size;
+    }
+
+    FIXME("Unknown cipher %#x, returning 1\n", cipher);
+
+    return 1;
+}
+
+static SECURITY_STATUS SEC_ENTRY schan_QueryContextAttributesW(
+        PCtxtHandle context_handle, ULONG attribute, PVOID buffer)
+{
+    struct schan_context *ctx;
+
+    TRACE("context_handle %p, attribute %#x, buffer %p\n",
+            context_handle, attribute, buffer);
+
+    if (!context_handle) return SEC_E_INVALID_HANDLE;
+    ctx = schan_get_object(context_handle->dwLower, SCHAN_HANDLE_CTX);
+
+    switch(attribute)
+    {
+        case SECPKG_ATTR_STREAM_SIZES:
+        {
+            SecPkgContext_StreamSizes *stream_sizes = (SecPkgContext_StreamSizes *)buffer;
+            gnutls_mac_algorithm_t mac = pgnutls_mac_get(ctx->session);
+            size_t mac_size = pgnutls_mac_get_key_size(mac);
+            gnutls_cipher_algorithm_t cipher = pgnutls_cipher_get(ctx->session);
+            unsigned int block_size = schannel_get_cipher_block_size(cipher);
+
+            TRACE("Using %zu mac bytes, block size %u\n", mac_size, block_size);
+
+            /* These are defined by the TLS RFC */
+            stream_sizes->cbHeader = 5;
+            stream_sizes->cbTrailer = mac_size + 256; /* Max 255 bytes padding + 1 for padding size */
+            stream_sizes->cbMaximumMessage = 1 << 14;
+            stream_sizes->cbBuffers = 4;
+            stream_sizes->cbBlockSize = block_size;
+            return SEC_E_OK;
+        }
+
+        default:
+            FIXME("Unhandled attribute %#x\n", attribute);
+            return SEC_E_UNSUPPORTED_FUNCTION;
+    }
+}
+
+static SECURITY_STATUS SEC_ENTRY schan_QueryContextAttributesA(
+        PCtxtHandle context_handle, ULONG attribute, PVOID buffer)
+{
+    TRACE("context_handle %p, attribute %#x, buffer %p\n",
+            context_handle, attribute, buffer);
+
+    switch(attribute)
+    {
+        case SECPKG_ATTR_STREAM_SIZES:
+            return schan_QueryContextAttributesW(context_handle, attribute, buffer);
+
+        default:
+            FIXME("Unhandled attribute %#x\n", attribute);
+            return SEC_E_UNSUPPORTED_FUNCTION;
+    }
+}
+
+static int schan_encrypt_message_get_next_buffer(const struct schan_transport *t, struct schan_buffers *s)
+{
+    SecBuffer *b;
+
+    if (s->current_buffer_idx == -1)
+        return schan_find_sec_buffer_idx(s->desc, 0, SECBUFFER_STREAM_HEADER);
+
+    b = &s->desc->pBuffers[s->current_buffer_idx];
+
+    if (b->BufferType == SECBUFFER_STREAM_HEADER)
+        return schan_find_sec_buffer_idx(s->desc, 0, SECBUFFER_DATA);
+
+    if (b->BufferType == SECBUFFER_DATA)
+        return schan_find_sec_buffer_idx(s->desc, 0, SECBUFFER_STREAM_TRAILER);
+
+    return -1;
+}
+
+static int schan_encrypt_message_get_next_buffer_token(const struct schan_transport *t, struct schan_buffers *s)
+{
+    SecBuffer *b;
+
+    if (s->current_buffer_idx == -1)
+        return schan_find_sec_buffer_idx(s->desc, 0, SECBUFFER_TOKEN);
+
+    b = &s->desc->pBuffers[s->current_buffer_idx];
+
+    if (b->BufferType == SECBUFFER_TOKEN)
+    {
+        int idx = schan_find_sec_buffer_idx(s->desc, 0, SECBUFFER_TOKEN);
+        if (idx != s->current_buffer_idx) return -1;
+        return schan_find_sec_buffer_idx(s->desc, 0, SECBUFFER_DATA);
+    }
+
+    if (b->BufferType == SECBUFFER_DATA)
+    {
+        int idx = schan_find_sec_buffer_idx(s->desc, 0, SECBUFFER_TOKEN);
+        if (idx != -1)
+            idx = schan_find_sec_buffer_idx(s->desc, idx + 1, SECBUFFER_TOKEN);
+        return idx;
+    }
+
+    return -1;
+}
+
+static SECURITY_STATUS SEC_ENTRY schan_EncryptMessage(PCtxtHandle context_handle,
+        ULONG quality, PSecBufferDesc message, ULONG message_seq_no)
+{
+    struct schan_transport transport;
+    struct schan_context *ctx;
+    struct schan_buffers *b;
+    SecBuffer *buffer;
+    SIZE_T data_size;
+    char *data;
+    ssize_t sent = 0;
+    ssize_t ret;
+    int idx;
+
+    TRACE("context_handle %p, quality %d, message %p, message_seq_no %d\n",
+            context_handle, quality, message, message_seq_no);
+
+    if (!context_handle) return SEC_E_INVALID_HANDLE;
+    ctx = schan_get_object(context_handle->dwLower, SCHAN_HANDLE_CTX);
+
+    dump_buffer_desc(message);
+
+    idx = schan_find_sec_buffer_idx(message, 0, SECBUFFER_DATA);
+    if (idx == -1)
+    {
+        WARN("No data buffer passed\n");
+        return SEC_E_INTERNAL_ERROR;
+    }
+    buffer = &message->pBuffers[idx];
+
+    data_size = buffer->cbBuffer;
+    data = HeapAlloc(GetProcessHeap(), 0, data_size);
+    memcpy(data, buffer->pvBuffer, data_size);
+
+    transport.ctx = ctx;
+    init_schan_buffers(&transport.in, NULL, NULL);
+    if (schan_find_sec_buffer_idx(message, 0, SECBUFFER_STREAM_HEADER) != -1)
+        init_schan_buffers(&transport.out, message, schan_encrypt_message_get_next_buffer);
+    else
+        init_schan_buffers(&transport.out, message, schan_encrypt_message_get_next_buffer_token);
+    pgnutls_transport_set_ptr(ctx->session, &transport);
+
+    while (sent < data_size)
+    {
+        ret = pgnutls_record_send(ctx->session, data + sent, data_size - sent);
+        if (ret < 0)
+        {
+            if (ret != GNUTLS_E_AGAIN)
+            {
+                pgnutls_perror(ret);
+                HeapFree(GetProcessHeap(), 0, data);
+                ERR("Returning SEC_E_INTERNAL_ERROR\n");
+                return SEC_E_INTERNAL_ERROR;
+            }
+            else break;
+        }
+        sent += ret;
+    }
+
+    TRACE("Sent %zd bytes\n", sent);
+
+    b = &transport.out;
+    b->desc->pBuffers[b->current_buffer_idx].cbBuffer = b->offset;
+    HeapFree(GetProcessHeap(), 0, data);
+
+    return SEC_E_OK;
+}
+
+static int schan_decrypt_message_get_next_buffer(const struct schan_transport *t, struct schan_buffers *s)
+{
+    if (s->current_buffer_idx == -1)
+        return schan_find_sec_buffer_idx(s->desc, 0, SECBUFFER_DATA);
+
+    return -1;
+}
+
+static SECURITY_STATUS SEC_ENTRY schan_DecryptMessage(PCtxtHandle context_handle,
+        PSecBufferDesc message, ULONG message_seq_no, PULONG quality)
+{
+    struct schan_transport transport;
+    struct schan_context *ctx;
+    SecBuffer *buffer;
+    SIZE_T data_size;
+    char *data;
+    ssize_t received = 0;
+    ssize_t ret;
+    int idx;
+
+    TRACE("context_handle %p, message %p, message_seq_no %d, quality %p\n",
+            context_handle, message, message_seq_no, quality);
+
+    if (!context_handle) return SEC_E_INVALID_HANDLE;
+    ctx = schan_get_object(context_handle->dwLower, SCHAN_HANDLE_CTX);
+
+    dump_buffer_desc(message);
+
+    idx = schan_find_sec_buffer_idx(message, 0, SECBUFFER_DATA);
+    if (idx == -1)
+    {
+        WARN("No data buffer passed\n");
+        return SEC_E_INTERNAL_ERROR;
+    }
+    buffer = &message->pBuffers[idx];
+
+    data_size = buffer->cbBuffer;
+    data = HeapAlloc(GetProcessHeap(), 0, data_size);
+
+    transport.ctx = ctx;
+    init_schan_buffers(&transport.in, message, schan_decrypt_message_get_next_buffer);
+    init_schan_buffers(&transport.out, NULL, NULL);
+    pgnutls_transport_set_ptr(ctx->session, (gnutls_transport_ptr_t)&transport);
+
+    while (received < data_size)
+    {
+        ret = pgnutls_record_recv(ctx->session, data + received, data_size - received);
+        if (ret < 0)
+        {
+            if (ret == GNUTLS_E_AGAIN)
+            {
+                if (!received)
+                {
+                    pgnutls_perror(ret);
+                    HeapFree(GetProcessHeap(), 0, data);
+                    TRACE("Returning SEC_E_INCOMPLETE_MESSAGE\n");
+                    return SEC_E_INCOMPLETE_MESSAGE;
+                }
+                break;
+            }
+            else
+            {
+                pgnutls_perror(ret);
+                HeapFree(GetProcessHeap(), 0, data);
+                ERR("Returning SEC_E_INTERNAL_ERROR\n");
+                return SEC_E_INTERNAL_ERROR;
+            }
+        }
+        received += ret;
+    }
+
+    TRACE("Received %zd bytes\n", received);
+
+    memcpy(buffer->pvBuffer, data, received);
+    buffer->cbBuffer = received;
+    HeapFree(GetProcessHeap(), 0, data);
+
+    return SEC_E_OK;
+}
+
 static SECURITY_STATUS SEC_ENTRY schan_DeleteSecurityContext(PCtxtHandle context_handle)
 {
     struct schan_context *ctx;
@@ -812,7 +1117,7 @@ static const SecurityFunctionTableA schanTableA = {
     NULL, /* CompleteAuthToken */
     schan_DeleteSecurityContext,
     NULL, /* ApplyControlToken */
-    NULL, /* QueryContextAttributesA */
+    schan_QueryContextAttributesA,
     NULL, /* ImpersonateSecurityContext */
     NULL, /* RevertSecurityContext */
     NULL, /* MakeSignature */
@@ -826,8 +1131,8 @@ static const SecurityFunctionTableA schanTableA = {
     NULL, /* AddCredentialsA */
     NULL, /* Reserved8 */
     NULL, /* QuerySecurityContextToken */
-    NULL, /* EncryptMessage */
-    NULL, /* DecryptMessage */
+    schan_EncryptMessage,
+    schan_DecryptMessage,
     NULL, /* SetContextAttributesA */
 };
 
@@ -843,7 +1148,7 @@ static const SecurityFunctionTableW schanTableW = {
     NULL, /* CompleteAuthToken */
     schan_DeleteSecurityContext,
     NULL, /* ApplyControlToken */
-    NULL, /* QueryContextAttributesW */
+    schan_QueryContextAttributesW,
     NULL, /* ImpersonateSecurityContext */
     NULL, /* RevertSecurityContext */
     NULL, /* MakeSignature */
@@ -857,8 +1162,8 @@ static const SecurityFunctionTableW schanTableW = {
     NULL, /* AddCredentialsW */
     NULL, /* Reserved8 */
     NULL, /* QuerySecurityContextToken */
-    NULL, /* EncryptMessage */
-    NULL, /* DecryptMessage */
+    schan_EncryptMessage,
+    schan_DecryptMessage,
     NULL, /* SetContextAttributesW */
 };
 
@@ -911,6 +1216,7 @@ void SECUR32_initSchannelSP(void)
     LOAD_FUNCPTR(gnutls_alert_get_name)
     LOAD_FUNCPTR(gnutls_certificate_allocate_credentials)
     LOAD_FUNCPTR(gnutls_certificate_free_credentials)
+    LOAD_FUNCPTR(gnutls_cipher_get)
     LOAD_FUNCPTR(gnutls_credentials_set)
     LOAD_FUNCPTR(gnutls_deinit)
     LOAD_FUNCPTR(gnutls_global_deinit)
@@ -919,8 +1225,12 @@ void SECUR32_initSchannelSP(void)
     LOAD_FUNCPTR(gnutls_global_set_log_level)
     LOAD_FUNCPTR(gnutls_handshake)
     LOAD_FUNCPTR(gnutls_init)
+    LOAD_FUNCPTR(gnutls_mac_get)
+    LOAD_FUNCPTR(gnutls_mac_get_key_size)
     LOAD_FUNCPTR(gnutls_perror)
     LOAD_FUNCPTR(gnutls_set_default_priority)
+    LOAD_FUNCPTR(gnutls_record_recv);
+    LOAD_FUNCPTR(gnutls_record_send);
     LOAD_FUNCPTR(gnutls_transport_set_errno)
     LOAD_FUNCPTR(gnutls_transport_set_ptr)
     LOAD_FUNCPTR(gnutls_transport_set_pull_function)

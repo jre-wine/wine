@@ -331,8 +331,8 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
     process->startup_info    = NULL;
     process->idle_event      = NULL;
     process->queue           = NULL;
-    process->peb             = NULL;
-    process->ldt_copy        = NULL;
+    process->peb             = 0;
+    process->ldt_copy        = 0;
     process->winstation      = 0;
     process->desktop         = 0;
     process->token           = NULL;
@@ -377,7 +377,7 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
         file_set_error();
         goto error;
     }
-    if (send_client_fd( process, request_pipe[1], 0 ) == -1)
+    if (send_client_fd( process, request_pipe[1], SERVER_PROTOCOL_VERSION ) == -1)
     {
         close( request_pipe[0] );
         close( request_pipe[1] );
@@ -505,7 +505,7 @@ struct process *get_process_from_handle( obj_handle_t handle, unsigned int acces
 }
 
 /* find a dll from its base address */
-static inline struct process_dll *find_process_dll( struct process *process, void *base )
+static inline struct process_dll *find_process_dll( struct process *process, mod_handle_t base )
 {
     struct process_dll *dll;
 
@@ -518,7 +518,8 @@ static inline struct process_dll *find_process_dll( struct process *process, voi
 
 /* add a dll to a process list */
 static struct process_dll *process_load_dll( struct process *process, struct file *file,
-                                             void *base, const WCHAR *filename, data_size_t name_len )
+                                             mod_handle_t base, const WCHAR *filename,
+                                             data_size_t name_len )
 {
     struct process_dll *dll;
 
@@ -547,7 +548,7 @@ static struct process_dll *process_load_dll( struct process *process, struct fil
 }
 
 /* remove a dll from a process list */
-static void process_unload_dll( struct process *process, void *base )
+static void process_unload_dll( struct process *process, mod_handle_t base )
 {
     struct process_dll *dll = find_process_dll( process, base );
 
@@ -557,7 +558,7 @@ static void process_unload_dll( struct process *process, void *base )
         free( dll->filename );
         list_remove( &dll->entry );
         free( dll );
-        generate_debug_event( current, UNLOAD_DLL_DEBUG_EVENT, base );
+        generate_debug_event( current, UNLOAD_DLL_DEBUG_EVENT, &base );
     }
     else set_error( STATUS_INVALID_PARAMETER );
 }
@@ -828,7 +829,7 @@ int set_process_debug_flag( struct process *process, int flag )
     char data = (flag != 0);
 
     /* BeingDebugged flag is the byte at offset 2 in the PEB */
-    return write_process_memory( process, (char *)process->peb + 2, 1, &data );
+    return write_process_memory( process, process->peb + 2, 1, &data );
 }
 
 /* take a snapshot of currently running processes */
@@ -1017,6 +1018,8 @@ DECL_HANDLER(init_process_done)
     list_remove( &dll->entry );
     list_add_head( &process->dlls, &dll->entry );
 
+    process->ldt_copy = req->ldt_copy;
+
     generate_startup_debug_events( process, req->entry );
     set_process_startup_state( process, STARTUP_DONE );
 
@@ -1165,7 +1168,7 @@ DECL_HANDLER(get_dll_info)
         if (dll)
         {
             reply->size = dll->size;
-            reply->entry_point = NULL; /* FIXME */
+            reply->entry_point = 0; /* FIXME */
             reply->filename_len = dll->namelen;
             if (dll->filename)
             {

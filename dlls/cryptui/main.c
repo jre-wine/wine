@@ -32,6 +32,7 @@
 #include "richedit.h"
 #include "ole2.h"
 #include "richole.h"
+#include "commdlg.h"
 #include "commctrl.h"
 #include "cryptuiapi.h"
 #include "cryptuires.h"
@@ -71,6 +72,354 @@ BOOL WINAPI CryptUIDlgCertMgr(PCCRYPTUI_CERT_MGR_STRUCT pCryptUICertMgr)
 {
     FIXME("(%p): stub\n", pCryptUICertMgr);
     return FALSE;
+}
+
+/* FIXME: real names are unknown, functions are undocumented */
+typedef struct _CRYPTUI_ENUM_SYSTEM_STORE_ARGS
+{
+    DWORD dwFlags;
+    void *pvSystemStoreLocationPara;
+} CRYPTUI_ENUM_SYSTEM_STORE_ARGS, *PCRYPTUI_ENUM_SYSTEM_STORE_ARGS;
+
+typedef struct _CRYPTUI_ENUM_DATA
+{
+    DWORD                           cStores;
+    HCERTSTORE                     *rghStore;
+    DWORD                           cEnumArgs;
+    PCRYPTUI_ENUM_SYSTEM_STORE_ARGS rgEnumArgs;
+} CRYPTUI_ENUM_DATA, *PCRYPTUI_ENUM_DATA;
+
+typedef BOOL (WINAPI *PFN_SELECTED_STORE_CB)(HCERTSTORE store, HWND hwnd,
+ void *pvArg);
+
+/* Values for dwFlags */
+#define CRYPTUI_ENABLE_SHOW_PHYSICAL_STORE 0x00000001
+
+typedef struct _CRYPTUI_SELECTSTORE_INFO_A
+{
+    DWORD                 dwSize;
+    HWND                  parent;
+    DWORD                 dwFlags;
+    LPSTR                 pszTitle;
+    LPSTR                 pszText;
+    CRYPTUI_ENUM_DATA    *pEnumData;
+    PFN_SELECTED_STORE_CB pfnSelectedStoreCallback;
+    void                 *pvArg;
+} CRYPTUI_SELECTSTORE_INFO_A, *PCRYPTUI_SELECTSTORE_INFO_A;
+
+typedef struct _CRYPTUI_SELECTSTORE_INFO_W
+{
+    DWORD                 dwSize;
+    HWND                  parent;
+    DWORD                 dwFlags;
+    LPWSTR                pwszTitle;
+    LPWSTR                pwszText;
+    CRYPTUI_ENUM_DATA    *pEnumData;
+    PFN_SELECTED_STORE_CB pfnSelectedStoreCallback;
+    void                 *pvArg;
+} CRYPTUI_SELECTSTORE_INFO_W, *PCRYPTUI_SELECTSTORE_INFO_W;
+
+struct StoreInfo
+{
+    enum {
+        StoreHandle,
+        SystemStore
+    } type;
+    union {
+        HCERTSTORE store;
+        LPWSTR name;
+    } DUMMYUNIONNAME;
+};
+
+static BOOL WINAPI enum_store_callback(const void *pvSystemStore,
+ DWORD dwFlags, PCERT_SYSTEM_STORE_INFO pStoreInfo, void *pvReserved,
+ void *pvArg)
+{
+    HWND tree = GetDlgItem(pvArg, IDC_STORE_LIST);
+    TVINSERTSTRUCTW tvis;
+    LPCWSTR localizedName;
+    BOOL ret = TRUE;
+
+    tvis.hParent = NULL;
+    tvis.hInsertAfter = TVI_LAST;
+    tvis.u.item.mask = TVIF_TEXT;
+    if ((localizedName = CryptFindLocalizedName(pvSystemStore)))
+    {
+        struct StoreInfo *storeInfo = HeapAlloc(GetProcessHeap(), 0,
+         sizeof(struct StoreInfo));
+
+        if (storeInfo)
+        {
+            storeInfo->type = SystemStore;
+            storeInfo->u.name = HeapAlloc(GetProcessHeap(), 0,
+             (strlenW(pvSystemStore) + 1) * sizeof(WCHAR));
+            if (storeInfo->u.name)
+            {
+                tvis.u.item.mask |= TVIF_PARAM;
+                tvis.u.item.lParam = (LPARAM)storeInfo;
+                strcpyW(storeInfo->u.name, pvSystemStore);
+            }
+            else
+            {
+                HeapFree(GetProcessHeap(), 0, storeInfo);
+                ret = FALSE;
+            }
+        }
+        else
+            ret = FALSE;
+        tvis.u.item.pszText = (LPWSTR)localizedName;
+    }
+    else
+        tvis.u.item.pszText = (LPWSTR)pvSystemStore;
+    /* FIXME: need a folder icon for the store too */
+    if (ret)
+        SendMessageW(tree, TVM_INSERTITEMW, 0, (LPARAM)&tvis);
+    return ret;
+}
+
+static void enumerate_stores(HWND hwnd, CRYPTUI_ENUM_DATA *pEnumData)
+{
+    DWORD i;
+    HWND tree = GetDlgItem(hwnd, IDC_STORE_LIST);
+
+    for (i = 0; i < pEnumData->cEnumArgs; i++)
+        CertEnumSystemStore(pEnumData->rgEnumArgs[i].dwFlags,
+         pEnumData->rgEnumArgs[i].pvSystemStoreLocationPara,
+         hwnd, enum_store_callback);
+    for (i = 0; i < pEnumData->cStores; i++)
+    {
+        DWORD size;
+
+        if (CertGetStoreProperty(pEnumData->rghStore[i],
+         CERT_STORE_LOCALIZED_NAME_PROP_ID, NULL, &size))
+        {
+            LPWSTR name = HeapAlloc(GetProcessHeap(), 0, size);
+
+            if (name)
+            {
+                if (CertGetStoreProperty(pEnumData->rghStore[i],
+                 CERT_STORE_LOCALIZED_NAME_PROP_ID, name, &size))
+                {
+                    struct StoreInfo *storeInfo = HeapAlloc(GetProcessHeap(),
+                     0, sizeof(struct StoreInfo));
+
+                    if (storeInfo)
+                    {
+                        TVINSERTSTRUCTW tvis;
+
+                        storeInfo->type = StoreHandle;
+                        storeInfo->u.store = pEnumData->rghStore[i];
+                        tvis.hParent = NULL;
+                        tvis.hInsertAfter = TVI_LAST;
+                        tvis.u.item.mask = TVIF_TEXT | TVIF_PARAM;
+                        tvis.u.item.pszText = name;
+                        tvis.u.item.lParam = (LPARAM)storeInfo;
+                        SendMessageW(tree, TVM_INSERTITEMW, 0, (LPARAM)&tvis);
+                    }
+                }
+                HeapFree(GetProcessHeap(), 0, name);
+            }
+        }
+    }
+}
+
+static void free_store_info(HWND tree)
+{
+    HTREEITEM next = (HTREEITEM)SendMessageW(tree, TVM_GETNEXTITEM, TVGN_CHILD,
+     (LPARAM)NULL);
+
+    while (next)
+    {
+        TVITEMW item;
+
+        memset(&item, 0, sizeof(item));
+        item.mask = TVIF_HANDLE | TVIF_PARAM;
+        item.hItem = next;
+        SendMessageW(tree, TVM_GETITEMW, 0, (LPARAM)&item);
+        if (item.lParam)
+        {
+            struct StoreInfo *storeInfo = (struct StoreInfo *)item.lParam;
+
+            if (storeInfo->type == SystemStore)
+                HeapFree(GetProcessHeap(), 0, storeInfo->u.name);
+            HeapFree(GetProcessHeap(), 0, storeInfo);
+        }
+        next = (HTREEITEM)SendMessageW(tree, TVM_GETNEXTITEM, TVGN_NEXT,
+         (LPARAM)next);
+    }
+}
+
+#define MAX_STRING_LEN 512
+
+static HCERTSTORE selected_item_to_store(HWND tree, HTREEITEM hItem)
+{
+    WCHAR buf[MAX_STRING_LEN];
+    TVITEMW item;
+    HCERTSTORE store;
+
+    memset(&item, 0, sizeof(item));
+    item.mask = TVIF_HANDLE | TVIF_PARAM | TVIF_TEXT;
+    item.hItem = hItem;
+    item.cchTextMax = sizeof(buf) / sizeof(buf[0]);
+    item.pszText = buf;
+    SendMessageW(tree, TVM_GETITEMW, 0, (LPARAM)&item);
+    if (item.lParam)
+    {
+        struct StoreInfo *storeInfo = (struct StoreInfo *)item.lParam;
+
+        if (storeInfo->type == StoreHandle)
+            store = storeInfo->u.store;
+        else
+            store = CertOpenSystemStoreW(0, storeInfo->u.name);
+    }
+    else
+    {
+        /* It's implicitly a system store */
+        store = CertOpenSystemStoreW(0, buf);
+    }
+    return store;
+}
+
+struct SelectStoreInfo
+{
+    PCRYPTUI_SELECTSTORE_INFO_W info;
+    HCERTSTORE                  store;
+};
+
+static LRESULT CALLBACK select_store_dlg_proc(HWND hwnd, UINT msg, WPARAM wp,
+ LPARAM lp)
+{
+    struct SelectStoreInfo *selectInfo;
+    LRESULT ret = 0;
+
+    switch (msg)
+    {
+    case WM_INITDIALOG:
+    {
+        selectInfo = (struct SelectStoreInfo *)lp;
+        SetWindowLongPtrW(hwnd, DWLP_USER, lp);
+        if (selectInfo->info->pwszTitle)
+            SendMessageW(hwnd, WM_SETTEXT, 0,
+             (LPARAM)selectInfo->info->pwszTitle);
+        if (selectInfo->info->pwszText)
+            SendMessageW(GetDlgItem(hwnd, IDC_STORE_TEXT), WM_SETTEXT, 0,
+             (LPARAM)selectInfo->info->pwszText);
+        if (!(selectInfo->info->dwFlags & CRYPTUI_ENABLE_SHOW_PHYSICAL_STORE))
+            ShowWindow(GetDlgItem(hwnd, IDC_SHOW_PHYSICAL_STORES), FALSE);
+        enumerate_stores(hwnd, selectInfo->info->pEnumData);
+        break;
+    }
+    case WM_COMMAND:
+        switch (wp)
+        {
+        case IDOK:
+        {
+            HWND tree = GetDlgItem(hwnd, IDC_STORE_LIST);
+            HTREEITEM selection = (HTREEITEM)SendMessageW(tree,
+             TVM_GETNEXTITEM, TVGN_CARET, (LPARAM)NULL);
+
+            selectInfo = (struct SelectStoreInfo *)GetWindowLongPtrW(hwnd,
+             DWLP_USER);
+            if (!selection)
+            {
+                WCHAR title[MAX_STRING_LEN], error[MAX_STRING_LEN], *pTitle;
+
+                if (selectInfo->info->pwszTitle)
+                    pTitle = selectInfo->info->pwszTitle;
+                else
+                {
+                    LoadStringW(hInstance, IDS_SELECT_STORE_TITLE, title,
+                     sizeof(title) / sizeof(title[0]));
+                    pTitle = title;
+                }
+                LoadStringW(hInstance, IDS_SELECT_STORE, error,
+                 sizeof(error) / sizeof(error[0]));
+                MessageBoxW(hwnd, error, pTitle, MB_ICONEXCLAMATION | MB_OK);
+            }
+            else
+            {
+                HCERTSTORE store = selected_item_to_store(tree, selection);
+
+                if (!selectInfo->info->pfnSelectedStoreCallback ||
+                 selectInfo->info->pfnSelectedStoreCallback(store, hwnd,
+                 selectInfo->info->pvArg))
+                {
+                    selectInfo->store = store;
+                    free_store_info(tree);
+                    EndDialog(hwnd, IDOK);
+                }
+                else
+                    CertCloseStore(store, 0);
+            }
+            ret = TRUE;
+            break;
+        }
+        case IDCANCEL:
+            free_store_info(GetDlgItem(hwnd, IDC_STORE_LIST));
+            EndDialog(hwnd, IDCANCEL);
+            ret = TRUE;
+            break;
+        }
+        break;
+    }
+    return ret;
+}
+
+/***********************************************************************
+ *		CryptUIDlgSelectStoreW (CRYPTUI.@)
+ */
+HCERTSTORE WINAPI CryptUIDlgSelectStoreW(PCRYPTUI_SELECTSTORE_INFO_W info)
+{
+    struct SelectStoreInfo selectInfo = { info, NULL };
+
+    TRACE("(%p)\n", info);
+
+    if (info->dwSize != sizeof(CRYPTUI_SELECTSTORE_INFO_W))
+    {
+        WARN("unexpected size %d\n", info->dwSize);
+        SetLastError(E_INVALIDARG);
+        return NULL;
+    }
+    DialogBoxParamW(hInstance, MAKEINTRESOURCEW(IDD_SELECT_STORE), info->parent,
+     select_store_dlg_proc, (LPARAM)&selectInfo);
+    return selectInfo.store;
+}
+
+/***********************************************************************
+ *		CryptUIDlgSelectStoreA (CRYPTUI.@)
+ */
+HCERTSTORE WINAPI CryptUIDlgSelectStoreA(PCRYPTUI_SELECTSTORE_INFO_A info)
+{
+    CRYPTUI_SELECTSTORE_INFO_W infoW;
+    HCERTSTORE ret;
+    int len;
+
+    TRACE("(%p)\n", info);
+
+    if (info->dwSize != sizeof(CRYPTUI_SELECTSTORE_INFO_A))
+    {
+        WARN("unexpected size %d\n", info->dwSize);
+        SetLastError(E_INVALIDARG);
+        return NULL;
+    }
+    memcpy(&infoW, &info, sizeof(info));
+    if (info->pszTitle)
+    {
+        len = MultiByteToWideChar(CP_ACP, 0, info->pszTitle, -1, NULL, 0);
+        infoW.pwszTitle = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, info->pszTitle, -1, infoW.pwszTitle,
+         len);
+    }
+    if (info->pszText)
+    {
+        len = MultiByteToWideChar(CP_ACP, 0, info->pszText, -1, NULL, 0);
+        infoW.pwszText = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, info->pszText, -1, infoW.pwszText, len);
+    }
+    ret = CryptUIDlgSelectStoreW(&infoW);
+    HeapFree(GetProcessHeap(), 0, infoW.pwszText);
+    HeapFree(GetProcessHeap(), 0, infoW.pwszTitle);
+    return ret;
 }
 
 /***********************************************************************
@@ -308,8 +657,6 @@ static void add_oid_text_to_control(HWND hwnd, char *oid)
         add_unformatted_text_to_control(hwnd, &nl, 1);
     }
 }
-
-#define MAX_STRING_LEN 512
 
 struct OIDToString
 {
@@ -941,7 +1288,7 @@ static LRESULT CALLBACK general_dlg_proc(HWND hwnd, UINT msg, WPARAM wp,
         switch (wp)
         {
         case IDC_ADDTOSTORE:
-            FIXME("call CryptUIWizImport\n");
+            CryptUIWizImport(0, hwnd, NULL, NULL, NULL);
             break;
         case IDC_ISSUERSTATEMENT:
         {
@@ -2999,46 +3346,6 @@ BOOL WINAPI CryptUIDlgViewContext(DWORD dwContextType, LPVOID pvContext,
     return ret;
 }
 
-static PCCERT_CONTEXT make_cert_from_file(LPCWSTR fileName)
-{
-    HANDLE file;
-    DWORD size, encoding = X509_ASN_ENCODING | PKCS_7_ASN_ENCODING;
-    BYTE *buffer;
-    PCCERT_CONTEXT cert;
-
-    file = CreateFileW(fileName, GENERIC_READ, FILE_SHARE_READ, NULL,
-     OPEN_EXISTING, 0, NULL);
-    if (file == INVALID_HANDLE_VALUE)
-    {
-        WARN("can't open certificate file %s\n", debugstr_w(fileName));
-        return NULL;
-    }
-    if ((size = GetFileSize(file, NULL)))
-    {
-        if ((buffer = HeapAlloc(GetProcessHeap(), 0, size)))
-        {
-            DWORD read;
-            if (!ReadFile(file, buffer, size, &read, NULL) || read != size)
-            {
-                WARN("can't read certificate file %s\n", debugstr_w(fileName));
-                HeapFree(GetProcessHeap(), 0, buffer);
-                CloseHandle(file);
-                return NULL;
-            }
-        }
-    }
-    else
-    {
-        WARN("empty file %s\n", debugstr_w(fileName));
-        CloseHandle(file);
-        return NULL;
-    }
-    CloseHandle(file);
-    cert = CertCreateCertificateContext(encoding, buffer, size);
-    HeapFree(GetProcessHeap(), 0, buffer);
-    return cert;
-}
-
 /* Decodes a cert's basic constraints extension (either szOID_BASIC_CONSTRAINTS
  * or szOID_BASIC_CONSTRAINTS2, whichever is present) to determine if it
  * should be a CA.  If neither extension is present, returns
@@ -3097,47 +3404,13 @@ static HCERTSTORE choose_store_for_cert(PCCERT_CONTEXT cert)
      CERT_SYSTEM_STORE_CURRENT_USER, storeName);
 }
 
-BOOL WINAPI CryptUIWizImport(DWORD dwFlags, HWND hwndParent, LPCWSTR pwszWizardTitle,
-                             PCCRYPTUI_WIZ_IMPORT_SRC_INFO pImportSrc, HCERTSTORE hDestCertStore)
+static BOOL import_cert(PCCERT_CONTEXT cert, HCERTSTORE hDestCertStore)
 {
-    BOOL ret;
     HCERTSTORE store;
-    const CERT_CONTEXT *cert;
-    BOOL freeCert = FALSE;
+    BOOL ret;
 
-    TRACE("(0x%08x, %p, %s, %p, %p)\n", dwFlags, hwndParent, debugstr_w(pwszWizardTitle),
-          pImportSrc, hDestCertStore);
-
-    if (!(dwFlags & CRYPTUI_WIZ_NO_UI)) FIXME("UI not implemented\n");
-
-    if (!pImportSrc ||
-     pImportSrc->dwSize != sizeof(CRYPTUI_WIZ_IMPORT_SRC_INFO))
+    if (!cert)
     {
-        SetLastError(E_INVALIDARG);
-        return FALSE;
-    }
-
-    switch (pImportSrc->dwSubjectChoice)
-    {
-    case CRYPTUI_WIZ_IMPORT_SUBJECT_FILE:
-        if (!(cert = make_cert_from_file(pImportSrc->u.pwszFileName)))
-        {
-            WARN("unable to create certificate context\n");
-            return FALSE;
-        }
-        else
-            freeCert = TRUE;
-        break;
-    case CRYPTUI_WIZ_IMPORT_SUBJECT_CERT_CONTEXT:
-        cert = pImportSrc->u.pCertContext;
-        if (!cert)
-        {
-            SetLastError(E_INVALIDARG);
-            return FALSE;
-        }
-        break;
-    default:
-        FIXME("source type not implemented: %u\n", pImportSrc->dwSubjectChoice);
         SetLastError(E_INVALIDARG);
         return FALSE;
     }
@@ -3147,14 +3420,983 @@ BOOL WINAPI CryptUIWizImport(DWORD dwFlags, HWND hwndParent, LPCWSTR pwszWizardT
         if (!(store = choose_store_for_cert(cert)))
         {
             WARN("unable to open certificate store\n");
-            CertFreeCertificateContext(cert);
             return FALSE;
         }
     }
-    ret = CertAddCertificateContextToStore(store, cert, CERT_STORE_ADD_REPLACE_EXISTING, NULL);
-
+    ret = CertAddCertificateContextToStore(store, cert,
+     CERT_STORE_ADD_REPLACE_EXISTING_INHERIT_PROPERTIES, NULL);
     if (!hDestCertStore) CertCloseStore(store, 0);
-    if (freeCert)
-        CertFreeCertificateContext(cert);
+    return ret;
+}
+
+static BOOL import_crl(PCCRL_CONTEXT crl, HCERTSTORE hDestCertStore)
+{
+    HCERTSTORE store;
+    BOOL ret;
+
+    if (!crl)
+    {
+        SetLastError(E_INVALIDARG);
+        return FALSE;
+    }
+    if (hDestCertStore) store = hDestCertStore;
+    else
+    {
+        static const WCHAR ca[] = { 'C','A',0 };
+
+        if (!(store = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0,
+         CERT_SYSTEM_STORE_CURRENT_USER, ca)))
+        {
+            WARN("unable to open certificate store\n");
+            return FALSE;
+        }
+    }
+    ret = CertAddCRLContextToStore(store, crl,
+     CERT_STORE_ADD_REPLACE_EXISTING_INHERIT_PROPERTIES, NULL);
+    if (!hDestCertStore) CertCloseStore(store, 0);
+    return ret;
+}
+
+static BOOL import_ctl(PCCTL_CONTEXT ctl, HCERTSTORE hDestCertStore)
+{
+    HCERTSTORE store;
+    BOOL ret;
+
+    if (!ctl)
+    {
+        SetLastError(E_INVALIDARG);
+        return FALSE;
+    }
+    if (hDestCertStore) store = hDestCertStore;
+    else
+    {
+        static const WCHAR trust[] = { 'T','r','u','s','t',0 };
+
+        if (!(store = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0,
+         CERT_SYSTEM_STORE_CURRENT_USER, trust)))
+        {
+            WARN("unable to open certificate store\n");
+            return FALSE;
+        }
+    }
+    ret = CertAddCTLContextToStore(store, ctl,
+     CERT_STORE_ADD_REPLACE_EXISTING_INHERIT_PROPERTIES, NULL);
+    if (!hDestCertStore) CertCloseStore(store, 0);
+    return ret;
+}
+
+/* Checks type, a type such as CERT_QUERY_CONTENT_CERT returned by
+ * CryptQueryObject, against the allowed types.  Returns TRUE if the
+ * type is allowed, FALSE otherwise.
+ */
+static BOOL check_context_type(DWORD dwFlags, DWORD type)
+{
+    BOOL ret;
+
+    if (dwFlags &
+     (CRYPTUI_WIZ_IMPORT_ALLOW_CERT | CRYPTUI_WIZ_IMPORT_ALLOW_CRL |
+     CRYPTUI_WIZ_IMPORT_ALLOW_CTL))
+    {
+        switch (type)
+        {
+        case CERT_QUERY_CONTENT_CERT:
+        case CERT_QUERY_CONTENT_SERIALIZED_CERT:
+            ret = dwFlags & CRYPTUI_WIZ_IMPORT_ALLOW_CERT;
+            break;
+        case CERT_QUERY_CONTENT_CRL:
+        case CERT_QUERY_CONTENT_SERIALIZED_CRL:
+            ret = dwFlags & CRYPTUI_WIZ_IMPORT_ALLOW_CRL;
+            break;
+        case CERT_QUERY_CONTENT_CTL:
+        case CERT_QUERY_CONTENT_SERIALIZED_CTL:
+            ret = dwFlags & CRYPTUI_WIZ_IMPORT_ALLOW_CTL;
+            break;
+        default:
+            /* The remaining types contain more than one type, so allow
+             * any combination.
+             */
+            ret = TRUE;
+        }
+    }
+    else
+    {
+        /* No allowed types specified, so any type is allowed */
+        ret = TRUE;
+    }
+    if (!ret)
+        SetLastError(E_INVALIDARG);
+    return ret;
+}
+
+
+static void import_warning(DWORD dwFlags, HWND hwnd, LPCWSTR szTitle,
+ int warningID)
+{
+    if (!(dwFlags & CRYPTUI_WIZ_NO_UI))
+    {
+        WCHAR title[MAX_STRING_LEN], error[MAX_STRING_LEN];
+        LPCWSTR pTitle;
+
+        if (szTitle)
+            pTitle = szTitle;
+        else
+        {
+            LoadStringW(hInstance, IDS_IMPORT_WIZARD, title,
+             sizeof(title) / sizeof(title[0]));
+            pTitle = title;
+        }
+        LoadStringW(hInstance, warningID, error,
+         sizeof(error) / sizeof(error[0]));
+        MessageBoxW(hwnd, error, pTitle, MB_ICONERROR | MB_OK);
+    }
+}
+
+static void import_warn_type_mismatch(DWORD dwFlags, HWND hwnd, LPCWSTR szTitle)
+{
+    import_warning(dwFlags, hwnd, szTitle, IDS_IMPORT_TYPE_MISMATCH);
+}
+
+static BOOL check_store_context_type(DWORD dwFlags, HCERTSTORE store)
+{
+    BOOL ret;
+
+    if (dwFlags &
+     (CRYPTUI_WIZ_IMPORT_ALLOW_CERT | CRYPTUI_WIZ_IMPORT_ALLOW_CRL |
+     CRYPTUI_WIZ_IMPORT_ALLOW_CTL))
+    {
+        PCCERT_CONTEXT cert;
+        PCCRL_CONTEXT crl;
+        PCCTL_CONTEXT ctl;
+
+        ret = TRUE;
+        if ((cert = CertEnumCertificatesInStore(store, NULL)))
+        {
+            CertFreeCertificateContext(cert);
+            if (!(dwFlags & CRYPTUI_WIZ_IMPORT_ALLOW_CERT))
+                ret = FALSE;
+        }
+        if (ret && (crl = CertEnumCRLsInStore(store, NULL)))
+        {
+            CertFreeCRLContext(crl);
+            if (!(dwFlags & CRYPTUI_WIZ_IMPORT_ALLOW_CRL))
+                ret = FALSE;
+        }
+        if (ret && (ctl = CertEnumCTLsInStore(store, NULL)))
+        {
+            CertFreeCTLContext(ctl);
+            if (!(dwFlags & CRYPTUI_WIZ_IMPORT_ALLOW_CTL))
+                ret = FALSE;
+        }
+    }
+    else
+        ret = TRUE;
+    if (!ret)
+        SetLastError(E_INVALIDARG);
+    return ret;
+}
+
+static BOOL import_store(DWORD dwFlags, HWND hwnd, LPCWSTR szTitle,
+ HCERTSTORE source, HCERTSTORE dest)
+{
+    BOOL ret;
+
+    if ((ret = check_store_context_type(dwFlags, source)))
+    {
+        PCCERT_CONTEXT cert = NULL;
+        PCCRL_CONTEXT crl = NULL;
+        PCCTL_CONTEXT ctl = NULL;
+
+        do {
+            cert = CertEnumCertificatesInStore(source, cert);
+            if (cert)
+                ret = import_cert(cert, dest);
+        } while (ret && cert);
+        do {
+            crl = CertEnumCRLsInStore(source, crl);
+            if (crl)
+                ret = import_crl(crl, dest);
+        } while (ret && crl);
+        do {
+            ctl = CertEnumCTLsInStore(source, ctl);
+            if (ctl)
+                ret = import_ctl(ctl, dest);
+        } while (ret && ctl);
+    }
+    else
+        import_warn_type_mismatch(dwFlags, hwnd, szTitle);
+    return ret;
+}
+
+static HCERTSTORE open_store_from_file(DWORD dwFlags, LPCWSTR fileName,
+ DWORD *pContentType)
+{
+    HCERTSTORE store = NULL;
+    DWORD contentType = 0, expectedContentTypeFlags;
+
+    if (dwFlags &
+     (CRYPTUI_WIZ_IMPORT_ALLOW_CERT | CRYPTUI_WIZ_IMPORT_ALLOW_CRL |
+     CRYPTUI_WIZ_IMPORT_ALLOW_CTL))
+    {
+        expectedContentTypeFlags =
+         CERT_QUERY_CONTENT_FLAG_SERIALIZED_STORE |
+         CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED |
+         CERT_QUERY_CONTENT_FLAG_PFX;
+        if (dwFlags & CRYPTUI_WIZ_IMPORT_ALLOW_CERT)
+            expectedContentTypeFlags |=
+             CERT_QUERY_CONTENT_FLAG_CERT |
+             CERT_QUERY_CONTENT_FLAG_SERIALIZED_CERT;
+        if (dwFlags & CRYPTUI_WIZ_IMPORT_ALLOW_CRL)
+            expectedContentTypeFlags |=
+             CERT_QUERY_CONTENT_FLAG_SERIALIZED_CRL |
+             CERT_QUERY_CONTENT_FLAG_CRL;
+        if (dwFlags & CRYPTUI_WIZ_IMPORT_ALLOW_CTL)
+            expectedContentTypeFlags |=
+             CERT_QUERY_CONTENT_FLAG_CTL |
+             CERT_QUERY_CONTENT_FLAG_SERIALIZED_CTL;
+    }
+    else
+        expectedContentTypeFlags =
+         CERT_QUERY_CONTENT_FLAG_CERT |
+         CERT_QUERY_CONTENT_FLAG_CTL |
+         CERT_QUERY_CONTENT_FLAG_CRL |
+         CERT_QUERY_CONTENT_FLAG_SERIALIZED_STORE |
+         CERT_QUERY_CONTENT_FLAG_SERIALIZED_CERT |
+         CERT_QUERY_CONTENT_FLAG_SERIALIZED_CTL |
+         CERT_QUERY_CONTENT_FLAG_SERIALIZED_CRL |
+         CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED |
+         CERT_QUERY_CONTENT_FLAG_PFX;
+
+    CryptQueryObject(CERT_QUERY_OBJECT_FILE, fileName,
+     expectedContentTypeFlags, CERT_QUERY_FORMAT_FLAG_ALL, 0, NULL,
+     &contentType, NULL, &store, NULL, NULL);
+    if (pContentType)
+        *pContentType = contentType;
+    return store;
+}
+
+static BOOL import_file(DWORD dwFlags, HWND hwnd, LPCWSTR szTitle,
+ LPCWSTR fileName, HCERTSTORE dest)
+{
+    HCERTSTORE source;
+    BOOL ret;
+
+    if ((source = open_store_from_file(dwFlags, fileName, NULL)))
+    {
+        ret = import_store(dwFlags, hwnd, szTitle, source, dest);
+        CertCloseStore(source, 0);
+    }
+    else
+        ret = FALSE;
+    return ret;
+}
+
+struct ImportWizData
+{
+    HFONT titleFont;
+    DWORD dwFlags;
+    LPCWSTR pwszWizardTitle;
+    CRYPTUI_WIZ_IMPORT_SRC_INFO importSrc;
+    LPWSTR fileName;
+    DWORD contentType;
+    BOOL freeSource;
+    HCERTSTORE hDestCertStore;
+    BOOL freeDest;
+    BOOL autoDest;
+    BOOL success;
+};
+
+static LRESULT CALLBACK import_welcome_dlg_proc(HWND hwnd, UINT msg, WPARAM wp,
+ LPARAM lp)
+{
+    LRESULT ret = 0;
+
+    switch (msg)
+    {
+    case WM_INITDIALOG:
+    {
+        struct ImportWizData *data;
+        PROPSHEETPAGEW *page = (PROPSHEETPAGEW *)lp;
+        WCHAR fontFace[MAX_STRING_LEN];
+        HDC hDC = GetDC(hwnd);
+        int height;
+
+        data = (struct ImportWizData *)page->lParam;
+        LoadStringW(hInstance, IDS_WIZARD_TITLE_FONT, fontFace,
+         sizeof(fontFace) / sizeof(fontFace[0]));
+        height = -MulDiv(12, GetDeviceCaps(hDC, LOGPIXELSY), 72);
+        data->titleFont = CreateFontW(height, 0, 0, 0, FW_BOLD, 0, 0, 0,
+         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+         DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, fontFace);
+        SendMessageW(GetDlgItem(hwnd, IDC_IMPORT_TITLE), WM_SETFONT,
+         (WPARAM)data->titleFont, TRUE);
+        ReleaseDC(hwnd, hDC);
+        break;
+    }
+    case WM_NOTIFY:
+    {
+        NMHDR *hdr = (NMHDR *)lp;
+
+        switch (hdr->code)
+        {
+        case PSN_SETACTIVE:
+            PostMessageW(GetParent(hwnd), PSM_SETWIZBUTTONS, 0, PSWIZB_NEXT);
+            ret = TRUE;
+            break;
+        }
+        break;
+    }
+    }
+    return ret;
+}
+
+static const WCHAR filter_cert[] = { '*','.','c','e','r',';','*','.',
+ 'c','r','t',0 };
+static const WCHAR filter_pfx[] = { '*','.','p','f','x',';','*','.',
+ 'p','1','2',0 };
+static const WCHAR filter_crl[] = { '*','.','c','r','l',0 };
+static const WCHAR filter_ctl[] = { '*','.','s','t','l',0 };
+static const WCHAR filter_serialized_store[] = { '*','.','s','s','t',0 };
+static const WCHAR filter_cms[] = { '*','.','s','p','c',';','*','.',
+ 'p','7','b',0 };
+static const WCHAR filter_all[] = { '*','.','*',0 };
+
+struct StringToFilter
+{
+    int     id;
+    DWORD   allowFlags;
+    LPCWSTR filter;
+} import_filters[] = {
+ { IDS_IMPORT_FILTER_CERT, CRYPTUI_WIZ_IMPORT_ALLOW_CERT, filter_cert },
+ { IDS_IMPORT_FILTER_PFX, 0, filter_pfx },
+ { IDS_IMPORT_FILTER_CRL, CRYPTUI_WIZ_IMPORT_ALLOW_CRL, filter_crl },
+ { IDS_IMPORT_FILTER_CTL, CRYPTUI_WIZ_IMPORT_ALLOW_CTL, filter_ctl },
+ { IDS_IMPORT_FILTER_SERIALIZED_STORE, 0, filter_serialized_store },
+ { IDS_IMPORT_FILTER_CMS, 0, filter_cms },
+ { IDS_IMPORT_FILTER_ALL, 0, filter_all },
+};
+
+static WCHAR *make_import_file_filter(DWORD dwFlags)
+{
+    DWORD i;
+    int len, totalLen = 2;
+    LPWSTR filter = NULL, str;
+
+    for (i = 0; i < sizeof(import_filters) / sizeof(import_filters[0]); i++)
+    {
+        if (!import_filters[i].allowFlags || !dwFlags ||
+         (dwFlags & import_filters[i].allowFlags))
+        {
+            len = LoadStringW(hInstance, import_filters[i].id, (LPWSTR)&str, 0);
+            totalLen += len + strlenW(import_filters[i].filter) + 2;
+        }
+    }
+    filter = HeapAlloc(GetProcessHeap(), 0, totalLen * sizeof(WCHAR));
+    if (filter)
+    {
+        LPWSTR ptr;
+
+        ptr = filter;
+        for (i = 0; i < sizeof(import_filters) / sizeof(import_filters[0]); i++)
+        {
+            if (!import_filters[i].allowFlags || !dwFlags ||
+             (dwFlags & import_filters[i].allowFlags))
+            {
+                len = LoadStringW(hInstance, import_filters[i].id,
+                 (LPWSTR)&str, 0);
+                memcpy(ptr, str, len * sizeof(WCHAR));
+                ptr += len;
+                *ptr++ = 0;
+                strcpyW(ptr, import_filters[i].filter);
+                ptr += strlenW(import_filters[i].filter) + 1;
+            }
+        }
+        *ptr++ = 0;
+    }
+    return filter;
+}
+
+static BOOL import_validate_filename(HWND hwnd, struct ImportWizData *data,
+ LPCWSTR fileName)
+{
+    HANDLE file;
+    BOOL ret = FALSE;
+
+    file = CreateFileW(fileName, GENERIC_READ, FILE_SHARE_READ, NULL,
+     OPEN_EXISTING, 0, NULL);
+    if (file != INVALID_HANDLE_VALUE)
+    {
+        HCERTSTORE source = open_store_from_file(data->dwFlags, fileName,
+         &data->contentType);
+        int warningID = 0;
+
+        if (!source)
+            warningID = IDS_IMPORT_BAD_FORMAT;
+        else if (!check_store_context_type(data->dwFlags, source))
+            warningID = IDS_IMPORT_TYPE_MISMATCH;
+        else
+        {
+            data->importSrc.dwSubjectChoice =
+             CRYPTUI_WIZ_IMPORT_SUBJECT_CERT_STORE;
+            data->importSrc.u.hCertStore = source;
+            data->freeSource = TRUE;
+            ret = TRUE;
+        }
+        if (warningID)
+        {
+            import_warning(data->dwFlags, hwnd, data->pwszWizardTitle,
+             warningID);
+        }
+        CloseHandle(file);
+    }
+    else
+    {
+        WCHAR title[MAX_STRING_LEN], error[MAX_STRING_LEN];
+        LPCWSTR pTitle;
+        LPWSTR msgBuf, fullError;
+
+        if (data->pwszWizardTitle)
+            pTitle = data->pwszWizardTitle;
+        else
+        {
+            LoadStringW(hInstance, IDS_IMPORT_WIZARD, title,
+             sizeof(title) / sizeof(title[0]));
+            pTitle = title;
+        }
+        LoadStringW(hInstance, IDS_IMPORT_OPEN_FAILED, error,
+         sizeof(error) / sizeof(error[0]));
+        FormatMessageW(
+         FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL,
+         GetLastError(), 0, (LPWSTR) &msgBuf, 0, NULL);
+        fullError = HeapAlloc(GetProcessHeap(), 0,
+         (strlenW(error) + strlenW(fileName) + strlenW(msgBuf) + 3)
+         * sizeof(WCHAR));
+        if (fullError)
+        {
+            LPWSTR ptr = fullError;
+
+            strcpyW(ptr, error);
+            ptr += strlenW(error);
+            strcpyW(ptr, fileName);
+            ptr += strlenW(fileName);
+            *ptr++ = ':';
+            *ptr++ = '\n';
+            strcpyW(ptr, msgBuf);
+            MessageBoxW(hwnd, fullError, pTitle, MB_ICONERROR | MB_OK);
+            HeapFree(GetProcessHeap(), 0, fullError);
+        }
+        LocalFree(msgBuf);
+    }
+    return ret;
+}
+
+static LRESULT CALLBACK import_file_dlg_proc(HWND hwnd, UINT msg, WPARAM wp,
+ LPARAM lp)
+{
+    LRESULT ret = 0;
+    struct ImportWizData *data;
+
+    switch (msg)
+    {
+    case WM_INITDIALOG:
+    {
+        PROPSHEETPAGEW *page = (PROPSHEETPAGEW *)lp;
+
+        data = (struct ImportWizData *)page->lParam;
+        SetWindowLongPtrW(hwnd, DWLP_USER, (LPARAM)data);
+        break;
+    }
+    case WM_NOTIFY:
+    {
+        NMHDR *hdr = (NMHDR *)lp;
+
+        switch (hdr->code)
+        {
+        case PSN_SETACTIVE:
+            PostMessageW(GetParent(hwnd), PSM_SETWIZBUTTONS, 0,
+             PSWIZB_BACK | PSWIZB_NEXT);
+            ret = TRUE;
+            break;
+        case PSN_WIZNEXT:
+        {
+            HWND fileNameEdit = GetDlgItem(hwnd, IDC_IMPORT_FILENAME);
+            DWORD len = SendMessageW(fileNameEdit, WM_GETTEXTLENGTH, 0, 0);
+
+            data = (struct ImportWizData *)GetWindowLongPtrW(hwnd, DWLP_USER);
+            if (!len)
+            {
+                import_warning(data->dwFlags, hwnd, data->pwszWizardTitle,
+                 IDS_IMPORT_EMPTY_FILE);
+                SetWindowLongPtrW(hwnd, DWLP_MSGRESULT, 1);
+                ret = 1;
+            }
+            else
+            {
+                LPWSTR fileName = HeapAlloc(GetProcessHeap(), 0,
+                 (len + 1) * sizeof(WCHAR));
+
+                if (fileName)
+                {
+                    SendMessageW(fileNameEdit, WM_GETTEXT, len + 1,
+                     (LPARAM)fileName);
+                    if (!import_validate_filename(hwnd, data, fileName))
+                    {
+                        HeapFree(GetProcessHeap(), 0, fileName);
+                        SetWindowLongPtrW(hwnd, DWLP_MSGRESULT, 1);
+                        ret = 1;
+                    }
+                    else
+                        data->fileName = fileName;
+                }
+            }
+            break;
+        }
+        }
+        break;
+    }
+    case WM_COMMAND:
+        switch (wp)
+        {
+        case IDC_IMPORT_BROWSE_FILE:
+        {
+            OPENFILENAMEW ofn;
+            WCHAR fileBuf[MAX_PATH];
+
+            data = (struct ImportWizData *)GetWindowLongPtrW(hwnd, DWLP_USER);
+            memset(&ofn, 0, sizeof(ofn));
+            ofn.lStructSize = sizeof(ofn);
+            ofn.hwndOwner = hwnd;
+            ofn.lpstrFilter = make_import_file_filter(data->dwFlags);
+            ofn.lpstrFile = fileBuf;
+            ofn.nMaxFile = sizeof(fileBuf) / sizeof(fileBuf[0]);
+            fileBuf[0] = 0;
+            if (GetOpenFileNameW(&ofn))
+                SendMessageW(GetDlgItem(hwnd, IDC_IMPORT_FILENAME), WM_SETTEXT,
+                 0, (LPARAM)ofn.lpstrFile);
+            HeapFree(GetProcessHeap(), 0, (LPWSTR)ofn.lpstrFilter);
+            break;
+        }
+        }
+        break;
+    }
+    return ret;
+}
+
+static LRESULT CALLBACK import_store_dlg_proc(HWND hwnd, UINT msg, WPARAM wp,
+ LPARAM lp)
+{
+    LRESULT ret = 0;
+    struct ImportWizData *data;
+
+    switch (msg)
+    {
+    case WM_INITDIALOG:
+    {
+        PROPSHEETPAGEW *page = (PROPSHEETPAGEW *)lp;
+
+        data = (struct ImportWizData *)page->lParam;
+        SetWindowLongPtrW(hwnd, DWLP_USER, (LPARAM)data);
+        SendMessageW(GetDlgItem(hwnd, IDC_IMPORT_AUTO_STORE), BM_CLICK, 0, 0);
+        if (data->dwFlags & CRYPTUI_WIZ_IMPORT_NO_CHANGE_DEST_STORE)
+            EnableWindow(GetDlgItem(hwnd, IDC_IMPORT_SPECIFY_STORE), FALSE);
+        EnableWindow(GetDlgItem(hwnd, IDC_IMPORT_STORE), FALSE);
+        EnableWindow(GetDlgItem(hwnd, IDC_IMPORT_BROWSE_STORE), FALSE);
+        break;
+    }
+    case WM_NOTIFY:
+    {
+        NMHDR *hdr = (NMHDR *)lp;
+
+        switch (hdr->code)
+        {
+        case PSN_SETACTIVE:
+            PostMessageW(GetParent(hwnd), PSM_SETWIZBUTTONS, 0,
+             PSWIZB_BACK | PSWIZB_NEXT);
+            ret = TRUE;
+            break;
+        case PSN_WIZNEXT:
+        {
+            data = (struct ImportWizData *)GetWindowLongPtrW(hwnd, DWLP_USER);
+            if (IsDlgButtonChecked(hwnd, IDC_IMPORT_SPECIFY_STORE) &&
+             !data->hDestCertStore)
+            {
+                import_warning(data->dwFlags, hwnd, data->pwszWizardTitle,
+                 IDS_IMPORT_SELECT_STORE);
+                SetWindowLongPtrW(hwnd, DWLP_MSGRESULT, 1);
+                ret = 1;
+            }
+            break;
+        }
+        }
+        break;
+    }
+    case WM_COMMAND:
+        switch (wp)
+        {
+        case IDC_IMPORT_AUTO_STORE:
+            data = (struct ImportWizData *)GetWindowLongPtrW(hwnd, DWLP_USER);
+            data->autoDest = TRUE;
+            EnableWindow(GetDlgItem(hwnd, IDC_IMPORT_STORE), FALSE);
+            EnableWindow(GetDlgItem(hwnd, IDC_IMPORT_BROWSE_STORE), FALSE);
+            break;
+        case IDC_IMPORT_SPECIFY_STORE:
+            data = (struct ImportWizData *)GetWindowLongPtrW(hwnd, DWLP_USER);
+            data->autoDest = FALSE;
+            EnableWindow(GetDlgItem(hwnd, IDC_IMPORT_STORE), TRUE);
+            EnableWindow(GetDlgItem(hwnd, IDC_IMPORT_BROWSE_STORE), TRUE);
+            break;
+        case IDC_IMPORT_BROWSE_STORE:
+        {
+            CRYPTUI_ENUM_SYSTEM_STORE_ARGS enumArgs = {
+             CERT_SYSTEM_STORE_CURRENT_USER, NULL };
+            CRYPTUI_ENUM_DATA enumData = { 0, NULL, 1, &enumArgs };
+            CRYPTUI_SELECTSTORE_INFO_W selectInfo;
+            HCERTSTORE store;
+
+            data = (struct ImportWizData *)GetWindowLongPtrW(hwnd, DWLP_USER);
+            selectInfo.dwSize = sizeof(selectInfo);
+            selectInfo.parent = hwnd;
+            selectInfo.dwFlags = CRYPTUI_ENABLE_SHOW_PHYSICAL_STORE;
+            selectInfo.pwszTitle = selectInfo.pwszTitle = NULL;
+            selectInfo.pEnumData = &enumData;
+            selectInfo.pfnSelectedStoreCallback = NULL;
+            if ((store = CryptUIDlgSelectStoreW(&selectInfo)))
+            {
+                WCHAR storeTitle[MAX_STRING_LEN];
+
+                LoadStringW(hInstance, IDS_IMPORT_DEST_DETERMINED,
+                 storeTitle, sizeof(storeTitle) / sizeof(storeTitle[0]));
+                SendMessageW(GetDlgItem(hwnd, IDC_IMPORT_STORE), WM_SETTEXT,
+                 0, (LPARAM)storeTitle);
+                data->hDestCertStore = store;
+                data->freeDest = TRUE;
+            }
+            break;
+        }
+        }
+        break;
+    }
+    return ret;
+}
+
+static void show_import_details(HWND lv, struct ImportWizData *data)
+{
+    WCHAR text[MAX_STRING_LEN];
+    LVITEMW item;
+    int contentID;
+
+    item.mask = LVIF_TEXT;
+    item.iItem = SendMessageW(lv, LVM_GETITEMCOUNT, 0, 0);
+    item.iSubItem = 0;
+    LoadStringW(hInstance, IDS_IMPORT_STORE_SELECTION, text,
+     sizeof(text)/ sizeof(text[0]));
+    item.pszText = text;
+    SendMessageW(lv, LVM_INSERTITEMW, 0, (LPARAM)&item);
+    item.iSubItem = 1;
+    if (data->autoDest)
+        LoadStringW(hInstance, IDS_IMPORT_DEST_AUTOMATIC, text,
+         sizeof(text)/ sizeof(text[0]));
+    else
+        LoadStringW(hInstance, IDS_IMPORT_DEST_DETERMINED, text,
+         sizeof(text)/ sizeof(text[0]));
+    SendMessageW(lv, LVM_SETITEMTEXTW, item.iItem, (LPARAM)&item);
+    item.iItem = SendMessageW(lv, LVM_GETITEMCOUNT, 0, 0);
+    item.iSubItem = 0;
+    LoadStringW(hInstance, IDS_IMPORT_CONTENT, text,
+     sizeof(text)/ sizeof(text[0]));
+    SendMessageW(lv, LVM_INSERTITEMW, 0, (LPARAM)&item);
+    switch (data->contentType)
+    {
+    case CERT_QUERY_CONTENT_CERT:
+    case CERT_QUERY_CONTENT_SERIALIZED_CERT:
+        contentID = IDS_IMPORT_CONTENT_CERT;
+        break;
+    case CERT_QUERY_CONTENT_CRL:
+    case CERT_QUERY_CONTENT_SERIALIZED_CRL:
+        contentID = IDS_IMPORT_CONTENT_CRL;
+        break;
+    case CERT_QUERY_CONTENT_CTL:
+    case CERT_QUERY_CONTENT_SERIALIZED_CTL:
+        contentID = IDS_IMPORT_CONTENT_CTL;
+        break;
+    case CERT_QUERY_CONTENT_PKCS7_SIGNED:
+        contentID = IDS_IMPORT_CONTENT_CMS;
+        break;
+    case CERT_QUERY_CONTENT_FLAG_PFX:
+        contentID = IDS_IMPORT_CONTENT_PFX;
+        break;
+    default:
+        contentID = IDS_IMPORT_CONTENT_STORE;
+        break;
+    }
+    LoadStringW(hInstance, contentID, text, sizeof(text)/ sizeof(text[0]));
+    item.iSubItem = 1;
+    SendMessageW(lv, LVM_SETITEMTEXTW, item.iItem, (LPARAM)&item);
+    if (data->fileName)
+    {
+        item.iItem = SendMessageW(lv, LVM_GETITEMCOUNT, 0, 0);
+        item.iSubItem = 0;
+        LoadStringW(hInstance, IDS_IMPORT_FILE, text,
+         sizeof(text)/ sizeof(text[0]));
+        SendMessageW(lv, LVM_INSERTITEMW, 0, (LPARAM)&item);
+        item.iSubItem = 1;
+        item.pszText = data->fileName;
+        SendMessageW(lv, LVM_SETITEMTEXTW, item.iItem, (LPARAM)&item);
+    }
+}
+
+static BOOL do_import(DWORD dwFlags, HWND hwndParent, LPCWSTR pwszWizardTitle,
+ PCCRYPTUI_WIZ_IMPORT_SRC_INFO pImportSrc, HCERTSTORE hDestCertStore)
+{
+    BOOL ret;
+
+    switch (pImportSrc->dwSubjectChoice)
+    {
+    case CRYPTUI_WIZ_IMPORT_SUBJECT_FILE:
+        ret = import_file(dwFlags, hwndParent, pwszWizardTitle,
+         pImportSrc->u.pwszFileName, hDestCertStore);
+        break;
+    case CRYPTUI_WIZ_IMPORT_SUBJECT_CERT_CONTEXT:
+        if ((ret = check_context_type(dwFlags, CERT_QUERY_CONTENT_CERT)))
+            ret = import_cert(pImportSrc->u.pCertContext, hDestCertStore);
+        else
+            import_warn_type_mismatch(dwFlags, hwndParent, pwszWizardTitle);
+        break;
+    case CRYPTUI_WIZ_IMPORT_SUBJECT_CRL_CONTEXT:
+        if ((ret = check_context_type(dwFlags, CERT_QUERY_CONTENT_CRL)))
+            ret = import_crl(pImportSrc->u.pCRLContext, hDestCertStore);
+        else
+            import_warn_type_mismatch(dwFlags, hwndParent, pwszWizardTitle);
+        break;
+    case CRYPTUI_WIZ_IMPORT_SUBJECT_CTL_CONTEXT:
+        if ((ret = check_context_type(dwFlags, CERT_QUERY_CONTENT_CTL)))
+            ret = import_ctl(pImportSrc->u.pCTLContext, hDestCertStore);
+        else
+            import_warn_type_mismatch(dwFlags, hwndParent, pwszWizardTitle);
+        break;
+    case CRYPTUI_WIZ_IMPORT_SUBJECT_CERT_STORE:
+        ret = import_store(dwFlags, hwndParent, pwszWizardTitle,
+         pImportSrc->u.hCertStore, hDestCertStore);
+        break;
+    default:
+        WARN("unknown source type: %u\n", pImportSrc->dwSubjectChoice);
+        SetLastError(E_INVALIDARG);
+        ret = FALSE;
+    }
+    return ret;
+}
+
+static LRESULT CALLBACK import_finish_dlg_proc(HWND hwnd, UINT msg, WPARAM wp,
+ LPARAM lp)
+{
+    LRESULT ret = 0;
+    struct ImportWizData *data;
+
+    switch (msg)
+    {
+    case WM_INITDIALOG:
+    {
+        PROPSHEETPAGEW *page = (PROPSHEETPAGEW *)lp;
+        HWND lv = GetDlgItem(hwnd, IDC_IMPORT_SETTINGS);
+        RECT rc;
+        LVCOLUMNW column;
+
+        data = (struct ImportWizData *)page->lParam;
+        SetWindowLongPtrW(hwnd, DWLP_USER, (LPARAM)data);
+        SendMessageW(GetDlgItem(hwnd, IDC_IMPORT_TITLE), WM_SETFONT,
+         (WPARAM)data->titleFont, TRUE);
+        GetWindowRect(lv, &rc);
+        column.mask = LVCF_WIDTH;
+        column.cx = (rc.right - rc.left) / 2 - 2;
+        SendMessageW(lv, LVM_INSERTCOLUMNW, 0, (LPARAM)&column);
+        SendMessageW(lv, LVM_INSERTCOLUMNW, 1, (LPARAM)&column);
+        show_import_details(lv, data);
+        break;
+    }
+    case WM_NOTIFY:
+    {
+        NMHDR *hdr = (NMHDR *)lp;
+
+        switch (hdr->code)
+        {
+        case PSN_SETACTIVE:
+        {
+            HWND lv = GetDlgItem(hwnd, IDC_IMPORT_SETTINGS);
+
+            data = (struct ImportWizData *)GetWindowLongPtrW(hwnd, DWLP_USER);
+            SendMessageW(lv, LVM_DELETEALLITEMS, 0, 0);
+            show_import_details(lv, data);
+            PostMessageW(GetParent(hwnd), PSM_SETWIZBUTTONS, 0,
+             PSWIZB_BACK | PSWIZB_FINISH);
+            ret = TRUE;
+            break;
+        }
+        case PSN_WIZFINISH:
+        {
+            data = (struct ImportWizData *)GetWindowLongPtrW(hwnd, DWLP_USER);
+            if ((data->success = do_import(data->dwFlags, hwnd,
+             data->pwszWizardTitle, &data->importSrc, data->hDestCertStore)))
+            {
+                WCHAR title[MAX_STRING_LEN], message[MAX_STRING_LEN];
+                LPCWSTR pTitle;
+
+                if (data->pwszWizardTitle)
+                    pTitle = data->pwszWizardTitle;
+                else
+                {
+                    LoadStringW(hInstance, IDS_IMPORT_WIZARD, title,
+                     sizeof(title) / sizeof(title[0]));
+                    pTitle = title;
+                }
+                LoadStringW(hInstance, IDS_IMPORT_SUCCEEDED, message,
+                 sizeof(message) / sizeof(message[0]));
+                MessageBoxW(hwnd, message, pTitle, MB_OK);
+            }
+            else
+                import_warning(data->dwFlags, hwnd, data->pwszWizardTitle,
+                 IDS_IMPORT_SUCCEEDED);
+            break;
+        }
+        }
+        break;
+    }
+    }
+    return ret;
+}
+
+static BOOL show_import_ui(DWORD dwFlags, HWND hwndParent,
+ LPCWSTR pwszWizardTitle, PCCRYPTUI_WIZ_IMPORT_SRC_INFO pImportSrc,
+ HCERTSTORE hDestCertStore)
+{
+    PROPSHEETHEADERW hdr;
+    PROPSHEETPAGEW pages[4];
+    struct ImportWizData data;
+    int nPages = 0;
+
+    data.dwFlags = dwFlags;
+    data.pwszWizardTitle = pwszWizardTitle;
+    if (pImportSrc)
+        memcpy(&data.importSrc, pImportSrc, sizeof(data.importSrc));
+    else
+        memset(&data.importSrc, 0, sizeof(data.importSrc));
+    data.fileName = NULL;
+    data.freeSource = FALSE;
+    data.hDestCertStore = hDestCertStore;
+    data.freeDest = FALSE;
+    data.autoDest = TRUE;
+    data.success = TRUE;
+
+    memset(&pages, 0, sizeof(pages));
+
+    pages[nPages].dwSize = sizeof(pages[0]);
+    pages[nPages].hInstance = hInstance;
+    pages[nPages].u.pszTemplate = MAKEINTRESOURCEW(IDD_IMPORT_WELCOME);
+    pages[nPages].pfnDlgProc = import_welcome_dlg_proc;
+    pages[nPages].dwFlags = PSP_HIDEHEADER;
+    pages[nPages].lParam = (LPARAM)&data;
+    nPages++;
+
+    if (!pImportSrc ||
+     pImportSrc->dwSubjectChoice == CRYPTUI_WIZ_IMPORT_SUBJECT_FILE)
+    {
+        pages[nPages].dwSize = sizeof(pages[0]);
+        pages[nPages].hInstance = hInstance;
+        pages[nPages].u.pszTemplate = MAKEINTRESOURCEW(IDD_IMPORT_FILE);
+        pages[nPages].pfnDlgProc = import_file_dlg_proc;
+        pages[nPages].dwFlags = PSP_USEHEADERTITLE | PSP_USEHEADERSUBTITLE;
+        pages[nPages].pszHeaderTitle = MAKEINTRESOURCEW(IDS_IMPORT_FILE_TITLE);
+        pages[nPages].pszHeaderSubTitle =
+         MAKEINTRESOURCEW(IDS_IMPORT_FILE_SUBTITLE);
+        pages[nPages].lParam = (LPARAM)&data;
+        nPages++;
+    }
+    else
+    {
+        switch (pImportSrc->dwSubjectChoice)
+        {
+        case CRYPTUI_WIZ_IMPORT_SUBJECT_CERT_CONTEXT:
+            data.contentType = CERT_QUERY_CONTENT_CERT;
+            break;
+        case CRYPTUI_WIZ_IMPORT_SUBJECT_CRL_CONTEXT:
+            data.contentType = CERT_QUERY_CONTENT_CRL;
+            break;
+        case CRYPTUI_WIZ_IMPORT_SUBJECT_CTL_CONTEXT:
+            data.contentType = CERT_QUERY_CONTENT_CTL;
+            break;
+        case CRYPTUI_WIZ_IMPORT_SUBJECT_CERT_STORE:
+            data.contentType = CERT_QUERY_CONTENT_SERIALIZED_STORE;
+            break;
+        }
+    }
+
+    pages[nPages].dwSize = sizeof(pages[0]);
+    pages[nPages].hInstance = hInstance;
+    pages[nPages].u.pszTemplate = MAKEINTRESOURCEW(IDD_IMPORT_STORE);
+    pages[nPages].pfnDlgProc = import_store_dlg_proc;
+    pages[nPages].dwFlags = PSP_USEHEADERTITLE | PSP_USEHEADERSUBTITLE;
+    pages[nPages].pszHeaderTitle = MAKEINTRESOURCEW(IDS_IMPORT_STORE_TITLE);
+    pages[nPages].pszHeaderSubTitle =
+     MAKEINTRESOURCEW(IDS_IMPORT_STORE_SUBTITLE);
+    pages[nPages].lParam = (LPARAM)&data;
+    nPages++;
+
+    pages[nPages].dwSize = sizeof(pages[0]);
+    pages[nPages].hInstance = hInstance;
+    pages[nPages].u.pszTemplate = MAKEINTRESOURCEW(IDD_IMPORT_FINISH);
+    pages[nPages].pfnDlgProc = import_finish_dlg_proc;
+    pages[nPages].dwFlags = PSP_HIDEHEADER;
+    pages[nPages].lParam = (LPARAM)&data;
+    nPages++;
+
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.dwSize = sizeof(hdr);
+    hdr.hwndParent = hwndParent;
+    hdr.dwFlags = PSH_PROPSHEETPAGE | PSH_WIZARD97_NEW | PSH_HEADER |
+     PSH_WATERMARK;
+    hdr.hInstance = hInstance;
+    if (pwszWizardTitle)
+        hdr.pszCaption = pwszWizardTitle;
+    else
+        hdr.pszCaption = MAKEINTRESOURCEW(IDS_IMPORT_WIZARD);
+    hdr.u3.ppsp = pages;
+    hdr.nPages = nPages;
+    hdr.u4.pszbmWatermark = MAKEINTRESOURCEW(IDB_CERT_WATERMARK);
+    hdr.u5.pszbmHeader = MAKEINTRESOURCEW(IDB_CERT_HEADER);
+    PropertySheetW(&hdr);
+    HeapFree(GetProcessHeap(), 0, data.fileName);
+    if (data.freeSource &&
+     data.importSrc.dwSubjectChoice == CRYPTUI_WIZ_IMPORT_SUBJECT_CERT_STORE)
+        CertCloseStore(data.importSrc.u.hCertStore, 0);
+    DeleteObject(data.titleFont);
+    return data.success;
+}
+
+BOOL WINAPI CryptUIWizImport(DWORD dwFlags, HWND hwndParent, LPCWSTR pwszWizardTitle,
+                             PCCRYPTUI_WIZ_IMPORT_SRC_INFO pImportSrc, HCERTSTORE hDestCertStore)
+{
+    BOOL ret;
+
+    TRACE("(0x%08x, %p, %s, %p, %p)\n", dwFlags, hwndParent, debugstr_w(pwszWizardTitle),
+          pImportSrc, hDestCertStore);
+
+    if (pImportSrc &&
+     pImportSrc->dwSize != sizeof(CRYPTUI_WIZ_IMPORT_SRC_INFO))
+    {
+        SetLastError(E_INVALIDARG);
+        return FALSE;
+    }
+
+    if (!(dwFlags & CRYPTUI_WIZ_NO_UI))
+        ret = show_import_ui(dwFlags, hwndParent, pwszWizardTitle, pImportSrc,
+         hDestCertStore);
+    else if (pImportSrc)
+        ret = do_import(dwFlags, hwndParent, pwszWizardTitle, pImportSrc,
+         hDestCertStore);
+    else
+    {
+        /* Can't have no UI without specifying source */
+        SetLastError(E_INVALIDARG);
+        ret = FALSE;
+    }
+
     return ret;
 }

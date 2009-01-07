@@ -2816,7 +2816,7 @@ HRESULT WINAPI SHInvokeDefaultCommand(HWND hWnd, IShellFolder* lpFolder, LPCITEM
  *
  * _SHPackDispParamsV
  */
-HRESULT WINAPI SHPackDispParamsV(DISPPARAMS *params, VARIANTARG *args, UINT cnt, va_list valist)
+HRESULT WINAPI SHPackDispParamsV(DISPPARAMS *params, VARIANTARG *args, UINT cnt, __ms_va_list valist)
 {
   VARIANTARG *iter;
 
@@ -2870,14 +2870,12 @@ HRESULT WINAPI SHPackDispParamsV(DISPPARAMS *params, VARIANTARG *args, UINT cnt,
  */
 HRESULT WINAPIV SHPackDispParams(DISPPARAMS *params, VARIANTARG *args, UINT cnt, ...)
 {
-  va_list valist;
+  __ms_va_list valist;
   HRESULT hres;
 
-  va_start(valist, cnt);
-
+  __ms_va_start(valist, cnt);
   hres = SHPackDispParamsV(params, args, cnt, valist);
-
-  va_end(valist);
+  __ms_va_end(valist);
   return hres;
 }
 
@@ -3003,7 +3001,7 @@ HRESULT WINAPIV IUnknown_CPContainerInvokeParam(
   IConnectionPoint *iCP;
   IConnectionPointContainer *iCPC;
   DISPPARAMS dispParams = {buffer, NULL, cParams, 0};
-  va_list valist;
+  __ms_va_list valist;
 
   if (!container)
     return E_NOINTERFACE;
@@ -3017,9 +3015,9 @@ HRESULT WINAPIV IUnknown_CPContainerInvokeParam(
   if(FAILED(result))
       return result;
 
-  va_start(valist, cParams);
+  __ms_va_start(valist, cParams);
   SHPackDispParamsV(&dispParams, buffer, cParams, valist);
-  va_end(valist);
+  __ms_va_end(valist);
 
   result = SHLWAPI_InvokeByIID(iCP, riid, dispId, &dispParams);
   IConnectionPoint_Release(iCP);
@@ -4311,10 +4309,10 @@ INT WINAPIV ShellMessageBoxWrapW(HINSTANCE hInstance, HWND hWnd, LPCWSTR lpText,
     WCHAR szText[100], szTitle[100];
     LPCWSTR pszText = szText, pszTitle = szTitle;
     LPWSTR pszTemp;
-    va_list args;
+    __ms_va_list args;
     int ret;
 
-    va_start(args, uType);
+    __ms_va_start(args, uType);
 
     TRACE("(%p,%p,%p,%p,%08x)\n", hInstance, hWnd, lpText, lpCaption, uType);
 
@@ -4331,7 +4329,7 @@ INT WINAPIV ShellMessageBoxWrapW(HINSTANCE hInstance, HWND hWnd, LPCWSTR lpText,
     FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_STRING,
                    pszText, 0, 0, (LPWSTR)&pszTemp, 0, &args);
 
-    va_end(args);
+    __ms_va_end(args);
 
     ret = MessageBoxW(hWnd, pszTemp, pszTitle, uType);
     LocalFree(pszTemp);

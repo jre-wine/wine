@@ -546,7 +546,7 @@
 @ stub KeInitializeApc
 @ stub KeInitializeDeviceQueue
 @ stub KeInitializeDpc
-@ stub KeInitializeEvent
+@ stdcall KeInitializeEvent(ptr long long)
 @ stub KeInitializeInterrupt
 @ stub KeInitializeMutant
 @ stub KeInitializeMutex
@@ -908,7 +908,7 @@
 @ stub PsRevertToSelf
 @ stub PsSetContextThread
 @ stdcall PsSetCreateProcessNotifyRoutine(ptr long)
-@ stub PsSetCreateThreadNotifyRoutine
+@ stdcall PsSetCreateThreadNotifyRoutine(ptr)
 @ stub PsSetJobUIRestrictionsClass
 @ stub PsSetLegoNotifyRoutine
 @ stub PsSetLoadImageNotifyRoutine

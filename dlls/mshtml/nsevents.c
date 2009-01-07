@@ -175,208 +175,6 @@ static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event
     return NS_OK;
 }
 
-#define IE_MAJOR_VERSION 7
-#define IE_MINOR_VERSION 0
-
-static BOOL handle_insert_comment(HTMLDocument *doc, const PRUnichar *comment)
-{
-    DWORD len;
-    int majorv = 0, minorv = 0;
-    const PRUnichar *ptr, *end;
-    nsAString nsstr;
-    PRUnichar *buf;
-    nsresult nsres;
-
-    enum {
-        CMP_EQ,
-        CMP_LT,
-        CMP_LTE,
-        CMP_GT,
-        CMP_GTE
-    } cmpt = CMP_EQ;
-
-    static const PRUnichar endifW[] = {'<','!','[','e','n','d','i','f',']'};
-
-    if(comment[0] != '[' || comment[1] != 'i' || comment[2] != 'f')
-        return FALSE;
-
-    ptr = comment+3;
-    while(isspaceW(*ptr))
-        ptr++;
-
-    if(ptr[0] == 'l' && ptr[1] == 't') {
-        ptr += 2;
-        if(*ptr == 'e') {
-            cmpt = CMP_LTE;
-            ptr++;
-        }else {
-            cmpt = CMP_LT;
-        }
-    }else if(ptr[0] == 'g' && ptr[1] == 't') {
-        ptr += 2;
-        if(*ptr == 'e') {
-            cmpt = CMP_GTE;
-            ptr++;
-        }else {
-            cmpt = CMP_GT;
-        }
-    }
-
-    if(!isspaceW(*ptr++))
-        return FALSE;
-    while(isspaceW(*ptr))
-        ptr++;
-
-    if(ptr[0] != 'I' || ptr[1] != 'E')
-        return FALSE;
-
-    ptr +=2;
-    if(!isspaceW(*ptr++))
-        return FALSE;
-    while(isspaceW(*ptr))
-        ptr++;
-
-    if(!isdigitW(*ptr))
-        return FALSE;
-    while(isdigitW(*ptr))
-        majorv = majorv*10 + (*ptr++ - '0');
-
-    if(*ptr == '.') {
-        if(!isdigitW(*ptr))
-            return FALSE;
-        while(isdigitW(*ptr))
-            minorv = minorv*10 + (*ptr++ - '0');
-    }
-
-    while(isspaceW(*ptr))
-        ptr++;
-    if(ptr[0] != ']' || ptr[1] != '>')
-        return FALSE;
-    ptr += 2;
-
-    len = strlenW(ptr);
-    if(len < sizeof(endifW)/sizeof(WCHAR))
-        return FALSE;
-
-    end = ptr + len-sizeof(endifW)/sizeof(WCHAR);
-    if(memcmp(end, endifW, sizeof(endifW)))
-        return FALSE;
-
-    switch(cmpt) {
-    case CMP_EQ:
-        if(majorv == IE_MAJOR_VERSION && minorv == IE_MINOR_VERSION)
-            break;
-        return FALSE;
-    case CMP_LT:
-        if(majorv > IE_MAJOR_VERSION)
-            break;
-        if(majorv == IE_MAJOR_VERSION && minorv > IE_MINOR_VERSION)
-            break;
-        return FALSE;
-    case CMP_LTE:
-        if(majorv > IE_MAJOR_VERSION)
-            break;
-        if(majorv == IE_MAJOR_VERSION && minorv >= IE_MINOR_VERSION)
-            break;
-        return FALSE;
-    case CMP_GT:
-        if(majorv < IE_MAJOR_VERSION)
-            break;
-        if(majorv == IE_MAJOR_VERSION && minorv < IE_MINOR_VERSION)
-            break;
-        return FALSE;
-    case CMP_GTE:
-        if(majorv < IE_MAJOR_VERSION)
-            break;
-        if(majorv == IE_MAJOR_VERSION && minorv <= IE_MINOR_VERSION)
-            break;
-        return FALSE;
-    }
-
-    buf = heap_alloc((end-ptr+1)*sizeof(WCHAR));
-    if(!buf)
-        return FALSE;
-
-    memcpy(buf, ptr, (end-ptr)*sizeof(WCHAR));
-    buf[end-ptr] = 0;
-    nsAString_Init(&nsstr, buf);
-    heap_free(buf);
-
-    /* FIXME: Find better way to insert HTML to document. */
-    nsres = nsIDOMHTMLDocument_Write(doc->nsdoc, &nsstr);
-    nsAString_Finish(&nsstr);
-    if(NS_FAILED(nsres)) {
-        ERR("Write failed: %08x\n", nsres);
-        return FALSE;
-    }
-
-    return TRUE;
-}
-
-static nsresult NSAPI handle_node_insert(nsIDOMEventListener *iface, nsIDOMEvent *event)
-{
-    NSContainer *This = NSEVENTLIST_THIS(iface)->This;
-    nsIDOMEventTarget *target;
-    nsIDOMComment *nscomment;
-    nsIDOMElement *elem;
-    nsresult nsres;
-
-    TRACE("(%p %p)\n", This, event);
-
-    nsres = nsIDOMEvent_GetTarget(event, &target);
-    if(NS_FAILED(nsres)) {
-        ERR("GetTarget failed: %08x\n", nsres);
-        return NS_OK;
-    }
-
-    nsres = nsIDOMEventTarget_QueryInterface(target, &IID_nsIDOMElement, (void**)&elem);
-    if(NS_SUCCEEDED(nsres)) {
-        nsIDOMHTMLScriptElement *script;
-
-        nsres = nsIDOMElement_QueryInterface(elem, &IID_nsIDOMHTMLScriptElement, (void**)&script);
-        if(NS_SUCCEEDED(nsres)) {
-            doc_insert_script(This->doc, script);
-            nsIDOMHTMLScriptElement_Release(script);
-        }
-
-        check_event_attr(This->doc, elem);
-
-        nsIDOMEventTarget_Release(target);
-        nsIDOMNode_Release(elem);
-        return NS_OK;
-    }
-
-    nsres = nsIDOMEventTarget_QueryInterface(target, &IID_nsIDOMComment, (void**)&nscomment);
-    if(NS_SUCCEEDED(nsres)) {
-        nsAString comment_str;
-        BOOL remove_comment = FALSE;
-
-        nsAString_Init(&comment_str, NULL);
-        nsres = nsIDOMComment_GetData(nscomment, &comment_str);
-        if(NS_SUCCEEDED(nsres)) {
-            const PRUnichar *comment;
-
-            nsAString_GetData(&comment_str, &comment);
-            remove_comment = handle_insert_comment(This->doc, comment);
-        }
-
-        nsAString_Finish(&comment_str);
-
-        if(remove_comment) {
-            nsIDOMNode *nsparent, *tmp;
-
-            nsIDOMComment_GetParentNode(nscomment, &nsparent);
-            nsIDOMNode_RemoveChild(nsparent, (nsIDOMNode*)nscomment, &tmp);
-            nsIDOMNode_Release(nsparent);
-            nsIDOMNode_Release(tmp);
-        }
-
-        nsIDOMComment_Release(nscomment);
-    }
-
-    return NS_OK;
-}
-
 static nsresult NSAPI handle_htmlevent(nsIDOMEventListener *iface, nsIDOMEvent *event)
 {
     NSContainer *This = NSEVENTLIST_THIS(iface)->This;
@@ -427,7 +225,6 @@ static const nsIDOMEventListenerVtbl blur_vtbl =      EVENTLISTENER_VTBL(handle_
 static const nsIDOMEventListenerVtbl focus_vtbl =     EVENTLISTENER_VTBL(handle_focus);
 static const nsIDOMEventListenerVtbl keypress_vtbl =  EVENTLISTENER_VTBL(handle_keypress);
 static const nsIDOMEventListenerVtbl load_vtbl =      EVENTLISTENER_VTBL(handle_load);
-static const nsIDOMEventListenerVtbl node_insert_vtbl = EVENTLISTENER_VTBL(handle_node_insert);
 static const nsIDOMEventListenerVtbl htmlevent_vtbl = EVENTLISTENER_VTBL(handle_htmlevent);
 
 static void init_event(nsIDOMEventTarget *target, const PRUnichar *type,
@@ -484,14 +281,11 @@ void init_nsevents(NSContainer *This)
     static const PRUnichar wsz_focus[]     = {'f','o','c','u','s',0};
     static const PRUnichar wsz_keypress[]  = {'k','e','y','p','r','e','s','s',0};
     static const PRUnichar wsz_load[]      = {'l','o','a','d',0};
-    static const PRUnichar DOMNodeInsertedW[] =
-        {'D','O','M','N','o','d','e','I','n','s','e','r','t','e','d',0};
 
     init_listener(&This->blur_listener,        This, &blur_vtbl);
     init_listener(&This->focus_listener,       This, &focus_vtbl);
     init_listener(&This->keypress_listener,    This, &keypress_vtbl);
     init_listener(&This->load_listener,        This, &load_vtbl);
-    init_listener(&This->node_insert_listener, This, &node_insert_vtbl);
     init_listener(&This->htmlevent_listener,   This, &htmlevent_vtbl);
 
     nsres = nsIWebBrowser_GetContentDOMWindow(This->webbrowser, &dom_window);
@@ -511,7 +305,6 @@ void init_nsevents(NSContainer *This)
     init_event(target, wsz_focus,      NSEVENTLIST(&This->focus_listener),       TRUE);
     init_event(target, wsz_keypress,   NSEVENTLIST(&This->keypress_listener),    FALSE);
     init_event(target, wsz_load,       NSEVENTLIST(&This->load_listener),        TRUE);
-    init_event(target, DOMNodeInsertedW,NSEVENTLIST(&This->node_insert_listener),TRUE);
 
     nsIDOMEventTarget_Release(target);
 }

@@ -121,6 +121,19 @@ static	void	CALLBACK	JOY_Timer(HWND hWnd, UINT wMsg, UINT_PTR wTimer, DWORD dwTi
 }
 
 /**************************************************************************
+ *                              joyConfigChanged        [WINMM.@]
+ */
+MMRESULT WINAPI joyConfigChanged(DWORD flags)
+{
+    FIXME("(%x) - stub\n", flags);
+
+    if (flags)
+	return JOYERR_PARMS;
+
+    return JOYERR_NOERROR;
+}
+
+/**************************************************************************
  * 				joyGetNumDevs		[WINMM.@]
  */
 UINT WINAPI joyGetNumDevs(void)

@@ -63,7 +63,7 @@ static HRESULT init_d3d9(
     device_pparams->hDeviceWindow = window;
     device_pparams->SwapEffect = D3DSWAPEFFECT_DISCARD;
 
-    hres = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_NULLREF, window,
+    hres = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window,
         D3DCREATE_SOFTWARE_VERTEXPROCESSING, device_pparams, device);
     ok(hres == D3D_OK || hres == D3DERR_NOTAVAILABLE,
         "IDirect3D_CreateDevice returned: 0x%x\n", hres);
@@ -91,6 +91,7 @@ static void test_begin_end_state_block(IDirect3DDevice9 *device_ptr)
     ok(hret == D3D_OK && state_block_ptr != 0 && state_block_ptr != (IDirect3DStateBlock9 *)0xdeadbeef, 
         "EndStateBlock returned: hret 0x%x, state_block_ptr %p. "
         "Expected hret 0x%x, state_block_ptr != %p, state_block_ptr != 0xdeadbeef.\n", hret, state_block_ptr, D3D_OK, NULL);
+    IDirect3DStateBlock9_Release(state_block_ptr);
 
     /* Calling EndStateBlock while not recording should return D3DERR_INVALIDCALL. state_block_ptr should not be touched. */
     state_block_ptr = (IDirect3DStateBlock9 *)0xdeadbeef;
@@ -1072,6 +1073,7 @@ typedef struct render_state_data {
 
 typedef struct render_state_arg {
     D3DPRESENT_PARAMETERS* device_pparams;
+    float pointsize_max;
 } render_state_arg;
 
 typedef struct render_state_context {
@@ -1122,14 +1124,12 @@ static inline DWORD to_dword(float fl) {
     return *((DWORD*) &fl);
 }
 
-static void render_state_default_data_init(
-    D3DPRESENT_PARAMETERS* device_pparams,
-    render_state_data* data) {
-
+static void render_state_default_data_init(const struct render_state_arg *rsarg, struct render_state_data *data)
+{
+   DWORD zenable = rsarg->device_pparams->EnableAutoDepthStencil ? D3DZB_TRUE : D3DZB_FALSE;
    unsigned int idx = 0;
 
-   data->states[idx++] = device_pparams->EnableAutoDepthStencil?
-                         D3DZB_TRUE : D3DZB_FALSE;  /* ZENABLE */
+   data->states[idx++] = zenable;               /* ZENABLE */
    data->states[idx++] = D3DFILL_SOLID;         /* FILLMODE */
    data->states[idx++] = D3DSHADE_GOURAUD;      /* SHADEMODE */
    data->states[idx++] = TRUE;                  /* ZWRITEENABLE */
@@ -1194,7 +1194,7 @@ static void render_state_default_data_init(
    data->states[idx++] = 0xFFFFFFFF;            /* MULTISAMPLEMASK */
    data->states[idx++] = D3DPATCHEDGE_DISCRETE; /* PATCHEDGESTYLE */ 
    data->states[idx++] = 0xbaadcafe;            /* DEBUGMONITORTOKEN */
-   data->states[idx++] = to_dword(64.0f);       /* POINTSIZE_MAX */
+   data->states[idx++] = to_dword(rsarg->pointsize_max); /* POINTSIZE_MAX */
    data->states[idx++] = FALSE;                 /* INDEXEDVERTEXBLENDENABLE */
    data->states[idx++] = 0x0000000F;            /* COLORWRITEENABLE */
    data->states[idx++] = to_dword(0.0f);        /* TWEENFACTOR */
@@ -1371,7 +1371,7 @@ static HRESULT render_state_setup_handler(
     test->test_data_out = &ctx->test_data_buffer;
     test->poison_data = &ctx->poison_data_buffer;
 
-    render_state_default_data_init(rsarg->device_pparams, &ctx->default_data_buffer);
+    render_state_default_data_init(rsarg, &ctx->default_data_buffer);
     render_state_test_data_init(&ctx->test_data_buffer);
     render_state_poison_data_init(&ctx->poison_data_buffer);
 
@@ -1453,6 +1453,7 @@ static void test_state_management(
     tcount++;
 
     render_state_arg.device_pparams = device_pparams;
+    render_state_arg.pointsize_max = caps.MaxPointSize;
     render_states_queue_test(&tests[tcount], &render_state_arg);
     tcount++;
 
@@ -1583,5 +1584,9 @@ START_TEST(stateblock)
     test_state_management(device_ptr, &device_pparams);
     test_shader_constant_apply(device_ptr);
 
-    if (device_ptr) IUnknown_Release(device_ptr);
+    if (device_ptr)
+    {
+        ULONG refcount = IDirect3DDevice9_Release(device_ptr);
+        ok(!refcount, "Device has %u references left\n", refcount);
+    }
 }

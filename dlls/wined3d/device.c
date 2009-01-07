@@ -1764,6 +1764,10 @@ static unsigned int ConvertFvfToDeclaration(IWineD3DDeviceImpl *This, /* For the
             elements[idx].Type = WINED3DDECLTYPE_FLOAT4;
             elements[idx].Usage = WINED3DDECLUSAGE_POSITIONT;
         }
+        else if ((fvf & WINED3DFVF_XYZW) == WINED3DFVF_XYZW) {
+            elements[idx].Type = WINED3DDECLTYPE_FLOAT4;
+            elements[idx].Usage = WINED3DDECLUSAGE_POSITION;
+        }
         else {
             elements[idx].Type = WINED3DDECLTYPE_FLOAT3;
             elements[idx].Usage = WINED3DDECLUSAGE_POSITION;
@@ -2543,7 +2547,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetStreamSource(IWineD3DDevice *iface, 
     oldSrc = This->updateStateBlock->streamSource[StreamNumber];
     TRACE("(%p) : StreamNo: %u, OldStream (%p), NewStream (%p), OffsetInBytes %u, NewStride %u\n", This, StreamNumber, oldSrc, pStreamData, OffsetInBytes, Stride);
 
-    This->updateStateBlock->changed.streamSource[StreamNumber] = TRUE;
+    This->updateStateBlock->changed.streamSource |= 1 << StreamNumber;
 
     if(oldSrc == pStreamData &&
        This->updateStateBlock->streamStride[StreamNumber] == Stride &&
@@ -2631,7 +2635,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetStreamSourceFreq(IWineD3DDevice *ifa
     TRACE("(%p) StreamNumber(%d), Divider(%d)\n", This, StreamNumber, Divider);
     This->updateStateBlock->streamFlags[StreamNumber] = Divider & (WINED3DSTREAMSOURCE_INSTANCEDATA  | WINED3DSTREAMSOURCE_INDEXEDDATA );
 
-    This->updateStateBlock->changed.streamFreq[StreamNumber]  = TRUE;
+    This->updateStateBlock->changed.streamFreq |= 1 << StreamNumber;
     This->updateStateBlock->streamFreq[StreamNumber]          = Divider & 0x7FFFFF;
 
     if(This->updateStateBlock->streamFreq[StreamNumber] != oldFreq ||
@@ -2722,7 +2726,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_MultiplyTransform(IWineD3DDevice *iface
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     TRACE("(%p) : For state %s\n", This, debug_d3dtstype(State));
 
-    if (State < HIGHEST_TRANSFORMSTATE)
+    if (State <= HIGHEST_TRANSFORMSTATE)
     {
         mat = &This->updateStateBlock->transforms[State];
     } else {
@@ -2984,7 +2988,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetLightEnable(IWineD3DDevice *iface, D
                  *
                  * TODO: Test how this affects rendering
                  */
-                FIXME("Too many concurrently active lights\n");
+                WARN("Too many concurrently active lights\n");
                 return WINED3D_OK;
             }
 
@@ -3034,7 +3038,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetClipPlane(IWineD3DDevice *iface, DWO
         return WINED3DERR_INVALIDCALL;
     }
 
-    This->updateStateBlock->changed.clipplane[Index] = TRUE;
+    This->updateStateBlock->changed.clipplane |= 1 << Index;
 
     if(This->updateStateBlock->clipplane[Index][0] == pPlane[0] &&
        This->updateStateBlock->clipplane[Index][1] == pPlane[1] &&
@@ -3634,6 +3638,7 @@ static void device_map_stage(IWineD3DDeviceImpl *This, int stage, int unit) {
 static void device_update_fixed_function_usage_map(IWineD3DDeviceImpl *This) {
     int i;
 
+    This->fixed_function_usage_map = 0;
     for (i = 0; i < MAX_TEXTURES; ++i) {
         WINED3DTEXTUREOP color_op = This->stateBlock->textureState[i][WINED3DTSS_COLOROP];
         WINED3DTEXTUREOP alpha_op = This->stateBlock->textureState[i][WINED3DTSS_ALPHAOP];
@@ -3646,10 +3651,6 @@ static void device_update_fixed_function_usage_map(IWineD3DDeviceImpl *This) {
 
         if (color_op == WINED3DTOP_DISABLE) {
             /* Not used, and disable higher stages */
-            while (i < MAX_TEXTURES) {
-                This->fixed_function_usage_map[i] = FALSE;
-                ++i;
-            }
             break;
         }
 
@@ -3659,26 +3660,27 @@ static void device_update_fixed_function_usage_map(IWineD3DDeviceImpl *This) {
                 || ((alpha_arg1 == WINED3DTA_TEXTURE) && alpha_op != WINED3DTOP_SELECTARG2)
                 || ((alpha_arg2 == WINED3DTA_TEXTURE) && alpha_op != WINED3DTOP_SELECTARG1)
                 || ((alpha_arg3 == WINED3DTA_TEXTURE) && (alpha_op == WINED3DTOP_MULTIPLYADD || alpha_op == WINED3DTOP_LERP))) {
-            This->fixed_function_usage_map[i] = TRUE;
-        } else {
-            This->fixed_function_usage_map[i] = FALSE;
+            This->fixed_function_usage_map |= (1 << i);
         }
 
         if ((color_op == WINED3DTOP_BUMPENVMAP || color_op == WINED3DTOP_BUMPENVMAPLUMINANCE) && i < MAX_TEXTURES - 1) {
-            This->fixed_function_usage_map[i+1] = TRUE;
+            This->fixed_function_usage_map |= (1 << (i + 1));
         }
     }
 }
 
 static void device_map_fixed_function_samplers(IWineD3DDeviceImpl *This) {
     int i, tex;
+    WORD ffu_map;
 
     device_update_fixed_function_usage_map(This);
+    ffu_map = This->fixed_function_usage_map;
 
     if (This->max_ffp_textures == This->max_ffp_texture_stages ||
-        This->stateBlock->lowest_disabled_stage <= This->max_ffp_textures) {
-        for (i = 0; i < This->stateBlock->lowest_disabled_stage; ++i) {
-            if (!This->fixed_function_usage_map[i]) continue;
+            This->stateBlock->lowest_disabled_stage <= This->max_ffp_textures) {
+        for (i = 0; ffu_map; ffu_map >>= 1, ++i)
+        {
+            if (!(ffu_map & 1)) continue;
 
             if (This->texUnitMap[i] != i) {
                 device_map_stage(This, i, i);
@@ -3691,8 +3693,9 @@ static void device_map_fixed_function_samplers(IWineD3DDeviceImpl *This) {
 
     /* Now work out the mapping */
     tex = 0;
-    for (i = 0; i < This->stateBlock->lowest_disabled_stage; ++i) {
-        if (!This->fixed_function_usage_map[i]) continue;
+    for (i = 0; ffu_map; ffu_map >>= 1, ++i)
+    {
+        if (!(ffu_map & 1)) continue;
 
         if (This->texUnitMap[i] != tex) {
             device_map_stage(This, i, tex);
@@ -3735,7 +3738,7 @@ static BOOL device_unit_free_for_vs(IWineD3DDeviceImpl *This, const DWORD *pshad
 
         if (!pshader_sampler_tokens) {
             /* No pixel shader, check fixed function */
-            return current_mapping >= MAX_TEXTURES || !This->fixed_function_usage_map[current_mapping];
+            return current_mapping >= MAX_TEXTURES || !(This->fixed_function_usage_map & (1 << current_mapping));
         }
 
         /* Pixel shader, check the shader's sampler map */
@@ -3785,8 +3788,8 @@ static void device_map_vsamplers(IWineD3DDeviceImpl *This, BOOL ps) {
 }
 
 void IWineD3DDeviceImpl_FindTexUnitMap(IWineD3DDeviceImpl *This) {
-    BOOL vs = use_vs(This);
-    BOOL ps = use_ps(This);
+    BOOL vs = use_vs(This->stateBlock);
+    BOOL ps = use_ps(This->stateBlock);
     /*
      * Rules are:
      * -> Pixel shaders need a 1:1 map. In theory the shader input could be mapped too, but
@@ -4738,7 +4741,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_EndStateBlock(IWineD3DDevice *iface, IW
     IWineD3DStateBlockImpl *object = This->updateStateBlock;
 
     if (!This->isRecordingState) {
-        FIXME("(%p) not recording! returning error\n", This);
+        WARN("(%p) not recording! returning error\n", This);
         *ppStateBlock = NULL;
         return WINED3DERR_INVALIDCALL;
     }
@@ -5137,7 +5140,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_DrawIndexedPrimitive(IWineD3DDevice *
          * without an index buffer set. (The first time at least...)
          * D3D8 simply dies, but I doubt it can do much harm to return
          * D3DERR_INVALIDCALL there as well. */
-        ERR("(%p) : Called without a valid index buffer set, returning WINED3DERR_INVALIDCALL\n", This);
+        WARN("(%p) : Called without a valid index buffer set, returning WINED3DERR_INVALIDCALL\n", This);
         return WINED3DERR_INVALIDCALL;
     }
 

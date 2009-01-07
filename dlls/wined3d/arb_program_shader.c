@@ -314,7 +314,7 @@ static void shader_generate_arb_declarations(IWineD3DBaseShader *iface, const sh
                 FIXME("No free constant to load the luminance parameters\n");
             }
         } else {
-            FIXME("No free constant found to load environemnt bump mapping matrix into the shader. texbem instruction will not apply bump mapping\n");
+            FIXME("No free constant found to load environment bump mapping matrix into the shader. texbem instruction will not apply bump mapping\n");
         }
 
         ps->numbumpenvmatconsts = cur + 1;
@@ -902,8 +902,39 @@ static void shader_hw_map2gl(const SHADER_OPCODE_ARG *arg)
     SHADER_BUFFER* buffer = arg->buffer;
     DWORD dst = arg->dst;
     const DWORD *src = arg->src;
+    const char *instruction;
     char arguments[256];
     unsigned int i;
+
+    switch (curOpcode->opcode)
+    {
+        case WINED3DSIO_ABS: instruction = "ABS"; break;
+        case WINED3DSIO_ADD: instruction = "ADD"; break;
+        case WINED3DSIO_CRS: instruction = "XPD"; break;
+        case WINED3DSIO_DP3: instruction = "DP3"; break;
+        case WINED3DSIO_DP4: instruction = "DP4"; break;
+        case WINED3DSIO_DST: instruction = "DST"; break;
+        case WINED3DSIO_EXP: instruction = "EX2"; break;
+        case WINED3DSIO_EXPP: instruction = "EXP"; break;
+        case WINED3DSIO_FRC: instruction = "FRC"; break;
+        case WINED3DSIO_LIT: instruction = "LIT"; break;
+        case WINED3DSIO_LOG: instruction = "LG2"; break;
+        case WINED3DSIO_LOGP: instruction = "LOG"; break;
+        case WINED3DSIO_LRP: instruction = "LRP"; break;
+        case WINED3DSIO_MAD: instruction = "MAD"; break;
+        case WINED3DSIO_MAX: instruction = "MAX"; break;
+        case WINED3DSIO_MIN: instruction = "MIN"; break;
+        case WINED3DSIO_MOV: instruction = "MOV"; break;
+        case WINED3DSIO_MUL: instruction = "MUL"; break;
+        case WINED3DSIO_NOP: instruction = "NOP"; break;
+        case WINED3DSIO_POW: instruction = "POW"; break;
+        case WINED3DSIO_SGE: instruction = "SGE"; break;
+        case WINED3DSIO_SLT: instruction = "SLT"; break;
+        case WINED3DSIO_SUB: instruction = "SUB"; break;
+        default: instruction = "";
+            FIXME("Unhandled opcode %s\n", curOpcode->name);
+            break;
+    }
 
     if (shader_is_pshader_version(arg->reg_maps->shader_version))
     {
@@ -958,7 +989,7 @@ static void shader_hw_map2gl(const SHADER_OPCODE_ARG *arg)
             strcat(arguments, ", ");
             strcat(arguments, operands[i]);
         }
-        shader_addline(buffer, "%s%s %s;\n", curOpcode->glname, modifier, arguments);
+        shader_addline(buffer, "%s%s %s;\n", instruction, modifier, arguments);
 
         /* A shift requires another line. */
         if (shift) pshader_gen_output_modifier_line(buffer, saturate, output_wmask, shift, output_rname);
@@ -975,7 +1006,7 @@ static void shader_hw_map2gl(const SHADER_OPCODE_ARG *arg)
                 vshader_program_add_param(arg, src[i-1], TRUE, arguments);
             }
         }
-        shader_addline(buffer, "%s%s;\n", curOpcode->glname, arguments);
+        shader_addline(buffer, "%s%s;\n", instruction, arguments);
     }
 }
 
@@ -1560,10 +1591,20 @@ static void vshader_hw_rsq_rcp(const SHADER_OPCODE_ARG *arg)
     DWORD dst = arg->dst;
     DWORD src = arg->src[0];
     DWORD swizzle = (src & WINED3DSP_SWIZZLE_MASK) >> WINED3DSP_SWIZZLE_SHIFT;
+    const char *instruction;
 
     char tmpLine[256];
 
-    strcpy(tmpLine, curOpcode->glname); /* Opcode */
+    switch(curOpcode->opcode)
+    {
+        case WINED3DSIO_RSQ: instruction = "RSQ"; break;
+        case WINED3DSIO_RCP: instruction = "RCP"; break;
+        default: instruction = "";
+            FIXME("Unhandled opcode %s\n", curOpcode->name);
+            break;
+    }
+
+    strcpy(tmpLine, instruction);
     vshader_program_add_param(arg, dst, FALSE, tmpLine); /* Destination */
     strcat(tmpLine, ",");
     vshader_program_add_param(arg, src, TRUE, tmpLine);
@@ -2339,7 +2380,7 @@ static void state_texfactor_arbfp(DWORD state, IWineD3DStateBlockImpl *statebloc
      * application provided constants
      */
     if(device->shader_backend == &arb_program_shader_backend) {
-        if(use_ps(device)) return;
+        if (use_ps(stateblock)) return;
 
         device = stateblock->wineD3DDevice;
         device->activeContext->pshader_const_dirty[ARB_FFP_CONST_TFACTOR] = 1;
@@ -2360,7 +2401,7 @@ static void state_arb_specularenable(DWORD state, IWineD3DStateBlockImpl *stateb
      * application provided constants
      */
     if(device->shader_backend == &arb_program_shader_backend) {
-        if(use_ps(device)) return;
+        if (use_ps(stateblock)) return;
 
         device = stateblock->wineD3DDevice;
         device->activeContext->pshader_const_dirty[ARB_FFP_CONST_SPECULAR_ENABLE] = 1;
@@ -2384,7 +2425,8 @@ static void set_bumpmat_arbfp(DWORD state, IWineD3DStateBlockImpl *stateblock, W
     IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
     float mat[2][2];
 
-    if(use_ps(device)) {
+    if (use_ps(stateblock))
+    {
         if(stage != 0 &&
            ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->baseShader.reg_maps.bumpmat[stage]) {
             /* The pixel shader has to know the bump env matrix. Do a constants update if it isn't scheduled
@@ -2418,7 +2460,8 @@ static void tex_bumpenvlum_arbfp(DWORD state, IWineD3DStateBlockImpl *stateblock
     IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
     float param[4];
 
-    if(use_ps(device)) {
+    if (use_ps(stateblock))
+    {
         if(stage != 0 &&
            ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->baseShader.reg_maps.luminanceparams[stage]) {
             /* The pixel shader has to know the luminance offset. Do a constants update if it
@@ -2921,8 +2964,8 @@ static GLuint gen_arbfp_ffp_shader(const struct ffp_frag_settings *settings, IWi
 static void fragment_prog_arbfp(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
     struct shader_arb_priv *priv = (struct shader_arb_priv *) device->fragment_priv;
-    BOOL use_pshader = use_ps(device);
-    BOOL use_vshader = use_vs(device);
+    BOOL use_pshader = use_ps(stateblock);
+    BOOL use_vshader = use_vs(stateblock);
     struct ffp_frag_settings settings;
     const struct arbfp_ffp_desc *desc;
     unsigned int i;

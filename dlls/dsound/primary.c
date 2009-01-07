@@ -46,19 +46,24 @@ WINE_DEFAULT_DEBUG_CHANNEL(dsound);
  */
 DWORD DSOUND_fraglen(DWORD nSamplesPerSec, DWORD nBlockAlign)
 {
-    DWORD fraglen = 256 * nBlockAlign;
+    /* Given a timer delay of 10ms, the fragment size is approximately:
+     *     fraglen = (nSamplesPerSec * 10 / 1000) * nBlockAlign
+     * ==> fraglen = (nSamplesPerSec / 100) * nBlockSize
+     *
+     * ALSA uses buffers that are powers of 2. Because of this, fraglen
+     * is rounded up to the nearest power of 2:
+     */
 
-    /* Compensate for only being roughly accurate */
-    if (nSamplesPerSec <= 26000)
-        fraglen /= 2;
+    if (nSamplesPerSec <= 12800)
+        return 128 * nBlockAlign;
 
-    if (nSamplesPerSec <= 10000)
-        fraglen /= 2;
+    if (nSamplesPerSec <= 25600)
+        return 256 * nBlockAlign;
 
-    if (nSamplesPerSec >= 80000)
-        fraglen *= 2;
+    if (nSamplesPerSec <= 51200)
+        return 512 * nBlockAlign;
 
-    return fraglen;
+    return 1024 * nBlockAlign;
 }
 
 static void DSOUND_RecalcPrimary(DirectSoundDevice *device)
@@ -832,6 +837,9 @@ static HRESULT WINAPI PrimaryBufferImpl_Lock(
 		GetTickCount()
 	);
 
+        if (!audiobytes1)
+            return DSERR_INVALIDPARAM;
+
 	if (device->priolevel != DSSCL_WRITEPRIMARY) {
 		WARN("failed priority check!\n");
 		return DSERR_PRIOLEVELNEEDED;
@@ -994,8 +1002,12 @@ static HRESULT WINAPI PrimaryBufferImpl_Unlock(
 
 	if (!(device->drvdesc.dwFlags & DSDDESC_DONTNEEDPRIMARYLOCK) && device->hwbuf) {
 		HRESULT	hres;
-		
-		hres = IDsDriverBuffer_Unlock(device->hwbuf, p1, x1, p2, x2);
+
+		if ((char *)p1 - (char *)device->buffer + x1 > device->buflen)
+		    hres = DSERR_INVALIDPARAM;
+		else
+		    hres = IDsDriverBuffer_Unlock(device->hwbuf, p1, x1, p2, x2);
+
 		if (hres != DS_OK) {
 			WARN("IDsDriverBuffer_Unlock failed\n");
 			return hres;

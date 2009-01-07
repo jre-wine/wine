@@ -103,6 +103,9 @@
 # ifdef HAVE_ASM_TYPES_H
 #  include <asm/types.h>
 # endif
+# ifdef HAVE_LINUX_TYPES_H
+#  include <linux/types.h>
+# endif
 # include <linux/ipx.h>
 # define HAVE_IPX
 #endif
@@ -1124,7 +1127,7 @@ static int WS2_recv( int fd, struct ws2_async *wsa )
  *
  * Handler for overlapped recv() operations.
  */
-static NTSTATUS WS2_async_recv( void* user, IO_STATUS_BLOCK* iosb, NTSTATUS status, ULONG *total )
+static NTSTATUS WS2_async_recv( void* user, IO_STATUS_BLOCK* iosb, NTSTATUS status, void **apc)
 {
     ws2_async* wsa = user;
     int result = 0, fd;
@@ -1160,7 +1163,8 @@ static NTSTATUS WS2_async_recv( void* user, IO_STATUS_BLOCK* iosb, NTSTATUS stat
     if (status != STATUS_PENDING)
     {
         iosb->u.Status = status;
-        iosb->Information = *total = result;
+        iosb->Information = result;
+        *apc = ws2_async_apc;
     }
     return status;
 }
@@ -1225,7 +1229,7 @@ static int WS2_send( int fd, struct ws2_async *wsa )
  *
  * Handler for overlapped send() operations.
  */
-static NTSTATUS WS2_async_send(void* user, IO_STATUS_BLOCK* iosb, NTSTATUS status, ULONG *total )
+static NTSTATUS WS2_async_send(void* user, IO_STATUS_BLOCK* iosb, NTSTATUS status, void **apc)
 {
     ws2_async* wsa = user;
     int result = 0, fd;
@@ -1270,7 +1274,8 @@ static NTSTATUS WS2_async_send(void* user, IO_STATUS_BLOCK* iosb, NTSTATUS statu
     if (status != STATUS_PENDING)
     {
         iosb->u.Status = status;
-        iosb->Information = *total = result;
+        iosb->Information = result;
+        *apc = ws2_async_apc;
     }
     return status;
 }
@@ -1280,7 +1285,7 @@ static NTSTATUS WS2_async_send(void* user, IO_STATUS_BLOCK* iosb, NTSTATUS statu
  *
  * Handler for shutdown() operations on overlapped sockets.
  */
-static NTSTATUS WS2_async_shutdown( void* user, PIO_STATUS_BLOCK iosb, NTSTATUS status, ULONG *total )
+static NTSTATUS WS2_async_shutdown( void* user, PIO_STATUS_BLOCK iosb, NTSTATUS status, void **apc )
 {
     ws2_async* wsa = user;
     int fd, err = 1;
@@ -1300,8 +1305,8 @@ static NTSTATUS WS2_async_shutdown( void* user, PIO_STATUS_BLOCK iosb, NTSTATUS 
         status = err ? wsaErrno() : STATUS_SUCCESS;
         break;
     }
-    *total = 0;
     iosb->u.Status = status;
+    *apc = ws2_async_apc;
     return status;
 }
 
@@ -1327,12 +1332,11 @@ static int WS2_register_async_shutdown( SOCKET s, int type )
 
     SERVER_START_REQ( register_async )
     {
-        req->handle = wine_server_obj_handle( wsa->hSocket );
         req->type   = type;
-        req->async.callback = WS2_async_shutdown;
-        req->async.iosb     = &wsa->local_iosb;
-        req->async.arg      = wsa;
-        req->async.apc      = ws2_async_apc;
+        req->async.handle   = wine_server_obj_handle( wsa->hSocket );
+        req->async.callback = wine_server_client_ptr( WS2_async_shutdown );
+        req->async.iosb     = wine_server_client_ptr( &wsa->local_iosb );
+        req->async.arg      = wine_server_client_ptr( wsa );
         req->async.cvalue   = 0;
         status = wine_server_call( req );
     }
@@ -2780,12 +2784,11 @@ INT WINAPI WSASendTo( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
 
             SERVER_START_REQ( register_async )
             {
-                req->handle = wine_server_obj_handle( wsa->hSocket );
-                req->type   = ASYNC_TYPE_WRITE;
-                req->async.callback = WS2_async_send;
-                req->async.iosb     = iosb;
-                req->async.arg      = wsa;
-                req->async.apc      = ws2_async_apc;
+                req->type           = ASYNC_TYPE_WRITE;
+                req->async.handle   = wine_server_obj_handle( wsa->hSocket );
+                req->async.callback = wine_server_client_ptr( WS2_async_send );
+                req->async.iosb     = wine_server_client_ptr( iosb );
+                req->async.arg      = wine_server_client_ptr( wsa );
                 req->async.event    = wine_server_obj_handle( lpCompletionRoutine ? 0 : lpOverlapped->hEvent );
                 req->async.cvalue   = cvalue;
                 err = wine_server_call( req );
@@ -4306,12 +4309,11 @@ INT WINAPI WSARecvFrom( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
 
                 SERVER_START_REQ( register_async )
                 {
-                    req->handle = wine_server_obj_handle( wsa->hSocket );
-                    req->type   = ASYNC_TYPE_READ;
-                    req->async.callback = WS2_async_recv;
-                    req->async.iosb     = iosb;
-                    req->async.arg      = wsa;
-                    req->async.apc      = ws2_async_apc;
+                    req->type           = ASYNC_TYPE_READ;
+                    req->async.handle   = wine_server_obj_handle( wsa->hSocket );
+                    req->async.callback = wine_server_client_ptr( WS2_async_recv );
+                    req->async.iosb     = wine_server_client_ptr( iosb );
+                    req->async.arg      = wine_server_client_ptr( wsa );
                     req->async.event    = wine_server_obj_handle( lpCompletionRoutine ? 0 : lpOverlapped->hEvent );
                     req->async.cvalue   = cvalue;
                     err = wine_server_call( req );
@@ -4552,6 +4554,30 @@ int WINAPI WSARemoveServiceClass(LPGUID info)
     FIXME("Request to remove service %p\n",info);
     WSASetLastError(WSATYPE_NOT_FOUND);
     return SOCKET_ERROR;
+}
+
+/***********************************************************************
+ *              inet_ntop                      (WS2_32.@)
+ */
+PCSTR WINAPI WS_inet_ntop( INT family, PVOID addr, PSTR buffer, size_t len )
+{
+#ifdef HAVE_INET_NTOP
+    union generic_unix_sockaddr unix_addr;
+
+    switch (family)
+    {
+    case WS_AF_INET:
+        ws_sockaddr_ws2u( addr, sizeof(struct WS_sockaddr_in), &unix_addr );
+        return inet_ntop( AF_INET, &unix_addr, buffer, len );
+    case WS_AF_INET6:
+        ws_sockaddr_ws2u( addr, sizeof(struct WS_sockaddr_in6), &unix_addr );
+        return inet_ntop( AF_INET6, &unix_addr, buffer, len );
+    }
+#else
+    FIXME( "not supported on this platform\n" );
+#endif
+    WSASetLastError( WSAEAFNOSUPPORT );
+    return NULL;
 }
 
 /***********************************************************************

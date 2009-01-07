@@ -21,6 +21,7 @@ C_SRCS = \
 	memcpy_unaligned.c \
 	memmove.c \
 	mkstemps.c \
+	poll.c \
 	pread.c \
 	pwrite.c \
 	readlink.c \
@@ -29,6 +30,7 @@ C_SRCS = \
 	strcasecmp.c \
 	strerror.c \
 	strncasecmp.c \
+	symlink.c \
 	usleep.c
 
 all: $(MODULE)

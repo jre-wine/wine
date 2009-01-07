@@ -1303,7 +1303,8 @@ static BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
             }
             break;
         case VENDOR_INTEL:
-            if (strstr(gl_info->gl_renderer, "GMA 950")) {
+            if (strstr(gl_info->gl_renderer, "GMA 950") ||
+                strstr(gl_info->gl_renderer, "945GM")) {
                 /* MacOS calls the card GMA 950, but everywhere else the PCI ID is named 945GM */
                 gl_info->gl_card = CARD_INTEL_I945GM;
                 vidmem = 64;
@@ -4174,7 +4175,6 @@ BOOL InitAdapters(void) {
             ERR("Can't load opengl32.dll!\n");
             goto nogl_adapter;
         }
-        mod_win32gl = mod_gl;
 #else
 #define USE_GL_FUNC(pfn) pfn = (void*)pwglGetProcAddress(#pfn);
         /* To bypass the opengl32 thunks load wglGetProcAddress from gdi32 (glXGetProcAddress wrapper) instead of opengl32's */

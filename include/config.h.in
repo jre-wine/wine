@@ -117,6 +117,9 @@
 /* Define to 1 if you have the <freetype/ftglyph.h> header file. */
 #undef HAVE_FREETYPE_FTGLYPH_H
 
+/* Define to 1 if you have the <freetype/ftlcdfil.h> header file. */
+#undef HAVE_FREETYPE_FTLCDFIL_H
+
 /* Define to 1 if you have the <freetype/ftmodapi.h> header file. */
 #undef HAVE_FREETYPE_FTMODAPI_H
 
@@ -245,6 +248,9 @@
 
 /* Define to 1 if you have the `inet_network' function. */
 #undef HAVE_INET_NETWORK
+
+/* Define to 1 if you have the `inet_ntop' function. */
+#undef HAVE_INET_NTOP
 
 /* Define to 1 if you have the `inet_pton' function. */
 #undef HAVE_INET_PTON
@@ -387,6 +393,9 @@
 /* Define to 1 if you have the <linux/serial.h> header file. */
 #undef HAVE_LINUX_SERIAL_H
 
+/* Define to 1 if you have the <linux/types.h> header file. */
+#undef HAVE_LINUX_TYPES_H
+
 /* Define to 1 if you have the <linux/ucdrom.h> header file. */
 #undef HAVE_LINUX_UCDROM_H
 
@@ -506,6 +515,9 @@
 
 /* Define to 1 if the system has the type `off_t'. */
 #undef HAVE_OFF_T
+
+/* Define if mkdir takes only one argument */
+#undef HAVE_ONE_ARG_MKDIR
 
 /* Define if OpenGL is present on the system */
 #undef HAVE_OPENGL
@@ -654,6 +666,9 @@
 /* Define to 1 if you have the `snprintf' function. */
 #undef HAVE_SNPRINTF
 
+/* Define to 1 if you have the `socketpair' function. */
+#undef HAVE_SOCKETPAIR
+
 /* Define to 1 if you have the <soundcard.h> header file. */
 #undef HAVE_SOUNDCARD_H
 
@@ -761,6 +776,9 @@
 
 /* Define to 1 if `st_mtim' is member of `struct stat'. */
 #undef HAVE_STRUCT_STAT_ST_MTIM
+
+/* Define to 1 if you have the `symlink' function. */
+#undef HAVE_SYMLINK
 
 /* Define to 1 if you have the <syscall.h> header file. */
 #undef HAVE_SYSCALL_H
@@ -1001,9 +1019,6 @@
 
 /* Define if Xrender has the XRenderSetPictureTransform function */
 #undef HAVE_XRENDERSETPICTURETRANSFORM
-
-/* Define to 1 if you have the `_mkdir' function. */
-#undef HAVE__MKDIR
 
 /* Define to 1 if you have the `_pclose' function. */
 #undef HAVE__PCLOSE

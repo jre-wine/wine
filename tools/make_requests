@@ -29,14 +29,15 @@ my %formats =
     "unsigned char" => [  1,   1,  "%02x" ],
     "unsigned short"=> [  2,   2,  "%04x" ],
     "unsigned int"  => [  4,   4,  "%08x" ],
-    "void*"         => [  4,   4,  "%p" ],
     "data_size_t"   => [  4,   4,  "%u" ],
     "obj_handle_t"  => [  4,   4,  "%04x" ],
-    "atom_t"        => [  2,   2,  "%04x" ],
+    "atom_t"        => [  4,   4,  "%04x" ],
     "user_handle_t" => [  4,   4,  "%08x" ],
     "process_id_t"  => [  4,   4,  "%04x" ],
     "thread_id_t"   => [  4,   4,  "%04x" ],
-    "lparam_t"      => [  4,   4,  "%lx" ],
+    "client_ptr_t"  => [  8,   8,  "&dump_uint64" ],
+    "mod_handle_t"  => [  8,   8,  "&dump_uint64" ],
+    "lparam_t"      => [  8,   8,  "&dump_uint64" ],
     "apc_param_t"   => [  8,   8,  "&dump_uint64" ],
     "file_pos_t"    => [  8,   8,  "&dump_uint64" ],
     "mem_size_t"    => [  8,   8,  "&dump_uint64" ],
@@ -45,7 +46,7 @@ my %formats =
     "char_info_t"   => [  4,   2,  "&dump_char_info" ],
     "apc_call_t"    => [  40,  8,  "&dump_apc_call" ],
     "apc_result_t"  => [  40,  8,  "&dump_apc_result" ],
-    "async_data_t"  => [  28,  8,  "&dump_async_data" ],
+    "async_data_t"  => [  40,  8,  "&dump_async_data" ],
     "luid_t"        => [  8,   4,  "&dump_luid" ],
     "ioctl_code_t"  => [  4,   4,  "&dump_ioctl_code" ],
 );
@@ -70,6 +71,7 @@ sub DO_DUMP_FUNC($$@)
     {
 	my $type = shift;
 	my $var = shift;
+        next if $var =~ /^__pad/;
 	if (defined($formats{$type}))
 	{
             my $fmt = ${$formats{$type}}[2];

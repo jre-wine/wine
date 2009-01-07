@@ -590,7 +590,7 @@ IDirectDrawImpl_SetDisplayModeNoOverride(IDirectDraw7 *iface,
     {
         case WINED3DERR_NOTAVAILABLE:       return DDERR_UNSUPPORTED;
         default:                            return hr;
-    };
+    }
 }
 
 /*****************************************************************************
@@ -1107,7 +1107,14 @@ IDirectDrawImpl_WaitForVerticalBlank(IDirectDraw7 *iface,
                                      HANDLE h)
 {
     ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
-    FIXME("(%p)->(%x,%p): Stub\n", This, Flags, h);
+    static BOOL hide = FALSE;
+
+    /* This function is called often, so print the fixme only once */
+    if(!hide)
+    {
+        FIXME("(%p)->(%x,%p): Stub\n", This, Flags, h);
+        hide = TRUE;
+    }
 
     /* MSDN says DDWAITVB_BLOCKBEGINEVENT is not supported */
     if(Flags & DDWAITVB_BLOCKBEGINEVENT)
@@ -2084,6 +2091,7 @@ IDirectDrawImpl_CreateNewSurface(IDirectDrawImpl *This,
     ICOM_INIT_INTERFACE(*ppSurf, IDirect3DTexture, IDirect3DTexture1_Vtbl);
     (*ppSurf)->ref = 1;
     (*ppSurf)->version = 7;
+    TRACE("%p->version = %d\n", (*ppSurf), (*ppSurf)->version);
     (*ppSurf)->ddraw = This;
     (*ppSurf)->surface_desc.dwSize = sizeof(DDSURFACEDESC2);
     (*ppSurf)->surface_desc.u4.ddpfPixelFormat.dwSize = sizeof(DDPIXELFORMAT);

@@ -185,6 +185,21 @@ out:
     return ret;
 }
 
+/*
+ * Helper function to get and set the viewport - needed on geforce 8800 on XP - driver bug?
+ * This is needed after IDirect3DDevice7_SetRenderTarget in combination with offscreen to backbuffer rendering.
+ */
+static void set_the_same_viewport_again(IDirect3DDevice7 *device)
+{
+    D3DVIEWPORT7 vp = {0};
+    HRESULT hr;
+    hr = IDirect3DDevice7_GetViewport(device,&vp);
+    ok(hr == D3D_OK && vp.dwWidth == 640 && vp.dwHeight == 480, "IDirect3DDevice7_SetViewport returned %08x\n", hr);
+    hr = IDirect3DDevice7_SetViewport(device, &vp);
+    ok(hr == D3D_OK, "IDirect3DDevice7_SetViewport returned %08x\n", hr);
+    return;
+}
+
 struct vertex
 {
     float x, y, z;
@@ -559,6 +574,8 @@ static void offscreen_test(IDirect3DDevice7 *device)
 
         hr = IDirect3DDevice7_SetRenderTarget(device, backbuffer, 0);
         ok(hr == D3D_OK, "SetRenderTarget failed, hr = %08x\n", hr);
+        set_the_same_viewport_again(device);
+
         hr = IDirect3DDevice7_SetTexture(device, 0, offscreen);
         ok(hr == D3D_OK, "SetTexture failed, %08x\n", hr);
 
@@ -716,6 +733,7 @@ static void alpha_test(IDirect3DDevice7 *device)
 
         hr = IDirect3DDevice7_SetRenderTarget(device, backbuffer, 0);
         ok(hr == D3D_OK, "Can't get back buffer, hr = %08x\n", hr);
+        set_the_same_viewport_again(device);
 
         /* Render the offscreen texture onto the frame buffer to be able to compare it regularly.
          * Disable alpha blending for the final composition
@@ -739,28 +757,28 @@ static void alpha_test(IDirect3DDevice7 *device)
     green = (color & 0x0000ff00) >>  8;
     blue =  (color & 0x000000ff);
     ok(red >= 0xbe && red <= 0xc0 && green >= 0x39 && green <= 0x41 && blue == 0x00,
-       "SRCALPHA on frame buffer returned color %08x, expected 0x00bf4000\n", color);
+       "SRCALPHA on frame buffer returned color 0x%08x, expected 0x00bf4000\n", color);
 
     color = getPixelColor(device, 160, 120);
     red =   (color & 0x00ff0000) >> 16;
     green = (color & 0x0000ff00) >>  8;
     blue =  (color & 0x000000ff);
     ok(red == 0x00 && green == 0x00 && blue >= 0xfe && blue <= 0xff ,
-       "DSTALPHA on frame buffer returned color %08x, expected 0x00ff0000\n", color);
+       "DSTALPHA on frame buffer returned color 0x%08x, expected 0x000000ff\n", color);
 
     color = getPixelColor(device, 480, 360);
     red =   (color & 0x00ff0000) >> 16;
     green = (color & 0x0000ff00) >>  8;
     blue =  (color & 0x000000ff);
     ok(red >= 0xbe && red <= 0xc0 && green >= 0x39 && green <= 0x41 && blue == 0x00,
-       "SRCALPHA on texture returned color %08x, expected bar\n", color);
+       "SRCALPHA on texture returned color 0x%08x, expected 0x00bf4000\n", color);
 
     color = getPixelColor(device, 480, 120);
     red =   (color & 0x00ff0000) >> 16;
     green = (color & 0x0000ff00) >>  8;
     blue =  (color & 0x000000ff);
     ok(red >= 0x7e && red <= 0x81 && green == 0x00 && blue >= 0x7e && blue <= 0x81,
-       "DSTALPHA on texture returned color %08x, expected foo\n", color);
+       "DSTALPHA on texture returned color 0x%08x, expected 0x00800080\n", color);
 
     out:
     if(offscreen) IDirectDrawSurface7_Release(offscreen);

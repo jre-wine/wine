@@ -46,6 +46,27 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
     return TRUE;
 }
 
+void WINAPI XInputEnable(BOOL enable)
+{
+    /* Setting to false will stop messages from XInputSetState being sent
+    to the controllers. Setting to true will send the last vibration
+    value (sent to XInputSetState) to the controller and allow messages to
+    be sent */
+    FIXME("(%d) Stub!\n", enable);
+}
+
+DWORD WINAPI XInputSetState(DWORD dwUserIndex, XINPUT_VIBRATION* pVibration)
+{
+    FIXME("(%d %p) Stub!\n", dwUserIndex, pVibration);
+
+    if (dwUserIndex < XUSER_MAX_COUNT)
+    {
+        return ERROR_DEVICE_NOT_CONNECTED;
+        /* If controller exists then return ERROR_SUCCESS */
+    }
+    return ERROR_BAD_ARGUMENTS;
+}
+
 DWORD WINAPI XInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState)
 {
     FIXME("(%u %p)\n", dwUserIndex, pState);

@@ -114,8 +114,8 @@ struct statvfs
 #define RTLD_GLOBAL  0x100
 #endif
 
-#ifdef HAVE__MKDIR
-#define mkdir(path,mode) _mkdir(path)
+#ifdef HAVE_ONE_ARG_MKDIR
+#define mkdir(path,mode) mkdir(path)
 #endif
 
 #if !defined(HAVE_FTRUNCATE) && defined(HAVE_CHSIZE)
@@ -224,19 +224,6 @@ struct statvfs
 #endif  /* __GNUC__ */
 
 
-/* Register functions */
-
-#ifdef __i386__
-#define DEFINE_REGS_ENTRYPOINT( name, args, pop_args ) \
-    __ASM_GLOBAL_FUNC( name, \
-                       "pushl %eax\n\t" \
-                       "call " __ASM_NAME("__wine_call_from_32_regs") "\n\t" \
-                       ".long " __ASM_NAME("__regs_") #name "-.\n\t" \
-                       ".byte " #args "," #pop_args )
-/* FIXME: add support for other CPUs */
-#endif  /* __i386__ */
-
-
 /****************************************************************
  * Function definitions (only when using libwine_port)
  */
@@ -305,6 +292,22 @@ int lstat(const char *file_name, struct stat *buf);
 void *memmove(void *dest, const void *src, size_t len);
 #endif /* !defined(HAVE_MEMMOVE) */
 
+#ifndef HAVE_POLL
+struct pollfd
+{
+    int fd;
+    short events;
+    short revents;
+};
+#define POLLIN   0x01
+#define POLLPRI  0x02
+#define POLLOUT  0x04
+#define POLLERR  0x08
+#define POLLHUP  0x10
+#define POLLNVAL 0x20
+int poll( struct pollfd *fds, unsigned int count, int timeout );
+#endif /* HAVE_POLL */
+
 #ifndef HAVE_PREAD
 ssize_t pread( int fd, void *buf, size_t count, off_t offset );
 #endif /* HAVE_PREAD */
@@ -340,6 +343,10 @@ int strcasecmp(const char *str1, const char *str2);
 # define strcasecmp _stricmp
 # endif
 #endif /* !defined(HAVE_STRCASECMP) */
+
+#ifndef HAVE_SYMLINK
+int symlink(const char *from, const char *to);
+#endif
 
 #ifndef HAVE_USLEEP
 int usleep (unsigned int useconds);

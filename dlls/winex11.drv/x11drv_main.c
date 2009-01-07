@@ -271,7 +271,7 @@ static int error_handler( Display *display, XErrorEvent *error_evt )
 /***********************************************************************
  *		wine_tsx11_lock   (X11DRV.@)
  */
-void wine_tsx11_lock(void)
+void CDECL wine_tsx11_lock(void)
 {
     EnterCriticalSection( &X11DRV_CritSection );
 }
@@ -279,7 +279,7 @@ void wine_tsx11_lock(void)
 /***********************************************************************
  *		wine_tsx11_unlock   (X11DRV.@)
  */
-void wine_tsx11_unlock(void)
+void CDECL wine_tsx11_unlock(void)
 {
     LeaveCriticalSection( &X11DRV_CritSection );
 }
@@ -689,7 +689,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
  *
  * Returns the active status of the screen saver
  */
-BOOL X11DRV_GetScreenSaveActive(void)
+BOOL CDECL X11DRV_GetScreenSaveActive(void)
 {
     int timeout, temp;
     wine_tsx11_lock();
@@ -703,7 +703,7 @@ BOOL X11DRV_GetScreenSaveActive(void)
  *
  * Activate/Deactivate the screen saver
  */
-void X11DRV_SetScreenSaveActive(BOOL bActivate)
+void CDECL X11DRV_SetScreenSaveActive(BOOL bActivate)
 {
     int timeout, interval, prefer_blanking, allow_exposures;
     static int last_timeout = 15 * 60;

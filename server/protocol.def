@@ -33,15 +33,17 @@
 
 typedef unsigned int obj_handle_t;
 typedef unsigned int user_handle_t;
-typedef unsigned short atom_t;
+typedef unsigned int atom_t;
 typedef unsigned int process_id_t;
 typedef unsigned int thread_id_t;
 typedef unsigned int data_size_t;
 typedef unsigned int ioctl_code_t;
-typedef unsigned long lparam_t;
+typedef unsigned __int64 lparam_t;
 typedef unsigned __int64 apc_param_t;
 typedef unsigned __int64 mem_size_t;
 typedef unsigned __int64 file_pos_t;
+typedef unsigned __int64 client_ptr_t;
+typedef client_ptr_t mod_handle_t;
 
 struct request_header
 {
@@ -76,20 +78,20 @@ struct debug_event_exception
 struct debug_event_create_thread
 {
     obj_handle_t handle;     /* handle to the new thread */
-    void        *teb;        /* thread teb (in debugged process address space) */
-    void        *start;      /* thread startup routine */
+    client_ptr_t teb;        /* thread teb (in debugged process address space) */
+    client_ptr_t start;      /* thread startup routine */
 };
 struct debug_event_create_process
 {
     obj_handle_t file;       /* handle to the process exe file */
     obj_handle_t process;    /* handle to the new process */
     obj_handle_t thread;     /* handle to the new thread */
-    void        *base;       /* base of executable image */
+    mod_handle_t base;       /* base of executable image */
     int          dbg_offset; /* offset of debug info in file */
     int          dbg_size;   /* size of debug info */
-    void        *teb;        /* thread teb (in debugged process address space) */
-    void        *start;      /* thread startup routine */
-    void        *name;       /* image name (optional) */
+    client_ptr_t teb;        /* thread teb (in debugged process address space) */
+    client_ptr_t start;      /* thread startup routine */
+    client_ptr_t name;       /* image name (optional) */
     int          unicode;    /* is it Unicode? */
 };
 struct debug_event_exit
@@ -99,21 +101,21 @@ struct debug_event_exit
 struct debug_event_load_dll
 {
     obj_handle_t handle;     /* file handle for the dll */
-    void        *base;       /* base address of the dll */
+    mod_handle_t base;       /* base address of the dll */
     int          dbg_offset; /* offset of debug info in file */
     int          dbg_size;   /* size of debug info */
-    void        *name;       /* image name (optional) */
+    client_ptr_t name;       /* image name (optional) */
     int          unicode;    /* is it Unicode? */
 };
 struct debug_event_unload_dll
 {
-    void       *base;       /* base address of the dll */
+    mod_handle_t base;       /* base address of the dll */
 };
 struct debug_event_output_string
 {
-    void       *string;     /* string to display (in debugged process address space) */
-    int         unicode;    /* is it Unicode? */
-    int         length;     /* string length */
+    client_ptr_t string;     /* string to display (in debugged process address space) */
+    int          unicode;    /* is it Unicode? */
+    data_size_t  length;     /* string length */
 };
 struct debug_event_rip_info
 {
@@ -149,8 +151,9 @@ struct send_fd
 /* structure sent by the server on the wait fifo */
 struct wake_up_reply
 {
-    void *cookie;    /* magic cookie that was passed in select_request */
-    int   signaled;  /* wait result */
+    client_ptr_t cookie;    /* magic cookie that was passed in select_request */
+    int          signaled;  /* wait result */
+    int          __pad;
 };
 
 /* NT-style timeout, in 100ns units, negative means relative timeout */
@@ -161,7 +164,7 @@ typedef __int64 timeout_t;
 typedef struct
 {
     atom_t         atom;     /* property atom */
-    short          string;   /* was atom a string originally? */
+    int            string;   /* was atom a string originally? */
     lparam_t       data;     /* data stored in property */
 } property_data_t;
 
@@ -177,19 +180,28 @@ typedef struct
 /* structure for parameters of async I/O calls */
 typedef struct
 {
-    void           *callback;      /* client-side callback to call upon end of async */
-    void           *iosb;          /* I/O status block in client addr space */
-    void           *arg;           /* opaque user data to pass to callback */
-    void           *apc;           /* user apc to call */
+    obj_handle_t    handle;        /* object to perform I/O on */
     obj_handle_t    event;         /* event to signal when done */
+    client_ptr_t    callback;      /* client-side callback to call upon end of async */
+    client_ptr_t    iosb;          /* I/O status block in client addr space */
+    client_ptr_t    arg;           /* opaque user data to pass to callback */
     apc_param_t     cvalue;        /* completion value to use for completion events */
 } async_data_t;
 
 /* structures for extra message data */
 
+struct hardware_msg_data
+{
+    lparam_t        info;      /* extra info */
+    int             x;         /* x position */
+    int             y;         /* y position */
+    unsigned int    hw_id;     /* unique id */
+    int             __pad;
+};
+
 struct callback_msg_data
 {
-    void           *callback;   /* callback function */
+    client_ptr_t    callback;   /* callback function */
     lparam_t        data;       /* user data for callback */
     lparam_t        result;     /* message result */
 };
@@ -198,7 +210,7 @@ struct winevent_msg_data
 {
     user_handle_t   hook;       /* hook handle */
     thread_id_t     tid;        /* thread id */
-    void           *hook_proc;  /* hook proc address */
+    client_ptr_t    hook_proc;  /* hook proc address */
     /* followed by module name if any */
 };
 
@@ -277,94 +289,101 @@ typedef union
     struct
     {
         enum apc_type    type;     /* APC_USER */
-        void (__stdcall *func)(unsigned long,unsigned long,unsigned long);
+        int              __pad;
+        client_ptr_t     func;     /* void (__stdcall *func)(ULONG_PTR,ULONG_PTR,ULONG_PTR); */
         apc_param_t      args[3];  /* arguments for user function */
     } user;
     struct
     {
-        enum apc_type   type;     /* APC_TIMER */
-        void (__stdcall *func)(void*, unsigned int, unsigned int);
+        enum apc_type    type;     /* APC_TIMER */
+        int              __pad;
+        client_ptr_t     func;     /* void (__stdcall *func)(void*, unsigned int, unsigned int); */
         timeout_t        time;     /* absolute time of expiration */
-        void            *arg;      /* user argument */
+        client_ptr_t     arg;      /* user argument */
     } timer;
     struct
     {
         enum apc_type    type;     /* APC_ASYNC_IO */
-        unsigned int   (*func)(void*, void*, unsigned int, unsigned int *);
-        void            *user;     /* user pointer */
-        void            *sb;       /* status block */
         unsigned int     status;   /* I/O status */
+        client_ptr_t     func;     /* unsigned int (*func)(void*, void*, unsigned int, void **); */
+        client_ptr_t     user;     /* user pointer */
+        client_ptr_t     sb;       /* status block */
     } async_io;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_ALLOC */
-        void            *addr;      /* requested address */
+        unsigned int     op_type;   /* type of operation */
+        client_ptr_t     addr;      /* requested address */
         mem_size_t       size;      /* allocation size */
         unsigned int     zero_bits; /* allocation alignment */
-        unsigned int     op_type;   /* type of operation */
         unsigned int     prot;      /* memory protection flags */
     } virtual_alloc;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_FREE */
-        void            *addr;      /* requested address */
-        mem_size_t       size;      /* allocation size */
         unsigned int     op_type;   /* type of operation */
+        client_ptr_t     addr;      /* requested address */
+        mem_size_t       size;      /* allocation size */
     } virtual_free;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_QUERY */
-        const void      *addr;      /* requested address */
+        int              __pad;
+        client_ptr_t     addr;      /* requested address */
     } virtual_query;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_PROTECT */
-        void            *addr;      /* requested address */
-        mem_size_t       size;      /* requested size */
         unsigned int     prot;      /* new protection flags */
+        client_ptr_t     addr;      /* requested address */
+        mem_size_t       size;      /* requested size */
     } virtual_protect;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_FLUSH */
-        const void      *addr;      /* requested address */
+        int              __pad;
+        client_ptr_t     addr;      /* requested address */
         mem_size_t       size;      /* requested size */
     } virtual_flush;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_LOCK */
-        void            *addr;      /* requested address */
+        int              __pad;
+        client_ptr_t     addr;      /* requested address */
         mem_size_t       size;      /* requested size */
     } virtual_lock;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_UNLOCK */
-        void            *addr;      /* requested address */
+        int              __pad;
+        client_ptr_t     addr;      /* requested address */
         mem_size_t       size;      /* requested size */
     } virtual_unlock;
     struct
     {
         enum apc_type    type;      /* APC_MAP_VIEW */
         obj_handle_t     handle;    /* mapping handle */
-        void            *addr;      /* requested address */
+        client_ptr_t     addr;      /* requested address */
         mem_size_t       size;      /* allocation size */
         file_pos_t       offset;    /* file offset */
-        unsigned int     zero_bits; /* allocation alignment */
         unsigned int     alloc_type;/* allocation type */
-        unsigned int     prot;      /* memory protection flags */
+        unsigned short   zero_bits; /* allocation alignment */
+        unsigned short   prot;      /* memory protection flags */
     } map_view;
     struct
     {
         enum apc_type    type;      /* APC_UNMAP_VIEW */
-        void            *addr;      /* view address */
+        int              __pad;
+        client_ptr_t     addr;      /* view address */
     } unmap_view;
     struct
     {
         enum apc_type    type;      /* APC_CREATE_THREAD */
-        void (__stdcall *func)(void*);  /* start function */
-        void            *arg;       /* argument for start function */
+        int              suspend;   /* suspended thread? */
+        client_ptr_t     func;      /* void (__stdcall *func)(void*);  start function */
+        client_ptr_t     arg;       /* argument for start function */
         mem_size_t       reserve;   /* reserve size for thread stack */
         mem_size_t       commit;    /* commit size for thread stack */
-        int              suspend;   /* suspended thread? */
     } create_thread;
 } apc_call_t;
 
@@ -375,39 +394,40 @@ typedef union
     {
         enum apc_type    type;      /* APC_ASYNC_IO */
         unsigned int     status;    /* new status of async operation */
+        client_ptr_t     apc;       /* user APC to call */
         unsigned int     total;     /* bytes transferred */
     } async_io;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_ALLOC */
         unsigned int     status;    /* status returned by call */
-        void            *addr;      /* resulting address */
+        client_ptr_t     addr;      /* resulting address */
         mem_size_t       size;      /* resulting size */
     } virtual_alloc;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_FREE */
         unsigned int     status;    /* status returned by call */
-        void            *addr;      /* resulting address */
+        client_ptr_t     addr;      /* resulting address */
         mem_size_t       size;      /* resulting size */
     } virtual_free;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_QUERY */
         unsigned int     status;    /* status returned by call */
-        void            *base;      /* resulting base address */
-        void            *alloc_base;/* resulting allocation base */
+        client_ptr_t     base;      /* resulting base address */
+        client_ptr_t     alloc_base;/* resulting allocation base */
         mem_size_t       size;      /* resulting region size */
-        unsigned int     state;     /* resulting region state */
-        unsigned int     prot;      /* resulting region protection */
-        unsigned int     alloc_prot;/* resulting allocation protection */
-        unsigned int     alloc_type;/* resulting region allocation type */
+        unsigned short   state;     /* resulting region state */
+        unsigned short   prot;      /* resulting region protection */
+        unsigned short   alloc_prot;/* resulting allocation protection */
+        unsigned short   alloc_type;/* resulting region allocation type */
     } virtual_query;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_PROTECT */
         unsigned int     status;    /* status returned by call */
-        void            *addr;      /* resulting address */
+        client_ptr_t     addr;      /* resulting address */
         mem_size_t       size;      /* resulting size */
         unsigned int     prot;      /* old protection flags */
     } virtual_protect;
@@ -415,28 +435,28 @@ typedef union
     {
         enum apc_type    type;      /* APC_VIRTUAL_FLUSH */
         unsigned int     status;    /* status returned by call */
-        const void      *addr;      /* resulting address */
+        client_ptr_t     addr;      /* resulting address */
         mem_size_t       size;      /* resulting size */
     } virtual_flush;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_LOCK */
         unsigned int     status;    /* status returned by call */
-        void            *addr;      /* resulting address */
+        client_ptr_t     addr;      /* resulting address */
         mem_size_t       size;      /* resulting size */
     } virtual_lock;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_UNLOCK */
         unsigned int     status;    /* status returned by call */
-        void            *addr;      /* resulting address */
+        client_ptr_t     addr;      /* resulting address */
         mem_size_t       size;      /* resulting size */
     } virtual_unlock;
     struct
     {
         enum apc_type    type;      /* APC_MAP_VIEW */
         unsigned int     status;    /* status returned by call */
-        void            *addr;      /* resulting address */
+        client_ptr_t     addr;      /* resulting address */
         mem_size_t       size;      /* resulting size */
     } map_view;
     struct
@@ -515,9 +535,10 @@ typedef union
 
 /* Signal the end of the process initialization */
 @REQ(init_process_done)
-    void*        module;       /* main module base address */
-    void*        entry;        /* process entry point */
     int          gui;          /* is it a GUI process? */
+    mod_handle_t module;       /* main module base address */
+    client_ptr_t ldt_copy;     /* address of LDT copy (in thread address space) */
+    client_ptr_t entry;        /* process entry point */
 @END
 
 
@@ -526,17 +547,16 @@ typedef union
     int          unix_pid;     /* Unix pid of new thread */
     int          unix_tid;     /* Unix tid of new thread */
     int          debug_level;  /* new debug level */
-    void*        teb;          /* TEB of new thread (in thread address space) */
-    void*        peb;          /* address of PEB (in thread address space) */
-    void*        entry;        /* thread entry point (in thread address space) */
-    void*        ldt_copy;     /* address of LDT copy (in thread address space) */
+    client_ptr_t teb;          /* TEB of new thread (in thread address space) */
+    client_ptr_t entry;        /* thread entry point (in thread address space) */
     int          reply_fd;     /* fd for reply pipe */
     int          wait_fd;      /* fd for blocking calls pipe */
+    client_ptr_t peb;          /* address of PEB (in thread address space) */
 @REPLY
     process_id_t pid;          /* process id of the new thread's process */
     thread_id_t  tid;          /* thread id of the new thread */
-    data_size_t  info_size;    /* total size of startup info */
     timeout_t    server_start; /* server start time */
+    data_size_t  info_size;    /* total size of startup info */
     int          version;      /* protocol version */
 @END
 
@@ -566,12 +586,12 @@ typedef union
 @REPLY
     process_id_t pid;              /* server process id */
     process_id_t ppid;             /* server process id of parent */
-    int          exit_code;        /* process exit code */
     int          priority;         /* priority class */
     unsigned int affinity;         /* process affinity mask */
-    void*        peb;              /* PEB address in process address space */
+    client_ptr_t peb;              /* PEB address in process address space */
     timeout_t    start_time;       /* process start time */
     timeout_t    end_time;         /* process end time */
+    int          exit_code;        /* process exit code */
 @END
 
 
@@ -593,12 +613,12 @@ typedef union
 @REPLY
     process_id_t pid;           /* server process id */
     thread_id_t  tid;           /* server thread id */
-    void*        teb;           /* thread teb pointer */
-    int          exit_code;     /* thread exit code */
+    client_ptr_t teb;           /* thread teb pointer */
     int          priority;      /* thread priority level */
     unsigned int affinity;      /* thread affinity mask */
     timeout_t    creation_time; /* thread creation time */
     timeout_t    exit_time;     /* thread exit time */
+    int          exit_code;     /* thread exit code */
     int          last;          /* last thread in process */
 @END
 
@@ -619,9 +639,9 @@ typedef union
 /* Retrieve information about a module */
 @REQ(get_dll_info)
     obj_handle_t handle;       /* process handle */
-    void*        base_address; /* base address of module */
+    mod_handle_t base_address; /* base address of module */
 @REPLY
-    void*        entry_point;
+    client_ptr_t entry_point;
     data_size_t  size;            /* module size */
     data_size_t  filename_len;    /* buffer len in bytes required to store filename */
     VARARG(filename,unicode_str); /* file name of module */
@@ -647,8 +667,8 @@ typedef union
 /* Notify the server that a dll has been loaded */
 @REQ(load_dll)
     obj_handle_t handle;       /* file handle */
-    void*        base;         /* base address */
-    void*        name;         /* ptr to ptr to name (in process addr space) */
+    mod_handle_t base;         /* base address */
+    client_ptr_t name;         /* ptr to ptr to name (in process addr space) */
     data_size_t  size;         /* dll size */
     int          dbg_offset;   /* debug info offset */
     int          dbg_size;     /* debug info size */
@@ -658,14 +678,14 @@ typedef union
 
 /* Notify the server that a dll is being unloaded */
 @REQ(unload_dll)
-    void*        base;         /* base address */
+    int          __pad;
+    mod_handle_t base;         /* base address */
 @END
 
 
 /* Queue an APC for a thread or process */
 @REQ(queue_apc)
-    obj_handle_t thread;       /* thread handle */
-    obj_handle_t process;      /* process handle */
+    obj_handle_t handle;       /* thread or process handle */
     apc_call_t   call;         /* call arguments */
 @REPLY
     obj_handle_t handle;       /* APC handle */
@@ -738,16 +758,16 @@ typedef union
 /* Wait for handles */
 @REQ(select)
     int          flags;        /* wait flags (see below) */
-    void*        cookie;       /* magic cookie to return to client */
+    client_ptr_t cookie;       /* magic cookie to return to client */
     obj_handle_t signal;       /* object to signal (0 if none) */
     obj_handle_t prev_apc;     /* handle to previous APC */
     timeout_t    timeout;      /* timeout */
     VARARG(result,apc_result); /* result of previous APC */
     VARARG(handles,handles);   /* handles to select on */
 @REPLY
-    obj_handle_t apc_handle;   /* handle to next APC */
     timeout_t    timeout;      /* timeout converted to absolute */
     apc_call_t   call;         /* APC call arguments */
+    obj_handle_t apc_handle;   /* handle to next APC */
 @END
 #define SELECT_ALL           1
 #define SELECT_ALERTABLE     2
@@ -1299,7 +1319,6 @@ enum char_info_mode
 /* enable directory change notifications */
 @REQ(read_directory_changes)
     unsigned int filter;        /* notification filter */
-    obj_handle_t handle;        /* handle to the directory */
     int          subtree;       /* watch the subtree? */
     int          want_data;     /* flag indicating whether change data should be collected */
     async_data_t async;         /* async I/O parameters */
@@ -1318,8 +1337,8 @@ enum char_info_mode
 @REQ(create_mapping)
     unsigned int access;        /* wanted access rights */
     unsigned int attributes;    /* object attributes */
-    mem_size_t   size;          /* mapping size */
     unsigned int protect;       /* protection flags (see below) */
+    mem_size_t   size;          /* mapping size */
     obj_handle_t file_handle;   /* file handle */
     VARARG(objattr,object_attributes); /* object attributes */
 @REPLY
@@ -1360,7 +1379,7 @@ enum char_info_mode
     mem_size_t   size;          /* mapping size */
     int          protect;       /* protection flags */
     int          header_size;   /* header size (for VPROT_IMAGE mapping) */
-    void*        base;          /* default base addr (for VPROT_IMAGE mapping) */
+    client_ptr_t base;          /* default base addr (for VPROT_IMAGE mapping) */
     obj_handle_t mapping;       /* duplicate mapping handle unless removable */
     obj_handle_t shared_file;   /* shared mapping file handle */
 @END
@@ -1453,9 +1472,9 @@ enum char_info_mode
 
 /* Send an output string to the debugger */
 @REQ(output_debug_string)
-    void*         string;      /* string to display (in debugged process address space) */
+    data_size_t   length;      /* string length */
+    client_ptr_t  string;      /* string to display (in debugged process address space) */
     int           unicode;     /* is it Unicode? */
-    int           length;      /* string length */
 @END
 
 
@@ -1491,7 +1510,7 @@ enum char_info_mode
 /* Read data from a process address space */
 @REQ(read_process_memory)
     obj_handle_t handle;       /* process handle */
-    void*        addr;         /* addr to read from */
+    client_ptr_t addr;         /* addr to read from */
 @REPLY
     VARARG(data,bytes);        /* result data */
 @END
@@ -1500,7 +1519,7 @@ enum char_info_mode
 /* Write data to a process address space */
 @REQ(write_process_memory)
     obj_handle_t handle;       /* process handle */
-    void*        addr;         /* addr to write to */
+    client_ptr_t addr;         /* addr to write to */
     VARARG(data,bytes);        /* data to write */
 @END
 
@@ -1660,9 +1679,9 @@ enum char_info_mode
 @REQ(set_timer)
     obj_handle_t handle;        /* handle to the timer */
     timeout_t    expire;        /* next expiration absolute time */
+    client_ptr_t callback;      /* callback function */
+    client_ptr_t arg;           /* callback argument */
     int          period;        /* timer period in ms */
-    void*        callback;      /* callback function */
-    void*        arg;           /* callback argument */
 @REPLY
     int          signaled;      /* was the timer signaled before this call ? */
 @END
@@ -1854,12 +1873,12 @@ enum message_type
     thread_id_t     id;        /* thread id */
     user_handle_t   win;       /* window handle */
     unsigned int    msg;       /* message code */
-    unsigned int    time;      /* message time */
     lparam_t        wparam;    /* parameters */
     lparam_t        lparam;    /* parameters */
     lparam_t        info;      /* extra info */
     int             x;         /* x position */
     int             y;         /* y position */
+    unsigned int    time;      /* message time */
 @END
 
 
@@ -1874,15 +1893,11 @@ enum message_type
     unsigned int    changed_mask; /* changed bits mask */
 @REPLY
     user_handle_t   win;       /* window handle */
-    int             type;      /* message type */
     unsigned int    msg;       /* message code */
     lparam_t        wparam;    /* parameters */
     lparam_t        lparam;    /* parameters */
-    lparam_t        info;      /* extra info */
-    int             x;         /* x position */
-    int             y;         /* y position */
+    int             type;      /* message type */
     unsigned int    time;      /* message time */
-    unsigned int    hw_id;     /* id if hardware message */
     unsigned int    active_hooks; /* active hooks bitmap */
     data_size_t     total;     /* total size of extra data */
     VARARG(data,message_data); /* message data for sent messages */
@@ -1891,8 +1906,8 @@ enum message_type
 
 /* Reply to a sent message */
 @REQ(reply_message)
-    lparam_t        result;    /* message result */
     int             remove;    /* should we remove the message? */
+    lparam_t        result;    /* message result */
     VARARG(data,bytes);        /* message data for sent messages */
 @END
 
@@ -1929,8 +1944,8 @@ enum message_type
 /* Kill a window timer */
 @REQ(kill_win_timer)
     user_handle_t   win;       /* window handle */
-    unsigned int    msg;       /* message to post */
     lparam_t        id;        /* timer id */
+    unsigned int    msg;       /* message to post */
 @END
 
 
@@ -1972,10 +1987,9 @@ enum message_type
 
 /* Create an async I/O */
 @REQ(register_async)
-    obj_handle_t handle;        /* handle to comm port, socket or file */
     int          type;          /* type of queue to look after */
-    int          count;         /* count - usually # of bytes to be read/written */
     async_data_t async;         /* async I/O parameters */
+    int          count;         /* count - usually # of bytes to be read/written */
 @END
 #define ASYNC_TYPE_READ  0x01
 #define ASYNC_TYPE_WRITE 0x02
@@ -1990,9 +2004,9 @@ enum message_type
 
 /* Perform an ioctl on a file */
 @REQ(ioctl)
-    obj_handle_t   handle;        /* handle to the device */
     ioctl_code_t   code;          /* ioctl code */
     async_data_t   async;         /* async I/O parameters */
+    int            blocking;      /* whether it's a blocking ioctl */
     VARARG(in_data,bytes);        /* ioctl input data */
 @REPLY
     obj_handle_t   wait;          /* handle to wait on for blocking ioctl */
@@ -2004,7 +2018,7 @@ enum message_type
 /* Retrieve results of an async ioctl */
 @REQ(get_ioctl_result)
     obj_handle_t   handle;        /* handle to the device */
-    void*          user_arg;      /* user arg used to identify the request */
+    client_ptr_t   user_arg;      /* user arg used to identify the request */
 @REPLY
     VARARG(out_data,bytes);       /* ioctl output data */
 @END
@@ -2016,11 +2030,11 @@ enum message_type
     unsigned int   attributes;   /* object attributes */
     obj_handle_t   rootdir;      /* root directory */
     unsigned int   options;
-    unsigned int   flags;
     unsigned int   maxinstances;
     unsigned int   outsize;
     unsigned int   insize;
     timeout_t      timeout;
+    unsigned int   flags;
     VARARG(name,unicode_str);    /* pipe name */
 @REPLY
     obj_handle_t   handle;       /* handle to the pipe */
@@ -2049,14 +2063,14 @@ enum message_type
     user_handle_t  parent;      /* parent window */
     user_handle_t  owner;       /* owner window */
     atom_t         atom;        /* class atom */
-    void*          instance;    /* module instance */
+    mod_handle_t   instance;    /* module instance */
     VARARG(class,unicode_str);  /* class name */
 @REPLY
     user_handle_t  handle;      /* created window */
     user_handle_t  parent;      /* full handle of parent */
     user_handle_t  owner;       /* full handle of owner */
     int            extra;       /* number of extra bytes */
-    void*          class_ptr;   /* pointer to class in client address space */
+    client_ptr_t   class_ptr;   /* pointer to class in client address space */
 @END
 
 
@@ -2100,13 +2114,13 @@ enum message_type
 
 /* Set some information in a window */
 @REQ(set_window_info)
-    unsigned int   flags;         /* flags for fields to set (see below) */
+    unsigned short flags;         /* flags for fields to set (see below) */
+    short int      is_unicode;    /* ANSI or unicode */
     user_handle_t  handle;        /* handle to the window */
     unsigned int   style;         /* window style */
     unsigned int   ex_style;      /* window extended style */
     unsigned int   id;            /* window id */
-    int            is_unicode;    /* ANSI or unicode */
-    void*          instance;      /* creator instance */
+    mod_handle_t   instance;      /* creator instance */
     lparam_t       user_data;     /* user-specific data */
     int            extra_offset;  /* offset to set in extra bytes */
     data_size_t    extra_size;    /* size to set in extra bytes */
@@ -2114,10 +2128,10 @@ enum message_type
 @REPLY
     unsigned int   old_style;     /* old window style */
     unsigned int   old_ex_style;  /* old window extended style */
-    unsigned int   old_id;        /* old window id */
-    void*          old_instance;  /* old creator instance */
+    mod_handle_t   old_instance;  /* old creator instance */
     lparam_t       old_user_data; /* old user-specific data */
     lparam_t       old_extra_value; /* old value in extra bytes */
+    unsigned int   old_id;        /* old window id */
 @END
 #define SET_WIN_STYLE     0x01
 #define SET_WIN_EXSTYLE   0x02
@@ -2303,8 +2317,8 @@ enum message_type
 /* Set a window property */
 @REQ(set_window_property)
     user_handle_t  window;        /* handle to the window */
-    atom_t         atom;          /* property atom (if no name specified) */
     lparam_t       data;          /* data to store */
+    atom_t         atom;          /* property atom (if no name specified) */
     VARARG(name,unicode_str);     /* property name */
 @END
 
@@ -2572,8 +2586,8 @@ enum message_type
     thread_id_t    tid;            /* id of thread to set the hook into */
     int            event_min;
     int            event_max;
+    client_ptr_t   proc;           /* hook procedure */
     int            flags;
-    void*          proc;           /* hook procedure */
     int            unicode;        /* is it a unicode hook? */
     VARARG(module,unicode_str);    /* module name */
 @REPLY
@@ -2585,8 +2599,8 @@ enum message_type
 /* Remove a window hook */
 @REQ(remove_hook)
     user_handle_t  handle;         /* handle to the hook */
+    client_ptr_t   proc;           /* hook procedure if handle is 0 */
     int            id;             /* id of the hook if handle is 0 */
-    void*          proc;           /* hook procedure if handle is 0 */
 @REPLY
     unsigned int   active_hooks;   /* active hooks bitmap */
 @END
@@ -2603,8 +2617,8 @@ enum message_type
     user_handle_t  handle;         /* handle to the next hook */
     process_id_t   pid;            /* process id for low-level keyboard/mouse hooks */
     thread_id_t    tid;            /* thread id for low-level keyboard/mouse hooks */
-    void*          proc;           /* hook procedure */
     int            unicode;        /* is it a unicode hook? */
+    client_ptr_t   proc;           /* hook procedure */
     unsigned int   active_hooks;   /* active hooks bitmap */
     VARARG(module,unicode_str);    /* module name */
 @END
@@ -2629,7 +2643,7 @@ enum message_type
     int            id;             /* id of the hook */
     process_id_t   pid;            /* process id for low-level keyboard/mouse hooks */
     thread_id_t    tid;            /* thread id for low-level keyboard/mouse hooks */
-    void*          proc;           /* hook procedure */
+    client_ptr_t   proc;           /* hook procedure */
     int            unicode;        /* is it a unicode hook? */
     VARARG(module,unicode_str);    /* module name */
 @END
@@ -2640,10 +2654,10 @@ enum message_type
     int            local;          /* is it a local class? */
     atom_t         atom;           /* class atom */
     unsigned int   style;          /* class style */
-    void*          instance;       /* module instance */
+    mod_handle_t   instance;       /* module instance */
     int            extra;          /* number of extra class bytes */
     int            win_extra;      /* number of window extra bytes */
-    void*          client_ptr;     /* pointer to class in client address space */
+    client_ptr_t   client_ptr;     /* pointer to class in client address space */
     VARARG(name,unicode_str);      /* class name */
 @REPLY
     atom_t         atom;           /* resulting class atom */
@@ -2653,10 +2667,10 @@ enum message_type
 /* Destroy a window class */
 @REQ(destroy_class)
     atom_t         atom;           /* class atom */
-    void*          instance;       /* module instance */
+    mod_handle_t   instance;       /* module instance */
     VARARG(name,unicode_str);      /* class name */
 @REPLY
-    void*          client_ptr;     /* pointer to class in client address space */
+    client_ptr_t   client_ptr;     /* pointer to class in client address space */
 @END
 
 
@@ -2667,7 +2681,7 @@ enum message_type
     atom_t         atom;           /* class atom */
     unsigned int   style;          /* class style */
     int            win_extra;      /* number of window extra bytes */
-    void*          instance;       /* module instance */
+    mod_handle_t   instance;       /* module instance */
     int            extra_offset;   /* offset to set in extra bytes */
     data_size_t    extra_size;     /* size to set in extra bytes */
     lparam_t       extra_value;    /* value to set in extra bytes */
@@ -2676,7 +2690,7 @@ enum message_type
     unsigned int   old_style;      /* previous class style */
     int            old_extra;      /* previous number of class extra bytes */
     int            old_win_extra;  /* previous number of window extra bytes */
-    void*          old_instance;   /* previous module instance */
+    mod_handle_t   old_instance;   /* previous module instance */
     lparam_t       old_extra_value; /* old value in extra bytes */
 @END
 #define SET_CLASS_ATOM      0x0001
@@ -2829,8 +2843,8 @@ enum message_type
     unsigned int   access;        /* wanted access rights */
     unsigned int   attributes;    /* object attributes */
     obj_handle_t   rootdir;       /* root directory */
-    unsigned int   max_msgsize;
     timeout_t      read_timeout;
+    unsigned int   max_msgsize;
     VARARG(name,unicode_str);     /* mailslot name */
 @REPLY
     obj_handle_t   handle;        /* handle to the mailslot */
@@ -2840,11 +2854,11 @@ enum message_type
 /* Set mailslot information */
 @REQ(set_mailslot_info)
     obj_handle_t   handle;        /* handle to the mailslot */
+    timeout_t      read_timeout;
     unsigned int   flags;
-    timeout_t      read_timeout;
 @REPLY
-    unsigned int   max_msgsize;
     timeout_t      read_timeout;
+    unsigned int   max_msgsize;
 @END
 #define MAILSLOT_SET_READ_TIMEOUT  1
 
@@ -2957,8 +2971,8 @@ enum message_type
     unsigned int access;          /* wanted access rights */
     unsigned int attributes;      /* object attributes */
     obj_handle_t rootdir;         /* root directory */
+    client_ptr_t user_ptr;        /* opaque ptr for use by client */
     obj_handle_t manager;         /* device manager */
-    void*        user_ptr;        /* opaque ptr for use by client */
     VARARG(name,unicode_str);     /* object name */
 @REPLY
     obj_handle_t handle;          /* handle to the device */
@@ -2980,7 +2994,7 @@ enum message_type
 @REPLY
     obj_handle_t next;            /* handle to the next ioctl */
     ioctl_code_t code;            /* ioctl code */
-    void*        user_ptr;        /* opaque ptr for the device */
+    client_ptr_t user_ptr;        /* opaque ptr for the device */
     data_size_t  in_size;         /* total needed input size */
     data_size_t  out_size;        /* needed output size */
     VARARG(next_data,bytes);      /* input data of the next ioctl */
@@ -3062,8 +3076,8 @@ enum message_type
 /* associate object with completion port */
 @REQ(set_completion_info)
     obj_handle_t  handle;         /* object handle */
-    obj_handle_t  chandle;        /* port handle */
     apc_param_t   ckey;           /* completion key */
+    obj_handle_t  chandle;        /* port handle */
 @END
 
 

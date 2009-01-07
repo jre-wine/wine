@@ -80,7 +80,7 @@
 
 #include "compobj_private.h"
 
-#define HANDLE_ERROR(err) { hr = err; TRACE("(HRESULT=%x)\n", (HRESULT)err); goto CLEANUP; }
+#define HANDLE_ERROR(err) do { hr = err; TRACE("(HRESULT=%x)\n", (HRESULT)err); goto CLEANUP; } while (0)
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
@@ -1246,7 +1246,8 @@ static HRESULT WINAPI OLEClipbrd_IDataObject_GetData(
   }
 
   if ( pformatetcIn->lindex != -1 )
-    return DV_E_LINDEX;
+    return DV_E_FORMATETC;
+
   if ( (pformatetcIn->tymed & TYMED_HGLOBAL) != TYMED_HGLOBAL )
     return DV_E_TYMED;
 /*

@@ -95,7 +95,7 @@ extern void post_message( user_handle_t win, unsigned int message,
                           lparam_t wparam, lparam_t lparam );
 extern void post_win_event( struct thread *thread, unsigned int event,
                             user_handle_t win, unsigned int object_id,
-                            unsigned int child_id, void *proc,
+                            unsigned int child_id, client_ptr_t proc,
                             const WCHAR *module, data_size_t module_size,
                             user_handle_t handle );
 
@@ -143,12 +143,12 @@ extern struct window_class *get_window_class( user_handle_t window );
 
 extern void destroy_process_classes( struct process *process );
 extern struct window_class *grab_class( struct process *process, atom_t atom,
-                                        void *instance, int *extra_bytes );
+                                        mod_handle_t instance, int *extra_bytes );
 extern void release_class( struct window_class *class );
 extern int is_desktop_class( struct window_class *class );
 extern int is_hwnd_message_class( struct window_class *class );
 extern atom_t get_class_atom( struct window_class *class );
-extern void *get_class_client_ptr( struct window_class *class );
+extern client_ptr_t get_class_client_ptr( struct window_class *class );
 
 /* windows station functions */
 
