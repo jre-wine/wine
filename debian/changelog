@@ -1,8 +1,20 @@
-wine (1.1.12-1) UNRELEASED; urgency=low
+wine (1.1.12-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.12, released Jan 2, 2009.
+    - Some simple 64-bit apps should now run.
+    - Support for subpixel font rendering.
+    - 64-bit code generation in the IDL compiler.
+    - New version of the Gecko engine.
+    - Various bug fixes.
+  * I will note that Wine's 64-bit support requires gcc 4.4 features
+    (and there's no gcc 4.4 in Debian yet). It's now possible to build
+    64-bit Wine using gcc-snapshot, but packaging isn't possible yet.
+    And anyway, there appears to not yet be any pre-made code to detect
+    whether a particular .exe is 64-bit or 32-bit, and thus which
+    Wine to run it with. (In a pinch, I suppose using "file" in the
+    wrapper script would do the trick, though...)
 
- -- Ove Kaaven <ovek@arcticnet.no>  Wed, 07 Jan 2009 21:17:18 +0100
+ -- Ove Kaaven <ovek@arcticnet.no>  Thu, 08 Jan 2009 15:58:00 +0100
 
 wine (1.1.11-1) experimental; urgency=low
 
