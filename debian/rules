@@ -288,7 +288,7 @@ ifeq (,$(AMD64_COPY))
 	# if they were compiled on the current one, install them
 	for ldr in $(LOADERS); do \
 	 [ ! -f debian/tmp/usr/lib/wine/$$ldr ] || \
-	 mv debian/tmp/usr/lib/wine/$$ldr debian/libwine/usr/lib/wine; \
+	 install debian/tmp/usr/lib/wine/$$ldr debian/libwine/usr/lib/wine; \
 	done
 
 	# patch marlett.ttf due to fontforge bug #458234
