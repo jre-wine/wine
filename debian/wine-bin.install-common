@@ -35,7 +35,6 @@ debian/tmp/usr/lib/wine/wineconsole.exe.so
 debian/tmp/usr/lib/wine/winedevice.exe.so
 debian/tmp/usr/lib/wine/winemenubuilder.exe.so
 debian/tmp/usr/lib/wine/winepath.exe.so
-debian/tmp/usr/lib/wine/winevdm.exe.so
 debian/tmp/usr/lib/wine/winhlp32.exe.so
 debian/tmp/usr/lib/wine/write.exe.so
 debian/tmp/usr/lib/wine/xcopy.exe.so

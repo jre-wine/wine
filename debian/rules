@@ -178,6 +178,7 @@ endif
 clean: clean-arch32 clean-arch64
 	dh_testdir
 	dh_testroot
+	rm -f debian/libwine.install debian/wine-bin.install
 	rm -f install-arch-stamp build-indep-stamp configure-ia32-stamp
 ifeq (false,$(AMD64_PACK))
 	rm -f debian/amd64.tar.lzma.uu
@@ -281,15 +282,19 @@ binary-arch: install-arch-stamp
 	dh_installdirs -s
 
 ifeq (,$(AMD64_COPY))
+	# certain binaries are only compiled on some platforms;
+	# if they were compiled on the current one, install them
+	for pkg in libwine wine-bin; do \
+	 cp debian/$$pkg.install-common debian/$$pkg.install; \
+	 for bin in $$(cat debian/$$pkg.install-platform); do \
+	  [ ! -f $$bin ] || \
+	  echo $$bin >> debian/$$pkg.install; \
+	 done; \
+	done
+
 	# distribute files into debian/<packagename>
 	# according to the <packagename>.install files
 	dh_install -s --list-missing
-	# certain binaries are only compiled on some platforms;
-	# if they were compiled on the current one, install them
-	for ldr in $(LOADERS); do \
-	 [ ! -f debian/tmp/usr/lib/wine/$$ldr ] || \
-	 install debian/tmp/usr/lib/wine/$$ldr debian/libwine/usr/lib/wine; \
-	done
 
 	# patch marlett.ttf due to fontforge bug #458234
 	#mensis -script debian/marlett.mensis debian/libwine/usr/share/wine/fonts/marlett.ttf
