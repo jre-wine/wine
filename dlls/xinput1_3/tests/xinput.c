@@ -27,6 +27,9 @@ static DWORD (WINAPI *pXInputGetState)(DWORD, XINPUT_STATE*);
 static DWORD (WINAPI *pXInputGetCapabilities)(DWORD,DWORD,XINPUT_CAPABILITIES*);
 static DWORD (WINAPI *pXInputSetState)(DWORD, XINPUT_VIBRATION*);
 static void  (WINAPI *pXInputEnable)(BOOL);
+static DWORD (WINAPI *pXInputGetKeystroke)(DWORD, DWORD, PXINPUT_KEYSTROKE);
+static DWORD (WINAPI *pXInputGetDSoundAudioDeviceGuids)(DWORD, GUID*, GUID*);
+static DWORD (WINAPI *pXInputGetBatteryInformation)(DWORD, BYTE, XINPUT_BATTERY_INFORMATION*);
 
 static void test_set_state(void)
 {
@@ -96,6 +99,30 @@ static void test_get_state(void)
     ok(result == ERROR_BAD_ARGUMENTS, "XInputGetState returned (%d)\n", result);
 }
 
+static void test_get_keystroke(void)
+{
+    XINPUT_KEYSTROKE keystroke;
+    DWORD controllerNum;
+    DWORD result;
+
+    for(controllerNum=0; controllerNum < XUSER_MAX_COUNT; controllerNum++)
+    {
+        ZeroMemory(&keystroke, sizeof(XINPUT_KEYSTROKE));
+
+        result = pXInputGetKeystroke(controllerNum, XINPUT_FLAG_GAMEPAD, &keystroke);
+        ok(result == ERROR_SUCCESS || result == ERROR_DEVICE_NOT_CONNECTED, "XInputGetKeystroke failed with (%d)\n", result);
+
+        if (ERROR_DEVICE_NOT_CONNECTED == result)
+        {
+            skip("Controller %d is not connected\n", controllerNum);
+        }
+    }
+
+    ZeroMemory(&keystroke, sizeof(XINPUT_KEYSTROKE));
+    result = pXInputGetKeystroke(XUSER_MAX_COUNT+1, XINPUT_FLAG_GAMEPAD, &keystroke);
+    ok(result == ERROR_BAD_ARGUMENTS, "XInputGetKeystroke returned (%d)\n", result);
+}
+
 static void test_get_capabilities(void)
 {
     XINPUT_CAPABILITIES capabilities;
@@ -120,6 +147,52 @@ static void test_get_capabilities(void)
     ok(result == ERROR_BAD_ARGUMENTS, "XInputGetCapabilities returned (%d)\n", result);
 }
 
+static void test_get_dsoundaudiodevice(void)
+{
+    DWORD controllerNum;
+    DWORD result;
+    GUID soundRender;
+    GUID soundCapture;
+
+    for(controllerNum=0; controllerNum < XUSER_MAX_COUNT; controllerNum++)
+    {
+        result = pXInputGetDSoundAudioDeviceGuids(controllerNum, &soundRender, &soundCapture);
+        ok(result == ERROR_SUCCESS || result == ERROR_DEVICE_NOT_CONNECTED, "XInputGetDSoundAudioDeviceGuids failed with (%d)\n", result);
+
+        if (ERROR_DEVICE_NOT_CONNECTED == result)
+        {
+            skip("Controller %d is not connected\n", controllerNum);
+        }
+    }
+
+    result = pXInputGetDSoundAudioDeviceGuids(XUSER_MAX_COUNT+1, &soundRender, &soundCapture);
+    ok(result == ERROR_BAD_ARGUMENTS, "XInputGetDSoundAudioDeviceGuids returned (%d)\n", result);
+}
+
+static void test_get_batteryinformation(void)
+{
+    DWORD controllerNum;
+    DWORD result;
+    XINPUT_BATTERY_INFORMATION batteryInfo;
+
+    for(controllerNum=0; controllerNum < XUSER_MAX_COUNT; controllerNum++)
+    {
+        ZeroMemory(&batteryInfo, sizeof(XINPUT_BATTERY_INFORMATION));
+
+        result = pXInputGetBatteryInformation(controllerNum, BATTERY_DEVTYPE_GAMEPAD, &batteryInfo);
+        ok(result == ERROR_SUCCESS || result == ERROR_DEVICE_NOT_CONNECTED, "XInputGetBatteryInformation failed with (%d)\n", result);
+
+        if (ERROR_DEVICE_NOT_CONNECTED == result)
+        {
+            ok(batteryInfo.BatteryLevel == BATTERY_TYPE_DISCONNECTED, "Failed to report device as being disconnected.\n");
+            skip("Controller %d is not connected\n", controllerNum);
+        }
+    }
+
+    result = pXInputGetBatteryInformation(XUSER_MAX_COUNT+1, BATTERY_DEVTYPE_GAMEPAD, &batteryInfo);
+    ok(result == ERROR_BAD_ARGUMENTS, "XInputGetBatteryInformation returned (%d)\n", result);
+}
+
 START_TEST(xinput)
 {
     HMODULE hXinput;
@@ -134,9 +207,17 @@ START_TEST(xinput)
     pXInputEnable = (void*)GetProcAddress(hXinput, "XInputEnable");
     pXInputSetState = (void*)GetProcAddress(hXinput, "XInputSetState");
     pXInputGetState = (void*)GetProcAddress(hXinput, "XInputGetState");
+    pXInputGetKeystroke = (void*)GetProcAddress(hXinput, "XInputGetKeystroke");
     pXInputGetCapabilities = (void*)GetProcAddress(hXinput, "XInputGetCapabilities");
+    pXInputGetDSoundAudioDeviceGuids = (void*)GetProcAddress(hXinput, "XInputGetDSoundAudioDeviceGuids");
+    pXInputGetBatteryInformation = (void*)GetProcAddress(hXinput, "XInputGetBatteryInformation");
+
     test_set_state();
     test_get_state();
+    test_get_keystroke();
     test_get_capabilities();
+    test_get_dsoundaudiodevice();
+    test_get_batteryinformation();
+
     FreeLibrary(hXinput);
 }

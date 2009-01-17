@@ -227,6 +227,23 @@ s_sum_conf_array(int x[], int n)
 }
 
 int
+s_sum_conf_ptr_by_conf_ptr(int n1, int *n2_then_x1, int *x2)
+{
+  int i;
+  int sum = 0;
+  if(n1 == 0)
+    return 0;
+
+  for(i = 1; i < n1; ++i)
+    sum += n2_then_x1[i];
+
+  for(i = 0; i < *n2_then_x1; ++i)
+    sum += x2[i];
+
+  return sum;
+}
+
+int
 s_sum_unique_conf_array(int x[], int n)
 {
   return s_sum_conf_array(x, n);
@@ -639,19 +656,6 @@ s_context_handle_test(void)
         pNDRSContextMarshall2(binding, h, buf, NULL, &server_if.InterfaceId, 0);
 
         pNDRSContextUnmarshall2(binding, buf, NDR_LOCAL_DATA_REPRESENTATION, &server_if2.InterfaceId, 0);
-    }
-}
-
-void
-s_get_5numbers(int count, pints_t n[5])
-{
-    int i;
-    for (i = 0; i < count; i++)
-    {
-        n[i].pi = midl_user_allocate(sizeof(*n[i].pi));
-        *n[i].pi = i;
-        n[i].ppi = NULL;
-        n[i].pppi = NULL;
     }
 }
 
@@ -1127,6 +1131,7 @@ array_tests(void)
     {{1, -2, 3, -4}, {2, 3, 5, 7}, {-4, -1, -14, 4114}}
   };
   int c[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  int c2[] = {10, 100, 200};
   vector_t vs[2] = {{1, -2, 3}, {4, -5, -6}};
   cps_t cps;
   cpsc_t cpsc;
@@ -1146,6 +1151,11 @@ array_tests(void)
   ok(sum_conf_array(&c[5], 2) == 11, "RPC sum_conf_array\n");
   ok(sum_conf_array(&c[7], 1) == 7, "RPC sum_conf_array\n");
   ok(sum_conf_array(&c[2], 0) == 0, "RPC sum_conf_array\n");
+
+  ok(sum_conf_ptr_by_conf_ptr(1, c2, c) == 45, "RPC sum_conf_ptr_by_conf_ptr\n");
+  ok(sum_conf_ptr_by_conf_ptr(3, c2, c) == 345, "RPC sum_conf_ptr_by_conf_ptr\n");
+  c2[0] = 0;
+  ok(sum_conf_ptr_by_conf_ptr(3, c2, c) == 300, "RPC sum_conf_ptr_by_conf_ptr\n");
 
   ok(sum_unique_conf_array(ca, 4) == -2, "RPC sum_unique_conf_array\n");
   ok(sum_unique_conf_ptr(ca, 5) == 3, "RPC sum_unique_conf_array\n");
@@ -1215,11 +1225,6 @@ array_tests(void)
   memset(api, 0, sizeof(api));
   pi = HeapAlloc(GetProcessHeap(), 0, sizeof(*pi));
   *pi = -1;
-  api[0].pi = pi;
-  get_5numbers(1, api);
-  ok(api[0].pi == pi, "RPC varying array [out] pointer changed from %p to %p\n", pi, api[0].pi);
-  ok(*api[0].pi == 0, "pi unmarshalled incorrectly %d\n", *api[0].pi);
-
   api[0].pi = pi;
   get_numbers(1, 1, api);
   ok(api[0].pi == pi, "RPC conformant varying array [out] pointer changed from %p to %p\n", pi, api[0].pi);
@@ -1294,12 +1299,12 @@ server(void)
   DWORD ret;
 
   iptcp_status = RpcServerUseProtseqEp(iptcp, 20, port, NULL);
-  ok(iptcp_status == RPC_S_OK, "RpcServerUseProtseqEp(ncacn_ip_tcp) failed with status %ld\n", iptcp_status);
+  ok(iptcp_status == RPC_S_OK, "RpcServerUseProtseqEp(ncacn_ip_tcp) failed with status %d\n", iptcp_status);
   np_status = RpcServerUseProtseqEp(np, 0, pipe, NULL);
   if (np_status == RPC_S_PROTSEQ_NOT_SUPPORTED)
     skip("Protocol sequence ncacn_np is not supported\n");
   else
-    ok(np_status == RPC_S_OK, "RpcServerUseProtseqEp(ncacn_np) failed with status %ld\n", np_status);
+    ok(np_status == RPC_S_OK, "RpcServerUseProtseqEp(ncacn_np) failed with status %d\n", np_status);
 
   if (pRpcServerRegisterIfEx)
   {
@@ -1310,9 +1315,9 @@ server(void)
   }
   else
     status = RpcServerRegisterIf(s_IServer_v0_0_s_ifspec, NULL, NULL);
-  ok(status == RPC_S_OK, "RpcServerRegisterIf failed with status %ld\n", status);
+  ok(status == RPC_S_OK, "RpcServerRegisterIf failed with status %d\n", status);
   status = RpcServerListen(1, 20, TRUE);
-  ok(status == RPC_S_OK, "RpcServerListen failed with status %ld\n", status);
+  ok(status == RPC_S_OK, "RpcServerListen failed with status %d\n", status);
   stop_event = CreateEvent(NULL, FALSE, FALSE, NULL);
   ok(stop_event != NULL, "CreateEvent failed with error %d\n", GetLastError());
 
@@ -1338,7 +1343,7 @@ server(void)
   {
     status = RpcMgmtWaitServerListen();
     todo_wine {
-      ok(status == RPC_S_OK, "RpcMgmtWaitServerListening failed with status %ld\n", status);
+      ok(status == RPC_S_OK, "RpcMgmtWaitServerListening failed with status %d\n", status);
     }
   }
 }

@@ -231,6 +231,7 @@
  523 stdcall -noname SHFreeShared(long long)
  524 stdcall -noname RealDriveType(long long)
  525 stub RealDriveTypeFlags
+ 526 stdcall SHFlushSFCache()
 
  640 stdcall -noname NTSHChangeNotifyRegister(long long long long long long)
  641 stdcall -noname NTSHChangeNotifyDeregister(long)
@@ -251,6 +252,8 @@
 
  660 stdcall -noname FileIconInit(long)
  680 stdcall -noname IsUserAdmin()
+
+ 704 stdcall -noname GUIDFromStringW(wstr ptr)
 
  714 stdcall @(ptr) SHELL32_714 # PathIsTemporaryW
  730 stdcall -noname RestartDialogEx(long wstr long long)

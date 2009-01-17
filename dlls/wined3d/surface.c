@@ -476,6 +476,43 @@ GLenum surface_get_gl_buffer(IWineD3DSurface *iface, IWineD3DSwapChain *swapchai
     return GL_BACK;
 }
 
+/* Slightly inefficient way to handle multiple dirty rects but it works :) */
+void surface_add_dirty_rect(IWineD3DSurface *iface, const RECT *dirty_rect)
+{
+    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
+    IWineD3DBaseTexture *baseTexture = NULL;
+
+    if (!(This->Flags & SFLAG_INSYSMEM) && (This->Flags & SFLAG_INTEXTURE))
+        IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL /* no partial locking for textures yet */);
+
+    IWineD3DSurface_ModifyLocation(iface, SFLAG_INSYSMEM, TRUE);
+    if (dirty_rect)
+    {
+        This->dirtyRect.left = min(This->dirtyRect.left, dirty_rect->left);
+        This->dirtyRect.top = min(This->dirtyRect.top, dirty_rect->top);
+        This->dirtyRect.right = max(This->dirtyRect.right, dirty_rect->right);
+        This->dirtyRect.bottom = max(This->dirtyRect.bottom, dirty_rect->bottom);
+    }
+    else
+    {
+        This->dirtyRect.left = 0;
+        This->dirtyRect.top = 0;
+        This->dirtyRect.right = This->currentDesc.Width;
+        This->dirtyRect.bottom = This->currentDesc.Height;
+    }
+
+    TRACE("(%p) : Dirty: yes, Rect:(%d, %d, %d, %d)\n", This, This->dirtyRect.left,
+            This->dirtyRect.top, This->dirtyRect.right, This->dirtyRect.bottom);
+
+    /* if the container is a basetexture then mark it dirty. */
+    if (SUCCEEDED(IWineD3DSurface_GetContainer(iface, &IID_IWineD3DBaseTexture, (void **)&baseTexture)))
+    {
+        TRACE("Passing to container\n");
+        IWineD3DBaseTexture_SetDirty(baseTexture, TRUE);
+        IWineD3DBaseTexture_Release(baseTexture);
+    }
+}
+
 static ULONG WINAPI IWineD3DSurfaceImpl_Release(IWineD3DSurface *iface)
 {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
@@ -963,6 +1000,7 @@ static void read_from_framebuffer_texture(IWineD3DSurfaceImpl *This)
         TRACE("Locking offscreen render target\n");
         ENTER_GL();
         glReadBuffer(device->offscreenBuffer);
+        checkGLcall("glReadBuffer");
         LEAVE_GL();
     }
 
@@ -1192,7 +1230,7 @@ lock_end:
          * Dirtify on lock
          * as seen in msdn docs
          */
-        IWineD3DSurface_AddDirtyRect(iface, pRect);
+        surface_add_dirty_rect(iface, pRect);
 
         /** Dirtify Container if needed */
         if (SUCCEEDED(IWineD3DSurface_GetContainer(iface, &IID_IWineD3DBaseTexture, (void **)&pBaseTexture))) {
@@ -1320,7 +1358,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
 
     if (!(This->Flags & SFLAG_LOCKED)) {
         WARN("trying to Unlock an unlocked surf@%p\n", This);
-        return WINED3DERR_INVALIDCALL;
+        return WINEDDERR_NOTLOCKED;
     }
 
     if (This->Flags & SFLAG_PBO) {
@@ -1527,11 +1565,11 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_ReleaseDC(IWineD3DSurface *iface, HDC 
     TRACE("(%p)->(%p)\n",This,hDC);
 
     if (!(This->Flags & SFLAG_DCINUSE))
-        return WINED3DERR_INVALIDCALL;
+        return WINEDDERR_NODC;
 
     if (This->hDC !=hDC) {
         WARN("Application tries to release an invalid DC(%p), surface dc is %p\n", hDC, This->hDC);
-        return WINED3DERR_INVALIDCALL;
+        return WINEDDERR_NODC;
     }
 
     if((This->Flags & SFLAG_PBO) && This->resource.allocatedMemory) {
@@ -1830,7 +1868,7 @@ static HRESULT d3dfmt_convert_surface(const BYTE *src, BYTE *dst, UINT pitch, UI
                 Dest = (WORD *) (dst + y * outpitch);
                 for (x = 0; x < width; x++ ) {
                     WORD color = *Source++;
-		    *Dest = color;
+                    *Dest = color;
                     if ((color < This->SrcBltCKey.dwColorSpaceLowValue) ||
                         (color > This->SrcBltCKey.dwColorSpaceHighValue)) {
                         *Dest |= (1 << 15);
@@ -2499,40 +2537,6 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_SaveSnapshot(IWineD3DSurface *iface, c
         IWineD3DSwapChain_Release(swapChain);
     }
     HeapFree(GetProcessHeap(), 0, allocatedMemory);
-    return WINED3D_OK;
-}
-
-/**
- *   Slightly inefficient way to handle multiple dirty rects but it works :)
- */
-static HRESULT WINAPI IWineD3DSurfaceImpl_AddDirtyRect(IWineD3DSurface *iface, CONST RECT* pDirtyRect)
-{
-    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
-    IWineD3DBaseTexture *baseTexture = NULL;
-
-    if (!(This->Flags & SFLAG_INSYSMEM) && (This->Flags & SFLAG_INTEXTURE))
-        IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL /* no partial locking for textures yet */);
-
-    IWineD3DSurface_ModifyLocation(iface, SFLAG_INSYSMEM, TRUE);
-    if (NULL != pDirtyRect) {
-        This->dirtyRect.left   = min(This->dirtyRect.left,   pDirtyRect->left);
-        This->dirtyRect.top    = min(This->dirtyRect.top,    pDirtyRect->top);
-        This->dirtyRect.right  = max(This->dirtyRect.right,  pDirtyRect->right);
-        This->dirtyRect.bottom = max(This->dirtyRect.bottom, pDirtyRect->bottom);
-    } else {
-        This->dirtyRect.left   = 0;
-        This->dirtyRect.top    = 0;
-        This->dirtyRect.right  = This->currentDesc.Width;
-        This->dirtyRect.bottom = This->currentDesc.Height;
-    }
-    TRACE("(%p) : Dirty: yes, Rect:(%d,%d,%d,%d)\n", This, This->dirtyRect.left,
-          This->dirtyRect.top, This->dirtyRect.right, This->dirtyRect.bottom);
-    /* if the container is a basetexture then mark it dirty. */
-    if (IWineD3DSurface_GetContainer(iface, &IID_IWineD3DBaseTexture, (void **)&baseTexture) == WINED3D_OK) {
-        TRACE("Passing to container\n");
-        IWineD3DBaseTexture_SetDirty(baseTexture, TRUE);
-        IWineD3DBaseTexture_Release(baseTexture);
-    }
     return WINED3D_OK;
 }
 
@@ -3865,7 +3869,8 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_PrivateSetup(IWineD3DSurface *iface) {
         3:    WARN and return WINED3DERR_NOTAVAILABLE;
         4: Create the surface, but allow it to be used only for DirectDraw Blts. Some apps(e.g. Swat 3) create textures with a Height of 16 and a Width > 3000 and blt 16x16 letter areas from them to the render target.
         */
-        WARN("(%p) Creating an oversized surface\n", This);
+        WARN("(%p) Creating an oversized surface: %ux%u (texture is %ux%u)\n",
+             This, This->pow2Width, This->pow2Height, This->currentDesc.Width, This->currentDesc.Height);
         This->Flags |= SFLAG_OVERSIZE;
 
         /* This will be initialized on the first blt */
@@ -4734,7 +4739,6 @@ const IWineD3DSurfaceVtbl IWineD3DSurface_Vtbl =
     IWineD3DBaseSurfaceImpl_SetClipper,
     IWineD3DBaseSurfaceImpl_GetClipper,
     /* Internal use: */
-    IWineD3DSurfaceImpl_AddDirtyRect,
     IWineD3DSurfaceImpl_LoadTexture,
     IWineD3DSurfaceImpl_BindTexture,
     IWineD3DSurfaceImpl_SaveSnapshot,

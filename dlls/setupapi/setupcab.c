@@ -121,17 +121,17 @@ static void UnloadCABINETDll(void)
 
 /* FDICreate callbacks */
 
-static void *sc_cb_alloc(ULONG cb)
+static void * CDECL sc_cb_alloc(ULONG cb)
 {
   return HeapAlloc(GetProcessHeap(), 0, cb);
 }
 
-static void sc_cb_free(void *pv)
+static void CDECL sc_cb_free(void *pv)
 {
   HeapFree(GetProcessHeap(), 0, pv);
 }
 
-static INT_PTR sc_cb_open(char *pszFile, int oflag, int pmode)
+static INT_PTR CDECL sc_cb_open(char *pszFile, int oflag, int pmode)
 {
   DWORD creation = 0, sharing = 0;
   int ioflag = 0;
@@ -202,7 +202,7 @@ static INT_PTR sc_cb_open(char *pszFile, int oflag, int pmode)
   return ret;
 }
 
-static UINT sc_cb_read(INT_PTR hf, void *pv, UINT cb)
+static UINT CDECL sc_cb_read(INT_PTR hf, void *pv, UINT cb)
 {
   DWORD num_read;
   BOOL rslt;
@@ -222,7 +222,7 @@ static UINT sc_cb_read(INT_PTR hf, void *pv, UINT cb)
   return num_read;
 }
 
-static UINT sc_cb_write(INT_PTR hf, void *pv, UINT cb)
+static UINT CDECL sc_cb_write(INT_PTR hf, void *pv, UINT cb)
 {
   DWORD num_written;
   /* BOOL rv; */
@@ -240,7 +240,7 @@ static UINT sc_cb_write(INT_PTR hf, void *pv, UINT cb)
   }
 }
 
-static int sc_cb_close(INT_PTR hf)
+static int CDECL sc_cb_close(INT_PTR hf)
 {
   /* TRACE("(hf == %d)\n", hf); */
 
@@ -250,7 +250,7 @@ static int sc_cb_close(INT_PTR hf)
     return -1;
 }
 
-static long sc_cb_lseek(INT_PTR hf, long dist, int seektype)
+static LONG CDECL sc_cb_lseek(INT_PTR hf, LONG dist, int seektype)
 {
   DWORD ret;
 
@@ -272,7 +272,7 @@ static long sc_cb_lseek(INT_PTR hf, long dist, int seektype)
 
 /* FDICopy callbacks */
 
-static INT_PTR sc_FNNOTIFY_A(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
+static INT_PTR CDECL sc_FNNOTIFY_A(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
 {
   FILE_IN_CABINET_INFO_A fici;
   PSC_HSC_A phsc;
@@ -307,7 +307,7 @@ static INT_PTR sc_FNNOTIFY_A(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
     ci.DiskName = pfdin->psz2;
     ci.SetId = pfdin->setID;
     ci.CabinetNumber = pfdin->iCabinet;
-    phsc->msghandler(phsc->context, SPFILENOTIFY_CABINETINFO, (UINT) &ci, 0);
+    phsc->msghandler(phsc->context, SPFILENOTIFY_CABINETINFO, (UINT_PTR) &ci, 0);
     return 0;
   case fdintPARTIAL_FILE:
     TRACE("Partial file notification\n");
@@ -328,7 +328,7 @@ static INT_PTR sc_FNNOTIFY_A(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
     fici.DosAttribs = pfdin->attribs;
     memset(&(fici.FullTargetName[0]), 0, MAX_PATH);
     err = phsc->msghandler(phsc->context, SPFILENOTIFY_FILEINCABINET,
-                           (UINT) &fici, (UINT) pfdin->psz1);
+                           (UINT_PTR)&fici, (UINT_PTR)pfdin->psz1);
     if (err == FILEOP_DOIT) {
       TRACE("  Callback specified filename: %s\n", debugstr_a(&(fici.FullTargetName[0])));
       if (!fici.FullTargetName[0]) {
@@ -352,7 +352,7 @@ static INT_PTR sc_FNNOTIFY_A(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
     fp.Flags = 0;
     /* the following should be a fixme -- but it occurs too many times */
     WARN("Should set file date/time/attribs (and execute files?)\n");
-    err = phsc->msghandler(phsc->context, SPFILENOTIFY_FILEEXTRACTED, (UINT) &fp, 0);
+    err = phsc->msghandler(phsc->context, SPFILENOTIFY_FILEEXTRACTED, (UINT_PTR)&fp, 0);
     if (sc_cb_close(pfdin->hf))
       WARN("_close failed.\n");
     if (err) {
@@ -374,7 +374,7 @@ static INT_PTR sc_FNNOTIFY_A(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
     ci.CabinetNumber = pfdin->iCabinet;
     /* remember the new cabinet name */
     strcpy(&(phsc->most_recent_cabinet_name[0]), pfdin->psz1);
-    err = phsc->msghandler(phsc->context, SPFILENOTIFY_NEEDNEWCABINET, (UINT) &ci, (UINT) &(mysterio[0]));
+    err = phsc->msghandler(phsc->context, SPFILENOTIFY_NEEDNEWCABINET, (UINT_PTR)&ci, (UINT_PTR)mysterio);
     if (err) {
       SetLastError(err);
       return -1;
@@ -391,7 +391,7 @@ static INT_PTR sc_FNNOTIFY_A(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
   }
 }
 
-static INT_PTR sc_FNNOTIFY_W(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
+static INT_PTR CDECL sc_FNNOTIFY_W(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
 {
   FILE_IN_CABINET_INFO_W fici;
   PSC_HSC_W phsc;
@@ -438,7 +438,7 @@ static INT_PTR sc_FNNOTIFY_W(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
     ci.DiskName = &(buf2[0]);
     ci.SetId = pfdin->setID;
     ci.CabinetNumber = pfdin->iCabinet;
-    phsc->msghandler(phsc->context, SPFILENOTIFY_CABINETINFO, (UINT) &ci, 0);
+    phsc->msghandler(phsc->context, SPFILENOTIFY_CABINETINFO, (UINT_PTR)&ci, 0);
     return 0;
   case fdintPARTIAL_FILE:
     TRACE("Partial file notification\n");
@@ -462,7 +462,7 @@ static INT_PTR sc_FNNOTIFY_W(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
     fici.DosAttribs = pfdin->attribs;
     memset(&(fici.FullTargetName[0]), 0, MAX_PATH * sizeof(WCHAR));
     err = phsc->msghandler(phsc->context, SPFILENOTIFY_FILEINCABINET,
-                           (UINT) &fici, (UINT) pfdin->psz1);
+                           (UINT_PTR)&fici, (UINT_PTR)pfdin->psz1);
     if (err == FILEOP_DOIT) {
       TRACE("  Callback specified filename: %s\n", debugstr_w(&(fici.FullTargetName[0])));
       if (fici.FullTargetName[0]) {
@@ -495,7 +495,7 @@ static INT_PTR sc_FNNOTIFY_W(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
     fp.Flags = 0;
     /* a valid fixme -- but occurs too many times */
     /* FIXME("Should set file date/time/attribs (and execute files?)\n"); */
-    err = phsc->msghandler(phsc->context, SPFILENOTIFY_FILEEXTRACTED, (UINT) &fp, 0);
+    err = phsc->msghandler(phsc->context, SPFILENOTIFY_FILEEXTRACTED, (UINT_PTR)&fp, 0);
     if (sc_cb_close(pfdin->hf))
       WARN("_close failed.\n");
     if (err) {
@@ -525,7 +525,7 @@ static INT_PTR sc_FNNOTIFY_W(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
     ci.DiskName = &(buf2[0]);
     ci.SetId = pfdin->setID;
     ci.CabinetNumber = pfdin->iCabinet;
-    err = phsc->msghandler(phsc->context, SPFILENOTIFY_NEEDNEWCABINET, (UINT) &ci, (UINT) &(mysterio[0]));
+    err = phsc->msghandler(phsc->context, SPFILENOTIFY_NEEDNEWCABINET, (UINT_PTR)&ci, (UINT_PTR)mysterio);
     if (err) {
       SetLastError(err);
       return -1;

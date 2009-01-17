@@ -50,15 +50,17 @@ typedef unsigned long  MSVCRT__fsize_t;
 typedef unsigned __int64 MSVCRT_size_t;
 typedef __int64 MSVCRT_intptr_t;
 typedef unsigned __int64 MSVCRT_uintptr_t;
+typedef __int64 MSVCRT_time_t;
 #else
 typedef unsigned long MSVCRT_size_t;
 typedef long MSVCRT_intptr_t;
 typedef unsigned long MSVCRT_uintptr_t;
+typedef long MSVCRT_time_t;
 #endif
 typedef unsigned int   MSVCRT__dev_t;
 typedef int  MSVCRT__off_t;
 typedef long MSVCRT_clock_t;
-typedef long MSVCRT_time_t;
+typedef long MSVCRT___time32_t;
 typedef __int64 MSVCRT___time64_t;
 typedef __int64 MSVCRT_fpos_t;
 
@@ -598,7 +600,7 @@ struct MSVCRT__stat64 {
 #define MSVCRT_SIGABRT  22
 #define MSVCRT_NSIG     (MSVCRT_SIGABRT + 1)
 
-typedef void (*MSVCRT___sighandler_t)(int);
+typedef void (__cdecl *MSVCRT___sighandler_t)(int);
 
 #define MSVCRT_SIG_DFL ((MSVCRT___sighandler_t)0)
 #define MSVCRT_SIG_IGN ((MSVCRT___sighandler_t)1)
@@ -665,9 +667,9 @@ double __cdecl   MSVCRT_difftime(MSVCRT_time_t time1, MSVCRT_time_t time2);
 MSVCRT_time_t  __cdecl MSVCRT_time(MSVCRT_time_t*);
 MSVCRT_FILE*   __cdecl MSVCRT__fdopen(int, const char *);
 MSVCRT_FILE*   __cdecl MSVCRT__wfdopen(int, const MSVCRT_wchar_t *);
-int            __cdecl MSVCRT_vsnprintf(char *str, unsigned int len, const char *format, va_list valist);
+int            __cdecl MSVCRT_vsnprintf(char *str, unsigned int len, const char *format, __ms_va_list valist);
 int            __cdecl MSVCRT_vsnwprintf(MSVCRT_wchar_t *str, unsigned int len,
-                                       const MSVCRT_wchar_t *format, va_list valist );
+                                       const MSVCRT_wchar_t *format, __ms_va_list valist );
 int            __cdecl MSVCRT_raise(int sig);
 
 #ifndef __WINE_MSVCRT_TEST

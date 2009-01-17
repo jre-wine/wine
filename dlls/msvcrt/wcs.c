@@ -525,7 +525,7 @@ static void pf_fixup_exponent( char *buf )
  *
  *  implements both A and W vsnprintf functions
  */
-static int pf_vsnprintf( pf_output *out, const WCHAR *format, va_list valist )
+static int pf_vsnprintf( pf_output *out, const WCHAR *format, __ms_va_list valist )
 {
     int r;
     LPCWSTR q, p = format;
@@ -678,13 +678,14 @@ static int pf_vsnprintf( pf_output *out, const WCHAR *format, va_list valist )
         /* output a pointer */
         else if( flags.Format == 'p' )
         {
-            char pointer[11];
+            char pointer[32];
+            void *ptr = va_arg( valist, void * );
 
             flags.PadZero = 0;
             if( flags.Alternate )
-                sprintf(pointer, "0X%08lX", va_arg(valist, long));
+                sprintf(pointer, "0X%0*lX", 2 * (int)sizeof(ptr), (ULONG_PTR)ptr);
             else
-                sprintf(pointer, "%08lX", va_arg(valist, long));
+                sprintf(pointer, "%0*lX", 2 * (int)sizeof(ptr), (ULONG_PTR)ptr);
             r = pf_output_format_A( out, pointer, -1, &flags );
         }
 
@@ -768,7 +769,7 @@ static int pf_vsnprintf( pf_output *out, const WCHAR *format, va_list valist )
  *		_vsnprintf (MSVCRT.@)
  */
 int CDECL MSVCRT_vsnprintf( char *str, unsigned int len,
-                            const char *format, va_list valist )
+                            const char *format, __ms_va_list valist )
 {
     DWORD sz;
     LPWSTR formatW = NULL;
@@ -797,7 +798,7 @@ int CDECL MSVCRT_vsnprintf( char *str, unsigned int len,
 /*********************************************************************
  *		vsprintf (MSVCRT.@)
  */
-int CDECL MSVCRT_vsprintf( char *str, const char *format, va_list valist)
+int CDECL MSVCRT_vsprintf( char *str, const char *format, __ms_va_list valist)
 {
     return MSVCRT_vsnprintf(str, INT_MAX, format, valist);
 }
@@ -808,10 +809,10 @@ int CDECL MSVCRT_vsprintf( char *str, const char *format, va_list valist)
 int CDECL MSVCRT__snprintf(char *str, unsigned int len, const char *format, ...)
 {
     int retval;
-    va_list valist;
-    va_start(valist, format);
+    __ms_va_list valist;
+    __ms_va_start(valist, format);
     retval = MSVCRT_vsnprintf(str, len, format, valist);
-    va_end(valist);
+    __ms_va_end(valist);
     return retval;
 }
 
@@ -819,7 +820,7 @@ int CDECL MSVCRT__snprintf(char *str, unsigned int len, const char *format, ...)
  *		_vsnwsprintf (MSVCRT.@)
  */
 int CDECL MSVCRT_vsnwprintf( MSVCRT_wchar_t *str, unsigned int len,
-                             const MSVCRT_wchar_t *format, va_list valist )
+                             const MSVCRT_wchar_t *format, __ms_va_list valist )
 {
     pf_output out;
 
@@ -837,10 +838,10 @@ int CDECL MSVCRT_vsnwprintf( MSVCRT_wchar_t *str, unsigned int len,
 int CDECL MSVCRT__snwprintf( MSVCRT_wchar_t *str, unsigned int len, const MSVCRT_wchar_t *format, ...)
 {
     int retval;
-    va_list valist;
-    va_start(valist, format);
+    __ms_va_list valist;
+    __ms_va_start(valist, format);
     retval = MSVCRT_vsnwprintf(str, len, format, valist);
-    va_end(valist);
+    __ms_va_end(valist);
     return retval;
 }
 
@@ -849,12 +850,12 @@ int CDECL MSVCRT__snwprintf( MSVCRT_wchar_t *str, unsigned int len, const MSVCRT
  */
 int CDECL MSVCRT_sprintf( char *str, const char *format, ... )
 {
-    va_list ap;
+    __ms_va_list ap;
     int r;
 
-    va_start( ap, format );
+    __ms_va_start( ap, format );
     r = MSVCRT_vsnprintf( str, INT_MAX, format, ap );
-    va_end( ap );
+    __ms_va_end( ap );
     return r;
 }
 
@@ -863,19 +864,19 @@ int CDECL MSVCRT_sprintf( char *str, const char *format, ... )
  */
 int CDECL MSVCRT_swprintf( MSVCRT_wchar_t *str, const MSVCRT_wchar_t *format, ... )
 {
-    va_list ap;
+    __ms_va_list ap;
     int r;
 
-    va_start( ap, format );
+    __ms_va_start( ap, format );
     r = MSVCRT_vsnwprintf( str, INT_MAX, format, ap );
-    va_end( ap );
+    __ms_va_end( ap );
     return r;
 }
 
 /*********************************************************************
  *		vswprintf (MSVCRT.@)
  */
-int CDECL MSVCRT_vswprintf( MSVCRT_wchar_t* str, const MSVCRT_wchar_t* format, va_list args )
+int CDECL MSVCRT_vswprintf( MSVCRT_wchar_t* str, const MSVCRT_wchar_t* format, __ms_va_list args )
 {
     return MSVCRT_vsnwprintf( str, INT_MAX, format, args );
 }
@@ -883,7 +884,7 @@ int CDECL MSVCRT_vswprintf( MSVCRT_wchar_t* str, const MSVCRT_wchar_t* format, v
 /*********************************************************************
  *		vswprintf_s (MSVCRT.@)
  */
-int CDECL MSVCRT_vswprintf_s( MSVCRT_wchar_t* str, MSVCRT_size_t num, const MSVCRT_wchar_t* format, va_list args )
+int CDECL MSVCRT_vswprintf_s( MSVCRT_wchar_t* str, MSVCRT_size_t num, const MSVCRT_wchar_t* format, __ms_va_list args )
 {
     /* FIXME: must handle positional arguments */
     return MSVCRT_vsnwprintf( str, num, format, args );

@@ -886,17 +886,15 @@ static inline void restore_context( const CONTEXT *context, SIGCONTEXT *sigconte
 
 
 /***********************************************************************
- *              get_cpu_context
- *
- * Register function to get the context of the current thread.
+ *		RtlCaptureContext (NTDLL.@)
  */
-void WINAPI __regs_get_cpu_context( CONTEXT *context, CONTEXT *regs )
+void WINAPI __regs_RtlCaptureContext( CONTEXT *context, CONTEXT *regs )
 {
     *context = *regs;
     if (fpux_support) save_fpux( context );
     else save_fpu( context );
 }
-DEFINE_REGS_ENTRYPOINT( get_cpu_context, 4, 4 )
+DEFINE_REGS_ENTRYPOINT( RtlCaptureContext, 1 )
 
 
 /***********************************************************************
@@ -1179,7 +1177,7 @@ static inline CONTEXT *get_exception_context( EXCEPTION_RECORD *rec )
  */
 static inline DWORD get_fpu_code( const CONTEXT *context )
 {
-    DWORD status = context->FloatSave.StatusWord;
+    DWORD status = context->FloatSave.StatusWord & ~(context->FloatSave.ControlWord & 0x3f);
 
     if (status & 0x01)  /* IE */
     {
@@ -1452,6 +1450,7 @@ static void fpe_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     case TRAP_x86_ARITHTRAP:  /* Floating point exception */
     case TRAP_x86_UNKNOWN:    /* Unknown fault code */
         rec->ExceptionCode = get_fpu_code( win_context );
+        rec->ExceptionAddress = (LPVOID)win_context->FloatSave.ErrorOffset;
         break;
     case TRAP_x86_CACHEFLT:  /* SIMD exception */
         /* TODO:

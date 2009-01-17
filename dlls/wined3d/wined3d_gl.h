@@ -866,6 +866,7 @@ void (WINE_GLAPI *glDepthFunc) (GLenum func);
 void (WINE_GLAPI *glDepthMask) (GLboolean flag);
 void (WINE_GLAPI *glDepthRange) (GLclampd nearParam, GLclampd farParam);
 void (WINE_GLAPI *glDisable) (GLenum cap);
+void (WINE_GLAPI *glDisableWINE) (GLenum cap);
 void (WINE_GLAPI *glDisableClientState) (GLenum array);
 void (WINE_GLAPI *glDrawArrays) (GLenum mode, GLint first, GLsizei count);
 void (WINE_GLAPI *glDrawBuffer) (GLenum mode);
@@ -875,6 +876,7 @@ void (WINE_GLAPI *glEdgeFlag) (GLboolean flag);
 void (WINE_GLAPI *glEdgeFlagPointer) (GLsizei stride, const GLvoid* pointer);
 void (WINE_GLAPI *glEdgeFlagv) (const GLboolean* flag);
 void (WINE_GLAPI *glEnable) (GLenum cap);
+void (WINE_GLAPI *glEnableWINE) (GLenum cap);
 void (WINE_GLAPI *glEnableClientState) (GLenum array);
 void (WINE_GLAPI *glEnd) ();
 void (WINE_GLAPI *glEndList) ();
@@ -3383,6 +3385,7 @@ typedef enum _GL_SupportedExt {
   EXT_TEXTURE_SRGB,
   EXT_TEXTURE_SWIZZLE,
   EXT_GPU_PROGRAM_PARAMETERS,
+  EXT_VERTEX_ARRAY_BGRA,
   /* NVIDIA */
   NV_HALF_FLOAT,
   NV_FOG_DISTANCE,
@@ -3852,6 +3855,7 @@ typedef struct _WINED3DGLTYPE {
     int         d3dType;
     GLint       size;
     GLenum      glType;
+    GLint       format;
     GLboolean   normalized;
     int         typesize;
 } WINED3DGLTYPE;

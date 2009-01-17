@@ -102,6 +102,7 @@ typedef enum {
     IHTMLGenericElement_tid,
     IHTMLImgElement_tid,
     IHTMLInputElement_tid,
+    IHTMLLocation_tid,
     IHTMLOptionElement_tid,
     IHTMLSelectElement_tid,
     IHTMLStyle_tid,
@@ -199,6 +200,7 @@ struct ConnectionPoint {
 };
 
 typedef struct {
+    DispatchEx dispex;
     const IHTMLLocationVtbl *lpHTMLLocationVtbl;
 
     LONG ref;
@@ -612,7 +614,6 @@ void doc_insert_script(HTMLDocument*,nsIDOMHTMLScriptElement*);
 IDispatch *script_parse_event(HTMLDocument*,LPCWSTR);
 void set_script_mode(HTMLDocument*,SCRIPTMODE);
 
-IHTMLElementCollection *HTMLElementCollection_Create(IUnknown*,HTMLElement**,DWORD);
 IHTMLElementCollection *create_all_collection(HTMLDOMNode*,BOOL);
 IHTMLElementCollection *create_collection_from_nodelist(HTMLDocument*,IUnknown*,nsIDOMNodeList*);
 IHTMLElementCollection *create_collection_from_htmlcol(HTMLDocument*,IUnknown*,nsIDOMHTMLCollection*);

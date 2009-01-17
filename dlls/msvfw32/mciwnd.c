@@ -309,7 +309,7 @@ static LRESULT MCIWND_Create(HWND hWnd, LPCREATESTRUCTW cs)
         /* MCI wnd class is prepared to be embedded as an MDI child window */
         if (cs->dwExStyle & WS_EX_MDICHILD)
         {
-            MDICREATESTRUCTW *mdics = (MDICREATESTRUCTW *)cs->lpCreateParams;
+            MDICREATESTRUCTW *mdics = cs->lpCreateParams;
             lParam = mdics->lParam;
         }
         else
@@ -752,7 +752,7 @@ end_of_mci_open:
                 MCIWND_notify_error(mwi);
                 return 0;
             }
-            TRACE("MCIWNDM_GETLENGTH: %d\n", mci_status.dwReturn);
+            TRACE("MCIWNDM_GETLENGTH: %ld\n", mci_status.dwReturn);
             return mci_status.dwReturn;
         }
 
@@ -769,7 +769,7 @@ end_of_mci_open:
                 MCIWND_notify_error(mwi);
                 return 0;
             }
-            TRACE("MCIWNDM_GETSTART: %d\n", mci_status.dwReturn);
+            TRACE("MCIWNDM_GETSTART: %ld\n", mci_status.dwReturn);
             return mci_status.dwReturn;
         }
 

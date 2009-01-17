@@ -519,6 +519,8 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
 #define Script_Arabic  6
 #define Script_Latin   1
 #define Script_Numeric 5
+#define Script_CR      22
+#define Script_LF      23
 
     int   cnt = 0, index = 0;
     int   New_Script = SCRIPT_UNDEFINED;
@@ -532,6 +534,12 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
     pItems[index].iCharPos = 0;
     memset(&pItems[index].a, 0, sizeof(SCRIPT_ANALYSIS));
 
+    if  (pwcInChars[cnt] == '\r')
+        pItems[index].a.eScript = Script_CR;
+    else
+    if  (pwcInChars[cnt] == '\n')
+        pItems[index].a.eScript = Script_LF;
+    else
     if  (pwcInChars[cnt] >= Numeric_start && pwcInChars[cnt] <= Numeric_stop)
         pItems[index].a.eScript = Script_Numeric;
     else
@@ -546,10 +554,16 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
 
     TRACE("New_Script=%d, eScript=%d index=%d cnt=%d iCharPos=%d\n",
           New_Script, pItems[index].a.eScript, index, cnt,
-          pItems[index].iCharPos = cnt);
+          pItems[index].iCharPos);
 
-    for (cnt=0; cnt < cInChars; cnt++)
+    for (cnt=1; cnt < cInChars; cnt++)
     {
+        if  (pwcInChars[cnt] == '\r')
+            New_Script = Script_CR;
+        else
+        if  (pwcInChars[cnt] == '\n')
+            New_Script = Script_LF;
+        else
         if  ((pwcInChars[cnt] >= Numeric_start && pwcInChars[cnt] <= Numeric_stop)
              || (New_Script == Script_Numeric && pwcInChars[cnt] == Numeric_space))
             New_Script = Script_Numeric;
@@ -558,7 +572,8 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
              || (New_Script == Script_Arabic && pwcInChars[cnt] == Numeric_space))
             New_Script = Script_Arabic;
         else
-        if  ((WCHAR) pwcInChars[cnt] >= Latin_start && (WCHAR) pwcInChars[cnt] <= Latin_stop)
+        if  ((pwcInChars[cnt] >= Latin_start && pwcInChars[cnt] <= Latin_stop)
+             || (New_Script == Script_Latin && pwcInChars[cnt] == Numeric_space))
             New_Script = Script_Latin;
         else
             New_Script = SCRIPT_UNDEFINED;
@@ -580,7 +595,7 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
             if  (New_Script == Script_Arabic)
                 pItems[index].a.s.uBidiLevel = 1;
 
-            TRACE("index=%d cnt=%d iCharPos=%d\n", index, cnt, pItems[index].iCharPos = cnt);
+            TRACE("index=%d cnt=%d iCharPos=%d\n", index, cnt, pItems[index].iCharPos);
         }
     }
 
@@ -1041,8 +1056,14 @@ HRESULT WINAPI ScriptBreak(const WCHAR *chars, int count, const SCRIPT_ANALYSIS 
         memset(&la[i], 0, sizeof(SCRIPT_LOGATTR));
 
         /* FIXME: set the other flags */
-        la[i].fWhiteSpace = isspaceW(chars[i]);
+        la[i].fWhiteSpace = (chars[i] == ' ');
         la[i].fCharStop = 1;
+
+        if (i > 0 && la[i - 1].fWhiteSpace)
+        {
+            la[i].fSoftBreak = 1;
+            la[i].fWordStop = 1;
+        }
     }
     return S_OK;
 }
@@ -1266,7 +1287,9 @@ HRESULT WINAPI ScriptShape(HDC hdc, SCRIPT_CACHE *psc, const WCHAR *pwcChars,
     HRESULT hr;
     unsigned int i;
 
-    TRACE("(%p, %p, %p, %d, %d, %p)\n",  hdc, psc, pwcChars, cChars, cMaxGlyphs, psa);
+    TRACE("(%p, %p, %s, %d, %d, %p, %p, %p, %p, %p)\n", hdc, psc, debugstr_wn(pwcChars, cChars),
+          cChars, cMaxGlyphs, psa, pwOutGlyphs, pwLogClust, psva, pcGlyphs);
+
     if (psa) TRACE("psa values: %d, %d, %d, %d, %d, %d, %d\n", psa->eScript, psa->fRTL, psa->fLayoutRTL,
                    psa->fLinkBefore, psa->fLinkAfter, psa->fLogicalOrder, psa->fNoGlyphIndex);
 
@@ -1301,10 +1324,12 @@ HRESULT WINAPI ScriptShape(HDC hdc, SCRIPT_CACHE *psc, const WCHAR *pwcChars,
         for (i = 0; i < cChars; i++)
         {
             /* FIXME: set to better values */
-            psva[i].uJustification = 2;
+            psva[i].uJustification = (pwcChars[i] == ' ') ? SCRIPT_JUSTIFY_BLANK : SCRIPT_JUSTIFY_CHARACTER;
             psva[i].fClusterStart  = 1;
             psva[i].fDiacritic     = 0;
             psva[i].fZeroWidth     = 0;
+            psva[i].fReserved      = 0;
+            psva[i].fShapeReserved = 0;
 
             if (pwLogClust) pwLogClust[i] = i;
         }
@@ -1339,8 +1364,8 @@ HRESULT WINAPI ScriptPlace(HDC hdc, SCRIPT_CACHE *psc, const WORD *pwGlyphs,
     HRESULT hr;
     int i;
 
-    TRACE("(%p, %p, %p, %s, %d, %p, %p, %p)\n",  hdc, psc, pwGlyphs,
-          debugstr_wn(pwGlyphs, cGlyphs), cGlyphs, psva, psa, piAdvance);
+    TRACE("(%p, %p, %p, %d, %p, %p, %p, %p, %p)\n",  hdc, psc, pwGlyphs, cGlyphs, psva, psa,
+          piAdvance, pGoffset, pABC);
 
     if (!psva) return E_INVALIDARG;
     if ((hr = init_script_cache(hdc, psc)) != S_OK) return hr;

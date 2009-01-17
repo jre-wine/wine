@@ -248,7 +248,7 @@ static void SrcColorKey32BlitTest(void)
 
     rc = IDirectDrawSurface_Lock(lpDst, NULL, &ddsd2, DDLOCK_WAIT, NULL);
     ok(rc==DD_OK,"Lock returned: %x\n",rc);
-    lpData = (LPDWORD)ddsd2.lpSurface;
+    lpData = ddsd2.lpSurface;
     lpData[0] = 0xCCCCCCCC;
     lpData[1] = 0xCCCCCCCC;
     lpData[2] = 0xCCCCCCCC;
@@ -274,7 +274,7 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Lock(lpSrc, NULL, &ddsd2, DDLOCK_WAIT, NULL);
     ok(rc==DD_OK,"Lock returned: %x\n",rc);
     ok((ddsd2.dwFlags & DDSD_LPSURFACE) == 0, "Surface desc has LPSURFACE Flags set\n");
-    lpData = (LPDWORD)ddsd2.lpSurface;
+    lpData = ddsd2.lpSurface;
     lpData[0] = 0x77010203;
     lpData[1] = 0x00010203;
     lpData[2] = 0x77FF00FF;
@@ -287,7 +287,7 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Lock(lpDst, NULL, &ddsd2, DDLOCK_WAIT, NULL);
     ok(rc==DD_OK,"Lock returned: %x\n",rc);
     ok((ddsd2.dwFlags & DDSD_LPSURFACE) == 0, "Surface desc has LPSURFACE Flags set\n");
-    lpData = (LPDWORD)ddsd2.lpSurface;
+    lpData = ddsd2.lpSurface;
     /* Different behavior on some drivers / windows versions. Some versions ignore the X channel when
      * color keying, but copy it to the destination surface. Others apply it for color keying, but
      * do not copy it into the destination surface.
@@ -388,7 +388,7 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Lock(lpSrc, NULL, &ddsd2, DDLOCK_WAIT, NULL);
     ok(rc==DD_OK,"Lock returned: %x\n",rc);
     ok((ddsd2.dwFlags & DDSD_LPSURFACE) == 0, "Surface desc has LPSURFACE Flags set\n");
-    lpData = (LPDWORD)ddsd2.lpSurface;
+    lpData = ddsd2.lpSurface;
     lpData[0] = 0x000000FF; /* Applies to src blt key in src surface */
     lpData[1] = 0x00000000; /* Applies to dst blt key in src surface */
     lpData[2] = 0x00FF0000; /* Dst color key in dst surface */
@@ -401,7 +401,7 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Lock(lpDst, NULL, &ddsd2, DDLOCK_WAIT, NULL);
     ok(rc==DD_OK,"Lock returned: %x\n",rc);
     ok((ddsd2.dwFlags & DDSD_LPSURFACE) == 0, "Surface desc has LPSURFACE Flags set\n");
-    lpData = (LPDWORD)ddsd2.lpSurface;
+    lpData = ddsd2.lpSurface;
     lpData[0] = 0x55555555;
     lpData[1] = 0x55555555;
     lpData[2] = 0x55555555;
@@ -418,7 +418,7 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Lock(lpDst, NULL, &ddsd2, DDLOCK_WAIT, NULL);
     ok(rc==DD_OK,"Lock returned: %x\n",rc);
     ok((ddsd2.dwFlags & DDSD_LPSURFACE) == 0, "Surface desc has LPSURFACE Flags set\n");
-    lpData = (LPDWORD)ddsd2.lpSurface;
+    lpData = ddsd2.lpSurface;
     /* Should have copied src data unmodified to dst */
     ok(lpData[0] == 0x000000FF &&
        lpData[1] == 0x00000000 &&
@@ -443,7 +443,7 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Lock(lpDst, NULL, &ddsd2, DDLOCK_WAIT, NULL);
     ok(rc==DD_OK,"Lock returned: %x\n",rc);
     ok((ddsd2.dwFlags & DDSD_LPSURFACE) == 0, "Surface desc has LPSURFACE Flags set\n");
-    lpData = (LPDWORD)ddsd2.lpSurface;
+    lpData = ddsd2.lpSurface;
 
     ok(lpData[0] == 0x55555555 && /* Here the src key applied */
        lpData[1] == 0x00000000 &&
@@ -468,7 +468,7 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Lock(lpDst, NULL, &ddsd2, DDLOCK_WAIT, NULL);
     ok(rc==DD_OK,"Lock returned: %x\n",rc);
     ok((ddsd2.dwFlags & DDSD_LPSURFACE) == 0, "Surface desc has LPSURFACE Flags set\n");
-    lpData = (LPDWORD)ddsd2.lpSurface;
+    lpData = ddsd2.lpSurface;
 
     ok(lpData[0] == 0x000000FF &&
        lpData[1] == 0x00000000 &&
@@ -495,7 +495,7 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Lock(lpDst, NULL, &ddsd2, DDLOCK_WAIT, NULL);
     ok(rc==DD_OK,"Lock returned: %x\n",rc);
     ok((ddsd2.dwFlags & DDSD_LPSURFACE) == 0, "Surface desc has LPSURFACE Flags set\n");
-    lpData = (LPDWORD)ddsd2.lpSurface;
+    lpData = ddsd2.lpSurface;
 
     ok(lpData[0] == 0x55555555 &&
        lpData[1] == 0x55555555 &&
@@ -521,7 +521,7 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Lock(lpDst, NULL, &ddsd2, DDLOCK_WAIT, NULL);
     ok(rc==DD_OK,"Lock returned: %x\n",rc);
     ok((ddsd2.dwFlags & DDSD_LPSURFACE) == 0, "Surface desc has LPSURFACE Flags set\n");
-    lpData = (LPDWORD)ddsd2.lpSurface;
+    lpData = ddsd2.lpSurface;
 
     /* DirectDraw uses the dest blit key from the SOURCE surface ! */
     ok(lpData[0] == 0x00ff0000 &&
@@ -548,7 +548,7 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Lock(lpDst, NULL, &ddsd2, DDLOCK_WAIT, NULL);
     ok(rc==DD_OK,"Lock returned: %x\n",rc);
     ok((ddsd2.dwFlags & DDSD_LPSURFACE) == 0, "Surface desc has LPSURFACE Flags set\n");
-    lpData = (LPDWORD)ddsd2.lpSurface;
+    lpData = ddsd2.lpSurface;
 
     ok(lpData[0] == 0x00FF0000 &&
        lpData[1] == 0x00FF0000 &&
@@ -575,7 +575,7 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Lock(lpDst, NULL, &ddsd2, DDLOCK_WAIT, NULL);
     ok(rc==DD_OK,"Lock returned: %x\n",rc);
     ok((ddsd2.dwFlags & DDSD_LPSURFACE) == 0, "Surface desc has LPSURFACE Flags set\n");
-    lpData = (LPDWORD)ddsd2.lpSurface;
+    lpData = ddsd2.lpSurface;
 
     ok(lpData[0] == 0x00FF0000 &&
        lpData[1] == 0x00FF0000 &&
@@ -598,7 +598,7 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Lock(lpSrc, NULL, &ddsd2, DDLOCK_WAIT, NULL);
     ok(rc==DD_OK,"Lock returned: %x\n",rc);
     ok((ddsd2.dwFlags & DDSD_LPSURFACE) == 0, "Surface desc has LPSURFACE Flags set\n");
-    lpData = (LPDWORD)ddsd2.lpSurface;
+    lpData = ddsd2.lpSurface;
     lpData[5] = 0x000000FF; /* Applies to src blt key in src surface */
     rc = IDirectDrawSurface_Unlock(lpSrc, NULL);
     ok(rc==DD_OK,"Unlock returned: %x\n",rc);
@@ -610,7 +610,7 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Lock(lpDst, NULL, &ddsd2, DDLOCK_WAIT, NULL);
     ok(rc==DD_OK,"Lock returned: %x\n",rc);
     ok((ddsd2.dwFlags & DDSD_LPSURFACE) == 0, "Surface desc has LPSURFACE Flags set\n");
-    lpData = (LPDWORD)ddsd2.lpSurface;
+    lpData = ddsd2.lpSurface;
 
     ok(lpData[0] == 0x00FF0000 && /* Masked by Destination key */
        lpData[1] == 0x00FF0000 && /* Masked by Destination key */
@@ -1016,7 +1016,7 @@ static void EnumTest(void)
     ok(!ctx.expected[3], "expected NULL pointer\n");
     ctx.count = 0;
 
-    rc = IDirectDraw_EnumSurfaces(lpDD, DDENUMSURFACES_DOESEXIST | DDENUMSURFACES_ALL, &ddsd, (void *) &ctx, enumCB);
+    rc = IDirectDraw_EnumSurfaces(lpDD, DDENUMSURFACES_DOESEXIST | DDENUMSURFACES_ALL, &ddsd, &ctx, enumCB);
     ok(rc == DD_OK, "IDirectDraw_EnumSurfaces returned %08x\n", rc);
     ok(ctx.count == 3, "%d surfaces enumerated, expected 3\n", ctx.count);
 
@@ -1433,7 +1433,7 @@ static HRESULT WINAPI CubeTestLvl2Enum(IDirectDrawSurface7 *surface, DDSURFACEDE
 static HRESULT WINAPI CubeTestLvl1Enum(IDirectDrawSurface7 *surface, DDSURFACEDESC2 *desc, void *context)
 {
     UINT mips = 0;
-    UINT *num = (UINT *) context;
+    UINT *num = context;
     static const struct compare expected[] =
     {
         {
@@ -2746,6 +2746,16 @@ static void SurfaceCapsTest(void)
 
         IDirectDraw7_Release(dd7);
     }
+
+    memset(&create, 0, sizeof(create));
+    create.dwSize = sizeof(create);
+    create.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+    create.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY | DDSCAPS_VIDEOMEMORY;
+    create.dwWidth = 64;
+    create.dwHeight = 64;
+    hr = IDirectDraw_CreateSurface(lpDD, &create, &surface1, NULL);
+    ok(hr == DDERR_INVALIDCAPS, "Creating a SYSMEM | VIDMEM surface returned 0x%08x, expected DDERR_INVALIDCAPS\n", hr);
+    if(surface1) IDirectDrawSurface_Release(surface1);
 }
 
 static BOOL can_create_primary_surface(void)
@@ -2762,6 +2772,101 @@ static BOOL can_create_primary_surface(void)
     if(FAILED(hr)) return FALSE;
     IDirectDrawSurface_Release(surface);
     return TRUE;
+}
+
+static void dctest_surf(IDirectDrawSurface *surf, int ddsdver) {
+    HRESULT hr;
+    HDC dc, dc2 = (HDC) 0x1234;
+    DDSURFACEDESC ddsd;
+    DDSURFACEDESC2 ddsd2;
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    memset(&ddsd2, 0, sizeof(ddsd2));
+    ddsd2.dwSize = sizeof(ddsd2);
+
+    hr = IDirectDrawSurface_GetDC(surf, &dc);
+    ok(hr == DD_OK, "IDirectDrawSurface_GetDC failed: 0x%08x\n", hr);
+
+    hr = IDirectDrawSurface_GetDC(surf, &dc2);
+    ok(hr == DDERR_DCALREADYCREATED, "IDirectDrawSurface_GetDC failed: 0x%08x\n", hr);
+    ok(dc2 == (HDC) 0x1234, "The failed GetDC call changed the dc: %p\n", dc2);
+
+    hr = IDirectDrawSurface_Lock(surf, NULL, ddsdver == 1 ? &ddsd : ((DDSURFACEDESC *) &ddsd2), 0, NULL);
+    ok(hr == DDERR_SURFACEBUSY, "IDirectDrawSurface_Lock returned 0x%08x, expected DDERR_ALREADYLOCKED\n", hr);
+
+    hr = IDirectDrawSurface_ReleaseDC(surf, dc);
+    ok(hr == DD_OK, "IDirectDrawSurface_ReleaseDC failed: 0x%08x\n", hr);
+    hr = IDirectDrawSurface_ReleaseDC(surf, dc);
+    ok(hr == DDERR_NODC, "IDirectDrawSurface_ReleaseDC returned 0x%08x, expected DDERR_NODC\n", hr);
+}
+
+static void GetDCTest(void)
+{
+    DDSURFACEDESC ddsd;
+    DDSURFACEDESC2 ddsd2;
+    IDirectDrawSurface *surf;
+    IDirectDrawSurface2 *surf2;
+    IDirectDrawSurface4 *surf4;
+    IDirectDrawSurface7 *surf7;
+    HRESULT hr;
+    IDirectDraw2 *dd2;
+    IDirectDraw4 *dd4;
+    IDirectDraw7 *dd7;
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+    ddsd.dwWidth = 64;
+    ddsd.dwHeight = 64;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+    memset(&ddsd2, 0, sizeof(ddsd2));
+    ddsd2.dwSize = sizeof(ddsd2);
+    ddsd2.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+    ddsd2.dwWidth = 64;
+    ddsd2.dwHeight = 64;
+    ddsd2.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+
+    hr = IDirectDraw_CreateSurface(lpDD, &ddsd, &surf, NULL);
+    ok(hr == DD_OK, "IDirectDraw_CreateSurface failed: 0x%08x\n", hr);
+    dctest_surf(surf, 1);
+    IDirectDrawSurface_Release(surf);
+
+    hr = IDirectDraw_QueryInterface(lpDD, &IID_IDirectDraw2, (void **) &dd2);
+    ok(hr == DD_OK, "IDirectDraw_QueryInterface failed: 0x%08x\n", hr);
+
+    hr = IDirectDraw2_CreateSurface(dd2, &ddsd, &surf, NULL);
+    ok(hr == DD_OK, "IDirectDraw2_CreateSurface failed: 0x%08x\n", hr);
+    dctest_surf(surf, 1);
+
+    hr = IDirectDrawSurface_QueryInterface(surf, &IID_IDirectDrawSurface2, (void **) &surf2);
+    ok(hr == DD_OK, "IDirectDrawSurface_QueryInterface failed: 0x%08x\n", hr);
+    dctest_surf((IDirectDrawSurface *) surf2, 1);
+
+    IDirectDrawSurface2_Release(surf2);
+    IDirectDrawSurface_Release(surf);
+    IDirectDraw2_Release(dd2);
+
+    hr = IDirectDraw_QueryInterface(lpDD, &IID_IDirectDraw4, (void **) &dd4);
+    ok(hr == DD_OK, "IDirectDraw_QueryInterface failed: 0x%08x\n", hr);
+
+    surf = NULL;
+    hr = IDirectDraw4_CreateSurface(dd4, &ddsd2, &surf4, NULL);
+    ok(hr == DD_OK, "IDirectDraw4_CreateSurface failed: 0x%08x\n", hr);
+    dctest_surf((IDirectDrawSurface *) surf4, 2);
+
+    IDirectDrawSurface4_Release(surf4);
+    IDirectDraw4_Release(dd4);
+
+    hr = IDirectDraw_QueryInterface(lpDD, &IID_IDirectDraw7, (void **) &dd7);
+    ok(hr == DD_OK, "IDirectDraw_QueryInterface failed: 0x%08x\n", hr);
+    surf = NULL;
+    hr = IDirectDraw7_CreateSurface(dd7, &ddsd2, &surf7, NULL);
+    ok(hr == DD_OK, "IDirectDraw7_CreateSurface failed: 0x%08x\n", hr);
+    dctest_surf((IDirectDrawSurface *) surf7, 2);
+
+    IDirectDrawSurface7_Release(surf7);
+    IDirectDraw7_Release(dd7);
 }
 
 START_TEST(dsurface)
@@ -2806,5 +2911,6 @@ START_TEST(dsurface)
     StructSizeTest();
     PaletteTest();
     SurfaceCapsTest();
+    GetDCTest();
     ReleaseDirectDraw();
 }

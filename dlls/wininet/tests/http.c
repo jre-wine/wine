@@ -363,13 +363,11 @@ static void InternetReadFile_test(int flags)
     CHECK_NOTIFIED2(INTERNET_STATUS_REQUEST_SENT, 2);
     CHECK_NOTIFIED2(INTERNET_STATUS_RECEIVING_RESPONSE, 2);
     CHECK_NOTIFIED2(INTERNET_STATUS_RESPONSE_RECEIVED, 2);
-    todo_wine CHECK_NOTIFIED2(INTERNET_STATUS_CLOSING_CONNECTION, 2);
-    todo_wine CHECK_NOTIFIED2(INTERNET_STATUS_CONNECTION_CLOSED, 2);
     CHECK_NOTIFIED(INTERNET_STATUS_REDIRECT);
     if (flags & INTERNET_FLAG_ASYNC)
         CHECK_NOTIFIED(INTERNET_STATUS_REQUEST_COMPLETE);
     else
-        todo_wine CHECK_NOT_NOTIFIED(INTERNET_STATUS_REQUEST_COMPLETE);
+        CHECK_NOT_NOTIFIED(INTERNET_STATUS_REQUEST_COMPLETE);
     /* Sent on WinXP only if first_connection_to_test_url is TRUE, on Win98 always sent */
     CLEAR_NOTIFIED(INTERNET_STATUS_CONNECTING_TO_SERVER);
     CLEAR_NOTIFIED(INTERNET_STATUS_CONNECTED_TO_SERVER);
@@ -411,8 +409,6 @@ static void InternetReadFile_test(int flags)
     length = 100;
     trace("Entering Query loop\n");
 
-    SET_EXPECT(INTERNET_STATUS_CLOSING_CONNECTION);
-    SET_EXPECT(INTERNET_STATUS_CONNECTION_CLOSED);
     while (TRUE)
     {
         if (flags & INTERNET_FLAG_ASYNC)
@@ -450,9 +446,8 @@ static void InternetReadFile_test(int flags)
         if (length == 0)
             break;
     }
-    /* WinXP does not send, but Win98 does */
-    CLEAR_NOTIFIED(INTERNET_STATUS_CLOSING_CONNECTION);
-    CLEAR_NOTIFIED(INTERNET_STATUS_CONNECTION_CLOSED);
+    todo_wine CHECK_NOTIFIED2(INTERNET_STATUS_CLOSING_CONNECTION, 2);
+    todo_wine CHECK_NOTIFIED2(INTERNET_STATUS_CONNECTION_CLOSED, 2);
 abort:
     trace("aborting\n");
     SET_EXPECT2(INTERNET_STATUS_HANDLE_CLOSING, (hor != 0x0) + (hic != 0x0));
@@ -1413,7 +1408,9 @@ static DWORD CALLBACK server_thread(LPVOID param)
             else
                 send(c, notokmsg, sizeof notokmsg-1, 0);
         }
-        if (strstr(buffer, "POST /test5"))
+        if (strstr(buffer, "POST /test5") ||
+            strstr(buffer, "RPC_IN_DATA /test5") ||
+            strstr(buffer, "RPC_OUT_DATA /test5"))
         {
             if (strstr(buffer, "Content-Length: 0"))
             {
@@ -1666,7 +1663,7 @@ static void test_header_handling_order(int port)
     request = HttpOpenRequest(connect, NULL, "/test3", NULL, NULL, types, INTERNET_FLAG_KEEP_CONNECTION, 0);
     ok(request != NULL, "HttpOpenRequest failed\n");
 
-    ret = HttpAddRequestHeaders(request, authorization, ~0UL, HTTP_ADDREQ_FLAG_ADD);
+    ret = HttpAddRequestHeaders(request, authorization, ~0u, HTTP_ADDREQ_FLAG_ADD);
     ok(ret, "HttpAddRequestHeaders failed\n");
 
     ret = HttpSendRequest(request, NULL, 0, NULL, 0);
@@ -1683,7 +1680,7 @@ static void test_header_handling_order(int port)
     request = HttpOpenRequest(connect, NULL, "/test4", NULL, NULL, types, INTERNET_FLAG_KEEP_CONNECTION, 0);
     ok(request != NULL, "HttpOpenRequest failed\n");
 
-    ret = HttpSendRequest(request, connection, ~0UL, NULL, 0);
+    ret = HttpSendRequest(request, connection, ~0u, NULL, 0);
     ok(ret, "HttpSendRequest failed\n");
 
     status = 0;
@@ -1697,10 +1694,10 @@ static void test_header_handling_order(int port)
     request = HttpOpenRequest(connect, "POST", "/test7", NULL, NULL, types, INTERNET_FLAG_KEEP_CONNECTION, 0);
     ok(request != NULL, "HttpOpenRequest failed\n");
 
-    ret = HttpAddRequestHeaders(request, "Content-Length: 100\r\n", ~0UL, HTTP_ADDREQ_FLAG_ADD_IF_NEW);
+    ret = HttpAddRequestHeaders(request, "Content-Length: 100\r\n", ~0u, HTTP_ADDREQ_FLAG_ADD_IF_NEW);
     ok(ret, "HttpAddRequestHeaders failed\n");
 
-    ret = HttpSendRequest(request, connection, ~0UL, NULL, 0);
+    ret = HttpSendRequest(request, connection, ~0u, NULL, 0);
     ok(ret, "HttpSendRequest failed\n");
 
     status = 0;
@@ -1811,6 +1808,33 @@ static void test_http1_1(int port)
         todo_wine
         ok(ret, "HttpSendRequest failed\n");
     }
+
+    InternetCloseHandle(req);
+    InternetCloseHandle(con);
+    InternetCloseHandle(ses);
+}
+
+static void test_HttpSendRequestW(int port)
+{
+    static const WCHAR header[] = {'U','A','-','C','P','U',':',' ','x','8','6',0};
+    HINTERNET ses, con, req;
+    DWORD error;
+    BOOL ret;
+
+    ses = InternetOpen("winetest", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, INTERNET_FLAG_ASYNC);
+    ok(ses != NULL, "InternetOpen failed\n");
+
+    con = InternetConnect(ses, "localhost", port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+    ok(con != NULL, "InternetConnect failed\n");
+
+    req = HttpOpenRequest(con, NULL, "/test1", NULL, NULL, NULL, 0, 0);
+    ok(req != NULL, "HttpOpenRequest failed\n");
+
+    SetLastError(0xdeadbeef);
+    ret = HttpSendRequestW(req, header, ~0u, NULL, 0);
+    error = GetLastError();
+    ok(!ret, "HttpSendRequestW succeeded\n");
+    ok(error == ERROR_IO_PENDING, "got %u expected ERROR_IO_PENDING\n", error);
 
     InternetCloseHandle(req);
     InternetCloseHandle(con);
@@ -2018,12 +2042,15 @@ static void test_http_connection(void)
     test_proxy_direct(si.port);
     test_header_handling_order(si.port);
     test_basic_request(si.port, "POST", "/test5");
+    test_basic_request(si.port, "RPC_IN_DATA", "/test5");
+    test_basic_request(si.port, "RPC_OUT_DATA", "/test5");
     test_basic_request(si.port, "GET", "/test6");
     test_connection_header(si.port);
     test_http1_1(si.port);
     test_cookie_header(si.port);
     test_basic_authentication(si.port);
     test_HttpQueryInfo(si.port);
+    test_HttpSendRequestW(si.port);
 
     /* send the basic request again to shutdown the server thread */
     test_basic_request(si.port, "GET", "/quit");
@@ -2055,7 +2082,7 @@ static void test_user_agent_header(void)
     ok(!ret, "HttpQueryInfo succeeded\n");
     ok(err == ERROR_HTTP_HEADER_NOT_FOUND, "expected ERROR_HTTP_HEADER_NOT_FOUND, got %u\n", err);
 
-    ret = HttpAddRequestHeaders(req, "User-Agent: Gizmo Project\r\n", ~0UL, HTTP_ADDREQ_FLAG_ADD_IF_NEW);
+    ret = HttpAddRequestHeaders(req, "User-Agent: Gizmo Project\r\n", ~0u, HTTP_ADDREQ_FLAG_ADD_IF_NEW);
     ok(ret, "HttpAddRequestHeaders succeeded\n");
 
     size = sizeof(buffer);
@@ -2075,7 +2102,7 @@ static void test_user_agent_header(void)
     ok(!ret, "HttpQueryInfo succeeded\n");
     ok(err == ERROR_HTTP_HEADER_NOT_FOUND, "expected ERROR_HTTP_HEADER_NOT_FOUND, got %u\n", err);
 
-    ret = HttpAddRequestHeaders(req, "Accept: audio/*, image/*, text/*\r\nUser-Agent: Gizmo Project\r\n", ~0UL, HTTP_ADDREQ_FLAG_ADD_IF_NEW);
+    ret = HttpAddRequestHeaders(req, "Accept: audio/*, image/*, text/*\r\nUser-Agent: Gizmo Project\r\n", ~0u, HTTP_ADDREQ_FLAG_ADD_IF_NEW);
     ok(ret, "HttpAddRequestHeaders failed\n");
 
     buffer[0] = 0;

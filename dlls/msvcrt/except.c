@@ -96,6 +96,9 @@ static inline int call_unwind_func( int (*func)(void), void *ebp )
 
 #endif
 
+
+#ifdef __i386__
+
 static DWORD MSVCRT_nested_handler(PEXCEPTION_RECORD rec,
                                    EXCEPTION_REGISTRATION_RECORD* frame,
                                    PCONTEXT context,
@@ -111,7 +114,7 @@ static DWORD MSVCRT_nested_handler(PEXCEPTION_RECORD rec,
 /*********************************************************************
  *		_EH_prolog (MSVCRT.@)
  */
-#ifdef __i386__
+
 /* Provided for VC++ binary compatibility only */
 __ASM_GLOBAL_FUNC(_EH_prolog,
                   "pushl $-1\n\t"
@@ -219,10 +222,10 @@ int CDECL _except_handler3(PEXCEPTION_RECORD rec,
 
     while (trylevel != TRYLEVEL_END)
     {
+      TRACE( "level %d prev %d filter %p\n", trylevel, pScopeTable[trylevel].previousTryLevel,
+             pScopeTable[trylevel].lpfnFilter );
       if (pScopeTable[trylevel].lpfnFilter)
       {
-        TRACE("filter = %p\n", pScopeTable[trylevel].lpfnFilter);
-
         retval = call_filter( pScopeTable[trylevel].lpfnFilter, &exceptPtrs, &frame->_ebp );
 
         TRACE("filter returned %s\n", retval == EXCEPTION_CONTINUE_EXECUTION ?
@@ -241,17 +244,17 @@ int CDECL _except_handler3(PEXCEPTION_RECORD rec,
           /* Set our trylevel to the enclosing block, and call the __finally
            * code, which won't return
            */
-          frame->trylevel = pScopeTable->previousTryLevel;
+          frame->trylevel = pScopeTable[trylevel].previousTryLevel;
           TRACE("__finally block %p\n",pScopeTable[trylevel].lpfnHandler);
           call_finally_block(pScopeTable[trylevel].lpfnHandler, &frame->_ebp);
           ERR("Returned from __finally block - expect crash!\n");
        }
       }
-      trylevel = pScopeTable->previousTryLevel;
+      trylevel = pScopeTable[trylevel].previousTryLevel;
     }
   }
 #else
-  FIXME("exception %lx flags=%lx at %p handler=%p %p %p stub\n",
+  FIXME("exception %x flags=%x at %p handler=%p %p %p stub\n",
         rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
         frame->handler, context, dispatcher);
 #endif

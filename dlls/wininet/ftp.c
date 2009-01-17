@@ -858,13 +858,13 @@ lend:
 
         if (hFindNext)
 	{
-            iar.dwResult = (DWORD)hFindNext;
+            iar.dwResult = (DWORD_PTR)hFindNext;
             iar.dwError = ERROR_SUCCESS;
             SendAsyncCallback(&lpwfs->hdr, lpwfs->hdr.dwContext, INTERNET_STATUS_HANDLE_CREATED,
                 &iar, sizeof(INTERNET_ASYNC_RESULT));
 	}
 
-        iar.dwResult = (DWORD)hFindNext;
+        iar.dwResult = (DWORD_PTR)hFindNext;
         iar.dwError = hFindNext ? ERROR_SUCCESS : INTERNET_GetLastError();
         SendAsyncCallback(&lpwfs->hdr, lpwfs->hdr.dwContext, INTERNET_STATUS_REQUEST_COMPLETE,
             &iar, sizeof(INTERNET_ASYNC_RESULT));
@@ -1267,6 +1267,7 @@ static const HANDLEHEADERVtbl FTPFILEVtbl = {
     NULL,
     FTPFILE_ReadFile,
     NULL,
+    NULL,
     FTPFILE_WriteFile,
     NULL,
     NULL
@@ -1343,13 +1344,13 @@ HINTERNET FTP_FtpOpenFileW(LPWININETFTPSESSIONW lpwfs,
 
 	if (lpwh)
 	{
-            iar.dwResult = (DWORD)handle;
+            iar.dwResult = (DWORD_PTR)handle;
             iar.dwError = ERROR_SUCCESS;
             SendAsyncCallback(&lpwfs->hdr, lpwfs->hdr.dwContext, INTERNET_STATUS_HANDLE_CREATED,
                 &iar, sizeof(INTERNET_ASYNC_RESULT));
 	}
 
-        iar.dwResult = (DWORD)bSuccess;
+        iar.dwResult = bSuccess;
         iar.dwError = bSuccess ? ERROR_SUCCESS : INTERNET_GetLastError();
         SendAsyncCallback(&lpwfs->hdr, lpwfs->hdr.dwContext, INTERNET_STATUS_REQUEST_COMPLETE,
             &iar, sizeof(INTERNET_ASYNC_RESULT));
@@ -2340,7 +2341,7 @@ HINTERNET FTP_Connect(LPWININETAPPINFOW hIC, LPCWSTR lpszServerName,
     {
         INTERNET_ASYNC_RESULT iar;
 
-        iar.dwResult = (DWORD)handle;
+        iar.dwResult = (DWORD_PTR)handle;
         iar.dwError = ERROR_SUCCESS;
 
         SendAsyncCallback(&hIC->hdr, dwContext,
@@ -3307,6 +3308,7 @@ static const HANDLEHEADERVtbl FTPFINDNEXTVtbl = {
     FTPFINDNEXT_Destroy,
     NULL,
     FTPFINDNEXT_QueryOption,
+    NULL,
     NULL,
     NULL,
     NULL,

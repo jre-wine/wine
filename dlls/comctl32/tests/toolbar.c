@@ -1,4 +1,4 @@
-/* Unit tests for treeview.
+/* Unit tests for toolbar.
  *
  * Copyright 2005 Krzysztof Foltman
  * Copyright 2007 Mikolaj Zalewski
@@ -1151,7 +1151,7 @@ static void test_setrows(void)
         memset(&rc, 0xCC, sizeof(rc));
         SendMessageA(hToolbar, TB_SETROWS,
                      MAKELONG(tbrows_results[i].nRows, tbrows_results[i].bLarger),
-                     (LONG) &rc);
+                     (LPARAM) &rc);
 
         rows = SendMessageA(hToolbar, TB_GETROWS, MAKELONG(0,0), MAKELONG(0,0));
         ok(rows == tbrows_results[i].expectedRows,

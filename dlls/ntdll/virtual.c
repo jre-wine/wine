@@ -53,6 +53,7 @@
 #include "winternl.h"
 #include "wine/library.h"
 #include "wine/server.h"
+#include "wine/exception.h"
 #include "wine/list.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
@@ -123,7 +124,7 @@ static void *user_space_limit    = (void *)0x7fff0000;  /* top of the user addre
 static void *working_set_limit   = (void *)0x7fff0000;  /* top of the current working set */
 #else
 static UINT page_shift;
-static UINT page_size;
+static UINT_PTR page_size;
 static UINT_PTR page_mask;
 static void *address_space_limit;
 static void *user_space_limit;
@@ -1516,6 +1517,73 @@ BOOL virtual_handle_stack_fault( void *addr )
 
 
 /***********************************************************************
+ *           virtual_check_buffer_for_read
+ *
+ * Check if a memory buffer can be read, triggering page faults if needed for DIB section access.
+ */
+BOOL virtual_check_buffer_for_read( const void *ptr, SIZE_T size )
+{
+    if (!size) return TRUE;
+    if (!ptr) return FALSE;
+
+    __TRY
+    {
+        volatile const char *p = ptr;
+        char dummy;
+        SIZE_T count = size;
+
+        while (count > page_size)
+        {
+            dummy = *p;
+            p += page_size;
+            count -= page_size;
+        }
+        dummy = p[0];
+        dummy = p[count - 1];
+    }
+    __EXCEPT_PAGE_FAULT
+    {
+        return FALSE;
+    }
+    __ENDTRY
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *           virtual_check_buffer_for_write
+ *
+ * Check if a memory buffer can be written to, triggering page faults if needed for write watches.
+ */
+BOOL virtual_check_buffer_for_write( void *ptr, SIZE_T size )
+{
+    if (!size) return TRUE;
+    if (!ptr) return FALSE;
+
+    __TRY
+    {
+        volatile char *p = ptr;
+        SIZE_T count = size;
+
+        while (count > page_size)
+        {
+            *p |= 0;
+            p += page_size;
+            count -= page_size;
+        }
+        p[0] |= 0;
+        p[count - 1] |= 0;
+    }
+    __EXCEPT_PAGE_FAULT
+    {
+        return FALSE;
+    }
+    __ENDTRY
+    return TRUE;
+}
+
+
+/***********************************************************************
  *           VIRTUAL_SetForceExec
  *
  * Whether to force exec prot on all views.
@@ -2547,14 +2615,22 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
 {
     NTSTATUS status;
 
-    SERVER_START_REQ( read_process_memory )
+    if (virtual_check_buffer_for_write( buffer, size ))
     {
-        req->handle = wine_server_obj_handle( process );
-        req->addr   = wine_server_client_ptr( addr );
-        wine_server_set_reply( req, buffer, size );
-        if ((status = wine_server_call( req ))) size = 0;
+        SERVER_START_REQ( read_process_memory )
+        {
+            req->handle = wine_server_obj_handle( process );
+            req->addr   = wine_server_client_ptr( addr );
+            wine_server_set_reply( req, buffer, size );
+            if ((status = wine_server_call( req ))) size = 0;
+        }
+        SERVER_END_REQ;
     }
-    SERVER_END_REQ;
+    else
+    {
+        status = STATUS_ACCESS_VIOLATION;
+        size = 0;
+    }
     if (bytes_read) *bytes_read = size;
     return status;
 }
@@ -2569,14 +2645,22 @@ NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *bu
 {
     NTSTATUS status;
 
-    SERVER_START_REQ( write_process_memory )
+    if (virtual_check_buffer_for_read( buffer, size ))
     {
-        req->handle     = wine_server_obj_handle( process );
-        req->addr       = wine_server_client_ptr( addr );
-        wine_server_add_data( req, buffer, size );
-        if ((status = wine_server_call( req ))) size = 0;
+        SERVER_START_REQ( write_process_memory )
+        {
+            req->handle     = wine_server_obj_handle( process );
+            req->addr       = wine_server_client_ptr( addr );
+            wine_server_add_data( req, buffer, size );
+            if ((status = wine_server_call( req ))) size = 0;
+        }
+        SERVER_END_REQ;
     }
-    SERVER_END_REQ;
+    else
+    {
+        status = STATUS_PARTIAL_COPY;
+        size = 0;
+    }
     if (bytes_written) *bytes_written = size;
     return status;
 }

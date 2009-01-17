@@ -23,10 +23,15 @@
 
 #define COBJMACROS
 #include "winbase.h"
+#include "wingdi.h"
 #include "winuser.h"
 #include "objbase.h"
 
 #include "d3d10.h"
+#ifdef D3D10CORE_INIT_GUID
+#include "initguid.h"
+#endif
+#include "wine/wined3d.h"
 
 /* TRACE helper functions */
 const char *debug_d3d10_primitive_topology(D3D10_PRIMITIVE_TOPOLOGY topology);
@@ -35,11 +40,21 @@ const char *debug_dxgi_format(DXGI_FORMAT format);
 /* IDirect3D10Device */
 extern const struct ID3D10DeviceVtbl d3d10_device_vtbl;
 extern const struct IUnknownVtbl d3d10_device_inner_unknown_vtbl;
+extern const struct IWineD3DDeviceParentVtbl d3d10_wined3d_device_parent_vtbl;
 struct d3d10_device
 {
     const struct ID3D10DeviceVtbl *vtbl;
     const struct IUnknownVtbl *inner_unknown_vtbl;
+    const struct IWineD3DDeviceParentVtbl *device_parent_vtbl;
     IUnknown *outer_unknown;
+    LONG refcount;
+};
+
+/* ID3D10Texture2D */
+extern const struct ID3D10Texture2DVtbl d3d10_texture2d_vtbl;
+struct d3d10_texture2d
+{
+    const struct ID3D10Texture2DVtbl *vtbl;
     LONG refcount;
 };
 

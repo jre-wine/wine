@@ -568,6 +568,12 @@ NTSTATUS WINAPI NtReadFile(HANDLE hFile, HANDLE hEvent,
                                  &needs_close, &type, &options );
     if (status) return status;
 
+    if (!virtual_check_buffer_for_write( buffer, length ))
+    {
+        status = STATUS_ACCESS_VIOLATION;
+        goto done;
+    }
+
     if (type == FD_TYPE_FILE && offset && offset->QuadPart != (LONGLONG)-2 /* FILE_USE_FILE_POINTER_POSITION */ )
     {
         /* async I/O doesn't make sense on regular files */
@@ -615,14 +621,11 @@ NTSTATUS WINAPI NtReadFile(HANDLE hFile, HANDLE hEvent,
             }
             else if (type == FD_TYPE_FILE) continue;  /* no async I/O on regular files */
         }
-        else
+        else if (errno != EAGAIN)
         {
             if (errno == EINTR) continue;
-            if (errno != EAGAIN)
-            {
-                status = FILE_GetNtStatus();
-                goto done;
-            }
+            if (!total) status = FILE_GetNtStatus();
+            goto done;
         }
 
         if (!(options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT)))
@@ -904,6 +907,12 @@ NTSTATUS WINAPI NtWriteFile(HANDLE hFile, HANDLE hEvent,
                                  &needs_close, &type, &options );
     if (status) return status;
 
+    if (!virtual_check_buffer_for_read( buffer, length ))
+    {
+        status = STATUS_INVALID_USER_BUFFER;
+        goto done;
+    }
+
     if (type == FD_TYPE_FILE && offset && offset->QuadPart != (LONGLONG)-2 /* FILE_USE_FILE_POINTER_POSITION */ )
     {
         /* async I/O doesn't make sense on regular files */
@@ -944,19 +953,15 @@ NTSTATUS WINAPI NtWriteFile(HANDLE hFile, HANDLE hEvent,
             }
             if (type == FD_TYPE_FILE) continue;  /* no async I/O on regular files */
         }
-        else
+        else if (errno != EAGAIN)
         {
             if (errno == EINTR) continue;
-            if (errno != EAGAIN)
+            if (!total)
             {
-                if (errno == EFAULT)
-                {
-                    status = STATUS_INVALID_USER_BUFFER;
-                    goto err;
-                }
-                status = FILE_GetNtStatus();
-                goto done;
+                if (errno == EFAULT) status = STATUS_INVALID_USER_BUFFER;
+                else status = FILE_GetNtStatus();
             }
+            goto done;
         }
 
         if (!(options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT)))
@@ -2012,7 +2017,7 @@ NTSTATUS WINAPI NtQueryAttributesFile( const OBJECT_ATTRIBUTES *attr, FILE_BASIC
 }
 
 
-#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || defined(__APPLE__)
+#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__APPLE__)
 /* helper for FILE_GetDeviceInfo to hide some platform differences in fstatfs */
 static inline void get_device_info_fstatfs( FILE_FS_DEVICE_INFORMATION *info, const char *fstypename,
                                             unsigned int flags )
@@ -2133,7 +2138,7 @@ static NTSTATUS get_device_info( int fd, FILE_FS_DEVICE_INFORMATION *info )
             info->DeviceType = FILE_DEVICE_DISK_FILE_SYSTEM;
             break;
         }
-#elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__APPLE__)
+#elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__OpenBSD__) || defined(__APPLE__)
         struct statfs stfs;
 
         if (fstatfs( fd, &stfs ) < 0)

@@ -2333,14 +2333,15 @@ IDirectDrawSurfaceImpl_SetSurfaceDesc(IDirectDrawSurface7 *iface,
         if(hr != WINED3D_OK)
         {
             /* No need for a trace here, wined3d does that for us */
-            LeaveCriticalSection(&ddraw_cs);
             switch(hr)
             {
-                case WINED3DERR_INVALIDCALL:        return DDERR_INVALIDPARAMS;
-                default:                            break; /* Go on */
+                case WINED3DERR_INVALIDCALL:
+                    LeaveCriticalSection(&ddraw_cs);
+                    return DDERR_INVALIDPARAMS;
+                default:
+                    break; /* Go on */
             }
         }
-
     }
 
     This->surface_desc = *DDSD;
@@ -2520,7 +2521,7 @@ IDirectDrawSurfaceImpl_SetColorKey(IDirectDrawSurface7 *iface,
                                           Flags,
                                           ctx.CKey);
     IDirectDrawSurface7_EnumAttachedSurfaces(iface,
-                                             (void *) &ctx,
+                                             &ctx,
                                              SetColorKeyEnum);
     LeaveCriticalSection(&ddraw_cs);
     switch(ctx.ret)

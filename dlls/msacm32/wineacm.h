@@ -370,7 +370,6 @@ typedef struct _WINE_ACMNOTIFYWND
 /* From internal.c */
 extern HANDLE MSACM_hHeap;
 extern PWINE_ACMDRIVERID MSACM_pFirstACMDriverID;
-extern PWINE_ACMDRIVERID MSACM_pLastACMDriverID;
 extern PWINE_ACMDRIVERID MSACM_RegisterDriver(LPCWSTR pszDriverAlias, LPCWSTR pszFileName,
 					      PWINE_ACMLOCALDRIVER pLocalDriver);
 extern void MSACM_RegisterAllDrivers(void);
@@ -397,7 +396,6 @@ extern PWINE_ACMDRIVERID MSACM_RegisterDriverFromRegistry(LPCWSTR pszRegEntry);
 extern PWINE_ACMLOCALDRIVER MSACM_RegisterLocalDriver(HMODULE hModule, DRIVERPROC lpDriverProc);
 extern PWINE_ACMLOCALDRIVERINST MSACM_OpenLocalDriver(PWINE_ACMLOCALDRIVER, LPARAM);
 extern LRESULT MSACM_CloseLocalDriver(PWINE_ACMLOCALDRIVERINST);
-extern PWINE_ACMLOCALDRIVER MSACM_UnregisterLocalDriver(PWINE_ACMLOCALDRIVER);
 /*
 extern PWINE_ACMLOCALDRIVER MSACM_GetLocalDriver(HACMDRIVER hDriver);
 */

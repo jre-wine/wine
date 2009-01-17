@@ -81,16 +81,41 @@ AC_ARG_WITH(xxf86vm,   AS_HELP_STRING([--without-xxf86vm],[do not use XFree vide
 AC_ARG_WITH(wine-tools,AS_HELP_STRING([--with-wine-tools=DIR],[use Wine tools from directory DIR]))
 
 AC_CANONICAL_HOST
+
+dnl check for out of tree build with unclean source tree
+case "$srcdir" in
+ .) ;;
+ *) if test -f "$srcdir/Makefile" -o -f "$srcdir/include/config.h"; then
+      AC_MSG_ERROR([you are building out of the source tree, but the source tree contains object files.
+You need to run 'make distclean' in the source tree first.])
+    fi ;;
+esac
+
+dnl **** Check for some programs ****
+
+AC_PROG_MAKE_SET
+AC_PROG_CC
+AC_PROG_CXX
+dnl We can't use AC_PROG_CPP for winegcc, it uses by default $(CC) -E
+AC_CHECK_TOOL(CPPBIN,cpp,cpp)
+
 case $host in
-  x86_64*linux*)
-    if test "x$enable_win64" != "xyes"
+  x86_64*)
+    if test "x$enable_win64" != "xyes" -a "$cross_compiling" != "yes"
     then
-      CC="${CC:-gcc} -m32"
-      CXX="${CXX:-g++} -m32"
+      CC="$CC -m32"
+      CXX="$CXX -m32"
+      AC_MSG_CHECKING([whether $CC works])
+      AC_LINK_IFELSE(AC_LANG_PROGRAM(),AC_MSG_RESULT([yes]),
+                     [AC_MSG_RESULT([no])
+                      AC_MSG_ERROR([Cannot build a 32-bit program, you need to install 32-bit development libraries.])])
       LD="${LD:-ld} -m elf_i386"
       AS="${AS:-as} --32"
       host_cpu="i386"
       notice_platform="32-bit "
+      AC_SUBST(TARGETFLAGS,"-m32")
+    else
+      AC_SUBST(TARGETFLAGS,"-m64")
     fi
     ;;
 esac
@@ -126,23 +151,6 @@ then
   WIN16_INSTALL=""
 fi
 
-dnl check for out of tree build with unclean source tree
-case "$srcdir" in
- .) ;;
- *) if test -f "$srcdir/Makefile" -o -f "$srcdir/include/config.h"; then
-      AC_MSG_ERROR([you are building out of the source tree, but the source tree contains object files.
-You need to run 'make distclean' in the source tree first.])
-    fi ;;
-esac
-
-dnl **** Check for some programs ****
-
-AC_PROG_MAKE_SET
-AC_PROG_CC
-AC_PROG_CXX
-dnl We can't use AC_PROG_CPP for winegcc, it uses by default $(CC) -E
-AC_CHECK_TOOL(CPPBIN,cpp,cpp)
-
 AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
   [if test -z "$with_wine_tools"; then
      if test "$cross_compiling" = "yes"; then
@@ -161,7 +169,7 @@ AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
 AC_SUBST(TOOLSDIR,$wine_cv_toolsdir)
 if test "$cross_compiling" = "yes"
 then
-    AC_SUBST(TARGET,"$host_alias")
+    AC_SUBST(TARGETFLAGS,"-b $host_alias")
 fi
 
 AC_PATH_XTRA
@@ -905,12 +913,15 @@ WINE_WARNING_WITH(xslt,[test "x$ac_cv_lib_soname_xslt" = "x"],
 
 dnl **** Check for libhal ****
 AC_SUBST(HALINCL,"")
-if test "x$with_hal" != "xno" -a "$PKG_CONFIG" != "false"
+if test "x$with_hal" != "xno"
 then
     ac_save_CPPFLAGS="$CPPFLAGS"
-    ac_hal_libs="`$PKG_CONFIG --libs hal 2>/dev/null`"
-    ac_hal_cflags="`$PKG_CONFIG --cflags hal 2>/dev/null`"
-    CPPFLAGS="$CPPFLAGS $ac_hal_cflags"
+    if test "$PKG_CONFIG" != "false"
+    then
+        ac_hal_libs="`$PKG_CONFIG --libs hal 2>/dev/null`"
+        ac_hal_cflags="`$PKG_CONFIG --cflags hal 2>/dev/null`"
+        CPPFLAGS="$CPPFLAGS $ac_hal_cflags"
+    fi
     AC_CHECK_HEADERS([dbus/dbus.h hal/libhal.h])
     if test "$ac_cv_header_dbus_dbus_h" = "yes" -a "$ac_cv_header_hal_libhal_h" = "yes"
     then
@@ -924,12 +935,15 @@ WINE_NOTICE_WITH(hal,[test "x$ac_cv_lib_soname_hal" = "x"],
                  [libhal ${notice_platform}development files not found, no dynamic device support.])
 
 dnl **** Check for libgnutls ****
-if test "x$with_gnutls" != "xno" -a "$PKG_CONFIG" != "false"
+if test "x$with_gnutls" != "xno"
 then
     ac_save_CPPFLAGS="$CPPFLAGS"
-    ac_gnutls_libs="`$PKG_CONFIG --libs gnutls 2>/dev/null`"
-    ac_gnutls_cflags="`$PKG_CONFIG --cflags gnutls 2>/dev/null`"
-    CPPFLAGS="$CPPFLAGS $ac_gnutls_cflags"
+    if test "$PKG_CONFIG" != "false"
+    then
+        ac_gnutls_libs="`$PKG_CONFIG --libs gnutls 2>/dev/null`"
+        ac_gnutls_cflags="`$PKG_CONFIG --cflags gnutls 2>/dev/null`"
+        CPPFLAGS="$CPPFLAGS $ac_gnutls_cflags"
+    fi
     AC_CHECK_HEADER(gnutls/gnutls.h,
         [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <gnutls/gnutls.h>]], [[typeof(gnutls_mac_get_key_size) *pfunc;]])],
             [WINE_CHECK_SONAME(gnutls,gnutls_global_init,
@@ -956,13 +970,16 @@ WINE_NOTICE_WITH(curses,[test "x$ac_cv_lib_soname_curses$ac_cv_lib_soname_ncurse
                  [lib(n)curses ${notice_platform}development files not found, curses won't be supported.])
 
 dnl **** Check for SANE ****
-AC_CHECK_PROG(sane_devel,sane-config,sane-config,no)
-if test "$sane_devel" != "no" -a "x$with_sane" != "xno"
+if test "x$with_sane" != "xno"
 then
-    ac_sane_incl="`$sane_devel --cflags`"
-    ac_sane_libs="`$sane_devel --ldflags`"
     ac_save_CPPFLAGS="$CPPFLAGS"
-    CPPFLAGS="$CPPFLAGS $ac_sane_incl"
+    AC_CHECK_PROG(sane_devel,sane-config,sane-config,no)
+    if test "$sane_devel" != "no"
+    then
+        ac_sane_incl="`$sane_devel --cflags`"
+        ac_sane_libs="`$sane_devel --ldflags`"
+        CPPFLAGS="$CPPFLAGS $ac_sane_incl"
+    fi
     AC_CHECK_HEADER(sane/sane.h,
         [WINE_CHECK_SONAME(sane,sane_init,[AC_SUBST(SANEINCL,"$ac_sane_incl")],,[$ac_sane_libs])])
     CPPFLAGS="$ac_save_CPPFLAGS"
@@ -971,21 +988,24 @@ WINE_NOTICE_WITH(sane,[test "x$ac_cv_lib_soname_sane" = "x"],
                  [libsane ${notice_platform}development files not found, scanners won't be supported.])
 
 dnl **** Check for libgphoto2 ****
-AC_CHECK_PROG(gphoto2_devel,gphoto2-config,gphoto2-config,no)
-AC_CHECK_PROG(gphoto2port_devel,gphoto2-port-config,gphoto2-port-config,no)
-if test "$gphoto2_devel" != "no" -a "$gphoto2port_devel" != "no" -a "x$with_gphoto" != "xno"
+if test "x$with_gphoto" != "xno"
 then
-    ac_gphoto2_incl="`$gphoto2_devel --cflags` `$gphoto2port_devel --cflags`"
-    ac_gphoto2_libs=""
-    for i in `$gphoto2_devel --libs` `$gphoto2port_devel --libs`
-    do
-      case "$i" in
-        -L/usr/lib|-L/usr/lib64) ;;
-        -L*|-l*) ac_gphoto2_libs="$ac_gphoto2_libs $i";;
-      esac
-    done
     ac_save_CPPFLAGS="$CPPFLAGS"
-    CPPFLAGS="$CPPFLAGS $ac_gphoto2_incl"
+    AC_CHECK_PROG(gphoto2_devel,gphoto2-config,gphoto2-config,no)
+    AC_CHECK_PROG(gphoto2port_devel,gphoto2-port-config,gphoto2-port-config,no)
+    if test "$gphoto2_devel" != "no" -a "$gphoto2port_devel" != "no"
+    then
+        ac_gphoto2_incl="`$gphoto2_devel --cflags` `$gphoto2port_devel --cflags`"
+        ac_gphoto2_libs=""
+        for i in `$gphoto2_devel --libs` `$gphoto2port_devel --libs`
+        do
+            case "$i" in
+            -L/usr/lib|-L/usr/lib64) ;;
+            -L*|-l*) ac_gphoto2_libs="$ac_gphoto2_libs $i";;
+            esac
+        done
+        CPPFLAGS="$CPPFLAGS $ac_gphoto2_incl"
+    fi
     AC_CHECK_HEADER(gphoto2-camera.h,
                     [AC_CHECK_LIB(gphoto2,gp_camera_new,
                                   [AC_DEFINE(HAVE_GPHOTO2, 1, [Define if we have libgphoto2 development environment])
@@ -1025,11 +1045,14 @@ WINE_NOTICE_WITH(cms,[test "$ac_cv_lib_lcms_cmsOpenProfileFromFile" != "yes"],
                  [liblcms ${notice_platform}development files not found, Color Management won't be supported.])
 
 dnl **** Check for FreeType 2 ****
-AC_CHECK_PROGS(ft_devel,[freetype-config freetype2-config],false)
-if test "$ft_devel" != "false" -a "x$with_freetype" != "xno"
+if test "x$with_freetype" != "xno"
 then
-    ac_freetype_libs=`$ft_devel --libs`
-    ac_freetype_incl=`$ft_devel --cflags`
+    AC_CHECK_PROGS(ft_devel,[freetype-config freetype2-config],no)
+    if test "$ft_devel" != "no"
+    then
+        ac_freetype_incl=`$ft_devel --cflags`
+        ac_freetype_libs=`$ft_devel --libs`
+    fi
     WINE_CHECK_SONAME(freetype,FT_Init_FreeType,[ft_lib=yes],[ft_lib=no],[$ac_freetype_libs])
     if test "$ft_lib" = "yes"
     then
@@ -1095,24 +1118,28 @@ WINE_CHECK_LIB_FUNCS(\
         [$LIBPTHREAD])
 
 dnl **** Check for EsounD ****
-AC_PATH_PROG(ESDCONFIG, esd-config)
-if test "x$with_esd" != xno -a "x$ESDCONFIG" != x -a "x$ESDCONFIG" != x'"$ESDCONFIG"';
+if test "x$with_esd" != xno
 then
-    ac_esd_incl=""
-    for i in `$ESDCONFIG --cflags`
-    do
-      case "$i" in
-        -I*) ac_esd_incl="$ac_esd_incl $i";;
-      esac
-    done
-    ac_esd_libs=`$ESDCONFIG --libs`
     save_CFLAGS="$CFLAGS"
-    CFLAGS="$CFLAGS $ac_esd_incl"
-    AC_CHECK_LIB(esd,esd_open_sound,
-        [AC_SUBST(ESDINCL, "$ac_esd_incl")
-         AC_SUBST(ESDLIBS, "$ac_esd_libs")
-         AC_DEFINE(HAVE_ESD, 1, [Define if you have EsounD sound server])],,
-        [$ac_esd_libs])
+    AC_PATH_PROG(ESDCONFIG, esd-config, no)
+    if test "x$ESDCONFIG" != "xno"
+    then
+        ac_esd_incl=""
+        for i in `$ESDCONFIG --cflags`
+        do
+            case "$i" in
+                -I*) ac_esd_incl="$ac_esd_incl $i";;
+            esac
+        done
+        ac_esd_libs=`$ESDCONFIG --libs`
+        CFLAGS="$CFLAGS $ac_esd_incl"
+    fi
+    AC_CHECK_HEADER(esd.h,
+        [AC_CHECK_LIB(esd,esd_open_sound,
+            [AC_SUBST(ESDINCL, "$ac_esd_incl")
+             AC_SUBST(ESDLIBS, "$ac_esd_libs")
+             AC_DEFINE(HAVE_ESD, 1, [Define if you have EsounD sound server])],,
+            [$ac_esd_libs])])
     CFLAGS="$save_CFLAGS"
 fi
 
@@ -1818,6 +1845,7 @@ WINE_CONFIG_MAKEFILE([dlls/dciman32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_D
 WINE_CONFIG_MAKEFILE([dlls/ddraw/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/ddraw/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/ddrawex/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ddrawex/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/devenum/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dinput/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dinput/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
@@ -1868,6 +1896,7 @@ WINE_CONFIG_MAKEFILE([dlls/hid/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DI
 WINE_CONFIG_MAKEFILE([dlls/hlink/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/hlink/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/hnetcfg/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/httpapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/iccvid/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/icmp/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/ifsmgr.vxd/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -1893,6 +1922,7 @@ WINE_CONFIG_MAKEFILE([dlls/jscript/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DL
 WINE_CONFIG_MAKEFILE([dlls/jscript/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/kernel32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/kernel32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/loadperf/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/localspl/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/localspl/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/localui/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -2048,6 +2078,7 @@ WINE_CONFIG_MAKEFILE([dlls/sxs/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DI
 WINE_CONFIG_MAKEFILE([dlls/tapi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/twain_32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/unicows/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/updspapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/url/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/urlmon/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/urlmon/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
@@ -2123,6 +2154,7 @@ WINE_CONFIG_MAKEFILE([libs/wine/Makefile],[Make.rules])
 WINE_CONFIG_MAKEFILE([libs/wpp/Makefile],[Make.rules])
 WINE_CONFIG_MAKEFILE([loader/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
 WINE_CONFIG_MAKEFILE([programs/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
+WINE_CONFIG_MAKEFILE([programs/cacls/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/clock/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/cmd/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/cmdlgtst/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS])

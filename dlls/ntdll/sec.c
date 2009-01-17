@@ -618,7 +618,12 @@ NTSTATUS WINAPI RtlGetDaclSecurityDescriptor(
 	    *pDacl = lpsd->Dacl;
 
 	  *lpbDaclDefaulted = (( SE_DACL_DEFAULTED & lpsd->Control ) ? 1 : 0);
-	}
+        }
+        else
+        {
+            *pDacl = NULL;
+            *lpbDaclDefaulted = 0;
+        }
 
 	return STATUS_SUCCESS;
 }
@@ -1556,6 +1561,9 @@ NtAccessCheck(
     TRACE("(%p, %p, %08x, %p, %p, %p, %p, %p)\n",
         SecurityDescriptor, ClientToken, DesiredAccess, GenericMapping,
         PrivilegeSet, ReturnLength, GrantedAccess, AccessStatus);
+
+    if (!PrivilegeSet || !ReturnLength)
+        return STATUS_ACCESS_VIOLATION;
 
     SERVER_START_REQ( access_check )
     {

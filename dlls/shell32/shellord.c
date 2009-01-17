@@ -33,6 +33,7 @@
 #include "winreg.h"
 #include "wine/debug.h"
 #include "winnls.h"
+#include "winternl.h"
 
 #include "shellapi.h"
 #include "objbase.h"
@@ -1528,6 +1529,17 @@ BOOL WINAPI shell32_243(DWORD a, DWORD b)
 }
 
 /*************************************************************************
+ *      GUIDFromStringW   [SHELL32.704]
+ */
+BOOL WINAPI GUIDFromStringW(LPCWSTR str, LPGUID guid)
+{
+    UNICODE_STRING guid_str;
+
+    RtlInitUnicodeString(&guid_str, str);
+    return !RtlGUIDFromString(&guid_str, guid);
+}
+
+/*************************************************************************
  *      @	[SHELL32.714]
  */
 DWORD WINAPI SHELL32_714(LPVOID x)
@@ -1991,4 +2003,17 @@ BOOL WINAPI LinkWindow_UnregisterClass(void)
 {
     FIXME("()\n");
     return TRUE;
+}
+
+/*************************************************************************
+ *              SHFlushSFCache (SHELL32.526)
+ *
+ * Notifies the shell that a user-specified special folder location has changed.
+ *
+ * NOTES
+ *   In Wine, the shell folder registry values are not cached, so this function
+ *   has no effect.
+ */
+void WINAPI SHFlushSFCache(void)
+{
 }

@@ -389,6 +389,8 @@
 @ stub SetupDiUnremoveDevice
 @ stub SetupDuplicateDiskSpaceListA
 @ stub SetupDuplicateDiskSpaceListW
+@ stdcall SetupEnumInfSectionsA(long long ptr long ptr)
+@ stdcall SetupEnumInfSectionsW(long long ptr long ptr)
 @ stdcall SetupFindFirstLineA(long str str ptr)
 @ stdcall SetupFindFirstLineW(long wstr wstr ptr)
 @ stdcall SetupFindNextLine(ptr ptr)
@@ -531,7 +533,7 @@
 @ stdcall StringTableInitialize()
 @ stdcall StringTableInitializeEx(long long)
 @ stdcall StringTableLookUpString(ptr wstr long)
-@ stdcall StringTableLookUpStringEx(ptr wstr long ptr ptr)
+@ stdcall StringTableLookUpStringEx(ptr wstr long ptr long)
 @ stdcall StringTableSetExtraData(ptr long ptr long)
 @ stdcall StringTableStringFromId(ptr long)
 @ stdcall StringTableStringFromIdEx(ptr long ptr ptr)
@@ -554,6 +556,7 @@
 @ stub pSetupGetVersionDatum
 @ stub pSetupGuidFromString
 @ stub pSetupIsGuidNull
+@ stdcall pSetupInstallCatalog(wstr wstr ptr)
 @ stdcall pSetupIsUserAdmin() IsUserAdmin
 @ stub pSetupMakeSurePathExists
 @ stdcall pSetupSetGlobalFlags(long)
@@ -571,4 +574,5 @@
 @ stdcall pSetupStringTableLookUpString(ptr wstr long) StringTableLookUpString
 @ stdcall pSetupStringTableLookUpStringEx(ptr wstr long ptr ptr) StringTableLookUpStringEx
 @ stdcall pSetupStringTableSetExtraData(ptr long ptr long) StringTableSetExtraData
+@ stub pSetupVerifyCatalogFile
 @ stub pSetupVerifyQueuedCatalogs

@@ -117,16 +117,20 @@ static HANDLE get_device_manager(void)
 /* exception handler for emulation of privileged instructions */
 static LONG CALLBACK vectored_handler( EXCEPTION_POINTERS *ptrs )
 {
-    extern DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT86 *context );
-
     EXCEPTION_RECORD *record = ptrs->ExceptionRecord;
-    CONTEXT86 *context = ptrs->ContextRecord;
 
     if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ||
         record->ExceptionCode == EXCEPTION_PRIV_INSTRUCTION)
     {
+#ifdef __i386__
+        CONTEXT *context = ptrs->ContextRecord;
+        extern DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context );
+
         if (__wine_emulate_instruction( record, context ) == ExceptionContinueExecution)
             return EXCEPTION_CONTINUE_EXECUTION;
+#else
+        FIXME( "Privileged instruction emulation not implemented on this CPU\n" );
+#endif
     }
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -253,7 +257,11 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
             break;
         case STATUS_PENDING:
             if (WaitForMultipleObjects( 2, handles, FALSE, INFINITE ) == WAIT_OBJECT_0)
+            {
+                HeapFree( GetProcessHeap(), 0, in_buff );
+                HeapFree( GetProcessHeap(), 0, out_buff );
                 return STATUS_SUCCESS;
+            }
             break;
         }
     }
@@ -1064,7 +1072,7 @@ NTSTATUS WINAPI PsCreateSystemThread(PHANDLE ThreadHandle, ULONG DesiredAccess,
  */
 HANDLE WINAPI PsGetCurrentProcessId(void)
 {
-    return (HANDLE)GetCurrentProcessId();  /* FIXME: not quite right... */
+    return UlongToHandle(GetCurrentProcessId());  /* FIXME: not quite right... */
 }
 
 
@@ -1073,7 +1081,7 @@ HANDLE WINAPI PsGetCurrentProcessId(void)
  */
 HANDLE WINAPI PsGetCurrentThreadId(void)
 {
-    return (HANDLE)GetCurrentThreadId();  /* FIXME: not quite right... */
+    return UlongToHandle(GetCurrentThreadId());  /* FIXME: not quite right... */
 }
 
 

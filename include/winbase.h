@@ -776,7 +776,7 @@ typedef struct _SYSTEM_INFO
     DWORD	dwPageSize;
     LPVOID	lpMinimumApplicationAddress;
     LPVOID	lpMaximumApplicationAddress;
-    DWORD	dwActiveProcessorMask;
+    DWORD_PTR	dwActiveProcessorMask;
     DWORD	dwNumberOfProcessors;
     DWORD	dwProcessorType;
     DWORD	dwAllocationGranularity;
@@ -1604,6 +1604,7 @@ WINBASEAPI LPWSTR      WINAPI GetEnvironmentStringsW(void);
 WINBASEAPI DWORD       WINAPI GetEnvironmentVariableA(LPCSTR,LPSTR,DWORD);
 WINBASEAPI DWORD       WINAPI GetEnvironmentVariableW(LPCWSTR,LPWSTR,DWORD);
 #define                       GetEnvironmentVariable WINELIB_NAME_AW(GetEnvironmentVariable)
+WINBASEAPI UINT        WINAPI GetErrorMode(void);
 WINBASEAPI BOOL        WINAPI GetExitCodeProcess(HANDLE,LPDWORD);
 WINBASEAPI BOOL        WINAPI GetExitCodeThread(HANDLE,LPDWORD);
 WINBASEAPI DWORD       WINAPI GetFileAttributesA(LPCSTR);

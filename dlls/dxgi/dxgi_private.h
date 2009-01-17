@@ -28,10 +28,10 @@
 #include "objbase.h"
 
 #include "dxgi.h"
-#include "wine/wined3d.h"
 #ifdef DXGI_INIT_GUID
 #include "initguid.h"
 #endif
+#include "wine/wined3d.h"
 #include "dxgi_private_interface.h"
 
 extern CRITICAL_SECTION dxgi_cs;
@@ -76,6 +76,14 @@ extern const struct IDXGISwapChainVtbl dxgi_swapchain_vtbl;
 struct dxgi_swapchain
 {
     const struct IDXGISwapChainVtbl *vtbl;
+    LONG refcount;
+};
+
+/* IDXGISurface */
+extern const struct IDXGISurfaceVtbl dxgi_surface_vtbl;
+struct dxgi_surface
+{
+    const struct IDXGISurfaceVtbl *vtbl;
     LONG refcount;
 };
 

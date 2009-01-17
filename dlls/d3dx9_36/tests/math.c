@@ -147,7 +147,7 @@ static void test_Matrix_AffineTransformation2D(void)
     U(exp_mat).m[3][1] = 6.401924f;
     U(exp_mat).m[0][2] = 0.0f;
     U(exp_mat).m[1][2] = 0.0f;
-    U(exp_mat).m[2][2] = 20.0f;
+    U(exp_mat).m[2][2] = 1.0f;
     U(exp_mat).m[3][2] = 0.0f;
     U(exp_mat).m[0][3] = 0.0f;
     U(exp_mat).m[1][3] = 0.0f;
@@ -177,7 +177,7 @@ static void test_Matrix_AffineTransformation2D(void)
     U(exp_mat).m[3][1] = -0.598076f;
     U(exp_mat).m[0][2] = 0.0f;
     U(exp_mat).m[1][2] = 0.0f;
-    U(exp_mat).m[2][2] = 20.0f;
+    U(exp_mat).m[2][2] = 1.0f;
     U(exp_mat).m[3][2] = 0.0f;
     U(exp_mat).m[0][3] = 0.0f;
     U(exp_mat).m[1][3] = 0.0f;
@@ -207,7 +207,7 @@ static void test_Matrix_AffineTransformation2D(void)
     U(exp_mat).m[3][1] = 7.0f;
     U(exp_mat).m[0][2] = 0.0f;
     U(exp_mat).m[1][2] = 0.0f;
-    U(exp_mat).m[2][2] = 20.0f;
+    U(exp_mat).m[2][2] = 1.0f;
     U(exp_mat).m[3][2] = 0.0f;
     U(exp_mat).m[0][3] = 0.0f;
     U(exp_mat).m[1][3] = 0.0f;
@@ -234,7 +234,7 @@ static void test_Matrix_AffineTransformation2D(void)
     U(exp_mat).m[3][1] = 0.0f;
     U(exp_mat).m[0][2] = 0.0f;
     U(exp_mat).m[1][2] = 0.0f;
-    U(exp_mat).m[2][2] = -20.0f;
+    U(exp_mat).m[2][2] = 1.0f;
     U(exp_mat).m[3][2] = 0.0f;
     U(exp_mat).m[0][3] = 0.0f;
     U(exp_mat).m[1][3] = 0.0f;
@@ -577,11 +577,6 @@ static void test_Matrix_Decompose(void)
     U(pm).m[3][3] = 1.0f;
 
     hr = D3DXMatrixDecompose(&got_scale, &got_rotation, &got_translation, &pm);
-    ok(hr == D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, got %x\n", hr);
-
-/*___________*/
-
-    hr = D3DXMatrixDecompose(&got_scale, &got_rotation, &got_translation, NULL);
     ok(hr == D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, got %x\n", hr);
 }
 

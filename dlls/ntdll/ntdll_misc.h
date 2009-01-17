@@ -41,7 +41,6 @@ struct drive_info
 /* exceptions */
 extern void wait_suspend( CONTEXT *context );
 extern void WINAPI __regs_RtlRaiseException( PEXCEPTION_RECORD, PCONTEXT );
-extern void get_cpu_context( CONTEXT *context );
 extern void set_cpu_context( const CONTEXT *context );
 
 /* debug helper */
@@ -142,6 +141,8 @@ extern NTSTATUS virtual_alloc_thread_stack( void *base, SIZE_T stack_size );
 extern void virtual_clear_thread_stack(void);
 extern BOOL virtual_handle_stack_fault( void *addr );
 extern NTSTATUS virtual_handle_fault( LPCVOID addr, DWORD err );
+extern BOOL virtual_check_buffer_for_read( const void *ptr, SIZE_T size );
+extern BOOL virtual_check_buffer_for_write( void *ptr, SIZE_T size );
 extern void VIRTUAL_SetForceExec( BOOL enable );
 extern void VIRTUAL_UseLargeAddressSpace(void);
 extern struct _KUSER_SHARED_DATA *user_shared_data;
@@ -217,13 +218,20 @@ static inline struct ntdll_thread_regs *ntdll_get_thread_regs(void)
 /* Register functions */
 
 #ifdef __i386__
-#define DEFINE_REGS_ENTRYPOINT( name, args, pop_args ) \
+#define DEFINE_REGS_ENTRYPOINT( name, args ) \
     __ASM_GLOBAL_FUNC( name, \
-                       "pushl %eax\n\t" \
-                       "call " __ASM_NAME("__wine_call_from_32_regs") "\n\t" \
-                       ".long " __ASM_NAME("__regs_") #name "-.\n\t" \
-                       ".byte " #args "," #pop_args )
-/* FIXME: add support for other CPUs */
+                       ".byte 0x68\n\t"  /* pushl $__regs_func */       \
+                       ".long " __ASM_NAME("__regs_") #name "-.-11\n\t" \
+                       ".byte 0x6a," #args "\n\t" /* pushl $args */     \
+                       "call " __ASM_NAME("__wine_call_from_32_regs"))
+#elif defined(__x86_64__)
+#define DEFINE_REGS_ENTRYPOINT( name, args ) \
+    __ASM_GLOBAL_FUNC( name, \
+                       "movq %rcx,8(%rsp)\n\t"  \
+                       "movq %rdx,16(%rsp)\n\t" \
+                       "movq $" #args ",%rcx\n\t" \
+                       "leaq " __ASM_NAME("__regs_") #name "(%rip),%rdx\n\t" \
+                       "call " __ASM_NAME("__wine_call_from_regs"))
 #endif
 
 #endif

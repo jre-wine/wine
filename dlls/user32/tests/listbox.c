@@ -50,7 +50,7 @@ static HWND
 create_listbox (DWORD add_style, HWND parent)
 {
   HWND handle;
-  int ctl_id=0;
+  INT_PTR ctl_id=0;
   if (parent)
     ctl_id=1;
   handle=CreateWindow ("LISTBOX", "TestList",
@@ -287,7 +287,7 @@ static void test_ownerdraw(void)
     cls.cbWndExtra = 0;
     cls.hInstance = GetModuleHandle(0);
     cls.hIcon = 0;
-    cls.hCursor = LoadCursor(0, (LPSTR)IDC_ARROW);
+    cls.hCursor = LoadCursor(0, IDC_ARROW);
     cls.hbrBackground = GetStockObject(WHITE_BRUSH);
     cls.lpszMenuName = NULL;
     cls.lpszClassName = "main_window_class";

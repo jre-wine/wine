@@ -22,8 +22,10 @@
 
 #include <commctrl.h>
 
-#ifdef __cplusplus
-extern "C" {
+#ifdef _WIN64
+#include <pshpack8.h>
+#else
+#include <pshpack1.h>
 #endif
 
 /* setupapi doesn't use the normal convention, it adds an underscore before A/W */
@@ -1633,8 +1635,8 @@ BOOL     WINAPI SetupDiUnremoveDevice(HDEVINFO, PSP_DEVINFO_DATA);
 HDSKSPC  WINAPI SetupDuplicateDiskSpaceListA(HDSKSPC, PVOID, DWORD, UINT);
 HDSKSPC  WINAPI SetupDuplicateDiskSpaceListW(HDSKSPC, PVOID, DWORD, UINT);
 #define         SetupDuplicateDiskSpaceList WINELIB_NAME_AW(SetupDuplicateDiskSpaceList)
-BOOL     WINAPI SetupEnumInfSectionsA(HINF, UINT, PSTR, SIZE, UINT *);
-BOOL     WINAPI SetupEnumInfSectionsW(HINF, UINT, PWSTR, SIZE, UINT *);
+BOOL     WINAPI SetupEnumInfSectionsA(HINF, UINT, PSTR, DWORD, DWORD *);
+BOOL     WINAPI SetupEnumInfSectionsW(HINF, UINT, PWSTR, DWORD, DWORD *);
 #define         SetupEnumInfSections WINELIB_NAME_AW(SetupEnumInfSections)
 BOOL     WINAPI SetupFindFirstLineA( HINF hinf, PCSTR section, PCSTR key, INFCONTEXT *context );
 BOOL     WINAPI SetupFindFirstLineW( HINF hinf, PCWSTR section, PCWSTR key, INFCONTEXT *context );
@@ -1848,8 +1850,6 @@ BOOL     WINAPI UnmapAndCloseFile(HANDLE, HANDLE, PVOID);
 
 #undef DECL_WINELIB_SETUPAPI_TYPE_AW
 
-#ifdef __cplusplus
-}
-#endif
+#include <poppack.h>
 
 #endif /* _INC_SETUPAPI */

@@ -96,7 +96,7 @@ typedef struct VideoRendererImpl
 
 static LRESULT CALLBACK VideoWndProcA(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    VideoRendererImpl* pVideoRenderer = (VideoRendererImpl*)GetWindowLongA(hwnd, 0);
+    VideoRendererImpl* pVideoRenderer = (VideoRendererImpl*)GetWindowLongPtrW(hwnd, 0);
     LPRECT lprect = (LPRECT)lParam;
 
     if (pVideoRenderer && pVideoRenderer->hWndMsgDrain)
@@ -197,7 +197,7 @@ static BOOL CreateRenderingWindow(VideoRendererImpl* This)
         return FALSE;
     }
 
-    SetWindowLongA(This->hWnd, 0, (LONG)This);
+    SetWindowLongPtrW(This->hWnd, 0, (LONG_PTR)This);
 
     return TRUE;
 }
@@ -1989,7 +1989,7 @@ static HRESULT WINAPI Videowindow_get_Owner(IVideoWindow *iface,
 					    OAHWND *Owner) {
     ICOM_THIS_MULTI(VideoRendererImpl, IVideoWindow_vtbl, iface);
 
-    TRACE("(%p/%p)->(%08x)\n", This, iface, (DWORD) Owner);
+    TRACE("(%p/%p)->(%p)\n", This, iface, Owner);
 
     *(HWND*)Owner = GetParent(This->hWnd);
 

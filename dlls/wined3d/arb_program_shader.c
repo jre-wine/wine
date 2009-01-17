@@ -510,8 +510,7 @@ static void vshader_program_add_param(const SHADER_OPCODE_ARG *arg, const DWORD 
     break;
   case WINED3DSPR_INPUT:
 
-    if (vshader_input_is_color((IWineD3DVertexShader*) This, reg))
-        is_color = TRUE;
+    if (This->swizzle_map & (1 << reg)) is_color = TRUE;
 
     sprintf(tmpReg, "vertex.attrib[%u]", reg);
     strcat(hwLine, tmpReg);
@@ -1925,13 +1924,29 @@ static GLuint shader_arb_generate_pshader(IWineD3DPixelShader *iface, SHADER_BUF
     const shader_reg_maps* reg_maps = &This->baseShader.reg_maps;
     CONST DWORD *function = This->baseShader.function;
     DWORD shader_version = reg_maps->shader_version;
-    const char *fragcolor;
     const WineD3D_GL_Info *gl_info = &((IWineD3DDeviceImpl *)This->baseShader.device)->adapter->gl_info;
     const local_constant *lconst;
     GLuint retval;
+    const char *fragcolor;
 
     /*  Create the hw ARB shader */
     shader_addline(buffer, "!!ARBfp1.0\n");
+
+    if (shader_version < WINED3DPS_VERSION(3,0)) {
+        switch(args->fog) {
+            case FOG_OFF:
+                break;
+            case FOG_LINEAR:
+                shader_addline(buffer, "OPTION ARB_fog_linear;\n");
+                break;
+            case FOG_EXP:
+                shader_addline(buffer, "OPTION ARB_fog_exp;\n");
+                break;
+            case FOG_EXP2:
+                shader_addline(buffer, "OPTION ARB_fog_exp2;\n");
+                break;
+        }
+    }
 
     shader_addline(buffer, "TEMP TMP;\n");     /* Used in matrix ops */
     shader_addline(buffer, "TEMP TMP2;\n");    /* Used in matrix ops */
@@ -1942,49 +1957,23 @@ static GLuint shader_arb_generate_pshader(IWineD3DPixelShader *iface, SHADER_BUF
     shader_addline(buffer, "PARAM coefmul = { 2, 4, 8, 16 };\n");
     shader_addline(buffer, "PARAM one = { 1.0, 1.0, 1.0, 1.0 };\n");
 
+    if (shader_version < WINED3DPS_VERSION(2,0)) {
+        fragcolor = "R0";
+    } else {
+        shader_addline(buffer, "TEMP TMP_COLOR;\n");
+        fragcolor = "TMP_COLOR";
+    }
+
     /* Base Declarations */
     shader_generate_arb_declarations( (IWineD3DBaseShader*) This, reg_maps, buffer, &GLINFO_LOCATION);
-
-    /* We need two variables for fog blending */
-    if(args->fog != FOG_OFF) shader_addline(buffer, "TEMP TMP_FOG;\n");
-    if (shader_version >= WINED3DPS_VERSION(2,0)) shader_addline(buffer, "TEMP TMP_COLOR;\n");
 
     /* Base Shader Body */
     shader_generate_main( (IWineD3DBaseShader*) This, buffer, reg_maps, function);
 
-    if (shader_version < WINED3DPS_VERSION(2,0)) {
-        fragcolor = "R0";
-    } else {
-        fragcolor = "TMP_COLOR";
-    }
     if(args->srgb_correction) {
         arbfp_add_sRGB_correction(buffer, fragcolor, "TMP", "TMP2", "TA", "TB");
     }
-    if (shader_version < WINED3DPS_VERSION(3,0)) {
-        /* calculate fog and blend it
-         * NOTE: state.fog.params.y and state.fog.params.z don't hold fog start s and end e but
-         * -1/(e-s) and e/(e-s) respectively.
-         */
-        switch(args->fog) {
-            case FOG_OFF:
-                shader_addline(buffer, "MOV result.color, %s;\n", fragcolor);
-                break;
-            case FOG_LINEAR:
-                shader_addline(buffer, "MAD_SAT TMP_FOG, fragment.fogcoord, state.fog.params.y, state.fog.params.z;\n");
-                shader_addline(buffer, "LRP result.color.xyz, TMP_FOG.x, %s, state.fog.color;\n", fragcolor);
-                shader_addline(buffer, "MOV result.color.w, %s.w;\n", fragcolor);
-                break;
-            case FOG_EXP:
-                FIXME("Implement EXP fog in ARB\n");
-                shader_addline(buffer, "MOV result.color, %s;\n", fragcolor);
-                break;
-            case FOG_EXP2:
-                FIXME("Implement EXP2 fog in ARB\n");
-                shader_addline(buffer, "MOV result.color, %s;\n", fragcolor);
-                break;
-        }
-    }
-
+    shader_addline(buffer, "MOV result.color, %s;\n", fragcolor);
     shader_addline(buffer, "END\n");
 
     /* TODO: change to resource.glObjectHandle or something like that */
@@ -2421,7 +2410,7 @@ static void state_arb_specularenable(DWORD state, IWineD3DStateBlockImpl *stateb
 }
 
 static void set_bumpmat_arbfp(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
+    DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / (WINED3D_HIGHEST_TEXTURE_STATE + 1);
     IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
     float mat[2][2];
 
@@ -2456,7 +2445,7 @@ static void set_bumpmat_arbfp(DWORD state, IWineD3DStateBlockImpl *stateblock, W
 }
 
 static void tex_bumpenvlum_arbfp(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
+    DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / (WINED3D_HIGHEST_TEXTURE_STATE + 1);
     IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
     float param[4];
 
@@ -3054,8 +3043,35 @@ static void fragment_prog_arbfp(DWORD state, IWineD3DStateBlockImpl *stateblock,
  * fragment_prog_arbfp function being called because FOGENABLE is dirty, which calls this function here
  */
 static void state_arbfp_fog(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    enum fogsource new_source;
+
     if(!isStateDirty(context, STATE_PIXELSHADER)) {
         fragment_prog_arbfp(state, stateblock, context);
+    }
+
+    if(!stateblock->renderState[WINED3DRS_FOGENABLE]) return;
+
+    if(use_vs(stateblock)
+       && ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->baseShader.reg_maps.fog) {
+        if( stateblock->renderState[WINED3DRS_FOGTABLEMODE] != WINED3DFOG_NONE ) {
+            FIXME("vertex shader with table fog used\n");
+        }
+        context->last_was_foggy_shader = TRUE;
+        new_source = FOGSOURCE_VS;
+    } else if(stateblock->renderState[WINED3DRS_FOGTABLEMODE] == WINED3DFOG_NONE) {
+        context->last_was_foggy_shader = FALSE;
+        if(stateblock->renderState[WINED3DRS_FOGVERTEXMODE] == WINED3DFOG_NONE || context->last_was_rhw) {
+            new_source = FOGSOURCE_COORD;
+        } else {
+            new_source = FOGSOURCE_FFP;
+        }
+    } else {
+        context->last_was_foggy_shader = FALSE;
+        new_source = FOGSOURCE_FFP;
+    }
+    if(new_source != context->fog_source) {
+        context->fog_source = new_source;
+        state_fogstartend(STATE_RENDER(WINED3DRS_FOGSTART), stateblock, context);
     }
 }
 
@@ -3201,7 +3217,11 @@ static const struct StateEntryTemplate arbfp_fragmentstate_template[] = {
     { STATE_RENDER(WINED3DRS_FOGENABLE),                  { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_arbfp_fog         }, 0                               },
     { STATE_RENDER(WINED3DRS_FOGTABLEMODE),               { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_arbfp_fog         }, 0                               },
     { STATE_RENDER(WINED3DRS_FOGVERTEXMODE),              { STATE_RENDER(WINED3DRS_FOGENABLE),                  state_arbfp_fog         }, 0                               },
+    { STATE_RENDER(WINED3DRS_FOGSTART),                   { STATE_RENDER(WINED3DRS_FOGSTART),                   state_fogstartend       }, 0                               },
+    { STATE_RENDER(WINED3DRS_FOGEND),                     { STATE_RENDER(WINED3DRS_FOGSTART),                   state_fogstartend       }, 0                               },
     { STATE_RENDER(WINED3DRS_SRGBWRITEENABLE),            { STATE_PIXELSHADER,                                  fragment_prog_arbfp     }, 0                               },
+    { STATE_RENDER(WINED3DRS_FOGCOLOR),                   { STATE_RENDER(WINED3DRS_FOGCOLOR),                   state_fogcolor      }, 0                               },
+    { STATE_RENDER(WINED3DRS_FOGDENSITY),                 { STATE_RENDER(WINED3DRS_FOGDENSITY),                 state_fogdensity    }, 0                               },
     {STATE_TEXTURESTAGE(0,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TEXTURESTAGE(0, WINED3DTSS_TEXTURETRANSFORMFLAGS), textransform      }, 0                               },
     {STATE_TEXTURESTAGE(1,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TEXTURESTAGE(1, WINED3DTSS_TEXTURETRANSFORMFLAGS), textransform      }, 0                               },
     {STATE_TEXTURESTAGE(2,WINED3DTSS_TEXTURETRANSFORMFLAGS),{STATE_TEXTURESTAGE(2, WINED3DTSS_TEXTURETRANSFORMFLAGS), textransform      }, 0                               },

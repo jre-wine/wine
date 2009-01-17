@@ -146,12 +146,12 @@ extern HANDLE get_BaseNamedObjects_handle(void);
 /* Register functions */
 
 #ifdef __i386__
-#define DEFINE_REGS_ENTRYPOINT( name, args, pop_args ) \
+#define DEFINE_REGS_ENTRYPOINT( name, args ) \
     __ASM_GLOBAL_FUNC( name, \
-                       "pushl %eax\n\t" \
-                       "call " __ASM_NAME("__wine_call_from_32_regs") "\n\t" \
-                       ".long " __ASM_NAME("__regs_") #name "-.\n\t" \
-                       ".byte " #args "," #pop_args )
+                       ".byte 0x68\n\t"  /* pushl $__regs_func */       \
+                       ".long " __ASM_NAME("__regs_") #name "-.-11\n\t" \
+                       ".byte 0x6a," #args "\n\t" /* pushl $args */     \
+                       "call " __ASM_NAME("__wine_call_from_32_regs"))
 #endif
 
 #endif

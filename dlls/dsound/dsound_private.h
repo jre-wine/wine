@@ -37,8 +37,6 @@ extern int ds_snd_queue_max;
 extern int ds_snd_queue_min;
 extern int ds_snd_shadow_maxsize;
 extern int ds_hw_accel;
-extern int ds_default_playback;
-extern int ds_default_capture;
 extern int ds_default_sample_rate;
 extern int ds_default_bits_per_sample;
 
@@ -71,7 +69,7 @@ typedef struct DirectSoundDevice             DirectSoundDevice;
 typedef struct DirectSoundCaptureDevice      DirectSoundCaptureDevice;
 
 /* dsound_convert.h */
-typedef void (*bitsconvertfunc)(const void *, void *);
+typedef void (*bitsconvertfunc)(const void *, void *, UINT, UINT, INT, UINT, UINT);
 extern const bitsconvertfunc convertbpp[4][4];
 typedef void (*mixfunc)(const void *, void *, unsigned);
 extern const mixfunc mixfunctions[4];

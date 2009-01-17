@@ -1790,6 +1790,108 @@ static void _test_doc_set_title(unsigned line, IHTMLDocument2 *doc, const char *
     SysFreeString(tmp);
 }
 
+#define test_border_styles(p, n) _test_border_styles(__LINE__, p, n)
+static void _test_border_styles(unsigned line, IHTMLStyle *pStyle, BSTR Name)
+{
+    HRESULT hres;
+    DISPID dispid;
+
+    hres = IHTMLStyle_GetIDsOfNames(pStyle, &IID_NULL, (LPOLESTR*)&Name, 1,
+                        LOCALE_USER_DEFAULT, &dispid);
+    ok_(__FILE__,line) (hres == S_OK, "GetIDsOfNames: %08x\n", hres);
+    if(hres == S_OK)
+    {
+        DISPPARAMS params = {NULL,NULL,0,0};
+        DISPID dispidNamed = DISPID_PROPERTYPUT;
+        VARIANT ret;
+        VARIANT vDefault;
+        VARIANTARG arg;
+
+        hres = IHTMLStyle_Invoke(pStyle, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
+            DISPATCH_PROPERTYGET, &params, &vDefault, NULL, NULL);
+        ok_(__FILE__,line) (hres == S_OK, "get_default. ret: %08x\n", hres);
+
+        params.cArgs = 1;
+        params.cNamedArgs = 1;
+        params.rgdispidNamedArgs = &dispidNamed;
+        V_VT(&arg) = VT_BSTR;
+        V_BSTR(&arg) = a2bstr("none");
+        params.rgvarg = &arg;
+        hres = IHTMLStyle_Invoke(pStyle, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
+            DISPATCH_PROPERTYPUT, &params, &ret, NULL, NULL);
+        ok_(__FILE__,line) (hres == S_OK, "none. ret: %08x\n", hres);
+        VariantClear(&arg);
+
+        V_VT(&arg) = VT_BSTR;
+        V_BSTR(&arg) = a2bstr("dotted");
+        hres = IHTMLStyle_Invoke(pStyle, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
+            DISPATCH_PROPERTYPUT, &params, &ret, NULL, NULL);
+        ok_(__FILE__,line) (hres == S_OK, "dotted. ret: %08x\n", hres);
+        VariantClear(&arg);
+
+        V_VT(&arg) = VT_BSTR;
+        V_BSTR(&arg) = a2bstr("dashed");
+        hres = IHTMLStyle_Invoke(pStyle, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
+        DISPATCH_PROPERTYPUT, &params, &ret, NULL, NULL);
+        ok_(__FILE__,line) (hres == S_OK, "dashed. ret: %08x\n", hres);
+        VariantClear(&arg);
+
+        V_VT(&arg) = VT_BSTR;
+        V_BSTR(&arg) = a2bstr("solid");
+        hres = IHTMLStyle_Invoke(pStyle, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
+            DISPATCH_PROPERTYPUT, &params, &ret, NULL, NULL);
+        ok_(__FILE__,line) (hres == S_OK, "solid. ret: %08x\n", hres);
+        VariantClear(&arg);
+
+        V_VT(&arg) = VT_BSTR;
+        V_BSTR(&arg) = a2bstr("double");
+        hres = IHTMLStyle_Invoke(pStyle, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
+            DISPATCH_PROPERTYPUT, &params, &ret, NULL, NULL);
+        ok_(__FILE__,line) (hres == S_OK, "double. ret: %08x\n", hres);
+        VariantClear(&arg);
+
+        V_VT(&arg) = VT_BSTR;
+        V_BSTR(&arg) = a2bstr("groove");
+        hres = IHTMLStyle_Invoke(pStyle, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
+            DISPATCH_PROPERTYPUT, &params, &ret, NULL, NULL);
+        ok_(__FILE__,line) (hres == S_OK, "groove. ret: %08x\n", hres);
+        VariantClear(&arg);
+
+        V_VT(&arg) = VT_BSTR;
+        V_BSTR(&arg) = a2bstr("ridge");
+        hres = IHTMLStyle_Invoke(pStyle, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
+            DISPATCH_PROPERTYPUT, &params, &ret, NULL, NULL);
+        ok_(__FILE__,line) (hres == S_OK, "ridge. ret: %08x\n", hres);
+        VariantClear(&arg);
+
+        V_VT(&arg) = VT_BSTR;
+        V_BSTR(&arg) = a2bstr("inset");
+        hres = IHTMLStyle_Invoke(pStyle, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
+            DISPATCH_PROPERTYPUT, &params, &ret, NULL, NULL);
+        ok_(__FILE__,line) (hres == S_OK, "inset. ret: %08x\n", hres);
+        VariantClear(&arg);
+
+        V_VT(&arg) = VT_BSTR;
+        V_BSTR(&arg) = a2bstr("outset");
+        hres = IHTMLStyle_Invoke(pStyle, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
+            DISPATCH_PROPERTYPUT, &params, &ret, NULL, NULL);
+        ok_(__FILE__,line) (hres == S_OK, "outset. ret: %08x\n", hres);
+        VariantClear(&arg);
+
+        V_VT(&arg) = VT_BSTR;
+        V_BSTR(&arg) = a2bstr("invalid");
+        hres = IHTMLStyle_Invoke(pStyle, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
+            DISPATCH_PROPERTYPUT, &params, &ret, NULL, NULL);
+        ok_(__FILE__,line) (FAILED(hres), "invalid value passed.\n");
+        VariantClear(&arg);
+
+        params.rgvarg = &vDefault;
+        hres = IHTMLStyle_Invoke(pStyle, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
+            DISPATCH_PROPERTYPUT, &params, &ret, NULL, NULL);
+        ok_(__FILE__,line) (hres == S_OK, "default. ret: %08x\n", hres);
+    }
+}
+
 static void test_elem_col_item(IHTMLElementCollection *col, LPCWSTR n,
         const elem_type_t *elem_types, long len)
 {
@@ -2185,6 +2287,7 @@ static void test_compatmode(IHTMLDocument2 *doc)
 static void test_location(IHTMLDocument2 *doc)
 {
     IHTMLLocation *location, *location2;
+    IHTMLWindow2 *window;
     ULONG ref;
     HRESULT hres;
 
@@ -2195,10 +2298,19 @@ static void test_location(IHTMLDocument2 *doc)
     ok(hres == S_OK, "get_location failed: %08x\n", hres);
 
     ok(location == location2, "location != location2\n");
+    IHTMLLocation_Release(location2);
+
+    hres = IHTMLDocument2_get_parentWindow(doc, &window);
+    ok(hres == S_OK, "get_parentWindow failed: %08x\n", hres);
+
+    hres = IHTMLWindow2_get_location(window, &location2);
+    ok(hres == S_OK, "get_location failed: %08x\n", hres);
+    ok(location == location2, "location != location2\n");
+    IHTMLLocation_Release(location2);
 
     test_ifaces((IUnknown*)location, location_iids);
+    test_disp((IUnknown*)location, &IID_IHTMLLocation);
 
-    IHTMLLocation_Release(location2);
     ref = IHTMLLocation_Release(location);
     ok(!ref, "location chould be destroyed here\n");
 }
@@ -2236,7 +2348,11 @@ static void test_navigator(IHTMLDocument2 *doc)
     bstr = NULL;
     hres = IOmNavigator_get_platform(navigator, &bstr);
     ok(hres == S_OK, "get_platform failed: %08x\n", hres);
+#ifdef _WIN64
+    ok(!strcmp_wa(bstr, "Win64"), "unexpected platform %s\n", dbgstr_w(bstr));
+#else
     ok(!strcmp_wa(bstr, "Win32"), "unexpected platform %s\n", dbgstr_w(bstr));
+#endif
     SysFreeString(bstr);
 
     bstr = NULL;
@@ -2735,6 +2851,58 @@ static void test_default_style(IHTMLStyle *style)
     hres = IHTMLStyle_put_overflow(style, sOverflowDefault);
     ok(hres == S_OK, "put_overflow failed: %08x\n", hres);
     SysFreeString(sOverflowDefault);
+
+    /* Attribute Tests*/
+    hres = IHTMLStyle_getAttribute(style, NULL, 1, &v);
+    ok(hres == E_INVALIDARG, "getAttribute failed: %08x\n", hres);
+
+    str = a2bstr("position");
+    hres = IHTMLStyle_getAttribute(style, str, 1, NULL);
+    ok(hres == E_INVALIDARG, "getAttribute failed: %08x\n", hres);
+
+    hres = IHTMLStyle_getAttribute(style, str, 1, &v);
+    ok(hres == S_OK, "getAttribute failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "type failed: %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IHTMLStyle_setAttribute(style, NULL, v, 1);
+    ok(hres == E_INVALIDARG, "getAttribute failed: %08x\n", hres);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = a2bstr("absolute");
+    hres = IHTMLStyle_setAttribute(style, str, v, 1);
+    ok(hres == S_OK, "setAttribute failed: %08x\n", hres);
+    VariantClear(&v);
+
+    hres = IHTMLStyle_getAttribute(style, str, 1, &v);
+    ok(hres == S_OK, "getAttribute failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "type failed: %d\n", V_VT(&v));
+    ok(!strcmp_wa(V_BSTR(&v), "absolute"), "str=%s\n", dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = NULL;
+    hres = IHTMLStyle_setAttribute(style, str, v, 1);
+    ok(hres == S_OK, "setAttribute failed: %08x\n", hres);
+    VariantClear(&v);
+
+    SysFreeString(str);
+
+    str = a2bstr("borderLeftStyle");
+    test_border_styles(style, str);
+    SysFreeString(str);
+
+    str = a2bstr("borderbottomstyle");
+    test_border_styles(style, str);
+    SysFreeString(str);
+
+    str = a2bstr("borderrightstyle");
+    test_border_styles(style, str);
+    SysFreeString(str);
+
+    str = a2bstr("bordertopstyle");
+    test_border_styles(style, str);
+    SysFreeString(str);
 
     hres = IHTMLStyle_QueryInterface(style, &IID_IHTMLStyle2, (void**)&style2);
     ok(hres == S_OK, "Could not get IHTMLStyle2 iface: %08x\n", hres);
@@ -3951,6 +4119,27 @@ static void gecko_installer_workaround(BOOL disable)
     RegCloseKey(hkey);
 }
 
+/* Check if Internet Explorer is configured to run in "Enhanced Security Configuration" (aka hardened mode) */
+/* Note: this code is duplicated in dlls/mshtml/tests/dom.c, dlls/mshtml/tests/script.c and dlls/urlmon/tests/misc.c */
+static BOOL is_ie_hardened()
+{
+    HKEY zone_map;
+    DWORD ie_harden, type, size;
+
+    ie_harden = 0;
+    if(RegOpenKeyEx(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap",
+                    0, KEY_QUERY_VALUE, &zone_map) == ERROR_SUCCESS) {
+        size = sizeof(DWORD);
+        if (RegQueryValueEx(zone_map, "IEHarden", NULL, &type, (LPBYTE) &ie_harden, &size) != ERROR_SUCCESS ||
+            type != REG_DWORD) {
+            ie_harden = 0;
+        }
+    RegCloseKey(zone_map);
+    }
+
+    return ie_harden != 0;
+}
+
 START_TEST(dom)
 {
     gecko_installer_workaround(TRUE);
@@ -3959,7 +4148,11 @@ START_TEST(dom)
     run_domtest(doc_str1, test_doc_elem);
     run_domtest(range_test_str, test_txtrange);
     run_domtest(range_test2_str, test_txtrange2);
-    run_domtest(elem_test_str, test_elems);
+    if (winetest_interactive || ! is_ie_hardened()) {
+        run_domtest(elem_test_str, test_elems);
+    }else {
+        skip("IE running in Enhanced Security Configuration\n");
+    }
     run_domtest(doc_blank, test_create_elems);
     run_domtest(doc_blank, test_defaults);
     run_domtest(indent_test_str, test_indent);

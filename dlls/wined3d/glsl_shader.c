@@ -130,11 +130,14 @@ static void print_glsl_info_log(const WineD3D_GL_Info *gl_info, GLhandleARB obj)
         "Fragment shader(s) linked, vertex shader(s) linked.",              /* fglrx, no \n   */
         "Vertex shader(s) linked, no fragment shader(s) defined. \n ",      /* fglrx, with \n */
         "Vertex shader(s) linked, no fragment shader(s) defined.",          /* fglrx, no \n   */
-        "Fragment shader was successfully compiled to run on hardware.\nWARNING: 0:1: extension 'GL_ARB_draw_buffers' is not supported",
+        "Fragment shader was successfully compiled to run on hardware.\n"
+        "WARNING: 0:2: extension 'GL_ARB_draw_buffers' is not supported",
         "Fragment shader(s) linked, no vertex shader(s) defined.",          /* fglrx, no \n   */
         "Fragment shader(s) linked, no vertex shader(s) defined. \n ",      /* fglrx, with \n */
         "WARNING: 0:2: extension 'GL_ARB_draw_buffers' is not supported\n"  /* MacOS ati      */
     };
+
+    if (!TRACE_ON(d3d_shader) && !FIXME_ON(d3d_shader)) return;
 
     GL_EXTCALL(glGetObjectParameterivARB(obj,
                GL_OBJECT_INFO_LOG_LENGTH_ARB,
@@ -1027,8 +1030,7 @@ static void shader_glsl_get_register_name(const DWORD param, const DWORD addr_to
                     strcpy(tmpStr, "gl_SecondaryColor");
             }
         } else {
-            if (vshader_input_is_color((IWineD3DVertexShader*) This, reg))
-               *is_color = TRUE;
+            if (((IWineD3DVertexShaderImpl *)This)->swizzle_map & (1 << reg)) *is_color = TRUE;
             sprintf(tmpStr, "attrib%u", reg);
         } 
         break;
@@ -3842,7 +3844,9 @@ static GLuint shader_glsl_generate_pshader(IWineD3DPixelShader *iface, SHADER_BU
         switch(args->fog) {
             case FOG_OFF: break;
             case FOG_LINEAR:
-                shader_addline(buffer, "float Fog = clamp(gl_FogFragCoord * gl_Fog.start + gl_Fog.end, 0.0, 1.0);\n");
+                shader_addline(buffer, "float fogstart = -1.0 / (gl_Fog.end - gl_Fog.start);\n");
+                shader_addline(buffer, "float fogend = gl_Fog.end * -fogstart;\n");
+                shader_addline(buffer, "float Fog = clamp(gl_FogFragCoord * fogstart + fogend, 0.0, 1.0);\n");
                 shader_addline(buffer, "%s.xyz = mix(gl_Fog.color.xyz, %s.xyz, Fog);\n", fragcolor, fragcolor);
                 break;
             case FOG_EXP:

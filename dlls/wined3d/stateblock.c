@@ -88,11 +88,11 @@ static void stateblock_savedstates_copy(IWineD3DStateBlock* iface, SAVEDSTATES *
     /* Fixed size arrays */
     dest->streamSource = source->streamSource;
     dest->streamFreq = source->streamFreq;
-    memcpy(dest->textures, source->textures, bsize * MAX_COMBINED_SAMPLERS);
-    memcpy(dest->transform, source->transform, bsize * (HIGHEST_TRANSFORMSTATE + 1));
-    memcpy(dest->renderState, source->renderState, bsize * (WINEHIGHEST_RENDER_STATE + 1));
-    memcpy(dest->textureState, source->textureState, bsize * MAX_TEXTURES * (WINED3D_HIGHEST_TEXTURE_STATE + 1));
-    memcpy(dest->samplerState, source->samplerState, bsize * MAX_COMBINED_SAMPLERS * (WINED3D_HIGHEST_SAMPLER_STATE + 1));
+    dest->textures = source->textures;
+    memcpy(dest->transform, source->transform, sizeof(source->transform));
+    memcpy(dest->renderState, source->renderState, sizeof(source->renderState));
+    memcpy(dest->textureState, source->textureState, sizeof(source->textureState));
+    memcpy(dest->samplerState, source->samplerState, sizeof(source->samplerState));
     dest->clipplane = source->clipplane;
     dest->pixelShaderConstantsB = source->pixelShaderConstantsB;
     dest->pixelShaderConstantsI = source->pixelShaderConstantsI;
@@ -102,6 +102,13 @@ static void stateblock_savedstates_copy(IWineD3DStateBlock* iface, SAVEDSTATES *
     /* Dynamically sized arrays */
     memcpy(dest->pixelShaderConstantsF, source->pixelShaderConstantsF, bsize * GL_LIMITS(pshader_constantsF));
     memcpy(dest->vertexShaderConstantsF, source->vertexShaderConstantsF, bsize * GL_LIMITS(vshader_constantsF));
+}
+
+static inline void stateblock_set_bits(DWORD *map, UINT map_size)
+{
+    DWORD mask = (1 << (map_size & 0x1f)) - 1;
+    memset(map, 0xff, (map_size >> 5) * sizeof(*map));
+    if (mask) map[map_size >> 5] = mask;
 }
 
 /** Set all members of a stateblock savedstate to the given value */
@@ -123,18 +130,37 @@ void stateblock_savedstates_set(
     states->scissorRect = value;
 
     /* Fixed size arrays */
-    states->streamSource = value ? 0xffff : 0;
-    states->streamFreq = value ? 0xffff : 0;
-    memset(states->textures, value, bsize * MAX_COMBINED_SAMPLERS);
-    memset(states->transform, value, bsize * (HIGHEST_TRANSFORMSTATE + 1));
-    memset(states->renderState, value, bsize * (WINEHIGHEST_RENDER_STATE + 1));
-    memset(states->textureState, value, bsize * MAX_TEXTURES * (WINED3D_HIGHEST_TEXTURE_STATE + 1));
-    memset(states->samplerState, value, bsize * MAX_COMBINED_SAMPLERS * (WINED3D_HIGHEST_SAMPLER_STATE + 1));
-    states->clipplane = value ? 0xffffffff : 0;
-    states->pixelShaderConstantsB = value ? 0xffff : 0;
-    states->pixelShaderConstantsI = value ? 0xffff : 0;
-    states->vertexShaderConstantsB = value ? 0xffff : 0;
-    states->vertexShaderConstantsI = value ? 0xffff : 0;
+    if (value)
+    {
+        int i;
+        states->streamSource = 0xffff;
+        states->streamFreq = 0xffff;
+        states->textures = 0xfffff;
+        stateblock_set_bits(states->transform, HIGHEST_TRANSFORMSTATE + 1);
+        stateblock_set_bits(states->renderState, WINEHIGHEST_RENDER_STATE + 1);
+        for (i = 0; i < MAX_TEXTURES; ++i) states->textureState[i] = 0x3ffff;
+        for (i = 0; i < MAX_COMBINED_SAMPLERS; ++i) states->samplerState[i] = 0x3fff;
+        states->clipplane = 0xffffffff;
+        states->pixelShaderConstantsB = 0xffff;
+        states->pixelShaderConstantsI = 0xffff;
+        states->vertexShaderConstantsB = 0xffff;
+        states->vertexShaderConstantsI = 0xffff;
+    }
+    else
+    {
+        states->streamSource = 0;
+        states->streamFreq = 0;
+        states->textures = 0;
+        memset(states->transform, 0, sizeof(states->transform));
+        memset(states->renderState, 0, sizeof(states->renderState));
+        memset(states->textureState, 0, sizeof(states->textureState));
+        memset(states->samplerState, 0, sizeof(states->samplerState));
+        states->clipplane = 0;
+        states->pixelShaderConstantsB = 0;
+        states->pixelShaderConstantsI = 0;
+        states->vertexShaderConstantsB = 0;
+        states->vertexShaderConstantsI = 0;
+    }
 
     /* Dynamically sized arrays */
     memset(states->pixelShaderConstantsF, value, bsize * GL_LIMITS(pshader_constantsF));
@@ -574,11 +600,13 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_Capture(IWineD3DStateBlock *iface)
 
         /* Samplers */
         /* TODO: move over to using memcpy */
-        for (j = 0; j < MAX_COMBINED_SAMPLERS; j++) {
-            if (This->changed.textures[j]) {
-                TRACE("Updating texture %u to %p (was %p)\n", j, targetStateBlock->textures[j], This->textures[j]);
-                This->textures[j] = targetStateBlock->textures[j];
-            }
+        map = This->changed.textures;
+        for (i = 0; map; map >>= 1, ++i)
+        {
+            if (!(map & 1)) continue;
+
+            TRACE("Updating texture %u to %p (was %p)\n", i, targetStateBlock->textures[i], This->textures[i]);
+            This->textures[i] = targetStateBlock->textures[i];
         }
 
         for (j = 0; j < This->num_contained_sampler_states; j++) {
@@ -781,7 +809,7 @@ should really perform a delta so that only the changes get updated*/
             DWORD stage = This->contained_tss_states[i].stage;
             DWORD state = This->contained_tss_states[i].state;
             ((IWineD3DDeviceImpl *)pDevice)->stateBlock->textureState[stage][state]         = This->textureState[stage][state];
-            ((IWineD3DDeviceImpl *)pDevice)->stateBlock->changed.textureState[stage][state] = TRUE;
+            ((IWineD3DDeviceImpl *)pDevice)->stateBlock->changed.textureState[stage] |= 1 << state;
             /* TODO: Record a display list to apply all gl states. For now apply by brute force */
             IWineD3DDeviceImpl_MarkStateDirty((IWineD3DDeviceImpl *)pDevice, STATE_TEXTURESTAGE(stage, state));
         }
@@ -790,7 +818,7 @@ should really perform a delta so that only the changes get updated*/
             DWORD stage = This->contained_sampler_states[i].stage;
             DWORD state = This->contained_sampler_states[i].state;
             ((IWineD3DDeviceImpl *)pDevice)->stateBlock->samplerState[stage][state]         = This->samplerState[stage][state];
-            ((IWineD3DDeviceImpl *)pDevice)->stateBlock->changed.samplerState[stage][state] = TRUE;
+            ((IWineD3DDeviceImpl *)pDevice)->stateBlock->changed.samplerState[stage] |= 1 << state;
             IWineD3DDeviceImpl_MarkStateDirty((IWineD3DDeviceImpl *)pDevice, STATE_SAMPLER(stage));
         }
 
@@ -832,14 +860,15 @@ should really perform a delta so that only the changes get updated*/
         {
             if (map & 1) IWineD3DDevice_SetStreamSourceFreq(pDevice, i, This->streamFreq[i] | This->streamFlags[i]);
         }
-        for (j = 0 ; j < MAX_COMBINED_SAMPLERS; j++){
-            if (This->changed.textures[j]) {
-                if (j < MAX_FRAGMENT_SAMPLERS) {
-                    IWineD3DDevice_SetTexture(pDevice, j, This->textures[j]);
-                } else {
-                    IWineD3DDevice_SetTexture(pDevice, WINED3DVERTEXTEXTURESAMPLER0 + j - MAX_FRAGMENT_SAMPLERS, This->textures[j]);
-                }
-            }
+
+        map = This->changed.textures;
+        for (i = 0; map; map >>= 1, ++i)
+        {
+            if (!(map & 1)) continue;
+
+            if (i < MAX_FRAGMENT_SAMPLERS) IWineD3DDevice_SetTexture(pDevice, i, This->textures[i]);
+            else IWineD3DDevice_SetTexture(pDevice, WINED3DVERTEXTEXTURESAMPLER0 + i - MAX_FRAGMENT_SAMPLERS,
+                    This->textures[i]);
         }
 
         map = This->changed.clipplane;
@@ -970,7 +999,8 @@ should really perform a delta so that only the changes get updated*/
             IWineD3DDevice_SetRenderState(pDevice, i, This->renderState[i]);
         }
         for(j = 0; j < MAX_TEXTURES; j++) {
-            for(i = 1; i <= WINED3D_HIGHEST_TEXTURE_STATE; i++) {
+            for (i = 0; i <= WINED3D_HIGHEST_TEXTURE_STATE; ++i)
+            {
                 IWineD3DDevice_SetTextureStageState(pDevice, j, i, This->textureState[j][i]);
             }
         }
@@ -995,7 +1025,8 @@ should really perform a delta so that only the changes get updated*/
             UINT sampler = j < MAX_FRAGMENT_SAMPLERS ? j : WINED3DVERTEXTEXTURESAMPLER0 + j - MAX_FRAGMENT_SAMPLERS;
 
             IWineD3DDevice_SetTexture(pDevice, sampler, This->textures[j]);
-            for(i = 1; i < WINED3D_HIGHEST_SAMPLER_STATE; i++) {
+            for (i = 1; i <= WINED3D_HIGHEST_SAMPLER_STATE; ++i)
+            {
                 IWineD3DDevice_SetSamplerState(pDevice, sampler, i, This->samplerState[j][i]);
             }
         }
@@ -1212,7 +1243,6 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStat
         This->textureState[i][WINED3DTSS_BUMPENVLSCALE         ] = 0;
         This->textureState[i][WINED3DTSS_BUMPENVLOFFSET        ] = 0;
         This->textureState[i][WINED3DTSS_TEXTURETRANSFORMFLAGS ] = WINED3DTTFF_DISABLE;
-        This->textureState[i][WINED3DTSS_ADDRESSW              ] = WINED3DTADDRESS_WRAP;
         This->textureState[i][WINED3DTSS_COLORARG0             ] = WINED3DTA_CURRENT;
         This->textureState[i][WINED3DTSS_ALPHAARG0             ] = WINED3DTA_CURRENT;
         This->textureState[i][WINED3DTSS_RESULTARG             ] = WINED3DTA_CURRENT;
@@ -1239,7 +1269,7 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStat
 
     for(i = 0; i < GL_LIMITS(textures); i++) {
         /* Note: This avoids calling SetTexture, so pretend it has been called */
-        This->changed.textures[i] = TRUE;
+        This->changed.textures |= 1 << i;
         This->textures[i]         = NULL;
     }
 

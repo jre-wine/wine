@@ -107,6 +107,8 @@ static BOOL (WINAPI *pSetSecurityDescriptorControl)(PSECURITY_DESCRIPTOR, SECURI
                                                     SECURITY_DESCRIPTOR_CONTROL);
 static DWORD (WINAPI *pGetSecurityInfo)(HANDLE, SE_OBJECT_TYPE, SECURITY_INFORMATION,
                                         PSID*, PSID*, PACL*, PACL*, PSECURITY_DESCRIPTOR*);
+static NTSTATUS (WINAPI *pNtAccessCheck)(PSECURITY_DESCRIPTOR, HANDLE, ACCESS_MASK, PGENERIC_MAPPING,
+                                         PPRIVILEGE_SET, PULONG, PULONG, NTSTATUS*);
 
 static HMODULE hmod;
 static int     myARGC;
@@ -142,6 +144,7 @@ static void init(void)
 
     hntdll = GetModuleHandleA("ntdll.dll");
     pNtQueryObject = (void *)GetProcAddress( hntdll, "NtQueryObject" );
+    pNtAccessCheck = (void *)GetProcAddress( hntdll, "NtAccessCheck" );
 
     hmod = GetModuleHandle("advapi32.dll");
     pAddAccessAllowedAceEx = (void *)GetProcAddress(hmod, "AddAccessAllowedAceEx");
@@ -240,7 +243,7 @@ static void test_sid(void)
      GetLastError() );
 
     ok(pConvertStringSidToSidA("S-1-5-21-93476-23408-4576", &psid), "ConvertStringSidToSidA failed\n");
-    pisid = (SID *)psid;
+    pisid = psid;
     ok(pisid->SubAuthorityCount == 4, "Invalid sub authority count - expected 4, got %d\n", pisid->SubAuthorityCount);
     ok(pisid->SubAuthority[0] == 21, "Invalid subauthority 0 - expceted 21, got %d\n", pisid->SubAuthority[0]);
     ok(pisid->SubAuthority[3] == 4576, "Invalid subauthority 0 - expceted 4576, got %d\n", pisid->SubAuthority[3]);
@@ -266,7 +269,7 @@ static void test_sid(void)
 
         r = pConvertStringSidToSidA( refs[i].refStr, &psid );
         ok( r, "failed to parse sid string\n" );
-        pisid = (PISID)psid;
+        pisid = psid;
         ok( pisid &&
          !memcmp( pisid->IdentifierAuthority.Value, refs[i].auth.Value,
          sizeof(refs[i].auth) ),
@@ -373,7 +376,7 @@ static void test_trustee(void)
         "MultipleTrusteeOperation wrong\n");
     ok( trustee.TrusteeForm == TRUSTEE_IS_SID, "TrusteeForm wrong\n");
     ok( trustee.TrusteeType == TRUSTEE_IS_UNKNOWN, "TrusteeType wrong\n");
-    ok( trustee.ptstrName == (LPSTR) psid, "ptstrName wrong\n" );
+    ok( trustee.ptstrName == psid, "ptstrName wrong\n" );
 
     /* test BuildTrusteeWithObjectsAndSidA (test 1) */
     memset( &trustee, 0xff, sizeof trustee );
@@ -842,6 +845,7 @@ static void test_AccessCheck(void)
     HMODULE NtDllModule;
     BOOLEAN Enabled;
     DWORD err;
+    NTSTATUS ntret, ntAccessStatus;
 
     NtDllModule = GetModuleHandle("ntdll.dll");
     if (!NtDllModule)
@@ -917,6 +921,7 @@ static void test_AccessCheck(void)
 
     /* Generic access mask */
     SetLastError(0xdeadbeef);
+    Access = AccessStatus = 0xdeadbeef;
     ret = AccessCheck(SecurityDescriptor, Token, GENERIC_READ, &Mapping,
                       PrivSet, &PrivSetLen, &Access, &AccessStatus);
     err = GetLastError();
@@ -925,7 +930,41 @@ static void test_AccessCheck(void)
     ok(Access == 0xdeadbeef && AccessStatus == 0xdeadbeef,
        "Access and/or AccessStatus were changed!\n");
 
+    /* Generic access mask - no privilegeset buffer */
+    SetLastError(0xdeadbeef);
+    Access = AccessStatus = 0xdeadbeef;
+    ret = AccessCheck(SecurityDescriptor, Token, GENERIC_READ, &Mapping,
+                      NULL, &PrivSetLen, &Access, &AccessStatus);
+    err = GetLastError();
+    ok(!ret && err == ERROR_NOACCESS, "AccessCheck should have failed "
+       "with ERROR_NOACCESS, instead of %d\n", err);
+    ok(Access == 0xdeadbeef && AccessStatus == 0xdeadbeef,
+       "Access and/or AccessStatus were changed!\n");
+
+    /* Generic access mask - no returnlength */
+    SetLastError(0xdeadbeef);
+    Access = AccessStatus = 0xdeadbeef;
+    ret = AccessCheck(SecurityDescriptor, Token, GENERIC_READ, &Mapping,
+                      PrivSet, NULL, &Access, &AccessStatus);
+    err = GetLastError();
+    ok(!ret && err == ERROR_NOACCESS, "AccessCheck should have failed "
+       "with ERROR_NOACCESS, instead of %d\n", err);
+    ok(Access == 0xdeadbeef && AccessStatus == 0xdeadbeef,
+       "Access and/or AccessStatus were changed!\n");
+
+    /* Generic access mask - no privilegeset buffer, no returnlength */
+    SetLastError(0xdeadbeef);
+    Access = AccessStatus = 0xdeadbeef;
+    ret = AccessCheck(SecurityDescriptor, Token, GENERIC_READ, &Mapping,
+                      NULL, NULL, &Access, &AccessStatus);
+    err = GetLastError();
+    ok(!ret && err == ERROR_NOACCESS, "AccessCheck should have failed "
+       "with ERROR_NOACCESS, instead of %d\n", err);
+    ok(Access == 0xdeadbeef && AccessStatus == 0xdeadbeef,
+       "Access and/or AccessStatus were changed!\n");
+
     /* sd with no dacl present */
+    Access = AccessStatus = 0xdeadbeef;
     ret = SetSecurityDescriptorDacl(SecurityDescriptor, FALSE, NULL, FALSE);
     ok(ret, "SetSecurityDescriptorDacl failed with error %d\n", GetLastError());
     ret = AccessCheck(SecurityDescriptor, Token, KEY_READ, &Mapping,
@@ -935,7 +974,63 @@ static void test_AccessCheck(void)
         "AccessCheck failed to grant access with error %d\n",
         GetLastError());
 
+    /* sd with no dacl present - no privilegeset buffer */
+    SetLastError(0xdeadbeef);
+    Access = AccessStatus = 0xdeadbeef;
+    ret = AccessCheck(SecurityDescriptor, Token, GENERIC_READ, &Mapping,
+                      NULL, &PrivSetLen, &Access, &AccessStatus);
+    err = GetLastError();
+    ok(!ret && err == ERROR_NOACCESS, "AccessCheck should have failed "
+       "with ERROR_NOACCESS, instead of %d\n", err);
+    ok(Access == 0xdeadbeef && AccessStatus == 0xdeadbeef,
+       "Access and/or AccessStatus were changed!\n");
+
+    if(pNtAccessCheck)
+    {
+       /* Generic access mask - no privilegeset buffer */
+       SetLastError(0xdeadbeef);
+       Access = ntAccessStatus = 0xdeadbeef;
+       ntret = pNtAccessCheck(SecurityDescriptor, Token, GENERIC_READ, &Mapping,
+                              NULL, &PrivSetLen, &Access, &ntAccessStatus);
+       err = GetLastError();
+       ok(ntret == STATUS_ACCESS_VIOLATION,
+          "NtAccessCheck should have failed with STATUS_ACCESS_VIOLATION, got %x\n", ntret);
+       ok(err == 0xdeadbeef,
+          "NtAccessCheck shouldn't set last error, got %d\n", err);
+       ok(Access == 0xdeadbeef && ntAccessStatus == 0xdeadbeef,
+          "Access and/or AccessStatus were changed!\n");
+
+      /* Generic access mask - no returnlength */
+      SetLastError(0xdeadbeef);
+      Access = ntAccessStatus = 0xdeadbeef;
+      ntret = pNtAccessCheck(SecurityDescriptor, Token, GENERIC_READ, &Mapping,
+                             PrivSet, NULL, &Access, &ntAccessStatus);
+      err = GetLastError();
+      ok(ntret == STATUS_ACCESS_VIOLATION,
+         "NtAccessCheck should have failed with STATUS_ACCESS_VIOLATION, got %x\n", ntret);
+      ok(err == 0xdeadbeef,
+         "NtAccessCheck shouldn't set last error, got %d\n", err);
+      ok(Access == 0xdeadbeef && ntAccessStatus == 0xdeadbeef,
+         "Access and/or AccessStatus were changed!\n");
+
+      /* Generic access mask - no privilegeset buffer, no returnlength */
+      SetLastError(0xdeadbeef);
+      Access = ntAccessStatus = 0xdeadbeef;
+      ntret = pNtAccessCheck(SecurityDescriptor, Token, GENERIC_READ, &Mapping,
+                             NULL, NULL, &Access, &ntAccessStatus);
+      err = GetLastError();
+      ok(ntret == STATUS_ACCESS_VIOLATION,
+         "NtAccessCheck should have failed with STATUS_ACCESS_VIOLATION, got %x\n", ntret);
+      ok(err == 0xdeadbeef,
+         "NtAccessCheck shouldn't set last error, got %d\n", err);
+      ok(Access == 0xdeadbeef && ntAccessStatus == 0xdeadbeef,
+         "Access and/or AccessStatus were changed!\n");
+    }
+    else
+       win_skip("NtAccessCheck unavailable. Skipping.\n");
+
     /* sd with NULL dacl */
+    Access = AccessStatus = 0xdeadbeef;
     ret = SetSecurityDescriptorDacl(SecurityDescriptor, TRUE, NULL, FALSE);
     ok(ret, "SetSecurityDescriptorDacl failed with error %d\n", GetLastError());
     ret = AccessCheck(SecurityDescriptor, Token, KEY_READ, &Mapping,
@@ -963,6 +1058,7 @@ static void test_AccessCheck(void)
     ok(res, "AddAccessDeniedAce failed with error %d\n", GetLastError());
 
     /* sd with dacl */
+    Access = AccessStatus = 0xdeadbeef;
     ret = AccessCheck(SecurityDescriptor, Token, KEY_READ, &Mapping,
                       PrivSet, &PrivSetLen, &Access, &AccessStatus);
     ok(ret, "AccessCheck failed with error %d\n", GetLastError());
@@ -980,6 +1076,7 @@ static void test_AccessCheck(void)
 
     /* Access denied by SD */
     SetLastError(0xdeadbeef);
+    Access = AccessStatus = 0xdeadbeef;
     ret = AccessCheck(SecurityDescriptor, Token, KEY_WRITE, &Mapping,
                       PrivSet, &PrivSetLen, &Access, &AccessStatus);
     ok(ret, "AccessCheck failed with error %d\n", GetLastError());
@@ -2215,7 +2312,7 @@ static void test_SetEntriesInAcl(void)
     ExplicitAccess.Trustee.MultipleTrusteeOperation = NO_MULTIPLE_TRUSTEE;
     ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_SID;
     ExplicitAccess.Trustee.TrusteeType = TRUSTEE_IS_UNKNOWN;
-    ExplicitAccess.Trustee.ptstrName = (LPWSTR)EveryoneSid;
+    ExplicitAccess.Trustee.ptstrName = EveryoneSid;
     res = pSetEntriesInAclW(1, &ExplicitAccess, OldAcl, &NewAcl);
     ok(res == ERROR_SUCCESS, "SetEntriesInAclW failed: %u\n", res);
     ok(NewAcl != NULL, "returned acl was NULL\n");
@@ -2263,7 +2360,7 @@ static void test_SetEntriesInAcl(void)
 
     ExplicitAccess.grfAccessMode = REVOKE_ACCESS;
     ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_SID;
-    ExplicitAccess.Trustee.ptstrName = (LPWSTR)UsersSid;
+    ExplicitAccess.Trustee.ptstrName = UsersSid;
     res = pSetEntriesInAclW(1, &ExplicitAccess, OldAcl, &NewAcl);
     ok(res == ERROR_SUCCESS, "SetEntriesInAclW failed: %u\n", res);
     ok(NewAcl != NULL, "returned acl was NULL\n");
@@ -2508,17 +2605,17 @@ static void test_ConvertSecurityDescriptorToString()
 
     size = 4096;
     pCreateWellKnownSid(WinLocalSid, NULL, sid_buf, &size);
-    SetSecurityDescriptorOwner(&desc, (PSID)sid_buf, FALSE);
+    SetSecurityDescriptorOwner(&desc, sid_buf, FALSE);
     ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:S-1-2-0");
 
-    SetSecurityDescriptorOwner(&desc, (PSID)sid_buf, TRUE);
+    SetSecurityDescriptorOwner(&desc, sid_buf, TRUE);
     ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:S-1-2-0");
 
     size = sizeof(sid_buf);
     pCreateWellKnownSid(WinLocalSystemSid, NULL, sid_buf, &size);
-    SetSecurityDescriptorOwner(&desc, (PSID)sid_buf, TRUE);
+    SetSecurityDescriptorOwner(&desc, sid_buf, TRUE);
     ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:SY");
 

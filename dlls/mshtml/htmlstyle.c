@@ -43,8 +43,16 @@ static const WCHAR attrBackgroundImage[] =
     {'b','a','c','k','g','r','o','u','n','d','-','i','m','a','g','e',0};
 static const WCHAR attrBorder[] =
     {'b','o','r','d','e','r',0};
+static const WCHAR attrBorderBottomStyle[] =
+    {'b','o','r','d','e','r','-','b','o','t','t','o','m','-','s','t','y','l','e',0};
 static const WCHAR attrBorderLeft[] =
     {'b','o','r','d','e','r','-','l','e','f','t',0};
+static const WCHAR attrBorderLeftStyle[] =
+    {'b','o','r','d','e','r','-','l','e','f','t','-','s','t','y','l','e',0};
+static const WCHAR attrBorderRightStyle[] =
+    {'b','o','r','d','e','r','-','r','i','g','h','t','-','s','t','y','l','e',0};
+static const WCHAR attrBorderTopStyle[] =
+    {'b','o','r','d','e','r','-','t','o','p','-','s','t','y','l','e',0};
 static const WCHAR attrBorderWidth[] =
     {'b','o','r','d','e','r','-','w','i','d','t','h',0};
 static const WCHAR attrColor[] =
@@ -104,7 +112,11 @@ static const struct{
     {attrBackgroundColor,      DISPID_IHTMLSTYLE_BACKGROUNDCOLOR},
     {attrBackgroundImage,      DISPID_IHTMLSTYLE_BACKGROUNDIMAGE},
     {attrBorder,               DISPID_IHTMLSTYLE_BORDER},
+    {attrBorderBottomStyle,    DISPID_IHTMLSTYLE_BORDERBOTTOMSTYLE},
     {attrBorderLeft,           DISPID_IHTMLSTYLE_BORDERLEFT},
+    {attrBorderLeftStyle,      DISPID_IHTMLSTYLE_BORDERLEFTSTYLE},
+    {attrBorderRightStyle,     DISPID_IHTMLSTYLE_BORDERRIGHTSTYLE},
+    {attrBorderTopStyle,       DISPID_IHTMLSTYLE_BORDERTOPSTYLE},
     {attrBorderWidth,          DISPID_IHTMLSTYLE_BORDERWIDTH},
     {attrColor,                DISPID_IHTMLSTYLE_COLOR},
     {attrCursor,               DISPID_IHTMLSTYLE_CURSOR},
@@ -411,6 +423,32 @@ static HRESULT get_nsstyle_pos(HTMLStyle *This, styleid_t sid, float *p)
     nsAString_Finish(&str_value);
 
     return hres;
+}
+
+static BOOL is_valid_border_style(BSTR v)
+{
+    static const WCHAR styleNone[]   = {'n','o','n','e',0};
+    static const WCHAR styleDotted[] = {'d','o','t','t','e','d',0};
+    static const WCHAR styleDashed[] = {'d','a','s','h','e','d',0};
+    static const WCHAR styleSolid[]  = {'s','o','l','i','d',0};
+    static const WCHAR styleDouble[] = {'d','o','u','b','l','e',0};
+    static const WCHAR styleGroove[] = {'g','r','o','o','v','e',0};
+    static const WCHAR styleRidge[]  = {'r','i','d','g','e',0};
+    static const WCHAR styleInset[]  = {'i','n','s','e','t',0};
+    static const WCHAR styleOutset[] = {'o','u','t','s','e','t',0};
+
+    TRACE("%s\n", debugstr_w(v));
+
+    if(!v || strcmpiW(v, styleNone)   == 0 || strcmpiW(v, styleDotted) == 0 ||
+             strcmpiW(v, styleDashed) == 0 || strcmpiW(v, styleSolid)  == 0 ||
+             strcmpiW(v, styleDouble) == 0 || strcmpiW(v, styleGroove) == 0 ||
+             strcmpiW(v, styleRidge)  == 0 || strcmpiW(v, styleInset)  == 0 ||
+             strcmpiW(v, styleOutset) == 0 )
+    {
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 #define HTMLSTYLE_THIS(iface) DEFINE_THIS(HTMLStyle, HTMLStyle, iface)
@@ -1431,57 +1469,73 @@ static HRESULT WINAPI HTMLStyle_get_borderStyle(IHTMLStyle *iface, BSTR *p)
 static HRESULT WINAPI HTMLStyle_put_borderTopStyle(IHTMLStyle *iface, BSTR v)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    if(!is_valid_border_style(v))
+        return E_INVALIDARG;
+
+    return set_style_attr(This, STYLEID_BORDER_TOP_STYLE, v, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_get_borderTopStyle(IHTMLStyle *iface, BSTR *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p)\n", This, p);
+    return get_style_attr(This, STYLEID_BORDER_TOP_STYLE, p);
 }
 
 static HRESULT WINAPI HTMLStyle_put_borderRightStyle(IHTMLStyle *iface, BSTR v)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    if(!is_valid_border_style(v))
+        return E_INVALIDARG;
+
+    return set_style_attr(This, STYLEID_BORDER_RIGHT_STYLE, v, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_get_borderRightStyle(IHTMLStyle *iface, BSTR *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p)\n", This, p);
+    return get_style_attr(This, STYLEID_BORDER_RIGHT_STYLE, p);
 }
 
 static HRESULT WINAPI HTMLStyle_put_borderBottomStyle(IHTMLStyle *iface, BSTR v)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    if(!is_valid_border_style(v))
+        return E_INVALIDARG;
+
+    return set_style_attr(This, STYLEID_BORDER_BOTTOM_STYLE, v, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_get_borderBottomStyle(IHTMLStyle *iface, BSTR *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p)\n", This, p);
+    return get_style_attr(This, STYLEID_BORDER_BOTTOM_STYLE, p);
 }
 
 static HRESULT WINAPI HTMLStyle_put_borderLeftStyle(IHTMLStyle *iface, BSTR v)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    if(!is_valid_border_style(v))
+        return E_INVALIDARG;
+
+    return set_style_attr(This, STYLEID_BORDER_LEFT_STYLE, v, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_get_borderLeftStyle(IHTMLStyle *iface, BSTR *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p)\n", This, p);
+    return get_style_attr(This, STYLEID_BORDER_LEFT_STYLE, p);
 }
 
 static HRESULT WINAPI HTMLStyle_put_width(IHTMLStyle *iface, VARIANT v)
@@ -2048,18 +2102,75 @@ static HRESULT WINAPI HTMLStyle_setAttribute(IHTMLStyle *iface, BSTR strAttribut
         VARIANT AttributeValue, LONG lFlags)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%s v%d %08x)\n", This, debugstr_w(strAttributeName),
-          V_VT(&AttributeValue), lFlags);
-    return E_NOTIMPL;
+    HRESULT hres;
+    DISPID dispid;
+
+    TRACE("(%p)->(%s v%d %08x)\n", This, debugstr_w(strAttributeName),
+           V_VT(&AttributeValue), lFlags);
+
+    if(!strAttributeName)
+        return E_INVALIDARG;
+
+    if(lFlags == 1)
+        FIXME("Parameter lFlags ignored\n");
+
+    hres = HTMLStyle_GetIDsOfNames(iface, &IID_NULL, (LPOLESTR*)&strAttributeName, 1,
+                        LOCALE_USER_DEFAULT, &dispid);
+    if(hres == S_OK)
+    {
+        VARIANT ret;
+        DISPID dispidNamed = DISPID_PROPERTYPUT;
+        DISPPARAMS params;
+
+        params.cArgs = 1;
+        params.rgvarg = &AttributeValue;
+        params.cNamedArgs = 1;
+        params.rgdispidNamedArgs = &dispidNamed;
+
+        hres = HTMLStyle_Invoke(iface, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
+            DISPATCH_PROPERTYPUT, &params, &ret, NULL, NULL);
+    }
+    else
+    {
+        FIXME("Custom attributes not supported.\n");
+    }
+
+    TRACE("ret: %08x\n", hres);
+
+    return hres;
 }
 
 static HRESULT WINAPI HTMLStyle_getAttribute(IHTMLStyle *iface, BSTR strAttributeName,
         LONG lFlags, VARIANT *AttributeValue)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%s %08x %p)\n", This, debugstr_w(strAttributeName),
-         lFlags, AttributeValue);
-    return E_NOTIMPL;
+    HRESULT hres;
+    DISPID dispid;
+
+    TRACE("(%p)->(%s v%p %08x)\n", This, debugstr_w(strAttributeName),
+          AttributeValue, lFlags);
+
+    if(!AttributeValue || !strAttributeName)
+        return E_INVALIDARG;
+
+    if(lFlags == 1)
+        FIXME("Parameter lFlags ignored\n");
+
+    hres = HTMLStyle_GetIDsOfNames(iface, &IID_NULL, (LPOLESTR*)&strAttributeName, 1,
+                        LOCALE_USER_DEFAULT, &dispid);
+    if(hres == S_OK)
+    {
+        DISPPARAMS params = {NULL, NULL, 0, 0 };
+
+        hres = HTMLStyle_Invoke(iface, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
+            DISPATCH_PROPERTYGET, &params, AttributeValue, NULL, NULL);
+    }
+    else
+    {
+        FIXME("Custom attributes not supported.\n");
+    }
+
+    return hres;
 }
 
 static HRESULT WINAPI HTMLStyle_removeAttribute(IHTMLStyle *iface, BSTR strAttributeName,

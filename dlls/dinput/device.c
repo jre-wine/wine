@@ -274,7 +274,7 @@ void fill_DataFormat(void *out, DWORD size, const void *in, const DataFormat *df
     memset(out, 0, size);
     if (df->dt == NULL) {
 	/* This means that the app uses Wine's internal data format */
-	memcpy(out, in, df->internal_format_size);
+        memcpy(out, in, min(size, df->internal_format_size));
     } else {
 	for (i = 0; i < df->size; i++) {
 	    if (df->dt[i].offset_in >= 0) {
@@ -432,11 +432,8 @@ static HRESULT create_DataFormat(LPCDIDATAFORMAT asked_format, DataFormat *forma
 		break;
 	    }
 	}
-	
-	if (j == asked_format->dwNumObjs)
-	    same = 0;
     }
-    
+
     TRACE("Setting to default value :\n");
     for (j = 0; j < asked_format->dwNumObjs; j++) {
 	if (done[j] == 0) {
@@ -879,7 +876,7 @@ HRESULT WINAPI IDirectInputDevice2AImpl_GetProperty(
 
     switch (LOWORD(rguid))
     {
-        case (DWORD) DIPROP_BUFFERSIZE:
+        case (DWORD_PTR) DIPROP_BUFFERSIZE:
         {
             LPDIPROPDWORD pd = (LPDIPROPDWORD)pdiph;
 
@@ -913,7 +910,7 @@ HRESULT WINAPI IDirectInputDevice2AImpl_SetProperty(
 
     switch (LOWORD(rguid))
     {
-        case (DWORD) DIPROP_AXISMODE:
+        case (DWORD_PTR) DIPROP_AXISMODE:
         {
             LPCDIPROPDWORD pd = (LPCDIPROPDWORD)pdiph;
 
@@ -933,7 +930,7 @@ HRESULT WINAPI IDirectInputDevice2AImpl_SetProperty(
             LeaveCriticalSection(&This->crit);
             break;
         }
-        case (DWORD) DIPROP_BUFFERSIZE:
+        case (DWORD_PTR) DIPROP_BUFFERSIZE:
         {
             LPCDIPROPDWORD pd = (LPCDIPROPDWORD)pdiph;
 

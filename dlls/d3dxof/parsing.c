@@ -36,10 +36,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dxof);
 
-static const char* get_primitive_string(WORD token);
-static BOOL parse_object_parts(parse_buffer * buf, BOOL allow_optional);
-static WORD check_TOKEN(parse_buffer * buf);
-
 #define TOKEN_NAME         1
 #define TOKEN_STRING       2
 #define TOKEN_INTEGER      3
@@ -73,6 +69,40 @@ static WORD check_TOKEN(parse_buffer * buf);
 #define TOKEN_ARRAY       52
 
 #define CLSIDFMT "<%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X>"
+
+static const char* get_primitive_string(WORD token)
+{
+  switch(token)
+  {
+    case TOKEN_WORD:
+      return "WORD";
+    case TOKEN_DWORD:
+      return "DWORD";
+    case TOKEN_FLOAT:
+      return "FLOAT";
+    case TOKEN_DOUBLE:
+      return "DOUBLE";
+    case TOKEN_CHAR:
+      return "CHAR";
+    case TOKEN_UCHAR:
+      return "UCHAR";
+    case TOKEN_SWORD:
+      return "SWORD";
+    case TOKEN_SDWORD:
+      return "SDWORD";
+    case TOKEN_VOID:
+      return "VOID";
+    case TOKEN_LPSTR:
+      return "STRING";
+    case TOKEN_UNICODE:
+      return "UNICODE";
+    case TOKEN_CSTRING:
+      return "CSTRING ";
+    default:
+      break;
+  }
+  return NULL;
+}
 
 void dump_template(xtemplate* templates_array, xtemplate* ptemplate)
 {
@@ -115,11 +145,6 @@ void dump_template(xtemplate* templates_array, xtemplate* ptemplate)
   DPRINTF("}\n");
 }
 
-BOOL is_template_available(parse_buffer * buf)
-{
-  return check_TOKEN(buf) == TOKEN_TEMPLATE;
-}
-
 BOOL read_bytes(parse_buffer * buf, LPVOID data, DWORD size)
 {
   if (buf->rem_bytes < size)
@@ -128,6 +153,12 @@ BOOL read_bytes(parse_buffer * buf, LPVOID data, DWORD size)
   buf->buffer += size;
   buf->rem_bytes -= size;
   return TRUE;
+}
+
+static void rewind_bytes(parse_buffer * buf, DWORD size)
+{
+  buf->buffer -= size;
+  buf->rem_bytes += size;
 }
 
 static void dump_TOKEN(WORD token)
@@ -242,13 +273,15 @@ static WORD get_operator_token(char c)
 
 static BOOL is_keyword(parse_buffer* buf, const char* keyword)
 {
+  char tmp[9]; /* template keyword size + 1 */
   DWORD len = strlen(keyword);
-  if (!strncasecmp((char*)buf->buffer, keyword,len) && is_separator(*(buf->buffer+len)))
+  read_bytes(buf, tmp, len+1);
+  if (!strncasecmp(tmp, keyword,len) && is_separator(tmp[len]))
   {
-    buf->buffer += len;
-    buf->rem_bytes -= len;
+    rewind_bytes(buf, 1);
     return TRUE;
   }
+  rewind_bytes(buf, len+1);
   return FALSE;
 }
 
@@ -502,8 +535,7 @@ static WORD parse_TOKEN(parse_buffer * buf)
       }
       else
       {
-        buf->buffer -= 1;
-        buf->rem_bytes += 1;
+        rewind_bytes(buf, 1);
 
         if ((token = get_keyword_token(buf)))
           break;
@@ -683,40 +715,6 @@ static WORD parse_TOKEN(parse_buffer * buf)
   return token;
 }
 
-static const char* get_primitive_string(WORD token)
-{
-  switch(token)
-  {
-    case TOKEN_WORD:
-      return "WORD";
-    case TOKEN_DWORD:
-      return "DWORD";
-    case TOKEN_FLOAT:
-      return "FLOAT";
-    case TOKEN_DOUBLE:
-      return "DOUBLE";
-    case TOKEN_CHAR:
-      return "CHAR";
-    case TOKEN_UCHAR:
-      return "UCHAR";
-    case TOKEN_SWORD:
-      return "SWORD";
-    case TOKEN_SDWORD:
-      return "SDWORD";
-    case TOKEN_VOID:
-      return "VOID";
-    case TOKEN_LPSTR:
-      return "STRING";
-    case TOKEN_UNICODE:
-      return "UNICODE";
-    case TOKEN_CSTRING:
-      return "CSTRING ";
-    default:
-      break;
-  }
-  return NULL;
-}
-
 static WORD get_TOKEN(parse_buffer * buf)
 {
   if (buf->token_present)
@@ -739,6 +737,11 @@ static WORD check_TOKEN(parse_buffer * buf)
   buf->token_present = TRUE;
 
   return buf->current_token;
+}
+
+BOOL is_template_available(parse_buffer * buf)
+{
+  return check_TOKEN(buf) == TOKEN_TEMPLATE;
 }
 
 static inline BOOL is_primitive_type(WORD token)
@@ -766,7 +769,7 @@ static inline BOOL is_primitive_type(WORD token)
   return ret;
 }
 
-BOOL parse_template_option_info(parse_buffer * buf)
+static BOOL parse_template_option_info(parse_buffer * buf)
 {
   xtemplate* cur_template = &buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates];
 
@@ -924,12 +927,12 @@ static BOOL parse_template_parts(parse_buffer * buf)
 
 static void go_to_next_definition(parse_buffer * buf)
 {
+  char c;
   while (buf->rem_bytes)
   {
-    char c = *buf->buffer;
+    read_bytes(buf, &c, 1);
     if ((c == '#') || (c == '/'))
     {
-      read_bytes(buf, &c, 1);
       /* Handle comment (# or //) */
       if (c == '/')
       {
@@ -946,13 +949,11 @@ static void go_to_next_definition(parse_buffer * buf)
       }
       continue;
     }
-    else if (is_space(*buf->buffer))
+    else if (!is_space(c))
     {
-      buf->buffer++;
-      buf->rem_bytes--;
-    }
-    else
+      rewind_bytes(buf, 1);
       break;
+    }
   }
 }
 
@@ -984,6 +985,7 @@ BOOL parse_template(parse_buffer * buf)
   return TRUE;
 }
 
+static BOOL parse_object_parts(parse_buffer * buf, BOOL allow_optional);
 static BOOL parse_object_members_list(parse_buffer * buf)
 {
   DWORD token;

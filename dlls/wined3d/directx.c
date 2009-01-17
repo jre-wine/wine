@@ -114,6 +114,7 @@ static const struct {
     {"GL_EXT_texture_filter_anisotropic",   EXT_TEXTURE_FILTER_ANISOTROPIC, 0                           },
     {"GL_EXT_texture_lod",                  EXT_TEXTURE_LOD,                0                           },
     {"GL_EXT_texture_lod_bias",             EXT_TEXTURE_LOD_BIAS,           0                           },
+    {"GL_EXT_vertex_array_bgra",            EXT_VERTEX_ARRAY_BGRA,          0                           },
     {"GL_EXT_vertex_shader",                EXT_VERTEX_SHADER,              0                           },
     {"GL_EXT_gpu_program_parameters",       EXT_GPU_PROGRAM_PARAMETERS,     0                           },
 
@@ -519,8 +520,7 @@ static BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
     ENTER_GL();
 
     gl_string = (const char *) glGetString(GL_RENDERER);
-    if (NULL == gl_string)
-	gl_string = "None";
+    if (!gl_string) gl_string = "None";
     strcpy(gl_info->gl_renderer, gl_string);
 
     gl_string = (const char *) glGetString(GL_VENDOR);
@@ -743,7 +743,7 @@ static BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
     gl_info->max_texture_size = gl_max;
     TRACE_(d3d_caps)("Maximum texture size support - max texture size=%d\n", gl_max);
 
-    glGetFloatv(GL_POINT_SIZE_RANGE, gl_floatv);
+    glGetFloatv(GL_ALIASED_POINT_SIZE_RANGE, gl_floatv);
     gl_info->max_pointsizemin = gl_floatv[0];
     gl_info->max_pointsize = gl_floatv[1];
     TRACE_(d3d_caps)("Maximum point size support - max point size=%f\n", gl_floatv[1]);
@@ -3151,11 +3151,11 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
         pCaps->RasterCaps         |= WINED3DPRASTERCAPS_FOGRANGE;
     }
                         /* FIXME Add:
-			   WINED3DPRASTERCAPS_COLORPERSPECTIVE
-			   WINED3DPRASTERCAPS_STRETCHBLTMULTISAMPLE
-			   WINED3DPRASTERCAPS_ANTIALIASEDGES
-			   WINED3DPRASTERCAPS_ZBUFFERLESSHSR
-			   WINED3DPRASTERCAPS_WBUFFER */
+                           WINED3DPRASTERCAPS_COLORPERSPECTIVE
+                           WINED3DPRASTERCAPS_STRETCHBLTMULTISAMPLE
+                           WINED3DPRASTERCAPS_ANTIALIASEDGES
+                           WINED3DPRASTERCAPS_ZBUFFERLESSHSR
+                           WINED3DPRASTERCAPS_WBUFFER */
 
     pCaps->ZCmpCaps = WINED3DPCMPCAPS_ALWAYS       |
                       WINED3DPCMPCAPS_EQUAL        |
@@ -3621,16 +3621,17 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
 
 /* Note due to structure differences between dx8 and dx9 D3DPRESENT_PARAMETERS,
    and fields being inserted in the middle, a new structure is used in place    */
-static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType, HWND hFocusWindow,
-                                           DWORD BehaviourFlags, IWineD3DDevice** ppReturnedDeviceInterface,
-                                           IUnknown *parent) {
-
+static HRESULT WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter,
+        WINED3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviourFlags, IUnknown *parent,
+        IWineD3DDeviceParent *device_parent, IWineD3DDevice **ppReturnedDeviceInterface)
+{
     IWineD3DDeviceImpl *object  = NULL;
     IWineD3DImpl       *This    = (IWineD3DImpl *)iface;
     WINED3DDISPLAYMODE  mode;
     const struct fragment_pipeline *frag_pipeline = NULL;
     int i;
     struct fragment_caps ffp_caps;
+    HRESULT hr;
 
     /* Validate the adapter number. If no adapters are available(no GL), ignore the adapter
      * number and create a device without a 3D adapter for 2D only operation.
@@ -3654,6 +3655,7 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     object->adapter = numAdapters ? &Adapters[Adapter] : NULL;
     IWineD3D_AddRef(object->wineD3D);
     object->parent  = parent;
+    object->device_parent = device_parent;
     list_init(&object->resources);
     list_init(&object->shaders);
 
@@ -3689,8 +3691,15 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     frag_pipeline->get_caps(DeviceType, &GLINFO_LOCATION, &ffp_caps);
     object->max_ffp_textures = ffp_caps.MaxSimultaneousTextures;
     object->max_ffp_texture_stages = ffp_caps.MaxTextureBlendStages;
-    compile_state_table(object->StateTable, object->multistate_funcs, &GLINFO_LOCATION,
+    hr = compile_state_table(object->StateTable, object->multistate_funcs, &GLINFO_LOCATION,
                         ffp_vertexstate_template, frag_pipeline, misc_state_template);
+
+    if (FAILED(hr)) {
+        IWineD3D_Release(object->wineD3D);
+        HeapFree(GetProcessHeap(), 0, object);
+
+        return hr;
+    }
 
     object->blitter = select_blit_implementation(Adapter, DeviceType);
 
@@ -4206,6 +4215,9 @@ BOOL InitAdapters(void) {
     glFinish = (void*)pwglGetProcAddress("wglFinish");
     glFlush = (void*)pwglGetProcAddress("wglFlush");
 #endif
+
+    glEnableWINE = glEnable;
+    glDisableWINE = glDisable;
 
     /* For now only one default adapter */
     {

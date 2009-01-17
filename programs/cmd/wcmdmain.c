@@ -158,7 +158,7 @@ void WCMD_output (const WCHAR *format, ...) {
   int ret;
 
   va_start(ap,format);
-  ret = wvsprintf (string, format, ap);
+  ret = vsnprintfW(string, sizeof(string)/sizeof(WCHAR), format, ap);
   if( ret >= (sizeof(string)/sizeof(WCHAR))) {
        WINE_ERR("Output truncated in WCMD_output\n" );
        ret = (sizeof(string)/sizeof(WCHAR)) - 1;
@@ -309,7 +309,7 @@ void WCMD_print_error (void) {
  *
  */
 
-void WCMD_show_prompt (void) {
+static void WCMD_show_prompt (void) {
 
   int status;
   WCHAR out_string[MAX_PATH], curdir[MAX_PATH], prompt_string[MAX_PATH];
@@ -438,28 +438,11 @@ WCHAR *WCMD_strtrim_leading_spaces (WCHAR *string) {
 }
 
 /*************************************************************************
- * WCMD_strtrim_trailing_spaces
- *
- *	Remove trailing spaces from a string. This routine modifies the input
- *	string by placing a null after the last non-space WCHARacter
- */
-void WCMD_strtrim_trailing_spaces (WCHAR *string) {
-
-  WCHAR *ptr;
-
-  ptr = string + strlenW (string) - 1;
-  while ((*ptr == ' ') && (ptr >= string)) {
-    *ptr = '\0';
-    ptr--;
-  }
-}
-
-/*************************************************************************
  * WCMD_opt_s_strip_quotes
  *
  *	Remove first and last quote WCHARacters, preserving all other text
  */
-void WCMD_opt_s_strip_quotes(WCHAR *cmd) {
+static void WCMD_opt_s_strip_quotes(WCHAR *cmd) {
   WCHAR *src = cmd + 1, *dest = cmd, *lastq = NULL;
   while((*dest=*src) != '\0') {
       if (*src=='\"')
@@ -778,7 +761,7 @@ static WCHAR *WCMD_expand_envvar(WCHAR *start, WCHAR *forVar, WCHAR *forVal) {
  * read in and not again, except for 'for' variable substitution.
  * eg. As evidence, "echo %1 && shift && echo %1" or "echo %%path%%"
  */
-void handleExpansion(WCHAR *cmd, BOOL justFors, WCHAR *forVariable, WCHAR *forValue) {
+static void handleExpansion(WCHAR *cmd, BOOL justFors, WCHAR *forVariable, WCHAR *forValue) {
 
   /* For commands in a context (batch program):                  */
   /*   Expand environment variables in a batch file %{0-9} first */
@@ -863,7 +846,7 @@ void handleExpansion(WCHAR *cmd, BOOL justFors, WCHAR *forVariable, WCHAR *forVa
  *	second in p2. Any subsequent non-qualifier strings are lost.
  *	Parameters in quotes are handled.
  */
-void WCMD_parse (WCHAR *s, WCHAR *q, WCHAR *p1, WCHAR *p2)
+static void WCMD_parse (WCHAR *s, WCHAR *q, WCHAR *p1, WCHAR *p2)
 {
   int p = 0;
 
@@ -1629,7 +1612,7 @@ static void WCMD_DumpCommands(CMD_LIST *commands) {
  *
  *   Adds a command to the current command list
  */
-void WCMD_addCommand(WCHAR *command, int *commandLen,
+static void WCMD_addCommand(WCHAR *command, int *commandLen,
                      WCHAR *redirs,  int *redirLen,
                      WCHAR **copyTo, int **copyToLen,
                      CMD_DELIMITERS prevDelim, int curDepth,
@@ -1693,7 +1676,7 @@ void WCMD_addCommand(WCHAR *command, int *commandLen,
 WCHAR *WCMD_ReadAndParseLine(WCHAR *optionalcmd, CMD_LIST **output, HANDLE readFrom) {
 
     WCHAR    *curPos;
-    BOOL      inQuotes = FALSE;
+    int       inQuotes = 0;
     WCHAR     curString[MAXSTRING];
     int       curStringLen = 0;
     WCHAR     curRedirs[MAXSTRING];
@@ -1888,6 +1871,13 @@ WCHAR *WCMD_ReadAndParseLine(WCHAR *optionalcmd, CMD_LIST **output, HANDLE readF
                 }
 
                 curCopyTo[(*curLen)++] = *curPos;
+
+                /* If a redirect is immediately followed by '&' (ie. 2>&1) then
+                    do not process that ampersand as an AND operator */
+                if (thisChar == '>' && *(curPos+1) == '&') {
+                    curCopyTo[(*curLen)++] = *(curPos+1);
+                    curPos++;
+                }
                 break;
 
       case '|': /* Pipe character only if not || */
@@ -1917,7 +1907,11 @@ WCHAR *WCMD_ReadAndParseLine(WCHAR *optionalcmd, CMD_LIST **output, HANDLE readF
                 }
                 break;
 
-      case '"': inQuotes = !inQuotes;
+      case '"': if (inQuotes && *(curPos+1) == ' ') {
+                    inQuotes--; /* An end quote must be proceeded by a space */
+                } else {
+                    inQuotes++; /* Quotes within quotes are fun! */
+                }
                 curCopyTo[(*curLen)++] = *curPos;
                 lastWasRedirect = FALSE;
                 break;
@@ -2059,7 +2053,7 @@ WCHAR *WCMD_ReadAndParseLine(WCHAR *optionalcmd, CMD_LIST **output, HANDLE readF
       if (*curPos == 0x00 && curDepth > 0 && readFrom != INVALID_HANDLE_VALUE) {
         inRem = FALSE;
         prevDelim = CMD_NONE;
-        inQuotes = FALSE;
+        inQuotes = 0;
         memset(extraSpace, 0x00, (MAXSTRING+1) * sizeof(WCHAR));
 
         /* Read more, skipping any blank lines */

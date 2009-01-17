@@ -356,20 +356,20 @@ static void test__llseek( void )
 
     for (i = 0; i < 400; i++)
     {
-        ok( HFILE_ERROR != _hwrite( filehandle, sillytext, strlen( sillytext ) ), "_hwrite complains\n" );
+        ok( _hwrite( filehandle, sillytext, strlen( sillytext ) ) != -1, "_hwrite complains\n" );
     }
-    ok( HFILE_ERROR != _llseek( filehandle, 400 * strlen( sillytext ), FILE_CURRENT ), "should be able to seek\n" );
-    ok( HFILE_ERROR != _llseek( filehandle, 27 + 35 * strlen( sillytext ), FILE_BEGIN ), "should be able to seek\n" );
+    ok( _llseek( filehandle, 400 * strlen( sillytext ), FILE_CURRENT ) != -1, "should be able to seek\n" );
+    ok( _llseek( filehandle, 27 + 35 * strlen( sillytext ), FILE_BEGIN ) != -1, "should be able to seek\n" );
 
     bytes_read = _hread( filehandle, buffer, 1);
     ok( 1 == bytes_read, "file read size error\n" );
     ok( buffer[0] == sillytext[27], "_llseek error, it got lost seeking\n" );
-    ok( HFILE_ERROR != _llseek( filehandle, -400 * strlen( sillytext ), FILE_END ), "should be able to seek\n" );
+    ok( _llseek( filehandle, -400 * (LONG)strlen( sillytext ), FILE_END ) != -1, "should be able to seek\n" );
 
     bytes_read = _hread( filehandle, buffer, 1);
     ok( 1 == bytes_read, "file read size error\n" );
     ok( buffer[0] == sillytext[0], "_llseek error, it got lost seeking\n" );
-    ok( HFILE_ERROR != _llseek( filehandle, 1000000, FILE_END ), "should be able to seek past file; poor, poor Windows programmers\n" );
+    ok( _llseek( filehandle, 1000000, FILE_END ) != -1, "should be able to seek past file; poor, poor Windows programmers\n" );
     ok( HFILE_ERROR != _lclose(filehandle), "_lclose complains\n" );
 
     ret = DeleteFileA( filename );
@@ -1673,10 +1673,11 @@ static void test_async_file_errors(void)
 
 static void test_read_write(void)
 {
-    DWORD bytes, ret;
+    DWORD bytes, ret, old_prot;
     HANDLE hFile;
     char temp_path[MAX_PATH];
     char filename[MAX_PATH];
+    char *mem;
     static const char prefix[] = "pfx";
 
     ret = GetTempPathA(MAX_PATH, temp_path);
@@ -1725,6 +1726,95 @@ static void test_read_write(void)
 		GetLastError() == ERROR_INVALID_PARAMETER), /* Win9x */
 	"ret = %d, error %d\n", ret, GetLastError());
     ok(!bytes, "bytes = %d\n", bytes);
+
+    /* test passing protected memory as buffer */
+
+    mem = VirtualAlloc( NULL, 0x4000, MEM_COMMIT, PAGE_READWRITE );
+    ok( mem != NULL, "failed to allocate virtual mem error %u\n", GetLastError() );
+
+    ret = WriteFile( hFile, mem, 0x4000, &bytes, NULL );
+    ok( ret, "WriteFile failed error %u\n", GetLastError() );
+    ok( bytes == 0x4000, "only wrote %x bytes\n", bytes );
+
+    ret = VirtualProtect( mem + 0x2000, 0x2000, PAGE_NOACCESS, &old_prot );
+    ok( ret, "VirtualProtect failed error %u\n", GetLastError() );
+
+    ret = WriteFile( hFile, mem, 0x4000, &bytes, NULL );
+    ok( !ret, "WriteFile succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_USER_BUFFER ||
+        GetLastError() == ERROR_INVALID_PARAMETER,  /* win9x */
+        "wrong error %u\n", GetLastError() );
+    ok( bytes == 0, "wrote %x bytes\n", bytes );
+
+    ret = WriteFile( (HANDLE)0xdead, mem, 0x4000, &bytes, NULL );
+    ok( !ret, "WriteFile succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_HANDLE || /* handle is checked before buffer on NT */
+        GetLastError() == ERROR_INVALID_PARAMETER,  /* win9x */
+        "wrong error %u\n", GetLastError() );
+    ok( bytes == 0, "wrote %x bytes\n", bytes );
+
+    ret = VirtualProtect( mem, 0x2000, PAGE_NOACCESS, &old_prot );
+    ok( ret, "VirtualProtect failed error %u\n", GetLastError() );
+
+    ret = WriteFile( hFile, mem, 0x4000, &bytes, NULL );
+    ok( !ret, "WriteFile succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_USER_BUFFER ||
+        GetLastError() == ERROR_INVALID_PARAMETER,  /* win9x */
+        "wrong error %u\n", GetLastError() );
+    ok( bytes == 0, "wrote %x bytes\n", bytes );
+
+    SetFilePointer( hFile, 0, NULL, FILE_BEGIN );
+
+    ret = ReadFile( hFile, mem, 0x4000, &bytes, NULL );
+    ok( !ret, "ReadFile succeeded\n" );
+    ok( GetLastError() == ERROR_NOACCESS ||
+        GetLastError() == ERROR_INVALID_PARAMETER,  /* win9x */
+        "wrong error %u\n", GetLastError() );
+    ok( bytes == 0, "read %x bytes\n", bytes );
+
+    ret = VirtualProtect( mem, 0x2000, PAGE_READONLY, &old_prot );
+    ok( ret, "VirtualProtect failed error %u\n", GetLastError() );
+
+    ret = ReadFile( hFile, mem, 0x4000, &bytes, NULL );
+    ok( !ret, "ReadFile succeeded\n" );
+    ok( GetLastError() == ERROR_NOACCESS ||
+        GetLastError() == ERROR_INVALID_PARAMETER,  /* win9x */
+        "wrong error %u\n", GetLastError() );
+    ok( bytes == 0, "read %x bytes\n", bytes );
+
+    ret = VirtualProtect( mem, 0x2000, PAGE_READWRITE, &old_prot );
+    ok( ret, "VirtualProtect failed error %u\n", GetLastError() );
+
+    ret = ReadFile( hFile, mem, 0x4000, &bytes, NULL );
+    ok( !ret, "ReadFile succeeded\n" );
+    ok( GetLastError() == ERROR_NOACCESS ||
+        GetLastError() == ERROR_INVALID_PARAMETER,  /* win9x */
+        "wrong error %u\n", GetLastError() );
+    ok( bytes == 0, "read %x bytes\n", bytes );
+
+    SetFilePointer( hFile, 0x1234, NULL, FILE_BEGIN );
+    SetEndOfFile( hFile );
+    SetFilePointer( hFile, 0, NULL, FILE_BEGIN );
+
+    ret = ReadFile( hFile, mem, 0x4000, &bytes, NULL );
+    ok( !ret, "ReadFile succeeded\n" );
+    ok( GetLastError() == ERROR_NOACCESS ||
+        GetLastError() == ERROR_INVALID_PARAMETER,  /* win9x */
+        "wrong error %u\n", GetLastError() );
+    ok( bytes == 0, "read %x bytes\n", bytes );
+
+    ret = ReadFile( hFile, mem, 0x2000, &bytes, NULL );
+    ok( ret, "ReadFile failed error %u\n", GetLastError() );
+    ok( bytes == 0x1234, "read %x bytes\n", bytes );
+
+    ret = ReadFile( hFile, NULL, 1, &bytes, NULL );
+    ok( !ret, "ReadFile succeeded\n" );
+    ok( GetLastError() == ERROR_NOACCESS ||
+        GetLastError() == ERROR_INVALID_PARAMETER,  /* win9x */
+        "wrong error %u\n", GetLastError() );
+    ok( bytes == 0, "read %x bytes\n", bytes );
+
+    VirtualFree( mem, 0, MEM_FREE );
 
     ret = CloseHandle(hFile);
     ok( ret, "CloseHandle: error %d\n", GetLastError());
@@ -1845,8 +1935,8 @@ static void test_OpenFile(void)
     ok( ofs.cBytes == sizeof(OFSTRUCT), "OpenFile set ofs.cBytes to %d\n", ofs.cBytes );
     ok( ofs.nErrCode == ERROR_SUCCESS || broken(ofs.nErrCode != ERROR_SUCCESS) /* win9x */,
         "OpenFile set ofs.nErrCode to %d\n", ofs.nErrCode );
-    ret = CloseHandle((HANDLE)hFile);
-    ok( ret == TRUE, "CloseHandle() returns %d\n", ret );
+    ret = _lclose(hFile);
+    ok( !ret, "_lclose() returns %d\n", ret );
     retval = GetFileAttributesA(filename);
     ok( retval != INVALID_FILE_ATTRIBUTES, "GetFileAttributesA: error %d\n", GetLastError() );
 
@@ -1863,8 +1953,8 @@ static void test_OpenFile(void)
         "OpenFile set ofs.nErrCode to %d\n", ofs.nErrCode );
     ok( lstrcmpiA(ofs.szPathName, buff) == 0,
         "OpenFile returned '%s', but was expected to return '%s'\n", ofs.szPathName, buff );
-    ret = CloseHandle((HANDLE)hFile);
-    ok( ret == TRUE, "CloseHandle() returns %d\n", ret );
+    ret = _lclose(hFile);
+    ok( !ret, "_lclose() returns %d\n", ret );
 
     memset(&ofs, 0xA5, sizeof(ofs));
     SetLastError(0xfaceabee);
@@ -1878,8 +1968,8 @@ static void test_OpenFile(void)
         "OpenFile set ofs.nErrCode to %d\n", ofs.nErrCode );
     ok( lstrcmpiA(ofs.szPathName, buff) == 0,
         "OpenFile returned '%s', but was expected to return '%s'\n", ofs.szPathName, buff );
-    ret = CloseHandle((HANDLE)hFile);
-    ok( ret == TRUE, "CloseHandle() returns %d\n", ret );
+    ret = _lclose(hFile);
+    ok( !ret, "_lclose() returns %d\n", ret );
 
     memset(&ofs, 0xA5, sizeof(ofs));
     SetLastError(0xfaceabee);
@@ -1893,8 +1983,8 @@ static void test_OpenFile(void)
         "OpenFile set ofs.nErrCode to %d\n", ofs.nErrCode );
     ok( lstrcmpiA(ofs.szPathName, buff) == 0,
         "OpenFile returned '%s', but was expected to return '%s'\n", ofs.szPathName, buff );
-    ret = CloseHandle((HANDLE)hFile);
-    ok( ret == TRUE, "CloseHandle() returns %d\n", ret );
+    ret = _lclose(hFile);
+    ok( !ret, "_lclose() returns %d\n", ret );
 
     memset(&ofs, 0xA5, sizeof(ofs));
     SetLastError(0xfaceabee);

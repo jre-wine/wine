@@ -1636,6 +1636,29 @@ static DWORD HTTPREQ_SetOption(WININETHANDLEHEADER *hdr, DWORD option, void *buf
     return ERROR_INTERNET_INVALID_OPTION;
 }
 
+static void HTTP_ReceiveRequestData(WININETHTTPREQW *req)
+{
+    INTERNET_ASYNC_RESULT iar;
+    BYTE buffer[4096];
+    BOOL res;
+
+    TRACE("%p\n", req);
+
+    res = NETCON_recv(&req->netConnection, buffer,
+                min(sizeof(buffer), req->dwContentLength - req->dwContentRead),
+                MSG_PEEK, (int *)&iar.dwError);
+
+    if(res) {
+        iar.dwResult = (DWORD_PTR)req->hdr.hInternet;
+    }else {
+        iar.dwResult = 0;
+        iar.dwError = INTERNET_GetLastError();
+    }
+
+    INTERNET_SendCallback(&req->hdr, req->hdr.dwContext, INTERNET_STATUS_REQUEST_COMPLETE, &iar,
+                          sizeof(INTERNET_ASYNC_RESULT));
+}
+
 static DWORD HTTP_Read(WININETHTTPREQW *req, void *buffer, DWORD size, DWORD *read, BOOL sync)
 {
     int bytes_read;
@@ -1695,7 +1718,7 @@ static DWORD HTTP_ReadChunked(WININETHTTPREQW *req, void *buffer, DWORD size, DW
     {
         if (*read == size) break;
 
-        if (req->dwContentLength == ~0UL) /* new chunk */
+        if (req->dwContentLength == ~0u) /* new chunk */
         {
             buflen = sizeof(reply);
             if (!NETCON_getNextLine(&req->netConnection, reply, &buflen)) break;
@@ -1736,7 +1759,7 @@ static DWORD HTTP_ReadChunked(WININETHTTPREQW *req, void *buffer, DWORD size, DW
         if (req->dwContentRead == req->dwContentLength) /* chunk complete */
         {
             req->dwContentRead = 0;
-            req->dwContentLength = ~0UL;
+            req->dwContentLength = ~0u;
 
             buflen = sizeof(reply);
             if (!NETCON_getNextLine(&req->netConnection, reply, &buflen))
@@ -1772,7 +1795,7 @@ static DWORD HTTPREQ_ReadFile(WININETHANDLEHEADER *hdr, void *buffer, DWORD size
     return HTTPREQ_Read(req, buffer, size, read, TRUE);
 }
 
-static void HTTPREQ_AsyncReadFileExProc(WORKREQUEST *workRequest)
+static void HTTPREQ_AsyncReadFileExAProc(WORKREQUEST *workRequest)
 {
     struct WORKREQ_INTERNETREADFILEEXA const *data = &workRequest->u.InternetReadFileExA;
     WININETHTTPREQW *req = (WININETHTTPREQW*)workRequest->hdr;
@@ -1815,9 +1838,74 @@ static DWORD HTTPREQ_ReadFileExA(WININETHANDLEHEADER *hdr, INTERNET_BUFFERSA *bu
         {
             WORKREQUEST workRequest;
 
-            workRequest.asyncproc = HTTPREQ_AsyncReadFileExProc;
+            workRequest.asyncproc = HTTPREQ_AsyncReadFileExAProc;
             workRequest.hdr = WININET_AddRef(&req->hdr);
             workRequest.u.InternetReadFileExA.lpBuffersOut = buffers;
+
+            INTERNET_AsyncCall(&workRequest);
+
+            return ERROR_IO_PENDING;
+        }
+    }
+
+    res = HTTPREQ_Read(req, buffers->lpvBuffer, buffers->dwBufferLength, &buffers->dwBufferLength,
+            !(flags & IRF_NO_WAIT));
+
+    if (res == ERROR_SUCCESS) {
+        DWORD size = buffers->dwBufferLength;
+        INTERNET_SendCallback(&req->hdr, req->hdr.dwContext, INTERNET_STATUS_RESPONSE_RECEIVED,
+                &size, sizeof(size));
+    }
+
+    return res;
+}
+
+static void HTTPREQ_AsyncReadFileExWProc(WORKREQUEST *workRequest)
+{
+    struct WORKREQ_INTERNETREADFILEEXW const *data = &workRequest->u.InternetReadFileExW;
+    WININETHTTPREQW *req = (WININETHTTPREQW*)workRequest->hdr;
+    INTERNET_ASYNC_RESULT iar;
+    DWORD res;
+
+    TRACE("INTERNETREADFILEEXW %p\n", workRequest->hdr);
+
+    res = HTTPREQ_Read(req, data->lpBuffersOut->lpvBuffer,
+            data->lpBuffersOut->dwBufferLength, &data->lpBuffersOut->dwBufferLength, TRUE);
+
+    iar.dwResult = res == ERROR_SUCCESS;
+    iar.dwError = res;
+
+    INTERNET_SendCallback(&req->hdr, req->hdr.dwContext,
+                          INTERNET_STATUS_REQUEST_COMPLETE, &iar,
+                          sizeof(INTERNET_ASYNC_RESULT));
+}
+
+static DWORD HTTPREQ_ReadFileExW(WININETHANDLEHEADER *hdr, INTERNET_BUFFERSW *buffers,
+        DWORD flags, DWORD_PTR context)
+{
+
+    WININETHTTPREQW *req = (WININETHTTPREQW*)hdr;
+    DWORD res;
+
+    if (flags & ~(IRF_ASYNC|IRF_NO_WAIT))
+        FIXME("these dwFlags aren't implemented: 0x%x\n", flags & ~(IRF_ASYNC|IRF_NO_WAIT));
+
+    if (buffers->dwStructSize != sizeof(*buffers))
+        return ERROR_INVALID_PARAMETER;
+
+    INTERNET_SendCallback(&req->hdr, req->hdr.dwContext, INTERNET_STATUS_RECEIVING_RESPONSE, NULL, 0);
+
+    if (hdr->dwFlags & INTERNET_FLAG_ASYNC) {
+        DWORD available = 0;
+
+        NETCON_query_data_available(&req->netConnection, &available);
+        if (!available)
+        {
+            WORKREQUEST workRequest;
+
+            workRequest.asyncproc = HTTPREQ_AsyncReadFileExWProc;
+            workRequest.hdr = WININET_AddRef(&req->hdr);
+            workRequest.u.InternetReadFileExW.lpBuffersOut = buffers;
 
             INTERNET_AsyncCall(&workRequest);
 
@@ -1847,17 +1935,8 @@ static BOOL HTTPREQ_WriteFile(WININETHANDLEHEADER *hdr, const void *buffer, DWOR
 static void HTTPREQ_AsyncQueryDataAvailableProc(WORKREQUEST *workRequest)
 {
     WININETHTTPREQW *req = (WININETHTTPREQW*)workRequest->hdr;
-    INTERNET_ASYNC_RESULT iar;
-    char buffer[4048];
 
-    TRACE("%p\n", workRequest->hdr);
-
-    iar.dwResult = NETCON_recv(&req->netConnection, buffer,
-                               min(sizeof(buffer), req->dwContentLength - req->dwContentRead),
-                               MSG_PEEK, (int *)&iar.dwError);
-
-    INTERNET_SendCallback(&req->hdr, req->hdr.dwContext, INTERNET_STATUS_REQUEST_COMPLETE, &iar,
-                          sizeof(INTERNET_ASYNC_RESULT));
+    HTTP_ReceiveRequestData(req);
 }
 
 static DWORD HTTPREQ_QueryDataAvailable(WININETHANDLEHEADER *hdr, DWORD *available, DWORD flags, DWORD_PTR ctx)
@@ -1901,6 +1980,7 @@ static const HANDLEHEADERVtbl HTTPREQVtbl = {
     HTTPREQ_SetOption,
     HTTPREQ_ReadFile,
     HTTPREQ_ReadFileExA,
+    HTTPREQ_ReadFileExW,
     HTTPREQ_WriteFile,
     HTTPREQ_QueryDataAvailable,
     NULL
@@ -2817,8 +2897,13 @@ BOOL WINAPI HttpSendRequestW(HINTERNET hHttpRequest, LPCWSTR lpszHeaders,
         req = &workRequest.u.HttpSendRequestW;
         if (lpszHeaders)
         {
-            req->lpszHeader = HeapAlloc(GetProcessHeap(), 0, dwHeaderLength * sizeof(WCHAR));
-            memcpy(req->lpszHeader, lpszHeaders, dwHeaderLength * sizeof(WCHAR));
+            DWORD size;
+
+            if (dwHeaderLength == ~0u) size = (strlenW(lpszHeaders) + 1) * sizeof(WCHAR);
+            else size = dwHeaderLength * sizeof(WCHAR);
+
+            req->lpszHeader = HeapAlloc(GetProcessHeap(), 0, size);
+            memcpy(req->lpszHeader, lpszHeaders, size);
         }
         else
             req->lpszHeader = 0;
@@ -3222,7 +3307,7 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
     if (!lpwhr->lpszVerb)
         lpwhr->lpszVerb = WININET_strdupW(szGET);
 
-    if (dwContentLength || !strcmpW(lpwhr->lpszVerb, szPost))
+    if (dwContentLength || strcmpW(lpwhr->lpszVerb, szGET))
     {
         sprintfW(contentLengthStr, szContentLength, dwContentLength);
         HTTP_HttpAddRequestHeadersW(lpwhr, contentLengthStr, -1L, HTTP_ADDREQ_FLAG_ADD_IF_NEW);
@@ -3465,12 +3550,18 @@ lend:
 
     /* TODO: send notification for P3P header */
 
-    iar.dwResult = (DWORD_PTR)lpwhr->hdr.hInternet;
-    iar.dwError = bSuccess ? ERROR_SUCCESS : INTERNET_GetLastError();
+    if(lpwhr->lpHttpSession->lpAppInfo->hdr.dwFlags & INTERNET_FLAG_ASYNC) {
+        if(bSuccess) {
+            HTTP_ReceiveRequestData(lpwhr);
+        }else {
+            iar.dwResult = (DWORD_PTR)lpwhr->hdr.hInternet;
+            iar.dwError = INTERNET_GetLastError();
 
-    INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
-                          INTERNET_STATUS_REQUEST_COMPLETE, &iar,
-                          sizeof(INTERNET_ASYNC_RESULT));
+            INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
+                                  INTERNET_STATUS_REQUEST_COMPLETE, &iar,
+                                  sizeof(INTERNET_ASYNC_RESULT));
+        }
+    }
 
     TRACE("<--\n");
     if (bSuccess) INTERNET_SetLastError(ERROR_SUCCESS);
