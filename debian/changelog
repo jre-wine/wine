@@ -1,8 +1,24 @@
-wine (1.1.13-1) UNRELEASED; urgency=low
+wine (1.1.13-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.13, released Jan 16, 2009.
+    - Freedesktop.org-compliant startup notifications.
+    - Many fixes for 64-bit application support.
+    - Improved graphics support in Internet Explorer.
+    - Various Richedit improvements.
+    - Better certificate manager dialog.
+    - Various bug fixes.
+  * Fix a minor copy&paste error I did for copying wine-preloader etc
+    into the packages (should use install, not mv, in the binary-arch
+    target).
+  * Install control panel modules into wine-bin. (Currently there's only
+    one - Add/Remove Programs.) (Closes: #511266)
+  * Added a more general way to only install certain binaries into
+    libwine if they were actually built; it now also works for wine-bin,
+    where winevdm.exe.so is now in the list of optional binaries.
+  * Installed clock.exe.so and icinfo.exe.so into the wine-utils
+    package, for some kind of completeness's sake.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sat, 17 Jan 2009 14:52:54 +0100
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 17 Jan 2009 15:02:33 +0100
 
 wine (1.1.12-1) experimental; urgency=low
 
