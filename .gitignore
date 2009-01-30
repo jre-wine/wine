@@ -34,7 +34,6 @@ dlls/ctl3dv2.dll16
 dlls/ddeml.dll16
 dlls/dispdib.dll16
 dlls/display.drv16
-dlls/dxgi/dxgi_private_interface.h
 dlls/gdi.exe16
 dlls/imm.dll16
 dlls/jscript/jsglobal.tlb
@@ -166,6 +165,7 @@ include/mimeole.h
 include/mlang.h
 include/mmstream.h
 include/mscoree.h
+include/msctf.h
 include/mshtmhst.h
 include/mshtml.h
 include/msinkaut.h
@@ -202,6 +202,7 @@ include/vmr9.h
 include/wine/itss.h
 include/wine/svcctl.h
 include/wine/wined3d.h
+include/wine/winedxgi.h
 include/wtypes.h
 include/wuapi.h
 include/xmldom.h
@@ -235,6 +236,7 @@ programs/explorer/explorer
 programs/hh/hh
 programs/icinfo/icinfo
 programs/iexplore/iexplore
+programs/lodctr/lodctr
 programs/msiexec/msiexec
 programs/net/net
 programs/notepad/notepad
@@ -258,6 +260,7 @@ programs/start/start
 programs/svchost/svchost
 programs/taskmgr/taskmgr
 programs/uninstaller/uninstaller
+programs/unlodctr/unlodctr
 programs/view/view
 programs/wineapploader
 programs/wineboot/wineboot

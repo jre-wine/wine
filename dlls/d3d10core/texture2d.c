@@ -28,6 +28,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d10core);
 
 static HRESULT STDMETHODCALLTYPE d3d10_texture2d_QueryInterface(ID3D10Texture2D *iface, REFIID riid, void **object)
 {
+    struct d3d10_texture2d *This = (struct d3d10_texture2d *)iface;
+
     TRACE("iface %p, riid %s, object %p\n", iface, debugstr_guid(riid), object);
 
     if (IsEqualGUID(riid, &IID_ID3D10Texture2D)
@@ -38,6 +40,12 @@ static HRESULT STDMETHODCALLTYPE d3d10_texture2d_QueryInterface(ID3D10Texture2D 
         IUnknown_AddRef(iface);
         *object = iface;
         return S_OK;
+    }
+
+    if (This->dxgi_surface)
+    {
+        TRACE("Forwarding to dxgi surface\n");
+        return IDXGISurface_QueryInterface(This->dxgi_surface, riid, object);
     }
 
     WARN("%s not implemented, returning E_NOINTERFACE\n", debugstr_guid(riid));
@@ -62,6 +70,13 @@ static ULONG STDMETHODCALLTYPE d3d10_texture2d_Release(ID3D10Texture2D *iface)
     ULONG refcount = InterlockedDecrement(&This->refcount);
 
     TRACE("%p decreasing refcount to %u\n", This, refcount);
+
+    if (!refcount)
+    {
+        if (This->dxgi_surface) IDXGISurface_Release(This->dxgi_surface);
+        if (This->wined3d_surface) IWineD3DSurface_Release(This->wined3d_surface);
+        HeapFree(GetProcessHeap(), 0, This);
+    }
 
     return refcount;
 }
@@ -104,7 +119,9 @@ static HRESULT STDMETHODCALLTYPE d3d10_texture2d_SetPrivateDataInterface(ID3D10T
 static void STDMETHODCALLTYPE d3d10_texture2d_GetType(ID3D10Texture2D *iface,
         D3D10_RESOURCE_DIMENSION *resource_dimension)
 {
-    FIXME("iface %p, resource_dimension %p stub!\n", iface, resource_dimension);
+    TRACE("iface %p, resource_dimension %p\n", iface, resource_dimension);
+
+    *resource_dimension = D3D10_RESOURCE_DIMENSION_TEXTURE2D;
 }
 
 static void STDMETHODCALLTYPE d3d10_texture2d_SetEvictionPriority(ID3D10Texture2D *iface, UINT eviction_priority)
@@ -137,7 +154,11 @@ static void STDMETHODCALLTYPE d3d10_texture2d_Unmap(ID3D10Texture2D *iface, UINT
 
 static void STDMETHODCALLTYPE d3d10_texture2d_GetDesc(ID3D10Texture2D *iface, D3D10_TEXTURE2D_DESC *desc)
 {
-    FIXME("iface %p, desc %p stub!\n", iface, desc);
+    struct d3d10_texture2d *This = (struct d3d10_texture2d *)iface;
+
+    TRACE("iface %p, desc %p\n", iface, desc);
+
+    *desc = This->desc;
 }
 
 const struct ID3D10Texture2DVtbl d3d10_texture2d_vtbl =

@@ -27,6 +27,7 @@ typedef unsigned __int64 apc_param_t;
 typedef unsigned __int64 mem_size_t;
 typedef unsigned __int64 file_pos_t;
 typedef unsigned __int64 client_ptr_t;
+typedef unsigned __int64 affinity_t;
 typedef client_ptr_t mod_handle_t;
 
 struct request_header
@@ -488,6 +489,7 @@ struct new_process_reply
     obj_handle_t phandle;
     thread_id_t  tid;
     obj_handle_t thandle;
+    char __pad_28[4];
 };
 
 
@@ -589,6 +591,7 @@ struct terminate_process_reply
 {
     struct reply_header __header;
     int          self;
+    char __pad_12[4];
 };
 
 
@@ -618,12 +621,12 @@ struct get_process_info_reply
     struct reply_header __header;
     process_id_t pid;
     process_id_t ppid;
-    int          priority;
-    unsigned int affinity;
+    affinity_t   affinity;
     client_ptr_t peb;
     timeout_t    start_time;
     timeout_t    end_time;
     int          exit_code;
+    int          priority;
 };
 
 
@@ -634,7 +637,7 @@ struct set_process_info_request
     obj_handle_t handle;
     int          mask;
     int          priority;
-    unsigned int affinity;
+    affinity_t   affinity;
 };
 struct set_process_info_reply
 {
@@ -657,12 +660,13 @@ struct get_thread_info_reply
     process_id_t pid;
     thread_id_t  tid;
     client_ptr_t teb;
-    int          priority;
-    unsigned int affinity;
+    affinity_t   affinity;
     timeout_t    creation_time;
     timeout_t    exit_time;
     int          exit_code;
+    int          priority;
     int          last;
+    char __pad_60[4];
 };
 
 
@@ -673,8 +677,9 @@ struct set_thread_info_request
     obj_handle_t handle;
     int          mask;
     int          priority;
-    unsigned int affinity;
+    affinity_t   affinity;
     obj_handle_t token;
+    char __pad_36[4];
 };
 struct set_thread_info_reply
 {
@@ -712,6 +717,7 @@ struct suspend_thread_reply
 {
     struct reply_header __header;
     int          count;
+    char __pad_12[4];
 };
 
 
@@ -725,6 +731,7 @@ struct resume_thread_reply
 {
     struct reply_header __header;
     int          count;
+    char __pad_12[4];
 };
 
 
@@ -739,6 +746,7 @@ struct load_dll_request
     int          dbg_offset;
     int          dbg_size;
     /* VARARG(filename,unicode_str); */
+    char __pad_44[4];
 };
 struct load_dll_reply
 {
@@ -750,7 +758,7 @@ struct load_dll_reply
 struct unload_dll_request
 {
     struct request_header __header;
-    int          __pad;
+    char __pad_12[4];
     mod_handle_t base;
 };
 struct unload_dll_reply
@@ -811,6 +819,7 @@ struct set_handle_info_reply
 {
     struct reply_header __header;
     int          old_flags;
+    char __pad_12[4];
 };
 
 
@@ -831,6 +840,7 @@ struct dup_handle_reply
     obj_handle_t handle;
     int          self;
     int          closed;
+    char __pad_20[4];
 };
 #define DUP_HANDLE_CLOSE_SOURCE  DUPLICATE_CLOSE_SOURCE
 #define DUP_HANDLE_SAME_ACCESS   DUPLICATE_SAME_ACCESS
@@ -849,6 +859,7 @@ struct open_process_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -864,6 +875,7 @@ struct open_thread_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -885,6 +897,7 @@ struct select_reply
     timeout_t    timeout;
     apc_call_t   call;
     obj_handle_t apc_handle;
+    char __pad_60[4];
 };
 #define SELECT_ALL           1
 #define SELECT_ALERTABLE     2
@@ -905,6 +918,7 @@ struct create_event_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -913,6 +927,7 @@ struct event_op_request
     struct request_header __header;
     obj_handle_t  handle;
     int           op;
+    char __pad_20[4];
 };
 struct event_op_reply
 {
@@ -934,6 +949,7 @@ struct open_event_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -950,6 +966,7 @@ struct create_mutex_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -963,6 +980,7 @@ struct release_mutex_reply
 {
     struct reply_header __header;
     unsigned int prev_count;
+    char __pad_12[4];
 };
 
 
@@ -979,6 +997,7 @@ struct open_mutex_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -996,6 +1015,7 @@ struct create_semaphore_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -1010,6 +1030,7 @@ struct release_semaphore_reply
 {
     struct reply_header __header;
     unsigned int prev_count;
+    char __pad_12[4];
 };
 
 
@@ -1026,6 +1047,7 @@ struct open_semaphore_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -1046,6 +1068,7 @@ struct create_file_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -1064,6 +1087,7 @@ struct open_file_object_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -1079,6 +1103,7 @@ struct alloc_file_handle_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -1121,6 +1146,7 @@ struct flush_file_reply
 {
     struct reply_header __header;
     obj_handle_t event;
+    char __pad_12[4];
 };
 
 
@@ -1171,6 +1197,7 @@ struct create_socket_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -1186,6 +1213,7 @@ struct accept_socket_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -1220,6 +1248,7 @@ struct get_socket_event_reply
     unsigned int pmask;
     unsigned int state;
     /* VARARG(errors,ints); */
+    char __pad_20[4];
 };
 
 
@@ -1231,6 +1260,7 @@ struct enable_socket_event_request
     unsigned int mask;
     unsigned int sstate;
     unsigned int cstate;
+    char __pad_28[4];
 };
 struct enable_socket_event_reply
 {
@@ -1242,6 +1272,7 @@ struct set_socket_deferred_request
     struct request_header __header;
     obj_handle_t handle;
     obj_handle_t deferred;
+    char __pad_20[4];
 };
 struct set_socket_deferred_reply
 {
@@ -1268,6 +1299,7 @@ struct alloc_console_reply
 struct free_console_request
 {
     struct request_header __header;
+    char __pad_12[4];
 };
 struct free_console_reply
 {
@@ -1346,6 +1378,7 @@ struct open_console_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -1358,6 +1391,7 @@ struct get_console_wait_event_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -1370,6 +1404,7 @@ struct get_console_mode_reply
 {
     struct reply_header __header;
     int          mode;
+    char __pad_12[4];
 };
 
 
@@ -1379,6 +1414,7 @@ struct set_console_mode_request
     struct request_header __header;
     obj_handle_t handle;
     int          mode;
+    char __pad_20[4];
 };
 struct set_console_mode_reply
 {
@@ -1432,6 +1468,7 @@ struct get_console_input_info_reply
     int           output_cp;
     user_handle_t win;
     /* VARARG(title,unicode_str); */
+    char __pad_36[4];
 };
 
 
@@ -1460,6 +1497,7 @@ struct get_console_input_history_reply
     struct reply_header __header;
     int          total;
     /* VARARG(line,unicode_str); */
+    char __pad_12[4];
 };
 
 
@@ -1476,6 +1514,7 @@ struct create_console_output_reply
 {
     struct reply_header __header;
     obj_handle_t handle_out;
+    char __pad_12[4];
 };
 
 
@@ -1498,6 +1537,7 @@ struct set_console_output_info_request
     short int    win_bottom;
     short int    max_width;
     short int    max_height;
+    char __pad_46[2];
 };
 struct set_console_output_info_reply
 {
@@ -1533,6 +1573,7 @@ struct get_console_output_info_reply
     short int    win_bottom;
     short int    max_width;
     short int    max_height;
+    char __pad_34[6];
 };
 
 
@@ -1546,6 +1587,7 @@ struct write_console_input_reply
 {
     struct reply_header __header;
     int          written;
+    char __pad_12[4];
 };
 
 
@@ -1561,6 +1603,7 @@ struct read_console_input_reply
     struct reply_header __header;
     int          read;
     /* VARARG(rec,input_records); */
+    char __pad_12[4];
 };
 
 
@@ -1581,6 +1624,7 @@ struct write_console_output_reply
     int          written;
     int          width;
     int          height;
+    char __pad_20[4];
 };
 enum char_info_mode
 {
@@ -1607,6 +1651,7 @@ struct fill_console_output_reply
 {
     struct reply_header __header;
     int          written;
+    char __pad_12[4];
 };
 
 
@@ -1640,6 +1685,7 @@ struct move_console_output_request
     short int    y_dst;
     short int    w;
     short int    h;
+    char __pad_28[4];
 };
 struct move_console_output_reply
 {
@@ -1653,6 +1699,7 @@ struct send_console_signal_request
     struct request_header __header;
     int          signal;
     process_id_t group_id;
+    char __pad_20[4];
 };
 struct send_console_signal_reply
 {
@@ -1685,6 +1732,7 @@ struct read_change_reply
     struct reply_header __header;
     int          action;
     /* VARARG(name,string); */
+    char __pad_12[4];
 };
 
 
@@ -1703,6 +1751,7 @@ struct create_mapping_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 #define VPROT_READ       0x01
@@ -1733,6 +1782,7 @@ struct open_mapping_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -1767,6 +1817,7 @@ struct get_mapping_committed_range_reply
     struct reply_header __header;
     mem_size_t   size;
     int          committed;
+    char __pad_20[4];
 };
 
 
@@ -1797,6 +1848,7 @@ struct create_snapshot_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -1835,6 +1887,7 @@ struct next_thread_reply
     thread_id_t  tid;
     int          base_pri;
     int          delta_pri;
+    char __pad_28[4];
 };
 
 
@@ -1851,6 +1904,7 @@ struct wait_debug_event_reply
     thread_id_t   tid;
     obj_handle_t  wait;
     /* VARARG(event,debug_event); */
+    char __pad_20[4];
 };
 
 
@@ -1871,6 +1925,7 @@ struct queue_exception_event_reply
 {
     struct reply_header __header;
     obj_handle_t     handle;
+    char __pad_12[4];
 };
 
 
@@ -1894,6 +1949,7 @@ struct output_debug_string_request
     data_size_t   length;
     client_ptr_t  string;
     int           unicode;
+    char __pad_28[4];
 };
 struct output_debug_string_reply
 {
@@ -1921,6 +1977,7 @@ struct debug_process_request
     struct request_header __header;
     process_id_t pid;
     int          attach;
+    char __pad_20[4];
 };
 struct debug_process_reply
 {
@@ -1938,6 +1995,7 @@ struct debug_break_reply
 {
     struct reply_header __header;
     int          self;
+    char __pad_12[4];
 };
 
 
@@ -2013,6 +2071,7 @@ struct open_key_reply
 {
     struct reply_header __header;
     obj_handle_t hkey;
+    char __pad_12[4];
 };
 
 
@@ -2113,6 +2172,7 @@ struct enum_key_value_reply
     data_size_t  namelen;
     /* VARARG(name,unicode_str,namelen); */
     /* VARARG(data,bytes); */
+    char __pad_20[4];
 };
 
 
@@ -2136,6 +2196,7 @@ struct load_registry_request
     obj_handle_t hkey;
     obj_handle_t file;
     /* VARARG(name,unicode_str); */
+    char __pad_20[4];
 };
 struct load_registry_reply
 {
@@ -2161,6 +2222,7 @@ struct save_registry_request
     struct request_header __header;
     obj_handle_t hkey;
     obj_handle_t file;
+    char __pad_20[4];
 };
 struct save_registry_reply
 {
@@ -2176,6 +2238,7 @@ struct set_registry_notification_request
     obj_handle_t event;
     int          subtree;
     unsigned int filter;
+    char __pad_28[4];
 };
 struct set_registry_notification_reply
 {
@@ -2197,6 +2260,7 @@ struct create_timer_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -2213,6 +2277,7 @@ struct open_timer_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -2229,6 +2294,7 @@ struct set_timer_reply
 {
     struct reply_header __header;
     int          signaled;
+    char __pad_12[4];
 };
 
 
@@ -2241,6 +2307,7 @@ struct cancel_timer_reply
 {
     struct reply_header __header;
      int         signaled;
+    char __pad_12[4];
 };
 
 
@@ -2254,6 +2321,7 @@ struct get_timer_info_reply
     struct reply_header __header;
     timeout_t    when;
     int          signaled;
+    char __pad_20[4];
 };
 
 
@@ -2270,6 +2338,7 @@ struct get_thread_context_reply
     struct reply_header __header;
     int          self;
     /* VARARG(context,context); */
+    char __pad_12[4];
 };
 
 
@@ -2286,6 +2355,7 @@ struct set_thread_context_reply
 {
     struct reply_header __header;
     int          self;
+    char __pad_12[4];
 };
 
 
@@ -2302,6 +2372,7 @@ struct get_selector_entry_reply
     unsigned int  base;
     unsigned int  limit;
     unsigned char flags;
+    char __pad_17[7];
 };
 
 
@@ -2316,6 +2387,7 @@ struct add_atom_reply
 {
     struct reply_header __header;
     atom_t        atom;
+    char __pad_12[4];
 };
 
 
@@ -2325,6 +2397,7 @@ struct delete_atom_request
     struct request_header __header;
     obj_handle_t  table;
     atom_t        atom;
+    char __pad_20[4];
 };
 struct delete_atom_reply
 {
@@ -2343,6 +2416,7 @@ struct find_atom_reply
 {
     struct reply_header __header;
     atom_t       atom;
+    char __pad_12[4];
 };
 
 
@@ -2360,6 +2434,7 @@ struct get_atom_information_reply
     int          pinned;
     data_size_t  total;
     /* VARARG(name,unicode_str); */
+    char __pad_20[4];
 };
 
 
@@ -2383,6 +2458,7 @@ struct empty_atom_table_request
     struct request_header __header;
     obj_handle_t table;
     int          if_pinned;
+    char __pad_20[4];
 };
 struct empty_atom_table_reply
 {
@@ -2400,6 +2476,7 @@ struct init_atom_table_reply
 {
     struct reply_header __header;
     obj_handle_t table;
+    char __pad_12[4];
 };
 
 
@@ -2412,6 +2489,7 @@ struct get_msg_queue_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -2467,6 +2545,7 @@ struct get_process_idle_event_reply
 {
     struct reply_header __header;
     obj_handle_t event;
+    char __pad_12[4];
 };
 
 
@@ -2527,6 +2606,7 @@ struct send_hardware_message_request
     int             x;
     int             y;
     unsigned int    time;
+    char __pad_60[4];
 };
 struct send_hardware_message_reply
 {
@@ -2627,6 +2707,7 @@ struct kill_win_timer_request
     user_handle_t   win;
     lparam_t        id;
     unsigned int    msg;
+    char __pad_28[4];
 };
 struct kill_win_timer_reply
 {
@@ -2644,6 +2725,7 @@ struct is_window_hung_reply
 {
     struct reply_header __header;
     int is_hung;
+    char __pad_12[4];
 };
 
 
@@ -2677,6 +2759,7 @@ struct set_serial_info_request
     unsigned int writeconst;
     unsigned int writemult;
     unsigned int eventmask;
+    char __pad_44[4];
 };
 struct set_serial_info_reply
 {
@@ -2693,6 +2776,7 @@ struct register_async_request
     int          type;
     async_data_t async;
     int          count;
+    char __pad_60[4];
 };
 struct register_async_reply
 {
@@ -2766,6 +2850,7 @@ struct create_named_pipe_reply
 {
     struct reply_header __header;
     obj_handle_t   handle;
+    char __pad_12[4];
 };
 
 
@@ -2788,6 +2873,7 @@ struct get_named_pipe_info_reply
     unsigned int   instances;
     unsigned int   outsize;
     unsigned int   insize;
+    char __pad_28[4];
 };
 
 
@@ -2896,6 +2982,7 @@ struct set_window_info_reply
     lparam_t       old_user_data;
     lparam_t       old_extra_value;
     unsigned int   old_id;
+    char __pad_44[4];
 };
 #define SET_WIN_STYLE     0x01
 #define SET_WIN_EXSTYLE   0x02
@@ -2932,6 +3019,7 @@ struct get_window_parents_reply
     struct reply_header __header;
     int            count;
     /* VARARG(parents,user_handles); */
+    char __pad_12[4];
 };
 
 
@@ -2950,6 +3038,7 @@ struct get_window_children_reply
     struct reply_header __header;
     int            count;
     /* VARARG(children,user_handles); */
+    char __pad_12[4];
 };
 
 
@@ -2966,6 +3055,7 @@ struct get_window_children_from_point_reply
     struct reply_header __header;
     int            count;
     /* VARARG(children,user_handles); */
+    char __pad_12[4];
 };
 
 
@@ -3092,6 +3182,7 @@ struct get_window_region_reply
     struct reply_header __header;
     data_size_t    total_size;
     /* VARARG(region,rectangles); */
+    char __pad_12[4];
 };
 
 
@@ -3102,6 +3193,7 @@ struct set_window_region_request
     user_handle_t  window;
     int            redraw;
     /* VARARG(region,rectangles); */
+    char __pad_20[4];
 };
 struct set_window_region_reply
 {
@@ -3124,6 +3216,7 @@ struct get_update_region_reply
     unsigned int   flags;
     data_size_t    total_size;
     /* VARARG(region,rectangles); */
+    char __pad_20[4];
 };
 #define UPDATE_NONCLIENT       0x01
 #define UPDATE_ERASE           0x02
@@ -3155,6 +3248,7 @@ struct redraw_window_request
     user_handle_t  window;
     unsigned int   flags;
     /* VARARG(region,rectangles); */
+    char __pad_20[4];
 };
 struct redraw_window_reply
 {
@@ -3170,6 +3264,7 @@ struct set_window_property_request
     lparam_t       data;
     atom_t         atom;
     /* VARARG(name,unicode_str); */
+    char __pad_28[4];
 };
 struct set_window_property_reply
 {
@@ -3218,6 +3313,7 @@ struct get_window_properties_reply
     struct reply_header __header;
     int            total;
     /* VARARG(props,properties); */
+    char __pad_12[4];
 };
 
 
@@ -3234,6 +3330,7 @@ struct create_winstation_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -3249,6 +3346,7 @@ struct open_winstation_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -3273,6 +3371,7 @@ struct get_process_winstation_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -3299,6 +3398,7 @@ struct enum_winstation_reply
     struct reply_header __header;
     unsigned int next;
     /* VARARG(name,unicode_str); */
+    char __pad_12[4];
 };
 
 
@@ -3315,6 +3415,7 @@ struct create_desktop_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -3332,6 +3433,7 @@ struct open_desktop_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -3357,6 +3459,7 @@ struct get_thread_desktop_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -3384,6 +3487,7 @@ struct enum_desktop_reply
     struct reply_header __header;
     unsigned int next;
     /* VARARG(name,unicode_str); */
+    char __pad_12[4];
 };
 
 
@@ -3436,6 +3540,7 @@ struct get_thread_input_reply
     user_handle_t  move_size;
     user_handle_t  caret;
     rectangle_t    rect;
+    char __pad_52[4];
 };
 
 
@@ -3448,6 +3553,7 @@ struct get_last_input_time_reply
 {
     struct reply_header __header;
     unsigned int time;
+    char __pad_12[4];
 };
 
 
@@ -3463,6 +3569,7 @@ struct get_key_state_reply
     struct reply_header __header;
     unsigned char  state;
     /* VARARG(keystate,bytes); */
+    char __pad_9[7];
 };
 
 
@@ -3489,6 +3596,7 @@ struct set_foreground_window_reply
     user_handle_t  previous;
     int            send_msg_old;
     int            send_msg_new;
+    char __pad_20[4];
 };
 
 
@@ -3501,6 +3609,7 @@ struct set_focus_window_reply
 {
     struct reply_header __header;
     user_handle_t  previous;
+    char __pad_12[4];
 };
 
 
@@ -3513,6 +3622,7 @@ struct set_active_window_reply
 {
     struct reply_header __header;
     user_handle_t  previous;
+    char __pad_12[4];
 };
 
 
@@ -3547,6 +3657,7 @@ struct set_caret_window_reply
     rectangle_t    old_rect;
     int            old_hide;
     int            old_state;
+    char __pad_36[4];
 };
 
 
@@ -3568,6 +3679,7 @@ struct set_caret_info_reply
     rectangle_t    old_rect;
     int            old_hide;
     int            old_state;
+    char __pad_36[4];
 };
 #define SET_CARET_POS        0x01
 #define SET_CARET_HIDE       0x02
@@ -3608,6 +3720,7 @@ struct remove_hook_reply
 {
     struct reply_header __header;
     unsigned int   active_hooks;
+    char __pad_12[4];
 };
 
 
@@ -3631,6 +3744,7 @@ struct start_hook_chain_reply
     client_ptr_t   proc;
     unsigned int   active_hooks;
     /* VARARG(module,unicode_str); */
+    char __pad_36[4];
 };
 
 
@@ -3667,6 +3781,7 @@ struct get_hook_info_reply
     client_ptr_t   proc;
     int            unicode;
     /* VARARG(module,unicode_str); */
+    char __pad_36[4];
 };
 
 
@@ -3687,6 +3802,7 @@ struct create_class_reply
 {
     struct reply_header __header;
     atom_t         atom;
+    char __pad_12[4];
 };
 
 
@@ -3754,6 +3870,7 @@ struct set_clipboard_info_reply
     user_handle_t  old_owner;
     user_handle_t  old_viewer;
     unsigned int   seqno;
+    char __pad_28[4];
 };
 
 #define SET_CB_OPEN      0x001
@@ -3780,6 +3897,7 @@ struct open_token_reply
 {
     struct reply_header __header;
     obj_handle_t   token;
+    char __pad_12[4];
 };
 #define OPEN_TOKEN_THREAD   1
 #define OPEN_TOKEN_AS_SELF  2
@@ -3821,6 +3939,7 @@ struct adjust_token_privileges_reply
     struct reply_header __header;
     unsigned int  len;
     /* VARARG(privileges,LUID_AND_ATTRIBUTES); */
+    char __pad_12[4];
 };
 
 
@@ -3834,6 +3953,7 @@ struct get_token_privileges_reply
     struct reply_header __header;
     unsigned int  len;
     /* VARARG(privileges,LUID_AND_ATTRIBUTES); */
+    char __pad_12[4];
 };
 
 
@@ -3849,6 +3969,7 @@ struct check_token_privileges_reply
     struct reply_header __header;
     int           has_privileges;
     /* VARARG(privileges,LUID_AND_ATTRIBUTES); */
+    char __pad_12[4];
 };
 
 struct duplicate_token_request
@@ -3864,6 +3985,7 @@ struct duplicate_token_reply
 {
     struct reply_header __header;
     obj_handle_t  new_handle;
+    char __pad_12[4];
 };
 
 struct access_check_request
@@ -3884,6 +4006,7 @@ struct access_check_reply
     unsigned int    access_status;
     unsigned int    privileges_len;
     /* VARARG(privileges,LUID_AND_ATTRIBUTES); */
+    char __pad_20[4];
 };
 
 struct get_token_user_request
@@ -3896,6 +4019,7 @@ struct get_token_user_reply
     struct reply_header __header;
     data_size_t     user_len;
     /* VARARG(user,SID); */
+    char __pad_12[4];
 };
 
 struct get_token_groups_request
@@ -3908,6 +4032,7 @@ struct get_token_groups_reply
     struct reply_header __header;
     data_size_t     user_len;
     /* VARARG(user,token_groups); */
+    char __pad_12[4];
 };
 
 struct set_security_object_request
@@ -3916,6 +4041,7 @@ struct set_security_object_request
     obj_handle_t    handle;
     unsigned int    security_info;
     /* VARARG(sd,security_descriptor); */
+    char __pad_20[4];
 };
 struct set_security_object_reply
 {
@@ -3933,6 +4059,7 @@ struct get_security_object_reply
     struct reply_header __header;
     unsigned int    sd_len;
     /* VARARG(sd,security_descriptor); */
+    char __pad_12[4];
 };
 
 
@@ -3950,6 +4077,7 @@ struct create_mailslot_reply
 {
     struct reply_header __header;
     obj_handle_t   handle;
+    char __pad_12[4];
 };
 
 
@@ -3966,6 +4094,7 @@ struct set_mailslot_info_reply
     struct reply_header __header;
     timeout_t      read_timeout;
     unsigned int   max_msgsize;
+    char __pad_20[4];
 };
 #define MAILSLOT_SET_READ_TIMEOUT  1
 
@@ -3983,6 +4112,7 @@ struct create_directory_reply
 {
     struct reply_header __header;
     obj_handle_t   handle;
+    char __pad_12[4];
 };
 
 
@@ -3999,6 +4129,7 @@ struct open_directory_reply
 {
     struct reply_header __header;
     obj_handle_t   handle;
+    char __pad_12[4];
 };
 
 
@@ -4015,6 +4146,7 @@ struct get_directory_entry_reply
     data_size_t    name_len;
     /* VARARG(name,unicode_str,name_len); */
     /* VARARG(type,unicode_str); */
+    char __pad_12[4];
 };
 
 
@@ -4033,6 +4165,7 @@ struct create_symlink_reply
 {
     struct reply_header __header;
     obj_handle_t   handle;
+    char __pad_12[4];
 };
 
 
@@ -4049,6 +4182,7 @@ struct open_symlink_reply
 {
     struct reply_header __header;
     obj_handle_t   handle;
+    char __pad_12[4];
 };
 
 
@@ -4101,6 +4235,7 @@ struct get_token_impersonation_level_reply
 {
     struct reply_header __header;
     int            impersonation_level;
+    char __pad_12[4];
 };
 
 
@@ -4126,6 +4261,7 @@ struct create_device_manager_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -4144,6 +4280,7 @@ struct create_device_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -4189,6 +4326,7 @@ struct make_process_system_reply
 {
     struct reply_header __header;
     obj_handle_t event;
+    char __pad_12[4];
 };
 
 
@@ -4224,6 +4362,7 @@ struct create_completion_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -4240,6 +4379,7 @@ struct open_completion_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -4285,6 +4425,7 @@ struct query_completion_reply
 {
     struct reply_header __header;
     unsigned int  depth;
+    char __pad_12[4];
 };
 
 
@@ -4295,6 +4436,7 @@ struct set_completion_info_request
     obj_handle_t  handle;
     apc_param_t   ckey;
     obj_handle_t  chandle;
+    char __pad_28[4];
 };
 struct set_completion_info_reply
 {
@@ -4329,6 +4471,7 @@ struct get_window_layered_info_reply
     unsigned int   color_key;
     unsigned int   alpha;
     unsigned int   flags;
+    char __pad_20[4];
 };
 
 
@@ -4340,6 +4483,7 @@ struct set_window_layered_info_request
     unsigned int   color_key;
     unsigned int   alpha;
     unsigned int   flags;
+    char __pad_28[4];
 };
 struct set_window_layered_info_reply
 {
@@ -5071,6 +5215,6 @@ union generic_reply
     struct set_window_layered_info_reply set_window_layered_info_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 380
+#define SERVER_PROTOCOL_VERSION 381
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

@@ -1169,7 +1169,7 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
     case ThreadBasicInformation:
         {
             THREAD_BASIC_INFORMATION info;
-            const unsigned int affinity_mask = (1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1;
+            const ULONG_PTR affinity_mask = ((ULONG_PTR)1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1;
 
             SERVER_START_REQ( get_thread_info )
             {
@@ -1191,6 +1191,26 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
             {
                 if (data) memcpy( data, &info, min( length, sizeof(info) ));
                 if (ret_len) *ret_len = min( length, sizeof(info) );
+            }
+        }
+        return status;
+    case ThreadAffinityMask:
+        {
+            const ULONG_PTR affinity_mask = ((ULONG_PTR)1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1;
+            ULONG_PTR affinity = 0;
+
+            SERVER_START_REQ( get_thread_info )
+            {
+                req->handle = wine_server_obj_handle( handle );
+                req->tid_in = 0;
+                if (!(status = wine_server_call( req )))
+                    affinity = reply->affinity & affinity_mask;
+            }
+            SERVER_END_REQ;
+            if (status == STATUS_SUCCESS)
+            {
+                if (data) memcpy( data, &affinity, min( length, sizeof(affinity) ));
+                if (ret_len) *ret_len = min( length, sizeof(affinity) );
             }
         }
         return status;
@@ -1325,7 +1345,6 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
         }
     case ThreadPriority:
     case ThreadBasePriority:
-    case ThreadAffinityMask:
     case ThreadImpersonationToken:
     case ThreadEnableAlignmentFaultFixup:
     case ThreadEventPair_Reusable:
@@ -1420,9 +1439,9 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
         return status;
     case ThreadAffinityMask:
         {
-            const DWORD affinity_mask = (1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1;
-            const DWORD *paff = data;
-            if (length != sizeof(DWORD)) return STATUS_INVALID_PARAMETER;
+            const ULONG_PTR affinity_mask = ((ULONG_PTR)1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1;
+            const ULONG_PTR *paff = data;
+            if (length != sizeof(ULONG_PTR)) return STATUS_INVALID_PARAMETER;
             if (*paff & ~affinity_mask) return STATUS_INVALID_PARAMETER;
             SERVER_START_REQ( set_thread_info )
             {

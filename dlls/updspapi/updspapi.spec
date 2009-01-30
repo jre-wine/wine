@@ -63,8 +63,16 @@
 @ stdcall UpdSpScanFileQueueW(long long long ptr ptr ptr) setupapi.SetupScanFileQueueW
 @ stdcall UpdSpSetDirectoryIdA(long long str) setupapi.SetupSetDirectoryIdA
 @ stdcall UpdSpSetDirectoryIdW(long long wstr) setupapi.SetupSetDirectoryIdW
-@ stub UpdSpSetDynamicStringA
+@ stdcall UpdSpSetDynamicStringA(ptr str str)
 @ stub UpdSpSetDynamicStringExA
 @ stub UpdSpSetDynamicStringExW
 @ stub UpdSpSetDynamicStringW
+@ stdcall UpdSpStringTableAddString(ptr wstr long) setupapi.StringTableAddString
+@ stdcall UpdSpStringTableAddStringEx(ptr wstr long ptr long) setupapi.StringTableAddStringEx
+@ stdcall UpdSpStringTableDestroy(ptr) setupapi.StringTableDestroy
+@ stub UpdSpStringTableEnum
+@ stdcall UpdSpStringTableInitialize() setupapi.StringTableInitialize
+@ stdcall UpdSpStringTableInitializeEx(long long) setupapi.StringTableInitializeEx
+@ stdcall UpdSpStringTableLookUpString(ptr wstr long) setupapi.StringTableLookUpString
+@ stdcall UpdSpStringTableLookUpStringEx(ptr wstr long ptr long) setupapi.StringTableLookUpStringEx
 @ stdcall UpdSpTermDefaultQueueCallback(ptr) setupapi.SetupTermDefaultQueueCallback

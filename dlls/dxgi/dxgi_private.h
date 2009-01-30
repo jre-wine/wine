@@ -32,7 +32,7 @@
 #include "initguid.h"
 #endif
 #include "wine/wined3d.h"
-#include "dxgi_private_interface.h"
+#include "wine/winedxgi.h"
 
 extern CRITICAL_SECTION dxgi_cs;
 
@@ -51,10 +51,10 @@ struct dxgi_factory
 };
 
 /* IDXGIDevice */
-extern const struct IDXGIDeviceVtbl dxgi_device_vtbl;
+extern const struct IWineDXGIDeviceVtbl dxgi_device_vtbl;
 struct dxgi_device
 {
-    const struct IDXGIDeviceVtbl *vtbl;
+    const struct IWineDXGIDeviceVtbl *vtbl;
     IUnknown *child_layer;
     LONG refcount;
     IWineD3DDevice *wined3d_device;
@@ -81,9 +81,12 @@ struct dxgi_swapchain
 
 /* IDXGISurface */
 extern const struct IDXGISurfaceVtbl dxgi_surface_vtbl;
+extern const struct IUnknownVtbl dxgi_surface_inner_unknown_vtbl;
 struct dxgi_surface
 {
     const struct IDXGISurfaceVtbl *vtbl;
+    const struct IUnknownVtbl *inner_unknown_vtbl;
+    IUnknown *outer_unknown;
     LONG refcount;
 };
 

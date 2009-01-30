@@ -87,7 +87,7 @@ struct sc_lock
 /* Check if the given handle is of the required type and allows the requested access. */
 static DWORD validate_context_handle(SC_RPC_HANDLE handle, DWORD type, DWORD needed_access, struct sc_handle **out_hdr)
 {
-    struct sc_handle *hdr = (struct sc_handle *)handle;
+    struct sc_handle *hdr = handle;
 
     if (type != SC_HTYPE_DONT_CARE && hdr->type != type)
     {
@@ -158,7 +158,7 @@ DWORD svcctl_OpenSCManagerW(
 
 static void SC_RPC_HANDLE_destroy(SC_RPC_HANDLE handle)
 {
-    struct sc_handle *hdr = (struct sc_handle *)handle;
+    struct sc_handle *hdr = handle;
     switch (hdr->type)
     {
         case SC_HTYPE_MANAGER:
@@ -215,10 +215,7 @@ DWORD svcctl_GetServiceDisplayNameW(
         service_unlock(entry);
     }
     else
-    {
-        *cchLength = 1;
         err = ERROR_SERVICE_DOES_NOT_EXIST;
-    }
 
     scmdatabase_unlock(manager->db);
 
@@ -261,10 +258,7 @@ DWORD svcctl_GetServiceKeyNameW(
         service_unlock(entry);
     }
     else
-    {
-        *cchLength = 1;
         err = ERROR_SERVICE_DOES_NOT_EXIST;
-    }
 
     scmdatabase_unlock(manager->db);
 
@@ -635,6 +629,53 @@ DWORD svcctl_ChangeServiceConfig2W( SC_RPC_HANDLE hService, DWORD level, SERVICE
             service->service_entry->description = descr;
             save_service_config( service->service_entry );
             service_unlock( service->service_entry );
+        }
+        break;
+    case SERVICE_CONFIG_FAILURE_ACTIONS:
+        WINE_FIXME( "SERVICE_CONFIG_FAILURE_ACTIONS not implemented: period %u msg %s cmd %s\n",
+                    config->actions.dwResetPeriod,
+                    wine_dbgstr_w(config->actions.lpRebootMsg),
+                    wine_dbgstr_w(config->actions.lpCommand) );
+        break;
+    default:
+        WINE_FIXME("level %u not implemented\n", level);
+        err = ERROR_INVALID_LEVEL;
+        break;
+    }
+    return err;
+}
+
+DWORD svcctl_QueryServiceConfig2W( SC_RPC_HANDLE hService, DWORD level,
+                                   BYTE *buffer, DWORD size, LPDWORD needed )
+{
+    struct sc_service_handle *service;
+    DWORD err;
+
+    if ((err = validate_service_handle(hService, SERVICE_QUERY_STATUS, &service)) != 0)
+        return err;
+
+    switch (level)
+    {
+    case SERVICE_CONFIG_DESCRIPTION:
+        {
+            SERVICE_DESCRIPTIONW *descr = (SERVICE_DESCRIPTIONW *)buffer;
+
+            service_lock_shared(service->service_entry);
+            *needed = sizeof(*descr);
+            if (service->service_entry->description)
+                *needed += (strlenW(service->service_entry->description) + 1) * sizeof(WCHAR);
+            if (size >= *needed)
+            {
+                if (service->service_entry->description)
+                {
+                    /* store a buffer offset instead of a pointer */
+                    descr->lpDescription = (WCHAR *)((BYTE *)(descr + 1) - buffer);
+                    strcpyW( (WCHAR *)(descr + 1), service->service_entry->description );
+                }
+                else descr->lpDescription = NULL;
+            }
+            else err = ERROR_INSUFFICIENT_BUFFER;
+            service_unlock(service->service_entry);
         }
         break;
 
@@ -1135,13 +1176,6 @@ DWORD svcctl_ChangeServiceConfig2A(
 }
 
 DWORD svcctl_QueryServiceConfig2A(
-    void)
-{
-    WINE_FIXME("\n");
-    return ERROR_CALL_NOT_IMPLEMENTED;
-}
-
-DWORD svcctl_QueryServiceConfig2W(
     void)
 {
     WINE_FIXME("\n");

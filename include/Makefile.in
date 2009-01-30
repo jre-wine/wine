@@ -5,7 +5,8 @@ VPATH	  = @srcdir@
 MODULE	  = none
 
 PRIVATE_IDL_H_SRCS = \
-	wine/wined3d.idl
+	wine/wined3d.idl \
+	wine/winedxgi.idl
 
 PUBLIC_IDL_H_SRCS = \
 	activaut.idl \
@@ -42,6 +43,7 @@ PUBLIC_IDL_H_SRCS = \
 	mlang.idl \
 	mmstream.idl \
 	mscoree.idl \
+	msctf.idl \
 	mshtmhst.idl \
 	mshtml.idl \
 	msinkaut.idl \
@@ -88,6 +90,7 @@ SRCDIR_INCLUDES = \
 	$(PUBLIC_IDL_H_SRCS) \
 	accctrl.h \
 	aclapi.h \
+	aclui.h \
 	adshlp.h \
 	advpub.h \
 	appmgmt.h \

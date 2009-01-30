@@ -1,5 +1,5 @@
 /*
- * Copyright 2008 Henri Verbeet for CodeWeavers
+ * Copyright (C) 2009 Andrey Turkin
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,24 +16,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-import "dxgi.idl";
+#include <windows.h>
+#include <loadperf.h>
 
-[
-    object,
-    local,
-    uuid(a07ad9ab-fb01-4574-8bfb-0a70a7373f04)
-]
-interface IWineDXGIFactory : IDXGIFactory
+int wmain(int argc, WCHAR *argv[])
 {
-    struct IWineD3D *get_wined3d();
-}
-
-[
-    object,
-    local,
-    uuid(ab1de34c-2963-4ffd-8493-40f580e510e5)
-]
-interface IWineDXGIAdapter : IDXGIAdapter
-{
-    UINT get_ordinal();
+    return UnloadPerfCounterTextStringsW(GetCommandLineW(), FALSE);
 }

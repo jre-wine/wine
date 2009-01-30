@@ -20,8 +20,10 @@
 #include "wine/port.h"
 
 #include <math.h>
+#include <limits.h>
 
 #include "jscript.h"
+#include "ntsecapi.h"
 
 #include "wine/debug.h"
 
@@ -352,11 +354,21 @@ static HRESULT Math_pow(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *d
     return S_OK;
 }
 
+/* ECMA-262 3rd Edition    15.8.2.14 */
 static HRESULT Math_random(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    UINT r;
+
+    TRACE("\n");
+
+    if(!RtlGenRandom(&r, sizeof(r)))
+        return E_UNEXPECTED;
+
+    if(retv)
+        num_set_val(retv, (DOUBLE)r/(DOUBLE)UINT_MAX);
+
+    return S_OK;
 }
 
 /* ECMA-262 3rd Edition    15.8.2.15 */
@@ -369,8 +381,8 @@ static HRESULT Math_round(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS 
     TRACE("\n");
 
     if(!arg_cnt(dp)) {
-        FIXME("arg_cnt = 0\n");
-        return E_NOTIMPL;
+        num_set_nan(retv);
+        return S_OK;
     }
 
     hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);

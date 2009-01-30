@@ -582,7 +582,7 @@ static HRESULT WINAPI WebBrowserEvents2_Invoke(IDispatch *iface, DISPID dispIdMe
         break;
 
     case DISPID_SETSECURELOCKICON:
-        CHECK_EXPECT(Invoke_SETSECURELOCKICON);
+        CHECK_EXPECT2(Invoke_SETSECURELOCKICON);
 
         ok(pDispParams->rgvarg != NULL, "rgvarg == NULL\n");
         ok(pDispParams->cArgs == 1, "cArgs=%d, expected 1\n", pDispParams->cArgs);
@@ -1081,10 +1081,10 @@ static HRESULT WINAPI DocHostUIHandler_ShowContextMenu(IDocHostUIHandler2 *iface
 
 static HRESULT WINAPI DocHostUIHandler_GetHostInfo(IDocHostUIHandler2 *iface, DOCHOSTUIINFO *pInfo)
 {
-    CHECK_EXPECT(GetHostInfo);
+    CHECK_EXPECT2(GetHostInfo);
     ok(pInfo != NULL, "pInfo=NULL\n");
     if(pInfo) {
-        ok(pInfo->cbSize == sizeof(DOCHOSTUIINFO), "pInfo->cbSize=%u\n", pInfo->cbSize);
+        ok(pInfo->cbSize == sizeof(DOCHOSTUIINFO) || broken(!pInfo->cbSize), "pInfo->cbSize=%u\n", pInfo->cbSize);
         ok(!pInfo->dwFlags, "pInfo->dwFlags=%08x, expected 0\n", pInfo->dwFlags);
         ok(!pInfo->dwDoubleClick, "pInfo->dwDoubleClick=%08x, expected 0\n", pInfo->dwDoubleClick);
         ok(!pInfo->pchHostCss, "pInfo->pchHostCss=%p, expected NULL\n", pInfo->pchHostCss);
@@ -1990,6 +1990,30 @@ static void test_Navigate2(IUnknown *unk)
     IWebBrowser2_Release(webbrowser);
 }
 
+static void test_IServiceProvider(IUnknown *unk)
+{
+    IServiceProvider *servprov = (void*)0xdeadbeef;
+    HRESULT hres;
+    IUnknown *ret = NULL;
+    static const IID IID_IBrowserService2 =
+        {0x68BD21CC,0x438B,0x11d2,{0xA5,0x60,0x00,0xA0,0xC,0x2D,0xBF,0xE8}};
+
+    hres = IUnknown_QueryInterface(unk, &IID_IServiceProvider, (void**)&servprov);
+    ok(hres == S_OK, "QueryInterface returned %08x, expected S_OK\n", hres);
+    if(FAILED(hres))
+        return;
+
+    hres = IServiceProvider_QueryService(servprov, &SID_STopLevelBrowser, &IID_IBrowserService2, (LPVOID*)&ret);
+    ok(hres == E_FAIL, "QueryService returned %08x, expected E_FAIL\n", hres);
+    ok(ret == NULL, "ret returned %p, expected NULL\n", ret);
+    if(hres == S_OK)
+    {
+        IUnknown_Release(ret);
+    }
+
+    IServiceProvider_Release(servprov);
+}
+
 static void test_QueryInterface(IUnknown *unk)
 {
     IQuickActivate *qa = (IQuickActivate*)0xdeadbeef;
@@ -2060,6 +2084,7 @@ static void test_WebBrowser(void)
     test_GetControlInfo(unk);
     test_wb_funcs(unk, FALSE);
     test_ConnectionPoint(unk, FALSE);
+    test_IServiceProvider(unk);
 
     IWebBrowser2_Release(wb);
     ref = IUnknown_Release(unk);

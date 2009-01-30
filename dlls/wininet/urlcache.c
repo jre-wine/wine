@@ -2258,6 +2258,8 @@ BOOL WINAPI CreateUrlCacheEntryW(
 	if (!len)
 	    return FALSE;
         szFile[len] = '\0';
+        while(len && szFile[--len] == '/') szFile[len] = '\0';
+
         /* FIXME: get rid of illegal characters like \, / and : */
     }
     else
@@ -2313,9 +2315,26 @@ BOOL WINAPI CreateUrlCacheEntryW(
 
     for (i = 0; i < 255; i++)
     {
-	static const WCHAR szFormat[] = {'[','%','u',']','%','s',0};
+        static const WCHAR szFormat[] = {'[','%','u',']','%','s',0};
         HANDLE hFile;
+        WCHAR *p;
+
         wsprintfW(lpszFileNameNoPath + countnoextension, szFormat, i, szExtension);
+        for (p = lpszFileNameNoPath + 1; *p; p++)
+        {
+            switch (*p)
+            {
+            case '<': case '>':
+            case ':': case '"':
+            case '/': case '\\':
+            case '|': case '?':
+            case '*':
+                *p = '_'; break;
+            default: break;
+            }
+        }
+        if (p[-1] == ' ' || p[-1] == '.') p[-1] = '_';
+
         TRACE("Trying: %s\n", debugstr_w(lpszFileName));
         hFile = CreateFileW(lpszFileName, GENERIC_READ, 0, NULL, CREATE_NEW, 0, NULL);
         if (hFile != INVALID_HANDLE_VALUE)
@@ -3597,4 +3616,13 @@ BOOL WINAPI IsUrlCacheEntryExpiredW( LPCWSTR url, DWORD dwFlags, FILETIME* pftLa
     URLCacheContainer_UnlockIndex(pContainer, pHeader);
 
     return TRUE;
+}
+
+/***********************************************************************
+ *           GetDiskInfoA (WININET.@)
+ */
+DWORD WINAPI GetDiskInfoA(void *p0, void *p1, void *p2, void *p3)
+{
+    FIXME("(%p, %p, %p, %p)\n", p0, p1, p2, p3);
+    return 0;
 }

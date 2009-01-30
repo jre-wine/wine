@@ -272,6 +272,11 @@ static void test_mediacontrol(void)
     ok(hr == S_OK, "GetCurrentPosition failed: %08x\n", hr);
     ok(pos == 0, "Position != 0 (%x%08x)\n", (DWORD)(pos >> 32), (DWORD)pos);
 
+    hr = IMediaSeeking_SetPositions(seeking, NULL, AM_SEEKING_ReturnTime, NULL, AM_SEEKING_NoPositioning);
+    ok(hr == S_OK, "SetPositions failed: %08x\n", hr);
+    hr = IMediaSeeking_SetPositions(seeking, NULL, AM_SEEKING_NoPositioning, NULL, AM_SEEKING_ReturnTime);
+    ok(hr == S_OK, "SetPositions failed: %08x\n", hr);
+
     IMediaFilter_SetSyncSource(filter, NULL);
     pos = 0xdeadbeef;
     hr = IMediaSeeking_GetCurrentPosition(seeking, &pos);
@@ -400,9 +405,9 @@ static HRESULT WINAPI IEnumMediaTypesImpl_QueryInterface(IEnumMediaTypes * iface
     *ppv = NULL;
 
     if (IsEqualIID(riid, &IID_IUnknown))
-        *ppv = (LPVOID)iface;
+        *ppv = iface;
     else if (IsEqualIID(riid, &IID_IEnumMediaTypes))
-        *ppv = (LPVOID)iface;
+        *ppv = iface;
 
     if (*ppv)
     {
@@ -535,9 +540,9 @@ static HRESULT WINAPI  TestFilter_Pin_QueryInterface(IPin * iface, REFIID riid, 
     *ppv = NULL;
 
     if (IsEqualIID(riid, &IID_IUnknown))
-        *ppv = (LPVOID)iface;
+        *ppv = iface;
     else if (IsEqualIID(riid, &IID_IPin))
-        *ppv = (LPVOID)iface;
+        *ppv = iface;
 
     if (*ppv)
     {
@@ -912,9 +917,9 @@ static HRESULT WINAPI IEnumPinsImpl_QueryInterface(IEnumPins * iface, REFIID rii
     *ppv = NULL;
 
     if (IsEqualIID(riid, &IID_IUnknown))
-        *ppv = (LPVOID)iface;
+        *ppv = iface;
     else if (IsEqualIID(riid, &IID_IEnumPins))
-        *ppv = (LPVOID)iface;
+        *ppv = iface;
 
     if (*ppv)
     {
@@ -1121,7 +1126,7 @@ static HRESULT TestFilter_Create(const CLSID* pClsid, const TestFilterPinData *p
     }
 
     pTestFilter->nPins = nPins;
-    *ppv = (LPVOID)pTestFilter;
+    *ppv = pTestFilter;
     return S_OK;
 
     error:
@@ -1147,13 +1152,13 @@ static HRESULT WINAPI TestFilter_QueryInterface(IBaseFilter * iface, REFIID riid
     *ppv = NULL;
 
     if (IsEqualIID(riid, &IID_IUnknown))
-        *ppv = (LPVOID)This;
+        *ppv = This;
     else if (IsEqualIID(riid, &IID_IPersist))
-        *ppv = (LPVOID)This;
+        *ppv = This;
     else if (IsEqualIID(riid, &IID_IMediaFilter))
-        *ppv = (LPVOID)This;
+        *ppv = This;
     else if (IsEqualIID(riid, &IID_IBaseFilter))
-        *ppv = (LPVOID)This;
+        *ppv = This;
 
     if (*ppv)
     {
@@ -1359,7 +1364,7 @@ static HRESULT WINAPI Test_IClassFactory_QueryInterface(
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_IClassFactory))
     {
-        *ppvObj = (LPVOID)iface;
+        *ppvObj = iface;
         IClassFactory_AddRef(iface);
         return S_OK;
     }
@@ -1434,7 +1439,13 @@ static HRESULT get_connected_filter_name(TestFilterImpl *pFilter, char *FilterNa
     IPin_Release(pin);
     if (FAILED(hr)) return hr;
 
+    SetLastError(0xdeadbeef);
     hr = IBaseFilter_QueryFilterInfo(pinInfo.pFilter, &filterInfo);
+    if (hr == S_OK && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        IBaseFilter_Release(pinInfo.pFilter);
+        return E_NOTIMPL;
+    }
     ok(hr == S_OK, "IBaseFilter_QueryFilterInfo failed with %x\n", hr);
     IBaseFilter_Release(pinInfo.pFilter);
     if (FAILED(hr)) return hr;
@@ -1557,7 +1568,7 @@ static void test_render_filter_priority(void)
     hr = IFilterGraph2_Render(pgraph2, ((TestFilterImpl*)ptestfilter)->ppPins[0]);
     ok(hr == S_OK, "IFilterGraph2_Render failed with %08x\n", hr);
 
-    get_connected_filter_name((TestFilterImpl*)ptestfilter, ConnectedFilterName1);
+    hr = get_connected_filter_name((TestFilterImpl*)ptestfilter, ConnectedFilterName1);
 
     IFilterGraph2_Release(pgraph2);
     pgraph2 = NULL;
@@ -1565,6 +1576,12 @@ static void test_render_filter_priority(void)
     ptestfilter = NULL;
     IBaseFilter_Release(ptestfilter2);
     ptestfilter2 = NULL;
+
+    if (hr == E_NOTIMPL)
+    {
+        win_skip("Needed functions are not implemented\n");
+        return;
+    }
 
     hr = CoCreateInstance(&CLSID_FilterGraph, NULL, CLSCTX_INPROC_SERVER, &IID_IFilterGraph2, (LPVOID*)&pgraph2);
     ok(hr == S_OK, "CoCreateInstance failed with %08x\n", hr);

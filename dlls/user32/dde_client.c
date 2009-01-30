@@ -527,7 +527,7 @@ static WDML_QUEUE_STATE WDML_HandleRequestReply(WDML_CONV* pConv, MSG* msg, WDML
 	if (DdeCmpStringHandles(hsz, pXAct->hszItem) != 0)
 	    return WDML_QS_PASS;
 
-	pXAct->hDdeData = WDML_Global2DataHandle((HGLOBAL)uiLo, &wdh);
+	pXAct->hDdeData = WDML_Global2DataHandle(pConv, (HGLOBAL)uiLo, &wdh);
 	if (wdh.fRelease)
 	{
 	    GlobalFree((HGLOBAL)uiLo);
@@ -821,7 +821,7 @@ static WDML_QUEUE_STATE WDML_HandleTerminateReply(WDML_CONV* pConv, MSG* msg)
 	FIXME("hmmm shouldn't happen\n");
 	return WDML_QS_PASS;
     }
-    if (!pConv->instance->CBFflags & CBF_SKIP_DISCONNECTS)
+    if (!(pConv->instance->CBFflags & CBF_SKIP_DISCONNECTS))
     {
 	WDML_InvokeCallback(pConv->instance, XTYP_DISCONNECT, 0, (HCONV)pConv,
 			    0, 0, 0, 0, (pConv->wStatus & ST_ISSELF) ? 1 : 0);
@@ -850,7 +850,7 @@ static WDML_QUEUE_STATE WDML_HandleIncomingData(WDML_CONV* pConv, MSG* msg, HDDE
     UnpackDDElParam(WM_DDE_DATA, msg->lParam, &uiLo, &uiHi);
     hsz = WDML_MakeHszFromAtom(pConv->instance, uiHi);
 
-    hDdeDataIn = WDML_Global2DataHandle((HGLOBAL)uiLo, &wdh);
+    hDdeDataIn = WDML_Global2DataHandle(pConv, (HGLOBAL)uiLo, &wdh);
 
     /* billx:
      *  For hot link, data should be passed to its callback with
@@ -904,11 +904,6 @@ static WDML_QUEUE_STATE WDML_HandleIncomingTerminate(WDML_CONV* pConv, MSG* msg,
 	return WDML_QS_PASS;
 
     pConv->wStatus |= ST_TERMINATED;
-    if (!pConv->instance->CBFflags & CBF_SKIP_DISCONNECTS)
-    {
-	WDML_InvokeCallback(pConv->instance, XTYP_DISCONNECT, 0, (HCONV)pConv,
-			    0, 0, 0, 0, (pConv->wStatus & ST_ISSELF) ? 1 : 0);
-    }
     if (pConv->wStatus & ST_CONNECTED)
     {
 	/* don't care about result code (if server exists or not) */

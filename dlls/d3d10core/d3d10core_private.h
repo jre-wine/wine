@@ -32,6 +32,7 @@
 #include "initguid.h"
 #endif
 #include "wine/wined3d.h"
+#include "wine/winedxgi.h"
 
 /* TRACE helper functions */
 const char *debug_d3d10_primitive_topology(D3D10_PRIMITIVE_TOPOLOGY topology);
@@ -56,6 +57,29 @@ struct d3d10_texture2d
 {
     const struct ID3D10Texture2DVtbl *vtbl;
     LONG refcount;
+
+    IUnknown *dxgi_surface;
+    IWineD3DSurface *wined3d_surface;
+    D3D10_TEXTURE2D_DESC desc;
+};
+
+/* ID3D10Buffer */
+extern const struct ID3D10BufferVtbl d3d10_buffer_vtbl;
+struct d3d10_buffer
+{
+    const struct ID3D10BufferVtbl *vtbl;
+    LONG refcount;
+};
+
+/* ID3D10RenderTargetView */
+extern const struct ID3D10RenderTargetViewVtbl d3d10_rendertarget_view_vtbl;
+struct d3d10_rendertarget_view
+{
+    const struct ID3D10RenderTargetViewVtbl *vtbl;
+    LONG refcount;
+
+    ID3D10Resource *resource;
+    D3D10_RENDER_TARGET_VIEW_DESC desc;
 };
 
 /* Layered device */

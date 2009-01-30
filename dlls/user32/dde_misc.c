@@ -817,6 +817,25 @@ UINT WINAPI DdeGetLastError(DWORD idInst)
     return error_code;
 }
 
+/******************************************************************
+ *		WDML_SetAllLastError
+ *
+ *
+ */
+static void	WDML_SetAllLastError(DWORD lastError)
+{
+    DWORD		threadID;
+    WDML_INSTANCE*	pInstance;
+    threadID = GetCurrentThreadId();
+    pInstance = WDML_InstanceList;
+    while (pInstance)
+    {
+	if (pInstance->threadID == threadID)
+	    pInstance->lastError = lastError;
+	pInstance = pInstance->next;
+    }
+}
+
 /* ================================================================
  *
  * 			String management
@@ -1109,7 +1128,9 @@ HSZ WINAPI DdeCreateStringHandleA(DWORD idInst, LPCSTR psz, INT codepage)
     TRACE("(%d,%s,%d)\n", idInst, debugstr_a(psz), codepage);
 
     pInstance = WDML_GetInstance(idInst);
-    if (pInstance)
+    if (pInstance == NULL)
+	WDML_SetAllLastError(DMLERR_INVALIDPARAMETER);
+    else
     {
 	if (codepage == 0) codepage = CP_WINANSI;
 	hsz = WDML_CreateString(pInstance, psz, codepage);
@@ -1136,7 +1157,9 @@ HSZ WINAPI DdeCreateStringHandleW(DWORD idInst, LPCWSTR psz, INT codepage)
     HSZ			hsz = 0;
 
     pInstance = WDML_GetInstance(idInst);
-    if (pInstance)
+    if (pInstance == NULL)
+	WDML_SetAllLastError(DMLERR_INVALIDPARAMETER);
+    else
     {
 	if (codepage == 0) codepage = CP_WINUNICODE;
 	hsz = WDML_CreateString(pInstance, psz, codepage);
@@ -1267,14 +1290,23 @@ INT WINAPI DdeCmpStringHandles(HSZ hsz1, HSZ hsz2)
 HDDEDATA WINAPI DdeCreateDataHandle(DWORD idInst, LPBYTE pSrc, DWORD cb, DWORD cbOff,
                                     HSZ hszItem, UINT wFmt, UINT afCmd)
 {
-    /* For now, we ignore idInst, hszItem.
+
+    /* Other than check for validity we will ignore for now idInst, hszItem.
      * The purpose of these arguments still need to be investigated.
      */
 
+    WDML_INSTANCE*		pInstance;
     HGLOBAL     		hMem;
     LPBYTE      		pByte;
     DDE_DATAHANDLE_HEAD*	pDdh;
     WCHAR psz[MAX_BUFFER_LEN];
+
+    pInstance = WDML_GetInstance(idInst);
+    if (pInstance == NULL)
+    {
+        WDML_SetAllLastError(DMLERR_INVALIDPARAMETER);
+        return NULL;
+    }
 
     if (!GetAtomNameW(HSZ2ATOM(hszItem), psz, MAX_BUFFER_LEN))
     {
@@ -1479,7 +1511,7 @@ BOOL WDML_IsAppOwned(HDDEDATA hData)
  *	2	   16	clipboard format
  *	4	   ?	data to be used
  */
-HDDEDATA        WDML_Global2DataHandle(HGLOBAL hMem, WINE_DDEHEAD* p)
+HDDEDATA        WDML_Global2DataHandle(WDML_CONV* pConv, HGLOBAL hMem, WINE_DDEHEAD* p)
 {
     DDEDATA*    pDd;
     HDDEDATA	ret = 0;
@@ -1500,7 +1532,7 @@ HDDEDATA        WDML_Global2DataHandle(HGLOBAL hMem, WINE_DDEHEAD* p)
                 /* fall thru */
             case 0:
             case CF_TEXT:
-                ret = DdeCreateDataHandle(0, pDd->Value, size, 0, 0, pDd->cfFormat, 0);
+                ret = DdeCreateDataHandle(pConv->instance->instanceID, pDd->Value, size, 0, 0, pDd->cfFormat, 0);
                 break;
             case CF_BITMAP:
                 if (size >= sizeof(BITMAP))
@@ -1515,7 +1547,7 @@ HDDEDATA        WDML_Global2DataHandle(HGLOBAL hMem, WINE_DDEHEAD* p)
                                                  bmp->bmPlanes, bmp->bmBitsPixel,
                                                  pDd->Value + sizeof(BITMAP))))
                         {
-                            ret = DdeCreateDataHandle(0, (LPBYTE)&hbmp, sizeof(hbmp),
+                            ret = DdeCreateDataHandle(pConv->instance->instanceID, (LPBYTE)&hbmp, sizeof(hbmp),
                                                       0, 0, CF_BITMAP, 0);
                         }
                         else ERR("Can't create bmp\n");

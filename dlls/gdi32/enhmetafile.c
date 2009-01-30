@@ -249,7 +249,7 @@ static inline BOOL is_dib_monochrome( const BITMAPINFO* info )
  */
 HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, BOOL on_disk )
 {
-    HENHMETAFILE hmf = 0;
+    HENHMETAFILE hmf;
     ENHMETAFILEOBJ *metaObj;
 
     if (emh->iType != EMR_HEADER || emh->dSignature != ENHMETA_SIGNATURE ||
@@ -261,15 +261,13 @@ HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, BOOL on_disk )
         return 0;
     }
 
-    metaObj = GDI_AllocObject( sizeof(ENHMETAFILEOBJ),
-                               ENHMETAFILE_MAGIC,
-                               (HGDIOBJ *)&hmf, NULL );
-    if (metaObj)
-    {
-        metaObj->emh = emh;
-        metaObj->on_disk = on_disk;
-        GDI_ReleaseObj( hmf );
-    }
+    if (!(metaObj = HeapAlloc( GetProcessHeap(), 0, sizeof(*metaObj) ))) return 0;
+
+    metaObj->emh = emh;
+    metaObj->on_disk = on_disk;
+
+    if (!(hmf = alloc_gdi_handle( &metaObj->header, OBJ_ENHMETAFILE, NULL )))
+        HeapFree( GetProcessHeap(), 0, metaObj );
     return hmf;
 }
 
@@ -278,7 +276,7 @@ HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, BOOL on_disk )
  */
 static BOOL EMF_Delete_HENHMETAFILE( HENHMETAFILE hmf )
 {
-    ENHMETAFILEOBJ *metaObj = GDI_GetObjPtr( hmf, ENHMETAFILE_MAGIC );
+    ENHMETAFILEOBJ *metaObj = free_gdi_handle( hmf );
 
     if(!metaObj) return FALSE;
 
@@ -286,7 +284,7 @@ static BOOL EMF_Delete_HENHMETAFILE( HENHMETAFILE hmf )
         UnmapViewOfFile( metaObj->emh );
     else
         HeapFree( GetProcessHeap(), 0, metaObj->emh );
-    return GDI_FreeObject( hmf, metaObj );
+    return HeapFree( GetProcessHeap(), 0, metaObj );
 }
 
 /******************************************************************
@@ -297,7 +295,7 @@ static BOOL EMF_Delete_HENHMETAFILE( HENHMETAFILE hmf )
 static ENHMETAHEADER *EMF_GetEnhMetaHeader( HENHMETAFILE hmf )
 {
     ENHMETAHEADER *ret = NULL;
-    ENHMETAFILEOBJ *metaObj = GDI_GetObjPtr( hmf, ENHMETAFILE_MAGIC );
+    ENHMETAFILEOBJ *metaObj = GDI_GetObjPtr( hmf, OBJ_ENHMETAFILE );
     TRACE("hmf %p -> enhmetaObj %p\n", hmf, metaObj);
     if (metaObj)
     {
@@ -2600,8 +2598,7 @@ static INT CALLBACK cbEnhPaletteCopy( HDC a,
 
     TRACE( "copying 0x%08x palettes\n", dwNumPalToCopy );
 
-    memcpy( (LPVOID)info->lpPe,
-            (LPCVOID)(((LPCSTR)lpEof) + lpEof->offPalEntries),
+    memcpy( info->lpPe, (LPCSTR)lpEof + lpEof->offPalEntries,
             sizeof( *(info->lpPe) ) * dwNumPalToCopy );
 
     /* Update the passed data as a return code */

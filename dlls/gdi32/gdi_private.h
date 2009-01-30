@@ -42,40 +42,13 @@ typedef struct {
 /* extra stock object: default 1x1 bitmap for memory DCs */
 #define DEFAULT_BITMAP (STOCK_LAST+1)
 
-  /* GDI objects magic numbers */
-#define FIRST_MAGIC           0x4f47
-#define PEN_MAGIC             0x4f47
-#define BRUSH_MAGIC           0x4f48
-#define FONT_MAGIC            0x4f49
-#define PALETTE_MAGIC         0x4f4a
-#define BITMAP_MAGIC          0x4f4b
-#define REGION_MAGIC          0x4f4c
-#define DC_MAGIC              0x4f4d
-#define DISABLED_DC_MAGIC     0x4f4e
-#define META_DC_MAGIC         0x4f4f
-#define METAFILE_MAGIC        0x4f50
-#define METAFILE_DC_MAGIC     0x4f51
-#define ENHMETAFILE_MAGIC     0x4f52
-#define ENHMETAFILE_DC_MAGIC  0x4f53
-#define MEMORY_DC_MAGIC       0x4f54
-#define EXT_PEN_MAGIC         0x4f55
-#define LAST_MAGIC            0x4f55
-
-#define MAGIC_DONTCARE	      0xffff
-
-/* GDI constants for making objects private/system (naming undoc. !) */
-#define OBJECT_PRIVATE        0x2000
-#define OBJECT_NOSYSTEM       0x8000
-
-#define GDIMAGIC(magic) ((magic) & ~(OBJECT_PRIVATE|OBJECT_NOSYSTEM))
-
 struct gdi_obj_funcs
 {
     HGDIOBJ (*pSelectObject)( HGDIOBJ handle, HDC hdc );
-    INT     (*pGetObjectA)( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
-    INT     (*pGetObjectW)( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
-    BOOL    (*pUnrealizeObject)( HGDIOBJ handle, void *obj );
-    BOOL    (*pDeleteObject)( HGDIOBJ handle, void *obj );
+    INT     (*pGetObjectA)( HGDIOBJ handle, INT count, LPVOID buffer );
+    INT     (*pGetObjectW)( HGDIOBJ handle, INT count, LPVOID buffer );
+    BOOL    (*pUnrealizeObject)( HGDIOBJ handle );
+    BOOL    (*pDeleteObject)( HGDIOBJ handle );
 };
 
 struct hdc_list
@@ -86,8 +59,10 @@ struct hdc_list
 
 typedef struct tagGDIOBJHDR
 {
-    WORD        wMagic;
-    DWORD       dwCount;
+    WORD        type;         /* object type (one of the OBJ_* constants) */
+    WORD        system : 1;   /* system object flag */
+    WORD        deleted : 1;  /* whether DeleteObject has been called on this object */
+    DWORD       selcount;     /* number of times the object is selected in a DC */
     const struct gdi_obj_funcs *funcs;
     struct hdc_list *hdcs;
 } GDIOBJHDR;
@@ -463,13 +438,12 @@ extern BOOL WineEngRemoveFontResourceEx(LPCWSTR, DWORD, PVOID) DECLSPEC_HIDDEN;
 
 /* gdiobj.c */
 extern BOOL GDI_Init(void) DECLSPEC_HIDDEN;
-extern void *GDI_AllocObject( WORD, WORD, HGDIOBJ *, const struct gdi_obj_funcs *funcs ) DECLSPEC_HIDDEN;
-extern void *GDI_ReallocObject( WORD, HGDIOBJ, void *obj ) DECLSPEC_HIDDEN;
-extern BOOL GDI_FreeObject( HGDIOBJ, void *obj ) DECLSPEC_HIDDEN;
+extern HGDIOBJ alloc_gdi_handle( GDIOBJHDR *obj, WORD type, const struct gdi_obj_funcs *funcs ) DECLSPEC_HIDDEN;
+extern void *free_gdi_handle( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern void *GDI_GetObjPtr( HGDIOBJ, WORD ) DECLSPEC_HIDDEN;
 extern void GDI_ReleaseObj( HGDIOBJ ) DECLSPEC_HIDDEN;
 extern void GDI_CheckNotLock(void) DECLSPEC_HIDDEN;
-extern BOOL GDI_inc_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
+extern HGDIOBJ GDI_inc_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern BOOL GDI_dec_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern BOOL GDI_hdc_using_object(HGDIOBJ obj, HDC hdc) DECLSPEC_HIDDEN;
 extern BOOL GDI_hdc_not_using_object(HGDIOBJ obj, HDC hdc) DECLSPEC_HIDDEN;

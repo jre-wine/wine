@@ -1770,7 +1770,7 @@ static void test_vertex_buffer_alignment(void)
             }
             if(FAILED(hr)) continue;
 
-            hr = IDirect3DVertexBuffer9_Lock(buffer, 0, 0, (void **) &data, 0);
+            hr = IDirect3DVertexBuffer9_Lock(buffer, 0, 0, &data, 0);
             ok(SUCCEEDED(hr), "IDirect3DVertexBuffer9_Lock failed (0x%08x)\n", hr);
             ok(((DWORD_PTR) data & 31) == 0, "Vertex buffer start address is not 32 byte aligned(size: %d, pool: %s, data: %p)\n",
                sizes[i], debug_d3dpool(pools[j]), data);
@@ -1973,7 +1973,7 @@ struct formats x8r8g8b8_format_list[] =
     { 0, 0, 0}
 };
 
-static void test_display_formats()
+static void test_display_formats(void)
 {
     /* Direct3D9 offers 4 display formats R5G6B5, X1R5G5B5, X8R8G8B8 and A2R10G10B10.
      * Next to these there are 6 different backbuffer formats. Only a fixed number of

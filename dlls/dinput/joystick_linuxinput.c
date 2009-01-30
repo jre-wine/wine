@@ -193,6 +193,7 @@ struct JoystickImpl
 	/* Force feedback variables */
         struct list                     ff_effects;
 	int				ff_state;
+	int				ff_autocenter;
 };
 
 static void fake_current_js_state(JoystickImpl *ji);
@@ -456,6 +457,10 @@ static JoystickImpl *alloc_device(REFGUID rguid, const void *jvt, IDirectInputIm
 #ifdef HAVE_STRUCT_FF_EFFECT_DIRECTION
     newDevice->ff_state    = FF_STATUS_STOPPED;
 #endif
+    /* There is no way in linux to query force feedback autocenter status.
+       Instead, track it with ff_autocenter, and assume it's initialy
+       enabled. */
+    newDevice->ff_autocenter = 1;
     InitializeCriticalSection(&newDevice->base.crit);
     newDevice->base.crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": JoystickImpl*->base.crit");
 
@@ -657,11 +662,25 @@ static HRESULT WINAPI JoystickAImpl_Acquire(LPDIRECTINPUTDEVICE8A iface)
             IDirectInputDevice2AImpl_Unacquire(iface);
             return DIERR_NOTFOUND;
         }
+        else
+        {
+            /* Couldn't open in r/w but opened in read-only. */
+            WARN("Could not open %s in read-write mode.  Force feedback will be disabled.\n", This->joydev->device);
+        }
     }
     else
     {
-        /* Couldn't open in r/w but opened in read-only. */
-        WARN("Could not open %s in read-write mode.  Force feedback will be disabled.\n", This->joydev->device);
+        if (!This->ff_autocenter)
+        {
+            struct input_event event;
+
+            /* Disable autocenter. */
+            event.type = EV_FF;
+            event.code = FF_AUTOCENTER;
+            event.value = 0;
+            if (write(This->joyfd, &event, sizeof(event)) == -1)
+                ERR("Failed disabling autocenter: %d %s\n", errno, strerror(errno));
+        }
     }
 
     return DI_OK;
@@ -678,6 +697,29 @@ static HRESULT WINAPI JoystickAImpl_Unacquire(LPDIRECTINPUTDEVICE8A iface)
     TRACE("(this=%p)\n",This);
     res = IDirectInputDevice2AImpl_Unacquire(iface);
     if (res==DI_OK && This->joyfd!=-1) {
+      effect_list_item *itr;
+      struct input_event event;
+
+      /* For each known effect:
+       * - stop it
+       * - unload it
+       * But, unlike DISFFC_RESET, do not release the effect.
+       */
+      LIST_FOR_EACH_ENTRY(itr, &This->ff_effects, effect_list_item, entry) {
+          IDirectInputEffect_Stop(itr->ref);
+          IDirectInputEffect_Unload(itr->ref);
+      }
+
+      /* Enable autocenter. */
+      event.type = EV_FF;
+      event.code = FF_AUTOCENTER;
+      /* TODO: Read autocenter strengh before disabling it, and use it here
+       * instead of 0xFFFF (maximum strengh).
+       */
+      event.value = 0xFFFF;
+      if (write(This->joyfd, &event, sizeof(event)) == -1)
+        ERR("Failed to set autocenter to %04x: %d %s\n", event.value, errno, strerror(errno));
+
       close(This->joyfd);
       This->joyfd = -1;
     }
@@ -907,7 +949,9 @@ static HRESULT WINAPI JoystickAImpl_SetProperty(LPDIRECTINPUTDEVICE8A iface,
     case (DWORD_PTR)DIPROP_AUTOCENTER: {
       LPCDIPROPDWORD pd = (LPCDIPROPDWORD)ph;
 
-      FIXME("DIPROP_AUTOCENTER(%d)\n", pd->dwData);
+      TRACE("autocenter(%d)\n", pd->dwData);
+      This->ff_autocenter = pd->dwData == DIPROPAUTOCENTER_ON;
+
       break;
     }
     case (DWORD_PTR)DIPROP_SATURATION: {
@@ -1031,6 +1075,14 @@ static HRESULT WINAPI JoystickAImpl_GetProperty(LPDIRECTINPUTDEVICE8A iface,
 
         pd->dwData = This->props[obj].lSaturation;
         TRACE("saturation(%d) obj=%d\n", pd->dwData, obj);
+        break;
+    }
+    case (DWORD_PTR) DIPROP_AUTOCENTER:
+    {
+        LPDIPROPDWORD pd = (LPDIPROPDWORD)pdiph;
+
+        pd->dwData = This->ff_autocenter ? DIPROPAUTOCENTER_ON : DIPROPAUTOCENTER_OFF;
+        TRACE("autocenter(%d)\n", pd->dwData);
         break;
     }
 

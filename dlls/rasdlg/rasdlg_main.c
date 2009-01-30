@@ -1,7 +1,7 @@
 /*
- *	PostScript driver object handling
+ * Implementation of the Remote Access Common Dialog API
  *
- *	Copyright 1998  Huw D M Davies
+ * Copyright 2009 CodeWeavers, Aric Stewart
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,17 +17,28 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+#include <stdarg.h>
 
-#include "psdrv.h"
+#include "windef.h"
+#include "winbase.h"
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
+WINE_DEFAULT_DEBUG_CHANNEL(rasdlg);
 
-/***********************************************************************
- *           SelectBitmap   (WINEPS.@)
- */
-HBITMAP PSDRV_SelectBitmap( PSDRV_PDEVICE *physDev, HBITMAP hbitmap )
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    FIXME("stub\n");
-    return 0;
+    TRACE("(0x%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
+
+    switch (fdwReason)
+    {
+        case DLL_WINE_PREATTACH:
+            return FALSE;    /* prefer native version */
+        case DLL_PROCESS_ATTACH:
+            DisableThreadLibraryCalls(hinstDLL);
+            break;
+        default:
+            break;
+    }
+
+    return TRUE;
 }

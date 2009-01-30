@@ -328,7 +328,7 @@ static void test_InitPathA(CHAR *newdir, CHAR *curDrive, CHAR *otherDrive)
      "GetTempPathA returned a path that did not end in '\\'\n");
   lstrcpyA(tmpstr,"aaaaaaaa");
   len1=GetTempPathA(len,tmpstr);
-  ok(len1==len+1,
+  ok(len1==len+1 || broken(len1 == len), /* WinME */
      "GetTempPathA should return string length %d instead of %d\n",len+1,len1);
 
 /* Test GetTmpFileNameA
@@ -468,10 +468,10 @@ static void test_CurrentDirectoryA(CHAR *origdir, CHAR *newdir)
 /* change to root without a trailing backslash. The function call succeeds
    but the directory is not changed.
 */
-  strcpy(tmpstr,"C:");
+  sprintf(tmpstr, "%c:", newdir[0]);
   test_setdir(newdir,tmpstr,newdir,1,"check 10");
 /* works however with a trailing backslash */
-  strcpy(tmpstr,"C:\\");
+  sprintf(tmpstr, "%c:\\", newdir[0]);
   test_setdir(newdir,tmpstr,NULL,1,"check 11");
 }
 
@@ -901,15 +901,18 @@ static void test_GetTempPath(void)
     char windir[MAX_PATH];
     char buf[MAX_PATH];
 
-    GetEnvironmentVariableA("TMP", save_TMP, sizeof(save_TMP));
+    if (!GetEnvironmentVariableA("TMP", save_TMP, sizeof(save_TMP))) save_TMP[0] = 0;
 
     /* test default configuration */
     trace("TMP=%s\n", save_TMP);
-    strcpy(buf,save_TMP);
-    if (buf[strlen(buf)-1]!='\\')
-        strcat(buf,"\\");
-    test_GetTempPathA(buf);
-    test_GetTempPathW(buf);
+    if (save_TMP[0])
+    {
+        strcpy(buf,save_TMP);
+        if (buf[strlen(buf)-1]!='\\')
+            strcat(buf,"\\");
+        test_GetTempPathA(buf);
+        test_GetTempPathW(buf);
+    }
 
     /* TMP=C:\WINDOWS */
     GetWindowsDirectoryA(windir, sizeof(windir));
@@ -1216,8 +1219,11 @@ static void test_drive_letter_case(void)
     ret = GetTempPath(sizeof(buf), buf);
     ok(ret, "GetTempPath error %u\n", GetLastError());
     ok(ret < sizeof(buf), "buffer should be %u bytes\n", ret);
-    ok(buf[1] == ':', "expected buf[1] == ':' got %c\n", buf[1]);
-    ok(buf[strlen(buf)-1] == '\\', "Temporary path (%s) doesn't end in a slash\n", buf);
+    if (buf[0])
+    {
+        ok(buf[1] == ':', "expected buf[1] == ':' got %c\n", buf[1]);
+        ok(buf[strlen(buf)-1] == '\\', "Temporary path (%s) doesn't end in a slash\n", buf);
+    }
 
     memset(buf, 0, sizeof(buf));
     SetLastError(0xdeadbeef);

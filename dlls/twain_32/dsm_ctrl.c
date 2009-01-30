@@ -156,6 +156,7 @@ TW_UINT16 TWAIN_IdentityGetDefault (pTW_IDENTITY pOrigin, TW_MEMREF pData)
 	if (!nrdevices)
 		return TWRC_FAILURE;
 	*pSourceIdentity = devices[0].identity;
+	DSM_twCC = TWCC_SUCCESS;
 	return TWRC_SUCCESS;
 }
 
@@ -168,8 +169,8 @@ TW_UINT16 TWAIN_IdentityGetFirst (pTW_IDENTITY pOrigin, TW_MEMREF pData)
 	twain_autodetect();
 	if (!nrdevices) {
 		TRACE ("no entries found.\n");
-		DSM_twCC = TWCC_SUCCESS;
-		return TWRC_ENDOFLIST;
+		DSM_twCC = TWCC_NODS;
+		return TWRC_FAILURE;
 	}
 	DSM_currentDevice = 0;
 	*pSourceIdentity = devices[DSM_currentDevice++].identity;

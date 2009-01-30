@@ -91,7 +91,7 @@ IDirectDrawImpl_QueryInterface(IDirectDraw7 *iface,
                                REFIID refiid,
                                void **obj)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
 
     TRACE("(%p)->(%s,%p)\n", This, debugstr_guid(refiid), obj);
 
@@ -111,12 +111,12 @@ IDirectDrawImpl_QueryInterface(IDirectDraw7 *iface,
     if ( IsEqualGUID( &IID_IUnknown, refiid ) ||
          IsEqualGUID( &IID_IDirectDraw7, refiid ) )
     {
-        *obj = ICOM_INTERFACE(This, IDirectDraw7);
+        *obj = This;
         TRACE("(%p) Returning IDirectDraw7 interface at %p\n", This, *obj);
     }
     else if ( IsEqualGUID( &IID_IDirectDraw4, refiid ) )
     {
-        *obj = ICOM_INTERFACE(This, IDirectDraw4);
+        *obj = &This->IDirectDraw4_vtbl;
         TRACE("(%p) Returning IDirectDraw4 interface at %p\n", This, *obj);
     }
     else if ( IsEqualGUID( &IID_IDirectDraw3, refiid ) )
@@ -129,12 +129,12 @@ IDirectDrawImpl_QueryInterface(IDirectDraw7 *iface,
     }
     else if ( IsEqualGUID( &IID_IDirectDraw2, refiid ) )
     {
-        *obj = ICOM_INTERFACE(This, IDirectDraw2);
+        *obj = &This->IDirectDraw2_vtbl;
         TRACE("(%p) Returning IDirectDraw2 interface at %p\n", This, *obj);
     }
     else if ( IsEqualGUID( &IID_IDirectDraw, refiid ) )
     {
-        *obj = ICOM_INTERFACE(This, IDirectDraw);
+        *obj = &This->IDirectDraw_vtbl;
         TRACE("(%p) Returning IDirectDraw interface at %p\n", This, *obj);
     }
 
@@ -173,25 +173,25 @@ IDirectDrawImpl_QueryInterface(IDirectDraw7 *iface,
         if ( IsEqualGUID( &IID_IDirect3D  , refiid ) )
         {
             This->d3dversion = 1;
-            *obj = ICOM_INTERFACE(This, IDirect3D);
+            *obj = &This->IDirect3D_vtbl;
             TRACE(" returning Direct3D interface at %p.\n", *obj);
         }
         else if ( IsEqualGUID( &IID_IDirect3D2  , refiid ) )
         {
             This->d3dversion = 2;
-            *obj = ICOM_INTERFACE(This, IDirect3D2);
+            *obj = &This->IDirect3D2_vtbl;
             TRACE(" returning Direct3D2 interface at %p.\n", *obj);
         }
         else if ( IsEqualGUID( &IID_IDirect3D3  , refiid ) )
         {
             This->d3dversion = 3;
-            *obj = ICOM_INTERFACE(This, IDirect3D3);
+            *obj = &This->IDirect3D3_vtbl;
             TRACE(" returning Direct3D3 interface at %p.\n", *obj);
         }
         else if(IsEqualGUID( &IID_IDirect3D7  , refiid ))
         {
             This->d3dversion = 7;
-            *obj = ICOM_INTERFACE(This, IDirect3D7);
+            *obj = &This->IDirect3D7_vtbl;
             TRACE(" returning Direct3D7 interface at %p.\n", *obj);
         }
     }
@@ -234,7 +234,7 @@ IDirectDrawImpl_QueryInterface(IDirectDraw7 *iface,
 static ULONG WINAPI
 IDirectDrawImpl_AddRef(IDirectDraw7 *iface)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     ULONG ref = InterlockedIncrement(&This->ref7);
 
     TRACE("(%p) : incrementing IDirectDraw7 refcount from %u.\n", This, ref -1);
@@ -258,9 +258,7 @@ void
 IDirectDrawImpl_Destroy(IDirectDrawImpl *This)
 {
     /* Clear the cooplevel to restore window and display mode */
-    IDirectDraw7_SetCooperativeLevel(ICOM_INTERFACE(This, IDirectDraw7),
-                                        NULL,
-                                        DDSCL_NORMAL);
+    IDirectDraw7_SetCooperativeLevel((IDirectDraw7 *)This, NULL, DDSCL_NORMAL);
 
     /* Destroy the device window if we created one */
     if(This->devicewindow != 0)
@@ -295,7 +293,7 @@ IDirectDrawImpl_Destroy(IDirectDrawImpl *This)
 static ULONG WINAPI
 IDirectDrawImpl_Release(IDirectDraw7 *iface)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     ULONG ref = InterlockedDecrement(&This->ref7);
 
     TRACE("(%p)->() decrementing IDirectDraw7 refcount from %u.\n", This, ref +1);
@@ -362,7 +360,7 @@ IDirectDrawImpl_SetCooperativeLevel(IDirectDraw7 *iface,
                                     HWND hwnd,
                                     DWORD cooplevel)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     HWND window;
 
     TRACE("(%p)->(%p,%08x)\n",This,hwnd,cooplevel);
@@ -548,7 +546,7 @@ IDirectDrawImpl_SetDisplayModeNoOverride(IDirectDraw7 *iface,
                                          DWORD RefreshRate,
                                          DWORD Flags)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     WINED3DDISPLAYMODE Mode;
     HRESULT hr;
     TRACE("(%p)->(%d,%d,%d,%d,%x): Relay!\n", This, Width, Height, BPP, RefreshRate, Flags);
@@ -664,15 +662,11 @@ IDirectDrawImpl_SetDisplayMode(IDirectDraw7 *iface,
 static HRESULT WINAPI
 IDirectDrawImpl_RestoreDisplayMode(IDirectDraw7 *iface)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     TRACE("(%p)\n", This);
 
-    return IDirectDrawImpl_SetDisplayModeNoOverride(ICOM_INTERFACE(This, IDirectDraw7),
-                                                    This->orig_width,
-                                                    This->orig_height,
-                                                    This->orig_bpp,
-                                                    0,
-                                                    0);
+    return IDirectDrawImpl_SetDisplayModeNoOverride(iface,
+            This->orig_width, This->orig_height, This->orig_bpp, 0, 0);
 }
 
 /*****************************************************************************
@@ -695,7 +689,7 @@ IDirectDrawImpl_GetCaps(IDirectDraw7 *iface,
                         DDCAPS *DriverCaps,
                         DDCAPS *HELCaps)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     DDCAPS caps;
     WINED3DCAPS winecaps;
     HRESULT hr;
@@ -790,7 +784,7 @@ IDirectDrawImpl_GetCaps(IDirectDraw7 *iface,
 static HRESULT WINAPI
 IDirectDrawImpl_Compact(IDirectDraw7 *iface)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     TRACE("(%p)\n", This);
 
     return DD_OK;
@@ -814,7 +808,7 @@ static HRESULT WINAPI
 IDirectDrawImpl_GetDisplayMode(IDirectDraw7 *iface,
                                DDSURFACEDESC2 *DDSD)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     HRESULT hr;
     WINED3DDISPLAYMODE Mode;
     DWORD Size;
@@ -885,7 +879,7 @@ static HRESULT WINAPI
 IDirectDrawImpl_GetFourCCCodes(IDirectDraw7 *iface,
                                DWORD *NumCodes, DWORD *Codes)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     WINED3DFORMAT formats[] = {
         WINED3DFMT_YUY2, WINED3DFMT_UYVY, WINED3DFMT_YV12,
         WINED3DFMT_DXT1, WINED3DFMT_DXT2, WINED3DFMT_DXT3, WINED3DFMT_DXT4, WINED3DFMT_DXT5,
@@ -947,7 +941,7 @@ static HRESULT WINAPI
 IDirectDrawImpl_GetMonitorFrequency(IDirectDraw7 *iface,
                                     DWORD *Freq)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     TRACE("(%p)->(%p)\n", This, Freq);
 
     /* Ideally this should be in WineD3D, as it concerns the screen setup,
@@ -975,7 +969,7 @@ static HRESULT WINAPI
 IDirectDrawImpl_GetVerticalBlankStatus(IDirectDraw7 *iface,
                                        BOOL *status)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     TRACE("(%p)->(%p)\n", This, status);
 
     /* This looks sane, the MSDN suggests it too */
@@ -1010,7 +1004,7 @@ IDirectDrawImpl_GetVerticalBlankStatus(IDirectDraw7 *iface,
 static HRESULT WINAPI
 IDirectDrawImpl_GetAvailableVidMem(IDirectDraw7 *iface, DDSCAPS2 *Caps, DWORD *total, DWORD *free)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     TRACE("(%p)->(%p, %p, %p)\n", This, Caps, total, free);
 
     if(TRACE_ON(ddraw))
@@ -1056,7 +1050,7 @@ static HRESULT WINAPI
 IDirectDrawImpl_Initialize(IDirectDraw7 *iface,
                            GUID *Guid)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     TRACE("(%p)->(%s): No-op\n", This, debugstr_guid(Guid));
 
     if(This->initialized)
@@ -1085,7 +1079,7 @@ IDirectDrawImpl_Initialize(IDirectDraw7 *iface,
 static HRESULT WINAPI
 IDirectDrawImpl_FlipToGDISurface(IDirectDraw7 *iface)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     TRACE("(%p)\n", This);
 
     return DD_OK;
@@ -1113,7 +1107,7 @@ IDirectDrawImpl_WaitForVerticalBlank(IDirectDraw7 *iface,
                                      DWORD Flags,
                                      HANDLE h)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     static BOOL hide = FALSE;
 
     /* This function is called often, so print the fixme only once */
@@ -1144,7 +1138,7 @@ IDirectDrawImpl_WaitForVerticalBlank(IDirectDraw7 *iface,
  *****************************************************************************/ 
 static HRESULT WINAPI IDirectDrawImpl_GetScanLine(IDirectDraw7 *iface, DWORD *Scanline)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     static BOOL hide = FALSE;
     WINED3DDISPLAYMODE Mode;
 
@@ -1186,7 +1180,7 @@ static HRESULT WINAPI IDirectDrawImpl_GetScanLine(IDirectDraw7 *iface, DWORD *Sc
 static HRESULT WINAPI
 IDirectDrawImpl_TestCooperativeLevel(IDirectDraw7 *iface)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     HRESULT hr;
     TRACE("(%p)\n", This);
 
@@ -1254,7 +1248,7 @@ static HRESULT WINAPI
 IDirectDrawImpl_GetGDISurface(IDirectDraw7 *iface,
                               IDirectDrawSurface7 **GDISurface)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     IWineD3DSurface *Surf;
     IDirectDrawSurface7 *ddsurf;
     HRESULT hr;
@@ -1325,7 +1319,7 @@ IDirectDrawImpl_EnumDisplayModes(IDirectDraw7 *iface,
                                  void *Context,
                                  LPDDENUMMODESCALLBACK2 cb)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     unsigned int modenum, fmt;
     WINED3DFORMAT pixelformat = WINED3DFMT_UNKNOWN;
     WINED3DDISPLAYMODE mode;
@@ -1506,7 +1500,7 @@ IDirectDrawImpl_EvaluateMode(IDirectDraw7 *iface,
                              DWORD Flags,
                              DWORD *Timeout)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     FIXME("(%p)->(%d,%p): Stub!\n", This, Flags, Timeout);
 
     /* When implementing this, implement it in WineD3D */
@@ -1534,7 +1528,7 @@ IDirectDrawImpl_GetDeviceIdentifier(IDirectDraw7 *iface,
                                     DDDEVICEIDENTIFIER2 *DDDI,
                                     DWORD Flags)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     TRACE("(%p)->(%p,%08x)\n", This, DDDI, Flags);
 
     if(!DDDI)
@@ -1568,7 +1562,7 @@ IDirectDrawImpl_GetSurfaceFromDC(IDirectDraw7 *iface,
                                  HDC hdc,
                                  IDirectDrawSurface7 **Surface)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     FIXME("(%p)->(%p,%p): Stub!\n", This, hdc, Surface);
 
     /* Implementation idea if needed: Loop through all surfaces and compare
@@ -1590,7 +1584,7 @@ IDirectDrawImpl_GetSurfaceFromDC(IDirectDraw7 *iface,
 static HRESULT WINAPI
 IDirectDrawImpl_RestoreAllSurfaces(IDirectDraw7 *iface)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     FIXME("(%p): Stub\n", This);
 
     /* This isn't hard to implement: Enumerate all WineD3D surfaces,
@@ -1629,7 +1623,7 @@ IDirectDrawImpl_StartModeTest(IDirectDraw7 *iface,
                               DWORD NumModes,
                               DWORD Flags)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     WARN("(%p)->(%p, %d, %x): Semi-Stub, most likely harmless\n", This, Modes, NumModes, Flags);
 
     /* This looks sane */
@@ -1658,9 +1652,7 @@ IDirectDrawImpl_RecreateSurfacesCallback(IDirectDrawSurface7 *surf,
                                          DDSURFACEDESC2 *desc,
                                          void *Context)
 {
-    IDirectDrawSurfaceImpl *surfImpl = ICOM_OBJECT(IDirectDrawSurfaceImpl,
-                                                   IDirectDrawSurface7,
-                                                   surf);
+    IDirectDrawSurfaceImpl *surfImpl = (IDirectDrawSurfaceImpl *)surf;
     IDirectDrawImpl *This = surfImpl->ddraw;
     IUnknown *Parent;
     IParentImpl *parImpl = NULL;
@@ -1701,7 +1693,7 @@ IDirectDrawImpl_RecreateSurfacesCallback(IDirectDrawSurface7 *surf,
     {
         /* It is a IParent interface! */
         IUnknown_Release(Parent); /* For the QueryInterface */
-        parImpl = ICOM_OBJECT(IParentImpl, IParent, Parent);
+        parImpl = (IParentImpl *)Parent;
         /* Release the reference the parent interface is holding */
         IWineD3DSurface_Release(wineD3DSurface);
     }
@@ -1728,7 +1720,7 @@ IDirectDrawImpl_RecreateSurfacesCallback(IDirectDrawSurface7 *surf,
          * new surface
          */
         parImpl = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*parImpl));
-        ICOM_INIT_INTERFACE(parImpl, IParent, IParent_Vtbl);
+        parImpl->lpVtbl = &IParent_Vtbl;
         parImpl->ref = 1;
 
         Parent = (IUnknown *) parImpl;
@@ -1817,11 +1809,7 @@ IDirectDrawImpl_RecreateAllSurfaces(IDirectDrawImpl *This)
     memset(&desc, 0, sizeof(desc));
     desc.dwSize = sizeof(desc);
 
-    return IDirectDraw7_EnumSurfaces(ICOM_INTERFACE(This, IDirectDraw7),
-                                     0,
-                                     &desc,
-                                     This,
-                                     IDirectDrawImpl_RecreateSurfacesCallback);
+    return IDirectDraw7_EnumSurfaces((IDirectDraw7 *)This, 0, &desc, This, IDirectDrawImpl_RecreateSurfacesCallback);
 }
 
 ULONG WINAPI D3D7CB_DestroySwapChain(IWineD3DSwapChain *pSwapChain) {
@@ -1997,11 +1985,11 @@ IDirectDrawImpl_CreateNewSurface(IDirectDrawImpl *This,
         ERR("(%p) Error allocating memory for a surface\n", This);
         return DDERR_OUTOFVIDEOMEMORY;
     }
-    ICOM_INIT_INTERFACE(*ppSurf, IDirectDrawSurface7, IDirectDrawSurface7_Vtbl);
-    ICOM_INIT_INTERFACE(*ppSurf, IDirectDrawSurface3, IDirectDrawSurface3_Vtbl);
-    ICOM_INIT_INTERFACE(*ppSurf, IDirectDrawGammaControl, IDirectDrawGammaControl_Vtbl);
-    ICOM_INIT_INTERFACE(*ppSurf, IDirect3DTexture2, IDirect3DTexture2_Vtbl);
-    ICOM_INIT_INTERFACE(*ppSurf, IDirect3DTexture, IDirect3DTexture1_Vtbl);
+    (*ppSurf)->lpVtbl = &IDirectDrawSurface7_Vtbl;
+    (*ppSurf)->IDirectDrawSurface3_vtbl = &IDirectDrawSurface3_Vtbl;
+    (*ppSurf)->IDirectDrawGammaControl_vtbl = &IDirectDrawGammaControl_Vtbl;
+    (*ppSurf)->IDirect3DTexture2_vtbl = &IDirect3DTexture2_Vtbl;
+    (*ppSurf)->IDirect3DTexture_vtbl = &IDirect3DTexture1_Vtbl;
     (*ppSurf)->ref = 1;
     (*ppSurf)->version = 7;
     TRACE("%p->version = %d\n", (*ppSurf), (*ppSurf)->version);
@@ -2036,14 +2024,14 @@ IDirectDrawImpl_CreateNewSurface(IDirectDrawImpl *This,
             return DDERR_OUTOFMEMORY;
         }
         parImpl->ref = 1;
-        ICOM_INIT_INTERFACE(parImpl, IParent, IParent_Vtbl);
-        Parent = (IUnknown *) ICOM_INTERFACE(parImpl, IParent);
+        parImpl->lpVtbl = &IParent_Vtbl;
+        Parent = (IUnknown *)parImpl;
         TRACE("Using IParent interface %p as parent\n", parImpl);
     }
     else
     {
         /* Use the surface as parent */
-        Parent = (IUnknown *) ICOM_INTERFACE(*ppSurf, IDirectDrawSurface7);
+        Parent = (IUnknown *)*ppSurf;
         TRACE("Using Surface interface %p as parent\n", *ppSurf);
     }
 
@@ -2173,7 +2161,7 @@ IDirectDrawImpl_CreateNewSurface(IDirectDrawImpl *This,
         if(hr != WINED3D_OK)
         {
             /* No need for a trace here, wined3d does that for us */
-            IDirectDrawSurface7_Release(ICOM_INTERFACE((*ppSurf), IDirectDrawSurface7));
+            IDirectDrawSurface7_Release((IDirectDrawSurface7 *)*ppSurf);
             return hr;
         }
     }
@@ -2336,7 +2324,7 @@ IDirectDrawImpl_CreateSurface(IDirectDraw7 *iface,
                               IDirectDrawSurface7 **Surf,
                               IUnknown *UnkOuter)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     IDirectDrawSurfaceImpl *object = NULL;
     HRESULT hr;
     LONG extra_surfaces = 0;
@@ -2597,7 +2585,7 @@ IDirectDrawImpl_CreateSurface(IDirectDraw7 *iface,
     }
     object->is_complex_root = TRUE;
 
-    *Surf = ICOM_INTERFACE(object, IDirectDrawSurface7);
+    *Surf = (IDirectDrawSurface7 *)object;
 
     /* Create Additional surfaces if necessary
      * This applies to Primary surfaces which have a back buffer count
@@ -2637,7 +2625,7 @@ IDirectDrawImpl_CreateSurface(IDirectDraw7 *iface,
     if(hr != DD_OK)
     {
         /* This destroys and possibly created surfaces too */
-        IDirectDrawSurface_Release( ICOM_INTERFACE(object, IDirectDrawSurface7) );
+        IDirectDrawSurface_Release((IDirectDrawSurface7 *)object);
         LeaveCriticalSection(&ddraw_cs);
         return hr;
     }
@@ -2739,13 +2727,13 @@ IDirectDrawImpl_CreateSurface(IDirectDraw7 *iface,
         {
             hr = IWineD3DDevice_CreateCubeTexture(This->wineD3DDevice, DDSD->dwWidth /* Edgelength */,
                     levels, 0 /* usage */, Format, Pool, (IWineD3DCubeTexture **)&object->wineD3DTexture,
-                    0 /* SharedHandle */, (IUnknown *)ICOM_INTERFACE(object, IDirectDrawSurface7));
+                    0 /* SharedHandle */, (IUnknown *)object);
         }
         else
         {
             hr = IWineD3DDevice_CreateTexture(This->wineD3DDevice, DDSD->dwWidth, DDSD->dwHeight, levels,
                     0 /* usage */, Format, Pool, (IWineD3DTexture **) &object->wineD3DTexture,
-                    0 /* SharedHandle */, (IUnknown *)ICOM_INTERFACE(object, IDirectDrawSurface7));
+                    0 /* SharedHandle */, (IUnknown *)object);
         }
         This->tex_root = NULL;
     }
@@ -2900,7 +2888,7 @@ IDirectDrawImpl_EnumSurfaces(IDirectDraw7 *iface,
      * because WineDDraw doesn't handle ddraw-like surface
      * caps structures
      */
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     IDirectDrawSurfaceImpl *surf;
     BOOL all, nomatch;
     DDSURFACEDESC2 desc;
@@ -2925,8 +2913,8 @@ IDirectDrawImpl_EnumSurfaces(IDirectDraw7 *iface,
         if (all || (nomatch != IDirectDrawImpl_DDSD_Match(DDSD, &surf->surface_desc)))
         {
             desc = surf->surface_desc;
-            IDirectDrawSurface7_AddRef(ICOM_INTERFACE(surf, IDirectDrawSurface7));
-            if(Callback( ICOM_INTERFACE(surf, IDirectDrawSurface7), &desc, Context) != DDENUMRET_OK)
+            IDirectDrawSurface7_AddRef((IDirectDrawSurface7 *)surf);
+            if (Callback((IDirectDrawSurface7 *)surf, &desc, Context) != DDENUMRET_OK)
             {
                 LeaveCriticalSection(&ddraw_cs);
                 return DD_OK;
@@ -2942,7 +2930,7 @@ findRenderTarget(IDirectDrawSurface7 *surface,
                  DDSURFACEDESC2 *desc,
                  void *ctx)
 {
-    IDirectDrawSurfaceImpl *surf = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirectDrawSurface7, surface);
+    IDirectDrawSurfaceImpl *surf = (IDirectDrawSurfaceImpl *)surface;
     IDirectDrawSurfaceImpl **target = ctx;
 
     if(!surf->isRenderTarget) {
@@ -3140,7 +3128,7 @@ DirectDrawCreateClipper(DWORD Flags,
         return E_OUTOFMEMORY;
     }
 
-    ICOM_INIT_INTERFACE(object, IDirectDrawClipper, IDirectDrawClipper_Vtbl);
+    object->lpVtbl = &IDirectDrawClipper_Vtbl;
     object->ref = 1;
     object->wineD3DClipper = pWineDirect3DCreateClipper((IUnknown *) object);
     if(!object->wineD3DClipper)
@@ -3167,7 +3155,7 @@ IDirectDrawImpl_CreateClipper(IDirectDraw7 *iface,
                               IDirectDrawClipper **Clipper,
                               IUnknown *UnkOuter)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     TRACE("(%p)->(%x,%p,%p)\n", This, Flags, Clipper, UnkOuter);
     return DirectDrawCreateClipper(Flags, Clipper, UnkOuter);
 }
@@ -3196,7 +3184,7 @@ IDirectDrawImpl_CreatePalette(IDirectDraw7 *iface,
                               IDirectDrawPalette **Palette,
                               IUnknown *pUnkOuter)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
     IDirectDrawPaletteImpl *object;
     HRESULT hr = DDERR_GENERIC;
     TRACE("(%p)->(%x,%p,%p,%p)\n", This, Flags, ColorTable, Palette, pUnkOuter);
@@ -3225,11 +3213,12 @@ IDirectDrawImpl_CreatePalette(IDirectDraw7 *iface,
         return E_OUTOFMEMORY;
     }
 
-    ICOM_INIT_INTERFACE(object, IDirectDrawPalette, IDirectDrawPalette_Vtbl);
+    object->lpVtbl = &IDirectDrawPalette_Vtbl;
     object->ref = 1;
     object->ddraw_owner = This;
 
-    hr = IWineD3DDevice_CreatePalette(This->wineD3DDevice, Flags, ColorTable, &object->wineD3DPalette, (IUnknown *) ICOM_INTERFACE(object, IDirectDrawPalette) );
+    hr = IWineD3DDevice_CreatePalette(This->wineD3DDevice, Flags,
+            ColorTable, &object->wineD3DPalette, (IUnknown *)object);
     if(hr != DD_OK)
     {
         HeapFree(GetProcessHeap(), 0, object);
@@ -3239,7 +3228,7 @@ IDirectDrawImpl_CreatePalette(IDirectDraw7 *iface,
 
     IDirectDraw7_AddRef(iface);
     object->ifaceToRelease = (IUnknown *) iface;
-    *Palette = ICOM_INTERFACE(object, IDirectDrawPalette);
+    *Palette = (IDirectDrawPalette *)object;
     LeaveCriticalSection(&ddraw_cs);
     return DD_OK;
 }
@@ -3266,8 +3255,8 @@ IDirectDrawImpl_DuplicateSurface(IDirectDraw7 *iface,
                                  IDirectDrawSurface7 *Src,
                                  IDirectDrawSurface7 **Dest)
 {
-    ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
-    IDirectDrawSurfaceImpl *Surf = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirectDrawSurface7, Src);
+    IDirectDrawImpl *This = (IDirectDrawImpl *)iface;
+    IDirectDrawSurfaceImpl *Surf = (IDirectDrawSurfaceImpl *)Src;
 
     FIXME("(%p)->(%p,%p)\n", This, Surf, Dest);
 
@@ -3368,10 +3357,7 @@ IDirectDrawImpl_FindDecl(IDirectDrawImpl *This,
     }
     TRACE("not found. Creating and inserting at position %d.\n", low);
 
-    hr = IWineD3DDevice_CreateVertexDeclarationFromFVF(This->wineD3DDevice,
-                                                       &pDecl,
-                                                       (IUnknown *) ICOM_INTERFACE(This, IDirectDraw7),
-                                                       fvf);
+    hr = IWineD3DDevice_CreateVertexDeclarationFromFVF(This->wineD3DDevice, &pDecl, (IUnknown *)This, fvf);
     if (hr != S_OK) return NULL;
 
     if(This->declArraySize == This->numConvertedDecls) {
@@ -3403,19 +3389,19 @@ static inline struct IDirectDrawImpl *ddraw_from_device_parent(IWineD3DDevicePar
     return (struct IDirectDrawImpl *)((char*)iface - FIELD_OFFSET(struct IDirectDrawImpl, device_parent_vtbl));
 }
 
-HRESULT STDMETHODCALLTYPE device_parent_QueryInterface(IWineD3DDeviceParent *iface, REFIID riid, void **object)
+static HRESULT STDMETHODCALLTYPE device_parent_QueryInterface(IWineD3DDeviceParent *iface, REFIID riid, void **object)
 {
     struct IDirectDrawImpl *This = ddraw_from_device_parent(iface);
     return IDirectDrawImpl_QueryInterface((IDirectDraw7 *)This, riid, object);
 }
 
-ULONG STDMETHODCALLTYPE device_parent_AddRef(IWineD3DDeviceParent *iface)
+static ULONG STDMETHODCALLTYPE device_parent_AddRef(IWineD3DDeviceParent *iface)
 {
     struct IDirectDrawImpl *This = ddraw_from_device_parent(iface);
     return IDirectDrawImpl_AddRef((IDirectDraw7 *)This);
 }
 
-ULONG STDMETHODCALLTYPE device_parent_Release(IWineD3DDeviceParent *iface)
+static ULONG STDMETHODCALLTYPE device_parent_Release(IWineD3DDeviceParent *iface)
 {
     struct IDirectDrawImpl *This = ddraw_from_device_parent(iface);
     return IDirectDrawImpl_Release((IDirectDraw7 *)This);
@@ -3467,9 +3453,8 @@ static HRESULT STDMETHODCALLTYPE device_parent_CreateSurface(IWineD3DDeviceParen
     if (!surf)
     {
         IDirectDrawSurface7 *attached;
-        IDirectDrawSurface7_GetAttachedSurface(ICOM_INTERFACE(This->tex_root, IDirectDrawSurface7),
-                &searchcaps, &attached);
-        surf = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirectDrawSurface7, attached);
+        IDirectDrawSurface7_GetAttachedSurface((IDirectDrawSurface7 *)This->tex_root, &searchcaps, &attached);
+        surf = (IDirectDrawSurfaceImpl *)attached;
         IDirectDrawSurface7_Release(attached);
     }
     if (!surf) ERR("root search surface not found\n");
@@ -3478,9 +3463,9 @@ static HRESULT STDMETHODCALLTYPE device_parent_CreateSurface(IWineD3DDeviceParen
     while (i < level)
     {
         IDirectDrawSurface7 *attached;
-        IDirectDrawSurface7_GetAttachedSurface(ICOM_INTERFACE(surf, IDirectDrawSurface7), &searchcaps, &attached);
+        IDirectDrawSurface7_GetAttachedSurface((IDirectDrawSurface7 *)surf, &searchcaps, &attached);
         if(!attached) ERR("Surface not found\n");
-        surf = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirectDrawSurface7, attached);
+        surf = (IDirectDrawSurfaceImpl *)attached;
         IDirectDrawSurface7_Release(attached);
         ++i;
     }
@@ -3507,8 +3492,7 @@ static HRESULT STDMETHODCALLTYPE device_parent_CreateRenderTarget(IWineD3DDevice
 
     if (d3d_surface->isRenderTarget)
     {
-        IDirectDrawSurface7_EnumAttachedSurfaces(ICOM_INTERFACE(d3d_surface, IDirectDrawSurface7),
-                &target, findRenderTarget);
+        IDirectDrawSurface7_EnumAttachedSurfaces((IDirectDrawSurface7 *)d3d_surface, &target, findRenderTarget);
     }
     else
     {
@@ -3608,11 +3592,11 @@ static HRESULT STDMETHODCALLTYPE device_parent_CreateSwapChain(IWineD3DDevicePar
         return DDERR_OUTOFVIDEOMEMORY;
     }
 
-    ICOM_INIT_INTERFACE(object, IParent, IParent_Vtbl);
+    object->lpVtbl = &IParent_Vtbl;
     object->ref = 1;
 
     hr = IWineD3DDevice_CreateSwapChain(This->wineD3DDevice, present_parameters,
-            swapchain, (IUnknown *)ICOM_INTERFACE(object, IParent), This->ImplType);
+            swapchain, (IUnknown *)object, This->ImplType);
     if (FAILED(hr))
     {
         FIXME("(%p) CreateSwapChain failed, returning %#x\n", iface, hr);

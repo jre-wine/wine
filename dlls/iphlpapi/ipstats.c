@@ -37,8 +37,14 @@
 #ifdef HAVE_SYS_SOCKETVAR_H
 #include <sys/socketvar.h>
 #endif
+#ifdef HAVE_SYS_TIMEOUT_H
+#include <sys/timeout.h>
+#endif
 #ifdef HAVE_NETINET_IN_H
 #include <netinet/in.h>
+#endif
+#ifdef HAVE_NETINET_IN_SYSTM_H
+#include <netinet/in_systm.h>
 #endif
 #ifdef HAVE_ARPA_INET_H
 #include <arpa/inet.h>
@@ -61,11 +67,17 @@
 #ifdef HAVE_NETINET_IF_ETHER_H
 #include <netinet/if_ether.h>
 #endif
+#ifdef HAVE_NETINET_IF_INARP_H
+#include <netinet/if_inarp.h>
+#endif
 #ifdef HAVE_NETINET_IP_H
 #include <netinet/ip.h>
 #endif
 #ifdef HAVE_NETINET_TCP_H
 #include <netinet/tcp.h>
+#endif
+#ifdef HAVE_NETINET_IP_VAR_H
+#include <netinet/ip_var.h>
 #endif
 #ifdef HAVE_NETINET_TCP_FSM_H
 #include <netinet/tcp_fsm.h>
@@ -73,14 +85,11 @@
 #ifdef HAVE_NETINET_IN_PCB_H
 #include <netinet/in_pcb.h>
 #endif
-#ifdef HAVE_NETINET_TCP_VAR_H
-#include <netinet/tcp_var.h>
-#endif
 #ifdef HAVE_NETINET_TCP_TIMER_H
 #include <netinet/tcp_timer.h>
 #endif
-#ifdef HAVE_NETINET_IN_SYSTM_H
-#include <netinet/in_systm.h>
+#ifdef HAVE_NETINET_TCP_VAR_H
+#include <netinet/tcp_var.h>
 #endif
 #ifdef HAVE_NETINET_IP_ICMP_H
 #include <netinet/ip_icmp.h>
@@ -88,16 +97,15 @@
 #ifdef HAVE_NETINET_ICMP_VAR_H
 #include <netinet/icmp_var.h>
 #endif
-#ifdef HAVE_NETINET_IP_VAR_H
-#include <netinet/ip_var.h>
-#endif
 #ifdef HAVE_NETINET_UDP_H
 #include <netinet/udp.h>
 #endif
 #ifdef HAVE_NETINET_UDP_VAR_H
 #include <netinet/udp_var.h>
 #endif
-
+#ifdef HAVE_SYS_PROTOSW_H
+#include <sys/protosw.h>
+#endif
 #ifdef HAVE_SYS_SYSCTL_H
 #include <sys/sysctl.h>
 #endif
@@ -132,6 +140,10 @@
 
 #ifndef RTF_MULTICAST
 #define RTF_MULTICAST 0 /* Not available on NetBSD/OpenBSD */
+#endif
+
+#ifndef RTF_LLINFO
+#define RTF_LLINFO 0 /* Not available on FreeBSD 8 and above */
 #endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(iphlpapi);
@@ -857,7 +869,7 @@ DWORD getUDPStats(MIB_UDPSTATS *stats)
 
 static DWORD getNumWithOneHeader(const char *filename)
 {
-#if defined(HAVE_SYS_SYSCTL_H) && defined(HAVE_NETINET_IN_PCB_H)
+#if defined(HAVE_SYS_SYSCTL_H) && defined(HAVE_STRUCT_XINPGEN)
    size_t Len = 0;
    char *Buf;
    struct xinpgen *pXIG, *pOrigXIG;
@@ -1569,7 +1581,7 @@ DWORD getTcpTable(PMIB_TCPTABLE *ppTcpTable, DWORD maxEntries, HANDLE heap,
 {
    DWORD numEntries;
    PMIB_TCPTABLE table;
-#if defined(HAVE_SYS_SYSCTL_H) && defined(HAVE_NETINET_IN_PCB_H)
+#if defined(HAVE_SYS_SYSCTL_H) && defined(HAVE_STRUCT_XINPGEN)
    size_t Len = 0;
    char *Buf;
    struct xinpgen *pXIG, *pOrigXIG;
@@ -1603,7 +1615,7 @@ DWORD getTcpTable(PMIB_TCPTABLE *ppTcpTable, DWORD maxEntries, HANDLE heap,
    if (!numEntries)
       return NO_ERROR;
 
-#if defined(HAVE_SYS_SYSCTL_H) && defined(HAVE_NETINET_IN_PCB_H)
+#if defined(HAVE_SYS_SYSCTL_H) && defined(HAVE_STRUCT_XINPGEN)
 
    if (sysctlbyname ("net.inet.tcp.pcblist", NULL, &Len, NULL, 0) < 0)
    {

@@ -558,9 +558,25 @@ static void STDMETHODCALLTYPE d3d10_device_Flush(ID3D10Device *iface)
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateBuffer(ID3D10Device *iface,
         const D3D10_BUFFER_DESC *desc, const D3D10_SUBRESOURCE_DATA *data, ID3D10Buffer **buffer)
 {
-    FIXME("iface %p, desc %p, data %p, buffer %p stub!\n", iface, desc, data, buffer);
+    struct d3d10_buffer *object;
 
-    return E_NOTIMPL;
+    FIXME("iface %p, desc %p, data %p, buffer %p partial stub!\n", iface, desc, data, buffer);
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate D3D10 buffer object memory\n");
+        return E_OUTOFMEMORY;
+    }
+
+    object->vtbl = &d3d10_buffer_vtbl;
+    object->refcount = 1;
+
+    *buffer = (ID3D10Buffer *)object;
+
+    TRACE("Created ID3D10Buffer %p\n", object);
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateTexture1D(ID3D10Device *iface,
@@ -575,6 +591,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateTexture2D(ID3D10Device *ifac
         const D3D10_TEXTURE2D_DESC *desc, const D3D10_SUBRESOURCE_DATA *data, ID3D10Texture2D **texture)
 {
     struct d3d10_texture2d *object;
+    HRESULT hr;
 
     FIXME("iface %p, desc %p, data %p, texture %p partial stub!\n", iface, desc, data, texture);
 
@@ -587,6 +604,49 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateTexture2D(ID3D10Device *ifac
 
     object->vtbl = &d3d10_texture2d_vtbl;
     object->refcount = 1;
+    object->desc = *desc;
+
+    if (desc->MipLevels == 1 && desc->ArraySize == 1)
+    {
+        IWineD3DDevice *wined3d_device;
+        IWineDXGIDevice *wine_device;
+
+        hr = ID3D10Device_QueryInterface(iface, &IID_IWineDXGIDevice, (void **)&wine_device);
+        if (FAILED(hr))
+        {
+            ERR("Device should implement IWineDXGIDevice\n");
+            HeapFree(GetProcessHeap(), 0, object);
+            return E_FAIL;
+        }
+
+        hr = IWineDXGIDevice_create_surface(wine_device, NULL, 0, NULL,
+                (IUnknown *)object, (void **)&object->dxgi_surface);
+        if (FAILED(hr))
+        {
+            ERR("Failed to create DXGI surface, returning %#x\n", hr);
+            HeapFree(GetProcessHeap(), 0, object);
+            IWineDXGIDevice_Release(wine_device);
+            return hr;
+        }
+
+        wined3d_device = IWineDXGIDevice_get_wined3d_device(wine_device);
+        IWineDXGIDevice_Release(wine_device);
+
+        FIXME("Implement DXGI<->wined3d format and usage conversion\n");
+
+        hr = IWineD3DDevice_CreateSurface(wined3d_device, desc->Width, desc->Height, desc->Format, FALSE,
+                FALSE, 0, &object->wined3d_surface, WINED3DRTYPE_SURFACE, desc->Usage, WINED3DPOOL_DEFAULT,
+                desc->SampleDesc.Count, desc->SampleDesc.Quality, NULL, SURFACE_OPENGL, (IUnknown *)object);
+        IWineD3DDevice_Release(wined3d_device);
+        if (FAILED(hr))
+        {
+            ERR("CreateSurface failed, returning %#x\n", hr);
+            IDXGISurface_Release(object->dxgi_surface);
+            HeapFree(GetProcessHeap(), 0, object);
+            return hr;
+        }
+    }
+
     *texture = (ID3D10Texture2D *)object;
 
     TRACE("Created ID3D10Texture2D %p\n", object);
@@ -610,12 +670,162 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateShaderResourceView(ID3D10Dev
     return E_NOTIMPL;
 }
 
+static HRESULT d3d10_device_set_rtdesc_from_resource(D3D10_RENDER_TARGET_VIEW_DESC *desc, ID3D10Resource *resource)
+{
+    D3D10_RESOURCE_DIMENSION dimension;
+    HRESULT hr;
+
+    ID3D10Resource_GetType(resource, &dimension);
+
+    switch(dimension)
+    {
+        case D3D10_RESOURCE_DIMENSION_TEXTURE1D:
+        {
+            ID3D10Texture1D *texture;
+            D3D10_TEXTURE1D_DESC texture_desc;
+
+            hr = ID3D10Resource_QueryInterface(resource, &IID_ID3D10Texture1D, (void **)&texture);
+            if (FAILED(hr))
+            {
+                ERR("Resource of type TEXTURE1D doesn't implement ID3D10Texture1D?\n");
+                return E_INVALIDARG;
+            }
+
+            ID3D10Texture1D_GetDesc(texture, &texture_desc);
+            ID3D10Texture1D_Release(texture);
+
+            desc->Format = texture_desc.Format;
+            if (texture_desc.ArraySize == 1)
+            {
+                desc->ViewDimension = D3D10_RTV_DIMENSION_TEXTURE1D;
+                desc->Texture1D.MipSlice = 0;
+            }
+            else
+            {
+                desc->ViewDimension = D3D10_RTV_DIMENSION_TEXTURE1DARRAY;
+                desc->Texture1DArray.MipSlice = 0;
+                desc->Texture1DArray.FirstArraySlice = 0;
+                desc->Texture1DArray.ArraySize = 1;
+            }
+
+            return S_OK;
+        }
+
+        case D3D10_RESOURCE_DIMENSION_TEXTURE2D:
+        {
+            ID3D10Texture2D *texture;
+            D3D10_TEXTURE2D_DESC texture_desc;
+
+            hr = ID3D10Resource_QueryInterface(resource, &IID_ID3D10Texture2D, (void **)&texture);
+            if (FAILED(hr))
+            {
+                ERR("Resource of type TEXTURE2D doesn't implement ID3D10Texture2D?\n");
+                return E_INVALIDARG;
+            }
+
+            ID3D10Texture2D_GetDesc(texture, &texture_desc);
+            ID3D10Texture2D_Release(texture);
+
+            desc->Format = texture_desc.Format;
+            if (texture_desc.ArraySize == 1)
+            {
+                if (texture_desc.SampleDesc.Count == 1)
+                {
+                    desc->ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2D;
+                    desc->Texture2D.MipSlice = 0;
+                }
+                else
+                {
+                    desc->ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2DMS;
+                }
+            }
+            else
+            {
+                if (texture_desc.SampleDesc.Count == 1)
+                {
+                    desc->ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2DARRAY;
+                    desc->Texture2DArray.MipSlice = 0;
+                    desc->Texture2DArray.FirstArraySlice = 0;
+                    desc->Texture2DArray.ArraySize = 1;
+                }
+                else
+                {
+                    desc->ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2DMSARRAY;
+                    desc->Texture2DMSArray.FirstArraySlice = 0;
+                    desc->Texture2DMSArray.ArraySize = 1;
+                }
+            }
+
+            return S_OK;
+        }
+
+        case D3D10_RESOURCE_DIMENSION_TEXTURE3D:
+        {
+            ID3D10Texture3D *texture;
+            D3D10_TEXTURE3D_DESC texture_desc;
+
+            hr = ID3D10Resource_QueryInterface(resource, &IID_ID3D10Texture3D, (void **)&texture);
+            if (FAILED(hr))
+            {
+                ERR("Resource of type TEXTURE3D doesn't implement ID3D10Texture3D?\n");
+                return E_INVALIDARG;
+            }
+
+            ID3D10Texture3D_GetDesc(texture, &texture_desc);
+            ID3D10Texture3D_Release(texture);
+
+            desc->Format = texture_desc.Format;
+            desc->ViewDimension = D3D10_RTV_DIMENSION_TEXTURE3D;
+            desc->Texture3D.MipSlice = 0;
+            desc->Texture3D.FirstWSlice = 0;
+            desc->Texture3D.WSize = 1;
+
+            return S_OK;
+        }
+
+        default:
+            FIXME("Unhandled resource dimension %#x\n", dimension);
+            return E_INVALIDARG;
+    }
+}
+
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateRenderTargetView(ID3D10Device *iface,
         ID3D10Resource *resource, const D3D10_RENDER_TARGET_VIEW_DESC *desc, ID3D10RenderTargetView **view)
 {
-    FIXME("iface %p, resource %p, desc %p, view %p stub!\n", iface, resource, desc, view);
+    struct d3d10_rendertarget_view *object;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, resource %p, desc %p, view %p stub!\n", iface, resource, desc, view);
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate D3D10 rendertarget view object memory\n");
+        return E_OUTOFMEMORY;
+    }
+
+    object->vtbl = &d3d10_rendertarget_view_vtbl;
+    object->refcount = 1;
+
+    if (!desc)
+    {
+        HRESULT hr = d3d10_device_set_rtdesc_from_resource(&object->desc, resource);
+        if (FAILED(hr))
+        {
+            HeapFree(GetProcessHeap(), 0, object);
+            return hr;
+        }
+    }
+    else
+    {
+        object->desc = *desc;
+    }
+
+    object->resource = resource;
+    ID3D10Resource_AddRef(resource);
+
+    *view = (ID3D10RenderTargetView *)object;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateDepthStencilView(ID3D10Device *iface,
@@ -913,19 +1123,19 @@ static inline struct d3d10_device *device_from_device_parent(IWineD3DDeviceParen
     return (struct d3d10_device *)((char*)iface - FIELD_OFFSET(struct d3d10_device, device_parent_vtbl));
 }
 
-HRESULT STDMETHODCALLTYPE device_parent_QueryInterface(IWineD3DDeviceParent *iface, REFIID riid, void **object)
+static HRESULT STDMETHODCALLTYPE device_parent_QueryInterface(IWineD3DDeviceParent *iface, REFIID riid, void **object)
 {
     struct d3d10_device *This = device_from_device_parent(iface);
     return d3d10_device_QueryInterface((ID3D10Device *)This, riid, object);
 }
 
-ULONG STDMETHODCALLTYPE device_parent_AddRef(IWineD3DDeviceParent *iface)
+static ULONG STDMETHODCALLTYPE device_parent_AddRef(IWineD3DDeviceParent *iface)
 {
     struct d3d10_device *This = device_from_device_parent(iface);
     return d3d10_device_AddRef((ID3D10Device *)This);
 }
 
-ULONG STDMETHODCALLTYPE device_parent_Release(IWineD3DDeviceParent *iface)
+static ULONG STDMETHODCALLTYPE device_parent_Release(IWineD3DDeviceParent *iface)
 {
     struct d3d10_device *This = device_from_device_parent(iface);
     return d3d10_device_Release((ID3D10Device *)This);
@@ -937,33 +1147,117 @@ static HRESULT STDMETHODCALLTYPE device_parent_CreateSurface(IWineD3DDeviceParen
         IUnknown *superior, UINT width, UINT height, WINED3DFORMAT format, DWORD usage,
         WINED3DPOOL pool, UINT level, WINED3DCUBEMAP_FACES face, IWineD3DSurface **surface)
 {
+    struct d3d10_device *This = device_from_device_parent(iface);
+    struct d3d10_texture2d *texture;
+    D3D10_TEXTURE2D_DESC desc;
+    HRESULT hr;
+
     FIXME("iface %p, superior %p, width %u, height %u, format %#x, usage %#x,\n"
-            "\tpool %#x, level %u, face %u, surface %p stub!\n",
+            "\tpool %#x, level %u, face %u, surface %p partial stub!\n",
             iface, superior, width, height, format, usage, pool, level, face, surface);
 
-    return E_NOTIMPL;
+    FIXME("Implement DXGI<->wined3d format and usage conversion\n");
+
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = format;
+    desc.SampleDesc.Count = 1;
+    desc.SampleDesc.Quality = 0;
+    desc.Usage = usage;
+    desc.BindFlags = 0;
+    desc.CPUAccessFlags = 0;
+    desc.MiscFlags = 0;
+
+    hr = d3d10_device_CreateTexture2D((ID3D10Device *)This, &desc, NULL, (ID3D10Texture2D **)&texture);
+    if (FAILED(hr))
+    {
+        ERR("CreateTexture2D failed, returning %#x\n", hr);
+        return hr;
+    }
+
+    *surface = texture->wined3d_surface;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE device_parent_CreateRenderTarget(IWineD3DDeviceParent *iface,
         IUnknown *superior, UINT width, UINT height, WINED3DFORMAT format, WINED3DMULTISAMPLE_TYPE multisample_type,
         DWORD multisample_quality, BOOL lockable, IWineD3DSurface **surface)
 {
+    struct d3d10_device *This = device_from_device_parent(iface);
+    struct d3d10_texture2d *texture;
+    D3D10_TEXTURE2D_DESC desc;
+    HRESULT hr;
+
     FIXME("iface %p, superior %p, width %u, height %u, format %#x, multisample_type %#x,\n"
             "\tmultisample_quality %u, lockable %u, surface %p stub!\n",
             iface, superior, width, height, format, multisample_type, multisample_quality, lockable, surface);
 
-    return E_NOTIMPL;
+    FIXME("Implement DXGI<->wined3d format and usage conversion\n");
+
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = format;
+    desc.SampleDesc.Count = multisample_type;
+    desc.SampleDesc.Quality = multisample_quality;
+    desc.Usage = D3D10_USAGE_DEFAULT;
+    desc.BindFlags = D3D10_BIND_RENDER_TARGET;
+    desc.CPUAccessFlags = 0;
+    desc.MiscFlags = 0;
+
+    hr = d3d10_device_CreateTexture2D((ID3D10Device *)This, &desc, NULL, (ID3D10Texture2D **)&texture);
+    if (FAILED(hr))
+    {
+        ERR("CreateTexture2D failed, returning %#x\n", hr);
+        return hr;
+    }
+
+    *surface = texture->wined3d_surface;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE device_parent_CreateDepthStencilSurface(IWineD3DDeviceParent *iface,
         IUnknown *superior, UINT width, UINT height, WINED3DFORMAT format, WINED3DMULTISAMPLE_TYPE multisample_type,
         DWORD multisample_quality, BOOL discard, IWineD3DSurface **surface)
 {
+    struct d3d10_device *This = device_from_device_parent(iface);
+    struct d3d10_texture2d *texture;
+    D3D10_TEXTURE2D_DESC desc;
+    HRESULT hr;
+
     FIXME("iface %p, superior %p, width %u, height %u, format %#x, multisample_type %#x,\n"
             "\tmultisample_quality %u, discard %u, surface %p stub!\n",
             iface, superior, width, height, format, multisample_type, multisample_quality, discard, surface);
 
-    return E_NOTIMPL;
+    FIXME("Implement DXGI<->wined3d format and usage conversion\n");
+
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = format;
+    desc.SampleDesc.Count = multisample_type;
+    desc.SampleDesc.Quality = multisample_quality;
+    desc.Usage = D3D10_USAGE_DEFAULT;
+    desc.BindFlags = D3D10_BIND_RENDER_TARGET;
+    desc.CPUAccessFlags = 0;
+    desc.MiscFlags = 0;
+
+    hr = d3d10_device_CreateTexture2D((ID3D10Device *)This, &desc, NULL, (ID3D10Texture2D **)&texture);
+    if (FAILED(hr))
+    {
+        ERR("CreateTexture2D failed, returning %#x\n", hr);
+        return hr;
+    }
+
+    *surface = texture->wined3d_surface;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE device_parent_CreateVolume(IWineD3DDeviceParent *iface,

@@ -96,7 +96,7 @@ static BOOL CALLBACK EnumAxes(
     VOID* pContext)
 {
     HRESULT hr;
-    JoystickInfo * info = (JoystickInfo *)pContext;
+    JoystickInfo * info = pContext;
 
     if (IsEqualIID(&pdidoi->guidType, &GUID_XAxis) ||
         IsEqualIID(&pdidoi->guidType, &GUID_YAxis) ||
@@ -171,7 +171,7 @@ static BOOL CALLBACK EnumJoysticks(
     LPVOID pvRef)
 {
     HRESULT hr;
-    UserData * data = (UserData *)pvRef;
+    UserData * data = pvRef;
     LPDIRECTINPUTDEVICE pJoystick;
     DIDATAFORMAT format;
     DIDEVCAPS caps;
@@ -267,7 +267,7 @@ static BOOL CALLBACK EnumJoysticks(
     info.lMin = 0;
     info.lMax = 0xffff;
     /* enumerate objects */
-    hr = IDirectInputDevice_EnumObjects(pJoystick, EnumAxes, (VOID*)&info, DIDFT_ALL);
+    hr = IDirectInputDevice_EnumObjects(pJoystick, EnumAxes, &info, DIDFT_ALL);
     ok(hr==DI_OK,"IDirectInputDevice_EnumObjects() failed: %08x\n", hr);
 
     ok(caps.dwAxes == info.axis, "Number of enumerated axes (%d) doesn't match capabilities (%d)\n", info.axis, caps.dwAxes);
@@ -280,7 +280,7 @@ static BOOL CALLBACK EnumJoysticks(
     info.lMin = -2000;
     info.lMax = +2000;
     info.dZone= 123;
-    hr = IDirectInputDevice_EnumObjects(pJoystick, EnumAxes, (VOID*)&info, DIDFT_ALL);
+    hr = IDirectInputDevice_EnumObjects(pJoystick, EnumAxes, &info, DIDFT_ALL);
     ok(hr==DI_OK,"IDirectInputDevice_EnumObjects() failed: %08x\n", hr);
 
     hr = IDirectInputDevice_GetDeviceInfo(pJoystick, 0);
@@ -328,6 +328,8 @@ static BOOL CALLBACK EnumJoysticks(
         DIEFFECT eff;
         LPDIRECTINPUTEFFECT effect = NULL;
         LONG cnt1, cnt2;
+        HWND real_hWnd;
+        HINSTANCE hInstance = GetModuleHandle(NULL);
 
         trace("Testing force-feedback\n");
         memset(&eff, 0, sizeof(eff));
@@ -342,6 +344,25 @@ static BOOL CALLBACK EnumJoysticks(
         eff.cbTypeSpecificParams  = sizeof(force);
         eff.lpvTypeSpecificParams = &force;
 
+        /* Sending effects to joystick requires
+         * calling IDirectInputEffect_Initialize, which requires
+         * having exclusive access to the device, which requires
+         * - not having acquired the joystick when calling
+         *   IDirectInputDevice_SetCooperativeLevel
+         * - a visible window
+         */
+        real_hWnd = CreateWindowEx(0, "EDIT", "Test text", 0, 10, 10, 300,
+                                   300, NULL, NULL, hInstance, NULL);
+        ok(real_hWnd!=0,"CreateWindowEx failed: %p\n", real_hWnd);
+        ShowWindow(real_hWnd, SW_SHOW);
+        hr = IDirectInputDevice_Unacquire(pJoystick);
+        ok(hr==DI_OK,"IDirectInputDevice_Unacquire() failed: %08x\n", hr);
+        hr = IDirectInputDevice_SetCooperativeLevel(pJoystick, real_hWnd,
+                                                    DISCL_EXCLUSIVE | DISCL_FOREGROUND);
+        ok(hr==DI_OK,"IDirectInputDevice_SetCooperativeLevel() failed: %08x\n", hr);
+        hr = IDirectInputDevice_Acquire(pJoystick);
+        ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %08x\n", hr);
+
         cnt1 = get_refcount((IUnknown*)pJoystick);
 
         hr = IDirectInputDevice2_CreateEffect((LPDIRECTINPUTDEVICE2)pJoystick, &GUID_ConstantForce,
@@ -352,11 +373,135 @@ static BOOL CALLBACK EnumJoysticks(
 
         if (effect)
         {
+            DWORD effect_status;
+            struct DIPROPDWORD diprop_word;
+
+            hr = IDirectInputEffect_Initialize(effect, hInstance, data->version,
+                                               &GUID_ConstantForce);
+            ok(hr==DI_OK,"IDirectInputEffect_Initialize failed: %08x\n", hr);
+            hr = IDirectInputEffect_SetParameters(effect, &eff, DIEP_AXES | DIEP_DIRECTION |
+                                                  DIEP_TYPESPECIFICPARAMS);
+            ok(hr==DI_OK,"IDirectInputEffect_SetParameters failed: %08x\n", hr);
+            if (hr==DI_OK) {
+                /* Test that upload, unacquire, acquire still permits updating
+                 * uploaded effect. */
+                hr = IDirectInputDevice_Unacquire(pJoystick);
+                ok(hr==DI_OK,"IDirectInputDevice_Unacquire() failed: %08x\n", hr);
+                hr = IDirectInputDevice_Acquire(pJoystick);
+                ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %08x\n", hr);
+                hr = IDirectInputEffect_SetParameters(effect, &eff, DIEP_GAIN);
+                ok(hr==DI_OK,"IDirectInputEffect_SetParameters failed: %08x\n", hr);
+            }
+
+            /* Check effect status.
+             * State: initialy stopped
+             * start
+             * State: started
+             * unacquire, acquire, download
+             * State: stopped
+             * start
+             * State: started
+             *
+             * Shows that:
+             * - effects are stopped after Unacquire + Acquire
+             * - effects are preserved (Download + Start doesn't complain
+             *   about incomplete effect)
+             */
+            hr = IDirectInputEffect_GetEffectStatus(effect, &effect_status);
+            ok(hr==DI_OK,"IDirectInputEffect_GetEffectStatus() failed: %08x\n", hr);
+            ok(effect_status==0,"IDirectInputEffect_GetEffectStatus() reported effect as started\n");
+            hr = IDirectInputEffect_SetParameters(effect, &eff, DIEP_START);
+            ok(hr==DI_OK,"IDirectInputEffect_SetParameters failed: %08x\n", hr);
+            hr = IDirectInputEffect_GetEffectStatus(effect, &effect_status);
+            ok(hr==DI_OK,"IDirectInputEffect_GetEffectStatus() failed: %08x\n", hr);
+            todo_wine ok(effect_status!=0,"IDirectInputEffect_GetEffectStatus() reported effect as stopped\n");
+            hr = IDirectInputDevice_Unacquire(pJoystick);
+            ok(hr==DI_OK,"IDirectInputDevice_Unacquire() failed: %08x\n", hr);
+            hr = IDirectInputDevice_Acquire(pJoystick);
+            ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %08x\n", hr);
+            hr = IDirectInputEffect_Download(effect);
+            ok(hr==DI_OK,"IDirectInputEffect_Download() failed: %08x\n", hr);
+            hr = IDirectInputEffect_GetEffectStatus(effect, &effect_status);
+            ok(hr==DI_OK,"IDirectInputEffect_GetEffectStatus() failed: %08x\n", hr);
+            ok(effect_status==0,"IDirectInputEffect_GetEffectStatus() reported effect as started\n");
+            hr = IDirectInputEffect_Start(effect, 1, 0);
+            ok(hr==DI_OK,"IDirectInputEffect_Start() failed: %08x\n", hr);
+            hr = IDirectInputEffect_GetEffectStatus(effect, &effect_status);
+            ok(hr==DI_OK,"IDirectInputEffect_GetEffectStatus() failed: %08x\n", hr);
+            todo_wine ok(effect_status!=0,"IDirectInputEffect_GetEffectStatus() reported effect as stopped\n");
+
+            /* Check autocenter status
+             * State: initialy stopped
+             * enable
+             * State: enabled
+             * acquire
+             * State: enabled
+             * unacquire
+             * State: enabled
+             *
+             * IDirectInputDevice2_SetProperty(DIPROP_AUTOCENTER) can only be
+             * executed when devide is released.
+             *
+             * If Executed interactively, user can feel that autocenter is
+             * only disabled when joystick is acquired.
+             */
+            diprop_word.diph.dwSize = sizeof(diprop_word);
+            diprop_word.diph.dwHeaderSize = sizeof(diprop_word.diph);
+            diprop_word.diph.dwObj = 0;
+            diprop_word.diph.dwHow = DIPH_DEVICE;
+            hr = IDirectInputDevice_Unacquire(pJoystick);
+            ok(hr==DI_OK,"IDirectInputDevice_Unacquire() failed: %08x\n", hr);
+            hr = IDirectInputDevice2_GetProperty(pJoystick, DIPROP_AUTOCENTER, &diprop_word.diph);
+            ok(hr==DI_OK,"IDirectInputDevice2_GetProperty() failed: %08x\n", hr);
+            ok(diprop_word.dwData==DIPROPAUTOCENTER_ON,"IDirectInputDevice2_GetProperty() reported autocenter as disabled\n");
+            diprop_word.dwData = DIPROPAUTOCENTER_OFF;
+            hr = IDirectInputDevice2_SetProperty(pJoystick, DIPROP_AUTOCENTER, &diprop_word.diph);
+            ok(hr==DI_OK,"IDirectInputDevice2_SetProperty() failed: %08x\n", hr);
+            hr = IDirectInputDevice2_GetProperty(pJoystick, DIPROP_AUTOCENTER, &diprop_word.diph);
+            ok(hr==DI_OK,"IDirectInputDevice2_GetProperty() failed: %08x\n", hr);
+            ok(diprop_word.dwData==DIPROPAUTOCENTER_OFF,"IDirectInputDevice2_GetProperty() reported autocenter as enabled\n");
+            if (winetest_interactive) {
+                trace("Acquiring in 2s, autocenter will be disabled.\n");
+                Sleep(2000);
+            }
+            hr = IDirectInputDevice_Acquire(pJoystick);
+            ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %08x\n", hr);
+            if (winetest_interactive)
+                trace("Acquired.\n");
+            hr = IDirectInputDevice2_GetProperty(pJoystick, DIPROP_AUTOCENTER, &diprop_word.diph);
+            ok(hr==DI_OK,"IDirectInputDevice2_GetProperty() failed: %08x\n", hr);
+            ok(diprop_word.dwData==DIPROPAUTOCENTER_OFF,"IDirectInputDevice2_GetProperty() reported autocenter as enabled\n");
+            if (winetest_interactive) {
+                trace("Releasing in 2s, autocenter will be re-enabled.\n");
+                Sleep(2000);
+            }
+            hr = IDirectInputDevice_Unacquire(pJoystick);
+            ok(hr==DI_OK,"IDirectInputDevice_Unacquire() failed: %08x\n", hr);
+            if (winetest_interactive)
+                trace("Released\n");
+            hr = IDirectInputDevice2_GetProperty(pJoystick, DIPROP_AUTOCENTER, &diprop_word.diph);
+            ok(hr==DI_OK,"IDirectInputDevice2_GetProperty() failed: %08x\n", hr);
+            ok(diprop_word.dwData==DIPROPAUTOCENTER_OFF,"IDirectInputDevice2_GetProperty() reported autocenter as enabled\n");
+            hr = IDirectInputDevice_Acquire(pJoystick);
+            ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %08x\n", hr);
+            hr = IDirectInputDevice2_GetProperty(pJoystick, DIPROP_AUTOCENTER, &diprop_word.diph);
+
             ref = IUnknown_Release(effect);
             ok(ref == 0, "IDirectInputDevice_Release() reference count = %d\n", ref);
         }
         cnt1 = get_refcount((IUnknown*)pJoystick);
         ok(cnt1 == cnt2, "Ref count is wrong %d != %d\n", cnt1, cnt2);
+
+        /* Before destroying the window, release joystick to revert to
+         * non-exclusive, background cooperative level. */
+        hr = IDirectInputDevice_Unacquire(pJoystick);
+        ok(hr==DI_OK,"IDirectInputDevice_Unacquire() failed: %08x\n", hr);
+        hr = IDirectInputDevice_SetCooperativeLevel(pJoystick, hWnd,
+                                                    DISCL_NONEXCLUSIVE | DISCL_BACKGROUND);
+        ok(hr==DI_OK,"IDirectInputDevice_SetCooperativeLevel() failed: %08x\n", hr);
+        DestroyWindow (real_hWnd);
+        hr = IDirectInputDevice_Acquire(pJoystick);
+        ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %08x\n", hr);
     }
 
     if (winetest_interactive) {

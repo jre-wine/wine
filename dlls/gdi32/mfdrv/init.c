@@ -166,7 +166,7 @@ static DC *MFDRV_AllocMetaFile(void)
     DC *dc;
     METAFILEDRV_PDEVICE *physDev;
 
-    if (!(dc = alloc_dc_ptr( &MFDRV_Funcs, METAFILE_DC_MAGIC ))) return NULL;
+    if (!(dc = alloc_dc_ptr( &MFDRV_Funcs, OBJ_METADC ))) return NULL;
 
     physDev = HeapAlloc(GetProcessHeap(),0,sizeof(*physDev));
     if (!physDev)
@@ -308,7 +308,7 @@ static DC *MFDRV_CloseMetaFile( HDC hdc )
     TRACE("(%p)\n", hdc );
 
     if (!(dc = get_dc_ptr( hdc ))) return NULL;
-    if (GDIMAGIC(dc->header.wMagic) != METAFILE_DC_MAGIC)
+    if (dc->header.type != OBJ_METADC)
     {
         release_dc_ptr( dc );
         return NULL;
@@ -339,8 +339,8 @@ static DC *MFDRV_CloseMetaFile( HDC hdc )
         }
 
 	physDev->mh->mtType = METAFILE_MEMORY; /* This is what windows does */
-        if (!WriteFile(physDev->hFile, (LPSTR)physDev->mh,
-                       sizeof(*physDev->mh), NULL, NULL)) {
+        if (!WriteFile(physDev->hFile, physDev->mh, sizeof(*physDev->mh),
+                       NULL, NULL)) {
             MFDRV_DeleteDC( dc );
             return 0;
         }
@@ -457,7 +457,7 @@ BOOL MFDRV_WriteRecord( PHYSDEV dev, METARECORD *mr, DWORD rlen)
         break;
     case METAFILE_DISK:
         TRACE("Writing record to disk\n");
-	if (!WriteFile(physDev->hFile, (char *)mr, rlen, NULL, NULL))
+        if (!WriteFile(physDev->hFile, mr, rlen, NULL, NULL))
 	    return FALSE;
         break;
     default:

@@ -39,7 +39,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dc);
 
 static const WCHAR displayW[] = { 'd','i','s','p','l','a','y',0 };
 
-static BOOL DC_DeleteObject( HGDIOBJ handle, void *obj );
+static BOOL DC_DeleteObject( HGDIOBJ handle );
 
 static const struct gdi_obj_funcs dc_funcs =
 {
@@ -53,13 +53,13 @@ static const struct gdi_obj_funcs dc_funcs =
 
 static inline DC *get_dc_obj( HDC hdc )
 {
-    DC *dc = GDI_GetObjPtr( hdc, MAGIC_DONTCARE );
+    DC *dc = GDI_GetObjPtr( hdc, 0 );
     if (!dc) return NULL;
 
-    if ((GDIMAGIC(dc->header.wMagic) != DC_MAGIC) &&
-        (GDIMAGIC(dc->header.wMagic) != MEMORY_DC_MAGIC) &&
-        (GDIMAGIC(dc->header.wMagic) != METAFILE_DC_MAGIC) &&
-        (GDIMAGIC(dc->header.wMagic) != ENHMETAFILE_DC_MAGIC))
+    if ((dc->header.type != OBJ_DC) &&
+        (dc->header.type != OBJ_MEMDC) &&
+        (dc->header.type != OBJ_METADC) &&
+        (dc->header.type != OBJ_ENHMETADC))
     {
         GDI_ReleaseObj( hdc );
         SetLastError( ERROR_INVALID_HANDLE );
@@ -74,12 +74,10 @@ static inline DC *get_dc_obj( HDC hdc )
  */
 DC *alloc_dc_ptr( const DC_FUNCTIONS *funcs, WORD magic )
 {
-    HDC hdc;
     DC *dc;
 
-    if (!(dc = GDI_AllocObject( sizeof(*dc), magic, (HGDIOBJ*)&hdc, &dc_funcs ))) return NULL;
+    if (!(dc = HeapAlloc( GetProcessHeap(), 0, sizeof(*dc) ))) return NULL;
 
-    dc->hSelf               = hdc;
     dc->funcs               = funcs;
     dc->physDev             = NULL;
     dc->thread              = GetCurrentThreadId();
@@ -105,9 +103,9 @@ DC *alloc_dc_ptr( const DC_FUNCTIONS *funcs, WORD magic )
     dc->hMetaRgn            = 0;
     dc->hMetaClipRgn        = 0;
     dc->hVisRgn             = 0;
-    dc->hPen                = GetStockObject( BLACK_PEN );
-    dc->hBrush              = GetStockObject( WHITE_BRUSH );
-    dc->hFont               = GetStockObject( SYSTEM_FONT );
+    dc->hPen                = GDI_inc_ref_count( GetStockObject( BLACK_PEN ));
+    dc->hBrush              = GDI_inc_ref_count( GetStockObject( WHITE_BRUSH ));
+    dc->hFont               = GDI_inc_ref_count( GetStockObject( SYSTEM_FONT ));
     dc->hBitmap             = 0;
     dc->hDevice             = 0;
     dc->hPalette            = GetStockObject( DEFAULT_PALETTE );
@@ -148,7 +146,12 @@ DC *alloc_dc_ptr( const DC_FUNCTIONS *funcs, WORD magic )
     dc->BoundsRect.bottom   = 0;
     dc->saved_visrgn        = NULL;
     PATH_InitGdiPath(&dc->path);
-    GDI_ReleaseObj( dc->hSelf );
+
+    if (!(dc->hSelf = alloc_gdi_handle( &dc->header, magic, &dc_funcs )))
+    {
+        HeapFree( GetProcessHeap(), 0, dc );
+        dc = NULL;
+    }
     return dc;
 }
 
@@ -160,9 +163,8 @@ DC *alloc_dc_ptr( const DC_FUNCTIONS *funcs, WORD magic )
 BOOL free_dc_ptr( DC *dc )
 {
     assert( dc->refcount == 1 );
-    /* grab the gdi lock again */
-    if (!GDI_GetObjPtr( dc->hSelf, MAGIC_DONTCARE )) return FALSE;  /* shouldn't happen */
-    return GDI_FreeObject( dc->hSelf, dc );
+    if (free_gdi_handle( dc->hSelf ) != dc) return FALSE;  /* shouldn't happen */
+    return HeapFree( GetProcessHeap(), 0, dc );
 }
 
 
@@ -224,9 +226,8 @@ void update_dc( DC *dc )
 /***********************************************************************
  *           DC_DeleteObject
  */
-static BOOL DC_DeleteObject( HGDIOBJ handle, void *obj )
+static BOOL DC_DeleteObject( HGDIOBJ handle )
 {
-    GDI_ReleaseObj( handle );
     return DeleteDC( handle );
 }
 
@@ -333,12 +334,11 @@ static HDC GetDCState( HDC hdc )
     HGDIOBJ handle;
 
     if (!(dc = get_dc_ptr( hdc ))) return 0;
-    if (!(newdc = GDI_AllocObject( sizeof(DC), GDIMAGIC(dc->header.wMagic), &handle, &dc_funcs )))
+    if (!(newdc = HeapAlloc( GetProcessHeap(), 0, sizeof(*newdc ))))
     {
       release_dc_ptr( dc );
       return 0;
     }
-    TRACE("(%p): returning %p\n", hdc, handle );
 
     newdc->flags            = dc->flags | DC_SAVED;
     newdc->layout           = dc->layout;
@@ -381,13 +381,12 @@ static HDC GetDCState( HDC hdc )
     newdc->vportExtX        = dc->vportExtX;
     newdc->vportExtY        = dc->vportExtY;
     newdc->BoundsRect       = dc->BoundsRect;
+    newdc->gdiFont          = dc->gdiFont;
 
-    newdc->hSelf = (HDC)handle;
     newdc->thread    = GetCurrentThreadId();
     newdc->refcount  = 1;
     newdc->saveLevel = 0;
     newdc->saved_dc  = 0;
-    GDI_ReleaseObj( handle );
 
     PATH_InitGdiPath( &newdc->path );
 
@@ -395,6 +394,15 @@ static HDC GetDCState( HDC hdc )
     newdc->hookThunk  = NULL;
     newdc->hookProc   = 0;
     newdc->saved_visrgn = NULL;
+
+    if (!(newdc->hSelf = alloc_gdi_handle( &newdc->header, dc->header.type, &dc_funcs )))
+    {
+        HeapFree( GetProcessHeap(), 0, newdc );
+        release_dc_ptr( dc );
+        return 0;
+    }
+    handle = newdc->hSelf;
+    TRACE("(%p): returning %p\n", hdc, handle );
 
     /* Get/SetDCState() don't change hVisRgn field ("Undoc. Windows" p.559). */
 
@@ -413,11 +421,6 @@ static HDC GetDCState( HDC hdc )
         CombineRgn( newdc->hMetaRgn, dc->hMetaRgn, 0, RGN_COPY );
     }
     /* don't bother recomputing hMetaClipRgn, we'll do that in SetDCState */
-
-    if(dc->gdiFont) {
-	newdc->gdiFont = dc->gdiFont;
-    } else
-        newdc->gdiFont = 0;
 
     release_dc_ptr( newdc );
     release_dc_ptr( dc );
@@ -674,10 +677,10 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
         ERR( "no driver found for %s\n", debugstr_w(buf) );
         return 0;
     }
-    if (!(dc = alloc_dc_ptr( funcs, DC_MAGIC ))) goto error;
+    if (!(dc = alloc_dc_ptr( funcs, OBJ_DC ))) goto error;
     hdc = dc->hSelf;
 
-    dc->hBitmap = GetStockObject( DEFAULT_BITMAP );
+    dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
     if (!(dc->hVisRgn = CreateRectRgn( 0, 0, 1, 1 ))) goto error;
 
     TRACE("(driver=%s, device=%s, output=%s): returning %p\n",
@@ -790,11 +793,11 @@ HDC WINAPI CreateCompatibleDC( HDC hdc )
 
     if (!funcs && !(funcs = DRIVER_load_driver( displayW ))) return 0;
 
-    if (!(dc = alloc_dc_ptr( funcs, MEMORY_DC_MAGIC ))) goto error;
+    if (!(dc = alloc_dc_ptr( funcs, OBJ_MEMDC ))) goto error;
 
     TRACE("(%p): returning %p\n", hdc, dc->hSelf );
 
-    dc->hBitmap = GetStockObject( DEFAULT_BITMAP );
+    dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
     if (!(dc->hVisRgn = CreateRectRgn( 0, 0, 1, 1 ))) goto error;   /* default bitmap is 1x1 */
 
     /* Copy the driver-specific physical device info into

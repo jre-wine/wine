@@ -281,7 +281,7 @@
 @ stdcall DeleteFiber(ptr)
 @ stdcall DeleteFileA(str)
 @ stdcall DeleteFileW(wstr)
-# @ stub DeleteTimerQueue
+@ stdcall DeleteTimerQueue(long)
 @ stdcall DeleteTimerQueueEx (long long)
 @ stdcall DeleteTimerQueueTimer(long long long)
 # @ stub DeleteVolumeMountPointA
@@ -835,7 +835,7 @@
 @ stdcall OpenMutexA(long long str)
 @ stdcall OpenMutexW(long long wstr)
 @ stdcall OpenProcess(long long long)
-@ stub OpenProfileUserMapping
+@ stdcall OpenProfileUserMapping()
 @ stdcall OpenSemaphoreA(long long str)
 @ stdcall OpenSemaphoreW(long long wstr)
 @ stdcall OpenThread(long long long)
@@ -1141,6 +1141,8 @@
 @ stdcall WaitNamedPipeW (wstr long)
 @ stdcall WideCharToMultiByte(long long wstr long ptr long ptr ptr)
 @ stdcall WinExec(str long)
+@ stdcall Wow64DisableWow64FsRedirection(ptr)
+@ stdcall Wow64RevertWow64FsRedirection(ptr)
 @ stdcall WriteConsoleA(long ptr long ptr ptr)
 @ stdcall WriteConsoleInputA(long ptr long ptr)
 @ stub WriteConsoleInputVDMA

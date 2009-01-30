@@ -89,7 +89,7 @@ WCHAR* GetWideString(const char* strA)
  * Allocates memory and converts input from multibyte to wide chars
  * Returned string must be freed by the caller
  */
-WCHAR* GetWideStringN(const char* strA, int chars, DWORD *len)
+static WCHAR* GetWideStringN(const char* strA, int chars, DWORD *len)
 {
     if(strA)
     {
@@ -128,7 +128,7 @@ char* GetMultiByteString(const WCHAR* strW)
  * Allocates memory and converts input from wide chars to multibyte
  * Returned string must be freed by the caller
  */
-char* GetMultiByteStringN(const WCHAR* strW, int chars, DWORD* len)
+static char* GetMultiByteStringN(const WCHAR* strW, int chars, DWORD* len)
 {
     if(strW)
     {
@@ -394,7 +394,7 @@ static LONG setValue(WCHAR* val_name, WCHAR* val_data, BOOL is_unicode)
         if (!lpbData)
             return ERROR_INVALID_DATA;
 
-        if(dwDataType == REG_MULTI_SZ && !is_unicode)
+        if((dwDataType == REG_MULTI_SZ || dwDataType == REG_EXPAND_SZ) && !is_unicode)
         {
             LPBYTE tmp = lpbData;
             lpbData = (LPBYTE)GetWideStringN((char*)lpbData, dwLen, &dwLen);
@@ -611,7 +611,7 @@ static void processRegEntry(WCHAR* stdInput, BOOL isUnicode)
  * Parameters:
  *   in - input stream to read from
  */
-void processRegLinesA(FILE *in)
+static void processRegLinesA(FILE *in)
 {
     LPSTR line           = NULL;  /* line read from input stream */
     ULONG lineSize       = REG_VAL_BUF_SIZE;
@@ -726,7 +726,7 @@ void processRegLinesA(FILE *in)
     HeapFree(GetProcessHeap(), 0, line);
 }
 
-void processRegLinesW(FILE *in)
+static void processRegLinesW(FILE *in)
 {
     WCHAR* buf           = NULL;  /* line read from input stream */
     ULONG lineSize       = REG_VAL_BUF_SIZE;

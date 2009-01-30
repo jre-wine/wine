@@ -48,7 +48,7 @@ static HWND new_richedit(HWND parent) {
   return new_window(RICHEDIT_CLASS10A, ES_MULTILINE, parent);
 }
 
-static void test_WM_SETTEXT()
+static void test_WM_SETTEXT(void)
 {
   HWND hwndRichEdit = new_richedit(NULL);
   const char * TestItem1 = "TestSomeText";
@@ -71,19 +71,18 @@ static void test_WM_SETTEXT()
   LRESULT result;
 
   /* This test attempts to show that WM_SETTEXT on a riched32 control does not
-     attempt to modify the text that is pasted into the control, and should
-     return it as is. In particular, \r\r\n is NOT converted, unlike riched20.
-     Currently, builtin riched32 mangles solitary \r or \n when not part of
-     a \r\n pair.
-
-     For riched32, the rules for breaking lines seem to be the following:
-     - \r\n is one line break. This is the normal case.
-     - \r{0,N}\n is one line break. In particular, \n by itself is a line break.
-     - \n{1,N} are that many line breaks.
-     - \r with text or other characters (except \n) past it, is a line break. That
-       is, a run of \r{N} without a terminating \n is considered N line breaks
-     - \r at the end of the text is NOT a line break. This differs from riched20,
-       where \r at the end of the text is a proper line break.
+   * attempt to modify the text that is pasted into the control, and should
+   * return it as is. In particular, \r\r\n is NOT converted, unlike riched20.
+   *
+   * For riched32, the rules for breaking lines seem to be the following:
+   * - \r\n is one line break. This is the normal case.
+   * - \r{0,2}\n is one line break. In particular, \n by itself is a line break.
+   * - \r{0,N-1}\r\r\n is N line breaks.
+   * - \n{1,N} are that many line breaks.
+   * - \r with text or other characters (except \n) past it, is a line break. That
+   *   is, a run of \r{N} without a terminating \n is considered N line breaks
+   * - \r at the end of the text is NOT a line break. This differs from riched20,
+   *   where \r at the end of the text is a proper line break.
    */
 
 #define TEST_SETTEXT(a, b, nlines) \
@@ -357,9 +356,10 @@ static const struct getline_s {
   const char *text;
 } gl[] = {
   {0, 10, "foo bar\r\n"},
-  {1, 10, "\n"},
-  {2, 10, "bar\n"},
-  {3, 10, "\r\n"},
+  {1, 10, "\r"},
+  {2, 10, "\r\r\n"},
+  {3, 10, "bar\n"},
+  {4, 10, "\r\n"},
 
   /* Buffer smaller than line length */
   {0, 2, "foo bar\r"},
@@ -374,7 +374,8 @@ static void test_EM_GETLINE(void)
   static const int nBuf = 1024;
   char dest[1024], origdest[1024];
   const char text[] = "foo bar\r\n"
-      "\n"
+      "\r"
+      "\r\r\n"
       "bar\n";
 
   SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) text);
@@ -420,28 +421,41 @@ static void test_EM_LINELENGTH(void)
         "richedit1\r"
         "richedit1\n"
         "richedit1\r\n"
-        "richedit1\r\r\r\r\r\n";
-  int offset_test[10][2] = {
-        {0, 9},
-        {5, 9},
-        {10, 9},
-        {15, 9},
-        {20, 9},
-        {25, 9},
-        {30, 9},
-        {35, 9},
-        {40, 9}, /* <----- in the middle of the \r run, but run not counted */
-        {45, 0},
+        "short\r"
+        "richedit1\r"
+        "\r"
+        "\r"
+        "\r\r\n";
+  int offset_test[16][2] = {
+        {0, 9},  /* Line 1: |richedit1\r */
+        {5, 9},  /* Line 1: riche|dit1\r */
+        {10, 9}, /* Line 2: |richedit1\n */
+        {15, 9}, /* Line 2: riche|dit1\n */
+        {20, 9}, /* Line 3: |richedit1\r\n */
+        {25, 9}, /* Line 3: riche|dit1\r\n */
+        {30, 9}, /* Line 3: richedit1\r|\n */
+        {31, 5}, /* Line 4: |short\r */
+        {42, 9}, /* Line 5: riche|dit1\r */
+        {46, 9}, /* Line 5: richedit1|\r */
+        {47, 0}, /* Line 6: |\r */
+        {48, 0}, /* Line 7: |\r */
+        {49, 0}, /* Line 8: |\r\r\n */
+        {50, 0}, /* Line 8: \r|\r\n */
+        {51, 0}, /* Line 8: \r\r|\n */
+        {52, 0}, /* Line 9: \r\r\n| */
   };
   int i;
   LRESULT result;
 
   SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) text);
 
-  for (i = 0; i < 10; i++) {
+  result = SendMessage(hwndRichEdit, EM_GETLINECOUNT, 0, 0);
+  ok(result == 9, "Incorrect line count of %ld\n", result);
+
+  for (i = 0; i < sizeof(offset_test)/sizeof(offset_test[0]); i++) {
     result = SendMessage(hwndRichEdit, EM_LINELENGTH, offset_test[i][0], 0);
     ok(result == offset_test[i][1], "Length of line at offset %d is %ld, expected %d\n",
-        offset_test[i][0], result, offset_test[i][1]);
+       offset_test[i][0], result, offset_test[i][1]);
   }
 
   DestroyWindow(hwndRichEdit);
@@ -451,9 +465,10 @@ static void test_EM_GETTEXTRANGE(void)
 {
     HWND hwndRichEdit = new_richedit(NULL);
     const char * text1 = "foo bar\r\nfoo bar";
-    const char * text2 = "foo bar\rfoo bar";
+    const char * text3 = "foo bar\rfoo bar";
     const char * expect1 = "bar\r\nfoo";
-    const char * expect2 = "bar\rfoo";
+    const char * expect2 = "\nfoo";
+    const char * expect3 = "bar\rfoo";
     char buffer[1024] = {0};
     LRESULT result;
     TEXTRANGEA textRange;
@@ -467,7 +482,14 @@ static void test_EM_GETTEXTRANGE(void)
     ok(result == 8, "EM_GETTEXTRANGE returned %ld\n", result);
     ok(!strcmp(expect1, buffer), "EM_GETTEXTRANGE filled %s\n", buffer);
 
-    SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)text2);
+    textRange.lpstrText = buffer;
+    textRange.chrg.cpMin = 8;
+    textRange.chrg.cpMax = 12;
+    result = SendMessage(hwndRichEdit, EM_GETTEXTRANGE, 0, (LPARAM)&textRange);
+    ok(result == 4, "EM_GETTEXTRANGE returned %ld\n", result);
+    ok(!strcmp(expect2, buffer), "EM_GETTEXTRANGE filled %s\n", buffer);
+
+    SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)text3);
 
     textRange.lpstrText = buffer;
     textRange.chrg.cpMin = 4;
@@ -475,7 +497,7 @@ static void test_EM_GETTEXTRANGE(void)
     result = SendMessage(hwndRichEdit, EM_GETTEXTRANGE, 0, (LPARAM)&textRange);
     ok(result == 7, "EM_GETTEXTRANGE returned %ld\n", result);
 
-    ok(!strcmp(expect2, buffer), "EM_GETTEXTRANGE filled %s\n", buffer);
+    ok(!strcmp(expect3, buffer), "EM_GETTEXTRANGE filled %s\n", buffer);
 
 
     DestroyWindow(hwndRichEdit);
@@ -512,6 +534,8 @@ static void test_EM_GETSELTEXT(void)
 
 static const char haystack[] = "WINEWine wineWine wine WineWine";
                              /* ^0        ^10       ^20       ^30 */
+
+static const char haystack2[] = "first\r\r\nsecond";
 
 struct find_s {
   int start;
@@ -598,6 +622,13 @@ struct find_s find_tests2[] = {
   {4, -1, "INEW", 0, 10},
 };
 
+struct find_s find_tests3[] = {
+  /* Searching for end of line characters */
+  {0, -1, "t\r\r\ns", FR_DOWN | FR_MATCHCASE, 4},
+  {6, -1, "\r\n", FR_DOWN | FR_MATCHCASE, 6},
+  {7, -1, "\n", FR_DOWN | FR_MATCHCASE, 7},
+};
+
 static void check_EM_FINDTEXT(HWND hwnd, const char *name, struct find_s *f, int id) {
   int findloc;
   FINDTEXT ft;
@@ -641,8 +672,15 @@ static void run_tests_EM_FINDTEXT(HWND hwnd, const char *name, struct find_s *fi
   int i;
 
   for (i = 0; i < num_tests; i++) {
-    check_EM_FINDTEXT(hwnd, name, &find[i], i);
-    check_EM_FINDTEXTEX(hwnd, name, &find[i], i);
+    if (*name == '3' && i == 0) {
+        todo_wine {
+            check_EM_FINDTEXT(hwnd, name, &find[i], i);
+            check_EM_FINDTEXTEX(hwnd, name, &find[i], i);
+        }
+    } else {
+        check_EM_FINDTEXT(hwnd, name, &find[i], i);
+        check_EM_FINDTEXTEX(hwnd, name, &find[i], i);
+    }
   }
 }
 
@@ -659,6 +697,12 @@ static void test_EM_FINDTEXT(void)
   /* Haystack text */
   run_tests_EM_FINDTEXT(hwndRichEdit, "2", find_tests2,
       sizeof(find_tests2)/sizeof(struct find_s));
+
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) haystack2);
+
+  /* Haystack text 2 (with EOL characters) */
+  run_tests_EM_FINDTEXT(hwndRichEdit, "3", find_tests3,
+      sizeof(find_tests3)/sizeof(struct find_s));
 
   DestroyWindow(hwndRichEdit);
 }

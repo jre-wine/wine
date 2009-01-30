@@ -87,9 +87,9 @@ static inline INT INTERNAL_YWSTODS(DC *dc, INT height)
 }
 
 static HGDIOBJ FONT_SelectObject( HGDIOBJ handle, HDC hdc );
-static INT FONT_GetObjectA( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
-static INT FONT_GetObjectW( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
-static BOOL FONT_DeleteObject( HGDIOBJ handle, void *obj );
+static INT FONT_GetObjectA( HGDIOBJ handle, INT count, LPVOID buffer );
+static INT FONT_GetObjectW( HGDIOBJ handle, INT count, LPVOID buffer );
+static BOOL FONT_DeleteObject( HGDIOBJ handle );
 
 static const struct gdi_obj_funcs font_funcs =
 {
@@ -345,21 +345,9 @@ HFONT WINAPI CreateFontIndirectW( const LOGFONTW *plf )
 
     if (!plf) return 0;
 
-    if (!(fontPtr = GDI_AllocObject( sizeof(FONTOBJ), FONT_MAGIC, (HGDIOBJ *)&hFont,
-                                     &font_funcs ))) return 0;
+    if (!(fontPtr = HeapAlloc( GetProcessHeap(), 0, sizeof(*fontPtr) ))) return 0;
 
     fontPtr->logfont = *plf;
-
-    TRACE("(%d %d %d %d %x %d %x %d %d) %s %s %s %s => %p\n",
-          plf->lfHeight, plf->lfWidth,
-          plf->lfEscapement, plf->lfOrientation,
-          plf->lfPitchAndFamily,
-          plf->lfOutPrecision, plf->lfClipPrecision,
-          plf->lfQuality, plf->lfCharSet,
-          debugstr_w(plf->lfFaceName),
-          plf->lfWeight > 400 ? "Bold" : "",
-          plf->lfItalic ? "Italic" : "",
-          plf->lfUnderline ? "Underline" : "", hFont);
 
     if (plf->lfEscapement != plf->lfOrientation)
     {
@@ -367,7 +355,7 @@ HFONT WINAPI CreateFontIndirectW( const LOGFONTW *plf )
         fontPtr->logfont.lfOrientation = fontPtr->logfont.lfEscapement;
         WARN("orientation angle %f set to "
              "escapement angle %f for new font %p\n",
-             plf->lfOrientation/10., plf->lfEscapement/10., hFont);
+             plf->lfOrientation/10., plf->lfEscapement/10., fontPtr);
     }
 
     pFaceNameItalicSuffix = strstrW(fontPtr->logfont.lfFaceName, ItalicW);
@@ -388,7 +376,23 @@ HFONT WINAPI CreateFontIndirectW( const LOGFONTW *plf )
 
     if (pFaceNameSuffix) *pFaceNameSuffix = 0;
 
-    GDI_ReleaseObj( hFont );
+    if (!(hFont = alloc_gdi_handle( &fontPtr->header, OBJ_FONT, &font_funcs )))
+    {
+        HeapFree( GetProcessHeap(), 0, fontPtr );
+        return 0;
+    }
+
+    TRACE("(%d %d %d %d %x %d %x %d %d) %s %s %s %s => %p\n",
+          plf->lfHeight, plf->lfWidth,
+          plf->lfEscapement, plf->lfOrientation,
+          plf->lfPitchAndFamily,
+          plf->lfOutPrecision, plf->lfClipPrecision,
+          plf->lfQuality, plf->lfCharSet,
+          debugstr_w(plf->lfFaceName),
+          plf->lfWeight > 400 ? "Bold" : "",
+          plf->lfItalic ? "Italic" : "",
+          plf->lfUnderline ? "Underline" : "", hFont);
+
     return hFont;
 }
 
@@ -485,11 +489,7 @@ static HGDIOBJ FONT_SelectObject( HGDIOBJ handle, HDC hdc )
     }
 
     if (GetDeviceCaps( dc->hSelf, TEXTCAPS ) & TC_VA_ABLE)
-    {
-        FONTOBJ *font = GDI_GetObjPtr( handle, FONT_MAGIC ); /* to grab the GDI lock (FIXME) */
         dc->gdiFont = WineEngCreateFontInstance( dc, handle );
-        if (font) GDI_ReleaseObj( handle );
-    }
 
     if (dc->funcs->pSelectFont) ret = dc->funcs->pSelectFont( dc->physDev, handle, dc->gdiFont );
 
@@ -514,30 +514,38 @@ static HGDIOBJ FONT_SelectObject( HGDIOBJ handle, HDC hdc )
 /***********************************************************************
  *           FONT_GetObjectA
  */
-static INT FONT_GetObjectA( HGDIOBJ handle, void *obj, INT count, LPVOID buffer )
+static INT FONT_GetObjectA( HGDIOBJ handle, INT count, LPVOID buffer )
 {
-    FONTOBJ *font = obj;
+    FONTOBJ *font = GDI_GetObjPtr( handle, OBJ_FONT );
     LOGFONTA lfA;
 
-    if(!buffer)
-        return sizeof(lfA);
-    FONT_LogFontWToA( &font->logfont, &lfA );
-
-    if (count > sizeof(lfA)) count = sizeof(lfA);
-    memcpy( buffer, &lfA, count );
+    if (!font) return 0;
+    if (buffer)
+    {
+        FONT_LogFontWToA( &font->logfont, &lfA );
+        if (count > sizeof(lfA)) count = sizeof(lfA);
+        memcpy( buffer, &lfA, count );
+    }
+    else count = sizeof(lfA);
+    GDI_ReleaseObj( handle );
     return count;
 }
 
 /***********************************************************************
  *           FONT_GetObjectW
  */
-static INT FONT_GetObjectW( HGDIOBJ handle, void *obj, INT count, LPVOID buffer )
+static INT FONT_GetObjectW( HGDIOBJ handle, INT count, LPVOID buffer )
 {
-    FONTOBJ *font = obj;
-    if(!buffer)
-        return sizeof(LOGFONTW);
-    if (count > sizeof(LOGFONTW)) count = sizeof(LOGFONTW);
-    memcpy( buffer, &font->logfont, count );
+    FONTOBJ *font = GDI_GetObjPtr( handle, OBJ_FONT );
+
+    if (!font) return 0;
+    if (buffer)
+    {
+        if (count > sizeof(LOGFONTW)) count = sizeof(LOGFONTW);
+        memcpy( buffer, &font->logfont, count );
+    }
+    else count = sizeof(LOGFONTW);
+    GDI_ReleaseObj( handle );
     return count;
 }
 
@@ -545,10 +553,14 @@ static INT FONT_GetObjectW( HGDIOBJ handle, void *obj, INT count, LPVOID buffer 
 /***********************************************************************
  *           FONT_DeleteObject
  */
-static BOOL FONT_DeleteObject( HGDIOBJ handle, void *obj )
+static BOOL FONT_DeleteObject( HGDIOBJ handle )
 {
+    FONTOBJ *obj;
+
     WineEngDestroyFontInstance( handle );
-    return GDI_FreeObject( handle, obj );
+
+    if (!(obj = free_gdi_handle( handle ))) return FALSE;
+    return HeapFree( GetProcessHeap(), 0, obj );
 }
 
 
@@ -828,7 +840,7 @@ INT WINAPI GetTextFaceW( HDC hdc, INT count, LPWSTR name )
 
     if(dc->gdiFont)
         ret = WineEngGetTextFace(dc->gdiFont, count, name);
-    else if ((font = GDI_GetObjPtr( dc->hFont, FONT_MAGIC )))
+    else if ((font = GDI_GetObjPtr( dc->hFont, OBJ_FONT )))
     {
         INT n = strlenW(font->logfont.lfFaceName) + 1;
         if (name)
@@ -920,8 +932,8 @@ BOOL WINAPI GetTextExtentExPointI( HDC hdc, const WORD *indices, INT count, INT 
     }
     else if(dc->funcs->pGetTextExtentExPoint) {
         FIXME("calling GetTextExtentExPoint\n");
-        ret = dc->funcs->pGetTextExtentExPoint( dc->physDev, (LPCWSTR)indices,
-                                                count, max_ext, nfit, dxs, size );
+        ret = dc->funcs->pGetTextExtentExPoint( dc->physDev, indices, count,
+                                                max_ext, nfit, dxs, size );
     }
 
     release_dc_ptr( dc );

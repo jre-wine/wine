@@ -339,6 +339,7 @@ AC_CHECK_HEADERS(\
 	sys/param.h \
 	sys/poll.h \
 	sys/prctl.h \
+	sys/protosw.h \
 	sys/ptrace.h \
 	sys/reg.h \
 	sys/resource.h \
@@ -353,6 +354,7 @@ AC_CHECK_HEADERS(\
 	sys/strtio.h \
 	sys/syscall.h \
 	sys/time.h \
+	sys/timeout.h \
 	sys/times.h \
 	sys/uio.h \
 	sys/un.h \
@@ -384,6 +386,7 @@ AC_CHECK_HEADERS(\
 	net/if_types.h \
 	net/route.h \
 	netinet/if_ether.h \
+	netinet/if_inarp.h \
 	netinet/in_pcb.h \
 	netinet/ip_icmp.h \
 	netinet/ip_var.h \
@@ -396,14 +399,23 @@ AC_CHECK_HEADERS(\
      #ifdef HAVE_SYS_SOCKETVAR_H
      # include <sys/socketvar.h>
      #endif
+     #ifdef HAVE_NET_ROUTE_H
+     # include <net/route.h>
+     #endif
      #ifdef HAVE_NETINET_IN_H
      # include <netinet/in.h>
+     #endif
+     #ifdef HAVE_NETINET_IN_SYSTM_H
+     # include <netinet/in_systm.h>
+     #endif
+     #ifdef HAVE_NET_IF_H
+     # include <net/if.h>
      #endif
      #ifdef HAVE_NETINET_IP_H
      # include <netinet/ip.h>
      #endif])
 
-AC_CHECK_HEADERS([netinet/tcp_var.h netinet/udp_var.h netinet/icmp_var.h netinet/tcp_timer.h ],,,
+AC_CHECK_HEADERS([netinet/tcp_timer.h netinet/udp_var.h netinet/icmp_var.h netinet/tcp_var.h ],,,
     [#include <sys/types.h>
      #ifdef HAVE_ALIAS_H
      # include <alias.h>
@@ -414,8 +426,14 @@ AC_CHECK_HEADERS([netinet/tcp_var.h netinet/udp_var.h netinet/icmp_var.h netinet
      #ifdef HAVE_SYS_SOCKETVAR_H
      # include <sys/socketvar.h>
      #endif
+     #ifdef HAVE_SYS_TIMEOUT_H
+     # include <sys/timeout.h>
+     #endif
      #ifdef HAVE_NETINET_IN_H
      # include <netinet/in.h>
+     #endif
+     #ifdef HAVE_NETINET_IN_SYSTM_H
+     # include <netinet/in_systm.h>
      #endif
      #ifdef HAVE_NETINET_IP_H
      # include <netinet/ip.h>
@@ -431,6 +449,9 @@ AC_CHECK_HEADERS([netinet/tcp_var.h netinet/udp_var.h netinet/icmp_var.h netinet
      #endif
      #ifdef HAVE_NETINET_TCP_H
      # include <netinet/tcp.h>
+     #endif
+     #ifdef HAVE_NETINET_TCP_TIMER_H
+     #include <netinet/tcp_timer.h>
      #endif])
 
 AC_CHECK_HEADERS([linux/ipx.h],,,
@@ -1006,6 +1027,7 @@ then
         done
         CPPFLAGS="$CPPFLAGS $ac_gphoto2_incl"
     fi
+    ac_gphoto2_libs=${ac_gphoto2_libs:-"-lgphoto2"}
     AC_CHECK_HEADER(gphoto2-camera.h,
                     [AC_CHECK_LIB(gphoto2,gp_camera_new,
                                   [AC_DEFINE(HAVE_GPHOTO2, 1, [Define if we have libgphoto2 development environment])
@@ -1053,6 +1075,7 @@ then
         ac_freetype_incl=`$ft_devel --cflags`
         ac_freetype_libs=`$ft_devel --libs`
     fi
+    ac_freetype_libs=${ac_freetype_libs:-"-lfreetype"}
     WINE_CHECK_SONAME(freetype,FT_Init_FreeType,[ft_lib=yes],[ft_lib=no],[$ac_freetype_libs])
     if test "$ft_lib" = "yes"
     then
@@ -1134,6 +1157,7 @@ then
         ac_esd_libs=`$ESDCONFIG --libs`
         CFLAGS="$CFLAGS $ac_esd_incl"
     fi
+    ac_esd_libs=${ac_esd_libs:-"-lesd"}
     AC_CHECK_HEADER(esd.h,
         [AC_CHECK_LIB(esd,esd_open_sound,
             [AC_SUBST(ESDINCL, "$ac_esd_incl")
@@ -1541,6 +1565,30 @@ AC_CHECK_TYPES([sigset_t],,,[#include <sys/types.h>
 #include <signal.h>])
 AC_CHECK_TYPES([request_sense],,,[#include <linux/cdrom.h>])
 
+AC_CHECK_TYPES([struct xinpgen],,,
+[#include <sys/types.h>
+#ifdef HAVE_SYS_SOCKET_H
+#include <sys/socket.h>
+#endif
+#ifdef HAVE_SYS_SOCKETVAR_H
+#include <sys/socketvar.h>
+#endif
+#ifdef HAVE_NET_ROUTE_H
+#include <net/route.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
+#ifdef HAVE_NETINET_IN_SYSTM_H
+#include <netinet/in_systm.h>
+#endif
+#ifdef HAVE_NETINET_IP_H
+#include <netinet/ip.h>
+#endif
+#ifdef HAVE_NETINET_IN_PCB_H
+#include <netinet/in_pcb.h>
+#endif])
+
 AC_CHECK_MEMBERS([struct ff_effect.direction],,,
 [#ifdef HAVE_LINUX_INPUT_H
 #include <linux/input.h>
@@ -1770,6 +1818,7 @@ WINE_CONFIG_MAKERULES([programs/Makeprog.rules],[MAKE_PROG_RULES],[Make.rules])
 WINE_CONFIG_MAKEFILE([Makefile],[Make.rules])
 WINE_CONFIG_MAKEFILE([dlls/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/acledit/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/aclui/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/activeds/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/actxprxy/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/adsiid/Makefile],[dlls/Makeimplib.rules],[dlls],[ALL_IMPLIB_DIRS])
@@ -1780,6 +1829,7 @@ WINE_CONFIG_MAKEFILE([dlls/advpack/tests/Makefile],[dlls/Maketest.rules],[dlls],
 WINE_CONFIG_MAKEFILE([dlls/amstream/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/appwiz.cpl/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/atl/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/authz/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/avicap32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/avifil32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/browseui/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -1838,6 +1888,9 @@ WINE_CONFIG_MAKEFILE([dlls/d3dx9_35/Makefile],[dlls/Makedll.rules],[dlls],[ALL_D
 WINE_CONFIG_MAKEFILE([dlls/d3dx9_36/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/d3dx9_36/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/d3dx9_37/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_38/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_39/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_40/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/d3dxof/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/d3dxof/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/dbghelp/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -1951,6 +2004,7 @@ WINE_CONFIG_MAKEFILE([dlls/mscat32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DL
 WINE_CONFIG_MAKEFILE([dlls/mscms/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/mscms/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/mscoree/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msctf/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/msdmo/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/msftedit/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/msg711.acm/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -1965,6 +2019,7 @@ WINE_CONFIG_MAKEFILE([dlls/msisip/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL
 WINE_CONFIG_MAKEFILE([dlls/msisys.ocx/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/msnet32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/msrle32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mssign32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/mssip32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/mstask/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/mstask/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
@@ -2030,6 +2085,7 @@ WINE_CONFIG_MAKEFILE([dlls/quartz/tests/Makefile],[dlls/Maketest.rules],[dlls],[
 WINE_CONFIG_MAKEFILE([dlls/query/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/rasapi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/rasapi32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/rasdlg/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/resutils/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/riched20/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/riched20/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
@@ -2076,7 +2132,9 @@ WINE_CONFIG_MAKEFILE([dlls/strmiids/Makefile],[dlls/Makeimplib.rules],[dlls],[AL
 WINE_CONFIG_MAKEFILE([dlls/svrapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/sxs/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/tapi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/traffic/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/twain_32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/twain_32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/unicows/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/updspapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/url/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -2165,6 +2223,7 @@ WINE_CONFIG_MAKEFILE([programs/explorer/Makefile],[programs/Makeprog.rules],[pro
 WINE_CONFIG_MAKEFILE([programs/hh/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/icinfo/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/iexplore/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/lodctr/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/msiexec/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/net/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/notepad/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
@@ -2182,6 +2241,7 @@ WINE_CONFIG_MAKEFILE([programs/start/Makefile],[programs/Makeprog.rules],[progra
 WINE_CONFIG_MAKEFILE([programs/svchost/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/taskmgr/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/uninstaller/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/unlodctr/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/view/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS])
 WINE_CONFIG_MAKEFILE([programs/wineboot/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/winebrowser/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])

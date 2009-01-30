@@ -68,15 +68,14 @@ IParentImpl_QueryInterface(IParent *iface,
                            REFIID riid,
                            void **obj)
 {
-    ICOM_THIS_FROM(IParentImpl, IParent, iface);
-    TRACE("(%p)->(%s,%p)\n", This, debugstr_guid(riid), obj);
+    TRACE("(%p)->(%s,%p)\n", iface, debugstr_guid(riid), obj);
 
     *obj = NULL;
     if ( IsEqualGUID( &IID_IUnknown, riid ) ||
          IsEqualGUID( &IID_IParent, riid ) )
     {
-        *obj = ICOM_INTERFACE(This, IParent);
-        IParent_AddRef(ICOM_INTERFACE(This, IParent));
+        *obj = iface;
+        IParent_AddRef(iface);
         return DD_OK;
     }
     return E_NOINTERFACE;
@@ -96,7 +95,7 @@ IParentImpl_QueryInterface(IParent *iface,
 static ULONG WINAPI
 IParentImpl_AddRef(IParent *iface)
 {
-    ICOM_THIS_FROM(IParentImpl, IParent, iface);
+    IParentImpl *This = (IParentImpl *)iface;
     ULONG ref = InterlockedIncrement(&This->ref);
 
     TRACE("(%p) : AddRef from %d\n", This, ref - 1);
@@ -121,7 +120,7 @@ IParentImpl_AddRef(IParent *iface)
 static ULONG WINAPI 
 IParentImpl_Release(IParent *iface)
 {
-    ICOM_THIS_FROM(IParentImpl, IParent, iface);
+    IParentImpl *This = (IParentImpl *)iface;
     ULONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p) : ReleaseRef to %d\n", This, ref);

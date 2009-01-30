@@ -25,3 +25,4 @@
 #include "cryptdlg_En.rc"
 #include "cryptdlg_Fr.rc"
 #include "cryptdlg_Ko.rc"
+#include "cryptdlg_Nl.rc"

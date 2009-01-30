@@ -3418,6 +3418,8 @@ static void test_elems(IHTMLDocument2 *doc)
     long type;
     HRESULT hres;
     IHTMLElementCollection *collection;
+    IHTMLDocument3 *doc3;
+    BSTR str;
 
     static const WCHAR imgidW[] = {'i','m','g','i','d',0};
     static const WCHAR inW[] = {'i','n',0};
@@ -3804,16 +3806,35 @@ static void test_elems(IHTMLDocument2 *doc)
         }
     }
     IDispatch_Release(disp);
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IHTMLDocument3, (void**)&doc3);
+    ok(hres == S_OK, "Could not get IHTMLDocument3 iface: %08x\n", hres);
+
+    str = a2bstr("img");
+    hres = IHTMLDocument3_getElementsByTagName(doc3, str, &col);
+    SysFreeString(str);
+    ok(hres == S_OK, "getElementByTag(%s) failed: %08x\n", dbgstr_w(ifrW), hres);
+    if(hres == S_OK)
+    {
+        static const elem_type_t img_types[] = { ET_IMG };
+
+        test_elem_collection((IUnknown*)col, img_types, sizeof(img_types)/sizeof(img_types[0]));
+        IHTMLElementCollection_Release(col);
+    }
+
+    IHTMLDocument3_Release(doc3);
 }
 
 static void test_create_elems(IHTMLDocument2 *doc)
 {
     IHTMLElement *elem, *body, *elem2;
-    IHTMLDOMNode *node, *node2, *node3;
+    IHTMLDOMNode *node, *node2, *node3, *comment;
+    IHTMLDocument5 *doc5;
     IDispatch *disp;
     VARIANT var;
     long type;
     HRESULT hres;
+    BSTR str;
 
     static const elem_type_t types1[] = { ET_TESTG };
 
@@ -3867,6 +3888,26 @@ static void test_create_elems(IHTMLDocument2 *doc)
     IHTMLDOMNode_Release(node3);
 
     test_elem_innertext(body, "insert test");
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IHTMLDocument5, (void**)&doc5);
+    if(hres == S_OK)
+    {
+        str = a2bstr("testing");
+        hres = IHTMLDocument5_createComment(doc5, str, &comment);
+        SysFreeString(str);
+        ok(hres == S_OK, "createComment failed: %08x\n", hres);
+        if(hres == S_OK)
+        {
+            type = get_node_type((IUnknown*)comment);
+            ok(type == 8, "type=%ld, expected 8\n", type);
+
+            test_node_get_value_str((IUnknown*)comment, "testing");
+
+            IHTMLDOMNode_Release(comment);
+        }
+
+        IHTMLDocument5_Release(doc5);
+    }
 
     IHTMLElement_Release(body);
 }
@@ -4121,7 +4162,7 @@ static void gecko_installer_workaround(BOOL disable)
 
 /* Check if Internet Explorer is configured to run in "Enhanced Security Configuration" (aka hardened mode) */
 /* Note: this code is duplicated in dlls/mshtml/tests/dom.c, dlls/mshtml/tests/script.c and dlls/urlmon/tests/misc.c */
-static BOOL is_ie_hardened()
+static BOOL is_ie_hardened(void)
 {
     HKEY zone_map;
     DWORD ie_harden, type, size;

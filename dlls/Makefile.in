@@ -177,6 +177,7 @@ IMPORT_LIBS = \
 	strmiids/libstrmiids.a \
 	uuid/libuuid.a \
 	winecrt0/libwinecrt0.a \
+	aclui/libaclui.$(IMPLIBEXT) \
 	activeds/libactiveds.$(IMPLIBEXT) \
 	advapi32/libadvapi32.$(IMPLIBEXT) \
 	advpack/libadvpack.$(IMPLIBEXT) \
@@ -231,6 +232,7 @@ IMPORT_LIBS = \
 	inetcomm/libinetcomm.$(IMPLIBEXT) \
 	iphlpapi/libiphlpapi.$(IMPLIBEXT) \
 	kernel32/libkernel32.$(IMPLIBEXT) \
+	loadperf/libloadperf.$(IMPLIBEXT) \
 	lz32/liblz32.$(IMPLIBEXT) \
 	mapi32/libmapi32.$(IMPLIBEXT) \
 	mlang/libmlang.$(IMPLIBEXT) \
@@ -270,6 +272,7 @@ IMPORT_LIBS = \
 	psapi/libpsapi.$(IMPLIBEXT) \
 	quartz/libquartz.$(IMPLIBEXT) \
 	rasapi32/librasapi32.$(IMPLIBEXT) \
+	rasdlg/librasdlg.$(IMPLIBEXT) \
 	resutils/libresutils.$(IMPLIBEXT) \
 	riched20/libriched20.$(IMPLIBEXT) \
 	rpcrt4/librpcrt4.$(IMPLIBEXT) \
@@ -320,6 +323,7 @@ CROSS_IMPLIBS = \
 	libd3dx9.a \
 	libwinspool.a \
 	libxinput.a \
+	aclui/libaclui.a \
 	activeds/libactiveds.a \
 	advapi32/libadvapi32.a \
 	advpack/libadvpack.a \
@@ -372,6 +376,7 @@ CROSS_IMPLIBS = \
 	inetcomm/libinetcomm.a \
 	iphlpapi/libiphlpapi.a \
 	kernel32/libkernel32.a \
+	loadperf/libloadperf.a \
 	lz32/liblz32.a \
 	mapi32/libmapi32.a \
 	mlang/libmlang.a \
@@ -411,6 +416,7 @@ CROSS_IMPLIBS = \
 	psapi/libpsapi.a \
 	quartz/libquartz.a \
 	rasapi32/librasapi32.a \
+	rasdlg/librasdlg.a \
 	resutils/libresutils.a \
 	riched20/libriched20.a \
 	rpcrt4/librpcrt4.a \
@@ -464,6 +470,9 @@ implib: $(IMPORT_LIBS)
 testsubdirs: $(TESTSUBDIRS)
 
 .PHONY: implib testsubdirs
+
+aclui/libaclui.def aclui/libaclui.a: aclui/aclui.spec $(WINEBUILD)
+	@cd aclui && $(MAKE) `basename $@`
 
 activeds/libactiveds.def activeds/libactiveds.a: activeds/activeds.spec $(WINEBUILD)
 	@cd activeds && $(MAKE) `basename $@`
@@ -627,6 +636,9 @@ iphlpapi/libiphlpapi.def iphlpapi/libiphlpapi.a: iphlpapi/iphlpapi.spec $(WINEBU
 kernel32/libkernel32.def kernel32/libkernel32.a: kernel32/kernel32.spec $(WINEBUILD)
 	@cd kernel32 && $(MAKE) `basename $@`
 
+loadperf/libloadperf.def loadperf/libloadperf.a: loadperf/loadperf.spec $(WINEBUILD)
+	@cd loadperf && $(MAKE) `basename $@`
+
 lz32/liblz32.def lz32/liblz32.a: lz32/lz32.spec $(WINEBUILD)
 	@cd lz32 && $(MAKE) `basename $@`
 
@@ -743,6 +755,9 @@ quartz/libquartz.def quartz/libquartz.a: quartz/quartz.spec $(WINEBUILD)
 
 rasapi32/librasapi32.def rasapi32/librasapi32.a: rasapi32/rasapi32.spec $(WINEBUILD)
 	@cd rasapi32 && $(MAKE) `basename $@`
+
+rasdlg/librasdlg.def rasdlg/librasdlg.a: rasdlg/rasdlg.spec $(WINEBUILD)
+	@cd rasdlg && $(MAKE) `basename $@`
 
 resutils/libresutils.def resutils/libresutils.a: resutils/resutils.spec $(WINEBUILD)
 	@cd resutils && $(MAKE) `basename $@`

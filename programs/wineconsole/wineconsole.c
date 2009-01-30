@@ -64,7 +64,7 @@ static void WINECON_Usage(void)
  *
  * updates the local copy of cells (band to update)
  */
-void WINECON_FetchCells(struct inner_data* data, int upd_tp, int upd_bm)
+static void WINECON_FetchCells(struct inner_data* data, int upd_tp, int upd_bm)
 {
     SERVER_START_REQ( read_console_output )
     {
@@ -102,29 +102,11 @@ void WINECON_NotifyWindowChange(struct inner_data* data)
 }
 
 /******************************************************************
- *		WINECON_GetHistorySize
- *
- *
- */
-int	WINECON_GetHistorySize(HANDLE hConIn)
-{
-    int	ret = 0;
-
-    SERVER_START_REQ(get_console_input_info)
-    {
-	req->handle = wine_server_obj_handle( hConIn );
-	if (!wine_server_call_err( req )) ret = reply->history_size;
-    }
-    SERVER_END_REQ;
-    return ret;
-}
-
-/******************************************************************
  *		WINECON_SetHistorySize
  *
  *
  */
-BOOL	WINECON_SetHistorySize(HANDLE hConIn, int size)
+static BOOL WINECON_SetHistorySize(HANDLE hConIn, int size)
 {
     BOOL	ret;
 
@@ -139,31 +121,12 @@ BOOL	WINECON_SetHistorySize(HANDLE hConIn, int size)
     return ret;
 }
 
-
-/******************************************************************
- *		WINECON_GetHistoryMode
- *
- *
- */
-int	WINECON_GetHistoryMode(HANDLE hConIn)
-{
-    int	ret = 0;
-
-    SERVER_START_REQ(get_console_input_info)
-    {
-	req->handle = wine_server_obj_handle( hConIn );
-	if (!wine_server_call_err( req )) ret = reply->history_mode;
-    }
-    SERVER_END_REQ;
-    return ret;
-}
-
 /******************************************************************
  *		WINECON_SetHistoryMode
  *
  *
  */
-BOOL	WINECON_SetHistoryMode(HANDLE hConIn, int mode)
+static BOOL WINECON_SetHistoryMode(HANDLE hConIn, int mode)
 {
     BOOL	ret;
 

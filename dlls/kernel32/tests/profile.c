@@ -215,33 +215,54 @@ static void test_profile_sections_names(void)
     CloseHandle( h);
 
     /* Test with sufficiently large buffer */
+    memset(buf, 0xc, sizeof(buf));
     ret = GetPrivateProfileSectionNamesA( buf, 29, testfile3 );
-    ok( ret == 27, "expected return size 27, got %d\n", ret );
-    ok( buf[ret-1] == 0 && buf[ret] == 0, "returned buffer not terminated with double-null\n" );
-    
+    ok( ret == 27 ||
+        broken(ret == 28), /* Win9x, WinME */
+        "expected return size 27, got %d\n", ret );
+    ok( (buf[ret-1] == 0 && buf[ret] == 0) ||
+        broken(buf[ret-1] == 0 && buf[ret-2] == 0), /* Win9x, WinME */
+        "returned buffer not terminated with double-null\n" );
+
     /* Test with exactly fitting buffer */
+    memset(buf, 0xc, sizeof(buf));
     ret = GetPrivateProfileSectionNamesA( buf, 28, testfile3 );
-    ok( ret == 26, "expected return size 26, got %d\n", ret );
-    ok( buf[ret+1] == 0 && buf[ret] == 0, "returned buffer not terminated with double-null\n" );
-    
+    ok( ret == 26 ||
+        broken(ret == 28), /* Win9x, WinME */
+        "expected return size 26, got %d\n", ret );
+    todo_wine
+    ok( (buf[ret+1] == 0 && buf[ret] == 0) || /* W2K3 and higher */
+        broken(buf[ret+1] == 0xc && buf[ret] == 0) || /* NT4, W2K, WinXP */
+        broken(buf[ret-1] == 0 && buf[ret-2] == 0), /* Win9x, WinME */
+        "returned buffer not terminated with double-null\n" );
+
     /* Test with a buffer too small */
+    memset(buf, 0xc, sizeof(buf));
     ret = GetPrivateProfileSectionNamesA( buf, 27, testfile3 );
     ok( ret == 25, "expected return size 25, got %d\n", ret );
-    ok( buf[ret+1] == 0 && buf[ret] == 0, "returned buffer not terminated with double-null\n" );
-    
+    /* Win9x and WinME only fills the buffer with complete section names (double-null terminated) */
+    count = strlen("section1") + sizeof(CHAR) + strlen("section2");
+    todo_wine
+    ok( (buf[ret+1] == 0 && buf[ret] == 0) ||
+        broken(buf[count] == 0 && buf[count+1] == 0), /* Win9x, WinME */
+        "returned buffer not terminated with double-null\n" );
+
     /* Tests on nonexistent file */
-    memset(buf, 0xcc, sizeof(buf));
+    memset(buf, 0xc, sizeof(buf));
     ret = GetPrivateProfileSectionNamesA( buf, 10, ".\\not_here.ini" );
-    ok( ret == 0, "expected return size 0, got %d\n", ret );
+    ok( ret == 0 ||
+        broken(ret == 1), /* Win9x, WinME */
+        "expected return size 0, got %d\n", ret );
     ok( buf[0] == 0, "returned buffer not terminated with null\n" );
     ok( buf[1] != 0, "returned buffer terminated with double-null\n" );
     
     /* Test with sufficiently large buffer */
     SetLastError(0xdeadbeef);
+    memset(bufW, 0xcc, sizeof(bufW));
     ret = GetPrivateProfileSectionNamesW( bufW, 29, testfile3W );
     if (ret == 0 && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
     {
-        skip("GetPrivateProfileSectionNamesW is not implemented\n");
+        win_skip("GetPrivateProfileSectionNamesW is not implemented\n");
         DeleteFileA( testfile3 );
         return;
     }
@@ -249,11 +270,15 @@ static void test_profile_sections_names(void)
     ok( bufW[ret-1] == 0 && bufW[ret] == 0, "returned buffer not terminated with double-null\n" );
     
     /* Test with exactly fitting buffer */
+    memset(bufW, 0xcc, sizeof(bufW));
     ret = GetPrivateProfileSectionNamesW( bufW, 28, testfile3W );
     ok( ret == 26, "expected return size 26, got %d\n", ret );
-    ok( bufW[ret+1] == 0 && bufW[ret] == 0, "returned buffer not terminated with double-null\n" );
-    
+    ok( (bufW[ret+1] == 0 && bufW[ret] == 0) || /* W2K3 and higher */
+        broken(bufW[ret+1] == 0xcccc && bufW[ret] == 0), /* NT4, W2K, WinXP */
+        "returned buffer not terminated with double-null\n" );
+
     /* Test with a buffer too small */
+    memset(bufW, 0xcc, sizeof(bufW));
     ret = GetPrivateProfileSectionNamesW( bufW, 27, testfile3W );
     ok( ret == 25, "expected return size 25, got %d\n", ret );
     ok( bufW[ret+1] == 0 && bufW[ret] == 0, "returned buffer not terminated with double-null\n" );
@@ -355,7 +380,7 @@ static void test_profile_existing(void)
     ok( DeleteFile(testfile2), "delete failed\n" );
 }
 
-static void test_profile_delete_on_close()
+static void test_profile_delete_on_close(void)
 {
     static CHAR testfile[] = ".\\testwine5.ini";
     HANDLE h;
@@ -436,7 +461,7 @@ static BOOL emptystr_ok(CHAR emptystr[MAX_PATH])
 
 static void test_GetPrivateProfileString(const char *content, const char *descript)
 {
-    DWORD ret;
+    DWORD ret, len;
     CHAR buf[MAX_PATH];
     CHAR def_val[MAX_PATH];
     CHAR path[MAX_PATH];
@@ -450,6 +475,18 @@ static void test_GetPrivateProfileString(const char *content, const char *descri
 
     trace("test_GetPrivateProfileStringA: %s\n", descript);
 
+    if(!lstrcmpA(descript, "CR only"))
+    {
+        SetLastError(0xdeadbeef);
+        ret = GetPrivateProfileStringW(NULL, NULL, NULL,
+                                       NULL, 0, NULL);
+        if (!ret && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+        {
+            win_skip("Win9x and WinME don't handle 'CR only' correctly\n");
+            return;
+        }
+    }
+
     create_test_file(filename, content, lstrlenA(content));
 
     /* Run this test series with caching. Wine won't cache profile
@@ -460,8 +497,11 @@ static void test_GetPrivateProfileString(const char *content, const char *descri
     lstrcpyA(buf, "kumquat");
     ret = GetPrivateProfileStringA(NULL, "name1", "default",
                                    buf, MAX_PATH, filename);
-    ok(ret == 18, "Expected 18, got %d\n", ret);
-    ok(!memcmp(buf, "section1\0section2\0", ret + 1),
+    ok(ret == 18 ||
+       broken(ret == 19), /* Win9x and WinME */
+       "Expected 18, got %d\n", ret);
+    len = lstrlenA("section1") + sizeof(CHAR) + lstrlenA("section2") + 2 * sizeof(CHAR);
+    ok(!memcmp(buf, "section1\0section2\0", len),
        "Expected \"section1\\0section2\\0\", got \"%s\"\n", buf);
 
     /* lpAppName is empty */
@@ -484,7 +524,9 @@ static void test_GetPrivateProfileString(const char *content, const char *descri
     ret = GetPrivateProfileStringA(emptystr, "name1", NULL,
                                    buf, MAX_PATH, filename);
     ok(ret == 0, "Expected 0, got %d\n", ret);
-    ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
+    ok(!lstrcmpA(buf, "") ||
+       broken(!lstrcmpA(buf, "kumquat")), /* Win9x, WinME */
+       "Expected \"\", got \"%s\"\n", buf);
     ok(emptystr_ok(emptystr), "AppName modified\n");
 
     /* lpAppName is empty, lpDefault is empty */
@@ -551,7 +593,9 @@ static void test_GetPrivateProfileString(const char *content, const char *descri
     ret = GetPrivateProfileStringA("section1", emptystr, NULL,
                                    buf, MAX_PATH, filename);
     ok(ret == 0, "Expected 0, got %d\n", ret);
-    ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
+    ok(!lstrcmpA(buf, "") ||
+       broken(!lstrcmpA(buf, "kumquat")), /* Win9x, WinME */
+       "Expected \"\", got \"%s\"\n", buf);
     ok(emptystr_ok(emptystr), "KeyName modified\n");
 
     /* lpKeyName is empty, lpDefault is empty */
@@ -583,8 +627,12 @@ static void test_GetPrivateProfileString(const char *content, const char *descri
     lstrcpyA(buf, "kumquat");
     ret = GetPrivateProfileStringA("section1", "name1", "default",
                                    buf, MAX_PATH, NULL);
-    ok(ret == 7, "Expected 7, got %d\n", ret);
-    ok(!lstrcmpA(buf, "default"), "Expected \"default\", got \"%s\"\n", buf);
+    ok(ret == 7 ||
+       broken(ret == 0), /* Win9x, WinME */
+       "Expected 7, got %d\n", ret);
+    ok(!lstrcmpA(buf, "default") ||
+       broken(!lstrcmpA(buf, "kumquat")), /* Win9x, WinME */
+       "Expected \"default\", got \"%s\"\n", buf);
 
     /* lpFileName is empty */
     lstrcpyA(buf, "kumquat");
@@ -640,7 +688,9 @@ static void test_GetPrivateProfileString(const char *content, const char *descri
     ret = GetPrivateProfileStringA(NULL, "name1", "default",
                                    buf, 16, filename);
     ok(ret == 14, "Expected 14, got %d\n", ret);
-    ok(!memcmp(buf, "section1\0secti\0", ret + 1),
+    len = lstrlenA("section1") + 2 * sizeof(CHAR);
+    ok(!memcmp(buf, "section1\0secti\0", ret + 1) ||
+       broken(!memcmp(buf, "section1\0\0", len)), /* Win9x, WinME */
        "Expected \"section1\\0secti\\0\", got \"%s\"\n", buf);
 
     /* lpKeyName is NULL, not enough room for final key name */
@@ -648,7 +698,8 @@ static void test_GetPrivateProfileString(const char *content, const char *descri
     ret = GetPrivateProfileStringA("section1", NULL, "default",
                                    buf, 16, filename);
     ok(ret == 14, "Expected 14, got %d\n", ret);
-    ok(!memcmp(buf, "name1\0name2\0na\0", ret + 1),
+    ok(!memcmp(buf, "name1\0name2\0na\0", ret + 1) ||
+       broken(!memcmp(buf, "name1\0name2\0n\0\0", ret + 1)), /* Win9x, WinME */
        "Expected \"name1\\0name2\\0na\\0\", got \"%s\"\n", buf);
 
     /* key value has quotation marks which are stripped */
@@ -673,7 +724,14 @@ static void test_GetPrivateProfileString(const char *content, const char *descri
     ok(!lstrcmpA(buf, "default"), "Expected \"default\", got \"%s\"\n", buf);
 
     GetWindowsDirectoryA(windir, MAX_PATH);
-    GetTempFileNameA(windir, "pre", 0, path);
+    SetLastError(0xdeadbeef);
+    ret = GetTempFileNameA(windir, "pre", 0, path);
+    if (!ret && GetLastError() == ERROR_ACCESS_DENIED)
+    {
+        skip("Not allowed to create a file in the Windows directory\n");
+        DeleteFileA(filename);
+        return;
+    }
     tempfile = strrchr(path, '\\') + 1;
     create_test_file(path, content, lstrlenA(content));
 

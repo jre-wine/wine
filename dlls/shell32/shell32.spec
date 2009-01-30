@@ -256,6 +256,7 @@
  704 stdcall -noname GUIDFromStringW(wstr ptr)
 
  714 stdcall @(ptr) SHELL32_714 # PathIsTemporaryW
+ 727 stdcall SHGetImageList(long ptr ptr)
  730 stdcall -noname RestartDialogEx(long wstr long long)
 
 1217 stub FOOBAR1217   # no joke! This is the real name!!
@@ -328,6 +329,7 @@
 @ stdcall SHCreateDirectoryExA(long str ptr)
 @ stdcall SHCreateDirectoryExW(long wstr ptr)
 @ stub SHCreateProcessAsUserW
+@ stdcall SHCreateShellItem(ptr ptr ptr ptr)
 @ stdcall SHEmptyRecycleBinA(long str long)
 @ stdcall SHEmptyRecycleBinW(long wstr long)
 @ stub SHExtractIconsW

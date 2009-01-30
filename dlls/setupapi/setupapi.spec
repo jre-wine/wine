@@ -319,7 +319,7 @@
 @ stdcall SetupDiGetClassDevsExW(ptr wstr ptr long ptr wstr ptr)
 @ stdcall SetupDiGetClassDevsW(ptr ptr long long)
 @ stub SetupDiGetClassImageIndex
-@ stub SetupDiGetClassImageList
+@ stdcall SetupDiGetClassImageList(ptr)
 @ stub SetupDiGetClassImageListExA
 @ stub SetupDiGetClassImageListExW
 @ stub SetupDiGetClassInstallParamsA
@@ -437,8 +437,8 @@
 @ stdcall SetupInitializeFileLogA (str long)
 @ stdcall SetupInitializeFileLogW (wstr long)
 @ stdcall SetupInstallFileA(ptr ptr str str str long ptr ptr)
-@ stub SetupInstallFileExA
-@ stub SetupInstallFileExW
+@ stdcall SetupInstallFileExA(ptr ptr str str str long ptr ptr ptr)
+@ stdcall SetupInstallFileExW(ptr ptr wstr wstr wstr long ptr ptr ptr)
 @ stdcall SetupInstallFileW(ptr ptr wstr wstr wstr long ptr ptr)
 @ stdcall SetupInstallFilesFromInfSectionA(long long long str str long)
 @ stdcall SetupInstallFilesFromInfSectionW(long long long wstr wstr long)

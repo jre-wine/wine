@@ -75,6 +75,7 @@ static const LAYOUT_INFO g_layout_info[] =
     {IDD_STATUS,        BF_TOP|BF_LEFT|BF_RIGHT},
     {IDD_FOLDER,        BF_TOP|BF_LEFT|BF_RIGHT},
     {IDD_TREEVIEW,      BF_TOP|BF_BOTTOM|BF_LEFT|BF_RIGHT},
+    {IDD_FOLDER,        BF_BOTTOM|BF_LEFT},
     {IDD_FOLDERTEXT,    BF_BOTTOM|BF_LEFT|BF_RIGHT},
     {IDD_MAKENEWFOLDER, BF_BOTTOM|BF_LEFT},
     {IDOK,              BF_BOTTOM|BF_RIGHT},
@@ -800,6 +801,17 @@ static BOOL BrsFolder_OnWindowPosChanging(browse_info *info, WINDOWPOS *pos)
     return 0;
 }
 
+static INT BrsFolder_OnDestroy(browse_info *info)
+{
+    if (info->layout)
+    {
+        SHFree(info->layout);
+        info->layout = NULL;
+    }
+
+    return 0;
+}
+
 /*************************************************************************
  *             BrsFolderDlgProc32  (not an exported API function)
  */
@@ -859,6 +871,9 @@ static INT_PTR CALLBACK BrsFolderDlgProc( HWND hWnd, UINT msg, WPARAM wParam,
 
     case BFFM_SETEXPANDED: /* unicode only */
         return BrsFolder_OnSetExpanded(info, (LPVOID)lParam, (BOOL)wParam, NULL);
+
+    case WM_DESTROY:
+        return BrsFolder_OnDestroy(info);
     }
     return FALSE;
 }

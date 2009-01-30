@@ -1857,6 +1857,7 @@ static void shader_arb_destroy(IWineD3DBaseShader *iface) {
         HeapFree(GetProcessHeap(), 0, This->gl_shaders);
         This->gl_shaders = NULL;
         This->num_gl_shaders = 0;
+        This->shader_array_size = 0;
     } else {
         IWineD3DVertexShaderImpl *This = (IWineD3DVertexShaderImpl *) iface;
 
@@ -3051,22 +3052,17 @@ static void state_arbfp_fog(DWORD state, IWineD3DStateBlockImpl *stateblock, Win
 
     if(!stateblock->renderState[WINED3DRS_FOGENABLE]) return;
 
-    if(use_vs(stateblock)
-       && ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->baseShader.reg_maps.fog) {
-        if( stateblock->renderState[WINED3DRS_FOGTABLEMODE] != WINED3DFOG_NONE ) {
-            FIXME("vertex shader with table fog used\n");
-        }
-        context->last_was_foggy_shader = TRUE;
-        new_source = FOGSOURCE_VS;
-    } else if(stateblock->renderState[WINED3DRS_FOGTABLEMODE] == WINED3DFOG_NONE) {
-        context->last_was_foggy_shader = FALSE;
-        if(stateblock->renderState[WINED3DRS_FOGVERTEXMODE] == WINED3DFOG_NONE || context->last_was_rhw) {
-            new_source = FOGSOURCE_COORD;
+    if(stateblock->renderState[WINED3DRS_FOGTABLEMODE] == WINED3DFOG_NONE) {
+        if(use_vs(stateblock)) {
+            new_source = FOGSOURCE_VS;
         } else {
-            new_source = FOGSOURCE_FFP;
+            if(stateblock->renderState[WINED3DRS_FOGVERTEXMODE] == WINED3DFOG_NONE || context->last_was_rhw) {
+                new_source = FOGSOURCE_COORD;
+            } else {
+                new_source = FOGSOURCE_FFP;
+            }
         }
     } else {
-        context->last_was_foggy_shader = FALSE;
         new_source = FOGSOURCE_FFP;
     }
     if(new_source != context->fog_source) {
