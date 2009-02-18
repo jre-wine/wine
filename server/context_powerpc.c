@@ -36,6 +36,10 @@
 
 #include "windef.h"
 
+#include "file.h"
+#include "thread.h"
+#include "request.h"
+
 #if 0  /* no longer used */
 
 #ifndef PTRACE_PEEKUSER
@@ -49,10 +53,6 @@
 #  define PTRACE_POKEUSER PT_WRITE_D
 # endif
 #endif /* PTRACE_POKEUSER */
-
-#include "file.h"
-#include "thread.h"
-#include "request.h"
 
 /* retrieve a thread context */
 static void get_thread_context_ptrace( struct thread *thread, unsigned int flags, CONTEXT *context )
