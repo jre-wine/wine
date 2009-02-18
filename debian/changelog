@@ -1,8 +1,15 @@
-wine (1.1.14-1) UNRELEASED; urgency=low
+wine (1.1.14-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.14, released Jan 30, 2009.
+    - Various bug fixes for Internet Explorer 7.
+    - Many crypt32 improvements, including new export wizard.
+    - Better support for windowless Richedit.
+    - Improvements to the print dialog.
+    - Many fixes to the regression tests on Windows.
+    - Various bug fixes.
+  * Try to fix a PowerPC build failure (reported but not fixed upstream yet).
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sat, 31 Jan 2009 00:19:58 +0100
+ -- Ove Kaaven <ovek@arcticnet.no>  Wed, 18 Feb 2009 13:31:53 +0100
 
 wine (1.1.13-1) experimental; urgency=low
 
