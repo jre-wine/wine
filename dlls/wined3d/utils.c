@@ -1365,8 +1365,6 @@ void set_texture_matrix(const float *smat, DWORD flags, BOOL calculatedCoords, B
 }
 #undef GLINFO_LOCATION
 
-#define GLINFO_LOCATION ((IWineD3DImpl *)(This->wineD3D))->gl_info
-
 /* This small helper function is used to convert a bitmask into the number of masked bits */
 unsigned int count_bits(unsigned int mask)
 {
@@ -1456,8 +1454,6 @@ BOOL getDepthStencilBits(WINED3DFORMAT fmt, short *depthSize, short *stencilSize
     TRACE("Returning depthSize: %d and stencilSize: %d for fmt=%s\n", *depthSize, *stencilSize, debug_d3dformat(fmt));
     return TRUE;
 }
-
-#undef GLINFO_LOCATION
 
 /* DirectDraw stuff */
 WINED3DFORMAT pixelformat_for_depth(DWORD depth) {
@@ -2136,7 +2132,7 @@ void gen_ffp_frag_op(IWineD3DStateBlockImpl *stateblock, struct ffp_frag_setting
 const struct ffp_frag_desc *find_ffp_frag_shader(const struct hash_table_t *fragment_shaders,
         const struct ffp_frag_settings *settings)
 {
-    return (const struct ffp_frag_desc *)hash_table_get(fragment_shaders, settings);
+    return hash_table_get(fragment_shaders, settings);
 }
 
 void add_ffp_frag_shader(struct hash_table_t *shaders, struct ffp_frag_desc *desc) {

@@ -263,6 +263,7 @@ typedef struct tagME_TextBuffer
 
 typedef struct tagME_Cursor
 {
+  ME_DisplayItem *pPara;
   ME_DisplayItem *pRun;
   int nOffset;
 } ME_Cursor;
@@ -342,6 +343,7 @@ typedef struct tagME_TextEditor
   SIZE sizeWindow;
   int nTotalLength, nLastTotalLength;
   int nTotalWidth, nLastTotalWidth;
+  int nAvailWidth; /* 0 = wrap to client area, else wrap width in twips */
   int nUDArrowX;
   int nSequence;
   COLORREF rgbBackColor;
@@ -396,6 +398,7 @@ typedef struct tagME_Context
   RECT rcView;
   HBRUSH hbrMargin;
   SIZE dpi;
+  int nAvailWidth;
 
   /* those are valid inside ME_WrapTextParagraph and related */
   POINT ptFirstRun;
@@ -412,10 +415,11 @@ typedef struct tagME_WrapContext
   int nRow;
   POINT pt;
   BOOL bOverflown, bWordWrap;
+  ME_DisplayItem *pPara;
   ME_DisplayItem *pRowStart;
-  
+
   ME_DisplayItem *pLastSplittableRun;
   POINT ptLastSplittableRun;
-} ME_WrapContext;  
+} ME_WrapContext;
 
 #endif

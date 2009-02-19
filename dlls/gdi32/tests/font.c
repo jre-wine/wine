@@ -2019,6 +2019,14 @@ typedef struct
                     ((DWORD)(BYTE)(ch2) << 16) | ((DWORD)(BYTE)(ch3) << 24))
 #define MS_OS2_TAG MS_MAKE_TAG('O','S','/','2')
 
+static void expect_ff(const TEXTMETRICA *tmA, const TT_OS2_V2 *os2, WORD family, const char *name)
+{
+    ok((tmA->tmPitchAndFamily & 0xf0) == family, "%s: expected family %02x got %02x. panose %d-%d-%d-%d-...\n",
+       name, family, tmA->tmPitchAndFamily, os2->panose.bFamilyType, os2->panose.bSerifStyle,
+       os2->panose.bWeight, os2->panose.bProportion);
+
+}
+
 static void test_text_metrics(const LOGFONTA *lf)
 {
     HDC hdc;
@@ -2128,6 +2136,58 @@ static void test_text_metrics(const LOGFONTA *lf)
         ret = GetDeviceCaps(hdc, LOGPIXELSY);
         ok(tmW.tmDigitizedAspectX == ret, "W: tmDigitizedAspectY %u != %u\n",
            tmW.tmDigitizedAspectX, ret);
+    }
+
+    /* test FF_ values */
+    switch(tt_os2.panose.bFamilyType)
+    {
+    case PAN_ANY:
+    case PAN_NO_FIT:
+    case PAN_FAMILY_TEXT_DISPLAY:
+    case PAN_FAMILY_PICTORIAL:
+    default:
+        if((tmA.tmPitchAndFamily & 1) == 0) /* fixed */
+        {
+            expect_ff(&tmA, &tt_os2, FF_MODERN, font_name);
+            break;
+        }
+        switch(tt_os2.panose.bSerifStyle)
+        {
+        case PAN_ANY:
+        case PAN_NO_FIT:
+        default:
+            expect_ff(&tmA, &tt_os2, FF_DONTCARE, font_name);
+            break;
+
+        case PAN_SERIF_COVE:
+        case PAN_SERIF_OBTUSE_COVE:
+        case PAN_SERIF_SQUARE_COVE:
+        case PAN_SERIF_OBTUSE_SQUARE_COVE:
+        case PAN_SERIF_SQUARE:
+        case PAN_SERIF_THIN:
+        case PAN_SERIF_BONE:
+        case PAN_SERIF_EXAGGERATED:
+        case PAN_SERIF_TRIANGLE:
+            expect_ff(&tmA, &tt_os2, FF_ROMAN, font_name);
+            break;
+
+        case PAN_SERIF_NORMAL_SANS:
+        case PAN_SERIF_OBTUSE_SANS:
+        case PAN_SERIF_PERP_SANS:
+        case PAN_SERIF_FLARED:
+        case PAN_SERIF_ROUNDED:
+            expect_ff(&tmA, &tt_os2, FF_SWISS, font_name);
+            break;
+        }
+        break;
+
+    case PAN_FAMILY_SCRIPT:
+        expect_ff(&tmA, &tt_os2, FF_SCRIPT, font_name);
+        break;
+
+    case PAN_FAMILY_DECORATIVE:
+        expect_ff(&tmA, &tt_os2, FF_DECORATIVE, font_name);
+        break;
     }
 
     test_negative_width(hdc, lf);
@@ -2477,6 +2537,61 @@ static void test_orientation(void)
     DeleteDC(hdc);
 }
 
+static void test_GetGlyphOutline(void)
+{
+    MAT2 mat = { {0,1}, {0,0}, {0,0}, {0,1} };
+    HDC hdc;
+    GLYPHMETRICS gm;
+    LOGFONTA lf;
+    HFONT hfont, old_hfont;
+    INT ret;
+
+    if (!is_truetype_font_installed("Tahoma"))
+    {
+        skip("Tahoma is not installed\n");
+        return;
+    }
+
+    hdc = CreateCompatibleDC(0);
+    memset(&lf, 0, sizeof(lf));
+    lf.lfHeight = 72;
+    lstrcpyA(lf.lfFaceName, "Tahoma");
+    SetLastError(0xdeadbeef);
+    hfont = CreateFontIndirectA(&lf);
+    ok(hfont != 0, "CreateFontIndirectA error %u\n", GetLastError());
+    old_hfont = SelectObject(hdc, hfont);
+
+    memset(&gm, 0, sizeof(gm));
+    SetLastError(0xdeadbeef);
+    ret = GetGlyphOutlineA(hdc, 'A', GGO_METRICS, &gm, 0, NULL, &mat);
+    ok(ret != GDI_ERROR, "GetGlyphOutlineA error %u\n", GetLastError());
+
+    memset(&gm, 0, sizeof(gm));
+    SetLastError(0xdeadbeef);
+    ret = GetGlyphOutlineA(hdc, 'A', GGO_METRICS, &gm, 0, NULL, NULL);
+    ok(ret == GDI_ERROR, "GetGlyphOutlineA should fail\n");
+    ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", GetLastError());
+
+    memset(&gm, 0, sizeof(gm));
+    SetLastError(0xdeadbeef);
+    ret = GetGlyphOutlineW(hdc, 'A', GGO_METRICS, &gm, 0, NULL, &mat);
+    if (GetLastError() != ERROR_CALL_NOT_IMPLEMENTED)
+        ok(ret != GDI_ERROR, "GetGlyphOutlineW error %u\n", GetLastError());
+
+    memset(&gm, 0, sizeof(gm));
+    SetLastError(0xdeadbeef);
+    ret = GetGlyphOutlineW(hdc, 'A', GGO_METRICS, &gm, 0, NULL, NULL);
+    if (GetLastError() != ERROR_CALL_NOT_IMPLEMENTED)
+    {
+       ok(ret == GDI_ERROR, "GetGlyphOutlineW should fail\n");
+       ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", GetLastError());
+    }
+
+    SelectObject(hdc, old_hfont);
+    DeleteObject(hfont);
+    DeleteDC(hdc);
+}
+
 START_TEST(font)
 {
     init();
@@ -2514,4 +2629,5 @@ START_TEST(font)
     test_GetTextMetrics();
     test_GdiRealizationInfo();
     test_GetTextFace();
+    test_GetGlyphOutline();
 }

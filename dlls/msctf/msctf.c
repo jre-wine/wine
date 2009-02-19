@@ -43,6 +43,10 @@ static LONG MSCTF_refCount;
 
 static HINSTANCE MSCTF_hinstance;
 
+DWORD tlsIndex = 0;
+
+const WCHAR szwSystemTIPKey[] = {'S','O','F','T','W','A','R','E','\\','M','i','c','r','o','s','o','f','t','\\','C','T','F','\\','T','I','P',0};
+
 typedef HRESULT (*LPFNCONSTRUCTOR)(IUnknown *pUnkOuter, IUnknown **ppvOut);
 
 static const struct {
@@ -50,6 +54,8 @@ static const struct {
     LPFNCONSTRUCTOR ctor;
 } ClassesTable[] = {
     {&CLSID_TF_ThreadMgr, ThreadMgr_Constructor},
+    {&CLSID_TF_InputProcessorProfiles, InputProcessorProfiles_Constructor},
+    {&CLSID_TF_CategoryMgr, CategoryMgr_Constructor},
     {NULL, NULL}
 };
 
@@ -159,8 +165,11 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD fdwReason, LPVOID fImpLoad)
         case DLL_WINE_PREATTACH:
             return FALSE;   /* prefer native version */
         case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(hinst);
             MSCTF_hinstance = hinst;
+            tlsIndex = TlsAlloc();
+            break;
+        case DLL_PROCESS_DETACH:
+            TlsFree(tlsIndex);
             break;
     }
     return TRUE;
@@ -191,4 +200,53 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, LPVOID *ppvOut)
         }
     FIXME("CLSID %s not supported\n", debugstr_guid(clsid));
     return CLASS_E_CLASSNOTAVAILABLE;
+}
+
+/***********************************************************************
+ *              TF_CreateThreadMgr (MSCTF.@)
+ */
+HRESULT WINAPI TF_CreateThreadMgr(ITfThreadMgr **pptim)
+{
+    TRACE("\n");
+    return ThreadMgr_Constructor(NULL,(IUnknown**)pptim);
+}
+
+/***********************************************************************
+ *              TF_GetThreadMgr (MSCTF.@)
+ */
+HRESULT WINAPI TF_GetThreadMgr(ITfThreadMgr **pptim)
+{
+    TRACE("\n");
+    *pptim = (ITfThreadMgr*)TlsGetValue(tlsIndex);
+
+    if (*pptim)
+        ITfThreadMgr_AddRef(*pptim);
+
+    return S_OK;
+}
+
+/***********************************************************************
+ *              SetInputScope(MSCTF.@)
+ */
+HRESULT WINAPI SetInputScope(HWND hwnd, INT inputscope)
+{
+    FIXME("STUB: %p %i\n",hwnd,inputscope);
+    return S_OK;
+}
+
+/***********************************************************************
+ *              SetInputScopes(MSCTF.@)
+ */
+HRESULT WINAPI SetInputScopes(HWND hwnd, const INT *pInputScopes,
+                              UINT cInputScopes, WCHAR **ppszPhraseList,
+                              UINT cPhrases, WCHAR *pszRegExp, WCHAR *pszSRGS)
+{
+    int i;
+    FIXME("STUB: %p ... %s %s\n",hwnd, debugstr_w(pszRegExp), debugstr_w(pszSRGS));
+    for (i = 0; i < cInputScopes; i++)
+        TRACE("\tScope[%i] = %i\n",i,pInputScopes[i]);
+    for (i = 0; i < cPhrases; i++)
+        TRACE("\tPhrase[%i] = %s\n",i,debugstr_w(ppszPhraseList[i]));
+
+    return S_OK;
 }

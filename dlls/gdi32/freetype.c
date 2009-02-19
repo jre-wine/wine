@@ -3333,7 +3333,7 @@ GdiFont *WineEngCreateFontInstance(DC *dc, HFONT hfont)
     {
         /* Windows 3.1 compatibility mode GM_COMPATIBLE has only limited
            font scaling abilities. */
-        dcmat.eM11 = dcmat.eM22 = fabs(dc->xformWorld2Vport.eM22);
+        dcmat.eM11 = dcmat.eM22 = dc->vport2WorldValid ? fabs(dc->xformWorld2Vport.eM22) : 1.0;
         dcmat.eM21 = dcmat.eM12 = 0;
     }
 
@@ -4417,7 +4417,7 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
 			       font->gmsize * sizeof(GM*));
     } else {
         if (format == GGO_METRICS && font->gm[original_index / GM_BLOCK_SIZE] != NULL &&
-            FONT_GM(font,original_index)->init && (!lpmat || is_identity_MAT2(lpmat)))
+            FONT_GM(font,original_index)->init && is_identity_MAT2(lpmat))
         {
             *lpgm = FONT_GM(font,original_index)->gm;
             TRACE("cached: %u,%u,%s,%d,%d\n", lpgm->gmBlackBoxX, lpgm->gmBlackBoxY,
@@ -4499,7 +4499,7 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
     }
 
     /* Extra transformation specified by caller */
-    if (lpmat && !is_identity_MAT2(lpmat))
+    if (!is_identity_MAT2(lpmat))
     {
         FT_Matrix extraMat;
         extraMat.xx = FT_FixedFromFIXED(lpmat->eM11);
@@ -4588,7 +4588,7 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
           lpgm->gmCellIncX, lpgm->gmCellIncY);
 
     if ((format == GGO_METRICS || format == GGO_BITMAP || format ==  WINE_GGO_GRAY16_BITMAP) &&
-        (!lpmat || is_identity_MAT2(lpmat))) /* don't cache custom transforms */
+        is_identity_MAT2(lpmat)) /* don't cache custom transforms */
     {
         FONT_GM(font,original_index)->gm = *lpgm;
         FONT_GM(font,original_index)->adv = adv;
@@ -5420,31 +5420,56 @@ UINT WineEngGetOutlineTextMetrics(GdiFont *font, UINT cbSize,
     else
         TM.tmPitchAndFamily = 0;
 
-    switch(pOS2->panose[PAN_FAMILYTYPE_INDEX]) {
+    switch(pOS2->panose[PAN_FAMILYTYPE_INDEX])
+    {
     case PAN_FAMILY_SCRIPT:
         TM.tmPitchAndFamily |= FF_SCRIPT;
-	break;
+        break;
+
     case PAN_FAMILY_DECORATIVE:
-    case PAN_FAMILY_PICTORIAL:
         TM.tmPitchAndFamily |= FF_DECORATIVE;
-	break;
+        break;
+
+    case PAN_ANY:
+    case PAN_NO_FIT:
     case PAN_FAMILY_TEXT_DISPLAY:
+    case PAN_FAMILY_PICTORIAL: /* symbol fonts get treated as if they were text */
+                               /* which is clearly not what the panose spec says. */
+    default:
         if(TM.tmPitchAndFamily == 0) /* fixed */
 	    TM.tmPitchAndFamily = FF_MODERN;
-	else {
-	    switch(pOS2->panose[PAN_SERIFSTYLE_INDEX]) {
-	    case PAN_SERIF_NORMAL_SANS:
-	    case PAN_SERIF_OBTUSE_SANS:
-	    case PAN_SERIF_PERP_SANS:
-	        TM.tmPitchAndFamily |= FF_SWISS;
-		break;
-	    default:
-	        TM.tmPitchAndFamily |= FF_ROMAN;
-	    }
+        else
+        {
+            switch(pOS2->panose[PAN_SERIFSTYLE_INDEX])
+            {
+            case PAN_ANY:
+            case PAN_NO_FIT:
+            default:
+                TM.tmPitchAndFamily |= FF_DONTCARE;
+                break;
+
+            case PAN_SERIF_COVE:
+            case PAN_SERIF_OBTUSE_COVE:
+            case PAN_SERIF_SQUARE_COVE:
+            case PAN_SERIF_OBTUSE_SQUARE_COVE:
+            case PAN_SERIF_SQUARE:
+            case PAN_SERIF_THIN:
+            case PAN_SERIF_BONE:
+            case PAN_SERIF_EXAGGERATED:
+            case PAN_SERIF_TRIANGLE:
+                TM.tmPitchAndFamily |= FF_ROMAN;
+                break;
+
+            case PAN_SERIF_NORMAL_SANS:
+            case PAN_SERIF_OBTUSE_SANS:
+            case PAN_SERIF_PERP_SANS:
+            case PAN_SERIF_FLARED:
+            case PAN_SERIF_ROUNDED:
+                TM.tmPitchAndFamily |= FF_SWISS;
+                break;
+            }
 	}
 	break;
-    default:
-        TM.tmPitchAndFamily |= FF_DONTCARE;
     }
 
     if(FT_IS_SCALABLE(ft_face))
@@ -5600,6 +5625,7 @@ static BOOL get_glyph_index_linked(GdiFont *font, UINT c, GdiFont **linked_font,
 BOOL WineEngGetCharWidth(GdiFont *font, UINT firstChar, UINT lastChar,
 			 LPINT buffer)
 {
+    static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
     UINT c;
     GLYPHMETRICS gm;
     FT_UInt glyph_index;
@@ -5612,7 +5638,7 @@ BOOL WineEngGetCharWidth(GdiFont *font, UINT firstChar, UINT lastChar,
     for(c = firstChar; c <= lastChar; c++) {
         get_glyph_index_linked(font, c, &linked_font, &glyph_index);
         WineEngGetGlyphOutline(linked_font, glyph_index, GGO_METRICS | GGO_GLYPH_INDEX,
-                               &gm, 0, NULL, NULL);
+                               &gm, 0, NULL, &identity);
 	buffer[c - firstChar] = FONT_GM(linked_font,glyph_index)->adv;
     }
     LeaveCriticalSection( &freetype_cs );
@@ -5626,6 +5652,7 @@ BOOL WineEngGetCharWidth(GdiFont *font, UINT firstChar, UINT lastChar,
 BOOL WineEngGetCharABCWidths(GdiFont *font, UINT firstChar, UINT lastChar,
 			     LPABC buffer)
 {
+    static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
     UINT c;
     GLYPHMETRICS gm;
     FT_UInt glyph_index;
@@ -5642,7 +5669,7 @@ BOOL WineEngGetCharABCWidths(GdiFont *font, UINT firstChar, UINT lastChar,
     for(c = firstChar; c <= lastChar; c++) {
         get_glyph_index_linked(font, c, &linked_font, &glyph_index);
         WineEngGetGlyphOutline(linked_font, glyph_index, GGO_METRICS | GGO_GLYPH_INDEX,
-                               &gm, 0, NULL, NULL);
+                               &gm, 0, NULL, &identity);
 	buffer[c - firstChar].abcA = FONT_GM(linked_font,glyph_index)->lsb;
 	buffer[c - firstChar].abcB = FONT_GM(linked_font,glyph_index)->bbx;
 	buffer[c - firstChar].abcC = FONT_GM(linked_font,glyph_index)->adv - FONT_GM(linked_font,glyph_index)->lsb -
@@ -5659,6 +5686,7 @@ BOOL WineEngGetCharABCWidths(GdiFont *font, UINT firstChar, UINT lastChar,
 BOOL WineEngGetCharABCWidthsI(GdiFont *font, UINT firstChar, UINT count, LPWORD pgi,
 			      LPABC buffer)
 {
+    static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
     UINT c;
     GLYPHMETRICS gm;
     FT_UInt glyph_index;
@@ -5674,7 +5702,7 @@ BOOL WineEngGetCharABCWidthsI(GdiFont *font, UINT firstChar, UINT count, LPWORD 
     if (!pgi)
         for(c = firstChar; c < firstChar+count; c++) {
             WineEngGetGlyphOutline(linked_font, c, GGO_METRICS | GGO_GLYPH_INDEX,
-                                   &gm, 0, NULL, NULL);
+                                   &gm, 0, NULL, &identity);
             buffer[c - firstChar].abcA = FONT_GM(linked_font,c)->lsb;
             buffer[c - firstChar].abcB = FONT_GM(linked_font,c)->bbx;
             buffer[c - firstChar].abcC = FONT_GM(linked_font,c)->adv - FONT_GM(linked_font,c)->lsb
@@ -5683,7 +5711,7 @@ BOOL WineEngGetCharABCWidthsI(GdiFont *font, UINT firstChar, UINT count, LPWORD 
     else
         for(c = 0; c < count; c++) {
             WineEngGetGlyphOutline(linked_font, pgi[c], GGO_METRICS | GGO_GLYPH_INDEX,
-                                   &gm, 0, NULL, NULL);
+                                   &gm, 0, NULL, &identity);
             buffer[c].abcA = FONT_GM(linked_font,pgi[c])->lsb;
             buffer[c].abcB = FONT_GM(linked_font,pgi[c])->bbx;
             buffer[c].abcC = FONT_GM(linked_font,pgi[c])->adv
@@ -5701,6 +5729,7 @@ BOOL WineEngGetCharABCWidthsI(GdiFont *font, UINT firstChar, UINT count, LPWORD 
 BOOL WineEngGetTextExtentExPoint(GdiFont *font, LPCWSTR wstr, INT count,
                                  INT max_ext, LPINT pnfit, LPINT dxs, LPSIZE size)
 {
+    static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
     INT idx;
     INT nfit = 0, ext;
     GLYPHMETRICS gm;
@@ -5721,7 +5750,7 @@ BOOL WineEngGetTextExtentExPoint(GdiFont *font, LPCWSTR wstr, INT count,
     for(idx = 0; idx < count; idx++) {
         get_glyph_index_linked(font, wstr[idx], &linked_font, &glyph_index);
         WineEngGetGlyphOutline(linked_font, glyph_index, GGO_METRICS | GGO_GLYPH_INDEX,
-                               &gm, 0, NULL, NULL);
+                               &gm, 0, NULL, &identity);
 	size->cx += FONT_GM(linked_font,glyph_index)->adv;
         ext = size->cx;
         if (! pnfit || ext <= max_ext) {
@@ -5746,6 +5775,7 @@ BOOL WineEngGetTextExtentExPoint(GdiFont *font, LPCWSTR wstr, INT count,
 BOOL WineEngGetTextExtentExPointI(GdiFont *font, const WORD *indices, INT count,
                                   INT max_ext, LPINT pnfit, LPINT dxs, LPSIZE size)
 {
+    static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
     INT idx;
     INT nfit = 0, ext;
     GLYPHMETRICS gm;
@@ -5763,7 +5793,7 @@ BOOL WineEngGetTextExtentExPointI(GdiFont *font, const WORD *indices, INT count,
     for(idx = 0; idx < count; idx++) {
         WineEngGetGlyphOutline(font, indices[idx],
 			       GGO_METRICS | GGO_GLYPH_INDEX, &gm, 0, NULL,
-			       NULL);
+			       &identity);
         size->cx += FONT_GM(font,indices[idx])->adv;
         ext = size->cx;
         if (! pnfit || ext <= max_ext) {

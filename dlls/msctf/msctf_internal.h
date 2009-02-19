@@ -20,7 +20,13 @@
 
 #ifndef __WINE_MSCTF_I_H
 #define __WINE_MSCTF_I_H
+extern DWORD tlsIndex;
 
 extern HRESULT ThreadMgr_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut);
+extern HRESULT DocumentMgr_Constructor(ITfDocumentMgr **ppOut);
+extern HRESULT Context_Constructor(TfClientId tidOwner, IUnknown *punk, ITfContext **ppOut, TfEditCookie *pecTextStore);
+extern HRESULT InputProcessorProfiles_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut);
+extern HRESULT CategoryMgr_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut);
 
+extern const WCHAR szwSystemTIPKey[];
 #endif /* __WINE_MSCTF_I_H */

@@ -101,9 +101,24 @@ TW_UINT16 SANE_CapabilityGetDefault (pTW_IDENTITY pOrigin, TW_MEMREF pData)
 TW_UINT16 SANE_CapabilityQuerySupport (pTW_IDENTITY pOrigin,
                                         TW_MEMREF pData)
 {
-    FIXME ("stub!\n");
+    TW_UINT16 twRC = TWRC_SUCCESS, twCC = TWCC_SUCCESS;
+    pTW_CAPABILITY pCapability = (pTW_CAPABILITY) pData;
 
-    return TWRC_FAILURE;
+    TRACE("DG_CONTROL/DAT_CAPABILITY/MSG_QUERYSUPPORT\n");
+
+    if (activeDS.currentState < 4 || activeDS.currentState > 7)
+    {
+        twRC = TWRC_FAILURE;
+        activeDS.twCC = TWCC_SEQERROR;
+    }
+    else
+    {
+        twCC = SANE_SaneCapability (pCapability, MSG_QUERYSUPPORT);
+        twRC = (twCC == TWCC_SUCCESS)?TWRC_SUCCESS:TWRC_FAILURE;
+        activeDS.twCC = twCC;
+    }
+
+    return twRC;
 }
 
 /* DG_CONTROL/DAT_CAPABILITY/MSG_RESET */
@@ -277,30 +292,25 @@ TW_UINT16 SANE_FileSystemRename (pTW_IDENTITY pOrigin,
 TW_UINT16 SANE_ProcessEvent (pTW_IDENTITY pOrigin, 
                               TW_MEMREF pData)
 {
-    TW_UINT16 twRC = TWRC_SUCCESS;
+    TW_UINT16 twRC = TWRC_NOTDSEVENT;
     pTW_EVENT pEvent = (pTW_EVENT) pData;
+    MSG *pMsg = pEvent->pEvent;
 
-    TRACE("DG_CONTROL/DAT_EVENT/MSG_PROCESSEVENT\n");
+    TRACE("DG_CONTROL/DAT_EVENT/MSG_PROCESSEVENT  msg 0x%x, wParam 0x%lx\n", pMsg->message, pMsg->wParam);
+
+    activeDS.twCC = TWCC_SUCCESS;
+    if (pMsg->message == activeDS.windowMessage && activeDS.windowMessage)
+    {
+        twRC = TWRC_DSEVENT;
+        pEvent->TWMessage = pMsg->wParam;
+    }
+    else
+        pEvent->TWMessage = MSG_NULL;  /* no message to the application */
 
     if (activeDS.currentState < 5 || activeDS.currentState > 7)
     {
         twRC = TWRC_FAILURE;
         activeDS.twCC = TWCC_SEQERROR;
-    }
-    else
-    {
-        if (activeDS.pendingEvent.TWMessage != MSG_NULL)
-        {
-            pEvent->TWMessage = activeDS.pendingEvent.TWMessage;
-            activeDS.pendingEvent.TWMessage = MSG_NULL;
-            twRC = TWRC_NOTDSEVENT;
-        }
-        else
-        {
-            pEvent->TWMessage = MSG_NULL;  /* no message to the application */
-            twRC = TWRC_NOTDSEVENT;
-        }
-        activeDS.twCC = TWCC_SUCCESS;
     }
 
     return twRC;
@@ -340,7 +350,8 @@ TW_UINT16 SANE_PendingXfersEndXfer (pTW_IDENTITY pOrigin,
         {
             activeDS.currentState = 5;
             /* Notify the application that it can close the data source */
-            activeDS.pendingEvent.TWMessage = MSG_CLOSEDSREQ;
+            if (activeDS.windowMessage)
+                PostMessageA(activeDS.hwndOwner, activeDS.windowMessage, MSG_CLOSEDSREQ, 0);
         }
         twRC = TWRC_SUCCESS;
         activeDS.twCC = TWCC_SUCCESS;
@@ -563,15 +574,19 @@ TW_UINT16 SANE_EnableDSUserInterface (pTW_IDENTITY pOrigin,
     else
     {
         activeDS.hwndOwner = pUserInterface->hParent;
+        if (! activeDS.windowMessage)
+            activeDS.windowMessage = RegisterWindowMessageA("SANE.DS ACTIVITY MESSAGE");
         if (pUserInterface->ShowUI)
         {
             BOOL rc;
             activeDS.currentState = 5; /* Transitions to state 5 */
 		FIXME("showing UI\n");
             rc = DoScannerUI();
+            pUserInterface->ModalUI = TRUE;
             if (!rc)
             {
-                activeDS.pendingEvent.TWMessage = MSG_CLOSEDSREQ;
+                if (activeDS.windowMessage)
+                    PostMessageA(activeDS.hwndOwner, activeDS.windowMessage, MSG_CLOSEDSREQ, 0);
             }
 #ifdef SONAME_LIBSANE
             else
@@ -584,11 +599,11 @@ TW_UINT16 SANE_EnableDSUserInterface (pTW_IDENTITY pOrigin,
         else
         {
             /* no UI will be displayed, so source is ready to transfer data */
-            activeDS.pendingEvent.TWMessage = MSG_XFERREADY;
             activeDS.currentState = 6; /* Transitions to state 6 directly */
+            if (activeDS.windowMessage)
+                PostMessageA(activeDS.hwndOwner, activeDS.windowMessage, MSG_XFERREADY, 0);
         }
 
-        activeDS.hwndOwner = pUserInterface->hParent;
         twRC = TWRC_SUCCESS;
         activeDS.twCC = TWCC_SUCCESS;
     }

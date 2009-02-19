@@ -70,6 +70,7 @@ PUBLIC_IDL_H_SRCS = \
 	shobjidl.idl \
 	shtypes.idl \
 	strmif.idl \
+	textstor.idl \
 	tom.idl \
 	unknwn.idl \
 	urlhist.idl \
@@ -143,6 +144,7 @@ SRCDIR_INCLUDES = \
 	d3dx9core.h \
 	d3dx9math.h \
 	d3dx9math.inl \
+	d3dx9mesh.h \
 	d3dx9shader.h \
 	d3dx9tex.h \
 	dbghelp.h \

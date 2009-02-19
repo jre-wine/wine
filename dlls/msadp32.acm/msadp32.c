@@ -128,6 +128,25 @@ static	DWORD	ADPCM_GetFormatIndex(const WAVEFORMATEX* wfx)
 	    return i;
     }
 
+    switch (wfx->wFormatTag)
+    {
+    case WAVE_FORMAT_PCM:
+	if(3 > wfx->nChannels &&
+	   wfx->nChannels > 0 &&
+	   wfx->nAvgBytesPerSec == 2 * wfx->nSamplesPerSec * wfx->nChannels &&
+	   wfx->nBlockAlign == 2 * wfx->nChannels &&
+	   wfx->wBitsPerSample == 16)
+	   return hi;
+	break;
+    case WAVE_FORMAT_ADPCM:
+	if(3 > wfx->nChannels &&
+	   wfx->nChannels > 0 &&
+	   wfx->wBitsPerSample == 4 &&
+	   wfx->cbSize == 32)
+	   return hi;
+	break;
+    }
+
     return 0xFFFFFFFF;
 }
 
@@ -143,16 +162,16 @@ static void     init_wfx_adpcm(ADPCMWAVEFORMAT* awfx)
 
     switch (pwfx->nSamplesPerSec)
     {
-    case  8000: pwfx->nBlockAlign = 256;   break;
-    case 11025: pwfx->nBlockAlign = 256;   break;
-    case 22050: pwfx->nBlockAlign = 512;   break;
-    default:
-    case 44100: pwfx->nBlockAlign = 1024;  break;
+    case  8000: pwfx->nBlockAlign = 256 * pwfx->nChannels;   break;
+    case 11025: pwfx->nBlockAlign = 256 * pwfx->nChannels;   break;
+    case 22050: pwfx->nBlockAlign = 512 * pwfx->nChannels;   break;
+    case 44100: pwfx->nBlockAlign = 1024 * pwfx->nChannels;  break;
+    default:                               break;
     }
     pwfx->cbSize = 2 * sizeof(WORD) + 7 * sizeof(ADPCMCOEFSET);
     /* 7 is the size of the block head (which contains two samples) */
 
-    awfx->wSamplesPerBlock = (pwfx->nBlockAlign - (7 * pwfx->nChannels)) * (2 / pwfx->nChannels) + 2;
+    awfx->wSamplesPerBlock = pwfx->nBlockAlign * 2 / pwfx->nChannels - 12;
     pwfx->nAvgBytesPerSec = (pwfx->nSamplesPerSec * pwfx->nBlockAlign) / awfx->wSamplesPerBlock;
     awfx->wNumCoef = 7;
     memcpy(awfx->aCoef, MSADPCM_CoeffSet, 7 * sizeof(ADPCMCOEFSET));
@@ -453,6 +472,7 @@ static	LRESULT	ADPCM_FormatSuggest(PACMDRVFORMATSUGGEST adfs)
     /* some tests ... */
     if (adfs->cbwfxSrc < sizeof(PCMWAVEFORMAT) ||
 	adfs->cbwfxDst < sizeof(PCMWAVEFORMAT) ||
+	adfs->pwfxSrc->wFormatTag == adfs->pwfxDst->wFormatTag ||
 	ADPCM_GetFormatIndex(adfs->pwfxSrc) == 0xFFFFFFFF) return ACMERR_NOTPOSSIBLE;
     /* FIXME: should do those tests against the real size (according to format tag */
 
@@ -477,18 +497,19 @@ static	LRESULT	ADPCM_FormatSuggest(PACMDRVFORMATSUGGEST adfs)
             adfs->pwfxDst->wFormatTag = WAVE_FORMAT_PCM;
     }
 
-    /* check if result is ok */
-    if (ADPCM_GetFormatIndex(adfs->pwfxDst) == 0xFFFFFFFF) return ACMERR_NOTPOSSIBLE;
-
     /* recompute other values */
     switch (adfs->pwfxDst->wFormatTag)
     {
     case WAVE_FORMAT_PCM:
         adfs->pwfxDst->nBlockAlign = (adfs->pwfxDst->nChannels * adfs->pwfxDst->wBitsPerSample) / 8;
         adfs->pwfxDst->nAvgBytesPerSec = adfs->pwfxDst->nSamplesPerSec * adfs->pwfxDst->nBlockAlign;
+        /* check if result is ok */
+        if (ADPCM_GetFormatIndex(adfs->pwfxDst) == 0xFFFFFFFF) return ACMERR_NOTPOSSIBLE;
         break;
     case WAVE_FORMAT_ADPCM:
         init_wfx_adpcm((ADPCMWAVEFORMAT*)adfs->pwfxDst);
+        /* check if result is ok */
+        if (ADPCM_GetFormatIndex(adfs->pwfxDst) == 0xFFFFFFFF) return ACMERR_NOTPOSSIBLE;
         break;
     default:
         FIXME("\n");
@@ -618,6 +639,9 @@ static	LRESULT	ADPCM_StreamClose(PACMDRVSTREAMINSTANCE adsi)
  */
 static	LRESULT ADPCM_StreamSize(const ACMDRVSTREAMINSTANCE *adsi, PACMDRVSTREAMSIZE adss)
 {
+    DWORD nblocks;
+    WORD wSamplesPerBlock;
+    /* wSamplesPerBlock formula comes from MSDN ADPCMWAVEFORMAT page.*/
     switch (adss->fdwSize)
     {
     case ACM_STREAMSIZEF_DESTINATION:
@@ -625,14 +649,20 @@ static	LRESULT ADPCM_StreamSize(const ACMDRVSTREAMINSTANCE *adsi, PACMDRVSTREAMS
 	if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_PCM &&
 	    adsi->pwfxDst->wFormatTag == WAVE_FORMAT_ADPCM)
         {
-	    /* don't take block overhead into account, doesn't matter too much */
-	    adss->cbSrcLength = adss->cbDstLength * 4;
+	    wSamplesPerBlock = adsi->pwfxDst->nBlockAlign * 2 / adsi->pwfxDst->nChannels - 12;
+	    nblocks = adss->cbDstLength / adsi->pwfxDst->nBlockAlign;
+	    if (nblocks == 0)
+		return ACMERR_NOTPOSSIBLE;
+	    adss->cbSrcLength = nblocks * adsi->pwfxSrc->nBlockAlign * wSamplesPerBlock;
 	}
         else if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_ADPCM &&
                  adsi->pwfxDst->wFormatTag == WAVE_FORMAT_PCM)
         {
-	    FIXME("misses the block header overhead\n");
-	    adss->cbSrcLength = 256 + adss->cbDstLength / 4;
+	    wSamplesPerBlock = adsi->pwfxSrc->nBlockAlign * 2 / adsi->pwfxSrc->nChannels - 12;
+	    nblocks = adss->cbDstLength / (adsi->pwfxDst->nBlockAlign * wSamplesPerBlock);
+	    if (nblocks == 0)
+		return ACMERR_NOTPOSSIBLE;
+	    adss->cbSrcLength = nblocks * adsi->pwfxSrc->nBlockAlign;
 	}
         else
         {
@@ -644,14 +674,26 @@ static	LRESULT ADPCM_StreamSize(const ACMDRVSTREAMINSTANCE *adsi, PACMDRVSTREAMS
 	if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_PCM &&
 	    adsi->pwfxDst->wFormatTag == WAVE_FORMAT_ADPCM)
         {
-	    FIXME("misses the block header overhead\n");
-	    adss->cbDstLength = 256 + adss->cbSrcLength / 4;
+	    wSamplesPerBlock = adsi->pwfxDst->nBlockAlign * 2 / adsi->pwfxDst->nChannels - 12;
+	    nblocks = adss->cbSrcLength / (adsi->pwfxSrc->nBlockAlign * wSamplesPerBlock);
+	    if (nblocks == 0)
+		return ACMERR_NOTPOSSIBLE;
+	    if (adss->cbSrcLength % (adsi->pwfxSrc->nBlockAlign * wSamplesPerBlock))
+		/* Round block count up. */
+		nblocks++;
+	    adss->cbDstLength = nblocks * adsi->pwfxDst->nBlockAlign;
 	}
         else if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_ADPCM &&
                  adsi->pwfxDst->wFormatTag == WAVE_FORMAT_PCM)
         {
-	    /* don't take block overhead into account, doesn't matter too much */
-	    adss->cbDstLength = adss->cbSrcLength * 4;
+	    wSamplesPerBlock = adsi->pwfxSrc->nBlockAlign * 2 / adsi->pwfxSrc->nChannels - 12;
+	    nblocks = adss->cbSrcLength / adsi->pwfxSrc->nBlockAlign;
+	    if (nblocks == 0)
+		return ACMERR_NOTPOSSIBLE;
+	    if (adss->cbSrcLength % adsi->pwfxSrc->nBlockAlign)
+		/* Round block count up. */
+		nblocks++;
+	    adss->cbDstLength = nblocks * adsi->pwfxDst->nBlockAlign * wSamplesPerBlock;
 	}
         else
         {

@@ -450,6 +450,10 @@ static void test_EM_LINELENGTH(void)
   SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) text);
 
   result = SendMessage(hwndRichEdit, EM_GETLINECOUNT, 0, 0);
+  if (result == 4) {
+     win_skip("Win9x, WinME and NT4 don't handle '\\r only' correctly\n");
+     return;
+  }
   ok(result == 9, "Incorrect line count of %ld\n", result);
 
   for (i = 0; i < sizeof(offset_test)/sizeof(offset_test[0]); i++) {
@@ -672,15 +676,8 @@ static void run_tests_EM_FINDTEXT(HWND hwnd, const char *name, struct find_s *fi
   int i;
 
   for (i = 0; i < num_tests; i++) {
-    if (*name == '3' && i == 0) {
-        todo_wine {
-            check_EM_FINDTEXT(hwnd, name, &find[i], i);
-            check_EM_FINDTEXTEX(hwnd, name, &find[i], i);
-        }
-    } else {
-        check_EM_FINDTEXT(hwnd, name, &find[i], i);
-        check_EM_FINDTEXTEX(hwnd, name, &find[i], i);
-    }
+    check_EM_FINDTEXT(hwnd, name, &find[i], i);
+    check_EM_FINDTEXTEX(hwnd, name, &find[i], i);
   }
 }
 
@@ -897,12 +894,12 @@ static void test_word_wrap(void)
 
     /* Test the effect of EM_SETTARGETDEVICE on word wrap. */
     res = SendMessage(hwnd, EM_SETTARGETDEVICE, 0, 1);
-    todo_wine ok(res, "EM_SETTARGETDEVICE failed (returned %d).\n", res);
+    ok(res, "EM_SETTARGETDEVICE failed (returned %d).\n", res);
     pos = SendMessage(hwnd, EM_CHARFROMPOS, 0, (LPARAM) &point);
     ok(!pos, "pos=%d indicating word wrap when none is expected.\n", pos);
 
     res = SendMessage(hwnd, EM_SETTARGETDEVICE, 0, 0);
-    todo_wine ok(res, "EM_SETTARGETDEVICE failed (returned %d).\n", res);
+    ok(res, "EM_SETTARGETDEVICE failed (returned %d).\n", res);
     pos = SendMessage(hwnd, EM_CHARFROMPOS, 0, (LPARAM) &point);
     ok(pos, "pos=%d indicating no word wrap when it is expected.\n", pos);
     DestroyWindow(hwnd);

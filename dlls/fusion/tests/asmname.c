@@ -362,12 +362,18 @@ static void test_assembly_name_props_line(IAssemblyName *name,
         hr = IAssemblyName_GetProperty(name, i, str, &size);
         to_multibyte(val, str);
 
-        if (i == ASM_NAME_PUBLIC_KEY_TOKEN)
-            lstrcpyA((LPSTR)expect, vals[i].val);
-
-        ok(hr == vals[i].hr, "%d: prop %d: Expected %08x, got %08x\n", line, i, vals[i].hr, hr);
-        ok(!lstrcmpW(str, expect), "%d: prop %d: Expected \"%s\", got \"%s\"\n", line, i, vals[i].val, val);
-        ok(size == vals[i].size, "%d: prop %d: Expected %d, got %d\n", line, i, vals[i].size, size);
+        ok(hr == vals[i].hr ||
+           broken(i >= ASM_NAME_CONFIG_MASK && hr == E_INVALIDARG) || /* .NET 1.1 */
+           broken(i >= ASM_NAME_FILE_MAJOR_VERSION && hr == E_INVALIDARG), /* .NET 1.0 */
+           "%d: prop %d: Expected %08x, got %08x\n", line, i, vals[i].hr, hr);
+        if (hr != E_INVALIDARG)
+        {
+            if (i == ASM_NAME_PUBLIC_KEY_TOKEN)
+                ok(!memcmp(vals[i].val, str, size), "Expected a correct ASM_NAME_PUBLIC_KEY_TOKEN\n");
+            else
+                ok(!lstrcmpA(vals[i].val, val), "%d: prop %d: Expected \"%s\", got \"%s\"\n", line, i, vals[i].val, val);
+            ok(size == vals[i].size, "%d: prop %d: Expected %d, got %d\n", line, i, vals[i].size, size);
+        }
     }
 }
 
@@ -407,7 +413,7 @@ static void test_CreateAssemblyNameObject(void)
     name = NULL;
     hr = pCreateAssemblyNameObject(&name, NULL, CANOF_SET_DEFAULT_VALUES, NULL);
     ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    ok(name != NULL, "Expected non-NULLNULL name\n");
+    ok(name != NULL, "Expected non-NULL name\n");
 
     size = MAX_PATH;
     hr = IAssemblyName_GetDisplayName(name, str, &size, ASM_DISPLAYF_FULL);
@@ -437,7 +443,7 @@ static void test_CreateAssemblyNameObject(void)
     name = NULL;
     hr = pCreateAssemblyNameObject(&name, empty, CANOF_SET_DEFAULT_VALUES, NULL);
     ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    ok(name != NULL, "Expected non-NULLNULL name\n");
+    ok(name != NULL, "Expected non-NULL name\n");
 
     size = MAX_PATH;
     hr = IAssemblyName_GetDisplayName(name, str, &size, ASM_DISPLAYF_FULL);
@@ -468,7 +474,7 @@ static void test_CreateAssemblyNameObject(void)
     name = NULL;
     hr = pCreateAssemblyNameObject(&name, namestr, CANOF_SET_DEFAULT_VALUES, NULL);
     ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    ok(name != NULL, "Expected non-NULLNULL name\n");
+    ok(name != NULL, "Expected non-NULL name\n");
 
     size = MAX_PATH;
     hr = IAssemblyName_GetDisplayName(name, str, &size, ASM_DISPLAYF_FULL);
@@ -502,7 +508,7 @@ static void test_CreateAssemblyNameObject(void)
     name = NULL;
     hr = pCreateAssemblyNameObject(&name, namestr, CANOF_PARSE_DISPLAY_NAME, NULL);
     ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    ok(name != NULL, "Expected non-NULLNULL name\n");
+    ok(name != NULL, "Expected non-NULL name\n");
 
     size = MAX_PATH;
     hr = IAssemblyName_GetDisplayName(name, str, &size, ASM_DISPLAYF_FULL);
@@ -534,7 +540,7 @@ static void test_CreateAssemblyNameObject(void)
     name = NULL;
     hr = pCreateAssemblyNameObject(&name, namestr, CANOF_PARSE_DISPLAY_NAME, NULL);
     ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    ok(name != NULL, "Expected non-NULLNULL name\n");
+    ok(name != NULL, "Expected non-NULL name\n");
 
     size = MAX_PATH;
     hr = IAssemblyName_GetDisplayName(name, str, &size, ASM_DISPLAYF_FULL);
@@ -565,7 +571,7 @@ static void test_CreateAssemblyNameObject(void)
     name = NULL;
     hr = pCreateAssemblyNameObject(&name, namestr, CANOF_PARSE_DISPLAY_NAME, NULL);
     ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    ok(name != NULL, "Expected non-NULLNULL name\n");
+    ok(name != NULL, "Expected non-NULL name\n");
 
     size = MAX_PATH;
     hr = IAssemblyName_GetDisplayName(name, str, &size, ASM_DISPLAYF_FULL);
@@ -597,7 +603,7 @@ static void test_CreateAssemblyNameObject(void)
     name = NULL;
     hr = pCreateAssemblyNameObject(&name, namestr, CANOF_PARSE_DISPLAY_NAME, NULL);
     ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    ok(name != NULL, "Expected non-NULLNULL name\n");
+    ok(name != NULL, "Expected non-NULL name\n");
 
     size = MAX_PATH;
     hr = IAssemblyName_GetDisplayName(name, str, &size, ASM_DISPLAYF_FULL);
@@ -629,7 +635,7 @@ static void test_CreateAssemblyNameObject(void)
     name = NULL;
     hr = pCreateAssemblyNameObject(&name, namestr, CANOF_PARSE_DISPLAY_NAME, NULL);
     ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    ok(name != NULL, "Expected non-NULLNULL name\n");
+    ok(name != NULL, "Expected non-NULL name\n");
 
     size = MAX_PATH;
     hr = IAssemblyName_GetDisplayName(name, str, &size, ASM_DISPLAYF_FULL);
@@ -661,7 +667,7 @@ static void test_CreateAssemblyNameObject(void)
     name = NULL;
     hr = pCreateAssemblyNameObject(&name, namestr, CANOF_PARSE_DISPLAY_NAME, NULL);
     ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    ok(name != NULL, "Expected non-NULLNULL name\n");
+    ok(name != NULL, "Expected non-NULL name\n");
 
     size = MAX_PATH;
     hr = IAssemblyName_GetDisplayName(name, str, &size, ASM_DISPLAYF_FULL);
@@ -736,7 +742,7 @@ static void test_CreateAssemblyNameObject(void)
     name = NULL;
     hr = pCreateAssemblyNameObject(&name, namestr, CANOF_PARSE_DISPLAY_NAME, NULL);
     ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    ok(name != NULL, "Expected non-NULLNULL name\n");
+    ok(name != NULL, "Expected non-NULL name\n");
 
     size = MAX_PATH;
     hr = IAssemblyName_GetDisplayName(name, str, &size, ASM_DISPLAYF_FULL);

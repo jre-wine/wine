@@ -34,12 +34,9 @@ static CHAR string1[MAX_PATH], string2[MAX_PATH];
 
 #define ok_w2(format, szString1, szString2) \
 \
-    if (lstrcmpW(szString1, szString2) != 0) \
-    { \
-        WideCharToMultiByte(CP_ACP, 0, szString1, -1, string1, MAX_PATH, NULL, NULL); \
-        WideCharToMultiByte(CP_ACP, 0, szString2, -1, string2, MAX_PATH, NULL, NULL); \
-        ok(0, format, string1, string2); \
-    }
+    WideCharToMultiByte(CP_ACP, 0, szString1, -1, string1, MAX_PATH, NULL, NULL); \
+    WideCharToMultiByte(CP_ACP, 0, szString2, -1, string2, MAX_PATH, NULL, NULL); \
+    ok(!lstrcmpA(string1, string2), format, string1, string2)
 
 static BOOL init_functionpointers(void)
 {
@@ -79,6 +76,8 @@ static BOOL init_functionpointers(void)
 
 static void test_GetCachePath(void)
 {
+    CHAR windirA[MAX_PATH];
+    WCHAR windir[MAX_PATH];
     WCHAR cachepath[MAX_PATH];
     WCHAR version[MAX_PATH];
     WCHAR path[MAX_PATH];
@@ -89,10 +88,6 @@ static void test_GetCachePath(void)
     static const WCHAR nochange[] = {'n','o','c','h','a','n','g','e',0};
     static const WCHAR assembly[] = {'a','s','s','e','m','b','l','y',0};
     static const WCHAR gac[] = {'G','A','C',0};
-    static const WCHAR nativeimg[] = {
-        'N','a','t','i','v','e','I','m','a','g','e','s','_',0};
-    static const WCHAR zapfmt[] = {
-        '%','s','\\','%','s','\\','%','s','%','s','_','3','2',0};
 
     if (!pGetCachePath)
     {
@@ -100,7 +95,9 @@ static void test_GetCachePath(void)
         return;
     }
 
-    GetWindowsDirectoryW(cachepath, MAX_PATH);
+    GetWindowsDirectoryA(windirA, MAX_PATH);
+    MultiByteToWideChar(CP_ACP, 0, windirA, -1, windir, MAX_PATH);
+    lstrcpyW(cachepath, windir);
     lstrcatW(cachepath, backslash);
     lstrcatW(cachepath, assembly);
     lstrcatW(cachepath, backslash);
@@ -147,11 +144,47 @@ static void test_GetCachePath(void)
        "Expected HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER), got %08x\n", hr);
     ok_w2("Expected \"%s\",  got \"%s\"\n", nochange, path);
 
+    lstrcpyW(cachepath, windir);
+    lstrcatW(cachepath, backslash);
+    lstrcatW(cachepath, assembly);
+
+    /* ASM_CACHE_ROOT */
+    lstrcpyW(path, nochange);
+    size = MAX_PATH;
+    hr = pGetCachePath(ASM_CACHE_ROOT, path, &size);
+    ok(hr == S_OK ||
+       broken(hr == E_INVALIDARG), /* .NET 1.1 */
+       "Expected S_OK, got %08x\n", hr);
+    if (hr == S_OK)
+        ok_w2("Expected \"%s\",  got \"%s\"\n", cachepath, path);
+
     if (pGetCORVersion)
     {
+        CHAR versionA[MAX_PATH];
+        CHAR cachepathA[MAX_PATH];
+        CHAR nativeimgA[MAX_PATH];
+        CHAR zapfmtA[MAX_PATH];
+
+        if (hr == S_OK)
+        {
+            lstrcpyA(nativeimgA, "NativeImages_");
+#ifdef _WIN64
+            lstrcpyA(zapfmtA, "%s\\%s\\%s%s_64");
+#else
+            lstrcpyA(zapfmtA, "%s\\%s\\%s%s_32");
+#endif
+        }
+        else
+        {
+            lstrcpyA(nativeimgA, "NativeImages1_");
+            lstrcpyA(zapfmtA, "%s\\%s\\%s%s");
+        }
+
         pGetCORVersion(version, MAX_PATH, &size);
-        GetWindowsDirectoryW(path, MAX_PATH);
-        wsprintfW(cachepath, zapfmt, path, assembly, nativeimg, version);
+        WideCharToMultiByte(CP_ACP, 0, version, -1, versionA, MAX_PATH, 0, 0);
+
+        wsprintfA(cachepathA, zapfmtA, windirA, "assembly", nativeimgA, versionA);
+        MultiByteToWideChar(CP_ACP, 0, cachepathA, -1, cachepath, MAX_PATH);
 
         /* ASM_CACHE_ZAP */
         lstrcpyW(path, nochange);
@@ -160,17 +193,6 @@ static void test_GetCachePath(void)
         ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
         ok_w2("Expected \"%s\",  got \"%s\"\n", cachepath, path);
     }
-
-    GetWindowsDirectoryW(cachepath, MAX_PATH);
-    lstrcatW(cachepath, backslash);
-    lstrcatW(cachepath, assembly);
-
-    /* ASM_CACHE_ROOT */
-    lstrcpyW(path, nochange);
-    size = MAX_PATH;
-    hr = pGetCachePath(ASM_CACHE_ROOT, path, &size);
-    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    ok_w2("Expected \"%s\",  got \"%s\"\n", cachepath, path);
 
     /* two flags at once */
     lstrcpyW(path, nochange);

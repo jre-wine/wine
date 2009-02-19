@@ -42,12 +42,23 @@ WINE_DEFAULT_DEBUG_CHANNEL(msctf);
 
 typedef struct tagACLMulti {
     const ITfThreadMgrVtbl *ThreadMgrVtbl;
+    const ITfSourceVtbl *SourceVtbl;
     LONG refCount;
+
+    ITfDocumentMgr *focus;
 } ThreadMgr;
+
+static inline ThreadMgr *impl_from_ITfSourceVtbl(ITfSource *iface)
+{
+    return (ThreadMgr *)((char *)iface - FIELD_OFFSET(ThreadMgr,SourceVtbl));
+}
 
 static void ThreadMgr_Destructor(ThreadMgr *This)
 {
+    TlsSetValue(tlsIndex,NULL);
     TRACE("destroying %p\n", This);
+    if (This->focus)
+        ITfDocumentMgr_Release(This->focus);
     HeapFree(GetProcessHeap(),0,This);
 }
 
@@ -59,6 +70,10 @@ static HRESULT WINAPI ThreadMgr_QueryInterface(ITfThreadMgr *iface, REFIID iid, 
     if (IsEqualIID(iid, &IID_IUnknown) || IsEqualIID(iid, &IID_ITfThreadMgr))
     {
         *ppvOut = This;
+    }
+    else if (IsEqualIID(iid, &IID_ITfSource))
+    {
+        *ppvOut = &This->SourceVtbl;
     }
 
     if (*ppvOut)
@@ -109,9 +124,8 @@ static HRESULT WINAPI ThreadMgr_fnDeactivate( ITfThreadMgr* iface)
 static HRESULT WINAPI ThreadMgr_CreateDocumentMgr( ITfThreadMgr* iface, ITfDocumentMgr
 **ppdim)
 {
-    ThreadMgr *This = (ThreadMgr *)iface;
-    FIXME("STUB:(%p)\n",This);
-    return E_NOTIMPL;
+    TRACE("(%p)\n",iface);
+    return DocumentMgr_Constructor(ppdim);
 }
 
 static HRESULT WINAPI ThreadMgr_EnumDocumentMgrs( ITfThreadMgr* iface, IEnumTfDocumentMgrs
@@ -126,15 +140,38 @@ static HRESULT WINAPI ThreadMgr_GetFocus( ITfThreadMgr* iface, ITfDocumentMgr
 **ppdimFocus)
 {
     ThreadMgr *This = (ThreadMgr *)iface;
-    FIXME("STUB:(%p)\n",This);
-    return E_NOTIMPL;
+    TRACE("(%p)\n",This);
+
+    if (!ppdimFocus)
+        return E_INVALIDARG;
+
+    *ppdimFocus = This->focus;
+
+    TRACE("->%p\n",This->focus);
+
+    if (This->focus == NULL)
+        return S_FALSE;
+
+    ITfDocumentMgr_AddRef(This->focus);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI ThreadMgr_SetFocus( ITfThreadMgr* iface, ITfDocumentMgr *pdimFocus)
 {
+    ITfDocumentMgr *check;
     ThreadMgr *This = (ThreadMgr *)iface;
-    FIXME("STUB:(%p)\n",This);
-    return E_NOTIMPL;
+
+    TRACE("(%p) %p\n",This,pdimFocus);
+
+    if (!pdimFocus || FAILED(IUnknown_QueryInterface(pdimFocus,&IID_ITfDocumentMgr,(LPVOID*) &check)))
+        return E_INVALIDARG;
+
+    if (This->focus)
+        ITfDocumentMgr_Release(This->focus);
+
+    This->focus = check;
+    return S_OK;
 }
 
 static HRESULT WINAPI ThreadMgr_AssociateFocus( ITfThreadMgr* iface, HWND hwnd,
@@ -195,18 +232,76 @@ static const ITfThreadMgrVtbl ThreadMgr_ThreadMgrVtbl =
     ThreadMgr_GetGlobalCompartment
 };
 
+
+static HRESULT WINAPI Source_QueryInterface(ITfSource *iface, REFIID iid, LPVOID *ppvOut)
+{
+    ThreadMgr *This = impl_from_ITfSourceVtbl(iface);
+    return ThreadMgr_QueryInterface((ITfThreadMgr *)This, iid, *ppvOut);
+}
+
+static ULONG WINAPI Source_AddRef(ITfSource *iface)
+{
+    ThreadMgr *This = impl_from_ITfSourceVtbl(iface);
+    return ThreadMgr_AddRef((ITfThreadMgr*)This);
+}
+
+static ULONG WINAPI Source_Release(ITfSource *iface)
+{
+    ThreadMgr *This = impl_from_ITfSourceVtbl(iface);
+    return ThreadMgr_Release((ITfThreadMgr *)This);
+}
+
+/*****************************************************
+ * ITfSource functions
+ *****************************************************/
+static WINAPI HRESULT ThreadMgrSource_AdviseSink(ITfSource *iface,
+        REFIID riid, IUnknown *punk, DWORD *pdwCookie)
+{
+    ThreadMgr *This = impl_from_ITfSourceVtbl(iface);
+    FIXME("STUB:(%p)\n",This);
+    return E_NOTIMPL;
+}
+
+static WINAPI HRESULT ThreadMgrSource_UnadviseSink(ITfSource *iface, DWORD pdwCookie)
+{
+    ThreadMgr *This = impl_from_ITfSourceVtbl(iface);
+    FIXME("STUB:(%p)\n",This);
+    return E_NOTIMPL;
+}
+
+static const ITfSourceVtbl ThreadMgr_SourceVtbl =
+{
+    Source_QueryInterface,
+    Source_AddRef,
+    Source_Release,
+
+    ThreadMgrSource_AdviseSink,
+    ThreadMgrSource_UnadviseSink,
+};
+
 HRESULT ThreadMgr_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut)
 {
     ThreadMgr *This;
     if (pUnkOuter)
         return CLASS_E_NOAGGREGATION;
 
+    /* Only 1 ThreadMgr is created per thread */
+    This = TlsGetValue(tlsIndex);
+    if (This)
+    {
+        ThreadMgr_AddRef((ITfThreadMgr*)This);
+        *ppOut = (IUnknown*)This;
+        return S_OK;
+    }
+
     This = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(ThreadMgr));
     if (This == NULL)
         return E_OUTOFMEMORY;
 
     This->ThreadMgrVtbl= &ThreadMgr_ThreadMgrVtbl;
+    This->SourceVtbl = &ThreadMgr_SourceVtbl;
     This->refCount = 1;
+    TlsSetValue(tlsIndex,This);
 
     TRACE("returning %p\n", This);
     *ppOut = (IUnknown *)This;

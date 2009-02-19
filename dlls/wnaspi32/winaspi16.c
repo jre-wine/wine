@@ -385,7 +385,7 @@ WORD WINAPI GetASPISupportInfo16(void)
 }
 
 
-DWORD ASPI_SendASPICommand(DWORD ptrSRB, UINT16 mode)
+static DWORD ASPI_SendASPICommand(DWORD ptrSRB, UINT16 mode)
 {
 #ifdef linux
   LPSRB16 lpSRB = PTR_TO_LIN( ptrSRB, mode );
@@ -440,11 +440,7 @@ adapter name */
  */
 WORD WINAPI SendASPICommand16(SEGPTR segptr_srb)
 {
-#ifdef linux
     return ASPI_SendASPICommand(segptr_srb, ASPI_WIN16);
-#else
-    return 0;
-#endif
 }
 
 

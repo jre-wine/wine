@@ -575,6 +575,8 @@ static const struct message WmShowMinOverlappedSeq[] = {
     { WM_GETTEXT, sent|defwinproc|optional },
     { WM_ACTIVATE, sent },
     { WM_ACTIVATEAPP, sent|wparam, 0 },
+    { WM_SYSCOMMAND, sent|optional|wparam, SC_RESTORE },
+    { HCBT_SYSCOMMAND, hook|optional|wparam, SC_RESTORE },
     { WM_PAINT, sent|optional },
     { WM_NCPAINT, sent|beginpaint|optional },
     { WM_ERASEBKGND, sent|beginpaint|optional },
@@ -1836,7 +1838,6 @@ static void flush_events(void)
         if (MsgWaitForMultipleObjects( 0, NULL, FALSE, min_timeout, QS_ALLINPUT ) == WAIT_TIMEOUT) break;
         while (PeekMessage( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessage( &msg );
         diff = time - GetTickCount();
-        min_timeout = 50;
     }
 }
 
@@ -4438,21 +4439,28 @@ static void test_messages(void)
     ShowWindow(hwnd, SW_SHOWMAXIMIZED);
     flush_events();
     ok_sequence(WmShowMaxOverlappedSeq, "ShowWindow(SW_SHOWMAXIMIZED):overlapped", TRUE);
-
-    ShowWindow(hwnd, SW_RESTORE);
-    ok_sequence(WmShowRestoreMaxOverlappedSeq, "ShowWindow(SW_RESTORE):overlapped", FALSE);
-    flush_events();
     flush_sequence();
+
+    if (GetWindowLongW( hwnd, GWL_STYLE ) & WS_MAXIMIZE)
+    {
+        ShowWindow(hwnd, SW_RESTORE);
+        flush_events();
+        ok_sequence(WmShowRestoreMaxOverlappedSeq, "ShowWindow(SW_RESTORE):overlapped", FALSE);
+        flush_sequence();
+    }
 
     ShowWindow(hwnd, SW_MINIMIZE);
     flush_events();
     ok_sequence(WmShowMinOverlappedSeq, "ShowWindow(SW_SHOWMINIMIZED):overlapped", TRUE);
     flush_sequence();
 
-    ShowWindow(hwnd, SW_RESTORE);
-    flush_events();
-    ok_sequence(WmShowRestoreMinOverlappedSeq, "ShowWindow(SW_RESTORE):overlapped", TRUE);
-    flush_sequence();
+    if (GetWindowLongW( hwnd, GWL_STYLE ) & WS_MINIMIZE)
+    {
+        ShowWindow(hwnd, SW_RESTORE);
+        flush_events();
+        ok_sequence(WmShowRestoreMinOverlappedSeq, "ShowWindow(SW_RESTORE):overlapped", TRUE);
+        flush_sequence();
+    }
 
     ShowWindow(hwnd, SW_SHOW);
     flush_events();
@@ -5210,8 +5218,10 @@ static void test_button_messages(void)
     ok(hwnd != 0, "Failed to create button window\n");
 
     SetForegroundWindow(hwnd);
-    SetFocus(0);
     flush_events();
+
+    SetActiveWindow(hwnd);
+    SetFocus(0);
     flush_sequence();
 
     SendMessageA(hwnd, WM_LBUTTONDOWN, 0, 0);
@@ -6240,7 +6250,7 @@ struct wnd_event
 static DWORD WINAPI thread_proc(void *param)
 {
     MSG msg;
-    struct wnd_event *wnd_event = (struct wnd_event *)param;
+    struct wnd_event *wnd_event = param;
 
     wnd_event->hwnd = CreateWindowExA(0, "TestWindowClass", "window caption text", WS_OVERLAPPEDWINDOW,
                                       100, 100, 200, 200, 0, 0, 0, NULL);
@@ -6537,19 +6547,19 @@ static const struct message WmAltPressRelease[] = {
     { WM_SYSKEYUP, sent|wparam|lparam, VK_MENU, 0xc0000001 },
     { 0 }
 };
-static const struct message WmAltMouseButton[] = {
-    { HCBT_KEYSKIPPED, hook|wparam|lparam|optional, VK_MENU, 0x20000001 }, /* XP */
-    { WM_SYSKEYDOWN, wparam|lparam, VK_MENU, 0x20000001 },
-    { WM_SYSKEYDOWN, sent|wparam|lparam, VK_MENU, 0x20000001 },
+static const struct message WmShiftMouseButton[] = {
+    { HCBT_KEYSKIPPED, hook|wparam|lparam|optional, VK_SHIFT, 1 }, /* XP */
+    { WM_KEYDOWN, wparam|lparam, VK_SHIFT, 1 },
+    { WM_KEYDOWN, sent|wparam|lparam, VK_SHIFT, 1 },
     { WM_MOUSEMOVE, wparam|optional, 0, 0 },
     { WM_MOUSEMOVE, sent|wparam|optional, 0, 0 },
-    { WM_LBUTTONDOWN, wparam, MK_LBUTTON, 0 },
-    { WM_LBUTTONDOWN, sent|wparam, MK_LBUTTON, 0 },
-    { WM_LBUTTONUP, wparam, 0, 0 },
-    { WM_LBUTTONUP, sent|wparam, 0, 0 },
-    { HCBT_KEYSKIPPED, hook|wparam|lparam|optional, VK_MENU, 0xc0000001 }, /* XP */
-    { WM_SYSKEYUP, wparam|lparam, VK_MENU, 0xc0000001 },
-    { WM_SYSKEYUP, sent|wparam|lparam, VK_MENU, 0xc0000001 },
+    { WM_LBUTTONDOWN, wparam, MK_LBUTTON|MK_SHIFT, 0 },
+    { WM_LBUTTONDOWN, sent|wparam, MK_LBUTTON|MK_SHIFT, 0 },
+    { WM_LBUTTONUP, wparam, MK_SHIFT, 0 },
+    { WM_LBUTTONUP, sent|wparam, MK_SHIFT, 0 },
+    { HCBT_KEYSKIPPED, hook|wparam|lparam|optional, VK_SHIFT, 0xc0000001 }, /* XP */
+    { WM_KEYUP, wparam|lparam, VK_SHIFT, 0xc0000001 },
+    { WM_KEYUP, sent|wparam|lparam, VK_SHIFT, 0xc0000001 },
     { 0 }
 };
 static const struct message WmF1Seq[] = {
@@ -6611,6 +6621,7 @@ static void pump_msg_loop(HWND hwnd, HACCEL hAccel)
 static void test_accelerators(void)
 {
     RECT rc;
+    POINT pt;
     SHORT state;
     HACCEL hAccel;
     HWND hwnd = CreateWindowExA(0, "TestWindowClass", NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
@@ -6770,22 +6781,27 @@ static void test_accelerators(void)
     /* this test doesn't pass in Wine for managed windows */
     ok_sequence(WmAltPressRelease, "Alt press/release", TRUE);
 
-    trace("testing Alt+MouseButton press/release\n");
+    trace("testing Shift+MouseButton press/release\n");
     /* first, move mouse pointer inside of the window client area */
     GetClientRect(hwnd, &rc);
     MapWindowPoints(hwnd, 0, (LPPOINT)&rc, 2);
     rc.left += (rc.right - rc.left)/2;
     rc.top += (rc.bottom - rc.top)/2;
     SetCursorPos(rc.left, rc.top);
+    SetActiveWindow(hwnd);
 
     flush_events();
     flush_sequence();
-    keybd_event(VK_MENU, 0, 0, 0);
-    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-    keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
-    pump_msg_loop(hwnd, 0);
-    ok_sequence(WmAltMouseButton, "Alt+MouseButton press/release", FALSE);
+    GetCursorPos(&pt);
+    if (pt.x == rc.left && pt.y == rc.top)
+    {
+        keybd_event(VK_SHIFT, 0, 0, 0);
+        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+        keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0);
+        pump_msg_loop(hwnd, 0);
+        ok_sequence(WmShiftMouseButton, "Shift+MouseButton press/release", FALSE);
+    }
 
     trace("testing VK_F1 press/release\n");
     keybd_event(VK_F1, 0, 0, 0);
@@ -7877,7 +7893,7 @@ static void test_winevents(void)
 
     hevent = CreateEventA(NULL, 0, 0, NULL);
     assert(hevent);
-    hwnd2 = (HWND)hevent;
+    hwnd2 = hevent;
 
     hthread = CreateThread(NULL, 0, cbt_global_hook_thread_proc, &hwnd2, 0, &tid);
     ok(hthread != NULL, "CreateThread failed, error %d\n", GetLastError());
@@ -7930,7 +7946,7 @@ static void test_winevents(void)
     ok_sequence(WmWinEventsSeq, "notify winevents", FALSE);
 
     /****** start of event filtering test *************/
-    hhook = (HWINEVENTHOOK)pSetWinEventHook(
+    hhook = pSetWinEventHook(
 	EVENT_OBJECT_SHOW, /* 0x8002 */
 	EVENT_OBJECT_LOCATIONCHANGE, /* 0x800B */
 	GetModuleHandleA(0), win_event_global_hook_proc,
@@ -7940,7 +7956,7 @@ static void test_winevents(void)
 
     hevent = CreateEventA(NULL, 0, 0, NULL);
     assert(hevent);
-    hwnd2 = (HWND)hevent;
+    hwnd2 = hevent;
 
     hthread = CreateThread(NULL, 0, win_event_global_thread_proc, &hwnd2, 0, &tid);
     ok(hthread != NULL, "CreateThread failed, error %d\n", GetLastError());
@@ -7969,16 +7985,14 @@ static void test_winevents(void)
     /****** end of event filtering test *************/
 
     /****** start of out of context event test *************/
-    hhook = (HWINEVENTHOOK)pSetWinEventHook(
-	EVENT_MIN, EVENT_MAX,
-	0, win_event_global_hook_proc,
-	GetCurrentProcessId(), 0,
+    hhook = pSetWinEventHook(EVENT_MIN, EVENT_MAX, 0,
+        win_event_global_hook_proc, GetCurrentProcessId(), 0,
 	WINEVENT_OUTOFCONTEXT);
     ok(hhook != 0, "SetWinEventHook error %d\n", GetLastError());
 
     hevent = CreateEventA(NULL, 0, 0, NULL);
     assert(hevent);
-    hwnd2 = (HWND)hevent;
+    hwnd2 = hevent;
 
     flush_sequence();
 
@@ -8025,7 +8039,7 @@ static void test_winevents(void)
 
     hevent = CreateEventA(NULL, 0, 0, NULL);
     assert(hevent);
-    hwnd2 = (HWND)hevent;
+    hwnd2 = hevent;
 
     hthread = CreateThread(NULL, 0, mouse_ll_global_thread_proc, &hwnd2, 0, &tid);
     ok(hthread != NULL, "CreateThread failed, error %d\n", GetLastError());
@@ -8092,8 +8106,8 @@ static void test_set_hook(void)
 
     /* even process local incontext hooks require hmodule */
     SetLastError(0xdeadbeef);
-    hwinevent_hook = (HWINEVENTHOOK)pSetWinEventHook(EVENT_MIN, EVENT_MAX,
-	0, win_event_proc, GetCurrentProcessId(), 0, WINEVENT_INCONTEXT);
+    hwinevent_hook = pSetWinEventHook(EVENT_MIN, EVENT_MAX, 0, win_event_proc,
+        GetCurrentProcessId(), 0, WINEVENT_INCONTEXT);
     ok(!hwinevent_hook, "WINEVENT_INCONTEXT requires hModule != 0\n");
     ok(GetLastError() == ERROR_HOOK_NEEDS_HMOD || /* Win2k */
        GetLastError() == 0xdeadbeef, /* Win9x */
@@ -8101,8 +8115,8 @@ static void test_set_hook(void)
 
     /* even thread local incontext hooks require hmodule */
     SetLastError(0xdeadbeef);
-    hwinevent_hook = (HWINEVENTHOOK)pSetWinEventHook(EVENT_MIN, EVENT_MAX,
-	0, win_event_proc, GetCurrentProcessId(), GetCurrentThreadId(), WINEVENT_INCONTEXT);
+    hwinevent_hook = pSetWinEventHook(EVENT_MIN, EVENT_MAX, 0, win_event_proc,
+        GetCurrentProcessId(), GetCurrentThreadId(), WINEVENT_INCONTEXT);
     ok(!hwinevent_hook, "WINEVENT_INCONTEXT requires hModule != 0\n");
     ok(GetLastError() == ERROR_HOOK_NEEDS_HMOD || /* Win2k */
        GetLastError() == 0xdeadbeef, /* Win9x */
@@ -8112,27 +8126,27 @@ static void test_set_hook(void)
     {
     /* these 3 tests don't pass under Win9x */
     SetLastError(0xdeadbeef);
-    hwinevent_hook = (HWINEVENTHOOK)pSetWinEventHook(1, 0,
-	0, win_event_proc, GetCurrentProcessId(), 0, WINEVENT_OUTOFCONTEXT);
+    hwinevent_hook = pSetWinEventHook(1, 0, 0, win_event_proc,
+        GetCurrentProcessId(), 0, WINEVENT_OUTOFCONTEXT);
     ok(!hwinevent_hook, "SetWinEventHook with invalid event range should fail\n");
     ok(GetLastError() == ERROR_INVALID_HOOK_FILTER, "unexpected error %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
-    hwinevent_hook = (HWINEVENTHOOK)pSetWinEventHook(-1, 1,
-	0, win_event_proc, GetCurrentProcessId(), 0, WINEVENT_OUTOFCONTEXT);
+    hwinevent_hook = pSetWinEventHook(-1, 1, 0, win_event_proc,
+        GetCurrentProcessId(), 0, WINEVENT_OUTOFCONTEXT);
     ok(!hwinevent_hook, "SetWinEventHook with invalid event range should fail\n");
     ok(GetLastError() == ERROR_INVALID_HOOK_FILTER, "unexpected error %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
-    hwinevent_hook = (HWINEVENTHOOK)pSetWinEventHook(EVENT_MIN, EVENT_MAX,
-	0, win_event_proc, 0, 0xdeadbeef, WINEVENT_OUTOFCONTEXT);
+    hwinevent_hook = pSetWinEventHook(EVENT_MIN, EVENT_MAX, 0, win_event_proc,
+        0, 0xdeadbeef, WINEVENT_OUTOFCONTEXT);
     ok(!hwinevent_hook, "SetWinEventHook with invalid tid should fail\n");
     ok(GetLastError() == ERROR_INVALID_THREAD_ID, "unexpected error %d\n", GetLastError());
     }
 
     SetLastError(0xdeadbeef);
-    hwinevent_hook = (HWINEVENTHOOK)pSetWinEventHook(0, 0,
-	0, win_event_proc, GetCurrentProcessId(), 0, WINEVENT_OUTOFCONTEXT);
+    hwinevent_hook = pSetWinEventHook(0, 0, 0, win_event_proc,
+        GetCurrentProcessId(), 0, WINEVENT_OUTOFCONTEXT);
     ok(hwinevent_hook != 0, "SetWinEventHook error %d\n", GetLastError());
     ok(GetLastError() == 0xdeadbeef, "unexpected error %d\n", GetLastError());
     ret = pUnhookWinEvent(hwinevent_hook);
@@ -8142,8 +8156,8 @@ todo_wine {
     /* This call succeeds under win2k SP4, but fails under Wine.
        Does win2k test/use passed process id? */
     SetLastError(0xdeadbeef);
-    hwinevent_hook = (HWINEVENTHOOK)pSetWinEventHook(EVENT_MIN, EVENT_MAX,
-	0, win_event_proc, 0xdeadbeef, 0, WINEVENT_OUTOFCONTEXT);
+    hwinevent_hook = pSetWinEventHook(EVENT_MIN, EVENT_MAX, 0, win_event_proc,
+        0xdeadbeef, 0, WINEVENT_OUTOFCONTEXT);
     ok(hwinevent_hook != 0, "SetWinEventHook error %d\n", GetLastError());
     ok(GetLastError() == 0xdeadbeef, "unexpected error %d\n", GetLastError());
     ret = pUnhookWinEvent(hwinevent_hook);
@@ -9340,11 +9354,11 @@ static void wait_move_event(HWND hwnd, int x, int y)
     while (GetTickCount() - time < 200 && !go) {
 	ret = PeekMessageA(&msg, hwnd, WM_MOUSEMOVE, WM_MOUSEMOVE, PM_NOREMOVE);
 	go  = ret && msg.pt.x > x && msg.pt.y > y;
-        if (ret && !go) PeekMessageA(&msg, hwnd, WM_MOUSEMOVE, WM_MOUSEMOVE, PM_REMOVE);
+        if (!ret) MsgWaitForMultipleObjects( 0, NULL, FALSE, GetTickCount() - time, QS_ALLINPUT );
     }
 }
 
-#define STEP 20
+#define STEP 5
 static void test_PeekMessage2(void)
 {
     HWND hwnd;
@@ -9374,7 +9388,7 @@ static void test_PeekMessage2(void)
     /* Do initial mousemove, wait until we can see it
        and then do our test peek with PM_NOREMOVE. */
     mouse_event(MOUSEEVENTF_MOVE, STEP, STEP, 0, 0);
-    wait_move_event(hwnd, 80, 80);
+    wait_move_event(hwnd, 100-STEP, 100-STEP);
 
     ret = PeekMessageA(&msg, hwnd, WM_MOUSEMOVE, WM_MOUSEMOVE, PM_NOREMOVE);
     ok(ret, "no message available\n");
@@ -9385,7 +9399,6 @@ static void test_PeekMessage2(void)
 	x1 = msg.pt.x;
 	y1 = msg.pt.y;
         ok(message == WM_MOUSEMOVE, "message not WM_MOUSEMOVE, %04x instead\n", message);
-        PeekMessageA(&msg, hwnd, WM_MOUSEMOVE, WM_MOUSEMOVE, PM_REMOVE);
     }
 
     /* Allow time to advance a bit, and then simulate the user moving their
@@ -9393,7 +9406,7 @@ static void test_PeekMessage2(void)
      * Although the previous mousemove message was never removed, the
      * mousemove we now peek should reflect the recent mouse movements
      * because the input queue will merge the move events. */
-    Sleep(2);
+    Sleep(100);
     mouse_event(MOUSEEVENTF_MOVE, STEP, STEP, 0, 0);
     wait_move_event(hwnd, x1, y1);
 
@@ -9408,11 +9421,10 @@ static void test_PeekMessage2(void)
         ok(message == WM_MOUSEMOVE, "message not WM_MOUSEMOVE, %04x instead\n", message);
 	ok(time2 > time1, "message time not advanced: %x %x\n", time1, time2);
 	ok(x2 != x1 && y2 != y1, "coords not changed: (%d %d) (%d %d)\n", x1, y1, x2, y2);
-        PeekMessageA(&msg, hwnd, WM_MOUSEMOVE, WM_MOUSEMOVE, PM_REMOVE);
     }
 
     /* Have another go, to drive the point home */
-    Sleep(2);
+    Sleep(100);
     mouse_event(MOUSEEVENTF_MOVE, STEP, STEP, 0, 0);
     wait_move_event(hwnd, x2, y2);
 
@@ -9886,11 +9898,11 @@ static const struct message WmRestore_3[] = {
     { 0 }
 };
 static const struct message WmRestore_4[] = {
-    { HCBT_MINMAX, hook|lparam, 0, SW_RESTORE },
-    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_FRAMECHANGED|SWP_STATECHANGED, 0, SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE|SWP_NOSIZE|SWP_NOMOVE },
-    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|SWP_STATECHANGED, 0, SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE|SWP_NOSIZE|SWP_NOMOVE },
+    { HCBT_MINMAX, hook|lparam|optional, 0, SW_RESTORE },
+    { WM_WINDOWPOSCHANGING, sent|wparam|optional, SWP_FRAMECHANGED|SWP_STATECHANGED, 0, SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE|SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGED, sent|wparam|optional, SWP_FRAMECHANGED|SWP_STATECHANGED, 0, SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE|SWP_NOSIZE|SWP_NOMOVE },
     { WM_MOVE, sent|defwinproc|optional },
-    { WM_SIZE, sent|wparam|defwinproc, SIZE_RESTORED },
+    { WM_SIZE, sent|wparam|defwinproc|optional, SIZE_RESTORED },
     { 0 }
 };
 static const struct message WmRestore_5[] = {
@@ -9907,6 +9919,7 @@ static const struct message WmHide_1[] = {
     { WM_SHOWWINDOW, sent|wparam, 0 },
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_HIDEWINDOW|SWP_NOSIZE|SWP_NOMOVE },
     { WM_WINDOWPOSCHANGED, sent|wparam, SWP_HIDEWINDOW|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { HCBT_ACTIVATE, hook|optional },
     { HCBT_SETFOCUS, hook|optional }, /* win2000 sends it */
     { 0 }
 };
@@ -9914,6 +9927,7 @@ static const struct message WmHide_2[] = {
     { WM_SHOWWINDOW, sent|wparam, 0 },
     { WM_WINDOWPOSCHANGING, sent /*|wparam, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE*/ }, /* win2000 doesn't add SWP_NOACTIVATE */
     { WM_WINDOWPOSCHANGED, sent /*|wparam, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE*/ }, /* win2000 doesn't add SWP_NOACTIVATE */
+    { HCBT_ACTIVATE, hook|optional },
     { 0 }
 };
 static const struct message WmHide_3[] = {
@@ -9986,6 +10000,7 @@ static const struct message WmMinMax_2[] = {
 };
 static const struct message WmMinMax_3[] = {
     { HCBT_MINMAX, hook|lparam, 0, SW_MINIMIZE },
+    { HCBT_SETFOCUS, hook|optional },
     { 0 }
 };
 static const struct message WmMinMax_4[] = {
@@ -10013,9 +10028,9 @@ static const struct message WmShowMaximized_2[] = {
     { WM_WINDOWPOSCHANGED, sent|optional },
     { WM_MOVE, sent|optional }, /* Win9x doesn't send it */
     { WM_SIZE, sent|wparam|optional, SIZE_MAXIMIZED }, /* Win9x doesn't send it */
-    { WM_WINDOWPOSCHANGING, sent },
+    { WM_WINDOWPOSCHANGING, sent|optional },
     { HCBT_SETFOCUS, hook|optional },
-    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|SWP_NOCOPYBITS|SWP_STATECHANGED },
+    { WM_WINDOWPOSCHANGED, sent|wparam|optional, SWP_FRAMECHANGED|SWP_NOCOPYBITS|SWP_STATECHANGED },
     { WM_MOVE, sent|defwinproc },
     { WM_SIZE, sent|wparam|defwinproc, SIZE_MAXIMIZED },
     { HCBT_SETFOCUS, hook|optional },
@@ -10087,7 +10102,7 @@ static void test_ShowWindow(void)
 /* 39 */ { SW_SHOWNOACTIVATE, TRUE, WS_VISIBLE, WmEmptySeq, FALSE },
 /* 40 */ { SW_MINIMIZE, TRUE, WS_VISIBLE|WS_MINIMIZE, WmMinimize_2, FALSE },
 /* 41 */ { SW_MINIMIZE, TRUE, WS_VISIBLE|WS_MINIMIZE, WmMinMax_3, FALSE },
-/* 42 */ { SW_SHOWMAXIMIZED, TRUE, WS_VISIBLE|WS_MAXIMIZE, WmShowMaximized_2, TRUE },
+/* 42 */ { SW_SHOWMAXIMIZED, TRUE, WS_VISIBLE|WS_MAXIMIZE, WmShowMaximized_2, FALSE },
 /* 43 */ { SW_SHOWMAXIMIZED, TRUE, WS_VISIBLE|WS_MAXIMIZE, WmMinMax_2, FALSE },
 /* 44 */ { SW_MINIMIZE, TRUE, WS_VISIBLE|WS_MINIMIZE, WmMinimize_1, FALSE },
 /* 45 */ { SW_MINIMIZE, TRUE, WS_VISIBLE|WS_MINIMIZE, WmMinMax_3, FALSE },
@@ -10361,10 +10376,13 @@ static void test_nullCallback(void)
 /* SetActiveWindow( 0 ) hwnd visible */
 static const struct message SetActiveWindowSeq0[] =
 {
-    { HCBT_ACTIVATE, hook },
+    { HCBT_ACTIVATE, hook|optional },
     { WM_NCACTIVATE, sent|wparam, 0 },
     { WM_GETTEXT, sent|defwinproc|optional },
     { WM_ACTIVATE, sent|wparam, 0 },
+    { WM_ACTIVATEAPP, sent|wparam|optional, 0 },
+    { WM_ACTIVATEAPP, sent|wparam|optional, 0 },
+    { WM_KILLFOCUS, sent|wparam|optional, 0 },
     { WM_QUERYNEWPALETTE, sent|wparam|lparam|optional, 0, 0 },
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE },
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE },
@@ -10484,11 +10502,7 @@ static void test_SetActiveWindow(void)
 
     trace("SetActiveWindow(hwnd), hwnd visible\n");
     ret = SetActiveWindow(hwnd);
-    todo_wine
-    {
-        ok( ret == hwnd, "Failed to SetActiveWindow(hwnd), hwnd visible\n");
-    }
-    ok_sequence(SetActiveWindowSeq1, "SetActiveWindow(hwnd), hwnd visible", TRUE);
+    if (ret == hwnd) ok_sequence(SetActiveWindowSeq1, "SetActiveWindow(hwnd), hwnd visible", TRUE);
     flush_sequence();
 
     trace("SetActiveWindow(popup), hwnd visible, popup visible\n");
@@ -10538,6 +10552,7 @@ static void test_SetForegroundWindow(void)
                            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                            100, 100, 200, 200, 0, 0, 0, NULL);
     ok (hwnd != 0, "Failed to create overlapped window\n");
+    SetForegroundWindow( hwnd );
     flush_sequence();
 
     trace("SetForegroundWindow( 0 )\n");
@@ -11336,12 +11351,10 @@ START_TEST(msg)
 
     if (pSetWinEventHook)
     {
-	hEvent_hook = (HWINEVENTHOOK)pSetWinEventHook(EVENT_MIN, EVENT_MAX,
-						      GetModuleHandleA(0),
-						      win_event_proc,
-						      0,
-						      GetCurrentThreadId(),
-						      WINEVENT_INCONTEXT);
+        hEvent_hook = pSetWinEventHook(EVENT_MIN, EVENT_MAX,
+                                       GetModuleHandleA(0), win_event_proc,
+                                       0, GetCurrentThreadId(),
+                                       WINEVENT_INCONTEXT);
 	assert(hEvent_hook);
 
 	if (pIsWinEventHookInstalled)

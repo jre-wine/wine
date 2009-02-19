@@ -67,11 +67,7 @@ int symt_cmp_addr(const void* p1, const void* p2)
     return cmp_addr(a1, a2);
 }
 
-static inline void re_append(char** mask, unsigned* len, char ch)
-{
-    *mask = HeapReAlloc(GetProcessHeap(), 0, *mask, ++(*len));
-    (*mask)[*len - 2] = ch;
-}
+#ifdef HAVE_REGEX_H
 
 /* transforms a dbghelp's regular expression into a POSIX one
  * Here are the valid dbghelp reg ex characters:
@@ -84,46 +80,137 @@ static inline void re_append(char** mask, unsigned* len, char ch)
  */
 static void compile_regex(const char* str, int numchar, regex_t* re, BOOL _case)
 {
-    char*       mask = HeapAlloc(GetProcessHeap(), 0, 1);
-    unsigned    len = 1;
+    char *mask, *p;
     BOOL        in_escape = FALSE;
     unsigned    flags = REG_NOSUB;
 
-    re_append(&mask, &len, '^');
+    if (numchar == -1) numchar = strlen( str );
+
+    p = mask = HeapAlloc( GetProcessHeap(), 0, 2 * numchar + 3 );
+    *p++ = '^';
 
     while (*str && numchar--)
     {
         /* FIXME: this shouldn't be valid on '-' */
         if (in_escape)
         {
-            re_append(&mask, &len, '\\');
-            re_append(&mask, &len, *str);
+            *p++ = '\\';
+            *p++ = *str;
             in_escape = FALSE;
         }
         else switch (*str)
         {
         case '\\': in_escape = TRUE; break;
-        case '*':  re_append(&mask, &len, '.'); re_append(&mask, &len, '*'); break;
-        case '?':  re_append(&mask, &len, '.'); break;
-        case '#':  re_append(&mask, &len, '*'); break;
+        case '*':  *p++ = '.'; *p++ = '*'; break;
+        case '?':  *p++ = '.'; break;
+        case '#':  *p++ = '*'; break;
         /* escape some valid characters in dbghelp reg exp:s */
-        case '$':  re_append(&mask, &len, '\\'); re_append(&mask, &len, '$'); break;
+        case '$':  *p++ = '\\'; *p++ = '$'; break;
         /* +, [, ], - are the same in dbghelp & POSIX, use them as any other char */
-        default:   re_append(&mask, &len, *str); break;
+        default:   *p++ = *str; break;
         }
         str++;
     }
     if (in_escape)
     {
-        re_append(&mask, &len, '\\');
-        re_append(&mask, &len, '\\');
+        *p++ = '\\';
+        *p++ = '\\';
     }
-    re_append(&mask, &len, '$');
-    mask[len - 1] = '\0';
+    *p++ = '$';
+    *p = 0;
     if (_case) flags |= REG_ICASE;
     if (regcomp(re, mask, flags)) FIXME("Couldn't compile %s\n", mask);
     HeapFree(GetProcessHeap(), 0, mask);
 }
+
+static BOOL compile_file_regex(regex_t* re, const char* srcfile)
+{
+    char *mask, *p;
+    BOOL ret;
+
+    if (!srcfile || !*srcfile) return regcomp(re, ".*", REG_NOSUB);
+
+    p = mask = HeapAlloc(GetProcessHeap(), 0, 5 * strlen(srcfile) + 4);
+    *p++ = '^';
+    while (*srcfile)
+    {
+        switch (*srcfile)
+        {
+        case '\\':
+        case '/':
+            *p++ = '[';
+            *p++ = '\\';
+            *p++ = '\\';
+            *p++ = '/';
+            *p++ = ']';
+            break;
+        case '.':
+            *p++ = '\\';
+            *p++ = '.';
+            break;
+        default:
+            *p++ = *srcfile;
+            break;
+        }
+        srcfile++;
+    }
+    *p++ = '$';
+    *p = 0;
+    ret = !regcomp(re, mask, REG_NOSUB);
+    HeapFree(GetProcessHeap(), 0, mask);
+    if (!ret)
+    {
+        FIXME("Couldn't compile %s\n", mask);
+        SetLastError(ERROR_INVALID_PARAMETER);
+    }
+    return ret;
+}
+
+static int match_regexp( const regex_t *re, const char *str )
+{
+    return !regexec( re, str, 0, NULL, 0 );
+}
+
+#else /* HAVE_REGEX_H */
+
+/* if we don't have regexp support, fall back to a simple string comparison */
+
+typedef struct
+{
+    char *str;
+    BOOL  icase;
+} regex_t;
+
+static void compile_regex(const char* str, int numchar, regex_t* re, BOOL _case)
+{
+    if (numchar == -1) numchar = strlen( str );
+
+    re->str = HeapAlloc( GetProcessHeap(), 0, numchar + 1 );
+    memcpy( re->str, str, numchar );
+    re->str[numchar] = 0;
+    re->icase = _case;
+}
+
+static BOOL compile_file_regex(regex_t* re, const char* srcfile)
+{
+    if (!srcfile || !*srcfile) re->str = NULL;
+    else compile_regex( srcfile, -1, re, FALSE );
+    return TRUE;
+}
+
+static int match_regexp( const regex_t *re, const char *str )
+{
+    if (!re->str) return 1;
+    if (re->icase) return !lstrcmpiA( re->str, str );
+    return !strcmp( re->str, str );
+}
+
+static void regfree( regex_t *re )
+{
+    HeapFree( GetProcessHeap(), 0, re->str );
+}
+
+#endif /* HAVE_REGEX_H */
 
 struct symt_compiland* symt_new_compiland(struct module* module, 
                                           unsigned long address, unsigned src_idx)
@@ -662,8 +749,7 @@ static BOOL symt_enum_module(struct module_pair* pair, const regex_t* regex,
     while ((ptr = hash_table_iter_up(&hti)))
     {
         sym = GET_ENTRY(ptr, struct symt_ht, hash_elt);
-        if (sym->hash_elt.name &&
-            regexec(regex, sym->hash_elt.name, 0, NULL, 0) == 0)
+        if (sym->hash_elt.name && match_regexp(regex, sym->hash_elt.name))
         {
             se->sym_info->SizeOfStruct = sizeof(SYMBOL_INFO);
             se->sym_info->MaxNameLen = sizeof(se->buffer) - sizeof(SYMBOL_INFO);
@@ -812,7 +898,7 @@ static BOOL symt_enum_locals_helper(struct module_pair* pair,
             }
             break;
         case SymTagData:
-            if (regexec(preg, symt_get_name(lsym), 0, NULL, 0) == 0)
+            if (match_regexp(preg, symt_get_name(lsym)))
             {
                 if (send_symbol(se, pair, func, lsym)) return FALSE;
             }
@@ -916,7 +1002,7 @@ static BOOL sym_enum(HANDLE hProcess, ULONG64 BaseOfDll, PCSTR Mask,
         {
             if (pair.requested->type == DMT_PE && module_get_debug(&pair))
             {
-                if (regexec(&mod_regex, pair.requested->module_name, 0, NULL, 0) == 0 &&
+                if (match_regexp(&mod_regex, pair.requested->module_name) &&
                     symt_enum_module(&pair, &sym_regex, se))
                     break;
             }
@@ -931,7 +1017,7 @@ static BOOL sym_enum(HANDLE hProcess, ULONG64 BaseOfDll, PCSTR Mask,
                     !module_get_containee(pair.pcs, pair.requested) &&
                     module_get_debug(&pair))
                 {
-                    if (regexec(&mod_regex, pair.requested->module_name, 0, NULL, 0) == 0 &&
+                    if (match_regexp(&mod_regex, pair.requested->module_name) &&
                         symt_enum_module(&pair, &sym_regex, se))
                     break;
                 }
@@ -1645,7 +1731,7 @@ BOOL WINAPI SymMatchString(PCSTR string, PCSTR re, BOOL _case)
     TRACE("%s %s %c\n", string, re, _case ? 'Y' : 'N');
 
     compile_regex(re, -1, &preg, _case);
-    ret = regexec(&preg, string, 0, NULL, 0) == 0;
+    ret = match_regexp(&preg, string);
     regfree(&preg);
     return ret;
 }
@@ -1760,5 +1846,66 @@ BOOL WINAPI SymSetScopeFromAddr(HANDLE hProcess, ULONG64 addr)
     FIXME("(%p %s): stub\n", hProcess, wine_dbgstr_longlong(addr));
 
     if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
+    return TRUE;
+}
+
+/******************************************************************
+ *		SymEnumLines (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymEnumLines(HANDLE hProcess, ULONG64 base, PCSTR compiland,
+                         PCSTR srcfile, PSYM_ENUMLINES_CALLBACK cb, PVOID user)
+{
+    struct module_pair          pair;
+    struct hash_table_iter      hti;
+    struct symt_ht*             sym;
+    regex_t                     re;
+    struct line_info*           dli;
+    void*                       ptr;
+    SRCCODEINFO                 sci;
+    const char*                 file;
+
+    if (!cb) return FALSE;
+    if (!(dbghelp_options & SYMOPT_LOAD_LINES)) return TRUE;
+
+    pair.pcs = process_find_by_handle(hProcess);
+    if (!pair.pcs) return FALSE;
+    if (compiland) FIXME("Unsupported yet (filtering on compiland %s)\n", compiland);
+    pair.requested = module_find_by_addr(pair.pcs, base, DMT_UNKNOWN);
+    if (!module_get_debug(&pair)) return FALSE;
+    if (!compile_file_regex(&re, srcfile)) return FALSE;
+
+    sci.SizeOfStruct = sizeof(sci);
+    sci.ModBase      = base;
+
+    hash_table_iter_init(&pair.effective->ht_symbols, &hti, NULL);
+    while ((ptr = hash_table_iter_up(&hti)))
+    {
+        unsigned int    i;
+
+        sym = GET_ENTRY(ptr, struct symt_ht, hash_elt);
+        if (sym->symt.tag != SymTagFunction) continue;
+
+        sci.FileName[0] = '\0';
+        for (i=0; i<vector_length(&((struct symt_function*)sym)->vlines); i++)
+        {
+            dli = vector_at(&((struct symt_function*)sym)->vlines, i);
+            if (dli->is_source_file)
+            {
+                file = source_get(pair.effective, dli->u.source_file);
+                if (!match_regexp(&re, file)) file = "";
+                strcpy(sci.FileName, file);
+            }
+            else if (sci.FileName[0])
+            {
+                sci.Key = dli;
+                sci.Obj[0] = '\0'; /* FIXME */
+                sci.LineNumber = dli->line_number;
+                sci.Address = dli->u.pc_offset;
+                if (!cb(&sci, user)) break;
+            }
+        }
+    }
+    regfree(&re);
     return TRUE;
 }

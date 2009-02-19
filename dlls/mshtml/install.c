@@ -193,18 +193,21 @@ static BOOL install_from_unix_file(const char *file_name)
 
     close(fd);
 
-    if(!wine_get_dos_file_name) {
+    if(!wine_get_dos_file_name)
         wine_get_dos_file_name = (void*)GetProcAddress(GetModuleHandleW(kernel32W), "wine_get_dos_file_name");
-        if(!wine_get_dos_file_name) {
-            ERR("Could not get wine_get_dos_file_name function.\n");
-            return FALSE;
-        }
-    }
 
-    dos_file_name = wine_get_dos_file_name(file_name);
-    if(!dos_file_name) {
-        ERR("Could not get dos file name of %s\n", debugstr_a(file_name));
-        return FALSE;
+    if(wine_get_dos_file_name) { /* Wine UNIX mode */
+	dos_file_name = wine_get_dos_file_name(file_name);
+	if(!dos_file_name) {
+	    ERR("Could not get dos file name of %s\n", debugstr_a(file_name));
+	    return FALSE;
+	}
+    } else { /* Windows mode */
+	UINT res;
+	WARN("Could not get wine_get_dos_file_name function, calling install_cab directly.\n");
+	res = MultiByteToWideChar( CP_ACP, 0, file_name, -1, 0, 0);
+	dos_file_name = heap_alloc (res*sizeof(WCHAR));
+	MultiByteToWideChar( CP_ACP, 0, file_name, -1, dos_file_name, res);
     }
 
     ret = install_cab(dos_file_name);
@@ -383,10 +386,12 @@ static HRESULT WINAPI InstallCallback_OnDataAvailable(IBindStatusCallback *iface
     HRESULT hres;
 
     do {
+        DWORD written;
+
         size = 0;
         hres = IStream_Read(str, buf, sizeof(buf), &size);
         if(size)
-            WriteFile(tmp_file, buf, size, NULL, NULL);
+            WriteFile(tmp_file, buf, size, &written, NULL);
     }while(hres == S_OK);
 
     return S_OK;
@@ -442,7 +447,7 @@ static LPWSTR get_url(void)
 
     if(size > sizeof(httpW) && !memcmp(url, httpW, sizeof(httpW))) {
         strcatW(url, v_formatW);
-        MultiByteToWideChar(CP_ACP, 0, GECKO_VERSION, -1, url+strlenW(url), -1);
+        MultiByteToWideChar(CP_ACP, 0, GECKO_VERSION, -1, url+strlenW(url), size/sizeof(WCHAR)-strlenW(url));
     }
 
     TRACE("Got URL %s\n", debugstr_w(url));

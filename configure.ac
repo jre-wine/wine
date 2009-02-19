@@ -56,6 +56,8 @@ AC_ARG_WITH(oss,       AS_HELP_STRING([--without-oss],[do not use the OSS sound 
             [if test "x$withval" = "xno"; then ac_cv_header_soundcard_h=no; ac_cv_header_sys_soundcard_h=no; ac_cv_header_machine_soundcard_h=no; fi])
 AC_ARG_WITH(png,       AS_HELP_STRING([--without-png],[do not use PNG]),
             [if test "x$withval" = "xno"; then ac_cv_header_png_h=no; fi])
+AC_ARG_WITH(pthread,   AS_HELP_STRING([--without-pthread],[do not use the pthread library]),
+            [if test "x$withval" = "xno"; then ac_cv_header_pthread_h=no; fi])
 AC_ARG_WITH(sane,      AS_HELP_STRING([--without-sane],[do not use SANE (scanner support)]))
 AC_ARG_WITH(xcomposite,AS_HELP_STRING([--without-xcomposite],[do not use the Xcomposite extension]),
             [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_Xcomposite_h=no; fi])
@@ -167,12 +169,10 @@ AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
      AC_MSG_ERROR([could not find Wine tools in $with_wine_tools.])
    fi])
 AC_SUBST(TOOLSDIR,$wine_cv_toolsdir)
-if test "$cross_compiling" = "yes"
+if test -n "$host_alias"
 then
-    AC_SUBST(TARGETFLAGS,"-b $host_alias")
+    AC_SUBST(TARGETFLAGS,"-b $host_alias $TARGETFLAGS")
 fi
-
-AC_PATH_XTRA
 
 dnl Check for flex
 AC_CHECK_PROGS(FLEX,flex,none)
@@ -242,8 +242,6 @@ dnl Check for -li386 for NetBSD and OpenBSD
 AC_CHECK_LIB(i386,i386_set_ldt)
 dnl Check for -lossaudio for NetBSD
 AC_CHECK_LIB(ossaudio,_oss_ioctl)
-dnl Check for -lpthread
-AC_CHECK_LIB(pthread,pthread_create,AC_SUBST(LIBPTHREAD,"-lpthread"))
 
 AC_SUBST(XLIB,"")
 AC_SUBST(OPENGL_LIBS,"")
@@ -538,6 +536,9 @@ case $host_os in
     enable_ws2_32=${enable_ws2_32:-no}
     enable_loader=${enable_loader:-no}
     enable_server=${enable_server:-no}
+    dnl Disable dependencies that are not useful on Windows
+    with_x=${with_x:-no}
+    with_pthread=${with_pthread:-no}
     ;;
   darwin*|macosx*)
     DLLEXT=".so"
@@ -661,7 +662,18 @@ then
     fi
 fi
 
+dnl **** Check for pthread ****
+
+if test "$ac_cv_header_pthread_h" = "yes"
+then
+    AC_CHECK_LIB(pthread,pthread_create,[AC_SUBST(LIBPTHREAD,"-lpthread")])
+fi
+WINE_ERROR_WITH(pthread,[test "x$LIBPTHREAD" = "x"],[pthread ${notice_platform}development files not found.
+Wine cannot support threads without libpthread.])
+
 dnl **** Check for X11 ****
+
+AC_PATH_XTRA
 
 if test "$have_x" = "yes"
 then
@@ -1305,10 +1317,6 @@ then
   fi
 
   dnl Check for some compiler flags
-
-  WINE_TRY_CFLAGS([-fshort-wchar],
-                  [AC_DEFINE(CC_FLAG_SHORT_WCHAR, "-fshort-wchar",
-                             [Specifies the compiler flag that forces a short wchar_t])])
   WINE_TRY_CFLAGS([-fno-builtin],[AC_SUBST(BUILTINFLAG,"-fno-builtin")])
   WINE_TRY_CFLAGS([-fno-strict-aliasing])
   WINE_TRY_CFLAGS([-Wdeclaration-after-statement])
@@ -1725,6 +1733,42 @@ AC_CHECK_MEMBERS([ns_msg._msg_ptr],,,
 #endif
 #ifdef HAVE_ARPA_NAMESER_H
 # include <arpa/nameser.h>
+#endif])
+
+dnl Check for struct icmpstat.icps_outhist
+AC_CHECK_MEMBERS([struct icmpstat.icps_outhist],,,
+[#ifdef HAVE_SYS_TYPES_H
+#include <sys/types.h>
+#endif
+#ifdef HAVE_ALIAS_H
+#include <alias.h>
+#endif
+#ifdef HAVE_SYS_SOCKET_H
+#include <sys/socket.h>
+#endif
+#ifdef HAVE_SYS_SOCKETVAR_H
+#include <sys/socketvar.h>
+#endif
+#ifdef HAVE_SYS_TIMEOUT_H
+#include <sys/timeout.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
+#ifdef HAVE_NETINET_IN_SYSTM_H
+#include <netinet/in_systm.h>
+#endif
+#ifdef HAVE_NETINET_IP_H
+#include <netinet/ip.h>
+#endif
+#ifdef HAVE_NETINET_IP_VAR_H
+#include <netinet/ip_var.h>
+#endif
+#ifdef HAVE_NETINET_IP_ICMP_H
+#include <netinet/ip_icmp.h>
+#endif
+#ifdef HAVE_NETINET_ICMP_VAR
+#include <netinet/icmp_var.h>
 #endif])
 
 dnl Check for the external timezone variables timezone and daylight
