@@ -1,8 +1,15 @@
-wine (1.1.15-1) UNRELEASED; urgency=low
+wine (1.1.15-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.15, released Feb 13, 2009.
+    - Gecko engine update.
+    - Better region support in GdiPlus.
+    - Support for cross-compilation in winegcc.
+    - Beginnings of MS Text Framework support.
+    - Many fixes to the regression tests on Windows.
+    - Various bug fixes.
+  * Added build-dependency alternative libjack-dev.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Fri, 20 Feb 2009 00:12:48 +0100
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 21 Feb 2009 00:54:23 +0100
 
 wine (1.1.14-1) experimental; urgency=low
 
