@@ -1,6 +1,5 @@
 debian/tmp/usr/bin/fnt2bdf
 debian/tmp/usr/bin/notepad
-debian/tmp/usr/bin/progman
 debian/tmp/usr/bin/winedbg
 debian/tmp/usr/bin/winedump
 debian/tmp/usr/bin/winefile
