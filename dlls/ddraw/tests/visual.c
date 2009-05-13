@@ -37,6 +37,8 @@ IDirect3DDevice *Direct3DDevice1 = NULL;
 IDirect3DExecuteBuffer *ExecuteBuffer = NULL;
 IDirect3DViewport *Viewport = NULL;
 
+static BOOL refdevice = FALSE;
+
 static HRESULT (WINAPI *pDirectDrawCreateEx)(LPGUID,LPVOID*,REFIID,LPUNKNOWN);
 
 static BOOL createObjects(void)
@@ -100,6 +102,8 @@ static BOOL createObjects(void)
         {
             trace("Creating a HAL device failed, trying Ref\n");
             hr = IDirect3D7_CreateDevice(Direct3D, &IID_IDirect3DRefDevice, Surface, &Direct3DDevice);
+            if (SUCCEEDED(hr))
+                refdevice = TRUE;
         }
     }
     if(!Direct3DDevice) goto err;
@@ -562,7 +566,7 @@ static void offscreen_test(IDirect3DDevice7 *device)
     hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_LIGHTING, FALSE);
     ok(hr == D3D_OK, "IDirect3DDevice7_SetRenderState returned hr = %08x\n", hr);
 
-    if(IDirect3DDevice7_BeginScene(device) == D3D_OK) {
+    if(IDirect3DDevice7_BeginScene(device) == D3D_OK && !refdevice) {
         hr = IDirect3DDevice7_SetRenderTarget(device, offscreen, 0);
         ok(hr == D3D_OK, "SetRenderTarget failed, hr = %08x\n", hr);
         hr = IDirect3DDevice7_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
@@ -2634,28 +2638,28 @@ START_TEST(visual)
     hr = IDirect3DDevice7_Clear(Direct3DDevice, 0, NULL, D3DCLEAR_TARGET, 0xffff0000, 0.0, 0);
     if(FAILED(hr))
     {
-        trace("Clear failed, can't assure correctness of the test results, skipping\n");
+        skip("Clear failed, can't assure correctness of the test results, skipping\n");
         goto cleanup;
     }
 
     color = getPixelColor(Direct3DDevice, 1, 1);
     if(color !=0x00ff0000)
     {
-        trace("Sanity check returned an incorrect color(%08x), can't assure the correctness of the tests, skipping\n", color);
+        skip("Sanity check returned an incorrect color(%08x), can't assure the correctness of the tests, skipping\n", color);
         goto cleanup;
     }
 
     hr = IDirect3DDevice7_Clear(Direct3DDevice, 0, NULL, D3DCLEAR_TARGET, 0xff00ddee, 0.0, 0);
     if(FAILED(hr))
     {
-        trace("Clear failed, can't assure correctness of the test results, skipping\n");
+        skip("Clear failed, can't assure correctness of the test results, skipping\n");
         goto cleanup;
     }
 
     color = getPixelColor(Direct3DDevice, 639, 479);
     if(color != 0x0000ddee)
     {
-        trace("Sanity check returned an incorrect color(%08x), can't assure the correctness of the tests, skipping\n", color);
+        skip("Sanity check returned an incorrect color(%08x), can't assure the correctness of the tests, skipping\n", color);
         goto cleanup;
     }
 

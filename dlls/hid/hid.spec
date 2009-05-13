@@ -2,7 +2,7 @@
 @ stub HidD_FreePreparsedData
 @ stub HidD_GetAttributes
 @ stub HidD_GetConfiguration
-@ stub HidD_GetFeature
+@ stdcall HidD_GetFeature(long ptr long)
 @ stdcall HidD_GetHidGuid(ptr)
 @ stub HidD_GetIndexedString
 @ stub HidD_GetInputReport
@@ -15,7 +15,7 @@
 @ stub HidD_GetSerialNumberString
 @ stub HidD_Hello
 @ stub HidD_SetConfiguration
-@ stub HidD_SetFeature
+@ stdcall HidD_SetFeature(long ptr long)
 @ stub HidD_SetNumInputBuffers
 @ stub HidD_SetOutputReport
 @ stub HidP_GetButtonCaps

@@ -197,15 +197,8 @@ void write_type_left(FILE *h, type_t *t, int declonly)
   if (type_is_alias(t)) fprintf(h, "%s", t->name);
   else if (t->declarray) write_type_left(h, type_array_get_element(t), declonly);
   else {
-    if (t->sign > 0) fprintf(h, "signed ");
-    else if (t->sign < 0) fprintf(h, "unsigned ");
-
-    if (is_array(t) && !t->name) {
-      write_type_left(h, type_array_get_element(t), declonly);
-      fprintf(h, "%s*", needs_space_after(type_array_get_element(t)) ? " " : "");
-    } else switch (t->type) {
-      case RPC_FC_ENUM16:
-      case RPC_FC_ENUM32:
+    switch (type_get_type_detect_alias(t)) {
+      case TYPE_ENUM:
         if (!declonly && t->defined && !t->written) {
           if (t->name) fprintf(h, "enum %s {\n", t->name);
           else fprintf(h, "enum {\n");
@@ -217,19 +210,14 @@ void write_type_left(FILE *h, type_t *t, int declonly)
         }
         else fprintf(h, "enum %s", t->name ? t->name : "");
         break;
-      case RPC_FC_STRUCT:
-      case RPC_FC_CVSTRUCT:
-      case RPC_FC_CPSTRUCT:
-      case RPC_FC_CSTRUCT:
-      case RPC_FC_PSTRUCT:
-      case RPC_FC_BOGUS_STRUCT:
-      case RPC_FC_ENCAPSULATED_UNION:
+      case TYPE_STRUCT:
+      case TYPE_ENCAPSULATED_UNION:
         if (!declonly && t->defined && !t->written) {
           if (t->name) fprintf(h, "struct %s {\n", t->name);
           else fprintf(h, "struct {\n");
           t->written = TRUE;
           indentation++;
-          if (t->type == RPC_FC_ENCAPSULATED_UNION)
+          if (type_get_type(t) != TYPE_STRUCT)
             write_fields(h, type_encapsulated_union_get_fields(t));
           else
             write_fields(h, type_struct_get_fields(t));
@@ -238,7 +226,7 @@ void write_type_left(FILE *h, type_t *t, int declonly)
         }
         else fprintf(h, "struct %s", t->name ? t->name : "");
         break;
-      case RPC_FC_NON_ENCAPSULATED_UNION:
+      case TYPE_UNION:
         if (!declonly && t->defined && !t->written) {
           if (t->name) fprintf(h, "union %s {\n", t->name);
           else fprintf(h, "union {\n");
@@ -250,16 +238,35 @@ void write_type_left(FILE *h, type_t *t, int declonly)
         }
         else fprintf(h, "union %s", t->name ? t->name : "");
         break;
-      case RPC_FC_RP:
-      case RPC_FC_UP:
-      case RPC_FC_FP:
-      case RPC_FC_OP:
+      case TYPE_POINTER:
         write_type_left(h, type_pointer_get_ref(t), declonly);
         fprintf(h, "%s*", needs_space_after(type_pointer_get_ref(t)) ? " " : "");
         if (is_attr(t->attrs, ATTR_CONST)) fprintf(h, "const ");
         break;
-      default:
+      case TYPE_ARRAY:
+        if (t->name)
+          fprintf(h, "%s", t->name);
+        else
+        {
+          write_type_left(h, type_array_get_element(t), declonly);
+          fprintf(h, "%s*", needs_space_after(type_array_get_element(t)) ? " " : "");
+        }
+        break;
+      case TYPE_BASIC:
+        if (t->sign > 0) fprintf(h, "signed ");
+        else if (t->sign < 0) fprintf(h, "unsigned ");
+        /* fall through */
+      case TYPE_INTERFACE:
+      case TYPE_MODULE:
+      case TYPE_COCLASS:
+      case TYPE_VOID:
         fprintf(h, "%s", t->name);
+        break;
+      case TYPE_ALIAS:
+      case TYPE_FUNCTION:
+        /* handled elsewhere */
+        assert(0);
+        break;
     }
   }
 }
@@ -288,7 +295,7 @@ static void write_type_v(FILE *h, type_t *t, int is_field, int declonly, const c
   for (pt = t; is_ptr(pt); pt = type_pointer_get_ref(pt), ptr_level++)
     ;
 
-  if (pt->type == RPC_FC_FUNCTION) {
+  if (type_get_type_detect_alias(pt) == TYPE_FUNCTION) {
     int i;
     const char *callconv = get_attrp(pt->attrs, ATTR_CALLCONV);
     if (!callconv) callconv = "";
@@ -304,7 +311,7 @@ static void write_type_v(FILE *h, type_t *t, int is_field, int declonly, const c
 
   if (name) fprintf(h, "%s%s", needs_space_after(t) ? " " : "", name );
 
-  if (pt->type == RPC_FC_FUNCTION) {
+  if (type_get_type_detect_alias(pt) == TYPE_FUNCTION) {
     if (ptr_level) fputc(')', h);
     fputc('(', h);
     write_args(h, type_function_get_args(pt), NULL, 0, FALSE);
@@ -380,7 +387,9 @@ void check_for_additional_prototype_types(const var_list_t *list)
         /* don't carry on parsing fields within this type */
         break;
       }
-      if (type->type != RPC_FC_BIND_PRIMITIVE && is_attr(type->attrs, ATTR_HANDLE)) {
+      if ((type_get_type(type) != TYPE_BASIC ||
+           type_basic_get_fc(type) != RPC_FC_BIND_PRIMITIVE) &&
+          is_attr(type->attrs, ATTR_HANDLE)) {
         if (!generic_handle_registered(name))
         {
           generic_handle_t *gh = xmalloc(sizeof(*gh));
@@ -403,13 +412,22 @@ void check_for_additional_prototype_types(const var_list_t *list)
       }
       else if (type_is_complete(type))
       {
-        var_list_t *vars = NULL;
-        if (type->type == RPC_FC_ENUM16 || type->type == RPC_FC_ENUM32)
+        var_list_t *vars;
+        switch (type_get_type_detect_alias(type))
+        {
+        case TYPE_ENUM:
           vars = type_enum_get_values(type);
-        else if (is_struct(type->type))
+          break;
+        case TYPE_STRUCT:
           vars = type_struct_get_fields(type);
-        else if (is_union(type->type))
+          break;
+        case TYPE_UNION:
           vars = type_union_get_cases(type);
+          break;
+        default:
+          vars = NULL;
+          break;
+        }
         check_for_additional_prototype_types(vars);
       }
 
@@ -791,7 +809,7 @@ static void write_locals(FILE *fp, const type_t *iface, int body)
           fprintf(fp, "    %s\n", comment);
           if (rt->name && strcmp(rt->name, "HRESULT") == 0)
             fprintf(fp, "    return E_NOTIMPL;\n");
-          else if (rt->type) {
+          else if (type_get_type(rt) != TYPE_VOID) {
             fprintf(fp, "    ");
             write_type_decl(fp, rt, "rv");
             fprintf(fp, ";\n");
@@ -824,7 +842,7 @@ static void write_local_stubs_stmts(FILE *local_stubs, const statement_list_t *s
   const statement_t *stmt;
   if (stmts) LIST_FOR_EACH_ENTRY( stmt, stmts, const statement_t, entry )
   {
-    if (stmt->type == STMT_TYPE && stmt->u.type->type == RPC_FC_IP)
+    if (stmt->type == STMT_TYPE && type_get_type(stmt->u.type) == TYPE_INTERFACE)
       write_locals(local_stubs, stmt->u.type, TRUE);
     else if (stmt->type == STMT_LIBRARY)
       write_local_stubs_stmts(local_stubs, stmt->u.lib->stmts);
@@ -1047,7 +1065,7 @@ static void write_imports(FILE *header, const statement_list_t *stmts)
     switch (stmt->type)
     {
       case STMT_TYPE:
-        if (stmt->u.type->type == RPC_FC_IP)
+        if (type_get_type(stmt->u.type) == TYPE_INTERFACE)
           write_imports(header, type_iface_get_stmts(stmt->u.type));
         break;
       case STMT_TYPEREF:
@@ -1078,12 +1096,12 @@ static void write_forward_decls(FILE *header, const statement_list_t *stmts)
     switch (stmt->type)
     {
       case STMT_TYPE:
-        if (stmt->u.type->type == RPC_FC_IP)
+        if (type_get_type(stmt->u.type) == TYPE_INTERFACE)
         {
           if (is_object(stmt->u.type->attrs) || is_attr(stmt->u.type->attrs, ATTR_DISPINTERFACE))
             write_forward(header, stmt->u.type);
         }
-        else if (stmt->u.type->type == RPC_FC_COCLASS)
+        else if (type_get_type(stmt->u.type) == TYPE_COCLASS)
           write_coclass_forward(header, stmt->u.type);
         break;
       case STMT_TYPEREF:
@@ -1112,7 +1130,7 @@ static void write_header_stmts(FILE *header, const statement_list_t *stmts, cons
     switch (stmt->type)
     {
       case STMT_TYPE:
-        if (stmt->u.type->type == RPC_FC_IP)
+        if (type_get_type(stmt->u.type) == TYPE_INTERFACE)
         {
           type_t *iface = stmt->u.type;
           if (is_attr(stmt->u.type->attrs, ATTR_DISPINTERFACE) || is_object(stmt->u.type->attrs))
@@ -1128,7 +1146,7 @@ static void write_header_stmts(FILE *header, const statement_list_t *stmts, cons
             write_rpc_interface_end(header, iface);
           }
         }
-        else if (stmt->u.type->type == RPC_FC_COCLASS)
+        else if (type_get_type(stmt->u.type) == TYPE_COCLASS)
           write_coclass(header, stmt->u.type);
         else
         {
@@ -1139,7 +1157,7 @@ static void write_header_stmts(FILE *header, const statement_list_t *stmts, cons
       case STMT_TYPEREF:
         /* FIXME: shouldn't write out forward declarations for undefined
         * interfaces but a number of our IDL files depend on this */
-        if (stmt->u.type->type == RPC_FC_IP && !stmt->u.type->written)
+        if (type_get_type(stmt->u.type) == TYPE_INTERFACE && !stmt->u.type->written)
           write_forward(header, stmt->u.type);
         break;
       case STMT_IMPORTLIB:
@@ -1164,7 +1182,7 @@ static void write_header_stmts(FILE *header, const statement_list_t *stmts, cons
         fprintf(header, "%s\n", stmt->u.str);
         break;
       case STMT_DECLARATION:
-        if (iface && stmt->u.var->type->type == RPC_FC_FUNCTION)
+        if (iface && type_get_type(stmt->u.var->type) == TYPE_FUNCTION)
         {
           if (!ignore_funcs)
           {

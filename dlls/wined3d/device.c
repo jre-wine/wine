@@ -133,6 +133,48 @@ static HRESULT WINAPI IWineD3DDeviceImpl_GetParent(IWineD3DDevice *iface, IUnkno
     return WINED3D_OK;
 }
 
+static HRESULT WINAPI IWineD3DDeviceImpl_CreateBuffer(IWineD3DDevice *iface,
+        struct wined3d_buffer_desc *desc, IUnknown *parent, IWineD3DBuffer **buffer)
+{
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    struct wined3d_buffer *object;
+    HRESULT hr;
+
+    TRACE("iface %p, desc %p, parent %p, buffer %p\n", iface, desc, parent, buffer);
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate memory\n");
+        return E_OUTOFMEMORY;
+    }
+
+    object->vtbl = &wined3d_buffer_vtbl;
+    object->desc = *desc;
+
+    FIXME("Ignoring access flags (pool)\n");
+
+    hr = resource_init(&object->resource, WINED3DRTYPE_BUFFER, This, desc->byte_width,
+            desc->usage, WINED3DFMT_UNKNOWN, WINED3DPOOL_MANAGED, parent);
+    if (FAILED(hr))
+    {
+        WARN("Failed to initialize resource, returning %#x\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
+        return hr;
+    }
+
+    TRACE("Created resource %p\n", object);
+
+    IWineD3DDeviceImpl_AddResource(iface, (IWineD3DResource *)object);
+
+    TRACE("size %#x, usage=%#x, format %s, memory @ %p, iface @ %p\n", object->resource.size, object->resource.usage,
+            debug_d3dformat(object->resource.format), object->resource.allocatedMemory, object);
+
+    *buffer = (IWineD3DBuffer *)object;
+
+    return WINED3D_OK;
+}
+
 static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexBuffer(IWineD3DDevice *iface, UINT Size, DWORD Usage, 
                              DWORD FVF, WINED3DPOOL Pool, IWineD3DVertexBuffer** ppVertexBuffer, HANDLE *sharedHandle,
                              IUnknown *parent) {
@@ -751,6 +793,29 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface, U
     return hr;
 }
 
+static HRESULT WINAPI IWineD3DDeviceImpl_CreateRendertargetView(IWineD3DDevice *iface,
+        IWineD3DResource *resource, IUnknown *parent, IWineD3DRendertargetView **rendertarget_view)
+{
+    struct wined3d_rendertarget_view *object;
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate memory\n");
+        return E_OUTOFMEMORY;
+    }
+
+    object->vtbl = &wined3d_rendertarget_view_vtbl;
+    object->refcount = 1;
+    IWineD3DResource_AddRef(resource);
+    object->resource = resource;
+    object->parent = parent;
+
+    *rendertarget_view = (IWineD3DRendertargetView *)object;
+
+    return WINED3D_OK;
+}
+
 static HRESULT WINAPI IWineD3DDeviceImpl_CreateTexture(IWineD3DDevice *iface,
         UINT Width, UINT Height, UINT Levels, DWORD Usage, WINED3DFORMAT Format, WINED3DPOOL Pool,
         IWineD3DTexture **ppTexture, HANDLE *pSharedHandle, IUnknown *parent)
@@ -921,6 +986,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateTexture(IWineD3DDevice *iface,
         tmpH = max(1, tmpH >> 1);
     }
     object->baseTexture.shader_color_fixup = glDesc->color_fixup;
+    object->baseTexture.internal_preload = texture_internal_preload;
 
     TRACE("(%p) : Created  texture %p\n", This, object);
     return WINED3D_OK;
@@ -1043,6 +1109,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVolumeTexture(IWineD3DDevice *ifa
         tmpD = max(1, tmpD >> 1);
     }
     object->baseTexture.shader_color_fixup = glDesc->color_fixup;
+    object->baseTexture.internal_preload = volumetexture_internal_preload;
 
     *ppVolumeTexture = (IWineD3DVolumeTexture *) object;
     TRACE("(%p) : Created volume texture %p\n", This, object);
@@ -1241,6 +1308,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateCubeTexture(IWineD3DDevice *iface
         tmpW = max(1, tmpW >> 1);
     }
     object->baseTexture.shader_color_fixup = glDesc->color_fixup;
+    object->baseTexture.internal_preload = cubetexture_internal_preload;
 
     TRACE("(%p) : Created Cube Texture %p\n", This, object);
     *ppCubeTexture = (IWineD3DCubeTexture *) object;
@@ -5300,7 +5368,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_DrawIndexedPrimitive(IWineD3DDevice *
           minIndex, NumVertices, startIndex, primCount);
 
     IWineD3DIndexBuffer_GetDesc(pIB, &IdxBufDsc);
-    if (IdxBufDsc.Format == WINED3DFMT_INDEX16) {
+    if (IdxBufDsc.Format == WINED3DFMT_R16_UINT) {
         idxStride = 2;
     } else {
         idxStride = 4;
@@ -5377,7 +5445,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_DrawIndexedPrimitiveUP(IWineD3DDevice *
         return WINED3DERR_INVALIDCALL;
     }
 
-    if (IndexDataFormat == WINED3DFMT_INDEX16) {
+    if (IndexDataFormat == WINED3DFMT_R16_UINT) {
         idxStride = 2;
     } else {
         idxStride = 4;
@@ -5440,7 +5508,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_DrawIndexedPrimitiveStrided(IWineD3DDev
         WINED3DFORMAT IndexDataFormat)
 {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
-    DWORD idxSize = (IndexDataFormat == WINED3DFMT_INDEX32 ? 4 : 2);
+    DWORD idxSize = (IndexDataFormat == WINED3DFMT_R32_UINT ? 4 : 2);
 
     /* Mark the state dirty until we have nicer tracking
      * its fine to change baseVertexIndex because that call is only called by ddraw which does not need
@@ -5529,9 +5597,10 @@ static HRESULT WINAPI IWineD3DDeviceImpl_UpdateTexture (IWineD3DDevice *iface, I
     }
 
     if (WINED3D_OK == hr) {
+        IWineD3DBaseTextureImpl *pDestImpl = (IWineD3DBaseTextureImpl *) pDestinationTexture;
 
         /* Make sure that the destination texture is loaded */
-        IWineD3DBaseTexture_PreLoad(pDestinationTexture);
+        pDestImpl->baseTexture.internal_preload(pDestinationTexture, SRGB_RGB);
 
         /* Update every surface level of the texture */
         levels = IWineD3DBaseTexture_GetLevelCount(pDestinationTexture);
@@ -5921,8 +5990,8 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
     LEAVE_GL();
 
     /* Make sure the surface is loaded and up to date */
-    IWineD3DSurface_PreLoad(pDestinationSurface);
-    IWineD3DSurface_BindTexture(pDestinationSurface);
+    surface_internal_preload(pDestinationSurface, SRGB_RGB);
+    IWineD3DSurface_BindTexture(pDestinationSurface, FALSE);
 
     IWineD3DSurface_GetGlDesc(pDestinationSurface, &glDescription);
 
@@ -6150,7 +6219,9 @@ static IWineD3DSwapChain *get_swapchain(IWineD3DSurface *target) {
     return NULL;
 }
 
-static void color_fill_fbo(IWineD3DDevice *iface, IWineD3DSurface *surface, CONST WINED3DRECT *rect, WINED3DCOLOR color) {
+static void color_fill_fbo(IWineD3DDevice *iface, IWineD3DSurface *surface,
+        const WINED3DRECT *rect, const float color[4])
+{
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
     IWineD3DSwapChain *swapchain;
 
@@ -6198,7 +6269,7 @@ static void color_fill_fbo(IWineD3DDevice *iface, IWineD3DSurface *surface, CONS
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(WINED3DRS_COLORWRITEENABLE));
 
-    glClearColor(D3DCOLOR_R(color), D3DCOLOR_G(color), D3DCOLOR_B(color), D3DCOLOR_A(color));
+    glClearColor(color[0], color[1], color[2], color[3]);
     glClear(GL_COLOR_BUFFER_BIT);
     checkGLcall("glClear");
 
@@ -6259,7 +6330,7 @@ static inline DWORD argb_to_fmt(DWORD color, WINED3DFORMAT destfmt) {
             TRACE("Returning %08x\n", ret);
             return ret;
 
-        case WINED3DFMT_A8:
+        case WINED3DFMT_A8_UNORM:
             TRACE("Returning %08x\n", a);
             return a;
 
@@ -6287,7 +6358,7 @@ static inline DWORD argb_to_fmt(DWORD color, WINED3DFORMAT destfmt) {
             return ret;
 
         case WINED3DFMT_X8B8G8R8:
-        case WINED3DFMT_A8B8G8R8:
+        case WINED3DFMT_R8G8B8A8_UNORM:
             ret  = a << 24;
             ret |= b << 16;
             ret |= g <<  8;
@@ -6307,7 +6378,7 @@ static inline DWORD argb_to_fmt(DWORD color, WINED3DFORMAT destfmt) {
             TRACE("Returning %08x\n", ret);
             return ret;
 
-        case WINED3DFMT_A2B10G10R10:
+        case WINED3DFMT_R10G10B10A2_UNORM:
             a = (a *    4) / 256;
             r = (r * 1024) / 256;
             g = (g * 1024) / 256;
@@ -6337,7 +6408,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ColorFill(IWineD3DDevice *iface, IWineD
     }
 
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
-        color_fill_fbo(iface, pSurface, pRect, color);
+        const float c[4] = {D3DCOLOR_R(color), D3DCOLOR_G(color), D3DCOLOR_B(color), D3DCOLOR_A(color)};
+        color_fill_fbo(iface, pSurface, pRect, c);
         return WINED3D_OK;
     } else {
         /* Just forward this to the DirectDraw blitting engine */
@@ -6347,6 +6419,59 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ColorFill(IWineD3DDevice *iface, IWineD
         return IWineD3DSurface_Blt(pSurface, (const RECT *)pRect, NULL, NULL,
                 WINEDDBLT_COLORFILL, &BltFx, WINED3DTEXF_NONE);
     }
+}
+
+static void WINAPI IWineD3DDeviceImpl_ClearRendertargetView(IWineD3DDevice *iface,
+        IWineD3DRendertargetView *rendertarget_view, const float color[4])
+{
+    IWineD3DResource *resource;
+    IWineD3DSurface *surface;
+    HRESULT hr;
+
+    hr = IWineD3DRendertargetView_GetResource(rendertarget_view, &resource);
+    if (FAILED(hr))
+    {
+        ERR("Failed to get resource, hr %#x\n", hr);
+        return;
+    }
+
+    if (IWineD3DResource_GetType(resource) != WINED3DRTYPE_SURFACE)
+    {
+        FIXME("Only supported on surface resources\n");
+        IWineD3DResource_Release(resource);
+        return;
+    }
+
+    surface = (IWineD3DSurface *)resource;
+
+    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
+    {
+        color_fill_fbo(iface, surface, NULL, color);
+    }
+    else
+    {
+        WINEDDBLTFX BltFx;
+        WINED3DCOLOR c;
+
+        WARN("Converting to WINED3DCOLOR, this might give incorrect results\n");
+
+        c = ((DWORD)(color[2] * 255.0));
+        c |= ((DWORD)(color[1] * 255.0)) << 8;
+        c |= ((DWORD)(color[0] * 255.0)) << 16;
+        c |= ((DWORD)(color[3] * 255.0)) << 24;
+
+        /* Just forward this to the DirectDraw blitting engine */
+        memset(&BltFx, 0, sizeof(BltFx));
+        BltFx.dwSize = sizeof(BltFx);
+        BltFx.u5.dwFillColor = argb_to_fmt(c, ((IWineD3DSurfaceImpl *)surface)->resource.format);
+        hr = IWineD3DSurface_Blt(surface, NULL, NULL, NULL, WINEDDBLT_COLORFILL, &BltFx, WINED3DTEXF_NONE);
+        if (FAILED(hr))
+        {
+            ERR("Blt failed, hr %#x\n", hr);
+        }
+    }
+
+    IWineD3DResource_Release(resource);
 }
 
 /* rendertarget and depth stencil functions */
@@ -7474,8 +7599,12 @@ static void WINAPI IWineD3DDeviceImpl_ResourceReleased(IWineD3DDevice *iface, IW
                 This->stateBlock->pIndexData =  NULL;
             }
         }
-
         break;
+
+        case WINED3DRTYPE_BUFFER:
+            /* Nothing to do, yet.*/
+            break;
+
         default:
         FIXME("(%p) unknown resource type %p %u\n", This, resource, IWineD3DResource_GetType(resource));
         break;
@@ -7520,10 +7649,12 @@ const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl =
     /*** IWineD3DDevice methods ***/
     IWineD3DDeviceImpl_GetParent,
     /*** Creation methods**/
+    IWineD3DDeviceImpl_CreateBuffer,
     IWineD3DDeviceImpl_CreateVertexBuffer,
     IWineD3DDeviceImpl_CreateIndexBuffer,
     IWineD3DDeviceImpl_CreateStateBlock,
     IWineD3DDeviceImpl_CreateSurface,
+    IWineD3DDeviceImpl_CreateRendertargetView,
     IWineD3DDeviceImpl_CreateTexture,
     IWineD3DDeviceImpl_CreateVolumeTexture,
     IWineD3DDeviceImpl_CreateVolume,
@@ -7635,6 +7766,7 @@ const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl =
     IWineD3DDeviceImpl_EndScene,
     IWineD3DDeviceImpl_Present,
     IWineD3DDeviceImpl_Clear,
+    IWineD3DDeviceImpl_ClearRendertargetView,
     /*** Drawing ***/
     IWineD3DDeviceImpl_DrawPrimitive,
     IWineD3DDeviceImpl_DrawIndexedPrimitive,

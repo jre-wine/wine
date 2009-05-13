@@ -41,6 +41,8 @@ static const WCHAR attrBackgroundColor[] =
     {'b','a','c','k','g','r','o','u','n','d','-','c','o','l','o','r',0};
 static const WCHAR attrBackgroundImage[] =
     {'b','a','c','k','g','r','o','u','n','d','-','i','m','a','g','e',0};
+static const WCHAR attrBackgroundRepeat[] =
+    {'b','a','c','k','g','r','o','u','n','d','-','r','e','p','e','a','t',0};
 static const WCHAR attrBorder[] =
     {'b','o','r','d','e','r',0};
 static const WCHAR attrBorderBottomStyle[] =
@@ -83,6 +85,8 @@ static const WCHAR attrMarginLeft[] =
     {'m','a','r','g','i','n','-','l','e','f','t',0};
 static const WCHAR attrMarginRight[] =
     {'m','a','r','g','i','n','-','r','i','g','h','t',0};
+static const WCHAR attrMinHeight[] =
+    {'m','i','n','-','h','e','i','g','h','t',0};
 static const WCHAR attrOverflow[] =
     {'o','v','e','r','f','l','o','w',0};
 static const WCHAR attrPaddingLeft[] =
@@ -111,6 +115,7 @@ static const struct{
     {attrBackground,           DISPID_IHTMLSTYLE_BACKGROUND},
     {attrBackgroundColor,      DISPID_IHTMLSTYLE_BACKGROUNDCOLOR},
     {attrBackgroundImage,      DISPID_IHTMLSTYLE_BACKGROUNDIMAGE},
+    {attrBackgroundRepeat,     DISPID_IHTMLSTYLE_BACKGROUNDREPEAT},
     {attrBorder,               DISPID_IHTMLSTYLE_BORDER},
     {attrBorderBottomStyle,    DISPID_IHTMLSTYLE_BORDERBOTTOMSTYLE},
     {attrBorderLeft,           DISPID_IHTMLSTYLE_BORDERLEFT},
@@ -132,6 +137,7 @@ static const struct{
     {attrMargin,               DISPID_IHTMLSTYLE_MARGIN},
     {attrMarginLeft,           DISPID_IHTMLSTYLE_MARGINLEFT},
     {attrMarginRight,          DISPID_IHTMLSTYLE_MARGINRIGHT},
+    {attrMinHeight,            DISPID_IHTMLSTYLE4_MINHEIGHT},
     {attrOverflow,             DISPID_IHTMLSTYLE_OVERFLOW},
     {attrPaddingLeft,          DISPID_IHTMLSTYLE_PADDINGLEFT},
     {attrPosition,             DISPID_IHTMLSTYLE2_POSITION},
@@ -209,10 +215,6 @@ static LPWSTR fix_url_value(LPCWSTR val)
     return ret;
 }
 
-#define ATTR_FIX_PX      1
-#define ATTR_FIX_URL     2
-#define ATTR_STR_TO_INT  4
-
 HRESULT set_nsstyle_attr(nsIDOMCSSStyleDeclaration *nsstyle, styleid_t sid, LPCWSTR value, DWORD flags)
 {
     nsAString str_name, str_value, str_empty;
@@ -242,7 +244,7 @@ HRESULT set_nsstyle_attr(nsIDOMCSSStyleDeclaration *nsstyle, styleid_t sid, LPCW
     return S_OK;
 }
 
-static HRESULT set_nsstyle_attr_var(nsIDOMCSSStyleDeclaration *nsstyle, styleid_t sid, VARIANT *value, DWORD flags)
+HRESULT set_nsstyle_attr_var(nsIDOMCSSStyleDeclaration *nsstyle, styleid_t sid, VARIANT *value, DWORD flags)
 {
     switch(V_VT(value)) {
     case VT_NULL:
@@ -251,6 +253,13 @@ static HRESULT set_nsstyle_attr_var(nsIDOMCSSStyleDeclaration *nsstyle, styleid_
     case VT_BSTR:
         return set_nsstyle_attr(nsstyle, sid, V_BSTR(value), flags);
 
+    case VT_I4: {
+        WCHAR str[14];
+        static const WCHAR format[] = {'%','d',0};
+
+        wsprintfW(str, format, V_I4(value));
+        return set_nsstyle_attr(nsstyle, sid, str, flags);
+    }
     default:
         FIXME("not implemented vt %d\n", V_VT(value));
         return E_NOTIMPL;
@@ -301,7 +310,7 @@ HRESULT get_nsstyle_attr(nsIDOMCSSStyleDeclaration *nsstyle, styleid_t sid, BSTR
     return S_OK;
 }
 
-static HRESULT get_nsstyle_attr_var(nsIDOMCSSStyleDeclaration *nsstyle, styleid_t sid, VARIANT *p, DWORD flags)
+HRESULT get_nsstyle_attr_var(nsIDOMCSSStyleDeclaration *nsstyle, styleid_t sid, VARIANT *p, DWORD flags)
 {
     nsAString str_value;
     const PRUnichar *value;
@@ -797,15 +806,30 @@ static HRESULT WINAPI HTMLStyle_get_backgroundImage(IHTMLStyle *iface, BSTR *p)
 static HRESULT WINAPI HTMLStyle_put_backgroundRepeat(IHTMLStyle *iface, BSTR v)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    static const WCHAR styleRepeat[]   = {'r','e','p','e','a','t',0};
+    static const WCHAR styleNoRepeat[] = {'n','o','-','r','e','p','e','a','t',0};
+    static const WCHAR styleRepeatX[]  = {'r','e','p','e','a','t','-','x',0};
+    static const WCHAR styleRepeatY[]  = {'r','e','p','e','a','t','-','y',0};
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    /* fontWeight can only be one of the following */
+    if(!v || strcmpiW(styleRepeat, v) == 0    || strcmpiW(styleNoRepeat, v) == 0    ||
+             strcmpiW(styleRepeatX, v) == 0 || strcmpiW(styleRepeatY, v) == 0 )
+    {
+        return set_style_attr(This, STYLEID_BACKGROUND_REPEAT , v, 0);
+    }
+
+    return E_INVALIDARG;
 }
 
 static HRESULT WINAPI HTMLStyle_get_backgroundRepeat(IHTMLStyle *iface, BSTR *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_style_attr(This, STYLEID_BACKGROUND_REPEAT, p);
 }
 
 static HRESULT WINAPI HTMLStyle_put_backgroundAttachment(IHTMLStyle *iface, BSTR v)
@@ -1121,8 +1145,8 @@ static HRESULT WINAPI HTMLStyle_put_marginRight(IHTMLStyle *iface, VARIANT v)
 static HRESULT WINAPI HTMLStyle_get_marginRight(IHTMLStyle *iface, VARIANT *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p)\n", This, p);
+    return get_nsstyle_attr_var(This->nsstyle, STYLEID_MARGIN_RIGHT, p, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_put_marginBottom(IHTMLStyle *iface, VARIANT v)
@@ -1186,8 +1210,8 @@ static HRESULT WINAPI HTMLStyle_get_margin(IHTMLStyle *iface, BSTR *p)
 static HRESULT WINAPI HTMLStyle_get_marginLeft(IHTMLStyle *iface, VARIANT *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p)\n", This, p);
+    return get_nsstyle_attr_var(This->nsstyle, STYLEID_MARGIN_LEFT, p, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_put_paddingTop(IHTMLStyle *iface, VARIANT v)
@@ -2163,7 +2187,7 @@ static HRESULT WINAPI HTMLStyle_setAttribute(IHTMLStyle *iface, BSTR strAttribut
     if(lFlags == 1)
         FIXME("Parameter lFlags ignored\n");
 
-    hres = HTMLStyle_GetIDsOfNames(iface, &IID_NULL, (LPOLESTR*)&strAttributeName, 1,
+    hres = HTMLStyle_GetIDsOfNames(iface, &IID_NULL, &strAttributeName, 1,
                         LOCALE_USER_DEFAULT, &dispid);
     if(hres == S_OK)
     {
@@ -2205,7 +2229,7 @@ static HRESULT WINAPI HTMLStyle_getAttribute(IHTMLStyle *iface, BSTR strAttribut
     if(lFlags == 1)
         FIXME("Parameter lFlags ignored\n");
 
-    hres = HTMLStyle_GetIDsOfNames(iface, &IID_NULL, (LPOLESTR*)&strAttributeName, 1,
+    hres = HTMLStyle_GetIDsOfNames(iface, &IID_NULL, &strAttributeName, 1,
                         LOCALE_USER_DEFAULT, &dispid);
     if(hres == S_OK)
     {

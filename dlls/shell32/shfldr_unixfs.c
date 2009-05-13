@@ -499,7 +499,7 @@ static char* UNIXFS_build_shitemid(char *pszUnixPath, void *pIDL) {
     ((LPSHITEMID)pIDL)->cb = cbLen;
     
     /* Set shell32's standard SHITEMID data fields. */
-    pIDLData = _ILGetDataPointer((LPCITEMIDLIST)pIDL);
+    pIDLData = _ILGetDataPointer(pIDL);
     pIDLData->type = S_ISDIR(fileStat.st_mode) ? PT_FOLDER : PT_VALUE;
     pIDLData->u.file.dwFileSize = (DWORD)fileStat.st_size;
     UNIXFS_seconds_since_1970_to_dos_date_time(fileStat.st_mtime, &pIDLData->u.file.uFileDate, 
@@ -1093,14 +1093,14 @@ static HRESULT WINAPI UnixFolder_IShellFolder2_GetUIObjectOf(IShellFolder2* ifac
         LPITEMIDLIST pidl;
         if (cidl != 1) return E_INVALIDARG;
         pidl = ILCombine(This->m_pidlLocation, apidl[0]);
-        *ppvOut = (LPVOID)IExtractIconA_Constructor(pidl);
+        *ppvOut = IExtractIconA_Constructor(pidl);
         SHFree(pidl);
         return S_OK;
     } else if (IsEqualIID(&IID_IExtractIconW, riid)) {
         LPITEMIDLIST pidl;
         if (cidl != 1) return E_INVALIDARG;
         pidl = ILCombine(This->m_pidlLocation, apidl[0]);
-        *ppvOut = (LPVOID)IExtractIconW_Constructor(pidl);
+        *ppvOut = IExtractIconW_Constructor(pidl);
         SHFree(pidl);
         return S_OK;
     } else if (IsEqualIID(&IID_IDropTarget, riid)) {
@@ -1273,8 +1273,14 @@ static HRESULT WINAPI UnixFolder_IShellFolder2_EnumSearches(IShellFolder2* iface
 static HRESULT WINAPI UnixFolder_IShellFolder2_GetDefaultColumn(IShellFolder2* iface, 
     DWORD dwReserved, ULONG *pSort, ULONG *pDisplay) 
 {
-    FIXME("stub\n");
-    return E_NOTIMPL;
+    TRACE("(iface=%p,dwReserved=%x,pSort=%p,pDisplay=%p)\n", iface, dwReserved, pSort, pDisplay);
+
+    if (pSort)
+        *pSort = 0;
+    if (pDisplay)
+        *pDisplay = 0;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI UnixFolder_IShellFolder2_GetDefaultColumnState(IShellFolder2* iface, 
@@ -2287,7 +2293,7 @@ static HRESULT WINAPI UnixSubFolderIterator_IEnumIDList_Next(IEnumIDList* iface,
              * and see if it passes the filter. 
              */
             lstrcpyA(pszRelativePath, pDirEntry->d_name);
-            rgelt[i] = (LPITEMIDLIST)SHAlloc(
+            rgelt[i] = SHAlloc(
                 UNIXFS_shitemid_len_from_filename(pszRelativePath, NULL, NULL)+sizeof(USHORT));
             if (!UNIXFS_build_shitemid(This->m_szFolder, rgelt[i]) ||
                 !UNIXFS_is_pidl_of_type(rgelt[i], This->m_fFilter)) 

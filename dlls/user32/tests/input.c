@@ -203,7 +203,7 @@ static int KbdMessage( KEV kev, WPARAM *pwParam, LPARAM *plParam )
  * . retrieve the messages from the input queue
  * . verify
  */
-static void do_test( HWND hwnd, int seqnr, const KEV td[] )
+static BOOL do_test( HWND hwnd, int seqnr, const KEV td[] )
 {
     INPUT inputs[MAXKEYEVENTS];
     KMSG expmsg[MAXKEYEVENTS];
@@ -236,22 +236,27 @@ static void do_test( HWND hwnd, int seqnr, const KEV td[] )
                   MSGNAME[msg.message - WM_KEYFIRST], msg.wParam, msg.lParam, msg.time);
         if( i < kmctr ) {
             ok( msg.message == expmsg[i].message &&
-                    msg.wParam == expmsg[i].wParam &&
-                    msg.lParam == expmsg[i].lParam,
-                    "wrong message! expected:\n"
-                    "message[%d] %-15s wParam %04lx lParam %08lx\n",i,
-                    MSGNAME[(expmsg[i]).message - WM_KEYFIRST],
-                    expmsg[i].wParam, expmsg[i].lParam );
+                msg.wParam == expmsg[i].wParam &&
+                msg.lParam == expmsg[i].lParam,
+                "%u/%u: wrong message %x/%08lx/%08lx expected %s/%08lx/%08lx\n",
+                seqnr, i, msg.message, msg.wParam, msg.lParam,
+                MSGNAME[(expmsg[i]).message - WM_KEYFIRST], expmsg[i].wParam, expmsg[i].lParam );
         }
         i++;
     }
     if (winetest_debug > 1)
         trace("%d messages retrieved\n", i);
+    if (!i && kmctr)
+    {
+        skip( "simulated keyboard input doesn't work\n" );
+        return FALSE;
+    }
     ok( i == kmctr, "message count is wrong: got %d expected: %d\n", i, kmctr);
+    return TRUE;
 }
 
 /* test all combinations of the specified key events */
-static void TestASet( HWND hWnd, int nrkev, const KEV kevdwn[], const KEV kevup[] )
+static BOOL TestASet( HWND hWnd, int nrkev, const KEV kevdwn[], const KEV kevup[] )
 {
     int i,j,k,l,m,n;
     static int count=0;
@@ -266,7 +271,7 @@ static void TestASet( HWND hWnd, int nrkev, const KEV kevdwn[], const KEV kevup[
                 kbuf[1] = kevdwn[1-i];
                 kbuf[2] = kevup[j];
                 kbuf[3] = kevup[1-j];
-                do_test( hWnd, count++, kbuf);
+                if (!do_test( hWnd, count++, kbuf)) return FALSE;
             }
         }
     }
@@ -288,7 +293,7 @@ static void TestASet( HWND hWnd, int nrkev, const KEV kevdwn[], const KEV kevup[
                                 kbuf[3] = kevup[l];
                                 kbuf[4] = kevup[m];
                                 kbuf[5] = kevup[n];
-                                do_test( hWnd, count++, kbuf);
+                                if (!do_test( hWnd, count++, kbuf)) return FALSE;
                             }
                         }
                     }
@@ -296,6 +301,7 @@ static void TestASet( HWND hWnd, int nrkev, const KEV kevdwn[], const KEV kevup[
             }
         }
     }
+    return TRUE;
 }
 
 /* test each set specified in the global testkeyset array */
@@ -303,30 +309,13 @@ static void TestSysKeys( HWND hWnd)
 {
     int i;
     for(i=0; testkeyset[i].nrkev;i++)
-        TestASet( hWnd, testkeyset[i].nrkev, testkeyset[i].keydwn,
-                testkeyset[i].keyup);
+        if (!TestASet( hWnd, testkeyset[i].nrkev, testkeyset[i].keydwn, testkeyset[i].keyup)) break;
 }
 
 static LRESULT CALLBACK WndProc( HWND hWnd, UINT msg, WPARAM wParam,
         LPARAM lParam )
 {
-    switch (msg) {
-        case WM_USER:
-            SetFocus(hWnd);
-            /* window has focus, now do the test */
-            if( hWnd == hWndTest) TestSysKeys( hWnd);
-            /* finished :-) */
-            break;
-
-        case WM_DESTROY:
-            PostQuitMessage( 0 );
-            break;
-
-        default:
-            return( DefWindowProcA( hWnd, msg, wParam, lParam ) );
-    }
-
-    return 0;
+    return DefWindowProcA( hWnd, msg, wParam, lParam );
 }
 
 static void test_Input_whitebox(void)
@@ -345,18 +334,22 @@ static void test_Input_whitebox(void)
     wclass.lpszMenuName = 0;
     wclass.cbClsExtra    = 0;
     wclass.cbWndExtra    = 0;
-    assert (RegisterClassA( &wclass ));
+    RegisterClassA( &wclass );
     /* create the test window that will receive the keystrokes */
-    assert ( hWndTest = CreateWindowA( wclass.lpszClassName, "InputSysKeyTest",
-                WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0, 100, 100,
-                NULL, NULL, hInstance, NULL) );
+    hWndTest = CreateWindowA( wclass.lpszClassName, "InputSysKeyTest",
+                              WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0, 100, 100,
+                              NULL, NULL, hInstance, NULL);
+    assert( hWndTest );
     ShowWindow( hWndTest, SW_SHOW);
+    SetWindowPos( hWndTest, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE );
+    SetForegroundWindow( hWndTest );
     UpdateWindow( hWndTest);
 
     /* flush pending messages */
     while (PeekMessage( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessageA( &msg );
 
-    SendMessageA(hWndTest, WM_USER, 0, 0);
+    SetFocus( hWndTest );
+    TestSysKeys( hWndTest );
     DestroyWindow(hWndTest);
 }
 
@@ -377,7 +370,6 @@ static void empty_message_queue(void)
             DispatchMessage(&msg);
         }
         diff = time - GetTickCount();
-        min_timeout = 20;
     }
 }
 
@@ -578,12 +570,15 @@ struct sendinput_test_s {
     /* RMENU == LMENU */
     /* 38 */
     {VK_RMENU, 0, 0,
-        {{VK_MENU, 0x00}, {VK_LMENU, 0x00}, {0}},
-        {{WM_SYSKEYDOWN, hook|wparam, VK_RMENU},
+        {{VK_MENU, 0x00}, {VK_LMENU, 0x00}, {VK_CONTROL, 0x00, 1}, {VK_LCONTROL, 0x01, 1}, {0}},
+        {{WM_SYSKEYDOWN, hook|wparam|optional, VK_LCONTROL},
+        {WM_SYSKEYDOWN, hook|wparam, VK_RMENU},
         {WM_SYSKEYDOWN, wparam|lparam, VK_MENU, 0}, {0}}},
     {VK_RMENU, KEYEVENTF_KEYUP, 1,
-        {{VK_MENU, 0x80}, {VK_LMENU, 0x80}, {0}},
-        {{WM_KEYUP, hook|wparam, VK_RMENU},
+        {{VK_MENU, 0x80}, {VK_LMENU, 0x80}, {VK_CONTROL, 0x81, 1}, {VK_LCONTROL, 0x80, 1}, {0}},
+        {{WM_KEYUP, hook|wparam|optional, VK_LCONTROL},
+        {WM_KEYUP, hook|wparam, VK_RMENU},
+        {WM_SYSKEYUP, wparam|lparam|optional, VK_CONTROL, KF_UP},
         {WM_SYSKEYUP, wparam|lparam, VK_MENU, KF_UP},
         {WM_SYSCOMMAND}, {0}}},
     /* LMENU | KEYEVENTF_EXTENDEDKEY == RMENU */
@@ -600,12 +595,15 @@ struct sendinput_test_s {
     /* RMENU | KEYEVENTF_EXTENDEDKEY == RMENU */
     /* 42 */
     {VK_RMENU, KEYEVENTF_EXTENDEDKEY, 0,
-        {{VK_MENU, 0x00}, {VK_RMENU, 0x00}, {0}},
-        {{WM_SYSKEYDOWN, hook|wparam|lparam, VK_RMENU, LLKHF_EXTENDED},
+        {{VK_MENU, 0x00}, {VK_RMENU, 0x00}, {VK_CONTROL, 0x00, 1}, {VK_LCONTROL, 0x01, 1}, {0}},
+        {{WM_SYSKEYDOWN, hook|wparam|lparam|optional, VK_LCONTROL, 0},
+        {WM_SYSKEYDOWN, hook|wparam|lparam, VK_RMENU, LLKHF_EXTENDED},
         {WM_SYSKEYDOWN, wparam|lparam, VK_MENU, KF_EXTENDED}, {0}}},
     {VK_RMENU, KEYEVENTF_KEYUP | KEYEVENTF_EXTENDEDKEY, 1,
-        {{VK_MENU, 0x80}, {VK_RMENU, 0x80}, {0}},
-        {{WM_KEYUP, hook|wparam|lparam, VK_RMENU, LLKHF_UP|LLKHF_EXTENDED},
+        {{VK_MENU, 0x80}, {VK_RMENU, 0x80}, {VK_CONTROL, 0x81, 1}, {VK_LCONTROL, 0x80, 1}, {0}},
+        {{WM_KEYUP, hook|wparam|lparam|optional, VK_LCONTROL, LLKHF_UP},
+        {WM_KEYUP, hook|wparam|lparam, VK_RMENU, LLKHF_UP|LLKHF_EXTENDED},
+        {WM_SYSKEYUP, wparam|lparam|optional, VK_CONTROL, KF_UP},
         {WM_SYSKEYUP, wparam|lparam, VK_MENU, KF_UP|KF_EXTENDED},
         {WM_SYSCOMMAND}, {0}}},
     /* MENU == LMENU */
@@ -622,12 +620,14 @@ struct sendinput_test_s {
     /* MENU | KEYEVENTF_EXTENDEDKEY == RMENU */
     /* 46 */
     {VK_MENU, KEYEVENTF_EXTENDEDKEY, 0,
-        {{VK_MENU, 0x00}, {VK_RMENU, 0x00}, {0}},
-        {{WM_SYSKEYDOWN, hook/*|wparam*/|lparam, VK_MENU, LLKHF_EXTENDED},
+        {{VK_MENU, 0x00}, {VK_RMENU, 0x00}, {VK_CONTROL, 0x00, 1}, {VK_LCONTROL, 0x01, 1}, {0}},
+        {{WM_SYSKEYDOWN, hook|wparam|lparam|optional, VK_CONTROL, 0},
+        {WM_SYSKEYDOWN, hook/*|wparam*/|lparam, VK_MENU, LLKHF_EXTENDED},
         {WM_SYSKEYDOWN, wparam|lparam, VK_MENU, KF_EXTENDED}, {0}}},
     {VK_MENU, KEYEVENTF_KEYUP | KEYEVENTF_EXTENDEDKEY, 1,
-        {{VK_MENU, 0x80}, {VK_RMENU, 0x80}, {0}},
-        {{WM_KEYUP, hook/*|wparam*/|lparam, VK_MENU, LLKHF_UP|LLKHF_EXTENDED},
+        {{VK_MENU, 0x80}, {VK_RMENU, 0x80}, {VK_CONTROL, 0x81, 1}, {VK_LCONTROL, 0x80, 1}, {0}},
+        {{WM_KEYUP, hook|wparam|lparam|optional, VK_CONTROL, LLKHF_UP},
+        {WM_KEYUP, hook/*|wparam*/|lparam, VK_MENU, LLKHF_UP|LLKHF_EXTENDED},
         {WM_SYSKEYUP, wparam|lparam, VK_MENU, KF_UP|KF_EXTENDED},
         {WM_SYSCOMMAND}, {0}}},
 
@@ -668,7 +668,7 @@ static void compare_and_check(int id, BYTE *ks1, BYTE *ks2, struct sendinput_tes
         int matched = ((ks1[t->wVk]&0x80) == (t->before_state&0x80)
                        && (ks2[t->wVk]&0x80) == (~t->before_state&0x80));
 
-        if (!matched && test->_todo_wine)
+        if (!matched && !t->optional && test->_todo_wine)
         {
             failcount++;
             todo_wine {
@@ -704,12 +704,13 @@ static void compare_and_check(int id, BYTE *ks1, BYTE *ks2, struct sendinput_tes
 
         if (expected->message == actual->message)
         {
-            ok((expected->flags & hook) == (actual->flags & hook),
-               "%2d (%x/%x): the msg 0x%04x should have been sent by a hook\n",
-               id, test->wVk, test->dwFlags, expected->message);
-
             if (expected->flags & wparam)
             {
+                if ((expected->flags & optional) && (expected->wParam != actual->wParam))
+                {
+                    expected++;
+                    continue;
+                }
                 if (expected->wParam != actual->wParam && test->_todo_wine)
                 {
                     failcount++;
@@ -736,6 +737,10 @@ static void compare_and_check(int id, BYTE *ks1, BYTE *ks2, struct sendinput_tes
                        "%2d (%x/%x): in msg 0x%04x expecting lParam 0x%lx got 0x%lx\n",
                        id, test->wVk, test->dwFlags, expected->message, expected->lParam, actual->lParam);
             }
+            ok((expected->flags & hook) == (actual->flags & hook),
+               "%2d (%x/%x): the msg 0x%04x should have been sent by a hook\n",
+               id, test->wVk, test->dwFlags, expected->message);
+
         }
         else if (expected->flags & optional)
         {
@@ -749,6 +754,15 @@ static void compare_and_check(int id, BYTE *ks1, BYTE *ks2, struct sendinput_tes
             ok(FALSE,
                "%2d (%x/%x): the msg 0x%04x was expected, but got msg 0x%04x instead\n",
                id, test->wVk, test->dwFlags, expected->message, actual->message);
+        }
+        /* NT4 doesn't send SYSKEYDOWN/UP to hooks, only KEYDOWN/UP */
+        else if ((expected->flags & hook) &&
+                 (expected->message == WM_SYSKEYDOWN || expected->message == WM_SYSKEYUP) &&
+                 (actual->message == expected->message - 4))
+        {
+            ok((expected->flags & hook) == (actual->flags & hook),
+               "%2d (%x/%x): the msg 0x%04x should have been sent by a hook\n",
+               id, test->wVk, test->dwFlags, expected->message);
         }
         else
             ok(FALSE,
@@ -797,6 +811,7 @@ static LRESULT CALLBACK WndProc2(HWND hWnd, UINT Msg, WPARAM wParam,
         Msg != WM_NCHITTEST &&
         Msg != WM_GETTEXT &&
         Msg != WM_GETICON &&
+        Msg != WM_IME_SELECT &&
         Msg != WM_DEVICECHANGE)
     {
         ok(sent_messages_cnt < MAXKEYMESSAGES, "Too many messages\n");
@@ -849,16 +864,12 @@ static void test_Input_blackbox(void)
     HWND window;
     HHOOK hook;
 
-    if (!pSendInput)
-    {
-        skip("SendInput is not available\n");
-        return;
-    }
-
     window = CreateWindow("Static", NULL, WS_POPUP|WS_HSCROLL|WS_VSCROLL
         |WS_VISIBLE, 0, 0, 200, 60, NULL, NULL,
         NULL, NULL);
     ok(window != NULL, "error: %d\n", (int) GetLastError());
+    SetWindowPos( window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE );
+    SetForegroundWindow( window );
 
     hook = SetWindowsHookExA(WH_KEYBOARD_LL, hook_proc, GetModuleHandleA( NULL ), 0);
 
@@ -883,6 +894,14 @@ static void test_Input_blackbox(void)
         pSendInput(1, (INPUT*)&i, sizeof(TEST_INPUT));
         empty_message_queue();
         GetKeyboardState(ks2);
+        if (!ii && sent_messages_cnt <= 1 && !memcmp( ks1, ks2, sizeof(ks1) ))
+        {
+            win_skip( "window doesn't receive the queued input\n" );
+            /* release the key */
+            i.u.ki.dwFlags |= KEYEVENTF_KEYUP;
+            pSendInput(1, (INPUT*)&i, sizeof(TEST_INPUT));
+            break;
+        }
         compare_and_check(ii, ks1, ks2, &sendinput_test[ii]);
     }
 
@@ -906,7 +925,7 @@ static void test_keynames(void)
 
 static POINT pt_old, pt_new;
 static BOOL clipped;
-#define STEP 20
+#define STEP 3
 
 static LRESULT CALLBACK hook_proc1( int code, WPARAM wparam, LPARAM lparam )
 {
@@ -966,7 +985,11 @@ static void test_mouse_ll_hook(void)
                         10, 10, 200, 200, NULL, NULL, NULL, NULL);
     SetCursorPos(100, 100);
 
-    hook2 = SetWindowsHookExA(WH_MOUSE_LL, hook_proc2, GetModuleHandleA(0), 0);
+    if (!(hook2 = SetWindowsHookExA(WH_MOUSE_LL, hook_proc2, GetModuleHandleA(0), 0)))
+    {
+        win_skip( "cannot set MOUSE_LL hook\n" );
+        goto done;
+    }
     hook1 = SetWindowsHookExA(WH_MOUSE_LL, hook_proc1, GetModuleHandleA(0), 0);
 
     GetCursorPos(&pt_old);
@@ -1023,6 +1046,7 @@ static void test_mouse_ll_hook(void)
     ok(pt.x == pt_new.x && pt.y == pt_new.y, "Position changed: (%d,%d)\n", pt.x, pt.y);
 
     UnhookWindowsHookEx(hook2);
+done:
     DestroyWindow(hwnd);
     SetCursorPos(pt_org.x, pt_org.y);
 }
@@ -1051,6 +1075,11 @@ static void test_GetMouseMovePointsEx(void)
      */
     SetLastError(MYERROR);
     retval = pGetMouseMovePointsEx(0, &in, out, BUFLIM, GMMP_USE_DISPLAY_POINTS);
+    if (retval == ERROR_INVALID_PARAMETER)
+    {
+        win_skip( "GetMouseMovePointsEx broken on WinME\n" );
+        return;
+    }
     ok(retval == -1, "expected GetMouseMovePointsEx to fail, got %d\n", retval);
     ok(GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == MYERROR,
        "expected error ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
@@ -1090,11 +1119,10 @@ static void test_GetMouseMovePointsEx(void)
     SetLastError(MYERROR);
     count = 0;
     retval = pGetMouseMovePointsEx(sizeof(MOUSEMOVEPOINT), &in, NULL, count, GMMP_USE_DISPLAY_POINTS);
-    todo_wine {
-    ok(retval == count, "expected GetMouseMovePointsEx to succeed, got %d\n", retval);
-    ok(MYERROR == GetLastError(),
-       "expected error %d, got %u\n", MYERROR, GetLastError());
-    }
+    if (retval == -1)
+        ok(GetLastError() == ERROR_POINT_NOT_FOUND, "unexpected error %u\n", GetLastError());
+    else
+        ok(retval == count, "expected GetMouseMovePointsEx to succeed, got %d\n", retval);
 
     /* test fourth parameter
      * a value higher than 64 is expected to fail with ERROR_INVALID_PARAMETER
@@ -1109,20 +1137,18 @@ static void test_GetMouseMovePointsEx(void)
     SetLastError(MYERROR);
     count = 0;
     retval = pGetMouseMovePointsEx(sizeof(MOUSEMOVEPOINT), &in, out, count, GMMP_USE_DISPLAY_POINTS);
-    todo_wine {
-    ok(retval == count, "expected GetMouseMovePointsEx to succeed, got %d\n", retval);
-    ok(MYERROR == GetLastError(),
-       "expected error %d, got %u\n", MYERROR, GetLastError());
-    }
+    if (retval == -1)
+        ok(GetLastError() == ERROR_POINT_NOT_FOUND, "unexpected error %u\n", GetLastError());
+    else
+        ok(retval == count, "expected GetMouseMovePointsEx to succeed, got %d\n", retval);
 
     SetLastError(MYERROR);
     count = BUFLIM;
     retval = pGetMouseMovePointsEx(sizeof(MOUSEMOVEPOINT), &in, out, count, GMMP_USE_DISPLAY_POINTS);
-    todo_wine {
-    ok((0 <= retval) && (retval <= count), "expected GetMouseMovePointsEx to succeed, got %d\n", retval);
-    ok(MYERROR == GetLastError(),
-       "expected error %d, got %u\n", MYERROR, GetLastError());
-    }
+    if (retval == -1)
+        ok(GetLastError() == ERROR_POINT_NOT_FOUND, "unexpected error %u\n", GetLastError());
+    else
+        ok((0 <= retval) && (retval <= count), "expected GetMouseMovePointsEx to succeed, got %d\n", retval);
 
     SetLastError(MYERROR);
     retval = pGetMouseMovePointsEx(sizeof(MOUSEMOVEPOINT), &in, out, BUFLIM+1, GMMP_USE_DISPLAY_POINTS);
@@ -1181,7 +1207,8 @@ static void test_key_map(void)
     s  = MapVirtualKeyEx(VK_SHIFT,  MAPVK_VK_TO_VSC, kl);
     ok(s != 0, "MapVirtualKeyEx(VK_SHIFT) should return non-zero\n");
     sL = MapVirtualKeyEx(VK_LSHIFT, MAPVK_VK_TO_VSC, kl);
-    ok(s == sL, "%x != %x\n", s, sL);
+    ok(s == sL || broken(sL == 0), /* win9x */
+       "%x != %x\n", s, sL);
 
     kL = MapVirtualKeyEx(0x2a, MAPVK_VSC_TO_VK, kl);
     ok(kL == VK_SHIFT, "Scan code -> vKey = %x (not VK_SHIFT)\n", kL);
@@ -1189,9 +1216,11 @@ static void test_key_map(void)
     ok(kR == VK_SHIFT, "Scan code -> vKey = %x (not VK_SHIFT)\n", kR);
 
     kL = MapVirtualKeyEx(0x2a, MAPVK_VSC_TO_VK_EX, kl);
-    ok(kL == VK_LSHIFT, "Scan code -> vKey = %x (not VK_LSHIFT)\n", kL);
+    ok(kL == VK_LSHIFT || broken(kL == 0), /* win9x */
+       "Scan code -> vKey = %x (not VK_LSHIFT)\n", kL);
     kR = MapVirtualKeyEx(0x36, MAPVK_VSC_TO_VK_EX, kl);
-    ok(kR == VK_RSHIFT, "Scan code -> vKey = %x (not VK_RSHIFT)\n", kR);
+    ok(kR == VK_RSHIFT || broken(kR == 0), /* win9x */
+       "Scan code -> vKey = %x (not VK_RSHIFT)\n", kR);
 
     /* test that MAPVK_VSC_TO_VK prefers the non-numpad vkey if there's ambiguity */
     for (i = 0; i < sizeof(numpad_collisions)/sizeof(numpad_collisions[0]); i++)
@@ -1224,7 +1253,7 @@ static void test_ToUnicode(void)
     ret = ToUnicode(VK_RETURN, SC_RETURN, state, wStr, 2, 0);
     if (!ret && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        skip("ToUnicode is not implemented\n");
+        win_skip("ToUnicode is not implemented\n");
         return;
     }
 
@@ -1259,12 +1288,13 @@ START_TEST(input)
 {
     init_function_pointers();
 
-    if (!pSendInput)
-        skip("SendInput is not available\n");
-    else
+    if (pSendInput)
+    {
+        test_Input_blackbox();
         test_Input_whitebox();
+    }
+    else win_skip("SendInput is not available\n");
 
-    test_Input_blackbox();
     test_keynames();
     test_mouse_ll_hook();
     test_key_map();
@@ -1274,5 +1304,5 @@ START_TEST(input)
     if(pGetMouseMovePointsEx)
         test_GetMouseMovePointsEx();
     else
-        skip("GetMouseMovePointsEx is not available\n");
+        win_skip("GetMouseMovePointsEx is not available\n");
 }

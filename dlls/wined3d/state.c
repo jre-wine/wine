@@ -469,6 +469,8 @@ static void state_alpha(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     float ref;
     BOOL enable_ckey = FALSE;
 
+    TRACE("state %#x, stateblock %p, context %p\n", state, stateblock, context);
+
     /* Find out if the texture on the first stage has a ckey set
      * The alpha state func reads the texture settings, even though alpha and texture are not grouped
      * together. This is to avoid making a huge alpha+texture+texture stage+ckey block due to the hardly
@@ -897,6 +899,9 @@ static void state_stencilwrite(DWORD state, IWineD3DStateBlockImpl *stateblock, 
 }
 
 static void state_fog_vertexpart(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+
+    TRACE("state %#x, stateblock %p, context %p\n", state, stateblock, context);
+
     if (!stateblock->renderState[WINED3DRS_FOGENABLE]) return;
 
     /* Table fog on: Never use fog coords, and use per-fragment fog */
@@ -980,6 +985,8 @@ void state_fogstartend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DC
 
 void state_fog_fragpart(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     enum fogsource new_source;
+
+    TRACE("state %#x, stateblock %p, context %p\n", state, stateblock, context);
 
     if (!stateblock->renderState[WINED3DRS_FOGENABLE]) {
         /* No fog? Disable it, and we're done :-) */
@@ -3285,6 +3292,8 @@ static void sampler_texmatrix(DWORD state, IWineD3DStateBlockImpl *stateblock, W
     DWORD sampler = state - STATE_SAMPLER(0);
     IWineD3DBaseTexture *texture = stateblock->textures[sampler];
 
+    TRACE("state %#x, stateblock %p, context %p\n", state, stateblock, context);
+
     if(!texture) return;
     /* The fixed function np2 texture emulation uses the texture matrix to fix up the coordinates
      * IWineD3DBaseTexture::ApplyStateChanges multiplies the set matrix with a fixup matrix. Before the
@@ -3344,8 +3353,10 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
     checkGLcall("glActiveTextureARB");
 
     if(stateblock->textures[sampler]) {
-        IWineD3DBaseTexture_PreLoad(stateblock->textures[sampler]);
-        IWineD3DBaseTexture_BindTexture(stateblock->textures[sampler]);
+        BOOL srgb = stateblock->samplerState[sampler][WINED3DSAMP_SRGBTEXTURE];
+        IWineD3DBaseTextureImpl *tex_impl = (IWineD3DBaseTextureImpl *) stateblock->textures[sampler];
+        tex_impl->baseTexture.internal_preload(stateblock->textures[sampler], srgb ? SRGB_SRGB : SRGB_RGB);
+        IWineD3DBaseTexture_BindTexture(stateblock->textures[sampler], srgb);
         IWineD3DBaseTexture_ApplyStateChanges(stateblock->textures[sampler], stateblock->textureState[sampler], stateblock->samplerState[sampler]);
 
         if (GL_SUPPORT(EXT_TEXTURE_LOD_BIAS)) {
@@ -3397,6 +3408,7 @@ void apply_pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DC
                     sampler(STATE_SAMPLER(i), stateblock, context);
                 }
             }
+            context->last_was_pshader = TRUE;
         } else {
            /* Otherwise all samplers were activated by the code above in earlier draws, or by sampler()
             * if a different texture was bound. I don't have to do anything.
@@ -3412,6 +3424,7 @@ void apply_pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DC
                         (STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP), stateblock, context);
             }
         }
+        context->last_was_pshader = FALSE;
     }
 
     if(!isStateDirty(context, device->StateTable[STATE_VSHADER].representative)) {

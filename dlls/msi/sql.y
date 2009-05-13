@@ -45,11 +45,12 @@ typedef struct tag_SQL_input
     MSIDATABASE *db;
     LPCWSTR command;
     DWORD n, len;
+    UINT r;
     MSIVIEW **view;  /* view structure for the resulting query */
     struct list *mem;
 } SQL_input;
 
-static LPWSTR SQL_getstring( void *info, const struct sql_str *str );
+static UINT SQL_getstring( void *info, const struct sql_str *strdata, LPWSTR *str );
 static INT SQL_getint( void *info );
 static int sql_lex( void *SQL_lval, SQL_input *info );
 
@@ -166,12 +167,16 @@ onecreate:
         {
             SQL_input* sql = (SQL_input*) info;
             MSIVIEW *create = NULL;
+            UINT r;
 
             if( !$5 )
                 YYABORT;
-            CREATE_CreateView( sql->db, &create, $3, $5, FALSE );
+            r = CREATE_CreateView( sql->db, &create, $3, $5, FALSE );
             if( !create )
+            {
+                sql->r = r;
                 YYABORT;
+            }
             $$ = create;
         }
   | TK_CREATE TK_TABLE table TK_LP table_def TK_RP TK_HOLD
@@ -677,8 +682,7 @@ table:
 id:
     TK_ID
         {
-            $$ = SQL_getstring( info, &$1 );
-            if( !$$ )
+            if ( SQL_getstring( info, &$1, &$$ ) != ERROR_SUCCESS || !$$ )
                 YYABORT;
         }
     ;
@@ -757,11 +761,15 @@ static int sql_lex( void *SQL_lval, SQL_input *sql )
     return token;
 }
 
-LPWSTR SQL_getstring( void *info, const struct sql_str *strdata )
+UINT SQL_getstring( void *info, const struct sql_str *strdata, LPWSTR *str )
 {
     LPCWSTR p = strdata->data;
     UINT len = strdata->len;
-    LPWSTR str;
+
+    /* match quotes */
+    if( ( (p[0]=='`') && (p[len-1]!='`') ) ||
+        ( (p[0]=='\'') && (p[len-1]!='\'') ) )
+        return ERROR_FUNCTION_FAILED;
 
     /* if there's quotes, remove them */
     if( ( (p[0]=='`') && (p[len-1]=='`') ) ||
@@ -770,13 +778,13 @@ LPWSTR SQL_getstring( void *info, const struct sql_str *strdata )
         p++;
         len -= 2;
     }
-    str = parser_alloc( info, (len + 1)*sizeof(WCHAR) );
-    if( !str )
-        return str;
-    memcpy( str, p, len*sizeof(WCHAR) );
-    str[len]=0;
+    *str = parser_alloc( info, (len + 1)*sizeof(WCHAR) );
+    if( !*str )
+        return ERROR_OUTOFMEMORY;
+    memcpy( *str, p, len*sizeof(WCHAR) );
+    (*str)[len]=0;
 
-    return str;
+    return ERROR_SUCCESS;
 }
 
 INT SQL_getint( void *info )
@@ -867,7 +875,11 @@ static struct expr * EXPR_sval( void *info, const struct sql_str *str )
     if( e )
     {
         e->type = EXPR_SVAL;
-        e->u.sval = SQL_getstring( info, str );
+        if( SQL_getstring( info, str, (LPWSTR *)&e->u.sval ) != ERROR_SUCCESS )
+        {
+            msi_free( e );
+            return NULL;
+        }
     }
     return e;
 }
@@ -907,6 +919,7 @@ UINT MSI_ParseSQL( MSIDATABASE *db, LPCWSTR command, MSIVIEW **phview,
     sql.command = command;
     sql.n = 0;
     sql.len = 0;
+    sql.r = ERROR_BAD_QUERY_SYNTAX;
     sql.view = phview;
     sql.mem = mem;
 
@@ -916,7 +929,7 @@ UINT MSI_ParseSQL( MSIDATABASE *db, LPCWSTR command, MSIVIEW **phview,
     if( r )
     {
         *sql.view = NULL;
-        return ERROR_BAD_QUERY_SYNTAX;
+        return sql.r;
     }
 
     return ERROR_SUCCESS;

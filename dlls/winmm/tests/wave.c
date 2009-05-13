@@ -62,7 +62,8 @@ static void test_multiple_waveopens(void)
     /* In windows this is most likely allowed, in wine an application can use the waveout
      * interface, but so can directsound.. this causes problems if directsound goes active
      */
-    todo_wine ok(ret == MMSYSERR_NOERROR, "waveOutOpen returns: %x\n", ret);
+    todo_wine ok(ret == MMSYSERR_NOERROR || broken(ret == MMSYSERR_ALLOCATED), /* winME */
+                 "waveOutOpen returns: %x\n", ret);
     if (ret == MMSYSERR_NOERROR)
         waveOutClose(handle2);
 
@@ -568,7 +569,7 @@ static DWORD WINAPI callback_thread(LPVOID lpParameter)
     MSG msg;
 
     PeekMessageW( &msg, 0, 0, 0, PM_NOREMOVE );  /* make sure the thread has a message queue */
-    SetEvent((HANDLE)lpParameter);
+    SetEvent(lpParameter);
 
     while (GetMessage(&msg, 0, 0, 0)) {
         UINT message = msg.message;
@@ -577,9 +578,9 @@ static DWORD WINAPI callback_thread(LPVOID lpParameter)
             message == WOM_CLOSE || message == WM_USER || message == WM_APP,
             "GetMessage returned unexpected message: %u\n", message);
         if (message == WOM_OPEN || message == WOM_DONE || message == WOM_CLOSE)
-            SetEvent((HANDLE)lpParameter);
+            SetEvent(lpParameter);
         else if (message == WM_APP) {
-            SetEvent((HANDLE)lpParameter);
+            SetEvent(lpParameter);
             return 0;
         }
     }
@@ -700,6 +701,7 @@ static void wave_out_test_deviceOut(int device, double duration,
     ok(rc==MMSYSERR_INVALPARAM,"waveOutGetVolume(%s,0) expected "
        "MMSYSERR_INVALPARAM, got %s\n", dev_name(device),wave_out_error(rc));
     rc=waveOutGetVolume(wout,&volume);
+    if (rc == MMSYSERR_NOTSUPPORTED) has_volume = FALSE;
     ok(has_volume ? rc==MMSYSERR_NOERROR : rc==MMSYSERR_NOTSUPPORTED,
        "waveOutGetVolume(%s): rc=%s\n",dev_name(device),wave_out_error(rc));
 

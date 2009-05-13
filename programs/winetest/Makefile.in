@@ -4,7 +4,8 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = winetest.exe
 APPMODE   = -mconsole
-IMPORTS   = comctl32 version user32 gdi32 advapi32 wsock32 kernel32
+IMPORTS   = uuid comctl32 version user32 gdi32 advapi32 wsock32 kernel32
+DELAYIMPORTS = ole32
 
 EXTRARCFLAGS = -DBUILD_SHA1=\"`GIT_DIR=$(TOPSRCDIR)/.git git rev-parse HEAD 2>/dev/null`\"
 
@@ -35,7 +36,7 @@ tests.rc: Makefile.in $(TOPOBJDIR)/config.status
 	(for i in $(TESTBINS); do echo "$$i TESTRES \"$$i\""; done) >$@ || ($(RM) $@ && false)
 
 clean::
-	$(RM) tests.rc dist.res winetest-dist winetest-dist.exe $(TESTBINS)
+	$(RM) tests.rc dist.res winetest-dist.exe $(TESTBINS)
 
 depend: tests.rc
 
@@ -43,19 +44,16 @@ depend: tests.rc
 
 .PHONY: dist
 
-dist: winetest-dist.exe$(DLLEXT) winetest-dist$(EXEEXT)
+dist: winetest-dist.exe$(DLLEXT)
 
 winetest-dist.exe.so: $(OBJS) dist.res Makefile.in
 	$(WINEGCC) $(APPMODE) $(OBJS) dist.res -o $@ -L$(DLLDIR) $(DELAYIMPORTS:%=-Wb,-d%) $(ALL_LIBS)
-
-winetest-dist: $(WINEWRAPPER)
-	$(RM) $@ && $(LN_S) $(WINEWRAPPER) $@
 
 winetest-dist.exe: $(OBJS) dist.res.o Makefile.in
 	$(CC) $(APPMODE) $(OBJS) dist.res.o -o $@ -L$(DLLDIR) $(IMPORTS:%=-L$(DLLDIR)/%) $(ALL_LIBS)
 	-upx -9 -qqq $@
 
-dist.res: winetest.rc tests.rc build.nfo tests.url winetest.ico $(TESTBINS)
+dist.res: winetest.rc tests.rc build.nfo winetest.ico $(TESTBINS)
 
 @DEPENDENCIES@  # everything below this line is overwritten by make depend
 

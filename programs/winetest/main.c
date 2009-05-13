@@ -28,9 +28,11 @@
 #include "config.h"
 #include "wine/port.h"
 
+#define COBJMACROS
 #include <stdio.h>
 #include <assert.h>
 #include <windows.h>
+#include <mshtml.h>
 
 #include "winetest.h"
 #include "resource.h"
@@ -42,6 +44,7 @@ struct wine_test
     int subtest_count;
     char **subtests;
     char *exename;
+    char *maindllpath;
 };
 
 char *tag = NULL;
@@ -58,6 +61,9 @@ static unsigned int nb_filters = 0;
 /* Needed to check for .NET dlls */
 static HMODULE hmscoree;
 static HRESULT (WINAPI *pLoadLibraryShim)(LPCWSTR, LPCWSTR, LPVOID, HMODULE *);
+
+/* To store the current PATH setting (related to .NET only provided dlls) */
+static char *curpath;
 
 /* check if test is being filtered out */
 static BOOL test_filtered_out( LPCSTR module, LPCSTR testname )
@@ -147,6 +153,21 @@ static int running_on_visible_desktop (void)
         return (uoflags.dwFlags & WSF_VISIBLE) != 0;
     }
     return IsWindowVisible(desktop);
+}
+
+/* check if Gecko is present, trying to trigger the install if not */
+static BOOL gecko_check(void)
+{
+    IHTMLDocument2 *doc;
+    IHTMLElement *body;
+    BOOL ret = FALSE;
+
+    CoInitialize( NULL );
+    if (FAILED( CoCreateInstance( &CLSID_HTMLDocument, NULL, CLSCTX_INPROC_SERVER,
+                                  &IID_IHTMLDocument2, (void **)&doc ))) return FALSE;
+    if ((ret = SUCCEEDED( IHTMLDocument2_get_body( doc, &body )))) IHTMLElement_Release( body );
+    IHTMLDocument_Release( doc );
+    return ret;
 }
 
 static void print_version (void)
@@ -309,6 +330,34 @@ extract_test (struct wine_test *test, const char *dir, LPTSTR res_name)
     CloseHandle(hfile);
 }
 
+static DWORD wait_process( HANDLE process, DWORD timeout )
+{
+    DWORD wait, diff = 0, start = GetTickCount();
+    MSG msg;
+
+    while (diff < timeout)
+    {
+        wait = MsgWaitForMultipleObjects( 1, &process, FALSE, timeout - diff, QS_ALLINPUT );
+        if (wait != WAIT_OBJECT_0 + 1) return wait;
+        while (PeekMessageA( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessage( &msg );
+        diff = GetTickCount() - start;
+    }
+    return WAIT_TIMEOUT;
+}
+
+static void append_path( const char *path)
+{
+    char *newpath;
+
+    newpath = xmalloc(strlen(curpath) + 1 + strlen(path) + 1);
+    strcpy(newpath, curpath);
+    strcat(newpath, ";");
+    strcat(newpath, path);
+    SetEnvironmentVariableA("PATH", newpath);
+
+    free(newpath);
+}
+
 /* Run a command for MS milliseconds.  If OUT != NULL, also redirect
    stdout to there.
 
@@ -329,49 +378,45 @@ run_ex (char *cmd, HANDLE out_file, const char *tempdir, DWORD ms)
     si.hStdError  = out_file ? out_file : GetStdHandle( STD_ERROR_HANDLE );
 
     if (!CreateProcessA (NULL, cmd, NULL, NULL, TRUE, CREATE_DEFAULT_ERROR_MODE,
-                         NULL, tempdir, &si, &pi)) {
-        status = -2;
-    } else {
-        CloseHandle (pi.hThread);
-        wait = WaitForSingleObject (pi.hProcess, ms);
-        if (wait == WAIT_OBJECT_0) {
-            GetExitCodeProcess (pi.hProcess, &status);
-        } else {
-            switch (wait) {
-            case WAIT_FAILED:
-                report (R_ERROR, "Wait for '%s' failed: %d", cmd,
-                        GetLastError ());
-                break;
-            case WAIT_TIMEOUT:
-                report (R_ERROR, "Process '%s' timed out.", cmd);
-                break;
-            default:
-                report (R_ERROR, "Wait returned %d", wait);
-            }
-            status = wait;
-            if (!TerminateProcess (pi.hProcess, 257))
-                report (R_ERROR, "TerminateProcess failed: %d",
-                        GetLastError ());
-            wait = WaitForSingleObject (pi.hProcess, 5000);
-            switch (wait) {
-            case WAIT_FAILED:
-                report (R_ERROR,
-                        "Wait for termination of '%s' failed: %d",
-                        cmd, GetLastError ());
-                break;
-            case WAIT_OBJECT_0:
-                break;
-            case WAIT_TIMEOUT:
-                report (R_ERROR, "Can't kill process '%s'", cmd);
-                break;
-            default:
-                report (R_ERROR, "Waiting for termination: %d",
-                        wait);
-            }
-        }
-        CloseHandle (pi.hProcess);
-    }
+                         NULL, tempdir, &si, &pi))
+        return -2;
 
+    CloseHandle (pi.hThread);
+    status = wait_process( pi.hProcess, ms );
+    switch (status)
+    {
+    case WAIT_OBJECT_0:
+        GetExitCodeProcess (pi.hProcess, &status);
+        CloseHandle (pi.hProcess);
+        return status;
+    case WAIT_FAILED:
+        report (R_ERROR, "Wait for '%s' failed: %d", cmd, GetLastError ());
+        break;
+    case WAIT_TIMEOUT:
+        report (R_ERROR, "Process '%s' timed out.", cmd);
+        break;
+    default:
+        report (R_ERROR, "Wait returned %d", status);
+        break;
+    }
+    if (!TerminateProcess (pi.hProcess, 257))
+        report (R_ERROR, "TerminateProcess failed: %d", GetLastError ());
+    wait = wait_process( pi.hProcess, 5000 );
+    switch (wait)
+    {
+    case WAIT_OBJECT_0:
+        break;
+    case WAIT_FAILED:
+        report (R_ERROR, "Wait for termination of '%s' failed: %d", cmd, GetLastError ());
+        break;
+    case WAIT_TIMEOUT:
+        report (R_ERROR, "Can't kill process '%s'", cmd);
+        break;
+    default:
+        report (R_ERROR, "Waiting for termination: %d", wait);
+        break;
+    }
+    CloseHandle (pi.hProcess);
     return status;
 }
 
@@ -418,8 +463,16 @@ get_subtests (const char *tempdir, struct wine_test *test, LPTSTR res_name)
 
     extract_test (test, tempdir, res_name);
     cmd = strmake (NULL, "%s --list", test->exename);
+    if (test->maindllpath) {
+        /* We need to add the path (to the main dll) to PATH */
+        append_path(test->maindllpath);
+    }
     status = run_ex (cmd, subfile, tempdir, 5000);
     err = GetLastError();
+    if (test->maindllpath) {
+        /* Restore PATH again */
+        SetEnvironmentVariableA("PATH", curpath);
+    }
     free (cmd);
 
     if (status == -2)
@@ -510,14 +563,35 @@ extract_test_proc (HMODULE hModule, LPCTSTR lpszType,
     strcpy(dllname, lpszName);
     *strstr(dllname, testexe) = 0;
 
+    wine_tests[nr_of_files].maindllpath = NULL;
     dll = LoadLibraryExA(dllname, NULL, LOAD_LIBRARY_AS_DATAFILE);
     if (!dll && pLoadLibraryShim)
     {
         MultiByteToWideChar(CP_ACP, 0, dllname, -1, dllnameW, MAX_PATH);
-        if (FAILED( pLoadLibraryShim(dllnameW, NULL, NULL, &dll) )) dll = 0;
+        if (FAILED( pLoadLibraryShim(dllnameW, NULL, NULL, &dll) ))
+            dll = 0;
+        else
+        {
+            char dllpath[MAX_PATH];
+
+            /* We have a dll that cannot be found through LoadLibraryExA. This
+             * is the case for .NET provided dll's. We will add the directory
+             * where the dll resides to the PATH variable when dealing with
+             * the tests for this dll.
+             */
+            GetModuleFileNameA(dll, dllpath, MAX_PATH);
+            *strrchr(dllpath, '\\') = '\0';
+            wine_tests[nr_of_files].maindllpath = xstrdup( dllpath );
+        }
     }
     if (!dll) {
         xprintf ("    %s=dll is missing\n", dllname);
+        return TRUE;
+    }
+    if (!strcmp( dllname, "mshtml" ) && running_under_wine() && !gecko_check())
+    {
+        FreeLibrary(dll);
+        xprintf ("    %s=load error Gecko is not installed\n", dllname);
         return TRUE;
     }
     GetModuleFileNameA(dll, filename, MAX_PATH);
@@ -544,6 +618,12 @@ run_tests (char *logname)
     DWORD strsize;
     SECURITY_ATTRIBUTES sa;
     char tmppath[MAX_PATH], tempdir[MAX_PATH+4];
+    DWORD needed;
+
+    /* Get the current PATH only once */
+    needed = GetEnvironmentVariableA("PATH", NULL, 0);
+    curpath = xmalloc(needed);
+    GetEnvironmentVariableA("PATH", curpath, needed);
 
     SetErrorMode (SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
 
@@ -595,10 +675,7 @@ run_tests (char *logname)
 
     xprintf ("Version 4\n");
     xprintf ("Tests from build %s\n", build_id[0] ? build_id : "-" );
-    strres = extract_rcdata (MAKEINTRESOURCE(TESTS_URL), STRINGRES, &strsize);
-    xprintf ("Archive: ");
-    if (strres) xprintf ("%.*s", strsize, strres);
-    else xprintf ("-\n");
+    xprintf ("Archive: -\n");  /* no longer used */
     xprintf ("Tag: %s\n", tag);
     xprintf ("Build info:\n");
     strres = extract_rcdata (MAKEINTRESOURCE(BUILD_INFO), STRINGRES, &strsize);
@@ -653,10 +730,20 @@ run_tests (char *logname)
         struct wine_test *test = wine_tests + i;
         int j;
 
+        if (test->maindllpath) {
+            /* We need to add the path (to the main dll) to PATH */
+            append_path(test->maindllpath);
+        }
+
 	for (j = 0; j < test->subtest_count; j++) {
             report (R_STEP, "Running: %s:%s", test->name,
                     test->subtests[j]);
 	    run_test (test, test->subtests[j], logfile, tempdir);
+        }
+
+        if (test->maindllpath) {
+            /* Restore PATH again */
+            SetEnvironmentVariableA("PATH", curpath);
         }
     }
     report (R_DELTA, 0, "Running: Done");
@@ -666,6 +753,7 @@ run_tests (char *logname)
     logfile = 0;
     remove_dir (tempdir);
     free (wine_tests);
+    free (curpath);
 
     return logname;
 }

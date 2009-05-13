@@ -623,7 +623,7 @@ static void test_cursor(void)
     pGetCursorInfo = (void *)GetProcAddress(user32_handle, "GetCursorInfo");
     if (!pGetCursorInfo)
     {
-        skip("GetCursorInfo is not available\n");
+        win_skip("GetCursorInfo is not available\n");
         return;
     }
 
@@ -774,7 +774,9 @@ static void test_display_modes(void)
     if(!pD3d) return;
 
     max_modes = IDirect3D8_GetAdapterModeCount(pD3d, D3DADAPTER_DEFAULT);
-    ok(max_modes > 0, "GetAdapterModeCount(D3DADAPTER_DEFAULT) returned 0!\n");
+    ok(max_modes > 0 ||
+       broken(max_modes == 0), /* VMware */
+       "GetAdapterModeCount(D3DADAPTER_DEFAULT) returned 0!\n");
 
     for(i=0; i<max_modes;i++) {
         res = IDirect3D8_EnumAdapterModes(pD3d, D3DADAPTER_DEFAULT, i, &dmode);
@@ -1205,7 +1207,9 @@ static void test_lights(void)
 
     /* TODO: Test the rendering results in this situation */
     hr = IDirect3DDevice8_LightEnable(device, i + 1, TRUE);
-    ok(hr == D3D_OK, "Enabling one light more than supported returned %08x\n", hr);
+    ok(hr == D3D_OK ||
+       broken(hr == D3DERR_INVALIDCALL), /* Some Win9x and WinME */
+       "Enabling one light more than supported returned %08x\n", hr);
     hr = IDirect3DDevice8_GetLightEnable(device, i + 1, &enabled);
     ok(hr == D3D_OK, "GetLightEnable on light %u failed with %08x\n", i + 1, hr);
     ok(enabled, "Light %d is %s\n", i + 1, enabled ? "enabled" : "disabled");

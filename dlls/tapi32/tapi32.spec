@@ -1,6 +1,7 @@
 @ stdcall lineAccept(long str long)
 @ stdcall lineAddProvider(str long ptr) lineAddProviderA
 @ stdcall lineAddProviderA(str long ptr)
+@ stdcall lineAddProviderW(wstr long ptr)
 @ stdcall lineAddToConference(long long)
 @ stdcall lineAnswer(long str long)
 @ stdcall lineBlindTransfer(long str long) lineBlindTransferA
@@ -54,6 +55,7 @@
 @ stdcall lineGetNumRings(long long ptr)
 @ stdcall lineGetProviderList(long ptr) lineGetProviderListA
 @ stdcall lineGetProviderListA(long ptr)
+@ stdcall lineGetProviderListW(long ptr)
 @ stdcall lineGetRequest(long long ptr) lineGetRequestA
 @ stdcall lineGetRequestA(long long ptr)
 @ stdcall lineGetStatusMessages(long ptr ptr)

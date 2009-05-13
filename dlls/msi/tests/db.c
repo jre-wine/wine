@@ -321,10 +321,8 @@ static void test_msiinsert(void)
     r = MsiRecordGetFieldCount(hrec);
     ok(r == 3, "record count wrong\n");
 
-    todo_wine {
     r = MsiRecordIsNull(hrec, 0);
     ok(r == FALSE, "field 0 not null\n");
-    }
 
     r = MsiRecordGetInteger(hrec, 1);
     ok(r == 1, "field 1 contents wrong\n");
@@ -651,7 +649,10 @@ static void test_msibadqueries(void)
     ok(r == ERROR_SUCCESS , "query failed\n");
 
     r = try_query( hdb, "select * from c where b = 'x");
-    todo_wine ok(r == ERROR_BAD_QUERY_SYNTAX, "query failed\n");
+    ok(r == ERROR_BAD_QUERY_SYNTAX, "query failed\n");
+
+    r = try_query( hdb, "select * from c where b = 'x'");
+    ok(r == ERROR_SUCCESS, "query failed\n");
 
     r = try_query( hdb, "select * from 'c'");
     ok(r == ERROR_BAD_QUERY_SYNTAX, "query failed\n");
@@ -900,10 +901,7 @@ static void test_viewmodify(void)
     ok(r == ERROR_SUCCESS, "failed to set string\n");
 
     r = MsiViewModify(hview, MSIMODIFY_UPDATE, hrec);
-    todo_wine
-    {
-        ok(r == ERROR_FUNCTION_FAILED, "MsiViewModify failed\n");
-    }
+    ok(r == ERROR_FUNCTION_FAILED, "MsiViewModify failed\n");
 
     r = MsiCloseHandle(hrec);
     ok(r == ERROR_SUCCESS, "failed to close record\n");
@@ -3239,13 +3237,11 @@ static void test_temporary_table(void)
     cond = MsiDatabaseIsTablePersistent(hdb, NULL);
     ok( cond == MSICONDITION_ERROR, "wrong return condition\n");
 
-    todo_wine {
     cond = MsiDatabaseIsTablePersistent(hdb, "_Tables");
     ok( cond == MSICONDITION_NONE, "wrong return condition\n");
 
     cond = MsiDatabaseIsTablePersistent(hdb, "_Columns");
     ok( cond == MSICONDITION_NONE, "wrong return condition\n");
-    }
 
     cond = MsiDatabaseIsTablePersistent(hdb, "_Storages");
     ok( cond == MSICONDITION_NONE, "wrong return condition\n");
@@ -3278,10 +3274,13 @@ static void test_temporary_table(void)
     r = run_query(hdb, 0, query);
     ok(r == ERROR_SUCCESS, "failed to add table\n");
 
-    todo_wine {
+    query = "SELECT * FROM `T2`";
+    r = MsiDatabaseOpenView(hdb, query, &view);
+    ok(r == ERROR_BAD_QUERY_SYNTAX,
+       "Expected ERROR_BAD_QUERY_SYNTAX, got %d\n", r);
+
     cond = MsiDatabaseIsTablePersistent(hdb, "T2");
     ok( cond == MSICONDITION_NONE, "wrong return condition\n");
-    }
 
     query = "CREATE TABLE `T3` ( `B` SHORT NOT NULL TEMPORARY, `C` CHAR(255) PRIMARY KEY `C`)";
     r = run_query(hdb, 0, query);
@@ -3290,14 +3289,12 @@ static void test_temporary_table(void)
     cond = MsiDatabaseIsTablePersistent(hdb, "T3");
     ok( cond == MSICONDITION_TRUE, "wrong return condition\n");
 
-    todo_wine {
     query = "CREATE TABLE `T4` ( `B` SHORT NOT NULL, `C` CHAR(255) TEMPORARY PRIMARY KEY `C`)";
     r = run_query(hdb, 0, query);
     ok(r == ERROR_FUNCTION_FAILED, "failed to add table\n");
 
     cond = MsiDatabaseIsTablePersistent(hdb, "T4");
     ok( cond == MSICONDITION_NONE, "wrong return condition\n");
-    }
 
     query = "CREATE TABLE `T5` ( `B` SHORT NOT NULL TEMP, `C` CHAR(255) TEMP PRIMARY KEY `C`) HOLD";
     r = run_query(hdb, 0, query);

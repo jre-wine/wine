@@ -1547,7 +1547,9 @@ static void test_GetDIBits(void)
     SetLastError(0xdeadbeef);
     lines = GetDIBits(0, hbmp, 0, bm.bmHeight, buf, bi, DIB_RGB_COLORS);
     ok(lines == 0, "GetDIBits copied %d lines with hdc = 0\n", lines);
-    ok(GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %u\n", GetLastError());
+    ok(GetLastError() == ERROR_INVALID_PARAMETER ||
+       broken(GetLastError() == 0xdeadbeef), /* winnt */
+       "wrong error %u\n", GetLastError());
     ok(bi->bmiHeader.biSizeImage == 0, "expected 0, got %u\n", bi->bmiHeader.biSizeImage);
 
     memset(buf, 0xAA, sizeof(buf));
@@ -1974,7 +1976,9 @@ static void test_CreateBitmap(void)
        "0: %p, 1: %p, 4: %p, 5: %p, curObj1 %p, old1 %p\n",
        bm, bm1, bm4, bm5, curObj1, old1);
     ok(bm != bm2 && bm != bm3, "0: %p, 2: %p, 3: %p\n", bm, bm2, bm3);
-    ok(bm != curObj2 /* XP */ || bm == curObj2 /* Win9x */,
+todo_wine
+    ok(bm != curObj2 || /* WinXP */
+       broken(bm == curObj2) /* Win9x */,
        "0: %p, curObj2 %p\n", bm, curObj2);
     ok(old2 == 0, "old2 %p\n", old2);
 
@@ -1986,7 +1990,6 @@ static void test_CreateBitmap(void)
     test_mono_1x1_bmp(bm5);
     test_mono_1x1_bmp(old1);
     test_mono_1x1_bmp(curObj1);
-    test_mono_1x1_bmp(curObj2);
 
     DeleteObject(bm);
     DeleteObject(bm1);

@@ -68,7 +68,7 @@ static void testCreateCertChainEngine(void)
 
     if (!pCertCreateCertificateChainEngine || !pCertFreeCertificateChainEngine)
     {
-        skip("Cert*CertificateChainEngine() functions are not available\n");
+        win_skip("Cert*CertificateChainEngine() functions are not available\n");
         return;
     }
 
@@ -1794,7 +1794,7 @@ static const ChainPolicyCheck basicConstraintsPolicyCheck[] = {
  { { sizeof(chain3) / sizeof(chain3[0]), chain3 },
    { 0, TRUST_E_BASIC_CONSTRAINTS, 0, 1, NULL }, NULL, 0 },
  { { sizeof(chain4) / sizeof(chain4[0]), chain4 },
-   { 0, TRUST_E_BASIC_CONSTRAINTS, 0, 1, NULL }, NULL, 0 },
+   { 0, TRUST_E_BASIC_CONSTRAINTS, 0, 1, NULL }, &chain4BrokenStatus, 0 },
  { { sizeof(chain5) / sizeof(chain5[0]), chain5 },
    { 0, 0, -1, -1, NULL }, NULL, 0 },
  { { sizeof(chain6) / sizeof(chain6[0]), chain6 },
@@ -1930,7 +1930,7 @@ static void testVerifyCertChainPolicy(void)
 
     if (!pCertVerifyCertificateChainPolicy)
     {
-        skip("CertVerifyCertificateChainPolicy() is not available\n");
+        win_skip("CertVerifyCertificateChainPolicy() is not available\n");
         return;
     }
 
@@ -2010,7 +2010,7 @@ START_TEST(chain)
     testCreateCertChainEngine();
     if (!pCertGetCertificateChain)
     {
-        skip("CertGetCertificateChain() is not available\n");
+        win_skip("CertGetCertificateChain() is not available\n");
     }
     else
     {

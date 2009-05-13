@@ -106,7 +106,6 @@
  *   -- LVN_GETINFOTIP
  *   -- LVN_HOTTRACK
  *   -- LVN_MARQUEEBEGIN
- *   -- LVN_ODFINDITEM
  *   -- LVN_SETDISPINFO
  *   -- NM_HOVER
  *   -- LVN_BEGINRDRAG
@@ -1530,7 +1529,7 @@ static INT LISTVIEW_ProcessLetterKeys(LISTVIEW_INFO *infoPtr, WPARAM charCode, L
     if (!charCode || !keyData) return 0;
 
     /* only allow the valid WM_CHARs through */
-    if (!isalnum(charCode) &&
+    if (!isalnumW(charCode) &&
         charCode != '.' && charCode != '`' && charCode != '!' &&
         charCode != '@' && charCode != '#' && charCode != '$' &&
         charCode != '%' && charCode != '^' && charCode != '&' &&
@@ -1574,6 +1573,28 @@ static INT LISTVIEW_ProcessLetterKeys(LISTVIEW_INFO *infoPtr, WPARAM charCode, L
         endidx=infoPtr->nItemCount;
         idx=0;
     }
+
+    /* Let application handle this for virtual listview */
+    if (infoPtr->dwStyle & LVS_OWNERDATA)
+    {
+        NMLVFINDITEMW nmlv;
+        LVFINDINFOW lvfi;
+
+        ZeroMemory(&lvfi, sizeof(lvfi));
+        lvfi.flags = (LVFI_WRAP | LVFI_PARTIAL);
+        infoPtr->szSearchParam[infoPtr->nSearchParamLength] = '\0';
+        lvfi.psz = infoPtr->szSearchParam;
+        nmlv.iStart = idx;
+        nmlv.lvfi = lvfi;
+
+        nItem = notify_hdr(infoPtr, LVN_ODFINDITEMW, (LPNMHDR)&nmlv.hdr);
+
+        if (nItem != -1)
+            LISTVIEW_KeySelection(infoPtr, nItem);
+
+        return 0;
+    }
+
     do {
         if (idx == infoPtr->nItemCount) {
             if (endidx == infoPtr->nItemCount || endidx == 0)
@@ -4511,10 +4532,11 @@ static BOOL LISTVIEW_DeleteAllItems(LISTVIEW_INFO *infoPtr, BOOL destroy)
 
     for (i = infoPtr->nItemCount - 1; i >= 0; i--)
     {
-        /* send LVN_DELETEITEM notification, if not suppressed */
-	if (!bSuppress) notify_deleteitem(infoPtr, i);
 	if (!(infoPtr->dwStyle & LVS_OWNERDATA))
 	{
+            /* send LVN_DELETEITEM notification, if not suppressed
+               and if it is not a virtual listview */
+            if (!bSuppress) notify_deleteitem(infoPtr, i);
             hdpaSubItems = DPA_GetPtr(infoPtr->hdpaItems, i);
 	    for (j = 0; j < DPA_GetPtrCount(hdpaSubItems); j++)
 	    {
@@ -5074,6 +5096,17 @@ static INT LISTVIEW_FindItemW(const LISTVIEW_INFO *infoPtr, INT nStart,
     ULONG xdist, ydist, dist, mindist = 0x7fffffff;
     POINT Position, Destination;
     LVITEMW lvItem;
+
+    /* Search in virtual listviews should be done by application, not by
+       listview control, so we just send LVN_ODFINDITEMW and return the result */
+    if (infoPtr->dwStyle & LVS_OWNERDATA)
+    {
+        NMLVFINDITEMW nmlv;
+
+        nmlv.iStart = nStart;
+        nmlv.lvfi = *lpFindInfo;
+        return notify_hdr(infoPtr, LVN_ODFINDITEMW, (LPNMHDR)&nmlv.hdr);
+    }
 
     if (!lpFindInfo || nItem < 0) return -1;
     
@@ -8953,6 +8986,7 @@ static LRESULT LISTVIEW_HeaderNotification(LISTVIEW_INFO *infoPtr, const NMHEADE
             nmlv.iItem = -1;
             nmlv.iSubItem = lpnmh->iItem;
             notify_listview(infoPtr, LVN_COLUMNCLICK, &nmlv);
+            notify_forward_header(infoPtr, lpnmh);
         }
 	break;
 

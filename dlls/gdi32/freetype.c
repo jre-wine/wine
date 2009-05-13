@@ -3627,8 +3627,10 @@ found:
 
         scale = (height + face->size.height - 1) / face->size.height;
         scaled_height = scale * face->size.height;
-        /* XP allows not more than 10% deviation */
-        if (scale > 1 && scaled_height - height > scaled_height / 10) scale--;
+        /* Only jump to the next height if the difference <= 25% original height */
+        if (scale > 2 && scaled_height - height > face->size.height / 4) scale--;
+        /* The jump between unscaled and doubled is delayed by 1 */
+        else if (scale == 2 && scaled_height - height > (face->size.height / 4 - 1)) scale--;
         ret->scale_y = scale;
 
         width = face->size.x_ppem >> 6;
@@ -4604,9 +4606,9 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
     }
 
     if(ft_face->glyph->format != ft_glyph_format_outline &&
-       (needsTransform || format == GGO_NATIVE || format == GGO_BEZIER ||
-                          format == GGO_GRAY2_BITMAP || format == GGO_GRAY4_BITMAP ||
-                          format == GGO_GRAY8_BITMAP))
+       (format == GGO_NATIVE || format == GGO_BEZIER ||
+        format == GGO_GRAY2_BITMAP || format == GGO_GRAY4_BITMAP ||
+        format == GGO_GRAY8_BITMAP))
     {
         TRACE("loaded a bitmap\n");
         LeaveCriticalSection( &freetype_cs );
@@ -5257,6 +5259,17 @@ BOOL WineEngGetTextMetrics(GdiFont *font, LPTEXTMETRICW ptm)
     return TRUE;
 }
 
+static BOOL face_has_symbol_charmap(FT_Face ft_face)
+{
+    int i;
+
+    for(i = 0; i < ft_face->num_charmaps; i++)
+    {
+        if(ft_face->charmaps[i]->encoding == FT_ENCODING_MS_SYMBOL)
+            return TRUE;
+    }
+    return FALSE;
+}
 
 /*************************************************************
  * WineEngGetOutlineTextMetrics
@@ -5396,18 +5409,34 @@ UINT WineEngGetOutlineTextMetrics(GdiFont *font, UINT cbSize,
     /* It appears that for fonts with SYMBOL_CHARSET Windows always sets
      * symbol range to 0 - f0ff
      */
-    if (font->charset == SYMBOL_CHARSET)
+
+    if (face_has_symbol_charmap(ft_face) || (pOS2->usFirstCharIndex >= 0xf000 && pOS2->usFirstCharIndex < 0xf100))
     {
         TM.tmFirstChar = 0;
-        TM.tmDefaultChar = pOS2->usDefaultChar ? pOS2->usDefaultChar : 0x1f;
+        switch(GetACP())
+        {
+        case 1257: /* Baltic */
+            TM.tmLastChar = 0xf8fd;
+            break;
+        default:
+            TM.tmLastChar = 0xf0ff;
+        }
+        TM.tmBreakChar = 0x20;
+        TM.tmDefaultChar = 0x1f;
     }
     else
     {
-        TM.tmFirstChar = pOS2->usFirstCharIndex;
-        TM.tmDefaultChar = pOS2->usDefaultChar ? pOS2->usDefaultChar : 0xffff;
+        TM.tmFirstChar = pOS2->usFirstCharIndex; /* Should be the first char in the cmap */
+        TM.tmLastChar = pOS2->usLastCharIndex;   /* Should be min(cmap_last, os2_last) */
+
+        if(pOS2->usFirstCharIndex <= 1)
+            TM.tmBreakChar = pOS2->usFirstCharIndex + 2;
+        else if (pOS2->usFirstCharIndex > 0xff)
+            TM.tmBreakChar = 0x20;
+        else
+            TM.tmBreakChar = pOS2->usFirstCharIndex;
+        TM.tmDefaultChar = TM.tmBreakChar - 1;
     }
-    TM.tmLastChar = pOS2->usLastCharIndex;
-    TM.tmBreakChar = pOS2->usBreakChar ? pOS2->usBreakChar : ' ';
     TM.tmItalic = font->fake_italic ? 255 : ((ft_face->style_flags & FT_STYLE_FLAG_ITALIC) ? 255 : 0);
     TM.tmUnderlined = font->underline;
     TM.tmStruckOut = font->strikeout;
@@ -5436,7 +5465,8 @@ UINT WineEngGetOutlineTextMetrics(GdiFont *font, UINT cbSize,
     case PAN_FAMILY_PICTORIAL: /* symbol fonts get treated as if they were text */
                                /* which is clearly not what the panose spec says. */
     default:
-        if(TM.tmPitchAndFamily == 0) /* fixed */
+        if(TM.tmPitchAndFamily == 0 || /* fixed */
+           pOS2->panose[PAN_PROPORTION_INDEX] == PAN_PROP_MONOSPACED)
 	    TM.tmPitchAndFamily = FF_MODERN;
         else
         {

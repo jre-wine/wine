@@ -564,6 +564,9 @@ static void test_CopyFileA(void)
     ret = GetTempFileNameA(temp_path, prefix, 0, source);
     ok(ret != 0, "GetTempFileNameA error %d\n", GetLastError());
 
+    ret = MoveFileA(source, source);
+    todo_wine ok(ret, "MoveFileA: failed, error %d\n", GetLastError());
+
     /* make the source have not zero size */
     hfile = CreateFileA(source, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0 );
     ok(hfile != INVALID_HANDLE_VALUE, "failed to open source file\n");
@@ -1503,7 +1506,7 @@ static void test_FindFirstFileExA(void)
 
     if (!pFindFirstFileExA)
     {
-        skip("FindFirstFileExA() is missing\n");
+        win_skip("FindFirstFileExA() is missing\n");
         return;
     }
 
@@ -1516,7 +1519,7 @@ static void test_FindFirstFileExA(void)
     handle = pFindFirstFileExA("test-dir\\*", FindExInfoStandard, &search_results, FindExSearchLimitToDirectories, NULL, 0);
     if (handle == INVALID_HANDLE_VALUE && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        skip("FindFirstFileExA is not implemented\n");
+        win_skip("FindFirstFileExA is not implemented\n");
         goto cleanup;
     }
     ok(handle != INVALID_HANDLE_VALUE, "FindFirstFile failed (err=%u)\n", GetLastError());
@@ -2136,7 +2139,7 @@ static void test_ReplaceFileA(void)
 
     if (!pReplaceFileA)
     {
-        skip("ReplaceFileA() is missing\n");
+        win_skip("ReplaceFileA() is missing\n");
         return;
     }
 
@@ -2344,7 +2347,7 @@ static void test_ReplaceFileW(void)
 
     if (!pReplaceFileW)
     {
-        skip("ReplaceFileW() is missing\n");
+        win_skip("ReplaceFileW() is missing\n");
         return;
     }
 

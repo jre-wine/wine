@@ -419,8 +419,25 @@ static HMENU MENU_CopySysPopup(void)
     HMENU hMenu = LoadMenuW(user32_module, sysmenuW);
 
     if( hMenu ) {
+        MENUINFO minfo;
+        MENUITEMINFOW miteminfo;
         POPUPMENU* menu = MENU_GetMenu(hMenu);
         menu->wFlags |= MF_SYSMENU | MF_POPUP;
+        /* decorate the menu with bitmaps */
+        minfo.cbSize = sizeof( MENUINFO);
+        minfo.dwStyle = MNS_CHECKORBMP;
+        minfo.fMask = MIM_STYLE;
+        SetMenuInfo( hMenu, &minfo);
+        miteminfo.cbSize = sizeof( MENUITEMINFOW);
+        miteminfo.fMask = MIIM_BITMAP;
+        miteminfo.hbmpItem = HBMMENU_POPUP_CLOSE;
+        SetMenuItemInfoW( hMenu, SC_CLOSE, FALSE, &miteminfo);
+        miteminfo.hbmpItem = HBMMENU_POPUP_RESTORE;
+        SetMenuItemInfoW( hMenu, SC_RESTORE, FALSE, &miteminfo);
+        miteminfo.hbmpItem = HBMMENU_POPUP_MAXIMIZE;
+        SetMenuItemInfoW( hMenu, SC_MAXIMIZE, FALSE, &miteminfo);
+        miteminfo.hbmpItem = HBMMENU_POPUP_MINIMIZE;
+        SetMenuItemInfoW( hMenu, SC_MINIMIZE, FALSE, &miteminfo);
 	SetMenuDefaultItem(hMenu, SC_CLOSE, FALSE);
     }
     else
@@ -819,7 +836,8 @@ static void MENU_GetBitmapItemSize( MENUITEM *lpitem, SIZE *size,
     case (INT_PTR)HBMMENU_POPUP_RESTORE:
     case (INT_PTR)HBMMENU_POPUP_MAXIMIZE:
     case (INT_PTR)HBMMENU_POPUP_MINIMIZE:
-        FIXME("Magic %p not implemented\n", bmp );
+        size->cx = GetSystemMetrics( SM_CXMENUSIZE);
+        size->cy = GetSystemMetrics( SM_CYMENUSIZE);
         return;
     }
     if (GetObjectW(bmp, sizeof(bm), &bm ))
@@ -852,6 +870,7 @@ static void MENU_DrawBitmapItem( HDC hdc, MENUITEM *lpitem, const RECT *rect,
     if (IS_MAGIC_BITMAP(hbmToDraw))
     {
         UINT flags = 0;
+        WCHAR bmchr = 0;
         RECT r;
 
 	switch((INT_PTR)hbmToDraw)
@@ -910,17 +929,44 @@ static void MENU_DrawBitmapItem( HDC hdc, MENUITEM *lpitem, const RECT *rect,
             }
             break;
         case (INT_PTR)HBMMENU_POPUP_CLOSE:
+            bmchr = 0x72;
+            break;
         case (INT_PTR)HBMMENU_POPUP_RESTORE:
+            bmchr = 0x32;
+            break;
         case (INT_PTR)HBMMENU_POPUP_MAXIMIZE:
+            bmchr = 0x31;
+            break;
         case (INT_PTR)HBMMENU_POPUP_MINIMIZE:
+            bmchr = 0x30;
+            break;
         default:
             FIXME("Magic %p not implemented\n", hbmToDraw);
             return;
         }
-        r = *rect;
-        InflateRect( &r, -1, -1 );
-        if (lpitem->fState & MF_HILITE) flags |= DFCS_PUSHED;
-        DrawFrameControl( hdc, &r, DFC_CAPTION, flags );
+        if (bmchr)
+        {
+            /* draw the magic bitmaps using marlett font characters */
+            /* FIXME: fontsize and the position (x,y) could probably be better */
+            HFONT hfont, hfontsav;
+            LOGFONTW logfont = { 0, 0, 0, 0, FW_NORMAL,
+                0, 0, 0, SYMBOL_CHARSET, 0, 0, 0, 0,
+                { 'M','a','r','l','e','t','t',0 } };
+            logfont.lfHeight =  min( h, w) - 5 ;
+            TRACE(" height %d rect %s\n", logfont.lfHeight, wine_dbgstr_rect( rect));
+            hfont = CreateFontIndirectW( &logfont);
+            hfontsav = SelectObject(hdc, hfont);
+            TextOutW( hdc,  rect->left, rect->top + 2, &bmchr, 1);
+            SelectObject(hdc, hfontsav);
+            DeleteObject( hfont);
+        }
+        else
+        {
+            r = *rect;
+            InflateRect( &r, -1, -1 );
+            if (lpitem->fState & MF_HILITE) flags |= DFCS_PUSHED;
+            DrawFrameControl( hdc, &r, DFC_CAPTION, flags );
+        }
         return;
     }
 
@@ -4963,45 +5009,55 @@ BOOL WINAPI GetMenuItemRect (HWND hwnd, HMENU hMenu, UINT uItem,
      return TRUE;
 }
 
-
 /**********************************************************************
  *		SetMenuInfo    (USER32.@)
  *
  * FIXME
- *	MIM_APPLYTOSUBMENUS
  *	actually use the items to draw the menu
+ *      (recalculate and/or redraw)
  */
-BOOL WINAPI SetMenuInfo (HMENU hMenu, LPCMENUINFO lpmi)
+static BOOL menu_SetMenuInfo( HMENU hMenu, LPCMENUINFO lpmi)
 {
     POPUPMENU *menu;
+    if( !(menu = MENU_GetMenu(hMenu))) return FALSE;
 
-    TRACE("(%p %p)\n", hMenu, lpmi);
+    if (lpmi->fMask & MIM_BACKGROUND)
+        menu->hbrBack = lpmi->hbrBack;
 
-    if (lpmi && (lpmi->cbSize==sizeof(MENUINFO)) && (menu = MENU_GetMenu(hMenu)))
-    {
+    if (lpmi->fMask & MIM_HELPID)
+        menu->dwContextHelpID = lpmi->dwContextHelpID;
 
-	if (lpmi->fMask & MIM_BACKGROUND)
-	    menu->hbrBack = lpmi->hbrBack;
+    if (lpmi->fMask & MIM_MAXHEIGHT)
+        menu->cyMax = lpmi->cyMax;
 
-	if (lpmi->fMask & MIM_HELPID)
-	    menu->dwContextHelpID = lpmi->dwContextHelpID;
+    if (lpmi->fMask & MIM_MENUDATA)
+        menu->dwMenuData = lpmi->dwMenuData;
 
-	if (lpmi->fMask & MIM_MAXHEIGHT)
-	    menu->cyMax = lpmi->cyMax;
+    if (lpmi->fMask & MIM_STYLE)
+        menu->dwStyle = lpmi->dwStyle;
 
-	if (lpmi->fMask & MIM_MENUDATA)
-	    menu->dwMenuData = lpmi->dwMenuData;
-
-	if (lpmi->fMask & MIM_STYLE)
-	{
-	    menu->dwStyle = lpmi->dwStyle;
-	    if (menu->dwStyle & MNS_AUTODISMISS) FIXME("MNS_AUTODISMISS unimplemented\n");
-	    if (menu->dwStyle & MNS_DRAGDROP) FIXME("MNS_DRAGDROP unimplemented\n");
-	    if (menu->dwStyle & MNS_MODELESS) FIXME("MNS_MODELESS unimplemented\n");
-	}
-
-	return TRUE;
+    if( lpmi->fMask & MIM_APPLYTOSUBMENUS) {
+        int i;
+        MENUITEM *item = menu->items;
+        for( i = menu->nItems; i; i--, item++)
+            if( item->fType & MF_POPUP)
+                menu_SetMenuInfo( item->hSubMenu, lpmi);
     }
+    return TRUE;
+}
+
+BOOL WINAPI SetMenuInfo (HMENU hMenu, LPCMENUINFO lpmi)
+{
+    TRACE("(%p %p)\n", hMenu, lpmi);
+    if( lpmi && (lpmi->cbSize == sizeof( MENUINFO)) && (menu_SetMenuInfo( hMenu, lpmi))) {
+	if( lpmi->fMask & MIM_STYLE) {
+	    if (lpmi->dwStyle & MNS_AUTODISMISS) FIXME("MNS_AUTODISMISS unimplemented\n");
+	    if (lpmi->dwStyle & MNS_DRAGDROP) FIXME("MNS_DRAGDROP unimplemented\n");
+	    if (lpmi->dwStyle & MNS_MODELESS) FIXME("MNS_MODELESS unimplemented\n");
+	}
+        return TRUE;
+    }
+    SetLastError( ERROR_INVALID_PARAMETER);
     return FALSE;
 }
 
@@ -5017,7 +5073,7 @@ BOOL WINAPI GetMenuInfo (HMENU hMenu, LPMENUINFO lpmi)
 
     TRACE("(%p %p)\n", hMenu, lpmi);
 
-    if (lpmi && (menu = MENU_GetMenu(hMenu)))
+    if (lpmi && (lpmi->cbSize == sizeof( MENUINFO)) && (menu = MENU_GetMenu(hMenu)))
     {
 
 	if (lpmi->fMask & MIM_BACKGROUND)
@@ -5037,6 +5093,7 @@ BOOL WINAPI GetMenuInfo (HMENU hMenu, LPMENUINFO lpmi)
 
 	return TRUE;
     }
+    SetLastError( ERROR_INVALID_PARAMETER);
     return FALSE;
 }
 

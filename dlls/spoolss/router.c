@@ -211,6 +211,8 @@ static backend_t * backend_load(LPWSTR dllname, LPWSTR name, LPWSTR regroot)
     DWORD id;
     DWORD res;
 
+    TRACE("(%s, %s, %s)\n", debugstr_w(dllname), debugstr_w(name), debugstr_w(regroot));
+
     EnterCriticalSection(&backend_cs);
     id = used_backends;
 
@@ -263,13 +265,22 @@ static backend_t * backend_load(LPWSTR dllname, LPWSTR name, LPWSTR regroot)
  */
 BOOL backend_load_all(void)
 {
+    static BOOL failed = FALSE;
     backend_t * pb;
 
-    pb = backend_load(localsplW, NULL, NULL);
+    EnterCriticalSection(&backend_cs);
 
-    /* ToDo: parse the registry and load all other backends */
+    /* if we failed before, dont try again */
+    if (!failed && (used_backends == 0)) {
+        pb = backend_load(localsplW, NULL, NULL);
 
-    return (pb != NULL);
+        /* ToDo: parse the registry and load all other backends */
+
+        failed = (used_backends == 0);
+    }
+    LeaveCriticalSection(&backend_cs);
+    TRACE("-> %d\n", !failed);
+    return (!failed);
 }
 
 /******************************************************************************
@@ -284,10 +295,20 @@ BOOL backend_load_all(void)
  */
 static backend_t * backend_first(LPWSTR name)
 {
-    /* test for the local system first */
-    if(!name || !name[0]) return backend[0];
 
-    FIXME("server %s not supported\n", debugstr_w(name));
+    EnterCriticalSection(&backend_cs);
+    /* Load all backends, when not done yet */
+    if (used_backends || backend_load_all()) {
+
+        /* test for the local system first */
+        if (!name || !name[0]) {
+            LeaveCriticalSection(&backend_cs);
+            return backend[0];
+        }
+    }
+
+    FIXME("server %s not supported in %d backends\n", debugstr_w(name), used_backends);
+    LeaveCriticalSection(&backend_cs);
     return NULL;
 }
 
@@ -333,4 +354,103 @@ BOOL WINAPI EnumMonitorsW(LPWSTR pName, DWORD Level, LPBYTE pMonitors, DWORD cbB
             pcbNeeded ? *pcbNeeded : 0, pcReturned ? *pcReturned : 0);
 
     return (res == ROUTER_SUCCESS);
+}
+
+/******************************************************************
+ * EnumPortsW (spoolss.@)
+ *
+ * Enumerate available Ports
+ *
+ * PARAMS
+ *  pName      [I] Servername or NULL (local Computer)
+ *  Level      [I] Structure-Level (1 or 2)
+ *  pPorts     [O] PTR to Buffer that receives the Result
+ *  cbBuf      [I] Size of Buffer at pPorts
+ *  pcbNeeded  [O] PTR to DWORD that receives the size in Bytes used / required for pPorts
+ *  pcReturned [O] PTR to DWORD that receives the number of Ports in pPorts
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE and in pcbNeeded the Bytes required for pPorts, if cbBuf is too small
+ *
+ */
+BOOL WINAPI EnumPortsW(LPWSTR pName, DWORD Level, LPBYTE pPorts, DWORD cbBuf,
+                       LPDWORD pcbNeeded, LPDWORD pcReturned)
+{
+    backend_t * pb;
+    DWORD res = ROUTER_UNKNOWN;
+
+    TRACE("(%s, %d, %p, %d, %p, %p)\n", debugstr_w(pName), Level, pPorts, cbBuf,
+            pcbNeeded, pcReturned);
+
+    if (pcbNeeded) *pcbNeeded = 0;
+    if (pcReturned) *pcReturned = 0;
+
+    pb = backend_first(pName);
+    if (pb && pb->fpEnumPorts)
+        res = pb->fpEnumPorts(pName, Level, pPorts, cbBuf, pcbNeeded, pcReturned);
+    else
+    {
+        SetLastError(ERROR_PROC_NOT_FOUND);
+    }
+
+    TRACE("got %u with %u (%u byte for %u entries)\n", res, GetLastError(),
+            pcbNeeded ? *pcbNeeded : 0, pcReturned ? *pcReturned : 0);
+
+    return (res == ROUTER_SUCCESS);
+}
+
+/******************************************************************
+ * GetPrinterDriverDirectoryW (spoolss.@)
+ *
+ * Return the PATH for the Printer-Drivers
+ *
+ * PARAMS
+ *   pName            [I] Servername or NULL (local Computer)
+ *   pEnvironment     [I] Printing-Environment or NULL (Default)
+ *   Level            [I] Structure-Level (must be 1)
+ *   pDriverDirectory [O] PTR to Buffer that receives the Result
+ *   cbBuf            [I] Size of Buffer at pDriverDirectory
+ *   pcbNeeded        [O] PTR to DWORD that receives the size in Bytes used /
+ *                        required for pDriverDirectory
+ *
+ * RETURNS
+ *   Success: TRUE  and in pcbNeeded the Bytes used in pDriverDirectory
+ *   Failure: FALSE and in pcbNeeded the Bytes required for pDriverDirectory,
+ *   if cbBuf is too small
+ *
+ *   Native Values returned in pDriverDirectory on Success:
+ *|  NT(Windows NT x86): "%winsysdir%\\spool\\DRIVERS\\w32x86"
+ *|  NT(Windows x64):    "%winsysdir%\\spool\\DRIVERS\\x64"
+ *|  NT(Windows 4.0):    "%winsysdir%\\spool\\DRIVERS\\win40"
+ *|  win9x(Windows 4.0): "%winsysdir%"
+ *
+ *   "%winsysdir%" is the Value from GetSystemDirectoryW()
+ *
+ */
+BOOL WINAPI GetPrinterDriverDirectoryW(LPWSTR pName, LPWSTR pEnvironment,
+            DWORD Level, LPBYTE pDriverDirectory, DWORD cbBuf, LPDWORD pcbNeeded)
+{
+    backend_t * pb;
+    DWORD res = ROUTER_UNKNOWN;
+
+    TRACE("(%s, %s, %d, %p, %d, %p)\n", debugstr_w(pName),
+          debugstr_w(pEnvironment), Level, pDriverDirectory, cbBuf, pcbNeeded);
+
+    if (pcbNeeded) *pcbNeeded = 0;
+
+    pb = backend_first(pName);
+    if (pb && pb->fpGetPrinterDriverDirectory)
+        res = pb->fpGetPrinterDriverDirectory(pName, pEnvironment, Level,
+                                              pDriverDirectory, cbBuf, pcbNeeded);
+    else
+    {
+        SetLastError(ERROR_PROC_NOT_FOUND);
+    }
+
+    TRACE("got %u with %u (%u byte)\n",
+            res, GetLastError(), pcbNeeded ? *pcbNeeded : 0);
+
+    return (res == ROUTER_SUCCESS);
+
 }

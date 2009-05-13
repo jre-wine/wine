@@ -451,7 +451,7 @@ static int sort_func_list( ORDDEF **list, int count,
  *
  * Output the dll initialization code.
  */
-static void output_init_code( const DLLSPEC *spec, const char *header_name )
+static void output_init_code( const DLLSPEC *spec )
 {
     char name[80];
 
@@ -468,13 +468,13 @@ static void output_init_code( const DLLSPEC *spec, const char *header_name )
         output( "\tcall %s\n", asm_name("__wine_spec_get_pc_thunk_eax") );
         output( "1:\tleal .L__wine_spec_file_name-1b(%%eax),%%ecx\n" );
         output( "\tpushl %%ecx\n" );
-        output( "\tleal %s-1b(%%eax),%%ecx\n", header_name );
+        output( "\tleal .L__wine_spec_dos_header-1b(%%eax),%%ecx\n" );
         output( "\tpushl %%ecx\n" );
     }
     else
     {
         output( "\tpushl $.L__wine_spec_file_name\n" );
-        output( "\tpushl $%s\n", header_name );
+        output( "\tpushl $.L__wine_spec_dos_header\n" );
     }
     output( "\tcall %s\n", asm_name("__wine_dll_register_16") );
     output( "\taddl $12,%%esp\n" );
@@ -490,12 +490,12 @@ static void output_init_code( const DLLSPEC *spec, const char *header_name )
     if (UsePIC)
     {
         output( "\tcall %s\n", asm_name("__wine_spec_get_pc_thunk_eax") );
-        output( "1:\tleal %s-1b(%%eax),%%ecx\n", header_name );
+        output( "1:\tleal .L__wine_spec_dos_header-1b(%%eax),%%ecx\n" );
         output( "\tpushl %%ecx\n" );
     }
     else
     {
-        output( "\tpushl $%s\n", header_name );
+        output( "\tpushl $.L__wine_spec_dos_header\n" );
     }
     output( "\tcall %s\n", asm_name("__wine_dll_unregister_16") );
     output( "\taddl $12,%%esp\n" );
@@ -522,20 +522,15 @@ static void output_init_code( const DLLSPEC *spec, const char *header_name )
 
 
 /*******************************************************************
- *         BuildSpec16File
+ *         output_module16
  *
- * Build a Win16 assembly file from a spec file.
+ * Output code for a 16-bit module.
  */
-void BuildSpec16File( DLLSPEC *spec )
+static void output_module16( DLLSPEC *spec )
 {
     ORDDEF **typelist;
     ORDDEF *entry_point = NULL;
     int i, j, nb_funcs;
-    char header_name[256];
-
-    /* File header */
-
-    output_standard_file_header();
 
     if (!spec->file_name)
     {
@@ -587,11 +582,10 @@ void BuildSpec16File( DLLSPEC *spec )
 
     /* Output the module structure */
 
-    sprintf( header_name, "__wine_spec_%s_dos_header", make_c_identifier(spec->dll_name) );
     output( "\n/* module data */\n\n" );
     output( "\t.data\n" );
     output( "\t.align %d\n", get_alignment(4) );
-    output( "%s:\n", header_name );
+    output( ".L__wine_spec_dos_header:\n" );
     output( "\t%s 0x%04x\n", get_asm_short_keyword(),                      /* e_magic */
              IMAGE_DOS_SIGNATURE );
     output( "\t%s 0\n", get_asm_short_keyword() );                         /* e_cblp */
@@ -611,7 +605,7 @@ void BuildSpec16File( DLLSPEC *spec )
     output( "\t%s 0\n", get_asm_short_keyword() );                         /* e_oemid */
     output( "\t%s 0\n", get_asm_short_keyword() );                         /* e_oeminfo */
     output( "\t%s 0,0,0,0,0,0,0,0,0,0\n", get_asm_short_keyword() );       /* e_res2 */
-    output( "\t.long .L__wine_spec_ne_header-%s\n", header_name );         /* e_lfanew */
+    output( "\t.long .L__wine_spec_ne_header-.L__wine_spec_dos_header\n" );/* e_lfanew */
 
     output( ".L__wine_spec_ne_header:\n" );
     output( "\t%s 0x%04x\n", get_asm_short_keyword(),                      /* ne_magic */
@@ -663,8 +657,8 @@ void BuildSpec16File( DLLSPEC *spec )
 
     /* code segment entry */
 
-    output( "\t%s .L__wine_spec_code_segment-%s\n",  /* filepos */
-             get_asm_short_keyword(), header_name );
+    output( "\t%s .L__wine_spec_code_segment-.L__wine_spec_dos_header\n",  /* filepos */
+             get_asm_short_keyword() );
     output( "\t%s .L__wine_spec_code_segment_end-.L__wine_spec_code_segment\n", /* size */
              get_asm_short_keyword() );
     output( "\t%s 0x%04x\n", get_asm_short_keyword(), NE_SEGFLAGS_32BIT );      /* flags */
@@ -673,8 +667,8 @@ void BuildSpec16File( DLLSPEC *spec )
 
     /* data segment entry */
 
-    output( "\t%s .L__wine_spec_data_segment-%s\n",  /* filepos */
-             get_asm_short_keyword(), header_name );
+    output( "\t%s .L__wine_spec_data_segment-.L__wine_spec_dos_header\n",  /* filepos */
+             get_asm_short_keyword() );
     output( "\t%s .L__wine_spec_data_segment_end-.L__wine_spec_data_segment\n", /* size */
              get_asm_short_keyword() );
     output( "\t%s 0x%04x\n", get_asm_short_keyword(), NE_SEGFLAGS_DATA );      /* flags */
@@ -683,7 +677,7 @@ void BuildSpec16File( DLLSPEC *spec )
 
     /* resource directory */
 
-    output_res16_directory( spec, header_name );
+    output_res16_directory( spec );
 
     /* resident names table */
 
@@ -829,14 +823,58 @@ void BuildSpec16File( DLLSPEC *spec )
         output( "\t.long %s\n", asm_name("wine_ldt_copy") );
     }
 
+    free( typelist );
+}
+
+
+/*******************************************************************
+ *         BuildSpec16File
+ *
+ * Build a Win16 assembly file from a spec file.
+ */
+void BuildSpec16File( DLLSPEC *spec )
+{
+    output_standard_file_header();
+    output_module16( spec );
+    output_init_code( spec );
+
     output( "\n\t%s\n", get_asm_string_section() );
     output( ".L__wine_spec_file_name:\n" );
     output( "\t%s \"%s\"\n", get_asm_string_keyword(), spec->file_name );
 
     output_stubs( spec );
     output_get_pc_thunk();
-    output_init_code( spec, header_name );
     output_gnu_stack_note();
+}
 
-    free( typelist );
+
+/*******************************************************************
+ *         output_spec16_file
+ *
+ * Output the complete data for a spec 16-bit file.
+ */
+void output_spec16_file( DLLSPEC *spec16 )
+{
+    DLLSPEC *spec32 = alloc_dll_spec();
+
+    spec32->file_name = xstrdup( spec16->file_name );
+
+    if (spec16->characteristics & IMAGE_FILE_DLL)
+    {
+        spec32->characteristics = IMAGE_FILE_DLL;
+        spec32->init_func = xstrdup( "__wine_spec_dll_entry" );
+    }
+
+    resolve_imports( spec16 );
+    add_16bit_exports( spec32, spec16 );
+
+    output_standard_file_header();
+    output_module( spec32 );
+    output_module16( spec16 );
+    output_stubs( spec16 );
+    output_exports( spec32 );
+    output_imports( spec16 );
+    output_resources( spec16 );
+    output_gnu_stack_note();
+    free_dll_spec( spec32 );
 }

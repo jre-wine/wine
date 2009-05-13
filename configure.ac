@@ -116,20 +116,28 @@ case $host in
       host_cpu="i386"
       notice_platform="32-bit "
       AC_SUBST(TARGETFLAGS,"-m32")
+      enable_win16=${enable_win16:-yes}
     else
       AC_SUBST(TARGETFLAGS,"-m64")
     fi
     ;;
+  *-mingw32*)
+    enable_win16=${enable_win16:-no}
+    ;;
+  i[[3456789]]86*)
+    enable_win16=${enable_win16:-yes}
+    ;;
 esac
 
 dnl enable_win16 defaults to yes on x86, to no on other CPUs
-case $host_cpu in
-  *i[[3456789]]86*)
-    enable_win16=${enable_win16:-yes}
-    ;;
-  *)
-    enable_win16=${enable_win16:-no}
-dnl disable some modules by default on non-x86
+enable_win16=${enable_win16:-no}
+
+AC_SUBST(WIN16_FILES,"\$(WIN16_FILES)")
+AC_SUBST(WIN16_INSTALL,"\$(WIN16_INSTALL)")
+if test "x$enable_win16" != "xyes"
+then
+    WIN16_FILES=""
+    WIN16_INSTALL=""
     enable_ifsmgr_vxd=${enable_ifsmgr_vxd:-no}
     enable_mmdevldr_vxd=${enable_mmdevldr_vxd:-no}
     enable_monodebg_vxd=${enable_monodebg_vxd:-no}
@@ -142,15 +150,8 @@ dnl disable some modules by default on non-x86
     enable_w32skrnl=${enable_w32skrnl:-no}
     enable_winedos=${enable_winedos:-no}
     enable_winevdm=${enable_winevdm:-no}
-    ;;
-esac
-   
-AC_SUBST(WIN16_FILES,"\$(WIN16_FILES)")
-AC_SUBST(WIN16_INSTALL,"\$(WIN16_INSTALL)")
-if test "x$enable_win16" != "xyes"
-then
-  WIN16_FILES=""
-  WIN16_INSTALL=""
+    enable_winhelp_exe16=${enable_winhelp_exe16:-no}
+    enable_winoldap_mod16=${enable_winoldap_mod16:-no}
 fi
 
 AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
@@ -169,7 +170,7 @@ AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
      AC_MSG_ERROR([could not find Wine tools in $with_wine_tools.])
    fi])
 AC_SUBST(TOOLSDIR,$wine_cv_toolsdir)
-if test -n "$host_alias"
+if test -n "$host_alias" -a "$host_alias" != "$build_alias"
 then
     AC_SUBST(TARGETFLAGS,"-b $host_alias $TARGETFLAGS")
 fi
@@ -1309,7 +1310,7 @@ then
   for(i=0; i<B; i++) Array[[i]] = i - 3;
   for(i=0; i<4 - 1; i++) L[[i]] = L[[i + 1]];
   L[[i]] = 4;
-  exit( Array[[1]] != -2 || L[[2]] != 3)]])],
+  return (Array[[1]] != -2 || L[[2]] != 3)]])],
     [ac_cv_c_gcc_strength_bug="no"],[ac_cv_c_gcc_strength_bug="yes"],[ac_cv_c_gcc_strength_bug="yes"]) )
   if test "$ac_cv_c_gcc_strength_bug" = "yes"
   then
@@ -1419,6 +1420,8 @@ esac
 
 dnl **** Check for functions ****
 
+ac_save_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS $BUILTINFLAG"
 AC_CHECK_FUNCS(\
 	_pclose \
 	_popen \
@@ -1494,6 +1497,7 @@ AC_CHECK_FUNCS(\
 	wait4 \
 	waitpid \
 )
+CFLAGS="$ac_save_CFLAGS"
 
 dnl Check for -ldl
 if test "$ac_cv_func_dlopen" = no
@@ -2030,6 +2034,7 @@ WINE_CONFIG_MAKEFILE([dlls/mapi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL
 WINE_CONFIG_MAKEFILE([dlls/mapi32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/mciavi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/mcicda/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mciqtz32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/mciseq/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/mciwave/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/midimap/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -2049,6 +2054,7 @@ WINE_CONFIG_MAKEFILE([dlls/mscms/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_
 WINE_CONFIG_MAKEFILE([dlls/mscms/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/mscoree/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/msctf/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msctf/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/msdmo/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/msftedit/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/msg711.acm/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -2272,7 +2278,7 @@ WINE_CONFIG_MAKEFILE([programs/msiexec/Makefile],[programs/Makeprog.rules],[prog
 WINE_CONFIG_MAKEFILE([programs/net/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/notepad/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/oleview/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
-WINE_CONFIG_MAKEFILE([programs/progman/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/progman/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/reg/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/regedit/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/regsvr32/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
@@ -2284,11 +2290,11 @@ WINE_CONFIG_MAKEFILE([programs/spoolsv/Makefile],[programs/Makeprog.rules],[prog
 WINE_CONFIG_MAKEFILE([programs/start/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/svchost/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/taskmgr/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
-WINE_CONFIG_MAKEFILE([programs/uninstaller/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/uninstaller/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/unlodctr/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/view/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS])
 WINE_CONFIG_MAKEFILE([programs/wineboot/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
-WINE_CONFIG_MAKEFILE([programs/winebrowser/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winebrowser/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/winecfg/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/wineconsole/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/winedbg/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
@@ -2299,7 +2305,9 @@ WINE_CONFIG_MAKEFILE([programs/winemine/Makefile],[programs/Makeprog.rules],[pro
 WINE_CONFIG_MAKEFILE([programs/winepath/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/winetest/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS])
 WINE_CONFIG_MAKEFILE([programs/winevdm/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winhelp.exe16/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/winhlp32/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winoldap.mod16/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/winver/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/wordpad/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/write/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
@@ -2326,6 +2334,9 @@ $testname: \$(DLLDIR)/$dir/$testname\$(DLLEXT)
 	cp \$(DLLDIR)/$dir/$testname\$(DLLEXT) \$@ && \$(STRIP) \$@"
     fi
 done
+
+dnl Don't install in bin dir for Windows build
+test -n "$DLLEXT" || ALL_PROGRAM_BIN_INSTALL_DIRS=""
 
 AC_OUTPUT
 

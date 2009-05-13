@@ -53,12 +53,21 @@ DWORD WINAPI lineAccept(HCALL hCall, LPCSTR lpsUserUserInfo, DWORD dwSize)
 }
 
 /***********************************************************************
- *		lineAddProvider (TAPI32.@)
+ *		lineAddProviderA (TAPI32.@)
  */
 DWORD WINAPI lineAddProviderA(LPCSTR lpszProviderName, HWND hwndOwner, LPDWORD lpdwPermanentProviderID)
 {
     FIXME("(%s, %p, %p): stub.\n", lpszProviderName, hwndOwner, lpdwPermanentProviderID);
-    return 1;
+    return LINEERR_OPERATIONFAILED;
+}
+
+/***********************************************************************
+ *		lineAddProviderW (TAPI32.@)
+ */
+DWORD WINAPI lineAddProviderW(LPCWSTR lpszProviderName, HWND hwndOwner, LPDWORD lpdwPermanentProviderID)
+{
+    FIXME("(%s, %p, %p): stub.\n", wine_dbgstr_w(lpszProviderName), hwndOwner, lpdwPermanentProviderID);
+    return LINEERR_OPERATIONFAILED;
 }
 
 /***********************************************************************
@@ -520,12 +529,21 @@ DWORD WINAPI lineGetNumRings(HLINE hLine, DWORD dwAddressID, LPDWORD lpdwNumRing
 }
 
 /***********************************************************************
- *		lineGetProviderList (TAPI32.@)
+ *		lineGetProviderListA (TAPI32.@)
  */
 DWORD WINAPI lineGetProviderListA(DWORD dwAPIVersion, LPLINEPROVIDERLIST lpProviderList)
 {
     FIXME("(%08x, %p): stub.\n", dwAPIVersion, lpProviderList);
-    return 0;
+    return LINEERR_OPERATIONFAILED;
+}
+
+/***********************************************************************
+ *		lineGetProviderListW (TAPI32.@)
+ */
+DWORD WINAPI lineGetProviderListW(DWORD dwAPIVersion, LPLINEPROVIDERLIST lpProviderList)
+{
+    FIXME("(%08x, %p): stub.\n", dwAPIVersion, lpProviderList);
+    return LINEERR_OPERATIONFAILED;
 }
 
 /***********************************************************************

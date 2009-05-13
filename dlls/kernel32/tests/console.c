@@ -162,7 +162,7 @@ static void testCursorInfo(HANDLE hCon)
 
     if (info.dwSize == 12)
     {
-        skip("NULL CONSOLE_CURSOR_INFO will crash on win9x\n");
+        win_skip("NULL CONSOLE_CURSOR_INFO will crash on win9x\n");
         return;
     }
 
@@ -706,7 +706,7 @@ static void testScreenBuffer(HANDLE hConOut)
     ret = SetConsoleOutputCP(866);
     if (!ret && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        skip("SetConsoleOutputCP is not implemented\n");
+        win_skip("SetConsoleOutputCP is not implemented\n");
         return;
     }
     ok(ret, "Cannot set output codepage to 866\n");
@@ -962,7 +962,7 @@ START_TEST(console)
 
     if (!pGetConsoleInputExeNameA || !pSetConsoleInputExeNameA)
     {
-        skip("GetConsoleInputExeNameA and/or SetConsoleInputExeNameA is not available\n");
+        win_skip("GetConsoleInputExeNameA and/or SetConsoleInputExeNameA is not available\n");
         return;
     }
     else

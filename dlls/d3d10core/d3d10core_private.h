@@ -38,6 +38,9 @@
 const char *debug_d3d10_primitive_topology(D3D10_PRIMITIVE_TOPOLOGY topology);
 const char *debug_dxgi_format(DXGI_FORMAT format);
 
+DXGI_FORMAT dxgi_format_from_wined3dformat(WINED3DFORMAT format);
+WINED3DFORMAT wined3dformat_from_dxgi_format(DXGI_FORMAT format);
+
 /* IDirect3D10Device */
 extern const struct ID3D10DeviceVtbl d3d10_device_vtbl;
 extern const struct IUnknownVtbl d3d10_device_inner_unknown_vtbl;
@@ -49,6 +52,8 @@ struct d3d10_device
     const struct IWineD3DDeviceParentVtbl *device_parent_vtbl;
     IUnknown *outer_unknown;
     LONG refcount;
+
+    IWineD3DDevice *wined3d_device;
 };
 
 /* ID3D10Texture2D */
@@ -69,6 +74,8 @@ struct d3d10_buffer
 {
     const struct ID3D10BufferVtbl *vtbl;
     LONG refcount;
+
+    IWineD3DBuffer *wined3d_buffer;
 };
 
 /* ID3D10RenderTargetView */
@@ -78,7 +85,7 @@ struct d3d10_rendertarget_view
     const struct ID3D10RenderTargetViewVtbl *vtbl;
     LONG refcount;
 
-    ID3D10Resource *resource;
+    IWineD3DRendertargetView *wined3d_view;
     D3D10_RENDER_TARGET_VIEW_DESC desc;
 };
 

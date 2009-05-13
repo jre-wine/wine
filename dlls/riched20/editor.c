@@ -2635,7 +2635,7 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
   ed->nParagraphs = 1;
   ed->nLastSelStart = ed->nLastSelEnd = 0;
   ed->pLastSelStartPara = ed->pLastSelEndPara = ME_FindItemFwd(ed->pBuffer->pFirst, diParagraph);
-  ed->bWordWrap = (props & TXTBIT_WORDWRAP) != 0;
+  ed->nAvailWidth = 0; /* wrap to client area */
   ed->bHideSelection = FALSE;
   ed->pfnWordBreak = NULL;
   ed->lpOleCallback = NULL;
@@ -2654,8 +2654,13 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
   ME_CheckCharOffsets(ed);
   ed->bDefaultFormatRect = TRUE;
   ITextHost_TxGetSelectionBarWidth(ed->texthost, &selbarwidth);
-  /* FIXME: Convert selbarwidth from HIMETRIC to pixels */
-  ed->selofs = selbarwidth ? SELECTIONBAR_WIDTH : 0;
+  if (selbarwidth) {
+    /* FIXME: Convert selbarwidth from HIMETRIC to pixels */
+    ed->selofs = SELECTIONBAR_WIDTH;
+    ed->styleFlags |= ES_SELECTIONBAR;
+  } else {
+    ed->selofs = 0;
+  }
   ed->nSelectionType = stPosition;
 
   ed->cPasswordMask = 0;
@@ -2664,8 +2669,12 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
 
   if (props & TXTBIT_AUTOWORDSEL)
     ed->styleFlags |= ECO_AUTOWORDSELECTION;
-  if (props & TXTBIT_MULTILINE)
+  if (props & TXTBIT_MULTILINE) {
     ed->styleFlags |= ES_MULTILINE;
+    ed->bWordWrap = (props & TXTBIT_WORDWRAP) != 0;
+  } else {
+    ed->bWordWrap = FALSE;
+  }
   if (props & TXTBIT_READONLY)
     ed->styleFlags |= ES_READONLY;
   if (!(props & TXTBIT_HIDESELECTION))
@@ -3063,31 +3072,36 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
     }
     changedSettings = oldSettings ^ settings;
 
-    if (oldSettings ^ settings) {
+    if (changedSettings) {
       editor->styleFlags = (editor->styleFlags & ~mask) | (settings & mask);
 
-      if (settings & ECO_SELECTIONBAR) {
-        editor->selofs = SELECTIONBAR_WIDTH;
-        editor->rcFormat.left += SELECTIONBAR_WIDTH;
-      } else {
-        editor->selofs = 0;
-        editor->rcFormat.left -= SELECTIONBAR_WIDTH;
+      if (changedSettings & ECO_SELECTIONBAR)
+      {
+        ITextHost_TxInvalidateRect(editor->texthost, &editor->rcFormat, TRUE);
+        if (settings & ECO_SELECTIONBAR) {
+          assert(!editor->selofs);
+          editor->selofs = SELECTIONBAR_WIDTH;
+          editor->rcFormat.left += editor->selofs;
+        } else {
+          editor->rcFormat.left -= editor->selofs;
+          editor->selofs = 0;
+        }
+        ME_RewrapRepaint(editor);
       }
-      ME_WrapMarkedParagraphs(editor);
-    }
 
-    if (settings & ECO_VERTICAL)
-      FIXME("ECO_VERTICAL not implemented yet!\n");
-    if (settings & ECO_AUTOHSCROLL)
-      FIXME("ECO_AUTOHSCROLL not implemented yet!\n");
-    if (settings & ECO_AUTOVSCROLL)
-      FIXME("ECO_AUTOVSCROLL not implemented yet!\n");
-    if (settings & ECO_NOHIDESEL)
-      FIXME("ECO_NOHIDESEL not implemented yet!\n");
-    if (settings & ECO_WANTRETURN)
-      FIXME("ECO_WANTRETURN not implemented yet!\n");
-    if (settings & ECO_AUTOWORDSELECTION)
-      FIXME("ECO_AUTOWORDSELECTION not implemented yet!\n");
+      if (changedSettings & settings & ECO_VERTICAL)
+        FIXME("ECO_VERTICAL not implemented yet!\n");
+      if (changedSettings & settings & ECO_AUTOHSCROLL)
+        FIXME("ECO_AUTOHSCROLL not implemented yet!\n");
+      if (changedSettings & settings & ECO_AUTOVSCROLL)
+        FIXME("ECO_AUTOVSCROLL not implemented yet!\n");
+      if (changedSettings & settings & ECO_NOHIDESEL)
+        FIXME("ECO_NOHIDESEL not implemented yet!\n");
+      if (changedSettings & settings & ECO_WANTRETURN)
+        FIXME("ECO_WANTRETURN not implemented yet!\n");
+      if (changedSettings & settings & ECO_AUTOWORDSELECTION)
+        FIXME("ECO_AUTOWORDSELECTION not implemented yet!\n");
+    }
 
     return settings;
   }
@@ -3155,12 +3169,18 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
         return 0;
     }
 
-    if (lParam)
+    if (lParam) {
       editor->styleFlags |= flags;
-    else
-      editor->styleFlags &= flags;
-
-    ITextHost_TxShowScrollBar(editor->texthost, wParam, lParam);
+      if (flags & WS_HSCROLL)
+        ITextHost_TxShowScrollBar(editor->texthost, SB_HORZ,
+                          editor->nTotalWidth > editor->sizeWindow.cx);
+      if (flags & WS_VSCROLL)
+        ITextHost_TxShowScrollBar(editor->texthost, SB_VERT,
+                          editor->nTotalLength > editor->sizeWindow.cy);
+    } else {
+      editor->styleFlags &= ~flags;
+      ITextHost_TxShowScrollBar(editor->texthost, wParam, FALSE);
+    }
     return 0;
   }
   case EM_SETTEXTEX:
@@ -3374,8 +3394,10 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   }
   case EM_LINESCROLL:
   {
+    if (!(editor->styleFlags & ES_MULTILINE))
+      return FALSE;
     ME_ScrollDown(editor, lParam * 8); /* FIXME follow the original */
-    return TRUE; /* Should return false if a single line richedit control */
+    return TRUE;
   }
   case WM_CLEAR:
   {
@@ -4287,7 +4309,7 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   case EM_SETTARGETDEVICE:
     if (wParam == 0)
     {
-      BOOL new = (lParam == 0);
+      BOOL new = (lParam == 0 && (editor->styleFlags & ES_MULTILINE));
       if (editor->nAvailWidth || editor->bWordWrap != new)
       {
         editor->bWordWrap = new;
@@ -4296,7 +4318,8 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
       }
     } else {
       int width = max(0, lParam);
-      if (!editor->bWordWrap || editor->nAvailWidth != width)
+      if ((editor->styleFlags & ES_MULTILINE) &&
+          (!editor->bWordWrap || editor->nAvailWidth != width))
       {
         editor->nAvailWidth = width;
         editor->bWordWrap = TRUE;

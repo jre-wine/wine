@@ -898,6 +898,13 @@ static void start_process( void *arg )
         entry = (LPTHREAD_START_ROUTINE)((char *)peb->ImageBaseAddress +
                                          nt->OptionalHeader.AddressOfEntryPoint);
 
+        if (!nt->OptionalHeader.AddressOfEntryPoint)
+        {
+            ERR( "%s doesn't have an entry point, it cannot be executed\n",
+                 debugstr_w(peb->ProcessParameters->ImagePathName.Buffer) );
+            ExitThread( 1 );
+        }
+
         if (TRACE_ON(relay))
             DPRINTF( "%04x:Starting process %s (entryproc=%p)\n", GetCurrentThreadId(),
                      debugstr_w(peb->ProcessParameters->ImagePathName.Buffer), entry );
@@ -1048,7 +1055,18 @@ void CDECL __wine_kernel_init(void)
             if (!getenv("WINEPRELOADRESERVE")) exec_process( main_exe_name );
             /* if we get back here, it failed */
         }
-
+        else if (error == ERROR_MOD_NOT_FOUND)
+        {
+            if ((p = strrchrW( main_exe_name, '\\' ))) p++;
+            else p = main_exe_name;
+            if (!strcmpiW( p, winevdmW ) && __wine_main_argc > 3)
+            {
+                /* args 1 and 2 are --app-name full_path */
+                MESSAGE( "wine: could not run %s: 16-bit/DOS support missing\n",
+                         debugstr_w(__wine_main_wargv[3]) );
+                ExitProcess( ERROR_BAD_EXE_FORMAT );
+            }
+        }
         FormatMessageA( FORMAT_MESSAGE_FROM_SYSTEM, NULL, error, 0, msg, sizeof(msg), NULL );
         MESSAGE( "wine: could not load %s: %s", debugstr_w(main_exe_name), msg );
         ExitProcess( error );
@@ -1185,7 +1203,7 @@ static char **build_envp( const WCHAR *envW )
     const WCHAR *end;
     char **envp;
     char *env, *p;
-    int count = 0, length;
+    int count = 1, length;
     unsigned int i;
 
     for (end = envW; *end; count++) end += strlenW(end) + 1;

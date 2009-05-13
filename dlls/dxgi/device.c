@@ -160,7 +160,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_CreateSurface(IWineDXGIDevice *ifac
         return E_FAIL;
     }
 
-    FIXME("Implement DXGI<->wined3d format and usage conversion\n");
+    FIXME("Implement DXGI<->wined3d usage conversion\n");
 
     memset(surface, 0, surface_count * sizeof(*surface));
     for (i = 0; i < surface_count; ++i)
@@ -168,8 +168,9 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_CreateSurface(IWineDXGIDevice *ifac
         IWineD3DSurface *wined3d_surface;
         IUnknown *parent;
 
-        hr = IWineD3DDeviceParent_CreateSurface(device_parent, NULL, desc->Width, desc->Height, desc->Format,
-                usage, WINED3DPOOL_DEFAULT, 0, WINED3DCUBEMAP_FACE_POSITIVE_X, &wined3d_surface);
+        hr = IWineD3DDeviceParent_CreateSurface(device_parent, NULL, desc->Width, desc->Height,
+                wined3dformat_from_dxgi_format(desc->Format), usage, WINED3DPOOL_DEFAULT, 0,
+                WINED3DCUBEMAP_FACE_POSITIVE_X, &wined3d_surface);
         if (FAILED(hr))
         {
             ERR("CreateSurface failed, returning %#x\n", hr);
@@ -279,6 +280,38 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_create_surface(IWineDXGIDevice *ifa
     return S_OK;
 }
 
+static HRESULT STDMETHODCALLTYPE dxgi_device_create_swapchain(IWineDXGIDevice *iface,
+        WINED3DPRESENT_PARAMETERS *present_parameters, IWineD3DSwapChain **wined3d_swapchain)
+{
+    struct dxgi_device *This = (struct dxgi_device *)iface;
+    struct dxgi_swapchain *object;
+    HRESULT hr;
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate DXGI swapchain object memory\n");
+        return E_OUTOFMEMORY;
+    }
+
+    object->vtbl = &dxgi_swapchain_vtbl;
+    object->refcount = 1;
+
+    hr = IWineD3DDevice_CreateSwapChain(This->wined3d_device, present_parameters,
+            &object->wined3d_swapchain, (IUnknown *)object, SURFACE_OPENGL);
+    if (FAILED(hr))
+    {
+        WARN("Failed to create a swapchain, returning %#x\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
+        return hr;
+    }
+    *wined3d_swapchain = object->wined3d_swapchain;
+
+    TRACE("Created IDXGISwapChain %p\n", object);
+
+    return S_OK;
+}
+
 const struct IWineDXGIDeviceVtbl dxgi_device_vtbl =
 {
     /* IUnknown methods */
@@ -299,4 +332,5 @@ const struct IWineDXGIDeviceVtbl dxgi_device_vtbl =
     /* IWineDXGIAdapter methods */
     dxgi_device_get_wined3d_device,
     dxgi_device_create_surface,
+    dxgi_device_create_swapchain,
 };
