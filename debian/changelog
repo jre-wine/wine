@@ -1,8 +1,25 @@
-wine (1.1.16-1) UNRELEASED; urgency=low
+wine (1.1.16-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.16, released Feb 27, 2009.
+    - Improved SANE scanner support.
+    - Support for digital CD audio playback.
+    - Improved cookies management in Wininet.
+    - Support for building stand-alone 16-bit modules.
+    - Many fixes to the regression tests on Windows.
+    - Various bug fixes.
+  * Try to install *.vxd.so only if they were built. (Closes: #517886)
+  * Changed "git-cat-file" to "git cat-file" in debian/maint/import.
+  * Changed uninstaller.desktop to execute "wine uninstaller".
+  * Wine no longer installs progman, uninstaller, and winebrowser as
+    their own binaries. Thus, removed these from the packaging, along
+    with their man pages. (The programs can still be run through the
+    "wine" command, e.g. "wine uninstaller".)
+  * Install stand-alone 16-bit modules (if they were built) into
+    libwine.
+  * Installed lodctr.exe.so, unlodctr.exe.so, and cacls.exe.so into
+    wine-bin.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Wed, 13 May 2009 17:09:41 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Wed, 13 May 2009 19:46:01 +0200
 
 wine (1.1.15-1) experimental; urgency=low
 
