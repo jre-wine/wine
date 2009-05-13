@@ -6,10 +6,6 @@ debian/tmp/usr/lib/wine/*.acm.so
 debian/tmp/usr/lib/wine/*.ocx.so
 debian/tmp/usr/lib/wine/*.tlb.so
 debian/tmp/usr/lib/wine/ntoskrnl.exe.so
-debian/tmp/usr/lib/wine/*.dll16
-debian/tmp/usr/lib/wine/*.drv16
-debian/tmp/usr/lib/wine/*.exe16
-debian/tmp/usr/lib/wine/*.mod16
 debian/tmp/usr/lib/wine/wine.bin
 debian/tmp/usr/lib/wine/wineserver
 debian/tmp/usr/share/wine/generic.ppd
