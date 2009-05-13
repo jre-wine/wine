@@ -5,7 +5,6 @@ debian/tmp/usr/lib/wine/*.sys.so
 debian/tmp/usr/lib/wine/*.acm.so
 debian/tmp/usr/lib/wine/*.ocx.so
 debian/tmp/usr/lib/wine/*.tlb.so
-debian/tmp/usr/lib/wine/*.vxd.so
 debian/tmp/usr/lib/wine/ntoskrnl.exe.so
 debian/tmp/usr/lib/wine/*.dll16
 debian/tmp/usr/lib/wine/*.drv16
