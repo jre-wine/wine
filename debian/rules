@@ -27,33 +27,8 @@ VERSION := $(lastword $(shell dpkg-parsechangelog|grep "^Version: "))
 
 #DEBIAN_SID := $(findstring sid,$(DEBIAN_VERSION))
 
-ifeq (,$(findstring etch,$(DEBIAN_VERSION)))
-# delete amd64.tar.lzma.uu if we're not on etch.
-AMD64_PACK = false
-endif
-
-# On i386, pack binaries into amd64.tar.lzma.uu and embed it into
-# source package, because debian's amd64 port has pretty crappy
-# support for building 32-bit binaries natively.
-
-#ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM),i486-linux-gnu)
-#AMD64_PACK ?= true
-#endif
-
-# On amd64, build 32-bit package by simply unpacking amd64.tar.lzma.uu
-# if it exists, otherwise build from source using 32-bit compiler.
-
 ifeq ($(DEB_HOST_GNU_CPU),x86_64)
-ifeq ($(DEB_HOST_GNU_SYSTEM),linux-gnu)
-ifneq (,$(wildcard debian/amd64.tar.lzma.uu))
-AMD64_COPY = true
-endif
-endif
-ifeq (,$(AMD64_COPY))
 BUILDS = build32
-else
-BUILDS =
-endif
 # Not ready yet: build Win64 version
 #BUILDS += build64
 #NATIVE_BUILD = build64
@@ -180,9 +155,6 @@ clean: clean-arch32 clean-arch64
 	dh_testroot
 	rm -f debian/libwine.install debian/wine-bin.install
 	rm -f install-arch-stamp build-indep-stamp configure-ia32-stamp
-ifeq (false,$(AMD64_PACK))
-	rm -f debian/amd64.tar.lzma.uu
-endif
 	rm -rf lib32
 	dh_clean
 
@@ -280,7 +252,6 @@ binary-arch: install-arch-stamp
 	# create installation directories
 	dh_installdirs -s
 
-ifeq (,$(AMD64_COPY))
 	# certain binaries are only compiled on some platforms;
 	# if they were compiled on the current one, install them
 	for pkg in libwine wine-bin; do \
@@ -321,7 +292,6 @@ endif
 	mv debian/libwine/usr/lib/wine/wldap32*  debian/libwine-ldap/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/winenas*  debian/libwine-nas/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/wineps*   debian/libwine-print/usr/lib/wine
-endif
 
 	dh_installdocs -s
 	dh_installman -s
@@ -349,20 +319,6 @@ endif
 
 	dh_compress -s
 	dh_fixperms -s
-
-ifneq (,$(AMD64_COPY))
-	# Using compressed 32-bit build.  Make sure it's the latest one!!
-	uudecode < debian/amd64.tar.lzma.uu | lzma -d | tar -xpf -
-endif
-ifeq (true,$(AMD64_PACK))
-	# Generating compressed 32-bit build.  Make sure to keep your *_i386.deb in sync with this file in your *.diff.gz!!
-	tar -cpf - `grep-dctrl -v "Architecture: all" debian/control | grep "^Package: " | sed -e "s,^Package: ,debian/,g"` \
-		| lzma -c9 | uuencode - > debian/amd64.tar.lzma.uu
-ifneq (,$(DEB_FIXDIFF))
-	# okay, try to change the .diff.gz
-	bash debian/diff-amd64.sh
-endif
-endif
 
 	# tight libwine dependencies for packages built here
 	dh_makeshlibs -plibwine -n -V "libwine (= $(VERSION))"

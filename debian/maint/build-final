@@ -1,6 +1,5 @@
 #!/bin/sh
 set -e
-rm -f debian/amd64.tar.lzma.uu
 version=`dpkg-parsechangelog|sed -n 's/Version: \(.*\)/\1/p'`
 # see if the version in the changelog is tagged (already built)
 obj_type="`git-cat-file -t "wine-$version" 2>/dev/null`" || true
@@ -22,7 +21,6 @@ version=`dpkg-parsechangelog|sed -n 's/Version: \(.*\)/\1/p'`
 git add debian/changelog
 git commit -m "Release $version"
 # build package
-export DEB_FIXDIFF=yes
 git-buildpackage --git-pristine-tar \
  --git-upstream-tag="wine-%(version)s" \
  --git-debian-tag="wine-%(version)s" \
