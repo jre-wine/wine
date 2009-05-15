@@ -27,18 +27,35 @@ VERSION := $(lastword $(shell dpkg-parsechangelog|grep "^Version: "))
 
 #DEBIAN_SID := $(findstring sid,$(DEBIAN_VERSION))
 
+CC=gcc
+LIBDIR=lib
+
+IA32_CC := $(CC)
+IA32_CFLAGS := $(CFLAGS)
+IA32_LDFLAGS := $(LDFLAGS)
+IA32_LIBDIR := $(LIBDIR)
+
+# Win64 version requires gcc >= 4.4
+AMD64_CC := gcc-4.4
+AMD64_CFLAGS := $(CFLAGS)
+AMD64_LDFLAGS := $(LDFLAGS)
+AMD64_LIBDIR := $(LIBDIR)
+
 ifeq ($(DEB_HOST_GNU_CPU),x86_64)
-BUILDS = build32
-# Not ready yet: build Win64 version
-#BUILDS += build64
-#NATIVE_BUILD = build64
-NATIVE_BUILD = build32
+
 IA32_LIBS = /emul/ia32-linux
-LDFLAGS += -L$(CURDIR)/lib32
-else
+IA32_LDFLAGS += -L$(CURDIR)/lib32
+#IA32_LIBDIR = lib32
+
+# Not ready yet: build Win64 version
+#BUILDS = build32 build64
 BUILDS = build32
-NATIVE_BUILD = build32
-endif
+
+else # !x86_64
+
+BUILDS = build32
+
+endif # x86_64
 
 LOADERS = wine-kthread wine-pthread wine-preloader
 
@@ -57,13 +74,14 @@ configure-arch32-stamp: configure-ia32-stamp
 ifeq (,$(DEB_SAVEBUILD))
 	mkdir build32 || true
 	cd build32 && \
-	CFLAGS="$(CFLAGS)" \
-	LDFLAGS="$(LDFLAGS)" \
+	CC="$(IA32_CC)" \
+	CFLAGS="$(IA32_CFLAGS)" \
+	LDFLAGS="$(IA32_LDFLAGS)" \
 	../configure --disable-win64 $(CONFIGOPTS) \
 	--prefix=/usr \
 	--sysconfdir=/etc \
 	--bindir=\$${prefix}/bin \
-	--libdir=\$${prefix}/lib \
+	--libdir=\$${prefix}/$(IA32_LIBDIR) \
 	--mandir=\$${prefix}/share/man \
 	--infodir=\$${prefix}/share/info
 else
@@ -78,13 +96,14 @@ configure-arch64-stamp: configure-ia32-stamp
 ifeq (,$(DEB_SAVEBUILD))
 	mkdir build64 || true
 	cd build64 && \
-	CFLAGS="$(CFLAGS)" \
-	LDFLAGS="$(LDFLAGS)" \
+	CC="$(AMD64_CC)" \
+	CFLAGS="$(AMD64_CFLAGS)" \
+	LDFLAGS="$(AMD64_LDFLAGS)" \
 	../configure --enable-win64 $(CONFIGOPTS) \
 	--prefix=/usr \
 	--sysconfdir=/etc \
 	--bindir=\$${prefix}/bin \
-	--libdir=\$${prefix}/lib \
+	--libdir=\$${prefix}/$(AMD64_LIBDIR) \
 	--mandir=\$${prefix}/share/man \
 	--infodir=\$${prefix}/share/info
 else
@@ -169,14 +188,14 @@ install-arch32-stamp: build-arch32-stamp
 	dh_testroot
 
 	# install wine, libwine, fonts, and tools
-	$(MAKE) -C build32 install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/lib
-	# move the real binaries into /usr/lib/wine
-	mv debian/tmp/usr/bin/wine debian/tmp/usr/lib/wine/wine.bin
+	$(MAKE) -C build32 install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/$(IA32_LIBDIR)
+	# move the real binaries into /usr/$(IA32_LIBDIR)/wine
+	mv debian/tmp/usr/bin/wine debian/tmp/usr/$(IA32_LIBDIR)/wine/wine.bin
 	for ldr in $(LOADERS); do \
 	 [ ! -f debian/tmp/usr/bin/$$ldr ] || \
-	 mv debian/tmp/usr/bin/$$ldr debian/tmp/usr/lib/wine; \
+	 mv debian/tmp/usr/bin/$$ldr debian/tmp/usr/$(IA32_LIBDIR)/wine; \
 	done
-	mv debian/tmp/usr/bin/wineserver debian/tmp/usr/lib/wine/wineserver
+	mv debian/tmp/usr/bin/wineserver debian/tmp/usr/$(IA32_LIBDIR)/wine/wineserver
 	# install manpages
 	$(MAKE) -C build32/documentation install-man prefix=`pwd`/debian/tmp/usr
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
@@ -195,10 +214,10 @@ install-arch64-stamp: build-arch64-stamp
 	dh_testroot
 
 	# install wine, libwine, fonts, and tools
-	$(MAKE) -C build64 install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/lib
-	# move the real binaries into /usr/lib/wine
-	mv debian/tmp/usr/bin/wine debian/tmp/usr/lib/wine/wine.bin
-	mv debian/tmp/usr/bin/wineserver debian/tmp/usr/lib/wine/wineserver
+	$(MAKE) -C build64 install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/$(AMD64_LIBDIR)
+	# move the real binaries into /usr/$(AMD64_LIBDIR)/wine
+	mv debian/tmp/usr/bin/wine debian/tmp/usr/$(AMD64_LIBDIR)/wine/wine.bin
+	mv debian/tmp/usr/bin/wineserver debian/tmp/usr/$(AMD64_LIBDIR)/wine/wineserver
 	# install manpages
 	$(MAKE) -C build64/documentation install-man prefix=`pwd`/debian/tmp/usr
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
