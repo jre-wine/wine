@@ -435,6 +435,8 @@ enum vertexprocessing_mode {
     pretransformed
 };
 
+#define WINED3D_CONST_NUM_UNUSED ~0U
+
 struct stb_const_desc {
     char                    texunit;
     UINT                    const_num;
@@ -653,8 +655,8 @@ extern LONG primCounter;
  */
 
 /* Routine common to the draw primitive and draw indexed primitive routines */
-void drawPrimitive(IWineD3DDevice *iface, int PrimitiveType, long NumPrimitives,
-        UINT numberOfVertices, long start_idx, short idxBytes, const void *idxData, int minIndex);
+void drawPrimitive(IWineD3DDevice *iface, UINT index_count, UINT numberOfVertices,
+        UINT start_idx, UINT idxBytes, const void *idxData, UINT minIndex);
 
 void primitiveDeclarationConvertToStridedData(
      IWineD3DDevice *iface,
@@ -668,6 +670,7 @@ typedef void (WINE_GLAPI *glAttribFunc)(const void *data);
 typedef void (WINE_GLAPI *glMultiTexCoordFunc)(GLenum unit, const void *data);
 extern glAttribFunc position_funcs[WINED3DDECLTYPE_UNUSED];
 extern glAttribFunc diffuse_funcs[WINED3DDECLTYPE_UNUSED];
+extern glAttribFunc specular_func_3ubv;
 extern glAttribFunc specular_funcs[WINED3DDECLTYPE_UNUSED];
 extern glAttribFunc normal_funcs[WINED3DDECLTYPE_UNUSED];
 extern glMultiTexCoordFunc multi_texcoord_funcs[WINED3DDECLTYPE_UNUSED];
@@ -935,8 +938,8 @@ struct WineD3DAdapter
     unsigned int            UsedTextureRam;
 };
 
-extern BOOL InitAdapters(void);
 extern BOOL initPixelFormats(WineD3D_GL_Info *gl_info);
+BOOL initPixelFormatsNoGL(WineD3D_GL_Info *gl_info);
 extern long WineD3DAdapterChangeGLRam(IWineD3DDeviceImpl *D3DDevice, long glram);
 extern void add_gl_compat_wrappers(WineD3D_GL_Info *gl_info);
 
@@ -1023,9 +1026,14 @@ typedef struct IWineD3DImpl
     /* WineD3D Information */
     IUnknown               *parent;
     UINT                    dxVersion;
+
+    UINT adapter_count;
+    struct WineD3DAdapter adapters[1];
 } IWineD3DImpl;
 
 extern const IWineD3DVtbl IWineD3D_Vtbl;
+
+BOOL InitAdapters(IWineD3DImpl *This);
 
 /* TODO: setup some flags in the registry to enable, disable pbuffer support
 (since it will break quite a few things until contexts are managed properly!) */
@@ -1039,6 +1047,8 @@ void dumpResources(struct list *list);
 /*****************************************************************************
  * IWineD3DDevice implementation structure
  */
+#define WINED3D_UNMAPPED_STAGE ~0U
+
 struct IWineD3DDeviceImpl
 {
     /* IUnknown fields      */
@@ -1226,7 +1236,7 @@ typedef struct IWineD3DResourceClass
     WINED3DPOOL             pool;
     UINT                    size;
     DWORD                   usage;
-    WINED3DFORMAT           format;
+    const struct GlPixelFormatDesc *format_desc;
     DWORD                   priority;
     BYTE                   *allocatedMemory; /* Pointer to the real data location */
     BYTE                   *heapMemory; /* Pointer to the HeapAlloced block of memory */
@@ -1250,7 +1260,8 @@ DWORD resource_get_priority(IWineD3DResource *iface);
 HRESULT resource_get_private_data(IWineD3DResource *iface, REFGUID guid,
         void *data, DWORD *data_size);
 HRESULT resource_init(struct IWineD3DResourceClass *resource, WINED3DRESOURCETYPE resource_type,
-        IWineD3DDeviceImpl *device, UINT size, DWORD usage, WINED3DFORMAT format, WINED3DPOOL pool, IUnknown *parent);
+        IWineD3DDeviceImpl *device, UINT size, DWORD usage, const struct GlPixelFormatDesc *format_desc,
+        WINED3DPOOL pool, IUnknown *parent);
 WINED3DRESOURCETYPE resource_get_type(IWineD3DResource *iface);
 DWORD resource_set_priority(IWineD3DResource *iface, DWORD new_priority);
 HRESULT resource_set_private_data(IWineD3DResource *iface, REFGUID guid,
@@ -1258,56 +1269,6 @@ HRESULT resource_set_private_data(IWineD3DResource *iface, REFGUID guid,
 
 /* Tests show that the start address of resources is 32 byte aligned */
 #define RESOURCE_ALIGNMENT 32
-
-/*****************************************************************************
- * IWineD3DVertexBuffer implementation structure (extends IWineD3DResourceImpl)
- */
-enum vbo_conversion_type {
-    CONV_NONE               = 0,
-    CONV_D3DCOLOR           = 1,
-    CONV_POSITIONT          = 2,
-    CONV_FLOAT16_2          = 3 /* Also handles FLOAT16_4 */
-
-    /* TODO: Add tests and support for FLOAT16_4 POSITIONT, D3DCOLOR position, other
-     * fixed function semantics as D3DCOLOR or FLOAT16
-     */
-};
-
-typedef struct IWineD3DVertexBufferImpl
-{
-    /* IUnknown & WineD3DResource Information     */
-    const IWineD3DVertexBufferVtbl *lpVtbl;
-    IWineD3DResourceClass     resource;
-
-    /* WineD3DVertexBuffer specifics */
-    DWORD                     fvf;
-
-    /* Vertex buffer object support */
-    GLuint                    vbo;
-    BYTE                      Flags;
-    LONG                      bindCount;
-    LONG                      vbo_size;
-    GLenum                    vbo_usage;
-
-    UINT                      dirtystart, dirtyend;
-    LONG                      lockcount;
-
-    LONG                      declChanges, draws;
-    /* Last description of the buffer */
-    DWORD                     stride;       /* 0 if no conversion               */
-    enum vbo_conversion_type  *conv_map;    /* NULL if no conversion            */
-
-    /* Extra load offsets, for FLOAT16 conversion */
-    DWORD                     *conv_shift;  /* NULL if no shifted conversion    */
-    DWORD                     conv_stride;  /* 0 if no shifted conversion       */
-} IWineD3DVertexBufferImpl;
-
-extern const IWineD3DVertexBufferVtbl IWineD3DVertexBuffer_Vtbl;
-
-#define VBFLAG_OPTIMIZED      0x01    /* Optimize has been called for the VB */
-#define VBFLAG_DIRTY          0x02    /* Buffer data has been modified */
-#define VBFLAG_HASDESC        0x04    /* A vertex description has been found */
-#define VBFLAG_CREATEVBO      0x08    /* Attempt to create a VBO next PreLoad */
 
 /*****************************************************************************
  * IWineD3DIndexBuffer implementation structure (extends IWineD3DResourceImpl)
@@ -1376,7 +1337,6 @@ typedef struct IWineD3DBaseTextureClass
     BOOL                    is_srgb;
     const struct min_lookup *minMipLookup;
     const GLenum            *magLookup;
-    struct color_fixup_desc shader_color_fixup;
     void                    (*internal_preload)(IWineD3DBaseTexture *iface, enum WINED3DSRGB srgb);
 } IWineD3DBaseTextureClass;
 
@@ -1426,9 +1386,6 @@ typedef struct IWineD3DTextureImpl
 
     /* IWineD3DTexture */
     IWineD3DSurface          *surfaces[MAX_LEVELS];
-    
-    UINT                      width;
-    UINT                      height;
     UINT                      target;
     BOOL                      cond_np2;
 
@@ -1572,7 +1529,6 @@ struct IWineD3DSurfaceImpl
 
     UINT                      pow2Width;
     UINT                      pow2Height;
-    float                     heightscale;
 
     /* A method to retrieve the drawable size. Not in the Vtable to make it changeable */
     void (*get_drawable_size)(IWineD3DSurfaceImpl *This, UINT *width, UINT *height);
@@ -1796,14 +1752,15 @@ typedef struct SAVEDSTATES {
     WORD vertexShaderConstantsB;                /* MAX_CONST_B, 16 */
     WORD vertexShaderConstantsI;                /* MAX_CONST_I, 16 */
     BOOL *vertexShaderConstantsF;
-    BYTE indices : 1;
-    BYTE material : 1;
-    BYTE viewport : 1;
-    BYTE vertexDecl : 1;
-    BYTE pixelShader : 1;
-    BYTE vertexShader : 1;
-    BYTE scissorRect : 1;
-    BYTE padding : 1;
+    WORD primitive_type : 1;
+    WORD indices : 1;
+    WORD material : 1;
+    WORD viewport : 1;
+    WORD vertexDecl : 1;
+    WORD pixelShader : 1;
+    WORD vertexShader : 1;
+    WORD scissorRect : 1;
+    WORD padding : 1;
 } SAVEDSTATES;
 
 struct StageState {
@@ -1835,11 +1792,14 @@ struct IWineD3DStateBlockImpl
     INT                        vertexShaderConstantI[MAX_CONST_I * 4];
     float                     *vertexShaderConstantF;
 
+    /* primitive type */
+    GLenum gl_primitive_type;
+
     /* Stream Source */
     BOOL                      streamIsUP;
     UINT                      streamStride[MAX_STREAMS];
     UINT                      streamOffset[MAX_STREAMS + 1 /* tesselated pseudo-stream */ ];
-    IWineD3DVertexBuffer     *streamSource[MAX_STREAMS];
+    IWineD3DBuffer           *streamSource[MAX_STREAMS];
     UINT                      streamFreq[MAX_STREAMS + 1];
     UINT                      streamFlags[MAX_STREAMS + 1];     /*0 | WINED3DSTREAMSOURCE_INSTANCEDATA | WINED3DSTREAMSOURCE_INDEXEDDATA  */
 
@@ -1974,15 +1934,54 @@ typedef struct  WineQueryEventData {
 } WineQueryEventData;
 
 /* IWineD3DBuffer */
+
+/* TODO: Add tests and support for FLOAT16_4 POSITIONT, D3DCOLOR position, other
+ * fixed function semantics as D3DCOLOR or FLOAT16 */
+enum wined3d_buffer_conversion_type
+{
+    CONV_NONE,
+    CONV_D3DCOLOR,
+    CONV_POSITIONT,
+    CONV_FLOAT16_2, /* Also handles FLOAT16_4 */
+};
+
+#define WINED3D_BUFFER_OPTIMIZED    0x01    /* Optimize has been called for the buffer */
+#define WINED3D_BUFFER_DIRTY        0x02    /* Buffer data has been modified */
+#define WINED3D_BUFFER_HASDESC      0x04    /* A vertex description has been found */
+#define WINED3D_BUFFER_CREATEBO     0x08    /* Attempt to create a buffer object next PreLoad */
+
 struct wined3d_buffer
 {
     const struct IWineD3DBufferVtbl *vtbl;
     IWineD3DResourceClass resource;
 
     struct wined3d_buffer_desc desc;
+
+    GLuint buffer_object;
+    GLenum buffer_object_usage;
+    UINT buffer_object_size;
+    LONG bind_count;
+    DWORD flags;
+
+    UINT dirty_start;
+    UINT dirty_end;
+    LONG lock_count;
+
+    /* legacy vertex buffers */
+    DWORD fvf;
+
+    /* conversion stuff */
+    UINT conversion_count;
+    UINT draw_count;
+    UINT stride;                                            /* 0 if no conversion */
+    UINT conversion_stride;                                 /* 0 if no shifted conversion */
+    enum wined3d_buffer_conversion_type *conversion_map;    /* NULL if no conversion */
+    /* Extra load offsets, for FLOAT16 conversion */
+    UINT *conversion_shift;                                 /* NULL if no shifted conversion */
 };
 
 extern const IWineD3DBufferVtbl wined3d_buffer_vtbl;
+const BYTE *buffer_get_memory(IWineD3DBuffer *iface, UINT offset, GLuint *buffer_object);
 
 /* IWineD3DRendertargetView */
 struct wined3d_rendertarget_view
@@ -2097,22 +2096,13 @@ void surface_set_compatible_renderbuffer(IWineD3DSurface *iface, unsigned int wi
 void surface_set_texture_name(IWineD3DSurface *iface, GLuint name, BOOL srgb_name);
 void surface_set_texture_target(IWineD3DSurface *iface, GLenum target);
 
-BOOL getColorBits(WINED3DFORMAT fmt, short *redSize, short *greenSize, short *blueSize, short *alphaSize, short *totalSize);
-BOOL getDepthStencilBits(WINED3DFORMAT fmt, short *depthSize, short *stencilSize);
+BOOL getColorBits(const WineD3D_GL_Info *gl_info, WINED3DFORMAT fmt,
+        short *redSize, short *greenSize, short *blueSize, short *alphaSize, short *totalSize);
+BOOL getDepthStencilBits(const WineD3D_GL_Info *gl_info, WINED3DFORMAT fmt, short *depthSize, short *stencilSize);
 
 /* Math utils */
 void multiply_matrix(WINED3DMATRIX *dest, const WINED3DMATRIX *src1, const WINED3DMATRIX *src2);
-unsigned int count_bits(unsigned int mask);
 UINT wined3d_log2i(UINT32 x);
-
-/*****************************************************************************
- * To enable calling of inherited functions, requires prototypes 
- *
- * Note: Only require classes which are subclassed, ie resource, basetexture, 
- */
-
-    /* IWineD3DVertexBuffer */
-    extern const BYTE *IWineD3DVertexBufferImpl_GetMemory(IWineD3DVertexBuffer* iface, DWORD iOffset, GLint *vbo);
 
 /* TODO: Make this dynamic, based on shader limits ? */
 #define MAX_REG_ADDR 1
@@ -2232,6 +2222,7 @@ typedef struct SHADER_PARSE_STATE {
 extern int shader_addline(
     SHADER_BUFFER* buffer,
     const char* fmt, ...) PRINTF_ATTR(2,3);
+int shader_vaddline(SHADER_BUFFER *buffer, const char *fmt, va_list args);
 
 const SHADER_OPCODE *shader_get_opcode(const SHADER_OPCODE *shader_ins, DWORD shader_version, DWORD code);
 
@@ -2272,8 +2263,6 @@ typedef struct IWineD3DBaseShaderClass
     struct list constantsF;
     struct list constantsI;
     shader_reg_maps reg_maps;
-
-    UINT recompile_count;
 
     /* Pointer to the parent device */
     IWineD3DDevice *device;
@@ -2492,6 +2481,15 @@ extern WINED3DFORMAT pixelformat_for_depth(DWORD depth);
 
 struct GlPixelFormatDesc
 {
+    WINED3DFORMAT format;
+    DWORD red_mask;
+    DWORD green_mask;
+    DWORD blue_mask;
+    DWORD alpha_mask;
+    UINT byte_count;
+    WORD depth_size;
+    WORD stencil_size;
+
     GLint glInternal;
     GLint glGammaInternal;
     GLint rtInternal;
@@ -2502,16 +2500,7 @@ struct GlPixelFormatDesc
     struct color_fixup_desc color_fixup;
 };
 
-typedef struct {
-    WINED3DFORMAT           format;
-    DWORD                   alphaMask, redMask, greenMask, blueMask;
-    UINT                    bpp;
-    short                   depthSize, stencilSize;
-    BOOL                    isFourcc;
-} StaticPixelFormatDesc;
-
-const StaticPixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt,
-        const WineD3D_GL_Info *gl_info, const struct GlPixelFormatDesc **glDesc);
+const struct GlPixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt, const WineD3D_GL_Info *gl_info);
 
 static inline BOOL use_vs(IWineD3DStateBlockImpl *stateblock)
 {

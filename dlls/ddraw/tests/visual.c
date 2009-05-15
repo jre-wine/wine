@@ -566,7 +566,12 @@ static void offscreen_test(IDirect3DDevice7 *device)
     hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_LIGHTING, FALSE);
     ok(hr == D3D_OK, "IDirect3DDevice7_SetRenderState returned hr = %08x\n", hr);
 
-    if(IDirect3DDevice7_BeginScene(device) == D3D_OK && !refdevice) {
+    if (refdevice) {
+        win_skip("Tests would crash on W2K with a refdevice\n");
+        goto out;
+    }
+
+    if(IDirect3DDevice7_BeginScene(device) == D3D_OK) {
         hr = IDirect3DDevice7_SetRenderTarget(device, offscreen, 0);
         ok(hr == D3D_OK, "SetRenderTarget failed, hr = %08x\n", hr);
         hr = IDirect3DDevice7_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
@@ -687,6 +692,12 @@ static void alpha_test(IDirect3DDevice7 *device)
 
     hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_ALPHABLENDENABLE, TRUE);
     ok(hr == D3D_OK, "IDirect3DDevice7_SetRenderState failed, hr = %08x\n", hr);
+
+    if (refdevice) {
+        win_skip("Tests would crash on W2K with a refdevice\n");
+        goto out;
+    }
+
     if(IDirect3DDevice7_BeginScene(device) == D3D_OK) {
 
         /* Draw two quads, one with src alpha blending, one with dest alpha blending. The
@@ -823,7 +834,9 @@ static void rhw_zero_test(IDirect3DDevice7 *device)
     }
 
     color = getPixelColor(device, 5, 5);
-    ok(color == 0xffffff, "Got color %08x, expected 00ffffff\n", color);
+    ok(color == 0xffffff ||
+       broken(color == 0), /* VMware */
+       "Got color %08x, expected 00ffffff\n", color);
 
     color = getPixelColor(device, 105, 105);
     ok(color == 0, "Got color %08x, expected 00000000\n", color);
@@ -1825,7 +1838,9 @@ static void D3D1_ViewportClearTest(void)
     red =   (color & 0x00ff0000) >> 16;
     green = (color & 0x0000ff00) >>  8;
     blue =  (color & 0x000000ff);
-    ok(red == 0xff && green == 0 && blue == 0, "Got color %08x, expected 00ff0000\n", color);
+    ok((red == 0xff && green == 0 && blue == 0) ||
+       broken(red == 0 && green == 0 && blue == 0xff), /* VMware and some native boxes */
+       "Got color %08x, expected 00ff0000\n", color);
 
     color = D3D1_getPixelColor(DirectDraw1, Surface1, 205, 205);
     red =   (color & 0x00ff0000) >> 16;
@@ -2278,7 +2293,9 @@ static void p8_primary_test(void)
     ddsd.ddpfPixelFormat.dwFlags = DDPF_RGB | DDPF_PALETTEINDEXED8;
     U1(ddsd.ddpfPixelFormat).dwRGBBitCount      = 8;
     hr = IDirectDraw_CreateSurface(DirectDraw1, &ddsd, &offscreen, NULL);
-    ok(hr == DD_OK, "IDirectDraw_CreateSurface returned %08x\n", hr);
+    ok(hr == DD_OK ||
+       broken(hr == DDERR_INVALIDPIXELFORMAT), /* VMware */
+       "IDirectDraw_CreateSurface returned %08x\n", hr);
     if (FAILED(hr)) goto out;
 
     memset(entries, 0, sizeof(entries));
@@ -2597,6 +2614,14 @@ static void cubemap_test(IDirect3DDevice7 *device)
     if(SUCCEEDED(hr))
     {
         hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_TEXCOORDSIZE3(0) | D3DFVF_TEX1, quad + 0 * 6, 4, 0);
+        if (hr == E_NOTIMPL)
+        {
+            /* VMware */
+            win_skip("IDirect3DDevice7_DrawPrimitive is not completely implemented, colors won't be tested\n");
+            hr = IDirect3DDevice7_EndScene(device);
+            ok(hr == DD_OK, "IDirect3DDevice7_EndScene returned %08x\n", hr);
+            goto out;
+        }
         ok(hr == DD_OK, "IDirect3DDevice7_DrawPrimitive returned %08x\n", hr);
         hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_TEXCOORDSIZE3(0) | D3DFVF_TEX1, quad + 4 * 6, 4, 0);
         ok(hr == DD_OK, "IDirect3DDevice7_DrawPrimitive returned %08x\n", hr);
@@ -2619,6 +2644,8 @@ static void cubemap_test(IDirect3DDevice7 *device)
     ok(color == 0x00ff00ff, "DDSCAPS2_CUBEMAP_POSITIVEY has color 0x%08x, expected 0x00ff00ff\n", color);
     color = getPixelColor(device, 480, 120); /* upper right quad - positivez */
     ok(color == 0x000000ff, "DDSCAPS2_CUBEMAP_POSITIVEZ has color 0x%08x, expected 0x000000ff\n", color);
+
+out:
     hr = IDirect3DDevice7_SetTexture(device, 0, NULL);
     ok(hr == DD_OK, "IDirect3DDevice7_SetTexture returned %08x\n", hr);
     IDirectDrawSurface7_Release(cubemap);

@@ -72,7 +72,7 @@ static void test_bitmap_info(HBITMAP hbm, INT expected_depth, const BITMAPINFOHE
     BITMAP bm;
     BITMAP bma[2];
     INT ret, width_bytes;
-    char buf[512], buf_cmp[512];
+    BYTE buf[512], buf_cmp[512];
     DWORD gle;
 
     ret = GetObject(hbm, sizeof(bm), &bm);
@@ -101,7 +101,9 @@ static void test_bitmap_info(HBITMAP hbm, INT expected_depth, const BITMAPINFOHE
     memset(buf, 0xAA, sizeof(buf));
     ret = GetBitmapBits(hbm, sizeof(buf), buf);
     ok(ret == bm.bmWidthBytes * bm.bmHeight, "%d != %d\n", ret, bm.bmWidthBytes * bm.bmHeight);
-    ok(!memcmp(buf, buf_cmp, sizeof(buf)), "buffers do not match\n");
+    ok(!memcmp(buf, buf_cmp, sizeof(buf)) ||
+       broken(memcmp(buf, buf_cmp, sizeof(buf))), /* win9x doesn't init the bitmap bits */
+        "buffers do not match, depth %d\n", bmih->biBitCount);
 
     /* test various buffer sizes for GetObject */
     ret = GetObject(hbm, sizeof(*bma) * 2, bma);
@@ -427,7 +429,9 @@ static void test_dib_bits_access( HBITMAP hdib, void *bits )
     pbmi->bmiHeader.biCompression = BI_RGB;
 
     ret = SetDIBits( hdc, hdib, 0, 16, data, pbmi, DIB_RGB_COLORS );
-    ok( ret == 16, "SetDIBits failed\n" );
+    ok(ret == 16 ||
+       broken(ret == 0), /* win9x */
+       "SetDIBits failed: expected 16 got %d\n", ret);
 
     ok(VirtualQuery(bits, &info, sizeof(info)) == sizeof(info),
         "VirtualQuery failed\n");
@@ -716,7 +720,8 @@ static void test_dibsections(void)
     hdib = CreateDIBSection(hdc, pbmi, DIB_PAL_COLORS, (void**)&bits, NULL, 0);
     ok(hdib != NULL, "CreateDIBSection failed\n");
     ok(GetObject(hdib, sizeof(DIBSECTION), &dibsec) != 0, "GetObject failed for DIB Section\n");
-    ok(dibsec.dsBmih.biClrUsed == 2,
+    ok(dibsec.dsBmih.biClrUsed == 2 ||
+       broken(dibsec.dsBmih.biClrUsed == 0), /* win9x */
         "created DIBSection: wrong biClrUsed field: %u, should be: %u\n", dibsec.dsBmih.biClrUsed, 2);
 
     /* The colour table has already been grabbed from the dc, so we select back the
@@ -808,7 +813,8 @@ static void test_dibsections(void)
     hdib = CreateDIBSection(hdc, pbmi, DIB_PAL_COLORS, (void**)&bits, NULL, 0);
     ok(hdib != NULL, "CreateDIBSection failed\n");
     ok(GetObject(hdib, sizeof(DIBSECTION), &dibsec) != 0, "GetObject failed for DIB Section\n");
-    ok(dibsec.dsBmih.biClrUsed == 256,
+    ok(dibsec.dsBmih.biClrUsed == 256 ||
+       broken(dibsec.dsBmih.biClrUsed == 0), /* win9x */
         "created DIBSection: wrong biClrUsed field: %u, should be: %u\n", dibsec.dsBmih.biClrUsed, 256);
 
     test_dib_info(hdib, bits, &pbmi->bmiHeader);
@@ -1110,7 +1116,9 @@ static void test_bitmap(void)
     memset(buf, 0xAA, sizeof(buf));
     ret = GetBitmapBits(hbmp, sizeof(buf), buf);
     ok(ret == bm.bmWidthBytes * bm.bmHeight, "%d != %d\n", ret, bm.bmWidthBytes * bm.bmHeight);
-    ok(!memcmp(buf, buf_cmp, sizeof(buf)), "buffers do not match\n");
+    ok(!memcmp(buf, buf_cmp, sizeof(buf)) ||
+       broken(memcmp(buf, buf_cmp, sizeof(buf))), /* win9x doesn't init the bitmap bits */
+       "buffers do not match\n");
 
     hbmp_old = SelectObject(hdc, hbmp);
 
@@ -1128,7 +1136,9 @@ static void test_bitmap(void)
     memset(buf, 0xAA, sizeof(buf));
     ret = GetBitmapBits(hbmp, sizeof(buf), buf);
     ok(ret == bm.bmWidthBytes * bm.bmHeight, "%d != %d\n", ret, bm.bmWidthBytes * bm.bmHeight);
-    ok(!memcmp(buf, buf_cmp, sizeof(buf)), "buffers do not match\n");
+    ok(!memcmp(buf, buf_cmp, sizeof(buf)) ||
+       broken(memcmp(buf, buf_cmp, sizeof(buf))), /* win9x doesn't init the bitmap bits */
+       "buffers do not match\n");
 
     hbmp_old = SelectObject(hdc, hbmp_old);
     ok(hbmp_old == hbmp, "wrong old bitmap %p\n", hbmp_old);
@@ -1557,7 +1567,9 @@ static void test_GetDIBits(void)
     lines = GetDIBits(hdc, hbmp, 0, bm.bmHeight, buf, bi, DIB_RGB_COLORS);
     ok(lines == bm.bmHeight, "GetDIBits copied %d lines of %d, error %u\n",
        lines, bm.bmHeight, GetLastError());
-    ok(bi->bmiHeader.biSizeImage == sizeof(dib_bits_1), "expected 16*4, got %u\n", bi->bmiHeader.biSizeImage);
+    ok(bi->bmiHeader.biSizeImage == sizeof(dib_bits_1) ||
+       broken(bi->bmiHeader.biSizeImage == 0), /* win9x */
+       "expected 16*4, got %u\n", bi->bmiHeader.biSizeImage);
 
     /* the color table consists of black and white */
     ok(bi->bmiColors[0].rgbRed == 0 && bi->bmiColors[0].rgbGreen == 0 &&
@@ -1580,7 +1592,6 @@ static void test_GetDIBits(void)
     }
 
     /* returned bits are DWORD aligned and upside down */
-todo_wine
     ok(!memcmp(buf, dib_bits_1, sizeof(dib_bits_1)), "DIB bits don't match\n");
 
     /* Test the palette indices */
@@ -1608,7 +1619,9 @@ todo_wine
     lines = GetDIBits(hdc, hbmp, 0, bm.bmHeight, buf, bi, DIB_RGB_COLORS);
     ok(lines == bm.bmHeight, "GetDIBits copied %d lines of %d, error %u\n",
        lines, bm.bmHeight, GetLastError());
-    ok(bi->bmiHeader.biSizeImage == sizeof(dib_bits_24), "expected 16*16*3, got %u\n", bi->bmiHeader.biSizeImage);
+    ok(bi->bmiHeader.biSizeImage == sizeof(dib_bits_24) ||
+       broken(bi->bmiHeader.biSizeImage == 0), /* win9x */
+       "expected 16*16*3, got %u\n", bi->bmiHeader.biSizeImage);
 
     /* the color table doesn't exist for 24-bit images */
     for (i = 0; i < 256; i++)
@@ -1636,7 +1649,9 @@ todo_wine
     memset(&bm, 0xAA, sizeof(bm));
     bytes = GetObject(hbmp, sizeof(bm), &bm);
     ok(bytes == sizeof(bm), "GetObject returned %d\n", bytes);
-    ok(bm.bmType == 0, "wrong bmType %d\n", bm.bmType);
+    ok(bm.bmType == 0 ||
+       broken(bm.bmType == 21072), /* win9x */
+       "wrong bmType %d\n", bm.bmType);
     ok(bm.bmWidth == 16, "wrong bmWidth %d\n", bm.bmWidth);
     ok(bm.bmHeight == 16, "wrong bmHeight %d\n", bm.bmHeight);
     ok(bm.bmWidthBytes == BITMAP_GetWidthBytes(bm.bmWidth, bm.bmBitsPixel), "wrong bmWidthBytes %d\n", bm.bmWidthBytes);
@@ -1645,8 +1660,9 @@ todo_wine
     ok(!bm.bmBits, "wrong bmBits %p\n", bm.bmBits);
 
     bytes = GetBitmapBits(hbmp, 0, NULL);
-    ok(bytes == bm.bmWidthBytes * bm.bmHeight, "expected %d got %d bytes\n",
-       bm.bmWidthBytes * bm.bmHeight, bytes);
+    ok(bytes == bm.bmWidthBytes * bm.bmHeight ||
+       broken(bytes == 0), /* win9x */
+       "expected %d got %d bytes\n", bm.bmWidthBytes * bm.bmHeight, bytes);
     bytes = GetBitmapBits(hbmp, sizeof(buf), buf);
     ok(bytes == bm.bmWidthBytes * bm.bmHeight, "expected %d got %d bytes\n",
        bm.bmWidthBytes * bm.bmHeight, bytes);
@@ -1666,7 +1682,9 @@ todo_wine
     lines = GetDIBits(hdc, hbmp, 0, bm.bmHeight, buf, bi, DIB_RGB_COLORS);
     ok(lines == bm.bmHeight, "GetDIBits copied %d lines of %d, error %u\n",
        lines, bm.bmHeight, GetLastError());
-    ok(bi->bmiHeader.biSizeImage == sizeof(dib_bits_1), "expected 16*4, got %u\n", bi->bmiHeader.biSizeImage);
+    ok(bi->bmiHeader.biSizeImage == sizeof(dib_bits_1) ||
+       broken(bi->bmiHeader.biSizeImage == 0), /* win9x */
+       "expected 16*4, got %u\n", bi->bmiHeader.biSizeImage);
 
     /* the color table consists of black and white */
     ok(bi->bmiColors[0].rgbRed == 0 && bi->bmiColors[0].rgbGreen == 0 &&
@@ -1717,7 +1735,9 @@ todo_wine
     lines = GetDIBits(hdc, hbmp, 0, bm.bmHeight, buf, bi, DIB_RGB_COLORS);
     ok(lines == bm.bmHeight, "GetDIBits copied %d lines of %d, error %u\n",
        lines, bm.bmHeight, GetLastError());
-    ok(bi->bmiHeader.biSizeImage == sizeof(dib_bits_24), "expected 16*16*3, got %u\n", bi->bmiHeader.biSizeImage);
+    ok(bi->bmiHeader.biSizeImage == sizeof(dib_bits_24) ||
+       broken(bi->bmiHeader.biSizeImage == 0), /* win9x */
+       "expected 16*16*3, got %u\n", bi->bmiHeader.biSizeImage);
 
     /* the color table doesn't exist for 24-bit images */
     for (i = 0; i < 256; i++)
@@ -1797,7 +1817,9 @@ static void test_GetDIBits_BI_BITFIELDS(void)
         ok( bitmasks[0] != 0, "red mask is not set\n" );
         ok( bitmasks[1] != 0, "green mask is not set\n" );
         ok( bitmasks[2] != 0, "blue mask is not set\n" );
-        ok( dibinfo->bmiHeader.biSizeImage != 0xdeadbeef, "size image not set\n" );
+        ok( dibinfo->bmiHeader.biSizeImage != 0xdeadbeef ||
+            broken(dibinfo->bmiHeader.biSizeImage == 0xdeadbeef), /* win9x */
+            "size image not set\n" );
 
         /* now with bits and 0 lines */
         memset(dibinfo, 0, sizeof(dibinfo_buf));
@@ -1900,7 +1922,9 @@ static void test_select_object(void)
         memset(&bm, 0xAA, sizeof(bm));
         bytes = GetObject(hbm, sizeof(bm), &bm);
         ok(bytes == sizeof(bm), "GetObject returned %d\n", bytes);
-        ok(bm.bmType == 0, "wrong bmType %d\n", bm.bmType);
+        ok(bm.bmType == 0 ||
+           broken(bm.bmType == 21072), /* win9x */
+           "wrong bmType %d\n", bm.bmType);
         ok(bm.bmWidth == 10, "wrong bmWidth %d\n", bm.bmWidth);
         ok(bm.bmHeight == 10, "wrong bmHeight %d\n", bm.bmHeight);
         ok(bm.bmWidthBytes == BITMAP_GetWidthBytes(bm.bmWidth, bm.bmBitsPixel), "wrong bmWidthBytes %d\n", bm.bmWidthBytes);
@@ -2186,7 +2210,9 @@ static void test_get16dibits(void)
     info->bmiHeader.biCompression = BI_RGB;
 
     ret = GetDIBits(screen_dc, hbmp, 0, 0, NULL, info, 0);
-    ok(ret != 0, "GetDIBits failed\n");
+    ok(ret != 0 ||
+       broken(ret == 0), /* win9x */
+       "GetDIBits failed got %d\n", ret);
 
     for (p = ((BYTE *) info) + sizeof(info->bmiHeader); (p - ((BYTE *) info)) < info_len; p++)
         if (*p != '!')

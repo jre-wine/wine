@@ -200,14 +200,16 @@ static void context_check_fbo_status(IWineD3DDevice *iface)
             attachment = (IWineD3DSurfaceImpl *)This->activeContext->current_fbo->render_targets[i];
             if (attachment)
             {
-                FIXME("\tColor attachment %d: (%p) %s %ux%u\n", i, attachment, debug_d3dformat(attachment->resource.format),
+                FIXME("\tColor attachment %d: (%p) %s %ux%u\n",
+                        i, attachment, debug_d3dformat(attachment->resource.format_desc->format),
                         attachment->pow2Width, attachment->pow2Height);
             }
         }
         attachment = (IWineD3DSurfaceImpl *)This->activeContext->current_fbo->depth_stencil;
         if (attachment)
         {
-            FIXME("\tDepth attachment: (%p) %s %ux%u\n", attachment, debug_d3dformat(attachment->resource.format),
+            FIXME("\tDepth attachment: (%p) %s %ux%u\n",
+                    attachment, debug_d3dformat(attachment->resource.format_desc->format),
                     attachment->pow2Width, attachment->pow2Height);
         }
     }
@@ -477,7 +479,8 @@ static int WineD3D_ChoosePixelFormat(IWineD3DDeviceImpl *This, HDC hdc, WINED3DF
     TRACE("ColorFormat=%s, DepthStencilFormat=%s, auxBuffers=%d, numSamples=%d, pbuffer=%d, findCompatible=%d\n",
           debug_d3dformat(ColorFormat), debug_d3dformat(DepthStencilFormat), auxBuffers, numSamples, pbuffer, findCompatible);
 
-    if(!getColorBits(ColorFormat, &redBits, &greenBits, &blueBits, &alphaBits, &colorBits)) {
+    if (!getColorBits(&This->adapter->gl_info, ColorFormat, &redBits, &greenBits, &blueBits, &alphaBits, &colorBits))
+    {
         ERR("Unable to get color bits for format %s (%#x)!\n", debug_d3dformat(ColorFormat), ColorFormat);
         return 0;
     }
@@ -499,7 +502,7 @@ static int WineD3D_ChoosePixelFormat(IWineD3DDeviceImpl *This, HDC hdc, WINED3DF
     DepthStencilFormat = WINED3DFMT_D24S8;
 
     if(DepthStencilFormat) {
-        getDepthStencilBits(DepthStencilFormat, &depthBits, &stencilBits);
+        getDepthStencilBits(&This->adapter->gl_info, DepthStencilFormat, &depthBits, &stencilBits);
     }
 
     for(matchtry = 0; matchtry < (sizeof(matches) / sizeof(matches[0])) && !iPixelFormat; matchtry++) {
@@ -643,16 +646,21 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         int iPixelFormat = 0;
 
         IWineD3DSurface *StencilSurface = This->stencilBufferTarget;
-        WINED3DFORMAT StencilBufferFormat = (NULL != StencilSurface) ? ((IWineD3DSurfaceImpl *) StencilSurface)->resource.format : 0;
+        WINED3DFORMAT StencilBufferFormat = StencilSurface ?
+                ((IWineD3DSurfaceImpl *)StencilSurface)->resource.format_desc->format : 0;
 
         /* Try to find a pixel format with pbuffer support. */
-        iPixelFormat = WineD3D_ChoosePixelFormat(This, hdc_parent, target->resource.format, StencilBufferFormat, FALSE /* auxBuffers */, 0 /* numSamples */, TRUE /* PBUFFER */, FALSE /* findCompatible */);
+        iPixelFormat = WineD3D_ChoosePixelFormat(This, hdc_parent, target->resource.format_desc->format,
+                StencilBufferFormat, FALSE /* auxBuffers */, 0 /* numSamples */, TRUE /* PBUFFER */,
+                FALSE /* findCompatible */);
         if(!iPixelFormat) {
             TRACE("Trying to locate a compatible pixel format because an exact match failed.\n");
 
             /* For some reason we weren't able to find a format, try to find something instead of crashing.
              * A reason for failure could have been wglChoosePixelFormatARB strictness. */
-            iPixelFormat = WineD3D_ChoosePixelFormat(This, hdc_parent, target->resource.format, StencilBufferFormat, FALSE /* auxBuffer */, 0 /* numSamples */, TRUE /* PBUFFER */, TRUE /* findCompatible */);
+            iPixelFormat = WineD3D_ChoosePixelFormat(This, hdc_parent, target->resource.format_desc->format,
+                    StencilBufferFormat, FALSE /* auxBuffer */, 0 /* numSamples */, TRUE /* PBUFFER */,
+                    TRUE /* findCompatible */);
         }
 
         /* This shouldn't happen as ChoosePixelFormat always returns something */
@@ -683,7 +691,7 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         PIXELFORMATDESCRIPTOR pfd;
         int iPixelFormat;
         int res;
-        WINED3DFORMAT ColorFormat = target->resource.format;
+        WINED3DFORMAT ColorFormat = target->resource.format_desc->format;
         WINED3DFORMAT DepthStencilFormat = 0;
         BOOL auxBuffers = FALSE;
         int numSamples = 0;
@@ -698,9 +706,9 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         if(wined3d_settings.offscreen_rendering_mode == ORM_BACKBUFFER) {
             auxBuffers = TRUE;
 
-            if(target->resource.format == WINED3DFMT_X4R4G4B4)
+            if (target->resource.format_desc->format == WINED3DFMT_X4R4G4B4)
                 ColorFormat = WINED3DFMT_A4R4G4B4;
-            else if(target->resource.format == WINED3DFMT_X8R8G8B8)
+            else if(target->resource.format_desc->format == WINED3DFMT_X8R8G8B8)
                 ColorFormat = WINED3DFMT_A8R8G8B8;
         }
 
@@ -919,31 +927,50 @@ out:
  *
  *****************************************************************************/
 static void RemoveContextFromArray(IWineD3DDeviceImpl *This, WineD3DContext *context) {
-    UINT t, s;
-    WineD3DContext **oldArray = This->contexts;
+    WineD3DContext **new_array;
+    BOOL found = FALSE;
+    UINT i;
 
     TRACE("Removing ctx %p\n", context);
 
-    This->numContexts--;
-
-    if(This->numContexts) {
-        This->contexts = HeapAlloc(GetProcessHeap(), 0, sizeof(*This->contexts) * This->numContexts);
-        if(!This->contexts) {
-            ERR("Cannot allocate a new context array, PANIC!!!\n");
+    for (i = 0; i < This->numContexts; ++i)
+    {
+        if (This->contexts[i] == context)
+        {
+            HeapFree(GetProcessHeap(), 0, context);
+            found = TRUE;
+            break;
         }
-        t = 0;
-        /* Note that we decreased numContexts a few lines up, so use '<=' instead of '<' */
-        for(s = 0; s <= This->numContexts; s++) {
-            if(oldArray[s] == context) continue;
-            This->contexts[t] = oldArray[s];
-            t++;
-        }
-    } else {
-        This->contexts = NULL;
     }
 
-    HeapFree(GetProcessHeap(), 0, context);
-    HeapFree(GetProcessHeap(), 0, oldArray);
+    if (!found)
+    {
+        ERR("Context %p doesn't exist in context array\n", context);
+        return;
+    }
+
+    while (i < This->numContexts - 1)
+    {
+        This->contexts[i] = This->contexts[i + 1];
+        ++i;
+    }
+
+    --This->numContexts;
+    if (!This->numContexts)
+    {
+        HeapFree(GetProcessHeap(), 0, This->contexts);
+        This->contexts = NULL;
+        return;
+    }
+
+    new_array = HeapReAlloc(GetProcessHeap(), 0, This->contexts, This->numContexts * sizeof(*This->contexts));
+    if (!new_array)
+    {
+        ERR("Failed to shrink context array. Oh well.\n");
+        return;
+    }
+
+    This->contexts = new_array;
 }
 
 /*****************************************************************************
@@ -1237,20 +1264,19 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
     BOOL readTexture = wined3d_settings.offscreen_rendering_mode != ORM_FBO && This->render_offscreen;
     WineD3DContext *context = This->activeContext;
     BOOL oldRenderOffscreen = This->render_offscreen;
-    const WINED3DFORMAT oldFmt = ((IWineD3DSurfaceImpl *) This->lastActiveRenderTarget)->resource.format;
-    const WINED3DFORMAT newFmt = ((IWineD3DSurfaceImpl *) target)->resource.format;
+    const struct GlPixelFormatDesc *old = ((IWineD3DSurfaceImpl *)This->lastActiveRenderTarget)->resource.format_desc;
+    const struct GlPixelFormatDesc *new = ((IWineD3DSurfaceImpl *)target)->resource.format_desc;
     const struct StateEntry *StateTable = This->StateTable;
 
     /* To compensate the lack of format switching with some offscreen rendering methods and on onscreen buffers
      * the alpha blend state changes with different render target formats
      */
-    if(oldFmt != newFmt) {
-        const struct GlPixelFormatDesc *glDesc;
-        const StaticPixelFormatDesc *old = getFormatDescEntry(oldFmt, NULL, NULL);
-        const StaticPixelFormatDesc *new = getFormatDescEntry(newFmt, &GLINFO_LOCATION, &glDesc);
-
-        /* Disable blending when the alphaMask has changed and when a format doesn't support blending */
-        if((old->alphaMask && !new->alphaMask) || (!old->alphaMask && new->alphaMask) || !(glDesc->Flags & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING)) {
+    if (old->format != new->format)
+    {
+        /* Disable blending when the alpha mask has changed and when a format doesn't support blending */
+        if ((old->alpha_mask && !new->alpha_mask) || (!old->alpha_mask && new->alpha_mask)
+                || !(new->Flags & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING))
+        {
             Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_ALPHABLENDENABLE), StateTable);
         }
     }

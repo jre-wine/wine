@@ -199,7 +199,7 @@ typedef struct tagMSIVIEWOPS
     /*
      * Inserts a new row into the database from the records contents
      */
-    UINT (*insert_row)( struct tagMSIVIEW *view, MSIRECORD *record, BOOL temporary );
+    UINT (*insert_row)( struct tagMSIVIEW *view, MSIRECORD *record, UINT row, BOOL temporary );
 
     /*
      * Deletes a row from the database
@@ -231,7 +231,7 @@ typedef struct tagMSIVIEWOPS
      *   the caller.
      *  The column information can be queried at any time.
      */
-    UINT (*get_column_info)( struct tagMSIVIEW *view, UINT n, LPWSTR *name, UINT *type );
+    UINT (*get_column_info)( struct tagMSIVIEW *view, UINT n, LPWSTR *name, UINT *type, BOOL *temporary );
 
     /*
      * modify - not yet implemented properly

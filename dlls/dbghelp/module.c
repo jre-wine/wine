@@ -37,8 +37,7 @@ const WCHAR        S_WineLoaderW[]  = {'<','w','i','n','e','-','l','o','a','d','
 static const WCHAR S_DotSoW[]       = {'.','s','o','\0'};
 static const WCHAR S_DotPdbW[]      = {'.','p','d','b','\0'};
 static const WCHAR S_DotDbgW[]      = {'.','d','b','g','\0'};
-const WCHAR        S_WinePThreadW[] = {'w','i','n','e','-','p','t','h','r','e','a','d','\0'};
-const WCHAR        S_WineKThreadW[] = {'w','i','n','e','-','k','t','h','r','e','a','d','\0'};
+const WCHAR        S_WineW[]        = {'w','i','n','e',0};
 const WCHAR        S_SlashW[]       = {'/','\0'};
 
 static const WCHAR S_AcmW[] = {'.','a','c','m','\0'};
@@ -87,9 +86,7 @@ static void module_fill_module(const WCHAR* in, WCHAR* out, size_t size)
     out[len] = '\0';
     if (len > 4 && (l = match_ext(out, len)))
         out[len - l] = '\0';
-    else if (len > 12 &&
-             (!strcmpiW(out + len - 12, S_WinePThreadW) ||
-              !strcmpiW(out + len - 12, S_WineKThreadW)))
+    else if (len > 4 && !strcmpiW(out + len - 4, S_WineW))
         lstrcpynW(out, S_WineLoaderW, size);
     else
     {
@@ -361,13 +358,13 @@ struct module* module_find_by_addr(const struct process* pcs, unsigned long addr
 }
 
 /******************************************************************
- *		module_is_elf_container_loaded
+ *		module_is_container_loaded
  *
- * checks whether the ELF container, for a (supposed) PE builtin is
+ * checks whether the native container, for a (supposed) PE builtin is
  * already loaded
  */
-static BOOL module_is_elf_container_loaded(const struct process* pcs,
-                                           const WCHAR* ImageName, DWORD base)
+static BOOL module_is_container_loaded(const struct process* pcs,
+                                       const WCHAR* ImageName, DWORD base)
 {
     size_t              len;
     struct module*      module;
@@ -428,13 +425,10 @@ enum module_type module_get_type_by_name(const WCHAR* name)
     if (len > 4 && !strncmpiW(name + len - 4, S_DotDbgW, 4))
         return DMT_DBG;
 
-    /* wine-[kp]thread is also an ELF module */
-    if (((len > 12 && name[len - 13] == '/') || len == 12) &&
-        (!strncmpiW(name + len - 12, S_WinePThreadW, 12) ||
-         !strncmpiW(name + len - 12, S_WineKThreadW, 12)))
-    {
+    /* wine is also an ELF module */
+    if (((len > 4 && name[len - 5] == '/') || len == 4) && !strcmpiW(name + len - 4, S_WineW))
         return DMT_ELF;
-    }
+
     return DMT_PE;
 }
 
@@ -531,7 +525,7 @@ DWORD64 WINAPI  SymLoadModuleExW(HANDLE hProcess, HANDLE hFile, PCWSTR wImageNam
     if (wImageName)
     {
         module = module_is_already_loaded(pcs, wImageName);
-        if (!module && module_is_elf_container_loaded(pcs, wImageName, BaseOfDll))
+        if (!module && module_is_container_loaded(pcs, wImageName, BaseOfDll))
         {
             /* force the loading of DLL as builtin */
             module = pe_load_builtin_module(pcs, wImageName, BaseOfDll, SizeOfDll);
@@ -715,7 +709,7 @@ BOOL  WINAPI SymEnumerateModulesW64(HANDLE hProcess,
     
     for (module = pcs->lmodules; module; module = module->next)
     {
-        if (!(dbghelp_options & SYMOPT_WINE_WITH_ELF_MODULES) && module->type == DMT_ELF)
+        if (!(dbghelp_options & SYMOPT_WINE_WITH_NATIVE_MODULES) && module->type == DMT_ELF)
             continue;
         if (!EnumModulesCallback(module->module.ModuleName,
                                  module->module.BaseOfImage, UserContext))

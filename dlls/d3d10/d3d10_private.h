@@ -40,20 +40,42 @@ enum d3d10_effect_variable_type
 
 struct d3d10_effect_variable
 {
+    struct d3d10_effect_pass *pass;
     enum d3d10_effect_variable_type type;
     DWORD idx_offset;
+    void *data;
 };
 
+struct d3d10_effect_shader_variable
+{
+    char *input_signature;
+    UINT input_signature_size;
+    union
+    {
+        ID3D10VertexShader *vs;
+        ID3D10PixelShader *ps;
+        ID3D10GeometryShader *gs;
+    } shader;
+};
+
+/* ID3D10EffectPass */
 struct d3d10_effect_pass
 {
+    const struct ID3D10EffectPassVtbl *vtbl;
+
+    struct d3d10_effect_technique *technique;
     char *name;
     DWORD start;
     DWORD variable_count;
     struct d3d10_effect_variable *variables;
 };
 
+/* ID3D10EffectTechnique */
 struct d3d10_effect_technique
 {
+    const struct ID3D10EffectTechniqueVtbl *vtbl;
+
+    struct d3d10_effect *effect;
     char *name;
     DWORD start;
     DWORD pass_count;
@@ -67,6 +89,7 @@ struct d3d10_effect
     const struct ID3D10EffectVtbl *vtbl;
     LONG refcount;
 
+    ID3D10Device *device;
     DWORD technique_count;
     DWORD index_offset;
     DWORD blendstate_count;

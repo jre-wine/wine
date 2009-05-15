@@ -89,6 +89,38 @@ struct d3d10_rendertarget_view
     D3D10_RENDER_TARGET_VIEW_DESC desc;
 };
 
+/* ID3D10InputLayout */
+extern const struct ID3D10InputLayoutVtbl d3d10_input_layout_vtbl;
+struct d3d10_input_layout
+{
+    const struct ID3D10InputLayoutVtbl *vtbl;
+    LONG refcount;
+};
+
+/* ID3D10VertexShader */
+extern const struct ID3D10VertexShaderVtbl d3d10_vertex_shader_vtbl;
+struct d3d10_vertex_shader
+{
+    const struct ID3D10VertexShaderVtbl *vtbl;
+    LONG refcount;
+};
+
+/* ID3D10GeometryShader */
+extern const struct ID3D10GeometryShaderVtbl d3d10_geometry_shader_vtbl;
+struct d3d10_geometry_shader
+{
+    const struct ID3D10GeometryShaderVtbl *vtbl;
+    LONG refcount;
+};
+
+/* ID3D10PixelShader */
+extern const struct ID3D10PixelShaderVtbl d3d10_pixel_shader_vtbl;
+struct d3d10_pixel_shader
+{
+    const struct ID3D10PixelShaderVtbl *vtbl;
+    LONG refcount;
+};
+
 /* Layered device */
 enum dxgi_device_layer_id
 {

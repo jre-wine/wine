@@ -31,51 +31,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(twain);
 
-/* DG_IMAGE/DAT_CIECOLOR/MSG_GET */
-TW_UINT16 SANE_CIEColorGet (pTW_IDENTITY pOrigin, 
-                             TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_IMAGE/DAT_EXTIMAGEINFO/MSG_GET */
-TW_UINT16 SANE_ExtImageInfoGet (pTW_IDENTITY pOrigin, 
-                                 TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_IMAGE/DAT_GRAYRESPONSE/MSG_RESET */
-TW_UINT16 SANE_GrayResponseReset (pTW_IDENTITY pOrigin, 
-                                   TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_IMAGE/DAT_GRAYRESPONSE/MSG_SET */
-TW_UINT16 SANE_GrayResponseSet (pTW_IDENTITY pOrigin, 
-                                 TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_IMAGE/DAT_IMAGEFILEXFER/MSG_GET */
-TW_UINT16 SANE_ImageFileXferGet (pTW_IDENTITY pOrigin, 
-                                  TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
 /* DG_IMAGE/DAT_IMAGEINFO/MSG_GET */
 TW_UINT16 SANE_ImageInfoGet (pTW_IDENTITY pOrigin, 
                               TW_MEMREF pData)
@@ -106,6 +61,7 @@ TW_UINT16 SANE_ImageInfoGet (pTW_IDENTITY pOrigin,
             {
                 WARN("psane_get_parameters: %s\n", psane_strstatus (status));
                 psane_cancel (activeDS.deviceHandle);
+                activeDS.sane_started = FALSE;
                 activeDS.twCC = TWCC_OPERATIONERROR;
                 return TWRC_FAILURE;
             }
@@ -142,7 +98,10 @@ TW_UINT16 SANE_ImageInfoGet (pTW_IDENTITY pOrigin,
             pImageInfo->Planar = TRUE;
             pImageInfo->SamplesPerPixel = 1;
             pImageInfo->BitsPerSample[0] = activeDS.sane_param.depth;
-            pImageInfo->PixelType = TWPT_GRAY;
+            if (activeDS.sane_param.depth == 1)
+                pImageInfo->PixelType = TWPT_BW;
+            else
+                pImageInfo->PixelType = TWPT_GRAY;
         }
         else
         {
@@ -157,12 +116,49 @@ TW_UINT16 SANE_ImageInfoGet (pTW_IDENTITY pOrigin,
 }
 
 /* DG_IMAGE/DAT_IMAGELAYOUT/MSG_GET */
-TW_UINT16 SANE_ImageLayoutGet (pTW_IDENTITY pOrigin, 
+TW_UINT16 SANE_ImageLayoutGet (pTW_IDENTITY pOrigin,
                                 TW_MEMREF pData)
 {
-    FIXME ("stub!\n");
-
+#ifndef SONAME_LIBSANE
     return TWRC_FAILURE;
+#else
+    TW_IMAGELAYOUT *img = (TW_IMAGELAYOUT *) pData;
+    SANE_Fixed tlx_current;
+    SANE_Fixed tly_current;
+    SANE_Fixed brx_current;
+    SANE_Fixed bry_current;
+    SANE_Status status;
+
+    TRACE("DG_IMAGE/DAT_IMAGELAYOUT/MSG_GET\n");
+
+    status = sane_option_probe_scan_area(activeDS.deviceHandle, "tl-x", &tlx_current, NULL, NULL, NULL, NULL);
+    if (status == SANE_STATUS_GOOD)
+        status = sane_option_probe_scan_area(activeDS.deviceHandle, "tl-y", &tly_current, NULL, NULL, NULL, NULL);
+
+    if (status == SANE_STATUS_GOOD)
+        status = sane_option_probe_scan_area(activeDS.deviceHandle, "br-x", &brx_current, NULL, NULL, NULL, NULL);
+
+    if (status == SANE_STATUS_GOOD)
+        status = sane_option_probe_scan_area(activeDS.deviceHandle, "br-y", &bry_current, NULL, NULL, NULL, NULL);
+
+    if (status != SANE_STATUS_GOOD)
+    {
+        activeDS.twCC = sane_status_to_twcc(status);
+        return TWRC_FAILURE;
+    }
+
+    convert_sane_res_to_twain(SANE_UNFIX(tlx_current), SANE_UNIT_MM, &img->Frame.Left, TWUN_INCHES);
+    convert_sane_res_to_twain(SANE_UNFIX(tly_current), SANE_UNIT_MM, &img->Frame.Top, TWUN_INCHES);
+    convert_sane_res_to_twain(SANE_UNFIX(brx_current), SANE_UNIT_MM, &img->Frame.Right, TWUN_INCHES);
+    convert_sane_res_to_twain(SANE_UNFIX(bry_current), SANE_UNIT_MM, &img->Frame.Bottom, TWUN_INCHES);
+
+    img->DocumentNumber = 1;
+    img->PageNumber = 1;
+    img->FrameNumber = 1;
+
+    activeDS.twCC = TWCC_SUCCESS;
+    return TWRC_SUCCESS;
+#endif
 }
 
 /* DG_IMAGE/DAT_IMAGELAYOUT/MSG_GETDEFAULT */
@@ -183,13 +179,62 @@ TW_UINT16 SANE_ImageLayoutReset (pTW_IDENTITY pOrigin,
     return TWRC_FAILURE;
 }
 
+#ifdef SONAME_LIBSANE
+static TW_UINT16 set_one_imagecoord(const char *option_name, TW_FIX32 val, BOOL *changed)
+{
+    double d = val.Whole + ((double) val.Frac / 65536.0);
+    int set_status = 0;
+    SANE_Status status;
+    status = sane_option_set_fixed(activeDS.deviceHandle, option_name,
+             SANE_FIX((d * 254) / 10), &set_status);
+    if (status != SANE_STATUS_GOOD)
+    {
+        activeDS.twCC = sane_status_to_twcc(status);
+        return TWRC_FAILURE;
+    }
+    if (set_status & SANE_INFO_INEXACT)
+        *changed = TRUE;
+    return TWRC_SUCCESS;
+}
+#endif
+
 /* DG_IMAGE/DAT_IMAGELAYOUT/MSG_SET */
-TW_UINT16 SANE_ImageLayoutSet (pTW_IDENTITY pOrigin, 
+TW_UINT16 SANE_ImageLayoutSet (pTW_IDENTITY pOrigin,
                                 TW_MEMREF pData)
 {
-    FIXME ("stub!\n");
-
+#ifndef SONAME_LIBSANE
     return TWRC_FAILURE;
+#else
+    TW_IMAGELAYOUT *img = (TW_IMAGELAYOUT *) pData;
+    BOOL changed = FALSE;
+    TW_UINT16 twrc;
+
+    TRACE("DG_IMAGE/DAT_IMAGELAYOUT/MSG_SET\n");
+    TRACE("Frame: [Left %x.%x|Top %x.%x|Right %x.%x|Bottom %x.%x]\n",
+            img->Frame.Left.Whole, img->Frame.Left.Frac,
+            img->Frame.Top.Whole, img->Frame.Top.Frac,
+            img->Frame.Right.Whole, img->Frame.Right.Frac,
+            img->Frame.Bottom.Whole, img->Frame.Bottom.Frac);
+
+    twrc = set_one_imagecoord("tl-x", img->Frame.Left, &changed);
+    if (twrc != TWRC_SUCCESS)
+        return (twrc);
+
+    twrc = set_one_imagecoord("tl-y", img->Frame.Top, &changed);
+    if (twrc != TWRC_SUCCESS)
+        return (twrc);
+
+    twrc = set_one_imagecoord("br-x", img->Frame.Right, &changed);
+    if (twrc != TWRC_SUCCESS)
+        return (twrc);
+
+    twrc = set_one_imagecoord("br-y", img->Frame.Bottom, &changed);
+    if (twrc != TWRC_SUCCESS)
+        return (twrc);
+
+    activeDS.twCC = TWCC_SUCCESS;
+    return changed ? TWRC_CHECKSTATUS : TWRC_SUCCESS;
+#endif
 }
 
 /* DG_IMAGE/DAT_IMAGEMEMXFER/MSG_GET */
@@ -227,13 +272,17 @@ TW_UINT16 SANE_ImageMemXferGet (pTW_IDENTITY pOrigin,
 
             ScanningDialogBox(activeDS.progressWnd,0);
 
-            status = psane_start (activeDS.deviceHandle);
-            if (status != SANE_STATUS_GOOD)
+            if (! activeDS.sane_started)
             {
-                WARN("psane_start: %s\n", psane_strstatus (status));
-                psane_cancel (activeDS.deviceHandle);
-                activeDS.twCC = TWCC_OPERATIONERROR;
-                return TWRC_FAILURE;
+                status = psane_start (activeDS.deviceHandle);
+                if (status != SANE_STATUS_GOOD)
+                {
+                    WARN("psane_start: %s\n", psane_strstatus (status));
+                    psane_cancel (activeDS.deviceHandle);
+                    activeDS.twCC = TWCC_OPERATIONERROR;
+                    return TWRC_FAILURE;
+                }
+                activeDS.sane_started = TRUE;
             }
 
             status = psane_get_parameters (activeDS.deviceHandle,
@@ -244,6 +293,7 @@ TW_UINT16 SANE_ImageMemXferGet (pTW_IDENTITY pOrigin,
             {
                 WARN("psane_get_parameters: %s\n", psane_strstatus (status));
                 psane_cancel (activeDS.deviceHandle);
+                activeDS.sane_started = FALSE;
                 activeDS.twCC = TWCC_OPERATIONERROR;
                 return TWRC_FAILURE;
             }
@@ -260,6 +310,7 @@ TW_UINT16 SANE_ImageMemXferGet (pTW_IDENTITY pOrigin,
         if (pImageMemXfer->Memory.Length < activeDS.sane_param.bytes_per_line)
         {
             psane_cancel (activeDS.deviceHandle);
+            activeDS.sane_started = FALSE;
             activeDS.twCC = TWCC_BADVALUE;
             return TWRC_FAILURE;
         }
@@ -306,6 +357,7 @@ TW_UINT16 SANE_ImageMemXferGet (pTW_IDENTITY pOrigin,
                 ScanningDialogBox(activeDS.progressWnd, -1);
                 TRACE("psane_read: %s\n", psane_strstatus (status));
                 psane_cancel (activeDS.deviceHandle);
+                activeDS.sane_started = FALSE;
                 twRC = TWRC_XFERDONE;
             }
             activeDS.twCC = TWRC_SUCCESS;
@@ -315,6 +367,7 @@ TW_UINT16 SANE_ImageMemXferGet (pTW_IDENTITY pOrigin,
             ScanningDialogBox(activeDS.progressWnd, -1);
             WARN("psane_read: %s\n", psane_strstatus (status));
             psane_cancel (activeDS.deviceHandle);
+            activeDS.sane_started = FALSE;
             activeDS.twCC = TWCC_OPERATIONERROR;
             twRC = TWRC_FAILURE;
         }
@@ -366,7 +419,10 @@ TW_UINT16 SANE_ImageNativeXferGet (pTW_IDENTITY pOrigin,
     int dib_bytes;
     int dib_bytes_per_line;
     BYTE *line;
+    RGBQUAD *colors;
+    int color_size = 0;
     int i;
+    BYTE *p;
 
     TRACE("DG_IMAGE/DAT_IMAGENATIVEXFER/MSG_GET\n");
 
@@ -378,13 +434,17 @@ TW_UINT16 SANE_ImageNativeXferGet (pTW_IDENTITY pOrigin,
     else
     {
         /* Transfer an image from the source to the application */
-        status = psane_start (activeDS.deviceHandle);
-        if (status != SANE_STATUS_GOOD)
+        if (! activeDS.sane_started)
         {
-            WARN("psane_start: %s\n", psane_strstatus (status));
-            psane_cancel (activeDS.deviceHandle);
-            activeDS.twCC = TWCC_OPERATIONERROR;
-            return TWRC_FAILURE;
+            status = psane_start (activeDS.deviceHandle);
+            if (status != SANE_STATUS_GOOD)
+            {
+                WARN("psane_start: %s\n", psane_strstatus (status));
+                psane_cancel (activeDS.deviceHandle);
+                activeDS.twCC = TWCC_OPERATIONERROR;
+                return TWRC_FAILURE;
+            }
+            activeDS.sane_started = TRUE;
         }
 
         status = psane_get_parameters (activeDS.deviceHandle, &activeDS.sane_param);
@@ -393,14 +453,31 @@ TW_UINT16 SANE_ImageNativeXferGet (pTW_IDENTITY pOrigin,
         {
             WARN("psane_get_parameters: %s\n", psane_strstatus (status));
             psane_cancel (activeDS.deviceHandle);
+            activeDS.sane_started = FALSE;
             activeDS.twCC = TWCC_OPERATIONERROR;
             return TWRC_FAILURE;
         }
 
-        if (activeDS.sane_param.format != SANE_FRAME_RGB)
+        if (activeDS.sane_param.format == SANE_FRAME_GRAY)
         {
-            FIXME("For NATIVE, we support only RGB, not %d\n", activeDS.sane_param.format);
+            if (activeDS.sane_param.depth == 8)
+                color_size = (1 << 8) * sizeof(*colors);
+            else if (activeDS.sane_param.depth == 1)
+                ;
+            else
+            {
+                FIXME("For NATIVE, we support only 1 bit monochrome and 8 bit Grayscale, not %d\n", activeDS.sane_param.depth);
+                psane_cancel (activeDS.deviceHandle);
+                activeDS.sane_started = FALSE;
+                activeDS.twCC = TWCC_OPERATIONERROR;
+                return TWRC_FAILURE;
+            }
+        }
+        else if (activeDS.sane_param.format != SANE_FRAME_RGB)
+        {
+            FIXME("For NATIVE, we support only GRAY and RGB, not %d\n", activeDS.sane_param.format);
             psane_cancel (activeDS.deviceHandle);
+            activeDS.sane_started = FALSE;
             activeDS.twCC = TWCC_OPERATIONERROR;
             return TWRC_FAILURE;
         }
@@ -413,13 +490,14 @@ TW_UINT16 SANE_ImageNativeXferGet (pTW_IDENTITY pOrigin,
         dib_bytes_per_line = ((activeDS.sane_param.bytes_per_line + 3) / 4) * 4;
         dib_bytes = activeDS.sane_param.lines * dib_bytes_per_line;
 
-        hDIB = GlobalAlloc(GMEM_ZEROINIT, dib_bytes + sizeof(*header));
+        hDIB = GlobalAlloc(GMEM_ZEROINIT, dib_bytes + sizeof(*header) + color_size);
         if (hDIB)
            header = GlobalLock(hDIB);
 
         if (!header)
         {
             psane_cancel (activeDS.deviceHandle);
+            activeDS.sane_started = FALSE;
             activeDS.twCC = TWCC_LOWMEMORY;
             if (hDIB)
                 GlobalFree(hDIB);
@@ -430,18 +508,31 @@ TW_UINT16 SANE_ImageNativeXferGet (pTW_IDENTITY pOrigin,
         header->biWidth = activeDS.sane_param.pixels_per_line;
         header->biHeight = activeDS.sane_param.lines;
         header->biPlanes = 1;
-        header->biBitCount = activeDS.sane_param.depth * 3;
         header->biCompression = BI_RGB;
+        if (activeDS.sane_param.format == SANE_FRAME_RGB)
+            header->biBitCount = activeDS.sane_param.depth * 3;
+        if (activeDS.sane_param.format == SANE_FRAME_GRAY)
+            header->biBitCount = activeDS.sane_param.depth;
         header->biSizeImage = dib_bytes;
         header->biXPelsPerMeter = 0;
         header->biYPelsPerMeter = 0;
         header->biClrUsed = 0;
         header->biClrImportant = 0;
 
+        p = (BYTE *)(header + 1);
+
+        if (color_size > 0)
+        {
+            colors = (RGBQUAD *) p;
+            p += color_size;
+            for (i = 0; i < (color_size / sizeof(*colors)); i++)
+                colors[i].rgbBlue = colors[i].rgbRed = colors[i].rgbGreen = i;
+        }
+
+
         /* Sane returns data in top down order.  Acrobat does best with
            a bottom up DIB being returned.  */
-        line = (BYTE *)(header + 1) +
-                (activeDS.sane_param.lines - 1) * dib_bytes_per_line;
+        line = p + (activeDS.sane_param.lines - 1) * dib_bytes_per_line;
         for (i = activeDS.sane_param.lines - 1; i >= 0; i--)
         {
             activeDS.progressWnd = ScanningDialogBox(activeDS.progressWnd,
@@ -464,12 +555,14 @@ TW_UINT16 SANE_ImageNativeXferGet (pTW_IDENTITY pOrigin,
         {
             WARN("psane_read: %s, reading line %d\n", psane_strstatus(status), i);
             psane_cancel (activeDS.deviceHandle);
+            activeDS.sane_started = FALSE;
             activeDS.twCC = TWCC_OPERATIONERROR;
             GlobalFree(hDIB);
             return TWRC_FAILURE;
         }
 
         psane_cancel (activeDS.deviceHandle);
+        activeDS.sane_started = FALSE;
         *pHandle = (TW_UINT32)hDIB;
         twRC = TWRC_XFERDONE;
         activeDS.twCC = TWCC_SUCCESS;
@@ -477,95 +570,4 @@ TW_UINT16 SANE_ImageNativeXferGet (pTW_IDENTITY pOrigin,
     }
     return twRC;
 #endif
-}
-
-/* DG_IMAGE/DAT_JPEGCOMPRESSION/MSG_GET */
-TW_UINT16 SANE_JPEGCompressionGet (pTW_IDENTITY pOrigin, 
-                                    TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_IMAGE/DAT_JPEGCOMPRESSION/MSG_GETDEFAULT */
-TW_UINT16 SANE_JPEGCompressionGetDefault (pTW_IDENTITY pOrigin,
-                                           
-                                           TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_IMAGE/DAT_JPEGCOMPRESSION/MSG_RESET */
-TW_UINT16 SANE_JPEGCompressionReset (pTW_IDENTITY pOrigin, 
-                                      TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_IMAGE/DAT_JPEGCOMPRESSION/MSG_SET */
-TW_UINT16 SANE_JPEGCompressionSet (pTW_IDENTITY pOrigin, 
-                                    TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_IMAGE/DAT_PALETTE8/MSG_GET */
-TW_UINT16 SANE_Palette8Get (pTW_IDENTITY pOrigin, 
-                             TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_IMAGE/DAT_PALETTE8/MSG_GETDEFAULT */
-TW_UINT16 SANE_Palette8GetDefault (pTW_IDENTITY pOrigin, 
-                                    TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_IMAGE/DAT_PALETTE8/MSG_RESET */
-TW_UINT16 SANE_Palette8Reset (pTW_IDENTITY pOrigin, 
-                               TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_IMAGE/DAT_PALETTE8/MSG_SET */
-TW_UINT16 SANE_Palette8Set (pTW_IDENTITY pOrigin, 
-                             TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_IMAGE/DAT_RGBRESPONSE/MSG_RESET */
-TW_UINT16 SANE_RGBResponseReset (pTW_IDENTITY pOrigin, 
-                                  TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_IMAGE/DAT_RGBRESPONSE/MSG_SET */
-TW_UINT16 SANE_RGBResponseSet (pTW_IDENTITY pOrigin, 
-                                TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
 }

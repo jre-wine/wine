@@ -236,19 +236,17 @@ static void state_ambient(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD
 static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     int srcBlend = GL_ZERO;
     int dstBlend = GL_ZERO;
-    const StaticPixelFormatDesc *rtFormat;
     IWineD3DSurfaceImpl *target = (IWineD3DSurfaceImpl *) stateblock->wineD3DDevice->render_targets[0];
 
     /* GL_LINE_SMOOTH needs GL_BLEND to work, according to the red book, and special blending params */
     if (stateblock->renderState[WINED3DRS_ALPHABLENDENABLE]      ||
         stateblock->renderState[WINED3DRS_EDGEANTIALIAS]         ||
         stateblock->renderState[WINED3DRS_ANTIALIASEDLINEENABLE]) {
-        const struct GlPixelFormatDesc *glDesc;
-        getFormatDescEntry(target->resource.format, &GLINFO_LOCATION, &glDesc);
 
         /* Disable blending in all cases even without pixelshaders. With blending on we could face a big performance penalty.
          * The d3d9 visual test confirms the behavior. */
-        if(!(glDesc->Flags & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING)) {
+        if (!(target->resource.format_desc->Flags & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING))
+        {
             glDisable(GL_BLEND);
             checkGLcall("glDisable GL_BLEND");
             return;
@@ -279,12 +277,10 @@ static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
          * returns 1.0, so D3DBLEND_DESTALPHA is GL_ONE, and D3DBLEND_INVDESTALPHA is GL_ZERO
          */
         case WINED3DBLEND_DESTALPHA          :
-            rtFormat = getFormatDescEntry(target->resource.format, NULL, NULL);
-            dstBlend = rtFormat->alphaMask ? GL_DST_ALPHA : GL_ONE;
+            dstBlend = target->resource.format_desc->alpha_mask ? GL_DST_ALPHA : GL_ONE;
             break;
         case WINED3DBLEND_INVDESTALPHA       :
-            rtFormat = getFormatDescEntry(target->resource.format, NULL, NULL);
-            dstBlend = rtFormat->alphaMask ? GL_ONE_MINUS_DST_ALPHA : GL_ZERO;
+            dstBlend = target->resource.format_desc->alpha_mask ? GL_ONE_MINUS_DST_ALPHA : GL_ZERO;
             break;
 
         case WINED3DBLEND_SRCALPHASAT        :
@@ -323,12 +319,10 @@ static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
         case WINED3DBLEND_SRCALPHASAT        : srcBlend = GL_SRC_ALPHA_SATURATE;  break;
 
         case WINED3DBLEND_DESTALPHA          :
-            rtFormat = getFormatDescEntry(target->resource.format, NULL, NULL);
-            srcBlend = rtFormat->alphaMask ? GL_DST_ALPHA : GL_ONE;
+            srcBlend = target->resource.format_desc->alpha_mask ? GL_DST_ALPHA : GL_ONE;
             break;
         case WINED3DBLEND_INVDESTALPHA       :
-            rtFormat = getFormatDescEntry(target->resource.format, NULL, NULL);
-            srcBlend = rtFormat->alphaMask ? GL_ONE_MINUS_DST_ALPHA : GL_ZERO;
+            srcBlend = target->resource.format_desc->alpha_mask ? GL_ONE_MINUS_DST_ALPHA : GL_ZERO;
             break;
 
         case WINED3DBLEND_BOTHSRCALPHA       : srcBlend = GL_SRC_ALPHA;
@@ -489,11 +483,10 @@ static void state_alpha(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
 
             if (surf->CKeyFlags & WINEDDSD_CKSRCBLT)
             {
-                const StaticPixelFormatDesc *fmt = getFormatDescEntry(surf->resource.format, NULL, NULL);
                 /* The surface conversion does not do color keying conversion for surfaces that have an alpha
                  * channel on their own. Likewise, the alpha test shouldn't be set up for color keying if the
                  * surface has alpha bits */
-                if (fmt->alphaMask == 0x00000000) enable_ckey = TRUE;
+                if (!surf->resource.format_desc->alpha_mask) enable_ckey = TRUE;
             }
         }
     }
@@ -2852,7 +2845,8 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
 
     if (stage != mapped_stage) WARN("Using non 1:1 mapping: %d -> %d!\n", stage, mapped_stage);
 
-    if (mapped_stage != -1) {
+    if (mapped_stage != WINED3D_UNMAPPED_STAGE)
+    {
         if (tex_used && mapped_stage >= GL_LIMITS(textures)) {
             FIXME("Attempt to enable unsupported stage!\n");
             return;
@@ -2863,7 +2857,8 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
 
     if(stage >= stateblock->lowest_disabled_stage) {
         TRACE("Stage disabled\n");
-        if (mapped_stage != -1) {
+        if (mapped_stage != WINED3D_UNMAPPED_STAGE)
+        {
             /* Disable everything here */
             glDisable(GL_TEXTURE_2D);
             checkGLcall("glDisable(GL_TEXTURE_2D)");
@@ -2904,7 +2899,8 @@ void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext
 
     TRACE("Setting alpha op for stage %d\n", stage);
     /* Do not care for enabled / disabled stages, just assign the settings. colorop disables / enables required stuff */
-    if (mapped_stage != -1) {
+    if (mapped_stage != WINED3D_UNMAPPED_STAGE)
+    {
         if (tex_used && mapped_stage >= GL_LIMITS(textures)) {
             FIXME("Attempt to enable unsupported stage!\n");
             return;
@@ -2928,8 +2924,7 @@ void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext
 
             surf = (IWineD3DSurfaceImpl *) ((IWineD3DTextureImpl *) stateblock->textures[0])->surfaces[0];
 
-            if (surf->CKeyFlags & WINEDDSD_CKSRCBLT
-                    && getFormatDescEntry(surf->resource.format, NULL, NULL)->alphaMask == 0x00000000)
+            if (surf->CKeyFlags & WINEDDSD_CKSRCBLT && !surf->resource.format_desc->alpha_mask)
             {
                 /* Color keying needs to pass alpha values from the texture through to have the alpha test work
                  * properly. On the other hand applications can still use texture combiners apparently. This code
@@ -3008,7 +3003,7 @@ static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock, W
         return;
     }
 
-    if (mapped_stage == -1) return;
+    if (mapped_stage == WINED3D_UNMAPPED_STAGE) return;
 
     if(mapped_stage >= GL_LIMITS(textures)) {
         return;
@@ -3047,7 +3042,7 @@ static void unloadTexCoords(IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void loadTexCoords(IWineD3DStateBlockImpl *stateblock, const WineDirect3DVertexStridedData *sd, GLint *curVBO)
+static void loadTexCoords(IWineD3DStateBlockImpl *stateblock, const WineDirect3DVertexStridedData *sd, GLuint *curVBO)
 {
     const UINT *offset = stateblock->streamOffset;
     unsigned int mapped_stage = 0;
@@ -3057,7 +3052,7 @@ static void loadTexCoords(IWineD3DStateBlockImpl *stateblock, const WineDirect3D
         int coordIdx = stateblock->textureState[textureNo][WINED3DTSS_TEXCOORDINDEX];
 
         mapped_stage = stateblock->wineD3DDevice->texUnitMap[textureNo];
-        if (mapped_stage == -1) continue;
+        if (mapped_stage == WINED3D_UNMAPPED_STAGE) continue;
 
         if (coordIdx < MAX_TEXTURES && (sd->u.s.texCoords[coordIdx].lpData || sd->u.s.texCoords[coordIdx].VBO)) {
             TRACE("Setting up texture %u, idx %d, cordindx %u, data %p\n",
@@ -3101,7 +3096,8 @@ static void tex_coordindex(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
     static const GLfloat r_plane[] = { 0.0, 0.0, 1.0, 0.0 };
     static const GLfloat q_plane[] = { 0.0, 0.0, 0.0, 1.0 };
 
-    if (mapped_stage == -1) {
+    if (mapped_stage == WINED3D_UNMAPPED_STAGE)
+    {
         TRACE("No texture unit mapped to stage %d. Skipping texture coordinates.\n", stage);
         return;
     }
@@ -3251,7 +3247,7 @@ static void tex_coordindex(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
          * and do all the things linked to it
          * TODO: Tidy that up to reload only the arrays of the changed unit
          */
-        GLint curVBO = GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT) ? -1 : 0;
+        GLuint curVBO = GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT) ? ~0U : 0;
 
         unloadTexCoords(stateblock);
         loadTexCoords(stateblock, &stateblock->wineD3DDevice->strided_streams, &curVBO);
@@ -3341,7 +3337,8 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
      * only has to bind textures and set the per texture states
      */
 
-    if (mapped_stage == -1) {
+    if (mapped_stage == WINED3D_UNMAPPED_STAGE)
+    {
         TRACE("No sampler mapped to stage %d. Returning.\n", sampler);
         return;
     }
@@ -3839,10 +3836,10 @@ static inline void unloadNumberedArrays(IWineD3DStateBlockImpl *stateblock, Wine
 static inline void loadNumberedArrays(IWineD3DStateBlockImpl *stateblock,
         const WineDirect3DVertexStridedData *strided, WineD3DContext *context)
 {
-    GLint curVBO = GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT) ? -1 : 0;
+    GLuint curVBO = GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT) ? ~0U : 0;
     int i;
     const UINT *offset = stateblock->streamOffset;
-    IWineD3DVertexBufferImpl *vb;
+    struct wined3d_buffer *vb;
     DWORD_PTR shift_index;
 
     /* Default to no instancing */
@@ -3870,27 +3867,28 @@ static inline void loadNumberedArrays(IWineD3DStateBlockImpl *stateblock,
                 checkGLcall("glBindBufferARB");
                 curVBO = strided->u.input[i].VBO;
             }
-            vb = (IWineD3DVertexBufferImpl *) stateblock->streamSource[strided->u.input[i].streamNo];
+            vb = (struct wined3d_buffer *)stateblock->streamSource[strided->u.input[i].streamNo];
             /* Use the VBO to find out if a vertex buffer exists, not the vb pointer. vb can point to a
              * user pointer data blob. In that case curVBO will be 0. If there is a vertex buffer but no
              * vbo we won't be load converted attributes anyway
              */
-            if(curVBO && vb->conv_shift) {
+            if (curVBO && vb->conversion_shift)
+            {
                 TRACE("Loading attribute from shifted buffer\n");
-                TRACE("Attrib %d has original stride %d, new stride %d\n", i, strided->u.input[i].dwStride, vb->conv_stride);
-                TRACE("Original offset %p, additional offset 0x%08x\n",strided->u.input[i].lpData, vb->conv_shift[(DWORD_PTR) strided->u.input[i].lpData]);
+                TRACE("Attrib %d has original stride %d, new stride %d\n",
+                        i, strided->u.input[i].dwStride, vb->conversion_stride);
+                TRACE("Original offset %p, additional offset 0x%08x\n",
+                        strided->u.input[i].lpData, vb->conversion_shift[(DWORD_PTR) strided->u.input[i].lpData]);
                 TRACE("Opengl type %x\n", WINED3D_ATR_GLTYPE(strided->u.input[i].dwType));
                 shift_index = ((DWORD_PTR) strided->u.input[i].lpData + offset[strided->u.input[i].streamNo]);
                 shift_index = shift_index % strided->u.input[i].dwStride;
-                GL_EXTCALL(glVertexAttribPointerARB(i,
-                                WINED3D_ATR_FORMAT(strided->u.input[i].dwType),
-                                WINED3D_ATR_GLTYPE(strided->u.input[i].dwType),
-                                WINED3D_ATR_NORMALIZED(strided->u.input[i].dwType),
-                                vb->conv_stride,
-
-                                strided->u.input[i].lpData + vb->conv_shift[shift_index] +
-                                stateblock->loadBaseVertexIndex * strided->u.input[i].dwStride +
-                                offset[strided->u.input[i].streamNo]));
+                GL_EXTCALL(glVertexAttribPointerARB(i, WINED3D_ATR_FORMAT(strided->u.input[i].dwType),
+                        WINED3D_ATR_GLTYPE(strided->u.input[i].dwType),
+                        WINED3D_ATR_NORMALIZED(strided->u.input[i].dwType),
+                        vb->conversion_stride,
+                        strided->u.input[i].lpData + vb->conversion_shift[shift_index]
+                        + stateblock->loadBaseVertexIndex * strided->u.input[i].dwStride
+                        + offset[strided->u.input[i].streamNo]));
 
             } else {
                 GL_EXTCALL(glVertexAttribPointerARB(i,
@@ -3915,7 +3913,7 @@ static inline void loadNumberedArrays(IWineD3DStateBlockImpl *stateblock,
              */
             const BYTE *ptr = strided->u.input[i].lpData + offset[strided->u.input[i].streamNo];
             if(strided->u.input[i].VBO) {
-                vb = (IWineD3DVertexBufferImpl *) stateblock->streamSource[strided->u.input[i].streamNo];
+                vb = (struct wined3d_buffer *)stateblock->streamSource[strided->u.input[i].streamNo];
                 ptr += (long) vb->resource.allocatedMemory;
             }
 
@@ -4013,7 +4011,7 @@ static inline void loadNumberedArrays(IWineD3DStateBlockImpl *stateblock,
 static void loadVertexData(IWineD3DStateBlockImpl *stateblock, const WineDirect3DVertexStridedData *sd)
 {
     const UINT *offset = stateblock->streamOffset;
-    GLint curVBO = GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT) ? -1 : 0;
+    GLuint curVBO = GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT) ? ~0U : 0;
 
     TRACE("Using fast vertex array code\n");
 

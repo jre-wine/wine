@@ -605,7 +605,7 @@ static obj_handle_t pipe_server_ioctl( struct fd *fd, ioctl_code_t code, const a
         {
         case ps_idle_server:
         case ps_wait_connect:
-            if (blocking)
+            if (blocking && !is_overlapped( get_fd_options(fd) ))
             {
                 async_data_t new_data = *async_data;
                 if (!(wait_handle = alloc_wait_event( current->process ))) break;
@@ -830,6 +830,7 @@ static struct object *named_pipe_open_file( struct object *obj, unsigned int acc
             server->fd = create_anonymous_fd( &pipe_server_fd_ops, fds[0], &server->obj, server->options );
             if (client->fd && server->fd)
             {
+                fd_copy_completion( server->ioctl_fd, server->fd );
                 if (server->state == ps_wait_open)
                     fd_async_wake_up( server->ioctl_fd, ASYNC_TYPE_WAIT, STATUS_SUCCESS );
                 set_server_state( server, ps_connected_server );

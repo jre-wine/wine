@@ -27,6 +27,10 @@
 
 #include "wine/test.h"
 
+static BOOL (WINAPI *pCreateUrlCacheContainerA)(DWORD, DWORD, DWORD, DWORD,
+                                                DWORD, DWORD, DWORD, DWORD);
+static BOOL (WINAPI *pCreateUrlCacheContainerW)(DWORD, DWORD, DWORD, DWORD,
+                                                DWORD, DWORD, DWORD, DWORD);
 static BOOL (WINAPI *pInternetTimeFromSystemTimeA)(CONST SYSTEMTIME *,DWORD ,LPSTR ,DWORD);
 static BOOL (WINAPI *pInternetTimeFromSystemTimeW)(CONST SYSTEMTIME *,DWORD ,LPWSTR ,DWORD);
 static BOOL (WINAPI *pInternetTimeToSystemTimeA)(LPCSTR ,SYSTEMTIME *,DWORD);
@@ -352,7 +356,13 @@ static void test_null(void)
   BOOL r;
   DWORD sz;
 
+  SetLastError(0xdeadbeef);
   hi = InternetOpenW(NULL, 0, NULL, NULL, 0);
+  if (hi == NULL && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+  {
+    win_skip("Internet*W functions are not implemented\n");
+    return;
+  }
   ok(hi != NULL, "open failed\n");
 
   hc = InternetConnectW(hi, NULL, 0, NULL, NULL, 0, 0, 0);
@@ -642,8 +652,13 @@ static void test_IsDomainLegalCookieDomainW(void)
     SetLastError(0xdeadbeef);
     ret = pIsDomainLegalCookieDomainW(NULL, NULL);
     error = GetLastError();
+    if (!ret && error == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        win_skip("IsDomainLegalCookieDomainW is not implemented\n");
+        return;
+    }
     ok(!ret ||
-        broken(ret), /* Win98, NT4, W2K, XP (some) */
+        broken(ret), /* IE6 */
         "IsDomainLegalCookieDomainW succeeded\n");
     ok(error == ERROR_INVALID_PARAMETER, "got %u expected ERROR_INVALID_PARAMETER\n", error);
 
@@ -664,7 +679,7 @@ static void test_IsDomainLegalCookieDomainW(void)
     error = GetLastError();
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
     ok(error == ERROR_INVALID_NAME ||
-        broken(error == ERROR_INVALID_PARAMETER), /* Win98, NT4, W2K, XP (some) */
+        broken(error == ERROR_INVALID_PARAMETER), /* IE6 */
         "got %u expected ERROR_INVALID_NAME\n", error);
 
     SetLastError(0xdeadbeef);
@@ -672,7 +687,7 @@ static void test_IsDomainLegalCookieDomainW(void)
     error = GetLastError();
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
     ok(error == ERROR_INVALID_NAME ||
-        broken(error == ERROR_INVALID_PARAMETER), /* Win98, NT4, W2K, XP (some) */
+        broken(error == ERROR_INVALID_PARAMETER), /* IE6 */
         "got %u expected ERROR_INVALID_NAME\n", error);
 
     SetLastError(0xdeadbeef);
@@ -680,7 +695,7 @@ static void test_IsDomainLegalCookieDomainW(void)
     error = GetLastError();
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
     ok(error == ERROR_INVALID_NAME ||
-        broken(error == 0xdeadbeef), /* Win98, NT4, W2K, XP (some) */
+        broken(error == 0xdeadbeef), /* IE6 */
         "got %u expected ERROR_INVALID_NAME\n", error);
 
     SetLastError(0xdeadbeef);
@@ -688,7 +703,7 @@ static void test_IsDomainLegalCookieDomainW(void)
     error = GetLastError();
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
     ok(error == ERROR_INVALID_NAME ||
-        broken(error == 0xdeadbeef), /* Win98, NT4, W2K, XP (some) */
+        broken(error == 0xdeadbeef), /* IE6 */
         "got %u expected ERROR_INVALID_NAME\n", error);
 
     SetLastError(0xdeadbeef);
@@ -702,7 +717,7 @@ static void test_IsDomainLegalCookieDomainW(void)
     error = GetLastError();
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
     ok(error == ERROR_INVALID_NAME ||
-        broken(error == 0xdeadbeef), /* Win98, NT4, W2K, XP (some) */
+        broken(error == 0xdeadbeef), /* IE6 */
         "got %u expected ERROR_INVALID_NAME\n", error);
 
     SetLastError(0xdeadbeef);
@@ -710,7 +725,7 @@ static void test_IsDomainLegalCookieDomainW(void)
     error = GetLastError();
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
     ok(error == ERROR_INVALID_NAME ||
-        broken(error == 0xdeadbeef), /* Win98, NT4, W2K, XP (some) */
+        broken(error == 0xdeadbeef), /* IE6 */
         "got %u expected ERROR_INVALID_NAME\n", error);
 
     SetLastError(0xdeadbeef);
@@ -745,7 +760,7 @@ static void test_IsDomainLegalCookieDomainW(void)
     error = GetLastError();
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
     ok(error == ERROR_INVALID_NAME ||
-        broken(error == 0xdeadbeef), /* Win98, NT4, W2K, XP (some) */
+        broken(error == 0xdeadbeef), /* IE6 */
         "got %u expected ERROR_INVALID_NAME\n", error);
 
     ret = pIsDomainLegalCookieDomainW(gmail_com, mail_gmail_com);
@@ -770,6 +785,8 @@ START_TEST(internet)
 {
     HMODULE hdll;
     hdll = GetModuleHandleA("wininet.dll");
+    pCreateUrlCacheContainerA = (void*)GetProcAddress(hdll, "CreateUrlCacheContainerA");
+    pCreateUrlCacheContainerW = (void*)GetProcAddress(hdll, "CreateUrlCacheContainerW");
     pInternetTimeFromSystemTimeA = (void*)GetProcAddress(hdll, "InternetTimeFromSystemTimeA");
     pInternetTimeFromSystemTimeW = (void*)GetProcAddress(hdll, "InternetTimeFromSystemTimeW");
     pInternetTimeToSystemTimeA = (void*)GetProcAddress(hdll, "InternetTimeToSystemTimeA");
@@ -784,7 +801,7 @@ START_TEST(internet)
     test_null();
 
     if (!pInternetTimeFromSystemTimeA)
-        skip("skipping the InternetTime tests\n");
+        win_skip("skipping the InternetTime tests\n");
     else
     {
         InternetTimeFromSystemTimeA_test();
@@ -792,8 +809,12 @@ START_TEST(internet)
         InternetTimeToSystemTimeA_test();
         InternetTimeToSystemTimeW_test();
     }
-    if (!pIsDomainLegalCookieDomainW)
-        skip("skipping IsDomainLegalCookieDomainW tests\n");
+    if (pIsDomainLegalCookieDomainW &&
+        ((void*)pIsDomainLegalCookieDomainW == (void*)pCreateUrlCacheContainerA ||
+         (void*)pIsDomainLegalCookieDomainW == (void*)pCreateUrlCacheContainerW))
+        win_skip("IsDomainLegalCookieDomainW is not available on systems with IE5\n");
+    else if (!pIsDomainLegalCookieDomainW)
+        win_skip("IsDomainLegalCookieDomainW (or ordinal 117) is not available\n");
     else
         test_IsDomainLegalCookieDomainW();
 }

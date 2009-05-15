@@ -106,7 +106,7 @@ static void check_get(TW_CAPABILITY *pCapability, TW_INT32 actual_support,
     {
         if (pCapability->ConType == TWON_ONEVALUE)
         {
-            TW_ONEVALUE *onev = (TW_ONEVALUE *) p;
+            TW_ONEVALUE *onev = p;
             ok(onev->Item == orig_value || !(actual_support & TWQC_GETCURRENT), "MSG_GET of 0x%x returned 0x%x, expecting 0x%x\n",
                 pCapability->Cap, onev->Item, orig_value);
             trace("MSG_GET of 0x%x returned val 0x%x, type %d\n", pCapability->Cap, onev->Item, onev->ItemType);
@@ -119,7 +119,7 @@ static void check_get(TW_CAPABILITY *pCapability, TW_INT32 actual_support,
             TW_UINT8 *p8;
             TW_UINT16 *p16;
             TW_UINT32 *p32;
-            TW_ENUMERATION *enumv = (TW_ENUMERATION *) p;
+            TW_ENUMERATION *enumv = p;
             p8 = enumv->ItemList;
             p16 = (TW_UINT16 *) p8;
             p32 = (TW_UINT32 *) p8;
@@ -391,6 +391,243 @@ static void test_resolution(TW_IDENTITY *appid, TW_IDENTITY *source, TW_UINT16 c
     }
 }
 
+static void test_physical(TW_IDENTITY *appid, TW_IDENTITY *source, TW_UINT16 captype, TW_INT32 minimum_support)
+{
+    TW_UINT16 rc;
+    TW_STATUS status;
+    TW_CAPABILITY cap;
+    TW_UINT32 val;
+    TW_UINT16 type;
+    TW_INT32 actual_support;
+
+    memset(&cap, 0, sizeof(cap));
+    cap.Cap = captype;
+    cap.ConType = TWON_DONTCARE16;
+
+    rc = pDSM_Entry(appid, source, DG_CONTROL, DAT_CAPABILITY, MSG_QUERYSUPPORT, &cap);
+    get_condition_code(appid, source, &status);
+    ok(rc == TWRC_SUCCESS && status.ConditionCode == TWCC_SUCCESS,
+            "Error [rc %d|cc %d] doing MSG_QUERYSUPPORT for type 0x%x\n", rc, status.ConditionCode, captype);
+    if (rc != TWRC_SUCCESS)
+        return;
+    ok(get_onevalue(cap.hContainer, (TW_UINT32 *) &actual_support, NULL), "Returned cap.hContainer invalid for QuerySupport on type 0x%x\n", captype);
+    ok((actual_support & minimum_support) == minimum_support,
+            "Error:  minimum support 0x%x for type 0x%x, got 0x%x\n", minimum_support,
+            captype, actual_support);
+
+
+    if (actual_support & TWQC_GETCURRENT)
+    {
+        memset(&cap, 0, sizeof(cap));
+        cap.Cap = captype;
+        cap.ConType = TWON_DONTCARE16;
+
+        rc = pDSM_Entry(appid, source, DG_CONTROL, DAT_CAPABILITY, MSG_GETCURRENT, &cap);
+        get_condition_code(appid, source, &status);
+        ok(rc == TWRC_SUCCESS && status.ConditionCode == TWCC_SUCCESS,
+                "Error [rc %d|cc %d] doing MSG_GETCURRENT for type 0x%x\n", rc, status.ConditionCode, captype);
+        if (rc == TWRC_SUCCESS)
+        {
+            get_onevalue(cap.hContainer, &val, &type);
+            ok(type == TWTY_FIX32, "GETCURRENT for PHYSICALXXX is not type FIX32, is type %d\n", type);
+            GlobalFree(cap.hContainer);
+        }
+    }
+
+    if (actual_support & TWQC_GETDEFAULT)
+    {
+        memset(&cap, 0, sizeof(cap));
+        cap.Cap = captype;
+        cap.ConType = TWON_DONTCARE16;
+
+        rc = pDSM_Entry(appid, source, DG_CONTROL, DAT_CAPABILITY, MSG_GETDEFAULT, &cap);
+        get_condition_code(appid, source, &status);
+        ok(rc == TWRC_SUCCESS && status.ConditionCode == TWCC_SUCCESS,
+                "Error [rc %d|cc %d] doing MSG_GETDEFAULT for type 0x%x\n", rc, status.ConditionCode, captype);
+        if (rc == TWRC_SUCCESS)
+        {
+            get_onevalue(cap.hContainer, &val, &type);
+            ok(type == TWTY_FIX32, "GETDEFAULT for PHYSICALXXX is not type FIX32, is type %d\n", type);
+            GlobalFree(cap.hContainer);
+        }
+    }
+
+    if (actual_support & TWQC_GET)
+    {
+        memset(&cap, 0, sizeof(cap));
+        cap.Cap = captype;
+        cap.ConType = TWON_DONTCARE16;
+
+        rc = pDSM_Entry(appid, source, DG_CONTROL, DAT_CAPABILITY, MSG_GET, &cap);
+        get_condition_code(appid, source, &status);
+        ok(rc == TWRC_SUCCESS && status.ConditionCode == TWCC_SUCCESS,
+                "Error [rc %d|cc %d] doing MSG_GET for type 0x%x\n", rc, status.ConditionCode, captype);
+        if (rc == TWRC_SUCCESS)
+        {
+            get_onevalue(cap.hContainer, &val, &type);
+            ok(type == TWTY_FIX32, "GET for PHYSICALXXX is not type FIX32, is type %d\n", type);
+            trace("GET for Physical type 0x%x returns 0x%x\n", captype, val);
+            GlobalFree(cap.hContainer);
+        }
+    }
+
+}
+
+static void test_supported_sizes(TW_IDENTITY *appid, TW_IDENTITY *source, TW_INT32 minimum_support)
+{
+    TW_UINT16 rc;
+    TW_STATUS status;
+    TW_CAPABILITY cap;
+    TW_UINT32 val;
+    TW_UINT16 type;
+    TW_INT32 actual_support;
+    TW_UINT32 orig_value;
+    TW_UINT32 default_value;
+    TW_UINT32 new_value = TWSS_NONE;
+
+
+    memset(&cap, 0, sizeof(cap));
+    cap.Cap = ICAP_SUPPORTEDSIZES;
+    cap.ConType = TWON_DONTCARE16;
+
+    rc = pDSM_Entry(appid, source, DG_CONTROL, DAT_CAPABILITY, MSG_QUERYSUPPORT, &cap);
+    get_condition_code(appid, source, &status);
+    ok(rc == TWRC_SUCCESS && status.ConditionCode == TWCC_SUCCESS,
+            "Error [rc %d|cc %d] doing MSG_QUERYSUPPORT for ICAP_SUPPORTEDSIZES\n", rc, status.ConditionCode);
+    if (rc != TWRC_SUCCESS)
+        return;
+    ok(get_onevalue(cap.hContainer, (TW_UINT32 *) &actual_support, NULL), "Returned cap.hContainer invalid for QuerySupport on ICAP_SUPPORTEDSIZES\n");
+    ok((actual_support & minimum_support) == minimum_support,
+            "Error:  minimum support 0x%x for ICAP_SUPPORTEDSIZES, got 0x%x\n", minimum_support, actual_support);
+
+    if (actual_support & TWQC_GETCURRENT)
+    {
+        memset(&cap, 0, sizeof(cap));
+        cap.Cap = ICAP_SUPPORTEDSIZES;
+        cap.ConType = TWON_DONTCARE16;
+
+        rc = pDSM_Entry(appid, source, DG_CONTROL, DAT_CAPABILITY, MSG_GETCURRENT, &cap);
+        get_condition_code(appid, source, &status);
+        ok(rc == TWRC_SUCCESS && status.ConditionCode == TWCC_SUCCESS,
+                "Error [rc %d|cc %d] doing MSG_GETCURRENT for ICAP_SUPPORTEDSIZES\n", rc, status.ConditionCode);
+        if (rc == TWRC_SUCCESS)
+        {
+            get_onevalue(cap.hContainer, &val, &type);
+            ok(type == TWTY_UINT16, "GETCURRENT for ICAP_SUPPORTEDSIZES is not type UINT16, is type %d\n", type);
+            trace("Current size is %d\n", val);
+            GlobalFree(cap.hContainer);
+            orig_value = val;
+        }
+    }
+
+    if (actual_support & TWQC_GETDEFAULT)
+    {
+        memset(&cap, 0, sizeof(cap));
+        cap.Cap = ICAP_SUPPORTEDSIZES;
+        cap.ConType = TWON_DONTCARE16;
+
+        rc = pDSM_Entry(appid, source, DG_CONTROL, DAT_CAPABILITY, MSG_GETDEFAULT, &cap);
+        get_condition_code(appid, source, &status);
+        ok(rc == TWRC_SUCCESS && status.ConditionCode == TWCC_SUCCESS,
+                "Error [rc %d|cc %d] doing MSG_GETDEFAULT for ICAP_SUPPORTEDSIZES\n", rc, status.ConditionCode);
+        if (rc == TWRC_SUCCESS)
+        {
+            get_onevalue(cap.hContainer, &val, &type);
+            ok(type == TWTY_UINT16, "GETDEFAULT for PHYSICALXXX is not type TWTY_UINT16, is type %d\n", type);
+            trace("Default size is %d\n", val);
+            GlobalFree(cap.hContainer);
+            default_value = val;
+        }
+    }
+
+    if (actual_support & TWQC_GET)
+    {
+        memset(&cap, 0, sizeof(cap));
+        cap.Cap = ICAP_SUPPORTEDSIZES;
+        cap.ConType = TWON_DONTCARE16;
+
+        rc = pDSM_Entry(appid, source, DG_CONTROL, DAT_CAPABILITY, MSG_GET, &cap);
+        get_condition_code(appid, source, &status);
+        ok(rc == TWRC_SUCCESS && status.ConditionCode == TWCC_SUCCESS,
+                "Error [rc %d|cc %d] doing MSG_GET for ICAP_SUPPORTEDSIZES\n", rc, status.ConditionCode);
+        check_get(&cap, actual_support, orig_value, default_value, &new_value);
+    }
+
+    if (actual_support & TWQC_SET)
+    {
+        memset(&cap, 0, sizeof(cap));
+        cap.Cap = ICAP_SUPPORTEDSIZES;
+        cap.ConType = TWON_ONEVALUE;
+        cap.hContainer = alloc_and_set_onevalue(new_value, TWTY_UINT16);
+
+        rc = pDSM_Entry(appid, source, DG_CONTROL, DAT_CAPABILITY, MSG_SET, &cap);
+        get_condition_code(appid, source, &status);
+        ok(rc == TWRC_SUCCESS && status.ConditionCode == TWCC_SUCCESS,
+                "Error [rc %d|cc %d] doing MSG_SET for ICAP_SUPPORTEDSIZES\n", rc, status.ConditionCode);
+        GlobalFree(cap.hContainer);
+
+    }
+
+    if (actual_support & TWQC_RESET)
+    {
+        memset(&cap, 0, sizeof(cap));
+        cap.Cap = ICAP_SUPPORTEDSIZES;
+        cap.ConType = TWON_DONTCARE16;
+
+        rc = pDSM_Entry(appid, source, DG_CONTROL, DAT_CAPABILITY, MSG_RESET, &cap);
+        get_condition_code(appid, source, &status);
+        ok(rc == TWRC_SUCCESS && status.ConditionCode == TWCC_SUCCESS,
+                "Error [rc %d|cc %d] doing MSG_RESET for ICAP_SUPPORTEDSIZES\n", rc, status.ConditionCode);
+        if (rc == TWRC_SUCCESS)
+            GlobalFree(cap.hContainer);
+    }
+}
+
+static void test_imagelayout(TW_IDENTITY *appid, TW_IDENTITY *source)
+{
+    TW_UINT16 rc;
+    TW_STATUS status;
+    TW_IMAGELAYOUT layout;
+
+    rc = pDSM_Entry(appid, source, DG_IMAGE, DAT_IMAGELAYOUT, MSG_GET, &layout);
+    get_condition_code(appid, source, &status);
+    ok(rc == TWRC_SUCCESS && status.ConditionCode == TWCC_SUCCESS,
+            "Error [rc %d|cc %d] doing MSG_GET for DG_IMAGE/DAT_IMAGELAYOUT\n", rc, status.ConditionCode);
+    if (rc != TWRC_SUCCESS)
+        return;
+    trace("ImageLayout [Left %x.%x|Top %x.%x|Right %x.%x|Bottom %x.%x|Document %d|Page %d|Frame %d]\n",
+            layout.Frame.Left.Whole, layout.Frame.Left.Frac,
+            layout.Frame.Top.Whole, layout.Frame.Top.Frac,
+            layout.Frame.Right.Whole, layout.Frame.Right.Frac,
+            layout.Frame.Bottom.Whole, layout.Frame.Bottom.Frac,
+            layout.DocumentNumber, layout.PageNumber, layout.FrameNumber);
+
+    memset(&layout, 0, sizeof(layout));
+    layout.Frame.Left.Whole = 1;
+    layout.Frame.Right.Whole = 2;
+    layout.Frame.Top.Whole = 1;
+    layout.Frame.Bottom.Whole = 2;
+    rc = pDSM_Entry(appid, source, DG_IMAGE, DAT_IMAGELAYOUT, MSG_SET, &layout);
+    get_condition_code(appid, source, &status);
+    ok(rc == TWRC_SUCCESS && status.ConditionCode == TWCC_SUCCESS,
+            "Error [rc %d|cc %d] doing MSG_SET for DG_IMAGE/DAT_IMAGELAYOUT\n", rc, status.ConditionCode);
+    if (rc != TWRC_SUCCESS)
+        return;
+
+    rc = pDSM_Entry(appid, source, DG_IMAGE, DAT_IMAGELAYOUT, MSG_GET, &layout);
+    get_condition_code(appid, source, &status);
+    ok(rc == TWRC_SUCCESS && status.ConditionCode == TWCC_SUCCESS,
+            "Error [rc %d|cc %d] doing MSG_GET for DG_IMAGE/DAT_IMAGELAYOUT\n", rc, status.ConditionCode);
+    if (rc != TWRC_SUCCESS)
+        return;
+    trace("ImageLayout after set [Left %x.%x|Top %x.%x|Right %x.%x|Bottom %x.%x|Document %d|Page %d|Frame %d]\n",
+            layout.Frame.Left.Whole, layout.Frame.Left.Frac,
+            layout.Frame.Top.Whole, layout.Frame.Top.Frac,
+            layout.Frame.Right.Whole, layout.Frame.Right.Frac,
+            layout.Frame.Bottom.Whole, layout.Frame.Bottom.Frac,
+            layout.DocumentNumber, layout.PageNumber, layout.FrameNumber);
+}
+
 
 static void test_single_source(TW_IDENTITY *appid, TW_IDENTITY *source)
 {
@@ -431,7 +668,7 @@ static void test_single_source(TW_IDENTITY *appid, TW_IDENTITY *source)
         }
     }
 
-    /* For Twain 1.6, all sources must support: */
+    /* All sources must support: */
     ok(capabilities[CAP_SUPPORTEDCAPS], "CAP_SUPPORTEDCAPS not supported\n");
     ok(capabilities[CAP_XFERCOUNT], "CAP_XFERCOUNT not supported\n");
     if (capabilities[CAP_XFERCOUNT])
@@ -443,7 +680,7 @@ static void test_single_source(TW_IDENTITY *appid, TW_IDENTITY *source)
 
     if (source->SupportedGroups & DG_IMAGE)
     {
-        /* For Twain 1.6:
+        /*
             Sources that supply image information must support DG_CONTROL / DAT_CAPABILITY /
             MSG_GET, MSG_GETCURRENT, MSG_GETDEFAULT on:
         */
@@ -453,16 +690,20 @@ static void test_single_source(TW_IDENTITY *appid, TW_IDENTITY *source)
                 TWQC_GET | TWQC_GETDEFAULT | TWQC_GETCURRENT);
         todo_wine
         ok(capabilities[ICAP_PLANARCHUNKY], "ICAP_PLANARCHUNKY not supported\n");
-        todo_wine
         ok(capabilities[ICAP_PHYSICALHEIGHT], "ICAP_PHYSICALHEIGHT not supported\n");
-        todo_wine
+        if (capabilities[ICAP_PHYSICALHEIGHT])
+            test_physical(appid, source, ICAP_PHYSICALHEIGHT,
+                TWQC_GET | TWQC_GETDEFAULT | TWQC_GETCURRENT);
         ok(capabilities[ICAP_PHYSICALWIDTH], "ICAP_PHYSICALWIDTH not supported\n");
+        if (capabilities[ICAP_PHYSICALWIDTH])
+            test_physical(appid, source, ICAP_PHYSICALWIDTH,
+                TWQC_GET | TWQC_GETDEFAULT | TWQC_GETCURRENT);
         ok(capabilities[ICAP_PIXELFLAVOR], "ICAP_PIXELFLAVOR not supported\n");
         if (capabilities[ICAP_PIXELFLAVOR])
             test_onevalue_cap(appid, source, ICAP_PIXELFLAVOR, TWTY_UINT16,
-                TWQC_GET | TWQC_SET | TWQC_GETDEFAULT | TWQC_GETCURRENT | TWQC_RESET);
+                TWQC_GET | TWQC_GETDEFAULT | TWQC_GETCURRENT);
 
-        /* For Twain 1.6:
+        /*
             Sources that supply image information must support DG_CONTROL / DAT_CAPABILITY /
             MSG_GET, MSG_GETCURRENT, MSG_GETDEFAULT, MSG_RESET and MSG_SET on:
         */
@@ -492,6 +733,21 @@ static void test_single_source(TW_IDENTITY *appid, TW_IDENTITY *source)
         if (capabilities[ICAP_YRESOLUTION])
             test_resolution(appid, source, ICAP_YRESOLUTION,
                 TWQC_GET | TWQC_SET | TWQC_GETDEFAULT | TWQC_GETCURRENT | TWQC_RESET);
+
+        /* Optional capabilities */
+        if (capabilities[CAP_AUTOFEED])
+            test_onevalue_cap(appid, source, CAP_AUTOFEED, TWTY_BOOL,
+                TWQC_GET | TWQC_SET | TWQC_GETDEFAULT | TWQC_GETCURRENT | TWQC_RESET);
+        if (capabilities[CAP_FEEDERENABLED])
+            test_onevalue_cap(appid, source, CAP_FEEDERENABLED, TWTY_BOOL,
+                TWQC_GET | TWQC_SET | TWQC_GETDEFAULT | TWQC_GETCURRENT | TWQC_RESET);
+        if (capabilities[ICAP_SUPPORTEDSIZES])
+            test_supported_sizes(appid, source,
+                TWQC_GET | TWQC_SET | TWQC_GETDEFAULT | TWQC_GETCURRENT | TWQC_RESET);
+
+        /* Additional tests */
+        test_imagelayout(appid, source);
+
     }
 }
 

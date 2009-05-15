@@ -931,18 +931,10 @@ static int encode_type(
 
     case VT_SAFEARRAY:
 	{
-	int next_vt;
+	type_t *element_type = type_alias_get_aliasee(type_array_get_element(type));
+	int next_vt = get_type_vt(element_type);
 
-	/* skip over SAFEARRAY type straight to element type */
-	type = type->ref;
-
-	for(next_vt = 0; type->ref; type = type->ref) {
-	    next_vt = get_type_vt(type->ref);
-	    if (next_vt != 0)
-	        break;
-	}
-
-	encode_type(typelib, next_vt, type->ref, &target_type, NULL, NULL, &child_size);
+	encode_type(typelib, next_vt, type_alias_get_aliasee(type_array_get_element(type)), &target_type, NULL, NULL, &child_size);
 
 	for (typeoffset = 0; typeoffset < typelib->typelib_segdir[MSFT_SEG_TYPEDESC].length; typeoffset += 8) {
 	    typedata = (void *)&typelib->typelib_segment_data[MSFT_SEG_TYPEDESC][typeoffset];
@@ -1040,8 +1032,7 @@ static int encode_type(
 
 static void dump_type(type_t *t)
 {
-    chat("dump_type: %p name %s type %d ref %p attrs %p\n", t, t->name, type_get_type(t), t->ref, t->attrs);
-    if(t->ref) dump_type(t->ref);
+    chat("dump_type: %p name %s type %d attrs %p\n", t, t->name, type_get_type(t), t->attrs);
 }
 
 static int encode_var(
@@ -1065,16 +1056,18 @@ static int encode_var(
     if (!decoded_size) decoded_size = &scratch;
     *decoded_size = 0;
 
-    chat("encode_var: var %p type %p type->name %s type->ref %p\n",
-         var, type, type->name ? type->name : "NULL", type->ref);
+    chat("encode_var: var %p type %p type->name %s\n",
+         var, type, type->name ? type->name : "NULL");
 
-    if (type->declarray) {
+    if (is_array(type) && !type_array_is_decl_as_ptr(type)) {
         int num_dims, elements = 1, arrayoffset;
         type_t *atype;
         int *arraydata;
 
         num_dims = 0;
-        for (atype = type; atype->declarray; atype = type_array_get_element(atype))
+        for (atype = type;
+             is_array(atype) && !type_array_is_decl_as_ptr(atype);
+             atype = type_array_get_element(atype))
             ++num_dims;
 
         chat("array with %d dimensions\n", num_dims);
@@ -1087,7 +1080,9 @@ static int encode_var(
         arraydata[1] |= ((num_dims * 2 * sizeof(int)) << 16);
 
         arraydata += 2;
-        for (atype = type; atype->declarray; atype = type_array_get_element(atype))
+        for (atype = type;
+             is_array(atype) && !type_array_is_decl_as_ptr(atype);
+             atype = type_array_get_element(atype))
         {
             arraydata[0] = type_array_get_dim(atype);
             arraydata[1] = 0;

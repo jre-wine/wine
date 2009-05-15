@@ -3833,17 +3833,12 @@ static INT HTTP_GetResponseHeaders(LPWININETHTTPREQW lpwhr, BOOL clear)
 
     do {
         /*
-         * HACK peek at the buffer
-         */
-        buflen = MAX_REPLY_LEN;
-        NETCON_recv(&lpwhr->netConnection, buffer, buflen, MSG_PEEK, &rc);
-
-        /*
          * We should first receive 'HTTP/1.x nnn OK' where nnn is the status code.
          */
-        memset(buffer, 0, MAX_REPLY_LEN);
+        buflen = MAX_REPLY_LEN;
         if (!NETCON_getNextLine(&lpwhr->netConnection, bufferA, &buflen))
             goto lend;
+        rc += buflen;
         MultiByteToWideChar( CP_ACP, 0, bufferA, buflen, buffer, MAX_REPLY_LEN );
 
         /* split the version from the status code */
@@ -3898,6 +3893,13 @@ static INT HTTP_GetResponseHeaders(LPWININETHTTPREQW lpwhr, BOOL clear)
             LPWSTR * pFieldAndValue;
 
             TRACE("got line %s, now interpreting\n", debugstr_a(bufferA));
+
+            if (!bufferA[0]) break;
+            if (!strchr(bufferA, ':'))
+            {
+                WARN("invalid header\n");
+                continue;
+            }
             MultiByteToWideChar( CP_ACP, 0, bufferA, buflen, buffer, MAX_REPLY_LEN );
 
             while (cchRawHeaders + buflen + strlenW(szCrLf) > cchMaxRawHeaders)

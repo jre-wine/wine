@@ -707,7 +707,6 @@ static void test_GetAttributesOf(void)
     char  cCurrDirA [MAX_PATH] = {0};
     WCHAR cCurrDirW [MAX_PATH];
     static WCHAR cTestDirW[] = {'t','e','s','t','d','i','r',0};
-    static const WCHAR cBackSlash[] = {'\\',0};
     IShellFolder *IDesktopFolder, *testIShellFolder;
     ITEMIDLIST *newPIDL;
     int len;
@@ -758,7 +757,10 @@ static void test_GetAttributesOf(void)
     if (FAILED(hr)) return;
 
     hr = IShellFolder_GetAttributesOf(psfMyComputer, 1, &pidlEmpty, &dwFlags);
-    todo_wine {ok (hr == E_INVALIDARG, "MyComputer->GetAttributesOf(emtpy pidl) should fail! hr = %08x\n", hr); }
+    todo_wine
+    ok (hr == E_INVALIDARG ||
+        broken(SUCCEEDED(hr)), /* W2K and earlier */
+        "MyComputer->GetAttributesOf(emtpy pidl) should fail! hr = %08x\n", hr);
 
     dwFlags = 0xffffffff;
     hr = IShellFolder_GetAttributesOf(psfMyComputer, 0, NULL, &dwFlags);
@@ -768,18 +770,18 @@ static void test_GetAttributesOf(void)
 
     IShellFolder_Release(psfMyComputer);
 
-    /* create test directory */
-    CreateFilesFolders();
-
     GetCurrentDirectoryA(MAX_PATH, cCurrDirA);
     len = lstrlenA(cCurrDirA);
 
     if (len == 0) {
-	trace("GetCurrentDirectoryA returned empty string. Skipping test_EnumObjects_and_CompareIDs\n");
+	win_skip("GetCurrentDirectoryA returned empty string. Skipping test_GetAttributesOf\n");
 	return;
     }
     if(cCurrDirA[len-1] == '\\')
 	cCurrDirA[len-1] = 0;
+
+    /* create test directory */
+    CreateFilesFolders();
 
     MultiByteToWideChar(CP_ACP, 0, cCurrDirA, -1, cCurrDirW, MAX_PATH);
  
@@ -808,8 +810,8 @@ static void test_GetAttributesOf(void)
     IMalloc_Free(ppM, newPIDL);
 
     /* append testdirectory name to path */
-    lstrcatW(cCurrDirW, cBackSlash);
-    lstrcatW(cCurrDirW, cTestDirW);
+    lstrcatA(cCurrDirA, "\\testdir");
+    MultiByteToWideChar(CP_ACP, 0, cCurrDirA, -1, cCurrDirW, MAX_PATH);
 
     hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL, cCurrDirW, NULL, &newPIDL, 0);
     ok(hr == S_OK, "ParseDisplayName failed %08x\n", hr);
@@ -854,7 +856,7 @@ static void test_SHGetPathFromIDList(void)
 
     if(!pSHGetPathFromIDListW || !pSHGetSpecialFolderPathW)
     {
-        skip("SHGetPathFromIDListW() or SHGetSpecialFolderPathW() is missing\n");
+        win_skip("SHGetPathFromIDListW() or SHGetSpecialFolderPathW() is missing\n");
         return;
     }
 
@@ -869,7 +871,16 @@ static void test_SHGetPathFromIDList(void)
     result = pSHGetSpecialFolderPathW(NULL, wszDesktop, CSIDL_DESKTOP, FALSE);
     ok(result, "SHGetSpecialFolderPathW(CSIDL_DESKTOP) failed! Last error: %u\n", GetLastError());
     if (!result) return;
-    
+
+    /* Check if we are on Win9x */
+    SetLastError(0xdeadbeef);
+    lstrcmpiW(wszDesktop, wszDesktop);
+    if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        win_skip("Most W-calls are not implemented\n");
+        return;
+    }
+
     result = pSHGetPathFromIDListW(pidlEmpty, wszPath);
     ok(result, "SHGetPathFromIDListW failed! Last error: %u\n", GetLastError());
     if (!result) return;
@@ -969,8 +980,8 @@ static void test_EnumObjects_and_CompareIDs(void)
     ITEMIDLIST *newPIDL;
     IShellFolder *IDesktopFolder, *testIShellFolder;
     char  cCurrDirA [MAX_PATH] = {0};
-    WCHAR cCurrDirW [MAX_PATH];
-    static const WCHAR cTestDirW[] = {'\\','t','e','s','t','d','i','r',0};
+    static const CHAR cTestDirA[] = "\\testdir";
+    WCHAR cTestDirW[MAX_PATH];
     int len;
     HRESULT hr;
 
@@ -978,21 +989,21 @@ static void test_EnumObjects_and_CompareIDs(void)
     len = lstrlenA(cCurrDirA);
 
     if(len == 0) {
-        trace("GetCurrentDirectoryA returned empty string. Skipping test_EnumObjects_and_CompareIDs\n");
+        win_skip("GetCurrentDirectoryA returned empty string. Skipping test_EnumObjects_and_CompareIDs\n");
         return;
     }
     if(cCurrDirA[len-1] == '\\')
         cCurrDirA[len-1] = 0;
 
-    MultiByteToWideChar(CP_ACP, 0, cCurrDirA, -1, cCurrDirW, MAX_PATH);
-    lstrcatW(cCurrDirW, cTestDirW);
+    lstrcatA(cCurrDirA, cTestDirA);
+    MultiByteToWideChar(CP_ACP, 0, cCurrDirA, -1, cTestDirW, MAX_PATH);
 
     hr = SHGetDesktopFolder(&IDesktopFolder);
     ok(hr == S_OK, "SHGetDesktopfolder failed %08x\n", hr);
 
     CreateFilesFolders();
 
-    hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL, cCurrDirW, NULL, &newPIDL, 0);
+    hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL, cTestDirW, NULL, &newPIDL, 0);
     ok(hr == S_OK, "ParseDisplayName failed %08x\n", hr);
 
     hr = IShellFolder_BindToObject(IDesktopFolder, newPIDL, NULL, (REFIID)&IID_IShellFolder, (LPVOID *)&testIShellFolder);

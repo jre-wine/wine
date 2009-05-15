@@ -79,11 +79,8 @@ static int get_refcount(IUnknown *object)
         if (container_ptr && container_ptr != (void *)0x1337c0d3) IUnknown_Release((IUnknown *)container_ptr); \
     }
 
-static void check_mipmap_levels(
-    IDirect3DDevice9* device, 
-    int width, int height, int count) 
+static void check_mipmap_levels(IDirect3DDevice9 *device, UINT width, UINT height, UINT count)
 {
-
     IDirect3DBaseTexture9* texture = NULL;
     HRESULT hr = IDirect3DDevice9_CreateTexture( device, width, height, 0, 0, 
         D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, (IDirect3DTexture9**) &texture, NULL );
@@ -2049,7 +2046,7 @@ static void test_display_formats(void)
 static void test_scissor_size(void)
 {
     IDirect3D9 *d3d9_ptr = 0;
-    int i;
+    unsigned int i;
     static const struct {
         int winx; int winy; int backx; int backy; BOOL window;
     } scts[] = { /* scissor tests */
@@ -2114,8 +2111,8 @@ static void test_scissor_size(void)
         ok(scissorrect.right == scts[i].backx && scissorrect.bottom == scts[i].backy && scissorrect.top == 0 && scissorrect.left == 0, "Scissorrect missmatch (%d, %d) should be (%d, %d)\n", scissorrect.right, scissorrect.bottom, scts[i].backx, scts[i].backy);
 
         /* check the scissorrect values after a reset */
-        present_parameters.BackBufferWidth = 1024;
-        present_parameters.BackBufferHeight = 768;
+        present_parameters.BackBufferWidth = 800;
+        present_parameters.BackBufferHeight = 600;
         hr = IDirect3DDevice9_Reset(device_ptr, &present_parameters);
         ok(hr == D3D_OK, "IDirect3DDevice9_Reset failed with %08x\n", hr);
         hr = IDirect3DDevice9_TestCooperativeLevel(device_ptr);
@@ -2123,7 +2120,7 @@ static void test_scissor_size(void)
 
         hr = IDirect3DDevice9_GetScissorRect(device_ptr, &scissorrect);
         ok(hr == D3D_OK, "IDirect3DDevice9_GetScissorRect failed with: %08x\n", hr);
-        ok(scissorrect.right == 1024 && scissorrect.bottom == 768 && scissorrect.top == 0 && scissorrect.left == 0, "Scissorrect missmatch (%d, %d) should be (%d, %d)\n", scissorrect.right, scissorrect.bottom, 1024, 768);
+        ok(scissorrect.right == 800 && scissorrect.bottom == 600 && scissorrect.top == 0 && scissorrect.left == 0, "Scissorrect missmatch (%d, %d) should be (%d, %d)\n", scissorrect.right, scissorrect.bottom, 800, 600);
 
         if(device_ptr) {
             ULONG ref;

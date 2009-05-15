@@ -114,6 +114,7 @@ typedef struct
 /* globals to communicate between test and wndproc */
 
 static BOOL bMenuVisible;
+static BOOL got_input;
 static HMENU hMenus[4];
 
 #define MOD_SIZE 10
@@ -139,12 +140,25 @@ static int MOD_odheight;
 static SIZE MODsizes[MOD_NRMENUS]= { {MOD_SIZE, MOD_SIZE},{MOD_SIZE, MOD_SIZE},
     {MOD_SIZE, MOD_SIZE},{MOD_SIZE, MOD_SIZE}};
 static int MOD_GotDrawItemMsg = FALSE;
+static int  gflag_initmenupopup,
+            gflag_entermenuloop,
+            gflag_initmenu;
+
 /* wndproc used by test_menu_ownerdraw() */
 static LRESULT WINAPI menu_ownerdraw_wnd_proc(HWND hwnd, UINT msg,
         WPARAM wparam, LPARAM lparam)
 {
     switch (msg)
     {
+        case WM_INITMENUPOPUP:
+            gflag_initmenupopup++;
+            break;
+        case WM_ENTERMENULOOP:
+            gflag_entermenuloop++;
+            break;
+        case WM_INITMENU:
+            gflag_initmenu++;
+            break;
         case WM_MEASUREITEM:
             {
                 MEASUREITEMSTRUCT* pmis = (MEASUREITEMSTRUCT*)lparam;
@@ -211,6 +225,8 @@ static LRESULT WINAPI menu_ownerdraw_wnd_proc(HWND hwnd, UINT msg,
             }
         case WM_ENTERIDLE:
             {
+                ok( lparam || broken(!lparam), /* win9x, nt4 */
+                    "Menu window handle is NULL!\n");
                 PostMessage(hwnd, WM_CANCELMODE, 0, 0);
                 return TRUE;
             }
@@ -262,7 +278,7 @@ static void test_menu_locked_by_window(void)
     ok(ret, "DrawMenuBar failed with error %d\n", GetLastError());
     }
     ret = IsMenu(GetMenu(hwnd));
-    ok(!ret, "Menu handle should have been destroyed\n");
+    ok(!ret || broken(ret) /* nt4 */, "Menu handle should have been destroyed\n");
 
     SendMessage(hwnd, WM_SYSCOMMAND, SC_KEYMENU, 0);
     /* did we process the WM_INITMENU message? */
@@ -1747,23 +1763,23 @@ static struct menu_mouse_tests_s {
     BOOL _todo_wine;
 } menu_tests[] = {
     /* for each test, send keys or clicks and check for menu visibility */
-    { INPUT_KEYBOARD, {{0}}, {VK_LMENU, 0}, TRUE, FALSE }, /* test 0 */
+    { INPUT_KEYBOARD, {{0}}, {VK_MENU, 0}, TRUE, FALSE }, /* test 0 */
     { INPUT_KEYBOARD, {{0}}, {VK_ESCAPE, 0}, FALSE, FALSE },
-    { INPUT_KEYBOARD, {{0}}, {VK_LMENU, 0}, TRUE, FALSE },
+    { INPUT_KEYBOARD, {{0}}, {VK_MENU, 0}, TRUE, FALSE },
     { INPUT_KEYBOARD, {{0}}, {'D', 0}, FALSE, FALSE },
-    { INPUT_KEYBOARD, {{0}}, {VK_LMENU, 0}, TRUE, FALSE },
+    { INPUT_KEYBOARD, {{0}}, {VK_MENU, 0}, TRUE, FALSE },
     { INPUT_KEYBOARD, {{0}}, {'E', 0}, FALSE, FALSE },
-    { INPUT_KEYBOARD, {{0}}, {VK_LMENU, 'M', 0}, TRUE, FALSE },
+    { INPUT_KEYBOARD, {{0}}, {VK_MENU, 'M', 0}, TRUE, FALSE },
     { INPUT_KEYBOARD, {{0}}, {VK_ESCAPE, VK_ESCAPE, 0}, FALSE, FALSE },
-    { INPUT_KEYBOARD, {{0}}, {VK_LMENU, 'M', VK_ESCAPE, 0}, TRUE, FALSE },
+    { INPUT_KEYBOARD, {{0}}, {VK_MENU, 'M', VK_ESCAPE, 0}, TRUE, FALSE },
     { INPUT_KEYBOARD, {{0}}, {VK_ESCAPE, 0}, FALSE, FALSE },
-    { INPUT_KEYBOARD, {{0}}, {VK_LMENU, 'M', 0}, TRUE, FALSE },
+    { INPUT_KEYBOARD, {{0}}, {VK_MENU, 'M', 0}, TRUE, FALSE },
     { INPUT_KEYBOARD, {{0}}, {'D', 0}, FALSE, FALSE },
-    { INPUT_KEYBOARD, {{0}}, {VK_LMENU, 'M', 0}, TRUE, FALSE },
+    { INPUT_KEYBOARD, {{0}}, {VK_MENU, 'M', 0}, TRUE, FALSE },
     { INPUT_KEYBOARD, {{0}}, {'E', 0}, FALSE, FALSE },
-    { INPUT_KEYBOARD, {{0}}, {VK_LMENU, 'M', 'P', 0}, TRUE, FALSE },
+    { INPUT_KEYBOARD, {{0}}, {VK_MENU, 'M', 'P', 0}, TRUE, FALSE },
     { INPUT_KEYBOARD, {{0}}, {'D', 0}, FALSE, FALSE },
-    { INPUT_KEYBOARD, {{0}}, {VK_LMENU, 'M', 'P', 0}, TRUE, FALSE },
+    { INPUT_KEYBOARD, {{0}}, {VK_MENU, 'M', 'P', 0}, TRUE, FALSE },
     { INPUT_KEYBOARD, {{0}}, {'E', 0}, FALSE, FALSE },
 
     { INPUT_MOUSE, {{1, 2}, {0}}, {0}, TRUE, TRUE }, /* test 18 */
@@ -1790,7 +1806,7 @@ static void send_key(WORD wVk)
     pSendInput(2, (INPUT *) i, sizeof(INPUT));
 }
 
-static void click_menu(HANDLE hWnd, struct menu_item_pair_s *mi)
+static BOOL click_menu(HANDLE hWnd, struct menu_item_pair_s *mi)
 {
     HMENU hMenu = hMenus[mi->uMenu];
     TEST_INPUT i[3];
@@ -1799,7 +1815,7 @@ static void click_menu(HANDLE hWnd, struct menu_item_pair_s *mi)
     int screen_w = GetSystemMetrics(SM_CXSCREEN);
     int screen_h = GetSystemMetrics(SM_CYSCREEN);
     BOOL ret = GetMenuItemRect(mi->uMenu > 2 ? NULL : hWnd, hMenu, mi->uItem, &r);
-    if(!ret) return;
+    if(!ret) return FALSE;
 
     memset(i, 0, sizeof(i));
     i[0].type = i[1].type = i[2].type = INPUT_MOUSE;
@@ -1812,10 +1828,11 @@ static void click_menu(HANDLE hWnd, struct menu_item_pair_s *mi)
     i[0].u.mi.dwFlags |= MOUSEEVENTF_MOVE;
     i[1].u.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
     i[2].u.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
-    pSendInput(3, (INPUT *) i, sizeof(INPUT));
+    ret = pSendInput(3, (INPUT *) i, sizeof(INPUT));
 
     /* hack to prevent mouse message buildup in Wine */
     while (PeekMessage( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessageA( &msg );
+    return ret;
 }
 
 static DWORD WINAPI test_menu_input_thread(LPVOID lpParameter)
@@ -1827,21 +1844,36 @@ static DWORD WINAPI test_menu_input_thread(LPVOID lpParameter)
     /* mixed keyboard/mouse test */
     for (i = 0; menu_tests[i].type != -1; i++)
     {
-        int elapsed = 0;
+        int ret = TRUE, elapsed = 0;
+
+        got_input = i && menu_tests[i-1].bMenuVisible;
 
         if (menu_tests[i].type == INPUT_KEYBOARD)
             for (j = 0; menu_tests[i].wVk[j] != 0; j++)
                 send_key(menu_tests[i].wVk[j]);
         else
             for (j = 0; menu_tests[i].menu_item_pairs[j].uMenu != 0; j++)
-                click_menu(hWnd, &menu_tests[i].menu_item_pairs[j]);
+                if (!(ret = click_menu(hWnd, &menu_tests[i].menu_item_pairs[j]))) break;
 
+        if (!ret)
+        {
+            skip( "test %u: failed to send input\n", i );
+            PostMessage( hWnd, WM_CANCELMODE, 0, 0 );
+            return 0;
+        }
         while (menu_tests[i].bMenuVisible != bMenuVisible)
         {
             if (elapsed > 200)
                 break;
             elapsed += 20;
             Sleep(20);
+        }
+
+        if (!got_input)
+        {
+            skip( "test %u: didn't receive input\n", i );
+            PostMessage( hWnd, WM_CANCELMODE, 0, 0 );
+            return 0;
         }
 
         if (menu_tests[i]._todo_wine)
@@ -1866,6 +1898,16 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam,
         case WM_EXITMENULOOP:
             bMenuVisible = FALSE;
             break;
+        case WM_KEYDOWN:
+        case WM_SYSKEYDOWN:
+        case WM_MOUSEMOVE:
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONUP:
+        case WM_NCMOUSEMOVE:
+        case WM_NCLBUTTONDOWN:
+        case WM_NCLBUTTONUP:
+            got_input = TRUE;
+            /* fall through */
         default:
             return( DefWindowProcA( hWnd, msg, wParam, lParam ) );
     }
@@ -2447,13 +2489,17 @@ static void test_menu_getmenuinfo(void)
     ret = pGetMenuInfo( hmenu, NULL);
     gle= GetLastError();
     ok( !ret, "GetMenuInfo() should have failed\n");
-    ok( gle == ERROR_INVALID_PARAMETER, "GetMenuInfo() error got %u expected %u\n", gle, ERROR_INVALID_PARAMETER);
+    ok( gle == ERROR_INVALID_PARAMETER ||
+        broken(gle == 0xdeadbeef), /* Win98, WinME */
+        "GetMenuInfo() error got %u expected %u\n", gle, ERROR_INVALID_PARAMETER);
     SetLastError(0xdeadbeef);
     mi.cbSize = 0;
     ret = pGetMenuInfo( hmenu, &mi);
     gle= GetLastError();
     ok( !ret, "GetMenuInfo() should have failed\n");
-    ok( gle == ERROR_INVALID_PARAMETER, "GetMenuInfo() error got %u expected %u\n", gle, ERROR_INVALID_PARAMETER);
+    ok( gle == ERROR_INVALID_PARAMETER ||
+        broken(gle == 0xdeadbeef), /* Win98, WinME */
+        "GetMenuInfo() error got %u expected %u\n", gle, ERROR_INVALID_PARAMETER);
     SetLastError(0xdeadbeef);
     mi.cbSize = sizeof( MENUINFO);
     ret = pGetMenuInfo( hmenu, &mi);
@@ -2465,8 +2511,10 @@ static void test_menu_getmenuinfo(void)
     ret = pGetMenuInfo( NULL, &mi);
     gle= GetLastError();
     ok( !ret, "GetMenuInfo() should have failed\n");
-    ok( gle == ERROR_INVALID_PARAMETER, "GetMenuInfo() error got %u expected %u\n", gle, ERROR_INVALID_PARAMETER);
-        /* clean up */
+    ok( gle == ERROR_INVALID_PARAMETER ||
+        broken(gle == 0xdeadbeef), /* Win98, WinME */
+        "GetMenuInfo() error got %u expected %u\n", gle, ERROR_INVALID_PARAMETER);
+    /* clean up */
     DestroyMenu( hmenu);
     return;
 }
@@ -2492,13 +2540,17 @@ static void test_menu_setmenuinfo(void)
     ret = pSetMenuInfo( hmenu, NULL);
     gle= GetLastError();
     ok( !ret, "SetMenuInfo() should have failed\n");
-    ok( gle == ERROR_INVALID_PARAMETER, "SetMenuInfo() error got %u expected %u\n", gle, ERROR_INVALID_PARAMETER);
+    ok( gle == ERROR_INVALID_PARAMETER ||
+        broken(gle == 0xdeadbeef), /* Win98, WinME */
+        "SetMenuInfo() error got %u expected %u\n", gle, ERROR_INVALID_PARAMETER);
     SetLastError(0xdeadbeef);
     mi.cbSize = 0;
     ret = pSetMenuInfo( hmenu, &mi);
     gle= GetLastError();
     ok( !ret, "SetMenuInfo() should have failed\n");
-    ok( gle == ERROR_INVALID_PARAMETER, "SetMenuInfo() error got %u expected %u\n", gle, ERROR_INVALID_PARAMETER);
+    ok( gle == ERROR_INVALID_PARAMETER ||
+        broken(gle == 0xdeadbeef), /* Win98, WinME */
+        "SetMenuInfo() error got %u expected %u\n", gle, ERROR_INVALID_PARAMETER);
     SetLastError(0xdeadbeef);
     mi.cbSize = sizeof( MENUINFO);
     ret = pSetMenuInfo( hmenu, &mi);
@@ -2510,7 +2562,9 @@ static void test_menu_setmenuinfo(void)
     ret = pSetMenuInfo( NULL, &mi);
     gle= GetLastError();
     ok( !ret, "SetMenuInfo() should have failed\n");
-    ok( gle == ERROR_INVALID_PARAMETER, "SetMenuInfo() error got %u expected %u\n", gle, ERROR_INVALID_PARAMETER);
+    ok( gle == ERROR_INVALID_PARAMETER ||
+        broken(gle == 0xdeadbeef), /* Win98, WinME */
+        "SetMenuInfo() error got %u expected %u\n", gle, ERROR_INVALID_PARAMETER);
     /* functional tests */
     /* menu and submenu should have the CHECKORBMP style bit cleared */
     SetLastError(0xdeadbeef);
@@ -2587,6 +2641,113 @@ static void test_menu_setmenuinfo(void)
     return;
 }
 
+/* little func to easy switch either TrackPopupMenu() or TrackPopupMenuEx() */
+static DWORD MyTrackPopupMenu( int ex, HMENU hmenu, UINT flags, INT x, INT y, HWND hwnd, LPTPMPARAMS ptpm)
+{
+    return ex
+        ? TrackPopupMenuEx( hmenu, flags, x, y, hwnd, ptpm)
+        : TrackPopupMenu( hmenu, flags, x, y, 0, hwnd, NULL);
+}
+
+/* some TrackPopupMenu and TrackPopupMenuEx tests */
+/* the LastError values differ between NO_ERROR and invalid handle */
+/* between all windows versions tested. The first value is that valid on XP  */
+/* Vista was the only that made returned different error values */
+/* between the TrackPopupMenu and TrackPopupMenuEx functions */
+static void test_menu_trackpopupmenu(void)
+{
+    BOOL ret;
+    HMENU hmenu;
+    DWORD gle;
+    int Ex;
+    HWND hwnd = CreateWindowEx(0, MAKEINTATOM(atomMenuCheckClass), NULL,
+            WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 200, 200,
+            NULL, NULL, NULL, NULL);
+    ok(hwnd != NULL, "CreateWindowEx failed with error %d\n", GetLastError());
+    if (!hwnd) return;
+    SetWindowLongPtr( hwnd, GWLP_WNDPROC, (LONG_PTR)menu_ownerdraw_wnd_proc);
+    for( Ex = 0; Ex < 2; Ex++)
+    {
+        hmenu = CreatePopupMenu();
+        ok(hmenu != NULL, "CreateMenu failed with error %d\n", GetLastError());
+        if (!hmenu)
+        {
+            DestroyWindow(hwnd);
+            return;
+        }
+        /* display the menu */
+        /* start with an invalid menu handle */
+        gle = 0xdeadbeef;
+        gflag_initmenupopup = gflag_entermenuloop = gflag_initmenu = 0;
+        ret = MyTrackPopupMenu( Ex, NULL, 0x100, 100,100, hwnd, NULL);
+        gle = GetLastError();
+        ok( !ret, "TrackPopupMenu%s should have failed\n", Ex ? "Ex" : "");
+        ok( gle == ERROR_INVALID_MENU_HANDLE
+            || broken (gle == 0xdeadbeef) /* win95 */
+            || broken (gle == NO_ERROR) /* win98/ME */
+            ,"TrackPopupMenu%s error got %u expected %u\n",
+            Ex ? "Ex" : "", gle, ERROR_INVALID_MENU_HANDLE);
+        ok( !(gflag_initmenupopup || gflag_entermenuloop || gflag_initmenu),
+                "got unexpected message(s)%s%s%s\n",
+                gflag_initmenupopup ? " WM_INITMENUPOPUP ": " ",
+                gflag_entermenuloop ? "WM_INITMENULOOP ": "",
+                gflag_initmenu ? "WM_INITMENU": "");
+        /* another one but not NULL */
+        gle = 0xdeadbeef;
+        gflag_initmenupopup = gflag_entermenuloop = gflag_initmenu = 0;
+        ret = MyTrackPopupMenu( Ex, (HMENU)hwnd, 0x100, 100,100, hwnd, NULL);
+        gle = GetLastError();
+        ok( !ret, "TrackPopupMenu%s should have failed\n", Ex ? "Ex" : "");
+        ok( gle == ERROR_INVALID_MENU_HANDLE
+            || broken (gle == 0xdeadbeef) /* win95 */
+            || broken (gle == NO_ERROR) /* win98/ME */
+            ,"TrackPopupMenu%s error got %u expected %u\n",
+            Ex ? "Ex" : "", gle, ERROR_INVALID_MENU_HANDLE);
+        ok( !(gflag_initmenupopup || gflag_entermenuloop || gflag_initmenu),
+                "got unexpected message(s)%s%s%s\n",
+                gflag_initmenupopup ? " WM_INITMENUPOPUP ": " ",
+                gflag_entermenuloop ? "WM_INITMENULOOP ": "",
+                gflag_initmenu ? "WM_INITMENU": "");
+        /* now a somewhat successfull call */
+        gle = 0xdeadbeef;
+        gflag_initmenupopup = gflag_entermenuloop = gflag_initmenu = 0;
+        ret = MyTrackPopupMenu( Ex, hmenu, 0x100, 100,100, hwnd, NULL);
+        gle = GetLastError();
+        ok( ret == 0, "TrackPopupMenu%s returned %d expected zero\n", Ex ? "Ex" : "", ret);
+        ok( gle == NO_ERROR
+            || gle == ERROR_INVALID_MENU_HANDLE /* NT4, win2k */
+            || broken (gle == 0xdeadbeef) /* win95 */
+            ,"TrackPopupMenu%s error got %u expected %u or %u\n",
+            Ex ? "Ex" : "", gle, NO_ERROR, ERROR_INVALID_MENU_HANDLE);
+        ok( gflag_initmenupopup && gflag_entermenuloop && gflag_initmenu,
+                "missed expected message(s)%s%s%s\n",
+                !gflag_initmenupopup ? " WM_INITMENUPOPUP ": " ",
+                !gflag_entermenuloop ? "WM_INITMENULOOP ": "",
+                !gflag_initmenu ? "WM_INITMENU": "");
+        /* and another */
+        ret = AppendMenuA( hmenu, MF_STRING, 1, "winetest");
+        ok( ret, "AppendMenA has failed!\n");
+        gle = 0xdeadbeef;
+        gflag_initmenupopup = gflag_entermenuloop = gflag_initmenu = 0;
+        ret = MyTrackPopupMenu( Ex, hmenu, 0x100, 100,100, hwnd, NULL);
+        gle = GetLastError();
+        ok( ret == 0, "TrackPopupMenu%s returned %d expected zero\n", Ex ? "Ex" : "", ret);
+        ok( gle == NO_ERROR
+            || gle == ERROR_INVALID_MENU_HANDLE /* NT4, win2k and Vista in the TrackPopupMenuEx case */
+            || broken (gle == 0xdeadbeef) /* win95 */
+            ,"TrackPopupMenu%s error got %u expected %u or %u\n",
+            Ex ? "Ex" : "", gle, NO_ERROR, ERROR_INVALID_MENU_HANDLE);
+        ok( gflag_initmenupopup && gflag_entermenuloop && gflag_initmenu,
+                "missed expected message(s)%s%s%s\n",
+                !gflag_initmenupopup ? " WM_INITMENUPOPUP ": " ",
+                !gflag_entermenuloop ? "WM_INITMENULOOP ": "",
+                !gflag_initmenu ? "WM_INITMENU": "");
+        DestroyMenu(hmenu);
+    }
+    /* clean up */
+    DestroyWindow(hwnd);
+}
+
 START_TEST(menu)
 {
     init_function_pointers();
@@ -2622,4 +2783,5 @@ START_TEST(menu)
     test_menu_flags();
 
     test_menu_hilitemenuitem();
+    test_menu_trackpopupmenu();
 }

@@ -85,6 +85,61 @@ SANE_Status sane_option_set_int(SANE_Handle h, const char *option_name, SANE_Int
     return psane_control_option(h, optno, SANE_ACTION_SET_VALUE, (void *) &val, status);
 }
 
+SANE_Status sane_option_get_bool(SANE_Handle h, const char *option_name, SANE_Bool *val, SANE_Int *status)
+{
+    SANE_Status rc;
+    int optno;
+    const SANE_Option_Descriptor *opt;
+
+    rc = sane_find_option(h, option_name, &opt, &optno, SANE_TYPE_BOOL);
+    if (rc != SANE_STATUS_GOOD)
+        return rc;
+
+    return psane_control_option(h, optno, SANE_ACTION_GET_VALUE, (void *) val, status);
+}
+
+SANE_Status sane_option_set_bool(SANE_Handle h, const char *option_name, SANE_Bool val, SANE_Int *status)
+{
+    SANE_Status rc;
+    int optno;
+    const SANE_Option_Descriptor *opt;
+
+    rc = sane_find_option(h, option_name, &opt, &optno, SANE_TYPE_BOOL);
+    if (rc != SANE_STATUS_GOOD)
+        return rc;
+
+    return psane_control_option(h, optno, SANE_ACTION_SET_VALUE, (void *) &val, status);
+}
+
+SANE_Status sane_option_set_fixed(SANE_Handle h, const char *option_name, SANE_Fixed val, SANE_Int *status)
+{
+    SANE_Status rc;
+    int optno;
+    const SANE_Option_Descriptor *opt;
+
+    rc = sane_find_option(h, option_name, &opt, &optno, SANE_TYPE_FIXED);
+    if (rc != SANE_STATUS_GOOD)
+        return rc;
+
+    return psane_control_option(h, optno, SANE_ACTION_SET_VALUE, (void *) &val, status);
+}
+
+SANE_Status sane_option_get_str(SANE_Handle h, const char *option_name, SANE_String val, size_t len, SANE_Int *status)
+{
+    SANE_Status rc;
+    int optno;
+    const SANE_Option_Descriptor *opt;
+
+    rc = sane_find_option(h, option_name, &opt, &optno, SANE_TYPE_STRING);
+    if (rc != SANE_STATUS_GOOD)
+        return rc;
+
+    if (opt->size < len)
+        return psane_control_option(h, optno, SANE_ACTION_GET_VALUE, (void *) val, status);
+    else
+        return SANE_STATUS_NO_MEM;
+}
+
 /* Important:  SANE has the side effect of of overwriting val with the returned value */
 SANE_Status sane_option_set_str(SANE_Handle h, const char *option_name, SANE_String val, SANE_Int *status)
 {
@@ -136,5 +191,80 @@ SANE_Status sane_option_probe_mode(SANE_Handle h, SANE_String_Const **choices, c
     else
         return SANE_STATUS_NO_MEM;
 
+}
+
+SANE_Status sane_option_probe_scan_area(SANE_Handle h, const char *option_name, SANE_Fixed *val,
+                                        SANE_Unit *unit, SANE_Fixed *min, SANE_Fixed *max, SANE_Fixed *quant)
+{
+    SANE_Status rc;
+    int optno;
+    const SANE_Option_Descriptor *opt;
+
+    rc = sane_find_option(h, option_name, &opt, &optno, SANE_TYPE_FIXED);
+    if (rc != SANE_STATUS_GOOD)
+        return rc;
+
+    if (unit)
+        *unit = opt->unit;
+    if (min)
+        *min = opt->constraint.range->min;
+    if (max)
+        *max = opt->constraint.range->max;
+    if (quant)
+        *quant = opt->constraint.range->quant;
+
+    if (val)
+        rc = psane_control_option(h, optno, SANE_ACTION_GET_VALUE, val, NULL);
+
+    return rc;
+}
+
+TW_UINT16 sane_status_to_twcc(SANE_Status rc)
+{
+    switch (rc)
+    {
+        case SANE_STATUS_GOOD:
+            return TWCC_SUCCESS;
+        case SANE_STATUS_UNSUPPORTED:
+            return TWCC_CAPUNSUPPORTED;
+        case SANE_STATUS_JAMMED:
+            return TWCC_PAPERJAM;
+        case SANE_STATUS_NO_MEM:
+            return TWCC_LOWMEMORY;
+        case SANE_STATUS_ACCESS_DENIED:
+            return TWCC_DENIED;
+
+        case SANE_STATUS_IO_ERROR:
+        case SANE_STATUS_NO_DOCS:
+        case SANE_STATUS_COVER_OPEN:
+        case SANE_STATUS_EOF:
+        case SANE_STATUS_INVAL:
+        case SANE_STATUS_CANCELLED:
+        case SANE_STATUS_DEVICE_BUSY:
+        default:
+            return TWCC_BUMMER;
+    }
+}
+static void convert_double_fix32(double d, TW_FIX32 *fix32)
+{
+    TW_INT32 value = (TW_INT32) (d * 65536.0 + 0.5);
+    fix32->Whole = value >> 16;
+    fix32->Frac = value & 0x0000ffffL;
+}
+
+BOOL convert_sane_res_to_twain(double sane_res, SANE_Unit unit, TW_FIX32 *twain_res, TW_UINT16 twtype)
+{
+    double d;
+
+    if (unit != SANE_UNIT_MM)
+        return FALSE;
+
+    if (twtype != TWUN_INCHES)
+        return FALSE;
+
+    d = (sane_res / 10.0) / 2.54;
+    convert_double_fix32((sane_res / 10.0) / 2.54, twain_res);
+
+    return TRUE;
 }
 #endif

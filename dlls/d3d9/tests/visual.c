@@ -1026,21 +1026,21 @@ static void fog_test(IDirect3DDevice9 *device)
         }
         IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
         color = getPixelColor(device, 160, 360);
-        ok(color == 0x0000FF00 || color == 0x0000FE00, "Reversed %s fog: z=0.1 has color 0x%08x, expected 0x0000ff00\n", mode, color);
+        ok(color == 0x0000FF00 || color == 0x0000FE00, "Reversed %s fog: z=0.1 has color 0x%08x, expected 0x0000ff00 or 0x0000fe00\n", mode, color);
 
         color = getPixelColor(device, 160, 120);
         r = (color & 0x00ff0000) >> 16;
         g = (color & 0x0000ff00) >>  8;
         b = (color & 0x000000ff);
         ok(r == 0x00 && g >= 0x29 && g <= 0x2d && b >= 0xd2 && b <= 0xd6,
-           "Reversed %s fog: z=0.7 has color 0x%08x, expected\n", mode, color);
+           "Reversed %s fog: z=0.7 has color 0x%08x\n", mode, color);
 
         color = getPixelColor(device, 480, 120);
         r = (color & 0x00ff0000) >> 16;
         g = (color & 0x0000ff00) >>  8;
         b = (color & 0x000000ff);
         ok(r == 0x00 && g >= 0xa8 && g <= 0xac && b >= 0x53 && b <= 0x57,
-           "Reversed %s fog: z=0.4 has color 0x%08x, expected\n", mode, color);
+           "Reversed %s fog: z=0.4 has color 0x%08x\n", mode, color);
 
         color = getPixelColor(device, 480, 360);
         ok(color == 0x000000ff, "Reversed %s fog: z=0.9 has color 0x%08x, expected 0x000000ff\n", mode, color);
@@ -8578,23 +8578,23 @@ static void pointsize_test(IDirect3DDevice9 *device)
 
     /* ptsize = 16, ptsize_max = 1 --> point has size 1 */
     color = getPixelColor(device, 448-4, 64-4);
-    ok(color == 0x000000ff, "pSize: Pixel (448-4),(64-4) has color 0x%08x, expected 0x00ffffff\n", color);
+    ok(color == 0x000000ff, "pSize: Pixel (448-4),(64-4) has color 0x%08x, expected 0x000000ff\n", color);
     color = getPixelColor(device, 448+4, 64+4);
-    ok(color == 0x000000ff, "pSize: Pixel (448+4),(64+4) has color 0x%08x, expected 0x00ffffff\n", color);
+    ok(color == 0x000000ff, "pSize: Pixel (448+4),(64+4) has color 0x%08x, expected 0x000000ff\n", color);
 
     /* ptsize = 4, ptsize_max = 1, ptsize_min = 16 --> point has size 1 */
     color = getPixelColor(device, 512-4, 64-4);
-    ok(color == 0x000000ff, "pSize: Pixel (448-4),(64-4) has color 0x%08x, expected 0x00ffffff\n", color);
+    ok(color == 0x000000ff, "pSize: Pixel (512-4),(64-4) has color 0x%08x, expected 0x000000ff\n", color);
     color = getPixelColor(device, 512+4, 64+4);
-    ok(color == 0x000000ff, "pSize: Pixel (448+4),(64+4) has color 0x%08x, expected 0x00ffffff\n", color);
+    ok(color == 0x000000ff, "pSize: Pixel (512+4),(64+4) has color 0x%08x, expected 0x000000ff\n", color);
 
     /* ptsize = 1, ptsize_max = default(64), ptsize_min = 16 --> point has size 16
      * Don't be overly picky - just show that the point is bigger than 1 pixel
      */
     color = getPixelColor(device, 576-4, 64-4);
-    ok(color == 0x00ffffff, "pSize: Pixel (448-4),(64-4) has color 0x%08x, expected 0x00ffffff\n", color);
+    ok(color == 0x00ffffff, "pSize: Pixel (576-4),(64-4) has color 0x%08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 576+4, 64+4);
-    ok(color == 0x00ffffff, "pSize: Pixel (448+4),(64+4) has color 0x%08x, expected 0x00ffffff\n", color);
+    ok(color == 0x00ffffff, "pSize: Pixel (576+4),(64+4) has color 0x%08x, expected 0x00ffffff\n", color);
 
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_POINTSIZE, *((DWORD *) (&ptsize_orig)));
     ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed hr=%08x\n", hr);
@@ -8878,7 +8878,7 @@ static void pixelshader_blending_test(IDirect3DDevice9 *device)
                b0 >= max(b1, 1) - 1 && b0 <= b1 + 1,
                "Offscreen failed for %s: Got color %#08x, expected %#08x.\n", test_formats[fmt_index].fmtName, color, test_formats[fmt_index].resultColorBlending);
         } else {
-            /* No pixel shader blending is supported so expected garbage.The type of 'garbage' depends on the driver version and OS.
+            /* No pixel shader blending is supported so expect garbage. The type of 'garbage' depends on the driver version and OS.
              * E.g. on G16R16 ati reports (on old r9600 drivers) 0x00ffffff and on modern ones 0x002010ff which is also what Nvidia
              * reports. On Vista Nvidia seems to report 0x00ffffff on Geforce7 cards. */
             color = getPixelColor(device, 320, 240);
@@ -9101,11 +9101,11 @@ static void stream_test(IDirect3DDevice9 *device)
     hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, (D3DSTREAMSOURCE_INSTANCEDATA | 0));
     ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %08x\n", hr);
     hr = IDirect3DDevice9_GetStreamSourceFreq(device, 1, &ind);
-    ok(hr == D3D_OK && ind == (0 | D3DSTREAMSOURCE_INSTANCEDATA), "IDirect3DDevice9_GetStreamSourceFreq failed with %08x\n", hr);
+    ok(hr == D3D_OK && ind == (0U | D3DSTREAMSOURCE_INSTANCEDATA), "IDirect3DDevice9_GetStreamSourceFreq failed with %08x\n", hr);
     hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, (D3DSTREAMSOURCE_INSTANCEDATA | D3DSTREAMSOURCE_INDEXEDDATA | 0));
     ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_SetStreamSourceFreq failed with %08x\n", hr);
     hr = IDirect3DDevice9_GetStreamSourceFreq(device, 1, &ind);
-    ok(hr == D3D_OK && ind == (0 | D3DSTREAMSOURCE_INSTANCEDATA), "IDirect3DDevice9_GetStreamSourceFreq failed with %08x\n", hr);
+    ok(hr == D3D_OK && ind == (0U | D3DSTREAMSOURCE_INSTANCEDATA), "IDirect3DDevice9_GetStreamSourceFreq failed with %08x\n", hr);
 
     /* set the default value back */
     hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, 1);

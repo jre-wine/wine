@@ -189,220 +189,6 @@ DWORD WINAPI AllocateAndGetIpAddrTableFromStack(PMIB_IPADDRTABLE *ppIpAddrTable,
 }
 
 
-static int IpForwardTableSorter(const void *a, const void *b)
-{
-  int ret;
-
-  if (a && b) {
-   const MIB_IPFORWARDROW* rowA = (const MIB_IPFORWARDROW*)a;
-   const MIB_IPFORWARDROW* rowB = (const MIB_IPFORWARDROW*)b;
-
-    ret = rowA->dwForwardDest - rowB->dwForwardDest;
-    if (ret == 0) {
-      ret = rowA->dwForwardProto - rowB->dwForwardProto;
-      if (ret == 0) {
-        ret = rowA->dwForwardPolicy - rowB->dwForwardPolicy;
-        if (ret == 0)
-          ret = rowA->dwForwardNextHop - rowB->dwForwardNextHop;
-      }
-    }
-  }
-  else
-    ret = 0;
-  return ret;
-}
-
-
-/******************************************************************
- *    AllocateAndGetIpForwardTableFromStack (IPHLPAPI.@)
- *
- * Get the route table.
- * Like GetIpForwardTable(), but allocate the returned table from heap.
- *
- * PARAMS
- *  ppIpForwardTable [Out] pointer into which the MIB_IPFORWARDTABLE is
- *                         allocated and returned.
- *  bOrder           [In]  whether to sort the table
- *  heap             [In]  heap from which the table is allocated
- *  flags            [In]  flags to HeapAlloc
- *
- * RETURNS
- *  ERROR_INVALID_PARAMETER if ppIfTable is NULL, other error codes
- *  on failure, NO_ERROR on success.
- */
-DWORD WINAPI AllocateAndGetIpForwardTableFromStack(PMIB_IPFORWARDTABLE *
- ppIpForwardTable, BOOL bOrder, HANDLE heap, DWORD flags)
-{
-  DWORD ret;
-
-  TRACE("ppIpForwardTable %p, bOrder %d, heap %p, flags 0x%08x\n",
-   ppIpForwardTable, bOrder, heap, flags);
-  ret = getRouteTable(ppIpForwardTable, heap, flags);
-  if (!ret && bOrder)
-    qsort((*ppIpForwardTable)->table, (*ppIpForwardTable)->dwNumEntries,
-     sizeof(MIB_IPFORWARDROW), IpForwardTableSorter);
-  TRACE("returning %d\n", ret);
-  return ret;
-}
-
-
-static int IpNetTableSorter(const void *a, const void *b)
-{
-  int ret;
-
-  if (a && b)
-    ret = ((const MIB_IPNETROW*)a)->dwAddr - ((const MIB_IPNETROW*)b)->dwAddr;
-  else
-    ret = 0;
-  return ret;
-}
-
-
-/******************************************************************
- *    AllocateAndGetIpNetTableFromStack (IPHLPAPI.@)
- *
- * Get the IP-to-physical address mapping table.
- * Like GetIpNetTable(), but allocate the returned table from heap.
- *
- * PARAMS
- *  ppIpNetTable [Out] pointer into which the MIB_IPNETTABLE is
- *                     allocated and returned.
- *  bOrder       [In]  whether to sort the table
- *  heap         [In]  heap from which the table is allocated
- *  flags        [In]  flags to HeapAlloc
- *
- * RETURNS
- *  ERROR_INVALID_PARAMETER if ppIpNetTable is NULL, other error codes
- *  on failure, NO_ERROR on success.
- */
-DWORD WINAPI AllocateAndGetIpNetTableFromStack(PMIB_IPNETTABLE *ppIpNetTable,
- BOOL bOrder, HANDLE heap, DWORD flags)
-{
-  DWORD ret;
-
-  TRACE("ppIpNetTable %p, bOrder %d, heap %p, flags 0x%08x\n",
-   ppIpNetTable, bOrder, heap, flags);
-  ret = getArpTable(ppIpNetTable, heap, flags);
-  if (!ret && bOrder)
-    qsort((*ppIpNetTable)->table, (*ppIpNetTable)->dwNumEntries,
-     sizeof(MIB_IPADDRROW), IpNetTableSorter);
-  TRACE("returning %d\n", ret);
-  return ret;
-}
-
-
-static int TcpTableSorter(const void *a, const void *b)
-{
-  int ret;
-
-  if (a && b) {
-    const MIB_TCPROW* rowA = a;
-    const MIB_TCPROW* rowB = b;
-
-    ret = ntohl (rowA->dwLocalAddr) - ntohl (rowB->dwLocalAddr);
-    if (ret == 0) {
-       ret = ntohs ((unsigned short)rowA->dwLocalPort) -
-          ntohs ((unsigned short)rowB->dwLocalPort);
-      if (ret == 0) {
-         ret = ntohl (rowA->dwRemoteAddr) - ntohl (rowB->dwRemoteAddr);
-        if (ret == 0)
-           ret = ntohs ((unsigned short)rowA->dwRemotePort) -
-              ntohs ((unsigned short)rowB->dwRemotePort);
-      }
-    }
-  }
-  else
-    ret = 0;
-  return ret;
-}
-
-
-/******************************************************************
- *    AllocateAndGetTcpTableFromStack (IPHLPAPI.@)
- *
- * Get the TCP connection table.
- * Like GetTcpTable(), but allocate the returned table from heap.
- *
- * PARAMS
- *  ppTcpTable [Out] pointer into which the MIB_TCPTABLE is
- *                   allocated and returned.
- *  bOrder     [In]  whether to sort the table
- *  heap       [In]  heap from which the table is allocated
- *  flags      [In]  flags to HeapAlloc
- *
- * RETURNS
- *  ERROR_INVALID_PARAMETER if ppTcpTable is NULL, whatever GetTcpTable()
- *  returns otherwise.
- */
-DWORD WINAPI AllocateAndGetTcpTableFromStack(PMIB_TCPTABLE *ppTcpTable,
- BOOL bOrder, HANDLE heap, DWORD flags)
-{
-  DWORD ret;
-
-  TRACE("ppTcpTable %p, bOrder %d, heap %p, flags 0x%08x\n",
-   ppTcpTable, bOrder, heap, flags);
-
-  *ppTcpTable = NULL;
-  ret = getTcpTable(ppTcpTable, 0, heap, flags);
-  if (!ret && bOrder)
-    qsort((*ppTcpTable)->table, (*ppTcpTable)->dwNumEntries,
-     sizeof(MIB_TCPROW), TcpTableSorter);
-  TRACE("returning %d\n", ret);
-  return ret;
-}
-
-
-static int UdpTableSorter(const void *a, const void *b)
-{
-  int ret;
-
-  if (a && b) {
-    const MIB_UDPROW* rowA = (const MIB_UDPROW*)a;
-    const MIB_UDPROW* rowB = (const MIB_UDPROW*)b;
-
-    ret = rowA->dwLocalAddr - rowB->dwLocalAddr;
-    if (ret == 0)
-      ret = rowA->dwLocalPort - rowB->dwLocalPort;
-  }
-  else
-    ret = 0;
-  return ret;
-}
-
-
-/******************************************************************
- *    AllocateAndGetUdpTableFromStack (IPHLPAPI.@)
- *
- * Get the UDP listener table.
- * Like GetUdpTable(), but allocate the returned table from heap.
- *
- * PARAMS
- *  ppUdpTable [Out] pointer into which the MIB_UDPTABLE is
- *                   allocated and returned.
- *  bOrder     [In]  whether to sort the table
- *  heap       [In]  heap from which the table is allocated
- *  flags      [In]  flags to HeapAlloc
- *
- * RETURNS
- *  ERROR_INVALID_PARAMETER if ppUdpTable is NULL, whatever GetUdpTable()
- *  returns otherwise.
- */
-DWORD WINAPI AllocateAndGetUdpTableFromStack(PMIB_UDPTABLE *ppUdpTable,
- BOOL bOrder, HANDLE heap, DWORD flags)
-{
-  DWORD ret;
-
-  TRACE("ppUdpTable %p, bOrder %d, heap %p, flags 0x%08x\n",
-   ppUdpTable, bOrder, heap, flags);
-  ret = getUdpTable(ppUdpTable, heap, flags);
-  if (!ret && bOrder)
-    qsort((*ppUdpTable)->table, (*ppUdpTable)->dwNumEntries,
-     sizeof(MIB_UDPROW), UdpTableSorter);
-  TRACE("returning %d\n", ret);
-  return ret;
-}
-
-
 /******************************************************************
  *    CreateIpForwardEntry (IPHLPAPI.@)
  *
@@ -692,7 +478,7 @@ DWORD WINAPI GetAdaptersInfo(PIP_ADAPTER_INFO pAdapterInfo, PULONG pOutBufLen)
 
         ret = getIPAddrTable(&ipAddrTable, GetProcessHeap(), 0);
         if (!ret)
-          ret = getRouteTable(&routeTable, GetProcessHeap(), 0);
+          ret = AllocateAndGetIpForwardTableFromStack(&routeTable, FALSE, GetProcessHeap(), 0);
         if (!ret)
           table = getNonLoopbackInterfaceIndexTable();
         if (table) {
@@ -943,29 +729,6 @@ DWORD WINAPI GetFriendlyIfIndex(DWORD IfIndex)
      byte set. */
   TRACE("returning %d\n", IfIndex);
   return IfIndex;
-}
-
-
-/******************************************************************
- *    GetIcmpStatistics (IPHLPAPI.@)
- *
- * Get the ICMP statistics for the local computer.
- *
- * PARAMS
- *  pStats [Out] buffer for ICMP statistics
- *
- * RETURNS
- *  Success: NO_ERROR
- *  Failure: error code from winerror.h
- */
-DWORD WINAPI GetIcmpStatistics(PMIB_ICMP pStats)
-{
-  DWORD ret;
-
-  TRACE("pStats %p\n", pStats);
-  ret = getICMPStats(pStats);
-  TRACE("returning %d\n", ret);
-  return ret;
 }
 
 
@@ -1251,48 +1014,28 @@ DWORD WINAPI GetIpAddrTable(PMIB_IPADDRTABLE pIpAddrTable, PULONG pdwSize, BOOL 
  */
 DWORD WINAPI GetIpForwardTable(PMIB_IPFORWARDTABLE pIpForwardTable, PULONG pdwSize, BOOL bOrder)
 {
-  DWORD ret;
+    DWORD ret;
+    PMIB_IPFORWARDTABLE table;
 
-  TRACE("pIpForwardTable %p, pdwSize %p, bOrder %d\n", pIpForwardTable,
-   pdwSize, (DWORD)bOrder);
-  if (!pdwSize)
-    ret = ERROR_INVALID_PARAMETER;
-  else {
-    DWORD numRoutes = getNumRoutes();
-    ULONG sizeNeeded = sizeof(MIB_IPFORWARDTABLE);
+    TRACE("pIpForwardTable %p, pdwSize %p, bOrder %d\n", pIpForwardTable, pdwSize, bOrder);
 
-    if (numRoutes > 1)
-      sizeNeeded += (numRoutes - 1) * sizeof(MIB_IPFORWARDROW);
-    if (!pIpForwardTable || *pdwSize < sizeNeeded) {
-      *pdwSize = sizeNeeded;
-      ret = ERROR_INSUFFICIENT_BUFFER;
-    }
-    else {
-      PMIB_IPFORWARDTABLE table;
+    if (!pdwSize) return ERROR_INVALID_PARAMETER;
 
-      ret = getRouteTable(&table, GetProcessHeap(), 0);
-      if (!ret) {
-        sizeNeeded = sizeof(MIB_IPFORWARDTABLE);
-        if (table->dwNumEntries > 1)
-          sizeNeeded += (table->dwNumEntries - 1) * sizeof(MIB_IPFORWARDROW);
-        if (*pdwSize < sizeNeeded) {
-          *pdwSize = sizeNeeded;
+    ret = AllocateAndGetIpForwardTableFromStack(&table, bOrder, GetProcessHeap(), 0);
+    if (!ret) {
+        DWORD size = FIELD_OFFSET( MIB_IPFORWARDTABLE, table[table->dwNumEntries] );
+        if (!pIpForwardTable || *pdwSize < size) {
+          *pdwSize = size;
           ret = ERROR_INSUFFICIENT_BUFFER;
         }
         else {
-          *pdwSize = sizeNeeded;
-          memcpy(pIpForwardTable, table, sizeNeeded);
-          if (bOrder)
-            qsort(pIpForwardTable->table, pIpForwardTable->dwNumEntries,
-             sizeof(MIB_IPFORWARDROW), IpForwardTableSorter);
-          ret = NO_ERROR;
+          *pdwSize = size;
+          memcpy(pIpForwardTable, table, size);
         }
         HeapFree(GetProcessHeap(), 0, table);
-      }
     }
-  }
-  TRACE("returning %d\n", ret);
-  return ret;
+    TRACE("returning %d\n", ret);
+    return ret;
 }
 
 
@@ -1318,71 +1061,28 @@ DWORD WINAPI GetIpForwardTable(PMIB_IPFORWARDTABLE pIpForwardTable, PULONG pdwSi
  */
 DWORD WINAPI GetIpNetTable(PMIB_IPNETTABLE pIpNetTable, PULONG pdwSize, BOOL bOrder)
 {
-  DWORD ret;
+    DWORD ret;
+    PMIB_IPNETTABLE table;
 
-  TRACE("pIpNetTable %p, pdwSize %p, bOrder %d\n", pIpNetTable, pdwSize,
-   (DWORD)bOrder);
-  if (!pdwSize)
-    ret = ERROR_INVALID_PARAMETER;
-  else {
-    DWORD numEntries = getNumArpEntries();
-    ULONG size = sizeof(MIB_IPNETTABLE);
+    TRACE("pIpNetTable %p, pdwSize %p, bOrder %d\n", pIpNetTable, pdwSize, bOrder);
 
-    if (numEntries > 1)
-      size += (numEntries - 1) * sizeof(MIB_IPNETROW);
-    if (!pIpNetTable || *pdwSize < size) {
-      *pdwSize = size;
-      ret = ERROR_INSUFFICIENT_BUFFER;
-    }
-    else {
-      PMIB_IPNETTABLE table;
+    if (!pdwSize) return ERROR_INVALID_PARAMETER;
 
-      ret = getArpTable(&table, GetProcessHeap(), 0);
-      if (!ret) {
-        size = sizeof(MIB_IPNETTABLE);
-        if (table->dwNumEntries > 1)
-          size += (table->dwNumEntries - 1) * sizeof(MIB_IPNETROW);
-        if (*pdwSize < size) {
+    ret = AllocateAndGetIpNetTableFromStack( &table, bOrder, GetProcessHeap(), 0 );
+    if (!ret) {
+        DWORD size = FIELD_OFFSET( MIB_IPNETTABLE, table[table->dwNumEntries] );
+        if (!pIpNetTable || *pdwSize < size) {
           *pdwSize = size;
           ret = ERROR_INSUFFICIENT_BUFFER;
         }
         else {
           *pdwSize = size;
           memcpy(pIpNetTable, table, size);
-          if (bOrder)
-            qsort(pIpNetTable->table, pIpNetTable->dwNumEntries,
-             sizeof(MIB_IPNETROW), IpNetTableSorter);
-          ret = NO_ERROR;
         }
         HeapFree(GetProcessHeap(), 0, table);
-      }
     }
-  }
-  TRACE("returning %d\n", ret);
-  return ret;
-}
-
-
-/******************************************************************
- *    GetIpStatistics (IPHLPAPI.@)
- *
- * Get the IP statistics for the local computer.
- *
- * PARAMS
- *  pStats [Out] buffer for IP statistics
- *
- * RETURNS
- *  Success: NO_ERROR
- *  Failure: error code from winerror.h
- */
-DWORD WINAPI GetIpStatistics(PMIB_IPSTATS pStats)
-{
-  DWORD ret;
-
-  TRACE("pStats %p\n", pStats);
-  ret = getIPStats(pStats);
-  TRACE("returning %d\n", ret);
-  return ret;
+    TRACE("returning %d\n", ret);
+    return ret;
 }
 
 
@@ -1557,29 +1257,6 @@ BOOL WINAPI GetRTTAndHopCount(IPAddr DestIpAddress, PULONG HopCount, ULONG MaxHo
 
 
 /******************************************************************
- *    GetTcpStatistics (IPHLPAPI.@)
- *
- * Get the TCP statistics for the local computer.
- *
- * PARAMS
- *  pStats [Out] buffer for TCP statistics
- *
- * RETURNS
- *  Success: NO_ERROR
- *  Failure: error code from winerror.h
- */
-DWORD WINAPI GetTcpStatistics(PMIB_TCPSTATS pStats)
-{
-  DWORD ret;
-
-  TRACE("pStats %p\n", pStats);
-  ret = getTCPStats(pStats);
-  TRACE("returning %d\n", ret);
-  return ret;
-}
-
-
-/******************************************************************
  *    GetTcpTable (IPHLPAPI.@)
  *
  * Get the table of active TCP connections.
@@ -1603,62 +1280,28 @@ DWORD WINAPI GetTcpStatistics(PMIB_TCPSTATS pStats)
  */
 DWORD WINAPI GetTcpTable(PMIB_TCPTABLE pTcpTable, PDWORD pdwSize, BOOL bOrder)
 {
-  DWORD ret;
+    DWORD ret;
+    PMIB_TCPTABLE table;
 
-  TRACE("pTcpTable %p, pdwSize %p, bOrder %d\n", pTcpTable, pdwSize,
-   (DWORD)bOrder);
-  if (!pdwSize)
-    ret = ERROR_INVALID_PARAMETER;
-  else {
-    DWORD numEntries = getNumTcpEntries();
-    DWORD size = sizeof(MIB_TCPTABLE);
+    TRACE("pTcpTable %p, pdwSize %p, bOrder %d\n", pTcpTable, pdwSize, bOrder);
 
-    if (numEntries > 1)
-      size += (numEntries - 1) * sizeof(MIB_TCPROW);
-    if (!pTcpTable || *pdwSize < size) {
-      *pdwSize = size;
-      ret = ERROR_INSUFFICIENT_BUFFER;
+    if (!pdwSize) return ERROR_INVALID_PARAMETER;
+
+    ret = AllocateAndGetTcpTableFromStack(&table, bOrder, GetProcessHeap(), 0);
+    if (!ret) {
+        DWORD size = FIELD_OFFSET( MIB_TCPTABLE, table[table->dwNumEntries] );
+        if (!pTcpTable || *pdwSize < size) {
+          *pdwSize = size;
+          ret = ERROR_INSUFFICIENT_BUFFER;
+        }
+        else {
+          *pdwSize = size;
+          memcpy(pTcpTable, table, size);
+        }
+        HeapFree(GetProcessHeap(), 0, table);
     }
-    else {
-      ret = getTcpTable(&pTcpTable, numEntries, 0, 0);
-      if (!ret) {
-        size = sizeof(MIB_TCPTABLE);
-        if (pTcpTable->dwNumEntries > 1)
-          size += (pTcpTable->dwNumEntries - 1) * sizeof(MIB_TCPROW);
-        *pdwSize = size;
-
-        if (bOrder)
-           qsort(pTcpTable->table, pTcpTable->dwNumEntries,
-                 sizeof(MIB_TCPROW), TcpTableSorter);
-        ret = NO_ERROR;
-      }
-    }
-  }
-  TRACE("returning %d\n", ret);
-  return ret;
-}
-
-
-/******************************************************************
- *    GetUdpStatistics (IPHLPAPI.@)
- *
- * Get the UDP statistics for the local computer.
- *
- * PARAMS
- *  pStats [Out] buffer for UDP statistics
- *
- * RETURNS
- *  Success: NO_ERROR
- *  Failure: error code from winerror.h
- */
-DWORD WINAPI GetUdpStatistics(PMIB_UDPSTATS pStats)
-{
-  DWORD ret;
-
-  TRACE("pStats %p\n", pStats);
-  ret = getUDPStats(pStats);
-  TRACE("returning %d\n", ret);
-  return ret;
+    TRACE("returning %d\n", ret);
+    return ret;
 }
 
 
@@ -1685,50 +1328,28 @@ DWORD WINAPI GetUdpStatistics(PMIB_UDPSTATS pStats)
  */
 DWORD WINAPI GetUdpTable(PMIB_UDPTABLE pUdpTable, PDWORD pdwSize, BOOL bOrder)
 {
-  DWORD ret;
+    DWORD ret;
+    PMIB_UDPTABLE table;
 
-  TRACE("pUdpTable %p, pdwSize %p, bOrder %d\n", pUdpTable, pdwSize,
-   (DWORD)bOrder);
-  if (!pdwSize)
-    ret = ERROR_INVALID_PARAMETER;
-  else {
-    DWORD numEntries = getNumUdpEntries();
-    DWORD size = sizeof(MIB_UDPTABLE);
+    TRACE("pUdpTable %p, pdwSize %p, bOrder %d\n", pUdpTable, pdwSize, bOrder);
 
-    if (numEntries > 1)
-      size += (numEntries - 1) * sizeof(MIB_UDPROW);
-    if (!pUdpTable || *pdwSize < size) {
-      *pdwSize = size;
-      ret = ERROR_INSUFFICIENT_BUFFER;
-    }
-    else {
-      PMIB_UDPTABLE table;
+    if (!pdwSize) return ERROR_INVALID_PARAMETER;
 
-      ret = getUdpTable(&table, GetProcessHeap(), 0);
-      if (!ret) {
-        size = sizeof(MIB_UDPTABLE);
-        if (table->dwNumEntries > 1)
-          size += (table->dwNumEntries - 1) * sizeof(MIB_UDPROW);
-        if (*pdwSize < size) {
+    ret = AllocateAndGetUdpTableFromStack( &table, bOrder, GetProcessHeap(), 0 );
+    if (!ret) {
+        DWORD size = FIELD_OFFSET( MIB_UDPTABLE, table[table->dwNumEntries] );
+        if (!pUdpTable || *pdwSize < size) {
           *pdwSize = size;
           ret = ERROR_INSUFFICIENT_BUFFER;
         }
         else {
           *pdwSize = size;
           memcpy(pUdpTable, table, size);
-          if (bOrder)
-            qsort(pUdpTable->table, pUdpTable->dwNumEntries,
-             sizeof(MIB_UDPROW), UdpTableSorter);
-          ret = NO_ERROR;
         }
         HeapFree(GetProcessHeap(), 0, table);
-      }
-      else
-        ret = ERROR_OUTOFMEMORY;
     }
-  }
-  TRACE("returning %d\n", ret);
-  return ret;
+    TRACE("returning %d\n", ret);
+    return ret;
 }
 
 

@@ -155,6 +155,32 @@ WINED3DFORMAT wined3dformat_from_d3dformat(D3DFORMAT format)
     }
 }
 
+static UINT vertex_count_from_primitive_count(D3DPRIMITIVETYPE primitive_type, UINT primitive_count)
+{
+    switch(primitive_type)
+    {
+        case D3DPT_POINTLIST:
+            return primitive_count;
+
+        case D3DPT_LINELIST:
+            return primitive_count * 2;
+
+        case D3DPT_LINESTRIP:
+            return primitive_count + 1;
+
+        case D3DPT_TRIANGLELIST:
+            return primitive_count * 3;
+
+        case D3DPT_TRIANGLESTRIP:
+        case D3DPT_TRIANGLEFAN:
+            return primitive_count + 2;
+
+        default:
+            FIXME("Unhandled primitive type %#x\n", primitive_type);
+            return 0;
+    }
+}
+
 /* IDirect3D IUnknown parts follow: */
 static HRESULT WINAPI IDirect3DDevice9Impl_QueryInterface(LPDIRECT3DDEVICE9EX iface, REFIID riid, LPVOID* ppobj) {
     IDirect3DDevice9Impl *This = (IDirect3DDevice9Impl *)iface;
@@ -444,7 +470,7 @@ static HRESULT WINAPI reset_enum_callback(IWineD3DResource *resource, void *data
             break;
 
         case WINED3DRTYPE_VERTEXBUFFER:
-            IWineD3DVertexBuffer_GetDesc((IWineD3DVertexBuffer *) resource, &vertex_desc);
+            IWineD3DBuffer_GetDesc((IWineD3DBuffer *)resource, &vertex_desc);
             pool = vertex_desc.Pool;
             break;
 
@@ -1357,7 +1383,9 @@ static HRESULT WINAPI IDirect3DDevice9Impl_DrawPrimitive(LPDIRECT3DDEVICE9EX ifa
     TRACE("(%p) Relay\n" , This);
 
     EnterCriticalSection(&d3d9_cs);
-    hr = IWineD3DDevice_DrawPrimitive(This->WineD3DDevice, PrimitiveType, StartVertex, PrimitiveCount);
+    IWineD3DDevice_SetPrimitiveType(This->WineD3DDevice, PrimitiveType);
+    hr = IWineD3DDevice_DrawPrimitive(This->WineD3DDevice, StartVertex,
+            vertex_count_from_primitive_count(PrimitiveType, PrimitiveCount));
     LeaveCriticalSection(&d3d9_cs);
     return hr;
 }
@@ -1371,7 +1399,9 @@ static HRESULT  WINAPI  IDirect3DDevice9Impl_DrawIndexedPrimitive(LPDIRECT3DDEVI
     /* D3D8 passes the baseVertexIndex in SetIndices, and due to the stateblock functions wined3d has to work that way */
     EnterCriticalSection(&d3d9_cs);
     IWineD3DDevice_SetBaseVertexIndex(This->WineD3DDevice, BaseVertexIndex);
-    hr = IWineD3DDevice_DrawIndexedPrimitive(This->WineD3DDevice, PrimitiveType, MinVertexIndex, NumVertices, startIndex, primCount);
+    IWineD3DDevice_SetPrimitiveType(This->WineD3DDevice, PrimitiveType);
+    hr = IWineD3DDevice_DrawIndexedPrimitive(This->WineD3DDevice, MinVertexIndex, NumVertices,
+            startIndex, vertex_count_from_primitive_count(PrimitiveType, primCount));
     LeaveCriticalSection(&d3d9_cs);
     return hr;
 }
@@ -1382,7 +1412,10 @@ static HRESULT  WINAPI  IDirect3DDevice9Impl_DrawPrimitiveUP(LPDIRECT3DDEVICE9EX
     TRACE("(%p) Relay\n" , This);
 
     EnterCriticalSection(&d3d9_cs);
-    hr = IWineD3DDevice_DrawPrimitiveUP(This->WineD3DDevice, PrimitiveType, PrimitiveCount, pVertexStreamZeroData, VertexStreamZeroStride);
+    IWineD3DDevice_SetPrimitiveType(This->WineD3DDevice, PrimitiveType);
+    hr = IWineD3DDevice_DrawPrimitiveUP(This->WineD3DDevice,
+            vertex_count_from_primitive_count(PrimitiveType, PrimitiveCount),
+            pVertexStreamZeroData, VertexStreamZeroStride);
     LeaveCriticalSection(&d3d9_cs);
     return hr;
 }
@@ -1395,9 +1428,10 @@ static HRESULT  WINAPI  IDirect3DDevice9Impl_DrawIndexedPrimitiveUP(LPDIRECT3DDE
     TRACE("(%p) Relay\n" , This);
 
     EnterCriticalSection(&d3d9_cs);
-    hr = IWineD3DDevice_DrawIndexedPrimitiveUP(This->WineD3DDevice, PrimitiveType, MinVertexIndex,
-            NumVertexIndices, PrimitiveCount, pIndexData, wined3dformat_from_d3dformat(IndexDataFormat),
-            pVertexStreamZeroData, VertexStreamZeroStride);
+    IWineD3DDevice_SetPrimitiveType(This->WineD3DDevice, PrimitiveType);
+    hr = IWineD3DDevice_DrawIndexedPrimitiveUP(This->WineD3DDevice, MinVertexIndex, NumVertexIndices,
+            vertex_count_from_primitive_count(PrimitiveType, PrimitiveCount), pIndexData,
+            wined3dformat_from_d3dformat(IndexDataFormat), pVertexStreamZeroData, VertexStreamZeroStride);
     LeaveCriticalSection(&d3d9_cs);
     return hr;
 }
@@ -1473,26 +1507,31 @@ static IDirect3DVertexDeclaration9 *getConvertedDecl(IDirect3DDevice9Impl *This,
 
 static HRESULT WINAPI IDirect3DDevice9Impl_SetFVF(LPDIRECT3DDEVICE9EX iface, DWORD FVF) {
     IDirect3DDevice9Impl *This = (IDirect3DDevice9Impl *)iface;
-    HRESULT hr = S_OK;
+    IDirect3DVertexDeclaration9 *decl;
+    HRESULT hr;
+
     TRACE("(%p) Relay\n" , This);
 
-    EnterCriticalSection(&d3d9_cs);
-    if (0 != FVF) {
-         IDirect3DVertexDeclaration9* pDecl = getConvertedDecl(This, FVF);
-
-         if(!pDecl) {
-             /* Any situation when this should happen, except out of memory? */
-             ERR("Failed to create a converted vertex declaration\n");
-             LeaveCriticalSection(&d3d9_cs);
-             return D3DERR_DRIVERINTERNALERROR;
-         }
-
-         hr = IDirect3DDevice9Impl_SetVertexDeclaration(iface, pDecl);
-         if (hr != S_OK) {
-             LeaveCriticalSection(&d3d9_cs);
-             return hr;
-         }
+    if (!FVF)
+    {
+        WARN("%#x is not a valid FVF\n", FVF);
+        return D3D_OK;
     }
+
+    EnterCriticalSection(&d3d9_cs);
+
+    decl = getConvertedDecl(This, FVF);
+    if (!decl)
+    {
+         /* Any situation when this should happen, except out of memory? */
+         ERR("Failed to create a converted vertex declaration\n");
+         LeaveCriticalSection(&d3d9_cs);
+         return D3DERR_DRIVERINTERNALERROR;
+    }
+
+    hr = IDirect3DDevice9Impl_SetVertexDeclaration(iface, decl);
+    if (FAILED(hr)) ERR("Failed to set vertex declaration\n");
+
     LeaveCriticalSection(&d3d9_cs);
 
     return hr;
@@ -1542,7 +1581,7 @@ static HRESULT WINAPI IDirect3DDevice9Impl_SetStreamSource(LPDIRECT3DDEVICE9EX i
 
 static HRESULT WINAPI IDirect3DDevice9Impl_GetStreamSource(LPDIRECT3DDEVICE9EX iface, UINT StreamNumber, IDirect3DVertexBuffer9 **pStream, UINT* OffsetInBytes, UINT* pStride) {
     IDirect3DDevice9Impl *This = (IDirect3DDevice9Impl *)iface;
-    IWineD3DVertexBuffer *retStream = NULL;
+    IWineD3DBuffer *retStream = NULL;
     HRESULT rc = D3D_OK;
 
     TRACE("(%p) Relay\n" , This);
@@ -1554,8 +1593,8 @@ static HRESULT WINAPI IDirect3DDevice9Impl_GetStreamSource(LPDIRECT3DDEVICE9EX i
     EnterCriticalSection(&d3d9_cs);
     rc = IWineD3DDevice_GetStreamSource(This->WineD3DDevice, StreamNumber, &retStream, OffsetInBytes, pStride);
     if (rc == D3D_OK  && NULL != retStream) {
-        IWineD3DVertexBuffer_GetParent(retStream, (IUnknown **)pStream);
-        IWineD3DVertexBuffer_Release(retStream);
+        IWineD3DBuffer_GetParent(retStream, (IUnknown **)pStream);
+        IWineD3DBuffer_Release(retStream);
     }else{
         if (rc != D3D_OK){
             FIXME("Call to GetStreamSource failed %p %p\n", OffsetInBytes, pStride);

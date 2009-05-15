@@ -1,14 +1,14 @@
 @ stub AbortPrinter
 @ stub AddFormW
 @ stub AddJobW
-@ stub AddMonitorW
+@ stdcall AddMonitorW(wstr long ptr)
 @ stub AddPerMachineConnectionW
 @ stub AddPortExW
 @ stub AddPortW
 @ stub AddPrintProcessorW
 @ stub AddPrintProvidorW
 @ stub AddPrinterConnectionW
-@ stub AddPrinterDriverExW
+@ stdcall AddPrinterDriverExW(wstr long ptr long)
 @ stub AddPrinterDriverW
 @ stub AddPrinterExW
 @ stub AddPrinterW
@@ -25,7 +25,7 @@
 @ stub CreatePrinterIC
 @ stub DbgGetPointers
 @ stub DeleteFormW
-@ stub DeleteMonitorW
+@ stdcall DeleteMonitorW(wstr wstr wstr)
 @ stub DeletePerMachineConnectionW
 @ stub DeletePortW
 @ stub DeletePrintProcessorW

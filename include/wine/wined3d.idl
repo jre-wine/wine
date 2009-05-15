@@ -97,12 +97,17 @@ typedef enum _WINED3DLIGHTTYPE
 
 typedef enum _WINED3DPRIMITIVETYPE
 {
+    WINED3DPT_UNDEFINED                     = 0,
     WINED3DPT_POINTLIST                     = 1,
     WINED3DPT_LINELIST                      = 2,
     WINED3DPT_LINESTRIP                     = 3,
     WINED3DPT_TRIANGLELIST                  = 4,
     WINED3DPT_TRIANGLESTRIP                 = 5,
     WINED3DPT_TRIANGLEFAN                   = 6,
+    WINED3DPT_LINELIST_ADJ                  = 10,
+    WINED3DPT_LINESTRIP_ADJ                 = 11,
+    WINED3DPT_TRIANGLELIST_ADJ              = 12,
+    WINED3DPT_TRIANGLESTRIP_ADJ             = 13,
     WINED3DPT_FORCE_DWORD                   = 0x7fffffff
 } WINED3DPRIMITIVETYPE;
 
@@ -1906,9 +1911,6 @@ typedef struct glDescriptor
     UINT textureName, srgbTextureName;
     int level;
     int /*GLenum*/ target;
-    int /*GLenum*/ glFormat;
-    int /*GLenum*/ glFormatInternal;
-    int /*GLenum*/ glType;
 } glDescriptor;
 
 typedef struct WineDirect3DStridedData
@@ -1916,7 +1918,7 @@ typedef struct WineDirect3DStridedData
     const BYTE *lpData; /* Pointer to start of data */
     DWORD dwStride;     /* Stride between occurrences of this data */
     DWORD dwType;       /* Type (as in D3DVSDT_TYPE) */
-    int VBO;            /* Vertex buffer object this data is in */
+    unsigned int VBO;   /* Vertex buffer object this data is in */
     UINT streamNo;      /* D3D stream number */
 } WineDirect3DStridedData;
 
@@ -2402,26 +2404,6 @@ interface IWineD3DRendertargetView : IWineD3DBase
 {
     HRESULT GetResource(
         [out] IWineD3DResource **resource
-    );
-}
-
-[
-    object,
-    local,
-    uuid(217f671e-6f30-11d9-c687-00046142c14f)
-]
-interface IWineD3DVertexBuffer : IWineD3DResource
-{
-    HRESULT Lock(
-        [in] UINT offset,
-        [in] UINT size,
-        [out] BYTE **data,
-        [in] DWORD flags
-    );
-    HRESULT Unlock(
-    );
-    HRESULT GetDesc(
-        [out] WINED3DVERTEXBUFFER_DESC *desc
     );
 }
 
@@ -2918,6 +2900,17 @@ interface IWineD3DSwapChain : IWineD3DBase
 ]
 interface IWineD3DBuffer : IWineD3DResource
 {
+    HRESULT Map(
+        [in] UINT offset,
+        [in] UINT size,
+        [out] BYTE **data,
+        [in] DWORD flags
+    );
+    HRESULT Unmap(
+    );
+    HRESULT GetDesc(
+        [out] WINED3DVERTEXBUFFER_DESC *desc
+    );
 }
 
 [
@@ -2989,7 +2982,7 @@ interface IWineD3DDevice : IWineD3DBase
         [in] DWORD usage,
         [in] DWORD fvf,
         [in] WINED3DPOOL pool,
-        [out] IWineD3DVertexBuffer **vertex_buffer,
+        [out] IWineD3DBuffer **vertex_buffer,
         [in] HANDLE *shared_handle,
         [in] IUnknown *parent
     );
@@ -3346,13 +3339,13 @@ interface IWineD3DDevice : IWineD3DBase
     );
     HRESULT SetStreamSource(
         [in] UINT stream_idx,
-        [in] IWineD3DVertexBuffer *vertex_buffer,
+        [in] IWineD3DBuffer *buffer,
         [in] UINT offset,
         [in] UINT stride
     );
     HRESULT GetStreamSource(
         [in] UINT stream_idx,
-        [out] IWineD3DVertexBuffer **vertex_buffer,
+        [out] IWineD3DBuffer **buffer,
         [out] UINT *offset,
         [out] UINT *stride
     );
@@ -3449,7 +3442,7 @@ interface IWineD3DDevice : IWineD3DBase
         [in] UINT src_start_idx,
         [in] UINT dst_idx,
         [in] UINT vertex_count,
-        [in] IWineD3DVertexBuffer *dest_buffer,
+        [in] IWineD3DBuffer *dest_buffer,
         [in] IWineD3DVertexDeclaration *declaration,
         [in] DWORD flags
     );
@@ -3480,42 +3473,42 @@ interface IWineD3DDevice : IWineD3DBase
         [in] IWineD3DRendertargetView *rendertarget_view,
         [in] const float color[4]
     );
+    void SetPrimitiveType(
+        [in] WINED3DPRIMITIVETYPE primitive_topology
+    );
+    void GetPrimitiveType(
+        [out] WINED3DPRIMITIVETYPE *primitive_topology
+    );
     HRESULT DrawPrimitive(
-        [in] WINED3DPRIMITIVETYPE primitive_type,
         [in] UINT start_vertex,
-        [in] UINT primitive_count
+        [in] UINT vertex_count
     );
     HRESULT DrawIndexedPrimitive(
-        [in] WINED3DPRIMITIVETYPE primitive_type,
         [in] UINT min_vertex_idx,
         [in] UINT vertex_count,
         [in] UINT start_idx,
-        [in] UINT primitive_count
+        [in] UINT index_count
     );
     HRESULT DrawPrimitiveUP(
-        [in] WINED3DPRIMITIVETYPE primitive_type,
-        [in] UINT primitive_count,
+        [in] UINT vertex_count,
         [in] const void *stream_data,
         [in] UINT stream_stride
     );
     HRESULT DrawIndexedPrimitiveUP(
-        [in] WINED3DPRIMITIVETYPE primitive_type,
         [in] UINT min_vertex_idx,
         [in] UINT vertex_count,
-        [in] UINT primitive_count,
+        [in] UINT index_count,
         [in] const void *index_data,
         [in] WINED3DFORMAT index_data_format,
         [in] const void *stream_data,
         [in] UINT stream_stride
     );
     HRESULT DrawPrimitiveStrided(
-        [in] WINED3DPRIMITIVETYPE primitive_type,
-        [in] UINT primitive_count,
+        [in] UINT vertex_count,
         [in] const WineDirect3DVertexStridedData *strided_data
     );
     HRESULT DrawIndexedPrimitiveStrided(
-        [in] WINED3DPRIMITIVETYPE primitive_type,
-        [in] UINT primitive_count,
+        [in] UINT index_count,
         [in] const WineDirect3DVertexStridedData *strided_data,
         [in] UINT vertex_count,
         [in] const void *index_data,

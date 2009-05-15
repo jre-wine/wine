@@ -183,7 +183,7 @@ static void write_enums(FILE *h, var_list_t *enums)
 int needs_space_after(type_t *t)
 {
   return (type_is_alias(t) ||
-          (!is_ptr(t) && (!is_conformant_array(t) || t->declarray || (is_array(t) && t->name))));
+          (!is_ptr(t) && (!is_array(t) || !type_array_is_decl_as_ptr(t) || t->name)));
 }
 
 void write_type_left(FILE *h, type_t *t, int declonly)
@@ -191,11 +191,10 @@ void write_type_left(FILE *h, type_t *t, int declonly)
   if (!h) return;
 
   if (is_attr(t->attrs, ATTR_CONST) &&
-      (type_is_alias(t) || t->declarray || !is_ptr(t)))
+      (type_is_alias(t) || !is_ptr(t)))
     fprintf(h, "const ");
 
   if (type_is_alias(t)) fprintf(h, "%s", t->name);
-  else if (t->declarray) write_type_left(h, type_array_get_element(t), declonly);
   else {
     switch (type_get_type_detect_alias(t)) {
       case TYPE_ENUM:
@@ -244,23 +243,56 @@ void write_type_left(FILE *h, type_t *t, int declonly)
         if (is_attr(t->attrs, ATTR_CONST)) fprintf(h, "const ");
         break;
       case TYPE_ARRAY:
-        if (t->name)
+        if (t->name && type_array_is_decl_as_ptr(t))
           fprintf(h, "%s", t->name);
         else
         {
           write_type_left(h, type_array_get_element(t), declonly);
-          fprintf(h, "%s*", needs_space_after(type_array_get_element(t)) ? " " : "");
+          if (type_array_is_decl_as_ptr(t))
+            fprintf(h, "%s*", needs_space_after(type_array_get_element(t)) ? " " : "");
         }
         break;
       case TYPE_BASIC:
-        if (t->sign > 0) fprintf(h, "signed ");
-        else if (t->sign < 0) fprintf(h, "unsigned ");
-        /* fall through */
+        if (type_basic_get_type(t) != TYPE_BASIC_INT32 &&
+            type_basic_get_type(t) != TYPE_BASIC_HYPER)
+        {
+          if (type_basic_get_sign(t) < 0) fprintf(h, "signed ");
+          else if (type_basic_get_sign(t) > 0) fprintf(h, "unsigned ");
+        }
+        switch (type_basic_get_type(t))
+        {
+        case TYPE_BASIC_INT8: fprintf(h, "small"); break;
+        case TYPE_BASIC_INT16: fprintf(h, "short"); break;
+        case TYPE_BASIC_INT: fprintf(h, "int"); break;
+        case TYPE_BASIC_INT64: fprintf(h, "__int64"); break;
+        case TYPE_BASIC_BYTE: fprintf(h, "byte"); break;
+        case TYPE_BASIC_CHAR: fprintf(h, "char"); break;
+        case TYPE_BASIC_WCHAR: fprintf(h, "wchar_t"); break;
+        case TYPE_BASIC_FLOAT: fprintf(h, "float"); break;
+        case TYPE_BASIC_DOUBLE: fprintf(h, "double"); break;
+        case TYPE_BASIC_ERROR_STATUS_T: fprintf(h, "error_status_t"); break;
+        case TYPE_BASIC_HANDLE: fprintf(h, "handle_t"); break;
+        case TYPE_BASIC_INT32:
+          if (type_basic_get_sign(t) > 0)
+            fprintf(h, "ULONG");
+          else
+            fprintf(h, "LONG");
+          break;
+        case TYPE_BASIC_HYPER:
+          if (type_basic_get_sign(t) > 0)
+            fprintf(h, "MIDL_uhyper");
+          else
+            fprintf(h, "hyper");
+          break;
+        }
+        break;
       case TYPE_INTERFACE:
       case TYPE_MODULE:
       case TYPE_COCLASS:
-      case TYPE_VOID:
         fprintf(h, "%s", t->name);
+        break;
+      case TYPE_VOID:
+        fprintf(h, "void");
         break;
       case TYPE_ALIAS:
       case TYPE_FUNCTION:
@@ -275,12 +307,14 @@ void write_type_right(FILE *h, type_t *t, int is_field)
 {
   if (!h) return;
 
-  if (t->declarray) {
+  if (type_get_type(t) == TYPE_ARRAY && !type_array_is_decl_as_ptr(t)) {
     if (is_conformant_array(t)) {
       fprintf(h, "[%s]", is_field ? "1" : "");
       t = type_array_get_element(t);
     }
-    for ( ; t->declarray; t = type_array_get_element(t))
+    for ( ;
+         type_get_type(t) == TYPE_ARRAY && !type_array_is_decl_as_ptr(t);
+         t = type_array_get_element(t))
       fprintf(h, "[%u]", type_array_get_dim(t));
   }
 }
@@ -388,7 +422,7 @@ void check_for_additional_prototype_types(const var_list_t *list)
         break;
       }
       if ((type_get_type(type) != TYPE_BASIC ||
-           type_basic_get_fc(type) != RPC_FC_BIND_PRIMITIVE) &&
+           type_basic_get_type(type) != TYPE_BASIC_HANDLE) &&
           is_attr(type->attrs, ATTR_HANDLE)) {
         if (!generic_handle_registered(name))
         {
@@ -546,8 +580,11 @@ const var_t* get_explicit_handle_var(const var_t *func)
         return NULL;
 
     LIST_FOR_EACH_ENTRY( var, type_get_function_args(func->type), const var_t, entry )
-        if (var->type->type == RPC_FC_BIND_PRIMITIVE)
+    {
+        const type_t *type = var->type;
+        if (type_get_type(type) == TYPE_BASIC && type_basic_get_type(type) == TYPE_BASIC_HANDLE)
             return var;
+    }
 
     return NULL;
 }
@@ -555,8 +592,11 @@ const var_t* get_explicit_handle_var(const var_t *func)
 const type_t* get_explicit_generic_handle_type(const var_t* var)
 {
     const type_t *t;
-    for (t = var->type; is_ptr(t); t = type_pointer_get_ref(t))
-        if (t->type != RPC_FC_BIND_PRIMITIVE && is_attr(t->attrs, ATTR_HANDLE))
+    for (t = var->type;
+         is_ptr(t) || type_is_alias(t);
+         t = type_is_alias(t) ? type_alias_get_aliasee(t) : type_pointer_get_ref(t))
+        if ((type_get_type_detect_alias(t) != TYPE_BASIC || type_basic_get_type(t) != TYPE_BASIC_HANDLE) &&
+            is_attr(t->attrs, ATTR_HANDLE))
             return t;
     return NULL;
 }

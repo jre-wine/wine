@@ -2018,11 +2018,14 @@ ME_FilterEvent(ME_TextEditor *editor, UINT msg, WPARAM* wParam, LPARAM* lParam)
 {
     MSGFILTER msgf;
 
+    if (!editor->hWnd) return FALSE;
+    msgf.nmhdr.hwndFrom = editor->hWnd;
+    msgf.nmhdr.idFrom = GetWindowLongW(editor->hWnd, GWLP_ID);
     msgf.nmhdr.code = EN_MSGFILTER;
     msgf.msg = msg;
     msgf.wParam = *wParam;
     msgf.lParam = *lParam;
-    if (ITextHost_TxNotify(editor->texthost, msgf.nmhdr.code, &msgf) == S_OK)
+    if (SendMessageW(GetParent(editor->hWnd), WM_NOTIFY, msgf.nmhdr.idFrom, (LPARAM)&msgf))
         return FALSE;
     *wParam = msgf.wParam;
     *lParam = msgf.lParam;
@@ -2036,6 +2039,8 @@ static void ME_UpdateSelectionLinkAttribute(ME_TextEditor *editor)
   ME_DisplayItem *startPara, *endPara;
   ME_DisplayItem *prev_para;
   int from, to;
+
+  if (!editor->AutoURLDetect_bEnable) return;
 
   ME_GetSelection(editor, &from, &to);
 
@@ -2232,9 +2237,7 @@ ME_KeyDown(ME_TextEditor *editor, WORD nKey)
           ME_CommitCoalescingUndo(editor);
           SetCursor(NULL);
 
-          if (editor->AutoURLDetect_bEnable)
-            ME_UpdateSelectionLinkAttribute(editor);
-
+          ME_UpdateSelectionLinkAttribute(editor);
           ME_UpdateRepaint(editor);
         }
         return TRUE;
@@ -2393,8 +2396,7 @@ static LRESULT ME_Char(ME_TextEditor *editor, WPARAM charCode,
       ITextHost_TxSetCursor(editor->texthost, NULL, FALSE);
     }
 
-    if (editor->AutoURLDetect_bEnable) ME_UpdateSelectionLinkAttribute(editor);
-
+    ME_UpdateSelectionLinkAttribute(editor);
     ME_UpdateRepaint(editor);
   }
   return 0;
@@ -2515,22 +2517,20 @@ static BOOL ME_SetCursor(ME_TextEditor *editor)
   offset = ME_CharFromPos(editor, pt.x, pt.y, &isExact);
   if (isExact)
   {
-      if (editor->AutoURLDetect_bEnable)
+      ME_Cursor cursor;
+      ME_Run *run;
+
+      ME_CursorFromCharOfs(editor, offset, &cursor);
+      run = &cursor.pRun->member.run;
+      if (run->style->fmt.dwMask & CFM_LINK &&
+          run->style->fmt.dwEffects & CFE_LINK)
       {
-          ME_Cursor cursor;
-          ME_Run *run;
-          ME_CursorFromCharOfs(editor, offset, &cursor);
-          run = &cursor.pRun->member.run;
-          if (editor->AutoURLDetect_bEnable &&
-              run->style->fmt.dwMask & CFM_LINK &&
-              run->style->fmt.dwEffects & CFE_LINK)
-          {
-              ITextHost_TxSetCursor(editor->texthost,
-                                    LoadCursorW(NULL, (WCHAR*)IDC_HAND),
-                                    FALSE);
-              return TRUE;
-          }
+          ITextHost_TxSetCursor(editor->texthost,
+                                LoadCursorW(NULL, (WCHAR*)IDC_HAND),
+                                FALSE);
+          return TRUE;
       }
+
       if (ME_IsSelection(editor))
       {
           int selStart, selEnd;
@@ -3231,12 +3231,10 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
 
     if (bSelection) {
       ME_ReleaseStyle(style);
-      if (editor->AutoURLDetect_bEnable)
-        ME_UpdateSelectionLinkAttribute(editor);
+      ME_UpdateSelectionLinkAttribute(editor);
     } else {
       len = 1;
-      if (editor->AutoURLDetect_bEnable)
-        ME_UpdateLinkAttribute(editor, 0, -1);
+      ME_UpdateLinkAttribute(editor, 0, -1);
     }
     ME_CommitUndo(editor);
     if (!(pStruct->flags & ST_KEEPUNDO))
@@ -3430,7 +3428,7 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
       ME_ClearTempStyle(editor);
     ME_EndToUnicode(unicode, wszText);
     ME_CommitUndo(editor);
-    if (editor->AutoURLDetect_bEnable) ME_UpdateSelectionLinkAttribute(editor);
+    ME_UpdateSelectionLinkAttribute(editor);
     if (!wParam)
       ME_EmptyUndoStack(editor);
     ME_UpdateRepaint(editor);
@@ -3498,10 +3496,7 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
     }
     else
       TRACE("WM_SETTEXT - NULL\n");
-    if (editor->AutoURLDetect_bEnable)
-    {
-      ME_UpdateLinkAttribute(editor, 0, -1);
-    }
+    ME_UpdateLinkAttribute(editor, 0, -1);
     ME_SetSelection(editor, 0, 0);
     editor->nModifyStep = 0;
     ME_CommitUndo(editor);
@@ -4846,6 +4841,8 @@ static BOOL ME_UpdateLinkAttribute(ME_TextEditor *editor, int sel_min, int sel_m
 {
   BOOL modified = FALSE;
   int cMin, cMax;
+
+  if (!editor->AutoURLDetect_bEnable) return FALSE;
 
   if (sel_max == -1) sel_max = ME_GetTextLength(editor);
   do

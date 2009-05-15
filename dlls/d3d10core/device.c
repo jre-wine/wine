@@ -146,8 +146,12 @@ static void STDMETHODCALLTYPE d3d10_device_DrawIndexed(ID3D10Device *iface,
 static void STDMETHODCALLTYPE d3d10_device_Draw(ID3D10Device *iface,
         UINT vertex_count, UINT start_vertex_location)
 {
-    FIXME("iface %p, vertex_count %u, start_vertex_location %u stub!\n",
+    struct d3d10_device *This = (struct d3d10_device *)iface;
+
+    TRACE("iface %p, vertex_count %u, start_vertex_location %u\n",
             iface, vertex_count, start_vertex_location);
+
+    IWineD3DDevice_DrawPrimitive(This->wined3d_device, start_vertex_location, vertex_count);
 }
 
 static void STDMETHODCALLTYPE d3d10_device_PSSetConstantBuffers(ID3D10Device *iface,
@@ -210,7 +214,11 @@ static void STDMETHODCALLTYPE d3d10_device_GSSetShader(ID3D10Device *iface, ID3D
 
 static void STDMETHODCALLTYPE d3d10_device_IASetPrimitiveTopology(ID3D10Device *iface, D3D10_PRIMITIVE_TOPOLOGY topology)
 {
-    FIXME("iface %p, topology %s stub!\n", iface, debug_d3d10_primitive_topology(topology));
+    struct d3d10_device *This = (struct d3d10_device *)iface;
+
+    TRACE("iface %p, topology %s\n", iface, debug_d3d10_primitive_topology(topology));
+
+    IWineD3DDevice_SetPrimitiveType(This->wined3d_device, (WINED3DPRIMITIVETYPE)topology);
 }
 
 static void STDMETHODCALLTYPE d3d10_device_VSSetShaderResources(ID3D10Device *iface,
@@ -424,7 +432,11 @@ static void STDMETHODCALLTYPE d3d10_device_GSGetShader(ID3D10Device *iface, ID3D
 
 static void STDMETHODCALLTYPE d3d10_device_IAGetPrimitiveTopology(ID3D10Device *iface, D3D10_PRIMITIVE_TOPOLOGY *topology)
 {
-    FIXME("iface %p, topology %p stub!\n", iface, topology);
+    struct d3d10_device *This = (struct d3d10_device *)iface;
+
+    TRACE("iface %p, topology %p\n", iface, topology);
+
+    IWineD3DDevice_GetPrimitiveType(This->wined3d_device, (WINED3DPRIMITIVETYPE *)topology);
 }
 
 static void STDMETHODCALLTYPE d3d10_device_VSGetShaderResources(ID3D10Device *iface,
@@ -894,30 +906,72 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateInputLayout(ID3D10Device *if
         const D3D10_INPUT_ELEMENT_DESC *element_descs, UINT element_count, const void *shader_byte_code,
         SIZE_T shader_byte_code_length, ID3D10InputLayout **input_layout)
 {
+    struct d3d10_input_layout *object;
+
     FIXME("iface %p, element_descs %p, element_count %u, shader_byte_code %p,"
             "\tshader_byte_code_length %lu, input_layout %p stub!\n",
             iface, element_descs, element_count, shader_byte_code,
             shader_byte_code_length, input_layout);
 
-    return E_NOTIMPL;
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate D3D10 input layout object memory\n");
+        return E_OUTOFMEMORY;
+    }
+
+    object->vtbl = &d3d10_input_layout_vtbl;
+    object->refcount = 1;
+
+    *input_layout = (ID3D10InputLayout *)object;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateVertexShader(ID3D10Device *iface,
         const void *byte_code, SIZE_T byte_code_length, ID3D10VertexShader **shader)
 {
+    struct d3d10_vertex_shader *object;
+
     FIXME("iface %p, byte_code %p, byte_code_length %lu, shader %p stub!\n",
             iface, byte_code, byte_code_length, shader);
 
-    return E_NOTIMPL;
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate D3D10 vertex shader object memory\n");
+        return E_OUTOFMEMORY;
+    }
+
+    object->vtbl = &d3d10_vertex_shader_vtbl;
+    object->refcount = 1;
+
+    *shader = (ID3D10VertexShader *)object;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateGeometryShader(ID3D10Device *iface,
         const void *byte_code, SIZE_T byte_code_length, ID3D10GeometryShader **shader)
 {
+    struct d3d10_geometry_shader *object;
+
     FIXME("iface %p, byte_code %p, byte_code_length %lu, shader %p stub!\n",
             iface, byte_code, byte_code_length, shader);
 
-    return E_NOTIMPL;
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate D3D10 geometry shader object memory\n");
+        return E_OUTOFMEMORY;
+    }
+
+    object->vtbl = &d3d10_geometry_shader_vtbl;
+    object->refcount = 1;
+
+    *shader = (ID3D10GeometryShader *)object;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateGeometryShaderWithStreamOutput(ID3D10Device *iface,
@@ -935,10 +989,24 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateGeometryShaderWithStreamOutp
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreatePixelShader(ID3D10Device *iface,
         const void *byte_code, SIZE_T byte_code_length, ID3D10PixelShader **shader)
 {
+    struct d3d10_pixel_shader *object;
+
     FIXME("iface %p, byte_code %p, byte_code_length %lu, shader %p stub!\n",
             iface, byte_code, byte_code_length, shader);
 
-    return E_NOTIMPL;
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate D3D10 pixel shader object memory\n");
+        return E_OUTOFMEMORY;
+    }
+
+    object->vtbl = &d3d10_pixel_shader_vtbl;
+    object->refcount = 1;
+
+    *shader = (ID3D10PixelShader *)object;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateBlendState(ID3D10Device *iface,

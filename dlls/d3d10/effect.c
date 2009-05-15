@@ -29,11 +29,15 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d10);
     ((DWORD)(ch2) << 16) | ((DWORD)(ch3) << 24 ))
 #define TAG_DXBC MAKE_TAG('D', 'X', 'B', 'C')
 #define TAG_FX10 MAKE_TAG('F', 'X', '1', '0')
+#define TAG_ISGN MAKE_TAG('I', 'S', 'G', 'N')
+
+static const struct ID3D10EffectTechniqueVtbl d3d10_effect_technique_vtbl;
+static const struct ID3D10EffectPassVtbl d3d10_effect_pass_vtbl;
 
 static inline void read_dword(const char **ptr, DWORD *d)
 {
-    memcpy(d, *ptr, sizeof(d));
-    *ptr += sizeof(d);
+    memcpy(d, *ptr, sizeof(*d));
+    *ptr += sizeof(*d);
 }
 
 static inline void skip_dword_unknown(const char **ptr, unsigned int count)
@@ -49,6 +53,18 @@ static inline void skip_dword_unknown(const char **ptr, unsigned int count)
     }
 }
 
+static inline void write_dword(char **ptr, DWORD d)
+{
+    memcpy(*ptr, &d, sizeof(d));
+    *ptr += sizeof(d);
+}
+
+static inline void write_dword_unknown(char **ptr, DWORD d)
+{
+    FIXME("Writing unknown DWORD 0x%08x\n", d);
+    write_dword(ptr, d);
+}
+
 static inline void read_tag(const char **ptr, DWORD *t, char t_str[5])
 {
     read_dword(ptr, t);
@@ -57,7 +73,7 @@ static inline void read_tag(const char **ptr, DWORD *t, char t_str[5])
 }
 
 static HRESULT parse_dxbc(const char *data, SIZE_T data_size,
-        HRESULT (*chunk_handler)(const char *data, void *ctx), void *ctx)
+        HRESULT (*chunk_handler)(const char *data, DWORD data_size, DWORD tag, void *ctx), void *ctx)
 {
     const char *ptr = data;
     HRESULT hr = S_OK;
@@ -89,12 +105,19 @@ static HRESULT parse_dxbc(const char *data, SIZE_T data_size,
 
     for (i = 0; i < chunk_count; ++i)
     {
+        DWORD chunk_tag, chunk_size;
+        const char *chunk_ptr;
         DWORD chunk_offset;
 
         read_dword(&ptr, &chunk_offset);
         TRACE("chunk %u at offset %#x\n", i, chunk_offset);
 
-        hr = chunk_handler(data + chunk_offset, ctx);
+        chunk_ptr = data + chunk_offset;
+
+        read_dword(&chunk_ptr, &chunk_tag);
+        read_dword(&chunk_ptr, &chunk_size);
+
+        hr = chunk_handler(chunk_ptr, chunk_size, chunk_tag, ctx);
         if (FAILED(hr)) break;
     }
 
@@ -122,13 +145,17 @@ static HRESULT parse_fx10_pass_index(struct d3d10_effect_pass *p, const char **p
 
     for (i = 0; i < p->variable_count; ++i)
     {
-        read_dword(ptr, &p->variables[i].type);
-        TRACE("Variable %u is of type %#x\n", i, p->variables[i].type);
+        struct d3d10_effect_variable *v = &p->variables[i];
+
+        v->pass = p;
+
+        read_dword(ptr, &v->type);
+        TRACE("Variable %u is of type %#x\n", i, v->type);
 
         skip_dword_unknown(ptr, 2);
 
-        read_dword(ptr, &p->variables[i].idx_offset);
-        TRACE("Variable %u idx is at offset %#x\n", i, p->variables[i].idx_offset);
+        read_dword(ptr, &v->idx_offset);
+        TRACE("Variable %u idx is at offset %#x\n", i, v->idx_offset);
     }
 
     return S_OK;
@@ -156,28 +183,74 @@ static HRESULT parse_fx10_technique_index(struct d3d10_effect_technique *t, cons
 
     for (i = 0; i < t->pass_count; ++i)
     {
-        hr = parse_fx10_pass_index(&t->passes[i], ptr);
+        struct d3d10_effect_pass *p = &t->passes[i];
+
+        p->vtbl = &d3d10_effect_pass_vtbl;
+        p->technique = t;
+
+        hr = parse_fx10_pass_index(p, ptr);
         if (FAILED(hr)) break;
     }
 
     return hr;
 }
 
-static HRESULT shader_chunk_handler(const char *data, void *ctx)
+static HRESULT shader_chunk_handler(const char *data, DWORD data_size, DWORD tag, void *ctx)
 {
-    const char *ptr = data;
-    DWORD chunk_size;
+    struct d3d10_effect_shader_variable *s = ctx;
     char tag_str[5];
-    DWORD tag;
 
-    read_tag(&ptr, &tag, tag_str);
+    memcpy(tag_str, &tag, 4);
+    tag_str[4] = '\0';
     TRACE("tag: %s\n", tag_str);
 
-    read_dword(&ptr, &chunk_size);
-    TRACE("chunk size: %#x\n", chunk_size);
+    TRACE("chunk size: %#x\n", data_size);
 
     switch(tag)
     {
+        case TAG_ISGN:
+        {
+            /* 32 (DXBC header) + 1 * 4 (chunk index) + 2 * 4 (chunk header) + data_size (chunk data) */
+            UINT size = 44 + data_size;
+            char *ptr;
+
+            s->input_signature = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+            if (!s->input_signature)
+            {
+                ERR("Failed to allocate input signature data\n");
+                return E_OUTOFMEMORY;
+            }
+            s->input_signature_size = size;
+
+            ptr = s->input_signature;
+
+            write_dword(&ptr, TAG_DXBC);
+
+            /* signature(?) */
+            write_dword_unknown(&ptr, 0);
+            write_dword_unknown(&ptr, 0);
+            write_dword_unknown(&ptr, 0);
+            write_dword_unknown(&ptr, 0);
+
+            /* seems to be always 1 */
+            write_dword_unknown(&ptr, 1);
+
+            /* DXBC size */
+            write_dword(&ptr, size);
+
+            /* chunk count */
+            write_dword(&ptr, 1);
+
+            /* chunk index */
+            write_dword(&ptr, (ptr - s->input_signature) + 4);
+
+            /* chunk */
+            write_dword(&ptr, TAG_ISGN);
+            write_dword(&ptr, data_size);
+            memcpy(ptr, data, data_size);
+            break;
+        }
+
         default:
             FIXME("Unhandled chunk %s\n", tag_str);
             break;
@@ -188,13 +261,44 @@ static HRESULT shader_chunk_handler(const char *data, void *ctx)
 
 static HRESULT parse_shader(struct d3d10_effect_variable *v, const char *data)
 {
+    ID3D10Device *device = v->pass->technique->effect->device;
+    struct d3d10_effect_shader_variable *s;
     const char *ptr = data;
     DWORD dxbc_size;
+    HRESULT hr;
+
+    v->data = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct d3d10_effect_shader_variable));
+    if (!v->data)
+    {
+        ERR("Failed to allocate shader variable memory\n");
+        return E_OUTOFMEMORY;
+    }
+
+    if (!ptr) return S_OK;
+
+    s = v->data;
 
     read_dword(&ptr, &dxbc_size);
     TRACE("dxbc size: %#x\n", dxbc_size);
 
-    return parse_dxbc(ptr, dxbc_size, shader_chunk_handler, v);
+    switch (v->type)
+    {
+        case D3D10_EVT_VERTEXSHADER:
+            hr = ID3D10Device_CreateVertexShader(device, ptr, dxbc_size, &s->shader.vs);
+            if (FAILED(hr)) return hr;
+            break;
+
+        case D3D10_EVT_PIXELSHADER:
+            hr = ID3D10Device_CreatePixelShader(device, ptr, dxbc_size, &s->shader.ps);
+            if (FAILED(hr)) return hr;
+            break;
+        case D3D10_EVT_GEOMETRYSHADER:
+            hr = ID3D10Device_CreateGeometryShader(device, ptr, dxbc_size, &s->shader.gs);
+            if (FAILED(hr)) return hr;
+            break;
+    }
+
+    return parse_dxbc(ptr, dxbc_size, shader_chunk_handler, s);
 }
 
 static HRESULT parse_fx10_variable(struct d3d10_effect_variable *v, const char *data)
@@ -212,10 +316,13 @@ static HRESULT parse_fx10_variable(struct d3d10_effect_variable *v, const char *
     if (offset == 1)
     {
         WARN("Skipping variable\n");
-        return S_OK;
+        ptr = NULL;
+    }
+    else
+    {
+        ptr = data + offset;
     }
 
-    ptr = data + offset;
     switch (v->type)
     {
         case D3D10_EVT_VERTEXSHADER:
@@ -322,6 +429,10 @@ static HRESULT parse_fx10_body(struct d3d10_effect *e, const char *data, DWORD d
     for (i = 0; i < e->technique_count; ++i)
     {
         struct d3d10_effect_technique *t = &e->techniques[i];
+
+        t->vtbl = &d3d10_effect_technique_vtbl;
+        t->effect = e;
+
         hr = parse_fx10_technique_index(t, &ptr);
         if (FAILED(hr)) break;
 
@@ -383,32 +494,26 @@ static HRESULT parse_fx10(struct d3d10_effect *e, const char *data, DWORD data_s
     return parse_fx10_body(e, ptr, data_size - (ptr - data));
 }
 
-static HRESULT fx10_chunk_handler(const char *data, void *ctx)
+static HRESULT fx10_chunk_handler(const char *data, DWORD data_size, DWORD tag, void *ctx)
 {
     struct d3d10_effect *e = ctx;
-    const char *ptr = data;
-    DWORD chunk_size;
     char tag_str[5];
-    DWORD tag;
 
-    read_tag(&ptr, &tag, tag_str);
+    memcpy(tag_str, &tag, 4);
+    tag_str[4] = '\0';
     TRACE("tag: %s\n", tag_str);
 
-    read_dword(&ptr, &chunk_size);
-    TRACE("chunk size: %#x\n", chunk_size);
+    TRACE("chunk size: %#x\n", data_size);
 
     switch(tag)
     {
         case TAG_FX10:
-            parse_fx10(e, ptr, chunk_size);
-            break;
+            return parse_fx10(e, data, data_size);
 
         default:
             FIXME("Unhandled chunk %s\n", tag_str);
-            break;
+            return S_OK;
     }
-
-    return S_OK;
 }
 
 HRESULT d3d10_effect_parse(struct d3d10_effect *This, const void *data, SIZE_T data_size)
@@ -416,14 +521,70 @@ HRESULT d3d10_effect_parse(struct d3d10_effect *This, const void *data, SIZE_T d
     return parse_dxbc(data, data_size, fx10_chunk_handler, This);
 }
 
+static void d3d10_effect_variable_destroy(struct d3d10_effect_variable *v)
+{
+    TRACE("variable %p\n", v);
+
+    switch(v->type)
+    {
+        case D3D10_EVT_VERTEXSHADER:
+        case D3D10_EVT_PIXELSHADER:
+        case D3D10_EVT_GEOMETRYSHADER:
+            HeapFree(GetProcessHeap(), 0, ((struct d3d10_effect_shader_variable *)v->data)->input_signature);
+            break;
+
+        default:
+            break;
+    }
+    HeapFree(GetProcessHeap(), 0, v->data);
+}
+
+static HRESULT d3d10_effect_variable_apply(struct d3d10_effect_variable *v)
+{
+    ID3D10Device *device = v->pass->technique->effect->device;
+
+    TRACE("variable %p, type %#x\n", v, v->type);
+
+    switch(v->type)
+    {
+        case D3D10_EVT_VERTEXSHADER:
+            ID3D10Device_VSSetShader(device, ((struct d3d10_effect_shader_variable *)v->data)->shader.vs);
+            return S_OK;
+
+        case D3D10_EVT_PIXELSHADER:
+            ID3D10Device_PSSetShader(device, ((struct d3d10_effect_shader_variable *)v->data)->shader.ps);
+            return S_OK;
+
+        case D3D10_EVT_GEOMETRYSHADER:
+            ID3D10Device_GSSetShader(device, ((struct d3d10_effect_shader_variable *)v->data)->shader.gs);
+            return S_OK;
+
+        default:
+            FIXME("Unhandled variable type %#x\n", v->type);
+            return E_FAIL;
+    }
+}
+
 static void d3d10_effect_pass_destroy(struct d3d10_effect_pass *p)
 {
+    TRACE("pass %p\n", p);
+
     HeapFree(GetProcessHeap(), 0, p->name);
-    HeapFree(GetProcessHeap(), 0, p->variables);
+    if (p->variables)
+    {
+        unsigned int i;
+        for (i = 0; i < p->variable_count; ++i)
+        {
+            d3d10_effect_variable_destroy(&p->variables[i]);
+        }
+        HeapFree(GetProcessHeap(), 0, p->variables);
+    }
 }
 
 static void d3d10_effect_technique_destroy(struct d3d10_effect_technique *t)
 {
+    TRACE("technique %p\n", t);
+
     HeapFree(GetProcessHeap(), 0, t->name);
     if (t->passes)
     {
@@ -484,6 +645,7 @@ static ULONG STDMETHODCALLTYPE d3d10_effect_Release(ID3D10Effect *iface)
             }
             HeapFree(GetProcessHeap(), 0, This->techniques);
         }
+        ID3D10Device_Release(This->device);
         HeapFree(GetProcessHeap(), 0, This);
     }
 
@@ -508,9 +670,14 @@ static BOOL STDMETHODCALLTYPE d3d10_effect_IsPool(ID3D10Effect *iface)
 
 static HRESULT STDMETHODCALLTYPE d3d10_effect_GetDevice(ID3D10Effect *iface, ID3D10Device **device)
 {
-    FIXME("iface %p, device %p stub!\n", iface, device);
+    struct d3d10_effect *This = (struct d3d10_effect *)iface;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, device %p\n", iface, device);
+
+    ID3D10Device_AddRef(This->device);
+    *device = This->device;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_effect_GetDesc(ID3D10Effect *iface, D3D10_EFFECT_DESC *desc)
@@ -561,15 +728,41 @@ static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableB
 static struct ID3D10EffectTechnique * STDMETHODCALLTYPE d3d10_effect_GetTechniqueByIndex(ID3D10Effect *iface,
         UINT index)
 {
-    FIXME("iface %p, index %u stub!\n", iface, index);
+    struct d3d10_effect *This = (struct d3d10_effect *)iface;
+    struct d3d10_effect_technique *t;
 
-    return NULL;
+    TRACE("iface %p, index %u\n", iface, index);
+
+    if (index >= This->technique_count)
+    {
+        WARN("Invalid index specified\n");
+        return NULL;
+    }
+
+    t = &This->techniques[index];
+
+    TRACE("Returning technique %p, \"%s\"\n", t, t->name);
+
+    return (ID3D10EffectTechnique *)t;
 }
 
 static struct ID3D10EffectTechnique * STDMETHODCALLTYPE d3d10_effect_GetTechniqueByName(ID3D10Effect *iface,
         LPCSTR name)
 {
-    FIXME("iface %p, name \"%s\" stub!\n", iface, name);
+    struct d3d10_effect *This = (struct d3d10_effect *)iface;
+    unsigned int i;
+
+    TRACE("iface %p, name \"%s\"\n", iface, name);
+
+    for (i = 0; i < This->technique_count; ++i)
+    {
+        struct d3d10_effect_technique *t = &This->techniques[i];
+        if (!strcmp(t->name, name))
+        {
+            TRACE("Returning technique %p\n", t);
+            return (ID3D10EffectTechnique *)t;
+        }
+    }
 
     return NULL;
 }
@@ -608,4 +801,220 @@ const struct ID3D10EffectVtbl d3d10_effect_vtbl =
     d3d10_effect_GetTechniqueByName,
     d3d10_effect_Optimize,
     d3d10_effect_IsOptimized,
+};
+
+/* ID3D10EffectTechnique methods */
+
+static BOOL STDMETHODCALLTYPE d3d10_effect_technique_IsValid(ID3D10EffectTechnique *iface)
+{
+    FIXME("iface %p stub!\n", iface);
+
+    return FALSE;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d10_effect_technique_GetDesc(ID3D10EffectTechnique *iface,
+        D3D10_TECHNIQUE_DESC *desc)
+{
+    struct d3d10_effect_technique *This = (struct d3d10_effect_technique *)iface;
+
+    TRACE("iface %p, desc %p\n", iface, desc);
+
+    desc->Name = This->name;
+    desc->Passes = This->pass_count;
+    WARN("Annotations not implemented\n");
+    desc->Annotations = 0;
+
+    return S_OK;
+}
+
+static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_technique_GetAnnotationByIndex(
+        ID3D10EffectTechnique *iface, UINT index)
+{
+    FIXME("iface %p, index %u stub!\n", iface, index);
+
+    return NULL;
+}
+
+static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_technique_GetAnnotationByName(
+        ID3D10EffectTechnique *iface, LPCSTR name)
+{
+    FIXME("iface %p, name \"%s\" stub!\n", iface, name);
+
+    return NULL;
+}
+
+static struct ID3D10EffectPass * STDMETHODCALLTYPE d3d10_effect_technique_GetPassByIndex(ID3D10EffectTechnique *iface,
+        UINT index)
+{
+    struct d3d10_effect_technique *This = (struct d3d10_effect_technique *)iface;
+    struct d3d10_effect_pass *p;
+
+    TRACE("iface %p, index %u\n", iface, index);
+
+    if (index >= This->pass_count)
+    {
+        WARN("Invalid index specified\n");
+        return NULL;
+    }
+
+    p = &This->passes[index];
+
+    TRACE("Returning pass %p, \"%s\"\n", p, p->name);
+
+    return (ID3D10EffectPass *)p;
+}
+
+static struct ID3D10EffectPass * STDMETHODCALLTYPE d3d10_effect_technique_GetPassByName(ID3D10EffectTechnique *iface,
+        LPCSTR name)
+{
+    struct d3d10_effect_technique *This = (struct d3d10_effect_technique *)iface;
+    unsigned int i;
+
+    TRACE("iface %p, name \"%s\"\n", iface, name);
+
+    for (i = 0; i < This->pass_count; ++i)
+    {
+        struct d3d10_effect_pass *p = &This->passes[i];
+        if (!strcmp(p->name, name))
+        {
+            TRACE("Returning pass %p\n", p);
+            return (ID3D10EffectPass *)p;
+        }
+    }
+
+    return NULL;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d10_effect_technique_ComputeStateBlockMask(ID3D10EffectTechnique *iface,
+        D3D10_STATE_BLOCK_MASK *mask)
+{
+    FIXME("iface %p,mask %p stub!\n", iface, mask);
+
+    return E_NOTIMPL;
+}
+
+static const struct ID3D10EffectTechniqueVtbl d3d10_effect_technique_vtbl =
+{
+    /* ID3D10EffectTechnique methods */
+    d3d10_effect_technique_IsValid,
+    d3d10_effect_technique_GetDesc,
+    d3d10_effect_technique_GetAnnotationByIndex,
+    d3d10_effect_technique_GetAnnotationByName,
+    d3d10_effect_technique_GetPassByIndex,
+    d3d10_effect_technique_GetPassByName,
+    d3d10_effect_technique_ComputeStateBlockMask,
+};
+
+/* ID3D10EffectPass methods */
+
+static BOOL STDMETHODCALLTYPE d3d10_effect_pass_IsValid(ID3D10EffectPass *iface)
+{
+    FIXME("iface %p stub!\n", iface);
+
+    return FALSE;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d10_effect_pass_GetDesc(ID3D10EffectPass *iface, D3D10_PASS_DESC *desc)
+{
+    struct d3d10_effect_pass *This = (struct d3d10_effect_pass *)iface;
+    unsigned int i;
+
+    FIXME("iface %p, desc %p partial stub!\n", iface, desc);
+
+    memset(desc, 0, sizeof(*desc));
+    desc->Name = This->name;
+    for (i = 0; i < This->variable_count; ++i)
+    {
+        struct d3d10_effect_variable *v = &This->variables[i];
+        if (v->type == D3D10_EVT_VERTEXSHADER)
+        {
+            struct d3d10_effect_shader_variable *s = v->data;
+            desc->pIAInputSignature = (BYTE *)s->input_signature;
+            desc->IAInputSignatureSize = s->input_signature_size;
+            break;
+        }
+    }
+
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d10_effect_pass_GetVertexShaderDesc(ID3D10EffectPass *iface,
+        D3D10_PASS_SHADER_DESC *desc)
+{
+    FIXME("iface %p, desc %p stub!\n", iface, desc);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d10_effect_pass_GetGeometryShaderDesc(ID3D10EffectPass *iface,
+        D3D10_PASS_SHADER_DESC *desc)
+{
+    FIXME("iface %p, desc %p stub!\n", iface, desc);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d10_effect_pass_GetPixelShaderDesc(ID3D10EffectPass *iface,
+        D3D10_PASS_SHADER_DESC *desc)
+{
+    FIXME("iface %p, desc %p stub!\n", iface, desc);
+
+    return E_NOTIMPL;
+}
+
+static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_pass_GetAnnotationByIndex(ID3D10EffectPass *iface,
+        UINT index)
+{
+    FIXME("iface %p, index %u stub!\n", iface, index);
+
+    return NULL;
+}
+
+static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_pass_GetAnnotationByName(ID3D10EffectPass *iface,
+        LPCSTR name)
+{
+    FIXME("iface %p, name \"%s\" stub!\n", iface, name);
+
+    return NULL;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d10_effect_pass_Apply(ID3D10EffectPass *iface, UINT flags)
+{
+    struct d3d10_effect_pass *This = (struct d3d10_effect_pass *)iface;
+    HRESULT hr = S_OK;
+    unsigned int i;
+
+    TRACE("iface %p, flags %#x\n", iface, flags);
+
+    if (flags) FIXME("Ignoring flags (%#x)\n", flags);
+
+    for (i = 0; i < This->variable_count; ++i)
+    {
+        hr = d3d10_effect_variable_apply(&This->variables[i]);
+        if (FAILED(hr)) break;
+    }
+
+    return hr;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d10_effect_pass_ComputeStateBlockMask(ID3D10EffectPass *iface,
+        D3D10_STATE_BLOCK_MASK *mask)
+{
+    FIXME("iface %p, mask %p stub!\n", iface, mask);
+
+    return E_NOTIMPL;
+}
+
+static const struct ID3D10EffectPassVtbl d3d10_effect_pass_vtbl =
+{
+    /* ID3D10EffectPass methods */
+    d3d10_effect_pass_IsValid,
+    d3d10_effect_pass_GetDesc,
+    d3d10_effect_pass_GetVertexShaderDesc,
+    d3d10_effect_pass_GetGeometryShaderDesc,
+    d3d10_effect_pass_GetPixelShaderDesc,
+    d3d10_effect_pass_GetAnnotationByIndex,
+    d3d10_effect_pass_GetAnnotationByName,
+    d3d10_effect_pass_Apply,
+    d3d10_effect_pass_ComputeStateBlockMask,
 };

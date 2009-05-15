@@ -4,11 +4,13 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = dbghelp.dll
 IMPORTLIB = dbghelp
+EXTRADEFS = -D_IMAGEHLP_SOURCE_
 IMPORTS   = psapi kernel32 ntdll
 DELAYIMPORTS = version
 
 C_SRCS = \
 	coff.c \
+	crc32.c \
 	dbghelp.c \
 	dwarf.c \
 	elf_module.c \

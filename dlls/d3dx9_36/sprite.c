@@ -91,15 +91,23 @@ static HRESULT WINAPI ID3DXSpriteImpl_GetDevice(LPD3DXSPRITE iface, LPDIRECT3DDE
 static HRESULT WINAPI ID3DXSpriteImpl_GetTransform(LPD3DXSPRITE iface, D3DXMATRIX *transform)
 {
     ID3DXSpriteImpl *This=(ID3DXSpriteImpl*)iface;
-    FIXME("(%p): stub\n", This);
-    return E_NOTIMPL;
+    TRACE("(%p)\n", This);
+
+    if(transform==NULL) return D3DERR_INVALIDCALL;
+    *transform=This->transform;
+
+    return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXSpriteImpl_SetTransform(LPD3DXSPRITE iface, CONST D3DXMATRIX *transform)
 {
     ID3DXSpriteImpl *This=(ID3DXSpriteImpl*)iface;
-    FIXME("(%p): stub\n", This);
-    return E_NOTIMPL;
+    TRACE("(%p)\n", This);
+
+    if(transform==NULL) return D3DERR_INVALIDCALL;
+    This->transform=*transform;
+
+    return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXSpriteImpl_SetWorldViewRH(LPD3DXSPRITE iface, CONST D3DXMATRIX *world, CONST D3DXMATRIX *view)
@@ -214,25 +222,35 @@ D3DXSPRITE_OBJECTSPACE: do not change device transforms
 D3DXSPRITE_SORT_DEPTH_BACKTOFRONT: sort by position
 D3DXSPRITE_SORT_DEPTH_FRONTTOBACK: sort by position
 D3DXSPRITE_SORT_TEXTURE: sort by texture (so that it doesn't change too often)
-D3DXSPRITE_DO_NOT_ADDREF_TEXTURE: don't call AddRef/Release on every Draw/Flush call
-D3DXSPRITE_DONOTSAVESTATE: don't restore the current device state on ID3DXSprite_End
 */
-    if(This->stateblock==NULL) {
-        /* Tell our state block what it must store */
-        hr=IDirect3DDevice9_BeginStateBlock(This->device);
-        if(hr!=D3D_OK) return hr;
-
-        set_states(This);
-
-        IDirect3DDevice9_SetVertexDeclaration(This->device, This->vdecl);
-        IDirect3DDevice9_SetStreamSource(This->device, 0, NULL, 0, sizeof(SPRITEVERTEX));
-        IDirect3DDevice9_SetIndices(This->device, NULL);
-        IDirect3DDevice9_SetTexture(This->device, 0, NULL);
-
-        IDirect3DDevice9_EndStateBlock(This->device, &This->stateblock);
+    if(This->vdecl==NULL) {
+        static const D3DVERTEXELEMENT9 elements[] =
+        {
+            { 0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0 },
+            { 0, 12, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0 },
+            { 0, 16, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0 },
+            D3DDECL_END()
+        };
+        IDirect3DDevice9_CreateVertexDeclaration(This->device, elements, &This->vdecl);
     }
-    /* Save current state */
-    IDirect3DStateBlock9_Capture(This->stateblock);
+
+    if(!(flags & D3DXSPRITE_DONOTSAVESTATE)) {
+        if(This->stateblock==NULL) {
+            /* Tell our state block what it must store */
+            hr=IDirect3DDevice9_BeginStateBlock(This->device);
+            if(hr!=D3D_OK) return hr;
+
+            set_states(This);
+
+            IDirect3DDevice9_SetVertexDeclaration(This->device, This->vdecl);
+            IDirect3DDevice9_SetStreamSource(This->device, 0, NULL, 0, sizeof(SPRITEVERTEX));
+            IDirect3DDevice9_SetIndices(This->device, NULL);
+            IDirect3DDevice9_SetTexture(This->device, 0, NULL);
+
+            IDirect3DDevice9_EndStateBlock(This->device, &This->stateblock);
+        }
+        IDirect3DStateBlock9_Capture(This->stateblock); /* Save current state */
+    }
 
     /* Apply device state */
     set_states(This);
@@ -264,7 +282,8 @@ static HRESULT WINAPI ID3DXSpriteImpl_Draw(LPD3DXSPRITE iface, LPDIRECT3DTEXTURE
         This->sprites=HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, This->sprites, This->allocated_sprites*sizeof(SPRITE));
     }
     This->sprites[This->sprite_count].texture=texture;
-    IUnknown_AddRef(texture);
+    if(!(This->flags & D3DXSPRITE_DO_NOT_ADDREF_TEXTURE))
+        IDirect3DTexture9_AddRef(texture);
 
     /* Reuse the texture desc if possible */
     if(This->sprite_count) {
@@ -362,8 +381,8 @@ static HRESULT WINAPI ID3DXSpriteImpl_Flush(LPD3DXSPRITE iface)
     }
     HeapFree(GetProcessHeap(), 0, vertices);
 
-    for(i=0;i<This->sprite_count;i++)
-        if(This->sprites[i].texture)
+    if(!(This->flags & D3DXSPRITE_DO_NOT_ADDREF_TEXTURE))
+        for(i=0;i<This->sprite_count;i++)
             IDirect3DTexture9_Release(This->sprites[i].texture);
 
     This->sprite_count=0;
@@ -381,7 +400,9 @@ static HRESULT WINAPI ID3DXSpriteImpl_End(LPD3DXSPRITE iface)
     if(!This->ready) return D3DERR_INVALIDCALL;
 
     ID3DXSprite_Flush(iface);
-    if(This->stateblock) IDirect3DStateBlock9_Apply(This->stateblock); /* Restore old state */
+
+    if(!(This->flags & D3DXSPRITE_DONOTSAVESTATE))
+        if(This->stateblock) IDirect3DStateBlock9_Apply(This->stateblock); /* Restore old state */
 
     This->ready=FALSE;
 
@@ -391,15 +412,39 @@ static HRESULT WINAPI ID3DXSpriteImpl_End(LPD3DXSPRITE iface)
 static HRESULT WINAPI ID3DXSpriteImpl_OnLostDevice(LPD3DXSPRITE iface)
 {
     ID3DXSpriteImpl *This=(ID3DXSpriteImpl*)iface;
-    FIXME("(%p): stub\n", This);
-    return E_NOTIMPL;
+    TRACE("(%p)\n", This);
+
+    if(This->stateblock) IDirect3DStateBlock9_Release(This->stateblock);
+    if(This->vdecl) IDirect3DVertexDeclaration9_Release(This->vdecl);
+    This->vdecl=NULL;
+    This->stateblock=NULL;
+
+    /* Reset some variables */
+    ID3DXSprite_OnResetDevice(iface);
+
+    return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXSpriteImpl_OnResetDevice(LPD3DXSPRITE iface)
 {
     ID3DXSpriteImpl *This=(ID3DXSpriteImpl*)iface;
-    FIXME("(%p): stub\n", This);
-    return E_NOTIMPL;
+    int i;
+
+    TRACE("(%p)\n", This);
+
+    for(i=0;i<This->sprite_count;i++)
+        if(This->sprites[i].texture)
+            IDirect3DTexture9_Release(This->sprites[i].texture);
+
+    This->sprite_count=0;
+
+    This->flags=0;
+    This->ready=FALSE;
+
+    /* keep matrices */
+    /* device objects get restored on Begin */
+
+    return D3D_OK;
 }
 
 static const ID3DXSpriteVtbl D3DXSprite_Vtbl =
@@ -426,14 +471,6 @@ HRESULT WINAPI D3DXCreateSprite(LPDIRECT3DDEVICE9 device, LPD3DXSPRITE *sprite)
 {
     ID3DXSpriteImpl *object;
     D3DCAPS9 caps;
-    static const D3DVERTEXELEMENT9 elements[] =
-        {
-            { 0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0 },
-            { 0, 12, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0 },
-            { 0, 16, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0 },
-            D3DDECL_END()
-        };
-
     TRACE("(void): relay\n");
 
     if(device==NULL || sprite==NULL) return D3DERR_INVALIDCALL;
@@ -448,24 +485,21 @@ HRESULT WINAPI D3DXCreateSprite(LPDIRECT3DDEVICE9 device, LPD3DXSPRITE *sprite)
     object->device=device;
     IUnknown_AddRef(device);
 
-    IDirect3DDevice9_CreateVertexDeclaration(object->device, elements, &object->vdecl);
+    object->vdecl=NULL;
     object->stateblock=NULL;
 
     D3DXMatrixIdentity(&object->transform);
     D3DXMatrixIdentity(&object->view);
-
-    object->flags=0;
-    object->ready=FALSE;
 
     IDirect3DDevice9_GetDeviceCaps(device, &caps);
     object->texfilter_caps=caps.TextureFilterCaps;
     object->maxanisotropy=caps.MaxAnisotropy;
     object->alphacmp_caps=caps.AlphaCmpCaps;
 
-    object->sprites=NULL;
-    object->sprite_count=0;
-    object->allocated_sprites=0;
+    ID3DXSprite_OnResetDevice((ID3DXSprite*)object);
 
+    object->sprites=NULL;
+    object->allocated_sprites=0;
     *sprite=(ID3DXSprite*)object;
 
     return D3D_OK;

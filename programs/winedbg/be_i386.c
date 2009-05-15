@@ -173,10 +173,11 @@ static void be_i386_all_print_context(HANDLE hThread, const CONTEXT* ctx)
     dbg_printf(")\n");
     
     /* Here are the rest of the registers */
-    dbg_printf(" FLES:%08x ", (unsigned int) ctx->FloatSave.ErrorSelector);
-    dbg_printf(" FLDO:%08x ", (unsigned int) ctx->FloatSave.DataOffset);
-    dbg_printf(" FLDS:%08x ", (unsigned int) ctx->FloatSave.DataSelector);
-    dbg_printf(" FLCNS:%08x \n", (unsigned int) ctx->FloatSave.Cr0NpxState);
+    dbg_printf(" FLES:%08x  FLDO:%08x  FLDS:%08x  FLCNS:%08x\n",
+               ctx->FloatSave.ErrorSelector,
+               ctx->FloatSave.DataOffset,
+               ctx->FloatSave.DataSelector,
+               ctx->FloatSave.Cr0NpxState);
 
     /* Now for the floating point registers */
     dbg_printf("Floating Point Registers:\n");
@@ -226,7 +227,7 @@ static void be_i386_print_context(HANDLE hThread, const CONTEXT* ctx, int all_re
     if (ctx->EFlags & 0x00004000) *pt-- = 'N'; /* Nested Task Flag */
     if (ctx->EFlags & 0x00008000) *pt-- = '-';
     if (ctx->EFlags & 0x00010000) *pt-- = 'R'; /* Resume Flag */
-    if (ctx->EFlags & 0x00020000) *pt-- = 'V'; /* Vritual Mode Flag */
+    if (ctx->EFlags & 0x00020000) *pt-- = 'V'; /* Virtual Mode Flag */
     if (ctx->EFlags & 0x00040000) *pt-- = 'a'; /* Alignment Check Flag */
     
     switch (get_selector_type(hThread, ctx, ctx->SegCs))

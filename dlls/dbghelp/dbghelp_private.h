@@ -111,7 +111,7 @@ void*    hash_table_iter_up(struct hash_table_iter* hti);
 
 extern unsigned dbghelp_options;
 /* some more Wine extensions */
-#define SYMOPT_WINE_WITH_ELF_MODULES 0x40000000
+#define SYMOPT_WINE_WITH_NATIVE_MODULES 0x40000000
 
 enum location_kind {loc_error,          /* reg is the error code */
                     loc_absolute,       /* offset is the location */
@@ -413,10 +413,14 @@ extern BOOL         validate_addr64(DWORD64 addr);
 extern BOOL         pcs_callback(const struct process* pcs, ULONG action, void* data);
 extern void*        fetch_buffer(struct process* pcs, unsigned size);
 
+/* crc32.c */
+extern DWORD calc_crc32(int fd);
+
+typedef BOOL (*enum_modules_cb)(const WCHAR*, unsigned long addr, void* user);
+
 /* elf_module.c */
 #define ELF_NO_MAP      ((const void*)0xffffffff)
-typedef BOOL (*elf_enum_modules_cb)(const WCHAR*, unsigned long addr, void* user);
-extern BOOL         elf_enum_modules(HANDLE hProc, elf_enum_modules_cb, void*);
+extern BOOL         elf_enum_modules(HANDLE hProc, enum_modules_cb, void*);
 extern BOOL         elf_fetch_file_info(const WCHAR* name, DWORD* base, DWORD* size, DWORD* checksum);
 struct elf_file_map;
 extern BOOL         elf_load_debug_info(struct module* module, struct elf_file_map* fmap);
@@ -431,8 +435,7 @@ extern DWORD WINAPI addr_to_linear(HANDLE hProcess, HANDLE hThread, ADDRESS* add
 /* module.c */
 extern const WCHAR      S_ElfW[];
 extern const WCHAR      S_WineLoaderW[];
-extern const WCHAR      S_WinePThreadW[];
-extern const WCHAR      S_WineKThreadW[];
+extern const WCHAR      S_WineW[];
 extern const WCHAR      S_SlashW[];
 
 extern struct module*
@@ -488,9 +491,14 @@ extern unsigned     source_new(struct module* module, const char* basedir, const
 extern const char*  source_get(const struct module* module, unsigned idx);
 
 /* stabs.c */
+typedef void (*stabs_def_cb)(struct module* module, unsigned long load_offset,
+                                const char* name, unsigned long offset,
+                                BOOL is_public, BOOL is_global, unsigned char other,
+                                struct symt_compiland* compiland, void* user);
 extern BOOL         stabs_parse(struct module* module, unsigned long load_offset,
                                 const void* stabs, int stablen,
-                                const char* strs, int strtablen);
+                                const char* strs, int strtablen,
+                                stabs_def_cb callback, void* user);
 
 /* dwarf.c */
 extern BOOL         dwarf2_parse(struct module* module, unsigned long load_offset,

@@ -64,64 +64,9 @@
 
 #include "dinput_private.h"
 #include "device_private.h"
+#include "joystick_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dinput);
-
-
-/*
- * Maps POV x & y event values to a DX "clock" position:
- *         0
- *   31500    4500
- * 27000  -1    9000
- *   22500   13500
- *       18000
- */
-DWORD joystick_map_pov(POINTL *p)
-{
-    if (p->x > 0)
-        return p->y < 0 ?  4500 : !p->y ?  9000 : 13500;
-    else if (p->x < 0)
-        return p->y < 0 ? 31500 : !p->y ? 27000 : 22500;
-    else
-        return p->y < 0 ?     0 : !p->y ?    -1 : 18000;
-}
-
-/*
- * This maps the read value (from the input event) to a value in the
- * 'wanted' range.
- * Notes:
- *   Dead zone is in % multiplied by a 100 (range 0..10000)
- */
-LONG joystick_map_axis(ObjProps *props, int val)
-{
-    LONG ret;
-    LONG dead_zone = MulDiv( props->lDeadZone, props->lDevMax - props->lDevMin, 10000 );
-    LONG dev_range = props->lDevMax - props->lDevMin - dead_zone;
-
-    /* Center input */
-    val -= (props->lDevMin + props->lDevMax) / 2;
-
-    /* Remove dead zone */
-    if (abs( val ) <= dead_zone / 2)
-        val = 0;
-    else
-        val = val < 0 ? val + dead_zone / 2 : val - dead_zone / 2;
-
-    /* Scale and map the value from the device range into the required range */
-    ret = MulDiv( val, props->lMax - props->lMin, dev_range ) +
-          (props->lMin + props->lMax) / 2;
-
-    /* Clamp in case or rounding errors */
-    if      (ret > props->lMax) ret = props->lMax;
-    else if (ret < props->lMin) ret = props->lMin;
-
-    TRACE( "(%d <%d> %d) -> (%d <%d> %d): val=%d ret=%d\n",
-           props->lDevMin, dead_zone, props->lDevMax,
-           props->lMin, props->lDeadZone, props->lMax,
-           val, ret );
-
-    return ret;
-}
 
 #ifdef HAVE_CORRECT_LINUXINPUT_H
 
@@ -1124,52 +1069,6 @@ static HRESULT WINAPI JoystickAImpl_GetProperty(LPDIRECTINPUTDEVICE8A iface,
     return DI_OK;
 }
 
-/******************************************************************************
-  *     GetObjectInfo : get information about a device object such as a button
-  *                     or axis
-  */
-static HRESULT WINAPI JoystickWImpl_GetObjectInfo(LPDIRECTINPUTDEVICE8W iface,
-        LPDIDEVICEOBJECTINSTANCEW pdidoi, DWORD dwObj, DWORD dwHow)
-{
-    static const WCHAR axisW[] = {'A','x','i','s',' ','%','d',0};
-    static const WCHAR povW[] = {'P','O','V',' ','%','d',0};
-    static const WCHAR buttonW[] = {'B','u','t','t','o','n',' ','%','d',0};
-    HRESULT res;
-
-    res = IDirectInputDevice2WImpl_GetObjectInfo(iface, pdidoi, dwObj, dwHow);
-    if (res != DI_OK) return res;
-
-    if      (pdidoi->dwType & DIDFT_AXIS)
-        sprintfW(pdidoi->tszName, axisW, DIDFT_GETINSTANCE(pdidoi->dwType));
-    else if (pdidoi->dwType & DIDFT_POV)
-        sprintfW(pdidoi->tszName, povW, DIDFT_GETINSTANCE(pdidoi->dwType));
-    else if (pdidoi->dwType & DIDFT_BUTTON)
-        sprintfW(pdidoi->tszName, buttonW, DIDFT_GETINSTANCE(pdidoi->dwType));
-
-    _dump_OBJECTINSTANCEW(pdidoi);
-    return res;
-}
-
-static HRESULT WINAPI JoystickAImpl_GetObjectInfo(LPDIRECTINPUTDEVICE8A iface,
-        LPDIDEVICEOBJECTINSTANCEA pdidoi, DWORD dwObj, DWORD dwHow)
-{
-    HRESULT res;
-    DIDEVICEOBJECTINSTANCEW didoiW;
-    DWORD dwSize = pdidoi->dwSize;
-
-    didoiW.dwSize = sizeof(didoiW);
-    res = JoystickWImpl_GetObjectInfo((LPDIRECTINPUTDEVICE8W)iface, &didoiW, dwObj, dwHow);
-    if (res != DI_OK) return res;
-
-    memset(pdidoi, 0, pdidoi->dwSize);
-    memcpy(pdidoi, &didoiW, FIELD_OFFSET(DIDEVICEOBJECTINSTANCEW, tszName));
-    pdidoi->dwSize = dwSize;
-    WideCharToMultiByte(CP_ACP, 0, didoiW.tszName, -1, pdidoi->tszName,
-                        sizeof(pdidoi->tszName), NULL, NULL);
-
-    return res;
-}
-
 /****************************************************************************** 
   *	CreateEffect - Create a new FF effect with the specified params
   */
@@ -1571,7 +1470,7 @@ static const IDirectInputDevice8AVtbl JoystickAvt =
         IDirectInputDevice2AImpl_SetDataFormat,
 	IDirectInputDevice2AImpl_SetEventNotification,
 	IDirectInputDevice2AImpl_SetCooperativeLevel,
-        JoystickAImpl_GetObjectInfo,
+        JoystickAGenericImpl_GetObjectInfo,
 	JoystickAImpl_GetDeviceInfo,
 	IDirectInputDevice2AImpl_RunControlPanel,
 	IDirectInputDevice2AImpl_Initialize,
@@ -1613,7 +1512,7 @@ static const IDirectInputDevice8WVtbl JoystickWvt =
         XCAST(SetDataFormat)IDirectInputDevice2AImpl_SetDataFormat,
 	XCAST(SetEventNotification)IDirectInputDevice2AImpl_SetEventNotification,
 	XCAST(SetCooperativeLevel)IDirectInputDevice2AImpl_SetCooperativeLevel,
-        JoystickWImpl_GetObjectInfo,
+        JoystickWGenericImpl_GetObjectInfo,
 	JoystickWImpl_GetDeviceInfo,
 	XCAST(RunControlPanel)IDirectInputDevice2AImpl_RunControlPanel,
 	XCAST(Initialize)IDirectInputDevice2AImpl_Initialize,

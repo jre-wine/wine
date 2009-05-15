@@ -71,6 +71,7 @@ struct tagActiveDS
     SANE_Parameters     sane_param;             /* parameters about the image
                                                    transferred */
     BOOL                sane_param_valid;  /* true if valid sane_param*/
+    BOOL                sane_started;      /* If sane_start has been called */
     INT                 deviceIndex;    /* index of the current device */
 #endif
     /* Capabilities */
@@ -85,6 +86,7 @@ struct tagActiveDS
 
 /* Helper functions */
 extern TW_UINT16 SANE_SaneCapability (pTW_CAPABILITY pCapability, TW_UINT16 action);
+extern TW_UINT16 SANE_SaneSetDefaults (void);
 
 /* Implementation of operation triplets
  * From Application to Source (Control Information) */
@@ -223,9 +225,17 @@ HWND ScanningDialogBox(HWND dialog, LONG progress);
 #ifdef SONAME_LIBSANE
 SANE_Status sane_option_get_int(SANE_Handle h, const char *option_name, SANE_Int *val);
 SANE_Status sane_option_set_int(SANE_Handle h, const char *option_name, SANE_Int val, SANE_Int *status);
+SANE_Status sane_option_get_str(SANE_Handle h, const char *option_name, SANE_String val, size_t len, SANE_Int *status);
 SANE_Status sane_option_set_str(SANE_Handle h, const char *option_name, SANE_String val, SANE_Int *status);
 SANE_Status sane_option_probe_resolution(SANE_Handle h, const char *option_name, SANE_Int *minval, SANE_Int *maxval, SANE_Int *quant);
 SANE_Status sane_option_probe_mode(SANE_Handle h, SANE_String_Const **choices, char *current, int current_size);
+SANE_Status sane_option_probe_scan_area(SANE_Handle h, const char *option_name, SANE_Fixed *val,
+                                        SANE_Unit *unit, SANE_Fixed *min, SANE_Fixed *max, SANE_Fixed *quant);
+SANE_Status sane_option_get_bool(SANE_Handle h, const char *option_name, SANE_Bool *val, SANE_Int *status);
+SANE_Status sane_option_set_bool(SANE_Handle h, const char *option_name, SANE_Bool val, SANE_Int *status);
+SANE_Status sane_option_set_fixed(SANE_Handle h, const char *option_name, SANE_Fixed val, SANE_Int *status);
+TW_UINT16 sane_status_to_twcc(SANE_Status rc);
+BOOL convert_sane_res_to_twain(double sane_res, SANE_Unit unit, TW_FIX32 *twain_res, TW_UINT16 twtype);
 #endif
 
 

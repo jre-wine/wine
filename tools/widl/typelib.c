@@ -116,10 +116,10 @@ static unsigned short builtin_vt(const type_t *t)
       elem_type = type_pointer_get_ref(t);
     if (type_get_type(elem_type) == TYPE_BASIC)
     {
-      switch (type_basic_get_fc(elem_type))
+      switch (type_basic_get_type(elem_type))
       {
-      case RPC_FC_CHAR: return VT_LPSTR;
-      case RPC_FC_WCHAR: return VT_LPWSTR;
+      case TYPE_BASIC_CHAR: return VT_LPSTR;
+      case TYPE_BASIC_WCHAR: return VT_LPWSTR;
       default: break;
       }
     }
@@ -148,45 +148,58 @@ unsigned short get_type_vt(type_t *t)
 
   switch (type_get_type(t)) {
   case TYPE_BASIC:
-    switch (type_basic_get_fc(t)) {
-    case RPC_FC_BYTE:
-    case RPC_FC_USMALL:
+    switch (type_basic_get_type(t)) {
+    case TYPE_BASIC_BYTE:
       return VT_UI1;
-    case RPC_FC_CHAR:
-    case RPC_FC_SMALL:
-      return VT_I1;
-    case RPC_FC_WCHAR:
+    case TYPE_BASIC_CHAR:
+    case TYPE_BASIC_INT8:
+      if (type_basic_get_sign(t) > 0)
+        return VT_UI1;
+      else
+        return VT_I1;
+    case TYPE_BASIC_WCHAR:
       return VT_I2; /* mktyplib seems to parse wchar_t as short */
-    case RPC_FC_SHORT:
-      return VT_I2;
-    case RPC_FC_USHORT:
-      return VT_UI2;
-    case RPC_FC_LONG:
-      if (match(t->name, "int")) return VT_INT;
-      return VT_I4;
-    case RPC_FC_ULONG:
-      if (match(t->name, "int")) return VT_UINT;
-      return VT_UI4;
-    case RPC_FC_HYPER:
-      if (t->sign < 0) return VT_UI8;
-      if (match(t->name, "MIDL_uhyper")) return VT_UI8;
-      return VT_I8;
-    case RPC_FC_FLOAT:
+    case TYPE_BASIC_INT16:
+      if (type_basic_get_sign(t) > 0)
+        return VT_UI2;
+      else
+        return VT_I2;
+    case TYPE_BASIC_INT:
+      if (type_basic_get_sign(t) > 0)
+        return VT_UINT;
+      else
+        return VT_INT;
+    case TYPE_BASIC_INT32:
+    case TYPE_BASIC_ERROR_STATUS_T:
+      if (type_basic_get_sign(t) > 0)
+        return VT_UI4;
+      else
+        return VT_I4;
+    case TYPE_BASIC_INT64:
+    case TYPE_BASIC_HYPER:
+      if (type_basic_get_sign(t) > 0)
+        return VT_UI8;
+      else
+        return VT_I8;
+    case TYPE_BASIC_FLOAT:
       return VT_R4;
-    case RPC_FC_DOUBLE:
+    case TYPE_BASIC_DOUBLE:
       return VT_R8;
-    default:
-      error("get_type_vt: unknown basic type: 0x%02x\n", type_basic_get_fc(t));
+    case TYPE_BASIC_HANDLE:
+      error("handles can't be used in typelibs\n");
     }
     break;
 
   case TYPE_POINTER:
-    if (match(type_pointer_get_ref(t)->name, "SAFEARRAY"))
-      return VT_SAFEARRAY;
     return VT_PTR;
 
   case TYPE_ARRAY:
-    if (t->declarray)
+    if (type_array_is_decl_as_ptr(t))
+    {
+      if (match(type_array_get_element(t)->name, "SAFEARRAY"))
+        return VT_SAFEARRAY;
+    }
+    else
       error("get_type_vt: array types not supported\n");
     return VT_PTR;
 
