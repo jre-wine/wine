@@ -251,7 +251,6 @@ install-arch-stamp: $(patsubst build%,install-arch%-stamp,$(BUILDS))
 	cp debian/wine.binfmt		debian/tmp/usr/share/binfmts/wine
 	# other documentation
 	mkdir -p debian/tmp/usr/share/doc/wine
-	cp dlls/twain_32/README		debian/tmp/usr/share/doc/wine/README.twain
 	cp tools/winedump/README	debian/tmp/usr/share/doc/wine/README.winedump
 	# tools
 	cp tools/font_convert.sh	debian/tmp/usr/bin/wine-font-convert

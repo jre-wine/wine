@@ -12,4 +12,3 @@ debian/tmp/usr/share/wine/generic.ppd
 debian/tmp/usr/share/wine/fonts
 debian/tmp/usr/share/man/man1/wineserver.1
 debian/tmp/usr/share/man/*/man1/wineserver.1
-debian/tmp/usr/share/doc/wine/README.twain usr/share/doc/libwine
