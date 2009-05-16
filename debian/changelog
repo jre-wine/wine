@@ -1,8 +1,20 @@
-wine (1.1.17-1) UNRELEASED; urgency=low
+wine (1.1.17-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.17, released Mar 13, 2009.
+    - Joystick support on Mac OS X.
+    - Implementation of iphlpapi on Solaris.
+    - A number of 64-bit improvements.
+    - Obsolete LinuxThreads support has been removed.
+    - Many fixes to the regression tests on Windows.
+    - Various bug fixes.
+  * README.twain is no more, was removed upstream.
+  * Permanently removed the amd64 binaries-in-diff hack.
+  * Worked on the experimental 64-bit support in debian/rules a bit.
+    Since gcc-4.4 is now in Debian, the 64-bit build rules will now use
+    that. Properly packaging the result will take a bit more work,
+    though...
 
- -- Ove Kaaven <ovek@arcticnet.no>  Fri, 15 May 2009 22:47:03 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 16 May 2009 11:15:41 +0200
 
 wine (1.1.16-1) experimental; urgency=low
 
