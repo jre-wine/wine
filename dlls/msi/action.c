@@ -401,9 +401,13 @@ static LPWSTR* msi_split_string( LPCWSTR str, WCHAR sep )
 
 static UINT msi_check_transform_applicable( MSIPACKAGE *package, IStorage *patch )
 {
-    WCHAR szProductCode[] = { 'P','r','o','d','u','c','t','C','o','d','e',0 };
-    LPWSTR prod_code, patch_product;
-    UINT ret;
+    static const WCHAR szProductCode[] =
+        { 'P','r','o','d','u','c','t','C','o','d','e',0 };
+    static const WCHAR szSystemLanguageID[] =
+        { 'S','y','s','t','e','m','L','a','n','g','u','a','g','e','I','D',0 };
+
+    LPWSTR prod_code, patch_product, langid = NULL, template = NULL;
+    UINT ret = ERROR_FUNCTION_FAILED;
 
     prod_code = msi_dup_property( package, szProductCode );
     patch_product = msi_get_suminfo_product( patch );
@@ -411,12 +415,57 @@ static UINT msi_check_transform_applicable( MSIPACKAGE *package, IStorage *patch
     TRACE("db = %s patch = %s\n", debugstr_w(prod_code), debugstr_w(patch_product));
 
     if ( strstrW( patch_product, prod_code ) )
-        ret = ERROR_SUCCESS;
-    else
-        ret = ERROR_FUNCTION_FAILED;
+    {
+        static const WCHAR zero[] = {'0',0};
+        MSISUMMARYINFO *si;
+        const WCHAR *p;
 
+        si = MSI_GetSummaryInformationW( patch, 0 );
+        if (!si)
+        {
+            ERR("no summary information!\n");
+            goto end;
+        }
+
+        template = msi_suminfo_dup_string( si, PID_TEMPLATE );
+        if (!template)
+        {
+            ERR("no template property!\n");
+            msiobj_release( &si->hdr );
+            goto end;
+        }
+
+        if (!template[0])
+        {
+            ret = ERROR_SUCCESS;
+            msiobj_release( &si->hdr );
+            goto end;
+        }
+
+        langid = msi_dup_property( package, szSystemLanguageID );
+        if (!langid)
+        {
+            msiobj_release( &si->hdr );
+            goto end;
+        }
+
+        p = strchrW( template, ';' );
+        if (p && (!strcmpW( p + 1, langid ) || !strcmpW( p + 1, zero )))
+        {
+            TRACE("applicable transform\n");
+            ret = ERROR_SUCCESS;
+        }
+
+        /* FIXME: check platform */
+
+        msiobj_release( &si->hdr );
+    }
+
+end:
     msi_free( patch_product );
     msi_free( prod_code );
+    msi_free( template );
+    msi_free( langid );
 
     return ret;
 }
@@ -3675,7 +3724,7 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
     if (!msi_check_publish(package))
         return ERROR_SUCCESS;
 
-    rc = MSIREG_OpenProductKey(package->ProductCode, package->Context,
+    rc = MSIREG_OpenProductKey(package->ProductCode, NULL, package->Context,
                                &hukey, TRUE);
     if (rc != ERROR_SUCCESS)
         goto end;
@@ -6021,9 +6070,24 @@ static UINT load_assembly(MSIRECORD *rec, LPVOID param)
     assembly->manifest = strdupW(MSI_RecordGetString(rec, 3));
     assembly->application = strdupW(MSI_RecordGetString(rec, 4));
     assembly->attributes = MSI_RecordGetInteger(rec, 5);
-    assembly->installed = check_assembly_installed(list->package->db,
-                                                   list->cache,
-                                                   assembly->component);
+
+    if (assembly->application)
+    {
+        WCHAR version[24];
+        DWORD size = sizeof(version)/sizeof(WCHAR);
+
+        /* FIXME: we should probably check the manifest file here */
+
+        if (!MsiGetFileVersionW(assembly->file->TargetPath, version, &size, NULL, NULL) &&
+            strcmpW(version, assembly->file->Version) >= 0)
+        {
+            assembly->installed = TRUE;
+        }
+    }
+    else
+        assembly->installed = check_assembly_installed(list->package->db,
+                                                       list->cache,
+                                                       assembly->component);
 
     list_add_head(list->assemblies, &assembly->entry);
     return ERROR_SUCCESS;

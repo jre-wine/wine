@@ -3,6 +3,7 @@
  * German language support
  *
  * Copyright 2008 Andrej Sinicyn
+ * Copyright 2009 Michael Stefaniuc
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,10 +22,19 @@
 
 LANGUAGE LANG_GERMAN, SUBLANG_NEUTRAL
 
+#pragma code_page(65001)
+
 STRINGTABLE
 {
     STRING_USAGE, "Die Syntax von diesem Befehl ist:\n\nREG [ ADD | DELETE | QUERY ]\nREG Befehl /?\n"
-    STRING_ADD_USAGE, "REG ADD Schl�ssel [/v Wert | /ve] [/t Typ] [/s Trenner] [/d Daten] [/f]\n"
-    STRING_DELETE_USAGE, "REG DELETE Schl�ssel [/v Wert | /ve | /va] [/f]\n"
-    STRING_QUERY_USAGE, "REG QUERY Schl�ssel [/v Wert | /ve] [/s]\n"
+    STRING_ADD_USAGE, "REG ADD Schlüssel [/v Wert | /ve] [/t Typ] [/s Trenner] [/d Daten] [/f]\n"
+    STRING_DELETE_USAGE, "REG DELETE Schlüssel [/v Wert | /ve | /va] [/f]\n"
+    STRING_QUERY_USAGE, "REG QUERY Schlüssel [/v Wert | /ve] [/s]\n"
+    STRING_SUCCESS, "Der Vorgang wurde erfolgreich abgeschlossen\n"
+    STRING_INVALID_KEY, "Fehler: Ungültiger Schlüssel\n"
+    STRING_INVALID_CMDLINE, "Fehler: Ungültige Befehlszeilenargumente\n"
+    STRING_NO_REMOTE, "Fehler: Konnte Schlüssel nicht zum remote Rechner hinzufügen\n"
+    STRING_CANNOT_FIND, "Fehler: Der angegebene Schlüssel oder Wert konnte nicht gefunden werden\n"
 }
+
+#pragma code_page(default)

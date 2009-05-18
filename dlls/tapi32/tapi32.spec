@@ -43,10 +43,12 @@
 @ stdcall lineGetCountryA(long long ptr)
 @ stdcall lineGetDevCaps(long long long long ptr) lineGetDevCapsA
 @ stdcall lineGetDevCapsA(long long long long ptr)
+@ stdcall lineGetDevCapsW(long long long long ptr)
 @ stdcall lineGetDevConfig(long ptr str) lineGetDevConfigA
 @ stdcall lineGetDevConfigA(long ptr str)
 @ stdcall lineGetID(long long long long ptr str) lineGetIDA
 @ stdcall lineGetIDA(long long long long ptr str)
+@ stdcall lineGetIDW(long long long long ptr wstr)
 @ stdcall lineGetIcon(long str ptr) lineGetIconA
 @ stdcall lineGetIconA(long str ptr)
 @ stdcall lineGetLineDevStatus(long ptr) lineGetLineDevStatusA
@@ -68,6 +70,7 @@
 @ stdcall lineInitializeExA(ptr long ptr str ptr ptr ptr)
 @ stdcall lineMakeCall(long ptr str long ptr) lineMakeCallA
 @ stdcall lineMakeCallA(long ptr str long ptr)
+@ stdcall lineMakeCallW(long ptr wstr long ptr)
 @ stdcall lineMonitorDigits(long long)
 @ stdcall lineMonitorMedia(long long)
 @ stdcall lineMonitorTones(long ptr long)

@@ -7,14 +7,12 @@ IMPORTLIB = d3d8
 IMPORTS   = dxguid uuid wined3d kernel32
 
 C_SRCS = \
-	basetexture.c \
 	cubetexture.c \
 	d3d8_main.c \
 	device.c \
 	directx.c \
 	indexbuffer.c \
 	pixelshader.c \
-	resource.c \
 	stateblock.c \
 	surface.c \
 	swapchain.c \

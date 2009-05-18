@@ -18,33 +18,21 @@ DOCSUBDIRS     = $(DLLSUBDIRS)
 # 16-bit dlls
 
 WIN16_FILES = \
-	avifile.dll16 \
 	commdlg.dll16 \
-	ctl3d.dll16 \
-	ctl3dv2.dll16 \
 	ddeml.dll16 \
 	gdi.exe16 \
-	imm.dll16 \
 	krnl386.exe16 \
 	mmsystem.dll16 \
 	msvideo.dll16 \
-	rasapi16.dll16 \
 	setupx.dll16 \
 	shell.dll16 \
-	sound.drv16 \
 	system.drv16 \
 	toolhelp.dll16 \
-	twain.dll16 \
 	user.exe16 \
 	ver.dll16 \
-	w32sys.dll16 \
-	win32s16.dll16 \
-	winaspi.dll16 \
 	wineps16.drv16 \
 	wing.dll16 \
-	winnls.dll16 \
 	winsock.dll16 \
-	wintab.dll16 \
 	wprocs.dll16
 
 @MAKE_RULES@
@@ -55,20 +43,11 @@ all: $(BUILDSUBDIRS) @WIN16_FILES@
 
 # Placeholders for 16-bit libraries
 
-avifile.dll16:
-	echo "avifil32.dll" >$@
-
 commdlg.dll16:
 	echo "comdlg32.dll" >$@
 
-ctl3d.dll16 ctl3dv2.dll16:
-	echo "ctl3d32.dll" >$@
-
 gdi.exe16 wing.dll16:
 	echo "gdi32.dll" >$@
-
-imm.dll16:
-	echo "imm32.dll" >$@
 
 krnl386.exe16 system.drv16 toolhelp.dll16:
 	echo "kernel32.dll" >$@
@@ -76,17 +55,11 @@ krnl386.exe16 system.drv16 toolhelp.dll16:
 msvideo.dll16:
 	echo "msvfw32.dll" >$@
 
-rasapi16.dll16:
-	echo "rasapi32.dll" >$@
-
 setupx.dll16:
 	echo "setupapi.dll" >$@
 
 shell.dll16:
 	echo "shell32.dll" >$@
-
-twain.dll16:
-	echo "twain_32.dll" >$@
 
 ddeml.dll16 user.exe16:
 	echo "user32.dll" >$@
@@ -94,26 +67,14 @@ ddeml.dll16 user.exe16:
 ver.dll16:
 	echo "version.dll" >$@
 
-w32sys.dll16 win32s16.dll16:
-	echo "w32skrnl.dll" >$@
-
 wprocs.dll16:
 	echo "winedos.dll" >$@
 
 wineps16.drv16:
 	echo "wineps.drv" >$@
 
-mmsystem.dll16 sound.drv16:
+mmsystem.dll16:
 	echo "winmm.dll" >$@
-
-winnls.dll16:
-	echo "winnls32.dll" >$@
-
-wintab.dll16:
-	echo "wintab32.dll" >$@
-
-winaspi.dll16:
-	echo "wnaspi32.dll" >$@
 
 winsock.dll16:
 	echo "ws2_32.dll" >$@

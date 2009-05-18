@@ -466,12 +466,25 @@ DWORD WINAPI lineGetCountryA(DWORD dwCountryID, DWORD dwAPIVersion, LPLINECOUNTR
 }
 
 /***********************************************************************
- *		lineGetDevCaps (TAPI32.@)
+ *		lineGetDevCapsW (TAPI32.@)
  */
-DWORD WINAPI lineGetDevCapsA(HLINEAPP hLineApp, DWORD dwDeviceID, DWORD dwAPIVersion, DWORD dwExtVersion, LPLINEDEVCAPS lpLineDevCaps)
+DWORD WINAPI lineGetDevCapsW(HLINEAPP hLineApp, DWORD dwDeviceID, DWORD dwAPIVersion,
+                             DWORD dwExtVersion, LPLINEDEVCAPS lpLineDevCaps)
 {
-    FIXME("(%p, %08x, %08x, %08x, %p): stub.\n", hLineApp, dwDeviceID, dwAPIVersion, dwExtVersion, lpLineDevCaps);
-    return 0;
+    FIXME("(%p, %08x, %08x, %08x, %p): stub.\n", hLineApp, dwDeviceID, dwAPIVersion,
+                                                 dwExtVersion, lpLineDevCaps);
+    return LINEERR_OPERATIONFAILED;
+}
+
+/***********************************************************************
+ *		lineGetDevCapsA (TAPI32.@)
+ */
+DWORD WINAPI lineGetDevCapsA(HLINEAPP hLineApp, DWORD dwDeviceID, DWORD dwAPIVersion,
+                             DWORD dwExtVersion, LPLINEDEVCAPS lpLineDevCaps)
+{
+    FIXME("(%p, %08x, %08x, %08x, %p): stub.\n", hLineApp, dwDeviceID, dwAPIVersion,
+                                                 dwExtVersion, lpLineDevCaps);
+    return LINEERR_OPERATIONFAILED;
 }
 
 /***********************************************************************
@@ -484,12 +497,26 @@ DWORD WINAPI lineGetDevConfigA(DWORD dwDeviceID, LPVARSTRING lpDeviceConfig, LPC
 }
 
 /***********************************************************************
- *		lineGetID (TAPI32.@)
+ *		lineGetIDW (TAPI32.@)
  */
-DWORD WINAPI lineGetIDA(HLINE hLine, DWORD dwAddressID, HCALL hCall, DWORD dwSelect, LPVARSTRING lpDeviceID, LPCSTR lpszDeviceClass)
+DWORD WINAPI lineGetIDW(HLINE hLine, DWORD dwAddressID, HCALL hCall, DWORD dwSelect,
+                        LPVARSTRING lpDeviceID, LPCWSTR lpszDeviceClass)
 {
-    FIXME("(%p, %08x, %p, %08x, %p, %s): stub.\n", hLine, dwAddressID, hCall, dwSelect, lpDeviceID, lpszDeviceClass);
-    return 0;
+    FIXME("(%p, %08x, %p, %08x, %p, %s): stub.\n", hLine, dwAddressID, hCall,
+                                                   dwSelect, lpDeviceID,
+                                                   debugstr_w(lpszDeviceClass));
+    return LINEERR_OPERATIONFAILED;
+}
+
+/***********************************************************************
+ *		lineGetIDA (TAPI32.@)
+ */
+DWORD WINAPI lineGetIDA(HLINE hLine, DWORD dwAddressID, HCALL hCall, DWORD dwSelect,
+                        LPVARSTRING lpDeviceID, LPCSTR lpszDeviceClass)
+{
+    FIXME("(%p, %08x, %p, %08x, %p, %s): stub.\n", hLine, dwAddressID, hCall,
+                                                   dwSelect, lpDeviceID, lpszDeviceClass);
+    return LINEERR_OPERATIONFAILED;
 }
 
 /***********************************************************************
@@ -992,12 +1019,25 @@ LONG WINAPI lineInitializeExA(LPHLINEAPP lphLineApp, HINSTANCE hInstance, LINECA
 }
 
 /***********************************************************************
- *		lineMakeCall (TAPI32.@)
+ *		lineMakeCallW (TAPI32.@)
  */
-DWORD WINAPI lineMakeCallA(HLINE hLine, LPHCALL lphCall, LPCSTR lpszDestAddress, DWORD dwCountryCode, LPLINECALLPARAMS lpCallParams)
+DWORD WINAPI lineMakeCallW(HLINE hLine, LPHCALL lphCall, LPCWSTR lpszDestAddress,
+                           DWORD dwCountryCode, LPLINECALLPARAMS lpCallParams)
 {
-    FIXME("(%p, %p, %s, %08x, %p): stub.\n", hLine, lphCall, lpszDestAddress, dwCountryCode, lpCallParams);
-    return 1;
+    FIXME("(%p, %p, %s, %08x, %p): stub.\n", hLine, lphCall, debugstr_w(lpszDestAddress),
+                                             dwCountryCode, lpCallParams);
+    return LINEERR_OPERATIONFAILED;
+}
+
+/***********************************************************************
+ *		lineMakeCallA (TAPI32.@)
+ */
+DWORD WINAPI lineMakeCallA(HLINE hLine, LPHCALL lphCall, LPCSTR lpszDestAddress,
+                           DWORD dwCountryCode, LPLINECALLPARAMS lpCallParams)
+{
+    FIXME("(%p, %p, %s, %08x, %p): stub.\n", hLine, lphCall, lpszDestAddress,
+                                             dwCountryCode, lpCallParams);
+    return LINEERR_OPERATIONFAILED;
 }
 
 /***********************************************************************

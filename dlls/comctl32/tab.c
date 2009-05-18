@@ -40,7 +40,6 @@
  *   TCIF_RTLREADING
  *
  *  Extended Styles:
- *   TCS_EX_FLATSEPARATORS
  *   TCS_EX_REGISTERDROP
  *
  *  States:
@@ -53,10 +52,7 @@
  *   TCN_KEYDOWN
  *
  *  Messages:
- *   TCM_REMOVEIMAGE
  *   TCM_DESELECTALL
- *   TCM_GETEXTENDEDSTYLE
- *   TCM_SETEXTENDEDSTYLE
  *
  *  Macros:
  *   TabCtrl_AdjustRect
@@ -127,6 +123,9 @@ typedef struct
   BOOL       bUnicode;        /* Unicode control? */
   HWND       hwndUpDown;      /* Updown control used for scrolling */
   INT        cbInfo;          /* Number of bytes of caller supplied info per tab */
+
+  DWORD      exStyle;         /* Extended style used, currently:
+                                 TCS_EX_FLATSEPARATORS, TCS_EX_REGISTERDROP */
 } TAB_INFO;
 
 /******************************************************************************
@@ -253,6 +252,9 @@ static inline LRESULT TAB_SetCurSel (TAB_INFO *infoPtr, INT iItem)
       return -1;
   else {
       if (infoPtr->iSelected != iItem) {
+          infoPtr->items[prevItem].dwState &= ~TCIS_BUTTONPRESSED;
+          infoPtr->items[iItem].dwState |= TCIS_BUTTONPRESSED;
+
           infoPtr->iSelected=iItem;
           infoPtr->uFocus=iItem;
           TAB_EnsureSelectionVisible(infoPtr);
@@ -490,12 +492,8 @@ static LRESULT TAB_KeyUp(TAB_INFO* infoPtr, WPARAM keyCode)
   {
     if (!TAB_SendSimpleNotify(infoPtr, TCN_SELCHANGING))
     {
-      infoPtr->iSelected = newItem;
-      infoPtr->uFocus    = newItem;
+      TAB_SetCurSel(infoPtr, newItem);
       TAB_SendSimpleNotify(infoPtr, TCN_SELCHANGE);
-
-      TAB_EnsureSelectionVisible(infoPtr);
-      TAB_InvalidateTabArea(infoPtr);
     }
   }
 
@@ -616,13 +614,8 @@ TAB_LButtonDown (TAB_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
   {
     if (!TAB_SendSimpleNotify(infoPtr, TCN_SELCHANGING))
     {
-      infoPtr->iSelected = newItem;
-      infoPtr->uFocus    = newItem;
+      TAB_SetCurSel(infoPtr, newItem);
       TAB_SendSimpleNotify(infoPtr, TCN_SELCHANGE);
-
-      TAB_EnsureSelectionVisible(infoPtr);
-
-      TAB_InvalidateTabArea(infoPtr);
     }
   }
   return 0;
@@ -1434,7 +1427,6 @@ TAB_EraseTabInterior(const TAB_INFO *infoPtr, HDC hdc, INT iItem, RECT *drawRect
     BOOL     deleteBrush = TRUE;
     RECT     rTemp = *drawRect;
 
-    InflateRect(&rTemp, -2, -2);
     if (lStyle & TCS_BUTTONS)
     {
 	if (iItem == infoPtr->iSelected)
@@ -1474,6 +1466,7 @@ TAB_EraseTabInterior(const TAB_INFO *infoPtr, HDC hdc, INT iItem, RECT *drawRect
     }
     else /* !TCS_BUTTONS */
     {
+        InflateRect(&rTemp, -2, -2);
         if (!GetWindowTheme (infoPtr->hwnd))
 	    FillRect(hdc, &rTemp, hbr);
     }
@@ -1948,7 +1941,7 @@ static void TAB_DrawItem(const TAB_INFO *infoPtr, HDC  hdc, INT  iItem)
       r = itemRect;
 
       /* Separators between flat buttons */
-      if (lStyle & TCS_FLATBUTTONS)
+      if ((lStyle & TCS_FLATBUTTONS) && (infoPtr->exStyle & TCS_EX_FLATSEPARATORS))
       {
 	r1 = r;
 	r1.right += (FLAT_BTN_SPACINGX -2);
@@ -1963,8 +1956,13 @@ static void TAB_DrawItem(const TAB_INFO *infoPtr, HDC  hdc, INT  iItem)
       }
       else  /* ! selected */
       {
-	if (!(lStyle & TCS_FLATBUTTONS))
-	  DrawEdge(hdc, &r, EDGE_RAISED, BF_SOFT|BF_RECT);
+        DWORD state = infoPtr->items[iItem].dwState;
+
+        if (state & TCIS_BUTTONPRESSED)
+          DrawEdge(hdc, &r, EDGE_SUNKEN, BF_SOFT|BF_RECT);
+        else
+          if (!(lStyle & TCS_FLATBUTTONS))
+            DrawEdge(hdc, &r, EDGE_RAISED, BF_SOFT|BF_RECT);
       }
     }
     else /* !TCS_BUTTONS */
@@ -2715,7 +2713,8 @@ TAB_SetItemT (TAB_INFO *infoPtr, INT iItem, LPTCITEMW tabItem, BOOL bUnicode)
     FIXME("TCIF_RTLREADING\n");
 
   if (tabItem->mask & TCIF_STATE)
-    wineItem->dwState = tabItem->dwState;
+    wineItem->dwState = (wineItem->dwState & ~tabItem->dwStateMask) |
+                        ( tabItem->dwState &  tabItem->dwStateMask);
 
   if (tabItem->mask & TCIF_TEXT)
   {
@@ -2762,7 +2761,7 @@ TAB_GetItemT (TAB_INFO *infoPtr, INT iItem, LPTCITEMW tabItem, BOOL bUnicode)
     FIXME("TCIF_RTLREADING\n");
 
   if (tabItem->mask & TCIF_STATE)
-    tabItem->dwState = wineItem->dwState;
+    tabItem->dwState = wineItem->dwState & tabItem->dwStateMask;
 
   if (tabItem->mask & TCIF_TEXT)
   {
@@ -2979,6 +2978,8 @@ static LRESULT TAB_Create (HWND hwnd, LPARAM lParam)
   dwStyle = GetWindowLongW(hwnd, GWL_STYLE);
   SetWindowLongW(hwnd, GWL_STYLE, dwStyle|WS_CLIPSIBLINGS);
 
+  infoPtr->exStyle = (dwStyle & TCS_FLATBUTTONS) ? TCS_EX_FLATSEPARATORS : 0;
+
   if (dwStyle & TCS_TOOLTIPS) {
     /* Create tooltip control */
     infoPtr->hwndToolTip =
@@ -3099,6 +3100,70 @@ TAB_SetItemExtra (TAB_INFO *infoPtr, INT cbInfo)
   return TRUE;
 }
 
+static LRESULT TAB_RemoveImage (TAB_INFO *infoPtr, INT image)
+{
+  if (!infoPtr)
+    return 0;
+
+  if (ImageList_Remove (infoPtr->himl, image))
+  {
+    INT i, *idx;
+    RECT r;
+
+    /* shift indices, repaint items if needed */
+    for (i = 0; i < infoPtr->uNumItem; i++)
+    {
+      idx = &infoPtr->items[i].iImage;
+      if (*idx >= image)
+      {
+        if (*idx == image)
+          *idx = -1;
+        else
+          (*idx)--;
+
+        /* repaint item */
+        if (TAB_InternalGetItemRect (infoPtr, i, &r, NULL))
+          InvalidateRect (infoPtr->hwnd, &r, TRUE);
+      }
+    }
+  }
+
+  return 0;
+}
+
+static LRESULT
+TAB_SetExtendedStyle (TAB_INFO *infoPtr, DWORD exMask, DWORD exStyle)
+{
+  DWORD prevstyle = infoPtr->exStyle;
+
+  /* zero mask means all styles */
+  if (exMask == 0) exMask = ~0;
+
+  if (exMask & TCS_EX_REGISTERDROP)
+  {
+    FIXME("TCS_EX_REGISTERDROP style unimplemented\n");
+    exMask  &= ~TCS_EX_REGISTERDROP;
+    exStyle &= ~TCS_EX_REGISTERDROP;
+  }
+
+  if (exMask & TCS_EX_FLATSEPARATORS)
+  {
+    if ((prevstyle ^ exStyle) & TCS_EX_FLATSEPARATORS)
+    {
+        infoPtr->exStyle ^= TCS_EX_FLATSEPARATORS;
+        TAB_InvalidateTabArea(infoPtr);
+    }
+  }
+
+  return prevstyle;
+}
+
+static inline LRESULT
+TAB_GetExtendedStyle (TAB_INFO *infoPtr)
+{
+  return infoPtr->exStyle;
+}
+
 static LRESULT WINAPI
 TAB_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -3159,8 +3224,7 @@ TAB_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
       return TAB_SetItemSize (infoPtr, lParam);
 
     case TCM_REMOVEIMAGE:
-      FIXME("Unimplemented msg TCM_REMOVEIMAGE\n");
-      return 0;
+      return TAB_RemoveImage (infoPtr, wParam);
 
     case TCM_SETPADDING:
       return TAB_SetPadding (infoPtr, lParam);
@@ -3197,12 +3261,10 @@ TAB_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
       return 0;
 
     case TCM_GETEXTENDEDSTYLE:
-      FIXME("Unimplemented msg TCM_GETEXTENDEDSTYLE\n");
-      return 0;
+      return TAB_GetExtendedStyle (infoPtr);
 
     case TCM_SETEXTENDEDSTYLE:
-      FIXME("Unimplemented msg TCM_SETEXTENDEDSTYLE\n");
-      return 0;
+      return TAB_SetExtendedStyle (infoPtr, wParam, lParam);
 
     case WM_GETFONT:
       return TAB_GetFont (infoPtr);

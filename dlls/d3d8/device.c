@@ -820,10 +820,11 @@ static HRESULT IDirect3DDevice8Impl_CreateSurface(LPDIRECT3DDEVICE8 iface, UINT 
 
     TRACE("(%p) : w(%d) h(%d) fmt(%d) surf@%p\n", This, Width, Height, Format, *ppSurface);
 
-    /* Not called from the VTable, no locking needed */
+    EnterCriticalSection(&d3d8_cs);
     hrc = IWineD3DDevice_CreateSurface(This->WineD3DDevice, Width, Height, wined3dformat_from_d3dformat(Format),
             Lockable, Discard, Level,  &object->wineD3DSurface, Type, Usage & WINED3DUSAGE_MASK,
             (WINED3DPOOL)Pool, MultiSample,MultisampleQuality, NULL, SURFACE_OPENGL, (IUnknown *)object);
+    LeaveCriticalSection(&d3d8_cs);
     if (hrc != D3D_OK || NULL == object->wineD3DSurface) {
        /* free up object */
         FIXME("(%p) call to IWineD3DDevice_CreateSurface failed\n", This);
@@ -841,9 +842,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateRenderTarget(LPDIRECT3DDEVICE8 
     HRESULT hr;
     TRACE("Relay\n");
 
-    EnterCriticalSection(&d3d8_cs);
     hr = IDirect3DDevice8Impl_CreateSurface(iface, Width, Height, Format, Lockable, FALSE /* Discard */, 0 /* Level */ , ppSurface, D3DRTYPE_SURFACE, D3DUSAGE_RENDERTARGET, D3DPOOL_DEFAULT, MultiSample, 0);
-    LeaveCriticalSection(&d3d8_cs);
     return hr;
 }
 
@@ -852,11 +851,9 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateDepthStencilSurface(LPDIRECT3DD
     TRACE("Relay\n");
 
     /* TODO: Verify that Discard is false */
-    EnterCriticalSection(&d3d8_cs);
     hr = IDirect3DDevice8Impl_CreateSurface(iface, Width, Height, Format, TRUE /* Lockable */, FALSE, 0 /* Level */
                                                ,ppSurface, D3DRTYPE_SURFACE, D3DUSAGE_DEPTHSTENCIL,
                                                 D3DPOOL_DEFAULT, MultiSample, 0);
-    LeaveCriticalSection(&d3d8_cs);
     return hr;
 }
 
@@ -865,10 +862,8 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateImageSurface(LPDIRECT3DDEVICE8 
     HRESULT hr;
     TRACE("Relay\n");
 
-    EnterCriticalSection(&d3d8_cs);
     hr = IDirect3DDevice8Impl_CreateSurface(iface, Width, Height, Format, TRUE /* Loackable */ , FALSE /*Discard*/ , 0 /* Level */ , ppSurface,
                                             D3DRTYPE_SURFACE, 0 /* Usage (undefined/none) */ , D3DPOOL_SYSTEMMEM, D3DMULTISAMPLE_NONE, 0 /* MultisampleQuality */);
-    LeaveCriticalSection(&d3d8_cs);
     return hr;
 }
 
@@ -894,13 +889,13 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CopyRects(LPDIRECT3DDEVICE8 iface, ID
     winedesc.Width  = &srcWidth;
     winedesc.Height = &srcHeight;
     winedesc.Size   = &srcSize;
+    EnterCriticalSection(&d3d8_cs);
     IWineD3DSurface_GetDesc(Source->wineD3DSurface, &winedesc);
 
     winedesc.Format = &destFormat;
     winedesc.Width  = &destWidth;
     winedesc.Height = &destHeight;
     winedesc.Size   = NULL;
-    EnterCriticalSection(&d3d8_cs);
     IWineD3DSurface_GetDesc(Dest->wineD3DSurface, &winedesc);
 
     /* Check that the source and destination formats match */
@@ -1759,16 +1754,15 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateVertexShader(LPDIRECT3DDEVICE8 
     object->ref = 1;
     object->lpVtbl = &Direct3DVertexShader8_Vtbl;
 
-    EnterCriticalSection(&d3d8_cs);
     hrc = IDirect3DDevice8Impl_CreateVertexDeclaration(iface, pDeclaration, &object->vertex_declaration);
     if (FAILED(hrc)) {
         ERR("(%p) : IDirect3DDeviceImpl_CreateVertexDeclaration call failed\n", This);
-        LeaveCriticalSection(&d3d8_cs);
         HeapFree(GetProcessHeap(), 0, object);
         *ppShader = 0;
         return D3DERR_INVALIDCALL;
     }
 
+    EnterCriticalSection(&d3d8_cs);
     handle = d3d8_allocate_handle(&This->handle_table, object);
     if (handle == D3D8_INVALID_HANDLE)
     {
@@ -1885,75 +1879,78 @@ static IDirect3DVertexDeclaration8Impl *IDirect3DDevice8Impl_FindDecl(IDirect3DD
 
 static HRESULT WINAPI IDirect3DDevice8Impl_SetVertexShader(LPDIRECT3DDEVICE8 iface, DWORD pShader) {
     IDirect3DDevice8Impl *This = (IDirect3DDevice8Impl *)iface;
-    HRESULT hrc = D3D_OK;
+    IDirect3DVertexShader8Impl *shader;
+    HRESULT hr;
 
     TRACE("(%p) : Relay\n", This);
-    EnterCriticalSection(&d3d8_cs);
+
     if (VS_HIGHESTFIXEDFXF >= pShader) {
         TRACE("Setting FVF, %#x\n", pShader);
+
+        EnterCriticalSection(&d3d8_cs);
         IWineD3DDevice_SetVertexDeclaration(This->WineD3DDevice,
                 IDirect3DDevice8Impl_FindDecl(This, pShader)->wined3d_vertex_declaration);
         IWineD3DDevice_SetVertexShader(This->WineD3DDevice, NULL);
-    } else {
-        IDirect3DVertexShader8Impl *shader;
-
-        TRACE("Setting shader\n");
-
-        shader = d3d8_get_object(&This->handle_table, pShader - (VS_HIGHESTFIXEDFXF + 1));
-        if (!shader)
-        {
-            WARN("Invalid handle (%#x) passed.\n", pShader);
-            hrc = D3DERR_INVALIDCALL;
-        }
-        else
-        {
-            hrc = IWineD3DDevice_SetVertexDeclaration(This->WineD3DDevice,
-                    ((IDirect3DVertexDeclaration8Impl *)shader->vertex_declaration)->wined3d_vertex_declaration);
-            if (SUCCEEDED(hrc))
-                hrc = IWineD3DDevice_SetVertexShader(This->WineD3DDevice, shader->wineD3DVertexShader);
-        }
+        LeaveCriticalSection(&d3d8_cs);
+        return D3D_OK;
     }
-    TRACE("(%p) : returning hr(%u)\n", This, hrc);
+
+    TRACE("Setting shader\n");
+
+    EnterCriticalSection(&d3d8_cs);
+    shader = d3d8_get_object(&This->handle_table, pShader - (VS_HIGHESTFIXEDFXF + 1));
+    if (!shader)
+    {
+        WARN("Invalid handle (%#x) passed.\n", pShader);
+        LeaveCriticalSection(&d3d8_cs);
+        return D3DERR_INVALIDCALL;
+    }
+
+    hr = IWineD3DDevice_SetVertexDeclaration(This->WineD3DDevice,
+            ((IDirect3DVertexDeclaration8Impl *)shader->vertex_declaration)->wined3d_vertex_declaration);
+    if (SUCCEEDED(hr)) hr = IWineD3DDevice_SetVertexShader(This->WineD3DDevice, shader->wineD3DVertexShader);
     LeaveCriticalSection(&d3d8_cs);
 
-    return hrc;
+    TRACE("Returning hr %#x\n", hr);
+
+    return hr;
 }
 
 static HRESULT WINAPI IDirect3DDevice8Impl_GetVertexShader(LPDIRECT3DDEVICE8 iface, DWORD* ppShader) {
     IDirect3DDevice8Impl *This = (IDirect3DDevice8Impl *)iface;
     IWineD3DVertexDeclaration *wined3d_declaration;
+    IDirect3DVertexDeclaration8 *d3d8_declaration;
     HRESULT hrc;
 
     TRACE("(%p) : Relay  device@%p\n", This, This->WineD3DDevice);
     EnterCriticalSection(&d3d8_cs);
 
     hrc = IWineD3DDevice_GetVertexDeclaration(This->WineD3DDevice, &wined3d_declaration);
-    if (SUCCEEDED(hrc))
+    if (FAILED(hrc))
     {
-        if (wined3d_declaration)
-        {
-            IDirect3DVertexDeclaration8 *d3d8_declaration;
-            hrc = IWineD3DVertexDeclaration_GetParent(wined3d_declaration, (IUnknown **)&d3d8_declaration);
-            IWineD3DVertexDeclaration_Release(wined3d_declaration);
-            if (SUCCEEDED(hrc))
-            {
-                *ppShader = ((IDirect3DVertexDeclaration8Impl *)d3d8_declaration)->shader_handle;
-                IDirect3DVertexDeclaration8_Release(d3d8_declaration);
-            }
-        }
-        else
-        {
-            *ppShader = 0;
-            hrc = D3D_OK;
-        }
-    }
-    else
-    {
+        LeaveCriticalSection(&d3d8_cs);
         WARN("(%p) : Call to IWineD3DDevice_GetVertexDeclaration failed %#x (device %p)\n",
                 This, hrc, This->WineD3DDevice);
+        return hrc;
     }
-    TRACE("(%p) : returning %#x\n", This, *ppShader);
+
+    if (!wined3d_declaration)
+    {
+        LeaveCriticalSection(&d3d8_cs);
+        *ppShader = 0;
+        return D3D_OK;
+    }
+
+    hrc = IWineD3DVertexDeclaration_GetParent(wined3d_declaration, (IUnknown **)&d3d8_declaration);
+    IWineD3DVertexDeclaration_Release(wined3d_declaration);
     LeaveCriticalSection(&d3d8_cs);
+    if (SUCCEEDED(hrc))
+    {
+        *ppShader = ((IDirect3DVertexDeclaration8Impl *)d3d8_declaration)->shader_handle;
+        IDirect3DVertexDeclaration8_Release(d3d8_declaration);
+    }
+
+    TRACE("(%p) : returning %#x\n", This, *ppShader);
 
     return hrc;
 }
@@ -1961,6 +1958,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetVertexShader(LPDIRECT3DDEVICE8 ifa
 static HRESULT  WINAPI  IDirect3DDevice8Impl_DeleteVertexShader(LPDIRECT3DDEVICE8 iface, DWORD pShader) {
     IDirect3DDevice8Impl *This = (IDirect3DDevice8Impl *)iface;
     IDirect3DVertexShader8Impl *shader;
+    IWineD3DVertexShader *cur = NULL;
 
     TRACE("(%p) : pShader %#x\n", This, pShader);
 
@@ -1972,21 +1970,22 @@ static HRESULT  WINAPI  IDirect3DDevice8Impl_DeleteVertexShader(LPDIRECT3DDEVICE
         WARN("Invalid handle (%#x) passed.\n", pShader);
         LeaveCriticalSection(&d3d8_cs);
         return D3DERR_INVALIDCALL;
-    } else {
-        IWineD3DVertexShader *cur = NULL;
-
-        IWineD3DDevice_GetVertexShader(This->WineD3DDevice, &cur);
-        if(cur) {
-            if(cur == shader->wineD3DVertexShader) IDirect3DDevice8_SetVertexShader(iface, 0);
-            IWineD3DVertexShader_Release(cur);
-        }
-
-        if (IUnknown_Release((IUnknown *)shader))
-        {
-            ERR("Shader %p has references left, this shouldn't happen.\n", shader);
-        }
     }
+
+    IWineD3DDevice_GetVertexShader(This->WineD3DDevice, &cur);
+
+    if (cur)
+    {
+        if (cur == shader->wineD3DVertexShader) IDirect3DDevice8_SetVertexShader(iface, 0);
+        IWineD3DVertexShader_Release(cur);
+    }
+
     LeaveCriticalSection(&d3d8_cs);
+
+    if (IUnknown_Release((IUnknown *)shader))
+    {
+        ERR("Shader %p has references left, this shouldn't happen.\n", shader);
+    }
 
     return D3D_OK;
 }
@@ -2023,10 +2022,10 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetVertexShaderDeclaration(LPDIRECT3D
     EnterCriticalSection(&d3d8_cs);
 
     shader = d3d8_get_object(&This->handle_table, pVertexShader - (VS_HIGHESTFIXEDFXF + 1));
+    LeaveCriticalSection(&d3d8_cs);
     if (!shader)
     {
         WARN("Invalid handle (%#x) passed.\n", pVertexShader);
-        LeaveCriticalSection(&d3d8_cs);
         return D3DERR_INVALIDCALL;
     }
     declaration = (IDirect3DVertexDeclaration8Impl *)shader->vertex_declaration;
@@ -2034,7 +2033,6 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetVertexShaderDeclaration(LPDIRECT3D
     /* If pData is NULL, we just return the required size of the buffer. */
     if (!pData) {
         *pSizeOfData = declaration->elements_size;
-        LeaveCriticalSection(&d3d8_cs);
         return D3D_OK;
     }
 
@@ -2042,12 +2040,10 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetVertexShaderDeclaration(LPDIRECT3D
      * we should write the required size and return D3DERR_MOREDATA.
      * That's not actually true. */
     if (*pSizeOfData < declaration->elements_size) {
-        LeaveCriticalSection(&d3d8_cs);
         return D3DERR_INVALIDCALL;
     }
 
     CopyMemory(pData, declaration->elements, declaration->elements_size);
-    LeaveCriticalSection(&d3d8_cs);
 
     return D3D_OK;
 }
@@ -2069,15 +2065,14 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetVertexShaderFunction(LPDIRECT3DDEV
         return D3DERR_INVALIDCALL;
     }
 
-    if (shader->wineD3DVertexShader)
+    if (!shader->wineD3DVertexShader)
     {
-        hr = IWineD3DVertexShader_GetFunction(shader->wineD3DVertexShader, pData, pSizeOfData);
-    }
-    else
-    {
+        LeaveCriticalSection(&d3d8_cs);
         *pSizeOfData = 0;
-        hr = D3D_OK;
+        return D3D_OK;
     }
+
+    hr = IWineD3DVertexShader_GetFunction(shader->wineD3DVertexShader, pData, pSizeOfData);
 
     LeaveCriticalSection(&d3d8_cs);
     return hr;
@@ -2131,7 +2126,8 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetIndices(LPDIRECT3DDEVICE8 iface, I
 static HRESULT WINAPI IDirect3DDevice8Impl_CreatePixelShader(LPDIRECT3DDEVICE8 iface, CONST DWORD* pFunction, DWORD* ppShader) {
     IDirect3DDevice8Impl *This = (IDirect3DDevice8Impl *)iface;
     IDirect3DPixelShader8Impl *object;
-    HRESULT hrc = D3D_OK;
+    DWORD handle;
+    HRESULT hr;
 
     TRACE("(%p) : pFunction(%p), ppShader(%p)\n", This, pFunction, ppShader);
 
@@ -2139,36 +2135,42 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreatePixelShader(LPDIRECT3DDEVICE8 i
         TRACE("(%p) Invalid call\n", This);
         return D3DERR_INVALIDCALL;
     }
+
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
-
-    if (NULL == object) {
+    if (!object)
+    {
+        ERR("Failed to allocate memmory.\n");
         return E_OUTOFMEMORY;
-    } else {
-        EnterCriticalSection(&d3d8_cs);
-
-        object->ref    = 1;
-        object->lpVtbl = &Direct3DPixelShader8_Vtbl;
-        hrc = IWineD3DDevice_CreatePixelShader(This->WineD3DDevice, pFunction, &object->wineD3DPixelShader , (IUnknown *)object);
-        if (D3D_OK != hrc) {
-            FIXME("(%p) call to IWineD3DDevice_CreatePixelShader failed\n", This);
-            HeapFree(GetProcessHeap(), 0 , object);
-            *ppShader = 0;
-        } else {
-            DWORD handle = d3d8_allocate_handle(&This->handle_table, object);
-            if (handle == D3D8_INVALID_HANDLE)
-            {
-                ERR("Failed to allocate shader handle\n");
-                IDirect3DVertexShader8_Release((IUnknown *)object);
-                hrc = E_OUTOFMEMORY;
-            } else {
-                *ppShader = object->handle = handle + VS_HIGHESTFIXEDFXF + 1;
-                TRACE("(%p) : returning %p (handle %#x)\n", This, object, *ppShader);
-            }
-        }
-        LeaveCriticalSection(&d3d8_cs);
     }
 
-    return hrc;
+    object->ref    = 1;
+    object->lpVtbl = &Direct3DPixelShader8_Vtbl;
+
+    EnterCriticalSection(&d3d8_cs);
+    hr = IWineD3DDevice_CreatePixelShader(This->WineD3DDevice, pFunction,
+            &object->wineD3DPixelShader, (IUnknown *)object);
+    if (FAILED(hr))
+    {
+        LeaveCriticalSection(&d3d8_cs);
+        FIXME("(%p) call to IWineD3DDevice_CreatePixelShader failed\n", This);
+        HeapFree(GetProcessHeap(), 0 , object);
+        *ppShader = 0;
+        return hr;
+    }
+
+    handle = d3d8_allocate_handle(&This->handle_table, object);
+    LeaveCriticalSection(&d3d8_cs);
+    if (handle == D3D8_INVALID_HANDLE)
+    {
+        ERR("Failed to allocate shader handle\n");
+        IDirect3DVertexShader8_Release((IUnknown *)object);
+        return E_OUTOFMEMORY;
+    }
+
+    *ppShader = object->handle = handle + VS_HIGHESTFIXEDFXF + 1;
+    TRACE("(%p) : returning %p (handle %#x)\n", This, object, *ppShader);
+
+    return hr;
 }
 
 static HRESULT WINAPI IDirect3DDevice8Impl_SetPixelShader(LPDIRECT3DDEVICE8 iface, DWORD pShader) {
@@ -2180,14 +2182,23 @@ static HRESULT WINAPI IDirect3DDevice8Impl_SetPixelShader(LPDIRECT3DDEVICE8 ifac
 
     EnterCriticalSection(&d3d8_cs);
 
+    if (!pShader)
+    {
+        hr = IWineD3DDevice_SetPixelShader(This->WineD3DDevice, NULL);
+        LeaveCriticalSection(&d3d8_cs);
+        return hr;
+    }
+
     shader = d3d8_get_object(&This->handle_table, pShader - (VS_HIGHESTFIXEDFXF + 1));
     if (!shader)
     {
         WARN("Invalid handle (%#x) passed.\n", pShader);
+        LeaveCriticalSection(&d3d8_cs);
+        return D3DERR_INVALIDCALL;
     }
 
     TRACE("(%p) : Setting shader %p\n", This, shader);
-    hr = IWineD3DDevice_SetPixelShader(This->WineD3DDevice, shader == NULL ? NULL :shader->wineD3DPixelShader);
+    hr = IWineD3DDevice_SetPixelShader(This->WineD3DDevice, shader->wineD3DPixelShader);
     LeaveCriticalSection(&d3d8_cs);
     return hr;
 }
@@ -2223,6 +2234,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetPixelShader(LPDIRECT3DDEVICE8 ifac
 static HRESULT WINAPI IDirect3DDevice8Impl_DeletePixelShader(LPDIRECT3DDEVICE8 iface, DWORD pShader) {
     IDirect3DDevice8Impl *This = (IDirect3DDevice8Impl *)iface;
     IDirect3DPixelShader8Impl *shader;
+    IWineD3DPixelShader *cur = NULL;
 
     TRACE("(%p) : pShader %#x\n", This, pShader);
 
@@ -2234,21 +2246,22 @@ static HRESULT WINAPI IDirect3DDevice8Impl_DeletePixelShader(LPDIRECT3DDEVICE8 i
         WARN("Invalid handle (%#x) passed.\n", pShader);
         LeaveCriticalSection(&d3d8_cs);
         return D3DERR_INVALIDCALL;
-    } else {
-        IWineD3DPixelShader *cur = NULL;
-
-        IWineD3DDevice_GetPixelShader(This->WineD3DDevice, &cur);
-        if(cur) {
-            if(cur == shader->wineD3DPixelShader) IDirect3DDevice8_SetPixelShader(iface, 0);
-            IWineD3DPixelShader_Release(cur);
-        }
-
-        if (IUnknown_Release((IUnknown *)shader))
-        {
-            ERR("Shader %p has references left, this shouldn't happen.\n", shader);
-        }
     }
+
+    IWineD3DDevice_GetPixelShader(This->WineD3DDevice, &cur);
+
+    if (cur)
+    {
+        if (cur == shader->wineD3DPixelShader) IDirect3DDevice8_SetPixelShader(iface, 0);
+        IWineD3DPixelShader_Release(cur);
+    }
+
     LeaveCriticalSection(&d3d8_cs);
+
+    if (IUnknown_Release((IUnknown *)shader))
+    {
+        ERR("Shader %p has references left, this shouldn't happen.\n", shader);
+    }
 
     return D3D_OK;
 }

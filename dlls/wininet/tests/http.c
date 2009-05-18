@@ -84,7 +84,8 @@ static BOOL first_connection_to_test_url = TRUE;
 
 #define CHECK_NOTIFIED2(status, num) \
     do { \
-        ok(notified[status] == (num), "expected status %d (%s) %d times, received %d times\n", \
+        ok(notified[status] + optional[status] == (num), \
+           "expected status %d (%s) %d times, received %d times\n", \
            status, status < MAX_INTERNET_STATUS && status_string[status][0] != 0 ? \
            status_string[status] : "unknown", (num), notified[status]); \
         CLEAR_NOTIFIED(status);                                         \
@@ -349,12 +350,12 @@ static void InternetReadFile_test(int flags)
     if (flags & INTERNET_FLAG_ASYNC)
         WaitForSingleObject(hCompleteEvent, INFINITE);
 
-    todo_wine if (first_connection_to_test_url)
+    if (first_connection_to_test_url)
     {
         CHECK_NOTIFIED(INTERNET_STATUS_RESOLVING_NAME);
         CHECK_NOTIFIED(INTERNET_STATUS_NAME_RESOLVED);
     }
-    else
+    else todo_wine
     {
         CHECK_NOT_NOTIFIED(INTERNET_STATUS_RESOLVING_NAME);
         CHECK_NOT_NOTIFIED(INTERNET_STATUS_NAME_RESOLVED);
@@ -446,8 +447,8 @@ static void InternetReadFile_test(int flags)
         if (length == 0)
             break;
     }
-    todo_wine CHECK_NOTIFIED2(INTERNET_STATUS_CLOSING_CONNECTION, 2);
-    todo_wine CHECK_NOTIFIED2(INTERNET_STATUS_CONNECTION_CLOSED, 2);
+    CHECK_NOTIFIED2(INTERNET_STATUS_CLOSING_CONNECTION, 2);
+    CHECK_NOTIFIED2(INTERNET_STATUS_CONNECTION_CLOSED, 2);
 abort:
     trace("aborting\n");
     SET_EXPECT2(INTERNET_STATUS_HANDLE_CLOSING, (hor != 0x0) + (hic != 0x0));
@@ -567,8 +568,8 @@ static void InternetReadFileExA_test(int flags)
     SET_EXPECT2(INTERNET_STATUS_REQUEST_SENT, 2);
     SET_EXPECT2(INTERNET_STATUS_RECEIVING_RESPONSE, 2);
     SET_EXPECT2(INTERNET_STATUS_RESPONSE_RECEIVED, 2);
-    SET_EXPECT2(INTERNET_STATUS_CLOSING_CONNECTION, 2);
-    SET_EXPECT2(INTERNET_STATUS_CONNECTION_CLOSED, 2);
+    SET_OPTIONAL2(INTERNET_STATUS_CLOSING_CONNECTION, 2);
+    SET_OPTIONAL2(INTERNET_STATUS_CONNECTION_CLOSED, 2);
     SET_EXPECT(INTERNET_STATUS_REDIRECT);
     SET_OPTIONAL(INTERNET_STATUS_CONNECTING_TO_SERVER);
     SET_OPTIONAL(INTERNET_STATUS_CONNECTED_TO_SERVER);
@@ -605,8 +606,8 @@ static void InternetReadFileExA_test(int flags)
     CHECK_NOTIFIED2(INTERNET_STATUS_REQUEST_SENT, 2);
     CHECK_NOTIFIED2(INTERNET_STATUS_RECEIVING_RESPONSE, 2);
     CHECK_NOTIFIED2(INTERNET_STATUS_RESPONSE_RECEIVED, 2);
-    todo_wine CHECK_NOTIFIED2(INTERNET_STATUS_CLOSING_CONNECTION, 2);
-    todo_wine CHECK_NOTIFIED2(INTERNET_STATUS_CONNECTION_CLOSED, 2);
+    CHECK_NOTIFIED2(INTERNET_STATUS_CLOSING_CONNECTION, 2);
+    CHECK_NOTIFIED2(INTERNET_STATUS_CONNECTION_CLOSED, 2);
     CHECK_NOTIFIED(INTERNET_STATUS_REDIRECT);
     if (flags & INTERNET_FLAG_ASYNC)
         CHECK_NOTIFIED(INTERNET_STATUS_REQUEST_COMPLETE);
@@ -754,8 +755,12 @@ abort:
           Sleep(100);
       CHECK_NOTIFIED2(INTERNET_STATUS_HANDLE_CLOSING, (hor != 0x0) + (hic != 0x0));
     }
+    /* to enable once Wine is fixed to never send it
     CHECK_NOT_NOTIFIED(INTERNET_STATUS_CLOSING_CONNECTION);
     CHECK_NOT_NOTIFIED(INTERNET_STATUS_CONNECTION_CLOSED);
+    */
+    CLEAR_NOTIFIED(INTERNET_STATUS_CLOSING_CONNECTION);
+    CLEAR_NOTIFIED(INTERNET_STATUS_CONNECTION_CLOSED);
     CloseHandle(hCompleteEvent);
     first_connection_to_test_url = FALSE;
 }

@@ -329,6 +329,7 @@ static void test_resolution(TW_IDENTITY *appid, TW_IDENTITY *source, TW_UINT16 c
                 "Error [rc %d|cc %d] doing MSG_GETDEFAULT for type 0x%x\n", rc, status.ConditionCode, captype);
         if (rc == TWRC_SUCCESS)
         {
+            get_onevalue(cap.hContainer, &val, &type);
             ok(type == TWTY_FIX32, "GETDEFAULT for RESOLUTION is not type FIX32, is type %d\n", type);
             memcpy(&default_value, &val, sizeof(default_value));
             GlobalFree(cap.hContainer);
@@ -481,8 +482,8 @@ static void test_supported_sizes(TW_IDENTITY *appid, TW_IDENTITY *source, TW_INT
     TW_UINT32 val;
     TW_UINT16 type;
     TW_INT32 actual_support;
-    TW_UINT32 orig_value;
-    TW_UINT32 default_value;
+    TW_UINT32 orig_value = TWSS_NONE;
+    TW_UINT32 default_value = TWSS_NONE;
     TW_UINT32 new_value = TWSS_NONE;
 
 

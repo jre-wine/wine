@@ -184,14 +184,13 @@ DWORD svcctl_GetServiceDisplayNameW(
     SC_RPC_HANDLE hSCManager,
     LPCWSTR lpServiceName,
     WCHAR *lpBuffer,
-    DWORD cchBufSize,
-    DWORD *cchLength)
+    DWORD *cchBufSize)
 {
     struct sc_manager_handle *manager;
     struct service_entry *entry;
     DWORD err;
 
-    WINE_TRACE("(%s, %d)\n", wine_dbgstr_w(lpServiceName), cchBufSize);
+    WINE_TRACE("(%s, %d)\n", wine_dbgstr_w(lpServiceName), *cchBufSize);
 
     if ((err = validate_scm_handle(hSCManager, 0, &manager)) != ERROR_SUCCESS)
         return err;
@@ -202,16 +201,18 @@ DWORD svcctl_GetServiceDisplayNameW(
     if (entry != NULL)
     {
         LPCWSTR name;
+        int len;
         service_lock_shared(entry);
         name = get_display_name(entry);
-        *cchLength = strlenW(name);
-        if (*cchLength < cchBufSize)
+        len = strlenW(name);
+        if (len <= *cchBufSize)
         {
             err = ERROR_SUCCESS;
-            lstrcpyW(lpBuffer, name);
+            memcpy(lpBuffer, name, (len + 1)*sizeof(*name));
         }
         else
             err = ERROR_INSUFFICIENT_BUFFER;
+        *cchBufSize = len;
         service_unlock(entry);
     }
     else
@@ -219,7 +220,7 @@ DWORD svcctl_GetServiceDisplayNameW(
 
     scmdatabase_unlock(manager->db);
 
-    if (err != ERROR_SUCCESS && cchBufSize > 0)
+    if (err != ERROR_SUCCESS)
         lpBuffer[0] = 0;
 
     return err;
@@ -229,14 +230,13 @@ DWORD svcctl_GetServiceKeyNameW(
     SC_RPC_HANDLE hSCManager,
     LPCWSTR lpServiceDisplayName,
     WCHAR *lpBuffer,
-    DWORD cchBufSize,
-    DWORD *cchLength)
+    DWORD *cchBufSize)
 {
     struct service_entry *entry;
     struct sc_manager_handle *manager;
     DWORD err;
 
-    WINE_TRACE("(%s, %d)\n", wine_dbgstr_w(lpServiceDisplayName), cchBufSize);
+    WINE_TRACE("(%s, %d)\n", wine_dbgstr_w(lpServiceDisplayName), *cchBufSize);
 
     if ((err = validate_scm_handle(hSCManager, 0, &manager)) != ERROR_SUCCESS)
         return err;
@@ -246,15 +246,17 @@ DWORD svcctl_GetServiceKeyNameW(
     entry = scmdatabase_find_service_by_displayname(manager->db, lpServiceDisplayName);
     if (entry != NULL)
     {
+        int len;
         service_lock_shared(entry);
-        *cchLength = strlenW(entry->name);
-        if (*cchLength < cchBufSize)
+        len = strlenW(entry->name);
+        if (len <= *cchBufSize)
         {
             err = ERROR_SUCCESS;
-            lstrcpyW(lpBuffer, entry->name);
+            memcpy(lpBuffer, entry->name, (len + 1)*sizeof(*entry->name));
         }
         else
             err = ERROR_INSUFFICIENT_BUFFER;
+        *cchBufSize = len;
         service_unlock(entry);
     }
     else
@@ -262,7 +264,7 @@ DWORD svcctl_GetServiceKeyNameW(
 
     scmdatabase_unlock(manager->db);
 
-    if (err != ERROR_SUCCESS && cchBufSize > 0)
+    if (err != ERROR_SUCCESS)
         lpBuffer[0] = 0;
 
     return err;
@@ -309,7 +311,7 @@ DWORD svcctl_OpenServiceW(
     scmdatabase_lock_shared(manager->db);
     entry = scmdatabase_find_service(manager->db, lpServiceName);
     if (entry != NULL)
-        entry->ref_count++;
+        InterlockedIncrement(&entry->ref_count);
     scmdatabase_unlock(manager->db);
 
     if (entry == NULL)
@@ -358,6 +360,7 @@ DWORD svcctl_CreateServiceW(
     err = service_create(lpServiceName, &entry);
     if (err != ERROR_SUCCESS)
         return err;
+    entry->ref_count = 1;
     entry->config.dwServiceType = entry->status.dwServiceType = dwServiceType;
     entry->config.dwStartType = dwStartType;
     entry->config.dwErrorControl = dwErrorControl;
@@ -651,6 +654,8 @@ DWORD svcctl_QueryServiceConfig2W( SC_RPC_HANDLE hService, DWORD level,
     struct sc_service_handle *service;
     DWORD err;
 
+    memset(buffer, 0, size);
+
     if ((err = validate_service_handle(hService, SERVICE_QUERY_STATUS, &service)) != 0)
         return err;
 
@@ -697,6 +702,8 @@ DWORD svcctl_QueryServiceStatusEx(
     struct sc_service_handle *service;
     DWORD err;
     LPSERVICE_STATUS_PROCESS pSvcStatusData;
+
+    memset(lpBuffer, 0, cbBufSize);
 
     if ((err = validate_service_handle(hService, SERVICE_QUERY_STATUS, &service)) != 0)
         return err;

@@ -190,6 +190,7 @@ typedef enum _WINED3DFORMAT
     WINED3DFMT_R10G10B10A2_TYPELESS,
     WINED3DFMT_R10G10B10A2_UNORM,
     WINED3DFMT_R10G10B10A2_UINT,
+    WINED3DFMT_R10G10B10A2_SNORM,
     WINED3DFMT_R11G11B10_FLOAT,
     WINED3DFMT_R8G8B8A8_TYPELESS,
     WINED3DFMT_R8G8B8A8_UNORM,
@@ -823,30 +824,6 @@ typedef enum _WINED3DDECLMETHOD
     WINED3DDECLMETHOD_LOOKUP                = 5,
     WINED3DDECLMETHOD_LOOKUPPRESAMPLED      = 6
 } WINED3DDECLMETHOD;
-
-typedef enum _WINED3DDECLTYPE
-{
-    WINED3DDECLTYPE_FLOAT1                  = 0,
-    WINED3DDECLTYPE_FLOAT2                  = 1,
-    WINED3DDECLTYPE_FLOAT3                  = 2,
-    WINED3DDECLTYPE_FLOAT4                  = 3,
-    WINED3DDECLTYPE_D3DCOLOR                = 4,
-    WINED3DDECLTYPE_UBYTE4                  = 5,
-    WINED3DDECLTYPE_SHORT2                  = 6,
-    WINED3DDECLTYPE_SHORT4                  = 7,
-    /* VS 2.0 */
-    WINED3DDECLTYPE_UBYTE4N                 = 8,
-    WINED3DDECLTYPE_SHORT2N                 = 9,
-    WINED3DDECLTYPE_SHORT4N                 = 10,
-    WINED3DDECLTYPE_USHORT2N                = 11,
-    WINED3DDECLTYPE_USHORT4N                = 12,
-    WINED3DDECLTYPE_UDEC3                   = 13,
-    WINED3DDECLTYPE_DEC3N                   = 14,
-    WINED3DDECLTYPE_FLOAT16_2               = 15,
-    WINED3DDECLTYPE_FLOAT16_4               = 16,
-    WINED3DDECLTYPE_UNUSED                  = 17,
-} WINED3DDECLTYPE;
-cpp_quote("#define WINED3DDECL_END() {0xFF, 0, WINED3DDECLTYPE_UNUSED, 0, 0, 0, -1}")
 
 typedef enum _WINED3DDECLUSAGE
 {
@@ -1767,14 +1744,14 @@ typedef struct _WINED3DCLIPSTATUS
 
 typedef struct _WINED3DVERTEXELEMENT
 {
-  WORD Stream;
-  WORD Offset;
-  BYTE Type;
-  BYTE Method;
-  BYTE Usage;
-  BYTE UsageIndex;
-  int Reg; /* DirectX 8 */
-} WINED3DVERTEXELEMENT, *LPWINED3DVERTEXELEMENT;
+    WINED3DFORMAT format;
+    WORD input_slot;
+    WORD offset;
+    UINT output_slot; /* D3D 8 & 10 */
+    BYTE method;
+    BYTE usage;
+    BYTE usage_idx;
+} WINED3DVERTEXELEMENT;
 
 typedef struct _WINED3DDEVICE_CREATION_PARAMETERS
 {
@@ -1915,53 +1892,19 @@ typedef struct glDescriptor
 
 typedef struct WineDirect3DStridedData
 {
-    const BYTE *lpData; /* Pointer to start of data */
-    DWORD dwStride;     /* Stride between occurrences of this data */
-    DWORD dwType;       /* Type (as in D3DVSDT_TYPE) */
-    unsigned int VBO;   /* Vertex buffer object this data is in */
-    UINT streamNo;      /* D3D stream number */
+    WINED3DFORMAT format;   /* Format of the data */
+    const BYTE *lpData;     /* Pointer to start of data */
+    DWORD dwStride;         /* Stride between occurrences of this data */
 } WineDirect3DStridedData;
 
 typedef struct WineDirect3DVertexStridedData
 {
-    /*
-     * IMPORTANT:
-     * This structure can be accessed in two ways: Named access, and array
-     * access. Please note that named access is only valid with the fixed
-     * function vertex pipeline, and the arrays are only valid with the
-     * programmable vertex pipeline(vertex shaders).
-     */
-    union
-    {
-        struct
-        {
-            /* Do not add or reorder fields here,
-             * so this can be indexed as an array */
-            WineDirect3DStridedData position;
-            WineDirect3DStridedData blendWeights;
-            WineDirect3DStridedData blendMatrixIndices;
-            WineDirect3DStridedData normal;
-            WineDirect3DStridedData pSize;
-            WineDirect3DStridedData diffuse;
-            WineDirect3DStridedData specular;
-            WineDirect3DStridedData texCoords[WINED3DDP_MAXTEXCOORD];
-            WineDirect3DStridedData position2;  /* tween data */
-            WineDirect3DStridedData normal2;    /* tween data */
-            WineDirect3DStridedData tangent;
-            WineDirect3DStridedData binormal;
-            WineDirect3DStridedData tessFactor;
-            WineDirect3DStridedData fog;
-            WineDirect3DStridedData depth;
-            WineDirect3DStridedData sample;
-
-            /* Add fields here */
-        } s;
-        WineDirect3DStridedData input[16];  /* Indexed by constants in D3DVSDE_REGISTER */
-    } u;
-
+    WineDirect3DStridedData position;
+    WineDirect3DStridedData normal;
+    WineDirect3DStridedData diffuse;
+    WineDirect3DStridedData specular;
+    WineDirect3DStridedData texCoords[WINED3DDP_MAXTEXCOORD];
     BOOL position_transformed;
-    WORD swizzle_map;       /* MAX_ATTRIBS, 16 */
-    WORD use_map;           /* MAX_ATTRIBS, 16 */
 } WineDirect3DVertexStridedData;
 
 typedef struct _WINED3DVSHADERCAPS2_0
@@ -2791,14 +2734,6 @@ interface IWineD3DVertexDeclaration : IWineD3DBase
 {
     HRESULT GetDevice(
         [out] IWineD3DDevice **device
-    );
-    HRESULT GetDeclaration(
-        [out] WINED3DVERTEXELEMENT *elements,
-        [out] UINT *element_count
-    );
-    HRESULT SetDeclaration(
-        [in] const WINED3DVERTEXELEMENT *elements,
-        [in] UINT element_count
     );
 }
 
