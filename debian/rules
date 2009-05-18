@@ -172,7 +172,7 @@ endif
 clean: clean-arch32 clean-arch64
 	dh_testdir
 	dh_testroot
-	rm -f debian/libwine.install debian/wine-bin.install
+	bash debian/clean-install.sh
 	rm -f install-arch-stamp build-indep-stamp configure-ia32-stamp
 	rm -rf lib32
 	dh_clean
@@ -271,15 +271,8 @@ binary-arch: install-arch-stamp
 	# create installation directories
 	dh_installdirs -s
 
-	# certain binaries are only compiled on some platforms;
-	# if they were compiled on the current one, install them
-	for pkg in libwine wine-bin; do \
-	 cp debian/$$pkg.install-common debian/$$pkg.install; \
-	 for bin in $$(cat debian/$$pkg.install-platform); do \
-	  [ ! -f $$bin ] || \
-	  echo $$bin >> debian/$$pkg.install; \
-	 done; \
-	done
+	# prepare <packagename>.install files
+	bash debian/prep-install.sh
 
 	# distribute files into debian/<packagename>
 	# according to the <packagename>.install files
