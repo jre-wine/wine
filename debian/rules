@@ -283,27 +283,7 @@ binary-arch: install-arch-stamp
 	#rm -f debian/libwine/usr/share/wine/fonts/marlett.ttf~
 
 	# split up libwine
-ifeq ($(DEB_HOST_GNU_SYSTEM),linux-gnu)
-	mv debian/libwine/usr/lib/wine/winealsa* debian/libwine-alsa/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/capi*     debian/libwine-capi/usr/lib/wine
-endif
-	mv debian/libwine/usr/lib/wine/mscms*    debian/libwine-cms/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/wineoss*  debian/libwine-oss/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/wineesd*  debian/libwine-esd/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/d3d8*     debian/libwine-gl/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/d3d9*     debian/libwine-gl/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/d3d10*    debian/libwine-gl/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/d3dim*    debian/libwine-gl/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/d3drm*    debian/libwine-gl/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/d3dx8*    debian/libwine-gl/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/d3dx9*    debian/libwine-gl/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/d3dxof*   debian/libwine-gl/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/glu32*    debian/libwine-gl/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/opengl32* debian/libwine-gl/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/winejack* debian/libwine-jack/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/wldap32*  debian/libwine-ldap/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/winenas*  debian/libwine-nas/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/wineps*   debian/libwine-print/usr/lib/wine
+	bash debian/split.sh libwine usr/lib/wine
 
 	dh_installdocs -s
 	dh_installman -s
