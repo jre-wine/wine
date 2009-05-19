@@ -1,8 +1,20 @@
-wine (1.1.18-1) UNRELEASED; urgency=low
+wine (1.1.18-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.18, released Mar 27, 2009.
+    - RPC over HTTP support.
+    - Improved support for upgrades in MSI.
+    - Debug symbols in WineDbg on Mac OS X.
+    - Many Direct3D code cleanups.
+    - Various bug fixes.
+  * Changed section of libwine-dbg to the new "debug" section.
+  * The logic for only installing binaries that are actually built is
+    now in separate shell scripts (prep-install.sh, clean-install.sh).
+  * Instead of splitting up libwine with a long list of "mv" commands in
+    debian/rules, the list of files and packages to split into is now in
+    a separate libwine.split file, which is processed by a shell script
+    (split.sh).
 
- -- Ove Kaaven <ovek@arcticnet.no>  Mon, 18 May 2009 23:14:22 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Tue, 19 May 2009 20:59:50 +0200
 
 wine (1.1.17-1) experimental; urgency=low
 
