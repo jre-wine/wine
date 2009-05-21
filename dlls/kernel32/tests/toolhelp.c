@@ -44,7 +44,7 @@ static BOOL (WINAPI *pThread32Next)(HANDLE, LPTHREADENTRY32);
 
 static DWORD WINAPI sub_thread(void* pmt)
 {
-    DWORD w = WaitForSingleObject((HANDLE)pmt, WAIT_TIME);
+    DWORD w = WaitForSingleObject(pmt, WAIT_TIME);
     return w;
 }
 
@@ -305,7 +305,7 @@ START_TEST(toolhelp)
         !pProcess32First || !pProcess32Next ||
         !pThread32First || !pThread32Next)
     {
-        skip("Needed functions are not available, most likely running on Windows NT\n");
+        win_skip("Needed functions are not available, most likely running on Windows NT\n");
         return;
     }
 

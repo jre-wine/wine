@@ -18,56 +18,20 @@ DOCSUBDIRS     = $(DLLSUBDIRS)
 # 16-bit dlls
 
 WIN16_FILES = \
-	avifile.dll16 \
-	comm.drv16 \
 	commdlg.dll16 \
-	compobj.dll16 \
-	ctl3d.dll16 \
-	ctl3dv2.dll16 \
 	ddeml.dll16 \
-	dispdib.dll16 \
-	display.drv16 \
 	gdi.exe16 \
-	imm.dll16 \
-	keyboard.drv16 \
 	krnl386.exe16 \
-	lzexpand.dll16 \
 	mmsystem.dll16 \
-	mouse.drv16 \
-	msacm.dll16 \
 	msvideo.dll16 \
-	ole2.dll16 \
-	ole2conv.dll16 \
-	ole2disp.dll16 \
-	ole2nls.dll16 \
-	ole2prox.dll16 \
-	ole2thk.dll16 \
-	olecli.dll16 \
-	olesvr.dll16 \
-	rasapi16.dll16 \
 	setupx.dll16 \
-	shell.dll16 \
-	sound.drv16 \
-	storage.dll16 \
-	stress.dll16 \
 	system.drv16 \
 	toolhelp.dll16 \
-	twain.dll16 \
-	typelib.dll16 \
 	user.exe16 \
 	ver.dll16 \
-	w32sys.dll16 \
-	win32s16.dll16 \
-	win87em.dll16 \
-	winaspi.dll16 \
-	windebug.dll16 \
 	wineps16.drv16 \
 	wing.dll16 \
-	winhelp.exe16 \
-	winnls.dll16 \
-	winoldap.mod16 \
 	winsock.dll16 \
-	wintab.dll16 \
 	wprocs.dll16
 
 @MAKE_RULES@
@@ -78,65 +42,26 @@ all: $(BUILDSUBDIRS) @WIN16_FILES@
 
 # Placeholders for 16-bit libraries
 
-avifile.dll16:
-	echo "avifil32.dll" >$@
-
 commdlg.dll16:
 	echo "comdlg32.dll" >$@
 
-ctl3d.dll16 ctl3dv2.dll16:
-	echo "ctl3d32.dll" >$@
-
-dispdib.dll16 gdi.exe16 wing.dll16:
+gdi.exe16 wing.dll16:
 	echo "gdi32.dll" >$@
 
-imm.dll16:
-	echo "imm32.dll" >$@
-
-comm.drv16 krnl386.exe16 stress.dll16 system.drv16 toolhelp.dll16 win87em.dll16 windebug.dll16 winhelp.exe16 winoldap.mod16:
+krnl386.exe16 system.drv16 toolhelp.dll16:
 	echo "kernel32.dll" >$@
-
-lzexpand.dll16:
-	echo "lz32.dll" >$@
-
-msacm.dll16:
-	echo "msacm32.dll" >$@
 
 msvideo.dll16:
 	echo "msvfw32.dll" >$@
 
-compobj.dll16 ole2.dll16 ole2conv.dll16 ole2nls.dll16 ole2prox.dll16 ole2thk.dll16 storage.dll16:
-	echo "ole32.dll" >$@
-
-ole2disp.dll16 typelib.dll16:
-	echo "oleaut32.dll" >$@
-
-olecli.dll16:
-	echo "olecli32.dll" >$@
-
-olesvr.dll16:
-	echo "olesvr32.dll" >$@
-
-rasapi16.dll16:
-	echo "rasapi32.dll" >$@
-
 setupx.dll16:
 	echo "setupapi.dll" >$@
 
-shell.dll16:
-	echo "shell32.dll" >$@
-
-twain.dll16:
-	echo "twain_32.dll" >$@
-
-ddeml.dll16 display.drv16 keyboard.drv16 mouse.drv16 user.exe16:
+ddeml.dll16 user.exe16:
 	echo "user32.dll" >$@
 
 ver.dll16:
 	echo "version.dll" >$@
-
-w32sys.dll16 win32s16.dll16:
-	echo "w32skrnl.dll" >$@
 
 wprocs.dll16:
 	echo "winedos.dll" >$@
@@ -144,17 +69,8 @@ wprocs.dll16:
 wineps16.drv16:
 	echo "wineps.drv" >$@
 
-mmsystem.dll16 sound.drv16:
+mmsystem.dll16:
 	echo "winmm.dll" >$@
-
-winnls.dll16:
-	echo "winnls32.dll" >$@
-
-wintab.dll16:
-	echo "wintab32.dll" >$@
-
-winaspi.dll16:
-	echo "wnaspi32.dll" >$@
 
 winsock.dll16:
 	echo "ws2_32.dll" >$@
@@ -302,7 +218,6 @@ IMPORT_LIBS = \
 	vdmdbg/libvdmdbg.$(IMPLIBEXT) \
 	version/libversion.$(IMPLIBEXT) \
 	wined3d/libwined3d.$(IMPLIBEXT) \
-	winedos/libwinedos.$(IMPLIBEXT) \
 	winhttp/libwinhttp.$(IMPLIBEXT) \
 	wininet/libwininet.$(IMPLIBEXT) \
 	winmm/libwinmm.$(IMPLIBEXT) \
@@ -446,7 +361,6 @@ CROSS_IMPLIBS = \
 	vdmdbg/libvdmdbg.a \
 	version/libversion.a \
 	wined3d/libwined3d.a \
-	winedos/libwinedos.a \
 	winhttp/libwinhttp.a \
 	wininet/libwininet.a \
 	winmm/libwinmm.a \
@@ -845,9 +759,6 @@ version/libversion.def version/libversion.a: version/version.spec $(WINEBUILD)
 
 wined3d/libwined3d.def wined3d/libwined3d.a: wined3d/wined3d.spec $(WINEBUILD)
 	@cd wined3d && $(MAKE) `basename $@`
-
-winedos/libwinedos.def winedos/libwinedos.a: winedos/winedos.spec $(WINEBUILD)
-	@cd winedos && $(MAKE) `basename $@`
 
 winhttp/libwinhttp.def winhttp/libwinhttp.a: winhttp/winhttp.spec $(WINEBUILD)
 	@cd winhttp && $(MAKE) `basename $@`

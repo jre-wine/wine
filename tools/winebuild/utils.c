@@ -31,8 +31,6 @@
 # include <unistd.h>
 #endif
 
-#include "windef.h"
-#include "winnt.h"
 #include "build.h"
 
 #define MAX_TMP_FILES 8
@@ -193,6 +191,130 @@ int output( const char *format, ... )
     return ret;
 }
 
+/* find a build tool in the path, trying the various names */
+char *find_tool( const char * const *names )
+{
+    static char **dirs;
+    static unsigned int count, maxlen;
+
+    char *p, *file;
+    unsigned int i, len;
+    struct stat st;
+
+    if (!dirs)
+    {
+        char *path;
+
+        /* split the path in directories */
+
+        if (!getenv( "PATH" )) return NULL;
+        path = xstrdup( getenv( "PATH" ));
+        for (p = path, count = 2; *p; p++) if (*p == ':') count++;
+        dirs = xmalloc( count * sizeof(*dirs) );
+        count = 0;
+        dirs[count++] = p = path;
+        while (*p)
+        {
+            while (*p && *p != ':') p++;
+            if (!*p) break;
+            *p++ = 0;
+            dirs[count++] = p;
+        }
+        for (i = 0; i < count; i++) maxlen = max( maxlen, strlen(dirs[i])+2 );
+    }
+
+    while (*names)
+    {
+        len = strlen(*names) + 1;
+        file = xmalloc( maxlen + len );
+
+        for (i = 0; i < count; i++)
+        {
+            strcpy( file, dirs[i] );
+            p = file + strlen(file);
+            if (p == file) *p++ = '.';
+            if (p[-1] != '/') *p++ = '/';
+            strcpy( p, *names );
+
+            if (!stat( file, &st ) && S_ISREG(st.st_mode) && (st.st_mode & 0111)) return file;
+        }
+        free( file );
+        names++;
+    }
+    return NULL;
+}
+
+const char *get_as_command(void)
+{
+    if (!as_command)
+    {
+        if (target_alias)
+        {
+            as_command = xmalloc( strlen(target_alias) + sizeof("-as") );
+            strcpy( as_command, target_alias );
+            strcat( as_command, "-as" );
+        }
+        else
+        {
+            static const char * const commands[] = { "gas", "as", NULL };
+            if (!(as_command = find_tool( commands ))) as_command = xstrdup("as");
+        }
+
+        if (force_pointer_size)
+        {
+            const char *args = (force_pointer_size == 8) ? " --64" : " --32";
+            as_command = xrealloc( as_command, strlen(as_command) + strlen(args) + 1 );
+            strcat( as_command, args );
+        }
+    }
+    return as_command;
+}
+
+const char *get_ld_command(void)
+{
+    if (!ld_command)
+    {
+        if (target_alias)
+        {
+            ld_command = xmalloc( strlen(target_alias) + sizeof("-ld") );
+            strcpy( ld_command, target_alias );
+            strcat( ld_command, "-ld" );
+        }
+        else
+        {
+            static const char * const commands[] = { "ld", "gld", NULL };
+            if (!(ld_command = find_tool( commands ))) ld_command = xstrdup("ld");
+        }
+
+        if (force_pointer_size)
+        {
+            const char *args = (force_pointer_size == 8) ? " -m elf_x86_64" : " -m elf_i386";
+            ld_command = xrealloc( ld_command, strlen(ld_command) + strlen(args) + 1 );
+            strcat( ld_command, args );
+        }
+    }
+    return ld_command;
+}
+
+const char *get_nm_command(void)
+{
+    if (!nm_command)
+    {
+        if (target_alias)
+        {
+            nm_command = xmalloc( strlen(target_alias) + sizeof("-nm") );
+            strcpy( nm_command, target_alias );
+            strcat( nm_command, "-nm" );
+        }
+        else
+        {
+            static const char * const commands[] = { "nm", "gnm", NULL };
+            if (!(nm_command = find_tool( commands ))) nm_command = xstrdup("nm");
+        }
+    }
+    return nm_command;
+}
+
 /* get a name for a temp file, automatically cleaned up on exit */
 char *get_temp_file_name( const char *prefix, const char *suffix )
 {
@@ -315,15 +437,15 @@ int remove_stdcall_decoration( char *name )
  */
 void assemble_file( const char *src_file, const char *obj_file )
 {
+    const char *prog = get_as_command();
     char *cmd;
     int err;
 
-    if (!as_command) as_command = xstrdup("as");
-    cmd = xmalloc( strlen(as_command) + strlen(obj_file) + strlen(src_file) + 6 );
-    sprintf( cmd, "%s -o %s %s", as_command, obj_file, src_file );
+    cmd = xmalloc( strlen(prog) + strlen(obj_file) + strlen(src_file) + 6 );
+    sprintf( cmd, "%s -o %s %s", prog, obj_file, src_file );
     if (verbose) fprintf( stderr, "%s\n", cmd );
     err = system( cmd );
-    if (err) fatal_error( "%s failed with status %d\n", as_command, err );
+    if (err) fatal_error( "%s failed with status %d\n", prog, err );
     free( cmd );
 }
 
@@ -341,6 +463,7 @@ DLLSPEC *alloc_dll_spec(void)
     spec->file_name          = NULL;
     spec->dll_name           = NULL;
     spec->init_func          = NULL;
+    spec->main_module        = NULL;
     spec->type               = SPEC_WIN32;
     spec->base               = MAX_ORDINALS;
     spec->limit              = 0;
@@ -535,6 +658,7 @@ const char *asm_name( const char *sym )
     {
     case PLATFORM_APPLE:
     case PLATFORM_WINDOWS:
+        if (sym[0] == '.' && sym[1] == 'L') return sym;
         buffer[0] = '_';
         strcpy( buffer + 1, sym );
         return buffer;

@@ -718,6 +718,11 @@ static HRESULT WINAPI OleControl_OnAmbientPropertyChange(IOleControl *iface, DIS
     TRACE("(%p)->(%d)\n", This, dispID);
 
     switch(dispID) {
+    case DISPID_UNKNOWN:
+        /* Unknown means multiple properties changed, so check them all.
+         * BUT the Webbrowser OleControl object doesn't appear to do this.
+         */
+        return S_OK;
     case DISPID_AMBIENT_OFFLINEIFNOTCONNECTED:
         return on_offlineconnected_change(This);
     case DISPID_AMBIENT_SILENT:
@@ -863,9 +868,26 @@ static HRESULT WINAPI WBOleCommandTarget_QueryStatus(IOleCommandTarget *iface,
         const GUID *pguidCmdGroup, ULONG cCmds, OLECMD prgCmds[], OLECMDTEXT *pCmdText)
 {
     WebBrowser *This = OLECMD_THIS(iface);
-    FIXME("(%p)->(%s %u %p %p)\n", This, debugstr_guid(pguidCmdGroup), cCmds, prgCmds,
+    IOleCommandTarget *cmdtrg;
+    HRESULT hres;
+
+    TRACE("(%p)->(%s %u %p %p)\n", This, debugstr_guid(pguidCmdGroup), cCmds, prgCmds,
           pCmdText);
-    return E_NOTIMPL;
+
+    if(!This->doc_host.document)
+        return 0x80040104;
+
+    /* NOTE: There are probably some commands that we should handle here
+     * instead of forwarding to document object. */
+
+    hres = IUnknown_QueryInterface(This->doc_host.document, &IID_IOleCommandTarget, (void**)&cmdtrg);
+    if(FAILED(hres))
+        return hres;
+
+    hres = IOleCommandTarget_QueryStatus(cmdtrg, pguidCmdGroup, cCmds, prgCmds, pCmdText);
+    IOleCommandTarget_Release(cmdtrg);
+
+    return hres;
 }
 
 static HRESULT WINAPI WBOleCommandTarget_Exec(IOleCommandTarget *iface,

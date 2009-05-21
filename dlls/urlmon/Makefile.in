@@ -14,9 +14,12 @@ C_SRCS = \
 	file.c \
 	format.c \
 	ftp.c \
+	gopher.c \
 	http.c \
 	internet.c \
+	mimefilter.c \
 	mk.c \
+	protocol.c \
 	regsvr.c \
 	sec_mgr.c \
 	session.c \

@@ -84,10 +84,11 @@ twain_add_onedriver(const char *dsname) {
 		if (i < nrdevices)
 			break;
 		if (nrdevices)
-			devices = realloc(devices, sizeof(devices[0])*(nrdevices+1));
+			devices = HeapReAlloc(GetProcessHeap(), 0, devices, sizeof(devices[0])*(nrdevices+1));
 		else
-			devices = malloc(sizeof(devices[0]));
-		devices[nrdevices].modname = strdup(dsname);
+			devices = HeapAlloc(GetProcessHeap(), 0, sizeof(devices[0]));
+		if ((devices[nrdevices].modname = HeapAlloc(GetProcessHeap(), 0, strlen(dsname) + 1)))
+			lstrcpyA(devices[nrdevices].modname, dsname);
 		devices[nrdevices].identity = sourceId;
 		nrdevices++;
 		DSM_sourceId++;
@@ -102,8 +103,8 @@ twain_autodetect(void) {
 	if (detectionrun) return;
 	detectionrun = 1;
 
-	twain_add_onedriver("gphoto2.ds");
 	twain_add_onedriver("sane.ds");
+	twain_add_onedriver("gphoto2.ds");
 #if 0
 	twain_add_onedriver("c:\\windows\\Twain_32\\Largan\\sp503a.ds");
 	twain_add_onedriver("c:\\windows\\Twain_32\\vivicam10\\vivicam10.ds");

@@ -129,7 +129,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_GetMediaStream(IAMMultiMediaStream
     MSPID PurposeId;
     unsigned int i;
 
-    TRACE("(%p/%p)->(%p,%p)\n", This, iface, idPurpose, ppMediaStream);
+    TRACE("(%p/%p)->(%s,%p)\n", This, iface, debugstr_guid(idPurpose), ppMediaStream);
 
     for (i = 0; i < This->nbStreams; i++)
     {
@@ -145,11 +145,11 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_GetMediaStream(IAMMultiMediaStream
     return MS_E_NOSTREAM;
 }
 
-static HRESULT WINAPI IAMMultiMediaStreamImpl_EnumMediaStreams(IAMMultiMediaStream* iface, long Index, IMediaStream** ppMediaStream)
+static HRESULT WINAPI IAMMultiMediaStreamImpl_EnumMediaStreams(IAMMultiMediaStream* iface, LONG Index, IMediaStream** ppMediaStream)
 {
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
 
-    FIXME("(%p/%p)->(%ld,%p) stub!\n", This, iface, Index, ppMediaStream);
+    FIXME("(%p/%p)->(%d,%p) stub!\n", This, iface, Index, ppMediaStream);
 
     return E_NOTIMPL;
 }
@@ -238,9 +238,17 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_GetFilterGraph(IAMMultiMediaStream
 {
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
 
-    FIXME("(%p/%p)->(%p) stub!\n", This, iface, ppGraphBuilder);
+    TRACE("(%p/%p)->(%p)\n", This, iface, ppGraphBuilder);
 
-    return E_NOTIMPL;
+    if (!ppGraphBuilder)
+        return E_POINTER;
+
+    if (This->pFilterGraph)
+        return IFilterGraph_QueryInterface(This->pFilterGraph, &IID_IGraphBuilder, (void**)ppGraphBuilder);
+    else
+        *ppGraphBuilder = NULL;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IAMMultiMediaStreamImpl_GetFilter(IAMMultiMediaStream* iface, IMediaStreamFilter** ppFilter)
@@ -260,7 +268,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_AddMediaStream(IAMMultiMediaStream
     IMediaStream* pStream;
     IMediaStream** pNewStreams;
 
-    FIXME("(%p/%p)->(%p,%p,%x,%p) partial stub!\n", This, iface, pStreamObject, PurposeId, dwFlags, ppNewStream);
+    FIXME("(%p/%p)->(%p,%s,%x,%p) partial stub!\n", This, iface, pStreamObject, debugstr_guid(PurposeId), dwFlags, ppNewStream);
 
     if (IsEqualGUID(PurposeId, &MSPID_PrimaryVideo))
         hr = DirectDrawMediaStream_create((IMultiMediaStream*)iface, PurposeId, This->StreamType, &pStream);

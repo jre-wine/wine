@@ -87,7 +87,7 @@ static void OnEnterMenuLoop(HWND hWnd)
 
     /* Update the status bar pane sizes */
     nParts = -1;
-    SendMessageW(hStatusBar, SB_SETPARTS, 1, (long)&nParts);
+    SendMessageW(hStatusBar, SB_SETPARTS, 1, (LPARAM)&nParts);
     bInMenuLoop = TRUE;
     SendMessageW(hStatusBar, SB_SETTEXTW, 0, (LPARAM)&empty);
 }
@@ -259,7 +259,7 @@ static void ExportRegistryFile_StoreSelection(HWND hdlg, OPENFILENAMEW *pOpenFil
         pOpenFileName->lCustData = (LPARAM)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(WCHAR));
 }
 
-static UINT CALLBACK ExportRegistryFile_OFNHookProc(HWND hdlg, UINT uiMsg, WPARAM wParam, LPARAM lParam)
+static UINT_PTR CALLBACK ExportRegistryFile_OFNHookProc(HWND hdlg, UINT uiMsg, WPARAM wParam, LPARAM lParam)
 {
     static OPENFILENAMEW* pOpenFileName;
     OFNOTIFYW *pOfNotify;

@@ -2,6 +2,7 @@
  * Direct3D 10
  *
  * Copyright 2007 Andras Kovacs
+ * Copyright 2009 Henri Verbeet for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -201,6 +202,42 @@ HRESULT WINAPI D3D10CreateDeviceAndSwapChain(IDXGIAdapter *adapter, D3D10_DRIVER
     }
 
     TRACE("Created IDXGISwapChain %p\n", *swapchain);
+
+    return S_OK;
+}
+
+HRESULT WINAPI D3D10CreateEffectFromMemory(void *data, SIZE_T data_size, UINT flags,
+        ID3D10Device *device, ID3D10EffectPool *effect_pool, ID3D10Effect **effect)
+{
+    struct d3d10_effect *object;
+    HRESULT hr;
+
+    FIXME("data %p, data_size %lu, flags %#x, device %p, effect_pool %p, effect %p stub!\n",
+            data, data_size, flags, device, effect_pool, effect);
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate D3D10 effect object memory\n");
+        return E_OUTOFMEMORY;
+    }
+
+    object->vtbl = &d3d10_effect_vtbl;
+    object->refcount = 1;
+    ID3D10Device_AddRef(device);
+    object->device = device;
+
+    hr = d3d10_effect_parse(object, data, data_size);
+    if (FAILED(hr))
+    {
+        ERR("Failed to parse effect\n");
+        IUnknown_Release((IUnknown *)object);
+        return hr;
+    }
+
+    *effect = (ID3D10Effect *)object;
+
+    TRACE("Created ID3D10Effect %p\n", object);
 
     return S_OK;
 }

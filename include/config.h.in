@@ -2,9 +2,6 @@
 
 #define __WINE_CONFIG_H
 
-/* Specifies the compiler flag that forces a short wchar_t */
-#undef CC_FLAG_SHORT_WCHAR
-
 /* Define to 1 if you have the <alias.h> header file. */
 #undef HAVE_ALIAS_H
 
@@ -43,9 +40,6 @@
 
 /* Define to 1 if you have the `chsize' function. */
 #undef HAVE_CHSIZE
-
-/* Define to 1 if you have the `clone' function. */
-#undef HAVE_CLONE
 
 /* Define to 1 if you have the <CoreAudio/CoreAudio.h> header file. */
 #undef HAVE_COREAUDIO_COREAUDIO_H
@@ -246,6 +240,9 @@
 /* Define to 1 if you have the <ieeefp.h> header file. */
 #undef HAVE_IEEEFP_H
 
+/* Define to 1 if you have the <inet/mib2.h> header file. */
+#undef HAVE_INET_MIB2_H
+
 /* Define to 1 if you have the `inet_network' function. */
 #undef HAVE_INET_NETWORK
 
@@ -257,6 +254,12 @@
 
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
+
+/* Define to 1 if you have the `IOHIDManagerCreate' function. */
+#undef HAVE_IOHIDMANAGERCREATE
+
+/* Define to 1 if you have the <IOKit/hid/IOHIDLib.h> header file. */
+#undef HAVE_IOKIT_HID_IOHIDLIB_H
 
 /* Define to 1 if you have the <IOKit/IOKitLib.h> header file. */
 #undef HAVE_IOKIT_IOKITLIB_H
@@ -278,6 +281,9 @@
 
 /* Define to 1 if you have the `kqueue' function. */
 #undef HAVE_KQUEUE
+
+/* Define to 1 if you have the <kstat.h> header file. */
+#undef HAVE_KSTAT_H
 
 /* Define to 1 if you have the <lber.h> header file. */
 #undef HAVE_LBER_H
@@ -329,6 +335,9 @@
 
 /* Define to 1 if you have the `i386' library (-li386). */
 #undef HAVE_LIBI386
+
+/* Define to 1 if you have the `kstat' library (-lkstat). */
+#undef HAVE_LIBKSTAT
 
 /* Define to 1 if you have the `ossaudio' library (-lossaudio). */
 #undef HAVE_LIBOSSAUDIO
@@ -422,6 +431,12 @@
 
 /* Define to 1 if you have the <mach/mach.h> header file. */
 #undef HAVE_MACH_MACH_H
+
+/* Define to 1 if you have the <mach-o/dyld_images.h> header file. */
+#undef HAVE_MACH_O_DYLD_IMAGES_H
+
+/* Define to 1 if you have the <mach-o/nlist.h> header file. */
+#undef HAVE_MACH_O_NLIST_H
 
 /* Define to 1 if you have the `memmove' function. */
 #undef HAVE_MEMMOVE
@@ -579,12 +594,6 @@
 /* Define to 1 if you have the <pthread_np.h> header file. */
 #undef HAVE_PTHREAD_NP_H
 
-/* Define to 1 if the system has the type `pthread_rwlockattr_t'. */
-#undef HAVE_PTHREAD_RWLOCKATTR_T
-
-/* Define to 1 if the system has the type `pthread_rwlock_t'. */
-#undef HAVE_PTHREAD_RWLOCK_T
-
 /* Define to 1 if you have the <pwd.h> header file. */
 #undef HAVE_PWD_H
 
@@ -608,9 +617,6 @@
 
 /* Define to 1 if you have the <resolv.h> header file. */
 #undef HAVE_RESOLV_H
-
-/* Define to 1 if you have the `rfork' function. */
-#undef HAVE_RFORK
 
 /* Define to 1 if you have the <sched.h> header file. */
 #undef HAVE_SCHED_H
@@ -711,6 +717,9 @@
 /* Define to 1 if you have the `strncasecmp' function. */
 #undef HAVE_STRNCASECMP
 
+/* Define to 1 if you have the <stropts.h> header file. */
+#undef HAVE_STROPTS_H
+
 /* Define to 1 if you have the `strtold' function. */
 #undef HAVE_STRTOLD
 
@@ -722,6 +731,9 @@
 
 /* Define to 1 if `direction' is member of `struct ff_effect'. */
 #undef HAVE_STRUCT_FF_EFFECT_DIRECTION
+
+/* Define to 1 if `icps_outhist' is member of `struct icmpstat'. */
+#undef HAVE_STRUCT_ICMPSTAT_ICPS_OUTHIST
 
 /* Define to 1 if `msg_accrights' is member of `struct msghdr'. */
 #undef HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS
@@ -905,6 +917,9 @@
 
 /* Define to 1 if you have the <sys/thr.h> header file. */
 #undef HAVE_SYS_THR_H
+
+/* Define to 1 if you have the <sys/tihdr.h> header file. */
+#undef HAVE_SYS_TIHDR_H
 
 /* Define to 1 if you have the <sys/timeout.h> header file. */
 #undef HAVE_SYS_TIMEOUT_H

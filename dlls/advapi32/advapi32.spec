@@ -272,7 +272,7 @@
 # @ stub GetSecurityDescriptorRMControl
 @ stdcall GetSecurityDescriptorSacl (ptr ptr ptr ptr)
 @ stdcall GetSecurityInfo (long long long ptr ptr ptr ptr ptr)
-# @ stub GetSecurityInfoExA
+@ stdcall GetSecurityInfoExA (long long long str str ptr ptr ptr ptr)
 @ stdcall GetSecurityInfoExW (long long long wstr wstr ptr ptr ptr ptr)
 @ stdcall GetServiceDisplayNameA(ptr str ptr ptr)
 @ stdcall GetServiceDisplayNameW(ptr wstr ptr ptr)
@@ -635,12 +635,12 @@
 @ stdcall SystemFunction036(ptr long) # RtlGenRandom
 @ stdcall SystemFunction040(ptr long long) # RtlEncryptMemory
 @ stdcall SystemFunction041(ptr long long) # RtlDecryptMemory
-@ stub TraceEvent
+@ stdcall TraceEvent(double ptr)
 @ stub TraceEventInstance
 @ stub TraceMessage
 @ stub TraceMessageVa
 # @ stub TreeResetNamedSecurityInfoA
-# @ stub TreeResetNamedSecurityInfoW
+@ stdcall TreeResetNamedSecurityInfoW(wstr long long ptr ptr ptr ptr long ptr long ptr)
 # @ stub TrusteeAccessToObjectA
 # @ stub TrusteeAccessToObjectW
 # @ stub UninstallApplication

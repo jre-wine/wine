@@ -146,6 +146,7 @@ typedef struct
 
 static char *xdg_config_dir;
 static char *xdg_data_dir;
+static char *xdg_desktop_dir;
 
 /* Icon extraction routines
  *
@@ -480,7 +481,7 @@ static BOOL extract_icon32(LPCWSTR szFileName, int nIndex, char *szXPMFileName)
         sEnumRes.nIndex = nIndex;
         if (!EnumResourceNamesW(hModule, (LPCWSTR)RT_GROUP_ICON,
                                 EnumResNameProc, (LONG_PTR)&sEnumRes) &&
-            sEnumRes.nIndex != 0)
+            sEnumRes.nIndex != -1)
         {
             WINE_TRACE("EnumResourceNamesW failed, error %d\n", GetLastError());
         }
@@ -1382,7 +1383,7 @@ static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bWait )
             lastEntry = link_name;
         else
             ++lastEntry;
-        location = heap_printf("%s/Desktop/%s.desktop", getenv("HOME"), lastEntry);
+        location = heap_printf("%s/%s.desktop", xdg_desktop_dir, lastEntry);
         if (location)
         {
             r = !write_desktop_entry(location, lastEntry, escaped_path, escaped_args, escaped_description, work_dir, icon_name);
@@ -1464,7 +1465,7 @@ static BOOL InvokeShellLinkerForURL( IUniformResourceLocatorW *url, LPCWSTR link
             lastEntry = link_name;
         else
             ++lastEntry;
-        location = heap_printf("%s/Desktop/%s.desktop", getenv("HOME"), lastEntry);
+        location = heap_printf("%s/%s.desktop", xdg_desktop_dir, lastEntry);
         if (location)
         {
             r = !write_desktop_entry(location, lastEntry, "winebrowser", escaped_urlPath, NULL, NULL, NULL);
@@ -1589,6 +1590,10 @@ static BOOL Process_Link( LPCWSTR linkname, BOOL bWait )
             InvokeShellLinker( sl, fullname, FALSE );
         }
     }
+    else
+    {
+        WINE_ERR("unable to load %s\n", wine_dbgstr_w(linkname));
+    }
 
     IPersistFile_Release( pf );
     IShellLinkW_Release( sl );
@@ -1663,6 +1668,57 @@ static BOOL Process_URL( LPCWSTR urlname, BOOL bWait )
     return !r;
 }
 
+static void RefreshFileTypeAssociations(void)
+{
+    HANDLE hSem = NULL;
+    char *mime_dir = NULL;
+    char *packages_dir = NULL;
+    char *applications_dir = NULL;
+
+    hSem = CreateSemaphoreA( NULL, 1, 1, "winemenubuilder_semaphore");
+    if( WAIT_OBJECT_0 != MsgWaitForMultipleObjects( 1, &hSem, FALSE, INFINITE, QS_ALLINPUT ) )
+    {
+        WINE_ERR("failed wait for semaphore\n");
+        CloseHandle(hSem);
+        hSem = NULL;
+        goto end;
+    }
+
+    mime_dir = heap_printf("%s/mime", xdg_data_dir);
+    if (mime_dir == NULL)
+    {
+        WINE_ERR("out of memory\n");
+        goto end;
+    }
+    create_directories(mime_dir);
+
+    packages_dir = heap_printf("%s/packages", mime_dir);
+    if (packages_dir == NULL)
+    {
+        WINE_ERR("out of memory\n");
+        goto end;
+    }
+    create_directories(packages_dir);
+
+    applications_dir = heap_printf("%s/applications", xdg_data_dir);
+    if (applications_dir == NULL)
+    {
+        WINE_ERR("out of memory\n");
+        goto end;
+    }
+    create_directories(applications_dir);
+
+end:
+    if (hSem)
+    {
+        ReleaseSemaphore(hSem, 1, NULL);
+        CloseHandle(hSem);
+    }
+    HeapFree(GetProcessHeap(), 0, mime_dir);
+    HeapFree(GetProcessHeap(), 0, packages_dir);
+    HeapFree(GetProcessHeap(), 0, applications_dir);
+}
+
 static CHAR *next_token( LPSTR *p )
 {
     LPSTR token = NULL, t = *p;
@@ -1701,6 +1757,16 @@ static CHAR *next_token( LPSTR *p )
 
 static BOOL init_xdg(void)
 {
+    WCHAR shellDesktopPath[MAX_PATH];
+    HRESULT hr = SHGetFolderPathW(NULL, CSIDL_DESKTOP, NULL, SHGFP_TYPE_CURRENT, shellDesktopPath);
+    if (SUCCEEDED(hr))
+        xdg_desktop_dir = wine_get_unix_file_name(shellDesktopPath);
+    if (xdg_desktop_dir == NULL)
+    {
+        WINE_ERR("error looking up the desktop directory\n");
+        return FALSE;
+    }
+
     if (getenv("XDG_CONFIG_HOME"))
         xdg_config_dir = heap_printf("%s/menus/applications-merged", getenv("XDG_CONFIG_HOME"));
     else
@@ -1726,6 +1792,7 @@ static BOOL init_xdg(void)
         }
         HeapFree(GetProcessHeap(), 0, xdg_config_dir);
     }
+    WINE_ERR("out of memory\n");
     return FALSE;
 }
 
@@ -1740,13 +1807,19 @@ int PASCAL WinMain (HINSTANCE hInstance, HINSTANCE prev, LPSTR cmdline, int show
     BOOL bURL = FALSE;
     int ret = 0;
 
-    init_xdg();
+    if (!init_xdg())
+        return 1;
 
     for( p = cmdline; p && *p; )
     {
         token = next_token( &p );
 	if( !token )
 	    break;
+        if( !lstrcmpA( token, "-a" ) )
+        {
+            RefreshFileTypeAssociations();
+            break;
+        }
         if( !lstrcmpA( token, "-w" ) )
             bWait = TRUE;
         else if ( !lstrcmpA( token, "-u" ) )

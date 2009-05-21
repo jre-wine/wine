@@ -149,14 +149,16 @@ void wait_suspend( CONTEXT *context )
 {
     LARGE_INTEGER timeout;
     int saved_errno = errno;
+    context_t server_context;
+
+    context_to_server( &server_context, context );
 
     /* store the context we got at suspend time */
     SERVER_START_REQ( set_thread_context )
     {
         req->handle  = wine_server_obj_handle( GetCurrentThread() );
-        req->flags   = CONTEXT_FULL;
         req->suspend = 1;
-        wine_server_add_data( req, context, sizeof(*context) );
+        wine_server_add_data( req, &server_context, sizeof(server_context) );
         wine_server_call( req );
     }
     SERVER_END_REQ;
@@ -169,13 +171,13 @@ void wait_suspend( CONTEXT *context )
     SERVER_START_REQ( get_thread_context )
     {
         req->handle  = wine_server_obj_handle( GetCurrentThread() );
-        req->flags   = CONTEXT_FULL;
         req->suspend = 1;
-        wine_server_set_reply( req, context, sizeof(*context) );
+        wine_server_set_reply( req, &server_context, sizeof(server_context) );
         wine_server_call( req );
     }
     SERVER_END_REQ;
 
+    context_from_server( context, &server_context );
     errno = saved_errno;
 }
 
@@ -187,15 +189,18 @@ void wait_suspend( CONTEXT *context )
  */
 static NTSTATUS send_debug_event( EXCEPTION_RECORD *rec, int first_chance, CONTEXT *context )
 {
-    int ret;
+    NTSTATUS ret;
     DWORD i;
     HANDLE handle = 0;
     client_ptr_t params[EXCEPTION_MAXIMUM_PARAMETERS];
+    context_t server_context;
 
     if (!NtCurrentTeb()->Peb->BeingDebugged) return 0;  /* no debugger present */
 
     for (i = 0; i < min( rec->NumberParameters, EXCEPTION_MAXIMUM_PARAMETERS ); i++)
         params[i] = rec->ExceptionInformation[i];
+
+    context_to_server( &server_context, context );
 
     SERVER_START_REQ( queue_exception_event )
     {
@@ -206,7 +211,7 @@ static NTSTATUS send_debug_event( EXCEPTION_RECORD *rec, int first_chance, CONTE
         req->address = wine_server_client_ptr( rec->ExceptionAddress );
         req->len     = i * sizeof(params[0]);
         wine_server_add_data( req, params, req->len );
-        wine_server_add_data( req, context, sizeof(*context) );
+        wine_server_add_data( req, &server_context, sizeof(server_context) );
         if (!wine_server_call( req )) handle = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
@@ -217,10 +222,11 @@ static NTSTATUS send_debug_event( EXCEPTION_RECORD *rec, int first_chance, CONTE
     SERVER_START_REQ( get_exception_status )
     {
         req->handle = wine_server_obj_handle( handle );
-        wine_server_set_reply( req, context, sizeof(*context) );
+        wine_server_set_reply( req, &server_context, sizeof(server_context) );
         ret = wine_server_call( req );
     }
     SERVER_END_REQ;
+    if (ret >= 0) context_from_server( context, &server_context );
     return ret;
 }
 
@@ -243,7 +249,10 @@ static LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
     LIST_FOR_EACH( ptr, &vectored_handlers )
     {
         VECTORED_HANDLER *handler = LIST_ENTRY( ptr, VECTORED_HANDLER, entry );
+        TRACE( "calling handler at %p code=%x flags=%x\n",
+               handler->func, rec->ExceptionCode, rec->ExceptionFlags );
         ret = handler->func( &except_ptrs );
+        TRACE( "handler at %p returned %x\n", handler->func, ret );
         if (ret == EXCEPTION_CONTINUE_EXECUTION) break;
     }
     RtlLeaveCriticalSection( &vectored_handlers_section );
@@ -312,7 +321,7 @@ static NTSTATUS call_stack_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
  *
  * Implementation of NtRaiseException.
  */
-static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance )
+NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance )
 {
     NTSTATUS status;
 
@@ -401,35 +410,21 @@ NTSTATUS WINAPI NtRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL 
 }
 
 
-/***********************************************************************
- *		RtlRaiseException (NTDLL.@)
+/*******************************************************************
+ *		raise_status
+ *
+ * Implementation of RtlRaiseStatus with a specific exception record.
  */
-void WINAPI __regs_RtlRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context )
+void raise_status( NTSTATUS status, EXCEPTION_RECORD *rec )
 {
-    NTSTATUS status = raise_exception( rec, context, TRUE );
-    if (status != STATUS_SUCCESS)
-    {
-        EXCEPTION_RECORD newrec;
-        newrec.ExceptionCode    = status;
-        newrec.ExceptionFlags   = EH_NONCONTINUABLE;
-        newrec.ExceptionRecord  = rec;
-        newrec.NumberParameters = 0;
-        RtlRaiseException( &newrec );  /* never returns */
-    }
-}
+    EXCEPTION_RECORD ExceptionRec;
 
-/**********************************************************************/
-
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( RtlRaiseException, 1 )
-#else
-void WINAPI RtlRaiseException( EXCEPTION_RECORD *rec )
-{
-    CONTEXT context;
-    RtlCaptureContext( &context );
-    __regs_RtlRaiseException( rec, &context );
+    ExceptionRec.ExceptionCode    = status;
+    ExceptionRec.ExceptionFlags   = EH_NONCONTINUABLE;
+    ExceptionRec.ExceptionRecord  = rec;
+    ExceptionRec.NumberParameters = 0;
+    for (;;) RtlRaiseException( &ExceptionRec );  /* never returns */
 }
-#endif
 
 
 /*******************************************************************
@@ -438,7 +433,7 @@ void WINAPI RtlRaiseException( EXCEPTION_RECORD *rec )
 void WINAPI __regs_RtlUnwind( EXCEPTION_REGISTRATION_RECORD* pEndFrame, PVOID unusedEip,
                               PEXCEPTION_RECORD pRecord, PVOID returnEax, CONTEXT *context )
 {
-    EXCEPTION_RECORD record, newrec;
+    EXCEPTION_RECORD record;
     EXCEPTION_REGISTRATION_RECORD *frame, *dispatch;
     DWORD res;
 
@@ -467,23 +462,12 @@ void WINAPI __regs_RtlUnwind( EXCEPTION_REGISTRATION_RECORD* pEndFrame, PVOID un
     {
         /* Check frame address */
         if (pEndFrame && (frame > pEndFrame))
-        {
-            newrec.ExceptionCode    = STATUS_INVALID_UNWIND_TARGET;
-            newrec.ExceptionFlags   = EH_NONCONTINUABLE;
-            newrec.ExceptionRecord  = pRecord;
-            newrec.NumberParameters = 0;
-            RtlRaiseException( &newrec );  /* never returns */
-        }
+            raise_status( STATUS_INVALID_UNWIND_TARGET, pRecord );
+
         if (((void*)frame < NtCurrentTeb()->Tib.StackLimit) ||
             ((void*)(frame+1) > NtCurrentTeb()->Tib.StackBase) ||
             (UINT_PTR)frame & 3)
-        {
-            newrec.ExceptionCode    = STATUS_BAD_STACK;
-            newrec.ExceptionFlags   = EH_NONCONTINUABLE;
-            newrec.ExceptionRecord  = pRecord;
-            newrec.NumberParameters = 0;
-            RtlRaiseException( &newrec );  /* never returns */
-        }
+            raise_status( STATUS_BAD_STACK, pRecord );
 
         /* Call handler */
         TRACE( "calling handler at %p code=%x flags=%x\n",
@@ -499,11 +483,7 @@ void WINAPI __regs_RtlUnwind( EXCEPTION_REGISTRATION_RECORD* pEndFrame, PVOID un
             frame = dispatch;
             break;
         default:
-            newrec.ExceptionCode    = STATUS_INVALID_DISPOSITION;
-            newrec.ExceptionFlags   = EH_NONCONTINUABLE;
-            newrec.ExceptionRecord  = pRecord;
-            newrec.NumberParameters = 0;
-            RtlRaiseException( &newrec );  /* never returns */
+            raise_status( STATUS_INVALID_DISPOSITION, pRecord );
             break;
         }
         frame = __wine_pop_frame( frame );
@@ -532,13 +512,7 @@ void WINAPI RtlUnwind( PVOID pEndFrame, PVOID unusedEip,
  */
 void WINAPI RtlRaiseStatus( NTSTATUS status )
 {
-    EXCEPTION_RECORD ExceptionRec;
-
-    ExceptionRec.ExceptionCode    = status;
-    ExceptionRec.ExceptionFlags   = EH_NONCONTINUABLE;
-    ExceptionRec.ExceptionRecord  = NULL;
-    ExceptionRec.NumberParameters = 0;
-    RtlRaiseException( &ExceptionRec );
+    raise_status( status, NULL );
 }
 
 

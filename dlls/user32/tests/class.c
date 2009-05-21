@@ -234,42 +234,48 @@ static void test_styles(void)
     check_style( "#32772",     1, 0, 0 );  /* icon title */
 }
 
-static void check_class(HINSTANCE inst, const char *name, const char *menu_name)
+static void check_class_(int line, HINSTANCE inst, const char *name, const char *menu_name)
 {
     WNDCLASS wc;
     UINT atom = GetClassInfo(inst,name,&wc);
-    ok( atom, "Class %s %p not found\n", name, inst );
+    ok_(__FILE__,line)( atom, "Class %s %p not found\n", name, inst );
     if (atom)
     {
         if (wc.lpszMenuName && menu_name)
-            ok( !strcmp( menu_name, wc.lpszMenuName ), "Wrong name %s/%s for class %s %p\n",
-                wc.lpszMenuName, menu_name, name, inst );
+            ok_(__FILE__,line)( !strcmp( menu_name, wc.lpszMenuName ),
+                                "Wrong name %s/%s for class %s %p\n",
+                                wc.lpszMenuName, menu_name, name, inst );
         else
-            ok( !menu_name == !wc.lpszMenuName, "Wrong name %p/%p for class %s %p\n",
-                wc.lpszMenuName, menu_name, name, inst );
+            ok_(__FILE__,line)( !menu_name == !wc.lpszMenuName, "Wrong name %p/%p for class %s %p\n",
+                                wc.lpszMenuName, menu_name, name, inst );
     }
 }
+#define check_class(inst,name,menu) check_class_(__LINE__,inst,name,menu)
 
-static void check_instance( const char *name, HINSTANCE inst, HINSTANCE info_inst, HINSTANCE gcl_inst )
+static void check_instance_( int line, const char *name, HINSTANCE inst,
+                             HINSTANCE info_inst, HINSTANCE gcl_inst )
 {
     WNDCLASSA wc;
     HWND hwnd;
 
-    ok( GetClassInfo( inst, name, &wc ), "Couldn't find class %s inst %p\n", name, inst );
-    ok( wc.hInstance == info_inst, "Wrong info instance %p/%p for class %s\n",
-        wc.hInstance, info_inst, name );
+    ok_(__FILE__,line)( GetClassInfo( inst, name, &wc ), "Couldn't find class %s inst %p\n", name, inst );
+    ok_(__FILE__,line)( wc.hInstance == info_inst, "Wrong info instance %p/%p for class %s\n",
+                        wc.hInstance, info_inst, name );
     hwnd = CreateWindowExA( 0, name, "test_window", 0, 0, 0, 0, 0, 0, 0, inst, 0 );
-    ok( hwnd != NULL, "Couldn't create window for class %s inst %p\n", name, inst );
-    ok( (HINSTANCE)GetClassLongPtrA( hwnd, GCLP_HMODULE ) == gcl_inst,
-        "Wrong GCL instance %p/%p for class %s\n",
+    ok_(__FILE__,line)( hwnd != NULL, "Couldn't create window for class %s inst %p\n", name, inst );
+    ok_(__FILE__,line)( (HINSTANCE)GetClassLongPtrA( hwnd, GCLP_HMODULE ) == gcl_inst,
+                        "Wrong GCL instance %p/%p for class %s\n",
         (HINSTANCE)GetClassLongPtrA( hwnd, GCLP_HMODULE ), gcl_inst, name );
-    ok( (HINSTANCE)GetWindowLongPtrA( hwnd, GWLP_HINSTANCE ) == inst,
-        "Wrong GWL instance %p/%p for window %s\n",
+    ok_(__FILE__,line)( (HINSTANCE)GetWindowLongPtrA( hwnd, GWLP_HINSTANCE ) == inst,
+                        "Wrong GWL instance %p/%p for window %s\n",
         (HINSTANCE)GetWindowLongPtrA( hwnd, GWLP_HINSTANCE ), inst, name );
-    ok(!UnregisterClassA(name, inst), "UnregisterClassA should fail while exists a class window\n");
-    ok(GetLastError() == ERROR_CLASS_HAS_WINDOWS, "GetLastError() should be set to ERROR_CLASS_HAS_WINDOWS not %d\n", GetLastError());
+    ok_(__FILE__,line)(!UnregisterClassA(name, inst),
+                       "UnregisterClassA should fail while exists a class window\n");
+    ok_(__FILE__,line)(GetLastError() == ERROR_CLASS_HAS_WINDOWS,
+                       "GetLastError() should be set to ERROR_CLASS_HAS_WINDOWS not %d\n", GetLastError());
     DestroyWindow(hwnd);
 }
+#define check_instance(name,inst,info_inst,gcl_inst) check_instance_(__LINE__,name,inst,info_inst,gcl_inst)
 
 struct class_info
 {
@@ -279,7 +285,7 @@ struct class_info
 
 static DWORD WINAPI thread_proc(void *param)
 {
-    struct class_info *class_info = (struct class_info *)param;
+    struct class_info *class_info = param;
 
     check_instance(class_info->name, class_info->inst, class_info->info_inst, class_info->gcl_inst);
 
@@ -415,7 +421,7 @@ static void test_instances(void)
     cls.style = 3;
     ok( RegisterClassA( &cls ), "Failed to register local class for deadbeef\n" );
     hwnd2 = CreateWindowExA( 0, name, "test_window", 0, 0, 0, 0, 0, 0, 0, NULL, 0 );
-    ok( (HINSTANCE)GetClassLongPtrA( hwnd2, GCLP_HMODULE ) == (HINSTANCE)0xdeadbeef,
+    ok( GetClassLongPtrA( hwnd2, GCLP_HMODULE ) == 0xdeadbeef,
         "Didn't get deadbeef class for null instance\n" );
     DestroyWindow( hwnd2 );
     ok( UnregisterClassA( name, (HINSTANCE)0xdeadbeef ), "Unregister failed for deadbeef\n" );
@@ -554,10 +560,7 @@ static void test_instances(void)
     ok( !UnregisterClass( "BUTTON", (HINSTANCE)0x87654321 ), "Unregistered button a second time\n" );
     ok( GetLastError() == ERROR_CLASS_DOES_NOT_EXIST, "Wrong error code %d\n", GetLastError() );
     ok( !GetClassInfo( 0, "BUTTON", &wc ), "Button still exists\n" );
-    ok( GetLastError() == ERROR_CLASS_DOES_NOT_EXIST ||
-        GetLastError() == ERROR_INVALID_PARAMETER || /* W2K3 */
-        GetLastError() == ERROR_SUCCESS /* Vista */,
-        "Wrong error code %d\n", GetLastError() );
+    /* last error not set reliably */
 
     /* we can change the instance of a system class */
     check_instance( "EDIT", (HINSTANCE)0xdeadbeef, (HINSTANCE)0xdeadbeef, user32 );
@@ -592,8 +595,8 @@ static void test_builtinproc(void)
     HWND hwnd;
     int i;
 
-    pDefWindowProcA = (void *)GetProcAddress(GetModuleHandle("user32.dll"), "DefWindowProcA");
-    pDefWindowProcW = (void *)GetProcAddress(GetModuleHandle("user32.dll"), "DefWindowProcW");
+    pDefWindowProcA = GetProcAddress(GetModuleHandle("user32.dll"), "DefWindowProcA");
+    pDefWindowProcW = GetProcAddress(GetModuleHandle("user32.dll"), "DefWindowProcW");
 
     for (i = 0; i < 4; i++)
     {
@@ -800,10 +803,8 @@ static BOOL RegisterTestDialog(HINSTANCE hInstance)
     wcx.hbrBackground = GetStockObject(WHITE_BRUSH);
     wcx.lpszClassName = "TestDialog";
     wcx.lpszMenuName =  "TestDialog";
-    wcx.hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(5),
-        IMAGE_ICON,
-        GetSystemMetrics(SM_CXSMICON),
-        GetSystemMetrics(SM_CYSMICON),
+    wcx.hIconSm = LoadImage(hInstance, MAKEINTRESOURCE(5), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
         LR_DEFAULTCOLOR);
 
     atom = RegisterClassEx(&wcx);

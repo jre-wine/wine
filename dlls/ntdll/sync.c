@@ -728,7 +728,7 @@ NTSTATUS WINAPI NtQueryTimer(
     ULONG Length,
     PULONG ReturnLength)
 {
-    TIMER_BASIC_INFORMATION * basic_info = (TIMER_BASIC_INFORMATION *)TimerInformation;
+    TIMER_BASIC_INFORMATION * basic_info = TimerInformation;
     NTSTATUS status;
     LARGE_INTEGER now;
 
@@ -831,7 +831,7 @@ static int wait_reply( void *cookie )
         server_protocol_perror("wakeup read");
     }
     /* the server closed the connection; time to die... */
-    server_abort_thread(0);
+    abort_thread(0);
 }
 
 
@@ -1429,7 +1429,7 @@ NTSTATUS WINAPI NtQueryIoCompletion( HANDLE CompletionPort, IO_COMPLETION_INFORM
     {
         case IoCompletionBasicInformation:
             {
-                ULONG *info = (ULONG *)CompletionInformation;
+                ULONG *info = CompletionInformation;
 
                 if (RequiredLength) *RequiredLength = sizeof(*info);
                 if (BufferLength != sizeof(*info))

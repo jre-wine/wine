@@ -1026,21 +1026,21 @@ static void fog_test(IDirect3DDevice9 *device)
         }
         IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
         color = getPixelColor(device, 160, 360);
-        ok(color == 0x0000FF00 || color == 0x0000FE00, "Reversed %s fog: z=0.1 has color 0x%08x, expected 0x0000ff00\n", mode, color);
+        ok(color == 0x0000FF00 || color == 0x0000FE00, "Reversed %s fog: z=0.1 has color 0x%08x, expected 0x0000ff00 or 0x0000fe00\n", mode, color);
 
         color = getPixelColor(device, 160, 120);
         r = (color & 0x00ff0000) >> 16;
         g = (color & 0x0000ff00) >>  8;
         b = (color & 0x000000ff);
         ok(r == 0x00 && g >= 0x29 && g <= 0x2d && b >= 0xd2 && b <= 0xd6,
-           "Reversed %s fog: z=0.7 has color 0x%08x, expected\n", mode, color);
+           "Reversed %s fog: z=0.7 has color 0x%08x\n", mode, color);
 
         color = getPixelColor(device, 480, 120);
         r = (color & 0x00ff0000) >> 16;
         g = (color & 0x0000ff00) >>  8;
         b = (color & 0x000000ff);
         ok(r == 0x00 && g >= 0xa8 && g <= 0xac && b >= 0x53 && b <= 0x57,
-           "Reversed %s fog: z=0.4 has color 0x%08x, expected\n", mode, color);
+           "Reversed %s fog: z=0.4 has color 0x%08x\n", mode, color);
 
         color = getPixelColor(device, 480, 360);
         ok(color == 0x000000ff, "Reversed %s fog: z=0.9 has color 0x%08x, expected 0x000000ff\n", mode, color);
@@ -1320,9 +1320,9 @@ out:
 /* This test tests fog in combination with shaders.
  * What's tested: linear fog (vertex and table) with pixel shader
  *                linear table fog with non foggy vertex shader
- *                vertex fog with foggy vertex shader
- * What's not tested: non linear fog with shader
- *                    table fog with foggy vertex shader
+ *                vertex fog with foggy vertex shader, non-linear
+ *                fog with shader, non-linear fog with foggy shader,
+ *                linear table fog with foggy shader
  */
 static void fog_with_shader_test(IDirect3DDevice9 *device)
 {
@@ -1423,6 +1423,25 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
         0x005fa000, 0x0040bf00, 0x0020df00, 0x0000ff00, 0x0000ff00}},
 
         /* vertex shader and pixel shader */
+        /* The next 4 tests would read the fog coord output, but it isn't available.
+         * The result is a fully fogged quad, no matter what the Z coord is. This is on
+         * a geforce 7400, 97.52 driver, Windows Vista, but probably hardware dependent.
+         * These tests should be disabled if some other hardware behaves differently
+         */
+        {1, 1, D3DFOG_NONE, D3DFOG_NONE,
+        {0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00,
+        0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00}},
+        {1, 1, D3DFOG_LINEAR, D3DFOG_NONE,
+        {0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00,
+        0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00}},
+        {1, 1, D3DFOG_EXP, D3DFOG_NONE,
+        {0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00,
+        0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00}},
+        {1, 1, D3DFOG_EXP2, D3DFOG_NONE,
+        {0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00,
+        0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00}},
+
+        /* These use the Z coordinate with linear table fog */
         {1, 1, D3DFOG_NONE, D3DFOG_LINEAR,
         {0x00ff0000, 0x00ff0000, 0x00df2000, 0x00bf4000, 0x009f6000, 0x007f8000,
         0x005fa000, 0x0040bf00, 0x0020df00, 0x0000ff00, 0x0000ff00}},
@@ -1432,11 +1451,17 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
         {1, 1, D3DFOG_EXP2, D3DFOG_LINEAR,
         {0x00ff0000, 0x00ff0000, 0x00df2000, 0x00bf4000, 0x009f6000, 0x007f8000,
         0x005fa000, 0x0040bf00, 0x0020df00, 0x0000ff00, 0x0000ff00}},
-
         {1, 1, D3DFOG_LINEAR, D3DFOG_LINEAR,
         {0x00ff0000, 0x00ff0000, 0x00df2000, 0x00bf4000, 0x009f6000, 0x007f8000,
         0x005fa000, 0x0040bf00, 0x0020df00, 0x0000ff00, 0x0000ff00}},
 
+        /* Non-linear table fog without fog coord */
+        {1, 1, D3DFOG_NONE, D3DFOG_EXP,
+        {0x00ff0000, 0x00e71800, 0x00d12e00, 0x00bd4200, 0x00ab5400, 0x009b6400,
+        0x008d7200, 0x007f8000, 0x00738c00, 0x00689700, 0x005ea100}},
+        {1, 1, D3DFOG_NONE, D3DFOG_EXP2,
+        {0x00fd0200, 0x00f50200, 0x00f50a00, 0x00e91600, 0x00d92600, 0x00c73800,
+        0x00b24d00, 0x009c6300, 0x00867900, 0x00728d00, 0x005ea100}},
 
 #if 0  /* FIXME: these fail on GeForce 8500 */
         /* foggy vertex shader */
@@ -1454,7 +1479,9 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
          0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
 #endif
 
-        /* foggy vertex shader and pixel shader */
+        /* foggy vertex shader and pixel shader. First 4 tests with vertex fog,
+         * all using the fixed fog-coord linear fog
+         */
         {2, 1, D3DFOG_NONE, D3DFOG_NONE,
         {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
          0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
@@ -1468,6 +1495,18 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
         {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
          0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
 
+        /* These use table fog. Here the shader-provided fog coordinate is
+         * ignored and the z coordinate used instead
+         */
+        {2, 1, D3DFOG_NONE, D3DFOG_EXP,
+        {0x00ff0000, 0x00e71800, 0x00d12e00, 0x00bd4200, 0x00ab5400, 0x009b6400,
+        0x008d7200, 0x007f8000, 0x00738c00, 0x00689700, 0x005ea100}},
+        {2, 1, D3DFOG_NONE, D3DFOG_EXP2,
+        {0x00fd0200, 0x00f50200, 0x00f50a00, 0x00e91600, 0x00d92600, 0x00c73800,
+        0x00b24d00, 0x009c6300, 0x00867900, 0x00728d00, 0x005ea100}},
+        {2, 1, D3DFOG_NONE, D3DFOG_LINEAR,
+        {0x00ff0000, 0x00ff0000, 0x00df2000, 0x00bf4000, 0x009f6000, 0x007f8000,
+        0x005fa000, 0x0040bf00, 0x0020df00, 0x0000ff00, 0x0000ff00}},
     };
 
     /* NOTE: changing these values will not affect the tests with foggy vertex shader, as the values are hardcoded in the shader*/
@@ -1539,15 +1578,9 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
 
             /* As the red and green component are the result of blending use 5% tolerance on the expected value */
             color = getPixelColor(device, 128, 240);
-            if(test_data[i].vshader == 1 && test_data[i].tfog == 0 && color != test_data[i].color[j]) {
-                todo_wine ok(color_match(color, test_data[i].color[j], 13),
-                             "fog vs%i ps%i fvm%i ftm%i %d: got color %08x, expected %08x +-5%%(todo)\n",
-                             test_data[i].vshader, test_data[i].pshader, test_data[i].vfog, test_data[i].tfog, j, color, test_data[i].color[j]);
-            } else {
-                ok(color_match(color, test_data[i].color[j], 13),
-                   "fog vs%i ps%i fvm%i ftm%i %d: got color %08x, expected %08x +-5%%\n",
-                   test_data[i].vshader, test_data[i].pshader, test_data[i].vfog, test_data[i].tfog, j, color, test_data[i].color[j]);
-            }
+            ok(color_match(color, test_data[i].color[j], 13),
+                "fog vs%i ps%i fvm%i ftm%i %d: got color %08x, expected %08x +-5%%\n",
+                test_data[i].vshader, test_data[i].pshader, test_data[i].vfog, test_data[i].tfog, j, color, test_data[i].color[j]);
         }
     }
 
@@ -2823,7 +2856,7 @@ static void release_buffer_test(IDirect3DDevice9 *device)
     IDirect3DIndexBuffer9 *ib = NULL;
     HRESULT hr;
     BYTE *data;
-    long ref;
+    LONG ref;
 
     static const struct vertex quad[] = {
         {-1.0,      -1.0,       0.1,        0xffff0000},
@@ -2872,7 +2905,7 @@ static void release_buffer_test(IDirect3DDevice9 *device)
 
     /* Now destroy the bound index buffer and draw again */
     ref = IDirect3DIndexBuffer9_Release(ib);
-    ok(ref == 0, "Index Buffer reference count is %08ld\n", ref);
+    ok(ref == 0, "Index Buffer reference count is %08d\n", ref);
 
     hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff0000ff, 0.0, 0);
     ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %08x\n", hr);
@@ -8545,23 +8578,23 @@ static void pointsize_test(IDirect3DDevice9 *device)
 
     /* ptsize = 16, ptsize_max = 1 --> point has size 1 */
     color = getPixelColor(device, 448-4, 64-4);
-    ok(color == 0x000000ff, "pSize: Pixel (448-4),(64-4) has color 0x%08x, expected 0x00ffffff\n", color);
+    ok(color == 0x000000ff, "pSize: Pixel (448-4),(64-4) has color 0x%08x, expected 0x000000ff\n", color);
     color = getPixelColor(device, 448+4, 64+4);
-    ok(color == 0x000000ff, "pSize: Pixel (448+4),(64+4) has color 0x%08x, expected 0x00ffffff\n", color);
+    ok(color == 0x000000ff, "pSize: Pixel (448+4),(64+4) has color 0x%08x, expected 0x000000ff\n", color);
 
     /* ptsize = 4, ptsize_max = 1, ptsize_min = 16 --> point has size 1 */
     color = getPixelColor(device, 512-4, 64-4);
-    ok(color == 0x000000ff, "pSize: Pixel (448-4),(64-4) has color 0x%08x, expected 0x00ffffff\n", color);
+    ok(color == 0x000000ff, "pSize: Pixel (512-4),(64-4) has color 0x%08x, expected 0x000000ff\n", color);
     color = getPixelColor(device, 512+4, 64+4);
-    ok(color == 0x000000ff, "pSize: Pixel (448+4),(64+4) has color 0x%08x, expected 0x00ffffff\n", color);
+    ok(color == 0x000000ff, "pSize: Pixel (512+4),(64+4) has color 0x%08x, expected 0x000000ff\n", color);
 
     /* ptsize = 1, ptsize_max = default(64), ptsize_min = 16 --> point has size 16
      * Don't be overly picky - just show that the point is bigger than 1 pixel
      */
     color = getPixelColor(device, 576-4, 64-4);
-    ok(color == 0x00ffffff, "pSize: Pixel (448-4),(64-4) has color 0x%08x, expected 0x00ffffff\n", color);
+    ok(color == 0x00ffffff, "pSize: Pixel (576-4),(64-4) has color 0x%08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 576+4, 64+4);
-    ok(color == 0x00ffffff, "pSize: Pixel (448+4),(64+4) has color 0x%08x, expected 0x00ffffff\n", color);
+    ok(color == 0x00ffffff, "pSize: Pixel (576+4),(64+4) has color 0x%08x, expected 0x00ffffff\n", color);
 
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_POINTSIZE, *((DWORD *) (&ptsize_orig)));
     ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed hr=%08x\n", hr);
@@ -8845,7 +8878,7 @@ static void pixelshader_blending_test(IDirect3DDevice9 *device)
                b0 >= max(b1, 1) - 1 && b0 <= b1 + 1,
                "Offscreen failed for %s: Got color %#08x, expected %#08x.\n", test_formats[fmt_index].fmtName, color, test_formats[fmt_index].resultColorBlending);
         } else {
-            /* No pixel shader blending is supported so expected garbage.The type of 'garbage' depends on the driver version and OS.
+            /* No pixel shader blending is supported so expect garbage. The type of 'garbage' depends on the driver version and OS.
              * E.g. on G16R16 ati reports (on old r9600 drivers) 0x00ffffff and on modern ones 0x002010ff which is also what Nvidia
              * reports. On Vista Nvidia seems to report 0x00ffffff on Geforce7 cards. */
             color = getPixelColor(device, 320, 240);
@@ -9068,11 +9101,11 @@ static void stream_test(IDirect3DDevice9 *device)
     hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, (D3DSTREAMSOURCE_INSTANCEDATA | 0));
     ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %08x\n", hr);
     hr = IDirect3DDevice9_GetStreamSourceFreq(device, 1, &ind);
-    ok(hr == D3D_OK && ind == (0 | D3DSTREAMSOURCE_INSTANCEDATA), "IDirect3DDevice9_GetStreamSourceFreq failed with %08x\n", hr);
+    ok(hr == D3D_OK && ind == (0U | D3DSTREAMSOURCE_INSTANCEDATA), "IDirect3DDevice9_GetStreamSourceFreq failed with %08x\n", hr);
     hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, (D3DSTREAMSOURCE_INSTANCEDATA | D3DSTREAMSOURCE_INDEXEDDATA | 0));
     ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_SetStreamSourceFreq failed with %08x\n", hr);
     hr = IDirect3DDevice9_GetStreamSourceFreq(device, 1, &ind);
-    ok(hr == D3D_OK && ind == (0 | D3DSTREAMSOURCE_INSTANCEDATA), "IDirect3DDevice9_GetStreamSourceFreq failed with %08x\n", hr);
+    ok(hr == D3D_OK && ind == (0U | D3DSTREAMSOURCE_INSTANCEDATA), "IDirect3DDevice9_GetStreamSourceFreq failed with %08x\n", hr);
 
     /* set the default value back */
     hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, 1);
@@ -9865,6 +9898,133 @@ static void zwriteenable_test(IDirect3DDevice9 *device) {
     ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed with 0x%08x\n", hr);
 }
 
+static void alphatest_test(IDirect3DDevice9 *device) {
+#define ALPHATEST_PASSED 0x0000ff00
+#define ALPHATEST_FAILED 0x00ff0000
+    struct {
+        D3DCMPFUNC  func;
+        DWORD       color_less;
+        DWORD       color_equal;
+        DWORD       color_greater;
+    } testdata[] = {
+        {   D3DCMP_NEVER,           ALPHATEST_FAILED, ALPHATEST_FAILED, ALPHATEST_FAILED },
+        {   D3DCMP_LESS,            ALPHATEST_PASSED, ALPHATEST_FAILED, ALPHATEST_FAILED },
+        {   D3DCMP_EQUAL,           ALPHATEST_FAILED, ALPHATEST_PASSED, ALPHATEST_FAILED },
+        {   D3DCMP_LESSEQUAL,       ALPHATEST_PASSED, ALPHATEST_PASSED, ALPHATEST_FAILED },
+        {   D3DCMP_GREATER,         ALPHATEST_FAILED, ALPHATEST_FAILED, ALPHATEST_PASSED },
+        {   D3DCMP_NOTEQUAL,        ALPHATEST_PASSED, ALPHATEST_FAILED, ALPHATEST_PASSED },
+        {   D3DCMP_GREATEREQUAL,    ALPHATEST_FAILED, ALPHATEST_PASSED, ALPHATEST_PASSED },
+        {   D3DCMP_ALWAYS,          ALPHATEST_PASSED, ALPHATEST_PASSED, ALPHATEST_PASSED },
+    };
+    unsigned int i, j;
+    HRESULT hr;
+    DWORD color;
+    struct vertex quad[] = {
+        {   -1.0,    -1.0,   0.1,    ALPHATEST_PASSED | 0x80000000  },
+        {    1.0,    -1.0,   0.1,    ALPHATEST_PASSED | 0x80000000  },
+        {   -1.0,     1.0,   0.1,    ALPHATEST_PASSED | 0x80000000  },
+        {    1.0,     1.0,   0.1,    ALPHATEST_PASSED | 0x80000000  },
+    };
+    D3DCAPS9 caps;
+
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ALPHATESTENABLE, TRUE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed with 0x%08x\n", hr);
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_DIFFUSE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed with 0x%08x\n", hr);
+
+    for(j = 0; j < 2; j++) {
+        if(j == 1) {
+            /* Try a pixel shader instead of fixed function. The wined3d code may emulate
+             * the alpha test either for performance reasons(floating point RTs) or to work
+             * around driver bugs(Geforce 7x00 cards on MacOS). There may be a different
+             * codepath for ffp and shader in this case, and the test should cover both
+             */
+            IDirect3DPixelShader9 *ps;
+            DWORD shader_code[] = {
+                0xffff0101,                                 /* ps_1_1           */
+                0x00000001, 0x800f0000, 0x90e40000,         /* mov r0, v0       */
+                0x0000ffff                                  /* end              */
+            };
+            memset(&caps, 0, sizeof(caps));
+            IDirect3DDevice9_GetDeviceCaps(device, &caps);
+            ok(hr == D3D_OK, "IDirect3DDevice9_GetDeviceCaps failed with 0x%08x\n", hr);
+            if(caps.PixelShaderVersion < D3DPS_VERSION(1, 1)) {
+                break;
+            }
+
+            hr = IDirect3DDevice9_CreatePixelShader(device, shader_code, &ps);
+            ok(hr == D3D_OK, "IDirect3DDevice9_CreatePixelShader failed with 0x%08x\n", hr);
+            IDirect3DDevice9_SetPixelShader(device, ps);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader failed with 0x%08x\n", hr);
+            IDirect3DPixelShader9_Release(ps);
+        }
+
+        for(i = 0; i < (sizeof(testdata)/sizeof(testdata[0])); i++) {
+            hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ALPHAFUNC, testdata[i].func);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed with 0x%08x\n", hr);
+
+            hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, ALPHATEST_FAILED, 0.0, 0);
+            ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with 0x%08x\n", hr);
+            hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ALPHAREF, 0x90);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed with 0x%08x\n", hr);
+            hr = IDirect3DDevice9_BeginScene(device);
+            ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed with 0x%08x\n", hr);
+            if(SUCCEEDED(hr)) {
+                hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(*quad));
+                ok(SUCCEEDED(hr), "DrawPrimitiveUP failed with 0x%08x\n", hr);
+                hr = IDirect3DDevice9_EndScene(device);
+                ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with 0x%08x\n", hr);
+            }
+            hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+            ok(SUCCEEDED(hr), "IDirect3DDevice9_Present failed with 0x%08x\n", hr);
+            color = getPixelColor(device, 320, 240);
+            ok(color_match(color, testdata[i].color_less, 1), "Alphatest failed. Got color 0x%08x, expected 0x%08x. alpha < ref, func %u\n",
+            color, testdata[i].color_less, testdata[i].func);
+
+            hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, ALPHATEST_FAILED, 0.0, 0);
+            ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with 0x%08x\n", hr);
+            hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ALPHAREF, 0x80);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed with 0x%08x\n", hr);
+            hr = IDirect3DDevice9_BeginScene(device);
+            ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed with 0x%08x\n", hr);
+            if(SUCCEEDED(hr)) {
+                hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(*quad));
+                ok(SUCCEEDED(hr), "DrawPrimitiveUP failed with 0x%08x\n", hr);
+                hr = IDirect3DDevice9_EndScene(device);
+                ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with 0x%08x\n", hr);
+            }
+            hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+            ok(SUCCEEDED(hr), "IDirect3DDevice9_Present failed with 0x%08x\n", hr);
+            color = getPixelColor(device, 320, 240);
+            ok(color_match(color, testdata[i].color_equal, 1), "Alphatest failed. Got color 0x%08x, expected 0x%08x. alpha == ref, func %u\n",
+            color, testdata[i].color_equal, testdata[i].func);
+
+            hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, ALPHATEST_FAILED, 0.0, 0);
+            ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with 0x%08x\n", hr);
+            hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ALPHAREF, 0x70);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed with 0x%08x\n", hr);
+            hr = IDirect3DDevice9_BeginScene(device);
+            ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed with 0x%08x\n", hr);
+            if(SUCCEEDED(hr)) {
+                hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(*quad));
+                ok(SUCCEEDED(hr), "DrawPrimitiveUP failed with 0x%08x\n", hr);
+                hr = IDirect3DDevice9_EndScene(device);
+                ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with 0x%08x\n", hr);
+            }
+            hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+            ok(SUCCEEDED(hr), "IDirect3DDevice9_Present failed with 0x%08x\n", hr);
+            color = getPixelColor(device, 320, 240);
+            ok(color_match(color, testdata[i].color_greater, 1), "Alphatest failed. Got color 0x%08x, expected 0x%08x. alpha > ref, func %u\n",
+            color, testdata[i].color_greater, testdata[i].func);
+        }
+    }
+
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ALPHATESTENABLE, FALSE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed with 0x%08x\n", hr);
+    IDirect3DDevice9_SetPixelShader(device, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader failed with 0x%08x\n", hr);
+}
+
 START_TEST(visual)
 {
     IDirect3DDevice9 *device_ptr;
@@ -9962,6 +10122,7 @@ START_TEST(visual)
     np2_stretch_rect_test(device_ptr);
     yuv_color_test(device_ptr);
     zwriteenable_test(device_ptr);
+    alphatest_test(device_ptr);
 
     if (caps.VertexShaderVersion >= D3DVS_VERSION(1, 1))
     {

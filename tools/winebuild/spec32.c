@@ -30,11 +30,20 @@
 #include <stdarg.h>
 #include <string.h>
 
-#include "windef.h"
-#include "winbase.h"
-#include "wine/exception.h"
 #include "build.h"
 
+#define IMAGE_FILE_MACHINE_UNKNOWN 0
+#define IMAGE_FILE_MACHINE_I386    0x014c
+#define IMAGE_FILE_MACHINE_ALPHA   0x0184
+#define IMAGE_FILE_MACHINE_POWERPC 0x01f0
+#define IMAGE_FILE_MACHINE_AMD64   0x8664
+
+#define IMAGE_SIZEOF_NT_OPTIONAL32_HEADER 224
+#define IMAGE_SIZEOF_NT_OPTIONAL64_HEADER 240
+
+#define IMAGE_NT_OPTIONAL_HDR32_MAGIC 0x10b
+#define IMAGE_NT_OPTIONAL_HDR64_MAGIC 0x20b
+#define IMAGE_ROM_OPTIONAL_HDR_MAGIC  0x107
 
 /* check if entry point needs a relay thunk */
 static inline int needs_relay( const ORDDEF *odp )
@@ -186,7 +195,7 @@ static void output_relay_debug( DLLSPEC *spec )
  *
  * Output the export table for a Win32 module.
  */
-static void output_exports( DLLSPEC *spec )
+void output_exports( DLLSPEC *spec )
 {
     int i, fwd_size = 0;
     int nr_exports = spec->base <= spec->limit ? spec->limit - spec->base + 1 : 0;
@@ -308,8 +317,7 @@ static void output_exports( DLLSPEC *spec )
 
     /* output relays */
 
-    /* we only support relay debugging on i386 and x86_64 */
-    if (target_cpu != CPU_x86 && target_cpu != CPU_x86_64)
+    if (!has_relays( spec ))
     {
         output( "\t%s 0\n", get_asm_ptr_keyword() );
         return;
@@ -366,17 +374,14 @@ static void output_asm_constructor( const char *constructor )
 
 
 /*******************************************************************
- *         BuildSpec32File
+ *         output_module
  *
- * Build a Win32 C file from a spec file.
+ * Output the module data.
  */
-void BuildSpec32File( DLLSPEC *spec )
+void output_module( DLLSPEC *spec )
 {
     int machine = 0;
     unsigned int page_size = get_page_size();
-
-    resolve_imports( spec );
-    output_standard_file_header();
 
     /* Reserve some space for the PE header */
 
@@ -420,7 +425,7 @@ void BuildSpec32File( DLLSPEC *spec )
     output( "%s\n", asm_globl("__wine_spec_nt_header") );
     output( ".L__wine_spec_rva_base:\n" );
 
-    output( "\t.long 0x%04x\n", IMAGE_NT_SIGNATURE );    /* Signature */
+    output( "\t.long 0x4550\n" );         /* Signature */
     switch(target_cpu)
     {
     case CPU_x86:     machine = IMAGE_FILE_MACHINE_I386; break;
@@ -451,7 +456,7 @@ void BuildSpec32File( DLLSPEC *spec )
     output( "\t.long 0\n" );              /* SizeOfUninitializedData */
     /* note: we expand the AddressOfEntryPoint field on 64-bit by overwriting the BaseOfCode field */
     output( "\t%s %s\n",                  /* AddressOfEntryPoint */
-             get_asm_ptr_keyword(), asm_name(spec->init_func) );
+            get_asm_ptr_keyword(), spec->init_func ? asm_name(spec->init_func) : "0" );
     if (get_ptr_size() == 4)
     {
         output( "\t.long 0\n" );          /* BaseOfCode */
@@ -522,11 +527,24 @@ void BuildSpec32File( DLLSPEC *spec )
     if (target_platform == PLATFORM_APPLE)
         output( "\t.lcomm %s,4\n", asm_name("_end") );
 
+    output_asm_constructor( "__wine_spec_init_ctor" );
+}
+
+
+/*******************************************************************
+ *         BuildSpec32File
+ *
+ * Build a Win32 C file from a spec file.
+ */
+void BuildSpec32File( DLLSPEC *spec )
+{
+    resolve_imports( spec );
+    output_standard_file_header();
+    output_module( spec );
     output_stubs( spec );
     output_exports( spec );
     output_imports( spec );
     output_resources( spec );
-    output_asm_constructor( "__wine_spec_init_ctor" );
     output_gnu_stack_note();
 }
 

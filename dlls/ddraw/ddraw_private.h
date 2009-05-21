@@ -385,7 +385,7 @@ struct IDirect3DDeviceImpl
     /* Other object connections */
     IWineD3DDevice          *wineD3DDevice;
     IDirectDrawImpl         *ddraw;
-    IWineD3DIndexBuffer     *indexbuffer;
+    IWineD3DBuffer          *indexbuffer;
     IDirectDrawSurfaceImpl  *target;
     BOOL                    OffScreenTarget;
 
@@ -681,12 +681,13 @@ struct IDirect3DVertexBufferImpl
     LONG                 ref;
 
     /*** WineD3D and ddraw links ***/
-    IWineD3DVertexBuffer *wineD3DVertexBuffer;
+    IWineD3DBuffer *wineD3DVertexBuffer;
     IWineD3DVertexDeclaration *wineD3DVertexDeclaration;
     IDirectDrawImpl *ddraw;
 
     /*** Storage for D3D7 specific things ***/
     DWORD                Caps;
+    DWORD                fvf;
 };
 
 /* The Vtables */
@@ -721,6 +722,8 @@ void DDRAW_dump_cooperativelevel(DWORD cooplevel);
 /* This only needs to be here as long the processvertices functionality of
  * IDirect3DExecuteBuffer isn't in WineD3D */
 void multiply_matrix(LPD3DMATRIX dest, const D3DMATRIX *src1, const D3DMATRIX *src2);
+
+void multiply_matrix_D3D_way(LPD3DMATRIX result, const D3DMATRIX *m1, const D3DMATRIX *m2);
 
 /* Helper function in main.c */
 BOOL LoadWineD3D(void);

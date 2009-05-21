@@ -198,6 +198,8 @@ typedef struct
     LPWSTR lpszStatusText;
     DWORD dwContentLength; /* total number of bytes to be read */
     DWORD dwContentRead; /* bytes of the content read so far */
+    DWORD dwBytesToWrite;
+    DWORD dwBytesWritten;
     HTTPHEADERW *pCustHeaders;
     DWORD nCustHeaders;
     HANDLE hCacheFile;
@@ -289,6 +291,12 @@ struct WORKREQ_HTTPSENDREQUESTW
     BOOL   bEndRequest;
 };
 
+struct WORKREQ_HTTPENDREQUESTW
+{
+    DWORD     dwFlags;
+    DWORD_PTR dwContext;
+};
+
 struct WORKREQ_SENDCALLBACK
 {
     DWORD_PTR dwContext;
@@ -335,6 +343,7 @@ typedef struct WORKREQ
         struct WORKREQ_FTPRENAMEFILEW           FtpRenameFileW;
         struct WORKREQ_FTPFINDNEXTW             FtpFindNextW;
         struct WORKREQ_HTTPSENDREQUESTW         HttpSendRequestW;
+        struct WORKREQ_HTTPENDREQUESTW          HttpEndRequestW;
         struct WORKREQ_SENDCALLBACK             SendCallback;
         struct WORKREQ_INTERNETOPENURLW         InternetOpenUrlW;
         struct WORKREQ_INTERNETREADFILEEXA      InternetReadFileExA;
@@ -379,7 +388,6 @@ INTERNETAPI HINTERNET WINAPI HTTP_HttpOpenRequestW(LPWININETHTTPSESSIONW lpwhs,
 	LPCWSTR lpszVerb, LPCWSTR lpszObjectName, LPCWSTR lpszVersion,
 	LPCWSTR lpszReferrer , LPCWSTR *lpszAcceptTypes,
 	DWORD dwFlags, DWORD_PTR dwContext);
-BOOL HTTP_FinishedReading(LPWININETHTTPREQW lpwhr);
 
 VOID SendAsyncCallback(LPWININETHANDLEHEADER hdr, DWORD_PTR dwContext,
                        DWORD dwInternetStatus, LPVOID lpvStatusInfo,
@@ -388,8 +396,6 @@ VOID SendAsyncCallback(LPWININETHANDLEHEADER hdr, DWORD_PTR dwContext,
 VOID INTERNET_SendCallback(LPWININETHANDLEHEADER hdr, DWORD_PTR dwContext,
                            DWORD dwInternetStatus, LPVOID lpvStatusInfo,
                            DWORD dwStatusInfoLength);
-
-LPHTTPHEADERW HTTP_GetHeader(LPWININETHTTPREQW lpwhr, LPCWSTR header);
 
 BOOL NETCON_connected(WININET_NETCONNECTION *connection);
 BOOL NETCON_init(WININET_NETCONNECTION *connnection, BOOL useSSL);

@@ -384,14 +384,16 @@ static void test_InitPathA(CHAR *newdir, CHAR *curDrive, CHAR *otherDrive)
   ok(CreateDirectoryA(tmpstr,NULL),"CreateDirectoryA failed\n");
   sprintf(tmpstr,"%s\\%s",newdir,LONGDIR);
   ok(CreateDirectoryA(tmpstr,NULL),"CreateDirectoryA failed\n");
-  bRes = CreateDirectoryA("c:",NULL);
-  ok(!bRes && (GetLastError() == ERROR_ACCESS_DENIED  || 
-               GetLastError() == ERROR_ALREADY_EXISTS),
-     "CreateDirectoryA(\"c:\" should have failed (%d)\n", GetLastError());
-  bRes = CreateDirectoryA("c:\\",NULL);
+  sprintf(tmpstr,"%c:", *curDrive);
+  bRes = CreateDirectoryA(tmpstr,NULL);
   ok(!bRes && (GetLastError() == ERROR_ACCESS_DENIED  ||
                GetLastError() == ERROR_ALREADY_EXISTS),
-     "CreateDirectoryA(\"c:\\\" should have failed (%d)\n", GetLastError());
+     "CreateDirectoryA(\"%s\" should have failed (%d)\n", tmpstr, GetLastError());
+  sprintf(tmpstr,"%c:\\", *curDrive);
+  bRes = CreateDirectoryA(tmpstr,NULL);
+  ok(!bRes && (GetLastError() == ERROR_ACCESS_DENIED  ||
+               GetLastError() == ERROR_ALREADY_EXISTS),
+     "CreateDirectoryA(\"%s\" should have failed (%d)\n", tmpstr, GetLastError());
   sprintf(tmpstr,"%s\\%s\\%s",newdir,SHORTDIR,SHORTFILE);
   hndl=CreateFileA(tmpstr,GENERIC_WRITE,0,NULL,
                    CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
@@ -959,7 +961,7 @@ static void test_GetLongPathNameW(void)
     length = pGetLongPathNameW(NULL,NULL,0);
     if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        skip("GetLongPathNameW is not implemented\n");
+        win_skip("GetLongPathNameW is not implemented\n");
         return;
     }
     ok(0==length,"GetLongPathNameW returned %d but expected 0\n",length);
@@ -988,7 +990,7 @@ static void test_GetShortPathNameW(void)
     GetTempPathW( MAX_PATH, path );
     if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        skip("GetTempPathW is not implemented\n");
+        win_skip("GetTempPathW is not implemented\n");
         return;
     }
 

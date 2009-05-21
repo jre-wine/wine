@@ -176,7 +176,6 @@ void ProcessPage_OnDebugChannels(void);
 
 #define WM_ONTRAYICON   WM_USER + 5
 
-HICON TrayIcon_GetProcessorUsageIcon(void);
 BOOL TrayIcon_ShellAddTrayIcon(void);
 BOOL TrayIcon_ShellRemoveTrayIcon(void);
 BOOL TrayIcon_ShellUpdateTrayIcon(void);
@@ -199,7 +198,6 @@ void ApplicationPage_OnEndTask(void);
 void ApplicationPage_OnGotoProcess(void);
 
 void RefreshApplicationPage(void);
-void UpdateApplicationListControlViewSetting(void);
 void RefreshPerformancePage(void);
 void RefreshProcessPage(void);
 

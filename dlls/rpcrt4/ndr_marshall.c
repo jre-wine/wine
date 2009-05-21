@@ -1500,18 +1500,28 @@ unsigned char * WINAPI NdrPointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
 
   TRACE("(%p,%p,%p,%d)\n", pStubMsg, ppMemory, pFormat, fMustAlloc);
 
-  /* Increment the buffer here instead of in PointerUnmarshall,
-   * as that is used by embedded pointers which already handle the incrementing
-   * the buffer, and shouldn't read any additional pointer data from the
-   * buffer */
-  if (*pFormat != RPC_FC_RP)
+  if (*pFormat == RPC_FC_RP)
   {
+    Buffer = pStubMsg->Buffer;
+    /* Do the NULL ref pointer check here because embedded pointers can be
+     * NULL if the type the pointer is embedded in was allocated rather than
+     * being passed in by the client */
+    if (pStubMsg->IsClient && !*ppMemory)
+    {
+      ERR("NULL ref pointer is not allowed\n");
+      RpcRaiseException(RPC_X_NULL_REF_POINTER);
+    }
+  }
+  else
+  {
+    /* Increment the buffer here instead of in PointerUnmarshall,
+     * as that is used by embedded pointers which already handle the incrementing
+     * the buffer, and shouldn't read any additional pointer data from the
+     * buffer */
     ALIGN_POINTER(pStubMsg->Buffer, 4);
     Buffer = pStubMsg->Buffer;
     safe_buffer_increment(pStubMsg, 4);
   }
-  else
-    Buffer = pStubMsg->Buffer;
 
   PointerUnmarshall(pStubMsg, Buffer, ppMemory, *ppMemory, pFormat, fMustAlloc);
 
@@ -3268,13 +3278,13 @@ unsigned char * WINAPI NdrComplexStructMarshall(PMIDL_STUB_MESSAGE pStubMsg,
 
     /* get the buffer pointer after complex array data, but before
      * pointer data */
-    pStubMsg->BufferLength = pStubMsg->Buffer - pStubMsg->BufferStart;
+    pStubMsg->BufferLength = pStubMsg->Buffer - (unsigned char *)pStubMsg->RpcMsg->Buffer;
     pStubMsg->IgnoreEmbeddedPointers = 1;
     NdrComplexStructBufferSize(pStubMsg, pMemory, pFormat);
     pStubMsg->IgnoreEmbeddedPointers = saved_ignore_embedded;
 
     /* save it for use by embedded pointer code later */
-    pStubMsg->PointerBufferMark = pStubMsg->BufferStart + pStubMsg->BufferLength;
+    pStubMsg->PointerBufferMark = (unsigned char *)pStubMsg->RpcMsg->Buffer + pStubMsg->BufferLength;
     TRACE("difference = 0x%x\n", pStubMsg->PointerBufferMark - pStubMsg->Buffer);
     pointer_buffer_mark_set = 1;
 
@@ -3830,14 +3840,14 @@ unsigned char * WINAPI NdrComplexArrayMarshall(PMIDL_STUB_MESSAGE pStubMsg,
 
     /* get the buffer pointer after complex array data, but before
      * pointer data */
-    pStubMsg->BufferLength = pStubMsg->Buffer - pStubMsg->BufferStart;
+    pStubMsg->BufferLength = pStubMsg->Buffer - (unsigned char *)pStubMsg->RpcMsg->Buffer;
     pStubMsg->IgnoreEmbeddedPointers = 1;
     NdrComplexArrayBufferSize(pStubMsg, pMemory, pFormat);
     pStubMsg->IgnoreEmbeddedPointers = saved_ignore_embedded;
 
     /* save it for use by embedded pointer code later */
-    pStubMsg->PointerBufferMark = pStubMsg->BufferStart + pStubMsg->BufferLength;
-    TRACE("difference = 0x%x\n", pStubMsg->Buffer - pStubMsg->BufferStart);
+    pStubMsg->PointerBufferMark = (unsigned char *)pStubMsg->RpcMsg->Buffer + pStubMsg->BufferLength;
+    TRACE("difference = 0x%x\n", pStubMsg->Buffer - (unsigned char *)pStubMsg->RpcMsg->Buffer);
     pointer_buffer_mark_set = 1;
 
     /* restore fields */
@@ -5547,7 +5557,6 @@ static unsigned char *union_arm_unmarshall(PMIDL_STUB_MESSAGE pStubMsg,
             case RPC_FC_UP:
             case RPC_FC_OP:
             case RPC_FC_FP:
-                **(void***)ppMemory = NULL;
                 ALIGN_POINTER(pStubMsg->Buffer, 4);
                 saved_buffer = pStubMsg->Buffer;
                 if (pStubMsg->PointerBufferMark)
@@ -5782,10 +5791,18 @@ unsigned char *  WINAPI NdrEncapsulatedUnionUnmarshall(PMIDL_STUB_MESSAGE pStubM
     if (fMustAlloc)
         *ppMemory = NdrAllocate(pStubMsg, size);
 
+    /* we can't pass fMustAlloc=TRUE into the marshaller for the arm
+     * since the arm is part of the memory block that is encompassed by
+     * the whole union. Memory is forced to allocate when pointers
+     * are set to NULL, so we emulate that part of fMustAlloc=TRUE by
+     * clearing the memory we pass in to the unmarshaller */
+    if (fMustAlloc)
+        memset(*ppMemory, 0, size);
+
     NdrBaseTypeUnmarshall(pStubMsg, ppMemory, &switch_type, FALSE);
     pMemoryArm = *ppMemory + increment;
 
-    return union_arm_unmarshall(pStubMsg, &pMemoryArm, switch_value, pFormat, fMustAlloc);
+    return union_arm_unmarshall(pStubMsg, &pMemoryArm, switch_value, pFormat, FALSE);
 }
 
 /***********************************************************************
@@ -5964,7 +5981,15 @@ unsigned char *  WINAPI NdrNonEncapsulatedUnionUnmarshall(PMIDL_STUB_MESSAGE pSt
     if (fMustAlloc)
         *ppMemory = NdrAllocate(pStubMsg, size);
 
-    return union_arm_unmarshall(pStubMsg, ppMemory, discriminant, pFormat, fMustAlloc);
+    /* we can't pass fMustAlloc=TRUE into the marshaller for the arm
+     * since the arm is part of the memory block that is encompassed by
+     * the whole union. Memory is forced to allocate when pointers
+     * are set to NULL, so we emulate that part of fMustAlloc=TRUE by
+     * clearing the memory we pass in to the unmarshaller */
+    if (fMustAlloc)
+        memset(*ppMemory, 0, size);
+
+    return union_arm_unmarshall(pStubMsg, ppMemory, discriminant, pFormat, FALSE);
 }
 
 /***********************************************************************
@@ -6179,68 +6204,68 @@ unsigned char *WINAPI NdrRangeUnmarshall(
     TRACE("base_type = 0x%02x, low_value = %d, high_value = %d\n",
         base_type, pRange->low_value, pRange->high_value);
 
-#define RANGE_UNMARSHALL(type, format_spec) \
+#define RANGE_UNMARSHALL(mem_type, wire_type, format_spec) \
     do \
     { \
-        ALIGN_POINTER(pStubMsg->Buffer, sizeof(type)); \
+        ALIGN_POINTER(pStubMsg->Buffer, sizeof(wire_type)); \
         if (!fMustAlloc && !*ppMemory) \
             fMustAlloc = TRUE; \
         if (fMustAlloc) \
-            *ppMemory = NdrAllocate(pStubMsg, sizeof(type)); \
-        if (pStubMsg->Buffer + sizeof(type) > pStubMsg->BufferEnd) \
+            *ppMemory = NdrAllocate(pStubMsg, sizeof(mem_type)); \
+        if (pStubMsg->Buffer + sizeof(wire_type) > pStubMsg->BufferEnd) \
         { \
             ERR("buffer overflow - Buffer = %p, BufferEnd = %p\n", \
                 pStubMsg->Buffer, (unsigned char *)pStubMsg->RpcMsg->Buffer + pStubMsg->BufferLength); \
             RpcRaiseException(RPC_X_BAD_STUB_DATA); \
         } \
-        if ((*(type *)pStubMsg->Buffer < (type)pRange->low_value) || \
-            (*(type *)pStubMsg->Buffer > (type)pRange->high_value)) \
+        if ((*(wire_type *)pStubMsg->Buffer < (mem_type)pRange->low_value) || \
+            (*(wire_type *)pStubMsg->Buffer > (mem_type)pRange->high_value)) \
         { \
             ERR("value exceeded bounds: " format_spec ", low: " format_spec ", high: " format_spec "\n", \
-                *(type *)pStubMsg->Buffer, (type)pRange->low_value, \
-                (type)pRange->high_value); \
+                *(wire_type *)pStubMsg->Buffer, (mem_type)pRange->low_value, \
+                (mem_type)pRange->high_value); \
             RpcRaiseException(RPC_S_INVALID_BOUND); \
             return NULL; \
         } \
         TRACE("*ppMemory: %p\n", *ppMemory); \
-        **(type **)ppMemory = *(type *)pStubMsg->Buffer; \
-        pStubMsg->Buffer += sizeof(type); \
+        **(mem_type **)ppMemory = *(wire_type *)pStubMsg->Buffer; \
+        pStubMsg->Buffer += sizeof(wire_type); \
     } while (0)
 
     switch(base_type)
     {
     case RPC_FC_CHAR:
     case RPC_FC_SMALL:
-        RANGE_UNMARSHALL(UCHAR, "%d");
+        RANGE_UNMARSHALL(UCHAR, UCHAR, "%d");
         TRACE("value: 0x%02x\n", **ppMemory);
         break;
     case RPC_FC_BYTE:
     case RPC_FC_USMALL:
-        RANGE_UNMARSHALL(CHAR, "%u");
+        RANGE_UNMARSHALL(CHAR, CHAR, "%u");
         TRACE("value: 0x%02x\n", **ppMemory);
         break;
     case RPC_FC_WCHAR: /* FIXME: valid? */
     case RPC_FC_USHORT:
-        RANGE_UNMARSHALL(USHORT, "%u");
+        RANGE_UNMARSHALL(USHORT, USHORT, "%u");
         TRACE("value: 0x%04x\n", **(USHORT **)ppMemory);
         break;
     case RPC_FC_SHORT:
-        RANGE_UNMARSHALL(SHORT, "%d");
+        RANGE_UNMARSHALL(SHORT, SHORT, "%d");
         TRACE("value: 0x%04x\n", **(USHORT **)ppMemory);
         break;
     case RPC_FC_LONG:
-        RANGE_UNMARSHALL(LONG, "%d");
+    case RPC_FC_ENUM32:
+        RANGE_UNMARSHALL(LONG, LONG, "%d");
         TRACE("value: 0x%08x\n", **(ULONG **)ppMemory);
         break;
     case RPC_FC_ULONG:
-        RANGE_UNMARSHALL(ULONG, "%u");
+        RANGE_UNMARSHALL(ULONG, ULONG, "%u");
         TRACE("value: 0x%08x\n", **(ULONG **)ppMemory);
         break;
     case RPC_FC_ENUM16:
-    case RPC_FC_ENUM32:
-        FIXME("Unhandled enum type\n");
+        RANGE_UNMARSHALL(UINT, USHORT, "%u");
+        TRACE("value: 0x%08x\n", **(UINT **)ppMemory);
         break;
-    case RPC_FC_ERROR_STATUS_T: /* FIXME: valid? */
     case RPC_FC_FLOAT:
     case RPC_FC_DOUBLE:
     case RPC_FC_HYPER:
@@ -6627,7 +6652,7 @@ static unsigned char *WINAPI NdrContextHandleMarshall(
     if (pFormat[1] & 0x80)
         NdrClientContextMarshall(pStubMsg, *(NDR_CCONTEXT **)pMemory, FALSE);
     else
-        NdrClientContextMarshall(pStubMsg, (NDR_CCONTEXT *)pMemory, FALSE);
+        NdrClientContextMarshall(pStubMsg, pMemory, FALSE);
 
     return NULL;
 }

@@ -72,7 +72,7 @@ PWINE_ACMDRIVERID MSACM_RegisterDriverFromRegistry(LPCWSTR pszRegEntry)
     /* The requested registry entry must have the format msacm.XXXXX in order to
        be recognized in any future sessions of msacm
      */
-    if (0 == strncmpiW(buf, msacmW, sizeof(msacmW)/sizeof(WCHAR))) {
+    if (0 == strncmpiW(pszRegEntry, msacmW, sizeof(msacmW)/sizeof(WCHAR))) {
         lRet = RegOpenKeyExW(HKEY_LOCAL_MACHINE, drvkey, 0, KEY_QUERY_VALUE, &hKey);
         if (lRet != ERROR_SUCCESS) {
             WARN("unable to open registry key - 0x%08x\n", lRet);
@@ -289,18 +289,29 @@ PWINE_ACMDRIVERID MSACM_RegisterDriver(LPCWSTR pszDriverAlias, LPCWSTR pszFileNa
           debugstr_w(pszDriverAlias), debugstr_w(pszFileName), pLocalDriver);
 
     padid = HeapAlloc(MSACM_hHeap, 0, sizeof(WINE_ACMDRIVERID));
+    if (!padid)
+        return NULL;
     padid->obj.dwType = WINE_ACMOBJ_DRIVERID;
     padid->obj.pACMDriverID = padid;
     padid->pszDriverAlias = NULL;
     if (pszDriverAlias)
     {
         padid->pszDriverAlias = HeapAlloc( MSACM_hHeap, 0, (strlenW(pszDriverAlias)+1) * sizeof(WCHAR) );
+        if (!padid->pszDriverAlias) {
+            HeapFree(MSACM_hHeap, 0, padid);
+            return NULL;
+        }
         strcpyW( padid->pszDriverAlias, pszDriverAlias );
     }
     padid->pszFileName = NULL;
     if (pszFileName)
     {
         padid->pszFileName = HeapAlloc( MSACM_hHeap, 0, (strlenW(pszFileName)+1) * sizeof(WCHAR) );
+        if (!padid->pszFileName) {
+            HeapFree(MSACM_hHeap, 0, padid->pszDriverAlias);
+            HeapFree(MSACM_hHeap, 0, padid);
+            return NULL;
+        }
         strcpyW( padid->pszFileName, pszFileName );
     }
     padid->pLocalDriver = pLocalDriver;

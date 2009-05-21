@@ -49,7 +49,7 @@ static const WCHAR szServiceManagerKey[] = { 'S','y','s','t','e','m','\\',
       'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
       'S','e','r','v','i','c','e','s',0 };
 
-void  __RPC_FAR * __RPC_USER MIDL_user_allocate(size_t len)
+void  __RPC_FAR * __RPC_USER MIDL_user_allocate(SIZE_T len)
 {
     return HeapAlloc(GetProcessHeap(), 0, len);
 }
@@ -340,7 +340,7 @@ static DWORD service_handle_start(service_data *service, const WCHAR *data, DWOR
 /******************************************************************************
  * service_handle_control
  */
-static DWORD service_handle_control(service_data *service, DWORD dwControl)
+static DWORD service_handle_control(const service_data *service, DWORD dwControl)
 {
     DWORD ret = ERROR_INVALID_SERVICE_CONTROL;
 
@@ -1264,7 +1264,7 @@ static DWORD move_string_to_buffer(BYTE **buf, LPWSTR *string_ptr)
     return cb;
 }
 
-static DWORD size_string(LPWSTR string)
+static DWORD size_string(LPCWSTR string)
 {
     return (string ? (strlenW(string) + 1)*sizeof(WCHAR) : sizeof(WCHAR));
 }
@@ -1365,9 +1365,10 @@ BOOL WINAPI QueryServiceConfig2A(SC_HANDLE hService, DWORD dwLevel, LPBYTE buffe
 
     switch(dwLevel) {
         case SERVICE_CONFIG_DESCRIPTION:
-            {   LPSERVICE_DESCRIPTIONA configA = (LPSERVICE_DESCRIPTIONA) buffer;
+            if (buffer && bufferW) {
+                LPSERVICE_DESCRIPTIONA configA = (LPSERVICE_DESCRIPTIONA) buffer;
                 LPSERVICE_DESCRIPTIONW configW = (LPSERVICE_DESCRIPTIONW) bufferW;
-                if (configW->lpDescription) {
+                if (configW->lpDescription && (size > sizeof(SERVICE_DESCRIPTIONA))) {
                     DWORD sz;
                     configA->lpDescription = (LPSTR)(configA + 1);
                     sz = WideCharToMultiByte( CP_ACP, 0, configW->lpDescription, -1,
@@ -1380,10 +1381,11 @@ BOOL WINAPI QueryServiceConfig2A(SC_HANDLE hService, DWORD dwLevel, LPBYTE buffe
                 }
                 else configA->lpDescription = NULL;
             }
-        break;
+            break;
         default:
             FIXME("conversation W->A not implemented for level %d\n", dwLevel);
             ret = FALSE;
+            break;
     }
 
 cleanup:
@@ -1566,9 +1568,10 @@ BOOL WINAPI GetServiceKeyNameW( SC_HANDLE hSCManager, LPCWSTR lpDisplayName,
 {
     DWORD err;
     WCHAR buffer[2];
+    DWORD size;
 
     TRACE("%p %s %p %p\n", hSCManager,
-          debugstr_w(lpServiceName), lpDisplayName, lpcchBuffer);
+          debugstr_w(lpDisplayName), lpServiceName, lpcchBuffer);
 
     if (!hSCManager)
     {
@@ -1586,16 +1589,24 @@ BOOL WINAPI GetServiceKeyNameW( SC_HANDLE hSCManager, LPCWSTR lpDisplayName,
         *lpcchBuffer = 2;
     }
 
+    /* RPC call takes size excluding nul-terminator, whereas *lpcchBuffer
+     * includes the nul-terminator on input. */
+    size = *lpcchBuffer - 1;
+
     __TRY
     {
         err = svcctl_GetServiceKeyNameW(hSCManager, lpDisplayName, lpServiceName,
-                                        *lpcchBuffer, lpcchBuffer);
+                                        &size);
     }
     __EXCEPT(rpc_filter)
     {
         err = map_exception_code(GetExceptionCode());
     }
     __ENDTRY
+
+    /* The value of *lpcchBuffer excludes nul-terminator on output. */
+    if (err == ERROR_SUCCESS || err == ERROR_INSUFFICIENT_BUFFER)
+        *lpcchBuffer = size;
 
     if (err)
         SetLastError(err);
@@ -1680,6 +1691,7 @@ BOOL WINAPI GetServiceDisplayNameW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
   LPWSTR lpDisplayName, LPDWORD lpcchBuffer)
 {
     DWORD err;
+    DWORD size;
     WCHAR buffer[2];
 
     TRACE("%p %s %p %p\n", hSCManager,
@@ -1701,16 +1713,24 @@ BOOL WINAPI GetServiceDisplayNameW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
         *lpcchBuffer = 2;
     }
 
+    /* RPC call takes size excluding nul-terminator, whereas *lpcchBuffer
+     * includes the nul-terminator on input. */
+    size = *lpcchBuffer - 1;
+
     __TRY
     {
         err = svcctl_GetServiceDisplayNameW(hSCManager, lpServiceName, lpDisplayName,
-                                            *lpcchBuffer, lpcchBuffer);
+                                            &size);
     }
     __EXCEPT(rpc_filter)
     {
         err = map_exception_code(GetExceptionCode());
     }
     __ENDTRY
+
+    /* The value of *lpcchBuffer excludes nul-terminator on output. */
+    if (err == ERROR_SUCCESS || err == ERROR_INSUFFICIENT_BUFFER)
+        *lpcchBuffer = size;
 
     if (err)
         SetLastError(err);
@@ -1807,7 +1827,7 @@ BOOL WINAPI ChangeServiceConfig2A( SC_HANDLE hService, DWORD dwInfoLevel,
 
     if (dwInfoLevel == SERVICE_CONFIG_DESCRIPTION)
     {
-        LPSERVICE_DESCRIPTIONA sd = (LPSERVICE_DESCRIPTIONA) lpInfo;
+        LPSERVICE_DESCRIPTIONA sd = lpInfo;
         SERVICE_DESCRIPTIONW sdw;
 
         sdw.lpDescription = SERV_dup( sd->lpDescription );
@@ -1818,7 +1838,7 @@ BOOL WINAPI ChangeServiceConfig2A( SC_HANDLE hService, DWORD dwInfoLevel,
     }
     else if (dwInfoLevel == SERVICE_CONFIG_FAILURE_ACTIONS)
     {
-        LPSERVICE_FAILURE_ACTIONSA fa = (LPSERVICE_FAILURE_ACTIONSA) lpInfo;
+        LPSERVICE_FAILURE_ACTIONSA fa = lpInfo;
         SERVICE_FAILURE_ACTIONSW faw;
 
         faw.dwResetPeriod = fa->dwResetPeriod;

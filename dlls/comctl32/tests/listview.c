@@ -153,7 +153,7 @@ struct subclass_info
 
 static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    static long defwndproc_counter = 0;
+    static LONG defwndproc_counter = 0;
     LRESULT ret;
     struct message msg;
 
@@ -217,7 +217,7 @@ static HWND create_parent_window(void)
 static LRESULT WINAPI listview_subclass_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     struct subclass_info *info = (struct subclass_info *)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
-    static long defwndproc_counter = 0;
+    static LONG defwndproc_counter = 0;
     LRESULT ret;
     struct message msg;
 
@@ -300,7 +300,7 @@ static HWND create_custom_listview_control(DWORD style)
 static LRESULT WINAPI header_subclass_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     struct subclass_info *info = (struct subclass_info *)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
-    static long defwndproc_counter = 0;
+    static LONG defwndproc_counter = 0;
     LRESULT ret;
     struct message msg;
 
@@ -634,6 +634,72 @@ static void test_items(void)
     insert_column(hwnd, 0);
     insert_column(hwnd, 1);
 
+    /* LVIS_SELECTED with zero stateMask */
+    /* set */
+    memset (&item, 0, sizeof (item));
+    item.mask = LVIF_STATE;
+    item.state = LVIS_SELECTED;
+    item.stateMask = 0;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_INSERTITEMA, 0, (LPARAM) &item);
+    ok(r == 0, "ret %d\n", r);
+    /* get */
+    memset (&item, 0xcc, sizeof (item));
+    item.mask = LVIF_STATE;
+    item.stateMask = LVIS_SELECTED;
+    item.state = 0;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    ok(r != 0, "ret %d\n", r);
+    ok(item.state & LVIS_SELECTED, "Expected LVIS_SELECTED\n");
+    SendMessage(hwnd, LVM_DELETEITEM, 0, 0);
+
+    /* LVIS_SELECTED with zero stateMask */
+    /* set */
+    memset (&item, 0, sizeof (item));
+    item.mask = LVIF_STATE;
+    item.state = LVIS_FOCUSED;
+    item.stateMask = 0;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_INSERTITEMA, 0, (LPARAM) &item);
+    ok(r == 0, "ret %d\n", r);
+    /* get */
+    memset (&item, 0xcc, sizeof (item));
+    item.mask = LVIF_STATE;
+    item.stateMask = LVIS_FOCUSED;
+    item.state = 0;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    ok(r != 0, "ret %d\n", r);
+    ok(item.state & LVIS_FOCUSED, "Expected LVIS_FOCUSED\n");
+    SendMessage(hwnd, LVM_DELETEITEM, 0, 0);
+
+    /* LVIS_CUT with LVIS_FOCUSED stateMask */
+    /* set */
+    memset (&item, 0, sizeof (item));
+    item.mask = LVIF_STATE;
+    item.state = LVIS_CUT;
+    item.stateMask = LVIS_FOCUSED;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_INSERTITEMA, 0, (LPARAM) &item);
+    ok(r == 0, "ret %d\n", r);
+    /* get */
+    memset (&item, 0xcc, sizeof (item));
+    item.mask = LVIF_STATE;
+    item.stateMask = LVIS_CUT;
+    item.state = 0;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    ok(r != 0, "ret %d\n", r);
+    ok(item.state & LVIS_CUT, "Expected LVIS_CUT\n");
+    SendMessage(hwnd, LVM_DELETEITEM, 0, 0);
+
     /* Insert an item with just a param */
     memset (&item, 0xcc, sizeof (item));
     item.mask = LVIF_PARAM;
@@ -748,19 +814,25 @@ static HIMAGELIST test_create_imagelist;
 
 static LRESULT CALLBACK create_test_wndproc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
+    LRESULT ret;
+
     if (uMsg == WM_CREATE)
     {
         LPCREATESTRUCT lpcs = (LPCREATESTRUCT)lParam;
         lpcs->style |= LVS_REPORT;
-        SendMessage(hwnd, LVM_SETIMAGELIST, 0, (LPARAM)test_create_imagelist);
     }
-    return CallWindowProc(listviewWndProc, hwnd, uMsg, wParam, lParam);
+    ret = CallWindowProc(listviewWndProc, hwnd, uMsg, wParam, lParam);
+    if (uMsg == WM_CREATE) SendMessage(hwnd, LVM_SETIMAGELIST, 0, (LPARAM)test_create_imagelist);
+    return ret;
 }
 
 static void test_create(void)
 {
     HWND hList;
     HWND hHeader;
+    LONG_PTR ret;
+    LONG r;
+    LVCOLUMNA col;
     WNDCLASSEX cls;
     cls.cbSize = sizeof(WNDCLASSEX);
     ok(GetClassInfoEx(GetModuleHandle(NULL), "SysListView32", &cls), "GetClassInfoEx failed\n");
@@ -774,6 +846,100 @@ static void test_create(void)
     ok((HIMAGELIST)SendMessage(hList, LVM_GETIMAGELIST, 0, 0) == test_create_imagelist, "Image list not obtained\n");
     hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
     ok(IsWindow(hHeader) && IsWindowVisible(hHeader), "Listview not in report mode\n");
+    ok(hHeader == GetDlgItem(hList, 0), "Expected header as dialog item\n");
+    DestroyWindow(hList);
+
+    /* header isn't created on LVS_ICON and LVS_LIST styles */
+    hList = CreateWindow("SysListView32", "Test", WS_VISIBLE, 0, 0, 100, 100, NULL, NULL,
+                          GetModuleHandle(NULL), 0);
+    hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
+    ok(!IsWindow(hHeader), "Header shouldn't be created\n");
+    ok(NULL == GetDlgItem(hList, 0), "NULL dialog item expected\n");
+    /* insert column */
+    memset(&col, 0, sizeof(LVCOLUMNA));
+    col.mask = LVCF_WIDTH;
+    col.cx = 100;
+    r = SendMessage(hList, LVM_INSERTCOLUMN, 0, (LPARAM)&col);
+    ok(r == 0, "Expected 0 column's inserted\n");
+    hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(hHeader), "Header should be created\n");
+    ok(hHeader == GetDlgItem(hList, 0), "Expected header as dialog item\n");
+    DestroyWindow(hList);
+
+    hList = CreateWindow("SysListView32", "Test", WS_VISIBLE|LVS_LIST, 0, 0, 100, 100, NULL, NULL,
+                          GetModuleHandle(NULL), 0);
+    hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
+    ok(!IsWindow(hHeader), "Header shouldn't be created\n");
+    ok(NULL == GetDlgItem(hList, 0), "NULL dialog item expected\n");
+    /* insert column */
+    memset(&col, 0, sizeof(LVCOLUMNA));
+    col.mask = LVCF_WIDTH;
+    col.cx = 100;
+    r = SendMessage(hList, LVM_INSERTCOLUMN, 0, (LPARAM)&col);
+    ok(r == 0, "Expected 0 column's inserted\n");
+    hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(hHeader), "Header should be created\n");
+    ok(hHeader == GetDlgItem(hList, 0), "Expected header as dialog item\n");
+    DestroyWindow(hList);
+
+    /* try to switch LVS_ICON -> LVS_REPORT and back LVS_ICON -> LVS_REPORT */
+    hList = CreateWindow("SysListView32", "Test", WS_VISIBLE, 0, 0, 100, 100, NULL, NULL,
+                          GetModuleHandle(NULL), 0);
+    ret = SetWindowLongPtr(hList, GWL_STYLE, GetWindowLongPtr(hList, GWL_STYLE) | LVS_REPORT);
+    ok(ret & WS_VISIBLE, "Style wrong, should have WS_VISIBLE\n");
+    hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(hHeader), "Header should be created\n");
+    ret = SetWindowLongPtr(hList, GWL_STYLE, GetWindowLong(hList, GWL_STYLE) & ~LVS_REPORT);
+    ok((ret & WS_VISIBLE) && (ret & LVS_REPORT), "Style wrong, should have WS_VISIBLE|LVS_REPORT\n");
+    hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(hHeader), "Header should be created\n");
+    ok(hHeader == GetDlgItem(hList, 0), "Expected header as dialog item\n");
+    DestroyWindow(hList);
+
+    /* try to switch LVS_LIST -> LVS_REPORT and back LVS_LIST -> LVS_REPORT */
+    hList = CreateWindow("SysListView32", "Test", WS_VISIBLE|LVS_LIST, 0, 0, 100, 100, NULL, NULL,
+                          GetModuleHandle(NULL), 0);
+    ret = SetWindowLongPtr(hList, GWL_STYLE,
+                          (GetWindowLongPtr(hList, GWL_STYLE) & ~LVS_LIST) | LVS_REPORT);
+    ok(((ret & WS_VISIBLE) && (ret & LVS_LIST)), "Style wrong, should have WS_VISIBLE|LVS_LIST\n");
+    hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(hHeader), "Header shouldn't be created\n");
+    ok(hHeader == GetDlgItem(hList, 0), "NULL dialog item expected\n");
+    ret = SetWindowLongPtr(hList, GWL_STYLE,
+                          (GetWindowLongPtr(hList, GWL_STYLE) & ~LVS_REPORT) | LVS_LIST);
+    ok(((ret & WS_VISIBLE) && (ret & LVS_REPORT)), "Style wrong, should have WS_VISIBLE|LVS_REPORT\n");
+    hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(hHeader), "Header shouldn't be created\n");
+    ok(hHeader == GetDlgItem(hList, 0), "NULL dialog item expected\n");
+    DestroyWindow(hList);
+
+    /* LVS_REPORT without WS_VISIBLE */
+    hList = CreateWindow("SysListView32", "Test", LVS_REPORT, 0, 0, 100, 100, NULL, NULL,
+                          GetModuleHandle(NULL), 0);
+    hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
+    ok(!IsWindow(hHeader), "Header shouldn't be created\n");
+    ok(NULL == GetDlgItem(hList, 0), "NULL dialog item expected\n");
+    /* insert column */
+    memset(&col, 0, sizeof(LVCOLUMNA));
+    col.mask = LVCF_WIDTH;
+    col.cx = 100;
+    r = SendMessage(hList, LVM_INSERTCOLUMN, 0, (LPARAM)&col);
+    ok(r == 0, "Expected 0 column's inserted\n");
+    hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(hHeader), "Header should be created\n");
+    ok(hHeader == GetDlgItem(hList, 0), "Expected header as dialog item\n");
+    DestroyWindow(hList);
+
+    /* LVS_REPORT without WS_VISIBLE, try to show it */
+    hList = CreateWindow("SysListView32", "Test", LVS_REPORT, 0, 0, 100, 100, NULL, NULL,
+                          GetModuleHandle(NULL), 0);
+    hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
+    ok(!IsWindow(hHeader), "Header shouldn't be created\n");
+    ok(NULL == GetDlgItem(hList, 0), "NULL dialog item expected\n");
+    ShowWindow(hList, SW_SHOW);
+    hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(hHeader), "Header should be created\n");
+    ok(hHeader == GetDlgItem(hList, 0), "Expected header as dialog item\n");
     DestroyWindow(hList);
 }
 
@@ -1219,6 +1385,62 @@ static void test_multiselect(void)
     DestroyWindow(hwnd);
 }
 
+static void test_subitem_rect(void)
+{
+    HWND hwnd;
+    DWORD r;
+    LVCOLUMN col;
+    RECT rect;
+
+    /* test LVM_GETSUBITEMRECT for header */
+    hwnd = create_listview_control();
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    /* add some columns */
+    memset(&col, 0, sizeof(LVCOLUMN));
+    col.mask = LVCF_WIDTH;
+    col.cx = 100;
+    r = -1;
+    r = SendMessage(hwnd, LVM_INSERTCOLUMN, 0, (LPARAM)&col);
+    expect(0, r);
+    col.cx = 150;
+    r = -1;
+    r = SendMessage(hwnd, LVM_INSERTCOLUMN, 1, (LPARAM)&col);
+    expect(1, r);
+    col.cx = 200;
+    r = -1;
+    r = SendMessage(hwnd, LVM_INSERTCOLUMN, 2, (LPARAM)&col);
+    expect(2, r);
+    /* item = -1 means header, subitem index is 1 based */
+    rect.left = LVIR_BOUNDS;
+    rect.top  = 0;
+    rect.right = rect.bottom = 0;
+    r = SendMessage(hwnd, LVM_GETSUBITEMRECT, -1, (LPARAM)&rect);
+    expect(0, r);
+
+    rect.left = LVIR_BOUNDS;
+    rect.top  = 1;
+    rect.right = rect.bottom = 0;
+    r = SendMessage(hwnd, LVM_GETSUBITEMRECT, -1, (LPARAM)&rect);
+todo_wine{
+    ok(r != 0, "Expected not-null LRESULT\n");
+    expect(100, rect.left);
+    expect(250, rect.right);
+    expect(3, rect.top);
+}
+    rect.left = LVIR_BOUNDS;
+    rect.top  = 2;
+    rect.right = rect.bottom = 0;
+    r = SendMessage(hwnd, LVM_GETSUBITEMRECT, -1, (LPARAM)&rect);
+todo_wine{
+    ok(r != 0, "Expected not-null LRESULT\n");
+    expect(250, rect.left);
+    expect(450, rect.right);
+    expect(3, rect.top);
+}
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(listview)
 {
     HMODULE hComctl32;
@@ -1256,4 +1478,5 @@ START_TEST(listview)
     test_columns();
     test_getorigin();
     test_multiselect();
+    test_subitem_rect();
 }

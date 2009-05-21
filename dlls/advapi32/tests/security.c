@@ -857,7 +857,7 @@ static void test_AccessCheck(void)
                           GetProcAddress(NtDllModule, "RtlAdjustPrivilege");
     if (!pRtlAdjustPrivilege)
     {
-        skip("missing RtlAdjustPrivilege, skipping test\n");
+        win_skip("missing RtlAdjustPrivilege, skipping test\n");
         return;
     }
 
@@ -1128,7 +1128,7 @@ static void test_AccessCheck(void)
         ok(ret, "AddAccessAllowedAceEx failed with error %d\n", GetLastError());
     }
     else
-        skip("AddAccessAllowedAceEx is not available\n");
+        win_skip("AddAccessAllowedAceEx is not available\n");
 
     ret = AccessCheck(SecurityDescriptor, Token, KEY_READ, &Mapping,
                       PrivSet, &PrivSetLen, &Access, &AccessStatus);
@@ -1190,13 +1190,13 @@ static void test_token_attr(void)
     ret = OpenProcessToken(GetCurrentProcess(), MAXIMUM_ALLOWED, &Token);
     if(!ret && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
     {
-        skip("OpenProcessToken is not implemented\n");
+        win_skip("OpenProcessToken is not implemented\n");
         return;
     }
     ok(ret, "OpenProcessToken failed with error %d\n", GetLastError());
     if (ret)
     {
-        BYTE buf[1024];
+        DWORD buf[256]; /* GetTokenInformation wants a dword-aligned buffer */
         Size = sizeof(buf);
         ret = GetTokenInformation(Token, TokenUser,(void*)buf, Size, &Size);
         ok(ret, "GetTokenInformation failed with error %d\n", GetLastError());
@@ -1209,7 +1209,7 @@ static void test_token_attr(void)
 
     if(!pConvertSidToStringSidA)
     {
-        skip("ConvertSidToStringSidA is not available\n");
+        win_skip("ConvertSidToStringSidA is not available\n");
         return;
     }
 
@@ -1359,7 +1359,7 @@ static void test_CreateWellKnownSid(void)
 
     if (!pCreateWellKnownSid)
     {
-        skip("CreateWellKnownSid not available\n");
+        win_skip("CreateWellKnownSid not available\n");
         return;
     }
 
@@ -1410,8 +1410,8 @@ static void test_CreateWellKnownSid(void)
 static void test_LookupAccountSid(void)
 {
     SID_IDENTIFIER_AUTHORITY SIDAuthNT = { SECURITY_NT_AUTHORITY };
-    CHAR accountA[MAX_PATH], domainA[MAX_PATH];
-    DWORD acc_sizeA, dom_sizeA;
+    CHAR accountA[MAX_PATH], domainA[MAX_PATH], usernameA[MAX_PATH];
+    DWORD acc_sizeA, dom_sizeA, user_sizeA;
     DWORD real_acc_sizeA, real_dom_sizeA;
     WCHAR accountW[MAX_PATH], domainW[MAX_PATH];
     DWORD acc_sizeW, dom_sizeW;
@@ -1419,10 +1419,12 @@ static void test_LookupAccountSid(void)
     PSID pUsersSid = NULL;
     SID_NAME_USE use;
     BOOL ret;
-    DWORD size;
+    DWORD size,cbti = 0;
     MAX_SID  max_sid;
     CHAR *str_sidA;
     int i;
+    HANDLE hToken;
+    PTOKEN_USER ptiUser = NULL;
 
     /* native windows crashes if account size, domain size, or name use is NULL */
 
@@ -1581,6 +1583,26 @@ static void test_LookupAccountSid(void)
 
     FreeSid(pUsersSid);
 
+    /* Test LookupAccountSid with Sid retrieved from token information.
+     This assumes this process is running under the account of the current user.*/
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY|TOKEN_DUPLICATE, &hToken);
+    ret = GetTokenInformation(hToken, TokenUser, NULL, 0, &cbti);
+    ptiUser = (PTOKEN_USER) HeapAlloc(GetProcessHeap(), 0, cbti);
+    if (GetTokenInformation(hToken, TokenUser, ptiUser, cbti, &cbti))
+    {
+        acc_sizeA = dom_sizeA = MAX_PATH;
+        ret = LookupAccountSidA(NULL, ptiUser->User.Sid, accountA, &acc_sizeA, domainA, &dom_sizeA, &use);
+        ok(ret, "LookupAccountSidA() Expected TRUE, got FALSE\n");
+        user_sizeA = MAX_PATH;
+        ret = GetUserNameA(usernameA , &user_sizeA);
+        ok(ret, "GetUserNameA() Expected TRUE, got FALSE\n");
+        todo_wine
+        {
+            ok(lstrcmpA(usernameA, accountA) == 0, "LookupAccountSidA() Expected account name: %s got: %s\n", usernameA, accountA );
+        }
+    }
+    HeapFree(GetProcessHeap(), 0, ptiUser);
+
     if (pCreateWellKnownSid && pConvertSidToStringSidA)
     {
         trace("Well Known SIDs:\n");
@@ -1684,7 +1706,7 @@ static void test_LookupAccountSid(void)
     }
 }
 
-static void get_sid_info(PSID psid, LPSTR *user, LPSTR *dom)
+static BOOL get_sid_info(PSID psid, LPSTR *user, LPSTR *dom)
 {
     static CHAR account[UNLEN + 1];
     static CHAR domain[UNLEN + 1];
@@ -1697,7 +1719,65 @@ static void get_sid_info(PSID psid, LPSTR *user, LPSTR *dom)
     size = dom_size = UNLEN + 1;
     account[0] = '\0';
     domain[0] = '\0';
-    LookupAccountSidA(NULL, psid, account, &size, domain, &dom_size, &use);
+    SetLastError(0xdeadbeef);
+    return LookupAccountSidA(NULL, psid, account, &size, domain, &dom_size, &use);
+}
+
+static void check_wellknown_name(const char* name, WELL_KNOWN_SID_TYPE result)
+{
+    SID_IDENTIFIER_AUTHORITY ident = { SECURITY_NT_AUTHORITY };
+    PSID domainsid;
+    char wk_sid[SECURITY_MAX_SID_SIZE];
+    DWORD cb;
+
+    DWORD sid_size, domain_size;
+    SID_NAME_USE sid_use;
+    LPSTR domain, account, sid_domain, wk_domain, wk_account;
+    PSID psid;
+    BOOL ret ,ret2;
+
+    sid_size = 0;
+    domain_size = 0;
+    ret = LookupAccountNameA(NULL, name, NULL, &sid_size, NULL, &domain_size, &sid_use);
+    psid = HeapAlloc(GetProcessHeap(),0,sid_size);
+    domain = HeapAlloc(GetProcessHeap(),0,domain_size);
+    ret = LookupAccountNameA(NULL, name, psid, &sid_size, domain, &domain_size, &sid_use);
+
+    if (!result)
+    {
+        ok(!ret, " %s Should have failed to lookup account name\n",name);
+        goto cleanup;
+    }
+
+    AllocateAndInitializeSid(&ident, 6, SECURITY_NT_NON_UNIQUE, 12, 23, 34, 45, 56, 0, 0, &domainsid);
+    cb = sizeof(wk_sid);
+    if (!pCreateWellKnownSid(result, domainsid, wk_sid, &cb))
+    {
+        win_skip("SID %i is not available on the system\n",result);
+        goto cleanup;
+    }
+
+    ret2 = get_sid_info(wk_sid, &wk_account, &wk_domain);
+    if (!ret2 && GetLastError() == ERROR_NONE_MAPPED)
+    {
+        win_skip("CreateWellKnownSid() succeeded but the account '%s' is not present (W2K)\n", name);
+        goto cleanup;
+    }
+
+    get_sid_info(psid, &account, &sid_domain);
+
+    ok(ret, "Failed to lookup account name %s\n",name);
+    ok(sid_size != 0, "sid_size was zero\n");
+
+    ok(EqualSid(psid,wk_sid),"(%s) Sids fail to match well known sid!\n",name);
+
+    ok(!lstrcmp(account, wk_account), "Expected %s , got %s\n", account, wk_account);
+    ok(!lstrcmp(domain, wk_domain), "Expected %s, got %s\n", wk_domain, domain);
+    ok(sid_use == SidTypeWellKnownGroup , "Expected Use (5), got %d\n", sid_use);
+
+cleanup:
+    HeapFree(GetProcessHeap(),0,psid);
+    HeapFree(GetProcessHeap(),0,domain);
 }
 
 static void test_LookupAccountName(void)
@@ -1705,6 +1785,7 @@ static void test_LookupAccountName(void)
     DWORD sid_size, domain_size, user_size;
     DWORD sid_save, domain_save;
     CHAR user_name[UNLEN + 1];
+    CHAR computer_name[UNLEN + 1];
     SID_NAME_USE sid_use;
     LPSTR domain, account, sid_dom;
     PSID psid;
@@ -1736,7 +1817,7 @@ static void test_LookupAccountName(void)
     ret = LookupAccountNameA(NULL, user_name, NULL, &sid_size, NULL, &domain_size, &sid_use);
     if(!ret && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
     {
-        skip("LookupAccountNameA is not implemented\n");
+        win_skip("LookupAccountNameA is not implemented\n");
         return;
     }
     ok(!ret, "Expected 0, got %d\n", ret);
@@ -1875,6 +1956,69 @@ static void test_LookupAccountName(void)
        "Expected RPC_S_SERVER_UNAVAILABLE or RPC_S_INVALID_NET_ADDR, got %d\n", GetLastError());
     ok(sid_size == 0, "Expected 0, got %d\n", sid_size);
     ok(domain_size == 0, "Expected 0, got %d\n", domain_size);
+
+    /* try with the computer name as the account name */
+    domain_size = sizeof(computer_name);
+    GetComputerNameA(computer_name, &domain_size);
+    sid_size = 0;
+    domain_size = 0;
+    ret = LookupAccountNameA(NULL, computer_name, NULL, &sid_size, NULL, &domain_size, &sid_use);
+    ok(!ret && (GetLastError() == ERROR_INSUFFICIENT_BUFFER ||
+       GetLastError() == ERROR_NONE_MAPPED /* in a domain */ ||
+       broken(GetLastError() == ERROR_TRUSTED_DOMAIN_FAILURE) ||
+       broken(GetLastError() == ERROR_TRUSTED_RELATIONSHIP_FAILURE)),
+       "LookupAccountNameA failed: %d\n", GetLastError());
+    if (GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+    {
+        psid = HeapAlloc(GetProcessHeap(), 0, sid_size);
+        domain = HeapAlloc(GetProcessHeap(), 0, domain_size);
+        ret = LookupAccountNameA(NULL, computer_name, psid, &sid_size, domain, &domain_size, &sid_use);
+        ok(ret, "LookupAccountNameA failed: %d\n", GetLastError());
+        ok(sid_use == SidTypeDomain, "expected SidTypeDomain, got %d\n", sid_use);
+        HeapFree(GetProcessHeap(), 0, domain);
+        HeapFree(GetProcessHeap(), 0, psid);
+    }
+
+    /* Well Known names */
+    if (!pCreateWellKnownSid)
+    {
+        win_skip("CreateWellKnownSid not available\n");
+        return;
+    }
+
+    if (PRIMARYLANGID(LANGIDFROMLCID(GetThreadLocale())) != LANG_ENGLISH)
+    {
+        skip("Non-english locale (skipping well known name creation tests)\n");
+        return;
+    }
+
+    check_wellknown_name("LocalService", WinLocalServiceSid);
+    check_wellknown_name("Local Service", WinLocalServiceSid);
+    /* 2 spaces */
+    check_wellknown_name("Local  Service", 0);
+    check_wellknown_name("NetworkService", WinNetworkServiceSid);
+    check_wellknown_name("Network Service", WinNetworkServiceSid);
+
+    /* example of some names where the spaces are not optional */
+    check_wellknown_name("Terminal Server User", WinTerminalServerSid);
+    check_wellknown_name("TerminalServer User", 0);
+    check_wellknown_name("TerminalServerUser", 0);
+    check_wellknown_name("Terminal ServerUser", 0);
+
+    check_wellknown_name("enterprise domain controllers",WinEnterpriseControllersSid);
+    check_wellknown_name("enterprisedomain controllers", 0);
+    check_wellknown_name("enterprise domaincontrollers", 0);
+    check_wellknown_name("enterprisedomaincontrollers", 0);
+
+    /* case insensitivity */
+    check_wellknown_name("lOCAlServICE", WinLocalServiceSid);
+
+    /* fully qualified account names */
+    check_wellknown_name("NT AUTHORITY\\LocalService", WinLocalServiceSid);
+    check_wellknown_name("nt authority\\Network Service", WinNetworkServiceSid);
+    check_wellknown_name("nt authority test\\Network Service", 0);
+    check_wellknown_name("Dummy\\Network Service", 0);
+    check_wellknown_name("ntauthority\\Network Service", 0);
 }
 
 static void test_security_descriptor(void)
@@ -1890,7 +2034,7 @@ static void test_security_descriptor(void)
     ret = InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION);
     if (ret && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        skip("InitializeSecurityDescriptor is not implemented\n");
+        win_skip("InitializeSecurityDescriptor is not implemented\n");
         return;
     }
 
@@ -1983,7 +2127,7 @@ static void test_process_security(void)
     res = InitializeAcl(Acl, 256, ACL_REVISION);
     if (!res && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        skip("ACLs not implemented - skipping tests\n");
+        win_skip("ACLs not implemented - skipping tests\n");
         HeapFree(GetProcessHeap(), 0, Acl);
         return;
     }
@@ -2161,14 +2305,14 @@ static void test_impersonation_level(void)
 
     pDuplicateTokenEx = (fnDuplicateTokenEx) GetProcAddress(hmod, "DuplicateTokenEx");
     if( !pDuplicateTokenEx ) {
-        skip("DuplicateTokenEx is not available\n");
+        win_skip("DuplicateTokenEx is not available\n");
         return;
     }
     SetLastError(0xdeadbeef);
     ret = ImpersonateSelf(SecurityAnonymous);
     if(!ret && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
     {
-        skip("ImpersonateSelf is not implemented\n");
+        win_skip("ImpersonateSelf is not implemented\n");
         return;
     }
     ok(ret, "ImpersonateSelf(SecurityAnonymous) failed with error %d\n", GetLastError());
@@ -2386,7 +2530,7 @@ static void test_GetNamedSecurityInfoA(void)
 
     if (!pGetNamedSecurityInfoA)
     {
-        skip("GetNamedSecurityInfoA is not available\n");
+        win_skip("GetNamedSecurityInfoA is not available\n");
         return;
     }
 
@@ -2399,7 +2543,7 @@ static void test_GetNamedSecurityInfoA(void)
         NULL, NULL, NULL, NULL, &pSecDesc);
     if (error != ERROR_SUCCESS && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
     {
-        skip("GetNamedSecurityInfoA is not implemented\n");
+        win_skip("GetNamedSecurityInfoA is not implemented\n");
         return;
     }
     ok(!error, "GetNamedSecurityInfo failed with error %d\n", error);
@@ -2427,7 +2571,7 @@ static void test_ConvertStringSecurityDescriptor(void)
 
     if (!pConvertStringSecurityDescriptorToSecurityDescriptorA)
     {
-        skip("ConvertStringSecurityDescriptorToSecurityDescriptor is not available\n");
+        win_skip("ConvertStringSecurityDescriptorToSecurityDescriptor is not available\n");
         return;
     }
 
@@ -2578,12 +2722,12 @@ static void test_ConvertSecurityDescriptorToString(void)
 
     if (!pConvertSecurityDescriptorToStringSecurityDescriptorA)
     {
-        skip("ConvertSecurityDescriptorToStringSecurityDescriptor is not available\n");
+        win_skip("ConvertSecurityDescriptorToStringSecurityDescriptor is not available\n");
         return;
     }
     if (!pCreateWellKnownSid)
     {
-        skip("CreateWellKnownSid is not available\n");
+        win_skip("CreateWellKnownSid is not available\n");
         return;
     }
 
@@ -2778,7 +2922,7 @@ static void test_PrivateObjectSecurity(void)
 
     if (!pConvertStringSecurityDescriptorToSecurityDescriptorA)
     {
-        skip("ConvertStringSecurityDescriptorToSecurityDescriptor is not available\n");
+        win_skip("ConvertStringSecurityDescriptorToSecurityDescriptor is not available\n");
         return;
     }
 
@@ -2860,7 +3004,7 @@ static void test_acls(void)
     ret = InitializeAcl(pAcl, sizeof(ACL) - 1, ACL_REVISION);
     if (!ret && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        skip("InitializeAcl is not implemented\n");
+        win_skip("InitializeAcl is not implemented\n");
         return;
     }
 

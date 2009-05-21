@@ -50,6 +50,21 @@
 #include "security.h"
 
 
+#define CPU_FLAG(cpu) (1 << (cpu))
+#ifdef __i386__
+static const unsigned int supported_cpus = CPU_FLAG(CPU_x86);
+#elif defined(__x86_64__)
+static const unsigned int supported_cpus = CPU_FLAG(CPU_x86_64) | CPU_FLAG(CPU_x86);
+#elif defined(__ALPHA__)
+static const unsigned int supported_cpus = CPU_FLAG(CPU_ALPHA);
+#elif defined(__powerpc__)
+static const unsigned int supported_cpus = CPU_FLAG(CPU_POWERPC);
+#elif defined(__sparc__)
+static const unsigned int supported_cpus = CPU_FLAG(CPU_SPARC);
+#else
+#error Unsupported CPU
+#endif
+
 /* thread queues */
 
 struct thread_wait
@@ -929,6 +944,34 @@ void kill_thread( struct thread *thread, int violent_death )
     release_object( thread );
 }
 
+/* copy parts of a context structure */
+static void copy_context( context_t *to, const context_t *from, unsigned int flags )
+{
+    assert( to->cpu == from->cpu );
+    to->flags |= flags;
+    if (flags & SERVER_CTX_CONTROL) to->ctl = from->ctl;
+    if (flags & SERVER_CTX_INTEGER) to->integer = from->integer;
+    if (flags & SERVER_CTX_SEGMENTS) to->seg = from->seg;
+    if (flags & SERVER_CTX_FLOATING_POINT) to->fp = from->fp;
+    if (flags & SERVER_CTX_DEBUG_REGISTERS) to->debug = from->debug;
+    if (flags & SERVER_CTX_EXTENDED_REGISTERS) to->ext = from->ext;
+}
+
+/* return the context flags that correspond to system regs */
+/* (system regs are the ones we can't access on the client side) */
+static unsigned int get_context_system_regs( enum cpu_type cpu )
+{
+    switch (cpu)
+    {
+    case CPU_x86:     return SERVER_CTX_DEBUG_REGISTERS;
+    case CPU_x86_64:  return SERVER_CTX_DEBUG_REGISTERS;
+    case CPU_ALPHA:   return 0;
+    case CPU_POWERPC: return 0;
+    case CPU_SPARC:   return 0;
+    }
+    return 0;
+}
+
 /* trigger a breakpoint event in a given thread */
 void break_thread( struct thread *thread )
 {
@@ -940,7 +983,24 @@ void break_thread( struct thread *thread )
     data.exception.first     = 1;
     data.exception.exc_code  = STATUS_BREAKPOINT;
     data.exception.flags     = EXCEPTION_CONTINUABLE;
-    data.exception.address   = get_context_ip( thread->context );
+    switch (thread->context->cpu)
+    {
+    case CPU_x86:
+        data.exception.address = thread->context->ctl.i386_regs.eip;
+        break;
+    case CPU_x86_64:
+        data.exception.address = thread->context->ctl.x86_64_regs.rip;
+        break;
+    case CPU_ALPHA:
+        data.exception.address = thread->context->ctl.alpha_regs.fir;
+        break;
+    case CPU_POWERPC:
+        data.exception.address = thread->context->ctl.powerpc_regs.iar;
+        break;
+    case CPU_SPARC:
+        data.exception.address = thread->context->ctl.sparc_regs.pc;
+        break;
+    }
     generate_debug_event( thread, EXCEPTION_DEBUG_EVENT, &data );
     thread->debug_break = 0;
 }
@@ -1031,7 +1091,7 @@ DECL_HANDLER(init_thread)
     if (!(current->wait_fd  = create_anonymous_fd( &thread_fd_ops, wait_fd, &current->obj, 0 )))
         return;
 
-    if (!is_valid_address(req->teb) || !is_valid_address(req->peb))
+    if (!is_valid_address(req->teb))
     {
         set_error( STATUS_INVALID_PARAMETER );
         return;
@@ -1043,12 +1103,23 @@ DECL_HANDLER(init_thread)
 
     if (!process->peb)  /* first thread, initialize the process too */
     {
+        if (!CPU_FLAG(req->cpu) || !(supported_cpus & CPU_FLAG(req->cpu)))
+        {
+            set_error( STATUS_NOT_SUPPORTED );
+            return;
+        }
         process->unix_pid = current->unix_pid;
-        process->peb      = req->peb;
+        process->peb      = req->entry;
+        process->cpu      = req->cpu;
         reply->info_size  = init_process( current );
     }
     else
     {
+        if (req->cpu != process->cpu)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return;
+        }
         if (process->unix_pid != current->unix_pid)
             process->unix_pid = -1;  /* can happen with linuxthreads */
         if (current->suspend + process->suspend > 0) stop_thread( current );
@@ -1060,6 +1131,7 @@ DECL_HANDLER(init_thread)
     reply->tid     = get_thread_id( current );
     reply->version = SERVER_PROTOCOL_VERSION;
     reply->server_start = server_start_time;
+    reply->all_cpus     = supported_cpus;
     return;
 
  error:
@@ -1330,9 +1402,9 @@ DECL_HANDLER(get_apc_result)
 DECL_HANDLER(get_thread_context)
 {
     struct thread *thread;
-    CONTEXT *context;
+    context_t *context;
 
-    if (get_reply_max_size() < sizeof(CONTEXT))
+    if (get_reply_max_size() < sizeof(context_t))
     {
         set_error( STATUS_INVALID_PARAMETER );
         return;
@@ -1349,7 +1421,7 @@ DECL_HANDLER(get_thread_context)
         else
         {
             if (thread->context == thread->suspend_context) thread->context = NULL;
-            set_reply_data_ptr( thread->suspend_context, sizeof(CONTEXT) );
+            set_reply_data_ptr( thread->suspend_context, sizeof(context_t) );
             thread->suspend_context = NULL;
         }
     }
@@ -1359,12 +1431,12 @@ DECL_HANDLER(get_thread_context)
         if (thread->state != RUNNING) set_error( STATUS_ACCESS_DENIED );
         else set_error( STATUS_PENDING );
     }
-    else if ((context = set_reply_data_size( sizeof(CONTEXT) )))
+    else if ((context = set_reply_data_size( sizeof(context_t) )))
     {
-        unsigned int flags = get_context_system_regs( req->flags );
+        unsigned int flags = get_context_system_regs( thread->process->cpu );
 
-        memset( context, 0, sizeof(CONTEXT) );
-        context->ContextFlags = get_context_cpu_flag();
+        memset( context, 0, sizeof(context_t) );
+        context->cpu = thread->process->cpu;
         if (thread->context) copy_context( context, thread->context, req->flags & ~flags );
         if (flags) get_thread_context( thread, context, flags );
     }
@@ -1376,8 +1448,9 @@ DECL_HANDLER(get_thread_context)
 DECL_HANDLER(set_thread_context)
 {
     struct thread *thread;
+    const context_t *context = get_req_data();
 
-    if (get_req_data_size() < sizeof(CONTEXT))
+    if (get_req_data_size() < sizeof(context_t))
     {
         set_error( STATUS_INVALID_PARAMETER );
         return;
@@ -1386,14 +1459,14 @@ DECL_HANDLER(set_thread_context)
 
     if (req->suspend)
     {
-        if (thread != current || thread->context)
+        if (thread != current || thread->context || context->cpu != thread->process->cpu)
         {
             /* nested suspend or exception, shouldn't happen */
             set_error( STATUS_INVALID_PARAMETER );
         }
-        else if ((thread->suspend_context = mem_alloc( sizeof(CONTEXT) )))
+        else if ((thread->suspend_context = mem_alloc( sizeof(context_t) )))
         {
-            memcpy( thread->suspend_context, get_req_data(), sizeof(CONTEXT) );
+            memcpy( thread->suspend_context, get_req_data(), sizeof(context_t) );
             thread->context = thread->suspend_context;
             if (thread->debug_break) break_thread( thread );
         }
@@ -1404,15 +1477,16 @@ DECL_HANDLER(set_thread_context)
         if (thread->state != RUNNING) set_error( STATUS_ACCESS_DENIED );
         else set_error( STATUS_PENDING );
     }
-    else
+    else if (context->cpu == thread->process->cpu)
     {
-        const CONTEXT *context = get_req_data();
-        unsigned int flags = get_context_system_regs( req->flags );
+        unsigned int system_flags = get_context_system_regs(context->cpu) & context->flags;
+        unsigned int client_flags = context->flags & ~system_flags;
 
-        if (flags) set_thread_context( thread, context, flags );
-        if (thread->context && !get_error())
-            copy_context( thread->context, context, req->flags & ~flags );
+        if (system_flags) set_thread_context( thread, context, system_flags );
+        if (thread->context && !get_error()) copy_context( thread->context, context, client_flags );
     }
+    else set_error( STATUS_INVALID_PARAMETER );
+
     reply->self = (thread == current);
     release_object( thread );
 }

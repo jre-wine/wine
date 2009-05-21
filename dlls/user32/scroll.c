@@ -156,8 +156,8 @@ static SCROLLBAR_INFO *SCROLL_GetInternalInfo( HWND hwnd, INT nBar, BOOL alloc )
     if (!wndPtr || wndPtr == WND_OTHER_PROCESS || wndPtr == WND_DESKTOP) return NULL;
     switch(nBar)
     {
-        case SB_HORZ: infoPtr = (SCROLLBAR_INFO *)wndPtr->pHScroll; break;
-        case SB_VERT: infoPtr = (SCROLLBAR_INFO *)wndPtr->pVScroll; break;
+        case SB_HORZ: infoPtr = wndPtr->pHScroll; break;
+        case SB_VERT: infoPtr = wndPtr->pVScroll; break;
         case SB_CTL:  infoPtr = (SCROLLBAR_INFO *)wndPtr->wExtra; break;
         case SB_BOTH: WARN("with SB_BOTH\n"); break;
     }
@@ -2068,6 +2068,9 @@ BOOL WINAPI EnableScrollBar( HWND hwnd, UINT nBar, UINT flags )
     if (!(infoPtr = SCROLL_GetInternalInfo( hwnd, nBar, TRUE ))) return FALSE;
     if (bFineWithMe && infoPtr->flags == flags) return FALSE;
     infoPtr->flags = flags;
+
+    if (nBar == SB_CTL && (flags == ESB_DISABLE_BOTH || flags == ESB_ENABLE_BOTH))
+        EnableWindow(hwnd, flags == ESB_ENABLE_BOTH);
 
     SCROLL_RefreshScrollBar( hwnd, nBar, TRUE, TRUE );
     return TRUE;

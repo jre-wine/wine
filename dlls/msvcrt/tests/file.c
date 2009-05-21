@@ -365,7 +365,7 @@ static void test_asciimode(void)
 	ok((c = fgetc(fp)) == '0'+ i, "fgetc after fseek with neg Offset failed in line %d\n", i);
 	fseek(fp, -4 ,SEEK_CUR);
     }
-    /* Show what happens is fseek positions filepointer on \\r */
+    /* Show what happens if fseek positions filepointer on \\r */
     fclose(fp);
     fp = fopen("ascii.tst", "r");
     fseek(fp, 3 ,SEEK_SET);
@@ -553,7 +553,7 @@ static void test_fgetwc( void )
   ok(l==BUFSIZ-2, "ftell expected %d got %ld\n", BUFSIZ-2, l);
   fgetws(wtextW,LLEN,tempfh);
   l=ftell(tempfh);
-  ok(l==BUFSIZ-2+strlen(mytext), "ftell expected %d got %ld\n", BUFSIZ-2+strlen(mytext), l);
+  ok(l==BUFSIZ-2+strlen(mytext), "ftell expected %d got %ld\n", BUFSIZ-2+lstrlen(mytext), l);
   mytextW = AtoW (mytext);
   aptr = mytextW;
   wptr = wtextW;

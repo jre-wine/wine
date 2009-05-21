@@ -273,10 +273,20 @@ static WORD get_operator_token(char c)
 
 static BOOL is_keyword(parse_buffer* buf, const char* keyword)
 {
-  char tmp[9]; /* template keyword size + 1 */
+  char tmp[8]; /* longest keyword size (template) */
   DWORD len = strlen(keyword);
-  read_bytes(buf, tmp, len+1);
-  if (!strncasecmp(tmp, keyword,len) && is_separator(tmp[len]))
+
+  if (!read_bytes(buf, tmp, len))
+    return FALSE;
+  if (strncasecmp(tmp, keyword, len))
+  {
+    rewind_bytes(buf, len);
+    return FALSE;
+  }
+
+  if (!read_bytes(buf, tmp, 1))
+    return TRUE;
+  if (is_separator(tmp[0]))
   {
     rewind_bytes(buf, 1);
     return TRUE;
@@ -985,6 +995,25 @@ BOOL parse_template(parse_buffer * buf)
   return TRUE;
 }
 
+static BOOL check_buffer(parse_buffer * buf, ULONG size)
+{
+  if ((buf->cur_pos_data + size) > buf->capacity)
+  {
+    LPBYTE pdata;
+    ULONG new_capacity = buf->capacity ? 2 * buf->capacity : 100000;
+
+    pdata = HeapAlloc(GetProcessHeap(), 0, new_capacity);
+    if (!pdata)
+      return FALSE;
+    memcpy(pdata, buf->pdata, buf->cur_pos_data);
+    HeapFree(GetProcessHeap(), 0, buf->pdata);
+    buf->capacity = new_capacity;
+    buf->pdata = pdata;
+    buf->pxo->root->pdata = pdata;
+  }
+  return TRUE;
+}
+
 static BOOL parse_object_parts(parse_buffer * buf, BOOL allow_optional);
 static BOOL parse_object_members_list(parse_buffer * buf)
 {
@@ -999,14 +1028,14 @@ static BOOL parse_object_members_list(parse_buffer * buf)
     int nb_elems = 1;
 
     buf->pxo->members[i].name = pt->members[i].name;
-    buf->pxo->members[i].start = buf->cur_pdata;
+    buf->pxo->members[i].start = buf->cur_pos_data;
 
     for (k = 0; k < pt->members[i].nb_dims; k++)
     {
       if (pt->members[i].dim_fixed[k])
         nb_elems *= pt->members[i].dim_value[k];
       else
-        nb_elems *= *(DWORD*)buf->pxo->members[pt->members[i].dim_value[k]].start;
+        nb_elems *= *(DWORD*)(buf->pxo->root->pdata + buf->pxo->members[pt->members[i].dim_value[k]].start);
     }
 
     TRACE("Elements to consider: %d\n", nb_elems);
@@ -1066,20 +1095,17 @@ static BOOL parse_object_members_list(parse_buffer * buf)
           last_dword = *(DWORD*)buf->value;
           TRACE("%s = %d\n", pt->members[i].name, *(DWORD*)buf->value);
           /* Assume larger size */
-          if ((buf->cur_pdata - buf->pdata + 4) > MAX_DATA_SIZE)
-          {
-            FIXME("Buffer too small\n");
+          if (!check_buffer(buf, 4))
             return FALSE;
-          }
           if (pt->members[i].type == TOKEN_WORD)
           {
-            *(((WORD*)(buf->cur_pdata))) = (WORD)(*(DWORD*)buf->value);
-            buf->cur_pdata += 2;
+            *(((WORD*)(buf->cur_pos_data + buf->pdata))) = (WORD)(*(DWORD*)buf->value);
+            buf->cur_pos_data += 2;
           }
           else if (pt->members[i].type == TOKEN_DWORD)
           {
-            *(((DWORD*)(buf->cur_pdata))) = (DWORD)(*(DWORD*)buf->value);
-            buf->cur_pdata += 4;
+            *(((DWORD*)(buf->cur_pos_data + buf->pdata))) = (DWORD)(*(DWORD*)buf->value);
+            buf->cur_pos_data += 4;
           }
           else
           {
@@ -1091,16 +1117,12 @@ static BOOL parse_object_members_list(parse_buffer * buf)
         {
           get_TOKEN(buf);
           TRACE("%s = %f\n", pt->members[i].name, *(float*)buf->value);
-          /* Assume larger size */
-          if ((buf->cur_pdata - buf->pdata + 4) > MAX_DATA_SIZE)
-          {
-            FIXME("Buffer too small\n");
+          if (!check_buffer(buf, 4))
             return FALSE;
-          }
           if (pt->members[i].type == TOKEN_FLOAT)
           {
-            *(((float*)(buf->cur_pdata))) = (float)(*(float*)buf->value);
-            buf->cur_pdata += 4;
+            *(((float*)(buf->cur_pos_data + buf->pdata))) = (float)(*(float*)buf->value);
+            buf->cur_pos_data += 4;
           }
           else
           {
@@ -1112,12 +1134,8 @@ static BOOL parse_object_members_list(parse_buffer * buf)
         {
           get_TOKEN(buf);
           TRACE("%s = %s\n", pt->members[i].name, (char*)buf->value);
-          /* Assume larger size */
-          if ((buf->cur_pdata - buf->pdata + 4) > MAX_DATA_SIZE)
-          {
-            FIXME("Buffer too small\n");
+          if (!check_buffer(buf, 4))
             return FALSE;
-          }
           if (pt->members[i].type == TOKEN_LPSTR)
           {
             int len = strlen((char*)buf->value) + 1;
@@ -1127,9 +1145,9 @@ static BOOL parse_object_members_list(parse_buffer * buf)
               return FALSE;
             }
             strcpy((char*)buf->cur_pstrings, (char*)buf->value);
-            *(((LPCSTR*)(buf->cur_pdata))) = (char*)buf->cur_pstrings;
+            *(((LPCSTR*)(buf->cur_pos_data + buf->pdata))) = (char*)buf->cur_pstrings;
             buf->cur_pstrings += len;
-            buf->cur_pdata += 4;
+            buf->cur_pos_data += 4;
           }
           else
           {
@@ -1163,7 +1181,7 @@ static BOOL parse_object_parts(parse_buffer * buf, BOOL allow_optional)
 
   if (allow_optional)
   {
-    buf->pxo->size = buf->cur_pdata - buf->pxo->pdata;
+    buf->pxo->size = buf->cur_pos_data - buf->pxo->pos_data;
 
     /* Skip trailing semicolon */
     while (check_TOKEN(buf) == TOKEN_SEMICOLON)
@@ -1232,8 +1250,9 @@ BOOL parse_object(parse_buffer * buf)
 {
   int i;
 
-  buf->pxo->pdata = buf->cur_pdata;
+  buf->pxo->pos_data = buf->cur_pos_data;
   buf->pxo->ptarget = NULL;
+  buf->pxo->root = buf->pxo_tab;
 
   if (get_TOKEN(buf) != TOKEN_NAME)
     return FALSE;

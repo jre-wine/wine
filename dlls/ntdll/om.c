@@ -65,7 +65,7 @@ NTSTATUS WINAPI NtQueryObject(IN HANDLE handle,
     {
     case ObjectBasicInformation:
         {
-            POBJECT_BASIC_INFORMATION p = (POBJECT_BASIC_INFORMATION)ptr;
+            POBJECT_BASIC_INFORMATION p = ptr;
 
             if (len < sizeof(*p)) return STATUS_INVALID_BUFFER_SIZE;
 
@@ -87,7 +87,7 @@ NTSTATUS WINAPI NtQueryObject(IN HANDLE handle,
         break;
     case ObjectDataInformation:
         {
-            OBJECT_DATA_INFORMATION* p = (OBJECT_DATA_INFORMATION*)ptr;
+            OBJECT_DATA_INFORMATION* p = ptr;
 
             if (len < sizeof(*p)) return STATUS_INVALID_BUFFER_SIZE;
 
@@ -133,7 +133,7 @@ NTSTATUS WINAPI NtSetInformationObject(IN HANDLE handle,
     {
     case ObjectDataInformation:
         {
-            OBJECT_DATA_INFORMATION* p = (OBJECT_DATA_INFORMATION*)ptr;
+            OBJECT_DATA_INFORMATION* p = ptr;
 
             if (len < sizeof(*p)) return STATUS_INVALID_BUFFER_SIZE;
 
@@ -332,8 +332,7 @@ NTSTATUS WINAPI NtOpenDirectoryObject(PHANDLE DirectoryHandle, ACCESS_MASK Desir
                                       POBJECT_ATTRIBUTES ObjectAttributes)
 {
     NTSTATUS ret;
-    TRACE("(%p,0x%08x)\n", DirectoryHandle, DesiredAccess);
-    dump_ObjectAttributes(ObjectAttributes);
+    TRACE("(%p,0x%08x,%s)\n", DirectoryHandle, DesiredAccess, debugstr_ObjectAttributes(ObjectAttributes));
 
     if (!DirectoryHandle) return STATUS_ACCESS_VIOLATION;
     if (!ObjectAttributes) return STATUS_INVALID_PARAMETER;
@@ -381,8 +380,7 @@ NTSTATUS WINAPI NtCreateDirectoryObject(PHANDLE DirectoryHandle, ACCESS_MASK Des
                                         POBJECT_ATTRIBUTES ObjectAttributes)
 {
     NTSTATUS ret;
-    TRACE("(%p,0x%08x)\n", DirectoryHandle, DesiredAccess);
-    dump_ObjectAttributes(ObjectAttributes);
+    TRACE("(%p,0x%08x,%s)\n", DirectoryHandle, DesiredAccess, debugstr_ObjectAttributes(ObjectAttributes));
 
     if (!DirectoryHandle) return STATUS_ACCESS_VIOLATION;
 
@@ -489,8 +487,7 @@ NTSTATUS WINAPI NtOpenSymbolicLinkObject(OUT PHANDLE LinkHandle, IN ACCESS_MASK 
                                          IN POBJECT_ATTRIBUTES ObjectAttributes)
 {
     NTSTATUS ret;
-    TRACE("(%p,0x%08x,%p)\n",LinkHandle, DesiredAccess, ObjectAttributes);
-    dump_ObjectAttributes(ObjectAttributes);
+    TRACE("(%p,0x%08x,%s)\n",LinkHandle, DesiredAccess, debugstr_ObjectAttributes(ObjectAttributes));
 
     if (!LinkHandle) return STATUS_ACCESS_VIOLATION;
     if (!ObjectAttributes) return STATUS_INVALID_PARAMETER;
@@ -540,12 +537,12 @@ NTSTATUS WINAPI NtCreateSymbolicLinkObject(OUT PHANDLE SymbolicLinkHandle,IN ACC
                                            IN PUNICODE_STRING TargetName)
 {
     NTSTATUS ret;
-    TRACE("(%p,0x%08x,%p, -> %s)\n", SymbolicLinkHandle, DesiredAccess, ObjectAttributes,
-                                      debugstr_us(TargetName));
-    dump_ObjectAttributes(ObjectAttributes);
 
     if (!SymbolicLinkHandle || !TargetName) return STATUS_ACCESS_VIOLATION;
     if (!TargetName->Buffer) return STATUS_INVALID_PARAMETER;
+
+    TRACE("(%p,0x%08x,%s -> %s)\n", SymbolicLinkHandle, DesiredAccess,
+          debugstr_ObjectAttributes(ObjectAttributes), debugstr_us(TargetName));
 
     SERVER_START_REQ(create_symlink)
     {

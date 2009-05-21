@@ -211,7 +211,7 @@ static void test_multibyte_to_unicode_translations(IMultiLanguage2 *iML2)
     ok(lenA == expected_len, "expected lenA %u, got %u\n", expected_len, lenA);
 }
 
-static inline void cpinfo_cmp(MIMECPINFO *cpinfo1, MIMECPINFO *cpinfo2)
+static void cpinfo_cmp(MIMECPINFO *cpinfo1, MIMECPINFO *cpinfo2)
 {
     ok(cpinfo1->dwFlags == cpinfo2->dwFlags, "dwFlags mismatch: %08x != %08x\n", cpinfo1->dwFlags, cpinfo2->dwFlags);
     ok(cpinfo1->uiCodePage == cpinfo2->uiCodePage, "uiCodePage mismatch: %u != %u\n", cpinfo1->uiCodePage, cpinfo2->uiCodePage);
@@ -538,7 +538,7 @@ static void test_EnumCodePages(IMultiLanguage2 *iML2, DWORD flags)
     IEnumCodePage_Release(iEnumCP);
 }
 
-static inline void scriptinfo_cmp(SCRIPTINFO *sinfo1, SCRIPTINFO *sinfo2)
+static void scriptinfo_cmp(SCRIPTINFO *sinfo1, SCRIPTINFO *sinfo2)
 {
     ok(sinfo1->ScriptId == sinfo2->ScriptId, "ScriptId mismatch: %d != %d\n", sinfo1->ScriptId, sinfo2->ScriptId);
     ok(sinfo1->uiCodePage == sinfo2->uiCodePage, "uiCodePage mismatch: %u != %u\n", sinfo1->uiCodePage, sinfo2->uiCodePage);
@@ -649,6 +649,8 @@ static void IMLangFontLink_Test(IMLangFontLink* iMLFL)
     DWORD dwCodePages, dwManyCodePages;
     DWORD dwCmpCodePages;
     UINT CodePage;
+    static const WCHAR str[3] = { 'd', 0x0436, 0xff90 };
+    LONG processed;
     HRESULT ret;
 
     dwCodePages = ~0u;
@@ -693,21 +695,89 @@ static void IMLangFontLink_Test(IMLangFontLink* iMLFL)
     dwCmpCodePages = FS_LATIN1 | FS_LATIN2 | FS_CYRILLIC | FS_GREEK | FS_TURKISH
         | FS_HEBREW | FS_ARABIC | FS_BALTIC | FS_VIETNAMESE | FS_THAI
         | FS_JISJAPAN | FS_CHINESESIMP | FS_WANSUNG | FS_CHINESETRAD;
-    ok(IMLangFontLink_GetCharCodePages(iMLFL, 'd', &dwCodePages) == S_OK,
-        "IMLangFontLink_GetCharCodePages failed\n");
-    ok(dwCodePages == dwCmpCodePages, "Incorrect CodePages returned (%i)\n", dwCodePages);
+    ret = IMLangFontLink_GetCharCodePages(iMLFL, 'd', &dwCodePages);
+    ok(ret == S_OK, "IMLangFontLink_GetCharCodePages error %x\n", ret);
+    ok(dwCodePages == dwCmpCodePages, "expected %x, got %x\n", dwCmpCodePages, dwCodePages);
+
+    dwCodePages = 0;
+    processed = 0;
+    ret = IMLangFontLink_GetStrCodePages(iMLFL, &str[0], 1, 0, &dwCodePages, &processed);
+    ok(ret == S_OK, "IMLangFontLink_GetStrCodePages error %x\n", ret);
+    ok(dwCodePages == dwCmpCodePages, "expected %x, got %x\n", dwCmpCodePages, dwCodePages);
+    ok(processed == 1, "expected 1, got %d\n", processed);
 
     /* Cyrillic */
     dwCmpCodePages = FS_CYRILLIC | FS_JISJAPAN | FS_CHINESESIMP | FS_WANSUNG;
-    ok(IMLangFontLink_GetCharCodePages(iMLFL, 0x0436, &dwCodePages) == S_OK,
-        "IMLangFontLink_GetCharCodePages failed\n");
-    ok(dwCodePages == dwCmpCodePages, "Incorrect CodePages returned (%i)\n", dwCodePages);
+    ret = IMLangFontLink_GetCharCodePages(iMLFL, 0x0436, &dwCodePages);
+    ok(ret == S_OK, "IMLangFontLink_GetCharCodePages error %x\n", ret);
+    ok(dwCodePages == dwCmpCodePages, "expected %x, got %x\n", dwCmpCodePages, dwCodePages);
+
+    dwCodePages = 0;
+    processed = 0;
+    ret = IMLangFontLink_GetStrCodePages(iMLFL, &str[1], 1, 0, &dwCodePages, &processed);
+    ok(ret == S_OK, "IMLangFontLink_GetStrCodePages error %x\n", ret);
+    ok(dwCodePages == dwCmpCodePages, "expected %x, got %x\n", dwCmpCodePages, dwCodePages);
+    ok(processed == 1, "expected 1, got %d\n", processed);
 
     /* Japanese */
     dwCmpCodePages =  FS_JISJAPAN;
-    ok(IMLangFontLink_GetCharCodePages(iMLFL, 0xff90, &dwCodePages) == S_OK,
-        "IMLangFontLink_GetCharCodePages failed\n");
-    ok(dwCodePages == dwCmpCodePages, "Incorrect CodePages returned (%i)\n", dwCodePages);
+    ret = IMLangFontLink_GetCharCodePages(iMLFL, 0xff90, &dwCodePages);
+    ok(ret == S_OK, "IMLangFontLink_GetCharCodePages error %x\n", ret);
+    ok(dwCodePages == dwCmpCodePages, "expected %x, got %x\n", dwCmpCodePages, dwCodePages);
+
+    dwCodePages = 0;
+    processed = 0;
+    ret = IMLangFontLink_GetStrCodePages(iMLFL, &str[2], 1, 0, &dwCodePages, &processed);
+    ok(ret == S_OK, "IMLangFontLink_GetStrCodePages error %x\n", ret);
+    ok(dwCodePages == dwCmpCodePages, "expected %x, got %x\n", dwCmpCodePages, dwCodePages);
+    ok(processed == 1, "expected 1, got %d\n", processed);
+
+    dwCmpCodePages = FS_CYRILLIC | FS_JISJAPAN | FS_CHINESESIMP | FS_WANSUNG;
+    dwCodePages = 0;
+    processed = 0;
+    ret = IMLangFontLink_GetStrCodePages(iMLFL, str, 2, 0, &dwCodePages, &processed);
+    ok(ret == S_OK, "IMLangFontLink_GetStrCodePages error %x\n", ret);
+    ok(dwCodePages == dwCmpCodePages, "expected %x, got %x\n", dwCmpCodePages, dwCodePages);
+    ok(processed == 2, "expected 2, got %d\n", processed);
+
+    dwCmpCodePages = FS_JISJAPAN;
+    dwCodePages = 0;
+    processed = 0;
+    ret = IMLangFontLink_GetStrCodePages(iMLFL, str, 3, 0, &dwCodePages, &processed);
+    ok(ret == S_OK, "IMLangFontLink_GetStrCodePages error %x\n", ret);
+    ok(dwCodePages == dwCmpCodePages, "expected %x, got %x\n", dwCmpCodePages, dwCodePages);
+    ok(processed == 3, "expected 3, got %d\n", processed);
+
+    dwCodePages = 0xffff;
+    processed = -1;
+    ret = IMLangFontLink_GetStrCodePages(iMLFL, &str[2], 1, 0, &dwCodePages, &processed);
+    ok(ret == S_OK, "IMLangFontLink_GetStrCodePages error %x\n", ret);
+    ok(dwCodePages == dwCmpCodePages, "expected %x, got %x\n", dwCmpCodePages, dwCodePages);
+    ok(processed == 1, "expected 0, got %d\n", processed);
+
+    ret = IMLangFontLink_GetStrCodePages(iMLFL, &str[2], 1, 0, NULL, NULL);
+    ok(ret == S_OK, "IMLangFontLink_GetStrCodePages error %x\n", ret);
+
+    dwCodePages = 0xffff;
+    processed = -1;
+    ret = IMLangFontLink_GetStrCodePages(iMLFL, str, -1, 0, &dwCodePages, &processed);
+    ok(ret == E_INVALIDARG, "IMLangFontLink_GetStrCodePages should fail: %x\n", ret);
+    ok(dwCodePages == 0, "expected %x, got %x\n", dwCmpCodePages, dwCodePages);
+    ok(processed == 0, "expected 0, got %d\n", processed);
+
+    dwCodePages = 0xffff;
+    processed = -1;
+    ret = IMLangFontLink_GetStrCodePages(iMLFL, NULL, 1, 0, &dwCodePages, &processed);
+    ok(ret == E_INVALIDARG, "IMLangFontLink_GetStrCodePages should fail: %x\n", ret);
+    ok(dwCodePages == 0, "expected %x, got %x\n", dwCmpCodePages, dwCodePages);
+    ok(processed == 0, "expected 0, got %d\n", processed);
+
+    dwCodePages = 0xffff;
+    processed = -1;
+    ret = IMLangFontLink_GetStrCodePages(iMLFL, str, 0, 0, &dwCodePages, &processed);
+    ok(ret == E_INVALIDARG, "IMLangFontLink_GetStrCodePages should fail: %x\n", ret);
+    ok(dwCodePages == 0, "expected %x, got %x\n", dwCmpCodePages, dwCodePages);
+    ok(processed == 0, "expected 0, got %d\n", processed);
 }
 
 /* copied from libs/wine/string.c */
@@ -1369,10 +1439,49 @@ static void test_JapaneseConversion(void)
     ok(memcmp(outputW,&unc_jp[i][1],destsz)==0,"(%i) Strings do not match\n",i);
 }
 
+static void test_GetScriptFontInfo(IMLangFontLink2 *font_link)
+{
+    HRESULT hr;
+    UINT nfonts;
+    SCRIPTFONTINFO sfi[1];
+
+    nfonts = 0;
+    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidLatin, 0, &nfonts, NULL);
+    ok(hr == S_OK, "GetScriptFontInfo failed %u\n", GetLastError());
+    ok(nfonts, "unexpected result\n");
+
+    nfonts = 0;
+    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidLatin, SCRIPTCONTF_FIXED_FONT, &nfonts, NULL);
+    ok(hr == S_OK, "GetScriptFontInfo failed %u\n", GetLastError());
+    ok(nfonts, "unexpected result\n");
+
+    nfonts = 0;
+    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidLatin, SCRIPTCONTF_PROPORTIONAL_FONT, &nfonts, NULL);
+    ok(hr == S_OK, "GetScriptFontInfo failed %u\n", GetLastError());
+    ok(nfonts, "unexpected result\n");
+
+    nfonts = 1;
+    memset(sfi, 0, sizeof(sfi));
+    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidLatin, SCRIPTCONTF_FIXED_FONT, &nfonts, sfi);
+    ok(hr == S_OK, "GetScriptFontInfo failed %u\n", GetLastError());
+    ok(nfonts == 1, "got %u, expected 1\n", nfonts);
+    ok(sfi[0].scripts != 0, "unexpected result\n");
+    ok(sfi[0].wszFont[0], "unexpected result\n");
+
+    nfonts = 1;
+    memset(sfi, 0, sizeof(sfi));
+    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidLatin, SCRIPTCONTF_PROPORTIONAL_FONT, &nfonts, sfi);
+    ok(hr == S_OK, "GetScriptFontInfo failed %u\n", GetLastError());
+    ok(nfonts == 1, "got %u, expected 1\n", nfonts);
+    ok(sfi[0].scripts != 0, "unexpected result\n");
+    ok(sfi[0].wszFont[0], "unexpected result\n");
+}
+
 START_TEST(mlang)
 {
     IMultiLanguage2 *iML2 = NULL;
     IMLangFontLink  *iMLFL = NULL;
+    IMLangFontLink2 *iMLFL2 = NULL;
     HRESULT ret;
 
     if (!init_function_ptrs())
@@ -1415,10 +1524,17 @@ START_TEST(mlang)
 
     ret = CoCreateInstance(&CLSID_CMultiLanguage, NULL, CLSCTX_INPROC_SERVER,
                            &IID_IMLangFontLink, (void **)&iMLFL);
-    if (ret != S_OK || !iML2) return;
+    if (ret != S_OK || !iMLFL) return;
 
     IMLangFontLink_Test(iMLFL);
     IMLangFontLink_Release(iMLFL);
+
+    ret = CoCreateInstance(&CLSID_CMultiLanguage, NULL, CLSCTX_INPROC_SERVER,
+                           &IID_IMLangFontLink2, (void **)&iMLFL2);
+    if (ret != S_OK || !iMLFL2) return;
+
+    test_GetScriptFontInfo(iMLFL2);
+    IMLangFontLink2_Release(iMLFL2);
 
     CoUninitialize();
 }

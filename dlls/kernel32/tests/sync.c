@@ -54,7 +54,7 @@ static void test_signalandwait(void)
     r = pSignalObjectAndWait(NULL, NULL, 0, 0);
     if (r == ERROR_INVALID_FUNCTION)
     {
-        skip("SignalObjectAndWait is not implemented\n");
+        win_skip("SignalObjectAndWait is not implemented\n");
         return; /* Win98/ME */
     }
     ok( r == WAIT_FAILED, "should fail\n");
@@ -220,7 +220,7 @@ static void test_slist(void)
         pInterlockedPopEntrySList == NULL ||
         pInterlockedPushEntrySList == NULL)
     {
-        skip("some required slist entrypoints were not found, skipping tests\n");
+        win_skip("some required slist entrypoints were not found, skipping tests\n");
         return;
     }
 
@@ -393,7 +393,7 @@ static void test_waitable_timer(void)
 
     if (!pCreateWaitableTimerA || !pOpenWaitableTimerA)
     {
-        skip("{Create,Open}WaitableTimerA() is not available\n");
+        win_skip("{Create,Open}WaitableTimerA() is not available\n");
         return;
     }
 
@@ -455,7 +455,7 @@ static void test_iocp_callback(void)
 
     p_BindIoCompletionCallback = (void*)GetProcAddress(hmod, "BindIoCompletionCallback");
     if(!p_BindIoCompletionCallback) {
-        skip("BindIoCompletionCallback not found in this DLL\n");
+        win_skip("BindIoCompletionCallback not found in this DLL\n");
         return;
     }
 
@@ -490,7 +490,7 @@ static void test_iocp_callback(void)
     ok(retb == TRUE, "BindIoCompletionCallback failed\n");
 
     memset(&overlapped, 0, sizeof(overlapped));
-    retb = WriteFile(hFile, (const void *) buffer, 4, &bytesWritten, &overlapped);
+    retb = WriteFile(hFile, buffer, 4, &bytesWritten, &overlapped);
     ok(retb == TRUE || GetLastError() == ERROR_IO_PENDING, "WriteFile failed, lastError = %d\n", GetLastError());
 
     ret = WaitForSingleObject(sem, 5000);
@@ -534,7 +534,7 @@ static void test_iocp_callback(void)
 
 static void CALLBACK timer_queue_cb1(PVOID p, BOOLEAN timedOut)
 {
-    int *pn = (int *) p;
+    int *pn = p;
     ok(timedOut, "Timer callbacks should always time out\n");
     ++*pn;
 }
@@ -645,7 +645,7 @@ static void test_timer_queue(void)
     if (!pChangeTimerQueueTimer || !pCreateTimerQueue || !pCreateTimerQueueTimer
         || !pDeleteTimerQueueEx || !pDeleteTimerQueueTimer)
     {
-        skip("TimerQueue API not present\n");
+        win_skip("TimerQueue API not present\n");
         return;
     }
 

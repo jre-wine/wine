@@ -51,6 +51,10 @@
 #ifdef HAVE_SYS_UIO_H
 #include <sys/uio.h>
 #endif
+#ifdef HAVE_SYS_THR_H
+#include <sys/ucontext.h>
+#include <sys/thr.h>
+#endif
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
@@ -58,7 +62,6 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "wine/library.h"
-#include "wine/pthread.h"
 #include "wine/server.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
@@ -72,6 +75,22 @@ WINE_DEFAULT_DEBUG_CHANNEL(server);
 
 #define SOCKETNAME "socket"        /* name of the socket file */
 #define LOCKNAME   "lock"          /* name of the lock file */
+
+#ifdef __i386__
+static const enum cpu_type client_cpu = CPU_x86;
+#elif defined(__x86_64__)
+static const enum cpu_type client_cpu = CPU_x86_64;
+#elif defined(__ALPHA__)
+static const enum cpu_type client_cpu = CPU_ALPHA;
+#elif defined(__powerpc__)
+static const enum cpu_type client_cpu = CPU_POWERPC;
+#elif defined(__sparc__)
+static const enum cpu_type client_cpu = CPU_SPARC;
+#else
+#error Unsupported CPU
+#endif
+
+unsigned int server_cpus = 0;
 
 #ifndef HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS
 /* data structure used to pass an fd with sendmsg/recvmsg */
@@ -88,8 +107,6 @@ struct cmsg_fd
 #endif  /* HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS */
 
 timeout_t server_start_time = 0;  /* time of server startup */
-
-extern struct wine_pthread_functions pthread_functions;
 
 sigset_t server_block_set;  /* signals to block during server calls */
 static int fd_socket = -1;  /* socket to exchange file descriptors with the server */
@@ -137,56 +154,6 @@ static void fatal_perror( const char *err, ... )
 
 
 /***********************************************************************
- *           server_exit_thread
- */
-void server_exit_thread( int status )
-{
-    struct wine_pthread_thread_info info;
-    int fds[4];
-
-    RtlAcquirePebLock();
-    RemoveEntryList( &NtCurrentTeb()->TlsLinks );
-    RtlReleasePebLock();
-    RtlFreeHeap( GetProcessHeap(), 0, NtCurrentTeb()->FlsSlots );
-    RtlFreeHeap( GetProcessHeap(), 0, NtCurrentTeb()->TlsExpansionSlots );
-
-    info.stack_base  = NtCurrentTeb()->DeallocationStack;
-    info.teb_base    = NtCurrentTeb();
-    info.teb_sel     = wine_get_fs();
-    info.exit_status = status;
-
-    fds[0] = ntdll_get_thread_data()->wait_fd[0];
-    fds[1] = ntdll_get_thread_data()->wait_fd[1];
-    fds[2] = ntdll_get_thread_data()->reply_fd;
-    fds[3] = ntdll_get_thread_data()->request_fd;
-    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, NULL );
-
-    info.stack_size = virtual_free_system_view( &info.stack_base );
-    info.teb_size = virtual_free_system_view( &info.teb_base );
-
-    close( fds[0] );
-    close( fds[1] );
-    close( fds[2] );
-    close( fds[3] );
-    pthread_functions.exit_thread( &info );
-}
-
-
-/***********************************************************************
- *           server_abort_thread
- */
-void server_abort_thread( int status )
-{
-    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, NULL );
-    close( ntdll_get_thread_data()->wait_fd[0] );
-    close( ntdll_get_thread_data()->wait_fd[1] );
-    close( ntdll_get_thread_data()->reply_fd );
-    close( ntdll_get_thread_data()->request_fd );
-    pthread_functions.abort_thread( status );
-}
-
-
-/***********************************************************************
  *           server_protocol_error
  */
 void server_protocol_error( const char *err, ... )
@@ -197,7 +164,7 @@ void server_protocol_error( const char *err, ... )
     fprintf( stderr, "wine client error:%x: ", GetCurrentThreadId() );
     vfprintf( stderr, err, args );
     va_end( args );
-    server_abort_thread(1);
+    abort_thread(1);
 }
 
 
@@ -208,7 +175,7 @@ void server_protocol_perror( const char *err )
 {
     fprintf( stderr, "wine client error:%x: ", GetCurrentThreadId() );
     perror( err );
-    server_abort_thread(1);
+    abort_thread(1);
 }
 
 
@@ -244,7 +211,7 @@ static unsigned int send_request( const struct __server_request_info *req )
     }
 
     if (ret >= 0) server_protocol_error( "partial write %d\n", ret );
-    if (errno == EPIPE) server_abort_thread(0);
+    if (errno == EPIPE) abort_thread(0);
     if (errno == EFAULT) return STATUS_ACCESS_VIOLATION;
     server_protocol_perror( "write" );
 }
@@ -273,7 +240,7 @@ static void read_reply_data( void *buffer, size_t size )
         server_protocol_perror("read");
     }
     /* the server closed the connection; time to die... */
-    server_abort_thread(0);
+    abort_thread(0);
 }
 
 
@@ -319,10 +286,10 @@ unsigned int wine_server_call( void *req_ptr )
     sigset_t old_set;
     unsigned int ret;
 
-    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, &old_set );
+    pthread_sigmask( SIG_BLOCK, &server_block_set, &old_set );
     ret = send_request( req );
     if (!ret) ret = wait_reply( req );
-    pthread_functions.sigprocmask( SIG_SETMASK, &old_set, NULL );
+    pthread_sigmask( SIG_SETMASK, &old_set, NULL );
     return ret;
 }
 
@@ -332,7 +299,7 @@ unsigned int wine_server_call( void *req_ptr )
  */
 void server_enter_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset )
 {
-    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, sigset );
+    pthread_sigmask( SIG_BLOCK, &server_block_set, sigset );
     RtlEnterCriticalSection( cs );
 }
 
@@ -343,7 +310,7 @@ void server_enter_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sig
 void server_leave_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset )
 {
     RtlLeaveCriticalSection( cs );
-    pthread_functions.sigprocmask( SIG_SETMASK, sigset, NULL );
+    pthread_sigmask( SIG_SETMASK, sigset, NULL );
 }
 
 
@@ -397,7 +364,7 @@ void CDECL wine_server_send_fd( int fd )
         if ((ret = sendmsg( fd_socket, &msghdr, 0 )) == sizeof(data)) return;
         if (ret >= 0) server_protocol_error( "partial write %d\n", ret );
         if (errno == EINTR) continue;
-        if (errno == EPIPE) server_abort_thread(0);
+        if (errno == EPIPE) abort_thread(0);
         server_protocol_perror( "sendmsg" );
     }
 }
@@ -455,7 +422,7 @@ static int receive_fd( obj_handle_t *handle )
         server_protocol_perror("recvmsg");
     }
     /* the server closed the connection; time to die... */
-    server_abort_thread(0);
+    abort_thread(0);
 }
 
 
@@ -927,6 +894,32 @@ static void send_server_task_port(void)
 }
 #endif  /* __APPLE__ */
 
+
+/***********************************************************************
+ *           get_unix_tid
+ *
+ * Retrieve the Unix tid to use on the server side for the current thread.
+ */
+static int get_unix_tid(void)
+{
+    int ret = -1;
+#if defined(linux) && defined(__i386__)
+    __asm__("int $0x80" : "=a" (ret) : "0" (224) /* SYS_gettid */);
+#elif defined(linux) && defined(__x86_64__)
+    __asm__("syscall" : "=a" (ret) : "0" (186) /* SYS_gettid */);
+#elif defined(__sun)
+    ret = pthread_self();
+#elif defined(__APPLE__)
+    ret = mach_thread_self();
+#elif defined(__FreeBSD__)
+    long lwpid;
+    thr_self( &lwpid );
+    ret = lwpid;
+#endif
+    return ret;
+}
+
+
 /***********************************************************************
  *           server_init_process
  *
@@ -955,7 +948,7 @@ void server_init_process(void)
     sigaddset( &server_block_set, SIGUSR1 );
     sigaddset( &server_block_set, SIGUSR2 );
     sigaddset( &server_block_set, SIGCHLD );
-    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, NULL );
+    pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
 
     /* receive the first thread request fd on the main socket */
     ntdll_get_thread_data()->request_fd = receive_fd( &version );
@@ -1012,7 +1005,7 @@ NTSTATUS server_init_process_done(void)
  *
  * Send an init thread request. Return 0 if OK.
  */
-size_t server_init_thread( int unix_pid, int unix_tid, void *entry_point )
+size_t server_init_thread( void *entry_point )
 {
     int ret;
     int reply_pipe[2];
@@ -1046,22 +1039,32 @@ size_t server_init_thread( int unix_pid, int unix_tid, void *entry_point )
 
     SERVER_START_REQ( init_thread )
     {
-        req->unix_pid    = unix_pid;
-        req->unix_tid    = unix_tid;
+        req->unix_pid    = getpid();
+        req->unix_tid    = get_unix_tid();
         req->teb         = wine_server_client_ptr( NtCurrentTeb() );
-        req->peb         = wine_server_client_ptr( NtCurrentTeb()->Peb );
         req->entry       = wine_server_client_ptr( entry_point );
         req->reply_fd    = reply_pipe[1];
         req->wait_fd     = ntdll_get_thread_data()->wait_fd[1];
         req->debug_level = (TRACE_ON(server) != 0);
+        req->cpu         = client_cpu;
         ret = wine_server_call( req );
         NtCurrentTeb()->ClientId.UniqueProcess = ULongToHandle(reply->pid);
         NtCurrentTeb()->ClientId.UniqueThread  = ULongToHandle(reply->tid);
         info_size         = reply->info_size;
         server_start_time = reply->server_start;
+        server_cpus       = reply->all_cpus;
     }
     SERVER_END_REQ;
 
-    if (ret) server_protocol_error( "init_thread failed with status %x\n", ret );
+    if (ret)
+    {
+        if (ret == STATUS_NOT_SUPPORTED)
+        {
+            static const char * const cpu_arch[] = { "x86", "x86_64", "Alpha", "PowerPC", "Sparc" };
+            server_protocol_error( "the running wineserver doesn't support the %s architecture.\n",
+                                   cpu_arch[client_cpu] );
+        }
+        else server_protocol_error( "init_thread failed with status %x\n", ret );
+    }
     return info_size;
 }

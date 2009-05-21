@@ -1213,8 +1213,8 @@ static BYTE *INT21_GetCurrentDTA( CONTEXT86 *context )
     TDB *pTask = GlobalLock16(GetCurrentTask());
 
     /* FIXME: This assumes DTA was set correctly! */
-    return (BYTE *)CTX_SEG_OFF_TO_LIN( context, SELECTOROF(pTask->dta),
-                                                (DWORD)OFFSETOF(pTask->dta) );
+    return CTX_SEG_OFF_TO_LIN( context, SELECTOROF(pTask->dta),
+                               OFFSETOF(pTask->dta) );
 }
 
 
@@ -1978,9 +1978,8 @@ static void INT21_ExtendedCountryInformation( CONTEXT86 *context )
     case 0xa1: /* CAPITALIZE COUNTED FILENAME STRING */
         TRACE("Convert string to uppercase with length\n");
         {
-            char *ptr = (char *)CTX_SEG_OFF_TO_LIN( context,
-                                                    context->SegDs,
-                                                    context->Edx );
+            char *ptr = CTX_SEG_OFF_TO_LIN( context, context->SegDs,
+                                            context->Edx );
             WORD len = CX_reg(context);
             while (len--) { *ptr = toupper(*ptr); ptr++; }
         }
@@ -2183,6 +2182,7 @@ static BOOL INT21_FileAttributes( CONTEXT86 *context,
         else
         {
             TRACE( "SET FILE CREATION DATE AND TIME, file %s\n", fileA );
+            MultiByteToWideChar(CP_OEMCP, 0, fileA, -1, fileW, MAX_PATH);
 
             handle = CreateFileW( fileW, GENERIC_WRITE,
                                   FILE_SHARE_READ | FILE_SHARE_WRITE, 
@@ -2208,8 +2208,8 @@ static BOOL INT21_FileAttributes( CONTEXT86 *context,
             INT_BARF( context, 0x21 );
         else
         {
-            TRACE( "GET FILE CREATION DATE AND TIME, handle %d\n",
-                   BX_reg(context) );
+            TRACE( "GET FILE CREATION DATE AND TIME, file %s\n", fileA );
+            MultiByteToWideChar(CP_OEMCP, 0, fileA, -1, fileW, MAX_PATH);
 
             handle = CreateFileW( fileW, GENERIC_READ, 
                                   FILE_SHARE_READ | FILE_SHARE_WRITE, 
@@ -3117,9 +3117,8 @@ static void INT21_LongFilename( CONTEXT86 *context )
 
             MultiByteToWideChar(CP_OEMCP, 0, pathA, -1, pathW, MAX_PATH);
             handle = FindFirstFileW(pathW, &dataW);
-            
-            dataA = (WIN32_FIND_DATAA *)CTX_SEG_OFF_TO_LIN(context, context->SegEs,
-                                                           context->Edi);
+
+            dataA = CTX_SEG_OFF_TO_LIN(context, context->SegEs, context->Edi);
             if (handle != INVALID_HANDLE_VALUE && 
                 (h16 = GlobalAlloc16(GMEM_MOVEABLE, sizeof(handle))))
             {
@@ -3148,8 +3147,7 @@ static void INT21_LongFilename( CONTEXT86 *context )
             TRACE("LONG FILENAME - FIND NEXT MATCHING FILE for handle %d\n",
                   BX_reg(context));
 
-            dataA = (WIN32_FIND_DATAA *)CTX_SEG_OFF_TO_LIN(context, context->SegEs,
-                                                           context->Edi);
+            dataA = CTX_SEG_OFF_TO_LIN(context, context->SegEs, context->Edi);
 
             if (h16 != INVALID_HANDLE_VALUE16 && (ptr = GlobalLock16( h16 )))
             {
@@ -3817,7 +3815,7 @@ static int INT21_FindFirst( CONTEXT86 *context )
     WCHAR maskW[12], pathW[MAX_PATH];
     static const WCHAR wildcardW[] = {'*','.','*',0};
 
-    path = (const char *)CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
+    path = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     MultiByteToWideChar(CP_OEMCP, 0, path, -1, pathW, MAX_PATH);
 
     p = strrchrW( pathW, '\\');
@@ -3987,7 +3985,7 @@ static int INT21_FindNext( CONTEXT86 *context )
  */
 static int INT21_FindFirstFCB( CONTEXT86 *context )
 {
-    BYTE *fcb = (BYTE *)CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
+    BYTE *fcb = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     FINDFILE_FCB *pFCB;
     int drive;
     WCHAR p[] = {' ',':',};
@@ -4011,7 +4009,7 @@ static int INT21_FindFirstFCB( CONTEXT86 *context )
  */
 static int INT21_FindNextFCB( CONTEXT86 *context )
 {
-    BYTE *fcb = (BYTE *)CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
+    BYTE *fcb = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     FINDFILE_FCB *pFCB;
     LPBYTE pResult = INT21_GetCurrentDTA(context);
     DOS_DIRENTRY_LAYOUT *ddl;
@@ -4178,7 +4176,7 @@ void WINAPI DOSVM_Int21Handler( CONTEXT86 *context )
     case 0x00: /* TERMINATE PROGRAM */
         TRACE("TERMINATE PROGRAM\n");
         if (DOSVM_IsWin16())
-            ExitThread( 0 );
+            DOSVM_Exit( 0 );
         else if(ISV86(context))
             MZ_Exit( context, FALSE, 0 );
         else
@@ -5052,7 +5050,7 @@ void WINAPI DOSVM_Int21Handler( CONTEXT86 *context )
     case 0x4c: /* "EXIT" - TERMINATE WITH RETURN CODE */
         TRACE( "EXIT with return code %d\n", AL_reg(context) );
         if (DOSVM_IsWin16())
-            ExitThread( AL_reg(context) );
+            DOSVM_Exit( AL_reg(context) );
         else if(ISV86(context))
             MZ_Exit( context, FALSE, AL_reg(context) );
         else

@@ -79,7 +79,8 @@ static const struct dinput_device *dinput_devices[] =
     &mouse_device,
     &keyboard_device,
     &joystick_linuxinput_device,
-    &joystick_linux_device
+    &joystick_linux_device,
+    &joystick_osx_device
 };
 #define NB_DINPUT_DEVICES (sizeof(dinput_devices)/sizeof(dinput_devices[0]))
 
@@ -885,6 +886,7 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 static LRESULT CALLBACK LL_hook_proc( int code, WPARAM wparam, LPARAM lparam )
 {
     IDirectInputImpl *dinput;
+    int skip = 0;
 
     if (code != HC_ACTION) return CallNextHookEx( 0, code, wparam, lparam );
 
@@ -898,13 +900,13 @@ static LRESULT CALLBACK LL_hook_proc( int code, WPARAM wparam, LPARAM lparam )
             if (dev->acquired && dev->event_proc)
             {
                 TRACE("calling %p->%p (%lx %lx)\n", dev, dev->event_proc, wparam, lparam);
-                dev->event_proc( (LPDIRECTINPUTDEVICE8A)dev, wparam, lparam );
+                skip |= dev->event_proc( (LPDIRECTINPUTDEVICE8A)dev, wparam, lparam );
             }
         LeaveCriticalSection( &dinput->crit );
     }
     LeaveCriticalSection( &dinput_hook_crit );
 
-    return CallNextHookEx( 0, code, wparam, lparam );
+    return skip ? 1 : CallNextHookEx( 0, code, wparam, lparam );
 }
 
 static LRESULT CALLBACK callwndproc_proc( int code, WPARAM wparam, LPARAM lparam )

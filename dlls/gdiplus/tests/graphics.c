@@ -486,6 +486,7 @@ static void test_Get_Release_DC(void)
     INT i;
     BOOL res;
     ARGB color = 0x00000000;
+    HRGN hrgn = CreateRectRgn(0, 0, 10, 10);
 
     pt[0].X = 10;
     pt[0].Y = 10;
@@ -653,6 +654,10 @@ static void test_Get_Release_DC(void)
     expect(ObjectBusy, status); status = Ok;
     status = GdipFlush(graphics, FlushIntentionFlush);
     expect(ObjectBusy, status); status = Ok;
+    status = GdipGetClipBounds(graphics, rectf);
+    expect(ObjectBusy, status); status = Ok;
+    status = GdipGetClipBoundsI(graphics, rect);
+    expect(ObjectBusy, status); status = Ok;
     status = GdipGetCompositingMode(graphics, &compmode);
     expect(ObjectBusy, status); status = Ok;
     status = GdipGetCompositingQuality(graphics, &quality);
@@ -711,6 +716,8 @@ static void test_Get_Release_DC(void)
     expect(ObjectBusy, status); status = Ok;
     status = GdipTranslateWorldTransform(graphics, 0.0, 0.0, MatrixOrderPrepend);
     expect(ObjectBusy, status); status = Ok;
+    status = GdipSetClipHrgn(graphics, hrgn, CombineModeReplace);
+    expect(ObjectBusy, status); status = Ok;
     status = GdipSetClipPath(graphics, path, CombineModeReplace);
     expect(ObjectBusy, status); status = Ok;
     status = GdipSetClipRect(graphics, 0.0, 0.0, 10.0, 10.0, CombineModeReplace);
@@ -718,7 +725,11 @@ static void test_Get_Release_DC(void)
     status = GdipSetClipRectI(graphics, 0, 0, 10, 10, CombineModeReplace);
     expect(ObjectBusy, status); status = Ok;
     status = GdipSetClipRegion(graphics, clip, CombineModeReplace);
-    expect(ObjectBusy, status);
+    expect(ObjectBusy, status); status = Ok;
+    status = GdipTranslateClip(graphics, 0.0, 0.0);
+    expect(ObjectBusy, status); status = Ok;
+    status = GdipTranslateClipI(graphics, 0, 0);
+    expect(ObjectBusy, status); status = Ok;
     status = GdipDrawPolygon(graphics, pen, ptf, 5);
     expect(ObjectBusy, status); status = Ok;
     status = GdipDrawPolygonI(graphics, pen, pt, 5);
@@ -746,6 +757,7 @@ static void test_Get_Release_DC(void)
     GdipDeleteBrush((GpBrush*)brush);
     GdipDeleteRegion(region);
     GdipDeleteMatrix(m);
+    DeleteObject(hrgn);
 
     ReleaseDC(0, hdc);
 }
@@ -923,6 +935,57 @@ static void test_textcontrast(void)
     ReleaseDC(0, hdc);
 }
 
+static void test_GdipDrawString(void)
+{
+    GpStatus status;
+    GpGraphics *graphics = NULL;
+    GpFont *fnt = NULL;
+    RectF  rect;
+    GpStringFormat *format;
+    GpBrush *brush;
+    LOGFONTA logfont;
+    HDC hdc = GetDC(0);
+    static const WCHAR string[] = {'T','e','s','t',0};
+
+    memset(&logfont,0,sizeof(logfont));
+    strcpy(logfont.lfFaceName,"Arial");
+    logfont.lfHeight = 12;
+    logfont.lfCharSet = DEFAULT_CHARSET;
+
+    status = GdipCreateFromHDC(hdc, &graphics);
+    expect(Ok, status);
+
+    status = GdipCreateFontFromLogfontA(hdc, &logfont, &fnt);
+    if (status == FileNotFound)
+    {
+        skip("Arial not installed.\n");
+        return;
+    }
+    expect(Ok, status);
+
+    status = GdipCreateSolidFill((ARGB)0xdeadbeef, (GpSolidFill**)&brush);
+    expect(Ok, status);
+
+    status = GdipCreateStringFormat(0,0,&format);
+    expect(Ok, status);
+
+    rect.X = 0;
+    rect.Y = 0;
+    rect.Width = 0;
+    rect.Height = 12;
+
+    status = GdipDrawString(graphics, string, 4, fnt, &rect, format, brush);
+    expect(Ok, status);
+
+    GdipDeleteGraphics(graphics);
+    GdipDeleteBrush(brush);
+    GdipDeleteFont(fnt);
+    GdipDeleteStringFormat(format);
+
+    ReleaseDC(0, hdc);
+}
+
+
 START_TEST(graphics)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -942,6 +1005,7 @@ START_TEST(graphics)
     test_GdipDrawArcI();
     test_GdipDrawLineI();
     test_GdipDrawLinesI();
+    test_GdipDrawString();
     test_Get_Release_DC();
     test_transformpoints();
     test_get_set_clip();

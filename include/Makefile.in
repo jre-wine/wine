@@ -60,6 +60,7 @@ PUBLIC_IDL_H_SRCS = \
 	oledb.idl \
 	oleidl.idl \
 	optary.idl \
+	perhist.idl \
 	propidl.idl \
 	pstore.idl \
 	qedit.idl \
@@ -70,6 +71,7 @@ PUBLIC_IDL_H_SRCS = \
 	shobjidl.idl \
 	shtypes.idl \
 	strmif.idl \
+	textstor.idl \
 	tom.idl \
 	unknwn.idl \
 	urlhist.idl \
@@ -120,7 +122,9 @@ SRCDIR_INCLUDES = \
 	custcntl.h \
 	cvconst.h \
 	d3d.h \
+	d3d10effect.h \
 	d3d10misc.h \
+	d3d10shader.h \
 	d3d8.h \
 	d3d8caps.h \
 	d3d8types.h \
@@ -143,6 +147,7 @@ SRCDIR_INCLUDES = \
 	d3dx9core.h \
 	d3dx9math.h \
 	d3dx9math.inl \
+	d3dx9mesh.h \
 	d3dx9shader.h \
 	d3dx9tex.h \
 	dbghelp.h \
@@ -468,6 +473,8 @@ SRCDIR_INCLUDES = \
 	wmistr.h \
 	wnaspi32.h \
 	wownt32.h \
+	ws2def.h \
+	ws2ipdef.h \
 	ws2spi.h \
 	ws2tcpip.h \
 	wshisotp.h \

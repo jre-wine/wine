@@ -22,6 +22,7 @@
 #include <stdarg.h>
 #include <signal.h>
 #include <sys/types.h>
+#include <pthread.h>
 
 #include "windef.h"
 #include "winnt.h"
@@ -40,38 +41,41 @@ struct drive_info
 
 /* exceptions */
 extern void wait_suspend( CONTEXT *context );
-extern void WINAPI __regs_RtlRaiseException( PEXCEPTION_RECORD, PCONTEXT );
+extern NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance );
+extern void raise_status( NTSTATUS status, EXCEPTION_RECORD *rec ) DECLSPEC_NORETURN;
 extern void set_cpu_context( const CONTEXT *context );
+extern void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags );
+extern NTSTATUS context_to_server( context_t *to, const CONTEXT *from );
+extern NTSTATUS context_from_server( CONTEXT *to, const context_t *from );
 
-/* debug helper */
+/* debug helpers */
 extern LPCSTR debugstr_us( const UNICODE_STRING *str );
-extern void dump_ObjectAttributes (const OBJECT_ATTRIBUTES *ObjectAttributes);
+extern LPCSTR debugstr_ObjectAttributes(const OBJECT_ATTRIBUTES *oa);
 
 extern NTSTATUS NTDLL_queue_process_apc( HANDLE process, const apc_call_t *call, apc_result_t *result );
 extern NTSTATUS NTDLL_wait_for_multiple_objects( UINT count, const HANDLE *handles, UINT flags,
                                                  const LARGE_INTEGER *timeout, HANDLE signal_object );
 
 /* init routines */
-extern void signal_init_thread(void);
+extern void signal_init_thread( TEB *teb );
 extern void signal_init_process(void);
 extern size_t get_signal_stack_total_size(void);
 extern void version_init( const WCHAR *appname );
 extern void debug_init(void);
 extern HANDLE thread_init(void);
-extern void pthread_init(void);
 extern void actctx_init(void);
 extern void virtual_init(void);
 extern void virtual_init_threading(void);
 
 /* server support */
 extern timeout_t server_start_time;
+extern unsigned int server_cpus;
 extern void server_init_process(void);
 extern NTSTATUS server_init_process_done(void);
-extern size_t server_init_thread( int unix_pid, int unix_tid, void *entry_point );
+extern size_t server_init_thread( void *entry_point );
 extern void DECLSPEC_NORETURN server_protocol_error( const char *err, ... );
 extern void DECLSPEC_NORETURN server_protocol_perror( const char *err );
-extern void DECLSPEC_NORETURN server_exit_thread( int status );
-extern void DECLSPEC_NORETURN server_abort_thread( int status );
+extern void DECLSPEC_NORETURN abort_thread( int status );
 extern sigset_t server_block_set;
 extern void server_enter_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset );
 extern void server_leave_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset );
@@ -137,7 +141,7 @@ extern unsigned int DIR_get_drives_info( struct drive_info info[MAX_DOS_DRIVES] 
 extern void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info );
 extern NTSTATUS virtual_create_system_view( void *base, SIZE_T size, DWORD vprot );
 extern SIZE_T virtual_free_system_view( PVOID *addr_ptr );
-extern NTSTATUS virtual_alloc_thread_stack( void *base, SIZE_T stack_size );
+extern NTSTATUS virtual_alloc_thread_stack( TEB *teb, SIZE_T reserve_size, SIZE_T commit_size );
 extern void virtual_clear_thread_stack(void);
 extern BOOL virtual_handle_stack_fault( void *addr );
 extern NTSTATUS virtual_handle_fault( LPCVOID addr, DWORD err );
@@ -185,16 +189,14 @@ struct debug_info
 /* thread private data, stored in NtCurrentTeb()->SystemReserved2 */
 struct ntdll_thread_data
 {
-    DWORD              fs;            /* 1d4 TEB selector */
-    DWORD              gs;            /* 1d8 libc selector; update winebuild if you move this! */
-    struct debug_info *debug_info;    /* 1dc info for debugstr functions */
-    int                request_fd;    /* 1e0 fd for sending server requests */
-    int                reply_fd;      /* 1e4 fd for receiving server replies */
-    int                wait_fd[2];    /* 1e8 fd for sleeping server requests */
-    void              *vm86_ptr;      /* 1f0 data for vm86 mode */
-    void              *pthread_data;  /* 1f4 private data for pthread emulation */
-
-    void              *pad[1];        /* 1f8 change this if you add fields! */
+    DWORD              fs;            /* 1d4/300 TEB selector */
+    DWORD              gs;            /* 1d8/304 libc selector; update winebuild if you move this! */
+    struct debug_info *debug_info;    /* 1dc/308 info for debugstr functions */
+    int                request_fd;    /* 1e0/310 fd for sending server requests */
+    int                reply_fd;      /* 1e4/314 fd for receiving server replies */
+    int                wait_fd[2];    /* 1e8/318 fd for sleeping server requests */
+    void              *vm86_ptr;      /* 1f0/320 data for vm86 mode */
+    pthread_t          pthread_id;    /* 1f4/328 pthread thread id */
 };
 
 static inline struct ntdll_thread_data *ntdll_get_thread_data(void)

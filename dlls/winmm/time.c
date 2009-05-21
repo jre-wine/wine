@@ -116,6 +116,7 @@ static inline void link_timer( WINE_TIMERENTRY *timer )
 #define MMSYSTIME_MININTERVAL (1)
 #define MMSYSTIME_MAXINTERVAL (65535)
 
+#ifdef HAVE_POLL
 
 /**************************************************************************
  *           TIME_MMSysTimeCallback
@@ -163,10 +164,10 @@ static int TIME_MMSysTimeCallback(void)
         switch(timer->wFlags & (TIME_CALLBACK_EVENT_SET|TIME_CALLBACK_EVENT_PULSE))
         {
         case TIME_CALLBACK_EVENT_SET:
-            SetEvent((HANDLE)timer->lpFunc);
+            SetEvent(timer->lpFunc);
             break;
         case TIME_CALLBACK_EVENT_PULSE:
-            PulseEvent((HANDLE)timer->lpFunc);
+            PulseEvent(timer->lpFunc);
             break;
         case TIME_CALLBACK_FUNCTION:
             {
@@ -253,6 +254,15 @@ static void TIME_MMTimeStart(void)
         SetThreadPriority(TIME_hMMTimer, THREAD_PRIORITY_TIME_CRITICAL);
     }
 }
+
+#else  /* HAVE_POLL */
+
+static void TIME_MMTimeStart(void)
+{
+    FIXME( "not starting system thread\n" );
+}
+
+#endif  /* HAVE_POLL */
 
 /**************************************************************************
  * 				TIME_MMTimeStop

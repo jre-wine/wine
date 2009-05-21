@@ -24,6 +24,20 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(jscript);
 
+#ifdef _WIN64
+
+#define CTXARG_T DWORDLONG
+#define IActiveScriptParseVtbl IActiveScriptParse64Vtbl
+#define IActiveScriptParseProcedure2Vtbl IActiveScriptParseProcedure2_64Vtbl
+
+#else
+
+#define CTXARG_T DWORD
+#define IActiveScriptParseVtbl IActiveScriptParse32Vtbl
+#define IActiveScriptParseProcedure2Vtbl IActiveScriptParseProcedure2_32Vtbl
+
+#endif
+
 typedef struct {
     const IActiveScriptVtbl                 *lpIActiveScriptVtbl;
     const IActiveScriptParseVtbl            *lpIActiveScriptParseVtbl;
@@ -44,11 +58,11 @@ typedef struct {
     parser_ctx_t *queue_tail;
 } JScript;
 
-#define ACTSCRIPT(x)    ((IActiveScript*)                 &(x)->lpIActiveScriptVtbl)
-#define ASPARSE(x)      ((IActiveScriptParse*)            &(x)->lpIActiveScriptParseVtbl)
-#define ASPARSEPROC(x)  ((IActiveScriptParseProcedure2*)  &(x)->lpIActiveScriptParseProcedure2Vtbl)
-#define ACTSCPPROP(x)   ((IActiveScriptProperty*)         &(x)->lpIActiveScriptPropertyVtbl)
-#define OBJSAFETY(x)    ((IObjectSafety*)                 &(x)->lpIObjectSafetyVtbl)
+#define ACTSCRIPT(x)    ((IActiveScript*) &(x)->lpIActiveScriptVtbl)
+#define ASPARSE(x)      (&(x)->lpIActiveScriptParseVtbl)
+#define ASPARSEPROC(x)  (&(x)->lpIActiveScriptParseProcedure2Vtbl)
+#define ACTSCPPROP(x)   (&(x)->lpIActiveScriptPropertyVtbl)
+#define OBJSAFETY(x)    (&(x)->lpIObjectSafetyVtbl)
 
 void script_release(script_ctx_t *ctx)
 {
@@ -555,34 +569,34 @@ static HRESULT WINAPI JScriptParse_InitNew(IActiveScriptParse *iface)
 static HRESULT WINAPI JScriptParse_AddScriptlet(IActiveScriptParse *iface,
         LPCOLESTR pstrDefaultName, LPCOLESTR pstrCode, LPCOLESTR pstrItemName,
         LPCOLESTR pstrSubItemName, LPCOLESTR pstrEventName, LPCOLESTR pstrDelimiter,
-        DWORD dwSourceContextCookie, ULONG ulStartingLineNumber, DWORD dwFlags,
+        CTXARG_T dwSourceContextCookie, ULONG ulStartingLineNumber, DWORD dwFlags,
         BSTR *pbstrName, EXCEPINFO *pexcepinfo)
 {
     JScript *This = ASPARSE_THIS(iface);
-    FIXME("(%p)->(%s %s %s %s %s %s %x %u %x %p %p)\n", This, debugstr_w(pstrDefaultName),
+    FIXME("(%p)->(%s %s %s %s %s %s %s %u %x %p %p)\n", This, debugstr_w(pstrDefaultName),
           debugstr_w(pstrCode), debugstr_w(pstrItemName), debugstr_w(pstrSubItemName),
-          debugstr_w(pstrEventName), debugstr_w(pstrDelimiter), dwSourceContextCookie,
+          debugstr_w(pstrEventName), debugstr_w(pstrDelimiter), wine_dbgstr_longlong(dwSourceContextCookie),
           ulStartingLineNumber, dwFlags, pbstrName, pexcepinfo);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI JScriptParse_ParseScriptText(IActiveScriptParse *iface,
         LPCOLESTR pstrCode, LPCOLESTR pstrItemName, IUnknown *punkContext,
-        LPCOLESTR pstrDelimiter, DWORD dwSourceContextCookie, ULONG ulStartingLine,
+        LPCOLESTR pstrDelimiter, CTXARG_T dwSourceContextCookie, ULONG ulStartingLine,
         DWORD dwFlags, VARIANT *pvarResult, EXCEPINFO *pexcepinfo)
 {
     JScript *This = ASPARSE_THIS(iface);
     parser_ctx_t *parser_ctx;
     HRESULT hres;
 
-    TRACE("(%p)->(%s %s %p %s %x %u %x %p %p)\n", This, debugstr_w(pstrCode),
+    TRACE("(%p)->(%s %s %p %s %s %u %x %p %p)\n", This, debugstr_w(pstrCode),
           debugstr_w(pstrItemName), punkContext, debugstr_w(pstrDelimiter),
-          dwSourceContextCookie, ulStartingLine, dwFlags, pvarResult, pexcepinfo);
+          wine_dbgstr_longlong(dwSourceContextCookie), ulStartingLine, dwFlags, pvarResult, pexcepinfo);
 
     if(This->thread_id != GetCurrentThreadId() || This->ctx->state == SCRIPTSTATE_CLOSED)
         return E_UNEXPECTED;
 
-    hres = script_parse(This->ctx, pstrCode, &parser_ctx);
+    hres = script_parse(This->ctx, pstrCode, pstrDelimiter, &parser_ctx);
     if(FAILED(hres))
         return hres;
 
@@ -634,21 +648,21 @@ static ULONG WINAPI JScriptParseProcedure_Release(IActiveScriptParseProcedure2 *
 static HRESULT WINAPI JScriptParseProcedure_ParseProcedureText(IActiveScriptParseProcedure2 *iface,
         LPCOLESTR pstrCode, LPCOLESTR pstrFormalParams, LPCOLESTR pstrProcedureName,
         LPCOLESTR pstrItemName, IUnknown *punkContext, LPCOLESTR pstrDelimiter,
-        DWORD dwSourceContextCookie, ULONG ulStartingLineNumber, DWORD dwFlags, IDispatch **ppdisp)
+        CTXARG_T dwSourceContextCookie, ULONG ulStartingLineNumber, DWORD dwFlags, IDispatch **ppdisp)
 {
     JScript *This = ASPARSEPROC_THIS(iface);
     parser_ctx_t *parser_ctx;
     DispatchEx *dispex;
     HRESULT hres;
 
-    TRACE("(%p)->(%s %s %s %s %p %s %x %u %x %p)\n", This, debugstr_w(pstrCode), debugstr_w(pstrFormalParams),
+    TRACE("(%p)->(%s %s %s %s %p %s %s %u %x %p)\n", This, debugstr_w(pstrCode), debugstr_w(pstrFormalParams),
           debugstr_w(pstrProcedureName), debugstr_w(pstrItemName), punkContext, debugstr_w(pstrDelimiter),
-          dwSourceContextCookie, ulStartingLineNumber, dwFlags, ppdisp);
+          wine_dbgstr_longlong(dwSourceContextCookie), ulStartingLineNumber, dwFlags, ppdisp);
 
     if(This->thread_id != GetCurrentThreadId() || This->ctx->state == SCRIPTSTATE_CLOSED)
         return E_UNEXPECTED;
 
-    hres = script_parse(This->ctx, pstrCode, &parser_ctx);
+    hres = script_parse(This->ctx, pstrCode, pstrDelimiter, &parser_ctx);
     if(FAILED(hres)) {
         WARN("Parse failed %08x\n", hres);
         return hres;

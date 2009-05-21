@@ -73,7 +73,7 @@ HANDLE get_BaseNamedObjects_handle(void)
         InitializeObjectAttributes(&attr, &str, 0, 0, NULL);
         NtOpenDirectoryObject(&dir, DIRECTORY_CREATE_OBJECT|DIRECTORY_TRAVERSE,
                               &attr);
-        if (InterlockedCompareExchangePointer( (PVOID)&handle, dir, 0 ) != 0)
+        if (InterlockedCompareExchangePointer( &handle, dir, 0 ) != 0)
         {
             /* someone beat us here... */
             CloseHandle( dir );
@@ -2230,7 +2230,8 @@ BOOL WINAPI GetQueuedCompletionStatus( HANDLE CompletionPort, LPDWORD lpNumberOf
         return TRUE;
     }
 
-    SetLastError( RtlNtStatusToDosError(status) );
+    if (status == STATUS_TIMEOUT) SetLastError( WAIT_TIMEOUT );
+    else SetLastError( RtlNtStatusToDosError(status) );
     return FALSE;
 }
 

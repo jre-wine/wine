@@ -628,7 +628,7 @@
 @ stdcall GetSystemTime(ptr)
 @ stdcall GetSystemTimeAdjustment(ptr ptr ptr)
 @ stdcall GetSystemTimeAsFileTime(ptr)
-# @ stub GetSystemTimes
+@ stdcall GetSystemTimes(ptr ptr ptr)
 @ stdcall GetSystemWindowsDirectoryA(ptr long)
 @ stdcall GetSystemWindowsDirectoryW(ptr long)
 @ stdcall GetSystemWow64DirectoryA(ptr long)
@@ -865,6 +865,8 @@
 @ stdcall QueryDepthSList(ptr) ntdll.RtlQueryDepthSList
 @ stdcall QueryDosDeviceA(str ptr long)
 @ stdcall QueryDosDeviceW(wstr ptr long)
+@ stub QueryFullProcessImageNameA
+@ stdcall QueryFullProcessImageNameW(ptr long wstr ptr)
 @ stdcall QueryInformationJobObject(long long ptr long ptr)
 # @ stub QueryMemoryResourceNotification
 @ stub QueryNumberOfEventLogRecords
@@ -1225,6 +1227,7 @@
 @ stdcall GlobalDOSFree16(long)
 @ stdcall GlobalFlags16(long)
 @ stdcall GlobalReAlloc16(long long long)
+@ stdcall InitTask16(ptr)
 @ stdcall IsBadReadPtr16(long long)
 @ stdcall IsTask16(long)
 @ stdcall LoadModule16(str long)

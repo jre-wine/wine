@@ -36,8 +36,6 @@
 # include <getopt.h>
 #endif
 
-#include "windef.h"
-#include "winbase.h"
 #include "build.h"
 
 int UsePIC = 0;
@@ -74,6 +72,7 @@ enum target_platform target_platform = PLATFORM_WINDOWS;
 enum target_platform target_platform = PLATFORM_UNSPECIFIED;
 #endif
 
+char *target_alias = NULL;
 char **lib_path = NULL;
 
 char *input_file_name = NULL;
@@ -141,6 +140,7 @@ static void set_subsystem( const char *subsystem, DLLSPEC *spec )
     if (!strcmp( str, "native" )) spec->subsystem = IMAGE_SUBSYSTEM_NATIVE;
     else if (!strcmp( str, "windows" )) spec->subsystem = IMAGE_SUBSYSTEM_WINDOWS_GUI;
     else if (!strcmp( str, "console" )) spec->subsystem = IMAGE_SUBSYSTEM_WINDOWS_CUI;
+    else if (!strcmp( str, "win16" )) spec->type = SPEC_WIN16;
     else fatal_error( "Invalid subsystem name '%s'\n", subsystem );
     if (major)
     {
@@ -161,6 +161,8 @@ static void set_target( const char *target )
     char *p, *platform, *spec = xstrdup( target );
 
     /* target specification is in the form CPU-MANUFACTURER-OS or CPU-MANUFACTURER-KERNEL-OS */
+
+    target_alias = xstrdup( target );
 
     /* get the CPU part */
 
@@ -184,25 +186,6 @@ static void set_target( const char *target )
     }
 
     free( spec );
-
-    if (!as_command)
-    {
-        as_command = xmalloc( strlen(target) + sizeof("-as") );
-        strcpy( as_command, target );
-        strcat( as_command, "-as" );
-    }
-    if (!ld_command)
-    {
-        ld_command = xmalloc( strlen(target) + sizeof("-ld") );
-        strcpy( ld_command, target );
-        strcat( ld_command, "-ld" );
-    }
-    if (!nm_command)
-    {
-        nm_command = xmalloc( strlen(target) + sizeof("-nm") );
-        strcpy( nm_command, target );
-        strcat( nm_command, "-nm" );
-    }
 }
 
 /* cleanup on program exit */
@@ -374,7 +357,7 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
             else force_pointer_size = 8;
             break;
         case 'M':
-            spec->type = SPEC_WIN16;
+            spec->main_module = xstrdup( optarg );
             break;
         case 'N':
             spec->dll_name = xstrdup( optarg );
@@ -599,20 +582,25 @@ int main(int argc, char **argv)
         if (spec->subsystem != IMAGE_SUBSYSTEM_NATIVE)
             spec->characteristics |= IMAGE_FILE_DLL;
         if (!spec_file_name) fatal_error( "missing .spec file\n" );
+        if (spec->type == SPEC_WIN32 && spec->main_module)  /* embedded 16-bit module */
+        {
+            spec->type = SPEC_WIN16;
+            load_resources( argv, spec );
+            if (parse_input_file( spec )) BuildSpec16File( spec );
+            break;
+        }
         /* fall through */
     case MODE_EXE:
         load_resources( argv, spec );
         load_import_libs( argv );
         if (spec_file_name && !parse_input_file( spec )) break;
+        read_undef_symbols( spec, argv );
         switch (spec->type)
         {
             case SPEC_WIN16:
-                if (argv[0])
-                    fatal_error( "file argument '%s' not allowed in this mode\n", argv[0] );
-                BuildSpec16File( spec );
+                output_spec16_file( spec );
                 break;
             case SPEC_WIN32:
-                read_undef_symbols( spec, argv );
                 BuildSpec32File( spec );
                 break;
             default: assert(0);

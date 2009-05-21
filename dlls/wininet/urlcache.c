@@ -995,11 +995,13 @@ static DWORD URLCache_CopyEntry(
     /* FIXME: is source url optional? */
     if (*lpdwBufferSize >= dwRequiredSize)
     {
-        lpCacheEntryInfo->lpszSourceUrlName = (LPSTR)lpCacheEntryInfo + dwRequiredSize - lenUrl - 1;
+        DWORD lenUrlBytes = (lenUrl+1) * (bUnicode ? sizeof(WCHAR) : sizeof(CHAR));
+
+        lpCacheEntryInfo->lpszSourceUrlName = (LPSTR)lpCacheEntryInfo + dwRequiredSize - lenUrlBytes;
         if (bUnicode)
             MultiByteToWideChar(CP_ACP, 0, (LPSTR)pUrlEntry + pUrlEntry->dwOffsetUrl, -1, (LPWSTR)lpCacheEntryInfo->lpszSourceUrlName, lenUrl + 1);
         else
-            memcpy(lpCacheEntryInfo->lpszSourceUrlName, (LPSTR)pUrlEntry + pUrlEntry->dwOffsetUrl, (lenUrl + 1) * sizeof(CHAR));
+            memcpy(lpCacheEntryInfo->lpszSourceUrlName, (LPSTR)pUrlEntry + pUrlEntry->dwOffsetUrl, lenUrlBytes);
     }
 
     if ((dwRequiredSize % 4) && (dwRequiredSize < *lpdwBufferSize))
@@ -3624,5 +3626,14 @@ BOOL WINAPI IsUrlCacheEntryExpiredW( LPCWSTR url, DWORD dwFlags, FILETIME* pftLa
 DWORD WINAPI GetDiskInfoA(void *p0, void *p1, void *p2, void *p3)
 {
     FIXME("(%p, %p, %p, %p)\n", p0, p1, p2, p3);
+    return 0;
+}
+
+/***********************************************************************
+ *           RegisterUrlCacheNotification (WININET.@)
+ */
+DWORD WINAPI RegisterUrlCacheNotification(LPVOID a, DWORD b, DWORD c, DWORD d, DWORD e, DWORD f)
+{
+    FIXME("(%p %x %x %x %x %x)\n", a, b, c, d, e, f);
     return 0;
 }

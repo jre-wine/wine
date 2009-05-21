@@ -122,7 +122,7 @@ static void PROFILE_CopyEntry( LPWSTR buffer, LPCWSTR value, int len,
 static inline void PROFILE_ByteSwapShortBuffer(WCHAR * buffer, int len)
 {
     int i;
-    USHORT * shortbuffer = (USHORT *)buffer;
+    USHORT * shortbuffer = buffer;
     for (i = 0; i < len; i++)
         shortbuffer[i] = RtlUshortByteSwap(shortbuffer[i]);
 }
@@ -204,7 +204,7 @@ static void PROFILE_Save( HANDLE hFile, const PROFILESECTION *section, ENCODING 
     {
         int len = 0;
 
-        if (section->name[0]) len += strlenW(section->name) + 6;
+        if (section->name[0]) len += strlenW(section->name) + 4;
 
         for (key = section->key; key; key = key->next)
         {
@@ -218,8 +218,6 @@ static void PROFILE_Save( HANDLE hFile, const PROFILESECTION *section, ENCODING 
         p = buffer;
         if (section->name[0])
         {
-            *p++ = '\r';
-            *p++ = '\n';
             *p++ = '[';
             strcpyW( p, section->name );
             p += strlenW(p);
@@ -227,6 +225,7 @@ static void PROFILE_Save( HANDLE hFile, const PROFILESECTION *section, ENCODING 
             *p++ = '\r';
             *p++ = '\n';
         }
+
         for (key = section->key; key; key = key->next)
         {
             strcpyW( p, key->name );
@@ -322,7 +321,7 @@ static PROFILESECTION *PROFILE_Load(HANDLE hFile, ENCODING * pEncoding)
     TRACE("%p\n", hFile);
     
     dwFileSize = GetFileSize(hFile, NULL);
-    if (dwFileSize == INVALID_FILE_SIZE)
+    if (dwFileSize == INVALID_FILE_SIZE || dwFileSize == 0)
         return NULL;
 
     buffer_base = HeapAlloc(GetProcessHeap(), 0 , dwFileSize);
@@ -345,37 +344,37 @@ static PROFILESECTION *PROFILE_Load(HANDLE hFile, ENCODING * pEncoding)
     case ENCODING_ANSI:
         TRACE("ANSI encoding\n");
 
-        len = MultiByteToWideChar(CP_ACP, 0, (char *)pBuffer, dwFileSize, NULL, 0);
+        len = MultiByteToWideChar(CP_ACP, 0, pBuffer, dwFileSize, NULL, 0);
         szFile = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
         if (!szFile)
         {
             HeapFree(GetProcessHeap(), 0, buffer_base);
             return NULL;
         }
-        MultiByteToWideChar(CP_ACP, 0, (char *)pBuffer, dwFileSize, szFile, len);
+        MultiByteToWideChar(CP_ACP, 0, pBuffer, dwFileSize, szFile, len);
         szEnd = szFile + len;
         break;
     case ENCODING_UTF8:
         TRACE("UTF8 encoding\n");
-        
-        len = MultiByteToWideChar(CP_UTF8, 0, (char *)pBuffer, dwFileSize, NULL, 0);
+
+        len = MultiByteToWideChar(CP_UTF8, 0, pBuffer, dwFileSize, NULL, 0);
         szFile = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
         if (!szFile)
         {
             HeapFree(GetProcessHeap(), 0, buffer_base);
             return NULL;
         }
-        MultiByteToWideChar(CP_UTF8, 0, (char *)pBuffer, dwFileSize, szFile, len);
+        MultiByteToWideChar(CP_UTF8, 0, pBuffer, dwFileSize, szFile, len);
         szEnd = szFile + len;
         break;
     case ENCODING_UTF16LE:
         TRACE("UTF16 Little Endian encoding\n");
-        szFile = (WCHAR *)pBuffer;
+        szFile = pBuffer;
         szEnd = (WCHAR *)((char *)pBuffer + dwFileSize);
         break;
     case ENCODING_UTF16BE:
         TRACE("UTF16 Big Endian encoding\n");
-        szFile = (WCHAR *)pBuffer;
+        szFile = pBuffer;
         szEnd = (WCHAR *)((char *)pBuffer + dwFileSize);
         PROFILE_ByteSwapShortBuffer(szFile, dwFileSize / sizeof(WCHAR));
         break;
@@ -587,12 +586,20 @@ static PROFILEKEY *PROFILE_Find( PROFILESECTION **section, LPCWSTR section_name,
     int seclen, keylen;
 
     while (PROFILE_isspaceW(*section_name)) section_name++;
-    p = section_name + strlenW(section_name) - 1;
+    if (*section_name)
+        p = section_name + strlenW(section_name) - 1;
+    else
+        p = section_name;
+
     while ((p > section_name) && PROFILE_isspaceW(*p)) p--;
     seclen = p - section_name + 1;
 
     while (PROFILE_isspaceW(*key_name)) key_name++;
-    p = key_name + strlenW(key_name) - 1;
+    if (*key_name)
+        p = key_name + strlenW(key_name) - 1;
+    else
+        p = key_name;
+
     while ((p > key_name) && PROFILE_isspaceW(*p)) p--;
     keylen = p - key_name + 1;
 
@@ -807,6 +814,7 @@ static BOOL PROFILE_Open( LPCWSTR filename, BOOL write_access )
                 {
                     TRACE("(%s): already opened, needs refreshing (mru=%d)\n",
                           debugstr_w(buffer), i);
+                    PROFILE_Free(CurProfile->section);
                     CurProfile->section = PROFILE_Load(hFile, &CurProfile->encoding);
                     CurProfile->LastWriteTime = LastWriteTime;
                 }
@@ -1445,8 +1453,7 @@ BOOL WINAPI WritePrivateProfileStringW( LPCWSTR section, LPCWSTR entry,
     else if (PROFILE_Open( filename, TRUE ))
     {
         if (!section) {
-            FIXME("(NULL?,%s,%s,%s)?\n",
-                  debugstr_w(entry), debugstr_w(string), debugstr_w(filename));
+            SetLastError(ERROR_FILE_NOT_FOUND);
         } else {
             ret = PROFILE_SetString( section, entry, string, FALSE);
             PROFILE_FlushFile();
@@ -1707,7 +1714,7 @@ BOOL WINAPI GetPrivateProfileStructW (LPCWSTR section, LPCWSTR key,
 		{
 		    BOOL highnibble = TRUE;
 		    BYTE b = 0, val;
-		    LPBYTE binbuf = (LPBYTE)buf;
+                    LPBYTE binbuf = buf;
 
 	            end -= 2; /* don't include checksum in output data */
 	            /* translate ASCII hex format into binary data */

@@ -21,6 +21,7 @@
 #define COBJMACROS
 
 #include <stdarg.h>
+#include <stdio.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -37,6 +38,15 @@
         (fe).lindex=-1;\
         };
 
+static inline char *dump_fmtetc(FORMATETC *fmt)
+{
+    static char buf[100];
+
+    snprintf(buf, sizeof(buf), "cf %04x ptd %p aspect %x lindex %d tymed %x",
+             fmt->cfFormat, fmt->ptd, fmt->dwAspect, fmt->lindex, fmt->tymed);
+    return buf;
+}
+
 typedef struct DataObjectImpl {
     const IDataObjectVtbl *lpVtbl;
     LONG ref;
@@ -45,6 +55,8 @@ typedef struct DataObjectImpl {
     UINT fmtetc_cnt;
 
     HANDLE text;
+    IStream *stm;
+    IStorage *stg;
 } DataObjectImpl;
 
 typedef struct EnumFormatImpl {
@@ -59,6 +71,10 @@ typedef struct EnumFormatImpl {
 
 static BOOL expect_DataObjectImpl_QueryGetData = TRUE;
 static ULONG DataObjectImpl_GetData_calls = 0;
+static ULONG DataObjectImpl_GetDataHere_calls = 0;
+static ULONG DataObjectImpl_EnumFormatEtc_calls = 0;
+
+static UINT cf_stream, cf_storage, cf_global, cf_another, cf_onemore;
 
 static HRESULT EnumFormatImpl_Create(FORMATETC *fmtetc, UINT size, LPENUMFORMATETC *lplpformatetc);
 
@@ -99,15 +115,21 @@ static HRESULT WINAPI EnumFormatImpl_Next(IEnumFORMATETC *iface, ULONG celt,
                                           FORMATETC *rgelt, ULONG *pceltFetched)
 {
     EnumFormatImpl *This = (EnumFormatImpl*)iface;
-    ULONG count = 0;
+    ULONG count, i;
 
     if(!rgelt)
         return E_INVALIDARG;
 
-    count = min(celt, This->fmtetc_cnt-This->cur);
-    if(count > 0) {
-        memcpy(rgelt, This->fmtetc+This->cur, count*sizeof(FORMATETC));
-        This->cur += count;
+    count = min(celt, This->fmtetc_cnt - This->cur);
+    for(i = 0; i < count; i++, This->cur++, rgelt++)
+    {
+        *rgelt = This->fmtetc[This->cur];
+        if(rgelt->ptd)
+        {
+            DWORD size = This->fmtetc[This->cur].ptd->tdSize;
+            rgelt->ptd = CoTaskMemAlloc(size);
+            memcpy(rgelt->ptd, This->fmtetc[This->cur].ptd, size);
+        }
     }
     if(pceltFetched)
         *pceltFetched = count;
@@ -184,9 +206,15 @@ static ULONG WINAPI DataObjectImpl_Release(IDataObject* iface)
     DataObjectImpl *This = (DataObjectImpl*)iface;
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    if(!ref) {
+    if(!ref)
+    {
+        int i;
         if(This->text) GlobalFree(This->text);
-        if(This->fmtetc) GlobalFree(This->fmtetc);
+        for(i = 0; i < This->fmtetc_cnt; i++)
+            HeapFree(GetProcessHeap(), 0, This->fmtetc[i].ptd);
+        HeapFree(GetProcessHeap(), 0, This->fmtetc);
+        if(This->stm) IStream_Release(This->stm);
+        if(This->stg) IStorage_Release(This->stg);
         HeapFree(GetProcessHeap(), 0, This);
     }
 
@@ -196,29 +224,56 @@ static ULONG WINAPI DataObjectImpl_Release(IDataObject* iface)
 static HRESULT WINAPI DataObjectImpl_GetData(IDataObject* iface, FORMATETC *pformatetc, STGMEDIUM *pmedium)
 {
     DataObjectImpl *This = (DataObjectImpl*)iface;
+    UINT i;
+    BOOL foundFormat = FALSE;
+
+    trace("getdata: %s\n", dump_fmtetc(pformatetc));
 
     DataObjectImpl_GetData_calls++;
 
     if(pformatetc->lindex != -1)
         return DV_E_FORMATETC;
 
-    if(!(pformatetc->tymed & TYMED_HGLOBAL))
-        return DV_E_TYMED;
+    for(i = 0; i < This->fmtetc_cnt; i++)
+    {
+        if(This->fmtetc[i].cfFormat == pformatetc->cfFormat)
+        {
+            foundFormat = TRUE;
+            if(This->fmtetc[i].tymed & pformatetc->tymed)
+            {
+                pmedium->pUnkForRelease = (LPUNKNOWN)iface;
+                IUnknown_AddRef(pmedium->pUnkForRelease);
 
-    if(This->text && pformatetc->cfFormat == CF_TEXT)
-        U(*pmedium).hGlobal = This->text;
-    else
-        return DV_E_FORMATETC;
+                if(pformatetc->cfFormat == CF_TEXT || pformatetc->cfFormat == cf_global)
+                {
+                    pmedium->tymed = TYMED_HGLOBAL;
+                    U(*pmedium).hGlobal = This->text;
+                }
+                else if(pformatetc->cfFormat == cf_stream)
+                {
+                    pmedium->tymed = TYMED_ISTREAM;
+                    IStream_AddRef(This->stm);
+                    U(*pmedium).pstm = This->stm;
+                }
+                else if(pformatetc->cfFormat == cf_storage)
+                {
+                    pmedium->tymed = TYMED_ISTORAGE;
+                    IStorage_AddRef(This->stg);
+                    U(*pmedium).pstg = This->stg;
+                }
+                return S_OK;
+            }
+        }
+    }
 
-    pmedium->tymed = TYMED_HGLOBAL;
-    pmedium->pUnkForRelease = (LPUNKNOWN)iface;
-    IUnknown_AddRef(pmedium->pUnkForRelease);
-    return S_OK;
+    return foundFormat ? DV_E_TYMED : DV_E_FORMATETC;
 }
 
 static HRESULT WINAPI DataObjectImpl_GetDataHere(IDataObject* iface, FORMATETC *pformatetc, STGMEDIUM *pmedium)
 {
-    ok(0, "unexpected call\n");
+    trace("getdatahere: %s\n", dump_fmtetc(pformatetc));
+    DataObjectImpl_GetDataHere_calls++;
+
     return E_NOTIMPL;
 }
 
@@ -228,6 +283,7 @@ static HRESULT WINAPI DataObjectImpl_QueryGetData(IDataObject* iface, FORMATETC 
     UINT i;
     BOOL foundFormat = FALSE;
 
+    trace("querygetdata: %s\n", dump_fmtetc(pformatetc));
     if (!expect_DataObjectImpl_QueryGetData)
         ok(0, "unexpected call to DataObjectImpl_QueryGetData\n");
 
@@ -262,6 +318,8 @@ static HRESULT WINAPI DataObjectImpl_EnumFormatEtc(IDataObject* iface, DWORD dwD
                                                    IEnumFORMATETC **ppenumFormatEtc)
 {
     DataObjectImpl *This = (DataObjectImpl*)iface;
+
+    DataObjectImpl_EnumFormatEtc_calls++;
 
     if(dwDirection != DATADIR_GET) {
         ok(0, "unexpected direction %d\n", dwDirection);
@@ -315,10 +373,65 @@ static HRESULT DataObjectImpl_CreateText(LPCSTR text, LPDATAOBJECT *lplpdataobj)
     obj->text = GlobalAlloc(GMEM_MOVEABLE, strlen(text) + 1);
     strcpy(GlobalLock(obj->text), text);
     GlobalUnlock(obj->text);
+    obj->stm = NULL;
+    obj->stg = NULL;
 
     obj->fmtetc_cnt = 1;
     obj->fmtetc = HeapAlloc(GetProcessHeap(), 0, obj->fmtetc_cnt*sizeof(FORMATETC));
     InitFormatEtc(obj->fmtetc[0], CF_TEXT, TYMED_HGLOBAL);
+
+    *lplpdataobj = (LPDATAOBJECT)obj;
+    return S_OK;
+}
+
+const char *cmpl_stm_data = "complex stream";
+const char *cmpl_text_data = "complex text";
+
+static HRESULT DataObjectImpl_CreateComplex(LPDATAOBJECT *lplpdataobj)
+{
+    DataObjectImpl *obj;
+    ILockBytes *lbs;
+    static const WCHAR devname[] = {'m','y','d','e','v',0};
+    DEVMODEW dm;
+
+    obj = HeapAlloc(GetProcessHeap(), 0, sizeof(DataObjectImpl));
+    obj->lpVtbl = &VT_DataObjectImpl;
+    obj->ref = 1;
+    obj->text = GlobalAlloc(GMEM_MOVEABLE, strlen(cmpl_text_data) + 1);
+    strcpy(GlobalLock(obj->text), cmpl_text_data);
+    GlobalUnlock(obj->text);
+    CreateStreamOnHGlobal(NULL, TRUE, &obj->stm);
+    IStream_Write(obj->stm, cmpl_stm_data, strlen(cmpl_stm_data), NULL);
+
+    CreateILockBytesOnHGlobal(NULL, TRUE, &lbs);
+    StgCreateDocfileOnILockBytes(lbs, STGM_CREATE|STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &obj->stg);
+    ILockBytes_Release(lbs);
+
+    obj->fmtetc_cnt = 8;
+    /* zeroing here since FORMATETC has a hole in it, and it's confusing to have this uninitialised. */
+    obj->fmtetc = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, obj->fmtetc_cnt*sizeof(FORMATETC));
+    InitFormatEtc(obj->fmtetc[0], CF_TEXT, TYMED_HGLOBAL);
+    InitFormatEtc(obj->fmtetc[1], cf_stream, TYMED_ISTREAM);
+    InitFormatEtc(obj->fmtetc[2], cf_storage, TYMED_ISTORAGE);
+    InitFormatEtc(obj->fmtetc[3], cf_another, TYMED_ISTORAGE|TYMED_ISTREAM|TYMED_HGLOBAL);
+    memset(&dm, 0, sizeof(dm));
+    dm.dmSize = sizeof(dm);
+    dm.dmDriverExtra = 0;
+    lstrcpyW(dm.dmDeviceName, devname);
+    obj->fmtetc[3].ptd = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(DVTARGETDEVICE, tdData) + sizeof(devname) + dm.dmSize + dm.dmDriverExtra);
+    obj->fmtetc[3].ptd->tdSize = FIELD_OFFSET(DVTARGETDEVICE, tdData) + sizeof(devname) + dm.dmSize + dm.dmDriverExtra;
+    obj->fmtetc[3].ptd->tdDriverNameOffset = FIELD_OFFSET(DVTARGETDEVICE, tdData);
+    obj->fmtetc[3].ptd->tdDeviceNameOffset = 0;
+    obj->fmtetc[3].ptd->tdPortNameOffset   = 0;
+    obj->fmtetc[3].ptd->tdExtDevmodeOffset = obj->fmtetc[3].ptd->tdDriverNameOffset + sizeof(devname);
+    lstrcpyW((WCHAR*)obj->fmtetc[3].ptd->tdData, devname);
+    memcpy(obj->fmtetc[3].ptd->tdData + sizeof(devname), &dm, dm.dmSize + dm.dmDriverExtra);
+
+    InitFormatEtc(obj->fmtetc[4], cf_global, TYMED_HGLOBAL);
+    InitFormatEtc(obj->fmtetc[5], cf_another, TYMED_HGLOBAL);
+    InitFormatEtc(obj->fmtetc[6], cf_another, 0xfffff);
+    InitFormatEtc(obj->fmtetc[7], cf_another, 0xfffff);
+    obj->fmtetc[7].dwAspect = DVASPECT_ICON;
 
     *lplpdataobj = (LPDATAOBJECT)obj;
     return S_OK;
@@ -423,17 +536,234 @@ static void test_get_clipboard(void)
     IDataObject_Release(data_obj);
 }
 
+static void test_enum_fmtetc(IDataObject *src)
+{
+    HRESULT hr;
+    IDataObject *data;
+    IEnumFORMATETC *enum_fmt, *src_enum;
+    FORMATETC fmt, src_fmt;
+    DWORD count = 0;
+
+    hr = OleGetClipboard(&data);
+    ok(hr == S_OK, "OleGetClipboard failed with error 0x%08x\n", hr);
+
+    hr = IDataObject_EnumFormatEtc(data, DATADIR_SET, &enum_fmt);
+    ok(hr == E_NOTIMPL ||
+       broken(hr == E_INVALIDARG), /* win98 (not win98SE) */
+       "got %08x\n", hr);
+
+    DataObjectImpl_EnumFormatEtc_calls = 0;
+    hr = IDataObject_EnumFormatEtc(data, DATADIR_GET, &enum_fmt);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(DataObjectImpl_EnumFormatEtc_calls == 0, "EnumFormatEtc was called\n");
+
+    if(src) IDataObject_EnumFormatEtc(src, DATADIR_GET, &src_enum);
+
+    while((hr = IEnumFORMATETC_Next(enum_fmt, 1, &fmt, NULL)) == S_OK)
+    {
+        ok(src != NULL, "shouldn't be here\n");
+        hr = IEnumFORMATETC_Next(src_enum, 1, &src_fmt, NULL);
+        ok(hr == S_OK, "%d: got %08x\n", count, hr);
+        trace("%d: cf %04x aspect %x tymed %x\n", count, fmt.cfFormat, fmt.dwAspect, fmt.tymed);
+        ok(fmt.cfFormat == src_fmt.cfFormat, "%d: %04x %04x\n", count, fmt.cfFormat, src_fmt.cfFormat);
+        ok(fmt.dwAspect == src_fmt.dwAspect, "%d: %08x %08x\n", count, fmt.dwAspect, src_fmt.dwAspect);
+        ok(fmt.lindex == src_fmt.lindex, "%d: %08x %08x\n", count, fmt.lindex, src_fmt.lindex);
+        ok(fmt.tymed == src_fmt.tymed, "%d: %08x %08x\n", count, fmt.tymed, src_fmt.tymed);
+        if(fmt.ptd)
+        {
+            ok(src_fmt.ptd != NULL, "%d: expected non-NULL\n", count);
+            CoTaskMemFree(fmt.ptd);
+            CoTaskMemFree(src_fmt.ptd);
+        }
+        count++;
+    }
+
+    ok(hr == S_FALSE, "%d: got %08x\n", count, hr);
+
+    if(src)
+    {
+        hr = IEnumFORMATETC_Next(src_enum, 1, &src_fmt, NULL);
+        ok(hr == S_FALSE, "%d: got %08x\n", count, hr);
+        IEnumFORMATETC_Release(src_enum);
+    }
+
+    hr = IEnumFORMATETC_Reset(enum_fmt);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    IEnumFORMATETC_Release(enum_fmt);
+    IDataObject_Release(data);
+}
+
+static void test_cf_dataobject(IDataObject *data)
+{
+    UINT cf = 0;
+    UINT cf_dataobject = RegisterClipboardFormatA("DataObject");
+    UINT cf_ole_priv_data = RegisterClipboardFormatA("Ole Private Data");
+    BOOL found_dataobject = FALSE, found_priv_data = FALSE;
+
+    OpenClipboard(NULL);
+    do
+    {
+        cf = EnumClipboardFormats(cf);
+        if(cf == cf_dataobject)
+        {
+            HGLOBAL h = GetClipboardData(cf);
+            HWND *ptr = GlobalLock(h);
+            DWORD size = GlobalSize(h);
+            HWND clip_owner = GetClipboardOwner();
+
+            found_dataobject = TRUE;
+            ok(size >= sizeof(*ptr), "size %d\n", size);
+            if(data)
+                ok(*ptr == clip_owner, "hwnd %p clip_owner %p\n", *ptr, clip_owner);
+            else /* ole clipboard flushed */
+                ok(*ptr == NULL, "hwnd %p\n", *ptr);
+            GlobalUnlock(h);
+        }
+        else if(cf == cf_ole_priv_data)
+        {
+            found_priv_data = TRUE;
+            if(data)
+            {
+                HGLOBAL h = GetClipboardData(cf);
+                DWORD *ptr = GlobalLock(h);
+                DWORD size = GlobalSize(h);
+
+                if(size != ptr[1])
+                    win_skip("Ole Private Data in win9x format\n");
+                else
+                {
+                    HRESULT hr;
+                    IEnumFORMATETC *enum_fmt;
+                    DWORD count = 0;
+                    FORMATETC fmt;
+                    struct formatetcetc
+                    {
+                        FORMATETC fmt;
+                        BOOL first_use_of_cf;
+                        DWORD res[2];
+                    } *fmt_ptr;
+                    struct priv_data
+                    {
+                        DWORD res1;
+                        DWORD size;
+                        DWORD res2;
+                        DWORD count;
+                        DWORD res3[2];
+                        struct formatetcetc fmts[1];
+                    } *priv = (struct priv_data*)ptr;
+                    CLIPFORMAT cfs_seen[10];
+
+                    hr = IDataObject_EnumFormatEtc(data, DATADIR_GET, &enum_fmt);
+                    ok(hr == S_OK, "got %08x\n", hr);
+                    fmt_ptr = priv->fmts;
+
+                    while(IEnumFORMATETC_Next(enum_fmt, 1, &fmt, NULL) == S_OK)
+                    {
+                        int i;
+                        BOOL seen_cf = FALSE;
+
+                        ok(fmt_ptr->fmt.cfFormat == fmt.cfFormat,
+                           "got %08x expected %08x\n", fmt_ptr->fmt.cfFormat, fmt.cfFormat);
+                        ok(fmt_ptr->fmt.dwAspect == fmt.dwAspect, "got %08x expected %08x\n",
+                           fmt_ptr->fmt.dwAspect, fmt.dwAspect);
+                        ok(fmt_ptr->fmt.lindex == fmt.lindex, "got %08x expected %08x\n",
+                           fmt_ptr->fmt.lindex, fmt.lindex);
+                        ok(fmt_ptr->fmt.tymed == fmt.tymed, "got %08x expected %08x\n",
+                           fmt_ptr->fmt.tymed, fmt.tymed);
+                        for(i = 0; i < count; i++)
+                            if(fmt_ptr->fmt.cfFormat == cfs_seen[i])
+                            {
+                                seen_cf = TRUE;
+                                break;
+                            }
+                        cfs_seen[count] = fmt.cfFormat;
+                        ok(fmt_ptr->first_use_of_cf == seen_cf ? FALSE : TRUE, "got %08x expected %08x\n",
+                           fmt_ptr->first_use_of_cf, !seen_cf);
+                        ok(fmt_ptr->res[0] == 0, "got %08x\n", fmt_ptr->res[1]);
+                        ok(fmt_ptr->res[1] == 0, "got %08x\n", fmt_ptr->res[2]);
+                        if(fmt.ptd)
+                        {
+                            DVTARGETDEVICE *target;
+
+                            ok(fmt_ptr->fmt.ptd != NULL, "target device offset zero\n");
+                            target = (DVTARGETDEVICE*)((char*)priv + (DWORD)fmt_ptr->fmt.ptd);
+                            ok(!memcmp(target, fmt.ptd, fmt.ptd->tdSize), "target devices differ\n");
+                            CoTaskMemFree(fmt.ptd);
+                        }
+                        fmt_ptr++;
+                        count++;
+                    }
+                    ok(priv->res1 == 0, "got %08x\n", priv->res1);
+                    ok(priv->res2 == 1, "got %08x\n", priv->res2);
+                    ok(priv->count == count, "got %08x expected %08x\n", priv->count, count);
+                    ok(priv->res3[0] == 0, "got %08x\n", priv->res3[0]);
+                    ok(priv->res3[1] == 0, "got %08x\n", priv->res3[1]);
+
+                    GlobalUnlock(h);
+                    IEnumFORMATETC_Release(enum_fmt);
+                }
+            }
+        }
+        else if(cf == cf_stream)
+        {
+            HGLOBAL h;
+            void *ptr;
+            DWORD size;
+
+            DataObjectImpl_GetDataHere_calls = 0;
+            h = GetClipboardData(cf);
+            ok(DataObjectImpl_GetDataHere_calls == 1, "got %d\n", DataObjectImpl_GetDataHere_calls);
+            ptr = GlobalLock(h);
+            size = GlobalSize(h);
+            ok(size == strlen(cmpl_stm_data), "expected %d got %d\n", lstrlenA(cmpl_stm_data), size);
+            ok(!memcmp(ptr, cmpl_stm_data, size), "mismatch\n");
+            GlobalUnlock(h);
+        }
+        else if(cf == cf_global)
+        {
+            HGLOBAL h;
+            void *ptr;
+            DWORD size;
+
+            DataObjectImpl_GetDataHere_calls = 0;
+            h = GetClipboardData(cf);
+            ok(DataObjectImpl_GetDataHere_calls == 0, "got %d\n", DataObjectImpl_GetDataHere_calls);
+            ptr = GlobalLock(h);
+            size = GlobalSize(h);
+            ok(size == strlen(cmpl_text_data) + 1, "expected %d got %d\n", lstrlenA(cmpl_text_data) + 1, size);
+            ok(!memcmp(ptr, cmpl_text_data, size), "mismatch\n");
+            GlobalUnlock(h);
+        }
+    } while(cf);
+    CloseClipboard();
+    ok(found_dataobject, "didn't find cf_dataobject\n");
+    ok(found_priv_data, "didn't find cf_ole_priv_data\n");
+}
+
 static void test_set_clipboard(void)
 {
     HRESULT hr;
     ULONG ref;
-    LPDATAOBJECT data1, data2;
+    LPDATAOBJECT data1, data2, data_cmpl;
+    HGLOBAL hblob, h;
+
+    cf_stream = RegisterClipboardFormatA("stream format");
+    cf_storage = RegisterClipboardFormatA("storage format");
+    cf_global = RegisterClipboardFormatA("global format");
+    cf_another = RegisterClipboardFormatA("another format");
+    cf_onemore = RegisterClipboardFormatA("one more format");
+
     hr = DataObjectImpl_CreateText("data1", &data1);
     ok(SUCCEEDED(hr), "Failed to create data1 object: 0x%08x\n", hr);
     if(FAILED(hr))
         return;
     hr = DataObjectImpl_CreateText("data2", &data2);
     ok(SUCCEEDED(hr), "Failed to create data2 object: 0x%08x\n", hr);
+    if(FAILED(hr))
+        return;
+    hr = DataObjectImpl_CreateComplex(&data_cmpl);
+    ok(SUCCEEDED(hr), "Failed to create complex data object: 0x%08x\n", hr);
     if(FAILED(hr))
         return;
 
@@ -453,6 +783,9 @@ static void test_set_clipboard(void)
 
     hr = OleSetClipboard(data1);
     ok(hr == S_OK, "failed to set clipboard to data1, hr = 0x%08x\n", hr);
+
+    test_cf_dataobject(data1);
+
     hr = OleIsCurrentClipboard(data1);
     ok(hr == S_OK, "expected current clipboard to be data1, hr = 0x%08x\n", hr);
     hr = OleIsCurrentClipboard(data2);
@@ -471,6 +804,18 @@ static void test_set_clipboard(void)
     hr = OleIsCurrentClipboard(NULL);
     ok(hr == S_FALSE, "expect S_FALSE, hr = 0x%08x\n", hr);
 
+    /* put a format directly onto the clipboard to show
+       OleFlushClipboard doesn't empty the clipboard */
+    hblob = GlobalAlloc(GMEM_DDESHARE|GMEM_MOVEABLE|GMEM_ZEROINIT, 10);
+    OpenClipboard(NULL);
+    h = SetClipboardData(cf_onemore, hblob);
+    ok(h == hblob, "got %p\n", h);
+    h = GetClipboardData(cf_onemore);
+    ok(h == hblob ||
+       broken(h != NULL), /* win9x */
+       "got %p\n", h);
+    CloseClipboard();
+
     hr = OleFlushClipboard();
     ok(hr == S_OK, "failed to flush clipboard, hr = 0x%08x\n", hr);
     hr = OleIsCurrentClipboard(data1);
@@ -480,12 +825,39 @@ static void test_set_clipboard(void)
     hr = OleIsCurrentClipboard(NULL);
     ok(hr == S_FALSE, "expect S_FALSE, hr = 0x%08x\n", hr);
 
+    /* format should survive the flush */
+    OpenClipboard(NULL);
+    h = GetClipboardData(cf_onemore);
+    ok(h == hblob ||
+       broken(h != NULL), /* win9x */
+       "got %p\n", h);
+    CloseClipboard();
+
+    test_cf_dataobject(NULL);
+
     ok(OleSetClipboard(NULL) == S_OK, "failed to clear clipboard, hr = 0x%08x\n", hr);
+
+    OpenClipboard(NULL);
+    h = GetClipboardData(cf_onemore);
+    ok(h == NULL, "got %p\n", h);
+    CloseClipboard();
+
+    trace("setting complex\n");
+    hr = OleSetClipboard(data_cmpl);
+    ok(hr == S_OK, "failed to set clipboard to complex data, hr = 0x%08x\n", hr);
+    test_cf_dataobject(data_cmpl);
+    test_enum_fmtetc(data_cmpl);
+
+    ok(OleSetClipboard(NULL) == S_OK, "failed to clear clipboard, hr = 0x%08x\n", hr);
+
+    test_enum_fmtetc(NULL);
 
     ref = IDataObject_Release(data1);
     ok(ref == 0, "expected data1 ref=0, got %d\n", ref);
     ref = IDataObject_Release(data2);
     ok(ref == 0, "expected data2 ref=0, got %d\n", ref);
+    ref = IDataObject_Release(data_cmpl);
+    ok(ref == 0, "expected data_cmpl ref=0, got %d\n", ref);
 
     OleUninitialize();
 }

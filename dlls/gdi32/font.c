@@ -212,14 +212,16 @@ static void FONT_TextMetricWToA(const TEXTMETRICW *ptmW, LPTEXTMETRICA ptmA )
     ptmA->tmFirstChar = min(ptmW->tmFirstChar, 255);
     if (ptmW->tmCharSet == SYMBOL_CHARSET)
     {
-        UINT last_char = ptmW->tmLastChar;
-        if (last_char > 0xf000) last_char -= 0xf000;
-        ptmA->tmLastChar = min(last_char, 255);
+        ptmA->tmFirstChar = 0x1e;
+        ptmA->tmLastChar = 0xff;  /* win9x behaviour - we need the OS2 table data to calculate correctly */
     }
     else
-        ptmA->tmLastChar = min(ptmW->tmLastChar, 255);
-    ptmA->tmDefaultChar = min(ptmW->tmDefaultChar, 255);
-    ptmA->tmBreakChar = min(ptmW->tmBreakChar, 255);
+    {
+        ptmA->tmFirstChar = ptmW->tmDefaultChar - 1;
+        ptmA->tmLastChar = min(ptmW->tmLastChar, 0xff);
+    }
+    ptmA->tmDefaultChar = ptmW->tmDefaultChar;
+    ptmA->tmBreakChar = ptmW->tmBreakChar;
     ptmA->tmItalic = ptmW->tmItalic;
     ptmA->tmUnderlined = ptmW->tmUnderlined;
     ptmA->tmStruckOut = ptmW->tmStruckOut;
@@ -245,45 +247,13 @@ static void FONT_NewTextMetricExWToA(const NEWTEXTMETRICEXW *ptmW, NEWTEXTMETRIC
 DWORD WINAPI GdiGetCodePage( HDC hdc )
 {
     UINT cp = CP_ACP;
-    CHARSETINFO csi;
-    int charset = GetTextCharset(hdc);
+    DC *dc = get_dc_ptr( hdc );
 
-    /* Hmm, nicely designed api this one! */
-    if(TranslateCharsetInfo(ULongToPtr(charset), &csi, TCI_SRCCHARSET))
-        cp = csi.ciACP;
-    else {
-        switch(charset) {
-        case OEM_CHARSET:
-            cp = GetOEMCP();
-            break;
-        case DEFAULT_CHARSET:
-            cp = GetACP();
-            break;
-
-        case VISCII_CHARSET:
-        case TCVN_CHARSET:
-        case KOI8_CHARSET:
-        case ISO3_CHARSET:
-        case ISO4_CHARSET:
-        case ISO10_CHARSET:
-        case CELTIC_CHARSET:
-            /* FIXME: These have no place here, but because x11drv
-               enumerates fonts with these (made up) charsets some apps
-               might use them and then the FIXME below would become
-               annoying.  Now we could pick the intended codepage for
-               each of these, but since it's broken anyway we'll just
-               use CP_ACP and hope it'll go away...
-            */
-            cp = CP_ACP;
-            break;
-
-        default:
-            FIXME("Can't find codepage for charset %d\n", charset);
-            break;
-        }
+    if (dc)
+    {
+        cp = dc->font_code_page;
+        release_dc_ptr( dc );
     }
-
-    TRACE("charset %d => cp %d\n", charset, cp);
     return cp;
 }
 
@@ -463,6 +433,52 @@ HFONT WINAPI CreateFontW( INT height, INT width, INT esc,
     return CreateFontIndirectW( &logfont );
 }
 
+static void update_font_code_page( DC *dc )
+{
+    CHARSETINFO csi;
+    int charset = DEFAULT_CHARSET;
+
+    if (dc->gdiFont)
+        charset = WineEngGetTextCharsetInfo( dc->gdiFont, NULL, 0 );
+
+    /* Hmm, nicely designed api this one! */
+    if (TranslateCharsetInfo( ULongToPtr(charset), &csi, TCI_SRCCHARSET) )
+        dc->font_code_page = csi.ciACP;
+    else {
+        switch(charset) {
+        case OEM_CHARSET:
+            dc->font_code_page = GetOEMCP();
+            break;
+        case DEFAULT_CHARSET:
+            dc->font_code_page = GetACP();
+            break;
+
+        case VISCII_CHARSET:
+        case TCVN_CHARSET:
+        case KOI8_CHARSET:
+        case ISO3_CHARSET:
+        case ISO4_CHARSET:
+        case ISO10_CHARSET:
+        case CELTIC_CHARSET:
+            /* FIXME: These have no place here, but because x11drv
+               enumerates fonts with these (made up) charsets some apps
+               might use them and then the FIXME below would become
+               annoying.  Now we could pick the intended codepage for
+               each of these, but since it's broken anyway we'll just
+               use CP_ACP and hope it'll go away...
+            */
+            dc->font_code_page = CP_ACP;
+            break;
+
+        default:
+            FIXME("Can't find codepage for charset %d\n", charset);
+            dc->font_code_page = CP_ACP;
+            break;
+        }
+    }
+
+    TRACE("charset %d => cp %d\n", charset, dc->font_code_page);
+}
 
 /***********************************************************************
  *           FONT_SelectObject
@@ -504,6 +520,7 @@ static HGDIOBJ FONT_SelectObject( HGDIOBJ handle, HDC hdc )
     {
         ret = dc->hFont;
         dc->hFont = handle;
+        update_font_code_page( dc );
         GDI_dec_ref_count( ret );
     }
     release_dc_ptr( dc );
@@ -2336,6 +2353,8 @@ DWORD WINAPI GetGlyphOutlineA( HDC hdc, UINT uChar, UINT fuFormat,
     DWORD ret;
     UINT c;
 
+    if (!lpmat2) return GDI_ERROR;
+
     if(!(fuFormat & GGO_GLYPH_INDEX)) {
         int len;
         char mbchs[2];
@@ -2364,12 +2383,15 @@ DWORD WINAPI GetGlyphOutlineW( HDC hdc, UINT uChar, UINT fuFormat,
                                  LPGLYPHMETRICS lpgm, DWORD cbBuffer,
                                  LPVOID lpBuffer, const MAT2 *lpmat2 )
 {
-    DC *dc = get_dc_ptr(hdc);
+    DC *dc;
     DWORD ret;
 
     TRACE("(%p, %04x, %04x, %p, %d, %p, %p)\n",
 	  hdc, uChar, fuFormat, lpgm, cbBuffer, lpBuffer, lpmat2 );
 
+    if (!lpmat2) return GDI_ERROR;
+
+    dc = get_dc_ptr(hdc);
     if(!dc) return GDI_ERROR;
 
     if(dc->gdiFont)
@@ -2461,8 +2483,7 @@ BOOL WINAPI CreateScalableFontResourceW( DWORD fHidden,
 DWORD WINAPI GetKerningPairsA( HDC hDC, DWORD cPairs,
                                LPKERNINGPAIR kern_pairA )
 {
-    INT charset;
-    CHARSETINFO csi;
+    UINT cp;
     CPINFO cpi;
     DWORD i, total_kern_pairs, kern_pairs_copied = 0;
     KERNINGPAIR *kern_pairW;
@@ -2473,22 +2494,17 @@ DWORD WINAPI GetKerningPairsA( HDC hDC, DWORD cPairs,
         return 0;
     }
 
-    charset = GetTextCharset(hDC);
-    if (!TranslateCharsetInfo(ULongToPtr(charset), &csi, TCI_SRCCHARSET))
-    {
-        FIXME("Can't find codepage for charset %d\n", charset);
-        return 0;
-    }
+    cp = GdiGetCodePage(hDC);
+
     /* GetCPInfo() will fail on CP_SYMBOL, and WideCharToMultiByte is supposed
      * to fail on an invalid character for CP_SYMBOL.
      */
     cpi.DefaultChar[0] = 0;
-    if (csi.ciACP != CP_SYMBOL && !GetCPInfo(csi.ciACP, &cpi))
+    if (cp != CP_SYMBOL && !GetCPInfo(cp, &cpi))
     {
-        FIXME("Can't find codepage %u info\n", csi.ciACP);
+        FIXME("Can't find codepage %u info\n", cp);
         return 0;
     }
-    TRACE("charset %d => codepage %u\n", charset, csi.ciACP);
 
     total_kern_pairs = GetKerningPairsW(hDC, 0, NULL);
     if (!total_kern_pairs) return 0;
@@ -2500,10 +2516,10 @@ DWORD WINAPI GetKerningPairsA( HDC hDC, DWORD cPairs,
     {
         char first, second;
 
-        if (!WideCharToMultiByte(csi.ciACP, 0, &kern_pairW[i].wFirst, 1, &first, 1, NULL, NULL))
+        if (!WideCharToMultiByte(cp, 0, &kern_pairW[i].wFirst, 1, &first, 1, NULL, NULL))
             continue;
 
-        if (!WideCharToMultiByte(csi.ciACP, 0, &kern_pairW[i].wSecond, 1, &second, 1, NULL, NULL))
+        if (!WideCharToMultiByte(cp, 0, &kern_pairW[i].wSecond, 1, &second, 1, NULL, NULL))
             continue;
 
         if (first == cpi.DefaultChar[0] || second == cpi.DefaultChar[0])

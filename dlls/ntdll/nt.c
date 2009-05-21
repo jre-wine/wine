@@ -63,10 +63,9 @@ NTSTATUS WINAPI NtDuplicateToken(
 {
     NTSTATUS status;
 
-    TRACE("(%p,0x%08x,%p,0x%08x,0x%08x,%p)\n",
-        ExistingToken, DesiredAccess, ObjectAttributes,
-        ImpersonationLevel, TokenType, NewToken);
-        dump_ObjectAttributes(ObjectAttributes);
+    TRACE("(%p,0x%08x,%s,0x%08x,0x%08x,%p)\n",
+          ExistingToken, DesiredAccess, debugstr_ObjectAttributes(ObjectAttributes),
+          ImpersonationLevel, TokenType, NewToken);
 
     if (ObjectAttributes && ObjectAttributes->SecurityQualityOfService)
     {
@@ -273,7 +272,7 @@ NTSTATUS WINAPI NtQueryInformationToken(
         SERVER_START_REQ( get_token_user )
         {
             TOKEN_USER * tuser = tokeninfo;
-            PSID sid = (PSID) (tuser + 1);
+            PSID sid = tuser + 1;
             DWORD sid_len = tokeninfolength < sizeof(TOKEN_USER) ? 0 : tokeninfolength - sizeof(TOKEN_USER);
 
             req->handle = wine_server_obj_handle( token );
@@ -293,13 +292,15 @@ NTSTATUS WINAPI NtQueryInformationToken(
         char stack_buffer[256];
         unsigned int server_buf_len = sizeof(stack_buffer);
         void *buffer = stack_buffer;
-        BOOLEAN need_more_memory = FALSE;
+        BOOLEAN need_more_memory;
 
         /* we cannot work out the size of the server buffer required for the
          * input size, since there are two factors affecting how much can be
          * stored in the buffer - number of groups and lengths of sids */
         do
         {
+            need_more_memory = FALSE;
+
             SERVER_START_REQ( get_token_groups )
             {
                 TOKEN_GROUPS *groups = tokeninfo;
@@ -382,7 +383,7 @@ NTSTATUS WINAPI NtQueryInformationToken(
         if (tokeninfo)
         {
             TOKEN_OWNER *owner = tokeninfo;
-            PSID sid = (PSID) (owner + 1);
+            PSID sid = owner + 1;
             SID_IDENTIFIER_AUTHORITY localSidAuthority = {SECURITY_NT_AUTHORITY};
             RtlInitializeSid(sid, &localSidAuthority, 1);
             *(RtlSubAuthoritySid(sid, 0)) = SECURITY_INTERACTIVE_RID;
@@ -779,7 +780,7 @@ NTSTATUS WINAPI NtQuerySystemInformation(
         break;
     case SystemProcessInformation:
         {
-            SYSTEM_PROCESS_INFORMATION* spi = (SYSTEM_PROCESS_INFORMATION*)SystemInformation;
+            SYSTEM_PROCESS_INFORMATION* spi = SystemInformation;
             SYSTEM_PROCESS_INFORMATION* last = NULL;
             HANDLE hSnap = 0;
             WCHAR procname[1024];
@@ -1210,7 +1211,7 @@ NTSTATUS WINAPI NtPowerInformation(
 		InformationLevel,lpInputBuffer,nInputBufferSize,lpOutputBuffer,nOutputBufferSize);
 	switch(InformationLevel) {
 		case SystemPowerCapabilities: {
-			PSYSTEM_POWER_CAPABILITIES PowerCaps = (PSYSTEM_POWER_CAPABILITIES)lpOutputBuffer;
+			PSYSTEM_POWER_CAPABILITIES PowerCaps = lpOutputBuffer;
 			FIXME("semi-stub: SystemPowerCapabilities\n");
 			if (nOutputBufferSize < sizeof(SYSTEM_POWER_CAPABILITIES))
 				return STATUS_BUFFER_TOO_SMALL;

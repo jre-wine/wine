@@ -29,6 +29,7 @@
 #include "objbase.h"
 #include "oaidl.h"
 #include "winnls.h"
+#include "wine/list.h"
 #include "wine/unicode.h"
 
 #include "cvconst.h"
@@ -37,13 +38,14 @@
 
 struct pool /* poor's man */
 {
-    struct pool_arena*  first;
-    unsigned            arena_size;
+    struct list arena_list;
+    struct list arena_full;
+    size_t      arena_size;
 };
 
-void     pool_init(struct pool* a, unsigned arena_size);
+void     pool_init(struct pool* a, size_t arena_size);
 void     pool_destroy(struct pool* a);
-void*    pool_alloc(struct pool* a, unsigned len);
+void*    pool_alloc(struct pool* a, size_t len);
 char*    pool_strdup(struct pool* a, const char* str);
 
 struct vector
@@ -90,7 +92,6 @@ void     hash_table_init(struct pool* pool, struct hash_table* ht,
                          unsigned num_buckets);
 void     hash_table_destroy(struct hash_table* ht);
 void     hash_table_add(struct hash_table* ht, struct hash_table_elt* elt);
-void*    hash_table_find(const struct hash_table* ht, const char* name);
 
 struct hash_table_iter
 {
@@ -110,7 +111,7 @@ void*    hash_table_iter_up(struct hash_table_iter* hti);
 
 extern unsigned dbghelp_options;
 /* some more Wine extensions */
-#define SYMOPT_WINE_WITH_ELF_MODULES 0x40000000
+#define SYMOPT_WINE_WITH_NATIVE_MODULES 0x40000000
 
 enum location_kind {loc_error,          /* reg is the error code */
                     loc_absolute,       /* offset is the location */
@@ -302,6 +303,7 @@ enum module_type
     DMT_UNKNOWN,        /* for lookup, not actually used for a module */
     DMT_ELF,            /* a real ELF shared module */
     DMT_PE,             /* a native or builtin PE module */
+    DMT_MACHO,          /* a real Mach-O shared module */
     DMT_PDB,            /* .PDB file */
     DMT_DBG,            /* .DBG file */
 };
@@ -320,6 +322,8 @@ struct module
     /* specific information for debug types */
     struct elf_module_info*	elf_info;
     struct dwarf2_module_info_s*dwarf2_info;
+
+    struct macho_module_info*	macho_info;
 
     /* memory allocation pool */
     struct pool                 pool;
@@ -412,10 +416,14 @@ extern BOOL         validate_addr64(DWORD64 addr);
 extern BOOL         pcs_callback(const struct process* pcs, ULONG action, void* data);
 extern void*        fetch_buffer(struct process* pcs, unsigned size);
 
+/* crc32.c */
+extern DWORD calc_crc32(int fd);
+
+typedef BOOL (*enum_modules_cb)(const WCHAR*, unsigned long addr, void* user);
+
 /* elf_module.c */
-#define ELF_NO_MAP      ((const void*)0xffffffff)
-typedef BOOL (*elf_enum_modules_cb)(const WCHAR*, unsigned long addr, void* user);
-extern BOOL         elf_enum_modules(HANDLE hProc, elf_enum_modules_cb, void*);
+#define ELF_NO_MAP      ((const void*)-1)
+extern BOOL         elf_enum_modules(HANDLE hProc, enum_modules_cb, void*);
 extern BOOL         elf_fetch_file_info(const WCHAR* name, DWORD* base, DWORD* size, DWORD* checksum);
 struct elf_file_map;
 extern BOOL         elf_load_debug_info(struct module* module, struct elf_file_map* fmap);
@@ -427,11 +435,21 @@ struct elf_thunk_area;
 extern int          elf_is_in_thunk_area(unsigned long addr, const struct elf_thunk_area* thunks);
 extern DWORD WINAPI addr_to_linear(HANDLE hProcess, HANDLE hThread, ADDRESS* addr);
 
+/* macho_module.c */
+#define MACHO_NO_MAP    ((const void*)-1)
+extern BOOL         macho_enum_modules(HANDLE hProc, enum_modules_cb, void*);
+extern BOOL         macho_fetch_file_info(const WCHAR* name, DWORD* base, DWORD* size, DWORD* checksum);
+struct macho_file_map;
+extern BOOL         macho_load_debug_info(struct module* module, struct macho_file_map* fmap);
+extern struct module*
+                    macho_load_module(struct process* pcs, const WCHAR* name, unsigned long);
+extern BOOL         macho_read_wine_loader_dbg_info(struct process* pcs);
+extern BOOL         macho_synchronize_module_list(struct process* pcs);
+
 /* module.c */
 extern const WCHAR      S_ElfW[];
 extern const WCHAR      S_WineLoaderW[];
-extern const WCHAR      S_WinePThreadW[];
-extern const WCHAR      S_WineKThreadW[];
+extern const WCHAR      S_WineW[];
 extern const WCHAR      S_SlashW[];
 
 extern struct module*
@@ -487,9 +505,14 @@ extern unsigned     source_new(struct module* module, const char* basedir, const
 extern const char*  source_get(const struct module* module, unsigned idx);
 
 /* stabs.c */
+typedef void (*stabs_def_cb)(struct module* module, unsigned long load_offset,
+                                const char* name, unsigned long offset,
+                                BOOL is_public, BOOL is_global, unsigned char other,
+                                struct symt_compiland* compiland, void* user);
 extern BOOL         stabs_parse(struct module* module, unsigned long load_offset,
                                 const void* stabs, int stablen,
-                                const char* strs, int strtablen);
+                                const char* strs, int strtablen,
+                                stabs_def_cb callback, void* user);
 
 /* dwarf.c */
 extern BOOL         dwarf2_parse(struct module* module, unsigned long load_offset,

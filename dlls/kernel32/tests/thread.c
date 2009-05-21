@@ -183,7 +183,7 @@ INT obeying_ars = 0; /* -1 == no, 0 == dunno yet, 1 == yes */
 */
 static DWORD WINAPI threadFunc1(LPVOID p)
 {
-    t1Struct *tstruct = (t1Struct *)p;
+   t1Struct *tstruct = p;
    int i;
 /* write our thread # into shared memory */
    tstruct->threadmem[tstruct->threadnum]=GetCurrentThreadId();
@@ -225,7 +225,7 @@ static DWORD WINAPI threadFunc3(LPVOID p)
 
 static DWORD WINAPI threadFunc4(LPVOID p)
 {
-    HANDLE event = (HANDLE)p;
+   HANDLE event = p;
    if(event != NULL) {
      SetEvent(event);
    }
@@ -236,7 +236,7 @@ static DWORD WINAPI threadFunc4(LPVOID p)
 #if CHECK_STACK
 static DWORD WINAPI threadFunc5(LPVOID p)
 {
-  DWORD *exitCode = (DWORD *)p;
+  DWORD *exitCode = p;
   SYSTEM_INFO sysInfo;
   sysInfo.dwPageSize=0;
   GetSystemInfo(&sysInfo);
@@ -255,13 +255,13 @@ static DWORD WINAPI threadFunc5(LPVOID p)
 
 static DWORD WINAPI threadFunc_SetEvent(LPVOID p)
 {
-    SetEvent((HANDLE) p);
+    SetEvent(p);
     return 0;
 }
 
 static DWORD WINAPI threadFunc_CloseHandle(LPVOID p)
 {
-    CloseHandle((HANDLE) p);
+    CloseHandle(p);
     return 0;
 }
 
@@ -308,7 +308,7 @@ static VOID test_CreateRemoteThread(void)
                                  hRemoteEvent, CREATE_SUSPENDED, &tid);
     if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        skip("CreateRemoteThread is not implemented\n");
+        win_skip("CreateRemoteThread is not implemented\n");
         goto cleanup;
     }
     ok(hThread != NULL, "CreateRemoteThread failed, err=%u\n", GetLastError());
@@ -550,8 +550,7 @@ static VOID test_TerminateThread(void)
   HANDLE thread,access_thread,event;
   DWORD threadId,exitCode;
   event=CreateEventA(NULL,TRUE,FALSE,NULL);
-  thread = CreateThread(NULL,0,threadFunc4,
-                        (LPVOID)event, 0,&threadId);
+  thread = CreateThread(NULL,0,threadFunc4,event,0,&threadId);
   ok(thread!=NULL,"Create Thread failed\n");
 /* TerminateThread has a race condition in Wine.  If the thread is terminated
    before it starts, it leaves a process behind.  Therefore, we wait for the
@@ -978,7 +977,7 @@ static void test_RegisterWaitForSingleObject(void)
 
     if (!pRegisterWaitForSingleObject || !pUnregisterWait)
     {
-        skip("RegisterWaitForSingleObject or UnregisterWait not implemented\n");
+        win_skip("RegisterWaitForSingleObject or UnregisterWait not implemented\n");
         return;
     }
 

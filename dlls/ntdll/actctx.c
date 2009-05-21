@@ -338,6 +338,7 @@ static void free_assembly_identity(struct assembly_identity *ai)
     RtlFreeHeap( GetProcessHeap(), 0, ai->arch );
     RtlFreeHeap( GetProcessHeap(), 0, ai->public_key );
     RtlFreeHeap( GetProcessHeap(), 0, ai->language );
+    RtlFreeHeap( GetProcessHeap(), 0, ai->type );
 }
 
 static struct entity* add_entity(struct entity_array *array, DWORD kind)
@@ -496,17 +497,19 @@ static WCHAR *build_assembly_dir(struct assembly_identity* ai)
     static const WCHAR noneW[] = {'n','o','n','e',0};
     static const WCHAR mskeyW[] = {'d','e','a','d','b','e','e','f',0};
 
+    const WCHAR *arch = ai->arch ? ai->arch : noneW;
     const WCHAR *key = ai->public_key ? ai->public_key : noneW;
     const WCHAR *lang = ai->language ? ai->language : noneW;
-    SIZE_T size = (strlenW(ai->arch) + 1 + strlenW(ai->name) + 1 + strlenW(key) + 24 + 1 +
-                   strlenW(lang) + 1) * sizeof(WCHAR) + sizeof(mskeyW);
+    const WCHAR *name = ai->name ? ai->name : noneW;
+    SIZE_T size = (strlenW(arch) + 1 + strlenW(name) + 1 + strlenW(key) + 24 + 1 +
+		    strlenW(lang) + 1) * sizeof(WCHAR) + sizeof(mskeyW);
     WCHAR *ret;
 
     if (!(ret = RtlAllocateHeap( GetProcessHeap(), 0, size ))) return NULL;
 
-    strcpyW( ret, ai->arch );
+    strcpyW( ret, arch );
     strcatW( ret, undW );
-    strcatW( ret, ai->name );
+    strcatW( ret, name );
     strcatW( ret, undW );
     strcatW( ret, key );
     strcatW( ret, undW );
@@ -1387,37 +1390,6 @@ static BOOL parse_assembly_elem(xmlbuf_t* xmlbuf, struct actctx_loader* acl,
              assembly->no_inherit)
         return FALSE;
 
-    if (xmlstr_cmp(&elem, assemblyIdentityW))
-    {
-        if (!parse_assembly_identity_elem(xmlbuf, acl->actctx, &assembly->id)) return FALSE;
-        ret = next_xml_elem(xmlbuf, &elem);
-
-        if (expected_ai)
-        {
-            /* FIXME: more tests */
-            if (assembly->type == ASSEMBLY_MANIFEST &&
-                memcmp(&assembly->id.version, &expected_ai->version, sizeof(assembly->id.version)))
-            {
-                FIXME("wrong version for assembly manifest: %u.%u.%u.%u / %u.%u.%u.%u\n",
-                      expected_ai->version.major, expected_ai->version.minor,
-                      expected_ai->version.build, expected_ai->version.revision,
-                      assembly->id.version.major, assembly->id.version.minor,
-                      assembly->id.version.build, assembly->id.version.revision);
-                return FALSE;
-            }
-            else if (assembly->type == ASSEMBLY_SHARED_MANIFEST &&
-                (assembly->id.version.major != expected_ai->version.major ||
-                 assembly->id.version.minor != expected_ai->version.minor ||
-                 assembly->id.version.build < expected_ai->version.build ||
-                 (assembly->id.version.build == expected_ai->version.build &&
-                  assembly->id.version.revision < expected_ai->version.revision)))
-            {
-                FIXME("wrong version for shared assembly manifest\n");
-                return FALSE;
-            }
-        }
-    }
-
     while (ret)
     {
         if (xmlstr_cmp_end(&elem, assemblyW))
@@ -1448,6 +1420,35 @@ static BOOL parse_assembly_elem(xmlbuf_t* xmlbuf, struct actctx_loader* acl,
         else if (xmlstr_cmp(&elem, clrSurrogateW))
         {
             ret = parse_clr_surrogate_elem(xmlbuf, assembly);
+        }
+        else if (xmlstr_cmp(&elem, assemblyIdentityW))
+        {
+            if (!parse_assembly_identity_elem(xmlbuf, acl->actctx, &assembly->id)) return FALSE;
+
+            if (expected_ai)
+            {
+                /* FIXME: more tests */
+                if (assembly->type == ASSEMBLY_MANIFEST &&
+                    memcmp(&assembly->id.version, &expected_ai->version, sizeof(assembly->id.version)))
+                {
+                    FIXME("wrong version for assembly manifest: %u.%u.%u.%u / %u.%u.%u.%u\n",
+                          expected_ai->version.major, expected_ai->version.minor,
+                          expected_ai->version.build, expected_ai->version.revision,
+                          assembly->id.version.major, assembly->id.version.minor,
+                          assembly->id.version.build, assembly->id.version.revision);
+                    ret = FALSE;
+                }
+                else if (assembly->type == ASSEMBLY_SHARED_MANIFEST &&
+                         (assembly->id.version.major != expected_ai->version.major ||
+                          assembly->id.version.minor != expected_ai->version.minor ||
+                          assembly->id.version.build < expected_ai->version.build ||
+                          (assembly->id.version.build == expected_ai->version.build &&
+                           assembly->id.version.revision < expected_ai->version.revision)))
+                {
+                    FIXME("wrong version for shared assembly manifest\n");
+                    ret = FALSE;
+                }
+            }
         }
         else
         {
@@ -2021,7 +2022,9 @@ static NTSTATUS parse_depend_manifests(struct actctx_loader* acl)
         {
             if (!acl->dependencies[i].optional)
             {
-                FIXME( "Could not find dependent assembly %s\n", debugstr_w(acl->dependencies[i].name) );
+                FIXME( "Could not find dependent assembly %s (%s)\n",
+                    debugstr_w(acl->dependencies[i].name),
+                    debugstr_version(&acl->dependencies[i].version) );
                 status = STATUS_SXS_CANT_GEN_ACTCTX;
                 break;
             }

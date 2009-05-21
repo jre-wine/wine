@@ -316,7 +316,7 @@ RunningObjectTableImpl_QueryInterface(IRunningObjectTable* iface,
 
     if (IsEqualIID(&IID_IUnknown, riid) ||
         IsEqualIID(&IID_IRunningObjectTable, riid))
-        *ppvObject = (IRunningObjectTable*)This;
+        *ppvObject = This;
 
     if ((*ppvObject)==0)
         return E_NOINTERFACE;
@@ -1291,10 +1291,10 @@ static HRESULT WINAPI EnumMonikerImpl_QueryInterface(IEnumMoniker* iface,REFIID 
     *ppvObject = NULL;
 
     if (IsEqualIID(&IID_IUnknown, riid))
-        *ppvObject = (IEnumMoniker*)This;
+        *ppvObject = This;
     else
         if (IsEqualIID(&IID_IEnumMoniker, riid))
-            *ppvObject = (IEnumMoniker*)This;
+            *ppvObject = This;
 
     if ((*ppvObject)==NULL)
         return E_NOINTERFACE;
@@ -1660,7 +1660,7 @@ HRESULT MonikerMarshal_Create(IMoniker *inner, IUnknown **outer)
     return S_OK;
 }
 
-void * __RPC_USER MIDL_user_allocate(size_t size)
+void * __RPC_USER MIDL_user_allocate(SIZE_T size)
 {
     return HeapAlloc(GetProcessHeap(), 0, size);
 }

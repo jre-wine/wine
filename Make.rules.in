@@ -62,7 +62,7 @@ ALLCFLAGS    = $(INCLUDES) $(DEFS) $(DLLFLAGS) $(EXTRACFLAGS) $(CPPFLAGS) $(CFLA
 ALLLINTFLAGS = $(INCLUDES) $(DEFS) $(LINTFLAGS)
 IDLFLAGS     = $(INCLUDES) $(DEFS) $(EXTRAIDLFLAGS)
 TARGETFLAGS  = @TARGETFLAGS@
-WINEBUILDFLAGS = $(TARGETFLAGS) $(DLLFLAGS) --as-cmd "$(AS)"
+WINEBUILDFLAGS = $(TARGETFLAGS) $(DLLFLAGS)
 MKINSTALLDIRS= $(TOPSRCDIR)/tools/mkinstalldirs -m 755
 WINAPI_CHECK = $(TOPSRCDIR)/tools/winapi/winapi_check
 WINEWRAPPER  = $(TOPSRCDIR)/tools/winewrapper
@@ -74,7 +74,7 @@ MAKECTESTS   = $(TOOLSDIR)/tools/make_ctests
 WRC          = $(TOOLSDIR)/tools/wrc/wrc
 WMC          = $(TOOLSDIR)/tools/wmc/wmc
 WIDL         = $(TOOLSDIR)/tools/widl/widl
-WINEGCC      = $(TOOLSDIR)/tools/winegcc/winegcc
+WINEGCC      = $(TOOLSDIR)/tools/winegcc/winegcc $(TARGETFLAGS) -B$(TOOLSDIR)/tools/winebuild
 RELPATH      = $(TOOLSDIR)/tools/relpath
 SFNT2FNT     = $(TOOLSDIR)/tools/sfnt2fnt
 FNT2FON      = $(TOOLSDIR)/tools/fnt2fon
@@ -271,10 +271,10 @@ $(SUBDIRS:%=%/__install-dev__): dummy
 $(SUBDIRS:%=%/__uninstall__): dummy
 	@cd `dirname $@` && $(MAKE) uninstall
 
-install:: $(INSTALLSUBDIRS:%=%/__install__)
-install-lib:: $(INSTALLSUBDIRS:%=%/__install-lib__)
-install-dev:: $(INSTALLSUBDIRS:%=%/__install-dev__)
-uninstall:: $(INSTALLSUBDIRS:%=%/__uninstall__)
+install:: $(INSTALLSUBDIRS:%=%/__install__) dummy
+install-lib:: $(INSTALLSUBDIRS:%=%/__install-lib__) dummy
+install-dev:: $(INSTALLSUBDIRS:%=%/__install-dev__) dummy
+uninstall:: $(INSTALLSUBDIRS:%=%/__uninstall__) dummy
 
 $(INSTALLDIRS):
 	$(MKINSTALLDIRS) $@
@@ -294,11 +294,11 @@ $(TESTSUBDIRS:%=%/__crosstest__): dummy
 $(TESTSUBDIRS:%=%/__testclean__): dummy
 	@cd `dirname $@` && $(MAKE) testclean
 
-check test:: $(TESTSUBDIRS:%=%/__test__)
+check test:: $(TESTSUBDIRS:%=%/__test__) dummy
 
-crosstest:: $(TESTSUBDIRS:%=%/__crosstest__)
+crosstest:: $(TESTSUBDIRS:%=%/__crosstest__) dummy
 
-testclean:: $(TESTSUBDIRS:%=%/__testclean__)
+testclean:: $(TESTSUBDIRS:%=%/__testclean__) dummy
 
 .PHONY: check test testclean crosstest $(TESTSUBDIRS:%=%/__test__) $(TESTSUBDIRS:%=%/__crosstest__) $(TESTSUBDIRS:%=%/__testclean__) 
 

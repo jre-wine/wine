@@ -66,7 +66,6 @@
 #include "winuser.h"
 #include "lzexpand.h"
 
-#include "wine/winbase16.h"
 #include "wine/unicode.h"
 #include "objbase.h"
 #include "typelib.h"
@@ -76,6 +75,26 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 WINE_DECLARE_DEBUG_CHANNEL(typelib);
+
+typedef struct
+{
+    WORD     offset;
+    WORD     length;
+    WORD     flags;
+    WORD     id;
+    WORD     handle;
+    WORD     usage;
+} NE_NAMEINFO;
+
+typedef struct
+{
+    WORD        type_id;   /* Type identifier */
+    WORD        count;     /* Number of resources of this type */
+    DWORD       resloader; /* SetResourceHandler() */
+    /*
+     * Name info array.
+     */
+} NE_TYPEINFO;
 
 static HRESULT typedescvt_to_variantvt(ITypeInfo *tinfo, const TYPEDESC *tdesc, VARTYPE *vt);
 static HRESULT TLB_AllocAndInitVarDesc(const VARDESC *src, VARDESC **dest_ptr);
@@ -396,7 +415,7 @@ HRESULT WINAPI LoadTypeLibEx(
                 /* else fall-through */
 
             case REGKIND_REGISTER:
-                if (FAILED(res = RegisterTypeLib(*pptLib, (LPOLESTR)szPath, NULL)))
+                if (FAILED(res = RegisterTypeLib(*pptLib, szPath, NULL)))
                 {
                     IUnknown_Release(*pptLib);
                     *pptLib = 0;
@@ -3748,7 +3767,7 @@ static ITypeLib2* ITypeLib2_Constructor_SLTG(LPVOID pLib, DWORD dwTLBLength)
 
     pPad9 = (SLTG_Pad9*)(pIndex + pTypeLibImpl->TypeInfoCount);
 
-    pFirstBlk = (LPVOID)(pPad9 + 1);
+    pFirstBlk = pPad9 + 1;
 
     /* We'll set up a ptr to the main library block, which is the last one. */
 
@@ -3952,23 +3971,23 @@ static ITypeLib2* ITypeLib2_Constructor_SLTG(LPVOID pLib, DWORD dwTLBLength)
 
       }
 
-      if(pTITail) { /* could get cFuncs, cVars and cImplTypes from here
+      /* could get cFuncs, cVars and cImplTypes from here
 		       but we've already set those */
 #define X(x) TRACE_(typelib)("tt "#x": %x\n",pTITail->res##x);
-	  X(06);
-	  X(16);
-	  X(18);
-	  X(1a);
-	  X(1e);
-	  X(24);
-	  X(26);
-	  X(2a);
-	  X(2c);
-	  X(2e);
-	  X(30);
-	  X(32);
-	  X(34);
-      }
+      X(06);
+      X(16);
+      X(18);
+      X(1a);
+      X(1e);
+      X(24);
+      X(26);
+      X(2a);
+      X(2c);
+      X(2e);
+      X(30);
+      X(32);
+      X(34);
+#undef X
       ppTypeInfoImpl = &((*ppTypeInfoImpl)->next);
       pBlk = (char*)pBlk + pBlkEntry[order].len;
     }
@@ -4978,7 +4997,7 @@ static HRESULT WINAPI ITypeInfo_fnGetTypeAttr( ITypeInfo2 *iface,
 
     if (This->TypeAttr.typekind == TKIND_ALIAS)
         TLB_CopyTypeDesc(&(*ppTypeAttr)->tdescAlias,
-            &This->TypeAttr.tdescAlias, (void *)(*ppTypeAttr + 1));
+            &This->TypeAttr.tdescAlias, *ppTypeAttr + 1);
 
     if((*ppTypeAttr)->typekind == TKIND_DISPATCH) {
         /* This should include all the inherited funcs */
@@ -5945,8 +5964,7 @@ DispCallFunc(
 
 #define INVBUF_ELEMENT_SIZE \
     (sizeof(VARIANTARG) + sizeof(VARIANTARG) + sizeof(VARIANTARG *) + sizeof(VARTYPE))
-#define INVBUF_GET_ARG_ARRAY(buffer, params) \
-    ((VARIANTARG *)(buffer))
+#define INVBUF_GET_ARG_ARRAY(buffer, params) (buffer)
 #define INVBUF_GET_MISSING_ARG_ARRAY(buffer, params) \
     ((VARIANTARG *)((char *)(buffer) + sizeof(VARIANTARG) * (params)))
 #define INVBUF_GET_ARG_PTR_ARRAY(buffer, params) \

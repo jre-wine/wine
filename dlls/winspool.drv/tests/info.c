@@ -41,6 +41,7 @@
 static CHAR does_not_exist_dll[]= "does_not_exist.dll";
 static CHAR does_not_exist[]    = "does_not_exist";
 static CHAR empty[]             = "";
+static CHAR env_x64[]           = "Windows x64";
 static CHAR env_x86[]           = "Windows NT x86";
 static CHAR env_win9x_case[]    = "windowS 4.0";
 static CHAR illegal_name[]      = "illegal,name";
@@ -176,6 +177,7 @@ static struct monitor_entry * find_installed_monitor(void)
     static struct monitor_entry  monitor_table[] = {
         {env_win9x_case, "localspl.dll"},
         {env_x86,        "localspl.dll"},
+        {env_x64,        "localspl.dll"},
         {env_win9x_case, "localmon.dll"},
         {env_x86,        "localmon.dll"},
         {env_win9x_case, "tcpmon.dll"},
@@ -196,6 +198,7 @@ static struct monitor_entry * find_installed_monitor(void)
     num_tests = (sizeof(monitor_table)/sizeof(struct monitor_entry));
 
     /* cleanup */
+    DeleteMonitorA(NULL, env_x64, winetest);
     DeleteMonitorA(NULL, env_x86, winetest);
     DeleteMonitorA(NULL, env_win9x_case, winetest);
 
@@ -476,7 +479,7 @@ static void test_AddPortEx(void)
 
 
     if (!pAddPortExA) {
-        skip("AddPortEx not supported\n");
+        win_skip("AddPortEx not supported\n");
         return;
     }
 
@@ -1104,6 +1107,8 @@ static void test_EnumPorts(void)
 
 static void test_EnumPrinterDrivers(void)
 {
+    static char env_all[] = "all";
+
     DWORD   res;
     LPBYTE  buffer;
     DWORD   cbBuf;
@@ -1207,6 +1212,28 @@ static void test_EnumPrinterDrivers(void)
 
         HeapFree(GetProcessHeap(), 0, buffer);
     } /* for(level ... */
+
+    pcbNeeded = 0;
+    pcReturned = 0;
+    SetLastError(0xdeadbeef);
+    res = EnumPrinterDriversA(NULL, env_all, 1, NULL, 0, &pcbNeeded, &pcReturned);
+    if (res)
+    {
+        skip("no printer drivers found\n");
+        return;
+    }
+    if (GetLastError() == ERROR_INVALID_ENVIRONMENT)
+    {
+        win_skip("NT4 and below don't support the 'all' environment value\n");
+        return;
+    }
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "unexpected error %u\n", GetLastError());
+
+    buffer = HeapAlloc(GetProcessHeap(), 0, pcbNeeded);
+    res = EnumPrinterDriversA(NULL, env_all, 1, buffer, pcbNeeded, &pcbNeeded, &pcReturned);
+    ok(res, "EnumPrinterDriversA failed %u\n", GetLastError());
+
+    HeapFree(GetProcessHeap(), 0, buffer);
 }
 
 /* ########################### */
@@ -2232,7 +2259,7 @@ static void test_EnumPrinters(void)
     /* EnumPrintersW is not supported on all platforms */
     if (!ret && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
     {
-        skip("EnumPrintersW is not implemented\n");
+        win_skip("EnumPrintersW is not implemented\n");
         return;
     }
 

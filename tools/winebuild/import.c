@@ -35,8 +35,6 @@
 # include <unistd.h>
 #endif
 
-#include "windef.h"
-#include "winbase.h"
 #include "build.h"
 
 struct import
@@ -379,6 +377,7 @@ static const char *get_default_entry_point( const DLLSPEC *spec )
 {
     if (spec->characteristics & IMAGE_FILE_DLL) return "__wine_spec_dll_entry";
     if (spec->subsystem == IMAGE_SUBSYSTEM_NATIVE) return "__wine_spec_drv_entry";
+    if (spec->type == SPEC_WIN16) return "__wine_spec_exe16_entry";
     return "__wine_spec_exe_entry";
 }
 
@@ -467,7 +466,7 @@ static void check_undefined_exports( DLLSPEC *spec )
     for (i = 0; i < spec->nb_entry_points; i++)
     {
         ORDDEF *odp = &spec->entry_points[i];
-        if (odp->type == TYPE_STUB) continue;
+        if (odp->type == TYPE_STUB || odp->type == TYPE_ABS) continue;
         if (odp->flags & FLAG_FORWARD) continue;
         if (find_name( odp->link_name, &undef_symbols ))
         {
@@ -509,7 +508,7 @@ static char *create_undef_symbols_file( DLLSPEC *spec )
     for (i = 0; i < spec->nb_entry_points; i++)
     {
         ORDDEF *odp = &spec->entry_points[i];
-        if (odp->type == TYPE_STUB) continue;
+        if (odp->type == TYPE_STUB || odp->type == TYPE_ABS) continue;
         if (odp->flags & FLAG_FORWARD) continue;
         fprintf( f, "\t%s %s\n", get_asm_ptr_keyword(), asm_name(odp->link_name) );
     }
@@ -527,21 +526,21 @@ static char *create_undef_symbols_file( DLLSPEC *spec )
 static const char *ldcombine_files( DLLSPEC *spec, char **argv )
 {
     unsigned int i, len = 0;
+    const char *prog = get_ld_command();
     char *cmd, *p, *ld_tmp_file, *undef_file;
     int err;
 
     undef_file = create_undef_symbols_file( spec );
     len += strlen(undef_file) + 1;
     ld_tmp_file = get_temp_file_name( output_file_name, ".o" );
-    if (!ld_command) ld_command = xstrdup("ld");
     for (i = 0; argv[i]; i++) len += strlen(argv[i]) + 1;
-    cmd = p = xmalloc( len + strlen(ld_tmp_file) + 8 + strlen(ld_command)  );
-    p += sprintf( cmd, "%s -r -o %s %s", ld_command, ld_tmp_file, undef_file );
+    cmd = p = xmalloc( len + strlen(ld_tmp_file) + 8 + strlen(prog)  );
+    p += sprintf( cmd, "%s -r -o %s %s", prog, ld_tmp_file, undef_file );
     for (i = 0; argv[i]; i++)
         p += sprintf( p, " %s", argv[i] );
     if (verbose) fprintf( stderr, "%s\n", cmd );
     err = system( cmd );
-    if (err) fatal_error( "%s -r failed with status %d\n", ld_command, err );
+    if (err) fatal_error( "%s -r failed with status %d\n", prog, err );
     free( cmd );
     return ld_tmp_file;
 }
@@ -551,6 +550,7 @@ void read_undef_symbols( DLLSPEC *spec, char **argv )
 {
     size_t prefix_len;
     FILE *f;
+    const char *prog = get_nm_command();
     char *cmd, buffer[1024], name_prefix[16];
     int err;
     const char *name;
@@ -564,9 +564,8 @@ void read_undef_symbols( DLLSPEC *spec, char **argv )
 
     name = ldcombine_files( spec, argv );
 
-    if (!nm_command) nm_command = xstrdup("nm");
-    cmd = xmalloc( strlen(nm_command) + strlen(name) + 5 );
-    sprintf( cmd, "%s -u %s", nm_command, name );
+    cmd = xmalloc( strlen(prog) + strlen(name) + 5 );
+    sprintf( cmd, "%s -u %s", prog, name );
     if (!(f = popen( cmd, "r" )))
         fatal_error( "Cannot execute '%s'\n", cmd );
 

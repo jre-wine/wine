@@ -86,71 +86,24 @@ WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
 
 /****************************************************************************
- * OLEClipbrd
- * DO NOT add any members before the VTables declaration!
+ * ole_clipbrd
  */
-struct OLEClipbrd
+struct ole_clipbrd
 {
-  /*
-   * List all interface VTables here
-   */
-  const IDataObjectVtbl*  lpvtbl1;  /* IDataObject VTable */
+    const IDataObjectVtbl* lpvtbl;  /* Exposed IDataObject vtable */
 
-  /*
-   * The hidden OLE clipboard window. This window is used as the bridge between the
-   * the OLE and windows clipboard API. (Windows creates one such window per process)
-   */
-  HWND                       hWndClipboard;
+    LONG ref;
 
-  /*
-   * Pointer to the source data object (via OleSetClipboard)
-   */
-  IDataObject*               pIDataObjectSrc;
-
-  /*
-   * The registered DataObject clipboard format
-   */
-  UINT                       cfDataObj;
-
-  /*
-   * The handle to ourself
-   */
-  HGLOBAL                    hSelf;
-
-  /*
-   * Reference count of this object
-   */
-  LONG                       ref;
+    HWND hWndClipboard;              /* Hidden clipboard window */
+    IDataObject* pIDataObjectSrc;    /* Source object passed to OleSetClipboard */
 };
 
-typedef struct OLEClipbrd OLEClipbrd;
+typedef struct ole_clipbrd ole_clipbrd;
 
-
-/****************************************************************************
-*   IEnumFORMATETC implementation
-*   DO NOT add any members before the VTables declaration!
-*/
-typedef struct
+static inline ole_clipbrd *impl_from_IDataObject(IDataObject *iface)
 {
-  /* IEnumFORMATETC VTable */
-  const IEnumFORMATETCVtbl          *lpVtbl;
-
-  /* IEnumFORMATETC fields */
-  UINT                         posFmt;    /* current enumerator position */
-  UINT                         countFmt;  /* number of EnumFORMATETC's in array */
-  LPFORMATETC                  pFmt;      /* array of EnumFORMATETC's */
-
-  /*
-   * Reference count of this object
-   */
-  LONG                         ref;
-
-  /*
-   * IUnknown implementation of the parent data object.
-   */
-  IUnknown*                    pUnkDataObj;
-
-} IEnumFORMATETCImpl;
+    return (ole_clipbrd*)((char*)iface - FIELD_OFFSET(ole_clipbrd, lpvtbl));
+}
 
 typedef struct PresentationDataHeader
 {
@@ -161,112 +114,244 @@ typedef struct PresentationDataHeader
 } PresentationDataHeader;
 
 /*
- * The one and only OLEClipbrd object which is created by OLEClipbrd_Initialize()
+ * The one and only ole_clipbrd object which is created by OLEClipbrd_Initialize()
  */
-static HGLOBAL hTheOleClipboard = 0;
-static OLEClipbrd* theOleClipboard = NULL;
+static ole_clipbrd* theOleClipboard;
 
 
 /*
- * Prototypes for the methods of the OLEClipboard class.
+ * Name of our registered OLE clipboard window class
  */
-void OLEClipbrd_Initialize(void);
-void OLEClipbrd_UnInitialize(void);
-static OLEClipbrd* OLEClipbrd_Construct(void);
-static void OLEClipbrd_Destroy(OLEClipbrd* ptrToDestroy);
-static HWND OLEClipbrd_CreateWindow(void);
-static void OLEClipbrd_DestroyWindow(HWND hwnd);
-static LRESULT CALLBACK OLEClipbrd_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
-static HRESULT OLEClipbrd_RenderFormat( IDataObject *pIDataObject, LPFORMATETC pFormatetc );
-static HGLOBAL OLEClipbrd_GlobalDupMem( HGLOBAL hGlobalSrc );
+static const CHAR OLEClipbrd_WNDCLASS[] = "CLIPBRDWNDCLASS";
 
-/*
- * Prototypes for the methods of the OLEClipboard class
- * that implement IDataObject methods.
- */
-static HRESULT WINAPI OLEClipbrd_IDataObject_QueryInterface(
-            IDataObject*     iface,
-            REFIID           riid,
-            void**           ppvObject);
-static ULONG WINAPI OLEClipbrd_IDataObject_AddRef(
-            IDataObject*     iface);
-static ULONG WINAPI OLEClipbrd_IDataObject_Release(
-            IDataObject*     iface);
-static HRESULT WINAPI OLEClipbrd_IDataObject_GetData(
-	    IDataObject*     iface,
-	    LPFORMATETC      pformatetcIn,
-	    STGMEDIUM*       pmedium);
-static HRESULT WINAPI OLEClipbrd_IDataObject_GetDataHere(
-	    IDataObject*     iface,
-	    LPFORMATETC      pformatetc,
-	    STGMEDIUM*       pmedium);
-static HRESULT WINAPI OLEClipbrd_IDataObject_QueryGetData(
-	    IDataObject*     iface,
-	    LPFORMATETC      pformatetc);
-static HRESULT WINAPI OLEClipbrd_IDataObject_GetCanonicalFormatEtc(
-	    IDataObject*     iface,
-	    LPFORMATETC      pformatectIn,
-	    LPFORMATETC      pformatetcOut);
-static HRESULT WINAPI OLEClipbrd_IDataObject_SetData(
-	    IDataObject*     iface,
-	    LPFORMATETC      pformatetc,
-	    STGMEDIUM*       pmedium,
-	    BOOL             fRelease);
-static HRESULT WINAPI OLEClipbrd_IDataObject_EnumFormatEtc(
-	    IDataObject*     iface,
-	    DWORD            dwDirection,
-	    IEnumFORMATETC** ppenumFormatEtc);
-static HRESULT WINAPI OLEClipbrd_IDataObject_DAdvise(
-	    IDataObject*     iface,
-	    FORMATETC*       pformatetc,
-	    DWORD            advf,
-	    IAdviseSink*     pAdvSink,
-	    DWORD*           pdwConnection);
-static HRESULT WINAPI OLEClipbrd_IDataObject_DUnadvise(
-	    IDataObject*     iface,
-	    DWORD            dwConnection);
-static HRESULT WINAPI OLEClipbrd_IDataObject_EnumDAdvise(
-	    IDataObject*     iface,
-	    IEnumSTATDATA**  ppenumAdvise);
+static UINT dataobject_clipboard_format;
+static UINT ole_priv_data_clipboard_format;
+static UINT embed_source_clipboard_format;
 
-/*
- * Prototypes for the IEnumFORMATETC methods.
- */
-static LPENUMFORMATETC OLEClipbrd_IEnumFORMATETC_Construct(UINT cfmt, const FORMATETC afmt[],
-                                                           LPUNKNOWN pUnkDataObj);
-static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_QueryInterface(LPENUMFORMATETC iface, REFIID riid,
-                                                               LPVOID* ppvObj);
-static ULONG WINAPI OLEClipbrd_IEnumFORMATETC_AddRef(LPENUMFORMATETC iface);
-static ULONG WINAPI OLEClipbrd_IEnumFORMATETC_Release(LPENUMFORMATETC iface);
-static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_Next(LPENUMFORMATETC iface, ULONG celt,
-                                                     FORMATETC* rgelt, ULONG* pceltFethed);
-static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_Skip(LPENUMFORMATETC iface, ULONG celt);
-static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_Reset(LPENUMFORMATETC iface);
-static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_Clone(LPENUMFORMATETC iface, LPENUMFORMATETC* ppenum);
-
-
-/*
- * Virtual function table for the OLEClipbrd's exposed IDataObject interface
- */
-static const IDataObjectVtbl OLEClipbrd_IDataObject_VTable =
+/* Structure of 'Ole Private Data' clipboard format */
+typedef struct
 {
-  OLEClipbrd_IDataObject_QueryInterface,
-  OLEClipbrd_IDataObject_AddRef,
-  OLEClipbrd_IDataObject_Release,
-  OLEClipbrd_IDataObject_GetData,
-  OLEClipbrd_IDataObject_GetDataHere,
-  OLEClipbrd_IDataObject_QueryGetData,
-  OLEClipbrd_IDataObject_GetCanonicalFormatEtc,
-  OLEClipbrd_IDataObject_SetData,
-  OLEClipbrd_IDataObject_EnumFormatEtc,
-  OLEClipbrd_IDataObject_DAdvise,
-  OLEClipbrd_IDataObject_DUnadvise,
-  OLEClipbrd_IDataObject_EnumDAdvise
-};
+    FORMATETC fmtetc;
+    DWORD first_use;  /* Has this cf been added to the list already */
+    DWORD unk[2];
+} ole_priv_data_entry;
 
-/*
- * Virtual function table for IEnumFORMATETC interface
+typedef struct
+{
+    DWORD unk1;
+    DWORD size; /* in bytes of the entire structure */
+    DWORD unk2;
+    DWORD count; /* no. of format entries */
+    DWORD unk3[2];
+    ole_priv_data_entry entries[1]; /* array of size count */
+    /* then follows any DVTARGETDEVICE structures referenced in the FORMATETCs */
+} ole_priv_data;
+
+/* Create an empty data structure.  The only thing that really matters
+   here is setting count and size members.  This is used by the enumerator as a
+   convenience when there's an empty list. */
+static HRESULT create_empty_priv_data(ole_priv_data **data)
+{
+    ole_priv_data *ptr;
+
+    *data = NULL;
+    ptr = HeapAlloc(GetProcessHeap(), 0, sizeof(*ptr));
+    if(!ptr) return E_OUTOFMEMORY;
+    ptr->size = sizeof(*ptr);
+    ptr->count = 0;
+    *data = ptr;
+    return S_OK;
+}
+
+/*---------------------------------------------------------------------*
+ *  Implementation of the internal IEnumFORMATETC interface returned by
+ *  the OLE clipboard's IDataObject.
+ *---------------------------------------------------------------------*/
+
+typedef struct enum_fmtetc
+{
+    const IEnumFORMATETCVtbl *lpVtbl;
+    LONG ref;
+
+    UINT pos;    /* current enumerator position */
+    ole_priv_data *data;
+} enum_fmtetc;
+
+static inline enum_fmtetc *impl_from_IEnumFORMATETC(IEnumFORMATETC *iface)
+{
+    return (enum_fmtetc*)((char*)iface - FIELD_OFFSET(enum_fmtetc, lpVtbl));
+}
+
+/************************************************************************
+ * OLEClipbrd_IEnumFORMATETC_QueryInterface (IUnknown)
+ *
+ * See Windows documentation for more details on IUnknown methods.
  */
+static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_QueryInterface
+  (LPENUMFORMATETC iface, REFIID riid, LPVOID* ppvObj)
+{
+  enum_fmtetc *This = impl_from_IEnumFORMATETC(iface);
+
+  TRACE("(%p)->(IID: %s, %p)\n", This, debugstr_guid(riid), ppvObj);
+
+  *ppvObj = NULL;
+
+  if(IsEqualIID(riid, &IID_IUnknown) ||
+     IsEqualIID(riid, &IID_IEnumFORMATETC))
+  {
+    *ppvObj = iface;
+  }
+
+  if(*ppvObj)
+  {
+    IEnumFORMATETC_AddRef((IEnumFORMATETC*)*ppvObj);
+    TRACE("-- Interface: (%p)->(%p)\n",ppvObj,*ppvObj);
+    return S_OK;
+  }
+
+  TRACE("-- Interface: E_NOINTERFACE\n");
+  return E_NOINTERFACE;
+}
+
+/************************************************************************
+ * OLEClipbrd_IEnumFORMATETC_AddRef (IUnknown)
+ *
+ */
+static ULONG WINAPI OLEClipbrd_IEnumFORMATETC_AddRef(LPENUMFORMATETC iface)
+{
+  enum_fmtetc *This = impl_from_IEnumFORMATETC(iface);
+  TRACE("(%p)->(count=%u)\n",This, This->ref);
+
+  return InterlockedIncrement(&This->ref);
+}
+
+/************************************************************************
+ * OLEClipbrd_IEnumFORMATETC_Release (IUnknown)
+ *
+ * See Windows documentation for more details on IUnknown methods.
+ */
+static ULONG WINAPI OLEClipbrd_IEnumFORMATETC_Release(LPENUMFORMATETC iface)
+{
+  enum_fmtetc *This = impl_from_IEnumFORMATETC(iface);
+  ULONG ref;
+
+  TRACE("(%p)->(count=%u)\n",This, This->ref);
+
+  ref = InterlockedDecrement(&This->ref);
+  if (!ref)
+  {
+    TRACE("() - destroying IEnumFORMATETC(%p)\n",This);
+    HeapFree(GetProcessHeap(), 0, This->data);
+    HeapFree(GetProcessHeap(), 0, This);
+  }
+  return ref;
+}
+
+/************************************************************************
+ * OLEClipbrd_IEnumFORMATETC_Next (IEnumFORMATETC)
+ *
+ * Standard enumerator members for IEnumFORMATETC
+ */
+static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_Next
+  (LPENUMFORMATETC iface, ULONG celt, FORMATETC *rgelt, ULONG *pceltFethed)
+{
+  enum_fmtetc *This = impl_from_IEnumFORMATETC(iface);
+  UINT cfetch, i;
+  HRESULT hres = S_FALSE;
+
+  TRACE("(%p)->(pos=%u)\n", This, This->pos);
+
+  if (This->pos < This->data->count)
+  {
+    cfetch = This->data->count - This->pos;
+    if (cfetch >= celt)
+    {
+      cfetch = celt;
+      hres = S_OK;
+    }
+
+    for(i = 0; i < cfetch; i++)
+    {
+      rgelt[i] = This->data->entries[This->pos++].fmtetc;
+      if(rgelt[i].ptd)
+      {
+        DVTARGETDEVICE *target = (DVTARGETDEVICE *)((char *)This->data + (DWORD)rgelt[i].ptd);
+        rgelt[i].ptd = CoTaskMemAlloc(target->tdSize);
+        if(!rgelt[i].ptd) return E_OUTOFMEMORY;
+        memcpy(rgelt[i].ptd, target, target->tdSize);
+      }
+    }
+  }
+  else
+  {
+    cfetch = 0;
+  }
+
+  if (pceltFethed)
+  {
+    *pceltFethed = cfetch;
+  }
+
+  return hres;
+}
+
+/************************************************************************
+ * OLEClipbrd_IEnumFORMATETC_Skip (IEnumFORMATETC)
+ *
+ * Standard enumerator members for IEnumFORMATETC
+ */
+static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_Skip(LPENUMFORMATETC iface, ULONG celt)
+{
+  enum_fmtetc *This = impl_from_IEnumFORMATETC(iface);
+  TRACE("(%p)->(num=%u)\n", This, celt);
+
+  This->pos += celt;
+  if (This->pos > This->data->count)
+  {
+    This->pos = This->data->count;
+    return S_FALSE;
+  }
+  return S_OK;
+}
+
+/************************************************************************
+ * OLEClipbrd_IEnumFORMATETC_Reset (IEnumFORMATETC)
+ *
+ * Standard enumerator members for IEnumFORMATETC
+ */
+static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_Reset(LPENUMFORMATETC iface)
+{
+  enum_fmtetc *This = impl_from_IEnumFORMATETC(iface);
+  TRACE("(%p)->()\n", This);
+
+  This->pos = 0;
+  return S_OK;
+}
+
+static HRESULT enum_fmtetc_construct(ole_priv_data *data, UINT pos, IEnumFORMATETC **obj);
+
+/************************************************************************
+ * OLEClipbrd_IEnumFORMATETC_Clone (IEnumFORMATETC)
+ *
+ * Standard enumerator members for IEnumFORMATETC
+ */
+static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_Clone
+  (LPENUMFORMATETC iface, LPENUMFORMATETC* obj)
+{
+  enum_fmtetc *This = impl_from_IEnumFORMATETC(iface);
+  ole_priv_data *new_data;
+
+  TRACE("(%p)->(%p)\n", This, obj);
+
+  if ( !obj ) return E_INVALIDARG;
+  *obj = NULL;
+
+  new_data = HeapAlloc(GetProcessHeap(), 0, This->data->size);
+  if(!new_data) return E_OUTOFMEMORY;
+
+  return enum_fmtetc_construct(new_data, This->pos, obj);
+}
+
 static const IEnumFORMATETCVtbl efvt =
 {
   OLEClipbrd_IEnumFORMATETC_QueryInterface,
@@ -278,504 +363,219 @@ static const IEnumFORMATETCVtbl efvt =
   OLEClipbrd_IEnumFORMATETC_Clone
 };
 
-/*
- * Name of our registered OLE clipboard window class
- */
-static const CHAR OLEClipbrd_WNDCLASS[] = "CLIPBRDWNDCLASS";
-
-/*
- *  If we need to store state info we can store it here.
- *  For now we don't need this functionality.
+/************************************************************************
+ * enum_fmtetc_construct
  *
-typedef struct tagClipboardWindowInfo
+ * Creates an IEnumFORMATETC enumerator from ole_priv_data which it then owns.
+ */
+static HRESULT enum_fmtetc_construct(ole_priv_data *data, UINT pos, IEnumFORMATETC **obj)
 {
-} ClipboardWindowInfo;
- */
+  enum_fmtetc* ef;
 
-/*---------------------------------------------------------------------*
- *           Win32 OLE clipboard API
- *---------------------------------------------------------------------*/
+  *obj = NULL;
+  ef = HeapAlloc(GetProcessHeap(), 0, sizeof(*ef));
+  if (!ef) return E_OUTOFMEMORY;
 
-/***********************************************************************
- *           OleSetClipboard     [OLE32.@]
- *  Places a pointer to the specified data object onto the clipboard,
- *  making the data object accessible to the OleGetClipboard function.
- *
- * RETURNS
- *
- *    S_OK                  IDataObject pointer placed on the clipboard
- *    CLIPBRD_E_CANT_OPEN   OpenClipboard failed
- *    CLIPBRD_E_CANT_EMPTY  EmptyClipboard failed
- *    CLIPBRD_E_CANT_CLOSE  CloseClipboard failed
- *    CLIPBRD_E_CANT_SET    SetClipboard failed
- */
+  ef->ref = 1;
+  ef->lpVtbl = &efvt;
+  ef->data = data;
+  ef->pos = pos;
 
-HRESULT WINAPI OleSetClipboard(IDataObject* pDataObj)
-{
-  HRESULT hr = S_OK;
-  IEnumFORMATETC* penumFormatetc = NULL;
-  FORMATETC rgelt;
-  BOOL bClipboardOpen = FALSE;
-  struct oletls *info = COM_CurrentInfo();
-/*
-  HGLOBAL hDataObject = 0;
-  OLEClipbrd **ppDataObject;
-*/
-
-  TRACE("(%p)\n", pDataObj);
-
-  if(!info)
-    WARN("Could not allocate tls\n");
-  else
-    if(!info->ole_inits)
-      return CO_E_NOTINITIALIZED;
-
-  /*
-   * Make sure we have a clipboard object
-   */
-  OLEClipbrd_Initialize();
-
-  /*
-   * If the Ole clipboard window hasn't been created yet, create it now.
-   */
-  if ( !theOleClipboard->hWndClipboard )
-    theOleClipboard->hWndClipboard = OLEClipbrd_CreateWindow();
-
-  if ( !theOleClipboard->hWndClipboard ) /* sanity check */
-    HANDLE_ERROR( E_FAIL );
-
-  /*
-   * Open the Windows clipboard, associating it with our hidden window
-   */
-  if ( !(bClipboardOpen = OpenClipboard(theOleClipboard->hWndClipboard)) )
-    HANDLE_ERROR( CLIPBRD_E_CANT_OPEN );
-
-  /*
-   * Empty the current clipboard and make our window the clipboard owner
-   * NOTE: This will trigger a WM_DESTROYCLIPBOARD message
-   */
-  if ( !EmptyClipboard() )
-    HANDLE_ERROR( CLIPBRD_E_CANT_EMPTY );
-
-  /*
-   * If we are already holding on to an IDataObject first release that.
-   */
-  if ( theOleClipboard->pIDataObjectSrc )
-  {
-    IDataObject_Release(theOleClipboard->pIDataObjectSrc);
-    theOleClipboard->pIDataObjectSrc = NULL;
-  }
-
-  /*
-   * AddRef the data object passed in and save its pointer.
-   * A NULL value indicates that the clipboard should be emptied.
-   */
-  theOleClipboard->pIDataObjectSrc = pDataObj;
-  if ( pDataObj )
-  {
-    IDataObject_AddRef(theOleClipboard->pIDataObjectSrc);
-  }
-
-  /*
-   * Enumerate all HGLOBAL formats supported by the source and make
-   * those formats available using delayed rendering using SetClipboardData.
-   * Only global memory based data items may be made available to non-OLE
-   * applications via the standard Windows clipboard API. Data based on other
-   * mediums(non TYMED_HGLOBAL) can only be accessed via the Ole Clipboard API.
-   *
-   * TODO: Do we need to additionally handle TYMED_IStorage media by copying
-   * the storage into global memory?
-   */
-  if ( pDataObj )
-  {
-    if ( FAILED(hr = IDataObject_EnumFormatEtc( pDataObj,
-                                                DATADIR_GET,
-                                                &penumFormatetc )))
-    {
-      HANDLE_ERROR( hr );
-    }
-
-    while ( S_OK == IEnumFORMATETC_Next(penumFormatetc, 1, &rgelt, NULL) )
-    {
-      if ( rgelt.tymed == TYMED_HGLOBAL )
-      {
-        CHAR szFmtName[80];
-        TRACE("(cfFormat=%d:%s)\n", rgelt.cfFormat,
-              GetClipboardFormatNameA(rgelt.cfFormat, szFmtName, sizeof(szFmtName)-1)
-                ? szFmtName : "");
-
-        SetClipboardData( rgelt.cfFormat, NULL);
-      }
-    }
-    IEnumFORMATETC_Release(penumFormatetc);
-  }
-
-  /*
-   * Windows additionally creates a new "DataObject" clipboard format
-   * and stores in on the clipboard. We could possibly store a pointer
-   * to our internal IDataObject interface on the clipboard. I'm not
-   * sure what the use of this is though.
-   * Enable the code below for this functionality.
-   */
-/*
-   theOleClipboard->cfDataObj = RegisterClipboardFormatA("DataObject");
-   hDataObject = GlobalAlloc( GMEM_DDESHARE|GMEM_MOVEABLE|GMEM_ZEROINIT,
-                             sizeof(OLEClipbrd *));
-   if (hDataObject==0)
-     HANDLE_ERROR( E_OUTOFMEMORY );
-
-   ppDataObject = GlobalLock(hDataObject);
-   *ppDataObject = theOleClipboard;
-   GlobalUnlock(hDataObject);
-
-   if ( !SetClipboardData( theOleClipboard->cfDataObj, hDataObject ) )
-     HANDLE_ERROR( CLIPBRD_E_CANT_SET );
-*/
-
-  hr = S_OK;
-
-CLEANUP:
-
-  /*
-   * Close Windows clipboard (It remains associated with our window)
-   */
-  if ( bClipboardOpen && !CloseClipboard() )
-    hr = CLIPBRD_E_CANT_CLOSE;
-
-  /*
-   * Release the source IDataObject if something failed
-   */
-  if ( FAILED(hr) )
-  {
-    if (theOleClipboard->pIDataObjectSrc)
-    {
-      IDataObject_Release(theOleClipboard->pIDataObjectSrc);
-      theOleClipboard->pIDataObjectSrc = NULL;
-    }
-  }
-
-  return hr;
+  TRACE("(%p)->()\n", ef);
+  *obj = (IEnumFORMATETC *)ef;
+  return S_OK;
 }
 
-
 /***********************************************************************
- * OleGetClipboard [OLE32.@]
- * Returns a pointer to our internal IDataObject which represents the conceptual
- * state of the Windows clipboard. If the current clipboard already contains
- * an IDataObject, our internal IDataObject will delegate to this object.
- */
-HRESULT WINAPI OleGetClipboard(IDataObject** ppDataObj)
-{
-  HRESULT hr = S_OK;
-  TRACE("()\n");
-
-  /*
-   * Make sure we have a clipboard object
-   */
-  OLEClipbrd_Initialize();
-
-  if (!theOleClipboard)
-    return E_OUTOFMEMORY;
-
-  /* Return a reference counted IDataObject */
-  hr = IDataObject_QueryInterface( (IDataObject*)&(theOleClipboard->lpvtbl1),
-                                   &IID_IDataObject,  (void**)ppDataObj);
-  return hr;
-}
-
-/******************************************************************************
- *              OleFlushClipboard        [OLE32.@]
- *  Renders the data from the source IDataObject into the windows clipboard
+ *                    dup_global_mem
  *
- *  TODO: OleFlushClipboard needs to additionally handle TYMED_IStorage media
- *  by copying the storage into global memory. Subsequently the default
- *  data object exposed through OleGetClipboard must convert this TYMED_HGLOBAL
- *  back to TYMED_IStorage.
+ * Helper method to duplicate an HGLOBAL chunk of memory
  */
-HRESULT WINAPI OleFlushClipboard(void)
+static HRESULT dup_global_mem( HGLOBAL src, HGLOBAL *dst )
 {
-  IEnumFORMATETC* penumFormatetc = NULL;
-  FORMATETC rgelt;
-  HRESULT hr = S_OK;
-  BOOL bClipboardOpen = FALSE;
-  IDataObject* pIDataObjectSrc = NULL;
+    void *src_ptr, *dst_ptr;
+    DWORD size;
 
-  TRACE("()\n");
+    *dst = NULL;
+    if ( !src ) return S_FALSE;
 
-  /*
-   * Make sure we have a clipboard object
-   */
-  OLEClipbrd_Initialize();
+    size = GlobalSize(src);
 
-  /*
-   * Already flushed or no source DataObject? Nothing to do.
-   */
-  if (!theOleClipboard->pIDataObjectSrc)
+    *dst = GlobalAlloc( GMEM_DDESHARE|GMEM_MOVEABLE, size );
+    if ( !*dst ) return E_OUTOFMEMORY;
+
+    src_ptr = GlobalLock(src);
+    dst_ptr = GlobalLock(*dst);
+
+    memcpy(dst_ptr, src_ptr, size);
+
+    GlobalUnlock(*dst);
+    GlobalUnlock(src);
+
     return S_OK;
+}
 
-  /*
-   * Addref and save the source data object we are holding on to temporarily,
-   * since it will be released when we empty the clipboard.
-   */
-  pIDataObjectSrc = theOleClipboard->pIDataObjectSrc;
-  IDataObject_AddRef(pIDataObjectSrc);
+/************************************************************
+ *              render_embed_source_hack
+ *
+ * This is clearly a hack and has no place in the clipboard code.
+ *
+ */
+static HRESULT render_embed_source_hack(IDataObject *data, LPFORMATETC fmt)
+{
+    STGMEDIUM std;
+    HGLOBAL hStorage = 0;
+    HRESULT hr = S_OK;
+    ILockBytes *ptrILockBytes;
 
-  /*
-   * Open the Windows clipboard
-   */
-  if ( !(bClipboardOpen = OpenClipboard(theOleClipboard->hWndClipboard)) )
-    HANDLE_ERROR( CLIPBRD_E_CANT_OPEN );
+    memset(&std, 0, sizeof(STGMEDIUM));
+    std.tymed = fmt->tymed = TYMED_ISTORAGE;
 
-  /*
-   * Empty the current clipboard
-   */
-  if ( !EmptyClipboard() )
-    HANDLE_ERROR( CLIPBRD_E_CANT_EMPTY );
+    hStorage = GlobalAlloc(GMEM_SHARE|GMEM_MOVEABLE, 0);
+    if (hStorage == NULL) return E_OUTOFMEMORY;
+    hr = CreateILockBytesOnHGlobal(hStorage, FALSE, &ptrILockBytes);
+    hr = StgCreateDocfileOnILockBytes(ptrILockBytes, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &std.u.pstg);
+    ILockBytes_Release(ptrILockBytes);
 
-  /*
-   * Render all HGLOBAL formats supported by the source into
-   * the windows clipboard.
-   */
-  if ( FAILED( hr = IDataObject_EnumFormatEtc( pIDataObjectSrc,
-                                               DATADIR_GET,
-                                               &penumFormatetc) ))
-  {
-    HANDLE_ERROR( hr );
-  }
-
-  while ( S_OK == IEnumFORMATETC_Next(penumFormatetc, 1, &rgelt, NULL) )
-  {
-    if ( rgelt.tymed == TYMED_HGLOBAL )
+    if (FAILED(hr = IDataObject_GetDataHere(theOleClipboard->pIDataObjectSrc, fmt, &std)))
     {
-      CHAR szFmtName[80];
-      TRACE("(cfFormat=%d:%s)\n", rgelt.cfFormat,
-            GetClipboardFormatNameA(rgelt.cfFormat, szFmtName, sizeof(szFmtName)-1)
-              ? szFmtName : "");
-
-      /*
-       * Render the clipboard data
-       */
-      if ( FAILED(OLEClipbrd_RenderFormat( pIDataObjectSrc, &rgelt )) )
-        continue;
+        WARN("() : IDataObject_GetDataHere failed to render clipboard data! (%x)\n", hr);
+        GlobalFree(hStorage);
+        return hr;
     }
-  }
 
-  IEnumFORMATETC_Release(penumFormatetc);
+    if (1) /* check whether the presentation data is already -not- present */
+    {
+        FORMATETC fmt2;
+        STGMEDIUM std2;
+        METAFILEPICT *mfp = 0;
 
-  /*
-   * Release the source data object we are holding on to
-   */
-  IDataObject_Release(pIDataObjectSrc);
+        fmt2.cfFormat = CF_METAFILEPICT;
+        fmt2.ptd = 0;
+        fmt2.dwAspect = DVASPECT_CONTENT;
+        fmt2.lindex = -1;
+        fmt2.tymed = TYMED_MFPICT;
 
-CLEANUP:
+        memset(&std2, 0, sizeof(STGMEDIUM));
+        std2.tymed = TYMED_MFPICT;
 
-  /*
-   * Close Windows clipboard (It remains associated with our window)
-   */
-  if ( bClipboardOpen && !CloseClipboard() )
-    hr = CLIPBRD_E_CANT_CLOSE;
+        /* Get the metafile picture out of it */
 
-  return hr;
-}
+        if (SUCCEEDED(hr = IDataObject_GetData(theOleClipboard->pIDataObjectSrc, &fmt2, &std2)))
+        {
+            mfp = GlobalLock(std2.u.hGlobal);
+        }
 
+        if (mfp)
+        {
+            OLECHAR name[]={ 2, 'O', 'l', 'e', 'P', 'r', 'e', 's', '0', '0', '0', 0};
+            IStream *pStream = 0;
+            void *mfBits;
+            PresentationDataHeader pdh;
+            INT nSize;
+            CLSID clsID;
+            LPOLESTR strProgID;
+            CHAR strOleTypeName[51];
+            BYTE OlePresStreamHeader [] =
+            {
+                0xFF, 0xFF, 0xFF, 0xFF, 0x03, 0x00, 0x00, 0x00,
+                0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+                0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00
+            };
 
-/***********************************************************************
- *           OleIsCurrentClipboard [OLE32.@]
- */
-HRESULT WINAPI OleIsCurrentClipboard(IDataObject *pDataObject)
-{
-  TRACE("()\n");
-  /*
-   * Make sure we have a clipboard object
-   */
-  OLEClipbrd_Initialize();
+            nSize = GetMetaFileBitsEx(mfp->hMF, 0, NULL);
 
-  if (!theOleClipboard)
-    return E_OUTOFMEMORY;
+            memset(&pdh, 0, sizeof(PresentationDataHeader));
+            memcpy(&pdh, OlePresStreamHeader, sizeof(OlePresStreamHeader));
 
-  if (pDataObject == NULL)
-    return S_FALSE;
+            pdh.dwObjectExtentX = mfp->xExt;
+            pdh.dwObjectExtentY = mfp->yExt;
+            pdh.dwSize = nSize;
 
-  return (pDataObject == theOleClipboard->pIDataObjectSrc) ? S_OK : S_FALSE;
-}
+            hr = IStorage_CreateStream(std.u.pstg, name, STGM_CREATE|STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, 0, &pStream);
 
+            hr = IStream_Write(pStream, &pdh, sizeof(PresentationDataHeader), NULL);
 
-/*---------------------------------------------------------------------*
- *           Internal implementation methods for the OLE clipboard
- *---------------------------------------------------------------------*/
+            mfBits = HeapAlloc(GetProcessHeap(), 0, nSize);
+            nSize = GetMetaFileBitsEx(mfp->hMF, nSize, mfBits);
 
-/***********************************************************************
- * OLEClipbrd_Initialize()
- * Initializes the OLE clipboard.
- */
-void OLEClipbrd_Initialize(void)
-{
-  /*
-   * Create the clipboard if necessary
-   */
-  if ( !theOleClipboard )
-  {
-    TRACE("()\n");
-    theOleClipboard = OLEClipbrd_Construct();
-  }
-}
+            hr = IStream_Write(pStream, mfBits, nSize, NULL);
 
+            IStream_Release(pStream);
 
-/***********************************************************************
- * OLEClipbrd_UnInitialize()
- * Un-Initializes the OLE clipboard
- */
-void OLEClipbrd_UnInitialize(void)
-{
-  TRACE("()\n");
-  /*
-   * Destroy the clipboard if no one holds a reference to us.
-   * Note that the clipboard was created with a reference count of 1.
-   */
-  if ( theOleClipboard && (theOleClipboard->ref <= 1) )
-  {
-    OLEClipbrd_Destroy( theOleClipboard );
-  }
-  else
-  {
-    WARN( "() : OLEClipbrd_UnInitialize called while client holds an IDataObject reference!\n");
-  }
-}
+            HeapFree(GetProcessHeap(), 0, mfBits);
 
+            GlobalUnlock(std2.u.hGlobal);
+            ReleaseStgMedium(&std2);
 
-/*********************************************************
- * Construct the OLEClipbrd class.
- */
-static OLEClipbrd* OLEClipbrd_Construct(void)
-{
-  OLEClipbrd* newObject = NULL;
-  HGLOBAL hNewObject = 0;
+            ReadClassStg(std.u.pstg, &clsID);
+            ProgIDFromCLSID(&clsID, &strProgID);
 
-  /*
-   * Allocate space for the object. We use GlobalAlloc since we need
-   * an HGLOBAL to expose our DataObject as a registered clipboard type.
-   */
-  hNewObject = GlobalAlloc( GMEM_DDESHARE|GMEM_MOVEABLE|GMEM_ZEROINIT,
-                           sizeof(OLEClipbrd));
-  if (hNewObject==0)
-    return NULL;
+            WideCharToMultiByte( CP_ACP, 0, strProgID, -1, strOleTypeName, sizeof(strOleTypeName), NULL, NULL );
+            OLECONVERT_CreateOleStream(std.u.pstg);
+            OLECONVERT_CreateCompObjStream(std.u.pstg, strOleTypeName);
+        }
+    }
 
-  /*
-   * Lock the handle for the entire lifetime of the clipboard.
-   */
-  newObject = GlobalLock(hNewObject);
+    if ( !SetClipboardData( fmt->cfFormat, hStorage ) )
+    {
+        WARN("() : Failed to set rendered clipboard data into clipboard!\n");
+        GlobalFree(hStorage);
+        hr = CLIPBRD_E_CANT_SET;
+    }
 
-  /*
-   * Initialize the virtual function table.
-   */
-  newObject->lpvtbl1 = &OLEClipbrd_IDataObject_VTable;
-
-  /*
-   * Start with one reference count. The caller of this function
-   * must release the interface pointer when it is done.
-   */
-  newObject->ref = 1;
-
-  newObject->hSelf = hNewObject;
-
-  /*
-   * The Ole clipboard is a singleton - save the global handle and pointer
-   */
-  theOleClipboard = newObject;
-  hTheOleClipboard = hNewObject;
-
-  return theOleClipboard;
-}
-
-static void OLEClipbrd_Destroy(OLEClipbrd* ptrToDestroy)
-{
-  TRACE("()\n");
-
-  if ( !ptrToDestroy )
-    return;
-
-  /*
-   * Destroy the Ole clipboard window
-   */
-  if ( ptrToDestroy->hWndClipboard )
-    OLEClipbrd_DestroyWindow(ptrToDestroy->hWndClipboard);
-
-  /*
-   * Free the actual OLE Clipboard structure.
-   */
-  TRACE("() - Destroying clipboard data object.\n");
-  GlobalUnlock(ptrToDestroy->hSelf);
-  GlobalFree(ptrToDestroy->hSelf);
-
-  /*
-   * The Ole clipboard is a singleton (ptrToDestroy == theOleClipboard)
-   */
-  theOleClipboard = NULL;
-  hTheOleClipboard = 0;
-}
-
-
-/***********************************************************************
- * OLEClipbrd_CreateWindow()
- * Create the clipboard window
- */
-static HWND OLEClipbrd_CreateWindow(void)
-{
-  HWND hwnd = 0;
-  WNDCLASSEXA wcex;
-
-  /*
-   * Register the clipboard window class if necessary
-   */
-    ZeroMemory( &wcex, sizeof(WNDCLASSEXA));
-
-    wcex.cbSize         = sizeof(WNDCLASSEXA);
-    /* Windows creates this class with a style mask of 0
-     * We don't bother doing this since the FindClassByAtom code
-     * would have to be changed to deal with this idiosyncrasy. */
-    wcex.style          = CS_GLOBALCLASS;
-    wcex.lpfnWndProc    = OLEClipbrd_WndProc;
-    wcex.hInstance      = 0;
-    wcex.lpszClassName  = OLEClipbrd_WNDCLASS;
-
-    RegisterClassExA(&wcex);
-
-  /*
-   * Create a hidden window to receive OLE clipboard messages
-   */
-
-/*
- *  If we need to store state info we can store it here.
- *  For now we don't need this functionality.
- *   ClipboardWindowInfo clipboardInfo;
- *   ZeroMemory( &trackerInfo, sizeof(ClipboardWindowInfo));
- */
-
-  hwnd = CreateWindowA(OLEClipbrd_WNDCLASS,
-				    "ClipboardWindow",
-				    WS_POPUP | WS_CLIPSIBLINGS | WS_OVERLAPPED,
-				    CW_USEDEFAULT, CW_USEDEFAULT,
-				    CW_USEDEFAULT, CW_USEDEFAULT,
-				    0,
-				    0,
-				    0,
-				    0 /*(LPVOID)&clipboardInfo */);
-
-  return hwnd;
+    ReleaseStgMedium(&std);
+    return hr;
 }
 
 /***********************************************************************
- * OLEClipbrd_DestroyWindow(HWND)
- * Destroy the clipboard window and unregister its class
+ *                render_format
+ *
+ * Render the clipboard data. Note that this call will delegate to the
+ * source data object.
+ * Note: This function assumes it is passed an HGLOBAL format to render.
  */
-static void OLEClipbrd_DestroyWindow(HWND hwnd)
+static HRESULT render_format(IDataObject *data, LPFORMATETC fmt)
 {
-  /*
-   * Destroy clipboard window and unregister its WNDCLASS
-   */
-  DestroyWindow(hwnd);
-  UnregisterClassA( OLEClipbrd_WNDCLASS, 0 );
+    STGMEDIUM std;
+    HGLOBAL clip_data = NULL;
+    HRESULT hr;
+
+    /* Embed source hack */
+    if(fmt->cfFormat == embed_source_clipboard_format)
+    {
+        return render_embed_source_hack(data, fmt);
+    }
+
+    if (FAILED(hr = IDataObject_GetData(data, fmt, &std)))
+    {
+        WARN("() : IDataObject_GetData failed to render clipboard data! (%x)\n", hr);
+        return hr;
+    }
+
+    if(std.tymed != TYMED_HGLOBAL)
+    {
+        FIXME("got tymed %x\n", std.tymed);
+        hr = DV_E_FORMATETC;
+        goto end;
+    }
+
+    hr = dup_global_mem(std.u.hGlobal, &clip_data);
+    if(FAILED(hr)) goto end;
+
+    if ( !SetClipboardData( fmt->cfFormat, clip_data ) )
+    {
+        WARN("() : Failed to set rendered clipboard data into clipboard!\n");
+        GlobalFree(clip_data);
+        hr = CLIPBRD_E_CANT_SET;
+    }
+
+end:
+    ReleaseStgMedium(&std);
+    return hr;
 }
+
 
 /***********************************************************************
  * OLEClipbrd_WndProc(HWND, unsigned, WORD, LONG)
@@ -821,7 +621,7 @@ static LRESULT CALLBACK OLEClipbrd_WndProc
        * Render the clipboard data.
        * (We must have a source data object or we wouldn't be in this WndProc)
        */
-      OLEClipbrd_RenderFormat( (IDataObject*)&(theOleClipboard->lpvtbl1), &rgelt );
+      render_format( (IDataObject*)&(theOleClipboard->lpvtbl), &rgelt );
 
       break;
     }
@@ -847,7 +647,7 @@ static LRESULT CALLBACK OLEClipbrd_WndProc
        * Render all HGLOBAL formats supported by the source into
        * the windows clipboard.
        */
-      if ( FAILED( IDataObject_EnumFormatEtc( (IDataObject*)&(theOleClipboard->lpvtbl1),
+      if ( FAILED( IDataObject_EnumFormatEtc( (IDataObject*)&(theOleClipboard->lpvtbl),
                                  DATADIR_GET, &penumFormatetc) ) )
       {
         WARN("(): WM_RENDERALLFORMATS failed to retrieve EnumFormatEtc!\n");
@@ -861,7 +661,7 @@ static LRESULT CALLBACK OLEClipbrd_WndProc
           /*
            * Render the clipboard data.
            */
-          if ( FAILED(OLEClipbrd_RenderFormat( (IDataObject*)&(theOleClipboard->lpvtbl1), &rgelt )) )
+          if ( FAILED(render_format( (IDataObject*)&(theOleClipboard->lpvtbl), &rgelt )) )
             continue;
 
           TRACE("(): WM_RENDERALLFORMATS(cfFormat=%d)\n", rgelt.cfFormat);
@@ -910,191 +710,6 @@ static LRESULT CALLBACK OLEClipbrd_WndProc
   return 0;
 }
 
-#define MAX_CLIPFORMAT_NAME   80
-
-/***********************************************************************
- * OLEClipbrd_RenderFormat(LPFORMATETC)
- * Render the clipboard data. Note that this call will delegate to the
- * source data object.
- * Note: This function assumes it is passed an HGLOBAL format to render.
- */
-static HRESULT OLEClipbrd_RenderFormat(IDataObject *pIDataObject, LPFORMATETC pFormatetc)
-{
-  STGMEDIUM std;
-  HGLOBAL hDup;
-  HRESULT hr = S_OK;
-  char szFmtName[MAX_CLIPFORMAT_NAME];
-  ILockBytes *ptrILockBytes = 0;
-  HGLOBAL hStorage = 0;
-
-  if (!GetClipboardFormatNameA(pFormatetc->cfFormat, szFmtName, MAX_CLIPFORMAT_NAME))
-      szFmtName[0] = '\0';
-
-  /* If embed source */
-  if (!strcmp(szFmtName, CF_EMBEDSOURCE))
-  {
-    memset(&std, 0, sizeof(STGMEDIUM));
-    std.tymed = pFormatetc->tymed = TYMED_ISTORAGE;
-
-    hStorage = GlobalAlloc(GMEM_SHARE|GMEM_MOVEABLE, 0);
-    if (hStorage == NULL)
-      HANDLE_ERROR( E_OUTOFMEMORY );
-    hr = CreateILockBytesOnHGlobal(hStorage, FALSE, &ptrILockBytes);
-    hr = StgCreateDocfileOnILockBytes(ptrILockBytes, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &std.u.pstg);
-
-    if (FAILED(hr = IDataObject_GetDataHere(theOleClipboard->pIDataObjectSrc, pFormatetc, &std)))
-    {
-      WARN("() : IDataObject_GetDataHere failed to render clipboard data! (%x)\n", hr);
-      GlobalFree(hStorage);
-      return hr;
-    }
-
-    if (1) /* check whether the presentation data is already -not- present */
-    {
-      FORMATETC fmt2;
-      STGMEDIUM std2;
-      METAFILEPICT *mfp = 0;
-
-      fmt2.cfFormat = CF_METAFILEPICT;
-      fmt2.ptd = 0;
-      fmt2.dwAspect = DVASPECT_CONTENT;
-      fmt2.lindex = -1;
-      fmt2.tymed = TYMED_MFPICT;
-
-      memset(&std2, 0, sizeof(STGMEDIUM));
-      std2.tymed = TYMED_MFPICT;
-
-      /* Get the metafile picture out of it */
-
-      if (SUCCEEDED(hr = IDataObject_GetData(theOleClipboard->pIDataObjectSrc, &fmt2, &std2)))
-      {
-        mfp = GlobalLock(std2.u.hGlobal);
-      }
-
-      if (mfp)
-      {
-        OLECHAR name[]={ 2, 'O', 'l', 'e', 'P', 'r', 'e', 's', '0', '0', '0', 0};
-        IStream *pStream = 0;
-        void *mfBits;
-        PresentationDataHeader pdh;
-        INT nSize;
-        CLSID clsID;
-        LPOLESTR strProgID;
-        CHAR strOleTypeName[51];
-        BYTE OlePresStreamHeader [] =
-        {
-            0xFF, 0xFF, 0xFF, 0xFF, 0x03, 0x00, 0x00, 0x00,
-            0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
-            0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00
-        };
-
-        nSize = GetMetaFileBitsEx(mfp->hMF, 0, NULL);
-
-        memset(&pdh, 0, sizeof(PresentationDataHeader));
-        memcpy(&pdh, OlePresStreamHeader, sizeof(OlePresStreamHeader));
-
-        pdh.dwObjectExtentX = mfp->xExt;
-        pdh.dwObjectExtentY = mfp->yExt;
-        pdh.dwSize = nSize;
-
-        hr = IStorage_CreateStream(std.u.pstg, name, STGM_CREATE|STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, 0, &pStream);
-
-        hr = IStream_Write(pStream, &pdh, sizeof(PresentationDataHeader), NULL);
-
-        mfBits = HeapAlloc(GetProcessHeap(), 0, nSize);
-        nSize = GetMetaFileBitsEx(mfp->hMF, nSize, mfBits);
-
-        hr = IStream_Write(pStream, mfBits, nSize, NULL);
-
-        IStream_Release(pStream);
-
-        HeapFree(GetProcessHeap(), 0, mfBits);
-
-        GlobalUnlock(std2.u.hGlobal);
-
-        ReadClassStg(std.u.pstg, &clsID);
-        ProgIDFromCLSID(&clsID, &strProgID);
-
-        WideCharToMultiByte( CP_ACP, 0, strProgID, -1, strOleTypeName, sizeof(strOleTypeName), NULL, NULL );
-        OLECONVERT_CreateOleStream(std.u.pstg);
-        OLECONVERT_CreateCompObjStream(std.u.pstg, strOleTypeName);
-      }
-    }
-  }
-  else
-  {
-    if (FAILED(hr = IDataObject_GetData(pIDataObject, pFormatetc, &std)))
-    {
-        WARN("() : IDataObject_GetData failed to render clipboard data! (%x)\n", hr);
-        GlobalFree(hStorage);
-        return hr;
-    }
-
-    /* To put a copy back on the clipboard */
-
-    hStorage = std.u.hGlobal;
-  }
-
-  /*
-   *  Put a copy of the rendered data back on the clipboard
-   */
-
-  if ( !(hDup = OLEClipbrd_GlobalDupMem(hStorage)) )
-    HANDLE_ERROR( E_OUTOFMEMORY );
-
-  if ( !SetClipboardData( pFormatetc->cfFormat, hDup ) )
-  {
-    GlobalFree(hDup);
-    WARN("() : Failed to set rendered clipboard data into clipboard!\n");
-  }
-
-CLEANUP:
-
-  ReleaseStgMedium(&std);
-
-  return hr;
-}
-
-
-/***********************************************************************
- * OLEClipbrd_GlobalDupMem( HGLOBAL )
- * Helper method to duplicate an HGLOBAL chunk of memory
- */
-static HGLOBAL OLEClipbrd_GlobalDupMem( HGLOBAL hGlobalSrc )
-{
-    HGLOBAL hGlobalDest;
-    PVOID pGlobalSrc, pGlobalDest;
-    DWORD cBytes;
-
-    if ( !hGlobalSrc )
-      return 0;
-
-    cBytes = GlobalSize(hGlobalSrc);
-    if ( 0 == cBytes )
-      return 0;
-
-    hGlobalDest = GlobalAlloc( GMEM_DDESHARE|GMEM_MOVEABLE,
-                               cBytes );
-    if ( !hGlobalDest )
-      return 0;
-
-    pGlobalSrc = GlobalLock(hGlobalSrc);
-    pGlobalDest = GlobalLock(hGlobalDest);
-    if ( !pGlobalSrc || !pGlobalDest )
-    {
-      GlobalFree(hGlobalDest);
-      return 0;
-    }
-
-    memcpy(pGlobalDest, pGlobalSrc, cBytes);
-
-    GlobalUnlock(hGlobalSrc);
-    GlobalUnlock(hGlobalDest);
-
-    return hGlobalDest;
-}
-
 
 /*---------------------------------------------------------------------*
  *  Implementation of the internal IDataObject interface exposed by
@@ -1112,44 +727,25 @@ static HRESULT WINAPI OLEClipbrd_IDataObject_QueryInterface(
             REFIID           riid,
             void**           ppvObject)
 {
-  /*
-   * Declare "This" pointer
-   */
-  OLEClipbrd *This = (OLEClipbrd *)iface;
-  TRACE("(%p)->(\n\tIID:\t%s,%p)\n",This,debugstr_guid(riid),ppvObject);
+  ole_clipbrd *This = impl_from_IDataObject(iface);
+  TRACE("(%p)->(IID:%s, %p)\n", This, debugstr_guid(riid), ppvObject);
 
-  /*
-   * Perform a sanity check on the parameters.
-   */
   if ( (This==0) || (ppvObject==0) )
     return E_INVALIDARG;
 
-  /*
-   * Initialize the return parameter.
-   */
   *ppvObject = 0;
 
-  /*
-   * Compare the riid with the interface IDs implemented by this object.
-   */
-  if (memcmp(&IID_IUnknown, riid, sizeof(IID_IUnknown)) == 0)
+  if (IsEqualIID(&IID_IUnknown, riid) ||
+      IsEqualIID(&IID_IDataObject, riid))
   {
     *ppvObject = iface;
   }
-  else if (memcmp(&IID_IDataObject, riid, sizeof(IID_IDataObject)) == 0)
-  {
-    *ppvObject = (IDataObject*)&(This->lpvtbl1);
-  }
-  else  /* We only support IUnknown and IDataObject */
+  else
   {
     WARN( "() : asking for unsupported interface %s\n", debugstr_guid(riid));
     return E_NOINTERFACE;
   }
 
-  /*
-   * Query Interface always increases the reference count by one when it is
-   * successful.
-   */
   IUnknown_AddRef((IUnknown*)*ppvObject);
 
   return S_OK;
@@ -1163,15 +759,35 @@ static HRESULT WINAPI OLEClipbrd_IDataObject_QueryInterface(
 static ULONG WINAPI OLEClipbrd_IDataObject_AddRef(
             IDataObject*     iface)
 {
-  /*
-   * Declare "This" pointer
-   */
-  OLEClipbrd *This = (OLEClipbrd *)iface;
+  ole_clipbrd *This = impl_from_IDataObject(iface);
 
   TRACE("(%p)->(count=%u)\n",This, This->ref);
 
   return InterlockedIncrement(&This->ref);
+}
 
+/***********************************************************************
+ * OLEClipbrd_DestroyWindow(HWND)
+ * Destroy the clipboard window and unregister its class
+ */
+static void OLEClipbrd_DestroyWindow(HWND hwnd)
+{
+  DestroyWindow(hwnd);
+  UnregisterClassA( OLEClipbrd_WNDCLASS, 0 );
+}
+
+static void OLEClipbrd_Destroy(ole_clipbrd* This)
+{
+    TRACE("()\n");
+
+    if (!This) return;
+
+    theOleClipboard = NULL;
+
+    if ( This->hWndClipboard )
+        OLEClipbrd_DestroyWindow(This->hWndClipboard);
+
+    HeapFree(GetProcessHeap(), 0, This);
 }
 
 /************************************************************************
@@ -1182,22 +798,13 @@ static ULONG WINAPI OLEClipbrd_IDataObject_AddRef(
 static ULONG WINAPI OLEClipbrd_IDataObject_Release(
             IDataObject*     iface)
 {
-  /*
-   * Declare "This" pointer
-   */
-  OLEClipbrd *This = (OLEClipbrd *)iface;
+  ole_clipbrd *This = impl_from_IDataObject(iface);
   ULONG ref;
 
   TRACE("(%p)->(count=%u)\n",This, This->ref);
 
-  /*
-   * Decrease the reference count on this object.
-   */
   ref = InterlockedDecrement(&This->ref);
 
-  /*
-   * If the reference count goes down to 0, perform suicide.
-   */
   if (ref == 0)
   {
     OLEClipbrd_Destroy(This);
@@ -1221,14 +828,8 @@ static HRESULT WINAPI OLEClipbrd_IDataObject_GetData(
 	    STGMEDIUM*       pmedium)
 {
   HANDLE      hData = 0;
-  BOOL bClipboardOpen = FALSE;
-  HRESULT hr = S_OK;
   LPVOID src;
-
-  /*
-   * Declare "This" pointer
-   */
-  OLEClipbrd *This = (OLEClipbrd *)iface;
+  ole_clipbrd *This = impl_from_IDataObject(iface);
 
   TRACE("(%p,%p,%p)\n", iface, pformatetcIn, pmedium);
 
@@ -1259,8 +860,7 @@ static HRESULT WINAPI OLEClipbrd_IDataObject_GetData(
   /*
    * Otherwise, get the data from the windows clipboard using GetClipboardData
    */
-  if ( !(bClipboardOpen = OpenClipboard(theOleClipboard->hWndClipboard)) )
-    HANDLE_ERROR( CLIPBRD_E_CANT_OPEN );
+  if ( !OpenClipboard(theOleClipboard->hWndClipboard)) return CLIPBRD_E_CANT_OPEN;
 
   hData = GetClipboardData(pformatetcIn->cfFormat);
 
@@ -1290,17 +890,8 @@ static HRESULT WINAPI OLEClipbrd_IDataObject_GetData(
   pmedium->u.hGlobal = hData;
   pmedium->pUnkForRelease = NULL;
 
-  hr = S_OK;
+  if ( !CloseClipboard() ) return CLIPBRD_E_CANT_CLOSE;
 
-CLEANUP:
-  /*
-   * Close Windows clipboard
-   */
-  if ( bClipboardOpen && !CloseClipboard() )
-     hr = CLIPBRD_E_CANT_CLOSE;
-
-  if ( FAILED(hr) )
-      return hr;
   return (hData == 0) ? DV_E_FORMATETC : S_OK;
 }
 
@@ -1387,103 +978,47 @@ static HRESULT WINAPI OLEClipbrd_IDataObject_SetData(
 static HRESULT WINAPI OLEClipbrd_IDataObject_EnumFormatEtc(
 	    IDataObject*     iface,
 	    DWORD            dwDirection,
-	    IEnumFORMATETC** ppenumFormatEtc)
+	    IEnumFORMATETC** enum_fmt)
 {
-  HRESULT hr = S_OK;
-  FORMATETC *afmt = NULL;
-  int cfmt, i;
-  UINT format;
-  BOOL bClipboardOpen;
+    HRESULT hr = S_OK;
+    ole_clipbrd *This = impl_from_IDataObject(iface);
+    HGLOBAL handle;
+    ole_priv_data *data = NULL;
 
-  /*
-   * Declare "This" pointer
-   */
-  OLEClipbrd *This = (OLEClipbrd *)iface;
+    TRACE("(%p, %x, %p)\n", iface, dwDirection, enum_fmt);
 
-  TRACE("(%p, %x, %p)\n", iface, dwDirection, ppenumFormatEtc);
+    *enum_fmt = NULL;
 
-  /*
-   * If we have a data source placed on the clipboard (via OleSetClipboard)
-   * simply delegate to the source object's EnumFormatEtc
-   */
-  if ( This->pIDataObjectSrc )
-  {
-    return IDataObject_EnumFormatEtc(This->pIDataObjectSrc,
-                                     dwDirection, ppenumFormatEtc);
-  }
+    if ( dwDirection != DATADIR_GET ) return E_NOTIMPL;
+    if ( !OpenClipboard(This->hWndClipboard) ) return CLIPBRD_E_CANT_OPEN;
 
-  /*
-   * Otherwise we must provide our own enumerator which wraps around the
-   * Windows clipboard function EnumClipboardFormats
-   */
-  if ( !ppenumFormatEtc )
-    return E_INVALIDARG;
-
-  if ( dwDirection != DATADIR_GET ) /* IDataObject_SetData not implemented */
-    return E_NOTIMPL;
-
-  /*
-   * Store all current clipboard formats in an array of FORMATETC's,
-   * and create an IEnumFORMATETC enumerator from this list.
-   */
-  cfmt = CountClipboardFormats();
-  afmt = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                                sizeof(FORMATETC) * cfmt);
-  /*
-   * Open the Windows clipboard, associating it with our hidden window
-   */
-  if ( !(bClipboardOpen = OpenClipboard(This->hWndClipboard)) )
-    HANDLE_ERROR( CLIPBRD_E_CANT_OPEN );
-
-  /*
-   * Store all current clipboard formats in an array of FORMATETC's
-   * TODO: Handle TYMED_IStorage media which were put on the clipboard
-   * by copying the storage into global memory. We must convert this
-   * TYMED_HGLOBAL back to TYMED_IStorage.
-   */
-  for (i = 0, format = 0; i < cfmt; i++)
-  {
-    format = EnumClipboardFormats(format);
-    if (!format)  /* Failed! */
+    handle = GetClipboardData( ole_priv_data_clipboard_format );
+    if(handle)
     {
-      ERR("EnumClipboardFormats failed to return format!\n");
-      HANDLE_ERROR( E_FAIL );
+        ole_priv_data *src = GlobalLock(handle);
+        if(src)
+        {
+            /* FIXME: sanity check on size */
+            data = HeapAlloc(GetProcessHeap(), 0, src->size);
+            if(!data)
+            {
+                GlobalUnlock(handle);
+                hr = E_OUTOFMEMORY;
+                goto end;
+            }
+            memcpy(data, src, src->size);
+            GlobalUnlock(handle);
+        }
     }
 
-    /* Init the FORMATETC struct */
-    afmt[i].cfFormat = format;
-    afmt[i].ptd = NULL;
-    afmt[i].dwAspect = DVASPECT_CONTENT;
-    afmt[i].lindex = -1;
-    afmt[i].tymed = TYMED_HGLOBAL;
-  }
+    if(!data) hr = create_empty_priv_data(&data);
+    if(FAILED(hr)) goto end;
 
-  /*
-   * Create an EnumFORMATETC enumerator and return an
-   * EnumFORMATETC after bumping up its ref count
-   */
-  *ppenumFormatEtc = OLEClipbrd_IEnumFORMATETC_Construct( cfmt, afmt, (LPUNKNOWN)iface);
-  if (!(*ppenumFormatEtc))
-    HANDLE_ERROR( E_OUTOFMEMORY );
+    hr = enum_fmtetc_construct( data, 0, enum_fmt );
 
-  if (FAILED( hr = IEnumFORMATETC_AddRef(*ppenumFormatEtc)))
-    HANDLE_ERROR( hr );
-
-  hr = S_OK;
-
-CLEANUP:
-  /*
-   * Free the array of FORMATETC's
-   */
-  HeapFree(GetProcessHeap(), 0, afmt);
-
-  /*
-   * Close Windows clipboard
-   */
-  if ( bClipboardOpen && !CloseClipboard() )
-    hr = CLIPBRD_E_CANT_CLOSE;
-
-  return hr;
+end:
+    if ( !CloseClipboard() ) hr = CLIPBRD_E_CANT_CLOSE;
+    return hr;
 }
 
 /************************************************************************
@@ -1534,236 +1069,468 @@ static HRESULT WINAPI OLEClipbrd_IDataObject_EnumDAdvise(
   return E_NOTIMPL;
 }
 
+static const IDataObjectVtbl OLEClipbrd_IDataObject_VTable =
+{
+  OLEClipbrd_IDataObject_QueryInterface,
+  OLEClipbrd_IDataObject_AddRef,
+  OLEClipbrd_IDataObject_Release,
+  OLEClipbrd_IDataObject_GetData,
+  OLEClipbrd_IDataObject_GetDataHere,
+  OLEClipbrd_IDataObject_QueryGetData,
+  OLEClipbrd_IDataObject_GetCanonicalFormatEtc,
+  OLEClipbrd_IDataObject_SetData,
+  OLEClipbrd_IDataObject_EnumFormatEtc,
+  OLEClipbrd_IDataObject_DAdvise,
+  OLEClipbrd_IDataObject_DUnadvise,
+  OLEClipbrd_IDataObject_EnumDAdvise
+};
 
 /*---------------------------------------------------------------------*
- *  Implementation of the internal IEnumFORMATETC interface returned by
- *  the OLE clipboard's IDataObject.
+ *           Internal implementation methods for the OLE clipboard
  *---------------------------------------------------------------------*/
 
-/************************************************************************
- * OLEClipbrd_IEnumFORMATETC_Construct (UINT, const FORMATETC, LPUNKNOWN)
- *
- * Creates an IEnumFORMATETC enumerator from an array of FORMATETC
- * Structures. pUnkOuter is the outer unknown for reference counting only.
- * NOTE: this does not AddRef the interface.
+/*********************************************************
+ * Construct the OLEClipbrd class.
  */
-
-static LPENUMFORMATETC OLEClipbrd_IEnumFORMATETC_Construct(UINT cfmt, const FORMATETC afmt[],
-                                                    LPUNKNOWN pUnkDataObj)
+static ole_clipbrd* OLEClipbrd_Construct(void)
 {
-  IEnumFORMATETCImpl* ef;
-  DWORD size=cfmt * sizeof(FORMATETC);
-  LPMALLOC pIMalloc;
+    ole_clipbrd* This;
 
-  ef = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IEnumFORMATETCImpl));
-  if (!ef)
-    return NULL;
+    This = HeapAlloc( GetProcessHeap(), 0, sizeof(*This) );
+    if (!This) return NULL;
 
-  ef->ref = 0;
-  ef->lpVtbl = &efvt;
-  ef->pUnkDataObj = pUnkDataObj;
+    This->lpvtbl = &OLEClipbrd_IDataObject_VTable;
+    This->ref = 1;
 
-  ef->posFmt = 0;
-  ef->countFmt = cfmt;
-  if (FAILED(CoGetMalloc(MEMCTX_TASK, &pIMalloc))) {
-    HeapFree(GetProcessHeap(), 0, ef);
-    return NULL;
+    This->hWndClipboard = NULL;
+    This->pIDataObjectSrc = NULL;
+
+    theOleClipboard = This;
+    return This;
+}
+
+static void register_clipboard_formats(void)
+{
+    static const WCHAR DataObjectW[] = { 'D','a','t','a','O','b','j','e','c','t',0 };
+    static const WCHAR OlePrivateDataW[] = { 'O','l','e',' ','P','r','i','v','a','t','e',' ','D','a','t','a',0 };
+    static const WCHAR EmbedSourceW[] = { 'E','m','b','e','d',' ','S','o','u','r','c','e',0 };
+
+    if(!dataobject_clipboard_format)
+        dataobject_clipboard_format = RegisterClipboardFormatW(DataObjectW);
+    if(!ole_priv_data_clipboard_format)
+        ole_priv_data_clipboard_format = RegisterClipboardFormatW(OlePrivateDataW);
+    if(!embed_source_clipboard_format)
+        embed_source_clipboard_format = RegisterClipboardFormatW(EmbedSourceW);
+}
+
+/***********************************************************************
+ * OLEClipbrd_Initialize()
+ * Initializes the OLE clipboard.
+ */
+void OLEClipbrd_Initialize(void)
+{
+  register_clipboard_formats();
+
+  if ( !theOleClipboard )
+  {
+    TRACE("()\n");
+    theOleClipboard = OLEClipbrd_Construct();
   }
-  ef->pFmt = (LPFORMATETC)IMalloc_Alloc(pIMalloc, size);
-  IMalloc_Release(pIMalloc);
-
-  if (ef->pFmt)
-    memcpy(ef->pFmt, afmt, size);
-
-  TRACE("(%p)->()\n",ef);
-  return (LPENUMFORMATETC)ef;
 }
 
 
-/************************************************************************
- * OLEClipbrd_IEnumFORMATETC_QueryInterface (IUnknown)
- *
- * See Windows documentation for more details on IUnknown methods.
+/***********************************************************************
+ * OLEClipbrd_UnInitialize()
+ * Un-Initializes the OLE clipboard
  */
-static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_QueryInterface
-  (LPENUMFORMATETC iface, REFIID riid, LPVOID* ppvObj)
+void OLEClipbrd_UnInitialize(void)
 {
-  IEnumFORMATETCImpl *This = (IEnumFORMATETCImpl *)iface;
-
-  TRACE("(%p)->(\n\tIID:\t%s,%p)\n",This,debugstr_guid(riid),ppvObj);
-
+  TRACE("()\n");
   /*
-   * Since enumerators are separate objects from the parent data object
-   * we only need to support the IUnknown and IEnumFORMATETC interfaces
+   * Destroy the clipboard if no one holds a reference to us.
+   * Note that the clipboard was created with a reference count of 1.
    */
-
-  *ppvObj = NULL;
-
-  if(IsEqualIID(riid, &IID_IUnknown))
+  if ( theOleClipboard && (theOleClipboard->ref <= 1) )
   {
-    *ppvObj = This;
-  }
-  else if(IsEqualIID(riid, &IID_IEnumFORMATETC))
-  {
-    *ppvObj = (IDataObject*)This;
-  }
-
-  if(*ppvObj)
-  {
-    IEnumFORMATETC_AddRef((IEnumFORMATETC*)*ppvObj);
-    TRACE("-- Interface: (%p)->(%p)\n",ppvObj,*ppvObj);
-    return S_OK;
-  }
-
-  TRACE("-- Interface: E_NOINTERFACE\n");
-  return E_NOINTERFACE;
-}
-
-/************************************************************************
- * OLEClipbrd_IEnumFORMATETC_AddRef (IUnknown)
- *
- * Since enumerating formats only makes sense when our data object is around,
- * we insure that it stays as long as we stay by calling our parents IUnknown
- * for AddRef and Release. But since we are not controlled by the lifetime of
- * the outer object, we still keep our own reference count in order to
- * free ourselves.
- */
-static ULONG WINAPI OLEClipbrd_IEnumFORMATETC_AddRef(LPENUMFORMATETC iface)
-{
-  IEnumFORMATETCImpl *This = (IEnumFORMATETCImpl *)iface;
-  TRACE("(%p)->(count=%u)\n",This, This->ref);
-
-  if (This->pUnkDataObj)
-    IUnknown_AddRef(This->pUnkDataObj);
-
-  return InterlockedIncrement(&This->ref);
-}
-
-/************************************************************************
- * OLEClipbrd_IEnumFORMATETC_Release (IUnknown)
- *
- * See Windows documentation for more details on IUnknown methods.
- */
-static ULONG WINAPI OLEClipbrd_IEnumFORMATETC_Release(LPENUMFORMATETC iface)
-{
-  IEnumFORMATETCImpl *This = (IEnumFORMATETCImpl *)iface;
-  LPMALLOC pIMalloc;
-  ULONG ref;
-
-  TRACE("(%p)->(count=%u)\n",This, This->ref);
-
-  if (This->pUnkDataObj)
-    IUnknown_Release(This->pUnkDataObj);  /* Release parent data object */
-
-  ref = InterlockedDecrement(&This->ref);
-  if (!ref)
-  {
-    TRACE("() - destroying IEnumFORMATETC(%p)\n",This);
-    if (SUCCEEDED(CoGetMalloc(MEMCTX_TASK, &pIMalloc)))
-    {
-      IMalloc_Free(pIMalloc, This->pFmt);
-      IMalloc_Release(pIMalloc);
-    }
-
-    HeapFree(GetProcessHeap(),0,This);
-  }
-  return ref;
-}
-
-/************************************************************************
- * OLEClipbrd_IEnumFORMATETC_Next (IEnumFORMATETC)
- *
- * Standard enumerator members for IEnumFORMATETC
- */
-static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_Next
-  (LPENUMFORMATETC iface, ULONG celt, FORMATETC *rgelt, ULONG *pceltFethed)
-{
-  IEnumFORMATETCImpl *This = (IEnumFORMATETCImpl *)iface;
-  UINT cfetch;
-  HRESULT hres = S_FALSE;
-
-  TRACE("(%p)->(pos=%u)\n", This, This->posFmt);
-
-  if (This->posFmt < This->countFmt)
-  {
-    cfetch = This->countFmt - This->posFmt;
-    if (cfetch >= celt)
-    {
-      cfetch = celt;
-      hres = S_OK;
-    }
-
-    memcpy(rgelt, &This->pFmt[This->posFmt], cfetch * sizeof(FORMATETC));
-    This->posFmt += cfetch;
+    OLEClipbrd_Destroy( theOleClipboard );
   }
   else
   {
-    cfetch = 0;
+    WARN( "() : OLEClipbrd_UnInitialize called while client holds an IDataObject reference!\n");
   }
+}
 
-  if (pceltFethed)
+/***********************************************************************
+ * OLEClipbrd_CreateWindow()
+ * Create the clipboard window
+ */
+static HWND OLEClipbrd_CreateWindow(void)
+{
+  HWND hwnd = 0;
+  WNDCLASSEXA wcex;
+
+  /*
+   * Register the clipboard window class if necessary
+   */
+    ZeroMemory( &wcex, sizeof(WNDCLASSEXA));
+
+    wcex.cbSize         = sizeof(WNDCLASSEXA);
+    /* Windows creates this class with a style mask of 0
+     * We don't bother doing this since the FindClassByAtom code
+     * would have to be changed to deal with this idiosyncrasy. */
+    wcex.style          = CS_GLOBALCLASS;
+    wcex.lpfnWndProc    = OLEClipbrd_WndProc;
+    wcex.hInstance      = 0;
+    wcex.lpszClassName  = OLEClipbrd_WNDCLASS;
+
+    RegisterClassExA(&wcex);
+
+  /*
+   * Create a hidden window to receive OLE clipboard messages
+   */
+
+/*
+ *  If we need to store state info we can store it here.
+ *  For now we don't need this functionality.
+ *   ClipboardWindowInfo clipboardInfo;
+ *   ZeroMemory( &trackerInfo, sizeof(ClipboardWindowInfo));
+ */
+
+  hwnd = CreateWindowA(OLEClipbrd_WNDCLASS,
+				    "ClipboardWindow",
+				    WS_POPUP | WS_CLIPSIBLINGS | WS_OVERLAPPED,
+				    CW_USEDEFAULT, CW_USEDEFAULT,
+				    CW_USEDEFAULT, CW_USEDEFAULT,
+				    0,
+				    0,
+				    0,
+				    0 /*(LPVOID)&clipboardInfo */);
+
+  return hwnd;
+}
+
+static inline BOOL is_format_in_list(ole_priv_data_entry *entries, DWORD num, UINT cf)
+{
+    DWORD i;
+    for(i = 0; i < num; i++)
+        if(entries[i].fmtetc.cfFormat == cf)
+            return TRUE;
+
+    return FALSE;
+}
+
+/*********************************************************************
+ *          set_clipboard_formats
+ *
+ * Enumerate all HGLOBAL formats supported by the source and make
+ * those formats available using delayed rendering using SetClipboardData.
+ *
+ * TODO: We need to additionally handle TYMED_IStorage and
+ * TYMED_IStream data by copying into global memory.
+ */
+static HRESULT set_clipboard_formats(IDataObject *data)
+{
+    HRESULT hr;
+    FORMATETC fmt;
+    IEnumFORMATETC *enum_fmt;
+    HGLOBAL priv_data_handle;
+    DWORD target_offset;
+    ole_priv_data *priv_data;
+    DWORD count = 0, needed = sizeof(*priv_data), idx;
+
+    hr = IDataObject_EnumFormatEtc(data, DATADIR_GET, &enum_fmt);
+    if(FAILED(hr)) return hr;
+
+    while(IEnumFORMATETC_Next(enum_fmt, 1, &fmt, NULL) == S_OK)
+    {
+        count++;
+        needed += sizeof(priv_data->entries[0]);
+        if(fmt.ptd)
+        {
+            needed += fmt.ptd->tdSize;
+            CoTaskMemFree(fmt.ptd);
+        }
+    }
+
+    /* Windows pads the list with two empty ole_priv_data_entries, one
+     * after the entries array and one after the target device data.
+     * Allocating with zero init to zero these pads. */
+
+    needed += sizeof(priv_data->entries[0]); /* initialisation of needed includes one of these. */
+    priv_data_handle = GlobalAlloc(GMEM_DDESHARE | GMEM_MOVEABLE | GMEM_ZEROINIT, needed);
+    priv_data = GlobalLock(priv_data_handle);
+
+    priv_data->unk1 = 0;
+    priv_data->size = needed;
+    priv_data->unk2 = 1;
+    priv_data->count = count;
+    priv_data->unk3[0] = 0;
+    priv_data->unk3[1] = 0;
+
+    IEnumFORMATETC_Reset(enum_fmt);
+
+    idx = 0;
+    target_offset = FIELD_OFFSET(ole_priv_data, entries[count + 1]); /* count entries + one pad. */
+
+    while(IEnumFORMATETC_Next(enum_fmt, 1, &fmt, NULL) == S_OK)
+    {
+        if (fmt.tymed == TYMED_HGLOBAL)
+        {
+            char fmt_name[80];
+            TRACE("(cfFormat=%d:%s)\n", fmt.cfFormat,
+                  GetClipboardFormatNameA(fmt.cfFormat, fmt_name, sizeof(fmt_name)-1) ? fmt_name : "");
+
+            SetClipboardData(fmt.cfFormat, NULL);
+        }
+
+        priv_data->entries[idx].fmtetc = fmt;
+        if(fmt.ptd)
+        {
+            memcpy((char*)priv_data + target_offset, fmt.ptd, fmt.ptd->tdSize);
+            priv_data->entries[idx].fmtetc.ptd = (DVTARGETDEVICE*)target_offset;
+            target_offset += fmt.ptd->tdSize;
+            CoTaskMemFree(fmt.ptd);
+        }
+
+        priv_data->entries[idx].first_use = !is_format_in_list(priv_data->entries, idx, fmt.cfFormat);
+        priv_data->entries[idx].unk[0] = 0;
+        priv_data->entries[idx].unk[1] = 0;
+
+        idx++;
+    }
+
+    IEnumFORMATETC_Release(enum_fmt);
+
+    GlobalUnlock(priv_data_handle);
+    SetClipboardData(ole_priv_data_clipboard_format, priv_data_handle);
+
+    return S_OK;
+}
+
+/*********************************************************************
+ *          set_dataobject_format
+ *
+ * Windows creates a 'DataObject' clipboard format that contains the
+ * clipboard window's HWND or NULL if the Ole clipboard has been flushed.
+ */
+static HRESULT set_dataobject_format(HWND hwnd)
+{
+    HGLOBAL h = GlobalAlloc(GMEM_DDESHARE | GMEM_MOVEABLE, sizeof(hwnd));
+    HWND *data;
+
+    if(!h) return E_OUTOFMEMORY;
+
+    data = GlobalLock(h);
+    *data = hwnd;
+    GlobalUnlock(h);
+
+    if(!SetClipboardData(dataobject_clipboard_format, h))
+    {
+        GlobalFree(h);
+        return CLIPBRD_E_CANT_SET;
+    }
+
+    return S_OK;
+}
+
+/*---------------------------------------------------------------------*
+ *           Win32 OLE clipboard API
+ *---------------------------------------------------------------------*/
+
+/***********************************************************************
+ *           OleSetClipboard     [OLE32.@]
+ *  Places a pointer to the specified data object onto the clipboard,
+ *  making the data object accessible to the OleGetClipboard function.
+ *
+ * RETURNS
+ *
+ *    S_OK                  IDataObject pointer placed on the clipboard
+ *    CLIPBRD_E_CANT_OPEN   OpenClipboard failed
+ *    CLIPBRD_E_CANT_EMPTY  EmptyClipboard failed
+ *    CLIPBRD_E_CANT_CLOSE  CloseClipboard failed
+ *    CLIPBRD_E_CANT_SET    SetClipboard failed
+ */
+
+HRESULT WINAPI OleSetClipboard(IDataObject* pDataObj)
+{
+  HRESULT hr = S_OK;
+  struct oletls *info = COM_CurrentInfo();
+
+  TRACE("(%p)\n", pDataObj);
+
+  if(!info)
+    WARN("Could not allocate tls\n");
+  else
+    if(!info->ole_inits)
+      return CO_E_NOTINITIALIZED;
+
+  OLEClipbrd_Initialize();
+
+  /*
+   * If the Ole clipboard window hasn't been created yet, create it now.
+   */
+  if ( !theOleClipboard->hWndClipboard )
+    theOleClipboard->hWndClipboard = OLEClipbrd_CreateWindow();
+
+  if ( !theOleClipboard->hWndClipboard ) return E_FAIL;
+
+  if ( !OpenClipboard(theOleClipboard->hWndClipboard) ) return CLIPBRD_E_CANT_OPEN;
+
+  /*
+   * Empty the current clipboard and make our window the clipboard owner
+   * NOTE: This will trigger a WM_DESTROYCLIPBOARD message
+   */
+  if ( !EmptyClipboard() )
   {
-    *pceltFethed = cfetch;
+    hr = CLIPBRD_E_CANT_EMPTY;
+    goto end;
   }
 
-  return hres;
-}
-
-/************************************************************************
- * OLEClipbrd_IEnumFORMATETC_Skip (IEnumFORMATETC)
- *
- * Standard enumerator members for IEnumFORMATETC
- */
-static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_Skip(LPENUMFORMATETC iface, ULONG celt)
-{
-  IEnumFORMATETCImpl *This = (IEnumFORMATETCImpl *)iface;
-  TRACE("(%p)->(num=%u)\n", This, celt);
-
-  This->posFmt += celt;
-  if (This->posFmt > This->countFmt)
+  /*
+   * If we are already holding on to an IDataObject first release that.
+   */
+  if ( theOleClipboard->pIDataObjectSrc )
   {
-    This->posFmt = This->countFmt;
-    return S_FALSE;
+    IDataObject_Release(theOleClipboard->pIDataObjectSrc);
+    theOleClipboard->pIDataObjectSrc = NULL;
   }
-  return S_OK;
+
+  /* A NULL value indicates that the clipboard should be emptied. */
+  theOleClipboard->pIDataObjectSrc = pDataObj;
+  if ( pDataObj )
+  {
+    IDataObject_AddRef(theOleClipboard->pIDataObjectSrc);
+    hr = set_clipboard_formats(pDataObj);
+    if(FAILED(hr)) goto end;
+  }
+
+  hr = set_dataobject_format(theOleClipboard->hWndClipboard);
+
+end:
+
+  if ( !CloseClipboard() )  hr = CLIPBRD_E_CANT_CLOSE;
+
+  if ( FAILED(hr) )
+  {
+    if (theOleClipboard->pIDataObjectSrc)
+    {
+      IDataObject_Release(theOleClipboard->pIDataObjectSrc);
+      theOleClipboard->pIDataObjectSrc = NULL;
+    }
+  }
+
+  return hr;
 }
 
-/************************************************************************
- * OLEClipbrd_IEnumFORMATETC_Reset (IEnumFORMATETC)
- *
- * Standard enumerator members for IEnumFORMATETC
- */
-static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_Reset(LPENUMFORMATETC iface)
-{
-  IEnumFORMATETCImpl *This = (IEnumFORMATETCImpl *)iface;
-  TRACE("(%p)->()\n", This);
 
-  This->posFmt = 0;
-  return S_OK;
+/***********************************************************************
+ * OleGetClipboard [OLE32.@]
+ * Returns a pointer to our internal IDataObject which represents the conceptual
+ * state of the Windows clipboard. If the current clipboard already contains
+ * an IDataObject, our internal IDataObject will delegate to this object.
+ */
+HRESULT WINAPI OleGetClipboard(IDataObject** ppDataObj)
+{
+  HRESULT hr = S_OK;
+  TRACE("()\n");
+
+  /*
+   * Make sure we have a clipboard object
+   */
+  OLEClipbrd_Initialize();
+
+  if (!theOleClipboard)
+    return E_OUTOFMEMORY;
+
+  /* Return a reference counted IDataObject */
+  hr = IDataObject_QueryInterface( (IDataObject*)&(theOleClipboard->lpvtbl),
+                                   &IID_IDataObject,  (void**)ppDataObj);
+  return hr;
 }
 
-/************************************************************************
- * OLEClipbrd_IEnumFORMATETC_Clone (IEnumFORMATETC)
+/******************************************************************************
+ *              OleFlushClipboard        [OLE32.@]
+ *  Renders the data from the source IDataObject into the windows clipboard
  *
- * Standard enumerator members for IEnumFORMATETC
+ *  TODO: OleFlushClipboard needs to additionally handle TYMED_IStorage media
+ *  by copying the storage into global memory. Subsequently the default
+ *  data object exposed through OleGetClipboard must convert this TYMED_HGLOBAL
+ *  back to TYMED_IStorage.
  */
-static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_Clone
-  (LPENUMFORMATETC iface, LPENUMFORMATETC* ppenum)
+HRESULT WINAPI OleFlushClipboard(void)
 {
-  IEnumFORMATETCImpl *This = (IEnumFORMATETCImpl *)iface;
+  IEnumFORMATETC* penumFormatetc = NULL;
+  FORMATETC rgelt;
   HRESULT hr = S_OK;
 
-  TRACE("(%p)->(ppenum=%p)\n", This, ppenum);
+  TRACE("()\n");
 
-  if ( !ppenum )
-    return E_INVALIDARG;
+  OLEClipbrd_Initialize();
 
-  *ppenum = OLEClipbrd_IEnumFORMATETC_Construct(This->countFmt,
-                                                This->pFmt,
-                                                This->pUnkDataObj);
+  /*
+   * Already flushed or no source DataObject? Nothing to do.
+   */
+  if (!theOleClipboard->pIDataObjectSrc)
+    return S_OK;
 
-  if (FAILED( hr = IEnumFORMATETC_AddRef(*ppenum)))
-    return ( hr );
+  if (!OpenClipboard(theOleClipboard->hWndClipboard))
+    return CLIPBRD_E_CANT_OPEN;
 
-  return (*ppenum) ? S_OK : E_OUTOFMEMORY;
+  /*
+   * Render all HGLOBAL formats supported by the source into
+   * the windows clipboard.
+   */
+  if ( FAILED( hr = IDataObject_EnumFormatEtc( theOleClipboard->pIDataObjectSrc,
+                                               DATADIR_GET,
+                                               &penumFormatetc) ))
+    goto end;
+
+
+  while ( S_OK == IEnumFORMATETC_Next(penumFormatetc, 1, &rgelt, NULL) )
+  {
+    if ( rgelt.tymed == TYMED_HGLOBAL )
+    {
+      CHAR szFmtName[80];
+      TRACE("(cfFormat=%d:%s)\n", rgelt.cfFormat,
+            GetClipboardFormatNameA(rgelt.cfFormat, szFmtName, sizeof(szFmtName)-1)
+              ? szFmtName : "");
+
+      if ( FAILED(render_format( theOleClipboard->pIDataObjectSrc, &rgelt )) )
+        continue;
+    }
+  }
+
+  IEnumFORMATETC_Release(penumFormatetc);
+
+  hr = set_dataobject_format(NULL);
+
+  IDataObject_Release(theOleClipboard->pIDataObjectSrc);
+  theOleClipboard->pIDataObjectSrc = NULL;
+
+end:
+
+  if ( !CloseClipboard() ) hr = CLIPBRD_E_CANT_CLOSE;
+
+  return hr;
+}
+
+
+/***********************************************************************
+ *           OleIsCurrentClipboard [OLE32.@]
+ */
+HRESULT WINAPI OleIsCurrentClipboard(IDataObject *pDataObject)
+{
+  TRACE("()\n");
+  /*
+   * Make sure we have a clipboard object
+   */
+  OLEClipbrd_Initialize();
+
+  if (!theOleClipboard)
+    return E_OUTOFMEMORY;
+
+  if (pDataObject == NULL)
+    return S_FALSE;
+
+  return (pDataObject == theOleClipboard->pIDataObjectSrc) ? S_OK : S_FALSE;
 }

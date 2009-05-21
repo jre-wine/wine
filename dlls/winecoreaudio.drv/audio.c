@@ -542,7 +542,7 @@ LONG CoreAudio_WaveInit(void)
     for (i = 0; i < MAX_WAVEOUTDRV; ++i)
     {
         static const WCHAR wszWaveOutFormat[] =
-            {'C','o','r','e','A','u','d','i','o',' ','W','a','v','e','I','n',' ','%','d',0};
+            {'C','o','r','e','A','u','d','i','o',' ','W','a','v','e','O','u','t',' ','%','d',0};
 
         WOutDev[i].state = WINE_WS_CLOSED;
         WOutDev[i].cadev = &CoreAudio_DefaultDevice; 
@@ -1329,6 +1329,36 @@ static DWORD wodReset(WORD wDevID)
 }
 
 /**************************************************************************
+*           wodBreakLoop                [internal]
+*/
+static DWORD wodBreakLoop(WORD wDevID)
+{
+    WINE_WAVEOUT* wwo;
+
+    TRACE("(%u);\n", wDevID);
+
+    if (wDevID >= MAX_WAVEOUTDRV)
+    {
+        WARN("bad device ID !\n");
+        return MMSYSERR_BADDEVICEID;
+    }
+
+    wwo = &WOutDev[wDevID];
+
+    OSSpinLockLock(&wwo->lock);
+
+    if (wwo->lpLoopPtr != NULL)
+    {
+        /* ensure exit at end of current loop */
+        wwo->dwLoops = 1;
+    }
+
+    OSSpinLockUnlock(&wwo->lock);
+
+    return MMSYSERR_NOERROR;
+}
+
+/**************************************************************************
 * 				wodGetPosition			[internal]
 */
 static DWORD wodGetPosition(WORD wDevID, LPMMTIME lpTime, DWORD uSize)
@@ -1488,7 +1518,7 @@ DWORD WINAPI CoreAudio_wodMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
         case WODM_WRITE:        return wodWrite(wDevID, (LPWAVEHDR) dwParam1, dwParam2);
         case WODM_PAUSE:        return wodPause(wDevID);  
         case WODM_GETPOS:       return wodGetPosition(wDevID, (LPMMTIME) dwParam1, dwParam2);
-        case WODM_BREAKLOOP:    return MMSYSERR_NOTSUPPORTED;
+        case WODM_BREAKLOOP:    return wodBreakLoop(wDevID);
         case WODM_PREPARE:      return wodPrepare(wDevID, (LPWAVEHDR)dwParam1, dwParam2);
         case WODM_UNPREPARE:    return wodUnprepare(wDevID, (LPWAVEHDR)dwParam1, dwParam2);
             

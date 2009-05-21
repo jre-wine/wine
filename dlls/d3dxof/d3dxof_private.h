@@ -42,8 +42,6 @@
 #define MAX_SUBOBJECTS 500
 #define MAX_STRINGS_BUFFER 10000
 
-#define MAX_DATA_SIZE 400000
-
 typedef struct {
     DWORD type;
     LONG idx_template;
@@ -66,7 +64,7 @@ typedef struct {
 
 typedef struct {
     char* name;
-    LPBYTE start;
+    ULONG start;
     ULONG size;
 } xobject_member;
 
@@ -77,12 +75,14 @@ struct _xobject {
    GUID class_id;
    GUID type;
    LPBYTE pdata;
+   ULONG pos_data;
    DWORD size;
    ULONG nb_members;
    xobject_member members[MAX_MEMBERS];
    ULONG nb_childs;
    ULONG nb_subobjects;
    struct _xobject * childs[MAX_CHILDS];
+   struct _xobject * root;
 };
 
 typedef struct _xobject xobject;
@@ -106,7 +106,6 @@ typedef struct {
     int cur_enum_object;
     BOOL from_ref;
     ULONG level;
-    LPBYTE pdata;
     LPBYTE pstrings;
 } IDirectXFileDataImpl;
 
@@ -130,7 +129,7 @@ typedef struct {
   BOOL token_present;
   BOOL txt;
   ULONG cur_subobject;
-  LPBYTE cur_pdata;
+  ULONG cur_pos_data;
   LPBYTE cur_pstrings;
   BYTE value[100];
   xobject** pxo_globals;
@@ -141,6 +140,7 @@ typedef struct {
   xtemplate* pxt[MAX_SUBOBJECTS];
   ULONG level;
   LPBYTE pdata;
+  ULONG capacity;
   LPBYTE pstrings;
 } parse_buffer;
 
@@ -149,6 +149,9 @@ typedef struct {
     LONG ref;
     DXFILELOADOPTIONS source;
     HANDLE hFile;
+    HANDLE file_mapping;
+    LPBYTE buffer;
+    HGLOBAL resource_data;
     parse_buffer buf;
     IDirectXFileImpl* pDirectXFile;
     ULONG nb_xobjects;

@@ -155,6 +155,26 @@ int WINAPI GetWindowRgn ( HWND hwnd, HRGN hrgn )
     return nRet;
 }
 
+/***********************************************************************
+ *		GetWindowRgnBox (USER32.@)
+ */
+int WINAPI GetWindowRgnBox( HWND hwnd, LPRECT prect )
+{
+    int ret = ERROR;
+    HRGN hrgn;
+
+    if (!prect)
+        return ERROR;
+
+    if ((hrgn = CreateRectRgn(0, 0, 0, 0)))
+    {
+        if ((ret = GetWindowRgn( hwnd, hrgn )) != ERROR )
+            ret = GetRgnBox( hrgn, prect );
+        DeleteObject(hrgn);
+    }
+
+    return ret;
+}
 
 /***********************************************************************
  *		SetWindowRgn (USER32.@)
@@ -187,6 +207,7 @@ int WINAPI SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL bRedraw )
             ret = !wine_server_call_err( req );
         }
         SERVER_END_REQ;
+        HeapFree( GetProcessHeap(), 0, data );
     }
     else  /* clear existing region */
     {
@@ -2062,7 +2083,7 @@ HDWP WINAPI BeginDeferWindowPos( INT count )
 
     handle = USER_HEAP_ALLOC( sizeof(DWP) + (count-1)*sizeof(WINDOWPOS) );
     if (!handle) return 0;
-    pDWP = (DWP *) USER_HEAP_LIN_ADDR( handle );
+    pDWP = USER_HEAP_LIN_ADDR( handle );
     pDWP->actualCount    = 0;
     pDWP->suggestedCount = count;
     pDWP->valid          = TRUE;
@@ -2133,7 +2154,7 @@ HDWP WINAPI DeferWindowPos( HDWP hdwp, HWND hwnd, HWND hwndAfter,
             retvalue = 0;
             goto END;
         }
-        pDWP = (DWP *) USER_HEAP_LIN_ADDR( newhdwp );
+        pDWP = USER_HEAP_LIN_ADDR( newhdwp );
         pDWP->suggestedCount++;
     }
     pDWP->winPos[pDWP->actualCount].hwnd = hwnd;
@@ -2163,7 +2184,7 @@ BOOL WINAPI EndDeferWindowPos( HDWP hdwp )
 
     TRACE("%p\n", hdwp);
 
-    pDWP = (DWP *) USER_HEAP_LIN_ADDR( hdwp );
+    pDWP = USER_HEAP_LIN_ADDR( hdwp );
     if (!pDWP) return FALSE;
     for (i = 0, winpos = pDWP->winPos; res && i < pDWP->actualCount; i++, winpos++)
     {

@@ -358,7 +358,7 @@
 @ cdecl _mbbtype(long long)
 # extern _mbcasemap
 @ cdecl _mbccpy (str str)
-@ stub _mbcjistojms #(long)
+@ cdecl _mbcjistojms (long)
 @ stub _mbcjmstojis #(long)
 @ cdecl _mbclen(ptr)
 @ stub _mbctohira #(long)
@@ -508,6 +508,8 @@
 @ cdecl _unloaddll(long)
 @ cdecl _unlock(long)
 @ cdecl _utime(str ptr)
+@ cdecl _vscprintf(str ptr)
+@ cdecl _vscwprintf(wstr ptr)
 @ cdecl _vsnprintf(ptr long str ptr) MSVCRT_vsnprintf
 @ cdecl _vsnwprintf(ptr long wstr ptr) MSVCRT_vsnwprintf
 @ cdecl _waccess(wstr long)

@@ -126,10 +126,10 @@ static const struct
     { ";\n;\nabc\r\n" STD_HEADER,                            ERROR_EXPECTED_SECTION_NAME, 3,    0 },
     { ";\n;\nab\nab\n" STD_HEADER,                           ERROR_EXPECTED_SECTION_NAME, 3,    0 },
     { ";aa\n;bb\n" STD_HEADER,                               0,                           0,    0 },
-    { STD_HEADER " [TestSection\x00] \n",                    ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
-    { STD_HEADER " [Test\x00Section] \n",                    ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
-    { STD_HEADER " [TestSection\x00] \n",                    ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
-    { STD_HEADER " [Test\x00Section] \n",                    ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
+    { STD_HEADER " [TestSection\x00]\n",                     ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
+    { STD_HEADER " [Test\x00Section]\n",                     ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
+    { STD_HEADER " [TestSection\x00]\n",                     ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
+    { STD_HEADER " [Test\x00Section]\n",                     ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
 };
 
 static void test_invalid_files(void)
@@ -439,6 +439,11 @@ static void test_key_names(void)
                             !strcmp( field, A1200), /* Vista, W2K8 */
                             "line %u: bad field %s/%s\n",
                             i, field, key_names[i].fields[index] );
+                    else  /* don't compare drive letter of paths */
+                        if (field[0] && field[1] == ':' && field[2] == '\\')
+                        ok( !strcmp( field + 1, key_names[i].fields[index] + 1 ),
+                            "line %u: bad field %s/%s\n",
+                            i, field, key_names[i].fields[index] );
                     else
                         ok( !strcmp( field, key_names[i].fields[index] ), "line %u: bad field %s/%s\n",
                             i, field, key_names[i].fields[index] );
@@ -584,18 +589,18 @@ static void test_SetupGetIntField(void)
         retb = SetupGetIntField( &context, keys[i].index, &intfield );
         if ( keys[i].err == ERROR_SUCCESS )
         {
-            ok( retb, "Expected success\n" );
+            ok( retb, "%u: Expected success\n", i );
             ok( GetLastError() == ERROR_SUCCESS ||
                 GetLastError() == 0xdeadbeef /* win9x, NT4 */,
-                "Expected ERROR_SUCCESS or 0xdeadbeef, got %u\n", GetLastError() );
+                "%u: Expected ERROR_SUCCESS or 0xdeadbeef, got %u\n", i, GetLastError() );
         }
         else
         {
-            ok( !retb, "Expected failure\n" );
+            ok( !retb, "%u: Expected failure\n", i );
             ok( GetLastError() == keys[i].err,
-                "Expected %d, got %u\n", keys[i].err, GetLastError() );
+                "%u: Expected %d, got %u\n", i, keys[i].err, GetLastError() );
         }
-        ok( intfield == keys[i].value, "Expected %d, got %d\n", keys[i].value, intfield );
+        ok( intfield == keys[i].value, "%u: Expected %d, got %d\n", i, keys[i].value, intfield );
 
         SetupCloseInfFile( hinf );
     }

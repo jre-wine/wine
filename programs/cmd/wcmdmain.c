@@ -88,7 +88,7 @@ static const WCHAR equalsW[] = {'=','\0'};
 static const WCHAR closeBW[] = {')','\0'};
 WCHAR anykey[100];
 WCHAR version_string[100];
-WCHAR quals[MAX_PATH], param1[MAX_PATH], param2[MAX_PATH];
+WCHAR quals[MAX_PATH], param1[MAXSTRING], param2[MAXSTRING];
 BATCH_CONTEXT *context = NULL;
 extern struct env_stack *pushd_directories;
 static const WCHAR *pagedMessage = NULL;
@@ -699,8 +699,8 @@ static WCHAR *WCMD_expand_envvar(WCHAR *start, WCHAR *forVar, WCHAR *forVal) {
       WCHAR *searchIn;
       WCHAR *searchFor;
 
-      s = WCMD_strdupW(endOfVar + 1);
       if (equalspos == NULL) return start+1;
+      s = WCMD_strdupW(endOfVar + 1);
 
       /* Null terminate both strings */
       thisVar[strlenW(thisVar)-1] = 0x00;
@@ -712,7 +712,6 @@ static WCHAR *WCMD_expand_envvar(WCHAR *start, WCHAR *forVar, WCHAR *forVal) {
       searchFor = WCMD_strdupW(colonpos+1);
       CharUpperBuff(searchFor, strlenW(colonpos+1));
 
-
       /* Handle wildcard case */
       if (*(colonpos+1) == '*') {
         /* Search for string to replace */
@@ -723,7 +722,6 @@ static WCHAR *WCMD_expand_envvar(WCHAR *start, WCHAR *forVar, WCHAR *forVal) {
           strcpyW(start, replacewith);
           strcatW(start, thisVarContents + (found-searchIn) + strlenW(searchFor+1));
           strcatW(start, s);
-          free(s);
         } else {
           /* Copy as it */
           strcpyW(start, thisVarContents);
@@ -749,6 +747,7 @@ static WCHAR *WCMD_expand_envvar(WCHAR *start, WCHAR *forVar, WCHAR *forVal) {
                 thisVarContents + (lastFound-searchIn));
         strcatW(outputposn, s);
       }
+      free(s);
       free(searchIn);
       free(searchFor);
       return start;
@@ -972,7 +971,8 @@ void WCMD_run_program (WCHAR *command, int called) {
   WCHAR  temp[MAX_PATH];
   WCHAR  pathtosearch[MAXSTRING];
   WCHAR *pathposn;
-  WCHAR  stemofsearch[MAX_PATH];
+  WCHAR  stemofsearch[MAX_PATH];    /* maximum allowed executable name is
+                                       MAX_PATH, including null character */
   WCHAR *lastSlash;
   WCHAR  pathext[MAXSTRING];
   BOOL  extensionsupplied = FALSE;
@@ -998,6 +998,12 @@ void WCMD_run_program (WCHAR *command, int called) {
       strcpyW (pathtosearch, curDir);
     }
     if (strchrW(param1, '.') != NULL) extensionsupplied = TRUE;
+    if (strlenW(param1) >= MAX_PATH)
+    {
+        WCMD_output_asis(WCMD_LoadMessage(WCMD_LINETOOLONG));
+        return;
+    }
+
     strcpyW(stemofsearch, param1);
 
   } else {
@@ -1204,9 +1210,9 @@ void WCMD_execute (WCHAR *command, WCHAR *redirects,
     SECURITY_ATTRIBUTES sa;
     WCHAR *new_cmd = NULL;
     WCHAR *new_redir = NULL;
-    HANDLE old_stdhandles[3] = {INVALID_HANDLE_VALUE,
-                                INVALID_HANDLE_VALUE,
-                                INVALID_HANDLE_VALUE};
+    HANDLE old_stdhandles[3] = {GetStdHandle (STD_INPUT_HANDLE),
+                                GetStdHandle (STD_OUTPUT_HANDLE),
+                                GetStdHandle (STD_ERROR_HANDLE)};
     DWORD  idx_stdhandles[3] = {STD_INPUT_HANDLE,
                                 STD_OUTPUT_HANDLE,
                                 STD_ERROR_HANDLE};
@@ -1325,7 +1331,6 @@ void WCMD_execute (WCHAR *command, WCHAR *redirects,
           HeapFree( GetProcessHeap(), 0, new_redir );
           return;
         }
-        old_stdhandles[0] = GetStdHandle (STD_INPUT_HANDLE);
         SetStdHandle (STD_INPUT_HANDLE, h);
 
         /* No need to remember the temporary name any longer once opened */
@@ -1341,7 +1346,6 @@ void WCMD_execute (WCHAR *command, WCHAR *redirects,
         HeapFree( GetProcessHeap(), 0, new_redir );
 	return;
       }
-      old_stdhandles[0] = GetStdHandle (STD_INPUT_HANDLE);
       SetStdHandle (STD_INPUT_HANDLE, h);
     }
 
@@ -1396,7 +1400,6 @@ void WCMD_execute (WCHAR *command, WCHAR *redirects,
         WINE_TRACE("Redirect %d to '%s' (%p)\n", handle, wine_dbgstr_w(param), h);
       }
 
-      old_stdhandles[handle] = GetStdHandle (idx_stdhandles[handle]);
       SetStdHandle (idx_stdhandles[handle], h);
     }
 
@@ -1559,7 +1562,7 @@ void WCMD_execute (WCHAR *command, WCHAR *redirects,
 
     /* Restore old handles */
     for (i=0; i<3; i++) {
-      if (old_stdhandles[i] != INVALID_HANDLE_VALUE) {
+      if (old_stdhandles[i] != GetStdHandle(idx_stdhandles[i])) {
         CloseHandle (GetStdHandle (idx_stdhandles[i]));
         SetStdHandle (idx_stdhandles[i], old_stdhandles[i]);
       }
@@ -1587,22 +1590,17 @@ WCHAR *WCMD_LoadMessage(UINT id) {
  *	Dumps out the parsed command line to ensure syntax is correct
  */
 static void WCMD_DumpCommands(CMD_LIST *commands) {
-    WCHAR buffer[MAXSTRING];
     CMD_LIST *thisCmd = commands;
-    const WCHAR fmt[] = {'%','p',' ','%','d',' ','%','2','.','2','d',' ',
-                         '%','p',' ','%','s',' ','R','e','d','i','r',':',
-                         '%','s','\0'};
 
     WINE_TRACE("Parsed line:\n");
     while (thisCmd != NULL) {
-      sprintfW(buffer, fmt,
+      WINE_TRACE("%p %d %2.2d %p %s Redir:%s\n",
                thisCmd,
                thisCmd->prevDelim,
                thisCmd->bracketDepth,
                thisCmd->nextcommand,
-               thisCmd->command,
-               thisCmd->redirects);
-      WINE_TRACE("%s\n", wine_dbgstr_w(buffer));
+               wine_dbgstr_w(thisCmd->command),
+               wine_dbgstr_w(thisCmd->redirects));
       thisCmd = thisCmd->nextcommand;
     }
 }

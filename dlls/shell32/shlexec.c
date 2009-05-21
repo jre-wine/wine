@@ -42,9 +42,9 @@
 #include "shlwapi.h"
 #include "ddeml.h"
 
-#include "wine/winbase16.h"
 #include "shell32_main.h"
 #include "pidl.h"
+#include "shresdef.h"
 
 #include "wine/debug.h"
 
@@ -935,6 +935,8 @@ static UINT_PTR execute_from_key(LPCWSTR key, LPCWSTR lpFile, WCHAR *env, LPCWST
 
         /* Is there a replace() function anywhere? */
         cmdlen /= sizeof(WCHAR);
+	if (cmdlen >= sizeof(cmd)/sizeof(WCHAR))
+	    cmdlen = sizeof(cmd)/sizeof(WCHAR)-1;
         cmd[cmdlen] = '\0';
         SHELL_ArgifyW(param, sizeof(param)/sizeof(WCHAR), cmd, lpFile, psei->lpIDList, szCommandline, &resultLen);
         if (resultLen > sizeof(param)/sizeof(WCHAR))
@@ -1452,7 +1454,10 @@ static void do_error_dialog( UINT_PTR retval, HWND hwnd )
     WCHAR msg[2048];
     int error_code=GetLastError();
 
-    FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM, NULL, error_code, 0, msg, sizeof(msg)/sizeof(WCHAR), NULL);
+    if (retval == SE_ERR_NOASSOC)
+        LoadStringW(shell32_hInstance, IDS_SHLEXEC_NOASSOC, msg, sizeof(msg)/sizeof(WCHAR));
+    else
+        FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM, NULL, error_code, 0, msg, sizeof(msg)/sizeof(WCHAR), NULL);
 
     MessageBoxW(hwnd, msg, NULL, MB_ICONERROR);
 }
@@ -1947,6 +1952,42 @@ HINSTANCE WINAPI ShellExecuteW(HWND hwnd, LPCWSTR lpOperation, LPCWSTR lpFile,
 
     SHELL_execute( &sei, SHELL_ExecuteW );
     return sei.hInstApp;
+}
+
+/*************************************************************************
+ * WOWShellExecute			[SHELL32.@]
+ *
+ * FIXME: the callback function most likely doesn't work the same way on Windows.
+ */
+HINSTANCE WINAPI WOWShellExecute(HWND hWnd, LPCSTR lpOperation,LPCSTR lpFile,
+                                 LPCSTR lpParameters,LPCSTR lpDirectory, INT iShowCmd, void *callback)
+{
+    SHELLEXECUTEINFOW seiW;
+    WCHAR *wVerb = NULL, *wFile = NULL, *wParameters = NULL, *wDirectory = NULL;
+    HANDLE hProcess = 0;
+
+    seiW.lpVerb = lpOperation ? __SHCloneStrAtoW(&wVerb, lpOperation) : NULL;
+    seiW.lpFile = lpFile ? __SHCloneStrAtoW(&wFile, lpFile) : NULL;
+    seiW.lpParameters = lpParameters ? __SHCloneStrAtoW(&wParameters, lpParameters) : NULL;
+    seiW.lpDirectory = lpDirectory ? __SHCloneStrAtoW(&wDirectory, lpDirectory) : NULL;
+
+    seiW.cbSize = sizeof(seiW);
+    seiW.fMask = 0;
+    seiW.hwnd = hWnd;
+    seiW.nShow = iShowCmd;
+    seiW.lpIDList = 0;
+    seiW.lpClass = 0;
+    seiW.hkeyClass = 0;
+    seiW.dwHotKey = 0;
+    seiW.hProcess = hProcess;
+
+    SHELL_execute( &seiW, callback );
+
+    SHFree(wVerb);
+    SHFree(wFile);
+    SHFree(wParameters);
+    SHFree(wDirectory);
+    return seiW.hInstApp;
 }
 
 /*************************************************************************

@@ -38,15 +38,13 @@
 #include <sys/mman.h>
 #endif
 
-#include "windef.h"
-#include "winbase.h"
 #include "build.h"
 
 /* Unicode string or integer id */
 struct string_id
 {
     char  *str;  /* ptr to string */
-    WORD   id;   /* integer id if str is NULL */
+    unsigned short id;   /* integer id if str is NULL */
 };
 
 /* descriptor for a resource */
@@ -56,7 +54,7 @@ struct resource
     struct string_id name;
     const void      *data;
     unsigned int     data_size;
-    WORD             memopt;
+    unsigned int     memopt;
 };
 
 /* type level of the resource tree */
@@ -105,7 +103,7 @@ static unsigned char get_byte(void)
 }
 
 /* get the next word from the current resource file */
-static WORD get_word(void)
+static unsigned short get_word(void)
 {
     /* might not be aligned */
 #ifdef WORDS_BIGENDIAN
@@ -119,14 +117,14 @@ static WORD get_word(void)
 }
 
 /* get the next dword from the current resource file */
-static DWORD get_dword(void)
+static unsigned int get_dword(void)
 {
 #ifdef WORDS_BIGENDIAN
-    WORD high = get_word();
-    WORD low = get_word();
+    unsigned short high = get_word();
+    unsigned short low = get_word();
 #else
-    WORD low = get_word();
-    WORD high = get_word();
+    unsigned short low = get_word();
+    unsigned short high = get_word();
 #endif
     return low | (high << 16);
 }
@@ -267,7 +265,7 @@ void output_res16_data( DLLSPEC *spec )
 }
 
 /* output the resource definitions */
-void output_res16_directory( DLLSPEC *spec, const char *header_name )
+void output_res16_directory( DLLSPEC *spec )
 {
     unsigned int i, j;
     struct res_tree *tree;
@@ -293,8 +291,8 @@ void output_res16_directory( DLLSPEC *spec, const char *header_name )
 
         for (j = 0, res = type->res; j < type->nb_names; j++, res++)
         {
-            output( "\t%s .L__wine_spec_resource_%lu-%s\n",
-                     get_asm_short_keyword(), (unsigned long)(res - spec->resources), header_name );
+            output( "\t%s .L__wine_spec_resource_%lu-.L__wine_spec_dos_header\n",
+                     get_asm_short_keyword(), (unsigned long)(res - spec->resources) );
             output( "\t%s .L__wine_spec_resource_%lu_end-.L__wine_spec_resource_%lu\n",
                      get_asm_short_keyword(), (unsigned long)(res - spec->resources),
                      (unsigned long)(res - spec->resources) );

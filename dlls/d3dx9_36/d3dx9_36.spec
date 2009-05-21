@@ -16,8 +16,8 @@
 @ stub D3DXCompileShaderFromFileW
 @ stub D3DXCompileShaderFromResourceA
 @ stub D3DXCompileShaderFromResourceW
-@ stub D3DXComputeBoundingBox
-@ stub D3DXComputeBoundingSphere
+@ stdcall D3DXComputeBoundingBox(ptr long long ptr ptr)
+@ stdcall D3DXComputeBoundingSphere(ptr long long ptr ptr)
 @ stub D3DXComputeIMTFromPerTexelSignal
 @ stub D3DXComputeIMTFromPerVertexSignal
 @ stub D3DXComputeIMTFromSignal
@@ -150,7 +150,7 @@
 @ stub D3DXGetDeclLength
 @ stub D3DXGetDeclVertexSize
 @ stdcall D3DXGetDriverLevel(ptr)
-@ stdcall D3DXGetFVFVertexSize(long) d3dx8.D3DXGetFVFVertexSize
+@ stdcall D3DXGetFVFVertexSize(long)
 @ stdcall D3DXGetImageInfoFromFileA(ptr ptr) d3dx8.D3DXGetImageInfoFromFileA
 @ stdcall D3DXGetImageInfoFromFileInMemory(ptr long ptr) d3dx8.D3DXGetImageInfoFromFileInMemory
 @ stdcall D3DXGetImageInfoFromFileW(ptr ptr) d3dx8.D3DXGetImageInfoFromFileW
@@ -167,7 +167,7 @@
 @ stdcall D3DXGetVertexShaderProfile(ptr)
 @ stdcall D3DXIntersect(ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr) d3dx8.D3DXIntersect
 @ stdcall D3DXIntersectSubset(ptr long ptr ptr ptr ptr ptr ptr ptr ptr ptr) d3dx8.D3DXIntersectSubset
-@ stdcall D3DXIntersectTri(ptr ptr ptr ptr ptr ptr ptr ptr) d3dx8.D3DXIntersectTri
+@ stdcall D3DXIntersectTri(ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stub D3DXLoadMeshFromXA
 @ stub D3DXLoadMeshFromXInMemory
 @ stub D3DXLoadMeshFromXResource

@@ -84,6 +84,9 @@ typedef enum {
     IHTMLBodyElement2_tid,
     IHTMLCommentElement_tid,
     IHTMLCurrentStyle_tid,
+    IHTMLCurrentStyle2_tid,
+    IHTMLCurrentStyle3_tid,
+    IHTMLCurrentStyle4_tid,
     IHTMLDocument2_tid,
     IHTMLDocument3_tid,
     IHTMLDocument4_tid,
@@ -107,6 +110,8 @@ typedef enum {
     IHTMLSelectElement_tid,
     IHTMLStyle_tid,
     IHTMLStyle2_tid,
+    IHTMLStyle3_tid,
+    IHTMLStyle4_tid,
     IHTMLTable_tid,
     IHTMLTableRow_tid,
     IHTMLTextContainer_tid,
@@ -199,14 +204,14 @@ struct ConnectionPoint {
     ConnectionPoint *next;
 };
 
-typedef struct {
+struct HTMLLocation {
     DispatchEx dispex;
     const IHTMLLocationVtbl *lpHTMLLocationVtbl;
 
     LONG ref;
 
     HTMLDocument *doc;
-} HTMLLocation;
+};
 
 typedef struct {
     const IHTMLOptionElementFactoryVtbl *lpHTMLOptionElementFactoryVtbl;
@@ -510,6 +515,7 @@ void NSContainer_Release(NSContainer*);
 
 void init_mutation(NSContainer*);
 void set_mutation_observer(NSContainer*,nsIDOMHTMLDocument*);
+void remove_mutation_observer(NSContainer*,nsIDOMHTMLDocument*);
 
 void HTMLDocument_LockContainer(HTMLDocument*,BOOL);
 void show_context_menu(HTMLDocument*,DWORD,POINT*,IDispatch*);

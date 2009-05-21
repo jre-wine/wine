@@ -107,7 +107,7 @@ static void test_SnmpUtilOidToA(void)
     {
         ret = SnmpUtilOidToA(NULL);
         ok(ret != NULL, "SnmpUtilOidToA failed\n");
-        ok(!strcmp(ret, expect0), "SnmpUtilOidToA failed got \n%s\n expected \n%s\n",
+        ok(!strcmp(ret, expect0), "SnmpUtilOidToA failed got\n%s\n expected\n%s\n",
            ret, expect1);
     }
 
@@ -115,34 +115,34 @@ static void test_SnmpUtilOidToA(void)
     ok(ret != NULL, "SnmpUtilOidToA failed\n");
     ok(!strcmp(ret, expect0) ||
        broken(!strcmp(ret, expect0_alt)), /* Win98, WinMe, NT4 */
-       "SnmpUtilOidToA failed got \n%s\n expected \n%s\n",
+       "SnmpUtilOidToA failed got\n%s\n expected\n%s\n",
        ret, expect0);
 
     ret = SnmpUtilOidToA(&oid1);
     ok(ret != NULL, "SnmpUtilOidToA failed\n");
-    ok(!strcmp(ret, expect1), "SnmpUtilOidToA failed got \n%s\n expected \n%s\n",
+    ok(!strcmp(ret, expect1), "SnmpUtilOidToA failed got\n%s\n expected\n%s\n",
        ret, expect1);
 
     ret = SnmpUtilOidToA(&oid2);
     ok(ret != NULL, "SnmpUtilOidToA failed\n");
-    ok(!strcmp(ret, expect2), "SnmpUtilOidToA failed got \n%s\n expected \n%s\n",
+    ok(!strcmp(ret, expect2), "SnmpUtilOidToA failed got\n%s\n expected\n%s\n",
        ret, expect2);
 
     ret = SnmpUtilOidToA(&oid3);
     ok(ret != NULL, "SnmpUtilOidToA failed\n");
-    ok(!strcmp(ret, expect3), "SnmpUtilOidToA failed got \n%s\n expected \n%s\n",
+    ok(!strcmp(ret, expect3), "SnmpUtilOidToA failed got\n%s\n expected\n%s\n",
        ret, expect3);
 
     ret = SnmpUtilOidToA(&oid4);
     ok(ret != NULL, "SnmpUtilOidToA failed\n");
     ok(!strcmp(ret, expect3) ||
        broken(!strcmp(ret, expect3_alt)), /* Win98, WinMe, NT4 */
-       "SnmpUtilOidToA failed got \n%s\n expected \n%s\n",
+       "SnmpUtilOidToA failed got\n%s\n expected\n%s\n",
        ret, expect3);
 
     ret = SnmpUtilOidToA(&oid5);
     ok(ret != NULL, "SnmpUtilOidToA failed\n");
-    ok(!strcmp(ret, expect4), "SnmpUtilOidToA failed got \n%s\n expected \n%s\n",
+    ok(!strcmp(ret, expect4), "SnmpUtilOidToA failed got\n%s\n expected\n%s\n",
        ret, expect4);
 }
 
@@ -330,7 +330,7 @@ static void test_SnmpUtilOctetsCmp(void)
     ok(ret == 1, "SnmpUtilOctetsCmp failed\n");
 
     ret = pSnmpUtilOctetsCmp(&octets1, &octets2);
-    ok(ret == -1, "SnmpUtilOctetsCmp failed\n");
+    ok(ret < 0, "SnmpUtilOctetsCmp failed\n");
 }
 
 static void test_SnmpUtilOidNCmp(void)
@@ -370,19 +370,19 @@ static void test_SnmpUtilOidNCmp(void)
     ok(!ret, "SnmpUtilOidNCmp failed\n");
 
     ret = SnmpUtilOidNCmp(&oid1, &oid2, 4);
-    ok(ret == -1, "SnmpUtilOidNCmp failed: %d\n", ret);
+    ok(ret < 0, "SnmpUtilOidNCmp failed: %d\n", ret);
 
     ret = SnmpUtilOidNCmp(&oid2, &oid1, 4);
-    ok(ret == 1, "SnmpUtilOidNCmp failed: %d\n", ret);
+    ok(ret > 0, "SnmpUtilOidNCmp failed: %d\n", ret);
 
     oid1.idLength = 3;
     memcpy(oid1.ids, oid2.ids, sizeof(UINT) * 4);
     ret = SnmpUtilOidNCmp(&oid1, &oid1, 4);
     ok(!ret, "SnmpUtilOidNCmp failed: %d\n", ret);
     ret = SnmpUtilOidNCmp(&oid2, &oid1, 4);
-    ok(ret == 1, "SnmpUtilOidNCmp failed: %d\n", ret);
+    ok(ret > 0, "SnmpUtilOidNCmp failed: %d\n", ret);
     ret = SnmpUtilOidNCmp(&oid1, &oid2, 4);
-    ok(ret == -1, "SnmpUtilOidNCmp failed: %d\n", ret);
+    ok(ret < 0, "SnmpUtilOidNCmp failed: %d\n", ret);
 
     ret = SnmpUtilOidNCmp(&oid1, &oid2, 2);
     ok(!ret, "SnmpUtilOidNCmp failed: %d\n", ret);
@@ -410,10 +410,10 @@ static void test_SnmpUtilOidCmp(void)
     }
 
     ret = SnmpUtilOidCmp(&oid2, &oid1);
-    ok(ret == 1, "SnmpUtilOidCmp failed\n");
+    ok(ret > 0, "SnmpUtilOidCmp failed\n");
 
     ret = SnmpUtilOidCmp(&oid1, &oid2);
-    ok(ret == -1, "SnmpUtilOidCmp failed\n");
+    ok(ret < 0, "SnmpUtilOidCmp failed\n");
 }
 
 static void test_SnmpUtilOidAppend(void)
@@ -550,24 +550,24 @@ START_TEST(util)
     test_SnmpUtilOidToA();
 
     if (!pSnmpUtilAsnAnyCpy || !pSnmpUtilAsnAnyFree)
-        skip("SnmpUtilAsnAnyCpy and/or SnmpUtilAsnAnyFree not available\n");
+        win_skip("SnmpUtilAsnAnyCpy and/or SnmpUtilAsnAnyFree not available\n");
     else
         test_SnmpUtilAsnAnyCpyFree();
 
     if (!pSnmpUtilOctetsCpy || !pSnmpUtilOctetsFree)
-        skip("SnmpUtilOctetsCpy and/or SnmpUtilOctetsFree not available\n");
+        win_skip("SnmpUtilOctetsCpy and/or SnmpUtilOctetsFree not available\n");
     else
         test_SnmpUtilOctetsCpyFree();
 
     test_SnmpUtilOidCpyFree();
 
     if (!pSnmpUtilOctetsNCmp)
-        skip("SnmpUtilOctetsNCmp not available\n");
+        win_skip("SnmpUtilOctetsNCmp not available\n");
     else
         test_SnmpUtilOctetsNCmp();
 
     if (!pSnmpUtilOctetsCmp)
-        skip("SnmpUtilOctetsCmp not available\n");
+        win_skip("SnmpUtilOctetsCmp not available\n");
     else
         test_SnmpUtilOctetsCmp();
 

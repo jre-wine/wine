@@ -224,7 +224,7 @@ void __wine_dll_unregister_16( const IMAGE_DOS_HEADER *header )
  */
 NE_MODULE *NE_GetPtr( HMODULE16 hModule )
 {
-    return (NE_MODULE *)GlobalLock16( GetExePtr(hModule) );
+    return GlobalLock16( GetExePtr(hModule) );
 }
 
 
@@ -1045,8 +1045,8 @@ static HINSTANCE16 MODULE_LoadModule16( LPCSTR libname, BOOL implicit, BOOL lib_
     NE_MODULE *pModule;
     const IMAGE_DOS_HEADER *descr = NULL;
     const char *file_name = NULL;
-    char dllname[20], owner[20], *p;
-    const char *basename;
+    char dllname[32], owner[20], *p;
+    const char *basename, *main_module;
     int owner_exists = FALSE;
 
     /* strip path information */
@@ -1056,14 +1056,52 @@ static HINSTANCE16 MODULE_LoadModule16( LPCSTR libname, BOOL implicit, BOOL lib_
     if ((p = strrchr( basename, '\\' ))) basename = p + 1;
     if ((p = strrchr( basename, '/' ))) basename = p + 1;
 
-    if (strlen(basename) < sizeof(dllname)-4)
+    if (strlen(basename) < sizeof(dllname)-6)
     {
         strcpy( dllname, basename );
         p = strrchr( dllname, '.' );
         if (!p) strcat( dllname, ".dll" );
         for (p = dllname; *p; p++) if (*p >= 'A' && *p <= 'Z') *p += 32;
 
-        if (wine_dll_get_owner( dllname, owner, sizeof(owner), &owner_exists ) != -1)
+        strcpy( p, "16" );
+        if ((mod32 = LoadLibraryA( dllname )))
+        {
+            if (!(descr = (void *)GetProcAddress( mod32, "__wine_spec_dos_header" )))
+            {
+                WARN( "loaded %s but does not contain a 16-bit module\n", debugstr_a(dllname) );
+                FreeLibrary( mod32 );
+            }
+            else
+            {
+                TRACE( "found %s with embedded 16-bit module\n", debugstr_a(dllname) );
+                file_name = basename;
+
+                /* if module has a 32-bit owner, match the load order of the owner */
+                if ((main_module = (void *)GetProcAddress( mod32, "__wine_spec_main_module" )))
+                {
+                    LDR_MODULE *ldr;
+                    HMODULE main_owner = LoadLibraryA( main_module );
+
+                    if (!main_owner)
+                    {
+                        WARN( "couldn't load owner %s for 16-bit dll %s\n", main_module, dllname );
+                        FreeLibrary( mod32 );
+                        return ERROR_FILE_NOT_FOUND;
+                    }
+                    /* check if module was loaded native */
+                    if (LdrFindEntryForAddress( main_owner, &ldr ) || !(ldr->Flags & LDR_WINE_INTERNAL))
+                    {
+                        FreeLibrary( mod32 );
+                        descr = NULL;
+                    }
+                    FreeLibrary( main_owner );
+                }
+            }
+        }
+        *p = 0;
+
+        /* old-style 16-bit placeholders support, to be removed at some point */
+        if (!mod32 && wine_dll_get_owner( dllname, owner, sizeof(owner), &owner_exists ) != -1)
         {
             mod32 = LoadLibraryA( owner );
             if (mod32)
@@ -1234,7 +1272,7 @@ HINSTANCE16 WINAPI LoadModule16( LPCSTR name, LPVOID paramBlock )
      *  in the meantime), or else to a stub module which contains only header
      *  information.
      */
-    params = (LOADPARAMS16 *)paramBlock;
+    params = paramBlock;
     if (params->showCmd)
         cmdShow = ((WORD *)MapSL( params->showCmd ))[1];
     cmdline = MapSL( params->cmdLine );

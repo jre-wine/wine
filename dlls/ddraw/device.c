@@ -316,9 +316,9 @@ IDirect3DDeviceImpl_7_Release(IDirect3DDevice7 *iface)
 
         EnterCriticalSection(&ddraw_cs);
         /* Free the index buffer. */
-        IWineD3DDevice_SetIndices(This->wineD3DDevice, NULL);
-        IWineD3DIndexBuffer_GetParent(This->indexbuffer,
-                                      (IUnknown **) &IndexBufferParent);
+        IWineD3DDevice_SetIndices(This->wineD3DDevice, NULL, WINED3DFMT_UNKNOWN);
+        IWineD3DBuffer_GetParent(This->indexbuffer,
+                                 (IUnknown **) &IndexBufferParent);
         IParent_Release(IndexBufferParent); /* Once for the getParent */
         if( IParent_Release(IndexBufferParent) != 0)  /* And now to destroy it */
         {
@@ -1166,11 +1166,11 @@ IDirect3DDeviceImpl_7_EnumTextureFormats(IDirect3DDevice7 *iface,
     };
 
     WINED3DFORMAT BumpFormatList[] = {
-        WINED3DFMT_V8U8,
+        WINED3DFMT_R8G8_SNORM,
         WINED3DFMT_L6V5U5,
         WINED3DFMT_X8L8V8U8,
-        WINED3DFMT_Q8W8V8U8,
-        WINED3DFMT_V16U16,
+        WINED3DFMT_R8G8B8A8_SNORM,
+        WINED3DFMT_R16G16_SNORM,
         WINED3DFMT_W11V11U10,
         WINED3DFMT_A2W10V10U10
     };
@@ -1790,7 +1790,7 @@ Thunk_IDirect3DDeviceImpl_3_GetDirect3D(IDirect3DDevice3 *iface,
     ret = IDirect3DDevice7_GetDirect3D((IDirect3DDevice7 *)This, &ret_ptr);
     if(ret != D3D_OK)
         return ret;
-    *Direct3D3 = ret_ptr ? (IDirect3D3 *)&((IDirectDrawImpl *)ret_ptr)->IDirect3D3_vtbl : NULL;
+    *Direct3D3 = ret_ptr ? (IDirect3D3 *)&ddraw_from_d3d7(ret_ptr)->IDirect3D3_vtbl : NULL;
     TRACE(" returning interface %p\n", *Direct3D3);
     return D3D_OK;
 }
@@ -1807,7 +1807,7 @@ Thunk_IDirect3DDeviceImpl_2_GetDirect3D(IDirect3DDevice2 *iface,
     ret = IDirect3DDevice7_GetDirect3D((IDirect3DDevice7 *)This, &ret_ptr);
     if(ret != D3D_OK)
         return ret;
-    *Direct3D2 = ret_ptr ? (IDirect3D2 *)&((IDirectDrawImpl *)ret_ptr)->IDirect3D2_vtbl : NULL;
+    *Direct3D2 = ret_ptr ? (IDirect3D2 *)&ddraw_from_d3d7(ret_ptr)->IDirect3D2_vtbl : NULL;
     TRACE(" returning interface %p\n", *Direct3D2);
     return D3D_OK;
 }
@@ -1824,7 +1824,7 @@ Thunk_IDirect3DDeviceImpl_1_GetDirect3D(IDirect3DDevice *iface,
     ret = IDirect3DDevice7_GetDirect3D((IDirect3DDevice7 *)This, &ret_ptr);
     if(ret != D3D_OK)
         return ret;
-    *Direct3D = ret_ptr ? (IDirect3D *)&((IDirectDrawImpl *)ret_ptr)->IDirect3D_vtbl : NULL;
+    *Direct3D = ret_ptr ? (IDirect3D *)&ddraw_from_d3d7(ret_ptr)->IDirect3D_vtbl : NULL;
     TRACE(" returning interface %p\n", *Direct3D);
     return D3D_OK;
 }
@@ -3463,43 +3463,12 @@ IDirect3DDeviceImpl_7_DrawPrimitive(IDirect3DDevice7 *iface,
                                     DWORD Flags)
 {
     IDirect3DDeviceImpl *This = (IDirect3DDeviceImpl *)iface;
-    UINT PrimitiveCount, stride;
+    UINT stride;
     HRESULT hr;
     TRACE("(%p)->(%08x,%08x,%p,%08x,%08x): Relay!\n", This, PrimitiveType, VertexType, Vertices, VertexCount, Flags);
 
     if(!Vertices)
         return DDERR_INVALIDPARAMS;
-
-    /* Get the vertex count */
-    switch(PrimitiveType)
-    {
-      case D3DPT_POINTLIST: 
-        PrimitiveCount = VertexCount;
-        break;
-
-      case D3DPT_LINELIST: 
-        PrimitiveCount = VertexCount / 2;
-        break;
-
-      case D3DPT_LINESTRIP:
-        PrimitiveCount = VertexCount - 1;
-        break;
-
-      case D3DPT_TRIANGLELIST:
-        PrimitiveCount = VertexCount / 3;
-        break;
-
-      case D3DPT_TRIANGLESTRIP:
-        PrimitiveCount = VertexCount - 2;
-        break;
-
-      case D3DPT_TRIANGLEFAN:
-        PrimitiveCount = VertexCount - 2;
-        break;
-
-      default:
-        return DDERR_INVALIDPARAMS;
-    }
 
     /* Get the stride */
     stride = get_flexible_vertex_size(VertexType);
@@ -3515,11 +3484,8 @@ IDirect3DDeviceImpl_7_DrawPrimitive(IDirect3DDevice7 *iface,
     }
 
     /* This method translates to the user pointer draw of WineD3D */
-    hr = IWineD3DDevice_DrawPrimitiveUP(This->wineD3DDevice,
-                                        PrimitiveType,
-                                        PrimitiveCount,
-                                        Vertices,
-                                        stride);
+    IWineD3DDevice_SetPrimitiveType(This->wineD3DDevice, PrimitiveType);
+    hr = IWineD3DDevice_DrawPrimitiveUP(This->wineD3DDevice, VertexCount, Vertices, stride);
     LeaveCriticalSection(&ddraw_cs);
     return hr;
 }
@@ -3627,40 +3593,8 @@ IDirect3DDeviceImpl_7_DrawIndexedPrimitive(IDirect3DDevice7 *iface,
                                            DWORD Flags)
 {
     IDirect3DDeviceImpl *This = (IDirect3DDeviceImpl *)iface;
-    UINT PrimitiveCount = 0;
     HRESULT hr;
     TRACE("(%p)->(%08x,%08x,%p,%08x,%p,%08x,%08x): Relay!\n", This, PrimitiveType, VertexType, Vertices, VertexCount, Indices, IndexCount, Flags);
-
-    /* Get the primitive number */
-    switch(PrimitiveType)
-    {
-      case D3DPT_POINTLIST: 
-        PrimitiveCount = IndexCount;
-        break;
-
-      case D3DPT_LINELIST: 
-        PrimitiveCount = IndexCount / 2;
-        break;
-
-      case D3DPT_LINESTRIP:
-        PrimitiveCount = IndexCount - 1;
-        break;
-
-      case D3DPT_TRIANGLELIST:
-        PrimitiveCount = IndexCount / 3;
-        break;
-
-      case D3DPT_TRIANGLESTRIP:
-        PrimitiveCount = IndexCount - 2;
-        break;
-
-      case D3DPT_TRIANGLEFAN:
-        PrimitiveCount = IndexCount - 2;
-        break;
-
-      default:
-        return DDERR_INVALIDPARAMS;
-    }
 
     /* Set the D3DDevice's FVF */
     EnterCriticalSection(&ddraw_cs);
@@ -3673,15 +3607,10 @@ IDirect3DDeviceImpl_7_DrawIndexedPrimitive(IDirect3DDevice7 *iface,
         return hr;
     }
 
-    hr = IWineD3DDevice_DrawIndexedPrimitiveUP(This->wineD3DDevice,
-                                               PrimitiveType,
-                                               0 /* MinVertexIndex */,
-                                               VertexCount /* UINT NumVertexIndex */,
-                                               PrimitiveCount,
-                                               Indices,
-                                               WINED3DFMT_INDEX16,
-                                               Vertices,
-                                               get_flexible_vertex_size(VertexType));
+    IWineD3DDevice_SetPrimitiveType(This->wineD3DDevice, PrimitiveType);
+    hr = IWineD3DDevice_DrawIndexedPrimitiveUP(This->wineD3DDevice, 0 /* MinVertexIndex */,
+            VertexCount /* UINT NumVertexIndex */, IndexCount, Indices, WINED3DFMT_R16_UINT,
+            Vertices, get_flexible_vertex_size(VertexType));
     LeaveCriticalSection(&ddraw_cs);
     return hr;
 }
@@ -3885,7 +3814,6 @@ IDirect3DDeviceImpl_7_DrawPrimitiveStrided(IDirect3DDevice7 *iface,
     IDirect3DDeviceImpl *This = (IDirect3DDeviceImpl *)iface;
     WineDirect3DVertexStridedData WineD3DStrided;
     DWORD i;
-    UINT PrimitiveCount;
     HRESULT hr;
 
     TRACE("(%p)->(%08x,%08x,%p,%08x,%08x): stub!\n", This, PrimitiveType, VertexType, D3DDrawPrimStrideData, VertexCount, Flags);
@@ -3899,12 +3827,12 @@ IDirect3DDeviceImpl_7_DrawPrimitiveStrided(IDirect3DDevice7 *iface,
      */
     if(VertexType & D3DFVF_POSITION_MASK)
     {
-        WineD3DStrided.u.s.position.lpData = D3DDrawPrimStrideData->position.lpvData;
-        WineD3DStrided.u.s.position.dwStride = D3DDrawPrimStrideData->position.dwStride;
-        WineD3DStrided.u.s.position.dwType = WINED3DDECLTYPE_FLOAT3;
+        WineD3DStrided.position.format = WINED3DFMT_R32G32B32_FLOAT;
+        WineD3DStrided.position.lpData = D3DDrawPrimStrideData->position.lpvData;
+        WineD3DStrided.position.dwStride = D3DDrawPrimStrideData->position.dwStride;
         if (VertexType & D3DFVF_XYZRHW)
         {
-            WineD3DStrided.u.s.position.dwType = WINED3DDECLTYPE_FLOAT4;
+            WineD3DStrided.position.format = WINED3DFMT_R32G32B32A32_FLOAT;
             WineD3DStrided.position_transformed = TRUE;
         } else
             WineD3DStrided.position_transformed = FALSE;
@@ -3912,76 +3840,44 @@ IDirect3DDeviceImpl_7_DrawPrimitiveStrided(IDirect3DDevice7 *iface,
 
     if(VertexType & D3DFVF_NORMAL)
     {
-        WineD3DStrided.u.s.normal.lpData = D3DDrawPrimStrideData->normal.lpvData;
-        WineD3DStrided.u.s.normal.dwStride = D3DDrawPrimStrideData->normal.dwStride;
-        WineD3DStrided.u.s.normal.dwType = WINED3DDECLTYPE_FLOAT3;
+        WineD3DStrided.normal.format = WINED3DFMT_R32G32B32_FLOAT;
+        WineD3DStrided.normal.lpData = D3DDrawPrimStrideData->normal.lpvData;
+        WineD3DStrided.normal.dwStride = D3DDrawPrimStrideData->normal.dwStride;
     }
 
     if(VertexType & D3DFVF_DIFFUSE)
     {
-        WineD3DStrided.u.s.diffuse.lpData = D3DDrawPrimStrideData->diffuse.lpvData;
-        WineD3DStrided.u.s.diffuse.dwStride = D3DDrawPrimStrideData->diffuse.dwStride;
-        WineD3DStrided.u.s.diffuse.dwType = WINED3DDECLTYPE_D3DCOLOR;
+        WineD3DStrided.diffuse.format = WINED3DFMT_A8R8G8B8;
+        WineD3DStrided.diffuse.lpData = D3DDrawPrimStrideData->diffuse.lpvData;
+        WineD3DStrided.diffuse.dwStride = D3DDrawPrimStrideData->diffuse.dwStride;
     }
 
     if(VertexType & D3DFVF_SPECULAR)
     {
-        WineD3DStrided.u.s.specular.lpData = D3DDrawPrimStrideData->specular.lpvData;
-        WineD3DStrided.u.s.specular.dwStride = D3DDrawPrimStrideData->specular.dwStride;
-        WineD3DStrided.u.s.specular.dwType = WINED3DDECLTYPE_D3DCOLOR;
+        WineD3DStrided.specular.format = WINED3DFMT_A8R8G8B8;
+        WineD3DStrided.specular.lpData = D3DDrawPrimStrideData->specular.lpvData;
+        WineD3DStrided.specular.dwStride = D3DDrawPrimStrideData->specular.dwStride;
     }
 
     for( i = 0; i < GET_TEXCOUNT_FROM_FVF(VertexType); i++)
     {
-        WineD3DStrided.u.s.texCoords[i].lpData = D3DDrawPrimStrideData->textureCoords[i].lpvData;
-        WineD3DStrided.u.s.texCoords[i].dwStride = D3DDrawPrimStrideData->textureCoords[i].dwStride;
         switch(GET_TEXCOORD_SIZE_FROM_FVF(VertexType, i))
         {
-            case 1: WineD3DStrided.u.s.texCoords[i].dwType = WINED3DDECLTYPE_FLOAT1; break;
-            case 2: WineD3DStrided.u.s.texCoords[i].dwType = WINED3DDECLTYPE_FLOAT2; break;
-            case 3: WineD3DStrided.u.s.texCoords[i].dwType = WINED3DDECLTYPE_FLOAT3; break;
-            case 4: WineD3DStrided.u.s.texCoords[i].dwType = WINED3DDECLTYPE_FLOAT4; break;
+            case 1: WineD3DStrided.texCoords[i].format = WINED3DFMT_R32_FLOAT; break;
+            case 2: WineD3DStrided.texCoords[i].format = WINED3DFMT_R32G32_FLOAT; break;
+            case 3: WineD3DStrided.texCoords[i].format = WINED3DFMT_R32G32B32_FLOAT; break;
+            case 4: WineD3DStrided.texCoords[i].format = WINED3DFMT_R32G32B32A32_FLOAT; break;
             default: ERR("Unexpected texture coordinate size %d\n",
                          GET_TEXCOORD_SIZE_FROM_FVF(VertexType, i));
         }
-    }
-
-    /* Get the primitive count */
-    switch(PrimitiveType)
-    {
-        case D3DPT_POINTLIST: 
-          PrimitiveCount = VertexCount;
-          break;
-
-        case D3DPT_LINELIST: 
-          PrimitiveCount = VertexCount / 2;
-          break;
-
-        case D3DPT_LINESTRIP:
-          PrimitiveCount = VertexCount - 1;
-          break;
-
-        case D3DPT_TRIANGLELIST:
-          PrimitiveCount = VertexCount / 3;
-          break;
-
-        case D3DPT_TRIANGLESTRIP:
-          PrimitiveCount = VertexCount - 2;
-          break;
-
-        case D3DPT_TRIANGLEFAN:
-          PrimitiveCount = VertexCount - 2;
-          break;
-
-        default: return DDERR_INVALIDPARAMS;
+        WineD3DStrided.texCoords[i].lpData = D3DDrawPrimStrideData->textureCoords[i].lpvData;
+        WineD3DStrided.texCoords[i].dwStride = D3DDrawPrimStrideData->textureCoords[i].dwStride;
     }
 
     /* WineD3D doesn't need the FVF here */
     EnterCriticalSection(&ddraw_cs);
-    hr = IWineD3DDevice_DrawPrimitiveStrided(This->wineD3DDevice,
-                                             PrimitiveType,
-                                             PrimitiveCount,
-                                             &WineD3DStrided);
+    IWineD3DDevice_SetPrimitiveType(This->wineD3DDevice, PrimitiveType);
+    hr = IWineD3DDevice_DrawPrimitiveStrided(This->wineD3DDevice, VertexCount, &WineD3DStrided);
     LeaveCriticalSection(&ddraw_cs);
     return hr;
 }
@@ -4059,7 +3955,6 @@ IDirect3DDeviceImpl_7_DrawIndexedPrimitiveStrided(IDirect3DDevice7 *iface,
     IDirect3DDeviceImpl *This = (IDirect3DDeviceImpl *)iface;
     WineDirect3DVertexStridedData WineD3DStrided;
     DWORD i;
-    UINT PrimitiveCount;
     HRESULT hr;
 
     TRACE("(%p)->(%08x,%08x,%p,%08x,%p,%08x,%08x)\n", This, PrimitiveType, VertexType, D3DDrawPrimStrideData, VertexCount, Indices, IndexCount, Flags);
@@ -4073,12 +3968,12 @@ IDirect3DDeviceImpl_7_DrawIndexedPrimitiveStrided(IDirect3DDevice7 *iface,
      */
     if(VertexType & D3DFVF_POSITION_MASK)
     {
-        WineD3DStrided.u.s.position.lpData = D3DDrawPrimStrideData->position.lpvData;
-        WineD3DStrided.u.s.position.dwStride = D3DDrawPrimStrideData->position.dwStride;
-        WineD3DStrided.u.s.position.dwType = WINED3DDECLTYPE_FLOAT3;
+        WineD3DStrided.position.format = WINED3DFMT_R32G32B32_FLOAT;
+        WineD3DStrided.position.lpData = D3DDrawPrimStrideData->position.lpvData;
+        WineD3DStrided.position.dwStride = D3DDrawPrimStrideData->position.dwStride;
         if (VertexType & D3DFVF_XYZRHW)
         {
-            WineD3DStrided.u.s.position.dwType = WINED3DDECLTYPE_FLOAT4;
+            WineD3DStrided.position.format = WINED3DFMT_R32G32B32A32_FLOAT;
             WineD3DStrided.position_transformed = TRUE;
         } else
             WineD3DStrided.position_transformed = FALSE;
@@ -4086,79 +3981,45 @@ IDirect3DDeviceImpl_7_DrawIndexedPrimitiveStrided(IDirect3DDevice7 *iface,
 
     if(VertexType & D3DFVF_NORMAL)
     {
-        WineD3DStrided.u.s.normal.lpData = D3DDrawPrimStrideData->normal.lpvData;
-        WineD3DStrided.u.s.normal.dwStride = D3DDrawPrimStrideData->normal.dwStride;
-        WineD3DStrided.u.s.normal.dwType = WINED3DDECLTYPE_FLOAT3;
+        WineD3DStrided.normal.format = WINED3DFMT_R32G32B32_FLOAT;
+        WineD3DStrided.normal.lpData = D3DDrawPrimStrideData->normal.lpvData;
+        WineD3DStrided.normal.dwStride = D3DDrawPrimStrideData->normal.dwStride;
     }
 
     if(VertexType & D3DFVF_DIFFUSE)
     {
-        WineD3DStrided.u.s.diffuse.lpData = D3DDrawPrimStrideData->diffuse.lpvData;
-        WineD3DStrided.u.s.diffuse.dwStride = D3DDrawPrimStrideData->diffuse.dwStride;
-        WineD3DStrided.u.s.diffuse.dwType = WINED3DDECLTYPE_D3DCOLOR;
+        WineD3DStrided.diffuse.format = WINED3DFMT_A8R8G8B8;
+        WineD3DStrided.diffuse.lpData = D3DDrawPrimStrideData->diffuse.lpvData;
+        WineD3DStrided.diffuse.dwStride = D3DDrawPrimStrideData->diffuse.dwStride;
     }
 
     if(VertexType & D3DFVF_SPECULAR)
     {
-        WineD3DStrided.u.s.specular.lpData = D3DDrawPrimStrideData->specular.lpvData;
-        WineD3DStrided.u.s.specular.dwStride = D3DDrawPrimStrideData->specular.dwStride;
-        WineD3DStrided.u.s.specular.dwType = WINED3DDECLTYPE_D3DCOLOR;
+        WineD3DStrided.specular.format = WINED3DFMT_A8R8G8B8;
+        WineD3DStrided.specular.lpData = D3DDrawPrimStrideData->specular.lpvData;
+        WineD3DStrided.specular.dwStride = D3DDrawPrimStrideData->specular.dwStride;
     }
 
     for( i = 0; i < GET_TEXCOUNT_FROM_FVF(VertexType); i++)
     {
-        WineD3DStrided.u.s.texCoords[i].lpData = D3DDrawPrimStrideData->textureCoords[i].lpvData;
-        WineD3DStrided.u.s.texCoords[i].dwStride = D3DDrawPrimStrideData->textureCoords[i].dwStride;
         switch(GET_TEXCOORD_SIZE_FROM_FVF(VertexType, i))
         {
-            case 1: WineD3DStrided.u.s.texCoords[i].dwType = WINED3DDECLTYPE_FLOAT1; break;
-            case 2: WineD3DStrided.u.s.texCoords[i].dwType = WINED3DDECLTYPE_FLOAT2; break;
-            case 3: WineD3DStrided.u.s.texCoords[i].dwType = WINED3DDECLTYPE_FLOAT3; break;
-            case 4: WineD3DStrided.u.s.texCoords[i].dwType = WINED3DDECLTYPE_FLOAT4; break;
+            case 1: WineD3DStrided.texCoords[i].format = WINED3DFMT_R32_FLOAT; break;
+            case 2: WineD3DStrided.texCoords[i].format = WINED3DFMT_R32G32_FLOAT; break;
+            case 3: WineD3DStrided.texCoords[i].format = WINED3DFMT_R32G32B32_FLOAT; break;
+            case 4: WineD3DStrided.texCoords[i].format = WINED3DFMT_R32G32B32A32_FLOAT; break;
             default: ERR("Unexpected texture coordinate size %d\n",
                          GET_TEXCOORD_SIZE_FROM_FVF(VertexType, i));
         }
-    }
-
-    /* Get the primitive count */
-    switch(PrimitiveType)
-    {
-        case D3DPT_POINTLIST:
-            PrimitiveCount = IndexCount;
-            break;
-
-        case D3DPT_LINELIST:
-            PrimitiveCount = IndexCount / 2;
-            break;
-
-        case D3DPT_LINESTRIP:
-            PrimitiveCount = IndexCount - 1;
-            break;
-
-        case D3DPT_TRIANGLELIST:
-            PrimitiveCount = IndexCount / 3;
-            break;
-
-        case D3DPT_TRIANGLESTRIP:
-            PrimitiveCount = IndexCount - 2;
-            break;
-
-        case D3DPT_TRIANGLEFAN:
-            PrimitiveCount = IndexCount - 2;
-            break;
-
-            default: return DDERR_INVALIDPARAMS;
+        WineD3DStrided.texCoords[i].lpData = D3DDrawPrimStrideData->textureCoords[i].lpvData;
+        WineD3DStrided.texCoords[i].dwStride = D3DDrawPrimStrideData->textureCoords[i].dwStride;
     }
 
     /* WineD3D doesn't need the FVF here */
     EnterCriticalSection(&ddraw_cs);
+    IWineD3DDevice_SetPrimitiveType(This->wineD3DDevice, PrimitiveType);
     hr = IWineD3DDevice_DrawIndexedPrimitiveStrided(This->wineD3DDevice,
-                                                    PrimitiveType,
-                                                    PrimitiveCount,
-                                                    &WineD3DStrided,
-                                                    VertexCount,
-                                                    Indices,
-                                                    WINED3DFMT_INDEX16);
+            IndexCount, &WineD3DStrided, VertexCount, Indices, WINED3DFMT_R16_UINT);
     LeaveCriticalSection(&ddraw_cs);
     return hr;
 }
@@ -4241,10 +4102,8 @@ IDirect3DDeviceImpl_7_DrawPrimitiveVB(IDirect3DDevice7 *iface,
 {
     IDirect3DDeviceImpl *This = (IDirect3DDeviceImpl *)iface;
     IDirect3DVertexBufferImpl *vb = (IDirect3DVertexBufferImpl *)D3DVertexBuf;
-    UINT PrimitiveCount;
     HRESULT hr;
     DWORD stride;
-    WINED3DVERTEXBUFFER_DESC Desc;
 
     TRACE("(%p)->(%08x,%p,%08x,%08x,%08x)\n", This, PrimitiveType, D3DVertexBuf, StartVertex, NumVertices, Flags);
 
@@ -4254,50 +4113,9 @@ IDirect3DDeviceImpl_7_DrawPrimitiveVB(IDirect3DDevice7 *iface,
         ERR("(%p) No Vertex buffer specified\n", This);
         return DDERR_INVALIDPARAMS;
     }
+    stride = get_flexible_vertex_size(vb->fvf);
 
-    /* Get the primitive count */
-    switch(PrimitiveType)
-    {
-        case D3DPT_POINTLIST: 
-          PrimitiveCount = NumVertices;
-          break;
-
-        case D3DPT_LINELIST: 
-          PrimitiveCount = NumVertices / 2;
-          break;
-
-        case D3DPT_LINESTRIP:
-          PrimitiveCount = NumVertices - 1;
-          break;
-
-        case D3DPT_TRIANGLELIST:
-          PrimitiveCount = NumVertices / 3;
-          break;
-
-        case D3DPT_TRIANGLESTRIP:
-          PrimitiveCount = NumVertices - 2;
-          break;
-
-        case D3DPT_TRIANGLEFAN:
-          PrimitiveCount = NumVertices - 2;
-          break;
-
-        default:
-          return DDERR_INVALIDPARAMS;
-    }
-
-    /* Get the FVF of the vertex buffer, and its stride */
     EnterCriticalSection(&ddraw_cs);
-    hr = IWineD3DVertexBuffer_GetDesc(vb->wineD3DVertexBuffer,
-                                      &Desc);
-    if(hr != D3D_OK)
-    {
-        ERR("(%p) IWineD3DVertexBuffer::GetDesc failed with hr = %08x\n", This, hr);
-        LeaveCriticalSection(&ddraw_cs);
-        return hr;
-    }
-    stride = get_flexible_vertex_size(Desc.FVF);
-
     hr = IWineD3DDevice_SetVertexDeclaration(This->wineD3DDevice,
                                              vb->wineD3DVertexDeclaration);
     if(FAILED(hr))
@@ -4321,10 +4139,8 @@ IDirect3DDeviceImpl_7_DrawPrimitiveVB(IDirect3DDevice7 *iface,
     }
 
     /* Now draw the primitives */
-    hr = IWineD3DDevice_DrawPrimitive(This->wineD3DDevice,
-                                      PrimitiveType,
-                                      StartVertex,
-                                      PrimitiveCount);
+    IWineD3DDevice_SetPrimitiveType(This->wineD3DDevice, PrimitiveType);
+    hr = IWineD3DDevice_DrawPrimitive(This->wineD3DDevice, StartVertex, NumVertices);
     LeaveCriticalSection(&ddraw_cs);
     return hr;
 }
@@ -4403,64 +4219,20 @@ IDirect3DDeviceImpl_7_DrawIndexedPrimitiveVB(IDirect3DDevice7 *iface,
 {
     IDirect3DDeviceImpl *This = (IDirect3DDeviceImpl *)iface;
     IDirect3DVertexBufferImpl *vb = (IDirect3DVertexBufferImpl *)D3DVertexBuf;
-    DWORD stride;
-    UINT PrimitiveCount;
+    DWORD stride = get_flexible_vertex_size(vb->fvf);
     WORD *LockedIndices;
     HRESULT hr;
-    WINED3DVERTEXBUFFER_DESC Desc;
 
     TRACE("(%p)->(%08x,%p,%d,%d,%p,%d,%08x)\n", This, PrimitiveType, vb, StartVertex, NumVertices, Indices, IndexCount, Flags);
 
     /* Steps:
-     * 1) Calculate some things: Vertex count -> Primitive count, stride, ...
-     * 2) Upload the Indices to the index buffer
-     * 3) Set the index source
-     * 4) Set the Vertex Buffer as the Stream source
-     * 5) Call IWineD3DDevice::DrawIndexedPrimitive
+     * 1) Upload the Indices to the index buffer
+     * 2) Set the index source
+     * 3) Set the Vertex Buffer as the Stream source
+     * 4) Call IWineD3DDevice::DrawIndexedPrimitive
      */
 
-    /* Get the primitive count */
-    switch(PrimitiveType)
-    {
-        case D3DPT_POINTLIST: 
-          PrimitiveCount = IndexCount;
-          break;
-
-        case D3DPT_LINELIST: 
-          PrimitiveCount = IndexCount / 2;
-          break;
-
-        case D3DPT_LINESTRIP:
-          PrimitiveCount = IndexCount - 1;
-          break;
-
-        case D3DPT_TRIANGLELIST:
-          PrimitiveCount = IndexCount / 3;
-          break;
-
-        case D3DPT_TRIANGLESTRIP:
-          PrimitiveCount = IndexCount - 2;
-          break;
-
-        case D3DPT_TRIANGLEFAN:
-          PrimitiveCount = IndexCount - 2;
-          break;
-
-        default: return DDERR_INVALIDPARAMS;
-    }
-
     EnterCriticalSection(&ddraw_cs);
-    /* Get the FVF of the vertex buffer, and its stride */
-    hr = IWineD3DVertexBuffer_GetDesc(vb->wineD3DVertexBuffer,
-                                      &Desc);
-    if(hr != D3D_OK)
-    {
-        ERR("(%p) IWineD3DVertexBuffer::GetDesc failed with hr = %08x\n", This, hr);
-        LeaveCriticalSection(&ddraw_cs);
-        return hr;
-    }
-    stride = get_flexible_vertex_size(Desc.FVF);
-    TRACE("Vertex buffer FVF = %08x, stride=%d\n", Desc.FVF, stride);
 
     hr = IWineD3DDevice_SetVertexDeclaration(This->wineD3DDevice,
                                              vb->wineD3DVertexDeclaration);
@@ -4477,30 +4249,31 @@ IDirect3DDeviceImpl_7_DrawIndexedPrimitiveVB(IDirect3DDevice7 *iface,
      * or a SetData-Method for the index buffer, which
      * overrides the index buffer data with our pointer.
      */
-    hr = IWineD3DIndexBuffer_Lock(This->indexbuffer,
-                                  0 /* OffSetToLock */,
-                                  IndexCount * sizeof(WORD),
-                                  (BYTE **) &LockedIndices,
-                                  0 /* Flags */);
+    hr = IWineD3DBuffer_Map(This->indexbuffer,
+                            0 /* OffSetToLock */,
+                            IndexCount * sizeof(WORD),
+                            (BYTE **) &LockedIndices,
+                            0 /* Flags */);
     assert(IndexCount < 0x100000);
     if(hr != D3D_OK)
     {
-        ERR("(%p) IWineD3DIndexBuffer::Lock failed with hr = %08x\n", This, hr);
+        ERR("(%p) IWineD3DBuffer::Map failed with hr = %08x\n", This, hr);
         LeaveCriticalSection(&ddraw_cs);
         return hr;
     }
     memcpy(LockedIndices, Indices, IndexCount * sizeof(WORD));
-    hr = IWineD3DIndexBuffer_Unlock(This->indexbuffer);
+    hr = IWineD3DBuffer_Unmap(This->indexbuffer);
     if(hr != D3D_OK)
     {
-        ERR("(%p) IWineD3DIndexBuffer::Unlock failed with hr = %08x\n", This, hr);
+        ERR("(%p) IWineD3DBuffer::Unmap failed with hr = %08x\n", This, hr);
         LeaveCriticalSection(&ddraw_cs);
         return hr;
     }
 
     /* Set the index stream */
     IWineD3DDevice_SetBaseVertexIndex(This->wineD3DDevice, StartVertex);
-    hr = IWineD3DDevice_SetIndices(This->wineD3DDevice, This->indexbuffer);
+    hr = IWineD3DDevice_SetIndices(This->wineD3DDevice, This->indexbuffer,
+                                   WINED3DFMT_R16_UINT);
 
     /* Set the vertex stream source */
     hr = IWineD3DDevice_SetStreamSource(This->wineD3DDevice,
@@ -4516,12 +4289,9 @@ IDirect3DDeviceImpl_7_DrawIndexedPrimitiveVB(IDirect3DDevice7 *iface,
     }
 
 
+    IWineD3DDevice_SetPrimitiveType(This->wineD3DDevice, PrimitiveType);
     hr = IWineD3DDevice_DrawIndexedPrimitive(This->wineD3DDevice,
-                                             PrimitiveType,
-                                             0 /* minIndex */,
-                                             NumVertices,
-                                             0 /* StartIndex */,
-                                             PrimitiveCount);
+            0 /* minIndex */, NumVertices, 0 /* StartIndex */, IndexCount);
 
     LeaveCriticalSection(&ddraw_cs);
     return hr;
@@ -4604,6 +4374,19 @@ Thunk_IDirect3DDeviceImpl_3_DrawIndexedPrimitiveVB(IDirect3DDevice3 *iface,
  *  is singular)
  *
  *****************************************************************************/
+
+static DWORD in_plane(UINT plane, D3DVECTOR normal, D3DVALUE origin_plane, D3DVECTOR center, D3DVALUE radius)
+{
+    float distance, norm;
+
+    norm = sqrt( normal.u1.x * normal.u1.x + normal.u2.y * normal.u2.y + normal.u3.z * normal.u3.z );
+    distance = ( origin_plane + normal.u1.x * center.u1.x + normal.u2.y * center.u2.y + normal.u3.z * center.u3.z ) / norm;
+
+    if ( fabs( distance ) < radius ) return D3DSTATUS_CLIPUNIONLEFT << plane;
+    if ( distance < -radius ) return (D3DSTATUS_CLIPUNIONLEFT  | D3DSTATUS_CLIPINTERSECTIONLEFT) << plane;
+    return 0;
+}
+
 static HRESULT WINAPI
 IDirect3DDeviceImpl_7_ComputeSphereVisibility(IDirect3DDevice7 *iface,
                                               D3DVECTOR *Centers,
@@ -4612,30 +4395,65 @@ IDirect3DDeviceImpl_7_ComputeSphereVisibility(IDirect3DDevice7 *iface,
                                               DWORD Flags,
                                               DWORD *ReturnValues)
 {
-    IDirect3DDeviceImpl *This = (IDirect3DDeviceImpl *)iface;
-    FIXME("(%p)->(%p,%p,%08x,%08x,%p): stub!\n", This, Centers, Radii, NumSpheres, Flags, ReturnValues);
+    D3DMATRIX m, temp;
+    D3DVALUE origin_plane[6];
+    D3DVECTOR vec[6];
+    HRESULT hr;
+    UINT i, j;
 
-    /* the DirectX 7 sdk says that the visibility is computed by
-     * back-transforming the viewing frustum to model space
-     * using the inverse of the combined world, view and projection
-     * matrix. If the matrix can't be reversed, D3DERR_INVALIDMATRIX
-     * is returned.
-     *
-     * Basic implementation idea:
-     * 1) Check if the center is in the viewing frustum
-     * 2) Cut the sphere with the planes of the viewing
-     *    frustum
-     *
-     * ->Center inside the frustum, no intersections:
-     *    Fully visible
-     * ->Center outside the frustum, no intersections:
-     *    Not visible
-     * ->Some intersections: Partially visible
-     *
-     * Implement this call in WineD3D. Either implement the
-     * matrix and vector stuff in WineD3D, or use some external
-     * math library.
-     */
+    TRACE("(%p)->(%p,%p,%08x,%08x,%p)\n", iface, Centers, Radii, NumSpheres, Flags, ReturnValues);
+
+    hr = IDirect3DDeviceImpl_7_GetTransform(iface, D3DTRANSFORMSTATE_WORLD, &m);
+    if ( hr != DD_OK ) return DDERR_INVALIDPARAMS;
+    hr = IDirect3DDeviceImpl_7_GetTransform(iface, D3DTRANSFORMSTATE_VIEW, &temp);
+    if ( hr != DD_OK ) return DDERR_INVALIDPARAMS;
+    multiply_matrix_D3D_way(&m, &m, &temp);
+
+    hr = IDirect3DDeviceImpl_7_GetTransform(iface, D3DTRANSFORMSTATE_PROJECTION, &temp);
+    if ( hr != DD_OK ) return DDERR_INVALIDPARAMS;
+    multiply_matrix_D3D_way(&m, &m, &temp);
+
+/* Left plane */
+    vec[0].u1.x = m._14 + m._11;
+    vec[0].u2.y = m._24 + m._21;
+    vec[0].u3.z = m._34 + m._31;
+    origin_plane[0] = m._44 + m._41;
+
+/* Right plane */
+    vec[1].u1.x = m._14 - m._11;
+    vec[1].u2.y = m._24 - m._21;
+    vec[1].u3.z = m._34 - m._31;
+    origin_plane[1] = m._44 - m._41;
+
+/* Top plane */
+    vec[2].u1.x = m._14 - m._12;
+    vec[2].u2.y = m._24 - m._22;
+    vec[2].u3.z = m._34 - m._32;
+    origin_plane[2] = m._44 - m._42;
+
+/* Bottom plane */
+    vec[3].u1.x = m._14 + m._12;
+    vec[3].u2.y = m._24 + m._22;
+    vec[3].u3.z = m._34 + m._32;
+    origin_plane[3] = m._44 + m._42;
+
+/* Front plane */
+    vec[4].u1.x = m._13;
+    vec[4].u2.y = m._23;
+    vec[4].u3.z = m._33;
+    origin_plane[4] = m._43;
+
+/* Back plane*/
+    vec[5].u1.x = m._14 - m._13;
+    vec[5].u2.y = m._24 - m._23;
+    vec[5].u3.z = m._34 - m._33;
+    origin_plane[5] = m._44 - m._43;
+
+    for(i=0; i<NumSpheres; i++)
+    {
+        ReturnValues[i] = 0;
+        for(j=0; j<6; j++) ReturnValues[i] |= in_plane(j, vec[j], origin_plane[j], Centers[i], Radii[i]);
+    }
 
     return D3D_OK;
 }
@@ -4937,6 +4755,13 @@ IDirect3DDeviceImpl_7_GetTextureStageState(IDirect3DDevice7 *iface,
     if(!State)
         return DDERR_INVALIDPARAMS;
 
+    if (TexStageStateType > D3DTSS_TEXTURETRANSFORMFLAGS)
+    {
+        WARN("Invalid TexStageStateType %#x passed.\n", TexStageStateType);
+        *State = 0;
+        return DD_OK;
+    }
+
     EnterCriticalSection(&ddraw_cs);
 
     if (l->sampler_state)
@@ -5056,6 +4881,12 @@ IDirect3DDeviceImpl_7_SetTextureStageState(IDirect3DDevice7 *iface,
     const struct tss_lookup *l = &tss_lookup[TexStageStateType];
     HRESULT hr;
     TRACE("(%p)->(%08x,%08x,%08x): Relay!\n", This, Stage, TexStageStateType, State);
+
+    if (TexStageStateType > D3DTSS_TEXTURETRANSFORMFLAGS)
+    {
+        WARN("Invalid TexStageStateType %#x passed.\n", TexStageStateType);
+        return DD_OK;
+    }
 
     EnterCriticalSection(&ddraw_cs);
 

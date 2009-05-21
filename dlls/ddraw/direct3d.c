@@ -820,17 +820,12 @@ IDirect3DImpl_7_CreateDevice(IDirect3D7 *iface,
 
     /* Create an Index Buffer. WineD3D needs one for Drawing indexed primitives
      * Create a (hopefully) long enough buffer, and copy the indices into it
-     * Ideally, a IWineD3DIndexBuffer::SetData method could be created, which
+     * Ideally, a IWineD3DBuffer::SetData method could be created, which
      * takes the pointer and avoids the memcpy
      */
-    hr = IWineD3DDevice_CreateIndexBuffer(This->wineD3DDevice,
-                                          0x40000, /* Length. Don't know how long it should be */
-                                          WINED3DUSAGE_DYNAMIC, /* Usage */
-                                          WINED3DFMT_INDEX16, /* Format. D3D7 uses WORDS */
-                                          WINED3DPOOL_DEFAULT,
-                                          &object->indexbuffer,
-                                          0 /* Handle */,
-                                          (IUnknown *)IndexBufferParent);
+    hr = IWineD3DDevice_CreateIndexBuffer(This->wineD3DDevice, 0x40000 /* Length. Don't know how long it should be */,
+            WINED3DUSAGE_DYNAMIC /* Usage */, WINED3DPOOL_DEFAULT,
+            &object->indexbuffer, 0 /* Handle */, (IUnknown *)IndexBufferParent);
 
     if(FAILED(hr))
     {
@@ -1022,6 +1017,7 @@ IDirect3DImpl_7_CreateVertexBuffer(IDirect3D7 *iface,
 
     object->Caps = Desc->dwCaps;
     object->ddraw = This;
+    object->fvf = Desc->dwFVF;
 
     EnterCriticalSection(&ddraw_cs);
     hr = IWineD3DDevice_CreateVertexBuffer(This->wineD3DDevice,
@@ -1048,7 +1044,7 @@ IDirect3DImpl_7_CreateVertexBuffer(IDirect3D7 *iface,
     if(!object->wineD3DVertexDeclaration)
     {
         ERR("Cannot find the vertex declaration for fvf %08x\n", Desc->dwFVF);
-        IWineD3DVertexBuffer_Release(object->wineD3DVertexBuffer);
+        IWineD3DBuffer_Release(object->wineD3DVertexBuffer);
         HeapFree(GetProcessHeap(), 0, object);
         LeaveCriticalSection(&ddraw_cs);
         return DDERR_INVALIDPARAMS;
@@ -1120,7 +1116,7 @@ IDirect3DImpl_7_EnumZBufferFormats(IDirect3D7 *iface,
      * 16-bit depth formats to be listed before the 24 and 32 ones. */
     WINED3DFORMAT FormatList[] = {
         WINED3DFMT_D15S1,
-        WINED3DFMT_D16,
+        WINED3DFMT_D16_UNORM,
         WINED3DFMT_D24X8,
         WINED3DFMT_D24X4S4,
         WINED3DFMT_D24S8,

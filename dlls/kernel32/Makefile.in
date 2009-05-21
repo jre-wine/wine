@@ -10,13 +10,9 @@ EXTRALIBS = @COREFOUNDATIONLIB@ @LIBPOLL@
 EXTRADLLFLAGS = -Wb,-F,KERNEL32.dll -Wl,--image-base,0x7b800000
 
 SPEC_SRCS16 = \
-	comm.drv.spec \
 	krnl386.exe.spec \
-	stress.spec \
 	system.drv.spec \
-	toolhelp.spec \
-	win87em.spec \
-	windebug.spec
+	toolhelp.spec
 
 C_SRCS = \
 	actctx.c \
@@ -56,7 +52,6 @@ C_SRCS = \
 	resource16.c \
 	selector.c \
 	snoop16.c \
-	stress.c \
 	string.c \
 	sync.c \
 	syslevel.c \
@@ -72,7 +67,6 @@ C_SRCS = \
 	virtual.c \
 	volume.c \
 	vxd.c \
-	windebug.c \
 	wowthunk.c
 
 C_SRCS16 = \
@@ -80,8 +74,7 @@ C_SRCS16 = \
 	error16.c \
 	kernel16.c \
 	registry16.c \
-	toolhelp16.c \
-	win87em.c
+	toolhelp16.c
 
 RC_SRCS = kernel.rc
 
@@ -96,8 +89,6 @@ MC_SRCS = \
 	nls/winerr_nor.mc
 
 EXTRA_OBJS   = relay16asm.o
-EXTRA_OBJS16 = winhelp.exe.o winoldap.mod.o
-
 EXTRASUBDIRS = nls
 
 @MAKE_DLL_RULES@
@@ -106,12 +97,6 @@ kernel.res: $(MC_SRCS:.mc=.mc.rc)
 
 relay16asm.o: $(WINEBUILD)
 	$(WINEBUILD) $(WINEBUILDFLAGS) -o $@ --relay16
-
-winoldap.mod.o: $(WINEBUILD)
-	$(WINEBUILD) $(WINEBUILDFLAGS) --exe -o $@ --main-module $(MODULE) --entry WINOLDAP_EntryPoint
-
-winhelp.exe.o: $(WINEBUILD)
-	$(WINEBUILD) $(WINEBUILDFLAGS) --exe -o $@ --main-module $(MODULE) --entry WINHELP_EntryPoint
 
 # Special rules for 16-bit resource and spec files
 

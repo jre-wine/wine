@@ -117,11 +117,8 @@ static HRESULT WINAPI IDirectSoundNotifyImpl_SetNotificationPositions(
         } else if (howmuch > 0) {
 	    /* Make an internal copy of the caller-supplied array.
 	     * Replace the existing copy if one is already present. */
-	    if (This->dsb->notifies)
-		    This->dsb->notifies = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-			This->dsb->notifies, howmuch * sizeof(DSBPOSITIONNOTIFY));
-	    else
-		    This->dsb->notifies = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+	    HeapFree(GetProcessHeap(), 0, This->dsb->notifies);
+	    This->dsb->notifies = HeapAlloc(GetProcessHeap(), 0,
 			howmuch * sizeof(DSBPOSITIONNOTIFY));
 
 	    if (This->dsb->notifies == NULL) {
@@ -383,17 +380,9 @@ static ULONG WINAPI IDirectSoundBufferImpl_Release(LPDIRECTSOUNDBUFFER8 iface)
 	DirectSoundDevice_RemoveBuffer(This->device, This);
 	RtlDeleteResource(&This->lock);
 
-	if (This->hwbuf) {
+	if (This->hwbuf)
 		IDsDriverBuffer_Release(This->hwbuf);
-		if (This->device->drvdesc.dwFlags & DSDDESC_USESYSTEMMEMORY) {
-			This->buffer->ref--;
-			list_remove(&This->entry);
-			if (This->buffer->ref==0) {
-				HeapFree(GetProcessHeap(),0,This->buffer->memory);
-				HeapFree(GetProcessHeap(),0,This->buffer);
-			}
-		}
-	} else {
+	if (!This->hwbuf || (This->device->drvdesc.dwFlags & DSDDESC_USESYSTEMMEMORY)) {
 		This->buffer->ref--;
 		list_remove(&This->entry);
 		if (This->buffer->ref==0) {

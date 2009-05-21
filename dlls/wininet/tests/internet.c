@@ -27,6 +27,10 @@
 
 #include "wine/test.h"
 
+static BOOL (WINAPI *pCreateUrlCacheContainerA)(DWORD, DWORD, DWORD, DWORD,
+                                                DWORD, DWORD, DWORD, DWORD);
+static BOOL (WINAPI *pCreateUrlCacheContainerW)(DWORD, DWORD, DWORD, DWORD,
+                                                DWORD, DWORD, DWORD, DWORD);
 static BOOL (WINAPI *pInternetTimeFromSystemTimeA)(CONST SYSTEMTIME *,DWORD ,LPSTR ,DWORD);
 static BOOL (WINAPI *pInternetTimeFromSystemTimeW)(CONST SYSTEMTIME *,DWORD ,LPWSTR ,DWORD);
 static BOOL (WINAPI *pInternetTimeToSystemTimeA)(LPCSTR ,SYSTEMTIME *,DWORD);
@@ -244,6 +248,102 @@ static void test_get_cookie(void)
     ret ? "TRUE" : "FALSE", GetLastError());
 }
 
+
+static void test_complicated_cookie(void)
+{
+  DWORD len;
+  BOOL ret;
+
+  CHAR buffer[1024];
+
+  ret = InternetSetCookie("http://www.example.com/bar",NULL,"A=B; domain=.example.com");
+  ok(ret == TRUE,"InternetSetCookie failed\n");
+  ret = InternetSetCookie("http://www.example.com/bar",NULL,"C=D; domain=.example.com; path=/");
+  ok(ret == TRUE,"InternetSetCookie failed\n");
+
+  /* Technically illegal! domain should require 2 dots, but native wininet accepts it */
+  ret = InternetSetCookie("http://www.example.com",NULL,"E=F; domain=example.com");
+  ok(ret == TRUE,"InternetSetCookie failed\n");
+  ret = InternetSetCookie("http://www.example.com",NULL,"G=H; domain=.example.com; path=/foo");
+  ok(ret == TRUE,"InternetSetCookie failed\n");
+  ret = InternetSetCookie("http://www.example.com/bar.html",NULL,"I=J; domain=.example.com");
+  ok(ret == TRUE,"InternetSetCookie failed\n");
+  ret = InternetSetCookie("http://www.example.com/bar/",NULL,"K=L; domain=.example.com");
+  ok(ret == TRUE,"InternetSetCookie failed\n");
+  ret = InternetSetCookie("http://www.example.com/bar/",NULL,"M=N; domain=.example.com; path=/foo/");
+  ok(ret == TRUE,"InternetSetCookie failed\n");
+
+  len = 1024;
+  ret = InternetGetCookie("http://testing.example.com", NULL, buffer, &len);
+  ok(strstr(buffer,"A=B")!=NULL,"A=B missing\n");
+  ok(strstr(buffer,"C=D")!=NULL,"C=D missing\n");
+  ok(strstr(buffer,"E=F")!=NULL,"E=F missing\n");
+  ok(strstr(buffer,"G=H")==NULL,"G=H present\n");
+  ok(strstr(buffer,"I=J")!=NULL,"I=J missing\n");
+  ok(strstr(buffer,"K=L")==NULL,"K=L present\n");
+  ok(strstr(buffer,"M=N")==NULL,"M=N present\n");
+
+  len = 1024;
+  ret = InternetGetCookie("http://testing.example.com/foobar", NULL, buffer, &len);
+  ok(strstr(buffer,"A=B")!=NULL,"A=B missing\n");
+  ok(strstr(buffer,"C=D")!=NULL,"C=D missing\n");
+  ok(strstr(buffer,"E=F")!=NULL,"E=F missing\n");
+  ok(strstr(buffer,"G=H")==NULL,"G=H present\n");
+  ok(strstr(buffer,"I=J")!=NULL,"I=J missing\n");
+  ok(strstr(buffer,"K=L")==NULL,"K=L present\n");
+  ok(strstr(buffer,"M=N")==NULL,"M=N present\n");
+
+  len = 1024;
+  ret = InternetGetCookie("http://testing.example.com/foobar/", NULL, buffer, &len);
+  ok(strstr(buffer,"A=B")!=NULL,"A=B missing\n");
+  ok(strstr(buffer,"C=D")!=NULL,"C=D missing\n");
+  ok(strstr(buffer,"E=F")!=NULL,"E=F missing\n");
+  ok(strstr(buffer,"G=H")!=NULL,"G=H missing\n");
+  ok(strstr(buffer,"I=J")!=NULL,"I=J missing\n");
+  ok(strstr(buffer,"K=L")==NULL,"K=L present\n");
+  ok(strstr(buffer,"M=N")==NULL,"M=N present\n");
+
+  len = 1024;
+  ret = InternetGetCookie("http://testing.example.com/foo/bar", NULL, buffer, &len);
+  ok(strstr(buffer,"A=B")!=NULL,"A=B missing\n");
+  ok(strstr(buffer,"C=D")!=NULL,"C=D missing\n");
+  ok(strstr(buffer,"E=F")!=NULL,"E=F missing\n");
+  ok(strstr(buffer,"G=H")!=NULL,"G=H missing\n");
+  ok(strstr(buffer,"I=J")!=NULL,"I=J missing\n");
+  ok(strstr(buffer,"K=L")==NULL,"K=L present\n");
+  ok(strstr(buffer,"M=N")!=NULL,"M=N missing\n");
+
+  len = 1024;
+  ret = InternetGetCookie("http://testing.example.com/barfoo", NULL, buffer, &len);
+  ok(strstr(buffer,"A=B")!=NULL,"A=B missing\n");
+  ok(strstr(buffer,"C=D")!=NULL,"C=D missing\n");
+  ok(strstr(buffer,"E=F")!=NULL,"E=F missing\n");
+  ok(strstr(buffer,"G=H")==NULL,"G=H present\n");
+  ok(strstr(buffer,"I=J")!=NULL,"I=J missing\n");
+  ok(strstr(buffer,"K=L")==NULL,"K=L present\n");
+  ok(strstr(buffer,"M=N")==NULL,"M=N present\n");
+
+  len = 1024;
+  ret = InternetGetCookie("http://testing.example.com/barfoo/", NULL, buffer, &len);
+  ok(strstr(buffer,"A=B")!=NULL,"A=B missing\n");
+  ok(strstr(buffer,"C=D")!=NULL,"C=D missing\n");
+  ok(strstr(buffer,"E=F")!=NULL,"E=F missing\n");
+  ok(strstr(buffer,"G=H")==NULL,"G=H present\n");
+  ok(strstr(buffer,"I=J")!=NULL,"I=J missing\n");
+  ok(strstr(buffer,"K=L")==NULL,"K=L present\n");
+  ok(strstr(buffer,"M=N")==NULL,"M=N present\n");
+
+  len = 1024;
+  ret = InternetGetCookie("http://testing.example.com/bar/foo", NULL, buffer, &len);
+  ok(strstr(buffer,"A=B")!=NULL,"A=B missing\n");
+  ok(strstr(buffer,"C=D")!=NULL,"C=D missing\n");
+  ok(strstr(buffer,"E=F")!=NULL,"E=F missing\n");
+  ok(strstr(buffer,"G=H")==NULL,"G=H present\n");
+  ok(strstr(buffer,"I=J")!=NULL,"I=J missing\n");
+  ok(strstr(buffer,"K=L")!=NULL,"K=L missing\n");
+  ok(strstr(buffer,"M=N")==NULL,"M=N present\n");
+}
+
 static void test_null(void)
 {
   HINTERNET hi, hc;
@@ -256,7 +356,13 @@ static void test_null(void)
   BOOL r;
   DWORD sz;
 
+  SetLastError(0xdeadbeef);
   hi = InternetOpenW(NULL, 0, NULL, NULL, 0);
+  if (hi == NULL && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+  {
+    win_skip("Internet*W functions are not implemented\n");
+    return;
+  }
   ok(hi != NULL, "open failed\n");
 
   hc = InternetConnectW(hi, NULL, 0, NULL, NULL, 0, 0, 0);
@@ -546,7 +652,14 @@ static void test_IsDomainLegalCookieDomainW(void)
     SetLastError(0xdeadbeef);
     ret = pIsDomainLegalCookieDomainW(NULL, NULL);
     error = GetLastError();
-    ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
+    if (!ret && error == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        win_skip("IsDomainLegalCookieDomainW is not implemented\n");
+        return;
+    }
+    ok(!ret ||
+        broken(ret), /* IE6 */
+        "IsDomainLegalCookieDomainW succeeded\n");
     ok(error == ERROR_INVALID_PARAMETER, "got %u expected ERROR_INVALID_PARAMETER\n", error);
 
     SetLastError(0xdeadbeef);
@@ -565,25 +678,33 @@ static void test_IsDomainLegalCookieDomainW(void)
     ret = pIsDomainLegalCookieDomainW(empty, gmail_com);
     error = GetLastError();
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
-    ok(error == ERROR_INVALID_NAME, "got %u expected ERROR_INVALID_NAME\n", error);
+    ok(error == ERROR_INVALID_NAME ||
+        broken(error == ERROR_INVALID_PARAMETER), /* IE6 */
+        "got %u expected ERROR_INVALID_NAME\n", error);
 
     SetLastError(0xdeadbeef);
     ret = pIsDomainLegalCookieDomainW(com, empty);
     error = GetLastError();
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
-    ok(error == ERROR_INVALID_NAME, "got %u expected ERROR_INVALID_NAME\n", error);
+    ok(error == ERROR_INVALID_NAME ||
+        broken(error == ERROR_INVALID_PARAMETER), /* IE6 */
+        "got %u expected ERROR_INVALID_NAME\n", error);
 
     SetLastError(0xdeadbeef);
     ret = pIsDomainLegalCookieDomainW(gmail_com, dot);
     error = GetLastError();
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
-    ok(error == ERROR_INVALID_NAME, "got %u expected ERROR_INVALID_NAME\n", error);
+    ok(error == ERROR_INVALID_NAME ||
+        broken(error == 0xdeadbeef), /* IE6 */
+        "got %u expected ERROR_INVALID_NAME\n", error);
 
     SetLastError(0xdeadbeef);
     ret = pIsDomainLegalCookieDomainW(dot, gmail_com);
     error = GetLastError();
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
-    ok(error == ERROR_INVALID_NAME, "got %u expected ERROR_INVALID_NAME\n", error);
+    ok(error == ERROR_INVALID_NAME ||
+        broken(error == 0xdeadbeef), /* IE6 */
+        "got %u expected ERROR_INVALID_NAME\n", error);
 
     SetLastError(0xdeadbeef);
     ret = pIsDomainLegalCookieDomainW(com, com);
@@ -595,19 +716,25 @@ static void test_IsDomainLegalCookieDomainW(void)
     ret = pIsDomainLegalCookieDomainW(com, dot_com);
     error = GetLastError();
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
-    ok(error == ERROR_INVALID_NAME, "got %u expected ERROR_INVALID_NAME\n", error);
+    ok(error == ERROR_INVALID_NAME ||
+        broken(error == 0xdeadbeef), /* IE6 */
+        "got %u expected ERROR_INVALID_NAME\n", error);
 
     SetLastError(0xdeadbeef);
     ret = pIsDomainLegalCookieDomainW(dot_com, com);
     error = GetLastError();
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
-    ok(error == ERROR_INVALID_NAME, "got %u expected ERROR_INVALID_NAME\n", error);
+    ok(error == ERROR_INVALID_NAME ||
+        broken(error == 0xdeadbeef), /* IE6 */
+        "got %u expected ERROR_INVALID_NAME\n", error);
 
     SetLastError(0xdeadbeef);
     ret = pIsDomainLegalCookieDomainW(com, gmail_com);
     error = GetLastError();
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
-    ok(error == 0xdeadbeef, "got %u expected 0xdeadbeef\n", error);
+    ok(error == ERROR_SXS_KEY_NOT_FOUND ||
+        error == 0xdeadbeef, /* up to IE7 */
+        "got %u expected ERROR_SXS_KEY_NOT_FOUND or 0xdeadbeef\n", error);
 
     ret = pIsDomainLegalCookieDomainW(gmail_com, gmail_com);
     ok(ret, "IsDomainLegalCookieDomainW failed\n");
@@ -615,8 +742,12 @@ static void test_IsDomainLegalCookieDomainW(void)
     SetLastError(0xdeadbeef);
     ret = pIsDomainLegalCookieDomainW(gmail_co_uk, co_uk);
     error = GetLastError();
-    ok(!ret, "IsDomainLegalCookieDomainW failed\n");
-    ok(error == 0xdeadbeef, "got %u expected 0xdeadbeef\n", error);
+    ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
+    ok(error == ERROR_SXS_KEY_NOT_FOUND || /* IE8 on XP */
+        error == ERROR_FILE_NOT_FOUND ||   /* IE8 on Vista */
+        error == 0xdeadbeef, /* up to IE7 */
+        "got %u expected ERROR_SXS_KEY_NOT_FOUND, ERROR_FILE_NOT_FOUND or "
+        "0xdeadbeef\n", error);
 
     ret = pIsDomainLegalCookieDomainW(uk, co_uk);
     ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
@@ -633,8 +764,10 @@ static void test_IsDomainLegalCookieDomainW(void)
     SetLastError(0xdeadbeef);
     ret = pIsDomainLegalCookieDomainW(dot_gmail_com, mail_gmail_com);
     error = GetLastError();
-    ok(!ret, "IsDomainLegalCookieDomainW failed\n");
-    ok(error == ERROR_INVALID_NAME, "got %u expected ERROR_INVALID_NAME\n", error);
+    ok(!ret, "IsDomainLegalCookieDomainW succeeded\n");
+    ok(error == ERROR_INVALID_NAME ||
+        broken(error == 0xdeadbeef), /* IE6 */
+        "got %u expected ERROR_INVALID_NAME\n", error);
 
     ret = pIsDomainLegalCookieDomainW(gmail_com, mail_gmail_com);
     ok(ret, "IsDomainLegalCookieDomainW failed\n");
@@ -658,6 +791,8 @@ START_TEST(internet)
 {
     HMODULE hdll;
     hdll = GetModuleHandleA("wininet.dll");
+    pCreateUrlCacheContainerA = (void*)GetProcAddress(hdll, "CreateUrlCacheContainerA");
+    pCreateUrlCacheContainerW = (void*)GetProcAddress(hdll, "CreateUrlCacheContainerW");
     pInternetTimeFromSystemTimeA = (void*)GetProcAddress(hdll, "InternetTimeFromSystemTimeA");
     pInternetTimeFromSystemTimeW = (void*)GetProcAddress(hdll, "InternetTimeFromSystemTimeW");
     pInternetTimeToSystemTimeA = (void*)GetProcAddress(hdll, "InternetTimeToSystemTimeA");
@@ -667,11 +802,12 @@ START_TEST(internet)
     test_InternetCanonicalizeUrlA();
     test_InternetQueryOptionA();
     test_get_cookie();
+    test_complicated_cookie();
     test_version();
     test_null();
 
     if (!pInternetTimeFromSystemTimeA)
-        skip("skipping the InternetTime tests\n");
+        win_skip("skipping the InternetTime tests\n");
     else
     {
         InternetTimeFromSystemTimeA_test();
@@ -679,8 +815,12 @@ START_TEST(internet)
         InternetTimeToSystemTimeA_test();
         InternetTimeToSystemTimeW_test();
     }
-    if (!pIsDomainLegalCookieDomainW)
-        skip("skipping IsDomainLegalCookieDomainW tests\n");
+    if (pIsDomainLegalCookieDomainW &&
+        ((void*)pIsDomainLegalCookieDomainW == (void*)pCreateUrlCacheContainerA ||
+         (void*)pIsDomainLegalCookieDomainW == (void*)pCreateUrlCacheContainerW))
+        win_skip("IsDomainLegalCookieDomainW is not available on systems with IE5\n");
+    else if (!pIsDomainLegalCookieDomainW)
+        win_skip("IsDomainLegalCookieDomainW (or ordinal 117) is not available\n");
     else
         test_IsDomainLegalCookieDomainW();
 }

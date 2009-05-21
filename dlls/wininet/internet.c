@@ -186,7 +186,8 @@ BOOL WININET_Release( LPWININETHANDLEHEADER info )
             info->vtbl->CloseConnection( info );
         }
         /* Don't send a callback if this is a session handle created with InternetOpenUrl */
-        if (info->htype != WH_HHTTPSESSION || !(info->dwInternalFlags & INET_OPENURL))
+        if ((info->htype != WH_HHTTPSESSION && info->htype != WH_HFTPSESSION)
+            || !(info->dwInternalFlags & INET_OPENURL))
         {
             INTERNET_SendCallback(info, info->dwContext,
                                   INTERNET_STATUS_HANDLE_CLOSING, &info->hInternet,
@@ -2367,8 +2368,35 @@ BOOL WINAPI InternetSetOptionW(HINTERNET hInternet, DWORD dwOption,
     case INTERNET_OPTION_DISABLE_AUTODIAL:
 	 FIXME("Option INTERNET_OPTION_DISABLE_AUTODIAL; STUB\n");
 	 break;
-    case 86:
-        FIXME("86\n");
+    case INTERNET_OPTION_HTTP_DECODING:
+        FIXME("INTERNET_OPTION_HTTP_DECODING; STUB\n");
+        INTERNET_SetLastError(ERROR_INTERNET_INVALID_OPTION);
+        ret = FALSE;
+        break;
+    case INTERNET_OPTION_COOKIES_3RD_PARTY:
+        FIXME("INTERNET_OPTION_COOKIES_3RD_PARTY; STUB\n");
+        INTERNET_SetLastError(ERROR_INTERNET_INVALID_OPTION);
+        ret = FALSE;
+        break;
+    case INTERNET_OPTION_SEND_UTF8_SERVERNAME_TO_PROXY:
+        FIXME("INTERNET_OPTION_SEND_UTF8_SERVERNAME_TO_PROXY; STUB\n");
+        INTERNET_SetLastError(ERROR_INTERNET_INVALID_OPTION);
+        ret = FALSE;
+        break;
+    case INTERNET_OPTION_CODEPAGE_PATH:
+        FIXME("INTERNET_OPTION_CODEPAGE_PATH; STUB\n");
+        INTERNET_SetLastError(ERROR_INTERNET_INVALID_OPTION);
+        ret = FALSE;
+        break;
+    case INTERNET_OPTION_CODEPAGE_EXTRA:
+        FIXME("INTERNET_OPTION_CODEPAGE_EXTRA; STUB\n");
+        INTERNET_SetLastError(ERROR_INTERNET_INVALID_OPTION);
+        ret = FALSE;
+        break;
+    case INTERNET_OPTION_IDN:
+        FIXME("INTERNET_OPTION_IDN; STUB\n");
+        INTERNET_SetLastError(ERROR_INTERNET_INVALID_OPTION);
+        ret = FALSE;
         break;
     default:
         FIXME("Option %d STUB\n",dwOption);

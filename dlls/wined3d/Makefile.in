@@ -11,6 +11,7 @@ C_SRCS = \
 	ati_fragment_shader.c \
 	baseshader.c \
 	basetexture.c \
+	buffer.c \
 	clipper.c \
 	context.c \
 	cubetexture.c \
@@ -19,7 +20,6 @@ C_SRCS = \
 	drawprim.c \
 	gl_compat.c \
 	glsl_shader.c \
-	indexbuffer.c \
 	nvidia_texture_shader.c \
 	palette.c \
 	pixelshader.c \
@@ -35,9 +35,9 @@ C_SRCS = \
 	swapchain_base.c \
 	texture.c \
 	utils.c \
-	vertexbuffer.c \
 	vertexdeclaration.c \
 	vertexshader.c \
+	view.c \
 	volume.c \
 	volumetexture.c \
 	wined3d_main.c

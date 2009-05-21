@@ -110,15 +110,15 @@ static inline IGenericSFImpl *impl_from_ISFHelper( ISFHelper *iface )
 /*
   converts This to an interface pointer
 */
-#define _IUnknown_(This)        (IUnknown*)&(This->lpVtbl)
-#define _IShellFolder_(This)    (IShellFolder*)&(This->lpvtblShellFolder)
-#define _IShellFolder2_(This)   (IShellFolder2*)&(This->lpvtblShellFolder)
-#define _IPersist_(This)        (IPersist*)&(This->lpvtblPersistFolder3)
-#define _IPersistFolder_(This)  (IPersistFolder*)&(This->lpvtblPersistFolder3)
-#define _IPersistFolder2_(This) (IPersistFolder2*)&(This->lpvtblPersistFolder3)
-#define _IPersistFolder3_(This) (IPersistFolder3*)&(This->lpvtblPersistFolder3)
-#define _IDropTarget_(This)     (IDropTarget*)&(This->lpvtblDropTarget)
-#define _ISFHelper_(This)       (ISFHelper*)&(This->lpvtblSFHelper)
+#define _IUnknown_(This)        ((IUnknown*)&(This)->lpVtbl)
+#define _IShellFolder_(This)    ((IShellFolder*)&(This)->lpvtblShellFolder)
+#define _IShellFolder2_(This)   ((IShellFolder2*)&(This)->lpvtblShellFolder)
+#define _IPersist_(This)        (&(This)->lpvtblPersistFolder3)
+#define _IPersistFolder_(This)  (&(This)->lpvtblPersistFolder3)
+#define _IPersistFolder2_(This) (&(This)->lpvtblPersistFolder3)
+#define _IPersistFolder3_(This) (&(This)->lpvtblPersistFolder3)
+#define _IDropTarget_(This)     (&(This)->lpvtblDropTarget)
+#define _ISFHelper_(This)       (&(This)->lpvtblSFHelper)
 
 /**************************************************************************
 * registers clipboardformat once
@@ -196,7 +196,7 @@ static ULONG WINAPI IUnknown_fnRelease (IUnknown * iface)
 
         SHFree (This->pidlRoot);
         SHFree (This->sPathTarget);
-        LocalFree ((HLOCAL) This);
+        LocalFree (This);
     }
     return refCount;
 }
@@ -324,7 +324,7 @@ LPITEMIDLIST SHELL32_CreatePidlFromBindCtx(IBindCtx *pbc, LPCWSTR path)
         return NULL;
 
     /* see if the caller bound File System Bind Data */
-    r = IBindCtx_GetObjectParam( pbc, (LPOLESTR) szfsbc, &param );
+    r = IBindCtx_GetObjectParam( pbc, szfsbc, &param );
     if (FAILED(r))
         return NULL;
 

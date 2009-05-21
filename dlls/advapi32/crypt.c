@@ -54,7 +54,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(crypt);
 static HWND crypt_hWindow;
 
 #define CRYPT_Alloc(size) (LocalAlloc(LMEM_ZEROINIT, size))
-#define CRYPT_Free(buffer) (LocalFree((HLOCAL)buffer))
+#define CRYPT_Free(buffer) (LocalFree(buffer))
 
 static inline PWSTR CRYPT_GetProvKeyName(PCWSTR pProvName)
 {
@@ -2243,7 +2243,7 @@ BOOL WINAPI CryptVerifySignatureA (HCRYPTHASH hHash, CONST BYTE *pbSignature, DW
  *  TRUE  if blocks are the same
  *  FALSE if blocks are different
  */
-BOOL WINAPI SystemFunction030(PVOID b1, PVOID b2)
+BOOL WINAPI SystemFunction030(LPCVOID b1, LPCVOID b2)
 {
     return !memcmp(b1, b2, 0x10);
 }

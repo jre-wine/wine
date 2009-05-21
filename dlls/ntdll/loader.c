@@ -39,7 +39,6 @@
 
 #include "wine/exception.h"
 #include "wine/library.h"
-#include "wine/pthread.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 #include "wine/server.h"
@@ -55,8 +54,6 @@ WINE_DECLARE_DEBUG_CHANNEL(imports);
 /* we don't want to include winuser.h */
 #define RT_MANIFEST                         ((ULONG_PTR)24)
 #define ISOLATIONAWARE_MANIFEST_RESOURCE_ID ((ULONG_PTR)2)
-
-extern struct wine_pthread_functions pthread_functions;
 
 typedef DWORD (CALLBACK *DLLENTRYPROC)(HMODULE,DWORD,LPVOID);
 
@@ -1228,13 +1225,13 @@ NTSTATUS WINAPI LdrFindEntryForAddress(const void* addr, PLDR_MODULE* pmod)
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
         mod = CONTAINING_RECORD(entry, LDR_MODULE, InMemoryOrderModuleList);
-        if ((const void *)mod->BaseAddress <= addr &&
+        if (mod->BaseAddress <= addr &&
             (const char *)addr < (char*)mod->BaseAddress + mod->SizeOfImage)
         {
             *pmod = mod;
             return STATUS_SUCCESS;
         }
-        if ((const void *)mod->BaseAddress > addr) break;
+        if (mod->BaseAddress > addr) break;
     }
     return STATUS_NO_MORE_ENTRIES;
 }
@@ -2426,7 +2423,7 @@ static NTSTATUS attach_process_dlls( void *wm )
 {
     NTSTATUS status;
 
-    pthread_functions.sigprocmask( SIG_UNBLOCK, &server_block_set, NULL );
+    pthread_sigmask( SIG_UNBLOCK, &server_block_set, NULL );
 
     RtlEnterCriticalSection( &loader_section );
     if ((status = process_attach( wm, (LPVOID)1 )) != STATUS_SUCCESS)
@@ -2451,7 +2448,6 @@ void WINAPI LdrInitializeThunk( ULONG unknown1, ULONG unknown2, ULONG unknown3, 
     NTSTATUS status;
     WINE_MODREF *wm;
     LPCWSTR load_path;
-    SIZE_T stack_size;
     PEB *peb = NtCurrentTeb()->Peb;
     IMAGE_NT_HEADERS *nt = RtlImageNtHeader( peb->ImageBaseAddress );
 
@@ -2474,10 +2470,7 @@ void WINAPI LdrInitializeThunk( ULONG unknown1, ULONG unknown2, ULONG unknown3, 
     RemoveEntryList( &wm->ldr.InLoadOrderModuleList );
     InsertHeadList( &peb->LdrData->InLoadOrderModuleList, &wm->ldr.InLoadOrderModuleList );
 
-    stack_size = max( nt->OptionalHeader.SizeOfStackReserve, nt->OptionalHeader.SizeOfStackCommit );
-    if (stack_size < 1024 * 1024) stack_size = 1024 * 1024;  /* Xlib needs a large stack */
-
-    if ((status = virtual_alloc_thread_stack( NULL, stack_size )) != STATUS_SUCCESS) goto error;
+    if ((status = virtual_alloc_thread_stack( NtCurrentTeb(), 0, 0 )) != STATUS_SUCCESS) goto error;
     if ((status = server_init_process_done()) != STATUS_SUCCESS) goto error;
 
     actctx_init();

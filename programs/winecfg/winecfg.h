@@ -107,7 +107,7 @@ struct drive
 
 #define DRIVE_MASK_BIT(B) (1 << (toupper(B) - 'A'))
 
-long drive_available_mask(char letter);
+ULONG drive_available_mask(char letter);
 BOOL add_drive(char letter, const char *targetpath, const char *device,
                const WCHAR *label, DWORD serial, DWORD type);
 void delete_drive(struct drive *pDrive);
@@ -133,6 +133,19 @@ static inline WCHAR *strdupW(const WCHAR *s)
 {
     WCHAR *r = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(s)+1)*sizeof(WCHAR));
     return lstrcpyW(r, s);
+}
+
+/* create a unicode string from a string in Unix locale */
+static inline WCHAR *strdupU2W(const char *unix_str)
+{
+    WCHAR *unicode_str;
+    int lenW;
+
+    lenW = MultiByteToWideChar(CP_UNIXCP, 0, unix_str, -1, NULL, 0);
+    unicode_str = HeapAlloc(GetProcessHeap(), 0, lenW * sizeof(WCHAR));
+    if (unicode_str)
+        MultiByteToWideChar(CP_UNIXCP, 0, unix_str, -1, unicode_str, lenW);
+    return unicode_str;
 }
 
 static inline char *get_text(HWND dialog, WORD id)

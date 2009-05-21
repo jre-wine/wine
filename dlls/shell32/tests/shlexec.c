@@ -1212,7 +1212,7 @@ typedef struct
 
 static DWORD CALLBACK ddeThread(LPVOID arg)
 {
-    dde_thread_info_t *info = (dde_thread_info_t *)arg;
+    dde_thread_info_t *info = arg;
     assert(info && info->filename);
     PostThreadMessage(info->threadIdParent,
                       WM_QUIT,
@@ -1266,7 +1266,7 @@ static void test_dde(void)
         denyNextConnection = TRUE;
         ddeExec[0] = 0;
 
-        assert(CreateThread(NULL, 0, ddeThread, (LPVOID)&info, 0, &threadId));
+        assert(CreateThread(NULL, 0, ddeThread, &info, 0, &threadId));
         while (GetMessage(&msg, NULL, 0, 0)) DispatchMessage(&msg);
         rc = msg.wParam > 32 ? 33 : msg.wParam;
         if ((test->todo & 0x1)==0)
@@ -1419,7 +1419,7 @@ static void test_dde_default_app(void)
          * so don't wait for it */
         SetEvent(hEvent);
 
-        assert(CreateThread(NULL, 0, ddeThread, (LPVOID)&info, 0, &threadId));
+        assert(CreateThread(NULL, 0, ddeThread, &info, 0, &threadId));
         while (GetMessage(&msg, NULL, 0, 0)) DispatchMessage(&msg);
         rc = msg.wParam > 32 ? 33 : msg.wParam;
 
@@ -1616,6 +1616,7 @@ static void test_commandline(void)
     static const WCHAR fmt3[] = {'%','s','=','%','s',' ','%','s','=','\"','%','s','\"',0};
     static const WCHAR fmt4[] = {'\"','%','s','\"',' ','\"','%','s',' ','%','s','\"',' ','%','s',0};
     static const WCHAR fmt5[] = {'\\','\"','%','s','\"',' ','%','s','=','\"','%','s','\\','\"',' ','\"','%','s','\\','\"',0};
+    static const WCHAR fmt6[] = {0};
 
     static const WCHAR chkfmt1[] = {'%','s','=','%','s',0};
     static const WCHAR chkfmt2[] = {'%','s',' ','%','s',0};
@@ -1670,6 +1671,10 @@ static void test_commandline(void)
     todo_wine ok(lstrcmpW(args[0],cmdline)==0,"arg0 is not as expected\n");
     wsprintfW(cmdline,chkfmt4,two,three,four);
     todo_wine ok(lstrcmpW(args[1],cmdline)==0,"arg1 is not as expected\n");
+
+    wsprintfW(cmdline,fmt6);
+    args=CommandLineToArgvW(cmdline,&numargs);
+    ok(numargs == 1, "expected 1 args, got %i\n",numargs);
 }
 
 START_TEST(shlexec)

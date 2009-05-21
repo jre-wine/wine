@@ -196,6 +196,36 @@ static char *dup_basename_token(const char *name, const char *ext)
     return ret;
 }
 
+static void add_widl_version_define(void)
+{
+    unsigned int version;
+    const char *p = PACKAGE_VERSION;
+
+    /* major */
+    version = atoi(p) * 0x10000;
+    p = strchr(p, '.');
+
+    /* minor */
+    if (p)
+    {
+        version += atoi(p + 1) * 0x100;
+        p = strchr(p + 1, '.');
+    }
+
+    /* build */
+    if (p)
+        version += atoi(p + 1);
+
+    if (version != 0)
+    {
+        char version_str[11];
+        snprintf(version_str, sizeof(version_str), "0x%x", version);
+        wpp_add_define("__WIDL__", version_str);
+    }
+    else
+        wpp_add_define("__WIDL__", NULL);
+}
+
 /* clean things up when aborting on a signal */
 static void exit_on_signal( int sig )
 {
@@ -349,7 +379,7 @@ static void write_id_data_stmts(const statement_list_t *stmts)
     if (stmt->type == STMT_TYPE)
     {
       const type_t *type = stmt->u.type;
-      if (type->type == RPC_FC_IP)
+      if (type_get_type(type) == TYPE_INTERFACE)
       {
         const UUID *uuid;
         if (!is_object(type->attrs) && !is_attr(type->attrs, ATTR_DISPINTERFACE))
@@ -358,7 +388,7 @@ static void write_id_data_stmts(const statement_list_t *stmts)
         write_guid(idfile, is_attr(type->attrs, ATTR_DISPINTERFACE) ? "DIID" : "IID",
                    type->name, uuid);
       }
-      else if (type->type == RPC_FC_COCLASS)
+      else if (type_get_type(type) == TYPE_COCLASS)
       {
         const UUID *uuid = get_attrp(type->attrs, ATTR_UUID);
         write_guid(idfile, "CLSID", type->name, uuid);
@@ -596,7 +626,7 @@ int main(int argc,char *argv[])
   if (do_client) client_token = dup_basename_token(client_name,"_c.c");
   if (do_server) server_token = dup_basename_token(server_name,"_s.c");
 
-  wpp_add_cmdline_define("__WIDL__");
+  add_widl_version_define();
 
   atexit(rm_tempfile);
   if (!no_preprocess)
