@@ -13,8 +13,10 @@ libwine-gl	d3dx9_*.dll.so
 libwine-gl	d3dxof.dll.so
 libwine-gl	glu32.dll.so
 libwine-gl	opengl32.dll.so
+libwine-gphoto2	gphoto2.ds.so
 libwine-jack	winejack.drv.so
 libwine-ldap	wldap32.dll.so
 libwine-nas	winenas.drv.so
 libwine-oss	wineoss.drv.so
 libwine-print	wineps.drv.so
+libwine-sane	sane.ds.so
