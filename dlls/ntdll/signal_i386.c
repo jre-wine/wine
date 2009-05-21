@@ -55,6 +55,8 @@
 # include <sys/sysctl.h>
 #endif
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "wine/library.h"
 #include "ntdll_misc.h"
@@ -199,7 +201,7 @@ typedef struct trapframe SIGCONTEXT;
 
 #endif /* bsdi */
 
-#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__OpenBSD__)
+#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
 
 typedef struct sigcontext SIGCONTEXT;
 
@@ -228,7 +230,41 @@ typedef struct sigcontext SIGCONTEXT;
 #define FPU_sig(context)     NULL  /* FIXME */
 #define FPUX_sig(context)    NULL  /* FIXME */
 
-#endif  /* *BSD */
+#endif  /* __FreeBSD__ */
+
+#ifdef __OpenBSD__
+
+typedef struct sigcontext SIGCONTEXT;
+
+#define EAX_sig(context)     ((context)->sc_eax)
+#define EBX_sig(context)     ((context)->sc_ebx)
+#define ECX_sig(context)     ((context)->sc_ecx)
+#define EDX_sig(context)     ((context)->sc_edx)
+#define ESI_sig(context)     ((context)->sc_esi)
+#define EDI_sig(context)     ((context)->sc_edi)
+#define EBP_sig(context)     ((context)->sc_ebp)
+
+#define CS_sig(context)      ((context)->sc_cs)
+#define DS_sig(context)      ((context)->sc_ds)
+#define ES_sig(context)      ((context)->sc_es)
+#define FS_sig(context)      ((context)->sc_fs)
+#define GS_sig(context)      ((context)->sc_gs)
+#define SS_sig(context)      ((context)->sc_ss)
+
+#define TRAP_sig(context)    ((context)->sc_trapno)
+#define ERROR_sig(context)   ((context)->sc_err)
+#define EFL_sig(context)     ((context)->sc_eflags)
+
+#define EIP_sig(context)     ((context)->sc_eip)
+#define ESP_sig(context)     ((context)->sc_esp)
+
+#define FPU_sig(context)     NULL  /* FIXME */
+#define FPUX_sig(context)    NULL  /* FIXME */
+
+#define T_MCHK T_MACHK
+#define T_XMMFLT T_XFTRAP
+
+#endif  /* __OpenBSD__ */
 
 #if defined(__svr4__) || defined(_SCO_DS) || defined(__sun)
 
@@ -593,7 +629,7 @@ static void merge_vm86_pending_flags( EXCEPTION_RECORD *rec )
 
             vcontext.EFlags &= ~VIP_FLAG;
             get_vm86_teb_info()->vm86_pending = 0;
-            __regs_RtlRaiseException( rec, &vcontext );
+            raise_exception( rec, &vcontext, TRUE );
 
             restore_vm86_context( &vcontext, vm86 );
             check_pending = TRUE;
@@ -1031,6 +1067,148 @@ void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags )
 
 
 /***********************************************************************
+ *           context_to_server
+ *
+ * Convert a register context to the server format.
+ */
+NTSTATUS context_to_server( context_t *to, const CONTEXT *from )
+{
+    DWORD flags = from->ContextFlags & ~CONTEXT_i386;  /* get rid of CPU id */
+
+    memset( to, 0, sizeof(*to) );
+    to->cpu = CPU_x86;
+
+    if (flags & CONTEXT_CONTROL)
+    {
+        to->flags |= SERVER_CTX_CONTROL;
+        to->ctl.i386_regs.ebp    = from->Ebp;
+        to->ctl.i386_regs.esp    = from->Esp;
+        to->ctl.i386_regs.eip    = from->Eip;
+        to->ctl.i386_regs.cs     = from->SegCs;
+        to->ctl.i386_regs.ss     = from->SegSs;
+        to->ctl.i386_regs.eflags = from->EFlags;
+    }
+    if (flags & CONTEXT_INTEGER)
+    {
+        to->flags |= SERVER_CTX_INTEGER;
+        to->integer.i386_regs.eax = from->Eax;
+        to->integer.i386_regs.ebx = from->Ebx;
+        to->integer.i386_regs.ecx = from->Ecx;
+        to->integer.i386_regs.edx = from->Edx;
+        to->integer.i386_regs.esi = from->Esi;
+        to->integer.i386_regs.edi = from->Edi;
+    }
+    if (flags & CONTEXT_SEGMENTS)
+    {
+        to->flags |= SERVER_CTX_SEGMENTS;
+        to->seg.i386_regs.ds = from->SegDs;
+        to->seg.i386_regs.es = from->SegEs;
+        to->seg.i386_regs.fs = from->SegFs;
+        to->seg.i386_regs.gs = from->SegGs;
+    }
+    if (flags & CONTEXT_FLOATING_POINT)
+    {
+        to->flags |= SERVER_CTX_FLOATING_POINT;
+        to->fp.i386_regs.ctrl     = from->FloatSave.ControlWord;
+        to->fp.i386_regs.status   = from->FloatSave.StatusWord;
+        to->fp.i386_regs.tag      = from->FloatSave.TagWord;
+        to->fp.i386_regs.err_off  = from->FloatSave.ErrorOffset;
+        to->fp.i386_regs.err_sel  = from->FloatSave.ErrorSelector;
+        to->fp.i386_regs.data_off = from->FloatSave.DataOffset;
+        to->fp.i386_regs.data_sel = from->FloatSave.DataSelector;
+        to->fp.i386_regs.cr0npx   = from->FloatSave.Cr0NpxState;
+        memcpy( to->fp.i386_regs.regs, from->FloatSave.RegisterArea, sizeof(to->fp.i386_regs.regs) );
+    }
+    if (flags & CONTEXT_DEBUG_REGISTERS)
+    {
+        to->flags |= SERVER_CTX_DEBUG_REGISTERS;
+        to->debug.i386_regs.dr0 = from->Dr0;
+        to->debug.i386_regs.dr1 = from->Dr1;
+        to->debug.i386_regs.dr2 = from->Dr2;
+        to->debug.i386_regs.dr3 = from->Dr3;
+        to->debug.i386_regs.dr6 = from->Dr6;
+        to->debug.i386_regs.dr7 = from->Dr7;
+    }
+    if (flags & CONTEXT_EXTENDED_REGISTERS)
+    {
+        to->flags |= SERVER_CTX_EXTENDED_REGISTERS;
+        memcpy( to->ext.i386_regs, from->ExtendedRegisters, sizeof(to->ext.i386_regs) );
+    }
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *           context_from_server
+ *
+ * Convert a register context from the server format.
+ */
+NTSTATUS context_from_server( CONTEXT *to, const context_t *from )
+{
+    if (from->cpu != CPU_x86) return STATUS_INVALID_PARAMETER;
+
+    to->ContextFlags = CONTEXT_i386;
+    if (from->flags & SERVER_CTX_CONTROL)
+    {
+        to->ContextFlags |= CONTEXT_CONTROL;
+        to->Ebp    = from->ctl.i386_regs.ebp;
+        to->Esp    = from->ctl.i386_regs.esp;
+        to->Eip    = from->ctl.i386_regs.eip;
+        to->SegCs  = from->ctl.i386_regs.cs;
+        to->SegSs  = from->ctl.i386_regs.ss;
+        to->EFlags = from->ctl.i386_regs.eflags;
+    }
+    if (from->flags & SERVER_CTX_INTEGER)
+    {
+        to->ContextFlags |= CONTEXT_INTEGER;
+        to->Eax = from->integer.i386_regs.eax;
+        to->Ebx = from->integer.i386_regs.ebx;
+        to->Ecx = from->integer.i386_regs.ecx;
+        to->Edx = from->integer.i386_regs.edx;
+        to->Esi = from->integer.i386_regs.esi;
+        to->Edi = from->integer.i386_regs.edi;
+    }
+    if (from->flags & SERVER_CTX_SEGMENTS)
+    {
+        to->ContextFlags |= CONTEXT_SEGMENTS;
+        to->SegDs = from->seg.i386_regs.ds;
+        to->SegEs = from->seg.i386_regs.es;
+        to->SegFs = from->seg.i386_regs.fs;
+        to->SegGs = from->seg.i386_regs.gs;
+    }
+    if (from->flags & SERVER_CTX_FLOATING_POINT)
+    {
+        to->ContextFlags |= CONTEXT_FLOATING_POINT;
+        to->FloatSave.ControlWord   = from->fp.i386_regs.ctrl;
+        to->FloatSave.StatusWord    = from->fp.i386_regs.status;
+        to->FloatSave.TagWord       = from->fp.i386_regs.tag;
+        to->FloatSave.ErrorOffset   = from->fp.i386_regs.err_off;
+        to->FloatSave.ErrorSelector = from->fp.i386_regs.err_sel;
+        to->FloatSave.DataOffset    = from->fp.i386_regs.data_off;
+        to->FloatSave.DataSelector  = from->fp.i386_regs.data_sel;
+        to->FloatSave.Cr0NpxState   = from->fp.i386_regs.cr0npx;
+        memcpy( to->FloatSave.RegisterArea, from->fp.i386_regs.regs, sizeof(to->FloatSave.RegisterArea) );
+    }
+    if (from->flags & SERVER_CTX_DEBUG_REGISTERS)
+    {
+        to->ContextFlags |= CONTEXT_DEBUG_REGISTERS;
+        to->Dr0 = from->debug.i386_regs.dr0;
+        to->Dr1 = from->debug.i386_regs.dr1;
+        to->Dr2 = from->debug.i386_regs.dr2;
+        to->Dr3 = from->debug.i386_regs.dr3;
+        to->Dr6 = from->debug.i386_regs.dr6;
+        to->Dr7 = from->debug.i386_regs.dr7;
+    }
+    if (from->flags & SERVER_CTX_EXTENDED_REGISTERS)
+    {
+        to->ContextFlags |= CONTEXT_EXTENDED_REGISTERS;
+        memcpy( to->ExtendedRegisters, from->ext.i386_regs, sizeof(to->ExtendedRegisters) );
+    }
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
  *           is_privileged_instr
  *
  * Check if the fault location is a privileged instruction.
@@ -1292,6 +1470,8 @@ static inline DWORD get_fpu_code( const CONTEXT *context )
  */
 static void WINAPI raise_segv_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
+    NTSTATUS status;
+
     switch(rec->ExceptionCode)
     {
     case EXCEPTION_ACCESS_VIOLATION:
@@ -1314,7 +1494,8 @@ static void WINAPI raise_segv_exception( EXCEPTION_RECORD *rec, CONTEXT *context
         }
         break;
     }
-    __regs_RtlRaiseException( rec, context );
+    status = NtRaiseException( rec, context, TRUE );
+    if (status) raise_status( status, rec );
 done:
     NtSetContextThread( GetCurrentThread(), context );
 }
@@ -1325,6 +1506,8 @@ done:
  */
 static void WINAPI raise_trap_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
+    NTSTATUS status;
+
     if (rec->ExceptionCode == EXCEPTION_SINGLE_STEP)
     {
         struct ntdll_thread_regs * const regs = ntdll_get_thread_regs();
@@ -1344,20 +1527,22 @@ static void WINAPI raise_trap_exception( EXCEPTION_RECORD *rec, CONTEXT *context
         context->EFlags &= ~0x100;  /* clear single-step flag */
     }
 
-    __regs_RtlRaiseException( rec, context );
-    NtSetContextThread( GetCurrentThread(), context );
+    status = NtRaiseException( rec, context, TRUE );
+    if (status) raise_status( status, rec );
 }
 
 
 /**********************************************************************
- *		raise_exception
+ *		raise_generic_exception
  *
  * Generic raise function for exceptions that don't need special treatment.
  */
-static void WINAPI raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
+static void WINAPI raise_generic_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
-    __regs_RtlRaiseException( rec, context );
-    NtSetContextThread( GetCurrentThread(), context );
+    NTSTATUS status;
+
+    status = NtRaiseException( rec, context, TRUE );
+    if (status) raise_status( status, rec );
 }
 
 
@@ -1386,7 +1571,7 @@ static void WINAPI raise_vm86_sti_exception( EXCEPTION_RECORD *rec, CONTEXT *con
     {
         /* Executing DPMI code and virtual interrupts are enabled. */
         get_vm86_teb_info()->vm86_pending = 0;
-        __regs_RtlRaiseException( rec, context );
+        NtRaiseException( rec, context, TRUE );
     }
 done:
     NtSetContextThread( GetCurrentThread(), context );
@@ -1527,7 +1712,7 @@ static void fpe_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     CONTEXT *win_context;
     SIGCONTEXT *context = sigcontext;
-    EXCEPTION_RECORD *rec = setup_exception( context, raise_exception );
+    EXCEPTION_RECORD *rec = setup_exception( context, raise_generic_exception );
 
     win_context = get_exception_context( rec );
 
@@ -1578,7 +1763,7 @@ static void int_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     init_handler( sigcontext, &fs, &gs );
     if (!dispatch_signal(SIGINT))
     {
-        EXCEPTION_RECORD *rec = setup_exception( sigcontext, raise_exception );
+        EXCEPTION_RECORD *rec = setup_exception( sigcontext, raise_generic_exception );
         rec->ExceptionCode = CONTROL_C_EXIT;
     }
 }
@@ -1590,7 +1775,7 @@ static void int_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  */
 static void abrt_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
-    EXCEPTION_RECORD *rec = setup_exception( sigcontext, raise_exception );
+    EXCEPTION_RECORD *rec = setup_exception( sigcontext, raise_generic_exception );
     rec->ExceptionCode  = EXCEPTION_WINE_ASSERTION;
     rec->ExceptionFlags = EH_NONCONTINUABLE;
 }
@@ -1808,7 +1993,7 @@ void __wine_enter_vm86( CONTEXT *context )
             WINE_ERR( "unhandled result from vm86 mode %x\n", res );
             continue;
         }
-        __regs_RtlRaiseException( &rec, context );
+        raise_exception( &rec, context, TRUE );
     }
 }
 
@@ -1821,6 +2006,21 @@ void __wine_enter_vm86( CONTEXT *context )
     MESSAGE("vm86 mode not supported on this platform\n");
 }
 #endif /* __HAVE_VM86 */
+
+
+/***********************************************************************
+ *		RtlRaiseException (NTDLL.@)
+ */
+void WINAPI __regs_RtlRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context )
+{
+    NTSTATUS status;
+
+    rec->ExceptionAddress = (void *)context->Eip;
+    status = raise_exception( rec, context, TRUE );
+    if (status != STATUS_SUCCESS) raise_status( status, rec );
+}
+DEFINE_REGS_ENTRYPOINT( RtlRaiseException, 1 )
+
 
 /**********************************************************************
  *		DbgBreakPoint   (NTDLL.@)

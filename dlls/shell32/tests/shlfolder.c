@@ -473,7 +473,7 @@ static void test_GetDisplayName(void)
         IShellFolder_Release(psfFile);
     }
 
-    if(!pSHBindToParent)
+    if (!pSHBindToParent)
     {
         win_skip("SHBindToParent is missing\n");
         DeleteFileA(szTestFile);
@@ -482,37 +482,42 @@ static void test_GetDisplayName(void)
     }
   
     /* Some tests for IShellFolder::SetNameOf */
-    hr = pSHBindToParent(pidlTestFile, &IID_IShellFolder, (VOID**)&psfPersonal, &pidlLast);
-    ok(SUCCEEDED(hr), "SHBindToParent failed! hr = %08x\n", hr);
-    if (SUCCEEDED(hr)) {
-        /* It's ok to use this fixed path. Call will fail anyway. */
-        WCHAR wszAbsoluteFilename[] = { 'C',':','\\','w','i','n','e','t','e','s','t', 0 };
-        LPITEMIDLIST pidlNew;
+    if (pSHGetFolderPathAndSubDirA)
+    {
+        hr = pSHBindToParent(pidlTestFile, &IID_IShellFolder, (VOID**)&psfPersonal, &pidlLast);
+        ok(SUCCEEDED(hr), "SHBindToParent failed! hr = %08x\n", hr);
+        if (SUCCEEDED(hr)) {
+            /* It's ok to use this fixed path. Call will fail anyway. */
+            WCHAR wszAbsoluteFilename[] = { 'C',':','\\','w','i','n','e','t','e','s','t', 0 };
+            LPITEMIDLIST pidlNew;
 
-        /* The pidl returned through the last parameter of SetNameOf is a simple one. */
-        hr = IShellFolder_SetNameOf(psfPersonal, NULL, pidlLast, wszDirName, SHGDN_NORMAL, &pidlNew);
-        ok (SUCCEEDED(hr), "SetNameOf failed! hr = %08x\n", hr);
-        if(hr == S_OK)
-        {
-            ok (((LPITEMIDLIST)((LPBYTE)pidlNew+pidlNew->mkid.cb))->mkid.cb == 0,
-                "pidl returned from SetNameOf should be simple!\n");
-
-            /* Passing an absolute path to SetNameOf fails. The HRESULT code indicates that SetNameOf
-             * is implemented on top of SHFileOperation in WinXP. */
-            hr = IShellFolder_SetNameOf(psfPersonal, NULL, pidlNew, wszAbsoluteFilename,
-                    SHGDN_FORPARSING, NULL);
-            ok (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED), "SetNameOf succeeded! hr = %08x\n", hr);
-
-            /* Rename the file back to its original name. SetNameOf ignores the fact, that the
-             * SHGDN flags specify an absolute path. */
-            hr = IShellFolder_SetNameOf(psfPersonal, NULL, pidlNew, wszFileName, SHGDN_FORPARSING, NULL);
+            /* The pidl returned through the last parameter of SetNameOf is a simple one. */
+            hr = IShellFolder_SetNameOf(psfPersonal, NULL, pidlLast, wszDirName, SHGDN_NORMAL, &pidlNew);
             ok (SUCCEEDED(hr), "SetNameOf failed! hr = %08x\n", hr);
+            if (hr == S_OK)
+            {
+                ok (((LPITEMIDLIST)((LPBYTE)pidlNew+pidlNew->mkid.cb))->mkid.cb == 0,
+                    "pidl returned from SetNameOf should be simple!\n");
 
-            pILFree(pidlNew);
+                /* Passing an absolute path to SetNameOf fails. The HRESULT code indicates that SetNameOf
+                 * is implemented on top of SHFileOperation in WinXP. */
+                hr = IShellFolder_SetNameOf(psfPersonal, NULL, pidlNew, wszAbsoluteFilename,
+                        SHGDN_FORPARSING, NULL);
+                ok (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED), "SetNameOf succeeded! hr = %08x\n", hr);
+
+                /* Rename the file back to its original name. SetNameOf ignores the fact, that the
+                 * SHGDN flags specify an absolute path. */
+                hr = IShellFolder_SetNameOf(psfPersonal, NULL, pidlNew, wszFileName, SHGDN_FORPARSING, NULL);
+                ok (SUCCEEDED(hr), "SetNameOf failed! hr = %08x\n", hr);
+
+                pILFree(pidlNew);
+            }
+
+            IShellFolder_Release(psfPersonal);
         }
-
-        IShellFolder_Release(psfPersonal);
     }
+    else
+        win_skip("Avoid needs of interaction on Win2k\n");
 
     /* Deleting the file and the directory */
     DeleteFileA(szTestFile);
@@ -695,12 +700,31 @@ static void test_GetAttributesOf(void)
     LPCITEMIDLIST pidlEmpty = (LPCITEMIDLIST)&emptyitem;
     LPITEMIDLIST pidlMyComputer;
     DWORD dwFlags;
-    static const DWORD dwDesktopFlags = /* As observed on WinXP SP2 */
-        SFGAO_STORAGE | SFGAO_HASPROPSHEET | SFGAO_STORAGEANCESTOR |
-        SFGAO_FILESYSANCESTOR | SFGAO_FOLDER | SFGAO_FILESYSTEM | SFGAO_HASSUBFOLDER;
-    static const DWORD dwMyComputerFlags = /* As observed on WinXP SP2 */
-        SFGAO_CANRENAME | SFGAO_CANDELETE | SFGAO_HASPROPSHEET |
-        SFGAO_DROPTARGET | SFGAO_FILESYSANCESTOR | SFGAO_FOLDER | SFGAO_HASSUBFOLDER;
+    static const DWORD desktopFlags[] = {
+        /* WinXP */
+        SFGAO_STORAGE | SFGAO_HASPROPSHEET | SFGAO_STORAGEANCESTOR | SFGAO_FILESYSANCESTOR |
+        SFGAO_FOLDER | SFGAO_FILESYSTEM | SFGAO_HASSUBFOLDER,
+        /* Win2k */
+        SFGAO_CANRENAME | SFGAO_HASPROPSHEET | SFGAO_STREAM | SFGAO_FILESYSANCESTOR |
+        SFGAO_FOLDER | SFGAO_FILESYSTEM | SFGAO_HASSUBFOLDER,
+        /* WinMe, Win9x, WinNT*/
+        SFGAO_CANRENAME | SFGAO_HASPROPSHEET | SFGAO_FILESYSANCESTOR |
+        SFGAO_FOLDER | SFGAO_FILESYSTEM | SFGAO_HASSUBFOLDER
+    };
+    static const DWORD myComputerFlags[] = {
+        /* WinXP */
+        SFGAO_CANRENAME | SFGAO_CANDELETE | SFGAO_HASPROPSHEET | SFGAO_DROPTARGET |
+        SFGAO_FILESYSANCESTOR | SFGAO_FOLDER | SFGAO_HASSUBFOLDER,
+        /* Win2k */
+        SFGAO_CANRENAME | SFGAO_HASPROPSHEET | SFGAO_DROPTARGET | SFGAO_STREAM |
+        SFGAO_FILESYSANCESTOR | SFGAO_FOLDER | SFGAO_HASSUBFOLDER,
+        /* WinMe, Win9x, WinNT */
+        SFGAO_CANRENAME | SFGAO_HASPROPSHEET | SFGAO_DROPTARGET | SFGAO_FILESYSANCESTOR |
+        SFGAO_FOLDER | SFGAO_HASSUBFOLDER,
+        /* Win95, WinNT when queried directly */
+        SFGAO_CANLINK | SFGAO_HASPROPSHEET | SFGAO_DROPTARGET | SFGAO_FILESYSANCESTOR |
+        SFGAO_FOLDER | SFGAO_FILESYSTEM | SFGAO_HASSUBFOLDER
+    };
     WCHAR wszMyComputer[] = { 
         ':',':','{','2','0','D','0','4','F','E','0','-','3','A','E','A','-','1','0','6','9','-',
         'A','2','D','8','-','0','8','0','0','2','B','3','0','3','0','9','D','}',0 };
@@ -709,7 +733,8 @@ static void test_GetAttributesOf(void)
     static WCHAR cTestDirW[] = {'t','e','s','t','d','i','r',0};
     IShellFolder *IDesktopFolder, *testIShellFolder;
     ITEMIDLIST *newPIDL;
-    int len;
+    int len, i;
+    BOOL foundFlagsMatch;
 
     hr = SHGetDesktopFolder(&psfDesktop);
     ok (SUCCEEDED(hr), "SHGetDesktopFolder failed! hr = %08x\n", hr);
@@ -719,15 +744,25 @@ static void test_GetAttributesOf(void)
     dwFlags = 0xffffffff;
     hr = IShellFolder_GetAttributesOf(psfDesktop, 1, &pidlEmpty, &dwFlags);
     ok (SUCCEEDED(hr), "Desktop->GetAttributesOf(empty pidl) failed! hr = %08x\n", hr);
-    ok (dwFlags == dwDesktopFlags, "Wrong Desktop attributes: %08x, expected: %08x\n", 
-        dwFlags, dwDesktopFlags);
+    for (i = 0, foundFlagsMatch = FALSE; !foundFlagsMatch &&
+         i < sizeof(desktopFlags) / sizeof(desktopFlags[0]); i++)
+    {
+        if (desktopFlags[i] == dwFlags)
+            foundFlagsMatch = TRUE;
+    }
+    ok (foundFlagsMatch, "Wrong Desktop attributes: %08x\n", dwFlags);
 
     /* .. or with no itemidlist at all. */
     dwFlags = 0xffffffff;
     hr = IShellFolder_GetAttributesOf(psfDesktop, 0, NULL, &dwFlags);
     ok (SUCCEEDED(hr), "Desktop->GetAttributesOf(NULL) failed! hr = %08x\n", hr);
-    ok (dwFlags == dwDesktopFlags, "Wrong Desktop attributes: %08x, expected: %08x\n", 
-        dwFlags, dwDesktopFlags);
+    for (i = 0, foundFlagsMatch = FALSE; !foundFlagsMatch &&
+         i < sizeof(desktopFlags) / sizeof(desktopFlags[0]); i++)
+    {
+        if (desktopFlags[i] == dwFlags)
+            foundFlagsMatch = TRUE;
+    }
+    ok (foundFlagsMatch, "Wrong Desktop attributes: %08x\n", dwFlags);
    
     /* Testing the attributes of the MyComputer shellfolder */
     hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, wszMyComputer, NULL, &pidlMyComputer, NULL);
@@ -737,18 +772,20 @@ static void test_GetAttributesOf(void)
         return;
     }
 
-    /* WinXP SP2 sets the SFGAO_CANLINK flag, when MyComputer is queried via the Desktop 
+    /* Windows sets the SFGAO_CANLINK flag, when MyComputer is queried via the Desktop
      * folder object. It doesn't do this, if MyComputer is queried directly (see below).
-     * SFGAO_CANLINK is the same as DROPEFFECT_LINK, which MSDN says means: "Drag source
-     * should create a link to the original data". You can't create links on MyComputer on
-     * Windows, so this flag shouldn't be set. Seems like a bug in Windows. As long as nobody
-     * depends on this bug, we probably shouldn't imitate it.
      */
     dwFlags = 0xffffffff;
     hr = IShellFolder_GetAttributesOf(psfDesktop, 1, (LPCITEMIDLIST*)&pidlMyComputer, &dwFlags);
     ok (SUCCEEDED(hr), "Desktop->GetAttributesOf(MyComputer) failed! hr = %08x\n", hr);
-    ok ((dwFlags & ~(DWORD)SFGAO_CANLINK) == dwMyComputerFlags, 
-                    "Wrong MyComputer attributes: %08x, expected: %08x\n", dwFlags, dwMyComputerFlags);
+    for (i = 0, foundFlagsMatch = FALSE; !foundFlagsMatch &&
+         i < sizeof(myComputerFlags) / sizeof(myComputerFlags[0]); i++)
+    {
+        if ((myComputerFlags[i] | SFGAO_CANLINK) == dwFlags)
+            foundFlagsMatch = TRUE;
+    }
+    todo_wine
+    ok (foundFlagsMatch, "Wrong MyComputer attributes: %08x\n", dwFlags);
 
     hr = IShellFolder_BindToObject(psfDesktop, pidlMyComputer, NULL, &IID_IShellFolder, (LPVOID*)&psfMyComputer);
     ok (SUCCEEDED(hr), "Desktop failed to bind to MyComputer object! hr = %08x\n", hr);
@@ -765,8 +802,14 @@ static void test_GetAttributesOf(void)
     dwFlags = 0xffffffff;
     hr = IShellFolder_GetAttributesOf(psfMyComputer, 0, NULL, &dwFlags);
     ok (SUCCEEDED(hr), "MyComputer->GetAttributesOf(NULL) failed! hr = %08x\n", hr); 
-    todo_wine { ok (dwFlags == dwMyComputerFlags, 
-                    "Wrong MyComputer attributes: %08x, expected: %08x\n", dwFlags, dwMyComputerFlags); }
+    for (i = 0, foundFlagsMatch = FALSE; !foundFlagsMatch &&
+         i < sizeof(myComputerFlags) / sizeof(myComputerFlags[0]); i++)
+    {
+        if (myComputerFlags[i] == dwFlags)
+            foundFlagsMatch = TRUE;
+    }
+    todo_wine
+    ok (foundFlagsMatch, "Wrong MyComputer attributes: %08x\n", dwFlags);
 
     IShellFolder_Release(psfMyComputer);
 
@@ -774,11 +817,11 @@ static void test_GetAttributesOf(void)
     len = lstrlenA(cCurrDirA);
 
     if (len == 0) {
-	win_skip("GetCurrentDirectoryA returned empty string. Skipping test_GetAttributesOf\n");
-	return;
+        win_skip("GetCurrentDirectoryA returned empty string. Skipping test_GetAttributesOf\n");
+        return;
     }
-    if(cCurrDirA[len-1] == '\\')
-	cCurrDirA[len-1] = 0;
+    if (len > 3 && cCurrDirA[len-1] == '\\')
+        cCurrDirA[len-1] = 0;
 
     /* create test directory */
     CreateFilesFolders();
@@ -810,6 +853,8 @@ static void test_GetAttributesOf(void)
     IMalloc_Free(ppM, newPIDL);
 
     /* append testdirectory name to path */
+    if (cCurrDirA[len-1] == '\\')
+        cCurrDirA[len-1] = 0;
     lstrcatA(cCurrDirA, "\\testdir");
     MultiByteToWideChar(CP_ACP, 0, cCurrDirA, -1, cCurrDirW, MAX_PATH);
 
@@ -821,7 +866,7 @@ static void test_GetAttributesOf(void)
     hr = IShellFolder_GetAttributesOf(IDesktopFolder, 1, (LPCITEMIDLIST*)&newPIDL, &dwFlags);
     ok (SUCCEEDED(hr), "Desktop->GetAttributesOf() failed! hr = %08x\n", hr);
     ok ((dwFlags&SFGAO_FOLDER), "Wrong directory attribute for absolute PIDL: %08x\n", dwFlags);
-        
+
     /* free memory */
     IMalloc_Free(ppM, newPIDL);
 
@@ -830,7 +875,7 @@ static void test_GetAttributesOf(void)
     Cleanup();
 
     IShellFolder_Release(IDesktopFolder);
-}    
+}
 
 static void test_SHGetPathFromIDList(void)
 {
@@ -1061,7 +1106,9 @@ static HRESULT WINAPI InitPropertyBag_IPropertyBag_Read(IPropertyBag *iface, LPC
         'R','e','s','o','l','v','e','L','i','n','k','F','l','a','g','s',0 };
        
     if (!lstrcmpW(pszPropName, wszTargetSpecialFolder)) {
-        ok(V_VT(pVar) == VT_I4, "Wrong variant type for 'TargetSpecialFolder' property!\n");
+        ok(V_VT(pVar) == VT_I4 ||
+           broken(V_VT(pVar) == VT_BSTR),   /* Win2k */
+           "Wrong variant type for 'TargetSpecialFolder' property!\n");
         return E_INVALIDARG;
     }
     
@@ -1075,7 +1122,9 @@ static HRESULT WINAPI InitPropertyBag_IPropertyBag_Read(IPropertyBag *iface, LPC
         WCHAR wszPath[MAX_PATH];
         BOOL result;
         
-        ok(V_VT(pVar) == VT_BSTR, "Wrong variant type for 'Target' property!\n");
+        ok(V_VT(pVar) == VT_BSTR ||
+           broken(V_VT(pVar) == VT_EMPTY),  /* Win2k */
+           "Wrong variant type for 'Target' property!\n");
         if (V_VT(pVar) != VT_BSTR) return E_INVALIDARG;
 
         result = pSHGetSpecialFolderPathW(NULL, wszPath, CSIDL_DESKTOPDIRECTORY, FALSE);
@@ -1147,7 +1196,13 @@ static void test_FolderShortcut(void) {
         win_skip("SHGetSpecialFolderPathW and/or StrRetToBufW are not available\n");
         return;
     }
-   
+
+    if (!pSHGetFolderPathAndSubDirA)
+    {
+        win_skip("FolderShortcut test doesn't work on Win2k\n");
+        return;
+    }
+
     /* These tests basically show, that CLSID_FolderShortcuts are initialized
      * via their IPersistPropertyBag interface. And that the target folder
      * is taken from the IPropertyBag's 'Target' property.
@@ -1167,7 +1222,7 @@ static void test_FolderShortcut(void) {
         IPersistPropertyBag_Release(pPersistPropertyBag);
         return;
     }
-    
+
     hr = IPersistPropertyBag_QueryInterface(pPersistPropertyBag, &IID_IShellFolder, 
                                             (LPVOID*)&pShellFolder);
     IPersistPropertyBag_Release(pPersistPropertyBag);
@@ -1321,11 +1376,11 @@ static void test_ITEMIDLIST_format(void) {
     HANDLE hFile;
     HRESULT hr;
     BOOL bResult;
-    WCHAR wszFile[3][17] = { { 'e','v','e','n','_',0 }, { 'o','d','d','_',0 }, 
+    WCHAR wszFile[3][17] = { { 'e','v','e','n','_',0 }, { 'o','d','d','_',0 },
         { 'l','o','n','g','e','r','_','t','h','a','n','.','8','_','3',0 } };
     int i;
-    
-    if(!pSHGetSpecialFolderPathW) return;
+
+    if (!pSHGetSpecialFolderPathW) return;
 
     bResult = pSHGetSpecialFolderPathW(NULL, wszPersonal, CSIDL_PERSONAL, FALSE);
     ok(bResult, "SHGetSpecialFolderPathW failed! Last error: %u\n", GetLastError());
@@ -1362,9 +1417,9 @@ static void test_ITEMIDLIST_format(void) {
         CHAR szFile[MAX_PATH];
         struct FileStructA *pFileStructA;
         WORD cbOffset;
-        
+
         WideCharToMultiByte(CP_ACP, 0, wszFile[i], -1, szFile, MAX_PATH, NULL, NULL);
-        
+
         hFile = CreateFileW(wszFile[i], GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_FLAG_WRITE_THROUGH, NULL);
         ok(hFile != INVALID_HANDLE_VALUE, "CreateFile failed! (%u)\n", GetLastError());
         if (hFile == INVALID_HANDLE_VALUE) {
@@ -1384,51 +1439,57 @@ static void test_ITEMIDLIST_format(void) {
         pFileStructA = (struct FileStructA *)pidlFile->mkid.abID;
         ok(pFileStructA->type == 0x32, "PIDLTYPE should be 0x32!\n");
         ok(pFileStructA->dummy == 0x00, "Dummy Byte should be 0x00!\n");
-        ok(pFileStructA->dwFileSize == 0, "Filesize should be zero!\n"); 
+        ok(pFileStructA->dwFileSize == 0, "Filesize should be zero!\n");
 
-        if (i < 2) /* First two file names are already in valid 8.3 format */ 
+        if (i < 2) /* First two file names are already in valid 8.3 format */
             ok(!strcmp(szFile, (CHAR*)&pidlFile->mkid.abID[12]), "Wrong file name!\n");
-        else 
+        else
             /* WinXP stores a derived 8.3 dos name (LONGER~1.8_3) here. We probably
              * can't implement this correctly, since unix filesystems don't support
              * this nasty short/long filename stuff. So we'll probably stay with our
              * current habbit of storing the long filename here, which seems to work
              * just fine. */
-            todo_wine { ok(pidlFile->mkid.abID[18] == '~', "Should be derived 8.3 name!\n"); }
+            todo_wine
+            ok(pidlFile->mkid.abID[18] == '~' ||
+               broken(pidlFile->mkid.abID[34] == '~'),  /* Win2k */
+               "Should be derived 8.3 name!\n");
 
         if (i == 0) /* First file name has an even number of chars. No need for alignment. */
-            ok(pidlFile->mkid.abID[12 + strlen(szFile) + 1] != '\0', 
-                "Alignment byte, where there shouldn't be!\n"); 
-        
+            ok(pidlFile->mkid.abID[12 + strlen(szFile) + 1] != '\0' ||
+               broken(pidlFile->mkid.cb == 2 + 12 + strlen(szFile) + 1 + 1),    /* Win2k */
+                "Alignment byte, where there shouldn't be!\n");
+
         if (i == 1) /* Second file name has an uneven number of chars => alignment byte */
-            ok(pidlFile->mkid.abID[12 + strlen(szFile) + 1] == '\0', 
+            ok(pidlFile->mkid.abID[12 + strlen(szFile) + 1] == '\0',
                 "There should be an alignment byte, but isn't!\n");
 
         /* The offset of the FileStructW member is stored as a WORD at the end of the pidl. */
         cbOffset = *(WORD*)(((LPBYTE)pidlFile)+pidlFile->mkid.cb-sizeof(WORD));
-        ok (cbOffset >= sizeof(struct FileStructA) &&
-            cbOffset <= pidlFile->mkid.cb - sizeof(struct FileStructW),
+        ok ((cbOffset >= sizeof(struct FileStructA) &&
+            cbOffset <= pidlFile->mkid.cb - sizeof(struct FileStructW)) ||
+            broken(pidlFile->mkid.cb == 2 + 12 + strlen(szFile) + 1 + 1) ||     /* Win2k on short names */
+            broken(pidlFile->mkid.cb == 2 + 12 + strlen(szFile) + 1 + 12 + 1),  /* Win2k on long names */
             "Wrong offset value (%d) stored at the end of the PIDL\n", cbOffset);
 
         if (cbOffset >= sizeof(struct FileStructA) &&
-            cbOffset <= pidlFile->mkid.cb - sizeof(struct FileStructW)) 
+            cbOffset <= pidlFile->mkid.cb - sizeof(struct FileStructW))
         {
             struct FileStructW *pFileStructW = (struct FileStructW *)(((LPBYTE)pidlFile)+cbOffset);
 
-            ok(pidlFile->mkid.cb == cbOffset + pFileStructW->cbLen, 
+            ok(pidlFile->mkid.cb == cbOffset + pFileStructW->cbLen,
                 "FileStructW's offset and length should add up to the PIDL's length!\n");
 
             if (pidlFile->mkid.cb == cbOffset + pFileStructW->cbLen) {
                 /* Since we just created the file, time of creation,
-                 * time of last access and time of last write access just be the same. 
-                 * These tests seem to fail sometimes (on WinXP), if the test is run again shortly 
+                 * time of last access and time of last write access just be the same.
+                 * These tests seem to fail sometimes (on WinXP), if the test is run again shortly
                  * after the first run. I do remember something with NTFS keeping the creation time
                  * if a file is deleted and then created again within a couple of seconds or so.
                  * Might be the reason. */
                 ok (pFileStructA->uFileDate == pFileStructW->uDate &&
                     pFileStructA->uFileTime == pFileStructW->uTime,
                     "Last write time should match creation time!\n");
-    
+
                 ok (pFileStructA->uFileDate == pFileStructW->uDate2 &&
                     pFileStructA->uFileTime == pFileStructW->uTime2,
                     "Last write time should match last access time!\n");

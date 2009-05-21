@@ -25,10 +25,17 @@ WINE_DEFAULT_DEBUG_CHANNEL(enhmetafile);
 
 INT CDECL EMFDRV_SaveDC( PHYSDEV dev )
 {
+    EMFDRV_PDEVICE* physDev = (EMFDRV_PDEVICE*)dev;
+    INT ret = save_dc_state( physDev->hdc );
     EMRSAVEDC emr;
-    emr.emr.iType = EMR_SAVEDC;
-    emr.emr.nSize = sizeof(emr);
-    return EMFDRV_WriteRecord( dev, &emr.emr );
+
+    if (ret)
+    {
+        emr.emr.iType = EMR_SAVEDC;
+        emr.emr.nSize = sizeof(emr);
+        EMFDRV_WriteRecord( dev, &emr.emr );
+    }
+    return ret;
 }
 
 BOOL CDECL EMFDRV_RestoreDC( PHYSDEV dev, INT level )
@@ -36,6 +43,7 @@ BOOL CDECL EMFDRV_RestoreDC( PHYSDEV dev, INT level )
     EMFDRV_PDEVICE* physDev = (EMFDRV_PDEVICE*)dev;
     DC *dc = get_dc_ptr( physDev->hdc );
     EMRRESTOREDC emr;
+    BOOL ret;
 
     emr.emr.iType = EMR_RESTOREDC;
     emr.emr.nSize = sizeof(emr);
@@ -44,11 +52,14 @@ BOOL CDECL EMFDRV_RestoreDC( PHYSDEV dev, INT level )
         emr.iRelative = level;
     else
         emr.iRelative = level - dc->saveLevel - 1;
-
-    EMFDRV_WriteRecord( dev, &emr.emr );
-
     release_dc_ptr( dc );
-    return TRUE;
+
+    physDev->restoring++;
+    ret = restore_dc_state( physDev->hdc, level );
+    physDev->restoring--;
+
+    if (ret) EMFDRV_WriteRecord( dev, &emr.emr );
+    return ret;
 }
 
 UINT CDECL EMFDRV_SetTextAlign( PHYSDEV dev, UINT align )

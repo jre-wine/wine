@@ -295,7 +295,20 @@ typedef struct wined3d_settings_s {
 extern wined3d_settings_t wined3d_settings;
 
 /* Shader backends */
-struct SHADER_OPCODE_ARG;
+
+/* TODO: Make this dynamic, based on shader limits ? */
+#define MAX_ATTRIBS 16
+#define MAX_REG_ADDR 1
+#define MAX_REG_TEMP 32
+#define MAX_REG_TEXCRD 8
+#define MAX_REG_INPUT 12
+#define MAX_REG_OUTPUT 12
+#define MAX_CONST_I 16
+#define MAX_CONST_B 16
+
+/* FIXME: This needs to go up to 2048 for
+ * Shader model 3 according to msdn (and for software shaders) */
+#define MAX_LABELS 16
 
 #define SHADER_PGMSIZE 65535
 typedef struct SHADER_BUFFER {
@@ -393,7 +406,80 @@ enum WINED3D_SHADER_INSTRUCTION_HANDLER
     WINED3DSIH_TABLE_SIZE
 };
 
-typedef void (*SHADER_HANDLER)(const struct SHADER_OPCODE_ARG *);
+typedef struct shader_reg_maps
+{
+    DWORD shader_version;
+    char texcoord[MAX_REG_TEXCRD];          /* pixel < 3.0 */
+    char temporary[MAX_REG_TEMP];           /* pixel, vertex */
+    char address[MAX_REG_ADDR];             /* vertex */
+    char packed_input[MAX_REG_INPUT];       /* pshader >= 3.0 */
+    char packed_output[MAX_REG_OUTPUT];     /* vertex >= 3.0 */
+    char attributes[MAX_ATTRIBS];           /* vertex */
+    char labels[MAX_LABELS];                /* pixel, vertex */
+    DWORD texcoord_mask[MAX_REG_TEXCRD];    /* vertex < 3.0 */
+
+    /* Sampler usage tokens
+     * Use 0 as default (bit 31 is always 1 on a valid token) */
+    DWORD samplers[max(MAX_FRAGMENT_SAMPLERS, MAX_VERTEX_SAMPLERS)];
+    BOOL bumpmat[MAX_TEXTURES], luminanceparams[MAX_TEXTURES];
+    char usesnrm, vpos, usesdsy;
+    char usesrelconstF;
+
+    /* Whether or not loops are used in this shader, and nesting depth */
+    unsigned loop_depth;
+
+    /* Whether or not this shader uses fog */
+    char fog;
+
+} shader_reg_maps;
+
+typedef struct SHADER_OPCODE
+{
+    unsigned int opcode;
+    const char *name;
+    char dst_token;
+    CONST UINT num_params;
+    enum WINED3D_SHADER_INSTRUCTION_HANDLER handler_idx;
+    DWORD min_version;
+    DWORD max_version;
+} SHADER_OPCODE;
+
+struct wined3d_shader_dst_param
+{
+    WINED3DSHADER_PARAM_REGISTER_TYPE register_type;
+    UINT register_idx;
+    DWORD write_mask;
+    DWORD modifiers;
+    DWORD shift;
+    BOOL has_rel_addr;
+    DWORD token;
+    DWORD addr_token;
+};
+
+struct wined3d_shader_instruction
+{
+    IWineD3DBaseShader *shader;
+    const shader_reg_maps *reg_maps;
+    enum WINED3D_SHADER_INSTRUCTION_HANDLER handler_idx;
+    DWORD flags;
+    BOOL coissue;
+    DWORD predicate;
+    DWORD src[4];
+    DWORD src_addr[4];
+    SHADER_BUFFER *buffer;
+    UINT dst_count;
+    const struct wined3d_shader_dst_param *dst;
+    UINT src_count;
+};
+
+struct wined3d_shader_semantic
+{
+    WINED3DDECLUSAGE usage;
+    UINT usage_idx;
+    struct wined3d_shader_dst_param reg;
+};
+
+typedef void (*SHADER_HANDLER)(const struct wined3d_shader_instruction *);
 
 struct shader_caps {
     DWORD               VertexShaderVersion;
@@ -401,6 +487,7 @@ struct shader_caps {
 
     DWORD               PixelShaderVersion;
     float               PixelShader1xMaxValue;
+    DWORD               MaxPixelShaderConst;
 
     WINED3DVSHADERCAPS2_0   VS20Caps;
     WINED3DPSHADERCAPS2_0   PS20Caps;
@@ -446,14 +533,16 @@ enum fogmode {
  */
 struct ps_compile_args {
     struct color_fixup_desc     color_fixup[MAX_FRAGMENT_SAMPLERS];
-    BOOL                        srgb_correction;
     enum vertexprocessing_mode  vp_mode;
     enum fogmode                fog;
     /* Projected textures(ps 1.0-1.3) */
     /* Texture types(2D, Cube, 3D) in ps 1.x */
+    BOOL                        srgb_correction;
+    WORD                        texrect_fixup;
+    /* Bitmap for texture rect coord fixups (16 samplers max currently).
+       D3D9 has a limit of 16 samplers and the fixup is superfluous
+       in D3D10 (unconditional NP2 support mandatory). */
 };
-
-#define MAX_ATTRIBS 16
 
 enum fog_src_type {
     VS_FOG_Z        = 0,
@@ -473,6 +562,7 @@ typedef struct {
     void (*shader_update_float_vertex_constants)(IWineD3DDevice *iface, UINT start, UINT count);
     void (*shader_update_float_pixel_constants)(IWineD3DDevice *iface, UINT start, UINT count);
     void (*shader_load_constants)(IWineD3DDevice *iface, char usePS, char useVS);
+    void (*shader_load_np2fixup_constants)(IWineD3DDevice *iface, char usePS, char useVS);
     void (*shader_destroy)(IWineD3DBaseShader *iface);
     HRESULT (*shader_alloc_private)(IWineD3DDevice *iface);
     void (*shader_free_private)(IWineD3DDevice *iface);
@@ -584,7 +674,7 @@ do {                                          \
 /* Trace vector and strided data information */
 #define TRACE_VECTOR(name) TRACE( #name "=(%f, %f, %f, %f)\n", name.x, name.y, name.z, name.w);
 #define TRACE_STRIDED(si, name) TRACE( #name "=(data:%p, stride:%d, format:%#x, vbo %d, stream %u)\n", \
-        si->elements[name].data, si->elements[name].stride, si->elements[name].d3d_format, \
+        si->elements[name].data, si->elements[name].stride, si->elements[name].format_desc->format, \
         si->elements[name].buffer_object, si->elements[name].stream_idx);
 
 /* Defines used for optimizations */
@@ -686,15 +776,9 @@ enum wined3d_ffp_emit_idx
 
 struct wined3d_stream_info_element
 {
-    WINED3DFORMAT d3d_format;
-    enum wined3d_ffp_emit_idx emit_idx;
-    GLint size;
-    GLint format;
-    GLenum type;
+    const struct GlPixelFormatDesc *format_desc;
     GLsizei stride;
-    GLboolean normalized;
     const BYTE *data;
-    int type_size;
     UINT stream_idx;
     GLuint buffer_object;
 };
@@ -1134,6 +1218,7 @@ struct IWineD3DDeviceImpl
     const struct blit_shader *blitter;
 
     unsigned int max_ffp_textures, max_ffp_texture_stages;
+    DWORD d3d_vshader_constantF, d3d_pshader_constantF; /* Advertised d3d caps, not GL ones */
 
     WORD view_ident : 1;                /* true iff view matrix is identity */
     WORD untransformed : 1;
@@ -1326,24 +1411,6 @@ HRESULT resource_set_private_data(IWineD3DResource *iface, REFGUID guid,
 #define RESOURCE_ALIGNMENT 32
 
 /*****************************************************************************
- * IWineD3DIndexBuffer implementation structure (extends IWineD3DResourceImpl)
- */
-typedef struct IWineD3DIndexBufferImpl
-{
-    /* IUnknown & WineD3DResource Information     */
-    const IWineD3DIndexBufferVtbl *lpVtbl;
-    IWineD3DResourceClass     resource;
-
-    GLuint                    vbo;
-    UINT                      dirtystart, dirtyend;
-    LONG                      lockcount;
-
-    /* WineD3DVertexBuffer specifics */
-} IWineD3DIndexBufferImpl;
-
-extern const IWineD3DIndexBufferVtbl IWineD3DIndexBuffer_Vtbl;
-
-/*****************************************************************************
  * IWineD3DBaseTexture D3D- > openGL state map lookups
  */
 #define WINED3DFUNC_NOTSUPPORTED  -2
@@ -1390,6 +1457,7 @@ typedef struct IWineD3DBaseTextureClass
     LONG                    bindCount;
     DWORD                   sampler;
     BOOL                    is_srgb;
+    BOOL                    pow2Matrix_identity;
     const struct min_lookup *minMipLookup;
     const GLenum            *magLookup;
     void                    (*internal_preload)(IWineD3DBaseTexture *iface, enum WINED3DSRGB srgb);
@@ -1868,7 +1936,8 @@ struct IWineD3DStateBlockImpl
     UINT                      streamFlags[MAX_STREAMS + 1];     /*0 | WINED3DSTREAMSOURCE_INSTANCEDATA | WINED3DSTREAMSOURCE_INDEXEDDATA  */
 
     /* Indices */
-    IWineD3DIndexBuffer*      pIndexData;
+    IWineD3DBuffer*           pIndexData;
+    WINED3DFORMAT             IndexFmt;
     INT                       baseVertexIndex;
     INT                       loadBaseVertexIndex; /* non-indexed drawing needs 0 here, indexed baseVertexIndex */
 
@@ -2013,6 +2082,7 @@ enum wined3d_buffer_conversion_type
 #define WINED3D_BUFFER_DIRTY        0x02    /* Buffer data has been modified */
 #define WINED3D_BUFFER_HASDESC      0x04    /* A vertex description has been found */
 #define WINED3D_BUFFER_CREATEBO     0x08    /* Attempt to create a buffer object next PreLoad */
+#define WINED3D_BUFFER_DOUBLEBUFFER 0x10    /* Use a vbo and local allocated memory */
 
 struct wined3d_buffer
 {
@@ -2023,6 +2093,7 @@ struct wined3d_buffer
 
     GLuint buffer_object;
     GLenum buffer_object_usage;
+    GLenum buffer_type_hint;
     UINT buffer_object_size;
     LONG bind_count;
     DWORD flags;
@@ -2030,9 +2101,6 @@ struct wined3d_buffer
     UINT dirty_start;
     UINT dirty_end;
     LONG lock_count;
-
-    /* legacy vertex buffers */
-    DWORD fvf;
 
     /* conversion stuff */
     UINT conversion_count;
@@ -2046,6 +2114,7 @@ struct wined3d_buffer
 
 extern const IWineD3DBufferVtbl wined3d_buffer_vtbl;
 const BYTE *buffer_get_memory(IWineD3DBuffer *iface, UINT offset, GLuint *buffer_object);
+const BYTE *buffer_get_sysmem(struct wined3d_buffer *This);
 
 /* IWineD3DRendertargetView */
 struct wined3d_rendertarget_view
@@ -2167,55 +2236,11 @@ BOOL getDepthStencilBits(const struct GlPixelFormatDesc *format_desc, short *dep
 void multiply_matrix(WINED3DMATRIX *dest, const WINED3DMATRIX *src1, const WINED3DMATRIX *src2);
 UINT wined3d_log2i(UINT32 x);
 
-/* TODO: Make this dynamic, based on shader limits ? */
-#define MAX_REG_ADDR 1
-#define MAX_REG_TEMP 32
-#define MAX_REG_TEXCRD 8
-#define MAX_REG_INPUT 12
-#define MAX_REG_OUTPUT 12
-#define MAX_CONST_I 16
-#define MAX_CONST_B 16
-
-/* FIXME: This needs to go up to 2048 for
- * Shader model 3 according to msdn (and for software shaders) */
-#define MAX_LABELS 16
-
-typedef struct semantic {
-    DWORD usage;
-    DWORD reg;
-} semantic;
-
 typedef struct local_constant {
     struct list entry;
     unsigned int idx;
     DWORD value[4];
 } local_constant;
-
-typedef struct shader_reg_maps {
-    DWORD shader_version;
-    char texcoord[MAX_REG_TEXCRD];          /* pixel < 3.0 */
-    char temporary[MAX_REG_TEMP];           /* pixel, vertex */
-    char address[MAX_REG_ADDR];             /* vertex */
-    char packed_input[MAX_REG_INPUT];       /* pshader >= 3.0 */
-    char packed_output[MAX_REG_OUTPUT];     /* vertex >= 3.0 */
-    char attributes[MAX_ATTRIBS];           /* vertex */
-    char labels[MAX_LABELS];                /* pixel, vertex */
-    DWORD texcoord_mask[MAX_REG_TEXCRD];    /* vertex < 3.0 */
-
-    /* Sampler usage tokens 
-     * Use 0 as default (bit 31 is always 1 on a valid token) */
-    DWORD samplers[max(MAX_FRAGMENT_SAMPLERS, MAX_VERTEX_SAMPLERS)];
-    BOOL bumpmat[MAX_TEXTURES], luminanceparams[MAX_TEXTURES];
-    char usesnrm, vpos, usesdsy;
-    char usesrelconstF;
-
-    /* Whether or not loops are used in this shader, and nesting depth */
-    unsigned loop_depth;
-
-    /* Whether or not this shader uses fog */
-    char fog;
-
-} shader_reg_maps;
 
 /* Undocumented opcode controls */
 #define INST_CONTROLS_SHIFT 16
@@ -2229,29 +2254,6 @@ typedef enum COMPARISON_TYPE {
     COMPARISON_NE = 5,
     COMPARISON_LE = 6
 } COMPARISON_TYPE;
-
-typedef struct SHADER_OPCODE {
-    unsigned int  opcode;
-    const char*   name;
-    char          dst_token;
-    CONST UINT    num_params;
-    enum WINED3D_SHADER_INSTRUCTION_HANDLER handler_idx;
-    DWORD         min_version;
-    DWORD         max_version;
-} SHADER_OPCODE;
-
-typedef struct SHADER_OPCODE_ARG {
-    IWineD3DBaseShader* shader;
-    const shader_reg_maps *reg_maps;
-    CONST SHADER_OPCODE* opcode;
-    DWORD opcode_token;
-    DWORD dst;
-    DWORD dst_addr;
-    DWORD predicate;
-    DWORD src[4];
-    DWORD src_addr[4];
-    SHADER_BUFFER* buffer;
-} SHADER_OPCODE_ARG;
 
 typedef struct SHADER_LIMITS {
     unsigned int temporary;
@@ -2298,7 +2300,7 @@ extern BOOL vshader_get_input(
 extern HRESULT allocate_shader_constants(IWineD3DStateBlockImpl* object);
 
 /* GLSL helper functions */
-extern void shader_glsl_add_instruction_modifiers(const SHADER_OPCODE_ARG *arg);
+extern void shader_glsl_add_instruction_modifiers(const struct wined3d_shader_instruction *ins);
 
 /*****************************************************************************
  * IDirect3DBaseShader implementation structure
@@ -2345,7 +2347,8 @@ void shader_buffer_init(struct SHADER_BUFFER *buffer);
 void shader_buffer_free(struct SHADER_BUFFER *buffer);
 void shader_cleanup(IWineD3DBaseShader *iface);
 HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, struct shader_reg_maps *reg_maps,
-        struct semantic *semantics_in, struct semantic *semantics_out, const DWORD *byte_code);
+        struct wined3d_shader_semantic *semantics_in, struct wined3d_shader_semantic *semantics_out,
+        const DWORD *byte_code);
 void shader_init(struct IWineD3DBaseShaderClass *shader,
         IWineD3DDevice *device, const SHADER_OPCODE *instruction_table);
 void shader_trace_init(const DWORD *byte_code, const SHADER_OPCODE *opcode_table);
@@ -2374,16 +2377,13 @@ static inline BOOL shader_is_comment(DWORD token) {
     return WINED3DSIO_COMMENT == (token & WINED3DSI_OPCODE_MASK);
 }
 
-static inline BOOL shader_is_scalar(DWORD param) {
-    DWORD reg_type = shader_get_regtype(param);
-    DWORD reg_num;
-
-    switch (reg_type) {
+static inline BOOL shader_is_scalar(WINED3DSHADER_PARAM_REGISTER_TYPE register_type, UINT register_idx)
+{
+    switch (register_type)
+    {
         case WINED3DSPR_RASTOUT:
-            if ((param & WINED3DSP_REGNUM_MASK) != 0) {
-                /* oFog & oPts */
-                return TRUE;
-            }
+            /* oFog & oPts */
+            if (register_idx != 0) return TRUE;
             /* oPos */
             return FALSE;
 
@@ -2394,8 +2394,8 @@ static inline BOOL shader_is_scalar(DWORD param) {
             return TRUE;
 
         case WINED3DSPR_MISCTYPE:
-            reg_num = param & WINED3DSP_REGNUM_MASK;
-            switch(reg_num) {
+            switch(register_idx)
+            {
                 case 0: /* vPos */
                     return FALSE;
                 case 1: /* vFace */
@@ -2446,8 +2446,8 @@ typedef struct IWineD3DVertexShaderImpl {
     UINT                        num_gl_shaders, shader_array_size;
 
     /* Vertex shader input and output semantics */
-    semantic semantics_in [MAX_ATTRIBS];
-    semantic semantics_out [MAX_REG_OUTPUT];
+    struct wined3d_shader_semantic semantics_in[MAX_ATTRIBS];
+    struct wined3d_shader_semantic semantics_out[MAX_REG_OUTPUT];
 
     UINT                       min_rel_offset, max_rel_offset;
     UINT                       rel_offset;
@@ -2481,7 +2481,7 @@ typedef struct IWineD3DPixelShaderImpl {
     IUnknown                   *parent;
 
     /* Pixel shader input semantics */
-    semantic semantics_in [MAX_REG_INPUT];
+    struct wined3d_shader_semantic semantics_in[MAX_REG_INPUT];
     DWORD                 input_reg_map[MAX_REG_INPUT];
     BOOL                  input_reg_used[MAX_REG_INPUT];
     int                         declared_in_count;

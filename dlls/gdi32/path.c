@@ -1353,7 +1353,6 @@ static BOOL PATH_add_outline(DC *dc, INT x, INT y, TTPOLYGONHEADER *header, DWOR
 
         pt.x = x + int_from_fixed(header->pfxStart.x);
         pt.y = y - int_from_fixed(header->pfxStart.y);
-        LPtoDP(dc->hSelf, &pt, 1);
         PATH_AddEntry(pPath, &pt, PT_MOVETO);
 
         curve = (TTPOLYCURVE *)(header + 1);
@@ -1372,7 +1371,6 @@ static BOOL PATH_add_outline(DC *dc, INT x, INT y, TTPOLYGONHEADER *header, DWOR
                 {
                     pt.x = x + int_from_fixed(curve->apfx[i].x);
                     pt.y = y - int_from_fixed(curve->apfx[i].y);
-                    LPtoDP(dc->hSelf, &pt, 1);
                     PATH_AddEntry(pPath, &pt, PT_LINETO);
                 }
                 break;
@@ -1391,13 +1389,11 @@ static BOOL PATH_add_outline(DC *dc, INT x, INT y, TTPOLYGONHEADER *header, DWOR
 
                 pts[0].x = x + int_from_fixed(ptfx.x);
                 pts[0].y = y - int_from_fixed(ptfx.y);
-                LPtoDP(dc->hSelf, &pts[0], 1);
 
                 for(i = 0; i < curve->cpfx; i++)
                 {
                     pts[i + 1].x = x + int_from_fixed(curve->apfx[i].x);
                     pts[i + 1].y = y - int_from_fixed(curve->apfx[i].y);
-                    LPtoDP(dc->hSelf, &pts[i + 1], 1);
                 }
 
                 PATH_BezierTo(pPath, pts, curve->cpfx + 1);
@@ -1429,7 +1425,6 @@ BOOL PATH_ExtTextOut(DC *dc, INT x, INT y, UINT flags, const RECT *lprc,
     unsigned int idx;
     double cosEsc, sinEsc;
     LOGFONTW lf;
-    POINT org;
     HDC hdc = dc->hSelf;
     INT offset = 0, xoff = 0, yoff = 0;
 
@@ -1450,8 +1445,6 @@ BOOL PATH_ExtTextOut(DC *dc, INT x, INT y, UINT flags, const RECT *lprc,
         sinEsc = 0;
     }
 
-    GetDCOrgEx(hdc, &org);
-
     for (idx = 0; idx < count; idx++)
     {
         static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
@@ -1460,16 +1453,20 @@ BOOL PATH_ExtTextOut(DC *dc, INT x, INT y, UINT flags, const RECT *lprc,
         void *outline;
 
         dwSize = GetGlyphOutlineW(hdc, str[idx], GGO_GLYPH_INDEX | GGO_NATIVE, &gm, 0, NULL, &identity);
-        if (!dwSize) return FALSE;
+        if (dwSize == GDI_ERROR) return FALSE;
 
-        outline = HeapAlloc(GetProcessHeap(), 0, dwSize);
-        if (!outline) return FALSE;
+        /* add outline only if char is printable */
+        if(dwSize)
+        {
+            outline = HeapAlloc(GetProcessHeap(), 0, dwSize);
+            if (!outline) return FALSE;
 
-        GetGlyphOutlineW(hdc, str[idx], GGO_GLYPH_INDEX | GGO_NATIVE, &gm, dwSize, outline, &identity);
+            GetGlyphOutlineW(hdc, str[idx], GGO_GLYPH_INDEX | GGO_NATIVE, &gm, dwSize, outline, &identity);
 
-        PATH_add_outline(dc, org.x + x + xoff, org.x + y + yoff, outline, dwSize);
+            PATH_add_outline(dc, x + xoff, y + yoff, outline, dwSize);
 
-        HeapFree(GetProcessHeap(), 0, outline);
+            HeapFree(GetProcessHeap(), 0, outline);
+        }
 
         if (dx)
         {

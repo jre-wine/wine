@@ -1410,8 +1410,8 @@ static void test_CreateWellKnownSid(void)
 static void test_LookupAccountSid(void)
 {
     SID_IDENTIFIER_AUTHORITY SIDAuthNT = { SECURITY_NT_AUTHORITY };
-    CHAR accountA[MAX_PATH], domainA[MAX_PATH];
-    DWORD acc_sizeA, dom_sizeA;
+    CHAR accountA[MAX_PATH], domainA[MAX_PATH], usernameA[MAX_PATH];
+    DWORD acc_sizeA, dom_sizeA, user_sizeA;
     DWORD real_acc_sizeA, real_dom_sizeA;
     WCHAR accountW[MAX_PATH], domainW[MAX_PATH];
     DWORD acc_sizeW, dom_sizeW;
@@ -1419,10 +1419,12 @@ static void test_LookupAccountSid(void)
     PSID pUsersSid = NULL;
     SID_NAME_USE use;
     BOOL ret;
-    DWORD size;
+    DWORD size,cbti = 0;
     MAX_SID  max_sid;
     CHAR *str_sidA;
     int i;
+    HANDLE hToken;
+    PTOKEN_USER ptiUser = NULL;
 
     /* native windows crashes if account size, domain size, or name use is NULL */
 
@@ -1581,6 +1583,26 @@ static void test_LookupAccountSid(void)
 
     FreeSid(pUsersSid);
 
+    /* Test LookupAccountSid with Sid retrieved from token information.
+     This assumes this process is running under the account of the current user.*/
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY|TOKEN_DUPLICATE, &hToken);
+    ret = GetTokenInformation(hToken, TokenUser, NULL, 0, &cbti);
+    ptiUser = (PTOKEN_USER) HeapAlloc(GetProcessHeap(), 0, cbti);
+    if (GetTokenInformation(hToken, TokenUser, ptiUser, cbti, &cbti))
+    {
+        acc_sizeA = dom_sizeA = MAX_PATH;
+        ret = LookupAccountSidA(NULL, ptiUser->User.Sid, accountA, &acc_sizeA, domainA, &dom_sizeA, &use);
+        ok(ret, "LookupAccountSidA() Expected TRUE, got FALSE\n");
+        user_sizeA = MAX_PATH;
+        ret = GetUserNameA(usernameA , &user_sizeA);
+        ok(ret, "GetUserNameA() Expected TRUE, got FALSE\n");
+        todo_wine
+        {
+            ok(lstrcmpA(usernameA, accountA) == 0, "LookupAccountSidA() Expected account name: %s got: %s\n", usernameA, accountA );
+        }
+    }
+    HeapFree(GetProcessHeap(), 0, ptiUser);
+
     if (pCreateWellKnownSid && pConvertSidToStringSidA)
     {
         trace("Well Known SIDs:\n");
@@ -1684,7 +1706,7 @@ static void test_LookupAccountSid(void)
     }
 }
 
-static void get_sid_info(PSID psid, LPSTR *user, LPSTR *dom)
+static BOOL get_sid_info(PSID psid, LPSTR *user, LPSTR *dom)
 {
     static CHAR account[UNLEN + 1];
     static CHAR domain[UNLEN + 1];
@@ -1697,7 +1719,65 @@ static void get_sid_info(PSID psid, LPSTR *user, LPSTR *dom)
     size = dom_size = UNLEN + 1;
     account[0] = '\0';
     domain[0] = '\0';
-    LookupAccountSidA(NULL, psid, account, &size, domain, &dom_size, &use);
+    SetLastError(0xdeadbeef);
+    return LookupAccountSidA(NULL, psid, account, &size, domain, &dom_size, &use);
+}
+
+static void check_wellknown_name(const char* name, WELL_KNOWN_SID_TYPE result)
+{
+    SID_IDENTIFIER_AUTHORITY ident = { SECURITY_NT_AUTHORITY };
+    PSID domainsid;
+    char wk_sid[SECURITY_MAX_SID_SIZE];
+    DWORD cb;
+
+    DWORD sid_size, domain_size;
+    SID_NAME_USE sid_use;
+    LPSTR domain, account, sid_domain, wk_domain, wk_account;
+    PSID psid;
+    BOOL ret ,ret2;
+
+    sid_size = 0;
+    domain_size = 0;
+    ret = LookupAccountNameA(NULL, name, NULL, &sid_size, NULL, &domain_size, &sid_use);
+    psid = HeapAlloc(GetProcessHeap(),0,sid_size);
+    domain = HeapAlloc(GetProcessHeap(),0,domain_size);
+    ret = LookupAccountNameA(NULL, name, psid, &sid_size, domain, &domain_size, &sid_use);
+
+    if (!result)
+    {
+        ok(!ret, " %s Should have failed to lookup account name\n",name);
+        goto cleanup;
+    }
+
+    AllocateAndInitializeSid(&ident, 6, SECURITY_NT_NON_UNIQUE, 12, 23, 34, 45, 56, 0, 0, &domainsid);
+    cb = sizeof(wk_sid);
+    if (!pCreateWellKnownSid(result, domainsid, wk_sid, &cb))
+    {
+        win_skip("SID %i is not available on the system\n",result);
+        goto cleanup;
+    }
+
+    ret2 = get_sid_info(wk_sid, &wk_account, &wk_domain);
+    if (!ret2 && GetLastError() == ERROR_NONE_MAPPED)
+    {
+        win_skip("CreateWellKnownSid() succeeded but the account '%s' is not present (W2K)\n", name);
+        goto cleanup;
+    }
+
+    get_sid_info(psid, &account, &sid_domain);
+
+    ok(ret, "Failed to lookup account name %s\n",name);
+    ok(sid_size != 0, "sid_size was zero\n");
+
+    ok(EqualSid(psid,wk_sid),"(%s) Sids fail to match well known sid!\n",name);
+
+    ok(!lstrcmp(account, wk_account), "Expected %s , got %s\n", account, wk_account);
+    ok(!lstrcmp(domain, wk_domain), "Expected %s, got %s\n", wk_domain, domain);
+    ok(sid_use == SidTypeWellKnownGroup , "Expected Use (5), got %d\n", sid_use);
+
+cleanup:
+    HeapFree(GetProcessHeap(),0,psid);
+    HeapFree(GetProcessHeap(),0,domain);
 }
 
 static void test_LookupAccountName(void)
@@ -1898,6 +1978,47 @@ static void test_LookupAccountName(void)
         HeapFree(GetProcessHeap(), 0, domain);
         HeapFree(GetProcessHeap(), 0, psid);
     }
+
+    /* Well Known names */
+    if (!pCreateWellKnownSid)
+    {
+        win_skip("CreateWellKnownSid not available\n");
+        return;
+    }
+
+    if (PRIMARYLANGID(LANGIDFROMLCID(GetThreadLocale())) != LANG_ENGLISH)
+    {
+        skip("Non-english locale (skipping well known name creation tests)\n");
+        return;
+    }
+
+    check_wellknown_name("LocalService", WinLocalServiceSid);
+    check_wellknown_name("Local Service", WinLocalServiceSid);
+    /* 2 spaces */
+    check_wellknown_name("Local  Service", 0);
+    check_wellknown_name("NetworkService", WinNetworkServiceSid);
+    check_wellknown_name("Network Service", WinNetworkServiceSid);
+
+    /* example of some names where the spaces are not optional */
+    check_wellknown_name("Terminal Server User", WinTerminalServerSid);
+    check_wellknown_name("TerminalServer User", 0);
+    check_wellknown_name("TerminalServerUser", 0);
+    check_wellknown_name("Terminal ServerUser", 0);
+
+    check_wellknown_name("enterprise domain controllers",WinEnterpriseControllersSid);
+    check_wellknown_name("enterprisedomain controllers", 0);
+    check_wellknown_name("enterprise domaincontrollers", 0);
+    check_wellknown_name("enterprisedomaincontrollers", 0);
+
+    /* case insensitivity */
+    check_wellknown_name("lOCAlServICE", WinLocalServiceSid);
+
+    /* fully qualified account names */
+    check_wellknown_name("NT AUTHORITY\\LocalService", WinLocalServiceSid);
+    check_wellknown_name("nt authority\\Network Service", WinNetworkServiceSid);
+    check_wellknown_name("nt authority test\\Network Service", 0);
+    check_wellknown_name("Dummy\\Network Service", 0);
+    check_wellknown_name("ntauthority\\Network Service", 0);
 }
 
 static void test_security_descriptor(void)

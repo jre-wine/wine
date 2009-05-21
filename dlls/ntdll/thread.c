@@ -37,7 +37,6 @@
 #include "winternl.h"
 #include "wine/library.h"
 #include "wine/server.h"
-#include "wine/pthread.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
 #include "ddk/wdm.h"
@@ -68,9 +67,6 @@ static LIST_ENTRY tls_links;
 static size_t sigstack_total_size;
 static ULONG sigstack_zero_bits;
 static int nb_threads = 1;
-
-static struct wine_pthread_functions pthread_functions;
-
 
 static RTL_CRITICAL_SECTION ldt_section;
 static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
@@ -289,7 +285,6 @@ HANDLE thread_init(void)
     thread_data->debug_info = &debug_info;
     InsertHeadList( &tls_links, &teb->TlsLinks );
 
-    wine_pthread_get_functions( &pthread_functions, sizeof(pthread_functions) );
     signal_init_thread( teb );
     virtual_init_threading();
 
@@ -299,7 +294,7 @@ HANDLE thread_init(void)
 
     /* setup the server connection */
     server_init_process();
-    info_size = server_init_thread( NULL );
+    info_size = server_init_thread( peb );
 
     /* create the process heap */
     if (!(peb->ProcessHeap = RtlCreateHeap( HEAP_GROWABLE, NULL, 0, 0, NULL, NULL )))
@@ -829,12 +824,15 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
 
     if (!self)
     {
+        context_t server_context;
+
+        context_to_server( &server_context, context );
+
         SERVER_START_REQ( set_thread_context )
         {
             req->handle  = wine_server_obj_handle( handle );
-            req->flags   = context->ContextFlags;
             req->suspend = 0;
-            wine_server_add_data( req, context, sizeof(*context) );
+            wine_server_add_data( req, &server_context, sizeof(server_context) );
             ret = wine_server_call( req );
             self = reply->self;
         }
@@ -849,9 +847,8 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
                     SERVER_START_REQ( set_thread_context )
                     {
                         req->handle  = wine_server_obj_handle( handle );
-                        req->flags   = context->ContextFlags;
                         req->suspend = 0;
-                        wine_server_add_data( req, context, sizeof(*context) );
+                        wine_server_add_data( req, &server_context, sizeof(server_context) );
                         ret = wine_server_call( req );
                     }
                     SERVER_END_REQ;
@@ -876,6 +873,29 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
 }
 
 
+/* convert CPU-specific flags to generic server flags */
+static inline unsigned int get_server_context_flags( DWORD flags )
+{
+    unsigned int ret = 0;
+
+    flags &= ~0x3f;  /* mask CPU id flags */
+    if (flags & CONTEXT_CONTROL) ret |= SERVER_CTX_CONTROL;
+    if (flags & CONTEXT_INTEGER) ret |= SERVER_CTX_INTEGER;
+#ifdef CONTEXT_SEGMENTS
+    if (flags & CONTEXT_SEGMENTS) ret |= SERVER_CTX_SEGMENTS;
+#endif
+#ifdef CONTEXT_FLOATING_POINT
+    if (flags & CONTEXT_FLOATING_POINT) ret |= SERVER_CTX_FLOATING_POINT;
+#endif
+#ifdef CONTEXT_DEBUG_REGISTERS
+    if (flags & CONTEXT_DEBUG_REGISTERS) ret |= SERVER_CTX_DEBUG_REGISTERS;
+#endif
+#ifdef CONTEXT_EXTENDED_REGISTERS
+    if (flags & CONTEXT_EXTENDED_REGISTERS) ret |= SERVER_CTX_EXTENDED_REGISTERS;
+#endif
+    return ret;
+}
+
 /***********************************************************************
  *              NtGetContextThread  (NTDLL.@)
  *              ZwGetContextThread  (NTDLL.@)
@@ -883,7 +903,6 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
 NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
 {
     NTSTATUS ret;
-    CONTEXT ctx;
     DWORD dummy, i;
     DWORD needed_flags = context->ContextFlags;
     BOOL self = (handle == GetCurrentThread());
@@ -895,12 +914,15 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
 
     if (!self)
     {
+        unsigned int server_flags = get_server_context_flags( context->ContextFlags );
+        context_t server_context;
+
         SERVER_START_REQ( get_thread_context )
         {
             req->handle  = wine_server_obj_handle( handle );
-            req->flags   = context->ContextFlags;
+            req->flags   = server_flags;
             req->suspend = 0;
-            wine_server_set_reply( req, &ctx, sizeof(ctx) );
+            wine_server_set_reply( req, &server_context, sizeof(server_context) );
             ret = wine_server_call( req );
             self = reply->self;
         }
@@ -915,9 +937,9 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
                     SERVER_START_REQ( get_thread_context )
                     {
                         req->handle  = wine_server_obj_handle( handle );
-                        req->flags   = context->ContextFlags;
+                        req->flags   = server_flags;
                         req->suspend = 0;
-                        wine_server_set_reply( req, &ctx, sizeof(ctx) );
+                        wine_server_set_reply( req, &server_context, sizeof(server_context) );
                         ret = wine_server_call( req );
                     }
                     SERVER_END_REQ;
@@ -933,17 +955,19 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
             }
             if (ret == STATUS_PENDING) ret = STATUS_ACCESS_DENIED;
         }
+        if (!ret) ret = context_from_server( context, &server_context );
         if (ret) return ret;
-        copy_context( context, &ctx, context->ContextFlags & ctx.ContextFlags );
-        needed_flags &= ~ctx.ContextFlags;
+        needed_flags &= ~context->ContextFlags;
     }
 
     if (self)
     {
         if (needed_flags)
         {
+            CONTEXT ctx;
             RtlCaptureContext( &ctx );
             copy_context( context, &ctx, ctx.ContextFlags & needed_flags );
+            context->ContextFlags |= ctx.ContextFlags & needed_flags;
         }
 #ifdef __i386__
         /* update the cached version of the debug registers */

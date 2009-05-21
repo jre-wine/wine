@@ -1374,7 +1374,34 @@ static inline COLUMN_INFO * LISTVIEW_GetColumnInfo(const LISTVIEW_INFO *infoPtr,
     assert (nSubItem >= 0 && nSubItem < DPA_GetPtrCount(infoPtr->hdpaColumns));
     return DPA_GetPtr(infoPtr->hdpaColumns, nSubItem);
 }
-	
+
+static INT LISTVIEW_CreateHeader(LISTVIEW_INFO *infoPtr)
+{
+    DWORD dFlags = WS_CHILD | HDS_HORZ | HDS_FULLDRAG | HDS_DRAGDROP;
+    HINSTANCE hInst;
+
+    if (infoPtr->hwndHeader) return 0;
+
+    /* setup creation flags */
+    dFlags |= (LVS_NOSORTHEADER & infoPtr->dwStyle) ? 0 : HDS_BUTTONS;
+    dFlags |= (LVS_NOCOLUMNHEADER & infoPtr->dwStyle) ? HDS_HIDDEN : 0;
+
+    hInst = (HINSTANCE)GetWindowLongPtrW(infoPtr->hwndSelf, GWLP_HINSTANCE);
+
+    /* create header */
+    infoPtr->hwndHeader = CreateWindowW(WC_HEADERW, NULL, dFlags,
+      0, 0, 0, 0, infoPtr->hwndSelf, NULL, hInst, NULL);
+    if (!infoPtr->hwndHeader) return -1;
+
+    /* set header unicode format */
+    SendMessageW(infoPtr->hwndHeader, HDM_SETUNICODEFORMAT, TRUE, 0);
+
+    /* set header font */
+    SendMessageW(infoPtr->hwndHeader, WM_SETFONT, (WPARAM)infoPtr->hFont, (LPARAM)TRUE);
+
+    return 0;
+}
+
 static inline void LISTVIEW_GetHeaderRect(const LISTVIEW_INFO *infoPtr, INT nSubItem, LPRECT lprc)
 {
     *lprc = LISTVIEW_GetColumnInfo(infoPtr, nSubItem)->rcHeader;
@@ -1547,7 +1574,7 @@ static INT LISTVIEW_ProcessLetterKeys(LISTVIEW_INFO *infoPtr, WPARAM charCode, L
     /* update the search parameters */
     infoPtr->lastKeyPressTimestamp = GetTickCount();
     if (infoPtr->lastKeyPressTimestamp - lastKeyPressTimestamp < KEY_DELAY) {
-        if (infoPtr->nSearchParamLength < MAX_PATH)
+        if (infoPtr->nSearchParamLength < MAX_PATH-1)
             infoPtr->szSearchParam[infoPtr->nSearchParamLength++]=charCode;
         if (infoPtr->charCode != charCode)
             infoPtr->charCode = charCode = 0;
@@ -3451,6 +3478,8 @@ static BOOL set_main_item(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem, BOOL 
     NMLISTVIEW nmlv;
     UINT uChanged = 0;
     LVITEMW item;
+    /* stateMask is ignored for LVM_INSERTITEM */
+    UINT stateMask = isNew ? ~0 : lpLVItem->stateMask;
 
     TRACE("()\n");
 
@@ -3483,7 +3512,7 @@ static BOOL set_main_item(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem, BOOL 
 
     TRACE("oldState=%x, newState=%x\n", item.state, lpLVItem->state);
     /* determine what fields will change */    
-    if ((lpLVItem->mask & LVIF_STATE) && ((item.state ^ lpLVItem->state) & lpLVItem->stateMask & ~infoPtr->uCallbackMask))
+    if ((lpLVItem->mask & LVIF_STATE) && ((item.state ^ lpLVItem->state) & stateMask & ~infoPtr->uCallbackMask))
 	uChanged |= LVIF_STATE;
 
     if ((lpLVItem->mask & LVIF_IMAGE) && (lpItem->hdr.iImage != lpLVItem->iImage))
@@ -3504,7 +3533,7 @@ static BOOL set_main_item(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem, BOOL 
     
     ZeroMemory(&nmlv, sizeof(NMLISTVIEW));
     nmlv.iItem = lpLVItem->iItem;
-    nmlv.uNewState = (item.state & ~lpLVItem->stateMask) | (lpLVItem->state & lpLVItem->stateMask);
+    nmlv.uNewState = (item.state & ~stateMask) | (lpLVItem->state & stateMask);
     nmlv.uOldState = item.state;
     nmlv.uChanged = uChanged;
     nmlv.lParam = item.lParam;
@@ -3537,21 +3566,21 @@ static BOOL set_main_item(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem, BOOL 
 
     if (uChanged & LVIF_STATE)
     {
-	if (lpItem && (lpLVItem->stateMask & ~infoPtr->uCallbackMask & ~(LVIS_FOCUSED | LVIS_SELECTED)))
+	if (lpItem && (stateMask & ~infoPtr->uCallbackMask & ~(LVIS_FOCUSED | LVIS_SELECTED)))
 	{
-	    lpItem->state &= ~lpLVItem->stateMask;
-	    lpItem->state |= (lpLVItem->state & lpLVItem->stateMask);
+	    lpItem->state &= ~stateMask;
+	    lpItem->state |= (lpLVItem->state & stateMask);
 	}
-	if (lpLVItem->state & lpLVItem->stateMask & ~infoPtr->uCallbackMask & LVIS_SELECTED)
+	if (lpLVItem->state & stateMask & ~infoPtr->uCallbackMask & LVIS_SELECTED)
 	{
 	    if (infoPtr->dwStyle & LVS_SINGLESEL) LISTVIEW_DeselectAllSkipItem(infoPtr, lpLVItem->iItem);
 	    ranges_additem(infoPtr->selectionRanges, lpLVItem->iItem);
 	}
-	else if (lpLVItem->stateMask & LVIS_SELECTED)
+	else if (stateMask & LVIS_SELECTED)
 	    ranges_delitem(infoPtr->selectionRanges, lpLVItem->iItem);
 	
 	/* if we are asked to change focus, and we manage it, do it */
-	if (lpLVItem->stateMask & ~infoPtr->uCallbackMask & LVIS_FOCUSED)
+	if (stateMask & ~infoPtr->uCallbackMask & LVIS_FOCUSED)
 	{
 	    if (lpLVItem->state & LVIS_FOCUSED)
 	    {
@@ -6859,6 +6888,7 @@ static INT LISTVIEW_InsertColumnT(LISTVIEW_INFO *infoPtr, INT nColumn,
     COLUMN_INFO *lpColumnInfo;
     INT nNewColumn;
     HDITEMW hdi;
+    UINT uView = infoPtr->dwStyle & LVS_TYPEMASK;
 
     TRACE("(nColumn=%d, lpColumn=%s, isW=%d)\n", nColumn, debuglvcolumn_t(lpColumn, isW), isW);
 
@@ -6885,6 +6915,14 @@ static INT LISTVIEW_InsertColumnT(LISTVIEW_INFO *infoPtr, INT nColumn,
     {
         hdi.mask |= HDI_LPARAM;
         hdi.lParam = lpColumn->iSubItem;
+    }
+
+    /* create header if not present */
+    LISTVIEW_CreateHeader(infoPtr);
+    if (!(LVS_NOCOLUMNHEADER & infoPtr->dwStyle) &&
+         (LVS_REPORT == uView) && (WS_VISIBLE & infoPtr->dwStyle))
+    {
+        ShowWindow(infoPtr->hwndHeader, SW_SHOWNORMAL);
     }
 
     /* insert item in header control */
@@ -8079,7 +8117,6 @@ static LRESULT LISTVIEW_Create(HWND hwnd, const CREATESTRUCTW *lpcs)
 {
   LISTVIEW_INFO *infoPtr = (LISTVIEW_INFO *)GetWindowLongPtrW(hwnd, 0);
   UINT uView = lpcs->style & LVS_TYPEMASK;
-  DWORD dFlags = WS_CHILD | HDS_HORZ | HDS_FULLDRAG | HDS_DRAGDROP;
 
   TRACE("(lpcs=%p)\n", lpcs);
 
@@ -8087,28 +8124,19 @@ static LRESULT LISTVIEW_Create(HWND hwnd, const CREATESTRUCTW *lpcs)
   infoPtr->notifyFormat = SendMessageW(infoPtr->hwndNotify, WM_NOTIFYFORMAT,
                                        (WPARAM)infoPtr->hwndSelf, (LPARAM)NF_QUERY);
 
-  /* setup creation flags */
-  dFlags |= (LVS_NOSORTHEADER & lpcs->style) ? 0 : HDS_BUTTONS;
-  dFlags |= (LVS_NOCOLUMNHEADER & lpcs->style) ? HDS_HIDDEN : 0;
-
-  /* create header */
-  infoPtr->hwndHeader = CreateWindowW(WC_HEADERW, NULL, dFlags,
-    0, 0, 0, 0, hwnd, NULL,
-    lpcs->hInstance, NULL);
-  if (!infoPtr->hwndHeader) return -1;
-
-  /* set header unicode format */
-  SendMessageW(infoPtr->hwndHeader, HDM_SETUNICODEFORMAT, TRUE, 0);
-
-  /* set header font */
-  SendMessageW(infoPtr->hwndHeader, WM_SETFONT, (WPARAM)infoPtr->hFont, (LPARAM)TRUE);
+  if ((uView == LVS_REPORT) && (lpcs->style & WS_VISIBLE))
+  {
+    if (LISTVIEW_CreateHeader(infoPtr) < 0)  return -1;
+  }
+  else
+    infoPtr->hwndHeader = 0;
 
   /* init item size to avoid division by 0 */
   LISTVIEW_UpdateItemSize (infoPtr);
 
   if (uView == LVS_REPORT)
   {
-    if (!(LVS_NOCOLUMNHEADER & lpcs->style))
+    if (!(LVS_NOCOLUMNHEADER & lpcs->style) && (WS_VISIBLE & lpcs->style))
     {
       ShowWindow(infoPtr->hwndHeader, SW_SHOWNORMAL);
     }
@@ -9553,6 +9581,8 @@ static INT LISTVIEW_StyleChanged(LISTVIEW_INFO *infoPtr, WPARAM wStyleType,
             HDLAYOUT hl;
             WINDOWPOS wp;
 
+            LISTVIEW_CreateHeader( infoPtr );
+
             hl.prc = &infoPtr->rcList;
             hl.pwpos = &wp;
             SendMessageW( infoPtr->hwndHeader, HDM_LAYOUT, 0, (LPARAM)&hl );
@@ -9599,6 +9629,34 @@ static INT LISTVIEW_StyleChanged(LISTVIEW_INFO *infoPtr, WPARAM wStyleType,
     LISTVIEW_InvalidateList(infoPtr);
 
     return 0;
+}
+
+/***
+ * DESCRIPTION:
+ * Processes WM_SHOWWINDOW messages.
+ *
+ * PARAMETER(S):
+ * [I] infoPtr : valid pointer to the listview structure
+ * [I] bShown  : window is being shown (FALSE when hidden)
+ * [I] iStatus : window show status
+ *
+ * RETURN:
+ * Zero
+ */
+static LRESULT LISTVIEW_ShowWindow(LISTVIEW_INFO *infoPtr, BOOL bShown, INT iStatus)
+{
+  UINT uView = infoPtr->dwStyle & LVS_TYPEMASK;
+
+  /* header delayed creation */
+  if ((uView == LVS_REPORT) && bShown)
+  {
+    LISTVIEW_CreateHeader(infoPtr);
+
+    if (!(LVS_NOCOLUMNHEADER & infoPtr->dwStyle))
+      ShowWindow(infoPtr->hwndHeader, SW_SHOWNORMAL);
+  }
+
+  return 0;
 }
 
 /***
@@ -10063,6 +10121,10 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
   case WM_SETREDRAW:
     return LISTVIEW_SetRedraw(infoPtr, (BOOL)wParam);
+
+  case WM_SHOWWINDOW:
+    LISTVIEW_ShowWindow(infoPtr, (BOOL)wParam, (INT)lParam);
+    return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 
   case WM_SIZE:
     return LISTVIEW_Size(infoPtr, (short)LOWORD(lParam), (short)HIWORD(lParam));

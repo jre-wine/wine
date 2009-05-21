@@ -32,7 +32,7 @@
  * TODO:
  *
  *  Styles:
- *   TCS_MULTISELECT
+ *   TCS_MULTISELECT - implement for VK_SPACE selection
  *   TCS_RIGHT
  *   TCS_RIGHTJUSTIFY
  *   TCS_SCROLLOPPOSITE
@@ -42,17 +42,11 @@
  *  Extended Styles:
  *   TCS_EX_REGISTERDROP
  *
- *  States:
- *   TCIS_BUTTONPRESSED
- *
  *  Notifications:
  *   NM_RELEASEDCAPTURE
  *   TCN_FOCUSCHANGE
  *   TCN_GETOBJECT
  *   TCN_KEYDOWN
- *
- *  Messages:
- *   TCM_DESELECTALL
  *
  *  Macros:
  *   TabCtrl_AdjustRect
@@ -165,6 +159,7 @@ static const WCHAR themeClass[] = { 'T','a','b',0 };
 static void TAB_InvalidateTabArea(const TAB_INFO *);
 static void TAB_EnsureSelectionVisible(TAB_INFO *);
 static void TAB_DrawItemInterior(const TAB_INFO *, HDC, INT, RECT*);
+static LRESULT TAB_DeselectAll(TAB_INFO *, BOOL);
 
 static BOOL
 TAB_SendSimpleNotify (const TAB_INFO *infoPtr, UINT code)
@@ -252,8 +247,8 @@ static inline LRESULT TAB_SetCurSel (TAB_INFO *infoPtr, INT iItem)
       return -1;
   else {
       if (infoPtr->iSelected != iItem) {
-          infoPtr->items[prevItem].dwState &= ~TCIS_BUTTONPRESSED;
-          infoPtr->items[iItem].dwState |= TCIS_BUTTONPRESSED;
+          TAB_GetItem(infoPtr, prevItem)->dwState &= ~TCIS_BUTTONPRESSED;
+          TAB_GetItem(infoPtr, iItem)->dwState |= TCIS_BUTTONPRESSED;
 
           infoPtr->iSelected=iItem;
           infoPtr->uFocus=iItem;
@@ -590,6 +585,7 @@ TAB_LButtonDown (TAB_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
   POINT pt;
   INT newItem;
   UINT dummy;
+  LONG lStyle = GetWindowLongW(infoPtr->hwnd, GWL_STYLE);
 
   if (infoPtr->hwndToolTip)
     TAB_RelayEvent (infoPtr->hwndToolTip, infoPtr->hwnd,
@@ -610,14 +606,43 @@ TAB_LButtonDown (TAB_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
 
   TRACE("On Tab, item %d\n", newItem);
 
-  if (newItem != -1 && infoPtr->iSelected != newItem)
+  if ((newItem != -1) && (infoPtr->iSelected != newItem))
   {
-    if (!TAB_SendSimpleNotify(infoPtr, TCN_SELCHANGING))
+    if ((lStyle & TCS_BUTTONS) && (lStyle & TCS_MULTISELECT) &&
+        (wParam & MK_CONTROL))
     {
-      TAB_SetCurSel(infoPtr, newItem);
+      RECT r;
+
+      /* toggle multiselection */
+      TAB_GetItem(infoPtr, newItem)->dwState ^= TCIS_BUTTONPRESSED;
+      if (TAB_InternalGetItemRect (infoPtr, newItem, &r, NULL))
+        InvalidateRect (infoPtr->hwnd, &r, TRUE);
+    }
+    else
+    {
+      INT i;
+      BOOL pressed = FALSE;
+
+      /* any button pressed ? */
+      for (i = 0; i < infoPtr->uNumItem; i++)
+        if ((TAB_GetItem (infoPtr, i)->dwState & TCIS_BUTTONPRESSED) &&
+            (infoPtr->iSelected != i))
+        {
+          pressed = TRUE;
+          break;
+        }
+
+      TAB_SendSimpleNotify(infoPtr, TCN_SELCHANGING);
+
+      if (pressed)
+        TAB_DeselectAll (infoPtr, FALSE);
+      else
+        TAB_SetCurSel(infoPtr, newItem);
+
       TAB_SendSimpleNotify(infoPtr, TCN_SELCHANGE);
     }
   }
+
   return 0;
 }
 
@@ -1455,9 +1480,10 @@ TAB_EraseTabInterior(const TAB_INFO *infoPtr, HDC hdc, INT iItem, RECT *drawRect
 	{
 	    if (lStyle & TCS_FLATBUTTONS)
 	    {
-		FillRect(hdc, drawRect, hbr);
+		InflateRect(&rTemp, 2, 2);
+		FillRect(hdc, &rTemp, hbr);
 		if (iItem == infoPtr->iHotTracked)
-		    DrawEdge(hdc, drawRect, EDGE_RAISED, BF_SOFT|BF_RECT);
+		    DrawEdge(hdc, &rTemp, BDR_RAISEDINNER, BF_RECT);
 	    }
 	    else
 		FillRect(hdc, &rTemp, hbr);
@@ -1469,6 +1495,18 @@ TAB_EraseTabInterior(const TAB_INFO *infoPtr, HDC hdc, INT iItem, RECT *drawRect
         InflateRect(&rTemp, -2, -2);
         if (!GetWindowTheme (infoPtr->hwnd))
 	    FillRect(hdc, &rTemp, hbr);
+    }
+
+    /* highlighting is drawn on top of previous fills */
+    if (TAB_GetItem(infoPtr, iItem)->dwState & TCIS_HIGHLIGHTED)
+    {
+        if (deleteBrush)
+        {
+            DeleteObject(hbr);
+            deleteBrush = FALSE;
+        }
+        hbr = GetSysColorBrush(COLOR_HIGHLIGHT);
+        FillRect(hdc, &rTemp, hbr);
     }
 
     /* Cleanup */
@@ -1529,7 +1567,22 @@ TAB_DrawItemInterior(const TAB_INFO *infoPtr, HDC hdc, INT iItem, RECT *drawRect
 	drawRect->left   += 4;
 	drawRect->top    += 4;
 	drawRect->right  -= 4;
-	drawRect->bottom -= 1;
+
+	if (lStyle & TCS_VERTICAL)
+	{
+	  if (!(lStyle & TCS_BOTTOM)) drawRect->right  += 1;
+	  drawRect->bottom   -= 4;
+	}
+	else
+	{
+	  if (lStyle & TCS_BOTTOM)
+	  {
+	    drawRect->top    -= 2;
+	    drawRect->bottom -= 4;
+	  }
+	  else
+	    drawRect->bottom -= 1;
+	}
       }
       else
       {
@@ -1624,10 +1677,15 @@ TAB_DrawItemInterior(const TAB_INFO *infoPtr, HDC hdc, INT iItem, RECT *drawRect
   */
   oldBkMode = SetBkMode(hdc, TRANSPARENT);
   if (!GetWindowTheme (infoPtr->hwnd) || (lStyle & TCS_BUTTONS))
-      SetTextColor(hdc, (((lStyle & TCS_HOTTRACK) && (iItem == infoPtr->iHotTracked) 
-                          && !(lStyle & TCS_FLATBUTTONS)) 
-                        | (TAB_GetItem(infoPtr, iItem)->dwState & TCIS_HIGHLIGHTED)) ?
-                        comctl32_color.clrHighlight : comctl32_color.clrBtnText);
+  {
+    if ((lStyle & TCS_HOTTRACK) && (iItem == infoPtr->iHotTracked) &&
+        !(lStyle & TCS_FLATBUTTONS))
+      SetTextColor(hdc, comctl32_color.clrHighlight);
+    else if (TAB_GetItem(infoPtr, iItem)->dwState & TCIS_HIGHLIGHTED)
+      SetTextColor(hdc, comctl32_color.clrHighlightText);
+    else
+      SetTextColor(hdc, comctl32_color.clrBtnText);
+  }
 
   /*
    * if owner draw, tell the owner to draw
@@ -1956,7 +2014,7 @@ static void TAB_DrawItem(const TAB_INFO *infoPtr, HDC  hdc, INT  iItem)
       }
       else  /* ! selected */
       {
-        DWORD state = infoPtr->items[iItem].dwState;
+        DWORD state = TAB_GetItem(infoPtr, iItem)->dwState;
 
         if (state & TCIS_BUTTONPRESSED)
           DrawEdge(hdc, &r, EDGE_SUNKEN, BF_SOFT|BF_RECT);
@@ -2673,6 +2731,8 @@ static inline LRESULT
 TAB_HighlightItem (TAB_INFO *infoPtr, INT iItem, BOOL fHighlight)
 {
   LPDWORD lpState;
+  DWORD oldState;
+  RECT r;
 
   TRACE("(%p,%d,%s)\n", infoPtr, iItem, fHighlight ? "true" : "false");
 
@@ -2680,11 +2740,15 @@ TAB_HighlightItem (TAB_INFO *infoPtr, INT iItem, BOOL fHighlight)
     return FALSE;
   
   lpState = &TAB_GetItem(infoPtr, iItem)->dwState;
+  oldState = *lpState;
 
   if (fHighlight)
     *lpState |= TCIS_HIGHLIGHTED;
   else
     *lpState &= ~TCIS_HIGHLIGHTED;
+
+  if ((oldState != *lpState) && TAB_InternalGetItemRect (infoPtr, iItem, &r, NULL))
+    InvalidateRect (infoPtr->hwnd, &r, TRUE);
 
   return TRUE;
 }
@@ -3113,7 +3177,7 @@ static LRESULT TAB_RemoveImage (TAB_INFO *infoPtr, INT image)
     /* shift indices, repaint items if needed */
     for (i = 0; i < infoPtr->uNumItem; i++)
     {
-      idx = &infoPtr->items[i].iImage;
+      idx = &TAB_GetItem(infoPtr, i)->iImage;
       if (*idx >= image)
       {
         if (*idx == image)
@@ -3162,6 +3226,39 @@ static inline LRESULT
 TAB_GetExtendedStyle (TAB_INFO *infoPtr)
 {
   return infoPtr->exStyle;
+}
+
+static LRESULT
+TAB_DeselectAll (TAB_INFO *infoPtr, BOOL excludesel)
+{
+  LONG style = GetWindowLongW(infoPtr->hwnd, GWL_STYLE);
+  BOOL paint = FALSE;
+  INT i, selected = infoPtr->iSelected;
+
+  if (!(style & TCS_BUTTONS))
+    return 0;
+
+  for (i = 0; i < infoPtr->uNumItem; i++)
+  {
+    if ((TAB_GetItem(infoPtr, i)->dwState & TCIS_BUTTONPRESSED) &&
+        (selected != i))
+    {
+      TAB_GetItem(infoPtr, i)->dwState &= ~TCIS_BUTTONPRESSED;
+      paint = TRUE;
+    }
+  }
+
+  if (!excludesel && (selected != -1))
+  {
+    TAB_GetItem(infoPtr, selected)->dwState &= ~TCIS_BUTTONPRESSED;
+    infoPtr->iSelected = -1;
+    paint = TRUE;
+  }
+
+  if (paint)
+    TAB_InvalidateTabArea (infoPtr);
+
+  return 0;
 }
 
 static LRESULT WINAPI
@@ -3257,8 +3354,7 @@ TAB_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
       return TAB_SetMinTabWidth(infoPtr, (INT)lParam);
 
     case TCM_DESELECTALL:
-      FIXME("Unimplemented msg TCM_DESELECTALL\n");
-      return 0;
+      return TAB_DeselectAll (infoPtr, (BOOL)wParam);
 
     case TCM_GETEXTENDEDSTYLE:
       return TAB_GetExtendedStyle (infoPtr);

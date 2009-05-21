@@ -75,16 +75,26 @@ static const Format PCM_Formats[] =
 {
     {1,  8,  8000}, {2,  8,  8000}, {1, 16,  8000}, {2, 16,  8000},
     {1,  8, 11025}, {2,  8, 11025}, {1, 16, 11025}, {2, 16, 11025},
+    {1,  8, 12000}, {2,  8, 12000}, {1, 16, 12000}, {2, 16, 12000},
+    {1,  8, 16000}, {2,  8, 16000}, {1, 16, 16000}, {2, 16, 16000},
     {1,  8, 22050}, {2,  8, 22050}, {1, 16, 22050}, {2, 16, 22050},
+    {1,  8, 24000}, {2,  8, 24000}, {1, 16, 24000}, {2, 16, 24000},
+    {1,  8, 32000}, {2,  8, 32000}, {1, 16, 32000}, {2, 16, 32000},
     {1,  8, 44100}, {2,  8, 44100}, {1, 16, 44100}, {2, 16, 44100},
-    {1,  8, 48000}, {2,  8, 48000}, {1, 16, 48000}, {2, 16, 48000},
+    {1,  8, 48000}, {2,  8, 48000}, {1, 16, 48000}, {2, 16, 48000}
 };
 
 static const Format MPEG3_Formats[] =
 {
-    {1,  0,  8000}, {2,	0,  8000},  {1,  0, 11025}, {2,	 0, 11025},
-    {1,  0, 22050}, {2,	0, 22050},  {1,  0, 44100}, {2,	 0, 44100},
-    {1,  0, 48000}, {2,	0, 48000},
+    {1,  0,  8000}, {2,  0,  8000},
+    {1,  0, 11025}, {2,  0, 11025},
+    {1,  0, 12000}, {2,  0, 12000},
+    {1,  0, 16000}, {2,  0, 16000},
+    {1,  0, 22050}, {2,  0, 22050},
+    {1,  0, 24000}, {2,  0, 24000},
+    {1,  0, 32000}, {2,  0, 32000},
+    {1,  0, 44100}, {2,  0, 44100},
+    {1,  0, 48000}, {2,  0, 48000}
 };
 
 #define	NUM_PCM_FORMATS		(sizeof(PCM_Formats) / sizeof(PCM_Formats[0]))
@@ -480,8 +490,7 @@ static	LRESULT MPEG3_StreamSize(PACMDRVSTREAMINSTANCE adsi, PACMDRVSTREAMSIZE ad
 	if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_PCM &&
 	    adsi->pwfxDst->wFormatTag == WAVE_FORMAT_MPEGLAYER3)
         {
-            nblocks = (adsi->pwfxDst->nAvgBytesPerSec * 8 * 144 / adsi->pwfxDst->nSamplesPerSec);
-            nblocks = (adss->cbDstLength - 3002 - nblocks) / nblocks;
+            nblocks = (adss->cbDstLength - 3000) / (DWORD)(adsi->pwfxDst->nAvgBytesPerSec * 1152 / adsi->pwfxDst->nSamplesPerSec + 0.5);
             if (nblocks == 0)
                 return ACMERR_NOTPOSSIBLE;
             adss->cbSrcLength = nblocks * 1152 * adsi->pwfxSrc->nBlockAlign;
@@ -492,7 +501,7 @@ static	LRESULT MPEG3_StreamSize(PACMDRVSTREAMINSTANCE adsi, PACMDRVSTREAMSIZE ad
             nblocks = adss->cbDstLength / (adsi->pwfxDst->nBlockAlign * 1152);
             if (nblocks == 0)
                 return ACMERR_NOTPOSSIBLE;
-            adss->cbSrcLength = nblocks * (DWORD)(adsi->pwfxSrc->nAvgBytesPerSec * 8 * 144 / adsi->pwfxSrc->nSamplesPerSec);
+            adss->cbSrcLength = nblocks * (DWORD)(adsi->pwfxSrc->nAvgBytesPerSec * 1152 / adsi->pwfxSrc->nSamplesPerSec);
 	}
         else
         {
@@ -507,15 +516,20 @@ static	LRESULT MPEG3_StreamSize(PACMDRVSTREAMINSTANCE adsi, PACMDRVSTREAMSIZE ad
             nblocks = adss->cbSrcLength / (adsi->pwfxSrc->nBlockAlign * 1152);
             if (nblocks == 0)
                 return ACMERR_NOTPOSSIBLE;
-            adss->cbDstLength = nblocks * (DWORD)(adsi->pwfxDst->nAvgBytesPerSec * 8 * 144 / adsi->pwfxDst->nSamplesPerSec);
+            if (adss->cbSrcLength % (DWORD)(adsi->pwfxSrc->nBlockAlign * 1152))
+                /* Round block count up. */
+                nblocks++;
+            adss->cbDstLength = 3000 + nblocks * (DWORD)(adsi->pwfxDst->nAvgBytesPerSec * 1152 / adsi->pwfxDst->nSamplesPerSec + 0.5);
 	}
         else if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_MPEGLAYER3 &&
                  adsi->pwfxDst->wFormatTag == WAVE_FORMAT_PCM)
         {
-            nblocks = (adsi->pwfxSrc->nAvgBytesPerSec * 8 * 144 / adsi->pwfxSrc->nSamplesPerSec);
-            nblocks = (adss->cbSrcLength - 3002 - nblocks) / nblocks;
+            nblocks = adss->cbSrcLength / (DWORD)(adsi->pwfxSrc->nAvgBytesPerSec * 1152 / adsi->pwfxSrc->nSamplesPerSec);
             if (nblocks == 0)
                 return ACMERR_NOTPOSSIBLE;
+            if (adss->cbSrcLength % (DWORD)(adsi->pwfxSrc->nAvgBytesPerSec * 1152 / adsi->pwfxSrc->nSamplesPerSec))
+                /* Round block count up. */
+                nblocks++;
             adss->cbDstLength = nblocks * 1152 * adsi->pwfxDst->nBlockAlign;
 	}
         else

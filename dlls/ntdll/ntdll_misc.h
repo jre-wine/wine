@@ -22,9 +22,7 @@
 #include <stdarg.h>
 #include <signal.h>
 #include <sys/types.h>
-#ifdef HAVE_PTHREAD_H
-# include <pthread.h>
-#endif
+#include <pthread.h>
 
 #include "windef.h"
 #include "winnt.h"
@@ -43,9 +41,12 @@ struct drive_info
 
 /* exceptions */
 extern void wait_suspend( CONTEXT *context );
-extern void WINAPI __regs_RtlRaiseException( PEXCEPTION_RECORD, PCONTEXT );
+extern NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance );
+extern void raise_status( NTSTATUS status, EXCEPTION_RECORD *rec ) DECLSPEC_NORETURN;
 extern void set_cpu_context( const CONTEXT *context );
 extern void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags );
+extern NTSTATUS context_to_server( context_t *to, const CONTEXT *from );
+extern NTSTATUS context_from_server( CONTEXT *to, const context_t *from );
 
 /* debug helpers */
 extern LPCSTR debugstr_us( const UNICODE_STRING *str );
@@ -68,6 +69,7 @@ extern void virtual_init_threading(void);
 
 /* server support */
 extern timeout_t server_start_time;
+extern unsigned int server_cpus;
 extern void server_init_process(void);
 extern NTSTATUS server_init_process_done(void);
 extern size_t server_init_thread( void *entry_point );
@@ -187,15 +189,14 @@ struct debug_info
 /* thread private data, stored in NtCurrentTeb()->SystemReserved2 */
 struct ntdll_thread_data
 {
-    DWORD              fs;            /* 1d4 TEB selector */
-    DWORD              gs;            /* 1d8 libc selector; update winebuild if you move this! */
-    struct debug_info *debug_info;    /* 1dc info for debugstr functions */
-    int                request_fd;    /* 1e0 fd for sending server requests */
-    int                reply_fd;      /* 1e4 fd for receiving server replies */
-    int                wait_fd[2];    /* 1e8 fd for sleeping server requests */
-    void              *vm86_ptr;      /* 1f0 data for vm86 mode */
-    void              *pthread_data;  /* 1f4 private data for pthread emulation */
-    pthread_t          pthread_id;    /* 1f8 pthread thread id */
+    DWORD              fs;            /* 1d4/300 TEB selector */
+    DWORD              gs;            /* 1d8/304 libc selector; update winebuild if you move this! */
+    struct debug_info *debug_info;    /* 1dc/308 info for debugstr functions */
+    int                request_fd;    /* 1e0/310 fd for sending server requests */
+    int                reply_fd;      /* 1e4/314 fd for receiving server replies */
+    int                wait_fd[2];    /* 1e8/318 fd for sleeping server requests */
+    void              *vm86_ptr;      /* 1f0/320 data for vm86 mode */
+    pthread_t          pthread_id;    /* 1f4/328 pthread thread id */
 };
 
 static inline struct ntdll_thread_data *ntdll_get_thread_data(void)

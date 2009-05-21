@@ -424,14 +424,10 @@ static void select_shader_max_constants(
 
     switch (vs_selected_mode) {
         case SHADER_GLSL:
-            /* Subtract the other potential uniforms from the max available (bools, ints, and 1 row of projection matrix) */
-            gl_info->max_vshader_constantsF = gl_info->vs_glsl_constantsF - (MAX_CONST_B / 4) - MAX_CONST_I - 1;
+            gl_info->max_vshader_constantsF = gl_info->vs_glsl_constantsF;
             break;
         case SHADER_ARB:
-            /* We have to subtract any other PARAMs that we might use in our shader programs.
-             * ATI seems to count 2 implicit PARAMs when we use fog and NVIDIA counts 1,
-             * and we reference one row of the PROJECTION matrix which counts as 1 PARAM. */
-            gl_info->max_vshader_constantsF = gl_info->vs_arb_constantsF - 3;
+            gl_info->max_vshader_constantsF = gl_info->vs_arb_constantsF;
             break;
         default:
             gl_info->max_vshader_constantsF = 0;
@@ -440,18 +436,10 @@ static void select_shader_max_constants(
 
     switch (ps_selected_mode) {
         case SHADER_GLSL:
-            /* Subtract the other potential uniforms from the max available (bools & ints), and 2 states for fog.
-             * In theory the texbem instruction may need one more shader constant too. But lets assume
-             * that a sm <= 1.3 shader does not need all the uniforms provided by a glsl-capable card,
-             * and lets not take away a uniform needlessly from all other shaders.
-             */
-            gl_info->max_pshader_constantsF = gl_info->ps_glsl_constantsF - (MAX_CONST_B / 4) - MAX_CONST_I - 2;
+            gl_info->max_pshader_constantsF = gl_info->ps_glsl_constantsF;
             break;
         case SHADER_ARB:
-            /* The arb shader only loads the bump mapping environment matrix into the shader if it finds
-             * a free constant to do that, so only reduce the number of available constants by 2 for the fog states.
-             */
-            gl_info->max_pshader_constantsF = gl_info->ps_arb_constantsF - 2;
+            gl_info->max_pshader_constantsF = gl_info->ps_arb_constantsF;
             break;
         default:
             gl_info->max_pshader_constantsF = 0;
@@ -1088,13 +1076,29 @@ static BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
              * shader capabilities, so we use the shader capabilities to distinguish between FX and 6xxx/7xxx.
              */
             if(WINE_D3D9_CAPABLE(gl_info) && (gl_info->vs_nv_version == VS_VERSION_30)) {
-                /* Geforce GTX - highend */
-                if(strstr(gl_info->gl_renderer, "GTX 280")) {
+                /* Geforce 200 - highend */
+                if(strstr(gl_info->gl_renderer, "GTX 280") ||
+                   strstr(gl_info->gl_renderer, "GTX 285") ||
+                   strstr(gl_info->gl_renderer, "GTX 295"))
+                {
                     gl_info->gl_card = CARD_NVIDIA_GEFORCE_GTX280;
                     vidmem = 1024;
                 }
-                /* Geforce9 - highend */
-                else if(strstr(gl_info->gl_renderer, "9800")) {
+                /* Geforce 200 - midend high */
+                if(strstr(gl_info->gl_renderer, "GTX 275")) {
+                    gl_info->gl_card = CARD_NVIDIA_GEFORCE_GTX275;
+                    vidmem = 896;
+                }
+                /* Geforce 200 - midend */
+                if(strstr(gl_info->gl_renderer, "GTX 260")) {
+                    gl_info->gl_card = CARD_NVIDIA_GEFORCE_GTX260;
+                    vidmem = 1024;
+                }
+                /* Geforce9 - highend / Geforce 200 - midend (GTS 150/250 are based on the same core) */
+                else if(strstr(gl_info->gl_renderer, "9800") ||
+                        strstr(gl_info->gl_renderer, "GTS 150") ||
+                        strstr(gl_info->gl_renderer, "GTS 250"))
+                {
                     gl_info->gl_card = CARD_NVIDIA_GEFORCE_9800GT;
                     vidmem = 512;
                 }
@@ -1102,6 +1106,28 @@ static BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
                 else if(strstr(gl_info->gl_renderer, "9600")) {
                     gl_info->gl_card = CARD_NVIDIA_GEFORCE_9600GT;
                     vidmem = 384; /* The 9600GSO has 384MB, the 9600GT has 512-1024MB */
+                }
+                /* Geforce9 - midend low / Geforce 200 - low*/
+                else if(strstr(gl_info->gl_renderer, "9500") ||
+                        strstr(gl_info->gl_renderer, "GT 120") ||
+                        strstr(gl_info->gl_renderer, "GT 130"))
+                {
+                    gl_info->gl_card = CARD_NVIDIA_GEFORCE_9500GT;
+                    vidmem = 256; /* The 9500GT has 256-1024MB */
+                }
+                /* Geforce9 - lowend */
+                else if(strstr(gl_info->gl_renderer, "9400")) {
+                    gl_info->gl_card = CARD_NVIDIA_GEFORCE_9400GT;
+                    vidmem = 256; /* The 9400GT has 256-1024MB */
+                }
+                /* Geforce9 - lowend low */
+                else if(strstr(gl_info->gl_renderer, "9100") ||
+                        strstr(gl_info->gl_renderer, "9200") ||
+                        strstr(gl_info->gl_renderer, "9300") ||
+                        strstr(gl_info->gl_renderer, "G 100"))
+                {
+                    gl_info->gl_card = CARD_NVIDIA_GEFORCE_9200;
+                    vidmem = 256; /* The 9100-9300 cards have 256MB */
                 }
                 /* Geforce8 - highend */
                 else if (strstr(gl_info->gl_renderer, "8800")) {
@@ -1405,12 +1431,14 @@ static BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
     /* Make sure there's an active HDC else the WGL extensions will fail */
     hdc = pwglGetCurrentDC();
     if (hdc) {
-        WGL_Extensions = GL_EXTCALL(wglGetExtensionsStringARB(hdc));
-        TRACE_(d3d_caps)("WGL_Extensions reported:\n");
+        /* Not all GL drivers might offer WGL extensions e.g. VirtualBox */
+        if(GL_EXTCALL(wglGetExtensionsStringARB))
+            WGL_Extensions = GL_EXTCALL(wglGetExtensionsStringARB(hdc));
 
         if (NULL == WGL_Extensions) {
             ERR("   WGL_Extensions returns NULL\n");
         } else {
+            TRACE_(d3d_caps)("WGL_Extensions reported:\n");
             while (*WGL_Extensions != 0x00) {
                 const char *Start;
                 char ThisExtn[256];
@@ -3007,7 +3035,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
                 /* Do nothing, continue with checking the format below */
                 break;
         }
-    } else if((RType == WINED3DRTYPE_INDEXBUFFER) || (RType == WINED3DRTYPE_VERTEXBUFFER)){
+    } else if(RType == WINED3DRTYPE_BUFFER){
         /* For instance vertexbuffer/indexbuffer aren't supported yet because no Windows drivers seem to offer it */
         TRACE_(d3d_caps)("Unhandled resource type D3DRTYPE_INDEXBUFFER / D3DRTYPE_VERTEXBUFFER\n");
         return WINED3DERR_NOTAVAILABLE;
@@ -3694,6 +3722,7 @@ static HRESULT WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter,
     const struct fragment_pipeline *frag_pipeline = NULL;
     int i;
     struct fragment_caps ffp_caps;
+    struct shader_caps shader_caps;
     HRESULT hr;
 
     /* Validate the adapter number. If no adapters are available(no GL), ignore the adapter
@@ -3748,6 +3777,11 @@ static HRESULT WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter,
     select_shader_mode(&adapter->gl_info, DeviceType,
             &object->ps_selected_mode, &object->vs_selected_mode);
     object->shader_backend = select_shader_backend(adapter, DeviceType);
+
+    memset(&shader_caps, 0, sizeof(shader_caps));
+    object->shader_backend->shader_get_caps(DeviceType, &adapter->gl_info, &shader_caps);
+    object->d3d_vshader_constantF = shader_caps.MaxVertexShaderConst;
+    object->d3d_pshader_constantF = shader_caps.MaxPixelShaderConst;
 
     memset(&ffp_caps, 0, sizeof(ffp_caps));
     frag_pipeline = select_fragment_implementation(adapter, DeviceType);

@@ -76,6 +76,22 @@ WINE_DEFAULT_DEBUG_CHANNEL(server);
 #define SOCKETNAME "socket"        /* name of the socket file */
 #define LOCKNAME   "lock"          /* name of the lock file */
 
+#ifdef __i386__
+static const enum cpu_type client_cpu = CPU_x86;
+#elif defined(__x86_64__)
+static const enum cpu_type client_cpu = CPU_x86_64;
+#elif defined(__ALPHA__)
+static const enum cpu_type client_cpu = CPU_ALPHA;
+#elif defined(__powerpc__)
+static const enum cpu_type client_cpu = CPU_POWERPC;
+#elif defined(__sparc__)
+static const enum cpu_type client_cpu = CPU_SPARC;
+#else
+#error Unsupported CPU
+#endif
+
+unsigned int server_cpus = 0;
+
 #ifndef HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS
 /* data structure used to pass an fd with sendmsg/recvmsg */
 struct cmsg_fd
@@ -1026,19 +1042,29 @@ size_t server_init_thread( void *entry_point )
         req->unix_pid    = getpid();
         req->unix_tid    = get_unix_tid();
         req->teb         = wine_server_client_ptr( NtCurrentTeb() );
-        req->peb         = wine_server_client_ptr( NtCurrentTeb()->Peb );
         req->entry       = wine_server_client_ptr( entry_point );
         req->reply_fd    = reply_pipe[1];
         req->wait_fd     = ntdll_get_thread_data()->wait_fd[1];
         req->debug_level = (TRACE_ON(server) != 0);
+        req->cpu         = client_cpu;
         ret = wine_server_call( req );
         NtCurrentTeb()->ClientId.UniqueProcess = ULongToHandle(reply->pid);
         NtCurrentTeb()->ClientId.UniqueThread  = ULongToHandle(reply->tid);
         info_size         = reply->info_size;
         server_start_time = reply->server_start;
+        server_cpus       = reply->all_cpus;
     }
     SERVER_END_REQ;
 
-    if (ret) server_protocol_error( "init_thread failed with status %x\n", ret );
+    if (ret)
+    {
+        if (ret == STATUS_NOT_SUPPORTED)
+        {
+            static const char * const cpu_arch[] = { "x86", "x86_64", "Alpha", "PowerPC", "Sparc" };
+            server_protocol_error( "the running wineserver doesn't support the %s architecture.\n",
+                                   cpu_arch[client_cpu] );
+        }
+        else server_protocol_error( "init_thread failed with status %x\n", ret );
+    }
     return info_size;
 }

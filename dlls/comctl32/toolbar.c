@@ -492,9 +492,9 @@ TOOLBAR_DrawFlatSeparator (const RECT *lpRect, HDC hdc, const TOOLBAR_INFO *info
 
 
 /***********************************************************************
-* 		TOOLBAR_DrawDDFlatSeparator
+* 		TOOLBAR_DrawFlatHorizontalSeparator
 *
-* This function draws the separator that was flagged as BTNS_DROPDOWN.
+* This function draws horizontal separator for toolbars having CCS_VERT style.
 * In this case, the separator is a pixel high line of COLOR_BTNSHADOW,
 * followed by a pixel high line of COLOR_BTNHIGHLIGHT. These separators
 * are horizontal as opposed to the vertical separators for not dropdown
@@ -503,7 +503,7 @@ TOOLBAR_DrawFlatSeparator (const RECT *lpRect, HDC hdc, const TOOLBAR_INFO *info
 * FIXME: It is possible that the height of each line is really SM_CYBORDER.
 */
 static void
-TOOLBAR_DrawDDFlatSeparator (const RECT *lpRect, HDC hdc,
+TOOLBAR_DrawFlatHorizontalSeparator (const RECT *lpRect, HDC hdc,
                              const TOOLBAR_INFO *infoPtr)
 {
     RECT myrect;
@@ -855,8 +855,8 @@ TOOLBAR_DrawButton (HWND hwnd, TBUTTON_INFO *btnPtr, HDC hdc, DWORD dwBaseCustDr
         /* empirical tests show that iBitmap can/will be non-zero    */
         /* when drawing the vertical bar...      */
         if ((dwStyle & TBSTYLE_FLAT) /* && (btnPtr->iBitmap == 0) */) {
-	    if (btnPtr->fsStyle & BTNS_DROPDOWN)
-		TOOLBAR_DrawDDFlatSeparator (&rc, hdc, infoPtr);
+            if (dwStyle & CCS_VERT)
+               TOOLBAR_DrawFlatHorizontalSeparator (&rc, hdc, infoPtr);
 	    else
 		TOOLBAR_DrawFlatSeparator (&rc, hdc, infoPtr);
 	}
@@ -1326,18 +1326,14 @@ TOOLBAR_WrapToolbar( HWND hwnd, DWORD dwStyle )
 	if (btnPtr[i].fsState & TBSTATE_HIDDEN)
 	    continue;
 
-	/* UNDOCUMENTED: If a separator has a non zero bitmap index, */
-	/* it is the actual width of the separator. This is used for */
-	/* custom controls in toolbars.                              */
-	/*                                                           */
-	/* BTNS_DROPDOWN separators are treated as buttons for    */
-	/* width.  - GA 8/01                                         */
-	if ((btnPtr[i].fsStyle & BTNS_SEP) &&
-	    !(btnPtr[i].fsStyle & BTNS_DROPDOWN))
-	    cx = (btnPtr[i].iBitmap > 0) ?
-			btnPtr[i].iBitmap : SEPARATOR_WIDTH;
+        if (btnPtr[i].cx > 0)
+            cx = btnPtr[i].cx;
+        /* horizontal separators are treated as buttons for width    */
+	else if ((btnPtr[i].fsStyle & BTNS_SEP) &&
+            !(infoPtr->dwStyle & CCS_VERT))
+	    cx = SEPARATOR_WIDTH;
 	else
-	    cx = (btnPtr[i].cx) ? btnPtr[i].cx : infoPtr->nButtonWidth;
+	    cx = infoPtr->nButtonWidth;
 
 	/* Two or more adjacent separators form a separator group.   */
 	/* The first separator in a group should be wrapped to the   */
@@ -1685,18 +1681,13 @@ TOOLBAR_LayoutToolbar(HWND hwnd)
 
 	cy = infoPtr->nButtonHeight;
 
-	/* UNDOCUMENTED: If a separator has a non zero bitmap index, */
-	/* it is the actual width of the separator. This is used for */
-	/* custom controls in toolbars.                              */
 	if (btnPtr->fsStyle & BTNS_SEP) {
-	    if (btnPtr->fsStyle & BTNS_DROPDOWN) {
-		cy = (btnPtr->iBitmap > 0) ?
-		     btnPtr->iBitmap : SEPARATOR_WIDTH;
-		cx = infoPtr->nButtonWidth;
+	    if (infoPtr->dwStyle & CCS_VERT) {
+                cy = SEPARATOR_WIDTH;
+                cx = (btnPtr->cx > 0) ? btnPtr->cx : infoPtr->nButtonWidth;
 	    }
 	    else
-		cx = (btnPtr->iBitmap > 0) ?
-		     btnPtr->iBitmap : SEPARATOR_WIDTH;
+                cx = (btnPtr->cx > 0) ? btnPtr->cx : SEPARATOR_WIDTH;
 	}
 	else
 	{
@@ -1759,12 +1750,9 @@ TOOLBAR_LayoutToolbar(HWND hwnd)
 	        y += cy;
 	    else
 	    {
-		/* UNDOCUMENTED: If a separator has a non zero bitmap index, */
-		/* it is the actual width of the separator. This is used for */
-		/* custom controls in toolbars. 			     */
-		if ( !(btnPtr->fsStyle & BTNS_DROPDOWN))
-		    y += cy + ( (btnPtr->iBitmap > 0 ) ?
-				btnPtr->iBitmap : SEPARATOR_WIDTH) * 2 /3;
+               if ( !(infoPtr->dwStyle & CCS_VERT))
+                    y += cy + ( (btnPtr->cx > 0 ) ?
+                                btnPtr->cx : SEPARATOR_WIDTH) * 2 /3;
 		else
 		    y += cy;
 
@@ -1846,7 +1834,12 @@ TOOLBAR_InternalInsertButtonsT(TOOLBAR_INFO *infoPtr, INT iIndex, UINT nAddButto
         TOOLBAR_DumpTBButton(lpTbb, fUnicode);
 
         ZeroMemory(btnPtr, sizeof(*btnPtr));
-        btnPtr->iBitmap   = lpTbb[iButton].iBitmap;
+
+        /* When inserting separator, iBitmap controls it's size */
+        if (lpTbb[iButton].fsStyle & BTNS_SEP) {
+            btnPtr->cx        = lpTbb[iButton].iBitmap;
+        } else
+            btnPtr->iBitmap   = lpTbb[iButton].iBitmap;
         btnPtr->idCommand = lpTbb[iButton].idCommand;
         btnPtr->fsState   = lpTbb[iButton].fsState;
         btnPtr->fsStyle   = lpTbb[iButton].fsStyle;
@@ -3401,7 +3394,11 @@ TOOLBAR_GetButtonInfoT(HWND hwnd, WPARAM wParam, LPARAM lParam, BOOL bUnicode)
     if (lpTbInfo->dwMask & TBIF_LPARAM)
 	lpTbInfo->lParam = btnPtr->dwData;
     if (lpTbInfo->dwMask & TBIF_SIZE)
-	lpTbInfo->cx = (WORD)(btnPtr->rect.right - btnPtr->rect.left);
+        /* tests show that for separators TBIF_SIZE returns not calculated width,
+           but cx property, that differs from 0 only if application have
+           specifically set it */
+        lpTbInfo->cx = (btnPtr->fsStyle & BTNS_SEP)
+            ? btnPtr->cx : (WORD)(btnPtr->rect.right - btnPtr->rect.left);
     if (lpTbInfo->dwMask & TBIF_STATE)
 	lpTbInfo->fsState = btnPtr->fsState;
     if (lpTbInfo->dwMask & TBIF_STYLE)
@@ -4241,7 +4238,9 @@ TOOLBAR_Restore(TOOLBAR_INFO *infoPtr, const TBSAVEPARAMSW *lpSave)
                 {
                     /* separator */
                     nmtbr.tbButton.fsStyle = TBSTYLE_SEP;
-                    nmtbr.tbButton.iBitmap = SEPARATOR_WIDTH;
+                    /* when inserting separators, iBitmap controls it's size.
+                       0 sets default size (width) */
+                    nmtbr.tbButton.iBitmap = 0;
                 }
                 else if (*nmtbr.pCurrent == (DWORD)-2)
                     /* hidden button */
