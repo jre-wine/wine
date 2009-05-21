@@ -1,8 +1,30 @@
-wine (1.1.19-1) UNRELEASED; urgency=low
+wine (1.1.19-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.19, released Apr 10, 2009.
+    - Support for Visual C++ project files in winemaker.
+    - Improvements to the Esound driver.
+    - Many Direct3D code cleanups.
+    - Fixes to OLE clipboard handling.
+    - OpenBSD compilation fixed.
+    - Various bug fixes.
+  * Made filenames in libwine.split tidier.
+  * Split libwine-gphoto2 and libwine-sane with libwine.split instead of
+    with *.install files.
+  * Removed *.dirs files, rely on dh_install (and split.sh) to create
+    directories as needed.
+  * Made the /usr/share/doc/<package> directory in all binary packages
+    (except libwine) be a symlink to /usr/share/doc/libwine. (All binary
+    packages already do have a strict dependency on the same libwine
+    binary version as themselves, so this should be in line with
+    policy.) Since Debian Wine is made up of many binary packages, this
+    should reduce the .deb package sizes and disk usage somewhat.
+  * Merged fixes from lenny branch:
+    - Recommend ttf-liberation, and changed msttcorefonts suggestion to
+      ttf-mscorefonts-installer. Closes: #490861.
+    - Removed application/x-zip-compressed from wine.desktop.
+      Closes: #452957.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Thu, 21 May 2009 12:35:10 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Thu, 21 May 2009 22:27:09 +0200
 
 wine (1.1.18-1) experimental; urgency=low
 
