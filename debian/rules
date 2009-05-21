@@ -271,6 +271,9 @@ binary-arch: install-arch-stamp
 	# create installation directories
 	dh_installdirs -s
 
+	# create usr/share/doc symlinks
+	bash debian/doclink.sh libwine
+
 	# prepare <packagename>.install files
 	bash debian/prep-install.sh
 
@@ -285,13 +288,14 @@ binary-arch: install-arch-stamp
 	# split up libwine
 	bash debian/split.sh libwine usr/lib/wine
 
-	dh_installdocs -s
+	dh_installdocs -plibwine
+	dh_installchangelogs -plibwine
+
 	dh_installman -s
 #	dh_installmenu -s
 	dh_installdebconf -s
 	dh_installmime -s
 
-	dh_installchangelogs -s
 	dh_link -s
 
 	# Wine uses many "interesting" linker options,
